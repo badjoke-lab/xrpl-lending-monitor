@@ -83,11 +83,18 @@ describe('scanLedgerObjects', () => {
     })
 
     expect(result.objects.map((value) => value.index)).toEqual(['VAULT-1', 'VAULT-2'])
-    expect(result.metrics).toEqual({ pages: 2, requests: 2, objects: 2, elapsedMs: 1 })
+    expect(result.metrics).toEqual({
+      pages: 2,
+      requests: 2,
+      objects: 2,
+      elapsedMs: 1,
+      requestedObjectsPerPage: 2048,
+    })
     expect(requests[0]).toMatchObject({
       ledger_hash: LEDGER_HASH,
       binary: false,
       type: 'vault',
+      limit: 2048,
     })
     expect(requests[0]).not.toHaveProperty('marker')
     expect(requests[1]?.marker).toEqual(opaqueMarker)
@@ -179,6 +186,31 @@ describe('scanLedgerObjects', () => {
     ).rejects.toMatchObject({
       pagesCompleted: 1,
       objectsRead: 1,
+    })
+  })
+
+  it('fails before looping when the server repeats a marker', async () => {
+    const fetcher: FetchLike = async () =>
+      response({
+        ledger_hash: LEDGER_HASH,
+        ledger_index: LEDGER_INDEX,
+        validated: true,
+        state: [object('vault', 'VAULT-1')],
+        marker: { cursor: 'SAME' },
+      })
+
+    await expect(
+      scanLedgerObjects({
+        endpoint: 'https://devnet.example',
+        timeoutMs: 1000,
+        ledgerHash: LEDGER_HASH,
+        ledgerIndex: LEDGER_INDEX,
+        filter: 'vault',
+        fetcher,
+      }),
+    ).rejects.toMatchObject({
+      pagesCompleted: 2,
+      objectsRead: 2,
     })
   })
 })
