@@ -42,6 +42,7 @@ export async function scanCurrentState(options: {
   ledgerIndex: number
   pageLimitPerType?: number
   requestLimitTotal?: number
+  objectLimitPerPage?: number
   fetcher?: FetchLike
   nowMs?: () => number
 }): Promise<CurrentStateScanResult> {
@@ -69,6 +70,7 @@ export async function scanCurrentState(options: {
       filter,
       pageLimit: options.pageLimitPerType,
       requestLimit: remainingRequests,
+      objectLimitPerPage: options.objectLimitPerPage,
       fetcher: options.fetcher,
       nowMs,
     })
