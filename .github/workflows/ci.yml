@@ -79,7 +79,21 @@ jobs:
         run: exit 1
 
       - name: Unit tests
-        run: pnpm test
+        id: unit
+        continue-on-error: true
+        run: pnpm test 2>&1 | tee unit-test.log
+
+      - name: Upload unit-test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-diagnostics
+          path: unit-test.log
+          retention-days: 1
+
+      - name: Stop after unit-test failure
+        if: steps.unit.outcome != 'success'
+        run: exit 1
 
       - name: Build application
         run: pnpm build
