@@ -30,6 +30,11 @@ function errorArtifact(error: unknown): Record<string, unknown> {
     observed_at: new Date().toISOString(),
     endpoint,
     complete: false,
+    benchmark_limits: {
+      pages_per_type: 2_000,
+      requests_total: 6_000,
+      requested_objects_per_page: 2_048,
+    },
     error: {
       name: error instanceof Error ? error.name : 'UnknownError',
       message: error instanceof Error ? error.message : String(error),
@@ -57,8 +62,8 @@ describe.runIf(runLive)('live current-state benchmark', () => {
         timeoutMs: 15_000,
         ledgerHash: snapshot.validatedLedger.hash,
         ledgerIndex: snapshot.validatedLedger.index,
-        pageLimitPerType: 200,
-        requestLimitTotal: 600,
+        pageLimitPerType: 2_000,
+        requestLimitTotal: 6_000,
         objectLimitPerPage: 2_048,
       })
       const heapAfter = process.memoryUsage().heapUsed
@@ -68,6 +73,11 @@ describe.runIf(runLive)('live current-state benchmark', () => {
         observed_at: snapshot.observedAt,
         network: snapshot.network,
         endpoint: snapshot.endpoint,
+        benchmark_limits: {
+          pages_per_type: 2_000,
+          requests_total: 6_000,
+          requested_objects_per_page: 2_048,
+        },
         ledger: {
           index: snapshot.validatedLedger.index,
           hash: snapshot.validatedLedger.hash,
@@ -105,5 +115,5 @@ describe.runIf(runLive)('live current-state benchmark', () => {
       console.error(`CURRENT_STATE_BENCHMARK_FAILURE=${JSON.stringify(artifact)}`)
       throw error
     }
-  }, 120_000)
+  }, 300_000)
 })
