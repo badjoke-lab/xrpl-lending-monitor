@@ -24,6 +24,7 @@ CREATE TABLE protocol_events (
   event_hash TEXT NOT NULL,
   ledger_index INTEGER NOT NULL,
   event_index INTEGER NOT NULL,
+  close_time INTEGER NOT NULL DEFAULT 0,
   event_type TEXT NOT NULL,
   result_code TEXT NOT NULL,
   source_json TEXT,
