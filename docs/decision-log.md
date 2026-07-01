@@ -163,3 +163,42 @@ Runtime configuration accepts only Devnet, requires `MAINNET_ENABLED=false`, and
 - accidental Mainnet activation fails at runtime;
 - the repository cannot silently target a real production D1 database;
 - provisioning and deployment require a later documented approval and configuration change.
+
+## D-012 — Status reads are separated from network writes
+
+- Date: 2026-07-01
+- Status: accepted
+
+### Context
+
+A public status request should not depend on XRPL response time or mutate collection state.
+
+### Decision
+
+The scheduled collector reads XRPL and writes network status to D1. The public `/api/status` endpoint reads the latest committed D1 state only.
+
+### Consequences
+
+- public API latency is independent of live XRPL latency;
+- status remains available during an RPC outage with explicit staleness and error fields;
+- public read traffic cannot trigger additional XRPL calls or D1 writes;
+- collector health and data freshness are visible separately.
+
+## D-013 — Reset signals require confirmation
+
+- Date: 2026-07-01
+- Status: accepted
+
+### Context
+
+A lower ledger index or a changed hash at the same index can indicate a Devnet reset, but one observation is not sufficient to destroy or roll over canonical state.
+
+### Decision
+
+Initial reset detection changes sync state to `reset_suspected`. It does not archive the current epoch or create a new one automatically.
+
+### Consequences
+
+- previous epoch data remains untouched after one suspicious observation;
+- later reset-hardening work must confirm the signal through repeated or independent evidence;
+- current-object collection pauses rather than mixing potentially different epochs.
