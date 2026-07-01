@@ -2,239 +2,99 @@
 
 ## Global keys
 
-Every canonical record must include:
-
-- `network` — `devnet` or `mainnet`;
-- `epoch_id` — identifies a continuous ledger history segment;
-- `ledger_index` or `last_ledger_index`;
-- source transaction hash where applicable;
-- created and updated timestamps in UTC.
-
-No query may join records across networks or epochs without an explicit aggregate layer.
+Every canonical record must include network, epoch, ledger identity, source transaction where applicable, and UTC timestamps. Queries must not join networks or epochs without an explicit aggregate layer.
 
 ## Provenance
 
-User-facing fields use one of:
+User-facing fields are labeled `direct`, `derived`, `indexed`, or `unavailable`. Derived fields expose a formula identifier. Indexed fields expose historical source references where practical.
 
-- `direct`
-- `derived`
-- `indexed`
-- `unavailable`
+## Bootstrap snapshots
 
-Derived fields must also expose a formula identifier. Indexed fields must expose the historical source range or event references where practical.
+### `current_state_snapshots`
+
+One row per bootstrap or replacement attempt:
+
+- `id`, `network`, `epoch_id`;
+- validated `ledger_index` and `ledger_hash`;
+- `status` — `building`, `active`, `failed`, or `superseded`;
+- exact `next_marker_json`;
+- page and object counts;
+- Vault, LoanBroker, and Loan counts;
+- `manifest_url` and `manifest_hash`;
+- failure code and message;
+- start, update, and activation timestamps.
+
+Only one snapshot per network and epoch may be active. Activation requires a verified complete manifest and no continuation marker.
+
+### External manifest and shards
+
+The manifest records schema version, network, epoch, snapshot ID, validated ledger identity, total counts, validation status, ordered shard descriptors, and a complete-manifest hash.
+
+Each shard descriptor records object type, sequence, object count, compressed byte size, content hash, and storage location. Full bootstrap object rows are stored in bounded compressed shards. D1 stores snapshot metadata, the manifest reference, and the active pointer.
 
 ## Core tables
 
 ### `network_epochs`
 
-- `id`
-- `network`
-- `status` — current or archived
-- `first_ledger_index`
-- `first_ledger_hash`
-- `last_ledger_index`
-- `last_ledger_hash`
-- `started_at`
-- `ended_at`
-- `reset_reason`
-- `created_at`
+Tracks continuous ledger history segments, their first and last ledger identities, status, timestamps, and reset reason.
 
 ### `sync_state`
 
-One active row per network.
-
-- `network`
-- `epoch_id`
-- `last_processed_ledger`
-- `last_processed_hash`
-- `latest_observed_ledger`
-- `last_attempt_at`
-- `last_success_at`
-- `status`
-- `consecutive_failures`
-- `endpoint`
-- `error_code`
-- `error_message`
+One active row per network with epoch, incremental cursor, latest observed ledger, active snapshot ID, attempts, success time, status, endpoint, and error state.
 
 ### `transactions`
 
-- `network`
-- `epoch_id`
-- `tx_hash`
-- `ledger_index`
-- `transaction_index`
-- `close_time`
-- `transaction_type`
-- `result`
-- `account`
-- `sequence`
-- `fee`
-- `vault_id`
-- `loan_broker_id`
-- `loan_id`
-- `raw_json` — optional and retention-controlled
-- `created_at`
-
-Unique key: network + epoch + transaction hash.
+Canonical transaction records keyed by network, epoch, and transaction hash. Includes ledger and transaction ordering, close time, type, result, account, fee, related object IDs, and optional retention-controlled raw JSON.
 
 ### `object_changes`
 
-Normalized AffectedNodes changes.
+Normalized AffectedNodes changes keyed by transaction, object, field, and change kind. Stores before and after values with explicit value type.
 
-- `network`
-- `epoch_id`
-- `tx_hash`
-- `ledger_index`
-- `object_type`
-- `object_id`
-- `change_kind` — created, modified, deleted
-- `field_name`
-- `before_value`
-- `after_value`
-- `value_type`
-- `created_at`
+## Current projections
 
-### `vaults_current`
+The active bootstrap snapshot supplies the initial object set. Incremental validated-ledger processing maintains projections after activation.
 
-- `network`
-- `epoch_id`
-- `vault_id`
-- `owner`
-- `account`
-- `asset_type`
-- `asset_key`
-- `asset_json`
-- `assets_total`
-- `assets_available`
-- `assets_maximum`
-- `loss_unrealized`
-- `share_mpt_id`
-- `domain_id`
-- `withdrawal_policy`
-- `scale`
-- `flags`
-- `data_hex`
-- `last_tx_hash`
-- `last_ledger_index`
-- `last_seen_at`
+### Vault
 
-### `loan_brokers_current`
+Stores identity, owner and pseudo-account, canonical asset, total and available assets, maximum, unrealized loss, Share MPT ID, domain, withdrawal policy, scale, flags, raw data, and last transaction and ledger identity.
 
-- `network`
-- `epoch_id`
-- `loan_broker_id`
-- `vault_id`
-- `owner`
-- `account`
-- `management_fee_rate`
-- `debt_total`
-- `debt_maximum`
-- `cover_available`
-- `cover_rate_minimum`
-- `cover_rate_liquidation`
-- `owner_count`
-- `loan_sequence`
-- `flags`
-- `data_hex`
-- `last_tx_hash`
-- `last_ledger_index`
-- `last_seen_at`
+### LoanBroker
 
-### `loans_current`
+Stores identity, Vault relationship, owner and pseudo-account, sequence values, management fee, debt, cover, cover rates, owner count, flags, raw data, and last transaction and ledger identity.
 
-- `network`
-- `epoch_id`
-- `loan_id`
-- `loan_broker_id`
-- `borrower`
-- `loan_sequence`
-- `start_date`
-- `next_payment_due_date`
-- `payment_interval`
-- `grace_period`
-- `payment_remaining`
-- `principal_outstanding`
-- `total_value_outstanding`
-- `management_fee_outstanding`
-- `periodic_payment`
-- all supported interest-rate fields
-- all supported fee fields
-- `loan_scale`
-- `flags`
-- `data_hex`
-- `on_ledger_status`
-- `schedule_status`
-- `last_tx_hash`
-- `last_ledger_index`
-- `last_seen_at`
+### Loan
+
+Stores identity, Broker relationship, borrower, sequence, start and payment schedule, remaining payments, outstanding values, fees, rates, scale, flags, on-ledger status, schedule status, raw data, and last transaction and ledger identity.
+
+`next_payment_due_date` is nullable for terminal paid or defaulted Loan objects. XRPL binary serialization may omit numeric zero fields. Normalization stores zero for omitted numeric fields where the protocol defines a zero default, but never invents a timestamp. A Loan with payments remaining and no next due date is invalid.
+
+## Historical records
 
 ### `object_history`
 
-Sparse state snapshots written only when values change.
-
-- `network`
-- `epoch_id`
-- `object_type`
-- `object_id`
-- `ledger_index`
-- `tx_hash`
-- `state_json`
-- `change_summary_json`
-- `created_at`
+Sparse object snapshots written only when state changes.
 
 ### `archived_objects`
 
-- `network`
-- `epoch_id`
-- `object_type`
-- `object_id`
-- `final_state_json`
-- `created_ledger_index`
-- `deleted_ledger_index`
-- `created_tx_hash`
-- `deleted_tx_hash`
-- `deletion_reason`
-- `archived_at`
+Final state, creation and deletion ledgers and transactions, deletion reason, relationships, and archive timestamp.
 
 ### `loan_lifecycle_events`
 
-- `network`
-- `epoch_id`
-- `loan_id`
-- `event_sequence`
-- `event_type`
-- `ledger_index`
-- `tx_hash`
-- `close_time`
-- `on_ledger_status_before`
-- `on_ledger_status_after`
-- `schedule_status_at_event`
-- `amount_json`
-- `details_json`
+Ordered Loan events with transaction identity, close time, status before and after, schedule status, amounts, and normalized details.
 
 ### `daily_aggregates`
 
-Asset-separated daily summaries.
-
-- `network`
-- `epoch_id`
-- `date_utc`
-- `asset_key`
-- `vault_count`
-- `broker_count`
-- `loan_count`
-- `assets_total`
-- `assets_available`
-- `debt_total`
-- `cover_available`
-- `loss_unrealized`
-- state counts
-- event counts
+Asset-separated daily counts and amounts for Vaults, Brokers, Loans, assets, debt, cover, loss, states, and events.
 
 ## Relationships
 
 ```text
 network_epoch
+  |- current_state_snapshot
+  |   |- external manifest
+  |       |- Vault shards
+  |       |- LoanBroker shards
+  |       |- Loan shards
   |- vault
   |   |- loan_broker
   |       |- loan
@@ -244,43 +104,29 @@ network_epoch
   |- lifecycle_event
 ```
 
-A Loan references a LoanBroker. A LoanBroker references a Vault. Asset identity is inherited from the Vault but should be denormalized into API projections for efficient reads.
+A Loan references a LoanBroker. A LoanBroker references a Vault. Asset identity is inherited from the Vault but may be denormalized into API projections for bounded reads.
 
 ## Numeric storage
 
-Do not use JavaScript floating-point values for canonical ledger amounts.
-
-- Store canonical numeric strings exactly as received.
-- Store rate integers exactly as received.
+- Never use JavaScript floating point for canonical ledger amounts.
+- Preserve exact numeric strings and integer rates.
 - Use explicit decimal utilities for calculations.
-- Preserve asset scale and amount representation.
-- Convert Ripple epoch times to UTC only in derived/API fields; preserve raw values.
+- Preserve asset scale and raw representation.
+- Preserve null separately from numeric zero.
+- Preserve raw Ripple epoch values and derive UTC display values separately.
 
 ## Current versus historical truth
 
-- Current tables are rebuilt or updated projections.
-- Transactions, changes, lifecycle events, and archived objects provide historical truth.
-- A missing current object is not proof of its historical nonexistence.
-- Deletion must be represented explicitly rather than by silently removing all records.
+- Current shards and tables are projections.
+- Transactions, changes, lifecycle events, and archived states provide historical truth.
+- A missing current object is not proof of historical nonexistence.
+- Deletion is explicit and never represented by silently removing all records.
+- A complete current snapshot does not imply complete pre-snapshot history.
 
 ## Index requirements
 
-At minimum:
-
-- network + epoch + object ID
-- network + epoch + ledger index
-- network + epoch + close time
-- transaction type + close time
-- Vault ID on Broker
-- Broker ID on Loan
-- Borrower
-- asset key
-- on-ledger status
-- schedule status
-- deleted ledger index
+At minimum index network and epoch with snapshot status, object ID, ledger index, close time, transaction type, Vault and Broker relationships, borrower, asset key, on-ledger status, schedule status, and deletion ledger.
 
 ## Retention
 
-Keep normalized transactions, object changes, lifecycle events, final deleted states, and daily aggregates.
-
-Raw JSON retention is configurable and may be pruned after normalization and verification. Repeated unchanged snapshots are prohibited.
+Keep normalized history, final deleted states, active snapshot metadata, required rollback metadata, and daily aggregates. Raw JSON retention is configurable. Repeated unchanged snapshots are prohibited. Incomplete shards may be removed only after they are no longer resumable and are not referenced by an active or rollback manifest.
