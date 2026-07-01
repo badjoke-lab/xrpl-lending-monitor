@@ -46,6 +46,10 @@ One active row per network with epoch, incremental cursor, latest observed ledge
 
 Canonical transaction records keyed by network, epoch, and transaction hash. Includes ledger and transaction ordering, close time, type, result, account, fee, related object IDs, and optional retention-controlled raw JSON.
 
+### `incremental_commit_guards`
+
+Internal transient rows used only inside an incremental collector D1 batch. A guard records the expected cursor and the cursor observed at batch execution time. Constraint failure aborts the batch before processed-ledger or protocol-event rows can persist. Successful batches delete their guard row before commit.
+
 ### `object_changes`
 
 Normalized AffectedNodes changes keyed by transaction, object, field, and change kind. Stores before and after values with explicit value type.

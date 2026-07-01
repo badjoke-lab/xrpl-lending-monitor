@@ -1,6 +1,6 @@
 # Implementation status
 
-Last updated: 2026-07-01.
+Last updated: 2026-07-02.
 
 ## Current milestone
 
@@ -14,9 +14,10 @@ GitHub pull request #10, `Add validated ledger history foundation`:
 
 - branch: `collector/incremental-ledger-foundation`;
 - base: `main`;
-- verified head on 2026-07-01: `a5c52b303e57f070e8ea8872e3a96d0143548ac1`;
-- state at verification: open, mergeable, not draft;
-- normal CI and non-destructive incremental ledger read workflow passed at that head.
+- previous verified head on 2026-07-01: `a5c52b303e57f070e8ea8872e3a96d0143548ac1`;
+- current local work includes `origin/main` through PR #11 squash merge `52d32424393bfa5c99f7279b99f84104a73dab79`;
+- current local validation passed after adding the D1 commit guard and rollback tests;
+- final local head before push: `349fb1c` (`fix: guard incremental cursor commits`).
 
 Always inspect the current pull-request head and checks before resuming; the values above are a recorded checkpoint, not permission to ignore newer GitHub state.
 
@@ -24,15 +25,11 @@ Always inspect the current pull-request head and checks before resuming; the val
 
 Complete pull request #10 before beginning a separate AffectedNodes implementation:
 
-1. re-read the current migration, incremental repository, parser, scanner, tests, and live-read workflow from the actual pull-request head;
-2. close the concurrent cursor race so processed-ledger persistence, protocol-event persistence, and cursor advancement are atomic;
-3. add rollback tests proving a cursor mismatch or mid-batch failure leaves no partial ledger or event rows;
-4. preserve idempotent retry and already-committed behavior;
-5. run full CI and the non-destructive live Devnet ledger-read workflow;
-6. update the pull-request body and this file with exact evidence;
-7. merge only after all required checks pass.
+1. push the current PR #10 branch update and let CI plus the incremental live-read workflow run;
+2. update the pull-request body with exact local, CI, and live evidence;
+3. merge only after all required checks pass and the branch is current.
 
-The recorded design direction is a D1-compatible fail-closed commit guard inside the same batch, or an equivalent mechanism proven by tests. Do not assume the design is already committed; inspect the branch first.
+The D1-compatible fail-closed commit guard is implemented locally in PR #10 and must be confirmed by GitHub CI before merge.
 
 ## Completed
 
@@ -81,6 +78,13 @@ The recorded design direction is a D1-compatible fail-closed commit guard inside
 - the partial traversal did not activate a snapshot;
 - normal CI, current-state live benchmark, and resume workflow passed.
 
+### Codex autonomous execution documentation
+
+- PR #11 merged by squash as `52d32424393bfa5c99f7279b99f84104a73dab79`;
+- root `AGENTS.md`, `docs/codex-goal.md`, `docs/codex-master-task.md`, `docs/implementation-status.md`, and `docs/README.md` are now in canonical `main`;
+- PR #11 CI `quality` passed before merge;
+- local validation for PR #11 passed `corepack enable`, `pnpm install --frozen-lockfile`, `pnpm check`, and `pnpm test:e2e`.
+
 ## Checkpoint A decision
 
 - scheduled Worker full bootstrap is not approved;
@@ -118,9 +122,19 @@ Then continue with M3 Public API, M4 baseline UI, M5 differentiated audit UI, an
 
 ## Current validation
 
-Merged `main` through PR #9 has passed frozen install, lint, type-check, unit tests, local D1 migrations, build, browser smoke, live current-state projection, and controlled resume checks.
+Merged `main` through PR #11 has passed frozen install, lint, type-check, unit tests, local D1 migrations, build, browser smoke, live current-state projection, controlled resume checks, and the PR #11 documentation CI check.
 
 At the recorded PR #10 head, the incremental parser read Devnet ledger `3293550`, verified its ledger identity and transaction order, observed two transactions with types `Payment` and `MPTokenAuthorize`, and found zero recognized Lending transactions. This is parser and continuity evidence, not evidence of complete historical collection.
+
+Current local PR #10 validation after the D1 commit guard update:
+
+- `pnpm exec vitest run src/worker/repositories/incremental-ledger-repository.test.ts src/collector/incremental/scan-validated-ledgers.test.ts`: 14 tests passed;
+- `pnpm lint && pnpm typecheck`: passed;
+- `pnpm test`: 20 test files passed, 3 skipped; 91 tests passed, 3 skipped;
+- clean local D1 migration reset by removing ignored `.wrangler/state/v3/d1`, then `pnpm db:migrate:local`: migrations `0001` through `0004` applied successfully;
+- live Devnet ledger read: ledger `3297579`, hash `9504061A151987DAB42DCE162187B1277CEB81940EB50E4F40BB09F3CCBCD397`, parent hash `E6BB4B1BA0CDB5681D822339A1A3E42C1D249FA147D2C6980BD3D91E4CD34AC1`, transaction count `0`, observed transaction types `[]`, recognized Lending-event count `0`;
+- `pnpm check`: passed;
+- `pnpm test:e2e`: 1 Chromium smoke test passed.
 
 ## Known open questions
 
@@ -142,6 +156,7 @@ At the recorded PR #10 head, the incremental parser read Devnet ledger `3293550`
 - manifest retry does not rescan durable final shards;
 - cleanup cannot run against resumable, building, protected, or active snapshots;
 - processed-ledger persistence, canonical-event persistence, and cursor advancement must be atomic;
+- incremental commits use a transient D1 guard row inside the same batch so cursor mismatch fails before processed-ledger or protocol-event rows can commit;
 - production bootstrap and Mainnet remain disabled until approved.
 
 ## Current blockers
