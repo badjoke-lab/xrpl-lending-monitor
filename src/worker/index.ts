@@ -38,12 +38,12 @@ app.get('/api/status', async (context) => {
   )
 })
 
-app.onError((error, context) => {
+app.onError((_error, context) => {
   if (context.req.path.startsWith('/api/')) {
     return context.json(
       {
         error: 'internal_error',
-        message: error.message,
+        message: 'Unexpected server error',
       },
       500,
     )
