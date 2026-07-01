@@ -14,15 +14,22 @@ Current ledger objects are used to build or verify projections. Historical truth
 
 ### Bootstrap current-state scan
 
-On an empty database or a new epoch:
+On an empty deployment or a new epoch:
 
-1. Fetch the latest validated ledger identity.
-2. Page through `ledger_data` for `vault`, `loan_broker`, and `loan` until no marker remains.
-3. Store current projections with the bootstrap ledger.
-4. Record all markers, page counts, object counts, and elapsed time.
-5. Do not call the bootstrap scan complete if any page fails.
+1. Fetch and persist the selected validated ledger hash and index.
+2. Start one unfiltered binary `ledger_data` traversal.
+3. Decode each bounded page and classify Vault, LoanBroker, and Loan objects locally.
+4. Preserve the opaque marker exactly after each successful batch.
+5. Normalize objects while writing bounded compressed shards.
+6. Record shard hashes, counts, ranges, and locations in a building manifest.
+7. Validate Vault to Broker to Loan relationships and Broker OwnerCount reconciliation.
+8. Publish the complete manifest only after the final marker is absent and all checks pass.
+9. Activate the snapshot in D1 only after manifest verification.
+10. Keep the previous active snapshot when any batch, upload, validation, or activation step fails.
 
 The bootstrap scan provides current objects, not complete history.
+
+The full bootstrap runs in a resumable long-running runner. A scheduled Cloudflare Worker does not perform the global marker traversal. Three separate filtered traversals are prohibited because the Devnet endpoint advances each filter through the same global ledger marker chain.
 
 ### Incremental ledger collector
 
@@ -38,6 +45,8 @@ Each scheduled run:
 8. Apply transaction, change, lifecycle, current projection, and archive writes in a transaction where practical.
 9. Commit the cursor only after successful processing.
 10. Record health and usage metrics.
+
+Incremental collection begins only after an initial active snapshot exists.
 
 ## Supported transaction types
 
@@ -67,8 +76,10 @@ Required unique identities:
 - object change: network + epoch + transaction hash + object ID + field + change kind
 - lifecycle event: network + epoch + Loan ID + transaction hash + event type
 - current object: network + epoch + object ID
+- bootstrap shard: network + epoch + snapshot ID + object type + shard sequence
+- bootstrap manifest: network + epoch + snapshot ID
 
-Reprocessing a ledger must produce the same canonical state without duplicate events.
+Reprocessing a ledger or bootstrap batch must produce the same canonical state without duplicate events or duplicate active snapshots.
 
 ## Marker handling
 
@@ -76,11 +87,19 @@ Every paginated RPC request must:
 
 - preserve the marker exactly;
 - continue until no marker remains;
-- enforce a high but explicit page ceiling as an operational guard, not as a silent truncation rule;
-- fail the scan if the ceiling is reached;
-- expose pages processed and truncation status in health output.
+- enforce an explicit page ceiling per batch;
+- persist the next marker only after the current batch and shard are durable;
+- reject repeated markers;
+- reject a changed ledger hash or index;
+- expose pages processed and continuation state in health output.
 
-Counts from a partial page must never be presented as total counts.
+A page ceiling pauses a resumable batch. It does not mark a bootstrap complete. Counts from a partial traversal must never be presented as total counts.
+
+## Loan zero omission
+
+Canonical XRPL binary decoding may omit numeric fields whose value is zero. The collector normalizes omitted numeric Loan fields to zero where the protocol defines numeric zero state.
+
+`NextPaymentDueDate` is different: terminal paid or defaulted Loans can remove the field. The projection stores it as `null`. If `PaymentRemaining` is greater than zero while the next due date is absent, normalization fails closed.
 
 ## Bounded work
 
@@ -88,8 +107,11 @@ Configuration includes:
 
 - maximum ledgers per scheduled run;
 - maximum RPC requests per run;
+- maximum marker pages per bootstrap batch;
+- maximum decoded objects per batch;
+- maximum shard size;
 - maximum transactions per ledger before deferral;
-- maximum retries per endpoint;
+- maximum retries per endpoint or upload;
 - execution deadline margin;
 - export and API pagination limits.
 
@@ -102,6 +124,7 @@ When behind, the collector catches up across multiple runs rather than exceeding
 - Record which endpoint served each collector run.
 - Apply exponential backoff with jitter.
 - Never advance the cursor after an incomplete ledger response.
+- Never resume a bootstrap against a different ledger identity.
 
 ## Object refresh strategy
 
@@ -160,7 +183,8 @@ Scheduled reconciliation compares:
 - LoanBroker VaultID references versus existing or archived Vaults;
 - Loan references versus existing or archived Brokers;
 - aggregate totals versus object-level sums by asset;
-- cursor continuity and ledger hashes.
+- cursor continuity and ledger hashes;
+- active manifest counts and shard hashes.
 
 Differences are recorded and repaired only through a documented deterministic process.
 
@@ -169,12 +193,14 @@ Differences are recorded and repaired only through a documented deterministic pr
 - Serve last committed data with a stale warning.
 - Never fabricate missing state.
 - Never skip a failed ledger.
+- Never activate an incomplete manifest.
 - Record parser failures with transaction hash and ledger.
 - Keep failed raw payloads temporarily for debugging when safe.
+- Clean up incomplete bootstrap artifacts only after they are no longer resumable or referenced.
 - Alert through CI, health endpoint, or repository automation when persistent.
 
 ## Initial cadence
 
-Target scheduled cadence: once per minute, subject to measured Worker and RPC behavior.
+The scheduled incremental target is once per minute, subject to measured Worker and RPC behavior. Full bootstrap is on-demand and resumable rather than minute-scheduled.
 
 Cadence may be adjusted according to measured runtime, RPC capacity, and data-freshness requirements. Data freshness is shown explicitly, so a slower cadence does not masquerade as real time.
