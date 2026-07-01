@@ -13,6 +13,7 @@ export interface CurrentSnapshotIdentity {
 
 export interface CurrentSnapshotManifestSummary {
   manifestKey: string
+  manifestSha256: string
   shardCount: number
   compressedBytes: number
   vaultCount: number
@@ -32,7 +33,8 @@ export async function beginCurrentSnapshot(
       ) VALUES (
         ?1, ?2, ?3, 'building', ?4, ?5, ?6,
         'r2_shards', ?7, ?8, ?8, ?8
-      )`,
+      )
+      ON CONFLICT(id) DO NOTHING`,
     )
     .bind(
       snapshot.id,
@@ -59,21 +61,27 @@ export async function activateCurrentSnapshot(options: {
       .prepare(
         `UPDATE current_state_snapshots
          SET status = 'superseded', updated_at = ?1
-         WHERE network = ?2 AND epoch_id = ?3 AND status = 'active'`,
+         WHERE network = ?2 AND epoch_id = ?3 AND status = 'active' AND id <> ?4`,
       )
-      .bind(options.completedAt, options.snapshot.network, options.snapshot.epochId),
+      .bind(
+        options.completedAt,
+        options.snapshot.network,
+        options.snapshot.epochId,
+        options.snapshot.id,
+      ),
     options.db
       .prepare(
         `UPDATE current_state_snapshots
-         SET status = 'active', manifest_key = ?1, page_count = ?2,
-             request_count = ?3, decoded_object_count = ?4, object_count = ?5,
-             vault_count = ?6, loan_broker_count = ?7, loan_count = ?8,
-             shard_count = ?9, compressed_bytes = ?10, duration_ms = ?11,
-             completed_at = ?12, updated_at = ?12
-         WHERE id = ?13 AND status = 'building'`,
+         SET status = 'active', manifest_key = ?1, manifest_hash = ?2, page_count = ?3,
+             request_count = ?4, decoded_object_count = ?5, object_count = ?6,
+             vault_count = ?7, loan_broker_count = ?8, loan_count = ?9,
+             shard_count = ?10, compressed_bytes = ?11, duration_ms = ?12,
+             completed_at = ?13, updated_at = ?13
+         WHERE id = ?14 AND status IN ('building', 'active')`,
       )
       .bind(
         options.manifest.manifestKey,
+        options.manifest.manifestSha256,
         options.metrics.pages,
         options.metrics.requests,
         options.metrics.decodedObjects,
