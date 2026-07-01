@@ -82,6 +82,17 @@ function loan(id = 'LOAN-1', brokerId = 'BROKER-1'): ScannedLedgerObject {
   }
 }
 
+function terminalLoan(flags = 0): ScannedLedgerObject {
+  const value = loan()
+  value.Flags = flags
+  delete value.NextPaymentDueDate
+  delete value.PaymentRemaining
+  delete value.PrincipalOutstanding
+  delete value.TotalValueOutstanding
+  delete value.ManagementFeeOutstanding
+  return value
+}
+
 function scan(options: {
   vaults?: ScannedLedgerObject[]
   brokers?: ScannedLedgerObject[]
@@ -130,9 +141,46 @@ describe('normalizeCurrentState', () => {
       id: 'LOAN-1',
       loanBrokerId: 'BROKER-1',
       loanScale: -2,
+      nextPaymentDueDate: 1400,
+      paymentRemaining: 12,
       onLedgerStatus: 'impaired',
       supportsOverpayment: true,
     })
+  })
+
+  it('normalizes zero-omitted fields on a fully paid Loan', () => {
+    const normalized = normalizeCurrentState(scan({ loans: [terminalLoan()] }))
+
+    expect(normalized.loans[0]).toMatchObject({
+      nextPaymentDueDate: null,
+      paymentRemaining: 0,
+      principalOutstanding: '0',
+      totalValueOutstanding: '0',
+      managementFeeOutstanding: '0',
+      onLedgerStatus: 'active',
+    })
+  })
+
+  it('normalizes zero-omitted fields on a defaulted Loan', () => {
+    const normalized = normalizeCurrentState(scan({ loans: [terminalLoan(0x00010000)] }))
+
+    expect(normalized.loans[0]).toMatchObject({
+      nextPaymentDueDate: null,
+      paymentRemaining: 0,
+      principalOutstanding: '0',
+      totalValueOutstanding: '0',
+      managementFeeOutstanding: '0',
+      onLedgerStatus: 'defaulted',
+    })
+  })
+
+  it('rejects a Loan that still has payments but no next due date', () => {
+    const malformed = terminalLoan()
+    malformed.PaymentRemaining = 1
+
+    expect(() => normalizeCurrentState(scan({ loans: [malformed] }))).toThrow(
+      'NextPaymentDueDate is required while PaymentRemaining is greater than zero',
+    )
   })
 
   it('reports a Broker that references a Vault outside the complete scan', () => {
