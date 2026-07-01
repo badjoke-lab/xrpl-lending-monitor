@@ -94,6 +94,14 @@ export class ExactDecimal {
     return new ExactDecimal(this.coefficient * value, this.scale)
   }
 
+  shiftDecimalLeft(places: number): ExactDecimal {
+    if (!Number.isSafeInteger(places)) {
+      throw new Error('Decimal shift must be a safe integer')
+    }
+    if (places >= 0) return new ExactDecimal(this.coefficient, this.scale + places)
+    return new ExactDecimal(this.coefficient * powerOfTen(-places), this.scale)
+  }
+
   compare(other: ExactDecimal): number {
     const targetScale = Math.max(this.scale, other.scale)
     const left = this.coefficient * powerOfTen(targetScale - this.scale)
