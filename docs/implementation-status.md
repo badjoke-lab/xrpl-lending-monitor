@@ -12,23 +12,26 @@ Last updated: 2026-07-01.
 
 ## Current work
 
-Stacked PR 6B: resumable bootstrap orchestration and storage activation boundaries. PR #6 is fully validated and remains the base branch until GitHub accepts the merge operation.
+Stacked PR #7 implements roadmap PR 6B: resumable bootstrap execution, durable checkpoints, compressed object shards, verified manifests, and D1 activation. PR #6 remains its fully validated base until the merge operation is accepted.
 
 Implemented on the active branch:
 
 - bootstrap identity locked to snapshot, epoch, endpoint, ledger index, ledger hash, and object prefix;
 - persisted exact-marker checkpoints with global page sequencing;
 - bounded calls into `scanCurrentStateBatch`;
+- deterministic gzip JSON shard serialization;
 - durable shard write before checkpoint advancement;
-- deterministic shard keys and SHA-256 content digests;
-- idempotent storage adapter contract;
+- SHA-256 digests for every shard and the manifest;
+- idempotent R2 object writes with size and digest checks;
+- D1 checkpoint migration and validated checkpoint adapter;
 - checkpoint identity and sequence validation;
 - terminal scan checkpointing before manifest publication;
 - manifest write and read-after-write digest verification;
-- active snapshot callback only after manifest verification;
+- digest-bound, idempotent D1 active-snapshot activation;
 - checkpoint retention when manifest verification fails;
 - checkpoint removal only after activation succeeds;
-- tests for complete activation, exact-marker resume, global shard ordering, manifest retry without rescanning, and ledger mismatch rejection.
+- D1 and R2 bootstrap execution wiring;
+- tests for activation, exact-marker resume, shard ordering, storage idempotency, manifest retry without rescanning, checkpoint persistence, gzip payloads, and ledger mismatch rejection.
 
 ## Completed
 
@@ -67,7 +70,7 @@ Implemented on the active branch:
 - full in-memory accumulation is not approved;
 - bootstrap uses a resumable long-running runner;
 - object data uses bounded compressed shards and a verified manifest;
-- D1 stores snapshot metadata and the active pointer;
+- D1 stores snapshot metadata, checkpoints, manifest digest, and the active pointer;
 - incremental updates follow the initial active snapshot.
 
 ## Current validation
@@ -83,20 +86,27 @@ PR #6 final head passed:
 - browser smoke test;
 - live Devnet binary traversal and projection normalization.
 
-PR 6B validation is pending CI on the stacked pull request.
+PR #7 current head passed:
+
+- frozen-lockfile install;
+- lint;
+- type-check;
+- unit tests;
+- all local D1 migrations including bootstrap checkpoints;
+- application build;
+- browser smoke test;
+- live Devnet binary traversal and projection normalization.
 
 ## Remaining PR 6B work
 
-- resolve CI findings from the new runner and tests;
-- add concrete checkpoint and object-store adapters without committing credentials;
-- connect verified manifest activation to the D1 repository contract;
-- add incomplete-attempt cleanup rules and tests;
-- add a controlled preview bootstrap workflow;
-- run a resume interruption test before any production provisioning.
+- add explicit incomplete-attempt cleanup rules and tests;
+- add a controlled preview bootstrap workflow with no committed credentials;
+- run an interruption-and-resume preview test;
+- provision production storage only after preview evidence is accepted.
 
 ## Following work
 
-### PR 7 — Incremental validated-ledger collector
+### Incremental validated-ledger collector
 
 - cursor-based validated-ledger processing;
 - recognized Lending transaction filtering;
@@ -109,7 +119,7 @@ PR 6B validation is pending CI on the stacked pull request.
 
 | Question | Required evidence | Assigned point |
 |---|---|---|
-| Which approved object-store adapter should back bootstrap shards? | Local adapter tests, preview upload, digest verification, and cleanup test | PR 6B |
+| What retention window should apply to failed bootstrap prefixes? | Cleanup and rollback tests | PR 6B |
 | What exact schedule-state boundary labels should be public? | Tests against due-time and grace-end boundaries | Status engine |
 | What is the confirmed successful overpayment transaction shape? | Isolated Devnet fixture and validated metadata | Loan lifecycle |
 | How should each deletion reason be classified? | Transaction and DeletedNode fixtures | Deleted-object archive |
@@ -123,12 +133,13 @@ PR 6B validation is pending CI on the stacked pull request.
 - partial traversal counts are never published as complete totals;
 - only a digest-verified complete manifest can activate a snapshot;
 - manifest retry does not rescan already durable final shards;
+- R2 writes are idempotent by key, byte count, and SHA-256 digest;
 - the previous active snapshot survives failed replacement work;
 - production bootstrap and Mainnet remain disabled until approved.
 
 ## Current blockers
 
-No design blocker. CI results determine the next code corrections. Real storage credentials and production provisioning remain intentionally absent.
+No code or design blocker. Production credentials and provisioning remain intentionally absent until preview interruption, resume, cleanup, and activation evidence is recorded.
 
 ## Operational rule
 
