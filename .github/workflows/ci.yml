@@ -35,16 +35,7 @@ jobs:
         run: pnpm lint
 
       - name: Type-check
-        run: pnpm typecheck --pretty false > typecheck-output.txt 2>&1
-
-      - name: Upload type-check report
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: typecheck-output
-          path: typecheck-output.txt
-          if-no-files-found: error
-          retention-days: 1
+        run: pnpm typecheck
 
       - name: Unit tests
         run: pnpm test
