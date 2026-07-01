@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
 import type { FetchLike } from '../network/xrpl-rpc'
-import { scanCurrentState } from './scan-current-state'
 import {
   LedgerObjectScanError,
   scanLedgerObjects,
@@ -145,7 +144,7 @@ describe('scanLedgerObjects', () => {
     })
   })
 
-  it('fails closed when a later page fails and exposes only failure metrics', async () => {
+  it('fails closed when a later page fails', async () => {
     let calls = 0
     const fetcher: FetchLike = async () => {
       calls += 1
@@ -225,64 +224,5 @@ describe('scanLedgerObjects', () => {
         decodeObject: decodeFixture,
       }),
     ).rejects.toMatchObject({ pagesCompleted: 2, objectsRead: 2 })
-  })
-})
-
-describe('scanCurrentState', () => {
-  it('returns all three object types from one fixed validated ledger', async () => {
-    const fetcher: FetchLike = async (_input, init) => {
-      const params = requestBody(init).params[0]
-      const filter = params?.type as CurrentObjectFilter
-      return response({
-        ledger_hash: LEDGER_HASH,
-        ledger_index: LEDGER_INDEX,
-        validated: true,
-        state: [object(filter, `${filter}-1`)],
-      })
-    }
-
-    const result = await scanCurrentState({
-      endpoint: 'https://devnet.example',
-      timeoutMs: 1000,
-      ledgerHash: LEDGER_HASH,
-      ledgerIndex: LEDGER_INDEX,
-      fetcher,
-      decodeObject: decodeFixture,
-      nowMs: (() => {
-        let value = 0
-        return () => value++
-      })(),
-    })
-
-    expect(result.vaults).toHaveLength(1)
-    expect(result.loanBrokers).toHaveLength(1)
-    expect(result.loans).toHaveLength(1)
-    expect(result.metrics).toMatchObject({ pages: 3, requests: 3, objects: 3 })
-  })
-
-  it('rejects duplicate object IDs within one type', async () => {
-    const fetcher: FetchLike = async (_input, init) => {
-      const filter = requestBody(init).params[0]?.type as CurrentObjectFilter
-      return response({
-        ledger_hash: LEDGER_HASH,
-        ledger_index: LEDGER_INDEX,
-        validated: true,
-        state:
-          filter === 'vault'
-            ? [object(filter, 'DUPLICATE'), object(filter, 'DUPLICATE')]
-            : [object(filter, `${filter}-1`)],
-      })
-    }
-
-    await expect(
-      scanCurrentState({
-        endpoint: 'https://devnet.example',
-        timeoutMs: 1000,
-        ledgerHash: LEDGER_HASH,
-        ledgerIndex: LEDGER_INDEX,
-        fetcher,
-        decodeObject: decodeFixture,
-      }),
-    ).rejects.toThrow('Duplicate vault object DUPLICATE')
   })
 })
