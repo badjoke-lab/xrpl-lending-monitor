@@ -7,7 +7,7 @@ on:
       - main
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   quality:
@@ -16,6 +16,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
@@ -31,6 +33,22 @@ jobs:
         id: install
         continue-on-error: true
         run: pnpm install --no-frozen-lockfile 2>&1 | tee pnpm-install.log
+
+      - name: Commit generated lockfile once
+        if: >-
+          steps.install.outcome == 'success' &&
+          github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name == github.repository &&
+          github.head_ref == 'foundation/project-skeleton'
+        run: |
+          if git diff --quiet -- pnpm-lock.yaml && git ls-files --error-unmatch pnpm-lock.yaml >/dev/null 2>&1; then
+            exit 0
+          fi
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add pnpm-lock.yaml
+          git commit -m "build: add pnpm lockfile"
+          git push origin HEAD:${GITHUB_HEAD_REF}
 
       - name: Upload install diagnostics and generated lockfile
         if: always()
