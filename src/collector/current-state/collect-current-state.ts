@@ -14,24 +14,14 @@ import { scanCurrentState, type CurrentStateScanResult } from './scan-current-st
 export interface CurrentStateCollectionResult {
   snapshot: CurrentSnapshotIdentity
   scan: CurrentStateScanResult
-  counts: {
-    vaults: number
-    loanBrokers: number
-    loans: number
-  }
+  counts: { vaults: number; loanBrokers: number; loans: number }
 }
 
 function errorDetails(error: unknown): { code: string; message: string } {
   if (error instanceof Error) {
-    return {
-      code: error.name || 'current_state_collection_failed',
-      message: error.message,
-    }
+    return { code: error.name || 'collection_failed', message: error.message }
   }
-  return {
-    code: 'current_state_collection_failed',
-    message: String(error),
-  }
+  return { code: 'collection_failed', message: String(error) }
 }
 
 export async function collectCurrentState(options: {
@@ -43,6 +33,7 @@ export async function collectCurrentState(options: {
   idFactory?: () => string
   pageLimitPerType?: number
   requestLimitTotal?: number
+  objectLimitPerPage?: number
   writeBatchSize?: number
 }): Promise<CurrentStateCollectionResult> {
   const state = await getSyncState(options.db)
@@ -79,6 +70,7 @@ export async function collectCurrentState(options: {
       ledgerIndex: snapshot.ledgerIndex,
       pageLimitPerType: options.pageLimitPerType,
       requestLimitTotal: options.requestLimitTotal,
+      objectLimitPerPage: options.objectLimitPerPage,
       fetcher: options.fetcher,
       nowMs: options.nowMs,
     })
