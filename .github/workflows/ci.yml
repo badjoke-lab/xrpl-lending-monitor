@@ -7,7 +7,7 @@ on:
       - main
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   quality:
@@ -16,8 +16,6 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
@@ -28,144 +26,25 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 24.18.0
+          cache: pnpm
 
       - name: Install dependencies
-        id: install
-        continue-on-error: true
-        run: pnpm install --no-frozen-lockfile 2>&1 | tee pnpm-install.log
-
-      - name: Commit generated lockfile once
-        if: >-
-          steps.install.outcome == 'success' &&
-          github.event_name == 'pull_request' &&
-          github.event.pull_request.head.repo.full_name == github.repository &&
-          github.head_ref == 'foundation/project-skeleton'
-        run: |
-          if git diff --quiet -- pnpm-lock.yaml && git ls-files --error-unmatch pnpm-lock.yaml >/dev/null 2>&1; then
-            exit 0
-          fi
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add pnpm-lock.yaml
-          git commit -m "build: add pnpm lockfile"
-          git push origin HEAD:${GITHUB_HEAD_REF}
-
-      - name: Upload install diagnostics and generated lockfile
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: pnpm-install-diagnostics
-          path: |
-            pnpm-install.log
-            pnpm-lock.yaml
-          retention-days: 1
-
-      - name: Stop after install failure
-        if: steps.install.outcome != 'success'
-        run: exit 1
+        run: pnpm install --frozen-lockfile
 
       - name: Lint
-        id: lint
-        continue-on-error: true
-        run: pnpm lint 2>&1 | tee lint.log
-
-      - name: Upload lint diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: lint-diagnostics
-          path: lint.log
-          retention-days: 1
-
-      - name: Stop after lint failure
-        if: steps.lint.outcome != 'success'
-        run: exit 1
+        run: pnpm lint
 
       - name: Type-check
-        id: typecheck
-        continue-on-error: true
-        run: pnpm typecheck 2>&1 | tee typecheck.log
-
-      - name: Upload type-check diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: typecheck-diagnostics
-          path: typecheck.log
-          retention-days: 1
-
-      - name: Stop after type-check failure
-        if: steps.typecheck.outcome != 'success'
-        run: exit 1
+        run: pnpm typecheck
 
       - name: Unit tests
-        id: unit
-        continue-on-error: true
-        run: pnpm test 2>&1 | tee unit-test.log
-
-      - name: Upload unit-test diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: unit-test-diagnostics
-          path: unit-test.log
-          retention-days: 1
-
-      - name: Stop after unit-test failure
-        if: steps.unit.outcome != 'success'
-        run: exit 1
+        run: pnpm test
 
       - name: Build application
-        id: build
-        continue-on-error: true
-        run: pnpm build 2>&1 | tee build.log
-
-      - name: Upload build diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-diagnostics
-          path: build.log
-          retention-days: 1
-
-      - name: Stop after build failure
-        if: steps.build.outcome != 'success'
-        run: exit 1
+        run: pnpm build
 
       - name: Install Chromium
-        id: browser_install
-        continue-on-error: true
-        run: pnpm exec playwright install --with-deps chromium 2>&1 | tee playwright-install.log
-
-      - name: Upload Chromium installation diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: playwright-install-diagnostics
-          path: playwright-install.log
-          retention-days: 1
-
-      - name: Stop after Chromium installation failure
-        if: steps.browser_install.outcome != 'success'
-        run: exit 1
+        run: pnpm exec playwright install --with-deps chromium
 
       - name: Browser smoke test
-        id: browser_test
-        continue-on-error: true
-        run: pnpm test:e2e 2>&1 | tee browser-test.log
-
-      - name: Upload browser diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: browser-test-diagnostics
-          path: |
-            browser-test.log
-            playwright-report/
-            test-results/
-          if-no-files-found: ignore
-          retention-days: 1
-
-      - name: Stop after browser-test failure
-        if: steps.browser_test.outcome != 'success'
-        run: exit 1
+        run: pnpm test:e2e
