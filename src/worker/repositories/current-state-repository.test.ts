@@ -71,12 +71,13 @@ const metrics = {
 }
 
 describe('current-state repository lifecycle', () => {
-  it('creates an R2-backed building snapshot without object rows in D1', async () => {
+  it('creates an idempotent R2-backed building snapshot without object rows in D1', async () => {
     const { db, prepared } = fakeDatabase()
     await beginCurrentSnapshot(db, snapshot)
 
     expect(prepared).toHaveLength(1)
     expect(prepared[0]?.sql).toContain("'r2_shards'")
+    expect(prepared[0]?.sql).toContain('ON CONFLICT(id) DO NOTHING')
     expect(prepared[0]?.values).toEqual([
       snapshot.id,
       snapshot.network,
@@ -90,7 +91,7 @@ describe('current-state repository lifecycle', () => {
     expect(prepared[0]?.runCount).toBe(1)
   })
 
-  it('activates only after the R2 manifest summary exists', async () => {
+  it('activates idempotently only after the digest-bound manifest exists', async () => {
     const { db, prepared, batches } = fakeDatabase()
     await activateCurrentSnapshot({
       db,
@@ -98,6 +99,7 @@ describe('current-state repository lifecycle', () => {
       metrics,
       manifest: {
         manifestKey: 'snapshots/snapshot-1/manifest.json',
+        manifestSha256: 'c'.repeat(64),
         shardCount: 25,
         compressedBytes: 1_234_567,
         vaultCount: 1_760,
@@ -109,12 +111,21 @@ describe('current-state repository lifecycle', () => {
 
     expect(prepared).toHaveLength(3)
     expect(prepared[0]?.sql).toContain("SET status = 'superseded'")
+    expect(prepared[0]?.sql).toContain('id <> ?4')
+    expect(prepared[0]?.values).toEqual([
+      '2026-07-01T00:01:00.000Z',
+      snapshot.network,
+      snapshot.epochId,
+      snapshot.id,
+    ])
     expect(prepared[1]?.sql).toContain("SET status = 'active'")
-    expect(prepared[1]?.sql).toContain('manifest_key')
+    expect(prepared[1]?.sql).toContain('manifest_hash')
+    expect(prepared[1]?.sql).toContain("status IN ('building', 'active')")
     expect(prepared[2]?.sql).toContain('UPDATE sync_state')
     expect(batches).toEqual([[0, 1, 2]])
     expect(prepared[1]?.values).toEqual([
       'snapshots/snapshot-1/manifest.json',
+      'c'.repeat(64),
       25,
       25,
       51_200,
