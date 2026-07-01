@@ -8,67 +8,77 @@ Last updated: 2026-07-01.
 
 ## Current branch
 
-`foundation/spec-roadmap`
+`foundation/project-skeleton`
 
 ## Current work
 
-Repository source-of-truth documents and operating rules are being established.
+Final validation and merge preparation for the project skeleton.
 
 ## Completed
 
+### Source-of-truth foundation
+
 - Repository created: `badjoke-lab/xrpl-lending-monitor`
-- Initial README on `main`
-- Repository operating rules
-- Documentation index
-- Product specification
-- Architecture specification
-- Data model
-- Loan status model
-- Asset model
-- Collector design
-- Testing strategy
-- Free-tier operating budget and benchmark gate
-- Competitor positioning
-- Dated development roadmap
+- PR #1 merged: source-of-truth specifications and development roadmap
+- Repository operating rules in `AGENTS.md`
+- Documentation index and PR checklist
+- Product, architecture, data, status, asset, collector, testing, free-tier, competitor, roadmap, and decision documents
+- Requirement that every implementation PR updates this file and relevant specifications
+
+### Project skeleton on the active branch
+
+- Node.js and pnpm versions pinned
+- Exact dependency versions and committed `pnpm-lock.yaml`
+- Explicit pnpm build-script approvals in `pnpm-workspace.yaml`
+- TypeScript configuration for UI, Worker, and tooling
+- React and Vite application entrypoint
+- Truthful foundation UI with no fabricated protocol data
+- Hono Worker with read-only `/api/health` and `/api/status`
+- Cloudflare Static Assets and D1 binding configuration
+- Placeholder D1 database ID to prevent accidental production deployment
+- Devnet-only, Mainnet-fail-closed runtime validation
+- Unit tests for network configuration
+- Playwright browser smoke test
+- ESLint, Vitest, Vite, Wrangler, and Playwright configuration
+- Read-only GitHub Actions CI using frozen-lockfile installation
+- D1 migration operating rules
+- Successful CI validation of install, lint, type-check, unit tests, build, Chromium installation, and browser smoke test
+
+## Active PR
+
+### PR #2 — Project skeleton
+
+Merge conditions:
+
+- clean frozen-lockfile CI passes;
+- documentation and implementation agree;
+- no production deployment occurs;
+- no Group Pay dependency exists.
+
+After merge, M0 is complete and work advances to M1.
 
 ## Next PR
 
-### PR 1 — Foundation specifications and roadmap
-
-Expected contents:
-
-- all M0 source-of-truth documents;
-- pull-request checklist enforcing document review and status updates;
-- initial decision log;
-- README links to the documentation set.
-
-Completion condition:
-
-- PR reviewed and merged;
-- this document moved to PR 3 as the next active work;
-- no implementation code is added before the documentation source of truth exists on `main`.
-
-## Following PR
-
-### PR 3 — Project skeleton
+### PR 4 — Network, amendment, and epoch foundation
 
 Planned scope:
 
-- Node and pnpm version pinning;
-- TypeScript;
-- React and Vite;
-- Cloudflare Worker and D1 configuration;
-- router;
-- Vitest and Playwright;
-- ESLint and formatting;
-- local/preview/production environment boundaries;
-- GitHub Actions;
-- migrations folder;
-- Mainnet disabled by default.
+- XRPL Devnet RPC client boundary;
+- endpoint fallback, timeout, and response validation;
+- server information and validated-ledger reads;
+- amendment-status reads;
+- `network_epochs` and `sync_state` D1 migration;
+- reset-signal detection skeleton;
+- D1-backed `/api/status`;
+- fixture and integration tests;
+- Mainnet remains disabled.
+
+## Following PRs
+
+- PR 5 — Asset normalization
+- PR 6 — Current object scanner and free-tier benchmark checkpoint
 
 ## Known open questions
-
-These do not block the current documentation PR. They must be resolved in the assigned implementation checkpoint.
 
 | Question | Required evidence | Assigned point |
 |---|---|---|
@@ -82,9 +92,14 @@ These do not block the current documentation PR. They must be resolved in the as
 
 ## Current blockers
 
-None for M0.
+None.
 
-Implementation is intentionally blocked until the specification PR is merged.
+## Schedule status
+
+- M0 specifications: complete
+- Project skeleton: complete on branch, pending merge
+- M1 collection work: next
+- Roadmap timing: on schedule
 
 ## Risks being watched
 
