@@ -2,6 +2,7 @@ import type { FetchLike } from '../network/xrpl-rpc'
 import {
   scanLedgerObjects,
   type CurrentObjectFilter,
+  type LedgerObjectDecoder,
   type LedgerObjectScanResult,
 } from './scan-ledger-objects'
 
@@ -45,6 +46,7 @@ export async function scanCurrentState(options: {
   objectLimitPerPage?: number
   fetcher?: FetchLike
   nowMs?: () => number
+  decodeObject?: LedgerObjectDecoder
 }): Promise<CurrentStateScanResult> {
   const requestLimitTotal = options.requestLimitTotal ?? 600
   if (!Number.isSafeInteger(requestLimitTotal) || requestLimitTotal < FILTERS.length) {
@@ -73,6 +75,7 @@ export async function scanCurrentState(options: {
       objectLimitPerPage: options.objectLimitPerPage,
       fetcher: options.fetcher,
       nowMs,
+      decodeObject: options.decodeObject,
     })
     ensureUniqueIds(result)
     results.set(filter, result)
