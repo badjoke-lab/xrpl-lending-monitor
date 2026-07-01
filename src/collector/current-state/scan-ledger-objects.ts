@@ -27,6 +27,7 @@ export interface LedgerObjectScanMetrics {
   requests: number
   objects: number
   elapsedMs: number
+  requestedObjectsPerPage: number
 }
 
 export interface LedgerObjectScanResult {
@@ -41,6 +42,7 @@ export class LedgerObjectScanError extends Error {
   readonly filter: CurrentObjectFilter
   readonly pagesCompleted: number
   readonly objectsRead: number
+  readonly lastMarker: unknown
   readonly cause: unknown
 
   constructor(options: {
@@ -48,6 +50,7 @@ export class LedgerObjectScanError extends Error {
     message: string
     pagesCompleted: number
     objectsRead: number
+    lastMarker?: unknown
     cause?: unknown
   }) {
     super(options.message)
@@ -55,6 +58,7 @@ export class LedgerObjectScanError extends Error {
     this.filter = options.filter
     this.pagesCompleted = options.pagesCompleted
     this.objectsRead = options.objectsRead
+    this.lastMarker = options.lastMarker
     this.cause = options.cause
   }
 }
@@ -76,6 +80,18 @@ function requiredLedgerIndex(value: unknown): number {
     throw new Error('ledger_index must be a non-negative safe integer')
   }
   return Number(number)
+}
+
+function markerFingerprint(marker: unknown): string {
+  if (typeof marker === 'string') return `string:${marker}`
+  if (typeof marker === 'number') return `number:${marker}`
+  if (typeof marker === 'boolean') return `boolean:${marker}`
+
+  try {
+    return `json:${JSON.stringify(marker)}`
+  } catch {
+    throw new Error('ledger_data marker could not be serialized for repetition detection')
+  }
 }
 
 function parsePage(options: {
@@ -127,16 +143,21 @@ export async function scanLedgerObjects(options: {
   filter: CurrentObjectFilter
   pageLimit?: number
   requestLimit?: number
+  objectLimitPerPage?: number
   fetcher?: FetchLike
   nowMs?: () => number
 }): Promise<LedgerObjectScanResult> {
   const pageLimit = options.pageLimit ?? 200
   const requestLimit = options.requestLimit ?? 200
+  const objectLimitPerPage = options.objectLimitPerPage ?? 2_048
   if (!Number.isSafeInteger(pageLimit) || pageLimit <= 0) {
     throw new Error('pageLimit must be a positive integer')
   }
   if (!Number.isSafeInteger(requestLimit) || requestLimit <= 0) {
     throw new Error('requestLimit must be a positive integer')
+  }
+  if (!Number.isSafeInteger(objectLimitPerPage) || objectLimitPerPage <= 0) {
+    throw new Error('objectLimitPerPage must be a positive integer')
   }
 
   const nowMs = options.nowMs ?? Date.now
@@ -147,6 +168,7 @@ export async function scanLedgerObjects(options: {
     fetcher: options.fetcher,
   })
   const objects: ScannedLedgerObject[] = []
+  const seenMarkers = new Set<string>()
   let marker: unknown = undefined
   let pages = 0
   let requests = 0
@@ -164,6 +186,7 @@ export async function scanLedgerObjects(options: {
         ledger_hash: options.ledgerHash,
         binary: false,
         type: options.filter,
+        limit: objectLimitPerPage,
       }
       if (marker !== undefined) params.marker = marker
 
@@ -181,6 +204,11 @@ export async function scanLedgerObjects(options: {
       marker = page.marker
 
       if (marker === undefined || marker === null) break
+      const fingerprint = markerFingerprint(marker)
+      if (seenMarkers.has(fingerprint)) {
+        throw new Error(`ledger_data repeated marker after page ${pages}`)
+      }
+      seenMarkers.add(fingerprint)
     }
   } catch (error) {
     throw new LedgerObjectScanError({
@@ -188,6 +216,7 @@ export async function scanLedgerObjects(options: {
       message: `Incomplete ${options.filter} scan: ${error instanceof Error ? error.message : String(error)}`,
       pagesCompleted: pages,
       objectsRead: objects.length,
+      lastMarker: marker,
       cause: error,
     })
   }
@@ -202,6 +231,7 @@ export async function scanLedgerObjects(options: {
       requests,
       objects: objects.length,
       elapsedMs: Math.max(0, nowMs() - startedAt),
+      requestedObjectsPerPage: objectLimitPerPage,
     },
   }
 }
