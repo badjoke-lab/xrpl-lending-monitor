@@ -67,18 +67,19 @@ export function planSuccessfulStatus(options: {
   staleAfterSeconds: number
 }): SuccessfulStatusPlan {
   const { previous, snapshot, staleAfterSeconds } = options
-  const reset = detectReset(
-    previous?.latestObservedLedger !== null && previous?.latestObservedLedger !== undefined
+  const previousObservation =
+    previous?.latestObservedLedger !== null &&
+    previous?.latestObservedLedger !== undefined &&
+    previous.latestObservedHash
       ? {
           index: previous.latestObservedLedger,
-          hash: previous.latestObservedHash ?? '',
+          hash: previous.latestObservedHash,
         }
-      : null,
-    {
-      index: snapshot.validatedLedger.index,
-      hash: snapshot.validatedLedger.hash,
-    },
-  )
+      : null
+  const reset = detectReset(previousObservation, {
+    index: snapshot.validatedLedger.index,
+    hash: snapshot.validatedLedger.hash,
+  })
 
   const createdAt = previous?.createdAt ?? snapshot.observedAt
   const base = {
