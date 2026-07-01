@@ -7,11 +7,6 @@ export interface RuntimeEnvironment {
   XRPL_DEVNET_RPC_FALLBACK_URL?: string
   XRPL_RPC_TIMEOUT_MS?: string
   NETWORK_STATUS_STALE_AFTER_SECONDS?: string
-  CURRENT_STATE_COLLECTION_ENABLED?: string
-  CURRENT_SCAN_PAGE_LIMIT_PER_TYPE?: string
-  CURRENT_SCAN_REQUEST_LIMIT_TOTAL?: string
-  CURRENT_SCAN_OBJECT_LIMIT_PER_PAGE?: string
-  CURRENT_SCAN_WRITE_BATCH_SIZE?: string
 }
 
 export interface RuntimeConfig {
@@ -20,11 +15,6 @@ export interface RuntimeConfig {
   xrplRpcUrls: readonly string[]
   rpcTimeoutMs: number
   staleAfterSeconds: number
-  currentStateCollectionEnabled: boolean
-  currentScanPageLimitPerType: number
-  currentScanRequestLimitTotal: number
-  currentScanObjectLimitPerPage: number
-  currentScanWriteBatchSize: number
 }
 
 function parsePositiveInteger(value: string | undefined, fallback: number, name: string): number {
@@ -36,13 +26,6 @@ function parsePositiveInteger(value: string | undefined, fallback: number, name:
   }
 
   return parsed
-}
-
-function parseBoolean(value: string | undefined, fallback: boolean, name: string): boolean {
-  if (value === undefined || value === '') return fallback
-  if (value === 'true') return true
-  if (value === 'false') return false
-  throw new Error(`${name} must be true or false`)
 }
 
 function parseHttpsUrl(value: string, name: string): string {
@@ -72,19 +55,6 @@ export function resolveRuntimeConfig(env: RuntimeEnvironment): RuntimeConfig {
       ? [parseHttpsUrl(env.XRPL_DEVNET_RPC_FALLBACK_URL, 'XRPL_DEVNET_RPC_FALLBACK_URL')]
       : []),
   ]
-  const pageLimit = parsePositiveInteger(
-    env.CURRENT_SCAN_PAGE_LIMIT_PER_TYPE,
-    200,
-    'CURRENT_SCAN_PAGE_LIMIT_PER_TYPE',
-  )
-  const requestLimit = parsePositiveInteger(
-    env.CURRENT_SCAN_REQUEST_LIMIT_TOTAL,
-    600,
-    'CURRENT_SCAN_REQUEST_LIMIT_TOTAL',
-  )
-  if (requestLimit < 3) {
-    throw new Error('CURRENT_SCAN_REQUEST_LIMIT_TOTAL must allow at least three requests')
-  }
 
   return {
     network: 'devnet',
@@ -95,23 +65,6 @@ export function resolveRuntimeConfig(env: RuntimeEnvironment): RuntimeConfig {
       env.NETWORK_STATUS_STALE_AFTER_SECONDS,
       30,
       'NETWORK_STATUS_STALE_AFTER_SECONDS',
-    ),
-    currentStateCollectionEnabled: parseBoolean(
-      env.CURRENT_STATE_COLLECTION_ENABLED,
-      false,
-      'CURRENT_STATE_COLLECTION_ENABLED',
-    ),
-    currentScanPageLimitPerType: pageLimit,
-    currentScanRequestLimitTotal: requestLimit,
-    currentScanObjectLimitPerPage: parsePositiveInteger(
-      env.CURRENT_SCAN_OBJECT_LIMIT_PER_PAGE,
-      2_048,
-      'CURRENT_SCAN_OBJECT_LIMIT_PER_PAGE',
-    ),
-    currentScanWriteBatchSize: parsePositiveInteger(
-      env.CURRENT_SCAN_WRITE_BATCH_SIZE,
-      50,
-      'CURRENT_SCAN_WRITE_BATCH_SIZE',
     ),
   }
 }
