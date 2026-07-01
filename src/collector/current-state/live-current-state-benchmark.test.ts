@@ -4,125 +4,127 @@ import { describe, expect, it } from 'vitest'
 
 import { readNetworkSnapshot } from '../network/read-network-snapshot'
 import {
-  CurrentStateScanError,
-  scanCurrentState,
-} from './scan-current-state'
+  normalizeLoan,
+  normalizeLoanBroker,
+  normalizeVault,
+} from './normalize-current-objects'
+import { scanCurrentStateBatch } from './scan-current-state'
 
 const runLive = process.env.RUN_LIVE_CURRENT_STATE_BENCHMARK === 'true'
 const endpoint =
   process.env.XRPL_DEVNET_RPC_URL ?? 'https://s.devnet.rippletest.net:51234/'
 const artifactPath = 'artifacts/current-state-live-benchmark.json'
 const probePages = 25
-const requestedObjectsPerPage = 2_048
 
 async function writeArtifact(value: unknown): Promise<void> {
   await mkdir('artifacts', { recursive: true })
   await writeFile(artifactPath, `${JSON.stringify(value, null, 2)}\n`, 'utf8')
 }
 
+interface ProjectionFailure {
+  type: 'vault' | 'loan_broker' | 'loan'
+  index: string
+  message: string
+  fieldNames: string[]
+  diagnostic: Record<string, unknown>
+}
+
+function diagnostic(value: Record<string, unknown>, type: ProjectionFailure['type']) {
+  if (type === 'vault') {
+    return {
+      ShareMPTID: value.ShareMPTID ?? null,
+      ShareMPTIDType: typeof value.ShareMPTID,
+      ShareMPTIDJson: JSON.stringify(value.ShareMPTID ?? null),
+      Asset: value.Asset ?? null,
+    }
+  }
+  if (type === 'loan_broker') {
+    return {
+      VaultID: value.VaultID ?? null,
+      OwnerCount: value.OwnerCount ?? null,
+      DebtTotal: value.DebtTotal ?? null,
+    }
+  }
+  return {
+    LoanBrokerID: value.LoanBrokerID ?? null,
+    Flags: value.Flags ?? null,
+    PrincipalOutstanding: value.PrincipalOutstanding ?? null,
+  }
+}
+
 describe.runIf(runLive)('live current-state benchmark', () => {
-  it('records bounded single-pass binary traversal evidence', async () => {
+  it('validates live projection field shapes in a bounded single pass', async () => {
     const snapshot = await readNetworkSnapshot({
       endpoints: [endpoint],
       timeoutMs: 15_000,
     })
+    const failures: ProjectionFailure[] = []
+    const normalizedCounts = { vaults: 0, loan_brokers: 0, loans: 0 }
     const heapBefore = process.memoryUsage().heapUsed
     const startedAt = Date.now()
 
-    let result:
-      | {
-          complete: true
-          pages: number
-          requests: number
-          decoded_objects: number
-          relevant_objects: number
-          by_type: Record<string, { objects: number }>
-          last_marker: null
-        }
-      | {
-          complete: false
-          pages: number
-          requests: number
-          decoded_objects: number
-          relevant_objects: number
-          by_type: null
-          last_marker: unknown
-        }
-
-    try {
-      const scan = await scanCurrentState({
-        endpoint: snapshot.endpoint,
-        timeoutMs: 15_000,
-        ledgerHash: snapshot.validatedLedger.hash,
-        ledgerIndex: snapshot.validatedLedger.index,
-        pageLimitPerType: probePages,
-        requestLimitTotal: probePages,
-        objectLimitPerPage: requestedObjectsPerPage,
-      })
-      result = {
-        complete: true,
-        pages: scan.metrics.pages,
-        requests: scan.metrics.requests,
-        decoded_objects: scan.metrics.decodedObjects,
-        relevant_objects: scan.metrics.objects,
-        by_type: scan.metrics.byType,
-        last_marker: null,
-      }
-    } catch (error) {
-      if (
-        !(error instanceof CurrentStateScanError) ||
-        !error.message.includes(`page limit ${probePages} reached before completion`)
-      ) {
-        throw error
-      }
-      result = {
-        complete: false,
-        pages: error.pagesCompleted,
-        requests: error.requestsCompleted,
-        decoded_objects: error.decodedObjects,
-        relevant_objects: error.relevantObjects,
-        by_type: null,
-        last_marker: error.lastMarker,
-      }
-    }
-
-    const heapAfter = process.memoryUsage().heapUsed
-    const artifact = {
-      schema_version: 3,
-      observed_at: snapshot.observedAt,
-      network: snapshot.network,
+    const result = await scanCurrentStateBatch({
       endpoint: snapshot.endpoint,
-      ledger: {
-        index: snapshot.validatedLedger.index,
-        hash: snapshot.validatedLedger.hash,
-        age_seconds: snapshot.validatedLedger.ageSeconds,
+      timeoutMs: 15_000,
+      ledgerHash: snapshot.validatedLedger.hash,
+      ledgerIndex: snapshot.validatedLedger.index,
+      maxPages: probePages,
+      objectLimitPerPage: 2_048,
+      onPage(page) {
+        const groups = [
+          ['vault', page.vaults, normalizeVault],
+          ['loan_broker', page.loanBrokers, normalizeLoanBroker],
+          ['loan', page.loans, normalizeLoan],
+        ] as const
+
+        for (const [type, values, normalize] of groups) {
+          for (const value of values) {
+            try {
+              normalize(value as never)
+              normalizedCounts[type === 'loan_broker' ? 'loan_brokers' : `${type}s`] += 1
+            } catch (error) {
+              if (failures.length < 50) {
+                failures.push({
+                  type,
+                  index: value.index,
+                  message: error instanceof Error ? error.message : String(error),
+                  fieldNames: Object.keys(value).sort(),
+                  diagnostic: diagnostic(value, type),
+                })
+              }
+            }
+          }
+        }
       },
-      amendments: {
-        lending_protocol: snapshot.amendments.lendingProtocol,
-        single_asset_vault: snapshot.amendments.singleAssetVault,
-      },
+    })
+
+    const artifact = {
+      schema_version: 4,
+      observed_at: snapshot.observedAt,
+      endpoint: snapshot.endpoint,
+      ledger: snapshot.validatedLedger,
       probe_configuration: {
         response_mode: 'binary',
-        traversal: 'single_pass_unfiltered',
+        traversal: 'single_pass_unfiltered_resumable',
         pages: probePages,
-        requested_objects_per_page: requestedObjectsPerPage,
+        requested_objects_per_page: 2_048,
       },
-      result,
+      result: {
+        complete: result.complete,
+        next_marker: result.nextMarker,
+        metrics: result.metrics,
+        normalized_counts: normalizedCounts,
+        projection_failure_count: failures.length,
+        projection_failures: failures,
+      },
       elapsed_ms: Date.now() - startedAt,
-      average_decoded_objects_per_page:
-        result.pages === 0 ? 0 : result.decoded_objects / result.pages,
-      relevant_ratio:
-        result.decoded_objects === 0
-          ? 0
-          : result.relevant_objects / result.decoded_objects,
-      process_heap_delta_bytes: heapAfter - heapBefore,
-      full_scan_attempted: false,
+      process_heap_delta_bytes: process.memoryUsage().heapUsed - heapBefore,
     }
 
     await writeArtifact(artifact)
     console.info(`CURRENT_STATE_BENCHMARK=${JSON.stringify(artifact)}`)
-    expect(result.pages).toBeGreaterThan(0)
-    expect(result.decoded_objects).toBeGreaterThan(0)
-    expect(result.relevant_objects).toBeGreaterThanOrEqual(0)
+    expect(result.metrics.pages).toBe(probePages)
+    expect(result.metrics.decodedObjects).toBeGreaterThan(0)
+    expect(failures).toEqual([])
   }, 180_000)
 })
