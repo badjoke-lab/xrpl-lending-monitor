@@ -14,3 +14,18 @@ CREATE TABLE processed_ledgers (
   PRIMARY KEY (network, epoch_id, ledger_index),
   UNIQUE (network, epoch_id, ledger_hash)
 );
+
+CREATE INDEX processed_ledgers_close_time
+  ON processed_ledgers (network, epoch_id, close_time DESC);
+
+CREATE TABLE protocol_events (
+  network TEXT NOT NULL,
+  epoch_id TEXT NOT NULL,
+  event_hash TEXT NOT NULL,
+  ledger_index INTEGER NOT NULL,
+  event_index INTEGER NOT NULL,
+  event_type TEXT NOT NULL,
+  result_code TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (network, epoch_id, event_hash)
+);
