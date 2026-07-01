@@ -144,6 +144,12 @@ function loanStatus(flags: number): LoanOnLedgerStatus {
 export function normalizeLoan(object: ScannedLedgerObject): LoanCurrentProjection {
   if (object.LedgerEntryType !== 'Loan') throw new Error('Expected a Loan object')
   const base = common(object)
+  const paymentRemaining = unsignedOrZero(object, 'PaymentRemaining')
+  const nextPaymentDueDate = optionalUnsigned(object, 'NextPaymentDueDate')
+
+  if (paymentRemaining > 0 && nextPaymentDueDate === null) {
+    throw new Error('NextPaymentDueDate is required while PaymentRemaining is greater than zero')
+  }
 
   return {
     kind: 'loan',
@@ -164,8 +170,8 @@ export function normalizeLoan(object: ScannedLedgerObject): LoanCurrentProjectio
     paymentInterval: requiredUnsigned(object, 'PaymentInterval'),
     gracePeriod: unsignedOrZero(object, 'GracePeriod'),
     previousPaymentDueDate: unsignedOrZero(object, 'PreviousPaymentDueDate'),
-    nextPaymentDueDate: requiredUnsigned(object, 'NextPaymentDueDate'),
-    paymentRemaining: requiredUnsigned(object, 'PaymentRemaining'),
+    nextPaymentDueDate,
+    paymentRemaining,
     principalOutstanding: amountOrZero(object, 'PrincipalOutstanding'),
     totalValueOutstanding: amountOrZero(object, 'TotalValueOutstanding'),
     managementFeeOutstanding: amountOrZero(object, 'ManagementFeeOutstanding'),
