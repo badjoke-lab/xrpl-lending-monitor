@@ -27,7 +27,7 @@ Describe what changes and why.
 - [ ] No wallet, signing, seed, or transaction-submission behavior was added.
 - [ ] No invented risk score, LTV, collateral value, borrower identity, or cross-asset TVL was added.
 
-## Free-tier impact
+## Resource impact
 
 - Worker requests/CPU impact:
 - D1 rows read/written impact:
@@ -53,7 +53,13 @@ Evidence:
 - [ ] `docs/development-roadmap.md` updated if schedule, status, dependency, or scope changed.
 - [ ] Relevant specification updated if behavior or data changed.
 - [ ] `docs/decision-log.md` updated for a material decision.
-- [ ] `docs/free-tier-budget.md` updated for resource-impact changes.
+- [ ] `docs/resource-envelope.md` updated for material resource-impact changes.
+
+## Publication review
+
+- [ ] Repository text contains only information needed to understand, operate, test, or maintain the public product.
+- [ ] Non-public strategy, personal constraints, unpublished continuation criteria, and unrelated project context are excluded.
+- [ ] Decisions are explained through product, safety, reliability, maintainability, or measurable resource reasons.
 
 ## Risks and rollback
 
