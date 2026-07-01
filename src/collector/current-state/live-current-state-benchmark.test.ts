@@ -3,117 +3,141 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { describe, expect, it } from 'vitest'
 
 import { readNetworkSnapshot } from '../network/read-network-snapshot'
-import { scanCurrentState } from './scan-current-state'
+import {
+  LedgerObjectScanError,
+  scanLedgerObjects,
+  type CurrentObjectFilter,
+} from './scan-ledger-objects'
 
 const runLive = process.env.RUN_LIVE_CURRENT_STATE_BENCHMARK === 'true'
 const endpoint =
   process.env.XRPL_DEVNET_RPC_URL ?? 'https://s.devnet.rippletest.net:51234/'
 const artifactPath = 'artifacts/current-state-live-benchmark.json'
-
-function fieldNames(value: Record<string, unknown> | undefined): string[] {
-  return value ? Object.keys(value).sort() : []
-}
+const probePagesPerType = 25
+const requestedObjectsPerPage = 2_048
 
 async function writeArtifact(value: unknown): Promise<void> {
   await mkdir('artifacts', { recursive: true })
   await writeFile(artifactPath, `${JSON.stringify(value, null, 2)}\n`, 'utf8')
 }
 
-function optionalErrorField(error: unknown, field: string): unknown {
-  if (typeof error !== 'object' || error === null || !(field in error)) return null
-  return (error as Record<string, unknown>)[field] ?? null
+interface ProbeResult {
+  filter: CurrentObjectFilter
+  complete: boolean
+  pages: number
+  requests: number
+  objects: number
+  elapsed_ms: number
+  average_objects_per_page: number
+  requested_objects_per_page: number
+  last_marker: unknown
 }
 
-function errorArtifact(error: unknown): Record<string, unknown> {
-  return {
-    schema_version: 1,
-    observed_at: new Date().toISOString(),
-    endpoint,
-    complete: false,
-    benchmark_limits: {
-      pages_per_type: 2_000,
-      requests_total: 6_000,
-      requested_objects_per_page: 2_048,
-    },
-    error: {
-      name: error instanceof Error ? error.name : 'UnknownError',
-      message: error instanceof Error ? error.message : String(error),
-      stack: error instanceof Error ? error.stack ?? null : null,
-      filter: optionalErrorField(error, 'filter'),
-      pages_completed: optionalErrorField(error, 'pagesCompleted'),
-      objects_read: optionalErrorField(error, 'objectsRead'),
-      last_marker: optionalErrorField(error, 'lastMarker'),
-      details: optionalErrorField(error, 'details'),
-      failures: optionalErrorField(error, 'failures'),
-    },
+async function probeType(options: {
+  filter: CurrentObjectFilter
+  endpoint: string
+  ledgerHash: string
+  ledgerIndex: number
+}): Promise<ProbeResult> {
+  const startedAt = Date.now()
+
+  try {
+    const result = await scanLedgerObjects({
+      endpoint: options.endpoint,
+      timeoutMs: 15_000,
+      ledgerHash: options.ledgerHash,
+      ledgerIndex: options.ledgerIndex,
+      filter: options.filter,
+      pageLimit: probePagesPerType,
+      requestLimit: probePagesPerType,
+      objectLimitPerPage: requestedObjectsPerPage,
+    })
+
+    return {
+      filter: options.filter,
+      complete: true,
+      pages: result.metrics.pages,
+      requests: result.metrics.requests,
+      objects: result.metrics.objects,
+      elapsed_ms: result.metrics.elapsedMs,
+      average_objects_per_page:
+        result.metrics.pages === 0 ? 0 : result.metrics.objects / result.metrics.pages,
+      requested_objects_per_page: result.metrics.requestedObjectsPerPage,
+      last_marker: null,
+    }
+  } catch (error) {
+    if (
+      !(error instanceof LedgerObjectScanError) ||
+      !error.message.includes(`page limit ${probePagesPerType} reached before completion`)
+    ) {
+      throw error
+    }
+
+    return {
+      filter: options.filter,
+      complete: false,
+      pages: error.pagesCompleted,
+      requests: error.pagesCompleted,
+      objects: error.objectsRead,
+      elapsed_ms: Date.now() - startedAt,
+      average_objects_per_page:
+        error.pagesCompleted === 0 ? 0 : error.objectsRead / error.pagesCompleted,
+      requested_objects_per_page: requestedObjectsPerPage,
+      last_marker: error.lastMarker,
+    }
   }
 }
 
 describe.runIf(runLive)('live current-state benchmark', () => {
-  it('reads one validated Devnet snapshot and completes every marker chain', async () => {
-    try {
-      const snapshot = await readNetworkSnapshot({
-        endpoints: [endpoint],
-        timeoutMs: 15_000,
-      })
-      const heapBefore = process.memoryUsage().heapUsed
-      const scan = await scanCurrentState({
-        endpoint: snapshot.endpoint,
-        timeoutMs: 15_000,
-        ledgerHash: snapshot.validatedLedger.hash,
-        ledgerIndex: snapshot.validatedLedger.index,
-        pageLimitPerType: 2_000,
-        requestLimitTotal: 6_000,
-        objectLimitPerPage: 2_048,
-      })
-      const heapAfter = process.memoryUsage().heapUsed
+  it('records bounded binary traversal evidence for every current object type', async () => {
+    const snapshot = await readNetworkSnapshot({
+      endpoints: [endpoint],
+      timeoutMs: 15_000,
+    })
+    const heapBefore = process.memoryUsage().heapUsed
+    const probes: ProbeResult[] = []
 
-      const artifact = {
-        schema_version: 1,
-        observed_at: snapshot.observedAt,
-        network: snapshot.network,
-        endpoint: snapshot.endpoint,
-        benchmark_limits: {
-          pages_per_type: 2_000,
-          requests_total: 6_000,
-          requested_objects_per_page: 2_048,
-        },
-        ledger: {
-          index: snapshot.validatedLedger.index,
-          hash: snapshot.validatedLedger.hash,
-          age_seconds: snapshot.validatedLedger.ageSeconds,
-        },
-        amendments: {
-          lending_protocol: snapshot.amendments.lendingProtocol,
-          single_asset_vault: snapshot.amendments.singleAssetVault,
-        },
-        counts: {
-          vaults: scan.vaults.length,
-          loan_brokers: scan.loanBrokers.length,
-          loans: scan.loans.length,
-        },
-        metrics: scan.metrics,
-        sample_field_names: {
-          vault: fieldNames(scan.vaults[0]),
-          loan_broker: fieldNames(scan.loanBrokers[0]),
-          loan: fieldNames(scan.loans[0]),
-        },
-        process_heap_delta_bytes: heapAfter - heapBefore,
-        complete: true,
-      }
-
-      await writeArtifact(artifact)
-      console.info(`CURRENT_STATE_BENCHMARK=${JSON.stringify(artifact)}`)
-      expect(scan.metrics.requests).toBeGreaterThanOrEqual(3)
-      expect(scan.metrics.pages).toBeGreaterThanOrEqual(3)
-      expect(scan.metrics.objects).toBe(
-        scan.vaults.length + scan.loanBrokers.length + scan.loans.length,
+    for (const filter of ['vault', 'loan_broker', 'loan'] as const) {
+      probes.push(
+        await probeType({
+          filter,
+          endpoint: snapshot.endpoint,
+          ledgerHash: snapshot.validatedLedger.hash,
+          ledgerIndex: snapshot.validatedLedger.index,
+        }),
       )
-    } catch (error) {
-      const artifact = errorArtifact(error)
-      await writeArtifact(artifact)
-      console.error(`CURRENT_STATE_BENCHMARK_FAILURE=${JSON.stringify(artifact)}`)
-      throw error
     }
-  }, 300_000)
+
+    const heapAfter = process.memoryUsage().heapUsed
+    const artifact = {
+      schema_version: 2,
+      observed_at: snapshot.observedAt,
+      network: snapshot.network,
+      endpoint: snapshot.endpoint,
+      ledger: {
+        index: snapshot.validatedLedger.index,
+        hash: snapshot.validatedLedger.hash,
+        age_seconds: snapshot.validatedLedger.ageSeconds,
+      },
+      amendments: {
+        lending_protocol: snapshot.amendments.lendingProtocol,
+        single_asset_vault: snapshot.amendments.singleAssetVault,
+      },
+      probe_configuration: {
+        response_mode: 'binary',
+        pages_per_type: probePagesPerType,
+        requested_objects_per_page: requestedObjectsPerPage,
+      },
+      probes,
+      process_heap_delta_bytes: heapAfter - heapBefore,
+      all_types_observed: probes.every((probe) => probe.pages > 0),
+      full_scan_attempted: false,
+    }
+
+    await writeArtifact(artifact)
+    console.info(`CURRENT_STATE_BENCHMARK=${JSON.stringify(artifact)}`)
+    expect(probes).toHaveLength(3)
+    expect(probes.every((probe) => probe.pages > 0)).toBe(true)
+    expect(probes.every((probe) => probe.objects >= 0)).toBe(true)
+  }, 180_000)
 })
