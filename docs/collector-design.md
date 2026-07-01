@@ -2,7 +2,7 @@
 
 ## Objective
 
-Continuously reconstruct XRPL Lending current state and history from validated ledgers while remaining restartable, idempotent, auditable, and compatible with Cloudflare free-tier constraints.
+Continuously reconstruct XRPL Lending current state and history from validated ledgers while remaining restartable, idempotent, auditable, and compatible with bounded runtime and storage constraints.
 
 ## Canonical source
 
@@ -177,4 +177,4 @@ Differences are recorded and repaired only through a documented deterministic pr
 
 Target scheduled cadence: once per minute, subject to measured Worker and RPC behavior.
 
-Cadence may be reduced to preserve free operation. Data freshness is shown explicitly, so a slower cadence does not masquerade as real time.
+Cadence may be adjusted according to measured runtime, RPC capacity, and data-freshness requirements. Data freshness is shown explicitly, so a slower cadence does not masquerade as real time.
