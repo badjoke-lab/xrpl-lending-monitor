@@ -85,6 +85,7 @@ const worker: ExportedHandler<Bindings> = {
         config,
         pageLimitPerType: config.currentScanPageLimitPerType,
         requestLimitTotal: config.currentScanRequestLimitTotal,
+        objectLimitPerPage: config.currentScanObjectLimitPerPage,
         writeBatchSize: config.currentScanWriteBatchSize,
       })
     }
