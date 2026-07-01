@@ -19,6 +19,7 @@ describe('resolveRuntimeConfig', () => {
       currentStateCollectionEnabled: false,
       currentScanPageLimitPerType: 200,
       currentScanRequestLimitTotal: 600,
+      currentScanObjectLimitPerPage: 2048,
       currentScanWriteBatchSize: 50,
     })
   })
@@ -32,6 +33,7 @@ describe('resolveRuntimeConfig', () => {
       CURRENT_STATE_COLLECTION_ENABLED: 'true',
       CURRENT_SCAN_PAGE_LIMIT_PER_TYPE: '25',
       CURRENT_SCAN_REQUEST_LIMIT_TOTAL: '75',
+      CURRENT_SCAN_OBJECT_LIMIT_PER_PAGE: '1024',
       CURRENT_SCAN_WRITE_BATCH_SIZE: '20',
     })
 
@@ -45,6 +47,7 @@ describe('resolveRuntimeConfig', () => {
       currentStateCollectionEnabled: true,
       currentScanPageLimitPerType: 25,
       currentScanRequestLimitTotal: 75,
+      currentScanObjectLimitPerPage: 1024,
       currentScanWriteBatchSize: 20,
     })
   })
@@ -108,5 +111,12 @@ describe('resolveRuntimeConfig', () => {
         CURRENT_SCAN_REQUEST_LIMIT_TOTAL: '2',
       }),
     ).toThrow('CURRENT_SCAN_REQUEST_LIMIT_TOTAL must allow at least three requests')
+
+    expect(() =>
+      resolveRuntimeConfig({
+        ...validEnvironment,
+        CURRENT_SCAN_OBJECT_LIMIT_PER_PAGE: '0',
+      }),
+    ).toThrow('CURRENT_SCAN_OBJECT_LIMIT_PER_PAGE must be a positive integer')
   })
 })
