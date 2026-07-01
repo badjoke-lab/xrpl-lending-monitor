@@ -8,29 +8,33 @@ Last updated: 2026-07-01.
 
 ## Active branch
 
-`collector/current-state-collection`
+`collector/bootstrap-clean`
 
 ## Current work
 
-Roadmap PR 6: validated-ledger current-state traversal, projection normalization, resumable snapshot staging, and Checkpoint A measurements.
+PR #7 implements roadmap PR 6B: resumable bootstrap execution, durable checkpoints, compressed object shards, verified manifests, D1 activation, and fail-closed cleanup planning. PR #6 is merged into `main`.
 
 Implemented on the active branch:
 
-- canonical binary decoding through the pinned XRPL codec;
-- one unfiltered ledger pass that classifies Vault, LoanBroker, and Loan locally;
-- a resumable `scanCurrentStateBatch` API with exact marker continuation;
-- bounded pages and object counts per invocation;
-- fixed ledger hash and ledger index validation;
-- repeated-marker, malformed-binary, duplicate-ID, and partial-run failure checks;
-- XRPL omitted-zero handling for current projections;
-- nullable terminal Loan due dates without invented timestamps;
-- rejection of Loans that retain payments without a next due date;
-- Loan flag decoding and relationship-integrity checks;
-- D1 snapshot metadata with `building`, `active`, `failed`, and `superseded` states;
-- D1 activation and cursor advancement only after a complete external manifest exists;
-- external shard and manifest contracts for current-state object storage;
-- machine-readable Devnet benchmark evidence;
-- unit tests for pagination, exact marker resume, terminal Loan normalization, projection normalization, and activation ordering.
+- bootstrap identity locked to snapshot, epoch, endpoint, ledger index, ledger hash, and object prefix;
+- persisted exact-marker checkpoints with global page sequencing;
+- bounded calls into `scanCurrentStateBatch`;
+- deterministic gzip JSON shard serialization;
+- durable shard write before checkpoint advancement;
+- SHA-256 digests for every shard and the manifest;
+- idempotent R2 object writes with size and digest checks;
+- D1 checkpoint migration and validated checkpoint adapter;
+- checkpoint identity and sequence validation;
+- terminal scan checkpointing before manifest publication;
+- manifest write and read-after-write digest verification;
+- digest-bound, idempotent D1 active-snapshot activation;
+- checkpoint retention when manifest verification fails;
+- checkpoint removal only after activation succeeds;
+- D1 and R2 bootstrap execution wiring;
+- cleanup rejection while a checkpoint exists or a snapshot is building or active;
+- prefix-scoped cleanup planning with protected active or rollback keys;
+- bounded deletion batches;
+- tests for activation, exact-marker resume, shard ordering, storage idempotency, manifest retry without rescanning, checkpoint persistence, gzip payloads, cleanup safety, and ledger mismatch rejection.
 
 ## Completed
 
@@ -40,60 +44,42 @@ Implemented on the active branch:
 - product, architecture, data, status, asset, collector, testing, resource, positioning, roadmap, and decision documents;
 - pinned TypeScript, React/Vite, Hono Worker, D1, test, and CI skeleton;
 - Mainnet-fail-closed runtime configuration;
-- read-only foundation UI and API boundary;
-- frozen-lockfile CI with lint, type-check, unit, migration, build, and browser checks.
+- read-only foundation UI and API boundary.
 
-### M1 network and epoch foundation
+### M1 network, epoch, and asset foundation
 
 - validated Devnet status collection;
 - amendment, ledger, epoch, reset-signal, and freshness handling;
 - D1-backed read-only `/api/status`;
-- scheduled Worker status refresh.
-
-### M1 asset normalization
-
-- canonical XRP, issuer-aware IOU, and MPT issuance identities;
+- scheduled Worker status refresh;
+- canonical XRP, issuer-aware IOU, and MPT identities;
 - exact decimal and scaled-integer arithmetic;
-- MPT metadata and flag resolution;
-- rate and Ripple epoch conversion;
-- API-safe serialization;
-- merged PR #5.
+- MPT metadata, rate, and Ripple epoch normalization.
 
-## Checkpoint A evidence
+### PR #6 — Validated current-state scanner
 
-### Bounded single-pass probe
-
-At validated Devnet ledger `3291171`, 25 binary pages produced:
-
-- 25 requests;
-- 51,200 decoded ledger objects;
-- 3,402 Lending-related objects;
-- 2,048 decoded objects per page;
-- 6.858 seconds elapsed in the recorded probe;
-- approximately 11.3 MB process-heap growth.
-
-### Complete filtered reference scans
-
-Separate measurement runs completed:
-
-- Vault: 789,254 objects over 11,481 requests, approximately 835 seconds;
-- LoanBroker: 522,784 objects over 11,481 requests, approximately 855 seconds.
-
-The measurements demonstrate that full bootstrap is a large historical-state operation rather than a normal scheduled status refresh.
+- one unfiltered binary ledger traversal with local Vault, LoanBroker, and Loan classification;
+- exact marker continuation and fixed validated-ledger checks;
+- bounded pages and objects per invocation;
+- zero-omitted terminal Loan normalization;
+- relationship checks and staged snapshot metadata;
+- Checkpoint A benchmark evidence and architecture decision;
+- final CI and live Devnet benchmark passed;
+- merged into `main` as `e15e465635ec28c26e527cad6b09bec3c231dc95`.
 
 ## Checkpoint A decision
 
-- **Scheduled Worker full bootstrap is not approved.** The scheduled Worker remains status-only until incremental collection is implemented.
-- **Three separate filtered traversals are not approved.** They repeat the same global ledger marker path.
-- **Full in-memory accumulation is not approved.** Current-state bootstrap must stream bounded pages.
-- **D1 is metadata and active-pointer storage only for bootstrap.** It does not hold every bootstrapped current object row.
-- **Current-state objects use compressed external shards plus a manifest.** Provisioning remains disabled until runner and storage integration are reviewed.
-- **Bootstrap runs through a resumable long-running runner.** The exact marker is persisted between bounded batches.
-- **Incremental updates follow bootstrap.** They maintain the active snapshot after the initial complete snapshot exists.
+- scheduled Worker full bootstrap is not approved;
+- repeated filtered global traversals are not approved;
+- full in-memory accumulation is not approved;
+- bootstrap uses a resumable long-running runner;
+- object data uses bounded compressed shards and a verified manifest;
+- D1 stores snapshot metadata, checkpoints, manifest digest, and the active pointer;
+- incremental updates follow the initial active snapshot.
 
 ## Current validation
 
-The final PR #6 branch has passed:
+PR #6 final head passed:
 
 - frozen-lockfile install;
 - lint;
@@ -101,66 +87,69 @@ The final PR #6 branch has passed:
 - unit tests;
 - local D1 migrations;
 - application build;
-- browser smoke tests;
-- controlled live Devnet binary traversal;
-- live Vault, LoanBroker, and Loan projection normalization.
+- browser smoke test;
+- live Devnet binary traversal and projection normalization.
 
-The live failure was caused by terminal Loan objects omitting zero-valued fields and removing `NextPaymentDueDate`. The projection now preserves these states as zero values plus a nullable due date while rejecting inconsistent non-terminal schedules.
+PR #7 implementation passed before branch cleanup:
 
-## Remaining PR 6 work
+- frozen-lockfile install;
+- lint;
+- type-check;
+- unit tests including cleanup safety;
+- all local D1 migrations including bootstrap checkpoints;
+- application build;
+- browser smoke test;
+- live Devnet binary traversal and projection normalization.
 
-- merge without enabling production bootstrap or provisioning object storage.
+The same 17-file PR #7 diff is being replayed on a clean branch based directly on the merged `main` tree. Final clean-branch CI is the remaining merge gate.
+
+## Remaining PR 6B work
+
+- complete clean-branch validation and replace the old stacked branch;
+- add a controlled preview bootstrap workflow with no committed credentials;
+- run an interruption-and-resume preview test;
+- select the failed-prefix retention window from preview evidence;
+- provision production storage only after preview evidence is accepted.
 
 ## Following work
 
-### PR 6B — Bootstrap runner and storage integration
-
-- long-running resumable execution;
-- exact marker checkpoint persistence;
-- bounded compressed shard generation;
-- shard upload and retry behavior;
-- complete manifest generation and verification;
-- cleanup of incomplete bootstrap attempts;
-- D1 active-pointer activation only after manifest verification;
-- one preview-environment full bootstrap and resume test.
-
-### PR 7 — Incremental validated-ledger collector
+### Incremental validated-ledger collector
 
 - cursor-based validated-ledger processing;
 - recognized Lending transaction filtering;
 - idempotent canonical event storage;
 - bounded catch-up and retry behavior;
 - raw-payload retention controls;
-- integration with the active bootstrap snapshot and later replacement snapshots.
+- integration with the active bootstrap snapshot.
 
 ## Known open questions
 
 | Question | Required evidence | Assigned point |
 |---|---|---|
-| Which long-running runner and object-store upload mechanism should execute bootstrap? | Resume, shard upload, manifest, and cleanup tests | PR 6B |
+| What retention window should apply to failed bootstrap prefixes? | Preview interruption, resume, cleanup, and rollback measurements | PR 6B |
 | What exact schedule-state boundary labels should be public? | Tests against due-time and grace-end boundaries | Status engine |
 | What is the confirmed successful overpayment transaction shape? | Isolated Devnet fixture and validated metadata | Loan lifecycle |
 | How should each deletion reason be classified? | Transaction and DeletedNode fixtures | Deleted-object archive |
 | Which MPT metadata fields remain consistently available across live responses? | Live issuance fixtures | Asset enrichment follow-up |
-| Which additional signals reliably confirm a Devnet reset? | Simulation and independent confirmation | Reset hardening |
 
 ## Active design decisions
 
 - all current objects are tied to one validated ledger and epoch;
 - markers are opaque and persisted unchanged;
+- a checkpoint advances only after its shard is durable;
 - partial traversal counts are never published as complete totals;
-- only a complete manifest can replace the previous active snapshot;
+- only a digest-verified complete manifest can activate a snapshot;
+- manifest retry does not rescan already durable final shards;
+- R2 writes are idempotent by key, byte count, and SHA-256 digest;
+- cleanup cannot run against resumable, building, or active snapshots;
+- cleanup is snapshot-prefix scoped and preserves protected manifest references;
 - the previous active snapshot survives failed replacement work;
-- public runtime configuration does not enable full bootstrap;
-- canonical identity and exact arithmetic from PR #5 apply to all projections;
-- terminal zero-valued Loan fields may be omitted by XRPL binary serialization;
-- `NextPaymentDueDate` is nullable only when the schedule has no remaining payment;
-- Mainnet and real production storage bindings remain disabled until approved.
+- production bootstrap and Mainnet remain disabled until approved.
 
 ## Current blockers
 
-None for completing and merging PR #6. Production bootstrap remains intentionally unprovisioned and is assigned to PR 6B.
+No code or design blocker. Final clean-branch CI and preview interruption/resume evidence remain before production provisioning.
 
 ## Operational rule
 
-Every future implementation PR updates this file with current work, completed work, validation, decisions, blockers, and the next active implementation step.
+Every implementation PR updates this file with current work, completed work, validation, decisions, blockers, and the next active implementation step.
