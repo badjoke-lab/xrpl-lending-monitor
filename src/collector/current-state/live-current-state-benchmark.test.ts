@@ -19,6 +19,11 @@ async function writeArtifact(value: unknown): Promise<void> {
   await writeFile(artifactPath, `${JSON.stringify(value, null, 2)}\n`, 'utf8')
 }
 
+function optionalErrorField(error: unknown, field: string): unknown {
+  if (typeof error !== 'object' || error === null || !(field in error)) return null
+  return (error as Record<string, unknown>)[field] ?? null
+}
+
 function errorArtifact(error: unknown): Record<string, unknown> {
   return {
     schema_version: 1,
@@ -29,14 +34,12 @@ function errorArtifact(error: unknown): Record<string, unknown> {
       name: error instanceof Error ? error.name : 'UnknownError',
       message: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack ?? null : null,
-      details:
-        typeof error === 'object' && error !== null && 'details' in error
-          ? (error as { details?: unknown }).details ?? null
-          : null,
-      failures:
-        typeof error === 'object' && error !== null && 'failures' in error
-          ? (error as { failures?: unknown }).failures ?? null
-          : null,
+      filter: optionalErrorField(error, 'filter'),
+      pages_completed: optionalErrorField(error, 'pagesCompleted'),
+      objects_read: optionalErrorField(error, 'objectsRead'),
+      last_marker: optionalErrorField(error, 'lastMarker'),
+      details: optionalErrorField(error, 'details'),
+      failures: optionalErrorField(error, 'failures'),
     },
   }
 }
@@ -56,6 +59,7 @@ describe.runIf(runLive)('live current-state benchmark', () => {
         ledgerIndex: snapshot.validatedLedger.index,
         pageLimitPerType: 200,
         requestLimitTotal: 600,
+        objectLimitPerPage: 2_048,
       })
       const heapAfter = process.memoryUsage().heapUsed
 
