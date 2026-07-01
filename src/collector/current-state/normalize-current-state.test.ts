@@ -11,6 +11,7 @@ function base(type: 'Vault' | 'LoanBroker' | 'Loan', index: string) {
   return {
     LedgerEntryType: type,
     index,
+    BinaryHex: '00',
     Flags: 0,
     PreviousTxnID: 'B'.repeat(64),
     PreviousTxnLgrSeq: 100,
@@ -92,6 +93,7 @@ function scan(options: {
     objects: 1,
     elapsedMs: 3,
     requestedObjectsPerPage: 2048,
+    responseMode: 'binary' as const,
   }
 
   return {
