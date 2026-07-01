@@ -1,0 +1,48 @@
+name: Incremental ledger read
+
+on:
+  pull_request:
+    paths:
+      - "src/collector/incremental/**"
+      - ".github/workflows/incremental-ledger-read.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live-devnet-ledger:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Read one validated Devnet ledger
+        env:
+          RUN_LIVE_INCREMENTAL_LEDGER_READ: "true"
+          XRPL_DEVNET_RPC_URL: "https://s.devnet.rippletest.net:51234/"
+        run: pnpm exec vitest run src/collector/incremental/live-validated-ledger-read.test.ts --reporter=verbose
+
+      - name: Upload ledger evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: incremental-ledger-read
+          path: artifacts/incremental-ledger-read.json
+          if-no-files-found: warn
+          retention-days: 14
