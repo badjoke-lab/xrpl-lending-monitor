@@ -36,3 +36,16 @@ CREATE TABLE protocol_events (
 
 CREATE UNIQUE INDEX protocol_events_ledger_order
   ON protocol_events (network, epoch_id, ledger_index, event_index);
+
+CREATE TABLE incremental_commit_guards (
+  commit_token TEXT PRIMARY KEY,
+  network TEXT NOT NULL CHECK (network IN ('devnet', 'mainnet')),
+  epoch_id TEXT NOT NULL,
+  expected_ledger INTEGER NOT NULL CHECK (expected_ledger >= 0),
+  expected_hash TEXT NOT NULL,
+  observed_ledger INTEGER NOT NULL CHECK (observed_ledger >= 0),
+  observed_hash TEXT NOT NULL,
+  checked_at TEXT NOT NULL,
+  CHECK (observed_ledger = expected_ledger),
+  CHECK (observed_hash = expected_hash)
+);

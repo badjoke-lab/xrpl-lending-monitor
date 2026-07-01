@@ -8,6 +8,23 @@ interface CursorRow {
 
 export type IncrementalCommitStatus = 'empty' | 'committed' | 'already_committed'
 
+function commitToken(options: {
+  epochId: string
+  expectedPreviousLedger: number
+  expectedPreviousHash: string
+  finalLedgerIndex: number
+  finalLedgerHash: string
+}): string {
+  return [
+    'incremental',
+    options.epochId,
+    options.expectedPreviousLedger,
+    options.expectedPreviousHash,
+    options.finalLedgerIndex,
+    options.finalLedgerHash,
+  ].join(':')
+}
+
 function assertScanChain(options: {
   scan: IncrementalScanResult
   expectedPreviousLedger: number
@@ -76,7 +93,44 @@ export async function commitIncrementalScan(options: {
     throw new Error('Incremental commit cursor changed before persistence')
   }
 
-  const statements: D1PreparedStatement[] = []
+  const token = commitToken({
+    epochId: options.epochId,
+    expectedPreviousLedger: options.expectedPreviousLedger,
+    expectedPreviousHash: options.expectedPreviousHash,
+    finalLedgerIndex: finalLedger.ledgerIndex,
+    finalLedgerHash: finalLedger.ledgerHash,
+  })
+  const statements: D1PreparedStatement[] = [
+    options.db
+      .prepare(
+        `INSERT INTO incremental_commit_guards (
+           commit_token, network, epoch_id, expected_ledger, expected_hash,
+           observed_ledger, observed_hash, checked_at
+         ) VALUES (
+           ?1, 'devnet', ?2, ?3, ?4,
+           (
+             SELECT last_processed_ledger
+             FROM sync_state
+             WHERE network = 'devnet'
+               AND epoch_id = ?2
+           ),
+           (
+             SELECT last_processed_hash
+             FROM sync_state
+             WHERE network = 'devnet'
+               AND epoch_id = ?2
+           ),
+           ?5
+         )`,
+      )
+      .bind(
+        token,
+        options.epochId,
+        options.expectedPreviousLedger,
+        options.expectedPreviousHash,
+        options.processedAt,
+      ),
+  ]
   for (const ledger of options.scan.ledgers) {
     statements.push(
       options.db
@@ -157,6 +211,12 @@ export async function commitIncrementalScan(options: {
         options.expectedPreviousLedger,
         options.expectedPreviousHash,
       ),
+  )
+
+  statements.push(
+    options.db
+      .prepare('DELETE FROM incremental_commit_guards WHERE commit_token = ?1')
+      .bind(token),
   )
 
   await options.db.batch(statements)
