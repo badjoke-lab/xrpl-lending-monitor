@@ -1,0 +1,67 @@
+## Summary
+
+Describe what changes and why.
+
+## Roadmap alignment
+
+- Milestone:
+- Planned PR slot:
+- Relevant specification documents read:
+  - [ ] `docs/product-spec.md`
+  - [ ] `docs/development-roadmap.md`
+  - [ ] `docs/implementation-status.md`
+  - [ ] Relevant domain documents
+
+## Scope
+
+- In scope:
+- Explicitly out of scope:
+
+## Data and product integrity
+
+- [ ] Network and epoch boundaries are preserved.
+- [ ] XRP, IOU, and MPT identities remain distinct.
+- [ ] On-ledger and schedule-derived state are not conflated.
+- [ ] Derived values expose documented formulas and provenance.
+- [ ] Deleted-object behavior is preserved where relevant.
+- [ ] No wallet, signing, seed, or transaction-submission behavior was added.
+- [ ] No invented risk score, LTV, collateral value, borrower identity, or cross-asset TVL was added.
+
+## Free-tier impact
+
+- Worker requests/CPU impact:
+- D1 rows read/written impact:
+- Storage impact:
+- Cache or batching changes:
+
+## Tests
+
+- [ ] Lint
+- [ ] Type-check
+- [ ] Unit tests
+- [ ] Integration tests
+- [ ] D1 migration checks
+- [ ] Build
+- [ ] Browser tests, when applicable
+- [ ] Live Devnet read smoke test, when applicable
+
+Evidence:
+
+## Documentation updates
+
+- [ ] `docs/implementation-status.md` updated.
+- [ ] `docs/development-roadmap.md` updated if schedule, status, dependency, or scope changed.
+- [ ] Relevant specification updated if behavior or data changed.
+- [ ] `docs/decision-log.md` updated for a material decision.
+- [ ] `docs/free-tier-budget.md` updated for resource-impact changes.
+
+## Risks and rollback
+
+- Risks:
+- Rollback plan:
+
+## Completion check
+
+- [ ] Implementation and documentation agree.
+- [ ] No unresolved assumption is hidden in code.
+- [ ] The next active work is recorded in `docs/implementation-status.md`.
