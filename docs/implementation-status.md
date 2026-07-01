@@ -6,30 +6,6 @@ Last updated: 2026-07-01.
 
 **M1 — Current-state collector**
 
-## Active branch
-
-`collector/asset-normalization`
-
-## Current work
-
-Roadmap PR 5: canonical XRP, IOU, and MPT asset normalization.
-
-Implemented on the active branch:
-
-- canonical XRP key and six-decimal drop display;
-- issuer-aware IOU keys;
-- 160-bit hexadecimal currency normalization;
-- MPT issuance-ID normalization;
-- exact decimal parsing, exponent normalization, comparison, addition, and subtraction;
-- exact XRP and MPT scaled-integer handling;
-- XRPL Amount and asset-descriptor normalization;
-- MPT AssetScale, issuer, transfer-fee, metadata, and flag resolution;
-- fallback behavior for missing or malformed MPT metadata;
-- tenths-of-a-basis-point conversion;
-- Ripple epoch conversion;
-- API-safe asset and amount serialization;
-- unit tests for identity separation, arithmetic, metadata, rates, serialization, and timestamps.
-
 ## Completed
 
 ### M0 — Foundation and specification lock
@@ -54,21 +30,39 @@ Implemented on the active branch:
 - explicit amendment, freshness, cursor, error, and reset fields;
 - unit tests and local D1 migration validation.
 
+### M1 asset normalization
+
+- canonical XRP key and six-decimal drop display;
+- issuer-aware IOU keys;
+- 160-bit hexadecimal currency normalization;
+- MPT issuance-ID normalization;
+- exact decimal parsing, exponent normalization, comparison, addition, and subtraction;
+- exact XRP and MPT scaled-integer handling;
+- XRPL Amount and asset-descriptor normalization;
+- MPT AssetScale, issuer, transfer-fee, metadata, and flag resolution;
+- fallback behavior for missing or malformed MPT metadata;
+- tenths-of-a-basis-point conversion;
+- Ripple epoch conversion;
+- API-safe asset and amount serialization;
+- unit tests for identity separation, arithmetic, metadata, rates, serialization, and timestamps.
+
 ## Current validation
 
-Pending clean branch CI for:
+PR #5 clean branch validation passed:
 
-- frozen-lockfile install;
-- lint;
-- type-check;
-- unit tests;
-- local D1 migration apply;
-- build;
-- browser smoke test.
+- frozen-lockfile install: passed;
+- lint: passed;
+- type-check: passed;
+- unit tests: passed;
+- local D1 migration apply: passed;
+- build: passed;
+- browser smoke test: passed.
 
 ## Next work
 
 ### Current object scanner and collector benchmark
+
+Planned branch: `collector/current-object-scanner`.
 
 - complete marker traversal for Vault, LoanBroker, and Loan;
 - current-state projections and relationship checks;
