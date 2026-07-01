@@ -23,12 +23,14 @@ Implemented on the active branch:
 - fixed ledger hash and ledger index validation;
 - repeated-marker, malformed-binary, duplicate-ID, and partial-run failure checks;
 - XRPL omitted-zero handling for current projections;
+- nullable terminal Loan due dates without invented timestamps;
+- rejection of Loans that retain payments without a next due date;
 - Loan flag decoding and relationship-integrity checks;
 - D1 snapshot metadata with `building`, `active`, `failed`, and `superseded` states;
 - D1 activation and cursor advancement only after a complete external manifest exists;
 - external shard and manifest contracts for current-state object storage;
 - machine-readable Devnet benchmark evidence;
-- unit tests for pagination, exact marker resume, projection normalization, and activation ordering.
+- unit tests for pagination, exact marker resume, terminal Loan normalization, projection normalization, and activation ordering.
 
 ## Completed
 
@@ -81,17 +83,17 @@ The measurements demonstrate that full bootstrap is a large historical-state ope
 
 ## Checkpoint A decision
 
-- **Scheduled Worker full bootstrap is not approved.** The scheduled Worker remains status-only.
+- **Scheduled Worker full bootstrap is not approved.** The scheduled Worker remains status-only until incremental collection is implemented.
 - **Three separate filtered traversals are not approved.** They repeat the same global ledger marker path.
 - **Full in-memory accumulation is not approved.** Current-state bootstrap must stream bounded pages.
-- **D1 is metadata and active-pointer storage only.** It does not hold every current object row.
-- **Current-state objects use compressed external shards plus a manifest.** Provisioning remains disabled until the runner and storage integration are reviewed.
+- **D1 is metadata and active-pointer storage only for bootstrap.** It does not hold every bootstrapped current object row.
+- **Current-state objects use compressed external shards plus a manifest.** Provisioning remains disabled until runner and storage integration are reviewed.
 - **Bootstrap runs through a resumable long-running runner.** The exact marker is persisted between bounded batches.
-- **Ongoing updates move to PR 7.** The incremental validated-ledger collector becomes the normal maintenance path after bootstrap.
+- **Incremental updates follow bootstrap.** They maintain the active snapshot after the initial complete snapshot exists.
 
 ## Current validation
 
-The latest stable branch state has passed:
+The corrected PR #6 branch has passed:
 
 - frozen-lockfile install;
 - lint;
@@ -100,19 +102,29 @@ The latest stable branch state has passed:
 - local D1 migrations;
 - application build;
 - browser smoke tests;
-- controlled live Devnet binary traversal.
+- controlled live Devnet binary traversal;
+- live Vault, LoanBroker, and Loan projection normalization.
 
-The current live projection check is validating omitted-zero handling across sampled Vault, LoanBroker, and Loan objects.
+The live failure was caused by terminal Loan objects omitting zero-valued fields and removing `NextPaymentDueDate`. The projection now preserves these states as zero values plus a nullable due date while rejecting inconsistent non-terminal schedules.
 
 ## Remaining PR 6 work
 
-- finish the live projection-field check;
-- correct any remaining codec-to-projection field assumptions;
-- synchronize architecture, data-model, collector, resource, and decision documents;
-- run final CI and bounded live benchmark;
+- synchronize remaining architecture, data-model, collector, resource, and roadmap wording;
+- run final CI after documentation synchronization;
 - merge without enabling production bootstrap or provisioning object storage.
 
 ## Following work
+
+### PR 6B — Bootstrap runner and storage integration
+
+- long-running resumable execution;
+- exact marker checkpoint persistence;
+- bounded compressed shard generation;
+- shard upload and retry behavior;
+- complete manifest generation and verification;
+- cleanup of incomplete bootstrap attempts;
+- D1 active-pointer activation only after manifest verification;
+- one preview-environment full bootstrap and resume test.
 
 ### PR 7 — Incremental validated-ledger collector
 
@@ -121,13 +133,13 @@ The current live projection check is validating omitted-zero handling across sam
 - idempotent canonical event storage;
 - bounded catch-up and retry behavior;
 - raw-payload retention controls;
-- integration with the active snapshot and later replacement snapshots.
+- integration with the active bootstrap snapshot and later replacement snapshots.
 
 ## Known open questions
 
 | Question | Required evidence | Assigned point |
 |---|---|---|
-| Which external runner and object-store upload mechanism should execute bootstrap? | Resume, shard upload, manifest, and cleanup tests | Bootstrap runner follow-up |
+| Which long-running runner and object-store upload mechanism should execute bootstrap? | Resume, shard upload, manifest, and cleanup tests | PR 6B |
 | What exact schedule-state boundary labels should be public? | Tests against due-time and grace-end boundaries | Status engine |
 | What is the confirmed successful overpayment transaction shape? | Isolated Devnet fixture and validated metadata | Loan lifecycle |
 | How should each deletion reason be classified? | Transaction and DeletedNode fixtures | Deleted-object archive |
@@ -143,11 +155,13 @@ The current live projection check is validating omitted-zero handling across sam
 - the previous active snapshot survives failed replacement work;
 - public runtime configuration does not enable full bootstrap;
 - canonical identity and exact arithmetic from PR #5 apply to all projections;
+- terminal zero-valued Loan fields may be omitted by XRPL binary serialization;
+- `NextPaymentDueDate` is nullable only when the schedule has no remaining payment;
 - Mainnet and real production storage bindings remain disabled until approved.
 
 ## Current blockers
 
-None for completing PR 6. Production bootstrap remains intentionally unprovisioned.
+None for completing and merging PR #6. Production bootstrap remains intentionally unprovisioned and is assigned to PR 6B.
 
 ## Operational rule
 
