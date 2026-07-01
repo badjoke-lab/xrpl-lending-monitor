@@ -86,6 +86,14 @@ function scan(options: {
   brokers?: ScannedLedgerObject[]
   loans?: ScannedLedgerObject[]
 } = {}): CurrentStateScanResult {
+  const perType = {
+    pages: 1,
+    requests: 1,
+    objects: 1,
+    elapsedMs: 3,
+    requestedObjectsPerPage: 2048,
+  }
+
   return {
     endpoint: 'https://devnet.example',
     ledgerHash: LEDGER_HASH,
@@ -99,9 +107,9 @@ function scan(options: {
       objects: 3,
       elapsedMs: 10,
       byType: {
-        vault: { pages: 1, requests: 1, objects: 1, elapsedMs: 3 },
-        loan_broker: { pages: 1, requests: 1, objects: 1, elapsedMs: 3 },
-        loan: { pages: 1, requests: 1, objects: 1, elapsedMs: 3 },
+        vault: perType,
+        loan_broker: perType,
+        loan: perType,
       },
     },
   }
