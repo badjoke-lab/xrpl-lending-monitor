@@ -42,7 +42,7 @@ Do not silently diverge from the specifications. Change the specification first 
 - Deleted Vault, LoanBroker, and Loan objects must remain searchable through indexed history.
 - Derived values must expose their formula and provenance.
 - Do not invent LTV, collateral value, credit score, borrower identity, protocol risk score, or investment recommendations.
-- All collection must be restartable, idempotent, marker-aware, and bounded for Cloudflare free-tier operation.
+- All collection must be restartable, idempotent, marker-aware, and bounded by the documented runtime and storage envelope.
 - Mainnet support must remain disabled until the amendment state and starting ledger are explicitly approved in the specifications.
 
 ## Documentation gates
@@ -53,8 +53,14 @@ A PR is incomplete when any of the following is true:
 - roadmap status is stale;
 - a new table, field, state, API, or page is undocumented;
 - a calculation lacks a formula and provenance category;
-- a free-tier cost implication is not recorded;
+- a material resource-impact implication is not recorded;
 - a new unresolved assumption is not listed in `docs/implementation-status.md`.
+
+## Public-information boundary
+
+Repository content, issues, pull requests, commit messages, release notes, and generated artifacts must not contain private operational strategy, personal constraints, unpublished continuation or reduction criteria, or unnecessary cross-project internal context.
+
+Technical and product decisions must be explained through product integrity, security, maintainability, measurable resource limits, or operational reliability. Secrets, credentials, private endpoints, and unredacted personal data must never be committed.
 
 ## Current phase
 
