@@ -4,16 +4,15 @@ import { describe, expect, it } from 'vitest'
 
 import { readNetworkSnapshot } from '../network/read-network-snapshot'
 import {
-  LedgerObjectScanError,
-  scanLedgerObjects,
-  type CurrentObjectFilter,
-} from './scan-ledger-objects'
+  CurrentStateScanError,
+  scanCurrentState,
+} from './scan-current-state'
 
 const runLive = process.env.RUN_LIVE_CURRENT_STATE_BENCHMARK === 'true'
 const endpoint =
   process.env.XRPL_DEVNET_RPC_URL ?? 'https://s.devnet.rippletest.net:51234/'
 const artifactPath = 'artifacts/current-state-live-benchmark.json'
-const probePagesPerType = 25
+const probePages = 25
 const requestedObjectsPerPage = 2_048
 
 async function writeArtifact(value: unknown): Promise<void> {
@@ -21,96 +20,75 @@ async function writeArtifact(value: unknown): Promise<void> {
   await writeFile(artifactPath, `${JSON.stringify(value, null, 2)}\n`, 'utf8')
 }
 
-interface ProbeResult {
-  filter: CurrentObjectFilter
-  complete: boolean
-  pages: number
-  requests: number
-  objects: number
-  elapsed_ms: number
-  average_objects_per_page: number
-  requested_objects_per_page: number
-  last_marker: unknown
-}
-
-async function probeType(options: {
-  filter: CurrentObjectFilter
-  endpoint: string
-  ledgerHash: string
-  ledgerIndex: number
-}): Promise<ProbeResult> {
-  const startedAt = Date.now()
-
-  try {
-    const result = await scanLedgerObjects({
-      endpoint: options.endpoint,
-      timeoutMs: 15_000,
-      ledgerHash: options.ledgerHash,
-      ledgerIndex: options.ledgerIndex,
-      filter: options.filter,
-      pageLimit: probePagesPerType,
-      requestLimit: probePagesPerType,
-      objectLimitPerPage: requestedObjectsPerPage,
-    })
-
-    return {
-      filter: options.filter,
-      complete: true,
-      pages: result.metrics.pages,
-      requests: result.metrics.requests,
-      objects: result.metrics.objects,
-      elapsed_ms: result.metrics.elapsedMs,
-      average_objects_per_page:
-        result.metrics.pages === 0 ? 0 : result.metrics.objects / result.metrics.pages,
-      requested_objects_per_page: result.metrics.requestedObjectsPerPage,
-      last_marker: null,
-    }
-  } catch (error) {
-    if (
-      !(error instanceof LedgerObjectScanError) ||
-      !error.message.includes(`page limit ${probePagesPerType} reached before completion`)
-    ) {
-      throw error
-    }
-
-    return {
-      filter: options.filter,
-      complete: false,
-      pages: error.pagesCompleted,
-      requests: error.pagesCompleted,
-      objects: error.objectsRead,
-      elapsed_ms: Date.now() - startedAt,
-      average_objects_per_page:
-        error.pagesCompleted === 0 ? 0 : error.objectsRead / error.pagesCompleted,
-      requested_objects_per_page: requestedObjectsPerPage,
-      last_marker: error.lastMarker,
-    }
-  }
-}
-
 describe.runIf(runLive)('live current-state benchmark', () => {
-  it('records bounded binary traversal evidence for every current object type', async () => {
+  it('records bounded single-pass binary traversal evidence', async () => {
     const snapshot = await readNetworkSnapshot({
       endpoints: [endpoint],
       timeoutMs: 15_000,
     })
     const heapBefore = process.memoryUsage().heapUsed
-    const probes: ProbeResult[] = []
+    const startedAt = Date.now()
 
-    for (const filter of ['vault', 'loan_broker', 'loan'] as const) {
-      probes.push(
-        await probeType({
-          filter,
-          endpoint: snapshot.endpoint,
-          ledgerHash: snapshot.validatedLedger.hash,
-          ledgerIndex: snapshot.validatedLedger.index,
-        }),
-      )
+    let result:
+      | {
+          complete: true
+          pages: number
+          requests: number
+          decoded_objects: number
+          relevant_objects: number
+          by_type: Record<string, { objects: number }>
+          last_marker: null
+        }
+      | {
+          complete: false
+          pages: number
+          requests: number
+          decoded_objects: number
+          relevant_objects: number
+          by_type: null
+          last_marker: unknown
+        }
+
+    try {
+      const scan = await scanCurrentState({
+        endpoint: snapshot.endpoint,
+        timeoutMs: 15_000,
+        ledgerHash: snapshot.validatedLedger.hash,
+        ledgerIndex: snapshot.validatedLedger.index,
+        pageLimitPerType: probePages,
+        requestLimitTotal: probePages,
+        objectLimitPerPage: requestedObjectsPerPage,
+      })
+      result = {
+        complete: true,
+        pages: scan.metrics.pages,
+        requests: scan.metrics.requests,
+        decoded_objects: scan.metrics.decodedObjects,
+        relevant_objects: scan.metrics.objects,
+        by_type: scan.metrics.byType,
+        last_marker: null,
+      }
+    } catch (error) {
+      if (
+        !(error instanceof CurrentStateScanError) ||
+        !error.message.includes(`page limit ${probePages} reached before completion`)
+      ) {
+        throw error
+      }
+      result = {
+        complete: false,
+        pages: error.pagesCompleted,
+        requests: error.requestsCompleted,
+        decoded_objects: error.decodedObjects,
+        relevant_objects: error.relevantObjects,
+        by_type: null,
+        last_marker: error.lastMarker,
+      }
     }
 
     const heapAfter = process.memoryUsage().heapUsed
     const artifact = {
-      schema_version: 2,
+      schema_version: 3,
       observed_at: snapshot.observedAt,
       network: snapshot.network,
       endpoint: snapshot.endpoint,
@@ -125,19 +103,26 @@ describe.runIf(runLive)('live current-state benchmark', () => {
       },
       probe_configuration: {
         response_mode: 'binary',
-        pages_per_type: probePagesPerType,
+        traversal: 'single_pass_unfiltered',
+        pages: probePages,
         requested_objects_per_page: requestedObjectsPerPage,
       },
-      probes,
+      result,
+      elapsed_ms: Date.now() - startedAt,
+      average_decoded_objects_per_page:
+        result.pages === 0 ? 0 : result.decoded_objects / result.pages,
+      relevant_ratio:
+        result.decoded_objects === 0
+          ? 0
+          : result.relevant_objects / result.decoded_objects,
       process_heap_delta_bytes: heapAfter - heapBefore,
-      all_types_observed: probes.every((probe) => probe.pages > 0),
       full_scan_attempted: false,
     }
 
     await writeArtifact(artifact)
     console.info(`CURRENT_STATE_BENCHMARK=${JSON.stringify(artifact)}`)
-    expect(probes).toHaveLength(3)
-    expect(probes.every((probe) => probe.pages > 0)).toBe(true)
-    expect(probes.every((probe) => probe.objects >= 0)).toBe(true)
+    expect(result.pages).toBeGreaterThan(0)
+    expect(result.decoded_objects).toBeGreaterThan(0)
+    expect(result.relevant_objects).toBeGreaterThanOrEqual(0)
   }, 180_000)
 })
