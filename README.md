@@ -6,9 +6,11 @@ The project covers the normal monitoring surface expected from a lending dashboa
 
 ## Current status
 
-Milestone 0: foundation and specification lock.
+Milestone 1: current-state collector.
 
-No collector, database, public API, or production UI has been implemented yet. The current work establishes the repository source of truth before implementation begins.
+The Devnet network and epoch foundation, canonical XRP/IOU/MPT normalization, and resumable current-state scanner are implemented. The scanner reads one validated ledger, classifies Vault, LoanBroker, and Loan objects from a single binary traversal, and stages activation behind a complete manifest. Production bootstrap, object-storage provisioning, and Mainnet remain disabled pending the dedicated bootstrap integration and release gates.
+
+See [`docs/implementation-status.md`](docs/implementation-status.md) for the exact active branch, validation state, and next work.
 
 ## Documentation
 
