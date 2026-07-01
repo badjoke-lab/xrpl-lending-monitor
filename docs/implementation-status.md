@@ -17,7 +17,7 @@ GitHub pull request #10, `Add validated ledger history foundation`:
 - previous verified head on 2026-07-01: `a5c52b303e57f070e8ea8872e3a96d0143548ac1`;
 - current local work includes `origin/main` through PR #11 squash merge `52d32424393bfa5c99f7279b99f84104a73dab79`;
 - current local validation passed after adding the D1 commit guard and rollback tests;
-- final pushed head for this session: pending.
+- final local head before push: `349fb1c` (`fix: guard incremental cursor commits`).
 
 Always inspect the current pull-request head and checks before resuming; the values above are a recorded checkpoint, not permission to ignore newer GitHub state.
 
