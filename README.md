@@ -21,13 +21,13 @@ Key documents:
 - [`docs/data-model.md`](docs/data-model.md)
 - [`docs/development-roadmap.md`](docs/development-roadmap.md)
 - [`docs/implementation-status.md`](docs/implementation-status.md)
-- [`docs/free-tier-budget.md`](docs/free-tier-budget.md)
+- [`docs/resource-envelope.md`](docs/resource-envelope.md)
 
 ## Working rule
 
 All implementation must follow the repository specifications and development roadmap. Contributors and coding agents must read [`AGENTS.md`](AGENTS.md) before making changes.
 
-Every implementation PR must update `docs/implementation-status.md` and must update the roadmap, specifications, budget, or decision log when the change affects them.
+Every implementation PR must update `docs/implementation-status.md` and must update the roadmap, specifications, resource envelope, or decision log when the change affects them.
 
 ## Initial product boundary
 
