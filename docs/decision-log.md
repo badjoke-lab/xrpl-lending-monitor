@@ -124,3 +124,42 @@ PR 6 must benchmark production-shaped collection. A free GitHub Actions collecto
 ### Consequences
 
 Conversation-only decisions and obsolete mockups cannot silently control implementation.
+
+## D-010 — Pinned modern TypeScript toolchain
+
+- Date: 2026-07-01
+- Status: accepted
+
+### Context
+
+The project needs one reproducible toolchain for the React interface, Cloudflare Worker, tests, and CI before collector implementation starts.
+
+### Decision
+
+Use Node.js 24 LTS and pnpm 11 with exact package versions. The initial stack is TypeScript, React, Vite, Hono, Wrangler, Vitest, Playwright, and ESLint.
+
+### Consequences
+
+- runtime and package-manager versions are checked into the repository;
+- dependency versions are exact rather than ranged;
+- CI must prove that the selected versions interoperate before merge;
+- a generated pnpm lockfile must be committed after dependency resolution succeeds.
+
+## D-011 — Fail-closed deployment boundary
+
+- Date: 2026-07-01
+- Status: accepted
+
+### Context
+
+Mainnet support is not approved, and no production D1 database has been provisioned.
+
+### Decision
+
+Runtime configuration accepts only Devnet, requires `MAINNET_ENABLED=false`, and rejects insecure RPC endpoints. The checked-in D1 database ID remains a zero-value placeholder until explicit provisioning.
+
+### Consequences
+
+- accidental Mainnet activation fails at runtime;
+- the repository cannot silently target a real production D1 database;
+- provisioning and deployment require a later documented approval and configuration change.
