@@ -86,6 +86,7 @@ function parseCheckpoint(json: string): BootstrapCheckpoint {
   } catch (error) {
     throw new Error(
       `Bootstrap checkpoint JSON is invalid: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
     )
   }
   if (!isCheckpoint(value)) {
