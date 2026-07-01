@@ -31,13 +31,46 @@ Canonical amount arithmetic uses exact integer coefficients, explicit decimal sc
 
 ### Decision
 
-Vault, LoanBroker, and Loan scans are fixed to one validated ledger and written to a `building` snapshot. The snapshot becomes `active` only after every marker page, object normalization, relationship check, and D1 write succeeds.
+Vault, LoanBroker, and Loan scans are fixed to one validated ledger and written to a `building` snapshot. The snapshot becomes `active` only after every marker page, object normalization, relationship check, and persistence step succeeds.
 
 ### Consequences
 
 - opaque markers are preserved exactly;
 - partial scans are not exposed as current totals;
 - a failed replacement does not overwrite the previous active snapshot;
-- cursor advancement occurs only in the final activation batch;
-- current-state collection remains disabled by default until Checkpoint A approves runtime and cadence;
-- page, request, object, write-batch, and elapsed-time measurements are recorded for the runtime decision.
+- cursor advancement occurs only after a complete manifest exists;
+- current-state collection remains disabled by default until runtime and storage integration pass their checks;
+- page, request, object, write-batch, and elapsed-time measurements are recorded.
+
+## D-016 — Terminal Loan zero fields
+
+- Date: 2026-07-01
+- Status: accepted
+
+### Decision
+
+Numeric Loan fields omitted by canonical XRPL binary decoding are treated as zero where the protocol uses zero defaults. `NextPaymentDueDate` is nullable because it is removed when a Loan reaches a terminal paid or defaulted state. A Loan with payments remaining but no next due date is rejected.
+
+### Consequences
+
+- paid and defaulted Loan objects remain visible;
+- missing terminal zero fields do not fail collection;
+- no timestamp is invented;
+- inconsistent active schedule state still fails closed;
+- raw decoded fields remain available for audit.
+
+## D-017 — Resumable bootstrap runner
+
+- Date: 2026-07-01
+- Status: accepted
+
+### Decision
+
+The full current-state bootstrap uses a resumable long-running runner and one unfiltered binary ledger traversal. It writes bounded compressed shards and publishes a verified manifest. The scheduled Worker handles bounded status and incremental ledger processing after bootstrap.
+
+### Consequences
+
+- repeated filtered traversals are rejected;
+- full in-memory accumulation is rejected;
+- production bootstrap remains disabled until resume, upload, manifest, cleanup, and activation tests pass;
+- an initial active snapshot is required before incremental maintenance begins.
