@@ -8,33 +8,22 @@ Last updated: 2026-07-01.
 
 ## Active branch
 
-`collector/bootstrap-clean`
+`collector/bootstrap-resume-preview`
 
 ## Current work
 
-PR #7 implements roadmap PR 6B: resumable bootstrap execution, durable checkpoints, compressed object shards, verified manifests, D1 activation, and fail-closed cleanup planning. PR #6 is merged into `main`.
+Controlled live Devnet interruption-and-resume evidence for the merged bootstrap runner and storage integration.
 
-Implemented on the active branch:
+Implemented and validated on the active branch:
 
-- bootstrap identity locked to snapshot, epoch, endpoint, ledger index, ledger hash, and object prefix;
-- persisted exact-marker checkpoints with global page sequencing;
-- bounded calls into `scanCurrentStateBatch`;
-- deterministic gzip JSON shard serialization;
-- durable shard write before checkpoint advancement;
-- SHA-256 digests for every shard and the manifest;
-- idempotent R2 object writes with size and digest checks;
-- D1 checkpoint migration and validated checkpoint adapter;
-- checkpoint identity and sequence validation;
-- terminal scan checkpointing before manifest publication;
-- manifest write and read-after-write digest verification;
-- digest-bound, idempotent D1 active-snapshot activation;
-- checkpoint retention when manifest verification fails;
-- checkpoint removal only after activation succeeds;
-- D1 and R2 bootstrap execution wiring;
-- cleanup rejection while a checkpoint exists or a snapshot is building or active;
-- prefix-scoped cleanup planning with protected active or rollback keys;
-- bounded deletion batches;
-- tests for activation, exact-marker resume, shard ordering, storage idempotency, manifest retry without rescanning, checkpoint persistence, gzip payloads, cleanup safety, and ledger mismatch rejection.
+- a two-batch live Devnet preview fixed to one validated ledger;
+- first execution stops after one binary ledger page and persists the exact continuation marker;
+- second execution resumes through the same bootstrap runner and advances to global shard page 2;
+- deterministic gzip shard generation in both batches;
+- evidence that lifecycle initialization occurs only once;
+- evidence that a partial traversal does not attempt snapshot activation;
+- machine-readable preview evidence uploaded by GitHub Actions;
+- pull-request and manual `workflow_dispatch` execution without committed credentials.
 
 ## Completed
 
@@ -46,26 +35,30 @@ Implemented on the active branch:
 - Mainnet-fail-closed runtime configuration;
 - read-only foundation UI and API boundary.
 
-### M1 network, epoch, and asset foundation
+### M1 network, epoch, asset, and current-state scanner
 
 - validated Devnet status collection;
 - amendment, ledger, epoch, reset-signal, and freshness handling;
 - D1-backed read-only `/api/status`;
-- scheduled Worker status refresh;
-- canonical XRP, issuer-aware IOU, and MPT identities;
-- exact decimal and scaled-integer arithmetic;
-- MPT metadata, rate, and Ripple epoch normalization.
+- canonical XRP, issuer-aware IOU, and MPT normalization;
+- exact arithmetic and time conversion;
+- one unfiltered binary current-state traversal;
+- exact marker continuation;
+- terminal Loan zero-omission handling;
+- Checkpoint A benchmark and runtime decision;
+- PR #6 merged as `e15e465635ec28c26e527cad6b09bec3c231dc95`.
 
-### PR #6 — Validated current-state scanner
+### Bootstrap runner and storage integration
 
-- one unfiltered binary ledger traversal with local Vault, LoanBroker, and Loan classification;
-- exact marker continuation and fixed validated-ledger checks;
-- bounded pages and objects per invocation;
-- zero-omitted terminal Loan normalization;
-- relationship checks and staged snapshot metadata;
-- Checkpoint A benchmark evidence and architecture decision;
-- final CI and live Devnet benchmark passed;
-- merged into `main` as `e15e465635ec28c26e527cad6b09bec3c231dc95`.
+- D1 bootstrap checkpoints;
+- deterministic compressed shards;
+- SHA-256 shard and manifest digests;
+- idempotent R2 writes;
+- verified manifest activation;
+- D1 active pointer update;
+- fail-closed cleanup planning;
+- full CI and live projection benchmark passed;
+- PR #8 merged as `3695ef37d2fdd8ab9ddfe04f7989b1c6f2533fe0`.
 
 ## Checkpoint A decision
 
@@ -79,36 +72,24 @@ Implemented on the active branch:
 
 ## Current validation
 
-PR #6 final head passed:
+Merged main has passed frozen install, lint, type-check, unit tests, all local D1 migrations, build, browser smoke, and live current-state projection checks.
 
-- frozen-lockfile install;
-- lint;
-- type-check;
-- unit tests;
-- local D1 migrations;
-- application build;
-- browser smoke test;
-- live Devnet binary traversal and projection normalization.
+The bootstrap resume preview passed at Devnet ledger `3293119` with hash `A607447D13F7D03E11AE7895CCAA5AB16D3C051EF4421042043AFA8E6454EC85`:
 
-PR #7 implementation passed before branch cleanup:
-
-- frozen-lockfile install;
-- lint;
-- type-check;
-- unit tests including cleanup safety;
-- all local D1 migrations including bootstrap checkpoints;
-- application build;
-- browser smoke test;
-- live Devnet binary traversal and projection normalization.
-
-The same 17-file PR #7 diff is being replayed on a clean branch based directly on the merged `main` tree. Final clean-branch CI is the remaining merge gate.
+- batch 1: 1 request, 2,048 decoded objects, 124 Lending objects, 33,213 compressed bytes;
+- batch 2 cumulative: 2 requests, 4,096 decoded objects, 261 Lending objects, 70,219 compressed bytes;
+- global shard pages remained `[1, 2]`;
+- the exact continuation marker advanced between batches;
+- lifecycle initialization ran once;
+- activation remained disabled for the partial traversal;
+- normal CI, the current-state live benchmark, and the new resume workflow all passed.
 
 ## Remaining PR 6B work
 
-- complete clean-branch validation and replace the old stacked branch;
-- add a controlled preview bootstrap workflow with no committed credentials;
-- run an interruption-and-resume preview test;
-- select the failed-prefix retention window from preview evidence;
+- merge the successful live resume workflow;
+- add real preview D1 and R2 bindings only after the credential and environment boundary is approved;
+- run a longer preview bootstrap using those isolated bindings;
+- set the failed-prefix retention window from the longer preview and rollback evidence;
 - provision production storage only after preview evidence is accepted.
 
 ## Following work
@@ -126,7 +107,7 @@ The same 17-file PR #7 diff is being replayed on a clean branch based directly o
 
 | Question | Required evidence | Assigned point |
 |---|---|---|
-| What retention window should apply to failed bootstrap prefixes? | Preview interruption, resume, cleanup, and rollback measurements | PR 6B |
+| What retention window should apply to failed bootstrap prefixes? | Longer preview, cleanup, and rollback measurements | Bootstrap preview |
 | What exact schedule-state boundary labels should be public? | Tests against due-time and grace-end boundaries | Status engine |
 | What is the confirmed successful overpayment transaction shape? | Isolated Devnet fixture and validated metadata | Loan lifecycle |
 | How should each deletion reason be classified? | Transaction and DeletedNode fixtures | Deleted-object archive |
@@ -140,15 +121,12 @@ The same 17-file PR #7 diff is being replayed on a clean branch based directly o
 - partial traversal counts are never published as complete totals;
 - only a digest-verified complete manifest can activate a snapshot;
 - manifest retry does not rescan already durable final shards;
-- R2 writes are idempotent by key, byte count, and SHA-256 digest;
 - cleanup cannot run against resumable, building, or active snapshots;
-- cleanup is snapshot-prefix scoped and preserves protected manifest references;
-- the previous active snapshot survives failed replacement work;
 - production bootstrap and Mainnet remain disabled until approved.
 
 ## Current blockers
 
-No code or design blocker. Final clean-branch CI and preview interruption/resume evidence remain before production provisioning.
+No code blocker. Real preview credentials and isolated bindings require an explicit environment decision before provisioning.
 
 ## Operational rule
 
