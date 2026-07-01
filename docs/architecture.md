@@ -14,7 +14,7 @@
 - GitHub Actions
 - XRPL JSON-RPC over HTTPS and WebSocket where appropriate
 
-The initial product does not require a continuously running server, a paid database, a paid RPC provider, or a self-hosted XRPL node.
+The initial product uses a lightweight managed deployment model and does not require a continuously running server or a self-hosted XRPL node.
 
 ## System overview
 
@@ -186,8 +186,8 @@ At minimum record:
 
 ## Why not Next.js SSR
 
-The product is primarily a static read interface over a small read-only API. React/Vite plus Workers provides a smaller deployment surface, predictable free-tier use, simpler caching, and less runtime coupling than an SSR framework.
+The product is primarily a static read interface over a small read-only API. React/Vite plus Workers provides a smaller deployment surface, predictable runtime and storage use, simpler caching, and less runtime coupling than an SSR framework.
 
 ## Why not a permanent WebSocket server
 
-Cloudflare Workers are not used as a permanently connected background process. Scheduled polling by ledger cursor is easier to resume, audit, and operate for free. Browser-side WebSocket updates may be added later as a non-canonical enhancement, but D1 remains the source served to users.
+Cloudflare Workers are not used as a permanently connected background process. Scheduled polling by ledger cursor is easier to resume, audit, and operate within a measured resource envelope. Browser-side WebSocket updates may be added later as a non-canonical enhancement, but D1 remains the source served to users.
