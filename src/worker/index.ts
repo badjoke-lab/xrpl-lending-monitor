@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 
+import { collectCurrentState } from '../collector/current-state/collect-current-state'
 import { refreshNetworkStatus } from '../collector/network/refresh-network-status'
 import { resolveRuntimeConfig } from '../shared/runtime-config'
 import type { Bindings } from './env'
@@ -19,6 +20,7 @@ app.get('/api/health', (context) => {
     service: 'xrpl-lending-monitor',
     network: config.network,
     mainnet_enabled: config.mainnetEnabled,
+    current_state_collection_enabled: config.currentStateCollectionEnabled,
   })
 })
 
@@ -76,6 +78,16 @@ const worker: ExportedHandler<Bindings> = {
       db: env.DB,
       config,
     })
+
+    if (config.currentStateCollectionEnabled) {
+      await collectCurrentState({
+        db: env.DB,
+        config,
+        pageLimitPerType: config.currentScanPageLimitPerType,
+        requestLimitTotal: config.currentScanRequestLimitTotal,
+        writeBatchSize: config.currentScanWriteBatchSize,
+      })
+    }
   },
 }
 
