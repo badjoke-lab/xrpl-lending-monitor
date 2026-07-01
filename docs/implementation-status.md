@@ -8,16 +8,18 @@ Last updated: 2026-07-01.
 
 ## Current branch
 
-`foundation/spec-roadmap`
+`foundation/project-skeleton`
 
 ## Current work
 
-Repository source-of-truth documents and operating rules are being established.
+Project skeleton implementation: pinned toolchain, React/Vite application shell, read-only Cloudflare Worker, D1 binding boundary, fail-closed Devnet configuration, tests, and CI.
 
 ## Completed
 
+### M0 source of truth
+
 - Repository created: `badjoke-lab/xrpl-lending-monitor`
-- Initial README on `main`
+- PR #1 merged: source-of-truth specifications and development roadmap
 - Repository operating rules
 - Documentation index
 - Product specification
@@ -30,45 +32,59 @@ Repository source-of-truth documents and operating rules are being established.
 - Free-tier operating budget and benchmark gate
 - Competitor positioning
 - Dated development roadmap
+- Decision log and PR documentation checklist
+
+### Project skeleton on current branch
+
+- Node and pnpm versions pinned
+- Exact application and development dependency versions pinned
+- TypeScript configuration for UI, Worker, and tooling
+- React and Vite application entrypoint
+- Truthful foundation UI with no fabricated protocol data
+- Hono Worker with read-only `/api/health` and `/api/status`
+- Cloudflare Static Assets and D1 binding configuration
+- Placeholder D1 database ID to block accidental production deployment
+- Devnet-only, Mainnet-fail-closed runtime validation
+- Unit tests for network configuration
+- Playwright browser smoke test
+- ESLint, Vitest, Vite, Wrangler, and Playwright configuration
+- GitHub Actions quality pipeline
+- D1 migration operating rules
+
+## Active PR
+
+### Project skeleton
+
+Expected completion condition:
+
+- dependency installation succeeds in CI;
+- lint, type-check, unit tests, build, and browser smoke tests pass;
+- no production deployment occurs;
+- no Group Pay dependency exists;
+- documentation and implementation agree.
 
 ## Next PR
 
-### PR 1 — Foundation specifications and roadmap
-
-Expected contents:
-
-- all M0 source-of-truth documents;
-- pull-request checklist enforcing document review and status updates;
-- initial decision log;
-- README links to the documentation set.
-
-Completion condition:
-
-- PR reviewed and merged;
-- this document moved to PR 3 as the next active work;
-- no implementation code is added before the documentation source of truth exists on `main`.
-
-## Following PR
-
-### PR 3 — Project skeleton
+### PR 4 — Network, amendment, and epoch foundation
 
 Planned scope:
 
-- Node and pnpm version pinning;
-- TypeScript;
-- React and Vite;
-- Cloudflare Worker and D1 configuration;
-- router;
-- Vitest and Playwright;
-- ESLint and formatting;
-- local/preview/production environment boundaries;
-- GitHub Actions;
-- migrations folder;
-- Mainnet disabled by default.
+- XRPL Devnet RPC client boundary;
+- endpoint fallback and timeout behavior;
+- server information and validated-ledger reads;
+- amendment-status reads;
+- `network_epochs` and `sync_state` D1 migration;
+- reset-signal detection skeleton;
+- D1-backed `/api/status`;
+- fixture and integration tests;
+- Mainnet remains disabled.
+
+## Following PRs
+
+- PR 5 — Asset normalization
+- PR 6 — Current object scanner and free-tier benchmark checkpoint
 
 ## Known open questions
-
-These do not block the current documentation PR. They must be resolved in the assigned implementation checkpoint.
 
 | Question | Required evidence | Assigned point |
 |---|---|---|
@@ -82,9 +98,15 @@ These do not block the current documentation PR. They must be resolved in the as
 
 ## Current blockers
 
-None for M0.
+No product blocker.
 
-Implementation is intentionally blocked until the specification PR is merged.
+A lockfile is not yet committed because dependency resolution is being verified by the first CI run. Dependencies are exact-pinned and CI currently installs without frozen-lockfile enforcement. A generated lockfile must be committed before the foundation milestone is considered fully settled.
+
+## Schedule status
+
+- M0 specification work: complete
+- Project skeleton: in progress and within the roadmap window
+- M1 collection work: not started
 
 ## Risks being watched
 
@@ -94,6 +116,7 @@ Implementation is intentionally blocked until the specification PR is merged.
 - MPT metadata may be incomplete.
 - Mainnet activation timing is unknown.
 - A direct competitor may expand into full lifecycle history.
+- Dependency versions are new and must be proven together by CI before merge.
 
 ## Operational rule
 
