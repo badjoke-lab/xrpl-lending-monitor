@@ -64,7 +64,7 @@ export interface LoanCurrentProjection {
   paymentInterval: number
   gracePeriod: number
   previousPaymentDueDate: number
-  nextPaymentDueDate: number
+  nextPaymentDueDate: number | null
   paymentRemaining: number
   principalOutstanding: string
   totalValueOutstanding: string
