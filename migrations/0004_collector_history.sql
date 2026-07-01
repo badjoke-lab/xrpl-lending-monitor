@@ -26,6 +26,9 @@ CREATE TABLE protocol_events (
   event_index INTEGER NOT NULL,
   event_type TEXT NOT NULL,
   result_code TEXT NOT NULL,
+  source_json TEXT,
+  metadata_json TEXT,
+  payload_retained INTEGER NOT NULL DEFAULT 1 CHECK (payload_retained IN (0, 1)),
   created_at TEXT NOT NULL,
   PRIMARY KEY (network, epoch_id, event_hash)
 );
