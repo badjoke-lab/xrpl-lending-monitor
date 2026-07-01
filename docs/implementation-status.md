@@ -109,8 +109,7 @@ The live failure was caused by terminal Loan objects omitting zero-valued fields
 
 ## Remaining PR 6 work
 
-- synchronize remaining architecture, data-model, collector, resource, and roadmap wording;
-- run final CI after documentation synchronization;
+- run final CI after the completed documentation synchronization;
 - merge without enabling production bootstrap or provisioning object storage.
 
 ## Following work
