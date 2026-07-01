@@ -12,26 +12,23 @@ Last updated: 2026-07-01.
 
 ## Current work
 
-Roadmap PR 6: marker-complete Vault, LoanBroker, and Loan collection, normalized current projections, staged D1 snapshots, and collector measurements.
+Roadmap PR 6: validated-ledger current-state traversal, projection normalization, resumable snapshot staging, and Checkpoint A measurements.
 
 Implemented on the active branch:
 
-- `ledger_data` scans fixed to one validated ledger hash and index;
-- opaque marker preservation across pages;
-- explicit page and request ceilings;
-- fail-closed behavior for page failure, ledger movement, invalid object type, and incomplete scans;
-- duplicate object-ID detection;
-- Vault, LoanBroker, and Loan field normalization;
-- direct Loan flag decoding for active, impaired, defaulted, and overpayment support;
-- Vault → LoanBroker → Loan relationship validation;
-- Broker OwnerCount reconciliation;
-- staged D1 snapshot schema with `building`, `active`, `failed`, and `superseded` states;
-- snapshot rows hidden from current reads until full activation;
-- bounded D1 write batches;
-- cursor advancement only in the final activation batch;
-- explicit request, page, object, and elapsed-time metrics;
-- scheduled collection guarded by `CURRENT_STATE_COLLECTION_ENABLED=false` by default;
-- fixture tests for marker preservation, page failure, ledger mismatch, duplicates, normalization, and relationship errors.
+- canonical binary decoding through the pinned XRPL codec;
+- one unfiltered ledger pass that classifies Vault, LoanBroker, and Loan locally;
+- a resumable `scanCurrentStateBatch` API with exact marker continuation;
+- bounded pages and object counts per invocation;
+- fixed ledger hash and ledger index validation;
+- repeated-marker, malformed-binary, duplicate-ID, and partial-run failure checks;
+- XRPL omitted-zero handling for current projections;
+- Loan flag decoding and relationship-integrity checks;
+- D1 snapshot metadata with `building`, `active`, `failed`, and `superseded` states;
+- D1 activation and cursor advancement only after a complete external manifest exists;
+- external shard and manifest contracts for current-state object storage;
+- machine-readable Devnet benchmark evidence;
+- unit tests for pagination, exact marker resume, projection normalization, and activation ordering.
 
 ## Completed
 
@@ -46,16 +43,10 @@ Implemented on the active branch:
 
 ### M1 network and epoch foundation
 
-- canonical LendingProtocol and SingleAssetVault amendment identifiers;
-- validated XRPL JSON-RPC reads with timeout and endpoint fallback;
-- validated-ledger, server-version, server-state, and complete-ledger parsing;
-- Devnet reset-signal detection for ledger rewind and same-index hash change;
-- deterministic initial epoch and synchronization state planning;
-- `network_epochs` and `sync_state` D1 migration;
-- scheduled status refresh and D1 persistence;
+- validated Devnet status collection;
+- amendment, ledger, epoch, reset-signal, and freshness handling;
 - D1-backed read-only `/api/status`;
-- explicit amendment, freshness, cursor, error, and reset fields;
-- unit tests and local D1 migration validation.
+- scheduled Worker status refresh.
 
 ### M1 asset normalization
 
@@ -64,77 +55,100 @@ Implemented on the active branch:
 - MPT metadata and flag resolution;
 - rate and Ripple epoch conversion;
 - API-safe serialization;
-- clean CI and merged PR #5.
+- merged PR #5.
+
+## Checkpoint A evidence
+
+### Bounded single-pass probe
+
+At validated Devnet ledger `3291171`, 25 binary pages produced:
+
+- 25 requests;
+- 51,200 decoded ledger objects;
+- 3,402 Lending-related objects;
+- 2,048 decoded objects per page;
+- 6.858 seconds elapsed in the recorded probe;
+- approximately 11.3 MB process-heap growth.
+
+### Complete filtered reference scans
+
+Separate measurement runs completed:
+
+- Vault: 789,254 objects over 11,481 requests, approximately 835 seconds;
+- LoanBroker: 522,784 objects over 11,481 requests, approximately 855 seconds.
+
+The measurements demonstrate that full bootstrap is a large historical-state operation rather than a normal scheduled status refresh.
+
+## Checkpoint A decision
+
+- **Scheduled Worker full bootstrap is not approved.** The scheduled Worker remains status-only.
+- **Three separate filtered traversals are not approved.** They repeat the same global ledger marker path.
+- **Full in-memory accumulation is not approved.** Current-state bootstrap must stream bounded pages.
+- **D1 is metadata and active-pointer storage only.** It does not hold every current object row.
+- **Current-state objects use compressed external shards plus a manifest.** Provisioning remains disabled until the runner and storage integration are reviewed.
+- **Bootstrap runs through a resumable long-running runner.** The exact marker is persisted between bounded batches.
+- **Ongoing updates move to PR 7.** The incremental validated-ledger collector becomes the normal maintenance path after bootstrap.
 
 ## Current validation
 
-Pending clean PR #6 CI for:
+The latest stable branch state has passed:
 
 - frozen-lockfile install;
 - lint;
 - type-check;
 - unit tests;
-- local D1 migration apply;
-- build;
-- browser smoke test.
+- local D1 migrations;
+- application build;
+- browser smoke tests;
+- controlled live Devnet binary traversal.
 
-Production-shaped live Devnet collection remains disabled until repository validation passes and Checkpoint A measurements are reviewed.
+The current live projection check is validating omitted-zero handling across sampled Vault, LoanBroker, and Loan objects.
 
 ## Remaining PR 6 work
 
-- fix any CI findings;
-- add D1 repository and activation tests where practical;
-- run a controlled live Devnet read benchmark;
-- record response shapes, object counts, pages, requests, elapsed time, and available MPT metadata;
-- measure Worker execution through deployment-compatible tooling;
-- select the approved runtime and cadence at Checkpoint A;
-- keep production collection disabled unless that decision explicitly enables it.
+- finish the live projection-field check;
+- correct any remaining codec-to-projection field assumptions;
+- synchronize architecture, data-model, collector, resource, and decision documents;
+- run final CI and bounded live benchmark;
+- merge without enabling production bootstrap or provisioning object storage.
 
 ## Following work
 
-### Incremental validated-ledger collector
+### PR 7 — Incremental validated-ledger collector
 
 - cursor-based validated-ledger processing;
 - recognized Lending transaction filtering;
 - idempotent canonical event storage;
 - bounded catch-up and retry behavior;
-- raw-payload retention controls.
+- raw-payload retention controls;
+- integration with the active snapshot and later replacement snapshots.
 
 ## Known open questions
 
 | Question | Required evidence | Assigned point |
 |---|---|---|
-| Which collector runtime and cadence provide adequate operating margin? | Production-shaped CPU, request, D1, storage, and catch-up measurements | PR 6 / Checkpoint A |
+| Which external runner and object-store upload mechanism should execute bootstrap? | Resume, shard upload, manifest, and cleanup tests | Bootstrap runner follow-up |
 | What exact schedule-state boundary labels should be public? | Tests against due-time and grace-end boundaries | Status engine |
 | What is the confirmed successful overpayment transaction shape? | Isolated Devnet fixture and validated metadata | Loan lifecycle |
 | How should each deletion reason be classified? | Transaction and DeletedNode fixtures | Deleted-object archive |
-| Which MPT metadata fields remain consistently available across live responses? | Current-object scan and live issuance fixtures | PR 6 benchmark |
-| Which additional signals reliably confirm a Devnet reset? | Simulation, independent confirmation, and live observation | Reset hardening |
+| Which MPT metadata fields remain consistently available across live responses? | Live issuance fixtures | Asset enrichment follow-up |
+| Which additional signals reliably confirm a Devnet reset? | Simulation and independent confirmation | Reset hardening |
 
 ## Active design decisions
 
-- all three object types are scanned at the same validated ledger;
-- markers are opaque and passed through unchanged;
-- partial scan counts are not published as complete totals;
-- current projections become visible only after full scan, normalization, relationship validation, and persistence succeed;
-- the previous active snapshot remains available after a failed replacement scan;
-- collection ceilings are explicit runtime settings;
-- collection activation is fail-closed by default;
-- canonical identity and arithmetic rules from PR #5 apply to all projections;
-- Mainnet and real production bindings remain disabled until approved.
+- all current objects are tied to one validated ledger and epoch;
+- markers are opaque and persisted unchanged;
+- partial traversal counts are never published as complete totals;
+- only a complete manifest can replace the previous active snapshot;
+- the previous active snapshot survives failed replacement work;
+- public runtime configuration does not enable full bootstrap;
+- canonical identity and exact arithmetic from PR #5 apply to all projections;
+- Mainnet and real production storage bindings remain disabled until approved.
 
 ## Current blockers
 
-None.
-
-## Risks being watched
-
-- scheduled Worker CPU allowance may be insufficient for the full collector;
-- a complete scan may require more requests or writes than one scheduled invocation should perform;
-- Devnet can reset and erase current public state;
-- public RPC response fields and metadata availability may change;
-- Mainnet activation timing is unknown.
+None for completing PR 6. Production bootstrap remains intentionally unprovisioned.
 
 ## Operational rule
 
-Every future implementation PR updates this file with the current milestone, completed work, next work, blockers, open questions, and material schedule changes.
+Every future implementation PR updates this file with current work, completed work, validation, decisions, blockers, and the next active implementation step.
