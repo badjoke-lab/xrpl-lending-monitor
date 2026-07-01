@@ -1,0 +1,73 @@
+{
+  "schema_version": 2,
+  "observed_at": "2026-07-01T10:30:57.774Z",
+  "network": "devnet",
+  "endpoint": "https://s.devnet.rippletest.net:51234/",
+  "ledger": {
+    "index": 3290994,
+    "hash": "D50DBDFDD04EED9B64D2220B5C8429785490660838E69491D653F5552D6134FD",
+    "age_seconds": 1
+  },
+  "amendments": {
+    "lending_protocol": {
+      "id": "565B90CA1AB2B9D42208ED10884188C64F9E19083DECB9634AAF06EB03299509",
+      "name": "LendingProtocol",
+      "enabled": true,
+      "supported": true
+    },
+    "single_asset_vault": {
+      "id": "81BD2619B6B3C8625AC5D0BC01DE17F06C3F0AB95C7C87C93715B87A4FD240D8",
+      "name": "SingleAssetVault",
+      "enabled": true,
+      "supported": true
+    }
+  },
+  "probe_configuration": {
+    "response_mode": "binary",
+    "pages_per_type": 25,
+    "requested_objects_per_page": 2048
+  },
+  "probes": [
+    {
+      "filter": "vault",
+      "complete": false,
+      "pages": 25,
+      "requests": 25,
+      "objects": 1760,
+      "elapsed_ms": 1592,
+      "average_objects_per_page": 70.4,
+      "requested_objects_per_page": 2048,
+      "last_marker": "00904E2AE91FF3CDDA24E427C0EC194D8032800B597FA7664B6DAB06D3D723D9"
+    },
+    {
+      "filter": "loan_broker",
+      "complete": false,
+      "pages": 25,
+      "requests": 25,
+      "objects": 1157,
+      "elapsed_ms": 1432,
+      "average_objects_per_page": 46.28,
+      "requested_objects_per_page": 2048,
+      "last_marker": "00904E2AE91FF3CDDA24E427C0EC194D8032800B597FA7664B6DAB06D3D723D9"
+    },
+    {
+      "filter": "loan",
+      "complete": false,
+      "pages": 25,
+      "requests": 25,
+      "objects": 486,
+      "elapsed_ms": 1279,
+      "average_objects_per_page": 19.44,
+      "requested_objects_per_page": 2048,
+      "last_marker": "00904E2AE91FF3CDDA24E427C0EC194D8032800B597FA7664B6DAB06D3D723D9"
+    }
+  ],
+  "process_heap_delta_bytes": 13996920,
+  "all_types_observed": true,
+  "full_scan_attempted": false,
+  "conclusion": {
+    "scheduled_worker_full_bootstrap": "not_approved",
+    "reason": "All three filtered scans remain incomplete after the bounded probe and traverse the same global ledger marker position. Full bootstrap requires a long-running, resumable, or parallel execution mode.",
+    "approved_next_measurement": "parallel full scans by object type in GitHub Actions with production collection still disabled"
+  }
+}
