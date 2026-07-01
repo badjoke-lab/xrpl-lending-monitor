@@ -32,7 +32,15 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Lint
-        run: pnpm lint
+        run: pnpm lint -- --format json --output-file lint-output.json
+
+      - name: Upload lint report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-output
+          path: lint-output.json
+          retention-days: 1
 
       - name: Type-check
         run: pnpm typecheck
