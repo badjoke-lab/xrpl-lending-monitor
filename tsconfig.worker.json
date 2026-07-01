@@ -1,6 +1,5 @@
 {
   "compilerOptions": {
-    "composite": true,
     "target": "ES2023",
     "lib": ["ES2023", "WebWorker"],
     "types": ["@cloudflare/workers-types"],
@@ -17,5 +16,6 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src/worker", "src/shared"]
+  "include": ["src/worker", "src/shared"],
+  "exclude": ["src/**/*.test.ts"]
 }
