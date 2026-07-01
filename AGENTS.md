@@ -1,67 +1,179 @@
 # Repository operating instructions
 
-These instructions apply to every contributor and coding agent working in this repository.
+These instructions apply to every contributor and coding agent working in this repository, including long-running Codex goal sessions.
+
+## Scope
+
+This root `AGENTS.md` applies to the entire repository. A nested `AGENTS.md` may add directory-specific rules but must not weaken the product, data-integrity, testing, security, or release rules defined here.
 
 ## Source of truth
 
-Before planning, editing, testing, or reviewing any change, read:
+Before planning, editing, testing, reviewing, or resuming work, read:
 
-1. `docs/README.md`
-2. `docs/product-spec.md`
-3. `docs/development-roadmap.md`
-4. `docs/implementation-status.md`
-5. Every domain document linked from the roadmap item being implemented
+1. `AGENTS.md`
+2. `docs/README.md`
+3. `docs/product-spec.md`
+4. `docs/development-roadmap.md`
+5. `docs/implementation-status.md`
+6. every domain document linked from the active roadmap item
+7. `docs/codex-goal.md` and `docs/codex-master-task.md` for the long-running Codex objective
 
-The repository documents are authoritative. Conversation history, old mockups, temporary audit code, and assumptions are not authoritative when they conflict with the current documents.
+Repository documents are authoritative. Conversation history, old mockups, temporary audit code, previous agent summaries, and assumptions are not authoritative when they conflict with the repository.
+
+`docs/development-roadmap.md` controls order and dependencies. `docs/implementation-status.md` controls the resume point. Inspect Git history, open pull requests, branches, and CI before trusting stale text; correct stale documentation in the same pull request.
+
+## Session startup and resume
+
+At the start of every session:
+
+1. inspect `main`, open pull requests, active branches, recent commits, and required checks;
+2. read the source-of-truth documents;
+3. identify the first incomplete dependency or release gate;
+4. verify whether work already exists before creating a branch or reimplementing it;
+5. resume the canonical branch or pull request when one exists;
+6. update `docs/implementation-status.md` before the session ends when repository state changed.
+
+Do not redo merged or otherwise verified work. A later agent must be able to resume from repository and GitHub state without relying on chat history.
+
+## Autonomous execution
+
+The accepted long-running objective is to complete the read-only public Devnet release defined by `docs/product-spec.md` and `docs/development-roadmap.md`.
+
+Continue through the roadmap in dependency order without asking for confirmation between ordinary implementation steps. A milestone boundary, target date, pull-request boundary, CI run, context-window boundary, or usage-limit interruption is not itself a reason to abandon the objective.
+
+Stop only when:
+
+- a human approval gate listed below is reached;
+- external account access or resource provisioning is required and unavailable;
+- authoritative specifications conflict and no safe interpretation exists;
+- live protocol evidence contradicts the accepted model;
+- required checks cannot pass without changing approved scope or weakening an invariant;
+- repository permissions prevent the required action.
+
+When blocked, record the exact blocker, completed evidence, current branch or pull request, first incomplete action, and required decision in `docs/implementation-status.md`. Continue independent work that does not cross the blocked dependency.
 
 ## Mandatory work sequence
 
-For every change:
+For every roadmap unit:
 
-1. Identify the active milestone and PR slot in `docs/development-roadmap.md`.
-2. Confirm the task appears in `docs/implementation-status.md` as current or next work.
-3. Read the relevant specification documents.
-4. Implement only the agreed scope.
-5. Add or update tests and data-integrity checks.
-6. Update `docs/implementation-status.md` in the same PR.
-7. Update the roadmap when dates, dependencies, scope, or completion state change.
-8. Record a material design change in `docs/decision-log.md`.
+1. identify the milestone and roadmap PR slot;
+2. confirm current repository and pull-request state;
+3. read the relevant specifications and operational documents;
+4. define acceptance criteria and invariants;
+5. implement the agreed scope and necessary support changes;
+6. add or update all applicable tests;
+7. run required local and CI validation;
+8. update `docs/implementation-status.md` in the same pull request;
+9. update roadmap, specifications, resource envelope, or decision log when behavior or accepted decisions change;
+10. open or update a focused pull request with evidence and rollback considerations;
+11. resolve failures and review findings without weakening checks;
+12. merge only after required checks pass and the branch has the intended predecessor;
+13. proceed to the next incomplete dependency when no human gate remains.
 
-Do not silently diverge from the specifications. Change the specification first or in the same PR.
+Do not silently diverge from specifications. Change the specification first or in the same pull request.
+
+## Branch and pull-request discipline
+
+- Work from the current canonical predecessor, normally `main` or the explicitly active pull-request branch.
+- Prefer one coherent roadmap unit per pull request.
+- Do not create parallel implementations of the same feature.
+- Avoid stacking dependent pull requests on unverified work; document unavoidable dependencies.
+- Update from the current predecessor before final validation when the base changed materially.
+- Do not rewrite shared history unless explicitly approved.
+- Do not merge with failing required checks, unresolved material findings, stale migrations, or inconsistent documentation.
+- When merge permission is unavailable, leave a reviewable pull request with passing checks and record the blocker.
+
+Roadmap PR numbers are planning slots and may not match GitHub pull-request numbers. Identify work by milestone and scope, not number alone.
+
+## Required validation
+
+The baseline full check is:
+
+```sh
+corepack enable
+pnpm install --frozen-lockfile
+pnpm check
+pnpm test:e2e
+```
+
+Use narrower checks while iterating, but run all checks relevant to the changed surface before merge. Every implementation pull request must satisfy `docs/testing-strategy.md`.
+
+Additional evidence is required when applicable:
+
+- local D1 migration application for schema changes;
+- fixture-ledger replay for parser, history, lifecycle, archive, and reconciliation work;
+- non-destructive live Devnet reads for network-dependent collectors;
+- browser evidence for user-visible flows and responsive states;
+- runtime, request, storage, and catch-up measurements for collector changes;
+- rollback and interruption evidence for bootstrap, persistence, deployment, and recovery changes.
+
+Do not delete, skip, weaken, or broadly mock a failing test merely to obtain a green check.
+
+## State persistence
+
+Before a session ends or an execution limit interrupts work:
+
+- commit and push coherent completed changes;
+- avoid leaving the only copy of important work in an uncommitted workspace;
+- update the pull-request description when scope or evidence changes;
+- update `docs/implementation-status.md` with the exact current state;
+- record reproducible test and live-read evidence where safe;
+- identify the first incomplete action rather than a vague future milestone;
+- record blockers without protected information.
+
+## Human approval gates
+
+Do not perform these actions without explicit human approval:
+
+- create or modify paid or production infrastructure;
+- create or change protected production configuration;
+- provision or connect production D1, R2, Workers, or domains;
+- deploy publicly to the production domain;
+- approve final legal, disclaimer, privacy, terms, or commercial text;
+- enable transaction submission, signing, wallet integration, or write operations;
+- enable Mainnet collection or change the approved Mainnet start strategy;
+- weaken a release gate, integrity invariant, retention safeguard, or fail-closed behavior.
+
+When approval is absent, implement and test adapters, migrations, local flows, mocks, and documented provisioning steps without claiming production evidence.
 
 ## Non-negotiable product rules
 
 - The initial product is read-only.
-- No wallet connection, signing, seed handling, transaction submission, lending, repayment, or deposit UI is allowed in the initial release.
+- No wallet connection, signing, transaction submission, lending, repayment, or deposit UI is allowed in the initial release.
 - Devnet and Mainnet data must never be mixed.
 - Every stored record must include network and epoch identity.
+- Current state, indexed history, and derived values must remain distinguishable.
 - XRP, IOU, and MPT assets must remain distinct.
-- Unlike assets must not be combined into a synthetic TVL without an explicit, documented pricing layer.
+- Unlike assets must not be combined into synthetic TVL without an explicit documented pricing layer.
 - On-ledger state and schedule-derived state must be stored and displayed separately.
 - A late loan must not be labelled defaulted unless the ledger state says it is defaulted.
-- Deleted Vault, LoanBroker, and Loan objects must remain searchable through indexed history.
-- Derived values must expose their formula and provenance.
-- Do not invent LTV, collateral value, credit score, borrower identity, protocol risk score, or investment recommendations.
-- All collection must be restartable, idempotent, marker-aware, and bounded by the documented runtime and storage envelope.
-- Mainnet support must remain disabled until the amendment state and starting ledger are explicitly approved in the specifications.
+- Deleted Vault, LoanBroker, and Loan objects must leave current projections but remain searchable through indexed history.
+- Derived values must expose formula and provenance.
+- Do not invent unavailable protocol facts, identity claims, collateral values, scoring, or investment recommendations.
+- Unknown fields and unsupported transaction shapes must be preserved or reported safely.
+- Collection must be restartable, idempotent, marker-aware or cursor-aware, gap-rejecting, and bounded by the documented resource envelope.
+- A partial bootstrap must never activate or be reported as complete.
+- Cursor advancement, processed-ledger persistence, and canonical event persistence must be atomic.
+- Reprocessing must not create duplicate canonical events.
+- Mainnet remains disabled until its prerequisites and release approval are explicitly accepted.
 
 ## Documentation gates
 
-A PR is incomplete when any of the following is true:
+A pull request is incomplete when:
 
-- implementation and docs disagree;
-- roadmap status is stale;
-- a new table, field, state, API, or page is undocumented;
-- a calculation lacks a formula and provenance category;
-- a material resource-impact implication is not recorded;
-- a new unresolved assumption is not listed in `docs/implementation-status.md`.
+- implementation and documentation disagree;
+- `docs/implementation-status.md` is stale;
+- roadmap dependencies or completion state are stale;
+- a new table, field, state, API, page, event, formula, retention rule, or operational dependency is undocumented;
+- a calculation lacks formula and provenance;
+- a material resource implication is not recorded;
+- a new unresolved assumption is not listed;
+- required evidence is missing.
 
 ## Public-information boundary
 
-Repository content, issues, pull requests, commit messages, release notes, and generated artifacts must not contain private operational strategy, personal constraints, unpublished continuation or reduction criteria, or unnecessary cross-project internal context.
+Repository content and generated artifacts must not contain protected configuration, private endpoints, unredacted personal data, unpublished operational strategy, or unnecessary cross-project context. Use redacted fixtures and bounded evidence. Explain decisions through product integrity, security, maintainability, measurable resource limits, and operational reliability.
 
-Technical and product decisions must be explained through product integrity, security, maintainability, measurable resource limits, or operational reliability. Secrets, credentials, private endpoints, and unredacted personal data must never be committed.
+## Current execution phase
 
-## Current phase
-
-The project is in **Milestone 0: foundation and specification lock**. The next implementation work is defined in `docs/implementation-status.md`.
+Foundation, current-state scanning, bootstrap runner and storage foundations, and controlled live interruption-and-resume preview are complete. The immediate continuation point is the open incremental validated-ledger collector pull request recorded in `docs/implementation-status.md`, followed by the isolated preview bootstrap and the remaining M2 through M6 roadmap in dependency order.
