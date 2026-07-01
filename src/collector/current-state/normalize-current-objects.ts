@@ -39,6 +39,11 @@ function requiredUnsigned(record: Record<string, unknown>, field: string): numbe
   return value
 }
 
+function unsignedOrZero(record: Record<string, unknown>, field: string): number {
+  if (record[field] === undefined || record[field] === null) return 0
+  return requiredUnsigned(record, field)
+}
+
 function optionalUnsigned(record: Record<string, unknown>, field: string): number | null {
   if (record[field] === undefined || record[field] === null) return null
   return requiredUnsigned(record, field)
@@ -56,6 +61,11 @@ function amountString(record: Record<string, unknown>, field: string): string {
   throw new Error(`${field} must be an exact numeric string or safe integer`)
 }
 
+function amountOrZero(record: Record<string, unknown>, field: string): string {
+  if (record[field] === undefined || record[field] === null) return '0'
+  return amountString(record, field)
+}
+
 function optionalAmountString(record: Record<string, unknown>, field: string): string | null {
   if (record[field] === undefined || record[field] === null) return null
   return amountString(record, field)
@@ -71,7 +81,7 @@ function common(object: ScannedLedgerObject): {
 } {
   return {
     id: object.index,
-    flags: requiredUnsigned(object, 'Flags'),
+    flags: unsignedOrZero(object, 'Flags'),
     dataHex: optionalString(object, 'Data'),
     previousTxHash: requiredString(object, 'PreviousTxnID'),
     previousLedgerIndex: requiredUnsigned(object, 'PreviousTxnLgrSeq'),
@@ -89,14 +99,14 @@ export function normalizeVault(object: ScannedLedgerObject): VaultCurrentProject
     owner: requiredString(object, 'Owner'),
     account: requiredString(object, 'Account'),
     asset: normalizeXrplAsset(object.Asset),
-    assetsTotal: amountString(object, 'AssetsTotal'),
-    assetsAvailable: amountString(object, 'AssetsAvailable'),
+    assetsTotal: amountOrZero(object, 'AssetsTotal'),
+    assetsAvailable: amountOrZero(object, 'AssetsAvailable'),
     assetsMaximum: optionalAmountString(object, 'AssetsMaximum'),
-    lossUnrealized: amountString(object, 'LossUnrealized'),
+    lossUnrealized: amountOrZero(object, 'LossUnrealized'),
     shareMptId,
     domainId: optionalString(object, 'DomainID'),
-    withdrawalPolicy: requiredUnsigned(object, 'WithdrawalPolicy'),
-    scale: requiredUnsigned(object, 'Scale'),
+    withdrawalPolicy: unsignedOrZero(object, 'WithdrawalPolicy'),
+    scale: unsignedOrZero(object, 'Scale'),
   }
 }
 
@@ -116,12 +126,12 @@ export function normalizeLoanBroker(
     sequence: requiredUnsigned(object, 'Sequence'),
     loanSequence: requiredUnsigned(object, 'LoanSequence'),
     managementFeeRate: optionalUnsigned(object, 'ManagementFeeRate'),
-    ownerCount: requiredUnsigned(object, 'OwnerCount'),
-    debtTotal: amountString(object, 'DebtTotal'),
+    ownerCount: unsignedOrZero(object, 'OwnerCount'),
+    debtTotal: amountOrZero(object, 'DebtTotal'),
     debtMaximum: optionalAmountString(object, 'DebtMaximum'),
-    coverAvailable: amountString(object, 'CoverAvailable'),
-    coverRateMinimum: requiredUnsigned(object, 'CoverRateMinimum'),
-    coverRateLiquidation: requiredUnsigned(object, 'CoverRateLiquidation'),
+    coverAvailable: amountOrZero(object, 'CoverAvailable'),
+    coverRateMinimum: unsignedOrZero(object, 'CoverRateMinimum'),
+    coverRateLiquidation: unsignedOrZero(object, 'CoverRateLiquidation'),
   }
 }
 
@@ -141,25 +151,25 @@ export function normalizeLoan(object: ScannedLedgerObject): LoanCurrentProjectio
     loanBrokerId: requiredString(object, 'LoanBrokerID'),
     borrower: requiredString(object, 'Borrower'),
     loanSequence: requiredUnsigned(object, 'LoanSequence'),
-    loanOriginationFee: amountString(object, 'LoanOriginationFee'),
-    loanServiceFee: amountString(object, 'LoanServiceFee'),
-    latePaymentFee: amountString(object, 'LatePaymentFee'),
-    closePaymentFee: amountString(object, 'ClosePaymentFee'),
-    overpaymentFeeRate: requiredUnsigned(object, 'OverpaymentFee'),
-    interestRate: requiredUnsigned(object, 'InterestRate'),
-    lateInterestRate: requiredUnsigned(object, 'LateInterestRate'),
-    closeInterestRate: requiredUnsigned(object, 'CloseInterestRate'),
-    overpaymentInterestRate: requiredUnsigned(object, 'OverpaymentInterestRate'),
+    loanOriginationFee: amountOrZero(object, 'LoanOriginationFee'),
+    loanServiceFee: amountOrZero(object, 'LoanServiceFee'),
+    latePaymentFee: amountOrZero(object, 'LatePaymentFee'),
+    closePaymentFee: amountOrZero(object, 'ClosePaymentFee'),
+    overpaymentFeeRate: unsignedOrZero(object, 'OverpaymentFee'),
+    interestRate: unsignedOrZero(object, 'InterestRate'),
+    lateInterestRate: unsignedOrZero(object, 'LateInterestRate'),
+    closeInterestRate: unsignedOrZero(object, 'CloseInterestRate'),
+    overpaymentInterestRate: unsignedOrZero(object, 'OverpaymentInterestRate'),
     startDate: requiredUnsigned(object, 'StartDate'),
     paymentInterval: requiredUnsigned(object, 'PaymentInterval'),
-    gracePeriod: requiredUnsigned(object, 'GracePeriod'),
-    previousPaymentDueDate: requiredUnsigned(object, 'PreviousPaymentDueDate'),
+    gracePeriod: unsignedOrZero(object, 'GracePeriod'),
+    previousPaymentDueDate: unsignedOrZero(object, 'PreviousPaymentDueDate'),
     nextPaymentDueDate: requiredUnsigned(object, 'NextPaymentDueDate'),
     paymentRemaining: requiredUnsigned(object, 'PaymentRemaining'),
-    principalOutstanding: amountString(object, 'PrincipalOutstanding'),
-    totalValueOutstanding: amountString(object, 'TotalValueOutstanding'),
-    managementFeeOutstanding: amountString(object, 'ManagementFeeOutstanding'),
-    periodicPayment: amountString(object, 'PeriodicPayment'),
+    principalOutstanding: amountOrZero(object, 'PrincipalOutstanding'),
+    totalValueOutstanding: amountOrZero(object, 'TotalValueOutstanding'),
+    managementFeeOutstanding: amountOrZero(object, 'ManagementFeeOutstanding'),
+    periodicPayment: amountOrZero(object, 'PeriodicPayment'),
     loanScale: optionalInteger(object, 'LoanScale'),
     onLedgerStatus: loanStatus(base.flags),
     supportsOverpayment: (base.flags & LOAN_OVERPAYMENT_FLAG) !== 0,
