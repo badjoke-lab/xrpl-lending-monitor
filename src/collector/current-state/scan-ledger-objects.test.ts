@@ -6,6 +6,7 @@ import {
   LedgerObjectScanError,
   scanLedgerObjects,
   type CurrentObjectFilter,
+  type LedgerObjectDecoder,
 } from './scan-ledger-objects'
 
 const LEDGER_HASH = 'A'.repeat(64)
@@ -24,9 +25,24 @@ function response(result: Record<string, unknown>): Response {
   })
 }
 
+function encodeFixture(value: Record<string, unknown>): string {
+  return Array.from(new TextEncoder().encode(JSON.stringify(value)))
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('')
+    .toUpperCase()
+}
+
+const decodeFixture: LedgerObjectDecoder = (hex) => {
+  const bytes = new Uint8Array(hex.length / 2)
+  for (let index = 0; index < hex.length; index += 2) {
+    bytes[index / 2] = Number.parseInt(hex.slice(index, index + 2), 16)
+  }
+  return JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>
+}
+
 function object(filter: CurrentObjectFilter, id: string): Record<string, unknown> {
   return {
-    LedgerEntryType: entryType[filter],
+    data: encodeFixture({ LedgerEntryType: entryType[filter] }),
     index: id,
   }
 }
@@ -76,6 +92,7 @@ describe('scanLedgerObjects', () => {
       ledgerIndex: LEDGER_INDEX,
       filter: 'vault',
       fetcher,
+      decodeObject: decodeFixture,
       nowMs: (() => {
         let value = 100
         return () => value++
@@ -89,10 +106,11 @@ describe('scanLedgerObjects', () => {
       objects: 2,
       elapsedMs: 1,
       requestedObjectsPerPage: 2048,
+      responseMode: 'binary',
     })
     expect(requests[0]).toMatchObject({
       ledger_hash: LEDGER_HASH,
-      binary: false,
+      binary: true,
       type: 'vault',
       limit: 2048,
     })
@@ -117,6 +135,7 @@ describe('scanLedgerObjects', () => {
         ledgerIndex: LEDGER_INDEX,
         filter: 'loan',
         fetcher,
+        decodeObject: decodeFixture,
       }),
     ).rejects.toMatchObject({
       name: 'LedgerObjectScanError',
@@ -151,16 +170,14 @@ describe('scanLedgerObjects', () => {
         ledgerIndex: LEDGER_INDEX,
         filter: 'loan_broker',
         fetcher,
+        decodeObject: decodeFixture,
       })
     } catch (error) {
       caught = error
     }
 
     expect(caught).toBeInstanceOf(LedgerObjectScanError)
-    expect(caught).toMatchObject({
-      pagesCompleted: 1,
-      objectsRead: 1,
-    })
+    expect(caught).toMatchObject({ pagesCompleted: 1, objectsRead: 1 })
   })
 
   it('fails when the page ceiling is reached while a marker remains', async () => {
@@ -182,11 +199,9 @@ describe('scanLedgerObjects', () => {
         filter: 'loan',
         pageLimit: 1,
         fetcher,
+        decodeObject: decodeFixture,
       }),
-    ).rejects.toMatchObject({
-      pagesCompleted: 1,
-      objectsRead: 1,
-    })
+    ).rejects.toMatchObject({ pagesCompleted: 1, objectsRead: 1 })
   })
 
   it('fails before looping when the server repeats a marker', async () => {
@@ -207,11 +222,9 @@ describe('scanLedgerObjects', () => {
         ledgerIndex: LEDGER_INDEX,
         filter: 'vault',
         fetcher,
+        decodeObject: decodeFixture,
       }),
-    ).rejects.toMatchObject({
-      pagesCompleted: 2,
-      objectsRead: 2,
-    })
+    ).rejects.toMatchObject({ pagesCompleted: 2, objectsRead: 2 })
   })
 })
 
@@ -234,6 +247,7 @@ describe('scanCurrentState', () => {
       ledgerHash: LEDGER_HASH,
       ledgerIndex: LEDGER_INDEX,
       fetcher,
+      decodeObject: decodeFixture,
       nowMs: (() => {
         let value = 0
         return () => value++
@@ -243,11 +257,7 @@ describe('scanCurrentState', () => {
     expect(result.vaults).toHaveLength(1)
     expect(result.loanBrokers).toHaveLength(1)
     expect(result.loans).toHaveLength(1)
-    expect(result.metrics).toMatchObject({
-      pages: 3,
-      requests: 3,
-      objects: 3,
-    })
+    expect(result.metrics).toMatchObject({ pages: 3, requests: 3, objects: 3 })
   })
 
   it('rejects duplicate object IDs within one type', async () => {
@@ -271,6 +281,7 @@ describe('scanCurrentState', () => {
         ledgerHash: LEDGER_HASH,
         ledgerIndex: LEDGER_INDEX,
         fetcher,
+        decodeObject: decodeFixture,
       }),
     ).rejects.toThrow('Duplicate vault object DUPLICATE')
   })
