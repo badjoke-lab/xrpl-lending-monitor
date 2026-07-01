@@ -38,14 +38,33 @@ export interface CurrentStateScanMetrics {
   byType: Record<CurrentObjectFilter, CurrentStateTypeMetrics>
 }
 
-export interface CurrentStateScanResult {
-  endpoint: string
-  ledgerHash: string
-  ledgerIndex: number
+export interface CurrentStatePage {
+  pageNumber: number
+  markerBefore: unknown
+  markerAfter: unknown
+  firstLedgerIndex: string | null
+  lastLedgerIndex: string | null
+  decodedObjects: number
   vaults: readonly ScannedLedgerObject[]
   loanBrokers: readonly ScannedLedgerObject[]
   loans: readonly ScannedLedgerObject[]
+}
+
+export interface CurrentStateBatchResult {
+  endpoint: string
+  ledgerHash: string
+  ledgerIndex: number
+  complete: boolean
+  nextMarker: unknown
   metrics: CurrentStateScanMetrics
+}
+
+export interface CurrentStateScanResult extends CurrentStateBatchResult {
+  complete: true
+  nextMarker: null
+  vaults: readonly ScannedLedgerObject[]
+  loanBrokers: readonly ScannedLedgerObject[]
+  loans: readonly ScannedLedgerObject[]
 }
 
 export class CurrentStateScanError extends Error {
@@ -124,26 +143,33 @@ function ensureUniqueIds(filter: CurrentObjectFilter, objects: readonly ScannedL
   }
 }
 
-export async function scanCurrentState(options: {
+function addPageMetrics(metrics: CurrentStateScanMetrics, page: CurrentStatePage): void {
+  metrics.pages += 1
+  metrics.requests += 1
+  metrics.decodedObjects += page.decodedObjects
+  metrics.byType.vault.objects += page.vaults.length
+  metrics.byType.loan_broker.objects += page.loanBrokers.length
+  metrics.byType.loan.objects += page.loans.length
+  metrics.objects += page.vaults.length + page.loanBrokers.length + page.loans.length
+}
+
+export async function scanCurrentStateBatch(options: {
   endpoint: string
   timeoutMs: number
   ledgerHash: string
   ledgerIndex: number
-  pageLimitPerType?: number
-  requestLimitTotal?: number
+  startMarker?: unknown
+  maxPages?: number
   objectLimitPerPage?: number
   fetcher?: FetchLike
   nowMs?: () => number
   decodeObject?: LedgerObjectDecoder
-}): Promise<CurrentStateScanResult> {
-  const pageLimit = options.pageLimitPerType ?? 200
-  const requestLimit = options.requestLimitTotal ?? 600
+  onPage: (page: CurrentStatePage) => Promise<void> | void
+}): Promise<CurrentStateBatchResult> {
+  const maxPages = options.maxPages ?? 25
   const objectLimitPerPage = options.objectLimitPerPage ?? 2_048
-  if (!Number.isSafeInteger(pageLimit) || pageLimit <= 0) {
-    throw new Error('pageLimitPerType must be a positive integer')
-  }
-  if (!Number.isSafeInteger(requestLimit) || requestLimit <= 0) {
-    throw new Error('requestLimitTotal must be a positive integer')
+  if (!Number.isSafeInteger(maxPages) || maxPages <= 0) {
+    throw new Error('maxPages must be a positive integer')
   }
   if (!Number.isSafeInteger(objectLimitPerPage) || objectLimitPerPage <= 0) {
     throw new Error('objectLimitPerPage must be a positive integer')
@@ -157,32 +183,37 @@ export async function scanCurrentState(options: {
     fetcher: options.fetcher,
   })
   const decodeObject = options.decodeObject ?? defaultDecoder
-  const vaults: ScannedLedgerObject[] = []
-  const loanBrokers: ScannedLedgerObject[] = []
-  const loans: ScannedLedgerObject[] = []
   const seenMarkers = new Set<string>()
-  let marker: unknown = undefined
-  let pages = 0
-  let requests = 0
-  let decodedObjects = 0
+  let marker: unknown = options.startMarker
+  const metrics: CurrentStateScanMetrics = {
+    pages: 0,
+    requests: 0,
+    decodedObjects: 0,
+    objects: 0,
+    elapsedMs: 0,
+    requestedObjectsPerPage: objectLimitPerPage,
+    responseMode: 'binary',
+    byType: {
+      vault: { objects: 0 },
+      loan_broker: { objects: 0 },
+      loan: { objects: 0 },
+    },
+  }
+
+  if (marker !== undefined && marker !== null) {
+    seenMarkers.add(markerFingerprint(marker))
+  }
 
   try {
-    while (true) {
-      if (pages >= pageLimit) {
-        throw new Error(`ledger_data page limit ${pageLimit} reached before completion`)
-      }
-      if (requests >= requestLimit) {
-        throw new Error(`ledger_data request limit ${requestLimit} reached before completion`)
-      }
-
+    for (let pageNumber = 1; pageNumber <= maxPages; pageNumber += 1) {
+      const markerBefore = marker
       const params: Record<string, unknown> = {
         ledger_hash: options.ledgerHash,
         binary: true,
         limit: objectLimitPerPage,
       }
-      if (marker !== undefined) params.marker = marker
+      if (markerBefore !== undefined && markerBefore !== null) params.marker = markerBefore
 
-      requests += 1
       const result = await client.call<LedgerDataResult>('ledger_data', params)
       const ledgerHash = requiredString(result.ledger_hash, 'ledger_hash')
       const ledgerIndex = requiredLedgerIndex(result.ledger_index)
@@ -198,13 +229,21 @@ export async function scanCurrentState(options: {
         throw new Error('ledger_data response state must be an array')
       }
 
+      const vaults: ScannedLedgerObject[] = []
+      const loanBrokers: ScannedLedgerObject[] = []
+      const loans: ScannedLedgerObject[] = []
+      let firstLedgerIndex: string | null = null
+      let lastLedgerIndex: string | null = null
+
       for (let index = 0; index < result.state.length; index += 1) {
         const value = result.state[index]
         if (!isRecord(value)) throw new Error(`state[${index}] must be an object`)
+        const ledgerObjectIndex = requiredString(value.index, `state[${index}].index`)
+        firstLedgerIndex ??= ledgerObjectIndex
+        lastLedgerIndex = ledgerObjectIndex
         const binaryHex = requiredHex(value.data, `state[${index}].data`)
         const decoded = decodeObject(binaryHex)
         if (!isRecord(decoded)) throw new Error(`state[${index}] did not decode to an object`)
-        decodedObjects += 1
 
         const entryType = decoded.LedgerEntryType
         if (entryType !== 'Vault' && entryType !== 'LoanBroker' && entryType !== 'Loan') {
@@ -214,7 +253,7 @@ export async function scanCurrentState(options: {
         const object: ScannedLedgerObject = {
           ...decoded,
           LedgerEntryType: entryType,
-          index: requiredString(value.index, `state[${index}].index`),
+          index: ledgerObjectIndex,
           BinaryHex: binaryHex,
         }
         const filter = FILTER_BY_ENTRY_TYPE[entryType]
@@ -223,51 +262,124 @@ export async function scanCurrentState(options: {
         else loans.push(object)
       }
 
-      pages += 1
+      ensureUniqueIds('vault', vaults)
+      ensureUniqueIds('loan_broker', loanBrokers)
+      ensureUniqueIds('loan', loans)
+
       marker = result.marker
-      if (marker === undefined || marker === null) break
+      const page: CurrentStatePage = {
+        pageNumber,
+        markerBefore,
+        markerAfter: marker,
+        firstLedgerIndex,
+        lastLedgerIndex,
+        decodedObjects: result.state.length,
+        vaults,
+        loanBrokers,
+        loans,
+      }
+      await options.onPage(page)
+      addPageMetrics(metrics, page)
+
+      if (marker === undefined || marker === null) {
+        metrics.elapsedMs = Math.max(0, nowMs() - startedAt)
+        return {
+          endpoint: options.endpoint,
+          ledgerHash: options.ledgerHash,
+          ledgerIndex: options.ledgerIndex,
+          complete: true,
+          nextMarker: null,
+          metrics,
+        }
+      }
+
       const fingerprint = markerFingerprint(marker)
       if (seenMarkers.has(fingerprint)) {
-        throw new Error(`ledger_data repeated marker after page ${pages}`)
+        throw new Error(`ledger_data repeated marker after page ${metrics.pages}`)
       }
       seenMarkers.add(fingerprint)
     }
-
-    ensureUniqueIds('vault', vaults)
-    ensureUniqueIds('loan_broker', loanBrokers)
-    ensureUniqueIds('loan', loans)
   } catch (error) {
     throw new CurrentStateScanError({
-      message: `Incomplete current-state scan: ${error instanceof Error ? error.message : String(error)}`,
-      pagesCompleted: pages,
-      requestsCompleted: requests,
-      decodedObjects,
-      relevantObjects: vaults.length + loanBrokers.length + loans.length,
+      message: `Incomplete current-state batch: ${error instanceof Error ? error.message : String(error)}`,
+      pagesCompleted: metrics.pages,
+      requestsCompleted: metrics.requests + 1,
+      decodedObjects: metrics.decodedObjects,
+      relevantObjects: metrics.objects,
       lastMarker: marker,
       cause: error,
     })
   }
 
+  metrics.elapsedMs = Math.max(0, nowMs() - startedAt)
   return {
     endpoint: options.endpoint,
     ledgerHash: options.ledgerHash,
     ledgerIndex: options.ledgerIndex,
+    complete: false,
+    nextMarker: marker,
+    metrics,
+  }
+}
+
+export async function scanCurrentState(options: {
+  endpoint: string
+  timeoutMs: number
+  ledgerHash: string
+  ledgerIndex: number
+  pageLimitPerType?: number
+  requestLimitTotal?: number
+  objectLimitPerPage?: number
+  fetcher?: FetchLike
+  nowMs?: () => number
+  decodeObject?: LedgerObjectDecoder
+}): Promise<CurrentStateScanResult> {
+  const vaults: ScannedLedgerObject[] = []
+  const loanBrokers: ScannedLedgerObject[] = []
+  const loans: ScannedLedgerObject[] = []
+  const maxPages = Math.min(
+    options.pageLimitPerType ?? 200,
+    options.requestLimitTotal ?? 600,
+  )
+
+  const batch = await scanCurrentStateBatch({
+    endpoint: options.endpoint,
+    timeoutMs: options.timeoutMs,
+    ledgerHash: options.ledgerHash,
+    ledgerIndex: options.ledgerIndex,
+    maxPages,
+    objectLimitPerPage: options.objectLimitPerPage,
+    fetcher: options.fetcher,
+    nowMs: options.nowMs,
+    decodeObject: options.decodeObject,
+    onPage(page) {
+      vaults.push(...page.vaults)
+      loanBrokers.push(...page.loanBrokers)
+      loans.push(...page.loans)
+    },
+  })
+
+  if (!batch.complete) {
+    throw new CurrentStateScanError({
+      message: `Incomplete current-state scan: page limit ${maxPages} reached before completion`,
+      pagesCompleted: batch.metrics.pages,
+      requestsCompleted: batch.metrics.requests,
+      decodedObjects: batch.metrics.decodedObjects,
+      relevantObjects: batch.metrics.objects,
+      lastMarker: batch.nextMarker,
+    })
+  }
+
+  ensureUniqueIds('vault', vaults)
+  ensureUniqueIds('loan_broker', loanBrokers)
+  ensureUniqueIds('loan', loans)
+
+  return {
+    ...batch,
+    complete: true,
+    nextMarker: null,
     vaults,
     loanBrokers,
     loans,
-    metrics: {
-      pages,
-      requests,
-      decodedObjects,
-      objects: vaults.length + loanBrokers.length + loans.length,
-      elapsedMs: Math.max(0, nowMs() - startedAt),
-      requestedObjectsPerPage: objectLimitPerPage,
-      responseMode: 'binary',
-      byType: {
-        vault: { objects: vaults.length },
-        loan_broker: { objects: loanBrokers.length },
-        loan: { objects: loans.length },
-      },
-    },
   }
 }
