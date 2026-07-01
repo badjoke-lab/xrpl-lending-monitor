@@ -12,7 +12,7 @@ Last updated: 2026-07-01.
 
 ## Current work
 
-Stacked PR #7 implements roadmap PR 6B: resumable bootstrap execution, durable checkpoints, compressed object shards, verified manifests, and D1 activation. PR #6 remains its fully validated base until the merge operation is accepted.
+Stacked PR #7 implements roadmap PR 6B: resumable bootstrap execution, durable checkpoints, compressed object shards, verified manifests, D1 activation, and fail-closed cleanup planning. PR #6 remains its fully validated base until the merge operation is accepted.
 
 Implemented on the active branch:
 
@@ -31,7 +31,10 @@ Implemented on the active branch:
 - checkpoint retention when manifest verification fails;
 - checkpoint removal only after activation succeeds;
 - D1 and R2 bootstrap execution wiring;
-- tests for activation, exact-marker resume, shard ordering, storage idempotency, manifest retry without rescanning, checkpoint persistence, gzip payloads, and ledger mismatch rejection.
+- cleanup rejection while a checkpoint exists or a snapshot is building or active;
+- prefix-scoped cleanup planning with protected active or rollback keys;
+- bounded deletion batches;
+- tests for activation, exact-marker resume, shard ordering, storage idempotency, manifest retry without rescanning, checkpoint persistence, gzip payloads, cleanup safety, and ledger mismatch rejection.
 
 ## Completed
 
@@ -86,12 +89,12 @@ PR #6 final head passed:
 - browser smoke test;
 - live Devnet binary traversal and projection normalization.
 
-PR #7 current head passed:
+PR #7 current implementation head passed:
 
 - frozen-lockfile install;
 - lint;
 - type-check;
-- unit tests;
+- unit tests including cleanup safety;
 - all local D1 migrations including bootstrap checkpoints;
 - application build;
 - browser smoke test;
@@ -99,9 +102,9 @@ PR #7 current head passed:
 
 ## Remaining PR 6B work
 
-- add explicit incomplete-attempt cleanup rules and tests;
 - add a controlled preview bootstrap workflow with no committed credentials;
 - run an interruption-and-resume preview test;
+- select the failed-prefix retention window from preview evidence;
 - provision production storage only after preview evidence is accepted.
 
 ## Following work
@@ -119,7 +122,7 @@ PR #7 current head passed:
 
 | Question | Required evidence | Assigned point |
 |---|---|---|
-| What retention window should apply to failed bootstrap prefixes? | Cleanup and rollback tests | PR 6B |
+| What retention window should apply to failed bootstrap prefixes? | Preview interruption, resume, cleanup, and rollback measurements | PR 6B |
 | What exact schedule-state boundary labels should be public? | Tests against due-time and grace-end boundaries | Status engine |
 | What is the confirmed successful overpayment transaction shape? | Isolated Devnet fixture and validated metadata | Loan lifecycle |
 | How should each deletion reason be classified? | Transaction and DeletedNode fixtures | Deleted-object archive |
@@ -134,6 +137,8 @@ PR #7 current head passed:
 - only a digest-verified complete manifest can activate a snapshot;
 - manifest retry does not rescan already durable final shards;
 - R2 writes are idempotent by key, byte count, and SHA-256 digest;
+- cleanup cannot run against resumable, building, or active snapshots;
+- cleanup is snapshot-prefix scoped and preserves protected manifest references;
 - the previous active snapshot survives failed replacement work;
 - production bootstrap and Mainnet remain disabled until approved.
 
