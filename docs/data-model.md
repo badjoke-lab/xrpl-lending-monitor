@@ -54,6 +54,8 @@ Internal transient rows used only inside an incremental collector D1 batch. A gu
 
 Normalized AffectedNodes changes keyed by transaction, object, field, and change kind. Stores before and after values with explicit value type.
 
+Each row includes network, epoch, transaction hash, ledger index, transaction order, transaction type, result, close time, node index, object type, object ID, action, field name, before JSON, after JSON, value type, unsupported-field flag, and directly supported relationship identifiers for Vault, LoanBroker, Loan, account, owner, borrower, asset, and MPT issuance.
+
 ## Current projections
 
 The active bootstrap snapshot supplies the initial object set. Incremental validated-ledger processing maintains projections after activation.
