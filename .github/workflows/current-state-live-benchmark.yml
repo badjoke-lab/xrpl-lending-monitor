@@ -1,0 +1,49 @@
+name: Current state live benchmark
+
+on:
+  pull_request:
+    paths:
+      - "src/collector/current-state/**"
+      - "src/collector/network/**"
+      - ".github/workflows/current-state-live-benchmark.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live-devnet-read:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run bounded live current-state benchmark
+        env:
+          RUN_LIVE_CURRENT_STATE_BENCHMARK: "true"
+          XRPL_DEVNET_RPC_URL: "https://s.devnet.rippletest.net:51234/"
+        run: pnpm exec vitest run src/collector/current-state/live-current-state-benchmark.test.ts --reporter=verbose
+
+      - name: Upload benchmark evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: current-state-live-benchmark
+          path: artifacts/current-state-live-benchmark.json
+          if-no-files-found: warn
+          retention-days: 14

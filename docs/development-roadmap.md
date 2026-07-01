@@ -9,14 +9,14 @@ This document controls implementation order, dependencies, and target windows. D
 | Milestone | Target window | Goal | Exit condition |
 |---|---|---|---|
 | M0 Foundation and specification lock | 2026-07-01 to 2026-07-04 | Establish repository, source-of-truth documents, toolchain, and operating rules | Documentation accepted and project skeleton ready |
-| M1 Current-state collector | 2026-07-05 to 2026-07-12 | Connect Devnet, manage epochs, and scan current Vault, Broker, and Loan objects | Complete marker-aware current-state scan stored |
+| M1 Current-state collector | 2026-07-05 to 2026-07-12 | Connect Devnet, manage epochs, scan current objects, and create the first active snapshot | Complete marker-aware current-state bootstrap stored and activated |
 | M2 Event history and lifecycle | 2026-07-13 to 2026-07-24 | Collect validated ledgers, normalize changes, reconstruct lifecycle, and preserve deletions | Deterministic replay and archive queries pass |
 | M3 Public API | 2026-07-25 to 2026-07-31 | Expose bounded read-only core and history APIs | Contract tests pass for baseline entities and history |
 | M4 Baseline UI | 2026-08-01 to 2026-08-12 | Deliver ordinary monitoring pages and navigation | Overview, lists, details, activity, search, and status work end to end |
 | M5 Differentiated audit UI | 2026-08-13 to 2026-08-20 | Add lifecycle, state changes, cover history, archives, epochs, and provenance | Audit views complete without baseline regressions |
 | M6 Hardening and public Devnet release | 2026-08-21 to 2026-08-31 | Prove integrity, resource safety, accessibility, and operations | Soak test and release gates pass |
 
-The schedule is recalibrated after the current-object scanner benchmark because collector runtime and cadence must be selected from measured evidence.
+The schedule was recalibrated after the current-object scanner benchmark. Full bootstrap is separated from the scheduled Worker because measured global marker traversal does not fit a normal scheduled invocation.
 
 ## M0 — Foundation and specification lock
 
@@ -62,17 +62,34 @@ The schedule is recalibrated after the current-object scanner benchmark because 
 
 ### PR 6 — Current object scanner and collector benchmark
 
-- complete marker traversal for Vault, LoanBroker, and Loan;
+- complete marker traversal primitives for Vault, LoanBroker, and Loan;
+- one unfiltered binary traversal with local classification;
+- resumable exact-marker batches;
 - current projections and relationship checks;
+- terminal Loan zero-omission handling;
 - partial-scan failure behavior;
-- CPU, request, D1, storage, and catch-up measurements;
+- CPU, request, memory, storage, and catch-up measurements;
 - collector runtime and cadence selection.
+
+### PR 6B — Bootstrap runner and storage integration
+
+- long-running resumable bootstrap execution;
+- fixed validated-ledger identity across resumed batches;
+- exact marker checkpoint persistence;
+- bounded compressed shard generation;
+- external shard upload and retries;
+- complete manifest generation and verification;
+- cleanup of incomplete attempts;
+- D1 snapshot metadata and active-pointer activation;
+- preview full-bootstrap and resume test.
+
+PR 6B is required before M1 exits. Incremental collection cannot maintain a snapshot that has never been bootstrapped and activated.
 
 ## M2 — Event history and lifecycle
 
 ### PR 7 — Incremental validated-ledger collector
 
-Cursor-based processing, recognized transaction filtering, idempotency, bounded catch-up, retry behavior, and raw-payload controls.
+Cursor-based processing, recognized transaction filtering, idempotency, bounded catch-up, retry behavior, raw-payload controls, and integration with the active bootstrap snapshot.
 
 ### PR 8 — AffectedNodes normalization
 
@@ -164,7 +181,7 @@ M6 completes only after the multi-day soak, resource envelope, product release g
 
 ### Checkpoint A — after PR 6
 
-Select the collector runtime and cadence from measured CPU, request, storage, and catch-up evidence.
+Select the bootstrap and incremental collector runtimes from measured CPU, request, storage, and catch-up evidence. PR 6B implements the selected bootstrap path.
 
 ### Checkpoint B — after PR 12
 

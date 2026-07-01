@@ -31,6 +31,16 @@ JSON parsing, normalization, calculations, and serialization consume CPU even wh
 - indexes are included in write-amplification measurements;
 - database and per-query limits are treated as explicit design constraints.
 
+D1 stores network state, cursors, snapshot metadata, manifests, active pointers, normalized events, lifecycle data, archives, and aggregates. Full bootstrap object rows are not bulk-loaded into D1.
+
+### External bootstrap storage
+
+- object data is split into bounded compressed shards;
+- every shard has a stable sequence, object type, byte size, object count, and content hash;
+- a manifest references only complete uploaded shards;
+- incomplete attempts are not visible through the active pointer;
+- upload, retry, cleanup, and retained-attempt costs are measured.
+
 ## Resource targets
 
 Targets remain below platform ceilings and are adjusted only from measured evidence.
@@ -38,10 +48,19 @@ Targets remain below platform ceilings and are adjusted only from measured evide
 ### Worker execution
 
 - process bounded ledger batches;
-- cap RPC requests and marker pages per run;
+- cap RPC requests and ledgers per run;
 - record CPU and wall time;
-- avoid large aggregation or UI work in the collector;
+- avoid global marker traversal, large aggregation, or UI work in the Worker;
 - preserve catch-up capacity without skipping ledgers.
+
+### Bootstrap execution
+
+- run one unfiltered binary ledger traversal;
+- cap marker pages and decoded objects per resumable batch;
+- persist the exact marker after durable shard completion;
+- avoid full in-memory accumulation;
+- reject changed ledger identity on resume;
+- record wall time, heap, requests, pages, decoded objects, relevant objects, shard bytes, and retries.
 
 ### Database reads
 
@@ -56,7 +75,8 @@ Targets remain below platform ceilings and are adjusted only from measured evide
 - write state snapshots only on change;
 - batch related writes;
 - account for index write amplification;
-- never advance the canonical cursor after partial persistence.
+- never advance the canonical cursor after partial persistence;
+- never replace the active snapshot pointer before complete manifest verification.
 
 ### Storage
 
@@ -64,13 +84,25 @@ Targets remain below platform ceilings and are adjusted only from measured evide
 - prohibit unchanged snapshots;
 - make raw transaction retention configurable;
 - remove eligible raw payloads only after normalized integrity checks;
-- use daily aggregates instead of unnecessarily dense long-term snapshots.
+- use daily aggregates instead of unnecessarily dense long-term snapshots;
+- retain only the active bootstrap snapshot plus explicitly required rollback or failed-attempt evidence.
 
-## Collector runtime options
+## Checkpoint A measurements
+
+The 2026-07-01 Devnet measurements established:
+
+- 25 unfiltered binary pages decoded 51,200 ledger objects and 3,402 Lending-related objects in 6.858 seconds;
+- a complete filtered Vault traversal required 11,481 requests and approximately 835 seconds;
+- a complete filtered LoanBroker traversal required 11,481 requests and approximately 855 seconds;
+- filtered traversal follows the same global marker chain and does not reduce page count enough to justify repeated scans.
+
+These measurements reject a scheduled Worker full bootstrap and reject three separate filtered traversals.
+
+## Collector runtime selection
 
 ### Scheduled Worker
 
-Use when production-shaped measurements show adequate CPU, request, and catch-up margin.
+Approved for bounded status refresh and the future incremental validated-ledger collector, subject to production-shaped CPU, request, D1, and catch-up measurements.
 
 Acceptance evidence includes:
 
@@ -80,9 +112,20 @@ Acceptance evidence includes:
 - catch-up behavior after downtime;
 - multi-day Devnet soak results.
 
-### Scheduled GitHub Actions collector
+### Resumable long-running bootstrap runner
 
-An alternative runtime when longer execution windows or different scheduling behavior are required. It requires a separate security decision for ingestion credentials and failure isolation.
+Selected for initial current-state bootstrap and epoch replacement bootstrap.
+
+It must pass:
+
+- exact marker resume tests;
+- same-ledger identity enforcement;
+- bounded shard generation;
+- upload retry and idempotency tests;
+- complete manifest verification;
+- incomplete-attempt cleanup tests;
+- active-pointer rollback tests;
+- preview full-bootstrap execution.
 
 ### Reduced-frequency or hybrid reconciliation
 
@@ -95,6 +138,7 @@ Current objects may be reconciled at a lower cadence while transaction collectio
 - D1 queries, rows read, and rows written per run;
 - index write amplification;
 - database growth per day and per 1,000 protocol events;
+- bootstrap shard count, compressed bytes, upload duration, and retry count;
 - API rows read for every major endpoint;
 - cache hit rate;
 - catch-up time after 1 hour and 24 hours of downtime.
@@ -104,6 +148,8 @@ Current objects may be reconciled at a lower cadence while transaction collectio
 - stop before the execution deadline margin;
 - never advance a cursor for an incomplete ledger;
 - cap ledgers, transactions, retries, and marker pages per run;
+- persist bootstrap continuation only after durable shard completion;
+- never activate an incomplete manifest;
 - record resource estimates in collector health data;
 - show stale-data status when collection slows;
 - rate-limit expensive exports;

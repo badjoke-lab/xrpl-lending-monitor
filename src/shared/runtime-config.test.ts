@@ -9,7 +9,7 @@ const validEnvironment = {
 }
 
 describe('resolveRuntimeConfig', () => {
-  it('accepts the approved Devnet configuration with bounded defaults', () => {
+  it('accepts the approved Devnet status configuration', () => {
     expect(resolveRuntimeConfig(validEnvironment)).toEqual({
       network: 'devnet',
       mainnetEnabled: false,
@@ -19,7 +19,7 @@ describe('resolveRuntimeConfig', () => {
     })
   })
 
-  it('accepts a distinct HTTPS fallback and explicit limits', () => {
+  it('accepts a distinct HTTPS fallback and explicit status limits', () => {
     const config = resolveRuntimeConfig({
       ...validEnvironment,
       XRPL_DEVNET_RPC_FALLBACK_URL: 'https://fallback.example/rpc',
@@ -27,12 +27,16 @@ describe('resolveRuntimeConfig', () => {
       NETWORK_STATUS_STALE_AFTER_SECONDS: '45',
     })
 
-    expect(config.xrplRpcUrls).toEqual([
-      'https://s.devnet.rippletest.net:51234/',
-      'https://fallback.example/rpc',
-    ])
-    expect(config.rpcTimeoutMs).toBe(5000)
-    expect(config.staleAfterSeconds).toBe(45)
+    expect(config).toEqual({
+      network: 'devnet',
+      mainnetEnabled: false,
+      xrplRpcUrls: [
+        'https://s.devnet.rippletest.net:51234/',
+        'https://fallback.example/rpc',
+      ],
+      rpcTimeoutMs: 5000,
+      staleAfterSeconds: 45,
+    })
   })
 
   it('deduplicates identical endpoints', () => {
