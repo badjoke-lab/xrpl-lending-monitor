@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "complete": true,
+  "observed_at": "2026-07-01T10:34:12.386Z",
+  "endpoint": "https://s.devnet.rippletest.net:51234/",
+  "network": "devnet",
+  "filter": "vault",
+  "ledger": {
+    "index": 3291050,
+    "hash": "2331B3E114068C776CDC4772C8D7B7CD43CCA945916865F3E6362DEED57D53C8"
+  },
+  "metrics": {
+    "pages": 11481,
+    "requests": 11481,
+    "objects": 789254,
+    "elapsed_ms": 835495,
+    "requested_objects_per_page": 2048,
+    "response_mode": "binary"
+  },
+  "wall_time_ms": 835496,
+  "process_heap_before_bytes": 20555488,
+  "process_heap_after_bytes": 953987280,
+  "process_heap_delta_bytes": 933431792
+}
