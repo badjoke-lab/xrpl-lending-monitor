@@ -1,5 +1,8 @@
 PRAGMA foreign_keys = ON;
 
+ALTER TABLE current_state_snapshots
+  ADD COLUMN manifest_hash TEXT;
+
 CREATE TABLE current_state_bootstrap_checkpoints (
   snapshot_id TEXT PRIMARY KEY
     REFERENCES current_state_snapshots(id) ON DELETE CASCADE,
