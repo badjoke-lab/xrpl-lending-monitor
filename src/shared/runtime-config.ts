@@ -10,6 +10,7 @@ export interface RuntimeEnvironment {
   CURRENT_STATE_COLLECTION_ENABLED?: string
   CURRENT_SCAN_PAGE_LIMIT_PER_TYPE?: string
   CURRENT_SCAN_REQUEST_LIMIT_TOTAL?: string
+  CURRENT_SCAN_OBJECT_LIMIT_PER_PAGE?: string
   CURRENT_SCAN_WRITE_BATCH_SIZE?: string
 }
 
@@ -22,6 +23,7 @@ export interface RuntimeConfig {
   currentStateCollectionEnabled: boolean
   currentScanPageLimitPerType: number
   currentScanRequestLimitTotal: number
+  currentScanObjectLimitPerPage: number
   currentScanWriteBatchSize: number
 }
 
@@ -101,6 +103,11 @@ export function resolveRuntimeConfig(env: RuntimeEnvironment): RuntimeConfig {
     ),
     currentScanPageLimitPerType: pageLimit,
     currentScanRequestLimitTotal: requestLimit,
+    currentScanObjectLimitPerPage: parsePositiveInteger(
+      env.CURRENT_SCAN_OBJECT_LIMIT_PER_PAGE,
+      2_048,
+      'CURRENT_SCAN_OBJECT_LIMIT_PER_PAGE',
+    ),
     currentScanWriteBatchSize: parsePositiveInteger(
       env.CURRENT_SCAN_WRITE_BATCH_SIZE,
       50,
