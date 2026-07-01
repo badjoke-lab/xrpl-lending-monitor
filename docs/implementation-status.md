@@ -4,32 +4,33 @@ Last updated: 2026-07-02.
 
 ## Current milestone
 
-**M1 closeout — Current-state collector activation** and **M2 foundation — Incremental validated-ledger collector**.
+**M1 closeout — Current-state collector activation** and **M2 event history — AffectedNodes normalization**.
 
 M1 code foundations and controlled resume evidence are merged, but M1 has not exited because a complete isolated preview bootstrap has not yet been stored, verified, and activated. M2 foundation work may continue in parallel where it does not claim dependency on a real active snapshot.
 
 ## Canonical continuation point
 
-GitHub pull request #10, `Add validated ledger history foundation`:
+GitHub pull request #10, `Add validated ledger history foundation`, merged by squash as `f895632e185826ccc4bc09709c6b65508ded90b2`.
 
-- branch: `collector/incremental-ledger-foundation`;
-- base: `main`;
-- previous verified head on 2026-07-01: `a5c52b303e57f070e8ea8872e3a96d0143548ac1`;
-- current local work includes `origin/main` through PR #11 squash merge `52d32424393bfa5c99f7279b99f84104a73dab79`;
-- current local validation passed after adding the D1 commit guard and rollback tests;
-- final local head before push: `349fb1c` (`fix: guard incremental cursor commits`).
+Active local branch for the next roadmap unit:
+
+- branch: `collector/affected-nodes-normalization`;
+- base: `main` at `f895632e185826ccc4bc09709c6b65508ded90b2`;
+- roadmap unit: M2 PR 8, AffectedNodes normalization;
+- current state: local implementation and validation complete; pull request not opened yet.
 
 Always inspect the current pull-request head and checks before resuming; the values above are a recorded checkpoint, not permission to ignore newer GitHub state.
 
 ## Immediate work
 
-Complete pull request #10 before beginning a separate AffectedNodes implementation:
+Complete the AffectedNodes normalization pull request before beginning the Loan lifecycle engine:
 
-1. push the current PR #10 branch update and let CI plus the incremental live-read workflow run;
-2. update the pull-request body with exact local, CI, and live evidence;
-3. merge only after all required checks pass and the branch is current.
+1. push `collector/affected-nodes-normalization`;
+2. open a focused PR with exact validation and live-read evidence;
+3. resolve CI or review findings without weakening invariants;
+4. merge only after required checks pass and the branch is current.
 
-The D1-compatible fail-closed commit guard is implemented locally in PR #10 and must be confirmed by GitHub CI before merge.
+The first incomplete action is opening the AffectedNodes normalization pull request.
 
 ## Completed
 
@@ -136,6 +137,23 @@ Current local PR #10 validation after the D1 commit guard update:
 - `pnpm check`: passed;
 - `pnpm test:e2e`: 1 Chromium smoke test passed.
 
+GitHub PR #10 validation:
+
+- `quality`: passed at head `6a3d4c6781d74a13f57f551b28a286b2b9b28b58`;
+- `live-devnet-ledger`: passed at head `6a3d4c6781d74a13f57f551b28a286b2b9b28b58`;
+- PR #10 had no review comments or unresolved review threads before merge.
+
+Current local AffectedNodes normalization validation:
+
+- `pnpm exec vitest run src/collector/incremental/affected-nodes.test.ts`: 9 tests passed;
+- `pnpm exec vitest run src/collector/incremental/affected-nodes.test.ts src/worker/repositories/incremental-ledger-repository.test.ts`: 19 tests passed;
+- `pnpm lint && pnpm typecheck`: passed;
+- clean local D1 migration reset by removing ignored `.wrangler/state/v3/d1`, then `pnpm db:migrate:local`: migrations `0001` through `0005` applied successfully;
+- `pnpm test`: 21 test files passed, 3 skipped; 100 tests passed, 3 skipped;
+- `pnpm check`: passed;
+- `pnpm test:e2e`: 1 Chromium smoke test passed;
+- live Devnet ledger read: ledger `3298066`, hash `41A6526B16E353963FA011E5227556F6D3B0152F760133801751D12F975A8C91`, parent hash `D3825AF193583DDB86C0A19BCDE341AB50D8D646F22C7E2C93512ECCEB97B42E`, transaction count `0`, observed transaction types `[]`, recognized Lending-event count `0`.
+
 ## Known open questions
 
 | Question | Required evidence | Assigned point |
@@ -161,7 +179,7 @@ Current local PR #10 validation after the D1 commit guard update:
 
 ## Current blockers
 
-No known code blocker is recorded for completing pull request #10.
+No known code blocker is recorded for completing the AffectedNodes normalization pull request.
 
 A real isolated preview bootstrap depends on approved external preview access. That dependency does not block local implementation, tests, documentation, or independent incremental-history work.
 

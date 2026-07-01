@@ -1,4 +1,5 @@
 import type { IncrementalScanResult } from '../../collector/incremental/scan-validated-ledgers'
+import { normalizeAffectedNodes } from '../../collector/incremental/affected-nodes'
 
 interface CursorRow {
   epoch_id: string | null
@@ -156,6 +157,16 @@ export async function commitIncrementalScan(options: {
     )
 
     for (const event of ledger.lendingTransactions) {
+      const objectChanges = normalizeAffectedNodes(event.metadata, {
+        network: 'devnet',
+        epochId: options.epochId,
+        ledgerIndex: ledger.ledgerIndex,
+        closeTime: ledger.closeTime,
+        transactionHash: event.hash,
+        transactionIndex: event.transactionIndex,
+        transactionType: event.transactionType,
+        result: event.result,
+      })
       statements.push(
         options.db
           .prepare(
@@ -181,6 +192,57 @@ export async function commitIncrementalScan(options: {
             options.processedAt,
           ),
       )
+
+      for (const change of objectChanges) {
+        statements.push(
+          options.db
+            .prepare(
+              `INSERT INTO object_changes (
+                 network, epoch_id, transaction_hash, ledger_index, transaction_index,
+                 transaction_type, result_code, close_time, node_index, object_type,
+                 object_id, action, field_name, before_json, after_json, value_type,
+                 unsupported_field, vault_id, loan_broker_id, loan_id, account, owner,
+                 borrower, asset_key, mpt_issuance_id, created_at
+               ) VALUES (
+                 ?1, ?2, ?3, ?4, ?5,
+                 ?6, ?7, ?8, ?9, ?10,
+                 ?11, ?12, ?13, ?14, ?15, ?16,
+                 ?17, ?18, ?19, ?20, ?21, ?22,
+                 ?23, ?24, ?25, ?26
+               )
+               ON CONFLICT(network, epoch_id, transaction_hash, node_index, object_id, field_name, action)
+               DO NOTHING`,
+            )
+            .bind(
+              change.network,
+              change.epochId,
+              change.transactionHash,
+              change.ledgerIndex,
+              change.transactionIndex,
+              change.transactionType,
+              change.result,
+              change.closeTime,
+              change.nodeIndex,
+              change.objectType,
+              change.objectId,
+              change.action,
+              change.fieldName,
+              change.beforeJson,
+              change.afterJson,
+              change.valueType,
+              change.unsupportedField ? 1 : 0,
+              change.relationships.vaultId,
+              change.relationships.loanBrokerId,
+              change.relationships.loanId,
+              change.relationships.account,
+              change.relationships.owner,
+              change.relationships.borrower,
+              change.relationships.assetKey,
+              change.relationships.mptIssuanceId,
+              options.processedAt,
+            ),
+        )
+      }
     }
   }
 
