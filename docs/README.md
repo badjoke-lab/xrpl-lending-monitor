@@ -11,7 +11,7 @@ This directory is the source of truth for XRPL Lending Monitor.
 5. [`asset-model.md`](asset-model.md) — XRP, IOU, and MPT handling
 6. [`collector-design.md`](collector-design.md) — collection, backfill, idempotency, and reset handling
 7. [`testing-strategy.md`](testing-strategy.md) — required validation and release tests
-8. [`free-tier-budget.md`](free-tier-budget.md) — operating limits and cost guardrails
+8. [`resource-envelope.md`](resource-envelope.md) — runtime, storage, and collection limits
 9. [`competitor-positioning.md`](competitor-positioning.md) — baseline parity and differentiators
 10. [`development-roadmap.md`](development-roadmap.md) — ordered implementation plan and target schedule
 11. [`implementation-status.md`](implementation-status.md) — current state, next PR, blockers, and open questions
@@ -29,4 +29,4 @@ When documents conflict, stop implementation and correct the conflict before pro
 
 ## Update requirements
 
-Every implementation PR must update `implementation-status.md`. A PR must also update the relevant specification, roadmap, budget, or decision record when it changes behavior, scope, sequencing, resource use, or a previously accepted decision.
+Every implementation PR must update `implementation-status.md`. A PR must also update the relevant specification, roadmap, resource envelope, or decision record when it changes behavior, scope, sequencing, resource use, or a previously accepted decision.

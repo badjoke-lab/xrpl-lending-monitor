@@ -2,7 +2,7 @@
 
 ## Objectives
 
-Testing must prove data correctness, collection continuity, protocol-state interpretation, asset handling, free-tier safety, and user-visible behavior. UI snapshots alone are not sufficient.
+Testing must prove data correctness, collection continuity, protocol-state interpretation, asset handling, runtime and storage safety, and user-visible behavior. UI snapshots alone are not sufficient.
 
 ## Test layers
 
@@ -10,34 +10,19 @@ Testing must prove data correctness, collection continuity, protocol-state inter
 
 Required for:
 
-- Ripple epoch conversion;
-- rate-unit conversion;
+- Ripple epoch and rate-unit conversion;
 - decimal-safe arithmetic;
 - XRP, IOU, and MPT normalization;
 - flag decoding;
-- on-ledger status;
-- schedule status and exact boundary times;
-- derived formulas;
+- on-ledger and schedule status boundaries;
+- derived formulas and provenance;
 - AffectedNodes normalization;
 - deletion-reason classification;
-- provenance assignment;
 - Devnet reset signals.
 
 ### Fixture-based parser tests
 
-Store redacted fixtures from validated Devnet transactions and ledger objects for every supported transaction type and object type.
-
-Fixtures must include:
-
-- created, modified, and deleted nodes;
-- zero-value fields that may be omitted;
-- XRP, IOU, and MPT amounts;
-- private Vaults and Domain IDs;
-- regular and full LoanPay;
-- overpayment evidence when confirmed;
-- impair, unimpair, and default;
-- deleted Loan, Broker, and Vault records;
-- unknown future fields.
+Use redacted fixtures from validated Devnet transactions and ledger objects for every supported transaction and object type. Fixtures cover created, modified, and deleted nodes; omitted zero values; XRP, IOU, and MPT amounts; Loan payment paths; impair, unimpair, default, and delete behavior; and unknown future fields.
 
 ### Integration tests
 
@@ -51,100 +36,43 @@ Use local D1 migrations and fixture-ledger sequences to verify:
 - deleted-object archival;
 - asset-separated aggregates;
 - network and epoch isolation;
-- marker completion;
+- complete marker traversal;
 - reconciliation behavior.
 
 ### Live Devnet smoke tests
 
-Live tests are non-destructive reads unless a dedicated, isolated protocol test is explicitly approved.
+Live tests are non-destructive reads unless a dedicated isolated protocol test is explicitly approved.
 
-Required read smoke tests:
+Required read checks include endpoint connection, server and amendment status, latest validated ledger, marker behavior for all object types, known current objects when available, and API serialization against live values.
 
-- endpoint connection;
-- server info and amendment state;
-- latest validated ledger;
-- first page and marker behavior for all object types;
-- one known current object when available;
-- API serialization against live values.
-
-Live tests must not depend on Group Pay or any other repository.
+Live tests must have no cross-project runtime dependency.
 
 ### API contract tests
 
-Verify:
-
-- network and epoch metadata in all responses;
-- pagination bounds;
-- filtering and sorting;
-- direct, derived, and indexed provenance;
-- archived object lookup;
-- stale-data warnings;
-- invalid identifiers and injection attempts;
-- raw-data retention boundaries.
+Verify network and epoch metadata, pagination bounds, filtering, sorting, provenance, archived lookup, stale-data warnings, invalid identifiers, injection attempts, and raw-data retention boundaries.
 
 ### Browser tests
 
-Playwright must cover:
-
-- Overview loading and stale state;
-- Vault, Broker, and Loan list navigation;
-- detail relationships;
-- Loan status separation;
-- activity and transaction changes;
-- search by supported identifier types;
-- archived epoch and deleted object views;
-- empty, loading, partial, and error states;
-- responsive layouts.
+Playwright covers Overview states, entity lists and details, relationships, Loan status separation, activity, search, archived epochs, deleted objects, error states, and responsive layouts.
 
 ## Data integrity invariants
 
-The test suite must enforce:
-
 1. Current objects are unique by network, epoch, and ID.
-2. A Loan references one Broker in the same network and epoch, or a documented archived reference.
-3. A Broker references one Vault in the same network and epoch, or a documented archived reference.
-4. Asset aggregates include only identical asset keys.
-5. A deleted object is absent from current projections and present in archives.
-6. Cursor gaps are rejected.
-7. Reprocessing produces no duplicate canonical events.
-8. `defaulted` is never derived from time alone.
-9. Partial marker scans are never reported as totals.
-10. Canonical amounts are not stored as binary floating point.
+2. Loan and Broker relationships stay within the same network and epoch unless an archived reference is documented.
+3. Asset aggregates include only identical canonical asset keys.
+4. Deleted objects leave current projections and remain in archives.
+5. Cursor gaps are rejected.
+6. Reprocessing creates no duplicate canonical events.
+7. `defaulted` is never derived from time alone.
+8. Partial marker scans are never reported as totals.
+9. Canonical amounts are not stored as binary floating point.
 
 ## Release checks
 
-Every PR:
+Every implementation PR runs lint, type-checking, unit and integration tests, migration checks, build checks, affected browser tests, and documentation consistency review.
 
-- lint;
-- type-check;
-- unit and integration tests;
-- migration apply on an empty local D1;
-- migration apply from the previous schema;
-- build;
-- affected Playwright smoke tests;
-- documentation consistency checklist.
-
-Before public release:
-
-- multi-day collector soak test;
-- forced endpoint outage and catch-up test;
-- simulated Devnet reset;
-- full marker scan;
-- database size and write-rate measurement;
-- API cache behavior;
-- accessibility and mobile review;
-- production rollback test.
+Before public release, run a multi-day collector soak, endpoint outage and catch-up tests, reset simulation, full marker scans, database growth measurements, API cache checks, accessibility and mobile review, and a rollback test.
 
 ## Test evidence
 
-Important live and integration test runs should produce artifacts containing:
-
-- summarized results;
-- redacted fixtures or hashes;
-- processed ledger range;
-- collector metrics;
-- failed invariants;
-- generated API samples;
-- relevant screenshots.
-
-Artifacts do not replace canonical repository fixtures and documentation.
+Important live and integration runs produce summarized results, redacted fixtures or hashes, processed ledger ranges, collector metrics, failed invariants, generated API samples, and relevant screenshots. Artifacts do not replace canonical fixtures and documentation.

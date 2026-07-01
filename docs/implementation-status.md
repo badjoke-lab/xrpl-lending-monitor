@@ -6,143 +6,93 @@ Last updated: 2026-07-01.
 
 **M1 — Current-state collector**
 
-## Current branch
-
-`collector/network-epoch-foundation`
-
-## Current work
-
-Roadmap PR 4: Devnet network, amendment, epoch, and synchronization-status foundation.
-
-The GitHub pull request number is #3 because the repository foundation and specification work were combined into the first merged PR.
-
 ## Completed
 
 ### M0 — Foundation and specification lock
 
-- Repository created: `badjoke-lab/xrpl-lending-monitor`
-- PR #1 merged: source-of-truth specifications and development roadmap
-- PR #2 merged: pinned TypeScript, React/Vite, Hono Worker, D1, test, and CI skeleton
-- Repository operating rules in `AGENTS.md`
-- Product, architecture, data, status, asset, collector, testing, free-tier, competitor, roadmap, and decision documents
-- Mainnet-fail-closed runtime configuration
-- Read-only foundation UI and API boundary
-- Frozen-lockfile CI with lint, type-check, unit, build, and browser checks
+- repository and source-of-truth documentation;
+- product, architecture, data, status, asset, collector, testing, resource, positioning, roadmap, and decision documents;
+- pinned TypeScript, React/Vite, Hono Worker, D1, test, and CI skeleton;
+- Mainnet-fail-closed runtime configuration;
+- read-only foundation UI and API boundary;
+- frozen-lockfile CI with lint, type-check, unit, migration, build, and browser checks.
 
-### Active branch implementation
+### M1 network and epoch foundation
 
-- Canonical LendingProtocol and SingleAssetVault amendment IDs
-- Validated XRPL JSON-RPC client
-- HTTPS-only endpoint configuration, timeout, and optional fallback
-- Same-endpoint `server_info` and amendment snapshot reads
-- Validated-ledger, server-version, server-state, and complete-ledger parsing
-- Initial Devnet reset-signal detection for ledger rewind and same-index hash change
-- Deterministic initial epoch ID and status planning
-- Healthy, stale, error, and reset-suspected synchronization states
-- `network_epochs` and `sync_state` D1 migration
-- D1 persistence for successful and failed status refreshes
-- Scheduled Worker handler for network-status refresh
-- D1-backed read-only `/api/status`
-- Explicit amendment, freshness, cursor, error, and reset fields in the API
-- Unit tests for RPC configuration, endpoint fallback, response parsing, reset detection, status planning, and API serialization
-- Local D1 migration application in CI
+- canonical LendingProtocol and SingleAssetVault amendment identifiers;
+- validated XRPL JSON-RPC reads with timeout and endpoint fallback;
+- validated-ledger, server-version, server-state, and complete-ledger parsing;
+- Devnet reset-signal detection for ledger rewind and same-index hash change;
+- deterministic initial epoch and synchronization state planning;
+- `network_epochs` and `sync_state` D1 migration;
+- scheduled status refresh and D1 persistence;
+- D1-backed read-only `/api/status`;
+- explicit amendment, freshness, cursor, error, and reset fields;
+- unit tests and local D1 migration validation.
 
-## Active PR
+## Current validation
 
-### PR #3 — Add Devnet network status and epoch foundation
+- frozen-lockfile install: passed;
+- lint: passed;
+- type-check: passed;
+- unit tests: passed;
+- local D1 migration apply: passed;
+- build: passed;
+- browser smoke test: passed.
 
-Roadmap slot: PR 4.
+## Next work
 
-Current validation:
-
-- frozen-lockfile install: passed
-- lint: passed
-- type-check: passed
-- unit tests: passed
-- local D1 migration apply: passed
-- build: passed
-- browser smoke test: passed
-
-Remaining before merge:
-
-- repository documentation review;
-- mark the draft ready;
-- final clean CI on the documented head.
-
-## Next PR
-
-### Roadmap PR 5 — Asset normalization
-
-Planned scope:
+### Asset normalization
 
 - XRP normalization;
-- IOU currency and issuer identity;
+- IOU currency-and-issuer identity;
 - MPT issuance identity and metadata resolution;
 - exact decimal amount utilities;
-- rate-unit conversion;
-- Ripple epoch conversion;
-- fixtures for missing and complete metadata;
+- rate-unit and Ripple epoch conversion;
+- missing and complete metadata fixtures;
 - API-safe asset serialization;
 - enforcement that unlike assets cannot be aggregated.
 
-## Following PR
-
-### Roadmap PR 6 — Current object scanner and free-tier benchmark checkpoint
+### Following work — current object scanner and collector benchmark
 
 - complete marker traversal for Vault, LoanBroker, and Loan;
-- current-state projections;
-- relationship checks;
+- current-state projections and relationship checks;
 - partial-scan failure behavior;
-- CPU, external request, D1, and storage measurements;
-- decision between Cloudflare Cron Worker, reduced cadence, or the approved free fallback.
+- CPU, request, D1, storage, and catch-up measurements;
+- collector runtime and cadence selection.
 
 ## Known open questions
 
 | Question | Required evidence | Assigned point |
 |---|---|---|
-| Can the collector remain under the Workers Free 10 ms CPU limit? | p50, p95, and max CPU benchmark with production-shaped payloads | Roadmap PR 6 / Checkpoint A |
-| What exact schedule-state boundary labels should be public? | unit tests against due time and grace-end boundaries | Roadmap PR 12 |
-| What is the confirmed successful overpayment transaction shape? | isolated Devnet fixture and validated metadata | Roadmap PR 9 |
-| How should each deletion reason be classified? | transaction and DeletedNode fixtures for full payment, default, Broker delete, and Vault delete | Roadmap PR 10 |
-| What MPT metadata is reliably available from public RPC? | live and fixture tests with missing and complete metadata | Roadmap PR 5 |
-| Which additional signals reliably confirm a Devnet reset? | simulated reset, second-endpoint confirmation, and live observation | Roadmap PR 25 |
-| Is GitHub Actions required as the collector fallback? | Worker benchmark failure or insufficient catch-up capacity | Checkpoint A |
+| Which collector runtime and cadence provide adequate operating margin? | Production-shaped CPU, request, storage, and catch-up measurements | Current object scanner / Checkpoint A |
+| What exact schedule-state boundary labels should be public? | Tests against due-time and grace-end boundaries | Status engine |
+| What is the confirmed successful overpayment transaction shape? | Isolated Devnet fixture and validated metadata | Loan lifecycle |
+| How should each deletion reason be classified? | Transaction and DeletedNode fixtures | Deleted-object archive |
+| What MPT metadata is reliably available from public RPC? | Live and fixture tests | Asset normalization |
+| Which additional signals reliably confirm a Devnet reset? | Simulation, independent confirmation, and live observation | Reset hardening |
 
-## Decisions made in the active PR
+## Active design decisions
 
-- A reset signal does not immediately archive the current epoch. It moves sync state to `reset_suspected`; verified rollover is deferred to the reset-hardening work.
-- All amendment and server values are read from the same endpoint for one snapshot.
-- The public status endpoint reads D1 only; it does not mutate state or call XRPL on demand.
-- Production Cron activation and real D1 provisioning remain disabled.
+- a single reset signal produces `reset_suspected` rather than automatic epoch rollover;
+- amendment and server values for a snapshot come from one endpoint;
+- the public status endpoint reads D1 only and does not mutate state or call XRPL on demand;
+- production collection activation and real production bindings remain disabled until approved.
 
 ## Current blockers
 
 None.
 
-## Schedule status
-
-- M0: complete
-- M1 network/epoch foundation: in progress and on schedule
-- Asset normalization: next
-- Current object scanner and free-tier checkpoint: follows asset normalization
-
 ## Risks being watched
 
-- Free Worker CPU limit may be too low for the full collector.
-- Devnet can reset and erase current public history.
-- A single reset signal can be transient and therefore requires confirmation before epoch rollover.
-- Public RPC behavior and available history may change.
-- MPT metadata may be incomplete.
-- Mainnet activation timing is unknown.
-- A direct competitor may expand into full lifecycle history.
+- scheduled Worker CPU allowance may be insufficient for the full collector;
+- Devnet can reset and erase current public state;
+- one reset signal can be transient and requires confirmation;
+- public RPC behavior and available history may change;
+- MPT metadata may be incomplete;
+- Mainnet activation timing is unknown;
+- direct comparators may expand lifecycle-history coverage.
 
 ## Operational rule
 
-Every future PR must update this file with:
-
-- current milestone;
-- completed work;
-- next PR;
-- new blockers or resolved blockers;
-- open questions created or closed;
-- schedule drift.
+Every future implementation PR updates this file with the current milestone, completed work, next work, blockers, open questions, and material schedule changes.
