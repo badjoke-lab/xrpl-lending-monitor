@@ -29,3 +29,6 @@ CREATE TABLE protocol_events (
   created_at TEXT NOT NULL,
   PRIMARY KEY (network, epoch_id, event_hash)
 );
+
+CREATE UNIQUE INDEX protocol_events_ledger_order
+  ON protocol_events (network, epoch_id, ledger_index, event_index);
