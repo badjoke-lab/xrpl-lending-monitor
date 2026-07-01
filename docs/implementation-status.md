@@ -14,7 +14,7 @@ Last updated: 2026-07-01.
 
 Controlled live Devnet interruption-and-resume evidence for the merged bootstrap runner and storage integration.
 
-Implemented on the active branch:
+Implemented and validated on the active branch:
 
 - a two-batch live Devnet preview fixed to one validated ledger;
 - first execution stops after one binary ledger page and persists the exact continuation marker;
@@ -23,7 +23,7 @@ Implemented on the active branch:
 - evidence that lifecycle initialization occurs only once;
 - evidence that a partial traversal does not attempt snapshot activation;
 - machine-readable preview evidence uploaded by GitHub Actions;
-- manual `workflow_dispatch` support without committed credentials.
+- pull-request and manual `workflow_dispatch` execution without committed credentials.
 
 ## Completed
 
@@ -72,25 +72,25 @@ Implemented on the active branch:
 
 ## Current validation
 
-Merged main has passed:
+Merged main has passed frozen install, lint, type-check, unit tests, all local D1 migrations, build, browser smoke, and live current-state projection checks.
 
-- frozen-lockfile install;
-- lint;
-- type-check;
-- unit tests;
-- all local D1 migrations;
-- application build;
-- browser smoke test;
-- live Devnet binary traversal and projection normalization.
+The bootstrap resume preview passed at Devnet ledger `3293119` with hash `A607447D13F7D03E11AE7895CCAA5AB16D3C051EF4421042043AFA8E6454EC85`:
 
-The active branch adds a live two-batch resume workflow. Its CI and uploaded evidence are the current gate.
+- batch 1: 1 request, 2,048 decoded objects, 124 Lending objects, 33,213 compressed bytes;
+- batch 2 cumulative: 2 requests, 4,096 decoded objects, 261 Lending objects, 70,219 compressed bytes;
+- global shard pages remained `[1, 2]`;
+- the exact continuation marker advanced between batches;
+- lifecycle initialization ran once;
+- activation remained disabled for the partial traversal;
+- normal CI, the current-state live benchmark, and the new resume workflow all passed.
 
 ## Remaining PR 6B work
 
-- pass the controlled live interruption-and-resume workflow;
-- use the observed shard sizes and resume behavior to set the failed-prefix retention window;
+- merge the successful live resume workflow;
 - add real preview D1 and R2 bindings only after the credential and environment boundary is approved;
-- run a longer preview bootstrap before production provisioning.
+- run a longer preview bootstrap using those isolated bindings;
+- set the failed-prefix retention window from the longer preview and rollback evidence;
+- provision production storage only after preview evidence is accepted.
 
 ## Following work
 
@@ -107,7 +107,7 @@ The active branch adds a live two-batch resume workflow. Its CI and uploaded evi
 
 | Question | Required evidence | Assigned point |
 |---|---|---|
-| What retention window should apply to failed bootstrap prefixes? | Preview interruption, resume, cleanup, and rollback measurements | Bootstrap preview |
+| What retention window should apply to failed bootstrap prefixes? | Longer preview, cleanup, and rollback measurements | Bootstrap preview |
 | What exact schedule-state boundary labels should be public? | Tests against due-time and grace-end boundaries | Status engine |
 | What is the confirmed successful overpayment transaction shape? | Isolated Devnet fixture and validated metadata | Loan lifecycle |
 | How should each deletion reason be classified? | Transaction and DeletedNode fixtures | Deleted-object archive |
@@ -126,7 +126,7 @@ The active branch adds a live two-batch resume workflow. Its CI and uploaded evi
 
 ## Current blockers
 
-No code blocker. Live interruption-and-resume evidence is required before adding real preview storage bindings.
+No code blocker. Real preview credentials and isolated bindings require an explicit environment decision before provisioning.
 
 ## Operational rule
 
