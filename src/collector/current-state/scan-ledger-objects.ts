@@ -1,7 +1,10 @@
+import { decode } from '@xrpl-commons/ripple-binary-codec'
+
 import { XrplJsonRpcClient, type FetchLike } from '../network/xrpl-rpc'
 
 export type CurrentObjectFilter = 'vault' | 'loan_broker' | 'loan'
 export type CurrentLedgerEntryType = 'Vault' | 'LoanBroker' | 'Loan'
+export type LedgerObjectDecoder = (binaryHex: string) => Record<string, unknown>
 
 const EXPECTED_ENTRY_TYPE: Record<CurrentObjectFilter, CurrentLedgerEntryType> = {
   vault: 'Vault',
@@ -12,6 +15,7 @@ const EXPECTED_ENTRY_TYPE: Record<CurrentObjectFilter, CurrentLedgerEntryType> =
 export interface ScannedLedgerObject extends Record<string, unknown> {
   LedgerEntryType: CurrentLedgerEntryType
   index: string
+  BinaryHex: string
 }
 
 interface LedgerDataResult {
@@ -28,6 +32,7 @@ export interface LedgerObjectScanMetrics {
   objects: number
   elapsedMs: number
   requestedObjectsPerPage: number
+  responseMode: 'binary'
 }
 
 export interface LedgerObjectScanResult {
@@ -74,6 +79,14 @@ function requiredString(value: unknown, field: string): string {
   return value
 }
 
+function requiredHex(value: unknown, field: string): string {
+  const hex = requiredString(value, field)
+  if (hex.length % 2 !== 0 || !/^[A-Fa-f0-9]+$/.test(hex)) {
+    throw new Error(`${field} must be an even-length hexadecimal string`)
+  }
+  return hex.toUpperCase()
+}
+
 function requiredLedgerIndex(value: unknown): number {
   const number = typeof value === 'string' ? Number(value) : value
   if (!Number.isSafeInteger(number) || Number(number) < 0) {
@@ -94,13 +107,20 @@ function markerFingerprint(marker: unknown): string {
   }
 }
 
+function defaultDecoder(binaryHex: string): Record<string, unknown> {
+  const decoded = decode(binaryHex)
+  if (!isRecord(decoded)) throw new Error('Binary ledger object did not decode to an object')
+  return decoded
+}
+
 function parsePage(options: {
   result: LedgerDataResult
   filter: CurrentObjectFilter
   expectedLedgerHash: string
   expectedLedgerIndex: number
+  decodeObject: LedgerObjectDecoder
 }): { objects: ScannedLedgerObject[]; marker: unknown } {
-  const { result, filter, expectedLedgerHash, expectedLedgerIndex } = options
+  const { result, filter, expectedLedgerHash, expectedLedgerIndex, decodeObject } = options
   const ledgerHash = requiredString(result.ledger_hash, 'ledger_hash')
   const ledgerIndex = requiredLedgerIndex(result.ledger_index)
 
@@ -119,16 +139,20 @@ function parsePage(options: {
   const expectedType = EXPECTED_ENTRY_TYPE[filter]
   const objects = result.state.map((value, index) => {
     if (!isRecord(value)) throw new Error(`state[${index}] must be an object`)
-    if (value.LedgerEntryType !== expectedType) {
+    const binaryHex = requiredHex(value.data, `state[${index}].data`)
+    const decoded = decodeObject(binaryHex)
+    if (!isRecord(decoded)) throw new Error(`state[${index}] did not decode to an object`)
+    if (decoded.LedgerEntryType !== expectedType) {
       throw new Error(
-        `state[${index}] expected ${expectedType}, received ${String(value.LedgerEntryType)}`,
+        `state[${index}] expected ${expectedType}, received ${String(decoded.LedgerEntryType)}`,
       )
     }
 
     return {
-      ...value,
+      ...decoded,
       LedgerEntryType: expectedType,
       index: requiredString(value.index, `state[${index}].index`),
+      BinaryHex: binaryHex,
     }
   })
 
@@ -146,6 +170,7 @@ export async function scanLedgerObjects(options: {
   objectLimitPerPage?: number
   fetcher?: FetchLike
   nowMs?: () => number
+  decodeObject?: LedgerObjectDecoder
 }): Promise<LedgerObjectScanResult> {
   const pageLimit = options.pageLimit ?? 200
   const requestLimit = options.requestLimit ?? 200
@@ -167,6 +192,7 @@ export async function scanLedgerObjects(options: {
     timeoutMs: options.timeoutMs,
     fetcher: options.fetcher,
   })
+  const decodeObject = options.decodeObject ?? defaultDecoder
   const objects: ScannedLedgerObject[] = []
   const seenMarkers = new Set<string>()
   let marker: unknown = undefined
@@ -184,7 +210,7 @@ export async function scanLedgerObjects(options: {
 
       const params: Record<string, unknown> = {
         ledger_hash: options.ledgerHash,
-        binary: false,
+        binary: true,
         type: options.filter,
         limit: objectLimitPerPage,
       }
@@ -197,6 +223,7 @@ export async function scanLedgerObjects(options: {
         filter: options.filter,
         expectedLedgerHash: options.ledgerHash,
         expectedLedgerIndex: options.ledgerIndex,
+        decodeObject,
       })
 
       pages += 1
@@ -232,6 +259,7 @@ export async function scanLedgerObjects(options: {
       objects: objects.length,
       elapsedMs: Math.max(0, nowMs() - startedAt),
       requestedObjectsPerPage: objectLimitPerPage,
+      responseMode: 'binary',
     },
   }
 }
