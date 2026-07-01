@@ -12,56 +12,50 @@ Last updated: 2026-07-01.
 
 ## Current work
 
-Project skeleton implementation: pinned toolchain, React/Vite application shell, read-only Cloudflare Worker, D1 binding boundary, fail-closed Devnet configuration, tests, and CI.
+Final validation and merge preparation for the project skeleton.
 
 ## Completed
 
-### M0 source of truth
+### Source-of-truth foundation
 
 - Repository created: `badjoke-lab/xrpl-lending-monitor`
 - PR #1 merged: source-of-truth specifications and development roadmap
-- Repository operating rules
-- Documentation index
-- Product specification
-- Architecture specification
-- Data model
-- Loan status model
-- Asset model
-- Collector design
-- Testing strategy
-- Free-tier operating budget and benchmark gate
-- Competitor positioning
-- Dated development roadmap
-- Decision log and PR documentation checklist
+- Repository operating rules in `AGENTS.md`
+- Documentation index and PR checklist
+- Product, architecture, data, status, asset, collector, testing, free-tier, competitor, roadmap, and decision documents
+- Requirement that every implementation PR updates this file and relevant specifications
 
-### Project skeleton on current branch
+### Project skeleton on the active branch
 
-- Node and pnpm versions pinned
-- Exact application and development dependency versions pinned
+- Node.js and pnpm versions pinned
+- Exact dependency versions and committed `pnpm-lock.yaml`
+- Explicit pnpm build-script approvals in `pnpm-workspace.yaml`
 - TypeScript configuration for UI, Worker, and tooling
 - React and Vite application entrypoint
 - Truthful foundation UI with no fabricated protocol data
 - Hono Worker with read-only `/api/health` and `/api/status`
 - Cloudflare Static Assets and D1 binding configuration
-- Placeholder D1 database ID to block accidental production deployment
+- Placeholder D1 database ID to prevent accidental production deployment
 - Devnet-only, Mainnet-fail-closed runtime validation
 - Unit tests for network configuration
 - Playwright browser smoke test
 - ESLint, Vitest, Vite, Wrangler, and Playwright configuration
-- GitHub Actions quality pipeline
+- Read-only GitHub Actions CI using frozen-lockfile installation
 - D1 migration operating rules
+- Successful CI validation of install, lint, type-check, unit tests, build, Chromium installation, and browser smoke test
 
 ## Active PR
 
-### Project skeleton
+### PR #2 — Project skeleton
 
-Expected completion condition:
+Merge conditions:
 
-- dependency installation succeeds in CI;
-- lint, type-check, unit tests, build, and browser smoke tests pass;
+- clean frozen-lockfile CI passes;
+- documentation and implementation agree;
 - no production deployment occurs;
-- no Group Pay dependency exists;
-- documentation and implementation agree.
+- no Group Pay dependency exists.
+
+After merge, M0 is complete and work advances to M1.
 
 ## Next PR
 
@@ -70,7 +64,7 @@ Expected completion condition:
 Planned scope:
 
 - XRPL Devnet RPC client boundary;
-- endpoint fallback and timeout behavior;
+- endpoint fallback, timeout, and response validation;
 - server information and validated-ledger reads;
 - amendment-status reads;
 - `network_epochs` and `sync_state` D1 migration;
@@ -98,15 +92,14 @@ Planned scope:
 
 ## Current blockers
 
-No product blocker.
-
-A lockfile is not yet committed because dependency resolution is being verified by the first CI run. Dependencies are exact-pinned and CI currently installs without frozen-lockfile enforcement. A generated lockfile must be committed before the foundation milestone is considered fully settled.
+None.
 
 ## Schedule status
 
-- M0 specification work: complete
-- Project skeleton: in progress and within the roadmap window
-- M1 collection work: not started
+- M0 specifications: complete
+- Project skeleton: complete on branch, pending merge
+- M1 collection work: next
+- Roadmap timing: on schedule
 
 ## Risks being watched
 
@@ -116,7 +109,6 @@ A lockfile is not yet committed because dependency resolution is being verified 
 - MPT metadata may be incomplete.
 - Mainnet activation timing is unknown.
 - A direct competitor may expand into full lifecycle history.
-- Dependency versions are new and must be proven together by CI before merge.
 
 ## Operational rule
 
