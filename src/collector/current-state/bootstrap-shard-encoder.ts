@@ -37,7 +37,8 @@ export function serializeCurrentStateShard(options: {
 }
 
 async function gzip(bytes: Uint8Array): Promise<Uint8Array> {
-  const stream = new Blob([bytes]).stream().pipeThrough(new CompressionStream('gzip'))
+  const source = Uint8Array.from(bytes)
+  const stream = new Blob([source.buffer]).stream().pipeThrough(new CompressionStream('gzip'))
   return new Uint8Array(await new Response(stream).arrayBuffer())
 }
 
