@@ -93,7 +93,7 @@ The measurements demonstrate that full bootstrap is a large historical-state ope
 
 ## Current validation
 
-The corrected PR #6 branch has passed:
+The final PR #6 branch has passed:
 
 - frozen-lockfile install;
 - lint;
@@ -109,7 +109,6 @@ The live failure was caused by terminal Loan objects omitting zero-valued fields
 
 ## Remaining PR 6 work
 
-- run final CI after the completed documentation synchronization;
 - merge without enabling production bootstrap or provisioning object storage.
 
 ## Following work
