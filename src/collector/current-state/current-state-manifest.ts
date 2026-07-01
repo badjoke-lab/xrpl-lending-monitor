@@ -10,6 +10,7 @@ export interface CurrentStateShardSummary {
   loanBrokerCount: number
   loanCount: number
   compressedBytes: number
+  sha256: string
 }
 
 export interface CurrentStateManifest {
@@ -45,6 +46,9 @@ export function buildCurrentStateManifest(options: {
   for (let index = 0; index < ordered.length; index += 1) {
     if (ordered[index]?.pageNumber !== index + 1) {
       throw new Error(`Current-state shard sequence is incomplete at page ${index + 1}`)
+    }
+    if (!/^[a-f0-9]{64}$/.test(ordered[index]?.sha256 ?? '')) {
+      throw new Error(`Current-state shard ${index + 1} has an invalid SHA-256 digest`)
     }
   }
 
