@@ -37,7 +37,7 @@ Need historical state, deleted objects, Devnet epochs, lifecycle reconstruction,
 7. **Deleted does not mean forgotten.** Deleted Vault, LoanBroker, and Loan records remain searchable.
 8. **Network context is always visible.** Network, epoch, validated ledger, and synchronization time accompany data.
 9. **Read-only by design.** No signing or transaction submission in the initial product.
-10. **Free-tier operation is a release constraint.** Collection and storage must remain bounded.
+10. **Bounded and measurable resource use is a release constraint.** Collection and storage must remain controlled and observable.
 
 ## Initial network scope
 
@@ -299,5 +299,5 @@ The first public release is not complete until:
 8. Deleted objects remain searchable.
 9. Activity displays normalized before/after changes.
 10. Data provenance is exposed.
-11. Free-tier guardrails and storage monitoring are active.
+11. Runtime, storage, and collection guardrails are active.
 12. Automated tests cover parser, status, asset, epoch, and lifecycle behavior.
