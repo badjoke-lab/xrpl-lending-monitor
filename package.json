@@ -19,8 +19,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "db:migrate:local": "wrangler d1 migrations apply xrpl-lending-monitor --local",
     "types:worker": "wrangler types",
-    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build"
+    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm db:migrate:local && pnpm build"
   },
   "dependencies": {
     "hono": "4.12.27",

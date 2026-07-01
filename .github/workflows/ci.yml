@@ -40,6 +40,9 @@ jobs:
       - name: Unit tests
         run: pnpm test
 
+      - name: Apply D1 migrations locally
+        run: pnpm db:migrate:local
+
       - name: Build application
         run: pnpm build
 

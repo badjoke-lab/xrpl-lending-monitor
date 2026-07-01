@@ -20,7 +20,9 @@
   "vars": {
     "APP_NETWORK": "devnet",
     "MAINNET_ENABLED": "false",
-    "XRPL_DEVNET_RPC_URL": "https://s.devnet.rippletest.net:51234"
+    "XRPL_DEVNET_RPC_URL": "https://s.devnet.rippletest.net:51234",
+    "XRPL_RPC_TIMEOUT_MS": "8000",
+    "NETWORK_STATUS_STALE_AFTER_SECONDS": "30"
   },
   "observability": {
     "enabled": true

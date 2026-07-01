@@ -4,91 +4,116 @@ Last updated: 2026-07-01.
 
 ## Current milestone
 
-**M0 — Foundation and specification lock**
+**M1 — Current-state collector**
 
 ## Current branch
 
-`foundation/project-skeleton`
+`collector/network-epoch-foundation`
 
 ## Current work
 
-Final validation and merge preparation for the project skeleton.
+Roadmap PR 4: Devnet network, amendment, epoch, and synchronization-status foundation.
+
+The GitHub pull request number is #3 because the repository foundation and specification work were combined into the first merged PR.
 
 ## Completed
 
-### Source-of-truth foundation
+### M0 — Foundation and specification lock
 
 - Repository created: `badjoke-lab/xrpl-lending-monitor`
 - PR #1 merged: source-of-truth specifications and development roadmap
+- PR #2 merged: pinned TypeScript, React/Vite, Hono Worker, D1, test, and CI skeleton
 - Repository operating rules in `AGENTS.md`
-- Documentation index and PR checklist
 - Product, architecture, data, status, asset, collector, testing, free-tier, competitor, roadmap, and decision documents
-- Requirement that every implementation PR updates this file and relevant specifications
+- Mainnet-fail-closed runtime configuration
+- Read-only foundation UI and API boundary
+- Frozen-lockfile CI with lint, type-check, unit, build, and browser checks
 
-### Project skeleton on the active branch
+### Active branch implementation
 
-- Node.js and pnpm versions pinned
-- Exact dependency versions and committed `pnpm-lock.yaml`
-- Explicit pnpm build-script approvals in `pnpm-workspace.yaml`
-- TypeScript configuration for UI, Worker, and tooling
-- React and Vite application entrypoint
-- Truthful foundation UI with no fabricated protocol data
-- Hono Worker with read-only `/api/health` and `/api/status`
-- Cloudflare Static Assets and D1 binding configuration
-- Placeholder D1 database ID to prevent accidental production deployment
-- Devnet-only, Mainnet-fail-closed runtime validation
-- Unit tests for network configuration
-- Playwright browser smoke test
-- ESLint, Vitest, Vite, Wrangler, and Playwright configuration
-- Read-only GitHub Actions CI using frozen-lockfile installation
-- D1 migration operating rules
-- Successful CI validation of install, lint, type-check, unit tests, build, Chromium installation, and browser smoke test
+- Canonical LendingProtocol and SingleAssetVault amendment IDs
+- Validated XRPL JSON-RPC client
+- HTTPS-only endpoint configuration, timeout, and optional fallback
+- Same-endpoint `server_info` and amendment snapshot reads
+- Validated-ledger, server-version, server-state, and complete-ledger parsing
+- Initial Devnet reset-signal detection for ledger rewind and same-index hash change
+- Deterministic initial epoch ID and status planning
+- Healthy, stale, error, and reset-suspected synchronization states
+- `network_epochs` and `sync_state` D1 migration
+- D1 persistence for successful and failed status refreshes
+- Scheduled Worker handler for network-status refresh
+- D1-backed read-only `/api/status`
+- Explicit amendment, freshness, cursor, error, and reset fields in the API
+- Unit tests for RPC configuration, endpoint fallback, response parsing, reset detection, status planning, and API serialization
+- Local D1 migration application in CI
 
 ## Active PR
 
-### PR #2 — Project skeleton
+### PR #3 — Add Devnet network status and epoch foundation
 
-Merge conditions:
+Roadmap slot: PR 4.
 
-- clean frozen-lockfile CI passes;
-- documentation and implementation agree;
-- no production deployment occurs;
-- no Group Pay dependency exists.
+Current validation:
 
-After merge, M0 is complete and work advances to M1.
+- frozen-lockfile install: passed
+- lint: passed
+- type-check: passed
+- unit tests: passed
+- local D1 migration apply: passed
+- build: passed
+- browser smoke test: passed
+
+Remaining before merge:
+
+- repository documentation review;
+- mark the draft ready;
+- final clean CI on the documented head.
 
 ## Next PR
 
-### PR 4 — Network, amendment, and epoch foundation
+### Roadmap PR 5 — Asset normalization
 
 Planned scope:
 
-- XRPL Devnet RPC client boundary;
-- endpoint fallback, timeout, and response validation;
-- server information and validated-ledger reads;
-- amendment-status reads;
-- `network_epochs` and `sync_state` D1 migration;
-- reset-signal detection skeleton;
-- D1-backed `/api/status`;
-- fixture and integration tests;
-- Mainnet remains disabled.
+- XRP normalization;
+- IOU currency and issuer identity;
+- MPT issuance identity and metadata resolution;
+- exact decimal amount utilities;
+- rate-unit conversion;
+- Ripple epoch conversion;
+- fixtures for missing and complete metadata;
+- API-safe asset serialization;
+- enforcement that unlike assets cannot be aggregated.
 
-## Following PRs
+## Following PR
 
-- PR 5 — Asset normalization
-- PR 6 — Current object scanner and free-tier benchmark checkpoint
+### Roadmap PR 6 — Current object scanner and free-tier benchmark checkpoint
+
+- complete marker traversal for Vault, LoanBroker, and Loan;
+- current-state projections;
+- relationship checks;
+- partial-scan failure behavior;
+- CPU, external request, D1, and storage measurements;
+- decision between Cloudflare Cron Worker, reduced cadence, or the approved free fallback.
 
 ## Known open questions
 
 | Question | Required evidence | Assigned point |
 |---|---|---|
-| Can the collector remain under the Workers Free 10 ms CPU limit? | p50, p95, and max CPU benchmark with production-shaped payloads | PR 6 / Checkpoint A |
-| What exact schedule-state boundary labels should be public? | unit tests against due time and grace-end boundaries | PR 12 |
-| What is the confirmed successful overpayment transaction shape? | isolated Devnet fixture and validated metadata | PR 9 |
-| How should each deletion reason be classified? | transaction and DeletedNode fixtures for full payment, default, Broker delete, and Vault delete | PR 10 |
-| What MPT metadata is reliably available from public RPC? | live and fixture tests with missing and complete metadata | PR 5 |
-| What signals reliably identify a Devnet reset? | simulated reset fixtures plus live observation | PR 4 and PR 25 |
+| Can the collector remain under the Workers Free 10 ms CPU limit? | p50, p95, and max CPU benchmark with production-shaped payloads | Roadmap PR 6 / Checkpoint A |
+| What exact schedule-state boundary labels should be public? | unit tests against due time and grace-end boundaries | Roadmap PR 12 |
+| What is the confirmed successful overpayment transaction shape? | isolated Devnet fixture and validated metadata | Roadmap PR 9 |
+| How should each deletion reason be classified? | transaction and DeletedNode fixtures for full payment, default, Broker delete, and Vault delete | Roadmap PR 10 |
+| What MPT metadata is reliably available from public RPC? | live and fixture tests with missing and complete metadata | Roadmap PR 5 |
+| Which additional signals reliably confirm a Devnet reset? | simulated reset, second-endpoint confirmation, and live observation | Roadmap PR 25 |
 | Is GitHub Actions required as the collector fallback? | Worker benchmark failure or insufficient catch-up capacity | Checkpoint A |
+
+## Decisions made in the active PR
+
+- A reset signal does not immediately archive the current epoch. It moves sync state to `reset_suspected`; verified rollover is deferred to the reset-hardening work.
+- All amendment and server values are read from the same endpoint for one snapshot.
+- The public status endpoint reads D1 only; it does not mutate state or call XRPL on demand.
+- Production Cron activation and real D1 provisioning remain disabled.
 
 ## Current blockers
 
@@ -96,15 +121,16 @@ None.
 
 ## Schedule status
 
-- M0 specifications: complete
-- Project skeleton: complete on branch, pending merge
-- M1 collection work: next
-- Roadmap timing: on schedule
+- M0: complete
+- M1 network/epoch foundation: in progress and on schedule
+- Asset normalization: next
+- Current object scanner and free-tier checkpoint: follows asset normalization
 
 ## Risks being watched
 
-- Free Worker CPU limit may be too low for the collector.
+- Free Worker CPU limit may be too low for the full collector.
 - Devnet can reset and erase current public history.
+- A single reset signal can be transient and therefore requires confirmation before epoch rollover.
 - Public RPC behavior and available history may change.
 - MPT metadata may be incomplete.
 - Mainnet activation timing is unknown.
