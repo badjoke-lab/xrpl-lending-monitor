@@ -1,0 +1,38 @@
+name: M4-7 diagnostic
+
+on:
+  push:
+    branches:
+      - ui/m4-7-baseline-integration
+
+permissions:
+  contents: read
+
+jobs:
+  browser-diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm exec playwright install --with-deps chromium
+      - name: Run M4-7 browser test
+        continue-on-error: true
+        run: pnpm test:e2e tests/e2e/integration-accessibility.spec.ts
+      - name: Upload diagnostic report
+        uses: actions/upload-artifact@v4
+        with:
+          name: m4-7-diagnostic-report
+          path: |
+            playwright-report
+            test-results
+          if-no-files-found: warn
+          retention-days: 1
