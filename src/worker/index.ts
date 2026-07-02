@@ -5,6 +5,12 @@ import { resolveRuntimeConfig } from '../shared/runtime-config'
 import type { Bindings } from './env'
 import { getActiveSnapshot } from './repositories/core-api-repository'
 import {
+  CurrentStateObjectReadError,
+  getCurrentVaultById,
+  listCurrentVaults,
+  type VaultSort,
+} from './repositories/current-state-object-reader'
+import {
   getTransactionDetail,
   listActivity,
   listEpochs,
@@ -18,8 +24,11 @@ import {
 } from './repositories/network-status-repository'
 import {
   type EntityCollectionKind,
+  serializeAvailableVaultCollection,
   serializeOverview,
   serializeUnavailableEntityCollection,
+  serializeUnavailableVaultDetail,
+  serializeVaultDetail,
 } from './serializers/core-api'
 import {
   serializeActivityCsv,
@@ -36,6 +45,8 @@ import { serializeNetworkStatus } from './serializers/network-status'
 const app = new Hono<{ Bindings: Bindings }>()
 const DEFAULT_PAGE_LIMIT = 25
 const MAX_PAGE_LIMIT = 100
+const MAX_QUERY_LENGTH = 128
+const MAX_CURSOR_LENGTH = 1024
 
 async function loadCoreApiContext(db: D1Database) {
   const [state, epoch, snapshot] = await Promise.all([
@@ -58,6 +69,18 @@ function parsePageLimit(value: string | undefined): number | null {
   return limit
 }
 
+function parseVaultSort(value: string | undefined): VaultSort | null {
+  if (value === undefined) return 'id_asc'
+  return value === 'id_asc' || value === 'id_desc' ? value : null
+}
+
+function parseOptionalBoolean(value: string | undefined): boolean | undefined | null {
+  if (value === undefined) return undefined
+  if (value === 'true') return true
+  if (value === 'false') return false
+  return null
+}
+
 function invalidLimitResponse(context: Context<{ Bindings: Bindings }>) {
   return context.json(
     {
@@ -65,6 +88,30 @@ function invalidLimitResponse(context: Context<{ Bindings: Bindings }>) {
       message: `limit must be an integer from 1 to ${MAX_PAGE_LIMIT}`,
     },
     400,
+  )
+}
+
+function currentStateReadErrorResponse(
+  context: Context<{ Bindings: Bindings }>,
+  error: CurrentStateObjectReadError,
+) {
+  if (error.code === 'invalid_cursor') {
+    return context.json(
+      {
+        error: 'invalid_cursor',
+        message: error.message,
+      },
+      400,
+    )
+  }
+
+  return context.json(
+    {
+      error: 'current_state_unavailable',
+      code: error.code,
+      message: 'The active current-state snapshot could not be verified for public reads.',
+    },
+    503,
   )
 }
 
@@ -101,6 +148,122 @@ app.get('/api/overview', async (context) => {
   return context.json(serializeOverview(await loadCoreApiContext(context.env.DB)))
 })
 
+app.get('/api/vaults', async (context) => {
+  resolveRuntimeConfig(context.env)
+
+  const limit = parsePageLimit(context.req.query('limit'))
+  if (limit === null) return invalidLimitResponse(context)
+
+  const sort = parseVaultSort(context.req.query('sort'))
+  if (sort === null) {
+    return context.json(
+      { error: 'invalid_sort', message: 'sort must be id_asc or id_desc' },
+      400,
+    )
+  }
+
+  const query = context.req.query('q')?.trim()
+  if (query && query.length > MAX_QUERY_LENGTH) {
+    return context.json(
+      { error: 'invalid_query', message: `q must be at most ${MAX_QUERY_LENGTH} characters` },
+      400,
+    )
+  }
+
+  const cursor = context.req.query('cursor')
+  if (cursor && cursor.length > MAX_CURSOR_LENGTH) {
+    return context.json(
+      { error: 'invalid_cursor', message: `cursor must be at most ${MAX_CURSOR_LENGTH} characters` },
+      400,
+    )
+  }
+
+  const hasLoss = parseOptionalBoolean(context.req.query('has_loss'))
+  if (hasLoss === null) {
+    return context.json(
+      { error: 'invalid_filter', message: 'has_loss must be true or false' },
+      400,
+    )
+  }
+
+  const { epoch, snapshot } = await loadCoreApiContext(context.env.DB)
+  if (!snapshot || !context.env.CURRENT_STATE) {
+    return context.json(
+      serializeUnavailableEntityCollection({
+        kind: 'vaults',
+        epoch,
+        snapshot,
+        page: { limit },
+      }),
+    )
+  }
+
+  try {
+    const result = await listCurrentVaults(context.env.CURRENT_STATE, snapshot, {
+      limit,
+      cursor,
+      sort,
+      query: query || undefined,
+      hasLoss,
+    })
+    return context.json(
+      serializeAvailableVaultCollection({
+        epoch,
+        snapshot,
+        result,
+        page: { limit },
+        sort,
+        query: query || undefined,
+        hasLoss,
+      }),
+    )
+  } catch (error) {
+    if (error instanceof CurrentStateObjectReadError) {
+      return currentStateReadErrorResponse(context, error)
+    }
+    throw error
+  }
+})
+
+app.get('/api/vaults/:vaultId', async (context) => {
+  resolveRuntimeConfig(context.env)
+
+  const vaultId = context.req.param('vaultId').toUpperCase()
+  if (!/^[A-F0-9]{64}$/.test(vaultId)) {
+    return context.json(
+      { error: 'invalid_identifier', message: 'vaultId must be a 64-character hexadecimal ID' },
+      400,
+    )
+  }
+
+  const { epoch, snapshot } = await loadCoreApiContext(context.env.DB)
+  if (!snapshot || !context.env.CURRENT_STATE) {
+    return context.json(serializeUnavailableVaultDetail({ epoch, snapshot }))
+  }
+
+  try {
+    const vault = await getCurrentVaultById(context.env.CURRENT_STATE, snapshot, vaultId)
+    if (!vault) {
+      return context.json(
+        {
+          error: 'not_found',
+          kind: 'vault',
+          id: vaultId,
+          snapshot_id: snapshot.id,
+        },
+        404,
+      )
+    }
+
+    return context.json(serializeVaultDetail({ epoch, snapshot, vault }))
+  } catch (error) {
+    if (error instanceof CurrentStateObjectReadError) {
+      return currentStateReadErrorResponse(context, error)
+    }
+    throw error
+  }
+})
+
 function entityCollectionHandler(kind: EntityCollectionKind) {
   return async (context: Context<{ Bindings: Bindings }>) => {
     resolveRuntimeConfig(context.env)
@@ -122,7 +285,6 @@ function entityCollectionHandler(kind: EntityCollectionKind) {
   }
 }
 
-app.get('/api/vaults', entityCollectionHandler('vaults'))
 app.get('/api/loan-brokers', entityCollectionHandler('loan_brokers'))
 app.get('/api/loans', entityCollectionHandler('loans'))
 
