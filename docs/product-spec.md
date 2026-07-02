@@ -229,6 +229,14 @@ Must list current and archived Devnet epochs and allow users to browse objects a
 
 Must document field provenance, formulas, pagination, network and epoch fields, exported formats, and unavailable data.
 
+Initial core API endpoints:
+
+- `GET /api/overview` returns Devnet network context, current epoch, active snapshot identity when present, collector freshness, Vault/LoanBroker/Loan counts, current object count, field provenance, and explicit unavailable reasons.
+- `GET /api/vaults`, `GET /api/loan-brokers`, and `GET /api/loans` are paginated collection endpoints. `limit` defaults to `25` and must be an integer from `1` through `100`.
+- Collection endpoints must return `network`, `kind`, `epoch`, `snapshot`, `data`, `page`, `availability`, and `provenance`.
+- Before an active current-state snapshot or public object shard reader is available, collection endpoints must return an empty `data` array with `availability.state = "unavailable"` and a reason, rather than inventing current entities.
+- API responses must remain read-only and Devnet-only until Mainnet release approval is recorded.
+
 ## Data provenance categories
 
 Every user-facing field and API field is one of:
