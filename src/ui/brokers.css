@@ -1,0 +1,140 @@
+.broker-filter-form {
+  display: grid;
+  grid-template-columns: minmax(280px, 1.8fr) minmax(210px, 0.8fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.broker-filter-form label {
+  display: grid;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.broker-filter-form input,
+.broker-filter-form select {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 9px 11px;
+  color: var(--text-primary);
+  background: #08131d;
+  font: inherit;
+}
+
+.broker-filter-form input::placeholder {
+  color: #5f7380;
+}
+
+.broker-table td {
+  white-space: nowrap;
+}
+
+.cover-balance {
+  display: grid;
+  gap: 3px;
+  min-width: 130px;
+}
+
+.cover-balance strong {
+  font-size: 0.7rem;
+}
+
+.cover-balance small {
+  font-size: 0.7rem;
+}
+
+.cover-balance.is-surplus strong {
+  color: var(--state-positive);
+}
+
+.cover-balance.is-shortfall strong {
+  color: var(--state-negative);
+}
+
+.broker-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.status-summary-card.summary-shortfall {
+  border-color: rgba(255, 139, 139, 0.42);
+  background: linear-gradient(180deg, rgba(80, 31, 36, 0.7), rgba(28, 20, 27, 0.9));
+}
+
+.related-entity-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  border: 1px solid rgba(35, 59, 76, 0.8);
+  border-radius: 9px;
+  padding: 15px;
+  background: rgba(6, 15, 23, 0.58);
+}
+
+.related-entity-card > div {
+  min-width: 0;
+}
+
+.related-entity-card span,
+.related-entity-card small {
+  display: block;
+  color: var(--text-muted);
+  font-size: 0.7rem;
+}
+
+.related-entity-card strong {
+  display: block;
+  margin: 6px 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 1120px) {
+  .broker-filter-form {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .broker-filter-form .primary-button {
+    grid-column: 1 / -1;
+  }
+
+  .broker-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 680px) {
+  .broker-filter-form {
+    grid-template-columns: 1fr;
+  }
+
+  .broker-filter-form .primary-button {
+    grid-column: auto;
+    width: 100%;
+  }
+
+  .broker-summary-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .related-entity-card {
+    display: grid;
+  }
+
+  .related-entity-card .secondary-button {
+    width: 100%;
+  }
+}
+
+@media (max-width: 430px) {
+  .broker-summary-grid {
+    grid-template-columns: 1fr;
+  }
+}
