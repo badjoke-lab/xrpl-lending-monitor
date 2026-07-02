@@ -1,11 +1,20 @@
-.broker-filter-form {
+.broker-filter-form,
+.loan-filter-form {
   display: grid;
-  grid-template-columns: minmax(280px, 1.8fr) minmax(210px, 0.8fr) auto;
   gap: 12px;
   align-items: end;
 }
 
-.broker-filter-form label {
+.broker-filter-form {
+  grid-template-columns: minmax(280px, 1.8fr) minmax(210px, 0.8fr) auto;
+}
+
+.loan-filter-form {
+  grid-template-columns: minmax(240px, 1.5fr) repeat(3, minmax(155px, 0.75fr)) auto;
+}
+
+.broker-filter-form label,
+.loan-filter-form label {
   display: grid;
   gap: 6px;
   color: var(--text-muted);
@@ -16,7 +25,9 @@
 }
 
 .broker-filter-form input,
-.broker-filter-form select {
+.broker-filter-form select,
+.loan-filter-form input,
+.loan-filter-form select {
   width: 100%;
   min-height: 42px;
   border: 1px solid var(--border-subtle);
@@ -27,11 +38,13 @@
   font: inherit;
 }
 
-.broker-filter-form input::placeholder {
+.broker-filter-form input::placeholder,
+.loan-filter-form input::placeholder {
   color: #5f7380;
 }
 
-.broker-table td {
+.broker-table td,
+.loan-table td {
   white-space: nowrap;
 }
 
@@ -41,10 +54,7 @@
   min-width: 130px;
 }
 
-.cover-balance strong {
-  font-size: 0.7rem;
-}
-
+.cover-balance strong,
 .cover-balance small {
   font-size: 0.7rem;
 }
@@ -57,7 +67,8 @@
   color: var(--state-negative);
 }
 
-.broker-summary-grid {
+.broker-summary-grid,
+.loan-summary-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
@@ -96,6 +107,48 @@
   overflow-wrap: anywhere;
 }
 
+.loan-state-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  border: 1px solid rgba(73, 167, 201, 0.34);
+  border-radius: 9px;
+  padding: 13px 15px;
+  background: rgba(10, 39, 52, 0.62);
+}
+
+.loan-state-note strong {
+  flex: 0 0 auto;
+  color: var(--accent-primary);
+  font-size: 0.78rem;
+}
+
+.loan-state-note span {
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.loan-relationships-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.loan-summary-grid .status-summary-card strong .status-badge {
+  font-size: 0.7rem;
+}
+
+@media (max-width: 1280px) {
+  .loan-filter-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .loan-filter-form .primary-button {
+    grid-column: 1 / -1;
+  }
+}
+
 @media (max-width: 1120px) {
   .broker-filter-form {
     grid-template-columns: 1fr 1fr;
@@ -105,26 +158,35 @@
     grid-column: 1 / -1;
   }
 
-  .broker-summary-grid {
+  .broker-summary-grid,
+  .loan-summary-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .loan-relationships-grid {
+    grid-template-columns: 1fr;
   }
 }
 
 @media (max-width: 680px) {
-  .broker-filter-form {
+  .broker-filter-form,
+  .loan-filter-form {
     grid-template-columns: 1fr;
   }
 
-  .broker-filter-form .primary-button {
+  .broker-filter-form .primary-button,
+  .loan-filter-form .primary-button {
     grid-column: auto;
     width: 100%;
   }
 
-  .broker-summary-grid {
+  .broker-summary-grid,
+  .loan-summary-grid {
     grid-template-columns: 1fr 1fr;
   }
 
-  .related-entity-card {
+  .related-entity-card,
+  .loan-state-note {
     display: grid;
   }
 
@@ -134,7 +196,8 @@
 }
 
 @media (max-width: 430px) {
-  .broker-summary-grid {
+  .broker-summary-grid,
+  .loan-summary-grid {
     grid-template-columns: 1fr;
   }
 }

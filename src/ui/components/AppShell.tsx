@@ -1,6 +1,8 @@
 import type { MouseEvent, ReactNode } from 'react'
 
 import { formatDuration, formatInteger, statusTone, titleCase } from '../lib/formatting'
+import { LoanDetailPage } from '../pages/LoanDetailPage'
+import { LoansPage } from '../pages/LoansPage'
 import type { NetworkStatusResponse, ResourceState } from '../types/api'
 
 interface Props {
@@ -18,7 +20,9 @@ const groups: Array<{ label: string; items: Item[] }> = [
     { label: 'Overview', path: '/' },
     { label: 'Vaults', path: '/vaults' },
     { label: 'Loan Brokers', path: '/loan-brokers' },
-    { label: 'Loans' }, { label: 'Activity' }, { label: 'Search' },
+    { label: 'Loans', path: '/loans' },
+    { label: 'Activity' },
+    { label: 'Search' },
   ] },
   { label: 'Audit', items: [
     { label: 'Lifecycle' }, { label: 'Archived Objects' },
@@ -88,8 +92,17 @@ function Context({ status }: { status: ResourceState<NetworkStatusResponse> }) {
   )
 }
 
+function resolveContent(currentPath: string, children: ReactNode, onNavigate: (path: string) => void) {
+  if (currentPath === '/loans') return <LoansPage onNavigate={onNavigate} />
+  const detail = /^\/loans\/([A-Fa-f0-9]{64})$/.exec(currentPath)
+  if (detail?.[1]) return <LoanDetailPage loanId={detail[1].toUpperCase()} onNavigate={onNavigate} />
+  return children
+}
+
 export function AppShell({ children, currentPath, status, onNavigate, onReload }: Props) {
   const home = (event: MouseEvent<HTMLAnchorElement>) => { event.preventDefault(); onNavigate('/') }
+  const content = resolveContent(currentPath, children, onNavigate)
+  const loansActive = currentPath === '/loans' || currentPath.startsWith('/loans/')
   return (
     <div className="application-frame">
       <a className="skip-link" href="#main-content">Skip to content</a>
@@ -107,12 +120,18 @@ export function AppShell({ children, currentPath, status, onNavigate, onReload }
           <button type="button" className="icon-button" onClick={onReload} aria-label="Refresh monitoring data">↻</button>
         </header>
         <Context status={status} />
-        <main id="main-content" className="main-content" tabIndex={-1}>{children}</main>
+        <main id="main-content" className="main-content" tabIndex={-1}>{content}</main>
         <footer className="site-footer"><p>XRPL Lending Devnet data. Independent read-only monitor.</p><div><a href="/api/status">Status JSON</a><a href="https://github.com/badjoke-lab/xrpl-lending-monitor">Source</a></div></footer>
       </div>
       <nav className="mobile-bottom-nav" aria-label="Mobile navigation">
         <a className={currentPath === '/' ? 'is-active' : ''} href="/" aria-current={currentPath === '/' ? 'page' : undefined} onClick={home}>Overview</a>
-        <span aria-disabled="true">Loans</span><span aria-disabled="true">Activity</span><span aria-disabled="true">Search</span>
+        <a
+          className={loansActive ? 'is-active' : ''}
+          href="/loans"
+          aria-current={loansActive ? 'page' : undefined}
+          onClick={(event) => { event.preventDefault(); onNavigate('/loans') }}
+        >Loans</a>
+        <span aria-disabled="true">Activity</span><span aria-disabled="true">Search</span>
         <details><summary>More</summary><div className="mobile-more-panel"><Navigation currentPath={currentPath} onNavigate={onNavigate} /></div></details>
       </nav>
     </div>
