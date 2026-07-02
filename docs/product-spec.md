@@ -4,9 +4,9 @@
 
 XRPL Lending Monitor is a read-only, independent monitor and historical audit layer for the XRPL Lending Protocol.
 
-It must provide the normal information expected from a lending monitor—protocol overview, Vaults, Loan Brokers, Loans, activity, search, and network health—then extend that baseline with lifecycle reconstruction, deleted-object archives, state-transition history, first-loss cover tracking, provenance, and Devnet epoch preservation.
+It provides the ordinary information expected from a lending monitor—protocol overview, Vaults, Loan Brokers, Loans, activity, search, and network health—then extends that baseline with lifecycle reconstruction, deleted-object archives, state-transition history, first-loss cover tracking, provenance, and Devnet epoch preservation.
 
-The product is not a wallet, lending frontend, broker service, investment product, credit-rating system, or substitute for the XRPL protocol specification.
+The product is not a wallet, lending frontend, broker service, investment product, credit-rating system, payment product, or substitute for the XRPL protocol specification.
 
 ## Primary users
 
@@ -20,7 +20,7 @@ Need to inspect Vault balances, available assets, Broker debt, first-loss cover,
 
 ### Broker operators and developers
 
-Need exact object fields, transaction history, before/after changes, network health, API access, and clear unavailable states.
+Need exact object fields, transaction history, before-and-after changes, network health, API access, and clear unavailable states.
 
 ### Researchers and auditors
 
@@ -33,13 +33,14 @@ Need historical state, deleted objects, Devnet epochs, lifecycle reconstruction,
 3. **Current state and history are separate.** Current ledger objects and indexed historical records must not be confused.
 4. **On-ledger status and schedule status are separate.** A Loan can be default-eligible without being defaulted.
 5. **Assets remain distinct.** XRP, IOU, and MPT quantities are not added together without a documented pricing layer.
-6. **Every value has provenance.** Direct, derived, indexed, or unavailable.
+6. **Every value has provenance.** Direct, Derived, Indexed, or Unavailable.
 7. **Deleted does not mean forgotten.** Deleted Vault, LoanBroker, and Loan records remain searchable.
 8. **Network context is always visible.** Network, epoch, validated ledger, and synchronization time accompany data.
 9. **Read-only by design.** No signing or transaction submission in the initial product.
-10. **Bounded and measurable resource use is a release constraint.** Collection and storage must remain controlled and observable.
-11. **Unavailable is not zero.** Unsupported, uncollected, stale, and failed data states are shown explicitly.
+10. **Bounded and measurable resource use is a release constraint.** Collection and storage remain controlled and observable.
+11. **Unavailable is not zero.** Unsupported, uncollected, stale, and failed states are shown explicitly.
 12. **Project transparency is part of the product.** About, Methodology, Contact, API documentation, limitations, and evidence boundaries are public.
+13. **No funding or payment surface in the current release.** Donation, payment, promotional, wallet, and transaction-submission features are outside scope.
 
 ## Initial network scope
 
@@ -61,13 +62,13 @@ Public pages are grouped as:
 - **Monitor** — Overview, Vaults, Loan Brokers, Loans, Activity, Search;
 - **Audit** — Lifecycle, Archived Objects, Cover & Loss, Devnet Epochs;
 - **System** — Network Status, API, Methodology;
-- **Project** — About, Contact, and optional Support.
+- **Project** — About and Contact.
 
 Canonical routes, route ownership, navigation, and responsive behavior are defined by the UI source-of-truth documents indexed in `docs/README.md`.
 
 ## Required data pages
 
-### 1. Overview — `/`
+### Overview — `/`
 
 Must show:
 
@@ -75,7 +76,7 @@ Must show:
 - amendment status;
 - latest validated ledger and age;
 - last successful collector run and lag;
-- total current Vault, LoanBroker, Loan, and current-object counts when available;
+- current Vault, LoanBroker, Loan, and current-object counts when available;
 - active-snapshot availability;
 - Loan counts by on-ledger and schedule state when supported;
 - asset-separated Vault totals, available assets, debt, and cover when supported;
@@ -86,11 +87,11 @@ Must show:
 
 A cross-asset total or fiat conversion is prohibited without a documented and approved pricing subsystem.
 
-### 2. Vault list — `/vaults`
+### Vault list — `/vaults`
 
-Must support search, pagination, sorting, and filtering by asset, public/private state, loss presence, connected Broker presence, network, epoch, and archive context where supported.
+Must support bounded search, cursor pagination, sorting, and filters by asset, public/private state, loss presence, connected Broker presence, network, epoch, and archive context where supported.
 
-Core columns:
+Core fields include:
 
 - Vault ID;
 - asset;
@@ -101,59 +102,58 @@ Core columns:
 - AssetsMaximum;
 - utilization;
 - LossUnrealized;
-- connected Broker count;
-- active Loan count;
+- connected Broker and Loan information when supported;
 - last ledger and update time.
 
-### 3. Vault detail — `/vaults/:vaultId`
+### Vault detail — `/vaults/:vaultId`
 
 Must show:
 
-- all current Vault fields suitable for users;
+- current Vault fields suitable for users;
 - Share MPT and Domain information;
 - calculated used assets and utilization;
-- connected Brokers and Loans;
+- connected Brokers and Loans when supported;
 - Deposit, Withdraw, Set, Clawback, and Delete activity;
 - historical balance, availability, and loss changes;
 - final state and deletion event when archived;
 - provenance and raw data after human-readable sections.
 
-### 4. Loan Broker list — `/loan-brokers`
+### Loan Broker list — `/loan-brokers`
 
-Core columns:
+Core fields include:
 
 - LoanBroker ID;
 - owner and pseudo-account;
 - connected Vault and asset;
-- active Loan count;
+- active Loan count when supported;
 - DebtTotal and DebtMaximum;
 - debt utilization;
 - CoverAvailable;
 - configured cover rates;
-- calculated required minimum cover;
-- calculated cover surplus or shortfall;
+- required minimum cover;
+- cover surplus or shortfall;
 - ManagementFeeRate;
-- impaired and defaulted Loan counts;
+- impairment and default counts only when directly supported;
 - last update.
 
-### 5. Loan Broker detail — `/loan-brokers/:brokerId`
+### Loan Broker detail — `/loan-brokers/:brokerId`
 
 Must show:
 
 - current Broker fields;
 - related Vault;
-- full Loan book;
+- Loan book when supported;
 - DebtTotal and cover history;
 - CoverDeposit, CoverWithdraw, CoverClawback, Set, and Delete activity;
 - current cover surplus or shortfall;
 - archived final state if deleted;
 - formula provenance and raw data after summaries.
 
-### 6. Loan list — `/loans`
+### Loan list — `/loans`
 
-Must support search, sorting, pagination, and filtering by network, epoch, asset, Vault, Broker, Borrower, on-ledger state, schedule state, and deleted state.
+Must support bounded search, sorting, cursor pagination, and filtering by network, epoch, asset, Vault, Broker, Borrower, on-ledger state, schedule state, and deleted state.
 
-Core columns:
+Core fields include:
 
 - Loan ID;
 - Borrower;
@@ -167,26 +167,26 @@ Core columns:
 - PaymentRemaining;
 - NextPaymentDueDate;
 - grace-period end;
-- last payment and last update.
+- last payment and last update when supported.
 
-### 7. Loan detail — `/loans/:loanId`
+### Loan detail — `/loans/:loanId`
 
 Must show:
 
-- terms and all relevant rate and fee fields;
+- terms and relevant rate and fee fields;
 - current balances and payment schedule;
 - on-ledger state;
 - schedule-derived state;
-- full lifecycle timeline;
+- lifecycle timeline when indexed history is available;
 - payment history;
 - impair, unimpair, default, and delete events;
-- before/after field changes;
+- before-and-after field changes;
 - related Broker and Vault;
 - raw identifiers and source transactions;
 - final state after deletion;
 - provenance and unavailable explanations.
 
-Required tabs:
+Required subviews:
 
 - Overview;
 - Terms;
@@ -196,9 +196,9 @@ Required tabs:
 - Transactions;
 - Raw Data.
 
-### 8. Activity — `/activity`
+### Activity — `/activity`
 
-Must cover all recognized Lending and Single Asset Vault transaction types:
+Must cover recognized Lending and Single Asset Vault transaction types:
 
 - VaultCreate;
 - VaultDeposit;
@@ -216,15 +216,15 @@ Must cover all recognized Lending and Single Asset Vault transaction types:
 - LoanManage;
 - LoanDelete.
 
-Activity must show result, time, ledger, transaction hash, initiating account, affected objects, normalized before/after changes, provenance, and bounded export access where supported.
+Activity shows result, time, ledger, transaction hash, initiating account, affected objects, normalized before-and-after changes, provenance, and bounded export access where supported.
 
-### 9. Transaction detail — `/transactions/:transactionHash`
+### Transaction detail — `/transactions/:transactionHash`
 
 Must show the transaction, metadata summary, affected nodes, normalized object changes, links to affected entities, provenance, and raw JSON where retained.
 
-### 10. Search — `/search`
+### Search — `/search`
 
-Search inputs:
+Search inputs include:
 
 - Vault ID;
 - LoanBroker ID;
@@ -234,41 +234,41 @@ Search inputs:
 - MPT issuance ID;
 - asset code or issuer pair.
 
-Search must distinguish no result, invalid identifier, unavailable index, current result, and archived result.
+Search distinguishes no result, invalid identifier, unavailable index, current result, and archived result.
 
-### 11. Account detail — `/accounts/:account`
+### Account detail — `/accounts/:account`
 
-Must aggregate owned Vaults, managed Brokers, Borrower Loans, protocol transactions, and archived relationships. It must not claim off-chain identity, KYC status, or account ownership beyond on-ledger relationships.
+Must aggregate owned Vaults, managed Brokers, Borrower Loans, protocol transactions, and archived relationships. It must not claim off-chain identity, KYC status, or ownership beyond on-ledger relationships.
 
-### 12. Network Status — `/network-status`
+### Network Status — `/network-status`
 
 Must show endpoint or server state where publicly safe, server version, complete-ledger range where available, validated ledger, collector cursor, collection lag, amendment state, retry/backoff state where available, snapshot availability, current epoch, reset reason, public-safe error state, and data age.
 
-### 13. Lifecycle explorer — `/audit/lifecycle`
+## Required audit pages
 
-Must provide a protocol-wide explorer for recorded Loan lifecycle events with network, epoch, Loan, Broker, Vault, account, asset, ledger, transaction, event type, and provenance context where supported.
+### Lifecycle explorer — `/audit/lifecycle`
 
-It must not infer unsupported intermediate events.
+Provides protocol-wide recorded Loan lifecycle events with network, epoch, Loan, Broker, Vault, account, asset, ledger, transaction, event type, and provenance context where supported. It must not infer unsupported intermediate events.
 
-### 14. Archived Objects — `/audit/archived`
+### Archived Objects — `/audit/archived`
 
-Must list deleted Vault, LoanBroker, and Loan records and support type, epoch, relationship, transaction, and classification filters where supported.
+Lists deleted Vault, LoanBroker, and Loan records and supports type, epoch, relationship, transaction, and classification filters where supported.
 
-Archived detail pages must show:
+Archived detail pages show:
 
-- a persistent archived-state explanation;
+- persistent archived-state explanation;
 - final state;
 - deletion event and transaction;
-- normalized before/after or removal representation;
+- normalized before-and-after or removal representation;
 - archive metadata and provenance;
 - related entities and source transactions;
 - raw archive data where retained.
 
 Unknown deletion reasons remain explicit unknowns.
 
-### 15. Cover & Loss — `/audit/cover-loss`
+### Cover & Loss — `/audit/cover-loss`
 
-Must show asset-separated:
+Shows asset-separated:
 
 - DebtTotal and DebtMaximum history;
 - CoverAvailable history;
@@ -281,15 +281,13 @@ Must show asset-separated:
 
 It must not show fiat totals, cross-asset aggregation, proprietary risk scores, or unsupported liquidation predictions.
 
-### 16. Devnet Epochs — `/epochs` and `/epochs/:epochId`
+### Devnet Epochs — `/epochs` and `/epochs/:epochId`
 
-Must list current and archived Devnet epochs and allow users to browse epoch-scoped objects, activity, lifecycle, and archives without mixing epochs.
-
-Must show first and last ledger where known, reset reason and time, current/archive state, and persistent historical context.
+Lists current and archived Devnet epochs and permits epoch-scoped browsing without mixing epochs. It shows first and last ledger where known, reset reason and time, current/archive state, and persistent historical context.
 
 ## Required documentation and project pages
 
-### 17. API documentation — `/api`
+### API documentation — `/api`
 
 Must document:
 
@@ -299,20 +297,22 @@ Must document:
 - network and epoch fields;
 - provenance;
 - stale and unavailable states;
-- response examples clearly labeled as examples;
+- response examples clearly labelled as examples;
 - JSON, CSV, NDJSON, and activity-feed formats;
 - raw-retention boundaries;
 - read-only and Devnet-only status.
 
-Initial core API endpoints include:
+Initial core endpoints include:
 
-- `GET /api/overview` for Devnet network context, current epoch, active snapshot identity when present, collector freshness, counts, provenance, and explicit unavailable reasons;
-- `GET /api/vaults`, `GET /api/loan-brokers`, and `GET /api/loans` as bounded collection endpoints;
-- `GET /api/activity`, `GET /api/transactions/{hash}`, `GET /api/epochs`, object-history, Loan-lifecycle, search, export, and feed endpoints implemented by M3.
+- `GET /api/overview`;
+- `GET /api/vaults` and `GET /api/vaults/{vaultId}`;
+- `GET /api/loan-brokers` and `GET /api/loan-brokers/{brokerId}`;
+- `GET /api/loans` and `GET /api/loans/{loanId}` when M4-4 is complete;
+- activity, transaction, epoch, object-history, Loan-lifecycle, search, export, and feed endpoints implemented by M3.
 
-Before an active current-state snapshot or public object shard reader is available, current entity collection endpoints must return an empty data array with explicit unavailable state and reason rather than inventing current entities.
+Before an active current-state snapshot or public object-shard binding is available, current entity endpoints return explicit unavailable state and reason rather than inventing current entities.
 
-### 18. Methodology — `/methodology`
+### Methodology — `/methodology`
 
 Methodology is a separate long-form page, not a subsection compressed into About.
 
@@ -339,9 +339,9 @@ Required sections:
 19. known limitations;
 20. verification and release process.
 
-The page must have stable anchors, a usable table of contents, readable long-form layout, and links to source specifications or code where useful.
+The page has stable anchors, a usable table of contents, readable long-form layout, and links to source specifications or code where useful.
 
-### 19. About — `/about`
+### About — `/about`
 
 Must explain:
 
@@ -354,53 +354,24 @@ Must explain:
 - independent and read-only status;
 - what the product does not provide;
 - repository and Methodology links;
-- Contact link;
-- optional Support section.
+- Contact link.
 
 About must not duplicate the full Methodology.
 
-### 20. Contact — `/contact`
+### Contact — `/contact`
 
 Must present two separate contact paths:
 
 1. a configured Google Form for general or private inquiries;
 2. configured GitHub Issues or issue templates for public bugs, data corrections, API issues, documentation issues, and feature requests.
 
-The page must warn users not to publish seeds, private keys, secrets, personal data, or non-public security details in GitHub Issues.
+The page warns users not to publish seeds, private keys, secrets, personal data, or non-public security details in GitHub Issues.
 
-Missing external configuration must produce an explicit unavailable explanation or omit the action. Placeholder URLs are prohibited.
-
-### 21. Optional Support section — `/about#support`
-
-Support is optional and disabled by default.
-
-It may be enabled only after explicit approval of:
-
-- XRPL address;
-- payment network;
-- accepted asset or assets;
-- destination-tag requirement;
-- QR payload;
-- disclosure text;
-- operational ownership.
-
-When enabled, it must explain:
-
-- support is voluntary;
-- support provides no entitlement, service level, influence, listing benefit, investment return, or guaranteed response;
-- monitor data is XRPL Lending Devnet data;
-- the payment network is stated separately and unambiguously;
-- exact accepted-asset and destination-tag instructions;
-- full address, copy control, and QR code;
-- Contact route for questions without promising recovery of mistaken payments.
-
-Support navigation may appear in the desktop sidebar Project group, mobile More menu, footer, and Contact page. All links point to `/about#support`.
-
-Support prompts must not appear inside data tables, metrics, warnings, entity pages, or audit results.
+Missing external configuration produces an explicit unavailable explanation or omits the action. Placeholder URLs are prohibited.
 
 ## Data provenance categories
 
-Every user-facing field and API field is one of:
+Every user-facing and API field is one of:
 
 - **Direct** — read directly from a validated ledger object or transaction;
 - **Derived** — calculated from direct values using a documented formula;
@@ -421,7 +392,7 @@ Examples:
 - time in grace period;
 - time since default eligibility.
 
-Every derived value must expose its formula in documentation and, where practical, in the interface.
+Every derived value exposes its formula in documentation and, where practical, in the interface.
 
 ## Explicitly excluded data and claims
 
@@ -450,6 +421,7 @@ The product must not invent or infer:
 - Vault deposits or withdrawals;
 - borrowing or repayment UI;
 - Broker management UI;
+- funding, donation, or payment UI;
 - price oracle integration;
 - fiat-denominated aggregation;
 - push notifications;
@@ -486,13 +458,12 @@ The first public release is not complete until:
 8. On-ledger and schedule states are not conflated.
 9. XRP, IOU, and MPT are handled correctly and not combined without pricing inputs.
 10. Deleted objects remain searchable and have final-state audit pages.
-11. Activity displays normalized before/after changes.
+11. Activity displays normalized before-and-after changes.
 12. Data provenance is exposed.
 13. Loading, empty, unavailable, stale, partial, error, archived, and invalid-route states are tested.
 14. Desktop and mobile navigation, responsive behavior, long identifiers, keyboard use, screen readers, contrast, and zoom pass.
 15. Runtime, storage, collection, cache, and abuse guardrails are active.
 16. Automated tests cover parser, status, asset, epoch, lifecycle, API, UI, and archive behavior.
 17. Contact external links are configured or explicitly unavailable; no placeholder URL is public.
-18. If Support is enabled, its address, network, asset, destination-tag instruction, QR payload, disclosures, and ownership are approved and verified.
-19. Multi-day Devnet soak, deployment approval, operational runbook, backup/export procedure, and rollback checks pass.
-20. Mainnet remains disabled unless separately approved.
+18. Multi-day Devnet soak, deployment approval, operational runbook, backup/export procedure, and rollback checks pass.
+19. Mainnet remains disabled unless separately approved.

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This task controls M4 and M5 UI execution after the UI architecture and roadmap documentation is merged. It supplements `codex-master-task.md` and is subordinate to the product, architecture, data, status, asset, testing, resource, and UI source-of-truth documents.
+This task controls M4 and M5 UI execution. It supplements `codex-master-task.md` and remains subordinate to the product, architecture, data, status, asset, testing, resource, and UI source-of-truth documents.
 
 ## Mandatory reading order
 
@@ -21,47 +21,41 @@ Before UI work, read:
 11. `docs/development-roadmap.md`;
 12. `docs/implementation-status.md`.
 
-When these documents conflict, stop UI implementation and correct the conflict in a focused documentation change before continuing.
+When these documents conflict, stop the conflicting implementation path and correct the conflict in a focused documentation change before continuing.
 
-## Current checkpoint boundary
+## Historical checkpoint boundary
 
-A WIP checkpoint exists on branch `ui/overview-status-shell` at commit `aa623b9`. It contains a functional first-pass API-fetching Overview shell but uses a light simplified presentation that does not match the approved design.
-
-Rules:
-
-- do not merge `aa623b9` as-is;
-- preserve useful API types, fetch logic, loading/error behavior, and tests where correct;
-- replace the visual shell and information architecture with the approved ledger-observatory design;
-- do not force-push or erase the checkpoint history merely to make the branch look clean;
-- rebase or merge the documentation PR only after it is merged and after inspecting the actual branch state.
+The WIP checkpoint on branch `ui/overview-status-shell` at commit `aa623b9` is historical and must not be merged as-is. Preserve useful logic only when it agrees with current `main` and the approved design.
 
 ## UI execution order
 
 Follow the current `development-roadmap.md` order.
 
-### M4-0 — UI specification and route architecture
+### Completed units
 
-This documentation unit must be merged before M4 code resumes.
+- M4-0 — UI specification and route architecture;
+- M4-1 — App shell, Overview, and Network Status;
+- M4-2 — Vault UI;
+- M4-3 — Loan Broker UI.
 
-### M4-1 — App shell, Overview, and Network Status
+### Active unit
 
-Implement only:
+M4-4 begins with the verified current-state Loan reader dependency, followed by the Loan list and detail UI.
 
-- responsive application shell;
-- desktop sidebar;
-- mobile navigation;
-- persistent network context bar;
-- Overview;
-- Network Status;
-- shared loading, empty, unavailable, stale, partial, error, not-found, and invalid-identifier states;
-- design tokens and foundational components;
-- focused component and Playwright tests.
+Required sequence:
 
-Do not begin Vault, Loan Broker, Loan, Activity, project pages, or M5 audit pages until this unit is green, reviewed, and merged.
+1. define bounded Loan list and detail contracts;
+2. read and verify Loan shards;
+3. resolve same-snapshot Loan Broker and Vault relationships;
+4. preserve canonical asset identity;
+5. serialize exact terms, balances, dates, flags, and provenance;
+6. keep on-ledger and schedule states separate;
+7. expose explicit unavailable behavior;
+8. implement Loan list and detail routes;
+9. add focused unit, integration, and browser tests;
+10. update implementation status and merge only after required checks pass.
 
-### M4-2 through M4-7
-
-Continue only in roadmap order and keep each pull request focused.
+Continue M4-5 through M6 only in roadmap order.
 
 ## Data rules
 
@@ -76,7 +70,7 @@ Never invent or imply:
 - borrower identity or KYC information;
 - complete current state before active snapshot activation;
 - Mainnet monitoring;
-- wallet, signing, transaction submission, or write operations.
+- wallet, funding, payment, signing, transaction submission, or write operations.
 
 When a value is absent, show the appropriate Unavailable, Empty, Stale, Partial, or Error state rather than zero or a mock value.
 
@@ -96,11 +90,11 @@ Implement:
 
 Generated mockups are layout references only. The API and specifications are the data authority.
 
-## About, Methodology, Contact, and Support
+## Project pages
 
 ### About
 
-Implement as a project page explaining purpose, users, scope, independence, read-only behavior, non-goals, repository, Methodology, Contact, and optional Support.
+Explain purpose, users, scope, independence, read-only behavior, non-goals, repository, Methodology, and Contact.
 
 ### Methodology
 
@@ -115,19 +109,7 @@ Use configured external URLs only:
 
 Do not publish placeholder URLs. Include the public-disclosure warning.
 
-### Support
-
-Support is disabled by default. Enable `/about#support` and navigation only after explicit approval of:
-
-- address;
-- network;
-- accepted asset;
-- destination-tag rule;
-- QR payload;
-- disclosure text;
-- operational ownership.
-
-Do not place support prompts inside monitoring or audit data surfaces.
+Funding, donation, payment, and promotional surfaces are outside the current UI scope.
 
 ## Testing requirements
 
@@ -147,7 +129,7 @@ For each UI unit, add focused tests for:
 
 Run the applicable set:
 
-- focused unit/component tests;
+- focused unit or component tests;
 - `pnpm lint`;
 - `pnpm typecheck`;
 - `pnpm test`;
@@ -159,7 +141,7 @@ Record exact evidence in `implementation-status.md` and the pull-request body.
 
 ## Pull-request rules
 
-Each UI pull request must include:
+Each UI pull request includes:
 
 - pages and components changed;
 - API dependencies;
@@ -172,7 +154,7 @@ Each UI pull request must include:
 - rollback plan;
 - explicit exclusions.
 
-Do not merge without explicit authorization and green required checks.
+Do not merge without authorization and green required checks.
 
 ## External and deployment boundaries
 
@@ -180,7 +162,7 @@ UI work does not authorize:
 
 - Cloudflare resource creation;
 - remote D1 migrations;
-- R2 provisioning;
+- object-storage provisioning;
 - deployment;
 - Cron activation;
 - domain changes;

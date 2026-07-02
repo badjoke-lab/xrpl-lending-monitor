@@ -41,8 +41,7 @@ Operational and machine-facing information:
 Project identity and contact:
 
 - About;
-- Contact;
-- Support link to `/about#support` when support is enabled.
+- Contact.
 
 ## Desktop navigation
 
@@ -72,16 +71,13 @@ System
 Project
   About
   Contact
-  Support
 ```
 
 Rules:
 
 - Overview remains the first and most prominent destination.
-- Support is not an independent route; it links to `/about#support`.
-- Support is omitted until approved address and disclosure configuration exist.
 - Navigation labels must not imply unavailable routes are complete. A route may be hidden until implemented or visibly marked unavailable.
-- The sidebar footer may contain repository, version, issue-report, and support links, but no promotional data or wallet controls.
+- The sidebar footer may contain repository, version, and issue-report links, but no promotional data or wallet controls.
 
 ## Top network context bar
 
@@ -116,7 +112,6 @@ Rules:
 - Vaults and Loan Brokers remain reachable within one additional action.
 - Current page and current group are clear.
 - The network context is condensed into the mobile app bar and an expandable status panel.
-- Support remains under Project and is omitted until enabled.
 
 ## Breadcrumbs
 
@@ -272,7 +267,7 @@ About answers:
 - what it monitors;
 - what it does not do;
 - why it is read-only and Devnet-first;
-- where to find the repository, methodology, contact, and optional support information.
+- where to find the repository, methodology, and contact information.
 
 ### Methodology
 
@@ -307,28 +302,6 @@ The Contact page must warn users not to place secrets, private keys, seeds, pers
 
 External URLs remain configuration values. No placeholder link may be presented as operational.
 
-## Support model
-
-Support, if enabled, is a section at `/about#support`.
-
-The section may contain:
-
-- a short independent-funding explanation;
-- an approved XRPL address;
-- copy control;
-- QR code generated from the approved address;
-- exact network, accepted asset, and destination-tag instructions;
-- disclosures that support is voluntary, provides no product entitlement, and does not influence data or coverage.
-
-The monitor uses Devnet data. A Mainnet support address must be clearly separated with wording equivalent to:
-
-```text
-Monitor data network: XRPL Lending Devnet
-Support payment network: XRPL Mainnet
-```
-
-Until address, network, accepted asset, destination-tag requirements, and disclosure text are explicitly approved, the Support navigation item and address panel remain disabled or omitted.
-
 ## Footer
 
 The footer may include:
@@ -338,7 +311,6 @@ The footer may include:
 - Methodology;
 - About;
 - Contact;
-- Support when enabled;
 - issue reporting;
 - version or build identifier.
 

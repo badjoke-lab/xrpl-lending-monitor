@@ -1,11 +1,12 @@
 # Development roadmap
 
 Baseline date: 2026-07-01.
+
 Recalibrated after M3 completion and UI architecture approval: 2026-07-02.
 
 This document controls implementation order, dependencies, and target windows. Dates are planning targets rather than promises. Correctness, data integrity, accessibility, and release gates take priority over calendar targets.
 
-Roadmap unit labels such as `M4-1` are planning identifiers, not guaranteed GitHub pull-request numbers. Each unit should normally be one focused pull request unless evidence justifies a smaller split.
+Roadmap labels such as `M4-4` are planning identifiers, not guaranteed GitHub pull-request numbers. Each unit should normally be one focused pull request unless evidence justifies a smaller split.
 
 ## Milestone summary
 
@@ -15,21 +16,19 @@ Roadmap unit labels such as `M4-1` are planning identifiers, not guaranteed GitH
 | M1 Current-state collector | Code foundation complete; isolated full bootstrap and activation remain | 2026-07-02 to 2026-07-08, external access permitting | Connect Devnet, manage epochs, scan current objects, and create the first active snapshot | Complete marker-aware current-state bootstrap stored, verified, and activated |
 | M2 Event history and lifecycle | Complete through Checkpoint B | Completed 2026-07-02 | Collect validated ledgers, normalize changes, reconstruct lifecycle, and preserve deletions | Deterministic replay, archive, status, and reconciliation work merged |
 | M3 Public API | Complete through exports and feeds | Completed 2026-07-02 | Expose bounded read-only core and history APIs | Contract tests pass for baseline entities, history, exports, and feeds |
-| M4 Baseline UI and project pages | UI architecture approved; implementation WIP checkpoint not merge-ready | 2026-07-02 to 2026-07-10 | Deliver the ordinary monitor, project pages, navigation, responsive behavior, and shared UI states | Required baseline routes work end to end and Checkpoint C passes |
+| M4 Baseline UI and project pages | M4-0 through M4-3 complete; M4-4 active | 2026-07-02 to 2026-07-10 | Deliver the ordinary monitor, project pages, navigation, responsive behavior, and shared UI states | Required baseline routes work end to end and Checkpoint C passes |
 | M5 Differentiated audit UI | Not started | 2026-07-10 to 2026-07-16 | Add lifecycle, state changes, archives, cover/loss, epochs, and provenance integration | Audit views complete without baseline regressions |
 | M6 Hardening and public Devnet release | Not started | 2026-07-16 to 2026-07-26 | Prove integrity, resource safety, accessibility, operations, and deployment readiness | Multi-day soak and all release gates pass |
 
-The original August target remains a conservative outer boundary. The recalibrated dates reflect the actual M2 and M3 completion state, but external preview access, bootstrap runtime, review, deployment approval, and soak evidence may extend the release date.
-
-The schedule was previously recalibrated after the current-object scanner benchmark. Full bootstrap remains separated from the scheduled Worker because measured global marker traversal does not fit a normal scheduled invocation.
+The original August target remains a conservative outer boundary. External preview access, bootstrap runtime, review, deployment approval, and soak evidence may extend the release date.
 
 ## Cross-cutting rules
 
 - M1 preview bootstrap closeout may proceed in parallel with independent M4 and M5 work, but current-state pages must show explicit unavailable states until an active snapshot exists.
 - No UI page may invent values to appear complete.
 - No Mainnet, wallet, signing, transaction submission, remote infrastructure, deployment, or production bootstrap action is authorized by this roadmap alone.
+- Funding, donation, payment, and promotional surfaces are outside the current release scope.
 - About, Methodology, Contact, and API documentation are required baseline project pages.
-- Support is optional, disabled by default, and may be enabled only after address, network, accepted asset, destination-tag rule, QR payload, disclosure text, and operational ownership are approved.
 - Generated UI mockups are visual references only; approved API and specification documents control displayed data.
 
 ## M0 — Foundation and specification lock
@@ -38,7 +37,7 @@ Completed scope:
 
 - repository operating foundation;
 - product and architecture specifications;
-- data, status, asset, collector, testing, resource, competitor, and roadmap documents;
+- data, status, asset, collector, testing, resource, competitor, roadmap, and UI documents;
 - pinned Node, pnpm, TypeScript, React, Vite, Worker, D1, Hono, Vitest, Playwright, ESLint, and CI setup;
 - local, preview, and production boundaries;
 - Mainnet fail-closed configuration.
@@ -97,7 +96,7 @@ Completed in dependency order:
 6. status engine and reconciliation;
 7. Checkpoint B history-completeness decision.
 
-Public lifecycle completeness claims remain bounded by the evidence recorded at Checkpoint B and later soak/reconciliation results.
+Public lifecycle completeness claims remain bounded by the evidence recorded at Checkpoint B and later soak and reconciliation results.
 
 ## M3 — Public API
 
@@ -105,17 +104,19 @@ Completed units:
 
 1. core entity API shell;
 2. activity, search, and history API;
-3. bounded exports and feeds.
+3. bounded exports and feeds;
+4. verified current-state Vault reads;
+5. verified current-state Loan Broker reads.
 
-Current-entity collections must continue to return explicit unavailable states until an active snapshot and public object-shard reader are available.
+Current-entity collections continue to return explicit unavailable states until an active snapshot and public object-shard binding are available.
 
 ## M4 — Baseline UI and project pages
 
-M4 begins with documentation and design alignment. UI code must not resume from the WIP checkpoint until M4-0 is merged.
-
 ### M4-0 — UI specification and route architecture
 
-Documentation-only unit:
+Complete.
+
+Delivered:
 
 - canonical site map and routes;
 - Monitor, Audit, System, and Project navigation groups;
@@ -126,14 +127,14 @@ Documentation-only unit:
 - loading, empty, unavailable, stale, partial, error, archived, and invalid-route states;
 - responsive and accessibility rules;
 - mockup interpretation and prohibited invented data;
-- About, Methodology, Contact, API, and optional Support specifications;
-- roadmap, product, architecture, Codex, index, decision, and implementation-status alignment.
-
-Exit condition: all source-of-truth documents agree and no UI code is included.
+- About, Methodology, Contact, and API specifications.
 
 ### M4-1 — App shell, Overview, and Network Status
 
-- reconcile the `ui/overview-status-shell` WIP checkpoint after M4-0 merges;
+Complete.
+
+Delivered:
+
 - dark design tokens;
 - desktop sidebar;
 - mobile app bar, bottom navigation, and More menu;
@@ -149,40 +150,59 @@ Exit condition: all source-of-truth documents agree and no UI code is included.
 - shared loading, empty, unavailable, stale, partial, error, not-found, and invalid-identifier components;
 - focused component and browser tests.
 
-Exit condition: the WIP light shell is replaced, all checks pass, and the approved desktop and mobile direction is demonstrated without invented data.
-
 ### M4-2 — Vault UI
 
-- Vault list;
-- bounded search, filters, sorting, and pagination;
-- Vault detail;
-- current fields, flags, asset identity, Share MPT, Domain, utilization, and used assets;
-- connected Loan Brokers and Loans;
-- activity and history;
-- archive cross-link;
-- responsive table and detail behavior.
+Complete.
+
+Delivered:
+
+- verified current-state Vault list and detail API reads;
+- Vault list with bounded search, sorting, and cursor pagination;
+- Vault detail with current fields, flags, asset identity, Share MPT, Domain, utilization, and used assets;
+- explicit unavailable relationship and history sections where API support is not yet present;
+- responsive table and detail behavior;
+- unit and browser coverage.
 
 ### M4-3 — Loan Broker UI
 
-- Loan Broker list and detail;
-- related Vault;
-- Loan book;
-- DebtTotal, DebtMaximum, debt utilization;
-- CoverAvailable, configured cover rates, required minimum cover, and surplus or shortfall;
-- activity and history;
-- archive cross-link;
-- asset-safe responsive presentation.
+Complete.
+
+Delivered:
+
+- verified current-state Loan Broker list and detail API reads;
+- same-snapshot Vault relationship and asset resolution;
+- Loan Broker list and detail routes;
+- DebtTotal, DebtMaximum, debt utilization, CoverAvailable, configured cover rates, required minimum cover, and surplus or shortfall;
+- formula and provenance display;
+- direct related Vault navigation;
+- explicit unavailable Loan book and history sections;
+- asset-safe responsive presentation;
+- unit and browser coverage.
 
 ### M4-4 — Loan UI
 
+Active.
+
+Dependency order:
+
+1. define verified current-state Loan list and detail contracts;
+2. implement bounded Loan shard reads;
+3. resolve related Loan Broker, Vault, and canonical asset in the same active snapshot;
+4. serialize exact balances, terms, schedule fields, flags, provenance, and separate state models;
+5. expose bounded list and detail API routes;
+6. implement Loan list and detail UI;
+7. add focused unit, integration, and browser tests.
+
+Required UI scope:
+
 - Loan list and detail;
-- bounded filters and pagination;
-- terms and current balances;
+- bounded search, filters, sorting, and pagination;
+- exact terms and current balances;
 - separate on-ledger and schedule states;
 - payment schedule;
 - related Broker and Vault;
 - archive lookup;
-- core Overview, Terms, and Payments tabs;
+- core Overview, Terms, and Payments subviews;
 - mobile Loan detail.
 
 Full lifecycle, state-change, and archive audit integration remains M5 work.
@@ -211,10 +231,9 @@ Required behavior:
 
 - documentation layout and stable anchors;
 - full Methodology table of contents;
-- Google Form and GitHub Issues contact choices using configured URLs only;
+- configured Google Form and GitHub Issues contact choices only;
 - public-issue privacy warning;
 - About purpose, scope, independence, read-only status, non-goals, repository, Methodology, and Contact links;
-- optional `/about#support` section and navigation only after explicit support configuration approval;
 - no placeholder external links.
 
 ### M4-7 — Baseline integration, accessibility, and Checkpoint C
@@ -228,7 +247,7 @@ Required behavior:
 - no unsupported USD, pricing, cross-asset total, or risk-score output;
 - end-to-end baseline monitor review.
 
-Exit condition: Checkpoint C confirms ordinary monitor completeness before audit-only promotion.
+Checkpoint C confirms ordinary monitor completeness before audit-only promotion.
 
 ## M5 — Differentiated audit UI
 
@@ -326,10 +345,9 @@ Activate the approved resource-envelope guardrails.
 - operational runbook;
 - backup and export procedure;
 - rollback procedure;
-- domain and deployment plan;
-- support configuration review if support is enabled.
+- domain and deployment plan.
 
-External forms, support address, domain, deployment, and production-resource changes remain human approval gates.
+External forms, domain, deployment, and production-resource changes remain human approval gates.
 
 ### M6-5 — Multi-day soak and public release
 
@@ -338,35 +356,9 @@ External forms, support address, domain, deployment, and production-resource cha
 - lag and resource evidence;
 - reset and recovery evidence where available;
 - active snapshot and history consistency;
-- public UI/API verification;
+- public UI and API verification;
 - deployment approval;
 - rollback readiness;
 - release report.
 
-M6 completes only after the multi-day soak, resource envelope, product release gates, deployment approval, and rollback checks pass. Mainnet remains disabled until separately approved.
-
-## Decision checkpoints
-
-### Checkpoint A — collector runtime
-
-Completed. The full bootstrap uses a resumable long-running runner and bounded compressed shards rather than a scheduled Worker global scan.
-
-### Checkpoint B — history completeness
-
-Completed as a bounded decision. Public claims remain limited by recorded evidence and later soak/reconciliation.
-
-### UI architecture gate — before M4 code resumes
-
-M4-0 documentation must be merged. The generated mockups are layout references only. The current light WIP checkpoint is not merge-ready.
-
-### Checkpoint C — after M4-7
-
-Confirm baseline monitor completeness, project-page completeness, navigation, responsive behavior, accessibility, and absence of invented data before promoting M5 audit-only features.
-
-### Checkpoint D — before public release
-
-Confirm domain, final legal and disclaimer text, Contact configuration, optional Support configuration, operational ownership, backup and export procedures, deployment plan, and rollback.
-
-## Mainnet follow-on milestone
-
-Mainnet is not scheduled. It requires verified amendment activation, an approved starting-ledger and backfill strategy, separate configuration and capacity review, a production-shaped read soak, and explicit release approval.
+M6 completes only after the release report demonstrates all product, integrity, resource, accessibility, security, and operational gates.
