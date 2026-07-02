@@ -1,0 +1,346 @@
+.documentation-page {
+  max-width: 82rem;
+  margin-inline: auto;
+}
+
+.documentation-hero {
+  align-items: flex-start;
+}
+
+.documentation-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.prose-stack {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.prose-stack p,
+.documentation-card p,
+.documentation-section p,
+.contact-option p {
+  line-height: 1.7;
+}
+
+.documentation-card-grid,
+.documentation-link-grid,
+.contact-option-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.documentation-card,
+.documentation-link-grid > div,
+.contact-option {
+  min-width: 0;
+  padding: 1.1rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-medium);
+  background: var(--surface-raised);
+}
+
+.documentation-card h2,
+.documentation-card h3,
+.documentation-link-grid h3,
+.contact-option h2 {
+  margin-top: 0;
+}
+
+.documentation-card p,
+.documentation-link-grid p,
+.contact-option p {
+  color: var(--text-muted);
+}
+
+.documentation-definition-list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+}
+
+.documentation-definition-list > div {
+  display: grid;
+  grid-template-columns: minmax(9rem, 0.35fr) minmax(0, 1fr);
+  gap: 1rem;
+  padding: 0.85rem 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.documentation-definition-list > div:last-child {
+  border-bottom: 0;
+}
+
+.documentation-definition-list dt {
+  font-weight: 800;
+}
+
+.documentation-definition-list dd {
+  margin: 0;
+  color: var(--text-muted);
+  line-height: 1.65;
+}
+
+.documentation-list {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0;
+  padding-left: 1.25rem;
+  line-height: 1.65;
+}
+
+.methodology-layout {
+  display: grid;
+  grid-template-columns: minmax(13rem, 18rem) minmax(0, 1fr);
+  gap: 1.5rem;
+  align-items: start;
+}
+
+.documentation-toc {
+  position: sticky;
+  top: 1rem;
+  max-height: calc(100vh - 2rem);
+  overflow: auto;
+  padding: 1rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-medium);
+  background: var(--surface-raised);
+}
+
+.documentation-toc h2 {
+  margin-top: 0;
+  font-size: 1rem;
+}
+
+.documentation-toc ol {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+.documentation-toc a {
+  display: inline-block;
+  padding-block: 0.12rem;
+  line-height: 1.35;
+}
+
+.methodology-content {
+  display: grid;
+  gap: 1.15rem;
+  min-width: 0;
+}
+
+.documentation-section {
+  min-width: 0;
+  scroll-margin-top: 6rem;
+  padding: 1.25rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-medium);
+  background: var(--surface-raised);
+}
+
+.documentation-section h2 {
+  margin-top: 0;
+}
+
+.documentation-section-summary {
+  font-size: 1.03rem;
+  font-weight: 650;
+}
+
+.back-to-contents {
+  display: inline-block;
+  margin-top: 0.9rem;
+  font-size: 0.88rem;
+}
+
+.provenance-key {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.provenance-key > div {
+  min-width: 0;
+  padding: 0.85rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-small);
+}
+
+.provenance-key p {
+  margin: 0.55rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.api-section-navigation {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  padding: 0.8rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-medium);
+  background: var(--surface-raised);
+}
+
+.api-section-navigation a {
+  padding: 0.55rem 0.75rem;
+  border-radius: var(--radius-small);
+  background: var(--surface-base);
+  font-weight: 700;
+}
+
+.api-endpoint-table-wrapper {
+  overflow-x: auto;
+}
+
+.api-endpoint-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 48rem;
+}
+
+.api-endpoint-table th,
+.api-endpoint-table td {
+  padding: 0.8rem;
+  border-bottom: 1px solid var(--border-subtle);
+  text-align: left;
+  vertical-align: top;
+}
+
+.api-endpoint-table th {
+  color: var(--text-muted);
+  font-size: 0.76rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.api-endpoint-table p {
+  margin: 0;
+}
+
+.api-endpoint-table small {
+  display: block;
+  margin-top: 0.35rem;
+  color: var(--text-muted);
+}
+
+.code-example {
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 1rem 0 0;
+  padding: 1rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-medium);
+  background: var(--surface-base);
+  white-space: pre;
+  tab-size: 2;
+}
+
+.example-warning {
+  padding: 0.85rem 1rem;
+  border-left: 3px solid var(--accent-primary);
+  background: var(--surface-base);
+}
+
+.contact-option-grid {
+  align-items: stretch;
+}
+
+.contact-option {
+  display: flex;
+  flex-direction: column;
+}
+
+.contact-option > .primary-button {
+  align-self: flex-start;
+  margin-top: auto;
+}
+
+.contact-option .state-block {
+  margin-top: auto;
+}
+
+.privacy-warning {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-medium);
+  background: var(--surface-raised);
+}
+
+.privacy-warning > div:first-child {
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-weight: 900;
+}
+
+.privacy-warning h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.privacy-warning p {
+  margin: 0.55rem 0 0;
+  color: var(--text-muted);
+  line-height: 1.65;
+}
+
+@media (max-width: 1000px) {
+  .methodology-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .documentation-toc {
+    position: static;
+    max-height: none;
+  }
+
+  .documentation-toc ol {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .provenance-key {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 700px) {
+  .documentation-card-grid,
+  .documentation-link-grid,
+  .contact-option-grid,
+  .provenance-key {
+    grid-template-columns: 1fr;
+  }
+
+  .documentation-definition-list > div {
+    grid-template-columns: 1fr;
+    gap: 0.3rem;
+  }
+
+  .documentation-toc ol {
+    grid-template-columns: 1fr;
+  }
+
+  .documentation-section,
+  .documentation-card,
+  .documentation-link-grid > div,
+  .contact-option {
+    padding: 1rem;
+  }
+
+  .privacy-warning {
+    grid-template-columns: 1fr;
+  }
+}
