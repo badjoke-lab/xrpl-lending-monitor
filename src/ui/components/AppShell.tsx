@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import type { MouseEvent, ReactNode } from 'react'
 
 import { formatDuration, formatInteger, statusTone, titleCase } from '../lib/formatting'
 import type { NetworkStatusResponse, ResourceState } from '../types/api'
@@ -89,7 +89,7 @@ function Context({ status }: { status: ResourceState<NetworkStatusResponse> }) {
 }
 
 export function AppShell({ children, currentPath, status, onNavigate, onReload }: Props) {
-  const home = (event: React.MouseEvent<HTMLAnchorElement>) => { event.preventDefault(); onNavigate('/') }
+  const home = (event: MouseEvent<HTMLAnchorElement>) => { event.preventDefault(); onNavigate('/') }
   return (
     <div className="application-frame">
       <a className="skip-link" href="#main-content">Skip to content</a>
