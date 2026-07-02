@@ -30,7 +30,6 @@ This document defines canonical public routes, route ownership, implementation m
 | `/methodology` | Methodology | System | M4 | Full technical methodology |
 | `/about` | About | Project | M4 | Project purpose and boundaries |
 | `/contact` | Contact | Project | M4 | Google Form and GitHub Issues choices |
-| `/about#support` | Support section | Project | M4 optional | Enabled only after explicit configuration approval |
 
 ## Loan detail subviews
 
@@ -110,15 +109,14 @@ Examples:
 
 Anchor changes require redirects or retained aliases after public release.
 
-## Contact and support external links
+## External links
 
 The following are configuration-backed, not hard-coded product routes:
 
 - Google Form URL;
 - GitHub Issues URL or issue-template URLs;
 - repository URL;
-- XRPL Explorer links;
-- approved support address URI and QR payload.
+- XRPL Explorer links.
 
 A missing configuration value results in an explicit unavailable or omitted control, never a placeholder destination.
 
@@ -147,5 +145,3 @@ The application must provide:
 ## Initial navigation visibility
 
 Routes may be hidden until their implementation unit is merged. The route map still remains authoritative. A hidden route is not removed from the roadmap.
-
-The Support item is the only planned route-level item that remains optional. It is hidden until the approved address and disclosures are present.
