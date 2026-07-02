@@ -4,34 +4,34 @@ Last updated: 2026-07-02.
 
 ## Current milestone
 
-**M1 closeout — Current-state collector activation** and **M3 public API — Activity, search, and history API**.
+**M1 closeout — Current-state collector activation** and **M3 public API — Exports and feeds**.
 
-M1 code foundations and controlled resume evidence are merged, but M1 has not exited because a complete isolated preview bootstrap has not yet been stored, verified, and activated. M2 history foundations, the Checkpoint B documentation decision, and the M3 core entity API shell are merged. M3 activity, search, and history API work is in progress.
+M1 code foundations and controlled resume evidence are merged, but M1 has not exited because a complete isolated preview bootstrap has not yet been stored, verified, and activated. M2 history foundations, the Checkpoint B documentation decision, the M3 core entity API shell, and M3 activity/search/history API are merged. M3 exports and feeds work is in progress.
 
 ## Canonical continuation point
 
-GitHub pull request #18, `Add core entity API shell`, merged by squash as `86258cadc4c44891708de89db2d7c55868161dfd`.
+GitHub pull request #19, `Add activity search and history API`, merged by squash as `c74753f1041efd6554052d90796eb3d5485ea5b9`.
 
 Active local branch for the next roadmap unit:
 
-- branch: `api/activity-history-api`;
-- base: `main` at `86258cadc4c44891708de89db2d7c55868161dfd`;
-- roadmap unit: M3 public API activity, search, and history API;
-- current implementation commit: `97c2f98` (`feat: add activity history API`);
+- branch: `api/exports-feeds`;
+- base: `main` at `c74753f1041efd6554052d90796eb3d5485ea5b9`;
+- roadmap unit: M3 public API exports and feeds;
+- current implementation commit: `34a3f99` (`feat: add bounded activity exports`);
 - current state: local implementation and validation complete; pull request not opened yet.
 
 Always inspect the current pull-request head and checks before resuming; the values above are a recorded checkpoint, not permission to ignore newer GitHub state.
 
 ## Immediate work
 
-Complete the M3 activity, search, and history API pull request:
+Complete the M3 exports and feeds pull request:
 
-1. push `api/activity-history-api`;
+1. push `api/exports-feeds`;
 2. open a focused PR with the validation below;
 3. merge only after required checks pass and the branch is current;
-4. continue to the M3 exports and feeds unit from updated `main`.
+4. continue to the M4 app shell, Overview, and Network Status unit from updated `main`.
 
-The first incomplete action is pushing `api/activity-history-api`.
+The first incomplete action is pushing `api/exports-feeds`.
 
 ## Completed
 
@@ -245,12 +245,25 @@ Current local M3 core entity API validation:
 Current local M3 activity, search, and history API validation:
 
 - implementation commit: `97c2f98` (`feat: add activity history API`);
+- status commit: `b183f54` (`docs: record history API progress`);
 - focused route test: `pnpm exec vitest run src/worker/history-api-routes.test.ts`: 6 tests passed;
 - `pnpm typecheck`: passed;
 - `pnpm check`: passed; 28 test files passed, 3 skipped; 139 tests passed, 3 skipped; local D1 migrations reported no pending migrations; build passed;
 - `pnpm test:e2e`: 1 Chromium smoke test passed;
 - live ledger evidence: not collected for this API-only branch because no collector, migration, or ledger-read behavior changed;
 - branch: `api/activity-history-api`;
+- PR #19, `Add activity search and history API`, passed `quality` at head `b183f54bf0b5c9098491c071704622b9be776db3` and was squash-merged as `c74753f1041efd6554052d90796eb3d5485ea5b9`;
+- PR #19 had no review comments or unresolved review threads before merge.
+
+Current local M3 exports and feeds validation:
+
+- implementation commit: `34a3f99` (`feat: add bounded activity exports`);
+- focused route test: `pnpm exec vitest run src/worker/history-api-routes.test.ts`: 9 tests passed;
+- `pnpm typecheck`: passed;
+- `pnpm check`: passed; 28 test files passed, 3 skipped; 142 tests passed, 3 skipped; local D1 migrations reported no pending migrations; build passed;
+- `pnpm test:e2e`: 1 Chromium smoke test passed;
+- live ledger evidence: not collected for this API-only branch because no collector, migration, or ledger-read behavior changed;
+- branch: `api/exports-feeds`;
 - pull request: not opened yet.
 
 ## Known open questions
@@ -278,7 +291,7 @@ Current local M3 activity, search, and history API validation:
 
 ## Current blockers
 
-No known code blocker is recorded for completing the M3 activity, search, and history API pull request.
+No known code blocker is recorded for completing the M3 exports and feeds pull request.
 
 A real isolated preview bootstrap depends on approved external preview access. That dependency does not block local implementation, tests, documentation, or independent incremental-history work.
 

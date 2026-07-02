@@ -241,6 +241,8 @@ Initial core API endpoints:
 - `GET /api/objects/{objectType}/{objectId}/history` returns bounded normalized field changes for one object.
 - `GET /api/loans/{loanId}/lifecycle` returns bounded indexed Loan lifecycle events.
 - `GET /api/search?q=...` performs exact-match search over indexed transaction hashes, object IDs, accounts, assets, and lifecycle identifiers.
+- `GET /api/exports/activity?format=json|ndjson|csv` returns bounded activity exports. The default format is JSON.
+- `GET /api/feeds/activity.ndjson` returns a bounded NDJSON activity feed.
 - API responses must remain read-only and Devnet-only until Mainnet release approval is recorded.
 
 ## Data provenance categories

@@ -22,6 +22,8 @@ import {
   serializeUnavailableEntityCollection,
 } from './serializers/core-api'
 import {
+  serializeActivityCsv,
+  serializeActivityNdjson,
   serializeActivityResponse,
   serializeEpochsResponse,
   serializeLoanLifecycleResponse,
@@ -223,6 +225,51 @@ app.get('/api/search', async (context) => {
       limit,
     }),
   )
+})
+
+app.get('/api/exports/activity', async (context) => {
+  resolveRuntimeConfig(context.env)
+
+  const limit = parsePageLimit(context.req.query('limit'))
+  if (limit === null) return invalidLimitResponse(context)
+
+  const format = context.req.query('format') ?? 'json'
+  const events = await listActivity(context.env.DB, { limit })
+
+  if (format === 'json') {
+    return context.json(serializeActivityResponse(events, limit))
+  }
+
+  if (format === 'ndjson') {
+    return new Response(serializeActivityNdjson(events), {
+      headers: { 'content-type': 'application/x-ndjson; charset=utf-8' },
+    })
+  }
+
+  if (format === 'csv') {
+    return new Response(serializeActivityCsv(events), {
+      headers: { 'content-type': 'text/csv; charset=utf-8' },
+    })
+  }
+
+  return context.json(
+    {
+      error: 'invalid_format',
+      message: 'format must be json, ndjson, or csv',
+    },
+    400,
+  )
+})
+
+app.get('/api/feeds/activity.ndjson', async (context) => {
+  resolveRuntimeConfig(context.env)
+
+  const limit = parsePageLimit(context.req.query('limit'))
+  if (limit === null) return invalidLimitResponse(context)
+
+  return new Response(serializeActivityNdjson(await listActivity(context.env.DB, { limit })), {
+    headers: { 'content-type': 'application/x-ndjson; charset=utf-8' },
+  })
 })
 
 app.onError((_error, context) => {
