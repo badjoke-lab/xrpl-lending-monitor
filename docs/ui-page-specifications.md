@@ -2,9 +2,9 @@
 
 ## Purpose
 
-This document defines the responsibility, required content, API dependency, unavailable behavior, navigation, and milestone assignment for every public page. It complements `product-spec.md`; it does not weaken any product, data, status, asset, provenance, or release requirement.
+This document defines responsibility, required content, API dependency, unavailable behavior, navigation, and milestone assignment for every public page. It complements `product-spec.md` and does not weaken data, status, asset, provenance, or release requirements.
 
-## Common requirements for every data page
+## Common requirements
 
 Every monitoring or audit page must:
 
@@ -15,7 +15,7 @@ Every monitoring or audit page must:
 - identify Direct, Derived, Indexed, and Unavailable data;
 - provide shareable routes for filters, pagination, selected entities, and meaningful subviews where practical;
 - use only approved read-only API data;
-- avoid wallet, signing, deposit, borrowing, repayment, or administration affordances.
+- avoid wallet, funding, transfer, signing, deposit, borrowing, repayment, and administration affordances.
 
 ## Overview — `/`
 
@@ -39,7 +39,7 @@ Provide a fast, trustworthy summary of protocol availability and current monitor
 ### Prohibited content
 
 - cross-asset totals;
-- USD or fiat estimates;
+- unsupported fiat estimates;
 - unsupported charts;
 - fabricated zeros for unavailable counts;
 - implied investment or safety conclusions.
@@ -50,31 +50,27 @@ Provide a fast, trustworthy summary of protocol availability and current monitor
 
 ### Milestone
 
-M4-1.
+M4-1, complete.
 
 ## Network Status — `/network-status`
-
-### Purpose
-
-Expose operational state and evidence without requiring raw API inspection.
 
 ### Required content
 
 - endpoint or server state where publicly safe;
 - server version and complete-ledger range where available;
-- validated ledger and ledger age;
+- validated ledger and age;
 - collector cursor and lag;
-- last attempt and last success;
-- consecutive failures and public-safe current error;
+- last attempt and success;
+- consecutive failures and public-safe error;
 - amendment enabled and supported states;
 - epoch and reset reason;
 - active snapshot identity and availability;
 - stale thresholds and explanations;
-- link to status API and Methodology.
+- links to status API and Methodology.
 
 ### Milestone
 
-M4-1.
+M4-1, complete.
 
 ## Vault list — `/vaults`
 
@@ -84,37 +80,32 @@ Browse current and discoverable archived Vaults.
 
 ### Required behavior
 
-- bounded search, pagination, sorting, and filters;
-- filters for asset, public/private state, loss presence, connected Broker presence, epoch, and archive context where supported;
-- columns defined by `product-spec.md`;
+- bounded search, cursor pagination, sorting, and supported filters;
+- asset-separated exact values;
 - explicit active-snapshot unavailable state;
-- route to Vault detail and archive record.
+- route to Vault detail and archive context;
+- no unsupported relationship counts.
 
 ### Milestone
 
-M4-2.
+M4-2, complete.
 
 ## Vault detail — `/vaults/:vaultId`
-
-### Purpose
-
-Explain one Vault’s current state, relationships, activity, history, and final archive context.
 
 ### Required sections
 
 - summary and identity;
 - current fields and flags;
-- asset and Share MPT information;
+- asset, Share MPT, and Domain information;
 - utilization and used assets with formula provenance;
-- connected Loan Brokers and Loans;
-- Deposit, Withdraw, Set, Clawback, and Delete activity;
-- balance, availability, and loss history;
-- archive banner and final-state link when deleted;
+- connected Loan Brokers and Loans when supported;
+- activity and history when supported;
+- archive context;
 - raw data last.
 
 ### Milestone
 
-M4-2, with differentiated historical refinements in M5 where needed.
+M4-2 complete for verified current state; deeper audit integration remains M5.
 
 ## Loan Broker list — `/loan-brokers`
 
@@ -124,33 +115,33 @@ Compare Broker debt, capacity, cover, relationships, and factual operational sta
 
 ### Required behavior
 
-- bounded search, sorting, pagination, and filters;
+- bounded search, sorting, and cursor pagination;
 - asset-separated values;
-- debt utilization;
-- required minimum cover and cover surplus or shortfall with formula provenance;
-- active, impaired, defaulted, and archived context without proprietary scoring.
+- DebtTotal, optional DebtMaximum, and debt utilization;
+- CoverAvailable, required minimum cover, and surplus or shortfall;
+- formula provenance;
+- same-snapshot Vault relationship;
+- explicit unavailable Loan counts and status summaries until supported.
 
 ### Milestone
 
-M4-3.
+M4-3, complete.
 
 ## Loan Broker detail — `/loan-brokers/:brokerId`
 
 ### Required sections
 
-- owner, pseudo-account, status, and provenance;
-- related Vault;
-- DebtTotal, DebtMaximum, debt utilization;
-- CoverAvailable, configured rates, required cover, surplus or shortfall;
-- Loan book;
-- CoverDeposit, CoverWithdraw, CoverClawback, Set, and Delete activity;
-- debt and cover history;
-- archived final state where applicable;
+- owner, pseudo-account, identifiers, status, and provenance;
+- related Vault and canonical asset;
+- debt, capacity, utilization, cover, configured rates, required cover, and surplus or shortfall;
+- Loan book when supported;
+- activity and history when supported;
+- archive context;
 - raw data last.
 
 ### Milestone
 
-M4-3, with deeper audit history in M5.
+M4-3 complete for verified current state; deeper audit history remains M5.
 
 ## Loan list — `/loans`
 
@@ -160,23 +151,32 @@ Browse current and archived Loans without conflating protocol and schedule state
 
 ### Required behavior
 
-- bounded search, sorting, pagination, and filters by network, epoch, asset, Vault, Broker, Borrower, on-ledger state, schedule state, and deleted state;
+- bounded search, sorting, cursor pagination, and supported filters;
+- exact asset units resolved through same-snapshot Broker and Vault relationships;
 - separate on-ledger and schedule columns;
-- exact asset units;
-- clear due and grace timestamps;
-- archive lookup and relationship links.
+- Borrower, Broker, Vault, and asset context;
+- PrincipalOutstanding, TotalValueOutstanding, PeriodicPayment, PaymentRemaining, NextPaymentDueDate, and grace context where present;
+- archive lookup and relationship links;
+- explicit unavailable behavior before active snapshot activation.
+
+### API dependencies
+
+Verified current-state Loan list reader and relationship resolver.
 
 ### Milestone
 
-M4-4.
+M4-4, active.
 
 ## Loan detail — `/loans/:loanId`
 
-### Required tabs
+### Core M4-4 subviews
 
 - Overview;
 - Terms;
-- Payments;
+- Payments.
+
+### Later audit subviews
+
 - Lifecycle;
 - State Changes;
 - Transactions;
@@ -184,38 +184,35 @@ M4-4.
 
 ### Overview requirements
 
-- Borrower, Broker, Vault, and asset;
+- Loan ID and Borrower;
+- related Broker and Vault;
+- canonical asset;
 - current balances;
-- on-ledger and schedule states shown separately;
+- separate on-ledger and schedule states;
 - next payment due and grace end;
 - last update, ledger, epoch, and provenance;
 - related-entity links.
 
-### Historical requirements
+### Terms requirements
 
-- full lifecycle ordering;
-- payment history;
-- impair, unimpair, default, and delete events;
-- normalized before/after changes;
-- source transactions;
-- final state after deletion.
+Display direct term, rate, interval, fee, sequence, and flag fields present in the verified Loan object. Missing or unknown fields remain explicit.
+
+### Payments requirements
+
+Display current schedule facts and calculated time context without inventing a complete payment history. Indexed historical payment timelines remain M5 work.
 
 ### Milestone
 
-Overview, Terms, and core Payments in M4-4. Full lifecycle, state-change, archive, and raw audit integration in M5-1 and M5-2.
+Overview, Terms, and core Payments in M4-4. Lifecycle, state changes, archive integration, and full raw audit work remain M5-1 and M5-2.
 
 ## Activity — `/activity`
 
-### Purpose
-
-Browse recognized Lending and Single Asset Vault transactions and normalized changes.
-
 ### Required behavior
 
-- transaction-type, result, object-type, account, epoch, provenance, and time filters where API-supported;
-- time, ledger, type, result, initiating account, affected objects, normalized change summary, provenance, and hash;
+- supported transaction, result, object, account, epoch, provenance, and time filters;
+- time, ledger, type, result, initiating account, affected objects, change summary, provenance, and hash;
 - bounded pagination and export links;
-- selected-row or linked transaction detail;
+- route to transaction detail;
 - no fabricated activity-volume chart.
 
 ### Milestone
@@ -231,7 +228,7 @@ M4-5.
 - affected nodes;
 - normalized object changes;
 - related entities;
-- retained raw transaction and metadata only where available and allowed;
+- retained raw transaction and metadata where available;
 - provenance and unavailable explanations.
 
 ### Milestone
@@ -256,7 +253,7 @@ M4-5.
 - group results by type;
 - show current versus archived context;
 - preserve network and epoch;
-- explain no-result versus unavailable states.
+- distinguish no result from unavailable index.
 
 ### Milestone
 
@@ -271,7 +268,7 @@ M4-5.
 - Borrower Loans;
 - protocol transactions;
 - archived relationships;
-- no off-chain identity or KYC claims.
+- no off-chain identity claims.
 
 ### Milestone
 
@@ -279,17 +276,7 @@ M4-5.
 
 ## Lifecycle explorer — `/audit/lifecycle`
 
-### Purpose
-
-Provide a protocol-wide lifecycle event explorer distinct from a single Loan’s timeline.
-
-### Required behavior
-
-- event filters, epoch, Loan, Broker, Vault, account, and asset context where supported;
-- ledger and transaction ordering;
-- event provenance;
-- links to Loan, transaction, and archive details;
-- no unsupported inference between recorded events.
+Provides protocol-wide recorded Loan lifecycle events with supported filters, canonical ordering, provenance, and links to Loan, transaction, and archive detail. It never infers missing events.
 
 ### Milestone
 
@@ -297,12 +284,7 @@ M5-1.
 
 ## Archived Objects — `/audit/archived`
 
-### Required behavior
-
-- browse deleted Vault, Loan Broker, and Loan records;
-- filter by type, epoch, related identifier, deletion transaction, and classification where supported;
-- distinguish unknown deletion classification from confirmed reasons;
-- route to archived detail.
+Browses deleted Vault, Loan Broker, and Loan records with supported type, epoch, relationship, transaction, and classification filters. Unknown classification remains explicit.
 
 ### Milestone
 
@@ -315,11 +297,11 @@ M5-2.
 - persistent archive banner;
 - final state;
 - deletion event, ledger, time, and transaction;
-- normalized before/after or removal representation;
+- normalized removal representation;
 - related entities and source transactions;
 - archive metadata and provenance;
 - retained raw archive data where available;
-- link back to current entity when one exists in another epoch or context.
+- current-context links where valid.
 
 ### Milestone
 
@@ -349,14 +331,7 @@ M5-3.
 
 ## Devnet Epochs — `/epochs` and `/epochs/:epochId`
 
-### Required content
-
-- current and archived epochs;
-- first and last ledger where known;
-- reset reason and timestamps;
-- epoch-scoped objects, activity, and archives;
-- persistent warning against mixing epochs;
-- links back to current context.
+Shows current and archived epochs, first and last ledger where known, reset reason, timestamps, scoped objects, activity, archives, and warnings against mixing epochs.
 
 ### Milestone
 
@@ -368,10 +343,10 @@ M5-4.
 
 - endpoint list;
 - parameters, limits, sorting, pagination, network, and epoch semantics;
-- response examples using clearly labeled examples;
+- clearly labelled response examples;
 - provenance and unavailable states;
 - export and feed formats;
-- raw-retention boundaries;
+- retention boundaries;
 - read-only and Devnet-only status.
 
 ### Milestone
@@ -403,7 +378,7 @@ M4-6, then maintained with API changes.
 19. known limitations;
 20. verification and release process.
 
-The page supports stable anchors, an on-page table of contents, readable long-form layout, and links to source code or specifications where useful.
+The page supports stable anchors, an on-page table of contents, readable long-form layout, and source links where useful.
 
 ### Milestone
 
@@ -417,12 +392,11 @@ M4-6, with evidence updates through M6.
 - why it exists;
 - intended users;
 - what it monitors;
-- what makes its audit layer different;
+- what differentiates its audit layer;
 - Devnet-only initial scope;
 - independent and read-only status;
 - explicit non-goals;
 - repository and Methodology links;
-- optional Support section;
 - Contact link.
 
 ### Milestone
@@ -435,53 +409,20 @@ M4-6.
 
 Two clearly separated options:
 
-1. General or private inquiry through a configured Google Form.
-2. Public technical issue, data correction, documentation issue, or feature request through GitHub Issues.
+1. general or private inquiry through a configured form;
+2. public technical issue, data correction, documentation issue, or feature request through GitHub Issues.
 
-The page must warn against posting seeds, private keys, personal data, secrets, or non-public security details in public issues. Missing external configuration must produce an unavailable explanation rather than a placeholder link.
+The page warns against publishing confidential or personal information in public issues. Missing external configuration produces an unavailable explanation rather than a placeholder link.
 
 ### Milestone
 
 M4-6.
 
-## Support section — `/about#support`
-
-### Status
-
-Optional and disabled by default.
-
-### Required approval before enablement
-
-- XRPL address;
-- payment network;
-- accepted asset or assets;
-- destination-tag requirement;
-- disclosure text;
-- QR payload;
-- operational ownership.
-
-### Required content when enabled
-
-- voluntary support statement;
-- no entitlement, service level, influence, investment return, or listing benefit;
-- clear separation between Devnet monitoring and Mainnet payment network;
-- copyable address and QR code;
-- exact accepted-asset and destination-tag instructions;
-- Contact link for payment mistakes without promising recovery.
-
-### Placement
-
-- About section is the canonical destination;
-- small sidebar, mobile More menu, footer, and Contact links may point to it;
-- no support prompt appears inside data tables, metric cards, warnings, or entity details.
-
-### Milestone
-
-M4-6 only if approval is complete. Otherwise the route anchor may remain reserved and hidden.
+Funding, donation, payment, and promotional pages or components are outside the current release scope.
 
 ## Not found and unavailable pages
 
-M4-1 establishes shared handling for:
+Shared handling covers:
 
 - route not found;
 - invalid identifier;
@@ -494,13 +435,4 @@ M4-1 establishes shared handling for:
 
 ## Release completeness
 
-A route is not complete merely because a shell exists. It must have:
-
-- approved information architecture;
-- all required data states;
-- responsive behavior;
-- keyboard and screen-reader support;
-- focused tests;
-- API-contract alignment;
-- no invented values;
-- implementation-status evidence.
+A route is complete only when it has approved information architecture, required data states, responsive behavior, keyboard and screen-reader support, focused tests, API-contract alignment, no invented values, and implementation-status evidence.
