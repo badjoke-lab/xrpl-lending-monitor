@@ -16,6 +16,12 @@ interface VaultsPageProps {
   onNavigate: (path: string) => void
 }
 
+interface VaultFilters {
+  query: string
+  sort: 'id_asc' | 'id_desc'
+  loss: 'all' | 'true' | 'false'
+}
+
 function amount(value: string | null, assetKey: string): string {
   return value === null ? 'Unavailable' : `${value} ${assetKey}`
 }
@@ -30,7 +36,11 @@ export function VaultsPage({ onNavigate }: VaultsPageProps) {
   const [draftQuery, setDraftQuery] = useState('')
   const [draftSort, setDraftSort] = useState<'id_asc' | 'id_desc'>('id_asc')
   const [draftLoss, setDraftLoss] = useState<'all' | 'true' | 'false'>('all')
-  const [filters, setFilters] = useState({ query: '', sort: 'id_asc' as const, loss: 'all' as const })
+  const [filters, setFilters] = useState<VaultFilters>({
+    query: '',
+    sort: 'id_asc',
+    loss: 'all',
+  })
   const [cursor, setCursor] = useState<string | null>(null)
   const [history, setHistory] = useState<Array<string | null>>([])
 
