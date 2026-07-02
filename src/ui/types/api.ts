@@ -151,6 +151,80 @@ export interface VaultDetailResponse {
   provenance: { object: Provenance }
 }
 
+export interface LoanBrokerRecord {
+  id: string
+  vault_id: string
+  owner: string
+  account: string
+  asset: CanonicalAssetResponse
+  sequence: number
+  loan_sequence: number
+  management_fee_rate: number | null
+  owner_count: number
+  debt_total: string
+  debt_maximum: string | null
+  cover_available: string
+  cover_rate_minimum: number
+  cover_rate_liquidation: number
+  flags: number
+  previous_transaction_hash: string
+  previous_ledger_index: number
+  related_vault: {
+    id: string
+    asset: CanonicalAssetResponse
+    owner: string
+    account: string
+  }
+  derived: {
+    debt_utilization_bps: number | null
+    required_minimum_cover: string | null
+    cover_surplus: string | null
+    cover_ratio_bps: number | null
+    formulas: {
+      debt_utilization: string
+      required_cover: string
+      cover_surplus: string
+    }
+    provenance: Provenance
+  }
+  provenance: {
+    object: Provenance
+    asset: Provenance
+    relationship: Provenance
+    derived: Provenance
+  }
+  raw?: Record<string, unknown>
+}
+
+export interface LoanBrokerCollectionResponse {
+  network: 'devnet'
+  kind: 'loan_brokers'
+  epoch: { id: string; status: string } | null
+  snapshot: SnapshotSummary | null
+  data: LoanBrokerRecord[]
+  page: {
+    limit: number
+    next_cursor: string | null
+    sort?: 'id_asc' | 'id_desc'
+    broker_shards_read?: number
+    relation_shards_read?: number
+    objects_examined?: number
+  }
+  filters?: { query: string | null }
+  availability: { state: 'available' | 'unavailable'; reason: string | null }
+  provenance: { collection: Provenance; asset_relationship?: Provenance }
+}
+
+export interface LoanBrokerDetailResponse {
+  network: 'devnet'
+  kind: 'loan_broker'
+  epoch: { id: string; status: string } | null
+  snapshot: SnapshotSummary | null
+  data: LoanBrokerRecord | null
+  availability: { state: 'available' | 'unavailable'; reason: string | null }
+  provenance: { object: Provenance; asset_relationship?: Provenance }
+}
+
 export type ResourceState<T> =
   | { state: 'loading'; data: null; error: null }
   | { state: 'ready'; data: T; error: null }
