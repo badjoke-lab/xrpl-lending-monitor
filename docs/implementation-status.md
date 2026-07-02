@@ -4,33 +4,33 @@ Last updated: 2026-07-02.
 
 ## Current milestone
 
-**M1 closeout — Current-state collector activation** and **M2 event history — Status engine and reconciliation**.
+**M1 closeout — Current-state collector activation** and **M3 public API — Core entity API**.
 
 M1 code foundations and controlled resume evidence are merged, but M1 has not exited because a complete isolated preview bootstrap has not yet been stored, verified, and activated. M2 foundation work may continue in parallel where it does not claim dependency on a real active snapshot.
 
 ## Canonical continuation point
 
-GitHub pull request #15, `Track cover debt and loss history`, merged by squash as `f8fd27e5d8bafa45e18b63475843e6b49b0d4aeb`.
+GitHub pull request #16, `Add Loan status and reconciliation checks`, merged by squash as `9b83df5617890d1f1fb3d3cac7080ef57a4e9790`.
 
 Active local branch for the next roadmap unit:
 
-- branch: `collector/status-reconciliation`;
-- base: `main` at `f8fd27e5d8bafa45e18b63475843e6b49b0d4aeb`;
-- roadmap unit: M2 PR 12, status engine and reconciliation;
-- current state: local implementation and validation complete; pull request not opened yet.
+- branch: `docs/checkpoint-b-history`;
+- base: `main` at `9b83df5617890d1f1fb3d3cac7080ef57a4e9790`;
+- roadmap unit: Checkpoint B history-completeness decision before M3;
+- current state: decision documentation in progress; pull request not opened yet.
 
 Always inspect the current pull-request head and checks before resuming; the values above are a recorded checkpoint, not permission to ignore newer GitHub state.
 
 ## Immediate work
 
-Complete the status engine and reconciliation pull request before Checkpoint B:
+Complete the Checkpoint B documentation pull request before beginning M3 core entity API:
 
-1. push `collector/status-reconciliation`;
-2. open a focused PR with exact validation and live-read evidence;
-3. resolve CI or review findings without weakening invariants;
-4. merge only after required checks pass and the branch is current.
+1. push `docs/checkpoint-b-history`;
+2. open a focused PR with exact validation;
+3. merge only after required checks pass and the branch is current;
+4. create the M3 core API branch from updated `main`.
 
-The first incomplete action is opening the status engine and reconciliation pull request.
+The first incomplete action is opening the Checkpoint B documentation pull request.
 
 ## Completed
 
@@ -213,6 +213,18 @@ Current local status/reconciliation validation:
 - `pnpm test:e2e`: 1 Chromium smoke test passed;
 - live Devnet ledger read: ledger `3308395`, hash `D29AB85FDB7E208895B85E118685CF5111B2E2846A138F323F4CF8825F942C9D`, parent hash `48FD9DB451AE63214847A069D24D1E6878B7B90D86829440414C151FFCDE9DC5`, transaction count `0`, observed transaction types `[]`, recognized Lending-event count `0`.
 
+GitHub PR #16 validation:
+
+- `quality`: passed at head `b655d2ce8fe5327dbee5c6f9a4dac2090f46a126`;
+- `live-devnet-ledger`: passed at head `b655d2ce8fe5327dbee5c6f9a4dac2090f46a126`;
+- PR #16 had no review comments or unresolved review threads before merge.
+
+Checkpoint B decision:
+
+- M2 data contracts are stable enough to begin M3 API contracts;
+- public lifecycle completeness claims are not approved yet;
+- active bootstrap snapshot, fixture-ledger replay, soak, and reconciliation evidence remain required before public release claims.
+
 ## Known open questions
 
 | Question | Required evidence | Assigned point |
@@ -238,7 +250,7 @@ Current local status/reconciliation validation:
 
 ## Current blockers
 
-No known code blocker is recorded for completing the status engine and reconciliation pull request.
+No known code blocker is recorded for completing the Checkpoint B documentation pull request.
 
 A real isolated preview bootstrap depends on approved external preview access. That dependency does not block local implementation, tests, documentation, or independent incremental-history work.
 

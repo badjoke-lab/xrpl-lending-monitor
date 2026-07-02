@@ -74,3 +74,22 @@ The full current-state bootstrap uses a resumable long-running runner and one un
 - full in-memory accumulation is rejected;
 - production bootstrap remains disabled until resume, upload, manifest, cleanup, and activation tests pass;
 - an initial active snapshot is required before incremental maintenance begins.
+
+## D-018 — Checkpoint B history boundary
+
+- Date: 2026-07-02
+- Status: accepted
+
+### Decision
+
+M2 history data contracts are stable enough to begin M3 public API contract implementation for current indexed data, object changes, lifecycle events, archives, balance history, and reconciliation reports.
+
+Public lifecycle completeness claims are not yet approved. They remain gated on a complete active bootstrap snapshot, fixture-ledger replay coverage for supported transaction shapes, and later release-gate soak/reconciliation evidence.
+
+### Consequences
+
+- M3 API work may begin without reworking M2 table identities;
+- API responses must expose provenance, freshness, and unavailable or incomplete states;
+- UI and public documentation must not claim complete pre-snapshot history;
+- deleted-object, lifecycle, cover, debt, loss, and status data may be exposed only as indexed data bounded by collected evidence;
+- public release remains blocked until M1 active snapshot and M6 integrity evidence pass.
