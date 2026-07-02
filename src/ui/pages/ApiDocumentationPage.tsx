@@ -1,4 +1,4 @@
-import { Panel, ProvenanceBadge, StatusBadge } from '../components/DataDisplay'
+import { ProvenanceBadge, StatusBadge } from '../components/DataDisplay'
 import { publicLinks } from '../config/publicLinks'
 
 interface ApiDocumentationPageProps {
