@@ -20,7 +20,7 @@ const groups: Array<{ label: string; items: Item[] }> = [
     { label: 'Loan Brokers', path: '/loan-brokers' },
     { label: 'Loans', path: '/loans' },
     { label: 'Activity', path: '/activity' },
-    { label: 'Search' },
+    { label: 'Search', path: '/search' },
   ] },
   { label: 'Audit', items: [
     { label: 'Lifecycle' }, { label: 'Archived Objects' },
@@ -94,6 +94,7 @@ export function MonitoringShell({ children, currentPath, status, onNavigate, onR
   const home = (event: MouseEvent<HTMLAnchorElement>) => { event.preventDefault(); onNavigate('/') }
   const loansActive = currentPath === '/loans' || currentPath.startsWith('/loans/')
   const activityActive = currentPath === '/activity' || currentPath.startsWith('/transactions/')
+  const searchActive = currentPath === '/search' || currentPath.startsWith('/accounts/')
   return (
     <div className="application-frame">
       <a className="skip-link" href="#main-content">Skip to content</a>
@@ -128,7 +129,12 @@ export function MonitoringShell({ children, currentPath, status, onNavigate, onR
           aria-current={activityActive ? 'page' : undefined}
           onClick={(event) => { event.preventDefault(); onNavigate('/activity') }}
         >Activity</a>
-        <span aria-disabled="true">Search</span>
+        <a
+          className={searchActive ? 'is-active' : ''}
+          href="/search"
+          aria-current={searchActive ? 'page' : undefined}
+          onClick={(event) => { event.preventDefault(); onNavigate('/search') }}
+        >Search</a>
         <details><summary>More</summary><div className="mobile-more-panel"><Navigation currentPath={currentPath} onNavigate={onNavigate} /></div></details>
       </nav>
     </div>
