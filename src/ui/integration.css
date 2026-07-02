@@ -1,0 +1,97 @@
+.breadcrumbs {
+  min-width: 0;
+  margin-bottom: 18px;
+  color: var(--text-muted);
+  font-size: 0.74rem;
+}
+
+.breadcrumbs ol {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.breadcrumbs li {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.breadcrumbs li + li::before {
+  color: var(--text-muted);
+  content: "/";
+}
+
+.breadcrumbs a,
+.breadcrumbs span {
+  max-width: min(42rem, 100%);
+  overflow-wrap: anywhere;
+}
+
+.breadcrumbs [aria-current="page"] {
+  color: var(--text-secondary);
+  font-weight: 750;
+}
+
+[id] {
+  scroll-margin-top: 88px;
+}
+
+.documentation-page,
+.page-stack,
+.panel,
+.metric-card,
+.state-block,
+.documentation-section,
+.documentation-card,
+.documentation-link-grid > *,
+.api-endpoint-table-wrapper,
+.main-content > * {
+  min-width: 0;
+}
+
+.mono,
+code,
+pre,
+td,
+th,
+dd,
+.state-block p,
+.page-summary,
+.breadcrumbs span {
+  overflow-wrap: anywhere;
+}
+
+pre,
+.api-endpoint-table-wrapper {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+@media (max-width: 720px) {
+  .breadcrumbs {
+    margin-bottom: 14px;
+  }
+
+  .breadcrumbs a,
+  .breadcrumbs span {
+    max-width: min(78vw, 30rem);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
