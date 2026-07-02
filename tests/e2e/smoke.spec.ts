@@ -123,9 +123,11 @@ test('renders the approved observatory Overview and navigates to Network Status'
 
   await expect(page.getByRole('heading', { level: 1, name: 'XRPL Lending Monitor' })).toBeVisible()
   await expect(page.locator('.sidebar')).toBeVisible()
-  await expect(page.getByText('DEVNET', { exact: true })).toBeVisible()
-  await expect(page.getByText('5,432,109', { exact: true })).toBeVisible()
-  await expect(page.getByText('12', { exact: true })).toBeVisible()
+  await expect(page.locator('.network-context').getByText('DEVNET', { exact: true })).toBeVisible()
+  await expect(
+    page.locator('.network-context').getByText('5,432,109', { exact: true }),
+  ).toBeVisible()
+  await expect(page.locator('.metrics-grid').getByText('12', { exact: true })).toBeVisible()
   await expect(page.getByText('LoanPay', { exact: true })).toBeVisible()
   await expect(page.locator('body')).not.toContainText('USD')
 
@@ -142,7 +144,7 @@ test('shows snapshot unavailability without substituting mock counts', async ({ 
 
   await expect(page.getByText('Current-state snapshot unavailable')).toBeVisible()
   await expect(page.getByText('active current-state snapshot has not been activated').first()).toBeVisible()
-  await expect(page.getByText('Unavailable', { exact: true }).first()).toBeVisible()
+  await expect(page.locator('.metrics-grid').getByText('Unavailable', { exact: true }).first()).toBeVisible()
 })
 
 test('preserves successful panels when the activity API fails', async ({ page }) => {
@@ -150,7 +152,7 @@ test('preserves successful panels when the activity API fails', async ({ page })
   await page.goto('/')
 
   await expect(page.getByText('Partial data')).toBeVisible()
-  await expect(page.getByText('12', { exact: true })).toBeVisible()
+  await expect(page.locator('.metrics-grid').getByText('12', { exact: true })).toBeVisible()
   await expect(page.getByText('/api/activity?limit=6 returned HTTP 500')).toBeVisible()
 })
 
@@ -162,7 +164,7 @@ test('uses mobile navigation and keeps network context visible', async ({ page }
   await expect(page.locator('.sidebar')).toBeHidden()
   await expect(page.locator('.mobile-appbar')).toBeVisible()
   await expect(page.locator('.mobile-bottom-nav')).toBeVisible()
-  await expect(page.getByText('DEVNET', { exact: true })).toBeVisible()
+  await expect(page.locator('.network-context').getByText('DEVNET', { exact: true })).toBeVisible()
 
   await page.locator('.mobile-bottom-nav summary').click()
   await expect(page.locator('.mobile-more-panel').getByText('Network Status', { exact: true })).toBeVisible()
