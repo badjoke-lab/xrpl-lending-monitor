@@ -16,6 +16,7 @@ jobs:
           node-version: 24.18.0
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm build
       - run: pnpm exec playwright install --with-deps chromium
       - name: Capture Playwright JSON
         run: pnpm exec playwright test --reporter=json > playwright-results.json || true
