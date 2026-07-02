@@ -2,6 +2,11 @@ export interface HistoryPageOptions {
   limit: number
 }
 
+export interface LoanLifecycleListOptions extends HistoryPageOptions {
+  eventType?: string | null
+  loanId?: string | null
+}
+
 export interface ProtocolEventRecord {
   eventHash: string
   epochId: string
@@ -379,6 +384,26 @@ export async function listLoanLifecycle(
          LIMIT ?2`,
       )
       .bind(loanId, options.limit),
+  )
+  return rows.map(mapLoanLifecycle)
+}
+
+export async function listLoanLifecycleEvents(
+  db: D1Database,
+  options: LoanLifecycleListOptions,
+): Promise<LoanLifecycleRecord[]> {
+  const rows = await allRows<LoanLifecycleRow>(
+    db
+      .prepare(
+        `SELECT *
+         FROM loan_lifecycle_events
+         WHERE network = 'devnet'
+           AND (?1 IS NULL OR event_type = ?1)
+           AND (?2 IS NULL OR loan_id = ?2)
+         ORDER BY ledger_index DESC, transaction_index DESC
+         LIMIT ?3`,
+      )
+      .bind(options.eventType ?? null, options.loanId ?? null, options.limit),
   )
   return rows.map(mapLoanLifecycle)
 }

@@ -9,6 +9,7 @@ import { LoanBrokerDetailPage } from './pages/LoanBrokerDetailPage'
 import { LoanBrokersPage } from './pages/LoanBrokersPage'
 import { LoanDetailPage } from './pages/LoanDetailPage'
 import { LoansPage } from './pages/LoansPage'
+import { LifecycleAuditPage } from './pages/LifecycleAuditPage'
 import { MethodologyPage } from './pages/MethodologyPage'
 import { NetworkStatusPage } from './pages/NetworkStatusPage'
 import { OverviewPage } from './pages/OverviewPage'
@@ -71,6 +72,7 @@ export function resolveMonitoringPage({ currentPath, resources, navigate, reload
   if (currentPath === '/loans') return <LoansPage onNavigate={navigate} />
   if (loan?.[1]) return <LoanDetailPage loanId={loan[1].toUpperCase()} onNavigate={navigate} />
   if (currentPath === '/activity') return <ActivityPage onNavigate={navigate} />
+  if (currentPath === '/audit/lifecycle') return <LifecycleAuditPage onNavigate={navigate} />
   if (transaction?.[1]) return <TransactionDetailPage transactionHash={transaction[1]} onNavigate={navigate} />
   if (currentPath === '/search') return <SearchPage onNavigate={navigate} />
   if (account?.[1]) {

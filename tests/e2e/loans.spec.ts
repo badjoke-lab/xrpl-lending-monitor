@@ -68,6 +68,60 @@ const loan = {
   raw: { LedgerEntryType: 'Loan', index: loanId, PrincipalOutstanding: '10000' },
 }
 
+const lifecycleEvent = {
+  loan_id: loanId,
+  epoch_id: 'epoch-1',
+  transaction_hash: 'E'.repeat(64),
+  ledger_index: 121,
+  transaction_index: 2,
+  close_time: 831440100,
+  event_type: 'payment',
+  transaction_type: 'LoanPay',
+  result_code: 'tesSUCCESS',
+  status_before: 'active',
+  status_after: 'active',
+  principal_before: '11000',
+  principal_after: '10000',
+  total_value_before: '11500',
+  total_value_after: '10500',
+  payment_remaining_before: 2,
+  payment_remaining_after: 1,
+  details_json: { payment: '1000' },
+  created_at: '2026-07-02T00:00:00.000Z',
+  provenance: 'indexed',
+}
+
+const objectChange = {
+  transaction_hash: lifecycleEvent.transaction_hash,
+  epoch_id: 'epoch-1',
+  ledger_index: 121,
+  transaction_index: 2,
+  transaction_type: 'LoanPay',
+  result_code: 'tesSUCCESS',
+  close_time: 831440100,
+  node_index: 0,
+  object_type: 'Loan',
+  object_id: loanId,
+  action: 'modified',
+  field_name: 'PrincipalOutstanding',
+  before_json: '11000',
+  after_json: '10000',
+  value_type: 'string',
+  unsupported_field: false,
+  relationships: {
+    vault_id: vaultId,
+    loan_broker_id: brokerId,
+    loan_id: loanId,
+    account: null,
+    owner: null,
+    borrower: 'rBorrower',
+    asset_key: 'XRP',
+    mpt_issuance_id: null,
+  },
+  created_at: '2026-07-02T00:00:00.000Z',
+  provenance: 'indexed',
+}
+
 async function mockBase(page: Page) {
   await page.route('**/api/status', (route) => route.fulfill({ json: statusResponse }))
   await page.route('**/api/overview', (route) => route.fulfill({
@@ -108,6 +162,12 @@ test('renders independent Loan states and opens verified detail relationships', 
       provenance: { object: 'direct', asset_relationship: 'direct', schedule_status: 'derived' },
     },
   }))
+  await page.route(`**/api/loans/${loanId}/lifecycle?limit=100`, (route) => route.fulfill({
+    json: { network: 'devnet', loan_id: loanId, data: [lifecycleEvent], page: { limit: 100, next_cursor: null } },
+  }))
+  await page.route(`**/api/objects/Loan/${loanId}/history?limit=100`, (route) => route.fulfill({
+    json: { network: 'devnet', object_type: 'Loan', object_id: loanId, data: [objectChange], page: { limit: 100, next_cursor: null } },
+  }))
 
   await page.goto('/loans')
   await expect(page.getByRole('heading', { level: 1, name: 'Loans' })).toBeVisible()
@@ -122,7 +182,10 @@ test('renders independent Loan states and opens verified detail relationships', 
   await expect(page.getByText('Default eligibility is a schedule calculation. It does not mean the on-ledger Loan is defaulted.')).toBeVisible()
   await expect(page.getByRole('link', { name: 'Open Broker' })).toHaveAttribute('href', `/loan-brokers/${brokerId}`)
   await expect(page.getByRole('link', { name: 'Open Vault' })).toHaveAttribute('href', `/vaults/${vaultId}`)
-  await expect(page.getByText('Indexed Loan history not yet connected')).toBeVisible()
+  await expect(page.getByRole('heading', { level: 2, name: 'Payment history and lifecycle' })).toBeVisible()
+  await expect(page.locator('.lifecycle-timeline').getByText('LoanPay', { exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { level: 2, name: 'State changes' })).toBeVisible()
+  await expect(page.locator('.state-change-list').getByRole('heading', { name: 'PrincipalOutstanding' })).toBeVisible()
   await expect(page.locator('.raw-data-panel')).toContainText('PrincipalOutstanding')
 })
 

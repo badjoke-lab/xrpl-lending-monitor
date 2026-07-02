@@ -9,7 +9,12 @@ import {
 } from '../components/DataDisplay'
 import { useApiResource } from '../hooks/useApiResource'
 import { formatInteger, formatUtc, truncateMiddle } from '../lib/formatting'
-import type { LoanDetailResponse, LoanRecord } from '../types/api'
+import type {
+  LoanDetailResponse,
+  LoanLifecycleResponse,
+  LoanRecord,
+  ObjectHistoryResponse,
+} from '../types/api'
 
 interface LoanDetailPageProps {
   loanId: string
@@ -26,6 +31,8 @@ function rate(value: number): string {
 
 export function LoanDetailPage({ loanId, onNavigate }: LoanDetailPageProps) {
   const { resource, reload } = useApiResource<LoanDetailResponse>(`/api/loans/${loanId}`)
+  const lifecycle = useApiResource<LoanLifecycleResponse>(`/api/loans/${loanId}/lifecycle?limit=100`)
+  const history = useApiResource<ObjectHistoryResponse>(`/api/objects/Loan/${loanId}/history?limit=100`)
   const response = resource.state === 'ready' ? resource.data : null
   const loan = response?.data ?? null
 
@@ -205,10 +212,87 @@ export function LoanDetailPage({ loanId, onNavigate }: LoanDetailPageProps) {
           </div>
 
           <Panel title="Payment history and lifecycle" description="Current schedule facts are available; indexed history is a later audit unit">
-            <UnavailableBlock
-              title="Indexed Loan history not yet connected"
-              reason="This page does not invent past payments, impairment events, default events, or lifecycle steps before their indexed APIs are integrated."
-            />
+            {lifecycle.resource.state === 'loading' ? <LoadingBlock label="Loading indexed Loan lifecycle" /> : null}
+            {lifecycle.resource.state === 'error' ? <ErrorBlock message={lifecycle.resource.error} onRetry={lifecycle.reload} /> : null}
+            {lifecycle.resource.state === 'ready' && lifecycle.resource.data.data.length === 0 ? (
+              <UnavailableBlock
+                title="No indexed lifecycle events available"
+                reason="No collected lifecycle events are available for this Loan in the bounded indexed history. Missing history is not inferred."
+              />
+            ) : null}
+            {lifecycle.resource.state === 'ready' && lifecycle.resource.data.data.length > 0 ? (
+              <div className="lifecycle-timeline" aria-label="Loan lifecycle timeline">
+                {lifecycle.resource.data.data.map((event) => (
+                  <article className="lifecycle-event-card" key={`${event.transaction_hash}:${event.event_type}`}>
+                    <header>
+                      <div>
+                        <span className="node-index">Ledger {formatInteger(event.ledger_index)} · #{formatInteger(event.transaction_index)}</span>
+                        <h3><StatusBadge value={event.event_type} /> <span>{event.transaction_type}</span></h3>
+                        <p>{formatUtc(new Date((event.close_time + 946_684_800) * 1000).toISOString())} UTC · {event.result_code}</p>
+                      </div>
+                      <ProvenanceBadge value={event.provenance} />
+                    </header>
+                    <DefinitionGrid
+                      items={[
+                        { label: 'Status before', value: <StatusBadge value={event.status_before} /> },
+                        { label: 'Status after', value: <StatusBadge value={event.status_after} /> },
+                        { label: 'Principal before', value: event.principal_before ?? 'Unavailable', mono: true },
+                        { label: 'Principal after', value: event.principal_after ?? 'Unavailable', mono: true },
+                        { label: 'Payments before', value: formatInteger(event.payment_remaining_before) },
+                        { label: 'Payments after', value: formatInteger(event.payment_remaining_after) },
+                        { label: 'Transaction', value: (
+                          <a
+                            href={`/transactions/${event.transaction_hash}`}
+                            onClick={(click) => {
+                              click.preventDefault()
+                              onNavigate(`/transactions/${event.transaction_hash}`)
+                            }}
+                          >{truncateMiddle(event.transaction_hash, 12)}</a>
+                        ), wide: true, mono: true },
+                      ]}
+                    />
+                  </article>
+                ))}
+              </div>
+            ) : null}
+          </Panel>
+
+          <Panel title="State changes" description="Normalized before-and-after Loan field changes from indexed AffectedNodes">
+            {history.resource.state === 'loading' ? <LoadingBlock label="Loading normalized Loan changes" /> : null}
+            {history.resource.state === 'error' ? <ErrorBlock message={history.resource.error} onRetry={history.reload} /> : null}
+            {history.resource.state === 'ready' && history.resource.data.data.length === 0 ? (
+              <UnavailableBlock
+                title="No indexed state changes available"
+                reason="No normalized before-and-after field changes are available for this Loan in the bounded indexed history."
+              />
+            ) : null}
+            {history.resource.state === 'ready' && history.resource.data.data.length > 0 ? (
+              <div className="state-change-list" aria-label="Loan state changes">
+                {history.resource.data.data.map((change) => (
+                  <article className="state-change-card" key={`${change.transaction_hash}:${change.node_index}:${change.field_name}:${change.action}`}>
+                    <header>
+                      <div>
+                        <span className="node-index">Ledger {formatInteger(change.ledger_index)} · node {formatInteger(change.node_index)}</span>
+                        <h3>{change.field_name}</h3>
+                        <p>{change.transaction_type} · {change.action} · {change.result_code}</p>
+                      </div>
+                      <ProvenanceBadge value={change.provenance} />
+                    </header>
+                    <div className="state-change-values">
+                      <div><span>Before</span><code>{JSON.stringify(change.before_json)}</code></div>
+                      <div><span>After</span><code>{JSON.stringify(change.after_json)}</code></div>
+                    </div>
+                    <a
+                      href={`/transactions/${change.transaction_hash}`}
+                      onClick={(click) => {
+                        click.preventDefault()
+                        onNavigate(`/transactions/${change.transaction_hash}`)
+                      }}
+                    >Source transaction {truncateMiddle(change.transaction_hash, 12)}</a>
+                  </article>
+                ))}
+              </div>
+            ) : null}
           </Panel>
 
           <Panel title="Raw decoded Loan object" description="Technical data follows the human-readable summary">

@@ -278,6 +278,10 @@ M4-5.
 
 Provides protocol-wide recorded Loan lifecycle events with supported filters, canonical ordering, provenance, and links to Loan, transaction, and archive detail. It never infers missing events.
 
+### API dependencies
+
+`/api/audit/lifecycle`, `/api/loans/:loanId/lifecycle`, and `/api/objects/Loan/:loanId/history`.
+
 ### Milestone
 
 M5-1.
