@@ -88,6 +88,8 @@ Final state, creation and deletion ledgers and transactions, deletion reason, re
 
 Ordered Loan events with transaction identity, close time, status before and after, schedule status, amounts, and normalized details.
 
+Initial lifecycle rows are derived from normalized Loan object changes. They include event type, transaction identity, close time, on-ledger status before and after, principal and total outstanding before and after, payment remaining before and after, and details JSON. Schedule-derived status remains separate and is not used to mark a Loan defaulted.
+
 ### `daily_aggregates`
 
 Asset-separated daily counts and amounts for Vaults, Brokers, Loans, assets, debt, cover, loss, states, and events.
