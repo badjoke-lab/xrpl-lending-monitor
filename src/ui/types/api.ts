@@ -225,6 +225,119 @@ export interface LoanBrokerDetailResponse {
   provenance: { object: Provenance; asset_relationship?: Provenance }
 }
 
+export type LoanOnLedgerStatus = 'active' | 'impaired' | 'defaulted'
+export type LoanScheduleStatus = 'current' | 'payment_due' | 'default_eligible' | 'complete' | 'unknown'
+
+export interface LoanRecord {
+  id: string
+  loan_broker_id: string
+  borrower: string
+  loan_sequence: number
+  asset: CanonicalAssetResponse
+  loan_origination_fee: string
+  loan_service_fee: string
+  late_payment_fee: string
+  close_payment_fee: string
+  overpayment_fee_rate: number
+  interest_rate: number
+  late_interest_rate: number
+  close_interest_rate: number
+  overpayment_interest_rate: number
+  start_date_ripple_time: number
+  start_date: string | null
+  payment_interval_seconds: number
+  grace_period_seconds: number
+  previous_payment_due_ripple_time: number
+  previous_payment_due: string | null
+  next_payment_due_ripple_time: number | null
+  next_payment_due: string | null
+  default_eligible_ripple_time: number | null
+  default_eligible_at: string | null
+  payment_remaining: number
+  principal_outstanding: string
+  total_value_outstanding: string
+  management_fee_outstanding: string
+  periodic_payment: string
+  loan_scale: number | null
+  on_ledger_status: LoanOnLedgerStatus
+  schedule_status: LoanScheduleStatus
+  status_source: {
+    flags: number
+    next_payment_due_ripple_time: number | null
+    next_payment_due: string | null
+    grace_period_seconds: number
+    default_eligible_ripple_time: number | null
+    default_eligible_at: string | null
+    evaluated_at_ripple_time: number
+    evaluated_at: string | null
+  }
+  supports_overpayment: boolean
+  flags: number
+  previous_transaction_hash: string
+  previous_ledger_index: number
+  related_loan_broker: {
+    id: string
+    vault_id: string
+    owner: string
+    account: string
+  }
+  related_vault: {
+    id: string
+    owner: string
+    account: string
+    asset: CanonicalAssetResponse
+  }
+  provenance: {
+    object: Provenance
+    asset: Provenance
+    relationships: Provenance
+    on_ledger_status: Provenance
+    schedule_status: Provenance
+  }
+  raw?: Record<string, unknown>
+}
+
+export interface LoanCollectionResponse {
+  network: 'devnet'
+  kind: 'loans'
+  epoch: { id: string; status: string } | null
+  snapshot: SnapshotSummary | null
+  data: LoanRecord[]
+  page: {
+    limit: number
+    next_cursor: string | null
+    sort?: 'id_asc' | 'id_desc'
+    loan_shards_read?: number
+    relation_shards_read?: number
+    objects_examined?: number
+  }
+  filters?: {
+    query: string | null
+    on_ledger_status: LoanOnLedgerStatus | null
+    schedule_status: LoanScheduleStatus | null
+  }
+  availability: { state: 'available' | 'unavailable'; reason: string | null }
+  provenance: {
+    collection: Provenance
+    asset_relationship?: Provenance
+    schedule_status?: Provenance
+  }
+}
+
+export interface LoanDetailResponse {
+  network: 'devnet'
+  kind: 'loan'
+  epoch: { id: string; status: string } | null
+  snapshot: SnapshotSummary | null
+  data: LoanRecord | null
+  availability: { state: 'available' | 'unavailable'; reason: string | null }
+  provenance: {
+    object: Provenance
+    asset_relationship?: Provenance
+    schedule_status?: Provenance
+  }
+}
+
 export type ResourceState<T> =
   | { state: 'loading'; data: null; error: null }
   | { state: 'ready'; data: T; error: null }
