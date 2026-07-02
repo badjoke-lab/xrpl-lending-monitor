@@ -15,6 +15,7 @@ export class CurrentStateObjectReadError extends Error {
     | 'snapshot_manifest_unavailable'
     | 'manifest_integrity_error'
     | 'shard_integrity_error'
+    | 'relationship_read_limit'
 
   constructor(
     code: CurrentStateObjectReadError['code'],
@@ -156,7 +157,10 @@ function validateManifest(value: unknown, snapshot: ActiveSnapshotRecord): Curre
   return value as unknown as CurrentStateManifest
 }
 
-async function readManifest(bucket: R2Bucket, snapshot: ActiveSnapshotRecord): Promise<CurrentStateManifest> {
+export async function readCurrentStateManifest(
+  bucket: R2Bucket,
+  snapshot: ActiveSnapshotRecord,
+): Promise<CurrentStateManifest> {
   if (!snapshot.manifestKey || !snapshot.manifestSha256) {
     throw new CurrentStateObjectReadError(
       'snapshot_manifest_unavailable',
@@ -205,7 +209,7 @@ function validateShardPayload(
   return value as unknown as CurrentStateShardPayload
 }
 
-async function readShard(
+export async function readCurrentStateShard(
   bucket: R2Bucket,
   snapshot: ActiveSnapshotRecord,
   descriptor: CurrentStateShardSummary,
@@ -232,6 +236,17 @@ async function readShard(
       error instanceof Error ? error.message : 'Current-state shard is invalid',
     )
   }
+}
+
+export function findCurrentStateShard(
+  manifest: CurrentStateManifest,
+  objectId: string,
+): CurrentStateShardSummary | null {
+  const normalizedId = objectId.toUpperCase()
+  return manifest.shards.find((shard) => {
+    if (!shard.firstLedgerIndex || !shard.lastLedgerIndex) return false
+    return shard.firstLedgerIndex <= normalizedId && normalizedId <= shard.lastLedgerIndex
+  }) ?? null
 }
 
 function encodeCursor(cursor: VaultCursor): string {
@@ -287,7 +302,7 @@ export async function listCurrentVaults(
   if (!Number.isSafeInteger(options.limit) || options.limit < 1) throw new Error('limit must be positive')
   if (!Number.isSafeInteger(maxShardsPerRead) || maxShardsPerRead < 1) throw new Error('maxShardsPerRead must be positive')
 
-  const manifest = await readManifest(bucket, snapshot)
+  const manifest = await readCurrentStateManifest(bucket, snapshot)
   const decodedCursor = options.cursor ? decodeCursor(options.cursor) : null
   if (decodedCursor && decodedCursor.snapshotId !== snapshot.id) {
     throw new CurrentStateObjectReadError('invalid_cursor', 'cursor belongs to a different snapshot')
@@ -309,7 +324,7 @@ export async function listCurrentVaults(
   ) {
     const descriptor = manifest.shards[shardIndex]
     if (!descriptor) break
-    const shard = await readShard(bucket, snapshot, descriptor)
+    const shard = await readCurrentStateShard(bucket, snapshot, descriptor)
     shardsRead += 1
 
     const ordered = shard.vaults
@@ -355,14 +370,11 @@ export async function getCurrentVaultById(
 ): Promise<VaultCurrentProjection | null> {
   const normalizedId = vaultId.toUpperCase()
   if (!/^[A-F0-9]{64}$/.test(normalizedId)) return null
-  const manifest = await readManifest(bucket, snapshot)
-  const descriptor = manifest.shards.find((shard) => {
-    if (!shard.firstLedgerIndex || !shard.lastLedgerIndex) return false
-    return shard.firstLedgerIndex <= normalizedId && normalizedId <= shard.lastLedgerIndex
-  })
+  const manifest = await readCurrentStateManifest(bucket, snapshot)
+  const descriptor = findCurrentStateShard(manifest, normalizedId)
   if (!descriptor) return null
 
-  const shard = await readShard(bucket, snapshot, descriptor)
+  const shard = await readCurrentStateShard(bucket, snapshot, descriptor)
   const object = shard.vaults.find((value) => value.index.toUpperCase() === normalizedId)
   return object ? normalizeVault(object) : null
 }
