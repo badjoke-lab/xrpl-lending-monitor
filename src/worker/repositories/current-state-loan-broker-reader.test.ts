@@ -215,6 +215,7 @@ describe('current-state Loan Broker reader', () => {
     await expect(
       listCurrentLoanBrokers(bucket, snapshot, {
         limit: 1,
+        sort: 'id_desc',
         maxRelationShardsPerRead: 0,
       }),
     ).rejects.toMatchObject({
