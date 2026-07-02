@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 
+import { AccountDetailPage } from './pages/AccountDetailPage'
 import { ActivityPage } from './pages/ActivityPage'
 import { LoanBrokerDetailPage } from './pages/LoanBrokerDetailPage'
 import { LoanBrokersPage } from './pages/LoanBrokersPage'
@@ -7,6 +8,7 @@ import { LoanDetailPage } from './pages/LoanDetailPage'
 import { LoansPage } from './pages/LoansPage'
 import { NetworkStatusPage } from './pages/NetworkStatusPage'
 import { OverviewPage } from './pages/OverviewPage'
+import { SearchPage } from './pages/SearchPage'
 import { TransactionDetailPage } from './pages/TransactionDetailPage'
 import { VaultDetailPage } from './pages/VaultDetailPage'
 import { VaultsPage } from './pages/VaultsPage'
@@ -17,6 +19,14 @@ interface RouteContext {
   resources: DashboardResources
   navigate: (path: string) => void
   reload: () => void
+}
+
+function safeDecode(value: string): string | null {
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return null
+  }
 }
 
 function NotFoundPage({ onNavigate }: { onNavigate: (path: string) => void }) {
@@ -46,6 +56,7 @@ export function resolveMonitoringPage({ currentPath, resources, navigate, reload
   const broker = /^\/loan-brokers\/([A-Fa-f0-9]{64})$/.exec(currentPath)
   const loan = /^\/loans\/([A-Fa-f0-9]{64})$/.exec(currentPath)
   const transaction = /^\/transactions\/([^/]+)$/.exec(currentPath)
+  const account = /^\/accounts\/([^/]+)$/.exec(currentPath)
 
   if (currentPath === '/') return <OverviewPage resources={resources} onNavigate={navigate} onReload={reload} />
   if (currentPath === '/network-status') return <NetworkStatusPage status={resources.status} onReload={reload} />
@@ -57,5 +68,10 @@ export function resolveMonitoringPage({ currentPath, resources, navigate, reload
   if (loan?.[1]) return <LoanDetailPage loanId={loan[1].toUpperCase()} onNavigate={navigate} />
   if (currentPath === '/activity') return <ActivityPage onNavigate={navigate} />
   if (transaction?.[1]) return <TransactionDetailPage transactionHash={transaction[1]} onNavigate={navigate} />
+  if (currentPath === '/search') return <SearchPage onNavigate={navigate} />
+  if (account?.[1]) {
+    const decodedAccount = safeDecode(account[1])
+    if (decodedAccount !== null) return <AccountDetailPage account={decodedAccount} onNavigate={navigate} />
+  }
   return <NotFoundPage onNavigate={navigate} />
 }

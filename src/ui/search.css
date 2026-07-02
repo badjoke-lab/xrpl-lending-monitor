@@ -1,0 +1,225 @@
+.global-search-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.8rem;
+  align-items: end;
+}
+
+.global-search-form label,
+.global-search-form label span {
+  display: block;
+}
+
+.global-search-form label span {
+  margin-bottom: 0.4rem;
+  color: var(--text-muted);
+  font-size: 0.84rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.global-search-form input {
+  width: 100%;
+}
+
+.field-help,
+.field-error {
+  margin: 0.7rem 0 0;
+  font-size: 0.9rem;
+}
+
+.field-help {
+  color: var(--text-muted);
+}
+
+.field-error {
+  color: var(--status-negative);
+  font-weight: 700;
+}
+
+.search-guidance-grid,
+.account-current-groups {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.search-guidance-grid > div,
+.account-current-groups > section {
+  min-width: 0;
+  padding: 1rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-medium);
+  background: var(--surface-raised);
+}
+
+.search-guidance-grid p,
+.account-current-groups p {
+  margin: 0.35rem 0 0;
+  color: var(--text-muted);
+}
+
+.search-result-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: center;
+  padding: 1rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-medium);
+  background: var(--surface-raised);
+}
+
+.search-result-summary > div {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 9rem;
+}
+
+.search-result-summary span {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.search-result-summary button {
+  margin-left: auto;
+}
+
+.search-result-list,
+.account-indexed-list,
+.account-relation-list {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.search-result-card,
+.account-indexed-card,
+.account-relation-card {
+  min-width: 0;
+  padding: 1rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-medium);
+  background: var(--surface-raised);
+}
+
+.search-result-heading,
+.account-relation-card > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.search-result-heading > div,
+.account-relation-card > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.search-result-facts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.7rem;
+  margin: 0.9rem 0 0;
+}
+
+.search-result-facts div {
+  min-width: 0;
+}
+
+.search-result-facts dt {
+  color: var(--text-muted);
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.search-result-facts dd {
+  margin: 0.25rem 0 0;
+  overflow-wrap: anywhere;
+}
+
+.result-context-note,
+.account-scope-note {
+  color: var(--text-muted);
+}
+
+.result-context-note {
+  margin: 0.8rem 0 0;
+  font-size: 0.88rem;
+}
+
+.account-identifier {
+  margin: 0.9rem 0 0;
+  overflow-wrap: anywhere;
+}
+
+.account-scope-note {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.75rem;
+  padding: 0.9rem 1rem;
+  border-left: 3px solid var(--accent-primary);
+  background: var(--surface-raised);
+}
+
+.account-current-groups h3 {
+  margin: 0;
+}
+
+.account-relation-list {
+  margin-top: 0.85rem;
+}
+
+.account-relation-card .identifier-link,
+.account-indexed-card .identifier-link,
+.search-result-card .identifier-link {
+  overflow-wrap: anywhere;
+}
+
+.account-transaction-list {
+  display: grid;
+  gap: 0.65rem;
+}
+
+@media (max-width: 900px) {
+  .search-guidance-grid,
+  .account-current-groups {
+    grid-template-columns: 1fr;
+  }
+
+  .search-result-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .global-search-form {
+    grid-template-columns: 1fr;
+  }
+
+  .search-result-summary {
+    align-items: stretch;
+  }
+
+  .search-result-summary button {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .search-result-facts {
+    grid-template-columns: 1fr;
+  }
+
+  .account-scope-note {
+    grid-template-columns: 1fr;
+  }
+}
