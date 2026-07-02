@@ -18,10 +18,8 @@ import {
   listObjectHistory,
   searchHistory,
 } from './repositories/history-api-repository'
-import {
-  getCurrentEpoch,
-  getSyncState,
-} from './repositories/network-status-repository'
+import { getCurrentEpoch, getSyncState } from './repositories/network-status-repository'
+import { registerCurrentLoanBrokerRoutes } from './routes/current-loan-brokers'
 import {
   type EntityCollectionKind,
   serializeAvailableVaultCollection,
@@ -54,19 +52,13 @@ async function loadCoreApiContext(db: D1Database) {
     getCurrentEpoch(db),
     getActiveSnapshot(db),
   ])
-
   return { state, epoch, snapshot }
 }
 
 function parsePageLimit(value: string | undefined): number | null {
   if (value === undefined) return DEFAULT_PAGE_LIMIT
-
   const limit = Number(value)
-  if (!Number.isInteger(limit) || limit < 1 || limit > MAX_PAGE_LIMIT) {
-    return null
-  }
-
-  return limit
+  return Number.isInteger(limit) && limit >= 1 && limit <= MAX_PAGE_LIMIT ? limit : null
 }
 
 function parseVaultSort(value: string | undefined): VaultSort | null {
@@ -96,15 +88,8 @@ function currentStateReadErrorResponse(
   error: CurrentStateObjectReadError,
 ) {
   if (error.code === 'invalid_cursor') {
-    return context.json(
-      {
-        error: 'invalid_cursor',
-        message: error.message,
-      },
-      400,
-    )
+    return context.json({ error: 'invalid_cursor', message: error.message }, 400)
   }
-
   return context.json(
     {
       error: 'current_state_unavailable',
@@ -117,7 +102,6 @@ function currentStateReadErrorResponse(
 
 app.get('/api/health', (context) => {
   const config = resolveRuntimeConfig(context.env)
-
   return context.json({
     ok: true,
     service: 'xrpl-lending-monitor',
@@ -128,38 +112,26 @@ app.get('/api/health', (context) => {
 
 app.get('/api/status', async (context) => {
   resolveRuntimeConfig(context.env)
-
   const [state, epoch] = await Promise.all([
     getSyncState(context.env.DB),
     getCurrentEpoch(context.env.DB),
   ])
-
-  return context.json(
-    serializeNetworkStatus({
-      state,
-      epoch,
-    }),
-  )
+  return context.json(serializeNetworkStatus({ state, epoch }))
 })
 
 app.get('/api/overview', async (context) => {
   resolveRuntimeConfig(context.env)
-
   return context.json(serializeOverview(await loadCoreApiContext(context.env.DB)))
 })
 
 app.get('/api/vaults', async (context) => {
   resolveRuntimeConfig(context.env)
-
   const limit = parsePageLimit(context.req.query('limit'))
   if (limit === null) return invalidLimitResponse(context)
 
   const sort = parseVaultSort(context.req.query('sort'))
   if (sort === null) {
-    return context.json(
-      { error: 'invalid_sort', message: 'sort must be id_asc or id_desc' },
-      400,
-    )
+    return context.json({ error: 'invalid_sort', message: 'sort must be id_asc or id_desc' }, 400)
   }
 
   const query = context.req.query('q')?.trim()
@@ -227,7 +199,6 @@ app.get('/api/vaults', async (context) => {
 
 app.get('/api/vaults/:vaultId', async (context) => {
   resolveRuntimeConfig(context.env)
-
   const vaultId = context.req.param('vaultId').toUpperCase()
   if (!/^[A-F0-9]{64}$/.test(vaultId)) {
     return context.json(
@@ -245,16 +216,10 @@ app.get('/api/vaults/:vaultId', async (context) => {
     const vault = await getCurrentVaultById(context.env.CURRENT_STATE, snapshot, vaultId)
     if (!vault) {
       return context.json(
-        {
-          error: 'not_found',
-          kind: 'vault',
-          id: vaultId,
-          snapshot_id: snapshot.id,
-        },
+        { error: 'not_found', kind: 'vault', id: vaultId, snapshot_id: snapshot.id },
         404,
       )
     }
-
     return context.json(serializeVaultDetail({ epoch, snapshot, vault }))
   } catch (error) {
     if (error instanceof CurrentStateObjectReadError) {
@@ -264,56 +229,36 @@ app.get('/api/vaults/:vaultId', async (context) => {
   }
 })
 
+registerCurrentLoanBrokerRoutes(app)
+
 function entityCollectionHandler(kind: EntityCollectionKind) {
   return async (context: Context<{ Bindings: Bindings }>) => {
     resolveRuntimeConfig(context.env)
-
     const limit = parsePageLimit(context.req.query('limit'))
-    if (limit === null) {
-      return invalidLimitResponse(context)
-    }
-
+    if (limit === null) return invalidLimitResponse(context)
     const { epoch, snapshot } = await loadCoreApiContext(context.env.DB)
     return context.json(
-      serializeUnavailableEntityCollection({
-        kind,
-        epoch,
-        snapshot,
-        page: { limit },
-      }),
+      serializeUnavailableEntityCollection({ kind, epoch, snapshot, page: { limit } }),
     )
   }
 }
 
-app.get('/api/loan-brokers', entityCollectionHandler('loan_brokers'))
 app.get('/api/loans', entityCollectionHandler('loans'))
 
 app.get('/api/activity', async (context) => {
   resolveRuntimeConfig(context.env)
-
   const limit = parsePageLimit(context.req.query('limit'))
   if (limit === null) return invalidLimitResponse(context)
-
-  return context.json(
-    serializeActivityResponse(await listActivity(context.env.DB, { limit }), limit),
-  )
+  return context.json(serializeActivityResponse(await listActivity(context.env.DB, { limit }), limit))
 })
 
 app.get('/api/transactions/:hash', async (context) => {
   resolveRuntimeConfig(context.env)
-
   const transactionHash = context.req.param('hash')
   const detail = await getTransactionDetail(context.env.DB, transactionHash)
   if (!detail.event && detail.changes.length === 0) {
-    return context.json(
-      {
-        error: 'not_found',
-        transaction_hash: transactionHash,
-      },
-      404,
-    )
+    return context.json({ error: 'not_found', transaction_hash: transactionHash }, 404)
   }
-
   return context.json(
     serializeTransactionResponse({
       transactionHash,
@@ -325,16 +270,13 @@ app.get('/api/transactions/:hash', async (context) => {
 
 app.get('/api/epochs', async (context) => {
   resolveRuntimeConfig(context.env)
-
   return context.json(serializeEpochsResponse(await listEpochs(context.env.DB)))
 })
 
 app.get('/api/objects/:objectType/:objectId/history', async (context) => {
   resolveRuntimeConfig(context.env)
-
   const limit = parsePageLimit(context.req.query('limit'))
   if (limit === null) return invalidLimitResponse(context)
-
   const objectType = context.req.param('objectType')
   const objectId = context.req.param('objectId')
   return context.json(
@@ -349,10 +291,8 @@ app.get('/api/objects/:objectType/:objectId/history', async (context) => {
 
 app.get('/api/loans/:loanId/lifecycle', async (context) => {
   resolveRuntimeConfig(context.env)
-
   const limit = parsePageLimit(context.req.query('limit'))
   if (limit === null) return invalidLimitResponse(context)
-
   const loanId = context.req.param('loanId')
   return context.json(
     serializeLoanLifecycleResponse({
@@ -365,21 +305,12 @@ app.get('/api/loans/:loanId/lifecycle', async (context) => {
 
 app.get('/api/search', async (context) => {
   resolveRuntimeConfig(context.env)
-
   const query = context.req.query('q')?.trim()
   if (!query) {
-    return context.json(
-      {
-        error: 'invalid_query',
-        message: 'q is required',
-      },
-      400,
-    )
+    return context.json({ error: 'invalid_query', message: 'q is required' }, 400)
   }
-
   const limit = parsePageLimit(context.req.query('limit'))
   if (limit === null) return invalidLimitResponse(context)
-
   return context.json(
     serializeSearchResponse({
       query,
@@ -391,44 +322,31 @@ app.get('/api/search', async (context) => {
 
 app.get('/api/exports/activity', async (context) => {
   resolveRuntimeConfig(context.env)
-
   const limit = parsePageLimit(context.req.query('limit'))
   if (limit === null) return invalidLimitResponse(context)
-
   const format = context.req.query('format') ?? 'json'
   const events = await listActivity(context.env.DB, { limit })
-
-  if (format === 'json') {
-    return context.json(serializeActivityResponse(events, limit))
-  }
-
+  if (format === 'json') return context.json(serializeActivityResponse(events, limit))
   if (format === 'ndjson') {
     return new Response(serializeActivityNdjson(events), {
       headers: { 'content-type': 'application/x-ndjson; charset=utf-8' },
     })
   }
-
   if (format === 'csv') {
     return new Response(serializeActivityCsv(events), {
       headers: { 'content-type': 'text/csv; charset=utf-8' },
     })
   }
-
   return context.json(
-    {
-      error: 'invalid_format',
-      message: 'format must be json, ndjson, or csv',
-    },
+    { error: 'invalid_format', message: 'format must be json, ndjson, or csv' },
     400,
   )
 })
 
 app.get('/api/feeds/activity.ndjson', async (context) => {
   resolveRuntimeConfig(context.env)
-
   const limit = parsePageLimit(context.req.query('limit'))
   if (limit === null) return invalidLimitResponse(context)
-
   return new Response(serializeActivityNdjson(await listActivity(context.env.DB, { limit })), {
     headers: { 'content-type': 'application/x-ndjson; charset=utf-8' },
   })
@@ -437,28 +355,17 @@ app.get('/api/feeds/activity.ndjson', async (context) => {
 app.onError((_error, context) => {
   if (context.req.path.startsWith('/api/')) {
     return context.json(
-      {
-        error: 'internal_error',
-        message: 'Unexpected server error',
-      },
+      { error: 'internal_error', message: 'Unexpected server error' },
       500,
     )
   }
-
   return new Response('Internal server error', { status: 500 })
 })
 
 app.notFound((context) => {
   if (context.req.path.startsWith('/api/')) {
-    return context.json(
-      {
-        error: 'not_found',
-        path: context.req.path,
-      },
-      404,
-    )
+    return context.json({ error: 'not_found', path: context.req.path }, 404)
   }
-
   return context.env.ASSETS.fetch(context.req.raw)
 })
 
@@ -468,10 +375,7 @@ const worker: ExportedHandler<Bindings> = {
   },
   async scheduled(_controller, env) {
     const config = resolveRuntimeConfig(env)
-    await refreshNetworkStatus({
-      db: env.DB,
-      config,
-    })
+    await refreshNetworkStatus({ db: env.DB, config })
   },
 }
 

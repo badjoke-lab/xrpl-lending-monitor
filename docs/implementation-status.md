@@ -4,147 +4,85 @@ Last updated: 2026-07-02.
 
 ## Current milestone
 
-**M1 closeout — Current-state collector activation** and **M4-2 — Vault UI**.
+**M1 closeout** and **M4-3 dependency — current Loan Broker API**.
 
-M0, M2, M3, M4-0, and M4-1 are complete. The verified current-state Vault read dependency is complete. M1 still requires a complete isolated preview bootstrap, verified activation, rollback, cleanup, and resource evidence.
+M0, M2, M3, M4-0, M4-1, and M4-2 are complete. M1 still requires an approved preview environment, complete bootstrap, verification, activation, rollback, cleanup, and resource evidence.
 
 ## Canonical continuation point
 
-Merged dependency:
-
-- PR #23: `Add verified current-state Vault reader`;
-- squash merge: `3445d1bf86805c28ca3aa6cce2202338757106b6`;
-- verified manifest/shard API, bounded cursor reads, Vault detail lookup, exact derivations, and fail-closed behavior are on `main`.
-
-Active M4-2 work:
+Latest merged UI work:
 
 - PR #24: `Add Vault list and detail UI`;
-- branch: `ui/vault-monitor`;
-- base: `main` at `3445d1bf86805c28ca3aa6cce2202338757106b6`;
-- validated implementation head before this status-only commit: `2fa5d1bfcaf2b734cc2f03e956d7ac32c4516446`;
-- CI run: `28568730467`;
-- result: all `quality` steps passed.
+- squash merge: `189107d04ea94774b73d60e04a5635795a1f0f5c`.
+
+Active work:
+
+- PR #25: `Add verified Loan Broker API reads`;
+- branch: `api/current-state-loan-broker-reader`;
+- base: `189107d04ea94774b73d60e04a5635795a1f0f5c`;
+- validated implementation head: `06147b022484c9f3d0ab8fa32eb9ade2dd8d99ec`;
+- CI run: `28569769664`;
+- all `quality` steps passed.
 
 ## Immediate work
 
-1. allow CI to rerun for this validation-only status commit;
-2. confirm PR #24 remains current, mergeable, and free of unresolved findings;
-3. merge only after the final required check passes;
-4. begin M4-3 Loan Broker verified-reader dependency and UI from updated `main`;
-5. keep real preview storage binding and bootstrap activation behind the existing approval gate.
+1. rerun CI for this status-only commit;
+2. confirm PR #25 is mergeable and has no unresolved findings;
+3. merge after the final check passes;
+4. implement the Loan Broker list and detail UI from updated `main`.
 
-The first incomplete action is confirming the final PR #24 check and merge state.
-
-## Completed foundations
-
-### Current-state Vault API
-
-The merged public read layer verifies active manifest and compressed shard metadata and content digests before exposing data. Reads are snapshot-bound, cursor-based, bounded by shard count, and fail closed on integrity errors.
+## Loan Broker API implementation
 
 Routes:
 
-- `GET /api/vaults`;
-- `GET /api/vaults/:vaultId`.
+- `GET /api/loan-brokers`;
+- `GET /api/loan-brokers/:brokerId`.
 
-Supported collection inputs include bounded limit, opaque cursor, ID order, factual text search, and unrealized-loss filter. Detail lookup uses manifest object-index ranges to choose one candidate shard.
+Collection behavior:
 
-Exact derived fields are:
+- limits from 1 to 100;
+- snapshot-bound cursor;
+- ID ascending or descending order;
+- factual query across Broker ID, Vault ID, owner, and account;
+- bounded Broker shard reads;
+- explicit unavailable response without an active snapshot or object-storage binding.
 
-- `used_assets = AssetsTotal - AssetsAvailable`;
-- `utilization_bps = floor(used_assets / AssetsTotal * 10000)`.
+Relationship behavior:
 
-Without an active snapshot or storage binding, the API returns explicit unavailable state.
+- the canonical asset is resolved from the referenced Vault in the same active snapshot;
+- repeated Vault relationships are grouped by shard;
+- shards already read during Broker scanning are reused;
+- no more than eight additional relationship shards are read per request;
+- missing or inconsistent relationships return an unavailable service response.
 
-## M4-2 implementation
+Derived fields:
 
-### Vault list — `/vaults`
+- debt utilization basis points;
+- required minimum cover;
+- cover surplus;
+- cover ratio basis points.
 
-Implemented:
+Calculations use exact decimal coefficients and canonical decimal formatting. Missing or invalid denominators produce unavailable derived values.
 
-- active desktop and mobile navigation;
-- factual text search;
-- unrealized-loss filter;
-- Vault ID ascending and descending order;
-- bounded opaque-cursor Next and Previous navigation;
-- current snapshot and ledger context;
-- Vault ID, owner, canonical asset, total, available, used, utilization, loss, and previous ledger;
-- direct collection provenance;
-- shard-read and object-examination counts;
-- loading, empty, unavailable, and request-error states;
-- direct JSON access;
-- no fiat values, cross-asset totals, inferred relationships, or fabricated counts.
+## Validation
 
-### Vault detail — `/vaults/:vaultId`
+CI run `28569769664` passed:
 
-Implemented:
-
-- 64-character hexadecimal route matching;
-- breadcrumbs and active Vault navigation;
-- asset, total, available, and utilization summary cards;
-- direct owner, pseudo-account, Share MPT, Domain, withdrawal policy, scale, flags, previous transaction, and previous ledger fields;
-- exact total, available, maximum, used, and unrealized-loss values;
-- formula and derived provenance;
-- explicit unavailable relationship panel instead of inferred Broker, Loan, activity, or history data;
-- raw decoded object after the human-readable summary;
-- direct API link and refresh action.
-
-### Responsive and shared behavior
-
-Implemented:
-
-- desktop filter grid and table;
-- tablet reflow;
-- mobile single-column filters and responsive summary cards;
-- dedicated table overflow rather than page overflow;
-- raw-object wrapping and bounded scroll;
-- generic abortable `useApiResource` hook;
-- Vault API response types;
-- sidebar active state for detail subroutes.
-
-## M4-2 validation
-
-PR #24 CI run `28568730467`, job `quality`, passed:
-
-- dependency installation;
+- install;
 - lint;
-- TypeScript type-check;
-- full unit test suite;
-- all local D1 migrations;
+- type-check;
+- full unit suite;
+- local D1 migrations;
 - production build;
 - Chromium installation;
-- existing Overview and Network Status browser tests;
-- three new Vault browser tests.
+- all existing browser tests.
 
-The Vault browser tests cover:
+Focused tests passed for cursor pagination, Vault asset resolution, shard reuse, detail lookup, relationship-read limits, exact calculations, and provenance.
 
-1. available collection, exact quantities, absence of USD output, detail navigation, raw data, and explicit relationship unavailability;
-2. missing-snapshot unavailable state and factual search/loss/order request parameters;
-3. narrow mobile layout and Vault access through the More menu.
+The initial unit run found a formatting-only mismatch in a derived decimal. Canonical decimal normalization was added and the full suite then passed.
 
-No collector, API, migration, Cloudflare configuration, remote resource, deployment, Mainnet, wallet, signing, transaction submission, or public-write behavior changed in PR #24.
+## Boundaries
 
-## Known open questions
+This work does not create remote resources, modify deployment configuration, enable Mainnet, add wallet or signing behavior, or add public write operations.
 
-| Question | Evidence | Point |
-|---|---|---|
-| Failed bootstrap prefix retention | Preview cleanup and rollback measurements | M1 closeout |
-| Manifest cache policy | Preview latency and request evidence | M6 |
-| Public shard cap tuning | Real shard-density and response-size evidence | M1 preview / M6 |
-| Connected Vault relationships | Verified Broker and Loan readers plus history queries | M4-3 to M5 |
-| Contact URLs | Explicit configuration approval | M4-6 |
-| Initial Support enablement | Approved payment configuration and disclosures | M4-6 / Checkpoint D |
-
-## Active prohibitions
-
-- generated mockup values are not facts;
-- unavailable data is not zero;
-- no unverified or unbounded current-state read;
-- no inferred Vault relationships;
-- no USD conversion, pricing oracle, cross-asset total, or proprietary risk score;
-- no remote infrastructure change, deployment, Mainnet, wallet, signing, transaction submission, or public write operation.
-
-## Current blockers
-
-No code blocker remains for M4-2.
-
-Real public Vault data still requires an approved `CURRENT_STATE` binding and a complete verified active snapshot. The UI exposes that absence explicitly.
+Real public Broker data still requires an approved `CURRENT_STATE` binding and a complete verified active snapshot.
