@@ -32,6 +32,12 @@ function serializeProtocolEvent(event: ProtocolEventRecord) {
   }
 }
 
+function csvCell(value: string | number | boolean | null): string {
+  if (value === null) return ''
+  const text = String(value)
+  return /[",\n\r]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text
+}
+
 function serializeObjectChange(change: ObjectChangeRecord) {
   return {
     transaction_hash: change.transactionHash,
@@ -125,6 +131,41 @@ export function serializeActivityResponse(events: ProtocolEventRecord[], limit: 
     data: events.map(serializeProtocolEvent),
     page: page(limit),
   }
+}
+
+export function serializeActivityNdjson(events: ProtocolEventRecord[]): string {
+  return events.map((event) => JSON.stringify(serializeProtocolEvent(event))).join('\n')
+}
+
+export function serializeActivityCsv(events: ProtocolEventRecord[]): string {
+  const header = [
+    'transaction_hash',
+    'epoch_id',
+    'ledger_index',
+    'event_index',
+    'close_time',
+    'transaction_type',
+    'result_code',
+    'payload_retained',
+    'created_at',
+  ]
+  const rows = events.map((event) =>
+    [
+      event.eventHash,
+      event.epochId,
+      event.ledgerIndex,
+      event.eventIndex,
+      event.closeTime,
+      event.eventType,
+      event.resultCode,
+      event.payloadRetained,
+      event.createdAt,
+    ]
+      .map(csvCell)
+      .join(','),
+  )
+
+  return [header.join(','), ...rows].join('\n')
 }
 
 export function serializeTransactionResponse(options: {

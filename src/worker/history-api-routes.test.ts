@@ -269,4 +269,53 @@ describe('history API routes', () => {
       ],
     })
   })
+
+  it('exports bounded activity as NDJSON and CSV without raw payloads', async () => {
+    const ndjson = await app.request(
+      '/api/exports/activity?format=ndjson&limit=1',
+      {},
+      createEnv(createFakeDatabase()),
+    )
+    expect(ndjson.status).toBe(200)
+    expect(ndjson.headers.get('content-type')).toContain('application/x-ndjson')
+    expect(await ndjson.text()).toBe(
+      '{"transaction_hash":"TX1","epoch_id":"epoch-1","ledger_index":200,"event_index":1,"close_time":800000000,"transaction_type":"LoanSet","result_code":"tesSUCCESS","payload_retained":false,"source_json":null,"metadata_json":null,"created_at":"2026-07-01T00:00:00.000Z","provenance":"indexed"}',
+    )
+
+    const csv = await app.request(
+      '/api/exports/activity?format=csv&limit=1',
+      {},
+      createEnv(createFakeDatabase()),
+    )
+    expect(csv.status).toBe(200)
+    expect(csv.headers.get('content-type')).toContain('text/csv')
+    expect(await csv.text()).toBe(
+      [
+        'transaction_hash,epoch_id,ledger_index,event_index,close_time,transaction_type,result_code,payload_retained,created_at',
+        'TX1,epoch-1,200,1,800000000,LoanSet,tesSUCCESS,false,2026-07-01T00:00:00.000Z',
+      ].join('\n'),
+    )
+  })
+
+  it('serves the bounded activity feed as NDJSON', async () => {
+    const response = await app.request('/api/feeds/activity.ndjson?limit=1', {}, createEnv(createFakeDatabase()))
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get('content-type')).toContain('application/x-ndjson')
+    expect(await response.text()).toContain('"transaction_hash":"TX1"')
+  })
+
+  it('rejects unsupported export formats', async () => {
+    const response = await app.request(
+      '/api/exports/activity?format=xml',
+      {},
+      createEnv(createFakeDatabase()),
+    )
+
+    expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toMatchObject({
+      error: 'invalid_format',
+      message: 'format must be json, ndjson, or csv',
+    })
+  })
 })
