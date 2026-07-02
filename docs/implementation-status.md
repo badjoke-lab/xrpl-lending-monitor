@@ -4,34 +4,34 @@ Last updated: 2026-07-02.
 
 ## Current milestone
 
-**M1 closeout — Current-state collector activation** and **M3 public API — Exports and feeds**.
+**M1 closeout — Current-state collector activation** and **M4 baseline UI — App shell, Overview, and Network Status**.
 
-M1 code foundations and controlled resume evidence are merged, but M1 has not exited because a complete isolated preview bootstrap has not yet been stored, verified, and activated. M2 history foundations, the Checkpoint B documentation decision, the M3 core entity API shell, and M3 activity/search/history API are merged. M3 exports and feeds work is in progress.
+M1 code foundations and controlled resume evidence are merged, but M1 has not exited because a complete isolated preview bootstrap has not yet been stored, verified, and activated. M2 history foundations and M3 public API work through PR #20 are merged. M4 UI work is in progress on the first-pass Overview shell.
 
 ## Canonical continuation point
 
-GitHub pull request #19, `Add activity search and history API`, merged by squash as `c74753f1041efd6554052d90796eb3d5485ea5b9`.
+GitHub pull request #20, `Add bounded activity exports`, merged by squash as `d0a8ef2`.
 
 Active local branch for the next roadmap unit:
 
-- branch: `api/exports-feeds`;
-- base: `main` at `c74753f1041efd6554052d90796eb3d5485ea5b9`;
-- roadmap unit: M3 public API exports and feeds;
-- current implementation commit: `34a3f99` (`feat: add bounded activity exports`);
-- current state: local implementation and validation complete; pull request not opened yet.
+- branch: `ui/overview-status-shell`;
+- base: `main` at `d0a8ef2`;
+- roadmap unit: M4 public UI app shell, Overview, and Network Status;
+- current implementation files: `src/ui/App.tsx` and `src/ui/styles.css`;
+- current state: local first-pass Overview shell is in progress and intentionally not yet aligned to the approved UI direction.
 
 Always inspect the current pull-request head and checks before resuming; the values above are a recorded checkpoint, not permission to ignore newer GitHub state.
 
 ## Immediate work
 
-Complete the M3 exports and feeds pull request:
+Complete the M4 app shell and Overview direction:
 
-1. push `api/exports-feeds`;
-2. open a focused PR with the validation below;
-3. merge only after required checks pass and the branch is current;
-4. continue to the M4 app shell, Overview, and Network Status unit from updated `main`.
+1. push `ui/overview-status-shell`;
+2. finish the approved dark sidebar and top-context shell without inventing unsupported facts;
+3. open a focused PR with the validation below;
+4. continue to the next M4 page only after the shell is aligned and preserved.
 
-The first incomplete action is pushing `api/exports-feeds`.
+The first incomplete action is replacing the light first-pass shell with the approved dark observatory layout.
 
 ## Completed
 
@@ -255,15 +255,16 @@ Current local M3 activity, search, and history API validation:
 - PR #19, `Add activity search and history API`, passed `quality` at head `b183f54bf0b5c9098491c071704622b9be776db3` and was squash-merged as `c74753f1041efd6554052d90796eb3d5485ea5b9`;
 - PR #19 had no review comments or unresolved review threads before merge.
 
-Current local M3 exports and feeds validation:
+Current local M4 UI checkpoint validation:
 
-- implementation commit: `34a3f99` (`feat: add bounded activity exports`);
-- focused route test: `pnpm exec vitest run src/worker/history-api-routes.test.ts`: 9 tests passed;
+- branch: `ui/overview-status-shell`;
+- current implementation files: `src/ui/App.tsx` and `src/ui/styles.css`;
+- approved UI direction: dark navy to near-black observatory system; cyan primary accent; green, amber, and red only for factual states and warnings; desktop left sidebar navigation; persistent top context bar with DEVNET, epoch, validated ledger, data age, and collector status; dense monitoring cards and tables; monospace IDs and hashes; explicit Direct, Derived, Indexed, and Unavailable provenance; responsive mobile layouts; summaries first and technical/raw data second;
+- known mismatch: the current first-pass CSS is light and the shell is simplified, so it does not yet implement the approved dark sidebar and top-context design;
 - `pnpm typecheck`: passed;
-- `pnpm check`: passed; 28 test files passed, 3 skipped; 142 tests passed, 3 skipped; local D1 migrations reported no pending migrations; build passed;
-- `pnpm test:e2e`: 1 Chromium smoke test passed;
-- live ledger evidence: not collected for this API-only branch because no collector, migration, or ledger-read behavior changed;
-- branch: `api/exports-feeds`;
+- `pnpm build`: passed;
+- focused UI tests: none were run because no additional focused UI test already existed for this checkpoint;
+- live evidence: not collected for this UI-only checkpoint;
 - pull request: not opened yet.
 
 ## Known open questions
@@ -291,7 +292,7 @@ Current local M3 exports and feeds validation:
 
 ## Current blockers
 
-No known code blocker is recorded for completing the M3 exports and feeds pull request.
+No known code blocker is recorded for completing the M4 UI checkpoint.
 
 A real isolated preview bootstrap depends on approved external preview access. That dependency does not block local implementation, tests, documentation, or independent incremental-history work.
 
