@@ -43,6 +43,53 @@
   scroll-margin-top: 88px;
 }
 
+.brand > span:last-child,
+.mobile-brand > span:last-child,
+.nav-item > span:first-child,
+.sidebar-footer,
+.context-facts,
+.context-facts > div,
+.page-header > *,
+.page-actions {
+  min-width: 0;
+}
+
+.nav-item,
+.page-header,
+.page-actions,
+.network-context,
+.context-facts {
+  flex-wrap: wrap;
+}
+
+.nav-item > span:first-child,
+.brand > span:last-child,
+.mobile-brand > span:last-child,
+.sidebar-footer {
+  overflow-wrap: anywhere;
+}
+
+.nav-item small {
+  flex: 0 0 auto;
+}
+
+.documentation-card-grid,
+.documentation-link-grid,
+.contact-option-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(18rem, 100%), 1fr));
+}
+
+.provenance-key {
+  grid-template-columns: repeat(auto-fit, minmax(min(9rem, 100%), 1fr));
+}
+
+.provenance-key .status-badge,
+.provenance-key .provenance-badge {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 .documentation-page,
 .page-stack,
 .panel,
