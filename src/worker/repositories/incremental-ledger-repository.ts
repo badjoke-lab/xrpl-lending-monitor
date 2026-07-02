@@ -1,5 +1,6 @@
 import type { IncrementalScanResult } from '../../collector/incremental/scan-validated-ledgers'
 import { normalizeAffectedNodes } from '../../collector/incremental/affected-nodes'
+import { deriveLoanLifecycleEvents } from '../../collector/incremental/loan-lifecycle'
 
 interface CursorRow {
   epoch_id: string | null
@@ -167,6 +168,7 @@ export async function commitIncrementalScan(options: {
         transactionType: event.transactionType,
         result: event.result,
       })
+      const lifecycleEvents = deriveLoanLifecycleEvents(objectChanges)
       statements.push(
         options.db
           .prepare(
@@ -239,6 +241,53 @@ export async function commitIncrementalScan(options: {
               change.relationships.borrower,
               change.relationships.assetKey,
               change.relationships.mptIssuanceId,
+              options.processedAt,
+            ),
+        )
+      }
+
+      for (const lifecycleEvent of lifecycleEvents) {
+        statements.push(
+          options.db
+            .prepare(
+              `INSERT INTO loan_lifecycle_events (
+                 network, epoch_id, loan_id, transaction_hash, ledger_index,
+                 transaction_index, close_time, event_type, transaction_type,
+                 result_code, status_before, status_after, principal_before,
+                 principal_after, total_value_before, total_value_after,
+                 payment_remaining_before, payment_remaining_after, details_json,
+                 created_at
+               ) VALUES (
+                 ?1, ?2, ?3, ?4, ?5,
+                 ?6, ?7, ?8, ?9,
+                 ?10, ?11, ?12, ?13,
+                 ?14, ?15, ?16,
+                 ?17, ?18, ?19,
+                 ?20
+               )
+               ON CONFLICT(network, epoch_id, loan_id, transaction_hash, event_type)
+               DO NOTHING`,
+            )
+            .bind(
+              lifecycleEvent.network,
+              lifecycleEvent.epochId,
+              lifecycleEvent.loanId,
+              lifecycleEvent.transactionHash,
+              lifecycleEvent.ledgerIndex,
+              lifecycleEvent.transactionIndex,
+              lifecycleEvent.closeTime,
+              lifecycleEvent.eventType,
+              lifecycleEvent.transactionType,
+              lifecycleEvent.result,
+              lifecycleEvent.statusBefore,
+              lifecycleEvent.statusAfter,
+              lifecycleEvent.principalBefore,
+              lifecycleEvent.principalAfter,
+              lifecycleEvent.totalValueBefore,
+              lifecycleEvent.totalValueAfter,
+              lifecycleEvent.paymentRemainingBefore,
+              lifecycleEvent.paymentRemainingAfter,
+              lifecycleEvent.detailsJson,
               options.processedAt,
             ),
         )

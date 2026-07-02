@@ -4,33 +4,33 @@ Last updated: 2026-07-02.
 
 ## Current milestone
 
-**M1 closeout — Current-state collector activation** and **M2 event history — AffectedNodes normalization**.
+**M1 closeout — Current-state collector activation** and **M2 event history — Loan lifecycle engine**.
 
 M1 code foundations and controlled resume evidence are merged, but M1 has not exited because a complete isolated preview bootstrap has not yet been stored, verified, and activated. M2 foundation work may continue in parallel where it does not claim dependency on a real active snapshot.
 
 ## Canonical continuation point
 
-GitHub pull request #10, `Add validated ledger history foundation`, merged by squash as `f895632e185826ccc4bc09709c6b65508ded90b2`.
+GitHub pull request #12, `Normalize AffectedNodes object changes`, merged by squash as `1b04dfaa308d670e30ac5275e444559c5f2bcf75`.
 
 Active local branch for the next roadmap unit:
 
-- branch: `collector/affected-nodes-normalization`;
-- base: `main` at `f895632e185826ccc4bc09709c6b65508ded90b2`;
-- roadmap unit: M2 PR 8, AffectedNodes normalization;
+- branch: `collector/loan-lifecycle-engine`;
+- base: `main` at `1b04dfaa308d670e30ac5275e444559c5f2bcf75`;
+- roadmap unit: M2 PR 9, Loan lifecycle engine;
 - current state: local implementation and validation complete; pull request not opened yet.
 
 Always inspect the current pull-request head and checks before resuming; the values above are a recorded checkpoint, not permission to ignore newer GitHub state.
 
 ## Immediate work
 
-Complete the AffectedNodes normalization pull request before beginning the Loan lifecycle engine:
+Complete the Loan lifecycle engine pull request before beginning the deleted-object archive:
 
-1. push `collector/affected-nodes-normalization`;
+1. push `collector/loan-lifecycle-engine`;
 2. open a focused PR with exact validation and live-read evidence;
 3. resolve CI or review findings without weakening invariants;
 4. merge only after required checks pass and the branch is current.
 
-The first incomplete action is opening the AffectedNodes normalization pull request.
+The first incomplete action is opening the Loan lifecycle engine pull request.
 
 ## Completed
 
@@ -154,6 +154,21 @@ Current local AffectedNodes normalization validation:
 - `pnpm test:e2e`: 1 Chromium smoke test passed;
 - live Devnet ledger read: ledger `3298066`, hash `41A6526B16E353963FA011E5227556F6D3B0152F760133801751D12F975A8C91`, parent hash `D3825AF193583DDB86C0A19BCDE341AB50D8D646F22C7E2C93512ECCEB97B42E`, transaction count `0`, observed transaction types `[]`, recognized Lending-event count `0`.
 
+GitHub PR #12 validation:
+
+- `quality`: passed at head `dbd0b4b3e8738f885c67fac4374a47bce4f6268e`;
+- `live-devnet-ledger`: passed at head `dbd0b4b3e8738f885c67fac4374a47bce4f6268e`;
+- PR #12 had no review comments or unresolved review threads before merge.
+
+Current local Loan lifecycle validation:
+
+- `pnpm exec vitest run src/collector/incremental/loan-lifecycle.test.ts src/worker/repositories/incremental-ledger-repository.test.ts`: 18 tests passed.
+- `pnpm lint && pnpm typecheck && pnpm test`: passed; 22 test files passed, 3 skipped; 108 tests passed, 3 skipped;
+- clean local D1 migration reset by removing ignored `.wrangler/state/v3/d1`, then `pnpm db:migrate:local`: migrations `0001` through `0006` applied successfully;
+- `pnpm check`: passed;
+- `pnpm test:e2e`: 1 Chromium smoke test passed;
+- live Devnet ledger read: ledger `3307901`, hash `1CA50D860533EAF90B2238F1C27476FD321548DD400142219C07E46E53DC3C2F`, parent hash `31FEC895939C0DDC662BDC94BD04EA8278CF014C9A92E93CDF45588ED67A5E1A`, transaction count `0`, observed transaction types `[]`, recognized Lending-event count `0`.
+
 ## Known open questions
 
 | Question | Required evidence | Assigned point |
@@ -179,7 +194,7 @@ Current local AffectedNodes normalization validation:
 
 ## Current blockers
 
-No known code blocker is recorded for completing the AffectedNodes normalization pull request.
+No known code blocker is recorded for completing the Loan lifecycle engine pull request.
 
 A real isolated preview bootstrap depends on approved external preview access. That dependency does not block local implementation, tests, documentation, or independent incremental-history work.
 

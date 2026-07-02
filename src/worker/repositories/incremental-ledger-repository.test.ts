@@ -45,11 +45,22 @@ interface StoredObjectChange {
   unsupportedField: number
 }
 
+interface StoredLifecycleEvent {
+  network: string
+  epochId: string
+  loanId: string
+  transactionHash: string
+  eventType: string
+  statusBefore: string
+  statusAfter: string
+}
+
 interface DatabaseState {
   cursor: CursorRow | null
   processedLedgers: StoredLedger[]
   protocolEvents: StoredEvent[]
   objectChanges: StoredObjectChange[]
+  lifecycleEvents: StoredLifecycleEvent[]
   guards: string[]
 }
 
@@ -59,6 +70,7 @@ function cloneState(state: DatabaseState): DatabaseState {
     processedLedgers: state.processedLedgers.map((item) => ({ ...item })),
     protocolEvents: state.protocolEvents.map((item) => ({ ...item })),
     objectChanges: state.objectChanges.map((item) => ({ ...item })),
+    lifecycleEvents: state.lifecycleEvents.map((item) => ({ ...item })),
     guards: [...state.guards],
   }
 }
@@ -70,6 +82,7 @@ function fakeDatabase(options: {
   processedLedgers?: StoredLedger[]
   protocolEvents?: StoredEvent[]
   objectChanges?: StoredObjectChange[]
+  lifecycleEvents?: StoredLifecycleEvent[]
 }) {
   const statements: StatementRecord[] = []
   const batches: number[][] = []
@@ -78,6 +91,7 @@ function fakeDatabase(options: {
     processedLedgers: options.processedLedgers ?? [],
     protocolEvents: options.protocolEvents ?? [],
     objectChanges: options.objectChanges ?? [],
+    lifecycleEvents: options.lifecycleEvents ?? [],
     guards: [],
   }
   const db = {
@@ -109,6 +123,7 @@ function fakeDatabase(options: {
       state.processedLedgers = draft.processedLedgers
       state.protocolEvents = draft.protocolEvents
       state.objectChanges = draft.objectChanges
+      state.lifecycleEvents = draft.lifecycleEvents
       state.guards = draft.guards
       batches.push(items.map((item) => item.__index ?? -1))
       return []
@@ -269,6 +284,55 @@ function applyStatement(
     return
   }
 
+  if (statement.sql.includes('INSERT INTO loan_lifecycle_events')) {
+    const [
+      network,
+      epochId,
+      loanId,
+      transactionHash,
+      ,
+      ,
+      ,
+      eventType,
+      ,
+      ,
+      statusBefore,
+      statusAfter,
+    ] = statement.values
+    if (
+      typeof network !== 'string' ||
+      typeof epochId !== 'string' ||
+      typeof loanId !== 'string' ||
+      typeof transactionHash !== 'string' ||
+      typeof eventType !== 'string' ||
+      typeof statusBefore !== 'string' ||
+      typeof statusAfter !== 'string'
+    ) {
+      throw new Error('Invalid lifecycle event bind values')
+    }
+    if (
+      !state.lifecycleEvents.some(
+        (item) =>
+          item.network === network &&
+          item.epochId === epochId &&
+          item.loanId === loanId &&
+          item.transactionHash === transactionHash &&
+          item.eventType === eventType,
+      )
+    ) {
+      state.lifecycleEvents.push({
+        network,
+        epochId,
+        loanId,
+        transactionHash,
+        eventType,
+        statusBefore,
+        statusAfter,
+      })
+    }
+    return
+  }
+
   if (statement.sql.includes('UPDATE sync_state')) {
     const [ledgerIndex, ledgerHash, , , epochId, expectedLedger, expectedHash] = statement.values
     if (
@@ -407,6 +471,9 @@ describe('commitIncrementalScan', () => {
     expect(batched.filter((sql) => sql?.includes('INSERT INTO processed_ledgers'))).toHaveLength(2)
     expect(batched.filter((sql) => sql?.includes('INSERT INTO protocol_events'))).toHaveLength(1)
     expect(batched.filter((sql) => sql?.includes('INSERT INTO object_changes'))).toHaveLength(2)
+    expect(batched.filter((sql) => sql?.includes('INSERT INTO loan_lifecycle_events'))).toHaveLength(
+      1,
+    )
     expect(batched.at(-2)).toContain('UPDATE sync_state')
     expect(batched.at(-1)).toContain('DELETE FROM incremental_commit_guards')
     expect(state.state.cursor).toEqual(after)
@@ -421,6 +488,10 @@ describe('commitIncrementalScan', () => {
       ['PaymentRemaining', '2', '1'],
     ])
     expect(state.state.objectChanges[0]?.unsupportedField).toBe(1)
+    expect(state.state.lifecycleEvents[0]).toMatchObject({
+      loanId: 'L'.repeat(64),
+      eventType: 'payment',
+    })
     expect(state.state.guards).toEqual([])
   })
 
@@ -443,6 +514,7 @@ describe('commitIncrementalScan', () => {
     expect(state.state.processedLedgers).toHaveLength(0)
     expect(state.state.protocolEvents).toHaveLength(0)
     expect(state.state.objectChanges).toHaveLength(0)
+    expect(state.state.lifecycleEvents).toHaveLength(0)
   })
 
   it('rolls back processed ledgers and protocol events when the cursor changes inside the batch', async () => {
@@ -460,6 +532,7 @@ describe('commitIncrementalScan', () => {
     expect(state.state.processedLedgers).toHaveLength(0)
     expect(state.state.protocolEvents).toHaveLength(0)
     expect(state.state.objectChanges).toHaveLength(0)
+    expect(state.state.lifecycleEvents).toHaveLength(0)
     expect(state.state.guards).toEqual([])
   })
 
@@ -471,10 +544,11 @@ describe('commitIncrementalScan', () => {
     expect(state.state.processedLedgers).toHaveLength(0)
     expect(state.state.protocolEvents).toHaveLength(0)
     expect(state.state.objectChanges).toHaveLength(0)
+    expect(state.state.lifecycleEvents).toHaveLength(0)
     expect(state.state.guards).toEqual([])
   })
 
-  it('reprocessing the same range does not duplicate canonical events or object changes', async () => {
+  it('reprocessing the same range does not duplicate canonical events, object changes, or lifecycle events', async () => {
     const existingEvent = {
       network: 'devnet',
       epochId: 'epoch-1',
@@ -497,6 +571,15 @@ describe('commitIncrementalScan', () => {
       afterJson: '1',
       unsupportedField: 0,
     }
+    const existingLifecycleEvent = {
+      network: 'devnet',
+      epochId: 'epoch-1',
+      loanId: 'L'.repeat(64),
+      transactionHash: 'T'.repeat(64),
+      eventType: 'payment',
+      statusBefore: 'unknown',
+      statusAfter: 'unknown',
+    }
     const state = fakeDatabase({
       cursor: before,
       processedLedgers: [
@@ -505,6 +588,7 @@ describe('commitIncrementalScan', () => {
       ],
       protocolEvents: [existingEvent],
       objectChanges: [existingChange],
+      lifecycleEvents: [existingLifecycleEvent],
     })
 
     await expect(commitWith(state)).resolves.toBe('committed')
@@ -514,6 +598,7 @@ describe('commitIncrementalScan', () => {
     expect(
       state.state.objectChanges.filter((item) => item.fieldName === 'PaymentRemaining'),
     ).toHaveLength(1)
+    expect(state.state.lifecycleEvents).toEqual([existingLifecycleEvent])
   })
 
   it('rejects persistence when the cursor changed before the batch', async () => {
@@ -530,6 +615,7 @@ describe('commitIncrementalScan', () => {
     expect(state.state.processedLedgers).toHaveLength(0)
     expect(state.state.protocolEvents).toHaveLength(0)
     expect(state.state.objectChanges).toHaveLength(0)
+    expect(state.state.lifecycleEvents).toHaveLength(0)
   })
 
   it('rejects ledger index gaps before persistence', async () => {
