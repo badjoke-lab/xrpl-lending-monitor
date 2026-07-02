@@ -1,0 +1,44 @@
+name: Apply API documentation route patch
+
+on:
+  push:
+    branches:
+      - ui/project-documentation-pages
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ui/project-documentation-pages
+      - name: Add exact API documentation SPA routes
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/worker/index.ts')
+          text = path.read_text()
+          marker = "app.onError((_error, context) => {"
+          route = """app.get(['/api', '/api/'], (context) => {
+            return context.env.ASSETS.fetch(new URL('/', context.req.url))
+          })
+
+          """
+          if route not in text:
+              text = text.replace(marker, route + marker, 1)
+              path.write_text(text)
+          PY
+      - name: Commit patch
+        run: |
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/worker/index.ts
+          git commit -m "Serve API documentation route through SPA assets"
+          git push origin HEAD:ui/project-documentation-pages
