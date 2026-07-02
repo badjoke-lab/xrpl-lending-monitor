@@ -14,22 +14,25 @@ Latest merged source-of-truth change:
 
 - PR #21: `Define UI architecture and recalibrate M4–M6 roadmap`;
 - squash merge: `0deae49e730f22b866674007b5a0d8d0eec564c3`;
-- CI: passed;
-- result: M4 UI implementation may resume under the new UI source-of-truth documents.
+- result: M4 UI implementation resumed under the approved UI source of truth.
 
-Active M4-1 branch:
+Active M4-1 work:
 
+- pull request: #22, `Add observatory Overview and Network Status UI`;
 - branch: `ui/observatory-overview-status`;
 - base: `main` at `0deae49e730f22b866674007b5a0d8d0eec564c3`;
+- validated head before this status-only update: `12d9a6f8fbc564910d9ecdf73134b70d68710d34`;
+- CI run: `28567044276`;
+- CI result: all required `quality` steps passed;
 - roadmap unit: M4-1 App shell, Overview, and Network Status;
-- current state: implementation, focused unit test, and Playwright coverage added; pull request and CI validation are the next actions.
+- current state: implementation and validation complete; final PR state check and merge are the next actions.
 
 Preserved superseded checkpoint:
 
 - branch: `ui/overview-status-shell`;
 - commit: `aa623b9` (`wip: checkpoint M4 overview shell`);
 - state: pushed and preserved for audit;
-- disposition: the API-fetching idea was reviewed, but the light simplified shell is not merge-ready and is superseded by the current canonical M4-1 branch.
+- disposition: its API-fetching idea was reviewed, but the light simplified shell is superseded and must not be merged.
 
 Always inspect current branch heads, open pull requests, and checks before resuming.
 
@@ -37,15 +40,13 @@ Always inspect current branch heads, open pull requests, and checks before resum
 
 Complete M4-1:
 
-1. review the complete branch diff against the UI source of truth;
-2. open the focused M4-1 pull request;
-3. run CI, type-check, unit, migration, build, and Playwright validation;
-4. fix failures without weakening data, accessibility, responsive, or unavailable-state rules;
-5. record exact final evidence here and in the pull-request body;
-6. merge only after required checks pass and explicit authorization remains valid;
-7. continue to M4-2 Vault UI from updated `main`.
+1. allow CI to rerun for this documentation-only validation record;
+2. confirm PR #22 remains current, mergeable, and free of unresolved findings;
+3. merge only after required checks pass and explicit authorization remains valid;
+4. update `main` and begin M4-2 Vault UI from the new merge commit;
+5. keep M1 isolated preview bootstrap as a separate parallel release dependency.
 
-The first incomplete action is opening the M4-1 pull request and evaluating CI.
+The first incomplete action is confirming the final PR #22 check and merge state.
 
 ## Completed milestones
 
@@ -62,16 +63,15 @@ Completed foundations include:
 - validated Devnet status collection;
 - amendment, ledger, epoch, reset, and freshness handling;
 - canonical XRP, IOU, and MPT identity and exact arithmetic;
-- one unfiltered binary current-state traversal;
-- exact marker continuation;
+- one unfiltered binary current-state traversal and exact marker continuation;
 - terminal Loan zero-omission handling;
 - resumable long-running bootstrap runner;
 - deterministic compressed shards and digests;
-- object-storage adapter and manifest verification contract;
+- storage adapter and manifest verification contract;
 - D1 snapshot metadata and active-pointer contract;
-- controlled live two-batch interruption and resume evidence.
+- controlled live interruption and resume evidence.
 
-M1 still requires approved isolated preview access, a complete fixed-ledger traversal, manifest verification, activation, rollback, cleanup, and resource evidence.
+M1 still requires approved isolated preview access, complete fixed-ledger traversal, manifest verification, activation, rollback, cleanup, and resource evidence.
 
 ### M2 — Event history and lifecycle complete
 
@@ -106,42 +106,41 @@ PR #21 established:
 - canonical page map and route ownership;
 - page responsibilities and API dependencies;
 - reusable component and data-state contracts;
-- desktop, tablet, mobile, zoom, and accessibility behavior;
+- responsive and accessibility behavior;
 - mockup interpretation and prohibition on invented mock data;
 - required About, Methodology, Contact, and API pages;
 - optional disabled-by-default Support at `/about#support`;
 - recalibrated M4, M5, and M6 roadmap;
 - Codex UI execution boundary and repository operating rules.
 
-## Current M4-1 implementation
+## M4-1 implementation
 
 ### Application shell
 
-Added:
+Implemented:
 
 - dark navy to near-black design tokens;
 - persistent desktop sidebar;
-- Monitor, Audit, System, and Project navigation groups;
+- Monitor, Audit, System, and Project groups;
 - only implemented routes are interactive; future routes are marked `Planned`;
-- mobile app bar;
-- mobile bottom navigation and More menu;
+- mobile app bar, bottom navigation, and More menu;
 - persistent DEVNET, epoch, validated-ledger, data-age, and collector context;
-- skip link, semantic landmarks, visible focus, reduced-motion behavior, and mobile safe-area handling;
+- skip link, semantic landmarks, visible focus, reduced motion, long-identifier handling, and mobile safe-area support;
 - read-only footer and repository/status links.
 
 ### Data loading
 
-Added independent resource loading for:
+Implemented independent resource loading for:
 
 - `/api/status`;
 - `/api/overview`;
 - `/api/activity?limit=6`.
 
-A failed resource no longer removes successful sibling panels. Requests abort on unmount. Retry is user initiated. Public-safe HTTP failures are shown explicitly.
+A failed resource does not remove successful sibling panels. Requests abort on unmount. Retry is user initiated. Public-safe HTTP failures are shown explicitly.
 
 ### Overview
 
-Added:
+Implemented:
 
 - Vault, Loan Broker, Loan, current-object, and active-snapshot metrics;
 - no substitution of unavailable counts with zero;
@@ -149,7 +148,7 @@ Added:
 - collector and server health;
 - amendment enabled and supported facts shown separately;
 - active-snapshot unavailable explanation;
-- bounded indexed activity table;
+- bounded Indexed activity table;
 - partial-failure warning;
 - Devnet reset and epoch preservation notice;
 - Direct, Derived, Indexed, and Unavailable legend;
@@ -157,41 +156,40 @@ Added:
 
 ### Network Status
 
-Added:
+Implemented:
 
 - server endpoint, version, state, complete-ledger range, validated ledger, hash, and age;
 - collector status, committed cursor, attempt/success times, data age, failures, hash, reset reason, and public error;
 - current epoch identity and boundary;
 - amendment enabled and supported matrix;
 - stale, unavailable, loading, and error behavior;
-- explicit interpretation boundary against Mainnet-readiness, safety, availability, or investment claims.
+- explicit interpretation boundary against Mainnet readiness, safety, availability guarantees, or investment claims.
 
 ### Routing
 
-M4-1 uses the platform History API for the two implemented UI routes:
+M4-1 uses the platform History API for:
 
 - `/`;
 - `/network-status`.
 
-Unknown routes render a dedicated not-found state. This avoids a new router dependency before broader route behavior is needed. The decision may be revisited in a focused M4 route unit if evidence requires it.
+Unknown routes render a dedicated not-found state. No routing dependency was added. The decision may be revisited in a focused later route unit if route count, deep-link behavior, static fallback, or accessibility evidence requires it.
 
 ### Responsive behavior
 
-Added:
+Implemented:
 
-- persistent sidebar on desktop;
-- compact network context on tablet and mobile;
-- mobile app bar and bottom navigation;
-- More menu for the complete information architecture;
-- intentional metric, status, definition, table, and documentation reflow;
-- dedicated horizontal overflow only for the activity table;
-- long identifier truncation with full link targets.
+- desktop persistent sidebar;
+- compact tablet/mobile context;
+- mobile app bar, bottom navigation, and More menu;
+- intentional metric, status, definition, and panel reflow;
+- dedicated overflow only for the activity table;
+- visual identifier truncation without changing full link targets.
 
-## M4-1 tests added
+## M4-1 validation
 
-### Unit
+### Focused unit coverage
 
-`src/ui/lib/formatting.test.ts` covers:
+`src/ui/lib/formatting.test.ts` contains six passing tests covering:
 
 - explicit Unavailable handling;
 - integer and duration formatting;
@@ -200,28 +198,35 @@ Added:
 - semantic status tones;
 - nullable boolean and machine-label formatting.
 
-### Playwright
+### Browser coverage
 
-`tests/e2e/smoke.spec.ts` now covers:
+`tests/e2e/smoke.spec.ts` contains four passing Chromium tests covering:
 
 - desktop observatory Overview;
-- sidebar and persistent network context;
+- sidebar and persistent context;
 - API-supported metrics and recent activity;
-- navigation to Network Status;
-- snapshot-unavailable behavior without mock counts;
+- client-side navigation to Network Status;
+- snapshot unavailability without mock counts;
 - partial activity failure while successful panels remain;
 - mobile app bar, bottom navigation, More menu, and network context;
 - absence of USD output.
 
-Final CI evidence is pending at the time of this status update.
+### CI evidence
 
-## Validation history
+PR #22 CI run `28567044276`, job `quality`, passed:
 
-Merged work through PR #20 passed the applicable lint, type-check, unit, local D1 migration, build, browser smoke, API contract, and bounded live-read workflows recorded in the relevant pull requests.
+- dependency installation;
+- lint;
+- TypeScript type-check;
+- full unit test suite;
+- local D1 migrations;
+- production build;
+- Chromium installation;
+- all browser smoke tests.
 
-M4 WIP checkpoint `aa623b9` passed `pnpm typecheck` and `pnpm build`; it is not merge-ready and is not the canonical implementation branch.
+The first CI run identified a Playwright locator ambiguity because the validated ledger correctly appeared in both the persistent context and health panel. The test was corrected by scoping the assertion to the network-context region; product behavior was not weakened.
 
-M4-1 final evidence will be recorded after CI.
+No collector, API, migration, Cloudflare, deployment, Mainnet, wallet, signing, or write behavior changed in M4-1.
 
 ## Known open questions
 
@@ -251,7 +256,7 @@ M4-1 final evidence will be recorded after CI.
 
 ## Current blockers
 
-No known code blocker prevents M4-1 CI validation.
+No known code blocker remains for M4-1.
 
 A real isolated preview bootstrap still depends on approved external preview access. That does not block UI work against explicit unavailable states.
 
