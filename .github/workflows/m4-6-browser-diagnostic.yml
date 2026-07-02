@@ -1,0 +1,39 @@
+name: M4-6 browser diagnostic
+
+on:
+  push:
+    branches:
+      - ui/project-documentation-pages
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ui/project-documentation-pages
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm exec playwright install --with-deps chromium
+      - name: Run browser tests
+        continue-on-error: true
+        run: pnpm test:e2e > browser-smoke.log 2>&1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: m4-6-browser-smoke
+          path: |
+            browser-smoke.log
+            test-results
+            playwright-report
+          if-no-files-found: warn
