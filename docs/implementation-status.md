@@ -6,31 +6,32 @@ Last updated: 2026-07-02.
 
 **M1 closeout** and **M4-3 — Loan Broker UI**.
 
-M0, M2, M3, M4-0, M4-1, and M4-2 are complete. The verified current-state Loan Broker read dependency is also complete. M1 still requires an approved preview environment, complete bootstrap, verification, activation, rollback, cleanup, and resource evidence.
+M0, M2, M3, M4-0, M4-1, and M4-2 are complete. The verified current-state Loan Broker read dependency is complete. M1 still requires an approved preview environment, complete bootstrap, verification, activation, rollback, cleanup, and resource evidence.
 
 ## Canonical continuation point
 
-Latest merged dependency:
+Merged dependency:
 
 - PR #25: `Add verified Loan Broker API reads`;
-- squash merge: `1051d667d87da432de1d26172fadf9fada3ae2e9`;
-- final CI passed lint, type-check, full unit tests, local D1 migrations, build, and all browser regression tests.
+- squash merge: `1051d667d87da432de1d26172fadf9fada3ae2e9`.
 
-Active M4-3 branch:
+Active M4-3 work:
 
+- PR #26: `Add Loan Broker monitor UI`;
 - branch: `ui/loan-broker-monitor`;
 - base: `main` at `1051d667d87da432de1d26172fadf9fada3ae2e9`;
-- scope: Loan Broker list, detail, Vault relationship navigation, exact debt and cover presentation, unavailable states, responsive layouts, and browser coverage.
+- validated implementation head before this status-only commit: `1e773e93f32ccb7773e3bfe0b01f107c8fb6f3ec`;
+- CI run: `28571871332`;
+- result: all `quality` steps passed.
 
 ## Immediate work
 
-1. open the focused M4-3 pull request;
-2. validate lint, type-check, unit tests, local D1 migrations, build, and all Playwright tests;
-3. fix failures without inventing data or weakening asset, provenance, relationship, responsive, or accessibility rules;
-4. record final evidence and merge only after required checks pass;
-5. begin M4-4 verified Loan reader dependency and Loan UI from updated `main`.
+1. allow CI to rerun for this validation-only status commit;
+2. confirm PR #26 remains current, mergeable, and free of unresolved findings;
+3. merge after the final required check passes;
+4. begin the M4-4 verified Loan reader dependency and Loan UI from updated `main`.
 
-The first incomplete action is opening and validating the M4-3 pull request.
+The first incomplete action is confirming the final PR #26 check and merge state.
 
 ## Completed API dependency
 
@@ -39,20 +40,11 @@ Available routes:
 - `GET /api/loan-brokers`;
 - `GET /api/loan-brokers/:brokerId`.
 
-The verified read layer provides bounded cursor pagination, ID sorting, factual text query, direct Broker fields, related Vault identity, canonical asset identity, and exact debt and cover calculations.
+The verified read layer provides bounded cursor pagination, ID sorting, factual query, direct Broker fields, related Vault identity, canonical asset identity, and exact debt and cover derivations.
 
 Every Broker quantity is paired with the related Vault asset in the same active snapshot. Missing, inconsistent, or over-limit relationships fail closed. Without an active snapshot or storage binding, the API returns explicit unavailable state.
 
-Derived fields are:
-
-- debt utilization basis points;
-- required minimum cover;
-- cover surplus or shortfall;
-- cover ratio basis points.
-
-All derivations use exact decimal arithmetic and expose formulas and provenance.
-
-## Active M4-3 implementation
+## M4-3 implementation
 
 ### Loan Broker list — `/loan-brokers`
 
@@ -98,22 +90,36 @@ Implemented:
 - tablet filter and summary-card reflow;
 - mobile single-column filters and summary cards;
 - dedicated table overflow rather than page-level horizontal scrolling;
-- shortfall-specific factual warning treatment;
+- shortfall-specific factual warning treatment with text labels;
 - related Vault card reflow;
 - Loan Broker API response types;
 - list and detail routes in the existing History API router;
 - active sidebar state for Broker detail routes;
 - dedicated Broker stylesheet.
 
-## Tests added
+## M4-3 validation
 
-`tests/e2e/loan-brokers.spec.ts` covers:
+PR #26 CI run `28571871332`, job `quality`, passed:
 
-1. available Broker collection, exact debt and cover values, absence of USD output, detail navigation, raw data, related Vault link, and explicit Loan book/history unavailability;
-2. unavailable active-snapshot state and factual search/order request parameters;
+- dependency installation;
+- lint;
+- TypeScript type-check;
+- full unit test suite;
+- all local D1 migrations;
+- production build;
+- Chromium installation;
+- all existing Overview, Network Status, and Vault browser tests;
+- three new Loan Broker browser tests.
+
+The new browser tests cover:
+
+1. available Broker collection, exact debt and cover facts, absence of USD output, detail navigation, raw data, direct Vault link, and explicit Loan book/history unavailability;
+2. missing-snapshot unavailable state and factual query/order request parameters;
 3. narrow mobile layout and Loan Broker navigation through the More menu.
 
-Final CI evidence is pending.
+The first browser run exposed only a locator ambiguity because `Cover surplus` appears in both the summary and detailed definition. The assertion was scoped to the summary region and semantic headings; product behavior and coverage were not weakened.
+
+No collector, API, migration, Cloudflare configuration, remote resource, deployment, Mainnet, wallet, signing, transaction submission, or public-write behavior changed in PR #26.
 
 ## Known open questions
 
@@ -137,6 +143,6 @@ Final CI evidence is pending.
 
 ## Current blockers
 
-No known code blocker prevents local and CI validation of M4-3.
+No code blocker remains for M4-3.
 
-Real public Broker data still requires an approved `CURRENT_STATE` binding and a complete verified active snapshot. The UI already exposes that absence as unavailable.
+Real public Broker data still requires an approved `CURRENT_STATE` binding and a complete verified active snapshot. The UI exposes that absence explicitly.
