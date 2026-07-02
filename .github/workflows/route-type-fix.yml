@@ -1,0 +1,39 @@
+name: Apply API route type fix
+
+on:
+  push:
+    branches:
+      - ui/project-documentation-pages
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ui/project-documentation-pages
+      - name: Use Fetcher-compatible asset URL
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('src/worker/index.ts')
+          text = path.read_text()
+          text = text.replace(
+              "context.env.ASSETS.fetch(new URL('/', context.req.url))",
+              "context.env.ASSETS.fetch(new URL('/', context.req.url).toString())",
+          )
+          path.write_text(text)
+          PY
+      - name: Commit patch
+        run: |
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/worker/index.ts
+          git commit -m "Use Fetcher-compatible API documentation asset URL"
+          git push origin HEAD:ui/project-documentation-pages
