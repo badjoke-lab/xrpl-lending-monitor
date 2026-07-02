@@ -27,6 +27,7 @@ const endpoints: Endpoint[] = [
   { method: 'GET', path: '/api/epochs', purpose: 'Current and archived Devnet epoch records.' },
   { method: 'GET', path: '/api/objects/{objectType}/{objectId}/history', purpose: 'Bounded normalized object-change history.' },
   { method: 'GET', path: '/api/loans/{loanId}/lifecycle', purpose: 'Bounded canonical Loan lifecycle sequence.' },
+  { method: 'GET', path: '/api/audit/lifecycle', purpose: 'Protocol-wide bounded Loan lifecycle event explorer with event and Loan filters.' },
   { method: 'GET', path: '/api/search', purpose: 'Bounded exact-match indexed search across transaction, relationship, archive, lifecycle, account, asset, and identifier fields.' },
   { method: 'GET', path: '/api/exports/activity', purpose: 'Bounded Activity export in JSON, NDJSON, or CSV.' },
   { method: 'GET', path: '/api/feeds/activity.ndjson', purpose: 'Bounded NDJSON Activity feed.' },
@@ -135,7 +136,8 @@ export function ApiDocumentationPage({ onNavigate }: ApiDocumentationPageProps) 
         <CodeExample>{`GET /api/activity?limit=100
 GET /api/transactions/{64-character-hash}
 GET /api/objects/Loan/{loanId}/history?limit=100
-GET /api/loans/{loanId}/lifecycle?limit=100`}</CodeExample>
+GET /api/loans/{loanId}/lifecycle?limit=100
+GET /api/audit/lifecycle?event_type=payment&loan_id={loanId}&limit=100`}</CodeExample>
       </section>
 
       <section className="documentation-section" id="search" aria-labelledby="api-search-heading">

@@ -4,9 +4,9 @@ Last updated: 2026-07-03.
 
 ## Current milestone
 
-**M1 closeout** and **M4-7 — Baseline integration, accessibility, and Checkpoint C**.
+**M1 closeout** and **M5-1 — Loan lifecycle and state changes**.
 
-M0, M2, M3, M4-0, M4-1, M4-2, M4-3, M4-4, M4-5, and M4-6 are complete. M4-7 is active on PR #34. M1 still requires an approved isolated preview environment, complete bootstrap, verification, activation, rollback, cleanup, and resource evidence.
+M0, M2, M3, and M4-0 through M4-7 are complete. M5-1 is active. M1 still requires a complete marker-aware bootstrap, verification, activation, rollback, cleanup, and resource evidence.
 
 ## Canonical continuation point
 
@@ -23,16 +23,40 @@ Latest merged work:
 - PR #35: `Configure Cloudflare D1 database binding`;
 - merge commit: `33edaa9c897aa9f05cce4b112c85e948c73d9e4e`;
 - PR #36: `Document Cloudflare production deployment`;
-- merge commit: `f22c0cecee641c5818d5b16df28bbac265a5cf01`.
+- merge commit: `f22c0cecee641c5818d5b16df28bbac265a5cf01`;
+- PR #34: `Complete M4 baseline integration and Checkpoint C`;
+- squash merge: `f7ae7032715c57234bb94dcbc3aeddce23e30a67`.
 
 Active implementation:
 
-- branch: `ui/m4-7-baseline-integration`;
-- pull request: #34, `Complete M4 baseline integration and Checkpoint C`;
-- milestone unit: M4-7;
-- base integrated: `origin/main` at `f22c0cecee641c5818d5b16df28bbac265a5cf01`;
-- temporary diagnostic workflow removed;
-- local validation after the documentation zoom overflow fix: `pnpm install --frozen-lockfile`, `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm db:migrate:local`, `pnpm build`, and `pnpm test:e2e` passed.
+- branch: `ui/m5-1-loan-lifecycle-audit`;
+- milestone unit: M5-1;
+- base: `main` at `f7ae7032715c57234bb94dcbc3aeddce23e30a67`;
+- scope: protocol-wide Loan lifecycle explorer, Loan detail lifecycle timeline, normalized Loan state changes, indexed source transaction links, explicit empty/unavailable states, and browser/API regression coverage.
+
+## Production D1 schema
+
+Approved production D1 migration was applied on 2026-07-03 with:
+
+```sh
+pnpm exec wrangler d1 migrations apply xrpl-lending-monitor --remote
+```
+
+Target:
+
+- database: `xrpl-lending-monitor`;
+- database ID: `bebc2c68-03d2-4a1c-98a7-46b34ee4e25d`.
+
+Evidence:
+
+- all eight migrations `0001_network_epochs.sql` through `0008_balance_history.sql` applied successfully;
+- `pnpm exec wrangler d1 migrations list xrpl-lending-monitor --remote` reported `No migrations to apply`;
+- read-only `sqlite_master` query verified expected tables and indexes with `changed_db: false` and `rows_written: 0`;
+- deployed `https://xrpl-lending-monitor.badjoke-lab.workers.dev/api/status` returned HTTP 200 with `collector.status = uninitialized`;
+- deployed `/api/overview` returned HTTP 200 with unavailable active-snapshot state and null counts;
+- deployed `/api/activity?limit=6` returned HTTP 200 with an empty indexed data array.
+
+No current-state snapshot was created or activated.
 
 ## Completed M4-4
 
@@ -89,9 +113,9 @@ Available routes:
 
 No placeholder external destination is published.
 
-## Active M4-7
+## Completed M4-7
 
-Implemented on the active branch:
+Delivered:
 
 - reusable route-aware `Breadcrumbs` component with unit coverage for top-level, detail, and invalid routes;
 - SPA navigation, browser history, hash deep-link, and focus restoration coverage;
@@ -101,11 +125,34 @@ Implemented on the active branch:
 - unsupported control regression for wallet, signing, transaction submission, payment, donation, USD total, and risk-score surfaces;
 - Checkpoint C documentation in `docs/checkpoint-c.md`.
 
+PR #34 passed CI and was squash-merged at `f7ae7032715c57234bb94dcbc3aeddce23e30a67`.
+
+## Active M5-1
+
+Implemented on the active branch:
+
+- `GET /api/audit/lifecycle` protocol-wide bounded lifecycle endpoint with `event_type`, `loan_id`, and `limit` filters;
+- Lifecycle audit page at `/audit/lifecycle`;
+- desktop sidebar and mobile More navigation to Lifecycle;
+- Loan detail panels for indexed lifecycle events and normalized before/after Loan state changes;
+- source transaction links and raw indexed details where retained;
+- explicit empty/unavailable states instead of inferred lifecycle or payment history;
+- focused API and browser tests.
+
+Local validation:
+
+- `pnpm install --frozen-lockfile` exited successfully with dependencies already up to date; pnpm printed a registry metadata fetch warning;
+- `pnpm lint`;
+- `pnpm typecheck`;
+- `pnpm test` — 168 passed, 3 skipped;
+- `pnpm db:migrate:local`;
+- `pnpm build`;
+- `pnpm test:e2e` — 26 passed.
+
 First incomplete action:
 
-- push PR #34 once GitHub authentication is restored;
-- inspect CI once the push is available on GitHub;
-- squash merge only after required checks pass.
+- open PR for M5-1;
+- inspect CI and merge only after required checks pass.
 
 ## Known open questions
 
@@ -114,7 +161,7 @@ First incomplete action:
 | Failed bootstrap prefix retention | Preview cleanup and rollback measurements | M1 closeout |
 | Broker and Loan shard-cap tuning | Real preview density and response measurements | M1 preview / M6 |
 | Current Loan counts by Broker | Bounded aggregation or indexed relationship API | M5 |
-| Full Broker and Loan history panels | Indexed audit integration | M5 |
+| Full Broker history panels | Indexed audit integration | M5 |
 | Private contact form URL | Explicit configuration approval | M6 |
 
 ## Active prohibitions
@@ -126,10 +173,10 @@ First incomplete action:
 - no unavailable-data-to-zero substitution;
 - no USD conversion, price feed, cross-asset total, or proprietary score;
 - no funding, donation, payment, or promotional surface in the current release;
-- no remote infrastructure change, deployment, Mainnet, wallet, signing, transaction submission, or public write operation.
+- no unapproved remote infrastructure change, deployment, Mainnet, wallet, signing, transaction submission, or public write operation.
 
 ## Current blockers
 
-No code blocker prevents completing M4.
+No code blocker prevents continuing M5.
 
 Real public current-state data still requires an approved `CURRENT_STATE` binding and a complete verified active snapshot. Current-state APIs and UI routes must continue to expose that absence explicitly.

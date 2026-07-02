@@ -84,6 +84,84 @@ export interface ActivityResponse {
   page: { limit: number; next_cursor: null }
 }
 
+export interface ObjectChangeRecord {
+  transaction_hash: string
+  epoch_id: string
+  ledger_index: number
+  transaction_index: number
+  transaction_type: string
+  result_code: string
+  close_time: number
+  node_index: number
+  object_type: string
+  object_id: string
+  action: 'created' | 'modified' | 'deleted'
+  field_name: string
+  before_json: unknown | null
+  after_json: unknown | null
+  value_type: string
+  unsupported_field: boolean
+  relationships: {
+    vault_id: string | null
+    loan_broker_id: string | null
+    loan_id: string | null
+    account: string | null
+    owner: string | null
+    borrower: string | null
+    asset_key: string | null
+    mpt_issuance_id: string | null
+  }
+  created_at: string
+  provenance: 'indexed'
+}
+
+export interface ObjectHistoryResponse {
+  network: 'devnet'
+  object_type: string
+  object_id: string
+  data: ObjectChangeRecord[]
+  page: { limit: number; next_cursor: null }
+}
+
+export interface LoanLifecycleEvent {
+  loan_id: string
+  epoch_id: string
+  transaction_hash: string
+  ledger_index: number
+  transaction_index: number
+  close_time: number
+  event_type: 'created' | 'payment' | 'paid' | 'impaired' | 'unimpaired' | 'defaulted' | 'deleted' | 'updated'
+  transaction_type: string
+  result_code: string
+  status_before: string
+  status_after: string
+  principal_before: string | null
+  principal_after: string | null
+  total_value_before: string | null
+  total_value_after: string | null
+  payment_remaining_before: number | null
+  payment_remaining_after: number | null
+  details_json: unknown
+  created_at: string
+  provenance: 'indexed'
+}
+
+export interface LoanLifecycleResponse {
+  network: 'devnet'
+  loan_id: string
+  data: LoanLifecycleEvent[]
+  page: { limit: number; next_cursor: null }
+}
+
+export interface LifecycleExplorerResponse {
+  network: 'devnet'
+  kind: 'loan_lifecycle'
+  data: LoanLifecycleEvent[]
+  filters: { event_type: string | null; loan_id: string | null }
+  page: { limit: number; next_cursor: null }
+  provenance: { collection: Provenance }
+}
+
 export interface CanonicalAssetResponse {
   type: 'xrp' | 'iou' | 'mpt'
   key: string

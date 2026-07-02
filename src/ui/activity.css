@@ -12,7 +12,8 @@
   font-size: 0.78rem;
 }
 
-.activity-filter-form input {
+.activity-filter-form input,
+.activity-filter-form select {
   width: 100%;
   min-height: 42px;
   border: 1px solid var(--border-subtle);
@@ -25,6 +26,10 @@
 
 .activity-filter-form input::placeholder {
   color: #5f7380;
+}
+
+.activity-filter-form select {
+  appearance: none;
 }
 
 .activity-filter-form .primary-button {
@@ -214,6 +219,95 @@
   overflow-wrap: anywhere;
 }
 
+.lifecycle-timeline,
+.state-change-list {
+  display: grid;
+  gap: 14px;
+}
+
+.lifecycle-event-card,
+.state-change-card {
+  min-width: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  padding: 16px;
+  background: rgba(7, 24, 33, 0.5);
+}
+
+.lifecycle-event-card > header,
+.state-change-card > header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+
+.lifecycle-event-card h2,
+.lifecycle-event-card h3,
+.state-change-card h3 {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 4px 0;
+  font-size: 0.98rem;
+}
+
+.lifecycle-event-card p,
+.state-change-card p,
+.lifecycle-change-summary {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+  line-height: 1.55;
+}
+
+.lifecycle-change-summary {
+  margin: 12px 0;
+}
+
+.lifecycle-state-grid,
+.state-change-values {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+
+.lifecycle-state-grid dt,
+.state-change-values span {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.lifecycle-state-grid dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.state-change-values {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-bottom: 12px;
+}
+
+.state-change-values code {
+  display: block;
+  min-height: 44px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 10px;
+  background: rgba(3, 15, 21, 0.82);
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 1180px) {
   .activity-filter-form {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -226,11 +320,17 @@
   .transaction-summary-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .lifecycle-state-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 760px) {
   .activity-filter-form,
-  .transaction-raw-grid {
+  .transaction-raw-grid,
+  .lifecycle-state-grid,
+  .state-change-values {
     grid-template-columns: 1fr;
   }
 
@@ -239,7 +339,9 @@
   }
 
   .activity-scope-note,
-  .affected-node-card > header {
+  .affected-node-card > header,
+  .lifecycle-event-card > header,
+  .state-change-card > header {
     display: grid;
   }
 

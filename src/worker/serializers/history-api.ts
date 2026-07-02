@@ -217,6 +217,27 @@ export function serializeLoanLifecycleResponse(options: {
   }
 }
 
+export function serializeLifecycleExplorerResponse(options: {
+  events: LoanLifecycleRecord[]
+  limit: number
+  filters: {
+    eventType: string | null
+    loanId: string | null
+  }
+}) {
+  return {
+    network: 'devnet',
+    kind: 'loan_lifecycle',
+    data: options.events.map(serializeLoanLifecycle),
+    filters: {
+      event_type: options.filters.eventType,
+      loan_id: options.filters.loanId,
+    },
+    page: page(options.limit),
+    provenance: { collection: 'indexed' },
+  }
+}
+
 export function serializeSearchResponse(options: {
   query: string
   results: SearchResultRecord[]

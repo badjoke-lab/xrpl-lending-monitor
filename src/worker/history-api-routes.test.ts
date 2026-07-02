@@ -226,6 +226,31 @@ describe('history API routes', () => {
     })
   })
 
+  it('lists protocol-wide lifecycle events with validated filters', async () => {
+    const response = await app.request('/api/audit/lifecycle?event_type=payment&loan_id=LOAN1&limit=5', {}, createEnv(createFakeDatabase()))
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toMatchObject({
+      network: 'devnet',
+      kind: 'loan_lifecycle',
+      filters: { event_type: 'payment', loan_id: 'LOAN1' },
+      data: [
+        {
+          loan_id: 'LOAN1',
+          event_type: 'payment',
+          status_before: 'active',
+          status_after: 'active',
+          provenance: 'indexed',
+        },
+      ],
+      provenance: { collection: 'indexed' },
+      page: { limit: 5, next_cursor: null },
+    })
+
+    const invalid = await app.request('/api/audit/lifecycle?event_type=made_up', {}, createEnv(createFakeDatabase()))
+    expect(invalid.status).toBe(400)
+  })
+
   it('requires a bounded search query', async () => {
     const missingQuery = await app.request('/api/search', {}, createEnv(createFakeDatabase()))
     expect(missingQuery.status).toBe(400)

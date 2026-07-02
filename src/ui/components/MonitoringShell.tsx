@@ -24,7 +24,7 @@ const groups: Array<{ label: string; items: Item[] }> = [
     { label: 'Search', path: '/search' },
   ] },
   { label: 'Audit', items: [
-    { label: 'Lifecycle' }, { label: 'Archived Objects' },
+    { label: 'Lifecycle', path: '/audit/lifecycle' }, { label: 'Archived Objects' },
     { label: 'Cover & Loss' }, { label: 'Devnet Epochs' },
   ] },
   { label: 'System', items: [

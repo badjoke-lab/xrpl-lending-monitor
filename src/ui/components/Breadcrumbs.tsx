@@ -58,6 +58,7 @@ export function resolveBreadcrumbs(currentPath: string): BreadcrumbItem[] {
     '/loans': 'Loans',
     '/activity': 'Activity',
     '/search': 'Search',
+    '/audit/lifecycle': 'Lifecycle',
     '/api': 'API',
     '/methodology': 'Methodology',
     '/about': 'About',

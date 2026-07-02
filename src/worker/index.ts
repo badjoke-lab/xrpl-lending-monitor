@@ -15,6 +15,7 @@ import {
   listActivity,
   listEpochs,
   listLoanLifecycle,
+  listLoanLifecycleEvents,
   listObjectHistory,
   searchHistory,
 } from './repositories/history-api-repository'
@@ -33,6 +34,7 @@ import {
   serializeActivityNdjson,
   serializeActivityResponse,
   serializeEpochsResponse,
+  serializeLifecycleExplorerResponse,
   serializeLoanLifecycleResponse,
   serializeObjectHistoryResponse,
   serializeSearchResponse,
@@ -43,6 +45,16 @@ import { serializeNetworkStatus } from './serializers/network-status'
 const app = new Hono<{ Bindings: Bindings }>()
 const DEFAULT_PAGE_LIMIT = 25
 const MAX_PAGE_LIMIT = 100
+const LIFECYCLE_EVENT_TYPES = new Set([
+  'created',
+  'payment',
+  'paid',
+  'impaired',
+  'unimpaired',
+  'defaulted',
+  'deleted',
+  'updated',
+])
 const MAX_QUERY_LENGTH = 128
 const MAX_CURSOR_LENGTH = 1024
 
@@ -298,6 +310,27 @@ app.get('/api/loans/:loanId/lifecycle', async (context) => {
     serializeLoanLifecycleResponse({
       loanId,
       events: await listLoanLifecycle(context.env.DB, loanId, { limit }),
+      limit,
+    }),
+  )
+})
+
+app.get('/api/audit/lifecycle', async (context) => {
+  resolveRuntimeConfig(context.env)
+  const limit = parsePageLimit(context.req.query('limit'))
+  if (limit === null) return invalidLimitResponse(context)
+  const eventType = context.req.query('event_type')?.trim() || null
+  const loanId = context.req.query('loan_id')?.trim() || null
+  if (eventType !== null && !LIFECYCLE_EVENT_TYPES.has(eventType)) {
+    return context.json(
+      { error: 'invalid_filter', message: 'event_type is not a supported lifecycle event type' },
+      400,
+    )
+  }
+  return context.json(
+    serializeLifecycleExplorerResponse({
+      events: await listLoanLifecycleEvents(context.env.DB, { limit, eventType, loanId }),
+      filters: { eventType, loanId },
       limit,
     }),
   )
