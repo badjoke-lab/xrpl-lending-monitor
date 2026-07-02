@@ -121,6 +121,17 @@ pre,
   overflow-x: auto;
 }
 
+@media (max-width: 80em) {
+  .methodology-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .documentation-toc {
+    position: static;
+    max-height: none;
+  }
+}
+
 @media (max-width: 720px) {
   .breadcrumbs {
     margin-bottom: 14px;

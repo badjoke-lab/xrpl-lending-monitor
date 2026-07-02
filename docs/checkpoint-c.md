@@ -1,6 +1,6 @@
 # Checkpoint C — Monitoring surface baseline
 
-Date: 2026-07-02  
+Date: 2026-07-03  
 Milestone: M4  
 Network boundary: XRPL Lending Devnet  
 Operation boundary: independent and read-only
@@ -52,11 +52,11 @@ This checkpoint records implementation and automated verification only. It does 
 | Keyboard navigation | Skip-link browser test and post-navigation focus test | Main content can be reached without traversing the full navigation |
 | Semantics | One main landmark, one page-level heading, labeled navigation regions | Baseline landmark and heading structure is retained |
 | Responsive layout | 390 px route checks and horizontal-overflow assertions | Documentation routes remain contained at mobile width |
-| Increased text size | 200% root text-size browser check | Primary Methodology content remains visible without page-level horizontal overflow |
+| Increased text size | 200% root text-size browser check after `pnpm build` on PR #34 | Primary Methodology content remains visible without page-level horizontal overflow |
 | Long identifiers | Breadcrumb resolver test and containment rules | Full identifiers remain available through title metadata without forcing layout overflow |
 | Shared state | Devnet, read-only, and epoch context checked before and after SPA navigation | Context remains consistent across pages |
 | Unsupported controls | Browser regression over interactive controls and explicit control selectors | No wallet, signing, transaction submission, payment, donation, USD-total, or risk-score control is exposed |
-| Quality gate | Repository CI | Lint, type-check, unit tests, local D1 migrations, build, Chromium installation, and browser tests must all pass before merge |
+| Quality gate | Local targeted pass: `pnpm build`; `pnpm test:e2e tests/e2e/integration-accessibility.spec.ts` | Full lint, type-check, unit tests, local D1 migrations, build, Chromium installation, and browser tests must all pass in CI before merge |
 
 ## Data and interpretation boundaries
 
