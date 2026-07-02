@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react'
 
 import { AppShell } from './components/AppShell'
 import { useDashboardResources } from './hooks/useDashboardResources'
+import { LoanBrokerDetailPage } from './pages/LoanBrokerDetailPage'
+import { LoanBrokersPage } from './pages/LoanBrokersPage'
 import { NetworkStatusPage } from './pages/NetworkStatusPage'
 import { OverviewPage } from './pages/OverviewPage'
 import { VaultDetailPage } from './pages/VaultDetailPage'
@@ -58,6 +60,7 @@ export function App() {
   }, [])
 
   const vaultDetailMatch = /^\/vaults\/([A-Fa-f0-9]{64})$/.exec(currentPath)
+  const brokerDetailMatch = /^\/loan-brokers\/([A-Fa-f0-9]{64})$/.exec(currentPath)
   let page
   if (currentPath === '/') {
     page = <OverviewPage resources={resources} onNavigate={navigate} onReload={reload} />
@@ -67,6 +70,15 @@ export function App() {
     page = <VaultsPage onNavigate={navigate} />
   } else if (vaultDetailMatch?.[1]) {
     page = <VaultDetailPage vaultId={vaultDetailMatch[1].toUpperCase()} onNavigate={navigate} />
+  } else if (currentPath === '/loan-brokers') {
+    page = <LoanBrokersPage onNavigate={navigate} />
+  } else if (brokerDetailMatch?.[1]) {
+    page = (
+      <LoanBrokerDetailPage
+        brokerId={brokerDetailMatch[1].toUpperCase()}
+        onNavigate={navigate}
+      />
+    )
   } else {
     page = <NotFoundPage onNavigate={navigate} />
   }
