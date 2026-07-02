@@ -4,33 +4,33 @@ Last updated: 2026-07-02.
 
 ## Current milestone
 
-**M1 closeout — Current-state collector activation** and **M2 event history — Cover, debt, and loss tracking**.
+**M1 closeout — Current-state collector activation** and **M2 event history — Status engine and reconciliation**.
 
 M1 code foundations and controlled resume evidence are merged, but M1 has not exited because a complete isolated preview bootstrap has not yet been stored, verified, and activated. M2 foundation work may continue in parallel where it does not claim dependency on a real active snapshot.
 
 ## Canonical continuation point
 
-GitHub pull request #14, `Archive deleted Lending objects`, merged by squash as `b70f7ce540aafe35220fa06182eb52ca8b572652`.
+GitHub pull request #15, `Track cover debt and loss history`, merged by squash as `f8fd27e5d8bafa45e18b63475843e6b49b0d4aeb`.
 
 Active local branch for the next roadmap unit:
 
-- branch: `collector/cover-debt-loss-tracking`;
-- base: `main` at `b70f7ce540aafe35220fa06182eb52ca8b572652`;
-- roadmap unit: M2 PR 11, cover, debt, and loss tracking;
+- branch: `collector/status-reconciliation`;
+- base: `main` at `f8fd27e5d8bafa45e18b63475843e6b49b0d4aeb`;
+- roadmap unit: M2 PR 12, status engine and reconciliation;
 - current state: local implementation and validation complete; pull request not opened yet.
 
 Always inspect the current pull-request head and checks before resuming; the values above are a recorded checkpoint, not permission to ignore newer GitHub state.
 
 ## Immediate work
 
-Complete the cover, debt, and loss tracking pull request before beginning status engine and reconciliation:
+Complete the status engine and reconciliation pull request before Checkpoint B:
 
-1. push `collector/cover-debt-loss-tracking`;
+1. push `collector/status-reconciliation`;
 2. open a focused PR with exact validation and live-read evidence;
 3. resolve CI or review findings without weakening invariants;
 4. merge only after required checks pass and the branch is current.
 
-The first incomplete action is opening the cover, debt, and loss tracking pull request.
+The first incomplete action is opening the status engine and reconciliation pull request.
 
 ## Completed
 
@@ -199,6 +199,20 @@ Current local cover/debt/loss validation:
 - `pnpm test:e2e`: 1 Chromium smoke test passed;
 - live Devnet ledger read: ledger `3308277`, hash `135F12108936C4CA352DE5504D640128F2CC64C4B5D03710C0062023715BD5FC`, parent hash `BD1F4D2F41B68A87322622BD11013493939607B28DFA95B5B4012794FA3FAEBB`, transaction count `0`, observed transaction types `[]`, recognized Lending-event count `0`.
 
+GitHub PR #15 validation:
+
+- `quality`: passed at head `bb27f09cb8a5d4825d6aeecebc4ea4dfbd1bd47b`;
+- `live-devnet-ledger`: passed at head `bb27f09cb8a5d4825d6aeecebc4ea4dfbd1bd47b`;
+- PR #15 had no review comments or unresolved review threads before merge.
+
+Current local status/reconciliation validation:
+
+- `pnpm exec vitest run src/domain/status/loan-status.test.ts src/collector/incremental/reconciliation.test.ts`: 9 tests passed;
+- `pnpm lint && pnpm typecheck && pnpm test`: passed; 26 test files passed, 3 skipped; 129 tests passed, 3 skipped;
+- `pnpm check`: passed;
+- `pnpm test:e2e`: 1 Chromium smoke test passed;
+- live Devnet ledger read: ledger `3308395`, hash `D29AB85FDB7E208895B85E118685CF5111B2E2846A138F323F4CF8825F942C9D`, parent hash `48FD9DB451AE63214847A069D24D1E6878B7B90D86829440414C151FFCDE9DC5`, transaction count `0`, observed transaction types `[]`, recognized Lending-event count `0`.
+
 ## Known open questions
 
 | Question | Required evidence | Assigned point |
@@ -224,7 +238,7 @@ Current local cover/debt/loss validation:
 
 ## Current blockers
 
-No known code blocker is recorded for completing the cover, debt, and loss tracking pull request.
+No known code blocker is recorded for completing the status engine and reconciliation pull request.
 
 A real isolated preview bootstrap depends on approved external preview access. That dependency does not block local implementation, tests, documentation, or independent incremental-history work.
 

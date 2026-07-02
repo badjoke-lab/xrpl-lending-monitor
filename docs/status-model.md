@@ -33,7 +33,16 @@ Allowed values:
 - `not_applicable` — deleted or unavailable schedule data.
 - `unknown` — required schedule fields are absent or invalid.
 
-Before implementation, tests must settle the exact boundary semantics for `payment_due` and `in_grace_period`. The API must expose timestamps used in the decision.
+Implemented boundary semantics:
+
+- before `NextPaymentDueDate`: `current`;
+- at `NextPaymentDueDate` and before `NextPaymentDueDate + GracePeriod`: `payment_due`;
+- at or after `NextPaymentDueDate + GracePeriod`: `default_eligible`;
+- deleted Loans: `not_applicable`;
+- zero remaining payments: `complete`;
+- missing required schedule fields: `unknown`.
+
+`in_grace_period` is retained only as a possible user-facing alias for `payment_due`; it is not a separate canonical persisted value. The API must expose timestamps used in the decision.
 
 ## Required API shape
 
