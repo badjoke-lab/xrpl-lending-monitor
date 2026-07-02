@@ -6,31 +6,32 @@ Last updated: 2026-07-02.
 
 **M1 closeout — Current-state collector activation** and **M3 public API — Core entity API**.
 
-M1 code foundations and controlled resume evidence are merged, but M1 has not exited because a complete isolated preview bootstrap has not yet been stored, verified, and activated. M2 foundation work may continue in parallel where it does not claim dependency on a real active snapshot.
+M1 code foundations and controlled resume evidence are merged, but M1 has not exited because a complete isolated preview bootstrap has not yet been stored, verified, and activated. M2 history foundations and the Checkpoint B documentation decision are merged. M3 core API work is in progress and must expose unavailable current-entity collections until an active snapshot and object shard reader are available.
 
 ## Canonical continuation point
 
-GitHub pull request #16, `Add Loan status and reconciliation checks`, merged by squash as `9b83df5617890d1f1fb3d3cac7080ef57a4e9790`.
+GitHub pull request #17, `Record Checkpoint B history boundary`, merged by squash as `04076722be7a37e95b5defbd82074d9474cb558c`.
 
 Active local branch for the next roadmap unit:
 
-- branch: `docs/checkpoint-b-history`;
-- base: `main` at `9b83df5617890d1f1fb3d3cac7080ef57a4e9790`;
-- roadmap unit: Checkpoint B history-completeness decision before M3;
-- current state: decision documentation in progress; pull request not opened yet.
+- branch: `api/core-entity-api`;
+- base: `main` at `04076722be7a37e95b5defbd82074d9474cb558c`;
+- roadmap unit: M3 public API core entity API shell;
+- current implementation commit: `13092b6` (`feat: add core entity API shell`);
+- current state: local implementation and validation complete; pull request not opened yet.
 
 Always inspect the current pull-request head and checks before resuming; the values above are a recorded checkpoint, not permission to ignore newer GitHub state.
 
 ## Immediate work
 
-Complete the Checkpoint B documentation pull request before beginning M3 core entity API:
+Complete the M3 core entity API pull request:
 
-1. push `docs/checkpoint-b-history`;
-2. open a focused PR with exact validation;
+1. push `api/core-entity-api`;
+2. open a focused PR with the validation below;
 3. merge only after required checks pass and the branch is current;
-4. create the M3 core API branch from updated `main`.
+4. continue to the next M3 API unit from updated `main`.
 
-The first incomplete action is opening the Checkpoint B documentation pull request.
+The first incomplete action is pushing `api/core-entity-api`.
 
 ## Completed
 
@@ -112,12 +113,14 @@ M1 exits only when a complete marker-aware bootstrap is stored, verified, and ac
 
 ## M2 ordered work after the incremental foundation
 
-1. AffectedNodes normalization;
-2. Loan lifecycle engine;
-3. deleted-object archive;
-4. cover, debt, and loss tracking;
-5. status engine and reconciliation;
-6. Checkpoint B history-completeness decision.
+Merged in dependency order:
+
+1. AffectedNodes normalization, PR #12, squash merge `1b04dfaa308d670e30ac5275e444559c5f2bcf75`;
+2. Loan lifecycle engine, PR #13, squash merge `c33152db20c4624a90f08cbad8b13bc4ca6b3b96`;
+3. deleted-object archive, PR #14, squash merge `b70f7ce540aafe35220fa06182eb52ca8b572652`;
+4. cover, debt, and loss tracking, PR #15, squash merge `f8fd27e5d8bafa45e18b63475843e6b49b0d4aeb`;
+5. status engine and reconciliation, PR #16, squash merge `9b83df5617890d1f1fb3d3cac7080ef57a4e9790`;
+6. Checkpoint B history-completeness decision, PR #17, squash merge `04076722be7a37e95b5defbd82074d9474cb558c`.
 
 Then continue with M3 Public API, M4 baseline UI, M5 differentiated audit UI, and M6 hardening and public Devnet release in `docs/development-roadmap.md` order.
 
@@ -225,6 +228,18 @@ Checkpoint B decision:
 - public lifecycle completeness claims are not approved yet;
 - active bootstrap snapshot, fixture-ledger replay, soak, and reconciliation evidence remain required before public release claims.
 
+Current local M3 core entity API validation:
+
+- implementation commit: `13092b6` (`feat: add core entity API shell`);
+- focused route test: `pnpm exec vitest run src/worker/core-api-routes.test.ts`: 4 tests passed;
+- `pnpm typecheck`: passed;
+- `pnpm lint`: passed;
+- `pnpm check`: passed; 27 test files passed, 3 skipped; 133 tests passed, 3 skipped; local D1 migrations reported no pending migrations; build passed;
+- `pnpm test:e2e`: 1 Chromium smoke test passed;
+- live ledger evidence: not collected for this API-only branch because no collector, migration, or ledger-read behavior changed;
+- branch: `api/core-entity-api`;
+- pull request: not opened yet.
+
 ## Known open questions
 
 | Question | Required evidence | Assigned point |
@@ -250,7 +265,7 @@ Checkpoint B decision:
 
 ## Current blockers
 
-No known code blocker is recorded for completing the Checkpoint B documentation pull request.
+No known code blocker is recorded for completing the M3 core entity API pull request.
 
 A real isolated preview bootstrap depends on approved external preview access. That dependency does not block local implementation, tests, documentation, or independent incremental-history work.
 
