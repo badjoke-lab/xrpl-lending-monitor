@@ -37,8 +37,36 @@ async function mockSharedState(page: Page) {
   }))
 }
 
-async function horizontalOverflow(page: Page) {
-  return page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+async function expectNoHorizontalOverflow(page: Page) {
+  const report = await page.evaluate(() => {
+    const root = document.documentElement
+    const viewportWidth = root.clientWidth
+    const offenders = Array.from(document.querySelectorAll<HTMLElement>('body *'))
+      .map((element) => {
+        const rect = element.getBoundingClientRect()
+        return {
+          element: `${element.tagName.toLowerCase()}${element.id ? `#${element.id}` : ''}${element.className ? `.${String(element.className).trim().replace(/\s+/g, '.')}` : ''}`,
+          left: Math.round(rect.left),
+          right: Math.round(rect.right),
+          width: Math.round(rect.width),
+          scrollWidth: element.scrollWidth,
+          clientWidth: element.clientWidth,
+          text: (element.textContent ?? '').trim().replace(/\s+/g, ' ').slice(0, 80),
+        }
+      })
+      .filter((item) => item.right > viewportWidth + 1 || item.left < -1)
+      .sort((a, b) => b.right - a.right)
+      .slice(0, 20)
+
+    return {
+      pageOverflow: root.scrollWidth - viewportWidth,
+      viewportWidth,
+      rootScrollWidth: root.scrollWidth,
+      offenders,
+    }
+  })
+
+  expect(report.pageOverflow, JSON.stringify(report, null, 2)).toBeLessThanOrEqual(1)
 }
 
 test('preserves breadcrumb hierarchy, history, deep links, and focus', async ({ page }) => {
@@ -88,20 +116,20 @@ test('keeps documentation usable at mobile width and increased text size', async
   for (const path of ['/about', '/methodology', '/contact']) {
     await page.goto(path)
     await expect(page.locator('.sidebar')).toBeHidden()
-    await expect.poll(() => horizontalOverflow(page)).toBeLessThanOrEqual(1)
+    await expectNoHorizontalOverflow(page)
   }
 
   await page.goto('/about')
   await page.locator('.mobile-bottom-nav details').click()
   await page.locator('.mobile-more-panel').getByRole('link', { name: 'API', exact: true }).click()
   await expect(page.getByRole('heading', { level: 1, name: 'Read-only API' })).toBeVisible()
-  await expect.poll(() => horizontalOverflow(page)).toBeLessThanOrEqual(1)
+  await expectNoHorizontalOverflow(page)
 
   await page.setViewportSize({ width: 1280, height: 900 })
   await page.goto('/methodology')
   await page.evaluate(() => { document.documentElement.style.fontSize = '200%' })
   await expect(page.getByRole('heading', { level: 1, name: 'Methodology' })).toBeVisible()
-  await expect.poll(() => horizontalOverflow(page)).toBeLessThanOrEqual(1)
+  await expectNoHorizontalOverflow(page)
 })
 
 test('does not expose unsupported financial or write controls', async ({ page }) => {
