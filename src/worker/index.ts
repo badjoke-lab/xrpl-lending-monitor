@@ -353,7 +353,7 @@ app.get('/api/feeds/activity.ndjson', async (context) => {
 })
 
 app.get(['/api', '/api/'], (context) => {
-  return context.env.ASSETS.fetch(new URL('/', context.req.url))
+  return context.env.ASSETS.fetch(new URL('/', context.req.url).toString())
 })
 
 app.onError((_error, context) => {
