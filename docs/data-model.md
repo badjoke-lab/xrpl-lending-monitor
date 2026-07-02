@@ -84,6 +84,8 @@ Sparse object snapshots written only when state changes.
 
 Final state, creation and deletion ledgers and transactions, deletion reason, relationships, and archive timestamp.
 
+Archived objects are written only from DeletedNode evidence for Vault, LoanBroker, and Loan objects. The final state is retained as normalized JSON, relationships remain queryable, and deletion reason is specific only when the transaction type directly supports it; otherwise it is `unknown`.
+
 ### `loan_lifecycle_events`
 
 Ordered Loan events with transaction identity, close time, status before and after, schedule status, amounts, and normalized details.

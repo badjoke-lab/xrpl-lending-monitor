@@ -55,12 +55,22 @@ interface StoredLifecycleEvent {
   statusAfter: string
 }
 
+interface StoredArchive {
+  network: string
+  epochId: string
+  objectType: string
+  objectId: string
+  deletionReason: string
+  finalStateJson: string
+}
+
 interface DatabaseState {
   cursor: CursorRow | null
   processedLedgers: StoredLedger[]
   protocolEvents: StoredEvent[]
   objectChanges: StoredObjectChange[]
   lifecycleEvents: StoredLifecycleEvent[]
+  archives: StoredArchive[]
   guards: string[]
 }
 
@@ -71,6 +81,7 @@ function cloneState(state: DatabaseState): DatabaseState {
     protocolEvents: state.protocolEvents.map((item) => ({ ...item })),
     objectChanges: state.objectChanges.map((item) => ({ ...item })),
     lifecycleEvents: state.lifecycleEvents.map((item) => ({ ...item })),
+    archives: state.archives.map((item) => ({ ...item })),
     guards: [...state.guards],
   }
 }
@@ -83,6 +94,7 @@ function fakeDatabase(options: {
   protocolEvents?: StoredEvent[]
   objectChanges?: StoredObjectChange[]
   lifecycleEvents?: StoredLifecycleEvent[]
+  archives?: StoredArchive[]
 }) {
   const statements: StatementRecord[] = []
   const batches: number[][] = []
@@ -92,6 +104,7 @@ function fakeDatabase(options: {
     protocolEvents: options.protocolEvents ?? [],
     objectChanges: options.objectChanges ?? [],
     lifecycleEvents: options.lifecycleEvents ?? [],
+    archives: options.archives ?? [],
     guards: [],
   }
   const db = {
@@ -124,6 +137,7 @@ function fakeDatabase(options: {
       state.protocolEvents = draft.protocolEvents
       state.objectChanges = draft.objectChanges
       state.lifecycleEvents = draft.lifecycleEvents
+      state.archives = draft.archives
       state.guards = draft.guards
       batches.push(items.map((item) => item.__index ?? -1))
       return []
@@ -333,6 +347,40 @@ function applyStatement(
     return
   }
 
+  if (statement.sql.includes('INSERT INTO archived_objects')) {
+    const [network, epochId, objectType, objectId, , , , , deletionReason, finalStateJson] =
+      statement.values
+    if (
+      typeof network !== 'string' ||
+      typeof epochId !== 'string' ||
+      typeof objectType !== 'string' ||
+      typeof objectId !== 'string' ||
+      typeof deletionReason !== 'string' ||
+      typeof finalStateJson !== 'string'
+    ) {
+      throw new Error('Invalid archived object bind values')
+    }
+    if (
+      !state.archives.some(
+        (item) =>
+          item.network === network &&
+          item.epochId === epochId &&
+          item.objectType === objectType &&
+          item.objectId === objectId,
+      )
+    ) {
+      state.archives.push({
+        network,
+        epochId,
+        objectType,
+        objectId,
+        deletionReason,
+        finalStateJson,
+      })
+    }
+    return
+  }
+
   if (statement.sql.includes('UPDATE sync_state')) {
     const [ledgerIndex, ledgerHash, , , epochId, expectedLedger, expectedHash] = statement.values
     if (
@@ -365,6 +413,55 @@ function applyStatement(
   }
 
   throw new Error(`Unhandled statement: ${statement.sql}`)
+}
+
+function deletedLoanScan(): IncrementalScanResult {
+  const baseScan = scan()
+  const transaction = {
+    hash: 'D'.repeat(64),
+    transactionType: 'LoanDelete',
+    account: 'rAccount',
+    sequence: 8,
+    fee: '10',
+    result: 'tesSUCCESS',
+    transactionIndex: 2,
+    transaction: { TransactionType: 'LoanDelete' },
+    metadata: {
+      TransactionResult: 'tesSUCCESS',
+      TransactionIndex: 2,
+      AffectedNodes: [
+        {
+          DeletedNode: {
+            LedgerEntryType: 'Loan',
+            LedgerIndex: 'L'.repeat(64),
+            FinalFields: {
+              Flags: 0,
+              LoanBrokerID: 'B'.repeat(64),
+              PaymentRemaining: 0,
+              TotalValueOutstanding: '0',
+            },
+          },
+        },
+      ],
+    },
+  }
+  return {
+    ...baseScan,
+    ledgers: [
+      {
+        ...baseScan.ledgers[0]!,
+        transactions: [transaction],
+        lendingTransactions: [transaction],
+      },
+      baseScan.ledgers[1]!,
+    ],
+    metrics: {
+      ledgers: 2,
+      inspectedTransactions: 1,
+      lendingTransactions: 1,
+      elapsedMs: 20,
+    },
+  }
 }
 
 function scan(): IncrementalScanResult {
@@ -492,7 +589,25 @@ describe('commitIncrementalScan', () => {
       loanId: 'L'.repeat(64),
       eventType: 'payment',
     })
+    expect(state.state.archives).toHaveLength(0)
     expect(state.state.guards).toEqual([])
+  })
+
+  it('archives deleted objects in the guarded batch', async () => {
+    const state = fakeDatabase({ cursor: before })
+
+    await expect(commitWith(state, { scan: deletedLoanScan() })).resolves.toBe('committed')
+    expect(state.state.archives).toEqual([
+      {
+        network: 'devnet',
+        epochId: 'epoch-1',
+        objectType: 'Loan',
+        objectId: 'L'.repeat(64),
+        deletionReason: 'loan_delete',
+        finalStateJson:
+          '{"Flags":0,"LoanBrokerID":"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB","PaymentRemaining":0,"TotalValueOutstanding":"0"}',
+      },
+    ])
   })
 
   it('stores no source payload when retention is disabled', async () => {
@@ -515,6 +630,7 @@ describe('commitIncrementalScan', () => {
     expect(state.state.protocolEvents).toHaveLength(0)
     expect(state.state.objectChanges).toHaveLength(0)
     expect(state.state.lifecycleEvents).toHaveLength(0)
+    expect(state.state.archives).toHaveLength(0)
   })
 
   it('rolls back processed ledgers and protocol events when the cursor changes inside the batch', async () => {
@@ -533,6 +649,7 @@ describe('commitIncrementalScan', () => {
     expect(state.state.protocolEvents).toHaveLength(0)
     expect(state.state.objectChanges).toHaveLength(0)
     expect(state.state.lifecycleEvents).toHaveLength(0)
+    expect(state.state.archives).toHaveLength(0)
     expect(state.state.guards).toEqual([])
   })
 

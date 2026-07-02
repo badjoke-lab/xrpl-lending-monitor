@@ -1,6 +1,7 @@
 import type { IncrementalScanResult } from '../../collector/incremental/scan-validated-ledgers'
 import { normalizeAffectedNodes } from '../../collector/incremental/affected-nodes'
 import { deriveLoanLifecycleEvents } from '../../collector/incremental/loan-lifecycle'
+import { deriveArchivedObjects } from '../../collector/incremental/deleted-object-archive'
 
 interface CursorRow {
   epoch_id: string | null
@@ -169,6 +170,7 @@ export async function commitIncrementalScan(options: {
         result: event.result,
       })
       const lifecycleEvents = deriveLoanLifecycleEvents(objectChanges)
+      const archivedObjects = deriveArchivedObjects(objectChanges)
       statements.push(
         options.db
           .prepare(
@@ -288,6 +290,47 @@ export async function commitIncrementalScan(options: {
               lifecycleEvent.paymentRemainingBefore,
               lifecycleEvent.paymentRemainingAfter,
               lifecycleEvent.detailsJson,
+              options.processedAt,
+            ),
+        )
+      }
+
+      for (const archivedObject of archivedObjects) {
+        statements.push(
+          options.db
+            .prepare(
+              `INSERT INTO archived_objects (
+                 network, epoch_id, object_type, object_id, deletion_transaction_hash,
+                 deletion_ledger_index, deletion_transaction_index, deletion_close_time,
+                 deletion_reason, final_state_json, vault_id, loan_broker_id, loan_id,
+                 owner, account, borrower, asset_key, archived_at
+               ) VALUES (
+                 ?1, ?2, ?3, ?4, ?5,
+                 ?6, ?7, ?8,
+                 ?9, ?10, ?11, ?12, ?13,
+                 ?14, ?15, ?16, ?17, ?18
+               )
+               ON CONFLICT(network, epoch_id, object_type, object_id)
+               DO NOTHING`,
+            )
+            .bind(
+              archivedObject.network,
+              archivedObject.epochId,
+              archivedObject.objectType,
+              archivedObject.objectId,
+              archivedObject.deletionTransactionHash,
+              archivedObject.deletionLedgerIndex,
+              archivedObject.deletionTransactionIndex,
+              archivedObject.deletionCloseTime,
+              archivedObject.deletionReason,
+              archivedObject.finalStateJson,
+              archivedObject.vaultId,
+              archivedObject.loanBrokerId,
+              archivedObject.loanId,
+              archivedObject.owner,
+              archivedObject.account,
+              archivedObject.borrower,
+              archivedObject.assetKey,
               options.processedAt,
             ),
         )
