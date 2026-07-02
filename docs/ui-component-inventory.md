@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This document defines reusable UI components, their responsibilities, required states, and milestone ownership. Components are contracts, not permission to introduce a design-system dependency. The initial implementation should use the existing React/Vite stack and ordinary CSS unless a separate decision approves otherwise.
+This document defines reusable UI components, responsibilities, required states, and milestone ownership. Components are contracts, not permission to add a design-system dependency.
 
 ## Application structure
 
@@ -12,22 +12,13 @@ Responsibilities:
 
 - desktop sidebar;
 - mobile app bar and navigation;
-- persistent network-context region;
+- persistent network context;
 - main content landmark;
 - route title, breadcrumbs, and page actions;
 - footer;
 - skip link and focus management.
 
-Required states:
-
-- desktop;
-- tablet;
-- mobile;
-- network context available;
-- network context stale;
-- network context unavailable.
-
-Milestone: M4-1.
+Required states: desktop, tablet, mobile, network available, network stale, and network unavailable.
 
 ### `Sidebar`
 
@@ -35,28 +26,20 @@ Responsibilities:
 
 - Monitor, Audit, System, and Project groups;
 - current-route state;
-- repository, issue, and optional support links;
-- collapsed behavior only if it remains accessible and understandable.
+- repository and issue links;
+- accessible collapsed behavior when used.
 
-Rules:
-
-- Support is omitted until enabled.
-- Unimplemented routes are hidden or clearly marked unavailable.
-- Active state is not conveyed by color alone.
-
-Milestone: M4-1, extended as routes ship.
+Unimplemented routes are hidden or clearly marked planned. Active state is not conveyed by color alone.
 
 ### `MobileNavigation`
 
 Responsibilities:
 
-- primary bottom navigation for Overview, Loans, Activity, Search, and More;
-- More menu containing all remaining routes;
+- bottom navigation for Overview, Loans, Activity, Search, and More;
+- More menu for remaining routes;
 - current route and group indication;
 - safe-area handling;
 - keyboard and screen-reader support.
-
-Milestone: M4-1.
 
 ### `NetworkContextBar`
 
@@ -68,63 +51,55 @@ Responsibilities:
 - data age;
 - collector status;
 - stale or reset warning;
-- link to Network Status.
+- Network Status link.
 
-It must never imply Mainnet or current data when context is unavailable.
-
-Milestone: M4-1.
+It never implies Mainnet or current data when context is unavailable.
 
 ## Navigation and utility components
 
 ### `Breadcrumbs`
 
 - route-backed links;
-- concise identifiers;
+- concise visual identifiers with complete accessible values;
 - current page marked with `aria-current`;
-- horizontal overflow handling on mobile.
+- mobile overflow handling.
 
 ### `PageHeader`
 
 - title;
-- short description;
+- description;
 - status badges;
-- context actions such as export or API link;
-- no write or wallet controls.
+- read-oriented actions such as export or API links;
+- no wallet or write controls.
 
 ### `SectionNavigation`
 
-Used for documentation tables of contents and entity-detail subviews. Supports stable anchors and active-section indication.
+Used for documentation contents and entity subviews. Supports stable anchors and active-section indication.
 
 ### `ExternalLink`
 
-- external-link icon and accessible label;
-- configurable new-tab behavior;
-- no placeholder URL;
-- safe `rel` values where needed.
+- accessible external-link label;
+- safe target and `rel` behavior;
+- no placeholder destination.
 
 ### `CopyValue`
 
-For accounts, object IDs, transaction hashes, issuance IDs, and support addresses.
+For accounts, object IDs, transaction hashes, issuance IDs, and other exact identifiers.
 
 Required behavior:
 
-- visual truncation without truncating copied content;
+- visual truncation without changing copied content;
 - explicit copy label;
 - accessible success message;
-- no copying of hidden placeholder values.
+- no hidden placeholder value.
 
 ## Data display components
 
 ### `MetricCard`
 
-- label;
-- value;
-- unit;
-- supporting context;
-- provenance;
-- loading, unavailable, stale, and error states.
-
-A missing metric is not rendered as zero.
+- label, value, unit, context, and provenance;
+- loading, unavailable, stale, and error states;
+- missing values are never rendered as zero.
 
 ### `StatusBadge`
 
@@ -137,7 +112,7 @@ Semantic variants:
 - archived;
 - unavailable.
 
-On-ledger and schedule status badges are separate component instances with explicit labels.
+On-ledger and schedule states are separate labelled instances.
 
 ### `ProvenanceBadge`
 
@@ -148,11 +123,11 @@ Canonical variants:
 - Indexed;
 - Unavailable.
 
-It may open a tooltip or field-detail explanation. Derived values link to formula documentation where practical.
+Derived values link to formulas where practical.
 
 ### `DefinitionList`
 
-For key/value facts in Network Status, entity summaries, archive metadata, and project pages. Supports long values and grouped provenance.
+For key/value facts in operational, entity, archive, and project pages. Supports long values and grouped provenance.
 
 ### `DataTable`
 
@@ -163,9 +138,9 @@ Responsibilities:
 - row links and optional row selection;
 - long-value handling;
 - loading, empty, unavailable, stale, partial, and error states;
-- mobile transformation strategy defined per table.
+- declared mobile transformation strategy.
 
-No generic table may silently add USD columns, cross-asset totals, or unsupported filters.
+A generic table never adds unsupported fiat columns, cross-asset totals, or filters.
 
 ### `FilterBar`
 
@@ -178,118 +153,95 @@ No generic table may silently add USD columns, cross-asset totals, or unsupporte
 
 ### `Pagination`
 
-- API contract-aligned limits and cursors;
-- previous/next and result context;
-- no fake page count when cursor pagination cannot provide one.
+- API-aligned limits and cursors;
+- Previous and Next controls;
+- result context;
+- no invented page count.
 
 ### `IdentifierLink`
 
-- type-aware link to Vault, Loan Broker, Loan, account, transaction, issuance, or archive;
-- truncated visual display;
-- full accessible value;
+- type-aware links to Vault, Loan Broker, Loan, account, transaction, issuance, or archive;
+- truncated visual display with complete accessible value;
 - copy action where useful.
 
 ### `AssetIdentity`
 
 - XRP, IOU currency plus issuer, or MPT issuance identity;
-- no unsupported symbol substitution;
-- exact unit displayed beside amounts;
-- no fiat price unless separately approved.
+- exact unit beside amounts;
+- no unsupported symbol substitution or fiat price.
 
 ## State components
 
 ### `LoadingState`
 
-- skeleton or message appropriate to the component;
-- no misleading stale value without stale labeling.
+Appropriate skeleton or message. Previous values are not shown as current without stale labelling.
 
 ### `EmptyState`
 
-- successful request with no records;
-- explains current filters and scope;
-- offers safe filter reset where appropriate.
+Successful request with no matching records. Explains active scope or filters and may offer reset.
 
 ### `UnavailableState`
 
-- explicit reason;
-- distinguishes unsupported, uncollected, and pre-activation conditions;
-- may link to Network Status or Methodology.
+Shows an explicit reason and distinguishes unsupported, uncollected, and pre-activation conditions.
 
 ### `StaleWarning`
 
-- displays age, threshold, and last success;
-- does not remove last known values;
-- links to Network Status.
+Shows age, threshold, and last success while preserving safe last-known values.
 
 ### `ErrorState`
 
-- public-safe error message;
-- retry control where appropriate;
-- no stack trace or secret;
-- component-level use for partial page failure.
+Shows a public-safe message and bounded retry control. It exposes no internal diagnostic detail.
 
 ### `ArchiveBanner`
 
-- explains that the object is deleted from current state and preserved in history;
-- shows epoch and deletion context;
-- does not classify cause without evidence.
+Explains that an object is absent from current state and preserved in history. It does not infer cause.
 
 ### `DevnetNotice`
 
-- explains reset possibility;
-- links to epoch history;
-- distinguishes Devnet monitoring from optional Mainnet support payments.
+Explains reset possibility, links to epoch history, and never implies Mainnet data.
 
 ## Monitoring components
 
 ### `OverviewMetrics`
 
-Uses API-supported counts and availability only.
+Uses only API-supported counts and availability.
 
 ### `CollectorHealthPanel`
 
-- collector status;
-- validated and processed ledger;
-- lag;
-- last attempt and success;
-- failure count;
-- error summary.
+Shows collector status, validated and processed ledgers, lag, attempts, success time, failure count, and safe error summary when supported.
 
 ### `AmendmentStatusPanel`
 
-Shows enabled and supported states independently where API-supported.
+Shows enabled and supported states independently.
 
 ### `ActivityPreview`
 
-- bounded recent records;
-- ledger, type, result, transaction hash;
-- route to full Activity and Transaction detail;
-- explicit no-data and unavailable states.
+Shows bounded recent records and explicit empty or unavailable states.
 
 ### `RecentChangesPanel`
 
-May be introduced only when normalized change data is available through an approved API.
+May exist only when normalized changes are available through an approved API.
 
 ## Entity components
 
 ### `EntitySummaryHeader`
 
 - type and identifier;
-- current/archive state;
+- current or archived state;
 - network, epoch, ledger, and update time;
-- primary related entities;
+- primary relationships;
 - copy controls.
 
 ### `RelatedEntitiesPanel`
 
 - relationship type;
 - identifier;
-- current/archive context;
+- current or archived context;
 - explicit missing relationship.
 
 ### `HistorySeries`
 
-- exact unit and asset identity;
+- exact asset and unit;
 - time or ledger axis;
 - provenance;
 - accessible table or summary;
@@ -298,76 +250,61 @@ May be introduced only when normalized change data is available through an appro
 ### `LifecycleTimeline`
 
 - canonical event order;
-- ledger, transaction, time, event type, and provenance;
-- explicit gaps and unavailable values;
+- ledger, transaction, time, type, and provenance;
+- explicit gaps;
 - no inferred event.
 
 ### `StateChangeDiff`
 
 - field;
-- before;
-- after;
+- before and after values;
 - action;
 - ledger and transaction context;
 - raw versus normalized distinction.
 
 ### `RawDataPanel`
 
-- last in information hierarchy;
+- last in the information hierarchy;
 - monospace and copy support;
 - retained data only;
-- truncation and download rules aligned with API limits.
+- API-aligned truncation and download behavior.
 
 ## Documentation and project components
 
 ### `DocumentationLayout`
 
 - constrained reading width;
-- on-page table of contents;
+- on-page contents;
 - stable anchors;
-- previous/next section navigation where useful;
-- mobile collapsible contents;
-- same application identity with reduced density.
+- previous or next section navigation where useful;
+- collapsible contents on mobile;
+- reduced density within the same application identity.
 
 ### `ContactOptionCard`
 
 Variants:
 
-- private/general Google Form;
+- general/private configured form;
 - public GitHub Issue.
 
 Required behavior:
 
 - describes appropriate use;
-- warns about public disclosure for GitHub Issues;
+- warns about public disclosure for Issues;
 - handles missing configuration explicitly.
-
-### `SupportAddressPanel`
-
-Disabled by default. When enabled, it includes:
-
-- approved address;
-- network;
-- accepted asset;
-- destination-tag instruction;
-- copy control;
-- QR code;
-- voluntary/no-entitlement disclosure;
-- explicit Devnet-monitor versus Mainnet-payment distinction.
-
-It must never appear inside monitoring data panels.
 
 ### `MethodologySection`
 
 - stable anchor;
-- summary;
-- detailed explanation;
+- summary and detailed explanation;
 - formula or algorithm where relevant;
 - evidence, limitation, and source links.
 
-## Component testing expectations
+Funding, donation, payment, and promotional components are outside the current release scope.
 
-Each reusable component must be tested for the states it owns. At minimum:
+## Testing expectations
+
+Each reusable component is tested for the states it owns. At minimum cover:
 
 - keyboard focus;
 - accessible name or landmark;
@@ -378,6 +315,6 @@ Each reusable component must be tested for the states it owns. At minimum:
 - narrow viewport;
 - no unsupported value invention.
 
-## Component change control
+## Change control
 
-A component may be added, renamed, or merged during implementation, but its responsibilities and state coverage must remain represented. Material changes require updates to this document and the relevant page specification.
+A component may be added, renamed, or merged during implementation, but its responsibilities and state coverage remain represented. Material changes require updates to this document and the relevant page specification.
