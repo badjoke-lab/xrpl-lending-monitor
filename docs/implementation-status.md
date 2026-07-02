@@ -4,7 +4,7 @@ Last updated: 2026-07-02.
 
 ## Current milestone
 
-**M1 closeout** and **M4-4 — verified Loan reader dependency**.
+**M1 closeout** and **M4-4 — Loan API dependency and Loan UI**.
 
 M0, M2, M3, M4-0, M4-1, M4-2, and M4-3 are complete. M1 still requires an approved preview environment, complete bootstrap, verification, activation, rollback, cleanup, and resource evidence.
 
@@ -14,19 +14,90 @@ Latest merged work:
 
 - PR #26: `Add Loan Broker monitor UI`;
 - squash merge: `0da8174f07dc0df2464594cc284d21d9d5721861`;
-- final CI run: `28572040522`;
-- result: all required `quality` checks passed.
+- PR #27: `Align current product scope and advance M4-4`;
+- squash merge: `35137cd3cfd6d4dc2113d9279bd83c9cba1a5cd7`.
 
-No implementation branch remains active after PR #26.
+Active implementation:
+
+- branch: `api/current-state-loan-reader`;
+- PR #28: `Add verified current Loan API reads`;
+- first validation run identified and corrected a fixture expectation about cached relationship shards;
+- corrected reader tests passed lint, type-check, unit tests, local migrations, production build, and browser tests;
+- an additional Loan serialization contract test is now included and awaits the final required CI run.
+
+## Completed in active M4-4 API unit
+
+### Verified current-state reader
+
+Implemented:
+
+- bounded opaque-cursor Loan pagination;
+- ascending and descending Loan ID ordering;
+- factual query over Loan ID, Loan Broker ID, and Borrower;
+- direct on-ledger status filtering;
+- separately derived schedule-status filtering;
+- bounded Loan-shard reads;
+- same-snapshot Loan to Loan Broker to Vault relationship resolution;
+- canonical Vault asset attached to every Loan amount;
+- relationship shard caching and explicit read limits;
+- fail-closed behavior for missing, inconsistent, outside-manifest, or over-limit relationships;
+- digest verification through the existing manifest and shard reader.
+
+### Status model
+
+Implemented canonical schedule boundaries using a recorded Ripple-epoch evaluation time:
+
+- before `NextPaymentDueDate`: `current`;
+- at the due time and before due time plus grace period: `payment_due`;
+- at or after due time plus grace period: `default_eligible`;
+- zero remaining payments: `complete`;
+- invalid or unavailable schedule inputs: `unknown`.
+
+Schedule status never changes or replaces the direct on-ledger status.
+
+### API routes
+
+Implemented:
+
+- `GET /api/loans`;
+- `GET /api/loans/:loanId`.
+
+Responses include:
+
+- exact Loan balances, fees, rates, terms, dates, sequence, flags, and previous transaction facts;
+- raw Ripple-epoch values and UTC timestamps;
+- separate `on_ledger_status` and `schedule_status`;
+- the fields and evaluation time used for schedule derivation;
+- related Loan Broker and Vault identities;
+- canonical asset identity;
+- direct and derived provenance;
+- explicit unavailable, invalid, not-found, and current-state integrity errors.
+
+### Tests
+
+Added fixture and contract coverage for:
+
+- Loan pagination;
+- cursor continuation;
+- same-snapshot Broker and Vault resolution;
+- canonical asset identity;
+- exact due and grace boundaries;
+- completed Loan schedules;
+- direct detail lookup;
+- relationship read limits;
+- exact serialized amounts;
+- independent on-ledger and schedule states;
+- raw data only on detail output.
 
 ## Immediate work
 
-1. define the verified current-state Loan list and detail read contract;
-2. implement bounded Loan shard reads and same-snapshot Loan Broker and Vault relationship resolution;
-3. expose Loan list and detail API routes with exact asset values, separate on-ledger and schedule states, and explicit unavailable behavior;
-4. implement and validate the M4-4 Loan list and detail UI after the reader dependency is complete.
+1. complete the final required CI run for PR #28;
+2. merge PR #28 only if all required checks pass;
+3. begin the M4-4 Loan list and detail UI from the merged Loan API contract;
+4. add responsive, unavailable-state, relationship-navigation, and browser coverage;
+5. update this document with the exact UI branch, pull request, and validation evidence.
 
-The first incomplete action is the M4-4 current-state Loan reader contract and dependency review.
+The first incomplete action is final validation and merge of PR #28.
 
 ## Completed M4-3 API and UI
 
@@ -40,103 +111,33 @@ Available UI routes:
 - `/loan-brokers`;
 - `/loan-brokers/:brokerId`.
 
-The verified read layer provides bounded cursor pagination, ID sorting, factual query, direct Broker fields, related Vault identity, canonical asset identity, and exact debt and cover derivations.
+The verified read layer provides bounded cursor pagination, ID sorting, factual query, direct Broker fields, related Vault identity, canonical asset identity, exact debt and cover derivations, and fail-closed relationship behavior.
 
-Every Broker quantity is paired with the related Vault asset in the same active snapshot. Missing, inconsistent, or over-limit relationships fail closed. Without an active snapshot or storage binding, the API and UI return explicit unavailable state.
-
-### Loan Broker list
-
-Implemented:
-
-- active desktop sidebar and mobile More navigation;
-- factual search over Broker ID, Vault ID, owner, and pseudo-account;
-- Broker ID ascending and descending order;
-- bounded opaque-cursor Previous and Next navigation;
-- active snapshot and ledger context;
-- Broker ID, owner, and canonical related-Vault asset;
-- DebtTotal and optional DebtMaximum;
-- debt utilization;
-- CoverAvailable;
-- required minimum cover;
-- cover surplus or explicit shortfall;
-- direct related Vault navigation;
-- Broker-shard, relationship-shard, and object-examination counts;
-- loading, empty, unavailable, and request-error states;
-- no inferred Loan count, impairment state, risk score, fiat value, or cross-asset total.
-
-### Loan Broker detail
-
-Implemented:
-
-- 64-character hexadecimal route matching;
-- breadcrumbs and active navigation;
-- asset, debt utilization, available cover, and surplus or shortfall summary cards;
-- direct owner, pseudo-account, sequences, owner count, management fee rate, flags, previous transaction, and previous ledger fields;
-- exact debt, maximum debt, cover, required cover, surplus or shortfall, and cover-ratio values;
-- minimum and liquidation cover-rate facts;
-- formulas and derived provenance;
-- direct related Vault card and navigation;
-- explicit unavailable Loan book and history panel rather than inferred counts or states;
-- raw decoded Broker object after the human-readable summary.
-
-### Responsive and shared behavior
-
-Implemented:
-
-- desktop filter grid and wide Broker table;
-- tablet filter and summary-card reflow;
-- mobile single-column filters and summary cards;
-- dedicated table overflow rather than page-level horizontal scrolling;
-- shortfall-specific factual warning treatment with text labels;
-- related Vault card reflow;
-- Loan Broker API response types;
-- list and detail routes in the existing History API router;
-- active sidebar state for Broker detail routes;
-- dedicated Broker stylesheet.
-
-## M4-3 validation
-
-PR #26 passed:
-
-- dependency installation;
-- lint;
-- TypeScript type-check;
-- full unit test suite;
-- all local D1 migrations;
-- production build;
-- Chromium installation;
-- all existing Overview, Network Status, and Vault browser tests;
-- three Loan Broker browser tests.
-
-The browser tests cover:
-
-1. available Broker collection, exact debt and cover facts, absence of USD output, detail navigation, raw data, direct Vault link, and explicit Loan book/history unavailability;
-2. missing-snapshot unavailable state and factual query/order request parameters;
-3. narrow mobile layout and Loan Broker navigation through the More menu.
-
-No collector, migration, Cloudflare configuration, remote resource, deployment, Mainnet, wallet, signing, transaction submission, or public-write behavior changed in PR #26.
+The UI provides responsive list and detail routes, direct Vault navigation, formula provenance, raw Broker data, and explicit unavailable Loan-book and history panels. PR #26 passed the full required quality workflow, including three Loan Broker browser tests.
 
 ## Known open questions
 
 | Question | Evidence | Point |
 |---|---|---|
 | Failed bootstrap prefix retention | Preview cleanup and rollback measurements | M1 closeout |
-| Broker shard-cap tuning | Real preview density and response measurements | M1 preview / M6 |
-| Current Loan counts by Broker | Verified Loan reader and bounded relationship resolution | M4-4 |
-| Broker activity and history panels | Indexed history APIs and M5 audit integration | M4-5 / M5 |
+| Broker and Loan shard-cap tuning | Real preview density and response measurements | M1 preview / M6 |
+| Current Loan counts by Broker | Bounded aggregation or indexed relationship API | Later M4 / M5 |
+| Broker and Loan history panels | Indexed history APIs and audit integration | M4-5 / M5 |
 | Contact URLs | Explicit configuration approval | M4-6 |
 
 ## Active prohibitions
 
 - no unlabeled quantity;
-- no inferred Loan count, impairment, default, or risk state;
+- no inferred impairment, default, credit, safety, or risk state;
+- no schedule eligibility presented as on-ledger default;
 - no cross-snapshot relationship;
 - no unavailable-data-to-zero substitution;
-- no USD conversion, price feed, cross-asset total, or proprietary risk score;
+- no USD conversion, price feed, cross-asset total, or proprietary score;
+- no funding, donation, payment, or promotional surface in the current release;
 - no remote infrastructure change, deployment, Mainnet, wallet, signing, transaction submission, or public write operation.
 
 ## Current blockers
 
-No code blocker prevents beginning M4-4.
+No code blocker prevents completing M4-4.
 
-Real public current-state data still requires an approved `CURRENT_STATE` binding and a complete verified active snapshot. The UI exposes that absence explicitly.
+Real public current-state data still requires an approved `CURRENT_STATE` binding and a complete verified active snapshot. The API and UI expose that absence explicitly.
