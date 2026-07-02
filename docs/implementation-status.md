@@ -4,49 +4,47 @@ Last updated: 2026-07-02.
 
 ## Current milestone
 
-**M1 closeout** and **M4-3 — Loan Broker UI**.
+**M1 closeout** and **M4-4 — verified Loan reader dependency**.
 
-M0, M2, M3, M4-0, M4-1, and M4-2 are complete. The verified current-state Loan Broker read dependency is complete. M1 still requires an approved preview environment, complete bootstrap, verification, activation, rollback, cleanup, and resource evidence.
+M0, M2, M3, M4-0, M4-1, M4-2, and M4-3 are complete. M1 still requires an approved preview environment, complete bootstrap, verification, activation, rollback, cleanup, and resource evidence.
 
 ## Canonical continuation point
 
-Merged dependency:
-
-- PR #25: `Add verified Loan Broker API reads`;
-- squash merge: `1051d667d87da432de1d26172fadf9fada3ae2e9`.
-
-Active M4-3 work:
+Latest merged work:
 
 - PR #26: `Add Loan Broker monitor UI`;
-- branch: `ui/loan-broker-monitor`;
-- base: `main` at `1051d667d87da432de1d26172fadf9fada3ae2e9`;
-- validated implementation head before this status-only commit: `1e773e93f32ccb7773e3bfe0b01f107c8fb6f3ec`;
-- CI run: `28571871332`;
-- result: all `quality` steps passed.
+- squash merge: `0da8174f07dc0df2464594cc284d21d9d5721861`;
+- final CI run: `28572040522`;
+- result: all required `quality` checks passed.
+
+No implementation branch remains active after PR #26.
 
 ## Immediate work
 
-1. allow CI to rerun for this validation-only status commit;
-2. confirm PR #26 remains current, mergeable, and free of unresolved findings;
-3. merge after the final required check passes;
-4. begin the M4-4 verified Loan reader dependency and Loan UI from updated `main`.
+1. define the verified current-state Loan list and detail read contract;
+2. implement bounded Loan shard reads and same-snapshot Loan Broker and Vault relationship resolution;
+3. expose Loan list and detail API routes with exact asset values, separate on-ledger and schedule states, and explicit unavailable behavior;
+4. implement and validate the M4-4 Loan list and detail UI after the reader dependency is complete.
 
-The first incomplete action is confirming the final PR #26 check and merge state.
+The first incomplete action is the M4-4 current-state Loan reader contract and dependency review.
 
-## Completed API dependency
+## Completed M4-3 API and UI
 
-Available routes:
+Available API routes:
 
 - `GET /api/loan-brokers`;
 - `GET /api/loan-brokers/:brokerId`.
 
+Available UI routes:
+
+- `/loan-brokers`;
+- `/loan-brokers/:brokerId`.
+
 The verified read layer provides bounded cursor pagination, ID sorting, factual query, direct Broker fields, related Vault identity, canonical asset identity, and exact debt and cover derivations.
 
-Every Broker quantity is paired with the related Vault asset in the same active snapshot. Missing, inconsistent, or over-limit relationships fail closed. Without an active snapshot or storage binding, the API returns explicit unavailable state.
+Every Broker quantity is paired with the related Vault asset in the same active snapshot. Missing, inconsistent, or over-limit relationships fail closed. Without an active snapshot or storage binding, the API and UI return explicit unavailable state.
 
-## M4-3 implementation
-
-### Loan Broker list — `/loan-brokers`
+### Loan Broker list
 
 Implemented:
 
@@ -55,8 +53,7 @@ Implemented:
 - Broker ID ascending and descending order;
 - bounded opaque-cursor Previous and Next navigation;
 - active snapshot and ledger context;
-- Broker ID and owner;
-- canonical asset inherited from the verified related Vault;
+- Broker ID, owner, and canonical related-Vault asset;
 - DebtTotal and optional DebtMaximum;
 - debt utilization;
 - CoverAvailable;
@@ -65,17 +62,17 @@ Implemented:
 - direct related Vault navigation;
 - Broker-shard, relationship-shard, and object-examination counts;
 - loading, empty, unavailable, and request-error states;
-- no Loan count, impairment state, risk score, fiat value, or cross-asset total without supporting API data.
+- no inferred Loan count, impairment state, risk score, fiat value, or cross-asset total.
 
-### Loan Broker detail — `/loan-brokers/:brokerId`
+### Loan Broker detail
 
 Implemented:
 
 - 64-character hexadecimal route matching;
 - breadcrumbs and active navigation;
-- asset, debt utilization, available cover, and surplus/shortfall summary cards;
+- asset, debt utilization, available cover, and surplus or shortfall summary cards;
 - direct owner, pseudo-account, sequences, owner count, management fee rate, flags, previous transaction, and previous ledger fields;
-- exact debt, maximum debt, cover, required cover, surplus/shortfall, and cover ratio values;
+- exact debt, maximum debt, cover, required cover, surplus or shortfall, and cover-ratio values;
 - minimum and liquidation cover-rate facts;
 - formulas and derived provenance;
 - direct related Vault card and navigation;
@@ -99,7 +96,7 @@ Implemented:
 
 ## M4-3 validation
 
-PR #26 CI run `28571871332`, job `quality`, passed:
+PR #26 passed:
 
 - dependency installation;
 - lint;
@@ -109,17 +106,15 @@ PR #26 CI run `28571871332`, job `quality`, passed:
 - production build;
 - Chromium installation;
 - all existing Overview, Network Status, and Vault browser tests;
-- three new Loan Broker browser tests.
+- three Loan Broker browser tests.
 
-The new browser tests cover:
+The browser tests cover:
 
 1. available Broker collection, exact debt and cover facts, absence of USD output, detail navigation, raw data, direct Vault link, and explicit Loan book/history unavailability;
 2. missing-snapshot unavailable state and factual query/order request parameters;
 3. narrow mobile layout and Loan Broker navigation through the More menu.
 
-The first browser run exposed only a locator ambiguity because `Cover surplus` appears in both the summary and detailed definition. The assertion was scoped to the summary region and semantic headings; product behavior and coverage were not weakened.
-
-No collector, API, migration, Cloudflare configuration, remote resource, deployment, Mainnet, wallet, signing, transaction submission, or public-write behavior changed in PR #26.
+No collector, migration, Cloudflare configuration, remote resource, deployment, Mainnet, wallet, signing, transaction submission, or public-write behavior changed in PR #26.
 
 ## Known open questions
 
@@ -130,7 +125,6 @@ No collector, API, migration, Cloudflare configuration, remote resource, deploym
 | Current Loan counts by Broker | Verified Loan reader and bounded relationship resolution | M4-4 |
 | Broker activity and history panels | Indexed history APIs and M5 audit integration | M4-5 / M5 |
 | Contact URLs | Explicit configuration approval | M4-6 |
-| Initial Support enablement | Approved payment configuration and disclosures | M4-6 / Checkpoint D |
 
 ## Active prohibitions
 
@@ -143,6 +137,6 @@ No collector, API, migration, Cloudflare configuration, remote resource, deploym
 
 ## Current blockers
 
-No code blocker remains for M4-3.
+No code blocker prevents beginning M4-4.
 
-Real public Broker data still requires an approved `CURRENT_STATE` binding and a complete verified active snapshot. The UI exposes that absence explicitly.
+Real public current-state data still requires an approved `CURRENT_STATE` binding and a complete verified active snapshot. The UI exposes that absence explicitly.
