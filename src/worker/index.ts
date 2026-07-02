@@ -352,9 +352,13 @@ app.get('/api/feeds/activity.ndjson', async (context) => {
   })
 })
 
-app.get(['/api', '/api/'], (context) => {
-  return context.env.ASSETS.fetch(new URL('/', context.req.url).toString())
-})
+function serveApiDocumentation(context: Context<{ Bindings: Bindings }>) {
+  const assetUrl = new URL('/', context.req.url)
+  return context.env.ASSETS.fetch(new Request(assetUrl.toString()))
+}
+
+app.get('/api', serveApiDocumentation)
+app.get('/api/', serveApiDocumentation)
 
 app.onError((_error, context) => {
   if (context.req.path.startsWith('/api/')) {
