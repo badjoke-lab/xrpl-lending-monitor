@@ -21,14 +21,8 @@ export interface NetworkStatusResponse {
     latest_ledger_age_seconds: number | null
   }
   amendments: {
-    lending_protocol: {
-      enabled: boolean | null
-      supported: boolean | null
-    }
-    single_asset_vault: {
-      enabled: boolean | null
-      supported: boolean | null
-    }
+    lending_protocol: { enabled: boolean | null; supported: boolean | null }
+    single_asset_vault: { enabled: boolean | null; supported: boolean | null }
   }
   collector: {
     status: string
@@ -39,26 +33,22 @@ export interface NetworkStatusResponse {
     data_age_seconds: number | null
     consecutive_failures: number
     reset_reason: string | null
-    error: {
-      code: string
-      message: string
-    } | null
+    error: { code: string; message: string } | null
   }
+}
+
+export interface SnapshotSummary {
+  id: string
+  epoch_id: string
+  ledger_index: number
+  ledger_hash: string
+  completed_at: string | null
 }
 
 export interface OverviewResponse {
   network: 'devnet'
-  epoch: {
-    id: string
-    status: string
-  } | null
-  snapshot: {
-    id: string
-    epoch_id: string
-    ledger_index: number
-    ledger_hash: string
-    completed_at: string
-  } | null
+  epoch: { id: string; status: string } | null
+  snapshot: SnapshotSummary | null
   freshness: {
     collector_status: string
     latest_validated_ledger: number | null
@@ -71,10 +61,7 @@ export interface OverviewResponse {
     loans: number | null
     current_objects: number | null
   }
-  provenance: {
-    counts: Provenance
-    freshness: Provenance
-  }
+  provenance: { counts: Provenance; freshness: Provenance }
   unavailable: string[]
 }
 
@@ -94,10 +81,74 @@ export interface ActivityRecord {
 export interface ActivityResponse {
   network: 'devnet'
   data: ActivityRecord[]
+  page: { limit: number; next_cursor: null }
+}
+
+export interface CanonicalAssetResponse {
+  type: 'xrp' | 'iou' | 'mpt'
+  key: string
+  scale: number | null
+  symbol?: string
+  currency?: string
+  issuer?: string | null
+  label?: string
+  issuanceId?: string
+  ticker?: string | null
+  name?: string | null
+}
+
+export interface VaultRecord {
+  id: string
+  owner: string
+  account: string
+  asset: CanonicalAssetResponse
+  assets_total: string
+  assets_available: string
+  assets_maximum: string | null
+  loss_unrealized: string
+  share_mpt_id: string
+  domain_id: string | null
+  withdrawal_policy: number
+  scale: number
+  flags: number
+  previous_transaction_hash: string
+  previous_ledger_index: number
+  derived: {
+    used_assets: string | null
+    utilization_bps: number | null
+    formula: string
+    provenance: Provenance
+  }
+  provenance: { object: Provenance; derived: Provenance }
+  raw?: Record<string, unknown>
+}
+
+export interface VaultCollectionResponse {
+  network: 'devnet'
+  kind: 'vaults'
+  epoch: { id: string; status: string } | null
+  snapshot: SnapshotSummary | null
+  data: VaultRecord[]
   page: {
     limit: number
-    next_cursor: null
+    next_cursor: string | null
+    sort?: 'id_asc' | 'id_desc'
+    shards_read?: number
+    objects_examined?: number
   }
+  filters?: { query: string | null; has_loss: boolean | null }
+  availability: { state: 'available' | 'unavailable'; reason: string | null }
+  provenance: { collection: Provenance }
+}
+
+export interface VaultDetailResponse {
+  network: 'devnet'
+  kind: 'vault'
+  epoch: { id: string; status: string } | null
+  snapshot: SnapshotSummary | null
+  data: VaultRecord | null
+  availability: { state: 'available' | 'unavailable'; reason: string | null }
+  provenance: { object: Provenance }
 }
 
 export type ResourceState<T> =
