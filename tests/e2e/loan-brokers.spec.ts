@@ -115,9 +115,9 @@ test('renders Broker debt and cover facts and opens detail', async ({ page }) =>
 
   await page.locator('.broker-table').getByRole('link', { name: /B{8}/ }).click()
   await expect(page).toHaveURL(new RegExp(`/loan-brokers/${brokerId}$`))
-  await expect(page.getByText('Debt and first-loss cover')).toBeVisible()
-  await expect(page.getByText('Cover surplus')).toBeVisible()
-  await expect(page.getByText('Loan book and Broker history not yet available')).toBeVisible()
+  await expect(page.getByRole('heading', { level: 2, name: 'Debt and first-loss cover' })).toBeVisible()
+  await expect(page.locator('.broker-summary-grid').getByText('Cover surplus', { exact: true })).toBeVisible()
+  await expect(page.getByText('Loan book and Broker history not yet available', { exact: true })).toBeVisible()
   await expect(page.locator('.raw-data-panel')).toContainText('LoanBroker')
   await expect(page.getByRole('link', { name: 'Open Vault' })).toHaveAttribute('href', `/vaults/${vaultId}`)
 })
