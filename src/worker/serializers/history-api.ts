@@ -1,0 +1,190 @@
+import type {
+  LoanLifecycleRecord,
+  NetworkEpochApiRecord,
+  ObjectChangeRecord,
+  ProtocolEventRecord,
+  SearchResultRecord,
+} from '../repositories/history-api-repository'
+
+export interface HistoryPage {
+  limit: number
+  next_cursor: null
+}
+
+function page(limit: number): HistoryPage {
+  return { limit, next_cursor: null }
+}
+
+function serializeProtocolEvent(event: ProtocolEventRecord) {
+  return {
+    transaction_hash: event.eventHash,
+    epoch_id: event.epochId,
+    ledger_index: event.ledgerIndex,
+    event_index: event.eventIndex,
+    close_time: event.closeTime,
+    transaction_type: event.eventType,
+    result_code: event.resultCode,
+    payload_retained: event.payloadRetained,
+    source_json: event.sourceJson,
+    metadata_json: event.metadataJson,
+    created_at: event.createdAt,
+    provenance: 'indexed',
+  }
+}
+
+function serializeObjectChange(change: ObjectChangeRecord) {
+  return {
+    transaction_hash: change.transactionHash,
+    epoch_id: change.epochId,
+    ledger_index: change.ledgerIndex,
+    transaction_index: change.transactionIndex,
+    transaction_type: change.transactionType,
+    result_code: change.resultCode,
+    close_time: change.closeTime,
+    node_index: change.nodeIndex,
+    object_type: change.objectType,
+    object_id: change.objectId,
+    action: change.action,
+    field_name: change.fieldName,
+    before_json: change.beforeJson,
+    after_json: change.afterJson,
+    value_type: change.valueType,
+    unsupported_field: change.unsupportedField,
+    relationships: {
+      vault_id: change.vaultId,
+      loan_broker_id: change.loanBrokerId,
+      loan_id: change.loanId,
+      account: change.account,
+      owner: change.owner,
+      borrower: change.borrower,
+      asset_key: change.assetKey,
+      mpt_issuance_id: change.mptIssuanceId,
+    },
+    created_at: change.createdAt,
+    provenance: 'indexed',
+  }
+}
+
+function serializeLoanLifecycle(event: LoanLifecycleRecord) {
+  return {
+    loan_id: event.loanId,
+    epoch_id: event.epochId,
+    transaction_hash: event.transactionHash,
+    ledger_index: event.ledgerIndex,
+    transaction_index: event.transactionIndex,
+    close_time: event.closeTime,
+    event_type: event.eventType,
+    transaction_type: event.transactionType,
+    result_code: event.resultCode,
+    status_before: event.statusBefore,
+    status_after: event.statusAfter,
+    principal_before: event.principalBefore,
+    principal_after: event.principalAfter,
+    total_value_before: event.totalValueBefore,
+    total_value_after: event.totalValueAfter,
+    payment_remaining_before: event.paymentRemainingBefore,
+    payment_remaining_after: event.paymentRemainingAfter,
+    details_json: event.detailsJson,
+    created_at: event.createdAt,
+    provenance: 'indexed',
+  }
+}
+
+function serializeEpoch(epoch: NetworkEpochApiRecord) {
+  return {
+    id: epoch.id,
+    network: 'devnet',
+    status: epoch.status,
+    first_ledger_index: epoch.firstLedgerIndex,
+    first_ledger_hash: epoch.firstLedgerHash,
+    last_ledger_index: epoch.lastLedgerIndex,
+    last_ledger_hash: epoch.lastLedgerHash,
+    started_at: epoch.startedAt,
+    ended_at: epoch.endedAt,
+    reset_reason: epoch.resetReason,
+    provenance: 'direct',
+  }
+}
+
+function serializeSearchResult(result: SearchResultRecord) {
+  return {
+    kind: result.kind,
+    epoch_id: result.epochId,
+    ledger_index: result.ledgerIndex,
+    transaction_hash: result.transactionHash,
+    object_type: result.objectType,
+    object_id: result.objectId,
+    loan_id: result.loanId,
+    provenance: 'indexed',
+  }
+}
+
+export function serializeActivityResponse(events: ProtocolEventRecord[], limit: number) {
+  return {
+    network: 'devnet',
+    data: events.map(serializeProtocolEvent),
+    page: page(limit),
+  }
+}
+
+export function serializeTransactionResponse(options: {
+  transactionHash: string
+  event: ProtocolEventRecord | null
+  changes: ObjectChangeRecord[]
+}) {
+  return {
+    network: 'devnet',
+    transaction_hash: options.transactionHash,
+    found: options.event !== null || options.changes.length > 0,
+    event: options.event ? serializeProtocolEvent(options.event) : null,
+    object_changes: options.changes.map(serializeObjectChange),
+  }
+}
+
+export function serializeEpochsResponse(epochs: NetworkEpochApiRecord[]) {
+  return {
+    network: 'devnet',
+    data: epochs.map(serializeEpoch),
+  }
+}
+
+export function serializeObjectHistoryResponse(options: {
+  objectType: string
+  objectId: string
+  changes: ObjectChangeRecord[]
+  limit: number
+}) {
+  return {
+    network: 'devnet',
+    object_type: options.objectType,
+    object_id: options.objectId,
+    data: options.changes.map(serializeObjectChange),
+    page: page(options.limit),
+  }
+}
+
+export function serializeLoanLifecycleResponse(options: {
+  loanId: string
+  events: LoanLifecycleRecord[]
+  limit: number
+}) {
+  return {
+    network: 'devnet',
+    loan_id: options.loanId,
+    data: options.events.map(serializeLoanLifecycle),
+    page: page(options.limit),
+  }
+}
+
+export function serializeSearchResponse(options: {
+  query: string
+  results: SearchResultRecord[]
+  limit: number
+}) {
+  return {
+    network: 'devnet',
+    query: options.query,
+    data: options.results.map(serializeSearchResult),
+    page: page(options.limit),
+  }
+}

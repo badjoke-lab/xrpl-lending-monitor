@@ -235,6 +235,12 @@ Initial core API endpoints:
 - `GET /api/vaults`, `GET /api/loan-brokers`, and `GET /api/loans` are paginated collection endpoints. `limit` defaults to `25` and must be an integer from `1` through `100`.
 - Collection endpoints must return `network`, `kind`, `epoch`, `snapshot`, `data`, `page`, `availability`, and `provenance`.
 - Before an active current-state snapshot or public object shard reader is available, collection endpoints must return an empty `data` array with `availability.state = "unavailable"` and a reason, rather than inventing current entities.
+- `GET /api/activity` returns bounded indexed protocol events without raw transaction or metadata payloads.
+- `GET /api/transactions/{hash}` returns one indexed protocol event plus normalized object changes, including raw payloads only when retention is enabled for that transaction.
+- `GET /api/epochs` returns Devnet epochs and reset context.
+- `GET /api/objects/{objectType}/{objectId}/history` returns bounded normalized field changes for one object.
+- `GET /api/loans/{loanId}/lifecycle` returns bounded indexed Loan lifecycle events.
+- `GET /api/search?q=...` performs exact-match search over indexed transaction hashes, object IDs, accounts, assets, and lifecycle identifiers.
 - API responses must remain read-only and Devnet-only until Mainnet release approval is recorded.
 
 ## Data provenance categories

@@ -4,34 +4,34 @@ Last updated: 2026-07-02.
 
 ## Current milestone
 
-**M1 closeout — Current-state collector activation** and **M3 public API — Core entity API**.
+**M1 closeout — Current-state collector activation** and **M3 public API — Activity, search, and history API**.
 
-M1 code foundations and controlled resume evidence are merged, but M1 has not exited because a complete isolated preview bootstrap has not yet been stored, verified, and activated. M2 history foundations and the Checkpoint B documentation decision are merged. M3 core API work is in progress and must expose unavailable current-entity collections until an active snapshot and object shard reader are available.
+M1 code foundations and controlled resume evidence are merged, but M1 has not exited because a complete isolated preview bootstrap has not yet been stored, verified, and activated. M2 history foundations, the Checkpoint B documentation decision, and the M3 core entity API shell are merged. M3 activity, search, and history API work is in progress.
 
 ## Canonical continuation point
 
-GitHub pull request #17, `Record Checkpoint B history boundary`, merged by squash as `04076722be7a37e95b5defbd82074d9474cb558c`.
+GitHub pull request #18, `Add core entity API shell`, merged by squash as `86258cadc4c44891708de89db2d7c55868161dfd`.
 
 Active local branch for the next roadmap unit:
 
-- branch: `api/core-entity-api`;
-- base: `main` at `04076722be7a37e95b5defbd82074d9474cb558c`;
-- roadmap unit: M3 public API core entity API shell;
-- current implementation commit: `13092b6` (`feat: add core entity API shell`);
+- branch: `api/activity-history-api`;
+- base: `main` at `86258cadc4c44891708de89db2d7c55868161dfd`;
+- roadmap unit: M3 public API activity, search, and history API;
+- current implementation commit: `97c2f98` (`feat: add activity history API`);
 - current state: local implementation and validation complete; pull request not opened yet.
 
 Always inspect the current pull-request head and checks before resuming; the values above are a recorded checkpoint, not permission to ignore newer GitHub state.
 
 ## Immediate work
 
-Complete the M3 core entity API pull request:
+Complete the M3 activity, search, and history API pull request:
 
-1. push `api/core-entity-api`;
+1. push `api/activity-history-api`;
 2. open a focused PR with the validation below;
 3. merge only after required checks pass and the branch is current;
-4. continue to the next M3 API unit from updated `main`.
+4. continue to the M3 exports and feeds unit from updated `main`.
 
-The first incomplete action is pushing `api/core-entity-api`.
+The first incomplete action is pushing `api/activity-history-api`.
 
 ## Completed
 
@@ -231,6 +231,7 @@ Checkpoint B decision:
 Current local M3 core entity API validation:
 
 - implementation commit: `13092b6` (`feat: add core entity API shell`);
+- status commit: `f340fb6` (`docs: record core entity API progress`);
 - focused route test: `pnpm exec vitest run src/worker/core-api-routes.test.ts`: 4 tests passed;
 - `pnpm typecheck`: passed;
 - `pnpm lint`: passed;
@@ -238,6 +239,18 @@ Current local M3 core entity API validation:
 - `pnpm test:e2e`: 1 Chromium smoke test passed;
 - live ledger evidence: not collected for this API-only branch because no collector, migration, or ledger-read behavior changed;
 - branch: `api/core-entity-api`;
+- PR #18, `Add core entity API shell`, passed `quality` at head `f340fb69e2aa104b37b22021e27345d4c0662763` and was squash-merged as `86258cadc4c44891708de89db2d7c55868161dfd`;
+- PR #18 had no review comments or unresolved review threads before merge.
+
+Current local M3 activity, search, and history API validation:
+
+- implementation commit: `97c2f98` (`feat: add activity history API`);
+- focused route test: `pnpm exec vitest run src/worker/history-api-routes.test.ts`: 6 tests passed;
+- `pnpm typecheck`: passed;
+- `pnpm check`: passed; 28 test files passed, 3 skipped; 139 tests passed, 3 skipped; local D1 migrations reported no pending migrations; build passed;
+- `pnpm test:e2e`: 1 Chromium smoke test passed;
+- live ledger evidence: not collected for this API-only branch because no collector, migration, or ledger-read behavior changed;
+- branch: `api/activity-history-api`;
 - pull request: not opened yet.
 
 ## Known open questions
@@ -265,7 +278,7 @@ Current local M3 core entity API validation:
 
 ## Current blockers
 
-No known code blocker is recorded for completing the M3 core entity API pull request.
+No known code blocker is recorded for completing the M3 activity, search, and history API pull request.
 
 A real isolated preview bootstrap depends on approved external preview access. That dependency does not block local implementation, tests, documentation, or independent incremental-history work.
 

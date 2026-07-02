@@ -5,6 +5,14 @@ import { resolveRuntimeConfig } from '../shared/runtime-config'
 import type { Bindings } from './env'
 import { getActiveSnapshot } from './repositories/core-api-repository'
 import {
+  getTransactionDetail,
+  listActivity,
+  listEpochs,
+  listLoanLifecycle,
+  listObjectHistory,
+  searchHistory,
+} from './repositories/history-api-repository'
+import {
   getCurrentEpoch,
   getSyncState,
 } from './repositories/network-status-repository'
@@ -13,6 +21,14 @@ import {
   serializeOverview,
   serializeUnavailableEntityCollection,
 } from './serializers/core-api'
+import {
+  serializeActivityResponse,
+  serializeEpochsResponse,
+  serializeLoanLifecycleResponse,
+  serializeObjectHistoryResponse,
+  serializeSearchResponse,
+  serializeTransactionResponse,
+} from './serializers/history-api'
 import { serializeNetworkStatus } from './serializers/network-status'
 
 const app = new Hono<{ Bindings: Bindings }>()
@@ -38,6 +54,16 @@ function parsePageLimit(value: string | undefined): number | null {
   }
 
   return limit
+}
+
+function invalidLimitResponse(context: Context<{ Bindings: Bindings }>) {
+  return context.json(
+    {
+      error: 'invalid_limit',
+      message: `limit must be an integer from 1 to ${MAX_PAGE_LIMIT}`,
+    },
+    400,
+  )
 }
 
 app.get('/api/health', (context) => {
@@ -79,13 +105,7 @@ function entityCollectionHandler(kind: EntityCollectionKind) {
 
     const limit = parsePageLimit(context.req.query('limit'))
     if (limit === null) {
-      return context.json(
-        {
-          error: 'invalid_limit',
-          message: `limit must be an integer from 1 to ${MAX_PAGE_LIMIT}`,
-        },
-        400,
-      )
+      return invalidLimitResponse(context)
     }
 
     const { epoch, snapshot } = await loadCoreApiContext(context.env.DB)
@@ -103,6 +123,107 @@ function entityCollectionHandler(kind: EntityCollectionKind) {
 app.get('/api/vaults', entityCollectionHandler('vaults'))
 app.get('/api/loan-brokers', entityCollectionHandler('loan_brokers'))
 app.get('/api/loans', entityCollectionHandler('loans'))
+
+app.get('/api/activity', async (context) => {
+  resolveRuntimeConfig(context.env)
+
+  const limit = parsePageLimit(context.req.query('limit'))
+  if (limit === null) return invalidLimitResponse(context)
+
+  return context.json(
+    serializeActivityResponse(await listActivity(context.env.DB, { limit }), limit),
+  )
+})
+
+app.get('/api/transactions/:hash', async (context) => {
+  resolveRuntimeConfig(context.env)
+
+  const transactionHash = context.req.param('hash')
+  const detail = await getTransactionDetail(context.env.DB, transactionHash)
+  if (!detail.event && detail.changes.length === 0) {
+    return context.json(
+      {
+        error: 'not_found',
+        transaction_hash: transactionHash,
+      },
+      404,
+    )
+  }
+
+  return context.json(
+    serializeTransactionResponse({
+      transactionHash,
+      event: detail.event,
+      changes: detail.changes,
+    }),
+  )
+})
+
+app.get('/api/epochs', async (context) => {
+  resolveRuntimeConfig(context.env)
+
+  return context.json(serializeEpochsResponse(await listEpochs(context.env.DB)))
+})
+
+app.get('/api/objects/:objectType/:objectId/history', async (context) => {
+  resolveRuntimeConfig(context.env)
+
+  const limit = parsePageLimit(context.req.query('limit'))
+  if (limit === null) return invalidLimitResponse(context)
+
+  const objectType = context.req.param('objectType')
+  const objectId = context.req.param('objectId')
+  return context.json(
+    serializeObjectHistoryResponse({
+      objectType,
+      objectId,
+      changes: await listObjectHistory(context.env.DB, objectType, objectId, { limit }),
+      limit,
+    }),
+  )
+})
+
+app.get('/api/loans/:loanId/lifecycle', async (context) => {
+  resolveRuntimeConfig(context.env)
+
+  const limit = parsePageLimit(context.req.query('limit'))
+  if (limit === null) return invalidLimitResponse(context)
+
+  const loanId = context.req.param('loanId')
+  return context.json(
+    serializeLoanLifecycleResponse({
+      loanId,
+      events: await listLoanLifecycle(context.env.DB, loanId, { limit }),
+      limit,
+    }),
+  )
+})
+
+app.get('/api/search', async (context) => {
+  resolveRuntimeConfig(context.env)
+
+  const query = context.req.query('q')?.trim()
+  if (!query) {
+    return context.json(
+      {
+        error: 'invalid_query',
+        message: 'q is required',
+      },
+      400,
+    )
+  }
+
+  const limit = parsePageLimit(context.req.query('limit'))
+  if (limit === null) return invalidLimitResponse(context)
+
+  return context.json(
+    serializeSearchResponse({
+      query,
+      results: await searchHistory(context.env.DB, query, { limit }),
+      limit,
+    }),
+  )
+})
 
 app.onError((_error, context) => {
   if (context.req.path.startsWith('/api/')) {
