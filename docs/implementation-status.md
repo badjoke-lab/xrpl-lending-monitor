@@ -24,7 +24,7 @@ Active implementation:
 - branch: `ui/project-documentation-pages`;
 - milestone unit: M4-6;
 - routes: `/about`, `/methodology`, `/contact`, and `/api`;
-- validation: pending CI.
+- validation: final CI rerun pending after the API documentation asset-route type fix.
 
 ## Completed M4-4
 
@@ -79,7 +79,7 @@ Implemented on the active branch:
 - responsive long-form, table, code example, table-of-contents, and contact layouts;
 - focused documentation browser tests.
 
-No placeholder external destination is published. The first incomplete action is CI validation, correction of any failures, and merge only after all required checks pass.
+No placeholder external destination is published. The first incomplete action is final CI validation and merge only after all required checks pass.
 
 ## Next M4 unit
 
