@@ -59,7 +59,10 @@ test('renders complete About and Methodology routes with stable anchors', async 
 test('documents current endpoints, limits, unavailable semantics, and examples', async ({ page }) => {
   await mockBase(page)
 
-  await page.goto('/api#exports')
+  await page.goto('/about')
+  await page.getByRole('link', { name: 'Open API documentation' }).click()
+  await expect(page).toHaveURL(/\/api$/)
+  await page.getByRole('link', { name: 'Exports', exact: true }).click()
   await expect(page.getByRole('heading', { level: 1, name: 'Read-only API' })).toBeVisible()
   await expect(page.locator('#exports')).toBeVisible()
   await expect(page.getByText('/api/loans/{loanId}', { exact: true })).toBeVisible()
