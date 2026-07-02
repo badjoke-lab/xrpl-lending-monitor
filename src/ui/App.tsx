@@ -4,6 +4,8 @@ import { AppShell } from './components/AppShell'
 import { useDashboardResources } from './hooks/useDashboardResources'
 import { NetworkStatusPage } from './pages/NetworkStatusPage'
 import { OverviewPage } from './pages/OverviewPage'
+import { VaultDetailPage } from './pages/VaultDetailPage'
+import { VaultsPage } from './pages/VaultsPage'
 
 function normalizePath(pathname: string): string {
   if (pathname === '/') return '/'
@@ -55,11 +57,16 @@ export function App() {
     window.requestAnimationFrame(() => document.getElementById('main-content')?.focus())
   }, [])
 
+  const vaultDetailMatch = /^\/vaults\/([A-Fa-f0-9]{64})$/.exec(currentPath)
   let page
   if (currentPath === '/') {
     page = <OverviewPage resources={resources} onNavigate={navigate} onReload={reload} />
   } else if (currentPath === '/network-status') {
     page = <NetworkStatusPage status={resources.status} onReload={reload} />
+  } else if (currentPath === '/vaults') {
+    page = <VaultsPage onNavigate={navigate} />
+  } else if (vaultDetailMatch?.[1]) {
+    page = <VaultDetailPage vaultId={vaultDetailMatch[1].toUpperCase()} onNavigate={navigate} />
   } else {
     page = <NotFoundPage onNavigate={navigate} />
   }

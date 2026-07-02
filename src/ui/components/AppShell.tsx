@@ -21,7 +21,7 @@ const navigationGroups: Array<{ label: string; items: NavigationItem[] }> = [
     label: 'Monitor',
     items: [
       { label: 'Overview', path: '/' },
-      { label: 'Vaults' },
+      { label: 'Vaults', path: '/vaults' },
       { label: 'Loan Brokers' },
       { label: 'Loans' },
       { label: 'Activity' },
@@ -69,7 +69,7 @@ function NavigationLink({
     )
   }
 
-  const active = currentPath === item.path
+  const active = currentPath === item.path || (item.path !== '/' && currentPath.startsWith(`${item.path}/`))
   return (
     <a
       className={`nav-item${active ? ' is-active' : ''}`}
@@ -157,85 +157,39 @@ function ContextBar({ status }: { status: ResourceState<NetworkStatusResponse> }
 export function AppShell({ children, currentPath, status, onNavigate, onReload }: AppShellProps) {
   return (
     <div className="application-frame">
-      <a className="skip-link" href="#main-content">
-        Skip to content
-      </a>
-
+      <a className="skip-link" href="#main-content">Skip to content</a>
       <aside className="sidebar">
-        <a
-          className="brand"
-          href="/"
-          onClick={(event) => {
-            event.preventDefault()
-            onNavigate('/')
-          }}
-        >
+        <a className="brand" href="/" onClick={(event) => { event.preventDefault(); onNavigate('/') }}>
           <span className="brand-mark" aria-hidden="true">XL</span>
-          <span>
-            <strong>XRPL Lending Monitor</strong>
-            <small>Devnet observatory</small>
-          </span>
+          <span><strong>XRPL Lending Monitor</strong><small>Devnet observatory</small></span>
         </a>
         <Navigation currentPath={currentPath} onNavigate={onNavigate} />
-        <div className="sidebar-footer">
-          <p>Independent · read-only</p>
-          <a href="https://github.com/badjoke-lab/xrpl-lending-monitor">Repository</a>
-        </div>
+        <div className="sidebar-footer"><p>Independent · read-only</p><a href="https://github.com/badjoke-lab/xrpl-lending-monitor">Repository</a></div>
       </aside>
 
       <div className="application-body">
         <header className="mobile-appbar">
-          <a
-            className="mobile-brand"
-            href="/"
-            onClick={(event) => {
-              event.preventDefault()
-              onNavigate('/')
-            }}
-          >
-            <span className="brand-mark" aria-hidden="true">XL</span>
-            <span>XRPL Lending Monitor</span>
+          <a className="mobile-brand" href="/" onClick={(event) => { event.preventDefault(); onNavigate('/') }}>
+            <span className="brand-mark" aria-hidden="true">XL</span><span>XRPL Lending Monitor</span>
           </a>
-          <button type="button" className="icon-button" onClick={onReload} aria-label="Refresh monitoring data">
-            ↻
-          </button>
+          <button type="button" className="icon-button" onClick={onReload} aria-label="Refresh monitoring data">↻</button>
         </header>
-
         <ContextBar status={status} />
-
-        <main id="main-content" className="main-content" tabIndex={-1}>
-          {children}
-        </main>
-
+        <main id="main-content" className="main-content" tabIndex={-1}>{children}</main>
         <footer className="site-footer">
           <p>XRPL Lending Devnet data. No wallet, signing, lending, repayment, or investment advice.</p>
-          <div>
-            <a href="/api/status">Status JSON</a>
-            <a href="https://github.com/badjoke-lab/xrpl-lending-monitor">Source</a>
-          </div>
+          <div><a href="/api/status">Status JSON</a><a href="https://github.com/badjoke-lab/xrpl-lending-monitor">Source</a></div>
         </footer>
       </div>
 
       <nav className="mobile-bottom-nav" aria-label="Mobile navigation">
-        <a
-          className={currentPath === '/' ? 'is-active' : ''}
-          href="/"
-          aria-current={currentPath === '/' ? 'page' : undefined}
-          onClick={(event) => {
-            event.preventDefault()
-            onNavigate('/')
-          }}
-        >
-          Overview
-        </a>
+        <a className={currentPath === '/' ? 'is-active' : ''} href="/" aria-current={currentPath === '/' ? 'page' : undefined} onClick={(event) => { event.preventDefault(); onNavigate('/') }}>Overview</a>
         <span aria-disabled="true">Loans</span>
         <span aria-disabled="true">Activity</span>
         <span aria-disabled="true">Search</span>
         <details>
           <summary>More</summary>
-          <div className="mobile-more-panel">
-            <Navigation currentPath={currentPath} onNavigate={onNavigate} />
-          </div>
+          <div className="mobile-more-panel"><Navigation currentPath={currentPath} onNavigate={onNavigate} /></div>
         </details>
       </nav>
     </div>
