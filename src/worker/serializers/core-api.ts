@@ -102,10 +102,11 @@ function serializeVault(vault: VaultCurrentProjection, includeRaw = false) {
 }
 
 function scaledRateProduct(value: ExactDecimal, rate: number): ExactDecimal {
-  return {
+  const unnormalized = {
     coefficient: (parseInteger(value.coefficient) * BigInt(rate)).toString(),
     scale: value.scale + 5,
   }
+  return parseExactDecimal(formatExactDecimal(unnormalized))
 }
 
 function brokerDerived(broker: LoanBrokerCurrentProjection) {
