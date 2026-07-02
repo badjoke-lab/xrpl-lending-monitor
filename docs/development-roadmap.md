@@ -1,200 +1,372 @@
 # Development roadmap
 
 Baseline date: 2026-07-01.
+Recalibrated after M3 completion and UI architecture approval: 2026-07-02.
 
-This document controls implementation order, dependencies, and target windows. Dates are planning targets rather than promises. Correctness, data integrity, and release gates take priority over calendar targets.
+This document controls implementation order, dependencies, and target windows. Dates are planning targets rather than promises. Correctness, data integrity, accessibility, and release gates take priority over calendar targets.
+
+Roadmap unit labels such as `M4-1` are planning identifiers, not guaranteed GitHub pull-request numbers. Each unit should normally be one focused pull request unless evidence justifies a smaller split.
 
 ## Milestone summary
 
-| Milestone | Target window | Goal | Exit condition |
-|---|---|---|---|
-| M0 Foundation and specification lock | 2026-07-01 to 2026-07-04 | Establish repository, source-of-truth documents, toolchain, and operating rules | Documentation accepted and project skeleton ready |
-| M1 Current-state collector | 2026-07-05 to 2026-07-12 | Connect Devnet, manage epochs, scan current objects, and create the first active snapshot | Complete marker-aware current-state bootstrap stored and activated |
-| M2 Event history and lifecycle | 2026-07-13 to 2026-07-24 | Collect validated ledgers, normalize changes, reconstruct lifecycle, and preserve deletions | Deterministic replay and archive queries pass |
-| M3 Public API | 2026-07-25 to 2026-07-31 | Expose bounded read-only core and history APIs | Contract tests pass for baseline entities and history |
-| M4 Baseline UI | 2026-08-01 to 2026-08-12 | Deliver ordinary monitoring pages and navigation | Overview, lists, details, activity, search, and status work end to end |
-| M5 Differentiated audit UI | 2026-08-13 to 2026-08-20 | Add lifecycle, state changes, cover history, archives, epochs, and provenance | Audit views complete without baseline regressions |
-| M6 Hardening and public Devnet release | 2026-08-21 to 2026-08-31 | Prove integrity, resource safety, accessibility, and operations | Soak test and release gates pass |
+| Milestone | Current status | Recalibrated target window | Goal | Exit condition |
+|---|---|---|---|---|
+| M0 Foundation and specification lock | Complete | 2026-07-01 | Establish repository, source-of-truth documents, toolchain, and operating rules | Documentation accepted and project skeleton ready |
+| M1 Current-state collector | Code foundation complete; isolated full bootstrap and activation remain | 2026-07-02 to 2026-07-08, external access permitting | Connect Devnet, manage epochs, scan current objects, and create the first active snapshot | Complete marker-aware current-state bootstrap stored, verified, and activated |
+| M2 Event history and lifecycle | Complete through Checkpoint B | Completed 2026-07-02 | Collect validated ledgers, normalize changes, reconstruct lifecycle, and preserve deletions | Deterministic replay, archive, status, and reconciliation work merged |
+| M3 Public API | Complete through exports and feeds | Completed 2026-07-02 | Expose bounded read-only core and history APIs | Contract tests pass for baseline entities, history, exports, and feeds |
+| M4 Baseline UI and project pages | UI architecture approved; implementation WIP checkpoint not merge-ready | 2026-07-02 to 2026-07-10 | Deliver the ordinary monitor, project pages, navigation, responsive behavior, and shared UI states | Required baseline routes work end to end and Checkpoint C passes |
+| M5 Differentiated audit UI | Not started | 2026-07-10 to 2026-07-16 | Add lifecycle, state changes, archives, cover/loss, epochs, and provenance integration | Audit views complete without baseline regressions |
+| M6 Hardening and public Devnet release | Not started | 2026-07-16 to 2026-07-26 | Prove integrity, resource safety, accessibility, operations, and deployment readiness | Multi-day soak and all release gates pass |
 
-The schedule was recalibrated after the current-object scanner benchmark. Full bootstrap is separated from the scheduled Worker because measured global marker traversal does not fit a normal scheduled invocation.
+The original August target remains a conservative outer boundary. The recalibrated dates reflect the actual M2 and M3 completion state, but external preview access, bootstrap runtime, review, deployment approval, and soak evidence may extend the release date.
+
+The schedule was previously recalibrated after the current-object scanner benchmark. Full bootstrap remains separated from the scheduled Worker because measured global marker traversal does not fit a normal scheduled invocation.
+
+## Cross-cutting rules
+
+- M1 preview bootstrap closeout may proceed in parallel with independent M4 and M5 work, but current-state pages must show explicit unavailable states until an active snapshot exists.
+- No UI page may invent values to appear complete.
+- No Mainnet, wallet, signing, transaction submission, remote infrastructure, deployment, or production bootstrap action is authorized by this roadmap alone.
+- About, Methodology, Contact, and API documentation are required baseline project pages.
+- Support is optional, disabled by default, and may be enabled only after address, network, accepted asset, destination-tag rule, QR payload, disclosure text, and operational ownership are approved.
+- Generated UI mockups are visual references only; approved API and specification documents control displayed data.
 
 ## M0 — Foundation and specification lock
 
-### PR 1 — Repository operating foundation
+Completed scope:
 
-- README and documentation index;
-- contributor and coding-agent rules;
-- PR template;
-- implementation status and decision records.
-
-### PR 2 — Product and architecture specification
-
-- product, architecture, data, status, and asset models;
-- collector and testing design;
-- resource envelope;
-- competitor positioning;
-- development roadmap.
-
-### PR 3 — Project skeleton
-
+- repository operating foundation;
+- product and architecture specifications;
+- data, status, asset, collector, testing, resource, competitor, and roadmap documents;
 - pinned Node, pnpm, TypeScript, React, Vite, Worker, D1, Hono, Vitest, Playwright, ESLint, and CI setup;
 - local, preview, and production boundaries;
 - Mainnet fail-closed configuration.
 
 ## M1 — Current-state collector
 
-### PR 4 — Network, amendment, and epoch foundation
+### Completed foundation
 
-- endpoint configuration and fallback;
-- server and validated-ledger status;
-- amendment status;
-- epoch and synchronization state;
-- reset-signal detection;
-- read-only status API.
-
-### PR 5 — Asset normalization
-
-- XRP normalization;
-- IOU currency-and-issuer identity;
-- MPT issuance identity and metadata;
-- decimal-safe amount and rate utilities;
-- Ripple epoch conversion.
-
-### PR 6 — Current object scanner and collector benchmark
-
-- complete marker traversal primitives for Vault, LoanBroker, and Loan;
-- one unfiltered binary traversal with local classification;
+- network, amendment, epoch, reset, and synchronization state;
+- canonical XRP, IOU, and MPT normalization;
+- current object scanner and benchmark;
+- complete marker traversal primitives;
 - resumable exact-marker batches;
 - current projections and relationship checks;
 - terminal Loan zero-omission handling;
-- partial-scan failure behavior;
-- CPU, request, memory, storage, and catch-up measurements;
-- collector runtime and cadence selection.
+- long-running bootstrap runner;
+- deterministic compressed shards;
+- external storage adapter;
+- complete manifest verification contract;
+- D1 snapshot metadata and active-pointer activation contract;
+- controlled two-batch live interruption and resume preview.
 
-### PR 6B — Bootstrap runner and storage integration
+### M1-closeout-1 — Preview environment plan and bindings
 
-- long-running resumable bootstrap execution;
-- fixed validated-ledger identity across resumed batches;
-- exact marker checkpoint persistence;
-- bounded compressed shard generation;
-- external shard upload and retries;
-- complete manifest generation and verification;
-- cleanup of incomplete attempts;
-- D1 snapshot metadata and active-pointer activation;
-- preview full-bootstrap and resume test.
+- isolated preview Worker configuration;
+- isolated preview D1;
+- isolated bootstrap object-storage path or bucket;
+- environment-specific IDs and bindings;
+- remote migration, rollback, cleanup, and access documentation;
+- no production or Mainnet configuration.
 
-PR 6B is required before M1 exits. Incremental collection cannot maintain a snapshot that has never been bootstrapped and activated.
+This unit stops at the human approval gate before resource creation or remote mutation if access has not been approved.
+
+### M1-closeout-2 — Complete preview bootstrap and activation
+
+- fix one validated Devnet ledger index and hash;
+- complete all markers;
+- persist exact continuation only after durable shard writes;
+- verify every shard and complete manifest;
+- demonstrate interruption, resume, retry, cleanup, activation, and rollback;
+- record requests, runtime, memory, bytes, object counts, and recovery behavior;
+- activate only the verified complete snapshot;
+- preserve the prior active pointer after failure.
+
+M1 exits only when a complete marker-aware bootstrap is stored, verified, and active.
 
 ## M2 — Event history and lifecycle
 
-### PR 7 — Incremental validated-ledger collector
+Completed in dependency order:
 
-Cursor-based processing, recognized transaction filtering, idempotency, bounded catch-up, retry behavior, raw-payload controls, and integration with the active bootstrap snapshot.
+1. incremental validated-ledger collector;
+2. AffectedNodes normalization;
+3. Loan lifecycle engine;
+4. deleted-object archive;
+5. cover, debt, and loss tracking;
+6. status engine and reconciliation;
+7. Checkpoint B history-completeness decision.
 
-### PR 8 — AffectedNodes normalization
-
-Created, modified, and deleted nodes; before-and-after changes; object IDs; unknown-field logging; and transaction relationships.
-
-### PR 9 — Loan lifecycle engine
-
-Creation terms, regular and full payments, confirmed overpayment behavior, impair, unimpair, default, delete, ordering, and final-state retention.
-
-### PR 10 — Deleted-object archive
-
-Vault, Broker, and Loan final states, deletion classification, archived relationships, and search aliases.
-
-### PR 11 — Cover, debt, and loss tracking
-
-Cover history, debt history, unrealized loss, required-cover formulas, surplus or shortfall, and asset-separated aggregates.
-
-### PR 12 — Status engine and reconciliation
-
-On-ledger status, schedule status, boundary tests, current-scan reconciliation, and repair reporting.
+Public lifecycle completeness claims remain bounded by the evidence recorded at Checkpoint B and later soak/reconciliation results.
 
 ## M3 — Public API
 
-### PR 13 — Core entity API
+Completed units:
 
-Status, Overview, Vault, Broker, and Loan list and detail endpoints with bounded pagination, filters, sorting, network, epoch, freshness, and provenance.
+1. core entity API shell;
+2. activity, search, and history API;
+3. bounded exports and feeds.
 
-### PR 14 — Activity, search, and history API
+Current-entity collections must continue to return explicit unavailable states until an active snapshot and public object-shard reader are available.
 
-Activity, transaction, search, account, epoch, object-history, and Loan-lifecycle endpoints.
+## M4 — Baseline UI and project pages
 
-### PR 15 — Exports and feeds
+M4 begins with documentation and design alignment. UI code must not resume from the WIP checkpoint until M4-0 is merged.
 
-Bounded JSON, CSV, NDJSON, and activity-feed access.
+### M4-0 — UI specification and route architecture
 
-## M4 — Baseline UI
+Documentation-only unit:
 
-### PR 16 — App shell, Overview, and Network Status
+- canonical site map and routes;
+- Monitor, Audit, System, and Project navigation groups;
+- desktop sidebar and mobile navigation model;
+- page responsibilities and API dependencies;
+- dark ledger-observatory visual system;
+- reusable component contracts;
+- loading, empty, unavailable, stale, partial, error, archived, and invalid-route states;
+- responsive and accessibility rules;
+- mockup interpretation and prohibited invented data;
+- About, Methodology, Contact, API, and optional Support specifications;
+- roadmap, product, architecture, Codex, index, decision, and implementation-status alignment.
 
-Responsive navigation, network and epoch context, freshness, Overview metrics, activity, status, and complete loading or error states.
+Exit condition: all source-of-truth documents agree and no UI code is included.
 
-### PR 17 — Vault UI
+### M4-1 — App shell, Overview, and Network Status
 
-Vault list, detail, relationships, activity, and history.
+- reconcile the `ui/overview-status-shell` WIP checkpoint after M4-0 merges;
+- dark design tokens;
+- desktop sidebar;
+- mobile app bar, bottom navigation, and More menu;
+- persistent Devnet, epoch, validated-ledger, freshness, and collector context;
+- Overview metrics using only API-supported values;
+- active-snapshot unavailable state;
+- network and collector health;
+- amendment status;
+- recent activity preview;
+- Devnet reset and epoch notice;
+- provenance legend;
+- Network Status page;
+- shared loading, empty, unavailable, stale, partial, error, not-found, and invalid-identifier components;
+- focused component and browser tests.
 
-### PR 18 — Loan Broker UI
+Exit condition: the WIP light shell is replaced, all checks pass, and the approved desktop and mobile direction is demonstrated without invented data.
 
-Broker list and detail, debt, cover, related Vault, Loan book, and cover history.
+### M4-2 — Vault UI
 
-### PR 19 — Loan UI
+- Vault list;
+- bounded search, filters, sorting, and pagination;
+- Vault detail;
+- current fields, flags, asset identity, Share MPT, Domain, utilization, and used assets;
+- connected Loan Brokers and Loans;
+- activity and history;
+- archive cross-link;
+- responsive table and detail behavior.
 
-Loan list, detail, terms, on-ledger and schedule status, and payment schedule.
+### M4-3 — Loan Broker UI
 
-### PR 20 — Activity, transaction, search, and account UI
+- Loan Broker list and detail;
+- related Vault;
+- Loan book;
+- DebtTotal, DebtMaximum, debt utilization;
+- CoverAvailable, configured cover rates, required minimum cover, and surplus or shortfall;
+- activity and history;
+- archive cross-link;
+- asset-safe responsive presentation.
 
-Activity list, transaction detail, global search, and account relationships.
+### M4-4 — Loan UI
+
+- Loan list and detail;
+- bounded filters and pagination;
+- terms and current balances;
+- separate on-ledger and schedule states;
+- payment schedule;
+- related Broker and Vault;
+- archive lookup;
+- core Overview, Terms, and Payments tabs;
+- mobile Loan detail.
+
+Full lifecycle, state-change, and archive audit integration remains M5 work.
+
+### M4-5 — Activity, Transaction, Search, and Account UI
+
+- Activity list and filters;
+- transaction detail;
+- affected nodes and normalized changes;
+- global search;
+- Account relationships;
+- export and feed links;
+- responsive activity cards or priority-column tables;
+- malformed-identifier and no-result states.
+
+### M4-6 — Project and data documentation pages
+
+Required pages:
+
+- About;
+- Methodology;
+- Contact;
+- API documentation.
+
+Required behavior:
+
+- documentation layout and stable anchors;
+- full Methodology table of contents;
+- Google Form and GitHub Issues contact choices using configured URLs only;
+- public-issue privacy warning;
+- About purpose, scope, independence, read-only status, non-goals, repository, Methodology, and Contact links;
+- optional `/about#support` section and navigation only after explicit support configuration approval;
+- no placeholder external links.
+
+### M4-7 — Baseline integration, accessibility, and Checkpoint C
+
+- cross-page navigation and breadcrumbs;
+- current versus archived relationship links;
+- browser-history and deep-link verification;
+- responsive completion across all M4 routes;
+- keyboard, focus, semantics, contrast, zoom, and long-identifier coverage;
+- shared state consistency;
+- no unsupported USD, pricing, cross-asset total, or risk-score output;
+- end-to-end baseline monitor review.
+
+Exit condition: Checkpoint C confirms ordinary monitor completeness before audit-only promotion.
 
 ## M5 — Differentiated audit UI
 
-### PR 21 — Loan lifecycle and state changes
+### M5-1 — Loan lifecycle and state changes
 
-Lifecycle, payments, state changes, normalized before-and-after values, and raw data.
+- protocol-wide lifecycle explorer;
+- Loan lifecycle and payment timeline;
+- impair, unimpair, default, repay, and delete events;
+- normalized before-and-after state changes;
+- source transactions;
+- raw data where retained;
+- no unsupported intermediate-state inference.
 
-### PR 22 — Archived objects and Devnet epochs
+### M5-2 — Archived objects and final-state audit
 
-Archived object pages, epoch selection, reset notices, and historical context.
+- Archived Objects explorer;
+- archived Vault, Loan Broker, and Loan detail pages;
+- final state;
+- deletion event and classification;
+- archive metadata and provenance;
+- source transactions and raw archive data;
+- current/archive and epoch cross-links.
 
-### PR 23 — Cover and loss audit views
+### M5-3 — Cover, debt, and loss audit
 
-Cover, debt, and loss timelines with factual operational conditions.
+- asset-separated DebtTotal, DebtMaximum, CoverAvailable, and LossUnrealized histories;
+- cover events;
+- required minimum cover formula and inputs;
+- cover surplus or shortfall;
+- Broker and Vault context;
+- source events and provenance;
+- no cross-asset or fiat aggregation.
 
-### PR 24 — Provenance and data documentation UI
+### M5-4 — Devnet epochs and provenance integration
 
-Direct, derived, indexed, and unavailable labels; formulas; API; and methodology pages.
+- epoch list and detail;
+- reset boundaries;
+- epoch-scoped objects, activity, and archives;
+- Direct, Derived, Indexed, and Unavailable inspection;
+- formula links;
+- Methodology and API cross-links.
+
+### M5-5 — Audit navigation, exports, and regression completion
+
+- cross-audit navigation;
+- audit exports where supported by bounded API contracts;
+- current, history, archive, and epoch consistency;
+- mobile audit layouts;
+- accessibility and browser regression coverage;
+- baseline M4 regression verification.
 
 ## M6 — Hardening and public Devnet release
 
-### PR 25 — Data integrity and reset simulation
+### M6-1 — Data integrity and reset simulation
 
-### PR 26 — Collector runtime benchmark and guardrails
+Prove:
 
-### PR 27 — Accessibility, performance, and browser coverage
+- Devnet reset creates a new epoch;
+- old epochs remain intact;
+- cursor gaps and hash discontinuities are rejected;
+- current and archive projections reconcile;
+- failed snapshot replacement rolls back safely;
+- duplicate processing does not duplicate canonical data.
 
-### PR 28 — Public documentation and deployment
+### M6-2 — Collector runtime benchmark and guardrails
+
+Measure and document:
+
+- runtime distribution;
+- request count;
+- D1 reads and writes;
+- storage and shard growth;
+- controlled catch-up;
+- endpoint outage and recovery;
+- retry and backoff behavior;
+- stale-data behavior;
+- bounded scheduling behavior.
+
+Activate the approved resource-envelope guardrails.
+
+### M6-3 — Accessibility, performance, security, and browser coverage
+
+- keyboard and screen-reader review;
+- focus, semantics, contrast, zoom, responsive behavior, table usability, and long identifiers;
+- supported browser matrix;
+- performance budgets;
+- input and identifier validation;
+- cache and abuse controls;
+- no secret or internal-error exposure.
+
+### M6-4 — Public documentation and deployment preparation
+
+- final About, Methodology, Contact, API, provenance, and limitation content;
+- legal and disclaimer review;
+- operational runbook;
+- backup and export procedure;
+- rollback procedure;
+- domain and deployment plan;
+- support configuration review if support is enabled.
+
+External forms, support address, domain, deployment, and production-resource changes remain human approval gates.
+
+### M6-5 — Multi-day soak and public release
+
+- production-shaped Devnet collector soak;
+- repeated scheduled runs;
+- lag and resource evidence;
+- reset and recovery evidence where available;
+- active snapshot and history consistency;
+- public UI/API verification;
+- deployment approval;
+- rollback readiness;
+- release report.
 
 M6 completes only after the multi-day soak, resource envelope, product release gates, deployment approval, and rollback checks pass. Mainnet remains disabled until separately approved.
 
 ## Decision checkpoints
 
-### Checkpoint A — after PR 6
+### Checkpoint A — collector runtime
 
-Select the bootstrap and incremental collector runtimes from measured CPU, request, storage, and catch-up evidence. PR 6B implements the selected bootstrap path.
+Completed. The full bootstrap uses a resumable long-running runner and bounded compressed shards rather than a scheduled Worker global scan.
 
-### Checkpoint B — after PR 12
+### Checkpoint B — history completeness
 
-Confirm that indexed history is complete enough for public lifecycle claims.
+Completed as a bounded decision. Public claims remain limited by recorded evidence and later soak/reconciliation.
 
-### Checkpoint C — after PR 20
+### UI architecture gate — before M4 code resumes
 
-Confirm baseline monitor completeness before promoting differentiated audit features.
+M4-0 documentation must be merged. The generated mockups are layout references only. The current light WIP checkpoint is not merge-ready.
+
+### Checkpoint C — after M4-7
+
+Confirm baseline monitor completeness, project-page completeness, navigation, responsive behavior, accessibility, and absence of invented data before promoting M5 audit-only features.
 
 ### Checkpoint D — before public release
 
-Confirm domain, legal and disclaimer pages, operational ownership, backup and export procedures, and release rollback.
+Confirm domain, final legal and disclaimer text, Contact configuration, optional Support configuration, operational ownership, backup and export procedures, deployment plan, and rollback.
 
 ## Mainnet follow-on milestone
 
-Mainnet is not scheduled yet. It requires verified amendment activation, an approved starting-ledger and backfill strategy, separate configuration and capacity review, a production-shaped read soak, and explicit release approval.
+Mainnet is not scheduled. It requires verified amendment activation, an approved starting-ledger and backfill strategy, separate configuration and capacity review, a production-shaped read soak, and explicit release approval.

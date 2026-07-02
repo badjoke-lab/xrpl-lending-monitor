@@ -17,6 +17,8 @@
 
 The initial product uses a lightweight managed deployment model and does not require a continuously running application server or a self-hosted XRPL node.
 
+No UI framework, design-system package, router, CMS, or content service is approved merely by being named in a mockup or planning document. The initial UI should use the existing React/Vite stack and ordinary CSS unless a focused decision justifies another dependency.
+
 ## System overview
 
 ```text
@@ -49,10 +51,12 @@ External object storage          Cloudflare D1
                        |
                        v
               React/Vite static application
+                |- application shell and navigation
                 |- overview and entity pages
                 |- search and activity
                 |- history and audit views
-                |- API/data documentation
+                |- API and methodology documentation
+                |- About, Contact, and optional Support section
 ```
 
 ## Runtime boundaries
@@ -108,6 +112,199 @@ The public API must never expose secrets, transaction signing, or write operatio
 
 Responsible for presentation only. It consumes the public API and does not call privileged collector or bootstrap routes.
 
+It must:
+
+- preserve network, epoch, freshness, and provenance context;
+- distinguish loading, empty, unavailable, stale, partial, error, archived, and invalid-route states;
+- use only API-supported values;
+- keep current and historical data separate;
+- keep on-ledger and schedule status separate;
+- preserve asset identity and avoid unsupported aggregation;
+- provide responsive, accessible Monitor, Audit, System, and Project pages;
+- keep raw data after human-readable summaries;
+- never imply a write, wallet, signing, or protocol-management capability.
+
+## UI architecture
+
+### Source-of-truth documents
+
+UI implementation follows:
+
+- `ui-information-architecture.md`;
+- `ui-page-map.md`;
+- `ui-page-specifications.md`;
+- `ui-design-spec.md`;
+- `ui-component-inventory.md`;
+- `ui-responsive-rules.md`;
+- `ui-reference/README.md`.
+
+Generated mockups are visual references only and do not define data, routes, or behavior.
+
+### Application shell
+
+The shell owns:
+
+- desktop sidebar;
+- mobile app bar, bottom navigation, and More menu;
+- persistent network context bar;
+- page heading and breadcrumbs;
+- main content landmark;
+- global footer;
+- not-found and invalid-route handling;
+- focus restoration after navigation.
+
+The shell must not block successful panels because one API request failed. Page-level data loading should permit partial success and component-level error states.
+
+### Route model
+
+Canonical routes are defined in `ui-page-map.md`.
+
+Implementation requirements:
+
+- deep links work in the Cloudflare Static Assets deployment;
+- browser back and forward navigation restore route, filters, pagination, and meaningful subviews;
+- static-asset fallback does not intercept `/api/*`;
+- invalid identifiers fail explicitly;
+- archived-only results link to archive routes rather than silently appearing current;
+- no invalid Mainnet request falls back to Devnet data.
+
+A lightweight routing implementation may be built with the platform History API or an approved router. Adding a router dependency requires checking bundle, accessibility, static-deployment, and maintenance impact.
+
+### UI data boundary
+
+UI components consume serialized API contracts. They do not import collector parsers, storage repositories, migration models, or bootstrap internals.
+
+Recommended layers:
+
+```text
+src/ui/
+  app and route composition
+  components/
+  pages/
+  hooks/
+  lib/api and formatting
+  types/API response types
+```
+
+Exact folders may change through implementation, but the separation between fetching, formatting, page composition, and reusable components must remain.
+
+### Fetching and partial failure
+
+- Network status and page data may load independently.
+- One failed panel does not discard successful sibling data.
+- Requests are abortable when routes change.
+- Stale data remains visible with a warning when safe.
+- Unavailable data uses the API reason rather than a fabricated fallback.
+- Retry controls are bounded and user initiated.
+- Error messages are public safe and do not expose stack traces or secrets.
+
+### Display formatting
+
+Formatting code must not alter canonical identity or precision.
+
+- amounts retain exact asset unit and scale;
+- accounts, IDs, hashes, and issuance IDs may be visually shortened but retain complete values and link targets;
+- times identify timezone, normally UTC;
+- derived values link to formula provenance;
+- no fiat conversion or cross-asset total is introduced by display helpers.
+
+### State model
+
+Shared components represent:
+
+- loading;
+- empty;
+- unavailable;
+- stale;
+- partial;
+- error;
+- archived;
+- not found;
+- invalid identifier.
+
+These are not interchangeable. Zero is a data value, not an error or availability state.
+
+### Page templates
+
+- dashboard page;
+- list page;
+- entity detail page;
+- transaction page;
+- audit page;
+- documentation/project page.
+
+Templates share navigation and tokens but retain different density and reading behavior.
+
+### Responsive architecture
+
+- desktop uses persistent sidebar and full context bar;
+- compact layouts reduce columns and move secondary rails;
+- tablet uses drawer navigation where needed;
+- mobile uses app bar, bottom navigation, More menu, and mobile-specific information priority;
+- tables use declared priority columns, row expansion, cards, or dedicated overflow rather than arbitrary shrinking;
+- documentation pages use collapsible contents on mobile.
+
+### Accessibility architecture
+
+- semantic landmarks and headings;
+- skip link;
+- visible focus;
+- keyboard route and control access;
+- non-color state labels;
+- accessible loading and refresh announcements where appropriate;
+- full values for truncated identifiers;
+- 200% zoom and reflow;
+- reduced-motion support.
+
+## Project-page architecture
+
+### About
+
+About is a static project page rendered within the application shell. It explains purpose, scope, users, independence, read-only boundaries, non-goals, repository, Methodology, Contact, and optional Support.
+
+### Methodology
+
+Methodology is a long-form structured page with stable section anchors and a table of contents. Its content should be stored in repository-controlled source so changes are reviewed with code and specifications. A CMS is not required.
+
+Implementation may use React content modules, Markdown compiled at build time, or another repository-local format. The chosen method must preserve static deployment, anchors, accessibility, code review, and link checking.
+
+### API documentation
+
+API documentation is a human-readable route within the shell. Live JSON endpoints remain under `/api/*`. The documentation route must not shadow Worker API routes.
+
+### Contact
+
+Contact uses configured external URLs:
+
+- Google Form for general or private inquiries;
+- GitHub Issues or issue templates for public technical reports.
+
+External URLs are environment or repository configuration values. Missing values result in omitted or explicitly unavailable actions. Placeholder URLs are not shipped.
+
+### Support
+
+Support is optional and disabled by default. Its canonical location is `/about#support`.
+
+Support configuration must include:
+
+- address;
+- payment network;
+- accepted asset;
+- destination-tag rule;
+- QR payload;
+- disclosure text;
+- operational owner.
+
+The monitor data network and payment network are separate concepts and must be displayed separately. The support configuration does not grant the public API or UI any signing or write capability.
+
+## External-link safety
+
+- Links are configured or derived from validated identifiers.
+- Explorer links use the approved Devnet explorer pattern only.
+- No untrusted API value becomes an arbitrary URL.
+- External links have clear labels and safe `rel` behavior where required.
+- Public issue links include a warning against secrets and private data.
+
 ## Deployment model
 
 Use one Cloudflare project with environment separation:
@@ -119,6 +316,8 @@ Use one Cloudflare project with environment separation:
 Mainnet is a data-source mode, not a separate codebase. It remains disabled by configuration until explicitly approved.
 
 Bootstrap execution is separately gated from normal application deployment. A successful web deployment does not imply that bootstrap storage or activation is enabled.
+
+Contact URLs and optional Support configuration must be environment appropriate. Preview deployments must not accidentally publish unapproved production contact or payment information.
 
 ## Repository layout target
 
@@ -133,6 +332,11 @@ Bootstrap execution is separately gated from normal application deployment. A su
 |  |- collector/
 |  |- domain/
 |  |- ui/
+|  |  |- components/
+|  |  |- pages/
+|  |  |- hooks/
+|  |  |- lib/
+|  |  |- types/
 |  |- worker/
 |  |- shared/
 |- migrations/
@@ -143,7 +347,7 @@ Bootstrap execution is separately gated from normal application deployment. A su
 |  |- e2e/
 |- scripts/
 |- public/
-|- wrangler.toml
+|- wrangler.toml or wrangler.jsonc
 |- package.json
 |- vite.config.ts
 |- vitest.config.ts
@@ -156,20 +360,20 @@ Exact folders may change only through a documented decision.
 
 The codebase should use domain modules rather than page-specific parsing:
 
-- `network`
-- `epoch`
-- `asset`
-- `vault`
-- `loan-broker`
-- `loan`
-- `transaction`
-- `lifecycle`
-- `status`
-- `provenance`
-- `snapshot`
-- `collector-health`
+- `network`;
+- `epoch`;
+- `asset`;
+- `vault`;
+- `loan-broker`;
+- `loan`;
+- `transaction`;
+- `lifecycle`;
+- `status`;
+- `provenance`;
+- `snapshot`;
+- `collector-health`.
 
-Parsing, calculation, storage, API serialization, and display formatting should not be mixed in one module.
+Parsing, calculation, storage, API serialization, data fetching, and display formatting should not be mixed in one module.
 
 ## Data flow guarantees
 
@@ -184,6 +388,7 @@ Parsing, calculation, storage, API serialization, and display formatting should 
 9. Deletion removes an item from current projections but not from history.
 10. Every query is scoped by network and epoch.
 11. API responses report collector cursor, active snapshot identity, and data age.
+12. UI display state cannot upgrade unavailable, stale, indexed, or derived data into direct current fact.
 
 ## Availability strategy
 
@@ -205,6 +410,8 @@ The bootstrap runner uses exact marker checkpoints, idempotent shard names, cont
 - Secrets are environment bindings and never committed.
 - Raw ledger payloads are treated as untrusted input.
 - Manifest and shard paths are validated before activation.
+- External Contact and Support configuration is validated and does not introduce signing.
+- User-visible errors do not expose internal stack traces, bindings, or secrets.
 
 ## Observability
 
@@ -225,6 +432,8 @@ At minimum record:
 - storage upload and manifest verification errors;
 - reset detections;
 - parser failures and unrecognized fields.
+
+UI error telemetry, if later added, must be separately specified and must not collect private user content by default.
 
 ## Why not Next.js SSR
 
