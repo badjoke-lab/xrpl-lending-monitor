@@ -4,34 +4,40 @@ Last updated: 2026-07-02.
 
 ## Current milestone
 
-**M1 closeout — Current-state collector activation** and **M3 public API — Exports and feeds**.
+**M1 closeout — Current-state collector activation** and **M4-0 — UI specification and route architecture**.
 
-M1 code foundations and controlled resume evidence are merged, but M1 has not exited because a complete isolated preview bootstrap has not yet been stored, verified, and activated. M2 history foundations, the Checkpoint B documentation decision, the M3 core entity API shell, and M3 activity/search/history API are merged. M3 exports and feeds work is in progress.
+M1 code foundations and controlled resume evidence are merged, but M1 has not exited because a complete isolated preview bootstrap has not yet been stored, verified, and activated. M2 history foundations and Checkpoint B are complete. M3 core, history/search, exports, and feeds are complete through PR #20. M4 code is paused behind the UI architecture gate.
 
 ## Canonical continuation point
 
-GitHub pull request #19, `Add activity search and history API`, merged by squash as `c74753f1041efd6554052d90796eb3d5485ea5b9`.
+GitHub pull request #20, `Add bounded activity exports`, merged by squash as `d0a8ef2e0b32345ed45284f37125fee714725a02`.
 
-Active local branch for the next roadmap unit:
+Two separate branches matter:
 
-- branch: `api/exports-feeds`;
-- base: `main` at `c74753f1041efd6554052d90796eb3d5485ea5b9`;
-- roadmap unit: M3 public API exports and feeds;
-- current implementation commit: `34a3f99` (`feat: add bounded activity exports`);
-- current state: local implementation and validation complete; pull request not opened yet.
+- UI WIP checkpoint branch: `ui/overview-status-shell`;
+- UI WIP checkpoint commit: `aa623b9` (`wip: checkpoint M4 overview shell`);
+- UI WIP state: pushed, working tree recorded clean, `pnpm typecheck` passed, `pnpm build` passed, no pull request opened;
+- UI WIP boundary: functional first-pass API fetching exists, but the light simplified presentation is not the approved design and must not be merged as-is;
+- active documentation branch: `planning/ui-architecture-roadmap`;
+- documentation base: `main` at `d0a8ef2e0b32345ed45284f37125fee714725a02`;
+- active roadmap unit: M4-0 UI specification and route architecture;
+- active state: source-of-truth UI, page, route, responsive, project-page, Support, roadmap, architecture, Codex, and decision documents are being aligned before UI code resumes.
 
-Always inspect the current pull-request head and checks before resuming; the values above are a recorded checkpoint, not permission to ignore newer GitHub state.
+Always inspect the current pull-request head, branch heads, and checks before resuming; these values are recorded checkpoints, not permission to ignore newer GitHub state.
 
 ## Immediate work
 
-Complete the M3 exports and feeds pull request:
+Complete the M4-0 documentation pull request:
 
-1. push `api/exports-feeds`;
-2. open a focused PR with the validation below;
-3. merge only after required checks pass and the branch is current;
-4. continue to the M4 app shell, Overview, and Network Status unit from updated `main`.
+1. finish UI source-of-truth documents;
+2. align product, architecture, roadmap, documentation index, decisions, Codex tasks, and this implementation status;
+3. verify the branch contains documentation only;
+4. open a focused pull request;
+5. resolve documentation or CI findings without weakening product or integrity rules;
+6. merge only after explicit authorization and required checks pass;
+7. after merge, update `ui/overview-status-shell` from current `main` and implement M4-1 without merging the light WIP as-is.
 
-The first incomplete action is pushing `api/exports-feeds`.
+The first incomplete action after this status update is reviewing the complete M4-0 branch diff and opening the focused documentation pull request.
 
 ## Completed
 
@@ -83,7 +89,7 @@ The first incomplete action is pushing `api/exports-feeds`.
 ### Codex autonomous execution documentation
 
 - PR #11 merged by squash as `52d32424393bfa5c99f7279b99f84104a73dab79`;
-- root `AGENTS.md`, `docs/codex-goal.md`, `docs/codex-master-task.md`, `docs/implementation-status.md`, and `docs/README.md` are now in canonical `main`;
+- root `AGENTS.md`, `docs/codex-goal.md`, `docs/codex-master-task.md`, `docs/implementation-status.md`, and `docs/README.md` are canonical;
 - PR #11 CI `quality` passed before merge;
 - local validation for PR #11 passed `corepack enable`, `pnpm install --frozen-lockfile`, `pnpm check`, and `pnpm test:e2e`.
 
@@ -99,7 +105,7 @@ The first incomplete action is pushing `api/exports-feeds`.
 
 ## M1 remaining work
 
-1. confirm the approved boundary for isolated preview D1 and R2 access;
+1. confirm the approved boundary for isolated preview D1 and object-storage access;
 2. connect the existing adapters only when that access is available;
 3. run a longer or complete fixed-ledger preview bootstrap;
 4. intentionally interrupt and resume against the same ledger;
@@ -111,170 +117,161 @@ The first incomplete action is pushing `api/exports-feeds`.
 
 M1 exits only when a complete marker-aware bootstrap is stored, verified, and active.
 
-## M2 ordered work after the incremental foundation
+## M2 completion
 
 Merged in dependency order:
 
-1. AffectedNodes normalization, PR #12, squash merge `1b04dfaa308d670e30ac5275e444559c5f2bcf75`;
-2. Loan lifecycle engine, PR #13, squash merge `c33152db20c4624a90f08cbad8b13bc4ca6b3b96`;
-3. deleted-object archive, PR #14, squash merge `b70f7ce540aafe35220fa06182eb52ca8b572652`;
-4. cover, debt, and loss tracking, PR #15, squash merge `f8fd27e5d8bafa45e18b63475843e6b49b0d4aeb`;
-5. status engine and reconciliation, PR #16, squash merge `9b83df5617890d1f1fb3d3cac7080ef57a4e9790`;
-6. Checkpoint B history-completeness decision, PR #17, squash merge `04076722be7a37e95b5defbd82074d9474cb558c`.
+1. incremental validated-ledger foundation, PR #10;
+2. AffectedNodes normalization, PR #12, squash merge `1b04dfaa308d670e30ac5275e444559c5f2bcf75`;
+3. Loan lifecycle engine, PR #13, squash merge `c33152db20c4624a90f08cbad8b13bc4ca6b3b96`;
+4. deleted-object archive, PR #14, squash merge `b70f7ce540aafe35220fa06182eb52ca8b572652`;
+5. cover, debt, and loss tracking, PR #15, squash merge `f8fd27e5d8bafa45e18b63475843e6b49b0d4aeb`;
+6. status engine and reconciliation, PR #16, squash merge `9b83df5617890d1f1fb3d3cac7080ef57a4e9790`;
+7. Checkpoint B history-completeness decision, PR #17, squash merge `04076722be7a37e95b5defbd82074d9474cb558c`.
 
-Then continue with M3 Public API, M4 baseline UI, M5 differentiated audit UI, and M6 hardening and public Devnet release in `docs/development-roadmap.md` order.
+## M3 completion
 
-## Current validation
+Merged in dependency order:
 
-Merged `main` through PR #11 has passed frozen install, lint, type-check, unit tests, local D1 migrations, build, browser smoke, live current-state projection, controlled resume checks, and the PR #11 documentation CI check.
+1. core entity API shell, PR #18, squash merge `86258cadc4c44891708de89db2d7c55868161dfd`;
+2. activity, search, and history API, PR #19, squash merge `c74753f1041efd6554052d90796eb3d5485ea5b9`;
+3. bounded exports and feeds, PR #20, squash merge `d0a8ef2e0b32345ed45284f37125fee714725a02`.
 
-At the recorded PR #10 head, the incremental parser read Devnet ledger `3293550`, verified its ledger identity and transaction order, observed two transactions with types `Payment` and `MPTokenAuthorize`, and found zero recognized Lending transactions. This is parser and continuity evidence, not evidence of complete historical collection.
+M3 APIs remain read-only and Devnet-only. Current entity collections remain explicitly unavailable until an active snapshot and public object-shard reader exist.
 
-Current local PR #10 validation after the D1 commit guard update:
+## Current validation history
 
-- `pnpm exec vitest run src/worker/repositories/incremental-ledger-repository.test.ts src/collector/incremental/scan-validated-ledgers.test.ts`: 14 tests passed;
-- `pnpm lint && pnpm typecheck`: passed;
-- `pnpm test`: 20 test files passed, 3 skipped; 91 tests passed, 3 skipped;
-- clean local D1 migration reset by removing ignored `.wrangler/state/v3/d1`, then `pnpm db:migrate:local`: migrations `0001` through `0004` applied successfully;
-- live Devnet ledger read: ledger `3297579`, hash `9504061A151987DAB42DCE162187B1277CEB81940EB50E4F40BB09F3CCBCD397`, parent hash `E6BB4B1BA0CDB5681D822339A1A3E42C1D249FA147D2C6980BD3D91E4CD34AC1`, transaction count `0`, observed transaction types `[]`, recognized Lending-event count `0`;
-- `pnpm check`: passed;
-- `pnpm test:e2e`: 1 Chromium smoke test passed.
+Merged work through PR #20 has passed the applicable frozen install, lint, type-check, unit tests, local D1 migrations, build, browser smoke, contract, and bounded live-read workflows recorded below and in pull-request bodies.
 
-GitHub PR #10 validation:
+### Incremental validated-ledger foundation
 
-- `quality`: passed at head `6a3d4c6781d74a13f57f551b28a286b2b9b28b58`;
-- `live-devnet-ledger`: passed at head `6a3d4c6781d74a13f57f551b28a286b2b9b28b58`;
-- PR #10 had no review comments or unresolved review threads before merge.
+- focused repository and scanner tests: 14 passed;
+- lint and type-check passed;
+- unit suite: 91 passed, 3 skipped;
+- local D1 migrations `0001` through `0004` applied from clean state;
+- live Devnet ledger read verified ledger `3297579`, hash `9504061A151987DAB42DCE162187B1277CEB81940EB50E4F40BB09F3CCBCD397`, parent hash `E6BB4B1BA0CDB5681D822339A1A3E42C1D249FA147D2C6980BD3D91E4CD34AC1`, zero transactions, and zero recognized Lending events;
+- `pnpm check` and one Chromium smoke test passed;
+- PR #10 required checks passed and no unresolved review findings remained.
 
-Current local AffectedNodes normalization validation:
+### AffectedNodes normalization
 
-- `pnpm exec vitest run src/collector/incremental/affected-nodes.test.ts`: 9 tests passed;
-- `pnpm exec vitest run src/collector/incremental/affected-nodes.test.ts src/worker/repositories/incremental-ledger-repository.test.ts`: 19 tests passed;
-- `pnpm lint && pnpm typecheck`: passed;
-- clean local D1 migration reset by removing ignored `.wrangler/state/v3/d1`, then `pnpm db:migrate:local`: migrations `0001` through `0005` applied successfully;
-- `pnpm test`: 21 test files passed, 3 skipped; 100 tests passed, 3 skipped;
-- `pnpm check`: passed;
-- `pnpm test:e2e`: 1 Chromium smoke test passed;
-- live Devnet ledger read: ledger `3298066`, hash `41A6526B16E353963FA011E5227556F6D3B0152F760133801751D12F975A8C91`, parent hash `D3825AF193583DDB86C0A19BCDE341AB50D8D646F22C7E2C93512ECCEB97B42E`, transaction count `0`, observed transaction types `[]`, recognized Lending-event count `0`.
+- focused tests: 19 passed;
+- lint and type-check passed;
+- local D1 migrations through `0005` applied from clean state;
+- unit suite: 100 passed, 3 skipped;
+- `pnpm check` and one Chromium smoke test passed;
+- live Devnet ledger `3298066` verified with zero transactions and zero recognized Lending events;
+- PR #12 required checks passed and no unresolved review findings remained.
 
-GitHub PR #12 validation:
+### Loan lifecycle
 
-- `quality`: passed at head `dbd0b4b3e8738f885c67fac4374a47bce4f6268e`;
-- `live-devnet-ledger`: passed at head `dbd0b4b3e8738f885c67fac4374a47bce4f6268e`;
-- PR #12 had no review comments or unresolved review threads before merge.
+- focused lifecycle and repository tests: 18 passed;
+- lint, type-check, and unit suite passed; 108 tests passed, 3 skipped;
+- local D1 migrations through `0006` applied from clean state;
+- `pnpm check` and one Chromium smoke test passed;
+- live Devnet ledger `3307901` verified with zero transactions and zero recognized Lending events;
+- PR #13 required checks passed and no unresolved review findings remained.
 
-Current local Loan lifecycle validation:
+### Deleted-object archive
 
-- `pnpm exec vitest run src/collector/incremental/loan-lifecycle.test.ts src/worker/repositories/incremental-ledger-repository.test.ts`: 18 tests passed.
-- `pnpm lint && pnpm typecheck && pnpm test`: passed; 22 test files passed, 3 skipped; 108 tests passed, 3 skipped;
-- clean local D1 migration reset by removing ignored `.wrangler/state/v3/d1`, then `pnpm db:migrate:local`: migrations `0001` through `0006` applied successfully;
-- `pnpm check`: passed;
-- `pnpm test:e2e`: 1 Chromium smoke test passed;
-- live Devnet ledger read: ledger `3307901`, hash `1CA50D860533EAF90B2238F1C27476FD321548DD400142219C07E46E53DC3C2F`, parent hash `31FEC895939C0DDC662BDC94BD04EA8278CF014C9A92E93CDF45588ED67A5E1A`, transaction count `0`, observed transaction types `[]`, recognized Lending-event count `0`.
+- focused archive and repository tests: 16 passed;
+- lint, type-check, and unit suite passed; 114 tests passed, 3 skipped;
+- local D1 migrations through `0007` applied from clean state;
+- `pnpm check` and one Chromium smoke test passed;
+- live Devnet ledger `3308105` verified with one `OracleSet` transaction and zero recognized Lending events;
+- PR #14 required checks passed and no unresolved review findings remained.
 
-GitHub PR #13 validation:
+### Cover, debt, and loss
 
-- `quality`: passed at head `1ea3deef688c6ca75e8cd2695c617e166d9cde6c`;
-- `live-devnet-ledger`: passed at head `1ea3deef688c6ca75e8cd2695c617e166d9cde6c`;
-- PR #13 had no review comments or unresolved review threads before merge.
+- focused balance-history and repository tests: 17 passed;
+- lint, type-check, and unit suite passed; 120 tests passed, 3 skipped;
+- local D1 migrations through `0008` applied from clean state;
+- `pnpm check` and one Chromium smoke test passed;
+- live Devnet ledger `3308277` verified with zero transactions and zero recognized Lending events;
+- PR #15 required checks passed and no unresolved review findings remained.
 
-Current local deleted-object archive validation:
+### Status and reconciliation
 
-- `pnpm exec vitest run src/collector/incremental/deleted-object-archive.test.ts src/worker/repositories/incremental-ledger-repository.test.ts`: 16 tests passed.
-- `pnpm lint && pnpm typecheck && pnpm test`: passed; 23 test files passed, 3 skipped; 114 tests passed, 3 skipped;
-- clean local D1 migration reset by removing ignored `.wrangler/state/v3/d1`, then `pnpm db:migrate:local`: migrations `0001` through `0007` applied successfully;
-- `pnpm check`: passed;
-- `pnpm test:e2e`: 1 Chromium smoke test passed;
-- live Devnet ledger read: ledger `3308105`, hash `A0B402E3F818A5E8C221B5344622C69472AB26C858AA29B508409EF9C626E8D8`, parent hash `739B577CF6DA4B7721001B1BFFC9F9CE67700861563FBF14B66E817A7FB4BED7`, transaction count `1`, observed transaction types `[OracleSet]`, recognized Lending-event count `0`.
+- focused status and reconciliation tests: 9 passed;
+- lint, type-check, and unit suite passed; 129 tests passed, 3 skipped;
+- `pnpm check` and one Chromium smoke test passed;
+- live Devnet ledger `3308395` verified with zero transactions and zero recognized Lending events;
+- PR #16 required checks passed and no unresolved review findings remained.
 
-GitHub PR #14 validation:
+### Checkpoint B decision
 
-- `quality`: passed at head `eb3b53b1a655ae80a115c45c8656f8de7257390e`;
-- `live-devnet-ledger`: passed at head `eb3b53b1a655ae80a115c45c8656f8de7257390e`;
-- PR #14 had no review comments or unresolved review threads before merge.
-
-Current local cover/debt/loss validation:
-
-- `pnpm exec vitest run src/collector/incremental/cover-debt-loss.test.ts src/worker/repositories/incremental-ledger-repository.test.ts`: 17 tests passed.
-- `pnpm lint && pnpm typecheck && pnpm test`: passed; 24 test files passed, 3 skipped; 120 tests passed, 3 skipped;
-- clean local D1 migration reset by removing ignored `.wrangler/state/v3/d1`, then `pnpm db:migrate:local`: migrations `0001` through `0008` applied successfully;
-- `pnpm check`: passed;
-- `pnpm test:e2e`: 1 Chromium smoke test passed;
-- live Devnet ledger read: ledger `3308277`, hash `135F12108936C4CA352DE5504D640128F2CC64C4B5D03710C0062023715BD5FC`, parent hash `BD1F4D2F41B68A87322622BD11013493939607B28DFA95B5B4012794FA3FAEBB`, transaction count `0`, observed transaction types `[]`, recognized Lending-event count `0`.
-
-GitHub PR #15 validation:
-
-- `quality`: passed at head `bb27f09cb8a5d4825d6aeecebc4ea4dfbd1bd47b`;
-- `live-devnet-ledger`: passed at head `bb27f09cb8a5d4825d6aeecebc4ea4dfbd1bd47b`;
-- PR #15 had no review comments or unresolved review threads before merge.
-
-Current local status/reconciliation validation:
-
-- `pnpm exec vitest run src/domain/status/loan-status.test.ts src/collector/incremental/reconciliation.test.ts`: 9 tests passed;
-- `pnpm lint && pnpm typecheck && pnpm test`: passed; 26 test files passed, 3 skipped; 129 tests passed, 3 skipped;
-- `pnpm check`: passed;
-- `pnpm test:e2e`: 1 Chromium smoke test passed;
-- live Devnet ledger read: ledger `3308395`, hash `D29AB85FDB7E208895B85E118685CF5111B2E2846A138F323F4CF8825F942C9D`, parent hash `48FD9DB451AE63214847A069D24D1E6878B7B90D86829440414C151FFCDE9DC5`, transaction count `0`, observed transaction types `[]`, recognized Lending-event count `0`.
-
-GitHub PR #16 validation:
-
-- `quality`: passed at head `b655d2ce8fe5327dbee5c6f9a4dac2090f46a126`;
-- `live-devnet-ledger`: passed at head `b655d2ce8fe5327dbee5c6f9a4dac2090f46a126`;
-- PR #16 had no review comments or unresolved review threads before merge.
-
-Checkpoint B decision:
-
-- M2 data contracts are stable enough to begin M3 API contracts;
+- M2 data contracts are stable enough for M3 API contracts;
 - public lifecycle completeness claims are not approved yet;
 - active bootstrap snapshot, fixture-ledger replay, soak, and reconciliation evidence remain required before public release claims.
 
-Current local M3 core entity API validation:
+### M3 core entity API
 
-- implementation commit: `13092b6` (`feat: add core entity API shell`);
-- status commit: `f340fb6` (`docs: record core entity API progress`);
-- focused route test: `pnpm exec vitest run src/worker/core-api-routes.test.ts`: 4 tests passed;
+- focused route tests: 4 passed;
+- type-check and lint passed;
+- `pnpm check` passed; 133 tests passed, 3 skipped; no pending local D1 migrations; build passed;
+- one Chromium smoke test passed;
+- live ledger evidence was not collected because the branch changed only API behavior;
+- PR #18 required checks passed and no unresolved review findings remained.
+
+### M3 activity, search, and history API
+
+- focused route tests: 6 passed;
+- type-check passed;
+- `pnpm check` passed; 139 tests passed, 3 skipped; no pending local D1 migrations; build passed;
+- one Chromium smoke test passed;
+- live ledger evidence was not collected because the branch changed only API behavior;
+- PR #19 required checks passed and no unresolved review findings remained.
+
+### M3 exports and feeds
+
+- focused route tests: 9 passed;
+- type-check passed;
+- `pnpm check` passed; 142 tests passed, 3 skipped; no pending local D1 migrations; build passed;
+- one Chromium smoke test passed;
+- live ledger evidence was not collected because the branch changed only API behavior;
+- PR #20 `quality` passed and the pull request was squash-merged as `d0a8ef2e0b32345ed45284f37125fee714725a02`.
+
+### M4 WIP checkpoint
+
+- branch: `ui/overview-status-shell`;
+- commit: `aa623b9` (`wip: checkpoint M4 overview shell`);
+- push: `origin/ui/overview-status-shell`;
+- working tree was recorded clean after push;
 - `pnpm typecheck`: passed;
-- `pnpm lint`: passed;
-- `pnpm check`: passed; 27 test files passed, 3 skipped; 133 tests passed, 3 skipped; local D1 migrations reported no pending migrations; build passed;
-- `pnpm test:e2e`: 1 Chromium smoke test passed;
-- live ledger evidence: not collected for this API-only branch because no collector, migration, or ledger-read behavior changed;
-- branch: `api/core-entity-api`;
-- PR #18, `Add core entity API shell`, passed `quality` at head `f340fb69e2aa104b37b22021e27345d4c0662763` and was squash-merged as `86258cadc4c44891708de89db2d7c55868161dfd`;
-- PR #18 had no review comments or unresolved review threads before merge.
+- `pnpm build`: passed;
+- focused UI tests were not run because no checkpoint-specific test existed;
+- known mismatch: the current implementation is light and simplified and lacks the approved dark ledger-observatory shell, sidebar, and persistent context bar;
+- merge status: not merge-ready and no pull request opened.
 
-Current local M3 activity, search, and history API validation:
+## M4-0 documentation scope
 
-- implementation commit: `97c2f98` (`feat: add activity history API`);
-- status commit: `b183f54` (`docs: record history API progress`);
-- focused route test: `pnpm exec vitest run src/worker/history-api-routes.test.ts`: 6 tests passed;
-- `pnpm typecheck`: passed;
-- `pnpm check`: passed; 28 test files passed, 3 skipped; 139 tests passed, 3 skipped; local D1 migrations reported no pending migrations; build passed;
-- `pnpm test:e2e`: 1 Chromium smoke test passed;
-- live ledger evidence: not collected for this API-only branch because no collector, migration, or ledger-read behavior changed;
-- branch: `api/activity-history-api`;
-- PR #19, `Add activity search and history API`, passed `quality` at head `b183f54bf0b5c9098491c071704622b9be776db3` and was squash-merged as `c74753f1041efd6554052d90796eb3d5485ea5b9`;
-- PR #19 had no review comments or unresolved review threads before merge.
+The active documentation unit defines and aligns:
 
-Current local M3 exports and feeds validation:
+- visual design system;
+- information architecture;
+- page map and canonical routes;
+- page responsibilities and API dependencies;
+- reusable component inventory;
+- responsive and accessibility behavior;
+- mockup interpretation;
+- About, Methodology, Contact, API, and optional Support behavior;
+- development roadmap and recalibrated target windows;
+- Codex UI continuation task;
+- decision log and documentation authority.
 
-- implementation commit: `34a3f99` (`feat: add bounded activity exports`);
-- focused route test: `pnpm exec vitest run src/worker/history-api-routes.test.ts`: 9 tests passed;
-- `pnpm typecheck`: passed;
-- `pnpm check`: passed; 28 test files passed, 3 skipped; 142 tests passed, 3 skipped; local D1 migrations reported no pending migrations; build passed;
-- `pnpm test:e2e`: 1 Chromium smoke test passed;
-- live ledger evidence: not collected for this API-only branch because no collector, migration, or ledger-read behavior changed;
-- branch: `api/exports-feeds`;
-- pull request: not opened yet.
+No UI code belongs in M4-0.
 
 ## Known open questions
 
 | Question | Required evidence | Assigned point |
 |---|---|---|
 | What retention window should apply to failed bootstrap prefixes? | Longer preview, cleanup, storage, and rollback measurements | M1 preview bootstrap |
-| What exact schedule-state boundary labels should be public? | Tests against due-time and grace-end boundaries | M2 status engine |
-| What is the confirmed successful overpayment transaction shape? | Isolated Devnet fixture and validated metadata | M2 Loan lifecycle |
-| How should each deletion reason be classified? | Transaction and DeletedNode fixtures | M2 deleted-object archive |
+| What is the confirmed successful overpayment transaction shape? | Isolated Devnet fixture and validated metadata | M2/M6 fixture follow-up |
+| How should each deletion reason be classified? | Transaction and DeletedNode fixtures | M5 archive UI and M6 integrity review |
 | Which MPT metadata fields remain consistently available across live responses? | Live issuance fixtures | Asset enrichment follow-up |
+| Which routing implementation should be used? | Static deployment, bundle, accessibility, deep-link, and maintenance review | M4-1 |
+| What are the final Google Form and GitHub Issue URLs? | Explicit configuration approval | M4-6 / Checkpoint D |
+| Will Support be enabled for initial release? | Approved address, network, asset, destination tag, QR payload, disclosures, and ownership | M4-6 / Checkpoint D |
 
 ## Active design decisions
 
@@ -285,20 +282,27 @@ Current local M3 exports and feeds validation:
 - only a digest-verified complete manifest can activate a snapshot;
 - manifest retry does not rescan durable final shards;
 - cleanup cannot run against resumable, building, protected, or active snapshots;
-- processed-ledger persistence, canonical-event persistence, and cursor advancement must be atomic;
-- incremental commits use a transient D1 guard row inside the same batch so cursor mismatch fails before processed-ledger or protocol-event rows can commit;
-- production bootstrap and Mainnet remain disabled until approved.
+- processed-ledger persistence, canonical-event persistence, and cursor advancement are atomic;
+- production bootstrap and Mainnet remain disabled until approved;
+- UI uses the approved dark ledger-observatory direction;
+- generated mockups do not define data;
+- About, Methodology, Contact, and API are required baseline pages;
+- Support is an optional disabled-by-default section at `/about#support`;
+- USD conversion, oracle pricing, cross-asset totals, and unsupported operational metrics remain prohibited.
 
 ## Current blockers
 
-No known code blocker is recorded for completing the M3 exports and feeds pull request.
+No code blocker prevents completion of the M4-0 documentation pull request.
 
-A real isolated preview bootstrap depends on approved external preview access. That dependency does not block local implementation, tests, documentation, or independent incremental-history work.
+A real isolated preview bootstrap depends on approved external preview access. That dependency does not block documentation, UI implementation against explicit unavailable states, local tests, or independent audit UI work.
+
+Contact external URLs are not yet approved. Support configuration is not yet approved. Their pages and components must therefore support unavailable or hidden states and must not publish placeholders.
 
 ## Codex continuation documents
 
 - `docs/codex-goal.md` contains the durable project objective;
 - `docs/codex-master-task.md` contains the ordered end-to-end execution task;
+- `docs/codex-ui-task.md` contains the M4/M5 UI execution boundary and WIP checkpoint instructions;
 - root `AGENTS.md` defines mandatory operating rules and human approval gates.
 
 ## Operational rule
