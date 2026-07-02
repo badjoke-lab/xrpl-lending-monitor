@@ -16,6 +16,7 @@ import {
   serializeUnavailableEntityCollection,
   serializeUnavailableEntityDetail,
 } from '../serializers/core-api'
+import { registerCurrentLoanRoutes } from './current-loans'
 
 const DEFAULT_LIMIT = 25
 const MAX_LIMIT = 100
@@ -161,4 +162,6 @@ export function registerCurrentLoanBrokerRoutes(app: Hono<{ Bindings: Bindings }
       throw error
     }
   })
+
+  registerCurrentLoanRoutes(app)
 }
