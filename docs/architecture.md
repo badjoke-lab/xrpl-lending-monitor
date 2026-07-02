@@ -12,12 +12,12 @@
 - Vitest
 - Playwright
 - GitHub Actions or another approved long-running bootstrap runner
-- External object storage for compressed bootstrap shards
+- external object storage for compressed bootstrap shards
 - XRPL JSON-RPC over HTTPS and WebSocket where appropriate
 
 The initial product uses a lightweight managed deployment model and does not require a continuously running application server or a self-hosted XRPL node.
 
-No UI framework, design-system package, router, CMS, or content service is approved merely by being named in a mockup or planning document. The initial UI should use the existing React/Vite stack and ordinary CSS unless a focused decision justifies another dependency.
+No UI framework, design-system package, router, CMS, or content service is approved merely by being named in a mockup or planning document. The initial UI uses the existing React/Vite stack and ordinary CSS unless a focused decision justifies another dependency.
 
 ## System overview
 
@@ -56,7 +56,7 @@ External object storage          Cloudflare D1
                 |- search and activity
                 |- history and audit views
                 |- API and methodology documentation
-                |- About, Contact, and optional Support section
+                |- About and Contact
 ```
 
 ## Runtime boundaries
@@ -101,12 +101,14 @@ Responsible for:
 
 - read-only D1 queries;
 - resolving the active snapshot manifest where current object data is required;
+- reading and verifying bounded current-state shards;
+- resolving same-snapshot relationships;
 - filtering, sorting, pagination, and search;
 - attaching network, epoch, cursor, snapshot, and synchronization metadata;
 - serving derived values with provenance;
 - applying cache and abuse controls.
 
-The public API must never expose secrets, transaction signing, or write operations.
+The public API never exposes secrets, transaction signing, payment operations, or write operations.
 
 ### Static web application
 
@@ -122,7 +124,7 @@ It must:
 - preserve asset identity and avoid unsupported aggregation;
 - provide responsive, accessible Monitor, Audit, System, and Project pages;
 - keep raw data after human-readable summaries;
-- never imply a write, wallet, signing, or protocol-management capability.
+- never imply a wallet, funding, payment, signing, protocol-management, or transaction-submission capability.
 
 ## UI architecture
 
@@ -153,7 +155,7 @@ The shell owns:
 - not-found and invalid-route handling;
 - focus restoration after navigation.
 
-The shell must not block successful panels because one API request failed. Page-level data loading should permit partial success and component-level error states.
+The shell must not block successful panels because one API request failed. Page-level data loading permits partial success and component-level error states.
 
 ### Route model
 
@@ -168,7 +170,7 @@ Implementation requirements:
 - archived-only results link to archive routes rather than silently appearing current;
 - no invalid Mainnet request falls back to Devnet data.
 
-A lightweight routing implementation may be built with the platform History API or an approved router. Adding a router dependency requires checking bundle, accessibility, static-deployment, and maintenance impact.
+A lightweight routing implementation may use the platform History API or an approved router. Adding a router dependency requires checking bundle, accessibility, static-deployment, and maintenance impact.
 
 ### UI data boundary
 
@@ -186,7 +188,7 @@ src/ui/
   types/API response types
 ```
 
-Exact folders may change through implementation, but the separation between fetching, formatting, page composition, and reusable components must remain.
+Exact folders may change through implementation, but fetching, formatting, page composition, and reusable components remain separated.
 
 ### Fetching and partial failure
 
@@ -260,11 +262,11 @@ Templates share navigation and tokens but retain different density and reading b
 
 ### About
 
-About is a static project page rendered within the application shell. It explains purpose, scope, users, independence, read-only boundaries, non-goals, repository, Methodology, Contact, and optional Support.
+About is a static project page rendered within the application shell. It explains purpose, scope, users, independence, read-only boundaries, non-goals, repository, Methodology, and Contact.
 
 ### Methodology
 
-Methodology is a long-form structured page with stable section anchors and a table of contents. Its content should be stored in repository-controlled source so changes are reviewed with code and specifications. A CMS is not required.
+Methodology is a long-form structured page with stable section anchors and a table of contents. Its content is stored in repository-controlled source so changes are reviewed with code and specifications. A CMS is not required.
 
 Implementation may use React content modules, Markdown compiled at build time, or another repository-local format. The chosen method must preserve static deployment, anchors, accessibility, code review, and link checking.
 
@@ -280,22 +282,6 @@ Contact uses configured external URLs:
 - GitHub Issues or issue templates for public technical reports.
 
 External URLs are environment or repository configuration values. Missing values result in omitted or explicitly unavailable actions. Placeholder URLs are not shipped.
-
-### Support
-
-Support is optional and disabled by default. Its canonical location is `/about#support`.
-
-Support configuration must include:
-
-- address;
-- payment network;
-- accepted asset;
-- destination-tag rule;
-- QR payload;
-- disclosure text;
-- operational owner.
-
-The monitor data network and payment network are separate concepts and must be displayed separately. The support configuration does not grant the public API or UI any signing or write capability.
 
 ## External-link safety
 
@@ -317,7 +303,7 @@ Mainnet is a data-source mode, not a separate codebase. It remains disabled by c
 
 Bootstrap execution is separately gated from normal application deployment. A successful web deployment does not imply that bootstrap storage or activation is enabled.
 
-Contact URLs and optional Support configuration must be environment appropriate. Preview deployments must not accidentally publish unapproved production contact or payment information.
+Contact URLs must be environment appropriate. Preview deployments must not publish unapproved production contact information.
 
 ## Repository layout target
 
@@ -358,7 +344,7 @@ Exact folders may change only through a documented decision.
 
 ## Domain separation
 
-The codebase should use domain modules rather than page-specific parsing:
+The codebase uses domain modules rather than page-specific parsing:
 
 - `network`;
 - `epoch`;
@@ -373,7 +359,7 @@ The codebase should use domain modules rather than page-specific parsing:
 - `snapshot`;
 - `collector-health`.
 
-Parsing, calculation, storage, API serialization, data fetching, and display formatting should not be mixed in one module.
+Parsing, calculation, storage, API serialization, data fetching, and display formatting are not mixed in one module.
 
 ## Data flow guarantees
 
@@ -389,60 +375,23 @@ Parsing, calculation, storage, API serialization, data fetching, and display for
 10. Every query is scoped by network and epoch.
 11. API responses report collector cursor, active snapshot identity, and data age.
 12. UI display state cannot upgrade unavailable, stale, indexed, or derived data into direct current fact.
+13. Same-snapshot relationships must fail closed when a related object is missing, inconsistent, or beyond the bounded read limit.
 
 ## Availability strategy
 
-The UI may continue serving the latest active snapshot and committed history while bootstrap or incremental collection is temporarily unavailable. It must show stale-data or replacement-in-progress warnings based on collector lag and snapshot state.
+The UI may continue serving the latest active snapshot and committed history while bootstrap or incremental collection is temporarily unavailable. It shows stale-data or replacement-in-progress warnings based on collector lag and snapshot state.
 
-The collector uses endpoint fallback, bounded retries, exponential backoff, and a recorded failure state. It must never silently skip a ledger.
+The collector uses endpoint fallback, bounded retries, exponential backoff, and a recorded failure state. It never silently skips a ledger.
 
-The bootstrap runner uses exact marker checkpoints, idempotent shard names, content hashes, bounded retries, and manifest verification. It must never expose a partial traversal as complete current state.
+The bootstrap runner uses exact marker checkpoints, idempotent shard names, content hashes, bounded retries, and manifest verification. It never activates a partial snapshot.
 
-## Security posture
+## Security and release boundaries
 
-- No private keys, seeds, or wallet sessions.
-- No user authentication in the initial release.
-- No public write API.
-- Strict validation of search and query inputs.
-- Bound pagination and export sizes.
-- Separate bootstrap, internal collector, and public API permissions.
-- Storage write access is not available to the public API.
-- Secrets are environment bindings and never committed.
-- Raw ledger payloads are treated as untrusted input.
-- Manifest and shard paths are validated before activation.
-- External Contact and Support configuration is validated and does not introduce signing.
-- User-visible errors do not expose internal stack traces, bindings, or secrets.
-
-## Observability
-
-At minimum record:
-
-- last attempted run;
-- last successful run;
-- last processed ledger;
-- current validated ledger;
-- active snapshot ID and ledger;
-- bootstrap status and exact continuation marker;
-- bootstrap pages, decoded objects, relevant objects, shard count, bytes, retries, and wall time;
-- lag in ledgers and seconds;
-- ledgers processed per incremental run;
-- transactions inspected and accepted;
-- D1 rows read and written estimates;
-- RPC errors and endpoint used;
-- storage upload and manifest verification errors;
-- reset detections;
-- parser failures and unrecognized fields.
-
-UI error telemetry, if later added, must be separately specified and must not collect private user content by default.
-
-## Why not Next.js SSR
-
-The product is primarily a static read interface over a small read-only API. React/Vite plus Workers provides a smaller deployment surface, predictable runtime and storage use, simpler caching, and less runtime coupling than an SSR framework.
-
-## Why not a permanent WebSocket server
-
-Cloudflare Workers are not used as a permanently connected background process. Scheduled polling by ledger cursor is easier to resume, audit, and operate within a measured resource envelope. Browser-side WebSocket updates may be added later as a non-canonical enhancement, but committed API data remains the source served to users.
-
-## Why bootstrap is separate from the Worker
-
-Measured Devnet traversal required thousands of requests and many minutes for a complete global marker pass. A resumable long-running runner provides the execution window and checkpoint model required for first activation without weakening Worker guardrails or exposing partial data.
+- no public write route;
+- no wallet connection;
+- no signing or transaction submission;
+- no funding, donation, or payment surface;
+- no secret, seed, or private key in repository content, logs, fixtures, or UI;
+- no remote infrastructure or deployment change without explicit approval;
+- no Mainnet collection until the documented gate is approved;
+- no weakening of validation or fail-closed behavior to obtain a green check.
