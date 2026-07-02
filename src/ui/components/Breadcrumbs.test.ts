@@ -30,6 +30,18 @@ describe('resolveBreadcrumbs', () => {
     expect(breadcrumbs[2]?.title).toBe('rExample/Relationship')
   })
 
+  it('places archived object details under the Archived Objects audit route', () => {
+    const objectId = 'B'.repeat(64)
+    const breadcrumbs = resolveBreadcrumbs(`/audit/archived/Loan/${objectId}`)
+
+    expect(breadcrumbs.slice(0, 2)).toEqual([
+      { label: 'Overview', path: '/' },
+      { label: 'Archived Objects', path: '/audit/archived' },
+    ])
+    expect(breadcrumbs[2]?.label).toBe('Loan BBBBBBBBBB…BBBBBBBB')
+    expect(breadcrumbs[2]?.title).toBe(objectId)
+  })
+
   it('labels unsupported routes without adding a false hierarchy', () => {
     expect(resolveBreadcrumbs('/unsupported')).toEqual([
       { label: 'Overview', path: '/' },

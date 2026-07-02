@@ -28,6 +28,8 @@ const endpoints: Endpoint[] = [
   { method: 'GET', path: '/api/objects/{objectType}/{objectId}/history', purpose: 'Bounded normalized object-change history.' },
   { method: 'GET', path: '/api/loans/{loanId}/lifecycle', purpose: 'Bounded canonical Loan lifecycle sequence.' },
   { method: 'GET', path: '/api/audit/lifecycle', purpose: 'Protocol-wide bounded Loan lifecycle event explorer with event and Loan filters.' },
+  { method: 'GET', path: '/api/audit/archived', purpose: 'Bounded archived Vault, Loan Broker, and Loan explorer with type and exact identifier filters.' },
+  { method: 'GET', path: '/api/audit/archived/{objectType}/{objectId}', purpose: 'Archived object final state, deletion event, relationships, raw retained archive data, and provenance.' },
   { method: 'GET', path: '/api/search', purpose: 'Bounded exact-match indexed search across transaction, relationship, archive, lifecycle, account, asset, and identifier fields.' },
   { method: 'GET', path: '/api/exports/activity', purpose: 'Bounded Activity export in JSON, NDJSON, or CSV.' },
   { method: 'GET', path: '/api/feeds/activity.ndjson', purpose: 'Bounded NDJSON Activity feed.' },
@@ -130,6 +132,7 @@ export function ApiDocumentationPage({ onNavigate }: ApiDocumentationPageProps) 
           <li>Transaction detail groups the indexed event and up to the bounded normalized object changes returned by the route.</li>
           <li>Object history is scoped by exact object type and identifier.</li>
           <li>Loan lifecycle ordering is canonical within the collected epoch and never fills unsupported intermediate events.</li>
+          <li>Archived-object routes expose final retained state and deletion evidence while explicitly separating archive facts from current state.</li>
           <li>Epoch records expose current and archived Devnet boundaries.</li>
           <li>Indexed evidence does not prove that a referenced object remains current.</li>
         </ul>
@@ -137,7 +140,9 @@ export function ApiDocumentationPage({ onNavigate }: ApiDocumentationPageProps) 
 GET /api/transactions/{64-character-hash}
 GET /api/objects/Loan/{loanId}/history?limit=100
 GET /api/loans/{loanId}/lifecycle?limit=100
-GET /api/audit/lifecycle?event_type=payment&loan_id={loanId}&limit=100`}</CodeExample>
+GET /api/audit/lifecycle?event_type=payment&loan_id={loanId}&limit=100
+GET /api/audit/archived?object_type=Loan&q={loanId}&limit=100
+GET /api/audit/archived/Loan/{loanId}`}</CodeExample>
       </section>
 
       <section className="documentation-section" id="search" aria-labelledby="api-search-heading">

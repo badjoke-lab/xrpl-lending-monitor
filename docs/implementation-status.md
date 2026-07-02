@@ -4,9 +4,9 @@ Last updated: 2026-07-03.
 
 ## Current milestone
 
-**M1 closeout** and **M5-1 — Loan lifecycle and state changes**.
+**M1 closeout** and **M5-2 — Archived objects and final-state audit**.
 
-M0, M2, M3, and M4-0 through M4-7 are complete. M5-1 is active. M1 still requires a complete marker-aware bootstrap, verification, activation, rollback, cleanup, and resource evidence.
+M0, M2, M3, M4-0 through M4-7, and M5-1 are complete. M5-2 is active. M1 still requires a complete marker-aware bootstrap, verification, activation, rollback, cleanup, and resource evidence.
 
 ## Canonical continuation point
 
@@ -25,14 +25,16 @@ Latest merged work:
 - PR #36: `Document Cloudflare production deployment`;
 - merge commit: `f22c0cecee641c5818d5b16df28bbac265a5cf01`;
 - PR #34: `Complete M4 baseline integration and Checkpoint C`;
-- squash merge: `f7ae7032715c57234bb94dcbc3aeddce23e30a67`.
+- squash merge: `f7ae7032715c57234bb94dcbc3aeddce23e30a67`;
+- PR #37: `Add Loan lifecycle audit`;
+- squash merge: `6e3e2af11bffdb570b675a4888ad6e4b58bb6c9b`.
 
 Active implementation:
 
-- branch: `ui/m5-1-loan-lifecycle-audit`;
-- milestone unit: M5-1;
-- base: `main` at `f7ae7032715c57234bb94dcbc3aeddce23e30a67`;
-- scope: protocol-wide Loan lifecycle explorer, Loan detail lifecycle timeline, normalized Loan state changes, indexed source transaction links, explicit empty/unavailable states, and browser/API regression coverage.
+- branch: `ui/m5-2-archived-objects-audit`;
+- milestone unit: M5-2;
+- base: `main` at `6e3e2af11bffdb570b675a4888ad6e4b58bb6c9b`;
+- scope: archived-object explorer, archived Vault/Loan Broker/Loan detail route, final retained state, deletion event classification, source transaction links, archive metadata/provenance, current/archive context separation, and browser/API regression coverage.
 
 ## Production D1 schema
 
@@ -127,9 +129,9 @@ Delivered:
 
 PR #34 passed CI and was squash-merged at `f7ae7032715c57234bb94dcbc3aeddce23e30a67`.
 
-## Active M5-1
+## Completed M5-1
 
-Implemented on the active branch:
+Delivered:
 
 - `GET /api/audit/lifecycle` protocol-wide bounded lifecycle endpoint with `event_type`, `loan_id`, and `limit` filters;
 - Lifecycle audit page at `/audit/lifecycle`;
@@ -139,7 +141,7 @@ Implemented on the active branch:
 - explicit empty/unavailable states instead of inferred lifecycle or payment history;
 - focused API and browser tests.
 
-Local validation:
+Validation:
 
 - `pnpm install --frozen-lockfile` exited successfully with dependencies already up to date; pnpm printed a registry metadata fetch warning;
 - `pnpm lint`;
@@ -149,9 +151,33 @@ Local validation:
 - `pnpm build`;
 - `pnpm test:e2e` — 26 passed.
 
+PR #37 passed CI and was squash-merged at `6e3e2af11bffdb570b675a4888ad6e4b58bb6c9b`.
+
+## Active M5-2
+
+Implemented on the active branch:
+
+- `GET /api/audit/archived` bounded explorer endpoint with object-type and exact-query filters;
+- `GET /api/audit/archived/:objectType/:objectId` detail endpoint for archived Vault, Loan Broker, and Loan records;
+- Archived Objects page at `/audit/archived`;
+- archived object detail page at `/audit/archived/:objectType/:objectId`;
+- desktop sidebar and mobile More navigation to Archived Objects;
+- source deletion transaction links, final retained state JSON, indexed relationships, archive metadata, and explicit current-context warning;
+- focused API and browser tests.
+
+Local validation:
+
+- `pnpm install --frozen-lockfile`;
+- `pnpm lint`;
+- `pnpm typecheck`;
+- `pnpm test` — 172 passed, 3 skipped;
+- `pnpm db:migrate:local`;
+- `pnpm build`;
+- `pnpm test:e2e` — 29 passed.
+
 First incomplete action:
 
-- open PR for M5-1;
+- open PR for M5-2;
 - inspect CI and merge only after required checks pass.
 
 ## Known open questions

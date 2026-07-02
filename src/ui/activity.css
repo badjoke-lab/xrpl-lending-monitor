@@ -46,6 +46,28 @@
   background: rgba(10, 39, 52, 0.62);
 }
 
+.archive-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  border: 1px solid rgba(185, 167, 255, 0.38);
+  border-radius: 9px;
+  padding: 13px 15px;
+  background: rgba(37, 30, 65, 0.5);
+}
+
+.archive-banner strong {
+  flex: 0 0 auto;
+  color: var(--state-archived);
+  font-size: 0.78rem;
+}
+
+.archive-banner span {
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
 .activity-scope-note strong {
   flex: 0 0 auto;
   color: var(--accent-primary);
@@ -142,6 +164,36 @@
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
+}
+
+.relationship-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+
+.relationship-detail-grid div,
+.transaction-summary-grid div {
+  min-width: 0;
+}
+
+.relationship-detail-grid dt,
+.transaction-summary-grid dt {
+  margin-bottom: 4px;
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.relationship-detail-grid dd,
+.transaction-summary-grid dd {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
 }
 
 .affected-node-card {
@@ -321,6 +373,10 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .relationship-detail-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .lifecycle-state-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -329,6 +385,7 @@
 @media (max-width: 760px) {
   .activity-filter-form,
   .transaction-raw-grid,
+  .relationship-detail-grid,
   .lifecycle-state-grid,
   .state-change-values {
     grid-template-columns: 1fr;
@@ -339,6 +396,7 @@
   }
 
   .activity-scope-note,
+  .archive-banner,
   .affected-node-card > header,
   .lifecycle-event-card > header,
   .state-change-card > header {

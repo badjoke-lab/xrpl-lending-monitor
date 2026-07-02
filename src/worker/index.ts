@@ -11,8 +11,10 @@ import {
   type VaultSort,
 } from './repositories/current-state-object-reader'
 import {
+  getArchivedObject,
   getTransactionDetail,
   listActivity,
+  listArchivedObjects,
   listEpochs,
   listLoanLifecycle,
   listLoanLifecycleEvents,
@@ -33,6 +35,8 @@ import {
   serializeActivityCsv,
   serializeActivityNdjson,
   serializeActivityResponse,
+  serializeArchivedObjectResponse,
+  serializeArchivedObjectsResponse,
   serializeEpochsResponse,
   serializeLifecycleExplorerResponse,
   serializeLoanLifecycleResponse,
@@ -55,6 +59,7 @@ const LIFECYCLE_EVENT_TYPES = new Set([
   'deleted',
   'updated',
 ])
+const ARCHIVED_OBJECT_TYPES = new Set(['Vault', 'LoanBroker', 'Loan'])
 const MAX_QUERY_LENGTH = 128
 const MAX_CURSOR_LENGTH = 1024
 
@@ -91,6 +96,13 @@ function invalidLimitResponse(context: Context<{ Bindings: Bindings }>) {
       error: 'invalid_limit',
       message: `limit must be an integer from 1 to ${MAX_PAGE_LIMIT}`,
     },
+    400,
+  )
+}
+
+function invalidQueryResponse(context: Context<{ Bindings: Bindings }>) {
+  return context.json(
+    { error: 'invalid_query', message: `q must be at most ${MAX_QUERY_LENGTH} characters` },
     400,
   )
 }
@@ -334,6 +346,48 @@ app.get('/api/audit/lifecycle', async (context) => {
       limit,
     }),
   )
+})
+
+app.get('/api/audit/archived', async (context) => {
+  resolveRuntimeConfig(context.env)
+  const limit = parsePageLimit(context.req.query('limit'))
+  if (limit === null) return invalidLimitResponse(context)
+  const objectType = context.req.query('object_type')?.trim() || null
+  const query = context.req.query('q')?.trim() || null
+  if (query !== null && query.length > MAX_QUERY_LENGTH) return invalidQueryResponse(context)
+  if (objectType !== null && !ARCHIVED_OBJECT_TYPES.has(objectType)) {
+    return context.json(
+      { error: 'invalid_filter', message: 'object_type must be Vault, LoanBroker, or Loan' },
+      400,
+    )
+  }
+  return context.json(
+    serializeArchivedObjectsResponse({
+      archives: await listArchivedObjects(context.env.DB, { limit, objectType, query }),
+      filters: { objectType, query },
+      limit,
+    }),
+  )
+})
+
+app.get('/api/audit/archived/:objectType/:objectId', async (context) => {
+  resolveRuntimeConfig(context.env)
+  const objectType = context.req.param('objectType')
+  const objectId = context.req.param('objectId')
+  if (!ARCHIVED_OBJECT_TYPES.has(objectType)) {
+    return context.json(
+      { error: 'invalid_object_type', message: 'objectType must be Vault, LoanBroker, or Loan' },
+      400,
+    )
+  }
+  const archive = await getArchivedObject(context.env.DB, objectType, objectId)
+  if (!archive) {
+    return context.json(
+      serializeArchivedObjectResponse({ objectType, objectId, archive: null }),
+      404,
+    )
+  }
+  return context.json(serializeArchivedObjectResponse({ objectType, objectId, archive }))
 })
 
 app.get('/api/search', async (context) => {

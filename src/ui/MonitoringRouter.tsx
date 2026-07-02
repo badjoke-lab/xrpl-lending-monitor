@@ -4,6 +4,8 @@ import { AboutPage } from './pages/AboutPage'
 import { AccountDetailPage } from './pages/AccountDetailPage'
 import { ActivityPage } from './pages/ActivityPage'
 import { ApiDocumentationPage } from './pages/ApiDocumentationPage'
+import { ArchivedObjectDetailPage } from './pages/ArchivedObjectDetailPage'
+import { ArchivedObjectsPage } from './pages/ArchivedObjectsPage'
 import { ContactPage } from './pages/ContactPage'
 import { LoanBrokerDetailPage } from './pages/LoanBrokerDetailPage'
 import { LoanBrokersPage } from './pages/LoanBrokersPage'
@@ -62,6 +64,7 @@ export function resolveMonitoringPage({ currentPath, resources, navigate, reload
   const loan = /^\/loans\/([A-Fa-f0-9]{64})$/.exec(currentPath)
   const transaction = /^\/transactions\/([^/]+)$/.exec(currentPath)
   const account = /^\/accounts\/([^/]+)$/.exec(currentPath)
+  const archivedObject = /^\/audit\/archived\/(Vault|LoanBroker|Loan)\/([^/]+)$/.exec(currentPath)
 
   if (currentPath === '/') return <OverviewPage resources={resources} onNavigate={navigate} onReload={reload} />
   if (currentPath === '/network-status') return <NetworkStatusPage status={resources.status} onReload={reload} />
@@ -73,6 +76,11 @@ export function resolveMonitoringPage({ currentPath, resources, navigate, reload
   if (loan?.[1]) return <LoanDetailPage loanId={loan[1].toUpperCase()} onNavigate={navigate} />
   if (currentPath === '/activity') return <ActivityPage onNavigate={navigate} />
   if (currentPath === '/audit/lifecycle') return <LifecycleAuditPage onNavigate={navigate} />
+  if (currentPath === '/audit/archived') return <ArchivedObjectsPage onNavigate={navigate} />
+  if (archivedObject?.[1] && archivedObject[2]) {
+    const decodedObjectId = safeDecode(archivedObject[2])
+    if (decodedObjectId !== null) return <ArchivedObjectDetailPage objectType={archivedObject[1]} objectId={decodedObjectId} onNavigate={navigate} />
+  }
   if (transaction?.[1]) return <TransactionDetailPage transactionHash={transaction[1]} onNavigate={navigate} />
   if (currentPath === '/search') return <SearchPage onNavigate={navigate} />
   if (account?.[1]) {
