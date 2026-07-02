@@ -18,16 +18,22 @@ interface SearchPageProps {
 
 const ACCOUNT_PATTERN = /^r[1-9A-HJ-NP-Za-km-z]{24,34}$/
 const HEX_256_PATTERN = /^[A-Fa-f0-9]{64}$/
-const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001F\u007F]/
 
 function initialQuery(): string {
   return new URLSearchParams(window.location.search).get('q')?.trim() ?? ''
 }
 
+function containsControlCharacter(value: string): boolean {
+  return Array.from(value).some((character) => {
+    const codePoint = character.codePointAt(0) ?? 0
+    return codePoint <= 31 || codePoint === 127
+  })
+}
+
 function validateQuery(query: string): string | null {
   if (!query) return 'Enter an exact indexed identifier, account, asset key, or transaction hash.'
   if (query.length > 128) return 'Search queries must be 128 characters or fewer.'
-  if (CONTROL_CHARACTER_PATTERN.test(query)) return 'Search queries cannot contain control characters.'
+  if (containsControlCharacter(query)) return 'Search queries cannot contain control characters.'
   if (query.startsWith('r') && !ACCOUNT_PATTERN.test(query)) {
     return 'An XRPL account must be a valid classic-address shape beginning with r.'
   }
@@ -136,7 +142,7 @@ export function SearchPage({ onNavigate }: SearchPageProps) {
               onChange={(event) => setDraft(event.target.value)}
               placeholder="Transaction hash, object ID, XRPL account, MPT issuance ID, or asset key"
               maxLength={128}
-              aria-describedby="search-help search-error"
+              aria-describedby={validationError ? 'search-help search-error' : 'search-help'}
             />
           </label>
           <button className="primary-button" type="submit">Search</button>
