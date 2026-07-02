@@ -6,9 +6,17 @@ import {
   subtractExactDecimals,
   type ExactDecimal,
 } from '../../domain/asset/decimal'
-import type { VaultCurrentProjection } from '../../domain/lending/current-projections'
+import type {
+  LoanBrokerCurrentProjection,
+  VaultCurrentProjection,
+} from '../../domain/lending/current-projections'
 import type { NetworkEpochRecord, StoredSyncState } from '../../domain/network/status'
 import type { ActiveSnapshotRecord } from '../repositories/core-api-repository'
+import type {
+  ListCurrentLoanBrokersResult,
+  LoanBrokerSort,
+  CurrentLoanBrokerRecord,
+} from '../repositories/current-state-loan-broker-reader'
 import type { ListCurrentVaultsResult, VaultSort } from '../repositories/current-state-object-reader'
 
 export type EntityCollectionKind = 'vaults' | 'loan_brokers' | 'loans'
@@ -18,12 +26,7 @@ export interface PageOptions {
 }
 
 function epochSummary(epoch: NetworkEpochRecord | null) {
-  return epoch
-    ? {
-        id: epoch.id,
-        status: epoch.status,
-      }
-    : null
+  return epoch ? { id: epoch.id, status: epoch.status } : null
 }
 
 function snapshotSummary(snapshot: ActiveSnapshotRecord | null) {
@@ -42,41 +45,40 @@ function coefficientAtScale(value: ExactDecimal, scale: number): bigint {
   return parseInteger(value.coefficient) * 10n ** BigInt(scale - value.scale)
 }
 
+function ratioBps(numerator: ExactDecimal, denominator: ExactDecimal): number | null {
+  const zero = parseExactDecimal('0')
+  if (compareExactDecimals(denominator, zero) <= 0 || compareExactDecimals(numerator, zero) < 0) {
+    return null
+  }
+  const scale = Math.max(numerator.scale, denominator.scale)
+  const numeratorInteger = coefficientAtScale(numerator, scale)
+  const denominatorInteger = coefficientAtScale(denominator, scale)
+  return Number((numeratorInteger * 10_000n) / denominatorInteger)
+}
+
 function vaultDerived(vault: VaultCurrentProjection) {
+  const formula = 'used_assets = AssetsTotal - AssetsAvailable; utilization_bps = floor(used_assets / AssetsTotal * 10000)'
   try {
     const total = parseExactDecimal(vault.assetsTotal)
     const available = parseExactDecimal(vault.assetsAvailable)
     const zero = parseExactDecimal('0')
     const used = subtractExactDecimals(total, available)
     if (compareExactDecimals(total, zero) <= 0 || compareExactDecimals(used, zero) < 0) {
-      return {
-        used_assets: null,
-        utilization_bps: null,
-        formula: 'used_assets = AssetsTotal - AssetsAvailable; utilization_bps = floor(used_assets / AssetsTotal * 10000)',
-        provenance: 'unavailable',
-      }
+      return { used_assets: null, utilization_bps: null, formula, provenance: 'unavailable' }
     }
-
-    const scale = Math.max(total.scale, used.scale)
-    const totalInteger = coefficientAtScale(total, scale)
-    const usedInteger = coefficientAtScale(used, scale)
     return {
       used_assets: formatExactDecimal(used),
-      utilization_bps: Number((usedInteger * 10_000n) / totalInteger),
-      formula: 'used_assets = AssetsTotal - AssetsAvailable; utilization_bps = floor(used_assets / AssetsTotal * 10000)',
+      utilization_bps: ratioBps(used, total),
+      formula,
       provenance: 'derived',
     }
   } catch {
-    return {
-      used_assets: null,
-      utilization_bps: null,
-      formula: 'used_assets = AssetsTotal - AssetsAvailable; utilization_bps = floor(used_assets / AssetsTotal * 10000)',
-      provenance: 'unavailable',
-    }
+    return { used_assets: null, utilization_bps: null, formula, provenance: 'unavailable' }
   }
 }
 
 function serializeVault(vault: VaultCurrentProjection, includeRaw = false) {
+  const derived = vaultDerived(vault)
   return {
     id: vault.id,
     owner: vault.owner,
@@ -93,12 +95,86 @@ function serializeVault(vault: VaultCurrentProjection, includeRaw = false) {
     flags: vault.flags,
     previous_transaction_hash: vault.previousTxHash,
     previous_ledger_index: vault.previousLedgerIndex,
-    derived: vaultDerived(vault),
+    derived,
+    provenance: { object: 'direct', derived: derived.provenance },
+    ...(includeRaw ? { raw: vault.raw } : {}),
+  }
+}
+
+function scaledRateProduct(value: ExactDecimal, rate: number): ExactDecimal {
+  return {
+    coefficient: (parseInteger(value.coefficient) * BigInt(rate)).toString(),
+    scale: value.scale + 5,
+  }
+}
+
+function brokerDerived(broker: LoanBrokerCurrentProjection) {
+  const formulas = {
+    debt_utilization: 'debt_utilization_bps = floor(DebtTotal / DebtMaximum * 10000)',
+    required_cover: 'required_minimum_cover = DebtTotal * CoverRateMinimum / 100000',
+    cover_surplus: 'cover_surplus = CoverAvailable - required_minimum_cover',
+  }
+  try {
+    const debt = parseExactDecimal(broker.debtTotal)
+    const cover = parseExactDecimal(broker.coverAvailable)
+    const debtMaximum = broker.debtMaximum === null ? null : parseExactDecimal(broker.debtMaximum)
+    const required = scaledRateProduct(debt, broker.coverRateMinimum)
+    const surplus = subtractExactDecimals(cover, required)
+    return {
+      debt_utilization_bps: debtMaximum ? ratioBps(debt, debtMaximum) : null,
+      required_minimum_cover: formatExactDecimal(required),
+      cover_surplus: formatExactDecimal(surplus),
+      cover_ratio_bps: ratioBps(cover, required),
+      formulas,
+      provenance: 'derived',
+    }
+  } catch {
+    return {
+      debt_utilization_bps: null,
+      required_minimum_cover: null,
+      cover_surplus: null,
+      cover_ratio_bps: null,
+      formulas,
+      provenance: 'unavailable',
+    }
+  }
+}
+
+function serializeLoanBroker(record: CurrentLoanBrokerRecord, includeRaw = false) {
+  const { broker, vault } = record
+  const derived = brokerDerived(broker)
+  return {
+    id: broker.id,
+    vault_id: broker.vaultId,
+    owner: broker.owner,
+    account: broker.account,
+    asset: vault.asset,
+    sequence: broker.sequence,
+    loan_sequence: broker.loanSequence,
+    management_fee_rate: broker.managementFeeRate,
+    owner_count: broker.ownerCount,
+    debt_total: broker.debtTotal,
+    debt_maximum: broker.debtMaximum,
+    cover_available: broker.coverAvailable,
+    cover_rate_minimum: broker.coverRateMinimum,
+    cover_rate_liquidation: broker.coverRateLiquidation,
+    flags: broker.flags,
+    previous_transaction_hash: broker.previousTxHash,
+    previous_ledger_index: broker.previousLedgerIndex,
+    related_vault: {
+      id: vault.id,
+      asset: vault.asset,
+      owner: vault.owner,
+      account: vault.account,
+    },
+    derived,
     provenance: {
       object: 'direct',
-      derived: vaultDerived(vault).provenance,
+      asset: 'direct',
+      relationship: 'direct',
+      derived: derived.provenance,
     },
-    ...(includeRaw ? { raw: vault.raw } : {}),
+    ...(includeRaw ? { raw: broker.raw } : {}),
   }
 }
 
@@ -127,9 +203,7 @@ export function serializeOverview(options: {
       counts: options.snapshot ? 'direct' : 'unavailable',
       freshness: options.state ? 'direct' : 'unavailable',
     },
-    unavailable: options.snapshot
-      ? []
-      : ['active current-state snapshot has not been activated'],
+    unavailable: options.snapshot ? [] : ['active current-state snapshot has not been activated'],
   }
 }
 
@@ -155,17 +229,9 @@ export function serializeAvailableVaultCollection(options: {
       shards_read: options.result.shardsRead,
       objects_examined: options.result.objectsExamined,
     },
-    filters: {
-      query: options.query ?? null,
-      has_loss: options.hasLoss ?? null,
-    },
-    availability: {
-      state: 'available',
-      reason: null,
-    },
-    provenance: {
-      collection: 'direct',
-    },
+    filters: { query: options.query ?? null, has_loss: options.hasLoss ?? null },
+    availability: { state: 'available', reason: null },
+    provenance: { collection: 'direct' },
   }
 }
 
@@ -180,13 +246,55 @@ export function serializeVaultDetail(options: {
     epoch: epochSummary(options.epoch),
     snapshot: snapshotSummary(options.snapshot),
     data: serializeVault(options.vault, true),
-    availability: {
-      state: 'available',
-      reason: null,
+    availability: { state: 'available', reason: null },
+    provenance: { object: 'direct' },
+  }
+}
+
+export function serializeAvailableLoanBrokerCollection(options: {
+  epoch: NetworkEpochRecord | null
+  snapshot: ActiveSnapshotRecord
+  result: ListCurrentLoanBrokersResult
+  page: PageOptions
+  sort: LoanBrokerSort
+  query?: string
+}) {
+  return {
+    network: 'devnet',
+    kind: 'loan_brokers',
+    epoch: epochSummary(options.epoch),
+    snapshot: snapshotSummary(options.snapshot),
+    data: options.result.data.map((record) => serializeLoanBroker(record)),
+    page: {
+      limit: options.page.limit,
+      next_cursor: options.result.nextCursor,
+      sort: options.sort,
+      broker_shards_read: options.result.brokerShardsRead,
+      relation_shards_read: options.result.relationShardsRead,
+      objects_examined: options.result.objectsExamined,
     },
+    filters: { query: options.query ?? null },
+    availability: { state: 'available', reason: null },
     provenance: {
-      object: 'direct',
+      collection: 'direct',
+      asset_relationship: 'direct',
     },
+  }
+}
+
+export function serializeLoanBrokerDetail(options: {
+  epoch: NetworkEpochRecord | null
+  snapshot: ActiveSnapshotRecord
+  record: CurrentLoanBrokerRecord
+}) {
+  return {
+    network: 'devnet',
+    kind: 'loan_broker',
+    epoch: epochSummary(options.epoch),
+    snapshot: snapshotSummary(options.snapshot),
+    data: serializeLoanBroker(options.record, true),
+    availability: { state: 'available', reason: null },
+    provenance: { object: 'direct', asset_relationship: 'direct' },
   }
 }
 
@@ -203,30 +311,26 @@ export function serializeUnavailableEntityCollection(options: {
     epoch: epochSummary(options.epoch),
     snapshot: snapshotSummary(options.snapshot),
     data: [],
-    page: {
-      limit: options.page.limit,
-      next_cursor: null,
-    },
+    page: { limit: options.page.limit, next_cursor: null },
     availability: {
       state: 'unavailable',
       reason: options.reason ?? (options.snapshot
         ? 'current object storage binding is not configured for public API reads'
         : 'active current-state snapshot has not been activated'),
     },
-    provenance: {
-      collection: 'unavailable',
-    },
+    provenance: { collection: 'unavailable' },
   }
 }
 
-export function serializeUnavailableVaultDetail(options: {
+export function serializeUnavailableEntityDetail(options: {
+  kind: 'vault' | 'loan_broker' | 'loan'
   epoch: NetworkEpochRecord | null
   snapshot: ActiveSnapshotRecord | null
   reason?: string
 }) {
   return {
     network: 'devnet',
-    kind: 'vault',
+    kind: options.kind,
     epoch: epochSummary(options.epoch),
     snapshot: snapshotSummary(options.snapshot),
     data: null,
@@ -236,8 +340,14 @@ export function serializeUnavailableVaultDetail(options: {
         ? 'current object storage binding is not configured for public API reads'
         : 'active current-state snapshot has not been activated'),
     },
-    provenance: {
-      object: 'unavailable',
-    },
+    provenance: { object: 'unavailable' },
   }
+}
+
+export function serializeUnavailableVaultDetail(options: {
+  epoch: NetworkEpochRecord | null
+  snapshot: ActiveSnapshotRecord | null
+  reason?: string
+}) {
+  return serializeUnavailableEntityDetail({ kind: 'vault', ...options })
 }
