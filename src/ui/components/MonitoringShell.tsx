@@ -28,9 +28,9 @@ const groups: Array<{ label: string; items: Item[] }> = [
   ] },
   { label: 'System', items: [
     { label: 'Network Status', path: '/network-status' },
-    { label: 'API' }, { label: 'Methodology' },
+    { label: 'API', path: '/api' }, { label: 'Methodology', path: '/methodology' },
   ] },
-  { label: 'Project', items: [{ label: 'About' }, { label: 'Contact' }] },
+  { label: 'Project', items: [{ label: 'About', path: '/about' }, { label: 'Contact', path: '/contact' }] },
 ]
 
 function Link({ item, currentPath, onNavigate }: {
