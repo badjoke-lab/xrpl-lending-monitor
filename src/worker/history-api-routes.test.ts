@@ -55,6 +55,28 @@ function objectChangeRow() {
   }
 }
 
+function archivedObjectRow() {
+  return {
+    epoch_id: 'epoch-1',
+    object_type: 'Loan',
+    object_id: 'LOAN1',
+    deletion_transaction_hash: 'TX1',
+    deletion_ledger_index: 200,
+    deletion_transaction_index: 1,
+    deletion_close_time: 800_000_000,
+    deletion_reason: 'loan_delete',
+    final_state_json: '{"LedgerEntryType":"Loan","LoanID":"LOAN1"}',
+    vault_id: 'VAULT1',
+    loan_broker_id: 'BROKER1',
+    loan_id: 'LOAN1',
+    owner: null,
+    account: null,
+    borrower: 'rBorrower',
+    asset_key: 'XRP',
+    archived_at: '2026-07-01T00:00:00.000Z',
+  }
+}
+
 function createFakeDatabase(): D1Database {
   return {
     prepare(sql: string) {
@@ -67,6 +89,10 @@ function createFakeDatabase(): D1Database {
         async first<T>() {
           if (sql.includes('FROM protocol_events') && sql.includes('event_hash = ?1')) {
             return (bindings[0] === 'TX1' ? protocolEventRow(true) : null) as T | null
+          }
+
+          if (sql.includes('FROM archived_objects')) {
+            return (bindings[0] === 'Loan' && bindings[1] === 'LOAN1' ? archivedObjectRow() : null) as T | null
           }
 
           return null
@@ -122,6 +148,10 @@ function createFakeDatabase(): D1Database {
                 },
               ] as T[],
             }
+          }
+
+          if (sql.includes('FROM archived_objects')) {
+            return { results: [archivedObjectRow()] as T[] }
           }
 
           if (sql.includes('FROM network_epochs')) {
@@ -248,6 +278,57 @@ describe('history API routes', () => {
     })
 
     const invalid = await app.request('/api/audit/lifecycle?event_type=made_up', {}, createEnv(createFakeDatabase()))
+    expect(invalid.status).toBe(400)
+  })
+
+  it('lists archived objects with explicit archive provenance', async () => {
+    const response = await app.request('/api/audit/archived?object_type=Loan&q=LOAN1&limit=5', {}, createEnv(createFakeDatabase()))
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toMatchObject({
+      network: 'devnet',
+      kind: 'archived_objects',
+      filters: { object_type: 'Loan', query: 'LOAN1' },
+      data: [
+        {
+          object_type: 'Loan',
+          object_id: 'LOAN1',
+          deletion_transaction_hash: 'TX1',
+          deletion_reason: 'loan_delete',
+          final_state_json: { LedgerEntryType: 'Loan', LoanID: 'LOAN1' },
+          relationships: { vault_id: 'VAULT1', loan_broker_id: 'BROKER1', loan_id: 'LOAN1' },
+          provenance: 'indexed',
+        },
+      ],
+      provenance: { collection: 'indexed' },
+      page: { limit: 5, next_cursor: null },
+    })
+  })
+
+  it('rejects unbounded archive filters', async () => {
+    const invalidQuery = await app.request(`/api/audit/archived?q=${'A'.repeat(129)}`, {}, createEnv(createFakeDatabase()))
+    expect(invalidQuery.status).toBe(400)
+  })
+
+  it('returns archived object detail and validates archive type', async () => {
+    const response = await app.request('/api/audit/archived/Loan/LOAN1', {}, createEnv(createFakeDatabase()))
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toMatchObject({
+      network: 'devnet',
+      kind: 'archived_object',
+      object_type: 'Loan',
+      object_id: 'LOAN1',
+      data: {
+        object_type: 'Loan',
+        object_id: 'LOAN1',
+        deletion_reason: 'loan_delete',
+        provenance: 'indexed',
+      },
+      availability: { state: 'available', reason: null },
+    })
+
+    const invalid = await app.request('/api/audit/archived/Offer/LOAN1', {}, createEnv(createFakeDatabase()))
     expect(invalid.status).toBe(400)
   })
 

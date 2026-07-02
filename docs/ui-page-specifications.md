@@ -290,6 +290,10 @@ M5-1.
 
 Browses deleted Vault, Loan Broker, and Loan records with supported type, epoch, relationship, transaction, and classification filters. Unknown classification remains explicit.
 
+### API dependencies
+
+`/api/audit/archived`.
+
 ### Milestone
 
 M5-2.
@@ -306,6 +310,10 @@ M5-2.
 - archive metadata and provenance;
 - retained raw archive data where available;
 - current-context links where valid.
+
+### API dependencies
+
+`/api/audit/archived/:objectType/:objectId` and `/api/transactions/:hash`.
 
 ### Milestone
 

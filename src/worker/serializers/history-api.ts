@@ -1,4 +1,5 @@
 import type {
+  ArchivedObjectRecord,
   LoanLifecycleRecord,
   NetworkEpochApiRecord,
   ObjectChangeRecord,
@@ -125,6 +126,31 @@ function serializeSearchResult(result: SearchResultRecord) {
   }
 }
 
+function serializeArchivedObject(archive: ArchivedObjectRecord) {
+  return {
+    epoch_id: archive.epochId,
+    object_type: archive.objectType,
+    object_id: archive.objectId,
+    deletion_transaction_hash: archive.deletionTransactionHash,
+    deletion_ledger_index: archive.deletionLedgerIndex,
+    deletion_transaction_index: archive.deletionTransactionIndex,
+    deletion_close_time: archive.deletionCloseTime,
+    deletion_reason: archive.deletionReason,
+    final_state_json: archive.finalStateJson,
+    relationships: {
+      vault_id: archive.vaultId,
+      loan_broker_id: archive.loanBrokerId,
+      loan_id: archive.loanId,
+      owner: archive.owner,
+      account: archive.account,
+      borrower: archive.borrower,
+      asset_key: archive.assetKey,
+    },
+    archived_at: archive.archivedAt,
+    provenance: 'indexed',
+  }
+}
+
 export function serializeActivityResponse(events: ProtocolEventRecord[], limit: number) {
   return {
     network: 'devnet',
@@ -235,6 +261,42 @@ export function serializeLifecycleExplorerResponse(options: {
     },
     page: page(options.limit),
     provenance: { collection: 'indexed' },
+  }
+}
+
+export function serializeArchivedObjectsResponse(options: {
+  archives: ArchivedObjectRecord[]
+  limit: number
+  filters: { objectType: string | null; query: string | null }
+}) {
+  return {
+    network: 'devnet',
+    kind: 'archived_objects',
+    data: options.archives.map(serializeArchivedObject),
+    filters: {
+      object_type: options.filters.objectType,
+      query: options.filters.query,
+    },
+    page: page(options.limit),
+    provenance: { collection: 'indexed' },
+  }
+}
+
+export function serializeArchivedObjectResponse(options: {
+  objectType: string
+  objectId: string
+  archive: ArchivedObjectRecord | null
+}) {
+  return {
+    network: 'devnet',
+    kind: 'archived_object',
+    object_type: options.objectType,
+    object_id: options.objectId,
+    data: options.archive ? serializeArchivedObject(options.archive) : null,
+    availability: options.archive
+      ? { state: 'available', reason: null }
+      : { state: 'unavailable', reason: 'archived object was not found in indexed history' },
+    provenance: { object: options.archive ? 'indexed' : 'unavailable' },
   }
 }
 

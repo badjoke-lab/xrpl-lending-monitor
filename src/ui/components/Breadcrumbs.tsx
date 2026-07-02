@@ -32,19 +32,25 @@ export function resolveBreadcrumbs(currentPath: string): BreadcrumbItem[] {
     pattern: RegExp
     collection: BreadcrumbItem
     detailLabel?: string
+    labelFactory?: (match: RegExpExecArray) => string
   }> = [
     { pattern: /^\/vaults\/([^/]+)$/, collection: { label: 'Vaults', path: '/vaults' } },
     { pattern: /^\/loan-brokers\/([^/]+)$/, collection: { label: 'Loan Brokers', path: '/loan-brokers' } },
     { pattern: /^\/loans\/([^/]+)$/, collection: { label: 'Loans', path: '/loans' } },
     { pattern: /^\/transactions\/([^/]+)$/, collection: { label: 'Activity', path: '/activity' }, detailLabel: 'Transaction' },
     { pattern: /^\/accounts\/([^/]+)$/, collection: { label: 'Search', path: '/search' }, detailLabel: 'Account' },
+    {
+      pattern: /^\/audit\/archived\/(Vault|LoanBroker|Loan)\/([^/]+)$/,
+      collection: { label: 'Archived Objects', path: '/audit/archived' },
+      labelFactory: (match) => `${match[1]} ${shortenIdentifier(decodeIdentifier(match[2] ?? ''))}`,
+    },
   ]
 
   for (const route of detailRoutes) {
     const match = route.pattern.exec(currentPath)
     if (match?.[1]) {
-      const identifier = decodeIdentifier(match[1])
-      const label = route.detailLabel
+      const identifier = decodeIdentifier(match[2] ?? match[1])
+      const label = route.labelFactory ? route.labelFactory(match) : route.detailLabel
         ? `${route.detailLabel} ${shortenIdentifier(identifier)}`
         : shortenIdentifier(identifier)
       return [overview, route.collection, { label, title: identifier }]
@@ -59,6 +65,7 @@ export function resolveBreadcrumbs(currentPath: string): BreadcrumbItem[] {
     '/activity': 'Activity',
     '/search': 'Search',
     '/audit/lifecycle': 'Lifecycle',
+    '/audit/archived': 'Archived Objects',
     '/api': 'API',
     '/methodology': 'Methodology',
     '/about': 'About',

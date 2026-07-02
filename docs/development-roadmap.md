@@ -253,6 +253,8 @@ Checkpoint C confirms ordinary monitor completeness before audit-only promotion.
 
 ### M5-1 — Loan lifecycle and state changes
 
+Status: complete in PR #37 (`6e3e2af11bffdb570b675a4888ad6e4b58bb6c9b`).
+
 - protocol-wide lifecycle explorer;
 - Loan lifecycle and payment timeline;
 - impair, unimpair, default, repay, and delete events;
@@ -262,6 +264,8 @@ Checkpoint C confirms ordinary monitor completeness before audit-only promotion.
 - no unsupported intermediate-state inference.
 
 ### M5-2 — Archived objects and final-state audit
+
+Status: active.
 
 - Archived Objects explorer;
 - archived Vault, Loan Broker, and Loan detail pages;

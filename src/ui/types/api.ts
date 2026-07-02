@@ -162,6 +162,48 @@ export interface LifecycleExplorerResponse {
   provenance: { collection: Provenance }
 }
 
+export interface ArchivedObjectRecord {
+  epoch_id: string
+  object_type: 'Vault' | 'LoanBroker' | 'Loan'
+  object_id: string
+  deletion_transaction_hash: string
+  deletion_ledger_index: number
+  deletion_transaction_index: number
+  deletion_close_time: number
+  deletion_reason: 'vault_delete' | 'loan_broker_delete' | 'loan_delete' | 'unknown'
+  final_state_json: unknown
+  relationships: {
+    vault_id: string | null
+    loan_broker_id: string | null
+    loan_id: string | null
+    owner: string | null
+    account: string | null
+    borrower: string | null
+    asset_key: string | null
+  }
+  archived_at: string
+  provenance: 'indexed'
+}
+
+export interface ArchivedObjectsResponse {
+  network: 'devnet'
+  kind: 'archived_objects'
+  data: ArchivedObjectRecord[]
+  filters: { object_type: string | null; query: string | null }
+  page: { limit: number; next_cursor: null }
+  provenance: { collection: Provenance }
+}
+
+export interface ArchivedObjectDetailResponse {
+  network: 'devnet'
+  kind: 'archived_object'
+  object_type: string
+  object_id: string
+  data: ArchivedObjectRecord | null
+  availability: { state: 'available' | 'unavailable'; reason: string | null }
+  provenance: { object: Provenance }
+}
+
 export interface CanonicalAssetResponse {
   type: 'xrp' | 'iou' | 'mpt'
   key: string

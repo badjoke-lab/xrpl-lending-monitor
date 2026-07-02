@@ -7,6 +7,11 @@ export interface LoanLifecycleListOptions extends HistoryPageOptions {
   loanId?: string | null
 }
 
+export interface ArchivedObjectListOptions extends HistoryPageOptions {
+  objectType?: string | null
+  query?: string | null
+}
+
 export interface ProtocolEventRecord {
   eventHash: string
   epochId: string
@@ -91,6 +96,26 @@ export interface SearchResultRecord {
   objectType: string | null
   objectId: string | null
   loanId: string | null
+}
+
+export interface ArchivedObjectRecord {
+  epochId: string
+  objectType: string
+  objectId: string
+  deletionTransactionHash: string
+  deletionLedgerIndex: number
+  deletionTransactionIndex: number
+  deletionCloseTime: number
+  deletionReason: string
+  finalStateJson: unknown
+  vaultId: string | null
+  loanBrokerId: string | null
+  loanId: string | null
+  owner: string | null
+  account: string | null
+  borrower: string | null
+  assetKey: string | null
+  archivedAt: string
 }
 
 interface ProtocolEventRow {
@@ -179,6 +204,26 @@ interface SearchResultRow {
   loan_id: string | null
 }
 
+interface ArchivedObjectRow {
+  epoch_id: string
+  object_type: string
+  object_id: string
+  deletion_transaction_hash: string
+  deletion_ledger_index: number
+  deletion_transaction_index: number
+  deletion_close_time: number
+  deletion_reason: string
+  final_state_json: string
+  vault_id: string | null
+  loan_broker_id: string | null
+  loan_id: string | null
+  owner: string | null
+  account: string | null
+  borrower: string | null
+  asset_key: string | null
+  archived_at: string
+}
+
 function parseStoredJson(value: string | null): unknown | null {
   if (value === null) return null
   return JSON.parse(value)
@@ -265,6 +310,28 @@ function mapEpoch(row: EpochRow): NetworkEpochApiRecord {
     startedAt: row.started_at,
     endedAt: row.ended_at,
     resetReason: row.reset_reason,
+  }
+}
+
+function mapArchivedObject(row: ArchivedObjectRow): ArchivedObjectRecord {
+  return {
+    epochId: row.epoch_id,
+    objectType: row.object_type,
+    objectId: row.object_id,
+    deletionTransactionHash: row.deletion_transaction_hash,
+    deletionLedgerIndex: row.deletion_ledger_index,
+    deletionTransactionIndex: row.deletion_transaction_index,
+    deletionCloseTime: row.deletion_close_time,
+    deletionReason: row.deletion_reason,
+    finalStateJson: JSON.parse(row.final_state_json),
+    vaultId: row.vault_id,
+    loanBrokerId: row.loan_broker_id,
+    loanId: row.loan_id,
+    owner: row.owner,
+    account: row.account,
+    borrower: row.borrower,
+    assetKey: row.asset_key,
+    archivedAt: row.archived_at,
   }
 }
 
@@ -406,6 +473,49 @@ export async function listLoanLifecycleEvents(
       .bind(options.eventType ?? null, options.loanId ?? null, options.limit),
   )
   return rows.map(mapLoanLifecycle)
+}
+
+export async function listArchivedObjects(
+  db: D1Database,
+  options: ArchivedObjectListOptions,
+): Promise<ArchivedObjectRecord[]> {
+  const rows = await allRows<ArchivedObjectRow>(
+    db
+      .prepare(
+        `SELECT *
+         FROM archived_objects
+         WHERE network = 'devnet'
+           AND (?1 IS NULL OR object_type = ?1)
+           AND (
+             ?2 IS NULL OR object_id = ?2 OR deletion_transaction_hash = ?2 OR
+             vault_id = ?2 OR loan_broker_id = ?2 OR loan_id = ?2 OR
+             owner = ?2 OR account = ?2 OR borrower = ?2 OR asset_key = ?2
+           )
+         ORDER BY deletion_ledger_index DESC, deletion_transaction_index DESC
+         LIMIT ?3`,
+      )
+      .bind(options.objectType ?? null, options.query ?? null, options.limit),
+  )
+  return rows.map(mapArchivedObject)
+}
+
+export async function getArchivedObject(
+  db: D1Database,
+  objectType: string,
+  objectId: string,
+): Promise<ArchivedObjectRecord | null> {
+  const row = await db
+    .prepare(
+      `SELECT *
+       FROM archived_objects
+       WHERE network = 'devnet'
+         AND object_type = ?1
+         AND object_id = ?2
+       LIMIT 1`,
+    )
+    .bind(objectType, objectId)
+    .first<ArchivedObjectRow>()
+  return row ? mapArchivedObject(row) : null
 }
 
 export async function searchHistory(
