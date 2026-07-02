@@ -64,6 +64,17 @@ interface StoredArchive {
   finalStateJson: string
 }
 
+interface StoredBalance {
+  network: string
+  epochId: string
+  subjectType: string
+  subjectId: string
+  transactionHash: string
+  metricType: string
+  beforeValue: string | null
+  afterValue: string | null
+}
+
 interface DatabaseState {
   cursor: CursorRow | null
   processedLedgers: StoredLedger[]
@@ -71,6 +82,7 @@ interface DatabaseState {
   objectChanges: StoredObjectChange[]
   lifecycleEvents: StoredLifecycleEvent[]
   archives: StoredArchive[]
+  balances: StoredBalance[]
   guards: string[]
 }
 
@@ -82,6 +94,7 @@ function cloneState(state: DatabaseState): DatabaseState {
     objectChanges: state.objectChanges.map((item) => ({ ...item })),
     lifecycleEvents: state.lifecycleEvents.map((item) => ({ ...item })),
     archives: state.archives.map((item) => ({ ...item })),
+    balances: state.balances.map((item) => ({ ...item })),
     guards: [...state.guards],
   }
 }
@@ -95,6 +108,7 @@ function fakeDatabase(options: {
   objectChanges?: StoredObjectChange[]
   lifecycleEvents?: StoredLifecycleEvent[]
   archives?: StoredArchive[]
+  balances?: StoredBalance[]
 }) {
   const statements: StatementRecord[] = []
   const batches: number[][] = []
@@ -105,6 +119,7 @@ function fakeDatabase(options: {
     objectChanges: options.objectChanges ?? [],
     lifecycleEvents: options.lifecycleEvents ?? [],
     archives: options.archives ?? [],
+    balances: options.balances ?? [],
     guards: [],
   }
   const db = {
@@ -138,6 +153,7 @@ function fakeDatabase(options: {
       state.objectChanges = draft.objectChanges
       state.lifecycleEvents = draft.lifecycleEvents
       state.archives = draft.archives
+      state.balances = draft.balances
       state.guards = draft.guards
       batches.push(items.map((item) => item.__index ?? -1))
       return []
@@ -381,6 +397,56 @@ function applyStatement(
     return
   }
 
+  if (statement.sql.includes('INSERT INTO balance_history')) {
+    const [
+      network,
+      epochId,
+      subjectType,
+      subjectId,
+      transactionHash,
+      ,
+      ,
+      ,
+      metricType,
+      ,
+      beforeValue,
+      afterValue,
+    ] = statement.values
+    if (
+      typeof network !== 'string' ||
+      typeof epochId !== 'string' ||
+      typeof subjectType !== 'string' ||
+      typeof subjectId !== 'string' ||
+      typeof transactionHash !== 'string' ||
+      typeof metricType !== 'string'
+    ) {
+      throw new Error('Invalid balance history bind values')
+    }
+    if (
+      !state.balances.some(
+        (item) =>
+          item.network === network &&
+          item.epochId === epochId &&
+          item.subjectType === subjectType &&
+          item.subjectId === subjectId &&
+          item.transactionHash === transactionHash &&
+          item.metricType === metricType,
+      )
+    ) {
+      state.balances.push({
+        network,
+        epochId,
+        subjectType,
+        subjectId,
+        transactionHash,
+        metricType,
+        beforeValue: typeof beforeValue === 'string' ? beforeValue : null,
+        afterValue: typeof afterValue === 'string' ? afterValue : null,
+      })
+    }
+    return
+  }
+
   if (statement.sql.includes('UPDATE sync_state')) {
     const [ledgerIndex, ledgerHash, , , epochId, expectedLedger, expectedHash] = statement.values
     if (
@@ -413,6 +479,60 @@ function applyStatement(
   }
 
   throw new Error(`Unhandled statement: ${statement.sql}`)
+}
+
+function brokerBalanceScan(): IncrementalScanResult {
+  const baseScan = scan()
+  const transaction = {
+    hash: 'C'.repeat(64),
+    transactionType: 'LoanBrokerCoverDeposit',
+    account: 'rAccount',
+    sequence: 9,
+    fee: '10',
+    result: 'tesSUCCESS',
+    transactionIndex: 3,
+    transaction: { TransactionType: 'LoanBrokerCoverDeposit' },
+    metadata: {
+      TransactionResult: 'tesSUCCESS',
+      TransactionIndex: 3,
+      AffectedNodes: [
+        {
+          ModifiedNode: {
+            LedgerEntryType: 'LoanBroker',
+            LedgerIndex: 'B'.repeat(64),
+            PreviousFields: {
+              DebtTotal: '1000',
+              CoverAvailable: '80',
+              CoverRateMinimum: 1000,
+            },
+            FinalFields: {
+              VaultID: 'V'.repeat(64),
+              DebtTotal: '1200',
+              CoverAvailable: '90',
+              CoverRateMinimum: 1500,
+            },
+          },
+        },
+      ],
+    },
+  }
+  return {
+    ...baseScan,
+    ledgers: [
+      {
+        ...baseScan.ledgers[0]!,
+        transactions: [transaction],
+        lendingTransactions: [transaction],
+      },
+      baseScan.ledgers[1]!,
+    ],
+    metrics: {
+      ledgers: 2,
+      inspectedTransactions: 1,
+      lendingTransactions: 1,
+      elapsedMs: 20,
+    },
+  }
 }
 
 function deletedLoanScan(): IncrementalScanResult {
@@ -590,7 +710,20 @@ describe('commitIncrementalScan', () => {
       eventType: 'payment',
     })
     expect(state.state.archives).toHaveLength(0)
+    expect(state.state.balances).toHaveLength(0)
     expect(state.state.guards).toEqual([])
+  })
+
+  it('persists Broker debt, cover, and required-cover history in the guarded batch', async () => {
+    const state = fakeDatabase({ cursor: before })
+
+    await expect(commitWith(state, { scan: brokerBalanceScan() })).resolves.toBe('committed')
+    expect(state.state.balances.map((item) => [item.metricType, item.beforeValue, item.afterValue])).toEqual([
+      ['cover_available', '80', '90'],
+      ['cover_surplus', '70', '72'],
+      ['debt_total', '1000', '1200'],
+      ['required_minimum_cover', '10.00000', '18.00000'],
+    ])
   })
 
   it('archives deleted objects in the guarded batch', async () => {
@@ -631,6 +764,7 @@ describe('commitIncrementalScan', () => {
     expect(state.state.objectChanges).toHaveLength(0)
     expect(state.state.lifecycleEvents).toHaveLength(0)
     expect(state.state.archives).toHaveLength(0)
+    expect(state.state.balances).toHaveLength(0)
   })
 
   it('rolls back processed ledgers and protocol events when the cursor changes inside the batch', async () => {
