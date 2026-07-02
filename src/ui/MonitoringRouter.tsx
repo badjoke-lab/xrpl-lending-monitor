@@ -1,11 +1,15 @@
 import type { ReactNode } from 'react'
 
+import { AboutPage } from './pages/AboutPage'
 import { AccountDetailPage } from './pages/AccountDetailPage'
 import { ActivityPage } from './pages/ActivityPage'
+import { ApiDocumentationPage } from './pages/ApiDocumentationPage'
+import { ContactPage } from './pages/ContactPage'
 import { LoanBrokerDetailPage } from './pages/LoanBrokerDetailPage'
 import { LoanBrokersPage } from './pages/LoanBrokersPage'
 import { LoanDetailPage } from './pages/LoanDetailPage'
 import { LoansPage } from './pages/LoansPage'
+import { MethodologyPage } from './pages/MethodologyPage'
 import { NetworkStatusPage } from './pages/NetworkStatusPage'
 import { OverviewPage } from './pages/OverviewPage'
 import { SearchPage } from './pages/SearchPage'
@@ -73,5 +77,9 @@ export function resolveMonitoringPage({ currentPath, resources, navigate, reload
     const decodedAccount = safeDecode(account[1])
     if (decodedAccount !== null) return <AccountDetailPage account={decodedAccount} onNavigate={navigate} />
   }
+  if (currentPath === '/api') return <ApiDocumentationPage onNavigate={navigate} />
+  if (currentPath === '/methodology') return <MethodologyPage onNavigate={navigate} />
+  if (currentPath === '/about') return <AboutPage onNavigate={navigate} />
+  if (currentPath === '/contact') return <ContactPage onNavigate={navigate} />
   return <NotFoundPage onNavigate={navigate} />
 }
