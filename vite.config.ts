@@ -1,30 +1,27 @@
 import react from '@vitejs/plugin-react'
-import {
-  defineConfig,
-  type Plugin,
-  type PreviewServer,
-  type ViteDevServer,
-} from 'vite'
+import { defineConfig, type Plugin } from 'vite'
 
-function installApiDocumentationFallback(server: ViteDevServer | PreviewServer) {
-  server.middlewares.use((request, _response, next) => {
-    if (request.url) {
-      const url = new URL(request.url, 'http://127.0.0.1')
-      if (url.pathname === '/api' || url.pathname === '/api/') {
-        request.url = `/${url.search}`
-      }
-    }
-    next()
-  })
+function rewriteExactApiDocumentationPath(request: { url?: string }) {
+  if (!request.url) return
+  const url = new URL(request.url, 'http://127.0.0.1')
+  if (url.pathname === '/api' || url.pathname === '/api/') {
+    request.url = `/${url.search}`
+  }
 }
 
 const apiDocumentationFallback: Plugin = {
   name: 'api-documentation-fallback',
   configureServer(server) {
-    installApiDocumentationFallback(server)
+    server.middlewares.use((request, _response, next) => {
+      rewriteExactApiDocumentationPath(request)
+      next()
+    })
   },
   configurePreviewServer(server) {
-    installApiDocumentationFallback(server)
+    server.middlewares.use((request, _response, next) => {
+      rewriteExactApiDocumentationPath(request)
+      next()
+    })
   },
 }
 
