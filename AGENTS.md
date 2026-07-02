@@ -64,7 +64,7 @@ For every roadmap unit:
 2. confirm current repository and pull-request state;
 3. read the relevant specifications and operational documents;
 4. define acceptance criteria and invariants;
-5. implement the agreed scope and necessary support changes;
+5. implement the agreed scope and necessary supporting changes;
 6. add or update all applicable tests;
 7. run required local and CI validation;
 8. update `docs/implementation-status.md` in the same pull request;
@@ -89,7 +89,7 @@ Do not silently diverge from specifications. Change the specification first or i
 
 Roadmap unit labels are planning identifiers and may not match GitHub pull-request numbers. Identify work by milestone and scope, not number alone.
 
-The UI WIP checkpoint on `ui/overview-status-shell` at `aa623b9` is not a competing implementation and must not be merged as-is. After the M4-0 documentation unit merges, resume that branch only after inspecting and reconciling it with current `main` and the approved UI source of truth.
+The historical UI WIP checkpoint on `ui/overview-status-shell` at `aa623b9` is not a competing implementation and must not be merged as-is.
 
 ## Required validation
 
@@ -136,8 +136,7 @@ Do not perform these actions without explicit human approval:
 - create or change protected production configuration;
 - provision or connect production D1, R2, Workers, or domains;
 - deploy publicly to the production domain;
-- approve final legal, disclaimer, privacy, terms, commercial, Contact, or Support text;
-- publish or change a support address, payment network, accepted asset, destination-tag instruction, QR payload, or payment URI;
+- approve final legal, disclaimer, privacy, terms, commercial, or Contact text;
 - enable transaction submission, signing, wallet integration, or write operations;
 - enable Mainnet collection or change the approved Mainnet start strategy;
 - weaken a release gate, integrity invariant, retention safeguard, or fail-closed behavior.
@@ -148,6 +147,7 @@ When approval is absent, implement and test adapters, migrations, local flows, u
 
 - The initial product is read-only.
 - No wallet connection, signing, transaction submission, lending, repayment, or deposit UI is allowed in the initial release.
+- Funding, donation, payment, and promotional surfaces are outside the current release scope.
 - Devnet and Mainnet data must never be mixed.
 - Every stored record must include network and epoch identity.
 - Current state, indexed history, derived values, and unavailable data must remain distinguishable.
@@ -168,7 +168,6 @@ When approval is absent, implement and test adapters, migrations, local flows, u
 - Generated UI mockups define layout direction only and never define data.
 - Missing data is not zero.
 - About, Methodology, Contact, and API documentation are required baseline pages.
-- Support is optional, disabled by default, and located at `/about#support` only after explicit configuration approval.
 
 ## UI implementation rules
 
@@ -179,7 +178,6 @@ When approval is absent, implement and test adapters, migrations, local flows, u
 - Preserve keyboard access, visible focus, semantic landmarks, contrast, zoom, reduced motion, long identifiers, and responsive behavior.
 - Do not publish placeholder external links.
 - Contact uses configured Google Form and GitHub Issues destinations only.
-- Support prompts must not appear in monitoring cards, data tables, warnings, entity details, or audit results.
 
 ## Documentation gates
 
@@ -194,12 +192,12 @@ A pull request is incomplete when:
 - a new unresolved assumption is not listed;
 - required evidence is missing;
 - generated mockup data has been copied without API support;
-- Contact or Support uses an unapproved or placeholder configuration.
+- Contact uses an unapproved or placeholder configuration.
 
 ## Public-information boundary
 
-Repository content and generated artifacts must not contain protected configuration, private endpoints, unredacted personal data, unpublished operational strategy, support seeds or private keys, or unnecessary cross-project context. Use redacted fixtures and bounded evidence. Explain decisions through product integrity, security, maintainability, measurable resource limits, accessibility, and operational reliability.
+Repository content and generated artifacts must not contain protected configuration, private endpoints, unredacted personal data, unpublished operational strategy, seeds or private keys, or unnecessary cross-project context. Use redacted fixtures and bounded evidence. Explain decisions through product integrity, security, maintainability, measurable resource limits, accessibility, and operational reliability.
 
 ## Current execution phase
 
-M0, M2, and M3 are complete. M1 code foundations are complete but isolated full bootstrap verification and activation remain. M4 code is paused at WIP commit `aa623b9` while M4-0 aligns UI architecture, page structure, project pages, roadmap, and execution rules. After M4-0 merges, resume M4-1 from the reconciled WIP branch in roadmap order. Production deployment and Mainnet remain disabled.
+M0, M2, M3, and M4-0 through M4-3 are complete. M1 code foundations are complete but isolated full bootstrap verification and activation remain. The immediate independent continuation point is M4-4: verified current-state Loan reads followed by the Loan list and detail UI. Production deployment and Mainnet remain disabled.
