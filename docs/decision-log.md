@@ -2,7 +2,7 @@
 
 Public decisions are recorded in the product, architecture, roadmap, and implementation-status documents.
 
-This file is reserved for concise public architecture decisions added by future changes.
+This file records concise public architecture and product decisions that materially constrain later implementation.
 
 ## D-014 — Canonical asset identity and exact arithmetic
 
@@ -93,3 +93,45 @@ Public lifecycle completeness claims are not yet approved. They remain gated on 
 - UI and public documentation must not claim complete pre-snapshot history;
 - deleted-object, lifecycle, cover, debt, loss, and status data may be exposed only as indexed data bounded by collected evidence;
 - public release remains blocked until M1 active snapshot and M6 integrity evidence pass.
+
+## D-019 — Ledger-observatory UI architecture
+
+- Date: 2026-07-02
+- Status: accepted
+
+### Decision
+
+The public interface uses a dark ledger-observatory design with a persistent desktop sidebar, mobile app bar and bottom navigation, visible Devnet/epoch/freshness context, summary-first entity pages, monospace identifiers, and explicit loading, empty, unavailable, stale, partial, error, archived, and invalid-route states.
+
+The approved mockup set is a visual and information-density reference only. API contracts and product specifications remain the sole authority for displayed values.
+
+### Consequences
+
+- the light simplified WIP shell at `ui/overview-status-shell` commit `aa623b9` is a resumable checkpoint, not a merge-ready design;
+- M4 UI code cannot resume until the UI architecture documentation is merged;
+- no USD conversion, oracle pricing, cross-asset total, unsupported chart, operational metric, state, or example value may be copied from mockups;
+- desktop and mobile behavior are separately specified and tested;
+- raw data follows human-readable summaries;
+- shared state components and provenance treatment are required before page expansion.
+
+## D-020 — Project pages and optional support placement
+
+- Date: 2026-07-02
+- Status: accepted
+
+### Decision
+
+About, Methodology, Contact, and API documentation are required baseline pages.
+
+Methodology is a separate comprehensive technical page rather than content compressed into About. Contact offers a configured Google Form for general/private inquiries and configured GitHub Issues for public technical reports and data corrections.
+
+Support, if enabled, is a section at `/about#support`, not a standalone page. It is disabled by default until its address, payment network, accepted asset, destination-tag rule, QR payload, disclosure text, and operational ownership receive explicit approval.
+
+### Consequences
+
+- no placeholder form, issue, explorer, or payment URL is published;
+- public-issue privacy warnings are required;
+- support links may appear in Project navigation, mobile More, footer, and Contact, but point to `/about#support`;
+- support prompts do not appear inside monitoring cards, data tables, warnings, entity details, or audit results;
+- Devnet monitoring and any Mainnet support-payment network are displayed as separate concepts;
+- support provides no entitlement, influence, listing benefit, investment return, or service level.
