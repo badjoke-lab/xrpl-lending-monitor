@@ -2,6 +2,7 @@ import type { MouseEvent, ReactNode } from 'react'
 
 import { formatDuration, formatInteger, statusTone, titleCase } from '../lib/formatting'
 import type { NetworkStatusResponse, ResourceState } from '../types/api'
+import { Breadcrumbs } from './Breadcrumbs'
 
 interface Props {
   children: ReactNode
@@ -112,7 +113,10 @@ export function MonitoringShell({ children, currentPath, status, onNavigate, onR
           <button type="button" className="icon-button" onClick={onReload} aria-label="Refresh monitoring data">↻</button>
         </header>
         <Context status={status} />
-        <main id="main-content" className="main-content" tabIndex={-1}>{children}</main>
+        <main id="main-content" className="main-content" tabIndex={-1}>
+          <Breadcrumbs currentPath={currentPath} onNavigate={onNavigate} />
+          {children}
+        </main>
         <footer className="site-footer"><p>XRPL Lending Devnet data. Independent read-only monitor.</p><div><a href="/api/status">Status JSON</a><a href="https://github.com/badjoke-lab/xrpl-lending-monitor">Source</a></div></footer>
       </div>
       <nav className="mobile-bottom-nav" aria-label="Mobile navigation">

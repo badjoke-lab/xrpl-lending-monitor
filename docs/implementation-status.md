@@ -1,12 +1,12 @@
 # Implementation status
 
-Last updated: 2026-07-02.
+Last updated: 2026-07-03.
 
 ## Current milestone
 
-**M1 closeout** and **M4-6 — Project and data documentation pages**.
+**M1 closeout** and **M4-7 — Baseline integration, accessibility, and Checkpoint C**.
 
-M0, M2, M3, M4-0, M4-1, M4-2, M4-3, M4-4, and M4-5 are complete. M4-6 is active. M1 still requires an approved isolated preview environment, complete bootstrap, verification, activation, rollback, cleanup, and resource evidence.
+M0, M2, M3, M4-0, M4-1, M4-2, M4-3, M4-4, M4-5, and M4-6 are complete. M4-7 is active on PR #34. M1 still requires an approved isolated preview environment, complete bootstrap, verification, activation, rollback, cleanup, and resource evidence.
 
 ## Canonical continuation point
 
@@ -17,14 +17,22 @@ Latest merged work:
 - PR #31: `Add Activity and transaction monitoring`;
 - squash merge: `541650294a2dea04ff72b96a7258b9ea6f583f3c`;
 - PR #32: `Add global Search and Account relationship monitoring`;
-- squash merge: `e92ba32ed57d9ca36f0db17793982222e3143db9`.
+- squash merge: `e92ba32ed57d9ca36f0db17793982222e3143db9`;
+- PR #33: `Add project and data documentation pages`;
+- squash merge: `89d9c85b`;
+- PR #35: `Configure Cloudflare D1 database binding`;
+- merge commit: `33edaa9c897aa9f05cce4b112c85e948c73d9e4e`;
+- PR #36: `Document Cloudflare production deployment`;
+- merge commit: `f22c0cecee641c5818d5b16df28bbac265a5cf01`.
 
 Active implementation:
 
-- branch: `ui/project-documentation-pages`;
-- milestone unit: M4-6;
-- routes: `/about`, `/methodology`, `/contact`, and `/api`;
-- validation: final CI rerun pending after the API documentation asset-route type fix.
+- branch: `ui/m4-7-baseline-integration`;
+- pull request: #34, `Complete M4 baseline integration and Checkpoint C`;
+- milestone unit: M4-7;
+- base integrated: `origin/main` at `f22c0cecee641c5818d5b16df28bbac265a5cf01`;
+- temporary diagnostic workflow removed;
+- local validation after the documentation zoom overflow fix: `pnpm install --frozen-lockfile`, `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm db:migrate:local`, `pnpm build`, and `pnpm test:e2e` passed.
 
 ## Completed M4-4
 
@@ -66,9 +74,9 @@ Delivered:
 
 PR #31 and PR #32 passed lint, type-check, unit tests, local D1 migrations, production build, Chromium setup, and browser tests before merge.
 
-## Active M4-6
+## Completed M4-6
 
-Implemented on the active branch:
+Available routes:
 
 - `/about` with purpose, users, scope, independence, read-only status, audit differentiation, non-goals, repository, Methodology, API, and Contact links;
 - `/methodology` with a complete 20-section table of contents and stable anchors covering sources, validated ledgers, bootstrap, marker resume, collection, AffectedNodes, assets, lifecycle, status, formulas, archives, epochs, provenance, missing data, idempotency, storage, API behavior, limitations, and release verification;
@@ -79,21 +87,25 @@ Implemented on the active branch:
 - responsive long-form, table, code example, table-of-contents, and contact layouts;
 - focused documentation browser tests.
 
-No placeholder external destination is published. The first incomplete action is final CI validation and merge only after all required checks pass.
+No placeholder external destination is published.
 
-## Next M4 unit
+## Active M4-7
 
-### M4-7 — Baseline integration, accessibility, and Checkpoint C
+Implemented on the active branch:
 
-Required completion work:
+- reusable route-aware `Breadcrumbs` component with unit coverage for top-level, detail, and invalid routes;
+- SPA navigation, browser history, hash deep-link, and focus restoration coverage;
+- keyboard skip-link and one-main-landmark/one-H1 assertions;
+- shared Devnet, read-only, epoch, and freshness context assertions across route changes;
+- mobile documentation route checks and 200% text-size horizontal-overflow regression coverage;
+- unsupported control regression for wallet, signing, transaction submission, payment, donation, USD total, and risk-score surfaces;
+- Checkpoint C documentation in `docs/checkpoint-c.md`.
 
-- cross-page navigation and breadcrumbs;
-- browser-history and deep-link verification;
-- responsive review across every M4 route;
-- keyboard, focus, semantics, contrast, zoom, and long-identifier coverage;
-- shared state consistency;
-- regression checks prohibiting unsupported USD, pricing, cross-asset totals, risk scores, wallet, signing, or write controls;
-- Checkpoint C record.
+First incomplete action:
+
+- push PR #34 once GitHub authentication is restored;
+- inspect CI once the push is available on GitHub;
+- squash merge only after required checks pass.
 
 ## Known open questions
 

@@ -18,14 +18,54 @@ function resolveTarget(value: string): { path: string; location: string } {
   }
 }
 
+function decodeHash(hash: string): string | null {
+  if (!hash.startsWith('#') || hash.length === 1) return null
+  try {
+    return decodeURIComponent(hash.slice(1))
+  } catch {
+    return null
+  }
+}
+
+function focusCurrentLocation(fallbackToMain: boolean) {
+  const targetId = decodeHash(window.location.hash)
+  const target = targetId ? document.getElementById(targetId) : null
+  if (target) {
+    const addedTabIndex = !target.hasAttribute('tabindex')
+    if (addedTabIndex) target.setAttribute('tabindex', '-1')
+    target.scrollIntoView({ block: 'start' })
+    target.focus({ preventScroll: true })
+    if (addedTabIndex) {
+      target.addEventListener('blur', () => target.removeAttribute('tabindex'), { once: true })
+    }
+    return
+  }
+  if (fallbackToMain) document.getElementById('main-content')?.focus()
+}
+
+function scheduleLocationFocus(fallbackToMain: boolean) {
+  window.requestAnimationFrame(() => {
+    window.requestAnimationFrame(() => focusCurrentLocation(fallbackToMain))
+  })
+}
+
 export function MonitoringApplication() {
   const [currentPath, setCurrentPath] = useState(() => normalizePath(window.location.pathname))
   const { resources, reload } = useDashboardResources()
 
   useEffect(() => {
-    const handlePopState = () => setCurrentPath(normalizePath(window.location.pathname))
+    const handlePopState = () => {
+      setCurrentPath(normalizePath(window.location.pathname))
+      scheduleLocationFocus(true)
+    }
+    const handleHashChange = () => scheduleLocationFocus(false)
     window.addEventListener('popstate', handlePopState)
-    return () => window.removeEventListener('popstate', handlePopState)
+    window.addEventListener('hashchange', handleHashChange)
+    if (window.location.hash) scheduleLocationFocus(false)
+    return () => {
+      window.removeEventListener('popstate', handlePopState)
+      window.removeEventListener('hashchange', handleHashChange)
+    }
   }, [])
 
   const navigate = useCallback((value: string) => {
@@ -35,7 +75,7 @@ export function MonitoringApplication() {
       window.history.pushState({}, '', target.location)
     }
     setCurrentPath(target.path)
-    window.requestAnimationFrame(() => document.getElementById('main-content')?.focus())
+    scheduleLocationFocus(true)
   }, [])
 
   return (
