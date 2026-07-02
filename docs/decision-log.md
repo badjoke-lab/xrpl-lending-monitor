@@ -22,7 +22,7 @@ Canonical amount arithmetic uses exact integer coefficients, explicit decimal sc
 - XRP drops and MPT integer units are displayed using explicit scales;
 - exponent-form IOU values normalize deterministically;
 - aggregation fails before combining unlike asset keys;
-- missing or malformed MPT metadata does not hide or alter the issuance identity.
+- missing or malformed MPT metadata does not hide or alter issuance identity.
 
 ## D-015 — Complete scans activate through staged snapshots
 
@@ -84,14 +84,14 @@ The full current-state bootstrap uses a resumable long-running runner and one un
 
 M2 history data contracts are stable enough to begin M3 public API contract implementation for current indexed data, object changes, lifecycle events, archives, balance history, and reconciliation reports.
 
-Public lifecycle completeness claims are not yet approved. They remain gated on a complete active bootstrap snapshot, fixture-ledger replay coverage for supported transaction shapes, and later release-gate soak/reconciliation evidence.
+Public lifecycle completeness claims are not yet approved. They remain gated on a complete active bootstrap snapshot, fixture-ledger replay coverage for supported transaction shapes, and later release-gate soak and reconciliation evidence.
 
 ### Consequences
 
 - M3 API work may begin without reworking M2 table identities;
-- API responses must expose provenance, freshness, and unavailable or incomplete states;
-- UI and public documentation must not claim complete pre-snapshot history;
-- deleted-object, lifecycle, cover, debt, loss, and status data may be exposed only as indexed data bounded by collected evidence;
+- API responses expose provenance, freshness, and unavailable or incomplete states;
+- UI and public documentation do not claim complete pre-snapshot history;
+- deleted-object, lifecycle, cover, debt, loss, and status data are exposed only as indexed data bounded by collected evidence;
 - public release remains blocked until M1 active snapshot and M6 integrity evidence pass.
 
 ## D-019 — Ledger-observatory UI architecture
@@ -101,20 +101,19 @@ Public lifecycle completeness claims are not yet approved. They remain gated on 
 
 ### Decision
 
-The public interface uses a dark ledger-observatory design with a persistent desktop sidebar, mobile app bar and bottom navigation, visible Devnet/epoch/freshness context, summary-first entity pages, monospace identifiers, and explicit loading, empty, unavailable, stale, partial, error, archived, and invalid-route states.
+The public interface uses a dark ledger-observatory design with a persistent desktop sidebar, mobile app bar and bottom navigation, visible Devnet, epoch, and freshness context, summary-first entity pages, monospace identifiers, and explicit loading, empty, unavailable, stale, partial, error, archived, and invalid-route states.
 
 The approved mockup set is a visual and information-density reference only. API contracts and product specifications remain the sole authority for displayed values.
 
 ### Consequences
 
-- the light simplified WIP shell at `ui/overview-status-shell` commit `aa623b9` is a resumable checkpoint, not a merge-ready design;
-- M4 UI code cannot resume until the UI architecture documentation is merged;
-- no USD conversion, oracle pricing, cross-asset total, unsupported chart, operational metric, state, or example value may be copied from mockups;
+- the light simplified WIP shell at `ui/overview-status-shell` commit `aa623b9` is a historical checkpoint, not a merge-ready design;
+- no USD conversion, oracle pricing, cross-asset total, unsupported chart, operational metric, state, or example value is copied from mockups;
 - desktop and mobile behavior are separately specified and tested;
 - raw data follows human-readable summaries;
 - shared state components and provenance treatment are required before page expansion.
 
-## D-020 — Project pages and optional support placement
+## D-020 — Project pages and external contact
 
 - Date: 2026-07-02
 - Status: accepted
@@ -123,15 +122,14 @@ The approved mockup set is a visual and information-density reference only. API 
 
 About, Methodology, Contact, and API documentation are required baseline pages.
 
-Methodology is a separate comprehensive technical page rather than content compressed into About. Contact offers a configured Google Form for general/private inquiries and configured GitHub Issues for public technical reports and data corrections.
+Methodology is a separate comprehensive technical page rather than content compressed into About. Contact offers a configured Google Form for general or private inquiries and configured GitHub Issues for public technical reports and data corrections.
 
-Support, if enabled, is a section at `/about#support`, not a standalone page. It is disabled by default until its address, payment network, accepted asset, destination-tag rule, QR payload, disclosure text, and operational ownership receive explicit approval.
+Funding, donation, payment, and promotional surfaces are not part of the current release scope.
 
 ### Consequences
 
-- no placeholder form, issue, explorer, or payment URL is published;
+- no placeholder form, issue, explorer, payment, or promotional URL is published;
 - public-issue privacy warnings are required;
-- support links may appear in Project navigation, mobile More, footer, and Contact, but point to `/about#support`;
-- support prompts do not appear inside monitoring cards, data tables, warnings, entity details, or audit results;
-- Devnet monitoring and any Mainnet support-payment network are displayed as separate concepts;
-- support provides no entitlement, influence, listing benefit, investment return, or service level.
+- Project navigation contains About and Contact;
+- documentation and project pages remain read-only;
+- later commercial or funding functionality requires a separate specification and approval.
