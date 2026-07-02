@@ -2,6 +2,7 @@ import type { IncrementalScanResult } from '../../collector/incremental/scan-val
 import { normalizeAffectedNodes } from '../../collector/incremental/affected-nodes'
 import { deriveLoanLifecycleEvents } from '../../collector/incremental/loan-lifecycle'
 import { deriveArchivedObjects } from '../../collector/incremental/deleted-object-archive'
+import { deriveBalanceHistory } from '../../collector/incremental/cover-debt-loss'
 
 interface CursorRow {
   epoch_id: string | null
@@ -171,6 +172,7 @@ export async function commitIncrementalScan(options: {
       })
       const lifecycleEvents = deriveLoanLifecycleEvents(objectChanges)
       const archivedObjects = deriveArchivedObjects(objectChanges)
+      const balanceHistory = deriveBalanceHistory(objectChanges)
       statements.push(
         options.db
           .prepare(
@@ -331,6 +333,42 @@ export async function commitIncrementalScan(options: {
               archivedObject.account,
               archivedObject.borrower,
               archivedObject.assetKey,
+              options.processedAt,
+            ),
+        )
+      }
+
+      for (const balanceRecord of balanceHistory) {
+        statements.push(
+          options.db
+            .prepare(
+              `INSERT INTO balance_history (
+                 network, epoch_id, subject_type, subject_id, transaction_hash,
+                 ledger_index, transaction_index, close_time, metric_type, asset_key,
+                 before_value, after_value, formula, source_fields_json, created_at
+               ) VALUES (
+                 ?1, ?2, ?3, ?4, ?5,
+                 ?6, ?7, ?8, ?9, ?10,
+                 ?11, ?12, ?13, ?14, ?15
+               )
+               ON CONFLICT(network, epoch_id, subject_type, subject_id, transaction_hash, metric_type)
+               DO NOTHING`,
+            )
+            .bind(
+              balanceRecord.network,
+              balanceRecord.epochId,
+              balanceRecord.subjectType,
+              balanceRecord.subjectId,
+              balanceRecord.transactionHash,
+              balanceRecord.ledgerIndex,
+              balanceRecord.transactionIndex,
+              balanceRecord.closeTime,
+              balanceRecord.metricType,
+              balanceRecord.assetKey,
+              balanceRecord.beforeValue,
+              balanceRecord.afterValue,
+              balanceRecord.formula,
+              balanceRecord.sourceFieldsJson,
               options.processedAt,
             ),
         )

@@ -4,33 +4,33 @@ Last updated: 2026-07-02.
 
 ## Current milestone
 
-**M1 closeout — Current-state collector activation** and **M2 event history — Deleted-object archive**.
+**M1 closeout — Current-state collector activation** and **M2 event history — Cover, debt, and loss tracking**.
 
 M1 code foundations and controlled resume evidence are merged, but M1 has not exited because a complete isolated preview bootstrap has not yet been stored, verified, and activated. M2 foundation work may continue in parallel where it does not claim dependency on a real active snapshot.
 
 ## Canonical continuation point
 
-GitHub pull request #13, `Derive Loan lifecycle events`, merged by squash as `c33152db20c4624a90f08cbad8b13bc4ca6b3b96`.
+GitHub pull request #14, `Archive deleted Lending objects`, merged by squash as `b70f7ce540aafe35220fa06182eb52ca8b572652`.
 
 Active local branch for the next roadmap unit:
 
-- branch: `collector/deleted-object-archive`;
-- base: `main` at `c33152db20c4624a90f08cbad8b13bc4ca6b3b96`;
-- roadmap unit: M2 PR 10, deleted-object archive;
+- branch: `collector/cover-debt-loss-tracking`;
+- base: `main` at `b70f7ce540aafe35220fa06182eb52ca8b572652`;
+- roadmap unit: M2 PR 11, cover, debt, and loss tracking;
 - current state: local implementation and validation complete; pull request not opened yet.
 
 Always inspect the current pull-request head and checks before resuming; the values above are a recorded checkpoint, not permission to ignore newer GitHub state.
 
 ## Immediate work
 
-Complete the deleted-object archive pull request before beginning cover, debt, and loss tracking:
+Complete the cover, debt, and loss tracking pull request before beginning status engine and reconciliation:
 
-1. push `collector/deleted-object-archive`;
+1. push `collector/cover-debt-loss-tracking`;
 2. open a focused PR with exact validation and live-read evidence;
 3. resolve CI or review findings without weakening invariants;
 4. merge only after required checks pass and the branch is current.
 
-The first incomplete action is opening the deleted-object archive pull request.
+The first incomplete action is opening the cover, debt, and loss tracking pull request.
 
 ## Completed
 
@@ -184,6 +184,21 @@ Current local deleted-object archive validation:
 - `pnpm test:e2e`: 1 Chromium smoke test passed;
 - live Devnet ledger read: ledger `3308105`, hash `A0B402E3F818A5E8C221B5344622C69472AB26C858AA29B508409EF9C626E8D8`, parent hash `739B577CF6DA4B7721001B1BFFC9F9CE67700861563FBF14B66E817A7FB4BED7`, transaction count `1`, observed transaction types `[OracleSet]`, recognized Lending-event count `0`.
 
+GitHub PR #14 validation:
+
+- `quality`: passed at head `eb3b53b1a655ae80a115c45c8656f8de7257390e`;
+- `live-devnet-ledger`: passed at head `eb3b53b1a655ae80a115c45c8656f8de7257390e`;
+- PR #14 had no review comments or unresolved review threads before merge.
+
+Current local cover/debt/loss validation:
+
+- `pnpm exec vitest run src/collector/incremental/cover-debt-loss.test.ts src/worker/repositories/incremental-ledger-repository.test.ts`: 17 tests passed.
+- `pnpm lint && pnpm typecheck && pnpm test`: passed; 24 test files passed, 3 skipped; 120 tests passed, 3 skipped;
+- clean local D1 migration reset by removing ignored `.wrangler/state/v3/d1`, then `pnpm db:migrate:local`: migrations `0001` through `0008` applied successfully;
+- `pnpm check`: passed;
+- `pnpm test:e2e`: 1 Chromium smoke test passed;
+- live Devnet ledger read: ledger `3308277`, hash `135F12108936C4CA352DE5504D640128F2CC64C4B5D03710C0062023715BD5FC`, parent hash `BD1F4D2F41B68A87322622BD11013493939607B28DFA95B5B4012794FA3FAEBB`, transaction count `0`, observed transaction types `[]`, recognized Lending-event count `0`.
+
 ## Known open questions
 
 | Question | Required evidence | Assigned point |
@@ -209,7 +224,7 @@ Current local deleted-object archive validation:
 
 ## Current blockers
 
-No known code blocker is recorded for completing the deleted-object archive pull request.
+No known code blocker is recorded for completing the cover, debt, and loss tracking pull request.
 
 A real isolated preview bootstrap depends on approved external preview access. That dependency does not block local implementation, tests, documentation, or independent incremental-history work.
 

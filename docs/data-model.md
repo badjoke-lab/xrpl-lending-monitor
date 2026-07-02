@@ -92,6 +92,10 @@ Ordered Loan events with transaction identity, close time, status before and aft
 
 Initial lifecycle rows are derived from normalized Loan object changes. They include event type, transaction identity, close time, on-ledger status before and after, principal and total outstanding before and after, payment remaining before and after, and details JSON. Schedule-derived status remains separate and is not used to mark a Loan defaulted.
 
+### `balance_history`
+
+Asset-scoped debt, cover, and loss history derived from normalized Vault and LoanBroker object changes. Direct rows preserve `DebtTotal`, `DebtMaximum`, `CoverAvailable`, and `LossUnrealized`. Derived rows preserve formulas and source fields for `required_minimum_cover = DebtTotal * CoverRateMinimum / 100000` and `cover_surplus = CoverAvailable - required_minimum_cover`. Rows do not aggregate unlike assets; `asset_key` is present only when directly supported by the normalized change context.
+
 ### `daily_aggregates`
 
 Asset-separated daily counts and amounts for Vaults, Brokers, Loans, assets, debt, cover, loss, states, and events.
