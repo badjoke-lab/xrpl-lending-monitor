@@ -1,57 +1,77 @@
-const plannedSurfaces = [
-  'Protocol overview and network health',
-  'Vault and Loan Broker monitoring',
-  'Loan schedules and on-ledger state',
-  'Activity, search, and transaction changes',
-  'Lifecycle history and deleted-object archive',
-  'Devnet epochs and data provenance',
-]
+import { useCallback, useEffect, useState } from 'react'
 
-export function App() {
+import { AppShell } from './components/AppShell'
+import { useDashboardResources } from './hooks/useDashboardResources'
+import { NetworkStatusPage } from './pages/NetworkStatusPage'
+import { OverviewPage } from './pages/OverviewPage'
+
+function normalizePath(pathname: string): string {
+  if (pathname === '/') return '/'
+  return pathname.replace(/\/+$/, '') || '/'
+}
+
+function NotFoundPage({ onNavigate }: { onNavigate: (path: string) => void }) {
   return (
-    <main className="shell">
-      <header className="hero">
+    <div className="page-stack">
+      <header className="page-header">
         <div>
-          <p className="eyebrow">Devnet first · read-only</p>
-          <h1>XRPL Lending Monitor</h1>
-          <p className="summary">
-            A complete XRPL Lending monitoring surface with historical lifecycle,
-            deleted-object, cover, and state-transition auditing.
+          <p className="page-kicker">Navigation</p>
+          <h1>Page not found</h1>
+          <p className="page-summary">
+            This route is not part of the currently implemented monitoring surface.
           </p>
         </div>
-        <span className="status">Foundation ready</span>
       </header>
-
-      <section className="notice" aria-labelledby="current-status">
-        <h2 id="current-status">Current implementation status</h2>
-        <p>
-          The repository foundation is active. Collector, D1 projections, public
-          monitoring data, and final interface pages have not been implemented yet.
-        </p>
-      </section>
-
-      <section aria-labelledby="planned-coverage">
-        <div className="section-heading">
-          <div>
-            <p className="eyebrow">Required product coverage</p>
-            <h2 id="planned-coverage">Baseline monitor plus audit history</h2>
-          </div>
-          <a href="/api/status">API status</a>
+      <div className="state-block state-unavailable" role="status">
+        <span className="state-symbol" aria-hidden="true">404</span>
+        <div>
+          <strong>Unknown route</strong>
+          <p>Return to the Overview or use the available navigation items.</p>
+          <button className="secondary-button" type="button" onClick={() => onNavigate('/')}>
+            Go to Overview
+          </button>
         </div>
+      </div>
+    </div>
+  )
+}
 
-        <div className="grid">
-          {plannedSurfaces.map((surface) => (
-            <article className="card" key={surface}>
-              <span aria-hidden="true">→</span>
-              <p>{surface}</p>
-            </article>
-          ))}
-        </div>
-      </section>
+export function App() {
+  const [currentPath, setCurrentPath] = useState(() => normalizePath(window.location.pathname))
+  const { resources, reload } = useDashboardResources()
 
-      <footer>
-        No wallet connection, signing, lending, repayment, or investment advice.
-      </footer>
-    </main>
+  useEffect(() => {
+    const handlePopState = () => setCurrentPath(normalizePath(window.location.pathname))
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [])
+
+  const navigate = useCallback((path: string) => {
+    const normalized = normalizePath(path)
+    if (normalized !== normalizePath(window.location.pathname)) {
+      window.history.pushState({}, '', normalized)
+    }
+    setCurrentPath(normalized)
+    window.requestAnimationFrame(() => document.getElementById('main-content')?.focus())
+  }, [])
+
+  let page
+  if (currentPath === '/') {
+    page = <OverviewPage resources={resources} onNavigate={navigate} onReload={reload} />
+  } else if (currentPath === '/network-status') {
+    page = <NetworkStatusPage status={resources.status} onReload={reload} />
+  } else {
+    page = <NotFoundPage onNavigate={navigate} />
+  }
+
+  return (
+    <AppShell
+      currentPath={currentPath}
+      status={resources.status}
+      onNavigate={navigate}
+      onReload={reload}
+    >
+      {page}
+    </AppShell>
   )
 }
