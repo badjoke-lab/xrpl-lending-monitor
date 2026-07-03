@@ -66,13 +66,13 @@ Numeric Loan fields omitted by canonical XRPL binary decoding are treated as zer
 
 ### Decision
 
-The full current-state bootstrap uses a resumable long-running runner and one unfiltered binary ledger traversal. It writes bounded compressed shards and publishes a verified manifest. The scheduled Worker handles bounded status and incremental ledger processing after bootstrap.
+The full current-state bootstrap uses a resumable long-running runner and one unfiltered binary ledger traversal. It writes bounded snapshot batches and publishes a verified manifest. The scheduled Worker handles bounded status and incremental ledger processing after bootstrap.
 
 ### Consequences
 
 - repeated filtered traversals are rejected;
 - full in-memory accumulation is rejected;
-- production bootstrap remains disabled until resume, upload, manifest, cleanup, and activation tests pass;
+- production bootstrap remains disabled until resume, persistence, manifest, cleanup, and activation tests pass;
 - an initial active snapshot is required before incremental maintenance begins.
 
 ## D-018 — Checkpoint B history boundary
@@ -133,3 +133,26 @@ Funding, donation, payment, and promotional surfaces are not part of the current
 - Project navigation contains About and Contact;
 - documentation and project pages remain read-only;
 - later commercial or funding functionality requires a separate specification and approval.
+
+## D-021 — D1-only current-state snapshots
+
+- Date: 2026-07-03
+- Status: accepted
+
+### Decision
+
+The earlier external object-storage design for current-state snapshot artifacts is superseded. Current-state bootstrap, verification, activation, rollback, and public reads will use versioned D1 snapshot rows and an atomic D1 active-snapshot pointer.
+
+This change is based on architecture simplification, a single measured persistence boundary, atomic activation requirements, and the observed Devnet data envelope. It does not weaken the fixed-ledger, exact-marker, deterministic-hash, manifest-verification, rollback, or fail-closed guarantees.
+
+### Consequences
+
+- snapshot construction writes only to an inactive snapshot ID;
+- bounded object batches, typed current rows, hashes, manifest metadata, checkpoints, cleanup eligibility, and the active pointer are stored in D1;
+- completed snapshots are immutable;
+- activation changes only the active pointer after complete verification;
+- the previous active snapshot is retained for rollback;
+- incomplete attempts are never exposed as current state;
+- current-state reads no longer depend on a separate object-storage binding;
+- active-plus-rollback storage, index overhead, row size, write count, and query count must be measured before remote bootstrap;
+- the design stops before production use if the documented D1 safety threshold is exceeded.
