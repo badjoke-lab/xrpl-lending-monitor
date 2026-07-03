@@ -8,6 +8,11 @@ import { createD1BootstrapCheckpointStore } from '../repositories/bootstrap-chec
 import { createD1BootstrapLifecycle } from '../repositories/bootstrap-lifecycle'
 import { createR2BootstrapObjectStore } from '../repositories/bootstrap-object-store'
 
+export {
+  runD1Bootstrap as runD1CurrentStateBootstrap,
+  type D1BootstrapResult,
+} from './d1-bootstrap'
+
 export interface D1R2CurrentStateBootstrapOptions {
   db: D1Database
   bucket: R2Bucket
