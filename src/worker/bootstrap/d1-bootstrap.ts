@@ -173,7 +173,7 @@ export async function runD1Bootstrap(options: {
           vaults: page.vaults,
           loanBrokers: page.loanBrokers,
           loans: page.loans,
-          cumulativeMetrics: metrics,
+          cumulativeMetrics: metrics as unknown as Record<string, unknown>,
           writtenAt,
         })
         lastCheckpoint = checkpointFrom({
