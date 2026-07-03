@@ -15,12 +15,6 @@
       "database_name": "xrpl-lending-monitor",
       "database_id": "bebc2c68-03d2-4a1c-98a7-46b34ee4e25d",
       "migrations_dir": "migrations"
-    },
-    {
-      "binding": "CURRENT_STATE",
-      "database_name": "xrpl-lending-monitor",
-      "database_id": "bebc2c68-03d2-4a1c-98a7-46b34ee4e25d",
-      "migrations_dir": "migrations"
     }
   ],
   "vars": {
