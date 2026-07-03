@@ -20,6 +20,7 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "db:migrate:local": "wrangler d1 migrations apply xrpl-lending-monitor --local",
+    "d1:operator": "vite-node scripts/run-d1-current-state-operator.ts",
     "types:worker": "wrangler types",
     "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm db:migrate:local && pnpm build"
   },
