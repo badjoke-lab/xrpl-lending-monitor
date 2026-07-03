@@ -4,100 +4,56 @@ Last updated: 2026-07-03.
 
 ## Current phase
 
-M0, M2, M3, M4-0 through M4-7, and M5-1 through M5-4 are complete.
-
-The active dependency is M1 D1-only closeout. The canonical sequence is defined in [`d1-migration-plan.md`](d1-migration-plan.md) and summarized in `development-roadmap.md`.
-
-M5-5 remains deferred until real current-state data is active and verified. M6 follows M5-5.
+M0, M2, M3, M4, and M5-1 through M5-4 are complete. M1 D1-only closeout is active. The controlling sequence is [`d1-migration-plan.md`](d1-migration-plan.md).
 
 ## Production state
 
-The public Devnet Worker is deployed and the baseline schema through migration `0008_balance_history.sql` is present.
+The public Devnet Worker is deployed with migrations through `0008_balance_history.sql`.
 
-Current public behavior:
+- migration `0009_d1_current_state_snapshots.sql` is not applied remotely;
+- no current-state snapshot has been created or activated;
+- current entity routes correctly report unavailable;
+- Mainnet remains disabled.
 
-- `/api/status` returns a successful response with the collector uninitialized;
-- `/api/overview` returns an explicit active-snapshot unavailable state;
-- `/api/activity?limit=6` returns a successful empty indexed-data response;
-- current Vault, Loan Broker, and Loan facts remain unavailable because no complete snapshot has been verified and activated.
+## Accepted direction
 
-No current-state snapshot has been created or activated. Migration `0009_d1_current_state_snapshots.sql` has not been applied remotely. Mainnet remains disabled.
-
-## Accepted current-state storage direction
-
-The earlier external object-storage design is superseded. The accepted target is D1-only versioned current-state storage with:
-
-- one runtime D1 binding, `DB`, for history and current-state data;
-- one fixed validated Devnet ledger per bootstrap;
-- exact opaque marker resume;
-- immutable inactive snapshot rows during construction;
-- deterministic object and batch hashes;
-- complete manifest and relationship verification;
-- an atomic active-snapshot pointer switch;
-- preservation of the previous active snapshot on failure;
+- one runtime D1 binding: `DB`;
+- fixed validated Devnet ledger per bootstrap;
+- exact-marker resume after durable bounded writes;
+- immutable inactive snapshots;
+- deterministic hashes, manifest, and relationship verification;
+- separate bootstrap, verification, measurement, activation, rollback, and cleanup actions;
 - one retained rollback snapshot;
-- cleanup limited to explicitly eligible failed or superseded attempts;
-- bounded queries, batches, and rows under the measured D1 resource envelope;
-- separate operator actions for bootstrap, verification, measurement, activation, rollback, and cleanup.
+- no public write route.
 
-This is an accepted design direction, not a claim that the production migration or bootstrap has already occurred.
+## Completed D1 units
 
-## Active pull requests and disposition
+- **PR #53 / D1-0:** canonical D1 plan and dependency order merged.
+- **PR #54 / D1-1:** rollback and cleanup safeguards merged, including local workerd D1 integration coverage.
+- PR #50 was closed as superseded by PR #54.
 
-### PR #53 — Documentation and dependency lock
+## Active D1 unit
 
-Merged. The canonical D1 migration plan, roadmap order, and implementation status are now on `main`.
+### PR #55 / D1-2 — Single D1 binding
 
-### PR #54 — Snapshot retention
+The branch removes the legacy `CURRENT_STATE` binding and uses `DB` for current Vault, Loan Broker, and Loan reads. It also removes the duplicate unavailable Loan route while preserving unavailable responses before a verified active snapshot exists.
 
-Status: active D1-1 implementation unit.
+PR #49 was closed because it retained a second alias to the same D1 database.
 
-Implemented on the branch:
+## Next order
 
-- manifest-backed verified rollback target lookup;
-- same-epoch sync-state requirement;
-- guarded active and rollback pointer swap;
-- guarded sync-state restoration and changed-row checks;
-- cleanup rejection for active, rollback, and resumable snapshots;
-- cleanup eligibility-time enforcement;
-- local workerd D1 integration coverage with migrations applied.
+1. Merge PR #55 after full validation.
+2. Complete D1-only local integration and isolate the superseded R2 path.
+3. Add the non-public operator and measurement harness.
+4. Complete a local Devnet bootstrap and the 350 MB resource gate.
+5. Review before remote schema work.
+6. Apply the additive migration, build and verify an inactive production snapshot, then activate separately.
+7. Start incremental collection, complete M5-5, and continue M6.
 
-PR #50 was closed without merge because it predated the canonical D1 plan and was replaced by PR #54 from the current main predecessor.
+## Current blockers
 
-### PR #49 — Current state binding
-
-Status: open but not merge-ready in its current form.
-
-The branch currently adds a second D1 alias named `CURRENT_STATE`. The accepted D1-only architecture instead uses the existing `DB` binding directly for current entity reads. PR #49 must be revised after PR #54 merges and must not preserve the former object-storage boundary through a duplicate D1 binding.
-
-## Immediate implementation order
-
-1. Complete and merge PR #54 snapshot retention safeguards.
-2. Revise and merge PR #49 as the single-`DB` runtime binding unit.
-3. Complete the D1-only local integration path and isolate superseded R2 paths.
-4. Add the non-public operator bootstrap and measurement harness.
-5. Run a complete local Devnet bootstrap and the 350 MB resource gate.
-6. Stop for review before any remote D1 mutation.
-7. Apply reviewed additive migration changes remotely.
-8. Run and verify an inactive production Devnet snapshot.
-9. Activate explicitly, prove rollback, start incremental collection, complete M5-5, and continue M6.
-
-## Release blockers
-
-- PR #54 retention safeguards are not merged;
-- PR #49 still represents the D1 database through a duplicate legacy binding;
-- no complete local D1-only bootstrap and resource report exists;
-- no reviewed operator execution path exists;
-- migration `0009` is not applied remotely;
+- PR #55 is not merged;
+- the old R2 bootstrap path is not yet isolated;
+- no complete local bootstrap resource report exists;
 - no production snapshot is verified or active;
-- incremental collection has not started from an active snapshot;
-- M5-5 real-data integration and M6 soak evidence are incomplete.
-
-## Public boundaries
-
-- Devnet only.
-- Read-only public API.
-- No public bootstrap, migration, activation, rollback, cleanup, or other write route.
-- No wallet, signing, transaction submission, lending actions, payments, pricing, fiat conversion, cross-asset totals, or proprietary risk scores.
-- XRP, IOU, and MPT remain distinct.
-- Missing data is not zero.
+- incremental collection, M5-5, and M6 evidence remain incomplete.
