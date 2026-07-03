@@ -1,5 +1,6 @@
 import type { ScannedLedgerObject } from '../../collector/current-state/scan-ledger-objects'
 import { canonicalJson, gzipDeterministic, sha256Hex, utf8 } from './canonical-json'
+import { encodeSnapshotRecord } from './record-codec'
 import type {
   SnapshotArtifact,
   SnapshotArtifactSet,
