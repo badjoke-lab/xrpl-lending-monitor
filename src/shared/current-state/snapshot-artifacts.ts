@@ -78,3 +78,44 @@ function groupRecords(
   if (current.length > 0) groups.push(current)
   return groups
 }
+
+async function buildKindArtifacts(options: {
+  identity: SnapshotIdentity
+  kind: SnapshotKind
+  pageSequence: number
+  values: readonly ScannedLedgerObject[]
+  maxObjects: number
+  maxBytes: number
+}): Promise<SnapshotArtifact[]> {
+  const sorted = [...options.values].sort((left, right) => left.index.localeCompare(right.index))
+  for (let index = 1; index < sorted.length; index += 1) {
+    if (sorted[index - 1]?.index === sorted[index]?.index) {
+      throw new Error(`Duplicate ${options.kind} object ${sorted[index]?.index ?? ''}`)
+    }
+  }
+  const records = await Promise.all(sorted.map((value) => encodeSnapshotRecord({
+    identity: options.identity,
+    kind: options.kind,
+    value,
+  })))
+  const groups = groupRecords(records, options.maxObjects, options.maxBytes)
+  return Promise.all(groups.map(async (group, index) => {
+    const uncompressed = concatenate(group)
+    const bytes = await gzipDeterministic(uncompressed)
+    const chunkSequence = index + 1
+    return {
+      key: `${prefix(options.identity)}/data/${options.kind}/${pageToken(options.pageSequence)}-${chunkToken(chunkSequence)}.ndjson.gz`,
+      kind: options.kind,
+      pageSequence: options.pageSequence,
+      chunkSequence,
+      objectCount: group.length,
+      firstObjectId: group[0]?.id ?? '',
+      lastObjectId: group[group.length - 1]?.id ?? '',
+      uncompressedBytes: uncompressed.byteLength,
+      compressedBytes: bytes.byteLength,
+      uncompressedSha256: await sha256Hex(uncompressed),
+      sha256: await sha256Hex(bytes),
+      bytes,
+    }
+  }))
+}
