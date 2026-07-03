@@ -111,7 +111,7 @@ function createFakeDatabase(options: FakeDatabaseOptions = {}): D1Database {
   } as unknown as D1Database
 }
 
-function createEnv(db: D1Database, currentState = false): Bindings {
+function createEnv(db: D1Database): Bindings {
   return {
     APP_NETWORK: 'devnet',
     MAINNET_ENABLED: 'false',
@@ -120,7 +120,6 @@ function createEnv(db: D1Database, currentState = false): Bindings {
     ASSETS: {
       fetch: () => Promise.resolve(new Response('not found', { status: 404 })),
     } as Fetcher,
-    ...(currentState ? { CURRENT_STATE: db as unknown as R2Bucket } : {}),
   }
 }
 
@@ -201,7 +200,7 @@ describe('core API routes', () => {
       },
       vault,
     })
-    const env = createEnv(db, true)
+    const env = createEnv(db)
 
     const collection = await app.request('/api/vaults?limit=1&sort=id_asc', {}, env)
     expect(collection.status).toBe(200)
@@ -234,7 +233,7 @@ describe('core API routes', () => {
     })
   })
 
-  it('returns an explicit unavailable entity collection without the current-state binding', async () => {
+  it('reads an active empty Loan Broker collection through the single D1 binding', async () => {
     const response = await app.request(
       '/api/loan-brokers?limit=2',
       {},
@@ -247,11 +246,8 @@ describe('core API routes', () => {
       kind: 'loan_brokers',
       data: [],
       page: { limit: 2, next_cursor: null },
-      availability: {
-        state: 'unavailable',
-        reason: 'current object storage binding is not configured for public API reads',
-      },
-      provenance: { collection: 'unavailable' },
+      availability: { state: 'available' },
+      provenance: { collection: 'direct' },
     })
   })
 

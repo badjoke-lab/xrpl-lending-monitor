@@ -27,7 +27,6 @@ import {
 import { getCurrentEpoch, getSyncState } from './repositories/network-status-repository'
 import { registerCurrentLoanBrokerRoutes } from './routes/current-loan-brokers'
 import {
-  type EntityCollectionKind,
   serializeAvailableVaultCollection,
   serializeOverview,
   serializeUnavailableEntityCollection,
@@ -197,7 +196,7 @@ app.get('/api/vaults', async (context) => {
   }
 
   const { epoch, snapshot } = await loadCoreApiContext(context.env.DB)
-  if (!snapshot || !context.env.CURRENT_STATE) {
+  if (!snapshot) {
     return context.json(
       serializeUnavailableEntityCollection({
         kind: 'vaults',
@@ -209,7 +208,7 @@ app.get('/api/vaults', async (context) => {
   }
 
   try {
-    const result = await listCurrentVaults(context.env.CURRENT_STATE, snapshot, {
+    const result = await listCurrentVaults(context.env.DB, snapshot, {
       limit,
       cursor,
       sort,
@@ -246,12 +245,12 @@ app.get('/api/vaults/:vaultId', async (context) => {
   }
 
   const { epoch, snapshot } = await loadCoreApiContext(context.env.DB)
-  if (!snapshot || !context.env.CURRENT_STATE) {
+  if (!snapshot) {
     return context.json(serializeUnavailableVaultDetail({ epoch, snapshot }))
   }
 
   try {
-    const vault = await getCurrentVaultById(context.env.CURRENT_STATE, snapshot, vaultId)
+    const vault = await getCurrentVaultById(context.env.DB, snapshot, vaultId)
     if (!vault) {
       return context.json(
         { error: 'not_found', kind: 'vault', id: vaultId, snapshot_id: snapshot.id },
@@ -268,20 +267,6 @@ app.get('/api/vaults/:vaultId', async (context) => {
 })
 
 registerCurrentLoanBrokerRoutes(app)
-
-function entityCollectionHandler(kind: EntityCollectionKind) {
-  return async (context: Context<{ Bindings: Bindings }>) => {
-    resolveRuntimeConfig(context.env)
-    const limit = parsePageLimit(context.req.query('limit'))
-    if (limit === null) return invalidLimitResponse(context)
-    const { epoch, snapshot } = await loadCoreApiContext(context.env.DB)
-    return context.json(
-      serializeUnavailableEntityCollection({ kind, epoch, snapshot, page: { limit } }),
-    )
-  }
-}
-
-app.get('/api/loans', entityCollectionHandler('loans'))
 
 app.get('/api/activity', async (context) => {
   resolveRuntimeConfig(context.env)
