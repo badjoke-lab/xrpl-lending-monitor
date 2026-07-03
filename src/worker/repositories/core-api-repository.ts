@@ -20,28 +20,35 @@ interface SnapshotRow {
   epoch_id: string
   ledger_index: number
   ledger_hash: string
-  object_prefix: string
-  manifest_key: string | null
-  manifest_hash: string | null
+  manifest_hash: string
   vault_count: number
   loan_broker_count: number
   loan_count: number
   object_count: number
-  shard_count: number
-  compressed_bytes: number
+  batch_count: number
+  normalized_bytes: number
   completed_at: string | null
 }
 
 export async function getActiveSnapshot(db: D1Database): Promise<ActiveSnapshotRecord | null> {
   const row = await db
     .prepare(
-      `SELECT id, epoch_id, ledger_index, ledger_hash, object_prefix,
-              manifest_key, manifest_hash, vault_count, loan_broker_count,
-              loan_count, object_count, shard_count, compressed_bytes, completed_at
-       FROM current_state_snapshots
-       WHERE network = 'devnet'
-         AND status = 'active'
-       ORDER BY ledger_index DESC
+      `SELECT snapshot.id, snapshot.epoch_id, snapshot.ledger_index,
+              snapshot.ledger_hash, snapshot.manifest_hash,
+              snapshot.vault_count, snapshot.loan_broker_count,
+              snapshot.loan_count, snapshot.object_count,
+              snapshot.batch_count, snapshot.normalized_bytes,
+              snapshot.completed_at
+       FROM current_state_d1_active_snapshots active
+       JOIN current_state_d1_snapshots snapshot
+         ON snapshot.id = active.snapshot_id
+        AND snapshot.epoch_id = active.epoch_id
+       JOIN current_state_d1_snapshot_manifests manifest
+         ON manifest.snapshot_id = snapshot.id
+        AND manifest.manifest_hash = snapshot.manifest_hash
+       WHERE active.network = 'devnet'
+         AND snapshot.network = 'devnet'
+         AND snapshot.status = 'verified'
        LIMIT 1`,
     )
     .first<SnapshotRow>()
@@ -52,15 +59,15 @@ export async function getActiveSnapshot(db: D1Database): Promise<ActiveSnapshotR
     epochId: row.epoch_id,
     ledgerIndex: row.ledger_index,
     ledgerHash: row.ledger_hash,
-    objectPrefix: row.object_prefix,
-    manifestKey: row.manifest_key,
+    objectPrefix: '',
+    manifestKey: null,
     manifestSha256: row.manifest_hash,
     vaultCount: row.vault_count,
     loanBrokerCount: row.loan_broker_count,
     loanCount: row.loan_count,
     objectCount: row.object_count,
-    shardCount: row.shard_count,
-    compressedBytes: row.compressed_bytes,
+    shardCount: row.batch_count,
+    compressedBytes: row.normalized_bytes,
     completedAt: row.completed_at,
   }
 }
