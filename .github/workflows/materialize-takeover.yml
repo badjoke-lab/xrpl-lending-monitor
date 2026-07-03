@@ -1,0 +1,48 @@
+name: Materialize takeover sources
+
+on:
+  push:
+    branches:
+      - github-release-current-state
+    paths:
+      - .takeover/READY
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: github-release-current-state
+          fetch-depth: 0
+
+      - name: Reconstruct source files
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          import json
+          from pathlib import Path
+
+          manifest = json.loads(Path('.takeover/manifest.json').read_text())
+          for target, fragments in manifest:
+              destination = Path(target)
+              destination.parent.mkdir(parents=True, exist_ok=True)
+              with destination.open('wb') as output:
+                  for fragment in fragments:
+                      output.write(Path('.takeover', fragment).read_bytes())
+          PY
+
+      - name: Commit reconstructed sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm -r .takeover
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "Add release-native current-state pipeline"
+          git push origin HEAD:github-release-current-state
