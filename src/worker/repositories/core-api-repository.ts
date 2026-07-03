@@ -30,28 +30,42 @@ interface SnapshotRow {
   completed_at: string | null
 }
 
+function isMissingD1CurrentStateSchema(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error)
+  return (
+    message.includes('no such table: current_state_d1_') ||
+    message.includes('no such table: main.current_state_d1_')
+  )
+}
+
 export async function getActiveSnapshot(db: D1Database): Promise<ActiveSnapshotRecord | null> {
-  const row = await db
-    .prepare(
-      `SELECT snapshot.id, snapshot.epoch_id, snapshot.ledger_index,
-              snapshot.ledger_hash, snapshot.manifest_hash,
-              snapshot.vault_count, snapshot.loan_broker_count,
-              snapshot.loan_count, snapshot.object_count,
-              snapshot.batch_count, snapshot.normalized_bytes,
-              snapshot.completed_at
-       FROM current_state_d1_active_snapshots active
-       JOIN current_state_d1_snapshots snapshot
-         ON snapshot.id = active.snapshot_id
-        AND snapshot.epoch_id = active.epoch_id
-       JOIN current_state_d1_snapshot_manifests manifest
-         ON manifest.snapshot_id = snapshot.id
-        AND manifest.manifest_hash = snapshot.manifest_hash
-       WHERE active.network = 'devnet'
-         AND snapshot.network = 'devnet'
-         AND snapshot.status = 'verified'
-       LIMIT 1`,
-    )
-    .first<SnapshotRow>()
+  let row: SnapshotRow | null
+  try {
+    row = await db
+      .prepare(
+        `SELECT snapshot.id, snapshot.epoch_id, snapshot.ledger_index,
+                snapshot.ledger_hash, snapshot.manifest_hash,
+                snapshot.vault_count, snapshot.loan_broker_count,
+                snapshot.loan_count, snapshot.object_count,
+                snapshot.batch_count, snapshot.normalized_bytes,
+                snapshot.completed_at
+         FROM current_state_d1_active_snapshots active
+         JOIN current_state_d1_snapshots snapshot
+           ON snapshot.id = active.snapshot_id
+          AND snapshot.epoch_id = active.epoch_id
+         JOIN current_state_d1_snapshot_manifests manifest
+           ON manifest.snapshot_id = snapshot.id
+          AND manifest.manifest_hash = snapshot.manifest_hash
+         WHERE active.network = 'devnet'
+           AND snapshot.network = 'devnet'
+           AND snapshot.status = 'verified'
+         LIMIT 1`,
+      )
+      .first<SnapshotRow>()
+  } catch (error) {
+    if (isMissingD1CurrentStateSchema(error)) return null
+    throw error
+  }
 
   if (!row) return null
   return {
