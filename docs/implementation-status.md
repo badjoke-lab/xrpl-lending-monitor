@@ -20,6 +20,7 @@ The public Devnet Worker is deployed through migration `0008_balance_history.sql
 - PR #59: 2,048 decoded objects per RPC page with writes bounded to 80 relevant objects.
 - PR #60: retained-snapshot capacity gate using actual local D1 size metadata.
 - PR #62: canonical compressed page-local data shards, digests, manifests, and local artifact storage.
+- PR #63: deterministic compressed object-ID, account, relationship, and search indexes.
 
 ## Capacity result
 
@@ -29,22 +30,22 @@ The measured rate projects approximately 5.03 GB for one complete row-per-object
 
 ## Active unit
 
-The `artifact-indexes` branch adds deterministic compressed secondary indexes for each page:
+The `page-artifact-commit` branch adds the page commit boundary:
 
-- object ID to immutable data shard;
-- Account, Owner, and Borrower to matching objects;
-- Vault to Loan Broker and Loan Broker to Loan relationships;
-- bounded current-state search entries for object IDs and accounts;
-- entry-count and uncompressed-byte shard limits;
-- SHA-256 digests and deterministic keys;
-- duplicate object-ID rejection;
-- fixture coverage for counts, references, determinism, and integrity failures.
+- one page manifest covering data and index artifacts;
+- retained opaque marker after the page;
+- page totals and per-artifact digests;
+- deterministic page-manifest key and bytes;
+- data, index, then manifest persistence order;
+- metadata verification after every write;
+- checkpoint advancement only after all artifacts and the manifest are durable;
+- failure tests proving that partial writes do not advance the checkpoint.
 
 ## Next order
 
-1. Pass full CI and merge the secondary-index unit.
-2. Add a combined page manifest covering data and index artifacts.
-3. Integrate artifact persistence with checkpoint advancement.
+1. Pass full CI and merge the page commit-boundary unit.
+2. Connect the page artifact set to the bootstrap scanner and persistent checkpoint repository.
+3. Add a snapshot-level manifest over all page manifests.
 4. Run a complete local Devnet compressed snapshot measurement.
 5. Implement bounded readers for list, detail, account, relationship, and search paths.
 6. Select and validate a production storage adapter only after local capacity and read-path evidence pass.
@@ -54,8 +55,8 @@ The `artifact-indexes` branch adds deterministic compressed secondary indexes fo
 
 ## Blockers
 
-- The secondary-index unit is not merged.
-- The combined manifest and checkpoint commit boundary are not implemented.
+- The page commit-boundary unit is not merged.
+- Scanner and persistent checkpoint integration are not implemented.
 - No complete compressed Devnet capacity report exists.
 - Migration `0009` remains unapplied remotely.
 - No production snapshot is verified or active.
