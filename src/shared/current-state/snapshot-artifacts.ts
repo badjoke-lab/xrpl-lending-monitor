@@ -45,3 +45,14 @@ interface EncodedRecord {
   id: string
   line: Uint8Array
 }
+
+function concatenate(records: readonly EncodedRecord[]): Uint8Array {
+  const size = records.reduce((total, record) => total + record.line.byteLength, 0)
+  const bytes = new Uint8Array(size)
+  let offset = 0
+  for (const record of records) {
+    bytes.set(record.line, offset)
+    offset += record.line.byteLength
+  }
+  return bytes
+}
