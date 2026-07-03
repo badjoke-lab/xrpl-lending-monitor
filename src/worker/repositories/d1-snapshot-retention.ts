@@ -189,7 +189,7 @@ export async function removeEligibleSnapshot(options: {
   snapshotId: string
   removeAt: string
 }): Promise<boolean> {
-  const result = await options.db
+  await options.db
     .prepare(
       `DELETE FROM current_state_d1_snapshots
        WHERE id = ?1
@@ -215,5 +215,10 @@ export async function removeEligibleSnapshot(options: {
     .bind(options.snapshotId, options.removeAt)
     .run()
 
-  return changed(result) === 1
+  const remaining = await options.db
+    .prepare(`SELECT id FROM current_state_d1_snapshots WHERE id = ?1`)
+    .bind(options.snapshotId)
+    .first<{ id: string }>()
+
+  return remaining === null
 }
