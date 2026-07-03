@@ -1,0 +1,1 @@
+export const SNAPSHOT_RECORD_SCHEMA_VERSION = 1
