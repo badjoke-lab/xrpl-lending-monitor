@@ -1,0 +1,78 @@
+name: Apply single D1 binding
+
+on:
+  push:
+    branches:
+      - feature-single-d1-binding
+    paths:
+      - .github/workflows/apply-single-d1-binding.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature-single-d1-binding
+      - name: Apply exact source replacements
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_exact(path, old, new, expected):
+              file = Path(path)
+              text = file.read_text()
+              count = text.count(old)
+              if count != expected:
+                  raise SystemExit(f"{path}: expected {expected} matches, found {count}")
+              file.write_text(text.replace(old, new))
+
+          replace_exact(
+              "src/worker/routes/current-loans.ts",
+              "if (!snapshot || !context.env.CURRENT_STATE)",
+              "if (!snapshot)",
+              2,
+          )
+          replace_exact(
+              "src/worker/routes/current-loans.ts",
+              "context.env.CURRENT_STATE",
+              "context.env.DB",
+              2,
+          )
+          replace_exact(
+              "src/worker/index.ts",
+              "if (!snapshot || !context.env.CURRENT_STATE)",
+              "if (!snapshot)",
+              2,
+          )
+          replace_exact(
+              "src/worker/index.ts",
+              "context.env.CURRENT_STATE",
+              "context.env.DB",
+              2,
+          )
+          replace_exact(
+              "src/worker/index.ts",
+              "  type EntityCollectionKind,\n",
+              "",
+              1,
+          )
+          replace_exact(
+              "src/worker/index.ts",
+              "function entityCollectionHandler(kind: EntityCollectionKind) {\n  return async (context: Context<{ Bindings: Bindings }>) => {\n    resolveRuntimeConfig(context.env)\n    const limit = parsePageLimit(context.req.query('limit'))\n    if (limit === null) return invalidLimitResponse(context)\n    const { epoch, snapshot } = await loadCoreApiContext(context.env.DB)\n    return context.json(\n      serializeUnavailableEntityCollection({ kind, epoch, snapshot, page: { limit } }),\n    )\n  }\n}\n\napp.get('/api/loans', entityCollectionHandler('loans'))\n\n",
+              "",
+              1,
+          )
+          Path(".github/workflows/apply-single-d1-binding.yml").unlink()
+          PY
+      - name: Commit exact replacements
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/worker/index.ts src/worker/routes/current-loans.ts .github/workflows/apply-single-d1-binding.yml
+          git commit -m "refactor: use the single D1 binding"
+          git push origin HEAD:feature-single-d1-binding
