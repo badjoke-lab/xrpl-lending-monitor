@@ -6,6 +6,10 @@ import {
   type ListCurrentVaultsResult,
   type VaultSort,
 } from './d1-current-vault-reader'
+import {
+  getGithubVaultById,
+  listGithubVaults,
+} from './github-current-readers'
 
 export { CurrentStateObjectReadError } from './current-state-read-error'
 export type { ListCurrentVaultsOptions, ListCurrentVaultsResult, VaultSort }
@@ -29,3 +33,6 @@ export function getCurrentVaultById(
 ) {
   return getStoredCurrentVaultById(database(storage), snapshot, vaultId)
 }
+
+void getGithubVaultById
+void listGithubVaults
