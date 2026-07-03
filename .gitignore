@@ -1,5 +1,6 @@
 node_modules/
 dist/
+.d1-tools-build/
 coverage/
 playwright-report/
 test-results/
