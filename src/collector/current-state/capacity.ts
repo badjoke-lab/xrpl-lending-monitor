@@ -1,0 +1,1 @@
+export const DATABASE_LIMIT_BYTES = 500_000_000
