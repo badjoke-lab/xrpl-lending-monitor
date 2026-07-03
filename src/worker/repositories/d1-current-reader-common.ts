@@ -3,7 +3,7 @@ import type {
   LoanCurrentProjection,
   VaultCurrentProjection,
 } from '../../domain/lending/current-projections'
-import { CurrentStateObjectReadError } from './current-state-object-reader'
+import { CurrentStateObjectReadError } from './current-state-read-error'
 
 interface CursorPayload {
   version: 1
