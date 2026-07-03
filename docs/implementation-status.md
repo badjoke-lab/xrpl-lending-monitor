@@ -19,6 +19,7 @@ The public Devnet Worker is deployed through migration `0008_balance_history.sql
 - PR #57: separate local operator actions and measurement evidence.
 - PR #59: 2,048 decoded objects per RPC page with writes bounded to 80 relevant objects.
 - PR #60: retained-snapshot capacity gate using actual local D1 size metadata.
+- PR #62: canonical compressed page-local data shards, digests, manifests, and local artifact storage.
 
 ## Capacity result
 
@@ -28,31 +29,33 @@ The measured rate projects approximately 5.03 GB for one complete row-per-object
 
 ## Active unit
 
-The `storage-review` branch adds the first backend-neutral snapshot artifact layer:
+The `artifact-indexes` branch adds deterministic compressed secondary indexes for each page:
 
-- canonical JSON serialization;
-- deterministic gzip compression;
-- SHA-256 digests;
-- bounded page-local shards;
-- immutable versioned keys;
-- deterministic manifest bytes;
-- an artifact-store interface and local in-memory implementation;
-- tests for deterministic output and immutable writes.
+- object ID to immutable data shard;
+- Account, Owner, and Borrower to matching objects;
+- Vault to Loan Broker and Loan Broker to Loan relationships;
+- bounded current-state search entries for object IDs and accounts;
+- entry-count and uncompressed-byte shard limits;
+- SHA-256 digests and deterministic keys;
+- duplicate object-ID rejection;
+- fixture coverage for counts, references, determinism, and integrity failures.
 
 ## Next order
 
-1. Pass full CI for the artifact layer.
-2. Add deterministic object, account, relationship, and search indexes.
-3. Integrate page artifact persistence with checkpoint advancement.
+1. Pass full CI and merge the secondary-index unit.
+2. Add a combined page manifest covering data and index artifacts.
+3. Integrate artifact persistence with checkpoint advancement.
 4. Run a complete local Devnet compressed snapshot measurement.
-5. Select and validate a production storage adapter only after local capacity and read-path evidence pass.
-6. Build and verify an inactive production snapshot.
-7. Activate separately, prove rollback, and start incremental collection.
-8. Complete M5-5 and continue M6.
+5. Implement bounded readers for list, detail, account, relationship, and search paths.
+6. Select and validate a production storage adapter only after local capacity and read-path evidence pass.
+7. Build and verify an inactive production snapshot.
+8. Activate separately, prove rollback, and start incremental collection.
+9. Complete M5-5 and continue M6.
 
 ## Blockers
 
-- The compressed snapshot format and indexes are not complete.
+- The secondary-index unit is not merged.
+- The combined manifest and checkpoint commit boundary are not implemented.
 - No complete compressed Devnet capacity report exists.
 - Migration `0009` remains unapplied remotely.
 - No production snapshot is verified or active.
