@@ -2,18 +2,29 @@ import { canonicalJson, sha256Hex, utf8 } from './canonical-json'
 import type { ArtifactStore } from './artifact-metadata'
 import type { ArtifactBootstrapCheckpoint } from './artifact-bootstrap-types'
 import type { PageArtifactManifest } from './page-artifact-types'
+import {
+  buildSnapshotCatalogArtifacts,
+  type SnapshotCatalogArtifact,
+  type SnapshotCatalogDescriptor,
+} from './snapshot-catalog'
 import type { SnapshotIdentity } from './snapshot-types'
 
 export interface SnapshotLevelManifest {
-  schemaVersion: 1
+  schemaVersion: 2
   identity: SnapshotIdentity
   generatedAt: string
   pageCount: number
   metrics: ArtifactBootstrapCheckpoint['metrics']
   pages: ArtifactBootstrapCheckpoint['pageManifests']
+  catalogs: SnapshotCatalogDescriptor[]
   totals: {
     dataObjects: number
     indexEntries: number
+    uncompressedBytes: number
+    compressedBytes: number
+  }
+  catalogTotals: {
+    entries: number
     uncompressedBytes: number
     compressedBytes: number
   }
@@ -21,6 +32,7 @@ export interface SnapshotLevelManifest {
 
 export interface SnapshotLevelArtifact {
   manifest: SnapshotLevelManifest
+  catalogArtifacts: SnapshotCatalogArtifact[]
   key: string
   bytes: Uint8Array
   sha256: string
@@ -84,6 +96,19 @@ async function loadPageManifests(options: {
   return pages
 }
 
+async function persistCatalogs(
+  store: ArtifactStore,
+  artifacts: readonly SnapshotCatalogArtifact[],
+): Promise<void> {
+  for (const artifact of artifacts) {
+    await store.write(artifact.key, artifact.bytes, artifact.sha256)
+    const stored = await store.inspect(artifact.key)
+    if (!stored || stored.size !== artifact.bytes.byteLength || stored.sha256 !== artifact.sha256) {
+      throw new Error(`Snapshot catalog persistence verification failed for ${artifact.key}`)
+    }
+  }
+}
+
 export async function buildAndPersistSnapshotLevelManifest(options: {
   store: ArtifactStore
   checkpoint: ArtifactBootstrapCheckpoint
@@ -100,27 +125,39 @@ export async function buildAndPersistSnapshotLevelManifest(options: {
   }
 
   const pages = await loadPageManifests(options)
+  const identity: SnapshotIdentity = {
+    network: options.checkpoint.network,
+    epochId: options.checkpoint.epochId,
+    snapshotId: options.checkpoint.snapshotId,
+    ledgerIndex: options.checkpoint.ledgerIndex,
+    ledgerHash: options.checkpoint.ledgerHash,
+  }
+  const catalogArtifacts = await buildSnapshotCatalogArtifacts({ identity, pages })
+  await persistCatalogs(options.store, catalogArtifacts)
+
   const totals = pages.reduce((result, page) => ({
     dataObjects: result.dataObjects + page.totals.dataObjects,
     indexEntries: result.indexEntries + page.totals.indexEntries,
     uncompressedBytes: result.uncompressedBytes + page.totals.uncompressedBytes,
     compressedBytes: result.compressedBytes + page.totals.compressedBytes,
   }), { dataObjects: 0, indexEntries: 0, uncompressedBytes: 0, compressedBytes: 0 })
+  const catalogs = catalogArtifacts.map(({ bytes: _bytes, ...descriptor }) => descriptor)
+  const catalogTotals = catalogs.reduce((result, catalog) => ({
+    entries: result.entries + catalog.entryCount,
+    uncompressedBytes: result.uncompressedBytes + catalog.uncompressedBytes,
+    compressedBytes: result.compressedBytes + catalog.compressedBytes,
+  }), { entries: 0, uncompressedBytes: 0, compressedBytes: 0 })
 
   const manifest: SnapshotLevelManifest = {
-    schemaVersion: 1,
-    identity: {
-      network: options.checkpoint.network,
-      epochId: options.checkpoint.epochId,
-      snapshotId: options.checkpoint.snapshotId,
-      ledgerIndex: options.checkpoint.ledgerIndex,
-      ledgerHash: options.checkpoint.ledgerHash,
-    },
+    schemaVersion: 2,
+    identity,
     generatedAt: options.generatedAt,
     pageCount: pages.length,
     metrics: options.checkpoint.metrics,
     pages: options.checkpoint.pageManifests,
+    catalogs,
     totals,
+    catalogTotals,
   }
   const bytes = utf8(`${canonicalJson(manifest)}\n`)
   const sha256 = await sha256Hex(bytes)
@@ -130,5 +167,5 @@ export async function buildAndPersistSnapshotLevelManifest(options: {
   if (!stored || stored.size !== bytes.byteLength || stored.sha256 !== sha256) {
     throw new Error('Snapshot manifest persistence verification failed')
   }
-  return { manifest, key, bytes, sha256 }
+  return { manifest, catalogArtifacts, key, bytes, sha256 }
 }

@@ -24,6 +24,7 @@ The public Devnet Worker is deployed through migration `0008_balance_history.sql
 - PR #64: one page manifest and checkpoint advancement only after durable artifact verification.
 - PR #65: scanner integration with resumable artifact checkpoints and no automatic activation.
 - PR #66: complete-snapshot verification and deterministic snapshot-level manifest.
+- PR #67: persistent local artifact storage, resumable checkpoints, measurement CLI, and evidence workflow.
 
 ## Capacity result
 
@@ -33,24 +34,26 @@ The measured rate projects approximately 5.03 GB for one complete row-per-object
 
 ## Active unit
 
-The `local-checkpoint-measurement` branch adds persistent local execution and capacity evidence for the compressed artifact pipeline:
+The `bounded-artifact-readers` branch adds the read path required by the current-state pages:
 
-- filesystem-backed immutable artifact storage;
-- filesystem-backed resumable checkpoint JSON;
-- fixed-ledger `run.json` authority for repeat invocations;
-- bounded page-budget samples and complete traversal mode;
-- automatic resume from the last durable page manifest;
-- final snapshot-manifest verification on complete traversal;
-- evidence for data and index sizes, artifact counts, compression ratio, heap use, and scan timing;
-- a local CLI and manual-only GitHub Actions workflow;
-- tests for immutability, unsafe paths, checkpoint reload, and process-equivalent pause and resume.
+- compressed snapshot shard catalogs for data and every secondary-index kind;
+- snapshot-manifest references to verified catalog artifacts;
+- catalog range metadata that preserves overlapping index ranges;
+- bounded list pagination with opaque cursors;
+- object detail through object-ID and data-shard lookup;
+- Account, Owner, and Borrower reference lookup;
+- Vault to Loan Broker and Loan Broker to Loan relationship lookup;
+- exact current-state search for object identifiers and accounts;
+- explicit result and shard-read limits;
+- digest, identity, object-value, cursor, and catalog integrity checks.
+- local artifact measurement evidence includes catalog artifact count, compressed bytes, uncompressed bytes, largest catalog artifact, and compressed catalog share.
 
 ## Next order
 
-1. Pass full CI and merge the local checkpoint and measurement unit.
+1. Pass full CI and merge the catalog and bounded-reader unit.
 2. Run the bounded compressed-artifact sample and inspect the evidence.
 3. Run a complete fixed-ledger Devnet measurement if the bounded result passes the resource guardrails.
-4. Implement bounded readers for list, detail, account, relationship, and search paths.
+4. Wire the readers to unavailable-safe current-state API routes.
 5. Select and validate a production storage adapter only after local capacity and read-path evidence pass.
 6. Build and verify an inactive production snapshot.
 7. Activate separately, prove rollback, and start incremental collection.
@@ -58,7 +61,7 @@ The `local-checkpoint-measurement` branch adds persistent local execution and ca
 
 ## Blockers
 
-- The persistent local measurement unit is not merged.
+- The snapshot catalog and bounded-reader unit is not merged.
 - No compressed-artifact capacity evidence has been accepted yet.
 - Migration `0009` remains unapplied remotely.
 - No production snapshot is verified or active.

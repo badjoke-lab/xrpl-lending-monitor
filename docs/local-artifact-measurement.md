@@ -5,7 +5,7 @@ This command builds and measures the compressed current-state artifact format ag
 It writes only to a local directory. The directory contains:
 
 - `run.json` — the fixed ledger and snapshot identity;
-- `artifacts/` — immutable compressed data, index, page-manifest, and snapshot-manifest files;
+- `artifacts/` — immutable compressed data, index, catalog, page-manifest, and snapshot-manifest files;
 - `checkpoints/` — the resumable scan checkpoint;
 - `evidence.json` — capacity and runtime evidence for the latest invocation.
 
@@ -53,11 +53,11 @@ Once `run.json` exists, it remains the authority for that root. Use a different 
 The evidence report includes:
 
 - decoded and relevant object counts;
-- data and secondary-index shard counts;
-- compressed and uncompressed data and index bytes;
+- data, secondary-index, and catalog artifact counts;
+- compressed and uncompressed data, index, and catalog bytes;
 - page-manifest and snapshot-manifest bytes;
-- total stored bytes and largest artifact;
-- compression ratio and compressed index share;
+- total stored bytes, largest artifact, and largest catalog artifact;
+- compression ratio, compressed index share, and compressed catalog share;
 - page progress, cumulative scan time, invocation wall time, and maximum observed heap use.
 
 The manual GitHub Actions workflow defaults to a 500-page bounded sample. A complete traversal requires selecting `full_run` explicitly.
