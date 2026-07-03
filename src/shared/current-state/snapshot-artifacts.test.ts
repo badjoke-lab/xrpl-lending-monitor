@@ -29,11 +29,7 @@ async function buildFixture() {
   return buildPageSnapshotArtifacts({
     identity,
     pageSequence: 7,
-    vaults: [
-      ledgerObject('Vault', 'C'),
-      ledgerObject('Vault', 'A'),
-      ledgerObject('Vault', 'B'),
-    ],
+    vaults: [ledgerObject('Vault', 'C'), ledgerObject('Vault', 'A'), ledgerObject('Vault', 'B')],
     loanBrokers: [ledgerObject('LoanBroker', 'D')],
     loans: [ledgerObject('Loan', 'E')],
     maxObjectsPerShard: 2,
@@ -44,5 +40,15 @@ async function buildFixture() {
 describe('snapshot artifacts', () => {
   it('canonicalizes object keys', () => {
     expect(canonicalJson({ b: 2, a: 1 })).toBe('{"a":1,"b":2}')
+  })
+
+  it('is deterministic', async () => {
+    const first = await buildFixture()
+    const second = await buildFixture()
+    expect(first.artifacts).toHaveLength(4)
+    expect(first.artifacts.map((value) => value.sha256)).toEqual(
+      second.artifacts.map((value) => value.sha256),
+    )
+    expect(first.manifestSha256).toBe(second.manifestSha256)
   })
 })
