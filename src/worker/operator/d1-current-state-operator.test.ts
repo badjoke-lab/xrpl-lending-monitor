@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const runD1Bootstrap = vi.fn()
+const { runD1Bootstrap } = vi.hoisted(() => ({
+  runD1Bootstrap: vi.fn(),
+}))
 
 vi.mock('../bootstrap/d1-bootstrap', () => ({ runD1Bootstrap }))
 
