@@ -154,7 +154,7 @@ export class SnapshotArtifactReader {
     term: string
     maxShardReads: number
   }): Promise<{ values: SnapshotCatalogValue[]; shardReads: number }> {
-    const descriptors = this.manifest.catalogs
+    const descriptors: SnapshotCatalogDescriptor[] = this.manifest.catalogs
       .filter((descriptor) => (
         descriptor.catalogKind === options.catalogKind
         && termMatches(descriptor.firstTerm, descriptor.lastTerm, options.term)
