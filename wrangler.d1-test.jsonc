@@ -1,0 +1,21 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "xrpl-lending-monitor-d1-test",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2026-07-01",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "xrpl-lending-monitor-test",
+      "database_id": "00000000-0000-0000-0000-000000000001",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "vars": {
+    "APP_NETWORK": "devnet",
+    "MAINNET_ENABLED": "false",
+    "XRPL_DEVNET_RPC_URL": "https://s.devnet.rippletest.net:51234",
+    "XRPL_RPC_TIMEOUT_MS": "8000",
+    "NETWORK_STATUS_STALE_AFTER_SECONDS": "30"
+  }
+}
