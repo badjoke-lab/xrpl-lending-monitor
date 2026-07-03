@@ -8,6 +8,12 @@ export interface ArtifactReaderCursor {
   lineIndex: number
 }
 
+export interface DecodedGzipNdjson {
+  records: unknown[]
+  decompressedBytes: number
+  decompressedSha256: string
+}
+
 function arrayBuffer(bytes: Uint8Array): ArrayBuffer {
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
 }
@@ -70,18 +76,76 @@ export function decodeArtifactReaderCursor(options: {
   return parsed as unknown as ArtifactReaderCursor
 }
 
+export async function decodeGzipNdjsonWithMetadata(options: {
+  bytes: Uint8Array
+  sha256: string
+  uncompressedSha256?: string
+  expectedDecompressedBytes?: number
+  maxDecompressedBytes: number
+}): Promise<DecodedGzipNdjson> {
+  if (!Number.isSafeInteger(options.maxDecompressedBytes) || options.maxDecompressedBytes < 1) {
+    throw new Error('maxDecompressedBytes must be a positive safe integer')
+  }
+  if (
+    options.expectedDecompressedBytes !== undefined
+    && (!Number.isSafeInteger(options.expectedDecompressedBytes) || options.expectedDecompressedBytes < 0)
+  ) {
+    throw new Error('expectedDecompressedBytes must be a non-negative safe integer')
+  }
+  if (
+    options.expectedDecompressedBytes !== undefined
+    && options.expectedDecompressedBytes > options.maxDecompressedBytes
+  ) {
+    throw new Error('Artifact declared decompressed size exceeds limit')
+  }
+  if (await sha256Hex(options.bytes) !== options.sha256) throw new Error('Artifact digest mismatch')
+  const stream = new Blob([arrayBuffer(options.bytes)]).stream().pipeThrough(new DecompressionStream('gzip'))
+  const reader = stream.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    total += value.byteLength
+    if (total > options.maxDecompressedBytes) {
+      await reader.cancel()
+      throw new Error('Artifact decompressed size exceeds limit')
+    }
+    if (options.expectedDecompressedBytes !== undefined && total > options.expectedDecompressedBytes) {
+      await reader.cancel()
+      throw new Error('Artifact decompressed size mismatch')
+    }
+    chunks.push(value)
+  }
+  if (options.expectedDecompressedBytes !== undefined && total !== options.expectedDecompressedBytes) {
+    throw new Error('Artifact decompressed size mismatch')
+  }
+  const decompressed = new Uint8Array(total)
+  let offset = 0
+  for (const chunk of chunks) {
+    decompressed.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  const decompressedSha256 = await sha256Hex(decompressed)
+  if (options.uncompressedSha256 && decompressedSha256 !== options.uncompressedSha256) {
+    throw new Error('Artifact decompressed digest mismatch')
+  }
+  const text = new TextDecoder().decode(decompressed)
+  if (text.length === 0) return { records: [], decompressedBytes: total, decompressedSha256 }
+  const lines = text.endsWith('\n') ? text.slice(0, -1).split('\n') : text.split('\n')
+  return {
+    records: lines.filter((line) => line.length > 0).map((line) => JSON.parse(line) as unknown),
+    decompressedBytes: total,
+    decompressedSha256,
+  }
+}
+
 export async function decodeGzipNdjson(options: {
   bytes: Uint8Array
   sha256: string
+  uncompressedSha256?: string
+  expectedDecompressedBytes?: number
+  maxDecompressedBytes: number
 }): Promise<unknown[]> {
-  if (await sha256Hex(options.bytes) !== options.sha256) {
-    throw new Error('Artifact digest mismatch')
-  }
-  const stream = new Blob([arrayBuffer(options.bytes)])
-    .stream()
-    .pipeThrough(new DecompressionStream('gzip'))
-  const text = new TextDecoder().decode(await new Response(stream).arrayBuffer())
-  if (text.length === 0) return []
-  const lines = text.endsWith('\n') ? text.slice(0, -1).split('\n') : text.split('\n')
-  return lines.filter((line) => line.length > 0).map((line) => JSON.parse(line) as unknown)
+  return (await decodeGzipNdjsonWithMetadata(options)).records
 }
