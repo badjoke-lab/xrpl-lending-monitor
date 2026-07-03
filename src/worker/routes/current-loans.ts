@@ -125,7 +125,7 @@ export function registerCurrentLoanRoutes(app: Hono<{ Bindings: Bindings }>): vo
       getCurrentEpoch(context.env.DB),
       getActiveSnapshot(context.env.DB),
     ])
-    if (!snapshot || !context.env.CURRENT_STATE) {
+    if (!snapshot) {
       return context.json(
         serializeUnavailableEntityCollection({
           kind: 'loans',
@@ -137,7 +137,7 @@ export function registerCurrentLoanRoutes(app: Hono<{ Bindings: Bindings }>): vo
     }
 
     try {
-      const result = await listCurrentLoans(context.env.CURRENT_STATE, snapshot, {
+      const result = await listCurrentLoans(context.env.DB, snapshot, {
         limit,
         sort,
         cursor,
@@ -181,7 +181,7 @@ export function registerCurrentLoanRoutes(app: Hono<{ Bindings: Bindings }>): vo
       getCurrentEpoch(context.env.DB),
       getActiveSnapshot(context.env.DB),
     ])
-    if (!snapshot || !context.env.CURRENT_STATE) {
+    if (!snapshot) {
       return context.json(
         serializeUnavailableEntityDetail({ kind: 'loan', epoch, snapshot }),
       )
@@ -189,7 +189,7 @@ export function registerCurrentLoanRoutes(app: Hono<{ Bindings: Bindings }>): vo
 
     try {
       const record = await getCurrentLoanById(
-        context.env.CURRENT_STATE,
+        context.env.DB,
         snapshot,
         loanId,
         currentRippleTime(),
