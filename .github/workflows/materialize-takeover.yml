@@ -1,39 +1,11 @@
-name: Materialize staged sources
+name: Disabled temporary workflow
 
 on:
-  push:
-    branches:
-      - github-release-current-state
-    paths:
-      - .staging/READY
-
-permissions:
-  contents: write
+  workflow_dispatch:
 
 jobs:
-  materialize:
+  disabled:
+    if: ${{ false }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: github-release-current-state
-          fetch-depth: 0
-
-      - name: Restore staged files
-        shell: bash
-        run: |
-          set -euo pipefail
-          base64 --decode .staging/manifest.txt > /tmp/sources.tar.xz
-          tar -xJf /tmp/sources.tar.xz -C .
-
-      - name: Commit restored files
-        shell: bash
-        run: |
-          set -euo pipefail
-          git rm -r .staging
-          git rm .github/workflows/materialize-takeover.yml
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add -A
-          git commit -m "Add release-native current-state pipeline"
-          git push origin HEAD:github-release-current-state
+      - run: echo disabled
