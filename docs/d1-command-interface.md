@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-03.
 
-This document defines the non-public local command interface used for D1 current-state bootstrap, verification, measurement, activation, rollback, and cleanup.
+This document defines the non-public local command interface used for D1 current-state bootstrap, verification, measurement, capacity gating, activation, rollback, and cleanup.
 
 It is an implementation and operations interface. It is not an HTTP route, public API, scheduled task, or automatic deployment action.
 
@@ -10,12 +10,13 @@ It is an implementation and operations interface. It is not an HTTP route, publi
 
 - `--local` is mandatory.
 - Wrangler remote bindings are disabled by the runner.
-- Bootstrap, verification, measurement, activation, rollback, and cleanup are distinct actions.
+- Bootstrap, verification, measurement, capacity gating, activation, rollback, and cleanup are distinct actions.
 - Bootstrap never activates a snapshot.
 - A fixed Devnet ledger index and 64-character ledger hash are required for bootstrap.
 - A bootstrap run is bounded to at most 25 RPC pages, 2,048 decoded ledger objects per page, 60 seconds, and two retries.
 - Relevant Vault, Loan Broker, and Loan rows from one RPC page are persisted in D1 batches of at most 80 objects.
 - The continuation marker advances only after the final D1 batch for the RPC page is durable.
+- Capacity gating requires a verified manifest-backed snapshot.
 - Evidence reports whether an opaque continuation marker exists but never emits the marker value.
 - Evidence must not contain credentials, private endpoints, provider account identifiers, or secrets.
 - Mainnet remains disabled.
@@ -112,11 +113,38 @@ The measurement report includes:
 - raw, projection, normalized, and logical bytes;
 - maximum row and batch size;
 - estimated written rows and measurement queries;
-- index-adjusted projected bytes;
-- the 350,000,000-byte safety threshold and pass or fail result;
 - recorded duration.
 
-The projection is a conservative pre-remote gate, not a claim about billed storage.
+Measurement describes the selected snapshot. It does not replace the retained-snapshot capacity gate.
+
+### Capacity gate
+
+```json
+{
+  "action": "capacity",
+  "snapshotId": "local-devnet-001",
+  "historyReserveBytes": 50000000,
+  "retainedSnapshots": 2,
+  "includedSnapshots": 1,
+  "enforce": true
+}
+```
+
+Capacity gating requires a verified snapshot and reports:
+
+- current local D1 size from D1 query metadata;
+- verified snapshot normalized bytes and manifest bytes;
+- object and batch row counts;
+- maximum row, object batch, and normalized batch sizes;
+- one additional retained-snapshot estimate including row and index overhead;
+- explicit history reserve;
+- projected total database bytes;
+- headroom below the 350,000,000-byte bootstrap stop threshold and the project database budget;
+- acceptance state and all rejection reasons.
+
+`retainedSnapshots` defaults to `2`. `includedSnapshots` defaults to `1` because the measured snapshot is already present in the current database. Set `includedSnapshots` to `2` only after both intended retained snapshots are already stored in that same local database.
+
+`enforce` defaults to `true`. A rejected report is still printed and written to `--output`, then the command exits with status `2`. Set `enforce` to `false` only for diagnostic measurement; it does not authorize remote work.
 
 ### Activate
 
@@ -172,10 +200,12 @@ Removal succeeds only after the eligibility time and only while all pointer and 
 4. Repeat `bootstrap` until `scanComplete` is true.
 5. Run `status`.
 6. Run `verify`.
-7. Run `measure` and confirm the resource gate.
-8. Run `activate` only as a separate explicit action.
-9. Validate current APIs and UI against the manifest.
-10. Build and activate a second snapshot before testing `restore`.
-11. Exercise cleanup only with a controlled failed or superseded attempt.
+7. Run `measure`.
+8. Run `capacity` with an explicit history reserve and confirm `accepted: true`.
+9. Run `activate` only as a separate explicit action.
+10. Validate current APIs and UI against the manifest.
+11. Build and verify a second snapshot, then rerun `capacity` with `includedSnapshots: 2`.
+12. Activate the second snapshot before testing `restore`.
+13. Exercise cleanup only with a controlled failed or superseded attempt.
 
 Remote migration and production bootstrap remain outside this interface until the D1-5 local evidence gate is complete and reviewed.
