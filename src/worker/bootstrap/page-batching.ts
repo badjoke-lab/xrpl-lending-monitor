@@ -44,7 +44,7 @@ export async function persistPageBatches(options: {
   const writeBatch = options.writeBatch ?? writeSnapshotBatch
   const chunks = splitPage(options.page)
   let nextSequence = options.nextSequence
-  let updatedAt = options.now()
+  let updatedAt = ''
 
   for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex += 1) {
     const chunk = chunks[chunkIndex]
