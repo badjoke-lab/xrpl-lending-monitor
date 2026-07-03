@@ -1,0 +1,1 @@
+export const SNAPSHOT_PAGE_LIMIT = 2048
