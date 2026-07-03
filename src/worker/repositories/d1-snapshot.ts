@@ -52,6 +52,14 @@ export function utf8Bytes(value: string): number {
   return new TextEncoder().encode(value).byteLength
 }
 
+export async function digestHex(value: string): Promise<string> {
+  const bytes = new TextEncoder().encode(value)
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes)
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('')
+}
+
 export async function loadSnapshot(
   db: D1Database,
   snapshotId: string,
@@ -64,4 +72,58 @@ export async function loadSnapshot(
     )
     .bind(snapshotId)
     .first<SnapshotRow>()
+}
+
+export async function beginSnapshot(
+  db: D1Database,
+  identity: SnapshotIdentity,
+): Promise<void> {
+  const existing = await loadSnapshot(db, identity.id)
+  if (existing) {
+    if (
+      existing.network !== identity.network ||
+      existing.epoch_id !== identity.epochId ||
+      existing.ledger_index !== identity.ledgerIndex ||
+      existing.ledger_hash !== identity.ledgerHash
+    ) {
+      throw new Error('Existing D1 snapshot identity does not match')
+    }
+    return
+  }
+
+  await db
+    .prepare(
+      `INSERT INTO current_state_d1_snapshots (
+         id, network, epoch_id, status, ledger_index, ledger_hash, endpoint,
+         started_at, created_at, updated_at
+       ) VALUES (?1, ?2, ?3, 'building', ?4, ?5, ?6, ?7, ?7, ?7)`,
+    )
+    .bind(
+      identity.id,
+      identity.network,
+      identity.epochId,
+      identity.ledgerIndex,
+      identity.ledgerHash,
+      identity.endpoint,
+      identity.startedAt,
+    )
+    .run()
+}
+
+export async function failSnapshot(options: {
+  db: D1Database
+  snapshotId: string
+  failedAt: string
+  code: string
+  message: string
+}): Promise<void> {
+  await options.db
+    .prepare(
+      `UPDATE current_state_d1_snapshots
+       SET status = 'failed', error_code = ?1, error_message = ?2,
+           completed_at = ?3, updated_at = ?3
+       WHERE id = ?4 AND status = 'building'`,
+    )
+    .bind(options.code, options.message, options.failedAt, options.snapshotId)
+    .run()
 }
