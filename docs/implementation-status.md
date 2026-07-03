@@ -44,46 +44,48 @@ This is an accepted design direction, not a claim that the production migration 
 
 ## Active pull requests and disposition
 
-### Documentation and dependency lock
+### PR #53 — Documentation and dependency lock
 
-The current documentation unit must merge first. It adds the canonical D1 migration plan and aligns the roadmap, implementation status, and decision record.
+Merged. The canonical D1 migration plan, roadmap order, and implementation status are now on `main`.
 
-### PR #50 — Snapshot retention safeguards
+### PR #54 — Snapshot retention
 
-Status: open and next implementation unit after the documentation lock.
+Status: active D1-1 implementation unit.
 
-Required before merge:
+Implemented on the branch:
 
-- real local D1 integration tests;
-- verified-manifest and same-epoch restore requirements;
-- guarded active and rollback pointer update result checking;
-- guarded `sync_state` restoration;
-- full protected-snapshot and eligibility-time cleanup tests;
-- documentation alignment with the canonical D1 plan.
+- manifest-backed verified rollback target lookup;
+- same-epoch sync-state requirement;
+- guarded active and rollback pointer swap;
+- guarded sync-state restoration and changed-row checks;
+- cleanup rejection for active, rollback, and resumable snapshots;
+- cleanup eligibility-time enforcement;
+- local workerd D1 integration coverage with migrations applied.
+
+PR #50 was closed without merge because it predated the canonical D1 plan and was replaced by PR #54 from the current main predecessor.
 
 ### PR #49 — Current state binding
 
 Status: open but not merge-ready in its current form.
 
-The branch currently adds a second D1 alias named `CURRENT_STATE`. The accepted D1-only architecture instead uses the existing `DB` binding directly for current entity reads. PR #49 must be revised after PR #50 merges and must not preserve the former object-storage boundary through a duplicate D1 binding.
+The branch currently adds a second D1 alias named `CURRENT_STATE`. The accepted D1-only architecture instead uses the existing `DB` binding directly for current entity reads. PR #49 must be revised after PR #54 merges and must not preserve the former object-storage boundary through a duplicate D1 binding.
 
 ## Immediate implementation order
 
-1. Merge the documentation and dependency lock.
-2. Complete and merge PR #50 snapshot retention safeguards.
-3. Revise and merge PR #49 as the single-`DB` runtime binding unit.
-4. Complete the D1-only local integration path and isolate superseded R2 paths.
-5. Add the non-public operator bootstrap and measurement harness.
-6. Run a complete local Devnet bootstrap and the 350 MB resource gate.
-7. Stop for review before any remote D1 mutation.
-8. Apply reviewed additive migration changes remotely.
-9. Run and verify an inactive production Devnet snapshot.
-10. Activate explicitly, prove rollback, start incremental collection, complete M5-5, and continue M6.
+1. Complete and merge PR #54 snapshot retention safeguards.
+2. Revise and merge PR #49 as the single-`DB` runtime binding unit.
+3. Complete the D1-only local integration path and isolate superseded R2 paths.
+4. Add the non-public operator bootstrap and measurement harness.
+5. Run a complete local Devnet bootstrap and the 350 MB resource gate.
+6. Stop for review before any remote D1 mutation.
+7. Apply reviewed additive migration changes remotely.
+8. Run and verify an inactive production Devnet snapshot.
+9. Activate explicitly, prove rollback, start incremental collection, complete M5-5, and continue M6.
 
 ## Release blockers
 
-- PR #50 retention safeguards are not complete.
-- PR #49 still represents the D1 database through a duplicate legacy binding.
+- PR #54 retention safeguards are not merged;
+- PR #49 still represents the D1 database through a duplicate legacy binding;
 - no complete local D1-only bootstrap and resource report exists;
 - no reviewed operator execution path exists;
 - migration `0009` is not applied remotely;
