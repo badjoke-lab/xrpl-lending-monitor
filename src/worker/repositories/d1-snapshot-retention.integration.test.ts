@@ -65,11 +65,12 @@ async function insertSnapshot(options: {
 describe('D1 snapshot retention integration', () => {
   beforeAll(async () => {
     const platform = await getPlatformProxy<{ DB: D1Database }>({
+      configPath: resolve(process.cwd(), 'wrangler.d1-test.jsonc'),
       persist: false,
       remoteBindings: false,
     })
     db = platform.env.DB
-    disposePlatform = platform.dispose
+    disposePlatform = () => platform.dispose()
     await applyMigrations(db)
 
     await db
