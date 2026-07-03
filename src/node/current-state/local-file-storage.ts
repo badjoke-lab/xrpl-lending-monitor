@@ -87,7 +87,10 @@ export class LocalFileArtifactStore implements ArtifactStore {
   }
 
   async enumerate(prefix: string): Promise<ArtifactMetadata[]> {
-    const prefixPath = prefix.length === 0 ? this.root : safeArtifactPath(this.root, prefix)
+    const normalizedPrefix = prefix.replace(/\/+$/, '')
+    const prefixPath = normalizedPrefix.length === 0
+      ? this.root
+      : safeArtifactPath(this.root, normalizedPrefix)
     const paths = await walkFiles(prefixPath)
     const metadata: ArtifactMetadata[] = []
     for (const path of paths) {
