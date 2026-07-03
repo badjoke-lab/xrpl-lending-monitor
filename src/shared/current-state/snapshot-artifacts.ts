@@ -21,3 +21,15 @@ function pageToken(value: number): string {
 function chunkToken(value: number): string {
   return String(value).padStart(4, '0')
 }
+
+function assertIdentity(identity: SnapshotIdentity): void {
+  if (identity.epochId.length === 0 || identity.snapshotId.length === 0) {
+    throw new Error('Snapshot identity fields must not be empty')
+  }
+  if (!Number.isSafeInteger(identity.ledgerIndex) || identity.ledgerIndex < 0) {
+    throw new Error('ledgerIndex must be a non-negative safe integer')
+  }
+  if (!/^[A-F0-9]{64}$/.test(identity.ledgerHash)) {
+    throw new Error('ledgerHash must be 64 uppercase hexadecimal characters')
+  }
+}
