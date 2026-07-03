@@ -17,7 +17,7 @@ const DEFAULT_OBJECT_LIMIT_PER_PAGE = 80
 const DEFAULT_MAX_PAGES_PER_RUN = 25
 
 export interface D1BootstrapResult {
-  status: 'paused' | 'verified'
+  status: 'paused' | 'complete' | 'verified'
   checkpoint: D1BootstrapCheckpoint
   manifest: SnapshotManifest | null
   manifestHash: string | null
@@ -106,6 +106,7 @@ export async function runD1Bootstrap(options: {
   timeoutMs: number
   maxPagesPerRun?: number
   objectLimitPerPage?: number
+  verifyOnComplete?: boolean
   now?: () => string
   dependencies?: Partial<Dependencies>
 }): Promise<D1BootstrapResult> {
@@ -206,6 +207,10 @@ export async function runD1Bootstrap(options: {
     if (!batch.complete) {
       return { status: 'paused', checkpoint, manifest: null, manifestHash: null }
     }
+  }
+
+  if (options.verifyOnComplete === false) {
+    return { status: 'complete', checkpoint, manifest: null, manifestHash: null }
   }
 
   const verification = await dependencies.verify({
