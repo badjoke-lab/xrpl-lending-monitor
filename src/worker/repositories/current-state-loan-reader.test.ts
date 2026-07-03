@@ -1,158 +1,145 @@
 import { describe, expect, it } from 'vitest'
 
-import { encodeCurrentStatePageGzip } from '../../collector/current-state/bootstrap-shard-encoder'
-import {
-  serializeCurrentStateManifest,
-  type CurrentStateManifest,
-} from '../../collector/current-state/current-state-manifest'
-import type { CurrentStatePage } from '../../collector/current-state/scan-current-state'
-import type { ScannedLedgerObject } from '../../collector/current-state/scan-ledger-objects'
 import type { ActiveSnapshotRecord } from './core-api-repository'
-import { getCurrentLoanById, listCurrentLoans } from './current-state-loan-reader'
-import type { CurrentStateObjectReadError } from './current-state-object-reader'
+import { getCurrentLoanById, listCurrentLoans } from './d1-current-loan-reader'
 
-async function digest(bytes: Uint8Array): Promise<string> {
-  const value = await crypto.subtle.digest('SHA-256', Uint8Array.from(bytes).buffer)
-  return [...new Uint8Array(value)].map((part) => part.toString(16).padStart(2, '0')).join('')
+interface QueryResponse {
+  all?: unknown[]
+  first?: unknown
 }
 
-function vault(id: string): ScannedLedgerObject {
+function fakeDatabase(responses: QueryResponse[]) {
+  const queue = [...responses]
+  const prepared: Array<{ sql: string; values: unknown[] }> = []
+  const db = {
+    prepare(sql: string) {
+      const record = { sql, values: [] as unknown[] }
+      prepared.push(record)
+      const response = queue.shift() ?? {}
+      const statement = {
+        bind(...values: unknown[]) {
+          record.values = values
+          return statement
+        },
+        async all<T>() {
+          return { results: (response.all ?? []) as T[] }
+        },
+        async first<T>() {
+          return (response.first ?? null) as T | null
+        },
+      }
+      return statement
+    },
+  }
+  return { db: db as unknown as D1Database, prepared }
+}
+
+const snapshot: ActiveSnapshotRecord = {
+  id: 'snapshot-1', epochId: 'epoch-1', ledgerIndex: 123, ledgerHash: 'A'.repeat(64),
+  objectPrefix: '', manifestKey: null, manifestSha256: 'b'.repeat(64),
+  vaultCount: 1, loanBrokerCount: 1, loanCount: 2, objectCount: 4,
+  shardCount: 1, compressedBytes: 300, completedAt: '2026-07-03T00:00:00.000Z',
+}
+
+function vaultProjection(id: string) {
   return {
-    LedgerEntryType: 'Vault', index: id, PreviousTxnID: 'F'.repeat(64), PreviousTxnLgrSeq: 120,
-    Owner: 'rVaultOwner', Account: 'rVaultAccount', Asset: { currency: 'XRP' },
-    AssetsTotal: '10000000', AssetsAvailable: '7500000', AssetsMaximum: '20000000',
-    LossUnrealized: '0', ShareMPTID: 'A'.repeat(48), WithdrawalPolicy: 0, Scale: 6, Flags: 0,
+    kind: 'vault', id, owner: 'rVaultOwner', account: 'rVault',
+    asset: { kind: 'xrp', key: 'XRP', currency: 'XRP', issuer: null, issuanceId: null, displayCode: 'XRP' },
+    assetsTotal: '100', assetsAvailable: '80', assetsMaximum: null, lossUnrealized: '0',
+    shareMptId: 'A'.repeat(48), domainId: null, withdrawalPolicy: 0, scale: 6,
+    flags: 0, dataHex: null, previousTxHash: 'F'.repeat(64), previousLedgerIndex: 120,
   }
 }
 
-function broker(id: string, vaultId: string): ScannedLedgerObject {
+function brokerProjection(id: string, vaultId: string) {
   return {
-    LedgerEntryType: 'LoanBroker', index: id, PreviousTxnID: 'E'.repeat(64), PreviousTxnLgrSeq: 121,
-    VaultID: vaultId, Owner: 'rBrokerOwner', Account: 'rBrokerAccount', Sequence: 1, LoanSequence: 3,
-    DebtTotal: '5000000', DebtMaximum: '10000000', CoverAvailable: '600000',
-    CoverRateMinimum: 10000, CoverRateLiquidation: 15000, Flags: 0,
+    kind: 'loan_broker', id, vaultId, owner: 'rBrokerOwner', account: 'rBroker',
+    sequence: 1, loanSequence: 3, managementFeeRate: null, ownerCount: 2,
+    debtTotal: '50', debtMaximum: '100', coverAvailable: '25',
+    coverRateMinimum: 10000, coverRateLiquidation: 15000,
+    flags: 0, dataHex: null, previousTxHash: 'E'.repeat(64), previousLedgerIndex: 121,
   }
 }
 
-function loan(id: string, brokerId: string, complete = false): ScannedLedgerObject {
+function loanProjection(id: string, brokerId: string, complete = false) {
   return {
-    LedgerEntryType: 'Loan', index: id, PreviousTxnID: 'D'.repeat(64), PreviousTxnLgrSeq: 122,
-    LoanBrokerID: brokerId, Borrower: complete ? 'rBorrowerTwo' : 'rBorrowerOne',
-    LoanSequence: complete ? 2 : 1, StartDate: 500, PaymentInterval: 100, GracePeriod: 60,
-    PreviousPaymentDueDate: 900, ...(complete ? {} : { NextPaymentDueDate: 1000 }),
-    PaymentRemaining: complete ? 0 : 2, PrincipalOutstanding: complete ? '0' : '10000',
-    TotalValueOutstanding: complete ? '0' : '10500', ManagementFeeOutstanding: '100',
-    PeriodicPayment: '1000', Flags: 0,
+    kind: 'loan', id, loanBrokerId: brokerId, borrower: complete ? 'rBorrowerTwo' : 'rBorrowerOne',
+    loanSequence: complete ? 2 : 1, loanOriginationFee: '0', loanServiceFee: '0',
+    latePaymentFee: '0', closePaymentFee: '0', overpaymentFeeRate: 0,
+    interestRate: 1000, lateInterestRate: 2000, closeInterestRate: 0,
+    overpaymentInterestRate: 0, startDate: 500, paymentInterval: 100,
+    gracePeriod: 60, previousPaymentDueDate: 900,
+    nextPaymentDueDate: complete ? null : 1000, paymentRemaining: complete ? 0 : 2,
+    principalOutstanding: complete ? '0' : '10000',
+    totalValueOutstanding: complete ? '0' : '10500', managementFeeOutstanding: '100',
+    periodicPayment: '1000', loanScale: null, onLedgerStatus: 'active',
+    supportsOverpayment: false, flags: 0, dataHex: null,
+    previousTxHash: 'D'.repeat(64), previousLedgerIndex: 122,
   }
 }
 
-async function fixture() {
-  const vaultId = `${'0'.repeat(63)}1`
-  const brokerId = `${'8'.repeat(63)}1`
-  const firstLoanId = `${'9'.repeat(63)}1`
-  const secondLoanId = `${'A'.repeat(63)}2`
-  const pages: CurrentStatePage[] = [
-    {
-      pageNumber: 1, markerBefore: null, markerAfter: 'broker', firstLedgerIndex: vaultId,
-      lastLedgerIndex: vaultId, decodedObjects: 1, vaults: [vault(vaultId)], loanBrokers: [], loans: [],
-    },
-    {
-      pageNumber: 2, markerBefore: 'broker', markerAfter: 'loans', firstLedgerIndex: brokerId,
-      lastLedgerIndex: brokerId, decodedObjects: 1, vaults: [], loanBrokers: [broker(brokerId, vaultId)], loans: [],
-    },
-    {
-      pageNumber: 3, markerBefore: 'loans', markerAfter: null, firstLedgerIndex: firstLoanId,
-      lastLedgerIndex: secondLoanId, decodedObjects: 2, vaults: [], loanBrokers: [],
-      loans: [loan(firstLoanId, brokerId), loan(secondLoanId, brokerId, true)],
-    },
-  ]
-  const snapshot: ActiveSnapshotRecord = {
-    id: 'snapshot-1', epochId: 'epoch-1', ledgerIndex: 123, ledgerHash: 'SNAPSHOT',
-    objectPrefix: 'current/snapshot-1', manifestKey: 'current/snapshot-1/manifest.json',
-    manifestSha256: null, vaultCount: 1, loanBrokerCount: 1, loanCount: 2, objectCount: 4,
-    shardCount: 3, compressedBytes: 0, completedAt: '2026-07-02T00:00:00.000Z',
+function row(loanId: string, brokerId: string, vaultId: string, complete = false) {
+  return {
+    object_id: loanId,
+    loan_projection_json: JSON.stringify(loanProjection(loanId, brokerId, complete)),
+    loan_raw_json: JSON.stringify({ LedgerEntryType: 'Loan', index: loanId }),
+    broker_projection_json: JSON.stringify(brokerProjection(brokerId, vaultId)),
+    broker_raw_json: JSON.stringify({ LedgerEntryType: 'LoanBroker', index: brokerId }),
+    vault_projection_json: JSON.stringify(vaultProjection(vaultId)),
+    vault_raw_json: JSON.stringify({ LedgerEntryType: 'Vault', index: vaultId }),
   }
-  const objects = new Map<string, { bytes: Uint8Array; sha256: string }>()
-  const shards = []
-  let compressedBytes = 0
-  for (const page of pages) {
-    const encoded = await encodeCurrentStatePageGzip(page, { snapshotId: snapshot.id, pageNumber: page.pageNumber })
-    const sha256 = await digest(encoded.bytes)
-    const key = `${snapshot.objectPrefix}/shards/${String(page.pageNumber).padStart(6, '0')}.json.gz`
-    objects.set(key, { bytes: encoded.bytes, sha256 })
-    compressedBytes += encoded.bytes.byteLength
-    shards.push({
-      key, pageNumber: page.pageNumber, firstLedgerIndex: page.firstLedgerIndex,
-      lastLedgerIndex: page.lastLedgerIndex, decodedObjects: page.decodedObjects,
-      vaultCount: page.vaults.length, loanBrokerCount: page.loanBrokers.length,
-      loanCount: page.loans.length, compressedBytes: encoded.bytes.byteLength, sha256,
-    })
-  }
-  const manifest: CurrentStateManifest = {
-    schemaVersion: 1, snapshotId: snapshot.id, network: 'devnet', epochId: snapshot.epochId,
-    ledgerIndex: snapshot.ledgerIndex, ledgerHash: snapshot.ledgerHash,
-    generatedAt: '2026-07-02T00:00:00.000Z', objectPrefix: snapshot.objectPrefix,
-    metrics: {
-      pages: 3, requests: 3, decodedObjects: 4, objects: 4, elapsedMs: 10,
-      requestedObjectsPerPage: 2048, responseMode: 'binary',
-      byType: { vault: { objects: 1 }, loan_broker: { objects: 1 }, loan: { objects: 2 } },
-    },
-    counts: { vaults: 1, loanBrokers: 1, loans: 2 }, compressedBytes, shards,
-  }
-  const manifestBytes = serializeCurrentStateManifest(manifest)
-  const manifestSha256 = await digest(manifestBytes)
-  snapshot.manifestSha256 = manifestSha256
-  snapshot.compressedBytes = compressedBytes
-  objects.set(snapshot.manifestKey!, { bytes: manifestBytes, sha256: manifestSha256 })
-  const bucket = {
-    async get(key: string) {
-      const stored = objects.get(key)
-      return stored ? {
-        size: stored.bytes.byteLength,
-        customMetadata: { sha256: stored.sha256 },
-        arrayBuffer: async () => Uint8Array.from(stored.bytes).buffer,
-      } : null
-    },
-  } as unknown as R2Bucket
-  return { bucket, snapshot, vaultId, brokerId, firstLoanId, secondLoanId }
 }
 
-describe('current-state Loan reader', () => {
-  it('paginates and resolves the canonical relationship chain', async () => {
-    const { bucket, snapshot, firstLoanId, secondLoanId } = await fixture()
-    const first = await listCurrentLoans(bucket, snapshot, { limit: 1, evaluatedAtRippleTime: 900 })
-    expect(first.data[0]?.loan.id).toBe(firstLoanId)
-    expect(first.data[0]?.schedule.status).toBe('current')
-    expect(first.data[0]?.vault.asset.key).toBe('XRP')
-    expect(first.loanShardsRead).toBe(3)
-    expect(first.relationShardsRead).toBe(0)
-    const second = await listCurrentLoans(bucket, snapshot, {
-      limit: 1, evaluatedAtRippleTime: 900, cursor: first.nextCursor ?? undefined,
-    })
-    expect(second.data[0]?.loan.id).toBe(secondLoanId)
-    expect(second.data[0]?.schedule.status).toBe('complete')
+describe('D1 current-state Loan reader', () => {
+  it('resolves Loan, Broker, and Vault in one snapshot-scoped query', async () => {
+    const vaultId = `${'1'.repeat(63)}1`
+    const brokerId = `${'8'.repeat(63)}1`
+    const firstId = `${'9'.repeat(63)}1`
+    const secondId = `${'A'.repeat(63)}2`
+    const { db, prepared } = fakeDatabase([{ all: [row(firstId, brokerId, vaultId), row(secondId, brokerId, vaultId, true)] }])
+
+    const result = await listCurrentLoans(db, snapshot, { limit: 1, evaluatedAtRippleTime: 900 })
+
+    expect(result.data[0]?.loan.id).toBe(firstId)
+    expect(result.data[0]?.broker.id).toBe(brokerId)
+    expect(result.data[0]?.vault.id).toBe(vaultId)
+    expect(result.data[0]?.schedule.status).toBe('current')
+    expect(result.nextCursor).toBeTruthy()
+    expect(prepared[0]?.sql).toContain('JOIN current_state_d1_loan_brokers')
+    expect(prepared[0]?.sql).toContain('JOIN current_state_d1_vaults')
   })
 
-  it('uses the exact due and grace boundaries', async () => {
-    const { bucket, snapshot, firstLoanId } = await fixture()
-    const due = await listCurrentLoans(bucket, snapshot, {
-      limit: 10, evaluatedAtRippleTime: 1000, scheduleStatus: 'payment_due',
+  it('uses exact due and grace boundaries for schedule filters', async () => {
+    const vaultId = `${'2'.repeat(63)}1`
+    const brokerId = `${'7'.repeat(63)}1`
+    const loanId = `${'9'.repeat(63)}2`
+    const dueDb = fakeDatabase([{ all: [row(loanId, brokerId, vaultId)] }]).db
+    const due = await listCurrentLoans(dueDb, snapshot, {
+      limit: 10,
+      evaluatedAtRippleTime: 1000,
+      scheduleStatus: 'payment_due',
     })
-    expect(due.data.map((record) => record.loan.id)).toEqual([firstLoanId])
-    const eligible = await listCurrentLoans(bucket, snapshot, {
-      limit: 10, evaluatedAtRippleTime: 1060, scheduleStatus: 'default_eligible',
+    expect(due.data.map((record) => record.loan.id)).toEqual([loanId])
+
+    const eligibleDb = fakeDatabase([{ all: [row(loanId, brokerId, vaultId)] }]).db
+    const eligible = await listCurrentLoans(eligibleDb, snapshot, {
+      limit: 10,
+      evaluatedAtRippleTime: 1060,
+      scheduleStatus: 'default_eligible',
     })
-    expect(eligible.data.map((record) => record.loan.id)).toEqual([firstLoanId])
+    expect(eligible.data.map((record) => record.loan.id)).toEqual([loanId])
   })
 
-  it('supports direct lookup and fails closed above the relationship limit', async () => {
-    const { bucket, snapshot, firstLoanId, brokerId, vaultId } = await fixture()
-    const detail = await getCurrentLoanById(bucket, snapshot, firstLoanId, 1060)
-    expect(detail?.broker.id).toBe(brokerId)
-    expect(detail?.vault.id).toBe(vaultId)
-    expect(detail?.schedule.status).toBe('default_eligible')
-    await expect(listCurrentLoans(bucket, snapshot, {
-      limit: 1, evaluatedAtRippleTime: 900, sort: 'id_desc', maxRelationShardsPerRead: 1,
-    })).rejects.toMatchObject({ code: 'relationship_read_limit' } satisfies Partial<CurrentStateObjectReadError>)
+  it('loads detail and evaluates a completed Loan without inventing a due date', async () => {
+    const vaultId = `${'3'.repeat(63)}1`
+    const brokerId = `${'6'.repeat(63)}1`
+    const loanId = `${'B'.repeat(63)}1`
+    const { db, prepared } = fakeDatabase([{ first: row(loanId, brokerId, vaultId, true) }])
+
+    const result = await getCurrentLoanById(db, snapshot, loanId.toLowerCase(), 1060)
+
+    expect(result?.schedule.status).toBe('complete')
+    expect(result?.schedule.nextPaymentDueRippleTime).toBeNull()
+    expect(prepared[0]?.values).toEqual([snapshot.id, loanId])
   })
 })
