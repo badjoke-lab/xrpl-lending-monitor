@@ -21,3 +21,14 @@ export interface SnapshotShardDescriptor {
   uncompressedSha256: string
   sha256: string
 }
+
+export interface SnapshotArtifact extends SnapshotShardDescriptor {
+  bytes: Uint8Array
+}
+
+export interface SnapshotArtifactSet {
+  artifacts: SnapshotArtifact[]
+  manifestKey: string
+  manifestBytes: Uint8Array
+  manifestSha256: string
+}
