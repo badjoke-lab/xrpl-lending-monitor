@@ -21,6 +21,7 @@ The public Devnet Worker is deployed through migration `0008_balance_history.sql
 - PR #60: retained-snapshot capacity gate using actual local D1 size metadata.
 - PR #62: canonical compressed page-local data shards, digests, manifests, and local artifact storage.
 - PR #63: deterministic compressed object-ID, account, relationship, and search indexes.
+- PR #64: one page manifest and checkpoint advancement only after durable artifact verification.
 
 ## Capacity result
 
@@ -30,22 +31,24 @@ The measured rate projects approximately 5.03 GB for one complete row-per-object
 
 ## Active unit
 
-The `page-artifact-commit` branch adds the page commit boundary:
+The `artifact-bootstrap-runner` branch connects the scanner to the artifact pipeline:
 
-- one page manifest covering data and index artifacts;
-- retained opaque marker after the page;
-- page totals and per-artifact digests;
-- deterministic page-manifest key and bytes;
-- data, index, then manifest persistence order;
-- metadata verification after every write;
-- checkpoint advancement only after all artifacts and the manifest are durable;
-- failure tests proving that partial writes do not advance the checkpoint.
+- page-by-page compressed data and secondary-index generation;
+- durable page manifest before marker advancement;
+- resumable opaque marker and page sequence;
+- cumulative scan metrics and page-manifest references;
+- pause and resume across bounded scan runs;
+- complete status without automatic activation;
+- identity and object-limit mismatch rejection;
+- tests for complete traversal, pause and resume, and partial-write failure.
+
+The checkpoint contract remains backend independent. A persistent control-plane adapter is separate work.
 
 ## Next order
 
-1. Pass full CI and merge the page commit-boundary unit.
-2. Connect the page artifact set to the bootstrap scanner and persistent checkpoint repository.
-3. Add a snapshot-level manifest over all page manifests.
+1. Pass full CI and merge the artifact bootstrap runner.
+2. Add a persistent local checkpoint adapter without applying remote schema.
+3. Add a snapshot-level manifest over all verified page manifests.
 4. Run a complete local Devnet compressed snapshot measurement.
 5. Implement bounded readers for list, detail, account, relationship, and search paths.
 6. Select and validate a production storage adapter only after local capacity and read-path evidence pass.
@@ -55,9 +58,9 @@ The `page-artifact-commit` branch adds the page commit boundary:
 
 ## Blockers
 
-- The page commit-boundary unit is not merged.
-- Scanner and persistent checkpoint integration are not implemented.
-- No complete compressed Devnet capacity report exists.
+- The artifact bootstrap runner is not merged.
+- A persistent checkpoint adapter is not implemented.
+- No snapshot-level manifest or complete compressed Devnet capacity report exists.
 - Migration `0009` remains unapplied remotely.
 - No production snapshot is verified or active.
 - Incremental collection, M5-5, and M6 evidence remain incomplete.
