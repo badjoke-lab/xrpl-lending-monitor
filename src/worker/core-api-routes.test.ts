@@ -1,15 +1,16 @@
 import { describe, expect, it } from 'vitest'
 
-import { encodeCurrentStatePageGzip } from '../collector/current-state/bootstrap-shard-encoder'
-import { serializeCurrentStateManifest, type CurrentStateManifest } from '../collector/current-state/current-state-manifest'
-import type { CurrentStatePage } from '../collector/current-state/scan-current-state'
-import type { ScannedLedgerObject } from '../collector/current-state/scan-ledger-objects'
 import { app } from './index'
 import type { Bindings } from './env'
 
 interface FakeDatabaseOptions {
   includeSnapshot?: boolean
   snapshot?: Partial<Record<string, unknown>>
+  vault?: {
+    id: string
+    projectionJson: string
+    rawJson: string
+  }
 }
 
 function createFakeDatabase(options: FakeDatabaseOptions = {}): D1Database {
@@ -66,34 +67,51 @@ function createFakeDatabase(options: FakeDatabaseOptions = {}): D1Database {
             }
           }
 
-          if (sql.includes('FROM current_state_snapshots') && options.includeSnapshot) {
+          if (sql.includes('FROM current_state_d1_active_snapshots') && options.includeSnapshot) {
             return {
               id: 'snapshot-1',
               epoch_id: 'epoch-1',
               ledger_index: 123,
               ledger_hash: 'SNAPSHOT',
-              object_prefix: 'current/snapshot-1',
-              manifest_key: null,
-              manifest_hash: null,
+              manifest_hash: 'A'.repeat(64),
               vault_count: 2,
               loan_broker_count: 3,
               loan_count: 5,
               object_count: 10,
-              shard_count: 0,
-              compressed_bytes: 0,
+              batch_count: 1,
+              normalized_bytes: 1024,
               completed_at: '2026-07-01T00:00:20.000Z',
               ...options.snapshot,
             }
           }
 
+          if (sql.includes('FROM current_state_d1_vaults') && options.vault) {
+            return {
+              projection_json: options.vault.projectionJson,
+              raw_json: options.vault.rawJson,
+            }
+          }
+
           return null
+        },
+        async all() {
+          if (sql.includes('FROM current_state_d1_vaults') && options.vault) {
+            return {
+              results: [{
+                object_id: options.vault.id,
+                projection_json: options.vault.projectionJson,
+                raw_json: options.vault.rawJson,
+              }],
+            }
+          }
+          return { results: [] }
         },
       }
     },
   } as unknown as D1Database
 }
 
-function createEnv(db: D1Database, bucket?: R2Bucket): Bindings {
+function createEnv(db: D1Database, currentState = false): Bindings {
   return {
     APP_NETWORK: 'devnet',
     MAINNET_ENABLED: 'false',
@@ -102,120 +120,42 @@ function createEnv(db: D1Database, bucket?: R2Bucket): Bindings {
     ASSETS: {
       fetch: () => Promise.resolve(new Response('not found', { status: 404 })),
     } as Fetcher,
-    ...(bucket ? { CURRENT_STATE: bucket } : {}),
+    ...(currentState ? { CURRENT_STATE: db as unknown as R2Bucket } : {}),
   }
 }
 
-async function sha256(bytes: Uint8Array): Promise<string> {
-  const source = Uint8Array.from(bytes)
-  const digest = await crypto.subtle.digest('SHA-256', source.buffer)
-  return [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, '0')).join('')
-}
-
-async function createVaultStorageFixture() {
-  const vaultId = `${'A'.repeat(63)}1`
-  const object: ScannedLedgerObject = {
-    LedgerEntryType: 'Vault',
-    index: vaultId,
-    BinaryHex: 'ABCD',
-    PreviousTxnID: 'F'.repeat(64),
-    PreviousTxnLgrSeq: 120,
-    Owner: 'rOwner',
-    Account: 'rVaultAccount',
-    Asset: { currency: 'XRP' },
-    AssetsTotal: '10000000',
-    AssetsAvailable: '7500000',
-    AssetsMaximum: '20000000',
-    LossUnrealized: '0',
-    ShareMPTID: 'B'.repeat(48),
-    DomainID: null,
-    WithdrawalPolicy: 0,
-    Scale: 6,
-    Flags: 0,
-  }
-  const page: CurrentStatePage = {
-    pageNumber: 1,
-    markerBefore: null,
-    markerAfter: null,
-    firstLedgerIndex: vaultId,
-    lastLedgerIndex: vaultId,
-    decodedObjects: 1,
-    vaults: [object],
-    loanBrokers: [],
-    loans: [],
-  }
-  const shard = await encodeCurrentStatePageGzip(page, { snapshotId: 'snapshot-1', pageNumber: 1 })
-  const shardHash = await sha256(shard.bytes)
-  const shardKey = 'current/snapshot-1/shards/000001.json.gz'
-  const manifest: CurrentStateManifest = {
-    schemaVersion: 1,
-    snapshotId: 'snapshot-1',
-    network: 'devnet',
-    epochId: 'epoch-1',
-    ledgerIndex: 123,
-    ledgerHash: 'SNAPSHOT',
-    generatedAt: '2026-07-01T00:00:20.000Z',
-    objectPrefix: 'current/snapshot-1',
-    metrics: {
-      pages: 1,
-      requests: 1,
-      decodedObjects: 1,
-      objects: 1,
-      elapsedMs: 1,
-      requestedObjectsPerPage: 2048,
-      responseMode: 'binary',
-      byType: {
-        vault: { objects: 1 },
-        loan_broker: { objects: 0 },
-        loan: { objects: 0 },
-      },
+function createVaultFixture() {
+  const id = `${'A'.repeat(63)}1`
+  const projection = {
+    kind: 'vault',
+    id,
+    owner: 'rOwner',
+    account: 'rVaultAccount',
+    asset: {
+      kind: 'xrp',
+      key: 'XRP',
+      currency: 'XRP',
+      issuer: null,
+      issuanceId: null,
+      displayCode: 'XRP',
     },
-    counts: { vaults: 1, loanBrokers: 0, loans: 0 },
-    compressedBytes: shard.bytes.byteLength,
-    shards: [{
-      key: shardKey,
-      pageNumber: 1,
-      firstLedgerIndex: vaultId,
-      lastLedgerIndex: vaultId,
-      decodedObjects: 1,
-      vaultCount: 1,
-      loanBrokerCount: 0,
-      loanCount: 0,
-      compressedBytes: shard.bytes.byteLength,
-      sha256: shardHash,
-    }],
+    assetsTotal: '10000000',
+    assetsAvailable: '7500000',
+    assetsMaximum: '20000000',
+    lossUnrealized: '0',
+    shareMptId: 'B'.repeat(48),
+    domainId: null,
+    withdrawalPolicy: 0,
+    scale: 6,
+    flags: 0,
+    dataHex: null,
+    previousTxHash: 'F'.repeat(64),
+    previousLedgerIndex: 120,
   }
-  const manifestBytes = serializeCurrentStateManifest(manifest)
-  const manifestHash = await sha256(manifestBytes)
-  const objects = new Map([
-    [shardKey, { bytes: shard.bytes, sha256: shardHash }],
-    ['current/snapshot-1/manifest.json', { bytes: manifestBytes, sha256: manifestHash }],
-  ])
-  const bucket = {
-    async get(key: string) {
-      const stored = objects.get(key)
-      if (!stored) return null
-      return {
-        size: stored.bytes.byteLength,
-        customMetadata: { sha256: stored.sha256 },
-        arrayBuffer: async () => Uint8Array.from(stored.bytes).buffer,
-      }
-    },
-  } as unknown as R2Bucket
-
   return {
-    vaultId,
-    bucket,
-    snapshot: {
-      vault_count: 1,
-      loan_broker_count: 0,
-      loan_count: 0,
-      object_count: 1,
-      shard_count: 1,
-      compressed_bytes: shard.bytes.byteLength,
-      manifest_key: 'current/snapshot-1/manifest.json',
-      manifest_hash: manifestHash,
-    },
+    id,
+    projectionJson: JSON.stringify(projection),
+    rawJson: JSON.stringify({ LedgerEntryType: 'Vault', index: id }),
   }
 }
 
@@ -244,25 +184,31 @@ describe('core API routes', () => {
         loans: 5,
         current_objects: 10,
       },
-      provenance: {
-        counts: 'direct',
-        freshness: 'direct',
-      },
+      provenance: { counts: 'direct', freshness: 'direct' },
       unavailable: [],
     })
   })
 
-  it('returns a verified available Vault collection and detail', async () => {
-    const fixture = await createVaultStorageFixture()
-    const db = createFakeDatabase({ includeSnapshot: true, snapshot: fixture.snapshot })
-    const env = createEnv(db, fixture.bucket)
+  it('returns an available D1 Vault collection and detail', async () => {
+    const vault = createVaultFixture()
+    const db = createFakeDatabase({
+      includeSnapshot: true,
+      snapshot: {
+        vault_count: 1,
+        loan_broker_count: 0,
+        loan_count: 0,
+        object_count: 1,
+      },
+      vault,
+    })
+    const env = createEnv(db, true)
 
     const collection = await app.request('/api/vaults?limit=1&sort=id_asc', {}, env)
     expect(collection.status).toBe(200)
     await expect(collection.json()).resolves.toMatchObject({
       kind: 'vaults',
       data: [{
-        id: fixture.vaultId,
+        id: vault.id,
         asset: { key: 'XRP' },
         assets_total: '10000000',
         assets_available: '7500000',
@@ -276,20 +222,24 @@ describe('core API routes', () => {
       provenance: { collection: 'direct' },
     })
 
-    const detail = await app.request(`/api/vaults/${fixture.vaultId}`, {}, env)
+    const detail = await app.request(`/api/vaults/${vault.id}`, {}, env)
     expect(detail.status).toBe(200)
     await expect(detail.json()).resolves.toMatchObject({
       kind: 'vault',
       data: {
-        id: fixture.vaultId,
+        id: vault.id,
         raw: { LedgerEntryType: 'Vault' },
       },
       availability: { state: 'available' },
     })
   })
 
-  it('returns an explicit unavailable entity collection without the storage binding', async () => {
-    const response = await app.request('/api/loan-brokers?limit=2', {}, createEnv(createFakeDatabase({ includeSnapshot: true })))
+  it('returns an explicit unavailable entity collection without the current-state binding', async () => {
+    const response = await app.request(
+      '/api/loan-brokers?limit=2',
+      {},
+      createEnv(createFakeDatabase({ includeSnapshot: true })),
+    )
 
     expect(response.status).toBe(200)
     await expect(response.json()).resolves.toMatchObject({
