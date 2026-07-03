@@ -12,26 +12,30 @@ This directory is the source of truth for XRPL Lending Monitor.
 6. [`collector-design.md`](collector-design.md) — collection, backfill, idempotency, and reset handling
 7. [`testing-strategy.md`](testing-strategy.md) — required validation and release tests
 8. [`resource-envelope.md`](resource-envelope.md) — runtime, storage, and collection limits
-9. [`d1-migration-plan.md`](d1-migration-plan.md) — canonical M1 D1 migration, bootstrap, verification, activation, and rollback sequence
+9. [`d1-migration-plan.md`](d1-migration-plan.md) — current-state D1 evaluation, bootstrap, verification, activation, and rollback sequence
 10. [`d1-command-interface.md`](d1-command-interface.md) — local non-public D1 actions, limits, evidence, and required operation order
-11. [`competitor-positioning.md`](competitor-positioning.md) — baseline parity and differentiators
-12. [`ui-information-architecture.md`](ui-information-architecture.md) — Monitor, Audit, System, and Project information groups and navigation
-13. [`ui-page-map.md`](ui-page-map.md) — canonical routes and route ownership
-14. [`ui-page-specifications.md`](ui-page-specifications.md) — page responsibilities, API dependencies, unavailable behavior, and milestone assignment
-15. [`ui-design-spec.md`](ui-design-spec.md) — visual system, state treatment, tables, charts, provenance, and accessibility
-16. [`ui-component-inventory.md`](ui-component-inventory.md) — reusable UI component contracts and required states
-17. [`ui-responsive-rules.md`](ui-responsive-rules.md) — desktop, tablet, mobile, zoom, and long-content behavior
-18. [`ui-reference/README.md`](ui-reference/README.md) — approved mockup interpretation and prohibited invented data
-19. [`development-roadmap.md`](development-roadmap.md) — ordered implementation plan, dependencies, and target schedule
-20. [`implementation-status.md`](implementation-status.md) — public implementation state and current release blockers
-21. [`decision-log.md`](decision-log.md) — accepted architectural and product decisions
+11. [`storage-artifact-format.md`](storage-artifact-format.md) — deterministic compressed current-state artifact format
+12. [`local-artifact-measurement.md`](local-artifact-measurement.md) — resumable local capacity measurement and evidence output
+13. [`competitor-positioning.md`](competitor-positioning.md) — baseline parity and differentiators
+14. [`ui-information-architecture.md`](ui-information-architecture.md) — Monitor, Audit, System, and Project information groups and navigation
+15. [`ui-page-map.md`](ui-page-map.md) — canonical routes and route ownership
+16. [`ui-page-specifications.md`](ui-page-specifications.md) — page responsibilities, API dependencies, unavailable behavior, and milestone assignment
+17. [`ui-design-spec.md`](ui-design-spec.md) — visual system, state treatment, tables, charts, provenance, and accessibility
+18. [`ui-component-inventory.md`](ui-component-inventory.md) — reusable UI component contracts and required states
+19. [`ui-responsive-rules.md`](ui-responsive-rules.md) — desktop, tablet, mobile, zoom, and long-content behavior
+20. [`ui-reference/README.md`](ui-reference/README.md) — approved mockup interpretation and prohibited invented data
+21. [`development-roadmap.md`](development-roadmap.md) — ordered implementation plan, dependencies, and target schedule
+22. [`implementation-status.md`](implementation-status.md) — public implementation state and current release blockers
+23. [`decision-log.md`](decision-log.md) — accepted architectural and product decisions
 
 ## Authority rules
 
 - `product-spec.md` defines what the product is.
 - Domain documents define how their data and behavior work.
-- `d1-migration-plan.md` controls M1 D1 closeout order, gates, and remote-operation boundaries.
+- `d1-migration-plan.md` records the current-state D1 evaluation and remote-operation boundaries.
 - `d1-command-interface.md` defines the local D1 action boundary and public-safe evidence contract.
+- `storage-artifact-format.md` defines the compressed artifact format.
+- `local-artifact-measurement.md` defines the local measurement command, resume behavior, and evidence fields.
 - UI information-architecture, page, design, component, responsive, and reference documents define presentation and interaction behavior.
 - `development-roadmap.md` defines implementation order and dependencies.
 - `implementation-status.md` records the current public implementation state.

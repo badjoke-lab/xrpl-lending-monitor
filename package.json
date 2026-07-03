@@ -11,8 +11,9 @@
   "scripts": {
     "dev": "vite",
     "dev:worker": "wrangler dev",
-    "build": "vite build && vite build --config vite.d1-tools.config.ts",
+    "build": "vite build && vite build --config vite.d1-tools.config.ts && vite build --config vite.artifact-measurement.config.ts",
     "build:d1-tools": "vite build --config vite.d1-tools.config.ts",
+    "build:artifact-measurement": "vite build --config vite.artifact-measurement.config.ts",
     "preview": "vite preview --host 127.0.0.1",
     "deploy": "pnpm build && wrangler deploy",
     "lint": "eslint .",
@@ -22,6 +23,7 @@
     "test:e2e": "playwright test",
     "db:migrate:local": "wrangler d1 migrations apply xrpl-lending-monitor --local",
     "d1:tools": "pnpm build:d1-tools && node .d1-tools-build/run-d1-current-state.mjs",
+    "artifact:measure": "pnpm build:artifact-measurement && node .artifact-measurement-build/run-artifact-measurement.mjs",
     "types:worker": "wrangler types",
     "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm db:migrate:local && pnpm build"
   },

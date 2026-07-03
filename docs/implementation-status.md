@@ -23,6 +23,7 @@ The public Devnet Worker is deployed through migration `0008_balance_history.sql
 - PR #63: deterministic compressed object-ID, account, relationship, and search indexes.
 - PR #64: one page manifest and checkpoint advancement only after durable artifact verification.
 - PR #65: scanner integration with resumable artifact checkpoints and no automatic activation.
+- PR #66: complete-snapshot verification and deterministic snapshot-level manifest.
 
 ## Capacity result
 
@@ -32,22 +33,23 @@ The measured rate projects approximately 5.03 GB for one complete row-per-object
 
 ## Active unit
 
-The `snapshot-level-manifest` branch adds complete-snapshot verification over page manifests:
+The `local-checkpoint-measurement` branch adds persistent local execution and capacity evidence for the compressed artifact pipeline:
 
-- requires a complete bootstrap checkpoint;
-- requires contiguous page sequences and matching page counts;
-- reloads every page manifest from the artifact store;
-- verifies each page-manifest digest and snapshot identity;
-- aggregates object, index-entry, compressed-byte, and uncompressed-byte totals;
-- emits one deterministic snapshot-level manifest;
-- verifies the stored snapshot manifest before returning it;
-- tests deterministic output, incomplete-checkpoint rejection, and digest mismatch rejection.
+- filesystem-backed immutable artifact storage;
+- filesystem-backed resumable checkpoint JSON;
+- fixed-ledger `run.json` authority for repeat invocations;
+- bounded page-budget samples and complete traversal mode;
+- automatic resume from the last durable page manifest;
+- final snapshot-manifest verification on complete traversal;
+- evidence for data and index sizes, artifact counts, compression ratio, heap use, and scan timing;
+- a local CLI and manual-only GitHub Actions workflow;
+- tests for immutability, unsafe paths, checkpoint reload, and process-equivalent pause and resume.
 
 ## Next order
 
-1. Pass full CI and merge the snapshot-level manifest unit.
-2. Add a persistent local checkpoint adapter without applying remote schema.
-3. Add a complete local Devnet measurement runner and evidence output.
+1. Pass full CI and merge the local checkpoint and measurement unit.
+2. Run the bounded compressed-artifact sample and inspect the evidence.
+3. Run a complete fixed-ledger Devnet measurement if the bounded result passes the resource guardrails.
 4. Implement bounded readers for list, detail, account, relationship, and search paths.
 5. Select and validate a production storage adapter only after local capacity and read-path evidence pass.
 6. Build and verify an inactive production snapshot.
@@ -56,9 +58,8 @@ The `snapshot-level-manifest` branch adds complete-snapshot verification over pa
 
 ## Blockers
 
-- The snapshot-level manifest unit is not merged.
-- A persistent checkpoint adapter is not implemented.
-- No complete compressed Devnet capacity report exists.
+- The persistent local measurement unit is not merged.
+- No compressed-artifact capacity evidence has been accepted yet.
 - Migration `0009` remains unapplied remotely.
 - No production snapshot is verified or active.
 - Incremental collection, M5-5, and M6 evidence remain incomplete.

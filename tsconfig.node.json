@@ -14,5 +14,11 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true
   },
-  "include": ["vite.config.ts", "vitest.config.ts", "playwright.config.ts"]
+  "include": [
+    "vite.config.ts",
+    "vite.d1-tools.config.ts",
+    "vite.artifact-measurement.config.ts",
+    "vitest.config.ts",
+    "playwright.config.ts"
+  ]
 }
