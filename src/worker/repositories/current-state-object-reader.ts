@@ -10,16 +10,20 @@ import {
   getGithubVaultById,
   listGithubVaults,
 } from './github-current-readers'
+import {
+  isReleaseCurrentStateSource,
+  type CurrentStateStorage,
+} from './release-current-state'
 
 export { CurrentStateObjectReadError } from './current-state-read-error'
 export type { ListCurrentVaultsOptions, ListCurrentVaultsResult, VaultSort }
 
-function database(storage: R2Bucket | D1Database): D1Database {
+function database(storage: CurrentStateStorage): D1Database {
   return storage as unknown as D1Database
 }
 
 export function listCurrentVaults(
-  storage: R2Bucket | D1Database,
+  storage: CurrentStateStorage,
   snapshot: ActiveSnapshotRecord,
   options: ListCurrentVaultsOptions,
 ): Promise<ListCurrentVaultsResult> {
@@ -27,12 +31,13 @@ export function listCurrentVaults(
 }
 
 export function getCurrentVaultById(
-  storage: R2Bucket | D1Database,
+  storage: CurrentStateStorage,
   snapshot: ActiveSnapshotRecord,
   vaultId: string,
 ) {
   return getStoredCurrentVaultById(database(storage), snapshot, vaultId)
 }
 
+void isReleaseCurrentStateSource
 void getGithubVaultById
 void listGithubVaults
