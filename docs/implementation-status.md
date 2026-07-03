@@ -4,53 +4,56 @@ Last updated: 2026-07-03.
 
 ## Current phase
 
-M1 D1-only closeout is active under [`d1-migration-plan.md`](d1-migration-plan.md). M0, M2, M3, M4, and M5-1 through M5-4 are complete.
+M1 current-state storage evaluation is active. M0, M2, M3, M4, and M5-1 through M5-4 are complete.
 
 ## Production state
 
 The public Devnet Worker is deployed through migration `0008_balance_history.sql`. Migration `0009_d1_current_state_snapshots.sql` is not applied remotely. No current-state snapshot is verified or active. Current entity routes report unavailable. Mainnet remains disabled.
 
-## Completed D1 units
+## Completed units
 
-- PR #53 / D1-0: canonical plan and dependency order.
-- PR #54 / D1-1: rollback and cleanup safeguards.
-- PR #55 / D1-2: one runtime D1 binding, `DB`.
-- PR #56 / D1-3: local D1 pause, resume, verification, activation, reads, rollback, and cleanup integration.
-- PR #57 / D1-4: separate local D1 actions and measurement evidence.
-- PR #59: up to 2,048 decoded objects per RPC page with D1 writes bounded to 80 relevant objects.
-- PR #49 and PR #50 were closed as superseded.
+- PR #53: D1 evaluation plan and dependency order.
+- PR #54: rollback and cleanup safeguards.
+- PR #55: one runtime D1 binding, `DB`.
+- PR #56: local pause, resume, verification, activation, reads, rollback, and cleanup integration.
+- PR #57: separate local operator actions and measurement evidence.
+- PR #59: 2,048 decoded objects per RPC page with writes bounded to 80 relevant objects.
+- PR #60: retained-snapshot capacity gate using actual local D1 size metadata.
 
-## Active D1 preparation unit
+## Capacity result
 
-### PR #60 — Retained-snapshot capacity gate
+A 500-page local Devnet sample decoded 1,024,000 ledger objects and stored 67,407 Lending objects. Local D1 grew by 218,869,760 bytes.
 
-The branch adds a local `capacity` action that:
+The measured rate projects approximately 5.03 GB for one complete row-per-object snapshot and 10.10 GB for active plus rollback plus reserve. This exceeds the 350 MB project threshold, so the D1 row-per-object current-state layout will not proceed to remote migration.
 
-- requires a verified manifest-backed snapshot;
-- reads the current local D1 size from D1 query metadata;
-- measures manifest, object, batch, maximum-row, and maximum-batch evidence;
-- adds only the retained snapshot generations not already present in the current database;
-- adds an explicit history reserve;
-- rejects projections above the 350 MB bootstrap stop threshold;
-- emits the JSON evidence before returning exit status `2` when enforcement rejects the projection.
+## Active unit
 
-This closes the capacity-check prerequisite for the D1-5 complete local Devnet bootstrap.
+The `storage-review` branch adds the first backend-neutral snapshot artifact layer:
+
+- canonical JSON serialization;
+- deterministic gzip compression;
+- SHA-256 digests;
+- bounded page-local shards;
+- immutable versioned keys;
+- deterministic manifest bytes;
+- an artifact-store interface and local in-memory implementation;
+- tests for deterministic output and immutable writes.
 
 ## Next order
 
-1. Complete and merge PR #60.
-2. Run a complete local Devnet bootstrap and generate the retained-snapshot capacity report.
-3. Verify and activate locally, build a second snapshot, rerun the gate with both generations included, and prove rollback.
-4. Review all D1-5 evidence before any remote schema mutation.
-5. Apply the reviewed additive migration.
+1. Pass full CI for the artifact layer.
+2. Add deterministic object, account, relationship, and search indexes.
+3. Integrate page artifact persistence with checkpoint advancement.
+4. Run a complete local Devnet compressed snapshot measurement.
+5. Select and validate a production storage adapter only after local capacity and read-path evidence pass.
 6. Build and verify an inactive production snapshot.
 7. Activate separately, prove rollback, and start incremental collection.
 8. Complete M5-5 and continue M6.
 
 ## Blockers
 
-- PR #60 is not merged.
-- No complete real Devnet local bootstrap report exists.
-- Migration `0009` is not applied remotely.
+- The compressed snapshot format and indexes are not complete.
+- No complete compressed Devnet capacity report exists.
+- Migration `0009` remains unapplied remotely.
 - No production snapshot is verified or active.
 - Incremental collection, M5-5, and M6 evidence remain incomplete.
