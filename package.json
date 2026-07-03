@@ -11,7 +11,7 @@
   "scripts": {
     "dev": "vite",
     "dev:worker": "wrangler dev",
-    "build": "vite build",
+    "build": "vite build && vite build --config vite.d1-tools.config.ts",
     "build:d1-tools": "vite build --config vite.d1-tools.config.ts",
     "preview": "vite preview --host 127.0.0.1",
     "deploy": "pnpm build && wrangler deploy",
@@ -23,7 +23,7 @@
     "db:migrate:local": "wrangler d1 migrations apply xrpl-lending-monitor --local",
     "d1:tools": "pnpm build:d1-tools && node .d1-tools-build/run-d1-current-state.mjs",
     "types:worker": "wrangler types",
-    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm db:migrate:local && pnpm build && pnpm build:d1-tools"
+    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm db:migrate:local && pnpm build"
   },
   "dependencies": {
     "@xrpl-commons/ripple-binary-codec": "2.7.0",
