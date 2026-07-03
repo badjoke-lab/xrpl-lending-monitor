@@ -30,6 +30,7 @@ const endpoints: Endpoint[] = [
   { method: 'GET', path: '/api/audit/lifecycle', purpose: 'Protocol-wide bounded Loan lifecycle event explorer with event and Loan filters.' },
   { method: 'GET', path: '/api/audit/archived', purpose: 'Bounded archived Vault, Loan Broker, and Loan explorer with type and exact identifier filters.' },
   { method: 'GET', path: '/api/audit/archived/{objectType}/{objectId}', purpose: 'Archived object final state, deletion event, relationships, raw retained archive data, and provenance.' },
+  { method: 'GET', path: '/api/audit/cover-loss', purpose: 'Bounded asset-separated debt, cover, required-cover, surplus, and loss history with formula provenance.' },
   { method: 'GET', path: '/api/search', purpose: 'Bounded exact-match indexed search across transaction, relationship, archive, lifecycle, account, asset, and identifier fields.' },
   { method: 'GET', path: '/api/exports/activity', purpose: 'Bounded Activity export in JSON, NDJSON, or CSV.' },
   { method: 'GET', path: '/api/feeds/activity.ndjson', purpose: 'Bounded NDJSON Activity feed.' },
@@ -133,6 +134,7 @@ export function ApiDocumentationPage({ onNavigate }: ApiDocumentationPageProps) 
           <li>Object history is scoped by exact object type and identifier.</li>
           <li>Loan lifecycle ordering is canonical within the collected epoch and never fills unsupported intermediate events.</li>
           <li>Archived-object routes expose final retained state and deletion evidence while explicitly separating archive facts from current state.</li>
+          <li>Cover and loss history keeps each asset key separate and exposes formulas only with their indexed source fields.</li>
           <li>Epoch records expose current and archived Devnet boundaries.</li>
           <li>Indexed evidence does not prove that a referenced object remains current.</li>
         </ul>
@@ -142,7 +144,8 @@ GET /api/objects/Loan/{loanId}/history?limit=100
 GET /api/loans/{loanId}/lifecycle?limit=100
 GET /api/audit/lifecycle?event_type=payment&loan_id={loanId}&limit=100
 GET /api/audit/archived?object_type=Loan&q={loanId}&limit=100
-GET /api/audit/archived/Loan/{loanId}`}</CodeExample>
+GET /api/audit/archived/Loan/{loanId}
+GET /api/audit/cover-loss?metric_type=cover_available&subject_type=LoanBroker&asset_key={assetKey}&limit=100`}</CodeExample>
       </section>
 
       <section className="documentation-section" id="search" aria-labelledby="api-search-heading">

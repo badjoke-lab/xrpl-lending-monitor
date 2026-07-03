@@ -204,6 +204,37 @@ export interface ArchivedObjectDetailResponse {
   provenance: { object: Provenance }
 }
 
+export interface BalanceHistoryRecord {
+  epoch_id: string
+  subject_type: 'Vault' | 'LoanBroker'
+  subject_id: string
+  transaction_hash: string
+  ledger_index: number
+  transaction_index: number
+  close_time: number
+  metric_type: 'debt_total' | 'debt_maximum' | 'cover_available' | 'loss_unrealized' | 'required_minimum_cover' | 'cover_surplus'
+  asset_key: string | null
+  before_value: string | null
+  after_value: string | null
+  formula: string | null
+  source_fields_json: unknown
+  created_at: string
+  provenance: Provenance
+}
+
+export interface BalanceHistoryResponse {
+  network: 'devnet'
+  kind: 'cover_debt_loss'
+  data: BalanceHistoryRecord[]
+  filters: { metric_type: string | null; subject_type: string | null; subject_id: string | null; asset_key: string | null }
+  page: { limit: number; next_cursor: null }
+  provenance: { collection: Provenance }
+  formulas: {
+    required_minimum_cover: string
+    cover_surplus: string
+  }
+}
+
 export interface CanonicalAssetResponse {
   type: 'xrp' | 'iou' | 'mpt'
   key: string

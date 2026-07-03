@@ -4,9 +4,9 @@ Last updated: 2026-07-03.
 
 ## Current milestone
 
-**M1 closeout** and **M5-2 — Archived objects and final-state audit**.
+**M1 closeout** and **M5-3 — Cover, debt, and loss audit**.
 
-M0, M2, M3, M4-0 through M4-7, and M5-1 are complete. M5-2 is active. M1 still requires a complete marker-aware bootstrap, verification, activation, rollback, cleanup, and resource evidence.
+M0, M2, M3, M4-0 through M4-7, and M5-1 through M5-2 are complete. M5-3 is active. M1 still requires a complete marker-aware bootstrap, verification, activation, rollback, cleanup, and resource evidence.
 
 ## Canonical continuation point
 
@@ -27,14 +27,16 @@ Latest merged work:
 - PR #34: `Complete M4 baseline integration and Checkpoint C`;
 - squash merge: `f7ae7032715c57234bb94dcbc3aeddce23e30a67`;
 - PR #37: `Add Loan lifecycle audit`;
-- squash merge: `6e3e2af11bffdb570b675a4888ad6e4b58bb6c9b`.
+- squash merge: `6e3e2af11bffdb570b675a4888ad6e4b58bb6c9b`;
+- PR #38: `Add archived object audit`;
+- squash merge: `7faf39d7217ce6e7438346e478a6416243929dd9`.
 
 Active implementation:
 
-- branch: `ui/m5-2-archived-objects-audit`;
-- milestone unit: M5-2;
-- base: `main` at `6e3e2af11bffdb570b675a4888ad6e4b58bb6c9b`;
-- scope: archived-object explorer, archived Vault/Loan Broker/Loan detail route, final retained state, deletion event classification, source transaction links, archive metadata/provenance, current/archive context separation, and browser/API regression coverage.
+- branch: `ui/m5-3-cover-debt-loss-audit`;
+- milestone unit: M5-3;
+- base: `main` at `7faf39d7217ce6e7438346e478a6416243929dd9`;
+- scope: asset-separated debt, maximum debt, cover available, unrealized loss, required minimum cover, and cover surplus/shortfall audit history with Broker/Vault context, source transactions, formula inputs, and browser/API regression coverage.
 
 ## Production D1 schema
 
@@ -153,9 +155,9 @@ Validation:
 
 PR #37 passed CI and was squash-merged at `6e3e2af11bffdb570b675a4888ad6e4b58bb6c9b`.
 
-## Active M5-2
+## Completed M5-2
 
-Implemented on the active branch:
+Delivered:
 
 - `GET /api/audit/archived` bounded explorer endpoint with object-type and exact-query filters;
 - `GET /api/audit/archived/:objectType/:objectId` detail endpoint for archived Vault, Loan Broker, and Loan records;
@@ -173,11 +175,31 @@ Local validation:
 - `pnpm test` — 172 passed, 3 skipped;
 - `pnpm db:migrate:local`;
 - `pnpm build`;
-- `pnpm test:e2e` — 29 passed.
+- `pnpm test:e2e` — 29 passed;
+- CI `quality` passed.
+
+PR #38 passed CI and was squash-merged at `7faf39d7217ce6e7438346e478a6416243929dd9`.
+
+## Active M5-3
+
+Implemented on the active branch:
+
+- `GET /api/audit/cover-loss` bounded endpoint with metric, subject, and asset filters;
+- Cover & Loss audit page at `/audit/cover-loss`;
+- desktop sidebar and mobile More navigation to Cover & Loss;
+- asset-separated before/after DebtTotal, DebtMaximum, CoverAvailable, LossUnrealized, required minimum cover, and cover surplus/shortfall records;
+- source transaction links, Broker/Vault current lookups, formula strings, indexed source fields, and explicit no-cross-asset aggregation messaging;
+- focused API, breadcrumb, and browser tests.
+
+Local validation:
+
+- `pnpm install --frozen-lockfile`;
+- `pnpm check` — includes lint, type-check, unit tests with 175 passed and 3 skipped, local D1 migration replay, and production build;
+- `pnpm test:e2e` — 31 passed.
 
 First incomplete action:
 
-- open PR for M5-2;
+- open PR for M5-3;
 - inspect CI and merge only after required checks pass.
 
 ## Known open questions

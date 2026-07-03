@@ -42,6 +42,13 @@ describe('resolveBreadcrumbs', () => {
     expect(breadcrumbs[2]?.title).toBe(objectId)
   })
 
+  it('labels the cover and loss audit route', () => {
+    expect(resolveBreadcrumbs('/audit/cover-loss')).toEqual([
+      { label: 'Overview', path: '/' },
+      { label: 'Cover & Loss' },
+    ])
+  })
+
   it('labels unsupported routes without adding a false hierarchy', () => {
     expect(resolveBreadcrumbs('/unsupported')).toEqual([
       { label: 'Overview', path: '/' },

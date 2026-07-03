@@ -1,5 +1,6 @@
 import type {
   ArchivedObjectRecord,
+  BalanceHistoryApiRecord,
   LoanLifecycleRecord,
   NetworkEpochApiRecord,
   ObjectChangeRecord,
@@ -151,6 +152,26 @@ function serializeArchivedObject(archive: ArchivedObjectRecord) {
   }
 }
 
+function serializeBalanceHistory(record: BalanceHistoryApiRecord) {
+  return {
+    epoch_id: record.epochId,
+    subject_type: record.subjectType,
+    subject_id: record.subjectId,
+    transaction_hash: record.transactionHash,
+    ledger_index: record.ledgerIndex,
+    transaction_index: record.transactionIndex,
+    close_time: record.closeTime,
+    metric_type: record.metricType,
+    asset_key: record.assetKey,
+    before_value: record.beforeValue,
+    after_value: record.afterValue,
+    formula: record.formula,
+    source_fields_json: record.sourceFieldsJson,
+    created_at: record.createdAt,
+    provenance: record.formula ? 'derived' : 'indexed',
+  }
+}
+
 export function serializeActivityResponse(events: ProtocolEventRecord[], limit: number) {
   return {
     network: 'devnet',
@@ -297,6 +318,35 @@ export function serializeArchivedObjectResponse(options: {
       ? { state: 'available', reason: null }
       : { state: 'unavailable', reason: 'archived object was not found in indexed history' },
     provenance: { object: options.archive ? 'indexed' : 'unavailable' },
+  }
+}
+
+export function serializeBalanceHistoryResponse(options: {
+  records: BalanceHistoryApiRecord[]
+  filters: {
+    metricType: string | null
+    subjectType: string | null
+    subjectId: string | null
+    assetKey: string | null
+  }
+  limit: number
+}) {
+  return {
+    network: 'devnet',
+    kind: 'cover_debt_loss',
+    data: options.records.map(serializeBalanceHistory),
+    filters: {
+      metric_type: options.filters.metricType,
+      subject_type: options.filters.subjectType,
+      subject_id: options.filters.subjectId,
+      asset_key: options.filters.assetKey,
+    },
+    page: page(options.limit),
+    provenance: { collection: 'indexed' },
+    formulas: {
+      required_minimum_cover: 'required_minimum_cover = DebtTotal * CoverRateMinimum / 100000',
+      cover_surplus: 'cover_surplus = CoverAvailable - required_minimum_cover',
+    },
   }
 }
 

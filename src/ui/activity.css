@@ -36,6 +36,10 @@
   justify-self: start;
 }
 
+.audit-filter-wide {
+  grid-template-columns: repeat(5, minmax(150px, 1fr));
+}
+
 .activity-scope-note {
   display: flex;
   align-items: flex-start;
@@ -362,6 +366,10 @@
 
 @media (max-width: 1180px) {
   .activity-filter-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .audit-filter-wide {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 

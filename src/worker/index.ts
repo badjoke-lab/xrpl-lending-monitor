@@ -15,6 +15,7 @@ import {
   getTransactionDetail,
   listActivity,
   listArchivedObjects,
+  listBalanceHistory,
   listEpochs,
   listLoanLifecycle,
   listLoanLifecycleEvents,
@@ -37,6 +38,7 @@ import {
   serializeActivityResponse,
   serializeArchivedObjectResponse,
   serializeArchivedObjectsResponse,
+  serializeBalanceHistoryResponse,
   serializeEpochsResponse,
   serializeLifecycleExplorerResponse,
   serializeLoanLifecycleResponse,
@@ -60,6 +62,15 @@ const LIFECYCLE_EVENT_TYPES = new Set([
   'updated',
 ])
 const ARCHIVED_OBJECT_TYPES = new Set(['Vault', 'LoanBroker', 'Loan'])
+const BALANCE_METRIC_TYPES = new Set([
+  'debt_total',
+  'debt_maximum',
+  'cover_available',
+  'loss_unrealized',
+  'required_minimum_cover',
+  'cover_surplus',
+])
+const BALANCE_SUBJECT_TYPES = new Set(['Vault', 'LoanBroker'])
 const MAX_QUERY_LENGTH = 128
 const MAX_CURSOR_LENGTH = 1024
 
@@ -388,6 +399,38 @@ app.get('/api/audit/archived/:objectType/:objectId', async (context) => {
     )
   }
   return context.json(serializeArchivedObjectResponse({ objectType, objectId, archive }))
+})
+
+app.get('/api/audit/cover-loss', async (context) => {
+  resolveRuntimeConfig(context.env)
+  const limit = parsePageLimit(context.req.query('limit'))
+  if (limit === null) return invalidLimitResponse(context)
+  const metricType = context.req.query('metric_type')?.trim() || null
+  const subjectType = context.req.query('subject_type')?.trim() || null
+  const subjectId = context.req.query('subject_id')?.trim() || null
+  const assetKey = context.req.query('asset_key')?.trim() || null
+  if (metricType !== null && !BALANCE_METRIC_TYPES.has(metricType)) {
+    return context.json(
+      { error: 'invalid_filter', message: 'metric_type is not supported for cover and loss audit' },
+      400,
+    )
+  }
+  if (subjectType !== null && !BALANCE_SUBJECT_TYPES.has(subjectType)) {
+    return context.json(
+      { error: 'invalid_filter', message: 'subject_type must be Vault or LoanBroker' },
+      400,
+    )
+  }
+  if ((subjectId !== null && subjectId.length > MAX_QUERY_LENGTH) || (assetKey !== null && assetKey.length > MAX_QUERY_LENGTH)) {
+    return invalidQueryResponse(context)
+  }
+  return context.json(
+    serializeBalanceHistoryResponse({
+      records: await listBalanceHistory(context.env.DB, { limit, metricType, subjectType, subjectId, assetKey }),
+      filters: { metricType, subjectType, subjectId, assetKey },
+      limit,
+    }),
+  )
 })
 
 app.get('/api/search', async (context) => {

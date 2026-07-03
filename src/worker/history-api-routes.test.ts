@@ -77,6 +77,25 @@ function archivedObjectRow() {
   }
 }
 
+function balanceHistoryRow() {
+  return {
+    epoch_id: 'epoch-1',
+    subject_type: 'LoanBroker',
+    subject_id: 'BROKER1',
+    transaction_hash: 'TX1',
+    ledger_index: 200,
+    transaction_index: 1,
+    close_time: 800_000_000,
+    metric_type: 'required_minimum_cover',
+    asset_key: 'XRP',
+    before_value: '10.00000',
+    after_value: '18.00000',
+    formula: 'required_minimum_cover = DebtTotal * CoverRateMinimum / 100000',
+    source_fields_json: '["CoverAvailable","CoverRateMinimum","DebtTotal"]',
+    created_at: '2026-07-01T00:00:00.000Z',
+  }
+}
+
 function createFakeDatabase(): D1Database {
   return {
     prepare(sql: string) {
@@ -152,6 +171,10 @@ function createFakeDatabase(): D1Database {
 
           if (sql.includes('FROM archived_objects')) {
             return { results: [archivedObjectRow()] as T[] }
+          }
+
+          if (sql.includes('FROM balance_history')) {
+            return { results: [balanceHistoryRow()] as T[] }
           }
 
           if (sql.includes('FROM network_epochs')) {
@@ -330,6 +353,51 @@ describe('history API routes', () => {
 
     const invalid = await app.request('/api/audit/archived/Offer/LOAN1', {}, createEnv(createFakeDatabase()))
     expect(invalid.status).toBe(400)
+  })
+
+  it('lists cover, debt, and loss history with formulas and source fields', async () => {
+    const response = await app.request(
+      '/api/audit/cover-loss?metric_type=required_minimum_cover&subject_type=LoanBroker&subject_id=BROKER1&asset_key=XRP&limit=5',
+      {},
+      createEnv(createFakeDatabase()),
+    )
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toMatchObject({
+      network: 'devnet',
+      kind: 'cover_debt_loss',
+      filters: {
+        metric_type: 'required_minimum_cover',
+        subject_type: 'LoanBroker',
+        subject_id: 'BROKER1',
+        asset_key: 'XRP',
+      },
+      data: [
+        {
+          subject_type: 'LoanBroker',
+          subject_id: 'BROKER1',
+          metric_type: 'required_minimum_cover',
+          asset_key: 'XRP',
+          before_value: '10.00000',
+          after_value: '18.00000',
+          formula: 'required_minimum_cover = DebtTotal * CoverRateMinimum / 100000',
+          source_fields_json: ['CoverAvailable', 'CoverRateMinimum', 'DebtTotal'],
+          provenance: 'derived',
+        },
+      ],
+      formulas: {
+        required_minimum_cover: 'required_minimum_cover = DebtTotal * CoverRateMinimum / 100000',
+      },
+      page: { limit: 5, next_cursor: null },
+    })
+  })
+
+  it('rejects unsupported cover and loss filters', async () => {
+    const invalidMetric = await app.request('/api/audit/cover-loss?metric_type=usd_total', {}, createEnv(createFakeDatabase()))
+    expect(invalidMetric.status).toBe(400)
+
+    const invalidSubject = await app.request('/api/audit/cover-loss?subject_type=Loan', {}, createEnv(createFakeDatabase()))
+    expect(invalidSubject.status).toBe(400)
   })
 
   it('requires a bounded search query', async () => {
