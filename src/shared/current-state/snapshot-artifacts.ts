@@ -119,3 +119,39 @@ async function buildKindArtifacts(options: {
     }
   }))
 }
+
+export async function buildPageSnapshotArtifacts(options: {
+  identity: SnapshotIdentity
+  pageSequence: number
+  vaults: readonly ScannedLedgerObject[]
+  loanBrokers: readonly ScannedLedgerObject[]
+  loans: readonly ScannedLedgerObject[]
+  maxObjectsPerShard?: number
+  maxUncompressedBytes?: number
+}): Promise<SnapshotArtifactSet> {
+  assertIdentity(options.identity)
+  validateLimit(options.pageSequence, 'pageSequence')
+  const maxObjects = options.maxObjectsPerShard ?? DEFAULT_MAX_OBJECTS_PER_SHARD
+  const maxBytes = options.maxUncompressedBytes ?? DEFAULT_MAX_UNCOMPRESSED_BYTES
+  validateLimit(maxObjects, 'maxObjectsPerShard')
+  validateLimit(maxBytes, 'maxUncompressedBytes')
+
+  const artifacts = (await Promise.all([
+    buildKindArtifacts({ ...options, kind: 'vault', values: options.vaults, maxObjects, maxBytes }),
+    buildKindArtifacts({ ...options, kind: 'loan-broker', values: options.loanBrokers, maxObjects, maxBytes }),
+    buildKindArtifacts({ ...options, kind: 'loan', values: options.loans, maxObjects, maxBytes }),
+  ])).flat().sort((left, right) => left.key.localeCompare(right.key))
+
+  const shards = artifacts.map(({ bytes: _bytes, ...descriptor }) => descriptor)
+  const manifestBytes = utf8(`${canonicalJson({
+    schemaVersion: 1,
+    identity: options.identity,
+    shards,
+  })}\n`)
+  return {
+    artifacts,
+    manifestKey: `${prefix(options.identity)}/manifest.json`,
+    manifestBytes,
+    manifestSha256: await sha256Hex(manifestBytes),
+  }
+}
