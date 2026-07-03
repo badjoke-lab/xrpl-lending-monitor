@@ -1,0 +1,34 @@
+name: Pin vite-node
+
+on:
+  push:
+    branches:
+      - d1-tools
+    paths:
+      - .github/workflows/pin-vite-node.yml
+
+permissions:
+  contents: write
+
+jobs:
+  pin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: d1-tools
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm add --save-dev --save-exact vite-node@4.1.9
+      - run: rm .github/workflows/pin-vite-node.yml
+      - run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add package.json pnpm-lock.yaml .github/workflows/pin-vite-node.yml
+          git commit -m "chore: pin vite-node for D1 operator"
+          git push origin HEAD:d1-tools
