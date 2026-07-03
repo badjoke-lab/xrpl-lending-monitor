@@ -67,7 +67,7 @@ test('documents current endpoints, limits, unavailable semantics, and examples',
   await expect(main).toContainText('/api/transactions/{hash}')
   await expect(main).toContainText('Collection limits are validated from 1 through 100.')
   await expect(main).toContainText('Illustrative shape only.')
-  await expect(main).toContainText('CURRENT_STATE')
+  await expect(main).toContainText('complete verified active D1 snapshot')
   await expect(main).not.toContainText('Connect wallet')
 })
 

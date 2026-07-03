@@ -21,37 +21,29 @@ This directory is the source of truth for XRPL Lending Monitor.
 15. [`ui-responsive-rules.md`](ui-responsive-rules.md) — desktop, tablet, mobile, zoom, and long-content behavior
 16. [`ui-reference/README.md`](ui-reference/README.md) — approved mockup interpretation and prohibited invented data
 17. [`development-roadmap.md`](development-roadmap.md) — ordered implementation plan, dependencies, and target schedule
-18. [`implementation-status.md`](implementation-status.md) — current state, active pull request, blockers, and exact resume point
+18. [`implementation-status.md`](implementation-status.md) — public implementation state and current release blockers
 19. [`decision-log.md`](decision-log.md) — accepted architectural and product decisions
-20. [`codex-goal.md`](codex-goal.md) — durable long-running Codex objective and resume task
-21. [`codex-master-task.md`](codex-master-task.md) — end-to-end execution instructions from the current state through public Devnet release
-22. [`codex-ui-task.md`](codex-ui-task.md) — UI-specific execution order, checkpoint, design, data, testing, and approval boundaries
 
 ## Authority rules
 
 - `product-spec.md` defines what the product is.
 - Domain documents define how their data and behavior work.
-- `ui-information-architecture.md`, `ui-page-map.md`, and `ui-page-specifications.md` define where product information appears and how pages relate.
-- `ui-design-spec.md`, `ui-component-inventory.md`, and `ui-responsive-rules.md` define presentation, reusable states, accessibility, and responsive behavior.
-- `ui-reference/README.md` interprets mockups but never overrides data or product specifications.
+- UI information-architecture, page, design, component, responsive, and reference documents define presentation and interaction behavior.
 - `development-roadmap.md` defines implementation order and dependencies.
-- `implementation-status.md` defines the current active work and resume point.
-- `decision-log.md` records why material choices were made.
-- `codex-goal.md`, `codex-master-task.md`, and `codex-ui-task.md` direct long-running execution but do not override product specifications, integrity rules, release gates, or human approval requirements.
-- Root `AGENTS.md` defines mandatory repository operating rules.
+- `implementation-status.md` records the current public implementation state.
+- `decision-log.md` records why material architecture and product choices were made.
+- Root `AGENTS.md` defines repository contribution rules.
 
-When documents conflict, stop the conflicting implementation path and correct the conflict before proceeding.
+When documents conflict, correct the conflict before merging the affected implementation.
 
 ## UI source-of-truth boundary
 
-The generated UI mockups are visual references only. They are not fixtures or API contracts. Do not copy example counts, USD conversions, cross-asset totals, oracle claims, hashes, addresses, states, charts, or operational metrics unless the approved API and specifications support them.
+Generated UI mockups are visual references only. They are not fixtures or API contracts. Do not copy example counts, USD conversions, cross-asset totals, oracle claims, hashes, addresses, states, charts, or operational metrics unless the approved API and specifications support them.
 
-The UI implementation must show explicit unavailable, stale, empty, partial, and error states rather than substituting zero or mock data.
+The UI must show explicit unavailable, stale, empty, partial, and error states rather than substituting zero or mock data.
 
 ## Update requirements
 
-Every implementation pull request must update `implementation-status.md`. A pull request must also update the relevant specification, roadmap, resource envelope, UI document, or decision record when it changes behavior, scope, sequencing, routes, visual rules, resource use, or a previously accepted decision.
+Every implementation pull request must update `implementation-status.md`. Update the relevant specification, roadmap, resource envelope, UI document, or decision record when a change affects behavior, scope, sequencing, routes, visual rules, resource use, or a previously accepted decision.
 
 A UI pull request is incomplete unless its page specification, responsive behavior, data states, accessibility coverage, and API dependencies agree with the implementation.
-
-Long-running agents must persist exact progress, evidence, blockers, and the first incomplete action in GitHub before a session ends so later work can resume without relying on conversation history.

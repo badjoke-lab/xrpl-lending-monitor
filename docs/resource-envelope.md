@@ -1,6 +1,6 @@
 # Resource envelope
 
-Last verified: 2026-07-01.
+Last verified: 2026-07-03.
 
 Official references:
 
@@ -10,7 +10,7 @@ Official references:
 
 ## Purpose
 
-This document defines the measurable runtime, storage, and query envelope for XRPL Lending Monitor. It is an engineering specification for reliability and bounded operation, not a statement about private budgets or organizational constraints.
+This document defines the measurable runtime, storage, and query envelope for XRPL Lending Monitor.
 
 ## Platform limits used for design
 
@@ -25,21 +25,16 @@ JSON parsing, normalization, calculations, and serialization consume CPU even wh
 
 ### D1
 
+- the database-size limit is treated as a hard ceiling;
+- a 350 MB projected-use threshold is the stop point before remote current-state bootstrap;
+- active current state plus one rollback snapshot must fit inside the threshold together with history and indexes;
 - rows read and written are measured per collector run and API route;
 - storage growth is measured per day and per protocol event;
 - queries are indexed and paginated;
-- indexes are included in write-amplification measurements;
-- database and per-query limits are treated as explicit design constraints.
+- indexes are included in write-amplification and storage measurements;
+- individual rows and statement batches remain bounded below platform limits.
 
-D1 stores network state, cursors, snapshot metadata, manifests, active pointers, normalized events, lifecycle data, archives, and aggregates. Full bootstrap object rows are not bulk-loaded into D1.
-
-### External bootstrap storage
-
-- object data is split into bounded compressed shards;
-- every shard has a stable sequence, object type, byte size, object count, and content hash;
-- a manifest references only complete uploaded shards;
-- incomplete attempts are not visible through the active pointer;
-- upload, retry, cleanup, and retained-attempt costs are measured.
+D1 stores network state, cursors, immutable current-state snapshots, manifests, hashes, checkpoints, active pointers, normalized events, lifecycle data, archives, balances, and aggregates.
 
 ## Resource targets
 
@@ -56,36 +51,41 @@ Targets remain below platform ceilings and are adjusted only from measured evide
 ### Bootstrap execution
 
 - run one unfiltered binary ledger traversal;
-- cap marker pages and decoded objects per resumable batch;
-- persist the exact marker after durable shard completion;
+- cap marker pages and decoded objects per resumable unit;
+- write bounded D1 batches to an inactive snapshot ID;
+- persist the exact marker only after the corresponding batch and typed rows are durable;
 - avoid full in-memory accumulation;
 - reject changed ledger identity on resume;
-- record wall time, heap, requests, pages, decoded objects, relevant objects, shard bytes, and retries.
+- record wall time, heap, requests, pages, decoded objects, relevant objects, normalized bytes, rows written, query count, and retries.
 
 ### Database reads
 
 - use indexed pagination;
 - prohibit unbounded full-table API scans;
+- query only the verified active snapshot for current objects;
+- resolve relationships inside the same snapshot;
 - precompute overview and daily aggregates where justified;
 - measure rows read for every major endpoint.
 
 ### Database writes
 
-- write only relevant Lending events;
-- write state snapshots only on change;
-- batch related writes;
+- write only relevant Lending records;
+- write current-state rows only into an inactive snapshot during bootstrap;
+- batch related writes within documented statement and row limits;
 - account for index write amplification;
 - never advance the canonical cursor after partial persistence;
-- never replace the active snapshot pointer before complete manifest verification.
+- never replace the active snapshot pointer before complete manifest verification;
+- never overwrite completed snapshot rows.
 
 ### Storage
 
 - retain normalized canonical history;
-- prohibit unchanged snapshots;
+- retain the active verified snapshot and one verified rollback snapshot;
+- keep incomplete attempts only while explicitly eligible for resume or bounded cleanup evidence;
 - make raw transaction retention configurable;
 - remove eligible raw payloads only after normalized integrity checks;
 - use daily aggregates instead of unnecessarily dense long-term snapshots;
-- retain only the active bootstrap snapshot plus explicitly required rollback or failed-attempt evidence.
+- stop before remote bootstrap when projected total use exceeds 350 MB.
 
 ## Checkpoint A measurements
 
@@ -102,7 +102,7 @@ These measurements reject a scheduled Worker full bootstrap and reject three sep
 
 ### Scheduled Worker
 
-Approved for bounded status refresh and the future incremental validated-ledger collector, subject to production-shaped CPU, request, D1, and catch-up measurements.
+Approved for bounded status refresh and the incremental validated-ledger collector, subject to production-shaped CPU, request, D1, and catch-up measurements.
 
 Acceptance evidence includes:
 
@@ -120,12 +120,14 @@ It must pass:
 
 - exact marker resume tests;
 - same-ledger identity enforcement;
-- bounded shard generation;
-- upload retry and idempotency tests;
+- bounded D1 batch generation;
+- deterministic object and batch hash tests;
 - complete manifest verification;
 - incomplete-attempt cleanup tests;
-- active-pointer rollback tests;
-- preview full-bootstrap execution.
+- active-pointer activation and rollback tests;
+- same-snapshot relationship tests;
+- projected database-size and write-count checks;
+- a complete Devnet bootstrap only after local validation and review.
 
 ### Reduced-frequency or hybrid reconciliation
 
@@ -138,7 +140,9 @@ Current objects may be reconciled at a lower cadence while transaction collectio
 - D1 queries, rows read, and rows written per run;
 - index write amplification;
 - database growth per day and per 1,000 protocol events;
-- bootstrap shard count, compressed bytes, upload duration, and retry count;
+- current-state object count, raw bytes, normalized bytes, row count, and projected database bytes;
+- active-plus-rollback snapshot storage;
+- maximum row size and maximum batch size;
 - API rows read for every major endpoint;
 - cache hit rate;
 - catch-up time after 1 hour and 24 hours of downtime.
@@ -147,14 +151,15 @@ Current objects may be reconciled at a lower cadence while transaction collectio
 
 - stop before the execution deadline margin;
 - never advance a cursor for an incomplete ledger;
-- cap ledgers, transactions, retries, and marker pages per run;
-- persist bootstrap continuation only after durable shard completion;
-- never activate an incomplete manifest;
+- cap ledgers, transactions, retries, marker pages, statements, and rows per run;
+- persist bootstrap continuation only after durable D1 batch completion;
+- never activate an incomplete or digest-invalid manifest;
+- reject same-snapshot relationship failures;
+- stop before remote bootstrap when the projected database use exceeds 350 MB;
 - record resource estimates in collector health data;
 - show stale-data status when collection slows;
 - rate-limit expensive exports;
-- preserve canonical normalized data before optional raw payloads;
-- require an explicit deployment decision for material capacity changes.
+- preserve canonical normalized data before optional raw payloads.
 
 ## Runtime selection rule
 

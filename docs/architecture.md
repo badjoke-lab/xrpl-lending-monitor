@@ -11,8 +11,7 @@
 - Hono or an equivalent small Worker router
 - Vitest
 - Playwright
-- GitHub Actions or another approved long-running bootstrap runner
-- external object storage for compressed bootstrap shards
+- GitHub Actions or another bounded long-running bootstrap runner
 - XRPL JSON-RPC over HTTPS and WebSocket where appropriate
 
 The initial product uses a lightweight managed deployment model and does not require a continuously running application server or a self-hosted XRPL node.
@@ -34,22 +33,24 @@ Resumable bootstrap runner       Cloudflare Worker
   |- unfiltered binary scan       |- incremental ledger collector
   |- exact marker checkpoints     |- catch-up processor
   |- local object classification  |- transaction and metadata parser
-  |- compressed object shards     |- status and lifecycle engine
-  |- complete manifest            |- public API
+  |- bounded D1 snapshot writes   |- status and lifecycle engine
+  |- complete manifest            |- read-only public API
         |                              |
-        v                              v
-External object storage          Cloudflare D1
-  |- current-state shards          |- network epochs and sync cursor
-  |- manifests                     |- snapshot metadata and active pointer
-  |- incomplete-attempt area       |- transactions and normalized changes
-                                   |- lifecycle events
-                                   |- deleted-object archive
-                                   |- aggregate snapshots
-        \                              /
-         \                            /
-          +------------+-------------+
-                       |
-                       v
+        +---------------+--------------+
+                        |
+                        v
+                 Cloudflare D1
+                   |- network epochs and sync cursor
+                   |- immutable current-state snapshots
+                   |- snapshot manifests and checkpoints
+                   |- active snapshot pointer
+                   |- current Vault/Broker/Loan rows
+                   |- transactions and normalized changes
+                   |- lifecycle events
+                   |- deleted-object archive
+                   |- aggregate and balance history
+                        |
+                        v
               React/Vite static application
                 |- application shell and navigation
                 |- overview and entity pages
@@ -58,6 +59,23 @@ External object storage          Cloudflare D1
                 |- API and methodology documentation
                 |- About and Contact
 ```
+
+## Current-state snapshot model
+
+The accepted current-state design is D1-only. An earlier external object-storage design is superseded.
+
+A bootstrap attempt:
+
+1. fixes one validated Devnet ledger index and hash;
+2. traverses `ledger_data` with the exact opaque server marker;
+3. classifies Vault, LoanBroker, and Loan objects locally;
+4. writes bounded rows into an inactive snapshot ID;
+5. records deterministic object and batch hashes;
+6. advances the checkpoint only after the corresponding D1 batch is durable;
+7. verifies counts, hashes, manifest completeness, and same-snapshot relationships;
+8. atomically switches the active pointer only after complete verification.
+
+Completed snapshots are immutable. A failed replacement cannot overwrite the prior active snapshot. One prior verified snapshot is retained as the rollback target. Cleanup is limited to explicitly eligible incomplete attempts.
 
 ## Runtime boundaries
 
@@ -70,13 +88,13 @@ Responsible for:
 - resuming from the exact opaque marker;
 - decoding pages and classifying Vault, LoanBroker, and Loan objects locally;
 - normalizing zero-omitted terminal Loan fields without inventing timestamps;
-- writing bounded compressed shards;
+- writing bounded inactive D1 snapshot batches;
 - generating and verifying a complete manifest;
-- activating snapshot metadata in D1 only after verification;
+- activating the snapshot pointer only after verification;
 - preserving the previous active snapshot after failure;
-- recording request, page, object, memory, wall-time, shard, and retry metrics.
+- recording request, page, object, row, byte, memory, wall-time, and retry metrics.
 
-The bootstrap runner is not a public request handler and is not triggered by page traffic. It is used for first activation, new epochs, and explicitly approved replacement scans.
+The bootstrap runner is not a public request handler and is not triggered by page traffic. It is used for first activation, new epochs, and explicitly initiated replacement scans.
 
 ### Collector Worker
 
@@ -100,8 +118,8 @@ The Collector Worker does not perform full global bootstrap scans. It must not d
 Responsible for:
 
 - read-only D1 queries;
-- resolving the active snapshot manifest where current object data is required;
-- reading and verifying bounded current-state shards;
+- resolving the verified active snapshot pointer;
+- reading bounded current Vault, Loan Broker, and Loan rows from that snapshot;
 - resolving same-snapshot relationships;
 - filtering, sorting, pagination, and search;
 - attaching network, epoch, cursor, snapshot, and synchronization metadata;
@@ -125,6 +143,20 @@ It must:
 - provide responsive, accessible Monitor, Audit, System, and Project pages;
 - keep raw data after human-readable summaries;
 - never imply a wallet, funding, payment, signing, protocol-management, or transaction-submission capability.
+
+## Data flow guarantees
+
+1. Only validated ledgers become canonical.
+2. A bootstrap snapshot is tied to one network, epoch, ledger index, and ledger hash.
+3. A continuation marker advances only after the corresponding bounded D1 write is durable.
+4. A snapshot becomes active only after its complete manifest and relationships verify.
+5. A failed snapshot never replaces the previous active snapshot.
+6. Incremental ledger persistence, canonical event persistence, and cursor advancement are atomic at the documented boundary.
+7. Reprocessing produces no duplicate canonical events.
+8. Current state is a projection; transaction and lifecycle records are historical evidence.
+9. Deletion removes an item from current projections but not from retained history.
+10. Every query is scoped by network and epoch.
+11. API responses report collector cursor, active snapshot identity, and data age.
 
 ## UI architecture
 
@@ -176,19 +208,7 @@ A lightweight routing implementation may use the platform History API or an appr
 
 UI components consume serialized API contracts. They do not import collector parsers, storage repositories, migration models, or bootstrap internals.
 
-Recommended layers:
-
-```text
-src/ui/
-  app and route composition
-  components/
-  pages/
-  hooks/
-  lib/api and formatting
-  types/API response types
-```
-
-Exact folders may change through implementation, but fetching, formatting, page composition, and reusable components remain separated.
+Fetching, formatting, page composition, and reusable components remain separated.
 
 ### Fetching and partial failure
 
@@ -212,186 +232,64 @@ Formatting code must not alter canonical identity or precision.
 
 ### State model
 
-Shared components represent:
+Shared components represent loading, empty, unavailable, stale, partial, error, archived, not found, and invalid identifier states. These are not interchangeable. Zero is a data value, not an error or availability state.
 
-- loading;
-- empty;
-- unavailable;
-- stale;
-- partial;
-- error;
-- archived;
-- not found;
-- invalid identifier.
+### Responsive and accessibility architecture
 
-These are not interchangeable. Zero is a data value, not an error or availability state.
-
-### Page templates
-
-- dashboard page;
-- list page;
-- entity detail page;
-- transaction page;
-- audit page;
-- documentation/project page.
-
-Templates share navigation and tokens but retain different density and reading behavior.
-
-### Responsive architecture
-
-- desktop uses persistent sidebar and full context bar;
+- desktop uses a persistent sidebar and full context bar;
 - compact layouts reduce columns and move secondary rails;
 - tablet uses drawer navigation where needed;
 - mobile uses app bar, bottom navigation, More menu, and mobile-specific information priority;
 - tables use declared priority columns, row expansion, cards, or dedicated overflow rather than arbitrary shrinking;
-- documentation pages use collapsible contents on mobile.
+- documentation pages use collapsible contents on mobile;
+- semantic landmarks, headings, skip links, visible focus, keyboard access, non-color state labels, full identifier values, 200% zoom, reflow, and reduced motion are required.
 
-### Accessibility architecture
+## Project pages
 
-- semantic landmarks and headings;
-- skip link;
-- visible focus;
-- keyboard route and control access;
-- non-color state labels;
-- accessible loading and refresh announcements where appropriate;
-- full values for truncated identifiers;
-- 200% zoom and reflow;
-- reduced-motion support.
+About explains purpose, scope, users, independence, read-only boundaries, non-goals, repository, Methodology, and Contact.
 
-## Project-page architecture
+Methodology is a long-form structured page with stable section anchors and a table of contents. Its content is repository controlled and reviewed with code.
 
-### About
+API documentation is a human-readable route within the shell. Live JSON endpoints remain under `/api/*`.
 
-About is a static project page rendered within the application shell. It explains purpose, scope, users, independence, read-only boundaries, non-goals, repository, Methodology, and Contact.
-
-### Methodology
-
-Methodology is a long-form structured page with stable section anchors and a table of contents. Its content is stored in repository-controlled source so changes are reviewed with code and specifications. A CMS is not required.
-
-Implementation may use React content modules, Markdown compiled at build time, or another repository-local format. The chosen method must preserve static deployment, anchors, accessibility, code review, and link checking.
-
-### API documentation
-
-API documentation is a human-readable route within the shell. Live JSON endpoints remain under `/api/*`. The documentation route must not shadow Worker API routes.
-
-### Contact
-
-Contact uses configured external URLs:
-
-- Google Form for general or private inquiries;
-- GitHub Issues or issue templates for public technical reports.
-
-External URLs are environment or repository configuration values. Missing values result in omitted or explicitly unavailable actions. Placeholder URLs are not shipped.
-
-## External-link safety
-
-- Links are configured or derived from validated identifiers.
-- Explorer links use the approved Devnet explorer pattern only.
-- No untrusted API value becomes an arbitrary URL.
-- External links have clear labels and safe `rel` behavior where required.
-- Public issue links include a warning against secrets and private data.
+Contact uses configured external destinations only. Missing values result in omitted or explicitly unavailable actions. Placeholder URLs are not shipped.
 
 ## Deployment model
 
 Use one Cloudflare project with environment separation:
 
-- `local` — local D1, fixture data, and local shard fixtures;
-- `preview` — pull-request or branch preview with isolated metadata and storage paths;
+- `local` — local D1 and fixture data;
+- `preview` — isolated validation where available;
 - `production` — public Devnet monitor.
 
-Mainnet is a data-source mode, not a separate codebase. It remains disabled by configuration until explicitly approved.
+Mainnet is a data-source mode, not a separate codebase. It remains disabled by configuration until separately approved.
 
-Bootstrap execution is separately gated from normal application deployment. A successful web deployment does not imply that bootstrap storage or activation is enabled.
+A successful web deployment does not imply that bootstrap, migration, or snapshot activation has occurred.
 
-Contact URLs must be environment appropriate. Preview deployments must not publish unapproved production contact information.
+## Security posture
 
-## Repository layout target
+- No private keys, seeds, wallet sessions, or public write API.
+- Strict validation of search and query inputs.
+- Bounded pagination, exports, D1 queries, and bootstrap batches.
+- Separate bootstrap, collector, and public API responsibilities.
+- Raw ledger payloads are treated as untrusted input.
+- Public errors do not expose stack traces, credentials, provider account identifiers, or internal incident details.
 
-```text
-/
-|- AGENTS.md
-|- README.md
-|- docs/
-|- src/
-|  |- api/
-|  |- bootstrap/
-|  |- collector/
-|  |- domain/
-|  |- ui/
-|  |  |- components/
-|  |  |- pages/
-|  |  |- hooks/
-|  |  |- lib/
-|  |  |- types/
-|  |- worker/
-|  |- shared/
-|- migrations/
-|- tests/
-|  |- fixtures/
-|  |- unit/
-|  |- integration/
-|  |- e2e/
-|- scripts/
-|- public/
-|- wrangler.toml or wrangler.jsonc
-|- package.json
-|- vite.config.ts
-|- vitest.config.ts
-|- playwright.config.ts
-```
+## Observability
 
-Exact folders may change only through a documented decision.
+Record at minimum:
 
-## Domain separation
+- active snapshot ID and ledger;
+- bootstrap status and continuation state;
+- bootstrap pages, decoded objects, relevant objects, rows, bytes, retries, and wall time;
+- latest validated ledger and last processed ledger;
+- lag in ledgers and seconds;
+- transactions inspected and accepted;
+- D1 rows read and written estimates;
+- RPC and persistence errors in public-safe form;
+- reset detections;
+- parser failures and unrecognized fields.
 
-The codebase uses domain modules rather than page-specific parsing:
+## Why bootstrap is separate from the Worker
 
-- `network`;
-- `epoch`;
-- `asset`;
-- `vault`;
-- `loan-broker`;
-- `loan`;
-- `transaction`;
-- `lifecycle`;
-- `status`;
-- `provenance`;
-- `snapshot`;
-- `collector-health`.
-
-Parsing, calculation, storage, API serialization, data fetching, and display formatting are not mixed in one module.
-
-## Data flow guarantees
-
-1. Only validated ledgers become canonical.
-2. A bootstrap snapshot is tied to one network, epoch, ledger index, and ledger hash.
-3. A bootstrap continuation is persisted only after the corresponding shard is durable.
-4. A snapshot becomes active only after its complete manifest is verified.
-5. A failed snapshot never replaces the previous active snapshot.
-6. An incremental ledger is committed only after all targeted transactions and object updates for that ledger are written successfully.
-7. Reprocessing the same ledger produces no duplicate canonical events.
-8. Current state is a projection; transaction and lifecycle records are the historical source.
-9. Deletion removes an item from current projections but not from history.
-10. Every query is scoped by network and epoch.
-11. API responses report collector cursor, active snapshot identity, and data age.
-12. UI display state cannot upgrade unavailable, stale, indexed, or derived data into direct current fact.
-13. Same-snapshot relationships must fail closed when a related object is missing, inconsistent, or beyond the bounded read limit.
-
-## Availability strategy
-
-The UI may continue serving the latest active snapshot and committed history while bootstrap or incremental collection is temporarily unavailable. It shows stale-data or replacement-in-progress warnings based on collector lag and snapshot state.
-
-The collector uses endpoint fallback, bounded retries, exponential backoff, and a recorded failure state. It never silently skips a ledger.
-
-The bootstrap runner uses exact marker checkpoints, idempotent shard names, content hashes, bounded retries, and manifest verification. It never activates a partial snapshot.
-
-## Security and release boundaries
-
-- no public write route;
-- no wallet connection;
-- no signing or transaction submission;
-- no funding, donation, or payment surface;
-- no secret, seed, or private key in repository content, logs, fixtures, or UI;
-- no remote infrastructure or deployment change without explicit approval;
-- no Mainnet collection until the documented gate is approved;
-- no weakening of validation or fail-closed behavior to obtain a green check.
+Measured Devnet traversal requires thousands of requests and many minutes for a complete global marker pass. A resumable long-running runner provides the execution window and checkpoint model required for first activation without weakening Worker guardrails or exposing partial data.

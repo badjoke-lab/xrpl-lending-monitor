@@ -7,9 +7,9 @@ Operation boundary: independent and read-only
 
 ## Decision
 
-The M4 monitoring surface is complete at the repository level and is ready to become the baseline for later audit-depth work.
+The M4 monitoring surface is complete at the repository level and is the baseline for later audit-depth work.
 
-This checkpoint records implementation and automated verification only. It does not approve deployment, remote infrastructure changes, Mainnet support, wallet access, signing, transaction submission, or any public write operation.
+This checkpoint records implementation and automated verification only. It does not claim Mainnet support, wallet access, signing, transaction submission, lending actions, or any public write operation.
 
 ## Included surface
 
@@ -52,15 +52,14 @@ This checkpoint records implementation and automated verification only. It does 
 | Keyboard navigation | Skip-link browser test and post-navigation focus test | Main content can be reached without traversing the full navigation |
 | Semantics | One main landmark, one page-level heading, labeled navigation regions | Baseline landmark and heading structure is retained |
 | Responsive layout | 390 px route checks and horizontal-overflow assertions | Documentation routes remain contained at mobile width |
-| Increased text size | 200% root text-size browser check after `pnpm build` on PR #34 | Primary Methodology content remains visible without page-level horizontal overflow |
-| Long identifiers | Breadcrumb resolver test and containment rules | Full identifiers remain available through title metadata without forcing layout overflow |
-| Shared state | Devnet, read-only, and epoch context checked before and after SPA navigation | Context remains consistent across pages |
-| Unsupported controls | Browser regression over interactive controls and explicit control selectors | No wallet, signing, transaction submission, payment, donation, USD-total, or risk-score control is exposed |
-| Quality gate | Local targeted pass: `pnpm build`; `pnpm test:e2e tests/e2e/integration-accessibility.spec.ts` | Full lint, type-check, unit tests, local D1 migrations, build, Chromium installation, and browser tests must all pass in CI before merge |
+| Increased text size | 200% root text-size browser check | Primary Methodology content remains visible without page-level horizontal overflow |
+| Long identifiers | Breadcrumb resolver test and containment rules | Full identifiers remain available without forcing layout overflow |
+| Shared state | Devnet, read-only, and epoch context checked across navigation | Context remains consistent across pages |
+| Unsupported controls | Browser regression over interactive controls | No wallet, signing, transaction submission, payment, donation, USD-total, or risk-score control is exposed |
 
 ## Data and interpretation boundaries
 
-- Current Vault, Loan Broker, and Loan state is public only when one complete verified active snapshot and the approved `CURRENT_STATE` binding are both available.
+- Current Vault, Loan Broker, and Loan state is public only when one complete verified active D1 snapshot is available.
 - Missing current state remains unavailable; it is not converted to an empty collection or zero.
 - Direct on-ledger state, derived schedule state, indexed history, and unavailable data remain separately labeled.
 - Relationships are resolved only inside their disclosed snapshot or indexed evidence context.
@@ -69,12 +68,11 @@ This checkpoint records implementation and automated verification only. It does 
 
 ## Deferred beyond M4
 
-- deeper lifecycle and archived-object audit views;
-- full Loan Broker and Loan history panels;
-- bounded relationship aggregation not already supported by the current API;
-- approved preview bootstrap, activation, rollback, cleanup, and resource evidence required for M1 closeout;
-- any deployment or Mainnet decision.
+- complete D1 current-state bootstrap, activation, rollback, cleanup, and resource evidence required for M1 closeout;
+- M5-5 cross-audit integration against verified real data;
+- M6 integrity, performance, accessibility, security, operations, and soak evidence;
+- any Mainnet decision.
 
 ## Continuation point
 
-M5 may extend audit depth from this baseline without weakening the M4 availability, provenance, epoch, read-only, navigation, accessibility, or unsupported-control boundaries recorded here.
+Later work may extend audit depth from this baseline without weakening the availability, provenance, epoch, read-only, navigation, accessibility, or unsupported-control boundaries recorded here.
