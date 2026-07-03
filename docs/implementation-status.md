@@ -22,6 +22,7 @@ The public Devnet Worker is deployed through migration `0008_balance_history.sql
 - PR #62: canonical compressed page-local data shards, digests, manifests, and local artifact storage.
 - PR #63: deterministic compressed object-ID, account, relationship, and search indexes.
 - PR #64: one page manifest and checkpoint advancement only after durable artifact verification.
+- PR #65: scanner integration with resumable artifact checkpoints and no automatic activation.
 
 ## Capacity result
 
@@ -31,36 +32,33 @@ The measured rate projects approximately 5.03 GB for one complete row-per-object
 
 ## Active unit
 
-The `artifact-bootstrap-runner` branch connects the scanner to the artifact pipeline:
+The `snapshot-level-manifest` branch adds complete-snapshot verification over page manifests:
 
-- page-by-page compressed data and secondary-index generation;
-- durable page manifest before marker advancement;
-- resumable opaque marker and page sequence;
-- cumulative scan metrics and page-manifest references;
-- pause and resume across bounded scan runs;
-- complete status without automatic activation;
-- identity and object-limit mismatch rejection;
-- tests for complete traversal, pause and resume, and partial-write failure.
-
-The checkpoint contract remains backend independent. A persistent control-plane adapter is separate work.
+- requires a complete bootstrap checkpoint;
+- requires contiguous page sequences and matching page counts;
+- reloads every page manifest from the artifact store;
+- verifies each page-manifest digest and snapshot identity;
+- aggregates object, index-entry, compressed-byte, and uncompressed-byte totals;
+- emits one deterministic snapshot-level manifest;
+- verifies the stored snapshot manifest before returning it;
+- tests deterministic output, incomplete-checkpoint rejection, and digest mismatch rejection.
 
 ## Next order
 
-1. Pass full CI and merge the artifact bootstrap runner.
+1. Pass full CI and merge the snapshot-level manifest unit.
 2. Add a persistent local checkpoint adapter without applying remote schema.
-3. Add a snapshot-level manifest over all verified page manifests.
-4. Run a complete local Devnet compressed snapshot measurement.
-5. Implement bounded readers for list, detail, account, relationship, and search paths.
-6. Select and validate a production storage adapter only after local capacity and read-path evidence pass.
-7. Build and verify an inactive production snapshot.
-8. Activate separately, prove rollback, and start incremental collection.
-9. Complete M5-5 and continue M6.
+3. Add a complete local Devnet measurement runner and evidence output.
+4. Implement bounded readers for list, detail, account, relationship, and search paths.
+5. Select and validate a production storage adapter only after local capacity and read-path evidence pass.
+6. Build and verify an inactive production snapshot.
+7. Activate separately, prove rollback, and start incremental collection.
+8. Complete M5-5 and continue M6.
 
 ## Blockers
 
-- The artifact bootstrap runner is not merged.
+- The snapshot-level manifest unit is not merged.
 - A persistent checkpoint adapter is not implemented.
-- No snapshot-level manifest or complete compressed Devnet capacity report exists.
+- No complete compressed Devnet capacity report exists.
 - Migration `0009` remains unapplied remotely.
 - No production snapshot is verified or active.
 - Incremental collection, M5-5, and M6 evidence remain incomplete.
