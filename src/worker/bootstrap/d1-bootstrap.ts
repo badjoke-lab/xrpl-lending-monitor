@@ -12,8 +12,8 @@ import {
 import { writeSnapshotBatch } from '../repositories/d1-snapshot-batch'
 import { beginSnapshot } from '../repositories/d1-snapshot'
 import { verifySnapshot, type SnapshotManifest } from '../repositories/d1-snapshot-verify'
+import { PAGE_OBJECT_LIMIT, persistPageBatches } from './page-batching'
 
-const DEFAULT_OBJECT_LIMIT_PER_PAGE = 80
 const DEFAULT_MAX_PAGES_PER_RUN = 25
 
 export interface D1BootstrapResult {
@@ -74,8 +74,8 @@ function validateLimits(objectLimitPerPage: number, maxPagesPerRun: number): voi
   if (!Number.isSafeInteger(objectLimitPerPage) || objectLimitPerPage < 1) {
     throw new Error('objectLimitPerPage must be a positive safe integer')
   }
-  if (objectLimitPerPage > DEFAULT_OBJECT_LIMIT_PER_PAGE) {
-    throw new Error(`D1 bootstrap objectLimitPerPage must not exceed ${DEFAULT_OBJECT_LIMIT_PER_PAGE}`)
+  if (objectLimitPerPage > PAGE_OBJECT_LIMIT) {
+    throw new Error(`D1 bootstrap objectLimitPerPage must not exceed ${PAGE_OBJECT_LIMIT}`)
   }
   if (!Number.isSafeInteger(maxPagesPerRun) || maxPagesPerRun < 1) {
     throw new Error('maxPagesPerRun must be a positive safe integer')
@@ -110,7 +110,7 @@ export async function runD1Bootstrap(options: {
   now?: () => string
   dependencies?: Partial<Dependencies>
 }): Promise<D1BootstrapResult> {
-  const objectLimitPerPage = options.objectLimitPerPage ?? DEFAULT_OBJECT_LIMIT_PER_PAGE
+  const objectLimitPerPage = options.objectLimitPerPage ?? PAGE_OBJECT_LIMIT
   const maxPagesPerRun = options.maxPagesPerRun ?? DEFAULT_MAX_PAGES_PER_RUN
   validateLimits(objectLimitPerPage, maxPagesPerRun)
 
@@ -150,7 +150,7 @@ export async function runD1Bootstrap(options: {
 
   if (!checkpoint.scanComplete) {
     const metrics = copyMetrics(checkpoint.metrics)
-    const firstSequence = checkpoint.nextBatchSequence
+    let nextSequence = checkpoint.nextBatchSequence
     let lastCheckpoint = checkpoint
 
     const batch = await dependencies.scanBatch({
@@ -158,32 +158,28 @@ export async function runD1Bootstrap(options: {
       timeoutMs: options.timeoutMs,
       ledgerHash: options.identity.ledgerHash,
       ledgerIndex: options.identity.ledgerIndex,
-      startMarker: firstSequence === 1 ? undefined : checkpoint.nextMarker,
+      startMarker: nextSequence === 1 ? undefined : checkpoint.nextMarker,
       maxPages: maxPagesPerRun,
       objectLimitPerPage,
       onPage: async (page) => {
-        const sequence = firstSequence + page.pageNumber - 1
         addPage(metrics, page)
-        const writtenAt = now()
-        await dependencies.writeBatch(options.db, {
+        const persisted = await persistPageBatches({
+          db: options.db,
           snapshotId: options.identity.snapshotId,
-          sequence,
-          markerBefore: page.markerBefore,
-          markerAfter: page.markerAfter,
-          decodedObjectCount: page.decodedObjects,
-          vaults: page.vaults,
-          loanBrokers: page.loanBrokers,
-          loans: page.loans,
-          cumulativeMetrics: metrics as unknown as Record<string, unknown>,
-          writtenAt,
+          page,
+          cumulativeMetrics: metrics,
+          nextSequence,
+          now,
+          writeBatch: dependencies.writeBatch,
         })
+        nextSequence = persisted.nextSequence
         lastCheckpoint = checkpointFrom({
           identity: options.identity,
           nextMarker: page.markerAfter ?? null,
-          nextBatchSequence: sequence + 1,
+          nextBatchSequence: nextSequence,
           scanComplete: page.markerAfter == null,
           metrics,
-          updatedAt: writtenAt,
+          updatedAt: persisted.updatedAt,
         })
       },
     })
