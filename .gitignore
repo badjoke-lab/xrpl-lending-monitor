@@ -1,6 +1,8 @@
 node_modules/
 dist/
 .d1-tools-build/
+.artifact-measurement-build/
+.local/
 coverage/
 playwright-report/
 test-results/
