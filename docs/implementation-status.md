@@ -4,9 +4,9 @@ Last updated: 2026-07-03.
 
 ## Current milestone
 
-**M1 closeout** and **M5-4 — Devnet epochs and provenance integration**.
+**M1 closeout** before M5-5.
 
-M0, M2, M3, M4-0 through M4-7, and M5-1 through M5-3 are complete. M5-4 is active. M1 still requires a complete marker-aware bootstrap, verification, activation, rollback, cleanup, and resource evidence.
+M0, M2, M3, M4-0 through M4-7, and M5-1 through M5-4 are complete. M5-5 is intentionally deferred until M1 closeout is complete or blocked at an external gate. M1 still requires approved current-state object storage, a complete marker-aware bootstrap, verification, activation, rollback, cleanup, incremental collector start, and resource evidence.
 
 ## Canonical continuation point
 
@@ -31,14 +31,16 @@ Latest merged work:
 - PR #38: `Add archived object audit`;
 - squash merge: `7faf39d7217ce6e7438346e478a6416243929dd9`;
 - PR #39: `Add cover debt and loss audit`;
-- squash merge: `22b7f1ea002284e6745d97ac07c4d88932691990`.
+- squash merge: `22b7f1ea002284e6745d97ac07c4d88932691990`;
+- PR #40: `Add Devnet epoch audit pages`;
+- squash merge: `d59859af3425f7b7c63c3f54b18452a234264c4f`.
 
 Active implementation:
 
-- branch: `ui/m5-4-devnet-epochs-provenance`;
-- milestone unit: M5-4;
-- base: `main` at `22b7f1ea002284e6745d97ac07c4d88932691990`;
-- scope: Devnet epoch list/detail, reset-boundary metadata, epoch-scoped indexed evidence counts, current-object unavailability, provenance inspection, formula/API/methodology cross-links, and browser/API regression coverage.
+- branch: `ops/m1-closeout-r2-approval-gate`;
+- milestone unit: M1 closeout;
+- base: `main` at `d59859af3425f7b7c63c3f54b18452a234264c4f`;
+- scope: remote baseline verification, current-state storage/binding inspection, and approval-gate documentation for required Cloudflare R2/current-state storage before any new remote mutation.
 
 ## Production D1 schema
 
@@ -63,6 +65,40 @@ Evidence:
 - deployed `/api/activity?limit=6` returned HTTP 200 with an empty indexed data array.
 
 No current-state snapshot was created or activated.
+
+Remote read-only recheck on 2026-07-03:
+
+- `pnpm exec wrangler d1 migrations list xrpl-lending-monitor --remote` reported `No migrations to apply`;
+- D1 database ID remained `bebc2c68-03d2-4a1c-98a7-46b34ee4e25d`;
+- deployed `/api/status`, `/api/overview`, and `/api/activity?limit=6` returned HTTP 200;
+- `/api/status` reported `collector.status = uninitialized`;
+- `/api/overview` reported explicit active-snapshot unavailability;
+- `/api/activity?limit=6` returned an empty indexed data array;
+- read-only remote D1 query reported zero rows in `current_state_snapshots`, `network_epochs`, and `sync_state` with `changed_db: false` and `rows_written: 0`.
+
+## M1 closeout approval gate
+
+Current-state bootstrap and activation cannot proceed until Cloudflare R2 is enabled and a production current-state bucket is available and bound to the Worker as `CURRENT_STATE`.
+
+Read-only evidence:
+
+- `wrangler.jsonc` currently binds D1 `DB` and static assets `ASSETS`; it does not bind `CURRENT_STATE`;
+- current-state public readers require `context.env.CURRENT_STATE`;
+- bootstrap storage uses R2 through `createR2BootstrapObjectStore`;
+- bootstrap activation writes active snapshot metadata to D1 only after manifest verification;
+- `pnpm exec wrangler r2 bucket list` failed with Cloudflare API code `10042`: `Please enable R2 through the Cloudflare Dashboard`.
+
+Required owner approval before continuing:
+
+- enable R2 for Cloudflare account `4342d6a763f40d2476b548c77339d42e`;
+- create an R2 bucket for current-state shards, proposed name `xrpl-lending-monitor-current-state`;
+- add a production Worker R2 binding named `CURRENT_STATE` pointing to that bucket;
+- deploy the binding/configuration through the repository/Cloudflare production path;
+- run the complete bootstrap, manifest upload, D1 activation, rollback, cleanup, and incremental collector start only after the resource and binding are approved.
+
+First blocked M1 action:
+
+- obtain explicit owner approval for the R2 enablement, bucket creation, `CURRENT_STATE` binding, and production configuration/deployment mutation.
 
 ## Completed M4-4
 
@@ -202,9 +238,9 @@ Local validation:
 
 PR #39 passed CI and was squash-merged at `22b7f1ea002284e6745d97ac07c4d88932691990`.
 
-## Active M5-4
+## Completed M5-4
 
-Implemented on the active branch:
+Delivered:
 
 - `GET /api/epochs/:epochId` detail endpoint with reset-boundary metadata, scoped indexed counts, and provenance;
 - Devnet Epochs page at `/epochs`;
@@ -218,12 +254,10 @@ Local validation:
 
 - `pnpm install --frozen-lockfile`;
 - `pnpm check` — includes lint, type-check, unit tests with 177 passed and 3 skipped, local D1 migration replay, and production build;
-- `pnpm test:e2e` — 33 passed.
+- `pnpm test:e2e` — 33 passed;
+- CI `quality` passed.
 
-First incomplete action:
-
-- open PR for M5-4;
-- inspect CI and merge only after required checks pass.
+PR #40 passed CI and was squash-merged at `d59859af3425f7b7c63c3f54b18452a234264c4f`.
 
 ## Known open questions
 
@@ -248,6 +282,6 @@ First incomplete action:
 
 ## Current blockers
 
-No code blocker prevents continuing M5.
+M1 closeout is blocked on owner approval and Cloudflare dashboard action because R2 is not enabled for the account. The required current-state object store and `CURRENT_STATE` binding do not exist yet. Do not start M5-5 until M1 real data is active and verified, or until this external gate is explicitly accepted as the stopping point.
 
 Real public current-state data still requires an approved `CURRENT_STATE` binding and a complete verified active snapshot. Current-state APIs and UI routes must continue to expose that absence explicitly.
