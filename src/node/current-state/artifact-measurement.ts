@@ -52,23 +52,30 @@ export interface LocalArtifactMeasurementEvidence {
     count: number
     dataShardCount: number
     indexShardCount: number
+    catalogArtifactCount: number
     pageManifestCount: number
+    snapshotManifestCount: number
     totalStoredBytes: number
     dataCompressedBytes: number
     indexCompressedBytes: number
+    catalogCompressedBytes: number
     pageManifestBytes: number
     snapshotManifestBytes: number
     maxArtifactBytes: number
+    maxCatalogArtifactBytes: number
   }
   payload: {
     dataObjects: number
     indexEntries: number
+    catalogEntries: number
     dataUncompressedBytes: number
     indexUncompressedBytes: number
+    catalogUncompressedBytes: number
     combinedUncompressedBytes: number
     combinedCompressedBytes: number
     compressionRatio: number | null
     indexShareOfCompressedPayload: number | null
+    catalogShareOfCompressedPayload: number | null
   }
   runtime: {
     invocationWallMs: number
@@ -262,16 +269,20 @@ function buildEvidence(options: {
 }): LocalArtifactMeasurementEvidence {
   const dataShards = options.pages.flatMap((page) => page.manifest.dataShards)
   const indexShards = options.pages.flatMap((page) => page.manifest.indexShards)
+  const catalogArtifacts = options.snapshot?.catalogArtifacts ?? []
   const dataCompressedBytes = dataShards.reduce((total, shard) => total + shard.compressedBytes, 0)
   const indexCompressedBytes = indexShards.reduce((total, shard) => total + shard.compressedBytes, 0)
+  const catalogCompressedBytes = catalogArtifacts.reduce((total, shard) => total + shard.compressedBytes, 0)
   const dataUncompressedBytes = dataShards.reduce((total, shard) => total + shard.uncompressedBytes, 0)
   const indexUncompressedBytes = indexShards.reduce((total, shard) => total + shard.uncompressedBytes, 0)
+  const catalogUncompressedBytes = catalogArtifacts.reduce((total, shard) => total + shard.uncompressedBytes, 0)
   const pageManifestBytes = options.pages.reduce((total, page) => total + page.bytes, 0)
   const snapshotManifestBytes = options.snapshot?.bytes.byteLength ?? 0
-  const shardSizes = [...dataShards, ...indexShards].map((shard) => shard.compressedBytes)
+  const shardSizes = [...dataShards, ...indexShards, ...catalogArtifacts].map((shard) => shard.compressedBytes)
   const maxArtifactBytes = Math.max(0, ...shardSizes, ...options.pages.map((page) => page.bytes), snapshotManifestBytes)
-  const combinedCompressedBytes = dataCompressedBytes + indexCompressedBytes
-  const combinedUncompressedBytes = dataUncompressedBytes + indexUncompressedBytes
+  const maxCatalogArtifactBytes = Math.max(0, ...catalogArtifacts.map((artifact) => artifact.compressedBytes))
+  const combinedCompressedBytes = dataCompressedBytes + indexCompressedBytes + catalogCompressedBytes
+  const combinedUncompressedBytes = dataUncompressedBytes + indexUncompressedBytes + catalogUncompressedBytes
 
   return {
     schemaVersion: 1,
@@ -295,26 +306,33 @@ function buildEvidence(options: {
         }
       : null,
     artifacts: {
-      count: dataShards.length + indexShards.length + options.pages.length + (options.snapshot ? 1 : 0),
+      count: dataShards.length + indexShards.length + catalogArtifacts.length + options.pages.length + (options.snapshot ? 1 : 0),
       dataShardCount: dataShards.length,
       indexShardCount: indexShards.length,
+      catalogArtifactCount: catalogArtifacts.length,
       pageManifestCount: options.pages.length,
+      snapshotManifestCount: options.snapshot ? 1 : 0,
       totalStoredBytes: combinedCompressedBytes + pageManifestBytes + snapshotManifestBytes,
       dataCompressedBytes,
       indexCompressedBytes,
+      catalogCompressedBytes,
       pageManifestBytes,
       snapshotManifestBytes,
       maxArtifactBytes,
+      maxCatalogArtifactBytes,
     },
     payload: {
       dataObjects: dataShards.reduce((total, shard) => total + shard.objectCount, 0),
       indexEntries: indexShards.reduce((total, shard) => total + shard.entryCount, 0),
+      catalogEntries: catalogArtifacts.reduce((total, shard) => total + shard.entryCount, 0),
       dataUncompressedBytes,
       indexUncompressedBytes,
+      catalogUncompressedBytes,
       combinedUncompressedBytes,
       combinedCompressedBytes,
       compressionRatio: finiteRatio(combinedUncompressedBytes, combinedCompressedBytes),
       indexShareOfCompressedPayload: finiteRatio(indexCompressedBytes, combinedCompressedBytes),
+      catalogShareOfCompressedPayload: finiteRatio(catalogCompressedBytes, combinedCompressedBytes),
     },
     runtime: {
       invocationWallMs: options.wallMs,

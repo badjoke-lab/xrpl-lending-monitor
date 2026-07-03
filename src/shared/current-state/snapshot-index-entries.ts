@@ -115,9 +115,9 @@ export function buildSnapshotIndexEntries(options: {
       category: 'object-id',
       reference,
     })),
-    ...account.map((entry) => encodeEntry('search', entry.term, {
+    ...[...new Set(account.map((entry) => entry.term))].map((term) => encodeEntry('search', term, {
       category: 'account',
-      account: entry.term,
+      account: term,
     })),
   ]
   return { 'object-id': objectId, account, relationship, search }

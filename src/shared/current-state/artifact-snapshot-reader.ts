@@ -260,6 +260,7 @@ export class SnapshotArtifactReader {
     indexKind: SnapshotIndexKind,
     term: string,
     options: BoundedReadOptions,
+    dedupeValues = false,
   ): Promise<BoundedReadResult<T>> {
     const { limit, maxShardReads } = readOptions(options)
     const catalog = await this.#catalogValues({ catalogKind: indexKind, term, maxShardReads })
@@ -274,6 +275,7 @@ export class SnapshotArtifactReader {
     if (cursor.descriptorIndex > descriptors.length) throw new Error('Reader cursor is beyond the index catalog')
 
     const items: T[] = []
+    const seenValues = new Set<string>()
     let shardReads = catalog.shardReads
     for (let descriptorIndex = cursor.descriptorIndex; descriptorIndex < descriptors.length; descriptorIndex += 1) {
       if (shardReads >= maxShardReads) {
@@ -297,6 +299,11 @@ export class SnapshotArtifactReader {
       for (let lineIndex = firstLine; lineIndex < records.length; lineIndex += 1) {
         const record = records[lineIndex]!
         if (record.term !== term) continue
+        if (dedupeValues) {
+          const key = canonicalJson(record.value)
+          if (seenValues.has(key)) continue
+          seenValues.add(key)
+        }
         items.push(record.value)
         if (items.length === limit) {
           const atShardEnd = lineIndex + 1 >= records.length
@@ -339,7 +346,7 @@ export class SnapshotArtifactReader {
     term: string,
     options: BoundedReadOptions = {},
   ): Promise<BoundedReadResult<SearchIndexValue>> {
-    return this.#exactIndex<SearchIndexValue>('search', term, options)
+    return this.#exactIndex<SearchIndexValue>('search', term, options, true)
   }
 
   async #objectFromReference(

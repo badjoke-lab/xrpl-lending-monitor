@@ -6,6 +6,8 @@ export default tseslint.config(
   {
     ignores: [
       'dist/**',
+      '.d1-tools-build/**',
+      '.artifact-measurement-build/**',
       'coverage/**',
       'playwright-report/**',
       'test-results/**',

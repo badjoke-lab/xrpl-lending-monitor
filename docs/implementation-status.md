@@ -46,23 +46,22 @@ The `bounded-artifact-readers` branch adds the read path required by the current
 - exact current-state search for object identifiers and accounts;
 - explicit result and shard-read limits;
 - digest, identity, object-value, cursor, and catalog integrity checks.
+- local artifact measurement evidence includes catalog artifact count, compressed bytes, uncompressed bytes, largest catalog artifact, and compressed catalog share.
 
 ## Next order
 
 1. Pass full CI and merge the catalog and bounded-reader unit.
-2. Update compressed measurement evidence to include catalog storage.
-3. Run the bounded compressed-artifact sample and inspect the evidence.
-4. Run a complete fixed-ledger Devnet measurement if the bounded result passes the resource guardrails.
-5. Wire the readers to unavailable-safe current-state API routes.
-6. Select and validate a production storage adapter only after local capacity and read-path evidence pass.
-7. Build and verify an inactive production snapshot.
-8. Activate separately, prove rollback, and start incremental collection.
-9. Complete M5-5 and continue M6.
+2. Run the bounded compressed-artifact sample and inspect the evidence.
+3. Run a complete fixed-ledger Devnet measurement if the bounded result passes the resource guardrails.
+4. Wire the readers to unavailable-safe current-state API routes.
+5. Select and validate a production storage adapter only after local capacity and read-path evidence pass.
+6. Build and verify an inactive production snapshot.
+7. Activate separately, prove rollback, and start incremental collection.
+8. Complete M5-5 and continue M6.
 
 ## Blockers
 
 - The snapshot catalog and bounded-reader unit is not merged.
-- Catalog storage is not yet included in measurement evidence.
 - No compressed-artifact capacity evidence has been accepted yet.
 - Migration `0009` remains unapplied remotely.
 - No production snapshot is verified or active.

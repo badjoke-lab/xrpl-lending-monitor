@@ -122,7 +122,21 @@ describe('local artifact measurement', () => {
     expect(second.checkpoint.metrics.elapsedMs).toBe(50)
     expect(second.payload.dataObjects).toBe(2)
     expect(second.payload.indexEntries).toBe(8)
+    expect(second.payload.catalogEntries).toBeGreaterThan(0)
+    expect(second.payload.catalogUncompressedBytes).toBeGreaterThan(0)
+    expect(second.payload.catalogShareOfCompressedPayload).toBeGreaterThan(0)
     expect(second.artifacts.pageManifestCount).toBe(2)
+    expect(second.artifacts.catalogArtifactCount).toBeGreaterThan(0)
+    expect(second.artifacts.catalogCompressedBytes).toBeGreaterThan(0)
+    expect(second.artifacts.maxCatalogArtifactBytes).toBeGreaterThan(0)
+    expect(second.artifacts.maxArtifactBytes).toBeGreaterThanOrEqual(second.artifacts.maxCatalogArtifactBytes)
+    expect(second.artifacts.totalStoredBytes).toBe(
+      second.artifacts.dataCompressedBytes
+      + second.artifacts.indexCompressedBytes
+      + second.artifacts.catalogCompressedBytes
+      + second.artifacts.pageManifestBytes
+      + second.artifacts.snapshotManifestBytes,
+    )
     expect(second.snapshotManifest?.key).toBe(
       'current-state/devnet/devnet-measurement-100/devnet-100-aaaaaaaaaaaa/manifest.json',
     )
@@ -133,7 +147,8 @@ describe('local artifact measurement', () => {
     expect(runPlan.identity).toMatchObject({ ledgerIndex: 100, ledgerHash })
     expect(JSON.parse(await readFile(join(root, 'evidence.json'), 'utf8'))).toMatchObject({
       status: 'complete',
-      payload: { dataObjects: 2 },
+      artifacts: { catalogArtifactCount: second.artifacts.catalogArtifactCount },
+      payload: { dataObjects: 2, catalogEntries: second.payload.catalogEntries },
     })
   })
 })
