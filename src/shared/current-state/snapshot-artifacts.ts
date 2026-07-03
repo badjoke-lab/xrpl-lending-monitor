@@ -33,3 +33,14 @@ function assertIdentity(identity: SnapshotIdentity): void {
     throw new Error('ledgerHash must be 64 uppercase hexadecimal characters')
   }
 }
+
+function validateLimit(value: number, field: string): void {
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new Error(`${field} must be a positive safe integer`)
+  }
+}
+
+interface EncodedRecord {
+  id: string
+  line: Uint8Array
+}
