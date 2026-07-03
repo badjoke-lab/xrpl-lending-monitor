@@ -17,28 +17,31 @@ The public Devnet Worker is deployed through migration `0008_balance_history.sql
 - PR #55 / D1-2: one runtime D1 binding, `DB`.
 - PR #56 / D1-3: local D1 pause, resume, verification, activation, reads, rollback, and cleanup integration.
 - PR #57 / D1-4: separate local D1 actions and measurement evidence.
+- PR #59: up to 2,048 decoded objects per RPC page with D1 writes bounded to 80 relevant objects.
 - PR #49 and PR #50 were closed as superseded.
 
 ## Active D1 preparation unit
 
-### PR #59 — Bounded RPC pages and D1 writes
+### PR #60 — Retained-snapshot capacity gate
 
-The branch separates the XRPL RPC page boundary from the D1 write boundary:
+The branch adds a local `capacity` action that:
 
-- up to 2,048 decoded ledger objects per RPC page;
-- at most 80 relevant lending objects per D1 write batch;
-- the continuation marker advances only after the final batch for the page is durable;
-- empty pages still persist one terminal batch so marker progress is durable;
-- the operator and command documentation use the same shared limits.
+- requires a verified manifest-backed snapshot;
+- reads the current local D1 size from D1 query metadata;
+- measures manifest, object, batch, maximum-row, and maximum-batch evidence;
+- adds only the retained snapshot generations not already present in the current database;
+- adds an explicit history reserve;
+- rejects projections above the 350 MB bootstrap stop threshold;
+- emits the JSON evidence before returning exit status `2` when enforcement rejects the projection.
 
-This closes the batching prerequisite for the D1-5 complete local Devnet bootstrap.
+This closes the capacity-check prerequisite for the D1-5 complete local Devnet bootstrap.
 
 ## Next order
 
-1. Complete and merge PR #59.
-2. Add the current-database and retained-snapshot capacity gate from the superseded PR #52 design to the current main branch.
-3. Run a complete local Devnet bootstrap and generate the 350 MB resource report.
-4. Review the local evidence before any remote schema mutation.
+1. Complete and merge PR #60.
+2. Run a complete local Devnet bootstrap and generate the retained-snapshot capacity report.
+3. Verify and activate locally, build a second snapshot, rerun the gate with both generations included, and prove rollback.
+4. Review all D1-5 evidence before any remote schema mutation.
 5. Apply the reviewed additive migration.
 6. Build and verify an inactive production snapshot.
 7. Activate separately, prove rollback, and start incremental collection.
@@ -46,8 +49,7 @@ This closes the batching prerequisite for the D1-5 complete local Devnet bootstr
 
 ## Blockers
 
-- PR #59 is not merged.
-- The complete retained-snapshot capacity gate is not yet on main.
+- PR #60 is not merged.
 - No complete real Devnet local bootstrap report exists.
 - Migration `0009` is not applied remotely.
 - No production snapshot is verified or active.

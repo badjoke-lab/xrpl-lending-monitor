@@ -4,6 +4,10 @@ import { dirname, resolve } from 'node:path'
 import { getPlatformProxy } from 'wrangler'
 
 import {
+  executeD1CapacityCheck,
+  type D1CapacityCheckInput,
+} from '../src/worker/operator/d1-capacity-check'
+import {
   executeD1CurrentStateOperator,
   type D1OperatorAction,
 } from '../src/worker/operator/d1-current-state-operator'
@@ -14,6 +18,8 @@ interface Arguments {
   persistPath: string
   outputPath: string | null
 }
+
+type D1CommandInput = D1OperatorAction | D1CapacityCheckInput
 
 function argumentValue(args: string[], name: string): string | null {
   const index = args.indexOf(name)
@@ -39,12 +45,12 @@ function parseArguments(args: string[]): Arguments {
   }
 }
 
-async function readAction(path: string): Promise<D1OperatorAction> {
+async function readAction(path: string): Promise<D1CommandInput> {
   const value: unknown = JSON.parse(await readFile(path, 'utf8'))
   if (!value || typeof value !== 'object' || !('action' in value)) {
     throw new Error('D1 input must be a JSON object with an action')
   }
-  return value as D1OperatorAction
+  return value as D1CommandInput
 }
 
 async function main(): Promise<void> {
@@ -57,17 +63,24 @@ async function main(): Promise<void> {
   })
 
   try {
-    const evidence = await executeD1CurrentStateOperator({
-      db: platform.env.DB,
-      input: await readAction(args.inputPath),
-      heapUsedBytes: () => process.memoryUsage().heapUsed,
-    })
+    const input = await readAction(args.inputPath)
+    const evidence = input.action === 'capacity'
+      ? await executeD1CapacityCheck({ db: platform.env.DB, input })
+      : await executeD1CurrentStateOperator({
+          db: platform.env.DB,
+          input,
+          heapUsedBytes: () => process.memoryUsage().heapUsed,
+        })
     const json = `${JSON.stringify(evidence, null, 2)}\n`
     if (args.outputPath) {
       await mkdir(dirname(args.outputPath), { recursive: true })
       await writeFile(args.outputPath, json, 'utf8')
     }
     process.stdout.write(json)
+
+    if (input.action === 'capacity' && input.enforce !== false && !evidence.result.accepted) {
+      process.exitCode = 2
+    }
   } finally {
     await platform.dispose()
   }
