@@ -8,3 +8,23 @@ export interface EncodedSnapshotRecord {
   id: string
   line: Uint8Array
 }
+
+export async function encodeSnapshotRecord(options: {
+  identity: SnapshotIdentity
+  kind: SnapshotKind
+  value: ScannedLedgerObject
+}): Promise<EncodedSnapshotRecord> {
+  const valueJson = canonicalJson(options.value)
+  const valueSha256 = await sha256Hex(valueJson)
+  return {
+    id: options.value.index,
+    line: utf8(`${canonicalJson({
+      schemaVersion: SNAPSHOT_RECORD_SCHEMA_VERSION,
+      identity: options.identity,
+      kind: options.kind,
+      id: options.value.index,
+      valueSha256,
+      value: options.value,
+    })}\n`),
+  }
+}
