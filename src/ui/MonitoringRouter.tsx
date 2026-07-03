@@ -7,6 +7,7 @@ import { ApiDocumentationPage } from './pages/ApiDocumentationPage'
 import { ArchivedObjectDetailPage } from './pages/ArchivedObjectDetailPage'
 import { ArchivedObjectsPage } from './pages/ArchivedObjectsPage'
 import { ContactPage } from './pages/ContactPage'
+import { CoverLossAuditPage } from './pages/CoverLossAuditPage'
 import { LoanBrokerDetailPage } from './pages/LoanBrokerDetailPage'
 import { LoanBrokersPage } from './pages/LoanBrokersPage'
 import { LoanDetailPage } from './pages/LoanDetailPage'
@@ -77,6 +78,7 @@ export function resolveMonitoringPage({ currentPath, resources, navigate, reload
   if (currentPath === '/activity') return <ActivityPage onNavigate={navigate} />
   if (currentPath === '/audit/lifecycle') return <LifecycleAuditPage onNavigate={navigate} />
   if (currentPath === '/audit/archived') return <ArchivedObjectsPage onNavigate={navigate} />
+  if (currentPath === '/audit/cover-loss') return <CoverLossAuditPage onNavigate={navigate} />
   if (archivedObject?.[1] && archivedObject[2]) {
     const decodedObjectId = safeDecode(archivedObject[2])
     if (decodedObjectId !== null) return <ArchivedObjectDetailPage objectType={archivedObject[1]} objectId={decodedObjectId} onNavigate={navigate} />

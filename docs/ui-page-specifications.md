@@ -337,6 +337,10 @@ M5-2.
 - proprietary risk scores;
 - unsupported liquidation predictions.
 
+### API dependencies
+
+`/api/audit/cover-loss` and `/api/transactions/:hash`.
+
 ### Milestone
 
 M5-3.

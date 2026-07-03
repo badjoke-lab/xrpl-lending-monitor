@@ -25,7 +25,7 @@ const groups: Array<{ label: string; items: Item[] }> = [
   ] },
   { label: 'Audit', items: [
     { label: 'Lifecycle', path: '/audit/lifecycle' }, { label: 'Archived Objects', path: '/audit/archived' },
-    { label: 'Cover & Loss' }, { label: 'Devnet Epochs' },
+    { label: 'Cover & Loss', path: '/audit/cover-loss' }, { label: 'Devnet Epochs' },
   ] },
   { label: 'System', items: [
     { label: 'Network Status', path: '/network-status' },

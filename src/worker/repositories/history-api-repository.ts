@@ -12,6 +12,13 @@ export interface ArchivedObjectListOptions extends HistoryPageOptions {
   query?: string | null
 }
 
+export interface BalanceHistoryListOptions extends HistoryPageOptions {
+  metricType?: string | null
+  subjectType?: string | null
+  subjectId?: string | null
+  assetKey?: string | null
+}
+
 export interface ProtocolEventRecord {
   eventHash: string
   epochId: string
@@ -118,6 +125,23 @@ export interface ArchivedObjectRecord {
   archivedAt: string
 }
 
+export interface BalanceHistoryApiRecord {
+  epochId: string
+  subjectType: string
+  subjectId: string
+  transactionHash: string
+  ledgerIndex: number
+  transactionIndex: number
+  closeTime: number
+  metricType: string
+  assetKey: string | null
+  beforeValue: string | null
+  afterValue: string | null
+  formula: string | null
+  sourceFieldsJson: unknown
+  createdAt: string
+}
+
 interface ProtocolEventRow {
   event_hash: string
   epoch_id: string
@@ -222,6 +246,23 @@ interface ArchivedObjectRow {
   borrower: string | null
   asset_key: string | null
   archived_at: string
+}
+
+interface BalanceHistoryRow {
+  epoch_id: string
+  subject_type: string
+  subject_id: string
+  transaction_hash: string
+  ledger_index: number
+  transaction_index: number
+  close_time: number
+  metric_type: string
+  asset_key: string | null
+  before_value: string | null
+  after_value: string | null
+  formula: string | null
+  source_fields_json: string
+  created_at: string
 }
 
 function parseStoredJson(value: string | null): unknown | null {
@@ -332,6 +373,25 @@ function mapArchivedObject(row: ArchivedObjectRow): ArchivedObjectRecord {
     borrower: row.borrower,
     assetKey: row.asset_key,
     archivedAt: row.archived_at,
+  }
+}
+
+function mapBalanceHistory(row: BalanceHistoryRow): BalanceHistoryApiRecord {
+  return {
+    epochId: row.epoch_id,
+    subjectType: row.subject_type,
+    subjectId: row.subject_id,
+    transactionHash: row.transaction_hash,
+    ledgerIndex: row.ledger_index,
+    transactionIndex: row.transaction_index,
+    closeTime: row.close_time,
+    metricType: row.metric_type,
+    assetKey: row.asset_key,
+    beforeValue: row.before_value,
+    afterValue: row.after_value,
+    formula: row.formula,
+    sourceFieldsJson: JSON.parse(row.source_fields_json),
+    createdAt: row.created_at,
   }
 }
 
@@ -516,6 +576,34 @@ export async function getArchivedObject(
     .bind(objectType, objectId)
     .first<ArchivedObjectRow>()
   return row ? mapArchivedObject(row) : null
+}
+
+export async function listBalanceHistory(
+  db: D1Database,
+  options: BalanceHistoryListOptions,
+): Promise<BalanceHistoryApiRecord[]> {
+  const rows = await allRows<BalanceHistoryRow>(
+    db
+      .prepare(
+        `SELECT *
+         FROM balance_history
+         WHERE network = 'devnet'
+           AND (?1 IS NULL OR metric_type = ?1)
+           AND (?2 IS NULL OR subject_type = ?2)
+           AND (?3 IS NULL OR subject_id = ?3)
+           AND (?4 IS NULL OR asset_key = ?4)
+         ORDER BY ledger_index DESC, transaction_index DESC, subject_id ASC, metric_type ASC
+         LIMIT ?5`,
+      )
+      .bind(
+        options.metricType ?? null,
+        options.subjectType ?? null,
+        options.subjectId ?? null,
+        options.assetKey ?? null,
+        options.limit,
+      ),
+  )
+  return rows.map(mapBalanceHistory)
 }
 
 export async function searchHistory(

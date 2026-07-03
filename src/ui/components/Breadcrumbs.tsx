@@ -66,6 +66,7 @@ export function resolveBreadcrumbs(currentPath: string): BreadcrumbItem[] {
     '/search': 'Search',
     '/audit/lifecycle': 'Lifecycle',
     '/audit/archived': 'Archived Objects',
+    '/audit/cover-loss': 'Cover & Loss',
     '/api': 'API',
     '/methodology': 'Methodology',
     '/about': 'About',
