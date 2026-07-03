@@ -2,13 +2,13 @@
 
 ## Objective
 
-Continuously reconstruct XRPL Lending current state and history from validated ledgers while remaining restartable, idempotent, auditable, and compatible with bounded runtime and storage constraints.
+Continuously reconstruct XRPL Lending current state and history from validated ledgers while remaining restartable, idempotent, auditable, and bounded.
 
 ## Canonical source
 
 Only validated ledgers and validated transaction metadata are canonical.
 
-Current ledger objects are used to build or verify projections. Historical truth comes from indexed transactions, normalized AffectedNodes, lifecycle events, and archived final states.
+Current ledger objects build or verify projections. Historical evidence comes from indexed transactions, normalized AffectedNodes, lifecycle events, and archived final states.
 
 ## Collection modes
 
@@ -16,34 +16,34 @@ Current ledger objects are used to build or verify projections. Historical truth
 
 On an empty deployment or a new epoch:
 
-1. Fetch and persist the selected validated ledger hash and index.
+1. Fix one validated ledger hash and index.
 2. Start one unfiltered binary `ledger_data` traversal.
 3. Decode each bounded page and classify Vault, LoanBroker, and Loan objects locally.
-4. Preserve the opaque marker exactly after each successful batch.
-5. Normalize objects while writing bounded compressed shards.
-6. Record shard hashes, counts, ranges, and locations in a building manifest.
-7. Validate Vault to Broker to Loan relationships and Broker OwnerCount reconciliation.
-8. Publish the complete manifest only after the final marker is absent and all checks pass.
-9. Activate the snapshot in D1 only after manifest verification.
-10. Keep the previous active snapshot when any batch, upload, validation, or activation step fails.
+4. Write normalized objects to an inactive D1 snapshot in bounded batches.
+5. Record deterministic object and batch hashes, counts, and normalized byte totals.
+6. Persist the exact opaque continuation marker only after the matching D1 batch is durable.
+7. Validate Vault to LoanBroker to Loan relationships and Broker OwnerCount reconciliation.
+8. Verify the complete manifest only after the final marker is absent and all checks pass.
+9. Atomically switch the active D1 snapshot pointer after verification.
+10. Preserve the previous active snapshot whenever collection, validation, or activation fails.
 
 The bootstrap scan provides current objects, not complete history.
 
-The full bootstrap runs in a resumable long-running runner. A scheduled Cloudflare Worker does not perform the global marker traversal. Three separate filtered traversals are prohibited because the Devnet endpoint advances each filter through the same global ledger marker chain.
+The full bootstrap runs in a resumable long-running runner. A scheduled Worker does not perform the global marker traversal. Three separate filtered traversals are prohibited because the endpoint advances filters through the same global marker chain.
 
 ### Incremental ledger collector
 
 Each scheduled run:
 
-1. Read the committed cursor.
+1. Read the committed cursor and verified active snapshot identity.
 2. Fetch the latest validated ledger.
 3. Detect a possible network reset before processing.
-4. Select a bounded ledger range after the cursor.
+4. Select a bounded contiguous ledger range after the cursor.
 5. Fetch each ledger with transactions and metadata.
 6. Filter supported transaction types.
 7. Normalize affected-object IDs and field changes.
-8. Apply transaction, change, lifecycle, current projection, and archive writes in a transaction where practical.
-9. Commit the cursor only after successful processing.
+8. Apply processed-ledger, event, change, lifecycle, current projection, balance, and archive writes atomically at the documented boundary.
+9. Advance the cursor only after successful persistence.
 10. Record health and usage metrics.
 
 Incremental collection begins only after an initial active snapshot exists.
@@ -66,52 +66,50 @@ Incremental collection begins only after an initial active snapshot exists.
 - LoanManage
 - LoanDelete
 
-Unrecognized future transaction types or fields must be logged, not silently discarded.
+Unrecognized future transaction types or fields are reported rather than silently discarded.
 
 ## Idempotency
 
-Required unique identities:
+Required unique identities include:
 
-- transaction: network + epoch + transaction hash
-- object change: network + epoch + transaction hash + object ID + field + change kind
-- lifecycle event: network + epoch + Loan ID + transaction hash + event type
-- current object: network + epoch + object ID
-- bootstrap shard: network + epoch + snapshot ID + object type + shard sequence
-- bootstrap manifest: network + epoch + snapshot ID
+- transaction: network + epoch + transaction hash;
+- object change: network + epoch + transaction hash + object ID + field + change kind;
+- lifecycle event: network + epoch + Loan ID + transaction hash + event type;
+- current object: network + epoch + snapshot ID + object ID;
+- snapshot batch: network + epoch + snapshot ID + batch sequence;
+- manifest: network + epoch + snapshot ID.
 
-Reprocessing a ledger or bootstrap batch must produce the same canonical state without duplicate events or duplicate active snapshots.
+Reprocessing a ledger or bootstrap batch must converge without duplicate canonical events or duplicate active snapshots.
 
 ## Marker handling
 
-Every paginated RPC request must:
+Every paginated bootstrap request must:
 
 - preserve the marker exactly;
 - continue until no marker remains;
-- enforce an explicit page ceiling per batch;
-- persist the next marker only after the current batch and shard are durable;
+- enforce a page ceiling per resumable unit;
+- persist the next marker only after the current D1 batch is durable;
 - reject repeated markers;
 - reject a changed ledger hash or index;
-- expose pages processed and continuation state in health output.
+- expose pages processed and continuation state in health evidence.
 
-A page ceiling pauses a resumable batch. It does not mark a bootstrap complete. Counts from a partial traversal must never be presented as total counts.
+A page ceiling pauses work. It does not mark the bootstrap complete. Partial counts are never presented as totals.
 
 ## Loan zero omission
 
-Canonical XRPL binary decoding may omit numeric fields whose value is zero. The collector normalizes omitted numeric Loan fields to zero where the protocol defines numeric zero state.
+Canonical XRPL binary decoding may omit numeric fields whose value is zero. The collector normalizes omitted numeric Loan fields to zero only where the protocol defines numeric zero state.
 
-`NextPaymentDueDate` is different: terminal paid or defaulted Loans can remove the field. The projection stores it as `null`. If `PaymentRemaining` is greater than zero while the next due date is absent, normalization fails closed.
+`NextPaymentDueDate` is different: terminal paid or defaulted Loans can remove it. The projection stores it as `null`. If `PaymentRemaining` is greater than zero while the next due date is absent, normalization fails closed.
 
 ## Bounded work
 
 Configuration includes:
 
-- maximum ledgers per scheduled run;
-- maximum RPC requests per run;
-- maximum marker pages per bootstrap batch;
-- maximum decoded objects per batch;
-- maximum shard size;
+- maximum ledgers and RPC requests per scheduled run;
+- maximum marker pages and decoded objects per bootstrap unit;
+- maximum D1 rows, statements, and normalized bytes per batch;
 - maximum transactions per ledger before deferral;
-- maximum retries per endpoint or upload;
+- maximum retries per endpoint;
 - execution deadline margin;
 - export and API pagination limits.
 
@@ -120,87 +118,78 @@ When behind, the collector catches up across multiple runs rather than exceeding
 ## Endpoint strategy
 
 - Use the official Lending Devnet endpoint as primary.
-- Maintain at least one validated fallback when available.
-- Record which endpoint served each collector run.
-- Apply exponential backoff with jitter.
-- Never advance the cursor after an incomplete ledger response.
+- Maintain a validated fallback when available.
+- Record which endpoint served each run.
+- Apply bounded exponential backoff with jitter.
+- Never advance the cursor after an incomplete response.
 - Never resume a bootstrap against a different ledger identity.
 
 ## Object refresh strategy
 
-AffectedNodes should provide most changes. After relevant transactions, refresh the affected Vault, LoanBroker, or Loan with `ledger_entry` when:
+AffectedNodes provide most changes. Refresh an affected Vault, LoanBroker, or Loan with `ledger_entry` when:
 
 - the normalized change is incomplete;
-- a newly created object needs its complete state;
-- flags or derived relationships require confirmation;
+- a newly created object needs complete state;
+- flags or relationships require confirmation;
 - a periodic integrity check is due.
 
-Use `vault_info` where Share MPT or Vault-specific information is not available through the basic object response.
+Use `vault_info` where Share MPT or Vault-specific information is unavailable through the basic object response.
 
-## Deletion handling
+## Removal handling
 
 When a DeletedNode is observed:
 
-1. Save the final fields and previous fields.
+1. Save final and previous fields.
 2. Copy the latest projection into `archived_objects`.
-3. Classify the deletion reason from transaction type and lifecycle context.
+3. Classify the reason only when the source evidence supports it.
 4. Remove the object from the current projection.
-5. Keep all relationships and search aliases in historical indexes.
+5. Keep relationships and search aliases in historical indexes.
 
-Deletion-reason classification may be `unknown` when evidence is insufficient.
+The reason remains `unknown` when evidence is insufficient.
 
 ## Lifecycle reconstruction
 
-For each Loan, order canonical events by ledger index and transaction index. Derive lifecycle events from LoanSet, LoanPay, LoanManage, LoanDelete, and relevant object changes.
+For each Loan, order canonical events by ledger index and transaction index. Derive lifecycle events from supported transactions and normalized changes.
 
-Do not reconstruct original terms from the current object when the creation transaction provides authoritative values such as requested principal or payment total.
+Do not reconstruct original terms from the current object when the creation transaction contains authoritative values.
 
 ## Devnet reset detection
 
-Potential reset signals:
+Potential signals include:
 
-- latest validated ledger index is lower than the committed cursor;
-- a known ledger index has a different hash;
-- server identity or history range changes unexpectedly;
-- a configured reset marker is observed.
+- latest validated ledger index lower than the committed cursor;
+- a known index with a different hash;
+- unexpected server history changes;
+- a configured reset marker.
 
-On detection:
-
-1. stop incremental processing;
-2. verify the signal with a second request or endpoint;
-3. archive the current epoch;
-4. create a new epoch;
-5. perform a new bootstrap scan;
-6. preserve all prior records unchanged;
-7. show a reset notice in API health data.
+After confirmation, stop incremental processing, archive the current epoch, create a new epoch, perform a new bootstrap, preserve prior records, and expose a reset notice.
 
 ## Integrity reconciliation
 
 Scheduled reconciliation compares:
 
-- full current-object scans versus current projections;
+- current-object scans versus active projections;
 - Broker OwnerCount versus indexed Loan relationships;
-- LoanBroker VaultID references versus existing or archived Vaults;
-- Loan references versus existing or archived Brokers;
-- aggregate totals versus object-level sums by asset;
+- LoanBroker Vault references versus current or archived Vaults;
+- Loan references versus current or archived Brokers;
+- asset-separated aggregates versus object-level values;
 - cursor continuity and ledger hashes;
-- active manifest counts and shard hashes.
+- active manifest counts, object hashes, batch hashes, and same-snapshot relationships.
 
-Differences are recorded and repaired only through a documented deterministic process.
+Differences are recorded and corrected only through a documented deterministic process.
 
 ## Failure behavior
 
-- Serve last committed data with a stale warning.
+- Serve last committed data with a stale warning when safe.
 - Never fabricate missing state.
 - Never skip a failed ledger.
-- Never activate an incomplete manifest.
-- Record parser failures with transaction hash and ledger.
-- Keep failed raw payloads temporarily for debugging when safe.
-- Clean up incomplete bootstrap artifacts only after they are no longer resumable or referenced.
-- Alert through CI, health endpoint, or repository automation when persistent.
+- Never activate an incomplete or digest-invalid manifest.
+- Preserve the previous active snapshot after failure.
+- Retain incomplete attempts only while resumable or required for bounded verification.
+- Keep public errors free of credentials, provider account identifiers, and internal incident details.
 
 ## Initial cadence
 
 The scheduled incremental target is once per minute, subject to measured Worker and RPC behavior. Full bootstrap is on-demand and resumable rather than minute-scheduled.
 
-Cadence may be adjusted according to measured runtime, RPC capacity, and data-freshness requirements. Data freshness is shown explicitly, so a slower cadence does not masquerade as real time.
+Cadence may change according to measured runtime, RPC capacity, and freshness requirements. The interface always reports actual freshness.
