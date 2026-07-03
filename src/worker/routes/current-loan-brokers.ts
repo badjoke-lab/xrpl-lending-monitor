@@ -84,7 +84,7 @@ export function registerCurrentLoanBrokerRoutes(app: Hono<{ Bindings: Bindings }
       getCurrentEpoch(context.env.DB),
       getActiveSnapshot(context.env.DB),
     ])
-    if (!snapshot || !context.env.CURRENT_STATE) {
+    if (!snapshot) {
       return context.json(
         serializeUnavailableEntityCollection({
           kind: 'loan_brokers',
@@ -96,7 +96,7 @@ export function registerCurrentLoanBrokerRoutes(app: Hono<{ Bindings: Bindings }
     }
 
     try {
-      const result = await listCurrentLoanBrokers(context.env.CURRENT_STATE, snapshot, {
+      const result = await listCurrentLoanBrokers(context.env.DB, snapshot, {
         limit,
         sort,
         cursor,
@@ -135,18 +135,14 @@ export function registerCurrentLoanBrokerRoutes(app: Hono<{ Bindings: Bindings }
       getCurrentEpoch(context.env.DB),
       getActiveSnapshot(context.env.DB),
     ])
-    if (!snapshot || !context.env.CURRENT_STATE) {
+    if (!snapshot) {
       return context.json(
         serializeUnavailableEntityDetail({ kind: 'loan_broker', epoch, snapshot }),
       )
     }
 
     try {
-      const record = await getCurrentLoanBrokerById(
-        context.env.CURRENT_STATE,
-        snapshot,
-        brokerId,
-      )
+      const record = await getCurrentLoanBrokerById(context.env.DB, snapshot, brokerId)
       if (!record) {
         return context.json(
           { error: 'not_found', kind: 'loan_broker', id: brokerId, snapshot_id: snapshot.id },
