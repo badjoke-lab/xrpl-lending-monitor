@@ -28,16 +28,20 @@ export function utf8(value: string): Uint8Array {
   return encoder.encode(value)
 }
 
+function arrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
+}
+
 function hex(bytes: ArrayBuffer): string {
   return Array.from(new Uint8Array(bytes), (value) => value.toString(16).padStart(2, '0')).join('')
 }
 
 export async function sha256Hex(value: Uint8Array | string): Promise<string> {
   const bytes = typeof value === 'string' ? utf8(value) : value
-  return hex(await crypto.subtle.digest('SHA-256', bytes))
+  return hex(await crypto.subtle.digest('SHA-256', arrayBuffer(bytes)))
 }
 
 export async function gzipDeterministic(bytes: Uint8Array): Promise<Uint8Array> {
-  const stream = new Blob([bytes]).stream().pipeThrough(new CompressionStream('gzip'))
+  const stream = new Blob([arrayBuffer(bytes)]).stream().pipeThrough(new CompressionStream('gzip'))
   return new Uint8Array(await new Response(stream).arrayBuffer())
 }
