@@ -211,7 +211,7 @@ describe('D1-only local current-state integration', () => {
     })
     await expect(
       listCurrentVaults(db, active!, { limit: 25, sort: 'id_asc' }),
-    ).resolves.toMatchObject({ items: [], nextCursor: null })
+    ).resolves.toMatchObject({ data: [], nextCursor: null })
 
     const second = snapshotIdentity('snapshot-2', 200, 'C'.repeat(64))
     await verifyTerminalSnapshot(second)
