@@ -123,6 +123,12 @@ function catalogEntries(pages: readonly PageArtifactManifest[]): Record<Snapshot
   return result
 }
 
+function maximumLastTerm(group: readonly SnapshotCatalogEntry[]): string {
+  return group.reduce((maximum, entry) => (
+    compareText(entry.lastTerm, maximum) > 0 ? entry.lastTerm : maximum
+  ), '')
+}
+
 export async function buildSnapshotCatalogArtifacts(options: {
   identity: SnapshotIdentity
   pages: readonly PageArtifactManifest[]
@@ -153,7 +159,7 @@ export async function buildSnapshotCatalogArtifacts(options: {
         chunkSequence,
         entryCount: group.length,
         firstTerm: group[0]?.firstTerm ?? '',
-        lastTerm: group[group.length - 1]?.lastTerm ?? '',
+        lastTerm: maximumLastTerm(group),
         uncompressedBytes: uncompressed.byteLength,
         compressedBytes: bytes.byteLength,
         uncompressedSha256: await sha256Hex(uncompressed),
