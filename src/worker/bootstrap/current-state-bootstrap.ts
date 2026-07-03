@@ -9,9 +9,9 @@ import { createD1BootstrapLifecycle } from '../repositories/bootstrap-lifecycle'
 import { createR2BootstrapObjectStore } from '../repositories/bootstrap-object-store'
 
 export {
-  runD1Bootstrap as runD1CurrentStateBootstrap,
-  type D1BootstrapResult,
-} from './d1-bootstrap'
+  orchestrateBootstrap as runD1CurrentStateBootstrap,
+  type BootstrapResult as D1BootstrapResult,
+} from './orchestrator'
 
 export interface D1R2CurrentStateBootstrapOptions {
   db: D1Database
