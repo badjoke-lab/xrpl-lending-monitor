@@ -1,5 +1,6 @@
 import type { BootstrapIdentity } from '../../collector/current-state/bootstrap-runner'
 import { runD1Bootstrap } from '../bootstrap/d1-bootstrap'
+import { PAGE_OBJECT_LIMIT } from '../bootstrap/page-batching'
 import { loadD1BootstrapCheckpoint } from '../repositories/d1-bootstrap-checkpoint-repository'
 import { loadSnapshot } from '../repositories/d1-snapshot'
 import {
@@ -10,7 +11,7 @@ import {
 import { activateSnapshot, verifySnapshot } from '../repositories/d1-snapshot-verify'
 
 const MAX_PAGES_PER_RUN = 25
-const MAX_OBJECTS_PER_PAGE = 80
+const MAX_OBJECTS_PER_PAGE = PAGE_OBJECT_LIMIT
 const MAX_TIMEOUT_MS = 60_000
 const MAX_RETRIES = 2
 const D1_SAFETY_THRESHOLD_BYTES = 350_000_000

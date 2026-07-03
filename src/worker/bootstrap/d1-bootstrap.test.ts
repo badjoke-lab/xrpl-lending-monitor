@@ -21,7 +21,7 @@ function metrics(options: Partial<CurrentStateScanMetrics> = {}): CurrentStateSc
     decodedObjects: 0,
     objects: 0,
     elapsedMs: 0,
-    requestedObjectsPerPage: 80,
+    requestedObjectsPerPage: 2_048,
     responseMode: 'binary',
     byType: {
       vault: { objects: 0 },
@@ -39,7 +39,7 @@ function page(markerBefore: unknown, markerAfter: unknown): CurrentStatePage {
     markerAfter,
     firstLedgerIndex: null,
     lastLedgerIndex: null,
-    decodedObjects: 80,
+    decodedObjects: 2_048,
     vaults: [],
     loanBrokers: [],
     loans: [],
@@ -96,6 +96,7 @@ describe('D1 bootstrap orchestration', () => {
         updateMetrics,
         verify,
         scanBatch: async (options) => {
+          expect(options.objectLimitPerPage).toBe(2_048)
           await options.onPage(page(undefined, { cursor: 'next' }))
           return {
             endpoint: identity.endpoint,
@@ -112,11 +113,17 @@ describe('D1 bootstrap orchestration', () => {
     expect(result.status).toBe('paused')
     expect(result.checkpoint.nextBatchSequence).toBe(2)
     expect(result.checkpoint.nextMarker).toEqual({ cursor: 'next' })
-    expect(result.checkpoint.metrics).toMatchObject({ pages: 1, requests: 1, decodedObjects: 80, elapsedMs: 5 })
+    expect(result.checkpoint.metrics).toMatchObject({
+      pages: 1,
+      requests: 1,
+      decodedObjects: 2_048,
+      elapsedMs: 5,
+    })
     expect(writeBatch).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
       snapshotId: identity.snapshotId,
       sequence: 1,
       markerAfter: { cursor: 'next' },
+      advanceCheckpoint: true,
     }))
     expect(updateMetrics).toHaveBeenCalledOnce()
     expect(verify).not.toHaveBeenCalled()
@@ -128,7 +135,7 @@ describe('D1 bootstrap orchestration', () => {
       nextMarker: { cursor: 'next' },
       nextBatchSequence: 2,
       scanComplete: false,
-      metrics: metrics({ pages: 1, requests: 1, decodedObjects: 80, elapsedMs: 5 }),
+      metrics: metrics({ pages: 1, requests: 1, decodedObjects: 2_048, elapsedMs: 5 }),
       updatedAt: '2026-07-03T00:00:00.000Z',
     }
     const verify = vi.fn(async () => ({ manifest: manifest(), manifestHash: 'c'.repeat(64) }))
@@ -151,7 +158,7 @@ describe('D1 bootstrap orchestration', () => {
         verify,
         scanBatch: async (options) => {
           expect(options.startMarker).toEqual({ cursor: 'next' })
-          expect(options.objectLimitPerPage).toBe(80)
+          expect(options.objectLimitPerPage).toBe(2_048)
           await options.onPage(page({ cursor: 'next' }, null))
           return {
             endpoint: identity.endpoint,
@@ -168,22 +175,27 @@ describe('D1 bootstrap orchestration', () => {
     expect(result.status).toBe('verified')
     expect(result.checkpoint.scanComplete).toBe(true)
     expect(result.checkpoint.nextMarker).toBeNull()
-    expect(result.checkpoint.metrics).toMatchObject({ pages: 2, requests: 2, decodedObjects: 160, elapsedMs: 12 })
+    expect(result.checkpoint.metrics).toMatchObject({
+      pages: 2,
+      requests: 2,
+      decodedObjects: 4_096,
+      elapsedMs: 12,
+    })
     expect(verify).toHaveBeenCalledWith(expect.objectContaining({
       snapshotId: identity.snapshotId,
       pageCount: 2,
       requestCount: 2,
-      decodedObjectCount: 160,
+      decodedObjectCount: 4_096,
       durationMs: 12,
     }))
   })
 
-  it('rejects a page size that could exceed the D1 statement envelope', async () => {
+  it('rejects an RPC page size above the bounded maximum', async () => {
     await expect(runD1Bootstrap({
       db: {} as D1Database,
       identity,
       timeoutMs: 1000,
-      objectLimitPerPage: 81,
-    })).rejects.toThrow('must not exceed 80')
+      objectLimitPerPage: 2_049,
+    })).rejects.toThrow('must not exceed 2048')
   })
 })

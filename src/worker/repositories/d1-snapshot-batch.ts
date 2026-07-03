@@ -24,6 +24,7 @@ export interface SnapshotBatchInput {
   loans: readonly ScannedLedgerObject[]
   cumulativeMetrics: Record<string, unknown>
   writtenAt: string
+  advanceCheckpoint?: boolean
 }
 
 export interface SnapshotBatchResult {
@@ -194,24 +195,26 @@ export async function writeSnapshotBatch(
     }
   }
 
-  statements.push(db.prepare(
-    `INSERT INTO current_state_d1_bootstrap_checkpoints (
-       snapshot_id, marker_json, next_batch_sequence, scan_complete, metrics_json, updated_at
-     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-     ON CONFLICT(snapshot_id) DO UPDATE SET
-       marker_json = excluded.marker_json,
-       next_batch_sequence = excluded.next_batch_sequence,
-       scan_complete = excluded.scan_complete,
-       metrics_json = excluded.metrics_json,
-       updated_at = excluded.updated_at`,
-  ).bind(
-    input.snapshotId,
-    markerAfter,
-    input.sequence + 1,
-    markerAfter === null ? 1 : 0,
-    canonicalJson(input.cumulativeMetrics),
-    input.writtenAt,
-  ))
+  if (input.advanceCheckpoint !== false) {
+    statements.push(db.prepare(
+      `INSERT INTO current_state_d1_bootstrap_checkpoints (
+         snapshot_id, marker_json, next_batch_sequence, scan_complete, metrics_json, updated_at
+       ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+       ON CONFLICT(snapshot_id) DO UPDATE SET
+         marker_json = excluded.marker_json,
+         next_batch_sequence = excluded.next_batch_sequence,
+         scan_complete = excluded.scan_complete,
+         metrics_json = excluded.metrics_json,
+         updated_at = excluded.updated_at`,
+    ).bind(
+      input.snapshotId,
+      markerAfter,
+      input.sequence + 1,
+      markerAfter === null ? 1 : 0,
+      canonicalJson(input.cumulativeMetrics),
+      input.writtenAt,
+    ))
+  }
 
   await db.batch(statements)
   return { status: 'stored', batchHash, objectCount: objects.length, normalizedBytes }

@@ -13,7 +13,9 @@ It is an implementation and operations interface. It is not an HTTP route, publi
 - Bootstrap, verification, measurement, activation, rollback, and cleanup are distinct actions.
 - Bootstrap never activates a snapshot.
 - A fixed Devnet ledger index and 64-character ledger hash are required for bootstrap.
-- A bootstrap run is bounded to at most 25 pages, 80 decoded objects per page, 60 seconds, and two retries.
+- A bootstrap run is bounded to at most 25 RPC pages, 2,048 decoded ledger objects per page, 60 seconds, and two retries.
+- Relevant Vault, Loan Broker, and Loan rows from one RPC page are persisted in D1 batches of at most 80 objects.
+- The continuation marker advances only after the final D1 batch for the RPC page is durable.
 - Evidence reports whether an opaque continuation marker exists but never emits the marker value.
 - Evidence must not contain credentials, private endpoints, provider account identifiers, or secrets.
 - Mainnet remains disabled.
@@ -71,12 +73,14 @@ Returns snapshot state, fixed ledger identity, batch progress, scan completion, 
   },
   "timeoutMs": 30000,
   "maxPagesPerRun": 25,
-  "objectLimitPerPage": 80,
+  "objectLimitPerPage": 2048,
   "maxRetries": 1
 }
 ```
 
 The command begins a new inactive snapshot or resumes the matching snapshot from its exact stored marker. A changed snapshot, epoch, ledger index, or ledger hash is rejected.
+
+Each RPC page may decode up to 2,048 ledger objects. Only relevant lending objects are normalized, and those relevant rows are split into D1 write batches of at most 80 objects. Intermediate write batches do not advance the stored continuation marker.
 
 A terminal scan returns `complete`, not `verified` or `active`.
 
