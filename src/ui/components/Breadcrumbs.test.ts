@@ -49,6 +49,14 @@ describe('resolveBreadcrumbs', () => {
     ])
   })
 
+  it('places epoch detail under Devnet Epochs', () => {
+    expect(resolveBreadcrumbs('/epochs/epoch-1')).toEqual([
+      { label: 'Overview', path: '/' },
+      { label: 'Devnet Epochs', path: '/epochs' },
+      { label: 'Epoch epoch-1', title: 'epoch-1' },
+    ])
+  })
+
   it('labels unsupported routes without adding a false hierarchy', () => {
     expect(resolveBreadcrumbs('/unsupported')).toEqual([
       { label: 'Overview', path: '/' },

@@ -17,7 +17,7 @@ Roadmap labels such as `M4-4` are planning identifiers, not guaranteed GitHub pu
 | M2 Event history and lifecycle | Complete through Checkpoint B | Completed 2026-07-02 | Collect validated ledgers, normalize changes, reconstruct lifecycle, and preserve deletions | Deterministic replay, archive, status, and reconciliation work merged |
 | M3 Public API | Complete through exports and feeds | Completed 2026-07-02 | Expose bounded read-only core and history APIs | Contract tests pass for baseline entities, history, exports, and feeds |
 | M4 Baseline UI and project pages | Complete through Checkpoint C | Completed 2026-07-03 | Deliver the ordinary monitor, project pages, navigation, responsive behavior, and shared UI states | Required baseline routes work end to end and Checkpoint C passes |
-| M5 Differentiated audit UI | M5-3 active | 2026-07-10 to 2026-07-16 | Add lifecycle, state changes, archives, cover/loss, epochs, and provenance integration | Audit views complete without baseline regressions |
+| M5 Differentiated audit UI | M5-4 active | 2026-07-10 to 2026-07-16 | Add lifecycle, state changes, archives, cover/loss, epochs, and provenance integration | Audit views complete without baseline regressions |
 | M6 Hardening and public Devnet release | Not started | 2026-07-16 to 2026-07-26 | Prove integrity, resource safety, accessibility, operations, and deployment readiness | Multi-day soak and all release gates pass |
 
 The original August target remains a conservative outer boundary. External preview access, bootstrap runtime, review, deployment approval, and soak evidence may extend the release date.
@@ -277,7 +277,7 @@ Status: complete in PR #38 (`7faf39d7217ce6e7438346e478a6416243929dd9`).
 
 ### M5-3 — Cover, debt, and loss audit
 
-Status: active.
+Status: complete in PR #39 (`22b7f1ea002284e6745d97ac07c4d88932691990`).
 
 - asset-separated DebtTotal, DebtMaximum, CoverAvailable, and LossUnrealized histories;
 - cover events;
@@ -288,6 +288,8 @@ Status: active.
 - no cross-asset or fiat aggregation.
 
 ### M5-4 — Devnet epochs and provenance integration
+
+Status: active.
 
 - epoch list and detail;
 - reset boundaries;

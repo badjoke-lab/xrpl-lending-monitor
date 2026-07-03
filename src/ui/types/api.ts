@@ -235,6 +235,42 @@ export interface BalanceHistoryResponse {
   }
 }
 
+export interface EpochRecord {
+  id: string
+  network: 'devnet'
+  status: 'current' | 'archived'
+  first_ledger_index: number
+  first_ledger_hash: string
+  last_ledger_index: number | null
+  last_ledger_hash: string | null
+  started_at: string
+  ended_at: string | null
+  reset_reason: string | null
+  provenance: Provenance
+}
+
+export interface EpochsResponse {
+  network: 'devnet'
+  data: EpochRecord[]
+}
+
+export interface EpochDetailResponse {
+  network: 'devnet'
+  kind: 'epoch'
+  epoch_id: string
+  data: EpochRecord | null
+  scoped_counts: {
+    protocol_events: number
+    object_changes: number
+    archived_objects: number
+    loan_lifecycle_events: number
+    balance_history_rows: number
+    current_objects: null
+  } | null
+  availability: { state: 'available' | 'unavailable'; reason: string | null; current_objects: string }
+  provenance: { epoch: Provenance; scoped_counts: Provenance; current_objects: Provenance }
+}
+
 export interface CanonicalAssetResponse {
   type: 'xrp' | 'iou' | 'mpt'
   key: string

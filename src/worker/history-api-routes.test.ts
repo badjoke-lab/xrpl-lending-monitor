@@ -110,6 +110,30 @@ function createFakeDatabase(): D1Database {
             return (bindings[0] === 'TX1' ? protocolEventRow(true) : null) as T | null
           }
 
+          if (sql.includes('FROM network_epochs') && sql.includes('id = ?1')) {
+            return (bindings[0] === 'epoch-1' ? {
+              id: 'epoch-1',
+              status: 'current',
+              first_ledger_index: 100,
+              first_ledger_hash: 'FIRST',
+              last_ledger_index: null,
+              last_ledger_hash: null,
+              started_at: '2026-07-01T00:00:00.000Z',
+              ended_at: null,
+              reset_reason: null,
+            } : null) as T | null
+          }
+
+          if (sql.includes('SELECT') && sql.includes('protocol_events') && sql.includes('balance_history_rows')) {
+            return {
+              protocol_events: 1,
+              object_changes: 2,
+              archived_objects: 1,
+              loan_lifecycle_events: 1,
+              balance_history_rows: 1,
+            } as T
+          }
+
           if (sql.includes('FROM archived_objects')) {
             return (bindings[0] === 'Loan' && bindings[1] === 'LOAN1' ? archivedObjectRow() : null) as T | null
           }
@@ -442,6 +466,39 @@ describe('history API routes', () => {
         },
       ],
     })
+  })
+
+  it('returns Devnet epoch detail with scoped indexed counts', async () => {
+    const response = await app.request('/api/epochs/epoch-1', {}, createEnv(createFakeDatabase()))
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toMatchObject({
+      network: 'devnet',
+      kind: 'epoch',
+      epoch_id: 'epoch-1',
+      data: {
+        id: 'epoch-1',
+        status: 'current',
+        first_ledger_index: 100,
+        provenance: 'direct',
+      },
+      scoped_counts: {
+        protocol_events: 1,
+        object_changes: 2,
+        archived_objects: 1,
+        loan_lifecycle_events: 1,
+        balance_history_rows: 1,
+        current_objects: null,
+      },
+      provenance: {
+        epoch: 'direct',
+        scoped_counts: 'indexed',
+        current_objects: 'unavailable',
+      },
+    })
+
+    const missing = await app.request('/api/epochs/missing', {}, createEnv(createFakeDatabase()))
+    expect(missing.status).toBe(404)
   })
 
   it('exports bounded activity as NDJSON and CSV without raw payloads', async () => {

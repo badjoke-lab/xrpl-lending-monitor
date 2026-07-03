@@ -1,6 +1,7 @@
 import type {
   ArchivedObjectRecord,
   BalanceHistoryApiRecord,
+  EpochStatsRecord,
   LoanLifecycleRecord,
   NetworkEpochApiRecord,
   ObjectChangeRecord,
@@ -233,6 +234,39 @@ export function serializeEpochsResponse(epochs: NetworkEpochApiRecord[]) {
   return {
     network: 'devnet',
     data: epochs.map(serializeEpoch),
+  }
+}
+
+export function serializeEpochDetailResponse(options: {
+  epochId: string
+  epoch: NetworkEpochApiRecord | null
+  stats: EpochStatsRecord | null
+}) {
+  return {
+    network: 'devnet',
+    kind: 'epoch',
+    epoch_id: options.epochId,
+    data: options.epoch ? serializeEpoch(options.epoch) : null,
+    scoped_counts: options.stats ? {
+      protocol_events: options.stats.protocolEvents,
+      object_changes: options.stats.objectChanges,
+      archived_objects: options.stats.archivedObjects,
+      loan_lifecycle_events: options.stats.loanLifecycleEvents,
+      balance_history_rows: options.stats.balanceHistoryRows,
+      current_objects: null,
+    } : null,
+    availability: options.epoch
+      ? {
+          state: 'available',
+          reason: null,
+          current_objects: 'unavailable until a verified active snapshot is activated',
+        }
+      : { state: 'unavailable', reason: 'epoch was not found in indexed history', current_objects: 'unavailable' },
+    provenance: {
+      epoch: options.epoch ? 'direct' : 'unavailable',
+      scoped_counts: options.stats ? 'indexed' : 'unavailable',
+      current_objects: 'unavailable',
+    },
   }
 }
 

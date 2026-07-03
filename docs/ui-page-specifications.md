@@ -349,6 +349,10 @@ M5-3.
 
 Shows current and archived epochs, first and last ledger where known, reset reason, timestamps, scoped objects, activity, archives, and warnings against mixing epochs.
 
+### API dependencies
+
+`/api/epochs`, `/api/epochs/:epochId`, `/api/activity`, `/api/audit/archived`, `/api/audit/cover-loss`, `/api`, and `/methodology`.
+
 ### Milestone
 
 M5-4.
