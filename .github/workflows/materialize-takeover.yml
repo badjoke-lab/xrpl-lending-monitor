@@ -26,15 +26,16 @@ jobs:
           python3 <<'PY'
           from pathlib import Path
 
-          for line in Path('.staging/manifest.txt').read_text().splitlines():
-              if not line.strip():
-                  continue
-              target, *fragments = line.split('\t')
-              destination = Path(target)
-              destination.parent.mkdir(parents=True, exist_ok=True)
-              with destination.open('wb') as output:
-                  for fragment in fragments:
-                      output.write(Path('.staging', fragment).read_bytes())
+          for manifest_path in sorted(Path('.staging/manifests').glob('*.txt')):
+              for line in manifest_path.read_text().splitlines():
+                  if not line.strip():
+                      continue
+                  target, *fragments = line.split('\t')
+                  destination = Path(target)
+                  destination.parent.mkdir(parents=True, exist_ok=True)
+                  with destination.open('wb') as output:
+                      for fragment in fragments:
+                          output.write(Path('.staging', fragment).read_bytes())
           PY
 
       - name: Commit reconstructed sources
