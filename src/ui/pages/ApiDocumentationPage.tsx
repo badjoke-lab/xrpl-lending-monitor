@@ -25,6 +25,7 @@ const endpoints: Endpoint[] = [
   { method: 'GET', path: '/api/activity', purpose: 'Latest bounded indexed protocol-event window.' },
   { method: 'GET', path: '/api/transactions/{hash}', purpose: 'Transaction event, affected object changes, relationships, provenance, and retained raw payloads where available.' },
   { method: 'GET', path: '/api/epochs', purpose: 'Current and archived Devnet epoch records.' },
+  { method: 'GET', path: '/api/epochs/{epochId}', purpose: 'Epoch boundary metadata, epoch-scoped indexed counts, provenance, and explicit current-object unavailability.' },
   { method: 'GET', path: '/api/objects/{objectType}/{objectId}/history', purpose: 'Bounded normalized object-change history.' },
   { method: 'GET', path: '/api/loans/{loanId}/lifecycle', purpose: 'Bounded canonical Loan lifecycle sequence.' },
   { method: 'GET', path: '/api/audit/lifecycle', purpose: 'Protocol-wide bounded Loan lifecycle event explorer with event and Loan filters.' },
@@ -135,12 +136,13 @@ export function ApiDocumentationPage({ onNavigate }: ApiDocumentationPageProps) 
           <li>Loan lifecycle ordering is canonical within the collected epoch and never fills unsupported intermediate events.</li>
           <li>Archived-object routes expose final retained state and deletion evidence while explicitly separating archive facts from current state.</li>
           <li>Cover and loss history keeps each asset key separate and exposes formulas only with their indexed source fields.</li>
-          <li>Epoch records expose current and archived Devnet boundaries.</li>
+          <li>Epoch records expose current and archived Devnet boundaries and epoch-scoped indexed counts without mixing reset eras.</li>
           <li>Indexed evidence does not prove that a referenced object remains current.</li>
         </ul>
         <CodeExample>{`GET /api/activity?limit=100
 GET /api/transactions/{64-character-hash}
 GET /api/objects/Loan/{loanId}/history?limit=100
+GET /api/epochs/{epochId}
 GET /api/loans/{loanId}/lifecycle?limit=100
 GET /api/audit/lifecycle?event_type=payment&loan_id={loanId}&limit=100
 GET /api/audit/archived?object_type=Loan&q={loanId}&limit=100

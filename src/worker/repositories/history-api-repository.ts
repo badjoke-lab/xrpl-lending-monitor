@@ -142,6 +142,14 @@ export interface BalanceHistoryApiRecord {
   createdAt: string
 }
 
+export interface EpochStatsRecord {
+  protocolEvents: number
+  objectChanges: number
+  archivedObjects: number
+  loanLifecycleEvents: number
+  balanceHistoryRows: number
+}
+
 interface ProtocolEventRow {
   event_hash: string
   epoch_id: string
@@ -471,6 +479,48 @@ export async function listEpochs(db: D1Database): Promise<NetworkEpochApiRecord[
       ),
   )
   return rows.map(mapEpoch)
+}
+
+export async function getEpoch(db: D1Database, epochId: string): Promise<NetworkEpochApiRecord | null> {
+  const row = await db
+    .prepare(
+      `SELECT id, status, first_ledger_index, first_ledger_hash,
+              last_ledger_index, last_ledger_hash, started_at, ended_at,
+              reset_reason
+       FROM network_epochs
+       WHERE network = 'devnet' AND id = ?1
+       LIMIT 1`,
+    )
+    .bind(epochId)
+    .first<EpochRow>()
+  return row ? mapEpoch(row) : null
+}
+
+export async function getEpochStats(db: D1Database, epochId: string): Promise<EpochStatsRecord> {
+  const row = await db
+    .prepare(
+      `SELECT
+         (SELECT COUNT(*) FROM protocol_events WHERE network = 'devnet' AND epoch_id = ?1) AS protocol_events,
+         (SELECT COUNT(*) FROM object_changes WHERE network = 'devnet' AND epoch_id = ?1) AS object_changes,
+         (SELECT COUNT(*) FROM archived_objects WHERE network = 'devnet' AND epoch_id = ?1) AS archived_objects,
+         (SELECT COUNT(*) FROM loan_lifecycle_events WHERE network = 'devnet' AND epoch_id = ?1) AS loan_lifecycle_events,
+         (SELECT COUNT(*) FROM balance_history WHERE network = 'devnet' AND epoch_id = ?1) AS balance_history_rows`,
+    )
+    .bind(epochId)
+    .first<{
+      protocol_events: number
+      object_changes: number
+      archived_objects: number
+      loan_lifecycle_events: number
+      balance_history_rows: number
+    }>()
+  return {
+    protocolEvents: row?.protocol_events ?? 0,
+    objectChanges: row?.object_changes ?? 0,
+    archivedObjects: row?.archived_objects ?? 0,
+    loanLifecycleEvents: row?.loan_lifecycle_events ?? 0,
+    balanceHistoryRows: row?.balance_history_rows ?? 0,
+  }
 }
 
 export async function listObjectHistory(

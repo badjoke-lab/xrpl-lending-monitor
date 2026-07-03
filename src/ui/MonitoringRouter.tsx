@@ -8,6 +8,8 @@ import { ArchivedObjectDetailPage } from './pages/ArchivedObjectDetailPage'
 import { ArchivedObjectsPage } from './pages/ArchivedObjectsPage'
 import { ContactPage } from './pages/ContactPage'
 import { CoverLossAuditPage } from './pages/CoverLossAuditPage'
+import { EpochDetailPage } from './pages/EpochDetailPage'
+import { EpochsPage } from './pages/EpochsPage'
 import { LoanBrokerDetailPage } from './pages/LoanBrokerDetailPage'
 import { LoanBrokersPage } from './pages/LoanBrokersPage'
 import { LoanDetailPage } from './pages/LoanDetailPage'
@@ -66,6 +68,7 @@ export function resolveMonitoringPage({ currentPath, resources, navigate, reload
   const transaction = /^\/transactions\/([^/]+)$/.exec(currentPath)
   const account = /^\/accounts\/([^/]+)$/.exec(currentPath)
   const archivedObject = /^\/audit\/archived\/(Vault|LoanBroker|Loan)\/([^/]+)$/.exec(currentPath)
+  const epoch = /^\/epochs\/([^/]+)$/.exec(currentPath)
 
   if (currentPath === '/') return <OverviewPage resources={resources} onNavigate={navigate} onReload={reload} />
   if (currentPath === '/network-status') return <NetworkStatusPage status={resources.status} onReload={reload} />
@@ -79,6 +82,11 @@ export function resolveMonitoringPage({ currentPath, resources, navigate, reload
   if (currentPath === '/audit/lifecycle') return <LifecycleAuditPage onNavigate={navigate} />
   if (currentPath === '/audit/archived') return <ArchivedObjectsPage onNavigate={navigate} />
   if (currentPath === '/audit/cover-loss') return <CoverLossAuditPage onNavigate={navigate} />
+  if (currentPath === '/epochs') return <EpochsPage onNavigate={navigate} />
+  if (epoch?.[1]) {
+    const decodedEpochId = safeDecode(epoch[1])
+    if (decodedEpochId !== null) return <EpochDetailPage epochId={decodedEpochId} onNavigate={navigate} />
+  }
   if (archivedObject?.[1] && archivedObject[2]) {
     const decodedObjectId = safeDecode(archivedObject[2])
     if (decodedObjectId !== null) return <ArchivedObjectDetailPage objectType={archivedObject[1]} objectId={decodedObjectId} onNavigate={navigate} />

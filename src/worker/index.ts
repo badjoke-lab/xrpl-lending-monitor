@@ -12,6 +12,8 @@ import {
 } from './repositories/current-state-object-reader'
 import {
   getArchivedObject,
+  getEpoch,
+  getEpochStats,
   getTransactionDetail,
   listActivity,
   listArchivedObjects,
@@ -39,6 +41,7 @@ import {
   serializeArchivedObjectResponse,
   serializeArchivedObjectsResponse,
   serializeBalanceHistoryResponse,
+  serializeEpochDetailResponse,
   serializeEpochsResponse,
   serializeLifecycleExplorerResponse,
   serializeLoanLifecycleResponse,
@@ -306,6 +309,16 @@ app.get('/api/transactions/:hash', async (context) => {
 app.get('/api/epochs', async (context) => {
   resolveRuntimeConfig(context.env)
   return context.json(serializeEpochsResponse(await listEpochs(context.env.DB)))
+})
+
+app.get('/api/epochs/:epochId', async (context) => {
+  resolveRuntimeConfig(context.env)
+  const epochId = context.req.param('epochId')
+  if (epochId.length > MAX_QUERY_LENGTH) return invalidQueryResponse(context)
+  const epoch = await getEpoch(context.env.DB, epochId)
+  if (!epoch) return context.json(serializeEpochDetailResponse({ epochId, epoch: null, stats: null }), 404)
+  const stats = await getEpochStats(context.env.DB, epochId)
+  return context.json(serializeEpochDetailResponse({ epochId, epoch, stats }))
 })
 
 app.get('/api/objects/:objectType/:objectId/history', async (context) => {

@@ -4,9 +4,9 @@ Last updated: 2026-07-03.
 
 ## Current milestone
 
-**M1 closeout** and **M5-3 — Cover, debt, and loss audit**.
+**M1 closeout** and **M5-4 — Devnet epochs and provenance integration**.
 
-M0, M2, M3, M4-0 through M4-7, and M5-1 through M5-2 are complete. M5-3 is active. M1 still requires a complete marker-aware bootstrap, verification, activation, rollback, cleanup, and resource evidence.
+M0, M2, M3, M4-0 through M4-7, and M5-1 through M5-3 are complete. M5-4 is active. M1 still requires a complete marker-aware bootstrap, verification, activation, rollback, cleanup, and resource evidence.
 
 ## Canonical continuation point
 
@@ -29,14 +29,16 @@ Latest merged work:
 - PR #37: `Add Loan lifecycle audit`;
 - squash merge: `6e3e2af11bffdb570b675a4888ad6e4b58bb6c9b`;
 - PR #38: `Add archived object audit`;
-- squash merge: `7faf39d7217ce6e7438346e478a6416243929dd9`.
+- squash merge: `7faf39d7217ce6e7438346e478a6416243929dd9`;
+- PR #39: `Add cover debt and loss audit`;
+- squash merge: `22b7f1ea002284e6745d97ac07c4d88932691990`.
 
 Active implementation:
 
-- branch: `ui/m5-3-cover-debt-loss-audit`;
-- milestone unit: M5-3;
-- base: `main` at `7faf39d7217ce6e7438346e478a6416243929dd9`;
-- scope: asset-separated debt, maximum debt, cover available, unrealized loss, required minimum cover, and cover surplus/shortfall audit history with Broker/Vault context, source transactions, formula inputs, and browser/API regression coverage.
+- branch: `ui/m5-4-devnet-epochs-provenance`;
+- milestone unit: M5-4;
+- base: `main` at `22b7f1ea002284e6745d97ac07c4d88932691990`;
+- scope: Devnet epoch list/detail, reset-boundary metadata, epoch-scoped indexed evidence counts, current-object unavailability, provenance inspection, formula/API/methodology cross-links, and browser/API regression coverage.
 
 ## Production D1 schema
 
@@ -180,9 +182,9 @@ Local validation:
 
 PR #38 passed CI and was squash-merged at `7faf39d7217ce6e7438346e478a6416243929dd9`.
 
-## Active M5-3
+## Completed M5-3
 
-Implemented on the active branch:
+Delivered:
 
 - `GET /api/audit/cover-loss` bounded endpoint with metric, subject, and asset filters;
 - Cover & Loss audit page at `/audit/cover-loss`;
@@ -195,11 +197,32 @@ Local validation:
 
 - `pnpm install --frozen-lockfile`;
 - `pnpm check` — includes lint, type-check, unit tests with 175 passed and 3 skipped, local D1 migration replay, and production build;
-- `pnpm test:e2e` — 31 passed.
+- `pnpm test:e2e` — 31 passed;
+- CI `quality` passed.
+
+PR #39 passed CI and was squash-merged at `22b7f1ea002284e6745d97ac07c4d88932691990`.
+
+## Active M5-4
+
+Implemented on the active branch:
+
+- `GET /api/epochs/:epochId` detail endpoint with reset-boundary metadata, scoped indexed counts, and provenance;
+- Devnet Epochs page at `/epochs`;
+- epoch detail page at `/epochs/:epochId`;
+- desktop sidebar and mobile More navigation to Devnet Epochs;
+- explicit current-object unavailability before active snapshot activation;
+- Methodology, API, Activity, and Archives cross-links;
+- focused API, breadcrumb, and browser tests.
+
+Local validation:
+
+- `pnpm install --frozen-lockfile`;
+- `pnpm check` — includes lint, type-check, unit tests with 177 passed and 3 skipped, local D1 migration replay, and production build;
+- `pnpm test:e2e` — 33 passed.
 
 First incomplete action:
 
-- open PR for M5-3;
+- open PR for M5-4;
 - inspect CI and merge only after required checks pass.
 
 ## Known open questions

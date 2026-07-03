@@ -39,6 +39,7 @@ export function resolveBreadcrumbs(currentPath: string): BreadcrumbItem[] {
     { pattern: /^\/loans\/([^/]+)$/, collection: { label: 'Loans', path: '/loans' } },
     { pattern: /^\/transactions\/([^/]+)$/, collection: { label: 'Activity', path: '/activity' }, detailLabel: 'Transaction' },
     { pattern: /^\/accounts\/([^/]+)$/, collection: { label: 'Search', path: '/search' }, detailLabel: 'Account' },
+    { pattern: /^\/epochs\/([^/]+)$/, collection: { label: 'Devnet Epochs', path: '/epochs' }, detailLabel: 'Epoch' },
     {
       pattern: /^\/audit\/archived\/(Vault|LoanBroker|Loan)\/([^/]+)$/,
       collection: { label: 'Archived Objects', path: '/audit/archived' },
@@ -67,6 +68,7 @@ export function resolveBreadcrumbs(currentPath: string): BreadcrumbItem[] {
     '/audit/lifecycle': 'Lifecycle',
     '/audit/archived': 'Archived Objects',
     '/audit/cover-loss': 'Cover & Loss',
+    '/epochs': 'Devnet Epochs',
     '/api': 'API',
     '/methodology': 'Methodology',
     '/about': 'About',
