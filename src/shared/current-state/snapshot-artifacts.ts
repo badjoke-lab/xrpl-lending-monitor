@@ -56,3 +56,25 @@ function concatenate(records: readonly EncodedRecord[]): Uint8Array {
   }
   return bytes
 }
+
+function groupRecords(
+  records: readonly EncodedRecord[],
+  maxObjects: number,
+  maxBytes: number,
+): EncodedRecord[][] {
+  const groups: EncodedRecord[][] = []
+  let current: EncodedRecord[] = []
+  let currentBytes = 0
+  for (const record of records) {
+    if (record.line.byteLength > maxBytes) throw new Error(`Object ${record.id} exceeds shard limit`)
+    if (current.length > 0 && (current.length >= maxObjects || currentBytes + record.line.byteLength > maxBytes)) {
+      groups.push(current)
+      current = []
+      currentBytes = 0
+    }
+    current.push(record)
+    currentBytes += record.line.byteLength
+  }
+  if (current.length > 0) groups.push(current)
+  return groups
+}
