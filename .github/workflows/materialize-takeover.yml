@@ -23,8 +23,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          base64 --decode .staging/manifest.txt > /tmp/sources.zip
-          unzip -o /tmp/sources.zip -d .
+          base64 --decode .staging/manifest.txt > /tmp/sources.tar.xz
+          tar -xJf /tmp/sources.tar.xz -C .
 
       - name: Commit restored files
         shell: bash
