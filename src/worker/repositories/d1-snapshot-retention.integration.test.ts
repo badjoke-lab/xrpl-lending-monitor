@@ -13,11 +13,22 @@ import {
 let db: D1Database
 let disposePlatform: (() => Promise<void>) | undefined
 
+function splitMigrationStatements(sql: string): string[] {
+  return sql
+    .replace(/--.*$/gm, '')
+    .split(';')
+    .map((statement) => statement.trim())
+    .filter((statement) => statement.length > 0)
+}
+
 async function applyMigrations(database: D1Database): Promise<void> {
   const directory = resolve(process.cwd(), 'migrations')
   const files = (await readdir(directory)).filter((file) => file.endsWith('.sql')).sort()
   for (const file of files) {
-    await database.exec(await readFile(resolve(directory, file), 'utf8'))
+    const sql = await readFile(resolve(directory, file), 'utf8')
+    for (const statement of splitMigrationStatements(sql)) {
+      await database.prepare(statement).run()
+    }
   }
 }
 
