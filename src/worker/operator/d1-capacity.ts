@@ -1,0 +1,1 @@
+export const D1_CAPACITY_STOP_BYTES = 350_000_000
