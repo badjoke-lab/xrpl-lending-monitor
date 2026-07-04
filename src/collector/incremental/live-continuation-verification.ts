@@ -22,6 +22,7 @@ export interface LiveContinuationEvidence {
     count: number
     minimum: number | null
     maximum: number | null
+    discontinuities: number
   }
   objectChanges: {
     created: number
@@ -31,6 +32,8 @@ export interface LiveContinuationEvidence {
   overlayObjects: {
     upserts: number
     tombstones: number
+    createdMatches: number
+    modifiedMatches: number
   }
   protocolEvents: {
     total: number
@@ -38,6 +41,7 @@ export interface LiveContinuationEvidence {
     loanManage: number
   }
   lifecycle: {
+    total: number
     payment: number
     paid: number
     impaired: number
@@ -71,19 +75,24 @@ export interface LiveContinuationVerificationReport {
     defaulted: VerificationPath
     deletionArchive: VerificationPath
     activityHistoryBalance: VerificationPath
+    ledgerContinuity: VerificationPath
     cursorOverlay: VerificationPath
     freshness: VerificationPath
   }
 }
 
-function countPair(
+function matchedPath(
   source: number,
-  projection: number,
+  matchedProjection: number,
   missingReason: string,
   inconsistentReason: string,
 ): VerificationPath {
-  if (source === 0 && projection === 0) return { state: 'missing', reason: missingReason }
-  if (source === 0 || projection === 0) return { state: 'inconsistent', reason: inconsistentReason }
+  if (source === 0 && matchedProjection === 0) {
+    return { state: 'missing', reason: missingReason }
+  }
+  if (source === 0 || matchedProjection === 0) {
+    return { state: 'inconsistent', reason: inconsistentReason }
+  }
   return { state: 'observed', reason: 'matching live evidence observed' }
 }
 
@@ -96,21 +105,21 @@ function lifecyclePath(count: number, label: string): VerificationPath {
 export function evaluateLiveContinuationEvidence(
   evidence: LiveContinuationEvidence,
 ): LiveContinuationVerificationReport {
-  const createdCurrent = countPair(
+  const createdCurrent = matchedPath(
     evidence.objectChanges.created,
-    evidence.overlayObjects.upserts,
+    evidence.overlayObjects.createdMatches,
     'no created-object continuation evidence observed',
-    'created-object and current-overlay evidence disagree',
+    'created-object and current-overlay source evidence disagree',
   )
-  const modifiedCurrent = countPair(
+  const modifiedCurrent = matchedPath(
     evidence.objectChanges.modified,
-    evidence.overlayObjects.upserts,
+    evidence.overlayObjects.modifiedMatches,
     'no modified-object continuation evidence observed',
-    'modified-object and current-overlay evidence disagree',
+    'modified-object and current-overlay source evidence disagree',
   )
 
   const paymentLifecycle = evidence.lifecycle.payment + evidence.lifecycle.paid
-  const loanPayment = countPair(
+  const loanPayment = matchedPath(
     evidence.protocolEvents.loanPay,
     paymentLifecycle,
     'no LoanPay continuation evidence observed',
@@ -152,7 +161,7 @@ export function evaluateLiveContinuationEvidence(
   let activityHistoryBalance: VerificationPath
   if (
     evidence.protocolEvents.total === 0
-    && paymentLifecycle === 0
+    && evidence.lifecycle.total === 0
     && evidence.balanceHistory.total === 0
   ) {
     activityHistoryBalance = {
@@ -161,7 +170,7 @@ export function evaluateLiveContinuationEvidence(
     }
   } else if (
     evidence.protocolEvents.total === 0
-    || paymentLifecycle === 0
+    || evidence.lifecycle.total === 0
     || evidence.balanceHistory.total === 0
   ) {
     activityHistoryBalance = {
@@ -172,6 +181,27 @@ export function evaluateLiveContinuationEvidence(
     activityHistoryBalance = {
       state: 'observed',
       reason: 'activity, lifecycle, and balance-history evidence observed',
+    }
+  }
+
+  let ledgerContinuity: VerificationPath
+  if (evidence.processedLedgers.count === 0) {
+    ledgerContinuity = {
+      state: 'missing',
+      reason: 'no processed-ledger continuation evidence observed',
+    }
+  } else if (
+    evidence.processedLedgers.discontinuities > 0
+    || evidence.processedLedgers.maximum !== evidence.cursor.lastProcessedLedger
+  ) {
+    ledgerContinuity = {
+      state: 'inconsistent',
+      reason: 'processed-ledger sequence is discontinuous or does not reach the cursor',
+    }
+  } else {
+    ledgerContinuity = {
+      state: 'observed',
+      reason: 'processed-ledger sequence is contiguous through the cursor',
     }
   }
 
@@ -212,15 +242,24 @@ export function evaluateLiveContinuationEvidence(
     || evidence.collector.status === 'stale'
     || evidence.collector.status === 'reset_suspected'
   ) {
-    freshness = { state: 'inconsistent', reason: `collector status is ${evidence.collector.status}` }
+    freshness = {
+      state: 'inconsistent',
+      reason: `collector status is ${evidence.collector.status}`,
+    }
   } else if (
     evidence.collector.status !== 'healthy'
     || evidence.collector.lagLedgers === null
     || evidence.collector.lagLedgers !== 0
   ) {
-    freshness = { state: 'missing', reason: 'collector has not yet reached a verified fresh head' }
+    freshness = {
+      state: 'missing',
+      reason: 'collector has not yet reached a verified fresh head',
+    }
   } else {
-    freshness = { state: 'observed', reason: 'collector is healthy at zero reported lag' }
+    freshness = {
+      state: 'observed',
+      reason: 'collector is healthy at zero reported lag',
+    }
   }
 
   const paths = {
@@ -232,6 +271,7 @@ export function evaluateLiveContinuationEvidence(
     defaulted,
     deletionArchive,
     activityHistoryBalance,
+    ledgerContinuity,
     cursorOverlay,
     freshness,
   }
