@@ -19,7 +19,7 @@ jobs:
           TARGET_SHA: 2ebc9cd8623f12e2bef8eb927f8e8e6c7a45c03d
         run: |
           gh api "repos/${GITHUB_REPOSITORY}/commits/${TARGET_SHA}/check-runs" \
-            --jq '{total_count,check_runs:[.check_runs[]|{name,status,conclusion,details_url,app:.app.name,started_at,completed_at}]}' \
+            --jq '{total_count,check_runs:[.check_runs[]|{name,status,conclusion,details_url,app:.app.name,started_at,completed_at,output}]}' \
             > check-runs.json
           API="repos/${GITHUB_REPOSITORY}/contents/.github/runtime-check-runs.json"
           CONTENT=$(base64 -w0 check-runs.json)
