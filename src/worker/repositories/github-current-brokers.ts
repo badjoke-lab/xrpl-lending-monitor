@@ -36,12 +36,6 @@ function validateSnapshot(snapshot: ActiveSnapshotRecord, source: ReleaseCurrent
   ) throw new CurrentStateObjectReadError('manifest_integrity_error', 'snapshot identity mismatch')
 }
 
-function queryMatches(values: readonly string[], query: string | undefined): boolean {
-  if (!query) return true
-  const needle = query.toLowerCase()
-  return values.some((value) => value.toLowerCase().includes(needle))
-}
-
 async function objectById<T>(
   source: ReleaseCurrentStateSource,
   objectId: string,
