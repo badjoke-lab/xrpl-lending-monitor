@@ -14,6 +14,7 @@
     "build": "vite build && vite build --config vite.d1-tools.config.ts && vite build --config vite.artifact-measurement.config.ts",
     "build:d1-tools": "vite build --config vite.d1-tools.config.ts",
     "build:artifact-measurement": "vite build --config vite.artifact-measurement.config.ts",
+    "build:release-current-state": "vite build --config vite.release-current-state.config.ts",
     "preview": "vite preview --host 127.0.0.1",
     "deploy": "pnpm build && wrangler deploy",
     "lint": "eslint .",
@@ -24,6 +25,8 @@
     "db:migrate:local": "wrangler d1 migrations apply xrpl-lending-monitor --local",
     "d1:tools": "pnpm build:d1-tools && node .d1-tools-build/run-d1-current-state.mjs",
     "artifact:measure": "pnpm build:artifact-measurement && node .artifact-measurement-build/run-artifact-measurement.mjs",
+    "release-current-state:build": "pnpm build:release-current-state",
+    "release-current-state:local": "pnpm build:release-current-state && node .release-current-state-build/run-release-current-state.mjs --local",
     "types:worker": "wrangler types",
     "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm db:migrate:local && pnpm build"
   },
