@@ -1,0 +1,347 @@
+{
+  "count": 85,
+  "maxBytes": 19059446,
+  "totalBytes": 682647912,
+  "files": [
+    {
+      "name": "data-segment-00000.ndjson.gz",
+      "bytes": 18999199
+    },
+    {
+      "name": "data-segment-00001.ndjson.gz",
+      "bytes": 19029331
+    },
+    {
+      "name": "data-segment-00002.ndjson.gz",
+      "bytes": 18964810
+    },
+    {
+      "name": "data-segment-00003.ndjson.gz",
+      "bytes": 18945997
+    },
+    {
+      "name": "data-segment-00004.ndjson.gz",
+      "bytes": 18950349
+    },
+    {
+      "name": "data-segment-00005.ndjson.gz",
+      "bytes": 19051517
+    },
+    {
+      "name": "data-segment-00006.ndjson.gz",
+      "bytes": 18913488
+    },
+    {
+      "name": "data-segment-00007.ndjson.gz",
+      "bytes": 18921447
+    },
+    {
+      "name": "data-segment-00008.ndjson.gz",
+      "bytes": 18889647
+    },
+    {
+      "name": "data-segment-00009.ndjson.gz",
+      "bytes": 18867604
+    },
+    {
+      "name": "data-segment-00010.ndjson.gz",
+      "bytes": 18942622
+    },
+    {
+      "name": "data-segment-00011.ndjson.gz",
+      "bytes": 18951209
+    },
+    {
+      "name": "data-segment-00012.ndjson.gz",
+      "bytes": 19059446
+    },
+    {
+      "name": "data-segment-00013.ndjson.gz",
+      "bytes": 18865896
+    },
+    {
+      "name": "data-segment-00014.ndjson.gz",
+      "bytes": 18920849
+    },
+    {
+      "name": "data-segment-00015.ndjson.gz",
+      "bytes": 18885473
+    },
+    {
+      "name": "data-segment-00016.ndjson.gz",
+      "bytes": 18923013
+    },
+    {
+      "name": "data-segment-00017.ndjson.gz",
+      "bytes": 19008914
+    },
+    {
+      "name": "data-segment-00018.ndjson.gz",
+      "bytes": 18943752
+    },
+    {
+      "name": "data-segment-00019.ndjson.gz",
+      "bytes": 18934559
+    },
+    {
+      "name": "index-bucket-00000.ndjson.gz",
+      "bytes": 4745313
+    },
+    {
+      "name": "index-bucket-00001.ndjson.gz",
+      "bytes": 4733309
+    },
+    {
+      "name": "index-bucket-00002.ndjson.gz",
+      "bytes": 4726543
+    },
+    {
+      "name": "index-bucket-00003.ndjson.gz",
+      "bytes": 4784162
+    },
+    {
+      "name": "index-bucket-00004.ndjson.gz",
+      "bytes": 4721442
+    },
+    {
+      "name": "index-bucket-00005.ndjson.gz",
+      "bytes": 4751085
+    },
+    {
+      "name": "index-bucket-00006.ndjson.gz",
+      "bytes": 4766234
+    },
+    {
+      "name": "index-bucket-00007.ndjson.gz",
+      "bytes": 4759779
+    },
+    {
+      "name": "index-bucket-00008.ndjson.gz",
+      "bytes": 4742758
+    },
+    {
+      "name": "index-bucket-00009.ndjson.gz",
+      "bytes": 4759089
+    },
+    {
+      "name": "index-bucket-00010.ndjson.gz",
+      "bytes": 4743707
+    },
+    {
+      "name": "index-bucket-00011.ndjson.gz",
+      "bytes": 4719631
+    },
+    {
+      "name": "index-bucket-00012.ndjson.gz",
+      "bytes": 4717963
+    },
+    {
+      "name": "index-bucket-00013.ndjson.gz",
+      "bytes": 4749804
+    },
+    {
+      "name": "index-bucket-00014.ndjson.gz",
+      "bytes": 4739855
+    },
+    {
+      "name": "index-bucket-00015.ndjson.gz",
+      "bytes": 4721318
+    },
+    {
+      "name": "index-bucket-00016.ndjson.gz",
+      "bytes": 4765942
+    },
+    {
+      "name": "index-bucket-00017.ndjson.gz",
+      "bytes": 4732229
+    },
+    {
+      "name": "index-bucket-00018.ndjson.gz",
+      "bytes": 4737604
+    },
+    {
+      "name": "index-bucket-00019.ndjson.gz",
+      "bytes": 4766739
+    },
+    {
+      "name": "index-bucket-00020.ndjson.gz",
+      "bytes": 4752953
+    },
+    {
+      "name": "index-bucket-00021.ndjson.gz",
+      "bytes": 4736253
+    },
+    {
+      "name": "index-bucket-00022.ndjson.gz",
+      "bytes": 4711730
+    },
+    {
+      "name": "index-bucket-00023.ndjson.gz",
+      "bytes": 4751012
+    },
+    {
+      "name": "index-bucket-00024.ndjson.gz",
+      "bytes": 4748109
+    },
+    {
+      "name": "index-bucket-00025.ndjson.gz",
+      "bytes": 4748876
+    },
+    {
+      "name": "index-bucket-00026.ndjson.gz",
+      "bytes": 4736403
+    },
+    {
+      "name": "index-bucket-00027.ndjson.gz",
+      "bytes": 4708165
+    },
+    {
+      "name": "index-bucket-00028.ndjson.gz",
+      "bytes": 4733644
+    },
+    {
+      "name": "index-bucket-00029.ndjson.gz",
+      "bytes": 4714452
+    },
+    {
+      "name": "index-bucket-00030.ndjson.gz",
+      "bytes": 4775487
+    },
+    {
+      "name": "index-bucket-00031.ndjson.gz",
+      "bytes": 4729456
+    },
+    {
+      "name": "index-bucket-00032.ndjson.gz",
+      "bytes": 4713118
+    },
+    {
+      "name": "index-bucket-00033.ndjson.gz",
+      "bytes": 4750808
+    },
+    {
+      "name": "index-bucket-00034.ndjson.gz",
+      "bytes": 4749740
+    },
+    {
+      "name": "index-bucket-00035.ndjson.gz",
+      "bytes": 4747789
+    },
+    {
+      "name": "index-bucket-00036.ndjson.gz",
+      "bytes": 4744653
+    },
+    {
+      "name": "index-bucket-00037.ndjson.gz",
+      "bytes": 4721102
+    },
+    {
+      "name": "index-bucket-00038.ndjson.gz",
+      "bytes": 4759244
+    },
+    {
+      "name": "index-bucket-00039.ndjson.gz",
+      "bytes": 4735252
+    },
+    {
+      "name": "index-bucket-00040.ndjson.gz",
+      "bytes": 4750242
+    },
+    {
+      "name": "index-bucket-00041.ndjson.gz",
+      "bytes": 4758402
+    },
+    {
+      "name": "index-bucket-00042.ndjson.gz",
+      "bytes": 4760698
+    },
+    {
+      "name": "index-bucket-00043.ndjson.gz",
+      "bytes": 4740943
+    },
+    {
+      "name": "index-bucket-00044.ndjson.gz",
+      "bytes": 4741017
+    },
+    {
+      "name": "index-bucket-00045.ndjson.gz",
+      "bytes": 4720492
+    },
+    {
+      "name": "index-bucket-00046.ndjson.gz",
+      "bytes": 4750349
+    },
+    {
+      "name": "index-bucket-00047.ndjson.gz",
+      "bytes": 4741467
+    },
+    {
+      "name": "index-bucket-00048.ndjson.gz",
+      "bytes": 4769912
+    },
+    {
+      "name": "index-bucket-00049.ndjson.gz",
+      "bytes": 4762287
+    },
+    {
+      "name": "index-bucket-00050.ndjson.gz",
+      "bytes": 4758726
+    },
+    {
+      "name": "index-bucket-00051.ndjson.gz",
+      "bytes": 4740207
+    },
+    {
+      "name": "index-bucket-00052.ndjson.gz",
+      "bytes": 4746469
+    },
+    {
+      "name": "index-bucket-00053.ndjson.gz",
+      "bytes": 4730419
+    },
+    {
+      "name": "index-bucket-00054.ndjson.gz",
+      "bytes": 4759055
+    },
+    {
+      "name": "index-bucket-00055.ndjson.gz",
+      "bytes": 4791164
+    },
+    {
+      "name": "index-bucket-00056.ndjson.gz",
+      "bytes": 4774108
+    },
+    {
+      "name": "index-bucket-00057.ndjson.gz",
+      "bytes": 4749316
+    },
+    {
+      "name": "index-bucket-00058.ndjson.gz",
+      "bytes": 4739620
+    },
+    {
+      "name": "index-bucket-00059.ndjson.gz",
+      "bytes": 4727950
+    },
+    {
+      "name": "index-bucket-00060.ndjson.gz",
+      "bytes": 4760299
+    },
+    {
+      "name": "index-bucket-00061.ndjson.gz",
+      "bytes": 4745854
+    },
+    {
+      "name": "index-bucket-00062.ndjson.gz",
+      "bytes": 4709124
+    },
+    {
+      "name": "index-bucket-00063.ndjson.gz",
+      "bytes": 4765642
+    },
+    {
+      "name": "manifest.json",
+      "bytes": 32276
+    }
+  ]
+}
