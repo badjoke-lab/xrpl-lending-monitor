@@ -1,0 +1,44 @@
+name: Inspect complete artifact sizes
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/artifact-size-inspect-trigger]
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: current-state-release-assets
+          path: .local/current-state-release
+          run-id: 28699460881
+          github-token: ${{ github.token }}
+
+      - name: Record sizes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          find .local/current-state-release/assets -maxdepth 1 -type f -printf '%f\t%s\n' | sort > sizes.tsv
+          MAX=$(sort -t $'\t' -k2,2nr sizes.tsv | head -n1 | cut -f2)
+          TOTAL=$(awk -F '\t' '{s+=$2} END{printf "%.0f",s}' sizes.tsv)
+          COUNT=$(wc -l < sizes.tsv)
+          jq -Rn \
+            --arg maxBytes "$MAX" \
+            --arg totalBytes "$TOTAL" \
+            --arg count "$COUNT" \
+            '[inputs|split("\t")|{name:.[0],bytes:(.[1]|tonumber)}] as $files | {count:($count|tonumber),maxBytes:($maxBytes|tonumber),totalBytes:($totalBytes|tonumber),files:$files}' \
+            < sizes.tsv > artifact-sizes.json
+          API="repos/${GITHUB_REPOSITORY}/contents/.github/complete-artifact-sizes.json"
+          CONTENT=$(base64 -w0 artifact-sizes.json)
+          SHA=$(gh api "$API" --jq .sha 2>/dev/null || true)
+          if [ -n "$SHA" ]; then
+            gh api --method PUT "$API" -f message="Update complete artifact sizes" -f content="$CONTENT" -f sha="$SHA" >/dev/null
+          else
+            gh api --method PUT "$API" -f message="Create complete artifact sizes" -f content="$CONTENT" >/dev/null
+          fi
