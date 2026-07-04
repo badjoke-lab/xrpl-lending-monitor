@@ -1,0 +1,16 @@
+{
+  "vaults": {
+    "code": "200",
+    "count": 1
+  },
+  "loanBrokers": {
+    "code": "200",
+    "count": 1
+  },
+  "loans": {
+    "queryCode": "200",
+    "queryCount": 1,
+    "filterCode": "200",
+    "filterCount": 2
+  }
+}
