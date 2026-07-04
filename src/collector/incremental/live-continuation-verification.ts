@@ -96,10 +96,21 @@ function matchedPath(
   return { state: 'observed', reason: 'matching live evidence observed' }
 }
 
-function lifecyclePath(count: number, label: string): VerificationPath {
-  return count > 0
-    ? { state: 'observed', reason: `${label} lifecycle evidence observed` }
-    : { state: 'missing', reason: `${label} lifecycle evidence not yet observed` }
+function managedLifecyclePath(
+  count: number,
+  loanManageEvents: number,
+  label: string,
+): VerificationPath {
+  if (count === 0) {
+    return { state: 'missing', reason: `${label} lifecycle evidence not yet observed` }
+  }
+  if (loanManageEvents === 0) {
+    return {
+      state: 'inconsistent',
+      reason: `${label} lifecycle evidence exists without LoanManage activity evidence`,
+    }
+  }
+  return { state: 'observed', reason: `${label} lifecycle and LoanManage activity observed` }
 }
 
 export function evaluateLiveContinuationEvidence(
@@ -126,9 +137,21 @@ export function evaluateLiveContinuationEvidence(
     'LoanPay activity and lifecycle evidence disagree',
   )
 
-  const impaired = lifecyclePath(evidence.lifecycle.impaired, 'impaired')
-  const unimpaired = lifecyclePath(evidence.lifecycle.unimpaired, 'unimpaired')
-  const defaulted = lifecyclePath(evidence.lifecycle.defaulted, 'defaulted')
+  const impaired = managedLifecyclePath(
+    evidence.lifecycle.impaired,
+    evidence.protocolEvents.loanManage,
+    'impaired',
+  )
+  const unimpaired = managedLifecyclePath(
+    evidence.lifecycle.unimpaired,
+    evidence.protocolEvents.loanManage,
+    'unimpaired',
+  )
+  const defaulted = managedLifecyclePath(
+    evidence.lifecycle.defaulted,
+    evidence.protocolEvents.loanManage,
+    'defaulted',
+  )
 
   let deletionArchive: VerificationPath
   if (
