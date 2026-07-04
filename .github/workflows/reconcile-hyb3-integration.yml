@@ -1,0 +1,31 @@
+name: Reconcile HYB-3 integration history
+
+on:
+  push:
+    branches:
+      - feat/m1-hyb-2-incremental-projection
+    paths:
+      - .github/workflows/reconcile-hyb3-integration.yml
+
+permissions:
+  contents: write
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: feat/m1-hyb-2-incremental-projection
+      - name: Merge main and remove helper workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git merge --no-edit -X ours origin/main
+          git rm .github/workflows/reconcile-hyb3-integration.yml
+          git commit -m "ci: remove HYB-3 reconciliation helper"
+          git push origin HEAD:feat/m1-hyb-2-incremental-projection
