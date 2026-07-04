@@ -398,6 +398,7 @@ function createReadModelAdapter(readModel: GithubCurrentStateReadModelReader) {
 
 export interface ReleaseCurrentStateSource {
   kind: 'release'
+  db: D1Database
   readModel: GithubCurrentStateReadModelReader
   opened: {
     manifest: GithubCurrentStateReadModelReader['manifest']
@@ -427,6 +428,7 @@ export function normalizeReleaseRecord(record: ReleaseNativeDataRecord): Project
 
 export async function openConfiguredReleaseCurrentState(
   config: RuntimeConfig,
+  db: D1Database,
 ): Promise<{
   source: ReleaseCurrentStateSource
   snapshot: ActiveSnapshotRecord
@@ -447,6 +449,7 @@ export async function openConfiguredReleaseCurrentState(
     return {
       source: {
         kind: 'release',
+        db,
         readModel,
         opened: { manifest, reader },
       },
@@ -482,7 +485,7 @@ export async function resolveCurrentStateStorage(
   const releaseConfigured = Boolean(config.currentState.githubRepository)
   if (releaseConfigured) {
     try {
-      const release = await openConfiguredReleaseCurrentState(config)
+      const release = await openConfiguredReleaseCurrentState(config, db)
       if (!release) return { source: db, snapshot: null, releaseUnavailable: true }
       return { source: release.source, snapshot: release.snapshot, releaseUnavailable: false }
     } catch {
