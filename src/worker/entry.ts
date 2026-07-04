@@ -1,6 +1,9 @@
 import { runIncrementalCollectorCycle } from '../collector/incremental/collector-cycle'
 import { refreshNetworkStatus } from '../collector/network/refresh-network-status'
-import { resolveIncrementalRuntimeConfig } from '../shared/incremental-runtime-config'
+import {
+  resolveIncrementalRuntimeConfig,
+  type IncrementalRuntimeEnvironment,
+} from '../shared/incremental-runtime-config'
 import { resolveRuntimeConfig } from '../shared/runtime-config'
 import type { Bindings } from './env'
 import { app } from './index'
@@ -15,7 +18,9 @@ const worker: ExportedHandler<Bindings> = {
     await runIncrementalCollectorCycle({
       db: env.DB,
       runtimeConfig,
-      incrementalConfig: resolveIncrementalRuntimeConfig(env),
+      incrementalConfig: resolveIncrementalRuntimeConfig(
+        env as unknown as IncrementalRuntimeEnvironment,
+      ),
     })
   },
 }
