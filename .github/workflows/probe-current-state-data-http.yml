@@ -1,0 +1,45 @@
+name: Probe current-state data HTTP
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/data-http-probe-trigger]
+
+permissions:
+  contents: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe raw branch resources
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE: https://raw.githubusercontent.com/badjoke-lab/xrpl-lending-monitor/current-state-data
+          TAG: current-state-28699460881-1
+        run: |
+          jq -n '{}' > result.json
+          for SPEC in \
+            'channel:channel.json' \
+            'manifest:snapshots/current-state-28699460881-1/manifest.json' \
+            'data:snapshots/current-state-28699460881-1/data-segment-00000.ndjson.gz' \
+            'index:snapshots/current-state-28699460881-1/index-bucket-00000.ndjson.gz'; do
+            KEY=${SPEC%%:*}
+            PATH_PART=${SPEC#*:}
+            curl -L -sS -D headers.txt -o body.bin --connect-timeout 10 --max-time 180 "$BASE/$PATH_PART"
+            CODE=$(awk 'toupper($1) ~ /^HTTP\// {code=$2} END{print code}' headers.txt)
+            LENGTH=$(awk 'tolower($1)=="content-length:" {gsub("\r", "", $2); value=$2} END{print value}' headers.txt)
+            ENCODING=$(awk 'tolower($1)=="content-encoding:" {gsub("\r", "", $2); value=$2} END{print value}' headers.txt)
+            BYTES=$(wc -c < body.bin)
+            jq --arg key "$KEY" --arg code "$CODE" --arg length "$LENGTH" --arg encoding "$ENCODING" --argjson bytes "$BYTES" \
+              '.[$key]={httpCode:$code,contentLength:$length,contentEncoding:$encoding,downloadedBytes:$bytes}' result.json > next.json
+            mv next.json result.json
+          done
+          API="repos/${GITHUB_REPOSITORY}/contents/.github/data-http-probe.json"
+          CONTENT=$(base64 -w0 result.json)
+          SHA=$(gh api "$API" --jq .sha 2>/dev/null || true)
+          if [ -n "$SHA" ]; then
+            gh api --method PUT "$API" -f message="Update data HTTP probe" -f content="$CONTENT" -f sha="$SHA" >/dev/null
+          else
+            gh api --method PUT "$API" -f message="Create data HTTP probe" -f content="$CONTENT" >/dev/null
+          fi
