@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path'
 import { scanLedgerObjects, type CurrentObjectFilter, type ScannedLedgerObject } from '../src/collector/current-state/scan-ledger-objects'
 import { XrplJsonRpcClient } from '../src/collector/network/xrpl-rpc'
 import { canonicalJson, gzipDeterministic, sha256Hex, utf8 } from '../src/shared/current-state/canonical-json'
-import { releaseNativeBucket, type ReleaseNativeDataAsset, type ReleaseNativeDataRecord, type ReleaseNativeIndexAsset, type ReleaseNativeIndexRecord, type ReleaseNativeManifest } from '../src/shared/current-state/release-native-reader'
+import { releaseNativeBucket, type ReleaseNativeDataAsset, type ReleaseNativeDataRecord, type ReleaseNativeIndexAsset, type ReleaseNativeIndexRecord, type ReleaseNativeManifest, type ReleaseNativeObjectReference } from '../src/shared/current-state/release-native-reader'
 
 type ReleaseKind = 'vault' | 'loan-broker' | 'loan'
 
@@ -33,6 +33,7 @@ type Arguments = {
 
 const FILTERS: readonly CurrentObjectFilter[] = ['vault', 'loan_broker', 'loan']
 const DEFAULT_ENDPOINT = 'https://s.devnet.rippletest.net:51234'
+const DATA_ASSET_NAME = 'data-segment-00000.ndjson.gz'
 
 function argumentValue(args: readonly string[], name: string): string | null {
   const index = args.indexOf(name)
@@ -108,11 +109,8 @@ async function getValidatedLedger(endpoint: string, timeoutMs: number): Promise<
   }
 }
 
-async function writeText(path: string, value: unknown): Promise<Uint8Array> {
-  const text = `${canonicalJson(value)}\n`
-  const bytes = utf8(text)
-  await writeFile(path, text, 'utf8')
-  return bytes
+async function writeText(path: string, value: unknown): Promise<void> {
+  await writeFile(path, `${canonicalJson(value)}\n`, 'utf8')
 }
 
 async function writeGzipNdjson(path: string, records: readonly unknown[]): Promise<{
@@ -139,14 +137,10 @@ function countRecords(records: readonly ReleaseNativeDataRecord[]): Counts {
   }
 }
 
-function emptyCounts(): Counts {
-  return { vaults: 0, loanBrokers: 0, loans: 0 }
-}
-
-function reference(record: ReleaseNativeDataRecord): ReleaseNativeIndexRecord['value'] extends { reference: infer T } ? T : never {
+function reference(record: ReleaseNativeDataRecord): ReleaseNativeObjectReference {
   return {
     segmentId: record.segmentId,
-    assetName: 'data-segment-00000.ndjson.gz',
+    assetName: DATA_ASSET_NAME,
     id: record.id,
     kind: record.kind,
   }
@@ -175,27 +169,29 @@ function addAccountIndex(indexes: ReleaseNativeIndexRecord[], record: ReleaseNat
 
 function addRelationshipIndex(indexes: ReleaseNativeIndexRecord[], record: ReleaseNativeDataRecord): void {
   if (record.kind === 'loan-broker') {
+    const vaultId = id(requiredString(record.value.VaultID, 'VaultID'), 'VaultID')
     indexes.push({
       schemaVersion: 1,
       bucket: 0,
-      term: id(requiredString(record.value.VaultID, 'VaultID'), 'VaultID'),
+      term: vaultId,
       lookupKind: 'relationship',
       value: {
         relation: 'vault-loan-broker',
-        source: { id: id(requiredString(record.value.VaultID, 'VaultID'), 'VaultID'), kind: 'vault' },
+        source: { id: vaultId, kind: 'vault' },
         target: reference(record),
       },
     })
   }
   if (record.kind === 'loan') {
+    const loanBrokerId = id(requiredString(record.value.LoanBrokerID, 'LoanBrokerID'), 'LoanBrokerID')
     indexes.push({
       schemaVersion: 1,
       bucket: 0,
-      term: id(requiredString(record.value.LoanBrokerID, 'LoanBrokerID'), 'LoanBrokerID'),
+      term: loanBrokerId,
       lookupKind: 'relationship',
       value: {
         relation: 'loan-broker-loan',
-        source: { id: id(requiredString(record.value.LoanBrokerID, 'LoanBrokerID'), 'LoanBrokerID'), kind: 'loan-broker' },
+        source: { id: loanBrokerId, kind: 'loan-broker' },
         target: reference(record),
       },
     })
@@ -268,10 +264,9 @@ async function main(): Promise<void> {
 
   const materialized = await makeDataRecords(args, ledger)
   const dataCounts = countRecords(materialized.records)
-  const dataAssetName = 'data-segment-00000.ndjson.gz'
-  const dataStats = await writeGzipNdjson(join(assetsDir, dataAssetName), materialized.records)
+  const dataStats = await writeGzipNdjson(join(assetsDir, DATA_ASSET_NAME), materialized.records)
   const dataAsset: ReleaseNativeDataAsset = {
-    assetName: dataAssetName,
+    assetName: DATA_ASSET_NAME,
     segmentId: 'segment-00000',
     sha256: dataStats.sha256,
     compressedBytes: dataStats.compressedBytes,
