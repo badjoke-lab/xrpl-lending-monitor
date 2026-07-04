@@ -27,12 +27,9 @@ export function listCurrentVaults(
   snapshot: ActiveSnapshotRecord,
   options: ListCurrentVaultsOptions,
 ): Promise<ListCurrentVaultsResult> {
-  const reader = isReleaseCurrentStateSource(storage)
-    ? listGithubVaults
-    : (target: CurrentStateStorage, active: ActiveSnapshotRecord, query: ListCurrentVaultsOptions) => (
-        listStoredCurrentVaults(database(target), active, query)
-      )
-  return reader(storage, snapshot, options)
+  return isReleaseCurrentStateSource(storage)
+    ? listGithubVaults(storage, snapshot, options)
+    : listStoredCurrentVaults(database(storage), snapshot, options)
 }
 
 export function getCurrentVaultById(
@@ -40,7 +37,7 @@ export function getCurrentVaultById(
   snapshot: ActiveSnapshotRecord,
   vaultId: string,
 ) {
-  return getStoredCurrentVaultById(database(storage), snapshot, vaultId)
+  return isReleaseCurrentStateSource(storage)
+    ? getGithubVaultById(storage, snapshot, vaultId)
+    : getStoredCurrentVaultById(database(storage), snapshot, vaultId)
 }
-
-void getGithubVaultById
