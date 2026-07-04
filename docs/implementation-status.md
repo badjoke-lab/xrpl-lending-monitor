@@ -4,7 +4,7 @@ Last updated: 2026-07-05.
 
 ## Current phase
 
-M1 incremental continuation is active. M1-HYB-6 guarded catch-up handover implementation is ready and green. The actual production catch-up execution has not started. M5-5 and M6 remain gated behind M1 exit.
+M1 incremental continuation is active. HYB-3 through HYB-6 are integrated into `main`. M1-HYB-7 live continuation verification tooling is implemented on the active branch, but real live-path evidence has not yet been collected. Production catch-up has not started. M5-5 and M6 remain gated behind M1 exit.
 
 ## Verified base
 
@@ -35,44 +35,43 @@ The implemented path now includes:
 - dry-run inspection, exact replay/no-op handling, and progressed-state no-op handling;
 - pre/post sync, overlay, history, and epoch guards around the handover batch;
 - fail-closed rejection for reset suspicion, unavailable network state, existing conflicting cursor/history/overlay state, and epoch mismatch;
-- scheduled-path gating behind an explicit catch-up initialization flag that defaults to disabled.
+- scheduled-path gating behind an explicit catch-up initialization flag that defaults to disabled;
+- read-only live continuation verification for created and modified current objects, Loan payments, impairment, unimpairment, default, deletion/archive consistency, activity/lifecycle/balance evidence, ledger continuity, cursor/overlay agreement, and freshness.
 
 Mainnet remains disabled.
 
-## HYB-6 readiness
+## HYB-7 verification semantics
 
-The guarded handover implementation is validated by lint, type-check, unit tests, local D1 migrations, application build, browser smoke test, and release-native checks.
+The verifier exposes each required live path as `observed`, `missing`, or `inconsistent`.
 
-The implementation is ready to:
+- zero evidence remains `missing` and never passes by default;
+- contradictory current/history evidence is `inconsistent`;
+- the overall report passes only when every required path is `observed`;
+- processed-ledger gaps or parent-hash discontinuities fail continuity verification;
+- archive and tombstone evidence is checked in both directions;
+- cursor and overlay watermark must agree;
+- freshness passes only at healthy zero reported lag.
 
-1. inspect the remote Devnet sync, epoch, overlay, and processed-ledger state;
-2. dry-run the verified-base handover decision;
-3. refuse any conflicting existing state;
-4. initialize the sync cursor and overlay watermark at the verified base ledger in one guarded D1 batch;
-5. preserve the latest observed validated head;
-6. allow the bounded scheduled collector to continue from base ledger plus one;
-7. become a safe no-op after successful initialization or later aligned catch-up progress.
+The verification endpoint is read-only. It does not create live evidence or infer success from the target schedule.
 
 ## Active unit
 
-M1-HYB-6 production execution and verification remains active.
+HYB-6 production execution remains blocked on a verified remote execution path. HYB-7 verification tooling is ready for real evidence once catch-up starts.
 
 ## Next order
 
-1. Complete HYB-6 integration into `main`.
-2. Deploy the merged migrations and Worker code through a verified remote execution path.
-3. Inspect remote Devnet state and run the guarded handover dry-run.
-4. Execute the guarded handover only if the remote evidence matches the fresh-initialization or aligned-replay contract.
-5. Start bounded catch-up from ledger `3371676`.
-6. Verify real Devnet created, modified, paid, impaired, defaulted, and deleted objects.
-7. Complete continuous-monitoring verification and M1 exit review.
-8. Complete M5-5, then begin M6 hardening and multi-day Devnet soak.
+1. Establish a verified remote deployment and D1 execution path.
+2. Inspect remote Devnet state and run the guarded handover dry-run.
+3. Execute the guarded handover only if remote evidence matches the initialization contract.
+4. Start bounded catch-up from ledger `3371676`.
+5. Collect and verify real created, modified, payment, state-transition, deletion, archive, balance-history, continuity, and freshness evidence.
+6. Complete M1 exit review.
+7. Complete M5-5, then begin M6 hardening and multi-day Devnet soak.
 
 ## Remaining blockers
 
-- HYB-6 integration into `main` is not yet complete.
-- Remote migrations and Worker deployment for the catch-up path are not yet verified.
+- Remote migration and Worker deployment for the catch-up path are not yet verified.
 - Production catch-up has not started.
-- Continuous Devnet monitoring verification is not complete.
+- Real HYB-7 live-path evidence is not yet complete.
 - M1 exit reconciliation evidence is incomplete.
 - M5-5 and M6 remain incomplete.
