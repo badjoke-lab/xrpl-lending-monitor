@@ -9,6 +9,36 @@ function diagnosticMessage(error: unknown): string {
   return error.message.slice(0, 300)
 }
 
+async function probeKind(
+  reader: NonNullable<Awaited<ReturnType<typeof openConfiguredReleaseCurrentState>>>['source']['opened']['reader'],
+  kind: 'vault' | 'loan-broker' | 'loan',
+) {
+  const first = await reader.listObjects(kind, {
+    limit: 2,
+    direction: 'asc',
+    maxAssetReads: 4,
+  })
+  const firstId = first.items[0]?.id ?? null
+  const detail = firstId
+    ? await reader.getObject(firstId, { maxAssetReads: 8 })
+    : null
+  const second = first.nextCursor
+    ? await reader.listObjects(kind, {
+        limit: 2,
+        cursor: first.nextCursor,
+        direction: 'asc',
+        maxAssetReads: 4,
+      })
+    : null
+  return {
+    first_count: first.items.length,
+    first_id: firstId,
+    detail_found: detail?.item !== null,
+    next_cursor: Boolean(first.nextCursor),
+    second_count: second?.items.length ?? 0,
+  }
+}
+
 export function registerCurrentStateDiagnosticRoute(app: Hono<{ Bindings: Bindings }>): void {
   app.get('/api/internal/current-state-diagnostic', async (context) => {
     const config = resolveRuntimeConfig(context.env)
@@ -21,9 +51,12 @@ export function registerCurrentStateDiagnosticRoute(app: Hono<{ Bindings: Bindin
           code: 'release_source_not_configured',
         })
       }
+      const vaults = await probeKind(opened.source.opened.reader, 'vault')
+      const loanBrokers = await probeKind(opened.source.opened.reader, 'loan-broker')
+      const loans = await probeKind(opened.source.opened.reader, 'loan')
       return context.json({
         ok: true,
-        stage: 'opened',
+        stage: 'read_model_navigation',
         snapshot_id: opened.snapshot.id,
         ledger_index: opened.snapshot.ledgerIndex,
         counts: {
@@ -31,12 +64,17 @@ export function registerCurrentStateDiagnosticRoute(app: Hono<{ Bindings: Bindin
           loan_brokers: opened.snapshot.loanBrokerCount,
           loans: opened.snapshot.loanCount,
         },
+        probes: {
+          vaults,
+          loan_brokers: loanBrokers,
+          loans,
+        },
       })
     } catch (error) {
       return context.json({
         ok: false,
-        stage: 'open_release_snapshot',
-        code: 'open_failed',
+        stage: 'read_model_navigation',
+        code: 'probe_failed',
         message: diagnosticMessage(error),
       })
     }
