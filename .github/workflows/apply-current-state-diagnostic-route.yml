@@ -1,0 +1,45 @@
+name: Apply current-state diagnostic route
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/current-state-diagnostic-route-trigger]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Register diagnostic route
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('src/worker/index.ts')
+          text = path.read_text()
+          import_anchor = "import { registerCurrentLoanBrokerRoutes } from './routes/current-loan-brokers'"
+          import_line = "import { registerCurrentStateDiagnosticRoute } from './routes/current-state-diagnostic'"
+          if import_line not in text:
+              if text.count(import_anchor) != 1:
+                  raise SystemExit('diagnostic import anchor mismatch')
+              text = text.replace(import_anchor, import_anchor + '\n' + import_line)
+          register_anchor = 'registerCurrentLoanBrokerRoutes(app)'
+          register_line = 'registerCurrentStateDiagnosticRoute(app)'
+          if register_line not in text:
+              if text.count(register_anchor) != 1:
+                  raise SystemExit('diagnostic registration anchor mismatch')
+              text = text.replace(register_anchor, register_anchor + '\n' + register_line)
+          path.write_text(text)
+          PY
+
+      - name: Commit route registration
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/worker/index.ts
+          git diff --cached --check
+          git commit -m "Register current-state diagnostic route"
+          git push origin HEAD:main
