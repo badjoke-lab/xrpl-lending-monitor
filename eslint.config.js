@@ -18,13 +18,19 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
+    files: ['**/*.{ts,tsx}'],
+    rules: {
+      'no-undef': 'off',
+    },
+  },
+  {
     files: ['src/ui/**/*.{ts,tsx}', 'tests/e2e/**/*.ts'],
     languageOptions: {
       globals: globals.browser,
     },
   },
   {
-    files: ['src/worker/**/*.ts'],
+    files: ['src/worker/**/*.ts', 'src/shared/current-state/**/*.{ts,tsx}'],
     languageOptions: {
       globals: globals.worker,
     },

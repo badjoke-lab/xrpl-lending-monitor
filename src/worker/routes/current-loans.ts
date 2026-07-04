@@ -1,9 +1,8 @@
 import type { Hono } from 'hono'
 
-import { resolveRuntimeConfig } from '../../shared/runtime-config'
 import type { LoanOnLedgerStatus } from '../../domain/lending/current-projections'
+import { resolveRuntimeConfig } from '../../shared/runtime-config'
 import type { Bindings } from '../env'
-import { getActiveSnapshot } from '../repositories/core-api-repository'
 import {
   getCurrentLoanById,
   listCurrentLoans,
@@ -12,6 +11,7 @@ import {
 } from '../repositories/current-state-loan-reader'
 import { CurrentStateObjectReadError } from '../repositories/current-state-object-reader'
 import { getCurrentEpoch } from '../repositories/network-status-repository'
+import { resolveCurrentStateStorage } from '../repositories/release-current-state'
 import {
   serializeUnavailableEntityCollection,
   serializeUnavailableEntityDetail,
@@ -77,7 +77,7 @@ function publicReadError(error: CurrentStateObjectReadError) {
 
 export function registerCurrentLoanRoutes(app: Hono<{ Bindings: Bindings }>): void {
   app.get('/api/loans', async (context) => {
-    resolveRuntimeConfig(context.env)
+    const config = resolveRuntimeConfig(context.env)
     const limit = parseLimit(context.req.query('limit'))
     if (limit === null) {
       return context.json(
@@ -121,10 +121,11 @@ export function registerCurrentLoanRoutes(app: Hono<{ Bindings: Bindings }>): vo
       )
     }
 
-    const [epoch, snapshot] = await Promise.all([
+    const [epoch, currentState] = await Promise.all([
       getCurrentEpoch(context.env.DB),
-      getActiveSnapshot(context.env.DB),
+      resolveCurrentStateStorage(config, context.env.DB),
     ])
+    const snapshot = currentState.snapshot
     if (!snapshot) {
       return context.json(
         serializeUnavailableEntityCollection({
@@ -137,7 +138,7 @@ export function registerCurrentLoanRoutes(app: Hono<{ Bindings: Bindings }>): vo
     }
 
     try {
-      const result = await listCurrentLoans(context.env.DB, snapshot, {
+      const result = await listCurrentLoans(currentState.source, snapshot, {
         limit,
         sort,
         cursor,
@@ -168,7 +169,7 @@ export function registerCurrentLoanRoutes(app: Hono<{ Bindings: Bindings }>): vo
   })
 
   app.get('/api/loans/:loanId', async (context) => {
-    resolveRuntimeConfig(context.env)
+    const config = resolveRuntimeConfig(context.env)
     const loanId = context.req.param('loanId').toUpperCase()
     if (!/^[A-F0-9]{64}$/.test(loanId)) {
       return context.json(
@@ -177,10 +178,11 @@ export function registerCurrentLoanRoutes(app: Hono<{ Bindings: Bindings }>): vo
       )
     }
 
-    const [epoch, snapshot] = await Promise.all([
+    const [epoch, currentState] = await Promise.all([
       getCurrentEpoch(context.env.DB),
-      getActiveSnapshot(context.env.DB),
+      resolveCurrentStateStorage(config, context.env.DB),
     ])
+    const snapshot = currentState.snapshot
     if (!snapshot) {
       return context.json(
         serializeUnavailableEntityDetail({ kind: 'loan', epoch, snapshot }),
@@ -189,7 +191,7 @@ export function registerCurrentLoanRoutes(app: Hono<{ Bindings: Bindings }>): vo
 
     try {
       const record = await getCurrentLoanById(
-        context.env.DB,
+        currentState.source,
         snapshot,
         loanId,
         currentRippleTime(),
