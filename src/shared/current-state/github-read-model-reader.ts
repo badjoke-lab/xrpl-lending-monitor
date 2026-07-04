@@ -46,13 +46,6 @@ interface ReadModelChannel {
   updatedAt: string
 }
 
-interface ReadModelPage<T> {
-  schemaVersion: 1
-  kind: ReadModelKind
-  page: number
-  records: T[]
-}
-
 interface LookupReference {
   id: string
   kind: ReadModelKind
@@ -136,7 +129,7 @@ function parseChannel(value: unknown): ReadModelChannel {
   const source = record(value, 'channel')
   const active = record(source.active, 'channel.active')
   if (source.schemaVersion !== 1 || active.manifestPath !== 'read-model/manifest.json') throw new Error('Read-model channel schema is invalid')
-  const channel: ReadModelChannel = {
+  return {
     schemaVersion: 1,
     active: {
       dataCommitSha: commitSha(active.dataCommitSha),
@@ -147,7 +140,6 @@ function parseChannel(value: unknown): ReadModelChannel {
     },
     updatedAt: text(source.updatedAt, 'channel.updatedAt'),
   }
-  return channel
 }
 
 function parseManifest(value: unknown): CurrentStateReadModelManifest {
@@ -267,11 +259,18 @@ export class GithubCurrentStateReadModelReader {
     assertAllowedReleaseResponseOrigin(manifestResponse.url)
     const manifestBytes = new Uint8Array(await manifestResponse.arrayBuffer())
     if (manifestBytes.byteLength > MAX_JSON_BYTES) throw new Error('Read-model manifest exceeds size limit')
-    if (await sha256Hex(manifestBytes) !== channel.active.manifestSha256) throw new Error('Read-model manifest digest mismatch')
-    const manifest = parseManifest(JSON.parse(new TextDecoder().decode(manifestBytes)))
+    const manifestText = new TextDecoder().decode(manifestBytes)
+    const manifest = parseManifest(JSON.parse(manifestText))
+    const digestPayload = manifestText.replace(
+      `"manifestSha256":"${manifest.manifestSha256}"`,
+      '"manifestSha256":null',
+    )
+    const semanticDigest = await sha256Hex(digestPayload)
+    if (semanticDigest !== channel.active.manifestSha256 || manifest.manifestSha256 !== semanticDigest) {
+      throw new Error('Read-model manifest digest mismatch')
+    }
     if (
-      manifest.manifestSha256 !== channel.active.manifestSha256
-      || manifest.releaseTag !== channel.active.releaseTag
+      manifest.releaseTag !== channel.active.releaseTag
       || manifest.snapshotId !== channel.active.snapshotId
     ) throw new Error('Read-model channel and manifest identity mismatch')
     return new GithubCurrentStateReadModelReader({
