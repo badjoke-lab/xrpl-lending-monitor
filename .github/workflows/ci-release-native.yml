@@ -35,7 +35,19 @@ jobs:
         with:
           name: release-native-lint-log
           path: lint.log
-      - run: pnpm typecheck
+      - name: Type-check
+        run: |
+          set +e
+          pnpm typecheck > typecheck.log 2>&1
+          status=$?
+          tail -n 200 typecheck.log
+          exit $status
+      - name: Upload typecheck log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-native-typecheck-log
+          path: typecheck.log
       - run: pnpm test
       - run: pnpm db:migrate:local
       - run: pnpm build
