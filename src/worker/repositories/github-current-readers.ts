@@ -42,13 +42,13 @@ function vaultMatches(record: ReleaseNativeDataRecord, options: ListCurrentVault
     && (options.hasLoss === undefined || (vault.lossUnrealized !== '0') === options.hasLoss)
 }
 
-function publicReadError(error: unknown): CurrentStateObjectReadError {
+function publicReadError(error: unknown, hasCursor: boolean): CurrentStateObjectReadError {
   if (error instanceof CurrentStateObjectReadError) return error
   const message = error instanceof Error ? error.message : 'read-model current-state read failed'
-  return new CurrentStateObjectReadError(
-    message.toLowerCase().includes('cursor') ? 'invalid_cursor' : 'manifest_integrity_error',
-    message,
-  )
+  const code = hasCursor || message.toLowerCase().includes('cursor')
+    ? 'invalid_cursor'
+    : 'manifest_integrity_error'
+  return new CurrentStateObjectReadError(code, message)
 }
 
 export async function listGithubVaults(
@@ -72,7 +72,7 @@ export async function listGithubVaults(
       objectsExamined: result.items.length,
     }
   } catch (error) {
-    throw publicReadError(error)
+    throw publicReadError(error, options.cursor !== undefined)
   }
 }
 
@@ -90,6 +90,6 @@ export async function getGithubVaultById(
     if (found.item.kind !== 'vault') throw new CurrentStateObjectReadError('manifest_integrity_error', 'object kind mismatch')
     return normalizeReleaseRecord(found.item) as VaultCurrentProjection
   } catch (error) {
-    throw publicReadError(error)
+    throw publicReadError(error, false)
   }
 }
