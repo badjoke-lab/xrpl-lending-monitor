@@ -1,0 +1,38 @@
+name: Probe Worker host
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/worker-host-probe-trigger]
+
+permissions:
+  contents: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe candidate hosts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          : > results.tsv
+          for HOST in \
+            xrpl-lending-monitor.badjoke-lab.workers.dev \
+            xrpl-lending-monitor.badjoke.workers.dev \
+            xrpl-lending-monitor.sohachi.workers.dev \
+            xrpl-lending-monitor.sohachiz.workers.dev; do
+            DNS=$(getent ahosts "$HOST" | head -n1 | awk '{print $1}' || true)
+            CODE=$(curl -L -sS -o /tmp/body -w '%{http_code}' --connect-timeout 5 --max-time 15 "https://${HOST}/api/vaults?limit=1" || true)
+            BYTES=$(wc -c < /tmp/body 2>/dev/null || echo 0)
+            printf '%s\t%s\t%s\t%s\n' "$HOST" "$DNS" "$CODE" "$BYTES" >> results.tsv
+          done
+          jq -Rn '[inputs|split("\t")|{host:.[0],address:.[1],httpCode:.[2],responseBytes:(.[3]|tonumber)}]' < results.tsv > worker-host-probe.json
+          API="repos/${GITHUB_REPOSITORY}/contents/.github/worker-host-probe.json"
+          CONTENT=$(base64 -w0 worker-host-probe.json)
+          SHA=$(gh api "$API" --jq .sha 2>/dev/null || true)
+          if [ -n "$SHA" ]; then
+            gh api --method PUT "$API" -f message="Update Worker host probe" -f content="$CONTENT" -f sha="$SHA" >/dev/null
+          else
+            gh api --method PUT "$API" -f message="Create Worker host probe" -f content="$CONTENT" >/dev/null
+          fi
