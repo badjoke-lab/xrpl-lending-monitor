@@ -1,23 +1,11 @@
-import {
-  normalizeLoan,
-  normalizeLoanBroker,
-  normalizeVault,
-} from '../../collector/current-state/normalize-current-objects'
-import type { ScannedLedgerObject } from '../../collector/current-state/scan-ledger-objects'
-import type {
-  LoanBrokerCurrentProjection,
-  LoanCurrentProjection,
-  VaultCurrentProjection,
-} from '../../domain/lending/current-projections'
-import type { ReleaseNativeDataRecord } from '../../shared/current-state/release-native-reader'
-import { openReleaseSnapshotReader, type ReleaseSnapshotReader } from '../../shared/current-state/release-reader'
+import { GithubCurrentStateReadModelReader } from '../../shared/current-state/github-read-model-reader'
 import type { RuntimeConfig } from '../../shared/runtime-config'
 import { getActiveSnapshot, type ActiveSnapshotRecord } from './core-api-repository'
 import { CurrentStateObjectReadError } from './current-state-read-error'
 
 export interface ReleaseCurrentStateSource {
   kind: 'release'
-  opened: ReleaseSnapshotReader
+  readModel: GithubCurrentStateReadModelReader
 }
 
 export type CurrentStateStorage = D1Database | ReleaseCurrentStateSource
@@ -39,40 +27,40 @@ export async function openConfiguredReleaseCurrentState(
   snapshot: ActiveSnapshotRecord
 } | null> {
   if (!config.currentState.githubRepository) return null
-  const cache = typeof caches === 'undefined' ? undefined : await caches.open('current-state-release')
   try {
-    const opened = await openReleaseSnapshotReader({
+    const readModel = await GithubCurrentStateReadModelReader.open({
       githubRepository: config.currentState.githubRepository,
       githubBranch: 'current-state-data',
-      channelTag: config.currentState.releaseChannelTag,
-      cache,
-      maxAssetBytes: config.currentState.maxAssetBytes,
-      maxDecompressedBytes: config.currentState.maxDecompressedBytes,
     })
-    const manifest = opened.manifest
+    const manifest = readModel.manifest
+    const objectCount = manifest.counts.vaults + manifest.counts.loanBrokers + manifest.counts.loans
+    const shardCount = manifest.pageCounts.vaults
+      + manifest.pageCounts.loanBrokers
+      + manifest.pageCounts.loans
+      + 16 ** manifest.lookupPrefixLength
     return {
-      source: { kind: 'release', opened },
+      source: { kind: 'release', readModel },
       snapshot: {
         id: manifest.snapshotId,
         epochId: manifest.epochId,
         ledgerIndex: manifest.ledgerIndex,
         ledgerHash: manifest.ledgerHash,
-        objectPrefix: '',
-        manifestKey: opened.channel.active?.manifestAssetName ?? null,
+        objectPrefix: 'read-model/',
+        manifestKey: 'read-model/manifest.json',
         manifestSha256: manifest.manifestSha256,
         vaultCount: manifest.counts.vaults,
         loanBrokerCount: manifest.counts.loanBrokers,
         loanCount: manifest.counts.loans,
-        objectCount: manifest.relevantObjectCount,
-        shardCount: manifest.dataAssets.length + manifest.indexAssets.length,
-        compressedBytes: manifest.totals.dataCompressedBytes + manifest.totals.indexCompressedBytes,
-        completedAt: opened.channel.updatedAt,
+        objectCount,
+        shardCount,
+        compressedBytes: 0,
+        completedAt: readModel.updatedAt,
       },
     }
   } catch (error) {
     throw new CurrentStateObjectReadError(
       'manifest_integrity_error',
-      error instanceof Error ? error.message : 'release current-state source is invalid',
+      error instanceof Error ? error.message : 'read-model current-state source is invalid',
     )
   }
 }
@@ -96,13 +84,4 @@ export async function resolveCurrentStateStorage(
     snapshot: await getActiveSnapshot(db),
     releaseUnavailable: false,
   }
-}
-
-export function normalizeReleaseRecord(record: ReleaseNativeDataRecord): (
-  VaultCurrentProjection | LoanBrokerCurrentProjection | LoanCurrentProjection
-) {
-  const value = record.value as ScannedLedgerObject
-  if (record.kind === 'vault') return normalizeVault(value)
-  if (record.kind === 'loan-broker') return normalizeLoanBroker(value)
-  return normalizeLoan(value)
 }
