@@ -1,4 +1,4 @@
-import type { CatchUpBaseIdentity } from '../worker/operator/catch-up-initialization-plan'
+import type { CatchUpBaseIdentity } from './catch-up-base-identity'
 
 export interface CatchUpRuntimeEnvironment {
   CATCH_UP_INITIALIZATION_ENABLED?: string
