@@ -10,7 +10,7 @@ on:
       page_limit:
         description: Maximum ledger_data pages per object type
         required: false
-        default: '500'
+        default: '5000'
       object_limit_per_page:
         description: ledger_data object limit per page
         required: false
@@ -47,11 +47,11 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 60
     env:
       GH_TOKEN: ${{ github.token }}
       ENDPOINT: ${{ github.event.inputs.endpoint || 'https://s.devnet.rippletest.net:51234' }}
-      PAGE_LIMIT: ${{ github.event.inputs.page_limit || '500' }}
+      PAGE_LIMIT: ${{ github.event.inputs.page_limit || '5000' }}
       OBJECT_LIMIT_PER_PAGE: ${{ github.event.inputs.object_limit_per_page || '2048' }}
       INDEX_BUCKETS: ${{ github.event.inputs.index_buckets || '16' }}
     steps:
