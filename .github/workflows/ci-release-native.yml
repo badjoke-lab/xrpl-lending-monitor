@@ -22,4 +22,20 @@ jobs:
           node-version: 24.18.0
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm check
+      - name: Lint
+        run: |
+          set +e
+          pnpm lint > lint.log 2>&1
+          status=$?
+          tail -n 200 lint.log
+          exit $status
+      - name: Upload lint log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-native-lint-log
+          path: lint.log
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm db:migrate:local
+      - run: pnpm build
