@@ -1,0 +1,37 @@
+name: Inspect read-model runs
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/current-state-ops-inspect-trigger]
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Inspect read-model workflows
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          jq -n '{}' > result.json
+          for SPEC in \
+            'publish:publish-current-state-read-model.yml' \
+            'digest:apply-read-model-manifest-digest-fix.yml'; do
+            KEY=${SPEC%%:*}
+            FILE=${SPEC#*:}
+            RUNS=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/${FILE}/runs?per_page=5" --jq '[.workflow_runs[]|{id,status,conclusion,head_sha,created_at,updated_at,html_url}]')
+            jq --arg key "$KEY" --argjson runs "$RUNS" '.[$key]=$runs' result.json > next.json
+            mv next.json result.json
+          done
+          API="repos/${GITHUB_REPOSITORY}/contents/.github/read-model-runs.json"
+          CONTENT=$(base64 -w0 result.json)
+          SHA=$(gh api "$API" --jq .sha 2>/dev/null || true)
+          if [ -n "$SHA" ]; then
+            gh api --method PUT "$API" -f message="Update read-model run list" -f content="$CONTENT" -f sha="$SHA" >/dev/null
+          else
+            gh api --method PUT "$API" -f message="Create read-model run list" -f content="$CONTENT" >/dev/null
+          fi
