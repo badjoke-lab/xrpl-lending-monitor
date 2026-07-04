@@ -24,7 +24,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['src/worker/**/*.ts'],
+    files: ['src/worker/**/*.ts', 'src/shared/current-state/**/*.{ts,tsx}'],
     languageOptions: {
       globals: globals.worker,
     },
