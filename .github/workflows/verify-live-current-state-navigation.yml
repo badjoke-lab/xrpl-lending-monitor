@@ -1,0 +1,48 @@
+name: Verify live current-state navigation
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/live-api-navigation-trigger]
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify details and cursors
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ORIGIN: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+        run: |
+          set -euo pipefail
+          jq -n '{}' > result.json
+          for SPEC in 'vaults:vaults' 'loanBrokers:loan-brokers' 'loans:loans'; do
+            KEY=${SPEC%%:*}
+            PATH_PART=${SPEC#*:}
+            curl -fsS "$ORIGIN/api/$PATH_PART?limit=2" -o list.json
+            ID=$(jq -r '.data[0].id' list.json)
+            CURSOR=$(jq -r '.page.next_cursor // ""' list.json)
+            SNAPSHOT=$(jq -r '.snapshot.id' list.json)
+            DETAIL=$(curl -sS -o detail.json -w '%{http_code}' "$ORIGIN/api/$PATH_PART/$ID")
+            PAGE2=$(curl -sS -G -o page2.json -w '%{http_code}' "$ORIGIN/api/$PATH_PART" --data-urlencode 'limit=2' --data-urlencode "cursor=$CURSOR")
+            COUNT2=$(jq '.data|length' page2.json)
+            jq --arg key "$KEY" --arg id "$ID" --arg snapshot "$SNAPSHOT" --arg detail "$DETAIL" --arg page2 "$PAGE2" --argjson count2 "$COUNT2" '.[$key]={id:$id,snapshot:$snapshot,detailCode:$detail,page2Code:$page2,page2Count:$count2}' result.json > next.json
+            mv next.json result.json
+            test "$DETAIL" = 200
+            test "$PAGE2" = 200
+          done
+          INVALID=$(curl -sS -G -o invalid.json -w '%{http_code}' "$ORIGIN/api/vaults" --data-urlencode 'cursor=deadbeef')
+          jq --arg invalid "$INVALID" '.invalidCursorCode=$invalid' result.json > next.json
+          mv next.json result.json
+          test "$INVALID" = 400
+          API="repos/${GITHUB_REPOSITORY}/contents/.github/live-api-navigation-results.json"
+          CONTENT=$(base64 -w0 result.json)
+          SHA=$(gh api "$API" --jq .sha 2>/dev/null || true)
+          if [ -n "$SHA" ]; then
+            gh api --method PUT "$API" -f message="Update live API navigation verification" -f content="$CONTENT" -f sha="$SHA" >/dev/null
+          else
+            gh api --method PUT "$API" -f message="Create live API navigation verification" -f content="$CONTENT" >/dev/null
+          fi
