@@ -1,0 +1,9 @@
+{
+  "runId": "28700774046",
+  "outcome": "success",
+  "complete": false,
+  "sourcePages": 2,
+  "dataAssets": 20,
+  "indexAssets": 64,
+  "stderrTail": "Materializing index bucket 35/64.\nMaterializing index bucket 36/64.\nMaterializing index bucket 37/64.\nMaterializing index bucket 38/64.\nMaterializing index bucket 39/64.\nMaterializing index bucket 40/64.\nMaterializing index bucket 41/64.\nMaterializing index bucket 42/64.\nMaterializing index bucket 43/64.\nMaterializing index bucket 44/64.\nMaterializing index bucket 45/64.\nMaterializing index bucket 46/64.\nMaterializing index bucket 47/64.\nMaterializing index bucket 48/64.\nMaterializing index bucket 49/64.\nMaterializing index bucket 50/64.\nMaterializing index bucket 51/64.\nMaterializing index bucket 52/64.\nMaterializing index bucket 53/64.\nMaterializing index bucket 54/64.\nMaterializing index bucket 55/64.\nMaterializing index bucket 56/64.\nMaterializing index bucket 57/64.\nMaterializing index bucket 58/64.\nMaterializing index bucket 59/64.\nMaterializing index bucket 60/64.\nMaterializing index bucket 61/64.\nMaterializing index bucket 62/64.\nMaterializing index bucket 63/64.\nMaterializing index bucket 64/64."
+}
