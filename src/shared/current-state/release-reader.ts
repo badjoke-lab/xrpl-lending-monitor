@@ -1,8 +1,10 @@
 import { sha256Hex } from './canonical-json'
 import {
+  GithubBranchAssetResolver,
   GithubReleaseAssetResolver,
   HttpReleaseArtifactStore,
   assertAllowedReleaseResponseOrigin,
+  type ReleaseAssetResolver,
 } from './http-release-artifact-store'
 import {
   parseReleaseChannel,
@@ -18,6 +20,7 @@ import {
 export interface OpenReleaseSnapshotReaderOptions {
   channelTag?: string
   githubRepository: string
+  githubBranch?: string | null
   fetcher?: typeof fetch
   cache?: Cache
   timeoutMs?: number
@@ -92,18 +95,38 @@ async function fetchBytes(options: {
   }
 }
 
+function resolvers(options: OpenReleaseSnapshotReaderOptions): {
+  channel: ReleaseAssetResolver
+  snapshot: (releaseTag: string) => ReleaseAssetResolver
+} {
+  if (options.githubBranch) {
+    return {
+      channel: new GithubBranchAssetResolver(options.githubRepository, options.githubBranch),
+      snapshot: (releaseTag) => new GithubBranchAssetResolver(
+        options.githubRepository,
+        options.githubBranch as string,
+        `snapshots/${releaseTag}`,
+      ),
+    }
+  }
+  return {
+    channel: new GithubReleaseAssetResolver(
+      options.githubRepository,
+      options.channelTag ?? 'current-state-channel',
+    ),
+    snapshot: (releaseTag) => new GithubReleaseAssetResolver(options.githubRepository, releaseTag),
+  }
+}
+
 export async function openReleaseSnapshotReader(
   options: OpenReleaseSnapshotReaderOptions,
 ): Promise<ReleaseSnapshotReader> {
   const fetcher = options.fetcher ?? fetch
   const timeoutMs = options.timeoutMs ?? 8_000
-  const channelResolver = new GithubReleaseAssetResolver(
-    options.githubRepository,
-    options.channelTag ?? 'current-state-channel',
-  )
+  const sourceResolvers = resolvers(options)
   const channelBytes = await fetchBytes({
     fetcher,
-    url: channelResolver.urlFor('channel.json'),
+    url: sourceResolvers.channel.urlFor('channel.json'),
     timeoutMs,
     maxBytes: 64 * 1024,
     field: 'Release channel',
@@ -111,10 +134,7 @@ export async function openReleaseSnapshotReader(
   const channel = parseReleaseChannel(JSON.parse(new TextDecoder().decode(channelBytes)))
   if (!channel.active) throw new Error('Current-state release channel has no active release')
 
-  const resolver = new GithubReleaseAssetResolver(
-    options.githubRepository,
-    channel.active.releaseTag,
-  )
+  const resolver = sourceResolvers.snapshot(channel.active.releaseTag)
   const manifestBytes = await fetchBytes({
     fetcher,
     url: resolver.urlFor(channel.active.manifestAssetName),
