@@ -15,6 +15,10 @@ import type {
   ReleaseNativeObjectReference,
 } from '../../shared/current-state/release-native-reader'
 import type { RuntimeConfig } from '../../shared/runtime-config'
+import {
+  getResolvedCurrentProjection,
+  listResolvedCurrentProjections,
+} from './base-overlay-current-reader'
 import { getActiveSnapshot, type ActiveSnapshotRecord } from './core-api-repository'
 import { CurrentStateObjectReadError } from './current-state-read-error'
 
@@ -97,6 +101,33 @@ function decodeIndexCursor(value: string | undefined, mode: string): AdapterInde
   }
 }
 
+function snapshotFromManifest(
+  manifest: GithubCurrentStateReadModelReader['manifest'],
+  completedAt: string,
+): ActiveSnapshotRecord {
+  const objectCount = manifest.counts.vaults + manifest.counts.loanBrokers + manifest.counts.loans
+  const shardCount = manifest.pageCounts.vaults
+    + manifest.pageCounts.loanBrokers
+    + manifest.pageCounts.loans
+    + 16 ** manifest.lookupPrefixLength
+  return {
+    id: manifest.snapshotId,
+    epochId: manifest.epochId,
+    ledgerIndex: manifest.ledgerIndex,
+    ledgerHash: manifest.ledgerHash,
+    objectPrefix: 'read-model/',
+    manifestKey: 'read-model/manifest.json',
+    manifestSha256: manifest.manifestSha256,
+    vaultCount: manifest.counts.vaults,
+    loanBrokerCount: manifest.counts.loanBrokers,
+    loanCount: manifest.counts.loans,
+    objectCount,
+    shardCount,
+    compressedBytes: 0,
+    completedAt,
+  }
+}
+
 function accountFieldMatches(
   kind: ReadModelKind,
   projection: Projection,
@@ -119,7 +150,10 @@ function accountFieldMatches(
   return matches
 }
 
-function createReadModelAdapter(readModel: GithubCurrentStateReadModelReader) {
+function createReadModelAdapter(
+  readModel: GithubCurrentStateReadModelReader,
+  getSource: () => ReleaseCurrentStateSource,
+) {
   const cache = new Map<string, { kind: ReadModelKind; projection: Projection }>()
 
   function remember(kind: ReadModelKind, projection: Projection): void {
@@ -148,6 +182,26 @@ function createReadModelAdapter(readModel: GithubCurrentStateReadModelReader) {
     const cached = cache.get(id)
     if (cached) return cached
 
+    const source = getSource()
+    const snapshot = snapshotFromManifest(source.opened.manifest, source.readModel.updatedAt)
+    for (const kind of ['vault', 'loan-broker', 'loan'] as const) {
+      const resolved = await getResolvedCurrentProjection({
+        db: source.db,
+        source,
+        snapshot,
+        kind,
+        objectId: id,
+      })
+      if (resolved.item) {
+        remember(kind, resolved.item)
+        return { kind, projection: resolved.item }
+      }
+    }
+    return null
+  }
+
+  async function loadBaseAny(objectId: string): Promise<{ kind: ReadModelKind; projection: Projection } | null> {
+    const id = objectId.toUpperCase()
     for (const kind of ['vault', 'loan-broker', 'loan'] as const) {
       try {
         if (kind === 'vault') {
@@ -194,21 +248,25 @@ function createReadModelAdapter(readModel: GithubCurrentStateReadModelReader) {
       const kind = kinds[kindIndex]!
       const remainingReads = maxAssetReads - assetReads
       const remainingItems = options.limit - items.length
-      const result = await readModel.list<unknown>(kind, {
-        limit: remainingItems,
-        cursor: inner ?? undefined,
-        direction: 'asc',
-        scope: `${mode}:${kind}`,
-        maxPageReads: remainingReads,
-        predicate: (item) => {
-          rememberPageItem(kind, item)
-          const projection = projectionFromPage(kind, item)
-          return accountFieldMatches(kind, projection, account, fields).length > 0
+      const source = getSource()
+      const result = await listResolvedCurrentProjections({
+        db: source.db,
+        source,
+        snapshot: snapshotFromManifest(source.opened.manifest, source.readModel.updatedAt),
+        kind,
+        list: {
+          limit: remainingItems,
+          cursor: inner ?? undefined,
+          direction: 'asc',
+          scope: `${mode}:${kind}`,
+          maxBasePageReads: remainingReads,
+          predicate: (projection) => accountFieldMatches(kind, projection, account, fields).length > 0,
         },
       })
-      assetReads += result.pageReads
+      assetReads += result.basePageReads
       for (const item of result.items) {
-        const projection = projectionFromPage(kind, item)
+        const projection = item
+        remember(kind, projection)
         const field = accountFieldMatches(kind, projection, account, fields)[0]
         if (!field) continue
         items.push({
@@ -256,22 +314,29 @@ function createReadModelAdapter(readModel: GithubCurrentStateReadModelReader) {
       const kind = scans[kindIndex]!
       const remainingReads = maxAssetReads - assetReads
       const remainingItems = options.limit - items.length
-      const result = await readModel.list<unknown>(kind, {
-        limit: remainingItems,
-        cursor: inner ?? undefined,
-        direction: 'asc',
-        scope: `${mode}:${kind}`,
-        maxPageReads: remainingReads,
-        predicate: (item) => {
-          rememberPageItem(kind, item)
-          if (kind === 'loan-broker') return (item as ReadModelBrokerRecord).broker.vaultId === sourceId
-          return (item as ReadModelLoanRecord).loan.loanBrokerId === sourceId
+      const source = getSource()
+      const result = await listResolvedCurrentProjections({
+        db: source.db,
+        source,
+        snapshot: snapshotFromManifest(source.opened.manifest, source.readModel.updatedAt),
+        kind,
+        list: {
+          limit: remainingItems,
+          cursor: inner ?? undefined,
+          direction: 'asc',
+          scope: `${mode}:${kind}`,
+          maxBasePageReads: remainingReads,
+          predicate: (projection) => {
+            if (kind === 'loan-broker') return (projection as LoanBrokerCurrentProjection).vaultId === sourceId
+            return (projection as LoanCurrentProjection).loanBrokerId === sourceId
+          },
         },
       })
-      assetReads += result.pageReads
+      assetReads += result.basePageReads
       for (const item of result.items) {
         if (kind === 'loan-broker') {
-          const projection = (item as ReadModelBrokerRecord).broker
+          const projection = item as LoanBrokerCurrentProjection
+          remember(kind, projection)
           items.push({
             schemaVersion: 1,
             bucket: 0,
@@ -284,7 +349,8 @@ function createReadModelAdapter(readModel: GithubCurrentStateReadModelReader) {
             },
           })
         } else {
-          const projection = (item as ReadModelLoanRecord).loan
+          const projection = item as LoanCurrentProjection
+          remember(kind, projection)
           items.push({
             schemaVersion: 1,
             bucket: 0,
@@ -382,7 +448,7 @@ function createReadModelAdapter(readModel: GithubCurrentStateReadModelReader) {
     },
 
     async getObject(objectId: string, _options: { maxAssetReads: number }) {
-      const found = await loadAny(objectId)
+      const found = await loadBaseAny(objectId)
       return {
         item: found ? fakeRecord(found.kind, found.projection) : null,
         complete: true,
@@ -440,35 +506,22 @@ export async function openConfiguredReleaseCurrentState(
       githubBranch: 'current-state-data',
     })
     const manifest = readModel.manifest
-    const objectCount = manifest.counts.vaults + manifest.counts.loanBrokers + manifest.counts.loans
-    const shardCount = manifest.pageCounts.vaults
-      + manifest.pageCounts.loanBrokers
-      + manifest.pageCounts.loans
-      + 16 ** manifest.lookupPrefixLength
-    const reader = createReadModelAdapter(readModel)
+    const snapshot = snapshotFromManifest(manifest, readModel.updatedAt)
+    const holder: { source?: ReleaseCurrentStateSource } = {}
+    const reader = createReadModelAdapter(readModel, () => {
+      if (!holder.source) throw new CurrentStateObjectReadError('manifest_integrity_error', 'release source is unavailable')
+      return holder.source
+    })
+    const source: ReleaseCurrentStateSource = {
+      kind: 'release',
+      db,
+      readModel,
+      opened: { manifest, reader },
+    }
+    holder.source = source
     return {
-      source: {
-        kind: 'release',
-        db,
-        readModel,
-        opened: { manifest, reader },
-      },
-      snapshot: {
-        id: manifest.snapshotId,
-        epochId: manifest.epochId,
-        ledgerIndex: manifest.ledgerIndex,
-        ledgerHash: manifest.ledgerHash,
-        objectPrefix: 'read-model/',
-        manifestKey: 'read-model/manifest.json',
-        manifestSha256: manifest.manifestSha256,
-        vaultCount: manifest.counts.vaults,
-        loanBrokerCount: manifest.counts.loanBrokers,
-        loanCount: manifest.counts.loans,
-        objectCount,
-        shardCount,
-        compressedBytes: 0,
-        completedAt: readModel.updatedAt,
-      },
+      source,
+      snapshot,
     }
   } catch (error) {
     throw new CurrentStateObjectReadError(

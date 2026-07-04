@@ -6,10 +6,8 @@ import type {
 import type { ReadModelKind } from '../../shared/current-state/github-read-model-reader'
 import type { ActiveSnapshotRecord } from './core-api-repository'
 import { CurrentStateObjectReadError } from './current-state-read-error'
-import {
-  normalizeReleaseRecord,
-  type ReleaseCurrentStateSource,
-} from './release-current-state'
+import type { ReleaseCurrentStateSource } from './release-current-state'
+import type { ReleaseNativeDataRecord } from '../../shared/current-state/release-native-reader'
 
 type Projection = VaultCurrentProjection | LoanBrokerCurrentProjection | LoanCurrentProjection
 
@@ -71,6 +69,14 @@ function objectType(kind: ReadModelKind): 'vault' | 'loan_broker' | 'loan' {
 
 function expectedProjectionKind(kind: ReadModelKind): 'vault' | 'loan_broker' | 'loan' {
   return objectType(kind)
+}
+
+function normalizeReleaseRecord(record: ReleaseNativeDataRecord): Projection {
+  const projection = record.value.__readModelProjection
+  if (!projection || typeof projection !== 'object') {
+    throw new CurrentStateObjectReadError('manifest_integrity_error', 'read-model projection is unavailable')
+  }
+  return projection as Projection
 }
 
 function isMissingOverlaySchema(error: unknown): boolean {
