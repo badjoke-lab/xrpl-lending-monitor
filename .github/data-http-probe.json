@@ -1,0 +1,26 @@
+{
+  "channel": {
+    "httpCode": "200",
+    "contentLength": "249",
+    "contentEncoding": "",
+    "downloadedBytes": 249
+  },
+  "manifest": {
+    "httpCode": "200",
+    "contentLength": "32276",
+    "contentEncoding": "",
+    "downloadedBytes": 32276
+  },
+  "data": {
+    "httpCode": "200",
+    "contentLength": "18999199",
+    "contentEncoding": "",
+    "downloadedBytes": 18999199
+  },
+  "index": {
+    "httpCode": "200",
+    "contentLength": "4745313",
+    "contentEncoding": "",
+    "downloadedBytes": 4745313
+  }
+}
