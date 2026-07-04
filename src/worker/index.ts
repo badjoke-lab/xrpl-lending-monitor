@@ -26,6 +26,7 @@ import {
 import { getCurrentEpoch, getSyncState } from './repositories/network-status-repository'
 import { resolveCurrentStateStorage } from './repositories/release-current-state'
 import { registerCurrentLoanBrokerRoutes } from './routes/current-loan-brokers'
+import { registerCurrentStateDiagnosticRoute } from './routes/current-state-diagnostic'
 import {
   serializeAvailableVaultCollection,
   serializeOverview,
@@ -275,6 +276,7 @@ app.get('/api/vaults/:vaultId', async (context) => {
 })
 
 registerCurrentLoanBrokerRoutes(app)
+registerCurrentStateDiagnosticRoute(app)
 
 app.get('/api/activity', async (context) => {
   resolveRuntimeConfig(context.env)
