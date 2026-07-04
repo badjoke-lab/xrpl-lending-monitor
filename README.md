@@ -2,15 +2,21 @@
 
 Read-only monitoring, history, and audit tooling for the XRPL Lending Protocol.
 
-The project covers the normal monitoring surface expected from a lending dashboard—overview, Vaults, Loan Brokers, Loans, activity, search, and network status—while preserving full lifecycle history, deleted objects, state transitions, first-loss cover changes, provenance, and Devnet epochs.
+The project covers the normal monitoring surface expected from a lending dashboard—overview, Vaults, Loan Brokers, Loans, activity, search, and network status—while preserving lifecycle history, deleted objects, state transitions, first-loss cover changes, provenance, and Devnet epochs within the collected evidence boundary.
 
 ## Current status
 
-Milestone 1: current-state collector.
+Milestone 1: incremental continuation and base-plus-overlay integration.
 
-The Devnet network and epoch foundation, canonical XRP/IOU/MPT normalization, and resumable current-state scanner are implemented. The scanner reads one validated ledger, classifies Vault, LoanBroker, and Loan objects from a single binary traversal, and stages activation behind a complete manifest. Production bootstrap, object-storage provisioning, and Mainnet remain disabled pending the dedicated bootstrap integration and release gates.
+A verified Devnet base read model is serving current Vault, Loan Broker, and Loan data through the public current-state API path. The active published base is fixed to validated Devnet ledger `3371675` and contains 1,552,503 current-state records.
 
-See [`docs/implementation-status.md`](docs/implementation-status.md) for the exact active branch, validation state, and next work.
+The incremental history foundation, AffectedNodes normalization, lifecycle derivation, deleted-object archive logic, balance history, public API contracts, and baseline UI are implemented. The active remaining M1 work is to add bounded D1 current-state overlay upserts and deletion tombstones, integrate base-plus-overlay current reads, wire scheduled incremental collection, catch up contiguously from the ledger after the active base, and verify continuous Devnet monitoring.
+
+The earlier D1-only complete row-per-object current-state snapshot design was stopped after measured projection exceeded the project resource safety envelope. The active architecture uses a verified immutable base read model plus bounded D1 incremental history and current-state overlay.
+
+Mainnet remains disabled.
+
+See [`docs/implementation-status.md`](docs/implementation-status.md) for the exact public implementation state and blockers, and [`docs/development-roadmap.md`](docs/development-roadmap.md) for target dates, dependency order, and milestone exit conditions.
 
 ## Documentation
 
@@ -21,9 +27,11 @@ Key documents:
 - [`docs/product-spec.md`](docs/product-spec.md)
 - [`docs/architecture.md`](docs/architecture.md)
 - [`docs/data-model.md`](docs/data-model.md)
+- [`docs/collector-design.md`](docs/collector-design.md)
+- [`docs/resource-envelope.md`](docs/resource-envelope.md)
 - [`docs/development-roadmap.md`](docs/development-roadmap.md)
 - [`docs/implementation-status.md`](docs/implementation-status.md)
-- [`docs/resource-envelope.md`](docs/resource-envelope.md)
+- [`docs/decision-log.md`](docs/decision-log.md)
 
 ## Working rule
 
@@ -40,3 +48,4 @@ Every implementation PR must update `docs/implementation-status.md` and must upd
 - No transaction signing or submission
 - XRP, IOU, and MPT kept distinct
 - No invented LTV, collateral value, credit score, risk score, or cross-asset TVL
+- No stale or partial data presented as fresh

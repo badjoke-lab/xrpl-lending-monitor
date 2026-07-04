@@ -1,68 +1,96 @@
 # Implementation status
 
-Last updated: 2026-07-03.
+Last updated: 2026-07-04.
 
 ## Current phase
 
-M1 current-state storage evaluation is active. M0, M2, M3, M4, and M5-1 through M5-4 are complete.
+M1 incremental continuation and base-plus-overlay integration is active. M0, M2, M3, M4, and M5-1 through M5-4 are complete at their documented implementation checkpoints. M5-5 and M6 remain gated behind M1 exit.
 
 ## Production state
 
-The public Devnet Worker is deployed through migration `0008_balance_history.sql`. Migration `0009_d1_current_state_snapshots.sql` is not applied remotely. No current-state snapshot is verified or active. Current entity routes report unavailable. Mainnet remains disabled.
+A verified Devnet base read model is serving current Vault, Loan Broker, and Loan data through the public current-state API path.
+
+The active published base is fixed to validated Devnet ledger `3371675` and contains:
+
+- 797,550 Vault records;
+- 528,228 Loan Broker records;
+- 226,725 Loan records;
+- 1,552,503 total current-state records.
+
+The incremental history implementation exists, but scheduled production continuation, D1 current-state overlay persistence, tombstone handling, base-plus-overlay API resolution, catch-up from the base ledger, and continuous monitoring evidence are not complete. Mainnet remains disabled.
 
 ## Completed units
 
-- PR #53: D1 evaluation plan and dependency order.
-- PR #54: rollback and cleanup safeguards.
-- PR #55: one runtime D1 binding, `DB`.
-- PR #56: local pause, resume, verification, activation, reads, rollback, and cleanup integration.
-- PR #57: separate local operator actions and measurement evidence.
-- PR #59: 2,048 decoded objects per RPC page with writes bounded to 80 relevant objects.
-- PR #60: retained-snapshot capacity gate using actual local D1 size metadata.
-- PR #62: canonical compressed page-local data shards, digests, manifests, and local artifact storage.
-- PR #63: deterministic compressed object-ID, account, relationship, and search indexes.
-- PR #64: one page manifest and checkpoint advancement only after durable artifact verification.
-- PR #65: scanner integration with resumable artifact checkpoints and no automatic activation.
-- PR #66: complete-snapshot verification and deterministic snapshot-level manifest.
-- PR #67: persistent local artifact storage, resumable checkpoints, measurement CLI, and evidence workflow.
+- Devnet network, epoch, reset, and synchronization state.
+- Canonical XRP, IOU, and MPT normalization.
+- Complete unfiltered `ledger_data` traversal primitives with exact opaque marker handling.
+- Resumable fixed-ledger bootstrap scanning.
+- Current Vault, Loan Broker, and Loan normalization and relationship checks.
+- Terminal Loan zero-omission handling.
+- Deterministic compressed artifact generation, digests, manifests, and verification.
+- Persistent resumable artifact checkpoints and complete fixed-ledger measurement tooling.
+- Verified full Devnet base snapshot materialization.
+- Lightweight current-state read-model compilation.
+- Immutable current-state data publication with active channel resolution.
+- Bounded current-state readers for Vault, Loan Broker, and Loan list/detail routes.
+- Bounded pagination, exact object lookup, filters, relationship navigation, and search validation.
+- Incremental validated-ledger scan foundation.
+- AffectedNodes normalization.
+- Loan lifecycle derivation.
+- Deleted-object archive derivation.
+- Cover, debt, and loss history derivation.
+- Status and reconciliation logic.
+- Public historical API contracts, exports, feeds, and baseline UI routes.
 
-## Capacity result
+## Resource decision
 
-A 500-page local Devnet sample decoded 1,024,000 ledger objects and stored 67,407 Lending objects. Local D1 grew by 218,869,760 bytes.
+A 500-page local Devnet sample decoded 1,024,000 ledger objects and stored 67,407 Lending objects. The measured D1 growth and projection placed the row-per-object full current-state snapshot design outside the project's documented 350 MB safety envelope.
 
-The measured rate projects approximately 5.03 GB for one complete row-per-object snapshot and 10.10 GB for active plus rollback plus reserve. This exceeds the 350 MB project threshold, so the D1 row-per-object current-state layout will not proceed to remote migration.
+The D1-only full-snapshot path therefore stopped before remote current-state migration. The active architecture is now a complete immutable verified base read model plus bounded D1 incremental history and current-state overlay.
+
+The earlier D1-only migration work remains useful as integrity, rollback, resume, immutability, and resource evidence, but it is not the active production current-state storage plan.
 
 ## Active unit
 
-The `bounded-artifact-readers` branch adds the read path required by the current-state pages:
+The active implementation sequence is:
 
-- compressed snapshot shard catalogs for data and every secondary-index kind;
-- snapshot-manifest references to verified catalog artifacts;
-- catalog range metadata that preserves overlapping index ranges;
-- bounded list pagination with opaque cursors;
-- object detail through object-ID and data-shard lookup;
-- Account, Owner, and Borrower reference lookup;
-- Vault to Loan Broker and Loan Broker to Loan relationship lookup;
-- exact current-state search for object identifiers and accounts;
-- explicit result and shard-read limits;
-- digest, identity, object-value, cursor, and catalog integrity checks.
-- local artifact measurement evidence includes catalog artifact count, compressed bytes, uncompressed bytes, largest catalog artifact, and compressed catalog share.
+1. documentation and dependency realignment;
+2. D1 incremental overlay and tombstone schema;
+3. incremental current-projection integration;
+4. base-plus-overlay API integration;
+5. scheduled incremental collector wiring;
+6. catch-up rehearsal and reconciliation;
+7. bounded production catch-up from the ledger after the active base;
+8. continuous Devnet monitoring verification;
+9. M1 exit review.
+
+The current API resolution rule is being formalized as:
+
+- overlay upsert overrides the base object;
+- deletion tombstone hides the base object from current routes;
+- no overlay record falls back to the verified base.
 
 ## Next order
 
-1. Pass full CI and merge the catalog and bounded-reader unit.
-2. Run the bounded compressed-artifact sample and inspect the evidence.
-3. Run a complete fixed-ledger Devnet measurement if the bounded result passes the resource guardrails.
-4. Wire the readers to unavailable-safe current-state API routes.
-5. Select and validate a production storage adapter only after local capacity and read-path evidence pass.
-6. Build and verify an inactive production snapshot.
-7. Activate separately, prove rollback, and start incremental collection.
-8. Complete M5-5 and continue M6.
+1. Merge the architecture, decision, resource, status, and roadmap realignment.
+2. Add bounded D1 current-state overlay records, tombstones, base identity binding, watermark state, and indexes.
+3. Persist overlay changes at the same canonical boundary as history and cursor movement.
+4. Merge base and overlay semantics into Overview, entity list/detail, Search, Account, and relationship reads.
+5. Connect bounded incremental processing to the scheduled Worker path.
+6. Rehearse interruption, resume, replay, gap rejection, and reconciliation.
+7. Start bounded production catch-up from the ledger after the active base ledger.
+8. Verify newly created, modified, paid, impaired, defaulted, and deleted objects through real Devnet continuation.
+9. Complete M1 exit review, then M5-5 and M6.
 
 ## Blockers
 
-- The snapshot catalog and bounded-reader unit is not merged.
-- No compressed-artifact capacity evidence has been accepted yet.
-- Migration `0009` remains unapplied remotely.
-- No production snapshot is verified or active.
-- Incremental collection, M5-5, and M6 evidence remain incomplete.
+- No D1 current-state overlay schema is active.
+- Incremental persistence does not yet write current-state overlay upserts or deletion tombstones.
+- Current API routes do not yet merge the verified base with D1 incremental state.
+- The scheduled Worker path does not yet run the incremental ledger collector.
+- Production catch-up from the active base ledger has not started.
+- Continuous monitoring, reconciliation, M5-5, and M6 evidence remain incomplete.
+
+## Public-information boundary
+
+This status document records product architecture, verified evidence, implementation state, resource decisions, and release blockers only. It does not publish credentials, provider account details, workflow run identifiers, internal incident narratives, private operational constraints, or unrelated project context.

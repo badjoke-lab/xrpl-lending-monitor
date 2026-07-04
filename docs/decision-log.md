@@ -31,16 +31,15 @@ Canonical amount arithmetic uses exact integer coefficients, explicit decimal sc
 
 ### Decision
 
-Vault, LoanBroker, and Loan scans are fixed to one validated ledger and written to a `building` snapshot. The snapshot becomes `active` only after every marker page, object normalization, relationship check, and persistence step succeeds.
+Vault, LoanBroker, and Loan scans are fixed to one validated ledger and written to an inactive complete-scan output. A base state becomes public only after every marker page, object normalization, relationship check, manifest check, and publication step succeeds.
 
 ### Consequences
 
 - opaque markers are preserved exactly;
 - partial scans are not exposed as current totals;
-- a failed replacement does not overwrite the previous active snapshot;
-- cursor advancement occurs only after a complete manifest exists;
-- current-state collection remains disabled by default until runtime and storage integration pass their checks;
-- page, request, object, write-batch, and elapsed-time measurements are recorded.
+- a failed replacement does not overwrite the previous verified base;
+- current-state continuation begins from the ledger after the verified base ledger;
+- page, request, object, write, byte, memory, and elapsed-time measurements are recorded where applicable.
 
 ## D-016 — Terminal Loan zero fields
 
@@ -66,14 +65,14 @@ Numeric Loan fields omitted by canonical XRPL binary decoding are treated as zer
 
 ### Decision
 
-The full current-state bootstrap uses a resumable long-running runner and one unfiltered binary ledger traversal. It writes bounded snapshot batches and publishes a verified manifest. The scheduled Worker handles bounded status and incremental ledger processing after bootstrap.
+The full current-state bootstrap uses a resumable long-running runner and one unfiltered binary ledger traversal. It produces deterministic bounded artifacts and a verified manifest. The scheduled Worker handles bounded status and incremental ledger processing after a verified base is available.
 
 ### Consequences
 
 - repeated filtered traversals are rejected;
 - full in-memory accumulation is rejected;
-- production bootstrap remains disabled until resume, persistence, manifest, cleanup, and activation tests pass;
-- an initial active snapshot is required before incremental maintenance begins.
+- production continuation remains disabled until resume, persistence, manifest, publication, and reader checks pass;
+- an initial verified base is required before incremental maintenance begins.
 
 ## D-018 — Checkpoint B history boundary
 
@@ -84,15 +83,15 @@ The full current-state bootstrap uses a resumable long-running runner and one un
 
 M2 history data contracts are stable enough to begin M3 public API contract implementation for current indexed data, object changes, lifecycle events, archives, balance history, and reconciliation reports.
 
-Public lifecycle completeness claims are not yet approved. They remain gated on a complete active bootstrap snapshot, fixture-ledger replay coverage for supported transaction shapes, and later release-gate soak and reconciliation evidence.
+Public lifecycle completeness claims are not yet approved. They remain gated on a verified base current state, fixture-ledger replay coverage for supported transaction shapes, contiguous incremental continuation, and later release-gate soak and reconciliation evidence.
 
 ### Consequences
 
 - M3 API work may begin without reworking M2 table identities;
 - API responses expose provenance, freshness, and unavailable or incomplete states;
-- UI and public documentation do not claim complete pre-snapshot history;
+- UI and public documentation do not claim complete pre-collection history;
 - deleted-object, lifecycle, cover, debt, loss, and status data are exposed only as indexed data bounded by collected evidence;
-- public release remains blocked until M1 active snapshot and M6 integrity evidence pass.
+- public release remains blocked until M1 continuation and M6 integrity evidence pass.
 
 ## D-019 — Ledger-observatory UI architecture
 
@@ -137,22 +136,57 @@ Funding, donation, payment, and promotional surfaces are not part of the current
 ## D-021 — D1-only current-state snapshots
 
 - Date: 2026-07-03
+- Status: superseded by D-022
+
+### Historical decision
+
+The evaluated design placed complete versioned current-state snapshot rows, manifests, checkpoints, activation pointers, rollback state, and public current-object reads in D1.
+
+### Supersession reason
+
+Measured projection for the row-per-object full current-state layout exceeded the project's documented storage safety envelope. The design was therefore stopped before remote current-state migration and replaced by D-022. The evaluation remains documented because it established useful retention, integrity, resume, and resource evidence.
+
+### Retained guarantees
+
+D-022 preserves the guarantees that matter:
+
+- one fixed validated ledger identity per complete bootstrap;
+- exact marker continuation;
+- deterministic normalization and hashing;
+- complete manifest verification;
+- relationship checks;
+- fail-closed replacement behavior;
+- bounded work;
+- explicit freshness and availability states.
+
+## D-022 — Verified base read model with D1 incremental overlay
+
+- Date: 2026-07-04
 - Status: accepted
 
 ### Decision
 
-The earlier external object-storage design for current-state snapshot artifacts is superseded. Current-state bootstrap, verification, activation, rollback, and public reads will use versioned D1 snapshot rows and an atomic D1 active-snapshot pointer.
+Current state uses two coordinated public data layers:
 
-This change is based on architecture simplification, a single measured persistence boundary, atomic activation requirements, and the observed Devnet data envelope. It does not weaken the fixed-ledger, exact-marker, deterministic-hash, manifest-verification, rollback, or fail-closed guarantees.
+1. a complete immutable verified base read model produced from one fixed validated Devnet ledger; and
+2. bounded D1 incremental history and current-state overlay records applied from the ledger immediately after the base ledger.
+
+The public API resolves current objects deterministically:
+
+- an overlay upsert overrides the base object;
+- a deletion tombstone hides the base object from current routes;
+- an object with no overlay record falls back to the verified base.
+
+Incremental history, lifecycle, archive, balance, overlay, and cursor changes share the documented canonical persistence boundary. The interface exposes base identity, collector cursor, overlay watermark, actual freshness, and stale or gap states.
 
 ### Consequences
 
-- snapshot construction writes only to an inactive snapshot ID;
-- bounded object batches, typed current rows, hashes, manifest metadata, checkpoints, cleanup eligibility, and the active pointer are stored in D1;
-- completed snapshots are immutable;
-- activation changes only the active pointer after complete verification;
-- the previous active snapshot is retained for rollback;
-- incomplete attempts are never exposed as current state;
-- current-state reads no longer depend on a separate object-storage binding;
-- active-plus-rollback storage, index overhead, row size, write count, and query count must be measured before remote bootstrap;
-- the design stops before production use if the documented D1 safety threshold is exceeded.
+- complete base objects are not duplicated into D1;
+- D1 stores network and epoch state, cursors, processed ledgers, normalized events, object changes, lifecycle data, archives, balance history, bounded current overlays, tombstones, aggregates, and operational state;
+- current-state pages can continue changing between complete base replacements;
+- a failed incremental run does not advance the canonical cursor;
+- a base identity mismatch fails closed;
+- a stale or interrupted continuation path is not presented as fresh;
+- complete base replacement remains an explicit verified process rather than page traffic or a public write route;
+- periodic reconciliation checks base identity, overlay deltas, relationships, counts, cursor continuity, and archived/current separation;
+- Mainnet remains disabled until separately approved.

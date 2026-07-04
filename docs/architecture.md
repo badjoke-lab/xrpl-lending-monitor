@@ -25,30 +25,39 @@ XRPL Lending Devnet
         |
         | validated ledger JSON-RPC
         |
-        +------------------------------+
-        |                              |
-        v                              v
-Resumable bootstrap runner       Cloudflare Worker
-  |- fixed validated ledger       |- network status refresh
-  |- unfiltered binary scan       |- incremental ledger collector
-  |- exact marker checkpoints     |- catch-up processor
-  |- local object classification  |- transaction and metadata parser
-  |- bounded D1 snapshot writes   |- status and lifecycle engine
-  |- complete manifest            |- read-only public API
-        |                              |
-        +---------------+--------------+
+        +-------------------------------+
+        |                               |
+        v                               v
+Resumable bootstrap runner        Cloudflare Worker
+  |- fixed validated ledger        |- network status refresh
+  |- unfiltered binary scan        |- scheduled incremental collector
+  |- exact marker checkpoints      |- bounded catch-up processor
+  |- local object classification   |- transaction and metadata parser
+  |- deterministic artifacts       |- status and lifecycle engine
+  |- complete manifest             |- current overlay updates
+  |- read-model compiler           |- read-only public API
+        |                               |
+        v                               v
+Verified immutable base read model   Cloudflare D1
+  |- active channel                  |- network epochs and sync cursor
+  |- manifest                        |- processed ledgers
+  |- current entity pages            |- protocol events
+  |- exact lookup buckets            |- normalized object changes
+  |- relationship/search data        |- lifecycle events
+        |                             |- deleted-object archive
+        |                             |- balance history
+        |                             |- current-state overlay upserts
+        |                             |- deletion tombstones
+        |                             |- aggregates and health state
+        +---------------+---------------+
                         |
                         v
-                 Cloudflare D1
-                   |- network epochs and sync cursor
-                   |- immutable current-state snapshots
-                   |- snapshot manifests and checkpoints
-                   |- active snapshot pointer
-                   |- current Vault/Broker/Loan rows
-                   |- transactions and normalized changes
-                   |- lifecycle events
-                   |- deleted-object archive
-                   |- aggregate and balance history
+              Public API merge layer
+                |- base resolution
+                |- overlay precedence
+                |- tombstone suppression
+                |- freshness metadata
+                |- bounded pagination/search
                         |
                         v
               React/Vite static application
@@ -60,22 +69,45 @@ Resumable bootstrap runner       Cloudflare Worker
                 |- About and Contact
 ```
 
-## Current-state snapshot model
+## Current-state model
 
-The accepted current-state design is D1-only. An earlier external object-storage design is superseded.
+The accepted current-state design is a verified immutable base read model plus bounded D1 incremental overlay.
 
-A bootstrap attempt:
+A complete bootstrap:
 
 1. fixes one validated Devnet ledger index and hash;
 2. traverses `ledger_data` with the exact opaque server marker;
 3. classifies Vault, LoanBroker, and Loan objects locally;
-4. writes bounded rows into an inactive snapshot ID;
-5. records deterministic object and batch hashes;
-6. advances the checkpoint only after the corresponding D1 batch is durable;
-7. verifies counts, hashes, manifest completeness, and same-snapshot relationships;
-8. atomically switches the active pointer only after complete verification.
+4. writes deterministic bounded artifacts and page manifests;
+5. verifies object identity, counts, digests, manifest completeness, and relationships;
+6. compiles a bounded lightweight read model for current list, detail, exact lookup, search, and relationship access;
+7. publishes the new immutable base and updates the active channel only after verification.
 
-Completed snapshots are immutable. A failed replacement cannot overwrite the prior active snapshot. One prior verified snapshot is retained as the rollback target. Cleanup is limited to explicitly eligible incomplete attempts.
+The base read model does not change in place.
+
+After a verified base exists, validated-ledger continuation begins at the ledger immediately after the base ledger. D1 stores only the bounded incremental evidence and current-state changes required after that base.
+
+The public current-state resolution rule is:
+
+1. a D1 overlay upsert overrides the corresponding base object;
+2. a D1 deletion tombstone suppresses the corresponding base object from current routes;
+3. absence of an overlay row falls back to the verified base object.
+
+A complete base replacement is a separate explicit operation. It is not triggered by page traffic and does not happen on every scheduled collector run.
+
+## Why the base and overlay are separate
+
+Measured projection showed that a row-per-object complete current-state snapshot in D1 would exceed the project's documented storage safety envelope. The design therefore avoids duplicating the complete base dataset into D1 while preserving:
+
+- one fixed validated ledger identity per complete bootstrap;
+- exact opaque marker continuation;
+- deterministic normalization and hashing;
+- complete manifest verification;
+- relationship checks;
+- immutable verified base publication;
+- contiguous incremental continuation;
+- idempotent replay;
+- explicit stale, gap, partial, unavailable, and error states.
 
 ## Runtime boundaries
 
@@ -88,28 +120,31 @@ Responsible for:
 - resuming from the exact opaque marker;
 - decoding pages and classifying Vault, LoanBroker, and Loan objects locally;
 - normalizing zero-omitted terminal Loan fields without inventing timestamps;
-- writing bounded inactive D1 snapshot batches;
-- generating and verifying a complete manifest;
-- activating the snapshot pointer only after verification;
-- preserving the previous active snapshot after failure;
-- recording request, page, object, row, byte, memory, wall-time, and retry metrics.
+- writing deterministic bounded artifacts;
+- generating and verifying page and snapshot manifests;
+- compiling the lightweight current-state read model;
+- publishing a new immutable base only after all verification passes;
+- recording request, page, object, byte, memory, wall-time, and retry metrics.
 
-The bootstrap runner is not a public request handler and is not triggered by page traffic. It is used for first activation, new epochs, and explicitly initiated replacement scans.
+The bootstrap runner is not a public request handler and is not triggered by page traffic. It is used for first base publication, new epochs, and explicitly initiated replacement scans.
 
 ### Collector Worker
 
 Responsible for:
 
-- polling the latest validated ledger;
-- resuming from the last committed cursor;
-- processing a bounded number of ledgers per run;
-- filtering Lending-related transactions;
+- polling or receiving the latest validated ledger state at the approved cadence;
+- reading the last committed cursor and active base identity;
+- resuming from the ledger immediately after the committed cursor;
+- processing a bounded contiguous ledger range per run;
+- filtering supported Lending-related transactions;
 - normalizing AffectedNodes;
-- refreshing affected objects;
-- recording lifecycle events and deletions;
-- detecting Devnet resets;
-- updating aggregate data;
-- recording health metrics.
+- deriving current projection changes;
+- recording protocol events, object changes, lifecycle events, archives, and balance history;
+- writing current-state overlay upserts for created and modified objects;
+- writing deletion tombstones for deleted objects;
+- advancing the cursor only after the canonical persistence boundary succeeds;
+- detecting Devnet resets and continuity failures;
+- updating aggregates and health metrics.
 
 The Collector Worker does not perform full global bootstrap scans. It must not depend on the web UI being active.
 
@@ -117,12 +152,13 @@ The Collector Worker does not perform full global bootstrap scans. It must not d
 
 Responsible for:
 
-- read-only D1 queries;
-- resolving the verified active snapshot pointer;
-- reading bounded current Vault, Loan Broker, and Loan rows from that snapshot;
-- resolving same-snapshot relationships;
+- resolving the verified active base read model;
+- reading bounded current Vault, Loan Broker, and Loan data from the base;
+- reading bounded D1 overlay upserts and deletion tombstones;
+- applying deterministic base-plus-overlay resolution;
+- resolving same-epoch and same-base relationships;
 - filtering, sorting, pagination, and search;
-- attaching network, epoch, cursor, snapshot, and synchronization metadata;
+- attaching network, epoch, base, cursor, overlay watermark, and synchronization metadata;
 - serving derived values with provenance;
 - applying cache and abuse controls.
 
@@ -134,7 +170,7 @@ Responsible for presentation only. It consumes the public API and does not call 
 
 It must:
 
-- preserve network, epoch, freshness, and provenance context;
+- preserve network, epoch, freshness, base, and provenance context;
 - distinguish loading, empty, unavailable, stale, partial, error, archived, and invalid-route states;
 - use only API-supported values;
 - keep current and historical data separate;
@@ -147,16 +183,56 @@ It must:
 ## Data flow guarantees
 
 1. Only validated ledgers become canonical.
-2. A bootstrap snapshot is tied to one network, epoch, ledger index, and ledger hash.
-3. A continuation marker advances only after the corresponding bounded D1 write is durable.
-4. A snapshot becomes active only after its complete manifest and relationships verify.
-5. A failed snapshot never replaces the previous active snapshot.
-6. Incremental ledger persistence, canonical event persistence, and cursor advancement are atomic at the documented boundary.
-7. Reprocessing produces no duplicate canonical events.
-8. Current state is a projection; transaction and lifecycle records are historical evidence.
-9. Deletion removes an item from current projections but not from retained history.
-10. Every query is scoped by network and epoch.
-11. API responses report collector cursor, active snapshot identity, and data age.
+2. A complete base is tied to one network, epoch, ledger index, and ledger hash.
+3. A bootstrap marker advances only after the corresponding bounded artifact output is durable.
+4. A base becomes active only after complete manifest and relationship verification.
+5. A failed base replacement never replaces the previous verified base.
+6. Incremental processing begins at the ledger after the base or committed incremental cursor.
+7. Incremental ledger persistence, canonical event persistence, current overlay persistence, and cursor advancement share the documented atomic boundary.
+8. Reprocessing produces no duplicate canonical events or conflicting current overlay state.
+9. Current state is resolved from verified base plus applied overlay; transaction and lifecycle records are historical evidence.
+10. Deletion hides an item from current projections but does not remove retained history.
+11. Every query is scoped by network and epoch and tied to a base identity where current state is involved.
+12. API responses report collector cursor, active base identity, overlay watermark, and data age.
+13. A detected gap or parent-hash discontinuity stops continuation and is never skipped.
+14. Stale or incomplete continuation is never presented as fresh.
+
+## Overlay semantics
+
+### Upsert
+
+A supported CreatedNode or ModifiedNode may produce a normalized current projection upsert. The overlay record includes enough identity and provenance to prove:
+
+- network and epoch;
+- active base snapshot identity;
+- object type and object ID;
+- relevant relationships;
+- canonical projection JSON;
+- ledger index and hash;
+- source transaction hash;
+- update time.
+
+A newer canonical overlay state replaces the older overlay state for the same object only through contiguous validated-ledger processing.
+
+### Deletion tombstone
+
+A supported DeletedNode produces a current-state tombstone and historical archive evidence where available.
+
+A tombstone prevents the immutable base object from reappearing in current list, detail, search, count, or relationship results.
+
+### Count and aggregate resolution
+
+Overview counts and aggregates must be derived from a verified base plus bounded created, updated, and deleted overlay effects. Cross-asset totals remain prohibited without an approved pricing subsystem.
+
+### Base replacement
+
+When a new verified base is published:
+
+1. fix and verify the replacement base ledger;
+2. publish the immutable replacement read model;
+3. bind subsequent continuation to the replacement base identity;
+4. reconcile overlap and preserve indexed historical evidence;
+5. retain explicit stale or partial state until the new continuation path is proven contiguous.
 
 ## UI architecture
 
@@ -206,7 +282,7 @@ A lightweight routing implementation may use the platform History API or an appr
 
 ### UI data boundary
 
-UI components consume serialized API contracts. They do not import collector parsers, storage repositories, migration models, or bootstrap internals.
+UI components consume serialized API contracts. They do not import collector parsers, storage repositories, migration models, bootstrap internals, or base-read internals.
 
 Fetching, formatting, page composition, and reusable components remain separated.
 
@@ -264,32 +340,38 @@ Use one Cloudflare project with environment separation:
 
 Mainnet is a data-source mode, not a separate codebase. It remains disabled by configuration until separately approved.
 
-A successful web deployment does not imply that bootstrap, migration, or snapshot activation has occurred.
+A successful web deployment does not imply that base publication, incremental catch-up, or collector continuation has occurred.
 
 ## Security posture
 
 - No private keys, seeds, wallet sessions, or public write API.
 - Strict validation of search and query inputs.
-- Bounded pagination, exports, D1 queries, and bootstrap batches.
+- Bounded pagination, exports, D1 queries, incremental batches, and bootstrap work.
 - Separate bootstrap, collector, and public API responsibilities.
 - Raw ledger payloads are treated as untrusted input.
 - Public errors do not expose stack traces, credentials, provider account identifiers, or internal incident details.
+- Public documentation does not include unpublished operational strategy or unrelated project context.
 
 ## Observability
 
 Record at minimum:
 
-- active snapshot ID and ledger;
-- bootstrap status and continuation state;
-- bootstrap pages, decoded objects, relevant objects, rows, bytes, retries, and wall time;
+- active base snapshot identity and ledger;
+- base publication time and manifest identity;
+- bootstrap status and continuation state during complete scans;
+- bootstrap pages, decoded objects, relevant objects, bytes, retries, and wall time;
 - latest validated ledger and last processed ledger;
+- overlay watermark;
 - lag in ledgers and seconds;
 - transactions inspected and accepted;
 - D1 rows read and written estimates;
 - RPC and persistence errors in public-safe form;
 - reset detections;
-- parser failures and unrecognized fields.
+- parser failures and unrecognized fields;
+- reconciliation results.
 
 ## Why bootstrap is separate from the Worker
 
-Measured Devnet traversal requires thousands of requests and many minutes for a complete global marker pass. A resumable long-running runner provides the execution window and checkpoint model required for first activation without weakening Worker guardrails or exposing partial data.
+Measured Devnet traversal requires thousands of requests and many minutes for a complete global marker pass. A resumable long-running runner provides the execution window and checkpoint model required for complete base generation without weakening Worker guardrails or exposing partial data.
+
+The scheduled Worker performs only bounded incremental continuation and catch-up. It never rebuilds the complete global base state during ordinary scheduled execution.
