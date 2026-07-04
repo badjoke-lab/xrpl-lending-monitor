@@ -1,0 +1,70 @@
+name: Deploy production Worker
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/production-deploy-trigger
+
+permissions:
+  contents: write
+
+concurrency:
+  group: production-worker-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Check Cloudflare credentials
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo "CLOUDFLARE_API_TOKEN is unavailable" >&2; exit 1; }
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "CLOUDFLARE_ACCOUNT_ID is unavailable" >&2; exit 1; }
+
+      - name: Build application
+        run: pnpm build
+
+      - name: Deploy Worker
+        id: deploy
+        run: pnpm exec wrangler deploy
+
+      - name: Report deploy status
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEPLOY_OUTCOME: ${{ steps.deploy.outcome }}
+        run: |
+          jq -n \
+            --arg runId "$GITHUB_RUN_ID" \
+            --arg runUrl "https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            --arg headSha "$GITHUB_SHA" \
+            --arg outcome "$DEPLOY_OUTCOME" \
+            '{runId:$runId,runUrl:$runUrl,headSha:$headSha,outcome:$outcome}' \
+            > deploy-status.json
+          API_PATH="repos/${GITHUB_REPOSITORY}/contents/.github/production-deploy-status.json"
+          CONTENT=$(base64 -w0 deploy-status.json)
+          EXISTING_SHA=$(gh api "$API_PATH" --jq .sha 2>/dev/null || true)
+          if [ -n "$EXISTING_SHA" ]; then
+            gh api --method PUT "$API_PATH" -f message="Update production deploy status" -f content="$CONTENT" -f sha="$EXISTING_SHA" >/dev/null
+          else
+            gh api --method PUT "$API_PATH" -f message="Create production deploy status" -f content="$CONTENT" >/dev/null
+          fi
