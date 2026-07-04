@@ -8,9 +8,9 @@ import {
   type LoanBrokerSort,
 } from './d1-current-loan-broker-reader'
 import {
-  getGithubLoanBrokerById,
-  listGithubLoanBrokers,
-} from './github-current-brokers'
+  getBaseOverlayLoanBrokerById,
+  listBaseOverlayLoanBrokers,
+} from './base-overlay-loan-broker-reader'
 import {
   isReleaseCurrentStateSource,
   type CurrentStateStorage,
@@ -33,7 +33,7 @@ export function listCurrentLoanBrokers(
   options: ListCurrentLoanBrokersOptions,
 ): Promise<ListCurrentLoanBrokersResult> {
   return isReleaseCurrentStateSource(storage)
-    ? listGithubLoanBrokers(storage, snapshot, options)
+    ? listBaseOverlayLoanBrokers(storage.db, storage, snapshot, options)
     : listStoredCurrentLoanBrokers(database(storage), snapshot, options)
 }
 
@@ -43,6 +43,6 @@ export function getCurrentLoanBrokerById(
   brokerId: string,
 ): Promise<CurrentLoanBrokerRecord | null> {
   return isReleaseCurrentStateSource(storage)
-    ? getGithubLoanBrokerById(storage, snapshot, brokerId)
+    ? getBaseOverlayLoanBrokerById(storage.db, storage, snapshot, brokerId)
     : getStoredCurrentLoanBrokerById(database(storage), snapshot, brokerId)
 }
