@@ -6,7 +6,9 @@
     "itemCount": 0,
     "errorCode": "",
     "snapshotId": "",
-    "ledgerIndex": 0
+    "ledgerIndex": 0,
+    "availability": "unavailable",
+    "reason": "active current-state snapshot has not been activated"
   },
   "loanBrokers": {
     "httpCode": "200",
@@ -15,7 +17,9 @@
     "itemCount": 0,
     "errorCode": "",
     "snapshotId": "",
-    "ledgerIndex": 0
+    "ledgerIndex": 0,
+    "availability": "unavailable",
+    "reason": "active current-state snapshot has not been activated"
   },
   "loans": {
     "httpCode": "200",
@@ -24,6 +28,8 @@
     "itemCount": 0,
     "errorCode": "",
     "snapshotId": "",
-    "ledgerIndex": 0
+    "ledgerIndex": 0,
+    "availability": "unavailable",
+    "reason": "active current-state snapshot has not been activated"
   }
 }
