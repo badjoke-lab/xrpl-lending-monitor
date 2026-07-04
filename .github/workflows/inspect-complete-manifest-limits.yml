@@ -1,0 +1,36 @@
+name: Inspect complete manifest limits
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/manifest-limit-inspect-trigger]
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: current-state-release-assets
+          path: .local/current-state-release
+          run-id: 28699460881
+          github-token: ${{ github.token }}
+
+      - name: Record manifest limits
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          MANIFEST=.local/current-state-release/assets/manifest.json
+          jq '{maxCompressedBytes:([.dataAssets[],.indexAssets[]|.compressedBytes]|max),maxUncompressedBytes:([.dataAssets[],.indexAssets[]|.uncompressedBytes]|max),dataMaxUncompressedBytes:([.dataAssets[].uncompressedBytes]|max),indexMaxUncompressedBytes:([.indexAssets[].uncompressedBytes]|max),relevantObjectCount,sourcePages,counts}' "$MANIFEST" > limits.json
+          API="repos/${GITHUB_REPOSITORY}/contents/.github/complete-manifest-limits.json"
+          CONTENT=$(base64 -w0 limits.json)
+          SHA=$(gh api "$API" --jq .sha 2>/dev/null || true)
+          if [ -n "$SHA" ]; then
+            gh api --method PUT "$API" -f message="Update complete manifest limits" -f content="$CONTENT" -f sha="$SHA" >/dev/null
+          else
+            gh api --method PUT "$API" -f message="Create complete manifest limits" -f content="$CONTENT" >/dev/null
+          fi
