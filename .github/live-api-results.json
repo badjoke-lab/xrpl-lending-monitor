@@ -1,0 +1,29 @@
+{
+  "vaults": {
+    "httpCode": "200",
+    "responseBytes": 258,
+    "validJson": true,
+    "itemCount": 0,
+    "errorCode": "",
+    "snapshotId": "",
+    "ledgerIndex": 0
+  },
+  "loanBrokers": {
+    "httpCode": "200",
+    "responseBytes": 264,
+    "validJson": true,
+    "itemCount": 0,
+    "errorCode": "",
+    "snapshotId": "",
+    "ledgerIndex": 0
+  },
+  "loans": {
+    "httpCode": "200",
+    "responseBytes": 257,
+    "validJson": true,
+    "itemCount": 0,
+    "errorCode": "",
+    "snapshotId": "",
+    "ledgerIndex": 0
+  }
+}
