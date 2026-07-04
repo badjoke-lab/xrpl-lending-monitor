@@ -1,0 +1,17 @@
+{
+  "vaults": {
+    "detailCode": "200",
+    "page2Code": "200",
+    "page2Count": 2
+  },
+  "loanBrokers": {
+    "detailCode": "200",
+    "page2Code": "200",
+    "page2Count": 2
+  },
+  "loans": {
+    "detailCode": "200",
+    "page2Code": "200",
+    "page2Count": 2
+  }
+}
