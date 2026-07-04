@@ -6,6 +6,7 @@ import { resolveRuntimeConfig } from '../shared/runtime-config'
 import type { Bindings } from './env'
 import { app } from './index'
 import { initializeCatchUpFromVerifiedBase } from './operator/catch-up-initialization'
+import { verifyLiveContinuation } from './operator/live-continuation-verification'
 import { getIncrementalCollectorState } from './repositories/incremental-collector-state'
 import { getSyncState } from './repositories/network-status-repository'
 import { serializeCollectorStatus } from './serializers/collector-status'
@@ -24,6 +25,12 @@ const worker: ExportedHandler<Bindings> = {
         sync,
         staleAfterSeconds: runtimeConfig.staleAfterSeconds,
       }))
+    }
+    if (
+      request.method === 'GET'
+      && url.pathname === '/api/status/continuation-verification'
+    ) {
+      return Response.json(await verifyLiveContinuation(env.DB))
     }
     return app.fetch(request, env, executionContext)
   },
