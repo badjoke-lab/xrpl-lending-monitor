@@ -75,7 +75,9 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build release materializer
-        run: pnpm build:release-current-state
+        run: |
+          pnpm build:release-current-state
+          node scripts/patch-release-current-state-build.mjs
 
       - name: Materialize current-state release assets
         run: |
