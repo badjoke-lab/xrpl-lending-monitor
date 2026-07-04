@@ -48,6 +48,18 @@ jobs:
         with:
           name: release-native-typecheck-log
           path: typecheck.log
-      - run: pnpm test
+      - name: Unit tests
+        run: |
+          set +e
+          pnpm test > test.log 2>&1
+          status=$?
+          tail -n 200 test.log
+          exit $status
+      - name: Upload test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-native-test-log
+          path: test.log
       - run: pnpm db:migrate:local
       - run: pnpm build
