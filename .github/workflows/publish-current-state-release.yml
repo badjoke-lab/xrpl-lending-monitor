@@ -77,7 +77,9 @@ jobs:
 
       - name: Materialize current-state release assets
         run: |
+          mkdir -p .local/current-state-release
           RELEASE_TAG="current-state-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          set +e
           node .release-current-state-build/run-release-current-state.mjs \
             --local \
             --endpoint "$ENDPOINT" \
@@ -85,9 +87,16 @@ jobs:
             --page-limit "$PAGE_LIMIT" \
             --object-limit-per-page "$OBJECT_LIMIT_PER_PAGE" \
             --index-buckets "$INDEX_BUCKETS" \
-            --output-dir .local/current-state-release
+            --output-dir .local/current-state-release \
+            > .local/current-state-release/materialize.stdout.log \
+            2> .local/current-state-release/materialize.stderr.log
+          STATUS=$?
+          cat .local/current-state-release/materialize.stderr.log
+          cat .local/current-state-release/materialize.stdout.log
+          exit "$STATUS"
 
       - name: Upload generated assets for audit
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: current-state-release-assets
