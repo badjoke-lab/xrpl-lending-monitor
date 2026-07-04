@@ -93,7 +93,13 @@ jobs:
           STATUS=$?
           cat .local/current-state-release/materialize.stderr.log
           cat .local/current-state-release/materialize.stdout.log
-          exit "$STATUS"
+          if [ "$STATUS" -ne 0 ]; then
+            exit "$STATUS"
+          fi
+          if [ "$(jq -r .complete .local/current-state-release/release-summary.json)" != "true" ]; then
+            echo "Refusing to publish incomplete current-state snapshot." >&2
+            exit 1
+          fi
 
       - name: Upload generated assets for audit
         if: always()
