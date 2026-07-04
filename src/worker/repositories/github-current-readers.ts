@@ -42,6 +42,15 @@ function vaultMatches(record: ReleaseNativeDataRecord, options: ListCurrentVault
     && (options.hasLoss === undefined || (vault.lossUnrealized !== '0') === options.hasLoss)
 }
 
+function publicReadError(error: unknown): CurrentStateObjectReadError {
+  if (error instanceof CurrentStateObjectReadError) return error
+  const message = error instanceof Error ? error.message : 'read-model current-state read failed'
+  return new CurrentStateObjectReadError(
+    message.toLowerCase().includes('cursor') ? 'invalid_cursor' : 'manifest_integrity_error',
+    message,
+  )
+}
+
 export async function listGithubVaults(
   storage: CurrentStateStorage,
   snapshot: ActiveSnapshotRecord,
@@ -49,17 +58,21 @@ export async function listGithubVaults(
 ): Promise<ListCurrentVaultsResult> {
   const source = releaseSource(storage)
   validateSnapshot(snapshot, source)
-  const result = await source.opened.reader.listObjects('vault', {
-    limit: options.limit,
-    cursor: options.cursor,
-    maxAssetReads: MAX_LIST_ASSET_READS,
-    direction: (options.sort ?? 'id_asc') === 'id_desc' ? 'desc' : 'asc',
-  }, (record) => vaultMatches(record, options))
-  return {
-    data: result.items.map((record) => normalizeReleaseRecord(record) as VaultCurrentProjection),
-    nextCursor: result.nextCursor,
-    shardsRead: result.assetReads,
-    objectsExamined: result.items.length,
+  try {
+    const result = await source.opened.reader.listObjects('vault', {
+      limit: options.limit,
+      cursor: options.cursor,
+      maxAssetReads: MAX_LIST_ASSET_READS,
+      direction: (options.sort ?? 'id_asc') === 'id_desc' ? 'desc' : 'asc',
+    }, (record) => vaultMatches(record, options))
+    return {
+      data: result.items.map((record) => normalizeReleaseRecord(record) as VaultCurrentProjection),
+      nextCursor: result.nextCursor,
+      shardsRead: result.assetReads,
+      objectsExamined: result.items.length,
+    }
+  } catch (error) {
+    throw publicReadError(error)
   }
 }
 
@@ -70,9 +83,13 @@ export async function getGithubVaultById(
 ): Promise<VaultCurrentProjection | null> {
   const source = releaseSource(storage)
   validateSnapshot(snapshot, source)
-  const found = await source.opened.reader.getObject(vaultId.toUpperCase(), { maxAssetReads: MAX_REQUEST_ASSET_READS })
-  if (!found.complete) throw new CurrentStateObjectReadError('relationship_read_limit', 'asset read limit exceeded')
-  if (!found.item) return null
-  if (found.item.kind !== 'vault') throw new CurrentStateObjectReadError('manifest_integrity_error', 'object kind mismatch')
-  return normalizeReleaseRecord(found.item) as VaultCurrentProjection
+  try {
+    const found = await source.opened.reader.getObject(vaultId.toUpperCase(), { maxAssetReads: MAX_REQUEST_ASSET_READS })
+    if (!found.complete) throw new CurrentStateObjectReadError('relationship_read_limit', 'asset read limit exceeded')
+    if (!found.item) return null
+    if (found.item.kind !== 'vault') throw new CurrentStateObjectReadError('manifest_integrity_error', 'object kind mismatch')
+    return normalizeReleaseRecord(found.item) as VaultCurrentProjection
+  } catch (error) {
+    throw publicReadError(error)
+  }
 }
