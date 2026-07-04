@@ -52,8 +52,37 @@ jobs:
             exit 1
           fi
           echo "confirmed=true" >> "$GITHUB_OUTPUT"
-      - name: List unapplied remote D1 migrations
-        run: pnpm exec wrangler d1 migrations list xrpl-lending-monitor --remote
+      - name: Capture read-only remote D1 preflight evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p devnet-preflight
+
+          pnpm exec wrangler d1 migrations list xrpl-lending-monitor --remote \
+            | tee devnet-preflight/migrations.txt
+
+          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote \
+            --command "SELECT epoch_id, last_processed_ledger, last_processed_hash, latest_observed_ledger, latest_observed_hash, status, last_success_at FROM sync_state WHERE network = 'devnet';" \
+            | tee devnet-preflight/sync-state.txt
+
+          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote \
+            --command "SELECT id, status, first_ledger_index, first_ledger_hash, last_ledger_index, last_ledger_hash FROM network_epochs WHERE network = 'devnet' ORDER BY created_at DESC LIMIT 10;" \
+            | tee devnet-preflight/network-epochs.txt
+
+          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote \
+            --command "SELECT epoch_id, base_snapshot_id, base_ledger_index, base_ledger_hash, overlay_ledger_index, overlay_ledger_hash, updated_at FROM current_state_overlay_state WHERE network = 'devnet' ORDER BY updated_at DESC LIMIT 10;" \
+            | tee devnet-preflight/overlay-state.txt
+
+          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote \
+            --command "SELECT COUNT(*) AS processed_ledger_count, MIN(ledger_index) AS minimum_ledger, MAX(ledger_index) AS maximum_ledger FROM processed_ledgers WHERE network = 'devnet';" \
+            | tee devnet-preflight/processed-ledgers.txt
+      - name: Upload remote preflight evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: devnet-preflight-evidence
+          path: devnet-preflight
+          if-no-files-found: warn
 
   migrate:
     needs: preflight
