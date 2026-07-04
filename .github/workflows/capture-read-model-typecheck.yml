@@ -1,0 +1,39 @@
+name: Capture read-model typecheck
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/read-model-typecheck-trigger]
+
+permissions:
+  contents: write
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Capture typecheck errors
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          pnpm typecheck > typecheck-errors.txt 2>&1
+          STATUS=$?
+          API="repos/${GITHUB_REPOSITORY}/contents/.github/read-model-typecheck-errors.txt"
+          CONTENT=$(base64 -w0 typecheck-errors.txt)
+          SHA=$(gh api "$API" --jq .sha 2>/dev/null || true)
+          if [ -n "$SHA" ]; then
+            gh api --method PUT "$API" -f message="Update read-model typecheck errors" -f content="$CONTENT" -f sha="$SHA" >/dev/null
+          else
+            gh api --method PUT "$API" -f message="Create read-model typecheck errors" -f content="$CONTENT" >/dev/null
+          fi
+          exit "$STATUS"
