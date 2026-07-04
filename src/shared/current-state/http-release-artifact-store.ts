@@ -165,7 +165,7 @@ export class HttpReleaseArtifactStore implements ArtifactStore {
     }
     this.#releaseTag = options.releaseTag
     this.#resolver = options.resolver
-    this.#fetcher = options.fetcher ?? fetch
+    this.#fetcher = options.fetcher ?? ((input, init) => fetch(input, init))
     this.#cache = options.cache
     this.#timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
     this.#maxAssetBytes = options.maxAssetBytes

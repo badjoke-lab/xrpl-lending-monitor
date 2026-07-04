@@ -121,7 +121,7 @@ function resolvers(options: OpenReleaseSnapshotReaderOptions): {
 export async function openReleaseSnapshotReader(
   options: OpenReleaseSnapshotReaderOptions,
 ): Promise<ReleaseSnapshotReader> {
-  const fetcher = options.fetcher ?? fetch
+  const fetcher = options.fetcher ?? ((input, init) => fetch(input, init))
   const timeoutMs = options.timeoutMs ?? 8_000
   const sourceResolvers = resolvers(options)
   const channelBytes = await fetchBytes({
