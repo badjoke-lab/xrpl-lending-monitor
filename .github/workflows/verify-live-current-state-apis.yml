@@ -33,12 +33,16 @@ jobs:
             ERROR_CODE=""
             SNAPSHOT_ID=""
             LEDGER_INDEX=0
+            AVAILABILITY=""
+            REASON=""
             if jq -e . "responses/${KEY}.json" >/dev/null 2>&1; then
               VALID=true
-              ITEM_COUNT=$(jq '[.items[]?] | length' "responses/${KEY}.json" 2>/dev/null || echo 0)
-              ERROR_CODE=$(jq -r '.error.code // ""' "responses/${KEY}.json" 2>/dev/null || true)
-              SNAPSHOT_ID=$(jq -r '.meta.snapshotId // .snapshot.id // ""' "responses/${KEY}.json" 2>/dev/null || true)
-              LEDGER_INDEX=$(jq -r '.meta.ledgerIndex // .snapshot.ledgerIndex // 0' "responses/${KEY}.json" 2>/dev/null || echo 0)
+              ITEM_COUNT=$(jq '[.data[]?] | length' "responses/${KEY}.json" 2>/dev/null || echo 0)
+              ERROR_CODE=$(jq -r 'if (.error|type)=="object" then (.error.code // "") else (.error // "") end' "responses/${KEY}.json" 2>/dev/null || true)
+              SNAPSHOT_ID=$(jq -r '.snapshot.id // ""' "responses/${KEY}.json" 2>/dev/null || true)
+              LEDGER_INDEX=$(jq -r '.snapshot.ledger_index // 0' "responses/${KEY}.json" 2>/dev/null || echo 0)
+              AVAILABILITY=$(jq -r '.availability.state // ""' "responses/${KEY}.json" 2>/dev/null || true)
+              REASON=$(jq -r '.availability.reason // ""' "responses/${KEY}.json" 2>/dev/null || true)
             fi
             jq \
               --arg key "$KEY" \
@@ -49,7 +53,9 @@ jobs:
               --arg errorCode "$ERROR_CODE" \
               --arg snapshotId "$SNAPSHOT_ID" \
               --argjson ledgerIndex "$LEDGER_INDEX" \
-              '.[$key]={httpCode:$code,responseBytes:$bytes,validJson:$valid,itemCount:$itemCount,errorCode:$errorCode,snapshotId:$snapshotId,ledgerIndex:$ledgerIndex}' \
+              --arg availability "$AVAILABILITY" \
+              --arg reason "$REASON" \
+              '.[$key]={httpCode:$code,responseBytes:$bytes,validJson:$valid,itemCount:$itemCount,errorCode:$errorCode,snapshotId:$snapshotId,ledgerIndex:$ledgerIndex,availability:$availability,reason:$reason}' \
               live-api-results.json > next.json
             mv next.json live-api-results.json
           done
