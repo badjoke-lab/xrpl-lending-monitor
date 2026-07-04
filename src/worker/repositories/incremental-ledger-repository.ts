@@ -1,8 +1,14 @@
-import type { IncrementalScanResult } from '../../collector/incremental/scan-validated-ledgers'
-import { normalizeAffectedNodes } from '../../collector/incremental/affected-nodes'
-import { deriveLoanLifecycleEvents } from '../../collector/incremental/loan-lifecycle'
 import { deriveArchivedObjects } from '../../collector/incremental/deleted-object-archive'
 import { deriveBalanceHistory } from '../../collector/incremental/cover-debt-loss'
+import { deriveCurrentStateOverlayMutations } from '../../collector/incremental/current-state-overlay'
+import { normalizeAffectedNodes } from '../../collector/incremental/affected-nodes'
+import { deriveLoanLifecycleEvents } from '../../collector/incremental/loan-lifecycle'
+import type { IncrementalScanResult } from '../../collector/incremental/scan-validated-ledgers'
+import {
+  assertCurrentStateOverlayBase,
+  type CurrentStateOverlayBaseIdentity,
+  type CurrentStateOverlayMutation,
+} from './current-state-overlay'
 
 interface CursorRow {
   epoch_id: string | null
@@ -66,9 +72,135 @@ async function readCursor(db: D1Database): Promise<CursorRow | null> {
     .first<CursorRow>()
 }
 
+function overlayGuardStatement(options: {
+  db: D1Database
+  token: string
+  base: CurrentStateOverlayBaseIdentity
+  expectedOverlayLedgerIndex: number
+  expectedOverlayLedgerHash: string
+  checkedAt: string
+}): D1PreparedStatement {
+  return options.db
+    .prepare(
+      `INSERT INTO current_state_overlay_commit_guards (
+         commit_token, network, epoch_id, base_snapshot_id,
+         expected_base_ledger_index, expected_base_ledger_hash,
+         observed_base_ledger_index, observed_base_ledger_hash,
+         expected_overlay_ledger_index, expected_overlay_ledger_hash,
+         observed_overlay_ledger_index, observed_overlay_ledger_hash,
+         checked_at
+       ) VALUES (
+         ?1, 'devnet', ?2, ?3,
+         ?4, ?5,
+         (
+           SELECT base_ledger_index
+           FROM current_state_overlay_state
+           WHERE network = 'devnet' AND epoch_id = ?2 AND base_snapshot_id = ?3
+         ),
+         (
+           SELECT base_ledger_hash
+           FROM current_state_overlay_state
+           WHERE network = 'devnet' AND epoch_id = ?2 AND base_snapshot_id = ?3
+         ),
+         ?6, ?7,
+         (
+           SELECT overlay_ledger_index
+           FROM current_state_overlay_state
+           WHERE network = 'devnet' AND epoch_id = ?2 AND base_snapshot_id = ?3
+         ),
+         (
+           SELECT overlay_ledger_hash
+           FROM current_state_overlay_state
+           WHERE network = 'devnet' AND epoch_id = ?2 AND base_snapshot_id = ?3
+         ),
+         ?8
+       )`,
+    )
+    .bind(
+      options.token,
+      options.base.epochId,
+      options.base.baseSnapshotId,
+      options.base.baseLedgerIndex,
+      options.base.baseLedgerHash,
+      options.expectedOverlayLedgerIndex,
+      options.expectedOverlayLedgerHash,
+      options.checkedAt,
+    )
+}
+
+function overlayMutationStatement(options: {
+  db: D1Database
+  base: CurrentStateOverlayBaseIdentity
+  mutation: CurrentStateOverlayMutation
+  ledgerIndex: number
+  ledgerHash: string
+  transactionHash: string
+  transactionIndex: number
+  updatedAt: string
+}): D1PreparedStatement {
+  const projection = options.mutation.operation === 'upsert' ? options.mutation.projectionJson : null
+  const links = options.mutation.relationships ?? {}
+  return options.db
+    .prepare(
+      `INSERT INTO current_state_overlay_objects (
+         network, epoch_id, base_snapshot_id, object_type, object_id, operation,
+         projection_json, owner, account, borrower, vault_id, loan_broker_id,
+         asset_key, on_ledger_status, source_ledger_index, source_ledger_hash,
+         source_transaction_hash, source_transaction_index, updated_at
+       ) VALUES (
+         'devnet', ?1, ?2, ?3, ?4, ?5,
+         ?6, ?7, ?8, ?9, ?10, ?11,
+         ?12, ?13, ?14, ?15,
+         ?16, ?17, ?18
+       )
+       ON CONFLICT(network, epoch_id, base_snapshot_id, object_type, object_id)
+       DO UPDATE SET
+         operation = excluded.operation,
+         projection_json = excluded.projection_json,
+         owner = excluded.owner,
+         account = excluded.account,
+         borrower = excluded.borrower,
+         vault_id = excluded.vault_id,
+         loan_broker_id = excluded.loan_broker_id,
+         asset_key = excluded.asset_key,
+         on_ledger_status = excluded.on_ledger_status,
+         source_ledger_index = excluded.source_ledger_index,
+         source_ledger_hash = excluded.source_ledger_hash,
+         source_transaction_hash = excluded.source_transaction_hash,
+         source_transaction_index = excluded.source_transaction_index,
+         updated_at = excluded.updated_at
+       WHERE excluded.source_ledger_index > current_state_overlay_objects.source_ledger_index
+          OR (
+            excluded.source_ledger_index = current_state_overlay_objects.source_ledger_index
+            AND excluded.source_transaction_index > current_state_overlay_objects.source_transaction_index
+          )`,
+    )
+    .bind(
+      options.base.epochId,
+      options.base.baseSnapshotId,
+      options.mutation.objectType,
+      options.mutation.objectId,
+      options.mutation.operation,
+      projection,
+      links.owner ?? null,
+      links.account ?? null,
+      links.borrower ?? null,
+      links.vaultId ?? null,
+      links.loanBrokerId ?? null,
+      links.assetKey ?? null,
+      links.onLedgerStatus ?? null,
+      options.ledgerIndex,
+      options.ledgerHash,
+      options.transactionHash,
+      options.transactionIndex,
+      options.updatedAt,
+    )
+}
+
 export async function commitIncrementalScan(options: {
   db: D1Database
   epochId: string
+  base: CurrentStateOverlayBaseIdentity
   expectedPreviousLedger: number
   expectedPreviousHash: string
   scan: IncrementalScanResult
@@ -77,6 +209,9 @@ export async function commitIncrementalScan(options: {
 }): Promise<IncrementalCommitStatus> {
   if (options.scan.ledgers.length === 0) return 'empty'
   assertScanChain(options)
+  if (options.base.epochId !== options.epochId) {
+    throw new Error('Incremental commit base epoch does not match the requested epoch')
+  }
 
   const finalLedger = options.scan.ledgers.at(-1)
   if (!finalLedger) return 'empty'
@@ -84,9 +219,13 @@ export async function commitIncrementalScan(options: {
   if (!cursor || cursor.epoch_id !== options.epochId) {
     throw new Error('Incremental commit epoch does not match sync state')
   }
+  const overlay = await assertCurrentStateOverlayBase({ db: options.db, base: options.base })
+
   if (
     cursor.last_processed_ledger === finalLedger.ledgerIndex &&
-    cursor.last_processed_hash === finalLedger.ledgerHash
+    cursor.last_processed_hash === finalLedger.ledgerHash &&
+    overlay.overlayLedgerIndex === finalLedger.ledgerIndex &&
+    overlay.overlayLedgerHash === finalLedger.ledgerHash
   ) {
     return 'already_committed'
   }
@@ -96,6 +235,12 @@ export async function commitIncrementalScan(options: {
   ) {
     throw new Error('Incremental commit cursor changed before persistence')
   }
+  if (
+    overlay.overlayLedgerIndex !== options.expectedPreviousLedger ||
+    overlay.overlayLedgerHash !== options.expectedPreviousHash
+  ) {
+    throw new Error('Current-state overlay watermark does not match the incremental cursor')
+  }
 
   const token = commitToken({
     epochId: options.epochId,
@@ -104,6 +249,8 @@ export async function commitIncrementalScan(options: {
     finalLedgerIndex: finalLedger.ledgerIndex,
     finalLedgerHash: finalLedger.ledgerHash,
   })
+  const overlayBeforeToken = `${token}:overlay:before`
+  const overlayAfterToken = `${token}:overlay:after`
   const statements: D1PreparedStatement[] = [
     options.db
       .prepare(
@@ -134,7 +281,16 @@ export async function commitIncrementalScan(options: {
         options.expectedPreviousHash,
         options.processedAt,
       ),
+    overlayGuardStatement({
+      db: options.db,
+      token: overlayBeforeToken,
+      base: options.base,
+      expectedOverlayLedgerIndex: options.expectedPreviousLedger,
+      expectedOverlayLedgerHash: options.expectedPreviousHash,
+      checkedAt: options.processedAt,
+    }),
   ]
+
   for (const ledger of options.scan.ledgers) {
     statements.push(
       options.db
@@ -173,6 +329,11 @@ export async function commitIncrementalScan(options: {
       const lifecycleEvents = deriveLoanLifecycleEvents(objectChanges)
       const archivedObjects = deriveArchivedObjects(objectChanges)
       const balanceHistory = deriveBalanceHistory(objectChanges)
+      const overlayMutations = deriveCurrentStateOverlayMutations(event.metadata, {
+        ledgerIndex: ledger.ledgerIndex,
+        transactionHash: event.hash,
+      })
+
       statements.push(
         options.db
           .prepare(
@@ -373,8 +534,62 @@ export async function commitIncrementalScan(options: {
             ),
         )
       }
+
+      for (const mutation of overlayMutations) {
+        statements.push(
+          overlayMutationStatement({
+            db: options.db,
+            base: options.base,
+            mutation,
+            ledgerIndex: ledger.ledgerIndex,
+            ledgerHash: ledger.ledgerHash,
+            transactionHash: event.hash,
+            transactionIndex: event.transactionIndex,
+            updatedAt: options.processedAt,
+          }),
+        )
+      }
     }
   }
+
+  statements.push(
+    options.db
+      .prepare(
+        `UPDATE current_state_overlay_state
+         SET overlay_ledger_index = ?1,
+             overlay_ledger_hash = ?2,
+             updated_at = ?3
+         WHERE network = 'devnet'
+           AND epoch_id = ?4
+           AND base_snapshot_id = ?5
+           AND base_ledger_index = ?6
+           AND base_ledger_hash = ?7
+           AND overlay_ledger_index = ?8
+           AND overlay_ledger_hash = ?9`,
+      )
+      .bind(
+        finalLedger.ledgerIndex,
+        finalLedger.ledgerHash,
+        options.processedAt,
+        options.base.epochId,
+        options.base.baseSnapshotId,
+        options.base.baseLedgerIndex,
+        options.base.baseLedgerHash,
+        options.expectedPreviousLedger,
+        options.expectedPreviousHash,
+      ),
+  )
+
+  statements.push(
+    overlayGuardStatement({
+      db: options.db,
+      token: overlayAfterToken,
+      base: options.base,
+      expectedOverlayLedgerIndex: finalLedger.ledgerIndex,
+      expectedOverlayLedgerHash: finalLedger.ledgerHash,
+      checkedAt: options.processedAt,
+    }),
+  )
 
   statements.push(
     options.db
@@ -407,6 +622,15 @@ export async function commitIncrementalScan(options: {
 
   statements.push(
     options.db
+      .prepare(
+        `DELETE FROM current_state_overlay_commit_guards
+         WHERE commit_token IN (?1, ?2)`,
+      )
+      .bind(overlayBeforeToken, overlayAfterToken),
+  )
+
+  statements.push(
+    options.db
       .prepare('DELETE FROM incremental_commit_guards WHERE commit_token = ?1')
       .bind(token),
   )
@@ -419,6 +643,13 @@ export async function commitIncrementalScan(options: {
     committed.last_processed_hash !== finalLedger.ledgerHash
   ) {
     throw new Error('Incremental commit did not advance the cursor to the final ledger')
+  }
+  const committedOverlay = await assertCurrentStateOverlayBase({ db: options.db, base: options.base })
+  if (
+    committedOverlay.overlayLedgerIndex !== finalLedger.ledgerIndex ||
+    committedOverlay.overlayLedgerHash !== finalLedger.ledgerHash
+  ) {
+    throw new Error('Incremental commit did not advance the overlay watermark to the final ledger')
   }
   return 'committed'
 }

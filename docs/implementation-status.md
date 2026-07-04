@@ -19,7 +19,9 @@ The active published base is fixed to validated Devnet ledger `3371675` and cont
 
 The bounded D1 current-state overlay foundation is implemented and migration-tested locally. It includes base identity binding, overlay watermark state, current-object upserts, deletion tombstones, bounded lookup indexes, idempotent replay handling, stale-mutation rejection, same-position conflict rejection, and compare-and-set watermark advancement.
 
-The overlay is not yet connected to the incremental collector persistence boundary, public current-state API resolution, production scheduled collection, or production catch-up. Mainnet remains disabled.
+The overlay is now connected to the incremental collector persistence boundary. Processed ledgers, protocol events, normalized object changes, Loan lifecycle events, deleted-object archives, balance history, current-state overlay upserts, deletion tombstones, overlay watermark advancement, and sync cursor advancement are committed in one guarded D1 batch.
+
+The overlay is not yet connected to public current-state API resolution, production scheduled collection, or production catch-up. Mainnet remains disabled.
 
 ## Completed units
 
@@ -48,6 +50,9 @@ The overlay is not yet connected to the incremental collector persistence bounda
 - D1 current-object upsert and deletion tombstone primitives.
 - D1 overlay indexes for current list, owner, account, borrower, Vault relationship, Broker relationship, asset, status, and ledger ordering.
 - Overlay replay, stale ordering, conflict, tombstone, and watermark guard tests.
+- Incremental current-projection derivation from CreatedNode NewFields and ModifiedNode FinalFields.
+- Incremental deletion tombstone derivation from DeletedNode FinalFields.
+- Guarded incremental commit integration that advances historical evidence, current overlay state, overlay watermark, and sync cursor together or rejects the batch.
 
 ## Resource decision
 
@@ -59,16 +64,17 @@ The earlier D1-only migration work remains useful as integrity, rollback, resume
 
 ## Active unit
 
-M1-HYB-2 incremental current-projection integration is next.
+M1-HYB-3 base-plus-overlay API integration is next.
 
 The active implementation sequence is:
 
-1. derive current projection upserts from supported CreatedNode and ModifiedNode changes;
-2. derive deletion tombstones from supported DeletedNode changes;
-3. bind overlay mutations to the active base identity and current epoch;
-4. persist history, lifecycle, archive, balance, overlay, and cursor movement at the documented canonical commit boundary;
-5. prove history and current overlay advance together or neither advances;
-6. keep cursor, parent-hash, and base-identity gap rejection intact.
+1. merge base and overlay semantics into Overview;
+2. merge Vault list/detail reads;
+3. merge Loan Broker list/detail reads;
+4. merge Loan list/detail reads;
+5. merge exact Search and Account/relationship reads;
+6. ensure tombstones suppress current results and route users to indexed archive context where available;
+7. expose base identity, overlay watermark, collector cursor, and freshness metadata.
 
 The current API resolution rule remains:
 
@@ -78,19 +84,15 @@ The current API resolution rule remains:
 
 ## Next order
 
-1. Merge M1-HYB-1 D1 overlay foundation.
-2. Implement M1-HYB-2 incremental projection integration and atomic persistence boundary.
-3. Implement M1-HYB-3 base-plus-overlay API integration for Overview, list/detail, Search, Account, and relationships.
-4. Connect bounded incremental processing to the scheduled Worker path.
-5. Rehearse interruption, resume, replay, gap rejection, and reconciliation.
-6. Start bounded production catch-up from the ledger after the active base ledger.
-7. Verify newly created, modified, paid, impaired, defaulted, and deleted objects through real Devnet continuation.
-8. Complete M1 exit review, then M5-5 and M6.
+1. Implement M1-HYB-3 base-plus-overlay API integration for Overview, list/detail, Search, Account, and relationships.
+2. Connect bounded incremental processing to the scheduled Worker path.
+3. Rehearse interruption, resume, replay, gap rejection, and reconciliation.
+4. Start bounded production catch-up from the ledger after the active base ledger.
+5. Verify newly created, modified, paid, impaired, defaulted, and deleted objects through real Devnet continuation.
+6. Complete M1 exit review, then M5-5 and M6.
 
 ## Blockers
 
-- Incremental persistence does not yet write current-state overlay upserts or deletion tombstones.
-- Overlay watermark movement is not yet tied to the canonical incremental commit boundary.
 - Current API routes do not yet merge the verified base with D1 incremental state.
 - The scheduled Worker path does not yet run the incremental ledger collector.
 - Production catch-up from the active base ledger has not started.

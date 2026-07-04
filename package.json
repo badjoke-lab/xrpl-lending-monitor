@@ -23,6 +23,7 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "db:migrate:local": "wrangler d1 migrations apply xrpl-lending-monitor --local",
+    "d1:migrate:local": "pnpm db:migrate:local",
     "d1:tools": "pnpm build:d1-tools && node .d1-tools-build/run-d1-current-state.mjs",
     "artifact:measure": "pnpm build:artifact-measurement && node .artifact-measurement-build/run-artifact-measurement.mjs",
     "release-current-state:build": "pnpm build:release-current-state",

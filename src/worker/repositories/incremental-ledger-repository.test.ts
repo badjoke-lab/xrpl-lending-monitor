@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { IncrementalScanResult } from '../../collector/incremental/scan-validated-ledgers'
+import type { CurrentStateOverlayBaseIdentity } from './current-state-overlay'
 import { commitIncrementalScan } from './incremental-ledger-repository'
 
 interface CursorRow {
@@ -75,8 +76,31 @@ interface StoredBalance {
   afterValue: string | null
 }
 
+interface StoredOverlayState {
+  network: 'devnet'
+  epochId: string
+  baseSnapshotId: string
+  baseLedgerIndex: number
+  baseLedgerHash: string
+  overlayLedgerIndex: number
+  overlayLedgerHash: string
+}
+
+interface StoredOverlayObject {
+  objectType: string
+  objectId: string
+  operation: string
+  projectionJson: string | null
+  sourceLedgerIndex: number
+  sourceLedgerHash: string
+  sourceTransactionHash: string
+  sourceTransactionIndex: number
+}
+
 interface DatabaseState {
   cursor: CursorRow | null
+  overlay: StoredOverlayState
+  overlayObjects: StoredOverlayObject[]
   processedLedgers: StoredLedger[]
   protocolEvents: StoredEvent[]
   objectChanges: StoredObjectChange[]
@@ -89,6 +113,8 @@ interface DatabaseState {
 function cloneState(state: DatabaseState): DatabaseState {
   return {
     cursor: state.cursor ? { ...state.cursor } : null,
+    overlay: { ...state.overlay },
+    overlayObjects: state.overlayObjects.map((item) => ({ ...item })),
     processedLedgers: state.processedLedgers.map((item) => ({ ...item })),
     protocolEvents: state.protocolEvents.map((item) => ({ ...item })),
     objectChanges: state.objectChanges.map((item) => ({ ...item })),
@@ -102,6 +128,8 @@ function cloneState(state: DatabaseState): DatabaseState {
 function fakeDatabase(options: {
   cursor: CursorRow | null
   cursorAtBatch?: CursorRow | null
+  overlayAtBatch?: Pick<StoredOverlayState, 'overlayLedgerIndex' | 'overlayLedgerHash'>
+  base?: CurrentStateOverlayBaseIdentity
   failOnProtocolEvent?: boolean
   processedLedgers?: StoredLedger[]
   protocolEvents?: StoredEvent[]
@@ -112,8 +140,19 @@ function fakeDatabase(options: {
 }) {
   const statements: StatementRecord[] = []
   const batches: number[][] = []
+  const base = options.base ?? defaultBase
   const state: DatabaseState = {
     cursor: options.cursor,
+    overlay: {
+      network: 'devnet',
+      epochId: base.epochId,
+      baseSnapshotId: base.baseSnapshotId,
+      baseLedgerIndex: base.baseLedgerIndex,
+      baseLedgerHash: base.baseLedgerHash,
+      overlayLedgerIndex: options.cursor?.last_processed_ledger ?? base.baseLedgerIndex,
+      overlayLedgerHash: options.cursor?.last_processed_hash ?? base.baseLedgerHash,
+    },
+    overlayObjects: [],
     processedLedgers: options.processedLedgers ?? [],
     protocolEvents: options.protocolEvents ?? [],
     objectChanges: options.objectChanges ?? [],
@@ -134,6 +173,18 @@ function fakeDatabase(options: {
           return statement
         },
         async first<T>() {
+          if (sql.includes('FROM current_state_overlay_state')) {
+            return {
+              network: state.overlay.network,
+              epoch_id: state.overlay.epochId,
+              base_snapshot_id: state.overlay.baseSnapshotId,
+              base_ledger_index: state.overlay.baseLedgerIndex,
+              base_ledger_hash: state.overlay.baseLedgerHash,
+              overlay_ledger_index: state.overlay.overlayLedgerIndex,
+              overlay_ledger_hash: state.overlay.overlayLedgerHash,
+              updated_at: '2026-07-01T00:00:00.000Z',
+            } as T
+          }
           return (state.cursor ? { ...state.cursor } : null) as T | null
         },
       }
@@ -141,6 +192,10 @@ function fakeDatabase(options: {
     },
     async batch(items: Array<{ __index?: number }>) {
       if (options.cursorAtBatch !== undefined) state.cursor = options.cursorAtBatch
+      if (options.overlayAtBatch !== undefined) {
+        state.overlay.overlayLedgerIndex = options.overlayAtBatch.overlayLedgerIndex
+        state.overlay.overlayLedgerHash = options.overlayAtBatch.overlayLedgerHash
+      }
       const draft = cloneState(state)
       for (const item of items) {
         const record = statements[item.__index ?? -1]
@@ -148,6 +203,8 @@ function fakeDatabase(options: {
         applyStatement(draft, record, options)
       }
       state.cursor = draft.cursor
+      state.overlay = draft.overlay
+      state.overlayObjects = draft.overlayObjects
       state.processedLedgers = draft.processedLedgers
       state.protocolEvents = draft.protocolEvents
       state.objectChanges = draft.objectChanges
@@ -167,6 +224,41 @@ function applyStatement(
   statement: StatementRecord,
   options: { failOnProtocolEvent?: boolean },
 ): void {
+  if (statement.sql.includes('INSERT INTO current_state_overlay_commit_guards')) {
+    const [
+      token,
+      epochId,
+      baseSnapshotId,
+      expectedBaseLedgerIndex,
+      expectedBaseLedgerHash,
+      expectedOverlayLedgerIndex,
+      expectedOverlayLedgerHash,
+    ] = statement.values
+    if (
+      typeof token !== 'string' ||
+      typeof epochId !== 'string' ||
+      typeof baseSnapshotId !== 'string' ||
+      typeof expectedBaseLedgerIndex !== 'number' ||
+      typeof expectedBaseLedgerHash !== 'string' ||
+      typeof expectedOverlayLedgerIndex !== 'number' ||
+      typeof expectedOverlayLedgerHash !== 'string'
+    ) {
+      throw new Error('Invalid overlay guard bind values')
+    }
+    if (
+      state.overlay.epochId !== epochId ||
+      state.overlay.baseSnapshotId !== baseSnapshotId ||
+      state.overlay.baseLedgerIndex !== expectedBaseLedgerIndex ||
+      state.overlay.baseLedgerHash !== expectedBaseLedgerHash ||
+      state.overlay.overlayLedgerIndex !== expectedOverlayLedgerIndex ||
+      state.overlay.overlayLedgerHash !== expectedOverlayLedgerHash
+    ) {
+      throw new Error('CHECK constraint failed: current_state_overlay_commit_guards')
+    }
+    state.guards.push(token)
+    return
+  }
+
   if (statement.sql.includes('incremental_commit_guards') && statement.sql.includes('INSERT')) {
     const [token, epochId, expectedLedger, expectedHash] = statement.values
     if (
@@ -186,6 +278,62 @@ function applyStatement(
       throw new Error('CHECK constraint failed: incremental_commit_guards')
     }
     state.guards.push(token)
+    return
+  }
+
+  if (statement.sql.includes('INSERT INTO current_state_overlay_objects')) {
+    const [
+      ,
+      ,
+      objectType,
+      objectId,
+      operation,
+      projectionJson,
+      ,
+      ,
+      ,
+      ,
+      ,
+      ,
+      ,
+      sourceLedgerIndex,
+      sourceLedgerHash,
+      sourceTransactionHash,
+      sourceTransactionIndex,
+    ] = statement.values
+    if (
+      typeof objectType !== 'string' ||
+      typeof objectId !== 'string' ||
+      typeof operation !== 'string' ||
+      typeof sourceLedgerIndex !== 'number' ||
+      typeof sourceLedgerHash !== 'string' ||
+      typeof sourceTransactionHash !== 'string' ||
+      typeof sourceTransactionIndex !== 'number'
+    ) {
+      throw new Error('Invalid overlay object bind values')
+    }
+    const existing = state.overlayObjects.find(
+      (item) => item.objectType === objectType && item.objectId === objectId,
+    )
+    const row = {
+      objectType,
+      objectId,
+      operation,
+      projectionJson: typeof projectionJson === 'string' ? projectionJson : null,
+      sourceLedgerIndex,
+      sourceLedgerHash,
+      sourceTransactionHash,
+      sourceTransactionIndex,
+    }
+    if (!existing) {
+      state.overlayObjects.push(row)
+    } else if (
+      sourceLedgerIndex > existing.sourceLedgerIndex ||
+      (sourceLedgerIndex === existing.sourceLedgerIndex &&
+        sourceTransactionIndex > existing.sourceTransactionIndex)
+    ) {
+      Object.assign(existing, row)
+    }
     return
   }
 
@@ -472,6 +620,50 @@ function applyStatement(
     return
   }
 
+  if (statement.sql.includes('UPDATE current_state_overlay_state')) {
+    const [
+      overlayLedgerIndex,
+      overlayLedgerHash,
+      ,
+      epochId,
+      baseSnapshotId,
+      baseLedgerIndex,
+      baseLedgerHash,
+      expectedLedgerIndex,
+      expectedLedgerHash,
+    ] = statement.values
+    if (
+      typeof overlayLedgerIndex !== 'number' ||
+      typeof overlayLedgerHash !== 'string' ||
+      typeof epochId !== 'string' ||
+      typeof baseSnapshotId !== 'string' ||
+      typeof baseLedgerIndex !== 'number' ||
+      typeof baseLedgerHash !== 'string' ||
+      typeof expectedLedgerIndex !== 'number' ||
+      typeof expectedLedgerHash !== 'string'
+    ) {
+      throw new Error('Invalid overlay watermark bind values')
+    }
+    if (
+      state.overlay.epochId === epochId &&
+      state.overlay.baseSnapshotId === baseSnapshotId &&
+      state.overlay.baseLedgerIndex === baseLedgerIndex &&
+      state.overlay.baseLedgerHash === baseLedgerHash &&
+      state.overlay.overlayLedgerIndex === expectedLedgerIndex &&
+      state.overlay.overlayLedgerHash === expectedLedgerHash
+    ) {
+      state.overlay.overlayLedgerIndex = overlayLedgerIndex
+      state.overlay.overlayLedgerHash = overlayLedgerHash
+    }
+    return
+  }
+
+  if (statement.sql.includes('current_state_overlay_commit_guards') && statement.sql.includes('DELETE')) {
+    const tokens = statement.values.filter((value): value is string => typeof value === 'string')
+    state.guards = state.guards.filter((item) => !tokens.includes(item))
+    return
+  }
+
   if (statement.sql.includes('incremental_commit_guards') && statement.sql.includes('DELETE')) {
     const [token] = statement.values
     state.guards = state.guards.filter((item) => item !== token)
@@ -507,6 +699,10 @@ function brokerBalanceScan(): IncrementalScanResult {
             },
             FinalFields: {
               VaultID: 'V'.repeat(64),
+              Owner: 'rOwner',
+              Account: 'rBrokerAccount',
+              Sequence: 1,
+              LoanSequence: 2,
               DebtTotal: '1200',
               CoverAvailable: '90',
               CoverRateMinimum: 1500,
@@ -584,6 +780,25 @@ function deletedLoanScan(): IncrementalScanResult {
   }
 }
 
+function completeLoanFields(overrides: Record<string, unknown> = {}) {
+  return {
+    Borrower: 'rBorrower',
+    Flags: 0,
+    LoanBrokerID: 'B'.repeat(64),
+    LoanSequence: 7,
+    StartDate: 1000,
+    PaymentInterval: 300,
+    GracePeriod: 20,
+    PreviousPaymentDueDate: 1000,
+    NextPaymentDueDate: 1300,
+    PaymentRemaining: 1,
+    PrincipalOutstanding: '600',
+    TotalValueOutstanding: '660',
+    PeriodicPayment: '330',
+    ...overrides,
+  }
+}
+
 function scan(): IncrementalScanResult {
   const transaction = {
     hash: 'T'.repeat(64),
@@ -607,8 +822,7 @@ function scan(): IncrementalScanResult {
               FutureProtocolField: 'before',
             },
             FinalFields: {
-              LoanBrokerID: 'B'.repeat(64),
-              PaymentRemaining: 1,
+              ...completeLoanFields(),
               FutureProtocolField: 'after',
             },
           },
@@ -662,6 +876,14 @@ const after = {
   last_processed_hash: 'C'.repeat(64),
 }
 
+const defaultBase: CurrentStateOverlayBaseIdentity = {
+  network: 'devnet',
+  epochId: 'epoch-1',
+  baseSnapshotId: 'snapshot-10',
+  baseLedgerIndex: 10,
+  baseLedgerHash: 'A'.repeat(64),
+}
+
 async function commitWith(
   state: ReturnType<typeof fakeDatabase>,
   options: { retainPayloads?: boolean; scan?: IncrementalScanResult } = {},
@@ -669,6 +891,7 @@ async function commitWith(
   return commitIncrementalScan({
     db: state.db,
     epochId: 'epoch-1',
+    base: defaultBase,
     expectedPreviousLedger: 10,
     expectedPreviousHash: 'A'.repeat(64),
     scan: options.scan ?? scan(),
@@ -691,7 +914,16 @@ describe('commitIncrementalScan', () => {
     expect(batched.filter((sql) => sql?.includes('INSERT INTO loan_lifecycle_events'))).toHaveLength(
       1,
     )
-    expect(batched.at(-2)).toContain('UPDATE sync_state')
+    const syncStateUpdate = batched.findIndex((sql) => sql?.includes('UPDATE sync_state'))
+    const overlayGuardCleanup = batched.findIndex((sql) =>
+      sql?.includes('DELETE FROM current_state_overlay_commit_guards'),
+    )
+    const incrementalGuardCleanup = batched.findIndex((sql) =>
+      sql?.includes('DELETE FROM incremental_commit_guards'),
+    )
+    expect(syncStateUpdate).toBeGreaterThan(-1)
+    expect(overlayGuardCleanup).toBeGreaterThan(syncStateUpdate)
+    expect(incrementalGuardCleanup).toBeGreaterThan(overlayGuardCleanup)
     expect(batched.at(-1)).toContain('DELETE FROM incremental_commit_guards')
     expect(state.state.cursor).toEqual(after)
     expect(state.state.processedLedgers.map((item) => item.ledgerIndex)).toEqual([11, 12])
