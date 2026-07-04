@@ -1,0 +1,49 @@
+name: Verify live current-state filters
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/live-api-filter-trigger]
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify query and filters
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ORIGIN: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+        run: |
+          set -euo pipefail
+          curl -fsS "$ORIGIN/api/vaults?limit=1" -o vault.json
+          VQ=$(jq -r '.data[0].id' vault.json | cut -c1-12)
+          VC=$(curl -sS -G -o vault-query.json -w '%{http_code}' "$ORIGIN/api/vaults" --data-urlencode 'limit=2' --data-urlencode "q=$VQ")
+
+          curl -fsS "$ORIGIN/api/loan-brokers?limit=1" -o broker.json
+          BQ=$(jq -r '.data[0].id' broker.json | cut -c1-12)
+          BC=$(curl -sS -G -o broker-query.json -w '%{http_code}' "$ORIGIN/api/loan-brokers" --data-urlencode 'limit=2' --data-urlencode "q=$BQ")
+
+          curl -fsS "$ORIGIN/api/loans?limit=1" -o loan.json
+          LQ=$(jq -r '.data[0].id' loan.json | cut -c1-12)
+          LS=$(jq -r '.data[0].on_ledger_status' loan.json)
+          LQC=$(curl -sS -G -o loan-query.json -w '%{http_code}' "$ORIGIN/api/loans" --data-urlencode 'limit=2' --data-urlencode "q=$LQ")
+          LFC=$(curl -sS -G -o loan-filter.json -w '%{http_code}' "$ORIGIN/api/loans" --data-urlencode 'limit=2' --data-urlencode "on_ledger_status=$LS")
+
+          jq -n --arg vaultCode "$VC" --arg brokerCode "$BC" --arg loanQueryCode "$LQC" --arg loanFilterCode "$LFC" --argjson vaultCount "$(jq '.data|length' vault-query.json)" --argjson brokerCount "$(jq '.data|length' broker-query.json)" --argjson loanQueryCount "$(jq '.data|length' loan-query.json)" --argjson loanFilterCount "$(jq '.data|length' loan-filter.json)" '{vaults:{code:$vaultCode,count:$vaultCount},loanBrokers:{code:$brokerCode,count:$brokerCount},loans:{queryCode:$loanQueryCode,queryCount:$loanQueryCount,filterCode:$loanFilterCode,filterCount:$loanFilterCount}}' > result.json
+
+          test "$VC" = 200
+          test "$BC" = 200
+          test "$LQC" = 200
+          test "$LFC" = 200
+
+          API="repos/${GITHUB_REPOSITORY}/contents/.github/live-api-filter-results.json"
+          CONTENT=$(base64 -w0 result.json)
+          SHA=$(gh api "$API" --jq .sha 2>/dev/null || true)
+          if [ -n "$SHA" ]; then
+            gh api --method PUT "$API" -f message="Update live API filter verification" -f content="$CONTENT" -f sha="$SHA" >/dev/null
+          else
+            gh api --method PUT "$API" -f message="Create live API filter verification" -f content="$CONTENT" >/dev/null
+          fi
