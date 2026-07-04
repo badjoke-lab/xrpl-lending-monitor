@@ -1,0 +1,30 @@
+name: Capture live API error body
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/live-api-error-body-trigger]
+
+permissions:
+  contents: write
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Capture response
+        env:
+          GH_TOKEN: ${{ github.token }}
+          URL: https://xrpl-lending-monitor.badjoke-lab.workers.dev/api/vaults?limit=1
+        run: |
+          CODE=$(curl -L -sS -D headers.txt -o body.txt -w '%{http_code}' --connect-timeout 10 --max-time 180 "$URL" || true)
+          BODY=$(head -c 300 body.txt | tr '\n' ' ')
+          jq -n --arg httpCode "$CODE" --arg body "$BODY" '{httpCode:$httpCode,body:$body}' > result.json
+          API="repos/${GITHUB_REPOSITORY}/contents/.github/live-api-error-body.json"
+          CONTENT=$(base64 -w0 result.json)
+          SHA=$(gh api "$API" --jq .sha 2>/dev/null || true)
+          if [ -n "$SHA" ]; then
+            gh api --method PUT "$API" -f message="Update live API error body" -f content="$CONTENT" -f sha="$SHA" >/dev/null
+          else
+            gh api --method PUT "$API" -f message="Create live API error body" -f content="$CONTENT" >/dev/null
+          fi
