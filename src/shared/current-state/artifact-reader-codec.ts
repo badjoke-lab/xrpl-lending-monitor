@@ -14,6 +14,8 @@ export interface DecodedGzipNdjson {
   decompressedSha256: string
 }
 
+const DEFAULT_MAX_DECOMPRESSED_BYTES = 64 * 1024 * 1024
+
 function arrayBuffer(bytes: Uint8Array): ArrayBuffer {
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
 }
@@ -81,9 +83,10 @@ export async function decodeGzipNdjsonWithMetadata(options: {
   sha256: string
   uncompressedSha256?: string
   expectedDecompressedBytes?: number
-  maxDecompressedBytes: number
+  maxDecompressedBytes?: number
 }): Promise<DecodedGzipNdjson> {
-  if (!Number.isSafeInteger(options.maxDecompressedBytes) || options.maxDecompressedBytes < 1) {
+  const maxDecompressedBytes = options.maxDecompressedBytes ?? DEFAULT_MAX_DECOMPRESSED_BYTES
+  if (!Number.isSafeInteger(maxDecompressedBytes) || maxDecompressedBytes < 1) {
     throw new Error('maxDecompressedBytes must be a positive safe integer')
   }
   if (
@@ -94,7 +97,7 @@ export async function decodeGzipNdjsonWithMetadata(options: {
   }
   if (
     options.expectedDecompressedBytes !== undefined
-    && options.expectedDecompressedBytes > options.maxDecompressedBytes
+    && options.expectedDecompressedBytes > maxDecompressedBytes
   ) {
     throw new Error('Artifact declared decompressed size exceeds limit')
   }
@@ -107,7 +110,7 @@ export async function decodeGzipNdjsonWithMetadata(options: {
     const { done, value } = await reader.read()
     if (done) break
     total += value.byteLength
-    if (total > options.maxDecompressedBytes) {
+    if (total > maxDecompressedBytes) {
       await reader.cancel()
       throw new Error('Artifact decompressed size exceeds limit')
     }
@@ -145,7 +148,7 @@ export async function decodeGzipNdjson(options: {
   sha256: string
   uncompressedSha256?: string
   expectedDecompressedBytes?: number
-  maxDecompressedBytes: number
+  maxDecompressedBytes?: number
 }): Promise<unknown[]> {
   return (await decodeGzipNdjsonWithMetadata(options)).records
 }
