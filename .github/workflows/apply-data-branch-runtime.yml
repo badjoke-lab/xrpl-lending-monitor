@@ -1,0 +1,52 @@
+name: Apply data branch runtime configuration
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/data-branch-runtime-trigger]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Apply exact runtime changes
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          runtime = Path('src/worker/repositories/release-current-state.ts')
+          text = runtime.read_text()
+          before = "      githubRepository: config.currentState.githubRepository,\n      channelTag: config.currentState.releaseChannelTag,"
+          after = "      githubRepository: config.currentState.githubRepository,\n      githubBranch: 'current-state-data',\n      channelTag: config.currentState.releaseChannelTag,"
+          if text.count(before) != 1:
+              raise SystemExit('runtime insertion point mismatch')
+          runtime.write_text(text.replace(before, after))
+
+          wrangler = Path('wrangler.jsonc')
+          config = wrangler.read_text()
+          replacements = {
+              '"CURRENT_STATE_MAX_ASSET_BYTES": "8388608"': '"CURRENT_STATE_MAX_ASSET_BYTES": "33554432"',
+              '"CURRENT_STATE_MAX_DECOMPRESSED_BYTES": "16777216"': '"CURRENT_STATE_MAX_DECOMPRESSED_BYTES": "100663296"',
+          }
+          for old, new in replacements.items():
+              if config.count(old) != 1:
+                  raise SystemExit(f'wrangler replacement mismatch: {old}')
+              config = config.replace(old, new)
+          wrangler.write_text(config)
+          PY
+
+      - name: Commit runtime changes
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/worker/repositories/release-current-state.ts wrangler.jsonc
+          git diff --cached --check
+          git commit -m "Read current state from GitHub data branch"
+          git push origin HEAD:main
