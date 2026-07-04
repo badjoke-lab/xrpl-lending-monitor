@@ -22,7 +22,11 @@
     "MAINNET_ENABLED": "false",
     "XRPL_DEVNET_RPC_URL": "https://s.devnet.rippletest.net:51234",
     "XRPL_RPC_TIMEOUT_MS": "8000",
-    "NETWORK_STATUS_STALE_AFTER_SECONDS": "30"
+    "NETWORK_STATUS_STALE_AFTER_SECONDS": "30",
+    "CURRENT_STATE_GITHUB_REPOSITORY": "badjoke-lab/xrpl-lending-monitor",
+    "CURRENT_STATE_RELEASE_CHANNEL_TAG": "current-state-channel",
+    "CURRENT_STATE_MAX_ASSET_BYTES": "8388608",
+    "CURRENT_STATE_MAX_DECOMPRESSED_BYTES": "16777216"
   },
   "observability": {
     "enabled": true
