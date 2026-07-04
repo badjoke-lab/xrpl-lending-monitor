@@ -2,6 +2,10 @@ import type { Hono } from 'hono'
 
 import { resolveRuntimeConfig } from '../../shared/runtime-config'
 import type { Bindings } from '../env'
+import {
+  CurrentStateObjectReadError,
+  listCurrentVaults,
+} from '../repositories/current-state-object-reader'
 import { openConfiguredReleaseCurrentState } from '../repositories/release-current-state'
 
 function diagnosticMessage(error: unknown): string {
@@ -39,6 +43,23 @@ async function probeKind(
   }
 }
 
+async function probeInvalidCursor(
+  opened: NonNullable<Awaited<ReturnType<typeof openConfiguredReleaseCurrentState>>>,
+): Promise<string> {
+  try {
+    await listCurrentVaults(opened.source, opened.snapshot, {
+      limit: 2,
+      cursor: 'deadbeef',
+      sort: 'id_asc',
+    })
+    return 'unexpected_success'
+  } catch (error) {
+    return error instanceof CurrentStateObjectReadError
+      ? error.code
+      : `unexpected:${diagnosticMessage(error)}`
+  }
+}
+
 export function registerCurrentStateDiagnosticRoute(app: Hono<{ Bindings: Bindings }>): void {
   app.get('/api/internal/current-state-diagnostic', async (context) => {
     const config = resolveRuntimeConfig(context.env)
@@ -54,6 +75,7 @@ export function registerCurrentStateDiagnosticRoute(app: Hono<{ Bindings: Bindin
       const vaults = await probeKind(opened.source.opened.reader, 'vault')
       const loanBrokers = await probeKind(opened.source.opened.reader, 'loan-broker')
       const loans = await probeKind(opened.source.opened.reader, 'loan')
+      const invalidCursor = await probeInvalidCursor(opened)
       return context.json({
         ok: true,
         stage: 'read_model_navigation',
@@ -68,6 +90,7 @@ export function registerCurrentStateDiagnosticRoute(app: Hono<{ Bindings: Bindin
           vaults,
           loan_brokers: loanBrokers,
           loans,
+          invalid_cursor: invalidCursor,
         },
       })
     } catch (error) {
