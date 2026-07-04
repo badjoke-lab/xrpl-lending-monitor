@@ -16,7 +16,7 @@ jobs:
       - name: Inspect runtime commit checks
         env:
           GH_TOKEN: ${{ github.token }}
-          TARGET_SHA: 535e7898e08de194cc985d344c78cd23f114894d
+          TARGET_SHA: e1d9c78544003e82b49c430a4dee81d86e38c3eb
         run: |
           gh api "repos/${GITHUB_REPOSITORY}/commits/${TARGET_SHA}/check-runs" \
             --jq '{total_count,check_runs:[.check_runs[]|{name,status,conclusion,details_url,app:.app.name,started_at,completed_at,output}]}' \
