@@ -1,0 +1,1 @@
+This marker records that patch payloads were uploaded before source materialization.
