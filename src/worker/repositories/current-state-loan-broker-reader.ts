@@ -7,6 +7,14 @@ import {
   type ListCurrentLoanBrokersResult,
   type LoanBrokerSort,
 } from './d1-current-loan-broker-reader'
+import {
+  getGithubLoanBrokerById,
+  listGithubLoanBrokers,
+} from './github-current-brokers'
+import {
+  isReleaseCurrentStateSource,
+  type CurrentStateStorage,
+} from './release-current-state'
 
 export type {
   CurrentLoanBrokerRecord,
@@ -15,22 +23,26 @@ export type {
   LoanBrokerSort,
 }
 
-function database(storage: R2Bucket | D1Database): D1Database {
+function database(storage: CurrentStateStorage): D1Database {
   return storage as unknown as D1Database
 }
 
 export function listCurrentLoanBrokers(
-  storage: R2Bucket | D1Database,
+  storage: CurrentStateStorage,
   snapshot: ActiveSnapshotRecord,
   options: ListCurrentLoanBrokersOptions,
 ): Promise<ListCurrentLoanBrokersResult> {
-  return listStoredCurrentLoanBrokers(database(storage), snapshot, options)
+  return isReleaseCurrentStateSource(storage)
+    ? listGithubLoanBrokers(storage, snapshot, options)
+    : listStoredCurrentLoanBrokers(database(storage), snapshot, options)
 }
 
 export function getCurrentLoanBrokerById(
-  storage: R2Bucket | D1Database,
+  storage: CurrentStateStorage,
   snapshot: ActiveSnapshotRecord,
   brokerId: string,
 ): Promise<CurrentLoanBrokerRecord | null> {
-  return getStoredCurrentLoanBrokerById(database(storage), snapshot, brokerId)
+  return isReleaseCurrentStateSource(storage)
+    ? getGithubLoanBrokerById(storage, snapshot, brokerId)
+    : getStoredCurrentLoanBrokerById(database(storage), snapshot, brokerId)
 }
