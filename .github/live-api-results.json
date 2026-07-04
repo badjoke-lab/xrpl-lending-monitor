@@ -1,35 +1,35 @@
 {
   "vaults": {
-    "httpCode": "200",
-    "responseBytes": 258,
-    "validJson": true,
+    "httpCode": "503",
+    "responseBytes": 17,
+    "validJson": false,
     "itemCount": 0,
     "errorCode": "",
     "snapshotId": "",
     "ledgerIndex": 0,
-    "availability": "unavailable",
-    "reason": "active current-state snapshot has not been activated"
+    "availability": "",
+    "reason": ""
   },
   "loanBrokers": {
-    "httpCode": "200",
-    "responseBytes": 264,
-    "validJson": true,
+    "httpCode": "503",
+    "responseBytes": 17,
+    "validJson": false,
     "itemCount": 0,
     "errorCode": "",
     "snapshotId": "",
     "ledgerIndex": 0,
-    "availability": "unavailable",
-    "reason": "active current-state snapshot has not been activated"
+    "availability": "",
+    "reason": ""
   },
   "loans": {
-    "httpCode": "200",
-    "responseBytes": 257,
-    "validJson": true,
+    "httpCode": "503",
+    "responseBytes": 17,
+    "validJson": false,
     "itemCount": 0,
     "errorCode": "",
     "snapshotId": "",
     "ledgerIndex": 0,
-    "availability": "unavailable",
-    "reason": "active current-state snapshot has not been activated"
+    "availability": "",
+    "reason": ""
   }
 }
