@@ -1,6 +1,8 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 
+import { decode } from '@xrpl-commons/ripple-binary-codec'
+
 import { scanLedgerObjects, type CurrentObjectFilter, type ScannedLedgerObject } from '../src/collector/current-state/scan-ledger-objects'
 import { XrplJsonRpcClient } from '../src/collector/network/xrpl-rpc'
 import { canonicalJson, gzipDeterministic, sha256Hex, utf8 } from '../src/shared/current-state/canonical-json'
@@ -29,6 +31,20 @@ type Arguments = {
   epochId: string | null
   snapshotId: string | null
   indexBuckets: number
+}
+
+type LedgerDataResult = {
+  ledger_hash?: unknown
+  ledger_index?: unknown
+  validated?: unknown
+  state?: unknown
+  marker?: unknown
+}
+
+type RelevantEntry = {
+  kind: ReleaseKind
+  page: number
+  object: ScannedLedgerObject & Record<string, unknown>
 }
 
 const FILTERS: readonly CurrentObjectFilter[] = ['vault', 'loan_broker', 'loan']
@@ -81,6 +97,12 @@ function requiredString(value: unknown, field: string): string {
   return value
 }
 
+function requiredHex(value: unknown, field: string): string {
+  const hex = requiredString(value, field)
+  if (hex.length % 2 !== 0 || !/^[A-Fa-f0-9]+$/.test(hex)) throw new Error(`${field} must be an even-length hexadecimal string`)
+  return hex.toUpperCase()
+}
+
 function requiredLedgerIndex(value: unknown): number {
   const parsed = typeof value === 'string' ? Number(value) : value
   if (!Number.isSafeInteger(parsed) || Number(parsed) < 1) throw new Error('ledger_index must be a positive safe integer')
@@ -93,10 +115,25 @@ function id(value: string, field: string): string {
   return normalized
 }
 
+function markerFingerprint(marker: unknown): string {
+  try {
+    return JSON.stringify(marker)
+  } catch {
+    throw new Error('ledger_data marker could not be serialized')
+  }
+}
+
 function kindFromFilter(filter: CurrentObjectFilter): ReleaseKind {
   if (filter === 'vault') return 'vault'
   if (filter === 'loan_broker') return 'loan-broker'
   return 'loan'
+}
+
+function kindFromLedgerEntryType(value: unknown): ReleaseKind | null {
+  if (value === 'Vault') return 'vault'
+  if (value === 'LoanBroker') return 'loan-broker'
+  if (value === 'Loan') return 'loan'
+  return null
 }
 
 async function getValidatedLedger(endpoint: string, timeoutMs: number): Promise<LedgerIdentity> {
@@ -198,12 +235,12 @@ function addRelationshipIndex(indexes: ReleaseNativeIndexRecord[], record: Relea
   }
 }
 
-async function makeDataRecords(options: Arguments, ledger: LedgerIdentity): Promise<{
-  records: ReleaseNativeDataRecord[]
+async function typedTraversal(options: Arguments, ledger: LedgerIdentity): Promise<{
+  entries: RelevantEntry[]
   sourcePages: number
   decodedObjectCount: number
 }> {
-  const records: ReleaseNativeDataRecord[] = []
+  const entries: RelevantEntry[] = []
   let sourcePages = 0
   let decodedObjectCount = 0
   for (const filter of FILTERS) {
@@ -220,21 +257,106 @@ async function makeDataRecords(options: Arguments, ledger: LedgerIdentity): Prom
     sourcePages += scan.metrics.pages
     decodedObjectCount += scan.metrics.objects
     const kind = kindFromFilter(filter)
-    for (const object of scan.objects) {
-      const value = object as ScannedLedgerObject & Record<string, unknown>
-      records.push({
-        schemaVersion: 1,
-        segmentId: 'segment-00000',
-        sourcePage: 1,
-        id: id(value.index, 'object.index'),
+    for (const object of scan.objects) entries.push({ kind, page: 1, object: object as ScannedLedgerObject & Record<string, unknown> })
+  }
+  return { entries, sourcePages: Math.max(1, sourcePages), decodedObjectCount }
+}
+
+async function fullLedgerTraversal(options: Arguments, ledger: LedgerIdentity): Promise<{
+  entries: RelevantEntry[]
+  sourcePages: number
+  decodedObjectCount: number
+}> {
+  const client = new XrplJsonRpcClient({ endpoint: options.endpoint, timeoutMs: options.timeoutMs })
+  const entries: RelevantEntry[] = []
+  const seenMarkers = new Set<string>()
+  let marker: unknown = undefined
+  let page = 0
+  let decodedObjectCount = 0
+
+  for (;;) {
+    if (page >= options.pageLimit) throw new Error(`full-ledger traversal reached page limit ${options.pageLimit} before completion`)
+    const params: Record<string, unknown> = {
+      ledger_hash: ledger.ledgerHash,
+      binary: true,
+      limit: options.objectLimitPerPage,
+    }
+    if (marker !== undefined) params.marker = marker
+    const result = await client.call<LedgerDataResult>('ledger_data', params)
+    const ledgerHash = id(requiredString(result.ledger_hash, 'ledger_hash'), 'ledger_hash')
+    const ledgerIndex = requiredLedgerIndex(result.ledger_index)
+    if (ledgerHash !== ledger.ledgerHash || ledgerIndex !== ledger.ledgerIndex) throw new Error('ledger_data moved during traversal')
+    if (result.validated !== true) throw new Error('ledger_data response must describe a validated ledger')
+    if (!Array.isArray(result.state)) throw new Error('ledger_data response state must be an array')
+
+    page += 1
+    for (let index = 0; index < result.state.length; index += 1) {
+      const stateEntry = result.state[index]
+      if (!isRecord(stateEntry)) throw new Error(`state[${index}] must be an object`)
+      const binaryHex = requiredHex(stateEntry.data, `state[${index}].data`)
+      const decoded = decode(binaryHex)
+      if (!isRecord(decoded)) throw new Error(`state[${index}] did not decode to an object`)
+      decodedObjectCount += 1
+      const kind = kindFromLedgerEntryType(decoded.LedgerEntryType)
+      if (!kind) continue
+      entries.push({
         kind,
-        valueSha256: await sha256Hex(canonicalJson(value)),
-        value,
+        page,
+        object: {
+          ...decoded,
+          LedgerEntryType: decoded.LedgerEntryType,
+          index: id(requiredString(stateEntry.index, `state[${index}].index`), `state[${index}].index`),
+          BinaryHex: binaryHex,
+        } as ScannedLedgerObject & Record<string, unknown>,
       })
     }
+
+    marker = result.marker
+    if (marker === undefined || marker === null) break
+    const fingerprint = markerFingerprint(marker)
+    if (seenMarkers.has(fingerprint)) throw new Error(`ledger_data repeated marker after page ${page}`)
+    seenMarkers.add(fingerprint)
+  }
+
+  return { entries, sourcePages: Math.max(1, page), decodedObjectCount }
+}
+
+async function makeDataRecords(options: Arguments, ledger: LedgerIdentity): Promise<{
+  records: ReleaseNativeDataRecord[]
+  sourcePages: number
+  decodedObjectCount: number
+  traversalMode: 'typed' | 'full-ledger-fallback'
+}> {
+  let materialized: Awaited<ReturnType<typeof typedTraversal>>
+  let traversalMode: 'typed' | 'full-ledger-fallback' = 'typed'
+  try {
+    process.stderr.write('Trying typed ledger_data traversal for Vault, LoanBroker, and Loan.\n')
+    materialized = await typedTraversal(options, ledger)
+  } catch (error) {
+    traversalMode = 'full-ledger-fallback'
+    process.stderr.write(`Typed traversal failed; falling back to full-ledger binary traversal: ${error instanceof Error ? error.message : String(error)}\n`)
+    materialized = await fullLedgerTraversal(options, ledger)
+  }
+
+  const records: ReleaseNativeDataRecord[] = []
+  for (const entry of materialized.entries) {
+    records.push({
+      schemaVersion: 1,
+      segmentId: 'segment-00000',
+      sourcePage: entry.page,
+      id: id(entry.object.index, 'object.index'),
+      kind: entry.kind,
+      valueSha256: await sha256Hex(canonicalJson(entry.object)),
+      value: entry.object,
+    })
   }
   records.sort((left, right) => left.id.localeCompare(right.id) || left.kind.localeCompare(right.kind))
-  return { records, sourcePages: Math.max(1, sourcePages), decodedObjectCount }
+  return {
+    records,
+    sourcePages: materialized.sourcePages,
+    decodedObjectCount: materialized.decodedObjectCount,
+    traversalMode,
+  }
 }
 
 async function bucketize(indexes: readonly ReleaseNativeIndexRecord[], bucketCount: number): Promise<ReleaseNativeIndexRecord[][]> {
@@ -272,7 +394,7 @@ async function main(): Promise<void> {
     compressedBytes: dataStats.compressedBytes,
     uncompressedBytes: dataStats.uncompressedBytes,
     recordCount: materialized.records.length,
-    sourcePages: { first: 1, last: 1, count: 1 },
+    sourcePages: { first: 1, last: materialized.sourcePages, count: materialized.sourcePages },
     firstObjectId: materialized.records[0]?.id ?? null,
     lastObjectId: materialized.records.at(-1)?.id ?? null,
     counts: dataCounts,
@@ -324,7 +446,7 @@ async function main(): Promise<void> {
     relevantObjectCount: materialized.records.length,
     counts: dataCounts,
     layout: {
-      pagesPerSegment: 1,
+      pagesPerSegment: materialized.sourcePages,
       indexBuckets: args.indexBuckets,
       dataSegmentCount: 1,
       hashFunction: 'sha256-first-u32-mod-bucket-count' as const,
@@ -358,6 +480,7 @@ async function main(): Promise<void> {
   const summary = {
     releaseTag: args.releaseTag,
     channelTag: 'current-state-channel',
+    traversalMode: materialized.traversalMode,
     manifestAssetName,
     manifestSha256,
     ledger,
@@ -369,7 +492,7 @@ async function main(): Promise<void> {
   await writeText(join(args.outputDir, 'release-summary.json'), summary)
   await writeFile(
     join(args.outputDir, 'release-notes.md'),
-    `# XRPL Lending Monitor current-state snapshot\n\n- release: ${args.releaseTag}\n- ledger: ${ledger.ledgerIndex}\n- ledger hash: ${ledger.ledgerHash}\n- vaults: ${dataCounts.vaults}\n- loan brokers: ${dataCounts.loanBrokers}\n- loans: ${dataCounts.loans}\n- manifest sha256: ${manifestSha256}\n`,
+    `# XRPL Lending Monitor current-state snapshot\n\n- release: ${args.releaseTag}\n- traversal mode: ${materialized.traversalMode}\n- ledger: ${ledger.ledgerIndex}\n- ledger hash: ${ledger.ledgerHash}\n- vaults: ${dataCounts.vaults}\n- loan brokers: ${dataCounts.loanBrokers}\n- loans: ${dataCounts.loans}\n- manifest sha256: ${manifestSha256}\n`,
     'utf8',
   )
   process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`)
