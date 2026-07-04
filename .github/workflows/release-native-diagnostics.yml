@@ -1,0 +1,37 @@
+name: Release-native diagnostics
+
+on:
+  push:
+    branches:
+      - github-release-current-state
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint-log:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Capture lint log
+        run: |
+          set +e
+          pnpm lint > lint.log 2>&1
+          status=$?
+          tail -n 200 lint.log
+          exit $status
+      - name: Upload lint log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-native-lint-log
+          path: lint.log
