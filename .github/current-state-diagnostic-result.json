@@ -1,1 +1,1 @@
-{"ok":false,"stage":"open_release_snapshot","code":"open_failed","message":"Illegal invocation: function called with incorrect `this` reference. See https://developers.cloudflare.com/workers/observability/errors/#illegal-invocation-errors for details."}
+{"ok":true,"stage":"opened","snapshot_id":"devnet-3371675-0ba2ed766c19","ledger_index":3371675,"counts":{"vaults":797550,"loan_brokers":528228,"loans":226725}}
