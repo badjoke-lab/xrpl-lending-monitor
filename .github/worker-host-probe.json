@@ -1,0 +1,26 @@
+[
+  {
+    "host": "xrpl-lending-monitor.badjoke-lab.workers.dev",
+    "address": "172.67.191.38",
+    "httpCode": "200",
+    "responseBytes": 258
+  },
+  {
+    "host": "xrpl-lending-monitor.badjoke.workers.dev",
+    "address": "",
+    "httpCode": "000",
+    "responseBytes": 258
+  },
+  {
+    "host": "xrpl-lending-monitor.sohachi.workers.dev",
+    "address": "",
+    "httpCode": "000",
+    "responseBytes": 258
+  },
+  {
+    "host": "xrpl-lending-monitor.sohachiz.workers.dev",
+    "address": "",
+    "httpCode": "000",
+    "responseBytes": 258
+  }
+]
