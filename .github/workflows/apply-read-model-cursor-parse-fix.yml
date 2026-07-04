@@ -20,13 +20,7 @@ jobs:
           path = Path('src/shared/current-state/github-read-model-reader.ts')
           text = path.read_text()
           before = "  const source = record(JSON.parse(new TextDecoder().decode(bytes)), 'cursor')"
-          after = """  let parsed: unknown
-  try {
-    parsed = JSON.parse(new TextDecoder().decode(bytes))
-  } catch {
-    throw new Error('Read-model cursor is invalid')
-  }
-  const source = record(parsed, 'cursor')"""
+          after = "  let parsed: unknown\n  try {\n    parsed = JSON.parse(new TextDecoder().decode(bytes))\n  } catch {\n    throw new Error('Read-model cursor is invalid')\n  }\n  const source = record(parsed, 'cursor')"
           if text.count(before) != 1:
               raise SystemExit('cursor parse target mismatch')
           path.write_text(text.replace(before, after))
