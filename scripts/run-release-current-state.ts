@@ -3,7 +3,6 @@ import { join, resolve } from 'node:path'
 
 import { decode } from '@xrpl-commons/ripple-binary-codec'
 
-import { scanLedgerObjects, type CurrentObjectFilter, type ScannedLedgerObject } from '../src/collector/current-state/scan-ledger-objects'
 import { XrplJsonRpcClient } from '../src/collector/network/xrpl-rpc'
 import { canonicalJson, gzipDeterministic, sha256Hex, utf8 } from '../src/shared/current-state/canonical-json'
 import { releaseNativeBucket, type ReleaseNativeDataAsset, type ReleaseNativeDataRecord, type ReleaseNativeIndexAsset, type ReleaseNativeIndexRecord, type ReleaseNativeManifest, type ReleaseNativeObjectReference } from '../src/shared/current-state/release-native-reader'
@@ -44,10 +43,9 @@ type LedgerDataResult = {
 type RelevantEntry = {
   kind: ReleaseKind
   page: number
-  object: ScannedLedgerObject & Record<string, unknown>
+  object: Record<string, unknown>
 }
 
-const FILTERS: readonly CurrentObjectFilter[] = ['vault', 'loan_broker', 'loan']
 const DEFAULT_ENDPOINT = 'https://s.devnet.rippletest.net:51234'
 const DATA_ASSET_NAME = 'data-segment-00000.ndjson.gz'
 
@@ -78,7 +76,7 @@ function parseArguments(args: readonly string[]): Arguments {
   return {
     endpoint: argumentValue(args, '--endpoint') ?? DEFAULT_ENDPOINT,
     timeoutMs: integerArgument(args, '--timeout-ms', 8_000),
-    pageLimit: integerArgument(args, '--page-limit', 500),
+    pageLimit: integerArgument(args, '--page-limit', 50),
     objectLimitPerPage: integerArgument(args, '--object-limit-per-page', 2_048),
     outputDir: resolve(argumentValue(args, '--output-dir') ?? '.local/current-state-release'),
     releaseTag,
@@ -121,12 +119,6 @@ function markerFingerprint(marker: unknown): string {
   } catch {
     throw new Error('ledger_data marker could not be serialized')
   }
-}
-
-function kindFromFilter(filter: CurrentObjectFilter): ReleaseKind {
-  if (filter === 'vault') return 'vault'
-  if (filter === 'loan_broker') return 'loan-broker'
-  return 'loan'
 }
 
 function kindFromLedgerEntryType(value: unknown): ReleaseKind | null {
@@ -235,37 +227,11 @@ function addRelationshipIndex(indexes: ReleaseNativeIndexRecord[], record: Relea
   }
 }
 
-async function typedTraversal(options: Arguments, ledger: LedgerIdentity): Promise<{
+async function boundedFullLedgerTraversal(options: Arguments, ledger: LedgerIdentity): Promise<{
   entries: RelevantEntry[]
   sourcePages: number
   decodedObjectCount: number
-}> {
-  const entries: RelevantEntry[] = []
-  let sourcePages = 0
-  let decodedObjectCount = 0
-  for (const filter of FILTERS) {
-    const scan = await scanLedgerObjects({
-      endpoint: options.endpoint,
-      timeoutMs: options.timeoutMs,
-      ledgerHash: ledger.ledgerHash,
-      ledgerIndex: ledger.ledgerIndex,
-      filter,
-      pageLimit: options.pageLimit,
-      requestLimit: options.pageLimit,
-      objectLimitPerPage: options.objectLimitPerPage,
-    })
-    sourcePages += scan.metrics.pages
-    decodedObjectCount += scan.metrics.objects
-    const kind = kindFromFilter(filter)
-    for (const object of scan.objects) entries.push({ kind, page: 1, object: object as ScannedLedgerObject & Record<string, unknown> })
-  }
-  return { entries, sourcePages: Math.max(1, sourcePages), decodedObjectCount }
-}
-
-async function fullLedgerTraversal(options: Arguments, ledger: LedgerIdentity): Promise<{
-  entries: RelevantEntry[]
-  sourcePages: number
-  decodedObjectCount: number
+  complete: boolean
 }> {
   const client = new XrplJsonRpcClient({ endpoint: options.endpoint, timeoutMs: options.timeoutMs })
   const entries: RelevantEntry[] = []
@@ -273,9 +239,14 @@ async function fullLedgerTraversal(options: Arguments, ledger: LedgerIdentity): 
   let marker: unknown = undefined
   let page = 0
   let decodedObjectCount = 0
+  let complete = false
 
+  process.stderr.write(`Running bounded full-ledger traversal with page limit ${options.pageLimit}.\n`)
   for (;;) {
-    if (page >= options.pageLimit) throw new Error(`full-ledger traversal reached page limit ${options.pageLimit} before completion`)
+    if (page >= options.pageLimit) {
+      process.stderr.write(`Bounded traversal stopped at page limit ${options.pageLimit}; snapshot is partial.\n`)
+      break
+    }
     const params: Record<string, unknown> = {
       ledger_hash: ledger.ledgerHash,
       binary: true,
@@ -290,6 +261,7 @@ async function fullLedgerTraversal(options: Arguments, ledger: LedgerIdentity): 
     if (!Array.isArray(result.state)) throw new Error('ledger_data response state must be an array')
 
     page += 1
+    if (page % 10 === 0) process.stderr.write(`Processed ${page} ledger_data pages; relevant objects so far: ${entries.length}.\n`)
     for (let index = 0; index < result.state.length; index += 1) {
       const stateEntry = result.state[index]
       if (!isRecord(stateEntry)) throw new Error(`state[${index}] must be an object`)
@@ -307,44 +279,38 @@ async function fullLedgerTraversal(options: Arguments, ledger: LedgerIdentity): 
           LedgerEntryType: decoded.LedgerEntryType,
           index: id(requiredString(stateEntry.index, `state[${index}].index`), `state[${index}].index`),
           BinaryHex: binaryHex,
-        } as ScannedLedgerObject & Record<string, unknown>,
+        },
       })
     }
 
     marker = result.marker
-    if (marker === undefined || marker === null) break
+    if (marker === undefined || marker === null) {
+      complete = true
+      break
+    }
     const fingerprint = markerFingerprint(marker)
     if (seenMarkers.has(fingerprint)) throw new Error(`ledger_data repeated marker after page ${page}`)
     seenMarkers.add(fingerprint)
   }
 
-  return { entries, sourcePages: Math.max(1, page), decodedObjectCount }
+  return { entries, sourcePages: Math.max(1, page), decodedObjectCount, complete }
 }
 
 async function makeDataRecords(options: Arguments, ledger: LedgerIdentity): Promise<{
   records: ReleaseNativeDataRecord[]
   sourcePages: number
   decodedObjectCount: number
-  traversalMode: 'typed' | 'full-ledger-fallback'
+  traversalMode: 'bounded-full-ledger'
+  complete: boolean
 }> {
-  let materialized: Awaited<ReturnType<typeof typedTraversal>>
-  let traversalMode: 'typed' | 'full-ledger-fallback' = 'typed'
-  try {
-    process.stderr.write('Trying typed ledger_data traversal for Vault, LoanBroker, and Loan.\n')
-    materialized = await typedTraversal(options, ledger)
-  } catch (error) {
-    traversalMode = 'full-ledger-fallback'
-    process.stderr.write(`Typed traversal failed; falling back to full-ledger binary traversal: ${error instanceof Error ? error.message : String(error)}\n`)
-    materialized = await fullLedgerTraversal(options, ledger)
-  }
-
+  const materialized = await boundedFullLedgerTraversal(options, ledger)
   const records: ReleaseNativeDataRecord[] = []
   for (const entry of materialized.entries) {
     records.push({
       schemaVersion: 1,
       segmentId: 'segment-00000',
       sourcePage: entry.page,
-      id: id(entry.object.index, 'object.index'),
+      id: id(requiredString(entry.object.index, 'object.index'), 'object.index'),
       kind: entry.kind,
       valueSha256: await sha256Hex(canonicalJson(entry.object)),
       value: entry.object,
@@ -355,7 +321,8 @@ async function makeDataRecords(options: Arguments, ledger: LedgerIdentity): Prom
     records,
     sourcePages: materialized.sourcePages,
     decodedObjectCount: materialized.decodedObjectCount,
-    traversalMode,
+    traversalMode: 'bounded-full-ledger',
+    complete: materialized.complete,
   }
 }
 
@@ -440,7 +407,7 @@ async function main(): Promise<void> {
     releaseTag: args.releaseTag,
     ledgerIndex: ledger.ledgerIndex,
     ledgerHash: ledger.ledgerHash,
-    complete: true,
+    complete: materialized.complete,
     sourcePages: materialized.sourcePages,
     decodedObjectCount: materialized.decodedObjectCount,
     relevantObjectCount: materialized.records.length,
@@ -481,9 +448,12 @@ async function main(): Promise<void> {
     releaseTag: args.releaseTag,
     channelTag: 'current-state-channel',
     traversalMode: materialized.traversalMode,
+    complete: materialized.complete,
     manifestAssetName,
     manifestSha256,
     ledger,
+    sourcePages: materialized.sourcePages,
+    decodedObjectCount: materialized.decodedObjectCount,
     counts: dataCounts,
     dataAssets: 1,
     indexAssets: indexAssets.length,
@@ -492,7 +462,7 @@ async function main(): Promise<void> {
   await writeText(join(args.outputDir, 'release-summary.json'), summary)
   await writeFile(
     join(args.outputDir, 'release-notes.md'),
-    `# XRPL Lending Monitor current-state snapshot\n\n- release: ${args.releaseTag}\n- traversal mode: ${materialized.traversalMode}\n- ledger: ${ledger.ledgerIndex}\n- ledger hash: ${ledger.ledgerHash}\n- vaults: ${dataCounts.vaults}\n- loan brokers: ${dataCounts.loanBrokers}\n- loans: ${dataCounts.loans}\n- manifest sha256: ${manifestSha256}\n`,
+    `# XRPL Lending Monitor current-state snapshot\n\n- release: ${args.releaseTag}\n- traversal mode: ${materialized.traversalMode}\n- complete: ${materialized.complete}\n- source pages: ${materialized.sourcePages}\n- decoded objects: ${materialized.decodedObjectCount}\n- ledger: ${ledger.ledgerIndex}\n- ledger hash: ${ledger.ledgerHash}\n- vaults: ${dataCounts.vaults}\n- loan brokers: ${dataCounts.loanBrokers}\n- loans: ${dataCounts.loans}\n- manifest sha256: ${manifestSha256}\n`,
     'utf8',
   )
   process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`)
