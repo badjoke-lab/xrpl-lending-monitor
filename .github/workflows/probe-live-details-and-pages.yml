@@ -1,0 +1,36 @@
+name: Probe live details and pages
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/current-state-ops-inspect-trigger]
+
+permissions:
+  contents: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe public details and second pages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ORIGIN: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+        run: |
+          jq -n '{}' > result.json
+          for SPEC in 'vaults:vaults' 'loanBrokers:loan-brokers' 'loans:loans'; do
+            KEY=${SPEC%%:*}
+            PATH_PART=${SPEC#*:}
+            curl -sS "$ORIGIN/api/$PATH_PART?limit=2" -o list.json
+            ID=$(jq -r '.data[0].id' list.json)
+            CURSOR=$(jq -r '.page.next_cursor' list.json)
+            DETAIL=$(curl -sS -o detail.json -w '%{http_code}' "$ORIGIN/api/$PATH_PART/$ID")
+            PAGE2=$(curl -sS -G -o page2.json -w '%{http_code}' "$ORIGIN/api/$PATH_PART" --data-urlencode 'limit=2' --data-urlencode "cursor=$CURSOR")
+            COUNT2=$(jq '.data|length' page2.json)
+            jq --arg key "$KEY" --arg detail "$DETAIL" --arg page2 "$PAGE2" --argjson count2 "$COUNT2" '.[$key]={detailCode:$detail,page2Code:$page2,page2Count:$count2}' result.json > next.json
+            mv next.json result.json
+          done
+          API="repos/${GITHUB_REPOSITORY}/contents/.github/live-details-pages-result.json"
+          CONTENT=$(base64 -w0 result.json)
+          SHA=$(gh api "$API" --jq .sha 2>/dev/null || true)
+          if [ -n "$SHA" ]; then gh api --method PUT "$API" -f message="Update live detail pagination result" -f content="$CONTENT" -f sha="$SHA" >/dev/null; else gh api --method PUT "$API" -f message="Create live detail pagination result" -f content="$CONTENT" >/dev/null; fi
