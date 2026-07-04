@@ -8,7 +8,7 @@ import { getSyncState } from '../../worker/repositories/network-status-repositor
 import { buildCollectorRunState } from './collector-run-record'
 import { readCollectorScope } from './collector-scope'
 import { planCollectorPreflight } from './preflight'
-import { runPreparedIncrementalRange } from './run-prepared-range'
+import { runBoundedPreparedIncrementalRange } from './run-bounded-prepared-range'
 
 export interface IncrementalCycleResult {
   status:
@@ -26,7 +26,7 @@ export interface IncrementalCycleDependencies {
   getCollectorState?: typeof getIncrementalCollectorState
   saveCollectorState?: typeof saveIncrementalCollectorState
   readScope?: typeof readCollectorScope
-  runRange?: typeof runPreparedIncrementalRange
+  runRange?: typeof runBoundedPreparedIncrementalRange
   now?: () => Date
 }
 
@@ -41,7 +41,7 @@ export async function runIncrementalCollectorCycle(options: {
   const getCollectorState = dependencies.getCollectorState ?? getIncrementalCollectorState
   const saveCollectorState = dependencies.saveCollectorState ?? saveIncrementalCollectorState
   const readScope = dependencies.readScope ?? readCollectorScope
-  const runRange = dependencies.runRange ?? runPreparedIncrementalRange
+  const runRange = dependencies.runRange ?? runBoundedPreparedIncrementalRange
   const now = dependencies.now ?? (() => new Date())
   const started = now()
   const attemptedAt = started.toISOString()
