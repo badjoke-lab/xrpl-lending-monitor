@@ -59,7 +59,7 @@ M1-HYB-6 production execution and verification remains active.
 
 ## Next order
 
-1. Merge the green HYB-3 through HYB-6 implementation chain into `main` in dependency order.
+1. Complete HYB-6 integration into `main`.
 2. Deploy the merged migrations and Worker code through a verified remote execution path.
 3. Inspect remote Devnet state and run the guarded handover dry-run.
 4. Execute the guarded handover only if the remote evidence matches the fresh-initialization or aligned-replay contract.
@@ -70,7 +70,7 @@ M1-HYB-6 production execution and verification remains active.
 
 ## Remaining blockers
 
-- The stacked HYB-3 through HYB-6 PR chain is not yet merged to `main`.
+- HYB-6 integration into `main` is not yet complete.
 - Remote migrations and Worker deployment for the catch-up path are not yet verified.
 - Production catch-up has not started.
 - Continuous Devnet monitoring verification is not complete.
