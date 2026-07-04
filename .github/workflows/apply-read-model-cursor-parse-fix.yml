@@ -32,4 +32,5 @@ jobs:
           git add src/shared/current-state/github-read-model-reader.ts
           git diff --cached --check
           git commit -m "Normalize read-model cursor parse errors"
+          git pull --rebase origin main
           git push origin HEAD:main
