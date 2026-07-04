@@ -1,0 +1,31 @@
+name: Reconcile HYB-6 integration history
+
+on:
+  push:
+    branches:
+      - hyb5
+    paths:
+      - .github/workflows/reconcile-hyb6-integration.yml
+
+permissions:
+  contents: write
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: hyb5
+      - name: Merge main and remove helper workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git merge --no-edit -X ours origin/main
+          git rm .github/workflows/reconcile-hyb6-integration.yml
+          git commit -m "ci: remove HYB-6 reconciliation helper"
+          git push origin HEAD:hyb5
