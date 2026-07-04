@@ -2,10 +2,10 @@ import type { LiveContinuationVerificationReport, VerificationPath } from './liv
 
 export interface M1RuntimeExitEvidence {
   expectedBase: {
-    epochId: string
-    snapshotId: string
-    ledgerIndex: number
-    ledgerHash: string
+    epochId: string | null
+    snapshotId: string | null
+    ledgerIndex: number | null
+    ledgerHash: string | null
   }
   boundBase: {
     epochId: string | null
@@ -41,19 +41,31 @@ export interface M1RuntimeExitReport {
 export function evaluateM1RuntimeExit(
   evidence: M1RuntimeExitEvidence,
 ): M1RuntimeExitReport {
-  const baseMatches = evidence.boundBase.epochId === evidence.expectedBase.epochId
+  const expectedBaseAvailable = evidence.expectedBase.epochId !== null
+    && evidence.expectedBase.snapshotId !== null
+    && evidence.expectedBase.ledgerIndex !== null
+    && evidence.expectedBase.ledgerHash !== null
+  const boundBaseAvailable = evidence.boundBase.epochId !== null
+    && evidence.boundBase.snapshotId !== null
+    && evidence.boundBase.ledgerIndex !== null
+    && evidence.boundBase.ledgerHash !== null
+  const baseMatches = expectedBaseAvailable
+    && boundBaseAvailable
+    && evidence.boundBase.epochId === evidence.expectedBase.epochId
     && evidence.boundBase.snapshotId === evidence.expectedBase.snapshotId
     && evidence.boundBase.ledgerIndex === evidence.expectedBase.ledgerIndex
     && evidence.boundBase.ledgerHash === evidence.expectedBase.ledgerHash
 
-  const verifiedBaseBinding: VerificationPath = evidence.boundBase.epochId === null
-    ? { state: 'missing', reason: 'verified base binding is unavailable' }
+  const verifiedBaseBinding: VerificationPath = !expectedBaseAvailable || !boundBaseAvailable
+    ? { state: 'missing', reason: 'verified base source or active overlay binding is unavailable' }
     : baseMatches
       ? { state: 'observed', reason: 'active overlay is bound to the expected verified base' }
       : { state: 'inconsistent', reason: 'active overlay base identity differs from the expected verified base' }
 
   let catchUpStart: VerificationPath
-  if (evidence.processedLedgers.count === 0 || evidence.processedLedgers.minimum === null) {
+  if (evidence.expectedBase.ledgerIndex === null) {
+    catchUpStart = { state: 'missing', reason: 'verified base ledger is unavailable' }
+  } else if (evidence.processedLedgers.count === 0 || evidence.processedLedgers.minimum === null) {
     catchUpStart = { state: 'missing', reason: 'production catch-up has not produced processed-ledger evidence' }
   } else if (evidence.processedLedgers.minimum !== evidence.expectedBase.ledgerIndex + 1) {
     catchUpStart = {
