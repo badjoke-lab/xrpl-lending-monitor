@@ -43,6 +43,7 @@ export async function openConfiguredReleaseCurrentState(
   try {
     const opened = await openReleaseSnapshotReader({
       githubRepository: config.currentState.githubRepository,
+      channelTag: config.currentState.releaseChannelTag,
       cache,
       maxAssetBytes: config.currentState.maxAssetBytes,
       maxDecompressedBytes: config.currentState.maxDecompressedBytes,
@@ -81,9 +82,6 @@ export async function resolveCurrentStateStorage(
 ): Promise<ResolvedCurrentStateStorage> {
   const releaseConfigured = Boolean(config.currentState.githubRepository)
   if (releaseConfigured) {
-    if (!config.currentState.githubRepository) {
-      return { source: db, snapshot: null, releaseUnavailable: true }
-    }
     try {
       const release = await openConfiguredReleaseCurrentState(config)
       if (!release) return { source: db, snapshot: null, releaseUnavailable: true }
