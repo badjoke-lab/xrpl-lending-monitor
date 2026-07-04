@@ -1,0 +1,47 @@
+name: Fix current-state fetch binding
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/current-state-fetch-binding-trigger]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fix unbound fetch usage
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          replacements = {
+              Path('src/shared/current-state/release-reader.ts'): (
+                  'const fetcher = options.fetcher ?? fetch',
+                  'const fetcher = options.fetcher ?? ((input, init) => fetch(input, init))',
+              ),
+              Path('src/shared/current-state/http-release-artifact-store.ts'): (
+                  'this.#fetcher = options.fetcher ?? fetch',
+                  'this.#fetcher = options.fetcher ?? ((input, init) => fetch(input, init))',
+              ),
+          }
+
+          for path, (before, after) in replacements.items():
+              text = path.read_text()
+              if text.count(before) != 1:
+                  raise SystemExit(f'{path}: expected exactly one fetch binding target')
+              path.write_text(text.replace(before, after))
+          PY
+
+      - name: Commit fix
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/shared/current-state/release-reader.ts src/shared/current-state/http-release-artifact-store.ts
+          git diff --cached --check
+          git commit -m "Fix current-state fetch binding on Workers"
+          git push origin HEAD:main
