@@ -1,0 +1,1 @@
+Temporary patch payloads for bootstrapping the GitHub Release current-state runtime branch. These files are removed by ops/current-state-patches/apply-runtime-patches.mjs after the source patch is applied.
