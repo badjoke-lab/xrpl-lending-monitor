@@ -24,6 +24,9 @@ jobs:
       SOURCE_RUN_ID: '28699460881'
       SOURCE_HEAD_SHA: '6ec422753c474b805c8a1f7f53b184c556163190'
     steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
       - name: Download complete artifact
         uses: actions/download-artifact@v4
         with:
