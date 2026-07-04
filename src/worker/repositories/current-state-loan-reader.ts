@@ -10,9 +10,9 @@ import {
   type LoanSort,
 } from './d1-current-loan-reader'
 import {
-  getGithubLoanById,
-  listGithubLoans,
-} from './github-current-loans'
+  getBaseOverlayLoanById,
+  listBaseOverlayLoans,
+} from './base-overlay-loan-reader'
 import {
   isReleaseCurrentStateSource,
   type CurrentStateStorage,
@@ -37,7 +37,7 @@ export function listCurrentLoans(
   options: ListCurrentLoansOptions,
 ): Promise<ListCurrentLoansResult> {
   return isReleaseCurrentStateSource(storage)
-    ? listGithubLoans(storage, snapshot, options)
+    ? listBaseOverlayLoans(storage.db, storage, snapshot, options)
     : listStoredCurrentLoans(database(storage), snapshot, options)
 }
 
@@ -48,6 +48,6 @@ export function getCurrentLoanById(
   evaluatedAtRippleTime: number,
 ): Promise<CurrentLoanRecord | null> {
   return isReleaseCurrentStateSource(storage)
-    ? getGithubLoanById(storage, snapshot, loanId, evaluatedAtRippleTime)
+    ? getBaseOverlayLoanById(storage.db, storage, snapshot, loanId, evaluatedAtRippleTime)
     : getStoredCurrentLoanById(database(storage), snapshot, loanId, evaluatedAtRippleTime)
 }

@@ -24,7 +24,13 @@ import {
   searchHistory,
 } from './repositories/history-api-repository'
 import { getCurrentEpoch, getSyncState } from './repositories/network-status-repository'
-import { resolveCurrentStateStorage } from './repositories/release-current-state'
+import { resolveBaseOverlaySnapshotCounts } from './repositories/base-overlay-overview'
+import { readResolvedOverlayState } from './repositories/base-overlay-current-reader'
+import {
+  isReleaseCurrentStateSource,
+  resolveCurrentStateStorage,
+} from './repositories/release-current-state'
+import { searchGithubCurrentStateExact } from './repositories/github-current-indexes'
 import { registerCurrentLoanBrokerRoutes } from './routes/current-loan-brokers'
 import { registerCurrentStateDiagnosticRoute } from './routes/current-state-diagnostic'
 import {
@@ -83,7 +89,13 @@ async function loadCoreApiContext(db: D1Database, config: RuntimeConfig) {
     getCurrentEpoch(db),
     resolveCurrentStateStorage(config, db),
   ])
-  return { state, epoch, snapshot: currentState.snapshot, currentState }
+  const snapshot = currentState.snapshot
+    ? await resolveBaseOverlaySnapshotCounts(db, currentState.snapshot)
+    : null
+  const overlay = snapshot
+    ? await readResolvedOverlayState({ db, snapshot })
+    : null
+  return { state, epoch, snapshot, overlay, currentState }
 }
 
 function parsePageLimit(value: string | undefined): number | null {
@@ -442,17 +454,27 @@ app.get('/api/audit/cover-loss', async (context) => {
 })
 
 app.get('/api/search', async (context) => {
-  resolveRuntimeConfig(context.env)
+  const config = resolveRuntimeConfig(context.env)
   const query = context.req.query('q')?.trim()
   if (!query) {
     return context.json({ error: 'invalid_query', message: 'q is required' }, 400)
   }
   const limit = parsePageLimit(context.req.query('limit'))
   if (limit === null) return invalidLimitResponse(context)
+  const [historyResults, currentState] = await Promise.all([
+    searchHistory(context.env.DB, query, { limit }),
+    resolveCurrentStateStorage(config, context.env.DB),
+  ])
+  const current = currentState.snapshot && isReleaseCurrentStateSource(currentState.source)
+    ? await searchGithubCurrentStateExact(currentState.source, currentState.snapshot, query, { limit })
+    : null
   return context.json(
     serializeSearchResponse({
       query,
-      results: await searchHistory(context.env.DB, query, { limit }),
+      results: historyResults,
+      current: current?.data,
+      currentNextCursor: current?.nextCursor ?? null,
+      currentComplete: current?.complete ?? false,
       limit,
     }),
   )

@@ -1,10 +1,10 @@
 # Implementation status
 
-Last updated: 2026-07-04.
+Last updated: 2026-07-05.
 
 ## Current phase
 
-M1 incremental continuation and base-plus-overlay integration is active. M0, M2, M3, M4, and M5-1 through M5-4 are complete at their documented implementation checkpoints. M5-5 and M6 remain gated behind M1 exit.
+M1 incremental continuation is active. M1-HYB-3 base-plus-overlay public API integration is complete. M0, M2, M3, M4, and M5-1 through M5-4 are complete at their documented implementation checkpoints. M5-5 and M6 remain gated behind M1 exit.
 
 ## Production state
 
@@ -21,7 +21,7 @@ The bounded D1 current-state overlay foundation is implemented and migration-tes
 
 The overlay is now connected to the incremental collector persistence boundary. Processed ledgers, protocol events, normalized object changes, Loan lifecycle events, deleted-object archives, balance history, current-state overlay upserts, deletion tombstones, overlay watermark advancement, and sync cursor advancement are committed in one guarded D1 batch.
 
-The overlay is not yet connected to public current-state API resolution, production scheduled collection, or production catch-up. Mainnet remains disabled.
+The overlay is connected to public current-state API resolution for Overview, current Vault, Loan Broker, Loan, exact Search, Account, and relationship reads. Production scheduled collection and production catch-up are not yet wired. Mainnet remains disabled.
 
 ## Completed units
 
@@ -53,6 +53,12 @@ The overlay is not yet connected to public current-state API resolution, product
 - Incremental current-projection derivation from CreatedNode NewFields and ModifiedNode FinalFields.
 - Incremental deletion tombstone derivation from DeletedNode FinalFields.
 - Guarded incremental commit integration that advances historical evidence, current overlay state, overlay watermark, and sync cursor together or rejects the batch.
+- Base-plus-overlay current API resolution for Overview counts and metadata.
+- Base-plus-overlay Vault, Loan Broker, and Loan list/detail reads.
+- Overlay-aware exact Search, Account, and relationship reads.
+- Tombstone suppression for current detail, list, search, count, and relationship resolution.
+- Base identity, overlay watermark, collector cursor, and freshness metadata exposure in current Overview.
+- Focused resolver, pagination, relationship, and count-delta tests for base-plus-overlay behavior.
 
 ## Resource decision
 
@@ -64,36 +70,33 @@ The earlier D1-only migration work remains useful as integrity, rollback, resume
 
 ## Active unit
 
-M1-HYB-3 base-plus-overlay API integration is next.
+M1-HYB-4 scheduled incremental collector wiring is next.
 
-The active implementation sequence is:
+M1-HYB-3 is complete. Current API resolution now applies:
 
-1. merge base and overlay semantics into Overview;
-2. merge Vault list/detail reads;
-3. merge Loan Broker list/detail reads;
-4. merge Loan list/detail reads;
-5. merge exact Search and Account/relationship reads;
-6. ensure tombstones suppress current results and route users to indexed archive context where available;
-7. expose base identity, overlay watermark, collector cursor, and freshness metadata.
+1. overlay upsert overrides the base object;
+2. deletion tombstone hides the base object from current routes;
+3. no overlay record falls back to the verified base.
 
-The current API resolution rule remains:
+The completed M1-HYB-3 surface includes:
 
-- overlay upsert overrides the base object;
-- deletion tombstone hides the base object from current routes;
-- no overlay record falls back to the verified base.
+- merged Overview counts, active base identity, overlay watermark, collector cursor, and freshness metadata;
+- merged Vault list/detail reads;
+- merged Loan Broker list/detail reads with overlay-aware Vault relationships;
+- merged Loan list/detail reads with overlay-aware Broker and Vault relationships;
+- current exact Search, Account, and relationship reads that apply overlay upserts and tombstones;
+- focused tests for detail precedence, list pagination, filters, duplicate suppression, tombstones, related-object fail-closed behavior, newly created overlay relationships, and count deltas.
 
 ## Next order
 
-1. Implement M1-HYB-3 base-plus-overlay API integration for Overview, list/detail, Search, Account, and relationships.
-2. Connect bounded incremental processing to the scheduled Worker path.
-3. Rehearse interruption, resume, replay, gap rejection, and reconciliation.
-4. Start bounded production catch-up from the ledger after the active base ledger.
-5. Verify newly created, modified, paid, impaired, defaulted, and deleted objects through real Devnet continuation.
-6. Complete M1 exit review, then M5-5 and M6.
+1. Connect bounded incremental processing to the scheduled Worker path.
+2. Rehearse interruption, resume, replay, gap rejection, and reconciliation.
+3. Start bounded production catch-up from the ledger after the active base ledger.
+4. Verify newly created, modified, paid, impaired, defaulted, and deleted objects through real Devnet continuation.
+5. Complete M1 exit review, then M5-5 and M6.
 
 ## Blockers
 
-- Current API routes do not yet merge the verified base with D1 incremental state.
 - The scheduled Worker path does not yet run the incremental ledger collector.
 - Production catch-up from the active base ledger has not started.
 - Continuous monitoring, reconciliation, M5-5, and M6 evidence remain incomplete.

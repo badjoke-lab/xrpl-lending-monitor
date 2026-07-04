@@ -1,4 +1,7 @@
 import type {
+  SearchIndexValue,
+} from '../../shared/current-state/artifact-reader-types'
+import type {
   ArchivedObjectRecord,
   BalanceHistoryApiRecord,
   EpochStatsRecord,
@@ -125,6 +128,23 @@ function serializeSearchResult(result: SearchResultRecord) {
     object_id: result.objectId,
     loan_id: result.loanId,
     provenance: 'indexed',
+  }
+}
+
+function serializeCurrentSearchResult(result: SearchIndexValue) {
+  if (result.category === 'object-id') {
+    return {
+      kind: 'current_object',
+      object_type: result.reference.kind,
+      object_id: result.reference.id,
+      data_key: result.reference.dataKey,
+      provenance: 'direct',
+    }
+  }
+  return {
+    kind: 'current_account',
+    account: result.account,
+    provenance: 'direct',
   }
 }
 
@@ -387,12 +407,25 @@ export function serializeBalanceHistoryResponse(options: {
 export function serializeSearchResponse(options: {
   query: string
   results: SearchResultRecord[]
+  current?: SearchIndexValue[]
+  currentNextCursor?: string | null
+  currentComplete?: boolean
   limit: number
 }) {
   return {
     network: 'devnet',
     query: options.query,
+    current: (options.current ?? []).map(serializeCurrentSearchResult),
     data: options.results.map(serializeSearchResult),
     page: page(options.limit),
+    current_page: {
+      limit: options.limit,
+      next_cursor: options.currentNextCursor ?? null,
+      complete: options.currentComplete ?? true,
+    },
+    provenance: {
+      current: options.current ? 'direct' : 'unavailable',
+      history: 'indexed',
+    },
   }
 }

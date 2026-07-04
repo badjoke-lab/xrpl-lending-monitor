@@ -64,7 +64,7 @@ export function registerCurrentStateDiagnosticRoute(app: Hono<{ Bindings: Bindin
   app.get('/api/internal/current-state-diagnostic', async (context) => {
     const config = resolveRuntimeConfig(context.env)
     try {
-      const opened = await openConfiguredReleaseCurrentState(config)
+      const opened = await openConfiguredReleaseCurrentState(config, context.env.DB)
       if (!opened) {
         return context.json({
           ok: false,

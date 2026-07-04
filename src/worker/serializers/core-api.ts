@@ -183,16 +183,33 @@ export function serializeOverview(options: {
   state: StoredSyncState | null
   epoch: NetworkEpochRecord | null
   snapshot: ActiveSnapshotRecord | null
+  overlay?: {
+    overlayLedgerIndex: number
+    overlayLedgerHash: string
+    updatedAt: string
+  } | null
 }) {
   return {
     network: 'devnet',
     epoch: epochSummary(options.epoch),
     snapshot: snapshotSummary(options.snapshot),
+    base: snapshotSummary(options.snapshot),
+    overlay_watermark: options.overlay
+      ? {
+          ledger_index: options.overlay.overlayLedgerIndex,
+          ledger_hash: options.overlay.overlayLedgerHash,
+          updated_at: options.overlay.updatedAt,
+        }
+      : null,
     freshness: {
       collector_status: options.state?.status ?? 'uninitialized',
       latest_validated_ledger: options.state?.latestObservedLedger ?? null,
       last_processed_ledger: options.state?.lastProcessedLedger ?? null,
+      last_processed_hash: options.state?.lastProcessedHash ?? null,
       last_success_at: options.state?.lastSuccessAt ?? null,
+      overlay_ledger: options.overlay?.overlayLedgerIndex ?? null,
+      overlay_hash: options.overlay?.overlayLedgerHash ?? null,
+      overlay_updated_at: options.overlay?.updatedAt ?? null,
     },
     counts: {
       vaults: options.snapshot?.vaultCount ?? null,
@@ -203,6 +220,7 @@ export function serializeOverview(options: {
     provenance: {
       counts: options.snapshot ? 'direct' : 'unavailable',
       freshness: options.state ? 'direct' : 'unavailable',
+      overlay_watermark: options.overlay ? 'direct' : 'unavailable',
     },
     unavailable: options.snapshot ? [] : ['active current-state snapshot has not been activated'],
   }

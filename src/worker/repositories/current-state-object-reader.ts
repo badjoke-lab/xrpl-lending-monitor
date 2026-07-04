@@ -7,9 +7,9 @@ import {
   type VaultSort,
 } from './d1-current-vault-reader'
 import {
-  getGithubVaultById,
-  listGithubVaults,
-} from './github-current-readers'
+  getBaseOverlayVaultById,
+  listBaseOverlayVaults,
+} from './base-overlay-vault-reader'
 import {
   isReleaseCurrentStateSource,
   type CurrentStateStorage,
@@ -28,7 +28,7 @@ export function listCurrentVaults(
   options: ListCurrentVaultsOptions,
 ): Promise<ListCurrentVaultsResult> {
   return isReleaseCurrentStateSource(storage)
-    ? listGithubVaults(storage, snapshot, options)
+    ? listBaseOverlayVaults(storage.db, storage, snapshot, options)
     : listStoredCurrentVaults(database(storage), snapshot, options)
 }
 
@@ -38,6 +38,6 @@ export function getCurrentVaultById(
   vaultId: string,
 ) {
   return isReleaseCurrentStateSource(storage)
-    ? getGithubVaultById(storage, snapshot, vaultId)
+    ? getBaseOverlayVaultById(storage.db, storage, snapshot, vaultId)
     : getStoredCurrentVaultById(database(storage), snapshot, vaultId)
 }
