@@ -1,0 +1,7 @@
+$ tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.worker.json --noEmit && tsc -p tsconfig.node.json --noEmit
+src/worker/repositories/github-current-indexes.ts(66,45): error TS2339: Property 'findAccounts' does not exist on type '{ listObjects(kind: ReadModelKind, options: AdapterListOptions, predicate?: ((record: ReleaseNativeDataRecord) => boolean) | undefined): Promise<...>; getObject(objectId: string, _options: { ...; }): Promise<...>; }'.
+src/worker/repositories/github-current-indexes.ts(72,50): error TS7006: Parameter 'value' implicitly has an 'any' type.
+src/worker/repositories/github-current-indexes.ts(87,45): error TS2339: Property 'findRelationships' does not exist on type '{ listObjects(kind: ReadModelKind, options: AdapterListOptions, predicate?: ((record: ReleaseNativeDataRecord) => boolean) | undefined): Promise<...>; getObject(objectId: string, _options: { ...; }): Promise<...>; }'.
+src/worker/repositories/github-current-indexes.ts(93,55): error TS7006: Parameter 'value' implicitly has an 'any' type.
+src/worker/repositories/github-current-indexes.ts(108,45): error TS2339: Property 'searchExact' does not exist on type '{ listObjects(kind: ReadModelKind, options: AdapterListOptions, predicate?: ((record: ReleaseNativeDataRecord) => boolean) | undefined): Promise<...>; getObject(objectId: string, _options: { ...; }): Promise<...>; }'.
+[ELIFECYCLE] Command failed with exit code 2.
