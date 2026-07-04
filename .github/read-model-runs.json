@@ -1,0 +1,24 @@
+{
+  "publish": [
+    {
+      "conclusion": "success",
+      "created_at": "2026-07-04T10:23:39Z",
+      "head_sha": "3829e60d8a4a65f2f983b2a54e4cf83d7066188b",
+      "html_url": "https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/28703225801",
+      "id": 28703225801,
+      "status": "completed",
+      "updated_at": "2026-07-04T10:32:49Z"
+    }
+  ],
+  "digest": [
+    {
+      "conclusion": "failure",
+      "created_at": "2026-07-04T10:30:14Z",
+      "head_sha": "89084f7812874dd5b20e210ac2246e67fe366d0f",
+      "html_url": "https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/28703376374",
+      "id": 28703376374,
+      "status": "completed",
+      "updated_at": "2026-07-04T10:30:25Z"
+    }
+  ]
+}
