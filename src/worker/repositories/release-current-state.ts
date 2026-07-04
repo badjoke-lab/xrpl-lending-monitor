@@ -43,6 +43,7 @@ export async function openConfiguredReleaseCurrentState(
   try {
     const opened = await openReleaseSnapshotReader({
       githubRepository: config.currentState.githubRepository,
+      githubBranch: 'current-state-data',
       channelTag: config.currentState.releaseChannelTag,
       cache,
       maxAssetBytes: config.currentState.maxAssetBytes,
