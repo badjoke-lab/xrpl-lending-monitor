@@ -1,7 +1,6 @@
 import type {
   LoanBrokerCurrentProjection,
   LoanCurrentProjection,
-  LoanOnLedgerStatus,
   VaultCurrentProjection,
 } from '../../domain/lending/current-projections'
 import type { ActiveSnapshotRecord } from './core-api-repository'
@@ -11,7 +10,6 @@ import type {
   ListCurrentLoansOptions,
   ListCurrentLoansResult,
   LoanScheduleEvaluation,
-  LoanScheduleStatus,
 } from './d1-current-loan-reader'
 import {
   isReleaseCurrentStateSource,
@@ -99,12 +97,11 @@ async function objectById<T>(
 function loanMatches(
   loan: LoanCurrentProjection,
   options: ListCurrentLoansOptions,
-): { matches: boolean; schedule: LoanScheduleEvaluation } {
+): boolean {
   const schedule = evaluateSchedule(loan, options.evaluatedAtRippleTime)
-  const matches = queryMatches([loan.id, loan.loanBrokerId, loan.borrower], options.query)
+  return queryMatches([loan.id, loan.loanBrokerId, loan.borrower], options.query)
     && (options.onLedgerStatus === undefined || loan.onLedgerStatus === options.onLedgerStatus)
     && (options.scheduleStatus === undefined || schedule.status === options.scheduleStatus)
-  return { matches, schedule }
 }
 
 async function materializeLoanRecord(
@@ -152,7 +149,7 @@ export async function listGithubLoans(
     direction: (options.sort ?? 'id_asc') === 'id_desc' ? 'desc' : 'asc',
   }, (record) => {
     const loan = normalizeReleaseRecord(record) as LoanCurrentProjection
-    return loanMatches(loan, options).matches
+    return loanMatches(loan, options)
   })
   const data: CurrentLoanRecord[] = []
   let relationReads = 0
@@ -198,5 +195,3 @@ export async function getGithubLoanById(
     MAX_REQUEST_ASSET_READS - found.assetReads,
   )).item
 }
-
-void (null as LoanOnLedgerStatus | LoanScheduleStatus | null)
