@@ -1,40 +1,42 @@
 # Development roadmap
 
 Baseline date: 2026-07-01.
-Last recalibrated: 2026-07-03.
+Last recalibrated: 2026-07-04.
 
 This document controls implementation order and dependencies. Dates are planning targets rather than promises. Correctness, data integrity, accessibility, and release evidence take priority over calendar targets.
 
-The detailed M1 execution sequence is defined by [`d1-migration-plan.md`](d1-migration-plan.md). When this roadmap and that plan differ on M1 order or remote-operation gates, the D1 migration plan controls until M1 exits.
+The current M1 execution path is a verified immutable base read model plus bounded D1 incremental history and current-state overlay. The earlier D1-only full-snapshot plan is retained as architectural history in [`d1-migration-plan.md`](d1-migration-plan.md) but no longer controls active implementation order.
 
 ## Milestone summary
 
 | Milestone | Status | Goal | Exit condition |
 |---|---|---|---|
 | M0 Foundation and specification lock | Complete | Establish repository, source-of-truth documents, toolchain, and operating rules | Documentation accepted and project skeleton ready |
-| M1 Current-state collector | D1-only closeout active | Connect Devnet, scan current objects, and create the first active snapshot | Complete marker-aware D1 snapshot stored, verified, activated, and followed by safe incremental collection |
-| M2 Event history and lifecycle | Complete through Checkpoint B | Normalize validated history, lifecycle, archives, balances, and status | Deterministic replay and reconciliation work complete |
-| M3 Public API | Complete through exports and feeds | Expose bounded read-only current and historical APIs | Contract tests pass and unavailable states are explicit |
-| M4 Baseline UI and project pages | Complete through Checkpoint C | Deliver the ordinary monitor, navigation, project pages, responsive behavior, and shared states | Required baseline routes work end to end |
-| M5 Differentiated audit UI | Complete through M5-4; M5-5 deferred behind M1 | Add lifecycle, archives, cover/loss, epochs, and provenance integration | Audit integration passes against verified real data |
+| M1 Current-state collector | Incremental continuation active | Serve a verified Devnet base state and continuously apply validated ledger changes | Verified base read model serves real Devnet data; contiguous scheduled collection, D1 overlay updates, deletion handling, reconciliation, and stale/gap safety pass |
+| M2 Event history and lifecycle | Complete through Checkpoint B | Normalize validated history, lifecycle, archives, balances, and status | Deterministic replay and reconciliation logic complete; production completeness remains bounded by M1 continuation and later soak evidence |
+| M3 Public API | Complete through exports and feeds; current merge integration pending | Expose bounded read-only current and historical APIs | Base-plus-overlay current routes and historical contracts pass, with explicit freshness and unavailable states |
+| M4 Baseline UI and project pages | Complete through Checkpoint C | Deliver the ordinary monitor, navigation, project pages, responsive behavior, and shared states | Required baseline routes work end to end; live freshness claims remain gated by M1 |
+| M5 Differentiated audit UI | Complete through M5-4; M5-5 deferred behind M1 | Add lifecycle, archives, cover/loss, epochs, and provenance integration | Audit integration passes against verified real data after M1 exits |
 | M6 Hardening and public Devnet release | Not started | Prove integrity, resource safety, accessibility, operations, and deployment readiness | Multi-day soak and all release gates pass |
 
 ## Cross-cutting rules
 
-- Current-state pages show explicit unavailable states until a verified active snapshot exists.
 - No page invents values to appear complete.
 - Devnet and Mainnet data never mix.
 - Mainnet, wallet, signing, transaction submission, funding, payments, pricing, fiat conversion, cross-asset totals, and proprietary risk scores remain outside scope.
 - Generated mockups are visual references only.
-- The public Worker uses one D1 binding, `DB`, for history and current-state snapshots.
-- Bootstrap is an explicit operator process. Bootstrap, verification, and activation remain separate operations.
-- Remote migration, production bootstrap, and active-pointer mutation are not implied by code merge or web deployment.
+- The public Worker uses one D1 binding, `DB`, for network state, cursors, normalized history, overlays, tombstones, aggregates, and operational state.
+- Complete base read models are immutable, versioned, manifest verified, and replaced only through an explicit publication process.
+- Incremental history and current-state overlay changes advance from the same validated-ledger cursor boundary.
+- A D1 overlay upsert overrides the base object; a deletion tombstone hides the base object; absence of an overlay record falls back to the verified base.
+- Gap, stale, partial, and unavailable states are explicit. A stale base plus interrupted incremental continuation is never presented as fresh.
+- Internal account circumstances, credentials, provider identifiers, workflow run identifiers, and unpublished operational details remain outside public documentation.
 
 ## M0 — Foundation and specification lock
 
 Complete.
 
-Delivered product, architecture, data, status, asset, collector, testing, resource, roadmap, D1 migration, and UI specifications; pinned toolchain; local and production boundaries; and Mainnet fail-closed configuration.
+Delivered product, architecture, data, status, asset, collector, testing, resource, roadmap, and UI specifications; pinned toolchain; local and production boundaries; and Mainnet fail-closed configuration.
 
 ## M1 — Current-state collector
 
@@ -43,112 +45,144 @@ Delivered product, architecture, data, status, asset, collector, testing, resour
 - network, amendment, epoch, reset, and synchronization state;
 - canonical XRP, IOU, and MPT normalization;
 - complete unfiltered marker traversal primitives;
-- exact-marker resumable batches;
+- exact-marker resumable bootstrap batches;
 - current object normalization and relationship checks;
 - terminal Loan zero-omission handling;
 - long-running bootstrap runner;
-- complete-manifest verification contract;
-- active-snapshot activation invariants;
-- D1 snapshot schema, bounded writers, verified readers, and bootstrap integration;
-- controlled interruption and resume evidence;
-- migration-before-activation unavailable behavior.
+- deterministic compressed artifact generation;
+- complete manifest verification;
+- verified full Devnet base snapshot materialization;
+- lightweight current-state read-model compilation;
+- immutable base data publication and active channel resolution;
+- bounded current Vault, Loan Broker, and Loan list/detail readers;
+- bounded pagination, exact identifier lookup, filters, relationships, and search validation;
+- incremental validated-ledger scan foundation;
+- AffectedNodes normalization;
+- Loan lifecycle derivation;
+- deleted-object archive derivation;
+- cover, debt, and loss history derivation;
+- deterministic cursor and parent-hash continuity checks.
 
-The earlier external object-storage implementation is superseded. M1 uses versioned D1 snapshot rows through one runtime D1 binding.
+The row-per-object D1 full-snapshot approach exceeded the project resource safety envelope in measured projection and does not proceed to production. M1 now completes through a verified immutable base read model plus bounded D1 incremental history and current-state overlay.
 
-### M1-D1-0 — Documentation and dependency lock
+### M1-HYB-0 — Documentation and dependency realignment
 
-- add the canonical D1 migration plan;
-- align roadmap, implementation status, and decision record;
-- lock dependency order before implementation continues.
+Target: 2026-07-04.
 
-Exit condition: documentation is merged before the remaining open implementation work.
+- supersede the D1-only current-state decision;
+- align architecture, collector design, resource envelope, implementation status, and roadmap;
+- retain the evaluated D1-only plan as historical evidence rather than an active execution plan;
+- define public-safe base-plus-overlay semantics and the new dependency order.
 
-### M1-D1-1 — Snapshot retention safeguards
+Exit condition: source-of-truth documents agree with the implemented base read path and the next incremental work.
 
-- real local D1 rollback integration tests;
-- verified-manifest and same-epoch restore requirements;
-- guarded active and rollback pointer swap;
-- guarded `sync_state` restore;
-- protected-snapshot cleanup rejection;
-- cleanup eligibility and time enforcement.
+### M1-HYB-1 — D1 incremental overlay foundation
 
-Exit condition: rollback and cleanup safety pass local migrations, full tests, and CI.
+Target: 2026-07-05.
 
-### M1-D1-2 — Single D1 runtime binding
+- add bounded overlay records for created and modified current objects;
+- add deletion tombstones for objects removed after the base ledger;
+- bind every overlay row to network, epoch, base snapshot identity, ledger, and transaction evidence;
+- add overlay watermark and indexes required by detail, list, search, relationship, and overview reads;
+- prove idempotent replay and fail-closed base identity mismatch behavior.
 
-- remove the legacy `CURRENT_STATE` runtime binding;
-- use `DB` for current entity readers;
-- preserve explicit unavailable behavior before migration or activation;
-- keep all current reads snapshot and epoch scoped.
+Exit condition: replay creates no duplicate canonical overlay state, deletion cannot fall through to the base, and base mismatch fails closed.
 
-Exit condition: one D1 binding serves history and verified current state without weakening unavailable states.
+### M1-HYB-2 — Incremental projection integration
 
-### M1-D1-3 — D1-only local integration closeout
+Target: 2026-07-06.
 
-- remove or isolate superseded D1-plus-R2 active paths;
-- test begin, bounded write, interruption, exact-marker resume, verification, activation, read, rollback, and cleanup;
-- reject changed ledger identity and invalid relationships;
-- prove retry idempotency and completed-snapshot immutability.
+- derive current projection upserts from supported CreatedNode and ModifiedNode changes;
+- derive current-state tombstones from DeletedNode changes;
+- persist history, lifecycle, archive, balance, overlay, and cursor movement at the documented canonical commit boundary;
+- keep cursor and parent-hash gap rejection intact;
+- prove all-or-nothing advancement between historical evidence and current-state overlay.
 
-Exit condition: local migration, integration, `pnpm check`, and browser validation pass.
+Exit condition: history and current overlay advance together or neither advances.
 
-### M1-D1-4 — Operator bootstrap and measurement harness
+### M1-HYB-3 — Base-plus-overlay API integration
 
-- separate status, bootstrap or resume, verify, measure, activate, restore, and cleanup actions;
-- require explicit fixed ledger index and hash;
-- default to no activation;
-- emit public-safe machine-readable evidence;
-- cap pages, objects, rows, statements, retries, and execution time.
+Target: 2026-07-07.
 
-Exit condition: a complete local bootstrap can be operated without a public write route or implicit activation.
+- merge base and overlay semantics into Overview;
+- merge Vault list/detail reads;
+- merge Loan Broker list/detail reads;
+- merge Loan list/detail reads;
+- merge exact Search and Account/relationship reads;
+- ensure tombstones suppress current results and route users to indexed archive context where available;
+- expose base identity, overlay watermark, collector cursor, and freshness metadata.
 
-### M1-D1-5 — Complete local bootstrap and resource gate
+Exit condition: current entity routes deterministically resolve overlay upsert > base, tombstone > hidden, otherwise base.
 
-Measure before any remote mutation:
+### M1-HYB-4 — Scheduled incremental collector wiring
 
-- object count;
-- raw and normalized bytes;
-- projected D1 storage including indexes, history, active snapshot, and one rollback snapshot;
-- maximum row and batch size;
-- rows written and queries executed;
-- API rows read and latency;
-- interruption, resume, verification, activation, rollback, and cleanup behavior.
+Target: 2026-07-08.
 
-Stop before remote use if projected total database use exceeds the documented 350 MB safety threshold or another measured D1 or runtime boundary is unsafe.
+- connect bounded incremental ledger processing to the scheduled Worker path;
+- retain network-status refresh independently;
+- cap ledgers, requests, statements, rows, retries, and execution time per run;
+- process only contiguous validated ledger ranges;
+- catch up across multiple runs instead of skipping or over-running runtime limits;
+- expose lag, stale state, error state, and last successful cursor.
 
-### M1-D1-6 — Remote additive migration
+Target cadence: once per minute, subject to measured Worker, D1, and RPC evidence. The interface reports actual freshness rather than assuming the target cadence was met.
 
-After local evidence review:
+Exit condition: scheduled runs advance contiguously, restart safely, and remain within measured guardrails.
 
-- read remote migration and database state;
-- apply only reviewed additive schema changes beginning with `0009_d1_current_state_snapshots.sql`;
-- verify empty current-state structures;
-- verify public APIs remain unavailable before activation.
+### M1-HYB-5 — Catch-up rehearsal and reconciliation
 
-### M1-D1-7 — Production bootstrap and verification
+Target: 2026-07-09.
 
-- fix one validated Devnet ledger index and hash;
-- complete every marker through bounded resumable runs;
-- verify every object and batch hash and the complete manifest;
-- verify same-snapshot relationships;
-- compare production resource evidence with the local projection;
-- leave the verified snapshot inactive.
+- rehearse catch-up from a fixed base ledger plus one;
+- interrupt and resume collection;
+- replay already processed ranges;
+- verify parent-hash continuity;
+- reconcile base counts plus created/deleted overlay deltas;
+- reconcile Vault to Loan Broker and Loan Broker to Loan relationships;
+- verify deleted objects are absent from current routes and retained in indexed history where collected.
 
-### M1-D1-8 — Explicit activation and rollback proof
+Exit condition: catch-up, interruption, replay, and reconciliation evidence pass without current/history divergence.
 
-- activate only the verified complete snapshot through a separate action;
-- validate Overview, current entities, Search, Account, epoch, and relationships;
-- demonstrate retained rollback behavior;
-- confirm incomplete attempts remain guarded.
+### M1-HYB-6 — Bounded production catch-up
 
-### M1-D1-9 — Incremental continuation and M1 exit
+Target start: 2026-07-10.
 
-- start the incremental collector from the ledger after the active snapshot ledger;
-- verify contiguous cursor and parent-hash continuity;
-- verify idempotent retries, projection updates, lifecycle, archives, balance history, and reset handling;
-- reconcile bootstrap current state with incremental history.
+- begin bounded production catch-up from the ledger after the active verified base snapshot;
+- preserve the fixed base identity while the overlay advances;
+- stop on any gap, parent-hash discontinuity, reset signal, or persistence failure;
+- expose actual lag until catch-up reaches the validated head.
 
-M1 exits only when the complete snapshot is stored, verified, active, serving real Devnet data, and followed by safely advancing incremental collection.
+Exit condition: production cursor reaches the validated head without a gap and current routes reflect base plus applied overlay.
+
+### M1-HYB-7 — Continuous Devnet monitoring verification
+
+Target: 2026-07-11.
+
+Verify real observed paths for:
+
+- newly created current objects;
+- modified current objects;
+- Loan payment changes;
+- impairment, unimpairment, and default state transitions;
+- deletion and archive handling;
+- Activity, lifecycle, balance history, and current-state consistency;
+- lag and freshness reporting.
+
+Exit condition: the live continuation path is operational and evidence shows current and historical views remain consistent.
+
+### M1-HYB-8 — M1 exit review
+
+Target: 2026-07-12.
+
+M1 exits only when:
+
+- a verified base read model is serving real Devnet current data;
+- the incremental cursor advances contiguously;
+- current overlay upserts and tombstones are applied safely;
+- restart and retry are idempotent;
+- bounded catch-up works after interruption;
+- stale or incomplete data is never labeled fresh;
+- reconciliation passes.
 
 ## M2 — Event history and lifecycle
 
@@ -162,11 +196,11 @@ Complete in dependency order:
 6. status engine and reconciliation;
 7. Checkpoint B history decision.
 
-Public completeness claims remain bounded by collection start, active-snapshot verification, reconciliation, and later soak evidence.
+Historical logic is implemented, but production completeness remains bounded by the collection start, M1 contiguous continuation, reconciliation, and later soak evidence.
 
 ## M3 — Public API
 
-Complete:
+Complete through contracts, exports, and feeds:
 
 - status and overview;
 - Vault, Loan Broker, and Loan list/detail contracts;
@@ -176,7 +210,7 @@ Complete:
 - lifecycle, archives, cover/loss audit endpoints;
 - bounded exports and feeds.
 
-Current entity endpoints remain unavailable until M1 activation.
+The active M1 work integrates base-plus-overlay current reads and freshness metadata into the current entity routes. Historical APIs remain bounded by collected evidence.
 
 ## M4 — Baseline UI and project pages
 
@@ -190,6 +224,8 @@ Complete through Checkpoint C:
 - shared loading, empty, unavailable, stale, partial, error, archived, not-found, and invalid-identifier states;
 - responsive and accessibility coverage.
 
+The UI must not claim real-time freshness until M1 incremental continuation and actual freshness reporting are operational.
+
 ## M5 — Differentiated audit UI
 
 Complete:
@@ -199,18 +235,31 @@ Complete:
 - M5-3 cover, debt, and loss;
 - M5-4 Devnet epochs and provenance.
 
-Deferred until M1 activation:
+### M5-5 — Cross-audit real-data integration
 
-- M5-5 cross-audit integration, exports, real-data regression, and consistency checks.
+Target: 2026-07-13 through 2026-07-14, after M1 exit.
+
+- cross-audit integration;
+- bounded exports against the live evidence boundary;
+- real-data browser regression;
+- current/history consistency checks;
+- lifecycle/current-object cross-checks;
+- archive/current exclusion checks.
+
+Exit condition: audit integration passes against verified base-plus-overlay current state and indexed real history.
 
 ## M6 — Hardening and public Devnet release
 
-Proceed after M5-5:
+Target start: 2026-07-15, after M1 exit and M5-5.
+
+Proceed in dependency order:
 
 1. integrity and reset simulations;
 2. runtime and resource guardrails;
 3. accessibility, performance, security, and browser validation;
 4. operations and deployment documentation;
-5. real multi-day soak and final release verification.
+5. backup/export and recovery verification;
+6. real multi-day Devnet soak;
+7. final release verification.
 
-Soak evidence is real elapsed evidence and is never fabricated or compressed.
+Completion has no artificial date. Soak evidence requires real elapsed time and is never fabricated or compressed.
