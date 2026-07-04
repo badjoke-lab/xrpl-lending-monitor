@@ -9,7 +9,11 @@ import {
   type ReadModelKind,
   type ReadModelLoanRecord,
 } from '../../shared/current-state/github-read-model-reader'
-import type { ReleaseNativeDataRecord } from '../../shared/current-state/release-native-reader'
+import type {
+  ReleaseNativeDataRecord,
+  ReleaseNativeIndexRecord,
+  ReleaseNativeObjectReference,
+} from '../../shared/current-state/release-native-reader'
 import type { RuntimeConfig } from '../../shared/runtime-config'
 import { getActiveSnapshot, type ActiveSnapshotRecord } from './core-api-repository'
 import { CurrentStateObjectReadError } from './current-state-read-error'
@@ -23,6 +27,21 @@ type AdapterListOptions = {
   direction: 'asc' | 'desc'
 }
 
+type AdapterReadOptions = {
+  limit: number
+  cursor?: string
+  maxAssetReads?: number
+}
+
+type AdapterIndexCursor = {
+  v: 1
+  mode: string
+  kindIndex: number
+  inner: string | null
+}
+
+const SEARCH_ACCOUNT_START = '__read_model_search_account_start__'
+
 function fakeRecord(kind: ReadModelKind, projection: Projection): ReleaseNativeDataRecord {
   return {
     schemaVersion: 1,
@@ -35,10 +54,69 @@ function fakeRecord(kind: ReadModelKind, projection: Projection): ReleaseNativeD
   }
 }
 
+function objectReference(kind: ReadModelKind, projection: Projection): ReleaseNativeObjectReference {
+  return {
+    segmentId: 'read-model',
+    assetName: 'read-model',
+    id: projection.id,
+    kind,
+  }
+}
+
 function projectionFromPage(kind: ReadModelKind, item: unknown): Projection {
   if (kind === 'vault') return item as VaultCurrentProjection
   if (kind === 'loan-broker') return (item as ReadModelBrokerRecord).broker
   return (item as ReadModelLoanRecord).loan
+}
+
+function encodeIndexCursor(cursor: AdapterIndexCursor): string {
+  const bytes = new TextEncoder().encode(JSON.stringify(cursor))
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+function decodeIndexCursor(value: string | undefined, mode: string): AdapterIndexCursor {
+  if (!value) return { v: 1, mode, kindIndex: 0, inner: null }
+  if (value.length % 2 !== 0 || !/^[a-f0-9]+$/i.test(value)) throw new Error('Adapter cursor is invalid')
+  const bytes = new Uint8Array(value.length / 2)
+  for (let index = 0; index < bytes.length; index += 1) {
+    bytes[index] = Number.parseInt(value.slice(index * 2, index * 2 + 2), 16)
+  }
+  const parsed = JSON.parse(new TextDecoder().decode(bytes)) as Partial<AdapterIndexCursor>
+  if (
+    parsed.v !== 1
+    || parsed.mode !== mode
+    || !Number.isSafeInteger(parsed.kindIndex)
+    || Number(parsed.kindIndex) < 0
+    || (parsed.inner !== null && typeof parsed.inner !== 'string')
+  ) throw new Error('Adapter cursor does not match the query')
+  return {
+    v: 1,
+    mode,
+    kindIndex: Number(parsed.kindIndex),
+    inner: parsed.inner ?? null,
+  }
+}
+
+function accountFieldMatches(
+  kind: ReadModelKind,
+  projection: Projection,
+  account: string,
+  fields: readonly ('Account' | 'Owner' | 'Borrower')[],
+): ('Account' | 'Owner' | 'Borrower')[] {
+  const matches: ('Account' | 'Owner' | 'Borrower')[] = []
+  if (kind === 'vault') {
+    const vault = projection as VaultCurrentProjection
+    if (fields.includes('Account') && vault.account === account) matches.push('Account')
+    if (fields.includes('Owner') && vault.owner === account) matches.push('Owner')
+  } else if (kind === 'loan-broker') {
+    const broker = projection as LoanBrokerCurrentProjection
+    if (fields.includes('Account') && broker.account === account) matches.push('Account')
+    if (fields.includes('Owner') && broker.owner === account) matches.push('Owner')
+  } else {
+    const loan = projection as LoanCurrentProjection
+    if (fields.includes('Borrower') && loan.borrower === account) matches.push('Borrower')
+  }
+  return matches
 }
 
 function createReadModelAdapter(readModel: GithubCurrentStateReadModelReader) {
@@ -98,6 +176,186 @@ function createReadModelAdapter(readModel: GithubCurrentStateReadModelReader) {
     return null
   }
 
+  async function findAccounts(
+    account: string,
+    fields: readonly ('Account' | 'Owner' | 'Borrower')[],
+    options: AdapterReadOptions,
+  ) {
+    const kinds: readonly ReadModelKind[] = ['vault', 'loan-broker', 'loan']
+    const mode = `account:${account}:${fields.join(',')}`
+    const cursor = decodeIndexCursor(options.cursor, mode)
+    const items: ReleaseNativeIndexRecord[] = []
+    let assetReads = 0
+    let kindIndex = cursor.kindIndex
+    let inner = cursor.inner
+    const maxAssetReads = Math.max(1, options.maxAssetReads ?? 16)
+
+    while (kindIndex < kinds.length && items.length < options.limit && assetReads < maxAssetReads) {
+      const kind = kinds[kindIndex]!
+      const remainingReads = maxAssetReads - assetReads
+      const remainingItems = options.limit - items.length
+      const result = await readModel.list<unknown>(kind, {
+        limit: remainingItems,
+        cursor: inner ?? undefined,
+        direction: 'asc',
+        scope: `${mode}:${kind}`,
+        maxPageReads: remainingReads,
+        predicate: (item) => {
+          rememberPageItem(kind, item)
+          const projection = projectionFromPage(kind, item)
+          return accountFieldMatches(kind, projection, account, fields).length > 0
+        },
+      })
+      assetReads += result.pageReads
+      for (const item of result.items) {
+        const projection = projectionFromPage(kind, item)
+        const field = accountFieldMatches(kind, projection, account, fields)[0]
+        if (!field) continue
+        items.push({
+          schemaVersion: 1,
+          bucket: 0,
+          term: account,
+          lookupKind: 'account',
+          value: { field, reference: objectReference(kind, projection) },
+        })
+      }
+      if (result.nextCursor) {
+        inner = result.nextCursor
+        break
+      }
+      kindIndex += 1
+      inner = null
+    }
+
+    const complete = kindIndex >= kinds.length
+    const nextCursor = complete
+      ? null
+      : encodeIndexCursor({ v: 1, mode, kindIndex, inner })
+    return { items, nextCursor, complete, assetReads }
+  }
+
+  async function findRelationships(
+    sourceId: string,
+    relation: 'vault-loan-broker' | 'loan-broker-loan' | null,
+    options: AdapterReadOptions,
+  ) {
+    const scans = relation === 'vault-loan-broker'
+      ? (['loan-broker'] as const)
+      : relation === 'loan-broker-loan'
+        ? (['loan'] as const)
+        : (['loan-broker', 'loan'] as const)
+    const mode = `relationship:${sourceId}:${relation ?? '*'}`
+    const cursor = decodeIndexCursor(options.cursor, mode)
+    const items: ReleaseNativeIndexRecord[] = []
+    let assetReads = 0
+    let kindIndex = cursor.kindIndex
+    let inner = cursor.inner
+    const maxAssetReads = Math.max(1, options.maxAssetReads ?? 16)
+
+    while (kindIndex < scans.length && items.length < options.limit && assetReads < maxAssetReads) {
+      const kind = scans[kindIndex]!
+      const remainingReads = maxAssetReads - assetReads
+      const remainingItems = options.limit - items.length
+      const result = await readModel.list<unknown>(kind, {
+        limit: remainingItems,
+        cursor: inner ?? undefined,
+        direction: 'asc',
+        scope: `${mode}:${kind}`,
+        maxPageReads: remainingReads,
+        predicate: (item) => {
+          rememberPageItem(kind, item)
+          if (kind === 'loan-broker') return (item as ReadModelBrokerRecord).broker.vaultId === sourceId
+          return (item as ReadModelLoanRecord).loan.loanBrokerId === sourceId
+        },
+      })
+      assetReads += result.pageReads
+      for (const item of result.items) {
+        if (kind === 'loan-broker') {
+          const projection = (item as ReadModelBrokerRecord).broker
+          items.push({
+            schemaVersion: 1,
+            bucket: 0,
+            term: sourceId,
+            lookupKind: 'relationship',
+            value: {
+              relation: 'vault-loan-broker',
+              source: { id: sourceId, kind: 'vault' },
+              target: objectReference('loan-broker', projection),
+            },
+          })
+        } else {
+          const projection = (item as ReadModelLoanRecord).loan
+          items.push({
+            schemaVersion: 1,
+            bucket: 0,
+            term: sourceId,
+            lookupKind: 'relationship',
+            value: {
+              relation: 'loan-broker-loan',
+              source: { id: sourceId, kind: 'loan-broker' },
+              target: objectReference('loan', projection),
+            },
+          })
+        }
+      }
+      if (result.nextCursor) {
+        inner = result.nextCursor
+        break
+      }
+      kindIndex += 1
+      inner = null
+    }
+
+    const complete = kindIndex >= scans.length
+    const nextCursor = complete
+      ? null
+      : encodeIndexCursor({ v: 1, mode, kindIndex, inner })
+    return { items, nextCursor, complete, assetReads }
+  }
+
+  async function searchExact(term: string, options: AdapterReadOptions) {
+    const items: ReleaseNativeIndexRecord[] = []
+    let assetReads = 0
+    let accountCursor = options.cursor
+    if (!options.cursor || options.cursor === SEARCH_ACCOUNT_START) {
+      if (!options.cursor) {
+        const found = await loadAny(term)
+        assetReads += found ? 2 : 1
+        if (found) {
+          items.push({
+            schemaVersion: 1,
+            bucket: 0,
+            term,
+            lookupKind: 'object-id',
+            value: { reference: objectReference(found.kind, found.projection) },
+          })
+          if (items.length >= options.limit) {
+            return { items, nextCursor: SEARCH_ACCOUNT_START, complete: false, assetReads }
+          }
+        }
+      }
+      accountCursor = undefined
+    }
+
+    const accountResult = await findAccounts(
+      term,
+      ['Account', 'Owner', 'Borrower'],
+      {
+        limit: options.limit - items.length,
+        cursor: accountCursor,
+        maxAssetReads: Math.max(1, (options.maxAssetReads ?? 16) - assetReads),
+      },
+    )
+    items.push(...accountResult.items)
+    assetReads += accountResult.assetReads
+    return {
+      items,
+      nextCursor: accountResult.nextCursor,
+      complete: accountResult.complete,
+      assetReads,
+    }
+  }
+
   return {
     async listObjects(
       kind: ReadModelKind,
@@ -131,6 +389,10 @@ function createReadModelAdapter(readModel: GithubCurrentStateReadModelReader) {
         assetReads: found ? 2 : 1,
       }
     },
+
+    findAccounts,
+    findRelationships,
+    searchExact,
   }
 }
 
