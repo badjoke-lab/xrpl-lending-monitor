@@ -1,10 +1,10 @@
 # Implementation status
 
-Last updated: 2026-07-04.
+Last updated: 2026-07-05.
 
 ## Current phase
 
-M1 incremental continuation is active. M1-HYB-3 base-plus-overlay public API integration is complete. M0, M2, M3, M4, and M5-1 through M5-4 are complete at their documented implementation checkpoints. M5-5 and M6 remain gated behind M1 exit.
+M1 incremental continuation is active. M1-HYB-4 scheduled incremental collector wiring is complete at its implementation checkpoint. M0, M2, M3, M4, and M5-1 through M5-4 are complete at their documented implementation checkpoints. M5-5 and M6 remain gated behind M1 exit.
 
 ## Production state
 
@@ -19,9 +19,11 @@ The active published base is fixed to validated Devnet ledger `3371675` and cont
 
 The bounded D1 current-state overlay foundation is implemented and migration-tested locally. It includes base identity binding, overlay watermark state, current-object upserts, deletion tombstones, bounded lookup indexes, idempotent replay handling, stale-mutation rejection, same-position conflict rejection, and compare-and-set watermark advancement.
 
-The overlay is now connected to the incremental collector persistence boundary. Processed ledgers, protocol events, normalized object changes, Loan lifecycle events, deleted-object archives, balance history, current-state overlay upserts, deletion tombstones, overlay watermark advancement, and sync cursor advancement are committed in one guarded D1 batch.
+The overlay is connected to the incremental collector persistence boundary. Processed ledgers, protocol events, normalized object changes, Loan lifecycle events, deleted-object archives, balance history, current-state overlay upserts, deletion tombstones, overlay watermark advancement, and sync cursor advancement are committed in one guarded D1 batch.
 
-The overlay is connected to public current-state API resolution for Overview, current Vault, Loan Broker, Loan, exact Search, Account, and relationship reads. Production scheduled collection and production catch-up are not yet wired. Mainnet remains disabled.
+The overlay is connected to public current-state API resolution for Overview, current Vault, Loan Broker, Loan, exact Search, Account, and relationship reads.
+
+The scheduled Worker path now refreshes network status and runs one bounded incremental collection cycle. The collector applies explicit ledger, request, transaction, row, statement, overlay-mutation, retry, and execution-deadline limits; processes only a contiguous prefix; records lag and run usage; exposes collector status; and waits for explicit cursor/base initialization rather than silently rebinding epochs. Production catch-up has not started. Mainnet remains disabled.
 
 ## Completed units
 
@@ -59,6 +61,13 @@ The overlay is connected to public current-state API resolution for Overview, cu
 - Tombstone suppression for current detail, list, search, count, and relationship resolution.
 - Base identity, overlay watermark, collector cursor, and freshness metadata exposure in current Overview.
 - Focused resolver, pagination, relationship, and count-delta tests for base-plus-overlay behavior.
+- Scheduled Worker integration for one bounded incremental collection cycle per trigger.
+- Explicit limits for ledgers, RPC requests, per-ledger transactions, inspected transactions, Lending transactions, rows, statements, overlay mutations, retries, and execution time.
+- Deadline-aware scan stopping before the next ledger read.
+- Contiguous-prefix budget selection before atomic persistence.
+- Fail-closed preflight behavior for uninitialized cursor/base state, reset suspicion, and overlay/cursor divergence.
+- Bounded endpoint retry and fallback handling with request-budget accounting.
+- Collector status exposure for cursor, lag, freshness, run timing, bounded usage, failures, and endpoint state.
 
 ## Resource decision
 
@@ -70,34 +79,29 @@ The earlier D1-only migration work remains useful as integrity, rollback, resume
 
 ## Active unit
 
-M1-HYB-4 scheduled incremental collector wiring is next.
+M1-HYB-5 catch-up rehearsal and reconciliation is next.
 
-M1-HYB-3 is complete. Current API resolution now applies:
+The completed M1-HYB-4 scheduled path now:
 
-1. overlay upsert overrides the base object;
-2. deletion tombstone hides the base object from current routes;
-3. no overlay record falls back to the verified base.
-
-The completed M1-HYB-3 surface includes:
-
-- merged Overview counts, active base identity, overlay watermark, collector cursor, and freshness metadata;
-- merged Vault list/detail reads;
-- merged Loan Broker list/detail reads with overlay-aware Vault relationships;
-- merged Loan list/detail reads with overlay-aware Broker and Vault relationships;
-- current exact Search, Account, and relationship reads that apply overlay upserts and tombstones;
-- focused tests for detail precedence, list pagination, filters, duplicate suppression, tombstones, related-object fail-closed behavior, newly created overlay relationships, and count deltas.
+1. refreshes Devnet network status independently;
+2. refuses to run without an explicit initialized cursor and matching overlay base binding;
+3. scans only the next contiguous validated ledger range;
+4. stops before the next ledger read when the execution deadline margin is reached;
+5. selects only the largest contiguous prefix that fits configured row, statement, transaction, and overlay budgets;
+6. commits through the guarded history-plus-overlay atomic persistence boundary;
+7. records actual remaining lag and bounded run usage;
+8. exposes healthy, behind, stale, error, reset-suspected, and initialization states without assuming freshness from the target cadence.
 
 ## Next order
 
-1. Connect bounded incremental processing to the scheduled Worker path.
-2. Rehearse interruption, resume, replay, gap rejection, and reconciliation.
-3. Start bounded production catch-up from the ledger after the active base ledger.
-4. Verify newly created, modified, paid, impaired, defaulted, and deleted objects through real Devnet continuation.
-5. Complete M1 exit review, then M5-5 and M6.
+1. Rehearse catch-up from base ledger plus one with interruption, resume, replay, gap rejection, and reconciliation.
+2. Start bounded production catch-up from the ledger after the active base ledger.
+3. Verify newly created, modified, paid, impaired, defaulted, and deleted objects through real Devnet continuation.
+4. Complete M1 exit review, then M5-5 and M6.
 
 ## Blockers
 
-- The scheduled Worker path does not yet run the incremental ledger collector.
+- Catch-up interruption, resume, replay, gap rejection, and reconciliation rehearsal is not yet complete.
 - Production catch-up from the active base ledger has not started.
 - Continuous monitoring, reconciliation, M5-5, and M6 evidence remain incomplete.
 
