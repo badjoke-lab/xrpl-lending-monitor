@@ -4,7 +4,7 @@ Last updated: 2026-07-05.
 
 ## Current phase
 
-M1 incremental continuation is active. M1-HYB-5 catch-up rehearsal and reconciliation is complete at its implementation checkpoint. M5-5 and M6 remain gated behind M1 exit.
+M1 incremental continuation is active. M1-HYB-6 guarded catch-up handover implementation is ready and green. The actual production catch-up execution has not started. M5-5 and M6 remain gated behind M1 exit.
 
 ## Verified base
 
@@ -30,24 +30,48 @@ The implemented path now includes:
 - cursor and overlay watermark checkpoint agreement;
 - base-count plus create/delete delta reconciliation;
 - relationship reconciliation issue propagation;
-- deleted-object current exclusion and archive-presence checks.
+- deleted-object current exclusion and archive-presence checks;
+- guarded one-time handover planning from the observation epoch to the verified base epoch;
+- dry-run inspection, exact replay/no-op handling, and progressed-state no-op handling;
+- pre/post sync, overlay, history, and epoch guards around the handover batch;
+- fail-closed rejection for reset suspicion, unavailable network state, existing conflicting cursor/history/overlay state, and epoch mismatch;
+- scheduled-path gating behind an explicit catch-up initialization flag that defaults to disabled.
 
-Production catch-up has not started. Mainnet remains disabled.
+Mainnet remains disabled.
+
+## HYB-6 readiness
+
+The guarded handover implementation is validated by lint, type-check, unit tests, local D1 migrations, application build, browser smoke test, and release-native checks.
+
+The implementation is ready to:
+
+1. inspect the remote Devnet sync, epoch, overlay, and processed-ledger state;
+2. dry-run the verified-base handover decision;
+3. refuse any conflicting existing state;
+4. initialize the sync cursor and overlay watermark at the verified base ledger in one guarded D1 batch;
+5. preserve the latest observed validated head;
+6. allow the bounded scheduled collector to continue from base ledger plus one;
+7. become a safe no-op after successful initialization or later aligned catch-up progress.
 
 ## Active unit
 
-M1-HYB-6 guarded production catch-up preparation is next.
+M1-HYB-6 production execution and verification remains active.
 
 ## Next order
 
-1. Prepare and start bounded production catch-up from the ledger after the active base ledger.
-2. Verify newly created, modified, paid, impaired, defaulted, and deleted objects through real Devnet continuation.
-3. Complete M1 exit review.
-4. Complete M5-5 real-data cross-audit integration.
-5. Begin M6 hardening and multi-day Devnet soak.
+1. Complete HYB-6 integration into `main`.
+2. Deploy the merged migrations and Worker code through a verified remote execution path.
+3. Inspect remote Devnet state and run the guarded handover dry-run.
+4. Execute the guarded handover only if the remote evidence matches the fresh-initialization or aligned-replay contract.
+5. Start bounded catch-up from ledger `3371676`.
+6. Verify real Devnet created, modified, paid, impaired, defaulted, and deleted objects.
+7. Complete continuous-monitoring verification and M1 exit review.
+8. Complete M5-5, then begin M6 hardening and multi-day Devnet soak.
 
 ## Remaining blockers
 
+- HYB-6 integration into `main` is not yet complete.
+- Remote migrations and Worker deployment for the catch-up path are not yet verified.
 - Production catch-up has not started.
 - Continuous Devnet monitoring verification is not complete.
 - M1 exit reconciliation evidence is incomplete.

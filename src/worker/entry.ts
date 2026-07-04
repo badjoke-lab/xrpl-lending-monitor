@@ -1,12 +1,11 @@
 import { runIncrementalCollectorCycle } from '../collector/incremental/collector-cycle'
 import { refreshNetworkStatus } from '../collector/network/refresh-network-status'
-import {
-  resolveIncrementalRuntimeConfig,
-  type IncrementalRuntimeEnvironment,
-} from '../shared/incremental-runtime-config'
+import { resolveCatchUpRuntimeConfig } from '../shared/catch-up-runtime-config'
+import { resolveIncrementalRuntimeConfig } from '../shared/incremental-runtime-config'
 import { resolveRuntimeConfig } from '../shared/runtime-config'
 import type { Bindings } from './env'
 import { app } from './index'
+import { initializeCatchUpFromVerifiedBase } from './operator/catch-up-initialization'
 import { getIncrementalCollectorState } from './repositories/incremental-collector-state'
 import { getSyncState } from './repositories/network-status-repository'
 import { serializeCollectorStatus } from './serializers/collector-status'
@@ -31,12 +30,20 @@ const worker: ExportedHandler<Bindings> = {
   async scheduled(_controller, env) {
     const runtimeConfig = resolveRuntimeConfig(env)
     await refreshNetworkStatus({ db: env.DB, config: runtimeConfig })
+
+    const catchUpConfig = resolveCatchUpRuntimeConfig(env)
+    if (catchUpConfig.initializationEnabled && catchUpConfig.base) {
+      await initializeCatchUpFromVerifiedBase({
+        db: env.DB,
+        base: catchUpConfig.base,
+        initializedAt: new Date().toISOString(),
+      })
+    }
+
     await runIncrementalCollectorCycle({
       db: env.DB,
       runtimeConfig,
-      incrementalConfig: resolveIncrementalRuntimeConfig(
-        env as unknown as IncrementalRuntimeEnvironment,
-      ),
+      incrementalConfig: resolveIncrementalRuntimeConfig(env),
     })
   },
 }
