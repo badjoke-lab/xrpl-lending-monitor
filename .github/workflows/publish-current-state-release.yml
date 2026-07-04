@@ -86,6 +86,7 @@ jobs:
           sed -i 's/result\.validated !== true/result.validated === false/' "$TARGET"
 
       - name: Materialize current-state release assets
+        id: materialize
         run: |
           mkdir -p .local/current-state-release
           RELEASE_TAG="current-state-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
@@ -115,6 +116,7 @@ jobs:
           if-no-files-found: error
 
       - name: Require complete current-state release before publication
+        id: completeness
         if: env.PUBLISH_ACTIVE == 'true'
         run: |
           if [ "$(jq -r .complete .local/current-state-release/release-summary.json)" != "true" ]; then
@@ -123,6 +125,7 @@ jobs:
           fi
 
       - name: Publish immutable snapshot release
+        id: publish_snapshot
         if: env.PUBLISH_ACTIVE == 'true'
         run: |
           TAG="$(jq -r .releaseTag .local/current-state-release/release-summary.json)"
@@ -133,6 +136,7 @@ jobs:
             --latest=false
 
       - name: Publish active channel
+        id: publish_channel
         if: env.PUBLISH_ACTIVE == 'true'
         run: |
           CHANNEL_TAG="current-state-channel"
@@ -144,4 +148,63 @@ jobs:
               --notes "Active current-state release channel." \
               --target "$GITHUB_SHA" \
               --latest=false
+          fi
+
+      - name: Report run status
+        if: always()
+        env:
+          MATERIALIZE_OUTCOME: ${{ steps.materialize.outcome }}
+          COMPLETENESS_OUTCOME: ${{ steps.completeness.outcome }}
+          SNAPSHOT_OUTCOME: ${{ steps.publish_snapshot.outcome }}
+          CHANNEL_OUTCOME: ${{ steps.publish_channel.outcome }}
+        run: |
+          SUMMARY=.local/current-state-release/release-summary.json
+          STDERR=.local/current-state-release/materialize.stderr.log
+          if [ -f "$SUMMARY" ]; then
+            COMPLETE=$(jq -r '.complete // false' "$SUMMARY")
+            RELEASE_TAG=$(jq -r '.releaseTag // ""' "$SUMMARY")
+            SOURCE_PAGES=$(jq -r '.sourcePages // 0' "$SUMMARY")
+            DATA_ASSETS=$(jq -r '.dataAssets // 0' "$SUMMARY")
+            INDEX_ASSETS=$(jq -r '.indexAssets // 0' "$SUMMARY")
+          else
+            COMPLETE=false
+            RELEASE_TAG=""
+            SOURCE_PAGES=0
+            DATA_ASSETS=0
+            INDEX_ASSETS=0
+          fi
+          if [ -f "$STDERR" ]; then
+            STDERR_TAIL=$(tail -n 40 "$STDERR")
+          else
+            STDERR_TAIL=""
+          fi
+          jq -n \
+            --arg runId "$GITHUB_RUN_ID" \
+            --arg runAttempt "$GITHUB_RUN_ATTEMPT" \
+            --arg runUrl "https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            --arg headSha "$GITHUB_SHA" \
+            --arg materialize "$MATERIALIZE_OUTCOME" \
+            --arg completeness "$COMPLETENESS_OUTCOME" \
+            --arg snapshot "$SNAPSHOT_OUTCOME" \
+            --arg channel "$CHANNEL_OUTCOME" \
+            --arg complete "$COMPLETE" \
+            --arg releaseTag "$RELEASE_TAG" \
+            --arg sourcePages "$SOURCE_PAGES" \
+            --arg dataAssets "$DATA_ASSETS" \
+            --arg indexAssets "$INDEX_ASSETS" \
+            --arg stderrTail "$STDERR_TAIL" \
+            '{schemaVersion:1,runId:$runId,runAttempt:$runAttempt,runUrl:$runUrl,headSha:$headSha,outcomes:{materialize:$materialize,completeness:$completeness,snapshot:$snapshot,channel:$channel},complete:($complete=="true"),releaseTag:$releaseTag,sourcePages:($sourcePages|tonumber),dataAssets:($dataAssets|tonumber),indexAssets:($indexAssets|tonumber),stderrTail:$stderrTail}' \
+            > current-state-release-status.json
+          API_PATH="repos/${GITHUB_REPOSITORY}/contents/.github/current-state-release-status.json"
+          CONTENT=$(base64 -w0 current-state-release-status.json)
+          EXISTING_SHA=$(gh api "$API_PATH" --jq .sha 2>/dev/null || true)
+          if [ -n "$EXISTING_SHA" ]; then
+            gh api --method PUT "$API_PATH" \
+              -f message="Update current-state release run status" \
+              -f content="$CONTENT" \
+              -f sha="$EXISTING_SHA" >/dev/null
+          else
+            gh api --method PUT "$API_PATH" \
+              -f message="Create current-state release run status" \
+              -f content="$CONTENT" >/dev/null
           fi
