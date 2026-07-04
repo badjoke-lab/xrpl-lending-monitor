@@ -3,7 +3,7 @@ name: Apply read-model digest source fix
 on:
   push:
     branches: [main]
-    paths: [.github/read-model-source-update]
+    paths: [.github/check-runs-inspect-trigger]
 
 permissions:
   contents: write
