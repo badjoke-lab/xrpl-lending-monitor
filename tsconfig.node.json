@@ -18,6 +18,7 @@
     "vite.config.ts",
     "vite.d1-tools.config.ts",
     "vite.artifact-measurement.config.ts",
+    "vite.release-current-state.config.ts",
     "vitest.config.ts",
     "playwright.config.ts"
   ]
