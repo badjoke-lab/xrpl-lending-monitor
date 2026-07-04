@@ -1,0 +1,29 @@
+name: Probe live invalid cursor
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/current-state-ops-inspect-trigger]
+
+permissions:
+  contents: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe public Vault cursor error
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ORIGIN: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+        run: |
+          CODE=$(curl -sS -G -o body.json -w '%{http_code}' "$ORIGIN/api/vaults" --data-urlencode 'cursor=deadbeef' || true)
+          jq -n --arg code "$CODE" --arg body "$(cat body.json)" '{httpCode:$code,body:$body}' > result.json
+          API="repos/${GITHUB_REPOSITORY}/contents/.github/live-invalid-cursor-result.json"
+          CONTENT=$(base64 -w0 result.json)
+          SHA=$(gh api "$API" --jq .sha 2>/dev/null || true)
+          if [ -n "$SHA" ]; then
+            gh api --method PUT "$API" -f message="Update live invalid cursor result" -f content="$CONTENT" -f sha="$SHA" >/dev/null
+          else
+            gh api --method PUT "$API" -f message="Create live invalid cursor result" -f content="$CONTENT" >/dev/null
+          fi
