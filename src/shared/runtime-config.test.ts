@@ -8,6 +8,13 @@ const validEnvironment = {
   XRPL_DEVNET_RPC_URL: 'https://s.devnet.rippletest.net:51234',
 }
 
+const defaultCurrentState = {
+  githubRepository: null,
+  releaseChannelTag: 'current-state-channel',
+  maxAssetBytes: 8 * 1024 * 1024,
+  maxDecompressedBytes: 16 * 1024 * 1024,
+}
+
 describe('resolveRuntimeConfig', () => {
   it('accepts the approved Devnet status configuration', () => {
     expect(resolveRuntimeConfig(validEnvironment)).toEqual({
@@ -16,6 +23,7 @@ describe('resolveRuntimeConfig', () => {
       xrplRpcUrls: ['https://s.devnet.rippletest.net:51234/'],
       rpcTimeoutMs: 8000,
       staleAfterSeconds: 30,
+      currentState: defaultCurrentState,
     })
   })
 
@@ -36,6 +44,24 @@ describe('resolveRuntimeConfig', () => {
       ],
       rpcTimeoutMs: 5000,
       staleAfterSeconds: 45,
+      currentState: defaultCurrentState,
+    })
+  })
+
+  it('accepts explicit release current-state settings', () => {
+    const config = resolveRuntimeConfig({
+      ...validEnvironment,
+      CURRENT_STATE_GITHUB_REPOSITORY: 'badjoke-lab/xrpl-lending-monitor',
+      CURRENT_STATE_RELEASE_CHANNEL_TAG: 'current-state-devnet',
+      CURRENT_STATE_MAX_ASSET_BYTES: '12345',
+      CURRENT_STATE_MAX_DECOMPRESSED_BYTES: '45678',
+    })
+
+    expect(config.currentState).toEqual({
+      githubRepository: 'badjoke-lab/xrpl-lending-monitor',
+      releaseChannelTag: 'current-state-devnet',
+      maxAssetBytes: 12345,
+      maxDecompressedBytes: 45678,
     })
   })
 
