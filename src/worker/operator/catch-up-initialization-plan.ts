@@ -1,12 +1,8 @@
 import type { StoredSyncState } from '../../domain/network/status'
+import type { CatchUpBaseIdentity } from '../../shared/catch-up-base-identity'
 import type { CurrentStateOverlayState } from '../repositories/current-state-overlay'
 
-export interface CatchUpBaseIdentity {
-  epochId: string
-  snapshotId: string
-  ledgerIndex: number
-  ledgerHash: string
-}
+export type { CatchUpBaseIdentity } from '../../shared/catch-up-base-identity'
 
 export interface CatchUpInitializationEvidence {
   sync: StoredSyncState | null
