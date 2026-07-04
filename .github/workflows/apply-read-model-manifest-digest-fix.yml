@@ -1,0 +1,23 @@
+name: Apply read-model digest source fix
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/read-model-digest-fix-trigger]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: node scripts/fix-read-model-manifest-digest.mjs
+      - run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/shared/current-state/github-read-model-reader.ts
+          git diff --cached --check
+          git commit -m "Verify read-model manifest semantic digest"
+          git push origin HEAD:main
