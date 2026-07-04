@@ -1,8 +1,11 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "xrpl-lending-monitor",
-  "main": "src/worker/index.ts",
+  "main": "src/worker/entry.ts",
   "compatibility_date": "2026-07-01",
+  "triggers": {
+    "crons": ["* * * * *"]
+  },
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",
@@ -26,7 +29,19 @@
     "CURRENT_STATE_GITHUB_REPOSITORY": "badjoke-lab/xrpl-lending-monitor",
     "CURRENT_STATE_RELEASE_CHANNEL_TAG": "current-state-channel",
     "CURRENT_STATE_MAX_ASSET_BYTES": "33554432",
-    "CURRENT_STATE_MAX_DECOMPRESSED_BYTES": "100663296"
+    "CURRENT_STATE_MAX_DECOMPRESSED_BYTES": "100663296",
+    "INCREMENTAL_MAX_LEDGERS_PER_RUN": "12",
+    "INCREMENTAL_MAX_LEDGER_RPC_REQUESTS_PER_RUN": "16",
+    "INCREMENTAL_MAX_TRANSACTIONS_PER_LEDGER": "5000",
+    "INCREMENTAL_MAX_INSPECTED_TRANSACTIONS_PER_RUN": "12000",
+    "INCREMENTAL_MAX_LENDING_TRANSACTIONS_PER_RUN": "500",
+    "INCREMENTAL_MAX_STATEMENTS_PER_RUN": "28",
+    "INCREMENTAL_MAX_ROWS_PER_RUN": "24",
+    "INCREMENTAL_MAX_OVERLAY_MUTATIONS_PER_RUN": "16",
+    "INCREMENTAL_MAX_RETRIES_PER_ENDPOINT": "1",
+    "INCREMENTAL_EXECUTION_BUDGET_MS": "45000",
+    "INCREMENTAL_DEADLINE_MARGIN_MS": "5000",
+    "INCREMENTAL_RETAIN_PAYLOADS": "false"
   },
   "observability": {
     "enabled": true
