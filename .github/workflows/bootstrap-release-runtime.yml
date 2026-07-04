@@ -1,0 +1,46 @@
+name: Bootstrap current-state release runtime branch
+
+on:
+  push:
+    branches:
+      - feature/github-release-artifact-store
+
+permissions:
+  contents: write
+
+concurrency:
+  group: bootstrap-current-state-release-runtime
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    if: ${{ !contains(github.event.head_commit.message, 'Apply GitHub Release current-state runtime') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/github-release-artifact-store
+          fetch-depth: 0
+      - name: Apply prepared patches
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 -d ops/current-state-patches/worktree.patch.gz.b64 | gzip -d > /tmp/worktree.patch
+          cat ops/current-state-patches/runtime-native-fix.patch.gz.b64.part* | base64 -d | gzip -d > /tmp/runtime-native-fix.patch
+          git apply --check /tmp/worktree.patch
+          git apply /tmp/worktree.patch
+          git apply --check /tmp/runtime-native-fix.patch
+          git apply /tmp/runtime-native-fix.patch
+          rm -rf ops/current-state-patches
+          rm -f .github/workflows/bootstrap-release-runtime.yml
+      - name: Commit patched runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Apply GitHub Release current-state runtime'
+          git push origin HEAD:feature/github-release-artifact-store
