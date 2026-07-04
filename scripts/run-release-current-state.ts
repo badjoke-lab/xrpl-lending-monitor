@@ -30,6 +30,7 @@ type Arguments = {
   epochId: string | null
   snapshotId: string | null
   indexBuckets: number
+  dataSegments: number
 }
 
 type LedgerDataResult = {
@@ -46,8 +47,15 @@ type RelevantEntry = {
   object: Record<string, unknown>
 }
 
+type TraversalResult = {
+  entries: RelevantEntry[]
+  sourcePages: number
+  decodedObjectCount: number
+  complete: boolean
+}
+
 const DEFAULT_ENDPOINT = 'https://s.devnet.rippletest.net:51234'
-const DATA_ASSET_NAME = 'data-segment-00000.ndjson.gz'
+const DATA_ASSET_PREFIX = 'data-segment-'
 
 function argumentValue(args: readonly string[], name: string): string | null {
   const index = args.indexOf(name)
@@ -76,13 +84,14 @@ function parseArguments(args: readonly string[]): Arguments {
   return {
     endpoint: argumentValue(args, '--endpoint') ?? DEFAULT_ENDPOINT,
     timeoutMs: integerArgument(args, '--timeout-ms', 8_000),
-    pageLimit: integerArgument(args, '--page-limit', 50),
+    pageLimit: integerArgument(args, '--page-limit', 500),
     objectLimitPerPage: integerArgument(args, '--object-limit-per-page', 2_048),
     outputDir: resolve(argumentValue(args, '--output-dir') ?? '.local/current-state-release'),
     releaseTag,
     epochId: argumentValue(args, '--epoch-id'),
     snapshotId: argumentValue(args, '--snapshot-id'),
-    indexBuckets: integerArgument(args, '--index-buckets', 16),
+    indexBuckets: integerArgument(args, '--index-buckets', 64),
+    dataSegments: integerArgument(args, '--data-segments', 20),
   }
 }
 
@@ -128,6 +137,20 @@ function kindFromLedgerEntryType(value: unknown): ReleaseKind | null {
   return null
 }
 
+function segmentId(index: number): string {
+  return `segment-${String(index).padStart(5, '0')}`
+}
+
+function dataAssetName(index: number): string {
+  return `${DATA_ASSET_PREFIX}${String(index).padStart(5, '0')}.ndjson.gz`
+}
+
+function dataAssetNameForRecord(record: ReleaseNativeDataRecord): string {
+  const suffix = record.segmentId.replace(/^segment-/, '')
+  if (!/^[0-9]{5}$/.test(suffix)) throw new Error(`Invalid segment id ${record.segmentId}`)
+  return `${DATA_ASSET_PREFIX}${suffix}.ndjson.gz`
+}
+
 async function getValidatedLedger(endpoint: string, timeoutMs: number): Promise<LedgerIdentity> {
   const client = new XrplJsonRpcClient({ endpoint, timeoutMs })
   const result = await client.call<unknown>('ledger', { ledger_index: 'validated' })
@@ -169,7 +192,7 @@ function countRecords(records: readonly ReleaseNativeDataRecord[]): Counts {
 function reference(record: ReleaseNativeDataRecord): ReleaseNativeObjectReference {
   return {
     segmentId: record.segmentId,
-    assetName: DATA_ASSET_NAME,
+    assetName: dataAssetNameForRecord(record),
     id: record.id,
     kind: record.kind,
   }
@@ -227,12 +250,7 @@ function addRelationshipIndex(indexes: ReleaseNativeIndexRecord[], record: Relea
   }
 }
 
-async function boundedFullLedgerTraversal(options: Arguments, ledger: LedgerIdentity): Promise<{
-  entries: RelevantEntry[]
-  sourcePages: number
-  decodedObjectCount: number
-  complete: boolean
-}> {
+async function boundedFullLedgerTraversal(options: Arguments, ledger: LedgerIdentity): Promise<TraversalResult> {
   const client = new XrplJsonRpcClient({ endpoint: options.endpoint, timeoutMs: options.timeoutMs })
   const entries: RelevantEntry[] = []
   const seenMarkers = new Set<string>()
@@ -326,6 +344,25 @@ async function makeDataRecords(options: Arguments, ledger: LedgerIdentity): Prom
   }
 }
 
+function segmentRecords(records: readonly ReleaseNativeDataRecord[], segmentCount: number): ReleaseNativeDataRecord[][] {
+  const segments = Array.from({ length: segmentCount }, () => [] as ReleaseNativeDataRecord[])
+  for (let segment = 0; segment < segmentCount; segment += 1) {
+    const start = Math.floor(records.length * segment / segmentCount)
+    const end = Math.floor(records.length * (segment + 1) / segmentCount)
+    const idForSegment = segmentId(segment)
+    for (const record of records.slice(start, end)) segments[segment]!.push({ ...record, segmentId: idForSegment })
+  }
+  return segments
+}
+
+function pageRange(records: readonly ReleaseNativeDataRecord[], totalSourcePages: number): { first: number; last: number; count: number } {
+  if (records.length === 0) return { first: 1, last: totalSourcePages, count: totalSourcePages }
+  const pages = records.map((record) => record.sourcePage)
+  const first = Math.min(...pages)
+  const last = Math.max(...pages)
+  return { first, last, count: last - first + 1 }
+}
+
 async function bucketize(indexes: readonly ReleaseNativeIndexRecord[], bucketCount: number): Promise<ReleaseNativeIndexRecord[][]> {
   const buckets = Array.from({ length: bucketCount }, () => [] as ReleaseNativeIndexRecord[])
   for (const index of indexes) {
@@ -352,23 +389,35 @@ async function main(): Promise<void> {
   const snapshotId = args.snapshotId ?? `devnet-${ledger.ledgerIndex}-${ledger.ledgerHash.slice(0, 12).toLowerCase()}`
 
   const materialized = await makeDataRecords(args, ledger)
-  const dataCounts = countRecords(materialized.records)
-  const dataStats = await writeGzipNdjson(join(assetsDir, DATA_ASSET_NAME), materialized.records)
-  const dataAsset: ReleaseNativeDataAsset = {
-    assetName: DATA_ASSET_NAME,
-    segmentId: 'segment-00000',
-    sha256: dataStats.sha256,
-    compressedBytes: dataStats.compressedBytes,
-    uncompressedBytes: dataStats.uncompressedBytes,
-    recordCount: materialized.records.length,
-    sourcePages: { first: 1, last: materialized.sourcePages, count: materialized.sourcePages },
-    firstObjectId: materialized.records[0]?.id ?? null,
-    lastObjectId: materialized.records.at(-1)?.id ?? null,
-    counts: dataCounts,
+  const segmentedRecords = segmentRecords(materialized.records, args.dataSegments)
+  const allRecords = segmentedRecords.flat()
+  const dataCounts = countRecords(allRecords)
+  const dataAssets: ReleaseNativeDataAsset[] = []
+  let dataCompressedBytes = 0
+  let dataUncompressedBytes = 0
+
+  for (let segment = 0; segment < segmentedRecords.length; segment += 1) {
+    const records = segmentedRecords[segment]!
+    const assetName = dataAssetName(segment)
+    const stats = await writeGzipNdjson(join(assetsDir, assetName), records)
+    dataCompressedBytes += stats.compressedBytes
+    dataUncompressedBytes += stats.uncompressedBytes
+    dataAssets.push({
+      assetName,
+      segmentId: segmentId(segment),
+      sha256: stats.sha256,
+      compressedBytes: stats.compressedBytes,
+      uncompressedBytes: stats.uncompressedBytes,
+      recordCount: records.length,
+      sourcePages: pageRange(records, materialized.sourcePages),
+      firstObjectId: records[0]?.id ?? null,
+      lastObjectId: records.at(-1)?.id ?? null,
+      counts: countRecords(records),
+    })
   }
 
   const indexSeed: ReleaseNativeIndexRecord[] = []
-  for (const record of materialized.records) {
+  for (const record of allRecords) {
     addObjectIndex(indexSeed, record)
     addAccountIndex(indexSeed, record, 'Account', record.value.Account)
     addAccountIndex(indexSeed, record, 'Owner', record.value.Owner)
@@ -410,19 +459,19 @@ async function main(): Promise<void> {
     complete: materialized.complete,
     sourcePages: materialized.sourcePages,
     decodedObjectCount: materialized.decodedObjectCount,
-    relevantObjectCount: materialized.records.length,
+    relevantObjectCount: allRecords.length,
     counts: dataCounts,
     layout: {
-      pagesPerSegment: materialized.sourcePages,
+      pagesPerSegment: Math.max(1, Math.ceil(materialized.sourcePages / args.dataSegments)),
       indexBuckets: args.indexBuckets,
-      dataSegmentCount: 1,
+      dataSegmentCount: dataAssets.length,
       hashFunction: 'sha256-first-u32-mod-bucket-count' as const,
     },
-    dataAssets: [dataAsset],
+    dataAssets,
     indexAssets,
     totals: {
-      dataCompressedBytes: dataStats.compressedBytes,
-      dataUncompressedBytes: dataStats.uncompressedBytes,
+      dataCompressedBytes,
+      dataUncompressedBytes,
       indexCompressedBytes,
       indexUncompressedBytes,
     },
@@ -455,14 +504,14 @@ async function main(): Promise<void> {
     sourcePages: materialized.sourcePages,
     decodedObjectCount: materialized.decodedObjectCount,
     counts: dataCounts,
-    dataAssets: 1,
+    dataAssets: dataAssets.length,
     indexAssets: indexAssets.length,
-    totalAssets: 1 + indexAssets.length + 1,
+    totalAssets: dataAssets.length + indexAssets.length + 1,
   }
   await writeText(join(args.outputDir, 'release-summary.json'), summary)
   await writeFile(
     join(args.outputDir, 'release-notes.md'),
-    `# XRPL Lending Monitor current-state snapshot\n\n- release: ${args.releaseTag}\n- traversal mode: ${materialized.traversalMode}\n- complete: ${materialized.complete}\n- source pages: ${materialized.sourcePages}\n- decoded objects: ${materialized.decodedObjectCount}\n- ledger: ${ledger.ledgerIndex}\n- ledger hash: ${ledger.ledgerHash}\n- vaults: ${dataCounts.vaults}\n- loan brokers: ${dataCounts.loanBrokers}\n- loans: ${dataCounts.loans}\n- manifest sha256: ${manifestSha256}\n`,
+    `# XRPL Lending Monitor current-state snapshot\n\n- release: ${args.releaseTag}\n- traversal mode: ${materialized.traversalMode}\n- complete: ${materialized.complete}\n- source pages: ${materialized.sourcePages}\n- decoded objects: ${materialized.decodedObjectCount}\n- data assets: ${dataAssets.length}\n- index assets: ${indexAssets.length}\n- total release assets: ${dataAssets.length + indexAssets.length + 1}\n- ledger: ${ledger.ledgerIndex}\n- ledger hash: ${ledger.ledgerHash}\n- vaults: ${dataCounts.vaults}\n- loan brokers: ${dataCounts.loanBrokers}\n- loans: ${dataCounts.loans}\n- manifest sha256: ${manifestSha256}\n`,
     'utf8',
   )
   process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`)
