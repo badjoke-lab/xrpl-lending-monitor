@@ -36,7 +36,7 @@ Production catch-up has not started. Mainnet remains disabled.
 
 ## Active unit
 
-M1-HYB-6 bounded production catch-up preparation is next.
+M1-HYB-6 guarded production catch-up preparation is next.
 
 ## Next order
 
