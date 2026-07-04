@@ -23,7 +23,7 @@ The overlay is connected to the incremental collector persistence boundary. Proc
 
 The overlay is connected to public current-state API resolution for Overview, current Vault, Loan Broker, Loan, exact Search, Account, and relationship reads.
 
-The scheduled Worker path now refreshes network status and runs one bounded incremental collection cycle. The collector applies explicit ledger, request, transaction, row, statement, overlay-mutation, retry, and execution-deadline limits; processes only a contiguous prefix; records lag and run usage; exposes collector status; and waits for explicit cursor/base initialization rather than silently rebinding epochs. Production catch-up has not started. Mainnet remains disabled.
+The scheduled Worker path refreshes network status and runs one bounded incremental collection cycle. The collector applies explicit ledger, request, transaction, row, statement, overlay-mutation, retry, and execution-deadline limits; processes only a contiguous prefix; records lag and run usage; exposes collector status; and waits for explicit cursor/base initialization rather than silently rebinding epochs. Production catch-up has not started. Mainnet remains disabled.
 
 ## Completed units
 
