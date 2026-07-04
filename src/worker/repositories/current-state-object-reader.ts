@@ -23,23 +23,21 @@ function database(storage: CurrentStateStorage): D1Database {
 }
 
 export function listCurrentVaults(
-  db: D1Database,
   storage: CurrentStateStorage,
   snapshot: ActiveSnapshotRecord,
   options: ListCurrentVaultsOptions,
 ): Promise<ListCurrentVaultsResult> {
   return isReleaseCurrentStateSource(storage)
-    ? listBaseOverlayVaults(db, storage, snapshot, options)
+    ? listBaseOverlayVaults(storage.db, storage, snapshot, options)
     : listStoredCurrentVaults(database(storage), snapshot, options)
 }
 
 export function getCurrentVaultById(
-  db: D1Database,
   storage: CurrentStateStorage,
   snapshot: ActiveSnapshotRecord,
   vaultId: string,
 ) {
   return isReleaseCurrentStateSource(storage)
-    ? getBaseOverlayVaultById(db, storage, snapshot, vaultId)
+    ? getBaseOverlayVaultById(storage.db, storage, snapshot, vaultId)
     : getStoredCurrentVaultById(database(storage), snapshot, vaultId)
 }
