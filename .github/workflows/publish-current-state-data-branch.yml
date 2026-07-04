@@ -1,0 +1,86 @@
+name: Publish current-state data branch
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/current-state-data-publish-trigger]
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: current-state-data-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_RUN_ID: '28699460881'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: current-state-release-assets
+          path: .local/current-state-release
+          run-id: ${{ env.SOURCE_RUN_ID }}
+          github-token: ${{ github.token }}
+
+      - name: Verify complete artifact
+        run: |
+          SUMMARY=.local/current-state-release/release-summary.json
+          test "$(jq -r .complete "$SUMMARY")" = "true"
+          test "$(jq -r .dataAssets "$SUMMARY")" = "20"
+          test "$(jq -r .indexAssets "$SUMMARY")" = "64"
+          test "$(find .local/current-state-release/assets -maxdepth 1 -type f | wc -l)" = "85"
+
+      - name: Prepare data branch tree
+        run: |
+          TAG=$(jq -r .releaseTag .local/current-state-release/release-summary.json)
+          mkdir -p "/tmp/current-state-data/snapshots/$TAG"
+          cp .local/current-state-release/assets/* "/tmp/current-state-data/snapshots/$TAG/"
+          cp .local/current-state-release/channel/channel.json /tmp/current-state-data/channel.json
+          cp .local/current-state-release/release-summary.json /tmp/current-state-data/release-summary.json
+          cp .local/current-state-release/release-notes.md /tmp/current-state-data/release-notes.md
+
+      - name: Publish branch
+        id: publish
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git checkout --orphan current-state-data-publish
+          git rm -rf . || true
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -R /tmp/current-state-data/. .
+          git add .
+          git commit -m "Publish complete current-state snapshot"
+          git push --force origin HEAD:refs/heads/current-state-data
+
+      - name: Report publish status
+        if: always()
+        env:
+          PUBLISH_OUTCOME: ${{ steps.publish.outcome }}
+        run: |
+          TAG=$(jq -r '.releaseTag // ""' .local/current-state-release/release-summary.json 2>/dev/null || true)
+          jq -n \
+            --arg runId "$GITHUB_RUN_ID" \
+            --arg runUrl "https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            --arg sourceRunId "$SOURCE_RUN_ID" \
+            --arg releaseTag "$TAG" \
+            --arg outcome "$PUBLISH_OUTCOME" \
+            '{runId:$runId,runUrl:$runUrl,sourceRunId:$sourceRunId,releaseTag:$releaseTag,outcome:$outcome}' \
+            > publish-status.json
+          API="repos/${GITHUB_REPOSITORY}/contents/.github/current-state-data-publish-status.json"
+          CONTENT=$(base64 -w0 publish-status.json)
+          SHA=$(gh api "$API" --jq .sha 2>/dev/null || true)
+          if [ -n "$SHA" ]; then
+            gh api --method PUT "$API" -f message="Update current-state data publish status" -f content="$CONTENT" -f sha="$SHA" >/dev/null
+          else
+            gh api --method PUT "$API" -f message="Create current-state data publish status" -f content="$CONTENT" >/dev/null
+          fi
