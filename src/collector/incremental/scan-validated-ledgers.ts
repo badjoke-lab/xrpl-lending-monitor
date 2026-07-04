@@ -24,7 +24,7 @@ export interface IncrementalScanResult {
   }
 }
 
-type LedgerReader = typeof readValidatedLedger
+export type LedgerReader = typeof readValidatedLedger
 
 function safeInteger(value: number, field: string, minimum: number): number {
   if (!Number.isSafeInteger(value) || value < minimum) {
@@ -42,6 +42,7 @@ export async function scanValidatedLedgerRange(options: {
   expectedPreviousHash: string | null
   reader?: LedgerReader
   now?: () => number
+  shouldContinue?: (nextLedgerIndex: number, ledgersRead: number) => boolean
 }): Promise<IncrementalScanResult> {
   const startLedgerIndex = safeInteger(options.startLedgerIndex, 'startLedgerIndex', 0)
   const latestValidatedLedger = safeInteger(
@@ -71,13 +72,14 @@ export async function scanValidatedLedgerRange(options: {
   }
 
   const reader = options.reader ?? readValidatedLedger
-  const endLedgerIndex = Math.min(latestValidatedLedger, startLedgerIndex + maxLedgers - 1)
+  const plannedEndLedgerIndex = Math.min(latestValidatedLedger, startLedgerIndex + maxLedgers - 1)
   const ledgers: IncrementalLedgerRead[] = []
   let expectedParentHash = options.expectedPreviousHash
   let inspectedTransactions = 0
   let lendingTransactions = 0
 
-  for (let ledgerIndex = startLedgerIndex; ledgerIndex <= endLedgerIndex; ledgerIndex += 1) {
+  for (let ledgerIndex = startLedgerIndex; ledgerIndex <= plannedEndLedgerIndex; ledgerIndex += 1) {
+    if (options.shouldContinue && !options.shouldContinue(ledgerIndex, ledgers.length)) break
     const ledger = await reader({
       endpoint: options.endpoint,
       ledgerIndex,
@@ -99,6 +101,7 @@ export async function scanValidatedLedgerRange(options: {
     expectedParentHash = ledger.ledgerHash
   }
 
+  const endLedgerIndex = ledgers.at(-1)?.ledgerIndex ?? null
   return {
     endpoint: options.endpoint,
     startLedgerIndex,
