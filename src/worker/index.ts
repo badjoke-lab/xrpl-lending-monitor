@@ -1,9 +1,8 @@
 import { Hono, type Context } from 'hono'
 
 import { refreshNetworkStatus } from '../collector/network/refresh-network-status'
-import { resolveRuntimeConfig } from '../shared/runtime-config'
+import { resolveRuntimeConfig, type RuntimeConfig } from '../shared/runtime-config'
 import type { Bindings } from './env'
-import { getActiveSnapshot } from './repositories/core-api-repository'
 import {
   CurrentStateObjectReadError,
   getCurrentVaultById,
@@ -25,6 +24,7 @@ import {
   searchHistory,
 } from './repositories/history-api-repository'
 import { getCurrentEpoch, getSyncState } from './repositories/network-status-repository'
+import { resolveCurrentStateStorage } from './repositories/release-current-state'
 import { registerCurrentLoanBrokerRoutes } from './routes/current-loan-brokers'
 import {
   serializeAvailableVaultCollection,
@@ -76,13 +76,13 @@ const BALANCE_SUBJECT_TYPES = new Set(['Vault', 'LoanBroker'])
 const MAX_QUERY_LENGTH = 128
 const MAX_CURSOR_LENGTH = 1024
 
-async function loadCoreApiContext(db: D1Database) {
-  const [state, epoch, snapshot] = await Promise.all([
+async function loadCoreApiContext(db: D1Database, config: RuntimeConfig) {
+  const [state, epoch, currentState] = await Promise.all([
     getSyncState(db),
     getCurrentEpoch(db),
-    getActiveSnapshot(db),
+    resolveCurrentStateStorage(config, db),
   ])
-  return { state, epoch, snapshot }
+  return { state, epoch, snapshot: currentState.snapshot, currentState }
 }
 
 function parsePageLimit(value: string | undefined): number | null {
@@ -157,12 +157,12 @@ app.get('/api/status', async (context) => {
 })
 
 app.get('/api/overview', async (context) => {
-  resolveRuntimeConfig(context.env)
-  return context.json(serializeOverview(await loadCoreApiContext(context.env.DB)))
+  const config = resolveRuntimeConfig(context.env)
+  return context.json(serializeOverview(await loadCoreApiContext(context.env.DB, config)))
 })
 
 app.get('/api/vaults', async (context) => {
-  resolveRuntimeConfig(context.env)
+  const config = resolveRuntimeConfig(context.env)
   const limit = parsePageLimit(context.req.query('limit'))
   if (limit === null) return invalidLimitResponse(context)
 
@@ -195,7 +195,11 @@ app.get('/api/vaults', async (context) => {
     )
   }
 
-  const { epoch, snapshot } = await loadCoreApiContext(context.env.DB)
+  const [epoch, currentState] = await Promise.all([
+    getCurrentEpoch(context.env.DB),
+    resolveCurrentStateStorage(config, context.env.DB),
+  ])
+  const snapshot = currentState.snapshot
   if (!snapshot) {
     return context.json(
       serializeUnavailableEntityCollection({
@@ -208,7 +212,7 @@ app.get('/api/vaults', async (context) => {
   }
 
   try {
-    const result = await listCurrentVaults(context.env.DB, snapshot, {
+    const result = await listCurrentVaults(currentState.source, snapshot, {
       limit,
       cursor,
       sort,
@@ -235,7 +239,7 @@ app.get('/api/vaults', async (context) => {
 })
 
 app.get('/api/vaults/:vaultId', async (context) => {
-  resolveRuntimeConfig(context.env)
+  const config = resolveRuntimeConfig(context.env)
   const vaultId = context.req.param('vaultId').toUpperCase()
   if (!/^[A-F0-9]{64}$/.test(vaultId)) {
     return context.json(
@@ -244,13 +248,17 @@ app.get('/api/vaults/:vaultId', async (context) => {
     )
   }
 
-  const { epoch, snapshot } = await loadCoreApiContext(context.env.DB)
+  const [epoch, currentState] = await Promise.all([
+    getCurrentEpoch(context.env.DB),
+    resolveCurrentStateStorage(config, context.env.DB),
+  ])
+  const snapshot = currentState.snapshot
   if (!snapshot) {
     return context.json(serializeUnavailableVaultDetail({ epoch, snapshot }))
   }
 
   try {
-    const vault = await getCurrentVaultById(context.env.DB, snapshot, vaultId)
+    const vault = await getCurrentVaultById(currentState.source, snapshot, vaultId)
     if (!vault) {
       return context.json(
         { error: 'not_found', kind: 'vault', id: vaultId, snapshot_id: snapshot.id },
