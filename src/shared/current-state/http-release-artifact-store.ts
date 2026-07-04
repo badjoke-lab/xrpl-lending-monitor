@@ -11,6 +11,7 @@ const DEFAULT_IMMUTABLE_TTL_SECONDS = 31_536_000
 const ALLOWED_RELEASE_RESPONSE_HOSTS = new Set([
   'github.com',
   'objects.githubusercontent.com',
+  'raw.githubusercontent.com',
   'release-assets.githubusercontent.com',
 ])
 
@@ -32,6 +33,24 @@ export interface HttpReleaseArtifactStoreOptions {
 
 function flatAssetName(value: string): string {
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value)) throw new Error('Release asset name is invalid')
+  return value
+}
+
+function repositoryName(value: string): string {
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(value)) {
+    throw new Error('GitHub repository must be owner/name')
+  }
+  return value
+}
+
+function branchName(value: string): string {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value)) throw new Error('GitHub data branch is invalid')
+  return value
+}
+
+function safePrefix(value: string): string {
+  if (value === '') return ''
+  if (!/^[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)*$/.test(value)) throw new Error('GitHub data path prefix is invalid')
   return value
 }
 
@@ -103,16 +122,31 @@ export class GithubReleaseAssetResolver implements ReleaseAssetResolver {
   readonly #releaseTag: string
 
   constructor(repository: string, releaseTag: string) {
-    if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) {
-      throw new Error('GitHub repository must be owner/name')
-    }
+    this.#repository = repositoryName(repository)
     if (releaseTag.length === 0) throw new Error('GitHub release tag is required')
-    this.#repository = repository
     this.#releaseTag = encodeURIComponent(releaseTag)
   }
 
   urlFor(assetName: string): string {
     return `https://github.com/${this.#repository}/releases/download/${this.#releaseTag}/${encodeURIComponent(flatAssetName(assetName))}`
+  }
+}
+
+export class GithubBranchAssetResolver implements ReleaseAssetResolver {
+  readonly #repository: string
+  readonly #branch: string
+  readonly #prefix: string
+
+  constructor(repository: string, branch: string, prefix = '') {
+    this.#repository = repositoryName(repository)
+    this.#branch = branchName(branch)
+    this.#prefix = safePrefix(prefix)
+  }
+
+  urlFor(assetName: string): string {
+    const suffix = encodeURIComponent(flatAssetName(assetName))
+    const path = this.#prefix ? `${this.#prefix}/${suffix}` : suffix
+    return `https://raw.githubusercontent.com/${this.#repository}/${this.#branch}/${path}`
   }
 }
 
