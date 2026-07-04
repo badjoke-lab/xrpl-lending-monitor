@@ -1,0 +1,120 @@
+2026-07-04T08:27:57.2157086Z Uploaded bytes 209715200
+2026-07-04T08:27:57.4548525Z Uploaded bytes 218103808
+2026-07-04T08:27:57.6766457Z Uploaded bytes 226492416
+2026-07-04T08:27:57.9076805Z Uploaded bytes 234881024
+2026-07-04T08:27:58.2117377Z Uploaded bytes 243269632
+2026-07-04T08:27:58.3098453Z Uploaded bytes 251658240
+2026-07-04T08:27:58.5184461Z Uploaded bytes 260046848
+2026-07-04T08:27:58.7435626Z Uploaded bytes 268435456
+2026-07-04T08:27:58.9693026Z Uploaded bytes 276824064
+2026-07-04T08:27:59.1204480Z Uploaded bytes 285212672
+2026-07-04T08:27:59.3488116Z Uploaded bytes 293601280
+2026-07-04T08:27:59.4969268Z Uploaded bytes 301989888
+2026-07-04T08:27:59.7110670Z Uploaded bytes 310378496
+2026-07-04T08:27:59.9333543Z Uploaded bytes 318767104
+2026-07-04T08:28:00.1139083Z Uploaded bytes 327155712
+2026-07-04T08:28:00.3001072Z Uploaded bytes 335544320
+2026-07-04T08:28:00.5155228Z Uploaded bytes 343932928
+2026-07-04T08:28:00.7205006Z Uploaded bytes 352321536
+2026-07-04T08:28:00.9501511Z Uploaded bytes 360710144
+2026-07-04T08:28:01.0990193Z Uploaded bytes 369098752
+2026-07-04T08:28:01.3267450Z Uploaded bytes 377487360
+2026-07-04T08:28:01.5097986Z Uploaded bytes 385875968
+2026-07-04T08:28:01.7717964Z Uploaded bytes 394264576
+2026-07-04T08:28:01.9004063Z Uploaded bytes 402653184
+2026-07-04T08:28:02.1187120Z Uploaded bytes 411041792
+2026-07-04T08:28:02.3142849Z Uploaded bytes 419430400
+2026-07-04T08:28:02.5815647Z Uploaded bytes 427819008
+2026-07-04T08:28:02.7471561Z Uploaded bytes 436207616
+2026-07-04T08:28:02.9561684Z Uploaded bytes 444596224
+2026-07-04T08:28:03.1547102Z Uploaded bytes 452984832
+2026-07-04T08:28:03.3762542Z Uploaded bytes 461373440
+2026-07-04T08:28:03.5464920Z Uploaded bytes 469762048
+2026-07-04T08:28:03.7709696Z Uploaded bytes 478150656
+2026-07-04T08:28:04.0103826Z Uploaded bytes 486539264
+2026-07-04T08:28:04.1678115Z Uploaded bytes 494927872
+2026-07-04T08:28:04.3960915Z Uploaded bytes 503316480
+2026-07-04T08:28:04.6368806Z Uploaded bytes 511705088
+2026-07-04T08:28:04.7768341Z Uploaded bytes 520093696
+2026-07-04T08:28:05.0081221Z Uploaded bytes 528482304
+2026-07-04T08:28:05.1947039Z Uploaded bytes 536870912
+2026-07-04T08:28:05.3958761Z Uploaded bytes 545259520
+2026-07-04T08:28:05.6097793Z Uploaded bytes 553648128
+2026-07-04T08:28:05.7872766Z Uploaded bytes 562036736
+2026-07-04T08:28:06.0760755Z Uploaded bytes 570425344
+2026-07-04T08:28:06.2543618Z Uploaded bytes 578813952
+2026-07-04T08:28:06.4270069Z Uploaded bytes 587202560
+2026-07-04T08:28:06.6483157Z Uploaded bytes 595591168
+2026-07-04T08:28:06.8681506Z Uploaded bytes 603979776
+2026-07-04T08:28:07.0313958Z Uploaded bytes 612368384
+2026-07-04T08:28:07.2459403Z Uploaded bytes 620756992
+2026-07-04T08:28:07.4663167Z Uploaded bytes 629145600
+2026-07-04T08:28:07.6590657Z Uploaded bytes 637534208
+2026-07-04T08:28:07.8887942Z Uploaded bytes 645922816
+2026-07-04T08:28:08.1112159Z Uploaded bytes 654311424
+2026-07-04T08:28:08.2851544Z Uploaded bytes 662700032
+2026-07-04T08:28:08.5137535Z Uploaded bytes 671088640
+2026-07-04T08:28:08.6957197Z Uploaded bytes 679477248
+2026-07-04T08:28:08.7956119Z Uploaded bytes 680788718
+2026-07-04T08:28:08.8619322Z Finished uploading artifact content to blob storage!
+2026-07-04T08:28:08.8621149Z SHA256 digest of uploaded artifact zip is 62bc2ec73fea1ec97264e44397e296943ba6f29a0a6258cd2f212577aa5873bc
+2026-07-04T08:28:08.8623202Z Finalizing artifact upload
+2026-07-04T08:28:09.1839219Z Artifact current-state-release-assets.zip successfully finalized. Artifact ID 8080032924
+2026-07-04T08:28:09.1840356Z Artifact current-state-release-assets has been successfully uploaded! Final size is 680788718 bytes. Artifact ID is 8080032924
+2026-07-04T08:28:09.1846054Z Artifact download URL: https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/28699460881/artifacts/8080032924
+2026-07-04T08:28:09.1988708Z ##[group]Run if [ "$(jq -r .complete .local/current-state-release/release-summary.json)" != "true" ]; then
+2026-07-04T08:28:09.1989289Z [36;1mif [ "$(jq -r .complete .local/current-state-release/release-summary.json)" != "true" ]; then[0m
+2026-07-04T08:28:09.1989730Z [36;1m  echo "Refusing to publish incomplete current-state snapshot." >&2[0m
+2026-07-04T08:28:09.1990043Z [36;1m  exit 1[0m
+2026-07-04T08:28:09.1990216Z [36;1mfi[0m
+2026-07-04T08:28:09.2018280Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-07-04T08:28:09.2018554Z env:
+2026-07-04T08:28:09.2020375Z   GH_TOKEN: ***
+2026-07-04T08:28:09.2020607Z   ENDPOINT: https://s.devnet.rippletest.net:51234
+2026-07-04T08:28:09.2020864Z   PAGE_LIMIT: 15000
+2026-07-04T08:28:09.2021044Z   OBJECT_LIMIT_PER_PAGE: 2048
+2026-07-04T08:28:09.2021237Z   DATA_SEGMENTS: 20
+2026-07-04T08:28:09.2021398Z   INDEX_BUCKETS: 64
+2026-07-04T08:28:09.2021567Z   PUBLISH_ACTIVE: true
+2026-07-04T08:28:09.2021991Z   PNPM_HOME: /home/runner/setup-pnpm/node_modules/.bin
+2026-07-04T08:28:09.2022245Z ##[endgroup]
+2026-07-04T08:28:09.2110739Z ##[group]Run TAG="$(jq -r .releaseTag .local/current-state-release/release-summary.json)"
+2026-07-04T08:28:09.2111195Z [36;1mTAG="$(jq -r .releaseTag .local/current-state-release/release-summary.json)"[0m
+2026-07-04T08:28:09.2111598Z [36;1mgh release create "$TAG" .local/current-state-release/assets/* \[0m
+2026-07-04T08:28:09.2112122Z [36;1m  --title "$TAG" \[0m
+2026-07-04T08:28:09.2112402Z [36;1m  --notes-file .local/current-state-release/release-notes.md \[0m
+2026-07-04T08:28:09.2112699Z [36;1m  --target "$GITHUB_SHA" \[0m
+2026-07-04T08:28:09.2112905Z [36;1m  --latest=false[0m
+2026-07-04T08:28:09.2137231Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-07-04T08:28:09.2137497Z env:
+2026-07-04T08:28:09.2139268Z   GH_TOKEN: ***
+2026-07-04T08:28:09.2139506Z   ENDPOINT: https://s.devnet.rippletest.net:51234
+2026-07-04T08:28:09.2139760Z   PAGE_LIMIT: 15000
+2026-07-04T08:28:09.2139939Z   OBJECT_LIMIT_PER_PAGE: 2048
+2026-07-04T08:28:09.2140164Z   DATA_SEGMENTS: 20
+2026-07-04T08:28:09.2140327Z   INDEX_BUCKETS: 64
+2026-07-04T08:28:09.2140491Z   PUBLISH_ACTIVE: true
+2026-07-04T08:28:09.2140709Z   PNPM_HOME: /home/runner/setup-pnpm/node_modules/.bin
+2026-07-04T08:28:09.2140950Z ##[endgroup]
+2026-07-04T08:28:10.1534793Z HTTP 403: Resource not accessible by integration (https://api.github.com/repos/badjoke-lab/xrpl-lending-monitor/releases)
+2026-07-04T08:28:10.1548697Z ##[error]Process completed with exit code 1.
+2026-07-04T08:28:10.1620787Z Node 20 is being deprecated. This workflow is running with Node 24 by default. If you need to temporarily use Node 20, you can set the ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true environment variable. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+2026-07-04T08:28:10.1621686Z Post job cleanup.
+2026-07-04T08:28:10.2747788Z Pruning is unnecessary.
+2026-07-04T08:28:10.2873057Z Node 20 is being deprecated. This workflow is running with Node 24 by default. If you need to temporarily use Node 20, you can set the ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true environment variable. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+2026-07-04T08:28:10.2873983Z Post job cleanup.
+2026-07-04T08:28:10.3591043Z [command]/usr/bin/git version
+2026-07-04T08:28:10.3632739Z git version 2.54.0
+2026-07-04T08:28:10.3672700Z Temporarily overriding HOME='/home/runner/work/_temp/6a2a51d2-cf09-43cb-aad8-899e4ecba3d0' before making global git config changes
+2026-07-04T08:28:10.3682547Z Adding repository directory to the temporary git global config as a safe directory
+2026-07-04T08:28:10.3685547Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/xrpl-lending-monitor/xrpl-lending-monitor
+2026-07-04T08:28:10.3711971Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-07-04T08:28:10.3748082Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-07-04T08:28:10.4014442Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-07-04T08:28:10.4036377Z http.https://github.com/.extraheader
+2026-07-04T08:28:10.4054045Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+2026-07-04T08:28:10.4082788Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-07-04T08:28:10.4299120Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-07-04T08:28:10.4334413Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-07-04T08:28:10.4655620Z Cleaning up orphan processes
+2026-07-04T08:28:10.4921068Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, actions/setup-node@v4, actions/upload-artifact@v4, pnpm/action-setup@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
