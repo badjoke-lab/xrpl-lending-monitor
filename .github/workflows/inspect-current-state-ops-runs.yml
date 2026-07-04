@@ -1,0 +1,40 @@
+name: Inspect current-state operations runs
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/current-state-ops-inspect-trigger
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Inspect operations workflows
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          jq -n '{republish:[],cancel:[],deploy:[]}' > ops-runs.json
+          for SPEC in \
+            'republish:republish-complete-current-state.yml' \
+            'cancel:cancel-obsolete-current-state-runs.yml' \
+            'deploy:deploy-production-worker.yml'; do
+            KEY=${SPEC%%:*}
+            WORKFLOW=${SPEC#*:}
+            RUNS=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/${WORKFLOW}/runs?per_page=5" --jq '[.workflow_runs[]|{id,status,conclusion,head_sha,created_at,updated_at,html_url}]')
+            jq --arg key "$KEY" --argjson runs "$RUNS" '.[$key]=$runs' ops-runs.json > next.json
+            mv next.json ops-runs.json
+          done
+          API_PATH="repos/${GITHUB_REPOSITORY}/contents/.github/current-state-ops-runs.json"
+          CONTENT=$(base64 -w0 ops-runs.json)
+          EXISTING_SHA=$(gh api "$API_PATH" --jq .sha 2>/dev/null || true)
+          if [ -n "$EXISTING_SHA" ]; then
+            gh api --method PUT "$API_PATH" -f message="Update current-state operations run list" -f content="$CONTENT" -f sha="$EXISTING_SHA" >/dev/null
+          else
+            gh api --method PUT "$API_PATH" -f message="Create current-state operations run list" -f content="$CONTENT" >/dev/null
+          fi
