@@ -5,6 +5,7 @@ export function withReleaseCurrentState(config: RuntimeConfig): RuntimeConfig {
     ...config,
     currentState: {
       githubRepository: 'badjoke-lab/xrpl-lending-monitor',
+      releaseChannelTag: 'current-state-channel',
       maxAssetBytes: 8 * 1024 * 1024,
       maxDecompressedBytes: 16 * 1024 * 1024,
     },
