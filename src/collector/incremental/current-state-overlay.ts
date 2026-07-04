@@ -6,11 +6,11 @@ import type {
 } from '../../domain/lending/current-projections'
 import { canonicalJson } from '../../shared/current-state/canonical-json'
 import {
+  type CurrentProjectionLedgerObject,
   normalizeLoan,
   normalizeLoanBroker,
   normalizeVault,
 } from '../current-state/normalize-current-objects'
-import type { ScannedLedgerObject } from '../current-state/scan-ledger-objects'
 import type {
   CurrentStateOverlayMutation,
   CurrentStateOverlayObjectType,
@@ -64,17 +64,17 @@ function projectionObject(options: {
   objectId: string
   fields: Record<string, unknown>
   context: OverlayDerivationContext
-}): ScannedLedgerObject {
+}): CurrentProjectionLedgerObject {
   return {
     ...options.fields,
     LedgerEntryType: options.type,
     index: options.objectId,
     PreviousTxnID: options.context.transactionHash,
     PreviousTxnLgrSeq: options.context.ledgerIndex,
-  } as ScannedLedgerObject
+  }
 }
 
-function normalizeProjection(object: ScannedLedgerObject): NormalizedProjection {
+function normalizeProjection(object: CurrentProjectionLedgerObject): NormalizedProjection {
   if (object.LedgerEntryType === 'Vault') return normalizeVault(object)
   if (object.LedgerEntryType === 'LoanBroker') return normalizeLoanBroker(object)
   return normalizeLoan(object)

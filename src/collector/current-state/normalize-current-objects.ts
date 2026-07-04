@@ -6,7 +6,7 @@ import type {
   LoanOnLedgerStatus,
   VaultCurrentProjection,
 } from '../../domain/lending/current-projections'
-import type { ScannedLedgerObject } from './scan-ledger-objects'
+import type { CurrentLedgerEntryType } from './scan-ledger-objects'
 
 const LOAN_DEFAULT_FLAG = 0x00010000
 const LOAN_IMPAIRED_FLAG = 0x00020000
@@ -71,7 +71,12 @@ function optionalAmountString(record: Record<string, unknown>, field: string): s
   return amountString(record, field)
 }
 
-function common(object: ScannedLedgerObject): {
+export interface CurrentProjectionLedgerObject extends Record<string, unknown> {
+  LedgerEntryType: CurrentLedgerEntryType
+  index: string
+}
+
+function common(object: CurrentProjectionLedgerObject): {
   id: string
   flags: number
   dataHex: string | null
@@ -89,7 +94,7 @@ function common(object: ScannedLedgerObject): {
   }
 }
 
-export function normalizeVault(object: ScannedLedgerObject): VaultCurrentProjection {
+export function normalizeVault(object: CurrentProjectionLedgerObject): VaultCurrentProjection {
   if (object.LedgerEntryType !== 'Vault') throw new Error('Expected a Vault object')
   const shareMptId = normalizeMptIssuanceId(requiredString(object, 'ShareMPTID'))
 
@@ -111,7 +116,7 @@ export function normalizeVault(object: ScannedLedgerObject): VaultCurrentProject
 }
 
 export function normalizeLoanBroker(
-  object: ScannedLedgerObject,
+  object: CurrentProjectionLedgerObject,
 ): LoanBrokerCurrentProjection {
   if (object.LedgerEntryType !== 'LoanBroker') {
     throw new Error('Expected a LoanBroker object')
@@ -141,7 +146,7 @@ function loanStatus(flags: number): LoanOnLedgerStatus {
   return 'active'
 }
 
-export function normalizeLoan(object: ScannedLedgerObject): LoanCurrentProjection {
+export function normalizeLoan(object: CurrentProjectionLedgerObject): LoanCurrentProjection {
   if (object.LedgerEntryType !== 'Loan') throw new Error('Expected a Loan object')
   const base = common(object)
   const paymentRemaining = unsignedOrZero(object, 'PaymentRemaining')
