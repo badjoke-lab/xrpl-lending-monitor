@@ -1,0 +1,117 @@
+name: Publish current-state release
+
+on:
+  workflow_dispatch:
+    inputs:
+      endpoint:
+        description: XRPL JSON-RPC endpoint
+        required: false
+        default: https://s.devnet.rippletest.net:51234
+      page_limit:
+        description: Maximum ledger_data pages per object type
+        required: false
+        default: '500'
+      object_limit_per_page:
+        description: ledger_data object limit per page
+        required: false
+        default: '2048'
+      index_buckets:
+        description: Release-native index bucket count
+        required: false
+        default: '16'
+  push:
+    branches:
+      - main
+    paths:
+      - .github/current-state-release-trigger
+      - .github/workflows/publish-current-state-release.yml
+      - scripts/run-release-current-state.ts
+      - src/collector/current-state/**
+      - src/collector/network/**
+      - src/shared/current-state/**
+      - vite.release-current-state.config.ts
+      - package.json
+      - pnpm-lock.yaml
+
+permissions:
+  contents: write
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: current-state-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ENDPOINT: ${{ github.event.inputs.endpoint || 'https://s.devnet.rippletest.net:51234' }}
+      PAGE_LIMIT: ${{ github.event.inputs.page_limit || '500' }}
+      OBJECT_LIMIT_PER_PAGE: ${{ github.event.inputs.object_limit_per_page || '2048' }}
+      INDEX_BUCKETS: ${{ github.event.inputs.index_buckets || '16' }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build release materializer
+        run: pnpm build:release-current-state
+
+      - name: Materialize current-state release assets
+        run: |
+          RELEASE_TAG="current-state-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          node .release-current-state-build/run-release-current-state.mjs \
+            --local \
+            --endpoint "$ENDPOINT" \
+            --release-tag "$RELEASE_TAG" \
+            --page-limit "$PAGE_LIMIT" \
+            --object-limit-per-page "$OBJECT_LIMIT_PER_PAGE" \
+            --index-buckets "$INDEX_BUCKETS" \
+            --output-dir .local/current-state-release
+
+      - name: Upload generated assets for audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: current-state-release-assets
+          path: .local/current-state-release
+          if-no-files-found: error
+
+      - name: Publish immutable snapshot release
+        run: |
+          TAG="$(jq -r .releaseTag .local/current-state-release/release-summary.json)"
+          gh release create "$TAG" .local/current-state-release/assets/* \
+            --title "$TAG" \
+            --notes-file .local/current-state-release/release-notes.md \
+            --target "$GITHUB_SHA" \
+            --latest=false
+
+      - name: Publish active channel
+        run: |
+          CHANNEL_TAG="current-state-channel"
+          if gh release view "$CHANNEL_TAG" >/dev/null 2>&1; then
+            gh release upload "$CHANNEL_TAG" .local/current-state-release/channel/channel.json --clobber
+          else
+            gh release create "$CHANNEL_TAG" .local/current-state-release/channel/channel.json \
+              --title "$CHANNEL_TAG" \
+              --notes "Active current-state release channel." \
+              --target "$GITHUB_SHA" \
+              --latest=false
+          fi
