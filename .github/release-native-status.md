@@ -1,3 +1,3 @@
 Release-native current-state implementation is merged.
 
-Validation branch: current-state release publication pipeline check.
+Validation branch completed: PR CI passed for the current-state release publication pipeline.
