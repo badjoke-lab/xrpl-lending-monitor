@@ -7,6 +7,17 @@ export interface RuntimeEnvironment {
   XRPL_DEVNET_RPC_FALLBACK_URL?: string
   XRPL_RPC_TIMEOUT_MS?: string
   NETWORK_STATUS_STALE_AFTER_SECONDS?: string
+  CURRENT_STATE_GITHUB_REPOSITORY?: string
+  CURRENT_STATE_RELEASE_CHANNEL_TAG?: string
+  CURRENT_STATE_MAX_ASSET_BYTES?: string
+  CURRENT_STATE_MAX_DECOMPRESSED_BYTES?: string
+}
+
+export interface CurrentStateRuntimeConfig {
+  githubRepository: string | null
+  releaseChannelTag: string
+  maxAssetBytes: number
+  maxDecompressedBytes: number
 }
 
 export interface RuntimeConfig {
@@ -15,6 +26,7 @@ export interface RuntimeConfig {
   xrplRpcUrls: readonly string[]
   rpcTimeoutMs: number
   staleAfterSeconds: number
+  currentState: CurrentStateRuntimeConfig
 }
 
 function parsePositiveInteger(value: string | undefined, fallback: number, name: string): number {
@@ -34,6 +46,23 @@ function parseHttpsUrl(value: string, name: string): string {
     throw new Error(`${name} must use HTTPS`)
   }
   return url.toString()
+}
+
+function parseGithubRepository(value: string | undefined): string | null {
+  const normalized = value?.trim()
+  if (!normalized) return null
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(normalized)) {
+    throw new Error('CURRENT_STATE_GITHUB_REPOSITORY must be owner/name')
+  }
+  return normalized
+}
+
+function parseReleaseChannelTag(value: string | undefined): string {
+  const normalized = value?.trim() || 'current-state-channel'
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(normalized)) {
+    throw new Error('CURRENT_STATE_RELEASE_CHANNEL_TAG must be a flat release tag')
+  }
+  return normalized
 }
 
 export function resolveRuntimeConfig(env: RuntimeEnvironment): RuntimeConfig {
@@ -66,5 +95,19 @@ export function resolveRuntimeConfig(env: RuntimeEnvironment): RuntimeConfig {
       30,
       'NETWORK_STATUS_STALE_AFTER_SECONDS',
     ),
+    currentState: {
+      githubRepository: parseGithubRepository(env.CURRENT_STATE_GITHUB_REPOSITORY),
+      releaseChannelTag: parseReleaseChannelTag(env.CURRENT_STATE_RELEASE_CHANNEL_TAG),
+      maxAssetBytes: parsePositiveInteger(
+        env.CURRENT_STATE_MAX_ASSET_BYTES,
+        8 * 1024 * 1024,
+        'CURRENT_STATE_MAX_ASSET_BYTES',
+      ),
+      maxDecompressedBytes: parsePositiveInteger(
+        env.CURRENT_STATE_MAX_DECOMPRESSED_BYTES,
+        16 * 1024 * 1024,
+        'CURRENT_STATE_MAX_DECOMPRESSED_BYTES',
+      ),
+    },
   }
 }
