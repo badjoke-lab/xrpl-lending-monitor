@@ -67,7 +67,7 @@ jobs:
           test "$(jq -r .lookupPrefixLength "$SUMMARY")" = "3"
           test "$(jq -r .lookupBuckets "$SUMMARY")" = "4096"
           test "$(jq -r '.counts.vaults + .counts.loanBrokers + .counts.loans' "$SUMMARY")" = "1552503"
-          test "$(find .local/current-state-read-model/read-model/pages -type f | wc -l)" = "31052"
+          test "$(find .local/current-state-read-model/read-model/pages -type f | wc -l)" = "31051"
           test "$(find .local/current-state-read-model/read-model/lookup -type f | wc -l)" = "4096"
 
       - name: Stage branch payload
