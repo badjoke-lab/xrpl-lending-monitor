@@ -27,7 +27,7 @@ export type CatchUpInitializationPlan =
       action: 'replay'
     }
 
-function exactOverlayMatch(
+function sameBase(
   state: CurrentStateOverlayState,
   base: CatchUpBaseIdentity,
 ): boolean {
@@ -35,8 +35,34 @@ function exactOverlayMatch(
     && state.baseSnapshotId === base.snapshotId
     && state.baseLedgerIndex === base.ledgerIndex
     && state.baseLedgerHash === base.ledgerHash
-    && state.overlayLedgerIndex === base.ledgerIndex
-    && state.overlayLedgerHash === base.ledgerHash
+}
+
+function alignedActiveState(options: {
+  sync: StoredSyncState
+  base: CatchUpBaseIdentity
+  overlayStates: readonly CurrentStateOverlayState[]
+  currentEpochId: string | null
+}): boolean {
+  const { sync, base, overlayStates, currentEpochId } = options
+  const overlay = overlayStates[0]
+  if (
+    sync.epochId !== base.epochId
+    || currentEpochId !== base.epochId
+    || overlayStates.length !== 1
+    || !overlay
+    || !sameBase(overlay, base)
+    || sync.lastProcessedLedger === null
+    || !sync.lastProcessedHash
+  ) return false
+
+  if (sync.lastProcessedLedger < base.ledgerIndex) return false
+  if (
+    sync.lastProcessedLedger === base.ledgerIndex
+    && sync.lastProcessedHash !== base.ledgerHash
+  ) return false
+
+  return overlay.overlayLedgerIndex === sync.lastProcessedLedger
+    && overlay.overlayLedgerHash === sync.lastProcessedHash
 }
 
 export function planCatchUpInitialization(options: {
@@ -64,14 +90,12 @@ export function planCatchUpInitialization(options: {
     throw new Error('Observed validated head conflicts with the verified base ledger')
   }
 
-  const exactReplay = sync.epochId === base.epochId
-    && sync.lastProcessedLedger === base.ledgerIndex
-    && sync.lastProcessedHash === base.ledgerHash
-    && evidence.currentEpochId === base.epochId
-    && evidence.overlayStates.length === 1
-    && exactOverlayMatch(evidence.overlayStates[0]!, base)
-
-  if (exactReplay) return { action: 'replay' }
+  if (alignedActiveState({
+    sync,
+    base,
+    overlayStates: evidence.overlayStates,
+    currentEpochId: evidence.currentEpochId,
+  })) return { action: 'replay' }
 
   if (sync.lastProcessedLedger !== null || sync.lastProcessedHash !== null) {
     throw new Error('Catch-up initialization refuses to replace an existing incremental cursor')
@@ -86,7 +110,7 @@ export function planCatchUpInitialization(options: {
     throw new Error('Current network epoch does not match sync state')
   }
   if (evidence.baseEpochExists) {
-    throw new Error('Verified base epoch identity already exists without an exact replay state')
+    throw new Error('Verified base epoch identity already exists without an aligned active state')
   }
 
   return {
