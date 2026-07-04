@@ -1,0 +1,13 @@
+{
+  "maxCompressedBytes": 19059446,
+  "maxUncompressedBytes": 62697702,
+  "dataMaxUncompressedBytes": 62697702,
+  "indexMaxUncompressedBytes": 26717068,
+  "relevantObjectCount": 1552503,
+  "sourcePages": 11606,
+  "counts": {
+    "loanBrokers": 528228,
+    "loans": 226725,
+    "vaults": 797550
+  }
+}
