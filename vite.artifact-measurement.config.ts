@@ -5,7 +5,8 @@ export default defineConfig({
     ssr: 'scripts/run-artifact-measurement.ts',
     outDir: '.artifact-measurement-build',
     emptyOutDir: true,
-    rollupOptions: {
+    rolldownOptions: {
+      external: ['cloudflare:sockets'],
       output: {
         entryFileNames: 'run-artifact-measurement.mjs',
       },
