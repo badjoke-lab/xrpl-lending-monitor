@@ -51,6 +51,34 @@ jobs:
             printf '%s\n' "${STATUS}" > "hyb6-live-dry-run/${NAME}.http-status.txt"
           done
 
+          curl -sS \
+            -H 'content-type: application/json' \
+            --data '{"method":"ledger","params":[{"api_version":2,"ledger_index":3371676,"transactions":true,"expand":true,"owner_funds":false}]}' \
+            https://devnet.honeycluster.io/ \
+            > hyb6-live-dry-run/ledger-3371676.json
+
+          jq '[
+            .result.ledger.transactions[]
+            | select((.tx_json.TransactionType // .tx.TransactionType // .TransactionType) | startswith("Loan") or . == "VaultCreate")
+            | {
+                hash: (.hash // .tx_json.hash // .tx.hash),
+                type: (.tx_json.TransactionType // .tx.TransactionType // .TransactionType),
+                nodes: [
+                  (.meta.AffectedNodes // .metaData.AffectedNodes // .meta_data.AffectedNodes // [])[]
+                  | (.CreatedNode // .ModifiedNode // .DeletedNode)
+                  | select(.LedgerEntryType == "Vault" or .LedgerEntryType == "LoanBroker" or .LedgerEntryType == "Loan")
+                  | {
+                      LedgerEntryType,
+                      LedgerIndex,
+                      NewFields: (.NewFields // null),
+                      FinalFields: (.FinalFields // null),
+                      PreviousFields: (.PreviousFields // null)
+                    }
+                ]
+              }
+          ]' hyb6-live-dry-run/ledger-3371676.json \
+            > hyb6-live-dry-run/ledger-3371676-lending-nodes.json
+
       - uses: actions/upload-artifact@v4
         with:
           name: hyb6-live-dry-run
