@@ -107,7 +107,7 @@ function database(): D1Database {
 }
 
 function releaseSource(onList: () => void): ReleaseCurrentStateSource {
-  const projection = loan('1'.repeat(64))
+  const page = [1, 2, 3, 4, 5].map((value) => record(loan(String(value).repeat(64))))
   return {
     kind: 'release',
     db: database(),
@@ -128,10 +128,11 @@ function releaseSource(onList: () => void): ReleaseCurrentStateSource {
         manifestSha256: snapshot.manifestSha256,
       },
       reader: {
-        async listObjects() {
+        async listObjects(_kind, _options, predicate) {
           onList()
+          const items = predicate ? page.filter((item) => predicate(item)) : page
           return {
-            items: [record(projection)],
+            items,
             nextCursor: 'next-raw-page',
             complete: false,
             assetReads: 1,
