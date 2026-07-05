@@ -1,0 +1,45 @@
+name: Probe blocked ledger 3388467
+
+on:
+  pull_request:
+    branches: [main]
+    paths: [.github/workflows/probe-ledger-3388467.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Fetch full validated ledger
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ledger-probe
+          curl --fail-with-body --silent --show-error --retry 3 \
+            -H 'content-type: application/json' \
+            --data '{"method":"ledger","params":[{"ledger_index":3388467,"transactions":true,"expand":true}]} ' \
+            https://devnet.honeycluster.io/ \
+            > ledger-probe/ledger-3388467.json
+          jq -e '.result.ledger.ledger_index == "3388467" or .result.ledger.ledger_index == 3388467' ledger-probe/ledger-3388467.json > /dev/null
+      - name: Build transaction summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq '{
+            ledger_index: .result.ledger.ledger_index,
+            transaction_count: (.result.ledger.transactions | length),
+            transaction_types: ([.result.ledger.transactions[]?.tx_json.TransactionType] | group_by(.) | map({type:.[0], count:length})),
+            lending_transactions: ([.result.ledger.transactions[]? | select(.tx_json.TransactionType | test("^(Vault|LoanBroker|Loan)"))] | length),
+            affected_node_count: ([.result.ledger.transactions[]?.meta.AffectedNodes[]?] | length),
+            lending_node_count: ([.result.ledger.transactions[]?.meta.AffectedNodes[]? | to_entries[0].value | select((.LedgerEntryType // "") | test("^(Vault|LoanBroker|Loan)$"))] | length)
+          }' ledger-probe/ledger-3388467.json > ledger-probe/summary.json
+          cat ledger-probe/summary.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ledger-3388467-probe
+          path: ledger-probe
+          if-no-files-found: error
+          retention-days: 7
