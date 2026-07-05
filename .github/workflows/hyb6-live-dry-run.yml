@@ -6,6 +6,11 @@ on:
       - ops/hyb6-live-dry-run
     paths:
       - .github/workflows/hyb6-live-dry-run.yml
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/hyb6-live-dry-run.yml
 
 permissions:
   contents: read
