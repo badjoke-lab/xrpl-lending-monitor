@@ -45,6 +45,16 @@ function usesNonStandardHttpsPort(endpoint: string): boolean {
   return url.protocol === 'https:' && url.port !== '' && url.port !== '443'
 }
 
+function abortError(message: string): Error {
+  const error = new Error(message)
+  error.name = 'AbortError'
+  return error
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError'
+}
+
 function decodeChunkedBody(body: string): string {
   let cursor = 0
   let decoded = ''
@@ -118,7 +128,11 @@ async function readSocketResponse(readable: ReadableStream<Uint8Array>): Promise
   })
 }
 
-async function socketFetch(endpoint: string, init: RequestInit): Promise<Response> {
+async function socketFetch(
+  endpoint: string,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<Response> {
   const url = new URL(endpoint)
   const port = Number(url.port || (url.protocol === 'https:' ? 443 : 80))
   const body = typeof init.body === 'string' ? init.body : ''
@@ -141,13 +155,30 @@ async function socketFetch(endpoint: string, init: RequestInit): Promise<Respons
   ].join('\r\n')
 
   const writer = socket.writable.getWriter()
-  try {
+  let timeout: ReturnType<typeof setTimeout> | undefined
+  const operation = (async () => {
     await socket.opened
     await writer.write(new TextEncoder().encode(request))
     await writer.close()
-    return await readSocketResponse(socket.readable)
+    return readSocketResponse(socket.readable)
+  })()
+  const bounded = new Promise<never>((_resolve, reject) => {
+    timeout = setTimeout(() => {
+      void socket.close().catch(() => undefined)
+      reject(abortError(`XRPL socket RPC timed out after ${timeoutMs} ms`))
+    }, timeoutMs)
+  })
+
+  try {
+    return await Promise.race([operation, bounded])
   } finally {
-    writer.releaseLock()
+    if (timeout !== undefined) clearTimeout(timeout)
+    try {
+      writer.releaseLock()
+    } catch {
+      // The socket may still be unwinding after a forced timeout close.
+    }
+    await socket.close().catch(() => undefined)
   }
 }
 
@@ -187,7 +218,7 @@ export class XrplJsonRpcClient {
         if (this.hasCustomFetcher || !usesNonStandardHttpsPort(this.endpoint)) {
           throw fetchError
         }
-        response = await socketFetch(this.endpoint, requestInit)
+        response = await socketFetch(this.endpoint, requestInit, this.timeoutMs)
       }
 
       if (!response.ok) {
@@ -244,7 +275,7 @@ export class XrplJsonRpcClient {
     } catch (error) {
       if (error instanceof XrplRpcError) throw error
 
-      if (error instanceof DOMException && error.name === 'AbortError') {
+      if (isAbortError(error)) {
         throw new XrplRpcError({
           endpoint: this.endpoint,
           method,
