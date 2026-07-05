@@ -1,0 +1,45 @@
+name: Probe blocker ledger 3375750
+
+on:
+  pull_request:
+    branches: [main]
+    paths: [.github/workflows/probe-ledger-3375750.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Fetch blocker ledger
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p probe-ledger-3375750
+          curl --fail-with-body --silent --show-error --retry 3 \
+            -H 'Content-Type: application/json' \
+            --data '{"method":"ledger","params":[{"ledger_index":3375750,"transactions":true,"expand":true,"owner_funds":false}]}' \
+            https://devnet.honeycluster.io/ \
+            > probe-ledger-3375750/ledger.json
+
+          jq '[.result.ledger.transactions[] | select(((.tx_json.TransactionType // .tx.TransactionType // .TransactionType // "") | test("^(Vault|LoanBroker|Loan)")))]' \
+            probe-ledger-3375750/ledger.json \
+            > probe-ledger-3375750/lending-transactions.json
+
+          jq '[.[] | {
+            hash: (.hash // .tx_json.hash // .tx.hash),
+            transaction_type: (.tx_json.TransactionType // .tx.TransactionType // .TransactionType),
+            affected_nodes: (.meta.AffectedNodes // .metaData.AffectedNodes // .meta_data.AffectedNodes)
+          }]' probe-ledger-3375750/lending-transactions.json \
+            > probe-ledger-3375750/lending-affected-nodes.json
+
+          jq -e 'length > 0' probe-ledger-3375750/lending-transactions.json > /dev/null
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: probe-ledger-3375750
+          path: probe-ledger-3375750
+          if-no-files-found: error
+          retention-days: 7
