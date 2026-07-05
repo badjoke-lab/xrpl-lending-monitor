@@ -15,7 +15,9 @@ import type { FetchLike } from './xrpl-rpc'
 function errorDetails(error: unknown): { code: string; message: string } {
   if (error instanceof NetworkSnapshotError) {
     const summary = error.failures
-      .map((failure) => `${failure.endpoint} ${failure.method}: ${failure.code}`)
+      .map((failure) => (
+        `${failure.endpoint} ${failure.method}: ${failure.code} (${failure.message})`
+      ))
       .join('; ')
 
     return {

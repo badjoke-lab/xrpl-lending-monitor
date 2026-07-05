@@ -88,6 +88,36 @@ describe('readNetworkSnapshot', () => {
     })
   })
 
+  it('serializes snapshot RPC calls for socket-constrained runtimes', async () => {
+    const baseFetcher = successfulFetcher()
+    let inFlight = 0
+    let maxInFlight = 0
+    const methods: string[] = []
+
+    const fetcher: FetchLike = async (input, init) => {
+      const body = JSON.parse(String(init?.body)) as { method: string }
+      methods.push(body.method)
+      inFlight += 1
+      maxInFlight = Math.max(maxInFlight, inFlight)
+
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 5))
+        return await baseFetcher(input, init)
+      } finally {
+        inFlight -= 1
+      }
+    }
+
+    await readNetworkSnapshot({
+      endpoints: ['https://primary.example'],
+      timeoutMs: 1000,
+      fetcher,
+    })
+
+    expect(methods).toEqual(['server_info', 'feature', 'feature'])
+    expect(maxInFlight).toBe(1)
+  })
+
   it('falls back as a whole snapshot when the primary endpoint fails', async () => {
     const snapshot = await readNetworkSnapshot({
       endpoints: ['https://primary.example', 'https://fallback.example'],
