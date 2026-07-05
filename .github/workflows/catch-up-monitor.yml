@@ -64,17 +64,27 @@ jobs:
             fi
           done
 
-      - name: Capture HYB-7 and M1 exit state
+      - name: Capture HYB-7 and M1 exit diagnostics
         shell: bash
         run: |
           set -euo pipefail
           BASE="$(cat runtime-monitor/base-url.txt)"
           curl --fail-with-body --silent --show-error --retry 3 \
-            "${BASE}/api/status/continuation-verification" \
+            "${BASE}/api/status/continuation-diagnostics" \
+            > runtime-monitor/continuation-diagnostics.json
+          jq -e '.evidence and .report and .report.paths' \
+            runtime-monitor/continuation-diagnostics.json > /dev/null
+          jq '.report' runtime-monitor/continuation-diagnostics.json \
             > runtime-monitor/continuation-verification.json
+
           curl --fail-with-body --silent --show-error --retry 3 \
-            "${BASE}/api/status/m1-exit" \
+            "${BASE}/api/status/m1-exit-diagnostics" \
+            > runtime-monitor/m1-exit-diagnostics.json
+          jq -e '.evidence and .report and .report.gates' \
+            runtime-monitor/m1-exit-diagnostics.json > /dev/null
+          jq '.report' runtime-monitor/m1-exit-diagnostics.json \
             > runtime-monitor/m1-exit.json
+
           curl --fail-with-body --silent --show-error --retry 3 \
             "${BASE}/api/status/catch-up-initialization" \
             > runtime-monitor/catch-up-initialization.json
@@ -108,6 +118,29 @@ jobs:
             samples_with_failures: ([.[] | select(.consecutive_failures > 0 or .error != null)] | length)
           }' runtime-monitor/series.json > runtime-monitor/summary.json
 
+          jq '{
+            processed_ledgers: .evidence.processedLedgers,
+            object_changes: .evidence.objectChanges,
+            overlay_objects: .evidence.overlayObjects,
+            protocol_events: .evidence.protocolEvents,
+            lifecycle: .evidence.lifecycle,
+            archives: .evidence.archives,
+            balance_history: .evidence.balanceHistory,
+            path_states: (.report.paths | with_entries(.value = .value.state)),
+            passed: .report.passed
+          }' runtime-monitor/continuation-diagnostics.json \
+            > runtime-monitor/diagnostic-summary.json
+
+          jq '{
+            expected_base: .evidence.expectedBase,
+            bound_base: .evidence.boundBase,
+            processed_ledgers: .evidence.processedLedgers,
+            cursor: .evidence.cursor,
+            gate_states: (.report.gates | with_entries(.value = .value.state)),
+            ready: .report.ready
+          }' runtime-monitor/m1-exit-diagnostics.json \
+            > runtime-monitor/m1-exit-summary.json
+
           {
             echo '## Catch-up runtime monitor'
             echo
@@ -117,11 +150,24 @@ jobs:
             jq -r '"| Head | \(.first.head) | \(.last.head) | \(.head_delta) |"' runtime-monitor/summary.json
             jq -r '"| Lag | \(.first.lag) | \(.last.lag) | \(.lag_delta) |"' runtime-monitor/summary.json
             echo
+            echo '### HYB-7 evidence counts'
+            echo
+            echo '| Evidence | Count |'
+            echo '|---|---:|'
+            jq -r '"| Processed ledgers | \(.evidence.processedLedgers.count) |"' runtime-monitor/continuation-diagnostics.json
+            jq -r '"| Object changes: created | \(.evidence.objectChanges.created) |"' runtime-monitor/continuation-diagnostics.json
+            jq -r '"| Object changes: modified | \(.evidence.objectChanges.modified) |"' runtime-monitor/continuation-diagnostics.json
+            jq -r '"| Object changes: deleted | \(.evidence.objectChanges.deleted) |"' runtime-monitor/continuation-diagnostics.json
+            jq -r '"| LoanPay events | \(.evidence.protocolEvents.loanPay) |"' runtime-monitor/continuation-diagnostics.json
+            jq -r '"| LoanManage events | \(.evidence.protocolEvents.loanManage) |"' runtime-monitor/continuation-diagnostics.json
+            jq -r '"| Lifecycle events | \(.evidence.lifecycle.total) |"' runtime-monitor/continuation-diagnostics.json
+            jq -r '"| Balance-history rows | \(.evidence.balanceHistory.total) |"' runtime-monitor/continuation-diagnostics.json
+            echo
             echo '### HYB-7 paths'
-            jq -r '.paths | to_entries[] | "- `\(.key)`: **\(.value.state)** — \(.value.reason)"' runtime-monitor/continuation-verification.json
+            jq -r '.report.paths | to_entries[] | "- `\(.key)`: **\(.value.state)** — \(.value.reason)"' runtime-monitor/continuation-diagnostics.json
             echo
             echo '### M1 exit gates'
-            jq -r '.gates | to_entries[] | "- `\(.key)`: **\(.value.state)** — \(.value.reason)"' runtime-monitor/m1-exit.json
+            jq -r '.report.gates | to_entries[] | "- `\(.key)`: **\(.value.state)** — \(.value.reason)"' runtime-monitor/m1-exit-diagnostics.json
           } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Enforce runtime monitor invariants

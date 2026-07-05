@@ -4,7 +4,7 @@ Last updated: 2026-07-05.
 
 ## Current phase
 
-M1 incremental continuation is active. HYB-3 through HYB-6 are integrated into `main`, the guarded verified-base handover has completed, and production catch-up is advancing contiguously from ledger `3371676`. The remote Worker network-status path is healthy and observing Devnet through the standard-port primary endpoint. M1-HYB-7 live continuation verification tooling is active and has already observed created-current, deletion/archive/tombstone, ledger-continuity, and cursor/overlay-agreement paths; other live paths remain incomplete. The active production calibration is 40 ledgers per scheduled run. A six-sample live benchmark recovered cleanly from the failed 48-ledger experiment, processed 40 ledgers on every sampled cycle with zero failures, advanced the cursor by 200 ledgers while the observed head advanced by 92, and reduced lag by 108 ledgers over the sample window. Permanent read-only catch-up runtime monitoring now samples collector progress, HYB-7 paths, M1 exit gates, and handover replay state every 30 minutes. M5-5 and M6 remain gated behind M1 exit.
+M1 incremental continuation is active. HYB-3 through HYB-6 are integrated into `main`, the guarded verified-base handover has completed, and production catch-up is advancing contiguously from ledger `3371676`. The remote Worker network-status path is healthy and observing Devnet through the standard-port primary endpoint. M1-HYB-7 live continuation verification tooling is active and has already observed created-current, deletion/archive/tombstone, ledger-continuity, and cursor/overlay-agreement paths; other live paths remain incomplete. The active production calibration is 40 ledgers per scheduled run. A six-sample live benchmark recovered cleanly from the failed 48-ledger experiment, processed 40 ledgers on every sampled cycle with zero failures, advanced the cursor by 200 ledgers while the observed head advanced by 92, and reduced lag by 108 ledgers over the sample window. Permanent read-only catch-up runtime monitoring now samples collector progress, raw HYB-7 evidence counts, HYB-7 path states, M1 exit gates, and handover replay state every 30 minutes. M5-5 and M6 remain gated behind M1 exit.
 
 ## Verified base
 
@@ -40,13 +40,14 @@ The implemented path now includes:
 - contiguous production catch-up beginning at ledger `3371676`;
 - live remote evidence for created current objects, deletion/archive/tombstone consistency, ledger continuity, and cursor/overlay watermark agreement;
 - read-only live continuation verification for created and modified current objects, Loan payments, impairment, unimpairment, default, deletion/archive consistency, activity/lifecycle/balance evidence, ledger continuity, cursor/overlay agreement, and freshness;
+- a read-only continuation diagnostics endpoint that returns the exact aggregate source/projection evidence snapshot together with the HYB-7 path report derived from that snapshot;
 - healthy remote Devnet network-status refresh with the standard-port Devnet endpoint as primary and the Ripple non-standard-port endpoint retained as fallback;
 - a read-only HYB-6 initialization status endpoint that resolves the active verified base identity and runs the exact handover planner in dry-run mode without D1 mutation;
 - live normalization coverage for zero-omitted XRP Vault assets;
 - bounded row and statement budgets raised to accommodate observed valid live Vault create/delete ranges while preserving the other run limits;
 - remote throughput benchmark evidence proving that a 48-ledger scheduled range exceeds the current Worker invocation subrequest ceiling and fails closed before cursor advancement;
 - remote recovery benchmark evidence proving that 40-ledger scheduled runs process successfully with zero sampled failures and a negative lag slope;
-- permanent read-only runtime monitoring that records collector cursor/head/lag movement, resource usage, failures, HYB-7 path states, M1 exit gates, and handover replay state every 30 minutes and fails closed on collector errors or cursor stalls while lag remains positive.
+- permanent read-only runtime monitoring that records collector cursor/head/lag movement, resource usage, failures, HYB-7 source/projection counts and path states, M1 exit gates, and handover replay state every 30 minutes and fails closed on collector errors or cursor stalls while lag remains positive.
 
 Mainnet remains disabled.
 
@@ -62,21 +63,22 @@ The verifier exposes each required live path as `observed`, `missing`, or `incon
 - cursor and overlay watermark must agree;
 - freshness passes only at healthy zero reported lag.
 
-The verification endpoint is read-only. It does not create live evidence or infer success from the target schedule.
+The verification and diagnostics endpoints are read-only. They do not create live evidence or infer success from the target schedule. Diagnostics expose aggregate evidence counts so missing source events can be distinguished from source/projection or activity/lifecycle/balance disagreement before any Devnet evidence generation is considered.
 
 ## Active unit
 
-HYB-6 production catch-up is running at the measured 40-ledger configuration. The guarded handover remains complete and replays as a no-op guard before scheduled collection. The 40-ledger benchmark showed successful recovery from the prior subrequest-limit failure, zero sampled failures, 200 ledgers of cursor advance against 92 ledgers of head advance, and a lag reduction of 108 ledgers over the six-sample window. Permanent runtime monitoring now samples progress every 30 minutes. The active unit is sustained catch-up observation and HYB-7 evidence accumulation while the cursor advances toward the validated head.
+HYB-6 production catch-up is running at the measured 40-ledger configuration. The guarded handover remains complete and replays as a no-op guard before scheduled collection. The 40-ledger benchmark showed successful recovery from the prior subrequest-limit failure, zero sampled failures, 200 ledgers of cursor advance against 92 ledgers of head advance, and a lag reduction of 108 ledgers over the six-sample window. Permanent runtime monitoring now samples progress and HYB-7 diagnostic evidence every 30 minutes. The active unit is sustained catch-up observation, HYB-7 source/projection evidence accumulation, and preparation to resolve only the paths that remain genuinely missing or inconsistent at the validated head.
 
 ## Next order
 
 1. Keep the measured 40-ledger bounded configuration active and continue contiguous catch-up.
 2. Use the permanent runtime monitor to record sustained lag reduction and fail immediately on collector errors or cursor stalls while lag remains positive.
-3. Continue catch-up until the cursor reaches the validated head without gap or parent-hash discontinuity.
-4. Re-evaluate HYB-7 path states during catch-up and separate naturally observed paths from paths that still require bounded Devnet-only evidence generation.
-5. Collect and verify the remaining real modified-current, LoanPay, impairment, unimpairment, default, activity/lifecycle/balance, and freshness paths.
-6. Complete M1 exit review and reconciliation.
-7. Complete M5-5, then begin M6 hardening and multi-day Devnet soak.
+3. Compare HYB-7 source/projection diagnostic counts during catch-up and distinguish absent source events from derivation or projection disagreement.
+4. Continue catch-up until the cursor reaches the validated head without gap or parent-hash discontinuity.
+5. Re-evaluate HYB-7 diagnostics at the head and collect or generate only the minimum canonical Devnet evidence required for paths that remain genuinely missing.
+6. Resolve any current projection or activity/lifecycle/balance inconsistency before M1 exit.
+7. Complete M1 exit review and reconciliation.
+8. Complete M5-5, then begin M6 hardening and multi-day Devnet soak.
 
 ## Remaining blockers
 
