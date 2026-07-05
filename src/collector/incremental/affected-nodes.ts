@@ -43,74 +43,24 @@ export interface NormalizedObjectChange extends ObjectChangeContext {
 
 const KNOWN_FIELDS = {
   Vault: new Set([
-    'Account',
-    'Asset',
-    'AssetsAvailable',
-    'AssetsMaximum',
-    'AssetsTotal',
-    'Data',
-    'DomainID',
-    'Flags',
-    'LedgerEntryType',
-    'LossUnrealized',
-    'Owner',
-    'PreviousTxnID',
-    'PreviousTxnLgrSeq',
-    'Scale',
-    'ShareMPTID',
-    'VaultID',
-    'WithdrawalPolicy',
+    'Account', 'Asset', 'AssetsAvailable', 'AssetsMaximum', 'AssetsTotal', 'Data',
+    'DomainID', 'Flags', 'LedgerEntryType', 'LossUnrealized', 'Owner', 'PreviousTxnID',
+    'PreviousTxnLgrSeq', 'Scale', 'ShareMPTID', 'VaultID', 'WithdrawalPolicy',
   ]),
   LoanBroker: new Set([
-    'Account',
-    'CoverAvailable',
-    'CoverRateLiquidation',
-    'CoverRateMinimum',
-    'Data',
-    'DebtMaximum',
-    'DebtTotal',
-    'Flags',
-    'LedgerEntryType',
-    'LoanBrokerID',
-    'LoanSequence',
-    'ManagementFeeRate',
-    'Owner',
-    'OwnerCount',
-    'PreviousTxnID',
-    'PreviousTxnLgrSeq',
-    'Sequence',
-    'VaultID',
+    'Account', 'CoverAvailable', 'CoverRateLiquidation', 'CoverRateMinimum', 'Data',
+    'DebtMaximum', 'DebtTotal', 'Flags', 'LedgerEntryType', 'LoanBrokerID',
+    'LoanSequence', 'ManagementFeeRate', 'Owner', 'OwnerCount', 'PreviousTxnID',
+    'PreviousTxnLgrSeq', 'Sequence', 'VaultID',
   ]),
   Loan: new Set([
-    'Borrower',
-    'CloseInterestRate',
-    'ClosePaymentFee',
-    'Data',
-    'Flags',
-    'GracePeriod',
-    'InterestRate',
-    'LateInterestRate',
-    'LatePaymentFee',
-    'LedgerEntryType',
-    'LoanBrokerID',
-    'LoanID',
-    'LoanOriginationFee',
-    'LoanScale',
-    'LoanSequence',
-    'LoanServiceFee',
-    'ManagementFeeOutstanding',
-    'NextPaymentDueDate',
-    'OverpaymentFee',
-    'OverpaymentInterestRate',
-    'PaymentInterval',
-    'PaymentRemaining',
-    'PeriodicPayment',
-    'PreviousPaymentDueDate',
-    'PreviousTxnID',
-    'PreviousTxnLgrSeq',
-    'PrincipalOutstanding',
-    'StartDate',
-    'TotalValueOutstanding',
+    'Borrower', 'CloseInterestRate', 'ClosePaymentFee', 'Data', 'Flags', 'GracePeriod',
+    'InterestRate', 'LateInterestRate', 'LatePaymentFee', 'LedgerEntryType',
+    'LoanBrokerID', 'LoanID', 'LoanOriginationFee', 'LoanScale', 'LoanSequence',
+    'LoanServiceFee', 'ManagementFeeOutstanding', 'NextPaymentDueDate',
+    'OverpaymentFee', 'OverpaymentInterestRate', 'PaymentInterval', 'PaymentRemaining',
+    'PeriodicPayment', 'PreviousPaymentDueDate', 'PreviousTxnID', 'PreviousTxnLgrSeq',
+    'PrincipalOutstanding', 'StartDate', 'TotalValueOutstanding',
   ]),
 } satisfies Record<Exclude<AffectedObjectType, 'unknown'>, Set<string>>
 
@@ -261,6 +211,16 @@ export function normalizeAffectedNodes(
     const { action, body } = actionNode(node)
     const objectId = requiredString(body.LedgerIndex, 'LedgerIndex')
     const type = objectType(body.LedgerEntryType)
+
+    // Lending transactions also modify bookkeeping objects such as AccountRoot and
+    // DirectoryNode. XRPL metadata may omit PreviousFields for those non-lending
+    // ModifiedNodes even when FinalFields is present. They are outside the lending
+    // object-change model, so ignore only that sparse non-lending shape. Known
+    // lending object types retain strict field-pair validation below.
+    if (action === 'modified' && type === 'unknown' && !isRecord(body.PreviousFields)) {
+      continue
+    }
+
     const { before, after, fieldNames } = fieldsFor(action, body)
     const relationIds = relationships(objectId, type, before, after)
 
