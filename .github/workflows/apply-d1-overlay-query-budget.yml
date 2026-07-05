@@ -1,0 +1,76 @@
+name: Apply D1 overlay query budget fix
+
+on:
+  pull_request:
+    branches: [main]
+    paths: [.github/workflows/apply-d1-overlay-query-budget.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+      - name: Patch bounded overlay lookup batches
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/worker/repositories/base-overlay-current-reader.ts')
+          text = path.read_text()
+          start = text.index('async function overlayOperationsForIds(options: {')
+          end = text.index('\nasync function loadOverlayPage(options: {', start)
+          replacement = '''async function overlayOperationsForIds(options: {
+            db: D1Database
+            snapshot: ActiveSnapshotRecord
+            kind: ReadModelKind
+            ids: string[]
+          }): Promise<Map<string, OverlayRow['operation']>> {
+            if (options.ids.length === 0) return new Map()
+            const operations = new Map<string, OverlayRow['operation']>()
+            const maxIdsPerQuery = 97
+            try {
+              for (let offset = 0; offset < options.ids.length; offset += maxIdsPerQuery) {
+                const ids = options.ids.slice(offset, offset + maxIdsPerQuery)
+                const placeholders = ids.map((_, index) => `?${index + 4}`).join(', ')
+                const result = await options.db.prepare(
+                  `SELECT object_id, operation, projection_json
+                   FROM current_state_overlay_objects
+                   WHERE network = 'devnet'
+                     AND epoch_id = ?1
+                     AND base_snapshot_id = ?2
+                     AND object_type = ?3
+                     AND object_id IN (${placeholders})`,
+                ).bind(
+                  options.snapshot.epochId,
+                  options.snapshot.id,
+                  objectType(options.kind),
+                  ...ids,
+                ).all<OverlayRow>()
+                for (const row of result.results ?? []) operations.set(row.object_id, row.operation)
+              }
+              return operations
+            } catch (error) {
+              if (isMissingOverlaySchema(error)) return new Map()
+              throw error
+            }
+          }
+          '''
+          path.write_text(text[:start] + replacement + text[end:])
+          PY
+          git diff --check
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/worker/repositories/base-overlay-current-reader.ts
+          git commit -m "Chunk overlay ID lookups within D1 bind limit"
+          git push origin HEAD:${{ github.head_ref }}
