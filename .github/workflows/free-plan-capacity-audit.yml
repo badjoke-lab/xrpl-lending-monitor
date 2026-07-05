@@ -29,28 +29,37 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p capacity-audit
+          mkdir -p capacity-audit/counts
           pnpm exec wrangler d1 info xrpl-lending-monitor --json > capacity-audit/d1-info.json
 
-      - name: Capture row counts and page metrics
+      - name: Capture schema inventory
         shell: bash
         run: |
           set -euo pipefail
-          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote --json --command "
-            SELECT 'processed_ledgers' AS table_name, COUNT(*) AS row_count FROM processed_ledgers
-            UNION ALL SELECT 'protocol_events', COUNT(*) FROM protocol_events
-            UNION ALL SELECT 'object_changes', COUNT(*) FROM object_changes
-            UNION ALL SELECT 'loan_lifecycle_events', COUNT(*) FROM loan_lifecycle_events
-            UNION ALL SELECT 'archived_objects', COUNT(*) FROM archived_objects
-            UNION ALL SELECT 'balance_history', COUNT(*) FROM balance_history
-            UNION ALL SELECT 'current_state_overlay_objects', COUNT(*) FROM current_state_overlay_objects
-            UNION ALL SELECT 'network_epochs', COUNT(*) FROM network_epochs;
-          " > capacity-audit/row-counts.json
+          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote --json --command \
+            "SELECT type, name, tbl_name FROM sqlite_master WHERE type IN ('table','index') ORDER BY type, name;" \
+            > capacity-audit/schema-inventory.json
 
-          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote --json --command "PRAGMA page_count;" > capacity-audit/page-count.json
-          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote --json --command "PRAGMA page_size;" > capacity-audit/page-size.json
+      - name: Capture key table row counts
+        shell: bash
+        run: |
+          set -u
+          for TABLE in \
+            processed_ledgers \
+            protocol_events \
+            object_changes \
+            loan_lifecycle_events \
+            archived_objects \
+            balance_history \
+            current_state_overlay_objects \
+            network_epochs; do
+            pnpm exec wrangler d1 execute xrpl-lending-monitor --remote --json --command \
+              "SELECT '${TABLE}' AS table_name, COUNT(*) AS row_count FROM ${TABLE};" \
+              > "capacity-audit/counts/${TABLE}.json" 2> "capacity-audit/counts/${TABLE}.stderr.txt" || true
+          done
 
       - name: Upload capacity evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: free-plan-capacity-audit
