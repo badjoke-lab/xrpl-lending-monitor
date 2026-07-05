@@ -64,7 +64,7 @@ jobs:
             fi
           done
 
-      - name: Capture HYB-7 diagnostics and M1 exit state
+      - name: Capture HYB-7 and M1 exit diagnostics
         shell: bash
         run: |
           set -euo pipefail
@@ -76,9 +76,15 @@ jobs:
             runtime-monitor/continuation-diagnostics.json > /dev/null
           jq '.report' runtime-monitor/continuation-diagnostics.json \
             > runtime-monitor/continuation-verification.json
+
           curl --fail-with-body --silent --show-error --retry 3 \
-            "${BASE}/api/status/m1-exit" \
+            "${BASE}/api/status/m1-exit-diagnostics" \
+            > runtime-monitor/m1-exit-diagnostics.json
+          jq -e '.evidence and .report and .report.gates' \
+            runtime-monitor/m1-exit-diagnostics.json > /dev/null
+          jq '.report' runtime-monitor/m1-exit-diagnostics.json \
             > runtime-monitor/m1-exit.json
+
           curl --fail-with-body --silent --show-error --retry 3 \
             "${BASE}/api/status/catch-up-initialization" \
             > runtime-monitor/catch-up-initialization.json
@@ -125,6 +131,16 @@ jobs:
           }' runtime-monitor/continuation-diagnostics.json \
             > runtime-monitor/diagnostic-summary.json
 
+          jq '{
+            expected_base: .evidence.expectedBase,
+            bound_base: .evidence.boundBase,
+            processed_ledgers: .evidence.processedLedgers,
+            cursor: .evidence.cursor,
+            gate_states: (.report.gates | with_entries(.value = .value.state)),
+            ready: .report.ready
+          }' runtime-monitor/m1-exit-diagnostics.json \
+            > runtime-monitor/m1-exit-summary.json
+
           {
             echo '## Catch-up runtime monitor'
             echo
@@ -151,7 +167,7 @@ jobs:
             jq -r '.report.paths | to_entries[] | "- `\(.key)`: **\(.value.state)** — \(.value.reason)"' runtime-monitor/continuation-diagnostics.json
             echo
             echo '### M1 exit gates'
-            jq -r '.gates | to_entries[] | "- `\(.key)`: **\(.value.state)** — \(.value.reason)"' runtime-monitor/m1-exit.json
+            jq -r '.report.gates | to_entries[] | "- `\(.key)`: **\(.value.state)** — \(.value.reason)"' runtime-monitor/m1-exit-diagnostics.json
           } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Enforce runtime monitor invariants
