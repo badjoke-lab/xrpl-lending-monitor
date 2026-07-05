@@ -17,6 +17,10 @@ import {
   readLoanActivityDiagnostics,
   type LoanActivityDiagnostics,
 } from '../repositories/loan-activity-diagnostics'
+import {
+  readManagedTransitionSourceDiagnostics,
+  type ManagedTransitionSourceDiagnostics,
+} from '../repositories/managed-transition-source-diagnostics'
 
 function activityHistoryBalancePath(options: {
   evidence: LiveContinuationEvidence
@@ -63,10 +67,19 @@ export function evaluateLiveContinuationForRuntime(
   evidence: LiveContinuationEvidence,
   loanActivity: LoanActivityDiagnostics,
   balanceSource?: BalanceHistorySourceDiagnostics,
+  managedTransitions?: ManagedTransitionSourceDiagnostics,
 ): LiveContinuationVerificationReport {
   const report = evaluateLiveContinuationEvidence(evidence)
+  const managedPath = (source: number, lifecycle: number, label: string): VerificationPath => {
+    if (source == 0 && lifecycle == 0) return { state: 'missing', reason: `${label} source transition and lifecycle evidence not yet observed` }
+    if (source == 0 || lifecycle == 0) return { state: 'inconsistent', reason: `${label} source transition and lifecycle evidence disagree` }
+    return { state: 'observed', reason: `${label} source transition and lifecycle evidence observed` }
+  }
   const paths = {
     ...report.paths,
+    impaired: managedTransitions ? managedPath(managedTransitions.impaired, evidence.lifecycle.impaired, 'impaired') : report.paths.impaired,
+    unimpaired: managedTransitions ? managedPath(managedTransitions.unimpaired, evidence.lifecycle.unimpaired, 'unimpaired') : report.paths.unimpaired,
+    defaulted: managedTransitions ? managedPath(managedTransitions.defaulted, evidence.lifecycle.defaulted, 'defaulted') : report.paths.defaulted,
     activityHistoryBalance: activityHistoryBalancePath({ evidence, loanActivity, balanceSource }),
   }
   return {
@@ -78,12 +91,13 @@ export function evaluateLiveContinuationForRuntime(
 export async function verifyLiveContinuation(
   db: D1Database,
 ): Promise<LiveContinuationVerificationReport> {
-  const [evidence, loanActivity, balanceSource] = await Promise.all([
+  const [evidence, loanActivity, balanceSource, managedTransitions] = await Promise.all([
     readLiveContinuationEvidence(db),
     readLoanActivityDiagnostics(db),
     readBalanceHistorySourceDiagnostics(db),
+    readManagedTransitionSourceDiagnostics(db),
   ])
-  return evaluateLiveContinuationForRuntime(evidence, loanActivity, balanceSource)
+  return evaluateLiveContinuationForRuntime(evidence, loanActivity, balanceSource, managedTransitions)
 }
 
 export interface LiveContinuationDiagnostics {
@@ -92,22 +106,25 @@ export interface LiveContinuationDiagnostics {
   drilldown: LiveContinuationDrilldown
   loanActivity: LoanActivityDiagnostics
   balanceSource: BalanceHistorySourceDiagnostics
+  managedTransitions: ManagedTransitionSourceDiagnostics
 }
 
 export async function diagnoseLiveContinuation(
   db: D1Database,
 ): Promise<LiveContinuationDiagnostics> {
-  const [evidence, drilldown, loanActivity, balanceSource] = await Promise.all([
+  const [evidence, drilldown, loanActivity, balanceSource, managedTransitions] = await Promise.all([
     readLiveContinuationEvidence(db),
     readLiveContinuationDrilldown(db),
     readLoanActivityDiagnostics(db),
     readBalanceHistorySourceDiagnostics(db),
+    readManagedTransitionSourceDiagnostics(db),
   ])
   return {
     evidence,
-    report: evaluateLiveContinuationForRuntime(evidence, loanActivity, balanceSource),
+    report: evaluateLiveContinuationForRuntime(evidence, loanActivity, balanceSource, managedTransitions),
     drilldown,
     loanActivity,
     balanceSource,
+    managedTransitions,
   }
 }
