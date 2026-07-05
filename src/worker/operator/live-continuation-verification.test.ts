@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { LiveContinuationEvidence } from '../../collector/incremental/live-continuation-verification'
+import type { BalanceHistorySourceDiagnostics } from '../repositories/balance-history-source-diagnostics'
 import type { LoanActivityDiagnostics } from '../repositories/loan-activity-diagnostics'
 import { evaluateLiveContinuationForRuntime } from './live-continuation-verification'
 
@@ -71,28 +72,71 @@ function activity(total: number): LoanActivityDiagnostics {
   }
 }
 
+function balanceSource(sourceChanges: number): BalanceHistorySourceDiagnostics {
+  return {
+    epochId: 'devnet-test',
+    sourceChanges,
+    latestLedger: sourceChanges > 0 ? 101 : null,
+  }
+}
+
 describe('runtime live-continuation classification', () => {
   it('keeps the cross-surface path missing when only unrelated protocol activity exists', () => {
-    const report = evaluateLiveContinuationForRuntime(evidence(), activity(0))
+    const report = evaluateLiveContinuationForRuntime(
+      evidence(),
+      activity(0),
+      balanceSource(0),
+    )
 
-    expect(report.paths.activityHistoryBalance).toEqual({
-      state: 'missing',
-      reason: 'relevant Loan activity, lifecycle, and balance-history evidence not yet observed',
-    })
+    expect(report.paths.activityHistoryBalance.state).toBe('missing')
   })
 
-  it('marks the cross-surface path inconsistent when relevant activity lacks derived evidence', () => {
-    const report = evaluateLiveContinuationForRuntime(evidence(), activity(1))
+  it('marks the cross-surface path inconsistent when relevant Loan activity lacks lifecycle evidence', () => {
+    const report = evaluateLiveContinuationForRuntime(
+      evidence(),
+      activity(1),
+      balanceSource(0),
+    )
 
     expect(report.paths.activityHistoryBalance.state).toBe('inconsistent')
   })
 
-  it('keeps the cross-surface path observed when relevant activity and both derived layers exist', () => {
+  it('keeps Loan activity plus lifecycle missing overall until a tracked balance source change is observed', () => {
+    const input = evidence()
+    input.lifecycle.total = 1
+
+    const report = evaluateLiveContinuationForRuntime(
+      input,
+      activity(1),
+      balanceSource(0),
+    )
+
+    expect(report.paths.activityHistoryBalance.state).toBe('missing')
+  })
+
+  it('marks balance source and history disagreement inconsistent', () => {
+    const input = evidence()
+    input.lifecycle.total = 1
+
+    const report = evaluateLiveContinuationForRuntime(
+      input,
+      activity(1),
+      balanceSource(1),
+    )
+
+    expect(report.paths.activityHistoryBalance.state).toBe('inconsistent')
+  })
+
+  it('marks the cross-surface path observed when both source/projection pairs exist', () => {
     const input = evidence()
     input.lifecycle.total = 1
     input.balanceHistory.total = 1
 
-    const report = evaluateLiveContinuationForRuntime(input, activity(1))
+    const report = evaluateLiveContinuationForRuntime(
+      input,
+      activity(1),
+      balanceSource(1),
+    )
 
     expect(report.paths.activityHistoryBalance.state).toBe('observed')
   })
