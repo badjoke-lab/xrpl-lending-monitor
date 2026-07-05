@@ -141,11 +141,16 @@ async function readFromEndpoint(options: {
     fetcher: options.fetcher,
   })
 
-  const [serverInfoResult, lendingResult, vaultResult] = await Promise.all([
-    client.call<ServerInfoResult>('server_info', { counters: false }),
-    client.call<Record<string, unknown>>('feature', { feature: LENDING_PROTOCOL_ID }),
-    client.call<Record<string, unknown>>('feature', { feature: SINGLE_ASSET_VAULT_ID }),
-  ])
+  // Keep one in-flight RPC per endpoint. The Worker fallback opens a fresh TCP/TLS
+  // socket for non-standard HTTPS ports, and the Devnet endpoint proved unreliable
+  // when the three snapshot calls were opened concurrently from one Worker run.
+  const serverInfoResult = await client.call<ServerInfoResult>('server_info', { counters: false })
+  const lendingResult = await client.call<Record<string, unknown>>('feature', {
+    feature: LENDING_PROTOCOL_ID,
+  })
+  const vaultResult = await client.call<Record<string, unknown>>('feature', {
+    feature: SINGLE_ASSET_VAULT_ID,
+  })
 
   const server = parseServerInfo(serverInfoResult)
 
