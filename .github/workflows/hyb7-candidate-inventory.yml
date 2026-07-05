@@ -1,0 +1,110 @@
+name: HYB-7 candidate inventory
+
+on:
+  pull_request:
+    branches: [main]
+    paths: [.github/workflows/hyb7-candidate-inventory.yml]
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Resolve Worker and capture read-only evidence candidates
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p hyb7-candidate-inventory
+          curl --fail-with-body --silent --show-error --retry 3 \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/subdomain" \
+            > hyb7-candidate-inventory/subdomain.json
+          SUBDOMAIN="$(jq -r '.result.subdomain // empty' hyb7-candidate-inventory/subdomain.json)"
+          test -n "$SUBDOMAIN"
+          BASE="https://xrpl-lending-monitor.${SUBDOMAIN}.workers.dev"
+          printf '%s\n' "$BASE" > hyb7-candidate-inventory/base-url.txt
+
+          curl --fail-with-body --silent --show-error --retry 3 \
+            "$BASE/api/status/continuation-diagnostics" \
+            > hyb7-candidate-inventory/continuation-diagnostics.json
+          curl --fail-with-body --silent --show-error --retry 3 \
+            "$BASE/api/status/m1-exit-diagnostics" \
+            > hyb7-candidate-inventory/m1-exit-diagnostics.json
+          curl --fail-with-body --silent --show-error --retry 3 \
+            "$BASE/api/status/collector" \
+            > hyb7-candidate-inventory/collector.json
+
+          curl --fail-with-body --silent --show-error --retry 3 \
+            "$BASE/api/loans?limit=5&on_ledger_status=active&schedule_status=current" \
+            > hyb7-candidate-inventory/active-current.json
+          curl --fail-with-body --silent --show-error --retry 3 \
+            "$BASE/api/loans?limit=5&on_ledger_status=active&schedule_status=payment_due" \
+            > hyb7-candidate-inventory/active-payment-due.json
+          curl --fail-with-body --silent --show-error --retry 3 \
+            "$BASE/api/loans?limit=5&on_ledger_status=active&schedule_status=default_eligible" \
+            > hyb7-candidate-inventory/active-default-eligible.json
+          curl --fail-with-body --silent --show-error --retry 3 \
+            "$BASE/api/loans?limit=5&on_ledger_status=impaired" \
+            > hyb7-candidate-inventory/impaired.json
+          curl --fail-with-body --silent --show-error --retry 3 \
+            "$BASE/api/loans?limit=5&on_ledger_status=defaulted" \
+            > hyb7-candidate-inventory/defaulted.json
+
+      - name: Build inventory summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -n \
+            --slurpfile collector hyb7-candidate-inventory/collector.json \
+            --slurpfile continuation hyb7-candidate-inventory/continuation-diagnostics.json \
+            --slurpfile m1 hyb7-candidate-inventory/m1-exit-diagnostics.json \
+            --slurpfile current hyb7-candidate-inventory/active-current.json \
+            --slurpfile due hyb7-candidate-inventory/active-payment-due.json \
+            --slurpfile eligible hyb7-candidate-inventory/active-default-eligible.json \
+            --slurpfile impaired hyb7-candidate-inventory/impaired.json \
+            --slurpfile defaulted hyb7-candidate-inventory/defaulted.json \
+            '{
+              collector: {
+                status: $collector[0].status,
+                cursor: $collector[0].cursor.last_processed_ledger,
+                head: $collector[0].cursor.latest_observed_ledger,
+                lag: $collector[0].cursor.lag_ledgers,
+                consecutive_failures: $collector[0].consecutive_failures,
+                error: $collector[0].error
+              },
+              loan_activity: $continuation[0].loanActivity,
+              path_states: ($continuation[0].report.paths | with_entries(.value = .value.state)),
+              m1_gate_states: ($m1[0].report.gates | with_entries(.value = .value.state)),
+              candidate_counts: {
+                active_current: ($current[0].data | length),
+                active_payment_due: ($due[0].data | length),
+                active_default_eligible: ($eligible[0].data | length),
+                impaired: ($impaired[0].data | length),
+                defaulted: ($defaulted[0].data | length)
+              },
+              candidate_ids: {
+                active_current: [$current[0].data[]?.id],
+                active_payment_due: [$due[0].data[]?.id],
+                active_default_eligible: [$eligible[0].data[]?.id],
+                impaired: [$impaired[0].data[]?.id],
+                defaulted: [$defaulted[0].data[]?.id]
+              }
+            }' > hyb7-candidate-inventory/summary.json
+
+          jq -e '.collector.error == null and .collector.consecutive_failures == 0' \
+            hyb7-candidate-inventory/summary.json > /dev/null
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hyb7-candidate-inventory
+          path: hyb7-candidate-inventory
+          if-no-files-found: error
+          retention-days: 7
