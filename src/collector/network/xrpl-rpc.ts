@@ -191,7 +191,7 @@ export class XrplJsonRpcClient {
   constructor(options: { endpoint: string; timeoutMs: number; fetcher?: FetchLike }) {
     this.endpoint = options.endpoint
     this.timeoutMs = options.timeoutMs
-    this.fetcher = options.fetcher ?? fetch
+    this.fetcher = options.fetcher ?? globalThis.fetch.bind(globalThis)
     this.hasCustomFetcher = options.fetcher !== undefined
   }
 
