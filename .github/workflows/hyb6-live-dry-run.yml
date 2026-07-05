@@ -28,7 +28,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p hyb6-live-dry-run
+          mkdir -p hyb6-live-dry-run/ledgers
 
           curl -sS \
             -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
@@ -51,18 +51,24 @@ jobs:
             printf '%s\n' "${STATUS}" > "hyb6-live-dry-run/${NAME}.http-status.txt"
           done
 
-          curl -sS \
-            -H 'content-type: application/json' \
-            --data '{"method":"ledger","params":[{"api_version":2,"ledger_index":3371676,"transactions":true,"expand":true,"owner_funds":false}]}' \
-            https://devnet.honeycluster.io/ \
-            > hyb6-live-dry-run/ledger-3371676.json
+          for LEDGER in $(seq 3371676 3371687); do
+            curl -sS \
+              -H 'content-type: application/json' \
+              --data "{\"method\":\"ledger\",\"params\":[{\"api_version\":2,\"ledger_index\":${LEDGER},\"transactions\":true,\"expand\":true,\"owner_funds\":false}]}" \
+              https://devnet.honeycluster.io/ \
+              > "hyb6-live-dry-run/ledgers/${LEDGER}.json"
+          done
 
-          jq '[
-            .result.ledger.transactions[]
+          jq -s '[
+            .[]
+            | .result.ledger as $ledger
+            | $ledger.transactions[]
             | select((.tx_json.TransactionType // .tx.TransactionType // .TransactionType) | startswith("Loan") or . == "VaultCreate")
             | {
+                ledger: ($ledger.ledger_index // $ledger.seqNum),
                 hash: (.hash // .tx_json.hash // .tx.hash),
                 type: (.tx_json.TransactionType // .tx.TransactionType // .TransactionType),
+                transaction: (.tx_json // .tx // .),
                 nodes: [
                   (.meta.AffectedNodes // .metaData.AffectedNodes // .meta_data.AffectedNodes // [])[]
                   | (.CreatedNode // .ModifiedNode // .DeletedNode)
@@ -76,8 +82,8 @@ jobs:
                     }
                 ]
               }
-          ]' hyb6-live-dry-run/ledger-3371676.json \
-            > hyb6-live-dry-run/ledger-3371676-lending-nodes.json
+          ]' hyb6-live-dry-run/ledgers/*.json \
+            > hyb6-live-dry-run/first-range-lending-nodes.json
 
       - uses: actions/upload-artifact@v4
         with:
