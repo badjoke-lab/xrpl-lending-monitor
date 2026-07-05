@@ -23,8 +23,8 @@
   "vars": {
     "APP_NETWORK": "devnet",
     "MAINNET_ENABLED": "false",
-    "XRPL_DEVNET_RPC_URL": "https://s.devnet.rippletest.net:51234",
-    "XRPL_DEVNET_RPC_FALLBACK_URL": "https://devnet.honeycluster.io/",
+    "XRPL_DEVNET_RPC_URL": "https://devnet.honeycluster.io/",
+    "XRPL_DEVNET_RPC_FALLBACK_URL": "https://s.devnet.rippletest.net:51234/",
     "XRPL_RPC_TIMEOUT_MS": "8000",
     "NETWORK_STATUS_STALE_AFTER_SECONDS": "30",
     "CURRENT_STATE_GITHUB_REPOSITORY": "badjoke-lab/xrpl-lending-monitor",
