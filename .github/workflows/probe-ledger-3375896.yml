@@ -1,0 +1,60 @@
+name: Probe blocker range from 3375896
+
+on:
+  pull_request:
+    branches: [main]
+    paths: [.github/workflows/probe-ledger-3375896.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Fetch blocker range
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p probe-ledger-3375896/ledgers
+          for LEDGER in $(seq 3375896 3375935); do
+            curl --fail-with-body --silent --show-error --retry 3 \
+              -H 'Content-Type: application/json' \
+              --data "{\"method\":\"ledger\",\"params\":[{\"ledger_index\":${LEDGER},\"transactions\":true,\"expand\":true,\"owner_funds\":false}]}" \
+              https://devnet.honeycluster.io/ \
+              > "probe-ledger-3375896/ledgers/${LEDGER}.json"
+          done
+
+          jq -s '[.[] | .result.ledger as $ledger | $ledger.transactions[] | {
+            ledger_index: ($ledger.ledger_index // $ledger.seqNum),
+            hash: (.hash // .tx_json.hash // .tx.hash),
+            transaction_type: (.tx_json.TransactionType // .tx.TransactionType // .TransactionType),
+            meta: (.meta // .metaData // .meta_data)
+          }]' probe-ledger-3375896/ledgers/*.json > probe-ledger-3375896/transactions.json
+
+          jq '[.[] | select((.transaction_type // "") | test("^(Vault|LoanBroker|Loan)"))]' \
+            probe-ledger-3375896/transactions.json > probe-ledger-3375896/lending-transactions.json
+
+          jq '[.[] as $tx | ($tx.meta.AffectedNodes // [])[] | select(.ModifiedNode != null) | {
+            ledger_index: $tx.ledger_index,
+            transaction_hash: $tx.hash,
+            transaction_type: $tx.transaction_type,
+            ledger_entry_type: .ModifiedNode.LedgerEntryType,
+            ledger_index_object: .ModifiedNode.LedgerIndex,
+            previous_fields_type: (.ModifiedNode.PreviousFields | type),
+            previous_fields: .ModifiedNode.PreviousFields,
+            final_fields_type: (.ModifiedNode.FinalFields | type),
+            final_fields: .ModifiedNode.FinalFields
+          }]' probe-ledger-3375896/lending-transactions.json > probe-ledger-3375896/modified-nodes.json
+
+          jq '[.[] | select(.previous_fields_type != "object" or .final_fields_type != "object")]' \
+            probe-ledger-3375896/modified-nodes.json > probe-ledger-3375896/suspect-modified-nodes.json
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: probe-ledger-3375896
+          path: probe-ledger-3375896
+          if-no-files-found: error
+          retention-days: 7
