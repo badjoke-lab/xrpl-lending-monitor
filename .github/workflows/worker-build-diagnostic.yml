@@ -17,5 +17,18 @@ jobs:
           node-version: 24.18.0
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Build Worker without deploy
-        run: pnpm exec wrangler deploy --dry-run --outdir .worker-dry-run
+      - name: Capture Worker build output
+        shell: bash
+        run: |
+          set +e
+          pnpm exec wrangler deploy --dry-run --outdir .worker-dry-run > worker-build-output.txt 2>&1
+          code=$?
+          cat worker-build-output.txt
+          echo "$code" > worker-build-exit-code.txt
+          exit 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: worker-build-diagnostic
+          path: |
+            worker-build-output.txt
+            worker-build-exit-code.txt
