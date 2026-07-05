@@ -1,4 +1,4 @@
-name: Deploy loan list fix and verify
+name: Diagnose deployed loan list route
 
 on:
   pull_request:
@@ -13,7 +13,7 @@ env:
   CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
 jobs:
-  deploy-and-verify:
+  diagnose:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -27,89 +27,45 @@ jobs:
       - run: pnpm check
       - run: pnpm exec wrangler deploy
 
-      - name: Capture filtered loan-list evidence
+      - name: Capture failing route with Worker tail
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p loan-list-fix-evidence
+          mkdir -p loan-list-route-diagnostics
           curl --fail-with-body --silent --show-error --retry 3 \
             -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
             "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/subdomain" \
-            > loan-list-fix-evidence/subdomain.json
-          SUBDOMAIN="$(jq -r '.result.subdomain // empty' loan-list-fix-evidence/subdomain.json)"
+            > loan-list-route-diagnostics/subdomain.json
+          SUBDOMAIN="$(jq -r '.result.subdomain // empty' loan-list-route-diagnostics/subdomain.json)"
           test -n "$SUBDOMAIN"
           BASE="https://xrpl-lending-monitor.${SUBDOMAIN}.workers.dev"
-          printf '%s\n' "$BASE" > loan-list-fix-evidence/base-url.txt
+          printf '%s\n' "$BASE" > loan-list-route-diagnostics/base-url.txt
 
-          curl --fail-with-body --silent --show-error --retry 3 \
-            "$BASE/api/loans?limit=5&on_ledger_status=active&schedule_status=current" \
-            > loan-list-fix-evidence/active-current.json
-          curl --fail-with-body --silent --show-error --retry 3 \
-            "$BASE/api/loans?limit=5&on_ledger_status=active&schedule_status=payment_due" \
-            > loan-list-fix-evidence/active-payment-due.json
-          curl --fail-with-body --silent --show-error --retry 3 \
-            "$BASE/api/loans?limit=5&on_ledger_status=active&schedule_status=default_eligible" \
-            > loan-list-fix-evidence/active-default-eligible.json
-          curl --fail-with-body --silent --show-error --retry 3 \
-            "$BASE/api/loans?limit=5&on_ledger_status=impaired" \
-            > loan-list-fix-evidence/impaired.json
-          curl --fail-with-body --silent --show-error --retry 3 \
-            "$BASE/api/loans?limit=5&on_ledger_status=defaulted" \
-            > loan-list-fix-evidence/defaulted.json
+          pnpm exec wrangler tail xrpl-lending-monitor --format json \
+            > loan-list-route-diagnostics/worker-tail.jsonl 2>&1 &
+          TAIL_PID=$!
+          sleep 6
 
-          for FILE in loan-list-fix-evidence/active-current.json \
-                      loan-list-fix-evidence/active-payment-due.json \
-                      loan-list-fix-evidence/active-default-eligible.json \
-                      loan-list-fix-evidence/impaired.json \
-                      loan-list-fix-evidence/defaulted.json; do
-            jq -e '.availability.state == "available" and (.data | type == "array") and .page' "$FILE" > /dev/null
-          done
+          set +e
+          HTTP_CODE="$(curl --silent --show-error --output loan-list-route-diagnostics/response.json \
+            --write-out '%{http_code}' \
+            "$BASE/api/loans?limit=5&on_ledger_status=active&schedule_status=current")"
+          CURL_STATUS=$?
+          set -e
+          printf '%s\n' "$HTTP_CODE" > loan-list-route-diagnostics/http-code.txt
+          printf '%s\n' "$CURL_STATUS" > loan-list-route-diagnostics/curl-status.txt
 
-          curl --fail-with-body --silent --show-error --retry 3 \
-            "$BASE/api/status/collector" \
-            > loan-list-fix-evidence/collector.json
-          curl --fail-with-body --silent --show-error --retry 3 \
-            "$BASE/api/status/continuation-diagnostics" \
-            > loan-list-fix-evidence/continuation-diagnostics.json
+          sleep 8
+          kill "$TAIL_PID" 2>/dev/null || true
+          wait "$TAIL_PID" 2>/dev/null || true
 
-      - name: Build evidence summary
-        shell: bash
-        run: |
-          set -euo pipefail
-          jq -n \
-            --slurpfile current loan-list-fix-evidence/active-current.json \
-            --slurpfile due loan-list-fix-evidence/active-payment-due.json \
-            --slurpfile eligible loan-list-fix-evidence/active-default-eligible.json \
-            --slurpfile impaired loan-list-fix-evidence/impaired.json \
-            --slurpfile defaulted loan-list-fix-evidence/defaulted.json \
-            --slurpfile collector loan-list-fix-evidence/collector.json \
-            --slurpfile continuation loan-list-fix-evidence/continuation-diagnostics.json \
-            '{
-              collector: {
-                status: $collector[0].status,
-                cursor: $collector[0].cursor.last_processed_ledger,
-                head: $collector[0].cursor.latest_observed_ledger,
-                lag: $collector[0].cursor.lag_ledgers,
-                consecutive_failures: $collector[0].consecutive_failures,
-                error: $collector[0].error
-              },
-              loan_activity: $continuation[0].loanActivity,
-              first_page: {
-                active_current: {count: ($current[0].data | length), next_cursor: ($current[0].page.next_cursor != null)},
-                active_payment_due: {count: ($due[0].data | length), next_cursor: ($due[0].page.next_cursor != null)},
-                active_default_eligible: {count: ($eligible[0].data | length), next_cursor: ($eligible[0].page.next_cursor != null)},
-                impaired: {count: ($impaired[0].data | length), next_cursor: ($impaired[0].page.next_cursor != null)},
-                defaulted: {count: ($defaulted[0].data | length), next_cursor: ($defaulted[0].page.next_cursor != null)}
-              }
-            }' > loan-list-fix-evidence/summary.json
-
-          jq -e '.collector.error == null and .collector.consecutive_failures == 0' \
-            loan-list-fix-evidence/summary.json > /dev/null
+          cat loan-list-route-diagnostics/response.json
+          echo "HTTP $HTTP_CODE"
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: loan-list-fix-evidence
-          path: loan-list-fix-evidence
+          name: loan-list-route-diagnostics
+          path: loan-list-route-diagnostics
           if-no-files-found: error
           retention-days: 7
