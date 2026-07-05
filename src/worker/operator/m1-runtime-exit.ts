@@ -4,9 +4,8 @@ import {
   type M1RuntimeExitEvidence,
   type M1RuntimeExitReport,
 } from '../../collector/incremental/m1-runtime-exit-gate'
-import type { RuntimeConfig } from '../../shared/runtime-config'
+import type { CatchUpBaseIdentity } from '../../shared/catch-up-base-identity'
 import { readLiveContinuationEvidence } from '../repositories/live-continuation-verification'
-import { resolveCurrentStateStorage } from '../repositories/release-current-state'
 
 interface BoundBaseRow {
   epoch_id: string
@@ -17,7 +16,7 @@ interface BoundBaseRow {
 
 interface M1RuntimeExitOptions {
   db: D1Database
-  config: RuntimeConfig
+  expectedBase: CatchUpBaseIdentity | null
 }
 
 export interface M1RuntimeExitDiagnostics {
@@ -28,8 +27,7 @@ export interface M1RuntimeExitDiagnostics {
 async function readM1RuntimeExitEvidence(
   options: M1RuntimeExitOptions,
 ): Promise<M1RuntimeExitEvidence> {
-  const [storage, liveEvidence, boundBase] = await Promise.all([
-    resolveCurrentStateStorage(options.config, options.db),
+  const [liveEvidence, boundBase] = await Promise.all([
     readLiveContinuationEvidence(options.db),
     options.db.prepare(
       `SELECT epoch_id, base_snapshot_id, base_ledger_index, base_ledger_hash
@@ -40,15 +38,14 @@ async function readM1RuntimeExitEvidence(
     ).first<BoundBaseRow>(),
   ])
 
-  const snapshot = storage.snapshot
   const continuation = evaluateLiveContinuationEvidence(liveEvidence)
 
   return {
     expectedBase: {
-      epochId: snapshot?.epochId ?? null,
-      snapshotId: snapshot?.id ?? null,
-      ledgerIndex: snapshot?.ledgerIndex ?? null,
-      ledgerHash: snapshot?.ledgerHash ?? null,
+      epochId: options.expectedBase?.epochId ?? null,
+      snapshotId: options.expectedBase?.snapshotId ?? null,
+      ledgerIndex: options.expectedBase?.ledgerIndex ?? null,
+      ledgerHash: options.expectedBase?.ledgerHash ?? null,
     },
     boundBase: {
       epochId: boundBase?.epoch_id ?? null,

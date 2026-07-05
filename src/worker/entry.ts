@@ -72,15 +72,17 @@ const worker: ExportedHandler<Bindings> = {
       return Response.json({ base, ...result })
     }
     if (request.method === 'GET' && url.pathname === '/api/status/m1-exit') {
+      const catchUpConfig = resolveCatchUpRuntimeConfig(env)
       return Response.json(await reviewM1RuntimeExit({
         db: env.DB,
-        config: resolveRuntimeConfig(env),
+        expectedBase: catchUpConfig.base,
       }))
     }
     if (request.method === 'GET' && url.pathname === '/api/status/m1-exit-diagnostics') {
+      const catchUpConfig = resolveCatchUpRuntimeConfig(env)
       return Response.json(await diagnoseM1RuntimeExit({
         db: env.DB,
-        config: resolveRuntimeConfig(env),
+        expectedBase: catchUpConfig.base,
       }))
     }
     return app.fetch(request, env, executionContext)
