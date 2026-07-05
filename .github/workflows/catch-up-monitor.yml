@@ -1,0 +1,152 @@
+name: Catch-up runtime monitor
+
+on:
+  schedule:
+    - cron: '17,47 * * * *'
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/catch-up-monitor.yml
+      - docs/operations-catch-up-monitor.md
+
+permissions:
+  contents: read
+
+concurrency:
+  group: catch-up-runtime-monitor
+  cancel-in-progress: false
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve deployed Worker URL
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p runtime-monitor
+          curl --fail-with-body --silent --show-error --retry 3 \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/subdomain" \
+            > runtime-monitor/subdomain.json
+
+          SUBDOMAIN="$(jq -r '.result.subdomain // empty' runtime-monitor/subdomain.json)"
+          test -n "${SUBDOMAIN}"
+          BASE="https://xrpl-lending-monitor.${SUBDOMAIN}.workers.dev"
+          printf '%s\n' "${BASE}" > runtime-monitor/base-url.txt
+
+      - name: Sample collector progress
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE="$(cat runtime-monitor/base-url.txt)"
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+            INTERVAL=60
+          else
+            INTERVAL=300
+          fi
+
+          for I in 0 1 2; do
+            curl --fail-with-body --silent --show-error --retry 3 \
+              "${BASE}/api/status/collector" \
+              > "runtime-monitor/collector-${I}.json"
+            jq -e '.cursor and .usage and (.consecutive_failures != null)' \
+              "runtime-monitor/collector-${I}.json" > /dev/null
+            if [ "${I}" -lt 2 ]; then
+              sleep "${INTERVAL}"
+            fi
+          done
+
+      - name: Capture HYB-7 and M1 exit state
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE="$(cat runtime-monitor/base-url.txt)"
+          curl --fail-with-body --silent --show-error --retry 3 \
+            "${BASE}/api/status/continuation-verification" \
+            > runtime-monitor/continuation-verification.json
+          curl --fail-with-body --silent --show-error --retry 3 \
+            "${BASE}/api/status/m1-exit" \
+            > runtime-monitor/m1-exit.json
+          curl --fail-with-body --silent --show-error --retry 3 \
+            "${BASE}/api/status/catch-up-initialization" \
+            > runtime-monitor/catch-up-initialization.json
+
+      - name: Build operational summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -s '[.[] | {
+            status,
+            cursor: .cursor.last_processed_ledger,
+            head: .cursor.latest_observed_ledger,
+            lag: .cursor.lag_ledgers,
+            run_duration_ms: .timing.run_duration_ms,
+            ledgers_processed: .usage.ledgers_processed,
+            rpc_requests: .usage.rpc_requests,
+            estimated_rows: .usage.estimated_rows,
+            estimated_statements: .usage.estimated_statements,
+            overlay_mutations: .usage.overlay_mutations,
+            consecutive_failures,
+            error
+          }]' runtime-monitor/collector-*.json > runtime-monitor/series.json
+
+          jq '{
+            first: .[0],
+            last: .[-1],
+            cursor_delta: (.[-1].cursor - .[0].cursor),
+            head_delta: (.[-1].head - .[0].head),
+            lag_delta: (.[-1].lag - .[0].lag),
+            samples: length,
+            samples_with_failures: ([.[] | select(.consecutive_failures > 0 or .error != null)] | length)
+          }' runtime-monitor/series.json > runtime-monitor/summary.json
+
+          {
+            echo '## Catch-up runtime monitor'
+            echo
+            echo '| Metric | First | Last | Delta |'
+            echo '|---|---:|---:|---:|'
+            jq -r '"| Cursor | \(.first.cursor) | \(.last.cursor) | \(.cursor_delta) |"' runtime-monitor/summary.json
+            jq -r '"| Head | \(.first.head) | \(.last.head) | \(.head_delta) |"' runtime-monitor/summary.json
+            jq -r '"| Lag | \(.first.lag) | \(.last.lag) | \(.lag_delta) |"' runtime-monitor/summary.json
+            echo
+            echo '### HYB-7 paths'
+            jq -r '.paths | to_entries[] | "- `\(.key)`: **\(.value.state)** — \(.value.reason)"' runtime-monitor/continuation-verification.json
+            echo
+            echo '### M1 exit gates'
+            jq -r '.gates | to_entries[] | "- `\(.key)`: **\(.value.state)** — \(.value.reason)"' runtime-monitor/m1-exit.json
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Enforce runtime monitor invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          FAILURES="$(jq -r '.samples_with_failures' runtime-monitor/summary.json)"
+          FIRST_LAG="$(jq -r '.first.lag' runtime-monitor/summary.json)"
+          CURSOR_DELTA="$(jq -r '.cursor_delta' runtime-monitor/summary.json)"
+
+          if [ "${FAILURES}" -gt 0 ]; then
+            echo "Collector error or consecutive failure observed in ${FAILURES} sample(s)."
+            exit 1
+          fi
+
+          if [ "${FIRST_LAG}" -gt 0 ] && [ "${CURSOR_DELTA}" -le 0 ]; then
+            echo "Collector cursor did not advance while catch-up lag remained positive."
+            exit 1
+          fi
+
+      - name: Upload runtime evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: catch-up-runtime-monitor
+          path: runtime-monitor
+          if-no-files-found: error
+          retention-days: 14
