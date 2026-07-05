@@ -17,6 +17,7 @@ jobs:
           node-version: 24.18.0
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm build
       - name: Capture Worker build output
         shell: bash
         run: |
