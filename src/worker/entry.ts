@@ -10,7 +10,10 @@ import {
   diagnoseLiveContinuation,
   verifyLiveContinuation,
 } from './operator/live-continuation-verification'
-import { reviewM1RuntimeExit } from './operator/m1-runtime-exit'
+import {
+  diagnoseM1RuntimeExit,
+  reviewM1RuntimeExit,
+} from './operator/m1-runtime-exit'
 import { getIncrementalCollectorState } from './repositories/incremental-collector-state'
 import { getSyncState } from './repositories/network-status-repository'
 import { openConfiguredReleaseCurrentState } from './repositories/release-current-state'
@@ -70,6 +73,12 @@ const worker: ExportedHandler<Bindings> = {
     }
     if (request.method === 'GET' && url.pathname === '/api/status/m1-exit') {
       return Response.json(await reviewM1RuntimeExit({
+        db: env.DB,
+        config: resolveRuntimeConfig(env),
+      }))
+    }
+    if (request.method === 'GET' && url.pathname === '/api/status/m1-exit-diagnostics') {
+      return Response.json(await diagnoseM1RuntimeExit({
         db: env.DB,
         config: resolveRuntimeConfig(env),
       }))
