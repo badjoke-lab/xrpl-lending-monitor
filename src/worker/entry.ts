@@ -10,6 +10,7 @@ import { verifyLiveContinuation } from './operator/live-continuation-verificatio
 import { reviewM1RuntimeExit } from './operator/m1-runtime-exit'
 import { getIncrementalCollectorState } from './repositories/incremental-collector-state'
 import { getSyncState } from './repositories/network-status-repository'
+import { openConfiguredReleaseCurrentState } from './repositories/release-current-state'
 import { serializeCollectorStatus } from './serializers/collector-status'
 
 const worker: ExportedHandler<Bindings> = {
@@ -32,6 +33,31 @@ const worker: ExportedHandler<Bindings> = {
       && url.pathname === '/api/status/continuation-verification'
     ) {
       return Response.json(await verifyLiveContinuation(env.DB))
+    }
+    if (request.method === 'GET' && url.pathname === '/api/status/catch-up-initialization') {
+      const runtimeConfig = resolveRuntimeConfig(env)
+      const release = await openConfiguredReleaseCurrentState(runtimeConfig, env.DB)
+      if (!release) {
+        return Response.json({
+          status: 'unavailable',
+          reason: 'verified_base_release_unavailable',
+        }, { status: 503 })
+      }
+
+      const base = {
+        epochId: release.snapshot.epochId,
+        snapshotId: release.snapshot.id,
+        ledgerIndex: release.snapshot.ledgerIndex,
+        ledgerHash: release.snapshot.ledgerHash,
+      }
+      const result = await initializeCatchUpFromVerifiedBase({
+        db: env.DB,
+        base,
+        initializedAt: new Date().toISOString(),
+        dryRun: true,
+      })
+
+      return Response.json({ base, ...result })
     }
     if (request.method === 'GET' && url.pathname === '/api/status/m1-exit') {
       return Response.json(await reviewM1RuntimeExit({
