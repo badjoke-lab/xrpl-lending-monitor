@@ -26,46 +26,21 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
       - run: pnpm exec wrangler deploy
-
-      - name: Capture failing route with Worker tail
+      - name: Capture route results
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p loan-list-route-diagnostics
-          curl --fail-with-body --silent --show-error --retry 3 \
-            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/subdomain" \
-            > loan-list-route-diagnostics/subdomain.json
-          SUBDOMAIN="$(jq -r '.result.subdomain // empty' loan-list-route-diagnostics/subdomain.json)"
-          test -n "$SUBDOMAIN"
+          mkdir -p route-diagnostics
+          curl --fail-with-body --silent --show-error --retry 3 -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/subdomain" > route-diagnostics/subdomain.json
+          SUBDOMAIN="$(jq -r '.result.subdomain // empty' route-diagnostics/subdomain.json)"
           BASE="https://xrpl-lending-monitor.${SUBDOMAIN}.workers.dev"
-          printf '%s\n' "$BASE" > loan-list-route-diagnostics/base-url.txt
-
-          pnpm exec wrangler tail xrpl-lending-monitor --format json \
-            > loan-list-route-diagnostics/worker-tail.jsonl 2>&1 &
-          TAIL_PID=$!
-          sleep 6
-
-          set +e
-          HTTP_CODE="$(curl --silent --show-error --output loan-list-route-diagnostics/response.json \
-            --write-out '%{http_code}' \
-            "$BASE/api/loans?limit=5&on_ledger_status=active&schedule_status=current")"
-          CURL_STATUS=$?
-          set -e
-          printf '%s\n' "$HTTP_CODE" > loan-list-route-diagnostics/http-code.txt
-          printf '%s\n' "$CURL_STATUS" > loan-list-route-diagnostics/curl-status.txt
-
-          sleep 8
-          kill "$TAIL_PID" 2>/dev/null || true
-          wait "$TAIL_PID" 2>/dev/null || true
-
-          cat loan-list-route-diagnostics/response.json
-          echo "HTTP $HTTP_CODE"
-
+          curl --silent --show-error "$BASE/api/loans?limit=5&on_ledger_status=active&schedule_status=current" > route-diagnostics/route.json
+          curl --silent --show-error "$BASE/api/status/loan-list-direct-diagnostics" > route-diagnostics/direct.json
+          cat route-diagnostics/direct.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: loan-list-route-diagnostics
-          path: loan-list-route-diagnostics
+          path: route-diagnostics
           if-no-files-found: error
           retention-days: 7
