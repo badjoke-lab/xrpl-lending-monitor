@@ -251,23 +251,29 @@ async function overlayOperationsForIds(options: {
   ids: string[]
 }): Promise<Map<string, OverlayRow['operation']>> {
   if (options.ids.length === 0) return new Map()
-  const placeholders = options.ids.map((_, index) => `?${index + 4}`).join(', ')
+  const operations = new Map<string, OverlayRow['operation']>()
+  const maxIdsPerQuery = 97
   try {
-    const result = await options.db.prepare(
-      `SELECT object_id, operation, projection_json
-       FROM current_state_overlay_objects
-       WHERE network = 'devnet'
-         AND epoch_id = ?1
-         AND base_snapshot_id = ?2
-         AND object_type = ?3
-         AND object_id IN (${placeholders})`,
-    ).bind(
-      options.snapshot.epochId,
-      options.snapshot.id,
-      objectType(options.kind),
-      ...options.ids,
-    ).all<OverlayRow>()
-    return new Map((result.results ?? []).map((row) => [row.object_id, row.operation]))
+    for (let offset = 0; offset < options.ids.length; offset += maxIdsPerQuery) {
+      const ids = options.ids.slice(offset, offset + maxIdsPerQuery)
+      const placeholders = ids.map((_, index) => `?${index + 4}`).join(', ')
+      const result = await options.db.prepare(
+        `SELECT object_id, operation, projection_json
+         FROM current_state_overlay_objects
+         WHERE network = 'devnet'
+           AND epoch_id = ?1
+           AND base_snapshot_id = ?2
+           AND object_type = ?3
+           AND object_id IN (${placeholders})`,
+      ).bind(
+        options.snapshot.epochId,
+        options.snapshot.id,
+        objectType(options.kind),
+        ...ids,
+      ).all<OverlayRow>()
+      for (const row of result.results ?? []) operations.set(row.object_id, row.operation)
+    }
+    return operations
   } catch (error) {
     if (isMissingOverlaySchema(error)) return new Map()
     throw error
