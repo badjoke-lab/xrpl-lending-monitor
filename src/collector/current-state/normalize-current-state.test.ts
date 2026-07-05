@@ -148,6 +148,18 @@ describe('normalizeCurrentState', () => {
     })
   })
 
+  it('treats an omitted Vault Asset field as XRP', () => {
+    const xrpVault = vault()
+    delete xrpVault.Asset
+
+    const normalized = normalizeCurrentState(scan({ vaults: [xrpVault] }))
+
+    expect(normalized.vaults[0]?.asset).toMatchObject({
+      type: 'xrp',
+      key: 'XRP',
+    })
+  })
+
   it('normalizes zero-omitted fields on a fully paid Loan', () => {
     const normalized = normalizeCurrentState(scan({ loans: [terminalLoan()] }))
 

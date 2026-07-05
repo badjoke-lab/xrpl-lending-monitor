@@ -97,13 +97,14 @@ function common(object: CurrentProjectionLedgerObject): {
 export function normalizeVault(object: CurrentProjectionLedgerObject): VaultCurrentProjection {
   if (object.LedgerEntryType !== 'Vault') throw new Error('Expected a Vault object')
   const shareMptId = normalizeMptIssuanceId(requiredString(object, 'ShareMPTID'))
+  const asset = normalizeXrplAsset(object.Asset ?? { currency: 'XRP' })
 
   return {
     kind: 'vault',
     ...common(object),
     owner: requiredString(object, 'Owner'),
     account: requiredString(object, 'Account'),
-    asset: normalizeXrplAsset(object.Asset),
+    asset,
     assetsTotal: amountOrZero(object, 'AssetsTotal'),
     assetsAvailable: amountOrZero(object, 'AssetsAvailable'),
     assetsMaximum: optionalAmountString(object, 'AssetsMaximum'),
