@@ -72,7 +72,7 @@ jobs:
           curl --fail-with-body --silent --show-error --retry 3 \
             "${BASE}/api/status/continuation-diagnostics" \
             > runtime-monitor/continuation-diagnostics.json
-          jq -e '.evidence and .report and .report.paths and .drilldown and .drilldown.linkageGaps and .loanActivity' \
+          jq -e '.evidence and .report and .report.paths and .drilldown and .drilldown.linkageGaps and .loanActivity and .balanceSource' \
             runtime-monitor/continuation-diagnostics.json > /dev/null
           jq '.report' runtime-monitor/continuation-diagnostics.json \
             > runtime-monitor/continuation-verification.json
@@ -126,6 +126,7 @@ jobs:
             loan_activity: .loanActivity,
             lifecycle: .evidence.lifecycle,
             archives: .evidence.archives,
+            balance_source: .balanceSource,
             balance_history: .evidence.balanceHistory,
             drilldown: .drilldown,
             path_states: (.report.paths | with_entries(.value = .value.state)),
@@ -166,6 +167,7 @@ jobs:
             jq -r '"| LoanManage events | \(.loanActivity.loanManage) |"' runtime-monitor/continuation-diagnostics.json
             jq -r '"| LoanDelete events | \(.loanActivity.loanDelete) |"' runtime-monitor/continuation-diagnostics.json
             jq -r '"| Lifecycle events | \(.evidence.lifecycle.total) |"' runtime-monitor/continuation-diagnostics.json
+            jq -r '"| Balance source changes | \(.balanceSource.sourceChanges) |"' runtime-monitor/continuation-diagnostics.json
             jq -r '"| Balance-history rows | \(.evidence.balanceHistory.total) |"' runtime-monitor/continuation-diagnostics.json
             echo
             echo '### HYB-7 linkage gaps'
