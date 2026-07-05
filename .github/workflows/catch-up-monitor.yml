@@ -72,7 +72,7 @@ jobs:
           curl --fail-with-body --silent --show-error --retry 3 \
             "${BASE}/api/status/continuation-diagnostics" \
             > runtime-monitor/continuation-diagnostics.json
-          jq -e '.evidence and .report and .report.paths and .drilldown and .drilldown.linkageGaps' \
+          jq -e '.evidence and .report and .report.paths and .drilldown and .drilldown.linkageGaps and .loanActivity' \
             runtime-monitor/continuation-diagnostics.json > /dev/null
           jq '.report' runtime-monitor/continuation-diagnostics.json \
             > runtime-monitor/continuation-verification.json
@@ -123,6 +123,7 @@ jobs:
             object_changes: .evidence.objectChanges,
             overlay_objects: .evidence.overlayObjects,
             protocol_events: .evidence.protocolEvents,
+            loan_activity: .loanActivity,
             lifecycle: .evidence.lifecycle,
             archives: .evidence.archives,
             balance_history: .evidence.balanceHistory,
@@ -159,8 +160,11 @@ jobs:
             jq -r '"| Object changes: created | \(.evidence.objectChanges.created) |"' runtime-monitor/continuation-diagnostics.json
             jq -r '"| Object changes: modified | \(.evidence.objectChanges.modified) |"' runtime-monitor/continuation-diagnostics.json
             jq -r '"| Object changes: deleted | \(.evidence.objectChanges.deleted) |"' runtime-monitor/continuation-diagnostics.json
-            jq -r '"| LoanPay events | \(.evidence.protocolEvents.loanPay) |"' runtime-monitor/continuation-diagnostics.json
-            jq -r '"| LoanManage events | \(.evidence.protocolEvents.loanManage) |"' runtime-monitor/continuation-diagnostics.json
+            jq -r '"| Relevant Loan activity | \(.loanActivity.total) |"' runtime-monitor/continuation-diagnostics.json
+            jq -r '"| LoanSet events | \(.loanActivity.loanSet) |"' runtime-monitor/continuation-diagnostics.json
+            jq -r '"| LoanPay events | \(.loanActivity.loanPay) |"' runtime-monitor/continuation-diagnostics.json
+            jq -r '"| LoanManage events | \(.loanActivity.loanManage) |"' runtime-monitor/continuation-diagnostics.json
+            jq -r '"| LoanDelete events | \(.loanActivity.loanDelete) |"' runtime-monitor/continuation-diagnostics.json
             jq -r '"| Lifecycle events | \(.evidence.lifecycle.total) |"' runtime-monitor/continuation-diagnostics.json
             jq -r '"| Balance-history rows | \(.evidence.balanceHistory.total) |"' runtime-monitor/continuation-diagnostics.json
             echo
