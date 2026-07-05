@@ -72,7 +72,7 @@ jobs:
           curl --fail-with-body --silent --show-error --retry 3 \
             "${BASE}/api/status/continuation-diagnostics" \
             > runtime-monitor/continuation-diagnostics.json
-          jq -e '.evidence and .report and .report.paths' \
+          jq -e '.evidence and .report and .report.paths and .drilldown and .drilldown.linkageGaps' \
             runtime-monitor/continuation-diagnostics.json > /dev/null
           jq '.report' runtime-monitor/continuation-diagnostics.json \
             > runtime-monitor/continuation-verification.json
@@ -126,6 +126,7 @@ jobs:
             lifecycle: .evidence.lifecycle,
             archives: .evidence.archives,
             balance_history: .evidence.balanceHistory,
+            drilldown: .drilldown,
             path_states: (.report.paths | with_entries(.value = .value.state)),
             passed: .report.passed
           }' runtime-monitor/continuation-diagnostics.json \
@@ -162,6 +163,9 @@ jobs:
             jq -r '"| LoanManage events | \(.evidence.protocolEvents.loanManage) |"' runtime-monitor/continuation-diagnostics.json
             jq -r '"| Lifecycle events | \(.evidence.lifecycle.total) |"' runtime-monitor/continuation-diagnostics.json
             jq -r '"| Balance-history rows | \(.evidence.balanceHistory.total) |"' runtime-monitor/continuation-diagnostics.json
+            echo
+            echo '### HYB-7 linkage gaps'
+            jq -r '.drilldown.linkageGaps | to_entries[] | "- `\(.key)`: **\(.value)**"' runtime-monitor/continuation-diagnostics.json
             echo
             echo '### HYB-7 paths'
             jq -r '.report.paths | to_entries[] | "- `\(.key)`: **\(.value.state)** — \(.value.reason)"' runtime-monitor/continuation-diagnostics.json
