@@ -149,6 +149,12 @@ export async function listBaseOverlayLoans(
 ): Promise<ListCurrentLoansResult> {
   const source = releaseSource(storage)
   validateSnapshot(snapshot, source)
+
+  // Keep the release-asset scan bounded independently of filter selectivity.
+  // Filtering inside the release reader can force a single request to walk a
+  // large part of the immutable snapshot when matches are rare. Read one
+  // bounded merged page, then apply public filters locally and let the cursor
+  // continue from the end of that raw page on the next request.
   const result = await listResolvedCurrentProjections({
     db,
     source,
@@ -167,17 +173,18 @@ export async function listBaseOverlayLoans(
         options.evaluatedAtRippleTime,
       ].join(':'),
       maxBasePageReads: MAX_LIST_ASSET_READS,
-      predicate: (projection) => matches(projection as LoanCurrentProjection, options),
     },
   })
 
   const data: CurrentLoanRecord[] = []
   for (const projection of result.items) {
+    const loan = projection as LoanCurrentProjection
+    if (!matches(loan, options)) continue
     data.push(await materialize(
       db,
       source,
       snapshot,
-      projection as LoanCurrentProjection,
+      loan,
       options.evaluatedAtRippleTime,
     ))
   }
