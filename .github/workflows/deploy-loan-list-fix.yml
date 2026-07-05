@@ -1,4 +1,4 @@
-name: Diagnose deployed loan list route
+name: Restore main deployment
 
 on:
   pull_request:
@@ -13,11 +13,13 @@ env:
   CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
 jobs:
-  diagnose:
+  deploy-main:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -26,21 +28,3 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
       - run: pnpm exec wrangler deploy
-      - name: Capture route results
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p route-diagnostics
-          curl --fail-with-body --silent --show-error --retry 3 -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/subdomain" > route-diagnostics/subdomain.json
-          SUBDOMAIN="$(jq -r '.result.subdomain // empty' route-diagnostics/subdomain.json)"
-          BASE="https://xrpl-lending-monitor.${SUBDOMAIN}.workers.dev"
-          curl --silent --show-error "$BASE/api/loans?limit=5&on_ledger_status=active&schedule_status=current" > route-diagnostics/route.json
-          curl --silent --show-error "$BASE/api/status/loan-list-direct-diagnostics" > route-diagnostics/direct.json
-          cat route-diagnostics/direct.json
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: loan-list-route-diagnostics
-          path: route-diagnostics
-          if-no-files-found: error
-          retention-days: 7
