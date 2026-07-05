@@ -5,7 +5,8 @@ export default defineConfig({
     ssr: 'scripts/run-release-current-state.ts',
     outDir: '.release-current-state-build',
     emptyOutDir: true,
-    rollupOptions: {
+    rolldownOptions: {
+      external: ['cloudflare:sockets'],
       output: {
         entryFileNames: 'run-release-current-state.mjs',
       },
