@@ -14,10 +14,13 @@ import {
   diagnoseM1RuntimeExit,
   reviewM1RuntimeExit,
 } from './operator/m1-runtime-exit'
+import { listCurrentLoans } from './repositories/current-state-loan-reader'
 import { getIncrementalCollectorState } from './repositories/incremental-collector-state'
 import { getSyncState } from './repositories/network-status-repository'
 import { openConfiguredReleaseCurrentState } from './repositories/release-current-state'
 import { serializeCollectorStatus } from './serializers/collector-status'
+
+const RIPPLE_EPOCH_UNIX_SECONDS = 946_684_800
 
 const worker: ExportedHandler<Bindings> = {
   async fetch(request, env, executionContext) {
@@ -45,6 +48,42 @@ const worker: ExportedHandler<Bindings> = {
       && url.pathname === '/api/status/continuation-diagnostics'
     ) {
       return Response.json(await diagnoseLiveContinuation(env.DB))
+    }
+    if (
+      request.method === 'GET'
+      && url.pathname === '/api/status/loan-list-direct-diagnostics'
+    ) {
+      const runtimeConfig = resolveRuntimeConfig(env)
+      try {
+        const release = await openConfiguredReleaseCurrentState(runtimeConfig, env.DB)
+        if (!release) {
+          return Response.json({ stage: 'open_release', status: 'unavailable' }, { status: 503 })
+        }
+        const evaluatedAtRippleTime = Math.floor(Date.now() / 1000) - RIPPLE_EPOCH_UNIX_SECONDS
+        const result = await listCurrentLoans(release.source, release.snapshot, {
+          limit: 5,
+          sort: 'id_asc',
+          onLedgerStatus: 'active',
+          scheduleStatus: 'current',
+          evaluatedAtRippleTime,
+        })
+        return Response.json({
+          stage: 'list_current_loans',
+          status: 'ok',
+          count: result.data.length,
+          nextCursor: result.nextCursor,
+          loanShardsRead: result.loanShardsRead,
+          objectsExamined: result.objectsExamined,
+        })
+      } catch (error) {
+        return Response.json({
+          stage: 'list_current_loans',
+          status: 'error',
+          name: error instanceof Error ? error.name : typeof error,
+          message: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack ?? null : null,
+        }, { status: 500 })
+      }
     }
     if (request.method === 'GET' && url.pathname === '/api/status/catch-up-initialization') {
       const runtimeConfig = resolveRuntimeConfig(env)
