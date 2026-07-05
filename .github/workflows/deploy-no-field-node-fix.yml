@@ -1,0 +1,88 @@
+name: Deploy no-field ModifiedNode fix and verify
+
+on:
+  pull_request:
+    branches: [main]
+    paths: [.github/workflows/deploy-no-field-node-fix.yml]
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+jobs:
+  deploy-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+      - run: pnpm exec wrangler deploy
+
+      - name: Capture recovery samples
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p recovery-evidence
+          curl --fail-with-body --silent --show-error --retry 3 \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/subdomain" \
+            > recovery-evidence/subdomain.json
+          SUBDOMAIN="$(jq -r '.result.subdomain // empty' recovery-evidence/subdomain.json)"
+          test -n "${SUBDOMAIN}"
+          BASE="https://xrpl-lending-monitor.${SUBDOMAIN}.workers.dev"
+          printf '%s\n' "${BASE}" > recovery-evidence/base-url.txt
+
+          sleep 75
+          for I in 0 1 2; do
+            curl --fail-with-body --silent --show-error --retry 3 \
+              "${BASE}/api/status/collector" \
+              > "recovery-evidence/collector-${I}.json"
+            if [ "${I}" -lt 2 ]; then sleep 60; fi
+          done
+
+          jq -s '[.[] | {
+            status,
+            cursor: .cursor.last_processed_ledger,
+            head: .cursor.latest_observed_ledger,
+            lag: .cursor.lag_ledgers,
+            consecutive_failures,
+            error,
+            ledgers_processed: .usage.ledgers_processed,
+            run_duration_ms: .timing.run_duration_ms
+          }]' recovery-evidence/collector-*.json \
+            > recovery-evidence/series.json
+
+          jq '{
+            first: .[0],
+            last: .[-1],
+            cursor_delta: (.[-1].cursor - .[0].cursor),
+            lag_delta: (.[-1].lag - .[0].lag),
+            failures: ([.[] | select(.consecutive_failures > 0 or .error != null)] | length)
+          }' recovery-evidence/series.json \
+            > recovery-evidence/summary.json
+
+          jq -e '.cursor_delta > 0 and .failures == 0' recovery-evidence/summary.json > /dev/null
+
+          curl --fail-with-body --silent --show-error --retry 3 \
+            "${BASE}/api/status/continuation-diagnostics" \
+            > recovery-evidence/continuation-diagnostics.json
+          curl --fail-with-body --silent --show-error --retry 3 \
+            "${BASE}/api/status/m1-exit-diagnostics" \
+            > recovery-evidence/m1-exit-diagnostics.json
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: no-field-node-recovery-evidence
+          path: recovery-evidence
+          if-no-files-found: error
+          retention-days: 7
