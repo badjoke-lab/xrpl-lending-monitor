@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Resolve Worker URL and run read-only HYB-6 dry-run
+      - name: Resolve Worker URL and capture read-only runtime status
         shell: bash
         run: |
           set -euo pipefail
@@ -42,11 +42,14 @@ jobs:
             exit 0
           fi
 
-          URL="https://xrpl-lending-monitor.${SUBDOMAIN}.workers.dev/api/status/catch-up-initialization"
-          printf '%s\n' "${URL}" > hyb6-live-dry-run/endpoint.txt
+          BASE="https://xrpl-lending-monitor.${SUBDOMAIN}.workers.dev"
+          printf '%s\n' "${BASE}" > hyb6-live-dry-run/base-url.txt
 
-          HTTP_STATUS="$(curl -sS -o hyb6-live-dry-run/response.json -w '%{http_code}' "${URL}" || true)"
-          printf '%s\n' "${HTTP_STATUS}" > hyb6-live-dry-run/http-status.txt
+          for NAME in catch-up-initialization collector continuation-verification m1-exit; do
+            URL="${BASE}/api/status/${NAME}"
+            STATUS="$(curl -sS -o "hyb6-live-dry-run/${NAME}.json" -w '%{http_code}' "${URL}" || true)"
+            printf '%s\n' "${STATUS}" > "hyb6-live-dry-run/${NAME}.http-status.txt"
+          done
 
       - uses: actions/upload-artifact@v4
         with:
