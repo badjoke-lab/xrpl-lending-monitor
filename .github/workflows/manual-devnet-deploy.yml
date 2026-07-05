@@ -61,21 +61,44 @@ jobs:
           pnpm exec wrangler d1 migrations list xrpl-lending-monitor --remote \
             | tee devnet-preflight/migrations.txt
 
-          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote \
-            --command "SELECT epoch_id, last_processed_ledger, last_processed_hash, latest_observed_ledger, latest_observed_hash, status, last_success_at FROM sync_state WHERE network = 'devnet';" \
-            | tee devnet-preflight/sync-state.txt
+          inspect_table() {
+            table="$1"
+            output="$2"
+            query="$3"
 
-          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote \
-            --command "SELECT id, status, first_ledger_index, first_ledger_hash, last_ledger_index, last_ledger_hash FROM network_epochs WHERE network = 'devnet' ORDER BY created_at DESC LIMIT 10;" \
-            | tee devnet-preflight/network-epochs.txt
+            presence="$(pnpm exec wrangler d1 execute xrpl-lending-monitor --remote \
+              --command "SELECT COUNT(*) AS table_count FROM sqlite_master WHERE type = 'table' AND name = '$table';")"
+            printf '%s\n' "$presence" > "devnet-preflight/${output}-presence.txt"
 
-          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote \
-            --command "SELECT epoch_id, base_snapshot_id, base_ledger_index, base_ledger_hash, overlay_ledger_index, overlay_ledger_hash, updated_at FROM current_state_overlay_state WHERE network = 'devnet' ORDER BY updated_at DESC LIMIT 10;" \
-            | tee devnet-preflight/overlay-state.txt
+            if printf '%s\n' "$presence" | grep -Eq '"table_count"[[:space:]]*:[[:space:]]*1'; then
+              pnpm exec wrangler d1 execute xrpl-lending-monitor --remote \
+                --command "$query" \
+                | tee "devnet-preflight/${output}.txt"
+            else
+              printf 'table_missing: %s\n' "$table" \
+                | tee "devnet-preflight/${output}.txt"
+            fi
+          }
 
-          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote \
-            --command "SELECT COUNT(*) AS processed_ledger_count, MIN(ledger_index) AS minimum_ledger, MAX(ledger_index) AS maximum_ledger FROM processed_ledgers WHERE network = 'devnet';" \
-            | tee devnet-preflight/processed-ledgers.txt
+          inspect_table \
+            "sync_state" \
+            "sync-state" \
+            "SELECT epoch_id, last_processed_ledger, last_processed_hash, latest_observed_ledger, latest_observed_hash, status, last_success_at FROM sync_state WHERE network = 'devnet';"
+
+          inspect_table \
+            "network_epochs" \
+            "network-epochs" \
+            "SELECT id, status, first_ledger_index, first_ledger_hash, last_ledger_index, last_ledger_hash FROM network_epochs WHERE network = 'devnet' ORDER BY created_at DESC LIMIT 10;"
+
+          inspect_table \
+            "current_state_overlay_state" \
+            "overlay-state" \
+            "SELECT epoch_id, base_snapshot_id, base_ledger_index, base_ledger_hash, overlay_ledger_index, overlay_ledger_hash, updated_at FROM current_state_overlay_state WHERE network = 'devnet' ORDER BY updated_at DESC LIMIT 10;"
+
+          inspect_table \
+            "processed_ledgers" \
+            "processed-ledgers" \
+            "SELECT COUNT(*) AS processed_ledger_count, MIN(ledger_index) AS minimum_ledger, MAX(ledger_index) AS maximum_ledger FROM processed_ledgers WHERE network = 'devnet';"
       - name: Upload remote preflight evidence
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
