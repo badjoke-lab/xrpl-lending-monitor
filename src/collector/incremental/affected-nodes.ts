@@ -186,6 +186,13 @@ function fieldsFor(action: AffectedNodeAction, body: Record<string, unknown>): {
     const before = requiredRecord(body.FinalFields, 'FinalFields')
     return { before, after: {}, fieldNames: Object.keys(before) }
   }
+
+  const previousAvailable = body.PreviousFields !== undefined && body.PreviousFields !== null
+  const finalAvailable = body.FinalFields !== undefined && body.FinalFields !== null
+  if (!previousAvailable && !finalAvailable) {
+    return { before: {}, after: {}, fieldNames: [] }
+  }
+
   const previous = requiredRecord(body.PreviousFields, 'PreviousFields')
   const final = requiredRecord(body.FinalFields, 'FinalFields')
   return { before: previous, after: final, fieldNames: Object.keys(previous) }
