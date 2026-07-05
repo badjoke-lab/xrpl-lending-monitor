@@ -83,7 +83,7 @@ jobs:
           inspect_table \
             "sync_state" \
             "sync-state" \
-            "SELECT epoch_id, last_processed_ledger, last_processed_hash, latest_observed_ledger, latest_observed_hash, status, last_success_at FROM sync_state WHERE network = 'devnet';"
+            "SELECT epoch_id, last_processed_ledger, last_processed_hash, latest_observed_ledger, latest_observed_hash, latest_ledger_age_seconds, last_attempt_at, last_success_at, status, consecutive_failures, endpoint, error_code, error_message, created_at, updated_at FROM sync_state WHERE network = 'devnet';"
 
           inspect_table \
             "network_epochs" \
@@ -99,6 +99,42 @@ jobs:
             "processed_ledgers" \
             "processed-ledgers" \
             "SELECT COUNT(*) AS processed_ledger_count, MIN(ledger_index) AS minimum_ledger, MAX(ledger_index) AS maximum_ledger FROM processed_ledgers WHERE network = 'devnet';"
+      - name: Capture read-only runtime diagnostics
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p devnet-preflight
+
+          curl --silent --show-error \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --header "Content-Type: application/json" \
+            --write-out '\nhttp_status=%{http_code}\n' \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/xrpl-lending-monitor/schedules" \
+            > devnet-preflight/cloudflare-schedules.txt
+
+          rpc_probe() {
+            name="$1"
+            body="$2"
+            curl --silent --show-error \
+              --header "Content-Type: application/json" \
+              --request POST \
+              --data "$body" \
+              --write-out '\nhttp_status=%{http_code}\n' \
+              "https://s.devnet.rippletest.net:51234/" \
+              > "devnet-preflight/xrpl-${name}.txt"
+          }
+
+          rpc_probe \
+            "server-info" \
+            '{"method":"server_info","params":[{"counters":false,"api_version":2}]}'
+
+          rpc_probe \
+            "lending-feature" \
+            '{"method":"feature","params":[{"feature":"565B90CA1AB2B9D42208ED10884188C64F9E19083DECB9634AAF06EB03299509","api_version":2}]}'
+
+          rpc_probe \
+            "vault-feature" \
+            '{"method":"feature","params":[{"feature":"81BD2619B6B3C8625AC5D0BC01DE17F06C3F0AB95C7C87C93715B87A4FD240D8","api_version":2}]}'
       - name: Upload remote preflight evidence
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
