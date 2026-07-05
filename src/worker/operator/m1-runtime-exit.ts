@@ -1,5 +1,9 @@
 import { evaluateLiveContinuationEvidence } from '../../collector/incremental/live-continuation-verification'
-import { evaluateM1RuntimeExit } from '../../collector/incremental/m1-runtime-exit-gate'
+import {
+  evaluateM1RuntimeExit,
+  type M1RuntimeExitEvidence,
+  type M1RuntimeExitReport,
+} from '../../collector/incremental/m1-runtime-exit-gate'
 import type { RuntimeConfig } from '../../shared/runtime-config'
 import { readLiveContinuationEvidence } from '../repositories/live-continuation-verification'
 import { resolveCurrentStateStorage } from '../repositories/release-current-state'
@@ -11,10 +15,19 @@ interface BoundBaseRow {
   base_ledger_hash: string
 }
 
-export async function reviewM1RuntimeExit(options: {
+interface M1RuntimeExitOptions {
   db: D1Database
   config: RuntimeConfig
-}) {
+}
+
+export interface M1RuntimeExitDiagnostics {
+  evidence: M1RuntimeExitEvidence
+  report: M1RuntimeExitReport
+}
+
+async function readM1RuntimeExitEvidence(
+  options: M1RuntimeExitOptions,
+): Promise<M1RuntimeExitEvidence> {
   const [storage, liveEvidence, boundBase] = await Promise.all([
     resolveCurrentStateStorage(options.config, options.db),
     readLiveContinuationEvidence(options.db),
@@ -30,7 +43,7 @@ export async function reviewM1RuntimeExit(options: {
   const snapshot = storage.snapshot
   const continuation = evaluateLiveContinuationEvidence(liveEvidence)
 
-  return evaluateM1RuntimeExit({
+  return {
     expectedBase: {
       epochId: snapshot?.epochId ?? null,
       snapshotId: snapshot?.id ?? null,
@@ -46,5 +59,22 @@ export async function reviewM1RuntimeExit(options: {
     processedLedgers: liveEvidence.processedLedgers,
     cursor: liveEvidence.cursor,
     continuation,
-  })
+  }
+}
+
+export async function diagnoseM1RuntimeExit(
+  options: M1RuntimeExitOptions,
+): Promise<M1RuntimeExitDiagnostics> {
+  const evidence = await readM1RuntimeExitEvidence(options)
+  return {
+    evidence,
+    report: evaluateM1RuntimeExit(evidence),
+  }
+}
+
+export async function reviewM1RuntimeExit(
+  options: M1RuntimeExitOptions,
+): Promise<M1RuntimeExitReport> {
+  const diagnostics = await diagnoseM1RuntimeExit(options)
+  return diagnostics.report
 }
