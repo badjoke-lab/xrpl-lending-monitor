@@ -56,11 +56,11 @@ The verification endpoint is read-only. It does not create live evidence or infe
 
 ## Active unit
 
-HYB-6 production execution remains blocked on a verified remote execution path. HYB-7 verification tooling is ready for real evidence once catch-up starts.
+The remote Devnet deployment path and read-only D1 inspection path are verified. Worker network-status refresh is being hardened for the non-standard-port Devnet RPC path by serializing the snapshot RPC sequence and preserving the underlying socket failure message. Production catch-up remains blocked until a post-deploy run records a successful network snapshot.
 
 ## Next order
 
-1. Establish a verified remote deployment and D1 execution path.
+1. Deploy the serialized Devnet network-snapshot RPC fix and verify a successful remote status refresh.
 2. Inspect remote Devnet state and run the guarded handover dry-run.
 3. Execute the guarded handover only if remote evidence matches the initialization contract.
 4. Start bounded catch-up from ledger `3371676`.
@@ -70,7 +70,7 @@ HYB-6 production execution remains blocked on a verified remote execution path. 
 
 ## Remaining blockers
 
-- Remote migration and Worker deployment for the catch-up path are not yet verified.
+- Post-deploy successful Worker network-status refresh evidence is not yet recorded.
 - Production catch-up has not started.
 - Real HYB-7 live-path evidence is not yet complete.
 - M1 exit reconciliation evidence is incomplete.
