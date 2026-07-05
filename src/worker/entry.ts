@@ -6,7 +6,10 @@ import { resolveRuntimeConfig } from '../shared/runtime-config'
 import type { Bindings } from './env'
 import { app } from './index'
 import { initializeCatchUpFromVerifiedBase } from './operator/catch-up-initialization'
-import { verifyLiveContinuation } from './operator/live-continuation-verification'
+import {
+  diagnoseLiveContinuation,
+  verifyLiveContinuation,
+} from './operator/live-continuation-verification'
 import { reviewM1RuntimeExit } from './operator/m1-runtime-exit'
 import { getIncrementalCollectorState } from './repositories/incremental-collector-state'
 import { getSyncState } from './repositories/network-status-repository'
@@ -33,6 +36,12 @@ const worker: ExportedHandler<Bindings> = {
       && url.pathname === '/api/status/continuation-verification'
     ) {
       return Response.json(await verifyLiveContinuation(env.DB))
+    }
+    if (
+      request.method === 'GET'
+      && url.pathname === '/api/status/continuation-diagnostics'
+    ) {
+      return Response.json(await diagnoseLiveContinuation(env.DB))
     }
     if (request.method === 'GET' && url.pathname === '/api/status/catch-up-initialization') {
       const runtimeConfig = resolveRuntimeConfig(env)
