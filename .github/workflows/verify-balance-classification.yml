@@ -1,0 +1,48 @@
+name: Verify balance classification
+
+on:
+  pull_request:
+    branches: [main]
+    paths: [.github/workflows/verify-balance-classification.yml]
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+      - run: pnpm exec wrangler deploy
+      - name: Capture live classification
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          curl --fail-with-body --silent --show-error --retry 3 -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/subdomain" > evidence/subdomain.json
+          SUBDOMAIN="$(jq -r '.result.subdomain // empty' evidence/subdomain.json)"
+          BASE="https://xrpl-lending-monitor.${SUBDOMAIN}.workers.dev"
+          curl --fail-with-body --silent --show-error --retry 3 "$BASE/api/status/continuation-diagnostics" > evidence/continuation.json
+          curl --fail-with-body --silent --show-error --retry 3 "$BASE/api/status/m1-exit-diagnostics" > evidence/m1-exit.json
+          curl --fail-with-body --silent --show-error --retry 3 "$BASE/api/status/collector" > evidence/collector.json
+          jq -e '.balanceSource and .report.paths.activityHistoryBalance.state != "inconsistent"' evidence/continuation.json > /dev/null
+          jq -n --slurpfile c evidence/continuation.json --slurpfile m evidence/m1-exit.json --slurpfile s evidence/collector.json '{balance_source:$c[0].balanceSource,balance_history:$c[0].evidence.balanceHistory,activity_history_balance:$c[0].report.paths.activityHistoryBalance,loan_activity:$c[0].loanActivity,m1_gates:($m[0].report.gates|with_entries(.value=.value.state)),collector:{status:$s[0].status,cursor:$s[0].cursor.last_processed_ledger,head:$s[0].cursor.latest_observed_ledger,lag:$s[0].cursor.lag_ledgers,failures:$s[0].consecutive_failures,error:$s[0].error}}' > evidence/summary.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: balance-classification-evidence
+          path: evidence
+          if-no-files-found: error
+          retention-days: 7
