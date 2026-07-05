@@ -4,7 +4,7 @@ Last updated: 2026-07-05.
 
 ## Current phase
 
-M1 incremental continuation is active. HYB-3 through HYB-6 are integrated into `main`, the guarded verified-base handover has completed, and production catch-up is advancing contiguously from ledger `3371676`. The remote Worker network-status path is healthy and observing Devnet through the standard-port primary endpoint. M1-HYB-7 live continuation verification tooling is active and has already observed created-current, deletion/archive/tombstone, ledger-continuity, and cursor/overlay-agreement paths; other live paths remain incomplete. The active operational unit is bounded catch-up throughput tuning so the collector can reduce rather than accumulate lag while remaining inside the documented Worker, D1, RPC, row, statement, and execution-time guardrails. M5-5 and M6 remain gated behind M1 exit.
+M1 incremental continuation is active. HYB-3 through HYB-6 are integrated into `main`, the guarded verified-base handover has completed, and production catch-up is advancing contiguously from ledger `3371676`. The remote Worker network-status path is healthy and observing Devnet through the standard-port primary endpoint. M1-HYB-7 live continuation verification tooling is active and has already observed created-current, deletion/archive/tombstone, ledger-continuity, and cursor/overlay-agreement paths; other live paths remain incomplete. The active operational unit is bounded catch-up throughput tuning so the collector can reduce rather than accumulate lag while remaining inside Worker, D1, RPC, row, statement, and execution-time guardrails. A 48-ledger live benchmark exceeded the Worker invocation subrequest ceiling and was rejected without cursor advancement. The next calibration point is 40 ledgers per run with all other safety bounds preserved. M5-5 and M6 remain gated behind M1 exit.
 
 ## Verified base
 
@@ -43,7 +43,8 @@ The implemented path now includes:
 - healthy remote Devnet network-status refresh with the standard-port Devnet endpoint as primary and the Ripple non-standard-port endpoint retained as fallback;
 - a read-only HYB-6 initialization status endpoint that resolves the active verified base identity and runs the exact handover planner in dry-run mode without D1 mutation;
 - live normalization coverage for zero-omitted XRP Vault assets;
-- bounded row and statement budgets raised to accommodate observed valid live Vault create/delete ranges while preserving the other run limits.
+- bounded row and statement budgets raised to accommodate observed valid live Vault create/delete ranges while preserving the other run limits;
+- remote throughput benchmark evidence proving that a 48-ledger scheduled range exceeds the current Worker invocation subrequest ceiling and fails closed before cursor advancement.
 
 Mainnet remains disabled.
 
@@ -63,13 +64,13 @@ The verification endpoint is read-only. It does not create live evidence or infe
 
 ## Active unit
 
-HYB-6 production catch-up is running. The guarded handover is complete and now replays as a no-op guard before scheduled collection. The active unit is remote throughput calibration: increase bounded ledger and RPC caps, measure real run duration and lag slope over multiple scheduled cycles, and keep only a configuration that demonstrably reduces lag without violating row, statement, overlay, transaction, RPC, or execution-time limits.
+HYB-6 production catch-up is running, but the temporary 48-ledger calibration is not viable under the current Worker invocation subrequest ceiling. The guarded handover remains complete and replays as a no-op guard before scheduled collection. The active unit is remote throughput calibration at 40 ledgers per run: restore successful collection, measure cursor/head/lag slope over multiple scheduled cycles, and keep only a configuration that demonstrably reduces lag without violating subrequest, row, statement, overlay, transaction, RPC, or execution-time limits.
 
 ## Next order
 
-1. Deploy and benchmark the bounded 48-ledger catch-up configuration against live Devnet.
-2. Compare cursor advance, validated-head advance, lag slope, run duration, RPC usage, row/statement usage, and failures over multiple scheduled cycles.
-3. Keep, reduce, or increase the bounded throughput configuration based on measured live evidence rather than nominal limits.
+1. Deploy the bounded 40-ledger catch-up configuration and verify that scheduled runs recover from the 48-ledger subrequest failure.
+2. Measure cursor advance, validated-head advance, lag slope, run duration, RPC usage, row/statement usage, and failures over multiple scheduled cycles.
+3. Keep, reduce, or further tune the bounded throughput configuration based on measured live evidence rather than nominal limits.
 4. Continue contiguous catch-up until the cursor reaches the validated head without gap or parent-hash discontinuity.
 5. Collect and verify the remaining real modified-current, LoanPay, impairment, unimpairment, default, activity/lifecycle/balance, and freshness paths.
 6. Complete M1 exit review and reconciliation.
@@ -77,7 +78,7 @@ HYB-6 production catch-up is running. The guarded handover is complete and now r
 
 ## Remaining blockers
 
-- The current bounded catch-up configuration still requires live throughput evidence showing sustained negative lag slope.
+- The 40-ledger configuration still requires live evidence proving successful recovery and sustained negative lag slope.
 - The production cursor has not yet reached the validated head.
 - Real HYB-7 live-path evidence is incomplete for modified current objects, LoanPay, impairment, unimpairment, default, activity/lifecycle/balance consistency, and freshness.
 - M1 exit reconciliation evidence is incomplete.
