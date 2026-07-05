@@ -1,4 +1,4 @@
-name: Probe blocker ledger 3375750
+name: Probe blocker range from 3375750
 
 on:
   pull_request:
@@ -11,33 +11,53 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
-      - name: Fetch blocker ledger
+      - name: Fetch blocker range
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p probe-ledger-3375750
-          curl --fail-with-body --silent --show-error --retry 3 \
-            -H 'Content-Type: application/json' \
-            --data '{"method":"ledger","params":[{"ledger_index":3375750,"transactions":true,"expand":true,"owner_funds":false}]}' \
-            https://devnet.honeycluster.io/ \
-            > probe-ledger-3375750/ledger.json
+          mkdir -p probe-ledger-3375750/ledgers
 
-          jq '[.result.ledger.transactions[] | select(((.tx_json.TransactionType // .tx.TransactionType // .TransactionType // "") | test("^(Vault|LoanBroker|Loan)")))]' \
-            probe-ledger-3375750/ledger.json \
-            > probe-ledger-3375750/lending-transactions.json
+          for LEDGER in $(seq 3375750 3375789); do
+            curl --fail-with-body --silent --show-error --retry 3 \
+              -H 'Content-Type: application/json' \
+              --data "{\"method\":\"ledger\",\"params\":[{\"ledger_index\":${LEDGER},\"transactions\":true,\"expand\":true,\"owner_funds\":false}]}" \
+              https://devnet.honeycluster.io/ \
+              > "probe-ledger-3375750/ledgers/${LEDGER}.json"
+          done
 
-          jq '[.[] | {
+          jq -s '[.[] | .result.ledger as $ledger | $ledger.transactions[] | {
+            ledger_index: ($ledger.ledger_index // $ledger.seqNum),
             hash: (.hash // .tx_json.hash // .tx.hash),
             transaction_type: (.tx_json.TransactionType // .tx.TransactionType // .TransactionType),
-            affected_nodes: (.meta.AffectedNodes // .metaData.AffectedNodes // .meta_data.AffectedNodes)
-          }]' probe-ledger-3375750/lending-transactions.json \
-            > probe-ledger-3375750/lending-affected-nodes.json
+            meta: (.meta // .metaData // .meta_data)
+          }]' probe-ledger-3375750/ledgers/*.json \
+            > probe-ledger-3375750/transactions.json
 
-          jq -e 'length > 0' probe-ledger-3375750/lending-transactions.json > /dev/null
+          jq '[.[] | select((.transaction_type // "") | test("^(Vault|LoanBroker|Loan)"))]' \
+            probe-ledger-3375750/transactions.json \
+            > probe-ledger-3375750/lending-transactions.json
+
+          jq '[.[] as $tx | ($tx.meta.AffectedNodes // [])[] | select(.ModifiedNode != null) | {
+            ledger_index: $tx.ledger_index,
+            transaction_hash: $tx.hash,
+            transaction_type: $tx.transaction_type,
+            ledger_entry_type: .ModifiedNode.LedgerEntryType,
+            ledger_index_object: .ModifiedNode.LedgerIndex,
+            previous_fields_type: (.ModifiedNode.PreviousFields | type),
+            previous_fields: .ModifiedNode.PreviousFields,
+            final_fields_type: (.ModifiedNode.FinalFields | type),
+            final_fields: .ModifiedNode.FinalFields
+          }]' probe-ledger-3375750/lending-transactions.json \
+            > probe-ledger-3375750/modified-nodes.json
+
+          jq '[.[] | select(.previous_fields_type != "object")]' \
+            probe-ledger-3375750/modified-nodes.json \
+            > probe-ledger-3375750/suspect-modified-nodes.json
 
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: probe-ledger-3375750
           path: probe-ledger-3375750
