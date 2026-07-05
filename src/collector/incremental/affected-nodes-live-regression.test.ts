@@ -47,7 +47,30 @@ describe('live metadata regressions', () => {
     expect(changes.map((change) => change.fieldName)).toEqual(['Account', 'Asset', 'Owner'])
   })
 
-  it('still rejects one-sided malformed ModifiedNode field payloads', () => {
+  it('ignores a sparse non-lending ModifiedNode with FinalFields but no PreviousFields', () => {
+    const changes = normalizeAffectedNodes(
+      {
+        AffectedNodes: [
+          {
+            ModifiedNode: {
+              LedgerEntryType: 'DirectoryNode',
+              LedgerIndex: 'D'.repeat(64),
+              FinalFields: {
+                Flags: 0,
+                Owner: 'rDirectoryOwner',
+                RootIndex: 'D'.repeat(64),
+              },
+            },
+          },
+        ],
+      },
+      context,
+    )
+
+    expect(changes).toEqual([])
+  })
+
+  it('still rejects one-sided malformed lending ModifiedNode field payloads', () => {
     expect(() => normalizeAffectedNodes(
       {
         AffectedNodes: [
