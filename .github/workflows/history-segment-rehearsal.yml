@@ -21,21 +21,35 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build:history-segment
-      - name: Generate the same fixed range twice
+      - name: Generate first fixed range
         shell: bash
         run: |
-          set -euo pipefail
+          set -o pipefail
           mkdir -p rehearsal
-          COMMON_ARGS=(
-            --local
-            --start-ledger 3389181
-            --end-ledger 3389185
-            --epoch-id devnet-3371675
-            --segment-id rehearsal-3389181-3389185
-            --source-revision "$GITHUB_SHA"
-          )
-          node .history-segment-build/run-history-segment.mjs "${COMMON_ARGS[@]}" --output-dir rehearsal/a > rehearsal/a-manifest.stdout.json
-          node .history-segment-build/run-history-segment.mjs "${COMMON_ARGS[@]}" --output-dir rehearsal/b > rehearsal/b-manifest.stdout.json
+          node .history-segment-build/run-history-segment.mjs \
+            --local \
+            --start-ledger 3389181 \
+            --end-ledger 3389185 \
+            --epoch-id devnet-3371675 \
+            --segment-id rehearsal-3389181-3389185 \
+            --source-revision "$GITHUB_SHA" \
+            --output-dir rehearsal/a \
+            > rehearsal/a-manifest.stdout.json \
+            2> rehearsal/a-error.log
+      - name: Generate second fixed range
+        shell: bash
+        run: |
+          set -o pipefail
+          node .history-segment-build/run-history-segment.mjs \
+            --local \
+            --start-ledger 3389181 \
+            --end-ledger 3389185 \
+            --epoch-id devnet-3371675 \
+            --segment-id rehearsal-3389181-3389185 \
+            --source-revision "$GITHUB_SHA" \
+            --output-dir rehearsal/b \
+            > rehearsal/b-manifest.stdout.json \
+            2> rehearsal/b-error.log
       - name: Verify byte-identical replay
         shell: bash
         run: |
