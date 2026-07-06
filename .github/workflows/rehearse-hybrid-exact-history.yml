@@ -1,0 +1,112 @@
+name: Rehearse hybrid exact history
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/rehearse-hybrid-exact-history.yml'
+      - 'scripts/rehearse-history-exact-lookups.ts'
+      - 'scripts/build-history-exact-index.ts'
+      - 'scripts/build-history-segment-publication.ts'
+      - 'scripts/run-history-segment.ts'
+      - 'src/shared/history-segments/**'
+      - 'vite.history-exact-rehearsal.config.ts'
+      - 'package.json'
+
+jobs:
+  rehearse:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build history tools
+        run: |
+          pnpm history-segment:build
+          pnpm history-segment-publication:build
+          pnpm history-exact-index:build
+          pnpm history-exact-rehearsal:build
+      - name: Generate linked live segments
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=.local/exact-rehearsal
+          EPOCH=devnet-3371675
+          A_ID=rehearsal-3389181-3389185
+          B_ID=rehearsal-3389186-3389190
+          mkdir -p "$ROOT/history/$EPOCH"
+          node .history-segment-build/run-history-segment.mjs \
+            --local \
+            --start-ledger 3389181 \
+            --end-ledger 3389185 \
+            --epoch-id "$EPOCH" \
+            --segment-id "$A_ID" \
+            --output-dir "$ROOT/history/$EPOCH/$A_ID" \
+            --source-revision "$GITHUB_SHA"
+          PREVIOUS_HASH=$(node -e "const fs=require('fs'); const m=JSON.parse(fs.readFileSync('$ROOT/history/$EPOCH/$A_ID/manifest.json','utf8')); process.stdout.write(m.endLedgerHash)")
+          node .history-segment-build/run-history-segment.mjs \
+            --local \
+            --start-ledger 3389186 \
+            --end-ledger 3389190 \
+            --epoch-id "$EPOCH" \
+            --segment-id "$B_ID" \
+            --output-dir "$ROOT/history/$EPOCH/$B_ID" \
+            --source-revision "$GITHUB_SHA" \
+            --previous-segment-id "$A_ID" \
+            --previous-segment-end-hash "$PREVIOUS_HASH"
+      - name: Build publication and exact index
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=.local/exact-rehearsal
+          EPOCH=devnet-3371675
+          A_ID=rehearsal-3389181-3389185
+          B_ID=rehearsal-3389186-3389190
+          node .history-segment-publication-build/build-history-segment-publication.mjs \
+            --local \
+            --manifest "$ROOT/history/$EPOCH/$A_ID/manifest.json" \
+            --manifest "$ROOT/history/$EPOCH/$B_ID/manifest.json" \
+            --chain-id exact-rehearsal-3389181-3389190 \
+            --epoch-id "$EPOCH" \
+            --source-revision "$GITHUB_SHA" \
+            --output "$ROOT/history/publication.json"
+          node .history-exact-index-build/build-history-exact-index.mjs \
+            --local \
+            --publication "$ROOT/history/publication.json" \
+            --artifact-root "$ROOT" \
+            --output-dir "$ROOT/history/index/exact" \
+            --asset-prefix history/index/exact \
+            --bucket-count 16 \
+            --source-revision "$GITHUB_SHA"
+      - name: Rehearse exact lookup and targeted reads
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=.local/exact-rehearsal
+          EPOCH=devnet-3371675
+          A_ID=rehearsal-3389181-3389185
+          B_ID=rehearsal-3389186-3389190
+          TX_TERM=$(node -e "const fs=require('fs'),z=require('zlib'); const rows=z.gunzipSync(fs.readFileSync('$ROOT/history/$EPOCH/$A_ID/protocol-events.ndjson.gz')).toString().trim().split('\n'); process.stdout.write(JSON.parse(rows[0]).eventHash)")
+          OBJECT_TERM=$(node -e "const fs=require('fs'),z=require('zlib'); const rows=z.gunzipSync(fs.readFileSync('$ROOT/history/$EPOCH/$A_ID/object-changes.ndjson.gz')).toString().trim().split('\n'); process.stdout.write(JSON.parse(rows[0]).objectId)")
+          LOAN_TERM=$(node -e "const fs=require('fs'),z=require('zlib'); const rows=z.gunzipSync(fs.readFileSync('$ROOT/history/$EPOCH/$B_ID/loan-lifecycle.ndjson.gz')).toString().trim().split('\n'); process.stdout.write(JSON.parse(rows[0]).loanId)")
+          node .history-exact-rehearsal-build/rehearse-history-exact-lookups.mjs \
+            --local \
+            --publication "$ROOT/history/publication.json" \
+            --exact-index-manifest "$ROOT/history/index/exact/manifest.json" \
+            --artifact-root "$ROOT" \
+            --term "$TX_TERM" \
+            --term "$OBJECT_TERM" \
+            --term "$LOAN_TERM" \
+            | tee "$ROOT/rehearsal-summary.json"
+          node -e "const fs=require('fs'); const s=JSON.parse(fs.readFileSync('$ROOT/rehearsal-summary.json','utf8')); if(!s.passed || s.termCount!==3 || s.terms.some(t=>t.referenceCount<1 || t.matchedRecords<1)) process.exit(1)"
+      - name: Upload rehearsal evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: hybrid-exact-history-rehearsal-evidence
+          path: .local/exact-rehearsal
+          if-no-files-found: error
