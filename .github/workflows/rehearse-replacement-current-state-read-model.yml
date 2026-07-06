@@ -62,8 +62,9 @@ jobs:
       - name: Rehearse Stage A replacement read model
         shell: bash
         run: |
-          set -euo pipefail
+          set -uo pipefail
           STARTED=$(date +%s)
+          set +e
           node .replacement-current-state-read-model-build/build-replacement-current-state-read-model.mjs \
             --local \
             --input-dir .local/current-state-release/assets \
@@ -72,9 +73,14 @@ jobs:
             --output-dir .local/replacement-stage-a \
             --page-size 50 \
             --lookup-prefix-length 3 \
-            > .local/replacement-stage-a-output.json
+            > .local/replacement-stage-a-output.json \
+            2> .local/replacement-stage-a-error.log
+          STATUS=$?
+          set -e
           ELAPSED=$(( $(date +%s) - STARTED ))
           echo "$ELAPSED" > .local/replacement-stage-a-elapsed-seconds.txt
+          cat .local/replacement-stage-a-error.log >&2
+          exit "$STATUS"
 
       - name: Verify replacement output
         shell: bash
@@ -106,6 +112,9 @@ jobs:
           name: replacement-current-state-stage-a-evidence
           path: |
             .local/replacement-stage-a-evidence.json
+            .local/replacement-stage-a-output.json
+            .local/replacement-stage-a-error.log
+            .local/replacement-stage-a-elapsed-seconds.txt
             .local/replacement-stage-a/replacement-read-model-summary.json
             .local/replacement-stage-a/read-model/manifest.json
           if-no-files-found: warn
