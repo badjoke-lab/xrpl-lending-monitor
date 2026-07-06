@@ -71,6 +71,20 @@ describe('readReferenced', () => {
     expect(result.recordsExamined).toBe(2)
   })
 
+  it('reports only assets actually read before an early limit return', async () => {
+    const reader = await makeReader()
+    const result = await reader.readReferenced<{ transactionHash: string }>({
+      references: [
+        { segmentId: 's', fileKind: 'object_changes', ledgerIndex: 104 },
+        { segmentId: 's', fileKind: 'protocol_events', ledgerIndex: 104 },
+      ],
+      predicate: (row) => row.transactionHash === 'TX1',
+      limit: 1,
+    })
+    expect(result.items).toHaveLength(1)
+    expect(result.assetReads).toBe(1)
+  })
+
   it('rejects unpublished and out-of-range references', async () => {
     const reader = await makeReader()
     await expect(reader.readReferenced({ references: [{ segmentId: 'missing', fileKind: 'object_changes' }] })).rejects.toThrow('not published')
