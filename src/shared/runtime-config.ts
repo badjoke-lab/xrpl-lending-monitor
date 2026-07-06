@@ -11,6 +11,11 @@ export interface RuntimeEnvironment {
   CURRENT_STATE_RELEASE_CHANNEL_TAG?: string
   CURRENT_STATE_MAX_ASSET_BYTES?: string
   CURRENT_STATE_MAX_DECOMPRESSED_BYTES?: string
+  HISTORY_GITHUB_REPOSITORY?: string
+  HISTORY_GITHUB_BRANCH?: string
+  HISTORY_CHANNEL_PATH?: string
+  HISTORY_MAX_ASSET_BYTES?: string
+  HISTORY_FETCH_TIMEOUT_MS?: string
 }
 
 export interface CurrentStateRuntimeConfig {
@@ -20,6 +25,14 @@ export interface CurrentStateRuntimeConfig {
   maxDecompressedBytes: number
 }
 
+export interface HistoryRuntimeConfig {
+  githubRepository: string | null
+  githubBranch: string
+  channelPath: string
+  maxAssetBytes: number
+  fetchTimeoutMs: number
+}
+
 export interface RuntimeConfig {
   network: AppNetwork
   mainnetEnabled: false
@@ -27,6 +40,7 @@ export interface RuntimeConfig {
   rpcTimeoutMs: number
   staleAfterSeconds: number
   currentState: CurrentStateRuntimeConfig
+  history: HistoryRuntimeConfig
 }
 
 function parsePositiveInteger(value: string | undefined, fallback: number, name: string): number {
@@ -48,11 +62,11 @@ function parseHttpsUrl(value: string, name: string): string {
   return url.toString()
 }
 
-function parseGithubRepository(value: string | undefined): string | null {
+function parseGithubRepository(value: string | undefined, name: string): string | null {
   const normalized = value?.trim()
   if (!normalized) return null
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(normalized)) {
-    throw new Error('CURRENT_STATE_GITHUB_REPOSITORY must be owner/name')
+    throw new Error(`${name} must be owner/name`)
   }
   return normalized
 }
@@ -62,6 +76,25 @@ function parseReleaseChannelTag(value: string | undefined): string {
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(normalized)) {
     throw new Error('CURRENT_STATE_RELEASE_CHANNEL_TAG must be a flat release tag')
   }
+  return normalized
+}
+
+function parseBranch(value: string | undefined): string {
+  const normalized = value?.trim() || 'history-data'
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(normalized)) {
+    throw new Error('HISTORY_GITHUB_BRANCH is invalid')
+  }
+  return normalized
+}
+
+function parseRelativePath(value: string | undefined): string {
+  const normalized = value?.trim() || 'history-channel.json'
+  if (
+    normalized.startsWith('/')
+    || normalized.includes('\\')
+    || normalized.split('/').some((part) => part === '' || part === '.' || part === '..')
+    || !/^[A-Za-z0-9._/-]+$/.test(normalized)
+  ) throw new Error('HISTORY_CHANNEL_PATH must be a safe relative path')
   return normalized
 }
 
@@ -96,7 +129,10 @@ export function resolveRuntimeConfig(env: RuntimeEnvironment): RuntimeConfig {
       'NETWORK_STATUS_STALE_AFTER_SECONDS',
     ),
     currentState: {
-      githubRepository: parseGithubRepository(env.CURRENT_STATE_GITHUB_REPOSITORY),
+      githubRepository: parseGithubRepository(
+        env.CURRENT_STATE_GITHUB_REPOSITORY,
+        'CURRENT_STATE_GITHUB_REPOSITORY',
+      ),
       releaseChannelTag: parseReleaseChannelTag(env.CURRENT_STATE_RELEASE_CHANNEL_TAG),
       maxAssetBytes: parsePositiveInteger(
         env.CURRENT_STATE_MAX_ASSET_BYTES,
@@ -107,6 +143,24 @@ export function resolveRuntimeConfig(env: RuntimeEnvironment): RuntimeConfig {
         env.CURRENT_STATE_MAX_DECOMPRESSED_BYTES,
         16 * 1024 * 1024,
         'CURRENT_STATE_MAX_DECOMPRESSED_BYTES',
+      ),
+    },
+    history: {
+      githubRepository: parseGithubRepository(
+        env.HISTORY_GITHUB_REPOSITORY,
+        'HISTORY_GITHUB_REPOSITORY',
+      ),
+      githubBranch: parseBranch(env.HISTORY_GITHUB_BRANCH),
+      channelPath: parseRelativePath(env.HISTORY_CHANNEL_PATH),
+      maxAssetBytes: parsePositiveInteger(
+        env.HISTORY_MAX_ASSET_BYTES,
+        32 * 1024 * 1024,
+        'HISTORY_MAX_ASSET_BYTES',
+      ),
+      fetchTimeoutMs: parsePositiveInteger(
+        env.HISTORY_FETCH_TIMEOUT_MS,
+        8_000,
+        'HISTORY_FETCH_TIMEOUT_MS',
       ),
     },
   }
