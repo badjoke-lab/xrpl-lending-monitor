@@ -1,7 +1,6 @@
 import { runIncrementalCollectorCycle } from '../collector/incremental/collector-cycle'
 import { refreshNetworkStatus } from '../collector/network/refresh-network-status'
 import { resolveCatchUpRuntimeConfig } from '../shared/catch-up-runtime-config'
-import { GithubCurrentStateReadModelReader } from '../shared/current-state/github-read-model-reader'
 import { resolveIncrementalRuntimeConfig } from '../shared/incremental-runtime-config'
 import { resolveReplacementBaseRuntimeConfig } from '../shared/replacement-base-runtime-config'
 import { resolveRuntimeConfig } from '../shared/runtime-config'
@@ -59,21 +58,12 @@ const worker: ExportedHandler<Bindings> = {
       return Response.json({ base, ...result })
     }
     if (request.method === 'GET' && url.pathname === '/api/status/replacement-base-rebase') {
-      const runtimeConfig = resolveRuntimeConfig(env)
-      if (!runtimeConfig.currentState.githubRepository) {
-        return Response.json({ status: 'unavailable', reason: 'current_state_repository_unconfigured' }, { status: 503 })
+      const replacementBaseConfig = resolveReplacementBaseRuntimeConfig(env)
+      if (!replacementBaseConfig.target) {
+        return Response.json({ status: 'unavailable', reason: 'replacement_base_target_unconfigured' }, { status: 503 })
       }
       try {
-        const candidate = await GithubCurrentStateReadModelReader.open({
-          githubRepository: runtimeConfig.currentState.githubRepository,
-          githubBranch: 'current-state-candidate-data',
-        })
-        const target = {
-          epochId: candidate.manifest.epochId,
-          snapshotId: candidate.manifest.snapshotId,
-          ledgerIndex: candidate.manifest.ledgerIndex,
-          ledgerHash: candidate.manifest.ledgerHash,
-        }
+        const target = replacementBaseConfig.target
         const result = await rebaseToReplacementBase({
           db: env.DB,
           target,
@@ -89,12 +79,20 @@ const worker: ExportedHandler<Bindings> = {
       }
     }
     if (request.method === 'GET' && url.pathname === '/api/status/m1-exit') {
+      const replacementBaseConfig = resolveReplacementBaseRuntimeConfig(env)
       const catchUpConfig = resolveCatchUpRuntimeConfig(env)
-      return Response.json(await reviewM1RuntimeExit({ db: env.DB, expectedBase: catchUpConfig.base }))
+      return Response.json(await reviewM1RuntimeExit({
+        db: env.DB,
+        expectedBase: replacementBaseConfig.target ?? catchUpConfig.base,
+      }))
     }
     if (request.method === 'GET' && url.pathname === '/api/status/m1-exit-diagnostics') {
+      const replacementBaseConfig = resolveReplacementBaseRuntimeConfig(env)
       const catchUpConfig = resolveCatchUpRuntimeConfig(env)
-      return Response.json(await diagnoseM1RuntimeExit({ db: env.DB, expectedBase: catchUpConfig.base }))
+      return Response.json(await diagnoseM1RuntimeExit({
+        db: env.DB,
+        expectedBase: replacementBaseConfig.target ?? catchUpConfig.base,
+      }))
     }
     const hybridExactHistory = await handleHybridExactHistoryOverride(request, env)
     if (hybridExactHistory) return hybridExactHistory
