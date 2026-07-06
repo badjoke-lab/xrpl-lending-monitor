@@ -8,7 +8,7 @@ M1 incremental continuation is active. HYB-3 through HYB-6 are integrated into `
 
 Two live `ModifiedNode` metadata blockers have been reproduced from Devnet and fixed without weakening validation for known lending objects. M1 exit diagnostics now use the configured catch-up base identity as the authoritative expected base, independently compare it with the active D1 overlay binding, and have been verified live. Permanent read-only runtime monitoring samples collector progress, raw HYB-7 evidence counts and drilldown, HYB-7 path states, M1 exit evidence/gates, and handover replay state every 30 minutes. M5-5 and M6 remain gated behind M1 exit.
 
-Dense-range live benchmarks showed that increasing D1 collector budgets can restore negative lag slope, but sustained dense historical catch-up would exceed the Free D1 write envelope. The active architecture therefore separates dense historical backfill into deterministic immutable history segments while preserving D1 for bounded live continuation. The segment manifest/continuity contract and collector-semantic record builder are integrated. A bounded fixed-range segment runner has passed a live deterministic replay rehearsal over Devnet ledgers `3389181` through `3389185`, producing byte-identical files and manifest across two independent generations. Multi-segment chain verification is now implemented and under CI review.
+Dense-range live benchmarks showed that increasing D1 collector budgets can restore negative lag slope, but sustained dense historical catch-up would exceed the Free D1 write envelope. The active architecture therefore separates dense historical backfill into deterministic immutable history segments while preserving D1 for bounded live continuation. The segment manifest/continuity contract, collector-semantic record builder, fixed-range segment runner, and ordered multi-segment chain verifier are integrated into `main`. A bounded fixed-range segment runner has passed a live deterministic replay rehearsal over Devnet ledgers `3389181` through `3389185`, producing byte-identical files and manifest across two independent generations. Segment-level checkpoint/resume state and its atomic update CLI are now under CI review.
 
 ## Verified base
 
@@ -69,7 +69,9 @@ The implemented path now includes:
 - a pure history-segment record builder that reuses the existing AffectedNodes, lifecycle, archive, balance-history, and current-projection derivations;
 - a bounded fixed-range segment runner with deterministic canonical JSON, deterministic gzip, SHA-256 file digests, and validated manifest output;
 - live byte-identical replay evidence for Devnet ledgers `3389181` through `3389185`;
-- an ordered chain verifier that validates every manifest, rejects duplicate segment IDs, enforces the expected start anchor, checks every adjacent ledger/hash link, and optionally binds the exact terminal ledger identity.
+- an ordered chain verifier that validates every manifest, rejects duplicate segment IDs, enforces the expected start anchor, checks every adjacent ledger/hash link, and optionally binds the exact terminal ledger identity;
+- segment-level checkpoint/resume state that advances only after complete validated segment manifests;
+- atomic local checkpoint updates through temporary-file write and rename, with invocation, range, epoch, predecessor, digest, and coverage validation.
 
 Mainnet remains disabled.
 
@@ -143,25 +145,24 @@ The verification and diagnostics endpoints are read-only. They do not create liv
 
 HYB-6 live continuation remains bounded at the 40-ledger maximum configuration, while dense historical catch-up is being moved out of the D1 row-by-row path. The guarded handover remains complete and replays as a no-op guard before scheduled collection. Permanent runtime monitoring continues to sample progress, HYB-7 diagnostics, and raw M1 exit evidence every 30 minutes.
 
-The active implementation unit is multi-segment chain verification, bounded checkpoint/resume support, and rehearsal of adjacent segment linkage before any canonical dense backfill publication or replacement-base handover.
+The active implementation unit is bounded checkpoint/resume support and rehearsal of adjacent segment linkage before any canonical dense backfill publication or replacement-base handover.
 
 ## Next order
 
-1. Merge the multi-segment chain verifier after CI review.
-2. Add bounded checkpoint and resume state for fixed historical ranges.
-3. Rehearse two adjacent non-canonical Devnet segments and require exact linkage plus deterministic replay.
-4. Add publication metadata and bounded readers without changing existing public API semantics.
-5. Backfill the dense historical gap into verified immutable segments.
-6. Build and independently verify a replacement current-state base near the verified segment-chain end.
-7. Execute guarded replacement-base handover and resume bounded D1 live continuation.
-8. Re-evaluate HYB-7 diagnostics at the validated head and resolve only genuinely missing paths.
-9. Complete M1 exit review and reconciliation, then M5-5 and M6 hardening.
+1. Merge segment checkpoint/resume support after CI review.
+2. Rehearse two adjacent non-canonical Devnet segments with checkpoint advancement and require exact linkage plus deterministic replay.
+3. Add publication metadata and bounded readers without changing existing public API semantics.
+4. Backfill the dense historical gap into verified immutable segments.
+5. Build and independently verify a replacement current-state base near the verified segment-chain end.
+6. Execute guarded replacement-base handover and resume bounded D1 live continuation.
+7. Re-evaluate HYB-7 diagnostics at the validated head and resolve only genuinely missing paths.
+8. Complete M1 exit review and reconciliation, then M5-5 and M6 hardening.
 
 ## Remaining blockers
 
 - The production cursor has not yet reached the validated head.
 - Dense historical catch-up is not yet covered by a verified published segment chain.
-- Checkpoint/resume and multi-segment rehearsal are not yet complete.
+- Adjacent multi-segment rehearsal is not yet complete.
 - Real HYB-7 live-path evidence is incomplete for LoanPay, impairment, unimpairment, default, activity/lifecycle/balance consistency, and freshness.
 - M1 exit remains incomplete until validated-head reach and all required live continuation paths are observed and consistent.
 - M5-5 and M6 remain incomplete.
