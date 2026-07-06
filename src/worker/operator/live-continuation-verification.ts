@@ -21,10 +21,6 @@ import {
   readManagedTransitionSourceDiagnostics,
   type ManagedTransitionSourceDiagnostics,
 } from '../repositories/managed-transition-source-diagnostics'
-import {
-  readManagedTransitionSourceDiagnostics,
-  type ManagedTransitionSourceDiagnostics,
-} from '../repositories/managed-transition-source-diagnostics'
 
 function activityHistoryBalancePath(options: {
   evidence: LiveContinuationEvidence
@@ -67,6 +63,29 @@ function activityHistoryBalancePath(options: {
   }
 }
 
+function managedTransitionPath(
+  sourceCount: number,
+  lifecycleCount: number,
+  label: string,
+): VerificationPath {
+  if (sourceCount === 0 && lifecycleCount === 0) {
+    return {
+      state: 'missing',
+      reason: `${label} source transition and lifecycle evidence not yet observed`,
+    }
+  }
+  if (sourceCount === 0 || lifecycleCount === 0) {
+    return {
+      state: 'inconsistent',
+      reason: `${label} source transition and lifecycle evidence disagree`,
+    }
+  }
+  return {
+    state: 'observed',
+    reason: `${label} source transition and lifecycle evidence observed`,
+  }
+}
+
 export function evaluateLiveContinuationForRuntime(
   evidence: LiveContinuationEvidence,
   loanActivity: LoanActivityDiagnostics,
@@ -74,16 +93,17 @@ export function evaluateLiveContinuationForRuntime(
   managedTransitions?: ManagedTransitionSourceDiagnostics,
 ): LiveContinuationVerificationReport {
   const report = evaluateLiveContinuationEvidence(evidence)
-  const managedPath = (source: number, lifecycle: number, label: string): VerificationPath => {
-    if (source == 0 && lifecycle == 0) return { state: 'missing', reason: `${label} source transition and lifecycle evidence not yet observed` }
-    if (source == 0 || lifecycle == 0) return { state: 'inconsistent', reason: `${label} source transition and lifecycle evidence disagree` }
-    return { state: 'observed', reason: `${label} source transition and lifecycle evidence observed` }
-  }
   const paths = {
     ...report.paths,
-    impaired: managedTransitions ? managedPath(managedTransitions.impaired, evidence.lifecycle.impaired, 'impaired') : report.paths.impaired,
-    unimpaired: managedTransitions ? managedPath(managedTransitions.unimpaired, evidence.lifecycle.unimpaired, 'unimpaired') : report.paths.unimpaired,
-    defaulted: managedTransitions ? managedPath(managedTransitions.defaulted, evidence.lifecycle.defaulted, 'defaulted') : report.paths.defaulted,
+    impaired: managedTransitions
+      ? managedTransitionPath(managedTransitions.impaired, evidence.lifecycle.impaired, 'impaired')
+      : report.paths.impaired,
+    unimpaired: managedTransitions
+      ? managedTransitionPath(managedTransitions.unimpaired, evidence.lifecycle.unimpaired, 'unimpaired')
+      : report.paths.unimpaired,
+    defaulted: managedTransitions
+      ? managedTransitionPath(managedTransitions.defaulted, evidence.lifecycle.defaulted, 'defaulted')
+      : report.paths.defaulted,
     activityHistoryBalance: activityHistoryBalancePath({ evidence, loanActivity, balanceSource }),
   }
   return {
@@ -101,7 +121,12 @@ export async function verifyLiveContinuation(
     readBalanceHistorySourceDiagnostics(db),
     readManagedTransitionSourceDiagnostics(db),
   ])
-  return evaluateLiveContinuationForRuntime(evidence, loanActivity, balanceSource, managedTransitions)
+  return evaluateLiveContinuationForRuntime(
+    evidence,
+    loanActivity,
+    balanceSource,
+    managedTransitions,
+  )
 }
 
 export interface LiveContinuationDiagnostics {
@@ -125,7 +150,12 @@ export async function diagnoseLiveContinuation(
   ])
   return {
     evidence,
-    report: evaluateLiveContinuationForRuntime(evidence, loanActivity, balanceSource, managedTransitions),
+    report: evaluateLiveContinuationForRuntime(
+      evidence,
+      loanActivity,
+      balanceSource,
+      managedTransitions,
+    ),
     drilldown,
     loanActivity,
     balanceSource,
