@@ -22,7 +22,7 @@ function parseBoolean(value: string | undefined, fallback: boolean, name: string
 
 function required(value: string | undefined, name: string): string {
   const normalized = value?.trim()
-  if (!normalized) throw new Error(`${name} is required when replacement-base rebase is enabled`)
+  if (!normalized) throw new Error(`${name} is required when a replacement base target is configured`)
   return normalized
 }
 
@@ -35,7 +35,14 @@ export function resolveReplacementBaseRuntimeConfig(
     'REPLACEMENT_BASE_REBASE_ENABLED',
   )
 
-  if (!rebaseEnabled) return { rebaseEnabled: false, target: null }
+  const targetFields = [
+    env.REPLACEMENT_BASE_EPOCH_ID,
+    env.REPLACEMENT_BASE_SNAPSHOT_ID,
+    env.REPLACEMENT_BASE_LEDGER_INDEX,
+    env.REPLACEMENT_BASE_LEDGER_HASH,
+  ]
+  const hasTargetField = targetFields.some((value) => Boolean(value?.trim()))
+  if (!rebaseEnabled && !hasTargetField) return { rebaseEnabled: false, target: null }
 
   const ledgerIndexText = required(
     env.REPLACEMENT_BASE_LEDGER_INDEX,
@@ -55,7 +62,7 @@ export function resolveReplacementBaseRuntimeConfig(
   }
 
   return {
-    rebaseEnabled: true,
+    rebaseEnabled,
     target: {
       epochId: required(env.REPLACEMENT_BASE_EPOCH_ID, 'REPLACEMENT_BASE_EPOCH_ID'),
       snapshotId: required(env.REPLACEMENT_BASE_SNAPSHOT_ID, 'REPLACEMENT_BASE_SNAPSHOT_ID'),

@@ -9,29 +9,42 @@ const targetEnv = {
   REPLACEMENT_BASE_LEDGER_HASH: '52C13CBFFC3433750DBBB986390C4C6E6F7CC82CF70B4B909C506536A8BD9218',
 }
 
+const target = {
+  epochId: 'devnet-3371675',
+  snapshotId: 'devnet-3432924-canonical',
+  ledgerIndex: 3432924,
+  ledgerHash: '52C13CBFFC3433750DBBB986390C4C6E6F7CC82CF70B4B909C506536A8BD9218',
+}
+
 describe('replacement-base runtime config', () => {
-  it('defaults rebase to disabled', () => {
+  it('defaults rebase to disabled with no target', () => {
     expect(resolveReplacementBaseRuntimeConfig({})).toEqual({
       rebaseEnabled: false,
       target: null,
     })
   })
 
-  it('resolves the enabled replacement target identity', () => {
+  it('resolves an enabled replacement target identity', () => {
     expect(resolveReplacementBaseRuntimeConfig(targetEnv)).toEqual({
       rebaseEnabled: true,
-      target: {
-        epochId: 'devnet-3371675',
-        snapshotId: 'devnet-3432924-canonical',
-        ledgerIndex: 3432924,
-        ledgerHash: '52C13CBFFC3433750DBBB986390C4C6E6F7CC82CF70B4B909C506536A8BD9218',
-      },
+      target,
     })
   })
 
-  it('rejects enabled rebase without a complete target identity', () => {
+  it('resolves a disabled target for read-only dry-run planning', () => {
+    expect(resolveReplacementBaseRuntimeConfig({
+      ...targetEnv,
+      REPLACEMENT_BASE_REBASE_ENABLED: 'false',
+    })).toEqual({
+      rebaseEnabled: false,
+      target,
+    })
+  })
+
+  it('rejects an incomplete target identity', () => {
     expect(() => resolveReplacementBaseRuntimeConfig({
-      REPLACEMENT_BASE_REBASE_ENABLED: 'true',
+      REPLACEMENT_BASE_REBASE_ENABLED: 'false',
+      REPLACEMENT_BASE_EPOCH_ID: 'devnet-3371675',
     })).toThrow('REPLACEMENT_BASE_LEDGER_INDEX is required')
   })
 
