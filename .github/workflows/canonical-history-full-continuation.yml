@@ -1,0 +1,293 @@
+name: Canonical history full continuation
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/canonical-history-full-continuation.yml'
+      - 'docs/evidence/canonical-history-backfill-plan-3371676-3432924.json'
+      - 'scripts/run-history-segment.ts'
+      - 'scripts/update-history-segment-checkpoint.ts'
+      - 'scripts/verify-history-segment-chain.ts'
+      - 'scripts/build-history-segment-publication.ts'
+      - 'scripts/build-history-exact-index.ts'
+      - 'scripts/rehearse-history-exact-lookups.ts'
+      - 'src/collector/history-segments/**'
+      - 'src/collector/incremental/**'
+      - 'src/shared/history-segments/**'
+      - 'src/shared/current-state/**'
+      - 'package.json'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  full-continuation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Download verified Stage A artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: canonical-history-stage-a
+          path: .local/canonical-full
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: 28795462858
+
+      - name: Verify Stage A anchor artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=.local/canonical-full
+          SUMMARY="$ROOT/stage-a-measurement-summary.json"
+          test -f "$SUMMARY"
+          jq -e '
+            .passed == true
+            and .stageStartLedgerIndex == 3371676
+            and .stageEndLedgerIndex == 3376675
+            and .segmentCount == 10
+            and .checkpointNextLedgerIndex == 3376676
+            and .terminalLedgerHash == "4FBAE14F2EB86369228F8C58D7DADC4A334CC05DED7C2C20667FA8C9B90F6463"
+          ' "$SUMMARY" > /dev/null
+
+      - name: Build history tools
+        run: |
+          pnpm history-segment:build
+          pnpm history-segment-checkpoint:build
+          pnpm history-segment-chain:build
+          pnpm history-segment-publication:build
+          pnpm history-exact-index:build
+          pnpm history-exact-rehearsal:build
+
+      - name: Rebuild full-range checkpoint through Stage A
+        shell: bash
+        run: |
+          set -euo pipefail
+          PLAN=docs/evidence/canonical-history-backfill-plan-3371676-3432924.json
+          ROOT=.local/canonical-full
+          EPOCH=devnet-3371675
+          CHECKPOINT="$ROOT/full-checkpoint.json"
+          rm -f "$CHECKPOINT"
+          for ORDINAL in $(seq 1 10); do
+            SEGMENT_ID=$(jq -r --argjson ordinal "$ORDINAL" '.segments[] | select(.ordinal == $ordinal) | .segmentId' "$PLAN")
+            MANIFEST="$ROOT/history/$EPOCH/$SEGMENT_ID/manifest.json"
+            test -f "$MANIFEST"
+            node .history-segment-checkpoint-build/update-history-segment-checkpoint.mjs \
+              --local \
+              --checkpoint "$CHECKPOINT" \
+              --manifest "$MANIFEST" \
+              --epoch-id "$EPOCH" \
+              --range-start-ledger 3371676 \
+              --range-end-ledger 3432924 \
+              > "$ROOT/full-checkpoint-$ORDINAL-output.json"
+          done
+          jq -e '.nextLedgerIndex == 3376676 and (.completedSegments | length) == 10' "$CHECKPOINT" > /dev/null
+
+      - name: Generate canonical continuation segments 11 through 123
+        shell: bash
+        run: |
+          set -euo pipefail
+          PLAN=docs/evidence/canonical-history-backfill-plan-3371676-3432924.json
+          ROOT=.local/canonical-full
+          EPOCH=devnet-3371675
+          CHECKPOINT="$ROOT/full-checkpoint.json"
+          METRICS="$ROOT/continuation-segment-metrics.ndjson"
+          : > "$METRICS"
+
+          PREV_ID=$(jq -r '.previousSegmentId' "$CHECKPOINT")
+          PREV_HASH=$(jq -r '.previousSegmentEndHash' "$CHECKPOINT")
+
+          for ORDINAL in $(seq 11 123); do
+            SEGMENT=$(jq -c --argjson ordinal "$ORDINAL" '.segments[] | select(.ordinal == $ordinal)' "$PLAN")
+            SEGMENT_ID=$(jq -r '.segmentId' <<<"$SEGMENT")
+            START=$(jq -r '.startLedgerIndex' <<<"$SEGMENT")
+            END=$(jq -r '.endLedgerIndex' <<<"$SEGMENT")
+            OUT="$ROOT/history/$EPOCH/$SEGMENT_ID"
+
+            STARTED=$(date +%s)
+            PASSED=false
+            ATTEMPTS=0
+            for ATTEMPT in 1 2 3; do
+              ATTEMPTS=$ATTEMPT
+              if node .history-segment-build/run-history-segment.mjs \
+                --local \
+                --timeout-ms 12000 \
+                --start-ledger "$START" \
+                --end-ledger "$END" \
+                --epoch-id "$EPOCH" \
+                --segment-id "$SEGMENT_ID" \
+                --output-dir "$OUT" \
+                --source-revision "$GITHUB_SHA" \
+                --previous-segment-id "$PREV_ID" \
+                --previous-segment-end-hash "$PREV_HASH" \
+                > "$ROOT/segment-$ORDINAL-manifest-output.json"; then
+                PASSED=true
+                break
+              fi
+              sleep $((ATTEMPT * 10))
+            done
+            if [[ "$PASSED" != true ]]; then
+              echo "Canonical segment $ORDINAL failed after $ATTEMPTS attempts" >&2
+              exit 1
+            fi
+            ELAPSED=$(( $(date +%s) - STARTED ))
+
+            node .history-segment-checkpoint-build/update-history-segment-checkpoint.mjs \
+              --local \
+              --checkpoint "$CHECKPOINT" \
+              --manifest "$OUT/manifest.json" \
+              --epoch-id "$EPOCH" \
+              --range-start-ledger 3371676 \
+              --range-end-ledger 3432924 \
+              > "$ROOT/full-checkpoint-$ORDINAL-output.json"
+
+            SEGMENT_BYTES=$(du -sb "$OUT" | cut -f1)
+            TOTAL_RECORDS=$(jq '[.files[].records] | add' "$OUT/manifest.json")
+            jq -nc \
+              --argjson ordinal "$ORDINAL" \
+              --arg segmentId "$SEGMENT_ID" \
+              --argjson startLedgerIndex "$START" \
+              --argjson endLedgerIndex "$END" \
+              --argjson attempts "$ATTEMPTS" \
+              --argjson elapsedSeconds "$ELAPSED" \
+              --argjson artifactBytes "$SEGMENT_BYTES" \
+              --argjson totalRecords "$TOTAL_RECORDS" \
+              '{ordinal:$ordinal,segmentId:$segmentId,startLedgerIndex:$startLedgerIndex,endLedgerIndex:$endLedgerIndex,attempts:$attempts,elapsedSeconds:$elapsedSeconds,artifactBytes:$artifactBytes,totalRecords:$totalRecords}' \
+              >> "$METRICS"
+
+            PREV_ID="$SEGMENT_ID"
+            PREV_HASH=$(jq -r '.endLedgerHash' "$OUT/manifest.json")
+          done
+
+          jq -e '.nextLedgerIndex == 3432925 and (.completedSegments | length) == 123' "$CHECKPOINT" > /dev/null
+          jq -s '.' "$METRICS" > "$ROOT/continuation-segment-metrics.json"
+
+      - name: Verify complete canonical chain
+        shell: bash
+        run: |
+          set -euo pipefail
+          PLAN=docs/evidence/canonical-history-backfill-plan-3371676-3432924.json
+          ROOT=.local/canonical-full
+          EPOCH=devnet-3371675
+          BASE_HASH=0BA2ED766C190C733F8F26288785CBDF01D0FC26E1A6C03EDB7E9DFF6F8BCB90
+          MANIFEST_ARGS=()
+          LAST_MANIFEST=''
+          for ORDINAL in $(seq 1 123); do
+            SEGMENT_ID=$(jq -r --argjson ordinal "$ORDINAL" '.segments[] | select(.ordinal == $ordinal) | .segmentId' "$PLAN")
+            MANIFEST="$ROOT/history/$EPOCH/$SEGMENT_ID/manifest.json"
+            MANIFEST_ARGS+=(--manifest "$MANIFEST")
+            LAST_MANIFEST="$MANIFEST"
+          done
+          TERMINAL_HASH=$(jq -r '.endLedgerHash' "$LAST_MANIFEST")
+          node .history-segment-chain-build/verify-history-segment-chain.mjs \
+            --local \
+            "${MANIFEST_ARGS[@]}" \
+            --epoch-id "$EPOCH" \
+            --start-ledger 3371676 \
+            --start-parent-hash "$BASE_HASH" \
+            --end-ledger 3432924 \
+            --end-ledger-hash "$TERMINAL_HASH" \
+            > "$ROOT/full-chain-summary.json"
+
+      - name: Build complete canonical publication
+        shell: bash
+        run: |
+          set -euo pipefail
+          PLAN=docs/evidence/canonical-history-backfill-plan-3371676-3432924.json
+          ROOT=.local/canonical-full
+          EPOCH=devnet-3371675
+          MANIFEST_ARGS=()
+          for ORDINAL in $(seq 1 123); do
+            SEGMENT_ID=$(jq -r --argjson ordinal "$ORDINAL" '.segments[] | select(.ordinal == $ordinal) | .segmentId' "$PLAN")
+            MANIFEST_ARGS+=(--manifest "$ROOT/history/$EPOCH/$SEGMENT_ID/manifest.json")
+          done
+          node .history-segment-publication-build/build-history-segment-publication.mjs \
+            --local \
+            "${MANIFEST_ARGS[@]}" \
+            --chain-id canonical-devnet-3371676-3432924 \
+            --epoch-id "$EPOCH" \
+            --source-revision "$GITHUB_SHA" \
+            --output "$ROOT/history/publication.json" \
+            > "$ROOT/full-publication-output.json"
+
+      - name: Build complete canonical exact index
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=.local/canonical-full
+          STARTED=$(date +%s)
+          node .history-exact-index-build/build-history-exact-index.mjs \
+            --local \
+            --publication "$ROOT/history/publication.json" \
+            --artifact-root "$ROOT" \
+            --output-dir "$ROOT/history/index/exact" \
+            --asset-prefix history/index/exact \
+            --bucket-count 1024 \
+            --source-revision "$GITHUB_SHA" \
+            > "$ROOT/full-exact-index-output.json"
+          echo $(( $(date +%s) - STARTED )) > "$ROOT/full-exact-index-elapsed-seconds.txt"
+
+      - name: Rehearse exact lookups against complete chain
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=.local/canonical-full
+          node .history-exact-rehearsal-build/rehearse-history-exact-lookups.mjs \
+            --local \
+            --publication "$ROOT/history/publication.json" \
+            --exact-index-manifest "$ROOT/history/index/exact/manifest.json" \
+            --artifact-root "$ROOT" \
+            --term 54A69056FD4D8017F52BB40FA27B6D155F2B07ECF0F24754A26EAF46F82045D0 \
+            --term 351B2FB507346B8B001148ED9D92A394D72FCA6CE87109A95B2C61A27B992F6E \
+            --term 2A3920F5B65CDEB35AEE7E4606736A7F0423D804A874EC3225BCD39A7A30A4D4 \
+            > "$ROOT/full-exact-rehearsal-summary.json"
+          jq -e '.passed == true and .termCount == 3 and (.terms | all(.referenceCount > 0 and .matchedRecords > 0))' "$ROOT/full-exact-rehearsal-summary.json" > /dev/null
+
+      - name: Build complete-chain measurement summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          PLAN=docs/evidence/canonical-history-backfill-plan-3371676-3432924.json
+          ROOT=.local/canonical-full
+          INDEX="$ROOT/history/index/exact/manifest.json"
+          PUBLICATION="$ROOT/history/publication.json"
+          CHECKPOINT="$ROOT/full-checkpoint.json"
+          PLAN_SHA=$(sha256sum "$PLAN" | awk '{print $1}')
+          EXACT_SECONDS=$(cat "$ROOT/full-exact-index-elapsed-seconds.txt")
+          ARTIFACT_BYTES=$(du -sb "$ROOT" | cut -f1)
+          jq -n \
+            --arg planSha256 "$PLAN_SHA" \
+            --arg publicationSha256 "$(jq -r '.publicationSha256' "$PUBLICATION")" \
+            --arg exactIndexManifestSha256 "$(jq -r '.manifestSha256' "$INDEX")" \
+            --arg terminalLedgerHash "$(jq -r '.endLedgerHash' "$PUBLICATION")" \
+            --argjson checkpointNextLedgerIndex "$(jq -r '.nextLedgerIndex' "$CHECKPOINT")" \
+            --argjson exactIndexRecords "$(jq -r '.totalRecords' "$INDEX")" \
+            --argjson exactIndexCompressedBytes "$(jq '[.assets[].compressedBytes] | add' "$INDEX")" \
+            --argjson maxBucketCompressedBytes "$(jq '[.assets[].compressedBytes] | max' "$INDEX")" \
+            --argjson maxBucketRecords "$(jq '[.assets[].recordCount] | max' "$INDEX")" \
+            --argjson exactIndexElapsedSeconds "$EXACT_SECONDS" \
+            --argjson artifactBytes "$ARTIFACT_BYTES" \
+            --slurpfile continuationMetrics "$ROOT/continuation-segment-metrics.json" \
+            '{schemaVersion:1,passed:true,stageStartLedgerIndex:3371676,stageEndLedgerIndex:3432924,ledgerCount:61249,segmentCount:123,checkpointNextLedgerIndex:$checkpointNextLedgerIndex,planSha256:$planSha256,publicationSha256:$publicationSha256,terminalLedgerHash:$terminalLedgerHash,exactIndexManifestSha256:$exactIndexManifestSha256,exactIndexBucketCount:1024,exactIndexRecords:$exactIndexRecords,exactIndexCompressedBytes:$exactIndexCompressedBytes,maxBucketCompressedBytes:$maxBucketCompressedBytes,maxBucketRecords:$maxBucketRecords,exactIndexElapsedSeconds:$exactIndexElapsedSeconds,artifactBytes:$artifactBytes,continuationSegmentMetrics:$continuationMetrics[0]}' \
+            > "$ROOT/full-chain-measurement-summary.json"
+          cat "$ROOT/full-chain-measurement-summary.json"
+
+      - name: Upload complete canonical chain evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: canonical-history-full-chain
+          path: .local/canonical-full
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
