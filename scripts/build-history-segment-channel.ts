@@ -3,6 +3,11 @@ import { dirname, resolve } from 'node:path'
 
 import { canonicalJson, sha256Hex, utf8 } from '../src/shared/current-state/canonical-json'
 import {
+  assertHistoryExactIndexManifest,
+  historyExactIndexManifestDigest,
+  type HistoryExactIndexManifest,
+} from '../src/shared/history-segments/exact-index'
+import {
   assertHistorySegmentPublicationDigest,
   type HistorySegmentChainPublication,
 } from '../src/shared/history-segments/publication'
@@ -40,6 +45,25 @@ async function main(): Promise<void> {
   const publication = JSON.parse(new TextDecoder().decode(publicationBytes)) as HistorySegmentChainPublication
   await assertHistorySegmentPublicationDigest(publication)
 
+  const exactIndexFile = value(args, '--exact-index-manifest')
+  const exactIndexPathArgument = value(args, '--exact-index-manifest-path')
+  if (exactIndexFile === null && exactIndexPathArgument !== null) {
+    throw new Error('--exact-index-manifest-path requires --exact-index-manifest')
+  }
+  let exactIndex: NonNullable<HistorySegmentChannel['active']['exactIndex']> | null = null
+  if (exactIndexFile !== null) {
+    const bytes = new Uint8Array(await readFile(resolve(exactIndexFile)))
+    const manifest = JSON.parse(new TextDecoder().decode(bytes)) as HistoryExactIndexManifest
+    assertHistoryExactIndexManifest(manifest, publication)
+    if (await historyExactIndexManifestDigest(manifest) !== manifest.manifestSha256) {
+      throw new Error('History exact index semantic manifest digest mismatch')
+    }
+    exactIndex = {
+      manifestPath: exactIndexPathArgument ?? 'history/index/exact/manifest.json',
+      manifestSha256: await sha256Hex(bytes),
+    }
+  }
+
   const channel: HistorySegmentChannel = {
     schemaVersion: 1,
     active: {
@@ -48,6 +72,7 @@ async function main(): Promise<void> {
       publicationSha256: await sha256Hex(publicationBytes),
       chainId: publication.chainId,
       epochId: publication.epochId,
+      exactIndex,
     },
     updatedAt: publication.publishedAt,
   }
