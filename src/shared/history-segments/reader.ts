@@ -182,6 +182,7 @@ export class HistorySegmentChainReader {
     if (references.length > maxAssetReads) throw new Error('History referenced read exceeds asset-read limit')
 
     const items: T[] = []
+    let assetReads = 0
     let compressedBytes = 0
     let decompressedBytes = 0
     let recordsExamined = 0
@@ -201,6 +202,7 @@ export class HistorySegmentChainReader {
         maxDecompressedBytes: remainingDecompressed,
       })
       if (decoded.records.length !== file.records) throw new Error('History referenced asset record count mismatch')
+      assetReads += 1
       compressedBytes += bytes.byteLength
       decompressedBytes += decoded.decompressedBytes
       for (const raw of decoded.records) {
@@ -210,11 +212,11 @@ export class HistorySegmentChainReader {
         if (!predicate(value)) continue
         items.push(value)
         if (items.length >= limit) {
-          return { items, assetReads: references.length, compressedBytes, decompressedBytes, recordsExamined }
+          return { items, assetReads, compressedBytes, decompressedBytes, recordsExamined }
         }
       }
     }
-    return { items, assetReads: references.length, compressedBytes, decompressedBytes, recordsExamined }
+    return { items, assetReads, compressedBytes, decompressedBytes, recordsExamined }
   }
 
   async list<T = unknown>(options: HistorySegmentReadOptions<T>): Promise<HistorySegmentReadResult<T>> {
