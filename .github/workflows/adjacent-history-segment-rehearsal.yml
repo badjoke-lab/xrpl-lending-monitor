@@ -1,0 +1,133 @@
+name: Adjacent history segment rehearsal
+
+on:
+  pull_request:
+    branches: [segment-chain-cli]
+    paths: [.github/workflows/adjacent-history-segment-rehearsal.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  rehearsal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build:history-segment
+      - run: pnpm build:history-segment-checkpoint
+      - run: pnpm build:history-segment-chain
+
+      - name: Generate first segment twice
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p rehearsal
+          COMMON=(
+            --local
+            --start-ledger 3389181
+            --end-ledger 3389185
+            --epoch-id devnet-3371675
+            --segment-id rehearsal-3389181-3389185
+            --source-revision "$GITHUB_SHA"
+          )
+          node .history-segment-build/run-history-segment.mjs "${COMMON[@]}" --output-dir rehearsal/a1 > rehearsal/a1.stdout.json
+          node .history-segment-build/run-history-segment.mjs "${COMMON[@]}" --output-dir rehearsal/a2 > rehearsal/a2.stdout.json
+
+      - name: Verify first segment deterministic replay
+        shell: bash
+        run: |
+          set -euo pipefail
+          find rehearsal/a1 -type f -printf '%f\n' | sort > rehearsal/a1-files.txt
+          find rehearsal/a2 -type f -printf '%f\n' | sort > rehearsal/a2-files.txt
+          cmp rehearsal/a1-files.txt rehearsal/a2-files.txt
+          while IFS= read -r NAME; do
+            cmp "rehearsal/a1/$NAME" "rehearsal/a2/$NAME"
+          done < rehearsal/a1-files.txt
+          cmp rehearsal/a1.stdout.json rehearsal/a2.stdout.json
+
+      - name: Generate second adjacent segment twice
+        shell: bash
+        run: |
+          set -euo pipefail
+          PREVIOUS_HASH="$(jq -r '.endLedgerHash' rehearsal/a1/manifest.json)"
+          COMMON=(
+            --local
+            --start-ledger 3389186
+            --end-ledger 3389190
+            --epoch-id devnet-3371675
+            --segment-id rehearsal-3389186-3389190
+            --source-revision "$GITHUB_SHA"
+            --previous-segment-id rehearsal-3389181-3389185
+            --previous-segment-end-hash "$PREVIOUS_HASH"
+          )
+          node .history-segment-build/run-history-segment.mjs "${COMMON[@]}" --output-dir rehearsal/b1 > rehearsal/b1.stdout.json
+          node .history-segment-build/run-history-segment.mjs "${COMMON[@]}" --output-dir rehearsal/b2 > rehearsal/b2.stdout.json
+
+      - name: Verify second segment deterministic replay
+        shell: bash
+        run: |
+          set -euo pipefail
+          find rehearsal/b1 -type f -printf '%f\n' | sort > rehearsal/b1-files.txt
+          find rehearsal/b2 -type f -printf '%f\n' | sort > rehearsal/b2-files.txt
+          cmp rehearsal/b1-files.txt rehearsal/b2-files.txt
+          while IFS= read -r NAME; do
+            cmp "rehearsal/b1/$NAME" "rehearsal/b2/$NAME"
+          done < rehearsal/b1-files.txt
+          cmp rehearsal/b1.stdout.json rehearsal/b2.stdout.json
+
+      - name: Advance and resume checkpoint across both segments
+        shell: bash
+        run: |
+          set -euo pipefail
+          COMMON=(
+            --local
+            --checkpoint rehearsal/checkpoint.json
+            --epoch-id devnet-3371675
+            --range-start-ledger 3389181
+            --range-end-ledger 3389190
+          )
+          node .history-segment-checkpoint-build/update-history-segment-checkpoint.mjs "${COMMON[@]}" --manifest rehearsal/a1/manifest.json > rehearsal/checkpoint-after-a.json
+          node .history-segment-checkpoint-build/update-history-segment-checkpoint.mjs "${COMMON[@]}" --manifest rehearsal/b1/manifest.json > rehearsal/checkpoint-after-b.json
+          jq -e '.nextLedgerIndex == 3389191 and (.completedSegments | length) == 2' rehearsal/checkpoint.json > /dev/null
+
+      - name: Verify exact two-segment chain
+        shell: bash
+        run: |
+          set -euo pipefail
+          START_PARENT="$(jq -r '.startParentHash' rehearsal/a1/manifest.json)"
+          END_HASH="$(jq -r '.endLedgerHash' rehearsal/b1/manifest.json)"
+          node .history-segment-chain-build/verify-history-segment-chain.mjs \
+            --local \
+            --manifest rehearsal/a1/manifest.json \
+            --manifest rehearsal/b1/manifest.json \
+            --epoch-id devnet-3371675 \
+            --start-ledger 3389181 \
+            --start-parent-hash "$START_PARENT" \
+            --end-ledger 3389190 \
+            --end-ledger-hash "$END_HASH" \
+            > rehearsal/chain-summary.json
+          jq -e '.segmentCount == 2 and .ledgerCount == 10 and .startLedgerIndex == 3389181 and .endLedgerIndex == 3389190' rehearsal/chain-summary.json > /dev/null
+
+      - name: Record evidence digests
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha256sum rehearsal/a1/* | sort -k2 > rehearsal/a1-digests.txt
+          sha256sum rehearsal/b1/* | sort -k2 > rehearsal/b1-digests.txt
+          cat rehearsal/chain-summary.json
+          cat rehearsal/checkpoint.json
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: adjacent-history-segment-rehearsal
+          path: rehearsal
+          if-no-files-found: error
+          retention-days: 14
