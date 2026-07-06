@@ -16,11 +16,13 @@ import {
   type PublishedHistorySegment,
 } from './publication'
 
-export interface HistorySegmentReadOptions {
+export interface HistorySegmentReadOptions<T = unknown> {
   kind: HistorySegmentFileKind
   limit?: number
   cursor?: string
   direction?: 'asc' | 'desc'
+  scope?: string
+  predicate?: (value: T) => boolean
   maxSegmentReads?: number
   maxCompressedBytes?: number
   maxDecompressedBytes?: number
@@ -129,7 +131,7 @@ export class HistorySegmentChainReader {
     return manifest
   }
 
-  async list<T = unknown>(options: HistorySegmentReadOptions): Promise<HistorySegmentReadResult<T>> {
+  async list<T = unknown>(options: HistorySegmentReadOptions<T>): Promise<HistorySegmentReadResult<T>> {
     const limit = positive(options.limit, DEFAULT_LIMIT, 'limit')
     if (limit > MAX_RESULT_LIMIT) throw new Error('History segment result limit exceeds maximum')
     const maxSegmentReads = positive(options.maxSegmentReads, DEFAULT_SEGMENT_READS, 'maxSegmentReads')
@@ -138,10 +140,16 @@ export class HistorySegmentChainReader {
     const maxRecordsExamined = positive(options.maxRecordsExamined, DEFAULT_RECORDS_EXAMINED, 'maxRecordsExamined')
     const maxWallTimeMs = positive(options.maxWallTimeMs, DEFAULT_WALL_TIME_MS, 'maxWallTimeMs')
     const direction = options.direction ?? 'desc'
+    const scope = options.scope ?? '*'
+    if (scope.length === 0) throw new Error('History segment read scope must be non-empty')
+    if (options.predicate && options.scope === undefined) {
+      throw new Error('Filtered history segment reads require an explicit cursor scope')
+    }
+    const predicate = options.predicate ?? (() => true)
     const descriptors = direction === 'asc'
       ? this.publication.segments
       : [...this.publication.segments].reverse()
-    const mode = `history:${options.kind}:${direction}`
+    const mode = `history:${options.kind}:${direction}:${scope}`
     const cursor = decodeArtifactReaderCursor({
       cursor: options.cursor,
       mode,
@@ -235,8 +243,10 @@ export class HistorySegmentChainReader {
             recordsExamined,
           }
         }
-        items.push(records[lineIndex] as T)
+        const record = records[lineIndex] as T
         recordsExamined += 1
+        if (!predicate(record)) continue
+        items.push(record)
         if (items.length >= limit) {
           const assetDone = lineIndex + 1 >= records.length
           const nextDescriptor = assetDone ? descriptorIndex + 1 : descriptorIndex
