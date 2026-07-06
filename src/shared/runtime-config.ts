@@ -23,8 +23,8 @@ export interface RuntimeEnvironment {
 
 export interface CurrentStateRuntimeConfig {
   githubRepository: string | null
-  githubBranch: string
-  replacement: {
+  githubBranch?: string
+  replacement?: {
     snapshotId: string
     githubBranch: string
   } | null
@@ -95,7 +95,7 @@ function parseReleaseChannelTag(value: string | undefined): string {
   return normalized
 }
 
-function parseReplacementCurrentState(value: RuntimeEnvironment): CurrentStateRuntimeConfig['replacement'] {
+function parseReplacementCurrentState(value: RuntimeEnvironment): NonNullable<CurrentStateRuntimeConfig['replacement']> | null {
   const snapshotId = value.CURRENT_STATE_REPLACEMENT_SNAPSHOT_ID?.trim()
   const branch = value.CURRENT_STATE_REPLACEMENT_GITHUB_BRANCH?.trim()
   if (!snapshotId && !branch) return null
