@@ -34,7 +34,7 @@ export interface HistoryExactIndexReference {
 }
 
 export interface HistoryExactIndexRecord {
-  schemaVersion: 1
+  schemaVersion: 2
   bucket: number
   term: string
   reference: HistoryExactIndexReference
@@ -51,7 +51,7 @@ export interface HistoryExactIndexAsset {
 }
 
 export interface HistoryExactIndexManifest {
-  schemaVersion: 1
+  schemaVersion: 2
   network: 'devnet'
   epochId: string
   chainId: string
@@ -153,7 +153,7 @@ export function assertHistoryExactIndexRecord(
   record: HistoryExactIndexRecord,
   bucketCount: number,
 ): void {
-  if (record.schemaVersion !== 1) throw new Error('History exact index record schema is invalid')
+  if (record.schemaVersion !== 2) throw new Error('History exact index record schema is invalid')
   integer(record.bucket, 'record.bucket')
   if (record.bucket >= bucketCount) throw new Error('History exact index record bucket is out of range')
   text(record.term, 'record.term')
@@ -171,7 +171,7 @@ export function assertHistoryExactIndexManifest(
   manifest: HistoryExactIndexManifest,
   publication: HistorySegmentChainPublication,
 ): void {
-  if (manifest.schemaVersion !== 1 || manifest.network !== 'devnet') throw new Error('History exact index manifest schema is invalid')
+  if (manifest.schemaVersion !== 2 || manifest.network !== 'devnet') throw new Error('History exact index manifest schema is invalid')
   text(manifest.epochId, 'epochId')
   text(manifest.chainId, 'chainId')
   text(manifest.sourceRevision, 'sourceRevision')
