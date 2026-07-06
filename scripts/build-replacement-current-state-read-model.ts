@@ -284,7 +284,7 @@ async function applyHistoryMutations(options: {
     const lines = text.split('\n').filter(Boolean)
     if (lines.length !== mutationFile.records) throw new Error(`Replacement mutation record count mismatch: ${descriptor.segmentId}`)
 
-    db.exec('BEGIN')
+    options.db.exec('BEGIN')
     try {
       for (const line of lines) {
         const mutation = prepareReplacementMutation(JSON.parse(line))
@@ -298,9 +298,9 @@ async function applyHistoryMutations(options: {
         else if (result === 'delete') stats.appliedDeletes += 1
         else stats.replayed += 1
       }
-      db.exec('COMMIT')
+      options.db.exec('COMMIT')
     } catch (error) {
-      db.exec('ROLLBACK')
+      options.db.exec('ROLLBACK')
       throw error
     }
   }
