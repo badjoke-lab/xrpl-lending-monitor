@@ -8,6 +8,9 @@ export interface RuntimeEnvironment {
   XRPL_RPC_TIMEOUT_MS?: string
   NETWORK_STATUS_STALE_AFTER_SECONDS?: string
   CURRENT_STATE_GITHUB_REPOSITORY?: string
+  CURRENT_STATE_GITHUB_BRANCH?: string
+  CURRENT_STATE_REPLACEMENT_SNAPSHOT_ID?: string
+  CURRENT_STATE_REPLACEMENT_GITHUB_BRANCH?: string
   CURRENT_STATE_RELEASE_CHANNEL_TAG?: string
   CURRENT_STATE_MAX_ASSET_BYTES?: string
   CURRENT_STATE_MAX_DECOMPRESSED_BYTES?: string
@@ -20,6 +23,11 @@ export interface RuntimeEnvironment {
 
 export interface CurrentStateRuntimeConfig {
   githubRepository: string | null
+  githubBranch: string
+  replacement: {
+    snapshotId: string
+    githubBranch: string
+  } | null
   releaseChannelTag: string
   maxAssetBytes: number
   maxDecompressedBytes: number
@@ -71,12 +79,33 @@ function parseGithubRepository(value: string | undefined, name: string): string 
   return normalized
 }
 
+function parseFlatName(value: string | undefined, fallback: string, name: string): string {
+  const normalized = value?.trim() || fallback
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(normalized)) {
+    throw new Error(`${name} is invalid`)
+  }
+  return normalized
+}
+
 function parseReleaseChannelTag(value: string | undefined): string {
   const normalized = value?.trim() || 'current-state-channel'
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(normalized)) {
     throw new Error('CURRENT_STATE_RELEASE_CHANNEL_TAG must be a flat release tag')
   }
   return normalized
+}
+
+function parseReplacementCurrentState(value: RuntimeEnvironment): CurrentStateRuntimeConfig['replacement'] {
+  const snapshotId = value.CURRENT_STATE_REPLACEMENT_SNAPSHOT_ID?.trim()
+  const branch = value.CURRENT_STATE_REPLACEMENT_GITHUB_BRANCH?.trim()
+  if (!snapshotId && !branch) return null
+  if (!snapshotId || !branch) {
+    throw new Error('replacement current-state snapshot ID and GitHub branch must be configured together')
+  }
+  return {
+    snapshotId: parseFlatName(snapshotId, '', 'CURRENT_STATE_REPLACEMENT_SNAPSHOT_ID'),
+    githubBranch: parseFlatName(branch, '', 'CURRENT_STATE_REPLACEMENT_GITHUB_BRANCH'),
+  }
 }
 
 function parseBranch(value: string | undefined): string {
@@ -133,6 +162,12 @@ export function resolveRuntimeConfig(env: RuntimeEnvironment): RuntimeConfig {
         env.CURRENT_STATE_GITHUB_REPOSITORY,
         'CURRENT_STATE_GITHUB_REPOSITORY',
       ),
+      githubBranch: parseFlatName(
+        env.CURRENT_STATE_GITHUB_BRANCH,
+        'current-state-data',
+        'CURRENT_STATE_GITHUB_BRANCH',
+      ),
+      replacement: parseReplacementCurrentState(env),
       releaseChannelTag: parseReleaseChannelTag(env.CURRENT_STATE_RELEASE_CHANNEL_TAG),
       maxAssetBytes: parsePositiveInteger(
         env.CURRENT_STATE_MAX_ASSET_BYTES,
