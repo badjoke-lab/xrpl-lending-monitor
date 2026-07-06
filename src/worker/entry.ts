@@ -3,6 +3,7 @@ import { refreshNetworkStatus } from '../collector/network/refresh-network-statu
 import { resolveCatchUpRuntimeConfig } from '../shared/catch-up-runtime-config'
 import { GithubCurrentStateReadModelReader } from '../shared/current-state/github-read-model-reader'
 import { resolveIncrementalRuntimeConfig } from '../shared/incremental-runtime-config'
+import { resolveReplacementBaseRuntimeConfig } from '../shared/replacement-base-runtime-config'
 import { resolveRuntimeConfig } from '../shared/runtime-config'
 import type { Bindings } from './env'
 import { app } from './index'
@@ -107,6 +108,14 @@ const worker: ExportedHandler<Bindings> = {
     const catchUpConfig = resolveCatchUpRuntimeConfig(env)
     if (catchUpConfig.initializationEnabled && catchUpConfig.base) {
       await initializeCatchUpFromVerifiedBase({ db: env.DB, base: catchUpConfig.base, initializedAt: new Date().toISOString() })
+    }
+    const replacementBaseConfig = resolveReplacementBaseRuntimeConfig(env)
+    if (replacementBaseConfig.rebaseEnabled && replacementBaseConfig.target) {
+      await rebaseToReplacementBase({
+        db: env.DB,
+        target: replacementBaseConfig.target,
+        rebasedAt: new Date().toISOString(),
+      })
     }
     await runIncrementalCollectorCycle({ db: env.DB, runtimeConfig, incrementalConfig: resolveIncrementalRuntimeConfig(env) })
   },
