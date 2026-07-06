@@ -7,6 +7,7 @@ import type { CatchUpBaseIdentity } from '../../shared/catch-up-base-identity'
 import { readBalanceHistorySourceDiagnostics } from '../repositories/balance-history-source-diagnostics'
 import { readLiveContinuationEvidence } from '../repositories/live-continuation-verification'
 import { readLoanActivityDiagnostics } from '../repositories/loan-activity-diagnostics'
+import { readManagedTransitionSourceDiagnostics } from '../repositories/managed-transition-source-diagnostics'
 import { evaluateLiveContinuationForRuntime } from './live-continuation-verification'
 
 interface BoundBaseRow {
@@ -29,10 +30,11 @@ export interface M1RuntimeExitDiagnostics {
 async function readM1RuntimeExitEvidence(
   options: M1RuntimeExitOptions,
 ): Promise<M1RuntimeExitEvidence> {
-  const [liveEvidence, loanActivity, balanceSource, boundBase] = await Promise.all([
+  const [liveEvidence, loanActivity, balanceSource, managedTransitions, boundBase] = await Promise.all([
     readLiveContinuationEvidence(options.db),
     readLoanActivityDiagnostics(options.db),
     readBalanceHistorySourceDiagnostics(options.db),
+    readManagedTransitionSourceDiagnostics(options.db),
     options.db.prepare(
       `SELECT epoch_id, base_snapshot_id, base_ledger_index, base_ledger_hash
        FROM current_state_overlay_state
@@ -46,6 +48,7 @@ async function readM1RuntimeExitEvidence(
     liveEvidence,
     loanActivity,
     balanceSource,
+    managedTransitions,
   )
 
   return {

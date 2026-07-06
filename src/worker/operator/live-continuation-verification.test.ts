@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { LiveContinuationEvidence } from '../../collector/incremental/live-continuation-verification'
 import type { BalanceHistorySourceDiagnostics } from '../repositories/balance-history-source-diagnostics'
 import type { LoanActivityDiagnostics } from '../repositories/loan-activity-diagnostics'
+import type { ManagedTransitionSourceDiagnostics } from '../repositories/managed-transition-source-diagnostics'
 import { evaluateLiveContinuationForRuntime } from './live-continuation-verification'
 
 function evidence(): LiveContinuationEvidence {
@@ -80,6 +81,25 @@ function balanceSource(sourceChanges: number): BalanceHistorySourceDiagnostics {
   }
 }
 
+function managedTransitions(options: {
+  impaired?: number
+  unimpaired?: number
+  defaulted?: number
+} = {}): ManagedTransitionSourceDiagnostics {
+  const impaired = options.impaired ?? 0
+  const unimpaired = options.unimpaired ?? 0
+  const defaulted = options.defaulted ?? 0
+  return {
+    epochId: 'devnet-test',
+    impaired,
+    impairedLatestLedger: impaired > 0 ? 101 : null,
+    unimpaired,
+    unimpairedLatestLedger: unimpaired > 0 ? 101 : null,
+    defaulted,
+    defaultedLatestLedger: defaulted > 0 ? 101 : null,
+  }
+}
+
 describe('runtime live-continuation classification', () => {
   it('keeps the cross-surface path missing when only unrelated protocol activity exists', () => {
     const report = evaluateLiveContinuationForRuntime(
@@ -139,5 +159,50 @@ describe('runtime live-continuation classification', () => {
     )
 
     expect(report.paths.activityHistoryBalance.state).toBe('observed')
+  })
+
+  it('keeps managed lifecycle paths missing when neither source nor derived transition exists', () => {
+    const report = evaluateLiveContinuationForRuntime(
+      evidence(),
+      activity(0),
+      balanceSource(0),
+      managedTransitions(),
+    )
+
+    expect(report.paths.impaired.state).toBe('missing')
+    expect(report.paths.unimpaired.state).toBe('missing')
+    expect(report.paths.defaulted.state).toBe('missing')
+  })
+
+  it('marks a managed lifecycle path inconsistent when source and derived evidence disagree', () => {
+    const input = evidence()
+    input.lifecycle.impaired = 1
+
+    const report = evaluateLiveContinuationForRuntime(
+      input,
+      activity(0),
+      balanceSource(0),
+      managedTransitions(),
+    )
+
+    expect(report.paths.impaired.state).toBe('inconsistent')
+  })
+
+  it('marks each managed lifecycle path observed only when exact source and derived evidence both exist', () => {
+    const input = evidence()
+    input.lifecycle.impaired = 1
+    input.lifecycle.unimpaired = 1
+    input.lifecycle.defaulted = 1
+
+    const report = evaluateLiveContinuationForRuntime(
+      input,
+      activity(0),
+      balanceSource(0),
+      managedTransitions({ impaired: 1, unimpaired: 1, defaulted: 1 }),
+    )
+
+    expect(report.paths.impaired.state).toBe('observed')
+    expect(report.paths.unimpaired.state).toBe('observed')
+    expect(report.paths.defaulted.state).toBe('observed')
   })
 })
