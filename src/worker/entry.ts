@@ -1,6 +1,7 @@
 import { runIncrementalCollectorCycle } from '../collector/incremental/collector-cycle'
 import { refreshNetworkStatus } from '../collector/network/refresh-network-status'
 import { resolveCatchUpRuntimeConfig } from '../shared/catch-up-runtime-config'
+import { GithubCurrentStateReadModelReader } from '../shared/current-state/github-read-model-reader'
 import { resolveIncrementalRuntimeConfig } from '../shared/incremental-runtime-config'
 import { resolveRuntimeConfig } from '../shared/runtime-config'
 import type { Bindings } from './env'
@@ -8,6 +9,7 @@ import { app } from './index'
 import { initializeCatchUpFromVerifiedBase } from './operator/catch-up-initialization'
 import { diagnoseLiveContinuation, verifyLiveContinuation } from './operator/live-continuation-verification'
 import { diagnoseM1RuntimeExit, reviewM1RuntimeExit } from './operator/m1-runtime-exit'
+import { rebaseToReplacementBase } from './operator/replacement-base-rebase'
 import { resolveHistorySource } from './repositories/history-source'
 import { getIncrementalCollectorState } from './repositories/incremental-collector-state'
 import { getSyncState } from './repositories/network-status-repository'
@@ -54,6 +56,36 @@ const worker: ExportedHandler<Bindings> = {
       const base = { epochId: release.snapshot.epochId, snapshotId: release.snapshot.id, ledgerIndex: release.snapshot.ledgerIndex, ledgerHash: release.snapshot.ledgerHash }
       const result = await initializeCatchUpFromVerifiedBase({ db: env.DB, base, initializedAt: new Date().toISOString(), dryRun: true })
       return Response.json({ base, ...result })
+    }
+    if (request.method === 'GET' && url.pathname === '/api/status/replacement-base-rebase') {
+      const runtimeConfig = resolveRuntimeConfig(env)
+      if (!runtimeConfig.currentState.githubRepository) {
+        return Response.json({ status: 'unavailable', reason: 'current_state_repository_unconfigured' }, { status: 503 })
+      }
+      try {
+        const candidate = await GithubCurrentStateReadModelReader.open({
+          githubRepository: runtimeConfig.currentState.githubRepository,
+          githubBranch: 'current-state-candidate-data',
+        })
+        const target = {
+          epochId: candidate.manifest.epochId,
+          snapshotId: candidate.manifest.snapshotId,
+          ledgerIndex: candidate.manifest.ledgerIndex,
+          ledgerHash: candidate.manifest.ledgerHash,
+        }
+        const result = await rebaseToReplacementBase({
+          db: env.DB,
+          target,
+          rebasedAt: new Date().toISOString(),
+          dryRun: true,
+        })
+        return Response.json({ target, ...result })
+      } catch (error) {
+        return Response.json({
+          status: 'unavailable',
+          reason: error instanceof Error ? error.message : 'replacement_base_rebase_dry_run_failed',
+        }, { status: 503 })
+      }
     }
     if (request.method === 'GET' && url.pathname === '/api/status/m1-exit') {
       const catchUpConfig = resolveCatchUpRuntimeConfig(env)
