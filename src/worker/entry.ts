@@ -41,6 +41,7 @@ const worker: ExportedHandler<Bindings> = {
           mode: 'd1',
           configured: false,
           chain: null,
+          exact_index: null,
         })
       }
       return Response.json({
@@ -60,6 +61,11 @@ const worker: ExportedHandler<Bindings> = {
           ledger_count: history.publication.ledgerCount,
           publication_sha256: history.publication.publicationSha256,
         },
+        exact_index: history.exactIndex ? {
+          bucket_count: history.exactIndex.manifest.bucketCount,
+          total_records: history.exactIndex.manifest.totalRecords,
+          manifest_sha256: history.exactIndex.manifest.manifestSha256,
+        } : null,
       })
     }
     if (request.method === 'GET' && url.pathname === '/api/status/collector') {
