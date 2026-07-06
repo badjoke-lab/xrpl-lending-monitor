@@ -40,6 +40,20 @@ export interface HistorySegmentReadResult<T = unknown> {
   recordsExamined: number
 }
 
+export interface HistorySegmentFileReference {
+  segmentId: string
+  fileKind: HistorySegmentFileKind
+  ledgerIndex?: number
+}
+
+export interface HistoryReferencedReadResult<T = unknown> {
+  items: T[]
+  assetReads: number
+  compressedBytes: number
+  decompressedBytes: number
+  recordsExamined: number
+}
+
 const MAX_RESULT_LIMIT = 100
 const DEFAULT_LIMIT = 50
 const DEFAULT_SEGMENT_READS = 4
@@ -131,6 +145,80 @@ export class HistorySegmentChainReader {
     return manifest
   }
 
+  async readReferenced<T = unknown>(options: {
+    references: readonly HistorySegmentFileReference[]
+    predicate?: (value: T) => boolean
+    limit?: number
+    maxAssetReads?: number
+    maxCompressedBytes?: number
+    maxDecompressedBytes?: number
+    maxRecordsExamined?: number
+  }): Promise<HistoryReferencedReadResult<T>> {
+    const limit = positive(options.limit, DEFAULT_LIMIT, 'limit')
+    if (limit > MAX_RESULT_LIMIT) throw new Error('History referenced result limit exceeds maximum')
+    const maxAssetReads = positive(options.maxAssetReads, DEFAULT_SEGMENT_READS, 'maxAssetReads')
+    const maxCompressedBytes = positive(options.maxCompressedBytes, DEFAULT_COMPRESSED_BYTES, 'maxCompressedBytes')
+    const maxDecompressedBytes = positive(options.maxDecompressedBytes, DEFAULT_DECOMPRESSED_BYTES, 'maxDecompressedBytes')
+    const maxRecordsExamined = positive(options.maxRecordsExamined, DEFAULT_RECORDS_EXAMINED, 'maxRecordsExamined')
+    const predicate = options.predicate ?? (() => true)
+    const descriptorOrder = new Map(this.publication.segments.map((segment, index) => [segment.segmentId, index]))
+    const unique = new Map<string, HistorySegmentFileReference>()
+    for (const reference of options.references) {
+      const descriptorIndex = descriptorOrder.get(reference.segmentId)
+      if (descriptorIndex === undefined) throw new Error(`History reference segment is not published: ${reference.segmentId}`)
+      const descriptor = this.publication.segments[descriptorIndex]!
+      if (reference.ledgerIndex !== undefined) {
+        if (!Number.isSafeInteger(reference.ledgerIndex)
+          || reference.ledgerIndex < descriptor.startLedgerIndex
+          || reference.ledgerIndex > descriptor.endLedgerIndex) {
+          throw new Error('History reference ledger is outside the published segment')
+        }
+      }
+      unique.set(`${reference.segmentId}:${reference.fileKind}`, reference)
+    }
+    const references = [...unique.values()].sort((left, right) =>
+      descriptorOrder.get(left.segmentId)! - descriptorOrder.get(right.segmentId)!
+      || left.fileKind.localeCompare(right.fileKind))
+    if (references.length > maxAssetReads) throw new Error('History referenced read exceeds asset-read limit')
+
+    const items: T[] = []
+    let assetReads = 0
+    let compressedBytes = 0
+    let decompressedBytes = 0
+    let recordsExamined = 0
+    for (const reference of references) {
+      const descriptor = this.publication.segments[descriptorOrder.get(reference.segmentId)!]!
+      const manifest = await this.#manifest(descriptor)
+      const file = manifest.files.find((entry) => entry.kind === reference.fileKind)
+      if (!file) throw new Error(`History referenced file kind is unavailable: ${reference.fileKind}`)
+      if (compressedBytes + file.bytes > maxCompressedBytes) throw new Error('History referenced read exceeds compressed byte limit')
+      const bytes = await this.#store.read(assetPath(descriptor.manifestPath, file.path))
+      if (!bytes || bytes.byteLength !== file.bytes) throw new Error('Missing or invalid referenced history segment asset')
+      const remainingDecompressed = maxDecompressedBytes - decompressedBytes
+      if (remainingDecompressed < 1) throw new Error('History referenced read exceeds decompressed byte limit')
+      const decoded = await decodeGzipNdjsonWithMetadata({
+        bytes,
+        sha256: file.sha256,
+        maxDecompressedBytes: remainingDecompressed,
+      })
+      if (decoded.records.length !== file.records) throw new Error('History referenced asset record count mismatch')
+      assetReads += 1
+      compressedBytes += bytes.byteLength
+      decompressedBytes += decoded.decompressedBytes
+      for (const raw of decoded.records) {
+        recordsExamined += 1
+        if (recordsExamined > maxRecordsExamined) throw new Error('History referenced read exceeds record examination limit')
+        const value = raw as T
+        if (!predicate(value)) continue
+        items.push(value)
+        if (items.length >= limit) {
+          return { items, assetReads, compressedBytes, decompressedBytes, recordsExamined }
+        }
+      }
+    }
+    return { items, assetReads, compressedBytes, decompressedBytes, recordsExamined }
+  }
+
   async list<T = unknown>(options: HistorySegmentReadOptions<T>): Promise<HistorySegmentReadResult<T>> {
     const limit = positive(options.limit, DEFAULT_LIMIT, 'limit')
     if (limit > MAX_RESULT_LIMIT) throw new Error('History segment result limit exceeds maximum')
@@ -142,19 +230,11 @@ export class HistorySegmentChainReader {
     const direction = options.direction ?? 'desc'
     const scope = options.scope ?? '*'
     if (scope.length === 0) throw new Error('History segment read scope must be non-empty')
-    if (options.predicate && options.scope === undefined) {
-      throw new Error('Filtered history segment reads require an explicit cursor scope')
-    }
+    if (options.predicate && options.scope === undefined) throw new Error('Filtered history segment reads require an explicit cursor scope')
     const predicate = options.predicate ?? (() => true)
-    const descriptors = direction === 'asc'
-      ? this.publication.segments
-      : [...this.publication.segments].reverse()
+    const descriptors = direction === 'asc' ? this.publication.segments : [...this.publication.segments].reverse()
     const mode = `history:${options.kind}:${direction}:${scope}`
-    const cursor = decodeArtifactReaderCursor({
-      cursor: options.cursor,
-      mode,
-      term: this.publication.chainId,
-    })
+    const cursor = decodeArtifactReaderCursor({ cursor: options.cursor, mode, term: this.publication.chainId })
     if (cursor.descriptorIndex > descriptors.length) throw new Error('History segment cursor is beyond the publication')
 
     const startedAt = this.#now()
@@ -163,90 +243,46 @@ export class HistorySegmentChainReader {
     let compressedBytes = 0
     let decompressedBytes = 0
     let recordsExamined = 0
-
     const nextCursor = (descriptorIndex: number, lineIndex: number): string => encodeArtifactReaderCursor({
-      schemaVersion: 1,
-      mode,
-      term: this.publication.chainId,
-      descriptorIndex,
-      lineIndex,
+      schemaVersion: 1, mode, term: this.publication.chainId, descriptorIndex, lineIndex,
     })
 
     for (let descriptorIndex = cursor.descriptorIndex; descriptorIndex < descriptors.length; descriptorIndex += 1) {
       const lineStart = descriptorIndex === cursor.descriptorIndex ? cursor.lineIndex : 0
       if (segmentReads >= maxSegmentReads || this.#now() - startedAt >= maxWallTimeMs) {
-        return {
-          items,
-          nextCursor: nextCursor(descriptorIndex, lineStart),
-          complete: false,
-          segmentReads,
-          compressedBytes,
-          decompressedBytes,
-          recordsExamined,
-        }
+        return { items, nextCursor: nextCursor(descriptorIndex, lineStart), complete: false, segmentReads, compressedBytes, decompressedBytes, recordsExamined }
       }
-
       const descriptor = descriptors[descriptorIndex]!
       const manifest = await this.#manifest(descriptor)
       const file = manifest.files.find((entry) => entry.kind === options.kind)
       if (!file) throw new Error(`History segment file kind is unavailable: ${options.kind}`)
       if (file.bytes > maxCompressedBytes - compressedBytes) {
         if (compressedBytes === 0) throw new Error('History segment asset exceeds compressed byte limit')
-        return {
-          items,
-          nextCursor: nextCursor(descriptorIndex, lineStart),
-          complete: false,
-          segmentReads,
-          compressedBytes,
-          decompressedBytes,
-          recordsExamined,
-        }
+        return { items, nextCursor: nextCursor(descriptorIndex, lineStart), complete: false, segmentReads, compressedBytes, decompressedBytes, recordsExamined }
       }
-
       const path = assetPath(descriptor.manifestPath, file.path)
       const bytes = await this.#store.read(path)
       if (!bytes || bytes.byteLength !== file.bytes) throw new Error(`Missing or invalid history segment asset ${path}`)
       const remainingDecompressed = maxDecompressedBytes - decompressedBytes
       if (remainingDecompressed < 1) {
-        return {
-          items,
-          nextCursor: nextCursor(descriptorIndex, lineStart),
-          complete: false,
-          segmentReads,
-          compressedBytes,
-          decompressedBytes,
-          recordsExamined,
-        }
+        return { items, nextCursor: nextCursor(descriptorIndex, lineStart), complete: false, segmentReads, compressedBytes, decompressedBytes, recordsExamined }
       }
-      const decoded = await decodeGzipNdjsonWithMetadata({
-        bytes,
-        sha256: file.sha256,
-        maxDecompressedBytes: remainingDecompressed,
-      })
+      const decoded = await decodeGzipNdjsonWithMetadata({ bytes, sha256: file.sha256, maxDecompressedBytes: remainingDecompressed })
       if (decoded.records.length !== file.records) throw new Error('History segment asset record count mismatch')
       segmentReads += 1
       compressedBytes += bytes.byteLength
       decompressedBytes += decoded.decompressedBytes
-
       const records = direction === 'asc' ? decoded.records : [...decoded.records].reverse()
       if (lineStart > records.length) throw new Error('History segment cursor is beyond the asset')
 
       for (let lineIndex = lineStart; lineIndex < records.length; lineIndex += 1) {
         if (recordsExamined >= maxRecordsExamined || this.#now() - startedAt >= maxWallTimeMs) {
-          return {
-            items,
-            nextCursor: nextCursor(descriptorIndex, lineIndex),
-            complete: false,
-            segmentReads,
-            compressedBytes,
-            decompressedBytes,
-            recordsExamined,
-          }
+          return { items, nextCursor: nextCursor(descriptorIndex, lineIndex), complete: false, segmentReads, compressedBytes, decompressedBytes, recordsExamined }
         }
-        const record = records[lineIndex] as T
+        const value = records[lineIndex] as T
         recordsExamined += 1
-        if (!predicate(record)) continue
-        items.push(record)
+        if (!predicate(value)) continue
+        items.push(value)
         if (items.length >= limit) {
           const assetDone = lineIndex + 1 >= records.length
           const nextDescriptor = assetDone ? descriptorIndex + 1 : descriptorIndex
@@ -263,15 +299,6 @@ export class HistorySegmentChainReader {
         }
       }
     }
-
-    return {
-      items,
-      nextCursor: null,
-      complete: true,
-      segmentReads,
-      compressedBytes,
-      decompressedBytes,
-      recordsExamined,
-    }
+    return { items, nextCursor: null, complete: true, segmentReads, compressedBytes, decompressedBytes, recordsExamined }
   }
 }

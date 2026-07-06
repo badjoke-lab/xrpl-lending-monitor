@@ -9,15 +9,32 @@ export type HistoryExactReferenceKind =
   | 'loan_lifecycle'
   | 'balance_history'
 
+export type HistoryExactSearchResultKind =
+  | 'transaction'
+  | 'object_change'
+  | 'archived_object'
+  | 'loan_lifecycle'
+
+export interface HistoryExactSearchResultMetadata {
+  kind: HistoryExactSearchResultKind
+  epochId: string
+  ledgerIndex: number
+  transactionHash: string
+  objectType: string | null
+  objectId: string | null
+  loanId: string | null
+}
+
 export interface HistoryExactIndexReference {
   kind: HistoryExactReferenceKind
   segmentId: string
   fileKind: HistorySegmentFileKind
   ledgerIndex: number
+  searchResult: HistoryExactSearchResultMetadata | null
 }
 
 export interface HistoryExactIndexRecord {
-  schemaVersion: 1
+  schemaVersion: 2
   bucket: number
   term: string
   reference: HistoryExactIndexReference
@@ -34,7 +51,7 @@ export interface HistoryExactIndexAsset {
 }
 
 export interface HistoryExactIndexManifest {
-  schemaVersion: 1
+  schemaVersion: 2
   network: 'devnet'
   epochId: string
   chainId: string
@@ -65,6 +82,22 @@ const REFERENCE_KINDS = new Set<HistoryExactReferenceKind>([
   'loan_lifecycle',
   'balance_history',
 ])
+const SEARCH_RESULT_KINDS = new Set<HistoryExactSearchResultKind>([
+  'transaction', 'object_change', 'archived_object', 'loan_lifecycle',
+])
+const EXPECTED_FILE_KIND: Record<HistoryExactReferenceKind, HistorySegmentFileKind> = {
+  transaction_event: 'protocol_events',
+  object_change: 'object_changes',
+  archived_object: 'archived_objects',
+  loan_lifecycle: 'loan_lifecycle',
+  balance_history: 'balance_history',
+}
+const EXPECTED_SEARCH_KIND: Record<Exclude<HistoryExactReferenceKind, 'balance_history'>, HistoryExactSearchResultKind> = {
+  transaction_event: 'transaction',
+  object_change: 'object_change',
+  archived_object: 'archived_object',
+  loan_lifecycle: 'loan_lifecycle',
+}
 
 function integer(value: number, field: string, minimum = 0): void {
   if (!Number.isSafeInteger(value) || value < minimum) throw new Error(`${field} is invalid`)
@@ -87,6 +120,23 @@ function safePath(value: string, field: string): void {
   ) throw new Error(`${field} is unsafe`)
 }
 
+function assertSearchResult(reference: HistoryExactIndexReference): void {
+  const result = reference.searchResult
+  if (reference.kind === 'balance_history') {
+    if (result !== null) throw new Error('Balance history exact reference must not expose a search result')
+    return
+  }
+  if (result === null) throw new Error('Searchable exact reference is missing result metadata')
+  if (!SEARCH_RESULT_KINDS.has(result.kind)) throw new Error('History exact search result kind is invalid')
+  if (result.kind !== EXPECTED_SEARCH_KIND[reference.kind]) {
+    throw new Error('History exact search result kind does not match reference kind')
+  }
+  text(result.epochId, 'reference.searchResult.epochId')
+  integer(result.ledgerIndex, 'reference.searchResult.ledgerIndex', 1)
+  text(result.transactionHash, 'reference.searchResult.transactionHash')
+  if (result.ledgerIndex !== reference.ledgerIndex) throw new Error('History exact search ledger mismatch')
+}
+
 export function normalizeHistoryExactTerm(value: string): string {
   const trimmed = value.trim()
   if (trimmed.length === 0) throw new Error('Exact history term must be non-empty')
@@ -103,23 +153,25 @@ export function assertHistoryExactIndexRecord(
   record: HistoryExactIndexRecord,
   bucketCount: number,
 ): void {
-  if (record.schemaVersion !== 1) throw new Error('History exact index record schema is invalid')
+  if (record.schemaVersion !== 2) throw new Error('History exact index record schema is invalid')
   integer(record.bucket, 'record.bucket')
   if (record.bucket >= bucketCount) throw new Error('History exact index record bucket is out of range')
   text(record.term, 'record.term')
   if (!REFERENCE_KINDS.has(record.reference.kind)) throw new Error('History exact index reference kind is invalid')
   text(record.reference.segmentId, 'reference.segmentId')
   if (!FILE_KINDS.has(record.reference.fileKind)) throw new Error('History exact index file kind is invalid')
+  if (record.reference.fileKind !== EXPECTED_FILE_KIND[record.reference.kind]) {
+    throw new Error('History exact file kind does not match reference kind')
+  }
   integer(record.reference.ledgerIndex, 'reference.ledgerIndex', 1)
+  assertSearchResult(record.reference)
 }
 
 export function assertHistoryExactIndexManifest(
   manifest: HistoryExactIndexManifest,
   publication: HistorySegmentChainPublication,
 ): void {
-  if (manifest.schemaVersion !== 1 || manifest.network !== 'devnet') {
-    throw new Error('History exact index manifest schema is invalid')
-  }
+  if (manifest.schemaVersion !== 2 || manifest.network !== 'devnet') throw new Error('History exact index manifest schema is invalid')
   text(manifest.epochId, 'epochId')
   text(manifest.chainId, 'chainId')
   text(manifest.sourceRevision, 'sourceRevision')
@@ -128,17 +180,11 @@ export function assertHistoryExactIndexManifest(
   digest(manifest.manifestSha256, 'manifestSha256')
   integer(manifest.bucketCount, 'bucketCount', 1)
   integer(manifest.totalRecords, 'totalRecords')
-  if (manifest.hashFunction !== 'sha256-first-u32-mod-bucket-count') {
-    throw new Error('Unsupported history exact index hash function')
+  if (manifest.hashFunction !== 'sha256-first-u32-mod-bucket-count') throw new Error('Unsupported history exact index hash function')
+  if (manifest.epochId !== publication.epochId || manifest.chainId !== publication.chainId || manifest.publicationSha256 !== publication.publicationSha256) {
+    throw new Error('History exact index manifest does not match publication identity')
   }
-  if (
-    manifest.epochId !== publication.epochId
-    || manifest.chainId !== publication.chainId
-    || manifest.publicationSha256 !== publication.publicationSha256
-  ) throw new Error('History exact index manifest does not match publication identity')
-  if (manifest.assets.length !== manifest.bucketCount) {
-    throw new Error('History exact index asset count does not match bucket count')
-  }
+  if (manifest.assets.length !== manifest.bucketCount) throw new Error('History exact index asset count does not match bucket count')
   let totalRecords = 0
   const paths = new Set<string>()
   manifest.assets.forEach((asset, index) => {
@@ -150,9 +196,7 @@ export function assertHistoryExactIndexManifest(
     digest(asset.sha256, `assets[${index}].sha256`)
     integer(asset.compressedBytes, `assets[${index}].compressedBytes`, 1)
     integer(asset.recordCount, `assets[${index}].recordCount`)
-    if ((asset.firstTerm === null) !== (asset.lastTerm === null)) {
-      throw new Error('History exact index term bounds must be both present or both null')
-    }
+    if ((asset.firstTerm === null) !== (asset.lastTerm === null)) throw new Error('History exact index term bounds must be both present or both null')
     if (asset.firstTerm !== null) {
       text(asset.firstTerm, `assets[${index}].firstTerm`)
       text(asset.lastTerm!, `assets[${index}].lastTerm`)
@@ -165,8 +209,6 @@ export function assertHistoryExactIndexManifest(
   if (totalRecords !== manifest.totalRecords) throw new Error('History exact index total record count mismatch')
 }
 
-export function historyExactIndexManifestDigest(
-  manifest: HistoryExactIndexManifest,
-): Promise<string> {
+export function historyExactIndexManifestDigest(manifest: HistoryExactIndexManifest): Promise<string> {
   return sha256Hex(`${canonicalJson({ ...manifest, manifestSha256: null })}\n`)
 }
