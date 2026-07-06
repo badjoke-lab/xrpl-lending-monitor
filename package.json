@@ -11,7 +11,7 @@
   "scripts": {
     "dev": "vite",
     "dev:worker": "wrangler dev",
-    "build": "vite build && vite build --config vite.d1-tools.config.ts && vite build --config vite.artifact-measurement.config.ts && vite build --config vite.history-segment.config.ts && vite build --config vite.history-segment-checkpoint.config.ts && vite build --config vite.history-segment-chain.config.ts && vite build --config vite.history-segment-publication.config.ts && vite build --config vite.history-segment-channel.config.ts && vite build --config vite.history-exact-index.config.ts && vite build --config vite.history-exact-rehearsal.config.ts",
+    "build": "vite build && vite build --config vite.d1-tools.config.ts && vite build --config vite.artifact-measurement.config.ts && vite build --config vite.history-segment.config.ts && vite build --config vite.history-segment-checkpoint.config.ts && vite build --config vite.history-segment-chain.config.ts && vite build --config vite.history-segment-publication.config.ts && vite build --config vite.history-segment-channel.config.ts && vite build --config vite.history-exact-index.config.ts && vite build --config vite.history-exact-rehearsal.config.ts && vite build --config vite.history-backfill-plan.config.ts",
     "build:d1-tools": "vite build --config vite.d1-tools.config.ts",
     "build:artifact-measurement": "vite build --config vite.artifact-measurement.config.ts",
     "build:release-current-state": "vite build --config vite.release-current-state.config.ts",
@@ -22,6 +22,7 @@
     "build:history-segment-channel": "vite build --config vite.history-segment-channel.config.ts",
     "build:history-exact-index": "vite build --config vite.history-exact-index.config.ts",
     "build:history-exact-rehearsal": "vite build --config vite.history-exact-rehearsal.config.ts",
+    "build:history-backfill-plan": "vite build --config vite.history-backfill-plan.config.ts",
     "preview": "vite preview --host 127.0.0.1",
     "deploy": "pnpm build && wrangler deploy",
     "lint": "eslint .",
@@ -49,6 +50,8 @@
     "history-exact-index:local": "pnpm build:history-exact-index && node .history-exact-index-build/build-history-exact-index.mjs --local",
     "history-exact-rehearsal:build": "pnpm build:history-exact-rehearsal",
     "history-exact-rehearsal:local": "pnpm build:history-exact-rehearsal && node .history-exact-rehearsal-build/rehearse-history-exact-lookups.mjs --local",
+    "history-backfill-plan:build": "pnpm build:history-backfill-plan",
+    "history-backfill-plan:local": "pnpm build:history-backfill-plan && node .history-backfill-plan-build/plan-history-backfill.mjs --local",
     "types:worker": "wrangler types",
     "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm db:migrate:local && pnpm build"
   },
