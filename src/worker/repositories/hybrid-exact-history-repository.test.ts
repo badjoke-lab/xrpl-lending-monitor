@@ -90,12 +90,12 @@ function db(): D1Database {
 }
 
 describe('hybrid exact history repository', () => {
-  it('prefers later live event and merges changes across boundary', async () => {
+  it('prefers later live event and suppresses duplicate change identity across boundary', async () => {
     const result = await getHybridTransactionDetail({
       db: db(), reader: reader(), exactIndex: exactIndex(), transactionHash: 'TX1',
     })
     expect(result.event?.ledgerIndex).toBe(106)
-    expect(result.changes.map((change) => change.ledgerIndex)).toEqual([106, 105])
+    expect(result.changes.map((change) => change.ledgerIndex)).toEqual([106])
   })
 
   it('merges live and immutable search results newest first', async () => {
