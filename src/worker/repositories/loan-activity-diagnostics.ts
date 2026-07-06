@@ -1,3 +1,5 @@
+import { readContinuationScopeBoundary } from './continuation-scope'
+
 interface LoanActivityRow {
   total: number
   latest_ledger: number | null
@@ -9,10 +11,6 @@ interface LoanActivityRow {
   loan_manage_latest_ledger: number | null
   loan_delete: number
   loan_delete_latest_ledger: number | null
-}
-
-interface EpochRow {
-  epoch_id: string | null
 }
 
 function numberValue(value: number | null | undefined): number {
@@ -33,32 +31,27 @@ export interface LoanActivityDiagnostics {
   loanDeleteLatestLedger: number | null
 }
 
+function empty(): LoanActivityDiagnostics {
+  return {
+    epochId: null,
+    total: 0,
+    latestLedger: null,
+    loanSet: 0,
+    loanSetLatestLedger: null,
+    loanPay: 0,
+    loanPayLatestLedger: null,
+    loanManage: 0,
+    loanManageLatestLedger: null,
+    loanDelete: 0,
+    loanDeleteLatestLedger: null,
+  }
+}
+
 export async function readLoanActivityDiagnostics(
   db: D1Database,
 ): Promise<LoanActivityDiagnostics> {
-  const epoch = await db.prepare(
-    `SELECT epoch_id
-     FROM sync_state
-     WHERE network = 'devnet'
-     LIMIT 1`,
-  ).first<EpochRow>()
-  const epochId = epoch?.epoch_id ?? null
-
-  if (!epochId) {
-    return {
-      epochId: null,
-      total: 0,
-      latestLedger: null,
-      loanSet: 0,
-      loanSetLatestLedger: null,
-      loanPay: 0,
-      loanPayLatestLedger: null,
-      loanManage: 0,
-      loanManageLatestLedger: null,
-      loanDelete: 0,
-      loanDeleteLatestLedger: null,
-    }
-  }
+  const scope = await readContinuationScopeBoundary(db)
+  if (!scope) return empty()
 
   const row = await db.prepare(
     `SELECT
@@ -73,11 +66,11 @@ export async function readLoanActivityDiagnostics(
        COALESCE(SUM(CASE WHEN event_type = 'LoanDelete' THEN 1 ELSE 0 END), 0) AS loan_delete,
        MAX(CASE WHEN event_type = 'LoanDelete' THEN ledger_index END) AS loan_delete_latest_ledger
      FROM protocol_events
-     WHERE network = 'devnet' AND epoch_id = ?1`,
-  ).bind(epochId).first<LoanActivityRow>()
+     WHERE network = 'devnet' AND epoch_id = ?1 AND ledger_index > ?2`,
+  ).bind(scope.epochId, scope.baseLedgerIndex).first<LoanActivityRow>()
 
   return {
-    epochId,
+    epochId: scope.epochId,
     total: numberValue(row?.total),
     latestLedger: row?.latest_ledger ?? null,
     loanSet: numberValue(row?.loan_set),

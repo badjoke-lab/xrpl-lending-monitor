@@ -11,6 +11,8 @@ interface SyncRow {
 interface OverlayRow {
   epoch_id: string
   base_snapshot_id: string
+  base_ledger_index: number
+  base_ledger_hash: string
   overlay_ledger_index: number
   overlay_ledger_hash: string
 }
@@ -86,7 +88,8 @@ export async function readLiveContinuationEvidence(
        LIMIT 1`,
     ).first<SyncRow>(),
     db.prepare(
-      `SELECT epoch_id, base_snapshot_id, overlay_ledger_index, overlay_ledger_hash
+      `SELECT epoch_id, base_snapshot_id, base_ledger_index, base_ledger_hash,
+              overlay_ledger_index, overlay_ledger_hash
        FROM current_state_overlay_state
        WHERE network = 'devnet'
        ORDER BY updated_at DESC
@@ -102,34 +105,43 @@ export async function readLiveContinuationEvidence(
 
   const epochId = sync?.epoch_id ?? ''
   const baseSnapshotId = overlay?.base_snapshot_id ?? ''
+  const baseLedgerIndex = overlay?.base_ledger_index ?? -1
+  const baseLedgerHash = overlay?.base_ledger_hash ?? ''
 
   const [processed, actions, overlayObjects, protocol, lifecycle, archives, tombstoneArchives, balances] =
     await Promise.all([
       db.prepare(
-        `WITH ordered AS (
-           SELECT ledger_index, ledger_hash, parent_hash,
+        `WITH source AS (
+           SELECT ?2 AS ledger_index, ?3 AS ledger_hash, '' AS parent_hash, 1 AS anchor
+           UNION ALL
+           SELECT ledger_index, ledger_hash, parent_hash, 0 AS anchor
+           FROM processed_ledgers
+           WHERE network = 'devnet' AND epoch_id = ?1 AND ledger_index > ?2
+         ), ordered AS (
+           SELECT ledger_index, ledger_hash, parent_hash, anchor,
                   LAG(ledger_index) OVER (ORDER BY ledger_index) AS previous_index,
                   LAG(ledger_hash) OVER (ORDER BY ledger_index) AS previous_hash
-           FROM processed_ledgers
-           WHERE network = 'devnet' AND epoch_id = ?1
+           FROM source
          )
-         SELECT COUNT(*) AS count,
-                MIN(ledger_index) AS minimum,
-                MAX(ledger_index) AS maximum,
+         SELECT COALESCE(SUM(CASE WHEN anchor = 0 THEN 1 ELSE 0 END), 0) AS count,
+                MIN(CASE WHEN anchor = 0 THEN ledger_index END) AS minimum,
+                MAX(CASE WHEN anchor = 0 THEN ledger_index END) AS maximum,
                 COALESCE(SUM(
                   CASE
-                    WHEN previous_index IS NOT NULL
+                    WHEN anchor = 0
+                     AND previous_index IS NOT NULL
                      AND (ledger_index <> previous_index + 1 OR parent_hash <> previous_hash)
                     THEN 1 ELSE 0
                   END
                 ), 0) AS discontinuities
          FROM ordered`,
-      ).bind(epochId).first<ProcessedRow>(),
+      ).bind(epochId, baseLedgerIndex, baseLedgerHash).first<ProcessedRow>(),
       db.prepare(
         `WITH distinct_actions AS (
            SELECT DISTINCT transaction_hash, node_index, object_id, action
            FROM object_changes
            WHERE network = 'devnet' AND epoch_id = ?1
+             AND ledger_index > ?2
              AND object_type IN ('Vault', 'LoanBroker', 'Loan')
          )
          SELECT
@@ -137,7 +149,7 @@ export async function readLiveContinuationEvidence(
            COALESCE(SUM(CASE WHEN action = 'modified' THEN 1 ELSE 0 END), 0) AS modified,
            COALESCE(SUM(CASE WHEN action = 'deleted' THEN 1 ELSE 0 END), 0) AS deleted
          FROM distinct_actions`,
-      ).bind(epochId).first<ActionRow>(),
+      ).bind(epochId, baseLedgerIndex).first<ActionRow>(),
       db.prepare(
         `SELECT
            COALESCE(SUM(CASE WHEN o.operation = 'upsert' THEN 1 ELSE 0 END), 0) AS upserts,
@@ -149,6 +161,7 @@ export async function readLiveContinuationEvidence(
                  AND c.epoch_id = o.epoch_id
                  AND c.object_id = o.object_id
                  AND c.action = 'created'
+                 AND c.ledger_index > ?3
              ) THEN 1 ELSE 0 END), 0) AS created_matches,
            COALESCE(SUM(CASE
              WHEN o.operation = 'upsert' AND EXISTS (
@@ -157,17 +170,18 @@ export async function readLiveContinuationEvidence(
                  AND c.epoch_id = o.epoch_id
                  AND c.object_id = o.object_id
                  AND c.action = 'modified'
+                 AND c.ledger_index > ?3
              ) THEN 1 ELSE 0 END), 0) AS modified_matches
          FROM current_state_overlay_objects o
          WHERE o.network = 'devnet' AND o.epoch_id = ?1 AND o.base_snapshot_id = ?2`,
-      ).bind(epochId, baseSnapshotId).first<OverlayObjectRow>(),
+      ).bind(epochId, baseSnapshotId, baseLedgerIndex).first<OverlayObjectRow>(),
       db.prepare(
         `SELECT COUNT(*) AS total,
                 COALESCE(SUM(CASE WHEN event_type = 'LoanPay' THEN 1 ELSE 0 END), 0) AS loan_pay,
                 COALESCE(SUM(CASE WHEN event_type = 'LoanManage' THEN 1 ELSE 0 END), 0) AS loan_manage
          FROM protocol_events
-         WHERE network = 'devnet' AND epoch_id = ?1`,
-      ).bind(epochId).first<ProtocolRow>(),
+         WHERE network = 'devnet' AND epoch_id = ?1 AND ledger_index > ?2`,
+      ).bind(epochId, baseLedgerIndex).first<ProtocolRow>(),
       db.prepare(
         `SELECT COUNT(*) AS total,
                 COALESCE(SUM(CASE WHEN event_type = 'payment' THEN 1 ELSE 0 END), 0) AS payment,
@@ -177,8 +191,8 @@ export async function readLiveContinuationEvidence(
                 COALESCE(SUM(CASE WHEN event_type = 'defaulted' THEN 1 ELSE 0 END), 0) AS defaulted,
                 COALESCE(SUM(CASE WHEN event_type = 'deleted' THEN 1 ELSE 0 END), 0) AS deleted
          FROM loan_lifecycle_events
-         WHERE network = 'devnet' AND epoch_id = ?1`,
-      ).bind(epochId).first<LifecycleRow>(),
+         WHERE network = 'devnet' AND epoch_id = ?1 AND ledger_index > ?2`,
+      ).bind(epochId, baseLedgerIndex).first<LifecycleRow>(),
       db.prepare(
         `SELECT COUNT(*) AS total,
                 COALESCE(SUM(CASE WHEN NOT EXISTS (
@@ -190,8 +204,8 @@ export async function readLiveContinuationEvidence(
                     AND o.operation = 'deleted'
                 ) THEN 1 ELSE 0 END), 0) AS missing_tombstones
          FROM archived_objects a
-         WHERE a.network = 'devnet' AND a.epoch_id = ?1`,
-      ).bind(epochId, baseSnapshotId).first<ArchiveRow>(),
+         WHERE a.network = 'devnet' AND a.epoch_id = ?1 AND a.deletion_ledger_index > ?3`,
+      ).bind(epochId, baseSnapshotId, baseLedgerIndex).first<ArchiveRow>(),
       db.prepare(
         `SELECT COUNT(*) AS tombstones_missing_archive
          FROM current_state_overlay_objects o
@@ -204,13 +218,14 @@ export async function readLiveContinuationEvidence(
              WHERE a.network = o.network
                AND a.epoch_id = o.epoch_id
                AND a.object_id = o.object_id
+               AND a.deletion_ledger_index > ?3
            )`,
-      ).bind(epochId, baseSnapshotId).first<TombstoneArchiveRow>(),
+      ).bind(epochId, baseSnapshotId, baseLedgerIndex).first<TombstoneArchiveRow>(),
       db.prepare(
         `SELECT COUNT(*) AS total
          FROM balance_history
-         WHERE network = 'devnet' AND epoch_id = ?1`,
-      ).bind(epochId).first<CountRow>(),
+         WHERE network = 'devnet' AND epoch_id = ?1 AND ledger_index > ?2`,
+      ).bind(epochId, baseLedgerIndex).first<CountRow>(),
     ])
 
   return {

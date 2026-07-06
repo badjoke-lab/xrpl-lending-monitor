@@ -1,6 +1,4 @@
-interface EpochRow {
-  epoch_id: string | null
-}
+import { readContinuationScopeBoundary } from './continuation-scope'
 
 interface ManagedTransitionSourceRow {
   impaired: number
@@ -25,28 +23,23 @@ export interface ManagedTransitionSourceDiagnostics {
   defaultedLatestLedger: number | null
 }
 
+function empty(): ManagedTransitionSourceDiagnostics {
+  return {
+    epochId: null,
+    impaired: 0,
+    impairedLatestLedger: null,
+    unimpaired: 0,
+    unimpairedLatestLedger: null,
+    defaulted: 0,
+    defaultedLatestLedger: null,
+  }
+}
+
 export async function readManagedTransitionSourceDiagnostics(
   db: D1Database,
 ): Promise<ManagedTransitionSourceDiagnostics> {
-  const epoch = await db.prepare(
-    `SELECT epoch_id
-     FROM sync_state
-     WHERE network = 'devnet'
-     LIMIT 1`,
-  ).first<EpochRow>()
-  const epochId = epoch?.epoch_id ?? null
-
-  if (!epochId) {
-    return {
-      epochId: null,
-      impaired: 0,
-      impairedLatestLedger: null,
-      unimpaired: 0,
-      unimpairedLatestLedger: null,
-      defaulted: 0,
-      defaultedLatestLedger: null,
-    }
-  }
+  const scope = await readContinuationScopeBoundary(db)
+  if (!scope) return empty()
 
   const row = await db.prepare(
     `WITH flag_changes AS (
@@ -56,6 +49,7 @@ export async function readManagedTransitionSourceDiagnostics(
        FROM object_changes
        WHERE network = 'devnet'
          AND epoch_id = ?1
+         AND ledger_index > ?2
          AND transaction_type = 'LoanManage'
          AND object_type = 'Loan'
          AND action = 'modified'
@@ -95,10 +89,10 @@ export async function readManagedTransitionSourceDiagnostics(
           AND (before_flags & 65536) = 0
          THEN ledger_index END) AS defaulted_latest_ledger
      FROM flag_changes`,
-  ).bind(epochId).first<ManagedTransitionSourceRow>()
+  ).bind(scope.epochId, scope.baseLedgerIndex).first<ManagedTransitionSourceRow>()
 
   return {
-    epochId,
+    epochId: scope.epochId,
     impaired: numberValue(row?.impaired),
     impairedLatestLedger: row?.impaired_latest_ledger ?? null,
     unimpaired: numberValue(row?.unimpaired),
