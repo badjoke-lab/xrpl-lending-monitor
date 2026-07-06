@@ -10,6 +10,8 @@ const validEnvironment = {
 
 const defaultCurrentState = {
   githubRepository: null,
+  githubBranch: 'current-state-data',
+  replacement: null,
   releaseChannelTag: 'current-state-channel',
   maxAssetBytes: 8 * 1024 * 1024,
   maxDecompressedBytes: 16 * 1024 * 1024,
@@ -62,6 +64,9 @@ describe('resolveRuntimeConfig', () => {
     const config = resolveRuntimeConfig({
       ...validEnvironment,
       CURRENT_STATE_GITHUB_REPOSITORY: 'badjoke-lab/xrpl-lending-monitor',
+      CURRENT_STATE_GITHUB_BRANCH: 'current-state-devnet',
+      CURRENT_STATE_REPLACEMENT_SNAPSHOT_ID: 'devnet-3432924-canonical',
+      CURRENT_STATE_REPLACEMENT_GITHUB_BRANCH: 'current-state-candidate-data',
       CURRENT_STATE_RELEASE_CHANNEL_TAG: 'current-state-devnet',
       CURRENT_STATE_MAX_ASSET_BYTES: '12345',
       CURRENT_STATE_MAX_DECOMPRESSED_BYTES: '45678',
@@ -69,10 +74,22 @@ describe('resolveRuntimeConfig', () => {
 
     expect(config.currentState).toEqual({
       githubRepository: 'badjoke-lab/xrpl-lending-monitor',
+      githubBranch: 'current-state-devnet',
+      replacement: {
+        snapshotId: 'devnet-3432924-canonical',
+        githubBranch: 'current-state-candidate-data',
+      },
       releaseChannelTag: 'current-state-devnet',
       maxAssetBytes: 12345,
       maxDecompressedBytes: 45678,
     })
+  })
+
+  it('rejects incomplete replacement current-state mapping', () => {
+    expect(() => resolveRuntimeConfig({
+      ...validEnvironment,
+      CURRENT_STATE_REPLACEMENT_SNAPSHOT_ID: 'devnet-3432924-canonical',
+    })).toThrow('must be configured together')
   })
 
   it('accepts explicit hybrid history settings', () => {
@@ -134,7 +151,11 @@ describe('resolveRuntimeConfig', () => {
     })).toThrow('HISTORY_MAX_ASSET_BYTES must be a positive integer')
   })
 
-  it('rejects unsafe history branch and channel paths', () => {
+  it('rejects unsafe branch and channel paths', () => {
+    expect(() => resolveRuntimeConfig({
+      ...validEnvironment,
+      CURRENT_STATE_GITHUB_BRANCH: 'current/state',
+    })).toThrow('CURRENT_STATE_GITHUB_BRANCH is invalid')
     expect(() => resolveRuntimeConfig({
       ...validEnvironment,
       HISTORY_GITHUB_BRANCH: 'history/devnet',
