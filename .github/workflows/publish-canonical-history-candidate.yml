@@ -1,0 +1,106 @@
+name: Publish canonical history candidate
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/publish-canonical-history-candidate.yml'
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: canonical-history-candidate-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Download complete canonical history artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: canonical-history-full-chain
+          path: .local/canonical-full
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: 28797313657
+
+      - name: Verify complete-chain evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          SUMMARY=.local/canonical-full/full-chain-measurement-summary.json
+          test -f "$SUMMARY"
+          test "$(jq -r .passed "$SUMMARY")" = "true"
+          test "$(jq -r .stageStartLedgerIndex "$SUMMARY")" = "3371676"
+          test "$(jq -r .stageEndLedgerIndex "$SUMMARY")" = "3432924"
+          test "$(jq -r .segmentCount "$SUMMARY")" = "123"
+          test "$(jq -r .checkpointNextLedgerIndex "$SUMMARY")" = "3432925"
+          test -f .local/canonical-full/history/publication.json
+          test -f .local/canonical-full/history/index/exact/manifest.json
+
+      - name: Build history channel tool
+        run: |
+          pnpm history-segment-channel:build
+          cp .history-segment-channel-build/build-history-segment-channel.mjs /tmp/build-history-segment-channel.mjs
+
+      - name: Stage candidate payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/history-candidate
+          mkdir -p /tmp/history-candidate
+          cp -R .local/canonical-full/history /tmp/history-candidate/history
+          cp .local/canonical-full/full-chain-measurement-summary.json /tmp/history-candidate/full-chain-measurement-summary.json
+          cp .local/canonical-full/full-exact-rehearsal-summary.json /tmp/history-candidate/full-exact-rehearsal-summary.json
+
+      - name: Publish immutable candidate data and channel
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git checkout --orphan history-candidate-publish
+          git rm -rf . || true
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -R /tmp/history-candidate/. .
+          git add history full-chain-measurement-summary.json full-exact-rehearsal-summary.json
+          git commit -m "Publish canonical history candidate data"
+          DATA_SHA=$(git rev-parse HEAD)
+
+          node /tmp/build-history-segment-channel.mjs \
+            --local \
+            --publication history/publication.json \
+            --publication-path history/publication.json \
+            --exact-index-manifest history/index/exact/manifest.json \
+            --exact-index-manifest-path history/index/exact/manifest.json \
+            --data-commit-sha "$DATA_SHA" \
+            --output history-channel.json
+
+          git add history-channel.json
+          git commit -m "Activate canonical history candidate channel"
+          git push --force origin HEAD:refs/heads/history-candidate-data
+
+      - name: Verify candidate branch head
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          CHANNEL=$(gh api "repos/${GITHUB_REPOSITORY}/contents/history-channel.json?ref=history-candidate-data" --jq .content | tr -d '\n' | base64 -d)
+          test "$(jq -r .active.chainId <<<"$CHANNEL")" = "canonical-devnet-3371676-3432924"
+          test "$(jq -r .active.epochId <<<"$CHANNEL")" = "devnet-3371675"
+          test "$(jq -r .active.exactIndex.manifestPath <<<"$CHANNEL")" = "history/index/exact/manifest.json"
