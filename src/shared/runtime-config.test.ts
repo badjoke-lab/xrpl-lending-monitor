@@ -15,6 +15,14 @@ const defaultCurrentState = {
   maxDecompressedBytes: 16 * 1024 * 1024,
 }
 
+const defaultHistory = {
+  githubRepository: null,
+  githubBranch: 'history-data',
+  channelPath: 'history-channel.json',
+  maxAssetBytes: 32 * 1024 * 1024,
+  fetchTimeoutMs: 8_000,
+}
+
 describe('resolveRuntimeConfig', () => {
   it('accepts the approved Devnet status configuration', () => {
     expect(resolveRuntimeConfig(validEnvironment)).toEqual({
@@ -24,6 +32,7 @@ describe('resolveRuntimeConfig', () => {
       rpcTimeoutMs: 8000,
       staleAfterSeconds: 30,
       currentState: defaultCurrentState,
+      history: defaultHistory,
     })
   })
 
@@ -45,6 +54,7 @@ describe('resolveRuntimeConfig', () => {
       rpcTimeoutMs: 5000,
       staleAfterSeconds: 45,
       currentState: defaultCurrentState,
+      history: defaultHistory,
     })
   })
 
@@ -65,6 +75,25 @@ describe('resolveRuntimeConfig', () => {
     })
   })
 
+  it('accepts explicit hybrid history settings', () => {
+    const config = resolveRuntimeConfig({
+      ...validEnvironment,
+      HISTORY_GITHUB_REPOSITORY: 'badjoke-lab/xrpl-lending-monitor',
+      HISTORY_GITHUB_BRANCH: 'history-devnet',
+      HISTORY_CHANNEL_PATH: 'history/channel.json',
+      HISTORY_MAX_ASSET_BYTES: '123456',
+      HISTORY_FETCH_TIMEOUT_MS: '4321',
+    })
+
+    expect(config.history).toEqual({
+      githubRepository: 'badjoke-lab/xrpl-lending-monitor',
+      githubBranch: 'history-devnet',
+      channelPath: 'history/channel.json',
+      maxAssetBytes: 123456,
+      fetchTimeoutMs: 4321,
+    })
+  })
+
   it('deduplicates identical endpoints', () => {
     const config = resolveRuntimeConfig({
       ...validEnvironment,
@@ -74,41 +103,45 @@ describe('resolveRuntimeConfig', () => {
   })
 
   it('rejects Mainnet settings', () => {
-    expect(() =>
-      resolveRuntimeConfig({ ...validEnvironment, APP_NETWORK: 'mainnet' }),
-    ).toThrow('APP_NETWORK must remain devnet')
-
-    expect(() =>
-      resolveRuntimeConfig({ ...validEnvironment, MAINNET_ENABLED: 'true' }),
-    ).toThrow('MAINNET_ENABLED must remain false')
+    expect(() => resolveRuntimeConfig({ ...validEnvironment, APP_NETWORK: 'mainnet' }))
+      .toThrow('APP_NETWORK must remain devnet')
+    expect(() => resolveRuntimeConfig({ ...validEnvironment, MAINNET_ENABLED: 'true' }))
+      .toThrow('MAINNET_ENABLED must remain false')
   })
 
   it('rejects insecure endpoints', () => {
-    expect(() =>
-      resolveRuntimeConfig({
-        ...validEnvironment,
-        XRPL_DEVNET_RPC_URL: 'http://localhost:51234',
-      }),
-    ).toThrow('XRPL_DEVNET_RPC_URL must use HTTPS')
+    expect(() => resolveRuntimeConfig({
+      ...validEnvironment,
+      XRPL_DEVNET_RPC_URL: 'http://localhost:51234',
+    })).toThrow('XRPL_DEVNET_RPC_URL must use HTTPS')
 
-    expect(() =>
-      resolveRuntimeConfig({
-        ...validEnvironment,
-        XRPL_DEVNET_RPC_FALLBACK_URL: 'http://fallback.example',
-      }),
-    ).toThrow('XRPL_DEVNET_RPC_FALLBACK_URL must use HTTPS')
+    expect(() => resolveRuntimeConfig({
+      ...validEnvironment,
+      XRPL_DEVNET_RPC_FALLBACK_URL: 'http://fallback.example',
+    })).toThrow('XRPL_DEVNET_RPC_FALLBACK_URL must use HTTPS')
   })
 
   it('rejects invalid numeric limits', () => {
-    expect(() =>
-      resolveRuntimeConfig({ ...validEnvironment, XRPL_RPC_TIMEOUT_MS: '0' }),
-    ).toThrow('XRPL_RPC_TIMEOUT_MS must be a positive integer')
+    expect(() => resolveRuntimeConfig({ ...validEnvironment, XRPL_RPC_TIMEOUT_MS: '0' }))
+      .toThrow('XRPL_RPC_TIMEOUT_MS must be a positive integer')
+    expect(() => resolveRuntimeConfig({
+      ...validEnvironment,
+      NETWORK_STATUS_STALE_AFTER_SECONDS: '1.5',
+    })).toThrow('NETWORK_STATUS_STALE_AFTER_SECONDS must be a positive integer')
+    expect(() => resolveRuntimeConfig({
+      ...validEnvironment,
+      HISTORY_MAX_ASSET_BYTES: '0',
+    })).toThrow('HISTORY_MAX_ASSET_BYTES must be a positive integer')
+  })
 
-    expect(() =>
-      resolveRuntimeConfig({
-        ...validEnvironment,
-        NETWORK_STATUS_STALE_AFTER_SECONDS: '1.5',
-      }),
-    ).toThrow('NETWORK_STATUS_STALE_AFTER_SECONDS must be a positive integer')
+  it('rejects unsafe history branch and channel paths', () => {
+    expect(() => resolveRuntimeConfig({
+      ...validEnvironment,
+      HISTORY_GITHUB_BRANCH: 'history/devnet',
+    })).toThrow('HISTORY_GITHUB_BRANCH is invalid')
+    expect(() => resolveRuntimeConfig({
+      ...validEnvironment,
+      HISTORY_CHANNEL_PATH: '../history-channel.json',
+    })).toThrow('HISTORY_CHANNEL_PATH must be a safe relative path')
   })
 })
