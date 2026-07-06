@@ -9,6 +9,7 @@ import {
   sha256Hex,
   utf8,
 } from '../src/shared/current-state/canonical-json'
+import { historySegmentJsonValue } from '../src/shared/history-segments/json-safe'
 import {
   assertHistorySegmentManifest,
   type HistorySegmentFile,
@@ -123,7 +124,9 @@ async function writeRecords(options: {
 }): Promise<HistorySegmentFile> {
   const text = options.records.length === 0
     ? ''
-    : `${options.records.map((record) => canonicalJson(record)).join('\n')}\n`
+    : `${options.records
+      .map((record) => canonicalJson(historySegmentJsonValue(record)))
+      .join('\n')}\n`
   const compressed = await gzipDeterministic(utf8(text))
   await writeFile(join(options.outputDir, options.fileName), compressed)
   return {
