@@ -67,7 +67,7 @@ function db(): D1Database {
           } as T
         },
         async all<T>() {
-          if (sql.startsWith('SELECT * FROM object_changes')) {
+          if (sql.includes('SELECT * FROM object_changes')) {
             return { results: [{
               transaction_hash: 'TX1', epoch_id: 'epoch-live', ledger_index: 106, transaction_index: 1,
               transaction_type: 'LoanPay', result_code: 'tesSUCCESS', close_time: 800_000_001,
