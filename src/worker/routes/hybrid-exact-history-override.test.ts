@@ -97,9 +97,9 @@ describe('hybrid exact history override', () => {
       new Request('https://example.test/api/search?q=LOAN1&limit=10'), env(),
     )
     expect(response?.status).toBe(200)
-    const body = await response?.json() as { history: { data: unknown[] }; query: string }
+    const body = await response?.json() as { data: unknown[]; query: string }
     expect(body.query).toBe('LOAN1')
-    expect(body.history.data).toHaveLength(1)
+    expect(body.data).toHaveLength(1)
     expect(currentSearch).not.toHaveBeenCalled()
   })
 })
