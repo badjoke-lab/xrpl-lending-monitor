@@ -54,7 +54,7 @@ async function main(): Promise<void> {
   const args = process.argv.slice(2)
   if (!args.includes('--local')) throw new Error('History segment chain verification requires --local')
 
-  const manifestPaths = argumentValues(args, '--manifest').map(resolve)
+  const manifestPaths = argumentValues(args, '--manifest').map((path) => resolve(path))
   if (manifestPaths.length === 0) throw new Error('At least one --manifest is required')
 
   const previousSegmentId = argumentValue(args, '--previous-segment-id')
