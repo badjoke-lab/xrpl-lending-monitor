@@ -1,0 +1,40 @@
+name: Generate HYB-7 managed transition evidence
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare isolated runtime
+        run: |
+          mkdir -p /tmp/hyb7
+          cp scripts/devnet-hyb7-managed-evidence.mjs /tmp/hyb7/runner.mjs
+          cd /tmp/hyb7
+          npm init -y
+          npm install --no-package-lock --no-save xrpl@4.6.0
+      - name: Run Devnet evidence flow
+        env:
+          XRPL_DEVNET_WS: wss://s.devnet.rippletest.net:51233
+          HYB7_EVIDENCE_OUTPUT: /tmp/hyb7/evidence.json
+        run: |
+          cd /tmp/hyb7
+          node runner.mjs | tee run.log
+      - name: Validate evidence
+        run: |
+          jq -e '.network == "devnet" and ([.transactions[] | select(.label == "LoanManage impair" and .result == "tesSUCCESS")] | length == 1) and ([.transactions[] | select(.label == "LoanManage unimpair" and .result == "tesSUCCESS")] | length == 1) and ([.transactions[] | select(.label == "LoanManage default" and .result == "tesSUCCESS")] | length == 1)' /tmp/hyb7/evidence.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hyb7-managed-transition-evidence
+          path: |
+            /tmp/hyb7/evidence.json
+            /tmp/hyb7/run.log
+          if-no-files-found: warn
+          retention-days: 30
