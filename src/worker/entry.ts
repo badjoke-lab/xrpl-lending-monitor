@@ -14,6 +14,7 @@ import {
   diagnoseM1RuntimeExit,
   reviewM1RuntimeExit,
 } from './operator/m1-runtime-exit'
+import { resolveHistorySource } from './repositories/history-source'
 import { getIncrementalCollectorState } from './repositories/incremental-collector-state'
 import { getSyncState } from './repositories/network-status-repository'
 import { openConfiguredReleaseCurrentState } from './repositories/release-current-state'
@@ -23,6 +24,44 @@ import { serializeCollectorStatus } from './serializers/collector-status'
 const worker: ExportedHandler<Bindings> = {
   async fetch(request, env, executionContext) {
     const url = new URL(request.url)
+    if (request.method === 'GET' && url.pathname === '/api/status/history-source') {
+      const runtimeConfig = resolveRuntimeConfig(env)
+      const history = await resolveHistorySource(runtimeConfig)
+      if (history.kind === 'unavailable') {
+        return Response.json({
+          status: 'unavailable',
+          mode: 'hybrid',
+          configured: true,
+          reason: history.unavailableReason,
+        }, { status: 503 })
+      }
+      if (history.kind === 'd1') {
+        return Response.json({
+          status: 'ok',
+          mode: 'd1',
+          configured: false,
+          chain: null,
+        })
+      }
+      return Response.json({
+        status: 'ok',
+        mode: 'hybrid',
+        configured: true,
+        channel: {
+          updated_at: history.channel.updatedAt,
+          data_commit_sha: history.channel.active.dataCommitSha,
+        },
+        chain: {
+          chain_id: history.publication.chainId,
+          epoch_id: history.publication.epochId,
+          start_ledger_index: history.publication.startLedgerIndex,
+          end_ledger_index: history.publication.endLedgerIndex,
+          segment_count: history.publication.segmentCount,
+          ledger_count: history.publication.ledgerCount,
+          publication_sha256: history.publication.publicationSha256,
+        },
+      })
+    }
     if (request.method === 'GET' && url.pathname === '/api/status/collector') {
       const runtimeConfig = resolveRuntimeConfig(env)
       const [collector, sync] = await Promise.all([
