@@ -74,17 +74,12 @@ export function planReplacementBaseRebase(options: {
   }
 
   const targetStates = evidence.overlayStates.filter((state) => sameBase(state, target))
-  if (
-    sync.lastProcessedLedger === target.ledgerIndex
-    && sync.lastProcessedHash === target.ledgerHash
-  ) {
-    if (targetStates.length !== 1) {
-      throw new Error('Replayed replacement base is missing one aligned target overlay state')
-    }
+
+  if (sync.lastProcessedLedger >= target.ledgerIndex && targetStates.length === 1) {
     const targetState = targetStates[0]!
     if (
-      targetState.overlayLedgerIndex !== target.ledgerIndex
-      || targetState.overlayLedgerHash !== target.ledgerHash
+      targetState.overlayLedgerIndex !== sync.lastProcessedLedger
+      || targetState.overlayLedgerHash !== sync.lastProcessedHash
     ) {
       throw new Error('Replayed replacement base target overlay watermark is inconsistent')
     }
