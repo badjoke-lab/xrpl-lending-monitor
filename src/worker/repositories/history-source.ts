@@ -3,14 +3,22 @@ import {
   openGithubHistorySegmentChain,
   type HistorySegmentChannel,
 } from '../../shared/history-segments/channel'
+import type { HistoryExactIndexManifest } from '../../shared/history-segments/exact-index'
+import type { HistoryExactIndexReader } from '../../shared/history-segments/exact-index-reader'
 import type { HistorySegmentChainPublication } from '../../shared/history-segments/publication'
 import type { HistorySegmentChainReader } from '../../shared/history-segments/reader'
+
+export interface ResolvedHistoryExactIndex {
+  manifest: HistoryExactIndexManifest
+  reader: HistoryExactIndexReader
+}
 
 export type ResolvedHistorySource =
   | {
       kind: 'd1'
       configured: false
       reader: null
+      exactIndex: null
       channel: null
       publication: null
       unavailableReason: null
@@ -19,6 +27,7 @@ export type ResolvedHistorySource =
       kind: 'hybrid'
       configured: true
       reader: HistorySegmentChainReader
+      exactIndex: ResolvedHistoryExactIndex | null
       channel: HistorySegmentChannel
       publication: HistorySegmentChainPublication
       unavailableReason: null
@@ -27,6 +36,7 @@ export type ResolvedHistorySource =
       kind: 'unavailable'
       configured: true
       reader: null
+      exactIndex: null
       channel: null
       publication: null
       unavailableReason: 'history_source_integrity_error'
@@ -42,6 +52,7 @@ export async function resolveHistorySource(
       kind: 'd1',
       configured: false,
       reader: null,
+      exactIndex: null,
       channel: null,
       publication: null,
       unavailableReason: null,
@@ -61,6 +72,7 @@ export async function resolveHistorySource(
       kind: 'hybrid',
       configured: true,
       reader: opened.reader,
+      exactIndex: opened.exactIndex,
       channel: opened.channel,
       publication: opened.publication,
       unavailableReason: null,
@@ -70,6 +82,7 @@ export async function resolveHistorySource(
       kind: 'unavailable',
       configured: true,
       reader: null,
+      exactIndex: null,
       channel: null,
       publication: null,
       unavailableReason: 'history_source_integrity_error',

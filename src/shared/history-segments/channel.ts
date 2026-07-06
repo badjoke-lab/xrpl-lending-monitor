@@ -2,6 +2,12 @@ import type { ArtifactMetadata, ArtifactStore } from '../current-state/artifact-
 import { sha256Hex } from '../current-state/canonical-json'
 import { assertAllowedReleaseResponseOrigin } from '../current-state/http-release-artifact-store'
 import {
+  assertHistoryExactIndexManifest,
+  historyExactIndexManifestDigest,
+  type HistoryExactIndexManifest,
+} from './exact-index'
+import { HistoryExactIndexReader } from './exact-index-reader'
+import {
   assertHistorySegmentPublicationDigest,
   type HistorySegmentChainPublication,
 } from './publication'
@@ -15,12 +21,17 @@ export interface HistorySegmentChannel {
     publicationSha256: string
     chainId: string
     epochId: string
+    exactIndex?: {
+      manifestPath: string
+      manifestSha256: string
+    } | null
   }
   updatedAt: string
 }
 
 const MAX_CHANNEL_BYTES = 256 * 1024
 const MAX_PUBLICATION_BYTES = 2 * 1024 * 1024
+const MAX_EXACT_INDEX_MANIFEST_BYTES = 2 * 1024 * 1024
 const DEFAULT_MAX_ASSET_BYTES = 32 * 1024 * 1024
 const DEFAULT_TIMEOUT_MS = 8_000
 const MAX_MEMORY_CACHE_ENTRIES = 8
@@ -74,6 +85,15 @@ function digest(value: unknown, field: string): string {
   return parsed
 }
 
+function parseExactIndexPointer(value: unknown): HistorySegmentChannel['active']['exactIndex'] {
+  if (value === undefined || value === null) return null
+  const source = record(value, 'channel.active.exactIndex')
+  return {
+    manifestPath: safePath(source.manifestPath, 'channel.active.exactIndex.manifestPath'),
+    manifestSha256: digest(source.manifestSha256, 'channel.active.exactIndex.manifestSha256'),
+  }
+}
+
 export function parseHistorySegmentChannel(value: unknown): HistorySegmentChannel {
   const source = record(value, 'channel')
   const active = record(source.active, 'channel.active')
@@ -86,6 +106,7 @@ export function parseHistorySegmentChannel(value: unknown): HistorySegmentChanne
       publicationSha256: digest(active.publicationSha256, 'channel.active.publicationSha256'),
       chainId: text(active.chainId, 'channel.active.chainId'),
       epochId: text(active.epochId, 'channel.active.epochId'),
+      exactIndex: parseExactIndexPointer(active.exactIndex),
     },
     updatedAt: text(source.updatedAt, 'channel.updatedAt'),
   }
@@ -209,6 +230,10 @@ export async function openGithubHistorySegmentChain(options: {
   channel: HistorySegmentChannel
   publication: HistorySegmentChainPublication
   reader: HistorySegmentChainReader
+  exactIndex: {
+    manifest: HistoryExactIndexManifest
+    reader: HistoryExactIndexReader
+  } | null
 }> {
   const repo = repository(options.githubRepository)
   const branchName = branch(options.githubBranch)
@@ -252,5 +277,32 @@ export async function openGithubHistorySegmentChain(options: {
     maxAssetBytes,
   })
   const reader = await HistorySegmentChainReader.open({ store, publication })
-  return { channel, publication, reader }
+
+  let exactIndex: {
+    manifest: HistoryExactIndexManifest
+    reader: HistoryExactIndexReader
+  } | null = null
+  if (channel.active.exactIndex) {
+    const exactIndexBytes = await fetchBounded({
+      fetcher,
+      url: `https://raw.githubusercontent.com/${repo}/${channel.active.dataCommitSha}/${channel.active.exactIndex.manifestPath}`,
+      maxBytes: MAX_EXACT_INDEX_MANIFEST_BYTES,
+      timeoutMs,
+      field: 'History exact index manifest',
+    })
+    if (await sha256Hex(exactIndexBytes) !== channel.active.exactIndex.manifestSha256) {
+      throw new Error('History exact index channel manifest digest mismatch')
+    }
+    const manifest = JSON.parse(new TextDecoder().decode(exactIndexBytes)) as HistoryExactIndexManifest
+    assertHistoryExactIndexManifest(manifest, publication)
+    if (await historyExactIndexManifestDigest(manifest) !== manifest.manifestSha256) {
+      throw new Error('History exact index semantic manifest digest mismatch')
+    }
+    exactIndex = {
+      manifest,
+      reader: await HistoryExactIndexReader.open({ store, publication, manifest }),
+    }
+  }
+
+  return { channel, publication, reader, exactIndex }
 }
