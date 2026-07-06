@@ -1,0 +1,72 @@
+name: Patch current-state source switch integration
+
+on:
+  push:
+    branches:
+      - current-state-source-switch-integration
+    paths:
+      - .github/workflows/patch-current-state-source-switch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: current-state-source-switch-integration
+      - name: Apply narrow integration patch
+        shell: python
+        run: |
+          from pathlib import Path
+
+          release = Path('src/worker/repositories/release-current-state.ts')
+          text = release.read_text()
+          old_import = "import { CurrentStateObjectReadError } from './current-state-read-error'\n"
+          new_import = old_import + "import {\n  assertCurrentStateSourceBinding,\n  resolveCurrentStateSource,\n} from './current-state-source-switch'\n"
+          if old_import not in text:
+              raise SystemExit('release-current-state import anchor missing')
+          text = text.replace(old_import, new_import, 1)
+
+          old_open = """    const readModel = await GithubCurrentStateReadModelReader.open({
+      githubRepository: config.currentState.githubRepository,
+      githubBranch: 'current-state-data',
+    })
+    const manifest = readModel.manifest
+"""
+          new_open = """    const selection = await resolveCurrentStateSource(db, config.currentState)
+    const readModel = await GithubCurrentStateReadModelReader.open({
+      githubRepository: config.currentState.githubRepository,
+      githubBranch: selection.githubBranch,
+    })
+    const manifest = readModel.manifest
+    assertCurrentStateSourceBinding({
+      activeBaseSnapshotId: selection.activeBaseSnapshotId,
+      manifestSnapshotId: manifest.snapshotId,
+    })
+"""
+          if old_open not in text:
+              raise SystemExit('release-current-state open anchor missing')
+          release.write_text(text.replace(old_open, new_open, 1))
+
+          wrangler = Path('wrangler.jsonc')
+          text = wrangler.read_text()
+          old_vars = '    "CURRENT_STATE_GITHUB_REPOSITORY": "badjoke-lab/xrpl-lending-monitor",\n    "CURRENT_STATE_RELEASE_CHANNEL_TAG": "current-state-channel",\n'
+          new_vars = '    "CURRENT_STATE_GITHUB_REPOSITORY": "badjoke-lab/xrpl-lending-monitor",\n    "CURRENT_STATE_GITHUB_BRANCH": "current-state-data",\n    "CURRENT_STATE_REPLACEMENT_SNAPSHOT_ID": "devnet-3432924-canonical",\n    "CURRENT_STATE_REPLACEMENT_GITHUB_BRANCH": "current-state-candidate-data",\n    "CURRENT_STATE_RELEASE_CHANNEL_TAG": "current-state-channel",\n'
+          if old_vars not in text:
+              raise SystemExit('wrangler current-state anchor missing')
+          wrangler.write_text(text.replace(old_vars, new_vars, 1))
+
+          Path('.github/workflows/patch-current-state-source-switch.yml').unlink()
+          Path('noop.txt').unlink(missing_ok=True)
+      - name: Commit integrated source switch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "Integrate D1-bound current-state source switching"
+          git push origin HEAD:current-state-source-switch-integration
