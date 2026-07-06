@@ -13,7 +13,7 @@ export function selectCurrentStateSource(options: {
   config: CurrentStateRuntimeConfig
   activeBaseSnapshotId: string | null
 }): CurrentStateSourceSelection {
-  const replacement = options.config.replacement
+  const replacement = options.config.replacement ?? null
   if (replacement && options.activeBaseSnapshotId === replacement.snapshotId) {
     return {
       githubBranch: replacement.githubBranch,
@@ -21,7 +21,7 @@ export function selectCurrentStateSource(options: {
     }
   }
   return {
-    githubBranch: options.config.githubBranch,
+    githubBranch: options.config.githubBranch ?? 'current-state-data',
     activeBaseSnapshotId: options.activeBaseSnapshotId,
   }
 }
