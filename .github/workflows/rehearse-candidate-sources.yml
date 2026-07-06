@@ -1,0 +1,43 @@
+name: Rehearse candidate sources
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/rehearse-candidate-sources.yml'
+      - 'scripts/rehearse-candidate-sources.ts'
+      - 'vite.candidate-source-rehearsal.config.ts'
+      - 'package.json'
+
+permissions:
+  contents: read
+
+jobs:
+  rehearse:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm candidate-source-rehearsal:build
+      - name: Check candidate sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .local/candidate-source-rehearsal
+          node .candidate-source-rehearsal-build/rehearse-candidate-sources.mjs --local --repository badjoke-lab/xrpl-lending-monitor --history-branch history-candidate-data --current-state-branch current-state-candidate-data > .local/candidate-source-rehearsal/summary.json
+          jq -e '.passed == true and .ledgerIndex == 3432924 and .segmentCount == 123 and .ledgerCount == 61249 and (.exactReads | length) == 3' .local/candidate-source-rehearsal/summary.json > /dev/null
+          cat .local/candidate-source-rehearsal/summary.json
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: candidate-source-rehearsal
+          path: .local/candidate-source-rehearsal/summary.json
+          if-no-files-found: error
+          retention-days: 30
