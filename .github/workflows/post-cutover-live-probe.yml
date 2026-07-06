@@ -48,11 +48,24 @@ jobs:
             sleep 10
           done
 
-          for NAME in collector continuation-verification continuation-diagnostics history-source m1-exit m1-exit-diagnostics; do
-            URL="${BASE}/api/status/${NAME}"
+          for NAME in collector continuation-verification continuation-diagnostics history-source m1-exit m1-exit-diagnostics overview; do
+            URL="${BASE}/api/${NAME}"
+            case "${NAME}" in
+              collector|continuation-verification|continuation-diagnostics|history-source|m1-exit|m1-exit-diagnostics)
+                URL="${BASE}/api/status/${NAME}"
+                ;;
+            esac
             CODE="$(curl -sS -o "post-cutover-live-probe/${NAME}.json" -w '%{http_code}' "${URL}" || true)"
             printf '%s\n' "${CODE}" > "post-cutover-live-probe/${NAME}.http-status.txt"
           done
+
+          VAULT_ID="FFFFD625AB1C2913BCFA6A0E7D5BDF7C44E35F0393ADE7ABF2272A6C7557F370"
+          BROKER_ID="FFFFE6601910CBFE324CCADB7E41C32380688DB9469F4435236F0F05B5591768"
+          LOAN_ID="FFFFC3C3A84E0B827AF014D9BEEBB309B18476D371D36F6E7E95C89BA2BC1518"
+
+          curl -sS -o post-cutover-live-probe/vault.json -w '%{http_code}' "${BASE}/api/vaults/${VAULT_ID}" > post-cutover-live-probe/vault.http-status.txt
+          curl -sS -o post-cutover-live-probe/broker.json -w '%{http_code}' "${BASE}/api/loan-brokers/${BROKER_ID}" > post-cutover-live-probe/broker.http-status.txt
+          curl -sS -o post-cutover-live-probe/loan.json -w '%{http_code}' "${BASE}/api/loans/${LOAN_ID}" > post-cutover-live-probe/loan.http-status.txt
 
           jq -n \
             --slurpfile rebase post-cutover-live-probe/replacement-base-rebase.json \
@@ -60,17 +73,25 @@ jobs:
             --slurpfile continuation post-cutover-live-probe/continuation-verification.json \
             --slurpfile history post-cutover-live-probe/history-source.json \
             --slurpfile m1 post-cutover-live-probe/m1-exit.json \
+            --slurpfile overview post-cutover-live-probe/overview.json \
             '{
               rebase: $rebase[0],
               collector: $collector[0],
               continuation: $continuation[0],
               history: $history[0],
-              m1: $m1[0]
+              m1: $m1[0],
+              overview: $overview[0]
             }' > post-cutover-live-probe/summary.json
 
           jq -e '.status == "replayed"' post-cutover-live-probe/replacement-base-rebase.json > /dev/null
           jq -e '.mode == "hybrid" and .configured == true and .chain.end_ledger_index == 3432924' post-cutover-live-probe/history-source.json > /dev/null
           jq -e '.target.ledgerIndex == 3432924 and .target.snapshotId == "devnet-3432924-canonical"' post-cutover-live-probe/replacement-base-rebase.json > /dev/null
+          test "$(cat post-cutover-live-probe/vault.http-status.txt)" = "200"
+          test "$(cat post-cutover-live-probe/broker.http-status.txt)" = "200"
+          test "$(cat post-cutover-live-probe/loan.http-status.txt)" = "200"
+          grep -q 'devnet-3432924-canonical' post-cutover-live-probe/vault.json
+          grep -q 'devnet-3432924-canonical' post-cutover-live-probe/broker.json
+          grep -q 'devnet-3432924-canonical' post-cutover-live-probe/loan.json
 
       - uses: actions/upload-artifact@v4
         if: always()
