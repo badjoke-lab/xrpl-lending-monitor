@@ -74,6 +74,7 @@ async function fixtures() {
       publicationSha256: await sha256Hex(publicationBytes),
       chainId: publication.chainId,
       epochId: publication.epochId,
+      exactIndex: null,
     },
     updatedAt: publication.publishedAt,
   }
@@ -92,6 +93,7 @@ describe('history source resolution', () => {
     await expect(resolveHistorySource(config())).resolves.toMatchObject({
       kind: 'd1',
       configured: false,
+      exactIndex: null,
       unavailableReason: null,
     })
   })
@@ -110,6 +112,7 @@ describe('history source resolution', () => {
     if (result.kind === 'hybrid') {
       expect(result.publication.endLedgerIndex).toBe(105)
       expect(result.channel.active.dataCommitSha).toBe(COMMIT)
+      expect(result.exactIndex).toBeNull()
     }
   })
 
@@ -122,6 +125,7 @@ describe('history source resolution', () => {
       kind: 'unavailable',
       configured: true,
       reader: null,
+      exactIndex: null,
       channel: null,
       publication: null,
       unavailableReason: 'history_source_integrity_error',
