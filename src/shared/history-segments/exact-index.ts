@@ -85,6 +85,19 @@ const REFERENCE_KINDS = new Set<HistoryExactReferenceKind>([
 const SEARCH_RESULT_KINDS = new Set<HistoryExactSearchResultKind>([
   'transaction', 'object_change', 'archived_object', 'loan_lifecycle',
 ])
+const EXPECTED_FILE_KIND: Record<HistoryExactReferenceKind, HistorySegmentFileKind> = {
+  transaction_event: 'protocol_events',
+  object_change: 'object_changes',
+  archived_object: 'archived_objects',
+  loan_lifecycle: 'loan_lifecycle',
+  balance_history: 'balance_history',
+}
+const EXPECTED_SEARCH_KIND: Record<Exclude<HistoryExactReferenceKind, 'balance_history'>, HistoryExactSearchResultKind> = {
+  transaction_event: 'transaction',
+  object_change: 'object_change',
+  archived_object: 'archived_object',
+  loan_lifecycle: 'loan_lifecycle',
+}
 
 function integer(value: number, field: string, minimum = 0): void {
   if (!Number.isSafeInteger(value) || value < minimum) throw new Error(`${field} is invalid`)
@@ -115,6 +128,9 @@ function assertSearchResult(reference: HistoryExactIndexReference): void {
   }
   if (result === null) throw new Error('Searchable exact reference is missing result metadata')
   if (!SEARCH_RESULT_KINDS.has(result.kind)) throw new Error('History exact search result kind is invalid')
+  if (result.kind !== EXPECTED_SEARCH_KIND[reference.kind]) {
+    throw new Error('History exact search result kind does not match reference kind')
+  }
   text(result.epochId, 'reference.searchResult.epochId')
   integer(result.ledgerIndex, 'reference.searchResult.ledgerIndex', 1)
   text(result.transactionHash, 'reference.searchResult.transactionHash')
@@ -144,6 +160,9 @@ export function assertHistoryExactIndexRecord(
   if (!REFERENCE_KINDS.has(record.reference.kind)) throw new Error('History exact index reference kind is invalid')
   text(record.reference.segmentId, 'reference.segmentId')
   if (!FILE_KINDS.has(record.reference.fileKind)) throw new Error('History exact index file kind is invalid')
+  if (record.reference.fileKind !== EXPECTED_FILE_KIND[record.reference.kind]) {
+    throw new Error('History exact file kind does not match reference kind')
+  }
   integer(record.reference.ledgerIndex, 'reference.ledgerIndex', 1)
   assertSearchResult(record.reference)
 }
