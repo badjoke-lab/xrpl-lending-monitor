@@ -1,12 +1,14 @@
 # Implementation status
 
-Last updated: 2026-07-05.
+Last updated: 2026-07-06.
 
 ## Current phase
 
 M1 incremental continuation is active. HYB-3 through HYB-6 are integrated into `main`, the guarded verified-base handover has completed, and production catch-up is advancing contiguously from ledger `3371676`. The remote Worker network-status path is healthy and observing Devnet through the standard-port primary endpoint. M1-HYB-7 live continuation verification and diagnostics are active. Live evidence has observed created-current, modified-current, deletion/archive/tombstone, ledger-continuity, and cursor/overlay-agreement paths; LoanPay, impairment, unimpairment, default, activity/lifecycle/balance consistency, and freshness remain incomplete. The production collector remains configured for a maximum of 40 ledgers per scheduled run with row, statement, overlay, transaction, RPC, and execution-time bounds.
 
 Two live `ModifiedNode` metadata blockers have been reproduced from Devnet and fixed without weakening validation for known lending objects. M1 exit diagnostics now use the configured catch-up base identity as the authoritative expected base, independently compare it with the active D1 overlay binding, and have been verified live. Permanent read-only runtime monitoring samples collector progress, raw HYB-7 evidence counts and drilldown, HYB-7 path states, M1 exit evidence/gates, and handover replay state every 30 minutes. M5-5 and M6 remain gated behind M1 exit.
+
+Dense-range live benchmarks showed that increasing D1 collector budgets can restore negative lag slope, but sustained dense historical catch-up would exceed the Free D1 write envelope. The active architecture therefore separates dense historical backfill into deterministic immutable history segments while preserving D1 for bounded live continuation. The segment manifest/continuity contract and collector-semantic record builder are integrated. A bounded fixed-range segment runner has passed a live deterministic replay rehearsal over Devnet ledgers `3389181` through `3389185`, producing byte-identical files and manifest across two independent generations.
 
 ## Verified base
 
@@ -60,7 +62,13 @@ The implemented path now includes:
 - bounded row and statement budgets raised to accommodate observed valid live Vault create/delete ranges while preserving the other run limits;
 - remote throughput evidence proving 48 ledgers per run exceeds the current Worker invocation subrequest ceiling and fails closed before cursor advancement;
 - remote recovery and post-recovery slope evidence proving the bounded 40-ledger configuration can advance successfully with zero sampled failures and negative lag slope in normal ranges;
-- permanent read-only runtime monitoring that records collector cursor/head/lag movement, resource usage, failures, HYB-7 source/projection counts and path states, M1 exit evidence/gates, and handover replay state every 30 minutes and fails closed on collector errors or cursor stalls while lag remains positive.
+- permanent read-only runtime monitoring that records collector cursor/head/lag movement, resource usage, failures, HYB-7 source/projection counts and path states, M1 exit evidence/gates, and handover replay state every 30 minutes and fails closed on collector errors or cursor stalls while lag remains positive;
+- dense history segment architecture separating immutable historical artifacts from bounded D1 live continuation;
+- history segment manifest validation with required file kinds, ledger range identity, SHA-256 digests, and previous-segment linkage;
+- exact adjacent-segment index and parent-hash continuity checks;
+- a pure history-segment record builder that reuses the existing AffectedNodes, lifecycle, archive, balance-history, and current-projection derivations;
+- a bounded fixed-range segment runner with deterministic canonical JSON, deterministic gzip, SHA-256 file digests, and validated manifest output;
+- live byte-identical replay evidence for Devnet ledgers `3389181` through `3389185`.
 
 Mainnet remains disabled.
 
@@ -90,7 +98,7 @@ A six-sample one-minute post-recovery slope benchmark then observed:
 - 48 estimated rows and 47 estimated statements on every sampled run;
 - zero lending transactions in that sampled range.
 
-This shows the earlier short positive-lag window was local to a dense range rather than evidence of sustained throughput failure. The current 40-ledger configuration therefore remains unchanged.
+This shows the earlier short positive-lag window was local to a dense range rather than evidence of sustained throughput failure. The current 40-ledger configuration therefore remains unchanged for the live Worker path.
 
 At the end of the same benchmark, HYB-7 diagnostics had:
 
@@ -105,6 +113,16 @@ At the end of the same benchmark, HYB-7 diagnostics had:
 - lifecycle events: 0;
 - balance-history rows: 0;
 - archives: 14 with zero archive/tombstone disagreement.
+
+The dense-range budget experiments later established that a 2048/2048 row/statement budget with 128 overlay mutations can process 40 ledgers per active run with strong negative lag slope, but the observed write volume is not suitable for sustained Free-plan D1 historical catch-up. The replacement history-segment rehearsal over ledgers `3389181 -> 3389185` generated twice and produced byte-identical output. The segment contained:
+
+- 5 ledger records;
+- 14 protocol events;
+- 213 object changes;
+- 14 current-projection mutations;
+- 0 loan-lifecycle rows;
+- 0 archived-object rows;
+- 0 balance-history rows.
 
 ## HYB-7 verification semantics
 
@@ -122,24 +140,28 @@ The verification and diagnostics endpoints are read-only. They do not create liv
 
 ## Active unit
 
-HYB-6 production catch-up is running at the bounded 40-ledger maximum configuration. The guarded handover remains complete and replays as a no-op guard before scheduled collection. The two observed live metadata blockers have been repaired and recovery verified. The M1 base-binding and catch-up-start gates now evaluate from the authoritative configured catch-up base and are observed in live evidence. Permanent runtime monitoring continues to sample progress, HYB-7 diagnostics, and raw M1 exit evidence every 30 minutes.
+HYB-6 live continuation remains bounded at the 40-ledger maximum configuration, while dense historical catch-up is being moved out of the D1 row-by-row path. The guarded handover remains complete and replays as a no-op guard before scheduled collection. Permanent runtime monitoring continues to sample progress, HYB-7 diagnostics, and raw M1 exit evidence every 30 minutes.
 
-The active unit is continued bounded catch-up, HYB-7 natural evidence accumulation, immediate repair of any newly observed live blocker, and preparation to resolve only the paths that remain genuinely missing or inconsistent at the validated head.
+The active implementation unit is deterministic history-segment generation, chain verification, bounded checkpoint/resume support, and rehearsal of adjacent segment linkage before any canonical dense backfill publication or replacement-base handover.
 
 ## Next order
 
-1. Keep the bounded 40-ledger maximum configuration active and continue contiguous catch-up.
-2. Use permanent runtime evidence to track sustained cursor/head/lag slope and fail immediately on collector errors or cursor stalls while lag remains positive.
-3. Compare HYB-7 source/projection and linkage diagnostics during catch-up and distinguish absent source events from derivation or projection disagreement.
-4. Continue catch-up until the cursor reaches the validated head without gap or parent-hash discontinuity.
-5. Re-evaluate HYB-7 diagnostics at the head and collect or generate only the minimum canonical Devnet evidence required for paths that remain genuinely missing.
-6. Resolve LoanPay, impairment, unimpairment, default, activity/lifecycle/balance consistency, and freshness before M1 exit.
-7. Complete M1 exit review and reconciliation using raw M1 exit diagnostics evidence.
-8. Complete M5-5, then begin M6 hardening and multi-day Devnet soak.
+1. Merge the fixed-range deterministic history-segment runner after CI and replay evidence review.
+2. Add segment-chain verification across multiple adjacent manifests and fail closed on index or parent-hash discontinuity.
+3. Add bounded checkpoint and resume state for fixed historical ranges.
+4. Rehearse two adjacent non-canonical Devnet segments and require exact linkage plus deterministic replay.
+5. Add publication metadata and bounded readers without changing existing public API semantics.
+6. Backfill the dense historical gap into verified immutable segments.
+7. Build and independently verify a replacement current-state base near the verified segment-chain end.
+8. Execute guarded replacement-base handover and resume bounded D1 live continuation.
+9. Re-evaluate HYB-7 diagnostics at the validated head and resolve only genuinely missing paths.
+10. Complete M1 exit review and reconciliation, then M5-5 and M6 hardening.
 
 ## Remaining blockers
 
 - The production cursor has not yet reached the validated head.
+- Dense historical catch-up is not yet covered by a verified published segment chain.
+- Checkpoint/resume and multi-segment rehearsal are not yet complete.
 - Real HYB-7 live-path evidence is incomplete for LoanPay, impairment, unimpairment, default, activity/lifecycle/balance consistency, and freshness.
 - M1 exit remains incomplete until validated-head reach and all required live continuation paths are observed and consistent.
 - M5-5 and M6 remain incomplete.

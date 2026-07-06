@@ -11,10 +11,11 @@
   "scripts": {
     "dev": "vite",
     "dev:worker": "wrangler dev",
-    "build": "vite build && vite build --config vite.d1-tools.config.ts && vite build --config vite.artifact-measurement.config.ts",
+    "build": "vite build && vite build --config vite.d1-tools.config.ts && vite build --config vite.artifact-measurement.config.ts && vite build --config vite.history-segment.config.ts",
     "build:d1-tools": "vite build --config vite.d1-tools.config.ts",
     "build:artifact-measurement": "vite build --config vite.artifact-measurement.config.ts",
     "build:release-current-state": "vite build --config vite.release-current-state.config.ts",
+    "build:history-segment": "vite build --config vite.history-segment.config.ts",
     "preview": "vite preview --host 127.0.0.1",
     "deploy": "pnpm build && wrangler deploy",
     "lint": "eslint .",
@@ -28,6 +29,8 @@
     "artifact:measure": "pnpm build:artifact-measurement && node .artifact-measurement-build/run-artifact-measurement.mjs",
     "release-current-state:build": "pnpm build:release-current-state",
     "release-current-state:local": "pnpm build:release-current-state && node .release-current-state-build/run-release-current-state.mjs --local",
+    "history-segment:build": "pnpm build:history-segment",
+    "history-segment:local": "pnpm build:history-segment && node .history-segment-build/run-history-segment.mjs --local",
     "types:worker": "wrangler types",
     "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm db:migrate:local && pnpm build"
   },
