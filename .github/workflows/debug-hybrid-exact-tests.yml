@@ -23,11 +23,20 @@ jobs:
           node-version-file: '.nvmrc'
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: >-
-          pnpm vitest run
-          src/shared/history-segments/exact-index-reader.test.ts
-          src/shared/history-segments/channel.test.ts
-          src/shared/history-segments/reader-references.test.ts
-          src/worker/repositories/hybrid-exact-history-repository.test.ts
-          src/worker/routes/hybrid-exact-history-override.test.ts
-          --reporter=verbose
+      - name: Run focused tests
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm vitest run \
+            src/shared/history-segments/exact-index-reader.test.ts \
+            src/shared/history-segments/channel.test.ts \
+            src/shared/history-segments/reader-references.test.ts \
+            src/worker/repositories/hybrid-exact-history-repository.test.ts \
+            src/worker/routes/hybrid-exact-history-override.test.ts \
+            --reporter=verbose 2>&1 | tee focused-test.log
+      - name: Upload focused test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hybrid-exact-focused-test-log
+          path: focused-test.log
