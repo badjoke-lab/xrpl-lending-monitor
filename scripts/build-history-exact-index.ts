@@ -225,7 +225,7 @@ async function main(): Promise<void> {
         if (!extracted) continue
         for (const term of extracted.terms) {
           const bucket = await historyExactIndexBucket(term, options.bucketCount)
-          buckets[bucket]!.push({ schemaVersion: 1, bucket, term, reference: extracted.reference })
+          buckets[bucket]!.push({ schemaVersion: 2, bucket, term, reference: extracted.reference })
         }
       }
     }
@@ -249,7 +249,7 @@ async function main(): Promise<void> {
   }
 
   const manifest: HistoryExactIndexManifest = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     network: 'devnet',
     epochId: publication.epochId,
     chainId: publication.chainId,
