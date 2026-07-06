@@ -1,6 +1,4 @@
-interface EpochRow {
-  epoch_id: string | null
-}
+import { readContinuationScopeBoundary } from './continuation-scope'
 
 interface BalanceSourceRow {
   source_changes: number
@@ -20,17 +18,8 @@ export interface BalanceHistorySourceDiagnostics {
 export async function readBalanceHistorySourceDiagnostics(
   db: D1Database,
 ): Promise<BalanceHistorySourceDiagnostics> {
-  const epoch = await db.prepare(
-    `SELECT epoch_id
-     FROM sync_state
-     WHERE network = 'devnet'
-     LIMIT 1`,
-  ).first<EpochRow>()
-  const epochId = epoch?.epoch_id ?? null
-
-  if (!epochId) {
-    return { epochId: null, sourceChanges: 0, latestLedger: null }
-  }
+  const scope = await readContinuationScopeBoundary(db)
+  if (!scope) return { epochId: null, sourceChanges: 0, latestLedger: null }
 
   const row = await db.prepare(
     `SELECT COUNT(*) AS source_changes,
@@ -38,12 +27,13 @@ export async function readBalanceHistorySourceDiagnostics(
      FROM object_changes
      WHERE network = 'devnet'
        AND epoch_id = ?1
+       AND ledger_index > ?2
        AND object_type IN ('Vault', 'LoanBroker')
        AND field_name IN ('DebtTotal', 'DebtMaximum', 'CoverAvailable', 'LossUnrealized')`,
-  ).bind(epochId).first<BalanceSourceRow>()
+  ).bind(scope.epochId, scope.baseLedgerIndex).first<BalanceSourceRow>()
 
   return {
-    epochId,
+    epochId: scope.epochId,
     sourceChanges: numberValue(row?.source_changes),
     latestLedger: row?.latest_ledger ?? null,
   }
