@@ -36,7 +36,8 @@ export interface HistorySegmentManifest {
   files: HistorySegmentFile[]
 }
 
-const HASH = /^[A-F0-9]{64}$/
+const LEDGER_HASH = /^[A-F0-9]{64}$/
+const SHA256 = /^[A-Fa-f0-9]{64}$/
 
 function nonEmpty(value: string, field: string): void {
   if (value.length === 0) throw new Error(`${field} must be non-empty`)
@@ -48,8 +49,12 @@ function safeNonNegative(value: number, field: string): void {
   }
 }
 
-function hash(value: string, field: string): void {
-  if (!HASH.test(value)) throw new Error(`${field} must be a 64-character uppercase hexadecimal hash`)
+function ledgerHash(value: string, field: string): void {
+  if (!LEDGER_HASH.test(value)) throw new Error(`${field} must be a 64-character uppercase hexadecimal hash`)
+}
+
+function sha256(value: string, field: string): void {
+  if (!SHA256.test(value)) throw new Error(`${field} must be a 64-character hexadecimal SHA-256 digest`)
 }
 
 export function assertHistorySegmentManifest(manifest: HistorySegmentManifest): void {
@@ -62,9 +67,9 @@ export function assertHistorySegmentManifest(manifest: HistorySegmentManifest): 
   safeNonNegative(manifest.startLedgerIndex, 'startLedgerIndex')
   safeNonNegative(manifest.endLedgerIndex, 'endLedgerIndex')
   safeNonNegative(manifest.ledgerCount, 'ledgerCount')
-  hash(manifest.startLedgerHash, 'startLedgerHash')
-  hash(manifest.startParentHash, 'startParentHash')
-  hash(manifest.endLedgerHash, 'endLedgerHash')
+  ledgerHash(manifest.startLedgerHash, 'startLedgerHash')
+  ledgerHash(manifest.startParentHash, 'startParentHash')
+  ledgerHash(manifest.endLedgerHash, 'endLedgerHash')
 
   if (manifest.endLedgerIndex < manifest.startLedgerIndex) {
     throw new Error('History segment end ledger precedes start ledger')
@@ -77,7 +82,7 @@ export function assertHistorySegmentManifest(manifest: HistorySegmentManifest): 
     throw new Error('Previous segment identity and hash must be both present or both null')
   }
   if (manifest.previousSegmentId !== null) nonEmpty(manifest.previousSegmentId, 'previousSegmentId')
-  if (manifest.previousSegmentEndHash !== null) hash(manifest.previousSegmentEndHash, 'previousSegmentEndHash')
+  if (manifest.previousSegmentEndHash !== null) ledgerHash(manifest.previousSegmentEndHash, 'previousSegmentEndHash')
 
   const expectedKinds = new Set<HistorySegmentFileKind>(HISTORY_SEGMENT_FILE_KINDS)
   const paths = new Set<string>()
@@ -88,7 +93,7 @@ export function assertHistorySegmentManifest(manifest: HistorySegmentManifest): 
     paths.add(file.path)
     safeNonNegative(file.bytes, `files.${file.kind}.bytes`)
     safeNonNegative(file.records, `files.${file.kind}.records`)
-    hash(file.sha256, `files.${file.kind}.sha256`)
+    sha256(file.sha256, `files.${file.kind}.sha256`)
   }
   if (expectedKinds.size > 0) {
     throw new Error(`History segment manifest is missing file kinds: ${[...expectedKinds].join(', ')}`)
