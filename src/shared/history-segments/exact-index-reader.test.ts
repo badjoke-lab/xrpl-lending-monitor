@@ -64,7 +64,7 @@ async function fixture() {
         object_changes: 2,
         loan_lifecycle: 1,
         archived_objects: 0,
-        balance_history: 0,
+        balance_history: 1,
         current_projection_mutations: 0,
       },
     }],
@@ -84,10 +84,26 @@ async function fixture() {
         bucket,
         term: TERM.toUpperCase(),
         reference: {
+          kind: 'balance_history',
+          segmentId: 's-101-105',
+          fileKind: 'balance_history',
+          ledgerIndex: 105,
+          searchResult: null,
+        },
+      },
+      {
+        schemaVersion: 1,
+        bucket,
+        term: TERM.toUpperCase(),
+        reference: {
           kind: 'object_change',
           segmentId: 's-101-105',
           fileKind: 'object_changes',
           ledgerIndex: 104,
+          searchResult: {
+            kind: 'object_change', epochId: 'epoch-1', ledgerIndex: 104,
+            transactionHash: 'TX-104', objectType: 'Loan', objectId: 'LOAN1', loanId: 'LOAN1',
+          },
         },
       },
       {
@@ -99,6 +115,10 @@ async function fixture() {
           segmentId: 's-101-105',
           fileKind: 'protocol_events',
           ledgerIndex: 104,
+          searchResult: {
+            kind: 'transaction', epochId: 'epoch-1', ledgerIndex: 104,
+            transactionHash: TERM.toUpperCase(), objectType: null, objectId: null, loanId: null,
+          },
         },
       },
     ] : []
@@ -143,10 +163,22 @@ describe('history exact index reader', () => {
     expect(result.term).toBe(TERM.toUpperCase())
     expect(result.bucket).toBe(targetBucket)
     expect(result.references.map((reference) => reference.kind)).toEqual([
+      'balance_history',
       'object_change',
       'transaction_event',
     ])
     expect(result.assetReads).toBe(1)
+  })
+
+  it('filters reference kinds before applying the result limit', async () => {
+    const { store, publication, manifest } = await fixture()
+    const reader = await HistoryExactIndexReader.open({ store, publication, manifest })
+    const result = await reader.find(TERM, {
+      limit: 1,
+      referenceKinds: ['object_change', 'transaction_event'],
+    })
+    expect(result.references).toHaveLength(1)
+    expect(result.references[0]?.kind).toBe('object_change')
   })
 
   it('reuses a verified bucket from the in-memory cache', async () => {
