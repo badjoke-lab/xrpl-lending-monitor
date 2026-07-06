@@ -1,0 +1,147 @@
+name: Publish replacement current-state candidate
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/publish-replacement-current-state-candidate.yml'
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: replacement-current-state-candidate-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Download verified base artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: current-state-release-assets
+          path: .local/current-state-release
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: 28699460881
+
+      - name: Download complete canonical history artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: canonical-history-full-chain
+          path: .local/canonical-full
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: 28797313657
+
+      - name: Verify candidate inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(jq -r .complete .local/current-state-release/release-summary.json)" = "true"
+          test "$(jq -r .ledger.ledgerIndex .local/current-state-release/release-summary.json)" = "3371675"
+          SUMMARY=.local/canonical-full/full-chain-measurement-summary.json
+          test "$(jq -r .passed "$SUMMARY")" = "true"
+          test "$(jq -r .stageStartLedgerIndex "$SUMMARY")" = "3371676"
+          test "$(jq -r .stageEndLedgerIndex "$SUMMARY")" = "3432924"
+          test "$(jq -r .segmentCount "$SUMMARY")" = "123"
+          test "$(jq -r .checkpointNextLedgerIndex "$SUMMARY")" = "3432925"
+
+      - name: Build replacement compiler
+        run: pnpm replacement-current-state-read-model:build
+
+      - name: Build replacement current-state candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          STARTED=$(date +%s)
+          node .replacement-current-state-read-model-build/build-replacement-current-state-read-model.mjs \
+            --local \
+            --input-dir .local/current-state-release/assets \
+            --history-root .local/canonical-full \
+            --publication .local/canonical-full/history/publication.json \
+            --output-dir .local/replacement-current-state \
+            --page-size 50 \
+            --lookup-prefix-length 3 \
+            --snapshot-id devnet-3432924-canonical \
+            --release-tag replacement-current-state-3432924 \
+            > .local/replacement-current-state-output.json
+          echo $(( $(date +%s) - STARTED )) > .local/replacement-current-state-elapsed-seconds.txt
+
+      - name: Verify replacement candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          FULL=.local/canonical-full/full-chain-measurement-summary.json
+          SUMMARY=.local/replacement-current-state/replacement-read-model-summary.json
+          MANIFEST=.local/replacement-current-state/read-model/manifest.json
+          EXPECTED_HASH=$(jq -r .terminalLedgerHash "$FULL")
+          test "$(jq -r .target.ledgerIndex "$SUMMARY")" = "3432924"
+          test "$(jq -r .target.ledgerHash "$SUMMARY")" = "$EXPECTED_HASH"
+          test "$(jq -r .segmentCount "$SUMMARY")" = "123"
+          test "$(jq -r .ledgerCount "$SUMMARY")" = "61249"
+          test "$(jq -r .ledgerIndex "$MANIFEST")" = "3432924"
+          test "$(jq -r .ledgerHash "$MANIFEST")" = "$EXPECTED_HASH"
+          test "$(find .local/replacement-current-state/read-model/lookup -type f | wc -l)" = "4096"
+          test "$(jq -r '.target.counts.vaults + .target.counts.loanBrokers + .target.counts.loans' "$SUMMARY")" -gt 1500000
+
+      - name: Stage candidate payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/current-state-candidate
+          mkdir -p /tmp/current-state-candidate
+          cp -R .local/replacement-current-state/read-model /tmp/current-state-candidate/read-model
+          cp .local/replacement-current-state/replacement-read-model-summary.json /tmp/current-state-candidate/replacement-read-model-summary.json
+          cp .local/replacement-current-state-elapsed-seconds.txt /tmp/current-state-candidate/replacement-current-state-elapsed-seconds.txt
+
+      - name: Publish immutable candidate data and channel
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git checkout --orphan current-state-candidate-publish
+          git rm -rf . || true
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -R /tmp/current-state-candidate/. .
+          git add read-model replacement-read-model-summary.json replacement-current-state-elapsed-seconds.txt
+          git commit -m "Publish replacement current-state candidate data"
+          DATA_SHA=$(git rev-parse HEAD)
+          MANIFEST_SHA=$(jq -r .target.manifestSha256 replacement-read-model-summary.json)
+          RELEASE_TAG=$(jq -r .target.releaseTag replacement-read-model-summary.json)
+          SNAPSHOT_ID=$(jq -r .target.snapshotId replacement-read-model-summary.json)
+          jq -n \
+            --arg dataCommitSha "$DATA_SHA" \
+            --arg manifestSha256 "$MANIFEST_SHA" \
+            --arg releaseTag "$RELEASE_TAG" \
+            --arg snapshotId "$SNAPSHOT_ID" \
+            --arg updatedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{schemaVersion:1,active:{dataCommitSha:$dataCommitSha,manifestPath:"read-model/manifest.json",manifestSha256:$manifestSha256,releaseTag:$releaseTag,snapshotId:$snapshotId},updatedAt:$updatedAt}' \
+            > channel.json
+          git add channel.json
+          git commit -m "Activate replacement current-state candidate channel"
+          git push --force origin HEAD:refs/heads/current-state-candidate-data
+
+      - name: Verify candidate branch head
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          CHANNEL=$(gh api "repos/${GITHUB_REPOSITORY}/contents/channel.json?ref=current-state-candidate-data" --jq .content | tr -d '\n' | base64 -d)
+          test "$(jq -r .active.releaseTag <<<"$CHANNEL")" = "replacement-current-state-3432924"
+          test "$(jq -r .active.snapshotId <<<"$CHANNEL")" = "devnet-3432924-canonical"
