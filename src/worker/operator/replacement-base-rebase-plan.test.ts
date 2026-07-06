@@ -8,6 +8,7 @@ const EPOCH = 'devnet-3371675'
 const OLD_HASH = '1'.repeat(64)
 const TARGET_HASH = '2'.repeat(64)
 const HEAD_HASH = '3'.repeat(64)
+const CONTINUED_HASH = '4'.repeat(64)
 
 const target = {
   epochId: EPOCH,
@@ -95,7 +96,7 @@ describe('replacement-base rebase planning', () => {
     })
   })
 
-  it('returns replay only when sync and target overlay are fully aligned', () => {
+  it('returns replay when sync and target overlay are aligned at the target', () => {
     expect(planReplacementBaseRebase({
       target,
       evidence: {
@@ -109,16 +110,45 @@ describe('replacement-base rebase planning', () => {
     })).toEqual({ action: 'replay' })
   })
 
-  it('blocks cursor regression and target reuse without aligned replay', () => {
+  it('returns replay after live continuation advances beyond the replacement target', () => {
+    const continuedLedger = target.ledgerIndex + 40
+    expect(planReplacementBaseRebase({
+      target,
+      evidence: {
+        sync: sync({
+          lastProcessedLedger: continuedLedger,
+          lastProcessedHash: CONTINUED_HASH,
+        }),
+        currentEpochId: EPOCH,
+        overlayStates: [
+          targetOverlay({
+            overlayLedgerIndex: continuedLedger,
+            overlayLedgerHash: CONTINUED_HASH,
+          }),
+          oldOverlay(),
+        ],
+      },
+    })).toEqual({ action: 'replay' })
+  })
+
+  it('blocks later cursors that are not bound to the replacement target', () => {
     expect(() => planReplacementBaseRebase({
       target,
       evidence: {
-        sync: sync({ lastProcessedLedger: target.ledgerIndex + 1 }),
+        sync: sync({
+          lastProcessedLedger: target.ledgerIndex + 1,
+          lastProcessedHash: CONTINUED_HASH,
+        }),
         currentEpochId: EPOCH,
-        overlayStates: [oldOverlay({ overlayLedgerIndex: target.ledgerIndex + 1 })],
+        overlayStates: [oldOverlay({
+          overlayLedgerIndex: target.ledgerIndex + 1,
+          overlayLedgerHash: CONTINUED_HASH,
+        })],
       },
     })).toThrow('refuses to regress')
+  })
 
+  it('blocks target reuse without an aligned replay state', () => {
     expect(() => planReplacementBaseRebase({
       target,
       evidence: {
@@ -138,6 +168,20 @@ describe('replacement-base rebase planning', () => {
         overlayStates: [oldOverlay({ overlayLedgerIndex: 3390078 })],
       },
     })).toThrow('exactly one overlay aligned')
+  })
+
+  it('blocks continued replay when target overlay watermark disagrees with the cursor', () => {
+    expect(() => planReplacementBaseRebase({
+      target,
+      evidence: {
+        sync: sync({
+          lastProcessedLedger: target.ledgerIndex + 40,
+          lastProcessedHash: CONTINUED_HASH,
+        }),
+        currentEpochId: EPOCH,
+        overlayStates: [targetOverlay()],
+      },
+    })).toThrow('target overlay watermark is inconsistent')
   })
 
   it('blocks epoch mismatch, bad health, and observed head behind target', () => {
