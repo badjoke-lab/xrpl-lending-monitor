@@ -1,0 +1,82 @@
+name: Benchmark 1024 budgets
+
+on:
+  pull_request:
+    branches: [perf1024]
+    paths: [.github/workflows/benchmark-1024.yml]
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+      - name: Deploy experiment
+        run: pnpm exec wrangler deploy
+      - name: Resolve Worker URL
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p benchmark-evidence
+          curl --fail-with-body --silent --show-error --retry 3 \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/subdomain" \
+            > benchmark-evidence/subdomain.json
+          SUBDOMAIN="$(jq -r '.result.subdomain // empty' benchmark-evidence/subdomain.json)"
+          test -n "$SUBDOMAIN"
+          printf '%s\n' "https://xrpl-lending-monitor.${SUBDOMAIN}.workers.dev" > benchmark-evidence/base-url.txt
+      - name: Warm up experiment
+        run: sleep 90
+      - name: Sample collector progress
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE="$(cat benchmark-evidence/base-url.txt)"
+          for I in 0 1 2 3 4 5; do
+            curl --fail-with-body --silent --show-error --retry 3 "$BASE/api/status/collector" > "benchmark-evidence/collector-${I}.json"
+            jq -e '.cursor and .usage and (.consecutive_failures != null)' "benchmark-evidence/collector-${I}.json" > /dev/null
+            if [ "$I" -lt 5 ]; then sleep 60; fi
+          done
+      - name: Build benchmark summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -s '[.[] | {status, cursor: .cursor.last_processed_ledger, head: .cursor.latest_observed_ledger, lag: .cursor.lag_ledgers, run_duration_ms: .timing.run_duration_ms, ledgers_processed: .usage.ledgers_processed, rpc_requests: .usage.rpc_requests, estimated_rows: .usage.estimated_rows, estimated_statements: .usage.estimated_statements, overlay_mutations: .usage.overlay_mutations, consecutive_failures, error}]' benchmark-evidence/collector-*.json > benchmark-evidence/series.json
+          jq '{first: .[0], last: .[-1], cursor_delta: (.[-1].cursor - .[0].cursor), head_delta: (.[-1].head - .[0].head), lag_delta: (.[-1].lag - .[0].lag), samples: length, failed_samples: ([.[] | select(.consecutive_failures > 0 or .error != null)] | length), max_run_duration_ms: ([.[].run_duration_ms] | max), min_ledgers_processed: ([.[].ledgers_processed] | min), max_ledgers_processed: ([.[].ledgers_processed] | max), max_estimated_rows: ([.[].estimated_rows] | max), max_estimated_statements: ([.[].estimated_statements] | max), max_overlay_mutations: ([.[].overlay_mutations] | max)}' benchmark-evidence/series.json > benchmark-evidence/summary.json
+          cat benchmark-evidence/summary.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: budget-1024-benchmark-evidence
+          path: benchmark-evidence
+          if-no-files-found: error
+          retention-days: 14
+      - name: Restore main deployment
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git checkout -B restore-main origin/main
+          pnpm exec wrangler deploy
+      - name: Enforce benchmark acceptance
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -e '.failed_samples == 0 and .cursor_delta > 0 and .lag_delta < 0 and .max_run_duration_ms < 40000' benchmark-evidence/summary.json > /dev/null
