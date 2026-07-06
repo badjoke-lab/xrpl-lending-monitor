@@ -84,6 +84,7 @@ function hybridSource() {
     kind: 'hybrid' as const,
     configured: true as const,
     reader,
+    exactIndex: null,
     channel: {
       schemaVersion: 1 as const,
       active: {
@@ -92,6 +93,7 @@ function hybridSource() {
         publicationSha256: 'a'.repeat(64),
         chainId: 'chain-1',
         epochId: 'epoch-1',
+        exactIndex: null,
       },
       updatedAt: '2026-07-06T00:00:00.000Z',
     },
@@ -115,7 +117,7 @@ beforeEach(() => {
 describe('hybrid history route override', () => {
   it('passes through to existing D1 routes when history is not configured', async () => {
     mockedResolve.mockResolvedValue({
-      kind: 'd1', configured: false, reader: null, channel: null, publication: null, unavailableReason: null,
+      kind: 'd1', configured: false, reader: null, exactIndex: null, channel: null, publication: null, unavailableReason: null,
     })
     await expect(handleHybridHistoryOverride(
       new Request('https://example.test/api/activity'),
@@ -125,7 +127,7 @@ describe('hybrid history route override', () => {
 
   it('returns explicit unavailable instead of silent D1 fallback for invalid configured history', async () => {
     mockedResolve.mockResolvedValue({
-      kind: 'unavailable', configured: true, reader: null, channel: null, publication: null,
+      kind: 'unavailable', configured: true, reader: null, exactIndex: null, channel: null, publication: null,
       unavailableReason: 'history_source_integrity_error',
     })
     const response = await handleHybridHistoryOverride(
