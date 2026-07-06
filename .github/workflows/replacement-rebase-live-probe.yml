@@ -6,6 +6,11 @@ on:
       - replacement-rebase-live-probe
     paths:
       - .github/workflows/replacement-rebase-live-probe.yml
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/replacement-rebase-live-probe.yml
 
 permissions:
   contents: read
