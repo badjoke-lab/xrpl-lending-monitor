@@ -1,0 +1,1152 @@
+{
+  "schemaVersion": 1,
+  "passed": true,
+  "stageStartLedgerIndex": 3371676,
+  "stageEndLedgerIndex": 3432924,
+  "ledgerCount": 61249,
+  "segmentCount": 123,
+  "checkpointNextLedgerIndex": 3432925,
+  "planSha256": "8052e57eef56ee9f0a6be58cfe7b4c86da5ded51f1d4b7d5cccf9c1f3248788f",
+  "publicationSha256": "0849bffd04a0e429031ea731ee3a46c72c02134bec7cc7d4ed3b6b9a4f4f2864",
+  "terminalLedgerHash": "52C13CBFFC3433750DBBB986390C4C6E6F7CC82CF70B4B909C506536A8BD9218",
+  "exactIndexManifestSha256": "c9a2fd597118990808c205ec321c2aeabaa612011a5d5bf6353624ce3b5a7115",
+  "exactIndexBucketCount": 1024,
+  "exactIndexRecords": 280454,
+  "exactIndexCompressedBytes": 6810664,
+  "maxBucketCompressedBytes": 43176,
+  "maxBucketRecords": 1384,
+  "exactIndexElapsedSeconds": 21,
+  "artifactBytes": 18216066,
+  "continuationSegmentMetrics": [
+    {
+      "ordinal": 11,
+      "segmentId": "devnet-3371675-3376676-3377175",
+      "startLedgerIndex": 3376676,
+      "endLedgerIndex": 3377175,
+      "attempts": 1,
+      "elapsedSeconds": 58,
+      "artifactBytes": 74038,
+      "totalRecords": 1468
+    },
+    {
+      "ordinal": 12,
+      "segmentId": "devnet-3371675-3377176-3377675",
+      "startLedgerIndex": 3377176,
+      "endLedgerIndex": 3377675,
+      "attempts": 1,
+      "elapsedSeconds": 53,
+      "artifactBytes": 26638,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 13,
+      "segmentId": "devnet-3371675-3377676-3378175",
+      "startLedgerIndex": 3377676,
+      "endLedgerIndex": 3378175,
+      "attempts": 1,
+      "elapsedSeconds": 49,
+      "artifactBytes": 26388,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 14,
+      "segmentId": "devnet-3371675-3378176-3378675",
+      "startLedgerIndex": 3378176,
+      "endLedgerIndex": 3378675,
+      "attempts": 1,
+      "elapsedSeconds": 50,
+      "artifactBytes": 26287,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 15,
+      "segmentId": "devnet-3371675-3378676-3379175",
+      "startLedgerIndex": 3378676,
+      "endLedgerIndex": 3379175,
+      "attempts": 1,
+      "elapsedSeconds": 49,
+      "artifactBytes": 26299,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 16,
+      "segmentId": "devnet-3371675-3379176-3379675",
+      "startLedgerIndex": 3379176,
+      "endLedgerIndex": 3379675,
+      "attempts": 1,
+      "elapsedSeconds": 53,
+      "artifactBytes": 26305,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 17,
+      "segmentId": "devnet-3371675-3379676-3380175",
+      "startLedgerIndex": 3379676,
+      "endLedgerIndex": 3380175,
+      "attempts": 1,
+      "elapsedSeconds": 47,
+      "artifactBytes": 26373,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 18,
+      "segmentId": "devnet-3371675-3380176-3380675",
+      "startLedgerIndex": 3380176,
+      "endLedgerIndex": 3380675,
+      "attempts": 1,
+      "elapsedSeconds": 52,
+      "artifactBytes": 26303,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 19,
+      "segmentId": "devnet-3371675-3380676-3381175",
+      "startLedgerIndex": 3380676,
+      "endLedgerIndex": 3381175,
+      "attempts": 1,
+      "elapsedSeconds": 48,
+      "artifactBytes": 26287,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 20,
+      "segmentId": "devnet-3371675-3381176-3381675",
+      "startLedgerIndex": 3381176,
+      "endLedgerIndex": 3381675,
+      "attempts": 1,
+      "elapsedSeconds": 51,
+      "artifactBytes": 26307,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 21,
+      "segmentId": "devnet-3371675-3381676-3382175",
+      "startLedgerIndex": 3381676,
+      "endLedgerIndex": 3382175,
+      "attempts": 1,
+      "elapsedSeconds": 48,
+      "artifactBytes": 26309,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 22,
+      "segmentId": "devnet-3371675-3382176-3382675",
+      "startLedgerIndex": 3382176,
+      "endLedgerIndex": 3382675,
+      "attempts": 1,
+      "elapsedSeconds": 51,
+      "artifactBytes": 26283,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 23,
+      "segmentId": "devnet-3371675-3382676-3383175",
+      "startLedgerIndex": 3382676,
+      "endLedgerIndex": 3383175,
+      "attempts": 1,
+      "elapsedSeconds": 50,
+      "artifactBytes": 26295,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 24,
+      "segmentId": "devnet-3371675-3383176-3383675",
+      "startLedgerIndex": 3383176,
+      "endLedgerIndex": 3383675,
+      "attempts": 1,
+      "elapsedSeconds": 53,
+      "artifactBytes": 26288,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 25,
+      "segmentId": "devnet-3371675-3383676-3384175",
+      "startLedgerIndex": 3383676,
+      "endLedgerIndex": 3384175,
+      "attempts": 1,
+      "elapsedSeconds": 50,
+      "artifactBytes": 26297,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 26,
+      "segmentId": "devnet-3371675-3384176-3384675",
+      "startLedgerIndex": 3384176,
+      "endLedgerIndex": 3384675,
+      "attempts": 1,
+      "elapsedSeconds": 52,
+      "artifactBytes": 26292,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 27,
+      "segmentId": "devnet-3371675-3384676-3385175",
+      "startLedgerIndex": 3384676,
+      "endLedgerIndex": 3385175,
+      "attempts": 1,
+      "elapsedSeconds": 49,
+      "artifactBytes": 26314,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 28,
+      "segmentId": "devnet-3371675-3385176-3385675",
+      "startLedgerIndex": 3385176,
+      "endLedgerIndex": 3385675,
+      "attempts": 1,
+      "elapsedSeconds": 51,
+      "artifactBytes": 26274,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 29,
+      "segmentId": "devnet-3371675-3385676-3386175",
+      "startLedgerIndex": 3385676,
+      "endLedgerIndex": 3386175,
+      "attempts": 1,
+      "elapsedSeconds": 49,
+      "artifactBytes": 26317,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 30,
+      "segmentId": "devnet-3371675-3386176-3386675",
+      "startLedgerIndex": 3386176,
+      "endLedgerIndex": 3386675,
+      "attempts": 1,
+      "elapsedSeconds": 52,
+      "artifactBytes": 26277,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 31,
+      "segmentId": "devnet-3371675-3386676-3387175",
+      "startLedgerIndex": 3386676,
+      "endLedgerIndex": 3387175,
+      "attempts": 1,
+      "elapsedSeconds": 51,
+      "artifactBytes": 26298,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 32,
+      "segmentId": "devnet-3371675-3387176-3387675",
+      "startLedgerIndex": 3387176,
+      "endLedgerIndex": 3387675,
+      "attempts": 1,
+      "elapsedSeconds": 51,
+      "artifactBytes": 26276,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 33,
+      "segmentId": "devnet-3371675-3387676-3388175",
+      "startLedgerIndex": 3387676,
+      "endLedgerIndex": 3388175,
+      "attempts": 1,
+      "elapsedSeconds": 51,
+      "artifactBytes": 26310,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 34,
+      "segmentId": "devnet-3371675-3388176-3388675",
+      "startLedgerIndex": 3388176,
+      "endLedgerIndex": 3388675,
+      "attempts": 1,
+      "elapsedSeconds": 66,
+      "artifactBytes": 545835,
+      "totalRecords": 10051
+    },
+    {
+      "ordinal": 35,
+      "segmentId": "devnet-3371675-3388676-3389175",
+      "startLedgerIndex": 3388676,
+      "endLedgerIndex": 3389175,
+      "attempts": 1,
+      "elapsedSeconds": 80,
+      "artifactBytes": 1129790,
+      "totalRecords": 20759
+    },
+    {
+      "ordinal": 36,
+      "segmentId": "devnet-3371675-3389176-3389675",
+      "startLedgerIndex": 3389176,
+      "endLedgerIndex": 3389675,
+      "attempts": 1,
+      "elapsedSeconds": 79,
+      "artifactBytes": 539163,
+      "totalRecords": 9951
+    },
+    {
+      "ordinal": 37,
+      "segmentId": "devnet-3371675-3389676-3390175",
+      "startLedgerIndex": 3389676,
+      "endLedgerIndex": 3390175,
+      "attempts": 1,
+      "elapsedSeconds": 77,
+      "artifactBytes": 499595,
+      "totalRecords": 9643
+    },
+    {
+      "ordinal": 38,
+      "segmentId": "devnet-3371675-3390176-3390675",
+      "startLedgerIndex": 3390176,
+      "endLedgerIndex": 3390675,
+      "attempts": 1,
+      "elapsedSeconds": 80,
+      "artifactBytes": 640613,
+      "totalRecords": 11979
+    },
+    {
+      "ordinal": 39,
+      "segmentId": "devnet-3371675-3390676-3391175",
+      "startLedgerIndex": 3390676,
+      "endLedgerIndex": 3391175,
+      "attempts": 1,
+      "elapsedSeconds": 62,
+      "artifactBytes": 473007,
+      "totalRecords": 8713
+    },
+    {
+      "ordinal": 40,
+      "segmentId": "devnet-3371675-3391176-3391675",
+      "startLedgerIndex": 3391176,
+      "endLedgerIndex": 3391675,
+      "attempts": 1,
+      "elapsedSeconds": 52,
+      "artifactBytes": 132778,
+      "totalRecords": 2463
+    },
+    {
+      "ordinal": 41,
+      "segmentId": "devnet-3371675-3391676-3392175",
+      "startLedgerIndex": 3391676,
+      "endLedgerIndex": 3392175,
+      "attempts": 1,
+      "elapsedSeconds": 49,
+      "artifactBytes": 94371,
+      "totalRecords": 1776
+    },
+    {
+      "ordinal": 42,
+      "segmentId": "devnet-3371675-3392176-3392675",
+      "startLedgerIndex": 3392176,
+      "endLedgerIndex": 3392675,
+      "attempts": 1,
+      "elapsedSeconds": 51,
+      "artifactBytes": 150376,
+      "totalRecords": 2885
+    },
+    {
+      "ordinal": 43,
+      "segmentId": "devnet-3371675-3392676-3393175",
+      "startLedgerIndex": 3392676,
+      "endLedgerIndex": 3393175,
+      "attempts": 1,
+      "elapsedSeconds": 49,
+      "artifactBytes": 163217,
+      "totalRecords": 3121
+    },
+    {
+      "ordinal": 44,
+      "segmentId": "devnet-3371675-3393176-3393675",
+      "startLedgerIndex": 3393176,
+      "endLedgerIndex": 3393675,
+      "attempts": 1,
+      "elapsedSeconds": 50,
+      "artifactBytes": 26265,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 45,
+      "segmentId": "devnet-3371675-3393676-3394175",
+      "startLedgerIndex": 3393676,
+      "endLedgerIndex": 3394175,
+      "attempts": 1,
+      "elapsedSeconds": 50,
+      "artifactBytes": 26302,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 46,
+      "segmentId": "devnet-3371675-3394176-3394675",
+      "startLedgerIndex": 3394176,
+      "endLedgerIndex": 3394675,
+      "attempts": 1,
+      "elapsedSeconds": 51,
+      "artifactBytes": 26297,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 47,
+      "segmentId": "devnet-3371675-3394676-3395175",
+      "startLedgerIndex": 3394676,
+      "endLedgerIndex": 3395175,
+      "attempts": 1,
+      "elapsedSeconds": 50,
+      "artifactBytes": 26313,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 48,
+      "segmentId": "devnet-3371675-3395176-3395675",
+      "startLedgerIndex": 3395176,
+      "endLedgerIndex": 3395675,
+      "attempts": 1,
+      "elapsedSeconds": 53,
+      "artifactBytes": 26287,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 49,
+      "segmentId": "devnet-3371675-3395676-3396175",
+      "startLedgerIndex": 3395676,
+      "endLedgerIndex": 3396175,
+      "attempts": 1,
+      "elapsedSeconds": 49,
+      "artifactBytes": 26314,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 50,
+      "segmentId": "devnet-3371675-3396176-3396675",
+      "startLedgerIndex": 3396176,
+      "endLedgerIndex": 3396675,
+      "attempts": 1,
+      "elapsedSeconds": 52,
+      "artifactBytes": 26256,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 51,
+      "segmentId": "devnet-3371675-3396676-3397175",
+      "startLedgerIndex": 3396676,
+      "endLedgerIndex": 3397175,
+      "attempts": 1,
+      "elapsedSeconds": 49,
+      "artifactBytes": 26281,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 52,
+      "segmentId": "devnet-3371675-3397176-3397675",
+      "startLedgerIndex": 3397176,
+      "endLedgerIndex": 3397675,
+      "attempts": 1,
+      "elapsedSeconds": 52,
+      "artifactBytes": 26292,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 53,
+      "segmentId": "devnet-3371675-3397676-3398175",
+      "startLedgerIndex": 3397676,
+      "endLedgerIndex": 3398175,
+      "attempts": 1,
+      "elapsedSeconds": 48,
+      "artifactBytes": 26337,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 54,
+      "segmentId": "devnet-3371675-3398176-3398675",
+      "startLedgerIndex": 3398176,
+      "endLedgerIndex": 3398675,
+      "attempts": 1,
+      "elapsedSeconds": 50,
+      "artifactBytes": 26295,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 55,
+      "segmentId": "devnet-3371675-3398676-3399175",
+      "startLedgerIndex": 3398676,
+      "endLedgerIndex": 3399175,
+      "attempts": 1,
+      "elapsedSeconds": 50,
+      "artifactBytes": 26318,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 56,
+      "segmentId": "devnet-3371675-3399176-3399675",
+      "startLedgerIndex": 3399176,
+      "endLedgerIndex": 3399675,
+      "attempts": 1,
+      "elapsedSeconds": 51,
+      "artifactBytes": 26301,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 57,
+      "segmentId": "devnet-3371675-3399676-3400175",
+      "startLedgerIndex": 3399676,
+      "endLedgerIndex": 3400175,
+      "attempts": 1,
+      "elapsedSeconds": 51,
+      "artifactBytes": 166190,
+      "totalRecords": 3389
+    },
+    {
+      "ordinal": 58,
+      "segmentId": "devnet-3371675-3400176-3400675",
+      "startLedgerIndex": 3400176,
+      "endLedgerIndex": 3400675,
+      "attempts": 1,
+      "elapsedSeconds": 50,
+      "artifactBytes": 37233,
+      "totalRecords": 780
+    },
+    {
+      "ordinal": 59,
+      "segmentId": "devnet-3371675-3400676-3401175",
+      "startLedgerIndex": 3400676,
+      "endLedgerIndex": 3401175,
+      "attempts": 1,
+      "elapsedSeconds": 51,
+      "artifactBytes": 26314,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 60,
+      "segmentId": "devnet-3371675-3401176-3401675",
+      "startLedgerIndex": 3401176,
+      "endLedgerIndex": 3401675,
+      "attempts": 1,
+      "elapsedSeconds": 51,
+      "artifactBytes": 26267,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 61,
+      "segmentId": "devnet-3371675-3401676-3402175",
+      "startLedgerIndex": 3401676,
+      "endLedgerIndex": 3402175,
+      "attempts": 1,
+      "elapsedSeconds": 50,
+      "artifactBytes": 26324,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 62,
+      "segmentId": "devnet-3371675-3402176-3402675",
+      "startLedgerIndex": 3402176,
+      "endLedgerIndex": 3402675,
+      "attempts": 1,
+      "elapsedSeconds": 50,
+      "artifactBytes": 26268,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 63,
+      "segmentId": "devnet-3371675-3402676-3403175",
+      "startLedgerIndex": 3402676,
+      "endLedgerIndex": 3403175,
+      "attempts": 1,
+      "elapsedSeconds": 59,
+      "artifactBytes": 26597,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 64,
+      "segmentId": "devnet-3371675-3403176-3403675",
+      "startLedgerIndex": 3403176,
+      "endLedgerIndex": 3403675,
+      "attempts": 1,
+      "elapsedSeconds": 65,
+      "artifactBytes": 26637,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 65,
+      "segmentId": "devnet-3371675-3403676-3404175",
+      "startLedgerIndex": 3403676,
+      "endLedgerIndex": 3404175,
+      "attempts": 1,
+      "elapsedSeconds": 58,
+      "artifactBytes": 59159,
+      "totalRecords": 1156
+    },
+    {
+      "ordinal": 66,
+      "segmentId": "devnet-3371675-3404176-3404675",
+      "startLedgerIndex": 3404176,
+      "endLedgerIndex": 3404675,
+      "attempts": 1,
+      "elapsedSeconds": 81,
+      "artifactBytes": 43171,
+      "totalRecords": 812
+    },
+    {
+      "ordinal": 67,
+      "segmentId": "devnet-3371675-3404676-3405175",
+      "startLedgerIndex": 3404676,
+      "endLedgerIndex": 3405175,
+      "attempts": 1,
+      "elapsedSeconds": 53,
+      "artifactBytes": 26583,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 68,
+      "segmentId": "devnet-3371675-3405176-3405675",
+      "startLedgerIndex": 3405176,
+      "endLedgerIndex": 3405675,
+      "attempts": 1,
+      "elapsedSeconds": 52,
+      "artifactBytes": 26286,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 69,
+      "segmentId": "devnet-3371675-3405676-3406175",
+      "startLedgerIndex": 3405676,
+      "endLedgerIndex": 3406175,
+      "attempts": 1,
+      "elapsedSeconds": 49,
+      "artifactBytes": 26250,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 70,
+      "segmentId": "devnet-3371675-3406176-3406675",
+      "startLedgerIndex": 3406176,
+      "endLedgerIndex": 3406675,
+      "attempts": 1,
+      "elapsedSeconds": 52,
+      "artifactBytes": 26294,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 71,
+      "segmentId": "devnet-3371675-3406676-3407175",
+      "startLedgerIndex": 3406676,
+      "endLedgerIndex": 3407175,
+      "attempts": 1,
+      "elapsedSeconds": 51,
+      "artifactBytes": 26321,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 72,
+      "segmentId": "devnet-3371675-3407176-3407675",
+      "startLedgerIndex": 3407176,
+      "endLedgerIndex": 3407675,
+      "attempts": 1,
+      "elapsedSeconds": 50,
+      "artifactBytes": 26299,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 73,
+      "segmentId": "devnet-3371675-3407676-3408175",
+      "startLedgerIndex": 3407676,
+      "endLedgerIndex": 3408175,
+      "attempts": 1,
+      "elapsedSeconds": 50,
+      "artifactBytes": 26319,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 74,
+      "segmentId": "devnet-3371675-3408176-3408675",
+      "startLedgerIndex": 3408176,
+      "endLedgerIndex": 3408675,
+      "attempts": 1,
+      "elapsedSeconds": 50,
+      "artifactBytes": 26258,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 75,
+      "segmentId": "devnet-3371675-3408676-3409175",
+      "startLedgerIndex": 3408676,
+      "endLedgerIndex": 3409175,
+      "attempts": 1,
+      "elapsedSeconds": 49,
+      "artifactBytes": 26271,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 76,
+      "segmentId": "devnet-3371675-3409176-3409675",
+      "startLedgerIndex": 3409176,
+      "endLedgerIndex": 3409675,
+      "attempts": 1,
+      "elapsedSeconds": 51,
+      "artifactBytes": 26293,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 77,
+      "segmentId": "devnet-3371675-3409676-3410175",
+      "startLedgerIndex": 3409676,
+      "endLedgerIndex": 3410175,
+      "attempts": 1,
+      "elapsedSeconds": 48,
+      "artifactBytes": 26316,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 78,
+      "segmentId": "devnet-3371675-3410176-3410675",
+      "startLedgerIndex": 3410176,
+      "endLedgerIndex": 3410675,
+      "attempts": 1,
+      "elapsedSeconds": 51,
+      "artifactBytes": 26292,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 79,
+      "segmentId": "devnet-3371675-3410676-3411175",
+      "startLedgerIndex": 3410676,
+      "endLedgerIndex": 3411175,
+      "attempts": 1,
+      "elapsedSeconds": 47,
+      "artifactBytes": 26313,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 80,
+      "segmentId": "devnet-3371675-3411176-3411675",
+      "startLedgerIndex": 3411176,
+      "endLedgerIndex": 3411675,
+      "attempts": 1,
+      "elapsedSeconds": 51,
+      "artifactBytes": 26253,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 81,
+      "segmentId": "devnet-3371675-3411676-3412175",
+      "startLedgerIndex": 3411676,
+      "endLedgerIndex": 3412175,
+      "attempts": 1,
+      "elapsedSeconds": 48,
+      "artifactBytes": 26284,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 82,
+      "segmentId": "devnet-3371675-3412176-3412675",
+      "startLedgerIndex": 3412176,
+      "endLedgerIndex": 3412675,
+      "attempts": 1,
+      "elapsedSeconds": 51,
+      "artifactBytes": 26294,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 83,
+      "segmentId": "devnet-3371675-3412676-3413175",
+      "startLedgerIndex": 3412676,
+      "endLedgerIndex": 3413175,
+      "attempts": 1,
+      "elapsedSeconds": 48,
+      "artifactBytes": 26324,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 84,
+      "segmentId": "devnet-3371675-3413176-3413675",
+      "startLedgerIndex": 3413176,
+      "endLedgerIndex": 3413675,
+      "attempts": 1,
+      "elapsedSeconds": 50,
+      "artifactBytes": 26263,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 85,
+      "segmentId": "devnet-3371675-3413676-3414175",
+      "startLedgerIndex": 3413676,
+      "endLedgerIndex": 3414175,
+      "attempts": 1,
+      "elapsedSeconds": 49,
+      "artifactBytes": 26291,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 86,
+      "segmentId": "devnet-3371675-3414176-3414675",
+      "startLedgerIndex": 3414176,
+      "endLedgerIndex": 3414675,
+      "attempts": 1,
+      "elapsedSeconds": 53,
+      "artifactBytes": 26278,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 87,
+      "segmentId": "devnet-3371675-3414676-3415175",
+      "startLedgerIndex": 3414676,
+      "endLedgerIndex": 3415175,
+      "attempts": 1,
+      "elapsedSeconds": 48,
+      "artifactBytes": 26277,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 88,
+      "segmentId": "devnet-3371675-3415176-3415675",
+      "startLedgerIndex": 3415176,
+      "endLedgerIndex": 3415675,
+      "attempts": 1,
+      "elapsedSeconds": 51,
+      "artifactBytes": 26283,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 89,
+      "segmentId": "devnet-3371675-3415676-3416175",
+      "startLedgerIndex": 3415676,
+      "endLedgerIndex": 3416175,
+      "attempts": 1,
+      "elapsedSeconds": 47,
+      "artifactBytes": 26308,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 90,
+      "segmentId": "devnet-3371675-3416176-3416675",
+      "startLedgerIndex": 3416176,
+      "endLedgerIndex": 3416675,
+      "attempts": 1,
+      "elapsedSeconds": 52,
+      "artifactBytes": 26278,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 91,
+      "segmentId": "devnet-3371675-3416676-3417175",
+      "startLedgerIndex": 3416676,
+      "endLedgerIndex": 3417175,
+      "attempts": 1,
+      "elapsedSeconds": 48,
+      "artifactBytes": 26285,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 92,
+      "segmentId": "devnet-3371675-3417176-3417675",
+      "startLedgerIndex": 3417176,
+      "endLedgerIndex": 3417675,
+      "attempts": 1,
+      "elapsedSeconds": 51,
+      "artifactBytes": 26281,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 93,
+      "segmentId": "devnet-3371675-3417676-3418175",
+      "startLedgerIndex": 3417676,
+      "endLedgerIndex": 3418175,
+      "attempts": 1,
+      "elapsedSeconds": 50,
+      "artifactBytes": 26303,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 94,
+      "segmentId": "devnet-3371675-3418176-3418675",
+      "startLedgerIndex": 3418176,
+      "endLedgerIndex": 3418675,
+      "attempts": 1,
+      "elapsedSeconds": 54,
+      "artifactBytes": 26370,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 95,
+      "segmentId": "devnet-3371675-3418676-3419175",
+      "startLedgerIndex": 3418676,
+      "endLedgerIndex": 3419175,
+      "attempts": 1,
+      "elapsedSeconds": 49,
+      "artifactBytes": 26397,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 96,
+      "segmentId": "devnet-3371675-3419176-3419675",
+      "startLedgerIndex": 3419176,
+      "endLedgerIndex": 3419675,
+      "attempts": 1,
+      "elapsedSeconds": 53,
+      "artifactBytes": 26357,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 97,
+      "segmentId": "devnet-3371675-3419676-3420175",
+      "startLedgerIndex": 3419676,
+      "endLedgerIndex": 3420175,
+      "attempts": 1,
+      "elapsedSeconds": 50,
+      "artifactBytes": 26336,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 98,
+      "segmentId": "devnet-3371675-3420176-3420675",
+      "startLedgerIndex": 3420176,
+      "endLedgerIndex": 3420675,
+      "attempts": 1,
+      "elapsedSeconds": 51,
+      "artifactBytes": 26303,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 99,
+      "segmentId": "devnet-3371675-3420676-3421175",
+      "startLedgerIndex": 3420676,
+      "endLedgerIndex": 3421175,
+      "attempts": 2,
+      "elapsedSeconds": 86,
+      "artifactBytes": 26322,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 100,
+      "segmentId": "devnet-3371675-3421176-3421675",
+      "startLedgerIndex": 3421176,
+      "endLedgerIndex": 3421675,
+      "attempts": 1,
+      "elapsedSeconds": 52,
+      "artifactBytes": 26285,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 101,
+      "segmentId": "devnet-3371675-3421676-3422175",
+      "startLedgerIndex": 3421676,
+      "endLedgerIndex": 3422175,
+      "attempts": 1,
+      "elapsedSeconds": 47,
+      "artifactBytes": 26329,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 102,
+      "segmentId": "devnet-3371675-3422176-3422675",
+      "startLedgerIndex": 3422176,
+      "endLedgerIndex": 3422675,
+      "attempts": 1,
+      "elapsedSeconds": 51,
+      "artifactBytes": 26295,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 103,
+      "segmentId": "devnet-3371675-3422676-3423175",
+      "startLedgerIndex": 3422676,
+      "endLedgerIndex": 3423175,
+      "attempts": 1,
+      "elapsedSeconds": 49,
+      "artifactBytes": 26312,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 104,
+      "segmentId": "devnet-3371675-3423176-3423675",
+      "startLedgerIndex": 3423176,
+      "endLedgerIndex": 3423675,
+      "attempts": 1,
+      "elapsedSeconds": 52,
+      "artifactBytes": 30975,
+      "totalRecords": 565
+    },
+    {
+      "ordinal": 105,
+      "segmentId": "devnet-3371675-3423676-3424175",
+      "startLedgerIndex": 3423676,
+      "endLedgerIndex": 3424175,
+      "attempts": 1,
+      "elapsedSeconds": 49,
+      "artifactBytes": 26378,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 106,
+      "segmentId": "devnet-3371675-3424176-3424675",
+      "startLedgerIndex": 3424176,
+      "endLedgerIndex": 3424675,
+      "attempts": 1,
+      "elapsedSeconds": 54,
+      "artifactBytes": 26435,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 107,
+      "segmentId": "devnet-3371675-3424676-3425175",
+      "startLedgerIndex": 3424676,
+      "endLedgerIndex": 3425175,
+      "attempts": 1,
+      "elapsedSeconds": 50,
+      "artifactBytes": 26435,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 108,
+      "segmentId": "devnet-3371675-3425176-3425675",
+      "startLedgerIndex": 3425176,
+      "endLedgerIndex": 3425675,
+      "attempts": 1,
+      "elapsedSeconds": 68,
+      "artifactBytes": 73799,
+      "totalRecords": 1468
+    },
+    {
+      "ordinal": 109,
+      "segmentId": "devnet-3371675-3425676-3426175",
+      "startLedgerIndex": 3425676,
+      "endLedgerIndex": 3426175,
+      "attempts": 1,
+      "elapsedSeconds": 53,
+      "artifactBytes": 26695,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 110,
+      "segmentId": "devnet-3371675-3426176-3426675",
+      "startLedgerIndex": 3426176,
+      "endLedgerIndex": 3426675,
+      "attempts": 1,
+      "elapsedSeconds": 59,
+      "artifactBytes": 26592,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 111,
+      "segmentId": "devnet-3371675-3426676-3427175",
+      "startLedgerIndex": 3426676,
+      "endLedgerIndex": 3427175,
+      "attempts": 1,
+      "elapsedSeconds": 74,
+      "artifactBytes": 27018,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 112,
+      "segmentId": "devnet-3371675-3427176-3427675",
+      "startLedgerIndex": 3427176,
+      "endLedgerIndex": 3427675,
+      "attempts": 1,
+      "elapsedSeconds": 61,
+      "artifactBytes": 26814,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 113,
+      "segmentId": "devnet-3371675-3427676-3428175",
+      "startLedgerIndex": 3427676,
+      "endLedgerIndex": 3428175,
+      "attempts": 1,
+      "elapsedSeconds": 61,
+      "artifactBytes": 26706,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 114,
+      "segmentId": "devnet-3371675-3428176-3428675",
+      "startLedgerIndex": 3428176,
+      "endLedgerIndex": 3428675,
+      "attempts": 1,
+      "elapsedSeconds": 59,
+      "artifactBytes": 26670,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 115,
+      "segmentId": "devnet-3371675-3428676-3429175",
+      "startLedgerIndex": 3428676,
+      "endLedgerIndex": 3429175,
+      "attempts": 1,
+      "elapsedSeconds": 49,
+      "artifactBytes": 150169,
+      "totalRecords": 2964
+    },
+    {
+      "ordinal": 116,
+      "segmentId": "devnet-3371675-3429176-3429675",
+      "startLedgerIndex": 3429176,
+      "endLedgerIndex": 3429675,
+      "attempts": 1,
+      "elapsedSeconds": 52,
+      "artifactBytes": 55432,
+      "totalRecords": 1246
+    },
+    {
+      "ordinal": 117,
+      "segmentId": "devnet-3371675-3429676-3430175",
+      "startLedgerIndex": 3429676,
+      "endLedgerIndex": 3430175,
+      "attempts": 1,
+      "elapsedSeconds": 48,
+      "artifactBytes": 26335,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 118,
+      "segmentId": "devnet-3371675-3430176-3430675",
+      "startLedgerIndex": 3430176,
+      "endLedgerIndex": 3430675,
+      "attempts": 1,
+      "elapsedSeconds": 64,
+      "artifactBytes": 26779,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 119,
+      "segmentId": "devnet-3371675-3430676-3431175",
+      "startLedgerIndex": 3430676,
+      "endLedgerIndex": 3431175,
+      "attempts": 1,
+      "elapsedSeconds": 56,
+      "artifactBytes": 26612,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 120,
+      "segmentId": "devnet-3371675-3431176-3431675",
+      "startLedgerIndex": 3431176,
+      "endLedgerIndex": 3431675,
+      "attempts": 1,
+      "elapsedSeconds": 66,
+      "artifactBytes": 26863,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 121,
+      "segmentId": "devnet-3371675-3431676-3432175",
+      "startLedgerIndex": 3431676,
+      "endLedgerIndex": 3432175,
+      "attempts": 1,
+      "elapsedSeconds": 53,
+      "artifactBytes": 26565,
+      "totalRecords": 500
+    },
+    {
+      "ordinal": 122,
+      "segmentId": "devnet-3371675-3432176-3432675",
+      "startLedgerIndex": 3432176,
+      "endLedgerIndex": 3432675,
+      "attempts": 1,
+      "elapsedSeconds": 63,
+      "artifactBytes": 74145,
+      "totalRecords": 1468
+    },
+    {
+      "ordinal": 123,
+      "segmentId": "devnet-3371675-3432676-3432924",
+      "startLedgerIndex": 3432676,
+      "endLedgerIndex": 3432924,
+      "attempts": 1,
+      "elapsedSeconds": 26,
+      "artifactBytes": 14406,
+      "totalRecords": 249
+    }
+  ]
+}
