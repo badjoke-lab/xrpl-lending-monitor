@@ -84,9 +84,9 @@ async function fixture() {
         bucket,
         term: TERM.toUpperCase(),
         reference: {
-          kind: 'transaction_event',
+          kind: 'object_change',
           segmentId: 's-101-105',
-          fileKind: 'protocol_events',
+          fileKind: 'object_changes',
           ledgerIndex: 104,
         },
       },
@@ -95,9 +95,9 @@ async function fixture() {
         bucket,
         term: TERM.toUpperCase(),
         reference: {
-          kind: 'object_change',
+          kind: 'transaction_event',
           segmentId: 's-101-105',
-          fileKind: 'object_changes',
+          fileKind: 'protocol_events',
           ledgerIndex: 104,
         },
       },
