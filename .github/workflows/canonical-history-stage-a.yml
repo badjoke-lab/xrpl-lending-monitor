@@ -1,0 +1,249 @@
+name: Canonical history Stage A
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/canonical-history-stage-a.yml'
+      - 'docs/evidence/canonical-history-backfill-plan-3371676-3432924.json'
+      - 'scripts/run-history-segment.ts'
+      - 'scripts/update-history-segment-checkpoint.ts'
+      - 'scripts/verify-history-segment-chain.ts'
+      - 'scripts/build-history-segment-publication.ts'
+      - 'scripts/build-history-exact-index.ts'
+      - 'src/collector/history-segments/**'
+      - 'src/collector/incremental/**'
+      - 'src/shared/history-segments/**'
+      - 'src/shared/current-state/**'
+      - 'package.json'
+
+permissions:
+  contents: read
+
+jobs:
+  stage-a:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build history tools
+        run: |
+          pnpm history-segment:build
+          pnpm history-segment-checkpoint:build
+          pnpm history-segment-chain:build
+          pnpm history-segment-publication:build
+          pnpm history-exact-index:build
+
+      - name: Generate canonical Stage A segments
+        shell: bash
+        run: |
+          set -euo pipefail
+          PLAN=docs/evidence/canonical-history-backfill-plan-3371676-3432924.json
+          ROOT=.local/canonical-stage-a
+          EPOCH=devnet-3371675
+          CHECKPOINT="$ROOT/checkpoint.json"
+          METRICS="$ROOT/segment-metrics.ndjson"
+          mkdir -p "$ROOT/history/$EPOCH"
+          : > "$METRICS"
+
+          EXPECTED_PLAN_SHA=8052e57eef56ee9f0a6be58cfe7b4c86da5ded51f1d4b7d5cccf9c1f3248788f
+          ACTUAL_PLAN_SHA=$(sha256sum "$PLAN" | awk '{print $1}')
+          test "$ACTUAL_PLAN_SHA" = "$EXPECTED_PLAN_SHA"
+
+          PREV_ID=''
+          PREV_HASH=''
+          for ORDINAL in $(seq 1 10); do
+            SEGMENT=$(jq -c --argjson ordinal "$ORDINAL" '.segments[] | select(.ordinal == $ordinal)' "$PLAN")
+            SEGMENT_ID=$(jq -r '.segmentId' <<<"$SEGMENT")
+            START=$(jq -r '.startLedgerIndex' <<<"$SEGMENT")
+            END=$(jq -r '.endLedgerIndex' <<<"$SEGMENT")
+            OUT="$ROOT/history/$EPOCH/$SEGMENT_ID"
+
+            ARGS=(
+              node .history-segment-build/run-history-segment.mjs
+              --local
+              --timeout-ms 12000
+              --start-ledger "$START"
+              --end-ledger "$END"
+              --epoch-id "$EPOCH"
+              --segment-id "$SEGMENT_ID"
+              --output-dir "$OUT"
+              --source-revision "$GITHUB_SHA"
+            )
+            if [[ -n "$PREV_ID" ]]; then
+              ARGS+=(
+                --previous-segment-id "$PREV_ID"
+                --previous-segment-end-hash "$PREV_HASH"
+              )
+            fi
+
+            STARTED=$(date +%s)
+            PASSED=false
+            ATTEMPTS=0
+            for ATTEMPT in 1 2 3; do
+              ATTEMPTS=$ATTEMPT
+              if "${ARGS[@]}" > "$ROOT/segment-$ORDINAL-manifest-output.json"; then
+                PASSED=true
+                break
+              fi
+              sleep $((ATTEMPT * 10))
+            done
+            if [[ "$PASSED" != true ]]; then
+              echo "Stage A segment $ORDINAL failed after $ATTEMPTS attempts" >&2
+              exit 1
+            fi
+            ELAPSED=$(( $(date +%s) - STARTED ))
+
+            node .history-segment-checkpoint-build/update-history-segment-checkpoint.mjs \
+              --local \
+              --checkpoint "$CHECKPOINT" \
+              --manifest "$OUT/manifest.json" \
+              --epoch-id "$EPOCH" \
+              --range-start-ledger 3371676 \
+              --range-end-ledger 3376675 \
+              > "$ROOT/checkpoint-$ORDINAL-output.json"
+
+            SEGMENT_BYTES=$(du -sb "$OUT" | cut -f1)
+            TOTAL_RECORDS=$(jq '[.files[].records] | add' "$OUT/manifest.json")
+            jq -nc \
+              --argjson ordinal "$ORDINAL" \
+              --arg segmentId "$SEGMENT_ID" \
+              --argjson startLedgerIndex "$START" \
+              --argjson endLedgerIndex "$END" \
+              --argjson attempts "$ATTEMPTS" \
+              --argjson elapsedSeconds "$ELAPSED" \
+              --argjson artifactBytes "$SEGMENT_BYTES" \
+              --argjson totalRecords "$TOTAL_RECORDS" \
+              '{ordinal:$ordinal,segmentId:$segmentId,startLedgerIndex:$startLedgerIndex,endLedgerIndex:$endLedgerIndex,attempts:$attempts,elapsedSeconds:$elapsedSeconds,artifactBytes:$artifactBytes,totalRecords:$totalRecords}' \
+              >> "$METRICS"
+
+            PREV_ID="$SEGMENT_ID"
+            PREV_HASH=$(jq -r '.endLedgerHash' "$OUT/manifest.json")
+          done
+
+          jq -e '.nextLedgerIndex == 3376676 and (.completedSegments | length) == 10' "$CHECKPOINT" > /dev/null
+          jq -s '.' "$METRICS" > "$ROOT/segment-metrics.json"
+
+      - name: Verify Stage A chain
+        shell: bash
+        run: |
+          set -euo pipefail
+          PLAN=docs/evidence/canonical-history-backfill-plan-3371676-3432924.json
+          ROOT=.local/canonical-stage-a
+          EPOCH=devnet-3371675
+          BASE_HASH=0BA2ED766C190C733F8F26288785CBDF01D0FC26E1A6C03EDB7E9DFF6F8BCB90
+          MANIFEST_ARGS=()
+          LAST_MANIFEST=''
+          for ORDINAL in $(seq 1 10); do
+            SEGMENT_ID=$(jq -r --argjson ordinal "$ORDINAL" '.segments[] | select(.ordinal == $ordinal) | .segmentId' "$PLAN")
+            MANIFEST="$ROOT/history/$EPOCH/$SEGMENT_ID/manifest.json"
+            MANIFEST_ARGS+=(--manifest "$MANIFEST")
+            LAST_MANIFEST="$MANIFEST"
+          done
+          TERMINAL_HASH=$(jq -r '.endLedgerHash' "$LAST_MANIFEST")
+          node .history-segment-chain-build/verify-history-segment-chain.mjs \
+            --local \
+            "${MANIFEST_ARGS[@]}" \
+            --epoch-id "$EPOCH" \
+            --start-ledger 3371676 \
+            --start-parent-hash "$BASE_HASH" \
+            --end-ledger 3376675 \
+            --end-ledger-hash "$TERMINAL_HASH" \
+            > "$ROOT/stage-a-chain-summary.json"
+
+      - name: Build Stage A publication
+        shell: bash
+        run: |
+          set -euo pipefail
+          PLAN=docs/evidence/canonical-history-backfill-plan-3371676-3432924.json
+          ROOT=.local/canonical-stage-a
+          EPOCH=devnet-3371675
+          MANIFEST_ARGS=()
+          for ORDINAL in $(seq 1 10); do
+            SEGMENT_ID=$(jq -r --argjson ordinal "$ORDINAL" '.segments[] | select(.ordinal == $ordinal) | .segmentId' "$PLAN")
+            MANIFEST_ARGS+=(--manifest "$ROOT/history/$EPOCH/$SEGMENT_ID/manifest.json")
+          done
+          node .history-segment-publication-build/build-history-segment-publication.mjs \
+            --local \
+            "${MANIFEST_ARGS[@]}" \
+            --chain-id canonical-stage-a-3371676-3376675 \
+            --epoch-id "$EPOCH" \
+            --source-revision "$GITHUB_SHA" \
+            --output "$ROOT/history/publication.json" \
+            > "$ROOT/publication-output.json"
+
+      - name: Build Stage A exact index
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=.local/canonical-stage-a
+          STARTED=$(date +%s)
+          node .history-exact-index-build/build-history-exact-index.mjs \
+            --local \
+            --publication "$ROOT/history/publication.json" \
+            --artifact-root "$ROOT" \
+            --output-dir "$ROOT/history/index/exact" \
+            --asset-prefix history/index/exact \
+            --bucket-count 1024 \
+            --source-revision "$GITHUB_SHA" \
+            > "$ROOT/exact-index-output.json"
+          echo $(( $(date +%s) - STARTED )) > "$ROOT/exact-index-elapsed-seconds.txt"
+
+      - name: Build Stage A measurement summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          PLAN=docs/evidence/canonical-history-backfill-plan-3371676-3432924.json
+          ROOT=.local/canonical-stage-a
+          INDEX="$ROOT/history/index/exact/manifest.json"
+          PUBLICATION="$ROOT/history/publication.json"
+          CHECKPOINT="$ROOT/checkpoint.json"
+          PLAN_SHA=$(sha256sum "$PLAN" | awk '{print $1}')
+          EXACT_SECONDS=$(cat "$ROOT/exact-index-elapsed-seconds.txt")
+          ARTIFACT_BYTES=$(du -sb "$ROOT" | cut -f1)
+          EXACT_TOTAL_RECORDS=$(jq -r '.totalRecords' "$INDEX")
+          EXACT_COMPRESSED_BYTES=$(jq '[.assets[].compressedBytes] | add' "$INDEX")
+          MAX_BUCKET_COMPRESSED_BYTES=$(jq '[.assets[].compressedBytes] | max' "$INDEX")
+          MAX_BUCKET_RECORDS=$(jq '[.assets[].recordCount] | max' "$INDEX")
+          PUBLICATION_SHA=$(jq -r '.publicationSha256' "$PUBLICATION")
+          INDEX_SHA=$(jq -r '.manifestSha256' "$INDEX")
+          TERMINAL_HASH=$(jq -r '.endLedgerHash' "$PUBLICATION")
+          CHECKPOINT_NEXT=$(jq -r '.nextLedgerIndex' "$CHECKPOINT")
+          jq -n \
+            --arg planSha256 "$PLAN_SHA" \
+            --arg publicationSha256 "$PUBLICATION_SHA" \
+            --arg exactIndexManifestSha256 "$INDEX_SHA" \
+            --arg terminalLedgerHash "$TERMINAL_HASH" \
+            --argjson stageStartLedgerIndex 3371676 \
+            --argjson stageEndLedgerIndex 3376675 \
+            --argjson ledgerCount 5000 \
+            --argjson segmentCount 10 \
+            --argjson checkpointNextLedgerIndex "$CHECKPOINT_NEXT" \
+            --argjson exactIndexBucketCount 1024 \
+            --argjson exactIndexRecords "$EXACT_TOTAL_RECORDS" \
+            --argjson exactIndexCompressedBytes "$EXACT_COMPRESSED_BYTES" \
+            --argjson maxBucketCompressedBytes "$MAX_BUCKET_COMPRESSED_BYTES" \
+            --argjson maxBucketRecords "$MAX_BUCKET_RECORDS" \
+            --argjson exactIndexElapsedSeconds "$EXACT_SECONDS" \
+            --argjson artifactBytes "$ARTIFACT_BYTES" \
+            --slurpfile segmentMetrics "$ROOT/segment-metrics.json" \
+            '{schemaVersion:1,passed:true,planSha256:$planSha256,stageStartLedgerIndex:$stageStartLedgerIndex,stageEndLedgerIndex:$stageEndLedgerIndex,ledgerCount:$ledgerCount,segmentCount:$segmentCount,checkpointNextLedgerIndex:$checkpointNextLedgerIndex,publicationSha256:$publicationSha256,terminalLedgerHash:$terminalLedgerHash,exactIndexManifestSha256:$exactIndexManifestSha256,exactIndexBucketCount:$exactIndexBucketCount,exactIndexRecords:$exactIndexRecords,exactIndexCompressedBytes:$exactIndexCompressedBytes,maxBucketCompressedBytes:$maxBucketCompressedBytes,maxBucketRecords:$maxBucketRecords,exactIndexElapsedSeconds:$exactIndexElapsedSeconds,artifactBytes:$artifactBytes,segmentMetrics:$segmentMetrics[0]}' \
+            > "$ROOT/stage-a-measurement-summary.json"
+          cat "$ROOT/stage-a-measurement-summary.json"
+
+      - name: Upload Stage A evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: canonical-history-stage-a
+          path: .local/canonical-stage-a
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
