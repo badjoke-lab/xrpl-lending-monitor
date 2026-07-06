@@ -17,6 +17,7 @@ import {
 import { getIncrementalCollectorState } from './repositories/incremental-collector-state'
 import { getSyncState } from './repositories/network-status-repository'
 import { openConfiguredReleaseCurrentState } from './repositories/release-current-state'
+import { handleHybridHistoryOverride } from './routes/hybrid-history-override'
 import { serializeCollectorStatus } from './serializers/collector-status'
 
 const worker: ExportedHandler<Bindings> = {
@@ -85,6 +86,10 @@ const worker: ExportedHandler<Bindings> = {
         expectedBase: catchUpConfig.base,
       }))
     }
+
+    const hybridHistory = await handleHybridHistoryOverride(request, env)
+    if (hybridHistory) return hybridHistory
+
     return app.fetch(request, env, executionContext)
   },
   async scheduled(_controller, env) {
