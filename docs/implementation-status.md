@@ -8,7 +8,7 @@ M1 incremental continuation is active. HYB-3 through HYB-6 are integrated into `
 
 Two live `ModifiedNode` metadata blockers have been reproduced from Devnet and fixed without weakening validation for known lending objects. M1 exit diagnostics now use the configured catch-up base identity as the authoritative expected base, independently compare it with the active D1 overlay binding, and have been verified live. Permanent read-only runtime monitoring samples collector progress, raw HYB-7 evidence counts and drilldown, HYB-7 path states, M1 exit evidence/gates, and handover replay state every 30 minutes. M5-5 and M6 remain gated behind M1 exit.
 
-Dense-range live benchmarks showed that increasing D1 collector budgets can restore negative lag slope, but sustained dense historical catch-up would exceed the Free D1 write envelope. The active architecture therefore separates dense historical backfill into deterministic immutable history segments while preserving D1 for bounded live continuation. The segment manifest/continuity contract, collector-semantic record builder, fixed-range segment runner, ordered multi-segment chain verifier, segment-level checkpoint/resume path, local chain verification CLI, verified-chain publication contract, bounded segment reader, deterministic publication/channel builders, and exact-commit channel opener are integrated into `main`. A two-segment live Devnet rehearsal over ledgers `3389181` through `3389190` has passed deterministic replay for both segments, checkpoint advancement/resume, exact cross-segment hash linkage, and exact terminal-boundary verification. Deterministic immutable-segment plus later-D1 merge semantics and a bounded hybrid history repository are now under CI review without changing public API routes.
+Dense-range live benchmarks showed that increasing D1 collector budgets can restore negative lag slope, but sustained dense historical catch-up would exceed the Free D1 write envelope. The active architecture therefore separates dense historical backfill into deterministic immutable history segments while preserving D1 for bounded live continuation. Segment generation, deterministic replay, chain verification, checkpoint/resume, publication contracts, exact-commit channel opening, bounded filtered reads, boundary-aware D1 reads, and deterministic immutable-plus-live merge semantics are integrated into `main`. A two-segment live Devnet rehearsal over ledgers `3389181` through `3389190` has passed deterministic replay for both segments, checkpoint advancement/resume, exact cross-segment hash linkage, and exact terminal-boundary verification. Optional fail-closed hybrid route integration and explicit history-source status diagnostics are now under CI review. Production history vars remain intentionally unset, so public history routes continue using D1-only mode until a canonical verified chain is published.
 
 ## Verified base
 
@@ -81,7 +81,14 @@ The implemented path now includes:
 - deterministic source-merge semantics that reject immutable rows beyond the verified boundary, suppress D1 overlap at or below the boundary, apply stable API-specific ordering, suppress duplicate identities defensively, and truncate only after merge;
 - bounded predicate filtering in the segment reader with query scope bound into the resume cursor;
 - boundary-aware D1 history reads that query only ledgers after the immutable publication boundary;
-- a bounded hybrid history repository for Activity, Object History, Loan lifecycle detail/explorer, Archives, and Balance History, returning immutable completion/cursor/resource metadata without silently changing public API routes.
+- a bounded hybrid history repository for Activity, Object History, Loan lifecycle detail/explorer, Archives, and Balance History, returning immutable completion/cursor/resource metadata;
+- optional runtime configuration for history repository, branch, channel path, asset-size bound, and fetch timeout;
+- explicit three-state history source resolution: D1-only when unconfigured, verified hybrid when configured and valid, and unavailable when configured history fails integrity validation;
+- a Worker-front hybrid route override using existing serializers for Activity, Object History, lifecycle detail/explorer, Archives, Balance History, activity exports, and activity feeds;
+- fail-closed 503 behavior when a bounded immutable scan cannot guarantee a complete existing-route result;
+- explicit temporary unavailable responses for exact transaction and cross-history search while immutable exact indexes are not yet implemented;
+- `/api/status/history-source` diagnostics exposing D1-only, hybrid chain identity, or configured-source integrity failure;
+- production history-source vars intentionally left unset until canonical chain publication and activation review.
 
 Mainnet remains disabled.
 
@@ -151,15 +158,15 @@ The verification and diagnostics endpoints are read-only. They do not create liv
 
 HYB-6 live continuation remains bounded at the 40-ledger maximum configuration, while dense historical catch-up is being moved out of the D1 row-by-row path. The guarded handover remains complete and replays as a no-op guard before scheduled collection. Permanent runtime monitoring continues to sample progress, HYB-7 diagnostics, and raw M1 exit evidence every 30 minutes.
 
-The active implementation unit is deterministic immutable-segment plus later-D1 history merging, with bounded filtered reads and explicit incomplete-scan metadata. Public API routes remain on their existing source until hybrid source selection, availability behavior, and cursor semantics are separately integrated and verified.
+The active implementation unit is optional fail-closed hybrid route integration while production remains D1-only, followed by bounded immutable exact indexes for transaction detail and cross-history search before canonical chain activation.
 
 ## Next order
 
-1. Merge the hybrid history merge adapter after CI and status review.
-2. Add configured hybrid history source opening and explicit availability diagnostics.
-3. Integrate hybrid Activity, Object History, lifecycle, Archive, and Balance History reads behind existing routes with explicit cursor semantics and no silent partial results.
-4. Add bounded segment-backed transaction detail and exact history search support or an explicit unavailable state where indexes are not yet sufficient.
-5. Backfill the dense historical gap into a canonical verified immutable segment chain and publish its exact-commit channel.
+1. Merge optional hybrid route integration after CI and status review.
+2. Add bounded immutable exact indexes for transaction hashes and exact history search terms.
+3. Rehearse transaction detail/search against segment plus later D1 history and remove their temporary unavailable state.
+4. Backfill the dense historical gap into a canonical verified immutable segment chain and publish its exact-commit channel.
+5. Run history-source diagnostics and bounded route rehearsal against the canonical channel before enabling production history vars.
 6. Build and independently verify a replacement current-state base near the verified segment-chain end.
 7. Execute guarded replacement-base handover and resume bounded D1 live continuation.
 8. Re-evaluate HYB-7 diagnostics at the validated head and resolve only genuinely missing paths.
@@ -169,7 +176,7 @@ The active implementation unit is deterministic immutable-segment plus later-D1 
 
 - The production cursor has not yet reached the validated head.
 - Dense historical catch-up is not yet covered by a canonical verified published segment chain.
-- Hybrid history source configuration, route integration, and exact transaction/search support are not yet complete.
+- Immutable exact transaction/search indexes and canonical hybrid activation rehearsal are not yet complete.
 - Real HYB-7 live-path evidence is incomplete for LoanPay, impairment, unimpairment, default, activity/lifecycle/balance consistency, and freshness.
 - M1 exit remains incomplete until validated-head reach and all required live continuation paths are observed and consistent.
 - M5-5 and M6 remain incomplete.
