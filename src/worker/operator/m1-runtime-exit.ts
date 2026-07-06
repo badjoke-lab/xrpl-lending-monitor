@@ -8,7 +8,6 @@ import { readBalanceHistorySourceDiagnostics } from '../repositories/balance-his
 import { readLiveContinuationEvidence } from '../repositories/live-continuation-verification'
 import { readLoanActivityDiagnostics } from '../repositories/loan-activity-diagnostics'
 import { readManagedTransitionSourceDiagnostics } from '../repositories/managed-transition-source-diagnostics'
-import { readManagedTransitionSourceDiagnostics } from '../repositories/managed-transition-source-diagnostics'
 import { evaluateLiveContinuationForRuntime } from './live-continuation-verification'
 
 interface BoundBaseRow {
