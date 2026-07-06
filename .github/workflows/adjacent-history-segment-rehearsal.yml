@@ -112,7 +112,8 @@ jobs:
             --start-parent-hash "$START_PARENT" \
             --end-ledger 3389190 \
             --end-ledger-hash "$END_HASH" \
-            > rehearsal/chain-summary.json
+            > rehearsal/chain-summary.json \
+            2> rehearsal/chain-error.log
           jq -e '.segmentCount == 2 and .ledgerCount == 10 and .startLedgerIndex == 3389181 and .endLedgerIndex == 3389190' rehearsal/chain-summary.json > /dev/null
 
       - name: Record evidence digests
