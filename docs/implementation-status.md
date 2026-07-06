@@ -8,7 +8,7 @@ M1 incremental continuation is active. HYB-3 through HYB-6 are integrated into `
 
 Two live `ModifiedNode` metadata blockers have been reproduced from Devnet and fixed without weakening validation for known lending objects. M1 exit diagnostics now use the configured catch-up base identity as the authoritative expected base, independently compare it with the active D1 overlay binding, and have been verified live. Permanent read-only runtime monitoring samples collector progress, raw HYB-7 evidence counts and drilldown, HYB-7 path states, M1 exit evidence/gates, and handover replay state every 30 minutes. M5-5 and M6 remain gated behind M1 exit.
 
-Dense-range live benchmarks showed that increasing D1 collector budgets can restore negative lag slope, but sustained dense historical catch-up would exceed the Free D1 write envelope. The active architecture therefore separates dense historical backfill into deterministic immutable history segments while preserving D1 for bounded live continuation. Segment generation, deterministic replay, chain verification, checkpoint/resume, publication contracts, exact-commit channel opening, bounded filtered reads, boundary-aware D1 reads, and deterministic immutable-plus-live merge semantics are integrated into `main`. A two-segment live Devnet rehearsal over ledgers `3389181` through `3389190` has passed deterministic replay for both segments, checkpoint advancement/resume, exact cross-segment hash linkage, and exact terminal-boundary verification. Optional fail-closed hybrid route integration and explicit history-source status diagnostics are now under CI review. Production history vars remain intentionally unset, so public history routes continue using D1-only mode until a canonical verified chain is published.
+Dense-range live benchmarks showed that increasing D1 collector budgets can restore negative lag slope, but sustained dense historical catch-up would exceed the Free D1 write envelope. The active architecture therefore separates dense historical backfill into deterministic immutable history segments while preserving D1 for bounded live continuation. Segment generation, deterministic replay, chain verification, checkpoint/resume, publication contracts, exact-commit channel opening, bounded filtered reads, boundary-aware D1 reads, deterministic immutable-plus-live merge semantics, optional fail-closed hybrid route integration, and explicit history-source diagnostics are integrated into `main`. A two-segment live Devnet rehearsal over ledgers `3389181` through `3389190` has passed deterministic replay for both segments, checkpoint advancement/resume, exact cross-segment hash linkage, and exact terminal-boundary verification. The bounded immutable exact-index foundation for transaction detail and cross-history search is now under CI review. Production history vars remain intentionally unset, so public history routes continue using D1-only mode until a canonical verified chain is published and activation rehearsal passes.
 
 ## Verified base
 
@@ -86,9 +86,13 @@ The implemented path now includes:
 - explicit three-state history source resolution: D1-only when unconfigured, verified hybrid when configured and valid, and unavailable when configured history fails integrity validation;
 - a Worker-front hybrid route override using existing serializers for Activity, Object History, lifecycle detail/explorer, Archives, Balance History, activity exports, and activity feeds;
 - fail-closed 503 behavior when a bounded immutable scan cannot guarantee a complete existing-route result;
-- explicit temporary unavailable responses for exact transaction and cross-history search while immutable exact indexes are not yet implemented;
+- explicit temporary unavailable responses for exact transaction and cross-history search while immutable exact indexes are not yet integrated;
 - `/api/status/history-source` diagnostics exposing D1-only, hybrid chain identity, or configured-source integrity failure;
-- production history-source vars intentionally left unset until canonical chain publication and activation review.
+- production history-source vars intentionally left unset until canonical chain publication and activation review;
+- an immutable exact-index contract binding network, epoch, chain ID, publication digest, fixed bucket count, hash function, ordered bucket asset metadata, source revision, generation time, and semantic manifest digest;
+- exact-term normalization and SHA-256 first-u32 modulo bucket-count routing;
+- a bounded exact-index reader that verifies one gzip bucket asset per lookup, validates digest, record count, bucket identity, deterministic order, and publication binding, and caches a small number of verified buckets;
+- a deterministic exact-index builder that extracts transaction hashes, object IDs, loan/broker/vault relationships, account/owner/borrower values, asset keys, lifecycle terms, and balance-history terms from verified segment artifacts into fixed buckets.
 
 Mainnet remains disabled.
 
@@ -158,25 +162,26 @@ The verification and diagnostics endpoints are read-only. They do not create liv
 
 HYB-6 live continuation remains bounded at the 40-ledger maximum configuration, while dense historical catch-up is being moved out of the D1 row-by-row path. The guarded handover remains complete and replays as a no-op guard before scheduled collection. Permanent runtime monitoring continues to sample progress, HYB-7 diagnostics, and raw M1 exit evidence every 30 minutes.
 
-The active implementation unit is optional fail-closed hybrid route integration while production remains D1-only, followed by bounded immutable exact indexes for transaction detail and cross-history search before canonical chain activation.
+The active implementation unit is the bounded immutable exact-index foundation for transaction detail and cross-history exact search. Optional hybrid route integration is already in `main`, but production remains D1-only until canonical chain publication and activation rehearsal.
 
 ## Next order
 
-1. Merge optional hybrid route integration after CI and status review.
-2. Add bounded immutable exact indexes for transaction hashes and exact history search terms.
-3. Rehearse transaction detail/search against segment plus later D1 history and remove their temporary unavailable state.
-4. Backfill the dense historical gap into a canonical verified immutable segment chain and publish its exact-commit channel.
-5. Run history-source diagnostics and bounded route rehearsal against the canonical channel before enabling production history vars.
-6. Build and independently verify a replacement current-state base near the verified segment-chain end.
-7. Execute guarded replacement-base handover and resume bounded D1 live continuation.
-8. Re-evaluate HYB-7 diagnostics at the validated head and resolve only genuinely missing paths.
-9. Complete M1 exit review and reconciliation, then M5-5 and M6 hardening.
+1. Merge the immutable exact-index foundation after CI and status review.
+2. Bind the exact-index manifest into the same exact-commit history channel identity as the publication.
+3. Add targeted immutable segment-file reads from exact references and hybrid transaction detail/search repositories.
+4. Rehearse transaction detail/search against immutable segment history plus later D1 continuation and remove the temporary hybrid unavailable state.
+5. Backfill the dense historical gap into a canonical verified immutable segment chain and publish its exact-commit channel and exact index.
+6. Run history-source diagnostics and bounded route rehearsal against the canonical channel before enabling production history vars.
+7. Build and independently verify a replacement current-state base near the verified segment-chain end.
+8. Execute guarded replacement-base handover and resume bounded D1 live continuation.
+9. Re-evaluate HYB-7 diagnostics at the validated head and resolve only genuinely missing paths.
+10. Complete M1 exit review and reconciliation, then M5-5 and M6 hardening.
 
 ## Remaining blockers
 
 - The production cursor has not yet reached the validated head.
 - Dense historical catch-up is not yet covered by a canonical verified published segment chain.
-- Immutable exact transaction/search indexes and canonical hybrid activation rehearsal are not yet complete.
+- Exact-index channel binding, targeted transaction/search reads, and canonical hybrid activation rehearsal are not yet complete.
 - Real HYB-7 live-path evidence is incomplete for LoanPay, impairment, unimpairment, default, activity/lifecycle/balance consistency, and freshness.
 - M1 exit remains incomplete until validated-head reach and all required live continuation paths are observed and consistent.
 - M5-5 and M6 remain incomplete.
