@@ -43,6 +43,11 @@ import {
   mergeObjectHistory,
 } from './merged-history-source'
 
+
+const ARCHIVED_HISTORY_SEGMENT_READS = 24
+const BALANCE_HISTORY_SEGMENT_READS = 16
+const AUDIT_HISTORY_WALL_TIME_MS = 5_000
+
 export interface ImmutableHistoryReadMeta {
   complete: boolean
   nextCursor: string | null
@@ -223,6 +228,8 @@ export async function listHybridArchivedObjects(options: {
     predicate: (archive) => archiveMatches(archive, options.list),
     limit: options.list.limit,
     cursor: options.immutableCursor,
+    maxSegmentReads: ARCHIVED_HISTORY_SEGMENT_READS,
+    maxWallTimeMs: AUDIT_HISTORY_WALL_TIME_MS,
   })
   const live = await listLiveArchivedObjectsAfterBoundary(
     options.db,
@@ -267,6 +274,8 @@ export async function listHybridBalanceHistory(options: {
     predicate: (record) => balanceMatches(record, options.list),
     limit: options.list.limit,
     cursor: options.immutableCursor,
+    maxSegmentReads: BALANCE_HISTORY_SEGMENT_READS,
+    maxWallTimeMs: AUDIT_HISTORY_WALL_TIME_MS,
   })
   const live = await listLiveBalanceHistoryAfterBoundary(
     options.db,
