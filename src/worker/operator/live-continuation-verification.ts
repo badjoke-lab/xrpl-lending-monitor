@@ -1,8 +1,6 @@
-import {
-  evaluateLiveContinuationEvidence,
-  type LiveContinuationEvidence,
-  type LiveContinuationVerificationReport,
-  type VerificationPath,
+import type {
+  LiveContinuationEvidence,
+  LiveContinuationVerificationReport,
 } from '../../collector/incremental/live-continuation-verification'
 import {
   readBalanceHistorySourceDiagnostics,
@@ -21,112 +19,18 @@ import {
   readManagedTransitionSourceDiagnostics,
   type ManagedTransitionSourceDiagnostics,
 } from '../repositories/managed-transition-source-diagnostics'
+import { evaluateLiveContinuationForRuntime } from './evaluate-live-continuation-runtime'
 
-function activityHistoryBalancePath(options: {
-  evidence: LiveContinuationEvidence
-  loanActivity: LoanActivityDiagnostics
-  balanceSource: BalanceHistorySourceDiagnostics | undefined
-}): VerificationPath {
-  const loanSourceObserved = options.loanActivity.total > 0
-  const lifecycleObserved = options.evidence.lifecycle.total > 0
-  const balanceSourceChanges = options.balanceSource?.sourceChanges
-    ?? options.evidence.balanceHistory.total
-  const balanceSourceObserved = balanceSourceChanges > 0
-  const balanceHistoryObserved = options.evidence.balanceHistory.total > 0
+export { evaluateLiveContinuationForRuntime }
 
-  if (loanSourceObserved !== lifecycleObserved) {
-    return {
-      state: 'inconsistent',
-      reason: 'relevant Loan activity and lifecycle evidence disagree',
-    }
-  }
-  if (balanceSourceObserved !== balanceHistoryObserved) {
-    return {
-      state: 'inconsistent',
-      reason: 'balance-history source changes and derived balance-history evidence disagree',
-    }
-  }
-  if (
-    loanSourceObserved
-    && lifecycleObserved
-    && balanceSourceObserved
-    && balanceHistoryObserved
-  ) {
-    return {
-      state: 'observed',
-      reason: 'relevant Loan activity/lifecycle and balance source/history evidence observed',
-    }
-  }
-  return {
-    state: 'missing',
-    reason: 'required Loan activity/lifecycle or balance source/history evidence not yet observed',
-  }
-}
-
-function managedTransitionPath(
-  sourceCount: number,
-  lifecycleCount: number,
-  label: string,
-): VerificationPath {
-  if (sourceCount === 0 && lifecycleCount === 0) {
-    return {
-      state: 'missing',
-      reason: `${label} source transition and lifecycle evidence not yet observed`,
-    }
-  }
-  if (sourceCount === 0 || lifecycleCount === 0) {
-    return {
-      state: 'inconsistent',
-      reason: `${label} source transition and lifecycle evidence disagree`,
-    }
-  }
-  return {
-    state: 'observed',
-    reason: `${label} source transition and lifecycle evidence observed`,
-  }
-}
-
-export function evaluateLiveContinuationForRuntime(
-  evidence: LiveContinuationEvidence,
-  loanActivity: LoanActivityDiagnostics,
-  balanceSource?: BalanceHistorySourceDiagnostics,
-  managedTransitions?: ManagedTransitionSourceDiagnostics,
-): LiveContinuationVerificationReport {
-  const report = evaluateLiveContinuationEvidence(evidence)
-  const paths = {
-    ...report.paths,
-    impaired: managedTransitions
-      ? managedTransitionPath(managedTransitions.impaired, evidence.lifecycle.impaired, 'impaired')
-      : report.paths.impaired,
-    unimpaired: managedTransitions
-      ? managedTransitionPath(managedTransitions.unimpaired, evidence.lifecycle.unimpaired, 'unimpaired')
-      : report.paths.unimpaired,
-    defaulted: managedTransitions
-      ? managedTransitionPath(managedTransitions.defaulted, evidence.lifecycle.defaulted, 'defaulted')
-      : report.paths.defaulted,
-    activityHistoryBalance: activityHistoryBalancePath({ evidence, loanActivity, balanceSource }),
-  }
-  return {
-    passed: Object.values(paths).every((path) => path.state === 'observed'),
-    paths,
-  }
-}
-
-export async function verifyLiveContinuation(
-  db: D1Database,
-): Promise<LiveContinuationVerificationReport> {
-  const [evidence, loanActivity, balanceSource, managedTransitions] = await Promise.all([
+export async function verifyLiveContinuation(db: D1Database): Promise<LiveContinuationVerificationReport> {
+  const [evidence, loan, balance, managed] = await Promise.all([
     readLiveContinuationEvidence(db),
     readLoanActivityDiagnostics(db),
     readBalanceHistorySourceDiagnostics(db),
     readManagedTransitionSourceDiagnostics(db),
   ])
-  return evaluateLiveContinuationForRuntime(
-    evidence,
-    loanActivity,
-    balanceSource,
-    managedTransitions,
-  )
+  return evaluateLiveContinuationForRuntime(evidence, loan, balance, managed)
 }
 
 export interface LiveContinuationDiagnostics {
@@ -138,10 +42,8 @@ export interface LiveContinuationDiagnostics {
   managedTransitions: ManagedTransitionSourceDiagnostics
 }
 
-export async function diagnoseLiveContinuation(
-  db: D1Database,
-): Promise<LiveContinuationDiagnostics> {
-  const [evidence, drilldown, loanActivity, balanceSource, managedTransitions] = await Promise.all([
+export async function diagnoseLiveContinuation(db: D1Database): Promise<LiveContinuationDiagnostics> {
+  const [evidence, drilldown, loan, balance, managed] = await Promise.all([
     readLiveContinuationEvidence(db),
     readLiveContinuationDrilldown(db),
     readLoanActivityDiagnostics(db),
@@ -150,15 +52,10 @@ export async function diagnoseLiveContinuation(
   ])
   return {
     evidence,
-    report: evaluateLiveContinuationForRuntime(
-      evidence,
-      loanActivity,
-      balanceSource,
-      managedTransitions,
-    ),
+    report: evaluateLiveContinuationForRuntime(evidence, loan, balance, managed),
     drilldown,
-    loanActivity,
-    balanceSource,
-    managedTransitions,
+    loanActivity: loan,
+    balanceSource: balance,
+    managedTransitions: managed,
   }
 }
