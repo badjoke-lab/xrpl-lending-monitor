@@ -20,20 +20,20 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm exec playwright install --with-deps chromium
-      - name: Run targeted test and capture output
+      - name: Run full E2E suite and capture output
         shell: bash
         run: |
           set +e
-          pnpm exec playwright test tests/e2e/smoke.spec.ts --grep "uses mobile navigation" > mobile-more-targeted.log 2>&1
+          pnpm test:e2e > full-e2e-debug.log 2>&1
           STATUS=$?
-          echo "$STATUS" > mobile-more-targeted-status.txt
+          echo "$STATUS" > full-e2e-debug-status.txt
           exit 0
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: mobile-more-targeted-debug
+          name: full-e2e-debug
           path: |
-            mobile-more-targeted.log
-            mobile-more-targeted-status.txt
+            full-e2e-debug.log
+            full-e2e-debug-status.txt
             test-results
           retention-days: 1
