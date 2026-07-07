@@ -201,7 +201,7 @@ The active operational unit is now:
 
 1. preserve healthy zero-lag collection and verify continued zero-failure operation plus actual D1 resource usage;
 2. resolve the single remaining HYB-7 evidence gap: real post-boundary unimpairment;
-3. while waiting for or deliberately generating an external Devnet unimpairment witness, use the now-satisfied fresh-head gate to check D1 headroom and run the gated production screenshot audit when safe;
+3. while waiting for or deliberately generating an external Devnet unimpairment witness, re-check D1 usage after UTC-day reset and run the gated production screenshot audit only when the existing headroom policy passes; the 2026-07-07 13:13 UTC check correctly blocked capture because daily usage already exceeded the operations reference allowances;
 4. inspect screenshot evidence, remediate UI overflow and spacing defects, and re-audit affected routes;
 5. once unimpairment is observed, run the M1 exit review workflow with `require_ready=true` and retain the evidence artifact;
 6. update repository status from the successful exit evidence and proceed to M5-5 real-data integration;
@@ -214,7 +214,7 @@ Non-invasive parallel preparation is allowed while M1 catch-up continues. The ga
 
 1. Monitor healthy zero-lag collection and D1 usage without changing collector limits absent failure or resource evidence.
 2. Keep replacement-base replay status, cursor/overlay agreement, and history-source diagnostics under permanent monitoring.
-3. Check current D1 headroom, then run the gated representative production screenshot audit and inspect the resulting desktop/mobile evidence.
+3. Re-check D1 headroom after UTC-day usage resets; the 2026-07-07 check exceeded the operations threshold and correctly skipped capture. Run the gated representative production screenshot audit only when the existing headroom policy passes, then inspect the resulting desktop/mobile evidence.
 4. Resolve the sole remaining HYB-7 unimpairment witness gap through real Devnet evidence; if natural evidence remains absent, use a separately approved external Devnet test actor rather than adding signing or write capability to the monitor.
 5. Execute the reproducible M1 exit review with readiness enforcement after unimpairment is observed.
 6. Complete M1 status review and M5-5 real-data integration.
@@ -227,5 +227,5 @@ Non-invasive parallel preparation is allowed while M1 catch-up continues. The ga
 - Real post-replacement-boundary HYB-7 evidence remains missing only for unimpairment.
 - M1 exit remains incomplete until that unimpairment path is observed and `liveContinuation` becomes observed.
 - M5-5 real-data integration remains gated behind M1 exit.
-- Production visual audit is now eligible after a current D1 headroom check; UI remediation and re-audit remain pending.
+- The production visual audit fresh-head gate is satisfied, but the 2026-07-07 13:13 UTC headroom probe recorded 9,761,975 rows read and 181,117 rows written for the UTC day against the operations-monitor reference allowances of 5,000,000 and 100,000. The existing below-80% headroom gate correctly stopped the screenshot crawl before Playwright installation or page traversal. Retry only after a new UTC-day usage check confirms headroom; do not weaken the gate. UI remediation and re-audit remain pending.
 - Final-host SEO binding and M6 release hardening remain pending in the dependency order defined by the roadmap.
