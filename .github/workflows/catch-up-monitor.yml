@@ -1,8 +1,6 @@
 name: Catch-up runtime monitor
 
 on:
-  schedule:
-    - cron: '17,47 * * * *'
   workflow_dispatch:
   pull_request:
     paths:
