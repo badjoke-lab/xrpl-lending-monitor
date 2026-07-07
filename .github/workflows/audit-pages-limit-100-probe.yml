@@ -56,7 +56,8 @@ jobs:
             let bytes = 0
             let requests = 0
             for (const descriptor of descriptors) {
-              const manifestResponse = await fetch(root + descriptor.manifestPath)
+              const manifestUrl = root + descriptor.manifestPath
+              const manifestResponse = await fetch(manifestUrl)
               if (!manifestResponse.ok) throw new Error(`manifest ${manifestResponse.status}`)
               const manifestBytes = Buffer.from(await manifestResponse.arrayBuffer())
               bytes += manifestBytes.length
@@ -64,7 +65,8 @@ jobs:
               const manifest = JSON.parse(manifestBytes.toString('utf8'))
               const file = manifest.files.find((entry) => entry.kind === kind)
               if (!file) throw new Error(`missing ${kind}`)
-              const assetResponse = await fetch(root + file.path)
+              const assetUrl = new URL(file.path, manifestUrl).toString()
+              const assetResponse = await fetch(assetUrl)
               if (!assetResponse.ok) throw new Error(`asset ${assetResponse.status}`)
               const assetBytes = Buffer.from(await assetResponse.arrayBuffer())
               bytes += assetBytes.length
