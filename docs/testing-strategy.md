@@ -71,6 +71,8 @@ Cover desktop and mobile navigation, network context, Overview, Network Status, 
 
 The browser suite must also prove that unsupported fiat values, cross-asset totals, oracle claims, invented counts, promotional controls, and write-capable controls are absent.
 
+A manual release visual-audit workflow must capture full-page screenshots from the deployed read-only site at minimum for representative desktop and narrow-mobile viewports. The route matrix includes Overview, Vaults, one valid Vault detail, Loan Brokers, one valid Broker detail, Loans, one valid Loan detail, Activity, Lifecycle, Archived Objects, Cover & Loss, Search, Network Status, API, Methodology, About, Contact, and the mobile More menu open state. Detail identifiers must be discovered from live read-only APIs rather than hard-coded stale fixtures. Screenshot evidence supplements, but does not replace, semantic browser assertions.
+
 Live current-state browser regression must verify that:
 
 - a base-only object renders correctly;
@@ -117,10 +119,12 @@ Before public release, complete:
 - base replacement review;
 - cache review where caching is used;
 - accessibility review;
+- full-page desktop/mobile visual audit and remediation re-audit;
+- route metadata, canonical, robots, sitemap, social metadata, and structured-data validation;
 - external-link review;
 - recovery procedure review;
 - real multi-day soak.
 
 ## Evidence
 
-Record summarized test results, bounded live evidence, processed ledger ranges, base identity, overlay watermark, resource measurements, failures, API samples, accessibility findings, and relevant screenshots in the pull request and implementation status.
+Record summarized test results, bounded live evidence, processed ledger ranges, base identity, overlay watermark, resource measurements, failures, API samples, accessibility findings, representative full-page screenshots, visual-audit findings and fixes, and discoverability validation results in the pull request and implementation status.

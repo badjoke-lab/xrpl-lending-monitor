@@ -71,6 +71,8 @@ Contains available or clearly planned routes from:
 - About;
 - Contact.
 
+The menu exposes a visible, labelled close control. Selecting a route closes the menu. Tapping More again may also close it, but repeated More activation is a secondary convenience and is never the only discoverable close mechanism.
+
 ## Overview
 
 ### Desktop
@@ -193,6 +195,16 @@ At minimum test:
 - long identifiers and error text;
 - loading, empty, unavailable, stale, partial, archived, and error states.
 
+## Release visual audit matrix
+
+Before public Devnet release, run a manual-dispatch full-page screenshot audit against the deployed read-only site after M1 has reached a verified healthy fresh head and D1 resource headroom has been checked. Capture at minimum:
+
+- wide desktop at approximately 1440 CSS pixels;
+- narrow mobile at approximately 390 CSS pixels;
+- Overview, core lists, valid entity details, Activity, all Audit pages, Search, Network Status, API, Methodology, About, Contact, and the open mobile More menu state.
+
+Review every capture for page-level horizontal overflow, clipped content, card and section spacing, wrapped controls, identifier behavior, filter layout, table strategy, footer spacing, fixed-navigation overlap, safe-area handling, touch-target crowding, and empty/error copy expansion. Findings are fixed and the affected pages are re-captured before the visual gate passes.
+
 ## Completion gate
 
-A page is responsive only when it has intentional navigation, readable information priority, usable controls and touch targets, preserved state and provenance context, an appropriate table or card strategy, tested focus order, and no hidden required information.
+A page is responsive only when it has intentional navigation, readable information priority, usable controls and touch targets, preserved state and provenance context, an appropriate table or card strategy, tested focus order, no hidden required information, no unintended page-level horizontal overflow, and no fixed navigation or safe-area overlap.

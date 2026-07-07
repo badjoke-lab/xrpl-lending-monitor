@@ -10,9 +10,9 @@ The active current-state base is `devnet-3432924-canonical` at ledger `3432924`.
 
 Post-cutover monitoring is now split into a lightweight 30-minute runtime monitor and guarded deep diagnostics every 6 hours. Deep diagnostics are deferred once current UTC-day D1 rows-read usage reaches the configured `4,000,000` guard unless explicitly forced by manual dispatch.
 
-The latest recorded runtime evidence shows continued collector progress with zero observed failures and negative lag slope. HYB-7 has now observed created current objects, modified current objects, deletion/archive handling, ledger continuity, and cursor/overlay agreement after the replacement boundary. Remaining semantic paths are LoanPay, impairment, unimpairment, default, activity/history/balance consistency, and freshness at zero lag.
+The latest bounded runtime probe captured at 2026-07-07 11:44 UTC shows continued collector progress with zero consecutive failures, no current error, cursor `3461324`, observed head `3461639`, and lag `315`. The processed continuation range is contiguous from `3432925` through `3461324` with zero discontinuities. HYB-7 now observes created current objects, modified current objects, LoanPay/payment, default, deletion/archive handling, activity/history/balance consistency, ledger continuity, and cursor/overlay agreement. Remaining missing paths are impairment, unimpairment, and freshness at a healthy zero-lag head.
 
-A read-only production list probe on 2026-07-07 compared current-state endpoints at `limit=1` and the UI-shaped `limit=25`. Vault list reads returned HTTP 200 at both limits. Loan Broker and Loan list reads returned HTTP 200 at `limit=1` but HTTP 500 at `limit=25`. The isolated hotfix unit keeps collector and D1 continuation behavior unchanged while removing relationship-read amplification in the release current-state adapter and strengthening the M1 exit review to exercise 25-row list reads.
+The current-state relationship-list amplification issue has been repaired, and the mobile More menu now exposes an explicit visible close control in addition to route-change and toggle closure. The separate public history-read investigation proved the immutable source itself was valid; sparse bounded scans were repaired by skipping published zero-record kinds, accepting complete merged newest-first windows, and applying bounded kind-specific scan ceilings for sparse archive and balance history. Final production probes returned HTTP 200 for Activity, Lifecycle, Archived Objects, and Cover & Loss at limits `25`, `50`, `75`, and `100`.
 
 M5-5 and M6 remain gated behind M1 exit.
 
@@ -90,7 +90,10 @@ The implemented and verified path now includes:
 - D1-safe monitoring cadence separation and a read-budget guard for deep diagnostics;
 - indexed HYB-7 overlay/object-change source matching to remove the observed high-read correlated lookup;
 - reproducible manual M1 exit review workflow capturing runtime gates, source invariants, and current-state exact-read evidence;
-- production-shaped current-state list probing that distinguishes one-row success from UI-shaped 25-row relationship-read failures.
+- production-shaped current-state list probing and repaired UI-sized relationship reads;
+- verified hybrid public history reads across Activity, Lifecycle, Archived Objects, and Cover & Loss at UI-sized windows through limit 100;
+- sparse immutable history scan handling that skips published zero-record kinds and uses bounded kind-specific ceilings where required;
+- explicit mobile More menu close control with route-change closure preserved.
 
 Mainnet remains disabled.
 
@@ -130,19 +133,19 @@ The latest known HYB-7 states are:
 - `deletionArchive`: observed;
 - `ledgerContinuity`: observed;
 - `cursorOverlay`: observed;
-- `loanPayment`: missing;
+- `loanPayment`: observed;
+- `defaulted`: observed;
+- `activityHistoryBalance`: observed;
 - `impaired`: missing;
 - `unimpaired`: missing;
-- `defaulted`: missing;
-- `activityHistoryBalance`: missing;
-- `freshness`: missing while the collector remains behind the validated head.
+- `freshness`: missing while the collector remains behind the observed validated head.
 
 The latest known M1 gates are:
 
 - `verifiedBaseBinding`: observed;
 - `catchUpStart`: observed;
 - `validatedHeadReached`: missing;
-- `liveContinuation`: missing.
+- `liveContinuation`: missing because all required HYB-7 live paths are not yet observed.
 
 ## Collector budgets
 
@@ -196,28 +199,36 @@ The active implementation unit is no longer historical backfill or cutover const
 
 The active operational unit is now:
 
-1. continue bounded D1 collection from `3432925` toward the validated head;
-2. verify sustained zero-failure operation and actual D1 resource usage under the 2048/2048/128 ceilings;
-3. observe real post-boundary HYB-7 evidence for LoanPay, impairment, unimpairment, default, and activity/history/balance consistency;
-4. confirm `validatedHeadReached` and freshness at zero lag;
+1. continue bounded D1 collection unchanged from `3432925` toward the observed validated head;
+2. verify sustained zero-failure operation and actual D1 resource usage under the documented ceilings;
+3. observe real post-boundary impairment and unimpairment evidence;
+4. confirm `validatedHeadReached` and freshness at healthy zero lag;
 5. run the M1 exit review workflow with `require_ready=true` and retain the evidence artifact;
 6. update repository status from the successful exit evidence;
-7. proceed to M5-5 and M6 hardening.
+7. proceed to M5-5 real-data integration;
+8. run the production full-page desktop/mobile screenshot audit, remediate UI overflow and spacing defects, and re-audit;
+9. complete SEO/discoverability implementation and final-host binding, then owner-managed subdomain, analytics, Search Console verification, and sitemap submission;
+10. proceed through M6 hardening and real multi-day Devnet soak.
+
+Non-invasive parallel preparation is allowed while M1 catch-up continues: SEO metadata and route-map design, analytics configuration hooks without placeholder IDs, and implementation of a manual screenshot-audit workflow. These preparation tasks do not justify slowing, resetting, rebasing, or retuning the collector.
 
 ## Next order
 
-1. Monitor collector lag slope and D1 usage while replacement-base continuation advances.
+1. Monitor collector lag slope and D1 usage while continuation advances without changing collector limits absent failure or resource evidence.
 2. Keep replacement-base replay status, cursor/overlay agreement, and history-source diagnostics under permanent monitoring.
-3. Re-evaluate HYB-7 paths as real post-boundary LoanPay, LoanManage, deletion, and balance-changing activity appears.
-4. Confirm the collector reaches the observed validated head and freshness becomes observed.
+3. Re-evaluate impairment and unimpairment evidence while the collector reaches the observed validated head.
+4. Confirm freshness at healthy zero lag and re-run continuation plus M1 diagnostics.
 5. Execute the reproducible M1 exit review with readiness enforcement.
-6. Complete M1 status review and reconciliation.
-7. Complete M5-5 and M6 hardening.
+6. Complete M1 status review and M5-5 real-data integration.
+7. Run the representative production screenshot audit, complete UI remediation, and re-audit.
+8. Finalize SEO/discoverability against the configured public host and complete owner-managed subdomain, analytics, Search Console, and sitemap tasks.
+9. Complete M6 hardening and real multi-day Devnet soak.
 
 ## Remaining blockers
 
-- The production cursor has not yet reached the validated head.
-- Real post-replacement-boundary HYB-7 evidence remains missing for LoanPay, impairment, unimpairment, default, and activity/history/balance consistency.
+- The production cursor has not yet reached the observed validated head.
+- Real post-replacement-boundary HYB-7 evidence remains missing for impairment and unimpairment.
 - Freshness remains missing until collector lag reaches zero with healthy status.
 - M1 exit remains incomplete until `validatedHeadReached` and all required live continuation paths are observed and consistent.
-- M5-5 and M6 remain incomplete and gated behind M1 exit.
+- M5-5 real-data integration remains gated behind M1 exit.
+- Production visual audit, final-host SEO binding, and M6 release hardening remain pending in the dependency order defined by the roadmap.
