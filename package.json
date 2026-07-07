@@ -11,7 +11,7 @@
   "scripts": {
     "dev": "vite",
     "dev:worker": "wrangler dev",
-    "build": "vite build && vite build --config vite.d1-tools.config.ts && vite build --config vite.artifact-measurement.config.ts && vite build --config vite.history-segment.config.ts && vite build --config vite.history-segment-checkpoint.config.ts && vite build --config vite.history-segment-chain.config.ts && vite build --config vite.history-segment-publication.config.ts && vite build --config vite.history-segment-channel.config.ts && vite build --config vite.history-exact-index.config.ts && vite build --config vite.history-exact-rehearsal.config.ts && vite build --config vite.history-backfill-plan.config.ts && vite build --config vite.replacement-current-state-read-model.config.ts && vite build --config vite.candidate-source-rehearsal.config.ts",
+    "build": "vite build && node scripts/build-discovery-files.mjs && vite build --config vite.d1-tools.config.ts && vite build --config vite.artifact-measurement.config.ts && vite build --config vite.history-segment.config.ts && vite build --config vite.history-segment-checkpoint.config.ts && vite build --config vite.history-segment-chain.config.ts && vite build --config vite.history-segment-publication.config.ts && vite build --config vite.history-segment-channel.config.ts && vite build --config vite.history-exact-index.config.ts && vite build --config vite.history-exact-rehearsal.config.ts && vite build --config vite.history-backfill-plan.config.ts && vite build --config vite.replacement-current-state-read-model.config.ts && vite build --config vite.candidate-source-rehearsal.config.ts",
     "build:d1-tools": "vite build --config vite.d1-tools.config.ts",
     "build:artifact-measurement": "vite build --config vite.artifact-measurement.config.ts",
     "build:release-current-state": "vite build --config vite.release-current-state.config.ts",
@@ -25,6 +25,7 @@
     "build:history-backfill-plan": "vite build --config vite.history-backfill-plan.config.ts",
     "build:replacement-current-state-read-model": "vite build --config vite.replacement-current-state-read-model.config.ts",
     "build:candidate-source-rehearsal": "vite build --config vite.candidate-source-rehearsal.config.ts",
+    "discovery:build": "node scripts/build-discovery-files.mjs",
     "preview": "vite preview --host 127.0.0.1",
     "deploy": "pnpm build && wrangler deploy",
     "lint": "eslint .",
