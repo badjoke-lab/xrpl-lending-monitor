@@ -167,25 +167,25 @@ test('uses mobile navigation, toggles More, and closes it after navigation', asy
   await page.goto('/')
 
   const mobileNav = page.locator('.mobile-bottom-nav')
-  const more = mobileNav.locator('details')
-  const summary = more.locator('summary')
-  const panel = page.locator('.mobile-more-panel')
+  const more = mobileNav.getByRole('button', { name: 'More' })
+  const panel = page.locator('#mobile-more-panel')
 
   await expect(page.locator('.sidebar')).toBeHidden()
   await expect(page.locator('.mobile-appbar')).toBeVisible()
   await expect(mobileNav).toBeVisible()
   await expect(page.locator('.network-context').getByText('DEVNET', { exact: true })).toBeVisible()
 
-  await summary.click()
+  await more.click()
   await expect(panel.getByText('Network Status', { exact: true })).toBeVisible()
+  await expect(more).toHaveAttribute('aria-expanded', 'true')
 
-  await summary.click()
+  await more.click()
   await expect(panel).toBeHidden()
+  await expect(more).toHaveAttribute('aria-expanded', 'false')
 
-  await summary.click()
+  await more.click()
   await panel.getByRole('link', { name: 'Network Status' }).click()
   await expect(page).toHaveURL(/\/network-status$/)
-  await expect(more).not.toHaveAttribute('open', '')
-  await expect(summary).toHaveAttribute('aria-expanded', 'false')
+  await expect(more).toHaveAttribute('aria-expanded', 'false')
   await expect(panel).toBeHidden()
 })
