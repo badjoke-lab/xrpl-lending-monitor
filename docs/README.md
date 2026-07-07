@@ -42,6 +42,7 @@ This directory is the source of truth for XRPL Lending Monitor.
 - UI information-architecture, page, design, component, responsive, and reference documents define presentation and interaction behavior.
 - `development-roadmap.md` defines active implementation order, dependencies, and target dates.
 - `implementation-status.md` records the current public implementation state.
+- `development-roadmap.md` and `implementation-status.md` must be re-read at the start of each implementation, operational, UI-audit, SEO, or release-preparation unit and reconciled with newly captured evidence before dependent work proceeds.
 - `decision-log.md` records why material architecture and product choices were accepted or superseded.
 - Root `AGENTS.md` defines repository contribution rules.
 

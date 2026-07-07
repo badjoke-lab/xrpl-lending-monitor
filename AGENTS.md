@@ -51,6 +51,8 @@ Current-state activation requires one fixed validated ledger, complete traversal
 ## Implementation discipline
 
 - Work from the current canonical predecessor.
+- Before every new implementation unit, operational probe, release-preparation unit, or externally visible configuration change, re-read `docs/development-roadmap.md` and `docs/implementation-status.md`; repository source-of-truth documents override stale conversation summaries or prior plans.
+- After new evidence changes an active gate, blocker, sequencing decision, or measured resource state, reconcile the affected status and roadmap documents before the next dependent unit proceeds.
 - Prefer one coherent roadmap unit per pull request.
 - Do not create parallel implementations of the same feature.
 - Update affected specifications, roadmap status, resource limits, and operational documentation with the implementation.

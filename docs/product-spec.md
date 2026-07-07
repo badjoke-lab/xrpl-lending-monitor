@@ -41,6 +41,7 @@ Need historical state, deleted objects, Devnet epochs, lifecycle reconstruction,
 11. **Unavailable is not zero.** Unsupported, uncollected, stale, and failed states are shown explicitly.
 12. **Project transparency is part of the product.** About, Methodology, Contact, API documentation, limitations, and evidence boundaries are public.
 13. **No funding or payment surface in the current release.** Donation, payment, promotional, wallet, and transaction-submission features are outside scope.
+14. **Public discoverability must match verified scope.** Search metadata, canonical URLs, sitemaps, social previews, and structured data describe only real public pages and never imply Mainnet, write capability, pricing, ratings, or unavailable evidence.
 
 ## Initial network scope
 
@@ -369,6 +370,20 @@ The page warns users not to publish seeds, private keys, secrets, personal data,
 
 Missing external configuration produces an explicit unavailable explanation or omits the action. Placeholder URLs are prohibited.
 
+## Public discoverability and analytics
+
+Public release preparation must provide:
+
+- route-specific titles and descriptions for indexable HTML routes;
+- one explicit final public host used for canonical URLs and absolute sitemap URLs;
+- `robots.txt` and sitemap behavior that distinguish public HTML discovery from API, status, export, feed, and other machine endpoints;
+- Open Graph and social-card metadata that accurately describe the independent, read-only, Devnet scope;
+- structured data only where the selected schema accurately matches the public page and evidence boundary;
+- an analytics integration hook that is inactive when no measurement ID is configured and never ships a placeholder ID;
+- Search Console verification and sitemap submission as an owner-managed external launch task after the final public host is configured.
+
+Canonical, sitemap, analytics, and verification values must not be hard-coded to temporary Worker URLs, placeholder subdomains, fake measurement IDs, or placeholder verification tokens. SEO metadata must not imply investment advice, Mainnet availability, wallet capability, transaction submission, fiat valuation, rankings, ratings, or unsupported completeness.
+
 ## Data provenance categories
 
 Every user-facing and API field is one of:
@@ -465,5 +480,7 @@ The first public release is not complete until:
 15. Runtime, storage, collection, cache, and abuse guardrails are active.
 16. Automated tests cover parser, status, asset, epoch, lifecycle, API, UI, and archive behavior.
 17. Contact external links are configured or explicitly unavailable; no placeholder URL is public.
-18. Multi-day Devnet soak, deployment approval, operational runbook, backup/export procedure, and rollback checks pass.
-19. Mainnet remains disabled unless separately approved.
+18. A manual full-page screenshot audit covers representative desktop and mobile routes with production-shaped data, and identified overflow, clipping, spacing, fixed-navigation overlap, safe-area, long-identifier, and form-layout defects are resolved and re-audited.
+19. Route-specific metadata, final-host canonical URLs, robots policy, sitemap, social metadata, and any structured data pass discoverability review; analytics remains disabled unless a real configured measurement ID is supplied.
+20. Multi-day Devnet soak, deployment approval, operational runbook, backup/export procedure, and rollback checks pass.
+21. Mainnet remains disabled unless separately approved.
