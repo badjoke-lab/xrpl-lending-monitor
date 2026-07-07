@@ -142,18 +142,21 @@ export function AppShell({ children, currentPath, status, onNavigate, onReload }
           onClick={(event) => { event.preventDefault(); navigateFromMobile('/loans') }}
         >Loans</a>
         <span aria-disabled="true">Activity</span><span aria-disabled="true">Search</span>
-        <details open={mobileMoreOpen}>
-          <summary
-            aria-expanded={mobileMoreOpen}
-            onClick={(event) => {
-              event.preventDefault()
-              setMobileMoreOpen((open) => !open)
-            }}
-          >More</summary>
-          <div className="mobile-more-panel">
+        <a
+          href="#mobile-more-panel"
+          role="button"
+          aria-controls="mobile-more-panel"
+          aria-expanded={mobileMoreOpen}
+          onClick={(event) => {
+            event.preventDefault()
+            setMobileMoreOpen((open) => !open)
+          }}
+        >More</a>
+        {mobileMoreOpen ? (
+          <div id="mobile-more-panel" className="mobile-more-panel">
             <Navigation currentPath={currentPath} onNavigate={navigateFromMobile} />
           </div>
-        </details>
+        ) : null}
       </nav>
     </div>
   )
