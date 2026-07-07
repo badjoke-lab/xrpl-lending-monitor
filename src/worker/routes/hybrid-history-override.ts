@@ -64,10 +64,13 @@ function invalidLimit(): Response {
 }
 
 function historyUnavailable(reason: string): Response {
+  const message = reason === 'bounded_immutable_scan_incomplete'
+    ? 'The public history window could not be completed within the bounded read budget.'
+    : 'The configured immutable history source could not be verified for public reads.'
   return Response.json({
     error: 'history_source_unavailable',
     reason,
-    message: 'The configured immutable history source could not be verified for public reads.',
+    message,
   }, { status: 503 })
 }
 

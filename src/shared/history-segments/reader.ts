@@ -249,10 +249,17 @@ export class HistorySegmentChainReader {
 
     for (let descriptorIndex = cursor.descriptorIndex; descriptorIndex < descriptors.length; descriptorIndex += 1) {
       const lineStart = descriptorIndex === cursor.descriptorIndex ? cursor.lineIndex : 0
-      if (segmentReads >= maxSegmentReads || this.#now() - startedAt >= maxWallTimeMs) {
+      if (this.#now() - startedAt >= maxWallTimeMs) {
         return { items, nextCursor: nextCursor(descriptorIndex, lineStart), complete: false, segmentReads, compressedBytes, decompressedBytes, recordsExamined }
       }
       const descriptor = descriptors[descriptorIndex]!
+      if (descriptor.recordCounts[options.kind] === 0) {
+        if (lineStart !== 0) throw new Error('History segment cursor is beyond an empty published kind')
+        continue
+      }
+      if (segmentReads >= maxSegmentReads) {
+        return { items, nextCursor: nextCursor(descriptorIndex, lineStart), complete: false, segmentReads, compressedBytes, decompressedBytes, recordsExamined }
+      }
       const manifest = await this.#manifest(descriptor)
       const file = manifest.files.find((entry) => entry.kind === options.kind)
       if (!file) throw new Error(`History segment file kind is unavailable: ${options.kind}`)
