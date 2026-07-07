@@ -1,0 +1,45 @@
+name: Direct production state probe
+on:
+  push:
+    branches:
+      - probe/direct-production-state
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Capture production read surfaces and M1 state
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p production-state-probe
+          B="https://xrpl-lending-monitor.badjoke-lab.workers.dev"
+
+          capture() {
+            NAME="$1"
+            URL="$2"
+            curl --max-time 120 -sS -o "production-state-probe/${NAME}.json" -w '%{http_code}\n' "${URL}" > "production-state-probe/${NAME}.status"
+          }
+
+          capture lifecycle "${B}/api/audit/lifecycle?limit=100"
+          capture archived "${B}/api/audit/archived?limit=100"
+          capture cover-loss "${B}/api/audit/cover-loss?limit=100"
+          capture collector "${B}/api/status/collector"
+          capture continuation "${B}/api/status/continuation-diagnostics"
+          capture m1-exit "${B}/api/status/m1-exit-diagnostics"
+          capture loan-activity "${B}/api/status/loan-activity-witnesses"
+
+          jq -n \
+            --slurpfile c production-state-probe/collector.json \
+            --slurpfile h production-state-probe/continuation.json \
+            --slurpfile m production-state-probe/m1-exit.json \
+            --slurpfile l production-state-probe/loan-activity.json \
+            '{collector:$c[0],continuation:$h[0],m1_exit:$m[0],loan_activity:$l[0]}' \
+            > production-state-probe/m1-summary.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: direct-production-state-probe
+          path: production-state-probe
+          retention-days: 1
