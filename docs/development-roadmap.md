@@ -12,7 +12,7 @@ The current M1 execution path is a verified immutable base read model plus bound
 | Milestone | Status | Goal | Exit condition |
 |---|---|---|---|
 | M0 Foundation and specification lock | Complete | Establish repository, source-of-truth documents, toolchain, and operating rules | Documentation accepted and project skeleton ready |
-| M1 Current-state collector | Fresh head reached; final unimpairment evidence and exit review active | Serve a verified Devnet base state and continuously apply validated ledger changes | Verified base read model serves real Devnet data; contiguous scheduled collection remains healthy at a fresh head; required HYB-7 paths and M1 exit review pass |
+| M1 Current-state collector | All HYB-7 paths observed; strict fresh-head recheck and exit review active | Serve a verified Devnet base state and continuously apply validated ledger changes | Verified base read model serves real Devnet data; contiguous scheduled collection remains healthy at a strict fresh head; required HYB-7 paths and M1 exit review pass |
 | M2 Event history and lifecycle | Complete through Checkpoint B | Normalize validated history, lifecycle, archives, balances, and status | Deterministic replay and reconciliation logic complete; production completeness remains bounded by M1 continuation and later soak evidence |
 | M3 Public API | Complete through exports and feeds; current merge integration pending final real-data cross-audit | Expose bounded read-only current and historical APIs | Base-plus-overlay current routes and historical contracts pass, with explicit freshness and unavailable states |
 | M4 Baseline UI and project pages | Complete through Checkpoint C | Deliver the ordinary monitor, navigation, project pages, responsive behavior, and shared states | Required baseline routes work end to end; live freshness claims remain gated by verified runtime evidence |
@@ -38,7 +38,7 @@ The current M1 execution path is a verified immutable base read model plus bound
 
 ## Active post-head execution order
 
-The collector reached a verified healthy fresh head on the latest recorded bounded probe. Work now proceeds on two coordinated tracks while permanent monitoring remains active.
+The latest recorded semantic probe observed all required HYB-7 paths, including natural post-boundary unimpairment, and the continuation report passed. M1 now waits on a strict fresh-head recheck and the reproducible readiness-enforced exit review while permanent monitoring and the D1-gated UI audit track continue.
 
 ### Permanent monitoring track
 
@@ -50,14 +50,13 @@ The collector reached a verified healthy fresh head on the latest recorded bound
 
 ### Track A — M1 completion path
 
-1. Preserve healthy zero-lag, zero-failure operation and source-layout invariants.
-2. Run the gated read-only unimpairment candidate review only when D1 headroom permits.
-3. Prefer naturally occurring post-boundary unimpairment evidence.
-4. If natural evidence remains absent and a deliberate witness is approved, use a separately controlled external Devnet actor under `operations-unimpairment-witness.md`; do not add seed, private key, wallet session, signing, submission, or public write capability to the monitor repository or deployment.
-5. Require validated source transaction evidence plus matching lifecycle, current-state, loss/balance-history, continuity, overlay, and freshness evidence before classifying unimpairment as observed.
-6. Run the reproducible M1 exit review with `require_ready=true`.
-7. Retain the exit artifact and reconcile roadmap/status from that evidence.
-8. Proceed to M5-5 only after M1 exit is complete.
+1. Preserve healthy operation, source-layout invariants, and the naturally observed post-boundary unimpairment evidence.
+2. Do not run candidate discovery or a deliberate external witness while the natural unimpairment source/lifecycle evidence remains observed and consistent.
+3. Recheck strict `validatedHeadReached` after the collector advances beyond the 20-ledger cursor-to-observed-head gap recorded by the 2026-07-07 21:08 UTC semantic probe. Do not infer strict head arrival from the public lag field alone.
+4. Require every M1 gate to be observed in one later diagnostic state.
+5. Run the reproducible M1 exit review with `require_ready=true`.
+6. Retain the exit artifact and reconcile roadmap/status from that evidence.
+7. Proceed to M5-5 only after M1 exit is complete.
 
 ### Track B — UI production-audit path
 
@@ -230,7 +229,7 @@ Verify real observed paths for:
 
 Exit condition: the live continuation path is operational and evidence shows current and historical views remain consistent.
 
-Latest recorded bounded probe state on 2026-07-07 at 13:00 UTC: the collector is healthy at zero lag with cursor and observed head both at `3463095`; processed continuation `3432925..3463095` contains `30171` ledgers with zero discontinuities. Created current, modified current, LoanPay/payment, impairment, default, deletion/archive, activity-history-balance consistency, ledger continuity, cursor/overlay agreement, and freshness are observed. Only unimpairment remains missing, with zero observed unimpairment source or lifecycle transitions. The M1 `validatedHeadReached` gate is observed; `liveContinuation` remains missing only because unimpairment evidence is absent.
+Latest recorded bounded semantic probe state on 2026-07-07 at 21:08 UTC: the collector was healthy, the processed continuation `3432925..3472761` contained `39837` ledgers with zero discontinuities, and all required HYB-7 paths were observed. The previously missing natural unimpairment path is now observed, including one `unimpaired` lifecycle transition with latest ledger `3470076`, and the continuation report passed. `liveContinuation` is observed. The same probe had cursor `3472761` and observed head `3472781`, so strict M1 `validatedHeadReached` remained missing and overall M1 readiness remained false.
 
 ### M1-HYB-8 — M1 exit review
 
@@ -262,8 +261,9 @@ Preparation that may proceed without mutating collector, D1, history, or deploym
 The following remain gated until a verified healthy fresh head and current D1 resource headroom are confirmed:
 
 - full production screenshot crawl of the representative route matrix;
-- UI remediation based on that production visual evidence;
-- gated read-only unimpairment candidate review.
+- UI remediation based on that production visual evidence.
+
+The read-only candidate-review and external witness path is no longer active while the newly observed natural unimpairment evidence remains valid and consistent.
 
 The following remain gated until M1 exit and a final public host is configured:
 
