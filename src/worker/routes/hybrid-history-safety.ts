@@ -5,5 +5,5 @@ export function safeHybridResult<T>(result: HybridHistoryResult<T>, limit: numbe
 }
 
 export function safeNewestFirstHybridResult<T>(result: HybridHistoryResult<T>, limit: number): boolean {
-  return safeHybridResult(result, limit) || result.merge.liveAccepted >= limit
+  return safeHybridResult(result, limit) || result.items.length >= limit
 }
