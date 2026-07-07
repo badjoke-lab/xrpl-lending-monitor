@@ -12,12 +12,12 @@ The current M1 execution path is a verified immutable base read model plus bound
 | Milestone | Status | Goal | Exit condition |
 |---|---|---|---|
 | M0 Foundation and specification lock | Complete | Establish repository, source-of-truth documents, toolchain, and operating rules | Documentation accepted and project skeleton ready |
-| M1 Current-state collector | Final catch-up and exit verification active | Serve a verified Devnet base state and continuously apply validated ledger changes | Verified base read model serves real Devnet data; contiguous scheduled collection reaches a healthy fresh head; required HYB-7 paths and M1 exit review pass |
+| M1 Current-state collector | Fresh head reached; final unimpairment evidence and exit review active | Serve a verified Devnet base state and continuously apply validated ledger changes | Verified base read model serves real Devnet data; contiguous scheduled collection remains healthy at a fresh head; required HYB-7 paths and M1 exit review pass |
 | M2 Event history and lifecycle | Complete through Checkpoint B | Normalize validated history, lifecycle, archives, balances, and status | Deterministic replay and reconciliation logic complete; production completeness remains bounded by M1 continuation and later soak evidence |
-| M3 Public API | Complete through exports and feeds; current merge integration pending | Expose bounded read-only current and historical APIs | Base-plus-overlay current routes and historical contracts pass, with explicit freshness and unavailable states |
-| M4 Baseline UI and project pages | Complete through Checkpoint C | Deliver the ordinary monitor, navigation, project pages, responsive behavior, and shared states | Required baseline routes work end to end; live freshness claims remain gated by M1 |
-| M5 Differentiated audit UI | Complete through M5-4; M5-5 deferred behind M1 | Add lifecycle, archives, cover/loss, epochs, and provenance integration | Audit integration passes against verified real data after M1 exits |
-| M6 Hardening and public Devnet release | Release-preparation specification active; runtime hardening gated | Prove integrity, resource safety, accessibility, discoverability, operations, and deployment readiness | Visual audit, SEO/discoverability, multi-day soak, and all release gates pass |
+| M3 Public API | Complete through exports and feeds; current merge integration pending final real-data cross-audit | Expose bounded read-only current and historical APIs | Base-plus-overlay current routes and historical contracts pass, with explicit freshness and unavailable states |
+| M4 Baseline UI and project pages | Complete through Checkpoint C | Deliver the ordinary monitor, navigation, project pages, responsive behavior, and shared states | Required baseline routes work end to end; live freshness claims remain gated by verified runtime evidence |
+| M5 Differentiated audit UI | Complete through M5-4; M5-5 gated behind M1 | Add lifecycle, archives, cover/loss, epochs, provenance, and cross-audit integration | Audit integration and bounded production behavior smoke pass against verified real data after M1 exits |
+| M6 Hardening and public Devnet release | Release-preparation implementation active; final hardening gated by M1 and M5-5 | Prove integrity, resource safety, accessibility, discoverability, operations, and deployment readiness | Final visual audit, production behavior smoke, SEO/discoverability, recovery verification, multi-day soak, and all release gates pass |
 
 ## Cross-cutting rules
 
@@ -31,8 +31,66 @@ The current M1 execution path is a verified immutable base read model plus bound
 - A D1 overlay upsert overrides the base object; a deletion tombstone hides the base object; absence of an overlay record falls back to the verified base.
 - Gap, stale, partial, and unavailable states are explicit. A stale base plus interrupted incremental continuation is never presented as fresh.
 - Internal account circumstances, credentials, provider identifiers, workflow run identifiers, and unpublished operational details remain outside public documentation.
-- Active collector catch-up is not paused for UI, SEO, analytics, or screenshot-audit preparation. Collector limits or cadence are not retuned without failure, lag-slope, or resource evidence that justifies the change.
+- Collector monitoring continues after lag reaches zero. Collector limits or cadence are not retuned without failure, lag-slope, or resource evidence that justifies the change.
 - Release-preparation work that does not mutate collector, D1, history, or deployment state may proceed in parallel, but gated production audits and public indexing configuration must respect the dependency order below.
+- Production behavior checks must prove relationship and state consistency, not only successful HTTP responses or page rendering.
+- Before every new implementation unit, operational probe, release-preparation unit, or externally visible configuration change, follow `AGENTS.md`: re-read this roadmap and `implementation-status.md`, and reconcile them after evidence changes gates, blockers, sequencing, or measured resource state.
+
+## Active post-head execution order
+
+The collector reached a verified healthy fresh head on the latest recorded bounded probe. Work now proceeds on two coordinated tracks while permanent monitoring remains active.
+
+### Permanent monitoring track
+
+1. Run the lightweight read-only runtime monitor every 30 minutes.
+2. Check collector status, cursor, observed head, lag, run usage, failures, current error, replacement-base binding, hybrid-history source state, and actual D1 daily usage.
+3. Run guarded deep semantic diagnostics every 6 hours.
+4. Check HYB-7 source/projection evidence, ledger continuity, created/modified/deleted changes, overlay/tombstone agreement, LoanPay and LoanManage activity, impairment/unimpairment/default transitions, lifecycle, archive, balance history, linkage gaps, and M1 gate states.
+5. Defer deep scans when the existing D1 read guard requires deferral. Do not weaken the guard merely to obtain release evidence.
+
+### Track A — M1 completion path
+
+1. Preserve healthy zero-lag, zero-failure operation and source-layout invariants.
+2. Run the gated read-only unimpairment candidate review only when D1 headroom permits.
+3. Prefer naturally occurring post-boundary unimpairment evidence.
+4. If natural evidence remains absent and a deliberate witness is approved, use a separately controlled external Devnet actor under `operations-unimpairment-witness.md`; do not add seed, private key, wallet session, signing, submission, or public write capability to the monitor repository or deployment.
+5. Require validated source transaction evidence plus matching lifecycle, current-state, loss/balance-history, continuity, overlay, and freshness evidence before classifying unimpairment as observed.
+6. Run the reproducible M1 exit review with `require_ready=true`.
+7. Retain the exit artifact and reconcile roadmap/status from that evidence.
+8. Proceed to M5-5 only after M1 exit is complete.
+
+### Track B — UI production-audit path
+
+1. Finish the prepared screenshot-audit capture hardening through required checks and merge before the next production crawl.
+2. After a UTC-day reset or later safe point, re-check actual D1 rows read and rows written.
+3. Run the production screenshot audit only when the existing below-80% headroom policy passes and collector healthy zero-lag preflight passes.
+4. Capture the representative desktop/mobile route matrix plus the open mobile More menu.
+5. Retain screenshot evidence together with route/profile/detail-ID manifest, page-level horizontal overflow, candidate overflowing elements, browser console errors, page errors, and HTTP error responses.
+6. Inspect evidence, remediate confirmed overflow, clipping, spacing, fixed-navigation overlap, safe-area, long-identifier, table, form-layout, and mobile-navigation defects.
+7. Re-audit affected routes using the same route and viewport evidence shape.
+
+Tracks A and B may progress in parallel, but neither may weaken collector integrity or D1 resource guards.
+
+### Post-M1 release path
+
+After M1 exit:
+
+1. M5-5 cross-audit real-data integration.
+2. Bounded exports against the live evidence boundary.
+3. Real-data browser regression.
+4. Current/history consistency checks.
+5. Lifecycle/current-object cross-checks.
+6. Archive/current exclusion checks.
+7. Bounded D1-aware production behavior smoke across representative list/detail and audit routes, including relationship integrity and freshness claims.
+8. M6 integrity/reset simulations and runtime/resource guardrails.
+9. Final post-integration production visual audit and remediation re-audit.
+10. Accessibility, performance, security, and cross-browser validation.
+11. Final public-host binding for canonical URLs, sitemap, structured data, and social metadata.
+12. Owner-managed public subdomain, valid GA4 configuration, Search Console verification, and sitemap submission.
+13. Operations/deployment documentation finalization.
+14. Backup/export and recovery verification.
+15. Real multi-day Devnet soak.
+16. Final release verification.
 
 ## M0 — Foundation and specification lock
 
@@ -172,16 +230,16 @@ Verify real observed paths for:
 
 Exit condition: the live continuation path is operational and evidence shows current and historical views remain consistent.
 
-Latest operational probe state on 2026-07-07 at 13:00 UTC: the collector is healthy at zero lag with cursor and observed head both at `3463095`; processed continuation `3432925..3463095` contains `30171` ledgers with zero discontinuities. Created current, modified current, LoanPay/payment, impairment, default, deletion/archive, activity-history-balance consistency, ledger continuity, cursor/overlay agreement, and freshness are observed. Only unimpairment remains missing, with zero observed unimpairment source or lifecycle transitions. The M1 `validatedHeadReached` gate is now observed; `liveContinuation` remains missing only because unimpairment evidence is absent.
+Latest recorded bounded probe state on 2026-07-07 at 13:00 UTC: the collector is healthy at zero lag with cursor and observed head both at `3463095`; processed continuation `3432925..3463095` contains `30171` ledgers with zero discontinuities. Created current, modified current, LoanPay/payment, impairment, default, deletion/archive, activity-history-balance consistency, ledger continuity, cursor/overlay agreement, and freshness are observed. Only unimpairment remains missing, with zero observed unimpairment source or lifecycle transitions. The M1 `validatedHeadReached` gate is observed; `liveContinuation` remains missing only because unimpairment evidence is absent.
 
 ### M1-HYB-8 — M1 exit review
 
-Target: 2026-07-12.
+Target: 2026-07-12, evidence-dependent.
 
 M1 exits only when:
 
 - a verified base read model is serving real Devnet current data;
-- the incremental cursor advances contiguously;
+- the incremental cursor advances contiguously and remains healthy at the validated head;
 - current overlay upserts and tombstones are applied safely;
 - restart and retry are idempotent;
 - bounded catch-up works after interruption;
@@ -190,20 +248,22 @@ M1 exits only when:
 - reconciliation passes;
 - the reproducible M1 exit review passes with readiness enforcement.
 
-### Parallel release-preparation track during M1 catch-up
+### Parallel release-preparation track during M1 completion
 
-The following preparation may proceed while the collector continues unchanged toward the validated head:
+Preparation that may proceed without mutating collector, D1, history, or deployment state includes:
 
-- define route-specific title and description requirements;
-- define canonical-host, robots, sitemap, Open Graph, social-card, and accurate structured-data requirements;
-- prepare configuration hooks for analytics without placeholder measurement IDs;
-- implement a manual-dispatch GitHub Actions screenshot-audit workflow;
-- define the representative desktop/mobile route matrix, including data pages, detail pages, documentation pages, and the open mobile More menu state.
+- route-specific title and description requirements;
+- canonical-host, robots, sitemap, Open Graph, social-card, and accurate structured-data requirements;
+- analytics configuration hooks without placeholder measurement IDs;
+- manual-dispatch GitHub Actions screenshot-audit workflow;
+- representative desktop/mobile route matrix including data pages, detail pages, documentation pages, and the open mobile More menu state;
+- screenshot capture hardening and technical layout/runtime diagnostics.
 
-The following remain gated until the collector has reached a verified healthy fresh head and current D1 resource headroom has been checked:
+The following remain gated until a verified healthy fresh head and current D1 resource headroom are confirmed:
 
 - full production screenshot crawl of the representative route matrix;
-- UI remediation based on that production visual evidence.
+- UI remediation based on that production visual evidence;
+- gated read-only unimpairment candidate review.
 
 The following remain gated until M1 exit and a final public host is configured:
 
@@ -212,7 +272,7 @@ The following remain gated until M1 exit and a final public host is configured:
 - Google Search Console verification and sitemap submission;
 - public launch indexing decisions.
 
-The collector is not slowed, reset, rebased, or retuned solely to make room for these preparation tasks.
+The collector is not slowed, reset, rebased, or retuned solely to make room for release-preparation tasks.
 
 ## M2 — Event history and lifecycle
 
@@ -254,7 +314,7 @@ Complete through Checkpoint C:
 - shared loading, empty, unavailable, stale, partial, error, archived, not-found, and invalid-identifier states;
 - responsive and accessibility coverage.
 
-The UI must not claim real-time freshness until M1 incremental continuation and actual freshness reporting are operational.
+The UI must not claim real-time freshness unless current runtime evidence supports that claim.
 
 ## M5 — Differentiated audit UI
 
@@ -267,30 +327,33 @@ Complete:
 
 ### M5-5 — Cross-audit real-data integration
 
-Target: 2026-07-13 through 2026-07-14, after M1 exit.
+Target: 2026-07-13 through 2026-07-14, after M1 exit. Dependency state controls the start date.
 
 - cross-audit integration;
 - bounded exports against the live evidence boundary;
 - real-data browser regression;
 - current/history consistency checks;
 - lifecycle/current-object cross-checks;
-- archive/current exclusion checks.
+- archive/current exclusion checks;
+- bounded production behavior smoke across representative Overview, entity list/detail, Activity, Lifecycle, Archived Objects, Cover & Loss, Search, and Network Status routes;
+- relationship verification through live identifiers, including Loan to Loan Broker and Loan Broker to Vault linkage where applicable;
+- freshness and lag claim verification against collector status.
 
-Exit condition: audit integration passes against verified base-plus-overlay current state and indexed real history.
+Exit condition: audit integration and production behavior smoke pass against verified base-plus-overlay current state and indexed real history.
 
 ## M6 — Hardening and public Devnet release
 
-Target start: 2026-07-15, after M1 exit and M5-5.
+Target start: 2026-07-15, after M1 exit and M5-5. Dependency state controls the start date.
 
 Proceed in dependency order:
 
 1. integrity and reset simulations;
 2. runtime and resource guardrails;
-3. manual full-page visual audit of representative desktop and mobile routes against production data;
+3. final post-integration full-page visual audit of representative desktop and mobile routes against production data;
 4. UI overflow, clipping, spacing, fixed-navigation overlap, safe-area, long-identifier, and form-layout remediation followed by screenshot re-audit;
 5. accessibility, performance, security, and cross-browser validation;
-6. SEO and discoverability implementation: route-specific metadata, final-host canonical URLs, robots policy, sitemap, social metadata, and accurate structured data;
-7. owner-managed public-host, analytics, and search-console setup after final host selection; repository code must expose configuration hooks and must not ship placeholder IDs or verification tokens;
+6. SEO and discoverability finalization: route-specific metadata, final-host canonical URLs, robots policy, sitemap, social metadata, and accurate structured data;
+7. owner-managed public-host, analytics, and Search Console setup after final host selection; repository code must expose configuration hooks and must not ship placeholder IDs or verification tokens;
 8. operations and deployment documentation;
 9. backup/export and recovery verification;
 10. real multi-day Devnet soak;
