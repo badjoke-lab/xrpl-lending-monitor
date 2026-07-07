@@ -1,0 +1,54 @@
+name: Current-state list probe
+on:
+  pull_request:
+    paths: [.github/workflows/current-state-list-probe.yml]
+permissions:
+  contents: read
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Probe production current-state list limits
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p current-state-list-probe
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/subdomain" \
+            > current-state-list-probe/subdomain.json
+          SUBDOMAIN="$(jq -r '.result.subdomain // empty' current-state-list-probe/subdomain.json)"
+          test -n "${SUBDOMAIN}"
+          BASE="https://xrpl-lending-monitor.${SUBDOMAIN}.workers.dev"
+
+          : > current-state-list-probe/results.ndjson
+          for endpoint in vaults loan-brokers loans; do
+            for limit in 1 25; do
+              body="current-state-list-probe/${endpoint}-limit-${limit}.json"
+              headers="current-state-list-probe/${endpoint}-limit-${limit}.headers"
+              status="$(curl --silent --show-error \
+                --dump-header "${headers}" \
+                --output "${body}" \
+                --write-out '%{http_code}' \
+                "${BASE}/api/${endpoint}?limit=${limit}&sort=id_asc")"
+              jq -cn \
+                --arg endpoint "${endpoint}" \
+                --argjson limit "${limit}" \
+                --arg status "${status}" \
+                --slurpfile body "${body}" \
+                '{endpoint:$endpoint,limit:$limit,http_status:($status|tonumber),error:($body[0].error // null),code:($body[0].code // null),message:($body[0].message // null),availability:($body[0].availability.state // null),data_length:(($body[0].data // [])|length),snapshot_id:($body[0].snapshot.id // null)}' \
+                >> current-state-list-probe/results.ndjson
+            done
+          done
+
+          jq -s '.' current-state-list-probe/results.ndjson | tee current-state-list-probe/summary.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: current-state-list-probe
+          path: current-state-list-probe
+          retention-days: 7
