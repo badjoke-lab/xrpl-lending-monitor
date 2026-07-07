@@ -1,0 +1,34 @@
+name: Activity post-fix probe
+on:
+  pull_request:
+    paths:
+      - .github/workflows/activity-post-fix-probe.yml
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify production Activity limit 100
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p activity-post-fix-probe
+          B="https://xrpl-lending-monitor.badjoke-lab.workers.dev"
+          for ATTEMPT in 1 2 3 4 5; do
+            CODE="$(curl --max-time 60 -sS -o activity-post-fix-probe/activity-100.json -w '%{http_code}' "${B}/api/activity?limit=100")"
+            printf '%s\n' "${CODE}" > activity-post-fix-probe/status.txt
+            if [ "${CODE}" = "200" ]; then
+              jq -e '.page.limit == 100 and (.data | length) == 100' activity-post-fix-probe/activity-100.json > /dev/null
+              exit 0
+            fi
+            sleep 15
+          done
+          cat activity-post-fix-probe/activity-100.json
+          exit 1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: activity-post-fix-probe
+          path: activity-post-fix-probe
+          retention-days: 1
