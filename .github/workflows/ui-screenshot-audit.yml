@@ -80,12 +80,18 @@ jobs:
           OUTPUT_DIR: ui-screenshot-audit/screenshots
         run: node scripts/capture-ui-audit.mjs
 
-      - name: Write audit gate summary
+      - name: Evaluate audit diagnostics
+        env:
+          AUDIT_DIR: ui-screenshot-audit/screenshots
+          REQUIRE_UI_AUDIT_TECHNICAL_CLEAN: true
+        run: node scripts/evaluate-ui-audit.mjs
+
+      - name: Write audit gate and diagnostics summary
         if: always()
         shell: bash
         run: |
           {
-            echo '## UI screenshot audit gates'
+            echo '## UI screenshot audit gates and diagnostics'
             echo
             if [ -f ui-screenshot-audit/collector.json ]; then
               jq -r '"- Collector: **\(.status)**, cursor `\(.cursor.last_processed_ledger)`, head `\(.cursor.latest_observed_ledger)`, lag `\(.cursor.lag_ledgers)`, failures `\(.consecutive_failures)`"' \
@@ -98,6 +104,19 @@ jobs:
                 ui-screenshot-audit/d1-headroom-summary.json
               jq -r '"- Actual headroom gate passed: **\(.passed)**"' \
                 ui-screenshot-audit/d1-headroom-summary.json
+            fi
+            if [ -f ui-screenshot-audit/screenshots/evaluation.json ]; then
+              jq -r '"- Technical diagnostics passed: **\(.technical_passed)**"' \
+                ui-screenshot-audit/screenshots/evaluation.json
+              jq -r '"- Capture coverage: `\(.coverage.actual_route_diagnostic_count)` / `\(.coverage.expected_capture_count)` route diagnostics, coverage passed **\(.coverage.passed)**"' \
+                ui-screenshot-audit/screenshots/evaluation.json
+              jq -r '"- Page-level horizontal overflow findings: **\(.page_horizontal_overflow_count)**"' \
+                ui-screenshot-audit/screenshots/evaluation.json
+              jq -r '"- Browser/runtime/HTTP technical findings: **\(.technical_finding_count)**"' \
+                ui-screenshot-audit/screenshots/evaluation.json
+              jq -r '"- Routes with overflow review candidates: **\(.overflow_review_candidate_route_count)**"' \
+                ui-screenshot-audit/screenshots/evaluation.json
+              echo '- Visual screenshot review is still required even when technical diagnostics pass.'
             fi
           } >> "${GITHUB_STEP_SUMMARY}"
 
