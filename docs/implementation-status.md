@@ -25,6 +25,8 @@ The production screenshot-audit workflow, capture hardening, deterministic evide
 
 The production screenshot-audit and unimpairment candidate-review workflows share a fail-closed actual D1 headroom check. After collector preflight and before Playwright installation, page traversal, or candidate-list discovery, the workflow queries current UTC-day D1 analytics, records a public-safe usage summary, and requires both rows-read and rows-written fractions to remain below the existing `0.8` threshold. Manual confirmation remains an operator-intent gate but no longer substitutes for measured usage.
 
+A bounded one-shot post-reset operation is scheduled for 2026-07-08 UTC: the read-only unimpairment candidate review at 00:10 UTC, followed by the production UI audit at 00:30 UTC. Both scheduled paths remain subject to the healthy zero-lag collector preflight and the measured below-80% D1 headroom gate. The UI audit re-measures headroom after the earlier candidate-review attempt. The schedules are date-guarded so later annual cron matches no-op outside the explicit 2026-07-08 UTC window.
+
 Route-aware SEO/discoverability preparation is implemented. Canonical and structured-data output remain inactive until an explicit public-site origin is configured, sitemap output is generated only for that configured origin, and GA4 remains inactive until a valid measurement ID is supplied.
 
 M5-5 and M6 remain gated behind M1 exit.
@@ -37,7 +39,7 @@ The 2026-07-07 13:13 UTC production-audit headroom probe recorded:
 - rows written: `181,117`;
 - reference allowances: `5,000,000` rows read and `100,000` rows written per UTC day.
 
-The below-80% gate correctly stopped the screenshot crawl before Playwright installation or page traversal. The gate remains unchanged. The next eligible run must obtain a new current-day measurement from the self-enforcing workflow and pass both read and write thresholds.
+The below-80% gate correctly stopped the screenshot crawl before Playwright installation or page traversal. The gate remains unchanged. The scheduled post-reset attempts must obtain new current-day measurements and pass both read and write thresholds before bounded candidate discovery or the production page crawl proceeds.
 
 ## Latest HYB-7 state
 
@@ -78,7 +80,7 @@ The active work is split into permanent monitoring plus two coordinated tracks.
 ### Track A — M1 completion
 
 1. Resolve the single remaining HYB-7 evidence gap: real post-boundary unimpairment.
-2. Run the manual read-only candidate review only when its measured actual D1 headroom gate passes.
+2. Let the scheduled bounded read-only candidate-review attempt run only when its measured actual D1 headroom gate passes.
 3. Prefer naturally observed Devnet evidence.
 4. Use the separately approved documented external Devnet witness procedure only when required.
 5. Require source, lifecycle, current-state, loss/balance-history, continuity, overlay, and freshness agreement before marking unimpairment observed.
@@ -87,18 +89,17 @@ The active work is split into permanent monitoring plus two coordinated tracks.
 
 ### Track B — production UI audit
 
-1. After UTC-day reset or another safe point, dispatch the audit workflow and let its actual D1 usage check decide eligibility.
-2. Proceed with the screenshot crawl only when measured headroom and healthy zero-lag collector preflight both pass.
-3. Inspect the generated JSON/Markdown technical summary, raw manifest and diagnostics, and screenshots together; technical evaluation accelerates and enforces triage but does not replace human visual review.
-4. Remediate confirmed UI defects and re-audit affected routes.
+1. Let the scheduled post-reset production audit attempt proceed only when measured headroom and healthy zero-lag collector preflight both pass.
+2. Inspect the generated JSON/Markdown technical summary, raw manifest and diagnostics, and screenshots together; technical evaluation accelerates and enforces triage but does not replace human visual review.
+3. Remediate confirmed UI defects and re-audit affected routes.
 
 Tracks A and B may progress in parallel. Neither may weaken collector integrity or D1 resource guards.
 
 ## Next order
 
 1. Keep permanent monitoring active.
-2. After UTC-day reset or another safe point, dispatch the self-enforcing D1 headroom checks for candidate review and production screenshot audit.
-3. Only when the measured gate passes, perform bounded candidate discovery and the screenshot crawl.
+2. Observe the 2026-07-08 UTC one-shot candidate-review and production UI-audit attempts.
+3. If the measured gates pass, inspect candidate and UI artifacts; if they do not pass, retain the measured evidence and do not weaken the gates.
 4. Inspect the generated audit summaries, raw diagnostics, and screenshots, fix confirmed UI defects, and re-audit affected routes.
 5. Resolve the sole unimpairment witness gap through real Devnet evidence.
 6. Execute M1 exit review with readiness enforcement and reconcile status from the artifact.
@@ -113,6 +114,6 @@ Tracks A and B may progress in parallel. Neither may weaken collector integrity 
 - Real post-replacement-boundary HYB-7 evidence remains missing only for unimpairment.
 - M1 exit remains incomplete until unimpairment is observed and `liveContinuation` becomes observed.
 - M5-5 real-data integration remains gated behind M1 exit.
-- The last recorded headroom probe exceeded the threshold. The next run must obtain and pass a new measured current-day gate; manual confirmation alone cannot bypass it.
+- The last recorded headroom probe exceeded the threshold. The scheduled post-reset attempts must obtain and pass new measured current-day gates; scheduling does not bypass the policy.
 - Production behavior smoke remains pending for the post-M1 M5-5 path.
 - Final-host SEO binding and M6 release hardening remain pending in roadmap order.
