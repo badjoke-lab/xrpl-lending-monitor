@@ -36,6 +36,12 @@ export default tseslint.config(
     },
   },
   {
+    files: ['scripts/**/*.mjs'],
+    languageOptions: {
+      globals: globals.node,
+    },
+  },
+  {
     files: ['src/worker/repositories/current-state-overlay.test.ts'],
     rules: {
       '@typescript-eslint/no-this-alias': 'off',
