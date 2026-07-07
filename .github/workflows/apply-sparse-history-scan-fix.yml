@@ -1,0 +1,94 @@
+name: Apply sparse history scan fix
+
+on:
+  push:
+    branches:
+      - fix/history-sparse-segment-scan
+    paths:
+      - .github/workflows/apply-sparse-history-scan-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/history-sparse-segment-scan
+          fetch-depth: 0
+
+      - name: Apply bounded sparse-segment scan fix and tests
+        shell: python
+        run: |
+          from pathlib import Path
+
+          reader = Path('src/shared/history-segments/reader.ts')
+          text = reader.read_text()
+          old = """    for (let descriptorIndex = cursor.descriptorIndex; descriptorIndex < descriptors.length; descriptorIndex += 1) {
+                const lineStart = descriptorIndex === cursor.descriptorIndex ? cursor.lineIndex : 0
+                if (segmentReads >= maxSegmentReads || this.#now() - startedAt >= maxWallTimeMs) {
+                  return { items, nextCursor: nextCursor(descriptorIndex, lineStart), complete: false, segmentReads, compressedBytes, decompressedBytes, recordsExamined }
+                }
+                const descriptor = descriptors[descriptorIndex]!
+                const manifest = await this.#manifest(descriptor)
+          """
+          new = """    for (let descriptorIndex = cursor.descriptorIndex; descriptorIndex < descriptors.length; descriptorIndex += 1) {
+                const lineStart = descriptorIndex === cursor.descriptorIndex ? cursor.lineIndex : 0
+                if (this.#now() - startedAt >= maxWallTimeMs) {
+                  return { items, nextCursor: nextCursor(descriptorIndex, lineStart), complete: false, segmentReads, compressedBytes, decompressedBytes, recordsExamined }
+                }
+                const descriptor = descriptors[descriptorIndex]!
+                if (descriptor.recordCounts[options.kind] === 0) {
+                  if (lineStart !== 0) throw new Error('History segment cursor is beyond an empty published kind')
+                  continue
+                }
+                if (segmentReads >= maxSegmentReads) {
+                  return { items, nextCursor: nextCursor(descriptorIndex, lineStart), complete: false, segmentReads, compressedBytes, decompressedBytes, recordsExamined }
+                }
+                const manifest = await this.#manifest(descriptor)
+          """
+          if old not in text:
+              raise SystemExit('reader replacement target not found')
+          reader.write_text(text.replace(old, new, 1))
+
+          tests = Path('src/shared/history-segments/reader.test.ts')
+          test_text = tests.read_text()
+          marker = """  it('returns a resumable cursor when the wall-time budget is exhausted', async () => {
+              const { store, publication } = await fixture()
+              let tick = 0
+              const reader = await HistorySegmentChainReader.open({ store, publication, now: () => tick++ === 0 ? 0 : 2_000 })
+              const result = await reader.list({ kind: 'protocol_events', maxWallTimeMs: 1_000 })
+              expect(result.items).toEqual([])
+              expect(result.complete).toBe(false)
+              expect(result.nextCursor).not.toBeNull()
+            })
+          """
+          addition = marker + """
+
+            it('skips published zero-record segments without consuming the segment-read budget', async () => {
+              const { store, publication } = await fixture()
+              const reader = await HistorySegmentChainReader.open({ store, publication })
+              const result = await reader.list({ kind: 'balance_history', limit: 10, maxSegmentReads: 1 })
+              expect(result.items).toEqual([])
+              expect(result.complete).toBe(true)
+              expect(result.nextCursor).toBeNull()
+              expect(result.segmentReads).toBe(0)
+              expect(result.recordsExamined).toBe(0)
+            })
+          """
+          if marker not in test_text:
+              raise SystemExit('reader test insertion target not found')
+          tests.write_text(test_text.replace(marker, addition, 1))
+
+          Path('.github/workflows/apply-sparse-history-scan-fix.yml').unlink()
+
+      - name: Commit fix
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/shared/history-segments/reader.ts src/shared/history-segments/reader.test.ts .github/workflows/apply-sparse-history-scan-fix.yml
+          git commit -m "Skip published empty history kinds during bounded scans"
+          git push origin HEAD:fix/history-sparse-segment-scan
