@@ -1,0 +1,58 @@
+name: Apply unimpairment witness documentation index
+
+on:
+  push:
+    branches:
+      - docs/unimpairment-witness-plan
+    paths:
+      - .github/workflows/apply-unimpairment-witness-doc-index.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: docs/unimpairment-witness-plan
+          fetch-depth: 0
+
+      - name: Index operation and record prepared plan
+        shell: python
+        run: |
+          from pathlib import Path
+
+          index = Path('docs/README.md')
+          text = index.read_text()
+          old = '24. [`decision-log.md`](decision-log.md) — accepted and superseded architectural and product decisions'
+          new = '24. [`operations-unimpairment-witness.md`](operations-unimpairment-witness.md) — bounded external Devnet semantic-witness operation for the remaining M1 unimpairment path\n25. [`decision-log.md`](decision-log.md) — accepted and superseded architectural and product decisions'
+          if old not in text:
+              raise SystemExit('documentation read-order target not found')
+          text = text.replace(old, new, 1)
+
+          old = '- `operations-public-discovery.md` defines final-host, canonical, sitemap, analytics, and Search Console launch operation.'
+          new = '- `operations-public-discovery.md` defines final-host, canonical, sitemap, analytics, and Search Console launch operation.\n- `operations-unimpairment-witness.md` defines the custody boundary, protocol preconditions, abort conditions, and evidence order for any separately controlled external Devnet unimpairment witness.'
+          if old not in text:
+              raise SystemExit('documentation authority target not found')
+          index.write_text(text.replace(old, new, 1))
+
+          status = Path('docs/implementation-status.md')
+          text = status.read_text()
+          old = '2. resolve the single remaining HYB-7 evidence gap: real post-boundary unimpairment;'
+          new = '2. resolve the single remaining HYB-7 evidence gap: real post-boundary unimpairment; the external witness operation is now specified with explicit custody separation, candidate preconditions, abort conditions, and validated-evidence gates, but no actor credentials or write capability have been added to the monitor;'
+          if old not in text:
+              raise SystemExit('active-unit unimpairment target not found')
+          status.write_text(text.replace(old, new, 1))
+
+          Path('.github/workflows/apply-unimpairment-witness-doc-index.yml').unlink()
+
+      - name: Commit documentation updates
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add docs/README.md docs/implementation-status.md .github/workflows/apply-unimpairment-witness-doc-index.yml
+          git commit -m "Index unimpairment witness operation"
+          git push origin HEAD:docs/unimpairment-witness-plan
