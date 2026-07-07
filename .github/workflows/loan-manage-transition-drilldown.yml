@@ -1,0 +1,39 @@
+name: LoanManage transition drilldown
+on:
+  pull_request:
+    paths:
+      - .github/workflows/loan-manage-transition-drilldown.yml
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Capture LoanManage transaction details
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p loan-manage-drilldown/details
+          B="https://xrpl-lending-monitor.badjoke-lab.workers.dev"
+          curl --max-time 60 -fsS "${B}/api/activity?limit=100" > loan-manage-drilldown/activity.json
+          jq -r '.data[] | select(.transaction_type == "LoanManage") | .transaction_hash' loan-manage-drilldown/activity.json \
+            | sort -u > loan-manage-drilldown/hashes.txt
+          while read -r HASH; do
+            test -n "${HASH}" || continue
+            curl --max-time 60 -fsS "${B}/api/transactions/${HASH}" > "loan-manage-drilldown/details/${HASH}.json"
+          done < loan-manage-drilldown/hashes.txt
+          jq -s '.' loan-manage-drilldown/details/*.json > loan-manage-drilldown/details-array.json
+          jq -n \
+            --slurpfile activity loan-manage-drilldown/activity.json \
+            --slurpfile details loan-manage-drilldown/details-array.json \
+            '{
+              activity_window: ($activity[0].data | length),
+              loan_manage_events: [$activity[0].data[] | select(.transaction_type == "LoanManage")],
+              details: $details[0]
+            }' > loan-manage-drilldown/summary.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: loan-manage-transition-drilldown
+          path: loan-manage-drilldown
+          retention-days: 1
