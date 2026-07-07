@@ -161,16 +161,30 @@ test('preserves successful panels when the activity API fails', async ({ page })
   await expect(page.getByText('/api/activity?limit=6 returned HTTP 500')).toBeVisible()
 })
 
-test('uses mobile navigation and keeps network context visible', async ({ page }) => {
+test('uses mobile navigation, toggles More, and closes it after navigation', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await mockDashboardApi(page)
   await page.goto('/')
 
+  const mobileNav = page.locator('.mobile-bottom-nav')
+  const more = mobileNav.locator('details')
+  const summary = more.locator('summary')
+  const panel = page.locator('.mobile-more-panel')
+
   await expect(page.locator('.sidebar')).toBeHidden()
   await expect(page.locator('.mobile-appbar')).toBeVisible()
-  await expect(page.locator('.mobile-bottom-nav')).toBeVisible()
+  await expect(mobileNav).toBeVisible()
   await expect(page.locator('.network-context').getByText('DEVNET', { exact: true })).toBeVisible()
 
-  await page.locator('.mobile-bottom-nav summary').click()
-  await expect(page.locator('.mobile-more-panel').getByText('Network Status', { exact: true })).toBeVisible()
+  await summary.click()
+  await expect(panel.getByText('Network Status', { exact: true })).toBeVisible()
+
+  await summary.click()
+  await expect(panel).toBeHidden()
+
+  await summary.click()
+  await panel.getByRole('link', { name: 'Network Status' }).click()
+  await expect(page).toHaveURL(/\/network-status$/)
+  await expect(more).not.toHaveAttribute('open', '')
+  await expect(panel).toBeHidden()
 })
