@@ -9,23 +9,40 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: Verify production audit collection reads
+      - name: Capture audit collection reads and publication stats
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p audit-pages-probe
           B="https://xrpl-lending-monitor.badjoke-lab.workers.dev"
-          check() {
+          capture() {
             NAME="$1"
             URL="$2"
-            CODE="$(curl --max-time 120 -sS -o "audit-pages-probe/${NAME}.json" -w '%{http_code}' "${URL}")"
-            printf '%s\n' "${CODE}" > "audit-pages-probe/${NAME}.status"
-            test "${CODE}" = "200"
-            jq -e '.data | type == "array"' "audit-pages-probe/${NAME}.json" > /dev/null
+            curl --max-time 120 -sS -o "audit-pages-probe/${NAME}.json" -w '%{http_code}\n' "${URL}" > "audit-pages-probe/${NAME}.status"
           }
-          check lifecycle "${B}/api/audit/lifecycle?limit=100"
-          check archived "${B}/api/audit/archived?limit=100"
-          check cover-loss "${B}/api/audit/cover-loss?limit=100"
+          capture lifecycle "${B}/api/audit/lifecycle?limit=100"
+          capture archived "${B}/api/audit/archived?limit=100"
+          capture cover-loss "${B}/api/audit/cover-loss?limit=100"
+
+          curl --max-time 120 -fsS \
+            "https://raw.githubusercontent.com/badjoke-lab/xrpl-lending-monitor/2753a75b2d76775bc8aa7d6d866ea147c353b2b5/history/publication.json" \
+            > audit-pages-probe/publication.json
+          jq '{
+            segmentCount,
+            archived_objects: {
+              total: ([.segments[].recordCounts.archived_objects] | add),
+              nonzero_segments: ([.segments[] | select(.recordCounts.archived_objects > 0)] | length),
+              newest_nonzero: ([.segments | to_entries[] | select(.value.recordCounts.archived_objects > 0) | .key] | max)
+            },
+            loan_lifecycle: {
+              total: ([.segments[].recordCounts.loan_lifecycle] | add),
+              nonzero_segments: ([.segments[] | select(.recordCounts.loan_lifecycle > 0)] | length)
+            },
+            balance_history: {
+              total: ([.segments[].recordCounts.balance_history] | add),
+              nonzero_segments: ([.segments[] | select(.recordCounts.balance_history > 0)] | length)
+            }
+          }' audit-pages-probe/publication.json > audit-pages-probe/publication-stats.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
