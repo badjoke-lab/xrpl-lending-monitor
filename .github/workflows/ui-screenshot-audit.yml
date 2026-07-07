@@ -9,12 +9,12 @@ on:
         default: https://xrpl-lending-monitor.badjoke-lab.workers.dev
         type: string
       confirm_fresh_head:
-        description: Confirm collector freshness has been verified before this production crawl
+        description: Confirm collector freshness has been reviewed before this production crawl
         required: true
         default: false
         type: boolean
       confirm_d1_headroom:
-        description: Confirm current D1 resource headroom has been checked before this production crawl
+        description: Confirm the operator expects the workflow to verify current UTC-day D1 headroom before crawling
         required: true
         default: false
         type: boolean
@@ -26,12 +26,16 @@ concurrency:
   group: ui-screenshot-audit
   cancel-in-progress: false
 
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
 jobs:
   capture:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - name: Enforce manual production-audit gates
+      - name: Enforce manual production-audit intent
         shell: bash
         run: |
           set -euo pipefail
@@ -39,6 +43,23 @@ jobs:
           test "${{ inputs.confirm_d1_headroom }}" = "true"
 
       - uses: actions/checkout@v4
+
+      - name: Verify collector is fresh and healthy
+        shell: bash
+        env:
+          BASE_URL: ${{ inputs.base_url }}
+        run: |
+          set -euo pipefail
+          mkdir -p ui-screenshot-audit
+          curl --max-time 60 -fsS "${BASE_URL%/}/api/status/collector" \
+            > ui-screenshot-audit/collector.json
+          jq -e '.status == "healthy" and .cursor.lag_ledgers == 0 and .consecutive_failures == 0 and .error == null' \
+            ui-screenshot-audit/collector.json > /dev/null
+
+      - name: Measure and enforce actual D1 headroom
+        env:
+          D1_HEADROOM_OUTPUT_DIR: ui-screenshot-audit
+        run: bash scripts/check-d1-headroom.sh
 
       - uses: pnpm/action-setup@v4
         with:
@@ -55,23 +76,32 @@ jobs:
       - name: Install Chromium
         run: pnpm exec playwright install --with-deps chromium
 
-      - name: Verify collector is fresh and healthy
-        shell: bash
-        env:
-          BASE_URL: ${{ inputs.base_url }}
-        run: |
-          set -euo pipefail
-          mkdir -p ui-screenshot-audit
-          curl --max-time 60 -fsS "${BASE_URL%/}/api/status/collector" \
-            > ui-screenshot-audit/collector.json
-          jq -e '.status == "healthy" and .cursor.lag_ledgers == 0 and .consecutive_failures == 0 and .error == null' \
-            ui-screenshot-audit/collector.json > /dev/null
-
       - name: Capture representative full-page screenshots
         env:
           BASE_URL: ${{ inputs.base_url }}
           OUTPUT_DIR: ui-screenshot-audit/screenshots
         run: node scripts/capture-ui-audit.mjs
+
+      - name: Write audit gate summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '## UI screenshot audit gates'
+            echo
+            if [ -f ui-screenshot-audit/collector.json ]; then
+              jq -r '"- Collector: **\(.status)**, cursor `\(.cursor.last_processed_ledger)`, head `\(.cursor.latest_observed_ledger)`, lag `\(.cursor.lag_ledgers)`, failures `\(.consecutive_failures)`"' \
+                ui-screenshot-audit/collector.json
+            fi
+            if [ -f ui-screenshot-audit/d1-headroom-summary.json ]; then
+              jq -r '"- D1 rows read: `\(.rows_read)` / `\(.rows_read_daily_allowance)` (`\((.rows_read_fraction * 10000 | round) / 100)%`)"' \
+                ui-screenshot-audit/d1-headroom-summary.json
+              jq -r '"- D1 rows written: `\(.rows_written)` / `\(.rows_written_daily_allowance)` (`\((.rows_written_fraction * 10000 | round) / 100)%`)"' \
+                ui-screenshot-audit/d1-headroom-summary.json
+              jq -r '"- Actual headroom gate passed: **\(.passed)**"' \
+                ui-screenshot-audit/d1-headroom-summary.json
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Upload screenshot audit evidence
         if: always()
