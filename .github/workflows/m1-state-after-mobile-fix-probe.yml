@@ -1,0 +1,34 @@
+name: M1 state after mobile fix probe
+on:
+  pull_request:
+    paths:
+      - .github/workflows/m1-state-after-mobile-fix-probe.yml
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Capture current M1 state
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir m1-state-probe
+          B="https://xrpl-lending-monitor.badjoke-lab.workers.dev"
+          curl --max-time 60 -fsS "${B}/api/status/collector" > m1-state-probe/collector.json
+          curl --max-time 120 -fsS "${B}/api/status/continuation-diagnostics" > m1-state-probe/continuation.json
+          curl --max-time 120 -fsS "${B}/api/status/m1-exit-diagnostics" > m1-state-probe/m1-exit.json
+          curl --max-time 60 -fsS "${B}/api/status/loan-activity-witnesses" > m1-state-probe/loan-activity.json
+          jq -n \
+            --slurpfile c m1-state-probe/collector.json \
+            --slurpfile h m1-state-probe/continuation.json \
+            --slurpfile m m1-state-probe/m1-exit.json \
+            --slurpfile l m1-state-probe/loan-activity.json \
+            '{collector:$c[0],hyb7:$h[0],m1_exit:$m[0],loan_activity:$l[0]}' \
+            > m1-state-probe/summary.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: m1-state-after-mobile-fix-probe
+          path: m1-state-probe
+          retention-days: 1
