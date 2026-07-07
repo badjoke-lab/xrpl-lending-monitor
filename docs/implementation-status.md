@@ -12,6 +12,8 @@ Post-cutover monitoring is now split into a lightweight 30-minute runtime monito
 
 The latest recorded runtime evidence shows continued collector progress with zero observed failures and negative lag slope. HYB-7 has now observed created current objects, modified current objects, deletion/archive handling, ledger continuity, and cursor/overlay agreement after the replacement boundary. Remaining semantic paths are LoanPay, impairment, unimpairment, default, activity/history/balance consistency, and freshness at zero lag.
 
+A read-only production list probe on 2026-07-07 compared current-state endpoints at `limit=1` and the UI-shaped `limit=25`. Vault list reads returned HTTP 200 at both limits. Loan Broker and Loan list reads returned HTTP 200 at `limit=1` but HTTP 500 at `limit=25`. The isolated hotfix unit keeps collector and D1 continuation behavior unchanged while removing relationship-read amplification in the release current-state adapter and strengthening the M1 exit review to exercise 25-row list reads.
+
 M5-5 and M6 remain gated behind M1 exit.
 
 ## Canonical history and replacement base
@@ -87,7 +89,8 @@ The implemented and verified path now includes:
 - permanent read-only runtime monitoring and explicit history-source diagnostics;
 - D1-safe monitoring cadence separation and a read-budget guard for deep diagnostics;
 - indexed HYB-7 overlay/object-change source matching to remove the observed high-read correlated lookup;
-- reproducible manual M1 exit review workflow capturing runtime gates, source invariants, and current-state exact-read evidence.
+- reproducible manual M1 exit review workflow capturing runtime gates, source invariants, and current-state exact-read evidence;
+- production-shaped current-state list probing that distinguishes one-row success from UI-shaped 25-row relationship-read failures.
 
 Mainnet remains disabled.
 

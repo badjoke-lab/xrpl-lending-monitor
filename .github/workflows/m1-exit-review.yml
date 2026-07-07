@@ -85,13 +85,13 @@ jobs:
           BASE="$(cat m1-exit-review/base-url.txt)"
 
           curl --fail-with-body --silent --show-error --retry 3 \
-            "${BASE}/api/vaults?limit=1" \
+            "${BASE}/api/vaults?limit=25&sort=id_asc" \
             > m1-exit-review/vault-list.json
           curl --fail-with-body --silent --show-error --retry 3 \
-            "${BASE}/api/loan-brokers?limit=1" \
+            "${BASE}/api/loan-brokers?limit=25&sort=id_asc" \
             > m1-exit-review/loan-broker-list.json
           curl --fail-with-body --silent --show-error --retry 3 \
-            "${BASE}/api/loans?limit=1" \
+            "${BASE}/api/loans?limit=25&sort=id_asc" \
             > m1-exit-review/loan-list.json
 
           jq -e '.availability.state == "available" and (.data | length) > 0 and .snapshot.id == "devnet-3432924-canonical"' \

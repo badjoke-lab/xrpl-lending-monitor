@@ -150,36 +150,41 @@ function accountFieldMatches(
   return matches
 }
 
-function createReadModelAdapter(
+export function createReadModelAdapter(
   readModel: GithubCurrentStateReadModelReader,
   getSource: () => ReleaseCurrentStateSource,
 ) {
-  const cache = new Map<string, { kind: ReadModelKind; projection: Projection }>()
+  const baseCache = new Map<string, { kind: ReadModelKind; projection: Projection }>()
+  const resolvedCache = new Map<string, { kind: ReadModelKind; projection: Projection }>()
 
-  function remember(kind: ReadModelKind, projection: Projection): void {
-    cache.set(projection.id, { kind, projection })
+  function rememberBase(kind: ReadModelKind, projection: Projection): void {
+    baseCache.set(projection.id.toUpperCase(), { kind, projection })
   }
 
-  function rememberPageItem(kind: ReadModelKind, item: unknown): void {
+  function rememberResolved(kind: ReadModelKind, projection: Projection): void {
+    resolvedCache.set(projection.id.toUpperCase(), { kind, projection })
+  }
+
+  function rememberBasePageItem(kind: ReadModelKind, item: unknown): void {
     if (kind === 'vault') {
-      remember('vault', item as VaultCurrentProjection)
+      rememberBase('vault', item as VaultCurrentProjection)
       return
     }
     if (kind === 'loan-broker') {
       const record = item as ReadModelBrokerRecord
-      remember('loan-broker', record.broker)
-      remember('vault', record.vault)
+      rememberBase('loan-broker', record.broker)
+      rememberBase('vault', record.vault)
       return
     }
     const record = item as ReadModelLoanRecord
-    remember('loan', record.loan)
-    remember('loan-broker', record.broker)
-    remember('vault', record.vault)
+    rememberBase('loan', record.loan)
+    rememberBase('loan-broker', record.broker)
+    rememberBase('vault', record.vault)
   }
 
   async function loadAny(objectId: string): Promise<{ kind: ReadModelKind; projection: Projection } | null> {
     const id = objectId.toUpperCase()
-    const cached = cache.get(id)
+    const cached = resolvedCache.get(id)
     if (cached) return cached
 
     const source = getSource()
@@ -193,7 +198,7 @@ function createReadModelAdapter(
         objectId: id,
       })
       if (resolved.item) {
-        remember(kind, resolved.item)
+        rememberResolved(kind, resolved.item)
         return { kind, projection: resolved.item }
       }
     }
@@ -202,24 +207,27 @@ function createReadModelAdapter(
 
   async function loadBaseAny(objectId: string): Promise<{ kind: ReadModelKind; projection: Projection } | null> {
     const id = objectId.toUpperCase()
+    const cached = baseCache.get(id)
+    if (cached) return cached
+
     for (const kind of ['vault', 'loan-broker', 'loan'] as const) {
       try {
         if (kind === 'vault') {
           const item = await readModel.get<VaultCurrentProjection>(id, kind)
           if (item) {
-            remember(kind, item)
+            rememberBase(kind, item)
             return { kind, projection: item }
           }
         } else if (kind === 'loan-broker') {
           const item = await readModel.get<ReadModelBrokerRecord>(id, kind)
           if (item) {
-            rememberPageItem(kind, item)
+            rememberBasePageItem(kind, item)
             return { kind, projection: item.broker }
           }
         } else {
           const item = await readModel.get<ReadModelLoanRecord>(id, kind)
           if (item) {
-            rememberPageItem(kind, item)
+            rememberBasePageItem(kind, item)
             return { kind, projection: item.loan }
           }
         }
@@ -266,7 +274,7 @@ function createReadModelAdapter(
       assetReads += result.basePageReads
       for (const item of result.items) {
         const projection = item
-        remember(kind, projection)
+        rememberResolved(kind, projection)
         const field = accountFieldMatches(kind, projection, account, fields)[0]
         if (!field) continue
         items.push({
@@ -336,7 +344,7 @@ function createReadModelAdapter(
       for (const item of result.items) {
         if (kind === 'loan-broker') {
           const projection = item as LoanBrokerCurrentProjection
-          remember(kind, projection)
+          rememberResolved(kind, projection)
           items.push({
             schemaVersion: 1,
             bucket: 0,
@@ -350,7 +358,7 @@ function createReadModelAdapter(
           })
         } else {
           const projection = item as LoanCurrentProjection
-          remember(kind, projection)
+          rememberResolved(kind, projection)
           items.push({
             schemaVersion: 1,
             bucket: 0,
@@ -435,7 +443,7 @@ function createReadModelAdapter(
         scope: `${kind}:${options.direction}`,
         maxPageReads: Math.max(1, Math.min(options.maxAssetReads ?? 4, 4)),
         predicate: (item) => {
-          rememberPageItem(kind, item)
+          rememberBasePageItem(kind, item)
           const projection = projectionFromPage(kind, item)
           return predicate ? predicate(fakeRecord(kind, projection)) : true
         },
