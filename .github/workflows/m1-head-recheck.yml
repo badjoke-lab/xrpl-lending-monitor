@@ -1,0 +1,76 @@
+name: M1 head recheck
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/m1-head-recheck.yml
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Capture bounded collector samples
+        shell: bash
+        env:
+          BASE_URL: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+        run: |
+          set -euo pipefail
+          mkdir -p m1-head-recheck
+          for I in 0 1 2; do
+            curl --max-time 60 --fail-with-body --silent --show-error --retry 3 \
+              "${BASE_URL%/}/api/status/collector" \
+              > "m1-head-recheck/collector-${I}.json"
+            jq -e '.status == "healthy" and .consecutive_failures == 0 and .error == null' \
+              "m1-head-recheck/collector-${I}.json" > /dev/null
+            if [ "${I}" -lt 2 ]; then
+              sleep 20
+            fi
+          done
+
+      - name: Summarize strict head equality
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -s '{
+            captured_at: (now | todateiso8601),
+            samples: [
+              .[] | {
+                cursor: .cursor.last_processed_ledger,
+                observed_head: .cursor.latest_observed_ledger,
+                reported_lag: .cursor.lag_ledgers,
+                exact_head_equal: (.cursor.last_processed_ledger == .cursor.latest_observed_ledger),
+                status,
+                consecutive_failures,
+                error,
+                last_success_at: .timing.last_success_at
+              }
+            ]
+          }
+          | .all_healthy = ([.samples[] | select(.status != "healthy" or .consecutive_failures != 0 or .error != null)] | length) == 0
+          | .latest = .samples[-1]
+          ' m1-head-recheck/collector-*.json > m1-head-recheck/summary.json
+
+          jq . m1-head-recheck/summary.json
+
+          {
+            echo '## M1 strict head lightweight recheck'
+            echo
+            jq -r '"- Latest cursor: `\(.latest.cursor)`"' m1-head-recheck/summary.json
+            jq -r '"- Latest observed head: `\(.latest.observed_head)`"' m1-head-recheck/summary.json
+            jq -r '"- Reported lag: `\(.latest.reported_lag)`"' m1-head-recheck/summary.json
+            jq -r '"- Exact cursor/head equality: **\(.latest.exact_head_equal)**"' m1-head-recheck/summary.json
+            jq -r '"- All samples healthy: **\(.all_healthy)**"' m1-head-recheck/summary.json
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload lightweight evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: m1-head-recheck
+          path: m1-head-recheck
+          if-no-files-found: error
+          retention-days: 2
