@@ -66,7 +66,10 @@ export async function readLoanActivityDiagnostics(
        COALESCE(SUM(CASE WHEN event_type = 'LoanDelete' THEN 1 ELSE 0 END), 0) AS loan_delete,
        MAX(CASE WHEN event_type = 'LoanDelete' THEN ledger_index END) AS loan_delete_latest_ledger
      FROM protocol_events
-     WHERE network = 'devnet' AND epoch_id = ?1 AND ledger_index > ?2`,
+     WHERE network = 'devnet'
+       AND epoch_id = ?1
+       AND ledger_index > ?2
+       AND result_code = 'tesSUCCESS'`,
   ).bind(scope.epochId, scope.baseLedgerIndex).first<LoanActivityRow>()
 
   return {
