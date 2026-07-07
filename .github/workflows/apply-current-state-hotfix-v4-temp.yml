@@ -1,0 +1,34 @@
+name: Apply current-state hotfix v4 once
+on:
+  pull_request:
+    paths: [.github/workflows/apply-current-state-hotfix-v4-temp.yml]
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+      - name: Apply reviewed patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git log -1 --pretty=%s)" = "Add patch-based current-state hotfix applier" || exit 0
+          git apply --check current-state-hotfix.patch
+          git apply current-state-hotfix.patch
+          git diff --check
+      - name: Commit source changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/worker/repositories/release-current-state.ts .github/workflows/m1-exit-review.yml docs/implementation-status.md
+          git commit -m "Fix current-state relation list reads"
+      - name: Push source changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
