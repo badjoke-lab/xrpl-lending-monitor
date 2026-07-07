@@ -19,6 +19,8 @@ import { handleHybridExactHistoryOverride } from './routes/hybrid-exact-history-
 import { handleHybridHistoryOverride } from './routes/hybrid-history-override'
 import { serializeCollectorStatus } from './serializers/collector-status'
 
+const COLLECTOR_STATUS_STALE_AFTER_SECONDS = 120
+
 const worker: ExportedHandler<Bindings> = {
   async fetch(request, env, executionContext) {
     const url = new URL(request.url)
@@ -46,7 +48,11 @@ const worker: ExportedHandler<Bindings> = {
     if (request.method === 'GET' && url.pathname === '/api/status/collector') {
       const runtimeConfig = resolveRuntimeConfig(env)
       const [collector, sync] = await Promise.all([getIncrementalCollectorState(env.DB), getSyncState(env.DB)])
-      return Response.json(serializeCollectorStatus({ collector, sync, staleAfterSeconds: runtimeConfig.staleAfterSeconds }))
+      return Response.json(serializeCollectorStatus({
+        collector,
+        sync,
+        staleAfterSeconds: Math.max(runtimeConfig.staleAfterSeconds, COLLECTOR_STATUS_STALE_AFTER_SECONDS),
+      }))
     }
     if (request.method === 'GET' && url.pathname === '/api/status/loan-activity-witnesses') {
       return Response.json(await readLoanActivityDiagnostics(env.DB))
