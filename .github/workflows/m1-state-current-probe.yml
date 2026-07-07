@@ -1,0 +1,27 @@
+name: M1 current state probe
+on:
+  pull_request:
+    paths:
+      - .github/workflows/m1-state-current-probe.yml
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Capture current M1 state
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p m1-current-probe
+          B="https://xrpl-lending-monitor.badjoke-lab.workers.dev"
+          curl --max-time 60 -fsS "${B}/api/status/collector" > m1-current-probe/collector.json
+          curl --max-time 120 -fsS "${B}/api/status/continuation-diagnostics" > m1-current-probe/continuation.json
+          curl --max-time 120 -fsS "${B}/api/status/m1-exit-diagnostics" > m1-current-probe/m1-exit.json
+          curl --max-time 60 -fsS "${B}/api/status/loan-activity-witnesses" > m1-current-probe/loan-activity.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: m1-current-state-probe
+          path: m1-current-probe
+          retention-days: 1
