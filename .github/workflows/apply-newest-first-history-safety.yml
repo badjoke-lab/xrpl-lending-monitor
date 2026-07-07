@@ -1,0 +1,61 @@
+name: Apply newest-first history safety
+
+on:
+  push:
+    branches:
+      - fix/history-ui-window-safety
+    paths:
+      - .github/workflows/apply-newest-first-history-safety.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/history-ui-window-safety
+          fetch-depth: 0
+
+      - name: Apply newest-first safety to descending history routes
+        shell: python
+        run: |
+          from pathlib import Path
+
+          route = Path('src/worker/routes/hybrid-history-override.ts')
+          text = route.read_text()
+          replacements = [
+            (
+              "const result = await listHybridObjectHistory({ ...common, objectType, objectId, page: { limit } })\n    if (!safeHybridResult(result, limit))",
+              "const result = await listHybridObjectHistory({ ...common, objectType, objectId, page: { limit } })\n    if (!safeNewestFirstHybridResult(result, limit))",
+            ),
+            (
+              "const result = await listHybridLoanLifecycleEvents({\n      ...common,\n      list: { limit, eventType, loanId },\n    })\n    if (!safeHybridResult(result, limit))",
+              "const result = await listHybridLoanLifecycleEvents({\n      ...common,\n      list: { limit, eventType, loanId },\n    })\n    if (!safeNewestFirstHybridResult(result, limit))",
+            ),
+            (
+              "const result = await listHybridArchivedObjects({ ...common, list: { limit, objectType, query } })\n    if (!safeHybridResult(result, limit))",
+              "const result = await listHybridArchivedObjects({ ...common, list: { limit, objectType, query } })\n    if (!safeNewestFirstHybridResult(result, limit))",
+            ),
+            (
+              "const result = await listHybridBalanceHistory({\n      ...common,\n      list: { limit, metricType, subjectType, subjectId, assetKey },\n    })\n    if (!safeHybridResult(result, limit))",
+              "const result = await listHybridBalanceHistory({\n      ...common,\n      list: { limit, metricType, subjectType, subjectId, assetKey },\n    })\n    if (!safeNewestFirstHybridResult(result, limit))",
+            ),
+          ]
+          for old, new in replacements:
+              if old not in text:
+                  raise SystemExit(f'replacement target missing: {old[:80]}')
+              text = text.replace(old, new, 1)
+          route.write_text(text)
+          Path('.github/workflows/apply-newest-first-history-safety.yml').unlink()
+
+      - name: Commit route changes
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/worker/routes/hybrid-history-override.ts .github/workflows/apply-newest-first-history-safety.yml
+          git commit -m "Use merged-page safety for newest-first history routes"
+          git push origin HEAD:fix/history-ui-window-safety
