@@ -1,4 +1,4 @@
-import { useEffect, useState, type MouseEvent, type ReactNode } from 'react'
+import type { MouseEvent, ReactNode } from 'react'
 
 import { formatDuration, formatInteger, statusTone, titleCase } from '../lib/formatting'
 import { LoanDetailPage } from '../pages/LoanDetailPage'
@@ -100,17 +100,7 @@ function resolveContent(currentPath: string, children: ReactNode, onNavigate: (p
 }
 
 export function AppShell({ children, currentPath, status, onNavigate, onReload }: Props) {
-  const [mobileMoreOpen, setMobileMoreOpen] = useState(false)
-
-  useEffect(() => {
-    setMobileMoreOpen(false)
-  }, [currentPath])
-
-  const navigateFromMobile = (path: string) => {
-    setMobileMoreOpen(false)
-    onNavigate(path)
-  }
-  const home = (event: MouseEvent<HTMLAnchorElement>) => { event.preventDefault(); navigateFromMobile('/') }
+  const home = (event: MouseEvent<HTMLAnchorElement>) => { event.preventDefault(); onNavigate('/') }
   const content = resolveContent(currentPath, children, onNavigate)
   const loansActive = currentPath === '/loans' || currentPath.startsWith('/loans/')
   return (
@@ -139,24 +129,10 @@ export function AppShell({ children, currentPath, status, onNavigate, onReload }
           className={loansActive ? 'is-active' : ''}
           href="/loans"
           aria-current={loansActive ? 'page' : undefined}
-          onClick={(event) => { event.preventDefault(); navigateFromMobile('/loans') }}
+          onClick={(event) => { event.preventDefault(); onNavigate('/loans') }}
         >Loans</a>
         <span aria-disabled="true">Activity</span><span aria-disabled="true">Search</span>
-        <a
-          href="#mobile-more-panel"
-          role="button"
-          aria-controls="mobile-more-panel"
-          aria-expanded={mobileMoreOpen}
-          onClick={(event) => {
-            event.preventDefault()
-            setMobileMoreOpen((open) => !open)
-          }}
-        >More</a>
-        {mobileMoreOpen ? (
-          <div id="mobile-more-panel" className="mobile-more-panel">
-            <Navigation currentPath={currentPath} onNavigate={navigateFromMobile} />
-          </div>
-        ) : null}
+        <details><summary>More</summary><div className="mobile-more-panel"><Navigation currentPath={currentPath} onNavigate={onNavigate} /></div></details>
       </nav>
     </div>
   )
