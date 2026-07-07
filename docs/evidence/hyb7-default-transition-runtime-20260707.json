@@ -1,0 +1,73 @@
+{
+  "recorded_at": "2026-07-07T06:20:40Z",
+  "network": "devnet",
+  "source": "read-only production HYB-7 reprobe",
+  "collector": {
+    "status": "stale",
+    "cursor": 3448324,
+    "validated_head": 3455279,
+    "lag_ledgers": 6935,
+    "last_attempt_at": "2026-07-07T06:19:35.356Z",
+    "last_success_at": "2026-07-07T06:19:35.356Z",
+    "run_duration_ms": 6046,
+    "consecutive_failures": 0,
+    "error": null
+  },
+  "hyb7": {
+    "passed": false,
+    "paths": {
+      "createdCurrent": "observed",
+      "modifiedCurrent": "observed",
+      "loanPayment": "observed",
+      "impaired": "missing",
+      "unimpaired": "missing",
+      "defaulted": "observed",
+      "deletionArchive": "observed",
+      "activityHistoryBalance": "observed",
+      "ledgerContinuity": "observed",
+      "cursorOverlay": "observed",
+      "freshness": "missing"
+    }
+  },
+  "loan_activity": {
+    "total": 25,
+    "latest_ledger": 3448092,
+    "loan_set": 11,
+    "loan_set_latest_ledger": 3448039,
+    "loan_pay": 11,
+    "loan_pay_latest_ledger": 3444422,
+    "loan_manage": 1,
+    "loan_manage_latest_ledger": 3448092,
+    "loan_delete": 2,
+    "loan_delete_latest_ledger": 3439991
+  },
+  "balance_source": {
+    "source_changes": 18,
+    "latest_ledger": 3448092,
+    "source_changes_missing_history": 0,
+    "history_rows_missing_source": 0
+  },
+  "managed_transitions": {
+    "impaired": 0,
+    "unimpaired": 0,
+    "defaulted": 1,
+    "defaulted_latest_ledger": 3448092
+  },
+  "m1": {
+    "ready": false,
+    "gates": {
+      "verifiedBaseBinding": "observed",
+      "catchUpStart": "observed",
+      "validatedHeadReached": "missing",
+      "liveContinuation": "missing"
+    }
+  },
+  "interpretation": {
+    "collector_status_note": "The probe captured a recent successful run with zero failures and no error. The stale label was produced by the then-active 30-second status window against a one-minute collector cadence and is tracked separately from HYB-7 path evidence.",
+    "remaining_hyb7_paths": [
+      "impaired",
+      "unimpaired",
+      "freshness"
+    ]
+  }
+}
