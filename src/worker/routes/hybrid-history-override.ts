@@ -7,7 +7,6 @@ import {
   listHybridLoanLifecycle,
   listHybridLoanLifecycleEvents,
   listHybridObjectHistory,
-  type HybridHistoryResult,
 } from '../repositories/hybrid-history-repository'
 import { resolveHistorySource } from '../repositories/history-source'
 import {
@@ -21,6 +20,7 @@ import {
   serializeLoanLifecycleResponse,
   serializeObjectHistoryResponse,
 } from '../serializers/history-api'
+import { safeHybridResult, safeNewestFirstHybridResult } from './hybrid-history-safety'
 
 const DEFAULT_PAGE_LIMIT = 25
 const MAX_PAGE_LIMIT = 100
@@ -78,10 +78,6 @@ function exactLookupUnavailable(): Response {
   }, { status: 503 })
 }
 
-function safeHybridResult<T>(result: HybridHistoryResult<T>, limit: number): boolean {
-  return result.immutable.complete || result.merge.immutableInput >= limit
-}
-
 function pathParts(pathname: string): string[] {
   return pathname.split('/').filter(Boolean).map((part) => decodeURIComponent(part))
 }
@@ -109,13 +105,13 @@ export async function handleHybridHistoryOverride(
 
   if (url.pathname === '/api/activity') {
     const result = await listHybridActivity({ ...common, page: { limit } })
-    if (!safeHybridResult(result, limit)) return historyUnavailable('bounded_immutable_scan_incomplete')
+    if (!safeNewestFirstHybridResult(result, limit)) return historyUnavailable('bounded_immutable_scan_incomplete')
     return Response.json(serializeActivityResponse(result.items, limit))
   }
 
   if (url.pathname === '/api/exports/activity' || url.pathname === '/api/feeds/activity.ndjson') {
     const result = await listHybridActivity({ ...common, page: { limit } })
-    if (!safeHybridResult(result, limit)) return historyUnavailable('bounded_immutable_scan_incomplete')
+    if (!safeNewestFirstHybridResult(result, limit)) return historyUnavailable('bounded_immutable_scan_incomplete')
     if (url.pathname === '/api/feeds/activity.ndjson') {
       return new Response(serializeActivityNdjson(result.items), {
         headers: { 'content-type': 'application/x-ndjson; charset=utf-8' },
