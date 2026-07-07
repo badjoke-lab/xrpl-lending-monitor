@@ -1,0 +1,189 @@
+name: Apply release preparation documentation recalibration
+
+on:
+  push:
+    branches:
+      - docs/recalibrate-release-prep-order-20260707-final
+    paths:
+      - .github/workflows/apply-release-prep-doc-recalibration.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: docs/recalibrate-release-prep-order-20260707-final
+          fetch-depth: 0
+
+      - name: Recalibrate roadmap, specifications, and status
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace(path: str, old: str, new: str, count: int = 1) -> None:
+              p = Path(path)
+              text = p.read_text()
+              if old not in text:
+                  raise SystemExit(f'{path}: replacement target not found: {old[:120]!r}')
+              p.write_text(text.replace(old, new, count))
+
+          # README current status and sequencing.
+          replace(
+              'README.md',
+              'Milestone 1: post-cutover incremental continuation and exit verification.',
+              'Milestone 1: final catch-up and exit verification, with non-invasive release preparation allowed in parallel.',
+          )
+          replace(
+              'README.md',
+              'The active M1 work is operational verification rather than architecture construction: continue bounded catch-up to the validated head, keep D1 usage and collector failures within the measured envelope, observe the remaining real post-boundary LoanPay and LoanManage lifecycle paths, verify activity/history/balance consistency, reach fresh zero-lag state, and complete the M1 exit review.',
+              'The active M1 work is operational verification rather than architecture construction. The latest bounded probe recorded a contiguous cursor through ledger `3461324`, observed head `3461639`, lag `315`, zero consecutive failures, and zero continuation discontinuities. HYB-7 now observes current creation and modification, LoanPay/payment, default, deletion/archive, activity-history-balance consistency, ledger continuity, and cursor/overlay agreement. Remaining missing paths are impairment, unimpairment, and freshness at a healthy zero-lag head. While collection continues unchanged, SEO/discoverability design and a manual screenshot-audit workflow may be prepared in parallel; full production visual audit and public indexing configuration remain ordered by the roadmap.',
+          )
+
+          # AGENTS: force roadmap/status re-read before each unit.
+          replace(
+              'AGENTS.md',
+              '- Work from the current canonical predecessor.\n- Prefer one coherent roadmap unit per pull request.',
+              '- Work from the current canonical predecessor.\n- Before every new implementation unit, operational probe, release-preparation unit, or externally visible configuration change, re-read `docs/development-roadmap.md` and `docs/implementation-status.md`; repository source-of-truth documents override stale conversation summaries or prior plans.\n- After new evidence changes an active gate, blocker, sequencing decision, or measured resource state, reconcile the affected status and roadmap documents before the next dependent unit proceeds.\n- Prefer one coherent roadmap unit per pull request.',
+          )
+
+          # Documentation index authority rule.
+          replace(
+              'docs/README.md',
+              '- `implementation-status.md` records the current public implementation state.\n- `decision-log.md` records why material architecture and product choices were accepted or superseded.',
+              '- `implementation-status.md` records the current public implementation state.\n- `development-roadmap.md` and `implementation-status.md` must be re-read at the start of each implementation, operational, UI-audit, SEO, or release-preparation unit and reconciled with newly captured evidence before dependent work proceeds.\n- `decision-log.md` records why material architecture and product choices were accepted or superseded.',
+          )
+
+          # Roadmap recalibration.
+          replace(
+              'docs/development-roadmap.md',
+              'Last recalibrated: 2026-07-04.',
+              'Last recalibrated: 2026-07-07.',
+          )
+          replace(
+              'docs/development-roadmap.md',
+              '| M1 Current-state collector | Incremental continuation active | Serve a verified Devnet base state and continuously apply validated ledger changes | Verified base read model serves real Devnet data; contiguous scheduled collection, D1 overlay updates, deletion handling, reconciliation, and stale/gap safety pass |',
+              '| M1 Current-state collector | Final catch-up and exit verification active | Serve a verified Devnet base state and continuously apply validated ledger changes | Verified base read model serves real Devnet data; contiguous scheduled collection reaches a healthy fresh head; required HYB-7 paths and M1 exit review pass |',
+          )
+          replace(
+              'docs/development-roadmap.md',
+              '| M6 Hardening and public Devnet release | Not started | Prove integrity, resource safety, accessibility, operations, and deployment readiness | Multi-day soak and all release gates pass |',
+              '| M6 Hardening and public Devnet release | Release-preparation specification active; runtime hardening gated | Prove integrity, resource safety, accessibility, discoverability, operations, and deployment readiness | Visual audit, SEO/discoverability, multi-day soak, and all release gates pass |',
+          )
+          replace(
+              'docs/development-roadmap.md',
+              '- Internal account circumstances, credentials, provider identifiers, workflow run identifiers, and unpublished operational details remain outside public documentation.',
+              '- Internal account circumstances, credentials, provider identifiers, workflow run identifiers, and unpublished operational details remain outside public documentation.\n- Active collector catch-up is not paused for UI, SEO, analytics, or screenshot-audit preparation. Collector limits or cadence are not retuned without failure, lag-slope, or resource evidence that justifies the change.\n- Release-preparation work that does not mutate collector, D1, history, or deployment state may proceed in parallel, but gated production audits and public indexing configuration must respect the dependency order below.',
+          )
+          replace(
+              'docs/development-roadmap.md',
+              'Exit condition: the live continuation path is operational and evidence shows current and historical views remain consistent.\n\n### M1-HYB-8 — M1 exit review',
+              'Exit condition: the live continuation path is operational and evidence shows current and historical views remain consistent.\n\nLatest operational probe state on 2026-07-07: created current, modified current, LoanPay/payment, default, deletion/archive, activity-history-balance consistency, ledger continuity, and cursor/overlay agreement are observed. Impairment, unimpairment, and freshness remain missing. The collector was still behind the observed head but advancing contiguously with zero observed failures.\n\n### M1-HYB-8 — M1 exit review',
+          )
+          replace(
+              'docs/development-roadmap.md',
+              'M1 exits only when:\n\n- a verified base read model is serving real Devnet current data;\n- the incremental cursor advances contiguously;\n- current overlay upserts and tombstones are applied safely;\n- restart and retry are idempotent;\n- bounded catch-up works after interruption;\n- stale or incomplete data is never labeled fresh;\n- reconciliation passes.\n\n## M2 — Event history and lifecycle',
+              'M1 exits only when:\n\n- a verified base read model is serving real Devnet current data;\n- the incremental cursor advances contiguously;\n- current overlay upserts and tombstones are applied safely;\n- restart and retry are idempotent;\n- bounded catch-up works after interruption;\n- stale or incomplete data is never labeled fresh;\n- required HYB-7 live paths are observed and consistent;\n- reconciliation passes;\n- the reproducible M1 exit review passes with readiness enforcement.\n\n### Parallel release-preparation track during M1 catch-up\n\nThe following preparation may proceed while the collector continues unchanged toward the validated head:\n\n- define route-specific title and description requirements;\n- define canonical-host, robots, sitemap, Open Graph, social-card, and accurate structured-data requirements;\n- prepare configuration hooks for analytics without placeholder measurement IDs;\n- implement a manual-dispatch GitHub Actions screenshot-audit workflow;\n- define the representative desktop/mobile route matrix, including data pages, detail pages, documentation pages, and the open mobile More menu state.\n\nThe following remain gated until the collector has reached a verified healthy fresh head and current D1 resource headroom has been checked:\n\n- full production screenshot crawl of the representative route matrix;\n- UI remediation based on that production visual evidence.\n\nThe following remain gated until M1 exit and a final public host is configured:\n\n- production canonical-host activation;\n- final absolute sitemap publication;\n- Google Search Console verification and sitemap submission;\n- public launch indexing decisions.\n\nThe collector is not slowed, reset, rebased, or retuned solely to make room for these preparation tasks.\n\n## M2 — Event history and lifecycle',
+          )
+          replace(
+              'docs/development-roadmap.md',
+              'Proceed in dependency order:\n\n1. integrity and reset simulations;\n2. runtime and resource guardrails;\n3. accessibility, performance, security, and browser validation;\n4. operations and deployment documentation;\n5. backup/export and recovery verification;\n6. real multi-day Devnet soak;\n7. final release verification.',
+              'Proceed in dependency order:\n\n1. integrity and reset simulations;\n2. runtime and resource guardrails;\n3. manual full-page visual audit of representative desktop and mobile routes against production data;\n4. UI overflow, clipping, spacing, fixed-navigation overlap, safe-area, long-identifier, and form-layout remediation followed by screenshot re-audit;\n5. accessibility, performance, security, and cross-browser validation;\n6. SEO and discoverability implementation: route-specific metadata, final-host canonical URLs, robots policy, sitemap, social metadata, and accurate structured data;\n7. owner-managed public-host, analytics, and search-console setup after final host selection; repository code must expose configuration hooks and must not ship placeholder IDs or verification tokens;\n8. operations and deployment documentation;\n9. backup/export and recovery verification;\n10. real multi-day Devnet soak;\n11. final release verification.',
+          )
+
+          # Product spec: discoverability and release gates.
+          replace(
+              'docs/product-spec.md',
+              '13. **No funding or payment surface in the current release.** Donation, payment, promotional, wallet, and transaction-submission features are outside scope.',
+              '13. **No funding or payment surface in the current release.** Donation, payment, promotional, wallet, and transaction-submission features are outside scope.\n14. **Public discoverability must match verified scope.** Search metadata, canonical URLs, sitemaps, social previews, and structured data describe only real public pages and never imply Mainnet, write capability, pricing, ratings, or unavailable evidence.',
+          )
+          replace(
+              'docs/product-spec.md',
+              'Missing external configuration produces an explicit unavailable explanation or omits the action. Placeholder URLs are prohibited.\n\n## Data provenance categories',
+              'Missing external configuration produces an explicit unavailable explanation or omits the action. Placeholder URLs are prohibited.\n\n## Public discoverability and analytics\n\nPublic release preparation must provide:\n\n- route-specific titles and descriptions for indexable HTML routes;\n- one explicit final public host used for canonical URLs and absolute sitemap URLs;\n- `robots.txt` and sitemap behavior that distinguish public HTML discovery from API, status, export, feed, and other machine endpoints;\n- Open Graph and social-card metadata that accurately describe the independent, read-only, Devnet scope;\n- structured data only where the selected schema accurately matches the public page and evidence boundary;\n- an analytics integration hook that is inactive when no measurement ID is configured and never ships a placeholder ID;\n- Search Console verification and sitemap submission as an owner-managed external launch task after the final public host is configured.\n\nCanonical, sitemap, analytics, and verification values must not be hard-coded to temporary Worker URLs, placeholder subdomains, fake measurement IDs, or placeholder verification tokens. SEO metadata must not imply investment advice, Mainnet availability, wallet capability, transaction submission, fiat valuation, rankings, ratings, or unsupported completeness.\n\n## Data provenance categories',
+          )
+          replace(
+              'docs/product-spec.md',
+              '18. Multi-day Devnet soak, deployment approval, operational runbook, backup/export procedure, and rollback checks pass.\n19. Mainnet remains disabled unless separately approved.',
+              '18. A manual full-page screenshot audit covers representative desktop and mobile routes with production-shaped data, and identified overflow, clipping, spacing, fixed-navigation overlap, safe-area, long-identifier, and form-layout defects are resolved and re-audited.\n19. Route-specific metadata, final-host canonical URLs, robots policy, sitemap, social metadata, and any structured data pass discoverability review; analytics remains disabled unless a real configured measurement ID is supplied.\n20. Multi-day Devnet soak, deployment approval, operational runbook, backup/export procedure, and rollback checks pass.\n21. Mainnet remains disabled unless separately approved.',
+          )
+
+          # Testing strategy: screenshot and SEO release evidence.
+          replace(
+              'docs/testing-strategy.md',
+              'The browser suite must also prove that unsupported fiat values, cross-asset totals, oracle claims, invented counts, promotional controls, and write-capable controls are absent.',
+              'The browser suite must also prove that unsupported fiat values, cross-asset totals, oracle claims, invented counts, promotional controls, and write-capable controls are absent.\n\nA manual release visual-audit workflow must capture full-page screenshots from the deployed read-only site at minimum for representative desktop and narrow-mobile viewports. The route matrix includes Overview, Vaults, one valid Vault detail, Loan Brokers, one valid Broker detail, Loans, one valid Loan detail, Activity, Lifecycle, Archived Objects, Cover & Loss, Search, Network Status, API, Methodology, About, Contact, and the mobile More menu open state. Detail identifiers must be discovered from live read-only APIs rather than hard-coded stale fixtures. Screenshot evidence supplements, but does not replace, semantic browser assertions.',
+          )
+          replace(
+              'docs/testing-strategy.md',
+              '- accessibility review;\n- external-link review;\n- recovery procedure review;',
+              '- accessibility review;\n- full-page desktop/mobile visual audit and remediation re-audit;\n- route metadata, canonical, robots, sitemap, social metadata, and structured-data validation;\n- external-link review;\n- recovery procedure review;',
+          )
+          replace(
+              'docs/testing-strategy.md',
+              'Record summarized test results, bounded live evidence, processed ledger ranges, base identity, overlay watermark, resource measurements, failures, API samples, accessibility findings, and relevant screenshots in the pull request and implementation status.',
+              'Record summarized test results, bounded live evidence, processed ledger ranges, base identity, overlay watermark, resource measurements, failures, API samples, accessibility findings, representative full-page screenshots, visual-audit findings and fixes, and discoverability validation results in the pull request and implementation status.',
+          )
+
+          # UI responsive rules: explicit close and visual audit matrix.
+          replace(
+              'docs/ui-responsive-rules.md',
+              '- Contact.',
+              '- Contact.\n\nThe menu exposes a visible, labelled close control. Selecting a route closes the menu. Tapping More again may also close it, but repeated More activation is a secondary convenience and is never the only discoverable close mechanism.',
+          )
+          replace(
+              'docs/ui-responsive-rules.md',
+              '## Completion gate\n\nA page is responsive only when it has intentional navigation, readable information priority, usable controls and touch targets, preserved state and provenance context, an appropriate table or card strategy, tested focus order, and no hidden required information.',
+              '## Release visual audit matrix\n\nBefore public Devnet release, run a manual-dispatch full-page screenshot audit against the deployed read-only site after M1 has reached a verified healthy fresh head and D1 resource headroom has been checked. Capture at minimum:\n\n- wide desktop at approximately 1440 CSS pixels;\n- narrow mobile at approximately 390 CSS pixels;\n- Overview, core lists, valid entity details, Activity, all Audit pages, Search, Network Status, API, Methodology, About, Contact, and the open mobile More menu state.\n\nReview every capture for page-level horizontal overflow, clipped content, card and section spacing, wrapped controls, identifier behavior, filter layout, table strategy, footer spacing, fixed-navigation overlap, safe-area handling, touch-target crowding, and empty/error copy expansion. Findings are fixed and the affected pages are re-captured before the visual gate passes.\n\n## Completion gate\n\nA page is responsive only when it has intentional navigation, readable information priority, usable controls and touch targets, preserved state and provenance context, an appropriate table or card strategy, tested focus order, no hidden required information, no unintended page-level horizontal overflow, and no fixed navigation or safe-area overlap.',
+          )
+
+          # Implementation status: latest probe, recovered history reads, and active order.
+          replace(
+              'docs/implementation-status.md',
+              'The latest recorded runtime evidence shows continued collector progress with zero observed failures and negative lag slope. HYB-7 has now observed created current objects, modified current objects, deletion/archive handling, ledger continuity, and cursor/overlay agreement after the replacement boundary. Remaining semantic paths are LoanPay, impairment, unimpairment, default, activity/history/balance consistency, and freshness at zero lag.',
+              'The latest bounded runtime probe captured at 2026-07-07 11:44 UTC shows continued collector progress with zero consecutive failures, no current error, cursor `3461324`, observed head `3461639`, and lag `315`. The processed continuation range is contiguous from `3432925` through `3461324` with zero discontinuities. HYB-7 now observes created current objects, modified current objects, LoanPay/payment, default, deletion/archive handling, activity/history/balance consistency, ledger continuity, and cursor/overlay agreement. Remaining missing paths are impairment, unimpairment, and freshness at a healthy zero-lag head.',
+          )
+          replace(
+              'docs/implementation-status.md',
+              'A read-only production list probe on 2026-07-07 compared current-state endpoints at `limit=1` and the UI-shaped `limit=25`. Vault list reads returned HTTP 200 at both limits. Loan Broker and Loan list reads returned HTTP 200 at `limit=1` but HTTP 500 at `limit=25`. The isolated hotfix unit keeps collector and D1 continuation behavior unchanged while removing relationship-read amplification in the release current-state adapter and strengthening the M1 exit review to exercise 25-row list reads.',
+              'The current-state relationship-list amplification issue has been repaired, and the mobile More menu now exposes an explicit visible close control in addition to route-change and toggle closure. The separate public history-read investigation proved the immutable source itself was valid; sparse bounded scans were repaired by skipping published zero-record kinds, accepting complete merged newest-first windows, and applying bounded kind-specific scan ceilings for sparse archive and balance history. Final production probes returned HTTP 200 for Activity, Lifecycle, Archived Objects, and Cover & Loss at limits `25`, `50`, `75`, and `100`.',
+          )
+          replace(
+              'docs/implementation-status.md',
+              '- production-shaped current-state list probing that distinguishes one-row success from UI-shaped 25-row relationship-read failures.',
+              '- production-shaped current-state list probing and repaired UI-sized relationship reads;\n- verified hybrid public history reads across Activity, Lifecycle, Archived Objects, and Cover & Loss at UI-sized windows through limit 100;\n- sparse immutable history scan handling that skips published zero-record kinds and uses bounded kind-specific ceilings where required;\n- explicit mobile More menu close control with route-change closure preserved.',
+          )
+          replace(
+              'docs/implementation-status.md',
+              'The latest known HYB-7 states are:\n\n- `createdCurrent`: observed;\n- `modifiedCurrent`: observed;\n- `deletionArchive`: observed;\n- `ledgerContinuity`: observed;\n- `cursorOverlay`: observed;\n- `loanPayment`: missing;\n- `impaired`: missing;\n- `unimpaired`: missing;\n- `defaulted`: missing;\n- `activityHistoryBalance`: missing;\n- `freshness`: missing while the collector remains behind the validated head.\n\nThe latest known M1 gates are:\n\n- `verifiedBaseBinding`: observed;\n- `catchUpStart`: observed;\n- `validatedHeadReached`: missing;\n- `liveContinuation`: missing.',
+              'The latest known HYB-7 states are:\n\n- `createdCurrent`: observed;\n- `modifiedCurrent`: observed;\n- `deletionArchive`: observed;\n- `ledgerContinuity`: observed;\n- `cursorOverlay`: observed;\n- `loanPayment`: observed;\n- `defaulted`: observed;\n- `activityHistoryBalance`: observed;\n- `impaired`: missing;\n- `unimpaired`: missing;\n- `freshness`: missing while the collector remains behind the observed validated head.\n\nThe latest known M1 gates are:\n\n- `verifiedBaseBinding`: observed;\n- `catchUpStart`: observed;\n- `validatedHeadReached`: missing;\n- `liveContinuation`: missing because all required HYB-7 live paths are not yet observed.',
+          )
+          replace(
+              'docs/implementation-status.md',
+              'The active operational unit is now:\n\n1. continue bounded D1 collection from `3432925` toward the validated head;\n2. verify sustained zero-failure operation and actual D1 resource usage under the 2048/2048/128 ceilings;\n3. observe real post-boundary HYB-7 evidence for LoanPay, impairment, unimpairment, default, and activity/history/balance consistency;\n4. confirm `validatedHeadReached` and freshness at zero lag;\n5. run the M1 exit review workflow with `require_ready=true` and retain the evidence artifact;\n6. update repository status from the successful exit evidence;\n7. proceed to M5-5 and M6 hardening.',
+              'The active operational unit is now:\n\n1. continue bounded D1 collection unchanged from `3432925` toward the observed validated head;\n2. verify sustained zero-failure operation and actual D1 resource usage under the documented ceilings;\n3. observe real post-boundary impairment and unimpairment evidence;\n4. confirm `validatedHeadReached` and freshness at healthy zero lag;\n5. run the M1 exit review workflow with `require_ready=true` and retain the evidence artifact;\n6. update repository status from the successful exit evidence;\n7. proceed to M5-5 real-data integration;\n8. run the production full-page desktop/mobile screenshot audit, remediate UI overflow and spacing defects, and re-audit;\n9. complete SEO/discoverability implementation and final-host binding, then owner-managed subdomain, analytics, Search Console verification, and sitemap submission;\n10. proceed through M6 hardening and real multi-day Devnet soak.\n\nNon-invasive parallel preparation is allowed while M1 catch-up continues: SEO metadata and route-map design, analytics configuration hooks without placeholder IDs, and implementation of a manual screenshot-audit workflow. These preparation tasks do not justify slowing, resetting, rebasing, or retuning the collector.',
+          )
+          replace(
+              'docs/implementation-status.md',
+              '1. Monitor collector lag slope and D1 usage while replacement-base continuation advances.\n2. Keep replacement-base replay status, cursor/overlay agreement, and history-source diagnostics under permanent monitoring.\n3. Re-evaluate HYB-7 paths as real post-boundary LoanPay, LoanManage, deletion, and balance-changing activity appears.\n4. Confirm the collector reaches the observed validated head and freshness becomes observed.\n5. Execute the reproducible M1 exit review with readiness enforcement.\n6. Complete M1 status review and reconciliation.\n7. Complete M5-5 and M6 hardening.',
+              '1. Monitor collector lag slope and D1 usage while continuation advances without changing collector limits absent failure or resource evidence.\n2. Keep replacement-base replay status, cursor/overlay agreement, and history-source diagnostics under permanent monitoring.\n3. Re-evaluate impairment and unimpairment evidence while the collector reaches the observed validated head.\n4. Confirm freshness at healthy zero lag and re-run continuation plus M1 diagnostics.\n5. Execute the reproducible M1 exit review with readiness enforcement.\n6. Complete M1 status review and M5-5 real-data integration.\n7. Run the representative production screenshot audit, complete UI remediation, and re-audit.\n8. Finalize SEO/discoverability against the configured public host and complete owner-managed subdomain, analytics, Search Console, and sitemap tasks.\n9. Complete M6 hardening and real multi-day Devnet soak.',
+          )
+          replace(
+              'docs/implementation-status.md',
+              '- The production cursor has not yet reached the validated head.\n- Real post-replacement-boundary HYB-7 evidence remains missing for LoanPay, impairment, unimpairment, default, and activity/history/balance consistency.\n- Freshness remains missing until collector lag reaches zero with healthy status.\n- M1 exit remains incomplete until `validatedHeadReached` and all required live continuation paths are observed and consistent.\n- M5-5 and M6 remain incomplete and gated behind M1 exit.',
+              '- The production cursor has not yet reached the observed validated head.\n- Real post-replacement-boundary HYB-7 evidence remains missing for impairment and unimpairment.\n- Freshness remains missing until collector lag reaches zero with healthy status.\n- M1 exit remains incomplete until `validatedHeadReached` and all required live continuation paths are observed and consistent.\n- M5-5 real-data integration remains gated behind M1 exit.\n- Production visual audit, final-host SEO binding, and M6 release hardening remain pending in the dependency order defined by the roadmap.',
+          )
+
+          Path('.github/workflows/apply-release-prep-doc-recalibration.yml').unlink()
+
+      - name: Commit documentation recalibration
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add README.md AGENTS.md docs/README.md docs/development-roadmap.md docs/product-spec.md docs/testing-strategy.md docs/ui-responsive-rules.md docs/implementation-status.md .github/workflows/apply-release-prep-doc-recalibration.yml
+          git commit -m "Recalibrate M1 exit and public release preparation order"
+          git push origin HEAD:docs/recalibrate-release-prep-order-20260707-final
