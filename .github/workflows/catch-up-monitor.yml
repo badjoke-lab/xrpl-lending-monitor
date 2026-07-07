@@ -64,11 +64,12 @@ jobs:
             fi
           done
 
-      - name: Capture HYB-7 and M1 exit diagnostics
+      - name: Capture HYB-7, M1, and cutover diagnostics
         shell: bash
         run: |
           set -euo pipefail
           BASE="$(cat runtime-monitor/base-url.txt)"
+
           curl --fail-with-body --silent --show-error --retry 3 \
             "${BASE}/api/status/continuation-diagnostics" \
             > runtime-monitor/continuation-diagnostics.json
@@ -86,8 +87,21 @@ jobs:
             > runtime-monitor/m1-exit.json
 
           curl --fail-with-body --silent --show-error --retry 3 \
-            "${BASE}/api/status/catch-up-initialization" \
-            > runtime-monitor/catch-up-initialization.json
+            "${BASE}/api/status/replacement-base-rebase" \
+            > runtime-monitor/replacement-base-rebase.json
+          jq -e '.status == "replayed" and .target.snapshotId == "devnet-3432924-canonical" and .target.ledgerIndex == 3432924' \
+            runtime-monitor/replacement-base-rebase.json > /dev/null
+
+          curl --fail-with-body --silent --show-error --retry 3 \
+            "${BASE}/api/status/history-source" \
+            > runtime-monitor/history-source.json
+          jq -e '.status == "ok" and .mode == "hybrid" and .configured == true and .chain.end_ledger_index == 3432924 and .exact_index.total_records > 0' \
+            runtime-monitor/history-source.json > /dev/null
+
+          curl --fail-with-body --silent --show-error --retry 3 \
+            "${BASE}/api/overview" \
+            > runtime-monitor/overview.json
+          grep -q 'devnet-3432924-canonical' runtime-monitor/overview.json
 
       - name: Build operational summary
         shell: bash
@@ -145,6 +159,20 @@ jobs:
           }' runtime-monitor/m1-exit-diagnostics.json \
             > runtime-monitor/m1-exit-summary.json
 
+          jq -n \
+            --slurpfile rebase runtime-monitor/replacement-base-rebase.json \
+            --slurpfile history runtime-monitor/history-source.json \
+            '{
+              replacement_rebase_status: $rebase[0].status,
+              replacement_snapshot: $rebase[0].target.snapshotId,
+              replacement_ledger: $rebase[0].target.ledgerIndex,
+              replacement_cursor: $rebase[0].evidence.sync.lastProcessedLedger,
+              history_mode: $history[0].mode,
+              history_end_ledger: $history[0].chain.end_ledger_index,
+              history_segments: $history[0].chain.segment_count,
+              exact_index_records: $history[0].exact_index.total_records
+            }' > runtime-monitor/cutover-summary.json
+
           {
             echo '## Catch-up runtime monitor'
             echo
@@ -153,6 +181,12 @@ jobs:
             jq -r '"| Cursor | \(.first.cursor) | \(.last.cursor) | \(.cursor_delta) |"' runtime-monitor/summary.json
             jq -r '"| Head | \(.first.head) | \(.last.head) | \(.head_delta) |"' runtime-monitor/summary.json
             jq -r '"| Lag | \(.first.lag) | \(.last.lag) | \(.lag_delta) |"' runtime-monitor/summary.json
+            echo
+            echo '### Canonical cutover state'
+            jq -r '"- Replacement rebase: **\(.replacement_rebase_status)**"' runtime-monitor/cutover-summary.json
+            jq -r '"- Replacement snapshot: `\(.replacement_snapshot)` at ledger `\(.replacement_ledger)`"' runtime-monitor/cutover-summary.json
+            jq -r '"- Hybrid history: **\(.history_mode)** through ledger `\(.history_end_ledger)` in `\(.history_segments)` segments"' runtime-monitor/cutover-summary.json
+            jq -r '"- Exact-index records: `\(.exact_index_records)`"' runtime-monitor/cutover-summary.json
             echo
             echo '### HYB-7 evidence counts'
             echo
@@ -201,6 +235,10 @@ jobs:
             echo "Collector cursor did not advance while catch-up lag remained positive."
             exit 1
           fi
+
+          jq -e '.status == "replayed"' runtime-monitor/replacement-base-rebase.json > /dev/null
+          jq -e '.mode == "hybrid" and .configured == true and .chain.end_ledger_index == 3432924' runtime-monitor/history-source.json > /dev/null
+          grep -q 'devnet-3432924-canonical' runtime-monitor/overview.json
 
       - name: Upload runtime evidence
         if: always()
