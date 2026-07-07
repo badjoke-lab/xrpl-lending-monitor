@@ -11,7 +11,7 @@ test('opens the configured public history source with production values', async 
       githubBranch: 'history-data',
       channelPath: 'history-channel.json',
       maxAssetBytes: 33_554_432,
-      timeoutMs: 30_000,
+      timeoutMs: 8_000,
     })
 
     console.log('PUBLIC_HISTORY_SOURCE_PROBE_OK', JSON.stringify({
