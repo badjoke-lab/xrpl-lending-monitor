@@ -134,7 +134,7 @@ test('keeps Vault navigation available on mobile', async ({ page }) => {
 
   await page.goto('/vaults')
   await expect(page.locator('.sidebar')).toBeHidden()
-  await page.locator('.mobile-bottom-nav summary').click()
+  await page.locator('.mobile-bottom-nav').getByRole('button', { name: 'More' }).click()
   await expect(page.locator('.mobile-more-panel').getByRole('link', { name: 'Vaults' })).toBeVisible()
   await expect(page.locator('.vault-filter-form')).toBeVisible()
 })
