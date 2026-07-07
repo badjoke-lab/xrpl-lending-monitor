@@ -20,12 +20,18 @@ jobs:
 
           overview = Path('src/ui/pages/OverviewPage.tsx')
           text = overview.read_text()
-          text = text.replace("import {\n  EmptyBlock,", "import { rippleEpochToIso } from '../../domain/time/ripple-epoch'\n\nimport {\n  EmptyBlock,", 1)
-          text = text.replace('<td>{formatUtc(event.close_time)}</td>', '<td>{formatUtc(rippleEpochToIso(event.close_time))}</td>', 1)
-          old = '''<a className="mono identifier-link" href={`/api/transactions/${event.transaction_hash}`} title={event.transaction_hash}>
+          import_anchor = "import {\n  EmptyBlock,"
+          if import_anchor not in text:
+            raise SystemExit('Overview import anchor not found')
+          text = text.replace(import_anchor, "import { rippleEpochToIso } from '../../domain/time/ripple-epoch'\n\n" + import_anchor, 1)
+          time_cell = '<td>{formatUtc(event.close_time)}</td>'
+          if time_cell not in text:
+            raise SystemExit('Overview time cell not found')
+          text = text.replace(time_cell, '<td>{formatUtc(rippleEpochToIso(event.close_time))}</td>', 1)
+          old_link = '''<a className="mono identifier-link" href={`/api/transactions/${event.transaction_hash}`} title={event.transaction_hash}>
                         {truncateMiddle(event.transaction_hash)}
                       </a>'''
-          new = '''<a
+          new_link = '''<a
                         className="mono identifier-link"
                         href={`/transactions/${event.transaction_hash}`}
                         title={event.transaction_hash}
@@ -36,30 +42,27 @@ jobs:
                       >
                         {truncateMiddle(event.transaction_hash)}
                       </a>'''
-          if old not in text:
-            raise SystemExit('Overview transaction link block not found')
-          overview.write_text(text.replace(old, new, 1))
+          if old_link not in text:
+            raise SystemExit('Overview transaction link not found')
+          overview.write_text(text.replace(old_link, new_link, 1))
 
           api_types = Path('src/ui/types/api.ts')
           text = api_types.read_text()
-          marker = '''export interface ActivityRecord {
-            transaction_hash: string
-            epoch_id: string
-            ledger_index: number
-            event_index: number
-            close_time: string'''
-          replacement = marker.replace('close_time: string', 'close_time: number')
-          if marker not in text:
-            raise SystemExit('ActivityRecord close_time type not found')
-          api_types.write_text(text.replace(marker, replacement, 1))
+          type_anchor = '  close_time: string\n  transaction_type: string'
+          if type_anchor not in text:
+            raise SystemExit('Activity close_time type anchor not found')
+          api_types.write_text(text.replace(type_anchor, '  close_time: number\n  transaction_type: string', 1))
 
           smoke = Path('tests/e2e/smoke.spec.ts')
           text = smoke.read_text()
-          text = text.replace("close_time: '2026-07-02T01:02:00.000Z',", 'close_time: 836_269_320,', 1)
+          close_time = "close_time: '2026-07-02T01:02:00.000Z',"
+          if close_time not in text:
+            raise SystemExit('smoke close_time fixture not found')
+          text = text.replace(close_time, 'close_time: 836_269_320,', 1)
           anchor = "  await expect(page.getByText('LoanPay', { exact: true })).toBeVisible()\n"
           addition = anchor + "  await expect(page.getByText(/02 Jul 2026, 01:02:00 UTC/)).toBeVisible()\n  await expect(page.locator('.activity-panel tbody a.identifier-link')).toHaveAttribute(\n    'href',\n    '/transactions/ABCDEF000000000000000000000000000000000000000000000000000001',\n  )\n"
           if anchor not in text:
-            raise SystemExit('smoke assertion insertion point not found')
+            raise SystemExit('smoke assertion anchor not found')
           smoke.write_text(text.replace(anchor, addition, 1))
           PY
           git diff --check
