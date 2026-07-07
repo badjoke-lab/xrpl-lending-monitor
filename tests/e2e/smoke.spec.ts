@@ -186,5 +186,6 @@ test('uses mobile navigation, toggles More, and closes it after navigation', asy
   await panel.getByRole('link', { name: 'Network Status' }).click()
   await expect(page).toHaveURL(/\/network-status$/)
   await expect(more).not.toHaveAttribute('open', '')
+  await expect(summary).toHaveAttribute('aria-expanded', 'false')
   await expect(panel).toBeHidden()
 })
