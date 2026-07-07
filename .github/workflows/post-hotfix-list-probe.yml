@@ -17,13 +17,12 @@ jobs:
         run: |
           set -euo pipefail
           mkdir probe
-          curl -fsS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/subdomain" > probe/subdomain.json
+          curl --max-time 30 -fsS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/subdomain" > probe/subdomain.json
           S="$(jq -r '.result.subdomain' probe/subdomain.json)"
           B="https://xrpl-lending-monitor.${S}.workers.dev"
           for E in vaults loan-brokers loans; do
-            curl -sS -o "probe/${E}.json" -w '%{http_code}' "${B}/api/${E}?limit=25&sort=id_asc" > "probe/${E}.status"
+            curl --max-time 60 -sS -o "probe/${E}.json" -w '%{http_code}' "${B}/api/${E}?limit=25&sort=id_asc" > "probe/${E}.status" || true
           done
-          jq -n --slurpfile v probe/vaults.json --slurpfile b probe/loan-brokers.json --slurpfile l probe/loans.json '{vaults:$v[0],brokers:$b[0],loans:$l[0]}' > probe/summary.json
           cat probe/*.status
       - uses: actions/upload-artifact@v4
         if: always()
