@@ -31,7 +31,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Probe production public history endpoints after sparse-scan fix
+      - name: Probe UI-shaped production history windows after sparse-scan fix
         shell: bash
         run: |
           mkdir -p probe-output
@@ -40,10 +40,10 @@ jobs:
             B="https://xrpl-lending-monitor.badjoke-lab.workers.dev"
             for path in \
               "/api/status/history-source" \
-              "/api/activity?limit=1" \
-              "/api/audit/lifecycle?limit=1" \
-              "/api/audit/archived?limit=1" \
-              "/api/audit/cover-loss?limit=1"
+              "/api/activity?limit=100" \
+              "/api/audit/lifecycle?limit=100" \
+              "/api/audit/archived?limit=100" \
+              "/api/audit/cover-loss?limit=100"
             do
               echo "===== ${path} ====="
               curl --max-time 60 -sS -w '\nHTTP %{http_code} total=%{time_total}s\n' "${B}${path}" || true
