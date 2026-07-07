@@ -27,7 +27,9 @@ The production screenshot-audit workflow, capture hardening, deterministic evide
 
 The production screenshot-audit and unimpairment candidate-review workflows share a fail-closed actual D1 headroom check. After collector preflight and before Playwright installation, page traversal, or candidate-list discovery, the workflow queries current UTC-day D1 analytics, records a public-safe usage summary, and requires both rows-read and rows-written fractions to remain below the existing `0.8` threshold. Manual confirmation remains an operator-intent gate but no longer substitutes for measured usage.
 
-Route-aware SEO/discoverability preparation is implemented. Canonical and structured-data output remain inactive until an explicit public-site origin is configured, sitemap output is generated only for that configured origin, and GA4 remains inactive until a valid measurement ID is supplied.
+A bounded one-shot 2026-07-08 UTC operation is scheduled in the active path: the M1 exit review at 00:10 UTC with readiness enforcement enabled for the scheduled run, followed by the production UI audit at 00:30 UTC. The M1 review preserves its evidence artifact even when strict readiness is not yet satisfied. The UI audit independently rechecks collector health and actual D1 headroom before any Playwright installation or page crawl. Candidate review is not scheduled because natural unimpairment evidence is already observed and consistent. Both schedules are date-guarded so later annual cron matches no-op outside the explicit 2026-07-08 UTC window.
+
+Route-aware SEO/discoverability preparation is implemented. Canonical and structured-data output remain inactive until an explicit public-site origin is configured, sitemap output is generated only when the final public origin is configured, and GA4 remains inactive until a valid measurement ID is supplied.
 
 M5-5 and M6 remain gated behind M1 exit.
 
@@ -40,7 +42,7 @@ The 2026-07-07 21:09 UTC audit-headroom retry probe recorded:
 - reference allowances: `5,000,000` rows read and `100,000` rows written per UTC day;
 - measured headroom gate: failed.
 
-The gate correctly stopped candidate discovery. Production screenshot crawl and candidate review remain deferred until a new UTC-day measurement passes both read and write thresholds. The gate remains unchanged and is not bypassed by the newly observed natural unimpairment evidence.
+The gate correctly stopped candidate discovery. Production screenshot crawl remains deferred until a new UTC-day measurement passes both read and write thresholds. Candidate review is no longer active while natural unimpairment evidence remains valid and consistent. The UI gate remains unchanged and is not bypassed by the scheduled operation.
 
 ## Latest HYB-7 state
 
@@ -67,9 +69,9 @@ The gate correctly stopped candidate discovery. Production screenshot crawl and 
 
 ## M1 exit review
 
-The manual `.github/workflows/m1-exit-review.yml` captures a reproducible read-only evidence package. With `require_ready=true`, it requires every HYB-7 path and M1 gate to be observed, collector lag equal to zero, zero consecutive failures, and expected replacement-base, hybrid-history, Overview, and exact current-state bindings.
+The `.github/workflows/m1-exit-review.yml` workflow captures a reproducible read-only evidence package. Manual dispatch retains the existing optional `require_ready` input. The date-guarded scheduled run enforces readiness. Readiness enforcement requires every HYB-7 path and M1 gate to be observed, collector lag equal to zero, zero consecutive failures, and expected replacement-base, hybrid-history, Overview, and exact current-state bindings.
 
-The latest semantic probe is sufficient to retire the unimpairment witness gap, but it is not itself an M1 exit. A later review must prove strict fresh-head arrival and all remaining readiness conditions in one reproducible exit artifact.
+The latest semantic probe is sufficient to retire the unimpairment witness gap, but it is not itself an M1 exit. The one-shot scheduled review must prove strict fresh-head arrival and all remaining readiness conditions in one reproducible exit artifact or fail closed while retaining the artifact.
 
 ## Active unit
 
@@ -86,27 +88,26 @@ The active work is split into permanent monitoring plus two coordinated tracks.
 
 1. Preserve the newly observed natural unimpairment and passing HYB-7 continuation evidence.
 2. Do not run candidate discovery or the external witness procedure while the natural evidence remains valid and consistent.
-3. Obtain a later strict fresh-head M1 diagnostic state with `validatedHeadReached: observed`.
-4. Run M1 exit review with `require_ready=true` only when every M1 gate is observed, and retain the artifact.
-5. Reconcile repository status and proceed to M5-5 only after successful M1 exit.
+3. Let the scheduled 00:10 UTC M1 exit review recheck strict head arrival with readiness enforcement.
+4. If every M1 gate is observed, retain the successful exit artifact and reconcile repository status before M5-5.
+5. If strict readiness is still missing, retain the failed review artifact, keep permanent monitoring active, and repeat only from later evidence without weakening the gate.
 
 ### Track B — production UI audit
 
-1. After UTC-day reset or another safe point, dispatch the audit workflow and let its actual D1 usage check decide eligibility.
-2. Proceed with the screenshot crawl only when measured headroom and healthy zero-lag collector preflight both pass.
-3. Inspect the generated JSON/Markdown technical summary, raw manifest and diagnostics, and screenshots together; technical evaluation accelerates and enforces triage but does not replace human visual review.
-4. Remediate confirmed UI defects and re-audit affected routes.
+1. Let the scheduled 00:30 UTC production audit attempt proceed only when measured headroom and healthy zero-lag collector preflight both pass.
+2. Inspect the generated JSON/Markdown technical summary, raw manifest and diagnostics, and screenshots together; technical evaluation accelerates and enforces triage but does not replace human visual review.
+3. Remediate confirmed UI defects and re-audit affected routes.
 
 Tracks A and B may progress in parallel. Neither may weaken collector integrity or D1 resource guards.
 
 ## Next order
 
 1. Keep permanent monitoring active.
-2. Recheck strict M1 head arrival after the collector advances beyond the 20-ledger gap recorded at 21:08 UTC; do not infer `validatedHeadReached` from the public lag field alone.
-3. When every M1 gate is observed, execute M1 exit review with readiness enforcement and reconcile status from the artifact.
-4. After UTC-day reset or another safe point, dispatch the self-enforcing D1 headroom checks for production screenshot audit; candidate review is unnecessary while natural unimpairment evidence remains valid.
-5. Only when the measured gate passes, perform the screenshot crawl, inspect generated summaries, raw diagnostics, and screenshots, fix confirmed UI defects, and re-audit affected routes.
-6. Complete M5-5 real-data integration, bounded live exports, browser regression, current/history consistency, lifecycle/current-object consistency, archive/current exclusion, and bounded production behavior smoke.
+2. Observe the 2026-07-08 00:10 UTC readiness-enforced M1 exit review.
+3. If M1 exits, reconcile roadmap/status from the artifact and proceed to M5-5; otherwise retain the artifact and continue strict head monitoring.
+4. Observe the independently gated 00:30 UTC production UI audit attempt.
+5. If the UI gate passes, inspect summaries, raw diagnostics, and screenshots, fix confirmed UI defects, and re-audit affected routes; if it fails, retain measured evidence and do not weaken the gate.
+6. Complete M5-5 real-data integration, bounded live exports, browser regression, current/history consistency, lifecycle/current-object consistency, archive/current exclusion, and bounded production behavior smoke after M1 exit.
 7. Complete M6 integrity/reset simulations, runtime/resource guardrails, final visual audit, accessibility, performance, security, and cross-browser validation.
 8. Bind SEO/discoverability to the final public host and complete owner-managed analytics and search setup.
 9. Finalize operations/deployment documentation and recovery verification.
@@ -114,8 +115,8 @@ Tracks A and B may progress in parallel. Neither may weaken collector integrity 
 
 ## Remaining blockers
 
-- M1 exit remains incomplete until a later strict fresh-head check observes `validatedHeadReached` and the reproducible `require_ready=true` exit review passes.
+- M1 exit remains incomplete until a later strict fresh-head check observes `validatedHeadReached` and the reproducible readiness-enforced exit review passes.
 - M5-5 real-data integration remains gated behind M1 exit.
-- The latest 2026-07-07 21:09 UTC measured headroom probe failed the threshold. Production screenshot audit remains deferred until a new current-day measurement passes; manual confirmation cannot bypass it.
+- The latest 2026-07-07 21:09 UTC measured headroom probe failed the threshold. Production screenshot audit remains deferred until a new current-day measurement passes; scheduling cannot bypass it.
 - Production behavior smoke remains pending for the post-M1 M5-5 path.
 - Final-host SEO binding and M6 release hardening remain pending in roadmap order.
