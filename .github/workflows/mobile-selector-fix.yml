@@ -1,0 +1,32 @@
+name: Mobile selector fix
+on:
+  pull_request:
+    paths:
+      - .github/workflows/mobile-selector-fix.yml
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/mobile-more-menu
+      - name: Update mobile More selectors
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          old = "page.locator('.mobile-bottom-nav summary').click()"
+          new = "page.locator('.mobile-bottom-nav').getByRole('button', { name: 'More' }).click()"
+          for path in Path('tests/e2e').glob('*.spec.ts'):
+              text = path.read_text()
+              if old in text:
+                  path.write_text(text.replace(old, new))
+          PY
+          git diff --check
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add tests/e2e
+          git commit -m "Align mobile More E2E selectors"
+          git push origin HEAD:fix/mobile-more-menu
