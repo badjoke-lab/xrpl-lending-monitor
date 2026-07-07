@@ -51,7 +51,7 @@ const worker: ExportedHandler<Bindings> = {
       return Response.json(serializeCollectorStatus({
         collector,
         sync,
-        staleAfterSeconds: COLLECTOR_STATUS_STALE_AFTER_SECONDS,
+        staleAfterSeconds: Math.max(runtimeConfig.staleAfterSeconds, COLLECTOR_STATUS_STALE_AFTER_SECONDS),
       }))
     }
     if (request.method === 'GET' && url.pathname === '/api/status/loan-activity-witnesses') {
