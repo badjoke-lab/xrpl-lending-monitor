@@ -1,0 +1,83 @@
+name: UI screenshot audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: Deployed read-only site base URL
+        required: true
+        default: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+        type: string
+      confirm_fresh_head:
+        description: Confirm collector freshness has been verified before this production crawl
+        required: true
+        default: false
+        type: boolean
+      confirm_d1_headroom:
+        description: Confirm current D1 resource headroom has been checked before this production crawl
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ui-screenshot-audit
+  cancel-in-progress: false
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Enforce manual production-audit gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${{ inputs.confirm_fresh_head }}" = "true"
+          test "${{ inputs.confirm_d1_headroom }}" = "true"
+
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Verify collector is fresh and healthy
+        shell: bash
+        env:
+          BASE_URL: ${{ inputs.base_url }}
+        run: |
+          set -euo pipefail
+          mkdir -p ui-screenshot-audit
+          curl --max-time 60 -fsS "${BASE_URL%/}/api/status/collector" \
+            > ui-screenshot-audit/collector.json
+          jq -e '.status == "healthy" and .cursor.lag_ledgers == 0 and .consecutive_failures == 0 and .error == null' \
+            ui-screenshot-audit/collector.json > /dev/null
+
+      - name: Capture representative full-page screenshots
+        env:
+          BASE_URL: ${{ inputs.base_url }}
+          OUTPUT_DIR: ui-screenshot-audit/screenshots
+        run: node scripts/capture-ui-audit.mjs
+
+      - name: Upload screenshot audit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-screenshot-audit
+          path: ui-screenshot-audit
+          if-no-files-found: error
+          retention-days: 14
