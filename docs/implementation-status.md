@@ -21,7 +21,9 @@ The latest captured bounded semantic probe at 2026-07-07 21:08 UTC showed:
 
 The same probe observed the previously missing real post-boundary unimpairment path. HYB-7 continuation diagnostics passed with every required path observed, including one `unimpaired` lifecycle transition with latest ledger `3470076`, matching managed-transition evidence, and `liveContinuation` became observed. No deliberate external witness is required while this natural validated evidence remains consistent.
 
-The M1 diagnostic report from that probe was not yet ready only because strict `validatedHeadReached` remained missing: the processed cursor was `3472761` while the observed head was `3472781`. `verifiedBaseBinding`, `catchUpStart`, and `liveContinuation` were observed. The next M1 action is therefore a later fresh-head recheck followed by the reproducible `require_ready=true` exit review only when all M1 gates are observed.
+The M1 diagnostic report from that semantic probe was not yet ready only because strict `validatedHeadReached` remained missing: the processed cursor was `3472761` while the observed head was `3472781`. `verifiedBaseBinding`, `catchUpStart`, and `liveContinuation` were observed.
+
+A later bounded lightweight head recheck captured at 2026-07-07 21:57 UTC sampled the public collector three times over 40 seconds. Every sample was healthy with cursor and observed head both `3473715`, reported lag `0`, zero consecutive failures, no current error, and exact cursor/head equality. This proves that the prior 20-ledger cursor-to-observed-head gap closed. It does not by itself replace the guarded M1 diagnostics or the reproducible `require_ready=true` exit review. The next M1 action is to run those guarded checks at a D1-safe point and require every M1 gate to be observed in the retained exit artifact.
 
 The production screenshot-audit workflow, capture hardening, deterministic evidence summarization, and strict technical evaluation are merged. The capture path waits for settled page state and records route/profile/detail-ID manifest data, overflow diagnostics, console errors, page errors, and HTTP error responses. The analyzer writes machine-readable JSON and human-readable Markdown summaries, requires exact expected route/profile capture coverage, rejects missing, duplicate, and unexpected diagnostic records, classifies page-level horizontal overflow separately from nested overflow review candidates, and fails the audit after writing evidence when strict technical checks do not pass. Human screenshot review remains required even when technical evaluation passes.
 
@@ -40,7 +42,7 @@ The 2026-07-07 21:09 UTC audit-headroom retry probe recorded:
 - reference allowances: `5,000,000` rows read and `100,000` rows written per UTC day;
 - measured headroom gate: failed.
 
-The gate correctly stopped candidate discovery. Production screenshot crawl and candidate review remain deferred until a new UTC-day measurement passes both read and write thresholds. The gate remains unchanged and is not bypassed by the newly observed natural unimpairment evidence.
+The gate correctly stopped candidate discovery. Production screenshot crawl remains deferred until a new UTC-day measurement passes both read and write thresholds. The gate remains unchanged and is not bypassed by the newly observed natural unimpairment evidence or by the later lightweight exact-head evidence.
 
 ## Latest HYB-7 state
 
@@ -57,19 +59,33 @@ The gate correctly stopped candidate discovery. Production screenshot crawl and 
 - `freshness`: observed;
 - continuation report: passed.
 
-## Latest M1 gates
+## Latest M1 evidence
+
+From the 2026-07-07 21:08 UTC semantic probe:
 
 - `verifiedBaseBinding`: observed;
 - `catchUpStart`: observed;
-- `validatedHeadReached`: missing at the 2026-07-07 21:08 UTC probe because cursor `3472761` had not yet reached observed head `3472781`;
+- `validatedHeadReached`: missing in that diagnostic state because cursor `3472761` had not yet reached observed head `3472781`;
 - `liveContinuation`: observed;
-- overall M1 readiness: false at that probe.
+- overall M1 readiness: false in that diagnostic state.
+
+From the 2026-07-07 21:57 UTC lightweight head recheck:
+
+- three of three samples healthy;
+- cursor `3473715`;
+- observed head `3473715`;
+- exact cursor/head equality: true in all samples;
+- reported lag `0`;
+- consecutive failures `0`;
+- current error `null`.
+
+The lightweight recheck closes the operational cursor/head gap but does not independently mutate the earlier M1 diagnostic report. A guarded diagnostic and readiness-enforced exit review must now confirm the complete gate set together.
 
 ## M1 exit review
 
 The manual `.github/workflows/m1-exit-review.yml` captures a reproducible read-only evidence package. With `require_ready=true`, it requires every HYB-7 path and M1 gate to be observed, collector lag equal to zero, zero consecutive failures, and expected replacement-base, hybrid-history, Overview, and exact current-state bindings.
 
-The latest semantic probe is sufficient to retire the unimpairment witness gap, but it is not itself an M1 exit. A later review must prove strict fresh-head arrival and all remaining readiness conditions in one reproducible exit artifact.
+The natural unimpairment gap and the later lightweight cursor/head equality prerequisite are both satisfied by captured evidence. M1 still exits only when the guarded diagnostics and readiness-enforced review pass together in a retained artifact.
 
 ## Active unit
 
@@ -84,11 +100,13 @@ The active work is split into permanent monitoring plus two coordinated tracks.
 
 ### Track A — M1 completion
 
-1. Preserve the newly observed natural unimpairment and passing HYB-7 continuation evidence.
-2. Do not run candidate discovery or the external witness procedure while the natural evidence remains valid and consistent.
-3. Obtain a later strict fresh-head M1 diagnostic state with `validatedHeadReached: observed`.
-4. Run M1 exit review with `require_ready=true` only when every M1 gate is observed, and retain the artifact.
-5. Reconcile repository status and proceed to M5-5 only after successful M1 exit.
+1. Preserve the naturally observed unimpairment and passing HYB-7 continuation evidence.
+2. Preserve the three-sample exact cursor/head equality evidence captured at 21:57 UTC.
+3. At a D1-safe point, run guarded M1 diagnostics and require every M1 gate to be observed together.
+4. Run M1 exit review with `require_ready=true`, retain the artifact, and reconcile repository status from that result.
+5. Proceed to M5-5 only after successful M1 exit.
+
+Candidate discovery and the external witness procedure remain inactive while the natural unimpairment evidence remains valid and consistent.
 
 ### Track B — production UI audit
 
@@ -102,19 +120,18 @@ Tracks A and B may progress in parallel. Neither may weaken collector integrity 
 ## Next order
 
 1. Keep permanent monitoring active.
-2. Recheck strict M1 head arrival after the collector advances beyond the 20-ledger gap recorded at 21:08 UTC; do not infer `validatedHeadReached` from the public lag field alone.
-3. When every M1 gate is observed, execute M1 exit review with readiness enforcement and reconcile status from the artifact.
-4. After UTC-day reset or another safe point, dispatch the self-enforcing D1 headroom checks for production screenshot audit; candidate review is unnecessary while natural unimpairment evidence remains valid.
-5. Only when the measured gate passes, perform the screenshot crawl, inspect generated summaries, raw diagnostics, and screenshots, fix confirmed UI defects, and re-audit affected routes.
-6. Complete M5-5 real-data integration, bounded live exports, browser regression, current/history consistency, lifecycle/current-object consistency, archive/current exclusion, and bounded production behavior smoke.
-7. Complete M6 integrity/reset simulations, runtime/resource guardrails, final visual audit, accessibility, performance, security, and cross-browser validation.
-8. Bind SEO/discoverability to the final public host and complete owner-managed analytics and search setup.
-9. Finalize operations/deployment documentation and recovery verification.
-10. Complete the real multi-day Devnet soak and final release verification.
+2. After UTC-day reset or another D1-safe point, run guarded M1 diagnostics and the readiness-enforced M1 exit review; retain and inspect the artifact before changing M1 status.
+3. In parallel after a safe reset, dispatch the self-enforcing D1 headroom check for the production screenshot audit and run the crawl only when the measured gate passes.
+4. Inspect generated audit summaries, raw diagnostics, and screenshots, fix confirmed UI defects, and re-audit affected routes.
+5. After successful M1 exit, complete M5-5 real-data integration, bounded live exports, browser regression, current/history consistency, lifecycle/current-object consistency, archive/current exclusion, and bounded production behavior smoke.
+6. Complete M6 integrity/reset simulations, runtime/resource guardrails, final visual audit, accessibility, performance, security, and cross-browser validation.
+7. Bind SEO/discoverability to the final public host and complete owner-managed analytics and search setup.
+8. Finalize operations/deployment documentation and recovery verification.
+9. Complete the real multi-day Devnet soak and final release verification.
 
 ## Remaining blockers
 
-- M1 exit remains incomplete until a later strict fresh-head check observes `validatedHeadReached` and the reproducible `require_ready=true` exit review passes.
+- M1 exit remains incomplete until guarded diagnostics and the reproducible `require_ready=true` exit review confirm every M1 gate together in a retained artifact.
 - M5-5 real-data integration remains gated behind M1 exit.
 - The latest 2026-07-07 21:09 UTC measured headroom probe failed the threshold. Production screenshot audit remains deferred until a new current-day measurement passes; manual confirmation cannot bypass it.
 - Production behavior smoke remains pending for the post-M1 M5-5 path.
