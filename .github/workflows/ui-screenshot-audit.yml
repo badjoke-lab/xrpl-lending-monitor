@@ -80,10 +80,11 @@ jobs:
           OUTPUT_DIR: ui-screenshot-audit/screenshots
         run: node scripts/capture-ui-audit.mjs
 
-      - name: Analyze screenshot audit evidence
+      - name: Analyze and enforce screenshot audit technical evidence
         env:
           UI_AUDIT_INPUT_DIR: ui-screenshot-audit/screenshots
           UI_AUDIT_ANALYSIS_OUTPUT_DIR: ui-screenshot-audit
+          REQUIRE_UI_AUDIT_TECHNICAL_CLEAN: true
         run: node scripts/analyze-ui-audit.mjs
 
       - name: Write audit gate and analysis summary
