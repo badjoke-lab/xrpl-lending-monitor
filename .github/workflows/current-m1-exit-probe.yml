@@ -1,0 +1,35 @@
+name: Current M1 exit probe
+on:
+  pull_request:
+    paths: [.github/workflows/current-m1-exit-probe.yml]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Capture current M1 exit state
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir m1-probe
+          B="https://xrpl-lending-monitor.badjoke-lab.workers.dev"
+          curl --max-time 60 -fsS "${B}/api/status/collector" > m1-probe/collector.json
+          curl --max-time 120 -fsS "${B}/api/status/continuation-diagnostics" > m1-probe/continuation.json
+          curl --max-time 120 -fsS "${B}/api/status/m1-exit-diagnostics" > m1-probe/m1-exit.json
+          curl --max-time 60 -fsS "${B}/api/status/loan-activity-witnesses" > m1-probe/loan-activity.json
+          jq -n \
+            --slurpfile c m1-probe/collector.json \
+            --slurpfile h m1-probe/continuation.json \
+            --slurpfile m m1-probe/m1-exit.json \
+            --slurpfile l m1-probe/loan-activity.json \
+            '{collector:$c[0],hyb7:$h[0],m1_exit:$m[0],loan_activity:$l[0]}' \
+            > m1-probe/summary.json
+          jq '{collector:{status:.collector.status,cursor:.collector.cursor,consecutive_failures:.collector.consecutive_failures,error:.collector.error},hyb7:{passed:.hyb7.report.passed,paths:(.hyb7.report.paths|with_entries(.value=.value.state))},m1_exit:{ready:.m1_exit.report.ready,gates:(.m1_exit.report.gates|with_entries(.value=.value.state))},loan_activity:.loan_activity}' m1-probe/summary.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: current-m1-exit-probe
+          path: m1-probe
+          retention-days: 7
