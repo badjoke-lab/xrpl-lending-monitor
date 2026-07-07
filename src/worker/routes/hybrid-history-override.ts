@@ -140,7 +140,7 @@ export async function handleHybridHistoryOverride(
     const objectType = parts[2] ?? ''
     const objectId = parts[3] ?? ''
     const result = await listHybridObjectHistory({ ...common, objectType, objectId, page: { limit } })
-    if (!safeHybridResult(result, limit)) return historyUnavailable('bounded_immutable_scan_incomplete')
+    if (!safeNewestFirstHybridResult(result, limit)) return historyUnavailable('bounded_immutable_scan_incomplete')
     return Response.json(serializeObjectHistoryResponse({ objectType, objectId, changes: result.items, limit }))
   }
 
@@ -164,7 +164,7 @@ export async function handleHybridHistoryOverride(
       ...common,
       list: { limit, eventType, loanId },
     })
-    if (!safeHybridResult(result, limit)) return historyUnavailable('bounded_immutable_scan_incomplete')
+    if (!safeNewestFirstHybridResult(result, limit)) return historyUnavailable('bounded_immutable_scan_incomplete')
     return Response.json(serializeLifecycleExplorerResponse({
       events: result.items,
       filters: { eventType, loanId },
@@ -185,7 +185,7 @@ export async function handleHybridHistoryOverride(
       }, { status: 400 })
     }
     const result = await listHybridArchivedObjects({ ...common, list: { limit, objectType, query } })
-    if (!safeHybridResult(result, limit)) return historyUnavailable('bounded_immutable_scan_incomplete')
+    if (!safeNewestFirstHybridResult(result, limit)) return historyUnavailable('bounded_immutable_scan_incomplete')
     return Response.json(serializeArchivedObjectsResponse({
       archives: result.items,
       filters: { objectType, query },
@@ -232,7 +232,7 @@ export async function handleHybridHistoryOverride(
       ...common,
       list: { limit, metricType, subjectType, subjectId, assetKey },
     })
-    if (!safeHybridResult(result, limit)) return historyUnavailable('bounded_immutable_scan_incomplete')
+    if (!safeNewestFirstHybridResult(result, limit)) return historyUnavailable('bounded_immutable_scan_incomplete')
     return Response.json(serializeBalanceHistoryResponse({
       records: result.items,
       filters: { metricType, subjectType, subjectId, assetKey },
