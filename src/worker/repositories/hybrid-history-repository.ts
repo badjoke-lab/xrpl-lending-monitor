@@ -4,6 +4,7 @@ import type { ArchivedObjectRecord as SegmentArchivedObjectRecord } from '../../
 import type { BalanceHistoryRecord as SegmentBalanceHistoryRecord } from '../../collector/incremental/cover-debt-loss'
 import type { LoanLifecycleEvent as SegmentLoanLifecycleEvent } from '../../collector/incremental/loan-lifecycle'
 import type { HistorySourceMergeDiagnostics } from '../../shared/history-segments/merge-sources'
+import type { HistorySegmentFileKind } from '../../shared/history-segments/manifest'
 import {
   HistorySegmentChainReader,
   type HistorySegmentReadResult,
@@ -19,6 +20,7 @@ import type {
   ObjectChangeRecord,
   ProtocolEventRecord,
 } from './history-api-repository'
+import { adaptiveHistoryReadBudget } from './history-read-budget'
 import {
   segmentArchivedObjectToApi,
   segmentBalanceHistoryToApi,
@@ -71,6 +73,23 @@ function immutableMeta<T>(result: HistorySegmentReadResult<T>): ImmutableHistory
 
 function boundary(reader: HistorySegmentChainReader): number {
   return reader.publication.endLedgerIndex
+}
+
+function historyReadBudget(options: {
+  reader: HistorySegmentChainReader
+  kind: HistorySegmentFileKind
+  direction: 'asc' | 'desc'
+  limit: number
+  filtered: boolean
+}) {
+  const segments = options.direction === 'desc'
+    ? [...options.reader.publication.segments].reverse()
+    : options.reader.publication.segments
+  return adaptiveHistoryReadBudget(
+    segments.map((segment) => segment.recordCounts[options.kind]),
+    options.limit,
+    options.filtered,
+  )
 }
 
 export async function listHybridActivity(options: {
@@ -135,6 +154,13 @@ export async function listHybridLoanLifecycle(options: {
   page: HistoryPageOptions
   immutableCursor?: string
 }): Promise<HybridHistoryResult<LoanLifecycleRecord>> {
+  const budget = historyReadBudget({
+    reader: options.reader,
+    kind: 'loan_lifecycle',
+    direction: 'asc',
+    limit: options.page.limit,
+    filtered: true,
+  })
   const immutable = await options.reader.list<SegmentLoanLifecycleEvent>({
     kind: 'loan_lifecycle',
     direction: 'asc',
@@ -142,6 +168,7 @@ export async function listHybridLoanLifecycle(options: {
     predicate: (event) => event.loanId === options.loanId,
     limit: options.page.limit,
     cursor: options.immutableCursor,
+    ...budget,
   })
   const live = await listLiveLoanLifecycleAfterBoundary(
     options.db,
@@ -166,6 +193,13 @@ export async function listHybridLoanLifecycleEvents(options: {
 }): Promise<HybridHistoryResult<LoanLifecycleRecord>> {
   const eventType = options.list.eventType ?? null
   const loanId = options.list.loanId ?? null
+  const budget = historyReadBudget({
+    reader: options.reader,
+    kind: 'loan_lifecycle',
+    direction: 'desc',
+    limit: options.list.limit,
+    filtered: eventType !== null || loanId !== null,
+  })
   const immutable = await options.reader.list<SegmentLoanLifecycleEvent>({
     kind: 'loan_lifecycle',
     direction: 'desc',
@@ -175,6 +209,7 @@ export async function listHybridLoanLifecycleEvents(options: {
       && (loanId === null || event.loanId === loanId),
     limit: options.list.limit,
     cursor: options.immutableCursor,
+    ...budget,
   })
   const live = await listLiveLoanLifecycleEventsAfterBoundary(
     options.db,
@@ -216,6 +251,13 @@ export async function listHybridArchivedObjects(options: {
   list: ArchivedObjectListOptions
   immutableCursor?: string
 }): Promise<HybridHistoryResult<ArchivedObjectRecord>> {
+  const budget = historyReadBudget({
+    reader: options.reader,
+    kind: 'archived_objects',
+    direction: 'desc',
+    limit: options.list.limit,
+    filtered: Boolean(options.list.objectType || options.list.query),
+  })
   const immutable = await options.reader.list<SegmentArchivedObjectRecord>({
     kind: 'archived_objects',
     direction: 'desc',
@@ -223,6 +265,7 @@ export async function listHybridArchivedObjects(options: {
     predicate: (archive) => archiveMatches(archive, options.list),
     limit: options.list.limit,
     cursor: options.immutableCursor,
+    ...budget,
   })
   const live = await listLiveArchivedObjectsAfterBoundary(
     options.db,
@@ -254,6 +297,18 @@ export async function listHybridBalanceHistory(options: {
   list: BalanceHistoryListOptions
   immutableCursor?: string
 }): Promise<HybridHistoryResult<BalanceHistoryApiRecord>> {
+  const budget = historyReadBudget({
+    reader: options.reader,
+    kind: 'balance_history',
+    direction: 'desc',
+    limit: options.list.limit,
+    filtered: Boolean(
+      options.list.metricType
+      || options.list.subjectType
+      || options.list.subjectId
+      || options.list.assetKey,
+    ),
+  })
   const immutable = await options.reader.list<SegmentBalanceHistoryRecord>({
     kind: 'balance_history',
     direction: 'desc',
@@ -267,6 +322,7 @@ export async function listHybridBalanceHistory(options: {
     predicate: (record) => balanceMatches(record, options.list),
     limit: options.list.limit,
     cursor: options.immutableCursor,
+    ...budget,
   })
   const live = await listLiveBalanceHistoryAfterBoundary(
     options.db,
