@@ -31,7 +31,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Probe UI-shaped production history windows after sparse-scan fix
+      - name: Probe UI-shaped production history windows after merged-page safety fix
         shell: bash
         run: |
           mkdir -p probe-output
