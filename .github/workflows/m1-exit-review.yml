@@ -1,6 +1,8 @@
 name: M1 exit review
 
 on:
+  schedule:
+    - cron: '10 0 8 7 *'
   workflow_dispatch:
     inputs:
       require_ready:
@@ -25,9 +27,37 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
+      - name: Resolve manual mode or one-shot scheduled window
+        id: execution
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REQUIRE_READY_INPUT: ${{ inputs.require_ready }}
+        run: |
+          set -euo pipefail
+          if [ "${EVENT_NAME}" = "workflow_dispatch" ]; then
+            echo 'active=true' >> "${GITHUB_OUTPUT}"
+            if [ "${REQUIRE_READY_INPUT}" = "true" ]; then
+              echo 'enforce_ready=true' >> "${GITHUB_OUTPUT}"
+            else
+              echo 'enforce_ready=false' >> "${GITHUB_OUTPUT}"
+            fi
+            exit 0
+          fi
+
+          if [ "$(date -u +%F)" = "2026-07-08" ]; then
+            echo 'active=true' >> "${GITHUB_OUTPUT}"
+            echo 'enforce_ready=true' >> "${GITHUB_OUTPUT}"
+          else
+            echo 'active=false' >> "${GITHUB_OUTPUT}"
+            echo 'enforce_ready=false' >> "${GITHUB_OUTPUT}"
+          fi
+
       - uses: actions/checkout@v4
+        if: steps.execution.outputs.active == 'true'
 
       - name: Resolve deployed Worker URL
+        if: steps.execution.outputs.active == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -42,6 +72,7 @@ jobs:
             > m1-exit-review/base-url.txt
 
       - name: Capture runtime and exit evidence
+        if: steps.execution.outputs.active == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -79,6 +110,7 @@ jobs:
           grep -q 'devnet-3432924-canonical' m1-exit-review/overview.json
 
       - name: Capture current-state list and exact-read evidence
+        if: steps.execution.outputs.active == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -123,6 +155,7 @@ jobs:
             m1-exit-review/loan-detail.json > /dev/null
 
       - name: Build review summary
+        if: steps.execution.outputs.active == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -189,6 +222,7 @@ jobs:
           } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Enforce non-contradiction invariants
+        if: steps.execution.outputs.active == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -199,7 +233,7 @@ jobs:
           jq -e '.consecutive_failures == 0' m1-exit-review/collector.json > /dev/null
 
       - name: Enforce ready exit state
-        if: ${{ inputs.require_ready }}
+        if: steps.execution.outputs.active == 'true' && steps.execution.outputs.enforce_ready == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -211,7 +245,7 @@ jobs:
             m1-exit-review/collector.json > /dev/null
 
       - name: Upload M1 exit review evidence
-        if: always()
+        if: always() && steps.execution.outputs.active == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: m1-exit-review
