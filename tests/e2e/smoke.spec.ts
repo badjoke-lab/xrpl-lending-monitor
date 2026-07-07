@@ -71,7 +71,7 @@ const activityResponse = {
       epoch_id: 'epoch-32',
       ledger_index: 5_432_107,
       event_index: 0,
-      close_time: '2026-07-02T01:02:00.000Z',
+      close_time: 836_269_320,
       transaction_type: 'LoanPay',
       result_code: 'tesSUCCESS',
       payload_retained: false,
@@ -129,6 +129,11 @@ test('renders the approved observatory Overview and navigates to Network Status'
   ).toBeVisible()
   await expect(page.locator('.metrics-grid').getByText('12', { exact: true })).toBeVisible()
   await expect(page.getByText('LoanPay', { exact: true })).toBeVisible()
+  await expect(page.getByText(/02 Jul 2026, 01:02:00 UTC/)).toBeVisible()
+  await expect(page.locator('.activity-panel tbody a.identifier-link')).toHaveAttribute(
+    'href',
+    '/transactions/ABCDEF000000000000000000000000000000000000000000000000000001',
+  )
   await expect(page.locator('body')).not.toContainText('USD')
 
   await page.locator('.sidebar').getByRole('link', { name: 'Network Status' }).click()

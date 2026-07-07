@@ -1,3 +1,5 @@
+import { rippleEpochToIso } from '../../domain/time/ripple-epoch'
+
 import {
   EmptyBlock,
   ErrorBlock,
@@ -211,12 +213,12 @@ export function OverviewPage({ resources, onNavigate, onReload }: OverviewPagePr
               <tbody>
                 {activity.map((event) => (
                   <tr key={`${event.transaction_hash}:${event.event_index}`}>
-                    <td>{formatUtc(event.close_time)}</td>
+                    <td>{formatUtc(rippleEpochToIso(event.close_time))}</td>
                     <td className="mono">{formatInteger(event.ledger_index)}</td>
                     <td>{event.transaction_type}</td>
                     <td><StatusBadge value={event.result_code} /></td>
                     <td>
-                      <a className="mono identifier-link" href={`/api/transactions/${event.transaction_hash}`} title={event.transaction_hash}>
+                      <a className="mono identifier-link" href={`/transactions/${event.transaction_hash}`} title={event.transaction_hash}>
                         {truncateMiddle(event.transaction_hash)}
                       </a>
                     </td>

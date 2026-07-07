@@ -70,7 +70,7 @@ export interface ActivityRecord {
   epoch_id: string
   ledger_index: number
   event_index: number
-  close_time: string
+  close_time: number
   transaction_type: string
   result_code: string
   payload_retained: boolean
