@@ -1,0 +1,115 @@
+name: Unimpairment candidate review
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: Deployed read-only site base URL
+        required: true
+        default: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+        type: string
+      confirm_d1_headroom:
+        description: Confirm current UTC-day D1 headroom has been reviewed before candidate discovery
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: unimpairment-candidate-review
+  cancel-in-progress: false
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Enforce operator headroom confirmation
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${{ inputs.confirm_d1_headroom }}" = "true"
+
+      - name: Verify collector is healthy and fresh
+        shell: bash
+        env:
+          BASE_URL: ${{ inputs.base_url }}
+        run: |
+          set -euo pipefail
+          mkdir -p unimpairment-candidate-review
+          BASE="${BASE_URL%/}"
+          curl --max-time 60 -fsS "${BASE}/api/status/collector" \
+            > unimpairment-candidate-review/collector.json
+          jq -e '.status == "healthy" and .cursor.lag_ledgers == 0 and .consecutive_failures == 0 and .error == null' \
+            unimpairment-candidate-review/collector.json > /dev/null
+
+      - name: Discover current impaired Loan candidates
+        shell: bash
+        env:
+          BASE_URL: ${{ inputs.base_url }}
+        run: |
+          set -euo pipefail
+          BASE="${BASE_URL%/}"
+          curl --max-time 120 -fsS \
+            "${BASE}/api/loans?limit=25&sort=id_asc&on_ledger_status=impaired" \
+            > unimpairment-candidate-review/impaired-loans.json
+
+          jq -e '.availability.state == "available" and .snapshot != null' \
+            unimpairment-candidate-review/impaired-loans.json > /dev/null
+
+          jq '{
+            network,
+            epoch,
+            snapshot,
+            reviewed_at: (now | todateiso8601),
+            source_filter: {
+              on_ledger_status: "impaired",
+              limit: 25,
+              sort: "id_asc"
+            },
+            candidates: [
+              .data[]
+              | select(.on_ledger_status == "impaired" and .payment_remaining > 0)
+              | {
+                  loan_id: .id,
+                  loan_broker_id: .loan_broker_id,
+                  loan_broker_owner: .related_loan_broker.owner,
+                  vault_id: .related_vault.id,
+                  borrower: .borrower,
+                  payment_remaining: .payment_remaining,
+                  total_value_outstanding: .total_value_outstanding,
+                  management_fee_outstanding: .management_fee_outstanding,
+                  flags: .flags,
+                  previous_ledger_index: .previous_ledger_index
+                }
+            ]
+          }
+          | .candidate_count = (.candidates | length)
+          ' unimpairment-candidate-review/impaired-loans.json \
+            > unimpairment-candidate-review/candidate-summary.json
+
+          jq . unimpairment-candidate-review/candidate-summary.json
+
+      - name: Write review summary
+        shell: bash
+        run: |
+          {
+            echo '## Unimpairment candidate review'
+            echo
+            jq -r '"- Collector: **\(.status)**, cursor `\(.cursor.last_processed_ledger)`, head `\(.cursor.latest_observed_ledger)`, lag `\(.cursor.lag_ledgers)`"' \
+              unimpairment-candidate-review/collector.json
+            jq -r '"- Current eligible impaired candidates: **\(.candidate_count)**"' \
+              unimpairment-candidate-review/candidate-summary.json
+            echo
+            echo 'This workflow performs read-only candidate discovery only. It does not accept credentials, sign, or submit transactions.'
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload read-only candidate evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: unimpairment-candidate-review
+          path: unimpairment-candidate-review
+          if-no-files-found: error
+          retention-days: 7

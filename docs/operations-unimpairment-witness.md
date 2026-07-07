@@ -61,6 +61,12 @@ The external operator controls the Loan Broker owner account and any signing mat
 
 Actor material must not be copied into repository files, pull requests, Actions inputs, logs, artifacts, screenshots, issue comments, or monitor configuration.
 
+## Prepared read-only candidate review
+
+The manual `.github/workflows/unimpairment-candidate-review.yml` workflow prepares bounded candidate evidence without accepting credentials or submitting transactions. It requires explicit operator confirmation that current UTC-day D1 headroom has been reviewed, verifies a healthy zero-lag collector, reads at most 25 current Loans filtered to `on_ledger_status=impaired`, and records only public relationship and current-state fields needed for candidate review.
+
+The candidate workflow is discovery evidence, not authority to submit. Exact Loan state and Loan Broker owner relationship must still be re-read immediately before any external signing step.
+
 ## Candidate preconditions
 
 A candidate is eligible only when read-only evidence confirms all of the following at the same current network and epoch context:
