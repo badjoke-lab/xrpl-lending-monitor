@@ -1,5 +1,5 @@
 import { chromium } from '@playwright/test'
-import { mkdir } from 'node:fs/promises'
+import { mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 const baseUrl = (process.env.BASE_URL ?? '').replace(/\/$/, '')
@@ -26,6 +26,24 @@ function firstId(payload, label) {
     throw new Error(`No ${label} identifier is available for screenshot detail discovery`)
   }
   return id
+}
+
+async function waitForAuditPage(page, route) {
+  await page.locator('#main-content').waitFor({ state: 'visible', timeout: 30_000 })
+
+  try {
+    await page.waitForFunction(() => document.querySelector('.state-loading') === null, undefined, {
+      timeout: 60_000,
+    })
+  } catch {
+    throw new Error(`${route} did not leave the loading state within 60 seconds`)
+  }
+
+  await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => undefined)
+  await page.evaluate(async () => {
+    await document.fonts.ready
+  })
+  await page.waitForTimeout(300)
 }
 
 const [vaults, brokers, loans] = await Promise.all([
@@ -64,6 +82,25 @@ const profiles = [
 ]
 
 await mkdir(outputDir, { recursive: true })
+await writeFile(
+  path.join(outputDir, 'manifest.json'),
+  `${JSON.stringify(
+    {
+      captured_at: new Date().toISOString(),
+      base_url: baseUrl,
+      profiles,
+      routes: routes.map(([name, route]) => ({ name, route })),
+      detail_ids: {
+        vault_id: vaultId,
+        loan_broker_id: brokerId,
+        loan_id: loanId,
+      },
+    },
+    null,
+    2,
+  )}\n`,
+  'utf8',
+)
 
 const browser = await chromium.launch({ headless: true })
 try {
@@ -84,8 +121,7 @@ try {
       if (!response || !response.ok()) {
         throw new Error(`${route} navigation failed with HTTP ${response?.status() ?? 'no response'}`)
       }
-      await page.locator('#main-content').waitFor({ state: 'visible', timeout: 30_000 })
-      await page.waitForTimeout(1_500)
+      await waitForAuditPage(page, route)
       await page.screenshot({
         path: path.join(profileDir, `${name}.png`),
         fullPage: true,
@@ -94,6 +130,7 @@ try {
 
     if (profile.name === 'mobile') {
       await page.goto(`${baseUrl}/`, { waitUntil: 'domcontentloaded', timeout: 60_000 })
+      await waitForAuditPage(page, '/')
       await page.locator('.mobile-bottom-nav').getByRole('button', { name: 'More' }).click()
       await page.locator('#mobile-more-panel').waitFor({ state: 'visible', timeout: 10_000 })
       await page.screenshot({
