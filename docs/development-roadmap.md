@@ -1,7 +1,7 @@
 # Development roadmap
 
 Baseline date: 2026-07-01.
-Last recalibrated: 2026-07-07.
+Last recalibrated: 2026-07-08.
 
 This document controls implementation order and dependencies. Dates are planning targets rather than promises. Correctness, data integrity, accessibility, and release evidence take priority over calendar targets.
 
@@ -61,11 +61,11 @@ The collector reached a verified healthy fresh head on the latest recorded bound
 
 ### Track B — UI production-audit path
 
-1. Finish the prepared screenshot-audit capture hardening through required checks and merge before the next production crawl.
-2. After a UTC-day reset or later safe point, re-check actual D1 rows read and rows written.
-3. Run the production screenshot audit only when the existing below-80% headroom policy passes and collector healthy zero-lag preflight passes.
+1. Keep the merged screenshot capture hardening and automatic technical evidence analyzer as the production audit path.
+2. Use the bounded one-shot 2026-07-08 UTC post-reset operation: read-only candidate review at 00:10 UTC, then production UI audit at 00:30 UTC.
+3. Let each operation proceed only when the existing below-80% D1 headroom policy passes and collector healthy zero-lag preflight passes; scheduling never bypasses either gate.
 4. Capture the representative desktop/mobile route matrix plus the open mobile More menu.
-5. Retain screenshot evidence together with route/profile/detail-ID manifest, page-level horizontal overflow, candidate overflowing elements, browser console errors, page errors, and HTTP error responses.
+5. Retain screenshot evidence together with route/profile/detail-ID manifest, page-level horizontal overflow, candidate overflowing elements, browser console errors, page errors, HTTP error responses, and machine-readable/Markdown analysis summaries.
 6. Inspect evidence, remediate confirmed overflow, clipping, spacing, fixed-navigation overlap, safe-area, long-identifier, table, form-layout, and mobile-navigation defects.
 7. Re-audit affected routes using the same route and viewport evidence shape.
 
@@ -255,15 +255,17 @@ Preparation that may proceed without mutating collector, D1, history, or deploym
 - route-specific title and description requirements;
 - canonical-host, robots, sitemap, Open Graph, social-card, and accurate structured-data requirements;
 - analytics configuration hooks without placeholder measurement IDs;
-- manual-dispatch GitHub Actions screenshot-audit workflow;
+- manual-dispatch GitHub Actions screenshot-audit workflow plus the bounded date-guarded 2026-07-08 UTC one-shot post-reset operation;
 - representative desktop/mobile route matrix including data pages, detail pages, documentation pages, and the open mobile More menu state;
-- screenshot capture hardening and technical layout/runtime diagnostics.
+- screenshot capture hardening, technical layout/runtime diagnostics, and deterministic audit-evidence analysis summaries.
 
 The following remain gated until a verified healthy fresh head and current D1 resource headroom are confirmed:
 
 - full production screenshot crawl of the representative route matrix;
 - UI remediation based on that production visual evidence;
 - gated read-only unimpairment candidate review.
+
+The dated scheduled attempts do not bypass these gates. They no-op outside the explicit 2026-07-08 UTC window and fail closed before bounded reads when collector or measured D1 headroom requirements do not pass.
 
 The following remain gated until M1 exit and a final public host is configured:
 
