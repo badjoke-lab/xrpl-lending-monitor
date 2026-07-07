@@ -1,0 +1,42 @@
+name: Apply UI audit status note
+
+on:
+  push:
+    branches:
+      - feat/manual-ui-screenshot-audit
+    paths:
+      - .github/workflows/apply-ui-audit-status-note.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/manual-ui-screenshot-audit
+          fetch-depth: 0
+
+      - name: Record prepared screenshot audit workflow
+        shell: python
+        run: |
+          from pathlib import Path
+          path = Path('docs/implementation-status.md')
+          text = path.read_text()
+          old = 'Non-invasive parallel preparation is allowed while M1 catch-up continues: SEO metadata and route-map design, analytics configuration hooks without placeholder IDs, and implementation of a manual screenshot-audit workflow. These preparation tasks do not justify slowing, resetting, rebasing, or retuning the collector.'
+          new = 'Non-invasive parallel preparation is allowed while M1 catch-up continues: SEO metadata and route-map design, analytics configuration hooks without placeholder IDs, and implementation of a manual screenshot-audit workflow. The gated manual screenshot workflow is now prepared: it discovers valid detail IDs through read-only APIs, captures the representative desktop/mobile route matrix plus the open mobile More menu, and refuses to run unless fresh-head and D1-headroom confirmations are supplied; it also verifies collector healthy zero-lag state before crawling. The production screenshot crawl itself remains pending. These preparation tasks do not justify slowing, resetting, rebasing, or retuning the collector.'
+          if old not in text:
+              raise SystemExit('implementation status insertion target not found')
+          path.write_text(text.replace(old, new, 1))
+          Path('.github/workflows/apply-ui-audit-status-note.yml').unlink()
+
+      - name: Commit status update
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add docs/implementation-status.md .github/workflows/apply-ui-audit-status-note.yml
+          git commit -m "Record prepared gated screenshot audit workflow"
+          git push origin HEAD:feat/manual-ui-screenshot-audit
