@@ -1,0 +1,28 @@
+name: Diagnose current-state patch
+on:
+  pull_request:
+    paths: [.github/workflows/diagnose-current-state-patch-temp.yml]
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+      - name: Capture patch check
+        shell: bash
+        run: |
+          set +e
+          git apply --check --verbose current-state-hotfix.patch > apply.log 2>&1
+          echo "$?" > apply-exit.txt
+          cat apply.log
+          exit 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: current-state-patch-diagnostic
+          path: |
+            apply.log
+            apply-exit.txt
+          retention-days: 1
