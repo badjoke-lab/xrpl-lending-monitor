@@ -7,9 +7,10 @@ function result(options: {
   complete?: boolean
   immutableInput?: number
   liveAccepted?: number
-} = {}): HybridHistoryResult<never> {
+  itemCount?: number
+} = {}): HybridHistoryResult<number> {
   return {
-    items: [],
+    items: Array.from({ length: options.itemCount ?? 0 }, (_, index) => index),
     immutable: {
       complete: options.complete ?? false,
       nextCursor: 'cursor',
@@ -31,13 +32,14 @@ function result(options: {
 
 describe('hybrid history safety', () => {
   it('keeps the base rule strict when immutable history is incomplete', () => {
-    expect(safeHybridResult(result({ liveAccepted: 100 }), 100)).toBe(false)
-    expect(safeHybridResult(result({ immutableInput: 100 }), 100)).toBe(true)
+    expect(safeHybridResult(result({ liveAccepted: 100, itemCount: 100 }), 100)).toBe(false)
+    expect(safeHybridResult(result({ immutableInput: 100, itemCount: 100 }), 100)).toBe(true)
     expect(safeHybridResult(result({ complete: true }), 100)).toBe(true)
   })
 
-  it('allows newest-first pages when live rows alone fill the requested limit', () => {
-    expect(safeNewestFirstHybridResult(result({ liveAccepted: 100 }), 100)).toBe(true)
-    expect(safeNewestFirstHybridResult(result({ liveAccepted: 99 }), 100)).toBe(false)
+  it('allows newest-first pages when the merged page fills the requested limit', () => {
+    expect(safeNewestFirstHybridResult(result({ liveAccepted: 100, itemCount: 100 }), 100)).toBe(true)
+    expect(safeNewestFirstHybridResult(result({ immutableInput: 40, liveAccepted: 60, itemCount: 100 }), 100)).toBe(true)
+    expect(safeNewestFirstHybridResult(result({ immutableInput: 40, liveAccepted: 59, itemCount: 99 }), 100)).toBe(false)
   })
 })
