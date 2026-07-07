@@ -1,0 +1,60 @@
+name: Apply history error copy fix
+
+on:
+  push:
+    branches:
+      - fix/history-sparse-segment-scan
+    paths:
+      - .github/workflows/apply-history-error-copy-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/history-sparse-segment-scan
+          fetch-depth: 0
+
+      - name: Apply reason-specific public history error copy
+        shell: python
+        run: |
+          from pathlib import Path
+
+          route = Path('src/worker/routes/hybrid-history-override.ts')
+          text = route.read_text()
+          old = """function historyUnavailable(reason: string): Response {
+            return Response.json({
+              error: 'history_source_unavailable',
+              reason,
+              message: 'The configured immutable history source could not be verified for public reads.',
+            }, { status: 503 })
+          }
+          """
+          new = """function historyUnavailable(reason: string): Response {
+            const message = reason === 'bounded_immutable_scan_incomplete'
+              ? 'The public history window could not be completed within the bounded read budget.'
+              : 'The configured immutable history source could not be verified for public reads.'
+            return Response.json({
+              error: 'history_source_unavailable',
+              reason,
+              message,
+            }, { status: 503 })
+          }
+          """
+          if old not in text:
+              raise SystemExit('history unavailable replacement target not found')
+          route.write_text(text.replace(old, new, 1))
+          Path('.github/workflows/apply-history-error-copy-fix.yml').unlink()
+
+      - name: Commit fix
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/worker/routes/hybrid-history-override.ts .github/workflows/apply-history-error-copy-fix.yml
+          git commit -m "Clarify bounded history scan errors"
+          git push origin HEAD:fix/history-sparse-segment-scan
