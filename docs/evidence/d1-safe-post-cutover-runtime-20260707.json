@@ -1,0 +1,87 @@
+{
+  "recordedAt": "2026-07-07T02:15:00Z",
+  "network": "devnet",
+  "canonicalBoundary": {
+    "startLedgerIndex": 3371676,
+    "endLedgerIndex": 3432924,
+    "ledgerCount": 61249,
+    "segmentCount": 123,
+    "terminalLedgerHash": "52C13CBFFC3433750DBBB986390C4C6E6F7CC82CF70B4B909C506536A8BD9218"
+  },
+  "activeSources": {
+    "replacementSnapshotId": "devnet-3432924-canonical",
+    "replacementRebaseStatus": "replayed",
+    "historyMode": "hybrid",
+    "historyEndLedgerIndex": 3432924,
+    "exactIndexRecords": 280454
+  },
+  "lightweightMonitor": {
+    "firstCursor": 3438844,
+    "lastCursor": 3438924,
+    "cursorDelta": 80,
+    "firstValidatedHead": 3450288,
+    "lastValidatedHead": 3450347,
+    "headDelta": 59,
+    "firstLag": 11444,
+    "lastLag": 11403,
+    "lagDelta": -41,
+    "samples": 3,
+    "samplesWithFailures": 0,
+    "finalRun": {
+      "ledgersProcessed": 40,
+      "rpcRequests": 40,
+      "estimatedRows": 81,
+      "estimatedStatements": 80,
+      "overlayMutations": 2,
+      "durationMs": 8262
+    }
+  },
+  "d1Usage": {
+    "dateUtc": "2026-07-07",
+    "rowsRead": 4507979,
+    "rowsReadAllowanceReference": 5000000,
+    "rowsWritten": 32516,
+    "rowsWrittenAllowanceReference": 100000
+  },
+  "readAmplificationFix": {
+    "problem": "HYB-7 overlay/object-change source-match query omitted canonical object_type from correlated lookups",
+    "mapping": {
+      "vault": "Vault",
+      "loan_broker": "LoanBroker",
+      "loan": "Loan"
+    },
+    "oldBoundaryQueryObservedRowsRead": 10184530,
+    "oldBoundaryQueryObservedRuns": 9,
+    "postFixResult": "old hot query absent from recent top-read query list",
+    "largestRemainingObservedDeepQueryRowsReadPerRunApprox": 25926
+  },
+  "monitoringPolicy": {
+    "lightweightCadenceMinutes": 30,
+    "deepCadenceHours": 6,
+    "deepReadGuardRowsRead": 4000000,
+    "manualForceInput": "force_deep"
+  },
+  "latestKnownHyb7": {
+    "observed": [
+      "createdCurrent",
+      "modifiedCurrent",
+      "deletionArchive",
+      "ledgerContinuity",
+      "cursorOverlay"
+    ],
+    "missing": [
+      "loanPayment",
+      "impaired",
+      "unimpaired",
+      "defaulted",
+      "activityHistoryBalance",
+      "freshness"
+    ]
+  },
+  "latestKnownM1Gates": {
+    "verifiedBaseBinding": "observed",
+    "catchUpStart": "observed",
+    "validatedHeadReached": "missing",
+    "liveContinuation": "missing"
+  }
+}
