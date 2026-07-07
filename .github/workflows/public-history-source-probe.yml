@@ -31,25 +31,46 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Probe UI-shaped production history windows after merged-page safety fix
+      - name: Probe production history limits and publication sparsity
         shell: bash
         run: |
           mkdir -p probe-output
           {
             set -u
             B="https://xrpl-lending-monitor.badjoke-lab.workers.dev"
-            for path in \
-              "/api/status/history-source" \
-              "/api/activity?limit=100" \
-              "/api/audit/lifecycle?limit=100" \
-              "/api/audit/archived?limit=100" \
-              "/api/audit/cover-loss?limit=100"
+            echo "===== source ====="
+            curl --max-time 60 -sS -w '\nHTTP %{http_code} total=%{time_total}s\n' "${B}/api/status/history-source" || true
+            echo
+            for route in activity audit/lifecycle audit/archived audit/cover-loss
             do
-              echo "===== ${path} ====="
-              curl --max-time 60 -sS -w '\nHTTP %{http_code} total=%{time_total}s\n' "${B}${path}" || true
-              echo
+              for limit in 25 50 75 100
+              do
+                path="/api/${route}?limit=${limit}"
+                echo "===== ${path} ====="
+                curl --max-time 60 -sS -o /tmp/probe-body -w 'HTTP %{http_code} total=%{time_total}s\n' "${B}${path}" || true
+                head -c 240 /tmp/probe-body
+                echo
+              done
             done
           } 2>&1 | tee probe-output/production-endpoints.txt
+
+          node <<'NODE' 2>&1 | tee probe-output/publication-stats.txt
+          const url = 'https://raw.githubusercontent.com/badjoke-lab/xrpl-lending-monitor/2753a75b2d76775bc8aa7d6d866ea147c353b2b5/history/publication.json'
+          const response = await fetch(url)
+          if (!response.ok) throw new Error(`publication fetch failed: ${response.status}`)
+          const publication = await response.json()
+          for (const kind of ['archived_objects', 'balance_history', 'loan_lifecycle', 'protocol_events']) {
+            const counts = publication.segments.map((segment) => segment.recordCounts[kind])
+            const nonzero = counts.filter((count) => count > 0)
+            console.log(JSON.stringify({
+              kind,
+              totalRecords: counts.reduce((sum, count) => sum + count, 0),
+              nonzeroSegments: nonzero.length,
+              maxSegmentRecords: Math.max(0, ...nonzero),
+              newestNonzeroCounts: counts.slice().reverse().filter((count) => count > 0).slice(0, 12),
+            }))
+          }
+          NODE
 
       - name: Open configured public history source
         shell: bash
