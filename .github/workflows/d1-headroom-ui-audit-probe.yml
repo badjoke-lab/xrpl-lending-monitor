@@ -1,0 +1,160 @@
+name: D1 headroom UI audit probe
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/d1-headroom-ui-audit-probe.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: d1-headroom-ui-audit-probe
+  cancel-in-progress: false
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  D1_DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
+  BASE_URL: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify fresh healthy collector
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ui-audit-probe
+          curl --max-time 60 -fsS "${BASE_URL}/api/status/collector" \
+            > ui-audit-probe/collector.json
+          jq -e '.status == "healthy" and .cursor.lag_ledgers == 0 and .consecutive_failures == 0 and .error == null' \
+            ui-audit-probe/collector.json > /dev/null
+
+      - name: Capture actual D1 daily usage and enforce headroom
+        shell: bash
+        run: |
+          set -euo pipefail
+          TODAY="$(date -u +%F)"
+
+          read -r -d '' QUERY <<'GRAPHQL' || true
+          query D1Usage(
+            $accountTag: string!
+            $start: Date
+            $end: Date
+            $databaseId: string
+          ) {
+            viewer {
+              accounts(filter: { accountTag: $accountTag }) {
+                d1AnalyticsAdaptiveGroups(
+                  limit: 10000
+                  filter: {
+                    date_geq: $start
+                    date_leq: $end
+                    databaseId: $databaseId
+                  }
+                ) {
+                  sum {
+                    readQueries
+                    writeQueries
+                    rowsRead
+                    rowsWritten
+                  }
+                }
+              }
+            }
+          }
+          GRAPHQL
+
+          jq -n \
+            --arg query "${QUERY}" \
+            --arg accountTag "${CLOUDFLARE_ACCOUNT_ID}" \
+            --arg start "${TODAY}" \
+            --arg end "${TODAY}" \
+            --arg databaseId "${D1_DATABASE_ID}" \
+            '{query: $query, variables: {accountTag: $accountTag, start: $start, end: $end, databaseId: $databaseId}}' \
+            > ui-audit-probe/d1-usage-request.json
+
+          curl --fail-with-body --silent --show-error --retry 3 \
+            -X POST \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            -H 'Content-Type: application/json' \
+            --data @ui-audit-probe/d1-usage-request.json \
+            https://api.cloudflare.com/client/v4/graphql \
+            > ui-audit-probe/d1-usage-response.json
+
+          jq -e '((.errors // []) | length) == 0 and (.data.viewer.accounts | length) > 0' \
+            ui-audit-probe/d1-usage-response.json > /dev/null
+
+          jq --arg date "${TODAY}" '
+            [.data.viewer.accounts[0].d1AnalyticsAdaptiveGroups[]] as $groups
+            | {
+                date_utc: $date,
+                read_queries: ([$groups[].sum.readQueries // 0] | add // 0),
+                write_queries: ([$groups[].sum.writeQueries // 0] | add // 0),
+                rows_read: ([$groups[].sum.rowsRead // 0] | add // 0),
+                rows_written: ([$groups[].sum.rowsWritten // 0] | add // 0),
+                free_rows_read_daily_allowance: 5000000,
+                free_rows_written_daily_allowance: 100000
+              }
+            | .rows_read_fraction = (.rows_read / .free_rows_read_daily_allowance)
+            | .rows_written_fraction = (.rows_written / .free_rows_written_daily_allowance)
+          ' ui-audit-probe/d1-usage-response.json \
+            > ui-audit-probe/d1-usage-summary.json
+
+          jq . ui-audit-probe/d1-usage-summary.json
+          jq -e '.rows_read_fraction < 0.8 and .rows_written_fraction < 0.8' \
+            ui-audit-probe/d1-usage-summary.json > /dev/null
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Capture representative full-page screenshots
+        env:
+          OUTPUT_DIR: ui-audit-probe/screenshots
+        run: node scripts/capture-ui-audit.mjs
+
+      - name: Write evidence summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '## D1 headroom UI audit probe'
+            echo
+            if [ -f ui-audit-probe/collector.json ]; then
+              jq -r '"- Collector: **\(.status)**, cursor `\(.cursor.last_processed_ledger)`, head `\(.cursor.latest_observed_ledger)`, lag `\(.cursor.lag_ledgers)`, failures `\(.consecutive_failures)`"' ui-audit-probe/collector.json
+            fi
+            if [ -f ui-audit-probe/d1-usage-summary.json ]; then
+              jq -r '"- D1 rows read: `\(.rows_read)` / `\(.free_rows_read_daily_allowance)` (`\((.rows_read_fraction * 10000 | round) / 100)%`)"' ui-audit-probe/d1-usage-summary.json
+              jq -r '"- D1 rows written: `\(.rows_written)` / `\(.free_rows_written_daily_allowance)` (`\((.rows_written_fraction * 10000 | round) / 100)%`)"' ui-audit-probe/d1-usage-summary.json
+            fi
+            if [ -d ui-audit-probe/screenshots ]; then
+              COUNT="$(find ui-audit-probe/screenshots -type f -name '*.png' | wc -l | tr -d ' ')"
+              echo "- Full-page screenshots captured: \`${COUNT}\`"
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload headroom and screenshot evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: d1-headroom-ui-audit-probe
+          path: ui-audit-probe
+          if-no-files-found: error
+          retention-days: 2
