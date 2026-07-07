@@ -1,0 +1,139 @@
+name: Activity live-first fix applier
+on:
+  pull_request:
+    paths:
+      - .github/workflows/activity-live-first-fix-applier.yml
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/activity-live-first-read-safety
+      - name: Apply reviewed Activity safety patch
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          route = Path('src/worker/routes/hybrid-history-override.ts')
+          text = route.read_text()
+          old = '''function safeHybridResult<T>(result: HybridHistoryResult<T>, limit: number): boolean {
+            return result.immutable.complete || result.merge.immutableInput >= limit
+          }
+          '''
+          new = '''function safeHybridResult<T>(result: HybridHistoryResult<T>, limit: number): boolean {
+            return result.immutable.complete || result.merge.immutableInput >= limit
+          }
+
+          function safeNewestFirstHybridResult<T>(result: HybridHistoryResult<T>, limit: number): boolean {
+            return safeHybridResult(result, limit) || result.merge.liveAccepted >= limit
+          }
+          '''
+          if old not in text:
+              raise SystemExit('route safety helper block not found')
+          text = text.replace(old, new, 1)
+          text = text.replace(
+              "const result = await listHybridActivity({ ...common, page: { limit } })\n    if (!safeHybridResult(result, limit))",
+              "const result = await listHybridActivity({ ...common, page: { limit } })\n    if (!safeNewestFirstHybridResult(result, limit))",
+              2,
+          )
+          route.write_text(text)
+
+          test = Path('src/worker/routes/hybrid-history-override.test.ts')
+          text = test.read_text()
+          text = text.replace('function db(): D1Database {', 'function db(liveEventCount = 1): D1Database {', 1)
+          old_rows = '''          if (sql.includes('FROM protocol_events')) {
+            return { results: [{
+              event_hash: 'LIVE-106',
+              epoch_id: 'epoch-1',
+              ledger_index: 106,
+              event_index: 1,
+              close_time: 800_000_001,
+              event_type: 'LoanPay',
+              result_code: 'tesSUCCESS',
+              payload_retained: 0,
+              created_at: '2025-05-08T06:13:21.000Z',
+            }] as T[] }
+          }
+          '''
+          new_rows = '''          if (sql.includes('FROM protocol_events')) {
+            return { results: Array.from({ length: liveEventCount }, (_, index) => ({
+              event_hash: `LIVE-${106 + index}`,
+              epoch_id: 'epoch-1',
+              ledger_index: 106 + index,
+              event_index: 1,
+              close_time: 800_000_001 + index,
+              event_type: 'LoanPay',
+              result_code: 'tesSUCCESS',
+              payload_retained: 0,
+              created_at: '2025-05-08T06:13:21.000Z',
+            })) as T[] }
+          }
+          '''
+          if old_rows not in text:
+              raise SystemExit('protocol event fake block not found')
+          text = text.replace(old_rows, new_rows, 1)
+          text = text.replace('function env(): Bindings {', 'function env(liveEventCount = 1): Bindings {', 1)
+          text = text.replace('    DB: db(),', '    DB: db(liveEventCount),', 1)
+          marker = '''  it('fails explicitly for exact history lookup until immutable indexes exist', async () => {
+          '''
+          addition = '''  it('serves newest-first activity when live rows alone satisfy the page limit', async () => {
+            const source = hybridSource()
+            source.reader.list = async () => ({
+              items: [],
+              nextCursor: 'cursor',
+              complete: false,
+              segmentReads: 4,
+              compressedBytes: 100,
+              decompressedBytes: 200,
+              recordsExamined: 10_000,
+            })
+            mockedResolve.mockResolvedValue(source as never)
+            const response = await handleHybridHistoryOverride(
+              new Request('https://example.test/api/activity?limit=100'),
+              env(100),
+            )
+            expect(response?.status).toBe(200)
+            const body = await response?.json() as { data: unknown[] }
+            expect(body.data).toHaveLength(100)
+          })
+
+          it('keeps newest-first activity unavailable when neither source can safely fill the page', async () => {
+            const source = hybridSource()
+            source.reader.list = async () => ({
+              items: [],
+              nextCursor: 'cursor',
+              complete: false,
+              segmentReads: 4,
+              compressedBytes: 100,
+              decompressedBytes: 200,
+              recordsExamined: 10_000,
+            })
+            mockedResolve.mockResolvedValue(source as never)
+            const response = await handleHybridHistoryOverride(
+              new Request('https://example.test/api/activity?limit=100'),
+              env(25),
+            )
+            expect(response?.status).toBe(503)
+            await expect(response?.json()).resolves.toMatchObject({
+              error: 'history_source_unavailable',
+              reason: 'bounded_immutable_scan_incomplete',
+            })
+          })
+
+          ''' + marker
+          if marker not in text:
+              raise SystemExit('test insertion marker not found')
+          test.write_text(text.replace(marker, addition, 1))
+          PY
+          git diff --check
+          pnpm install --frozen-lockfile
+          pnpm test -- src/worker/routes/hybrid-history-override.test.ts
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/worker/routes/hybrid-history-override.ts src/worker/routes/hybrid-history-override.test.ts
+          git commit -m "Fix live-first Activity history safety"
+          git push origin HEAD:fix/activity-live-first-read-safety
