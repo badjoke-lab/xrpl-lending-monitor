@@ -172,7 +172,7 @@ Verify real observed paths for:
 
 Exit condition: the live continuation path is operational and evidence shows current and historical views remain consistent.
 
-Latest operational probe state on 2026-07-07: created current, modified current, LoanPay/payment, default, deletion/archive, activity-history-balance consistency, ledger continuity, and cursor/overlay agreement are observed. Impairment, unimpairment, and freshness remain missing. The collector was still behind the observed head but advancing contiguously with zero observed failures.
+Latest operational probe state on 2026-07-07 at 13:00 UTC: the collector is healthy at zero lag with cursor and observed head both at `3463095`; processed continuation `3432925..3463095` contains `30171` ledgers with zero discontinuities. Created current, modified current, LoanPay/payment, impairment, default, deletion/archive, activity-history-balance consistency, ledger continuity, cursor/overlay agreement, and freshness are observed. Only unimpairment remains missing, with zero observed unimpairment source or lifecycle transitions. The M1 `validatedHeadReached` gate is now observed; `liveContinuation` remains missing only because unimpairment evidence is absent.
 
 ### M1-HYB-8 — M1 exit review
 
