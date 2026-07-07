@@ -5,6 +5,12 @@ on:
     - cron: '17,47 * * * *'
     - cron: '23 */6 * * *'
   workflow_dispatch:
+    inputs:
+      force_deep:
+        description: Run deep diagnostics even when the D1 read guard would defer them
+        required: false
+        default: false
+        type: boolean
   pull_request:
     paths:
       - .github/workflows/catch-up-monitor.yml
@@ -283,7 +289,103 @@ jobs:
           printf '%s\n' "https://xrpl-lending-monitor.${SUBDOMAIN}.workers.dev" \
             > runtime-monitor-deep/base-url.txt
 
+      - name: Check D1 read budget before deep diagnostics
+        id: usage-guard
+        shell: bash
+        env:
+          FORCE_DEEP: ${{ inputs.force_deep || 'false' }}
+        run: |
+          set -euo pipefail
+          TODAY="$(date -u +%F)"
+
+          read -r -d '' QUERY <<'GRAPHQL' || true
+          query D1Usage(
+            $accountTag: string!
+            $start: Date
+            $end: Date
+            $databaseId: string
+          ) {
+            viewer {
+              accounts(filter: { accountTag: $accountTag }) {
+                d1AnalyticsAdaptiveGroups(
+                  limit: 10000
+                  filter: {
+                    date_geq: $start
+                    date_leq: $end
+                    databaseId: $databaseId
+                  }
+                ) {
+                  sum {
+                    rowsRead
+                    rowsWritten
+                  }
+                }
+              }
+            }
+          }
+          GRAPHQL
+
+          jq -n \
+            --arg query "${QUERY}" \
+            --arg accountTag "${CLOUDFLARE_ACCOUNT_ID}" \
+            --arg start "${TODAY}" \
+            --arg end "${TODAY}" \
+            --arg databaseId "${D1_DATABASE_ID}" \
+            '{query: $query, variables: {accountTag: $accountTag, start: $start, end: $end, databaseId: $databaseId}}' \
+            > runtime-monitor-deep/d1-usage-request.json
+
+          curl --fail-with-body --silent --show-error --retry 3 \
+            -X POST \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            -H 'Content-Type: application/json' \
+            --data @runtime-monitor-deep/d1-usage-request.json \
+            https://api.cloudflare.com/client/v4/graphql \
+            > runtime-monitor-deep/d1-usage-response.json
+
+          jq -e '((.errors // []) | length) == 0 and (.data.viewer.accounts | length) > 0' \
+            runtime-monitor-deep/d1-usage-response.json > /dev/null
+
+          jq --arg date "${TODAY}" '
+            [.data.viewer.accounts[0].d1AnalyticsAdaptiveGroups[]] as $groups
+            | {
+                date_utc: $date,
+                rows_read: ([$groups[].sum.rowsRead // 0] | add // 0),
+                rows_written: ([$groups[].sum.rowsWritten // 0] | add // 0),
+                deep_read_guard_threshold: 4000000
+              }
+          ' runtime-monitor-deep/d1-usage-response.json \
+            > runtime-monitor-deep/d1-usage-guard.json
+
+          ROWS_READ="$(jq -r '.rows_read' runtime-monitor-deep/d1-usage-guard.json)"
+          if [ "${FORCE_DEEP}" = "true" ]; then
+            echo 'run_deep=true' >> "${GITHUB_OUTPUT}"
+            jq '. + {decision: "forced"}' runtime-monitor-deep/d1-usage-guard.json \
+              > runtime-monitor-deep/d1-usage-guard-decision.json
+          elif [ "${ROWS_READ}" -ge 4000000 ]; then
+            echo 'run_deep=false' >> "${GITHUB_OUTPUT}"
+            jq '. + {decision: "deferred", reason: "daily rows-read usage is at or above the deep diagnostic guard threshold"}' \
+              runtime-monitor-deep/d1-usage-guard.json \
+              > runtime-monitor-deep/d1-usage-guard-decision.json
+          else
+            echo 'run_deep=true' >> "${GITHUB_OUTPUT}"
+            jq '. + {decision: "run"}' runtime-monitor-deep/d1-usage-guard.json \
+              > runtime-monitor-deep/d1-usage-guard-decision.json
+          fi
+          cat runtime-monitor-deep/d1-usage-guard-decision.json
+
+      - name: Record deferred deep diagnostics
+        if: steps.usage-guard.outputs.run_deep != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '## Deep diagnostics deferred by D1 read guard' >> "${GITHUB_STEP_SUMMARY}"
+          echo >> "${GITHUB_STEP_SUMMARY}"
+          jq -r '"- UTC date: `\(.date_utc)`"' runtime-monitor-deep/d1-usage-guard-decision.json >> "${GITHUB_STEP_SUMMARY}"
+          jq -r '"- Rows read: `\(.rows_read)`"' runtime-monitor-deep/d1-usage-guard-decision.json >> "${GITHUB_STEP_SUMMARY}"
+          jq -r '"- Guard threshold: `\(.deep_read_guard_threshold)`"' runtime-monitor-deep/d1-usage-guard-decision.json >> "${GITHUB_STEP_SUMMARY}"
+
       - name: Capture HYB-7 and M1 exit diagnostics
+        if: steps.usage-guard.outputs.run_deep == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -309,6 +411,7 @@ jobs:
             > runtime-monitor-deep/history-source.json
 
       - name: Build deep diagnostic summary
+        if: steps.usage-guard.outputs.run_deep == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -364,6 +467,7 @@ jobs:
           } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Enforce deep diagnostic invariants
+        if: steps.usage-guard.outputs.run_deep == 'true'
         shell: bash
         run: |
           set -euo pipefail
