@@ -9,7 +9,7 @@ on:
         default: https://xrpl-lending-monitor.badjoke-lab.workers.dev
         type: string
       confirm_d1_headroom:
-        description: Confirm current UTC-day D1 headroom has been reviewed before candidate discovery
+        description: Confirm the operator expects the workflow to verify current UTC-day D1 headroom before candidate discovery
         required: true
         default: false
         type: boolean
@@ -21,16 +21,22 @@ concurrency:
   group: unimpairment-candidate-review
   cancel-in-progress: false
 
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
 jobs:
   review:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Enforce operator headroom confirmation
+      - name: Enforce operator review intent
         shell: bash
         run: |
           set -euo pipefail
           test "${{ inputs.confirm_d1_headroom }}" = "true"
+
+      - uses: actions/checkout@v4
 
       - name: Verify collector is healthy and fresh
         shell: bash
@@ -44,6 +50,11 @@ jobs:
             > unimpairment-candidate-review/collector.json
           jq -e '.status == "healthy" and .cursor.lag_ledgers == 0 and .consecutive_failures == 0 and .error == null' \
             unimpairment-candidate-review/collector.json > /dev/null
+
+      - name: Measure and enforce actual D1 headroom
+        env:
+          D1_HEADROOM_OUTPUT_DIR: unimpairment-candidate-review
+        run: bash scripts/check-d1-headroom.sh
 
       - name: Discover current impaired Loan candidates
         shell: bash
@@ -93,20 +104,34 @@ jobs:
           jq . unimpairment-candidate-review/candidate-summary.json
 
       - name: Write review summary
+        if: always()
         shell: bash
         run: |
           {
             echo '## Unimpairment candidate review'
             echo
-            jq -r '"- Collector: **\(.status)**, cursor `\(.cursor.last_processed_ledger)`, head `\(.cursor.latest_observed_ledger)`, lag `\(.cursor.lag_ledgers)`"' \
-              unimpairment-candidate-review/collector.json
-            jq -r '"- Current eligible impaired candidates: **\(.candidate_count)**"' \
-              unimpairment-candidate-review/candidate-summary.json
+            if [ -f unimpairment-candidate-review/collector.json ]; then
+              jq -r '"- Collector: **\(.status)**, cursor `\(.cursor.last_processed_ledger)`, head `\(.cursor.latest_observed_ledger)`, lag `\(.cursor.lag_ledgers)`"' \
+                unimpairment-candidate-review/collector.json
+            fi
+            if [ -f unimpairment-candidate-review/d1-headroom-summary.json ]; then
+              jq -r '"- D1 rows read: `\(.rows_read)` / `\(.rows_read_daily_allowance)` (`\((.rows_read_fraction * 10000 | round) / 100)%`)"' \
+                unimpairment-candidate-review/d1-headroom-summary.json
+              jq -r '"- D1 rows written: `\(.rows_written)` / `\(.rows_written_daily_allowance)` (`\((.rows_written_fraction * 10000 | round) / 100)%`)"' \
+                unimpairment-candidate-review/d1-headroom-summary.json
+              jq -r '"- Actual headroom gate passed: **\(.passed)**"' \
+                unimpairment-candidate-review/d1-headroom-summary.json
+            fi
+            if [ -f unimpairment-candidate-review/candidate-summary.json ]; then
+              jq -r '"- Current eligible impaired candidates: **\(.candidate_count)**"' \
+                unimpairment-candidate-review/candidate-summary.json
+            fi
             echo
             echo 'This workflow performs read-only candidate discovery only. It does not accept credentials, sign, or submit transactions.'
           } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Upload read-only candidate evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: unimpairment-candidate-review
