@@ -2,7 +2,9 @@
 
 ## Objectives
 
-Testing proves data correctness, collection continuity, base identity, overlay resolution, status interpretation, asset handling, bounded resource use, accessibility, and user-visible behavior.
+Testing proves data correctness, collection continuity, base identity, overlay resolution, status interpretation, asset handling, bounded resource use, accessibility, discoverability, and user-visible behavior.
+
+The project does not treat HTTP 200 responses or successful page rendering alone as sufficient proof. Release evidence is layered so ledger continuity, source events, projections, current state, lifecycle, balance history, archive state, API contracts, and UI behavior can be checked independently and then reconciled.
 
 ## Required layers
 
@@ -61,9 +63,48 @@ Cover:
 - stale state while behind;
 - reset detection and epoch separation.
 
+### Permanent runtime monitoring
+
+Post-cutover runtime monitoring remains active after the collector reaches the validated head.
+
+The lightweight monitoring layer runs every 30 minutes and checks collector status, cursor, observed head, lag, runtime usage, failures, current error, replacement-base binding, hybrid-history source state, and actual D1 daily usage.
+
+The deep semantic layer runs every 6 hours subject to the D1 read guard and checks HYB-7 source/projection evidence, processed-ledger continuity, created/modified/deleted object changes, overlay/tombstone agreement, LoanPay and LoanManage activity, impairment/unimpairment/default transitions, lifecycle, archive, balance source/history, linkage gaps, and M1 gate states.
+
+A missing live path remains `missing`; contradictory evidence is `inconsistent`; only source-plus-projection agreement can become `observed`. Monitoring must not synthesize evidence, weaken resource guards, or mutate collector, D1, XRPL, or deployment state.
+
 ### API contract tests
 
 Cover metadata, active base identity, overlay watermark, collector cursor, bounded pagination, filters, sorting, provenance, asset-safe values, base-plus-overlay relationships, stale and unavailable states, archived lookup, malformed identifiers, exports, feeds, and retention boundaries.
+
+### Production behavior smoke
+
+Run a bounded production behavior smoke after important deployments and as part of M5-5 real-data integration. It is lower-frequency than permanent runtime monitoring and must remain D1-aware.
+
+Representative coverage includes:
+
+- Overview;
+- Vault list to valid Vault detail;
+- Loan Broker list to valid Broker detail;
+- Loan list to valid Loan detail;
+- Activity;
+- Lifecycle;
+- Archived Objects;
+- Cover & Loss;
+- Search;
+- Network Status.
+
+The smoke must verify more than route availability. It must check representative live relationships and state consistency, including where applicable:
+
+- `Loan.loan_broker_id` matches the related Loan Broker identifier;
+- the related Loan Broker `vault_id` matches the related Vault identifier;
+- current objects are not simultaneously presented as archived;
+- archived or deleted objects do not reappear through current base fallback;
+- current state agrees with the latest relevant indexed historical transition;
+- lifecycle state agrees with current-object state where the protocol semantics require agreement;
+- freshness and lag claims match the collector status source.
+
+The production behavior smoke must use bounded read-only requests, discovered live identifiers, explicit timeouts, and clear failure evidence. It must not run at the 30-minute permanent-monitor cadence.
 
 ### Browser tests
 
@@ -72,6 +113,8 @@ Cover desktop and mobile navigation, network context, Overview, Network Status, 
 The browser suite must also prove that unsupported fiat values, cross-asset totals, oracle claims, invented counts, promotional controls, and write-capable controls are absent.
 
 A manual release visual-audit workflow must capture full-page screenshots from the deployed read-only site at minimum for representative desktop and narrow-mobile viewports. The route matrix includes Overview, Vaults, one valid Vault detail, Loan Brokers, one valid Broker detail, Loans, one valid Loan detail, Activity, Lifecycle, Archived Objects, Cover & Loss, Search, Network Status, API, Methodology, About, Contact, and the mobile More menu open state. Detail identifiers must be discovered from live read-only APIs rather than hard-coded stale fixtures. Screenshot evidence supplements, but does not replace, semantic browser assertions.
+
+Before capture, the audit must wait for visible main content, completed loading states, best-effort network idle, and web-font readiness. The artifact must include the route/profile/detail-ID manifest and technical diagnostics for page-level horizontal overflow, candidate overflowing elements, browser console errors, page errors, and HTTP error responses.
 
 Live current-state browser regression must verify that:
 
@@ -97,6 +140,7 @@ Live current-state browser regression must verify that:
 12. Tombstones suppress base fallback.
 13. Base identity mismatch never falls back silently.
 14. Stale or interrupted continuation is never labeled fresh.
+15. A successful route response does not override contradictory source, projection, lifecycle, balance, archive, or relationship evidence.
 
 ## Accessibility and external links
 
@@ -109,6 +153,7 @@ Every implementation pull request runs applicable lint, type, unit, integration,
 Before public release, complete:
 
 - complete base verification;
+- permanent lightweight and deep monitoring continuity;
 - incremental collector soak;
 - outage recovery;
 - catch-up tests;
@@ -117,14 +162,18 @@ Before public release, complete:
 - D1 growth and overlay measurements;
 - reconciliation;
 - base replacement review;
+- M1 readiness-enforced exit review;
+- M5-5 real-data cross-audit integration;
+- bounded production behavior smoke;
 - cache review where caching is used;
 - accessibility review;
-- full-page desktop/mobile visual audit and remediation re-audit;
+- full-page desktop/mobile visual audit, technical diagnostic review, and remediation re-audit;
 - route metadata, canonical, robots, sitemap, social metadata, and structured-data validation;
 - external-link review;
 - recovery procedure review;
-- real multi-day soak.
+- real multi-day soak;
+- final release verification.
 
 ## Evidence
 
-Record summarized test results, bounded live evidence, processed ledger ranges, base identity, overlay watermark, resource measurements, failures, API samples, accessibility findings, representative full-page screenshots, visual-audit findings and fixes, and discoverability validation results in the pull request and implementation status.
+Record summarized test results, bounded live evidence, processed ledger ranges, base identity, overlay watermark, resource measurements, failures, API samples, production behavior-smoke findings, accessibility findings, representative full-page screenshots, visual-audit diagnostics, visual-audit findings and fixes, and discoverability validation results in the pull request and implementation status.
