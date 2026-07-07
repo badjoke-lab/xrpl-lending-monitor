@@ -26,10 +26,6 @@ concurrency:
   group: ui-screenshot-audit
   cancel-in-progress: false
 
-env:
-  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-
 jobs:
   capture:
     runs-on: ubuntu-latest
@@ -58,6 +54,8 @@ jobs:
 
       - name: Measure and enforce actual D1 headroom
         env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           D1_HEADROOM_OUTPUT_DIR: ui-screenshot-audit
         run: bash scripts/check-d1-headroom.sh
 
