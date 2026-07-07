@@ -12,7 +12,7 @@ The current M1 execution path is a verified immutable base read model plus bound
 | Milestone | Status | Goal | Exit condition |
 |---|---|---|---|
 | M0 Foundation and specification lock | Complete | Establish repository, source-of-truth documents, toolchain, and operating rules | Documentation accepted and project skeleton ready |
-| M1 Current-state collector | All HYB-7 paths observed; strict fresh-head recheck and exit review active | Serve a verified Devnet base state and continuously apply validated ledger changes | Verified base read model serves real Devnet data; contiguous scheduled collection remains healthy at a strict fresh head; required HYB-7 paths and M1 exit review pass |
+| M1 Current-state collector | All HYB-7 paths and exact-head equality observed; guarded exit review active | Serve a verified Devnet base state and continuously apply validated ledger changes | Verified base read model serves real Devnet data; contiguous scheduled collection remains healthy at a strict fresh head; required HYB-7 paths and M1 exit review pass |
 | M2 Event history and lifecycle | Complete through Checkpoint B | Normalize validated history, lifecycle, archives, balances, and status | Deterministic replay and reconciliation logic complete; production completeness remains bounded by M1 continuation and later soak evidence |
 | M3 Public API | Complete through exports and feeds; current merge integration pending final real-data cross-audit | Expose bounded read-only current and historical APIs | Base-plus-overlay current routes and historical contracts pass, with explicit freshness and unavailable states |
 | M4 Baseline UI and project pages | Complete through Checkpoint C | Deliver the ordinary monitor, navigation, project pages, responsive behavior, and shared states | Required baseline routes work end to end; live freshness claims remain gated by verified runtime evidence |
@@ -38,7 +38,7 @@ The current M1 execution path is a verified immutable base read model plus bound
 
 ## Active post-head execution order
 
-The latest recorded semantic probe observed all required HYB-7 paths, including natural post-boundary unimpairment, and the continuation report passed. M1 now waits on a strict fresh-head recheck and the reproducible readiness-enforced exit review while permanent monitoring and the D1-gated UI audit track continue.
+The recorded evidence now includes all required HYB-7 paths, natural post-boundary unimpairment, passing continuation diagnostics, and three consecutive lightweight samples with exact cursor/head equality. M1 now proceeds to guarded diagnostics and the readiness-enforced exit review at a D1-safe point while permanent monitoring and the D1-gated UI audit track continue.
 
 ### Permanent monitoring track
 
@@ -50,10 +50,10 @@ The latest recorded semantic probe observed all required HYB-7 paths, including 
 
 ### Track A — M1 completion path
 
-1. Preserve healthy operation, source-layout invariants, and the naturally observed post-boundary unimpairment evidence.
-2. Do not run candidate discovery or a deliberate external witness while the natural unimpairment source/lifecycle evidence remains observed and consistent.
-3. Recheck strict `validatedHeadReached` after the collector advances beyond the 20-ledger cursor-to-observed-head gap recorded by the 2026-07-07 21:08 UTC semantic probe. Do not infer strict head arrival from the public lag field alone.
-4. Require every M1 gate to be observed in one later diagnostic state.
+1. Preserve healthy operation, source-layout invariants, passing HYB-7 continuation evidence, and the naturally observed post-boundary unimpairment evidence.
+2. Preserve the 2026-07-07 21:57 UTC lightweight evidence showing three healthy samples with cursor and observed head both `3473715` and exact equality in every sample.
+3. Do not run candidate discovery or a deliberate external witness while the natural unimpairment source/lifecycle evidence remains observed and consistent.
+4. At a D1-safe point, run guarded M1 diagnostics and require every M1 gate to be observed together.
 5. Run the reproducible M1 exit review with `require_ready=true`.
 6. Retain the exit artifact and reconcile roadmap/status from that evidence.
 7. Proceed to M5-5 only after M1 exit is complete.
@@ -230,6 +230,8 @@ Verify real observed paths for:
 Exit condition: the live continuation path is operational and evidence shows current and historical views remain consistent.
 
 Latest recorded bounded semantic probe state on 2026-07-07 at 21:08 UTC: the collector was healthy, the processed continuation `3432925..3472761` contained `39837` ledgers with zero discontinuities, and all required HYB-7 paths were observed. The previously missing natural unimpairment path is now observed, including one `unimpaired` lifecycle transition with latest ledger `3470076`, and the continuation report passed. `liveContinuation` is observed. The same probe had cursor `3472761` and observed head `3472781`, so strict M1 `validatedHeadReached` remained missing and overall M1 readiness remained false.
+
+A later bounded lightweight recheck captured at 2026-07-07 21:57 UTC sampled the collector three times over 40 seconds. All three samples were healthy with cursor and observed head both `3473715`, reported lag `0`, zero consecutive failures, no current error, and exact cursor/head equality. This closes the operational gap seen in the earlier semantic probe, but M1 still requires a guarded diagnostic state and readiness-enforced exit artifact proving the complete gate set together.
 
 ### M1-HYB-8 — M1 exit review
 
