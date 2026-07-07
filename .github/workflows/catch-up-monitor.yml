@@ -1,6 +1,9 @@
 name: Catch-up runtime monitor
 
 on:
+  schedule:
+    - cron: '17,47 * * * *'
+    - cron: '23 */6 * * *'
   workflow_dispatch:
   pull_request:
     paths:
@@ -17,9 +20,11 @@ concurrency:
 env:
   CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
   CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  D1_DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
 
 jobs:
-  monitor:
+  lightweight-monitor:
+    if: ${{ github.event_name != 'schedule' || github.event.schedule == '17,47 * * * *' }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -29,22 +34,21 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p runtime-monitor
+          mkdir -p runtime-monitor-lightweight
           curl --fail-with-body --silent --show-error --retry 3 \
             -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
             "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/subdomain" \
-            > runtime-monitor/subdomain.json
-
-          SUBDOMAIN="$(jq -r '.result.subdomain // empty' runtime-monitor/subdomain.json)"
+            > runtime-monitor-lightweight/subdomain.json
+          SUBDOMAIN="$(jq -r '.result.subdomain // empty' runtime-monitor-lightweight/subdomain.json)"
           test -n "${SUBDOMAIN}"
-          BASE="https://xrpl-lending-monitor.${SUBDOMAIN}.workers.dev"
-          printf '%s\n' "${BASE}" > runtime-monitor/base-url.txt
+          printf '%s\n' "https://xrpl-lending-monitor.${SUBDOMAIN}.workers.dev" \
+            > runtime-monitor-lightweight/base-url.txt
 
       - name: Sample collector progress
         shell: bash
         run: |
           set -euo pipefail
-          BASE="$(cat runtime-monitor/base-url.txt)"
+          BASE="$(cat runtime-monitor-lightweight/base-url.txt)"
           if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
             INTERVAL=60
           else
@@ -54,40 +58,108 @@ jobs:
           for I in 0 1 2; do
             curl --fail-with-body --silent --show-error --retry 3 \
               "${BASE}/api/status/collector" \
-              > "runtime-monitor/collector-${I}.json"
+              > "runtime-monitor-lightweight/collector-${I}.json"
             jq -e '.cursor and .usage and (.consecutive_failures != null)' \
-              "runtime-monitor/collector-${I}.json" > /dev/null
+              "runtime-monitor-lightweight/collector-${I}.json" > /dev/null
             if [ "${I}" -lt 2 ]; then
               sleep "${INTERVAL}"
             fi
           done
 
-      - name: Capture HYB-7 and M1 exit diagnostics
+      - name: Capture cutover source invariants
         shell: bash
         run: |
           set -euo pipefail
-          BASE="$(cat runtime-monitor/base-url.txt)"
-          curl --fail-with-body --silent --show-error --retry 3 \
-            "${BASE}/api/status/continuation-diagnostics" \
-            > runtime-monitor/continuation-diagnostics.json
-          jq -e '.evidence and .report and .report.paths and .drilldown and .drilldown.linkageGaps and .loanActivity and .balanceSource and .managedTransitions' \
-            runtime-monitor/continuation-diagnostics.json > /dev/null
-          jq '.report' runtime-monitor/continuation-diagnostics.json \
-            > runtime-monitor/continuation-verification.json
+          BASE="$(cat runtime-monitor-lightweight/base-url.txt)"
 
           curl --fail-with-body --silent --show-error --retry 3 \
-            "${BASE}/api/status/m1-exit-diagnostics" \
-            > runtime-monitor/m1-exit-diagnostics.json
-          jq -e '.evidence and .report and .report.gates' \
-            runtime-monitor/m1-exit-diagnostics.json > /dev/null
-          jq '.report' runtime-monitor/m1-exit-diagnostics.json \
-            > runtime-monitor/m1-exit.json
+            "${BASE}/api/status/replacement-base-rebase" \
+            > runtime-monitor-lightweight/replacement-base-rebase.json
+          curl --fail-with-body --silent --show-error --retry 3 \
+            "${BASE}/api/status/history-source" \
+            > runtime-monitor-lightweight/history-source.json
+          curl --fail-with-body --silent --show-error --retry 3 \
+            "${BASE}/api/overview" \
+            > runtime-monitor-lightweight/overview.json
+
+          jq -e '.status == "replayed" and .target.snapshotId == "devnet-3432924-canonical" and .target.ledgerIndex == 3432924' \
+            runtime-monitor-lightweight/replacement-base-rebase.json > /dev/null
+          jq -e '.status == "ok" and .mode == "hybrid" and .configured == true and .chain.end_ledger_index == 3432924 and .exact_index.total_records > 0' \
+            runtime-monitor-lightweight/history-source.json > /dev/null
+          grep -q 'devnet-3432924-canonical' runtime-monitor-lightweight/overview.json
+
+      - name: Capture actual D1 daily usage
+        shell: bash
+        run: |
+          set -euo pipefail
+          TODAY="$(date -u +%F)"
+
+          read -r -d '' QUERY <<'GRAPHQL' || true
+          query D1Usage(
+            $accountTag: string!
+            $start: Date
+            $end: Date
+            $databaseId: string
+          ) {
+            viewer {
+              accounts(filter: { accountTag: $accountTag }) {
+                d1AnalyticsAdaptiveGroups(
+                  limit: 10000
+                  filter: {
+                    date_geq: $start
+                    date_leq: $end
+                    databaseId: $databaseId
+                  }
+                ) {
+                  sum {
+                    readQueries
+                    writeQueries
+                    rowsRead
+                    rowsWritten
+                  }
+                }
+              }
+            }
+          }
+          GRAPHQL
+
+          jq -n \
+            --arg query "${QUERY}" \
+            --arg accountTag "${CLOUDFLARE_ACCOUNT_ID}" \
+            --arg start "${TODAY}" \
+            --arg end "${TODAY}" \
+            --arg databaseId "${D1_DATABASE_ID}" \
+            '{query: $query, variables: {accountTag: $accountTag, start: $start, end: $end, databaseId: $databaseId}}' \
+            > runtime-monitor-lightweight/d1-usage-request.json
 
           curl --fail-with-body --silent --show-error --retry 3 \
-            "${BASE}/api/status/catch-up-initialization" \
-            > runtime-monitor/catch-up-initialization.json
+            -X POST \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            -H 'Content-Type: application/json' \
+            --data @runtime-monitor-lightweight/d1-usage-request.json \
+            https://api.cloudflare.com/client/v4/graphql \
+            > runtime-monitor-lightweight/d1-usage-response.json
 
-      - name: Build operational summary
+          jq -e '((.errors // []) | length) == 0 and (.data.viewer.accounts | length) > 0' \
+            runtime-monitor-lightweight/d1-usage-response.json > /dev/null
+
+          jq --arg date "${TODAY}" '
+            [.data.viewer.accounts[0].d1AnalyticsAdaptiveGroups[]] as $groups
+            | {
+                date_utc: $date,
+                read_queries: ([$groups[].sum.readQueries // 0] | add // 0),
+                write_queries: ([$groups[].sum.writeQueries // 0] | add // 0),
+                rows_read: ([$groups[].sum.rowsRead // 0] | add // 0),
+                rows_written: ([$groups[].sum.rowsWritten // 0] | add // 0),
+                free_rows_read_daily_allowance: 5000000,
+                free_rows_written_daily_allowance: 100000
+              }
+            | .rows_read_fraction = (.rows_read / .free_rows_read_daily_allowance)
+            | .rows_written_fraction = (.rows_written / .free_rows_written_daily_allowance)
+          ' runtime-monitor-lightweight/d1-usage-response.json \
+            > runtime-monitor-lightweight/d1-usage-summary.json
+
+      - name: Build lightweight operational summary
         shell: bash
         run: |
           set -euo pipefail
@@ -104,7 +176,8 @@ jobs:
             overlay_mutations: .usage.overlay_mutations,
             consecutive_failures,
             error
-          }]' runtime-monitor/collector-*.json > runtime-monitor/series.json
+          }]' runtime-monitor-lightweight/collector-*.json \
+            > runtime-monitor-lightweight/series.json
 
           jq '{
             first: .[0],
@@ -114,8 +187,131 @@ jobs:
             lag_delta: (.[-1].lag - .[0].lag),
             samples: length,
             samples_with_failures: ([.[] | select(.consecutive_failures > 0 or .error != null)] | length)
-          }' runtime-monitor/series.json > runtime-monitor/summary.json
+          }' runtime-monitor-lightweight/series.json \
+            > runtime-monitor-lightweight/summary.json
 
+          jq -n \
+            --slurpfile rebase runtime-monitor-lightweight/replacement-base-rebase.json \
+            --slurpfile history runtime-monitor-lightweight/history-source.json \
+            '{
+              replacement_rebase_status: $rebase[0].status,
+              replacement_snapshot: $rebase[0].target.snapshotId,
+              replacement_ledger: $rebase[0].target.ledgerIndex,
+              replacement_cursor: $rebase[0].evidence.sync.lastProcessedLedger,
+              history_mode: $history[0].mode,
+              history_end_ledger: $history[0].chain.end_ledger_index,
+              history_segments: $history[0].chain.segment_count,
+              exact_index_records: $history[0].exact_index.total_records
+            }' > runtime-monitor-lightweight/cutover-summary.json
+
+          {
+            echo '## Lightweight post-cutover monitor'
+            echo
+            echo '| Metric | First | Last | Delta |'
+            echo '|---|---:|---:|---:|'
+            jq -r '"| Cursor | \(.first.cursor) | \(.last.cursor) | \(.cursor_delta) |"' runtime-monitor-lightweight/summary.json
+            jq -r '"| Head | \(.first.head) | \(.last.head) | \(.head_delta) |"' runtime-monitor-lightweight/summary.json
+            jq -r '"| Lag | \(.first.lag) | \(.last.lag) | \(.lag_delta) |"' runtime-monitor-lightweight/summary.json
+            echo
+            echo '### Cutover source invariants'
+            jq -r '"- Replacement rebase: **\(.replacement_rebase_status)**"' runtime-monitor-lightweight/cutover-summary.json
+            jq -r '"- Replacement snapshot: `\(.replacement_snapshot)` at ledger `\(.replacement_ledger)`"' runtime-monitor-lightweight/cutover-summary.json
+            jq -r '"- Hybrid history: **\(.history_mode)** through ledger `\(.history_end_ledger)` in `\(.history_segments)` segments"' runtime-monitor-lightweight/cutover-summary.json
+            jq -r '"- Exact-index records: `\(.exact_index_records)`"' runtime-monitor-lightweight/cutover-summary.json
+            echo
+            echo '### D1 actual daily usage'
+            jq -r '"- Rows read: `\(.rows_read)` / `\(.free_rows_read_daily_allowance)`"' runtime-monitor-lightweight/d1-usage-summary.json
+            jq -r '"- Rows written: `\(.rows_written)` / `\(.free_rows_written_daily_allowance)`"' runtime-monitor-lightweight/d1-usage-summary.json
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          READ_FRACTION="$(jq -r '.rows_read_fraction' runtime-monitor-lightweight/d1-usage-summary.json)"
+          WRITE_FRACTION="$(jq -r '.rows_written_fraction' runtime-monitor-lightweight/d1-usage-summary.json)"
+          if awk "BEGIN { exit !(${READ_FRACTION} >= 0.8) }"; then
+            echo '::warning::D1 rows-read usage is at or above 80% of the configured Free daily allowance.'
+          fi
+          if awk "BEGIN { exit !(${WRITE_FRACTION} >= 0.8) }"; then
+            echo '::warning::D1 rows-written usage is at or above 80% of the configured Free daily allowance.'
+          fi
+
+      - name: Enforce lightweight runtime invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          FAILURES="$(jq -r '.samples_with_failures' runtime-monitor-lightweight/summary.json)"
+          FIRST_LAG="$(jq -r '.first.lag' runtime-monitor-lightweight/summary.json)"
+          CURSOR_DELTA="$(jq -r '.cursor_delta' runtime-monitor-lightweight/summary.json)"
+
+          if [ "${FAILURES}" -gt 0 ]; then
+            echo "Collector error or consecutive failure observed in ${FAILURES} sample(s)."
+            exit 1
+          fi
+          if [ "${FIRST_LAG}" -gt 0 ] && [ "${CURSOR_DELTA}" -le 0 ]; then
+            echo 'Collector cursor did not advance while catch-up lag remained positive.'
+            exit 1
+          fi
+          jq -e '.status == "replayed"' runtime-monitor-lightweight/replacement-base-rebase.json > /dev/null
+          jq -e '.mode == "hybrid" and .configured == true and .chain.end_ledger_index == 3432924' runtime-monitor-lightweight/history-source.json > /dev/null
+          grep -q 'devnet-3432924-canonical' runtime-monitor-lightweight/overview.json
+
+      - name: Upload lightweight runtime evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: catch-up-runtime-monitor-lightweight
+          path: runtime-monitor-lightweight
+          if-no-files-found: error
+          retention-days: 14
+
+  deep-diagnostics:
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && github.event.schedule == '23 */6 * * *') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve deployed Worker URL
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p runtime-monitor-deep
+          curl --fail-with-body --silent --show-error --retry 3 \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/subdomain" \
+            > runtime-monitor-deep/subdomain.json
+          SUBDOMAIN="$(jq -r '.result.subdomain // empty' runtime-monitor-deep/subdomain.json)"
+          test -n "${SUBDOMAIN}"
+          printf '%s\n' "https://xrpl-lending-monitor.${SUBDOMAIN}.workers.dev" \
+            > runtime-monitor-deep/base-url.txt
+
+      - name: Capture HYB-7 and M1 exit diagnostics
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE="$(cat runtime-monitor-deep/base-url.txt)"
+
+          curl --fail-with-body --silent --show-error --retry 3 \
+            "${BASE}/api/status/continuation-diagnostics" \
+            > runtime-monitor-deep/continuation-diagnostics.json
+          jq -e '.evidence and .report and .report.paths and .drilldown and .drilldown.linkageGaps and .loanActivity and .balanceSource and .managedTransitions' \
+            runtime-monitor-deep/continuation-diagnostics.json > /dev/null
+
+          curl --fail-with-body --silent --show-error --retry 3 \
+            "${BASE}/api/status/m1-exit-diagnostics" \
+            > runtime-monitor-deep/m1-exit-diagnostics.json
+          jq -e '.evidence and .report and .report.gates' \
+            runtime-monitor-deep/m1-exit-diagnostics.json > /dev/null
+
+          curl --fail-with-body --silent --show-error --retry 3 \
+            "${BASE}/api/status/replacement-base-rebase" \
+            > runtime-monitor-deep/replacement-base-rebase.json
+          curl --fail-with-body --silent --show-error --retry 3 \
+            "${BASE}/api/status/history-source" \
+            > runtime-monitor-deep/history-source.json
+
+      - name: Build deep diagnostic summary
+        shell: bash
+        run: |
+          set -euo pipefail
           jq '{
             processed_ledgers: .evidence.processedLedgers,
             object_changes: .evidence.objectChanges,
@@ -130,8 +326,8 @@ jobs:
             drilldown: .drilldown,
             path_states: (.report.paths | with_entries(.value = .value.state)),
             passed: .report.passed
-          }' runtime-monitor/continuation-diagnostics.json \
-            > runtime-monitor/diagnostic-summary.json
+          }' runtime-monitor-deep/continuation-diagnostics.json \
+            > runtime-monitor-deep/diagnostic-summary.json
 
           jq '{
             expected_base: .evidence.expectedBase,
@@ -140,71 +336,50 @@ jobs:
             cursor: .evidence.cursor,
             gate_states: (.report.gates | with_entries(.value = .value.state)),
             ready: .report.ready
-          }' runtime-monitor/m1-exit-diagnostics.json \
-            > runtime-monitor/m1-exit-summary.json
+          }' runtime-monitor-deep/m1-exit-diagnostics.json \
+            > runtime-monitor-deep/m1-exit-summary.json
 
           {
-            echo '## Catch-up runtime monitor'
-            echo
-            echo '| Metric | First | Last | Delta |'
-            echo '|---|---:|---:|---:|'
-            jq -r '"| Cursor | \(.first.cursor) | \(.last.cursor) | \(.cursor_delta) |"' runtime-monitor/summary.json
-            jq -r '"| Head | \(.first.head) | \(.last.head) | \(.head_delta) |"' runtime-monitor/summary.json
-            jq -r '"| Lag | \(.first.lag) | \(.last.lag) | \(.lag_delta) |"' runtime-monitor/summary.json
+            echo '## Deep post-cutover diagnostics'
             echo
             echo '### HYB-7 evidence counts'
             echo
             echo '| Evidence | Count |'
             echo '|---|---:|'
-            jq -r '"| Processed ledgers | \(.evidence.processedLedgers.count) |"' runtime-monitor/continuation-diagnostics.json
-            jq -r '"| Object changes: created | \(.evidence.objectChanges.created) |"' runtime-monitor/continuation-diagnostics.json
-            jq -r '"| Object changes: modified | \(.evidence.objectChanges.modified) |"' runtime-monitor/continuation-diagnostics.json
-            jq -r '"| Object changes: deleted | \(.evidence.objectChanges.deleted) |"' runtime-monitor/continuation-diagnostics.json
-            jq -r '"| Relevant Loan activity | \(.loanActivity.total) |"' runtime-monitor/continuation-diagnostics.json
-            jq -r '"| LoanSet events | \(.loanActivity.loanSet) |"' runtime-monitor/continuation-diagnostics.json
-            jq -r '"| LoanPay events | \(.loanActivity.loanPay) |"' runtime-monitor/continuation-diagnostics.json
-            jq -r '"| LoanManage events | \(.loanActivity.loanManage) |"' runtime-monitor/continuation-diagnostics.json
-            jq -r '"| LoanDelete events | \(.loanActivity.loanDelete) |"' runtime-monitor/continuation-diagnostics.json
-            jq -r '"| Lifecycle events | \(.evidence.lifecycle.total) |"' runtime-monitor/continuation-diagnostics.json
-            jq -r '"| Impair source transitions | \(.managedTransitions.impaired) |"' runtime-monitor/continuation-diagnostics.json
-            jq -r '"| Unimpair source transitions | \(.managedTransitions.unimpaired) |"' runtime-monitor/continuation-diagnostics.json
-            jq -r '"| Default source transitions | \(.managedTransitions.defaulted) |"' runtime-monitor/continuation-diagnostics.json
-            jq -r '"| Balance source changes | \(.balanceSource.sourceChanges) |"' runtime-monitor/continuation-diagnostics.json
-            jq -r '"| Balance-history rows | \(.evidence.balanceHistory.total) |"' runtime-monitor/continuation-diagnostics.json
-            echo
-            echo '### HYB-7 linkage gaps'
-            jq -r '.drilldown.linkageGaps | to_entries[] | "- `\(.key)`: **\(.value)**"' runtime-monitor/continuation-diagnostics.json
+            jq -r '"| Processed ledgers | \(.evidence.processedLedgers.count) |"' runtime-monitor-deep/continuation-diagnostics.json
+            jq -r '"| Object changes: created | \(.evidence.objectChanges.created) |"' runtime-monitor-deep/continuation-diagnostics.json
+            jq -r '"| Object changes: modified | \(.evidence.objectChanges.modified) |"' runtime-monitor-deep/continuation-diagnostics.json
+            jq -r '"| Object changes: deleted | \(.evidence.objectChanges.deleted) |"' runtime-monitor-deep/continuation-diagnostics.json
+            jq -r '"| LoanPay events | \(.loanActivity.loanPay) |"' runtime-monitor-deep/continuation-diagnostics.json
+            jq -r '"| LoanManage events | \(.loanActivity.loanManage) |"' runtime-monitor-deep/continuation-diagnostics.json
+            jq -r '"| Lifecycle events | \(.evidence.lifecycle.total) |"' runtime-monitor-deep/continuation-diagnostics.json
+            jq -r '"| Balance source changes | \(.balanceSource.sourceChanges) |"' runtime-monitor-deep/continuation-diagnostics.json
+            jq -r '"| Balance-history rows | \(.evidence.balanceHistory.total) |"' runtime-monitor-deep/continuation-diagnostics.json
             echo
             echo '### HYB-7 paths'
-            jq -r '.report.paths | to_entries[] | "- `\(.key)`: **\(.value.state)** — \(.value.reason)"' runtime-monitor/continuation-diagnostics.json
+            jq -r '.report.paths | to_entries[] | "- `\(.key)`: **\(.value.state)** — \(.value.reason)"' runtime-monitor-deep/continuation-diagnostics.json
             echo
             echo '### M1 exit gates'
-            jq -r '.report.gates | to_entries[] | "- `\(.key)`: **\(.value.state)** — \(.value.reason)"' runtime-monitor/m1-exit-diagnostics.json
+            jq -r '.report.gates | to_entries[] | "- `\(.key)`: **\(.value.state)** — \(.value.reason)"' runtime-monitor-deep/m1-exit-diagnostics.json
           } >> "${GITHUB_STEP_SUMMARY}"
 
-      - name: Enforce runtime monitor invariants
+      - name: Enforce deep diagnostic invariants
         shell: bash
         run: |
           set -euo pipefail
-          FAILURES="$(jq -r '.samples_with_failures' runtime-monitor/summary.json)"
-          FIRST_LAG="$(jq -r '.first.lag' runtime-monitor/summary.json)"
-          CURSOR_DELTA="$(jq -r '.cursor_delta' runtime-monitor/summary.json)"
+          jq -e '[.report.paths[] | select(.state == "inconsistent")] | length == 0' \
+            runtime-monitor-deep/continuation-diagnostics.json > /dev/null
+          jq -e '[.report.gates[] | select(.state == "inconsistent")] | length == 0' \
+            runtime-monitor-deep/m1-exit-diagnostics.json > /dev/null
+          jq -e '.status == "replayed"' runtime-monitor-deep/replacement-base-rebase.json > /dev/null
+          jq -e '.mode == "hybrid" and .configured == true and .chain.end_ledger_index == 3432924' \
+            runtime-monitor-deep/history-source.json > /dev/null
 
-          if [ "${FAILURES}" -gt 0 ]; then
-            echo "Collector error or consecutive failure observed in ${FAILURES} sample(s)."
-            exit 1
-          fi
-
-          if [ "${FIRST_LAG}" -gt 0 ] && [ "${CURSOR_DELTA}" -le 0 ]; then
-            echo "Collector cursor did not advance while catch-up lag remained positive."
-            exit 1
-          fi
-
-      - name: Upload runtime evidence
+      - name: Upload deep diagnostic evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: catch-up-runtime-monitor
-          path: runtime-monitor
+          name: catch-up-runtime-monitor-deep
+          path: runtime-monitor-deep
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 30
