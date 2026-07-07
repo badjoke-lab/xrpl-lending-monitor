@@ -200,7 +200,7 @@ The active implementation unit is no longer historical backfill or cutover const
 The active operational unit is now:
 
 1. preserve healthy zero-lag collection and verify continued zero-failure operation plus actual D1 resource usage;
-2. resolve the single remaining HYB-7 evidence gap: real post-boundary unimpairment; the external witness operation is now specified with explicit custody separation, candidate preconditions, abort conditions, and validated-evidence gates, but no actor credentials or write capability have been added to the monitor;
+2. resolve the single remaining HYB-7 evidence gap: real post-boundary unimpairment; the external witness operation is specified and a gated manual read-only candidate-review workflow is prepared, but it has not been run because current D1 headroom is unavailable and no actor credentials or write capability have been added to the monitor;
 3. while waiting for or deliberately generating an external Devnet unimpairment witness, re-check D1 usage after UTC-day reset and run the gated production screenshot audit only when the existing headroom policy passes; the 2026-07-07 13:13 UTC check correctly blocked capture because daily usage already exceeded the operations reference allowances;
 4. inspect screenshot evidence, remediate UI overflow and spacing defects, and re-audit affected routes;
 5. once unimpairment is observed, run the M1 exit review workflow with `require_ready=true` and retain the evidence artifact;
