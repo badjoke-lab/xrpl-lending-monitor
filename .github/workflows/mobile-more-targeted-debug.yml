@@ -1,0 +1,39 @@
+name: Mobile More targeted debug
+on:
+  pull_request:
+    paths:
+      - .github/workflows/mobile-more-targeted-debug.yml
+permissions:
+  contents: read
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.18.0'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm exec playwright install --with-deps chromium
+      - name: Run targeted test and capture output
+        shell: bash
+        run: |
+          set +e
+          pnpm exec playwright test tests/e2e/smoke.spec.ts --grep "uses mobile navigation" > mobile-more-targeted.log 2>&1
+          STATUS=$?
+          echo "$STATUS" > mobile-more-targeted-status.txt
+          exit 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mobile-more-targeted-debug
+          path: |
+            mobile-more-targeted.log
+            mobile-more-targeted-status.txt
+            test-results
+          retention-days: 1
