@@ -32,16 +32,14 @@ async function waitForAuditPage(page, route) {
   await page.locator('#main-content').waitFor({ state: 'visible', timeout: 30_000 })
 
   try {
-    await page.waitForFunction(() => document.querySelector('.state-loading') === null, undefined, {
-      timeout: 60_000,
-    })
+    await page.locator('.state-loading').waitFor({ state: 'hidden', timeout: 60_000 })
   } catch {
     throw new Error(`${route} did not leave the loading state within 60 seconds`)
   }
 
   await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => undefined)
   await page.evaluate(async () => {
-    await document.fonts.ready
+    await globalThis.document.fonts.ready
   })
   await page.waitForTimeout(300)
 }
