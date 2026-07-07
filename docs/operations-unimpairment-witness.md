@@ -63,7 +63,9 @@ Actor material must not be copied into repository files, pull requests, Actions 
 
 ## Prepared read-only candidate review
 
-The manual `.github/workflows/unimpairment-candidate-review.yml` workflow prepares bounded candidate evidence without accepting credentials or submitting transactions. It requires explicit operator confirmation that current UTC-day D1 headroom has been reviewed, verifies a healthy zero-lag collector, reads at most 25 current Loans filtered to `on_ledger_status=impaired`, and records only public relationship and current-state fields needed for candidate review.
+The manual `.github/workflows/unimpairment-candidate-review.yml` workflow prepares bounded candidate evidence without accepting credentials or submitting transactions. It requires explicit operator intent, verifies a healthy zero-lag collector, measures actual current UTC-day D1 rows read and rows written through the Cloudflare analytics source, and fails closed unless both remain below the existing 80% headroom threshold. Only after that measured gate passes does it read at most 25 current Loans filtered to `on_ledger_status=impaired` and record the public relationship and current-state fields needed for candidate review.
+
+The candidate-review artifact retains the public-safe collector state, D1 usage summary, and candidate summary. It does not retain the Cloudflare account identifier, raw analytics request, actor credentials, signing material, or transaction-submission capability.
 
 The candidate workflow is discovery evidence, not authority to submit. Exact Loan state and Loan Broker owner relationship must still be re-read immediately before any external signing step.
 
@@ -102,7 +104,7 @@ This example defines intent only. It is not a signed transaction, does not conta
 ## Execution order
 
 1. Keep permanent collector monitoring active and confirm healthy zero lag.
-2. Perform bounded read-only candidate discovery.
+2. Measure actual UTC-day D1 usage and proceed with bounded read-only candidate discovery only when the existing 80% headroom gate passes.
 3. Confirm candidate current state and Loan Broker owner relationship.
 4. Confirm the external operator controls that exact owner account without transferring credentials into this project.
 5. Construct and review one bounded Devnet `LoanManage` unimpair transaction externally.
@@ -125,6 +127,7 @@ Abort without submission when any of these is true:
 - the Loan Broker owner relationship changed or cannot be verified;
 - the actor does not control the exact current Loan Broker owner account;
 - the monitor is stale, behind, inconsistent, or reporting collector failures;
+- the current D1 usage gate does not pass;
 - a natural validated unimpairment witness has already appeared;
 - the proposed transaction contains multiple LoanManage state flags;
 - the external submission method would expose credentials to this repository or CI.

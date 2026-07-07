@@ -34,6 +34,9 @@ jobs:
       - name: Lint
         run: pnpm lint
 
+      - name: Validate D1 headroom gate shell syntax
+        run: bash -n scripts/check-d1-headroom.sh
+
       - name: Type-check
         run: pnpm typecheck
 
