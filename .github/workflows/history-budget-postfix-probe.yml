@@ -1,0 +1,40 @@
+name: History budget postfix probe
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/history-budget-postfix-probe.yml
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Probe UI-sized history windows
+        shell: bash
+        run: |
+          mkdir -p probe-output
+          B="https://xrpl-lending-monitor.badjoke-lab.workers.dev"
+          {
+            for route in activity audit/lifecycle audit/archived audit/cover-loss
+            do
+              for limit in 25 50 75 100
+              do
+                path="/api/${route}?limit=${limit}"
+                echo "===== ${path} ====="
+                curl --max-time 60 -sS -o /tmp/probe-body -w 'HTTP %{http_code} total=%{time_total}s\n' "${B}${path}" || true
+                head -c 240 /tmp/probe-body
+                echo
+              done
+            done
+          } 2>&1 | tee probe-output/history-windows.txt
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: history-budget-postfix-probe
+          path: probe-output
+          retention-days: 1
