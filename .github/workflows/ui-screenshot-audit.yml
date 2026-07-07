@@ -80,7 +80,13 @@ jobs:
           OUTPUT_DIR: ui-screenshot-audit/screenshots
         run: node scripts/capture-ui-audit.mjs
 
-      - name: Write audit gate summary
+      - name: Analyze screenshot audit evidence
+        env:
+          UI_AUDIT_INPUT_DIR: ui-screenshot-audit/screenshots
+          UI_AUDIT_ANALYSIS_OUTPUT_DIR: ui-screenshot-audit
+        run: node scripts/analyze-ui-audit.mjs
+
+      - name: Write audit gate and analysis summary
         if: always()
         shell: bash
         run: |
@@ -98,6 +104,10 @@ jobs:
                 ui-screenshot-audit/d1-headroom-summary.json
               jq -r '"- Actual headroom gate passed: **\(.passed)**"' \
                 ui-screenshot-audit/d1-headroom-summary.json
+            fi
+            if [ -f ui-screenshot-audit/analysis-summary.md ]; then
+              echo
+              cat ui-screenshot-audit/analysis-summary.md
             fi
           } >> "${GITHUB_STEP_SUMMARY}"
 
