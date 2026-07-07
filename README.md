@@ -6,17 +6,17 @@ The project covers the normal monitoring surface expected from a lending dashboa
 
 ## Current status
 
-Milestone 1: incremental continuation and base-plus-overlay integration.
+Milestone 1: post-cutover incremental continuation and exit verification.
 
-A verified Devnet base read model is serving current Vault, Loan Broker, and Loan data through the public current-state API path. The active published base is fixed to validated Devnet ledger `3371675` and contains 1,552,503 current-state records.
+The canonical-history and replacement-current-state cutover is complete on XRPL Devnet. Production history runs in verified hybrid mode: immutable canonical history covers ledgers `3371676..3432924`, and bounded D1 continuation covers ledgers after that boundary. The active replacement current-state base is `devnet-3432924-canonical` at ledger `3432924`.
 
-The incremental history foundation, AffectedNodes normalization, lifecycle derivation, deleted-object archive logic, balance history, public API contracts, and baseline UI are implemented. The active remaining M1 work is to add bounded D1 current-state overlay upserts and deletion tombstones, integrate base-plus-overlay current reads, wire scheduled incremental collection, catch up contiguously from the ledger after the active base, and verify continuous Devnet monitoring.
+Scheduled incremental collection is advancing contiguously after the replacement boundary with explicit cursor, lag, freshness, resource-usage, and failure reporting. Base-plus-overlay current reads, deletion tombstones, hybrid historical reads, exact history lookup, lifecycle history, archives, balance history, and the baseline UI are implemented.
 
-The earlier D1-only complete row-per-object current-state snapshot design was stopped after measured projection exceeded the project resource safety envelope. The active architecture uses a verified immutable base read model plus bounded D1 incremental history and current-state overlay.
+The active M1 work is operational verification rather than architecture construction: continue bounded catch-up to the validated head, keep D1 usage and collector failures within the measured envelope, observe the remaining real post-boundary LoanPay and LoanManage lifecycle paths, verify activity/history/balance consistency, reach fresh zero-lag state, and complete the M1 exit review.
 
 Mainnet remains disabled.
 
-See [`docs/implementation-status.md`](docs/implementation-status.md) for the exact public implementation state and blockers, and [`docs/development-roadmap.md`](docs/development-roadmap.md) for target dates, dependency order, and milestone exit conditions.
+See [`docs/implementation-status.md`](docs/implementation-status.md) for the exact public implementation state and blockers, [`docs/development-roadmap.md`](docs/development-roadmap.md) for dependency order and milestone exit conditions, and [`docs/evidence/d1-safe-post-cutover-runtime-20260707.json`](docs/evidence/d1-safe-post-cutover-runtime-20260707.json) for the latest recorded post-cutover runtime evidence.
 
 ## Documentation
 
