@@ -210,7 +210,7 @@ The active operational unit is now:
 9. complete SEO/discoverability implementation and final-host binding, then owner-managed subdomain, analytics, Search Console verification, and sitemap submission;
 10. proceed through M6 hardening and real multi-day Devnet soak.
 
-Non-invasive parallel preparation is allowed while M1 catch-up continues: SEO metadata and route-map design, analytics configuration hooks without placeholder IDs, and implementation of a manual screenshot-audit workflow. These preparation tasks do not justify slowing, resetting, rebasing, or retuning the collector.
+Non-invasive parallel preparation is allowed while M1 catch-up continues: SEO metadata and route-map design, analytics configuration hooks without placeholder IDs, and implementation of a manual screenshot-audit workflow. The gated manual screenshot workflow is now prepared: it discovers valid detail IDs through read-only APIs, captures the representative desktop/mobile route matrix plus the open mobile More menu, and refuses to run unless fresh-head and D1-headroom confirmations are supplied; it also verifies collector healthy zero-lag state before crawling. The production screenshot crawl itself remains pending. These preparation tasks do not justify slowing, resetting, rebasing, or retuning the collector.
 
 ## Next order
 
