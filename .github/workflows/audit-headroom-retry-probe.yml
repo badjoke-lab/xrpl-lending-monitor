@@ -1,0 +1,83 @@
+name: Audit headroom retry probe
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/audit-headroom-retry-probe.yml
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Capture collector and semantic status
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p audit-headroom-retry-probe
+          B="https://xrpl-lending-monitor.badjoke-lab.workers.dev"
+          curl --max-time 60 -fsS "${B}/api/status/collector" > audit-headroom-retry-probe/collector.json
+          curl --max-time 120 -fsS "${B}/api/status/continuation-diagnostics" > audit-headroom-retry-probe/continuation.json
+          curl --max-time 120 -fsS "${B}/api/status/m1-exit-diagnostics" > audit-headroom-retry-probe/m1-exit.json
+          curl --max-time 60 -fsS "${B}/api/status/loan-activity-witnesses" > audit-headroom-retry-probe/loan-activity.json
+          jq -e '.status == "healthy" and .cursor.lag_ledgers == 0 and .consecutive_failures == 0 and .error == null' audit-headroom-retry-probe/collector.json > /dev/null
+
+      - name: Measure actual D1 headroom
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          D1_HEADROOM_OUTPUT_DIR: audit-headroom-retry-probe
+        run: bash scripts/check-d1-headroom.sh
+
+      - name: Capture read-only impaired candidates when gate passes
+        shell: bash
+        run: |
+          set -euo pipefail
+          B="https://xrpl-lending-monitor.badjoke-lab.workers.dev"
+          curl --max-time 120 -fsS \
+            "${B}/api/loans?limit=25&sort=id_asc&on_ledger_status=impaired" \
+            > audit-headroom-retry-probe/impaired-loans.json
+          jq -e '.availability.state == "available" and .snapshot != null' audit-headroom-retry-probe/impaired-loans.json > /dev/null
+          jq '{
+            network,
+            epoch,
+            snapshot,
+            reviewed_at: (now | todateiso8601),
+            candidate_count: ([.data[] | select(.on_ledger_status == "impaired" and .payment_remaining > 0)] | length)
+          }' audit-headroom-retry-probe/impaired-loans.json > audit-headroom-retry-probe/candidate-summary.json
+
+      - name: Summarize probe
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '## Audit headroom retry probe'
+            echo
+            if [ -f audit-headroom-retry-probe/collector.json ]; then
+              jq -r '"- Collector: **\(.status)**, cursor `\(.cursor.last_processed_ledger)`, head `\(.cursor.latest_observed_ledger)`, lag `\(.cursor.lag_ledgers)`, failures `\(.consecutive_failures)`"' audit-headroom-retry-probe/collector.json
+            fi
+            if [ -f audit-headroom-retry-probe/d1-headroom-summary.json ]; then
+              jq -r '"- D1 rows read: `\(.rows_read)` / `\(.rows_read_daily_allowance)` (`\((.rows_read_fraction * 10000 | round) / 100)%`)"' audit-headroom-retry-probe/d1-headroom-summary.json
+              jq -r '"- D1 rows written: `\(.rows_written)` / `\(.rows_written_daily_allowance)` (`\((.rows_written_fraction * 10000 | round) / 100)%`)"' audit-headroom-retry-probe/d1-headroom-summary.json
+              jq -r '"- Actual headroom gate passed: **\(.passed)**"' audit-headroom-retry-probe/d1-headroom-summary.json
+            fi
+            if [ -f audit-headroom-retry-probe/candidate-summary.json ]; then
+              jq -r '"- Current eligible impaired candidates: **\(.candidate_count)**"' audit-headroom-retry-probe/candidate-summary.json
+            fi
+            if [ -f audit-headroom-retry-probe/m1-exit.json ]; then
+              jq -r '"- M1 ready: **\(.ready)**"' audit-headroom-retry-probe/m1-exit.json
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: audit-headroom-retry-probe
+          path: audit-headroom-retry-probe
+          if-no-files-found: error
+          retention-days: 1
