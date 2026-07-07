@@ -1,4 +1,4 @@
-import { useRef, type MouseEvent, type ReactNode } from 'react'
+import { useState, type MouseEvent, type ReactNode } from 'react'
 
 import { formatDuration, formatInteger, statusTone, titleCase } from '../lib/formatting'
 import { LoanDetailPage } from '../pages/LoanDetailPage'
@@ -100,12 +100,9 @@ function resolveContent(currentPath: string, children: ReactNode, onNavigate: (p
 }
 
 export function AppShell({ children, currentPath, status, onNavigate, onReload }: Props) {
-  const mobileMoreRef = useRef<HTMLDetailsElement>(null)
-  const closeMobileMore = () => {
-    if (mobileMoreRef.current) mobileMoreRef.current.open = false
-  }
+  const [mobileMoreOpen, setMobileMoreOpen] = useState(false)
   const navigateFromMobile = (path: string) => {
-    closeMobileMore()
+    setMobileMoreOpen(false)
     onNavigate(path)
   }
   const home = (event: MouseEvent<HTMLAnchorElement>) => { event.preventDefault(); navigateFromMobile('/') }
@@ -140,8 +137,14 @@ export function AppShell({ children, currentPath, status, onNavigate, onReload }
           onClick={(event) => { event.preventDefault(); navigateFromMobile('/loans') }}
         >Loans</a>
         <span aria-disabled="true">Activity</span><span aria-disabled="true">Search</span>
-        <details ref={mobileMoreRef}>
-          <summary>More</summary>
+        <details open={mobileMoreOpen}>
+          <summary
+            aria-expanded={mobileMoreOpen}
+            onClick={(event) => {
+              event.preventDefault()
+              setMobileMoreOpen((open) => !open)
+            }}
+          >More</summary>
           <div className="mobile-more-panel">
             <Navigation currentPath={currentPath} onNavigate={navigateFromMobile} />
           </div>
