@@ -167,7 +167,7 @@ export function MonitoringShell({ children, currentPath, status, onNavigate, onR
                 type="button"
                 className="secondary-button"
                 onClick={() => setMobileMoreOpen(false)}
-                aria-label="Close More menu"
+                aria-label="Close menu"
               >Close</button>
             </div>
             <Navigation currentPath={currentPath} onNavigate={navigateFromMobile} />
