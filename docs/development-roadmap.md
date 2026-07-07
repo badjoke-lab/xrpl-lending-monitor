@@ -1,7 +1,7 @@
 # Development roadmap
 
 Baseline date: 2026-07-01.
-Last recalibrated: 2026-07-07.
+Last recalibrated: 2026-07-08.
 
 This document controls implementation order and dependencies. Dates are planning targets rather than promises. Correctness, data integrity, accessibility, and release evidence take priority over calendar targets.
 
@@ -61,13 +61,13 @@ The collector reached a verified healthy fresh head on the latest recorded bound
 
 ### Track B — UI production-audit path
 
-1. Finish the prepared screenshot-audit capture hardening through required checks and merge before the next production crawl.
-2. After a UTC-day reset or later safe point, re-check actual D1 rows read and rows written.
-3. Run the production screenshot audit only when the existing below-80% headroom policy passes and collector healthy zero-lag preflight passes.
-4. Capture the representative desktop/mobile route matrix plus the open mobile More menu.
-5. Retain screenshot evidence together with route/profile/detail-ID manifest, page-level horizontal overflow, candidate overflowing elements, browser console errors, page errors, and HTTP error responses.
-6. Inspect evidence, remediate confirmed overflow, clipping, spacing, fixed-navigation overlap, safe-area, long-identifier, table, form-layout, and mobile-navigation defects.
-7. Re-audit affected routes using the same route and viewport evidence shape.
+1. After a UTC-day reset or later safe point, dispatch the self-enforcing production audit and let its actual D1 usage measurement decide eligibility.
+2. Run the production screenshot crawl only when the existing below-80% headroom policy passes and collector healthy zero-lag preflight passes.
+3. Capture the representative desktop/mobile route matrix plus the open mobile More menu.
+4. Require exact expected route/profile diagnostic coverage, reject missing, duplicate, or unexpected route and technical-profile records, classify page-level horizontal overflow separately from nested overflow review candidates, aggregate browser console, page, and HTTP errors, and retain JSON and Markdown summaries. Technical evidence failure stops the audit after evidence files are written.
+5. Inspect generated summaries, raw manifest and diagnostics, and screenshots together. Human visual review remains required even when strict technical evaluation passes.
+6. Remediate confirmed overflow, clipping, spacing, fixed-navigation overlap, safe-area, long-identifier, table, form-layout, and mobile-navigation defects.
+7. Re-audit affected routes using the same route, viewport, diagnostic, and evidence-summary shape.
 
 Tracks A and B may progress in parallel, but neither may weaken collector integrity or D1 resource guards.
 
@@ -257,7 +257,7 @@ Preparation that may proceed without mutating collector, D1, history, or deploym
 - analytics configuration hooks without placeholder measurement IDs;
 - manual-dispatch GitHub Actions screenshot-audit workflow;
 - representative desktop/mobile route matrix including data pages, detail pages, documentation pages, and the open mobile More menu state;
-- screenshot capture hardening and technical layout/runtime diagnostics.
+- screenshot capture hardening, technical layout/runtime diagnostics, deterministic evidence summarization, and strict technical-evidence evaluation.
 
 The following remain gated until a verified healthy fresh head and current D1 resource headroom are confirmed:
 
