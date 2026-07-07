@@ -1,4 +1,4 @@
-import type { MouseEvent, ReactNode } from 'react'
+import { useEffect, useState, type MouseEvent, type ReactNode } from 'react'
 
 import { formatDuration, formatInteger, statusTone, titleCase } from '../lib/formatting'
 import { LoanDetailPage } from '../pages/LoanDetailPage'
@@ -100,7 +100,17 @@ function resolveContent(currentPath: string, children: ReactNode, onNavigate: (p
 }
 
 export function AppShell({ children, currentPath, status, onNavigate, onReload }: Props) {
-  const home = (event: MouseEvent<HTMLAnchorElement>) => { event.preventDefault(); onNavigate('/') }
+  const [mobileMoreOpen, setMobileMoreOpen] = useState(false)
+
+  useEffect(() => {
+    setMobileMoreOpen(false)
+  }, [currentPath])
+
+  const navigateFromMobile = (path: string) => {
+    setMobileMoreOpen(false)
+    onNavigate(path)
+  }
+  const home = (event: MouseEvent<HTMLAnchorElement>) => { event.preventDefault(); navigateFromMobile('/') }
   const content = resolveContent(currentPath, children, onNavigate)
   const loansActive = currentPath === '/loans' || currentPath.startsWith('/loans/')
   return (
@@ -129,10 +139,15 @@ export function AppShell({ children, currentPath, status, onNavigate, onReload }
           className={loansActive ? 'is-active' : ''}
           href="/loans"
           aria-current={loansActive ? 'page' : undefined}
-          onClick={(event) => { event.preventDefault(); onNavigate('/loans') }}
+          onClick={(event) => { event.preventDefault(); navigateFromMobile('/loans') }}
         >Loans</a>
         <span aria-disabled="true">Activity</span><span aria-disabled="true">Search</span>
-        <details><summary>More</summary><div className="mobile-more-panel"><Navigation currentPath={currentPath} onNavigate={onNavigate} /></div></details>
+        <details open={mobileMoreOpen} onToggle={(event) => setMobileMoreOpen(event.currentTarget.open)}>
+          <summary>More</summary>
+          <div className="mobile-more-panel">
+            <Navigation currentPath={currentPath} onNavigate={navigateFromMobile} />
+          </div>
+        </details>
       </nav>
     </div>
   )
