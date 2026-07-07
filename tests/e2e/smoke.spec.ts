@@ -161,7 +161,7 @@ test('preserves successful panels when the activity API fails', async ({ page })
   await expect(page.getByText('/api/activity?limit=6 returned HTTP 500')).toBeVisible()
 })
 
-test('uses mobile navigation, toggles More, and closes it after navigation', async ({ page }) => {
+test('uses mobile navigation, closes More explicitly, toggles it, and closes it after navigation', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await mockDashboardApi(page)
   await page.goto('/')
@@ -179,6 +179,13 @@ test('uses mobile navigation, toggles More, and closes it after navigation', asy
   await expect(panel.getByText('Network Status', { exact: true })).toBeVisible()
   await expect(more).toHaveAttribute('aria-expanded', 'true')
 
+  const close = panel.getByRole('button', { name: 'Close More menu' })
+  await expect(close).toBeVisible()
+  await close.click()
+  await expect(panel).toBeHidden()
+  await expect(more).toHaveAttribute('aria-expanded', 'false')
+
+  await more.click()
   await more.click()
   await expect(panel).toBeHidden()
   await expect(more).toHaveAttribute('aria-expanded', 'false')
