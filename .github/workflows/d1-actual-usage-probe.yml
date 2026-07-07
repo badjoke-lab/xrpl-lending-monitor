@@ -20,6 +20,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
 
       - name: Query actual D1 row usage for current UTC day
         shell: bash
@@ -92,22 +100,49 @@ jobs:
                 write_queries: ([$groups[].sum.writeQueries // 0] | add // 0),
                 rows_read: ([$groups[].sum.rowsRead // 0] | add // 0),
                 rows_written: ([$groups[].sum.rowsWritten // 0] | add // 0),
+                free_rows_read_daily_allowance: 5000000,
                 free_rows_written_daily_allowance: 100000
               }
+            | .rows_read_fraction_of_free_allowance = (.rows_read / .free_rows_read_daily_allowance)
             | .rows_written_fraction_of_free_allowance = (.rows_written / .free_rows_written_daily_allowance)
           ' d1-actual-usage-probe/response.json \
             > d1-actual-usage-probe/summary.json
 
           cat d1-actual-usage-probe/summary.json
 
+      - name: Capture top queries by rows read
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm exec wrangler d1 insights xrpl-lending-monitor \
+            --sort-type=sum \
+            --sort-by=reads \
+            --sort-direction=DESC \
+            --limit=20 \
+            --timePeriod=1d \
+            --json \
+            > d1-actual-usage-probe/top-reads.json
+          jq -e 'type == "array"' d1-actual-usage-probe/top-reads.json > /dev/null
+          jq '[.[] | {query, totalRowsRead, totalRowsWritten, numberOfTimesRun, totalDurationMs}]' \
+            d1-actual-usage-probe/top-reads.json \
+            > d1-actual-usage-probe/top-reads-summary.json
+          cat d1-actual-usage-probe/top-reads-summary.json
+
+      - name: Write usage summary
+        shell: bash
+        run: |
+          set -euo pipefail
           {
             echo '## D1 actual usage probe'
             echo
             jq -r '"- UTC date: `\(.date_utc)`"' d1-actual-usage-probe/summary.json
+            jq -r '"- Rows read: `\(.rows_read)` / `\(.free_rows_read_daily_allowance)` Free daily allowance"' d1-actual-usage-probe/summary.json
             jq -r '"- Rows written: `\(.rows_written)` / `\(.free_rows_written_daily_allowance)` Free daily allowance"' d1-actual-usage-probe/summary.json
-            jq -r '"- Rows read: `\(.rows_read)`"' d1-actual-usage-probe/summary.json
             jq -r '"- Write queries: `\(.write_queries)`"' d1-actual-usage-probe/summary.json
             jq -r '"- Read queries: `\(.read_queries)`"' d1-actual-usage-probe/summary.json
+            echo
+            echo '### Top D1 queries by rows read'
+            jq -r '.[] | "- rows_read=`\(.totalRowsRead)` runs=`\(.numberOfTimesRun)` rows_written=`\(.totalRowsWritten)` — `\(.query | gsub("\\n"; " ") | .[0:160])`"' d1-actual-usage-probe/top-reads-summary.json
           } >> "${GITHUB_STEP_SUMMARY}"
 
       - uses: actions/upload-artifact@v4
