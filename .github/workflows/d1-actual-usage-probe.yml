@@ -1,0 +1,119 @@
+name: D1 actual usage probe
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/d1-actual-usage-probe.yml
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  D1_DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Query actual D1 row usage for current UTC day
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p d1-actual-usage-probe
+          TODAY="$(date -u +%F)"
+
+          read -r -d '' QUERY <<'GRAPHQL' || true
+          query D1Usage(
+            $accountTag: string!
+            $start: Date
+            $end: Date
+            $databaseId: string
+          ) {
+            viewer {
+              accounts(filter: { accountTag: $accountTag }) {
+                d1AnalyticsAdaptiveGroups(
+                  limit: 10000
+                  filter: {
+                    date_geq: $start
+                    date_leq: $end
+                    databaseId: $databaseId
+                  }
+                  orderBy: [date_DESC]
+                ) {
+                  sum {
+                    readQueries
+                    writeQueries
+                    rowsRead
+                    rowsWritten
+                  }
+                  dimensions {
+                    date
+                    databaseId
+                  }
+                }
+              }
+            }
+          }
+          GRAPHQL
+
+          jq -n \
+            --arg query "${QUERY}" \
+            --arg accountTag "${CLOUDFLARE_ACCOUNT_ID}" \
+            --arg start "${TODAY}" \
+            --arg end "${TODAY}" \
+            --arg databaseId "${D1_DATABASE_ID}" \
+            '{query: $query, variables: {accountTag: $accountTag, start: $start, end: $end, databaseId: $databaseId}}' \
+            > d1-actual-usage-probe/request.json
+
+          curl --fail-with-body --silent --show-error --retry 3 \
+            -X POST \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            -H 'Content-Type: application/json' \
+            --data @d1-actual-usage-probe/request.json \
+            https://api.cloudflare.com/client/v4/graphql \
+            > d1-actual-usage-probe/response.json
+
+          jq -e '((.errors // []) | length) == 0 and (.data.viewer.accounts | length) > 0' \
+            d1-actual-usage-probe/response.json > /dev/null
+
+          jq --arg date "${TODAY}" --arg databaseId "${D1_DATABASE_ID}" '
+            [.data.viewer.accounts[0].d1AnalyticsAdaptiveGroups[]] as $groups
+            | {
+                date_utc: $date,
+                database_id: $databaseId,
+                groups: ($groups | length),
+                read_queries: ([$groups[].sum.readQueries // 0] | add // 0),
+                write_queries: ([$groups[].sum.writeQueries // 0] | add // 0),
+                rows_read: ([$groups[].sum.rowsRead // 0] | add // 0),
+                rows_written: ([$groups[].sum.rowsWritten // 0] | add // 0),
+                free_rows_written_daily_allowance: 100000
+              }
+            | .rows_written_fraction_of_free_allowance = (.rows_written / .free_rows_written_daily_allowance)
+          ' d1-actual-usage-probe/response.json \
+            > d1-actual-usage-probe/summary.json
+
+          cat d1-actual-usage-probe/summary.json
+
+          {
+            echo '## D1 actual usage probe'
+            echo
+            jq -r '"- UTC date: `\(.date_utc)`"' d1-actual-usage-probe/summary.json
+            jq -r '"- Rows written: `\(.rows_written)` / `\(.free_rows_written_daily_allowance)` Free daily allowance"' d1-actual-usage-probe/summary.json
+            jq -r '"- Rows read: `\(.rows_read)`"' d1-actual-usage-probe/summary.json
+            jq -r '"- Write queries: `\(.write_queries)`"' d1-actual-usage-probe/summary.json
+            jq -r '"- Read queries: `\(.read_queries)`"' d1-actual-usage-probe/summary.json
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: d1-actual-usage-probe
+          path: d1-actual-usage-probe
+          if-no-files-found: error
+          retention-days: 14
