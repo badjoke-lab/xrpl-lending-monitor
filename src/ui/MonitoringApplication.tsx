@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react'
 
 import { MonitoringShell } from './components/MonitoringShell'
 import { useDashboardResources } from './hooks/useDashboardResources'
+import { trackPageView } from './lib/analytics'
+import { applyPageSeoMetadata } from './lib/seo'
 import { resolveMonitoringPage } from './MonitoringRouter'
 
 function normalizePath(pathname: string): string {
@@ -67,6 +69,11 @@ export function MonitoringApplication() {
       window.removeEventListener('hashchange', handleHashChange)
     }
   }, [])
+
+  useEffect(() => {
+    applyPageSeoMetadata(currentPath)
+    trackPageView(`${currentPath}${window.location.search}`)
+  }, [currentPath])
 
   const navigate = useCallback((value: string) => {
     const target = resolveTarget(value)
