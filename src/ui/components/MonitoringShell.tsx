@@ -1,4 +1,4 @@
-import type { MouseEvent, ReactNode } from 'react'
+import { useEffect, useState, type MouseEvent, type ReactNode } from 'react'
 
 import { formatDuration, formatInteger, statusTone, titleCase } from '../lib/formatting'
 import type { NetworkStatusResponse, ResourceState } from '../types/api'
@@ -92,7 +92,17 @@ function Context({ status }: { status: ResourceState<NetworkStatusResponse> }) {
 }
 
 export function MonitoringShell({ children, currentPath, status, onNavigate, onReload }: Props) {
-  const home = (event: MouseEvent<HTMLAnchorElement>) => { event.preventDefault(); onNavigate('/') }
+  const [mobileMoreOpen, setMobileMoreOpen] = useState(false)
+
+  useEffect(() => {
+    setMobileMoreOpen(false)
+  }, [currentPath])
+
+  const navigateFromMobile = (path: string) => {
+    setMobileMoreOpen(false)
+    onNavigate(path)
+  }
+  const home = (event: MouseEvent<HTMLAnchorElement>) => { event.preventDefault(); navigateFromMobile('/') }
   const loansActive = currentPath === '/loans' || currentPath.startsWith('/loans/')
   const activityActive = currentPath === '/activity' || currentPath.startsWith('/transactions/')
   const searchActive = currentPath === '/search' || currentPath.startsWith('/accounts/')
@@ -125,21 +135,35 @@ export function MonitoringShell({ children, currentPath, status, onNavigate, onR
           className={loansActive ? 'is-active' : ''}
           href="/loans"
           aria-current={loansActive ? 'page' : undefined}
-          onClick={(event) => { event.preventDefault(); onNavigate('/loans') }}
+          onClick={(event) => { event.preventDefault(); navigateFromMobile('/loans') }}
         >Loans</a>
         <a
           className={activityActive ? 'is-active' : ''}
           href="/activity"
           aria-current={activityActive ? 'page' : undefined}
-          onClick={(event) => { event.preventDefault(); onNavigate('/activity') }}
+          onClick={(event) => { event.preventDefault(); navigateFromMobile('/activity') }}
         >Activity</a>
         <a
           className={searchActive ? 'is-active' : ''}
           href="/search"
           aria-current={searchActive ? 'page' : undefined}
-          onClick={(event) => { event.preventDefault(); onNavigate('/search') }}
+          onClick={(event) => { event.preventDefault(); navigateFromMobile('/search') }}
         >Search</a>
-        <details><summary>More</summary><div className="mobile-more-panel"><Navigation currentPath={currentPath} onNavigate={onNavigate} /></div></details>
+        <a
+          href="#mobile-more-panel"
+          role="button"
+          aria-controls="mobile-more-panel"
+          aria-expanded={mobileMoreOpen}
+          onClick={(event) => {
+            event.preventDefault()
+            setMobileMoreOpen((open) => !open)
+          }}
+        >More</a>
+        {mobileMoreOpen ? (
+          <div id="mobile-more-panel" className="mobile-more-panel">
+            <Navigation currentPath={currentPath} onNavigate={navigateFromMobile} />
+          </div>
+        ) : null}
       </nav>
     </div>
   )

@@ -103,7 +103,7 @@ test('exposes lifecycle audit navigation on mobile without write controls', asyn
   await page.route('**/api/audit/lifecycle?*', (route) => route.fulfill({ json: lifecycleResponse() }))
 
   await page.goto('/about')
-  await page.locator('.mobile-bottom-nav details').click()
+  await page.locator('.mobile-bottom-nav').getByRole('button', { name: 'More' }).click()
   await page.locator('.mobile-more-panel').getByRole('link', { name: 'Lifecycle', exact: true }).click()
   await expect(page).toHaveURL(/\/audit\/lifecycle$/)
   await expect(page.getByRole('heading', { level: 1, name: 'Loan Lifecycle' })).toBeVisible()

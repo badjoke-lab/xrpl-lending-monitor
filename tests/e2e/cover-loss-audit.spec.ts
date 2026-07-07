@@ -124,7 +124,7 @@ test('exposes cover and loss audit navigation on mobile without write controls',
   await page.route('**/api/audit/cover-loss?*', (route) => route.fulfill({ json: coverLossResponse() }))
 
   await page.goto('/about')
-  await page.locator('.mobile-bottom-nav details').click()
+  await page.locator('.mobile-bottom-nav').getByRole('button', { name: 'More' }).click()
   await page.locator('.mobile-more-panel').getByRole('link', { name: 'Cover & Loss', exact: true }).click()
   await expect(page).toHaveURL(/\/audit\/cover-loss$/)
   await expect(page.getByRole('heading', { level: 1, name: 'Cover & Loss' })).toBeVisible()

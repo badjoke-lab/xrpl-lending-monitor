@@ -162,7 +162,7 @@ test('exposes Loan Broker navigation on mobile', async ({ page }) => {
 
   await page.goto('/loan-brokers')
   await expect(page.locator('.sidebar')).toBeHidden()
-  await page.locator('.mobile-bottom-nav summary').click()
+  await page.locator('.mobile-bottom-nav').getByRole('button', { name: 'More' }).click()
   await expect(page.locator('.mobile-more-panel').getByRole('link', { name: 'Loan Brokers' })).toBeVisible()
   await expect(page.locator('.broker-filter-form')).toBeVisible()
 })

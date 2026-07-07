@@ -92,7 +92,7 @@ test('exposes Devnet Epochs navigation on mobile without write controls', async 
   await page.route('**/api/epochs', (route) => route.fulfill({ json: { network: 'devnet', data: [epochRecord()] } }))
 
   await page.goto('/about')
-  await page.locator('.mobile-bottom-nav details').click()
+  await page.locator('.mobile-bottom-nav').getByRole('button', { name: 'More' }).click()
   await page.locator('.mobile-more-panel').getByRole('link', { name: 'Devnet Epochs', exact: true }).click()
   await expect(page).toHaveURL(/\/epochs$/)
   await expect(page.getByRole('heading', { level: 1, name: 'Devnet Epochs' })).toBeVisible()

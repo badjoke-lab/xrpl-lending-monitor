@@ -120,7 +120,7 @@ test('keeps documentation usable at mobile width and increased text size', async
   }
 
   await page.goto('/about')
-  await page.locator('.mobile-bottom-nav details').click()
+  await page.locator('.mobile-bottom-nav').getByRole('button', { name: 'More' }).click()
   await page.locator('.mobile-more-panel').getByRole('link', { name: 'API', exact: true }).click()
   await expect(page.getByRole('heading', { level: 1, name: 'Read-only API' })).toBeVisible()
   await expectNoHorizontalOverflow(page)
