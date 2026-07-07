@@ -1,4 +1,4 @@
-import { useState, type MouseEvent, type ReactNode } from 'react'
+import { useEffect, useState, type MouseEvent, type ReactNode } from 'react'
 
 import { formatDuration, formatInteger, statusTone, titleCase } from '../lib/formatting'
 import { LoanDetailPage } from '../pages/LoanDetailPage'
@@ -101,6 +101,11 @@ function resolveContent(currentPath: string, children: ReactNode, onNavigate: (p
 
 export function AppShell({ children, currentPath, status, onNavigate, onReload }: Props) {
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false)
+
+  useEffect(() => {
+    setMobileMoreOpen(false)
+  }, [currentPath])
+
   const navigateFromMobile = (path: string) => {
     setMobileMoreOpen(false)
     onNavigate(path)
