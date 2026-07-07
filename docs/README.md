@@ -27,7 +27,8 @@ This directory is the source of truth for XRPL Lending Monitor.
 21. [`development-roadmap.md`](development-roadmap.md) — active implementation order, dependencies, target dates, and exit conditions
 22. [`implementation-status.md`](implementation-status.md) — public implementation state, active unit, and current release blockers
 23. [`operations-public-discovery.md`](operations-public-discovery.md) — final-host canonical, robots, sitemap, analytics, and Search Console operation
-24. [`decision-log.md`](decision-log.md) — accepted and superseded architectural and product decisions
+24. [`operations-unimpairment-witness.md`](operations-unimpairment-witness.md) — bounded external Devnet semantic-witness operation for the remaining M1 unimpairment path
+25. [`decision-log.md`](decision-log.md) — accepted and superseded architectural and product decisions
 
 ## Authority rules
 
@@ -44,6 +45,7 @@ This directory is the source of truth for XRPL Lending Monitor.
 - `development-roadmap.md` defines active implementation order, dependencies, and target dates.
 - `implementation-status.md` records the current public implementation state.
 - `operations-public-discovery.md` defines final-host, canonical, sitemap, analytics, and Search Console launch operation.
+- `operations-unimpairment-witness.md` defines the custody boundary, protocol preconditions, abort conditions, and evidence order for any separately controlled external Devnet unimpairment witness.
 - `development-roadmap.md` and `implementation-status.md` must be re-read at the start of each implementation, operational, UI-audit, SEO, or release-preparation unit and reconciled with newly captured evidence before dependent work proceeds.
 - `decision-log.md` records why material architecture and product choices were accepted or superseded.
 - Root `AGENTS.md` defines repository contribution rules.
