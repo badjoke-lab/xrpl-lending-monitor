@@ -9,88 +9,21 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: Capture audit collection reads and publication stats
+      - name: Verify production audit collection reads
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p audit-pages-probe
           B="https://xrpl-lending-monitor.badjoke-lab.workers.dev"
-          capture() {
-            NAME="$1"
-            URL="$2"
-            curl --max-time 120 -sS -o "audit-pages-probe/${NAME}.json" -w '%{http_code}\n' "${URL}" > "audit-pages-probe/${NAME}.status"
-          }
-          capture lifecycle "${B}/api/audit/lifecycle?limit=100"
-          capture archived "${B}/api/audit/archived?limit=100"
-          capture cover-loss "${B}/api/audit/cover-loss?limit=100"
-
-          curl --max-time 120 -fsS \
-            "https://raw.githubusercontent.com/badjoke-lab/xrpl-lending-monitor/2753a75b2d76775bc8aa7d6d866ea147c353b2b5/history/publication.json" \
-            > audit-pages-probe/publication.json
-          jq '{
-            segmentCount,
-            archived_objects: {
-              total: ([.segments[].recordCounts.archived_objects] | add),
-              nonzero_segments: ([.segments[] | select(.recordCounts.archived_objects > 0)] | length),
-              newest_nonzero: ([.segments | to_entries[] | select(.value.recordCounts.archived_objects > 0) | .key] | max)
-            },
-            loan_lifecycle: {
-              total: ([.segments[].recordCounts.loan_lifecycle] | add),
-              nonzero_segments: ([.segments[] | select(.recordCounts.loan_lifecycle > 0)] | length)
-            },
-            balance_history: {
-              total: ([.segments[].recordCounts.balance_history] | add),
-              nonzero_segments: ([.segments[] | select(.recordCounts.balance_history > 0)] | length)
-            }
-          }' audit-pages-probe/publication.json > audit-pages-probe/publication-stats.json
-
-          node <<'NODE'
-          const fs = require('fs')
-          const publication = JSON.parse(fs.readFileSync('audit-pages-probe/publication.json', 'utf8'))
-          const commit = '2753a75b2d76775bc8aa7d6d866ea147c353b2b5'
-          const root = `https://raw.githubusercontent.com/badjoke-lab/xrpl-lending-monitor/${commit}/`
-
-          async function benchmark(kind) {
-            const descriptors = publication.segments.filter((segment) => segment.recordCounts[kind] > 0).reverse()
-            const started = Date.now()
-            let bytes = 0
-            let requests = 0
-            for (const descriptor of descriptors) {
-              const manifestUrl = root + descriptor.manifestPath
-              const manifestResponse = await fetch(manifestUrl)
-              if (!manifestResponse.ok) throw new Error(`manifest ${manifestResponse.status}`)
-              const manifestBytes = Buffer.from(await manifestResponse.arrayBuffer())
-              bytes += manifestBytes.length
-              requests += 1
-              const manifest = JSON.parse(manifestBytes.toString('utf8'))
-              const file = manifest.files.find((entry) => entry.kind === kind)
-              if (!file) throw new Error(`missing ${kind}`)
-              const assetUrl = new URL(file.path, manifestUrl).toString()
-              const assetResponse = await fetch(assetUrl)
-              if (!assetResponse.ok) throw new Error(`asset ${assetResponse.status}`)
-              const assetBytes = Buffer.from(await assetResponse.arrayBuffer())
-              bytes += assetBytes.length
-              requests += 1
-            }
-            return {
-              kind,
-              nonzeroSegments: descriptors.length,
-              requests,
-              bytes,
-              elapsedMs: Date.now() - started,
-            }
-          }
-
-          Promise.all([
-            benchmark('archived_objects'),
-            benchmark('balance_history'),
-          ]).then((results) => {
-            fs.writeFileSync('audit-pages-probe/remote-read-benchmark.json', JSON.stringify(results, null, 2))
-          }).catch((error) => {
-            console.error(error)
-            process.exit(1)
-          })
-          NODE
+          CODE="$(curl --max-time 120 -sS -o audit-pages-probe/lifecycle.json -w '%{http_code}' "${B}/api/audit/lifecycle?limit=100")"
+          printf '%s\n' "${CODE}" > audit-pages-probe/lifecycle.status
+          test "${CODE}" = "200"
+          CODE="$(curl --max-time 120 -sS -o audit-pages-probe/archived.json -w '%{http_code}' "${B}/api/audit/archived?limit=100")"
+          printf '%s\n' "${CODE}" > audit-pages-probe/archived.status
+          test "${CODE}" = "200"
+          CODE="$(curl --max-time 120 -sS -o audit-pages-probe/cover-loss.json -w '%{http_code}' "${B}/api/audit/cover-loss?limit=100")"
+          printf '%s\n' "${CODE}" > audit-pages-probe/cover-loss.status
+          test "${CODE}" = "200"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
