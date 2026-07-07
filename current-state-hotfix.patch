@@ -1,0 +1,171 @@
+--- a/src/worker/repositories/release-current-state.ts
++++ b/src/worker/repositories/release-current-state.ts
+@@ -150,36 +150,41 @@
+   return matches
+ }
+ 
+-function createReadModelAdapter(
++export function createReadModelAdapter(
+   readModel: GithubCurrentStateReadModelReader,
+   getSource: () => ReleaseCurrentStateSource,
+ ) {
+-  const cache = new Map<string, { kind: ReadModelKind; projection: Projection }>()
++  const baseCache = new Map<string, { kind: ReadModelKind; projection: Projection }>()
++  const resolvedCache = new Map<string, { kind: ReadModelKind; projection: Projection }>()
+ 
+-  function remember(kind: ReadModelKind, projection: Projection): void {
+-    cache.set(projection.id, { kind, projection })
++  function rememberBase(kind: ReadModelKind, projection: Projection): void {
++    baseCache.set(projection.id.toUpperCase(), { kind, projection })
+   }
+ 
+-  function rememberPageItem(kind: ReadModelKind, item: unknown): void {
++  function rememberResolved(kind: ReadModelKind, projection: Projection): void {
++    resolvedCache.set(projection.id.toUpperCase(), { kind, projection })
++  }
++
++  function rememberBasePageItem(kind: ReadModelKind, item: unknown): void {
+     if (kind === 'vault') {
+-      remember('vault', item as VaultCurrentProjection)
++      rememberBase('vault', item as VaultCurrentProjection)
+       return
+     }
+     if (kind === 'loan-broker') {
+       const record = item as ReadModelBrokerRecord
+-      remember('loan-broker', record.broker)
+-      remember('vault', record.vault)
++      rememberBase('loan-broker', record.broker)
++      rememberBase('vault', record.vault)
+       return
+     }
+     const record = item as ReadModelLoanRecord
+-    remember('loan', record.loan)
+-    remember('loan-broker', record.broker)
+-    remember('vault', record.vault)
++    rememberBase('loan', record.loan)
++    rememberBase('loan-broker', record.broker)
++    rememberBase('vault', record.vault)
+   }
+ 
+   async function loadAny(objectId: string): Promise<{ kind: ReadModelKind; projection: Projection } | null> {
+     const id = objectId.toUpperCase()
+-    const cached = cache.get(id)
++    const cached = resolvedCache.get(id)
+     if (cached) return cached
+ 
+     const source = getSource()
+@@ -193,7 +198,7 @@
+         objectId: id,
+       })
+       if (resolved.item) {
+-        remember(kind, resolved.item)
++        rememberResolved(kind, resolved.item)
+         return { kind, projection: resolved.item }
+       }
+     }
+@@ -202,24 +207,27 @@
+ 
+   async function loadBaseAny(objectId: string): Promise<{ kind: ReadModelKind; projection: Projection } | null> {
+     const id = objectId.toUpperCase()
++    const cached = baseCache.get(id)
++    if (cached) return cached
++
+     for (const kind of ['vault', 'loan-broker', 'loan'] as const) {
+       try {
+         if (kind === 'vault') {
+           const item = await readModel.get<VaultCurrentProjection>(id, kind)
+           if (item) {
+-            remember(kind, item)
++            rememberBase(kind, item)
+             return { kind, projection: item }
+           }
+         } else if (kind === 'loan-broker') {
+           const item = await readModel.get<ReadModelBrokerRecord>(id, kind)
+           if (item) {
+-            rememberPageItem(kind, item)
++            rememberBasePageItem(kind, item)
+             return { kind, projection: item.broker }
+           }
+         } else {
+           const item = await readModel.get<ReadModelLoanRecord>(id, kind)
+           if (item) {
+-            rememberPageItem(kind, item)
++            rememberBasePageItem(kind, item)
+             return { kind, projection: item.loan }
+           }
+         }
+@@ -266,7 +274,7 @@
+       assetReads += result.basePageReads
+       for (const item of result.items) {
+         const projection = item
+-        remember(kind, projection)
++        rememberResolved(kind, projection)
+         const field = accountFieldMatches(kind, projection, account, fields)[0]
+         if (!field) continue
+         items.push({
+@@ -336,7 +344,7 @@
+       for (const item of result.items) {
+         if (kind === 'loan-broker') {
+           const projection = item as LoanBrokerCurrentProjection
+-          remember(kind, projection)
++          rememberResolved(kind, projection)
+           items.push({
+             schemaVersion: 1,
+             bucket: 0,
+@@ -350,7 +358,7 @@
+           })
+         } else {
+           const projection = item as LoanCurrentProjection
+-          remember(kind, projection)
++          rememberResolved(kind, projection)
+           items.push({
+             schemaVersion: 1,
+             bucket: 0,
+@@ -435,7 +443,7 @@
+         scope: `${kind}:${options.direction}`,
+         maxPageReads: Math.max(1, Math.min(options.maxAssetReads ?? 4, 4)),
+         predicate: (item) => {
+-          rememberPageItem(kind, item)
++          rememberBasePageItem(kind, item)
+           const projection = projectionFromPage(kind, item)
+           return predicate ? predicate(fakeRecord(kind, projection)) : true
+         },
+--- a/.github/workflows/m1-exit-review.yml
++++ b/.github/workflows/m1-exit-review.yml
+@@ -85,13 +85,13 @@
+           BASE="$(cat m1-exit-review/base-url.txt)"
+ 
+           curl --fail-with-body --silent --show-error --retry 3 \
+-            "${BASE}/api/vaults?limit=1" \
++            "${BASE}/api/vaults?limit=25&sort=id_asc" \
+             > m1-exit-review/vault-list.json
+           curl --fail-with-body --silent --show-error --retry 3 \
+-            "${BASE}/api/loan-brokers?limit=1" \
++            "${BASE}/api/loan-brokers?limit=25&sort=id_asc" \
+             > m1-exit-review/loan-broker-list.json
+           curl --fail-with-body --silent --show-error --retry 3 \
+-            "${BASE}/api/loans?limit=1" \
++            "${BASE}/api/loans?limit=25&sort=id_asc" \
+             > m1-exit-review/loan-list.json
+ 
+           jq -e '.availability.state == "available" and (.data | length) > 0 and .snapshot.id == "devnet-3432924-canonical"' \
+--- a/docs/implementation-status.md
++++ b/docs/implementation-status.md
+@@ -12,6 +12,8 @@
+ 
+ The latest recorded runtime evidence shows continued collector progress with zero observed failures and negative lag slope. HYB-7 has now observed created current objects, modified current objects, deletion/archive handling, ledger continuity, and cursor/overlay agreement after the replacement boundary. Remaining semantic paths are LoanPay, impairment, unimpairment, default, activity/history/balance consistency, and freshness at zero lag.
+ 
++A read-only production list probe on 2026-07-07 compared current-state endpoints at `limit=1` and the UI-shaped `limit=25`. Vault list reads returned HTTP 200 at both limits. Loan Broker and Loan list reads returned HTTP 200 at `limit=1` but HTTP 500 at `limit=25`. The isolated hotfix unit keeps collector and D1 continuation behavior unchanged while removing relationship-read amplification in the release current-state adapter and strengthening the M1 exit review to exercise 25-row list reads.
++
+ M5-5 and M6 remain gated behind M1 exit.
+ 
+ ## Canonical history and replacement base
+@@ -87,7 +89,8 @@
+ - permanent read-only runtime monitoring and explicit history-source diagnostics;
+ - D1-safe monitoring cadence separation and a read-budget guard for deep diagnostics;
+ - indexed HYB-7 overlay/object-change source matching to remove the observed high-read correlated lookup;
+-- reproducible manual M1 exit review workflow capturing runtime gates, source invariants, and current-state exact-read evidence.
++- reproducible manual M1 exit review workflow capturing runtime gates, source invariants, and current-state exact-read evidence;
++- production-shaped current-state list probing that distinguishes one-row success from UI-shaped 25-row relationship-read failures.
+ 
+ Mainnet remains disabled.
