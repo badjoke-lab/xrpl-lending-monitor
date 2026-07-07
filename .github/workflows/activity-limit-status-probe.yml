@@ -1,0 +1,26 @@
+name: Activity limit status probe
+on:
+  pull_request:
+    paths:
+      - .github/workflows/activity-limit-status-probe.yml
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe Activity limits
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p activity-limit-probe
+          B="https://xrpl-lending-monitor.badjoke-lab.workers.dev"
+          for LIMIT in 6 25 100; do
+            curl --max-time 60 -sS -o "activity-limit-probe/activity-${LIMIT}.json" -w '%{http_code}\n' "${B}/api/activity?limit=${LIMIT}" > "activity-limit-probe/activity-${LIMIT}.status"
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: activity-limit-status-probe
+          path: activity-limit-probe
+          retention-days: 1
