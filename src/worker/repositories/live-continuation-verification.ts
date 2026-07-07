@@ -159,6 +159,11 @@ export async function readLiveContinuationEvidence(
                SELECT 1 FROM object_changes c
                WHERE c.network = o.network
                  AND c.epoch_id = o.epoch_id
+                 AND c.object_type = CASE o.object_type
+                   WHEN 'vault' THEN 'Vault'
+                   WHEN 'loan_broker' THEN 'LoanBroker'
+                   WHEN 'loan' THEN 'Loan'
+                 END
                  AND c.object_id = o.object_id
                  AND c.action = 'created'
                  AND c.ledger_index > ?3
@@ -168,6 +173,11 @@ export async function readLiveContinuationEvidence(
                SELECT 1 FROM object_changes c
                WHERE c.network = o.network
                  AND c.epoch_id = o.epoch_id
+                 AND c.object_type = CASE o.object_type
+                   WHEN 'vault' THEN 'Vault'
+                   WHEN 'loan_broker' THEN 'LoanBroker'
+                   WHEN 'loan' THEN 'Loan'
+                 END
                  AND c.object_id = o.object_id
                  AND c.action = 'modified'
                  AND c.ledger_index > ?3
