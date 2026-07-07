@@ -1,6 +1,6 @@
 # Implementation status
 
-Last updated: 2026-07-07.
+Last updated: 2026-07-08.
 
 ## Current phase
 
@@ -21,9 +21,9 @@ The latest bounded runtime probe captured at 2026-07-07 13:00 UTC showed:
 
 HYB-7 observes created current objects, modified current objects, LoanPay/payment, impairment, default, deletion/archive handling, activity/history/balance consistency, ledger continuity, cursor/overlay agreement, and freshness. Only unimpairment remains missing. M1 `validatedHeadReached` is observed, while `liveContinuation` remains missing only because unimpairment has not yet been observed.
 
-The production screenshot-audit workflow and capture hardening are merged. The capture path waits for settled page state and records route/profile/detail-ID manifest data, overflow diagnostics, console errors, page errors, and HTTP error responses.
+The production screenshot-audit workflow, capture hardening, deterministic evidence summarization, and strict technical evaluation are merged. The capture path waits for settled page state and records route/profile/detail-ID manifest data, overflow diagnostics, console errors, page errors, and HTTP error responses. The analyzer writes machine-readable JSON and human-readable Markdown summaries, requires exact expected route/profile capture coverage, rejects missing, duplicate, and unexpected diagnostic records, classifies page-level horizontal overflow separately from nested overflow review candidates, and fails the audit after writing evidence when strict technical checks do not pass. Human screenshot review remains required even when technical evaluation passes.
 
-The production screenshot-audit and unimpairment candidate-review workflows now share a fail-closed actual D1 headroom check. After collector preflight and before Playwright installation, page traversal, or candidate-list discovery, the workflow queries current UTC-day D1 analytics, records a public-safe usage summary, and requires both rows-read and rows-written fractions to remain below the existing `0.8` threshold. Manual confirmation remains an operator-intent gate but no longer substitutes for measured usage.
+The production screenshot-audit and unimpairment candidate-review workflows share a fail-closed actual D1 headroom check. After collector preflight and before Playwright installation, page traversal, or candidate-list discovery, the workflow queries current UTC-day D1 analytics, records a public-safe usage summary, and requires both rows-read and rows-written fractions to remain below the existing `0.8` threshold. Manual confirmation remains an operator-intent gate but no longer substitutes for measured usage.
 
 Route-aware SEO/discoverability preparation is implemented. Canonical and structured-data output remain inactive until an explicit public-site origin is configured, sitemap output is generated only for that configured origin, and GA4 remains inactive until a valid measurement ID is supplied.
 
@@ -89,7 +89,7 @@ The active work is split into permanent monitoring plus two coordinated tracks.
 
 1. After UTC-day reset or another safe point, dispatch the audit workflow and let its actual D1 usage check decide eligibility.
 2. Proceed with the screenshot crawl only when measured headroom and healthy zero-lag collector preflight both pass.
-3. Inspect screenshots together with manifest and technical diagnostics.
+3. Inspect the generated JSON/Markdown technical summary, raw manifest and diagnostics, and screenshots together; technical evaluation accelerates and enforces triage but does not replace human visual review.
 4. Remediate confirmed UI defects and re-audit affected routes.
 
 Tracks A and B may progress in parallel. Neither may weaken collector integrity or D1 resource guards.
@@ -99,7 +99,7 @@ Tracks A and B may progress in parallel. Neither may weaken collector integrity 
 1. Keep permanent monitoring active.
 2. After UTC-day reset or another safe point, dispatch the self-enforcing D1 headroom checks for candidate review and production screenshot audit.
 3. Only when the measured gate passes, perform bounded candidate discovery and the screenshot crawl.
-4. Inspect evidence, fix confirmed UI defects, and re-audit affected routes.
+4. Inspect the generated audit summaries, raw diagnostics, and screenshots, fix confirmed UI defects, and re-audit affected routes.
 5. Resolve the sole unimpairment witness gap through real Devnet evidence.
 6. Execute M1 exit review with readiness enforcement and reconcile status from the artifact.
 7. Complete M5-5 real-data integration, bounded live exports, browser regression, current/history consistency, lifecycle/current-object consistency, archive/current exclusion, and bounded production behavior smoke.
