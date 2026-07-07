@@ -31,7 +31,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Probe production public history endpoints
+      - name: Probe production public history endpoints after sparse-scan fix
         shell: bash
         run: |
           mkdir -p probe-output
