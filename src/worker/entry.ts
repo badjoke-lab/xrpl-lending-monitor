@@ -12,6 +12,7 @@ import { diagnoseM1RuntimeExit, reviewM1RuntimeExit } from './operator/m1-runtim
 import { rebaseToReplacementBase } from './operator/replacement-base-rebase'
 import { resolveHistorySource } from './repositories/history-source'
 import { getIncrementalCollectorState } from './repositories/incremental-collector-state'
+import { readLoanActivityDiagnostics } from './repositories/loan-activity-diagnostics'
 import { getSyncState } from './repositories/network-status-repository'
 import { openConfiguredReleaseCurrentState } from './repositories/release-current-state'
 import { handleHybridExactHistoryOverride } from './routes/hybrid-exact-history-override'
@@ -46,6 +47,9 @@ const worker: ExportedHandler<Bindings> = {
       const runtimeConfig = resolveRuntimeConfig(env)
       const [collector, sync] = await Promise.all([getIncrementalCollectorState(env.DB), getSyncState(env.DB)])
       return Response.json(serializeCollectorStatus({ collector, sync, staleAfterSeconds: runtimeConfig.staleAfterSeconds }))
+    }
+    if (request.method === 'GET' && url.pathname === '/api/status/loan-activity-witnesses') {
+      return Response.json(await readLoanActivityDiagnostics(env.DB))
     }
     if (request.method === 'GET' && url.pathname === '/api/status/continuation-verification') return Response.json(await verifyLiveContinuation(env.DB))
     if (request.method === 'GET' && url.pathname === '/api/status/continuation-diagnostics') return Response.json(await diagnoseLiveContinuation(env.DB))
