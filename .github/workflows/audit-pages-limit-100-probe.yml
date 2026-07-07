@@ -43,6 +43,52 @@ jobs:
               nonzero_segments: ([.segments[] | select(.recordCounts.balance_history > 0)] | length)
             }
           }' audit-pages-probe/publication.json > audit-pages-probe/publication-stats.json
+
+          node <<'NODE'
+          const fs = require('fs')
+          const publication = JSON.parse(fs.readFileSync('audit-pages-probe/publication.json', 'utf8'))
+          const commit = '2753a75b2d76775bc8aa7d6d866ea147c353b2b5'
+          const root = `https://raw.githubusercontent.com/badjoke-lab/xrpl-lending-monitor/${commit}/`
+
+          async function benchmark(kind) {
+            const descriptors = publication.segments.filter((segment) => segment.recordCounts[kind] > 0).reverse()
+            const started = Date.now()
+            let bytes = 0
+            let requests = 0
+            for (const descriptor of descriptors) {
+              const manifestResponse = await fetch(root + descriptor.manifestPath)
+              if (!manifestResponse.ok) throw new Error(`manifest ${manifestResponse.status}`)
+              const manifestBytes = Buffer.from(await manifestResponse.arrayBuffer())
+              bytes += manifestBytes.length
+              requests += 1
+              const manifest = JSON.parse(manifestBytes.toString('utf8'))
+              const file = manifest.files.find((entry) => entry.kind === kind)
+              if (!file) throw new Error(`missing ${kind}`)
+              const assetResponse = await fetch(root + file.path)
+              if (!assetResponse.ok) throw new Error(`asset ${assetResponse.status}`)
+              const assetBytes = Buffer.from(await assetResponse.arrayBuffer())
+              bytes += assetBytes.length
+              requests += 1
+            }
+            return {
+              kind,
+              nonzeroSegments: descriptors.length,
+              requests,
+              bytes,
+              elapsedMs: Date.now() - started,
+            }
+          }
+
+          Promise.all([
+            benchmark('archived_objects'),
+            benchmark('balance_history'),
+          ]).then((results) => {
+            fs.writeFileSync('audit-pages-probe/remote-read-benchmark.json', JSON.stringify(results, null, 2))
+          }).catch((error) => {
+            console.error(error)
+            process.exit(1)
+          })
+          NODE
       - uses: actions/upload-artifact@v4
         if: always()
         with:
