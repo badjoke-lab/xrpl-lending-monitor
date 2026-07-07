@@ -92,7 +92,7 @@ test('exposes documentation routes through the mobile More navigation', async ({
 
   await page.goto('/methodology#provenance')
   await expect(page.locator('.sidebar')).toBeHidden()
-  await page.locator('.mobile-bottom-nav details').click()
+  await page.locator('.mobile-bottom-nav').getByRole('button', { name: 'More' }).click()
   await expect(page.locator('.mobile-more-panel').getByRole('link', { name: 'Methodology' })).toHaveAttribute('aria-current', 'page')
   await expect(page.locator('.mobile-more-panel').getByRole('link', { name: 'API' })).toHaveAttribute('href', '/api')
   await expect(page.locator('.mobile-more-panel').getByRole('link', { name: 'About' })).toHaveAttribute('href', '/about')

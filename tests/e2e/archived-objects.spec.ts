@@ -139,7 +139,7 @@ test('exposes archived object navigation on mobile', async ({ page }) => {
   await page.route('**/api/audit/archived?*', (route) => route.fulfill({ json: archivedListResponse() }))
 
   await page.goto('/about')
-  await page.locator('.mobile-bottom-nav details').click()
+  await page.locator('.mobile-bottom-nav').getByRole('button', { name: 'More' }).click()
   await page.locator('.mobile-more-panel').getByRole('link', { name: 'Archived Objects', exact: true }).click()
   await expect(page).toHaveURL(/\/audit\/archived$/)
   await expect(page.getByRole('heading', { level: 1, name: 'Archived Objects' })).toBeVisible()
