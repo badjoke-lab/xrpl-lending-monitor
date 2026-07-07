@@ -1,0 +1,114 @@
+name: Apply current-state hotfix v2 once
+on:
+  pull_request:
+    paths: [.github/workflows/apply-current-state-hotfix-v2-temp.yml]
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+      - name: Apply bounded hotfix patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git log -1 --pretty=%s)" = "Add robust one-shot current-state hotfix applier" || exit 0
+          python <<'PY'
+          from pathlib import Path
+
+          p = Path('src/worker/repositories/release-current-state.ts')
+          s = p.read_text()
+          s = s.replace('function createReadModelAdapter(\n', 'export function createReadModelAdapter(\n', 1)
+
+          a = s.index('  const cache = new Map<string, { kind: ReadModelKind; projection: Projection }>()')
+          b = s.index('  async function loadAny', a)
+          cache_block = '''  const baseCache = new Map<string, { kind: ReadModelKind; projection: Projection }>()
+          const resolvedCache = new Map<string, { kind: ReadModelKind; projection: Projection }>()
+
+          function rememberBase(kind: ReadModelKind, projection: Projection): void {
+            baseCache.set(projection.id.toUpperCase(), { kind, projection })
+          }
+
+          function rememberResolved(kind: ReadModelKind, projection: Projection): void {
+            resolvedCache.set(projection.id.toUpperCase(), { kind, projection })
+          }
+
+          function rememberBasePageItem(kind: ReadModelKind, item: unknown): void {
+            if (kind === 'vault') {
+              rememberBase('vault', item as VaultCurrentProjection)
+              return
+            }
+            if (kind === 'loan-broker') {
+              const record = item as ReadModelBrokerRecord
+              rememberBase('loan-broker', record.broker)
+              rememberBase('vault', record.vault)
+              return
+            }
+            const record = item as ReadModelLoanRecord
+            rememberBase('loan', record.loan)
+            rememberBase('loan-broker', record.broker)
+            rememberBase('vault', record.vault)
+          }
+
+          '''
+          s = s[:a] + cache_block + s[b:]
+
+          a = s.index('  async function loadAny')
+          b = s.index('  async function loadBaseAny', a)
+          segment = s[a:b]
+          segment = segment.replace('cache.get(id)', 'resolvedCache.get(id)', 1)
+          segment = segment.replace('remember(kind, resolved.item)', 'rememberResolved(kind, resolved.item)', 1)
+          s = s[:a] + segment + s[b:]
+
+          a = s.index('  async function loadBaseAny')
+          b = s.index('  async function findAccounts', a)
+          segment = s[a:b]
+          marker = '    const id = objectId.toUpperCase()\n'
+          segment = segment.replace(marker, marker + '    const cached = baseCache.get(id)\n    if (cached) return cached\n\n', 1)
+          segment = segment.replace('remember(kind, item)', 'rememberBase(kind, item)')
+          segment = segment.replace('rememberPageItem(kind, item)', 'rememberBasePageItem(kind, item)')
+          s = s[:a] + segment + s[b:]
+
+          a = s.index('  async function findAccounts')
+          segment = s[a:]
+          segment = segment.replace('remember(kind, projection)', 'rememberResolved(kind, projection)')
+          segment = segment.replace('rememberPageItem(kind, item)', 'rememberBasePageItem(kind, item)')
+          s = s[:a] + segment
+          p.write_text(s)
+
+          p = Path('.github/workflows/m1-exit-review.yml')
+          s = p.read_text()
+          s = s.replace('/api/vaults?limit=1', '/api/vaults?limit=25&sort=id_asc')
+          s = s.replace('/api/loan-brokers?limit=1', '/api/loan-brokers?limit=25&sort=id_asc')
+          s = s.replace('/api/loans?limit=1', '/api/loans?limit=25&sort=id_asc')
+          p.write_text(s)
+
+          p = Path('docs/implementation-status.md')
+          s = p.read_text()
+          marker = 'M5-5 and M6 remain gated behind M1 exit.\n'
+          paragraph = 'A read-only production list probe on 2026-07-07 compared current-state endpoints at `limit=1` and the UI-shaped `limit=25`. Vault list reads returned HTTP 200 at both limits. Loan Broker and Loan list reads returned HTTP 200 at `limit=1` but HTTP 500 at `limit=25`. The isolated hotfix keeps collector and D1 continuation behavior unchanged while removing relationship-read amplification in the release current-state adapter and strengthening the M1 exit review to exercise 25-row list reads.\n\n'
+          if paragraph not in s:
+            s = s.replace(marker, paragraph + marker, 1)
+          old = '- reproducible manual M1 exit review workflow capturing runtime gates, source invariants, and current-state exact-read evidence.\n'
+          new = '- reproducible manual M1 exit review workflow capturing runtime gates, source invariants, and current-state exact-read evidence;\n- production-shaped current-state list probing that distinguishes one-row success from UI-shaped 25-row relationship-read failures.\n'
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+          PY
+
+          rm -f .github/workflows/source-snapshot-temp.yml
+          rm -f .github/workflows/apply-current-state-hotfix-temp.yml
+          rm -f .github/workflows/apply-current-state-hotfix-v2-temp.yml
+
+          grep -q 'const baseCache' src/worker/repositories/release-current-state.ts
+          grep -q 'const resolvedCache' src/worker/repositories/release-current-state.ts
+          grep -q 'limit=25&sort=id_asc' .github/workflows/m1-exit-review.yml
+          test -f src/worker/repositories/release-current-state.test.ts
+
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "Fix current-state relation list reads"
+          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
