@@ -1,0 +1,66 @@
+{
+  "recorded_at": "2026-07-07T05:59:00Z",
+  "network": "devnet",
+  "source": "read-only production runtime probe",
+  "collector": {
+    "status": "behind",
+    "cursor": 3447484,
+    "validated_head": 3454840,
+    "lag_ledgers": 7356,
+    "consecutive_failures": 0,
+    "latest_run": {
+      "rpc_requests": 40,
+      "endpoint_attempts": 40,
+      "ledgers_processed": 40,
+      "inspected_transactions": 8,
+      "lending_transactions": 0,
+      "estimated_rows": 48,
+      "estimated_statements": 47,
+      "overlay_mutations": 0
+    }
+  },
+  "hyb7": {
+    "passed": false,
+    "paths": {
+      "createdCurrent": "observed",
+      "modifiedCurrent": "observed",
+      "loanPayment": "observed",
+      "impaired": "missing",
+      "unimpaired": "missing",
+      "defaulted": "missing",
+      "deletionArchive": "observed",
+      "activityHistoryBalance": "observed",
+      "ledgerContinuity": "observed",
+      "cursorOverlay": "observed",
+      "freshness": "missing"
+    }
+  },
+  "loan_activity": {
+    "total": 20,
+    "latest_ledger": 3444422,
+    "loan_set": 7,
+    "loan_pay": 11,
+    "loan_manage": 0,
+    "loan_delete": 2
+  },
+  "balance_source": {
+    "source_changes": 14,
+    "latest_ledger": 3444422,
+    "source_changes_missing_history": 0,
+    "history_rows_missing_source": 0
+  },
+  "managed_transitions": {
+    "impaired": 0,
+    "unimpaired": 0,
+    "defaulted": 0
+  },
+  "m1": {
+    "ready": false,
+    "gates": {
+      "verifiedBaseBinding": "observed",
+      "catchUpStart": "observed",
+      "validatedHeadReached": "missing",
+      "liveContinuation": "missing"
+    }
+  }
+}
