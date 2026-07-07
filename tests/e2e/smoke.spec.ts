@@ -179,7 +179,7 @@ test('uses mobile navigation, closes More explicitly, toggles it, and closes it 
   await expect(panel.getByText('Network Status', { exact: true })).toBeVisible()
   await expect(more).toHaveAttribute('aria-expanded', 'true')
 
-  const close = panel.getByRole('button', { name: 'Close More menu' })
+  const close = panel.getByRole('button', { name: 'Close menu' })
   await expect(close).toBeVisible()
   await close.click()
   await expect(panel).toBeHidden()
