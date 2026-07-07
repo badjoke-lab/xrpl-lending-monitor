@@ -178,4 +178,16 @@ describe('history segment chain reader', () => {
     expect(result.complete).toBe(false)
     expect(result.nextCursor).not.toBeNull()
   })
+
+
+  it('skips published zero-record segments without consuming the segment-read budget', async () => {
+    const { store, publication } = await fixture()
+    const reader = await HistorySegmentChainReader.open({ store, publication })
+    const result = await reader.list({ kind: 'balance_history', limit: 10, maxSegmentReads: 1 })
+    expect(result.items).toEqual([])
+    expect(result.complete).toBe(true)
+    expect(result.nextCursor).toBeNull()
+    expect(result.segmentReads).toBe(0)
+    expect(result.recordsExamined).toBe(0)
+  })
 })
