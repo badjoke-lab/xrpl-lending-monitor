@@ -1,0 +1,34 @@
+name: Audit pages limit 100 probe
+on:
+  pull_request:
+    paths:
+      - .github/workflows/audit-pages-limit-100-probe.yml
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify production audit collection reads
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p audit-pages-probe
+          B="https://xrpl-lending-monitor.badjoke-lab.workers.dev"
+          check() {
+            NAME="$1"
+            URL="$2"
+            CODE="$(curl --max-time 120 -sS -o "audit-pages-probe/${NAME}.json" -w '%{http_code}' "${URL}")"
+            printf '%s\n' "${CODE}" > "audit-pages-probe/${NAME}.status"
+            test "${CODE}" = "200"
+            jq -e '.data | type == "array"' "audit-pages-probe/${NAME}.json" > /dev/null
+          }
+          check lifecycle "${B}/api/audit/lifecycle?limit=100"
+          check archived "${B}/api/audit/archived?limit=100"
+          check cover-loss "${B}/api/audit/cover-loss?limit=100"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: audit-pages-limit-100-probe
+          path: audit-pages-probe
+          retention-days: 1
