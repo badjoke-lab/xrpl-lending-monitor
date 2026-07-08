@@ -6,17 +6,31 @@ The project covers the normal monitoring surface expected from a lending dashboa
 
 ## Current status
 
-Milestone 1: final catch-up and exit verification, with non-invasive release preparation allowed in parallel.
+M1 is complete. The canonical-history and replacement-current-state cutover is complete on XRPL Devnet. Production history runs in verified hybrid mode: immutable canonical history covers ledgers `3371676..3432924`, and bounded D1 continuation covers ledgers after that boundary. The active replacement current-state base is `devnet-3432924-canonical` at ledger `3432924`.
 
-The canonical-history and replacement-current-state cutover is complete on XRPL Devnet. Production history runs in verified hybrid mode: immutable canonical history covers ledgers `3371676..3432924`, and bounded D1 continuation covers ledgers after that boundary. The active replacement current-state base is `devnet-3432924-canonical` at ledger `3432924`.
+M5-5 real-data integration is active. The retained production API cross-audit has passed, covering current/history consistency, lifecycle/current consistency, archive/current exclusion, live relationships, bounded exports and feeds, snapshot identity, Activity result classification, Cover & Loss availability, and freshness/lag behavior. Production-shaped browser evidence remains pending before M5-5 exit.
 
-Scheduled incremental collection is advancing contiguously after the replacement boundary with explicit cursor, lag, freshness, resource-usage, and failure reporting. Base-plus-overlay current reads, deletion tombstones, hybrid historical reads, exact history lookup, lifecycle history, archives, balance history, and the baseline UI are implemented.
+The durable browser-regression workflow is merged. It is designed to traverse 15 representative public routes only after a healthy zero-lag collector preflight and the existing D1 headroom gate pass, then evaluate route coverage, required behaviors, technical findings, collector evidence, resource evidence, and bounded witness selection through a fail-closed exit evaluator.
 
-The active M1 work is operational verification rather than architecture construction. The latest bounded probe recorded a contiguous cursor through ledger `3461324`, observed head `3461639`, lag `315`, zero consecutive failures, and zero continuation discontinuities. HYB-7 now observes current creation and modification, LoanPay/payment, default, deletion/archive, activity-history-balance consistency, ledger continuity, and cursor/overlay agreement. Remaining missing paths are impairment, unimpairment, and freshness at a healthy zero-lag head. While collection continues unchanged, SEO/discoverability design and a manual screenshot-audit workflow may be prepared in parallel; full production visual audit and public indexing configuration remain ordered by the roadmap.
+Post-M5-5 M6 integrity/reset and runtime/resource baseline plans are prepared but not active. Explorer v1 pre-entry design preparation is also complete: the approved direction is a Guided Dashboard + bounded Relationship Explorer hybrid, with contract mapping, translation rules, content copy, relationship behavior, and a static API-shape audit documented before implementation begins.
+
+The implementation order remains:
+
+```text
+M5-5 completion
+  -> M6 integrity/reset baseline
+  -> M6 runtime/resource guardrails
+  -> Explorer v1
+  -> remaining M6 release hardening
+  -> public Devnet release and real soak
+  -> XRPL Lending Observatory data foundation
+  -> Observatory monitoring view
+  -> Explorer v2
+```
 
 Mainnet remains disabled.
 
-See [`docs/implementation-status.md`](docs/implementation-status.md) for the exact public implementation state and blockers, [`docs/development-roadmap.md`](docs/development-roadmap.md) for dependency order and milestone exit conditions, and [`docs/evidence/d1-safe-post-cutover-runtime-20260707.json`](docs/evidence/d1-safe-post-cutover-runtime-20260707.json) for the latest recorded post-cutover runtime evidence.
+See [`docs/implementation-status.md`](docs/implementation-status.md) for the exact public implementation state and blockers, [`docs/development-roadmap.md`](docs/development-roadmap.md) for active milestone dependency order, and [`docs/observatory-roadmap.md`](docs/observatory-roadmap.md) for the approved Explorer and XRPL Lending Observatory expansion sequence.
 
 ## Documentation
 
@@ -31,6 +45,7 @@ Key documents:
 - [`docs/resource-envelope.md`](docs/resource-envelope.md)
 - [`docs/development-roadmap.md`](docs/development-roadmap.md)
 - [`docs/implementation-status.md`](docs/implementation-status.md)
+- [`docs/observatory-roadmap.md`](docs/observatory-roadmap.md)
 - [`docs/decision-log.md`](docs/decision-log.md)
 
 ## Working rule
