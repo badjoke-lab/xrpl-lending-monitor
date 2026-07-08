@@ -14,7 +14,7 @@ permissions:
 jobs:
   e2e-diagnostic:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -26,13 +26,27 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      - name: Build
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p e2e-diagnostic
+          pnpm build 2>&1 | tee e2e-diagnostic/build.log
+      - name: Inspect preview inputs
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "dist_exists=$(test -d dist && echo true || echo false)"
+            echo "index_exists=$(test -f dist/index.html && echo true || echo false)"
+            if [ -d dist ]; then du -sh dist; find dist -maxdepth 2 -type f | sort | head -100; fi
+          } | tee e2e-diagnostic/dist-inspection.log
       - name: Install Chromium
         run: pnpm exec playwright install --with-deps chromium
       - name: Run browser smoke with retained output
         shell: bash
         run: |
           set -o pipefail
-          mkdir -p e2e-diagnostic
           pnpm test:e2e --reporter=line 2>&1 | tee e2e-diagnostic/output.log
       - name: Collect Playwright outputs
         if: always()
