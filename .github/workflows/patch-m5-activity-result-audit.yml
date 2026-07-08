@@ -8,6 +8,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: patch-m5-activity-result-classification
+  cancel-in-progress: false
+
 jobs:
   patch:
     runs-on: ubuntu-latest
@@ -36,10 +40,6 @@ jobs:
           if old_summary not in text:
             raise SystemExit('Activity summary anchor not found')
           text = text.replace(old_summary, 'activity_rows: activityRows.length,\n    activity_success_rows: activitySuccessRows,\n    activity_non_success_rows: activityNonSuccessRows,\n    archived_rows:', 1)
-          old_markdown = '`- Activity rows checked: \\`${summary.audit_collections.activity_rows}\\``,'
-          if old_markdown not in text:
-            raise SystemExit('Activity Markdown anchor not found')
-          text = text.replace(old_markdown, old_markdown + "\n    `- Activity success/non-success rows: \\`${summary.audit_collections.activity_success_rows}\\` / \\`${summary.audit_collections.activity_non_success_rows}\\``,", 1)
           path.write_text(text)
           PY
           git config user.name github-actions[bot]
