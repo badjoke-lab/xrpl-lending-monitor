@@ -122,7 +122,7 @@ The UI must show explicit unavailable, stale, empty, partial, and error states r
 
 ## Update requirements
 
-Every implementation pull request must update `implementation-status.md`. Update the relevant specification, roadmap status, resource limits, and operational documentation with the implementation.
+Every implementation pull request must update `implementation-status.md`. Update the relevant specification, roadmap status, resource envelope, UI document, or decision record when a change affects behavior, scope, sequencing, routes, visual rules, resource use, or a previously accepted decision.
 
 Explorer and Observatory work must also update `explorer-spec.md` or `observatory-roadmap.md` when behavior, scope, sequencing, metric dependencies, or resource assumptions change.
 
