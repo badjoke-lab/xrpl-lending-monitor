@@ -8,7 +8,8 @@ This document defines canonical public routes, route ownership, implementation m
 
 | Route | Page | Group | Initial milestone | Notes |
 |---|---|---|---|---|
-| `/` | Overview | Monitor | M4 | Main entry point |
+| `/` | Overview | Monitor | M4 | Main technical entry point |
+| `/explore` | XRPL Lending Explorer | Explore | E1 | Beginner-oriented guided current-state and relationship view |
 | `/vaults` | Vault list | Monitor | M4 | Search, filters, sorting, pagination |
 | `/vaults/:vaultId` | Vault detail | Monitor | M4 | Current or archived-context links |
 | `/loan-brokers` | Loan Broker list | Monitor | M4 | Debt and cover summary |
@@ -30,6 +31,22 @@ This document defines canonical public routes, route ownership, implementation m
 | `/methodology` | Methodology | System | M4 | Full technical methodology |
 | `/about` | About | Project | M4 | Project purpose and boundaries |
 | `/contact` | Contact | Project | M4 | Google Form and GitHub Issues choices |
+
+## Explore route boundary
+
+`/explore` is the canonical route for Explorer v1 and remains the stable guided-entry route when Explorer v2 is later implemented.
+
+Explorer v1:
+
+- reuses approved bounded current-state, relationship, Activity, status, and overview contracts;
+- does not add a separate collector or scheduled job;
+- does not define Observatory historical metrics;
+- provides conceptual flow, bounded current summaries, relationship exploration, human-readable Loan cards, Activity translation, glossary, and technical-view transitions;
+- remains linked to canonical technical entity, Activity, Audit, and Methodology routes.
+
+Explorer v2 may extend `/explore` with bounded historical and comparative subviews only after the XRPL Lending Observatory data foundation and Observatory monitoring view have stable approved contracts.
+
+Any Explorer v2 subroute or query-backed subview must be added to this route map before implementation. Explorer v2 does not create duplicate canonical entity detail routes.
 
 ## Loan detail subviews
 
@@ -122,12 +139,12 @@ A missing configuration value results in an explicit unavailable or omitted cont
 
 ## Route context requirements
 
-Every data route must preserve or display:
+Every data route, including `/explore`, must preserve or display:
 
 - network;
-- epoch;
+- epoch where applicable;
 - freshness;
-- current versus archived context;
+- current versus historical or archived context where applicable;
 - unavailable or stale state when applicable.
 
 Filters and pagination should be reflected in the URL where practical so views are shareable and browser navigation is predictable.
@@ -145,3 +162,5 @@ The application must provide:
 ## Initial navigation visibility
 
 Routes may be hidden until their implementation unit is merged. The route map still remains authoritative. A hidden route is not removed from the roadmap.
+
+`/explore` remains hidden until the E1 implementation unit reaches its approved navigation integration step. It must not be exposed as complete before its bounded data, state, accessibility, and resource requirements are implemented.

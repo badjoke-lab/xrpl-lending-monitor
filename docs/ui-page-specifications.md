@@ -2,11 +2,11 @@
 
 ## Purpose
 
-This document defines responsibility, required content, API dependency, unavailable behavior, navigation, and milestone assignment for every public page. It complements `product-spec.md` and does not weaken data, status, asset, provenance, or release requirements.
+This document defines responsibility, required content, API dependency, unavailable behavior, navigation, and milestone assignment for every public page. It complements `product-spec.md` and `explorer-spec.md` and does not weaken data, status, asset, provenance, or release requirements.
 
 ## Common requirements
 
-Every monitoring or audit page must:
+Every Explore, monitoring, or audit page must:
 
 - show Devnet, epoch, validated-ledger, freshness, and collector context where available;
 - distinguish current, historical, archived, stale, empty, unavailable, partial, and error states;
@@ -21,7 +21,7 @@ Every monitoring or audit page must:
 
 ### Purpose
 
-Provide a fast, trustworthy summary of protocol availability and current monitoring state, then route users to detailed pages.
+Provide a fast, trustworthy technical summary of protocol availability and current monitoring state, then route users to detailed pages and the guided Explore surface.
 
 ### Required content
 
@@ -34,7 +34,7 @@ Provide a fast, trustworthy summary of protocol availability and current monitor
 - recent protocol activity preview;
 - stale, collector-error, and reset notices;
 - provenance legend;
-- links to Vaults, Loan Brokers, Loans, Activity, Network Status, and Methodology.
+- links to Explore after E1 navigation integration and to Vaults, Loan Brokers, Loans, Activity, Network Status, and Methodology.
 
 ### Prohibited content
 
@@ -50,7 +50,76 @@ Provide a fast, trustworthy summary of protocol availability and current monitor
 
 ### Milestone
 
-M4-1, complete.
+M4-1, complete. Explore transition link is added during E1.
+
+## XRPL Lending Explorer — `/explore`
+
+### Purpose
+
+Provide a beginner-oriented guided view of how observed Vaults, Loan Brokers, Loans, and protocol activity relate without replacing the technical Monitor or Audit surfaces.
+
+### Required content
+
+- Devnet, read-only, and freshness context;
+- concise scope statement and transition to technical Overview;
+- conceptual Vault -> Loan Broker -> Loan -> payment/management flow explanation;
+- bounded current summary cards from approved contracts;
+- bounded observed relationship view with accessible list or text alternative;
+- human-readable Loan cards that preserve separate on-ledger and schedule states;
+- recent Activity translation that retains canonical transaction type, result, ledger, hash, affected objects, and provenance;
+- compact glossary for Vault, Loan Broker, Loan, current state, indexed history, status separation, and provenance categories;
+- links to canonical technical Vault, Loan Broker, Loan, Activity, transaction, Audit, and Methodology routes as applicable;
+- explicit stale, partial, unavailable, empty, and error behavior.
+
+### Required behavior
+
+- use bounded initial requests;
+- lazy-load selected detail;
+- avoid page-load N+1 detail requests;
+- preserve same-network and same-epoch relationship context;
+- visually distinguish conceptual protocol flow from actually observed object relationships;
+- preserve complete identifier access when values are visually shortened;
+- expose technical evidence rather than replacing it with plain-language copy;
+- keep explanation sections usable when one dynamic panel fails without implying the failed data is current or complete;
+- remain fully usable with keyboard, screen reader, reduced motion, 200% zoom, reflow, and long identifiers.
+
+### Prohibited behavior
+
+- a separate Explorer collector;
+- an Explorer-only scheduled job;
+- request-time full-history scans;
+- periodic page-specific D1 recomputation;
+- unbounded relationship graph loading;
+- unbounded historical range queries;
+- protocol-wide historical trend charts that require unapproved Observatory metrics;
+- global TVL, fiat valuation, cross-asset aggregation, LTV, collateral value, credit score, proprietary risk score, or investment conclusion;
+- wording that changes the meaning of canonical transaction results, protocol state, schedule state, or provenance.
+
+### API dependencies
+
+Prefer reuse of approved bounded contracts:
+
+- `/api/status`;
+- `/api/overview`;
+- bounded Vault list/detail and relationship contracts;
+- bounded Loan Broker list/detail and relationship contracts;
+- bounded Loan list/detail and relationship contracts;
+- bounded `/api/activity`;
+- exact Search or relationship contracts when needed.
+
+A dedicated bounded Explorer composition endpoint may be added only after E1-1 measurement and contract review show that it reduces repeated reads or simplifies a stable bounded composition without weakening provenance or freshness semantics.
+
+### Milestone
+
+E1, after M5-5 exit and early M6 integrity/resource guardrails, before final M6 visual and release-hardening gates.
+
+Detailed E1-1 through E1-5 sequence and completion conditions are defined in `explorer-spec.md` and `observatory-roadmap.md`.
+
+### Explorer v2 boundary
+
+Explorer v2 may extend the guided surface with bounded historical time series, comparisons, payment/lifecycle timelines, and relationship exploration only after O1 Observatory data contracts and the O2 Observatory monitoring view are stable.
+
+Explorer v2 does not define metrics ad hoc. Any new metric returns to the Observatory contract process first.
 
 ## Network Status — `/network-status`
 
@@ -400,9 +469,11 @@ M4-6, then maintained with API changes.
 
 The page supports stable anchors, an on-page table of contents, readable long-form layout, and source links where useful.
 
+Explorer v1 may link to these sections but must not duplicate or replace the technical methodology. Observatory O1 and O2 work must extend Methodology when new public metrics, rollups, retention behavior, or formulas are approved.
+
 ### Milestone
 
-M4-6, with evidence updates through M6.
+M4-6, with evidence updates through M6 and later Observatory metric changes.
 
 ## About — `/about`
 
@@ -415,13 +486,14 @@ M4-6, with evidence updates through M6.
 - what differentiates its audit layer;
 - Devnet-only initial scope;
 - independent and read-only status;
+- what Explore provides after E1 without replacing technical Monitor or Audit surfaces;
 - explicit non-goals;
 - repository and Methodology links;
 - Contact link.
 
 ### Milestone
 
-M4-6.
+M4-6 baseline; Explorer description update during E1.
 
 ## Contact — `/contact`
 
@@ -453,6 +525,12 @@ Shared handling covers:
 - unsupported data field;
 - partial panel failure.
 
+Explorer additionally requires explicit behavior when relationship seed data, one relationship branch, Activity translation data, or selected-object detail is unavailable while other page sections remain usable.
+
 ## Release completeness
 
 A route is complete only when it has approved information architecture, required data states, responsive behavior, keyboard and screen-reader support, focused tests, API-contract alignment, no invented values, and implementation-status evidence.
+
+Explorer v1 is additionally incomplete until request, D1-read, base-read, cache, representative interaction, graph/list accessibility, and production-shaped browser evidence satisfy the E1 completion gates.
+
+Explorer v2 remains unavailable until O1 and O2 dependencies are satisfied.

@@ -190,3 +190,38 @@ Incremental history, lifecycle, archive, balance, overlay, and cursor changes sh
 - complete base replacement remains an explicit verified process rather than page traffic or a public write route;
 - periodic reconciliation checks base identity, overlay deltas, relationships, counts, cursor continuity, and archived/current separation;
 - Mainnet remains disabled until separately approved.
+
+## D-023 — Explorer-first presentation layer and Observatory sequence
+
+- Date: 2026-07-08
+- Status: accepted
+
+### Decision
+
+The project adopts the following product-evolution order:
+
+```text
+XRPL Lending Monitor
+  -> Explorer v1
+  -> XRPL Lending Observatory data foundation
+  -> Observatory monitoring view
+  -> Explorer v2
+```
+
+Explorer v1 is a bounded guided presentation layer over approved Monitor APIs and current/history contracts. It is scheduled after M5-5 and early M6 resource guardrails, but before the final M6 visual and release-hardening passes so it can be included in those gates.
+
+The XRPL Lending Observatory expansion begins only after the stable Monitor release boundary and real soak evidence. Observatory work begins with data contracts, incremental aggregates, retention, reset behavior, and resource measurement before trend charts or guided historical exploration.
+
+Explorer v2 begins only after the Observatory data foundation and Observatory monitoring view establish stable bounded metric contracts and canonical technical interpretation.
+
+### Consequences
+
+- the canonical guided route is `/explore`;
+- Explorer v1 does not add a separate collector, separate scheduled job, request-time full-history scan, or Explorer-specific historical analytics pipeline;
+- existing Monitor and Audit pages remain first-class technical surfaces and are not replaced by Explorer;
+- Explorer v1 focuses on protocol flow, bounded current summaries, bounded relationships, human-readable Loan cards, Activity translation, glossary, and transitions to technical evidence;
+- free-tier operation remains a design target enforced through measured request, D1-read, D1-write, base-read, cache, storage-growth, and retention evidence;
+- Observatory metrics must define source, formula or event derivation, provenance, asset scope, observation-window boundary, retention, reset behavior, replay behavior, resource cost, API contract, and reconciliation before publication;
+- one approved Observatory metric contract should support both the technical Observatory monitoring view and Explorer v2 where practical;
+- Explorer v2 does not invent metrics ad hoc;
+- repository contributors and automation must re-read `explorer-spec.md` and `observatory-roadmap.md` with the active roadmap, implementation status, resource envelope, and affected UI/data specifications before Explorer or Observatory implementation work.
