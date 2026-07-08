@@ -22,7 +22,12 @@ async function requestJson(relativePath, options = {}) {
     try {
       json = JSON.parse(text)
     } catch {
-      throw new Error(`${relativePath} returned invalid JSON`)
+      const retryable = response.status >= 500 && response.status <= 599
+      if (retryable && attempt < maxAttempts) {
+        await new Promise((resolve) => setTimeout(resolve, attempt * 1000))
+        continue
+      }
+      throw new Error(`${relativePath} returned invalid JSON with HTTP ${response.status}`)
     }
 
     last = { status: response.status, json, text }
