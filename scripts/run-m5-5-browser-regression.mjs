@@ -74,10 +74,10 @@ async function waitForApplicationPage(page, route) {
   assert(response?.ok(), `${route} navigation returned HTTP ${response?.status() ?? 'no response'}`)
 
   await page.locator('#main-content').waitFor({ state: 'visible', timeout: 30000 })
-  await page.waitForFunction(() => document.querySelectorAll('.state-loading').length === 0, undefined, { timeout: 60000 })
+  await page.waitForFunction(() => globalThis.document.querySelectorAll('.state-loading').length === 0, undefined, { timeout: 60000 })
   await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => undefined)
   await page.evaluate(async () => {
-    await document.fonts.ready
+    await globalThis.document.fonts.ready
   })
   await page.waitForTimeout(250)
 
