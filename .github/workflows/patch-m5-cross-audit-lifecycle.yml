@@ -27,24 +27,20 @@ jobs:
           set -euo pipefail
           python - <<'PY'
           from pathlib import Path
+
           path = Path('scripts/run-m5-5-cross-audit.mjs')
           text = path.read_text()
-          old = '''const objectHistory = await request(`/api/objects/Loan/${encodeURIComponent(loan.id)}/history?limit=25`)
-          assert(objectHistory.json?.network === 'devnet', 'Loan object history must be Devnet')
-          const objectHistoryRows = asArray(objectHistory.json?.data, 'Loan object history data')
-          assert(objectHistoryRows.every((row) => row.object_type === 'Loan' && row.object_id === loan.id), 'Loan object history contains mismatched object identity')
+          start_marker = "const objectHistory = await request(`/api/objects/Loan/${encodeURIComponent(loan.id)}/history?limit=25`)"
+          end_marker = "assert(lifecycleExplorerRows.length > 0, 'Lifecycle explorer must contain indexed evidence')"
+          start = text.find(start_marker)
+          if start < 0:
+            raise SystemExit('current-history start marker not found')
+          end_start = text.find(end_marker, start)
+          if end_start < 0:
+            raise SystemExit('lifecycle explorer end marker not found')
+          end = end_start + len(end_marker)
 
-          const currentLoanLifecycle = await request(`/api/loans/${encodeURIComponent(loan.id)}/lifecycle?limit=25`)
-          assert(currentLoanLifecycle.json?.network === 'devnet', 'Loan lifecycle must be Devnet')
-          assert(currentLoanLifecycle.json?.loan_id === loan.id, 'Loan lifecycle response identity mismatch')
-          const currentLoanLifecycleRows = asArray(currentLoanLifecycle.json?.data, 'Loan lifecycle data')
-          assert(currentLoanLifecycleRows.every((row) => row.loan_id === loan.id), 'Loan lifecycle contains mismatched loan identity')
-
-          const lifecycleExplorer = await request('/api/audit/lifecycle?limit=100')
-          assert(lifecycleExplorer.json?.network === 'devnet', 'Lifecycle explorer must be Devnet')
-          const lifecycleExplorerRows = asArray(lifecycleExplorer.json?.data, 'Lifecycle explorer data')
-          assert(lifecycleExplorerRows.length > 0, 'Lifecycle explorer must contain indexed evidence')'''.replace('          ', '')
-          new = '''const lifecycleExplorer = await request('/api/audit/lifecycle?limit=100')
+          new = """const lifecycleExplorer = await request('/api/audit/lifecycle?limit=100')
           assert(lifecycleExplorer.json?.network === 'devnet', 'Lifecycle explorer must be Devnet')
           const lifecycleExplorerRows = asArray(lifecycleExplorer.json?.data, 'Lifecycle explorer data')
           assert(lifecycleExplorerRows.length > 0, 'Lifecycle explorer must contain indexed evidence')
@@ -65,11 +61,13 @@ jobs:
           assert(objectHistory.json?.network === 'devnet', 'Loan object history must be Devnet')
           const objectHistoryRows = asArray(objectHistory.json?.data, 'Loan object history data')
           assert(objectHistoryRows.length === 1, 'Lifecycle-backed current Loan must expose one bounded newest history row')
-          assert(objectHistoryRows.every((row) => row.object_type === 'Loan' && row.object_id === lifecycleCurrentLoan.id), 'Loan object history contains mismatched object identity')'''.replace('          ', '')
-          if old not in text:
-            raise SystemExit('expected lifecycle/current history block not found')
-          text = text.replace(old, new, 1)
-          text = text.replace('loan_id: loan.id,\n    object_history_rows:', 'loan_id: lifecycleCurrentLoan.id,\n    object_history_rows:', 1)
+          assert(objectHistoryRows.every((row) => row.object_type === 'Loan' && row.object_id === lifecycleCurrentLoan.id), 'Loan object history contains mismatched object identity')"""
+          new = new.replace('          ', '')
+          text = text[:start] + new + text[end:]
+          old_summary = 'loan_id: loan.id,\n    object_history_rows:'
+          if old_summary not in text:
+            raise SystemExit('current-history summary marker not found')
+          text = text.replace(old_summary, 'loan_id: lifecycleCurrentLoan.id,\n    object_history_rows:', 1)
           path.write_text(text)
           PY
           git config user.name github-actions[bot]
