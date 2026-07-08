@@ -18,7 +18,7 @@ async function requestJson(relativePath, options = {}) {
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     const response = await fetch(url, { signal: AbortSignal.timeout(requestTimeoutMs) })
     const text = await response.text()
-    let json = null
+    let json
     try {
       json = JSON.parse(text)
     } catch {
