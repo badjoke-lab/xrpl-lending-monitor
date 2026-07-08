@@ -1,0 +1,57 @@
+name: M5-5 cross-audit PR probe
+
+on:
+  pull_request:
+    paths:
+      - scripts/run-m5-5-cross-audit.mjs
+      - .github/workflows/m5-5-production-cross-audit.yml
+      - .github/workflows/m5-5-cross-audit-pr-probe.yml
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify collector preflight
+        shell: bash
+        env:
+          BASE_URL: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+        run: |
+          set -euo pipefail
+          mkdir -p m5-5-cross-audit
+          curl --max-time 60 --fail-with-body --silent --show-error --retry 3 \
+            "${BASE_URL%/}/api/status/collector" \
+            > m5-5-cross-audit/collector-preflight.json
+          jq -e '.status == "healthy" and .cursor.lag_ledgers == 0 and .consecutive_failures == 0 and .error == null' \
+            m5-5-cross-audit/collector-preflight.json > /dev/null
+
+      - name: Measure and enforce actual D1 headroom
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          D1_HEADROOM_OUTPUT_DIR: m5-5-cross-audit
+        run: bash scripts/check-d1-headroom.sh
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+
+      - name: Run production cross-audit
+        env:
+          BASE_URL: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+          M5_CROSS_AUDIT_OUTPUT_DIR: m5-5-cross-audit
+        run: node scripts/run-m5-5-cross-audit.mjs
+
+      - name: Upload temporary evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: m5-5-cross-audit-pr-probe
+          path: m5-5-cross-audit
+          if-no-files-found: error
+          retention-days: 3
