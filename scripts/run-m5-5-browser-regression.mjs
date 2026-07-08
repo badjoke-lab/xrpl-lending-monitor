@@ -109,14 +109,12 @@ assert(collector?.cursor?.lag_ledgers === 0, 'Collector lag must be zero before 
 assert(collector?.consecutive_failures === 0, 'Collector consecutive failures must be zero before browser regression')
 assert(collector?.error === null, 'Collector current error must be null before browser regression')
 
-const [vaultsResponse, brokersResponse, loansResponse, lifecycleResponse, archivedResponse, activityResponse] = await Promise.all([
-  requestJson('/api/vaults?limit=25&sort=id_asc'),
-  requestJson('/api/loan-brokers?limit=25&sort=id_asc'),
-  requestJson('/api/loans?limit=25&sort=id_asc'),
-  requestJson('/api/audit/lifecycle?limit=100'),
-  requestJson('/api/audit/archived?limit=25'),
-  requestJson('/api/activity?limit=25'),
-])
+const vaultsResponse = await requestJson('/api/vaults?limit=25&sort=id_asc')
+const brokersResponse = await requestJson('/api/loan-brokers?limit=25&sort=id_asc')
+const loansResponse = await requestJson('/api/loans?limit=25&sort=id_asc')
+const lifecycleResponse = await requestJson('/api/audit/lifecycle?limit=100')
+const archivedResponse = await requestJson('/api/audit/archived?limit=1')
+const activityResponse = await requestJson('/api/activity?limit=1')
 
 const vaultId = firstId(vaultsResponse.json, 'Vault')
 const brokerId = firstId(brokersResponse.json, 'Loan Broker')
