@@ -20,6 +20,7 @@ Before changing code or documentation, read:
 12. `docs/m6-integrity-reset-plan.md` and `docs/m6-resource-guardrail-plan.md` for early M6 integrity/reset or runtime/resource work
 13. the UI specification documents for user-visible work
 14. `docs/explorer-spec.md` and `docs/observatory-roadmap.md` for Explorer or XRPL Lending Observatory work
+15. `docs/explorer-v1-visual-direction.md`, `docs/explorer-v1-contract-matrix.md`, `docs/explorer-v1-translation-dictionary.md`, and `docs/explorer-v1-relationship-contract.md` before Explorer E1-1 through E1-5
 
 Repository documents are authoritative when they agree with implementation and verified evidence. Correct stale documentation in the same pull request as the related change.
 
@@ -58,6 +59,7 @@ Current-state activation requires one fixed validated ledger, complete traversal
 - Before every new implementation unit, operational probe, release-preparation unit, or externally visible configuration change, re-read `docs/development-roadmap.md` and `docs/implementation-status.md`; repository source-of-truth documents override stale conversation summaries or prior plans.
 - Before the first M6 integrity/reset or runtime/resource unit, also re-read `docs/m6-integrity-reset-plan.md` and `docs/m6-resource-guardrail-plan.md`; do not start M6 while `implementation-status.md` still records M5-5 as active.
 - Before every Explorer or Observatory implementation unit, also re-read `docs/explorer-spec.md` and `docs/observatory-roadmap.md` and reconcile them with the active roadmap, implementation status, resource envelope, early M6 baseline evidence, and affected UI/data specifications.
+- Before Explorer E1-1 through E1-5, also re-read the four Explorer v1 pre-entry design documents. Revalidate their endpoint assumptions, translation wording, relationship bounds, and measurement hooks against actual M6 evidence before coding; pre-entry design preparation does not satisfy the E1 start gate.
 - After new evidence changes an active gate, blocker, sequencing decision, or measured resource state, reconcile the affected status and roadmap documents before the next dependent unit proceeds.
 - Prefer one coherent roadmap unit per pull request.
 - Do not create parallel implementations of the same feature.
@@ -108,4 +110,5 @@ Public documentation should explain decisions through product integrity, securit
 - Implement explicit loading, empty, unavailable, stale, partial, error, archived, not-found, and invalid-identifier states.
 - Explorer plain-language summaries supplement rather than replace canonical transaction types, results, field meanings, identifiers, provenance, and technical routes.
 - Generated mockups define visual direction only and never define product data.
+- Explorer v1 Hero styling remains visually aligned with the current Monitor and does not use lighthouse, observatory-building, scenic landscape, or decorative architectural illustration.
 - Do not publish placeholder external links.
