@@ -118,6 +118,7 @@ export async function listHybridExactObjectHistory(options: {
       && change.objectId === options.objectId
       && transactionHashes.has(change.transactionHash),
     limit: EXACT_DETAIL_MAX_RECORDS,
+    direction: 'desc',
     maxAssetReads: EXACT_DETAIL_MAX_ASSET_READS,
   })).items.map(segmentObjectChangeToApi)
   const live = await listLiveObjectHistoryAfterBoundary(
@@ -153,6 +154,7 @@ export async function listHybridExactLoanLifecycle(options: {
     references: references(lookup.references),
     predicate: (event) => event.loanId === options.loanId && transactionHashes.has(event.transactionHash),
     limit: EXACT_DETAIL_MAX_RECORDS,
+    direction: 'asc',
     maxAssetReads: EXACT_DETAIL_MAX_ASSET_READS,
   })).items.map(segmentLoanLifecycleToApi)
   const live = await listLiveLoanLifecycleAfterBoundary(
