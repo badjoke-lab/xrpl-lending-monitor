@@ -225,3 +225,30 @@ Explorer v2 begins only after the Observatory data foundation and Observatory mo
 - one approved Observatory metric contract should support both the technical Observatory monitoring view and Explorer v2 where practical;
 - Explorer v2 does not invent metrics ad hoc;
 - repository contributors and automation must re-read `explorer-spec.md` and `observatory-roadmap.md` with the active roadmap, implementation status, resource envelope, and affected UI/data specifications before Explorer or Observatory implementation work.
+
+## D-024 — Explorer v1 Guided Dashboard + Relationship Explorer direction
+
+- Date: 2026-07-08
+- Status: accepted
+
+### Decision
+
+Explorer v1 adopts a **Guided Dashboard + Relationship Explorer hybrid** visual and information architecture.
+
+The page teaches the three primary concepts first, shows bounded current facts second, explains the conceptual Vault -> Loan Broker -> Loan flow, then presents a bounded observed relationship view, a readable selected-Loan summary, recent Activity translation, glossary/help, and transitions to canonical technical evidence.
+
+Explorer remains visually part of the current XRPL Lending Monitor application. The Hero uses restrained dark application styling and must not use lighthouse, observatory-building, scenic landscape, or decorative architectural illustration.
+
+Pre-entry design preparation may document visual composition, contract mapping, translation rules, relationship loading principles, accessibility alternatives, and measurement hooks before the E1 start gate. It does not start E1 implementation or authorize routes, runtime fetching, endpoints, persistence, or budgets.
+
+### Consequences
+
+- the approved visual direction is recorded in `explorer-v1-visual-direction.md`;
+- planned sections are mapped in `explorer-v1-contract-matrix.md`;
+- plain-language concept, field, status, and Activity wording is prepared in `explorer-v1-translation-dictionary.md` and must be revalidated against actual API/event semantics before implementation;
+- bounded relationship behavior is prepared in `explorer-v1-relationship-contract.md` and must be finalized with M6 resource evidence;
+- the relationship view is the primary project-specific Explorer visual feature but remains bounded, same-context, progressively loaded, and accessible;
+- conceptual flow and observed relationships are visually distinct;
+- page-load N+1 detail fetching remains prohibited;
+- unsupported values from mockups remain prohibited, including TVL, fiat values, APR/APY, unsupported 24-hour changes, cross-asset totals, LTV, collateral value, health gauges, liquidation-risk visuals, and credit/risk scores;
+- the start gate remains unchanged: M5-5 exit, M6 integrity/reset baseline, and M6 runtime/resource guardrails must precede E1-1 implementation.
