@@ -1,0 +1,39 @@
+name: Patch Loan detail history window
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/patch-loan-detail-history-window.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+      - name: Bound Loan detail lifecycle and history requests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('src/ui/pages/LoanDetailPage.tsx')
+          text = path.read_text()
+          old_lifecycle = 'const lifecycle = useApiResource<LoanLifecycleResponse>(`/api/loans/${loanId}/lifecycle?limit=100`)'
+          old_history = 'const history = useApiResource<ObjectHistoryResponse>(`/api/objects/Loan/${loanId}/history?limit=100`)'
+          if old_lifecycle not in text or old_history not in text:
+            raise SystemExit('Loan detail history request anchors not found')
+          text = text.replace(old_lifecycle, 'const lifecycle = useApiResource<LoanLifecycleResponse>(`/api/loans/${loanId}/lifecycle?limit=25`)', 1)
+          text = text.replace(old_history, 'const history = useApiResource<ObjectHistoryResponse>(`/api/objects/Loan/${loanId}/history?limit=25`)', 1)
+          path.write_text(text)
+          PY
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/ui/pages/LoanDetailPage.tsx
+          git commit -m 'Bound Loan detail lifecycle and history reads'
+          git push origin HEAD:${{ github.head_ref }}
