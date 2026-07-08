@@ -99,6 +99,56 @@ A later production-shaped browser attempt at `2026-07-08 04:12 UTC` recorded:
 
 No browser pass is claimed from that attempt. The gate remains unchanged.
 
+## Explorer v1 pre-entry design preparation
+
+A documentation-only Explorer v1 pre-entry design preparation unit is complete in the current branch and awaiting normal PR validation/merge.
+
+This preparation does not start E1-1 and does not change runtime behavior, public routes, API contracts, collector behavior, D1 persistence, schedules, deployment, or resource thresholds.
+
+The accepted visual direction is:
+
+> Guided Dashboard + Relationship Explorer hybrid.
+
+The accepted page hierarchy is:
+
+```text
+Hero and scope
+  -> Three concepts
+  -> Current snapshot
+  -> Conceptual protocol flow
+  -> Bounded observed relationships
+  -> Selected Loan
+  -> Recent Activity translation
+  -> How to read this page / glossary
+  -> Technical view transition
+```
+
+The Hero remains visually aligned with the current XRPL Lending Monitor application and explicitly excludes lighthouse, observatory-building, scenic landscape, or other decorative Hero illustration.
+
+Prepared documents:
+
+- `docs/explorer-v1-visual-direction.md`;
+- `docs/explorer-v1-contract-matrix.md`;
+- `docs/explorer-v1-translation-dictionary.md`;
+- `docs/explorer-v1-relationship-contract.md`.
+
+The preparation establishes:
+
+- accepted visual composition;
+- section-to-candidate-contract mapping;
+- initial-load versus lazy-load boundaries;
+- unsupported metric prohibitions;
+- plain-language concept and field dictionary;
+- success/non-success Activity translation framework;
+- conservative fallback translation rule;
+- bounded relationship anchor/loading models;
+- same-network, same-epoch, same-base-context relationship rules;
+- semantic relationship-list alternative requirements;
+- mobile relationship-layout direction;
+- measurement hooks required by the M6 Explorer resource harness.
+
+Unresolved endpoint selection, numeric relationship caps, request budgets, and any dedicated composition endpoint decision remain deferred to measured E1-1 review after the start gate opens.
+
 ## Approved Explorer and Observatory sequence
 
 The approved order is:
@@ -124,14 +174,18 @@ The detailed early M6 pre-entry plans are prepared but inactive until M5-5 exits
 - `docs/m6-integrity-reset-plan.md`;
 - `docs/m6-resource-guardrail-plan.md`.
 
-The detailed Explorer and Observatory contracts remain:
+The detailed Explorer and Observatory contracts are:
 
 - `docs/explorer-spec.md`;
-- `docs/observatory-roadmap.md`.
+- `docs/observatory-roadmap.md`;
+- `docs/explorer-v1-visual-direction.md`;
+- `docs/explorer-v1-contract-matrix.md`;
+- `docs/explorer-v1-translation-dictionary.md`;
+- `docs/explorer-v1-relationship-contract.md`.
 
 ## Active unit
 
-The active work is permanent monitoring plus two coordinated M5-5/UI tracks.
+The active work remains permanent monitoring plus two coordinated M5-5/UI tracks. Explorer pre-entry preparation does not change the active implementation gate.
 
 ### Permanent monitoring
 
@@ -189,17 +243,19 @@ No new per-route numeric budget has been invented before measurement. The existi
 ## Next order
 
 1. Keep permanent monitoring active.
-2. Let the date-guarded `2026-07-09 00:45 UTC` browser-regression attempt run after the planned deep-diagnostics window, evaluate collector health and current-day D1 headroom, then traverse only if both gates pass.
-3. Inspect all retained browser, resource, and exit-evaluator artifacts.
-4. Reconcile M5-5 exit only when retained API and new browser evidence both satisfy their gates.
-5. After M5-5 exits, begin `M6-I1` from `docs/m6-integrity-reset-plan.md`.
-6. Complete the integrity/reset baseline in M6-I1 through M6-I5 order.
-7. Then execute M6-R1 through M6-R5 preparation order from `docs/m6-resource-guardrail-plan.md`.
-8. Begin Explorer v1 E1-1 through E1-5 only after its M5-5, integrity/reset, and resource-guardrail start gates are satisfied.
-9. Continue remaining M6 visual, accessibility, performance, security, cross-browser, discoverability, operations, recovery, soak, and final release gates with `/explore` included in the release surface.
-10. Only after stable Monitor release and real soak evidence, begin O1 Observatory data-foundation work.
-11. Build the Observatory monitoring view only after O1 contracts are stable.
-12. Build Explorer v2 only after O2 establishes canonical technical interpretation and stable bounded APIs.
+2. Merge the Explorer v1 pre-entry design preparation only after documentation review/CI confirms no schedule or source-of-truth contradiction.
+3. Let the date-guarded `2026-07-09 00:45 UTC` browser-regression attempt run after the planned deep-diagnostics window, evaluate collector health and current-day D1 headroom, then traverse only if both gates pass.
+4. Inspect all retained browser, resource, and exit-evaluator artifacts.
+5. Reconcile M5-5 exit only when retained API and new browser evidence both satisfy their gates.
+6. After M5-5 exits, begin `M6-I1` from `docs/m6-integrity-reset-plan.md`.
+7. Complete the integrity/reset baseline in M6-I1 through M6-I5 order.
+8. Then execute M6-R1 through M6-R5 preparation order from `docs/m6-resource-guardrail-plan.md`.
+9. Begin Explorer v1 E1-1 only after its M5-5, integrity/reset, and resource-guardrail start gates are satisfied; revalidate all pre-entry Explorer documents against actual M6 evidence.
+10. Continue E1-2 through E1-5 in `observatory-roadmap.md` order.
+11. Continue remaining M6 visual, accessibility, performance, security, cross-browser, discoverability, operations, recovery, soak, and final release gates with `/explore` included in the release surface.
+12. Only after stable Monitor release and real soak evidence, begin O1 Observatory data-foundation work.
+13. Build the Observatory monitoring view only after O1 contracts are stable.
+14. Build Explorer v2 only after O2 establishes canonical technical interpretation and stable bounded APIs.
 
 ## Remaining blockers
 
@@ -207,6 +263,7 @@ No new per-route numeric budget has been invented before measurement. The existi
 - M5-5 API cross-audit evidence is passing, but real-data browser regression and representative browser production behavior evidence remain pending before M5-5 exit.
 - The independent production UI audit remains separately gated by measured current-day headroom and collector health.
 - M6 plans are prepared but M6 execution remains blocked until M5-5 exit.
-- Explorer v1 remains blocked until M5-5 exit plus the M6 integrity/reset and runtime/resource start gates.
+- Explorer v1 pre-entry design preparation is documentation-only and does not satisfy the Explorer start gate.
+- Explorer v1 implementation remains blocked until M5-5 exit plus the M6 integrity/reset and runtime/resource start gates.
 - Final-host SEO binding and remaining M6 release hardening remain pending in roadmap order.
 - Observatory O1-O3 remains post-release and post-soak work.
