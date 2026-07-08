@@ -16,7 +16,7 @@ The current M1 execution path is a verified immutable base read model plus bound
 | M2 Event history and lifecycle | Complete through Checkpoint B | Normalize validated history, lifecycle, archives, balances, and status | Deterministic replay and reconciliation logic complete; production completeness remains bounded by M1 continuation and later soak evidence |
 | M3 Public API | Complete through exports and feeds; current merge integration pending final real-data cross-audit | Expose bounded read-only current and historical APIs | Base-plus-overlay current routes and historical contracts pass, with explicit freshness and unavailable states |
 | M4 Baseline UI and project pages | Complete through Checkpoint C | Deliver the ordinary monitor, navigation, project pages, responsive behavior, and shared states | Required baseline routes work end to end; live freshness claims remain gated by verified runtime evidence |
-| M5 Differentiated audit UI | M5-5 active after successful M1 exit | Add lifecycle, archives, cover/loss, epochs, provenance, and cross-audit integration | Audit integration and bounded production behavior smoke pass against verified real data after M1 exits |
+| M5 Differentiated audit UI | M5-5 API cross-audit passed; browser regression and representative behavior smoke active | Add lifecycle, archives, cover/loss, epochs, provenance, and cross-audit integration | Audit integration and bounded production behavior smoke pass against verified real data after M1 exits |
 | M6 Hardening and public Devnet release | Release-preparation implementation active; final hardening gated by M1 and M5-5 | Prove integrity, resource safety, accessibility, discoverability, operations, and deployment readiness | Final visual audit, production behavior smoke, SEO/discoverability, recovery verification, multi-day soak, and all release gates pass |
 
 ## Cross-cutting rules
@@ -38,7 +38,7 @@ The current M1 execution path is a verified immutable base read model plus bound
 
 ## Active post-head execution order
 
-M1 exited on retained 2026-07-08 UTC evidence: collector healthy at exact head, HYB-7 passed with every path observed, and M1 exit diagnostics reported ready with every gate observed. Work now proceeds to M5-5 real-data integration while permanent monitoring and the independently D1-gated UI audit track continue.
+M1 exited on retained 2026-07-08 UTC evidence. The first M5-5 D1-gated production cross-audit then passed against live Devnet data at 2026-07-08 00:52:38 UTC. API-level current/history, lifecycle/current, archive/current exclusion, live relationships, bounded exports, Activity result classification, Cover & Loss availability, snapshot identity, and freshness/lag checks are observed. M5-5 now proceeds to real-data browser regression and representative browser behavior smoke while permanent monitoring and the independently D1-gated human UI audit track continue.
 
 ### Permanent monitoring track
 
@@ -51,12 +51,12 @@ M1 exited on retained 2026-07-08 UTC evidence: collector healthy at exact head, 
 ### Track A — M5-5 real-data integration path
 
 1. Preserve permanent monitoring and the completed M1 exit evidence.
-2. Run cross-audit real-data integration against the verified base-plus-overlay current state and indexed real history.
-3. Verify bounded exports against the live evidence boundary.
-4. Run real-data browser regression and current/history consistency checks.
-5. Cross-check lifecycle against current objects and prove archive/current exclusion.
-6. Run bounded production behavior smoke across representative list/detail and audit routes.
-7. Verify Loan to Loan Broker and Loan Broker to Vault relationships through live identifiers, plus freshness and lag claims against collector status.
+2. Preserve the passing D1-gated production cross-audit evidence and durable manual audit workflow.
+3. Treat API-level current/history, lifecycle/current, archive/current exclusion, live relationship, bounded export/feed, snapshot identity, and freshness/lag checks as observed from the retained cross-audit evidence.
+4. Preserve Activity result-code classification: successful and non-success protocol transactions are both valid indexed evidence and are counted separately rather than rejecting non-success events.
+5. Run real-data browser regression across representative Overview, entity list/detail, Activity, Lifecycle, Archived Objects, Cover & Loss, Search, and Network Status routes.
+6. Run representative browser production behavior smoke with live identifiers and prove route-level relationship, archive/current, history/current, lifecycle/current, and freshness presentation consistency.
+7. Reconcile M5-5 exit only after the browser regression and representative production behavior smoke pass.
 
 ### Track B — UI production-audit path
 
@@ -344,6 +344,8 @@ Target: active from 2026-07-08 after successful M1 exit. Evidence state controls
 Exit condition: audit integration and production behavior smoke pass against verified base-plus-overlay current state and indexed real history.
 
 M1 exit evidence recorded for this dependency: at 2026-07-08 00:13:44 UTC the collector was healthy with cursor and observed head both `3476415`, lag `0`, zero consecutive failures, HYB-7 passed with every path observed, and M1 diagnostics reported `ready: true` with all four gates observed.
+
+First M5-5 production cross-audit evidence: at 2026-07-08 00:52:38 UTC the collector was healthy with cursor and observed head both `3477191`, lag `0`, and zero consecutive failures. Snapshot `devnet-3432924-canonical` matched Overview and current Vault, Loan Broker, and Loan reads. Loan to Loan Broker and Loan Broker to Vault links were consistent; a lifecycle-backed current Loan matched indexed lifecycle and bounded object history; an exact archived Loan was available in archive history and returned `404` from current state; Activity returned 100 rows classified as 77 successful and 23 non-success protocol transactions; Archived Objects returned 25 rows; Cover & Loss returned 100 rows; JSON, NDJSON, CSV, and feed NDJSON Activity exports each returned 25 bounded rows. The audit passed. D1 usage at capture time was 946,159 rows read and 3,414 rows written, so the unchanged headroom gate passed. Human screenshot review remains a separate Track B requirement.
 
 ## M6 — Hardening and public Devnet release
 
