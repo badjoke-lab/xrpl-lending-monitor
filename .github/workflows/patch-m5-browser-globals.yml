@@ -1,0 +1,36 @@
+name: Patch M5 browser globals
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/patch-m5-browser-globals.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - name: Use explicit browser globals inside page callbacks
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/run-m5-5-browser-regression.mjs')
+          text = path.read_text()
+          text = text.replace("() => document.querySelectorAll('.state-loading').length === 0", "() => globalThis.document.querySelectorAll('.state-loading').length === 0")
+          text = text.replace('await document.fonts.ready', 'await globalThis.document.fonts.ready')
+          path.write_text(text)
+          PY
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add scripts/run-m5-5-browser-regression.mjs
+          git commit -m 'Use explicit browser globals in regression runner'
+          git push origin HEAD:${{ github.head_ref }}
