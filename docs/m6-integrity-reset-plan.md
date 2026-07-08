@@ -58,6 +58,21 @@ Every scenario must preserve the existing integrity rules.
 14. Stale, interrupted, partial, and unavailable states are explicit and never labeled fresh.
 15. Time alone never changes on-ledger Loan status.
 
+## Prepared M6-I1 fixture catalog
+
+`m6-i1-fixture-catalog.md` prepares stable deterministic scenario IDs F00-F14, explicit context identities, shared object/asset families, a common before/after evidence snapshot shape, fixture-builder restrictions, and reuse mapping for M6-I2 through M6-I5.
+
+The catalog is a pre-entry implementation plan. It is not passing M6 evidence and does not activate M6-I1.
+
+When M6-I1 becomes active:
+
+1. re-read the fixture catalog and issue #283;
+2. inventory existing repository test helpers and focused tests first;
+3. reuse production types, repositories, serializers, relationship resolvers, and commit paths;
+4. implement only missing reusable fixture support;
+5. record evidence-backed deviations from the catalog where existing production semantics require them;
+6. never create a parallel test-only current-state, relationship, or precedence model merely to satisfy the catalog shape.
+
 ## Execution order
 
 ### M6-I1 — Deterministic integrity fixture matrix

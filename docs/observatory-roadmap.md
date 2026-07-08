@@ -64,8 +64,10 @@ Approved pre-entry preparation may include:
 - mapping planned sections to candidate existing contracts;
 - identifying initial-load versus lazy-load boundaries;
 - drafting plain-language concept and field translations;
+- drafting baseline static and templated UI copy;
 - drafting Activity success/non-success translation rules;
 - defining bounded relationship interaction principles;
+- auditing current static API and response shapes for composition candidates;
 - identifying accessibility alternatives;
 - identifying resource measurements required by later E1 work;
 - documenting unresolved endpoint choices for measured E1-1 review.
@@ -88,7 +90,9 @@ The approved pre-entry documents are:
 - `explorer-v1-visual-direction.md`;
 - `explorer-v1-contract-matrix.md`;
 - `explorer-v1-translation-dictionary.md`;
-- `explorer-v1-relationship-contract.md`.
+- `explorer-v1-content-copy.md`;
+- `explorer-v1-relationship-contract.md`;
+- `explorer-v1-static-api-shape-audit.md`.
 
 These documents prepare E1-1. At E1-1 start they must be revalidated against:
 
@@ -97,7 +101,8 @@ These documents prepare E1-1. At E1-1 start they must be revalidated against:
 - M6 runtime/resource evidence;
 - the Explorer measurement harness;
 - final approved API response shapes;
-- final normalized Activity semantics.
+- final normalized Activity semantics;
+- actual route/component hierarchy and accessibility constraints.
 
 An unresolved pre-entry assumption never becomes an implementation contract merely because it appears in a mockup or draft document.
 
@@ -173,9 +178,10 @@ Explorer v1 does not include:
 
 #### E1-1 — Contract and composition review
 
-- re-read and revalidate all Explorer v1 pre-entry design documents;
+- re-read and revalidate all Explorer v1 pre-entry design, copy, relationship, and static API-shape documents;
 - map each Explorer section to existing API contracts;
 - confirm or revise candidate sources in the contract matrix using actual API shapes;
+- re-evaluate the bounded Loan-list-derived relationship seed candidate from the static API-shape audit using measured M6 resource evidence;
 - identify where one bounded composition endpoint would reduce repeated reads, if any;
 - define initial request budget from M6 resource evidence;
 - define current-state, relationship, activity, and detail-loading states;
@@ -191,7 +197,8 @@ Exit condition: every displayed value and relationship has an approved source an
 - add approved navigation entry;
 - implement Hero, scope statement, three-concept explanation, protocol flow explanation, and technical-view transitions;
 - implement explicit network, freshness, and unavailable behavior;
-- follow the approved same-product Hero treatment without scenic/lighthouse illustration.
+- follow the approved same-product Hero treatment without scenic/lighthouse illustration;
+- use the approved content-copy baseline, narrowing or removing wording that final evidence cannot support.
 
 Exit condition: the page is navigable and understandable before advanced visualizations are added.
 
@@ -210,9 +217,10 @@ Exit condition: relationship navigation is bounded, same-context, accessible, an
 
 - implement summary-first Loan cards;
 - preserve separate on-ledger and schedule states;
-- implement plain-language Activity summaries while retaining canonical transaction type, result, ledger, hash, and affected objects;
+- implement plain-language Activity summaries while retaining canonical transaction type, result, ledger, hash, and affected objects where the approved contract actually provides them;
 - expose technical detail links or drawers;
-- revalidate implementation wording against `explorer-v1-translation-dictionary.md` and actual API/event semantics.
+- revalidate implementation wording against `explorer-v1-translation-dictionary.md`, `explorer-v1-content-copy.md`, final API response shapes, and actual normalized event semantics;
+- keep affected-object preview behind measured composition or lazy technical navigation when the bounded Activity list does not directly provide it.
 
 Exit condition: users can understand a representative Loan and recent event without losing access to exact evidence or changing canonical meaning.
 
@@ -457,7 +465,7 @@ Before every Explorer or Observatory implementation unit:
 5. re-read this document;
 6. re-read `docs/resource-envelope.md`;
 7. re-read `docs/m6-integrity-reset-plan.md` and `docs/m6-resource-guardrail-plan.md` where their evidence gates apply;
-8. re-read the four Explorer v1 pre-entry design documents before E1-1 through E1-5;
+8. re-read the six Explorer v1 pre-entry design, copy, relationship, and static-audit documents before E1-1 through E1-5;
 9. re-read the affected UI and data source-of-truth documents;
 10. reconcile newly captured evidence into roadmap/status/resource documentation before the next dependent unit proceeds.
 

@@ -18,9 +18,10 @@ Before changing code or documentation, read:
 10. `docs/development-roadmap.md`
 11. `docs/implementation-status.md`
 12. `docs/m6-integrity-reset-plan.md` and `docs/m6-resource-guardrail-plan.md` for early M6 integrity/reset or runtime/resource work
-13. the UI specification documents for user-visible work
-14. `docs/explorer-spec.md` and `docs/observatory-roadmap.md` for Explorer or XRPL Lending Observatory work
-15. `docs/explorer-v1-visual-direction.md`, `docs/explorer-v1-contract-matrix.md`, `docs/explorer-v1-translation-dictionary.md`, `docs/explorer-v1-content-copy.md`, `docs/explorer-v1-relationship-contract.md`, and `docs/explorer-v1-static-api-shape-audit.md` before Explorer E1-1 through E1-5
+13. `docs/m6-i1-fixture-catalog.md` before M6-I1 implementation
+14. the UI specification documents for user-visible work
+15. `docs/explorer-spec.md` and `docs/observatory-roadmap.md` for Explorer or XRPL Lending Observatory work
+16. `docs/explorer-v1-visual-direction.md`, `docs/explorer-v1-contract-matrix.md`, `docs/explorer-v1-translation-dictionary.md`, `docs/explorer-v1-content-copy.md`, `docs/explorer-v1-relationship-contract.md`, and `docs/explorer-v1-static-api-shape-audit.md` before Explorer E1-1 through E1-5
 
 Repository documents are authoritative when they agree with implementation and verified evidence. Correct stale documentation in the same pull request as the related change.
 
@@ -58,6 +59,7 @@ Current-state activation requires one fixed validated ledger, complete traversal
 - Work from the current canonical predecessor.
 - Before every new implementation unit, operational probe, release-preparation unit, or externally visible configuration change, re-read `docs/development-roadmap.md` and `docs/implementation-status.md`; repository source-of-truth documents override stale conversation summaries or prior plans.
 - Before the first M6 integrity/reset or runtime/resource unit, also re-read `docs/m6-integrity-reset-plan.md` and `docs/m6-resource-guardrail-plan.md`; do not start M6 while `implementation-status.md` still records M5-5 as active.
+- Before M6-I1 implementation, also re-read `docs/m6-i1-fixture-catalog.md` and issue #283, inventory existing repository test helpers first, and record evidence-backed deviations rather than creating a parallel fixture model.
 - Before every Explorer or Observatory implementation unit, also re-read `docs/explorer-spec.md` and `docs/observatory-roadmap.md` and reconcile them with the active roadmap, implementation status, resource envelope, early M6 baseline evidence, and affected UI/data specifications.
 - Before Explorer E1-1 through E1-5, also re-read the Explorer v1 pre-entry design, copy, and static-audit documents. Revalidate endpoint assumptions, static API-shape findings, translation wording, content copy, relationship bounds, and measurement hooks against actual M6 evidence before coding; pre-entry design preparation does not satisfy the E1 start gate.
 - After new evidence changes an active gate, blocker, sequencing decision, or measured resource state, reconcile the affected status and roadmap documents before the next dependent unit proceeds.
