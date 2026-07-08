@@ -1,0 +1,81 @@
+name: Patch M5 cross-audit bounded retries
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/patch-m5-cross-audit-retry.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - name: Add bounded retries for transient server responses
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('scripts/run-m5-5-cross-audit.mjs')
+          text = path.read_text()
+          start_marker = 'async function request(relativePath, options = {}) {'
+          end_marker = '\n}\n\nfunction requireAvailableCurrent'
+          start = text.find(start_marker)
+          if start < 0:
+            raise SystemExit('request start marker not found')
+          end_start = text.find(end_marker, start)
+          if end_start < 0:
+            raise SystemExit('request end marker not found')
+          end = end_start + 2
+
+          new = '''async function request(relativePath, options = {}) {
+            const url = `${baseUrl}${relativePath}`
+            const maxAttempts = 3
+            let lastResponse = null
+            for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+              const response = await fetch(url, { signal: AbortSignal.timeout(requestTimeoutMs) })
+              const contentType = response.headers.get('content-type') ?? ''
+              const text = await response.text()
+              let json = null
+              if (contentType.includes('application/json')) {
+                try {
+                  json = JSON.parse(text)
+                } catch {
+                  throw new Error(`${relativePath} returned invalid JSON`)
+                }
+              }
+              lastResponse = {
+                path: relativePath,
+                status: response.status,
+                contentType,
+                text,
+                json,
+              }
+              const expectedStatusMatched = options.expectedStatus !== undefined && response.status === options.expectedStatus
+              const successMatched = options.expectedStatus === undefined && response.ok
+              if (expectedStatusMatched || successMatched) return lastResponse
+              const retryable = response.status >= 500 && response.status <= 599
+              if (!retryable || attempt === maxAttempts) break
+              await new Promise((resolve) => setTimeout(resolve, attempt * 1000))
+            }
+            if (options.expectedStatus !== undefined) {
+              throw new Error(`${relativePath} returned ${lastResponse.status}, expected ${options.expectedStatus}`)
+            }
+            throw new Error(`${relativePath} returned ${lastResponse.status}: ${lastResponse.text.slice(0, 240)}`)
+          }'''.replace('          ', '')
+          text = text[:start] + new + text[end:]
+          path.write_text(text)
+          PY
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add scripts/run-m5-5-cross-audit.mjs
+          git commit -m 'Retry transient M5 cross-audit server responses'
+          git push origin HEAD:${{ github.head_ref }}
