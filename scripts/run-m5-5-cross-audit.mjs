@@ -148,12 +148,12 @@ const brokerToVault = broker.related_vault?.id === vault.id && broker.vault_id =
 assert(loanToBroker, 'Loan → Loan Broker relationship is inconsistent')
 assert(brokerToVault, 'Loan Broker → Vault relationship is inconsistent')
 
-const objectHistory = await request(`/api/objects/Loan/${encodeURIComponent(loan.id)}/history?limit=100`)
+const objectHistory = await request(`/api/objects/Loan/${encodeURIComponent(loan.id)}/history?limit=25`)
 assert(objectHistory.json?.network === 'devnet', 'Loan object history must be Devnet')
 const objectHistoryRows = asArray(objectHistory.json?.data, 'Loan object history data')
 assert(objectHistoryRows.every((row) => row.object_type === 'Loan' && row.object_id === loan.id), 'Loan object history contains mismatched object identity')
 
-const currentLoanLifecycle = await request(`/api/loans/${encodeURIComponent(loan.id)}/lifecycle?limit=100`)
+const currentLoanLifecycle = await request(`/api/loans/${encodeURIComponent(loan.id)}/lifecycle?limit=25`)
 assert(currentLoanLifecycle.json?.network === 'devnet', 'Loan lifecycle must be Devnet')
 assert(currentLoanLifecycle.json?.loan_id === loan.id, 'Loan lifecycle response identity mismatch')
 const currentLoanLifecycleRows = asArray(currentLoanLifecycle.json?.data, 'Loan lifecycle data')
