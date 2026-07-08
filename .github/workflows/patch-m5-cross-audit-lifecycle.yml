@@ -1,0 +1,75 @@
+name: Patch M5 lifecycle-backed current history audit
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/patch-m5-cross-audit-lifecycle.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - name: Select current history witness from lifecycle evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/run-m5-5-cross-audit.mjs')
+          text = path.read_text()
+          old = '''const objectHistory = await request(`/api/objects/Loan/${encodeURIComponent(loan.id)}/history?limit=25`)
+          assert(objectHistory.json?.network === 'devnet', 'Loan object history must be Devnet')
+          const objectHistoryRows = asArray(objectHistory.json?.data, 'Loan object history data')
+          assert(objectHistoryRows.every((row) => row.object_type === 'Loan' && row.object_id === loan.id), 'Loan object history contains mismatched object identity')
+
+          const currentLoanLifecycle = await request(`/api/loans/${encodeURIComponent(loan.id)}/lifecycle?limit=25`)
+          assert(currentLoanLifecycle.json?.network === 'devnet', 'Loan lifecycle must be Devnet')
+          assert(currentLoanLifecycle.json?.loan_id === loan.id, 'Loan lifecycle response identity mismatch')
+          const currentLoanLifecycleRows = asArray(currentLoanLifecycle.json?.data, 'Loan lifecycle data')
+          assert(currentLoanLifecycleRows.every((row) => row.loan_id === loan.id), 'Loan lifecycle contains mismatched loan identity')
+
+          const lifecycleExplorer = await request('/api/audit/lifecycle?limit=100')
+          assert(lifecycleExplorer.json?.network === 'devnet', 'Lifecycle explorer must be Devnet')
+          const lifecycleExplorerRows = asArray(lifecycleExplorer.json?.data, 'Lifecycle explorer data')
+          assert(lifecycleExplorerRows.length > 0, 'Lifecycle explorer must contain indexed evidence')'''.replace('          ', '')
+          new = '''const lifecycleExplorer = await request('/api/audit/lifecycle?limit=100')
+          assert(lifecycleExplorer.json?.network === 'devnet', 'Lifecycle explorer must be Devnet')
+          const lifecycleExplorerRows = asArray(lifecycleExplorer.json?.data, 'Lifecycle explorer data')
+          assert(lifecycleExplorerRows.length > 0, 'Lifecycle explorer must contain indexed evidence')
+          const seenLifecycleLoans = new Set()
+          const lifecycleCurrentCandidate = lifecycleExplorerRows.find((row) => {
+            if (seenLifecycleLoans.has(row.loan_id)) return false
+            seenLifecycleLoans.add(row.loan_id)
+            return row.event_type !== 'deleted'
+          })
+          assert(lifecycleCurrentCandidate?.loan_id, 'Lifecycle explorer must expose a latest non-deleted Loan witness')
+          const lifecycleCurrentDetailResponse = await request(`/api/loans/${encodeURIComponent(lifecycleCurrentCandidate.loan_id)}`)
+          const lifecycleCurrentLoan = requireAvailableCurrent(lifecycleCurrentDetailResponse, 'Lifecycle current Loan detail', snapshotId)
+          assert(lifecycleCurrentLoan.id === lifecycleCurrentCandidate.loan_id, 'Lifecycle/current Loan identity mismatch')
+          const currentLoanLifecycleRows = lifecycleExplorerRows.filter((row) => row.loan_id === lifecycleCurrentLoan.id)
+          assert(currentLoanLifecycleRows.every((row) => row.loan_id === lifecycleCurrentLoan.id), 'Lifecycle explorer contains mismatched Loan identity')
+
+          const objectHistory = await request(`/api/objects/Loan/${encodeURIComponent(lifecycleCurrentLoan.id)}/history?limit=1`)
+          assert(objectHistory.json?.network === 'devnet', 'Loan object history must be Devnet')
+          const objectHistoryRows = asArray(objectHistory.json?.data, 'Loan object history data')
+          assert(objectHistoryRows.length === 1, 'Lifecycle-backed current Loan must expose one bounded newest history row')
+          assert(objectHistoryRows.every((row) => row.object_type === 'Loan' && row.object_id === lifecycleCurrentLoan.id), 'Loan object history contains mismatched object identity')'''.replace('          ', '')
+          if old not in text:
+            raise SystemExit('expected lifecycle/current history block not found')
+          text = text.replace(old, new, 1)
+          text = text.replace('loan_id: loan.id,\n    object_history_rows:', 'loan_id: lifecycleCurrentLoan.id,\n    object_history_rows:', 1)
+          path.write_text(text)
+          PY
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add scripts/run-m5-5-cross-audit.mjs
+          git commit -m 'Select current history witness from lifecycle evidence'
+          git push origin HEAD:${{ github.head_ref }}
