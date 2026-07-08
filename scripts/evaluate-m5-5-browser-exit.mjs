@@ -17,13 +17,13 @@ async function readJson(filePath, label) {
   try {
     text = await readFile(filePath, 'utf8')
   } catch (error) {
-    throw new Error(`${label} could not be read from ${filePath}: ${error.message}`)
+    throw new Error(`${label} could not be read from ${filePath}: ${error.message}`, { cause: error })
   }
 
   try {
     return JSON.parse(text)
   } catch (error) {
-    throw new Error(`${label} is not valid JSON at ${filePath}: ${error.message}`)
+    throw new Error(`${label} is not valid JSON at ${filePath}: ${error.message}`, { cause: error })
   }
 }
 
