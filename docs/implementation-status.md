@@ -27,23 +27,23 @@ A later bounded lightweight head recheck captured at 2026-07-07 21:57 UTC sample
 
 The production screenshot-audit workflow, capture hardening, deterministic evidence summarization, and strict technical evaluation are merged. The capture path waits for settled page state and records route/profile/detail-ID manifest data, overflow diagnostics, console errors, page errors, and HTTP error responses. The analyzer writes machine-readable JSON and human-readable Markdown summaries, requires exact expected route/profile capture coverage, rejects missing, duplicate, and unexpected diagnostic records, classifies page-level horizontal overflow separately from nested overflow review candidates, and fails the audit after writing evidence when strict technical checks do not pass. Human screenshot review remains required even when technical evaluation passes.
 
-The production screenshot-audit and unimpairment candidate-review workflows share a fail-closed actual D1 headroom check. After collector preflight and before Playwright installation, page traversal, or candidate-list discovery, the workflow queries current UTC-day D1 analytics, records a public-safe usage summary, and requires both rows-read and rows-written fractions to remain below the existing `0.8` threshold. Manual confirmation remains an operator-intent gate but no longer substitutes for measured usage.
-
-A bounded one-shot 2026-07-08 UTC operation is scheduled in the active path: the M1 exit review at 00:10 UTC with readiness enforcement enabled for the scheduled run, followed by the production UI audit at 00:30 UTC. The M1 review preserves its evidence artifact even when strict readiness is not yet satisfied. The UI audit independently rechecks collector health and actual D1 headroom before any Playwright installation or page crawl. Candidate review is not scheduled because natural unimpairment evidence is already observed and consistent. Both schedules are date-guarded so later annual cron matches no-op outside the explicit 2026-07-08 UTC window.
+The production screenshot-audit and browser-regression workflows share a fail-closed actual D1 headroom check. After collector preflight and before Playwright installation or page traversal, the workflow queries current UTC-day D1 analytics, records a public-safe usage summary, and requires both rows-read and rows-written fractions to remain below the existing `0.8` threshold. Manual confirmation remains an operator-intent gate but no longer substitutes for measured usage.
 
 Route-aware SEO/discoverability preparation is implemented. Canonical and structured-data output remain inactive until an explicit public-site origin is configured, sitemap output is generated only when the final public origin is configured, and GA4 remains inactive until a valid measurement ID is supplied.
 
 M1 exit is complete. M5-5 real-data integration is now active; M6 remains gated behind M5-5 and its production evidence.
 
-The first D1-gated M5-5 production cross-audit passed at 2026-07-08 00:52:38 UTC. It verified shared snapshot identity across current entities, live Loan to Loan Broker and Loan Broker to Vault relationships, lifecycle-backed current/history consistency, lifecycle/current consistency, exact archive availability plus current-state exclusion, Activity result-code classification, Cover & Loss evidence availability, bounded Activity exports and feed output, Overview snapshot identity, and collector freshness. A durable manual workflow now repeats the same audit only after healthy zero-lag collector preflight and the unchanged measured D1 headroom gate pass. Real-data browser regression and representative browser production behavior smoke remain active before M5-5 exit.
+The first D1-gated M5-5 production cross-audit passed at 2026-07-08 00:52:38 UTC. It verified shared snapshot identity across current entities, live Loan to Loan Broker and Loan Broker to Vault relationships, lifecycle-backed current/history consistency, lifecycle/current consistency, exact archive availability plus current-state exclusion, Activity result-code classification, Cover & Loss evidence availability, bounded Activity exports and feed output, Overview snapshot identity, and collector freshness. A durable manual workflow repeats the same audit only after healthy zero-lag collector preflight and the unchanged measured D1 headroom gate pass.
 
 The first M5-5 real-data browser regression probe exposed a focused prerequisite before the browser matrix could pass. A representative Loan detail route rendered an explicit Object History error because a UI-shaped `limit=25` exact-object history request could not complete through the generic bounded immutable segment-chain scan. The collector and D1 headroom preflights were healthy. The exact-index prerequisite is now merged: exact Object History and per-Loan lifecycle detail use the verified immutable exact index and bounded targeted segment-file reads, then merge post-boundary D1 continuation at the same canonical history boundary. Object History remains newest-first; Loan lifecycle detail remains oldest-first. The fallback generic scan remains available for configured hybrid sources without a verified exact index. The prerequisite passed normal CI, release-native CI, exact-history rehearsal, and browser smoke without changing collector, D1 schema, persistence boundary, deployment configuration, or public write surface.
 
-The durable M5-5 browser regression unit is now implemented for merge validation. It adds a manual D1-headroom-gated workflow and a real-data browser runner that traverses 15 representative routes, discovers live witnesses from bounded public APIs, fails on rendered state errors, browser console or page errors, and observed HTTP 5xx responses, and verifies representative relationship, lifecycle/current, indexed history rendering, archive context, Search, and Network Status behavior. Loan detail lifecycle and Object History requests are bounded to `limit=25`. The durable runner retains human screenshot review as a separate Track B requirement and does not include the earlier temporary PR-only probe workflow. Production-shaped execution remains pending until the durable workflow is merged and the updated public read path is deployed.
+The durable M5-5 browser regression workflow and runner are merged. They discover live witnesses from bounded public APIs, traverse 15 representative routes, fail on rendered state errors, browser console or page errors, and observed HTTP 5xx responses, and verify representative relationship, lifecycle/current, indexed history rendering, archive context, Search, and Network Status behavior. Loan detail lifecycle and Object History requests are bounded to `limit=25`, and the corresponding e2e fixture is aligned to that request contract. Normal CI and release-native CI passed before merge. Human screenshot review remains a separate Track B requirement.
+
+A post-merge production-shaped browser probe attempted to proceed at 2026-07-08 04:12 UTC. Collector preflight passed, but the unchanged D1 headroom gate measured `4,209,732` rows read and `25,806` rows written for the UTC day. Rows read were approximately `84.19%` of the `5,000,000` daily reference allowance, so the below-80% gate failed. The workflow stopped before dependency installation, Playwright installation, or browser traversal. No browser result is claimed from that attempt.
 
 ## Approved Explorer and Observatory sequence
 
-The approved product-evolution order is now:
+The approved product-evolution order is:
 
 ```text
 M5-5 completion
@@ -78,9 +78,19 @@ The 2026-07-07 21:09 UTC audit-headroom retry probe recorded:
 - reference allowances: `5,000,000` rows read and `100,000` rows written per UTC day;
 - measured headroom gate: failed.
 
-The gate correctly stopped candidate discovery. Production screenshot crawl remains deferred until a new UTC-day measurement passes both read and write thresholds. Candidate review is no longer active while natural unimpairment evidence remains valid and consistent. The UI gate remains unchanged and is not bypassed by the scheduled operation or by the later lightweight exact-head evidence.
+The 2026-07-08 00:52 UTC M5-5 production cross-audit probe measured `946,159` rows read and `3,414` rows written for the UTC day. Read and write fractions were approximately `18.92%` and `3.41%` of the configured daily reference allowances, so the unchanged below-80% gate passed.
 
-The 2026-07-08 00:52 UTC M5-5 production cross-audit probe measured `946,159` rows read and `3,414` rows written for the UTC day. Read and write fractions were approximately `18.92%` and `3.41%` of the configured daily reference allowances, so the unchanged below-80% gate passed. The production screenshot audit remains independently gated and must remeasure current-day usage before crawling.
+The 2026-07-08 04:12 UTC post-merge browser probe preflight recorded:
+
+- collector preflight: passed;
+- rows read: `4,209,732`;
+- rows written: `25,806`;
+- read fraction: approximately `84.19%` of the `5,000,000` daily reference allowance;
+- write fraction: approximately `25.81%` of the `100,000` daily reference allowance;
+- measured headroom gate: failed;
+- browser traversal: not started.
+
+The headroom guard remains unchanged. M5-5 browser regression and production screenshot crawling must remeasure current-day usage and may proceed only when their respective collector and headroom preconditions pass.
 
 ## Latest HYB-7 state
 
@@ -100,34 +110,6 @@ The 2026-07-08 00:52 UTC M5-5 production cross-audit probe measured `946,159` ro
 ## M1 exit result
 
 At 2026-07-08 00:13:44 UTC, retained D1-gated evidence recorded collector healthy with cursor and observed head both `3476415`, lag `0`, zero consecutive failures, no current error, HYB-7 `passed: true` with every path observed, and M1 diagnostics `ready: true` with `verifiedBaseBinding`, `catchUpStart`, `validatedHeadReached`, and `liveContinuation` all observed. Bounded replacement-base, hybrid-history, Overview, and current list/detail exact-read checks also passed.
-
-## Latest M1 evidence
-
-From the 2026-07-07 21:08 UTC semantic probe:
-
-- `verifiedBaseBinding`: observed;
-- `catchUpStart`: observed;
-- `validatedHeadReached`: missing in that diagnostic state because cursor `3472761` had not yet reached observed head `3472781`;
-- `liveContinuation`: observed;
-- overall M1 readiness: false in that diagnostic state.
-
-From the 2026-07-07 21:57 UTC lightweight head recheck:
-
-- three of three samples healthy;
-- cursor `3473715`;
-- observed head `3473715`;
-- exact cursor/head equality: true in all samples;
-- reported lag `0`;
-- consecutive failures `0`;
-- current error `null`.
-
-The lightweight recheck closes the operational cursor/head gap but does not independently mutate the earlier M1 diagnostic report. The scheduled readiness-enforced M1 exit review must confirm the complete gate set together.
-
-## M1 exit review
-
-The `.github/workflows/m1-exit-review.yml` workflow captures a reproducible read-only evidence package. Manual dispatch retains the existing optional `require_ready` input. The date-guarded scheduled run enforces readiness. Readiness enforcement requires every HYB-7 path and M1 gate to be observed, collector lag equal to zero, zero consecutive failures, and expected replacement-base, hybrid-history, Overview, and exact current-state bindings.
-
-A retained 2026-07-08 UTC D1-gated exit probe subsequently passed all readiness conditions together: collector healthy at exact head, HYB-7 passed with every path observed, and M1 diagnostics reported `ready: true` with every gate observed. M1 is therefore complete.
 
 ## Latest M5-5 production cross-audit result
 
@@ -165,14 +147,14 @@ The active work is split into permanent monitoring plus two coordinated tracks.
 2. Keep the durable production cross-audit workflow available for repeatable API-level checks after healthy collector and measured D1 headroom gates pass.
 3. Treat current/history, lifecycle/current, archive/current exclusion, live relationships, bounded exports/feed, snapshot identity, Activity result classification, and freshness/lag API checks as observed in retained evidence.
 4. Preserve the merged exact-index prerequisite for Object History and per-Loan lifecycle detail; do not return to broad request-time scans or weaken bounded read limits.
-5. Complete merge validation of the durable D1-gated browser regression workflow and real-data runner.
-6. After merge and deployment, run the browser regression across representative current, history, audit, Search, and Network Status routes using live witnesses.
+5. Preserve the merged durable D1-gated browser regression workflow and runner.
+6. Run the browser regression across representative current, history, audit, Search, and Network Status routes only when collector and measured D1 headroom gates pass.
 7. Verify rendered relationship, archive/current, history/current, lifecycle/current, Search, and freshness consistency from the retained browser artifact.
 8. Reconcile M5-5 exit only after the browser regression and representative browser behavior checks pass.
 
 ### Track B — production UI audit
 
-1. Let the scheduled 00:30 UTC production audit attempt proceed only when measured headroom and healthy zero-lag collector preflight both pass.
+1. Run the production audit only when measured headroom and healthy zero-lag collector preflight both pass.
 2. Inspect the generated JSON/Markdown technical summary, raw manifest and diagnostics, and screenshots together; technical evaluation accelerates and enforces triage but does not replace human visual review.
 3. Remediate confirmed UI defects and re-audit affected routes.
 
@@ -183,8 +165,8 @@ Tracks A and B may progress in parallel. Neither may weaken collector integrity 
 1. Keep permanent monitoring active.
 2. Preserve the passing M5-5 API cross-audit evidence and durable D1-gated repeat workflow.
 3. Preserve the merged exact-index Object History and Loan lifecycle detail prerequisite and its passing CI/rehearsal evidence.
-4. Complete CI and merge review for the durable M5-5 browser regression workflow and runner.
-5. Deploy the merged public read path and manually run the D1-gated browser regression against the production-shaped route set.
+4. Preserve the merged durable M5-5 browser regression workflow and runner.
+5. Re-run the D1-gated browser regression against the production-shaped route set only when measured current-day headroom passes; do not weaken or bypass the gate.
 6. Inspect the retained JSON/Markdown browser artifact and reconcile M5-5 exit only if representative relationship, archive/current, history/current, lifecycle/current, Search, and freshness behavior all pass.
 7. In parallel, run the independently D1-gated production UI audit when measured headroom permits; inspect summaries, diagnostics, and screenshots, then remediate and re-audit confirmed defects.
 8. After M5-5 exits, begin M6 integrity/reset simulation and runtime/resource guardrail work.
@@ -196,9 +178,9 @@ Tracks A and B may progress in parallel. Neither may weaken collector integrity 
 
 ## Remaining blockers
 
-- The 2026-07-08 00:52 UTC M5-5 production cross-audit probe measured 946,159 rows read and 3,414 rows written for the UTC day. Read and write fractions were approximately 18.92% and 3.41% of the configured daily reference allowances, so the unchanged below-80% gate passed. The production screenshot audit remains independently gated and must remeasure current-day usage before crawling.
-- The exact-index targeted-read prerequisite is merged and validated, but the durable browser regression workflow must merge and the production-shaped browser run must pass against the deployed public read path.
-- M5-5 API cross-audit evidence is passing, but real-data browser regression and representative browser production behavior evidence remain pending before M5-5 exit.
+- At 2026-07-08 04:12 UTC the post-merge browser probe was blocked before browser work because D1 rows read had reached 4,209,732 / 5,000,000, approximately 84.19% of the daily reference allowance. The unchanged below-80% headroom gate must pass before browser traversal.
+- M5-5 API cross-audit evidence is passing, and the exact-history prerequisite plus durable browser workflow are merged, but real-data browser regression and representative browser production behavior evidence remain pending before M5-5 exit.
+- The independent production UI audit remains separately gated by measured current-day headroom and collector health.
 - Final-host SEO binding and M6 release hardening remain pending in roadmap order.
 - Explorer v1 is approved but not active until M5-5 exits and the early M6 resource guardrail start gate is satisfied.
 - Observatory O1-O3 work is approved in sequence but remains post-release and post-soak work.
