@@ -102,6 +102,13 @@ jobs:
           set -o pipefail
           node scripts/run-m5-5-browser-regression.mjs 2>&1 | tee m5-5-browser-regression/runner.log
 
+      - name: Evaluate M5-5 browser exit evidence
+        if: steps.intent.outputs.run_allowed == 'true'
+        env:
+          M5_BROWSER_OUTPUT_DIR: m5-5-browser-regression
+          M5_EXIT_EVALUATION_OUTPUT_DIR: m5-5-browser-regression
+        run: node scripts/evaluate-m5-5-browser-exit.mjs
+
       - name: Publish browser-regression summary
         if: always() && steps.intent.outputs.run_allowed == 'true'
         shell: bash
@@ -118,6 +125,9 @@ jobs:
           fi
           if [ -f m5-5-browser-regression/summary.md ]; then
             cat m5-5-browser-regression/summary.md >> "${GITHUB_STEP_SUMMARY}"
+          fi
+          if [ -f m5-5-browser-regression/exit-evaluation.md ]; then
+            cat m5-5-browser-regression/exit-evaluation.md >> "${GITHUB_STEP_SUMMARY}"
           fi
 
       - name: Upload browser-regression evidence
