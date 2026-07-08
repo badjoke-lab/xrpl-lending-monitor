@@ -77,7 +77,8 @@ function exactIndex(): HistoryExactIndexReader {
   } as unknown as HistoryExactIndexReader
 }
 
-function db(): D1Database {
+function db(options: { liveObjectTransactionHash?: string } = {}): D1Database {
+  const liveObjectTransactionHash = options.liveObjectTransactionHash ?? 'TX1'
   return {
     prepare(sql: string) {
       const statement = {
@@ -94,7 +95,7 @@ function db(): D1Database {
         async all<T>() {
           if (sql.includes('SELECT * FROM object_changes')) {
             return { results: [{
-              transaction_hash: 'TX2', epoch_id: 'epoch-live', ledger_index: 106, transaction_index: 1,
+              transaction_hash: liveObjectTransactionHash, epoch_id: 'epoch-live', ledger_index: 106, transaction_index: 1,
               transaction_type: 'LoanPay', result_code: 'tesSUCCESS', close_time: 800_000_001,
               node_index: 0, object_type: 'Loan', object_id: 'LOAN1', action: 'modified',
               field_name: 'PrincipalOutstanding', before_json: '"90"', after_json: '"80"',
@@ -134,7 +135,8 @@ describe('hybrid exact history repository', () => {
 
   it('merges exact immutable and post-boundary object history newest first', async () => {
     const result = await listHybridExactObjectHistory({
-      db: db(), reader: reader(), exactIndex: exactIndex(), objectType: 'Loan', objectId: 'LOAN1', page: { limit: 25 },
+      db: db({ liveObjectTransactionHash: 'TX2' }), reader: reader(), exactIndex: exactIndex(),
+      objectType: 'Loan', objectId: 'LOAN1', page: { limit: 25 },
     })
     expect(result.map((change) => change.ledgerIndex)).toEqual([106, 105])
     expect(result.every((change) => change.objectType === 'Loan' && change.objectId === 'LOAN1')).toBe(true)
