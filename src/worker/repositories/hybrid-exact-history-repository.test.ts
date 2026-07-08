@@ -93,6 +93,12 @@ function db(options: { liveObjectTransactionHash?: string } = {}): D1Database {
           } as T
         },
         async all<T>() {
+          if (sql.includes("SELECT 'transaction' AS kind")) {
+            return { results: [{
+              kind: 'transaction', epoch_id: 'epoch-live', ledger_index: 107,
+              transaction_hash: 'TX-LIVE', object_type: null, object_id: null, loan_id: null,
+            }] as T[] }
+          }
           if (sql.includes('SELECT * FROM object_changes')) {
             return { results: [{
               transaction_hash: liveObjectTransactionHash, epoch_id: 'epoch-live', ledger_index: 106, transaction_index: 1,
@@ -113,10 +119,7 @@ function db(options: { liveObjectTransactionHash?: string } = {}): D1Database {
               payment_remaining_after: 0, details_json: '{}', created_at: '2025-05-08T06:13:21.000Z',
             }] as T[] }
           }
-          return { results: [{
-            kind: 'transaction', epoch_id: 'epoch-live', ledger_index: 107,
-            transaction_hash: 'TX-LIVE', object_type: null, object_id: null, loan_id: null,
-          }] as T[] }
+          return { results: [] as T[] }
         },
       }
       return statement
