@@ -31,8 +31,8 @@ function rate(value: number): string {
 
 export function LoanDetailPage({ loanId, onNavigate }: LoanDetailPageProps) {
   const { resource, reload } = useApiResource<LoanDetailResponse>(`/api/loans/${loanId}`)
-  const lifecycle = useApiResource<LoanLifecycleResponse>(`/api/loans/${loanId}/lifecycle?limit=100`)
-  const history = useApiResource<ObjectHistoryResponse>(`/api/objects/Loan/${loanId}/history?limit=100`)
+  const lifecycle = useApiResource<LoanLifecycleResponse>(`/api/loans/${loanId}/lifecycle?limit=25`)
+  const history = useApiResource<ObjectHistoryResponse>(`/api/objects/Loan/${loanId}/history?limit=25`)
   const response = resource.state === 'ready' ? resource.data : null
   const loan = response?.data ?? null
 
