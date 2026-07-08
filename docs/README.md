@@ -12,25 +12,27 @@ This directory is the source of truth for XRPL Lending Monitor and its approved 
 6. [`collector-design.md`](collector-design.md) — complete base bootstrap, incremental collection, overlay resolution, idempotency, and reset handling
 7. [`testing-strategy.md`](testing-strategy.md) — required validation and release tests
 8. [`resource-envelope.md`](resource-envelope.md) — runtime, storage, collection, base-read, overlay, catch-up, and public-query limits
-9. [`d1-migration-plan.md`](d1-migration-plan.md) — superseded D1-only full-snapshot evaluation retained as architecture and resource history
-10. [`d1-command-interface.md`](d1-command-interface.md) — local non-public D1 evaluation actions, limits, evidence, and operation order
-11. [`storage-artifact-format.md`](storage-artifact-format.md) — deterministic compressed complete-base artifact format
-12. [`local-artifact-measurement.md`](local-artifact-measurement.md) — resumable local capacity measurement and evidence output
-13. [`competitor-positioning.md`](competitor-positioning.md) — baseline parity and differentiators
-14. [`explorer-spec.md`](explorer-spec.md) — Explorer v1 and v2 scope, data boundaries, page behavior, and completion gates
-15. [`ui-information-architecture.md`](ui-information-architecture.md) — Monitor, Audit, System, Project, and approved Explore navigation relationships
-16. [`ui-page-map.md`](ui-page-map.md) — canonical routes and route ownership
-17. [`ui-page-specifications.md`](ui-page-specifications.md) — page responsibilities, API dependencies, unavailable behavior, and milestone assignment
-18. [`ui-design-spec.md`](ui-design-spec.md) — visual system, state treatment, tables, charts, provenance, and accessibility
-19. [`ui-component-inventory.md`](ui-component-inventory.md) — reusable UI component contracts and required states
-20. [`ui-responsive-rules.md`](ui-responsive-rules.md) — desktop, tablet, mobile, zoom, and long-content behavior
-21. [`ui-reference/README.md`](ui-reference/README.md) — approved mockup interpretation and prohibited invented data
-22. [`development-roadmap.md`](development-roadmap.md) — active M0-M6 implementation order, dependencies, target dates, and exit conditions
-23. [`observatory-roadmap.md`](observatory-roadmap.md) — approved Explorer v1 insertion and post-release Observatory O1-O3 expansion order
-24. [`implementation-status.md`](implementation-status.md) — public implementation state, active unit, and current release blockers
-25. [`operations-public-discovery.md`](operations-public-discovery.md) — final-host canonical, robots, sitemap, analytics, and Search Console operation
-26. [`operations-unimpairment-witness.md`](operations-unimpairment-witness.md) — bounded external Devnet semantic-witness operation for the remaining M1 unimpairment path
-27. [`decision-log.md`](decision-log.md) — accepted and superseded architectural and product decisions
+9. [`m6-integrity-reset-plan.md`](m6-integrity-reset-plan.md) — first post-M5-5 M6 integrity, replay, reset, epoch-transition, catch-up, and reconciliation baseline
+10. [`m6-resource-guardrail-plan.md`](m6-resource-guardrail-plan.md) — early M6 runtime/resource measurement baseline and Explorer v1 guardrail harness contract
+11. [`d1-migration-plan.md`](d1-migration-plan.md) — superseded D1-only full-snapshot evaluation retained as architecture and resource history
+12. [`d1-command-interface.md`](d1-command-interface.md) — local non-public D1 evaluation actions, limits, evidence, and operation order
+13. [`storage-artifact-format.md`](storage-artifact-format.md) — deterministic compressed complete-base artifact format
+14. [`local-artifact-measurement.md`](local-artifact-measurement.md) — resumable local capacity measurement and evidence output
+15. [`competitor-positioning.md`](competitor-positioning.md) — baseline parity and differentiators
+16. [`explorer-spec.md`](explorer-spec.md) — Explorer v1 and v2 scope, data boundaries, page behavior, and completion gates
+17. [`ui-information-architecture.md`](ui-information-architecture.md) — Monitor, Audit, System, Project, and approved Explore navigation relationships
+18. [`ui-page-map.md`](ui-page-map.md) — canonical routes and route ownership
+19. [`ui-page-specifications.md`](ui-page-specifications.md) — page responsibilities, API dependencies, unavailable behavior, and milestone assignment
+20. [`ui-design-spec.md`](ui-design-spec.md) — visual system, state treatment, tables, charts, provenance, and accessibility
+21. [`ui-component-inventory.md`](ui-component-inventory.md) — reusable UI component contracts and required states
+22. [`ui-responsive-rules.md`](ui-responsive-rules.md) — desktop, tablet, mobile, zoom, and long-content behavior
+23. [`ui-reference/README.md`](ui-reference/README.md) — approved mockup interpretation and prohibited invented data
+24. [`development-roadmap.md`](development-roadmap.md) — active M0-M6 implementation order, dependencies, target dates, and exit conditions
+25. [`observatory-roadmap.md`](observatory-roadmap.md) — approved Explorer v1 insertion and post-release Observatory O1-O3 expansion order
+26. [`implementation-status.md`](implementation-status.md) — public implementation state, active unit, and current release blockers
+27. [`operations-public-discovery.md`](operations-public-discovery.md) — final-host canonical, robots, sitemap, analytics, and Search Console operation
+28. [`operations-unimpairment-witness.md`](operations-unimpairment-witness.md) — bounded external Devnet semantic-witness operation for the remaining M1 unimpairment path
+29. [`decision-log.md`](decision-log.md) — accepted and superseded architectural and product decisions
 
 ## Authority rules
 
@@ -40,6 +42,8 @@ This directory is the source of truth for XRPL Lending Monitor and its approved 
 - Domain documents define how their data and behavior work.
 - `collector-design.md` defines complete base bootstrap, incremental continuation, current overlay behavior, and reset handling.
 - `resource-envelope.md` defines measurable runtime, storage, public-query, and evidence gates.
+- `m6-integrity-reset-plan.md` defines the first executable M6 integrity/reset baseline after M5-5 exit; it does not authorize early M6 implementation.
+- `m6-resource-guardrail-plan.md` defines the early M6 measurement order, evidence contract, budget-approval process, and Explorer v1 resource-harness gate.
 - `d1-migration-plan.md` records the superseded D1-only full-snapshot evaluation and retained lessons; it does not control active M1 order.
 - `d1-command-interface.md` defines the local D1 evaluation action boundary and public-safe evidence contract.
 - `storage-artifact-format.md` defines the compressed artifact format used by complete base generation.
@@ -51,6 +55,7 @@ This directory is the source of truth for XRPL Lending Monitor and its approved 
 - `operations-public-discovery.md` defines final-host, canonical, sitemap, analytics, and Search Console launch operation.
 - `operations-unimpairment-witness.md` defines the custody boundary, protocol preconditions, abort conditions, and evidence order for any separately controlled external Devnet unimpairment witness.
 - `development-roadmap.md`, `observatory-roadmap.md`, `explorer-spec.md`, and `implementation-status.md` must be re-read at the start of each Explorer or Observatory implementation unit and reconciled with newly captured evidence before dependent work proceeds.
+- `development-roadmap.md`, `implementation-status.md`, `m6-integrity-reset-plan.md`, and `m6-resource-guardrail-plan.md` must be re-read before the first M6 integrity/reset or runtime/resource implementation unit.
 - `development-roadmap.md` and `implementation-status.md` must also be re-read at the start of each implementation, operational, UI-audit, SEO, or release-preparation unit.
 - `decision-log.md` records why material architecture and product choices were accepted or superseded.
 - Root `AGENTS.md` defines repository contribution rules.

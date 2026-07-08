@@ -17,8 +17,9 @@ Before changing code or documentation, read:
 9. `docs/resource-envelope.md`
 10. `docs/development-roadmap.md`
 11. `docs/implementation-status.md`
-12. the UI specification documents for user-visible work
-13. `docs/explorer-spec.md` and `docs/observatory-roadmap.md` for Explorer or XRPL Lending Observatory work
+12. `docs/m6-integrity-reset-plan.md` and `docs/m6-resource-guardrail-plan.md` for early M6 integrity/reset or runtime/resource work
+13. the UI specification documents for user-visible work
+14. `docs/explorer-spec.md` and `docs/observatory-roadmap.md` for Explorer or XRPL Lending Observatory work
 
 Repository documents are authoritative when they agree with implementation and verified evidence. Correct stale documentation in the same pull request as the related change.
 
@@ -55,7 +56,8 @@ Current-state activation requires one fixed validated ledger, complete traversal
 
 - Work from the current canonical predecessor.
 - Before every new implementation unit, operational probe, release-preparation unit, or externally visible configuration change, re-read `docs/development-roadmap.md` and `docs/implementation-status.md`; repository source-of-truth documents override stale conversation summaries or prior plans.
-- Before every Explorer or Observatory implementation unit, also re-read `docs/explorer-spec.md` and `docs/observatory-roadmap.md` and reconcile them with the active roadmap, implementation status, resource envelope, and affected UI/data specifications.
+- Before the first M6 integrity/reset or runtime/resource unit, also re-read `docs/m6-integrity-reset-plan.md` and `docs/m6-resource-guardrail-plan.md`; do not start M6 while `implementation-status.md` still records M5-5 as active.
+- Before every Explorer or Observatory implementation unit, also re-read `docs/explorer-spec.md` and `docs/observatory-roadmap.md` and reconcile them with the active roadmap, implementation status, resource envelope, early M6 baseline evidence, and affected UI/data specifications.
 - After new evidence changes an active gate, blocker, sequencing decision, or measured resource state, reconcile the affected status and roadmap documents before the next dependent unit proceeds.
 - Prefer one coherent roadmap unit per pull request.
 - Do not create parallel implementations of the same feature.
@@ -81,6 +83,8 @@ Additional evidence is required where applicable:
 - non-destructive live Devnet reads for network-dependent collectors;
 - browser evidence for user-visible flows and accessibility;
 - runtime, request, storage, and recovery measurements for collector and bootstrap changes;
+- reset-signal classification, interruption/replay, epoch-transition, catch-up, and reconciliation evidence for early M6 integrity/reset work;
+- collector, replay/catch-up, representative API-read, browser-request-shape, and Explorer harness measurements for early M6 resource work;
 - request, D1-read, base-read, cache, accessibility, and representative interaction measurements for Explorer work;
 - aggregate replay, storage growth, read/write profile, retention, reset, and reconciliation evidence for Observatory data-foundation work;
 - rollback and interruption evidence for persistence and deployment changes.
