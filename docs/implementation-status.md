@@ -32,7 +32,7 @@ A fail-closed M5-5 browser exit evaluator is merged. It verifies:
 
 The evaluator writes `exit-evaluation.json` and `exit-evaluation.md`. A passing browser evaluator marks browser evidence ready for M5-5 exit reconciliation, but retained API cross-audit evidence remains a separate prerequisite. Human screenshot review remains a separate Track B requirement.
 
-A date-guarded production browser-regression attempt is scheduled for `2026-07-09 00:20 UTC` (`2026-07-09 09:20 JST`), after the next UTC-day D1 usage reset. The scheduled path uses the same healthy zero-lag collector preflight and unchanged below-80% D1 headroom gate as manual execution. Outside the exact date, the annual cron shape performs no checkout, D1 query, dependency installation, Playwright installation, browser traversal, summary publication, or artifact upload.
+A date-guarded production browser-regression attempt is scheduled for `2026-07-09 00:45 UTC` (`2026-07-09 09:45 JST`), after the next UTC-day D1 usage reset and after the permanent `00:23 UTC` deep-diagnostics window. The deep diagnostics job has a 15-minute timeout, so the later browser start intentionally avoids planned overlap between deep evidence scans and production browser traversal. The scheduled path uses the same healthy zero-lag collector preflight and unchanged below-80% D1 headroom gate as manual execution. Outside the exact date, the annual cron shape performs no checkout, D1 query, dependency installation, Playwright installation, browser traversal, summary publication, or artifact upload.
 
 ## Latest retained runtime evidence
 
@@ -145,7 +145,7 @@ The active work is permanent monitoring plus two coordinated M5-5/UI tracks.
 1. Preserve completed M1 exit evidence and passing M5-5 API cross-audit evidence.
 2. Preserve the exact-index Object History and Loan lifecycle detail prerequisite.
 3. Preserve the optimized durable D1-gated browser regression workflow, request-count evidence, runner-log retention, and fail-closed exit evaluator.
-4. Let the `2026-07-09 00:20 UTC` date-guarded run proceed only through unchanged collector and D1 headroom gates.
+4. Let the `2026-07-09 00:45 UTC` date-guarded run proceed only after the planned deep-diagnostics window and only through unchanged collector and D1 headroom gates.
 5. Inspect `summary.json`, `summary.md`, `runner.log`, `exit-evaluation.json`, `exit-evaluation.md`, collector preflight, and D1 headroom evidence.
 6. Reconcile M5-5 exit only if retained API cross-audit evidence remains valid and browser exit evidence passes.
 
@@ -189,7 +189,7 @@ No new per-route numeric budget has been invented before measurement. The existi
 ## Next order
 
 1. Keep permanent monitoring active.
-2. Let the date-guarded `2026-07-09 00:20 UTC` browser-regression attempt evaluate collector health and current-day D1 headroom, then traverse only if both gates pass.
+2. Let the date-guarded `2026-07-09 00:45 UTC` browser-regression attempt run after the planned deep-diagnostics window, evaluate collector health and current-day D1 headroom, then traverse only if both gates pass.
 3. Inspect all retained browser, resource, and exit-evaluator artifacts.
 4. Reconcile M5-5 exit only when retained API and new browser evidence both satisfy their gates.
 5. After M5-5 exits, begin `M6-I1` from `docs/m6-integrity-reset-plan.md`.
@@ -203,7 +203,7 @@ No new per-route numeric budget has been invented before measurement. The existi
 
 ## Remaining blockers
 
-- The next production-shaped browser evidence attempt is scheduled for `2026-07-09 00:20 UTC` and remains subject to unchanged healthy zero-lag collector and below-80% current-day D1 headroom gates.
+- The next production-shaped browser evidence attempt is scheduled for `2026-07-09 00:45 UTC` and intentionally isolated from the planned `00:23 UTC` deep-diagnostics window; it remains subject to unchanged healthy zero-lag collector and below-80% current-day D1 headroom gates.
 - M5-5 API cross-audit evidence is passing, but real-data browser regression and representative browser production behavior evidence remain pending before M5-5 exit.
 - The independent production UI audit remains separately gated by measured current-day headroom and collector health.
 - M6 plans are prepared but M6 execution remains blocked until M5-5 exit.
