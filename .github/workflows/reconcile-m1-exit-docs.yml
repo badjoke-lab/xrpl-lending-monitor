@@ -1,0 +1,74 @@
+name: Reconcile M1 exit docs
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/reconcile-m1-exit-docs.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - name: Reconcile roadmap and status
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          roadmap = Path('docs/development-roadmap.md')
+          text = roadmap.read_text()
+          replacements = {
+            '| M1 Current-state collector | All HYB-7 paths and exact-head equality observed; guarded exit review active |': '| M1 Current-state collector | Complete |',
+            '| M5 Differentiated audit UI | Complete through M5-4; M5-5 gated behind M1 |': '| M5 Differentiated audit UI | M5-5 active after successful M1 exit |',
+            'The recorded evidence now includes all required HYB-7 paths, natural post-boundary unimpairment, passing continuation diagnostics, and three consecutive lightweight samples with exact cursor/head equality. M1 now proceeds to guarded diagnostics and the readiness-enforced exit review at a D1-safe point while permanent monitoring and the D1-gated UI audit track continue.': 'M1 exited on retained 2026-07-08 UTC evidence: collector healthy at exact head, HYB-7 passed with every path observed, and M1 exit diagnostics reported ready with every gate observed. Work now proceeds to M5-5 real-data integration while permanent monitoring and the independently D1-gated UI audit track continue.',
+            '### Track A — M1 completion path': '### Track A — M5-5 real-data integration path',
+            '1. Preserve healthy operation, source-layout invariants, passing HYB-7 continuation evidence, and the naturally observed post-boundary unimpairment evidence.\n2. Preserve the 2026-07-07 21:57 UTC lightweight evidence showing three healthy samples with cursor and observed head both `3473715` and exact equality in every sample.\n3. Do not run candidate discovery or a deliberate external witness while the natural unimpairment source/lifecycle evidence remains observed and consistent.\n4. At a D1-safe point, run guarded M1 diagnostics and require every M1 gate to be observed together.\n5. Run the reproducible M1 exit review with `require_ready=true`.\n6. Retain the exit artifact and reconcile roadmap/status from that evidence.\n7. Proceed to M5-5 only after M1 exit is complete.': '1. Preserve permanent monitoring and the completed M1 exit evidence.\n2. Run cross-audit real-data integration against the verified base-plus-overlay current state and indexed real history.\n3. Verify bounded exports against the live evidence boundary.\n4. Run real-data browser regression and current/history consistency checks.\n5. Cross-check lifecycle against current objects and prove archive/current exclusion.\n6. Run bounded production behavior smoke across representative list/detail and audit routes.\n7. Verify Loan to Loan Broker and Loan Broker to Vault relationships through live identifiers, plus freshness and lag claims against collector status.',
+            'Target: 2026-07-13 through 2026-07-14, after M1 exit. Dependency state controls the start date.': 'Target: active from 2026-07-08 after successful M1 exit. Evidence state controls completion.',
+            'The active M1 work integrates base-plus-overlay current reads and freshness metadata into the current entity routes. Historical APIs remain bounded by collected evidence.': 'The completed M1 path serves base-plus-overlay current reads and freshness metadata. M5-5 now cross-audits those current reads against indexed history and representative production behavior.'
+          }
+          for old, new in replacements.items():
+            if old not in text:
+              raise SystemExit(f'missing roadmap anchor: {old[:80]}')
+            text = text.replace(old, new, 1)
+          marker = 'Exit condition: audit integration and production behavior smoke pass against verified base-plus-overlay current state and indexed real history.\n'
+          if marker not in text:
+            raise SystemExit('missing M5-5 exit marker')
+          text = text.replace(marker, marker + '\nM1 exit evidence recorded for this dependency: at 2026-07-08 00:13:44 UTC the collector was healthy with cursor and observed head both `3476415`, lag `0`, zero consecutive failures, HYB-7 passed with every path observed, and M1 diagnostics reported `ready: true` with all four gates observed.\n', 1)
+          roadmap.write_text(text)
+
+          status = Path('docs/implementation-status.md')
+          text = status.read_text()
+          text = text.replace('M5-5 and M6 remain gated behind M1 exit.', 'M1 exit is complete. M5-5 real-data integration is now active; M6 remains gated behind M5-5 and its production evidence.', 1)
+          text = text.replace('The natural unimpairment gap and the later lightweight cursor/head equality prerequisite are both satisfied by captured evidence. The one-shot scheduled review must now prove all readiness conditions together in one reproducible exit artifact or fail closed while retaining the artifact.', 'A retained 2026-07-08 UTC D1-gated exit probe subsequently passed all readiness conditions together: collector healthy at exact head, HYB-7 passed with every path observed, and M1 diagnostics reported `ready: true` with every gate observed. M1 is therefore complete.', 1)
+          text = text.replace('### Track A — M1 completion', '### Track A — M5-5 real-data integration', 1)
+          start = text.index('### Track A — M5-5 real-data integration')
+          end = text.index('### Track B — production UI audit')
+          replacement = '''### Track A — M5-5 real-data integration\n\n1. Preserve permanent monitoring and the completed M1 exit evidence.\n2. Cross-audit verified current state against indexed real history.\n3. Validate bounded exports against the live evidence boundary.\n4. Run real-data browser regression and current/history consistency checks.\n5. Cross-check lifecycle/current-object consistency and archive/current exclusion.\n6. Run bounded production behavior smoke and relationship checks across representative routes.\n7. Verify freshness and lag claims against collector status.\n\n'''
+          text = text[:start] + replacement + text[end:]
+          old_next = '''1. Keep permanent monitoring active.\n2. Observe the 2026-07-08 00:10 UTC readiness-enforced M1 exit review.\n3. If M1 exits, reconcile roadmap/status from the artifact and proceed to M5-5; otherwise retain the artifact and continue strict monitoring without weakening the gate.\n4. Observe the independently gated 00:30 UTC production UI audit attempt.\n5. If the UI gate passes, inspect summaries, raw diagnostics, and screenshots, fix confirmed UI defects, and re-audit affected routes; if it fails, retain measured evidence and do not weaken the gate.\n6. Complete M5-5 real-data integration, bounded live exports, browser regression, current/history consistency, lifecycle/current-object consistency, archive/current exclusion, and bounded production behavior smoke after M1 exit.\n7. Complete M6 integrity/reset simulations, runtime/resource guardrails, final visual audit, accessibility, performance, security, and cross-browser validation.\n8. Bind SEO/discoverability to the final public host and complete owner-managed analytics and search setup.\n9. Finalize operations/deployment documentation and recovery verification.\n10. Complete the real multi-day Devnet soak and final release verification.'''
+          new_next = '''1. Keep permanent monitoring active.\n2. Execute M5-5 cross-audit real-data integration against the completed M1 state.\n3. Complete bounded exports, browser regression, current/history and lifecycle/current consistency, archive/current exclusion, relationship verification, and bounded production behavior smoke.\n4. In parallel, run the independently D1-gated production UI audit when measured headroom permits; inspect summaries, diagnostics, and screenshots, then remediate and re-audit confirmed defects.\n5. After M5-5 exits, complete M6 integrity/reset simulations, runtime/resource guardrails, final visual audit, accessibility, performance, security, and cross-browser validation.\n6. Bind SEO/discoverability to the final public host and complete owner-managed analytics and search setup.\n7. Finalize operations/deployment documentation and recovery verification.\n8. Complete the real multi-day Devnet soak and final release verification.'''
+          if old_next not in text:
+            raise SystemExit('missing status next-order anchor')
+          text = text.replace(old_next, new_next, 1)
+          text = text.replace('- M1 exit remains incomplete until the scheduled readiness-enforced review confirms every M1 gate together in a retained artifact.\n- M5-5 real-data integration remains gated behind M1 exit.\n', '', 1)
+          text = text.replace('The latest 2026-07-07 21:09 UTC measured headroom probe failed the threshold.', 'The 2026-07-08 00:13 UTC M1 exit probe measured fresh UTC-day D1 usage at 528 rows read and 1,168 rows written and passed the headroom gate. The production screenshot audit still applies its own independent current-day gate before crawling.', 1)
+          insert = '## Latest M1 evidence\n'
+          if insert not in text:
+            raise SystemExit('missing latest M1 evidence anchor')
+          text = text.replace(insert, '## M1 exit result\n\nAt 2026-07-08 00:13:44 UTC, retained D1-gated evidence recorded collector healthy with cursor and observed head both `3476415`, lag `0`, zero consecutive failures, no current error, HYB-7 `passed: true` with every path observed, and M1 diagnostics `ready: true` with `verifiedBaseBinding`, `catchUpStart`, `validatedHeadReached`, and `liveContinuation` all observed. Bounded replacement-base, hybrid-history, Overview, and current list/detail exact-read checks also passed.\n\n## Latest M1 evidence\n', 1)
+          status.write_text(text)
+          PY
+
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add docs/development-roadmap.md docs/implementation-status.md
+          git commit -m 'Record successful M1 exit and activate M5-5'
+          git push origin HEAD:${{ github.head_ref }}
