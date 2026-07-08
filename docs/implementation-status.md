@@ -101,7 +101,7 @@ No browser pass is claimed from that attempt. The gate remains unchanged.
 
 ## Explorer v1 pre-entry design preparation
 
-A documentation-only Explorer v1 pre-entry design preparation unit is complete in the current branch and awaiting normal PR validation/merge.
+A documentation-only Explorer v1 pre-entry design preparation unit is complete and formalized in the repository source-of-truth documents.
 
 This preparation does not start E1-1 and does not change runtime behavior, public routes, API contracts, collector behavior, D1 persistence, schedules, deployment, or resource thresholds.
 
@@ -243,19 +243,18 @@ No new per-route numeric budget has been invented before measurement. The existi
 ## Next order
 
 1. Keep permanent monitoring active.
-2. Merge the Explorer v1 pre-entry design preparation only after documentation review/CI confirms no schedule or source-of-truth contradiction.
-3. Let the date-guarded `2026-07-09 00:45 UTC` browser-regression attempt run after the planned deep-diagnostics window, evaluate collector health and current-day D1 headroom, then traverse only if both gates pass.
-4. Inspect all retained browser, resource, and exit-evaluator artifacts.
-5. Reconcile M5-5 exit only when retained API and new browser evidence both satisfy their gates.
-6. After M5-5 exits, begin `M6-I1` from `docs/m6-integrity-reset-plan.md`.
-7. Complete the integrity/reset baseline in M6-I1 through M6-I5 order.
-8. Then execute M6-R1 through M6-R5 preparation order from `docs/m6-resource-guardrail-plan.md`.
-9. Begin Explorer v1 E1-1 only after its M5-5, integrity/reset, and resource-guardrail start gates are satisfied; revalidate all pre-entry Explorer documents against actual M6 evidence.
-10. Continue E1-2 through E1-5 in `observatory-roadmap.md` order.
-11. Continue remaining M6 visual, accessibility, performance, security, cross-browser, discoverability, operations, recovery, soak, and final release gates with `/explore` included in the release surface.
-12. Only after stable Monitor release and real soak evidence, begin O1 Observatory data-foundation work.
-13. Build the Observatory monitoring view only after O1 contracts are stable.
-14. Build Explorer v2 only after O2 establishes canonical technical interpretation and stable bounded APIs.
+2. Let the date-guarded `2026-07-09 00:45 UTC` browser-regression attempt run after the planned deep-diagnostics window, evaluate collector health and current-day D1 headroom, then traverse only if both gates pass.
+3. Inspect all retained browser, resource, and exit-evaluator artifacts.
+4. Reconcile M5-5 exit only when retained API and new browser evidence both satisfy their gates.
+5. After M5-5 exits, begin `M6-I1` from `docs/m6-integrity-reset-plan.md`.
+6. Complete the integrity/reset baseline in M6-I1 through M6-I5 order.
+7. Then execute M6-R1 through M6-R5 preparation order from `docs/m6-resource-guardrail-plan.md`.
+8. Begin Explorer v1 E1-1 only after its M5-5, integrity/reset, and resource-guardrail start gates are satisfied; revalidate all pre-entry Explorer documents against actual M6 evidence.
+9. Continue E1-2 through E1-5 in `observatory-roadmap.md` order.
+10. Continue remaining M6 visual, accessibility, performance, security, cross-browser, discoverability, operations, recovery, soak, and final release gates with `/explore` included in the release surface.
+11. Only after stable Monitor release and real soak evidence, begin O1 Observatory data-foundation work.
+12. Build the Observatory monitoring view only after O1 contracts are stable.
+13. Build Explorer v2 only after O2 establishes canonical technical interpretation and stable bounded APIs.
 
 ## Remaining blockers
 
