@@ -13,6 +13,8 @@ on:
         required: true
         default: false
         type: boolean
+  schedule:
+    - cron: '20 0 9 7 *'
 
 permissions:
   contents: read
@@ -25,17 +27,34 @@ jobs:
   browser-regression:
     runs-on: ubuntu-latest
     timeout-minutes: 35
+    env:
+      TARGET_BASE_URL: ${{ inputs.base_url || 'https://xrpl-lending-monitor.badjoke-lab.workers.dev' }}
     steps:
-      - name: Enforce manual browser-regression intent
-        shell: bash
-        run: test "${{ inputs.confirm_d1_headroom }}" = "true"
-
-      - uses: actions/checkout@v4
-
-      - name: Verify collector preflight
+      - name: Resolve browser-regression intent
+        id: intent
         shell: bash
         env:
-          BASE_URL: ${{ inputs.base_url }}
+          EVENT_NAME: ${{ github.event_name }}
+          CONFIRM_D1_HEADROOM: ${{ inputs.confirm_d1_headroom }}
+        run: |
+          set -euo pipefail
+          run_allowed=false
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            test "$CONFIRM_D1_HEADROOM" = "true"
+            run_allowed=true
+          elif [ "$EVENT_NAME" = "schedule" ] && [ "$(date -u +%F)" = "2026-07-09" ]; then
+            run_allowed=true
+          fi
+          echo "run_allowed=$run_allowed" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        if: steps.intent.outputs.run_allowed == 'true'
+
+      - name: Verify collector preflight
+        if: steps.intent.outputs.run_allowed == 'true'
+        shell: bash
+        env:
+          BASE_URL: ${{ env.TARGET_BASE_URL }}
         run: |
           set -euo pipefail
           mkdir -p m5-5-browser-regression
@@ -46,6 +65,7 @@ jobs:
             m5-5-browser-regression/collector-preflight.json > /dev/null
 
       - name: Measure and enforce actual D1 headroom
+        if: steps.intent.outputs.run_allowed == 'true'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -53,24 +73,29 @@ jobs:
         run: bash scripts/check-d1-headroom.sh
 
       - uses: pnpm/action-setup@v4
+        if: steps.intent.outputs.run_allowed == 'true'
         with:
           version: 11.9.0
 
       - uses: actions/setup-node@v4
+        if: steps.intent.outputs.run_allowed == 'true'
         with:
           node-version: 24.18.0
           cache: pnpm
 
       - name: Install dependencies
+        if: steps.intent.outputs.run_allowed == 'true'
         run: pnpm install --frozen-lockfile
 
       - name: Install Chromium
+        if: steps.intent.outputs.run_allowed == 'true'
         run: pnpm exec playwright install --with-deps chromium
 
       - name: Run real-data browser regression and behavior smoke
+        if: steps.intent.outputs.run_allowed == 'true'
         shell: bash
         env:
-          BASE_URL: ${{ inputs.base_url }}
+          BASE_URL: ${{ env.TARGET_BASE_URL }}
           M5_BROWSER_OUTPUT_DIR: m5-5-browser-regression
           M5_BROWSER_REQUEST_TIMEOUT_MS: 120000
         run: |
@@ -78,7 +103,7 @@ jobs:
           node scripts/run-m5-5-browser-regression.mjs 2>&1 | tee m5-5-browser-regression/runner.log
 
       - name: Publish browser-regression summary
-        if: always()
+        if: always() && steps.intent.outputs.run_allowed == 'true'
         shell: bash
         run: |
           if [ -f m5-5-browser-regression/d1-headroom-summary.json ]; then
@@ -96,7 +121,7 @@ jobs:
           fi
 
       - name: Upload browser-regression evidence
-        if: always()
+        if: always() && steps.intent.outputs.run_allowed == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: m5-5-browser-regression
