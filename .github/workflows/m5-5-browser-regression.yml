@@ -1,0 +1,102 @@
+name: M5-5 browser regression
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: Deployed read-only site base URL
+        required: true
+        default: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+        type: string
+      confirm_d1_headroom:
+        description: Confirm the operator expects the workflow to measure actual current UTC-day D1 headroom before browser regression
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: m5-5-browser-regression
+  cancel-in-progress: false
+
+jobs:
+  browser-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Enforce manual browser-regression intent
+        shell: bash
+        run: test "${{ inputs.confirm_d1_headroom }}" = "true"
+
+      - uses: actions/checkout@v4
+
+      - name: Verify collector preflight
+        shell: bash
+        env:
+          BASE_URL: ${{ inputs.base_url }}
+        run: |
+          set -euo pipefail
+          mkdir -p m5-5-browser-regression
+          curl --max-time 60 --fail-with-body --silent --show-error --retry 3 \
+            "${BASE_URL%/}/api/status/collector" \
+            > m5-5-browser-regression/collector-preflight.json
+          jq -e '.status == "healthy" and .cursor.lag_ledgers == 0 and .consecutive_failures == 0 and .error == null' \
+            m5-5-browser-regression/collector-preflight.json > /dev/null
+
+      - name: Measure and enforce actual D1 headroom
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          D1_HEADROOM_OUTPUT_DIR: m5-5-browser-regression
+        run: bash scripts/check-d1-headroom.sh
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run real-data browser regression and behavior smoke
+        env:
+          BASE_URL: ${{ inputs.base_url }}
+          M5_BROWSER_OUTPUT_DIR: m5-5-browser-regression
+          M5_BROWSER_REQUEST_TIMEOUT_MS: 120000
+        run: node scripts/run-m5-5-browser-regression.mjs
+
+      - name: Publish browser-regression summary
+        if: always()
+        shell: bash
+        run: |
+          if [ -f m5-5-browser-regression/d1-headroom-summary.json ]; then
+            {
+              echo '## D1 headroom gate'
+              echo
+              jq -r '"- Rows read: `\(.rows_read)` / `\(.rows_read_daily_allowance)`"' m5-5-browser-regression/d1-headroom-summary.json
+              jq -r '"- Rows written: `\(.rows_written)` / `\(.rows_written_daily_allowance)`"' m5-5-browser-regression/d1-headroom-summary.json
+              jq -r '"- Passed: **\(.passed)**"' m5-5-browser-regression/d1-headroom-summary.json
+              echo
+            } >> "${GITHUB_STEP_SUMMARY}"
+          fi
+          if [ -f m5-5-browser-regression/summary.md ]; then
+            cat m5-5-browser-regression/summary.md >> "${GITHUB_STEP_SUMMARY}"
+          fi
+
+      - name: Upload browser-regression evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: m5-5-browser-regression
+          path: m5-5-browser-regression
+          if-no-files-found: error
+          retention-days: 14

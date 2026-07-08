@@ -162,11 +162,11 @@ test('renders independent Loan states and opens verified detail relationships', 
       provenance: { object: 'direct', asset_relationship: 'direct', schedule_status: 'derived' },
     },
   }))
-  await page.route(`**/api/loans/${loanId}/lifecycle?limit=100`, (route) => route.fulfill({
-    json: { network: 'devnet', loan_id: loanId, data: [lifecycleEvent], page: { limit: 100, next_cursor: null } },
+  await page.route(`**/api/loans/${loanId}/lifecycle?limit=25`, (route) => route.fulfill({
+    json: { network: 'devnet', loan_id: loanId, data: [lifecycleEvent], page: { limit: 25, next_cursor: null } },
   }))
-  await page.route(`**/api/objects/Loan/${loanId}/history?limit=100`, (route) => route.fulfill({
-    json: { network: 'devnet', object_type: 'Loan', object_id: loanId, data: [objectChange], page: { limit: 100, next_cursor: null } },
+  await page.route(`**/api/objects/Loan/${loanId}/history?limit=25`, (route) => route.fulfill({
+    json: { network: 'devnet', object_type: 'Loan', object_id: loanId, data: [objectChange], page: { limit: 25, next_cursor: null } },
   }))
 
   await page.goto('/loans')
