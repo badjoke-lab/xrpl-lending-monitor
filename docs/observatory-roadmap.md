@@ -51,7 +51,55 @@ As of 2026-07-08, the repository records:
 - real-data browser regression and representative browser production behavior smoke still required before M5-5 exit;
 - M6 gated behind M5-5.
 
-Explorer work must not interrupt or weaken the active M5-5 browser verification path.
+Explorer implementation must not interrupt or weaken the active M5-5 browser verification path.
+
+## Explorer v1 pre-entry design preparation
+
+Pre-entry design preparation may proceed before the E1 start gate only when it is documentation/design work that does not change runtime behavior, public routes, API contracts, collector behavior, D1 persistence, schedules, deployment, or resource thresholds.
+
+Approved pre-entry preparation may include:
+
+- comparison and approval of visual mockup directions;
+- textual recording of the accepted visual composition;
+- mapping planned sections to candidate existing contracts;
+- identifying initial-load versus lazy-load boundaries;
+- drafting plain-language concept and field translations;
+- drafting Activity success/non-success translation rules;
+- defining bounded relationship interaction principles;
+- identifying accessibility alternatives;
+- identifying resource measurements required by later E1 work;
+- documenting unresolved endpoint choices for measured E1-1 review.
+
+Pre-entry preparation must not:
+
+- create `/explore` in production;
+- add Explore navigation as if the page were implemented;
+- implement Explorer components or runtime data fetching;
+- add a dedicated Explorer endpoint;
+- add Explorer-only persistence;
+- add a new collector or scheduled job;
+- add request-time historical aggregation;
+- set numeric relationship or request budgets without M6 resource evidence;
+- claim E1-1 complete;
+- satisfy or bypass the E1 start gate.
+
+The approved pre-entry documents are:
+
+- `explorer-v1-visual-direction.md`;
+- `explorer-v1-contract-matrix.md`;
+- `explorer-v1-translation-dictionary.md`;
+- `explorer-v1-relationship-contract.md`.
+
+These documents prepare E1-1. At E1-1 start they must be revalidated against:
+
+- actual M5-5 exit evidence;
+- M6 integrity/reset evidence;
+- M6 runtime/resource evidence;
+- the Explorer measurement harness;
+- final approved API response shapes;
+- final normalized Activity semantics.
+
+An unresolved pre-entry assumption never becomes an implementation contract merely because it appears in a mockup or draft document.
 
 ## E1 — Explorer v1
 
@@ -68,6 +116,22 @@ This placement intentionally occurs before the final full visual audit, accessib
 ### Goal
 
 Add one beginner-oriented guided public route that translates already approved protocol data and relationships without adding a parallel collector or historical analytics system.
+
+### Approved visual direction
+
+Explorer v1 uses the approved Guided Dashboard + Relationship Explorer hybrid documented in `explorer-v1-visual-direction.md`.
+
+The design:
+
+- teaches vocabulary before showing complex relationships;
+- shows bounded current facts before relationship exploration;
+- distinguishes conceptual protocol flow from observed relationships;
+- uses a bounded relationship explorer as the primary project-specific visual feature;
+- provides one readable selected-Loan summary;
+- translates recent Activity while retaining canonical evidence;
+- provides glossary/help and transitions to technical views;
+- remains visually consistent with the current Monitor;
+- does not use lighthouse, observatory-building, scenic landscape, or decorative Hero illustration.
 
 ### Scope
 
@@ -109,20 +173,25 @@ Explorer v1 does not include:
 
 #### E1-1 — Contract and composition review
 
+- re-read and revalidate all Explorer v1 pre-entry design documents;
 - map each Explorer section to existing API contracts;
+- confirm or revise candidate sources in the contract matrix using actual API shapes;
 - identify where one bounded composition endpoint would reduce repeated reads, if any;
-- define initial request budget;
+- define initial request budget from M6 resource evidence;
 - define current-state, relationship, activity, and detail-loading states;
-- confirm no Explorer-only scheduled persistence is required.
+- confirm no Explorer-only scheduled persistence is required;
+- confirm translation conditions against actual normalized Activity semantics;
+- select bounded relationship anchor/loading model from measured evidence.
 
-Exit condition: every displayed value and relationship has an approved source and provenance category, and the expected initial-load query plan is bounded.
+Exit condition: every displayed value and relationship has an approved source and provenance category, translation rules match actual evidence semantics, and the expected initial-load query plan is bounded and measured.
 
 #### E1-2 — Shell, route, and educational flow
 
 - add `/explore` route;
 - add approved navigation entry;
-- implement hero, scope statement, protocol flow explanation, and technical-view transitions;
-- implement explicit network, freshness, and unavailable behavior.
+- implement Hero, scope statement, three-concept explanation, protocol flow explanation, and technical-view transitions;
+- implement explicit network, freshness, and unavailable behavior;
+- follow the approved same-product Hero treatment without scenic/lighthouse illustration.
 
 Exit condition: the page is navigable and understandable before advanced visualizations are added.
 
@@ -132,7 +201,8 @@ Exit condition: the page is navigable and understandable before advanced visuali
 - implement bounded Vault -> Loan Broker -> Loan structure view;
 - provide graph/tree and accessible list alternatives where applicable;
 - lazy-load selected object detail;
-- prevent N+1 page-load fetching.
+- prevent N+1 page-load fetching;
+- follow `explorer-v1-relationship-contract.md` and measured M6 harness limits.
 
 Exit condition: relationship navigation is bounded, same-context, accessible, and measurable.
 
@@ -141,16 +211,18 @@ Exit condition: relationship navigation is bounded, same-context, accessible, an
 - implement summary-first Loan cards;
 - preserve separate on-ledger and schedule states;
 - implement plain-language Activity summaries while retaining canonical transaction type, result, ledger, hash, and affected objects;
-- expose technical detail links or drawers.
+- expose technical detail links or drawers;
+- revalidate implementation wording against `explorer-v1-translation-dictionary.md` and actual API/event semantics.
 
-Exit condition: users can understand a representative Loan and recent event without losing access to exact evidence.
+Exit condition: users can understand a representative Loan and recent event without losing access to exact evidence or changing canonical meaning.
 
 #### E1-5 — Explorer production evidence
 
 - measure initial page-load requests;
 - measure D1 rows read and base read-model access where applicable;
 - measure one representative detail interaction;
-- verify cache behavior;
+- measure one representative relationship expansion interaction;
+- verify cache behavior where a real cache exists;
 - run production-shaped browser behavior smoke;
 - include `/explore` in representative desktop/mobile screenshot audit;
 - verify stale, partial, unavailable, empty, and error states;
@@ -384,7 +456,9 @@ Before every Explorer or Observatory implementation unit:
 4. re-read `docs/explorer-spec.md`;
 5. re-read this document;
 6. re-read `docs/resource-envelope.md`;
-7. re-read the affected UI and data source-of-truth documents;
-8. reconcile newly captured evidence into roadmap/status/resource documentation before the next dependent unit proceeds.
+7. re-read `docs/m6-integrity-reset-plan.md` and `docs/m6-resource-guardrail-plan.md` where their evidence gates apply;
+8. re-read the four Explorer v1 pre-entry design documents before E1-1 through E1-5;
+9. re-read the affected UI and data source-of-truth documents;
+10. reconcile newly captured evidence into roadmap/status/resource documentation before the next dependent unit proceeds.
 
 Conversation summaries and prior plans do not override repository source-of-truth documents.
