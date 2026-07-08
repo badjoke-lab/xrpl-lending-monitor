@@ -148,21 +148,28 @@ const brokerToVault = broker.related_vault?.id === vault.id && broker.vault_id =
 assert(loanToBroker, 'Loan → Loan Broker relationship is inconsistent')
 assert(brokerToVault, 'Loan Broker → Vault relationship is inconsistent')
 
-const objectHistory = await request(`/api/objects/Loan/${encodeURIComponent(loan.id)}/history?limit=25`)
-assert(objectHistory.json?.network === 'devnet', 'Loan object history must be Devnet')
-const objectHistoryRows = asArray(objectHistory.json?.data, 'Loan object history data')
-assert(objectHistoryRows.every((row) => row.object_type === 'Loan' && row.object_id === loan.id), 'Loan object history contains mismatched object identity')
-
-const currentLoanLifecycle = await request(`/api/loans/${encodeURIComponent(loan.id)}/lifecycle?limit=25`)
-assert(currentLoanLifecycle.json?.network === 'devnet', 'Loan lifecycle must be Devnet')
-assert(currentLoanLifecycle.json?.loan_id === loan.id, 'Loan lifecycle response identity mismatch')
-const currentLoanLifecycleRows = asArray(currentLoanLifecycle.json?.data, 'Loan lifecycle data')
-assert(currentLoanLifecycleRows.every((row) => row.loan_id === loan.id), 'Loan lifecycle contains mismatched loan identity')
-
 const lifecycleExplorer = await request('/api/audit/lifecycle?limit=100')
 assert(lifecycleExplorer.json?.network === 'devnet', 'Lifecycle explorer must be Devnet')
 const lifecycleExplorerRows = asArray(lifecycleExplorer.json?.data, 'Lifecycle explorer data')
 assert(lifecycleExplorerRows.length > 0, 'Lifecycle explorer must contain indexed evidence')
+const seenLifecycleLoans = new Set()
+const lifecycleCurrentCandidate = lifecycleExplorerRows.find((row) => {
+  if (seenLifecycleLoans.has(row.loan_id)) return false
+  seenLifecycleLoans.add(row.loan_id)
+  return row.event_type !== 'deleted'
+})
+assert(lifecycleCurrentCandidate?.loan_id, 'Lifecycle explorer must expose a latest non-deleted Loan witness')
+const lifecycleCurrentDetailResponse = await request(`/api/loans/${encodeURIComponent(lifecycleCurrentCandidate.loan_id)}`)
+const lifecycleCurrentLoan = requireAvailableCurrent(lifecycleCurrentDetailResponse, 'Lifecycle current Loan detail', snapshotId)
+assert(lifecycleCurrentLoan.id === lifecycleCurrentCandidate.loan_id, 'Lifecycle/current Loan identity mismatch')
+const currentLoanLifecycleRows = lifecycleExplorerRows.filter((row) => row.loan_id === lifecycleCurrentLoan.id)
+assert(currentLoanLifecycleRows.every((row) => row.loan_id === lifecycleCurrentLoan.id), 'Lifecycle explorer contains mismatched Loan identity')
+
+const objectHistory = await request(`/api/objects/Loan/${encodeURIComponent(lifecycleCurrentLoan.id)}/history?limit=1`)
+assert(objectHistory.json?.network === 'devnet', 'Loan object history must be Devnet')
+const objectHistoryRows = asArray(objectHistory.json?.data, 'Loan object history data')
+assert(objectHistoryRows.length === 1, 'Lifecycle-backed current Loan must expose one bounded newest history row')
+assert(objectHistoryRows.every((row) => row.object_type === 'Loan' && row.object_id === lifecycleCurrentLoan.id), 'Loan object history contains mismatched object identity')
 
 const activity = await request('/api/activity?limit=100')
 assert(activity.json?.network === 'devnet', 'Activity must be Devnet')
@@ -234,7 +241,7 @@ const summary = summarizeTechnicalEvidence({
     broker_to_vault: brokerToVault,
   },
   currentHistory: {
-    loan_id: loan.id,
+    loan_id: lifecycleCurrentLoan.id,
     object_history_rows: objectHistoryRows.length,
   },
   lifecycle: {
