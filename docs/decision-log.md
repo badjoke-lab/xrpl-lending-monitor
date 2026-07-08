@@ -208,7 +208,7 @@ XRPL Lending Monitor
   -> Explorer v2
 ```
 
-Explorer v1 is a bounded guided presentation layer over approved Monitor APIs and current/history contracts. It is scheduled after M5-5 and early M6 resource guardrails, but before the final M6 visual and release-hardening passes so it can be included in those gates.
+Explorer v1 is a bounded guided presentation layer over approved Monitor APIs and current/history contracts. It is scheduled after M5-5 plus the early M6 integrity/reset and runtime/resource guardrail baselines, but before the final M6 visual and release-hardening passes so it can be included in those gates.
 
 The XRPL Lending Observatory expansion begins only after the stable Monitor release boundary and real soak evidence. Observatory work begins with data contracts, incremental aggregates, retention, reset behavior, and resource measurement before trend charts or guided historical exploration.
 
