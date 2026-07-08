@@ -12,11 +12,11 @@ The current M1 execution path is a verified immutable base read model plus bound
 | Milestone | Status | Goal | Exit condition |
 |---|---|---|---|
 | M0 Foundation and specification lock | Complete | Establish repository, source-of-truth documents, toolchain, and operating rules | Documentation accepted and project skeleton ready |
-| M1 Current-state collector | All HYB-7 paths and exact-head equality observed; guarded exit review active | Serve a verified Devnet base state and continuously apply validated ledger changes | Verified base read model serves real Devnet data; contiguous scheduled collection remains healthy at a strict fresh head; required HYB-7 paths and M1 exit review pass |
+| M1 Current-state collector | Complete | Serve a verified Devnet base state and continuously apply validated ledger changes | Verified base read model serves real Devnet data; contiguous scheduled collection remains healthy at a strict fresh head; required HYB-7 paths and M1 exit review pass |
 | M2 Event history and lifecycle | Complete through Checkpoint B | Normalize validated history, lifecycle, archives, balances, and status | Deterministic replay and reconciliation logic complete; production completeness remains bounded by M1 continuation and later soak evidence |
 | M3 Public API | Complete through exports and feeds; current merge integration pending final real-data cross-audit | Expose bounded read-only current and historical APIs | Base-plus-overlay current routes and historical contracts pass, with explicit freshness and unavailable states |
 | M4 Baseline UI and project pages | Complete through Checkpoint C | Deliver the ordinary monitor, navigation, project pages, responsive behavior, and shared states | Required baseline routes work end to end; live freshness claims remain gated by verified runtime evidence |
-| M5 Differentiated audit UI | Complete through M5-4; M5-5 gated behind M1 | Add lifecycle, archives, cover/loss, epochs, provenance, and cross-audit integration | Audit integration and bounded production behavior smoke pass against verified real data after M1 exits |
+| M5 Differentiated audit UI | M5-5 active after successful M1 exit | Add lifecycle, archives, cover/loss, epochs, provenance, and cross-audit integration | Audit integration and bounded production behavior smoke pass against verified real data after M1 exits |
 | M6 Hardening and public Devnet release | Release-preparation implementation active; final hardening gated by M1 and M5-5 | Prove integrity, resource safety, accessibility, discoverability, operations, and deployment readiness | Final visual audit, production behavior smoke, SEO/discoverability, recovery verification, multi-day soak, and all release gates pass |
 
 ## Cross-cutting rules
@@ -38,7 +38,7 @@ The current M1 execution path is a verified immutable base read model plus bound
 
 ## Active post-head execution order
 
-The recorded evidence now includes all required HYB-7 paths, natural post-boundary unimpairment, passing continuation diagnostics, and three consecutive lightweight samples with exact cursor/head equality. M1 now proceeds to guarded diagnostics and the readiness-enforced exit review at a D1-safe point while permanent monitoring and the D1-gated UI audit track continue.
+M1 exited on retained 2026-07-08 UTC evidence: collector healthy at exact head, HYB-7 passed with every path observed, and M1 exit diagnostics reported ready with every gate observed. Work now proceeds to M5-5 real-data integration while permanent monitoring and the independently D1-gated UI audit track continue.
 
 ### Permanent monitoring track
 
@@ -48,15 +48,15 @@ The recorded evidence now includes all required HYB-7 paths, natural post-bounda
 4. Check HYB-7 source/projection evidence, ledger continuity, created/modified/deleted changes, overlay/tombstone agreement, LoanPay and LoanManage activity, impairment/unimpairment/default transitions, lifecycle, archive, balance history, linkage gaps, and M1 gate states.
 5. Defer deep scans when the existing D1 read guard requires deferral. Do not weaken the guard merely to obtain release evidence.
 
-### Track A — M1 completion path
+### Track A — M5-5 real-data integration path
 
-1. Preserve healthy operation, source-layout invariants, passing HYB-7 continuation evidence, and the naturally observed post-boundary unimpairment evidence.
-2. Preserve the 2026-07-07 21:57 UTC lightweight evidence showing three healthy samples with cursor and observed head both `3473715` and exact equality in every sample.
-3. Do not run candidate discovery or a deliberate external witness while the natural unimpairment source/lifecycle evidence remains observed and consistent.
-4. At a D1-safe point, run guarded M1 diagnostics and require every M1 gate to be observed together.
-5. Run the reproducible M1 exit review with `require_ready=true`.
-6. Retain the exit artifact and reconcile roadmap/status from that evidence.
-7. Proceed to M5-5 only after M1 exit is complete.
+1. Preserve permanent monitoring and the completed M1 exit evidence.
+2. Run cross-audit real-data integration against the verified base-plus-overlay current state and indexed real history.
+3. Verify bounded exports against the live evidence boundary.
+4. Run real-data browser regression and current/history consistency checks.
+5. Cross-check lifecycle against current objects and prove archive/current exclusion.
+6. Run bounded production behavior smoke across representative list/detail and audit routes.
+7. Verify Loan to Loan Broker and Loan Broker to Vault relationships through live identifiers, plus freshness and lag claims against collector status.
 
 ### Track B — UI production-audit path
 
@@ -302,7 +302,7 @@ Complete through contracts, exports, and feeds:
 - lifecycle, archives, cover/loss audit endpoints;
 - bounded exports and feeds.
 
-The active M1 work integrates base-plus-overlay current reads and freshness metadata into the current entity routes. Historical APIs remain bounded by collected evidence.
+The completed M1 path serves base-plus-overlay current reads and freshness metadata. M5-5 now cross-audits those current reads against indexed history and representative production behavior.
 
 ## M4 — Baseline UI and project pages
 
@@ -329,7 +329,7 @@ Complete:
 
 ### M5-5 — Cross-audit real-data integration
 
-Target: 2026-07-13 through 2026-07-14, after M1 exit. Dependency state controls the start date.
+Target: active from 2026-07-08 after successful M1 exit. Evidence state controls completion.
 
 - cross-audit integration;
 - bounded exports against the live evidence boundary;
@@ -342,6 +342,8 @@ Target: 2026-07-13 through 2026-07-14, after M1 exit. Dependency state controls 
 - freshness and lag claim verification against collector status.
 
 Exit condition: audit integration and production behavior smoke pass against verified base-plus-overlay current state and indexed real history.
+
+M1 exit evidence recorded for this dependency: at 2026-07-08 00:13:44 UTC the collector was healthy with cursor and observed head both `3476415`, lag `0`, zero consecutive failures, HYB-7 passed with every path observed, and M1 diagnostics reported `ready: true` with all four gates observed.
 
 ## M6 — Hardening and public Devnet release
 
