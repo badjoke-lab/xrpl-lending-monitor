@@ -108,22 +108,28 @@ export class HistoryExactIndexReader {
   async find(termValue: string, options: {
     limit?: number
     referenceKinds?: readonly HistoryExactReferenceKind[]
+    referencePredicate?: (reference: HistoryExactIndexReference) => boolean
+    direction?: 'asc' | 'desc'
   } = {}): Promise<HistoryExactLookupResult> {
     const limit = options.limit ?? MAX_RESULT_LIMIT
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_RESULT_LIMIT) {
       throw new Error('History exact lookup limit must be between 1 and 100')
     }
     const allowedKinds = options.referenceKinds ? new Set(options.referenceKinds) : null
+    const referencePredicate = options.referencePredicate ?? (() => true)
+    const direction = options.direction ?? 'desc'
     const term = normalizeHistoryExactTerm(termValue)
     const bucket = await historyExactIndexBucket(term, this.manifest.bucketCount)
     const loaded = await this.#bucket(bucket)
+    const matches = loaded.records.filter((record) =>
+      record.term === term
+      && (allowedKinds === null || allowedKinds.has(record.reference.kind))
+      && referencePredicate(record.reference))
+    const ordered = direction === 'asc' ? [...matches].reverse() : matches
     return {
       term,
       bucket,
-      references: loaded.records
-        .filter((record) => record.term === term && (allowedKinds === null || allowedKinds.has(record.reference.kind)))
-        .slice(0, limit)
-        .map((record) => record.reference),
+      references: ordered.slice(0, limit).map((record) => record.reference),
       assetReads: loaded.assetReads,
       compressedBytes: loaded.compressedBytes,
       decompressedBytes: loaded.decompressedBytes,
