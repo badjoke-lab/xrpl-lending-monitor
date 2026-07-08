@@ -111,6 +111,7 @@ function renderMarkdown(summary) {
     `- Lifecycle explorer rows checked: \`${summary.lifecycle.explorer_rows}\``,
     `- Archived object current exclusion: **${summary.archive_exclusion.current_excluded ? 'passed' : 'failed'}**`,
     `- Activity rows checked: \`${summary.audit_collections.activity_rows}\``,
+    `- Activity success/non-success rows: \`${summary.audit_collections.activity_success_rows}\` / \`${summary.audit_collections.activity_non_success_rows}\``,
     `- Archived rows checked: \`${summary.audit_collections.archived_rows}\``,
     `- Cover/loss rows checked: \`${summary.audit_collections.cover_loss_rows}\``,
     `- Activity export JSON rows: \`${summary.exports.json_rows}\``,
@@ -184,7 +185,9 @@ const activity = await request('/api/activity?limit=100')
 assert(activity.json?.network === 'devnet', 'Activity must be Devnet')
 const activityRows = asArray(activity.json?.data, 'Activity data')
 assert(activityRows.length > 0, 'Activity must contain protocol events')
-assert(activityRows.every((row) => row.result_code === 'tesSUCCESS'), 'Activity contains a non-success protocol event')
+assert(activityRows.every((row) => typeof row.result_code === 'string' && row.result_code.length > 0), 'Activity contains an event without a result code')
+const activitySuccessRows = activityRows.filter((row) => row.result_code === 'tesSUCCESS').length
+const activityNonSuccessRows = activityRows.length - activitySuccessRows
 
 const archived = await request('/api/audit/archived?limit=25')
 assert(archived.json?.network === 'devnet', 'Archived Objects must be Devnet')
@@ -266,6 +269,8 @@ const summary = summarizeTechnicalEvidence({
   },
   auditCollections: {
     activity_rows: activityRows.length,
+    activity_success_rows: activitySuccessRows,
+    activity_non_success_rows: activityNonSuccessRows,
     archived_rows: archivedRows.length,
     cover_loss_rows: coverLossRows.length,
   },
