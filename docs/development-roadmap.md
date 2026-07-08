@@ -7,6 +7,8 @@ This document controls implementation order and dependencies. Dates are planning
 
 The current M1 execution path is a verified immutable base read model plus bounded D1 incremental history and current-state overlay. The earlier D1-only full-snapshot plan is retained as architectural history in [`d1-migration-plan.md`](d1-migration-plan.md) but no longer controls active implementation order.
 
+The approved product-evolution path is documented in [`observatory-roadmap.md`](observatory-roadmap.md): complete M5-5, establish early M6 integrity and resource guardrails, implement bounded Explorer v1, complete the remaining M6 release hardening and real soak, then proceed through XRPL Lending Observatory O1 data foundation, O2 monitoring view, and O3 Explorer v2. Explorer scope is defined in [`explorer-spec.md`](explorer-spec.md).
+
 ## Milestone summary
 
 | Milestone | Status | Goal | Exit condition |
@@ -17,7 +19,10 @@ The current M1 execution path is a verified immutable base read model plus bound
 | M3 Public API | Complete through exports and feeds; current merge integration pending final real-data cross-audit | Expose bounded read-only current and historical APIs | Base-plus-overlay current routes and historical contracts pass, with explicit freshness and unavailable states |
 | M4 Baseline UI and project pages | Complete through Checkpoint C | Deliver the ordinary monitor, navigation, project pages, responsive behavior, and shared states | Required baseline routes work end to end; live freshness claims remain gated by verified runtime evidence |
 | M5 Differentiated audit UI | M5-5 API cross-audit passed; browser regression and representative behavior smoke active | Add lifecycle, archives, cover/loss, epochs, provenance, and cross-audit integration | Audit integration and bounded production behavior smoke pass against verified real data after M1 exits |
-| M6 Hardening and public Devnet release | Release-preparation implementation active; final hardening gated by M1 and M5-5 | Prove integrity, resource safety, accessibility, discoverability, operations, and deployment readiness | Final visual audit, production behavior smoke, SEO/discoverability, recovery verification, multi-day soak, and all release gates pass |
+| M6 Hardening and public Devnet release | Release-preparation implementation active; final hardening gated by M1 and M5-5 | Prove integrity and resource safety, add bounded Explorer v1, then complete accessibility, discoverability, operations, and deployment readiness | Explorer v1 passes resource and browser gates; final visual audit, production behavior smoke, SEO/discoverability, recovery verification, multi-day soak, and all release gates pass |
+| O1 Observatory data foundation | Planned after stable Monitor release and real soak | Define bounded incremental historical metrics and reusable series | Approved metric contracts, replay safety, retention, resource evidence, API contracts, and reconciliation pass |
+| O2 Observatory monitoring view | Planned after O1 | Establish technical monitoring interpretation of historical change and trends | Stable Observatory metrics are displayed consistently with bounded range, provenance, and production evidence |
+| O3 Explorer v2 | Planned after O2 | Add guided historical and comparative exploration | Every visualization maps to stable Observatory contracts and passes resource, accessibility, and browser gates |
 
 ## Cross-cutting rules
 
@@ -34,7 +39,10 @@ The current M1 execution path is a verified immutable base read model plus bound
 - Collector monitoring continues after lag reaches zero. Collector limits or cadence are not retuned without failure, lag-slope, or resource evidence that justifies the change.
 - Release-preparation work that does not mutate collector, D1, history, or deployment state may proceed in parallel, but gated production audits and public indexing configuration must respect the dependency order below.
 - Production behavior checks must prove relationship and state consistency, not only successful HTTP responses or page rendering.
+- Explorer v1 is a bounded presentation layer over approved contracts. It does not add a separate collector, scheduled job, request-time full-history scan, or Explorer-specific historical analytics pipeline.
+- Explorer v2 is gated behind O1 and O2. It does not define Observatory metrics ad hoc.
 - Before every new implementation unit, operational probe, release-preparation unit, or externally visible configuration change, follow `AGENTS.md`: re-read this roadmap and `implementation-status.md`, and reconcile them after evidence changes gates, blockers, sequencing, or measured resource state.
+- Before every Explorer or Observatory implementation unit, also re-read `explorer-spec.md`, `observatory-roadmap.md`, `resource-envelope.md`, and the affected UI and data specifications.
 
 ## Active post-head execution order
 
@@ -82,14 +90,18 @@ After M1 exit:
 6. Archive/current exclusion checks.
 7. Bounded D1-aware production behavior smoke across representative list/detail and audit routes, including relationship integrity and freshness claims.
 8. M6 integrity/reset simulations and runtime/resource guardrails.
-9. Final post-integration production visual audit and remediation re-audit.
-10. Accessibility, performance, security, and cross-browser validation.
-11. Final public-host binding for canonical URLs, sitemap, structured data, and social metadata.
-12. Owner-managed public subdomain, valid GA4 configuration, Search Console verification, and sitemap submission.
-13. Operations/deployment documentation finalization.
-14. Backup/export and recovery verification.
-15. Real multi-day Devnet soak.
-16. Final release verification.
+9. Explorer v1 E1-1 through E1-5 from `observatory-roadmap.md`.
+10. Final post-integration production visual audit and remediation re-audit, including `/explore`.
+11. Accessibility, performance, security, and cross-browser validation, including `/explore`.
+12. Final public-host binding for canonical URLs, sitemap, structured data, and social metadata.
+13. Owner-managed public subdomain, valid GA4 configuration, Search Console verification, and sitemap submission.
+14. Operations/deployment documentation finalization.
+15. Backup/export and recovery verification.
+16. Real multi-day Devnet soak.
+17. Final release verification.
+18. After stable release and real soak evidence, begin O1 Observatory data-foundation work.
+19. Begin O2 Observatory monitoring view only after O1 contracts are stable.
+20. Begin O3 Explorer v2 only after O2 establishes canonical technical metric interpretation and stable bounded APIs.
 
 ## M0 — Foundation and specification lock
 
@@ -355,14 +367,53 @@ Proceed in dependency order:
 
 1. integrity and reset simulations;
 2. runtime and resource guardrails;
-3. final post-integration full-page visual audit of representative desktop and mobile routes against production data;
-4. UI overflow, clipping, spacing, fixed-navigation overlap, safe-area, long-identifier, and form-layout remediation followed by screenshot re-audit;
-5. accessibility, performance, security, and cross-browser validation;
-6. SEO and discoverability finalization: route-specific metadata, final-host canonical URLs, robots policy, sitemap, social metadata, and accurate structured data;
-7. owner-managed public-host, analytics, and Search Console setup after final host selection; repository code must expose configuration hooks and must not ship placeholder IDs or verification tokens;
-8. operations and deployment documentation;
-9. backup/export and recovery verification;
-10. real multi-day Devnet soak;
-11. final release verification.
+3. Explorer v1 E1-1 through E1-5 as defined by `explorer-spec.md` and `observatory-roadmap.md`;
+4. final post-integration full-page visual audit of representative desktop and mobile routes against production data, including `/explore`;
+5. UI overflow, clipping, spacing, fixed-navigation overlap, safe-area, long-identifier, graph/list alternative, and form-layout remediation followed by screenshot re-audit;
+6. accessibility, performance, security, and cross-browser validation, including `/explore`;
+7. SEO and discoverability finalization: route-specific metadata, final-host canonical URLs, robots policy, sitemap, social metadata, and accurate structured data;
+8. owner-managed public-host, analytics, and Search Console setup after final host selection; repository code must expose configuration hooks and must not ship placeholder IDs or verification tokens;
+9. operations and deployment documentation;
+10. backup/export and recovery verification;
+11. real multi-day Devnet soak;
+12. final release verification.
+
+Explorer v1 start gate:
+
+- M5-5 has exited from browser evidence rather than API evidence alone;
+- M6 integrity/reset simulation work has established its baseline;
+- runtime and resource guardrails are available to measure Explorer request, D1-read, base-read, cache, and representative interaction cost.
+
+Explorer v1 exit does not complete M6. The route must then pass the remaining full visual, accessibility, performance, security, cross-browser, discoverability, operations, recovery, soak, and final release gates with the rest of the application.
 
 Completion has no artificial date. Soak evidence requires real elapsed time and is never fabricated or compressed.
+
+## Post-release XRPL Lending Observatory expansion
+
+The approved expansion order is:
+
+### O1 — Observatory data foundation
+
+Begin only after the stable Monitor release boundary and real soak evidence.
+
+Define bounded incremental historical metrics and series. Every metric requires an approved source, formula or event derivation, canonical asset scope, observation-window semantics, provenance, missing-data behavior, retention, epoch/reset behavior, replay behavior, resource budget, API contract, and reconciliation rule.
+
+User page traffic must not trigger full-history aggregation. Prefer incremental current metrics and hourly or daily rollups only where justified by measured value and resource cost.
+
+### O2 — Observatory monitoring view
+
+Begin only after O1 contracts are stable and resource evidence passes.
+
+Establish the canonical technical monitoring interpretation of protocol change, activity, trends, utilization, debt, payment, impairment, unimpairment, default, deletion, cover, and loss metrics that have approved O1 contracts.
+
+Historical ranges remain bounded. Missing intervals are not interpolated as fact. Every chart has an accessible alternative and preserves asset, epoch, freshness, provenance, and observation-window context.
+
+### O3 — Explorer v2
+
+Begin only after O2 establishes stable bounded APIs and canonical technical metric interpretation.
+
+Extend the guided Explorer with historical time series, period comparisons, payment and lifecycle timelines, relationship exploration, and guided explanations of material changes using existing Observatory contracts.
+
+Explorer v2 does not define new metrics ad hoc. Any new visualization requiring a new metric returns to the O1 contract process before implementation.
+
+Detailed requirements and completion gates are defined in `explorer-spec.md` and `observatory-roadmap.md`.
