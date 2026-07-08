@@ -18,6 +18,7 @@ Before changing code or documentation, read:
 10. `docs/development-roadmap.md`
 11. `docs/implementation-status.md`
 12. the UI specification documents for user-visible work
+13. `docs/explorer-spec.md` and `docs/observatory-roadmap.md` for Explorer or XRPL Lending Observatory work
 
 Repository documents are authoritative when they agree with implementation and verified evidence. Correct stale documentation in the same pull request as the related change.
 
@@ -25,6 +26,8 @@ Repository documents are authoritative when they agree with implementation and v
 
 - The public product is an independent, read-only XRPL Lending Protocol monitor.
 - The initial release is Devnet only.
+- Explorer v1 is an approved bounded guided presentation layer over the Monitor data contracts; it is not a separate collector or analytics pipeline.
+- The approved post-release expansion is named XRPL Lending Observatory. Explorer v2 remains gated behind the Observatory data foundation and Observatory monitoring view.
 - Mainnet, wallet connection, signing, transaction submission, lending actions, repayment actions, deposits, withdrawals, and public write APIs are outside scope.
 - Funding, donation, payment, pricing, fiat conversion, cross-asset totals, and proprietary risk or credit scores are outside scope.
 - XRP, IOU, and MPT identities and quantities must remain distinct.
@@ -52,6 +55,7 @@ Current-state activation requires one fixed validated ledger, complete traversal
 
 - Work from the current canonical predecessor.
 - Before every new implementation unit, operational probe, release-preparation unit, or externally visible configuration change, re-read `docs/development-roadmap.md` and `docs/implementation-status.md`; repository source-of-truth documents override stale conversation summaries or prior plans.
+- Before every Explorer or Observatory implementation unit, also re-read `docs/explorer-spec.md` and `docs/observatory-roadmap.md` and reconcile them with the active roadmap, implementation status, resource envelope, and affected UI/data specifications.
 - After new evidence changes an active gate, blocker, sequencing decision, or measured resource state, reconcile the affected status and roadmap documents before the next dependent unit proceeds.
 - Prefer one coherent roadmap unit per pull request.
 - Do not create parallel implementations of the same feature.
@@ -77,6 +81,8 @@ Additional evidence is required where applicable:
 - non-destructive live Devnet reads for network-dependent collectors;
 - browser evidence for user-visible flows and accessibility;
 - runtime, request, storage, and recovery measurements for collector and bootstrap changes;
+- request, D1-read, base-read, cache, accessibility, and representative interaction measurements for Explorer work;
+- aggregate replay, storage growth, read/write profile, retention, reset, and reconciliation evidence for Observatory data-foundation work;
 - rollback and interruption evidence for persistence and deployment changes.
 
 ## Public-information boundary
@@ -96,5 +102,6 @@ Public documentation should explain decisions through product integrity, securit
 - Use the approved dark ledger-observatory direction.
 - Preserve keyboard access, visible focus, semantic landmarks, contrast, zoom, reduced motion, long identifiers, and responsive behavior.
 - Implement explicit loading, empty, unavailable, stale, partial, error, archived, not-found, and invalid-identifier states.
+- Explorer plain-language summaries supplement rather than replace canonical transaction types, results, field meanings, identifiers, provenance, and technical routes.
 - Generated mockups define visual direction only and never define product data.
 - Do not publish placeholder external links.
