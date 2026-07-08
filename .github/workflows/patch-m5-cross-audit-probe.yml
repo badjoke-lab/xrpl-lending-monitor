@@ -8,6 +8,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: patch-m5-cross-audit-bounded-windows
+  cancel-in-progress: false
+
 jobs:
   patch:
     runs-on: ubuntu-latest
