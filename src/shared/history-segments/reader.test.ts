@@ -126,6 +126,19 @@ describe('history segment chain reader', () => {
     expect(result.segmentReads).toBe(2)
   })
 
+  it('reads targeted references in requested ascending and descending order', async () => {
+    const { store, publication } = await fixture()
+    const reader = await HistorySegmentChainReader.open({ store, publication })
+    const references = publication.segments.map((segment) => ({
+      segmentId: segment.segmentId,
+      fileKind: 'protocol_events' as const,
+    }))
+    const ascending = await reader.readReferenced<{ ledgerIndex: number }>({ references, direction: 'asc', limit: 10 })
+    const descending = await reader.readReferenced<{ ledgerIndex: number }>({ references, direction: 'desc', limit: 10 })
+    expect(ascending.items.map((item) => item.ledgerIndex)).toEqual([101, 102, 106, 107])
+    expect(descending.items.map((item) => item.ledgerIndex)).toEqual([107, 106, 102, 101])
+  })
+
   it('returns a cursor when the segment-read budget is exhausted and resumes', async () => {
     const { store, publication } = await fixture()
     const reader = await HistorySegmentChainReader.open({ store, publication })
@@ -189,7 +202,6 @@ describe('history segment chain reader', () => {
     expect(result.segmentReads).toBe(0)
     expect(result.recordsExamined).toBe(0)
   })
-
 
   it('skips newer zero-record segments and reaches older records within the read budget', async () => {
     const { store, publication } = await fixture()
