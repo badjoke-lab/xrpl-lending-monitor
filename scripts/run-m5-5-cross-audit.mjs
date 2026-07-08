@@ -16,29 +16,38 @@ function asArray(value, label) {
 
 async function request(relativePath, options = {}) {
   const url = `${baseUrl}${relativePath}`
-  const response = await fetch(url, { signal: AbortSignal.timeout(requestTimeoutMs) })
-  const contentType = response.headers.get('content-type') ?? ''
-  const text = await response.text()
-  let json = null
-  if (contentType.includes('application/json')) {
-    try {
-      json = JSON.parse(text)
-    } catch {
-      throw new Error(`${relativePath} returned invalid JSON`)
+  const maxAttempts = 3
+  let lastResponse = null
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const response = await fetch(url, { signal: AbortSignal.timeout(requestTimeoutMs) })
+    const contentType = response.headers.get('content-type') ?? ''
+    const text = await response.text()
+    let json = null
+    if (contentType.includes('application/json')) {
+      try {
+        json = JSON.parse(text)
+      } catch {
+        throw new Error(`${relativePath} returned invalid JSON`)
+      }
     }
+    lastResponse = {
+      path: relativePath,
+      status: response.status,
+      contentType,
+      text,
+      json,
+    }
+    const expectedStatusMatched = options.expectedStatus !== undefined && response.status === options.expectedStatus
+    const successMatched = options.expectedStatus === undefined && response.ok
+    if (expectedStatusMatched || successMatched) return lastResponse
+    const retryable = response.status >= 500 && response.status <= 599
+    if (!retryable || attempt === maxAttempts) break
+    await new Promise((resolve) => setTimeout(resolve, attempt * 1000))
   }
   if (options.expectedStatus !== undefined) {
-    assert(response.status === options.expectedStatus, `${relativePath} returned ${response.status}, expected ${options.expectedStatus}`)
-  } else {
-    assert(response.ok, `${relativePath} returned ${response.status}: ${text.slice(0, 240)}`)
+    throw new Error(`${relativePath} returned ${lastResponse.status}, expected ${options.expectedStatus}`)
   }
-  return {
-    path: relativePath,
-    status: response.status,
-    contentType,
-    text,
-    json,
-  }
+  throw new Error(`${relativePath} returned ${lastResponse.status}: ${lastResponse.text.slice(0, 240)}`)
 }
 
 function requireAvailableCurrent(response, label, snapshotId = null) {
