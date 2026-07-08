@@ -1,6 +1,10 @@
 import { resolveRuntimeConfig } from '../../shared/runtime-config'
 import type { Bindings } from '../env'
 import {
+  listHybridExactLoanLifecycle,
+  listHybridExactObjectHistory,
+} from '../repositories/hybrid-exact-history-repository'
+import {
   listHybridActivity,
   listHybridArchivedObjects,
   listHybridBalanceHistory,
@@ -139,6 +143,16 @@ export async function handleHybridHistoryOverride(
   if (parts[1] === 'objects' && parts[4] === 'history') {
     const objectType = parts[2] ?? ''
     const objectId = parts[3] ?? ''
+    if (source.exactIndex) {
+      const changes = await listHybridExactObjectHistory({
+        ...common,
+        exactIndex: source.exactIndex.reader,
+        objectType,
+        objectId,
+        page: { limit },
+      })
+      return Response.json(serializeObjectHistoryResponse({ objectType, objectId, changes, limit }))
+    }
     const result = await listHybridObjectHistory({ ...common, objectType, objectId, page: { limit } })
     if (!safeNewestFirstHybridResult(result, limit)) return historyUnavailable('bounded_immutable_scan_incomplete')
     return Response.json(serializeObjectHistoryResponse({ objectType, objectId, changes: result.items, limit }))
@@ -146,6 +160,15 @@ export async function handleHybridHistoryOverride(
 
   if (parts[1] === 'loans' && parts[3] === 'lifecycle') {
     const loanId = parts[2] ?? ''
+    if (source.exactIndex) {
+      const events = await listHybridExactLoanLifecycle({
+        ...common,
+        exactIndex: source.exactIndex.reader,
+        loanId,
+        page: { limit },
+      })
+      return Response.json(serializeLoanLifecycleResponse({ loanId, events, limit }))
+    }
     const result = await listHybridLoanLifecycle({ ...common, loanId, page: { limit } })
     if (!safeHybridResult(result, limit)) return historyUnavailable('bounded_immutable_scan_incomplete')
     return Response.json(serializeLoanLifecycleResponse({ loanId, events: result.items, limit }))

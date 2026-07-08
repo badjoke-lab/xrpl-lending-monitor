@@ -149,6 +149,7 @@ export class HistorySegmentChainReader {
     references: readonly HistorySegmentFileReference[]
     predicate?: (value: T) => boolean
     limit?: number
+    direction?: 'asc' | 'desc'
     maxAssetReads?: number
     maxCompressedBytes?: number
     maxDecompressedBytes?: number
@@ -161,6 +162,7 @@ export class HistorySegmentChainReader {
     const maxDecompressedBytes = positive(options.maxDecompressedBytes, DEFAULT_DECOMPRESSED_BYTES, 'maxDecompressedBytes')
     const maxRecordsExamined = positive(options.maxRecordsExamined, DEFAULT_RECORDS_EXAMINED, 'maxRecordsExamined')
     const predicate = options.predicate ?? (() => true)
+    const direction = options.direction ?? 'asc'
     const descriptorOrder = new Map(this.publication.segments.map((segment, index) => [segment.segmentId, index]))
     const unique = new Map<string, HistorySegmentFileReference>()
     for (const reference of options.references) {
@@ -176,9 +178,11 @@ export class HistorySegmentChainReader {
       }
       unique.set(`${reference.segmentId}:${reference.fileKind}`, reference)
     }
-    const references = [...unique.values()].sort((left, right) =>
-      descriptorOrder.get(left.segmentId)! - descriptorOrder.get(right.segmentId)!
-      || left.fileKind.localeCompare(right.fileKind))
+    const references = [...unique.values()].sort((left, right) => {
+      const order = descriptorOrder.get(left.segmentId)! - descriptorOrder.get(right.segmentId)!
+        || left.fileKind.localeCompare(right.fileKind)
+      return direction === 'asc' ? order : -order
+    })
     if (references.length > maxAssetReads) throw new Error('History referenced read exceeds asset-read limit')
 
     const items: T[] = []
@@ -205,7 +209,8 @@ export class HistorySegmentChainReader {
       assetReads += 1
       compressedBytes += bytes.byteLength
       decompressedBytes += decoded.decompressedBytes
-      for (const raw of decoded.records) {
+      const records = direction === 'asc' ? decoded.records : [...decoded.records].reverse()
+      for (const raw of records) {
         recordsExamined += 1
         if (recordsExamined > maxRecordsExamined) throw new Error('History referenced read exceeds record examination limit')
         const value = raw as T
