@@ -41,6 +41,8 @@ The durable M5-5 browser regression workflow and runner are merged. They discove
 
 A post-merge production-shaped browser probe attempted to proceed at 2026-07-08 04:12 UTC. Collector preflight passed, but the unchanged D1 headroom gate measured `4,209,732` rows read and `25,806` rows written for the UTC day. Rows read were approximately `84.19%` of the `5,000,000` daily reference allowance, so the below-80% gate failed. The workflow stopped before dependency installation, Playwright installation, or browser traversal. No browser result is claimed from that attempt.
 
+Before the next eligible production-shaped run, the browser runner is being tightened to reduce avoidable read amplification without weakening coverage. The optimized path first intersects the bounded current Loan window with the bounded Lifecycle window in memory, so the normal witness path requires no additional current-Loan detail probes. If the two windows do not overlap, fallback detail verification is capped at four unique non-deleted lifecycle Loan candidates instead of twelve. The same lifecycle-backed current Loan is reused for relationship and lifecycle checks. Browser behavior assertions are performed during the existing 15-route traversal instead of revisiting Loan, Loan Broker, Vault, Lifecycle, archive, Search, and Network Status pages after the matrix. Evidence output records lifecycle witness selection mode, fallback detail-probe count, discovery logical API requests, discovery HTTP attempts, and browser API request count.
+
 ## Approved Explorer and Observatory sequence
 
 The approved product-evolution order is:
@@ -148,9 +150,10 @@ The active work is split into permanent monitoring plus two coordinated tracks.
 3. Treat current/history, lifecycle/current, archive/current exclusion, live relationships, bounded exports/feed, snapshot identity, Activity result classification, and freshness/lag API checks as observed in retained evidence.
 4. Preserve the merged exact-index prerequisite for Object History and per-Loan lifecycle detail; do not return to broad request-time scans or weaken bounded read limits.
 5. Preserve the merged durable D1-gated browser regression workflow and runner.
-6. Run the browser regression across representative current, history, audit, Search, and Network Status routes only when collector and measured D1 headroom gates pass.
-7. Verify rendered relationship, archive/current, history/current, lifecycle/current, Search, and freshness consistency from the retained browser artifact.
-8. Reconcile M5-5 exit only after the browser regression and representative browser behavior checks pass.
+6. Complete CI and merge validation of the focused browser-runner read-budget optimization before the next production-shaped run.
+7. Run the browser regression across representative current, history, audit, Search, and Network Status routes only when collector and measured D1 headroom gates pass.
+8. Verify rendered relationship, archive/current, history/current, lifecycle/current, Search, freshness, and recorded request counts from the retained browser artifact.
+9. Reconcile M5-5 exit only after the browser regression and representative browser behavior checks pass.
 
 ### Track B — production UI audit
 
@@ -166,19 +169,21 @@ Tracks A and B may progress in parallel. Neither may weaken collector integrity 
 2. Preserve the passing M5-5 API cross-audit evidence and durable D1-gated repeat workflow.
 3. Preserve the merged exact-index Object History and Loan lifecycle detail prerequisite and its passing CI/rehearsal evidence.
 4. Preserve the merged durable M5-5 browser regression workflow and runner.
-5. Re-run the D1-gated browser regression against the production-shaped route set only when measured current-day headroom passes; do not weaken or bypass the gate.
-6. Inspect the retained JSON/Markdown browser artifact and reconcile M5-5 exit only if representative relationship, archive/current, history/current, lifecycle/current, Search, and freshness behavior all pass.
-7. In parallel, run the independently D1-gated production UI audit when measured headroom permits; inspect summaries, diagnostics, and screenshots, then remediate and re-audit confirmed defects.
-8. After M5-5 exits, begin M6 integrity/reset simulation and runtime/resource guardrail work.
-9. After those early M6 guardrails are established, execute Explorer v1 E1-1 through E1-5 from `docs/observatory-roadmap.md` without adding a new collector or scheduled job.
-10. Continue remaining M6 final visual audit, accessibility, performance, security, cross-browser, discoverability, operations, recovery, soak, and final release verification with `/explore` included in the release surface.
-11. Only after the stable Monitor release boundary and real soak evidence, begin O1 Observatory data-foundation specification and resource design.
-12. Build the Observatory monitoring view only after O1 contracts are stable.
-13. Build Explorer v2 only after the Observatory monitoring view establishes canonical metric interpretation and stable bounded APIs.
+5. Complete CI and merge review of the focused browser-runner read-budget optimization.
+6. Re-run the D1-gated browser regression against the production-shaped route set only when measured current-day headroom passes; do not weaken or bypass the gate.
+7. Inspect the retained JSON/Markdown browser artifact and reconcile M5-5 exit only if representative relationship, archive/current, history/current, lifecycle/current, Search, freshness, and request-count evidence pass.
+8. In parallel, run the independently D1-gated production UI audit when measured headroom permits; inspect summaries, diagnostics, and screenshots, then remediate and re-audit confirmed defects.
+9. After M5-5 exits, begin M6 integrity/reset simulation and runtime/resource guardrail work.
+10. After those early M6 guardrails are established, execute Explorer v1 E1-1 through E1-5 from `docs/observatory-roadmap.md` without adding a new collector or scheduled job.
+11. Continue remaining M6 final visual audit, accessibility, performance, security, cross-browser, discoverability, operations, recovery, soak, and final release verification with `/explore` included in the release surface.
+12. Only after the stable Monitor release boundary and real soak evidence, begin O1 Observatory data-foundation specification and resource design.
+13. Build the Observatory monitoring view only after O1 contracts are stable.
+14. Build Explorer v2 only after the Observatory monitoring view establishes canonical metric interpretation and stable bounded APIs.
 
 ## Remaining blockers
 
 - At 2026-07-08 04:12 UTC the post-merge browser probe was blocked before browser work because D1 rows read had reached 4,209,732 / 5,000,000, approximately 84.19% of the daily reference allowance. The unchanged below-80% headroom gate must pass before browser traversal.
+- The focused browser-runner read-budget optimization must pass CI and merge before the next production-shaped browser run.
 - M5-5 API cross-audit evidence is passing, and the exact-history prerequisite plus durable browser workflow are merged, but real-data browser regression and representative browser production behavior evidence remain pending before M5-5 exit.
 - The independent production UI audit remains separately gated by measured current-day headroom and collector health.
 - Final-host SEO binding and M6 release hardening remain pending in roadmap order.

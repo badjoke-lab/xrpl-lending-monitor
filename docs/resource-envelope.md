@@ -1,6 +1,6 @@
 # Resource envelope
 
-Last verified: 2026-07-04.
+Last verified: 2026-07-08.
 
 Official references:
 
@@ -134,6 +134,22 @@ Complete base bootstrap:
 - precompute overview and daily aggregates where justified;
 - measure D1 rows read and base pages read for major endpoints.
 
+## Production-shaped browser and audit probes
+
+Production browser regression, screenshot audit, and other expensive read-only probes must preserve the same resource discipline as public runtime work.
+
+- measure current UTC-day D1 rows read and rows written before dependency installation, Playwright installation, or page traversal;
+- require the documented headroom gate to pass rather than relying on operator confirmation alone;
+- prefer reuse of already fetched bounded result windows and in-memory set intersection before issuing exact detail probes;
+- cap fallback witness detail probes explicitly;
+- reuse one representative entity for multiple compatible checks when doing so preserves coverage and source meaning;
+- do not revisit the same route solely to repeat assertions that can be performed during the existing representative route traversal;
+- do not remove representative relationship, history, archive, Search, freshness, error, or provenance checks merely to reduce reads;
+- record discovery logical API requests, discovery HTTP attempts, browser API request count, and bounded witness-selection mode where the probe supports those measurements;
+- retain separate human screenshot review where required; reduced request count does not replace visual review.
+
+A failed headroom gate is successful guardrail behavior. No browser or visual-audit result may be claimed when the workflow stops before traversal.
+
 ## Database writes
 
 - write only Lending-related normalized history and bounded overlay state;
@@ -205,6 +221,7 @@ It must pass:
 - overlay row count and bytes after catch-up;
 - tombstone count and bytes after catch-up;
 - base page reads and D1 rows read for major endpoints;
+- production browser-regression discovery logical requests, HTTP attempts, and browser API request count;
 - catch-up time after 1 hour and 24 hours of downtime;
 - reconciliation cost;
 - real multi-day soak evidence.
@@ -220,7 +237,8 @@ It must pass:
 - never advance the overlay watermark beyond the committed cursor;
 - show stale-data status when collection slows;
 - rate-limit expensive exports;
-- preserve canonical normalized data before optional raw payloads.
+- preserve canonical normalized data before optional raw payloads;
+- stop production browser and screenshot probes before traversal when the measured D1 headroom gate does not pass.
 
 ## Runtime selection rule
 

@@ -2,20 +2,31 @@ import { chromium } from '@playwright/test'
 import { mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
+import {
+  lifecycleFallbackCandidates,
+  selectLifecycleCurrentWitness,
+} from './m5-5-browser-witness-selection.mjs'
+
 const baseUrl = (process.env.BASE_URL ?? 'https://xrpl-lending-monitor.badjoke-lab.workers.dev').replace(/\/$/, '')
 const outputDir = process.env.M5_BROWSER_OUTPUT_DIR ?? 'm5-5-browser-regression'
 const requestTimeoutMs = Number(process.env.M5_BROWSER_REQUEST_TIMEOUT_MS ?? 120000)
+const maxLifecycleFallbackProbes = 4
+
+let logicalApiRequests = 0
+let apiHttpAttempts = 0
 
 function assert(condition, message) {
   if (!condition) throw new Error(message)
 }
 
 async function requestJson(relativePath, options = {}) {
+  logicalApiRequests += 1
   const url = `${baseUrl}${relativePath}`
   const maxAttempts = options.maxAttempts ?? 3
   let last = null
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    apiHttpAttempts += 1
     const response = await fetch(url, { signal: AbortSignal.timeout(requestTimeoutMs) })
     const text = await response.text()
     let json
@@ -54,21 +65,45 @@ function archivedCurrentPath(objectType, objectId) {
   throw new Error(`Unsupported archived object type: ${objectType}`)
 }
 
-async function discoverLifecycleCurrentWitness(lifecycleRows) {
-  const seen = new Set()
-  for (const row of lifecycleRows) {
-    if (!row?.loan_id || seen.has(row.loan_id) || row.event_type === 'deleted') continue
-    seen.add(row.loan_id)
-    if (seen.size > 12) break
-    const response = await requestJson(`/api/loans/${encodeURIComponent(row.loan_id)}`, {
+async function discoverLifecycleCurrentWitness(lifecycleRows, currentLoanRows) {
+  const intersected = selectLifecycleCurrentWitness(lifecycleRows, currentLoanRows)
+  if (intersected) {
+    return {
+      loanId: intersected,
+      selectionMode: 'bounded_set_intersection',
+      detailProbes: 0,
+    }
+  }
+
+  const fallbackCandidates = lifecycleFallbackCandidates(
+    lifecycleRows,
+    currentLoanRows,
+    maxLifecycleFallbackProbes,
+  )
+  let detailProbes = 0
+
+  for (const loanId of fallbackCandidates) {
+    detailProbes += 1
+    const response = await requestJson(`/api/loans/${encodeURIComponent(loanId)}`, {
       acceptStatuses: [200, 404],
       maxAttempts: 2,
     })
-    if (response.status === 200 && response.json?.availability?.state === 'available' && response.json?.data?.id === row.loan_id) {
-      return row.loan_id
+    if (
+      response.status === 200
+      && response.json?.availability?.state === 'available'
+      && response.json?.data?.id === loanId
+    ) {
+      return {
+        loanId,
+        selectionMode: 'bounded_detail_fallback',
+        detailProbes,
+      }
     }
   }
-  throw new Error('No lifecycle-backed current Loan witness was found in the bounded lifecycle window')
+
+  throw new Error(
+    `No lifecycle-backed current Loan witness was found by bounded set intersection or ${detailProbes} fallback detail probes`,
+  )
 }
 
 async function waitForApplicationPage(page, route) {
@@ -116,17 +151,29 @@ const lifecycleResponse = await requestJson('/api/audit/lifecycle?limit=100')
 const archivedResponse = await requestJson('/api/audit/archived?limit=1')
 const activityResponse = await requestJson('/api/activity?limit=1')
 
-const vaultId = firstId(vaultsResponse.json, 'Vault')
-const brokerId = firstId(brokersResponse.json, 'Loan Broker')
-const relationshipLoanId = firstId(loansResponse.json, 'Loan')
-const relationshipLoanResponse = await requestJson(`/api/loans/${encodeURIComponent(relationshipLoanId)}`)
+firstId(vaultsResponse.json, 'Vault')
+firstId(brokersResponse.json, 'Loan Broker')
+firstId(loansResponse.json, 'Loan')
+
+const currentLoanRows = loansResponse.json?.data
+assert(Array.isArray(currentLoanRows) && currentLoanRows.length > 0, 'Loan list did not provide current rows')
+
+const lifecycleRows = lifecycleResponse.json?.data
+assert(Array.isArray(lifecycleRows) && lifecycleRows.length > 0, 'Lifecycle explorer did not provide evidence rows')
+const lifecycleWitness = await discoverLifecycleCurrentWitness(lifecycleRows, currentLoanRows)
+const lifecycleLoanId = lifecycleWitness.loanId
+
+const relationshipLoanResponse = await requestJson(`/api/loans/${encodeURIComponent(lifecycleLoanId)}`)
 const relationshipLoan = relationshipLoanResponse.json?.data
 assert(relationshipLoan?.related_loan_broker?.id, 'Relationship Loan detail did not expose a related Loan Broker')
 assert(relationshipLoan?.related_vault?.id, 'Relationship Loan detail did not expose a related Vault')
 
-const lifecycleRows = lifecycleResponse.json?.data
-assert(Array.isArray(lifecycleRows) && lifecycleRows.length > 0, 'Lifecycle explorer did not provide evidence rows')
-const lifecycleLoanId = await discoverLifecycleCurrentWitness(lifecycleRows)
+const relationshipLoanId = lifecycleLoanId
+const brokerId = relationshipLoan.related_loan_broker.id
+const vaultId = relationshipLoan.related_vault.id
+const brokerPath = `/loan-brokers/${brokerId}`
+const vaultPath = `/vaults/${vaultId}`
+const lifecycleLoanPath = `/loans/${lifecycleLoanId}`
 
 const archivedRows = archivedResponse.json?.data
 assert(Array.isArray(archivedRows) && archivedRows.length > 0, 'Archived Objects did not provide evidence rows')
@@ -141,11 +188,11 @@ assert(typeof transactionHash === 'string' && transactionHash.length > 0, 'Activ
 const routeMatrix = [
   ['overview', '/'],
   ['vaults', '/vaults'],
-  ['vault-detail', `/vaults/${encodeURIComponent(vaultId)}`],
+  ['vault-detail', vaultPath],
   ['loan-brokers', '/loan-brokers'],
-  ['loan-broker-detail', `/loan-brokers/${encodeURIComponent(brokerId)}`],
+  ['loan-broker-detail', brokerPath],
   ['loans', '/loans'],
-  ['loan-detail', `/loans/${encodeURIComponent(lifecycleLoanId)}`],
+  ['loan-detail', lifecycleLoanPath],
   ['activity', '/activity'],
   ['transaction-detail', `/transactions/${encodeURIComponent(transactionHash)}`],
   ['lifecycle', `/audit/lifecycle?loan_id=${encodeURIComponent(lifecycleLoanId)}`],
@@ -164,6 +211,7 @@ const context = await browser.newContext({
 const page = await context.newPage()
 const findings = []
 let activeRoute = null
+let browserApiRequests = 0
 
 page.on('console', (message) => {
   if (message.type() === 'error') {
@@ -172,6 +220,13 @@ page.on('console', (message) => {
 })
 page.on('pageerror', (error) => {
   findings.push({ route: activeRoute, type: 'page_error', message: error.message.slice(0, 1000) })
+})
+page.on('request', (request) => {
+  try {
+    if (new URL(request.url()).pathname.startsWith('/api/')) browserApiRequests += 1
+  } catch {
+    // Ignore malformed browser-internal URLs; response checks still cover application traffic.
+  }
 })
 page.on('response', (response) => {
   if (response.status() >= 500) {
@@ -187,68 +242,86 @@ try {
     activeRoute = route
     const heading = await waitForApplicationPage(page, route)
     routeResults.push({ name, route, heading, passed: true })
+
+    if (name === 'vault-detail') {
+      behaviorChecks.push({ check: 'vault_detail_rendering', passed: true, route })
+    }
+
+    if (name === 'loan-broker-detail') {
+      await checkExactHref(page, vaultPath, 'Loan Broker → Vault link')
+      behaviorChecks.push({ check: 'loan_broker_vault_link', passed: true, broker_id: brokerId, vault_id: vaultId })
+    }
+
+    if (name === 'loan-detail') {
+      await checkExactHref(page, brokerPath, 'Loan → Loan Broker link')
+      await checkExactHref(page, vaultPath, 'Loan → Vault link')
+      behaviorChecks.push({
+        check: 'loan_relationship_links',
+        passed: true,
+        loan_id: relationshipLoanId,
+        broker_id: brokerId,
+        vault_id: vaultId,
+      })
+
+      const lifecycleTimelineCount = await page.locator('[aria-label="Loan lifecycle timeline"] .lifecycle-event-card').count()
+      const stateChangeCount = await page.locator('[aria-label="Loan state changes"] .state-change-card').count()
+      assert(lifecycleTimelineCount > 0, 'Current Loan detail did not render indexed lifecycle events')
+      assert(stateChangeCount > 0, 'Current Loan detail did not render indexed state changes')
+      behaviorChecks.push({
+        check: 'loan_lifecycle_history_rendering',
+        passed: true,
+        loan_id: lifecycleLoanId,
+        lifecycle_events: lifecycleTimelineCount,
+        state_changes: stateChangeCount,
+      })
+    }
+
+    if (name === 'lifecycle') {
+      const lifecycleCards = await page.locator('.lifecycle-event-card').count()
+      assert(lifecycleCards > 0, 'Filtered Lifecycle page did not render lifecycle events')
+      await checkExactHref(page, lifecycleLoanPath, 'Lifecycle → current Loan link')
+      behaviorChecks.push({
+        check: 'lifecycle_current_link',
+        passed: true,
+        loan_id: lifecycleLoanId,
+        event_cards: lifecycleCards,
+      })
+    }
+
+    if (name === 'archived-detail') {
+      await page.getByText('Archived context', { exact: true }).waitFor({ state: 'visible', timeout: 10000 })
+      await page.getByText('Current existence is not implied.', { exact: false }).waitFor({ state: 'visible', timeout: 10000 })
+      await page.getByRole('button', { name: 'Current lookup' }).waitFor({ state: 'visible', timeout: 10000 })
+      behaviorChecks.push({
+        check: 'archived_context_presentation',
+        passed: true,
+        object_type: archivedWitness.object_type,
+        object_id: archivedWitness.object_id,
+        current_path: archivedCurrentPath(archivedWitness.object_type, archivedWitness.object_id),
+      })
+    }
+
+    if (name === 'search') {
+      const queryText = await page.locator('.search-result-summary .mono').first().textContent()
+      assert(queryText?.trim() === lifecycleLoanId, 'Search page did not preserve the exact Loan query')
+      await checkExactHref(page, lifecycleLoanPath, 'Search → current Loan link')
+      behaviorChecks.push({ check: 'search_current_loan_link', passed: true, query: lifecycleLoanId })
+    }
+
+    if (name === 'network-status') {
+      await page.getByRole('heading', { name: 'Network Status' }).waitFor({ state: 'visible' })
+      const healthyStatusCount = await page.locator('.status-summary-card').filter({ hasText: 'Collector' }).getByText('Healthy', { exact: true }).count()
+      assert(healthyStatusCount > 0, 'Network Status did not render collector Healthy state')
+      await page.getByText('Last processed ledger', { exact: true }).waitFor({ state: 'visible' })
+      behaviorChecks.push({
+        check: 'network_status_freshness_presentation',
+        passed: true,
+        collector_status: collector.status,
+        collector_cursor: collector.cursor.last_processed_ledger,
+        collector_head: collector.cursor.latest_observed_ledger,
+      })
+    }
   }
-
-  activeRoute = `/loans/${relationshipLoanId}`
-  await waitForApplicationPage(page, activeRoute)
-  const brokerPath = `/loan-brokers/${relationshipLoan.related_loan_broker.id}`
-  const vaultPath = `/vaults/${relationshipLoan.related_vault.id}`
-  await checkExactHref(page, brokerPath, 'Loan → Loan Broker link')
-  await checkExactHref(page, vaultPath, 'Loan → Vault link')
-  behaviorChecks.push({ check: 'loan_relationship_links', passed: true, loan_id: relationshipLoanId, broker_id: relationshipLoan.related_loan_broker.id, vault_id: relationshipLoan.related_vault.id })
-
-  await page.getByRole('link', { name: 'Open Broker' }).click()
-  await page.waitForURL((url) => url.pathname === brokerPath, { timeout: 30000 })
-  await waitForApplicationPage(page, brokerPath)
-  await checkExactHref(page, vaultPath, 'Loan Broker → Vault link')
-  behaviorChecks.push({ check: 'loan_broker_navigation', passed: true, route: brokerPath })
-
-  await page.getByRole('link', { name: 'Open Vault' }).click()
-  await page.waitForURL((url) => url.pathname === vaultPath, { timeout: 30000 })
-  await waitForApplicationPage(page, vaultPath)
-  behaviorChecks.push({ check: 'vault_navigation', passed: true, route: vaultPath })
-
-  const lifecycleRoute = `/audit/lifecycle?loan_id=${encodeURIComponent(lifecycleLoanId)}`
-  activeRoute = lifecycleRoute
-  await waitForApplicationPage(page, lifecycleRoute)
-  const lifecycleCards = await page.locator('.lifecycle-event-card').count()
-  assert(lifecycleCards > 0, 'Filtered Lifecycle page did not render lifecycle events')
-  const lifecycleLoanPath = `/loans/${lifecycleLoanId}`
-  await checkExactHref(page, lifecycleLoanPath, 'Lifecycle → current Loan link')
-  behaviorChecks.push({ check: 'lifecycle_current_link', passed: true, loan_id: lifecycleLoanId, event_cards: lifecycleCards })
-
-  await page.locator(`a[href="${lifecycleLoanPath}"]`).first().click()
-  await page.waitForURL((url) => url.pathname === lifecycleLoanPath, { timeout: 30000 })
-  await waitForApplicationPage(page, lifecycleLoanPath)
-  const lifecycleTimelineCount = await page.locator('[aria-label="Loan lifecycle timeline"] .lifecycle-event-card').count()
-  const stateChangeCount = await page.locator('[aria-label="Loan state changes"] .state-change-card').count()
-  assert(lifecycleTimelineCount > 0, 'Current Loan detail did not render indexed lifecycle events')
-  assert(stateChangeCount > 0, 'Current Loan detail did not render indexed state changes')
-  behaviorChecks.push({ check: 'loan_lifecycle_history_rendering', passed: true, loan_id: lifecycleLoanId, lifecycle_events: lifecycleTimelineCount, state_changes: stateChangeCount })
-
-  const archiveRoute = `/audit/archived/${encodeURIComponent(archivedWitness.object_type)}/${encodeURIComponent(archivedWitness.object_id)}`
-  activeRoute = archiveRoute
-  await waitForApplicationPage(page, archiveRoute)
-  await page.getByText('Archived context', { exact: true }).waitFor({ state: 'visible', timeout: 10000 })
-  await page.getByText('Current existence is not implied.', { exact: false }).waitFor({ state: 'visible', timeout: 10000 })
-  await page.getByRole('button', { name: 'Current lookup' }).waitFor({ state: 'visible', timeout: 10000 })
-  behaviorChecks.push({ check: 'archived_context_presentation', passed: true, object_type: archivedWitness.object_type, object_id: archivedWitness.object_id, current_path: archivedCurrentPath(archivedWitness.object_type, archivedWitness.object_id) })
-
-  const searchRoute = `/search?q=${encodeURIComponent(lifecycleLoanId)}`
-  activeRoute = searchRoute
-  await waitForApplicationPage(page, searchRoute)
-  const queryText = await page.locator('.search-result-summary .mono').first().textContent()
-  assert(queryText?.trim() === lifecycleLoanId, 'Search page did not preserve the exact Loan query')
-  await checkExactHref(page, lifecycleLoanPath, 'Search → current Loan link')
-  behaviorChecks.push({ check: 'search_current_loan_link', passed: true, query: lifecycleLoanId })
-
-  activeRoute = '/network-status'
-  await waitForApplicationPage(page, '/network-status')
-  await page.getByRole('heading', { name: 'Network Status' }).waitFor({ state: 'visible' })
-  const healthyStatusCount = await page.locator('.status-summary-card').filter({ hasText: 'Collector' }).getByText('Healthy', { exact: true }).count()
-  assert(healthyStatusCount > 0, 'Network Status did not render collector Healthy state')
-  await page.getByText('Last processed ledger', { exact: true }).waitFor({ state: 'visible' })
-  behaviorChecks.push({ check: 'network_status_freshness_presentation', passed: true, collector_status: collector.status, collector_cursor: collector.cursor.last_processed_ledger, collector_head: collector.cursor.latest_observed_ledger })
 
   assert(findings.length === 0, `Browser regression collected technical findings: ${JSON.stringify(findings).slice(0, 1500)}`)
 } finally {
@@ -271,9 +344,16 @@ const summary = {
     loan_broker_id: brokerId,
     relationship_loan_id: relationshipLoanId,
     lifecycle_loan_id: lifecycleLoanId,
+    lifecycle_selection_mode: lifecycleWitness.selectionMode,
+    lifecycle_detail_probes: lifecycleWitness.detailProbes,
     archived_object_type: archivedWitness.object_type,
     archived_object_id: archivedWitness.object_id,
     transaction_hash: transactionHash,
+  },
+  request_counts: {
+    discovery_logical_api_requests: logicalApiRequests,
+    discovery_http_attempts: apiHttpAttempts,
+    browser_api_requests: browserApiRequests,
   },
   routes: routeResults,
   behavior_checks: behaviorChecks,
@@ -293,6 +373,9 @@ const markdown = [
   `- Routes checked: **${summary.result.route_count}**`,
   `- Behavior checks: **${summary.result.behavior_check_count}**`,
   `- Collector: **${summary.collector.status}**, cursor \`${summary.collector.cursor}\`, head \`${summary.collector.head}\`, lag \`${summary.collector.lag}\``,
+  `- Lifecycle witness: **${summary.witnesses.lifecycle_selection_mode}**, detail probes \`${summary.witnesses.lifecycle_detail_probes}\``,
+  `- Discovery API requests: **${summary.request_counts.discovery_logical_api_requests}** logical / **${summary.request_counts.discovery_http_attempts}** HTTP attempts`,
+  `- Browser API requests observed: **${summary.request_counts.browser_api_requests}**`,
   `- Technical findings: **${summary.technical_findings.length}**`,
   '',
   'Verified browser behaviors:',

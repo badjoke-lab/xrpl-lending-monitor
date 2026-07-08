@@ -68,11 +68,14 @@ jobs:
         run: pnpm exec playwright install --with-deps chromium
 
       - name: Run real-data browser regression and behavior smoke
+        shell: bash
         env:
           BASE_URL: ${{ inputs.base_url }}
           M5_BROWSER_OUTPUT_DIR: m5-5-browser-regression
           M5_BROWSER_REQUEST_TIMEOUT_MS: 120000
-        run: node scripts/run-m5-5-browser-regression.mjs
+        run: |
+          set -o pipefail
+          node scripts/run-m5-5-browser-regression.mjs 2>&1 | tee m5-5-browser-regression/runner.log
 
       - name: Publish browser-regression summary
         if: always()
