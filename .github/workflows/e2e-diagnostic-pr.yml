@@ -1,0 +1,51 @@
+name: E2E diagnostic PR probe
+
+on:
+  pull_request:
+    paths:
+      - src/ui/**
+      - tests/e2e/**
+      - playwright.config.ts
+      - .github/workflows/e2e-diagnostic-pr.yml
+
+permissions:
+  contents: read
+
+jobs:
+  e2e-diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Run browser smoke with retained output
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p e2e-diagnostic
+          pnpm test:e2e --reporter=line 2>&1 | tee e2e-diagnostic/output.log
+      - name: Collect Playwright outputs
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p e2e-diagnostic
+          if [ -d test-results ]; then cp -R test-results e2e-diagnostic/test-results; fi
+          if [ -d playwright-report ]; then cp -R playwright-report e2e-diagnostic/playwright-report; fi
+      - name: Upload diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-diagnostic
+          path: e2e-diagnostic
+          if-no-files-found: error
+          retention-days: 3
