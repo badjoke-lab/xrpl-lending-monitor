@@ -24,11 +24,11 @@ const immutableChange = {
   },
 }
 const immutableLifecycle = {
-  loanId: 'LOAN1', epochId: 'epoch-1', transactionHash: 'TX1', ledgerIndex: 105,
+  network: 'devnet', loanId: 'LOAN1', epochId: 'epoch-1', transactionHash: 'TX1', ledgerIndex: 105,
   transactionIndex: 1, closeTime: 800_000_000, eventType: 'payment', transactionType: 'LoanPay',
-  resultCode: 'tesSUCCESS', statusBefore: 'active', statusAfter: 'active', principalBefore: '100',
+  result: 'tesSUCCESS', statusBefore: 'active', statusAfter: 'active', principalBefore: '100',
   principalAfter: '90', totalValueBefore: '100', totalValueAfter: '90', paymentRemainingBefore: 2,
-  paymentRemainingAfter: 1, details: {},
+  paymentRemainingAfter: 1, detailsJson: '{}',
 }
 
 function reader(): HistorySegmentChainReader {
