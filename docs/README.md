@@ -23,21 +23,22 @@ This directory is the source of truth for XRPL Lending Monitor and its approved 
 17. [`explorer-v1-visual-direction.md`](explorer-v1-visual-direction.md) — approved Guided Dashboard + Relationship Explorer visual composition and Hero restrictions
 18. [`explorer-v1-contract-matrix.md`](explorer-v1-contract-matrix.md) — pre-entry section-to-data/state/load/resource mapping
 19. [`explorer-v1-translation-dictionary.md`](explorer-v1-translation-dictionary.md) — pre-entry concept, field, and Activity plain-language translation rules
-20. [`explorer-v1-relationship-contract.md`](explorer-v1-relationship-contract.md) — bounded relationship view, lazy loading, same-context, accessibility, and measurement contract
-21. [`explorer-v1-static-api-shape-audit.md`](explorer-v1-static-api-shape-audit.md) — static audit of current list/detail response shapes and provisional low-fan-out relationship seed candidates
-22. [`ui-information-architecture.md`](ui-information-architecture.md) — Monitor, Audit, System, Project, and approved Explore navigation relationships
-23. [`ui-page-map.md`](ui-page-map.md) — canonical routes and route ownership
-24. [`ui-page-specifications.md`](ui-page-specifications.md) — page responsibilities, API dependencies, unavailable behavior, and milestone assignment
-25. [`ui-design-spec.md`](ui-design-spec.md) — visual system, state treatment, tables, charts, provenance, and accessibility
-26. [`ui-component-inventory.md`](ui-component-inventory.md) — reusable UI component contracts and required states
-27. [`ui-responsive-rules.md`](ui-responsive-rules.md) — desktop, tablet, mobile, zoom, and long-content behavior
-28. [`ui-reference/README.md`](ui-reference/README.md) — approved mockup interpretation and prohibited invented data
-29. [`development-roadmap.md`](development-roadmap.md) — active M0-M6 implementation order, dependencies, target dates, and exit conditions
-30. [`observatory-roadmap.md`](observatory-roadmap.md) — approved Explorer v1 insertion and post-release Observatory O1-O3 expansion order
-31. [`implementation-status.md`](implementation-status.md) — public implementation state, active unit, and current release blockers
-32. [`operations-public-discovery.md`](operations-public-discovery.md) — final-host canonical, robots, sitemap, analytics, and Search Console operation
-33. [`operations-unimpairment-witness.md`](operations-unimpairment-witness.md) — bounded external Devnet semantic-witness operation for the remaining M1 unimpairment path
-34. [`decision-log.md`](decision-log.md) — accepted and superseded architectural and product decisions
+20. [`explorer-v1-content-copy.md`](explorer-v1-content-copy.md) — baseline English Hero, section, state, Loan-summary, Activity, glossary, and technical-transition copy
+21. [`explorer-v1-relationship-contract.md`](explorer-v1-relationship-contract.md) — bounded relationship view, lazy loading, same-context, accessibility, and measurement contract
+22. [`explorer-v1-static-api-shape-audit.md`](explorer-v1-static-api-shape-audit.md) — static audit of current list/detail response shapes and provisional low-fan-out relationship seed candidates
+23. [`ui-information-architecture.md`](ui-information-architecture.md) — Monitor, Audit, System, Project, and approved Explore navigation relationships
+24. [`ui-page-map.md`](ui-page-map.md) — canonical routes and route ownership
+25. [`ui-page-specifications.md`](ui-page-specifications.md) — page responsibilities, API dependencies, unavailable behavior, and milestone assignment
+26. [`ui-design-spec.md`](ui-design-spec.md) — visual system, state treatment, tables, charts, provenance, and accessibility
+27. [`ui-component-inventory.md`](ui-component-inventory.md) — reusable UI component contracts and required states
+28. [`ui-responsive-rules.md`](ui-responsive-rules.md) — desktop, tablet, mobile, zoom, and long-content behavior
+29. [`ui-reference/README.md`](ui-reference/README.md) — approved mockup interpretation and prohibited invented data
+30. [`development-roadmap.md`](development-roadmap.md) — active M0-M6 implementation order, dependencies, target dates, and exit conditions
+31. [`observatory-roadmap.md`](observatory-roadmap.md) — approved Explorer v1 insertion and post-release Observatory O1-O3 expansion order
+32. [`implementation-status.md`](implementation-status.md) — public implementation state, active unit, and current release blockers
+33. [`operations-public-discovery.md`](operations-public-discovery.md) — final-host canonical, robots, sitemap, analytics, and Search Console operation
+34. [`operations-unimpairment-witness.md`](operations-unimpairment-witness.md) — bounded external Devnet semantic-witness operation for the remaining M1 unimpairment path
+35. [`decision-log.md`](decision-log.md) — accepted and superseded architectural and product decisions
 
 ## Authority rules
 
@@ -46,6 +47,7 @@ This directory is the source of truth for XRPL Lending Monitor and its approved 
 - `explorer-v1-visual-direction.md` defines the approved Guided Dashboard + Relationship Explorer composition, same-product visual treatment, and Hero restrictions.
 - `explorer-v1-contract-matrix.md` defines pre-entry section mapping to candidate data sources, states, initial/lazy loading, provenance, technical transitions, and measurement hooks.
 - `explorer-v1-translation-dictionary.md` defines pre-entry plain-language concept, field, status, and Activity wording rules; implementation must revalidate the dictionary against final API and normalized event semantics.
+- `explorer-v1-content-copy.md` defines the baseline English UI copy for static and templated Explorer text; implementation must narrow or remove wording that final evidence cannot support.
 - `explorer-v1-relationship-contract.md` defines bounded observed relationship behavior, progressive loading, same-context rules, accessible alternatives, and measurement requirements.
 - `explorer-v1-static-api-shape-audit.md` records current static response/route capabilities and provisional composition candidates; it does not replace M6 resource measurement or E1-1 contract decisions.
 - `architecture.md` defines the active system and runtime architecture.
@@ -65,7 +67,7 @@ This directory is the source of truth for XRPL Lending Monitor and its approved 
 - `operations-public-discovery.md` defines final-host, canonical, sitemap, analytics, and Search Console launch operation.
 - `operations-unimpairment-witness.md` defines the custody boundary, protocol preconditions, abort conditions, and evidence order for any separately controlled external Devnet unimpairment witness.
 - `development-roadmap.md`, `observatory-roadmap.md`, `explorer-spec.md`, and `implementation-status.md` must be re-read at the start of each Explorer or Observatory implementation unit and reconciled with newly captured evidence before dependent work proceeds.
-- Before Explorer E1-1, also re-read the five Explorer v1 pre-entry design/audit documents and reconcile unresolved endpoint, translation, relationship-bound, static API-shape, and visual decisions with the M6 resource harness evidence.
+- Before Explorer E1-1, also re-read the Explorer v1 pre-entry design, copy, and static-audit documents and reconcile unresolved endpoint, translation, relationship-bound, copy, static API-shape, and visual decisions with the M6 resource harness evidence.
 - `development-roadmap.md`, `implementation-status.md`, `m6-integrity-reset-plan.md`, and `m6-resource-guardrail-plan.md` must be re-read before the first M6 integrity/reset or runtime/resource implementation unit.
 - `development-roadmap.md` and `implementation-status.md` must also be re-read at the start of each implementation, operational, UI-audit, SEO, or release-preparation unit.
 - `decision-log.md` records why material architecture and product choices were accepted or superseded.
