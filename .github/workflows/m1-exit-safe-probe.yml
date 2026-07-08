@@ -1,0 +1,142 @@
+name: M1 exit safe probe
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/m1-exit-safe-probe.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: m1-exit-safe-probe
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      BASE_URL: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify collector preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p m1-exit-safe-probe
+          curl --max-time 60 --fail-with-body --silent --show-error --retry 3 \
+            "${BASE_URL%/}/api/status/collector" \
+            > m1-exit-safe-probe/collector.json
+          jq -e '.status == "healthy" and .cursor.lag_ledgers == 0 and .consecutive_failures == 0 and .error == null' \
+            m1-exit-safe-probe/collector.json > /dev/null
+
+      - name: Measure and enforce actual D1 headroom
+        id: headroom
+        continue-on-error: true
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          D1_HEADROOM_OUTPUT_DIR: m1-exit-safe-probe
+        run: bash scripts/check-d1-headroom.sh
+
+      - name: Capture guarded M1 evidence
+        if: steps.headroom.outcome == 'success'
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --max-time 120 --fail-with-body --silent --show-error --retry 3 \
+            "${BASE_URL%/}/api/status/continuation-diagnostics" \
+            > m1-exit-safe-probe/continuation-diagnostics.json
+          curl --max-time 120 --fail-with-body --silent --show-error --retry 3 \
+            "${BASE_URL%/}/api/status/m1-exit-diagnostics" \
+            > m1-exit-safe-probe/m1-exit-diagnostics.json
+          curl --max-time 60 --fail-with-body --silent --show-error --retry 3 \
+            "${BASE_URL%/}/api/status/replacement-base-rebase" \
+            > m1-exit-safe-probe/replacement-base-rebase.json
+          curl --max-time 60 --fail-with-body --silent --show-error --retry 3 \
+            "${BASE_URL%/}/api/status/history-source" \
+            > m1-exit-safe-probe/history-source.json
+          curl --max-time 60 --fail-with-body --silent --show-error --retry 3 \
+            "${BASE_URL%/}/api/overview" \
+            > m1-exit-safe-probe/overview.json
+
+          jq -e '.report.passed == true and ([.report.paths[].state] | all(. == "observed"))' \
+            m1-exit-safe-probe/continuation-diagnostics.json > /dev/null
+          jq -e '.report.ready == true and ([.report.gates[].state] | all(. == "observed"))' \
+            m1-exit-safe-probe/m1-exit-diagnostics.json > /dev/null
+          jq -e '.status == "replayed" and .target.snapshotId == "devnet-3432924-canonical" and .target.ledgerIndex == 3432924' \
+            m1-exit-safe-probe/replacement-base-rebase.json > /dev/null
+          jq -e '.status == "ok" and .mode == "hybrid" and .configured == true and .chain.end_ledger_index == 3432924 and .exact_index.total_records > 0' \
+            m1-exit-safe-probe/history-source.json > /dev/null
+          grep -q 'devnet-3432924-canonical' m1-exit-safe-probe/overview.json
+
+      - name: Capture current-state exact reads
+        if: steps.headroom.outcome == 'success'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for KIND in vaults loan-brokers loans; do
+            curl --max-time 60 --fail-with-body --silent --show-error --retry 3 \
+              "${BASE_URL%/}/api/${KIND}?limit=25&sort=id_asc" \
+              > "m1-exit-safe-probe/${KIND}-list.json"
+            jq -e '.availability.state == "available" and (.data | length) > 0 and .snapshot.id == "devnet-3432924-canonical"' \
+              "m1-exit-safe-probe/${KIND}-list.json" > /dev/null
+          done
+
+          VAULT_ID="$(jq -r '.data[0].id' m1-exit-safe-probe/vaults-list.json)"
+          BROKER_ID="$(jq -r '.data[0].id' m1-exit-safe-probe/loan-brokers-list.json)"
+          LOAN_ID="$(jq -r '.data[0].id' m1-exit-safe-probe/loans-list.json)"
+
+          curl --max-time 60 --fail-with-body --silent --show-error --retry 3 "${BASE_URL%/}/api/vaults/${VAULT_ID}" > m1-exit-safe-probe/vault-detail.json
+          curl --max-time 60 --fail-with-body --silent --show-error --retry 3 "${BASE_URL%/}/api/loan-brokers/${BROKER_ID}" > m1-exit-safe-probe/loan-broker-detail.json
+          curl --max-time 60 --fail-with-body --silent --show-error --retry 3 "${BASE_URL%/}/api/loans/${LOAN_ID}" > m1-exit-safe-probe/loan-detail.json
+
+          jq -e --arg id "${VAULT_ID}" '.availability.state == "available" and .data.id == $id and .snapshot.id == "devnet-3432924-canonical"' m1-exit-safe-probe/vault-detail.json > /dev/null
+          jq -e --arg id "${BROKER_ID}" '.availability.state == "available" and .data.id == $id and .snapshot.id == "devnet-3432924-canonical"' m1-exit-safe-probe/loan-broker-detail.json > /dev/null
+          jq -e --arg id "${LOAN_ID}" '.availability.state == "available" and .data.id == $id and .snapshot.id == "devnet-3432924-canonical"' m1-exit-safe-probe/loan-detail.json > /dev/null
+
+      - name: Build probe summary
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -n \
+            --slurpfile collector m1-exit-safe-probe/collector.json \
+            --slurpfile headroom m1-exit-safe-probe/d1-headroom-summary.json \
+            --arg headroom_outcome "${{ steps.headroom.outcome }}" \
+            '{
+              recorded_at: (now | todateiso8601),
+              collector: $collector[0],
+              headroom: ($headroom[0] // null),
+              headroom_outcome: $headroom_outcome
+            }' > m1-exit-safe-probe/probe-summary.json
+
+          if [ -f m1-exit-safe-probe/continuation-diagnostics.json ] && [ -f m1-exit-safe-probe/m1-exit-diagnostics.json ]; then
+            jq -s '.[0] * {
+              hyb7: {passed: .[1].report.passed, paths: (.[1].report.paths | with_entries(.value = .value.state))},
+              m1_exit: {ready: .[2].report.ready, gates: (.[2].report.gates | with_entries(.value = .value.state))}
+            }' \
+              m1-exit-safe-probe/probe-summary.json \
+              m1-exit-safe-probe/continuation-diagnostics.json \
+              m1-exit-safe-probe/m1-exit-diagnostics.json \
+              > m1-exit-safe-probe/probe-summary.tmp.json
+            mv m1-exit-safe-probe/probe-summary.tmp.json m1-exit-safe-probe/probe-summary.json
+          fi
+
+          jq . m1-exit-safe-probe/probe-summary.json
+
+      - name: Fail closed when D1 headroom is unavailable
+        if: steps.headroom.outcome != 'success'
+        shell: bash
+        run: exit 1
+
+      - name: Upload probe evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: m1-exit-safe-probe
+          path: m1-exit-safe-probe
+          if-no-files-found: error
+          retention-days: 3
