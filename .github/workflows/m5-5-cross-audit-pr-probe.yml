@@ -17,7 +17,7 @@ concurrency:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 24
     steps:
       - uses: actions/checkout@v4
 
