@@ -34,6 +34,26 @@ function db(): D1Database {
               created_at: '2025-05-08T06:13:21.000Z',
             }] as T[] }
           }
+          if (sql.includes('SELECT * FROM object_changes')) {
+            return { results: [{
+              transaction_hash: 'LIVE-TX', epoch_id: 'epoch-1', ledger_index: 106, transaction_index: 1,
+              transaction_type: 'LoanPay', result_code: 'tesSUCCESS', close_time: 800_000_001,
+              node_index: 0, object_type: 'Loan', object_id: 'LOAN1', action: 'modified',
+              field_name: 'PrincipalOutstanding', before_json: '"90"', after_json: '"80"', value_type: 'string',
+              unsupported_field: 0, vault_id: null, loan_broker_id: 'BROKER1', loan_id: 'LOAN1', account: null,
+              owner: null, borrower: 'rBorrower', asset_key: 'XRP', mpt_issuance_id: null,
+              created_at: '2025-05-08T06:13:21.000Z',
+            }] as T[] }
+          }
+          if (sql.includes('FROM loan_lifecycle_events')) {
+            return { results: [{
+              loan_id: 'LOAN1', epoch_id: 'epoch-1', transaction_hash: 'LIVE-TX', ledger_index: 106,
+              transaction_index: 1, close_time: 800_000_001, event_type: 'payment', transaction_type: 'LoanPay',
+              result_code: 'tesSUCCESS', status_before: 'active', status_after: 'active', principal_before: '90',
+              principal_after: '80', total_value_before: '90', total_value_after: '80', payment_remaining_before: 1,
+              payment_remaining_after: 0, details_json: '{}', created_at: '2025-05-08T06:13:21.000Z',
+            }] as T[] }
+          }
           return { results: [] as T[] }
         },
       }
@@ -52,7 +72,31 @@ function env(): Bindings {
   }
 }
 
-function hybridSource() {
+function immutableObjectChange() {
+  return {
+    network: 'devnet', epochId: 'epoch-1', ledgerIndex: 105, closeTime: 800_000_000,
+    transactionHash: 'IMMUTABLE-TX', transactionIndex: 1, transactionType: 'LoanPay', result: 'tesSUCCESS',
+    nodeIndex: 0, objectType: 'Loan', objectId: 'LOAN1', action: 'modified',
+    fieldName: 'PrincipalOutstanding', beforeValue: '100', afterValue: '90',
+    beforeJson: '"100"', afterJson: '"90"', valueType: 'string', unsupportedField: false,
+    relationships: {
+      vaultId: null, loanBrokerId: 'BROKER1', loanId: 'LOAN1', account: null,
+      owner: null, borrower: 'rBorrower', assetKey: 'XRP', mptIssuanceId: null,
+    },
+  }
+}
+
+function immutableLifecycle() {
+  return {
+    loanId: 'LOAN1', epochId: 'epoch-1', transactionHash: 'IMMUTABLE-TX', ledgerIndex: 105,
+    transactionIndex: 1, closeTime: 800_000_000, eventType: 'payment', transactionType: 'LoanPay',
+    resultCode: 'tesSUCCESS', statusBefore: 'active', statusAfter: 'active', principalBefore: '100',
+    principalAfter: '90', totalValueBefore: '100', totalValueAfter: '90', paymentRemainingBefore: 2,
+    paymentRemainingAfter: 1, details: {},
+  }
+}
+
+function hybridSource(options: { exact?: boolean } = {}) {
   const reader = {
     publication: {
       epochId: 'epoch-1',
@@ -79,12 +123,43 @@ function hybridSource() {
         recordsExamined: 1,
       }
     },
+    async readReferenced<T>(readOptions: { references: { fileKind: string }[] }) {
+      const value = readOptions.references[0]?.fileKind === 'loan_lifecycle'
+        ? immutableLifecycle()
+        : immutableObjectChange()
+      return { items: [value] as T[], assetReads: 1, compressedBytes: 100, decompressedBytes: 200, recordsExamined: 1 }
+    },
   }
+  const exactIndex = options.exact ? {
+    manifest: {},
+    reader: {
+      async find(_term: string, findOptions: { referenceKinds?: readonly string[]; referencePredicate?: (reference: unknown) => boolean }) {
+        const lifecycle = findOptions.referenceKinds?.includes('loan_lifecycle') ?? false
+        const reference = lifecycle
+          ? {
+              kind: 'loan_lifecycle', segmentId: 's', fileKind: 'loan_lifecycle', ledgerIndex: 105,
+              searchResult: {
+                kind: 'loan_lifecycle', epochId: 'epoch-1', ledgerIndex: 105,
+                transactionHash: 'IMMUTABLE-TX', objectType: 'Loan', objectId: 'LOAN1', loanId: 'LOAN1',
+              },
+            }
+          : {
+              kind: 'object_change', segmentId: 's', fileKind: 'object_changes', ledgerIndex: 105,
+              searchResult: {
+                kind: 'object_change', epochId: 'epoch-1', ledgerIndex: 105,
+                transactionHash: 'IMMUTABLE-TX', objectType: 'Loan', objectId: 'LOAN1', loanId: 'LOAN1',
+              },
+            }
+        if (findOptions.referencePredicate && !findOptions.referencePredicate(reference)) return { references: [] }
+        return { references: [reference] }
+      },
+    },
+  } : null
   return {
     kind: 'hybrid' as const,
     configured: true as const,
     reader,
-    exactIndex: null,
+    exactIndex,
     channel: {
       schemaVersion: 1 as const,
       active: {
@@ -151,6 +226,28 @@ describe('hybrid history route override', () => {
     const body = await response?.json() as { data: { transaction_hash: string }[]; page: unknown }
     expect(body.data.map((item) => item.transaction_hash)).toEqual(['LIVE-106', 'IMMUTABLE-105'])
     expect(body.page).toEqual({ limit: 10, next_cursor: null })
+  })
+
+  it('serves Object History through exact targeted immutable reads plus live continuation', async () => {
+    mockedResolve.mockResolvedValue(hybridSource({ exact: true }) as never)
+    const response = await handleHybridHistoryOverride(
+      new Request('https://example.test/api/objects/Loan/LOAN1/history?limit=25'),
+      env(),
+    )
+    expect(response?.status).toBe(200)
+    const body = await response?.json() as { data: { ledger_index: number }[] }
+    expect(body.data.map((item) => item.ledger_index)).toEqual([106, 105])
+  })
+
+  it('serves Loan lifecycle detail through exact targeted immutable reads plus live continuation', async () => {
+    mockedResolve.mockResolvedValue(hybridSource({ exact: true }) as never)
+    const response = await handleHybridHistoryOverride(
+      new Request('https://example.test/api/loans/LOAN1/lifecycle?limit=25'),
+      env(),
+    )
+    expect(response?.status).toBe(200)
+    const body = await response?.json() as { data: { ledger_index: number }[] }
+    expect(body.data.map((item) => item.ledger_index)).toEqual([105, 106])
   })
 
   it('fails explicitly for exact history lookup until immutable indexes exist', async () => {
