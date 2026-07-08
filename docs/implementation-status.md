@@ -35,6 +35,8 @@ Route-aware SEO/discoverability preparation is implemented. Canonical and struct
 
 M1 exit is complete. M5-5 real-data integration is now active; M6 remains gated behind M5-5 and its production evidence.
 
+The first D1-gated M5-5 production cross-audit passed at 2026-07-08 00:52:38 UTC. It verified shared snapshot identity across current entities, live Loan to Loan Broker and Loan Broker to Vault relationships, lifecycle-backed current/history consistency, lifecycle/current consistency, exact archive availability plus current-state exclusion, Activity result-code classification, Cover & Loss evidence availability, bounded Activity exports and feed output, Overview snapshot identity, and collector freshness. A durable manual workflow now repeats the same audit only after healthy zero-lag collector preflight and the unchanged measured D1 headroom gate pass. Real-data browser regression and representative browser production behavior smoke remain active before M5-5 exit.
+
 ## Latest resource evidence
 
 The 2026-07-07 21:09 UTC audit-headroom retry probe recorded:
@@ -45,6 +47,8 @@ The 2026-07-07 21:09 UTC audit-headroom retry probe recorded:
 - measured headroom gate: failed.
 
 The gate correctly stopped candidate discovery. Production screenshot crawl remains deferred until a new UTC-day measurement passes both read and write thresholds. Candidate review is no longer active while natural unimpairment evidence remains valid and consistent. The UI gate remains unchanged and is not bypassed by the scheduled operation or by the later lightweight exact-head evidence.
+
+The 2026-07-08 00:52 UTC M5-5 production cross-audit probe measured `946,159` rows read and `3,414` rows written for the UTC day. Read and write fractions were approximately `18.92%` and `3.41%` of the configured daily reference allowances, so the unchanged below-80% gate passed. The production screenshot audit remains independently gated and must remeasure current-day usage before crawling.
 
 ## Latest HYB-7 state
 
@@ -93,6 +97,25 @@ The `.github/workflows/m1-exit-review.yml` workflow captures a reproducible read
 
 A retained 2026-07-08 UTC D1-gated exit probe subsequently passed all readiness conditions together: collector healthy at exact head, HYB-7 passed with every path observed, and M1 diagnostics reported `ready: true` with every gate observed. M1 is therefore complete.
 
+## Latest M5-5 production cross-audit result
+
+At 2026-07-08 00:52:38 UTC, the D1-gated production cross-audit passed with:
+
+- collector healthy, cursor/head `3477191`, lag `0`, consecutive failures `0`;
+- active snapshot `devnet-3432924-canonical` at ledger `3432924`, with Overview snapshot match;
+- 25 current Vaults, 25 Loan Brokers, and 25 Loans sampled from bounded list reads;
+- Loan to Loan Broker and Loan Broker to Vault live relationship checks consistent;
+- one lifecycle-backed current Loan matched one bounded newest object-history row and indexed lifecycle evidence;
+- Lifecycle explorer: 100 rows;
+- archived Loan exact lookup available and same object excluded from current state with HTTP `404`;
+- Activity: 100 rows, including 77 `tesSUCCESS` and 23 non-success protocol transactions, classified rather than rejected;
+- Archived Objects: 25 rows;
+- Cover & Loss: 100 rows;
+- Activity JSON, NDJSON, CSV, and feed NDJSON outputs: 25 bounded rows each;
+- D1 usage: 946,159 rows read and 3,414 rows written; headroom gate passed;
+- audit result: passed;
+- human screenshot review remains separately required.
+
 ## Active unit
 
 The active work is split into permanent monitoring plus two coordinated tracks.
@@ -106,13 +129,12 @@ The active work is split into permanent monitoring plus two coordinated tracks.
 
 ### Track A — M5-5 real-data integration
 
-1. Preserve permanent monitoring and the completed M1 exit evidence.
-2. Cross-audit verified current state against indexed real history.
-3. Validate bounded exports against the live evidence boundary.
-4. Run real-data browser regression and current/history consistency checks.
-5. Cross-check lifecycle/current-object consistency and archive/current exclusion.
-6. Run bounded production behavior smoke and relationship checks across representative routes.
-7. Verify freshness and lag claims against collector status.
+1. Preserve permanent monitoring, completed M1 exit evidence, and the passing D1-gated production cross-audit artifact.
+2. Keep the durable production cross-audit workflow available for repeatable API-level checks after healthy collector and measured D1 headroom gates pass.
+3. Treat current/history, lifecycle/current, archive/current exclusion, live relationships, bounded exports/feed, snapshot identity, Activity result classification, and freshness/lag API checks as observed in retained evidence.
+4. Run real-data browser regression across representative current, history, audit, Search, and Network Status routes.
+5. Run representative browser production behavior smoke with live identifiers and verify rendered relationship, archive/current, history/current, lifecycle/current, and freshness consistency.
+6. Reconcile M5-5 exit only after the browser regression and representative browser smoke pass.
 
 ### Track B — production UI audit
 
@@ -125,16 +147,17 @@ Tracks A and B may progress in parallel. Neither may weaken collector integrity 
 ## Next order
 
 1. Keep permanent monitoring active.
-2. Execute M5-5 cross-audit real-data integration against the completed M1 state.
-3. Complete bounded exports, browser regression, current/history and lifecycle/current consistency, archive/current exclusion, relationship verification, and bounded production behavior smoke.
-4. In parallel, run the independently D1-gated production UI audit when measured headroom permits; inspect summaries, diagnostics, and screenshots, then remediate and re-audit confirmed defects.
-5. After M5-5 exits, complete M6 integrity/reset simulations, runtime/resource guardrails, final visual audit, accessibility, performance, security, and cross-browser validation.
-6. Bind SEO/discoverability to the final public host and complete owner-managed analytics and search setup.
-7. Finalize operations/deployment documentation and recovery verification.
-8. Complete the real multi-day Devnet soak and final release verification.
+2. Preserve the passing M5-5 API cross-audit evidence and durable D1-gated repeat workflow.
+3. Run real-data browser regression and representative browser production behavior smoke across the roadmap route set, using live identifiers and checking relationship, archive/current, history/current, lifecycle/current, and freshness presentation consistency.
+4. Reconcile M5-5 exit only from browser evidence; do not treat API cross-audit success as a substitute for browser regression.
+5. In parallel, run the independently D1-gated production UI audit when measured headroom permits; inspect summaries, diagnostics, and screenshots, then remediate and re-audit confirmed defects.
+6. After M5-5 exits, complete M6 integrity/reset simulations, runtime/resource guardrails, final visual audit, accessibility, performance, security, and cross-browser validation.
+7. Bind SEO/discoverability to the final public host and complete owner-managed analytics and search setup.
+8. Finalize operations/deployment documentation and recovery verification.
+9. Complete the real multi-day Devnet soak and final release verification.
 
 ## Remaining blockers
 
-- The 2026-07-08 00:13 UTC M1 exit probe measured fresh UTC-day D1 usage at 528 rows read and 1,168 rows written and passed the headroom gate. The production screenshot audit still applies its own independent current-day gate before crawling. Production screenshot audit remains deferred until a new current-day measurement passes; scheduling cannot bypass it.
-- Production behavior smoke remains pending for the post-M1 M5-5 path.
+- The 2026-07-08 00:52 UTC M5-5 production cross-audit probe measured 946,159 rows read and 3,414 rows written for the UTC day. Read and write fractions were approximately 18.92% and 3.41% of the configured daily reference allowances, so the unchanged below-80% gate passed. The production screenshot audit remains independently gated and must remeasure current-day usage before crawling.
+- M5-5 API cross-audit evidence is passing, but real-data browser regression and representative browser production behavior smoke remain pending before M5-5 exit.
 - Final-host SEO binding and M6 release hardening remain pending in roadmap order.
