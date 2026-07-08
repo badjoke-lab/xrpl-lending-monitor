@@ -42,10 +42,13 @@ jobs:
           node-version: 24.18.0
 
       - name: Run production cross-audit
+        shell: bash
         env:
           BASE_URL: https://xrpl-lending-monitor.badjoke-lab.workers.dev
           M5_CROSS_AUDIT_OUTPUT_DIR: m5-5-cross-audit
-        run: node scripts/run-m5-5-cross-audit.mjs
+        run: |
+          set -o pipefail
+          node scripts/run-m5-5-cross-audit.mjs 2>&1 | tee m5-5-cross-audit/runner.log
 
       - name: Upload temporary evidence
         if: always()
