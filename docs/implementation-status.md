@@ -10,21 +10,29 @@ M1 exit is complete. M5-5 real-data integration remains active. M6 remains gated
 
 The retained M5-5 API-level production cross-audit evidence from `2026-07-08 00:52:38 UTC` remains passing. The remaining M5-5 exit requirement is production-shaped browser evidence plus the fail-closed browser exit evaluator.
 
-## Active blocker — scheduled collector CPU exhaustion
+## Active recovery — five-minute scheduled collector tuning
 
-The date-guarded M5-5 browser evidence path did not become exit evidence. The current active blocker is the production scheduled collector, not D1 daily headroom.
+Cloudflare production Observability on `2026-07-09` showed repeated scheduled collector events with `cron=* * * * *` and `outcome=exceededCpu`. The first GitHub catch-up runtime monitor rerun after the UTC-day reset showed D1 usage had recovered, but collector cursor still did not advance.
 
-Cloudflare production Observability on `2026-07-09` showed repeated scheduled events with:
+PR #296 changed the production Worker schedule from every minute to five-minute cadence and reduced per-run incremental collector budgets for Cloudflare Worker Free operation. The retained post-merge runtime monitor artifact created at `2026-07-09T05:11:52Z` passed all lightweight runtime invariants:
 
-- `eventType`: `cron`;
-- `cron`: `* * * * *`;
-- `outcome`: `exceededCpu`;
-- `cpuTimeMs`: `10`;
-- wall time roughly 4-6 seconds.
+- samples: `3`;
+- cursor: `3497296 -> 3497376`;
+- `cursor_delta`: `80`;
+- `samples_with_failures`: `0`;
+- consecutive failures: `0`;
+- error: `null`;
+- D1 rows read: `1,145,867 / 5,000,000`;
+- D1 rows written: `3,518 / 100,000`.
 
-The GitHub catch-up runtime monitor rerun after the UTC-day reset showed D1 usage had recovered, but collector cursor still did not advance. Therefore M5-5 browser regression remains blocked until the scheduled collector can run without Worker CPU termination and produce retained recovery evidence.
+This proves the collector is no longer fully stuck under the first free-tier recovery profile. However, it does not prove the collector is caught up. The same artifact recorded:
 
-The active recovery unit is PR #296, which changes the production Worker schedule from every minute to five-minute cadence and reduces per-run incremental collector budgets for Cloudflare Worker Free operation. This is a free-tier stability compromise, not a claim of strict real-time operation.
+- head: `3510361 -> 3510559`;
+- `head_delta`: `198`;
+- lag: `13065 -> 13183`;
+- `lag_delta`: `118`.
+
+The active unit is therefore a measured tuning pass: keep five-minute cadence, increase the per-run ledger/RPC budget conservatively, and re-run the catch-up runtime monitor. The next tuning profile must preserve fail-closed collector integrity, D1 gates, and M5-5 browser exit criteria.
 
 ## Latest retained runtime evidence
 
@@ -42,7 +50,7 @@ The durable production browser-regression path is merged and validated in CI. It
 
 The browser exit evaluator is merged and writes `exit-evaluation.json` and `exit-evaluation.md`. A passing evaluator marks browser evidence ready for M5-5 exit reconciliation, but retained API cross-audit evidence remains a separate prerequisite.
 
-No browser pass is claimed while the production collector remains CPU-blocked.
+No M5-5 browser pass is claimed while the production collector remains materially behind.
 
 ## Explorer v1 pre-entry design preparation
 
@@ -79,15 +87,16 @@ Explorer v1 is a bounded presentation layer over approved contracts. It must not
 
 ## Active unit
 
-The active implementation unit is free-tier scheduled collector recovery.
+The active implementation unit is five-minute free-tier scheduled collector tuning.
 
-1. Merge and deploy the five-minute free-tier collector configuration only after review.
-2. Verify Cloudflare scheduled events no longer report `outcome=exceededCpu`.
-3. Verify `/api/status/collector` shows advancing cursor evidence (`cursor_delta > 0`) and no consecutive failures.
+1. Preserve five-minute cadence.
+2. Increase the per-run collector budget conservatively from the first recovery profile.
+3. Deploy only after CI passes.
 4. Rerun the catch-up runtime monitor and retain the artifact.
-5. Return to M5-5 browser evidence only after collector recovery is retained.
+5. Accept the tuning only if cursor advances without failures and lag does not continue to grow under the sampled window.
+6. Return to M5-5 browser evidence only after collector recovery/tuning evidence is retained.
 
-Track A — M5-5 browser evidence — remains blocked until collector recovery evidence is captured. Track B — production UI audit — also remains gated by measured current-day headroom and collector health.
+Track A — M5-5 browser evidence — remains blocked until collector tuning evidence is captured. Track B — production UI audit — also remains gated by measured current-day headroom and collector health.
 
 Neither track may weaken collector integrity, D1 resource gates, or browser exit criteria.
 
@@ -103,18 +112,17 @@ M6-I1 may begin only after M5-5 exits and after issue #283, the fixture catalog,
 
 ## Next order
 
-1. Complete PR #296 review for free-tier collector recovery.
-2. Deploy the five-minute/free-tier collector configuration.
-3. Confirm Cloudflare scheduled events stop producing `exceededCpu`.
-4. Confirm collector cursor advancement and retained catch-up runtime monitor evidence.
-5. Run or rerun M5-5 browser regression only after collector preflight and D1 headroom gates pass.
-6. Inspect `summary.json`, `summary.md`, `runner.log`, `exit-evaluation.json`, `exit-evaluation.md`, collector preflight, and D1 headroom evidence.
-7. Reconcile M5-5 exit only when retained API and browser evidence both satisfy their gates.
-8. After M5-5 exits, begin M6-I1 using `docs/m6-integrity-reset-plan.md`, `docs/m6-i1-fixture-catalog.md`, and issue #283 after inventorying existing helpers.
+1. Complete the five-minute tuning PR.
+2. Deploy the tuned free-tier collector profile.
+3. Confirm collector cursor advancement, zero failures, D1 headroom, and non-growing lag with retained catch-up runtime monitor evidence.
+4. Run or rerun M5-5 browser regression only after collector preflight and D1 headroom gates pass.
+5. Inspect `summary.json`, `summary.md`, `runner.log`, `exit-evaluation.json`, `exit-evaluation.md`, collector preflight, and D1 headroom evidence.
+6. Reconcile M5-5 exit only when retained API and browser evidence both satisfy their gates.
+7. After M5-5 exits, begin M6-I1 using `docs/m6-integrity-reset-plan.md`, `docs/m6-i1-fixture-catalog.md`, and issue #283 after inventorying existing helpers.
 
 ## Remaining blockers
 
-- Production scheduled collector recovery evidence is missing after the `exceededCpu` Cloudflare events.
+- Production scheduled collector is advancing again, but retained evidence still shows growing lag under the first five-minute recovery profile.
 - M5-5 API cross-audit evidence is passing, but real-data browser regression and representative browser production behavior evidence remain pending before M5-5 exit.
 - The independent production UI audit remains separately gated by measured current-day headroom and collector health.
 - M6 plans and M6-I1 fixture catalog are prepared, but M6 execution remains blocked until M5-5 exit.
