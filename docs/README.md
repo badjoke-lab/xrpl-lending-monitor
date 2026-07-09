@@ -37,20 +37,15 @@ This directory is the source of truth for XRPL Lending Monitor and its approved 
 31. [`development-roadmap.md`](development-roadmap.md) — active M0-M6 implementation order, dependencies, target dates, and exit conditions
 32. [`observatory-roadmap.md`](observatory-roadmap.md) — approved Explorer v1 insertion and post-release Observatory O1-O3 expansion order
 33. [`implementation-status.md`](implementation-status.md) — public implementation state, active unit, and current release blockers
-34. [`operations-public-discovery.md`](operations-public-discovery.md) — final-host canonical, robots, sitemap, analytics, and Search Console operation
-35. [`operations-unimpairment-witness.md`](operations-unimpairment-witness.md) — bounded external Devnet semantic-witness operation for the remaining M1 unimpairment path
-36. [`decision-log.md`](decision-log.md) — accepted and superseded architectural and product decisions
+34. [`ops/free-tier-collector-recovery-2026-07-09.md`](ops/free-tier-collector-recovery-2026-07-09.md) — retained Cloudflare Worker Free collector CPU blocker evidence and recovery boundary
+35. [`operations-public-discovery.md`](operations-public-discovery.md) — final-host canonical, robots, sitemap, analytics, and Search Console operation
+36. [`operations-unimpairment-witness.md`](operations-unimpairment-witness.md) — bounded external Devnet semantic-witness operation for the remaining M1 unimpairment path
+37. [`decision-log.md`](decision-log.md) — accepted and superseded architectural and product decisions
 
 ## Authority rules
 
 - `product-spec.md` defines the current Monitor product boundary.
 - `explorer-spec.md` defines approved Explorer v1 and Explorer v2 scope, behavior, data boundaries, and sequencing requirements.
-- `explorer-v1-visual-direction.md` defines the approved Guided Dashboard + Relationship Explorer composition, same-product visual treatment, and Hero restrictions.
-- `explorer-v1-contract-matrix.md` defines pre-entry section mapping to candidate data sources, states, initial/lazy loading, provenance, technical transitions, and measurement hooks.
-- `explorer-v1-translation-dictionary.md` defines pre-entry plain-language concept, field, status, and Activity wording rules; implementation must revalidate the dictionary against final API and normalized event semantics.
-- `explorer-v1-content-copy.md` defines the baseline English UI copy for static and templated Explorer text; implementation must narrow or remove wording that final evidence cannot support.
-- `explorer-v1-relationship-contract.md` defines bounded observed relationship behavior, progressive loading, same-context rules, accessible alternatives, and measurement requirements.
-- `explorer-v1-static-api-shape-audit.md` records current static response/route capabilities and provisional composition candidates; it does not replace M6 resource measurement or E1-1 contract decisions.
 - `architecture.md` defines the active system and runtime architecture.
 - Domain documents define how their data and behavior work.
 - `collector-design.md` defines complete base bootstrap, incremental continuation, current overlay behavior, and reset handling.
@@ -58,14 +53,10 @@ This directory is the source of truth for XRPL Lending Monitor and its approved 
 - `m6-integrity-reset-plan.md` defines the first executable M6 integrity/reset baseline after M5-5 exit; it does not authorize early M6 implementation.
 - `m6-i1-fixture-catalog.md` prepares deterministic M6-I1 scenario IDs, shared context/object/asset families, evidence snapshot requirements, and M6-I2-I5 reuse; the catalog is not passing implementation evidence.
 - `m6-resource-guardrail-plan.md` defines the early M6 measurement order, evidence contract, budget-approval process, and Explorer v1 resource-harness gate.
-- `d1-migration-plan.md` records the superseded D1-only full-snapshot evaluation and retained lessons; it does not control active M1 order.
-- `d1-command-interface.md` defines the local D1 evaluation action boundary and public-safe evidence contract.
-- `storage-artifact-format.md` defines the compressed artifact format used by complete base generation.
-- `local-artifact-measurement.md` defines local measurement commands, resume behavior, and evidence fields.
-- UI information-architecture, page, design, component, responsive, and reference documents define presentation and interaction behavior.
 - `development-roadmap.md` defines the active M0-M6 implementation order, dependencies, and target dates.
 - `observatory-roadmap.md` defines the approved product-evolution order from Explorer v1 through XRPL Lending Observatory O1-O3 and may not be used to bypass active M5-5 or M6 gates.
 - `implementation-status.md` records the current public implementation state.
+- `ops/free-tier-collector-recovery-2026-07-09.md` records the production Cloudflare Worker CPU blocker and the free-tier recovery boundary; it does not by itself prove recovery.
 - `operations-public-discovery.md` defines final-host, canonical, sitemap, analytics, and Search Console launch operation.
 - `operations-unimpairment-witness.md` defines the custody boundary, protocol preconditions, abort conditions, and evidence order for any separately controlled external Devnet unimpairment witness.
 - `development-roadmap.md`, `observatory-roadmap.md`, `explorer-spec.md`, and `implementation-status.md` must be re-read at the start of each Explorer or Observatory implementation unit and reconciled with newly captured evidence before dependent work proceeds.
@@ -117,13 +108,3 @@ Explorer v1 is a bounded presentation layer over approved current contracts. It 
 Generated UI mockups are visual references only. They are not fixtures or API contracts. Do not copy example counts, USD conversions, cross-asset totals, oracle claims, hashes, addresses, states, charts, or operational metrics unless the approved API and specifications support them.
 
 The approved Explorer v1 mockup direction is captured textually in `explorer-v1-visual-direction.md`; implementation follows the documented composition and restrictions, not the mockup's example values.
-
-The UI must show explicit unavailable, stale, empty, partial, and error states rather than substituting zero or mock data.
-
-## Update requirements
-
-Every implementation pull request must update `implementation-status.md`. Update the relevant specification, roadmap status, resource envelope, UI document, or decision record when a change affects behavior, scope, sequencing, routes, visual rules, resource use, or a previously accepted decision.
-
-Explorer and Observatory work must also update `explorer-spec.md` or `observatory-roadmap.md` when behavior, scope, sequencing, metric dependencies, or resource assumptions change.
-
-A UI pull request is incomplete unless its page specification, responsive behavior, data states, accessibility coverage, and API dependencies agree with the implementation.
