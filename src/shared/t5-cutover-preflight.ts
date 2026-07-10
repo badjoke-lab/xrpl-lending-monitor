@@ -89,11 +89,15 @@ export async function buildT5CutoverPreflightBundle(options: {
     ledgerHash: candidate.ledgerHash,
   }
   const rebasePlan = planReplacementBaseRebase({ target, evidence: productionEvidence })
-  if (rebasePlan.action !== 'rebase' && rebasePlan.action !== 'replay') {
-    throw new Error('T5 replacement-base preflight did not produce a cutover action')
-  }
-  if (productionEvidence.sync.lastProcessedLedger === null || productionEvidence.sync.lastProcessedHash === null) {
-    throw new Error('T5 production cursor evidence is incomplete')
+  const sync = productionEvidence.sync
+  if (
+    sync === null
+    || sync.lastProcessedLedger === null
+    || sync.lastProcessedHash === null
+    || sync.latestObservedLedger === null
+    || sync.latestObservedHash === null
+  ) {
+    throw new Error('T5 production sync evidence is incomplete')
   }
 
   return {
@@ -115,10 +119,10 @@ export async function buildT5CutoverPreflightBundle(options: {
       ledgerCount: candidate.ledgerCount,
     },
     production: {
-      cursorLedgerIndex: productionEvidence.sync.lastProcessedLedger,
-      cursorLedgerHash: productionEvidence.sync.lastProcessedHash,
-      latestObservedLedger: productionEvidence.sync.latestObservedLedger,
-      latestObservedHash: productionEvidence.sync.latestObservedHash,
+      cursorLedgerIndex: sync.lastProcessedLedger,
+      cursorLedgerHash: sync.lastProcessedHash,
+      latestObservedLedger: sync.latestObservedLedger,
+      latestObservedHash: sync.latestObservedHash,
       overlayStateCount: productionEvidence.overlayStates.length,
     },
     target,
