@@ -1,0 +1,51 @@
+{
+  "sync": {
+    "network": "devnet",
+    "epochId": "devnet-3371675",
+    "lastProcessedLedger": 3502434,
+    "lastProcessedHash": "EBABB4FEA60A8EB6767E7BA4905FABBB49746E730AE51C51EB9106E4304FD480",
+    "latestObservedLedger": 3539155,
+    "latestObservedHash": "7EC8E8B36C8D61FE808311395F3F7C2F44DD8F88EC327C599645C481D11493A9",
+    "latestLedgerAgeSeconds": 3,
+    "lastAttemptAt": "2026-07-10T08:00:55.418Z",
+    "lastSuccessAt": "2026-07-10T08:00:55.800Z",
+    "status": "healthy",
+    "consecutiveFailures": 0,
+    "endpoint": "wss://s.devnet.rippletest.net:51233/",
+    "serverVersion": "3.2.0",
+    "serverState": "full",
+    "completeLedgers": "2407901-3539155",
+    "lendingProtocolEnabled": true,
+    "lendingProtocolSupported": true,
+    "singleAssetVaultEnabled": true,
+    "singleAssetVaultSupported": true,
+    "resetReason": null,
+    "errorCode": null,
+    "errorMessage": null,
+    "createdAt": "2026-07-04T20:51:29.523Z",
+    "updatedAt": "2026-07-10T08:00:55.800Z"
+  },
+  "currentEpochId": "devnet-3371675",
+  "overlayStates": [
+    {
+      "network": "devnet",
+      "epochId": "devnet-3371675",
+      "baseSnapshotId": "devnet-3432924-canonical",
+      "baseLedgerIndex": 3432924,
+      "baseLedgerHash": "52C13CBFFC3433750DBBB986390C4C6E6F7CC82CF70B4B909C506536A8BD9218",
+      "overlayLedgerIndex": 3502434,
+      "overlayLedgerHash": "EBABB4FEA60A8EB6767E7BA4905FABBB49746E730AE51C51EB9106E4304FD480",
+      "updatedAt": "2026-07-10T08:00:55.800Z"
+    },
+    {
+      "network": "devnet",
+      "epochId": "devnet-3371675",
+      "baseSnapshotId": "devnet-3371675-0ba2ed766c19",
+      "baseLedgerIndex": 3371675,
+      "baseLedgerHash": "0BA2ED766C190C733F8F26288785CBDF01D0FC26E1A6C03EDB7E9DFF6F8BCB90",
+      "overlayLedgerIndex": 3390079,
+      "overlayLedgerHash": "44AEA40C87FA489362AFD40785E514CB26C2743EADF8CC44951282C1B66C07C4",
+      "updatedAt": "2026-07-06T05:42:30.122Z"
+    }
+  ]
+}
