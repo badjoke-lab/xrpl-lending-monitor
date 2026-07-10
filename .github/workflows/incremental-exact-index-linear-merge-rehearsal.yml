@@ -1,0 +1,122 @@
+name: Incremental exact-index linear-merge rehearsal
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/build-incremental-history-exact-index.ts'
+      - '.github/workflows/incremental-exact-index-linear-merge-rehearsal.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Check out implementation
+        uses: actions/checkout@v4
+
+      - name: Check out T2 history source metadata and exact index
+        uses: actions/checkout@v4
+        with:
+          ref: history-rolling-candidate-data
+          path: .local/t2-history
+          sparse-checkout: |
+            history/publication.json
+            history/index/exact
+          sparse-checkout-cone-mode: false
+
+      - name: Check out T3 target history and full exact index
+        uses: actions/checkout@v4
+        with:
+          ref: history-rolling-t3-candidate-data
+          path: .local/t3-history
+          sparse-checkout: history
+          sparse-checkout-cone-mode: true
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build plan and incremental exact-index tools
+        run: |
+          pnpm build:history-extension-plan
+          pnpm build:incremental-history-exact-index
+
+      - name: Reconstruct fixed T2-to-T3 extension plan
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=incremental-exact-index-linear-merge
+          mkdir -p "${ROOT}"
+          TARGET_LEDGER="$(jq -r '.endLedgerIndex' .local/t3-history/history/publication.json)"
+          TARGET_HASH="$(jq -r '.endLedgerHash' .local/t3-history/history/publication.json)"
+          node .history-extension-plan-build/plan-history-extension.mjs \
+            --local \
+            --publication .local/t2-history/history/publication.json \
+            --target-ledger "${TARGET_LEDGER}" \
+            --target-ledger-hash "${TARGET_HASH}" \
+            --segment-ledgers 250 \
+            --checkpoint-every-segments 4 \
+            --output "${ROOT}/plan.json" \
+            > "${ROOT}/plan.stdout.json"
+          jq -e '.source.endLedgerIndex == 3541657 and .extension.ledgerCount > 0 and .extension.ledgerCount <= 1000' "${ROOT}/plan.json" > /dev/null
+
+      - name: Build optimized incremental T3 exact index
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=incremental-exact-index-linear-merge
+          SOURCE_REVISION="$(jq -r '.sourceRevision' .local/t3-history/history/index/exact/manifest.json)"
+          STARTED="$(date +%s%3N)"
+          node .incremental-history-exact-index-build/build-incremental-history-exact-index.mjs \
+            --local \
+            --publication .local/t3-history/history/publication.json \
+            --plan "${ROOT}/plan.json" \
+            --artifact-root .local/t3-history \
+            --base-index-dir .local/t2-history/history/index/exact \
+            --base-publication .local/t2-history/history/publication.json \
+            --output-dir "${ROOT}/incremental" \
+            --asset-prefix history/index/exact \
+            --source-revision "${SOURCE_REVISION}" \
+            > "${ROOT}/incremental.stdout.json"
+          echo $(( $(date +%s%3N) - STARTED )) > "${ROOT}/incremental-elapsed-ms.txt"
+
+      - name: Require byte-identical full and incremental indexes
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=incremental-exact-index-linear-merge
+          (cd .local/t3-history/history/index/exact && find . -type f -print0 | sort -z | xargs -0 sha256sum) > "${ROOT}/full-sha256.txt"
+          (cd "${ROOT}/incremental" && find . -type f -print0 | sort -z | xargs -0 sha256sum) > "${ROOT}/incremental-sha256.txt"
+          diff -u "${ROOT}/full-sha256.txt" "${ROOT}/incremental-sha256.txt"
+          jq -n \
+            --slurpfile plan "${ROOT}/plan.json" \
+            --slurpfile incremental "${ROOT}/incremental.stdout.json" \
+            --argjson incrementalElapsedMs "$(cat "${ROOT}/incremental-elapsed-ms.txt")" '
+            {
+              passed: true,
+              sourceLedgerIndex: $plan[0].source.endLedgerIndex,
+              targetLedgerIndex: $plan[0].target.ledgerIndex,
+              deltaLedgerCount: $plan[0].extension.ledgerCount,
+              mergeStrategy: $incremental[0].mergeStrategy,
+              baseRecords: $incremental[0].baseRecords,
+              addedRecords: $incremental[0].addedRecords,
+              totalRecords: $incremental[0].totalRecords,
+              incrementalElapsedMs: $incrementalElapsedMs,
+              byteIdentical: true
+            }' > "${ROOT}/evidence.json"
+          jq -e '.passed == true and .mergeStrategy == "sorted-linear-merge" and .byteIdentical == true' "${ROOT}/evidence.json" > /dev/null
+
+      - name: Upload retained linear-merge evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: incremental-exact-index-linear-merge-rehearsal
+          path: incremental-exact-index-linear-merge
+          if-no-files-found: error
+          retention-days: 30
