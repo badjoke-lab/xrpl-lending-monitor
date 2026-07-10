@@ -111,3 +111,5 @@ jobs:
           git add scripts/build-rolling-current-state-read-model.ts
           git commit -m 'perf: batch rolling output writes within bounded groups'
           git push origin HEAD:${GITHUB_HEAD_REF}
+
+# retrigger
