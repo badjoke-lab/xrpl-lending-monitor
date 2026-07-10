@@ -1,0 +1,214 @@
+name: Rolling checkpoint candidate evidence recovery
+
+on:
+  workflow_dispatch:
+    inputs:
+      history_candidate_branch:
+        description: Published history candidate branch to recover evidence for
+        required: true
+        default: history-rolling-next-candidate-data
+        type: string
+      current_state_candidate_branch:
+        description: Published current-state candidate branch to recover evidence for
+        required: true
+        default: current-state-rolling-next-candidate-data
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: rolling-checkpoint-candidate-evidence-recovery-${{ inputs.history_candidate_branch }}-${{ inputs.current_state_candidate_branch }}
+  cancel-in-progress: false
+
+env:
+  HISTORY_CANDIDATE_BRANCH: ${{ inputs.history_candidate_branch }}
+  CURRENT_STATE_CANDIDATE_BRANCH: ${{ inputs.current_state_candidate_branch }}
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Validate workflow inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          git check-ref-format --branch "${HISTORY_CANDIDATE_BRANCH}" > /dev/null
+          git check-ref-format --branch "${CURRENT_STATE_CANDIDATE_BRANCH}" > /dev/null
+          test "${HISTORY_CANDIDATE_BRANCH}" != "${CURRENT_STATE_CANDIDATE_BRANCH}"
+
+      - name: Check out implementation
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Check out published history candidate metadata
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.history_candidate_branch }}
+          path: .local/history-candidate
+          sparse-checkout: |
+            history-channel.json
+            history/publication.json
+            history/index/exact/manifest.json
+          sparse-checkout-cone-mode: false
+
+      - name: Check out published current-state candidate metadata
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.current_state_candidate_branch }}
+          path: .local/current-candidate
+          sparse-checkout: |
+            channel.json
+            rolling-read-model-summary.json
+            read-model/manifest.json
+          sparse-checkout-cone-mode: false
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build remote candidate rehearsal tool
+        run: pnpm build:candidate-source-rehearsal
+
+      - name: Bind exact candidate branch heads
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=rolling-checkpoint-candidate-evidence-recovery
+          mkdir -p "${ROOT}"
+
+          HISTORY_SHA="$(git ls-remote origin "refs/heads/${HISTORY_CANDIDATE_BRANCH}" | awk '{print $1}')"
+          CURRENT_SHA="$(git ls-remote origin "refs/heads/${CURRENT_STATE_CANDIDATE_BRANCH}" | awk '{print $1}')"
+          printf '%s' "${HISTORY_SHA}" | grep -Eq '^[a-f0-9]{40}$'
+          printf '%s' "${CURRENT_SHA}" | grep -Eq '^[a-f0-9]{40}$'
+
+          test "$(git -C .local/history-candidate rev-parse HEAD)" = "${HISTORY_SHA}"
+          test "$(git -C .local/current-candidate rev-parse HEAD)" = "${CURRENT_SHA}"
+
+          printf '%s\n' "${HISTORY_SHA}" > "${ROOT}/history-commit-sha.txt"
+          printf '%s\n' "${CURRENT_SHA}" > "${ROOT}/current-state-commit-sha.txt"
+
+      - name: Rehearse exact remote candidate pair
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=rolling-checkpoint-candidate-evidence-recovery
+          node .candidate-source-rehearsal-build/rehearse-candidate-sources.mjs \
+            --local \
+            --repository badjoke-lab/xrpl-lending-monitor \
+            --history-branch "${HISTORY_CANDIDATE_BRANCH}" \
+            --current-state-branch "${CURRENT_STATE_CANDIDATE_BRANCH}" \
+            > "${ROOT}/remote-rehearsal-summary.json"
+
+          jq -e '.passed == true and (.exactReads | length) == 3 and .recentHistory.items == 1' \
+            "${ROOT}/remote-rehearsal-summary.json" > /dev/null
+
+      - name: Verify published candidate identity alignment
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=rolling-checkpoint-candidate-evidence-recovery
+          PUBLICATION=.local/history-candidate/history/publication.json
+          EXACT=.local/history-candidate/history/index/exact/manifest.json
+          CURRENT_SUMMARY=.local/current-candidate/rolling-read-model-summary.json
+          CURRENT_MANIFEST=.local/current-candidate/read-model/manifest.json
+          CURRENT_CHANNEL=.local/current-candidate/channel.json
+          REMOTE="${ROOT}/remote-rehearsal-summary.json"
+
+          TARGET_LEDGER="$(jq -r '.endLedgerIndex' "${PUBLICATION}")"
+          TARGET_HASH="$(jq -r '.endLedgerHash' "${PUBLICATION}")"
+          PUBLICATION_SHA="$(jq -r '.publicationSha256' "${PUBLICATION}")"
+          SNAPSHOT_ID="$(jq -r '.target.snapshotId' "${CURRENT_SUMMARY}")"
+          MANIFEST_SHA="$(jq -r '.target.manifestSha256' "${CURRENT_SUMMARY}")"
+
+          jq -e --argjson ledger "${TARGET_LEDGER}" --arg hash "${TARGET_HASH}" \
+            '.complete == true and .endLedgerIndex == $ledger and .endLedgerHash == $hash' \
+            "${PUBLICATION}" > /dev/null
+
+          jq -e --arg publication "${PUBLICATION_SHA}" \
+            '.publicationSha256 == $publication and .bucketCount == 256 and .totalRecords > 0' \
+            "${EXACT}" > /dev/null
+
+          jq -e --argjson ledger "${TARGET_LEDGER}" --arg hash "${TARGET_HASH}" --arg snapshot "${SNAPSHOT_ID}" --arg manifest "${MANIFEST_SHA}" '
+            .target.ledgerIndex == $ledger
+            and .target.ledgerHash == $hash
+            and .target.snapshotId == $snapshot
+            and .target.manifestSha256 == $manifest
+            and .rollingBase.segmentCount == 64
+          ' "${CURRENT_SUMMARY}" > /dev/null
+
+          jq -e --argjson ledger "${TARGET_LEDGER}" --arg hash "${TARGET_HASH}" --arg snapshot "${SNAPSHOT_ID}" --arg manifest "${MANIFEST_SHA}" '
+            .complete == true
+            and .ledgerIndex == $ledger
+            and .ledgerHash == $hash
+            and .snapshotId == $snapshot
+            and .manifestSha256 == $manifest
+          ' "${CURRENT_MANIFEST}" > /dev/null
+
+          jq -e --arg snapshot "${SNAPSHOT_ID}" --arg manifest "${MANIFEST_SHA}" '
+            .active.snapshotId == $snapshot and .active.manifestSha256 == $manifest
+          ' "${CURRENT_CHANNEL}" > /dev/null
+
+          jq -e --argjson ledger "${TARGET_LEDGER}" --arg hash "${TARGET_HASH}" --arg manifest "${MANIFEST_SHA}" '
+            .passed == true
+            and .ledgerIndex == $ledger
+            and .ledgerHash == $hash
+            and .currentStateManifestSha256 == $manifest
+          ' "${REMOTE}" > /dev/null
+
+      - name: Build retained recovery evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=rolling-checkpoint-candidate-evidence-recovery
+          PUBLICATION=.local/history-candidate/history/publication.json
+          EXACT=.local/history-candidate/history/index/exact/manifest.json
+          CURRENT=.local/current-candidate/rolling-read-model-summary.json
+          REMOTE="${ROOT}/remote-rehearsal-summary.json"
+
+          jq -n \
+            --arg historyBranch "${HISTORY_CANDIDATE_BRANCH}" \
+            --arg currentStateBranch "${CURRENT_STATE_CANDIDATE_BRANCH}" \
+            --arg historyCommitSha "$(cat "${ROOT}/history-commit-sha.txt")" \
+            --arg currentStateCommitSha "$(cat "${ROOT}/current-state-commit-sha.txt")" \
+            --slurpfile publication "${PUBLICATION}" \
+            --slurpfile exact "${EXACT}" \
+            --slurpfile current "${CURRENT}" \
+            --slurpfile remote "${REMOTE}" '
+            {
+              passed:true,
+              recovery:true,
+              candidate:{historyBranch:$historyBranch,historyCommitSha:$historyCommitSha,currentStateBranch:$currentStateBranch,currentStateCommitSha:$currentStateCommitSha},
+              source:$current[0].source,
+              extension:$current[0].extension,
+              target:{chainId:$publication[0].chainId,publicationSha256:$publication[0].publicationSha256,segmentCount:$publication[0].segmentCount,ledgerCount:$publication[0].ledgerCount,ledgerIndex:$publication[0].endLedgerIndex,ledgerHash:$publication[0].endLedgerHash},
+              exactIndex:{manifestSha256:$exact[0].manifestSha256,totalRecords:$exact[0].totalRecords},
+              currentState:{target:$current[0].target,mutationStats:$current[0].mutationStats,rollingBase:$current[0].rollingBase},
+              remoteRehearsal:$remote[0]
+            }
+          ' > "${ROOT}/evidence.json"
+
+          jq -e '
+            .passed == true
+            and .recovery == true
+            and .target.ledgerIndex == .remoteRehearsal.ledgerIndex
+            and .target.ledgerHash == .remoteRehearsal.ledgerHash
+            and .currentState.target.ledgerIndex == .target.ledgerIndex
+            and .currentState.target.ledgerHash == .target.ledgerHash
+            and .currentState.rollingBase.segmentCount == 64
+            and .exactIndex.totalRecords > 0
+          ' "${ROOT}/evidence.json" > /dev/null
+
+      - name: Upload retained recovered candidate evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: rolling-checkpoint-candidate-evidence-recovery
+          path: rolling-checkpoint-candidate-evidence-recovery
+          if-no-files-found: error
+          retention-days: 30
