@@ -21,6 +21,7 @@ jobs:
       XRPL_WSS_PROBE_HTTP_ENDPOINT: 'https://s.devnet.rippletest.net:51234/'
       XRPL_WSS_PROBE_ENDPOINT: 'wss://s.devnet.rippletest.net:51233/'
       XRPL_WSS_PROBE_LEDGER_COUNT: '64'
+      XRPL_WSS_PROBE_READ_WINDOW: '4'
       XRPL_WSS_PROBE_TIMEOUT_MS: '15000'
       XRPL_WSS_PROBE_OUTPUT: 'artifacts/wss-probe/evidence.json'
     steps:
