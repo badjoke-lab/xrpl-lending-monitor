@@ -1,0 +1,214 @@
+name: T5 fixed-target extension rehearsal
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/t5-fixed-target-extension-rehearsal.yml'
+      - 'scripts/plan-history-extension.ts'
+      - 'src/shared/history-segments/extension-plan.ts'
+      - 'scripts/run-history-segment.ts'
+      - 'scripts/verify-history-segment-chain.ts'
+      - 'src/shared/history-segments/**'
+      - 'vite.history-extension-plan.config.ts'
+      - 'vite.history-segment.config.ts'
+      - 'vite.history-segment-chain.config.ts'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rehearse:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out implementation
+        uses: actions/checkout@v4
+
+      - name: Check out active history source metadata
+        uses: actions/checkout@v4
+        with:
+          ref: history-data
+          path: .local/history-source
+          sparse-checkout: |
+            history-channel.json
+            history/publication.json
+          sparse-checkout-cone-mode: false
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build fixed-target rehearsal tools
+        run: |
+          pnpm build:history-extension-plan
+          pnpm build:history-segment
+          pnpm build:history-segment-chain
+
+      - name: Verify active source binding
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p t5-fixed-target-rehearsal
+          CHANNEL=.local/history-source/history-channel.json
+          PUBLICATION=.local/history-source/history/publication.json
+          PUBLICATION_FILE_SHA="$(sha256sum "${PUBLICATION}" | awk '{print $1}')"
+          CHANNEL_FILE_SHA="$(jq -r '.active.publicationSha256' "${CHANNEL}")"
+
+          jq -n \
+            --arg publication_file_sha "${PUBLICATION_FILE_SHA}" \
+            --arg channel_file_sha "${CHANNEL_FILE_SHA}" \
+            --arg channel_path "$(jq -r '.active.publicationPath' "${CHANNEL}")" \
+            --arg channel_chain "$(jq -r '.active.chainId' "${CHANNEL}")" \
+            --arg publication_chain "$(jq -r '.chainId' "${PUBLICATION}")" \
+            --arg channel_epoch "$(jq -r '.active.epochId' "${CHANNEL}")" \
+            --arg publication_epoch "$(jq -r '.epochId' "${PUBLICATION}")" \
+            '{
+              publication_path: $channel_path,
+              channel_publication_file_sha256: $channel_file_sha,
+              observed_publication_file_sha256: $publication_file_sha,
+              channel_chain_id: $channel_chain,
+              publication_chain_id: $publication_chain,
+              channel_epoch_id: $channel_epoch,
+              publication_epoch_id: $publication_epoch
+            }' > t5-fixed-target-rehearsal/source-binding.json
+
+          jq -e \
+            --arg publication_file_sha "${PUBLICATION_FILE_SHA}" '
+            .active.publicationPath == "history/publication.json"
+            and .active.publicationSha256 == $publication_file_sha
+          ' "${CHANNEL}" > /dev/null
+
+          jq -e --slurpfile publication "${PUBLICATION}" '
+            .active.chainId == $publication[0].chainId
+            and .active.epochId == $publication[0].epochId
+          ' "${CHANNEL}" > /dev/null
+
+      - name: Capture fixed target and build frozen extension plan
+        shell: bash
+        run: |
+          set -euo pipefail
+          PUBLICATION=.local/history-source/history/publication.json
+          SOURCE_END="$(jq -r '.endLedgerIndex' "${PUBLICATION}")"
+          TARGET_LEDGER="$((SOURCE_END + 4))"
+          jq -n --argjson ledger_index "${TARGET_LEDGER}" '{
+            method: "ledger",
+            params: [{ledger_index: $ledger_index, transactions: false, expand: false}]
+          }' > t5-fixed-target-rehearsal/target-request.json
+
+          curl --fail-with-body --silent --show-error --retry 3 \
+            -H 'Content-Type: application/json' \
+            --data @t5-fixed-target-rehearsal/target-request.json \
+            https://devnet.honeycluster.io/ \
+            > t5-fixed-target-rehearsal/target-response.json
+
+          TARGET_HASH="$(jq -r '.result.ledger_hash // .result.ledger.ledger_hash // empty' t5-fixed-target-rehearsal/target-response.json)"
+          test "$(printf '%s' "${TARGET_HASH}" | wc -c)" -eq 64
+          printf '%s' "${TARGET_HASH}" | grep -Eq '^[A-F0-9]{64}$'
+
+          node .history-extension-plan-build/plan-history-extension.mjs \
+            --local \
+            --publication "${PUBLICATION}" \
+            --target-ledger "${TARGET_LEDGER}" \
+            --target-ledger-hash "${TARGET_HASH}" \
+            --segment-ledgers 4 \
+            --checkpoint-every-segments 1 \
+            --output t5-fixed-target-rehearsal/plan.json \
+            > t5-fixed-target-rehearsal/plan.stdout.json
+
+          jq -e '
+            .extension.segmentCount == 1
+            and .extension.ledgerCount == 4
+            and .extension.startLedgerIndex == (.source.endLedgerIndex + 1)
+            and .extension.endLedgerIndex == .target.ledgerIndex
+            and .extension.anchorPreviousSegmentEndHash == .source.endLedgerHash
+          ' t5-fixed-target-rehearsal/plan.json > /dev/null
+
+      - name: Generate extension segment strictly from frozen plan
+        shell: bash
+        run: |
+          set -euo pipefail
+          PLAN=t5-fixed-target-rehearsal/plan.json
+          START="$(jq -r '.extension.segments[0].startLedgerIndex' "${PLAN}")"
+          END="$(jq -r '.extension.segments[0].endLedgerIndex' "${PLAN}")"
+          SEGMENT_ID="$(jq -r '.extension.segments[0].segmentId' "${PLAN}")"
+          EPOCH_ID="$(jq -r '.epochId' "${PLAN}")"
+          PREVIOUS_ID="$(jq -r '.extension.anchorPreviousSegmentId' "${PLAN}")"
+          PREVIOUS_HASH="$(jq -r '.extension.anchorPreviousSegmentEndHash' "${PLAN}")"
+
+          node .history-segment-build/run-history-segment.mjs \
+            --local \
+            --endpoint https://devnet.honeycluster.io/ \
+            --timeout-ms 8000 \
+            --start-ledger "${START}" \
+            --end-ledger "${END}" \
+            --epoch-id "${EPOCH_ID}" \
+            --segment-id "${SEGMENT_ID}" \
+            --previous-segment-id "${PREVIOUS_ID}" \
+            --previous-segment-end-hash "${PREVIOUS_HASH}" \
+            --source-revision "${GITHUB_SHA}" \
+            --output-dir t5-fixed-target-rehearsal/segment \
+            > t5-fixed-target-rehearsal/segment.stdout.json
+
+          TARGET_HASH="$(jq -r '.target.ledgerHash' "${PLAN}")"
+          jq -e --arg target_hash "${TARGET_HASH}" \
+            '.endLedgerHash == $target_hash' \
+            t5-fixed-target-rehearsal/segment/manifest.json > /dev/null
+
+      - name: Verify extension chain against source terminal and fixed target
+        shell: bash
+        run: |
+          set -euo pipefail
+          PLAN=t5-fixed-target-rehearsal/plan.json
+          node .history-segment-chain-build/verify-history-segment-chain.mjs \
+            --local \
+            --manifest t5-fixed-target-rehearsal/segment/manifest.json \
+            --epoch-id "$(jq -r '.epochId' "${PLAN}")" \
+            --start-ledger "$(jq -r '.extension.startLedgerIndex' "${PLAN}")" \
+            --start-parent-hash "$(jq -r '.source.endLedgerHash' "${PLAN}")" \
+            --previous-segment-id "$(jq -r '.source.lastSegmentId' "${PLAN}")" \
+            --previous-segment-end-hash "$(jq -r '.source.endLedgerHash' "${PLAN}")" \
+            --end-ledger "$(jq -r '.target.ledgerIndex' "${PLAN}")" \
+            --end-ledger-hash "$(jq -r '.target.ledgerHash' "${PLAN}")" \
+            > t5-fixed-target-rehearsal/chain-summary.json
+
+          jq -n \
+            --slurpfile plan t5-fixed-target-rehearsal/plan.json \
+            --slurpfile manifest t5-fixed-target-rehearsal/segment/manifest.json \
+            --slurpfile chain t5-fixed-target-rehearsal/chain-summary.json \
+            '{
+              passed: true,
+              source: $plan[0].source,
+              target: $plan[0].target,
+              extension: {
+                startLedgerIndex: $plan[0].extension.startLedgerIndex,
+                endLedgerIndex: $plan[0].extension.endLedgerIndex,
+                ledgerCount: $plan[0].extension.ledgerCount,
+                segmentCount: $plan[0].extension.segmentCount
+              },
+              generatedSegment: {
+                segmentId: $manifest[0].segmentId,
+                startLedgerIndex: $manifest[0].startLedgerIndex,
+                endLedgerIndex: $manifest[0].endLedgerIndex,
+                endLedgerHash: $manifest[0].endLedgerHash,
+                previousSegmentId: $manifest[0].previousSegmentId,
+                previousSegmentEndHash: $manifest[0].previousSegmentEndHash
+              },
+              chain: $chain[0]
+            }' > t5-fixed-target-rehearsal/evidence.json
+
+      - name: Upload retained rehearsal evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: t5-fixed-target-extension-rehearsal
+          path: t5-fixed-target-rehearsal
+          if-no-files-found: error
