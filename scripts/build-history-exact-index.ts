@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 
 import { decodeGzipNdjsonWithMetadata } from '../src/shared/current-state/artifact-reader-codec'
@@ -231,6 +231,7 @@ async function main(): Promise<void> {
     }
   }
 
+  await rm(options.outputDir, { recursive: true, force: true })
   await mkdir(options.outputDir, { recursive: true })
   const assets: HistoryExactIndexManifest['assets'] = []
   let totalRecords = 0
