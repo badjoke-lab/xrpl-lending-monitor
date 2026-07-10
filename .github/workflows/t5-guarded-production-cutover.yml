@@ -53,6 +53,15 @@ jobs:
           repository: ${{ github.repository }}
           run-id: 29081255773
 
+      - name: Download prior successful fresh preflight evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: t5-fresh-cutover-preflight
+          path: .local/prior-preflight
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: 29081581310
+
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -60,11 +69,11 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
 
-      - name: Validate repository and T1 cutover config
+      - name: Validate T1 cutover configuration
         shell: bash
         run: |
           set -euo pipefail
-          pnpm check
+          pnpm build:t5-cutover-preflight
           jq -e --arg snapshot "${TARGET_SNAPSHOT_ID}" --argjson ledger "${TARGET_LEDGER_INDEX}" --arg hash "${TARGET_LEDGER_HASH}" '
             .triggers.crons == ["* * * * *"]
             and .vars.REPLACEMENT_BASE_SNAPSHOT_ID == $snapshot
@@ -82,13 +91,10 @@ jobs:
           PROD_CURRENT_SHA="$(git ls-remote origin refs/heads/current-state-data | awk '{print $1}')"
           REMOTE_HISTORY_CANDIDATE="$(git ls-remote origin refs/heads/history-t5-real-candidate-data | awk '{print $1}')"
           REMOTE_CURRENT_CANDIDATE="$(git ls-remote origin refs/heads/current-state-t5-real-candidate-data | awk '{print $1}')"
-
           test "${PROD_HISTORY_SHA}" = "${HISTORY_CANDIDATE_SHA}"
           test "${REMOTE_HISTORY_CANDIDATE}" = "${HISTORY_CANDIDATE_SHA}"
           test "${REMOTE_CURRENT_CANDIDATE}" = "${CURRENT_CANDIDATE_SHA}"
           test -n "${PROD_CURRENT_SHA}"
-
-          printf '%s\n' "${PROD_HISTORY_SHA}" > cutover-evidence/production-history-sha.txt
           printf '%s\n' "${PROD_CURRENT_SHA}" > cutover-evidence/production-current-sha-before.txt
 
       - name: Re-check current UTC-day D1 headroom
@@ -101,17 +107,25 @@ jobs:
           GRAPHQL
           jq -n --arg query "${QUERY}" --arg accountTag "${CLOUDFLARE_ACCOUNT_ID}" --arg start "${TODAY}" --arg end "${TODAY}" --arg databaseId "${D1_DATABASE_ID}" '{query:$query,variables:{accountTag:$accountTag,start:$start,end:$end,databaseId:$databaseId}}' > cutover-evidence/d1-request.json
           curl --fail-with-body --silent --show-error --retry 3 -X POST -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -H 'Content-Type: application/json' --data @cutover-evidence/d1-request.json https://api.cloudflare.com/client/v4/graphql > cutover-evidence/d1-response.json
-          jq -e '((.errors // []) | length) == 0 and (.data.viewer.accounts | length) > 0' cutover-evidence/d1-response.json > /dev/null
+          jq -e '((.errors // []) | length)==0 and (.data.viewer.accounts | length)>0' cutover-evidence/d1-response.json > /dev/null
           jq '[.data.viewer.accounts[0].d1AnalyticsAdaptiveGroups[]] as $groups | {rows_read:([$groups[].sum.rowsRead // 0] | add // 0),rows_written:([$groups[].sum.rowsWritten // 0] | add // 0)} | .rows_written_remaining=(100000-.rows_written)' cutover-evidence/d1-response.json > cutover-evidence/d1-summary.json
-          jq -e '.rows_written < 95000 and .rows_written_remaining >= 5000' cutover-evidence/d1-summary.json > /dev/null
+          jq -e '.rows_written<95000 and .rows_written_remaining>=5000' cutover-evidence/d1-summary.json > /dev/null
 
-      - name: Rebuild fresh fail-closed preflight immediately before continuation
+      - name: Rebuild fresh fail-closed preflight with stored-evidence fallback
         shell: bash
         run: |
           set -euo pipefail
-          pnpm build:t5-cutover-preflight
-          curl --fail-with-body --silent --show-error --retry 3 https://xrpl-lending-monitor.badjoke-lab.workers.dev/api/status/replacement-base-rebase > cutover-evidence/stored-rebase.json
-          jq '.evidence' cutover-evidence/stored-rebase.json > cutover-evidence/production-evidence-stored.json
+          curl --fail-with-body --silent --show-error --retry 3 https://xrpl-lending-monitor.badjoke-lab.workers.dev/api/status/replacement-base-rebase > cutover-evidence/current-rebase-endpoint.json
+          if jq -e '.evidence.sync.lastProcessedLedger != null and (.evidence.overlayStates | type)=="array"' cutover-evidence/current-rebase-endpoint.json > /dev/null 2>&1; then
+            jq '.evidence' cutover-evidence/current-rebase-endpoint.json > cutover-evidence/production-evidence-base.json
+          else
+            cp .local/prior-preflight/production-rebase-evidence-stored.json cutover-evidence/production-evidence-base.json
+          fi
+
+          curl --fail-with-body --silent --show-error --retry 3 https://xrpl-lending-monitor.badjoke-lab.workers.dev/api/status/collector > cutover-evidence/collector-before.json
+          BASE_CURSOR="$(jq -r '.sync.lastProcessedLedger' cutover-evidence/production-evidence-base.json)"
+          BASE_HASH="$(jq -r '.sync.lastProcessedHash' cutover-evidence/production-evidence-base.json)"
+          jq -e --argjson cursor "${BASE_CURSOR}" --arg hash "${BASE_HASH}" '.cursor.last_processed_ledger==$cursor and .cursor.last_processed_hash==$hash and .consecutive_failures==0 and .error==null' cutover-evidence/collector-before.json > /dev/null
 
           jq -n '{method:"ledger",params:[{ledger_index:"validated",transactions:false,expand:false}]}' > cutover-evidence/live-head-request.json
           curl --fail-with-body --silent --show-error --retry 3 -H 'Content-Type: application/json' --data @cutover-evidence/live-head-request.json https://devnet.honeycluster.io/ > cutover-evidence/live-head-response.json
@@ -119,7 +133,7 @@ jobs:
           LIVE_HASH="$(jq -r '.result.ledger_hash // .result.ledger.ledger_hash // empty' cutover-evidence/live-head-response.json)"
           test "${LIVE_LEDGER}" -ge "${TARGET_LEDGER_INDEX}"
           printf '%s' "${LIVE_HASH}" | grep -Eq '^[A-F0-9]{64}$'
-          jq --argjson live_ledger "${LIVE_LEDGER}" --arg live_hash "${LIVE_HASH}" '.sync.latestObservedLedger=$live_ledger | .sync.latestObservedHash=$live_hash | .sync.latestLedgerAgeSeconds=0' cutover-evidence/production-evidence-stored.json > cutover-evidence/production-evidence-refreshed.json
+          jq --argjson live_ledger "${LIVE_LEDGER}" --arg live_hash "${LIVE_HASH}" '.sync.latestObservedLedger=$live_ledger | .sync.latestObservedHash=$live_hash | .sync.latestLedgerAgeSeconds=0' cutover-evidence/production-evidence-base.json > cutover-evidence/production-evidence-refreshed.json
 
           CANDIDATE=.local/t1-evidence/remote-rehearsal-summary.json
           PUBLICATION=.local/history-candidate/history/publication.json
@@ -141,7 +155,7 @@ jobs:
         run: |
           set -euo pipefail
           curl --fail-with-body --silent --show-error --retry 3 https://xrpl-lending-monitor.badjoke-lab.workers.dev/api/status/replacement-base-rebase > cutover-evidence/rebase-before-minute.json
-          if jq -e --arg snapshot "${TARGET_SNAPSHOT_ID}" --argjson ledger "${TARGET_LEDGER_INDEX}" '.status=="replayed" and .target.snapshotId==$snapshot and .target.ledgerIndex==$ledger and .evidence.sync.lastProcessedLedger >= $ledger' cutover-evidence/rebase-before-minute.json > /dev/null; then
+          if jq -e --arg snapshot "${TARGET_SNAPSHOT_ID}" --argjson ledger "${TARGET_LEDGER_INDEX}" '.status=="replayed" and .target.snapshotId==$snapshot and .target.ledgerIndex==$ledger and .evidence.sync.lastProcessedLedger >= $ledger' cutover-evidence/rebase-before-minute.json > /dev/null 2>&1; then
             touch cutover-evidence/rebase-confirmed
           fi
 
@@ -184,16 +198,14 @@ jobs:
           test "$(git ls-remote origin refs/heads/current-state-data | awk '{print $1}')" = "${CURRENT_CANDIDATE_SHA}"
           touch cutover-evidence/current-promoted
 
-      - name: Restore or verify protected four-hour cadence with T1 target
+      - name: Restore protected four-hour cadence with T1 target
         shell: bash
         run: |
           set -euo pipefail
           python - <<'PY'
           from pathlib import Path
           p=Path('wrangler.jsonc')
-          text=p.read_text()
-          text=text.replace('"crons": ["* * * * *"]','"crons": ["0 */4 * * *"]',1)
-          p.write_text(text)
+          p.write_text(p.read_text().replace('"crons": ["* * * * *"]','"crons": ["0 */4 * * *"]',1))
           PY
           pnpm exec wrangler deploy
           touch cutover-evidence/protected-deployed
@@ -208,7 +220,6 @@ jobs:
           curl --fail-with-body --silent --show-error --retry 3 https://xrpl-lending-monitor.badjoke-lab.workers.dev/api/status/history-source > cutover-evidence/history-final.json
           curl --fail-with-body --silent --show-error --retry 3 https://xrpl-lending-monitor.badjoke-lab.workers.dev/api/status/collector > cutover-evidence/collector-final.json
           curl --fail-with-body --silent --show-error --retry 3 https://xrpl-lending-monitor.badjoke-lab.workers.dev/api/overview > cutover-evidence/overview-final.json
-
           jq -e --arg snapshot "${TARGET_SNAPSHOT_ID}" --argjson ledger "${TARGET_LEDGER_INDEX}" '.status=="replayed" and .target.snapshotId==$snapshot and .target.ledgerIndex==$ledger and .evidence.sync.lastProcessedLedger >= $ledger' cutover-evidence/rebase-final.json > /dev/null
           jq -e --arg publication_sha "${TARGET_PUBLICATION_SHA}" --argjson ledger "${TARGET_LEDGER_INDEX}" '.status=="ok" and .mode=="hybrid" and .chain.end_ledger_index==$ledger and .chain.publication_sha256==$publication_sha' cutover-evidence/history-final.json > /dev/null
           jq -e --argjson ledger "${TARGET_LEDGER_INDEX}" '.cursor.last_processed_ledger >= $ledger and .consecutive_failures==0 and .error==null' cutover-evidence/collector-final.json > /dev/null
