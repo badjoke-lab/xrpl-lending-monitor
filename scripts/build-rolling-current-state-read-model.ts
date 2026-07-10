@@ -1,4 +1,4 @@
-import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { gunzipSync } from 'node:zlib'
 import { DatabaseSync } from 'node:sqlite'
@@ -8,7 +8,6 @@ import {
   parseRollingCurrentStateBaseManifest,
   rollingBaseManifestDigest,
   rollingBaseSegmentForId,
-  type RollingBaseKind,
   type RollingCurrentStateBaseManifest,
 } from '../src/shared/current-state/rolling-base'
 import {
