@@ -1,6 +1,6 @@
 # Implementation status
 
-Last updated: 2026-07-09.
+Last updated: 2026-07-10.
 
 ## Current phase
 
@@ -10,7 +10,7 @@ M1 exit is complete. M5-5 real-data integration remains active. M6 remains gated
 
 The retained M5-5 API-level production cross-audit evidence from `2026-07-08 00:52:38 UTC` remains passing. The remaining M5-5 exit requirement is production-shaped browser evidence plus the fail-closed browser exit evaluator.
 
-## Active recovery — five-minute scheduled collector tuning
+## Active recovery — Cloudflare Free collector throughput
 
 Cloudflare production Observability on `2026-07-09` showed repeated scheduled collector events with `cron=* * * * *` and `outcome=exceededCpu`. The first GitHub catch-up runtime monitor rerun after the UTC-day reset showed D1 usage had recovered, but collector cursor still did not advance.
 
@@ -31,7 +31,33 @@ PR #297 raised the five-minute profile to 16 ledgers/run. The retained runtime m
 
 PR #298 raised the five-minute profile to 32 ledgers/run. The retained runtime monitor artifact created at `2026-07-09T08:08:50Z` passed, but still showed `cursor_delta=64`, `head_delta=175`, and `lag_delta=+111`, with D1 rows read at `3,479,262 / 5,000,000`.
 
-Therefore 32 ledgers/run is still below observed Devnet head growth, and same-day D1 usage is too high for further safe probing. The next prepared unit is a 64-ledger/run free-tier limit test after UTC daily D1 reset. This is a measurement unit, not a final health claim.
+PR #299 then tested 64 ledgers/run after the UTC daily reset. Runtime monitor run `29060806372` failed in both lightweight and deep diagnostics. The first lightweight artifact recorded:
+
+- `cursor_delta=0`;
+- `head_delta=175`;
+- `lag_delta=+175`;
+- `samples_with_failures=3`;
+- three consecutive collector samples with `Too many subrequests by single Worker invocation`.
+
+The cursor remained at ledger `3501250` while observed head advanced from `3531143` to `3531318`. This was a per-invocation subrequest failure, not a CPU exhaustion result.
+
+PR #301 immediately restored the last retained passing five-minute 32-ledger/run profile. CI and Release-native CI passed before merge.
+
+The rerun of runtime monitor run `29060806372` then passed both `deep-diagnostics` and `lightweight-monitor`. The retained rerun lightweight artifact recorded:
+
+- first cursor/head/lag: `3501282 / 3532832 / 31550`;
+- last cursor/head/lag: `3501346 / 3533007 / 31661`;
+- `cursor_delta=64`;
+- `head_delta=175`;
+- `lag_delta=+111`;
+- `samples=3`;
+- `samples_with_failures=0`;
+- `ledgers_processed=32` and `rpc_requests=32` in the first and last samples;
+- run duration approximately `6.8s` in the first and last samples;
+- D1 rows read at capture: `2,429,539 / 5,000,000`;
+- D1 rows written at capture: `404 / 100,000`.
+
+Therefore the collector is recovered but remains materially behind. The 32-ledger HTTP profile is the temporary production safety baseline, not a catch-up-grade capacity solution. Configuration-only HTTP increases above this baseline are blocked. The active design direction is documented in `docs/ops/free-tier-collector-throughput-design-2026-07-10.md`.
 
 ## Latest retained runtime evidence
 
@@ -86,17 +112,19 @@ Explorer v1 is a bounded presentation layer over approved contracts. It must not
 
 ## Active unit
 
-The active implementation unit is preparing a 64-ledger/run five-minute free-tier collector limit test for after UTC daily D1 reset.
+The active implementation unit is T1 from `docs/ops/free-tier-collector-throughput-design-2026-07-10.md`: add a tested XRPL WebSocket ledger-transport seam without changing production behavior.
 
-1. Preserve five-minute cadence.
-2. Stage the 64-ledger/run profile in draft.
-3. Do not merge or run the monitor again before UTC daily D1 reset unless production safety requires rollback.
-4. After UTC reset and a short counter-settlement buffer, merge/deploy the 64 profile.
-5. Wait for Cloudflare deployment and at least two scheduled cron windows.
-6. Run the catch-up runtime monitor once.
-7. Accept the test only if cursor advances without failures, D1 headroom remains safe, and lag growth is reduced or reversed.
+The unit boundary is:
 
-Track A — M5-5 browser evidence — remains blocked until collector tuning evidence is captured. Track B — production UI audit — also remains gated by measured current-day headroom and collector health.
+1. Keep production cron at five-minute cadence and keep the 32-ledger HTTP rollback profile unchanged.
+2. Add a collector-cycle-scoped WebSocket ledger session behind the existing ledger reader boundary.
+3. Parse WebSocket responses into the existing `ValidatedLedgerRead` contract.
+4. Preserve exact requested-ledger checks, parent-hash continuity, budget selection, guarded D1 commit, and cursor atomicity.
+5. Add deterministic request-correlation, timeout, malformed-response, close/error, continuity, and no-partial-commit tests.
+6. Keep production wiring disabled until a non-production Devnet WSS probe passes.
+7. After the probe, run a production 32-ledger transport canary before any 64-ledger WebSocket throughput test.
+
+Track A — M5-5 browser evidence — remains blocked until collector capacity and freshness are adequate for valid production-shaped evidence. Track B — production UI audit — also remains gated by measured current-day headroom and collector health.
 
 Neither track may weaken collector integrity, D1 resource gates, or browser exit criteria.
 
@@ -112,19 +140,21 @@ M6-I1 may begin only after M5-5 exits and after issue #283, the fixture catalog,
 
 ## Next order
 
-1. Keep the 64-ledger/run draft PR staged until UTC daily D1 reset.
-2. After UTC reset plus a short buffer, merge/deploy the 64-ledger/run test profile.
-3. Confirm collector cursor advancement, zero failures, D1 headroom, and lag behavior with one retained catch-up runtime monitor artifact.
-4. If 64 still underperforms, decide whether to test 96 after a later reset or record that Cloudflare Worker Free cannot provide catch-up-grade near-real-time operation.
-5. Run or rerun M5-5 browser regression only after collector preflight and D1 headroom gates pass.
-6. Inspect `summary.json`, `summary.md`, `runner.log`, `exit-evaluation.json`, `exit-evaluation.md`, collector preflight, and D1 headroom evidence.
-7. Reconcile M5-5 exit only when retained API and browser evidence both satisfy their gates.
-8. After M5-5 exits, begin M6-I1 using `docs/m6-integrity-reset-plan.md`, `docs/m6-i1-fixture-catalog.md`, and issue #283 after inventorying existing helpers.
+1. Implement T1 WebSocket transport seam and deterministic tests without changing production configuration.
+2. Run the bounded non-production Devnet WSS probe and retain connection, logical-message, wall-time, response, and continuity evidence.
+3. Only after the probe passes, run a production 32-ledger WebSocket transport canary.
+4. Only after the canary passes, test a 64-ledger WebSocket profile with one retained runtime monitor artifact.
+5. Select any higher capacity target from measured head slope, transport wall time, CPU outcome, D1 usage, and retained runtime evidence rather than configuration arithmetic alone.
+6. Run or rerun M5-5 browser regression only after collector preflight and D1 headroom gates pass and the collector is sufficiently current for production-shaped evidence.
+7. Inspect `summary.json`, `summary.md`, `runner.log`, `exit-evaluation.json`, `exit-evaluation.md`, collector preflight, and D1 headroom evidence.
+8. Reconcile M5-5 exit only when retained API and browser evidence both satisfy their gates.
+9. After M5-5 exits, begin M6-I1 using `docs/m6-integrity-reset-plan.md`, `docs/m6-i1-fixture-catalog.md`, and issue #283 after inventorying existing helpers.
 
 ## Remaining blockers
 
-- Production scheduled collector is advancing without failures, but retained evidence still shows growing lag at the 32-ledger/run five-minute profile.
-- Same-day D1 read usage is too high for additional safe probing before UTC daily reset.
+- The production collector is recovered at the five-minute 32-ledger HTTP profile, but retained evidence still shows growing lag and no catch-up-grade capacity.
+- The 64-ledger HTTP profile is rejected because it exceeds the Worker per-invocation subrequest limit and stops cursor advancement.
+- A tested lower-subrequest transport path does not yet exist; T1 WebSocket transport work is the active unit.
 - M5-5 API cross-audit evidence is passing, but real-data browser regression and representative browser production behavior evidence remain pending before M5-5 exit.
 - The independent production UI audit remains separately gated by measured current-day headroom and collector health.
 - M6 plans and M6-I1 fixture catalog are prepared, but M6 execution remains blocked until M5-5 exit.
