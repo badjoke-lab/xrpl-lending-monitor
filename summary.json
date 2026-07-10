@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "mode": "read-only-shadow-22h-aggregate",
+  "sampleCount": 1,
+  "firstSampledAt": "2026-07-10T23:49:10.520Z",
+  "lastSampledAt": "2026-07-10T23:49:10.520Z",
+  "coverage": {
+    "firstRequestedStartLedger": 3555393,
+    "lastEndLedger": 3555482,
+    "lastValidatedLedger": 3555482
+  },
+  "cadence": {
+    "targetSeconds": 300,
+    "averageObservedGapSeconds": null,
+    "maxObservedGapSeconds": null,
+    "minObservedGapSeconds": null,
+    "completeToHeadRate": 1
+  },
+  "totals": {
+    "ledgersRead": 90,
+    "inspectedTransactions": 1186,
+    "lendingTransactions": 92,
+    "successfulLendingTransactions": 85,
+    "affectedObjectTouches": 54,
+    "minimalProjectionWriteLowerBound": 141,
+    "elapsedMs": 3589,
+    "completeToHeadSamples": 1,
+    "maxBacklogBefore": 90
+  },
+  "averagesPerSample": {
+    "ledgersRead": 90,
+    "lendingTransactions": 92,
+    "affectedObjectTouches": 54,
+    "minimalProjectionWriteLowerBound": 141,
+    "elapsedMs": 3589
+  }
+}
