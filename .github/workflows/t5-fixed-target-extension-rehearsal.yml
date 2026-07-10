@@ -7,11 +7,14 @@ on:
     paths:
       - '.github/workflows/t5-fixed-target-extension-rehearsal.yml'
       - 'scripts/plan-history-extension.ts'
+      - 'scripts/verify-history-extension-artifacts.ts'
       - 'src/shared/history-segments/extension-plan.ts'
+      - 'src/shared/history-segments/extension-artifacts.ts'
       - 'scripts/run-history-segment.ts'
       - 'scripts/verify-history-segment-chain.ts'
       - 'src/shared/history-segments/**'
       - 'vite.history-extension-plan.config.ts'
+      - 'vite.history-extension-artifacts.config.ts'
       - 'vite.history-segment.config.ts'
       - 'vite.history-segment-chain.config.ts'
       - 'package.json'
@@ -50,6 +53,7 @@ jobs:
       - name: Build fixed-target rehearsal tools
         run: |
           pnpm build:history-extension-plan
+          pnpm build:history-extension-artifacts
           pnpm build:history-segment
           pnpm build:history-segment-chain
 
@@ -163,6 +167,16 @@ jobs:
             '.endLedgerHash == $target_hash' \
             t5-fixed-target-rehearsal/segment/manifest.json > /dev/null
 
+      - name: Verify artifacts against frozen plan
+        shell: bash
+        run: |
+          set -euo pipefail
+          node .history-extension-artifacts-build/verify-history-extension-artifacts.mjs \
+            --local \
+            --plan t5-fixed-target-rehearsal/plan.json \
+            --manifest t5-fixed-target-rehearsal/segment/manifest.json \
+            > t5-fixed-target-rehearsal/plan-bound-artifact-summary.json
+
       - name: Verify extension chain against source terminal and fixed target
         shell: bash
         run: |
@@ -183,6 +197,7 @@ jobs:
           jq -n \
             --slurpfile plan t5-fixed-target-rehearsal/plan.json \
             --slurpfile manifest t5-fixed-target-rehearsal/segment/manifest.json \
+            --slurpfile planBound t5-fixed-target-rehearsal/plan-bound-artifact-summary.json \
             --slurpfile chain t5-fixed-target-rehearsal/chain-summary.json \
             '{
               passed: true,
@@ -202,6 +217,7 @@ jobs:
                 previousSegmentId: $manifest[0].previousSegmentId,
                 previousSegmentEndHash: $manifest[0].previousSegmentEndHash
               },
+              planBoundArtifacts: $planBound[0],
               chain: $chain[0]
             }' > t5-fixed-target-rehearsal/evidence.json
 
