@@ -20,6 +20,7 @@ import {
 interface Arguments {
   endpoint: string
   timeoutMs: number
+  readWindowSize: number
   startLedger: number
   endLedger: number
   epochId: string
@@ -33,6 +34,7 @@ interface Arguments {
 const DEFAULT_ENDPOINT = 'https://devnet.honeycluster.io/'
 const RIPPLE_EPOCH_UNIX_SECONDS = 946_684_800
 const MAX_REHEARSAL_LEDGERS = 500
+const MAX_READ_WINDOW_SIZE = 16
 
 function argumentValue(args: readonly string[], name: string): string | null {
   const index = args.indexOf(name)
@@ -79,6 +81,10 @@ function parseArguments(args: readonly string[]): Arguments {
   if (endLedger - startLedger + 1 > MAX_REHEARSAL_LEDGERS) {
     throw new Error(`A rehearsal segment may contain at most ${MAX_REHEARSAL_LEDGERS} ledgers`)
   }
+  const readWindowSize = positiveInteger(args, '--read-window-size', 1)
+  if (readWindowSize > MAX_READ_WINDOW_SIZE) {
+    throw new Error(`--read-window-size may be at most ${MAX_READ_WINDOW_SIZE}`)
+  }
   const epochId = flatText(requiredArgument(args, '--epoch-id'), 'epochId')
   const segmentId = flatText(
     argumentValue(args, '--segment-id') ?? `${epochId}-${startLedger}-${endLedger}`,
@@ -95,6 +101,7 @@ function parseArguments(args: readonly string[]): Arguments {
   return {
     endpoint: argumentValue(args, '--endpoint') ?? DEFAULT_ENDPOINT,
     timeoutMs: positiveInteger(args, '--timeout-ms', 8_000),
+    readWindowSize,
     startLedger,
     endLedger,
     epochId,
@@ -147,6 +154,7 @@ async function main(): Promise<void> {
     latestValidatedLedger: options.endLedger,
     maxLedgers: options.endLedger - options.startLedger + 1,
     expectedPreviousHash: options.previousSegmentEndHash,
+    readWindowSize: options.readWindowSize,
   })
   if (!scan.completeToLatest || scan.endLedgerIndex !== options.endLedger) {
     throw new Error('History segment scan did not complete the requested fixed range')
