@@ -1,0 +1,167 @@
+name: Incremental exact-index equivalence
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/incremental-exact-index-equivalence.yml'
+      - 'scripts/build-incremental-history-exact-index.ts'
+      - 'src/shared/history-segments/exact-index-entries.ts'
+      - 'vite.incremental-history-exact-index.config.ts'
+      - 'package.json'
+
+permissions:
+  contents: read
+
+jobs:
+  equivalence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Check out implementation
+        uses: actions/checkout@v4
+
+      - name: Check out active T1 history and exact index
+        uses: actions/checkout@v4
+        with:
+          ref: history-data
+          path: .local/history-root
+          sparse-checkout: history
+          sparse-checkout-cone-mode: true
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build exact-index equivalence tools
+        run: |
+          pnpm build:history-extension-plan
+          pnpm build:history-segment
+          pnpm build:history-segment-checkpoint
+          pnpm build:history-extension-artifacts
+          pnpm build:history-segment-chain
+          pnpm build:extended-history-publication
+          pnpm build:history-exact-index
+          pnpm build:incremental-history-exact-index
+
+      - name: Preserve T1 publication and exact index base
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=incremental-exact-index-equivalence
+          mkdir -p "${ROOT}" .local/base-index
+          cp .local/history-root/history/publication.json "${ROOT}/base-publication.json"
+          cp -R .local/history-root/history/index/exact/. .local/base-index/
+          jq -e '.endLedgerIndex == 3539657 and .publicationSha256 == "71b5766984f7529a7691aa3851470c7706e2087ab03e2c6da30503df9109f8cd"' "${ROOT}/base-publication.json" > /dev/null
+
+      - name: Freeze T1-plus-8 target and build extension plan
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=incremental-exact-index-equivalence
+          SOURCE="${ROOT}/base-publication.json"
+          SOURCE_END="$(jq -r '.endLedgerIndex' "${SOURCE}")"
+          TARGET="$((SOURCE_END + 8))"
+          jq -n --argjson ledger_index "${TARGET}" '{method:"ledger",params:[{ledger_index:$ledger_index,transactions:false,expand:false}]}' > "${ROOT}/target-request.json"
+          curl --fail-with-body --silent --show-error --retry 3 -H 'Content-Type: application/json' --data @"${ROOT}/target-request.json" https://devnet.honeycluster.io/ > "${ROOT}/target-response.json"
+          TARGET_HASH="$(jq -r '.result.ledger_hash // .result.ledger.ledger_hash // empty' "${ROOT}/target-response.json")"
+          printf '%s' "${TARGET_HASH}" | grep -Eq '^[A-F0-9]{64}$'
+          node .history-extension-plan-build/plan-history-extension.mjs --local --publication "${SOURCE}" --target-ledger "${TARGET}" --target-ledger-hash "${TARGET_HASH}" --segment-ledgers 4 --checkpoint-every-segments 2 --output "${ROOT}/plan.json" > "${ROOT}/plan.stdout.json"
+          jq -e '.extension.ledgerCount == 8 and .extension.segmentCount == 2' "${ROOT}/plan.json" > /dev/null
+
+      - name: Generate and checkpoint two extension segments
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=incremental-exact-index-equivalence
+          PLAN="${ROOT}/plan.json"
+          EPOCH="$(jq -r '.epochId' "${PLAN}")"
+          RANGE_START="$(jq -r '.extension.startLedgerIndex' "${PLAN}")"
+          RANGE_END="$(jq -r '.extension.endLedgerIndex' "${PLAN}")"
+          ANCHOR_ID="$(jq -r '.extension.anchorPreviousSegmentId' "${PLAN}")"
+          ANCHOR_HASH="$(jq -r '.extension.anchorPreviousSegmentEndHash' "${PLAN}")"
+          CHECKPOINT="${ROOT}/checkpoint.json"
+          PREV_ID="${ANCHOR_ID}"
+          PREV_HASH="${ANCHOR_HASH}"
+          : > "${ROOT}/manifest-paths.txt"
+
+          while IFS= read -r SEGMENT; do
+            ORDINAL="$(jq -r '.ordinal' <<<"${SEGMENT}")"
+            SEGMENT_ID="$(jq -r '.segmentId' <<<"${SEGMENT}")"
+            START="$(jq -r '.startLedgerIndex' <<<"${SEGMENT}")"
+            END="$(jq -r '.endLedgerIndex' <<<"${SEGMENT}")"
+            OUT=".local/history-root/history/${EPOCH}/${SEGMENT_ID}"
+            PASSED=false
+            for ATTEMPT in 1 2 3; do
+              if node .history-segment-build/run-history-segment.mjs --local --endpoint https://devnet.honeycluster.io/ --timeout-ms 12000 --start-ledger "${START}" --end-ledger "${END}" --epoch-id "${EPOCH}" --segment-id "${SEGMENT_ID}" --previous-segment-id "${PREV_ID}" --previous-segment-end-hash "${PREV_HASH}" --source-revision "${GITHUB_SHA}" --output-dir "${OUT}" > "${ROOT}/segment-${ORDINAL}.stdout.json"; then PASSED=true; break; fi
+              sleep $((ATTEMPT * 5))
+            done
+            test "${PASSED}" = true
+            node .history-segment-checkpoint-build/update-history-segment-checkpoint.mjs --local --checkpoint "${CHECKPOINT}" --manifest "${OUT}/manifest.json" --epoch-id "${EPOCH}" --range-start-ledger "${RANGE_START}" --range-end-ledger "${RANGE_END}" --previous-segment-id "${ANCHOR_ID}" --previous-segment-end-hash "${ANCHOR_HASH}" > "${ROOT}/checkpoint-${ORDINAL}.stdout.json"
+            printf '%s\n' "${OUT}/manifest.json" >> "${ROOT}/manifest-paths.txt"
+            PREV_ID="${SEGMENT_ID}"
+            PREV_HASH="$(jq -r '.endLedgerHash' "${OUT}/manifest.json")"
+          done < <(jq -c '.extension.segments[]' "${PLAN}")
+
+          jq -e --argjson end "${RANGE_END}" '.nextLedgerIndex == ($end + 1) and (.completedSegments | length) == 2' "${CHECKPOINT}" > /dev/null
+
+      - name: Verify extension and build target publication
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=incremental-exact-index-equivalence
+          PLAN="${ROOT}/plan.json"
+          MANIFEST_ARGS=()
+          while IFS= read -r MANIFEST; do MANIFEST_ARGS+=(--manifest "${MANIFEST}"); done < "${ROOT}/manifest-paths.txt"
+          node .history-extension-artifacts-build/verify-history-extension-artifacts.mjs --local --plan "${PLAN}" "${MANIFEST_ARGS[@]}" > "${ROOT}/plan-bound-summary.json"
+          node .history-segment-chain-build/verify-history-segment-chain.mjs --local "${MANIFEST_ARGS[@]}" --epoch-id "$(jq -r '.epochId' "${PLAN}")" --start-ledger "$(jq -r '.extension.startLedgerIndex' "${PLAN}")" --start-parent-hash "$(jq -r '.source.endLedgerHash' "${PLAN}")" --previous-segment-id "$(jq -r '.source.lastSegmentId' "${PLAN}")" --previous-segment-end-hash "$(jq -r '.source.endLedgerHash' "${PLAN}")" --end-ledger "$(jq -r '.target.ledgerIndex' "${PLAN}")" --end-ledger-hash "$(jq -r '.target.ledgerHash' "${PLAN}")" > "${ROOT}/chain-summary.json"
+          TARGET="$(jq -r '.target.ledgerIndex' "${PLAN}")"
+          node .extended-history-publication-build/build-extended-history-publication.mjs --local --source-publication "${ROOT}/base-publication.json" --plan "${PLAN}" "${MANIFEST_ARGS[@]}" --chain-id "canonical-devnet-3371676-${TARGET}" --source-revision "${GITHUB_SHA}" --output "${ROOT}/target-publication.json" > "${ROOT}/publication.stdout.json"
+          cp "${ROOT}/target-publication.json" .local/history-root/history/publication.json
+
+      - name: Build incremental target exact index
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=incremental-exact-index-equivalence
+          STARTED="$(date +%s)"
+          node .incremental-history-exact-index-build/build-incremental-history-exact-index.mjs --local --publication "${ROOT}/target-publication.json" --plan "${ROOT}/plan.json" --artifact-root .local/history-root --base-index-dir .local/base-index --base-publication "${ROOT}/base-publication.json" --output-dir "${ROOT}/incremental" --asset-prefix history/index/exact --source-revision "${GITHUB_SHA}" > "${ROOT}/incremental.stdout.json"
+          echo $(( $(date +%s) - STARTED )) > "${ROOT}/incremental-elapsed-seconds.txt"
+
+      - name: Build full-rebuild target exact index
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=incremental-exact-index-equivalence
+          STARTED="$(date +%s)"
+          node .history-exact-index-build/build-history-exact-index.mjs --local --publication "${ROOT}/target-publication.json" --artifact-root .local/history-root --output-dir "${ROOT}/full" --asset-prefix history/index/exact --bucket-count 256 --source-revision "${GITHUB_SHA}" > "${ROOT}/full.stdout.json"
+          echo $(( $(date +%s) - STARTED )) > "${ROOT}/full-elapsed-seconds.txt"
+
+      - name: Require byte-identical exact-index outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=incremental-exact-index-equivalence
+          (cd "${ROOT}/incremental" && find . -type f -print0 | sort -z | xargs -0 sha256sum) > "${ROOT}/incremental-sha256.txt"
+          (cd "${ROOT}/full" && find . -type f -print0 | sort -z | xargs -0 sha256sum) > "${ROOT}/full-sha256.txt"
+          diff -u "${ROOT}/full-sha256.txt" "${ROOT}/incremental-sha256.txt"
+          jq -n --slurpfile plan "${ROOT}/plan.json" --slurpfile incremental "${ROOT}/incremental/manifest.json" --slurpfile full "${ROOT}/full/manifest.json" --argjson incrementalSeconds "$(cat "${ROOT}/incremental-elapsed-seconds.txt")" --argjson fullSeconds "$(cat "${ROOT}/full-elapsed-seconds.txt")" '{passed:true,target:$plan[0].target,extension:{ledgerCount:$plan[0].extension.ledgerCount,segmentCount:$plan[0].extension.segmentCount},incremental:{manifestSha256:$incremental[0].manifestSha256,totalRecords:$incremental[0].totalRecords,elapsedSeconds:$incrementalSeconds},full:{manifestSha256:$full[0].manifestSha256,totalRecords:$full[0].totalRecords,elapsedSeconds:$fullSeconds},byteEquivalent:true}' > "${ROOT}/evidence.json"
+
+      - name: Upload retained exact-index equivalence evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: incremental-exact-index-equivalence
+          path: |
+            incremental-exact-index-equivalence/evidence.json
+            incremental-exact-index-equivalence/plan.json
+            incremental-exact-index-equivalence/plan-bound-summary.json
+            incremental-exact-index-equivalence/chain-summary.json
+            incremental-exact-index-equivalence/incremental-sha256.txt
+            incremental-exact-index-equivalence/full-sha256.txt
+            incremental-exact-index-equivalence/incremental/manifest.json
+            incremental-exact-index-equivalence/full/manifest.json
+          if-no-files-found: error
+          retention-days: 30
