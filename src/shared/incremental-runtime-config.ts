@@ -3,6 +3,7 @@ export type IncrementalLedgerTransport = 'http' | 'websocket'
 export interface IncrementalRuntimeEnvironment {
   INCREMENTAL_LEDGER_TRANSPORT?: string
   INCREMENTAL_WEBSOCKET_ENDPOINT?: string
+  INCREMENTAL_WEBSOCKET_READ_WINDOW?: string
   INCREMENTAL_MAX_LEDGERS_PER_RUN?: string
   INCREMENTAL_MAX_LEDGER_RPC_REQUESTS_PER_RUN?: string
   INCREMENTAL_MAX_TRANSACTIONS_PER_LEDGER?: string
@@ -20,6 +21,7 @@ export interface IncrementalRuntimeEnvironment {
 export interface IncrementalRuntimeConfig {
   ledgerTransport: IncrementalLedgerTransport
   webSocketEndpoint: string | null
+  webSocketReadWindow: number
   maxLedgersPerRun: number
   maxLedgerRpcRequestsPerRun: number
   maxTransactionsPerLedger: number
@@ -75,6 +77,7 @@ export function resolveIncrementalRuntimeConfig(env: IncrementalRuntimeEnvironme
   const config: IncrementalRuntimeConfig = {
     ledgerTransport: ledgerTransport(env.INCREMENTAL_LEDGER_TRANSPORT),
     webSocketEndpoint: webSocketEndpoint(env.INCREMENTAL_WEBSOCKET_ENDPOINT),
+    webSocketReadWindow: positive(env.INCREMENTAL_WEBSOCKET_READ_WINDOW, 1, 'INCREMENTAL_WEBSOCKET_READ_WINDOW'),
     maxLedgersPerRun: positive(env.INCREMENTAL_MAX_LEDGERS_PER_RUN, 12, 'INCREMENTAL_MAX_LEDGERS_PER_RUN'),
     maxLedgerRpcRequestsPerRun: positive(env.INCREMENTAL_MAX_LEDGER_RPC_REQUESTS_PER_RUN, 16, 'INCREMENTAL_MAX_LEDGER_RPC_REQUESTS_PER_RUN'),
     maxTransactionsPerLedger: positive(env.INCREMENTAL_MAX_TRANSACTIONS_PER_LEDGER, 5_000, 'INCREMENTAL_MAX_TRANSACTIONS_PER_LEDGER'),
@@ -91,6 +94,9 @@ export function resolveIncrementalRuntimeConfig(env: IncrementalRuntimeEnvironme
 
   if (config.ledgerTransport === 'websocket' && !config.webSocketEndpoint) {
     throw new Error('INCREMENTAL_WEBSOCKET_ENDPOINT is required for websocket transport')
+  }
+  if (config.webSocketReadWindow > config.maxLedgersPerRun) {
+    throw new Error('INCREMENTAL_WEBSOCKET_READ_WINDOW must not exceed INCREMENTAL_MAX_LEDGERS_PER_RUN')
   }
   if (config.maxLedgerRpcRequestsPerRun < config.maxLedgersPerRun) {
     throw new Error('INCREMENTAL_MAX_LEDGER_RPC_REQUESTS_PER_RUN must be at least INCREMENTAL_MAX_LEDGERS_PER_RUN')
