@@ -1,0 +1,38 @@
+name: Rolling lint fix
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/rolling-lint-fix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+      - name: Remove two unused imports
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/build-rolling-current-state-read-model.ts')
+          text = p.read_text()
+          text = text.replace('import { mkdir, readFile, readdir, rm, writeFile }', 'import { mkdir, readFile, rm, writeFile }')
+          text = text.replace('  type RollingBaseKind,\n', '')
+          p.write_text(text)
+          PY
+          git diff --check
+          if git diff --quiet; then exit 0; fi
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add scripts/build-rolling-current-state-read-model.ts
+          git commit -m 'fix: remove unused rolling builder imports'
+          git push origin HEAD:${GITHUB_HEAD_REF}
