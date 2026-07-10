@@ -1,0 +1,167 @@
+name: T5 extended exact-index rehearsal
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  rehearse:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Check out implementation
+        uses: actions/checkout@v4
+
+      - name: Check out active immutable history data
+        uses: actions/checkout@v4
+        with:
+          ref: history-data
+          path: .local/history-root
+          sparse-checkout: |
+            history
+          sparse-checkout-cone-mode: true
+
+      - name: Download retained multi-segment extension artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: t5-multi-segment-extension-rehearsal
+          path: .local/extension
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: 29073900381
+
+      - name: Download retained extended publication artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: t5-extended-publication-rehearsal
+          path: .local/extended-publication
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: 29074302912
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Assemble extended immutable history root
+        shell: bash
+        run: |
+          set -euo pipefail
+          PLAN=.local/extension/plan.json
+          EPOCH="$(jq -r '.epochId' "${PLAN}")"
+          cp -R ".local/extension/history/${EPOCH}/." ".local/history-root/history/${EPOCH}/"
+          cp .local/extended-publication/history/publication.json \
+            .local/history-root/history/publication.json
+          jq -e '.segmentCount == 126 and .ledgerCount == 61261 and .endLedgerIndex == 3432936' \
+            .local/history-root/history/publication.json > /dev/null
+
+      - name: Build exact-index tools
+        run: |
+          pnpm build:history-exact-index
+          pnpm build:history-exact-rehearsal
+
+      - name: Build exact index for extended publication
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=.local/history-root
+          mkdir -p t5-extended-exact-index-rehearsal
+          STARTED="$(date +%s)"
+          node .history-exact-index-build/build-history-exact-index.mjs \
+            --local \
+            --publication "${ROOT}/history/publication.json" \
+            --artifact-root "${ROOT}" \
+            --output-dir "${ROOT}/history/index/exact" \
+            --asset-prefix history/index/exact \
+            --bucket-count 256 \
+            --source-revision "${GITHUB_SHA}" \
+            > t5-extended-exact-index-rehearsal/index.stdout.json
+          ELAPSED="$(( $(date +%s) - STARTED ))"
+          printf '%s\n' "${ELAPSED}" > t5-extended-exact-index-rehearsal/index-elapsed-seconds.txt
+
+      - name: Rehearse exact lookup against extended publication
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=.local/history-root
+          PUBLICATION="${ROOT}/history/publication.json"
+          EPOCH="$(jq -r '.epochId' "${PUBLICATION}")"
+
+          TX_SEGMENT="$(jq -r '.segments[] | select(.recordCounts.protocol_events > 0) | .segmentId' "${PUBLICATION}" | head -n 1)"
+          OBJECT_SEGMENT="$(jq -r '.segments[] | select(.recordCounts.object_changes > 0) | .segmentId' "${PUBLICATION}" | head -n 1)"
+          LOAN_SEGMENT="$(jq -r '.segments[] | select(.recordCounts.loan_lifecycle > 0) | .segmentId' "${PUBLICATION}" | head -n 1)"
+          test -n "${TX_SEGMENT}"
+          test -n "${OBJECT_SEGMENT}"
+          test -n "${LOAN_SEGMENT}"
+
+          TX_TERM="$(node -e "const fs=require('fs'),z=require('zlib');const p='${ROOT}/history/${EPOCH}/${TX_SEGMENT}/protocol-events.ndjson.gz';const r=z.gunzipSync(fs.readFileSync(p)).toString().trim().split('\\n');process.stdout.write(JSON.parse(r[0]).eventHash)")"
+          OBJECT_TERM="$(node -e "const fs=require('fs'),z=require('zlib');const p='${ROOT}/history/${EPOCH}/${OBJECT_SEGMENT}/object-changes.ndjson.gz';const r=z.gunzipSync(fs.readFileSync(p)).toString().trim().split('\\n');process.stdout.write(JSON.parse(r[0]).objectId)")"
+          LOAN_TERM="$(node -e "const fs=require('fs'),z=require('zlib');const p='${ROOT}/history/${EPOCH}/${LOAN_SEGMENT}/loan-lifecycle.ndjson.gz';const r=z.gunzipSync(fs.readFileSync(p)).toString().trim().split('\\n');process.stdout.write(JSON.parse(r[0]).loanId)")"
+
+          node .history-exact-rehearsal-build/rehearse-history-exact-lookups.mjs \
+            --local \
+            --publication "${PUBLICATION}" \
+            --exact-index-manifest "${ROOT}/history/index/exact/manifest.json" \
+            --artifact-root "${ROOT}" \
+            --term "${TX_TERM}" \
+            --term "${OBJECT_TERM}" \
+            --term "${LOAN_TERM}" \
+            > t5-extended-exact-index-rehearsal/lookup-summary.json
+
+          jq -e '
+            .passed == true
+            and .segmentCount == 126
+            and .ledgerCount == 61261
+            and .endLedgerIndex == 3432936
+            and .termCount == 3
+            and ([.terms[] | select(.referenceCount < 1 or .matchedRecords < 1)] | length) == 0
+          ' t5-extended-exact-index-rehearsal/lookup-summary.json > /dev/null
+
+      - name: Build retained evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=.local/history-root
+          jq -n \
+            --argjson elapsedSeconds "$(cat t5-extended-exact-index-rehearsal/index-elapsed-seconds.txt)" \
+            --slurpfile publication "${ROOT}/history/publication.json" \
+            --slurpfile index "${ROOT}/history/index/exact/manifest.json" \
+            --slurpfile lookup t5-extended-exact-index-rehearsal/lookup-summary.json '
+            {
+              passed: true,
+              elapsedSeconds: $elapsedSeconds,
+              history: {
+                chainId: $publication[0].chainId,
+                publicationSha256: $publication[0].publicationSha256,
+                segmentCount: $publication[0].segmentCount,
+                ledgerCount: $publication[0].ledgerCount,
+                endLedgerIndex: $publication[0].endLedgerIndex,
+                endLedgerHash: $publication[0].endLedgerHash
+              },
+              exactIndex: {
+                manifestSha256: $index[0].manifestSha256,
+                bucketCount: $index[0].bucketCount,
+                totalRecords: $index[0].totalRecords,
+                publicationSha256: $index[0].publicationSha256
+              },
+              lookup: $lookup[0]
+            }' > t5-extended-exact-index-rehearsal/evidence.json
+
+      - name: Upload retained exact-index evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: t5-extended-exact-index-rehearsal
+          path: |
+            t5-extended-exact-index-rehearsal
+            .local/history-root/history/index/exact/manifest.json
+          if-no-files-found: warn
+          retention-days: 30
