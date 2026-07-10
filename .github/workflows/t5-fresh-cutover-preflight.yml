@@ -1,0 +1,165 @@
+name: T5 fresh cutover preflight
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out implementation
+        uses: actions/checkout@v4
+
+      - name: Check out rehearsed T1 history candidate
+        uses: actions/checkout@v4
+        with:
+          ref: history-t5-real-candidate-data
+          path: .local/history-candidate
+          sparse-checkout: |
+            history-channel.json
+            history/publication.json
+          sparse-checkout-cone-mode: false
+
+      - name: Download retained T1 candidate evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: t5-post-bulk-delta-candidate
+          path: .local/t1-evidence
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: 29079733794
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build cutover preflight tool
+        run: pnpm build:t5-cutover-preflight
+
+      - name: Capture fresh production rebase evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=t5-fresh-cutover-preflight
+          mkdir -p "${ROOT}"
+
+          curl --fail-with-body --silent --show-error --retry 3 \
+            https://xrpl-lending-monitor.badjoke-lab.workers.dev/api/status/replacement-base-rebase \
+            > "${ROOT}/production-rebase-dry-run.json"
+
+          jq -e '
+            .evidence.sync.epochId != null
+            and .evidence.sync.lastProcessedLedger != null
+            and .evidence.sync.lastProcessedHash != null
+            and .evidence.sync.latestObservedLedger != null
+            and .evidence.sync.latestObservedHash != null
+            and .evidence.currentEpochId != null
+            and (.evidence.overlayStates | type) == "array"
+          ' "${ROOT}/production-rebase-dry-run.json" > /dev/null
+
+          jq '.evidence' "${ROOT}/production-rebase-dry-run.json" \
+            > "${ROOT}/production-rebase-evidence.json"
+
+      - name: Verify retained candidate evidence and commit bindings
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=t5-fresh-cutover-preflight
+          EVIDENCE=.local/t1-evidence/evidence.json
+          CANDIDATE=.local/t1-evidence/remote-rehearsal-summary.json
+          PUBLICATION=.local/history-candidate/history/publication.json
+          CHANNEL=.local/history-candidate/history-channel.json
+          HISTORY_SHA="$(tr -d '\n\r' < .local/t1-evidence/history-commit-sha.txt)"
+          CURRENT_SHA="$(tr -d '\n\r' < .local/t1-evidence/current-state-commit-sha.txt)"
+
+          printf '%s' "${HISTORY_SHA}" | grep -Eq '^[a-f0-9]{40}$'
+          printf '%s' "${CURRENT_SHA}" | grep -Eq '^[a-f0-9]{40}$'
+
+          jq -e '
+            .passed == true
+            and .candidate.historyBranch == "history-t5-real-candidate-data"
+            and .candidate.currentStateBranch == "current-state-t5-real-candidate-data"
+            and .t1.endLedgerIndex == .remoteRehearsal.ledgerIndex
+            and .t1.endLedgerHash == .remoteRehearsal.ledgerHash
+          ' "${EVIDENCE}" > /dev/null
+
+          jq -e --slurpfile publication "${PUBLICATION}" '
+            .active.chainId == $publication[0].chainId
+            and .active.epochId == $publication[0].epochId
+          ' "${CHANNEL}" > /dev/null
+
+          jq -e --slurpfile publication "${PUBLICATION}" '
+            .passed == true
+            and .epochId == $publication[0].epochId
+            and .chainId == $publication[0].chainId
+            and .ledgerIndex == $publication[0].endLedgerIndex
+            and .ledgerHash == $publication[0].endLedgerHash
+            and .segmentCount == $publication[0].segmentCount
+            and .ledgerCount == $publication[0].ledgerCount
+          ' "${CANDIDATE}" > /dev/null
+
+          cp "${CANDIDATE}" "${ROOT}/candidate-summary.json"
+          cp "${PUBLICATION}" "${ROOT}/history-publication.json"
+          printf '%s\n' "${HISTORY_SHA}" > "${ROOT}/history-commit-sha.txt"
+          printf '%s\n' "${CURRENT_SHA}" > "${ROOT}/current-state-commit-sha.txt"
+
+      - name: Build fail-closed cutover preflight bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=t5-fresh-cutover-preflight
+          HISTORY_SHA="$(cat "${ROOT}/history-commit-sha.txt")"
+          CURRENT_SHA="$(cat "${ROOT}/current-state-commit-sha.txt")"
+
+          node .t5-cutover-preflight-build/build-t5-cutover-preflight-bundle.mjs \
+            --local \
+            --candidate-summary "${ROOT}/candidate-summary.json" \
+            --history-publication "${ROOT}/history-publication.json" \
+            --production-evidence "${ROOT}/production-rebase-evidence.json" \
+            --history-commit-sha "${HISTORY_SHA}" \
+            --current-state-commit-sha "${CURRENT_SHA}" \
+            > "${ROOT}/bundle.json"
+
+          jq -e '
+            .candidate.ledgerIndex == .target.ledgerIndex
+            and .candidate.ledgerHash == .target.ledgerHash
+            and .candidate.currentStateSnapshotId == .target.snapshotId
+            and (.rebasePlan.action == "rebase" or .rebasePlan.action == "replay")
+            and .production.latestObservedLedger >= .target.ledgerIndex
+            and .production.overlayStateCount > 0
+          ' "${ROOT}/bundle.json" > /dev/null
+
+      - name: Build retained summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=t5-fresh-cutover-preflight
+          jq -n \
+            --slurpfile bundle "${ROOT}/bundle.json" \
+            --slurpfile production "${ROOT}/production-rebase-evidence.json" '
+            {
+              passed: true,
+              capturedAt: $production[0].sync.updatedAt,
+              candidate: $bundle[0].candidate,
+              production: $bundle[0].production,
+              target: $bundle[0].target,
+              rebasePlan: $bundle[0].rebasePlan
+            }' > "${ROOT}/evidence.json"
+
+      - name: Upload retained cutover preflight evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: t5-fresh-cutover-preflight
+          path: t5-fresh-cutover-preflight
+          if-no-files-found: warn
+          retention-days: 30
