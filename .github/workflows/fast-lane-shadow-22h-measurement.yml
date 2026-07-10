@@ -1,0 +1,71 @@
+name: Fast lane shadow 22h measurement
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fast-lane-shadow-22h-measurement.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fast-lane-shadow-22h-measurement
+  cancel-in-progress: false
+
+jobs:
+  block-1:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+      - name: Measure block 1 of 4
+        run: bash scripts/run-fast-lane-shadow-block.sh fast-lane-shadow-22h-data 67
+
+  block-2:
+    needs: block-1
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+      - name: Measure block 2 of 4
+        run: bash scripts/run-fast-lane-shadow-block.sh fast-lane-shadow-22h-data 67
+
+  block-3:
+    needs: block-2
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+      - name: Measure block 3 of 4
+        run: bash scripts/run-fast-lane-shadow-block.sh fast-lane-shadow-22h-data 67
+
+  block-4:
+    needs: block-3
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+      - name: Measure block 4 of 4
+        run: bash scripts/run-fast-lane-shadow-block.sh fast-lane-shadow-22h-data 67
