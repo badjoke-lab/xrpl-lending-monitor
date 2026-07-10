@@ -1,10 +1,14 @@
 import type { IncrementalRuntimeConfig } from '../../shared/incremental-runtime-config'
 import type { RuntimeConfig } from '../../shared/runtime-config'
-import { commitIncrementalScan } from '../../worker/repositories/incremental-ledger-repository'
 import type { IncrementalCollectorState } from '../../worker/repositories/incremental-collector-state'
 import { buildCollectorRunState } from './collector-run-record'
 import type { CollectorScopeRow } from './collector-scope'
 import { selectIncrementalCommitPrefix } from './incremental-work-budget'
+import {
+  commitIncrementalScanWithUsage,
+  EMPTY_INCREMENTAL_PERSISTENCE_D1_USAGE,
+  type IncrementalPersistenceD1Usage,
+} from './measured-incremental-commit'
 import { scanValidatedLedgerRange } from './scan-validated-ledgers'
 
 export interface RunnableCursor {
@@ -26,11 +30,11 @@ export async function runPreparedIncrementalRange(options: {
   runtimeConfig: RuntimeConfig
   incrementalConfig: IncrementalRuntimeConfig
   scan?: typeof scanValidatedLedgerRange
-  commit?: typeof commitIncrementalScan
+  commit?: typeof commitIncrementalScanWithUsage
   now?: () => Date
 }) {
   const scan = options.scan ?? scanValidatedLedgerRange
-  const commit = options.commit ?? commitIncrementalScan
+  const commit = options.commit ?? commitIncrementalScanWithUsage
   const now = options.now ?? (() => new Date())
   const endpoint = options.cursor.endpoint ?? options.runtimeConfig.xrplRpcUrls[0]
   if (!endpoint) throw new Error('No XRPL endpoint is configured')
@@ -78,6 +82,7 @@ export async function runPreparedIncrementalRange(options: {
   const finalLedger = selected.scan.ledgers.at(-1)
   if (!finalLedger) throw new Error('Incremental limits produced no commit range')
 
+  let persistenceUsage: IncrementalPersistenceD1Usage = EMPTY_INCREMENTAL_PERSISTENCE_D1_USAGE
   await commit({
     db: options.db,
     epochId: options.cursor.epochId,
@@ -93,6 +98,9 @@ export async function runPreparedIncrementalRange(options: {
     scan: selected.scan,
     processedAt: options.attemptedAt,
     retainPayloads: options.incrementalConfig.retainPayloads,
+    onPersistenceUsage: (usage) => {
+      persistenceUsage = usage
+    },
   })
 
   const lag = Math.max(0, options.cursor.latestObservedLedger - finalLedger.ledgerIndex)
@@ -116,6 +124,10 @@ export async function runPreparedIncrementalRange(options: {
       rows: selected.estimate.estimatedRows,
       statements: selected.estimate.estimatedStatements,
       overlays: selected.estimate.overlayMutations,
+      persistenceBatchResults: persistenceUsage.batchResults,
+      persistenceStatements: persistenceUsage.statements,
+      persistenceRowsRead: persistenceUsage.rowsRead,
+      persistenceRowsWritten: persistenceUsage.rowsWritten,
       success: true,
     }),
   }
