@@ -61,14 +61,28 @@ function overlay(): CurrentStateOverlayState {
   }
 }
 
+function candidateFor(historyPublication: HistorySegmentChainPublication): T5CandidateRehearsalSummary {
+  return {
+    schemaVersion: 1,
+    passed: true,
+    repository: 'owner/repo',
+    historyBranch: 'history-candidate',
+    currentStateBranch: 'current-candidate',
+    epochId: 'devnet-99',
+    chainId: historyPublication.chainId,
+    ledgerIndex: 110,
+    ledgerHash: C,
+    segmentCount: 1,
+    ledgerCount: 11,
+    currentStateSnapshotId: 'devnet-110-cccccccccccc',
+    currentStateManifestSha256: 'f'.repeat(64),
+  }
+}
+
 describe('T5 cutover preflight bundle', () => {
   it('binds rehearsed candidate identities to production rebase evidence', async () => {
     const historyPublication = await publication()
-    const candidate: T5CandidateRehearsalSummary = {
-      schemaVersion: 1, passed: true, repository: 'owner/repo', historyBranch: 'history-candidate', currentStateBranch: 'current-candidate',
-      epochId: 'devnet-99', chainId: historyPublication.chainId, ledgerIndex: 110, ledgerHash: C,
-      segmentCount: 1, ledgerCount: 11, currentStateSnapshotId: 'devnet-110-cccccccccccc', currentStateManifestSha256: 'f'.repeat(64),
-    }
+    const candidate = candidateFor(historyPublication)
     const evidence: ReplacementBaseRebaseEvidence = { sync: sync(), currentEpochId: 'devnet-99', overlayStates: [overlay()] }
     const bundle = await buildT5CutoverPreflightBundle({
       candidate, historyPublication, productionEvidence: evidence,
@@ -82,14 +96,22 @@ describe('T5 cutover preflight bundle', () => {
 
   it('rejects candidate/history identity disagreement', async () => {
     const historyPublication = await publication()
-    const candidate: T5CandidateRehearsalSummary = {
-      schemaVersion: 1, passed: true, repository: 'owner/repo', historyBranch: 'history-candidate', currentStateBranch: 'current-candidate',
-      epochId: 'devnet-99', chainId: historyPublication.chainId, ledgerIndex: 111, ledgerHash: C,
-      segmentCount: 1, ledgerCount: 11, currentStateSnapshotId: 'devnet-111-cccccccccccc', currentStateManifestSha256: 'f'.repeat(64),
-    }
+    const candidate = candidateFor(historyPublication)
+    candidate.ledgerIndex = 111
+    candidate.currentStateSnapshotId = 'devnet-111-cccccccccccc'
     await expect(buildT5CutoverPreflightBundle({
       candidate, historyPublication, productionEvidence: { sync: sync(), currentEpochId: 'devnet-99', overlayStates: [overlay()] },
       historyCommitSha: 'a'.repeat(40), currentStateCommitSha: 'b'.repeat(40),
     })).rejects.toThrow('does not match the history publication identity')
+  })
+
+  it('rejects an invalid current-state manifest digest before planning cutover', async () => {
+    const historyPublication = await publication()
+    const candidate = candidateFor(historyPublication)
+    candidate.currentStateManifestSha256 = 'not-a-digest'
+    await expect(buildT5CutoverPreflightBundle({
+      candidate, historyPublication, productionEvidence: { sync: sync(), currentEpochId: 'devnet-99', overlayStates: [overlay()] },
+      historyCommitSha: 'a'.repeat(40), currentStateCommitSha: 'b'.repeat(40),
+    })).rejects.toThrow('current-state manifest digest is invalid')
   })
 })
