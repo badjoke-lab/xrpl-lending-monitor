@@ -1,0 +1,210 @@
+name: T5 candidate evidence recovery
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out implementation
+        uses: actions/checkout@v4
+
+      - name: Check out T1 history candidate metadata
+        uses: actions/checkout@v4
+        with:
+          ref: history-t5-real-candidate-data
+          path: .local/history-candidate
+          sparse-checkout: |
+            history-channel.json
+            history/publication.json
+            history/index/exact/manifest.json
+          sparse-checkout-cone-mode: false
+
+      - name: Check out T1 current-state candidate metadata
+        uses: actions/checkout@v4
+        with:
+          ref: current-state-t5-real-candidate-data
+          path: .local/current-candidate
+          sparse-checkout: |
+            channel.json
+            replacement-read-model-summary.json
+            read-model/manifest.json
+          sparse-checkout-cone-mode: false
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build candidate rehearsal tool
+        run: pnpm build:candidate-source-rehearsal
+
+      - name: Re-run remote T1 candidate rehearsal
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=t5-candidate-evidence-recovery
+          mkdir -p "${ROOT}"
+
+          node .candidate-source-rehearsal-build/rehearse-candidate-sources.mjs \
+            --local \
+            --repository badjoke-lab/xrpl-lending-monitor \
+            --history-branch history-t5-real-candidate-data \
+            --current-state-branch current-state-t5-real-candidate-data \
+            > "${ROOT}/remote-rehearsal-summary.json"
+
+          jq -e '
+            .passed == true
+            and (.exactReads | length) == 3
+            and .recentHistory.items == 1
+          ' "${ROOT}/remote-rehearsal-summary.json" > /dev/null
+
+      - name: Verify exact branch and metadata bindings
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=t5-candidate-evidence-recovery
+          PUBLICATION=.local/history-candidate/history/publication.json
+          HISTORY_CHANNEL=.local/history-candidate/history-channel.json
+          EXACT=.local/history-candidate/history/index/exact/manifest.json
+          CURRENT_CHANNEL=.local/current-candidate/channel.json
+          CURRENT_SUMMARY=.local/current-candidate/replacement-read-model-summary.json
+          CURRENT_MANIFEST=.local/current-candidate/read-model/manifest.json
+          REMOTE="${ROOT}/remote-rehearsal-summary.json"
+
+          HISTORY_SHA="$(git -C .local/history-candidate rev-parse HEAD)"
+          CURRENT_SHA="$(git -C .local/current-candidate rev-parse HEAD)"
+          printf '%s' "${HISTORY_SHA}" | grep -Eq '^[a-f0-9]{40}$'
+          printf '%s' "${CURRENT_SHA}" | grep -Eq '^[a-f0-9]{40}$'
+
+          jq -e --slurpfile publication "${PUBLICATION}" '
+            .active.chainId == $publication[0].chainId
+            and .active.epochId == $publication[0].epochId
+          ' "${HISTORY_CHANNEL}" > /dev/null
+
+          PUBLICATION_SHA="$(jq -r '.publicationSha256' "${PUBLICATION}")"
+          jq -e --arg publication_sha "${PUBLICATION_SHA}" '
+            .publicationSha256 == $publication_sha
+            and .bucketCount == 256
+            and .totalRecords > 0
+          ' "${EXACT}" > /dev/null
+
+          CURRENT_MANIFEST_SHA="$(jq -r '.manifestSha256' "${CURRENT_MANIFEST}")"
+          jq -e --arg manifest_sha "${CURRENT_MANIFEST_SHA}" '
+            .active.manifestSha256 == $manifest_sha
+          ' "${CURRENT_CHANNEL}" > /dev/null
+
+          jq -e --slurpfile manifest "${CURRENT_MANIFEST}" '
+            .target.ledgerIndex == $manifest[0].ledgerIndex
+            and .target.ledgerHash == $manifest[0].ledgerHash
+            and .target.snapshotId == $manifest[0].snapshotId
+            and .target.manifestSha256 == $manifest[0].manifestSha256
+          ' "${CURRENT_SUMMARY}" > /dev/null
+
+          jq -e --slurpfile publication "${PUBLICATION}" --slurpfile manifest "${CURRENT_MANIFEST}" '
+            .passed == true
+            and .epochId == $publication[0].epochId
+            and .chainId == $publication[0].chainId
+            and .ledgerIndex == $publication[0].endLedgerIndex
+            and .ledgerHash == $publication[0].endLedgerHash
+            and .segmentCount == $publication[0].segmentCount
+            and .ledgerCount == $publication[0].ledgerCount
+            and .currentStateSnapshotId == $manifest[0].snapshotId
+            and .currentStateManifestSha256 == $manifest[0].manifestSha256
+          ' "${REMOTE}" > /dev/null
+
+          printf '%s\n' "${HISTORY_SHA}" > "${ROOT}/history-commit-sha.txt"
+          printf '%s\n' "${CURRENT_SHA}" > "${ROOT}/current-state-commit-sha.txt"
+          cp "${PUBLICATION}" "${ROOT}/history-publication.json"
+          cp "${EXACT}" "${ROOT}/exact-index-manifest.json"
+          cp "${CURRENT_SUMMARY}" "${ROOT}/current-state-summary.json"
+          cp "${CURRENT_MANIFEST}" "${ROOT}/current-state-manifest.json"
+
+      - name: Build retained recovered evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=t5-candidate-evidence-recovery
+          T0_END=3536520
+          PUBLICATION="${ROOT}/history-publication.json"
+          T1_END="$(jq -r '.endLedgerIndex' "${PUBLICATION}")"
+          T1_SEGMENTS="$(jq -r '.segmentCount' "${PUBLICATION}")"
+          DELTA_LEDGER_COUNT="$((T1_END - T0_END))"
+          DELTA_SEGMENT_COUNT="$((T1_SEGMENTS - 331))"
+          test "${DELTA_LEDGER_COUNT}" -gt 0
+          test "${DELTA_SEGMENT_COUNT}" -gt 0
+
+          jq -n \
+            --arg historyBranch "history-t5-real-candidate-data" \
+            --arg historyCommitSha "$(cat "${ROOT}/history-commit-sha.txt")" \
+            --arg currentStateBranch "current-state-t5-real-candidate-data" \
+            --arg currentStateCommitSha "$(cat "${ROOT}/current-state-commit-sha.txt")" \
+            --argjson deltaLedgerCount "${DELTA_LEDGER_COUNT}" \
+            --argjson deltaSegmentCount "${DELTA_SEGMENT_COUNT}" \
+            --slurpfile publication "${ROOT}/history-publication.json" \
+            --slurpfile exact "${ROOT}/exact-index-manifest.json" \
+            --slurpfile current "${ROOT}/current-state-summary.json" \
+            --slurpfile remote "${ROOT}/remote-rehearsal-summary.json" '
+            {
+              passed: true,
+              t0: {
+                chainId: "canonical-devnet-3371676-3536520",
+                publicationSha256: "adc81c029b3c424757de063225665910036dff59b5fc47997fa7537e7124feda",
+                segmentCount: 331,
+                ledgerCount: 164845,
+                endLedgerIndex: 3536520,
+                endLedgerHash: "6462640F28B507F09A1AD4E9A5E9B1378080D73D9B0CE235CBB4C413F97890C9"
+              },
+              delta: {
+                startLedgerIndex: 3536521,
+                endLedgerIndex: $publication[0].endLedgerIndex,
+                ledgerCount: $deltaLedgerCount,
+                segmentCount: $deltaSegmentCount
+              },
+              t1: {
+                chainId: $publication[0].chainId,
+                publicationSha256: $publication[0].publicationSha256,
+                segmentCount: $publication[0].segmentCount,
+                ledgerCount: $publication[0].ledgerCount,
+                endLedgerIndex: $publication[0].endLedgerIndex,
+                endLedgerHash: $publication[0].endLedgerHash
+              },
+              exactIndex: {
+                manifestSha256: $exact[0].manifestSha256,
+                totalRecords: $exact[0].totalRecords,
+                bucketCount: $exact[0].bucketCount,
+                publicationSha256: $exact[0].publicationSha256
+              },
+              currentState: $current[0].target,
+              candidate: {
+                historyBranch: $historyBranch,
+                historyCommitSha: $historyCommitSha,
+                currentStateBranch: $currentStateBranch,
+                currentStateCommitSha: $currentStateCommitSha
+              },
+              remoteRehearsal: $remote[0]
+            }' > "${ROOT}/evidence.json"
+
+          jq -e '
+            .t1.endLedgerIndex == .remoteRehearsal.ledgerIndex
+            and .t1.endLedgerHash == .remoteRehearsal.ledgerHash
+            and .currentState.ledgerIndex == .t1.endLedgerIndex
+            and .currentState.ledgerHash == .t1.endLedgerHash
+            and .exactIndex.publicationSha256 == .t1.publicationSha256
+          ' "${ROOT}/evidence.json" > /dev/null
+
+      - name: Upload retained recovered candidate evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: t5-candidate-evidence-recovery
+          path: t5-candidate-evidence-recovery
+          if-no-files-found: error
+          retention-days: 30
