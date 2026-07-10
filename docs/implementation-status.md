@@ -86,7 +86,11 @@ T3c production 32-ledger WebSocket canary with read window `4` was merged in PR 
 - D1 rows read at capture: `2,463,593 / 5,000,000` (`49.27186%`);
 - D1 rows written at capture: `30,230 / 100,000` (`30.23%`).
 
-T3c passed both safety and the 32-ledger capacity gate. Windowing removed the sequential WSS shortfall while retaining one connection and no collector failures. It authorizes one temporary 64-ledger WSS throughput test, not automatic adoption of a sustained higher profile. D1 daily usage and catch-up slope remain independent gates.
+T3c passed both safety and the 32-ledger capacity gate. Windowing removed the sequential WSS shortfall while retaining one connection and no collector failures. It authorized one temporary 64-ledger WSS throughput test, not automatic adoption of a sustained higher profile. D1 daily usage and catch-up slope remained independent gates.
+
+T4 temporary production 64-ledger WSS window-4 test was merged in PR #309 and measured with runtime monitor run `29060806372`, retained lightweight artifact `8218342545`. Two post-propagation WSS64 samples each processed the full 64-ledger batch through one connection with zero failures and `error=null`; run duration was approximately `9.6s`. Across the retained sampled window, cursor advanced `+128`, observed head advanced `+192`, and lag grew `+64`. T4 therefore passed the transport and persistence safety gates but failed the catch-up objective under the observed head slope.
+
+PR #310 restored the production-validated WSS32 window-4 baseline after T4. This is a control baseline for T5 resource measurement, not a reversal of the WebSocket architecture.
 
 ## Latest retained runtime evidence
 
@@ -141,19 +145,17 @@ Explorer v1 is a bounded presentation layer over approved contracts. It must not
 
 ## Active unit
 
-The active operational unit is T4: run one temporary production 64-ledger WebSocket throughput test with bounded read window `4`.
+The active operational unit is T5-1: measure the D1 cost of the incremental persistence batch before selecting another sustained or temporary throughput increase.
 
 The unit boundary is:
 
-1. Keep WebSocket transport, read window `4`, and five-minute cron cadence unchanged.
-2. Raise the temporary throughput profile to `64` ledgers/run with the measured 64-profile processing budgets; do not treat configuration merge as approval for sustained operation.
-3. Preserve an immediate rollback path to the passing 32-ledger WSS window-4 profile.
-4. After deployment propagation, retain one lightweight runtime monitor artifact with at least two post-propagation 64-ledger WSS samples.
-5. Require WSS endpoint evidence, `endpoint_attempts=1`, zero failures, `error=null`, cursor movement, and no subrequest, CPU, timeout, continuity, persistence, or cursor-stall result.
-6. Compare ledgers processed, run duration, cursor slope, head slope, and lag slope against T3c.
-7. Inspect D1 rows read and written before selecting any sustained catch-up profile; current pre-T4 evidence already shows `49.27186%` of daily reads and `30.23%` of daily writes consumed.
-8. If T4 fails any safety gate, immediately restore the 32-ledger WSS window-4 profile.
-9. If T4 passes, do not raise again by configuration arithmetic. T5 must select the next operating profile from measured catch-up slope, wall time, Worker outcome, and D1 daily resource rate.
+1. Keep production on the passing WSS32 window-4, five-minute baseline while the measurement path is introduced.
+2. Measure only the existing atomic incremental `db.batch()` result metadata without changing commit ordering, cursor atomicity, overlay watermark checks, or continuity checks.
+3. Persist and expose `persistence_batch_results`, `persistence_statements`, `persistence_rows_read`, and `persistence_rows_written` separately from estimated rows/statements.
+4. Treat these fields as persistence-batch measurements, not total scheduled-invocation cost; network-status refresh, preflight reads, collector-state save, public reads, and diagnostics remain outside the metric.
+5. Retain passing production evidence for WSS32 after the measurement deployment.
+6. Compare WSS32 and a bounded temporary WSS64 profile using the same metric contract before any window-8 or 128-ledger production test.
+7. Do not increase capacity from arithmetic alone. Use measured persistence cost, daily D1 macro burn, wall time, Worker outcome, cursor slope, head slope, and lag slope together.
 
 Track A — M5-5 browser evidence — remains blocked until collector capacity and freshness are adequate for valid production-shaped evidence. Track B — production UI audit — also remains gated by measured current-day headroom and collector health.
 
@@ -171,19 +173,21 @@ M6-I1 may begin only after M5-5 exits and after issue #283, the fixture catalog,
 
 ## Next order
 
-1. Run the temporary production 64-ledger WSS window-4 test and retain one post-propagation runtime monitor artifact.
-2. Restore 32-ledger WSS window-4 immediately if the 64-ledger test fails any safety gate.
-3. If T4 passes, select T5 operating capacity from measured head/cursor slope, wall time, Worker outcome, and D1 daily read/write rate rather than configuration arithmetic.
-4. Keep M5-5 browser regression blocked until collector preflight and D1 headroom gates pass and the collector is sufficiently current for production-shaped evidence.
-5. Reconcile M5-5 exit only when retained API and browser evidence both satisfy their gates.
-6. After M5-5 exits, begin M6-I1 using `docs/m6-integrity-reset-plan.md`, `docs/m6-i1-fixture-catalog.md`, and issue #283 after inventorying existing helpers.
+1. Merge T5-1 persistence-batch D1 measurement only after normal CI, Release-native CI, migration rehearsal, and unit coverage pass.
+2. Retain production WSS32 window-4 measurement evidence with zero collector failures.
+3. Run one bounded temporary WSS64 comparison only after the WSS32 measurement baseline is retained.
+4. Decide whether window `8` read-only probing and a later 128-ledger production test are justified from measured D1 cost, daily macro burn, wall time, Worker outcome, and head/cursor slope.
+5. Keep M5-5 browser regression blocked until collector preflight and D1 headroom gates pass and the collector is sufficiently current for production-shaped evidence.
+6. Reconcile M5-5 exit only when retained API and browser evidence both satisfy their gates.
+7. After M5-5 exits, begin M6-I1 using `docs/m6-integrity-reset-plan.md`, `docs/m6-i1-fixture-catalog.md`, and issue #283 after inventorying existing helpers.
 
 ## Remaining blockers
 
-- Production has passed the 32-ledger WSS window-4 canary, but catch-up-grade sustained capacity has not yet been selected.
+- Production is back on the passing 32-ledger WSS window-4 baseline, but catch-up-grade sustained capacity has not yet been selected.
 - The 64-ledger HTTP profile is rejected because it exceeds the Worker per-invocation subrequest limit and stops cursor advancement.
-- The temporary 64-ledger WSS window-4 throughput profile has not yet been measured in production.
-- Current-day D1 usage is already material and must be included in any sustained catch-up decision.
+- T4 proved the 64-ledger WSS window-4 profile is technically safe but did not outpace the sampled Devnet head growth.
+- Collector-specific persistence-batch D1 cost has not yet been retained from production for a 32-versus-64 comparison.
+- Current-day D1 usage is material and must remain an independent sustained-operation gate.
 - M5-5 API cross-audit evidence is passing, but real-data browser regression and representative browser production behavior evidence remain pending before M5-5 exit.
 - The independent production UI audit remains separately gated by measured current-day headroom and collector health.
 - M6 plans and M6-I1 fixture catalog are prepared, but M6 execution remains blocked until M5-5 exit.

@@ -17,6 +17,10 @@ export function buildCollectorRunState(options: {
   rows?: number
   statements?: number
   overlays?: number
+  persistenceBatchResults?: number
+  persistenceStatements?: number
+  persistenceRowsRead?: number
+  persistenceRowsWritten?: number
   success?: boolean
   error?: Error
 }): IncrementalCollectorState {
@@ -39,6 +43,10 @@ export function buildCollectorRunState(options: {
     lastEstimatedRows: options.rows ?? 0,
     lastEstimatedStatements: options.statements ?? 0,
     lastOverlayMutations: options.overlays ?? 0,
+    lastPersistenceBatchResults: options.persistenceBatchResults ?? 0,
+    lastPersistenceStatements: options.persistenceStatements ?? 0,
+    lastPersistenceRowsRead: options.persistenceRowsRead ?? 0,
+    lastPersistenceRowsWritten: options.persistenceRowsWritten ?? 0,
     errorCode: options.error ? 'incremental_collector_failed' : null,
     errorMessage: options.error?.message.slice(0, 500) ?? null,
     createdAt: options.previous?.createdAt ?? options.now,
