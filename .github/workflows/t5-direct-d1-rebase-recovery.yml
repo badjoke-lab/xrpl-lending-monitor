@@ -1,0 +1,240 @@
+name: T5 direct-D1 rebase recovery
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+  actions: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  HISTORY_CANDIDATE_SHA: b620df620326282ce7424afb6dabb055da5841be
+  CURRENT_CANDIDATE_SHA: 167f181af25eec1d5aaf7cf09608039045f82a52
+  TARGET_SNAPSHOT_ID: devnet-3539657-747554dd57de
+  TARGET_LEDGER_INDEX: '3539657'
+  TARGET_LEDGER_HASH: 747554DD57DE87C80E55B5936EAE223DA72DE3637DD23A6095A34CAFE1CCAEDB
+  TARGET_PUBLICATION_SHA: 71b5766984f7529a7691aa3851470c7706e2087ab03e2c6da30503df9109f8cd
+  TARGET_CURRENT_MANIFEST_SHA: 14b79b84dc67ff2e6e71dc7d1ddf29d0627e546d5748c127ca2319502bbc42cd
+
+concurrency:
+  group: t5-direct-d1-rebase-recovery
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out recovery implementation
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Download retained T1 candidate evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: t5-candidate-evidence-recovery
+          path: .local/t1-evidence
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: 29081255773
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build deterministic preflight tool and verify refs
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm build:t5-cutover-preflight
+          mkdir -p recovery-evidence
+          test "$(git ls-remote origin refs/heads/history-data | awk '{print $1}')" = "${HISTORY_CANDIDATE_SHA}"
+          test "$(git ls-remote origin refs/heads/history-t5-real-candidate-data | awk '{print $1}')" = "${HISTORY_CANDIDATE_SHA}"
+          test "$(git ls-remote origin refs/heads/current-state-t5-real-candidate-data | awk '{print $1}')" = "${CURRENT_CANDIDATE_SHA}"
+
+      - name: Capture fresh rebase evidence directly from remote D1
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote --json --command "SELECT epoch_id,last_processed_ledger,last_processed_hash,latest_observed_ledger,latest_observed_hash,status FROM sync_state WHERE network='devnet'" > recovery-evidence/sync-query.json
+          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote --json --command "SELECT id FROM network_epochs WHERE network='devnet' AND status='current' LIMIT 1" > recovery-evidence/epoch-query.json
+          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote --json --command "SELECT epoch_id,base_snapshot_id,base_ledger_index,base_ledger_hash,overlay_ledger_index,overlay_ledger_hash,updated_at FROM current_state_overlay_state WHERE network='devnet' AND epoch_id='devnet-3371675' ORDER BY updated_at DESC,base_snapshot_id ASC" > recovery-evidence/overlay-query.json
+
+          jq '[.. | objects | select(has("results")) | .results[]?] | .[0]' recovery-evidence/sync-query.json > recovery-evidence/sync-row.json
+          jq '[.. | objects | select(has("results")) | .results[]?] | .[0]' recovery-evidence/epoch-query.json > recovery-evidence/epoch-row.json
+          jq '[.. | objects | select(has("results")) | .results[]?]' recovery-evidence/overlay-query.json > recovery-evidence/overlay-rows.json
+
+          jq -e '.epoch_id != null and .last_processed_ledger != null and .last_processed_hash != null' recovery-evidence/sync-row.json > /dev/null
+          jq -e '.id == "devnet-3371675"' recovery-evidence/epoch-row.json > /dev/null
+          jq -e 'length > 0' recovery-evidence/overlay-rows.json > /dev/null
+
+          jq -n \
+            --slurpfile sync recovery-evidence/sync-row.json \
+            --slurpfile epoch recovery-evidence/epoch-row.json \
+            --slurpfile overlays recovery-evidence/overlay-rows.json '
+            {
+              sync: {
+                network: "devnet",
+                epochId: $sync[0].epoch_id,
+                lastProcessedLedger: $sync[0].last_processed_ledger,
+                lastProcessedHash: $sync[0].last_processed_hash,
+                latestObservedLedger: $sync[0].latest_observed_ledger,
+                latestObservedHash: $sync[0].latest_observed_hash,
+                status: $sync[0].status
+              },
+              currentEpochId: $epoch[0].id,
+              overlayStates: ($overlays[0] | map({
+                network: "devnet",
+                epochId: .epoch_id,
+                baseSnapshotId: .base_snapshot_id,
+                baseLedgerIndex: .base_ledger_index,
+                baseLedgerHash: .base_ledger_hash,
+                overlayLedgerIndex: .overlay_ledger_index,
+                overlayLedgerHash: .overlay_ledger_hash,
+                updatedAt: .updated_at
+              }))
+            }' > recovery-evidence/d1-rebase-evidence.json
+
+      - name: Add live validated head and build fail-closed preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -n '{method:"ledger",params:[{ledger_index:"validated",transactions:false,expand:false}]}' > recovery-evidence/live-head-request.json
+          curl --fail-with-body --silent --show-error --retry 3 -H 'Content-Type: application/json' --data @recovery-evidence/live-head-request.json https://devnet.honeycluster.io/ > recovery-evidence/live-head-response.json
+          LIVE_LEDGER="$(jq -r '.result.ledger_index // .result.ledger.ledger_index // empty' recovery-evidence/live-head-response.json)"
+          LIVE_HASH="$(jq -r '.result.ledger_hash // .result.ledger.ledger_hash // empty' recovery-evidence/live-head-response.json)"
+          test "${LIVE_LEDGER}" -ge "${TARGET_LEDGER_INDEX}"
+          printf '%s' "${LIVE_HASH}" | grep -Eq '^[A-F0-9]{64}$'
+          jq --argjson ledger "${LIVE_LEDGER}" --arg hash "${LIVE_HASH}" '.sync.latestObservedLedger=$ledger | .sync.latestObservedHash=$hash' recovery-evidence/d1-rebase-evidence.json > recovery-evidence/rebase-evidence-refreshed.json
+
+          CANDIDATE=.local/t1-evidence/remote-rehearsal-summary.json
+          PUBLICATION=.local/t1-evidence/history-publication.json
+          jq -e --arg publication_sha "${TARGET_PUBLICATION_SHA}" --argjson ledger "${TARGET_LEDGER_INDEX}" --arg hash "${TARGET_LEDGER_HASH}" '.publicationSha256==$publication_sha and .endLedgerIndex==$ledger and .endLedgerHash==$hash' "${PUBLICATION}" > /dev/null
+          jq -e --arg manifest_sha "${TARGET_CURRENT_MANIFEST_SHA}" --argjson ledger "${TARGET_LEDGER_INDEX}" --arg hash "${TARGET_LEDGER_HASH}" '.passed==true and .currentStateManifestSha256==$manifest_sha and .ledgerIndex==$ledger and .ledgerHash==$hash' "${CANDIDATE}" > /dev/null
+
+          node .t5-cutover-preflight-build/build-t5-cutover-preflight-bundle.mjs --local --candidate-summary "${CANDIDATE}" --history-publication "${PUBLICATION}" --production-evidence recovery-evidence/rebase-evidence-refreshed.json --history-commit-sha "${HISTORY_CANDIDATE_SHA}" --current-state-commit-sha "${CURRENT_CANDIDATE_SHA}" > recovery-evidence/preflight-bundle.json
+          jq -e --arg snapshot "${TARGET_SNAPSHOT_ID}" --argjson ledger "${TARGET_LEDGER_INDEX}" '(.rebasePlan.action=="rebase" or .rebasePlan.action=="replay") and .target.snapshotId==$snapshot and .target.ledgerIndex==$ledger' recovery-evidence/preflight-bundle.json > /dev/null
+          if jq -e '.rebasePlan.action=="replay"' recovery-evidence/preflight-bundle.json > /dev/null; then
+            touch recovery-evidence/rebase-confirmed
+          fi
+
+      - name: Verify production T1 history and current schedule state
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error --retry 3 https://xrpl-lending-monitor.badjoke-lab.workers.dev/api/status/history-source > recovery-evidence/history-source.json
+          jq -e --arg publication_sha "${TARGET_PUBLICATION_SHA}" --argjson ledger "${TARGET_LEDGER_INDEX}" '.status=="ok" and .mode=="hybrid" and .chain.end_ledger_index==$ledger and .chain.publication_sha256==$publication_sha' recovery-evidence/history-source.json > /dev/null
+          curl --fail-with-body --silent --show-error --retry 3 -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/xrpl-lending-monitor/schedules" > recovery-evidence/schedule-before.json
+          jq -e '.result.schedules | length==1 and .[0].cron=="0 */4 * * *"' recovery-evidence/schedule-before.json > /dev/null
+
+      - name: Deploy temporary minute cadence when rebase is pending
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f recovery-evidence/rebase-confirmed ]; then
+            pnpm exec wrangler deploy
+            touch recovery-evidence/minute-deployed
+            curl --fail-with-body --silent --show-error --retry 3 -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/xrpl-lending-monitor/schedules" > recovery-evidence/schedule-minute.json
+            jq -e '.result.schedules | length==1 and .[0].cron=="* * * * *"' recovery-evidence/schedule-minute.json > /dev/null
+          fi
+
+      - name: Wait for guarded T1 rebase replay
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f recovery-evidence/rebase-confirmed ]; then
+            for I in $(seq 1 30); do
+              curl --fail-with-body --silent --show-error --retry 2 https://xrpl-lending-monitor.badjoke-lab.workers.dev/api/status/replacement-base-rebase > recovery-evidence/rebase-poll.json || true
+              if jq -e --arg snapshot "${TARGET_SNAPSHOT_ID}" --argjson ledger "${TARGET_LEDGER_INDEX}" '.status=="replayed" and .target.snapshotId==$snapshot and .target.ledgerIndex==$ledger and .evidence.sync.lastProcessedLedger >= $ledger' recovery-evidence/rebase-poll.json > /dev/null 2>&1; then
+                touch recovery-evidence/rebase-confirmed
+                break
+              fi
+              sleep 10
+            done
+          fi
+          test -f recovery-evidence/rebase-confirmed
+
+      - name: Promote exact T1 current state after confirmed rebase
+        shell: bash
+        run: |
+          set -euo pipefail
+          REMOTE_CURRENT="$(git ls-remote origin refs/heads/current-state-data | awk '{print $1}')"
+          if [ "${REMOTE_CURRENT}" != "${CURRENT_CANDIDATE_SHA}" ]; then
+            git fetch origin "${CURRENT_CANDIDATE_SHA}"
+            git push --force-with-lease="refs/heads/current-state-data:${REMOTE_CURRENT}" origin "${CURRENT_CANDIDATE_SHA}:refs/heads/current-state-data"
+          fi
+          test "$(git ls-remote origin refs/heads/current-state-data | awk '{print $1}')" = "${CURRENT_CANDIDATE_SHA}"
+          touch recovery-evidence/current-promoted
+
+      - name: Restore protected four-hour cadence with T1 target
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('wrangler.jsonc')
+          p.write_text(p.read_text().replace('"crons": ["* * * * *"]','"crons": ["0 */4 * * *"]',1))
+          PY
+          pnpm exec wrangler deploy
+          touch recovery-evidence/protected-deployed
+          curl --fail-with-body --silent --show-error --retry 3 -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/xrpl-lending-monitor/schedules" > recovery-evidence/schedule-protected.json
+          jq -e '.result.schedules | length==1 and .[0].cron=="0 */4 * * *"' recovery-evidence/schedule-protected.json > /dev/null
+
+      - name: Verify final T1 production alignment
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error --retry 3 https://xrpl-lending-monitor.badjoke-lab.workers.dev/api/status/replacement-base-rebase > recovery-evidence/rebase-final.json
+          curl --fail-with-body --silent --show-error --retry 3 https://xrpl-lending-monitor.badjoke-lab.workers.dev/api/status/history-source > recovery-evidence/history-final.json
+          curl --fail-with-body --silent --show-error --retry 3 https://xrpl-lending-monitor.badjoke-lab.workers.dev/api/status/collector > recovery-evidence/collector-final.json
+          curl --fail-with-body --silent --show-error --retry 3 https://xrpl-lending-monitor.badjoke-lab.workers.dev/api/overview > recovery-evidence/overview-final.json
+          jq -e --arg snapshot "${TARGET_SNAPSHOT_ID}" --argjson ledger "${TARGET_LEDGER_INDEX}" '.status=="replayed" and .target.snapshotId==$snapshot and .target.ledgerIndex==$ledger and .evidence.sync.lastProcessedLedger >= $ledger' recovery-evidence/rebase-final.json > /dev/null
+          jq -e --arg publication_sha "${TARGET_PUBLICATION_SHA}" --argjson ledger "${TARGET_LEDGER_INDEX}" '.status=="ok" and .chain.end_ledger_index==$ledger and .chain.publication_sha256==$publication_sha' recovery-evidence/history-final.json > /dev/null
+          jq -e --argjson ledger "${TARGET_LEDGER_INDEX}" '.cursor.last_processed_ledger >= $ledger and .consecutive_failures==0 and .error==null' recovery-evidence/collector-final.json > /dev/null
+          grep -q "${TARGET_SNAPSHOT_ID}" recovery-evidence/overview-final.json
+          test "$(git ls-remote origin refs/heads/current-state-data | awk '{print $1}')" = "${CURRENT_CANDIDATE_SHA}"
+
+      - name: Ensure current-state promotion after confirmed rebase
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f recovery-evidence/rebase-confirmed ]; then
+            REMOTE_CURRENT="$(git ls-remote origin refs/heads/current-state-data | awk '{print $1}')"
+            if [ "${REMOTE_CURRENT}" != "${CURRENT_CANDIDATE_SHA}" ]; then
+              git fetch origin "${CURRENT_CANDIDATE_SHA}"
+              git push --force-with-lease="refs/heads/current-state-data:${REMOTE_CURRENT}" origin "${CURRENT_CANDIDATE_SHA}:refs/heads/current-state-data"
+            fi
+          fi
+
+      - name: Always restore protected cadence after minute deployment
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f recovery-evidence/minute-deployed ] && [ ! -f recovery-evidence/protected-deployed ]; then
+            python - <<'PY'
+          from pathlib import Path
+          p=Path('wrangler.jsonc')
+          p.write_text(p.read_text().replace('"crons": ["* * * * *"]','"crons": ["0 */4 * * *"]',1))
+          PY
+            pnpm exec wrangler deploy
+            curl --fail-with-body --silent --show-error --retry 3 -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/xrpl-lending-monitor/schedules" > recovery-evidence/schedule-cleanup.json
+            jq -e '.result.schedules | length==1 and .[0].cron=="0 */4 * * *"' recovery-evidence/schedule-cleanup.json > /dev/null
+          fi
+
+      - name: Upload retained direct-D1 recovery evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: t5-direct-d1-rebase-recovery
+          path: recovery-evidence
+          if-no-files-found: warn
+          retention-days: 30
