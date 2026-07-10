@@ -1,4 +1,8 @@
+export type IncrementalLedgerTransport = 'http' | 'websocket'
+
 export interface IncrementalRuntimeEnvironment {
+  INCREMENTAL_LEDGER_TRANSPORT?: string
+  INCREMENTAL_WEBSOCKET_ENDPOINT?: string
   INCREMENTAL_MAX_LEDGERS_PER_RUN?: string
   INCREMENTAL_MAX_LEDGER_RPC_REQUESTS_PER_RUN?: string
   INCREMENTAL_MAX_TRANSACTIONS_PER_LEDGER?: string
@@ -14,6 +18,8 @@ export interface IncrementalRuntimeEnvironment {
 }
 
 export interface IncrementalRuntimeConfig {
+  ledgerTransport: IncrementalLedgerTransport
+  webSocketEndpoint: string | null
   maxLedgersPerRun: number
   maxLedgerRpcRequestsPerRun: number
   maxTransactionsPerLedger: number
@@ -49,8 +55,26 @@ function boolean(value: string | undefined, fallback: boolean, name: string): bo
   throw new Error(`${name} must be true or false`)
 }
 
+function ledgerTransport(value: string | undefined): IncrementalLedgerTransport {
+  if (value === undefined || value === '' || value === 'http') return 'http'
+  if (value === 'websocket') return 'websocket'
+  throw new Error('INCREMENTAL_LEDGER_TRANSPORT must be http or websocket')
+}
+
+function webSocketEndpoint(value: string | undefined): string | null {
+  const normalized = value?.trim()
+  if (!normalized) return null
+  const url = new URL(normalized)
+  if (url.protocol !== 'wss:') {
+    throw new Error('INCREMENTAL_WEBSOCKET_ENDPOINT must use WSS')
+  }
+  return url.toString()
+}
+
 export function resolveIncrementalRuntimeConfig(env: IncrementalRuntimeEnvironment): IncrementalRuntimeConfig {
   const config: IncrementalRuntimeConfig = {
+    ledgerTransport: ledgerTransport(env.INCREMENTAL_LEDGER_TRANSPORT),
+    webSocketEndpoint: webSocketEndpoint(env.INCREMENTAL_WEBSOCKET_ENDPOINT),
     maxLedgersPerRun: positive(env.INCREMENTAL_MAX_LEDGERS_PER_RUN, 12, 'INCREMENTAL_MAX_LEDGERS_PER_RUN'),
     maxLedgerRpcRequestsPerRun: positive(env.INCREMENTAL_MAX_LEDGER_RPC_REQUESTS_PER_RUN, 16, 'INCREMENTAL_MAX_LEDGER_RPC_REQUESTS_PER_RUN'),
     maxTransactionsPerLedger: positive(env.INCREMENTAL_MAX_TRANSACTIONS_PER_LEDGER, 5_000, 'INCREMENTAL_MAX_TRANSACTIONS_PER_LEDGER'),
@@ -65,6 +89,9 @@ export function resolveIncrementalRuntimeConfig(env: IncrementalRuntimeEnvironme
     retainPayloads: boolean(env.INCREMENTAL_RETAIN_PAYLOADS, false, 'INCREMENTAL_RETAIN_PAYLOADS'),
   }
 
+  if (config.ledgerTransport === 'websocket' && !config.webSocketEndpoint) {
+    throw new Error('INCREMENTAL_WEBSOCKET_ENDPOINT is required for websocket transport')
+  }
   if (config.maxLedgerRpcRequestsPerRun < config.maxLedgersPerRun) {
     throw new Error('INCREMENTAL_MAX_LEDGER_RPC_REQUESTS_PER_RUN must be at least INCREMENTAL_MAX_LEDGERS_PER_RUN')
   }
