@@ -10,6 +10,8 @@ import {
 } from '../worker/operator/replacement-base-rebase-plan'
 
 const COMMIT_SHA = /^[a-f0-9]{40}$/
+const SHA256 = /^[a-f0-9]{64}$/
+const LEDGER_HASH = /^[A-F0-9]{64}$/
 
 export interface T5CandidateRehearsalSummary {
   schemaVersion: 1
@@ -60,6 +62,29 @@ function assertCommitSha(value: string, field: string): void {
   if (!COMMIT_SHA.test(value)) throw new Error(`${field} is not a full commit SHA`)
 }
 
+function assertCandidateShape(candidate: T5CandidateRehearsalSummary): void {
+  if (candidate.schemaVersion !== 1) throw new Error('T5 candidate rehearsal schema is unsupported')
+  if (!candidate.repository || !candidate.historyBranch || !candidate.currentStateBranch) {
+    throw new Error('T5 candidate source identity is incomplete')
+  }
+  if (!candidate.epochId || !candidate.chainId || !candidate.currentStateSnapshotId) {
+    throw new Error('T5 candidate target identity is incomplete')
+  }
+  if (!Number.isSafeInteger(candidate.ledgerIndex) || candidate.ledgerIndex < 1) {
+    throw new Error('T5 candidate ledger index is invalid')
+  }
+  if (!LEDGER_HASH.test(candidate.ledgerHash)) throw new Error('T5 candidate ledger hash is invalid')
+  if (!Number.isSafeInteger(candidate.segmentCount) || candidate.segmentCount < 1) {
+    throw new Error('T5 candidate segment count is invalid')
+  }
+  if (!Number.isSafeInteger(candidate.ledgerCount) || candidate.ledgerCount < 1) {
+    throw new Error('T5 candidate ledger count is invalid')
+  }
+  if (!SHA256.test(candidate.currentStateManifestSha256)) {
+    throw new Error('T5 candidate current-state manifest digest is invalid')
+  }
+}
+
 export async function buildT5CutoverPreflightBundle(options: {
   candidate: T5CandidateRehearsalSummary
   historyPublication: HistorySegmentChainPublication
@@ -69,6 +94,7 @@ export async function buildT5CutoverPreflightBundle(options: {
 }): Promise<T5CutoverPreflightBundle> {
   const { candidate, historyPublication, productionEvidence } = options
   if (!candidate.passed) throw new Error('T5 candidate rehearsal did not pass')
+  assertCandidateShape(candidate)
   assertCommitSha(options.historyCommitSha, 'historyCommitSha')
   assertCommitSha(options.currentStateCommitSha, 'currentStateCommitSha')
   await assertHistorySegmentPublicationDigest(historyPublication)
