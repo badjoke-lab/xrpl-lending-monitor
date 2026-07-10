@@ -1,0 +1,133 @@
+name: T5 extended publication rehearsal
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  rehearse:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out implementation
+        uses: actions/checkout@v4
+
+      - name: Check out active history source publication
+        uses: actions/checkout@v4
+        with:
+          ref: history-data
+          path: .local/history-source
+          sparse-checkout: |
+            history-channel.json
+            history/publication.json
+          sparse-checkout-cone-mode: false
+
+      - name: Download retained multi-segment extension artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: t5-multi-segment-extension-rehearsal
+          path: .local/extension
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: 29073900381
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build extended publication tool
+        run: pnpm build:extended-history-publication
+
+      - name: Build full publication from verified prefix and extension suffix
+        shell: bash
+        run: |
+          set -euo pipefail
+          SOURCE=.local/history-source/history/publication.json
+          PLAN=.local/extension/plan.json
+          EPOCH="$(jq -r '.epochId' "${PLAN}")"
+          START="$(jq -r '.startLedgerIndex' "${SOURCE}")"
+          TARGET="$(jq -r '.target.ledgerIndex' "${PLAN}")"
+          CHAIN_ID="canonical-devnet-${START}-${TARGET}"
+          MANIFEST_ARGS=()
+
+          while IFS= read -r SEGMENT_ID; do
+            MANIFEST_ARGS+=(--manifest ".local/extension/history/${EPOCH}/${SEGMENT_ID}/manifest.json")
+          done < <(jq -r '.extension.segments[].segmentId' "${PLAN}")
+
+          mkdir -p t5-extended-publication-rehearsal/history
+          node .extended-history-publication-build/build-extended-history-publication.mjs \
+            --local \
+            --source-publication "${SOURCE}" \
+            --plan "${PLAN}" \
+            "${MANIFEST_ARGS[@]}" \
+            --chain-id "${CHAIN_ID}" \
+            --source-revision "${GITHUB_SHA}" \
+            --output t5-extended-publication-rehearsal/history/publication.json \
+            > t5-extended-publication-rehearsal/publication.stdout.json
+
+      - name: Verify exact prefix preservation and fixed target terminal
+        shell: bash
+        run: |
+          set -euo pipefail
+          SOURCE=.local/history-source/history/publication.json
+          PLAN=.local/extension/plan.json
+          PUBLICATION=t5-extended-publication-rehearsal/history/publication.json
+
+          jq -e \
+            --slurpfile source "${SOURCE}" \
+            --slurpfile plan "${PLAN}" '
+            (.segments[0:$source[0].segmentCount] == $source[0].segments)
+            and .segmentCount == ($source[0].segmentCount + $plan[0].extension.segmentCount)
+            and .ledgerCount == ($source[0].ledgerCount + $plan[0].extension.ledgerCount)
+            and .endLedgerIndex == $plan[0].target.ledgerIndex
+            and .endLedgerHash == $plan[0].target.ledgerHash
+            and ([.segments[$source[0].segmentCount:][] | .segmentId] == [$plan[0].extension.segments[].segmentId])
+          ' "${PUBLICATION}" > /dev/null
+
+          jq -n \
+            --slurpfile source "${SOURCE}" \
+            --slurpfile plan "${PLAN}" \
+            --slurpfile publication "${PUBLICATION}" '
+            {
+              passed: true,
+              source: {
+                chainId: $source[0].chainId,
+                publicationSha256: $source[0].publicationSha256,
+                segmentCount: $source[0].segmentCount,
+                ledgerCount: $source[0].ledgerCount,
+                endLedgerIndex: $source[0].endLedgerIndex,
+                endLedgerHash: $source[0].endLedgerHash
+              },
+              extension: {
+                segmentCount: $plan[0].extension.segmentCount,
+                ledgerCount: $plan[0].extension.ledgerCount,
+                startLedgerIndex: $plan[0].extension.startLedgerIndex,
+                endLedgerIndex: $plan[0].extension.endLedgerIndex
+              },
+              publication: {
+                chainId: $publication[0].chainId,
+                publicationSha256: $publication[0].publicationSha256,
+                segmentCount: $publication[0].segmentCount,
+                ledgerCount: $publication[0].ledgerCount,
+                startLedgerIndex: $publication[0].startLedgerIndex,
+                endLedgerIndex: $publication[0].endLedgerIndex,
+                endLedgerHash: $publication[0].endLedgerHash,
+                prefixPreserved: ($publication[0].segments[0:$source[0].segmentCount] == $source[0].segments)
+              }
+            }' > t5-extended-publication-rehearsal/evidence.json
+
+      - name: Upload retained extended publication evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: t5-extended-publication-rehearsal
+          path: t5-extended-publication-rehearsal
+          if-no-files-found: error
