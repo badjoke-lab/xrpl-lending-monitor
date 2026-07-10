@@ -1,0 +1,53 @@
+name: Devnet WSS ledger probe
+
+on:
+  pull_request:
+    paths:
+      - 'src/collector/incremental/xrpl-websocket-ledger-probe.live.test.ts'
+      - 'src/collector/incremental/xrpl-websocket-ledger-session.ts'
+      - 'src/collector/incremental/scan-validated-ledgers.ts'
+      - '.github/workflows/devnet-wss-ledger-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bounded-read-only-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      RUN_XRPL_WSS_PROBE: '1'
+      XRPL_WSS_PROBE_HTTP_ENDPOINT: 'https://s.devnet.rippletest.net:51234/'
+      XRPL_WSS_PROBE_ENDPOINT: 'wss://s.devnet.rippletest.net:51233/'
+      XRPL_WSS_PROBE_LEDGER_COUNT: '64'
+      XRPL_WSS_PROBE_TIMEOUT_MS: '15000'
+      XRPL_WSS_PROBE_OUTPUT: 'artifacts/wss-probe/evidence.json'
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run bounded read-only WSS probe
+        run: pnpm exec vitest run src/collector/incremental/xrpl-websocket-ledger-probe.live.test.ts --reporter=verbose
+
+      - name: Upload WSS probe evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: devnet-wss-ledger-probe-evidence
+          path: artifacts/wss-probe/evidence.json
+          if-no-files-found: error
