@@ -84,6 +84,15 @@ jobs:
           printf '%s' "${HISTORY_SHA}" | grep -Eq '^[a-f0-9]{40}$'
           printf '%s' "${CURRENT_SHA}" | grep -Eq '^[a-f0-9]{40}$'
 
+          LOCAL_HISTORY_SHA="$(git -C .local/history-candidate rev-parse HEAD)"
+          REMOTE_HISTORY_SHA="$(git ls-remote origin refs/heads/history-t5-real-candidate-data | awk '{print $1}')"
+          REMOTE_CURRENT_SHA="$(git ls-remote origin refs/heads/current-state-t5-real-candidate-data | awk '{print $1}')"
+          test -n "${REMOTE_HISTORY_SHA}"
+          test -n "${REMOTE_CURRENT_SHA}"
+          test "${LOCAL_HISTORY_SHA}" = "${HISTORY_SHA}"
+          test "${REMOTE_HISTORY_SHA}" = "${HISTORY_SHA}"
+          test "${REMOTE_CURRENT_SHA}" = "${CURRENT_SHA}"
+
           jq -e '
             .passed == true
             and .candidate.historyBranch == "history-t5-real-candidate-data"
