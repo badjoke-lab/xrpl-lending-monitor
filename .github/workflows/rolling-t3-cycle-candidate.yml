@@ -1,0 +1,430 @@
+name: Rolling T3 cycle candidate
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/rolling-t3-cycle-candidate.yml'
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: rolling-t3-cycle-candidate
+  cancel-in-progress: true
+
+jobs:
+  candidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Check out implementation
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Check out T2 rolling history source
+        uses: actions/checkout@v4
+        with:
+          ref: history-rolling-candidate-data
+          path: .local/history-root
+          sparse-checkout: history
+          sparse-checkout-cone-mode: true
+
+      - name: Check out T2 rolling current-state source
+        uses: actions/checkout@v4
+        with:
+          ref: current-state-rolling-candidate-data
+          path: .local/current-state-root
+          sparse-checkout: |
+            read-model
+            rolling-base
+            rolling-read-model-summary.json
+          sparse-checkout-cone-mode: true
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build rolling cycle tools
+        run: |
+          pnpm build:history-extension-plan
+          pnpm build:history-extension-artifacts
+          pnpm build:history-segment
+          pnpm build:history-segment-checkpoint
+          pnpm build:history-segment-chain
+          pnpm build:extended-history-publication
+          pnpm build:history-exact-index
+          pnpm build:history-segment-channel
+          pnpm build:rolling-current-state
+          pnpm build:candidate-source-rehearsal
+          cp .history-segment-channel-build/build-history-segment-channel.mjs /tmp/build-history-segment-channel.mjs
+          cp .candidate-source-rehearsal-build/rehearse-candidate-sources.mjs /tmp/rehearse-candidate-sources.mjs
+
+      - name: Verify T2 source pair and freeze bounded T3 target
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=rolling-t3-cycle-candidate
+          SOURCE=.local/history-root/history/publication.json
+          CURRENT=.local/current-state-root/rolling-read-model-summary.json
+          ROLLING=.local/current-state-root/rolling-base/manifest.json
+          mkdir -p "${ROOT}"
+
+          SOURCE_LEDGER="$(jq -r '.endLedgerIndex' "${SOURCE}")"
+          SOURCE_HASH="$(jq -r '.endLedgerHash' "${SOURCE}")"
+          test "${SOURCE_LEDGER}" -eq "$(jq -r '.target.ledgerIndex' "${CURRENT}")"
+          test "${SOURCE_HASH}" = "$(jq -r '.target.ledgerHash' "${CURRENT}")"
+          test "${SOURCE_LEDGER}" -eq "$(jq -r '.ledgerIndex' "${ROLLING}")"
+          test "${SOURCE_HASH}" = "$(jq -r '.ledgerHash' "${ROLLING}")"
+          test "$(jq -r '.segmentCount' "${ROLLING}")" -eq 64
+
+          jq -n '{method:"ledger",params:[{ledger_index:"validated",transactions:false,expand:false}]}' > "${ROOT}/live-head-request.json"
+          curl --fail-with-body --silent --show-error --retry 3 -H 'Content-Type: application/json' --data @"${ROOT}/live-head-request.json" https://devnet.honeycluster.io/ > "${ROOT}/live-head-response.json"
+          LIVE_LEDGER="$(jq -r '.result.ledger_index // .result.ledger.ledger_index // empty' "${ROOT}/live-head-response.json")"
+          test "${LIVE_LEDGER}" -gt "${SOURCE_LEDGER}"
+          MAX_TARGET="$((SOURCE_LEDGER + 1000))"
+          if [ "${LIVE_LEDGER}" -lt "${MAX_TARGET}" ]; then TARGET="${LIVE_LEDGER}"; else TARGET="${MAX_TARGET}"; fi
+
+          jq -n --argjson ledger_index "${TARGET}" '{method:"ledger",params:[{ledger_index:$ledger_index,transactions:false,expand:false}]}' > "${ROOT}/target-request.json"
+          curl --fail-with-body --silent --show-error --retry 3 -H 'Content-Type: application/json' --data @"${ROOT}/target-request.json" https://devnet.honeycluster.io/ > "${ROOT}/target-response.json"
+          TARGET_HASH="$(jq -r '.result.ledger_hash // .result.ledger.ledger_hash // empty' "${ROOT}/target-response.json")"
+          printf '%s' "${TARGET_HASH}" | grep -Eq '^[A-F0-9]{64}$'
+
+          node .history-extension-plan-build/plan-history-extension.mjs \
+            --local \
+            --publication "${SOURCE}" \
+            --target-ledger "${TARGET}" \
+            --target-ledger-hash "${TARGET_HASH}" \
+            --segment-ledgers 250 \
+            --checkpoint-every-segments 4 \
+            --output "${ROOT}/plan.json" \
+            > "${ROOT}/plan.stdout.json"
+
+          jq -e --argjson source "${SOURCE_LEDGER}" --argjson target "${TARGET}" '
+            .source.endLedgerIndex == $source
+            and .extension.startLedgerIndex == ($source + 1)
+            and .extension.endLedgerIndex == $target
+            and .extension.ledgerCount > 0
+            and .extension.ledgerCount <= 1000
+          ' "${ROOT}/plan.json" > /dev/null
+
+      - name: Generate window-4 T2-to-T3 delta
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=rolling-t3-cycle-candidate
+          PLAN="${ROOT}/plan.json"
+          EPOCH="$(jq -r '.epochId' "${PLAN}")"
+          RANGE_START="$(jq -r '.extension.startLedgerIndex' "${PLAN}")"
+          RANGE_END="$(jq -r '.extension.endLedgerIndex' "${PLAN}")"
+          ANCHOR_ID="$(jq -r '.extension.anchorPreviousSegmentId' "${PLAN}")"
+          ANCHOR_HASH="$(jq -r '.extension.anchorPreviousSegmentEndHash' "${PLAN}")"
+          CHECKPOINT="${ROOT}/checkpoint.json"
+          MANIFEST_PATHS="${ROOT}/manifest-paths.txt"
+          : > "${MANIFEST_PATHS}"
+          PREV_ID="${ANCHOR_ID}"
+          PREV_HASH="${ANCHOR_HASH}"
+          STARTED="$(date +%s)"
+
+          while IFS= read -r SEGMENT; do
+            ORDINAL="$(jq -r '.ordinal' <<<"${SEGMENT}")"
+            SEGMENT_ID="$(jq -r '.segmentId' <<<"${SEGMENT}")"
+            START="$(jq -r '.startLedgerIndex' <<<"${SEGMENT}")"
+            END="$(jq -r '.endLedgerIndex' <<<"${SEGMENT}")"
+            OUT=".local/history-root/history/${EPOCH}/${SEGMENT_ID}"
+            PASSED=false
+            for ATTEMPT in 1 2 3; do
+              if node .history-segment-build/run-history-segment.mjs \
+                --local \
+                --endpoint https://devnet.honeycluster.io/ \
+                --timeout-ms 12000 \
+                --read-window-size 4 \
+                --start-ledger "${START}" \
+                --end-ledger "${END}" \
+                --epoch-id "${EPOCH}" \
+                --segment-id "${SEGMENT_ID}" \
+                --previous-segment-id "${PREV_ID}" \
+                --previous-segment-end-hash "${PREV_HASH}" \
+                --source-revision "${GITHUB_SHA}" \
+                --output-dir "${OUT}" \
+                > "${ROOT}/segment-${ORDINAL}.stdout.json"; then
+                PASSED=true
+                break
+              fi
+              sleep $((ATTEMPT * 10))
+            done
+            test "${PASSED}" = true
+
+            node .history-segment-checkpoint-build/update-history-segment-checkpoint.mjs \
+              --local \
+              --checkpoint "${CHECKPOINT}" \
+              --manifest "${OUT}/manifest.json" \
+              --epoch-id "${EPOCH}" \
+              --range-start-ledger "${RANGE_START}" \
+              --range-end-ledger "${RANGE_END}" \
+              --previous-segment-id "${ANCHOR_ID}" \
+              --previous-segment-end-hash "${ANCHOR_HASH}" \
+              > "${ROOT}/checkpoint-${ORDINAL}.stdout.json"
+
+            printf '%s\n' "${OUT}/manifest.json" >> "${MANIFEST_PATHS}"
+            PREV_ID="${SEGMENT_ID}"
+            PREV_HASH="$(jq -r '.endLedgerHash' "${OUT}/manifest.json")"
+          done < <(jq -c '.extension.segments[]' "${PLAN}")
+
+          echo $(( $(date +%s) - STARTED )) > "${ROOT}/delta-elapsed-seconds.txt"
+          EXPECTED_SEGMENTS="$(jq -r '.extension.segmentCount' "${PLAN}")"
+          jq -e --argjson end "${RANGE_END}" --argjson count "${EXPECTED_SEGMENTS}" '.nextLedgerIndex == ($end + 1) and (.completedSegments | length) == $count' "${CHECKPOINT}" > /dev/null
+
+      - name: Verify T3 delta and build T3 publication
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=rolling-t3-cycle-candidate
+          PLAN="${ROOT}/plan.json"
+          SOURCE_PUBLICATION=.local/history-root/history/publication.json
+          cp "${SOURCE_PUBLICATION}" "${ROOT}/source-publication.json"
+          MANIFEST_ARGS=()
+          while IFS= read -r MANIFEST; do MANIFEST_ARGS+=(--manifest "${MANIFEST}"); done < "${ROOT}/manifest-paths.txt"
+
+          node .history-extension-artifacts-build/verify-history-extension-artifacts.mjs \
+            --local --plan "${PLAN}" "${MANIFEST_ARGS[@]}" \
+            > "${ROOT}/plan-bound-summary.json"
+
+          node .history-segment-chain-build/verify-history-segment-chain.mjs \
+            --local "${MANIFEST_ARGS[@]}" \
+            --epoch-id "$(jq -r '.epochId' "${PLAN}")" \
+            --start-ledger "$(jq -r '.extension.startLedgerIndex' "${PLAN}")" \
+            --start-parent-hash "$(jq -r '.source.endLedgerHash' "${PLAN}")" \
+            --previous-segment-id "$(jq -r '.source.lastSegmentId' "${PLAN}")" \
+            --previous-segment-end-hash "$(jq -r '.source.endLedgerHash' "${PLAN}")" \
+            --end-ledger "$(jq -r '.target.ledgerIndex' "${PLAN}")" \
+            --end-ledger-hash "$(jq -r '.target.ledgerHash' "${PLAN}")" \
+            > "${ROOT}/chain-summary.json"
+
+          TARGET="$(jq -r '.target.ledgerIndex' "${PLAN}")"
+          node .extended-history-publication-build/build-extended-history-publication.mjs \
+            --local \
+            --source-publication "${ROOT}/source-publication.json" \
+            --plan "${PLAN}" \
+            "${MANIFEST_ARGS[@]}" \
+            --chain-id "canonical-devnet-3371676-${TARGET}" \
+            --source-revision "${GITHUB_SHA}" \
+            --output "${ROOT}/publication.json" \
+            > "${ROOT}/publication.stdout.json"
+          cp "${ROOT}/publication.json" .local/history-root/history/publication.json
+
+      - name: Build T3 exact index
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=rolling-t3-cycle-candidate
+          STARTED="$(date +%s)"
+          node .history-exact-index-build/build-history-exact-index.mjs \
+            --local \
+            --publication .local/history-root/history/publication.json \
+            --artifact-root .local/history-root \
+            --output-dir .local/history-root/history/index/exact \
+            --asset-prefix history/index/exact \
+            --bucket-count 256 \
+            --source-revision "${GITHUB_SHA}" \
+            > "${ROOT}/exact-index.stdout.json"
+          echo $(( $(date +%s) - STARTED )) > "${ROOT}/exact-index-elapsed-seconds.txt"
+
+      - name: Build T3 current state from compact rolling base
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=rolling-t3-cycle-candidate
+          PLAN="${ROOT}/plan.json"
+          TARGET="$(jq -r '.target.ledgerIndex' "${PLAN}")"
+          HASH="$(jq -r '.target.ledgerHash' "${PLAN}")"
+          PREFIX="$(printf '%s' "${HASH}" | tr '[:upper:]' '[:lower:]' | cut -c1-12)"
+          STARTED="$(date +%s)"
+
+          node .rolling-current-state-build/build-rolling-current-state-read-model.mjs \
+            --local \
+            --base-rolling-dir .local/current-state-root/rolling-base \
+            --history-root .local/history-root \
+            --plan "${PLAN}" \
+            --output-dir .local/t3-current-state \
+            --page-size 50 \
+            --lookup-prefix-length 3 \
+            --rolling-segments 64 \
+            --snapshot-id "devnet-${TARGET}-${PREFIX}" \
+            --release-tag "replacement-current-state-${TARGET}" \
+            > "${ROOT}/current-state.stdout.json"
+
+          echo $(( $(date +%s) - STARTED )) > "${ROOT}/current-state-elapsed-seconds.txt"
+          jq -e --argjson target "${TARGET}" --arg hash "${HASH}" '
+            .source.ledgerIndex == 3541657
+            and .target.ledgerIndex == $target
+            and .target.ledgerHash == $hash
+            and .rollingBase.segmentCount == 64
+          ' .local/t3-current-state/rolling-read-model-summary.json > /dev/null
+
+      - name: Stage T3 candidate payloads
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/t3-history-candidate /tmp/t3-current-candidate /tmp/t3-evidence
+          mkdir -p /tmp/t3-history-candidate /tmp/t3-current-candidate /tmp/t3-evidence
+          cp -R .local/history-root/history /tmp/t3-history-candidate/history
+          cp -R .local/t3-current-state/read-model /tmp/t3-current-candidate/read-model
+          cp -R .local/t3-current-state/rolling-base /tmp/t3-current-candidate/rolling-base
+          cp .local/t3-current-state/rolling-read-model-summary.json /tmp/t3-current-candidate/rolling-read-model-summary.json
+
+      - name: Publish T3 history candidate branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git checkout --orphan rolling-t3-history-publish
+          git rm -rf . || true
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -R /tmp/t3-history-candidate/. .
+          git add history
+          git commit -m "Publish rolling T3 history candidate data"
+          DATA_SHA="$(git rev-parse HEAD)"
+          node /tmp/build-history-segment-channel.mjs \
+            --local \
+            --publication history/publication.json \
+            --publication-path history/publication.json \
+            --exact-index-manifest history/index/exact/manifest.json \
+            --exact-index-manifest-path history/index/exact/manifest.json \
+            --data-commit-sha "${DATA_SHA}" \
+            --output history-channel.json
+          git add history-channel.json
+          git commit -m "Activate rolling T3 history candidate channel"
+          git push --force origin HEAD:refs/heads/history-rolling-t3-candidate-data
+          git rev-parse HEAD > /tmp/t3-evidence/history-commit-sha.txt
+
+      - name: Publish T3 current-state candidate branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git checkout --orphan rolling-t3-current-publish
+          git rm -rf . || true
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -R /tmp/t3-current-candidate/. .
+          git add read-model rolling-base rolling-read-model-summary.json
+          git commit -m "Publish rolling T3 current-state candidate data"
+          DATA_SHA="$(git rev-parse HEAD)"
+          MANIFEST_SHA="$(jq -r .target.manifestSha256 rolling-read-model-summary.json)"
+          RELEASE_TAG="$(jq -r .target.releaseTag rolling-read-model-summary.json)"
+          SNAPSHOT_ID="$(jq -r .target.snapshotId rolling-read-model-summary.json)"
+          jq -n \
+            --arg dataCommitSha "${DATA_SHA}" \
+            --arg manifestSha256 "${MANIFEST_SHA}" \
+            --arg releaseTag "${RELEASE_TAG}" \
+            --arg snapshotId "${SNAPSHOT_ID}" \
+            --arg updatedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{schemaVersion:1,active:{dataCommitSha:$dataCommitSha,manifestPath:"read-model/manifest.json",manifestSha256:$manifestSha256,releaseTag:$releaseTag,snapshotId:$snapshotId},updatedAt:$updatedAt}' \
+            > channel.json
+          git add channel.json
+          git commit -m "Activate rolling T3 current-state candidate channel"
+          git push --force origin HEAD:refs/heads/current-state-rolling-t3-candidate-data
+          git rev-parse HEAD > /tmp/t3-evidence/current-state-commit-sha.txt
+
+      - name: Rehearse remote T3 candidate pair
+        shell: bash
+        run: |
+          set -euo pipefail
+          node /tmp/rehearse-candidate-sources.mjs \
+            --local \
+            --repository badjoke-lab/xrpl-lending-monitor \
+            --history-branch history-rolling-t3-candidate-data \
+            --current-state-branch current-state-rolling-t3-candidate-data \
+            > /tmp/t3-evidence/remote-rehearsal-summary.json
+          jq -e '.passed == true and (.exactReads | length) == 3 and .recentHistory.items == 1' /tmp/t3-evidence/remote-rehearsal-summary.json > /dev/null
+
+      - name: Build retained T3 cycle evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=rolling-t3-cycle-candidate
+          PUBLICATION=.local/history-root/history/publication.json
+          EXACT=.local/history-root/history/index/exact/manifest.json
+          CURRENT=.local/t3-current-state/rolling-read-model-summary.json
+          cp /tmp/t3-evidence/* "${ROOT}/"
+
+          jq -n \
+            --slurpfile plan "${ROOT}/plan.json" \
+            --slurpfile publication "${PUBLICATION}" \
+            --slurpfile exact "${EXACT}" \
+            --slurpfile current "${CURRENT}" \
+            --slurpfile remote "${ROOT}/remote-rehearsal-summary.json" \
+            --arg historyCommitSha "$(cat "${ROOT}/history-commit-sha.txt")" \
+            --arg currentStateCommitSha "$(cat "${ROOT}/current-state-commit-sha.txt")" \
+            --argjson deltaElapsedSeconds "$(cat "${ROOT}/delta-elapsed-seconds.txt")" \
+            --argjson exactIndexElapsedSeconds "$(cat "${ROOT}/exact-index-elapsed-seconds.txt")" \
+            --argjson currentStateElapsedSeconds "$(cat "${ROOT}/current-state-elapsed-seconds.txt")" '
+            {
+              passed: true,
+              source: {
+                chainId: $plan[0].source.chainId,
+                publicationSha256: $plan[0].source.publicationSha256,
+                ledgerIndex: $plan[0].source.endLedgerIndex,
+                ledgerHash: $plan[0].source.endLedgerHash,
+                currentStateMode: "rolling-base"
+              },
+              delta: {
+                startLedgerIndex: $plan[0].extension.startLedgerIndex,
+                endLedgerIndex: $plan[0].extension.endLedgerIndex,
+                ledgerCount: $plan[0].extension.ledgerCount,
+                segmentCount: $plan[0].extension.segmentCount,
+                readWindowSize: 4,
+                elapsedSeconds: $deltaElapsedSeconds
+              },
+              target: {
+                chainId: $publication[0].chainId,
+                publicationSha256: $publication[0].publicationSha256,
+                segmentCount: $publication[0].segmentCount,
+                ledgerCount: $publication[0].ledgerCount,
+                ledgerIndex: $publication[0].endLedgerIndex,
+                ledgerHash: $publication[0].endLedgerHash
+              },
+              exactIndex: {
+                manifestSha256: $exact[0].manifestSha256,
+                totalRecords: $exact[0].totalRecords,
+                elapsedSeconds: $exactIndexElapsedSeconds
+              },
+              currentState: {
+                target: $current[0].target,
+                mutationStats: $current[0].mutationStats,
+                rollingBase: $current[0].rollingBase,
+                elapsedSeconds: $currentStateElapsedSeconds
+              },
+              candidate: {
+                historyBranch: "history-rolling-t3-candidate-data",
+                historyCommitSha: $historyCommitSha,
+                currentStateBranch: "current-state-rolling-t3-candidate-data",
+                currentStateCommitSha: $currentStateCommitSha
+              },
+              remoteRehearsal: $remote[0]
+            }' > "${ROOT}/evidence.json"
+
+          jq -e '
+            .passed == true
+            and .source.currentStateMode == "rolling-base"
+            and .delta.readWindowSize == 4
+            and .target.ledgerIndex == .remoteRehearsal.ledgerIndex
+            and .target.ledgerHash == .remoteRehearsal.ledgerHash
+            and .currentState.target.ledgerIndex == .target.ledgerIndex
+            and .currentState.target.ledgerHash == .target.ledgerHash
+            and .currentState.rollingBase.segmentCount == 64
+          ' "${ROOT}/evidence.json" > /dev/null
+
+      - name: Upload retained T3 cycle evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: rolling-t3-cycle-candidate
+          path: rolling-t3-cycle-candidate
+          if-no-files-found: warn
+          retention-days: 30
