@@ -1,0 +1,118 @@
+name: Rolling output concurrency patch
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/rolling-output-concurrency-patch.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+      - name: Apply bounded concurrent artifact writes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('scripts/build-rolling-current-state-read-model.ts')
+          text = path.read_text()
+
+          old_pages = '''  const records: unknown[] = []
+          let pageNo = 0
+          async function flush(): Promise<void> {
+            if (records.length === 0) return
+            await writeGzipJson(
+              join(pageDir, `${String(pageNo).padStart(8, '0')}.json.gz`),
+              { schemaVersion: 1, kind: options.kind, page: pageNo, records },
+            )
+            pageNo += 1
+            records.length = 0
+          }
+          '''
+          new_pages = '''  const records: unknown[] = []
+          const pendingWrites: Promise<void>[] = []
+          let pageNo = 0
+          async function flush(): Promise<void> {
+            if (records.length === 0) return
+            const outputPage = pageNo
+            const outputRecords = records.splice(0)
+            pageNo += 1
+            pendingWrites.push(writeGzipJson(
+              join(pageDir, `${String(outputPage).padStart(8, '0')}.json.gz`),
+              { schemaVersion: 1, kind: options.kind, page: outputPage, records: outputRecords },
+            ))
+            if (pendingWrites.length >= 16) await Promise.all(pendingWrites.splice(0))
+          }
+          '''
+          if old_pages not in text:
+              raise SystemExit('page writer marker not found')
+          text = text.replace(old_pages, new_pages, 1)
+
+          old_page_finish = '''    await flush()
+            options.db.exec('COMMIT')
+          '''
+          new_page_finish = '''    await flush()
+            await Promise.all(pendingWrites)
+            options.db.exec('COMMIT')
+          '''
+          if old_page_finish not in text:
+              raise SystemExit('page finish marker not found')
+          text = text.replace(old_page_finish, new_page_finish, 1)
+
+          old_lookup = '''  const bucketCount = 16 ** prefixLength
+            for (let index = 0; index < bucketCount; index += 1) {
+              const prefix = index.toString(16).toUpperCase().padStart(prefixLength, '0')
+              const next = nextHexPrefix(prefix)
+              const rows = query.all(prefix, next, next) as LookupRow[]
+              await writeGzipJson(
+                join(lookupDir, `${prefix}.json.gz`),
+                {
+                  schemaVersion: 1,
+                  prefix,
+                  records: rows.map((row) => ({ id: row.id, kind: row.kind, page: row.page_no, offset: row.offset_no })),
+                },
+              )
+            }
+            return bucketCount
+          '''
+          new_lookup = '''  const bucketCount = 16 ** prefixLength
+            const pendingWrites: Promise<void>[] = []
+            for (let index = 0; index < bucketCount; index += 1) {
+              const prefix = index.toString(16).toUpperCase().padStart(prefixLength, '0')
+              const next = nextHexPrefix(prefix)
+              const rows = query.all(prefix, next, next) as LookupRow[]
+              pendingWrites.push(writeGzipJson(
+                join(lookupDir, `${prefix}.json.gz`),
+                {
+                  schemaVersion: 1,
+                  prefix,
+                  records: rows.map((row) => ({ id: row.id, kind: row.kind, page: row.page_no, offset: row.offset_no })),
+                },
+              ))
+              if (pendingWrites.length >= 32) await Promise.all(pendingWrites.splice(0))
+            }
+            await Promise.all(pendingWrites)
+            return bucketCount
+          '''
+          if old_lookup not in text:
+              raise SystemExit('lookup writer marker not found')
+          text = text.replace(old_lookup, new_lookup, 1)
+
+          path.write_text(text)
+          PY
+          git diff --check
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add scripts/build-rolling-current-state-read-model.ts
+          git commit -m 'perf: batch rolling read-model artifact writes'
+          git push origin HEAD:${GITHUB_HEAD_REF}
