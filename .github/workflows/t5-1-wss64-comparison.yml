@@ -1,0 +1,233 @@
+name: T5-1 WSS64 comparison
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  D1_DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
+
+jobs:
+  compare-and-restore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Validate temporary comparison profile
+        run: pnpm check
+
+      - name: Resolve Worker URL
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p t5-1-wss64-comparison
+          curl --fail-with-body --silent --show-error --retry 3 \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/subdomain" \
+            > t5-1-wss64-comparison/subdomain.json
+          SUBDOMAIN="$(jq -r '.result.subdomain // empty' t5-1-wss64-comparison/subdomain.json)"
+          test -n "${SUBDOMAIN}"
+          printf '%s\n' "https://xrpl-lending-monitor.${SUBDOMAIN}.workers.dev" \
+            > t5-1-wss64-comparison/base-url.txt
+
+      - name: Capture D1 usage before comparison
+        shell: bash
+        run: |
+          set -euo pipefail
+          capture_usage() {
+            output="$1"
+            TODAY="$(date -u +%F)"
+            read -r -d '' QUERY <<'GRAPHQL' || true
+          query D1Usage($accountTag: string!, $start: Date, $end: Date, $databaseId: string) {
+            viewer {
+              accounts(filter: { accountTag: $accountTag }) {
+                d1AnalyticsAdaptiveGroups(
+                  limit: 10000
+                  filter: { date_geq: $start, date_leq: $end, databaseId: $databaseId }
+                ) {
+                  sum { readQueries writeQueries rowsRead rowsWritten }
+                }
+              }
+            }
+          }
+          GRAPHQL
+            jq -n \
+              --arg query "${QUERY}" \
+              --arg accountTag "${CLOUDFLARE_ACCOUNT_ID}" \
+              --arg start "${TODAY}" \
+              --arg end "${TODAY}" \
+              --arg databaseId "${D1_DATABASE_ID}" \
+              '{query: $query, variables: {accountTag: $accountTag, start: $start, end: $end, databaseId: $databaseId}}' \
+              > t5-1-wss64-comparison/d1-request.json
+            curl --fail-with-body --silent --show-error --retry 3 \
+              -X POST \
+              -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+              -H 'Content-Type: application/json' \
+              --data @t5-1-wss64-comparison/d1-request.json \
+              https://api.cloudflare.com/client/v4/graphql \
+              > t5-1-wss64-comparison/d1-response.json
+            jq --arg date "${TODAY}" '
+              [.data.viewer.accounts[0].d1AnalyticsAdaptiveGroups[]] as $groups
+              | {
+                  date_utc: $date,
+                  rows_read: ([$groups[].sum.rowsRead // 0] | add // 0),
+                  rows_written: ([$groups[].sum.rowsWritten // 0] | add // 0)
+                }
+            ' t5-1-wss64-comparison/d1-response.json > "${output}"
+          }
+          capture_usage t5-1-wss64-comparison/d1-before.json
+
+      - name: Deploy temporary WSS64 comparison profile
+        run: pnpm exec wrangler deploy
+
+      - name: Capture three distinct post-deploy WSS64 scheduled runs
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE="$(cat t5-1-wss64-comparison/base-url.txt)"
+          PREVIOUS_MS="$(node -e 'process.stdout.write(String(Date.now()))')"
+
+          for SAMPLE in 0 1 2; do
+            FOUND=0
+            for ATTEMPT in $(seq 1 16); do
+              curl --fail-with-body --silent --show-error --retry 3 \
+                "${BASE}/api/status/collector" \
+                > t5-1-wss64-comparison/collector-latest.json
+
+              LAST_ATTEMPT="$(jq -r '.timing.last_attempt_at // empty' t5-1-wss64-comparison/collector-latest.json)"
+              LAST_ATTEMPT_MS="$(node -e 'const v=Date.parse(process.argv[1]||""); process.stdout.write(Number.isFinite(v)?String(v):"0")' "${LAST_ATTEMPT}")"
+
+              if [ "${LAST_ATTEMPT_MS}" -gt "${PREVIOUS_MS}" ]; then
+                jq -e '
+                  (.endpoint | startswith("wss://"))
+                  and .usage.persistence_statements > 0
+                  and .usage.persistence_batch_results > 0
+                  and .consecutive_failures == 0
+                  and .error == null
+                ' t5-1-wss64-comparison/collector-latest.json > /dev/null
+                cp t5-1-wss64-comparison/collector-latest.json \
+                  "t5-1-wss64-comparison/collector-${SAMPLE}.json"
+                PREVIOUS_MS="${LAST_ATTEMPT_MS}"
+                FOUND=1
+                break
+              fi
+
+              sleep 30
+            done
+
+            if [ "${FOUND}" -ne 1 ]; then
+              echo "No distinct measured WSS64 collector run found for sample ${SAMPLE}" >&2
+              exit 1
+            fi
+          done
+
+          jq -s '[.[] | {
+            cursor: .cursor.last_processed_ledger,
+            head: .cursor.latest_observed_ledger,
+            lag: .cursor.lag_ledgers,
+            run_duration_ms: .timing.run_duration_ms,
+            rpc_requests: .usage.rpc_requests,
+            endpoint_attempts: .usage.endpoint_attempts,
+            ledgers_processed: .usage.ledgers_processed,
+            inspected_transactions: .usage.inspected_transactions,
+            lending_transactions: .usage.lending_transactions,
+            estimated_rows: .usage.estimated_rows,
+            estimated_statements: .usage.estimated_statements,
+            persistence_batch_results: .usage.persistence_batch_results,
+            persistence_statements: .usage.persistence_statements,
+            persistence_rows_read: .usage.persistence_rows_read,
+            persistence_rows_written: .usage.persistence_rows_written,
+            consecutive_failures,
+            error
+          }]' t5-1-wss64-comparison/collector-[0-2].json \
+            > t5-1-wss64-comparison/series.json
+
+          jq '{
+            first: .[0],
+            last: .[-1],
+            cursor_delta: (.[-1].cursor - .[0].cursor),
+            head_delta: (.[-1].head - .[0].head),
+            lag_delta: (.[-1].lag - .[0].lag),
+            samples: length,
+            samples_with_failures: ([.[] | select(.consecutive_failures > 0 or .error != null)] | length),
+            persistence_rows_read_total: ([.[].persistence_rows_read] | add),
+            persistence_rows_written_total: ([.[].persistence_rows_written] | add),
+            ledgers_processed_total: ([.[].ledgers_processed] | add)
+          }' t5-1-wss64-comparison/series.json \
+            > t5-1-wss64-comparison/summary.json
+
+      - name: Capture D1 usage after comparison
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TODAY="$(date -u +%F)"
+          read -r -d '' QUERY <<'GRAPHQL' || true
+          query D1Usage($accountTag: string!, $start: Date, $end: Date, $databaseId: string) {
+            viewer {
+              accounts(filter: { accountTag: $accountTag }) {
+                d1AnalyticsAdaptiveGroups(
+                  limit: 10000
+                  filter: { date_geq: $start, date_leq: $end, databaseId: $databaseId }
+                ) {
+                  sum { readQueries writeQueries rowsRead rowsWritten }
+                }
+              }
+            }
+          }
+          GRAPHQL
+          jq -n \
+            --arg query "${QUERY}" \
+            --arg accountTag "${CLOUDFLARE_ACCOUNT_ID}" \
+            --arg start "${TODAY}" \
+            --arg end "${TODAY}" \
+            --arg databaseId "${D1_DATABASE_ID}" \
+            '{query: $query, variables: {accountTag: $accountTag, start: $start, end: $end, databaseId: $databaseId}}' \
+            > t5-1-wss64-comparison/d1-request-after.json
+          curl --fail-with-body --silent --show-error --retry 3 \
+            -X POST \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            -H 'Content-Type: application/json' \
+            --data @t5-1-wss64-comparison/d1-request-after.json \
+            https://api.cloudflare.com/client/v4/graphql \
+            > t5-1-wss64-comparison/d1-response-after.json
+          jq --arg date "${TODAY}" '
+            [.data.viewer.accounts[0].d1AnalyticsAdaptiveGroups[]] as $groups
+            | {
+                date_utc: $date,
+                rows_read: ([$groups[].sum.rowsRead // 0] | add // 0),
+                rows_written: ([$groups[].sum.rowsWritten // 0] | add // 0)
+              }
+          ' t5-1-wss64-comparison/d1-response-after.json \
+            > t5-1-wss64-comparison/d1-after.json
+
+      - name: Restore main WSS32 production baseline
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git checkout -B restore-main origin/main
+          pnpm install --frozen-lockfile
+          pnpm exec wrangler deploy
+
+      - name: Upload WSS64 comparison evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: t5-1-wss64-comparison
+          path: t5-1-wss64-comparison
+          if-no-files-found: warn
