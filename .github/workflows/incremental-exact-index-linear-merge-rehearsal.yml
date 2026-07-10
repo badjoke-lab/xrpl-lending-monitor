@@ -1,0 +1,164 @@
+name: Incremental exact-index linear-merge rehearsal
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/build-incremental-history-exact-index.ts'
+      - '.github/workflows/incremental-exact-index-linear-merge-rehearsal.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Check out implementation
+        uses: actions/checkout@v4
+
+      - name: Check out T2 history source metadata and exact index
+        uses: actions/checkout@v4
+        with:
+          ref: history-rolling-candidate-data
+          path: .local/t2-history
+          sparse-checkout: |
+            history/publication.json
+            history/index/exact
+          sparse-checkout-cone-mode: false
+
+      - name: Check out T3 target history and full exact index
+        uses: actions/checkout@v4
+        with:
+          ref: history-rolling-t3-candidate-data
+          path: .local/t3-history
+          sparse-checkout: history
+          sparse-checkout-cone-mode: true
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build plan and incremental exact-index tools
+        run: |
+          pnpm build:history-extension-plan
+          pnpm build:incremental-history-exact-index
+
+      - name: Reconstruct fixed T2-to-T3 extension plan
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=incremental-exact-index-linear-merge
+          mkdir -p "${ROOT}"
+          TARGET_LEDGER="$(jq -r '.endLedgerIndex' .local/t3-history/history/publication.json)"
+          TARGET_HASH="$(jq -r '.endLedgerHash' .local/t3-history/history/publication.json)"
+          node .history-extension-plan-build/plan-history-extension.mjs \
+            --local \
+            --publication .local/t2-history/history/publication.json \
+            --target-ledger "${TARGET_LEDGER}" \
+            --target-ledger-hash "${TARGET_HASH}" \
+            --segment-ledgers 250 \
+            --checkpoint-every-segments 4 \
+            --output "${ROOT}/plan.json" \
+            > "${ROOT}/plan.stdout.json"
+          jq -e '.source.endLedgerIndex == 3541657 and .extension.ledgerCount > 0 and .extension.ledgerCount <= 1000' "${ROOT}/plan.json" > /dev/null
+
+      - name: Build optimized incremental T3 exact index
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=incremental-exact-index-linear-merge
+          SOURCE_REVISION="$(jq -r '.sourceRevision' .local/t3-history/history/index/exact/manifest.json)"
+          STARTED="$(date +%s%3N)"
+          node .incremental-history-exact-index-build/build-incremental-history-exact-index.mjs \
+            --local \
+            --publication .local/t3-history/history/publication.json \
+            --plan "${ROOT}/plan.json" \
+            --artifact-root .local/t3-history \
+            --base-index-dir .local/t2-history/history/index/exact \
+            --base-publication .local/t2-history/history/publication.json \
+            --output-dir "${ROOT}/incremental" \
+            --asset-prefix history/index/exact \
+            --source-revision "${SOURCE_REVISION}" \
+            > "${ROOT}/incremental.stdout.json"
+          echo $(( $(date +%s%3N) - STARTED )) > "${ROOT}/incremental-elapsed-ms.txt"
+
+      - name: Analyze manifest-referenced full and incremental index equality
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=incremental-exact-index-linear-merge
+          FULL_DIR=.local/t3-history/history/index/exact
+          INC_DIR="${ROOT}/incremental"
+          jq -r '.assets[].path | split("/")[-1]' "${FULL_DIR}/manifest.json" > "${ROOT}/referenced-assets.txt"
+          test "$(wc -l < "${ROOT}/referenced-assets.txt")" -eq "$(jq -r '.bucketCount' "${FULL_DIR}/manifest.json")"
+          : > "${ROOT}/full-sha256.txt"
+          : > "${ROOT}/incremental-sha256.txt"
+          while IFS= read -r NAME; do
+            test -f "${FULL_DIR}/${NAME}"
+            test -f "${INC_DIR}/${NAME}"
+            FULL_SHA="$(sha256sum "${FULL_DIR}/${NAME}" | awk '{print $1}')"
+            INC_SHA="$(sha256sum "${INC_DIR}/${NAME}" | awk '{print $1}')"
+            printf '%s  ./%s\n' "${FULL_SHA}" "${NAME}" >> "${ROOT}/full-sha256.txt"
+            printf '%s  ./%s\n' "${INC_SHA}" "${NAME}" >> "${ROOT}/incremental-sha256.txt"
+          done < "${ROOT}/referenced-assets.txt"
+          FULL_MANIFEST_SHA="$(sha256sum "${FULL_DIR}/manifest.json" | awk '{print $1}')"
+          INC_MANIFEST_SHA="$(sha256sum "${INC_DIR}/manifest.json" | awk '{print $1}')"
+          printf '%s  ./manifest.json\n' "${FULL_MANIFEST_SHA}" >> "${ROOT}/full-sha256.txt"
+          printf '%s  ./manifest.json\n' "${INC_MANIFEST_SHA}" >> "${ROOT}/incremental-sha256.txt"
+          if diff -u "${ROOT}/full-sha256.txt" "${ROOT}/incremental-sha256.txt" > "${ROOT}/sha256.diff.txt"; then
+            BYTE_IDENTICAL=true
+          else
+            BYTE_IDENTICAL=false
+          fi
+          cp "${FULL_DIR}/manifest.json" "${ROOT}/full-manifest.json"
+          cp "${INC_DIR}/manifest.json" "${ROOT}/incremental-manifest.json"
+          FULL_FILE_COUNT="$(find "${FULL_DIR}" -maxdepth 1 -type f | wc -l)"
+          REFERENCED_FILE_COUNT="$(( $(wc -l < "${ROOT}/referenced-assets.txt") + 1 ))"
+          jq -n \
+            --slurpfile plan "${ROOT}/plan.json" \
+            --slurpfile incremental "${ROOT}/incremental.stdout.json" \
+            --slurpfile fullManifest "${ROOT}/full-manifest.json" \
+            --slurpfile incrementalManifest "${ROOT}/incremental-manifest.json" \
+            --argjson incrementalElapsedMs "$(cat "${ROOT}/incremental-elapsed-ms.txt")" \
+            --argjson byteIdentical "${BYTE_IDENTICAL}" \
+            --argjson fullDirectoryFileCount "${FULL_FILE_COUNT}" \
+            --argjson referencedFileCount "${REFERENCED_FILE_COUNT}" '
+            {
+              passed: $byteIdentical,
+              sourceLedgerIndex: $plan[0].source.endLedgerIndex,
+              targetLedgerIndex: $plan[0].target.ledgerIndex,
+              deltaLedgerCount: $plan[0].extension.ledgerCount,
+              mergeStrategy: $incremental[0].mergeStrategy,
+              baseRecords: $incremental[0].baseRecords,
+              addedRecords: $incremental[0].addedRecords,
+              totalRecords: $incremental[0].totalRecords,
+              incrementalElapsedMs: $incrementalElapsedMs,
+              byteIdentical: $byteIdentical,
+              fullManifestSha256: $fullManifest[0].manifestSha256,
+              incrementalManifestSha256: $incrementalManifest[0].manifestSha256,
+              fullTotalRecords: $fullManifest[0].totalRecords,
+              incrementalTotalRecords: $incrementalManifest[0].totalRecords,
+              fullDirectoryFileCount: $fullDirectoryFileCount,
+              referencedFileCount: $referencedFileCount,
+              staleUnreferencedFileCount: ($fullDirectoryFileCount - $referencedFileCount)
+            }' > "${ROOT}/evidence.json"
+
+      - name: Upload retained linear-merge evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: incremental-exact-index-linear-merge-rehearsal
+          path: incremental-exact-index-linear-merge
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Require byte-identical manifest-referenced index output
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -e '.passed == true and .mergeStrategy == "sorted-linear-merge" and .byteIdentical == true and .fullManifestSha256 == .incrementalManifestSha256 and .fullTotalRecords == .incrementalTotalRecords' incremental-exact-index-linear-merge/evidence.json > /dev/null

@@ -74,11 +74,48 @@ function parseArguments(args: readonly string[]): Arguments {
   }
 }
 
-function sortRecords(records: HistoryExactIndexRecord[]): void {
-  records.sort((left, right) => left.term.localeCompare(right.term)
+function compareRecords(left: HistoryExactIndexRecord, right: HistoryExactIndexRecord): number {
+  return left.term.localeCompare(right.term)
     || right.reference.ledgerIndex - left.reference.ledgerIndex
     || left.reference.kind.localeCompare(right.reference.kind)
-    || left.reference.segmentId.localeCompare(right.reference.segmentId))
+    || left.reference.segmentId.localeCompare(right.reference.segmentId)
+}
+
+function sortRecords(records: HistoryExactIndexRecord[]): void {
+  records.sort(compareRecords)
+}
+
+function assertSorted(records: readonly HistoryExactIndexRecord[], field: string): void {
+  for (let index = 1; index < records.length; index += 1) {
+    if (compareRecords(records[index - 1]!, records[index]!) > 0) {
+      throw new Error(`${field} is not sorted at offset ${index}`)
+    }
+  }
+}
+
+function mergeSortedRecords(
+  base: readonly HistoryExactIndexRecord[],
+  delta: readonly HistoryExactIndexRecord[],
+): HistoryExactIndexRecord[] {
+  const merged = new Array<HistoryExactIndexRecord>(base.length + delta.length)
+  let baseIndex = 0
+  let deltaIndex = 0
+  let outputIndex = 0
+
+  while (baseIndex < base.length && deltaIndex < delta.length) {
+    const baseRecord = base[baseIndex]!
+    const deltaRecord = delta[deltaIndex]!
+    if (compareRecords(baseRecord, deltaRecord) <= 0) {
+      merged[outputIndex++] = baseRecord
+      baseIndex += 1
+    } else {
+      merged[outputIndex++] = deltaRecord
+      deltaIndex += 1
+    }
+  }
+  while (baseIndex < base.length) merged[outputIndex++] = base[baseIndex++]!
+  while (deltaIndex < delta.length) merged[outputIndex++] = delta[deltaIndex++]!
+  return merged
 }
 
 async function loadBaseBuckets(options: {
@@ -106,13 +143,14 @@ async function loadBaseBuckets(options: {
       assertHistoryExactIndexRecord(indexRecord, options.manifest.bucketCount)
       if (indexRecord.bucket !== asset.bucket) throw new Error(`Base exact-index bucket mismatch: ${asset.path}`)
     }
+    assertSorted(records, `Base exact-index bucket ${asset.bucket}`)
     buckets[asset.bucket] = records
   }
   return buckets
 }
 
 async function appendDeltaEntries(options: {
-  buckets: HistoryExactIndexRecord[][]
+  deltaBuckets: HistoryExactIndexRecord[][]
   bucketCount: number
   artifactRoot: string
   plan: HistoryExtensionPlan
@@ -144,7 +182,7 @@ async function appendDeltaEntries(options: {
         if (!extracted) continue
         for (const term of extracted.terms) {
           const bucket = await historyExactIndexBucket(term, options.bucketCount)
-          options.buckets[bucket]!.push({ schemaVersion: 2, bucket, term, reference: extracted.reference })
+          options.deltaBuckets[bucket]!.push({ schemaVersion: 2, bucket, term, reference: extracted.reference })
           added += 1
         }
       }
@@ -176,25 +214,26 @@ async function main(): Promise<void> {
     || plan.epochId !== publication.epochId
   ) throw new Error('Incremental exact-index plan target does not match target publication')
 
-  const buckets = await loadBaseBuckets({
+  const baseBuckets = await loadBaseBuckets({
     manifest: baseManifest,
     publication: basePublication,
     indexDir: options.baseIndexDir,
   })
+  const deltaBuckets = Array.from({ length: baseManifest.bucketCount }, () => [] as HistoryExactIndexRecord[])
   const baseRecords = baseManifest.totalRecords
   const addedRecords = await appendDeltaEntries({
-    buckets,
+    deltaBuckets,
     bucketCount: baseManifest.bucketCount,
     artifactRoot: options.artifactRoot,
     plan,
   })
+  for (const delta of deltaBuckets) sortRecords(delta)
 
   await mkdir(options.outputDir, { recursive: true })
   const assets: HistoryExactIndexManifest['assets'] = []
   let totalRecords = 0
   for (let bucket = 0; bucket < baseManifest.bucketCount; bucket += 1) {
-    const records = buckets[bucket]!
-    sortRecords(records)
+    const records = mergeSortedRecords(baseBuckets[bucket]!, deltaBuckets[bucket]!)
     for (const indexRecord of records) assertHistoryExactIndexRecord(indexRecord, baseManifest.bucketCount)
     const text = records.length ? `${records.map((entry) => canonicalJson(entry)).join('\n')}\n` : ''
     const bytes = await gzipDeterministic(utf8(text))
@@ -231,6 +270,7 @@ async function main(): Promise<void> {
   await writeFile(join(options.outputDir, 'manifest.json'), `${canonicalJson(manifest)}\n`, 'utf8')
   process.stdout.write(`${canonicalJson({
     passed: true,
+    mergeStrategy: 'sorted-linear-merge',
     basePublicationSha256: basePublication.publicationSha256,
     targetPublicationSha256: publication.publicationSha256,
     baseRecords,
