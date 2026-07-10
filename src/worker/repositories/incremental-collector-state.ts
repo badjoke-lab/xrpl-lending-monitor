@@ -24,10 +24,10 @@ export interface IncrementalCollectorState {
   lastEstimatedRows: number
   lastEstimatedStatements: number
   lastOverlayMutations: number
-  lastPersistenceBatchResults: number
-  lastPersistenceStatements: number
-  lastPersistenceRowsRead: number
-  lastPersistenceRowsWritten: number
+  lastPersistenceBatchResults?: number
+  lastPersistenceStatements?: number
+  lastPersistenceRowsRead?: number
+  lastPersistenceRowsWritten?: number
   errorCode: string | null
   errorMessage: string | null
   createdAt: string
@@ -51,10 +51,10 @@ interface CollectorStateRow {
   last_estimated_rows: number
   last_estimated_statements: number
   last_overlay_mutations: number
-  last_persistence_batch_results: number
-  last_persistence_statements: number
-  last_persistence_rows_read: number
-  last_persistence_rows_written: number
+  last_persistence_batch_results?: number
+  last_persistence_statements?: number
+  last_persistence_rows_read?: number
+  last_persistence_rows_written?: number
   error_code: string | null
   error_message: string | null
   created_at: string
@@ -80,10 +80,10 @@ function mapState(row: CollectorStateRow): IncrementalCollectorState {
     lastEstimatedRows: row.last_estimated_rows,
     lastEstimatedStatements: row.last_estimated_statements,
     lastOverlayMutations: row.last_overlay_mutations,
-    lastPersistenceBatchResults: row.last_persistence_batch_results,
-    lastPersistenceStatements: row.last_persistence_statements,
-    lastPersistenceRowsRead: row.last_persistence_rows_read,
-    lastPersistenceRowsWritten: row.last_persistence_rows_written,
+    lastPersistenceBatchResults: row.last_persistence_batch_results ?? 0,
+    lastPersistenceStatements: row.last_persistence_statements ?? 0,
+    lastPersistenceRowsRead: row.last_persistence_rows_read ?? 0,
+    lastPersistenceRowsWritten: row.last_persistence_rows_written ?? 0,
     errorCode: row.error_code,
     errorMessage: row.error_message,
     createdAt: row.created_at,
@@ -154,10 +154,10 @@ export async function saveIncrementalCollectorState(
     state.lastEstimatedRows,
     state.lastEstimatedStatements,
     state.lastOverlayMutations,
-    state.lastPersistenceBatchResults,
-    state.lastPersistenceStatements,
-    state.lastPersistenceRowsRead,
-    state.lastPersistenceRowsWritten,
+    state.lastPersistenceBatchResults ?? 0,
+    state.lastPersistenceStatements ?? 0,
+    state.lastPersistenceRowsRead ?? 0,
+    state.lastPersistenceRowsWritten ?? 0,
     state.errorCode,
     state.errorMessage,
     state.createdAt,
