@@ -46,7 +46,9 @@ The approved product-evolution path is documented in [`observatory-roadmap.md`](
 
 ## Active post-head execution order
 
-M1 exited on retained 2026-07-08 UTC evidence. The first M5-5 D1-gated production cross-audit then passed against live Devnet data at 2026-07-08 00:52:38 UTC. API-level current/history, lifecycle/current, archive/current exclusion, live relationships, bounded exports, Activity result classification, Cover & Loss availability, snapshot identity, and freshness/lag checks are observed. M5-5 now proceeds to real-data browser regression and representative browser behavior smoke while permanent monitoring and the independently D1-gated human UI audit track continue.
+M1 exited on retained 2026-07-08 UTC evidence. The first M5-5 D1-gated production cross-audit then passed against live Devnet data at 2026-07-08 00:52:38 UTC. API-level current/history, lifecycle/current, archive/current exclusion, live relationships, bounded exports, Activity result classification, Cover & Loss availability, snapshot identity, and freshness/lag checks are observed.
+
+M5-5 browser regression, representative browser behavior smoke, the independent production UI audit, and unimpairment candidate review are currently blocked by collector recovery. The 64-ledger/run five-minute Free-tier profile failed in retained post-reset evidence on 2026-07-10 with Worker subrequest-limit errors, zero cursor advancement, and growing lag despite safe D1 daily usage. These tracks resume only after retained collector evidence shows healthy status, zero failures, safe D1 headroom, and lag reduction or zero-lag health.
 
 ### Permanent monitoring track
 
