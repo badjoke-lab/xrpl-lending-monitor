@@ -1,0 +1,471 @@
+name: T5 post-bulk delta candidate
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: t5-post-bulk-delta-candidate
+  cancel-in-progress: false
+
+jobs:
+  build-publish-rehearse:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Check out implementation
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Check out active immutable history prefix
+        uses: actions/checkout@v4
+        with:
+          ref: history-data
+          path: .local/history-root
+          sparse-checkout: |
+            history
+          sparse-checkout-cone-mode: true
+
+      - name: Download T0 bulk plan
+        uses: actions/download-artifact@v4
+        with:
+          name: t5-production-target-plan
+          path: .local/t0-plan
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: 29076859742
+
+      - name: Download T0 bulk shards
+        uses: actions/download-artifact@v4
+        with:
+          pattern: t5-production-target-shard-*
+          path: .local/t0-shards
+          merge-multiple: true
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: 29076859742
+
+      - name: Download T0 bulk result
+        uses: actions/download-artifact@v4
+        with:
+          name: t5-production-target-bulk-result
+          path: .local/t0-result
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: 29076859742
+
+      - name: Download verified release-native base artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: current-state-release-assets
+          path: .local/current-state-release
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: 28699460881
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Assemble verified T0 history root
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p t5-post-bulk-delta-candidate
+          T0_PUBLICATION="$(find .local/t0-result -path '*/history/publication.json' -print -quit)"
+          T0_PLAN="$(find .local/t0-plan -name extension-plan.json -print -quit)"
+          test -n "${T0_PUBLICATION}"
+          test -n "${T0_PLAN}"
+          EPOCH="$(jq -r '.epochId' "${T0_PLAN}")"
+
+          while IFS= read -r HISTORY_DIR; do
+            cp -R "${HISTORY_DIR}/." ".local/history-root/history/${EPOCH}/"
+          done < <(find .local/t0-shards -type d -path "*/history/${EPOCH}")
+
+          cp "${T0_PUBLICATION}" .local/history-root/history/publication.json
+
+          jq -e '
+            .chainId == "canonical-devnet-3371676-3536520"
+            and .segmentCount == 331
+            and .ledgerCount == 164845
+            and .endLedgerIndex == 3536520
+            and .endLedgerHash == "6462640F28B507F09A1AD4E9A5E9B1378080D73D9B0CE235CBB4C413F97890C9"
+          ' .local/history-root/history/publication.json > /dev/null
+
+          jq -n \
+            --slurpfile publication .local/history-root/history/publication.json \
+            '{chainId:$publication[0].chainId,publicationSha256:$publication[0].publicationSha256,segmentCount:$publication[0].segmentCount,ledgerCount:$publication[0].ledgerCount,endLedgerIndex:$publication[0].endLedgerIndex,endLedgerHash:$publication[0].endLedgerHash}' \
+            > t5-post-bulk-delta-candidate/t0.json
+
+      - name: Build delta and candidate tools
+        run: |
+          pnpm build:history-extension-plan
+          pnpm build:history-extension-artifacts
+          pnpm build:history-segment
+          pnpm build:history-segment-checkpoint
+          pnpm build:history-segment-chain
+          pnpm build:extended-history-publication
+          pnpm build:history-exact-index
+          pnpm build:history-segment-channel
+          pnpm build:replacement-current-state-read-model
+          pnpm build:candidate-source-rehearsal
+          cp .history-segment-channel-build/build-history-segment-channel.mjs /tmp/build-history-segment-channel.mjs
+          cp .candidate-source-rehearsal-build/rehearse-candidate-sources.mjs /tmp/rehearse-candidate-sources.mjs
+
+      - name: Freeze T1 validated head and build delta plan
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=t5-post-bulk-delta-candidate
+          SOURCE=.local/history-root/history/publication.json
+
+          jq -n '{method:"ledger",params:[{ledger_index:"validated",transactions:false,expand:false}]}' > "${ROOT}/t1-request.json"
+          curl --fail-with-body --silent --show-error --retry 3 \
+            -H 'Content-Type: application/json' \
+            --data @"${ROOT}/t1-request.json" \
+            https://devnet.honeycluster.io/ \
+            > "${ROOT}/t1-response.json"
+
+          T1_LEDGER="$(jq -r '.result.ledger_index // .result.ledger.ledger_index // empty' "${ROOT}/t1-response.json")"
+          T1_HASH="$(jq -r '.result.ledger_hash // .result.ledger.ledger_hash // empty' "${ROOT}/t1-response.json")"
+          test "${T1_LEDGER}" -gt 3536520
+          printf '%s' "${T1_HASH}" | grep -Eq '^[A-F0-9]{64}$'
+
+          node .history-extension-plan-build/plan-history-extension.mjs \
+            --local \
+            --publication "${SOURCE}" \
+            --target-ledger "${T1_LEDGER}" \
+            --target-ledger-hash "${T1_HASH}" \
+            --segment-ledgers 500 \
+            --checkpoint-every-segments 10 \
+            --output "${ROOT}/delta-plan.json" \
+            > "${ROOT}/delta-plan.stdout.json"
+
+          jq -e '
+            .extension.startLedgerIndex == 3536521
+            and .extension.endLedgerIndex == .target.ledgerIndex
+            and .extension.ledgerCount > 0
+            and .extension.segmentCount > 0
+          ' "${ROOT}/delta-plan.json" > /dev/null
+
+      - name: Generate bounded T0-to-T1 delta
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=t5-post-bulk-delta-candidate
+          PLAN="${ROOT}/delta-plan.json"
+          EPOCH="$(jq -r '.epochId' "${PLAN}")"
+          RANGE_START="$(jq -r '.extension.startLedgerIndex' "${PLAN}")"
+          RANGE_END="$(jq -r '.extension.endLedgerIndex' "${PLAN}")"
+          ANCHOR_ID="$(jq -r '.extension.anchorPreviousSegmentId' "${PLAN}")"
+          ANCHOR_HASH="$(jq -r '.extension.anchorPreviousSegmentEndHash' "${PLAN}")"
+          CHECKPOINT="${ROOT}/delta-checkpoint.json"
+          MANIFEST_PATHS="${ROOT}/delta-manifest-paths.txt"
+          : > "${MANIFEST_PATHS}"
+          PREV_ID="${ANCHOR_ID}"
+          PREV_HASH="${ANCHOR_HASH}"
+          STARTED="$(date +%s)"
+
+          while IFS= read -r SEGMENT; do
+            ORDINAL="$(jq -r '.ordinal' <<<"${SEGMENT}")"
+            SEGMENT_ID="$(jq -r '.segmentId' <<<"${SEGMENT}")"
+            START="$(jq -r '.startLedgerIndex' <<<"${SEGMENT}")"
+            END="$(jq -r '.endLedgerIndex' <<<"${SEGMENT}")"
+            OUT="${ROOT}/delta-history/${EPOCH}/${SEGMENT_ID}"
+            PASSED=false
+            ATTEMPTS=0
+            for ATTEMPT in 1 2 3; do
+              ATTEMPTS="${ATTEMPT}"
+              if node .history-segment-build/run-history-segment.mjs \
+                --local \
+                --endpoint https://devnet.honeycluster.io/ \
+                --timeout-ms 12000 \
+                --start-ledger "${START}" \
+                --end-ledger "${END}" \
+                --epoch-id "${EPOCH}" \
+                --segment-id "${SEGMENT_ID}" \
+                --previous-segment-id "${PREV_ID}" \
+                --previous-segment-end-hash "${PREV_HASH}" \
+                --source-revision "${GITHUB_SHA}" \
+                --output-dir "${OUT}" \
+                > "${ROOT}/delta-segment-${ORDINAL}.stdout.json"; then
+                PASSED=true
+                break
+              fi
+              sleep $((ATTEMPT * 10))
+            done
+            test "${PASSED}" = true
+
+            node .history-segment-checkpoint-build/update-history-segment-checkpoint.mjs \
+              --local \
+              --checkpoint "${CHECKPOINT}" \
+              --manifest "${OUT}/manifest.json" \
+              --epoch-id "${EPOCH}" \
+              --range-start-ledger "${RANGE_START}" \
+              --range-end-ledger "${RANGE_END}" \
+              --previous-segment-id "${ANCHOR_ID}" \
+              --previous-segment-end-hash "${ANCHOR_HASH}" \
+              > "${ROOT}/delta-checkpoint-${ORDINAL}.stdout.json"
+
+            printf '%s\n' "${OUT}/manifest.json" >> "${MANIFEST_PATHS}"
+            PREV_ID="${SEGMENT_ID}"
+            PREV_HASH="$(jq -r '.endLedgerHash' "${OUT}/manifest.json")"
+          done < <(jq -c '.extension.segments[]' "${PLAN}")
+
+          echo $(( $(date +%s) - STARTED )) > "${ROOT}/delta-elapsed-seconds.txt"
+          EXPECTED_SEGMENTS="$(jq -r '.extension.segmentCount' "${PLAN}")"
+          jq -e --argjson end "${RANGE_END}" --argjson count "${EXPECTED_SEGMENTS}" '.nextLedgerIndex == ($end + 1) and (.completedSegments | length) == $count' "${CHECKPOINT}" > /dev/null
+
+      - name: Verify delta and build T1 full publication
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=t5-post-bulk-delta-candidate
+          PLAN="${ROOT}/delta-plan.json"
+          MANIFEST_ARGS=()
+          while IFS= read -r MANIFEST; do MANIFEST_ARGS+=(--manifest "${MANIFEST}"); done < "${ROOT}/delta-manifest-paths.txt"
+
+          node .history-extension-artifacts-build/verify-history-extension-artifacts.mjs \
+            --local \
+            --plan "${PLAN}" \
+            "${MANIFEST_ARGS[@]}" \
+            > "${ROOT}/delta-plan-bound-summary.json"
+
+          node .history-segment-chain-build/verify-history-segment-chain.mjs \
+            --local \
+            "${MANIFEST_ARGS[@]}" \
+            --epoch-id "$(jq -r '.epochId' "${PLAN}")" \
+            --start-ledger "$(jq -r '.extension.startLedgerIndex' "${PLAN}")" \
+            --start-parent-hash "$(jq -r '.source.endLedgerHash' "${PLAN}")" \
+            --previous-segment-id "$(jq -r '.source.lastSegmentId' "${PLAN}")" \
+            --previous-segment-end-hash "$(jq -r '.source.endLedgerHash' "${PLAN}")" \
+            --end-ledger "$(jq -r '.target.ledgerIndex' "${PLAN}")" \
+            --end-ledger-hash "$(jq -r '.target.ledgerHash' "${PLAN}")" \
+            > "${ROOT}/delta-chain-summary.json"
+
+          TARGET="$(jq -r '.target.ledgerIndex' "${PLAN}")"
+          CHAIN_ID="canonical-devnet-3371676-${TARGET}"
+          node .extended-history-publication-build/build-extended-history-publication.mjs \
+            --local \
+            --source-publication .local/history-root/history/publication.json \
+            --plan "${PLAN}" \
+            "${MANIFEST_ARGS[@]}" \
+            --chain-id "${CHAIN_ID}" \
+            --source-revision "${GITHUB_SHA}" \
+            --output "${ROOT}/t1-publication.json" \
+            > "${ROOT}/t1-publication.stdout.json"
+
+          EPOCH="$(jq -r '.epochId' "${PLAN}")"
+          cp -R "${ROOT}/delta-history/${EPOCH}/." ".local/history-root/history/${EPOCH}/"
+          cp "${ROOT}/t1-publication.json" .local/history-root/history/publication.json
+
+      - name: Build T1 exact index
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=t5-post-bulk-delta-candidate
+          STARTED="$(date +%s)"
+          node .history-exact-index-build/build-history-exact-index.mjs \
+            --local \
+            --publication .local/history-root/history/publication.json \
+            --artifact-root .local/history-root \
+            --output-dir .local/history-root/history/index/exact \
+            --asset-prefix history/index/exact \
+            --bucket-count 256 \
+            --source-revision "${GITHUB_SHA}" \
+            > "${ROOT}/exact-index.stdout.json"
+          echo $(( $(date +%s) - STARTED )) > "${ROOT}/exact-index-elapsed-seconds.txt"
+
+      - name: Build T1 replacement current state
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=t5-post-bulk-delta-candidate
+          PUBLICATION=.local/history-root/history/publication.json
+          TARGET_INDEX="$(jq -r '.endLedgerIndex' "${PUBLICATION}")"
+          TARGET_HASH="$(jq -r '.endLedgerHash' "${PUBLICATION}")"
+          HASH_PREFIX="$(printf '%s' "${TARGET_HASH}" | tr '[:upper:]' '[:lower:]' | cut -c1-12)"
+          SNAPSHOT_ID="devnet-${TARGET_INDEX}-${HASH_PREFIX}"
+          STARTED="$(date +%s)"
+
+          node .replacement-current-state-read-model-build/build-replacement-current-state-read-model.mjs \
+            --local \
+            --input-dir .local/current-state-release/assets \
+            --history-root .local/history-root \
+            --publication "${PUBLICATION}" \
+            --output-dir .local/t1-current-state \
+            --page-size 50 \
+            --lookup-prefix-length 3 \
+            --snapshot-id "${SNAPSHOT_ID}" \
+            --release-tag "replacement-current-state-${TARGET_INDEX}" \
+            > "${ROOT}/current-state.stdout.json"
+          echo $(( $(date +%s) - STARTED )) > "${ROOT}/current-state-elapsed-seconds.txt"
+
+          jq -e --argjson target_index "${TARGET_INDEX}" --arg target_hash "${TARGET_HASH}" '
+            .target.ledgerIndex == $target_index and .target.ledgerHash == $target_hash
+          ' .local/t1-current-state/replacement-read-model-summary.json > /dev/null
+          jq -e --argjson target_index "${TARGET_INDEX}" --arg target_hash "${TARGET_HASH}" '
+            .ledgerIndex == $target_index and .ledgerHash == $target_hash
+          ' .local/t1-current-state/read-model/manifest.json > /dev/null
+
+      - name: Stage T1 candidate payloads
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/t1-history-candidate /tmp/t1-current-candidate /tmp/t1-candidate-evidence
+          mkdir -p /tmp/t1-history-candidate /tmp/t1-current-candidate /tmp/t1-candidate-evidence
+          cp -R .local/history-root/history /tmp/t1-history-candidate/history
+          cp -R .local/t1-current-state/read-model /tmp/t1-current-candidate/read-model
+          cp .local/t1-current-state/replacement-read-model-summary.json /tmp/t1-current-candidate/replacement-read-model-summary.json
+
+      - name: Publish T1 history candidate branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git checkout --orphan t1-history-candidate-publish
+          git rm -rf . || true
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -R /tmp/t1-history-candidate/. .
+          git add history
+          git commit -m "Publish T5 T1 history candidate data"
+          DATA_SHA="$(git rev-parse HEAD)"
+          node /tmp/build-history-segment-channel.mjs \
+            --local \
+            --publication history/publication.json \
+            --publication-path history/publication.json \
+            --exact-index-manifest history/index/exact/manifest.json \
+            --exact-index-manifest-path history/index/exact/manifest.json \
+            --data-commit-sha "${DATA_SHA}" \
+            --output history-channel.json
+          git add history-channel.json
+          git commit -m "Activate T5 T1 history candidate channel"
+          git push --force origin HEAD:refs/heads/history-t5-real-candidate-data
+          git rev-parse HEAD > /tmp/t1-candidate-evidence/history-commit-sha.txt
+
+      - name: Publish T1 current-state candidate branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git checkout --orphan t1-current-candidate-publish
+          git rm -rf . || true
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -R /tmp/t1-current-candidate/. .
+          git add read-model replacement-read-model-summary.json
+          git commit -m "Publish T5 T1 current-state candidate data"
+          DATA_SHA="$(git rev-parse HEAD)"
+          MANIFEST_SHA="$(jq -r .target.manifestSha256 replacement-read-model-summary.json)"
+          RELEASE_TAG="$(jq -r .target.releaseTag replacement-read-model-summary.json)"
+          SNAPSHOT_ID="$(jq -r .target.snapshotId replacement-read-model-summary.json)"
+          jq -n \
+            --arg dataCommitSha "${DATA_SHA}" \
+            --arg manifestSha256 "${MANIFEST_SHA}" \
+            --arg releaseTag "${RELEASE_TAG}" \
+            --arg snapshotId "${SNAPSHOT_ID}" \
+            --arg updatedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{schemaVersion:1,active:{dataCommitSha:$dataCommitSha,manifestPath:"read-model/manifest.json",manifestSha256:$manifestSha256,releaseTag:$releaseTag,snapshotId:$snapshotId},updatedAt:$updatedAt}' \
+            > channel.json
+          git add channel.json
+          git commit -m "Activate T5 T1 current-state candidate channel"
+          git push --force origin HEAD:refs/heads/current-state-t5-real-candidate-data
+          git rev-parse HEAD > /tmp/t1-candidate-evidence/current-state-commit-sha.txt
+
+      - name: Rehearse remote T1 candidate pair
+        shell: bash
+        run: |
+          set -euo pipefail
+          node /tmp/rehearse-candidate-sources.mjs \
+            --local \
+            --repository badjoke-lab/xrpl-lending-monitor \
+            --history-branch history-t5-real-candidate-data \
+            --current-state-branch current-state-t5-real-candidate-data \
+            > /tmp/t1-candidate-evidence/remote-rehearsal-summary.json
+          jq -e '
+            .passed == true
+            and (.exactReads | length) == 3
+            and .recentHistory.items == 1
+          ' /tmp/t1-candidate-evidence/remote-rehearsal-summary.json > /dev/null
+
+      - name: Build retained T1 candidate evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=t5-post-bulk-delta-candidate
+          PUBLICATION=.local/history-root/history/publication.json
+          EXACT=.local/history-root/history/index/exact/manifest.json
+          CURRENT=.local/t1-current-state/replacement-read-model-summary.json
+          cp /tmp/t1-candidate-evidence/* "${ROOT}/"
+
+          jq -n \
+            --slurpfile t0 "${ROOT}/t0.json" \
+            --slurpfile delta "${ROOT}/delta-plan.json" \
+            --slurpfile publication "${PUBLICATION}" \
+            --slurpfile exact "${EXACT}" \
+            --slurpfile current "${CURRENT}" \
+            --slurpfile remote "${ROOT}/remote-rehearsal-summary.json" \
+            --arg historyCommitSha "$(cat "${ROOT}/history-commit-sha.txt")" \
+            --arg currentStateCommitSha "$(cat "${ROOT}/current-state-commit-sha.txt")" \
+            --argjson deltaElapsedSeconds "$(cat "${ROOT}/delta-elapsed-seconds.txt")" \
+            --argjson exactIndexElapsedSeconds "$(cat "${ROOT}/exact-index-elapsed-seconds.txt")" \
+            --argjson currentStateElapsedSeconds "$(cat "${ROOT}/current-state-elapsed-seconds.txt")" '
+            {
+              passed: true,
+              t0: $t0[0],
+              delta: {
+                startLedgerIndex: $delta[0].extension.startLedgerIndex,
+                endLedgerIndex: $delta[0].extension.endLedgerIndex,
+                ledgerCount: $delta[0].extension.ledgerCount,
+                segmentCount: $delta[0].extension.segmentCount,
+                elapsedSeconds: $deltaElapsedSeconds
+              },
+              t1: {
+                chainId: $publication[0].chainId,
+                publicationSha256: $publication[0].publicationSha256,
+                segmentCount: $publication[0].segmentCount,
+                ledgerCount: $publication[0].ledgerCount,
+                endLedgerIndex: $publication[0].endLedgerIndex,
+                endLedgerHash: $publication[0].endLedgerHash
+              },
+              exactIndex: {
+                manifestSha256: $exact[0].manifestSha256,
+                totalRecords: $exact[0].totalRecords,
+                elapsedSeconds: $exactIndexElapsedSeconds
+              },
+              currentState: {
+                target: $current[0].target,
+                elapsedSeconds: $currentStateElapsedSeconds
+              },
+              candidate: {
+                historyBranch: "history-t5-real-candidate-data",
+                historyCommitSha: $historyCommitSha,
+                currentStateBranch: "current-state-t5-real-candidate-data",
+                currentStateCommitSha: $currentStateCommitSha
+              },
+              remoteRehearsal: $remote[0]
+            }' > "${ROOT}/evidence.json"
+
+          jq -e '
+            .passed == true
+            and .t1.endLedgerIndex == .remoteRehearsal.ledgerIndex
+            and .t1.endLedgerHash == .remoteRehearsal.ledgerHash
+            and .currentState.target.ledgerIndex == .t1.endLedgerIndex
+            and .currentState.target.ledgerHash == .t1.endLedgerHash
+          ' "${ROOT}/evidence.json" > /dev/null
+
+      - name: Upload retained post-bulk candidate evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: t5-post-bulk-delta-candidate
+          path: t5-post-bulk-delta-candidate
+          if-no-files-found: warn
+          retention-days: 30
