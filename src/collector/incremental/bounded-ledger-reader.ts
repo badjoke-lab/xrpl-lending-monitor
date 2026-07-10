@@ -15,8 +15,12 @@ export function createBoundedLedgerReader(options: {
   preferredEndpoint: string | null
   baseReader?: LedgerReader
 }): { reader: LedgerReader; usage: BoundedLedgerReaderUsage } {
+  const configuredEndpoints = new Set(options.runtimeConfig.xrplRpcUrls)
+  const preferredEndpoint = options.preferredEndpoint && configuredEndpoints.has(options.preferredEndpoint)
+    ? options.preferredEndpoint
+    : null
   const endpoints = [...new Set([
-    options.preferredEndpoint,
+    preferredEndpoint,
     ...options.runtimeConfig.xrplRpcUrls,
   ].filter((value): value is string => Boolean(value)))]
   const baseReader = options.baseReader ?? readValidatedLedger

@@ -45,6 +45,28 @@ describe('bounded ledger reader', () => {
     expect(bounded.usage.endpointAttempts).toBe(2)
   })
 
+  it('ignores a WebSocket state endpoint when rolling back to HTTP', async () => {
+    const baseReader = vi.fn(async ({ endpoint, ledgerIndex }) => ledger(endpoint, ledgerIndex))
+    const bounded = createBoundedLedgerReader({
+      runtimeConfig,
+      incrementalConfig: resolveIncrementalRuntimeConfig({}),
+      preferredEndpoint: 'wss://devnet.example/socket',
+      baseReader,
+    })
+
+    const result = await bounded.reader({
+      endpoint: 'https://ignored.example',
+      ledgerIndex: 12,
+      timeoutMs: 1000,
+    })
+
+    expect(result.endpoint).toBe('https://primary.example/')
+    expect(baseReader).toHaveBeenCalledTimes(1)
+    expect(baseReader).toHaveBeenCalledWith(expect.objectContaining({
+      endpoint: 'https://primary.example/',
+    }))
+  })
+
   it('fails before exceeding the request budget', async () => {
     const baseReader = vi.fn(async () => { throw new Error('unavailable') })
     const bounded = createBoundedLedgerReader({
