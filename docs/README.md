@@ -38,9 +38,10 @@ This directory is the source of truth for XRPL Lending Monitor and its approved 
 32. [`observatory-roadmap.md`](observatory-roadmap.md) — approved Explorer v1 insertion and post-release Observatory O1-O3 expansion order
 33. [`implementation-status.md`](implementation-status.md) — public implementation state, active unit, and current release blockers
 34. [`ops/free-tier-collector-recovery-2026-07-09.md`](ops/free-tier-collector-recovery-2026-07-09.md) — retained Cloudflare Worker Free collector CPU blocker evidence and recovery boundary
-35. [`operations-public-discovery.md`](operations-public-discovery.md) — final-host canonical, robots, sitemap, analytics, and Search Console operation
-36. [`operations-unimpairment-witness.md`](operations-unimpairment-witness.md) — bounded external Devnet semantic-witness operation for the remaining M1 unimpairment path
-37. [`decision-log.md`](decision-log.md) — accepted and superseded architectural and product decisions
+35. [`ops/free-tier-collector-throughput-design-2026-07-10.md`](ops/free-tier-collector-throughput-design-2026-07-10.md) — HTTP subrequest failure evidence, 32-ledger production baseline, and staged WebSocket transport validation plan
+36. [`operations-public-discovery.md`](operations-public-discovery.md) — final-host canonical, robots, sitemap, analytics, and Search Console operation
+37. [`operations-unimpairment-witness.md`](operations-unimpairment-witness.md) — bounded external Devnet semantic-witness operation for the remaining M1 unimpairment path
+38. [`decision-log.md`](decision-log.md) — accepted and superseded architectural and product decisions
 
 ## Authority rules
 
@@ -57,6 +58,7 @@ This directory is the source of truth for XRPL Lending Monitor and its approved 
 - `observatory-roadmap.md` defines the approved product-evolution order from Explorer v1 through XRPL Lending Observatory O1-O3 and may not be used to bypass active M5-5 or M6 gates.
 - `implementation-status.md` records the current public implementation state.
 - `ops/free-tier-collector-recovery-2026-07-09.md` records the production Cloudflare Worker CPU blocker and the free-tier recovery boundary; it does not by itself prove recovery.
+- `ops/free-tier-collector-throughput-design-2026-07-10.md` records the 64-ledger HTTP subrequest failure, the restored 32-ledger HTTP production baseline, and the T1-T5 transport-validation order; it does not authorize production transport or batch-size changes without measured evidence.
 - `operations-public-discovery.md` defines final-host, canonical, sitemap, analytics, and Search Console launch operation.
 - `operations-unimpairment-witness.md` defines the custody boundary, protocol preconditions, abort conditions, and evidence order for any separately controlled external Devnet unimpairment witness.
 - `development-roadmap.md`, `observatory-roadmap.md`, `explorer-spec.md`, and `implementation-status.md` must be re-read at the start of each Explorer or Observatory implementation unit and reconciled with newly captured evidence before dependent work proceeds.
