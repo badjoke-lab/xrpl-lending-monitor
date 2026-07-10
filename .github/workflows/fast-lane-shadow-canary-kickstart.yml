@@ -1,0 +1,28 @@
+name: Fast lane shadow canary kickstart
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/measure-fast-lane-shadow-canary.mjs'
+      - '.github/workflows/fast-lane-shadow-canary.yml'
+      - '.github/workflows/fast-lane-shadow-canary-kickstart.yml'
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch fast-lane shadow canary
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'fast-lane-shadow-canary.yml',
+              ref: 'main',
+            })
