@@ -149,6 +149,6 @@ describe('history extension artifacts', () => {
     const values = manifests()
     values[1] = { ...values[1]!, endLedgerHash: E }
     expect(() => assertHistoryExtensionArtifacts({ plan: plan(), manifests: values }))
-      .toThrow('History segment chain terminal ledger hash mismatch')
+      .toThrow('end hash does not match the expected terminal boundary')
   })
 })
