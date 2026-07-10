@@ -60,6 +60,7 @@ async function runWebSocketPreparedIncrementalRange(options: BoundedPreparedIncr
         ...scanOptions,
         endpoint,
         reader: session.reader,
+        readWindowSize: options.incrementalConfig.webSocketReadWindow,
       }),
     })
 
