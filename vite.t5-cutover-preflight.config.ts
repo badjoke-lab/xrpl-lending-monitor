@@ -1,4 +1,6 @@
-import { defineConfig } from 'vite'
+import { build, defineConfig } from 'vite'
+
+await build({ configFile: 'vite.config.ts' })
 
 export default defineConfig({
   build: {
