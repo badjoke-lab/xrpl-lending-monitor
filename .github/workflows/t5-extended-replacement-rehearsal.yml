@@ -1,0 +1,190 @@
+name: T5 extended replacement rehearsal
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  rehearse:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Check out extended publication implementation
+        uses: actions/checkout@v4
+        with:
+          ref: feat/t5-extended-history-publication
+
+      - name: Check out active immutable history data
+        uses: actions/checkout@v4
+        with:
+          ref: history-data
+          path: .local/history-root
+          sparse-checkout: |
+            history
+          sparse-checkout-cone-mode: true
+
+      - name: Download retained multi-segment extension artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: t5-multi-segment-extension-rehearsal
+          path: .local/extension
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: 29073900381
+
+      - name: Download retained extended publication artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: t5-extended-publication-rehearsal
+          path: .local/extended-publication
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: 29074302912
+
+      - name: Download verified release-native base artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: current-state-release-assets
+          path: .local/current-state-release
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: 28699460881
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Assemble extended immutable history root
+        shell: bash
+        run: |
+          set -euo pipefail
+          PLAN=.local/extension/plan.json
+          EPOCH="$(jq -r '.epochId' "${PLAN}")"
+          SOURCE_END="$(jq -r '.source.endLedgerIndex' "${PLAN}")"
+          TARGET="$(jq -r '.target.ledgerIndex' "${PLAN}")"
+
+          test "${SOURCE_END}" = "3432924"
+          test "${TARGET}" = "3432936"
+          test -d ".local/history-root/history/${EPOCH}"
+
+          cp -R ".local/extension/history/${EPOCH}/." ".local/history-root/history/${EPOCH}/"
+          cp .local/extended-publication/history/publication.json \
+            .local/history-root/history/publication.json
+
+          jq -e --slurpfile plan "${PLAN}" '
+            .segmentCount == 126
+            and .ledgerCount == 61261
+            and .endLedgerIndex == $plan[0].target.ledgerIndex
+            and .endLedgerHash == $plan[0].target.ledgerHash
+          ' .local/history-root/history/publication.json > /dev/null
+
+          for SEGMENT_ID in $(jq -r '.extension.segments[].segmentId' "${PLAN}"); do
+            test -f ".local/history-root/history/${EPOCH}/${SEGMENT_ID}/manifest.json"
+          done
+
+      - name: Build replacement compiler
+        run: pnpm build:replacement-current-state-read-model
+
+      - name: Rebuild replacement current state through fixed target
+        shell: bash
+        run: |
+          set -uo pipefail
+          mkdir -p t5-extended-replacement-rehearsal
+          STARTED="$(date +%s)"
+          set +e
+          node .replacement-current-state-read-model-build/build-replacement-current-state-read-model.mjs \
+            --local \
+            --input-dir .local/current-state-release/assets \
+            --history-root .local/history-root \
+            --publication .local/history-root/history/publication.json \
+            --output-dir .local/replacement-extended \
+            --page-size 50 \
+            --lookup-prefix-length 3 \
+            > t5-extended-replacement-rehearsal/compiler.stdout.json \
+            2> t5-extended-replacement-rehearsal/compiler.error.log
+          STATUS=$?
+          set -e
+          ELAPSED="$(( $(date +%s) - STARTED ))"
+          printf '%s\n' "${ELAPSED}" > t5-extended-replacement-rehearsal/elapsed-seconds.txt
+          cat t5-extended-replacement-rehearsal/compiler.error.log >&2
+          exit "${STATUS}"
+
+      - name: Verify replacement target and history alignment
+        shell: bash
+        run: |
+          set -euo pipefail
+          PLAN=.local/extension/plan.json
+          PUBLICATION=.local/history-root/history/publication.json
+          SUMMARY=.local/replacement-extended/replacement-read-model-summary.json
+          MANIFEST=.local/replacement-extended/read-model/manifest.json
+          TARGET_INDEX="$(jq -r '.target.ledgerIndex' "${PLAN}")"
+          TARGET_HASH="$(jq -r '.target.ledgerHash' "${PLAN}")"
+
+          jq -e \
+            --argjson target_index "${TARGET_INDEX}" \
+            --arg target_hash "${TARGET_HASH}" '
+            .target.ledgerIndex == $target_index
+            and .target.ledgerHash == $target_hash
+            and .segmentCount == 126
+            and .ledgerCount == 61261
+          ' "${SUMMARY}" > /dev/null
+
+          jq -e \
+            --argjson target_index "${TARGET_INDEX}" \
+            --arg target_hash "${TARGET_HASH}" '
+            .ledgerIndex == $target_index
+            and .ledgerHash == $target_hash
+          ' "${MANIFEST}" > /dev/null
+
+          PAGE_COUNT="$(find .local/replacement-extended/read-model/pages -type f | wc -l)"
+          LOOKUP_COUNT="$(find .local/replacement-extended/read-model/lookup -type f | wc -l)"
+          test "${PAGE_COUNT}" -gt 0
+          test "${LOOKUP_COUNT}" -eq 4096
+
+          jq -n \
+            --argjson elapsedSeconds "$(cat t5-extended-replacement-rehearsal/elapsed-seconds.txt)" \
+            --argjson pageFiles "${PAGE_COUNT}" \
+            --argjson lookupFiles "${LOOKUP_COUNT}" \
+            --slurpfile publication "${PUBLICATION}" \
+            --slurpfile summary "${SUMMARY}" \
+            --slurpfile manifest "${MANIFEST}" '
+            {
+              passed: true,
+              elapsedSeconds: $elapsedSeconds,
+              pageFiles: $pageFiles,
+              lookupFiles: $lookupFiles,
+              history: {
+                chainId: $publication[0].chainId,
+                publicationSha256: $publication[0].publicationSha256,
+                segmentCount: $publication[0].segmentCount,
+                ledgerCount: $publication[0].ledgerCount,
+                endLedgerIndex: $publication[0].endLedgerIndex,
+                endLedgerHash: $publication[0].endLedgerHash
+              },
+              replacement: $summary[0],
+              manifestTarget: {
+                snapshotId: $manifest[0].snapshotId,
+                ledgerIndex: $manifest[0].ledgerIndex,
+                ledgerHash: $manifest[0].ledgerHash
+              }
+            }' > t5-extended-replacement-rehearsal/evidence.json
+
+      - name: Upload retained replacement evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: t5-extended-replacement-rehearsal
+          path: |
+            t5-extended-replacement-rehearsal
+            .local/replacement-extended/replacement-read-model-summary.json
+            .local/replacement-extended/read-model/manifest.json
+          if-no-files-found: warn
+          retention-days: 30
