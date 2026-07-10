@@ -4,13 +4,23 @@ import type { StoredSyncState } from '../domain/network/status'
 import type { CurrentStateOverlayState } from '../worker/repositories/current-state-overlay'
 import type { ReplacementBaseRebaseEvidence } from '../worker/operator/replacement-base-rebase-plan'
 import { HISTORY_SEGMENT_FILE_KINDS } from './history-segments/manifest'
-import { historySegmentPublicationDigest, type HistorySegmentChainPublication } from './history-segments/publication'
+import {
+  historySegmentPublicationDigest,
+  type HistorySegmentChainPublication,
+  type PublishedHistorySegment,
+} from './history-segments/publication'
 import { buildT5CutoverPreflightBundle, type T5CandidateRehearsalSummary } from './t5-cutover-preflight'
 
 const A = 'A'.repeat(64)
 const B = 'B'.repeat(64)
 const C = 'C'.repeat(64)
 const D = 'D'.repeat(64)
+
+function recordCounts(ledgers: number): PublishedHistorySegment['recordCounts'] {
+  return Object.fromEntries(
+    HISTORY_SEGMENT_FILE_KINDS.map((kind) => [kind, kind === 'ledgers' ? ledgers : 0]),
+  ) as PublishedHistorySegment['recordCounts']
+}
 
 async function publication(): Promise<HistorySegmentChainPublication> {
   const result: HistorySegmentChainPublication = {
@@ -23,7 +33,7 @@ async function publication(): Promise<HistorySegmentChainPublication> {
       startLedgerIndex: 100, startLedgerHash: A, startParentHash: B,
       endLedgerIndex: 110, endLedgerHash: C, ledgerCount: 11,
       previousSegmentId: null, previousSegmentEndHash: null,
-      recordCounts: Object.fromEntries(HISTORY_SEGMENT_FILE_KINDS.map((kind) => [kind, kind === 'ledgers' ? 11 : 0])) as any,
+      recordCounts: recordCounts(11),
     }],
     publicationSha256: '0'.repeat(64),
   }
