@@ -1,6 +1,6 @@
 # Implementation status
 
-Last updated: 2026-07-09.
+Last updated: 2026-07-10.
 
 ## Current phase
 
@@ -31,7 +31,25 @@ PR #297 raised the five-minute profile to 16 ledgers/run. The retained runtime m
 
 PR #298 raised the five-minute profile to 32 ledgers/run. The retained runtime monitor artifact created at `2026-07-09T08:08:50Z` passed, but still showed `cursor_delta=64`, `head_delta=175`, and `lag_delta=+111`, with D1 rows read at `3,479,262 / 5,000,000`.
 
-Therefore 32 ledgers/run is still below observed Devnet head growth, and same-day D1 usage is too high for further safe probing. The next prepared unit is a 64-ledger/run free-tier limit test after UTC daily D1 reset. This is a measurement unit, not a final health claim.
+Therefore 32 ledgers/run is still below observed Devnet head growth, and same-day D1 usage was too high for further same-day probing.
+
+PR #299 raised the five-minute profile to 64 ledgers/run after the UTC daily reset. The retained post-reset lightweight runtime monitor artifact created from run attempt 2 of `29057836573` at `2026-07-10T00:48:25Z` failed the runtime invariants:
+
+- samples: `3`;
+- cursor: `3501250 -> 3501250`;
+- `cursor_delta`: `0`;
+- head: `3530970 -> 3531143`;
+- `head_delta`: `173`;
+- lag: `29720 -> 29893`;
+- `lag_delta`: `+173`;
+- `samples_with_failures`: `3`;
+- consecutive failures: `32 -> 34`;
+- error: `incremental_collector_failed`;
+- error message: `Too many subrequests by single Worker invocation`;
+- D1 rows read: `204 / 5,000,000`;
+- D1 rows written: `40 / 100,000`.
+
+This proves the 64-ledger/run five-minute profile is not acceptable on Cloudflare Worker Free as currently configured. The blocker is no longer D1 daily headroom in this post-reset sample; it is the Worker subrequest limit. M5-5 browser regression, production UI screenshot audit, and unimpairment candidate review remain blocked because the collector is not healthy and is materially behind.
 
 ## Latest retained runtime evidence
 
@@ -86,15 +104,13 @@ Explorer v1 is a bounded presentation layer over approved contracts. It must not
 
 ## Active unit
 
-The active implementation unit is preparing a 64-ledger/run five-minute free-tier collector limit test for after UTC daily D1 reset.
+The active implementation unit is collector recovery after the failed 64-ledger/run five-minute free-tier limit test.
 
-1. Preserve five-minute cadence.
-2. Stage the 64-ledger/run profile in draft.
-3. Do not merge or run the monitor again before UTC daily D1 reset unless production safety requires rollback.
-4. After UTC reset and a short counter-settlement buffer, merge/deploy the 64 profile.
-5. Wait for Cloudflare deployment and at least two scheduled cron windows.
-6. Run the catch-up runtime monitor once.
-7. Accept the test only if cursor advances without failures, D1 headroom remains safe, and lag growth is reduced or reversed.
+1. Preserve the retained failed 64-ledger evidence.
+2. Do not run M5-5 browser regression, production UI screenshot audit, or unimpairment candidate review while collector status is `error`, cursor is stalled, or lag is materially positive.
+3. Do not weaken D1 gates, browser exit criteria, or source/projection consistency gates.
+4. Choose the next collector recovery unit from evidence: either reduce/restructure the per-run work to stay below Worker subrequest limits, or explicitly record that Cloudflare Worker Free cannot provide catch-up-grade near-real-time operation for the current collector shape.
+5. After any collector recovery change, require retained runtime monitor evidence showing cursor advancement, zero failures, safe D1 headroom, and lag reduction or zero-lag health before resuming M5-5 browser/UI/candidate-review tracks.
 
 Track A — M5-5 browser evidence — remains blocked until collector tuning evidence is captured. Track B — production UI audit — also remains gated by measured current-day headroom and collector health.
 
@@ -112,19 +128,18 @@ M6-I1 may begin only after M5-5 exits and after issue #283, the fixture catalog,
 
 ## Next order
 
-1. Keep the 64-ledger/run draft PR staged until UTC daily D1 reset.
-2. After UTC reset plus a short buffer, merge/deploy the 64-ledger/run test profile.
-3. Confirm collector cursor advancement, zero failures, D1 headroom, and lag behavior with one retained catch-up runtime monitor artifact.
-4. If 64 still underperforms, decide whether to test 96 after a later reset or record that Cloudflare Worker Free cannot provide catch-up-grade near-real-time operation.
-5. Run or rerun M5-5 browser regression only after collector preflight and D1 headroom gates pass.
-6. Inspect `summary.json`, `summary.md`, `runner.log`, `exit-evaluation.json`, `exit-evaluation.md`, collector preflight, and D1 headroom evidence.
-7. Reconcile M5-5 exit only when retained API and browser evidence both satisfy their gates.
-8. After M5-5 exits, begin M6-I1 using `docs/m6-integrity-reset-plan.md`, `docs/m6-i1-fixture-catalog.md`, and issue #283 after inventorying existing helpers.
+1. Preserve the failed 64-ledger/run evidence from run attempt 2 of `29057836573`.
+2. Decide the next collector recovery unit from the Worker subrequest-limit failure; do not proceed directly to a larger 96-ledger profile without new evidence that it will not worsen the same limit.
+3. After the next recovery change, confirm collector cursor advancement, zero failures, D1 headroom, and lag behavior with one retained catch-up runtime monitor artifact.
+4. Run or rerun M5-5 browser regression only after collector preflight and D1 headroom gates pass.
+5. Inspect `summary.json`, `summary.md`, `runner.log`, `exit-evaluation.json`, `exit-evaluation.md`, collector preflight, and D1 headroom evidence.
+6. Reconcile M5-5 exit only when retained API and browser evidence both satisfy their gates.
+7. After M5-5 exits, begin M6-I1 using `docs/m6-integrity-reset-plan.md`, `docs/m6-i1-fixture-catalog.md`, and issue #283 after inventorying existing helpers.
 
 ## Remaining blockers
 
-- Production scheduled collector is advancing without failures, but retained evidence still shows growing lag at the 32-ledger/run five-minute profile.
-- Same-day D1 read usage is too high for additional safe probing before UTC daily reset.
+- Production scheduled collector is failing under the 64-ledger/run five-minute profile with `incremental_collector_failed` / Worker subrequest-limit errors.
+- The latest retained post-reset sample had safe D1 usage, but collector cursor did not advance and lag increased.
 - M5-5 API cross-audit evidence is passing, but real-data browser regression and representative browser production behavior evidence remain pending before M5-5 exit.
 - The independent production UI audit remains separately gated by measured current-day headroom and collector health.
 - M6 plans and M6-I1 fixture catalog are prepared, but M6 execution remains blocked until M5-5 exit.
