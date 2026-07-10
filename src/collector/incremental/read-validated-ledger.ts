@@ -99,6 +99,40 @@ function field(record: Record<string, unknown>, ...names: string[]): unknown {
   return undefined
 }
 
+export function parseValidatedLedgerResult(options: {
+  endpoint: string
+  requestedLedgerIndex: number
+  result: Record<string, unknown>
+}): ValidatedLedgerRead {
+  const ledger = recordFrom(options.result.ledger, 'ledger result')
+  const validated = options.result.validated ?? ledger.validated
+  if (validated !== true) throw new Error(`Ledger ${options.requestedLedgerIndex} is not validated`)
+
+  const ledgerIndex = requiredInteger(
+    field(options.result, 'ledger_index') ?? field(ledger, 'ledger_index', 'seqNum'),
+    'ledger_index',
+  )
+  if (ledgerIndex !== options.requestedLedgerIndex) {
+    throw new Error(`Requested ledger ${options.requestedLedgerIndex} but received ${ledgerIndex}`)
+  }
+  const transactions = ledger.transactions
+  if (!Array.isArray(transactions)) throw new Error('ledger transactions must be an array')
+
+  return {
+    endpoint: options.endpoint,
+    ledgerIndex,
+    ledgerHash: requiredString(
+      field(options.result, 'ledger_hash') ?? field(ledger, 'ledger_hash', 'hash'),
+      'ledger_hash',
+    ),
+    parentHash: requiredString(field(ledger, 'parent_hash', 'parentHash'), 'parent_hash'),
+    closeTime: requiredInteger(field(ledger, 'close_time', 'closeTime'), 'close_time'),
+    transactions: transactions.map(parseTransaction).sort(
+      (left, right) => left.transactionIndex - right.transactionIndex,
+    ),
+  }
+}
+
 export async function readValidatedLedger(options: {
   endpoint: string
   ledgerIndex: number
@@ -116,31 +150,9 @@ export async function readValidatedLedger(options: {
     expand: true,
     owner_funds: false,
   })
-  const ledger = recordFrom(result.ledger, 'ledger result')
-  const validated = result.validated ?? ledger.validated
-  if (validated !== true) throw new Error(`Ledger ${options.ledgerIndex} is not validated`)
-
-  const ledgerIndex = requiredInteger(
-    field(result, 'ledger_index') ?? field(ledger, 'ledger_index', 'seqNum'),
-    'ledger_index',
-  )
-  if (ledgerIndex !== options.ledgerIndex) {
-    throw new Error(`Requested ledger ${options.ledgerIndex} but received ${ledgerIndex}`)
-  }
-  const transactions = ledger.transactions
-  if (!Array.isArray(transactions)) throw new Error('ledger transactions must be an array')
-
-  return {
+  return parseValidatedLedgerResult({
     endpoint: options.endpoint,
-    ledgerIndex,
-    ledgerHash: requiredString(
-      field(result, 'ledger_hash') ?? field(ledger, 'ledger_hash', 'hash'),
-      'ledger_hash',
-    ),
-    parentHash: requiredString(field(ledger, 'parent_hash', 'parentHash'), 'parent_hash'),
-    closeTime: requiredInteger(field(ledger, 'close_time', 'closeTime'), 'close_time'),
-    transactions: transactions.map(parseTransaction).sort(
-      (left, right) => left.transactionIndex - right.transactionIndex,
-    ),
-  }
+    requestedLedgerIndex: options.ledgerIndex,
+    result,
+  })
 }
