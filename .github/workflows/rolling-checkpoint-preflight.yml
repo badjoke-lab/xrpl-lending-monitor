@@ -30,14 +30,14 @@ jobs:
             history/publication.json
           sparse-checkout-cone-mode: false
 
-      - name: Download retained rolling candidate evidence
+      - name: Download retained rolling T2 evidence
         uses: actions/download-artifact@v4
         with:
-          name: rolling-checkpoint-candidate
+          name: rolling-t2-evidence-recovery
           path: .local/candidate-evidence
           github-token: ${{ secrets.GITHUB_TOKEN }}
           repository: ${{ github.repository }}
-          run-id: 29087578902
+          run-id: 29089075551
 
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
@@ -72,8 +72,8 @@ jobs:
             and .target.ledgerIndex == $publication[0].endLedgerIndex
             and .target.ledgerHash == $publication[0].endLedgerHash
             and .target.publicationSha256 == $publication[0].publicationSha256
-            and .currentState.target.ledgerIndex == .target.ledgerIndex
-            and .currentState.target.ledgerHash == .target.ledgerHash
+            and .currentState.ledgerIndex == .target.ledgerIndex
+            and .currentState.ledgerHash == .target.ledgerHash
             and .remoteRehearsal.passed == true
           ' "${EVIDENCE}" > /dev/null
 
