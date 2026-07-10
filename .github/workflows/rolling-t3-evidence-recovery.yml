@@ -1,0 +1,138 @@
+name: Rolling T3 evidence recovery
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/rolling-t3-evidence-recovery.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          ref: history-rolling-t3-candidate-data
+          path: .local/history-candidate
+          sparse-checkout: |
+            history/publication.json
+            history/index/exact/manifest.json
+          sparse-checkout-cone-mode: false
+      - uses: actions/checkout@v4
+        with:
+          ref: current-state-rolling-t3-candidate-data
+          path: .local/current-candidate
+          sparse-checkout: |
+            rolling-read-model-summary.json
+            rolling-base/manifest.json
+            read-model/manifest.json
+          sparse-checkout-cone-mode: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build:candidate-source-rehearsal
+
+      - name: Rehearse T3 candidate pair and recover evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=rolling-t3-evidence-recovery
+          mkdir -p "${ROOT}"
+          node .candidate-source-rehearsal-build/rehearse-candidate-sources.mjs \
+            --local \
+            --repository badjoke-lab/xrpl-lending-monitor \
+            --history-branch history-rolling-t3-candidate-data \
+            --current-state-branch current-state-rolling-t3-candidate-data \
+            > "${ROOT}/remote-rehearsal-summary.json"
+          jq -e '.passed == true and (.exactReads | length) == 3 and .recentHistory.items == 1' "${ROOT}/remote-rehearsal-summary.json" > /dev/null
+
+          PUBLICATION=.local/history-candidate/history/publication.json
+          EXACT=.local/history-candidate/history/index/exact/manifest.json
+          CURRENT=.local/current-candidate/rolling-read-model-summary.json
+          ROLLING=.local/current-candidate/rolling-base/manifest.json
+          READ_MODEL=.local/current-candidate/read-model/manifest.json
+          HISTORY_SHA="$(git ls-remote origin refs/heads/history-rolling-t3-candidate-data | awk '{print $1}')"
+          CURRENT_SHA="$(git ls-remote origin refs/heads/current-state-rolling-t3-candidate-data | awk '{print $1}')"
+          printf '%s' "${HISTORY_SHA}" | grep -Eq '^[a-f0-9]{40}$'
+          printf '%s' "${CURRENT_SHA}" | grep -Eq '^[a-f0-9]{40}$'
+
+          jq -n -e \
+            --slurpfile publication "${PUBLICATION}" \
+            --slurpfile exact "${EXACT}" \
+            --slurpfile current "${CURRENT}" \
+            --slurpfile rolling "${ROLLING}" \
+            --slurpfile readModel "${READ_MODEL}" '
+            $publication[0].endLedgerIndex == $current[0].target.ledgerIndex
+            and $publication[0].endLedgerHash == $current[0].target.ledgerHash
+            and $publication[0].publicationSha256 == $exact[0].publicationSha256
+            and $current[0].target.manifestSha256 == $readModel[0].manifestSha256
+            and $current[0].target.ledgerIndex == $rolling[0].ledgerIndex
+            and $current[0].target.ledgerHash == $rolling[0].ledgerHash
+            and $current[0].rollingBase.manifestSha256 == $rolling[0].manifestSha256
+            and $rolling[0].segmentCount == 64
+          ' > /dev/null
+
+          jq -n \
+            --slurpfile publication "${PUBLICATION}" \
+            --slurpfile exact "${EXACT}" \
+            --slurpfile current "${CURRENT}" \
+            --slurpfile rolling "${ROLLING}" \
+            --slurpfile remote "${ROOT}/remote-rehearsal-summary.json" \
+            --arg historyCommitSha "${HISTORY_SHA}" \
+            --arg currentStateCommitSha "${CURRENT_SHA}" '
+            {
+              passed:true,
+              source:{
+                ledgerIndex:$current[0].source.ledgerIndex,
+                ledgerHash:$current[0].source.ledgerHash,
+                snapshotId:$current[0].source.snapshotId,
+                currentStateMode:"rolling-base"
+              },
+              delta:{
+                startLedgerIndex:$current[0].extension.startLedgerIndex,
+                endLedgerIndex:$current[0].extension.endLedgerIndex,
+                ledgerCount:$current[0].extension.ledgerCount,
+                segmentCount:$current[0].extension.segmentCount,
+                readWindowSize:4
+              },
+              target:{
+                chainId:$publication[0].chainId,
+                publicationSha256:$publication[0].publicationSha256,
+                segmentCount:$publication[0].segmentCount,
+                ledgerCount:$publication[0].ledgerCount,
+                ledgerIndex:$publication[0].endLedgerIndex,
+                ledgerHash:$publication[0].endLedgerHash
+              },
+              exactIndex:{manifestSha256:$exact[0].manifestSha256,totalRecords:$exact[0].totalRecords},
+              currentState:{target:$current[0].target,mutationStats:$current[0].mutationStats,rollingBase:{manifestSha256:$rolling[0].manifestSha256,segmentCount:$rolling[0].segmentCount,counts:$rolling[0].counts}},
+              candidate:{historyBranch:"history-rolling-t3-candidate-data",historyCommitSha:$historyCommitSha,currentStateBranch:"current-state-rolling-t3-candidate-data",currentStateCommitSha:$currentStateCommitSha},
+              remoteRehearsal:$remote[0]
+            }' > "${ROOT}/evidence.json"
+
+          jq -e '
+            .passed == true
+            and .source.currentStateMode == "rolling-base"
+            and .source.ledgerIndex == 3541657
+            and .delta.ledgerCount == 1000
+            and .delta.readWindowSize == 4
+            and .target.ledgerIndex == .remoteRehearsal.ledgerIndex
+            and .target.ledgerHash == .remoteRehearsal.ledgerHash
+            and .currentState.target.ledgerIndex == .target.ledgerIndex
+            and .currentState.rollingBase.segmentCount == 64
+          ' "${ROOT}/evidence.json" > /dev/null
+
+      - name: Upload retained T3 evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: rolling-t3-evidence-recovery
+          path: rolling-t3-evidence-recovery
+          if-no-files-found: error
+          retention-days: 30
