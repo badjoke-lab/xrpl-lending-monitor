@@ -1,0 +1,279 @@
+name: T5 multi-segment extension rehearsal
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/t5-multi-segment-extension-rehearsal.yml'
+      - 'scripts/plan-history-extension.ts'
+      - 'scripts/run-history-segment.ts'
+      - 'scripts/update-history-segment-checkpoint.ts'
+      - 'scripts/verify-history-extension-artifacts.ts'
+      - 'scripts/verify-history-segment-chain.ts'
+      - 'src/shared/history-segments/**'
+      - 'vite.history-extension-plan.config.ts'
+      - 'vite.history-extension-artifacts.config.ts'
+      - 'vite.history-segment.config.ts'
+      - 'vite.history-segment-checkpoint.config.ts'
+      - 'vite.history-segment-chain.config.ts'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rehearse:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out implementation
+        uses: actions/checkout@v4
+
+      - name: Check out active history source metadata
+        uses: actions/checkout@v4
+        with:
+          ref: history-data
+          path: .local/history-source
+          sparse-checkout: |
+            history-channel.json
+            history/publication.json
+          sparse-checkout-cone-mode: false
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build multi-segment rehearsal tools
+        run: |
+          pnpm build:history-extension-plan
+          pnpm build:history-extension-artifacts
+          pnpm build:history-segment
+          pnpm build:history-segment-checkpoint
+          pnpm build:history-segment-chain
+
+      - name: Freeze source binding and fixed target
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=t5-multi-segment-rehearsal
+          CHANNEL=.local/history-source/history-channel.json
+          PUBLICATION=.local/history-source/history/publication.json
+          mkdir -p "${ROOT}"
+
+          PUBLICATION_FILE_SHA="$(sha256sum "${PUBLICATION}" | awk '{print $1}')"
+          CHANNEL_FILE_SHA="$(jq -r '.active.publicationSha256' "${CHANNEL}")"
+          test "${PUBLICATION_FILE_SHA}" = "${CHANNEL_FILE_SHA}"
+          jq -e --slurpfile publication "${PUBLICATION}" '
+            .active.publicationPath == "history/publication.json"
+            and .active.chainId == $publication[0].chainId
+            and .active.epochId == $publication[0].epochId
+          ' "${CHANNEL}" > /dev/null
+
+          SOURCE_END="$(jq -r '.endLedgerIndex' "${PUBLICATION}")"
+          TARGET_LEDGER="$((SOURCE_END + 12))"
+          jq -n --argjson ledger_index "${TARGET_LEDGER}" '{
+            method: "ledger",
+            params: [{ledger_index: $ledger_index, transactions: false, expand: false}]
+          }' > "${ROOT}/target-request.json"
+
+          curl --fail-with-body --silent --show-error --retry 3 \
+            -H 'Content-Type: application/json' \
+            --data @"${ROOT}/target-request.json" \
+            https://devnet.honeycluster.io/ \
+            > "${ROOT}/target-response.json"
+
+          TARGET_HASH="$(jq -r '.result.ledger_hash // .result.ledger.ledger_hash // empty' "${ROOT}/target-response.json")"
+          printf '%s' "${TARGET_HASH}" | grep -Eq '^[A-F0-9]{64}$'
+
+          node .history-extension-plan-build/plan-history-extension.mjs \
+            --local \
+            --publication "${PUBLICATION}" \
+            --target-ledger "${TARGET_LEDGER}" \
+            --target-ledger-hash "${TARGET_HASH}" \
+            --segment-ledgers 4 \
+            --checkpoint-every-segments 1 \
+            --output "${ROOT}/plan.json" \
+            > "${ROOT}/plan.stdout.json"
+
+          jq -e '
+            .extension.segmentCount == 3
+            and .extension.ledgerCount == 12
+            and .extension.startLedgerIndex == (.source.endLedgerIndex + 1)
+            and .extension.endLedgerIndex == .target.ledgerIndex
+            and ([.extension.segments[].ledgerCount] | all(. == 4))
+            and ([.extension.segments[].checkpointAfter] | all(. == true))
+          ' "${ROOT}/plan.json" > /dev/null
+
+          jq -n \
+            --arg publication_file_sha256 "${PUBLICATION_FILE_SHA}" \
+            --slurpfile channel "${CHANNEL}" \
+            --slurpfile plan "${ROOT}/plan.json" \
+            '{
+              publication_file_sha256: $publication_file_sha256,
+              channel: $channel[0].active,
+              source: $plan[0].source,
+              target: $plan[0].target
+            }' > "${ROOT}/frozen-boundary.json"
+
+      - name: Generate planned segments with retry and checkpointing
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=t5-multi-segment-rehearsal
+          PLAN="${ROOT}/plan.json"
+          EPOCH="$(jq -r '.epochId' "${PLAN}")"
+          RANGE_START="$(jq -r '.extension.startLedgerIndex' "${PLAN}")"
+          RANGE_END="$(jq -r '.extension.endLedgerIndex' "${PLAN}")"
+          ANCHOR_ID="$(jq -r '.extension.anchorPreviousSegmentId' "${PLAN}")"
+          ANCHOR_HASH="$(jq -r '.extension.anchorPreviousSegmentEndHash' "${PLAN}")"
+          CHECKPOINT="${ROOT}/checkpoint.json"
+          MANIFEST_PATHS="${ROOT}/manifest-paths.txt"
+          METRICS="${ROOT}/segment-metrics.ndjson"
+          : > "${MANIFEST_PATHS}"
+          : > "${METRICS}"
+
+          PREV_ID="${ANCHOR_ID}"
+          PREV_HASH="${ANCHOR_HASH}"
+
+          while IFS= read -r SEGMENT; do
+            ORDINAL="$(jq -r '.ordinal' <<<"${SEGMENT}")"
+            SEGMENT_ID="$(jq -r '.segmentId' <<<"${SEGMENT}")"
+            START="$(jq -r '.startLedgerIndex' <<<"${SEGMENT}")"
+            END="$(jq -r '.endLedgerIndex' <<<"${SEGMENT}")"
+            OUT="${ROOT}/history/${EPOCH}/${SEGMENT_ID}"
+            STARTED="$(date +%s)"
+            PASSED=false
+            ATTEMPTS=0
+
+            for ATTEMPT in 1 2 3; do
+              ATTEMPTS="${ATTEMPT}"
+              if node .history-segment-build/run-history-segment.mjs \
+                --local \
+                --endpoint https://devnet.honeycluster.io/ \
+                --timeout-ms 8000 \
+                --start-ledger "${START}" \
+                --end-ledger "${END}" \
+                --epoch-id "${EPOCH}" \
+                --segment-id "${SEGMENT_ID}" \
+                --previous-segment-id "${PREV_ID}" \
+                --previous-segment-end-hash "${PREV_HASH}" \
+                --source-revision "${GITHUB_SHA}" \
+                --output-dir "${OUT}" \
+                > "${ROOT}/segment-${ORDINAL}.stdout.json"; then
+                PASSED=true
+                break
+              fi
+              sleep $((ATTEMPT * 5))
+            done
+
+            if [[ "${PASSED}" != true ]]; then
+              echo "Planned extension segment ${ORDINAL} failed after ${ATTEMPTS} attempts" >&2
+              exit 1
+            fi
+
+            node .history-segment-checkpoint-build/update-history-segment-checkpoint.mjs \
+              --local \
+              --checkpoint "${CHECKPOINT}" \
+              --manifest "${OUT}/manifest.json" \
+              --epoch-id "${EPOCH}" \
+              --range-start-ledger "${RANGE_START}" \
+              --range-end-ledger "${RANGE_END}" \
+              --previous-segment-id "${ANCHOR_ID}" \
+              --previous-segment-end-hash "${ANCHOR_HASH}" \
+              > "${ROOT}/checkpoint-${ORDINAL}.stdout.json"
+
+            printf '%s\n' "${OUT}/manifest.json" >> "${MANIFEST_PATHS}"
+            ELAPSED="$(( $(date +%s) - STARTED ))"
+            MANIFEST_BYTES="$(wc -c < "${OUT}/manifest.json")"
+            TOTAL_RECORDS="$(jq '[.files[].records] | add' "${OUT}/manifest.json")"
+            jq -nc \
+              --argjson ordinal "${ORDINAL}" \
+              --arg segmentId "${SEGMENT_ID}" \
+              --argjson startLedgerIndex "${START}" \
+              --argjson endLedgerIndex "${END}" \
+              --argjson attempts "${ATTEMPTS}" \
+              --argjson elapsedSeconds "${ELAPSED}" \
+              --argjson manifestBytes "${MANIFEST_BYTES}" \
+              --argjson totalRecords "${TOTAL_RECORDS}" \
+              '{ordinal:$ordinal,segmentId:$segmentId,startLedgerIndex:$startLedgerIndex,endLedgerIndex:$endLedgerIndex,attempts:$attempts,elapsedSeconds:$elapsedSeconds,manifestBytes:$manifestBytes,totalRecords:$totalRecords}' \
+              >> "${METRICS}"
+
+            PREV_ID="${SEGMENT_ID}"
+            PREV_HASH="$(jq -r '.endLedgerHash' "${OUT}/manifest.json")"
+          done < <(jq -c '.extension.segments[]' "${PLAN}")
+
+          EXPECTED_SEGMENTS="$(jq -r '.extension.segmentCount' "${PLAN}")"
+          jq -e \
+            --argjson range_end "${RANGE_END}" \
+            --argjson expected_segments "${EXPECTED_SEGMENTS}" \
+            --arg anchor_id "${ANCHOR_ID}" \
+            --arg anchor_hash "${ANCHOR_HASH}" '
+            .nextLedgerIndex == ($range_end + 1)
+            and (.completedSegments | length) == $expected_segments
+            and .anchorPreviousSegmentId == $anchor_id
+            and .anchorPreviousSegmentEndHash == $anchor_hash
+          ' "${CHECKPOINT}" > /dev/null
+
+          jq -s '.' "${METRICS}" > "${ROOT}/segment-metrics.json"
+
+      - name: Verify generated set against frozen plan and chain boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=t5-multi-segment-rehearsal
+          PLAN="${ROOT}/plan.json"
+          MANIFEST_ARGS=()
+          while IFS= read -r MANIFEST; do
+            MANIFEST_ARGS+=(--manifest "${MANIFEST}")
+          done < "${ROOT}/manifest-paths.txt"
+
+          node .history-extension-artifacts-build/verify-history-extension-artifacts.mjs \
+            --local \
+            --plan "${PLAN}" \
+            "${MANIFEST_ARGS[@]}" \
+            > "${ROOT}/plan-bound-artifact-summary.json"
+
+          node .history-segment-chain-build/verify-history-segment-chain.mjs \
+            --local \
+            "${MANIFEST_ARGS[@]}" \
+            --epoch-id "$(jq -r '.epochId' "${PLAN}")" \
+            --start-ledger "$(jq -r '.extension.startLedgerIndex' "${PLAN}")" \
+            --start-parent-hash "$(jq -r '.source.endLedgerHash' "${PLAN}")" \
+            --previous-segment-id "$(jq -r '.source.lastSegmentId' "${PLAN}")" \
+            --previous-segment-end-hash "$(jq -r '.source.endLedgerHash' "${PLAN}")" \
+            --end-ledger "$(jq -r '.target.ledgerIndex' "${PLAN}")" \
+            --end-ledger-hash "$(jq -r '.target.ledgerHash' "${PLAN}")" \
+            > "${ROOT}/chain-summary.json"
+
+          jq -n \
+            --slurpfile frozen "${ROOT}/frozen-boundary.json" \
+            --slurpfile planBound "${ROOT}/plan-bound-artifact-summary.json" \
+            --slurpfile checkpoint "${ROOT}/checkpoint.json" \
+            --slurpfile chain "${ROOT}/chain-summary.json" \
+            --slurpfile metrics "${ROOT}/segment-metrics.json" \
+            '{
+              passed: true,
+              frozenBoundary: $frozen[0],
+              planBoundArtifacts: $planBound[0],
+              checkpoint: {
+                nextLedgerIndex: $checkpoint[0].nextLedgerIndex,
+                completedSegmentCount: ($checkpoint[0].completedSegments | length),
+                previousSegmentId: $checkpoint[0].previousSegmentId,
+                previousSegmentEndHash: $checkpoint[0].previousSegmentEndHash
+              },
+              chain: $chain[0],
+              metrics: $metrics[0]
+            }' > "${ROOT}/evidence.json"
+
+      - name: Upload retained multi-segment rehearsal evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: t5-multi-segment-extension-rehearsal
+          path: t5-multi-segment-rehearsal
+          if-no-files-found: error
