@@ -1,0 +1,172 @@
+name: Rolling checkpoint preflight
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/rolling-checkpoint-preflight.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  D1_DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out implementation
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Check out rolling history candidate metadata
+        uses: actions/checkout@v4
+        with:
+          ref: history-rolling-candidate-data
+          path: .local/history-candidate
+          sparse-checkout: |
+            history/publication.json
+          sparse-checkout-cone-mode: false
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build preflight and candidate rehearsal tools
+        run: |
+          pnpm build:t5-cutover-preflight
+          pnpm build:candidate-source-rehearsal
+
+      - name: Rehearse exact remote rolling candidate pair
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p rolling-checkpoint-preflight
+          node .candidate-source-rehearsal-build/rehearse-candidate-sources.mjs \
+            --local \
+            --repository badjoke-lab/xrpl-lending-monitor \
+            --history-branch history-rolling-candidate-data \
+            --current-state-branch current-state-rolling-candidate-data \
+            > rolling-checkpoint-preflight/candidate-summary.json
+          jq -e '.passed == true and (.exactReads | length) == 3 and .recentHistory.items == 1' rolling-checkpoint-preflight/candidate-summary.json > /dev/null
+
+      - name: Bind exact candidate branch commit SHAs
+        shell: bash
+        run: |
+          set -euo pipefail
+          HISTORY_SHA="$(git ls-remote origin refs/heads/history-rolling-candidate-data | awk '{print $1}')"
+          CURRENT_SHA="$(git ls-remote origin refs/heads/current-state-rolling-candidate-data | awk '{print $1}')"
+          printf '%s' "${HISTORY_SHA}" | grep -Eq '^[a-f0-9]{40}$'
+          printf '%s' "${CURRENT_SHA}" | grep -Eq '^[a-f0-9]{40}$'
+          printf '%s\n' "${HISTORY_SHA}" > rolling-checkpoint-preflight/history-commit-sha.txt
+          printf '%s\n' "${CURRENT_SHA}" > rolling-checkpoint-preflight/current-state-commit-sha.txt
+
+      - name: Capture fresh production evidence directly from remote D1
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote --json --command "SELECT epoch_id,last_processed_ledger,last_processed_hash,latest_observed_ledger,latest_observed_hash,status FROM sync_state WHERE network='devnet'" > rolling-checkpoint-preflight/sync-query.json
+          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote --json --command "SELECT id FROM network_epochs WHERE network='devnet' AND status='current' LIMIT 1" > rolling-checkpoint-preflight/epoch-query.json
+          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote --json --command "SELECT epoch_id,base_snapshot_id,base_ledger_index,base_ledger_hash,overlay_ledger_index,overlay_ledger_hash,updated_at FROM current_state_overlay_state WHERE network='devnet' AND epoch_id='devnet-3371675' ORDER BY updated_at DESC,base_snapshot_id ASC" > rolling-checkpoint-preflight/overlay-query.json
+
+          jq '[.. | objects | select(has("results")) | .results[]?] | .[0]' rolling-checkpoint-preflight/sync-query.json > rolling-checkpoint-preflight/sync-row.json
+          jq '[.. | objects | select(has("results")) | .results[]?] | .[0]' rolling-checkpoint-preflight/epoch-query.json > rolling-checkpoint-preflight/epoch-row.json
+          jq '[.. | objects | select(has("results")) | .results[]?]' rolling-checkpoint-preflight/overlay-query.json > rolling-checkpoint-preflight/overlay-rows.json
+
+          jq -e '.epoch_id != null and .last_processed_ledger != null and .last_processed_hash != null' rolling-checkpoint-preflight/sync-row.json > /dev/null
+          jq -e '.id == "devnet-3371675"' rolling-checkpoint-preflight/epoch-row.json > /dev/null
+          jq -e 'length > 0' rolling-checkpoint-preflight/overlay-rows.json > /dev/null
+
+          jq -n \
+            --slurpfile sync rolling-checkpoint-preflight/sync-row.json \
+            --slurpfile epoch rolling-checkpoint-preflight/epoch-row.json \
+            --slurpfile overlays rolling-checkpoint-preflight/overlay-rows.json '
+            {
+              sync: {
+                network: "devnet",
+                epochId: $sync[0].epoch_id,
+                lastProcessedLedger: $sync[0].last_processed_ledger,
+                lastProcessedHash: $sync[0].last_processed_hash,
+                latestObservedLedger: $sync[0].latest_observed_ledger,
+                latestObservedHash: $sync[0].latest_observed_hash,
+                status: $sync[0].status
+              },
+              currentEpochId: $epoch[0].id,
+              overlayStates: ($overlays[0] | map({
+                network: "devnet",
+                epochId: .epoch_id,
+                baseSnapshotId: .base_snapshot_id,
+                baseLedgerIndex: .base_ledger_index,
+                baseLedgerHash: .base_ledger_hash,
+                overlayLedgerIndex: .overlay_ledger_index,
+                overlayLedgerHash: .overlay_ledger_hash,
+                updatedAt: .updated_at
+              }))
+            }' > rolling-checkpoint-preflight/production-evidence.json
+
+      - name: Refresh evidence with live validated head
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -n '{method:"ledger",params:[{ledger_index:"validated",transactions:false,expand:false}]}' > rolling-checkpoint-preflight/live-head-request.json
+          curl --fail-with-body --silent --show-error --retry 3 -H 'Content-Type: application/json' --data @rolling-checkpoint-preflight/live-head-request.json https://devnet.honeycluster.io/ > rolling-checkpoint-preflight/live-head-response.json
+          LIVE_LEDGER="$(jq -r '.result.ledger_index // .result.ledger.ledger_index // empty' rolling-checkpoint-preflight/live-head-response.json)"
+          LIVE_HASH="$(jq -r '.result.ledger_hash // .result.ledger.ledger_hash // empty' rolling-checkpoint-preflight/live-head-response.json)"
+          printf '%s' "${LIVE_HASH}" | grep -Eq '^[A-F0-9]{64}$'
+          CANDIDATE_LEDGER="$(jq -r '.ledgerIndex' rolling-checkpoint-preflight/candidate-summary.json)"
+          test "${LIVE_LEDGER}" -ge "${CANDIDATE_LEDGER}"
+          jq --argjson ledger "${LIVE_LEDGER}" --arg hash "${LIVE_HASH}" '.sync.latestObservedLedger=$ledger | .sync.latestObservedHash=$hash' rolling-checkpoint-preflight/production-evidence.json > rolling-checkpoint-preflight/production-evidence-refreshed.json
+
+      - name: Build fail-closed rolling cutover preflight bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          HISTORY_SHA="$(cat rolling-checkpoint-preflight/history-commit-sha.txt)"
+          CURRENT_SHA="$(cat rolling-checkpoint-preflight/current-state-commit-sha.txt)"
+          node .t5-cutover-preflight-build/build-t5-cutover-preflight-bundle.mjs \
+            --local \
+            --candidate-summary rolling-checkpoint-preflight/candidate-summary.json \
+            --history-publication .local/history-candidate/history/publication.json \
+            --production-evidence rolling-checkpoint-preflight/production-evidence-refreshed.json \
+            --history-commit-sha "${HISTORY_SHA}" \
+            --current-state-commit-sha "${CURRENT_SHA}" \
+            > rolling-checkpoint-preflight/preflight-bundle.json
+
+          jq -e '
+            (.rebasePlan.action == "rebase" or .rebasePlan.action == "replay")
+            and .candidate.historyBranch == "history-rolling-candidate-data"
+            and .candidate.currentStateBranch == "current-state-rolling-candidate-data"
+            and .candidate.ledgerIndex == .target.ledgerIndex
+            and .candidate.ledgerHash == .target.ledgerHash
+            and .production.latestObservedLedger >= .target.ledgerIndex
+          ' rolling-checkpoint-preflight/preflight-bundle.json > /dev/null
+
+      - name: Capture current UTC-day D1 headroom
+        shell: bash
+        run: |
+          set -euo pipefail
+          TODAY="$(date -u +%F)"
+          read -r -d '' QUERY <<'GRAPHQL' || true
+          query D1Usage($accountTag:string!,$start:Date,$end:Date,$databaseId:string){viewer{accounts(filter:{accountTag:$accountTag}){d1AnalyticsAdaptiveGroups(limit:10000,filter:{date_geq:$start,date_leq:$end,databaseId:$databaseId}){sum{rowsRead rowsWritten}}}}}
+          GRAPHQL
+          jq -n --arg query "${QUERY}" --arg accountTag "${CLOUDFLARE_ACCOUNT_ID}" --arg start "${TODAY}" --arg end "${TODAY}" --arg databaseId "${D1_DATABASE_ID}" '{query:$query,variables:{accountTag:$accountTag,start:$start,end:$end,databaseId:$databaseId}}' > rolling-checkpoint-preflight/d1-usage-request.json
+          curl --fail-with-body --silent --show-error --retry 3 -X POST -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -H 'Content-Type: application/json' --data @rolling-checkpoint-preflight/d1-usage-request.json https://api.cloudflare.com/client/v4/graphql > rolling-checkpoint-preflight/d1-usage-response.json
+          jq -e '((.errors // []) | length)==0 and (.data.viewer.accounts | length)>0' rolling-checkpoint-preflight/d1-usage-response.json > /dev/null
+          jq '[.data.viewer.accounts[0].d1AnalyticsAdaptiveGroups[]] as $groups | {rows_read:([$groups[].sum.rowsRead // 0] | add // 0),rows_written:([$groups[].sum.rowsWritten // 0] | add // 0)} | .rows_read_remaining=(5000000-.rows_read) | .rows_written_remaining=(100000-.rows_written)' rolling-checkpoint-preflight/d1-usage-response.json > rolling-checkpoint-preflight/d1-usage-summary.json
+
+      - name: Upload retained read-only preflight evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: rolling-checkpoint-preflight
+          path: rolling-checkpoint-preflight
+          if-no-files-found: error
+          retention-days: 30
