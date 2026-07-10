@@ -262,6 +262,25 @@ jobs:
               overlayStates:($overlays[0] | map({network:"devnet",epochId:.epoch_id,baseSnapshotId:.base_snapshot_id,baseLedgerIndex:.base_ledger_index,baseLedgerHash:.base_ledger_hash,overlayLedgerIndex:.overlay_ledger_index,overlayLedgerHash:.overlay_ledger_hash,updatedAt:.updated_at}))
             }' > "${ROOT}/production-evidence.json"
 
+      - name: Verify canonical rollback config matches current production base
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=rolling-promotion-evidence
+          BASE_SNAPSHOT="$(jq -r '.vars.REPLACEMENT_BASE_SNAPSHOT_ID' wrangler.jsonc)"
+          BASE_LEDGER="$(jq -r '.vars.REPLACEMENT_BASE_LEDGER_INDEX | tonumber' wrangler.jsonc)"
+          BASE_HASH="$(jq -r '.vars.REPLACEMENT_BASE_LEDGER_HASH' wrangler.jsonc)"
+
+          jq -e '.triggers.crons == ["0 */4 * * *"]' wrangler.jsonc > /dev/null
+          jq -e --arg snapshot "${BASE_SNAPSHOT}" --argjson ledger "${BASE_LEDGER}" --arg hash "${BASE_HASH}" '
+            .sync.lastProcessedLedger >= $ledger
+            and any(.overlayStates[]; .baseSnapshotId == $snapshot and .baseLedgerIndex == $ledger and .baseLedgerHash == $hash)
+          ' "${ROOT}/production-evidence.json" > /dev/null
+
+          jq -n --arg snapshotId "${BASE_SNAPSHOT}" --argjson ledgerIndex "${BASE_LEDGER}" --arg ledgerHash "${BASE_HASH}" \
+            '{snapshotId:$snapshotId,ledgerIndex:$ledgerIndex,ledgerHash:$ledgerHash,protectedCron:"0 */4 * * *"}' \
+            > "${ROOT}/canonical-rollback-base.json"
+
       - name: Refresh live head and build fresh fail-closed preflight
         shell: bash
         run: |
@@ -538,10 +557,11 @@ jobs:
 
           jq -n \
             --slurpfile target "${ROOT}/target-identity.json" \
+            --slurpfile rollback "${ROOT}/canonical-rollback-base.json" \
             --slurpfile preflight "${ROOT}/preflight-bundle.json" \
             --slurpfile usage "${ROOT}/d1-summary.json" \
             --slurpfile collector "${ROOT}/collector-final.json" '
-            {passed:true,target:$target[0],rebasePlan:$preflight[0].rebasePlan,d1UsageAtGate:$usage[0],collector:$collector[0]}
+            {passed:true,target:$target[0],canonicalRollbackBase:$rollback[0],rebasePlan:$preflight[0].rebasePlan,d1UsageAtGate:$usage[0],collector:$collector[0],canonicalConfigReconciliationRequired:true}
           ' > "${ROOT}/evidence.json"
 
       - name: Ensure current-state promotion after confirmed rebase
