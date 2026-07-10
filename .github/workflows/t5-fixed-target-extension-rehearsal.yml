@@ -53,21 +53,50 @@ jobs:
           pnpm build:history-segment
           pnpm build:history-segment-chain
 
-      - name: Verify active source binding and capture fixed target
+      - name: Verify active source binding
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p t5-fixed-target-rehearsal
           CHANNEL=.local/history-source/history-channel.json
           PUBLICATION=.local/history-source/history/publication.json
+          PUBLICATION_FILE_SHA="$(sha256sum "${PUBLICATION}" | awk '{print $1}')"
+          CHANNEL_FILE_SHA="$(jq -r '.active.publicationSha256' "${CHANNEL}")"
+
+          jq -n \
+            --arg publication_file_sha "${PUBLICATION_FILE_SHA}" \
+            --arg channel_file_sha "${CHANNEL_FILE_SHA}" \
+            --arg channel_path "$(jq -r '.active.publicationPath' "${CHANNEL}")" \
+            --arg channel_chain "$(jq -r '.active.chainId' "${CHANNEL}")" \
+            --arg publication_chain "$(jq -r '.chainId' "${PUBLICATION}")" \
+            --arg channel_epoch "$(jq -r '.active.epochId' "${CHANNEL}")" \
+            --arg publication_epoch "$(jq -r '.epochId' "${PUBLICATION}")" \
+            '{
+              publication_path: $channel_path,
+              channel_publication_file_sha256: $channel_file_sha,
+              observed_publication_file_sha256: $publication_file_sha,
+              channel_chain_id: $channel_chain,
+              publication_chain_id: $publication_chain,
+              channel_epoch_id: $channel_epoch,
+              publication_epoch_id: $publication_epoch
+            }' > t5-fixed-target-rehearsal/source-binding.json
+
+          jq -e \
+            --arg publication_file_sha "${PUBLICATION_FILE_SHA}" '
+            .active.publicationPath == "history/publication.json"
+            and .active.publicationSha256 == $publication_file_sha
+          ' "${CHANNEL}" > /dev/null
 
           jq -e --slurpfile publication "${PUBLICATION}" '
-            .active.publicationPath == "history/publication.json"
-            and .active.publicationSha256 == $publication[0].publicationSha256
-            and .active.chainId == $publication[0].chainId
+            .active.chainId == $publication[0].chainId
             and .active.epochId == $publication[0].epochId
           ' "${CHANNEL}" > /dev/null
 
+      - name: Capture fixed target and build frozen extension plan
+        shell: bash
+        run: |
+          set -euo pipefail
+          PUBLICATION=.local/history-source/history/publication.json
           SOURCE_END="$(jq -r '.endLedgerIndex' "${PUBLICATION}")"
           TARGET_LEDGER="$((SOURCE_END + 4))"
           jq -n --argjson ledger_index "${TARGET_LEDGER}" '{
