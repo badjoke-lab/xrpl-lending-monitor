@@ -1,0 +1,218 @@
+name: Rolling T2 evidence recovery
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out implementation
+        uses: actions/checkout@v4
+
+      - name: Check out rolling history candidate metadata
+        uses: actions/checkout@v4
+        with:
+          ref: history-rolling-candidate-data
+          path: .local/history-candidate
+          sparse-checkout: |
+            history-channel.json
+            history/publication.json
+            history/index/exact/manifest.json
+          sparse-checkout-cone-mode: false
+
+      - name: Check out rolling current-state candidate metadata
+        uses: actions/checkout@v4
+        with:
+          ref: current-state-rolling-candidate-data
+          path: .local/current-candidate
+          sparse-checkout: |
+            channel.json
+            rolling-read-model-summary.json
+            rolling-base/manifest.json
+            read-model/manifest.json
+          sparse-checkout-cone-mode: false
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build candidate rehearsal tool
+        run: pnpm build:candidate-source-rehearsal
+
+      - name: Re-run remote rolling candidate rehearsal
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=rolling-t2-evidence-recovery
+          mkdir -p "${ROOT}"
+
+          node .candidate-source-rehearsal-build/rehearse-candidate-sources.mjs \
+            --local \
+            --repository badjoke-lab/xrpl-lending-monitor \
+            --history-branch history-rolling-candidate-data \
+            --current-state-branch current-state-rolling-candidate-data \
+            > "${ROOT}/remote-rehearsal-summary.json"
+
+          jq -e '.passed == true and (.exactReads | length) == 3 and .recentHistory.items == 1' \
+            "${ROOT}/remote-rehearsal-summary.json" > /dev/null
+
+      - name: Verify branch metadata and exact T2 identity bindings
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=rolling-t2-evidence-recovery
+          PUBLICATION=.local/history-candidate/history/publication.json
+          HISTORY_CHANNEL=.local/history-candidate/history-channel.json
+          EXACT=.local/history-candidate/history/index/exact/manifest.json
+          CURRENT_CHANNEL=.local/current-candidate/channel.json
+          CURRENT_SUMMARY=.local/current-candidate/rolling-read-model-summary.json
+          CURRENT_MANIFEST=.local/current-candidate/read-model/manifest.json
+          ROLLING=.local/current-candidate/rolling-base/manifest.json
+          REMOTE="${ROOT}/remote-rehearsal-summary.json"
+
+          HISTORY_SHA="$(git -C .local/history-candidate rev-parse HEAD)"
+          CURRENT_SHA="$(git -C .local/current-candidate rev-parse HEAD)"
+          printf '%s' "${HISTORY_SHA}" | grep -Eq '^[a-f0-9]{40}$'
+          printf '%s' "${CURRENT_SHA}" | grep -Eq '^[a-f0-9]{40}$'
+
+          PUBLICATION_SHA="$(jq -r '.publicationSha256' "${PUBLICATION}")"
+          TARGET_LEDGER="$(jq -r '.endLedgerIndex' "${PUBLICATION}")"
+          TARGET_HASH="$(jq -r '.endLedgerHash' "${PUBLICATION}")"
+          TARGET_SNAPSHOT="$(jq -r '.target.snapshotId' "${CURRENT_SUMMARY}")"
+          CURRENT_MANIFEST_SHA="$(jq -r '.target.manifestSha256' "${CURRENT_SUMMARY}")"
+
+          jq -e --slurpfile publication "${PUBLICATION}" '
+            .active.chainId == $publication[0].chainId
+            and .active.epochId == $publication[0].epochId
+          ' "${HISTORY_CHANNEL}" > /dev/null
+
+          jq -e --arg publication "${PUBLICATION_SHA}" '.publicationSha256 == $publication and .bucketCount == 256 and .totalRecords > 0' "${EXACT}" > /dev/null
+
+          jq -e --arg snapshot "${TARGET_SNAPSHOT}" --arg manifest "${CURRENT_MANIFEST_SHA}" '.active.snapshotId == $snapshot and .active.manifestSha256 == $manifest' "${CURRENT_CHANNEL}" > /dev/null
+
+          jq -e --argjson ledger "${TARGET_LEDGER}" --arg hash "${TARGET_HASH}" --arg snapshot "${TARGET_SNAPSHOT}" --arg manifest "${CURRENT_MANIFEST_SHA}" '.complete == true and .ledgerIndex == $ledger and .ledgerHash == $hash and .snapshotId == $snapshot and .manifestSha256 == $manifest' "${CURRENT_MANIFEST}" > /dev/null
+
+          jq -e --argjson ledger "${TARGET_LEDGER}" --arg hash "${TARGET_HASH}" --arg snapshot "${TARGET_SNAPSHOT}" '.complete == true and .ledgerIndex == $ledger and .ledgerHash == $hash and .snapshotId == $snapshot and .segmentCount == 64' "${ROLLING}" > /dev/null
+
+          jq -e --slurpfile publication "${PUBLICATION}" --slurpfile current "${CURRENT_SUMMARY}" '
+            .passed == true
+            and .epochId == $publication[0].epochId
+            and .chainId == $publication[0].chainId
+            and .ledgerIndex == $publication[0].endLedgerIndex
+            and .ledgerHash == $publication[0].endLedgerHash
+            and .segmentCount == $publication[0].segmentCount
+            and .ledgerCount == $publication[0].ledgerCount
+            and .currentStateSnapshotId == $current[0].target.snapshotId
+            and .currentStateManifestSha256 == $current[0].target.manifestSha256
+          ' "${REMOTE}" > /dev/null
+
+          printf '%s\n' "${HISTORY_SHA}" > "${ROOT}/history-commit-sha.txt"
+          printf '%s\n' "${CURRENT_SHA}" > "${ROOT}/current-state-commit-sha.txt"
+          cp "${PUBLICATION}" "${ROOT}/history-publication.json"
+          cp "${EXACT}" "${ROOT}/exact-index-manifest.json"
+          cp "${CURRENT_SUMMARY}" "${ROOT}/current-state-summary.json"
+          cp "${CURRENT_MANIFEST}" "${ROOT}/current-state-manifest.json"
+          cp "${ROLLING}" "${ROOT}/rolling-base-manifest.json"
+
+      - name: Build retained T2 evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=rolling-t2-evidence-recovery
+          SOURCE_LEDGER=3539657
+          SOURCE_SEGMENTS=338
+          PUBLICATION="${ROOT}/history-publication.json"
+          TARGET_LEDGER="$(jq -r '.endLedgerIndex' "${PUBLICATION}")"
+          TARGET_SEGMENTS="$(jq -r '.segmentCount' "${PUBLICATION}")"
+          DELTA_LEDGER_COUNT="$((TARGET_LEDGER - SOURCE_LEDGER))"
+          DELTA_SEGMENT_COUNT="$((TARGET_SEGMENTS - SOURCE_SEGMENTS))"
+          test "${DELTA_LEDGER_COUNT}" -gt 0
+          test "${DELTA_SEGMENT_COUNT}" -gt 0
+
+          jq -n \
+            --arg historyBranch "history-rolling-candidate-data" \
+            --arg historyCommitSha "$(cat "${ROOT}/history-commit-sha.txt")" \
+            --arg currentStateBranch "current-state-rolling-candidate-data" \
+            --arg currentStateCommitSha "$(cat "${ROOT}/current-state-commit-sha.txt")" \
+            --argjson deltaLedgerCount "${DELTA_LEDGER_COUNT}" \
+            --argjson deltaSegmentCount "${DELTA_SEGMENT_COUNT}" \
+            --slurpfile publication "${ROOT}/history-publication.json" \
+            --slurpfile exact "${ROOT}/exact-index-manifest.json" \
+            --slurpfile current "${ROOT}/current-state-summary.json" \
+            --slurpfile rolling "${ROOT}/rolling-base-manifest.json" \
+            --slurpfile remote "${ROOT}/remote-rehearsal-summary.json" '
+            {
+              passed: true,
+              source: {
+                ledgerIndex: 3539657,
+                ledgerHash: "747554DD57DE87C80E55B5936EAE223DA72DE3637DD23A6095A34CAFE1CCAEDB",
+                publicationSha256: "71b5766984f7529a7691aa3851470c7706e2087ab03e2c6da30503df9109f8cd",
+                segmentCount: 338,
+                snapshotId: "devnet-3539657-747554dd57de"
+              },
+              delta: {
+                startLedgerIndex: 3539658,
+                endLedgerIndex: $publication[0].endLedgerIndex,
+                ledgerCount: $deltaLedgerCount,
+                segmentCount: $deltaSegmentCount,
+                mutationStats: $current[0].mutationStats
+              },
+              target: {
+                chainId: $publication[0].chainId,
+                publicationSha256: $publication[0].publicationSha256,
+                segmentCount: $publication[0].segmentCount,
+                ledgerCount: $publication[0].ledgerCount,
+                ledgerIndex: $publication[0].endLedgerIndex,
+                ledgerHash: $publication[0].endLedgerHash
+              },
+              exactIndex: {
+                manifestSha256: $exact[0].manifestSha256,
+                totalRecords: $exact[0].totalRecords,
+                bucketCount: $exact[0].bucketCount,
+                publicationSha256: $exact[0].publicationSha256
+              },
+              currentState: $current[0].target,
+              rollingBase: {
+                manifestSha256: $rolling[0].manifestSha256,
+                segmentCount: $rolling[0].segmentCount,
+                counts: $rolling[0].counts
+              },
+              candidate: {
+                historyBranch: $historyBranch,
+                historyCommitSha: $historyCommitSha,
+                currentStateBranch: $currentStateBranch,
+                currentStateCommitSha: $currentStateCommitSha
+              },
+              remoteRehearsal: $remote[0]
+            }' > "${ROOT}/evidence.json"
+
+          jq -e '
+            .passed == true
+            and .delta.ledgerCount == 2423
+            and .delta.segmentCount == 5
+            and .target.ledgerIndex == 3542080
+            and .target.ledgerHash == "14A73FC05A4AA90BB908B9C7FC276211BD6D3AAB9EC5D12C4F9BF1E4CDA3E20C"
+            and .target.ledgerIndex == .remoteRehearsal.ledgerIndex
+            and .target.ledgerHash == .remoteRehearsal.ledgerHash
+            and .currentState.ledgerIndex == .target.ledgerIndex
+            and .currentState.ledgerHash == .target.ledgerHash
+            and .rollingBase.segmentCount == 64
+            and .exactIndex.publicationSha256 == .target.publicationSha256
+          ' "${ROOT}/evidence.json" > /dev/null
+
+      - name: Upload retained recovered T2 evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: rolling-t2-evidence-recovery
+          path: rolling-t2-evidence-recovery
+          if-no-files-found: error
+          retention-days: 30
