@@ -87,20 +87,29 @@ jobs:
             > "${ROOT}/incremental.stdout.json"
           echo $(( $(date +%s%3N) - STARTED )) > "${ROOT}/incremental-elapsed-ms.txt"
 
-      - name: Require byte-identical full and incremental indexes
+      - name: Analyze full and incremental index equality
         shell: bash
         run: |
           set -euo pipefail
           ROOT=incremental-exact-index-linear-merge
           (cd .local/t3-history/history/index/exact && find . -type f -print0 | sort -z | xargs -0 sha256sum) > "${ROOT}/full-sha256.txt"
           (cd "${ROOT}/incremental" && find . -type f -print0 | sort -z | xargs -0 sha256sum) > "${ROOT}/incremental-sha256.txt"
-          diff -u "${ROOT}/full-sha256.txt" "${ROOT}/incremental-sha256.txt"
+          if diff -u "${ROOT}/full-sha256.txt" "${ROOT}/incremental-sha256.txt" > "${ROOT}/sha256.diff.txt"; then
+            BYTE_IDENTICAL=true
+          else
+            BYTE_IDENTICAL=false
+          fi
+          cp .local/t3-history/history/index/exact/manifest.json "${ROOT}/full-manifest.json"
+          cp "${ROOT}/incremental/manifest.json" "${ROOT}/incremental-manifest.json"
           jq -n \
             --slurpfile plan "${ROOT}/plan.json" \
             --slurpfile incremental "${ROOT}/incremental.stdout.json" \
-            --argjson incrementalElapsedMs "$(cat "${ROOT}/incremental-elapsed-ms.txt")" '
+            --slurpfile fullManifest "${ROOT}/full-manifest.json" \
+            --slurpfile incrementalManifest "${ROOT}/incremental-manifest.json" \
+            --argjson incrementalElapsedMs "$(cat "${ROOT}/incremental-elapsed-ms.txt")" \
+            --argjson byteIdentical "${BYTE_IDENTICAL}" '
             {
-              passed: true,
+              passed: $byteIdentical,
               sourceLedgerIndex: $plan[0].source.endLedgerIndex,
               targetLedgerIndex: $plan[0].target.ledgerIndex,
               deltaLedgerCount: $plan[0].extension.ledgerCount,
@@ -109,14 +118,24 @@ jobs:
               addedRecords: $incremental[0].addedRecords,
               totalRecords: $incremental[0].totalRecords,
               incrementalElapsedMs: $incrementalElapsedMs,
-              byteIdentical: true
+              byteIdentical: $byteIdentical,
+              fullManifestSha256: $fullManifest[0].manifestSha256,
+              incrementalManifestSha256: $incrementalManifest[0].manifestSha256,
+              fullTotalRecords: $fullManifest[0].totalRecords,
+              incrementalTotalRecords: $incrementalManifest[0].totalRecords
             }' > "${ROOT}/evidence.json"
-          jq -e '.passed == true and .mergeStrategy == "sorted-linear-merge" and .byteIdentical == true' "${ROOT}/evidence.json" > /dev/null
 
       - name: Upload retained linear-merge evidence
+        if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
           name: incremental-exact-index-linear-merge-rehearsal
           path: incremental-exact-index-linear-merge
           if-no-files-found: error
           retention-days: 30
+
+      - name: Require byte-identical index output
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -e '.passed == true and .mergeStrategy == "sorted-linear-merge" and .byteIdentical == true' incremental-exact-index-linear-merge/evidence.json > /dev/null
