@@ -24,6 +24,10 @@ export interface IncrementalCollectorState {
   lastEstimatedRows: number
   lastEstimatedStatements: number
   lastOverlayMutations: number
+  lastPersistenceBatchResults: number
+  lastPersistenceStatements: number
+  lastPersistenceRowsRead: number
+  lastPersistenceRowsWritten: number
   errorCode: string | null
   errorMessage: string | null
   createdAt: string
@@ -47,6 +51,10 @@ interface CollectorStateRow {
   last_estimated_rows: number
   last_estimated_statements: number
   last_overlay_mutations: number
+  last_persistence_batch_results: number
+  last_persistence_statements: number
+  last_persistence_rows_read: number
+  last_persistence_rows_written: number
   error_code: string | null
   error_message: string | null
   created_at: string
@@ -72,6 +80,10 @@ function mapState(row: CollectorStateRow): IncrementalCollectorState {
     lastEstimatedRows: row.last_estimated_rows,
     lastEstimatedStatements: row.last_estimated_statements,
     lastOverlayMutations: row.last_overlay_mutations,
+    lastPersistenceBatchResults: row.last_persistence_batch_results,
+    lastPersistenceStatements: row.last_persistence_statements,
+    lastPersistenceRowsRead: row.last_persistence_rows_read,
+    lastPersistenceRowsWritten: row.last_persistence_rows_written,
     errorCode: row.error_code,
     errorMessage: row.error_message,
     createdAt: row.created_at,
@@ -94,8 +106,14 @@ export async function saveIncrementalCollectorState(
        lag_ledgers, endpoint, last_run_duration_ms, last_rpc_requests,
        last_endpoint_attempts, last_ledgers_processed, last_inspected_transactions,
        last_lending_transactions, last_estimated_rows, last_estimated_statements,
-       last_overlay_mutations, error_code, error_message, created_at, updated_at
-     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)
+       last_overlay_mutations, last_persistence_batch_results, last_persistence_statements,
+       last_persistence_rows_read, last_persistence_rows_written,
+       error_code, error_message, created_at, updated_at
+     ) VALUES (
+       ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8,
+       ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
+       ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24
+     )
      ON CONFLICT(network) DO UPDATE SET
        status = excluded.status,
        last_attempt_at = excluded.last_attempt_at,
@@ -112,6 +130,10 @@ export async function saveIncrementalCollectorState(
        last_estimated_rows = excluded.last_estimated_rows,
        last_estimated_statements = excluded.last_estimated_statements,
        last_overlay_mutations = excluded.last_overlay_mutations,
+       last_persistence_batch_results = excluded.last_persistence_batch_results,
+       last_persistence_statements = excluded.last_persistence_statements,
+       last_persistence_rows_read = excluded.last_persistence_rows_read,
+       last_persistence_rows_written = excluded.last_persistence_rows_written,
        error_code = excluded.error_code,
        error_message = excluded.error_message,
        updated_at = excluded.updated_at`,
@@ -132,6 +154,10 @@ export async function saveIncrementalCollectorState(
     state.lastEstimatedRows,
     state.lastEstimatedStatements,
     state.lastOverlayMutations,
+    state.lastPersistenceBatchResults,
+    state.lastPersistenceStatements,
+    state.lastPersistenceRowsRead,
+    state.lastPersistenceRowsWritten,
     state.errorCode,
     state.errorMessage,
     state.createdAt,
