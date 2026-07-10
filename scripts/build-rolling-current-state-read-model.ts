@@ -451,15 +451,19 @@ async function writeKindPages(options: {
   const byId = options.db.prepare('SELECT id, projection_json FROM objects WHERE id = ? AND kind = ?')
   const insertRef = options.db.prepare('INSERT INTO refs (id, kind, page_no, offset_no) VALUES (?, ?, ?, ?)')
   const records: unknown[] = []
-  let pageNo = 0
-  async function flush(): Promise<void> {
-    if (records.length === 0) return
-    await writeGzipJson(
-      join(pageDir, `${String(pageNo).padStart(8, '0')}.json.gz`),
-      { schemaVersion: 1, kind: options.kind, page: pageNo, records },
-    )
-    pageNo += 1
-    records.length = 0
+const pendingWrites: Promise<void>[] = []
+let pageNo = 0
+async function flush(): Promise<void> {
+  if (records.length === 0) return
+  const outputPage = pageNo
+  const outputRecords = records.splice(0)
+  pageNo += 1
+  pendingWrites.push(writeGzipJson(
+    join(pageDir, `${String(outputPage).padStart(8, '0')}.json.gz`),
+    { schemaVersion: 1, kind: options.kind, page: outputPage, records: outputRecords },
+  ))
+  if (pendingWrites.length >= 16) await Promise.all(pendingWrites.splice(0))
+}
   }
   options.db.exec('BEGIN')
   try {
@@ -482,6 +486,7 @@ async function writeKindPages(options: {
       if (records.length >= options.pageSize) await flush()
     }
     await flush()
+    await Promise.all(pendingWrites)
     options.db.exec('COMMIT')
   } catch (error) {
     options.db.exec('ROLLBACK')
@@ -510,20 +515,23 @@ async function writeLookupBuckets(
     WHERE id >= ? AND (? IS NULL OR id < ?) ORDER BY id ASC
   `)
   const bucketCount = 16 ** prefixLength
-  for (let index = 0; index < bucketCount; index += 1) {
-    const prefix = index.toString(16).toUpperCase().padStart(prefixLength, '0')
-    const next = nextHexPrefix(prefix)
-    const rows = query.all(prefix, next, next) as LookupRow[]
-    await writeGzipJson(
-      join(lookupDir, `${prefix}.json.gz`),
-      {
-        schemaVersion: 1,
-        prefix,
-        records: rows.map((row) => ({ id: row.id, kind: row.kind, page: row.page_no, offset: row.offset_no })),
-      },
-    )
-  }
-  return bucketCount
+const pendingWrites: Promise<void>[] = []
+for (let index = 0; index < bucketCount; index += 1) {
+  const prefix = index.toString(16).toUpperCase().padStart(prefixLength, '0')
+  const next = nextHexPrefix(prefix)
+  const rows = query.all(prefix, next, next) as LookupRow[]
+  pendingWrites.push(writeGzipJson(
+    join(lookupDir, `${prefix}.json.gz`),
+    {
+      schemaVersion: 1,
+      prefix,
+      records: rows.map((row) => ({ id: row.id, kind: row.kind, page: row.page_no, offset: row.offset_no })),
+    },
+  ))
+  if (pendingWrites.length >= 32) await Promise.all(pendingWrites.splice(0))
+}
+await Promise.all(pendingWrites)
+return bucketCount
 }
 
 function currentCounts(db: DatabaseSync): Counts {
