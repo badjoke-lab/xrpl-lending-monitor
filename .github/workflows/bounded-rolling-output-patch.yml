@@ -1,0 +1,113 @@
+name: Bounded rolling output patch
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/bounded-rolling-output-patch.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+      - name: Apply bounded output write batches
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/build-rolling-current-state-read-model.ts')
+          text = p.read_text()
+          old_pages = '''  const records: unknown[] = []
+  let pageNo = 0
+  async function flush(): Promise<void> {
+    if (records.length === 0) return
+    await writeGzipJson(
+      join(pageDir, `${String(pageNo).padStart(8, '0')}.json.gz`),
+      { schemaVersion: 1, kind: options.kind, page: pageNo, records },
+    )
+    pageNo += 1
+    records.length = 0
+  }
+'''
+          new_pages = '''  const records: unknown[] = []
+  const pendingWrites: Promise<void>[] = []
+  let pageNo = 0
+  async function flush(): Promise<void> {
+    if (records.length === 0) return
+    const outputPage = pageNo
+    const outputRecords = records.splice(0)
+    pageNo += 1
+    pendingWrites.push(writeGzipJson(
+      join(pageDir, `${String(outputPage).padStart(8, '0')}.json.gz`),
+      { schemaVersion: 1, kind: options.kind, page: outputPage, records: outputRecords },
+    ))
+    if (pendingWrites.length >= 16) await Promise.all(pendingWrites.splice(0))
+  }
+'''
+          if old_pages not in text:
+              raise SystemExit('writeKindPages marker not found')
+          text = text.replace(old_pages, new_pages, 1)
+          old_flush = '''    await flush()
+    options.db.exec('COMMIT')
+'''
+          new_flush = '''    await flush()
+    await Promise.all(pendingWrites)
+    options.db.exec('COMMIT')
+'''
+          if old_flush not in text:
+              raise SystemExit('final page flush marker not found')
+          text = text.replace(old_flush, new_flush, 1)
+          old_lookup = '''  const bucketCount = 16 ** prefixLength
+  for (let index = 0; index < bucketCount; index += 1) {
+    const prefix = index.toString(16).toUpperCase().padStart(prefixLength, '0')
+    const next = nextHexPrefix(prefix)
+    const rows = query.all(prefix, next, next) as LookupRow[]
+    await writeGzipJson(
+      join(lookupDir, `${prefix}.json.gz`),
+      {
+        schemaVersion: 1,
+        prefix,
+        records: rows.map((row) => ({ id: row.id, kind: row.kind, page: row.page_no, offset: row.offset_no })),
+      },
+    )
+  }
+  return bucketCount
+'''
+          new_lookup = '''  const bucketCount = 16 ** prefixLength
+  const pendingWrites: Promise<void>[] = []
+  for (let index = 0; index < bucketCount; index += 1) {
+    const prefix = index.toString(16).toUpperCase().padStart(prefixLength, '0')
+    const next = nextHexPrefix(prefix)
+    const rows = query.all(prefix, next, next) as LookupRow[]
+    pendingWrites.push(writeGzipJson(
+      join(lookupDir, `${prefix}.json.gz`),
+      {
+        schemaVersion: 1,
+        prefix,
+        records: rows.map((row) => ({ id: row.id, kind: row.kind, page: row.page_no, offset: row.offset_no })),
+      },
+    ))
+    if (pendingWrites.length >= 32) await Promise.all(pendingWrites.splice(0))
+  }
+  await Promise.all(pendingWrites)
+  return bucketCount
+'''
+          if old_lookup not in text:
+              raise SystemExit('writeLookupBuckets marker not found')
+          text = text.replace(old_lookup, new_lookup, 1)
+          p.write_text(text)
+          PY
+          git diff --check
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add scripts/build-rolling-current-state-read-model.ts
+          git commit -m 'perf: batch rolling output writes within bounded groups'
+          git push origin HEAD:${GITHUB_HEAD_REF}
