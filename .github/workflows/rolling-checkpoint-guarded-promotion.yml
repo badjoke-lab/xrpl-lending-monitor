@@ -226,6 +226,9 @@ jobs:
             echo "PROD_CURRENT_SHA_BEFORE=${PROD_CURRENT_SHA_BEFORE}"
           } >> "${GITHUB_ENV}"
 
+          git fetch origin "refs/heads/${PRODUCTION_HISTORY_BRANCH}:refs/remotes/origin/${PRODUCTION_HISTORY_BRANCH}-before"
+          test "$(git rev-parse "refs/remotes/origin/${PRODUCTION_HISTORY_BRANCH}-before")" = "${PROD_HISTORY_SHA_BEFORE}"
+
           pnpm exec wrangler d1 execute xrpl-lending-monitor --remote --json \
             --command "SELECT epoch_id,last_processed_ledger,last_processed_hash,latest_observed_ledger,latest_observed_hash,status FROM sync_state WHERE network='devnet'" \
             > "${ROOT}/sync-query.json"
@@ -590,7 +593,7 @@ jobs:
           if [ -f "${ROOT}/history-promoted" ] && [ ! -f "${ROOT}/rebase-confirmed" ]; then
             REMOTE_HISTORY="$(git ls-remote origin "refs/heads/${PRODUCTION_HISTORY_BRANCH}" | awk '{print $1}')"
             if [ "${REMOTE_HISTORY}" = "${HISTORY_CANDIDATE_SHA}" ]; then
-              git fetch origin "${PROD_HISTORY_SHA_BEFORE}"
+              test "$(git rev-parse "refs/remotes/origin/${PRODUCTION_HISTORY_BRANCH}-before")" = "${PROD_HISTORY_SHA_BEFORE}"
               git push --force-with-lease="refs/heads/${PRODUCTION_HISTORY_BRANCH}:${HISTORY_CANDIDATE_SHA}" \
                 origin "${PROD_HISTORY_SHA_BEFORE}:refs/heads/${PRODUCTION_HISTORY_BRANCH}"
             else
