@@ -1,0 +1,180 @@
+name: Rolling checkpoint preflight
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out implementation
+        uses: actions/checkout@v4
+
+      - name: Check out rolling history candidate metadata
+        uses: actions/checkout@v4
+        with:
+          ref: history-rolling-candidate-data
+          path: .local/history-candidate
+          sparse-checkout: |
+            history-channel.json
+            history/publication.json
+          sparse-checkout-cone-mode: false
+
+      - name: Download retained rolling candidate evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: rolling-checkpoint-candidate
+          path: .local/candidate-evidence
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: 29087578902
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build deterministic cutover planner
+        run: pnpm build:t5-cutover-preflight
+
+      - name: Verify exact candidate branch identities and retained evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=rolling-checkpoint-preflight
+          mkdir -p "${ROOT}"
+          EVIDENCE=.local/candidate-evidence/evidence.json
+          SUMMARY=.local/candidate-evidence/remote-rehearsal-summary.json
+          PUBLICATION=.local/history-candidate/history/publication.json
+          HISTORY_SHA="$(tr -d '\n\r' < .local/candidate-evidence/history-commit-sha.txt)"
+          CURRENT_SHA="$(tr -d '\n\r' < .local/candidate-evidence/current-state-commit-sha.txt)"
+
+          printf '%s' "${HISTORY_SHA}" | grep -Eq '^[a-f0-9]{40}$'
+          printf '%s' "${CURRENT_SHA}" | grep -Eq '^[a-f0-9]{40}$'
+          test "$(git -C .local/history-candidate rev-parse HEAD)" = "${HISTORY_SHA}"
+          test "$(git ls-remote origin refs/heads/history-rolling-candidate-data | awk '{print $1}')" = "${HISTORY_SHA}"
+          test "$(git ls-remote origin refs/heads/current-state-rolling-candidate-data | awk '{print $1}')" = "${CURRENT_SHA}"
+
+          jq -e --slurpfile publication "${PUBLICATION}" '
+            .passed == true
+            and .target.ledgerIndex == $publication[0].endLedgerIndex
+            and .target.ledgerHash == $publication[0].endLedgerHash
+            and .target.publicationSha256 == $publication[0].publicationSha256
+            and .currentState.target.ledgerIndex == .target.ledgerIndex
+            and .currentState.target.ledgerHash == .target.ledgerHash
+            and .remoteRehearsal.passed == true
+          ' "${EVIDENCE}" > /dev/null
+
+          jq -e --slurpfile publication "${PUBLICATION}" '
+            .passed == true
+            and .ledgerIndex == $publication[0].endLedgerIndex
+            and .ledgerHash == $publication[0].endLedgerHash
+            and .segmentCount == $publication[0].segmentCount
+            and .ledgerCount == $publication[0].ledgerCount
+          ' "${SUMMARY}" > /dev/null
+
+          cp "${SUMMARY}" "${ROOT}/candidate-summary.json"
+          cp "${PUBLICATION}" "${ROOT}/history-publication.json"
+          printf '%s\n' "${HISTORY_SHA}" > "${ROOT}/history-commit-sha.txt"
+          printf '%s\n' "${CURRENT_SHA}" > "${ROOT}/current-state-commit-sha.txt"
+
+      - name: Capture fresh production rebase evidence directly from D1
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=rolling-checkpoint-preflight
+          EPOCH="$(jq -r '.epochId' "${ROOT}/candidate-summary.json")"
+
+          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote --json --command "SELECT epoch_id,last_processed_ledger,last_processed_hash,latest_observed_ledger,latest_observed_hash,status FROM sync_state WHERE network='devnet'" > "${ROOT}/sync-query.json"
+          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote --json --command "SELECT id FROM network_epochs WHERE network='devnet' AND status='current' LIMIT 1" > "${ROOT}/epoch-query.json"
+          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote --json --command "SELECT epoch_id,base_snapshot_id,base_ledger_index,base_ledger_hash,overlay_ledger_index,overlay_ledger_hash,updated_at FROM current_state_overlay_state WHERE network='devnet' AND epoch_id='${EPOCH}' ORDER BY updated_at DESC,base_snapshot_id ASC" > "${ROOT}/overlay-query.json"
+
+          jq '[.. | objects | select(has("results")) | .results[]?] | .[0]' "${ROOT}/sync-query.json" > "${ROOT}/sync-row.json"
+          jq '[.. | objects | select(has("results")) | .results[]?] | .[0]' "${ROOT}/epoch-query.json" > "${ROOT}/epoch-row.json"
+          jq '[.. | objects | select(has("results")) | .results[]?]' "${ROOT}/overlay-query.json" > "${ROOT}/overlay-rows.json"
+
+          jq -e '.epoch_id != null and .last_processed_ledger != null and .last_processed_hash != null' "${ROOT}/sync-row.json" > /dev/null
+          jq -e --arg epoch "${EPOCH}" '.id == $epoch' "${ROOT}/epoch-row.json" > /dev/null
+          jq -e 'length > 0' "${ROOT}/overlay-rows.json" > /dev/null
+
+          jq -n \
+            --slurpfile sync "${ROOT}/sync-row.json" \
+            --slurpfile epoch "${ROOT}/epoch-row.json" \
+            --slurpfile overlays "${ROOT}/overlay-rows.json" '
+            {
+              sync: {
+                network: "devnet",
+                epochId: $sync[0].epoch_id,
+                lastProcessedLedger: $sync[0].last_processed_ledger,
+                lastProcessedHash: $sync[0].last_processed_hash,
+                latestObservedLedger: $sync[0].latest_observed_ledger,
+                latestObservedHash: $sync[0].latest_observed_hash,
+                status: $sync[0].status
+              },
+              currentEpochId: $epoch[0].id,
+              overlayStates: ($overlays[0] | map({
+                network: "devnet",
+                epochId: .epoch_id,
+                baseSnapshotId: .base_snapshot_id,
+                baseLedgerIndex: .base_ledger_index,
+                baseLedgerHash: .base_ledger_hash,
+                overlayLedgerIndex: .overlay_ledger_index,
+                overlayLedgerHash: .overlay_ledger_hash,
+                updatedAt: .updated_at
+              }))
+            }' > "${ROOT}/production-evidence.json"
+
+      - name: Add live validated head and build fail-closed bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=rolling-checkpoint-preflight
+          TARGET_LEDGER="$(jq -r '.ledgerIndex' "${ROOT}/candidate-summary.json")"
+          jq -n '{method:"ledger",params:[{ledger_index:"validated",transactions:false,expand:false}]}' > "${ROOT}/live-head-request.json"
+          curl --fail-with-body --silent --show-error --retry 3 -H 'Content-Type: application/json' --data @"${ROOT}/live-head-request.json" https://devnet.honeycluster.io/ > "${ROOT}/live-head-response.json"
+          LIVE_LEDGER="$(jq -r '.result.ledger_index // .result.ledger.ledger_index // empty' "${ROOT}/live-head-response.json")"
+          LIVE_HASH="$(jq -r '.result.ledger_hash // .result.ledger.ledger_hash // empty' "${ROOT}/live-head-response.json")"
+          test "${LIVE_LEDGER}" -ge "${TARGET_LEDGER}"
+          printf '%s' "${LIVE_HASH}" | grep -Eq '^[A-F0-9]{64}$'
+
+          jq --argjson ledger "${LIVE_LEDGER}" --arg hash "${LIVE_HASH}" '.sync.latestObservedLedger=$ledger | .sync.latestObservedHash=$hash' "${ROOT}/production-evidence.json" > "${ROOT}/production-evidence-refreshed.json"
+
+          node .t5-cutover-preflight-build/build-t5-cutover-preflight-bundle.mjs \
+            --local \
+            --candidate-summary "${ROOT}/candidate-summary.json" \
+            --history-publication "${ROOT}/history-publication.json" \
+            --production-evidence "${ROOT}/production-evidence-refreshed.json" \
+            --history-commit-sha "$(cat "${ROOT}/history-commit-sha.txt")" \
+            --current-state-commit-sha "$(cat "${ROOT}/current-state-commit-sha.txt")" \
+            > "${ROOT}/bundle.json"
+
+          jq -e '
+            .candidate.ledgerIndex == .target.ledgerIndex
+            and .candidate.ledgerHash == .target.ledgerHash
+            and .candidate.currentStateSnapshotId == .target.snapshotId
+            and (.rebasePlan.action == "rebase" or .rebasePlan.action == "replay")
+            and .production.latestObservedLedger >= .target.ledgerIndex
+            and .production.overlayStateCount > 0
+          ' "${ROOT}/bundle.json" > /dev/null
+
+          jq -n --slurpfile bundle "${ROOT}/bundle.json" --argjson liveLedger "${LIVE_LEDGER}" --arg liveHash "${LIVE_HASH}" '{passed:true,candidate:$bundle[0].candidate,production:$bundle[0].production,target:$bundle[0].target,rebasePlan:$bundle[0].rebasePlan,liveHead:{ledgerIndex:$liveLedger,ledgerHash:$liveHash}}' > "${ROOT}/evidence.json"
+
+      - name: Upload retained rolling preflight evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: rolling-checkpoint-preflight
+          path: rolling-checkpoint-preflight
+          if-no-files-found: error
+          retention-days: 30
