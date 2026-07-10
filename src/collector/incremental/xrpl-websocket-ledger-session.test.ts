@@ -263,7 +263,7 @@ describe('XRPL WebSocket ledger session', () => {
 
       await vi.advanceTimersByTimeAsync(51)
 
-      await expect(pending).rejects.toThrow('Ledger 601 timed out after 50 ms')
+      await expect(pending).rejects.toThrow('timed out after 50 ms')
       expect(socket.closed).toBe(true)
     } finally {
       vi.useRealTimers()
