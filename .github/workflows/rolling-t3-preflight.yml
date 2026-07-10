@@ -1,0 +1,112 @@
+name: Rolling T3 preflight
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/rolling-t3-preflight.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  D1_DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/checkout@v4
+        with:
+          ref: history-rolling-t3-candidate-data
+          path: .local/history-candidate
+          sparse-checkout: |
+            history/publication.json
+          sparse-checkout-cone-mode: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: |
+          pnpm build:t5-cutover-preflight
+          pnpm build:candidate-source-rehearsal
+
+      - name: Rehearse exact remote T3 candidate pair
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=rolling-t3-preflight
+          mkdir -p "${ROOT}"
+          node .candidate-source-rehearsal-build/rehearse-candidate-sources.mjs --local --repository badjoke-lab/xrpl-lending-monitor --history-branch history-rolling-t3-candidate-data --current-state-branch current-state-rolling-t3-candidate-data > "${ROOT}/candidate-summary.json"
+          jq -e '.passed == true and (.exactReads | length) == 3 and .recentHistory.items == 1' "${ROOT}/candidate-summary.json" > /dev/null
+          HISTORY_SHA="$(git ls-remote origin refs/heads/history-rolling-t3-candidate-data | awk '{print $1}')"
+          CURRENT_SHA="$(git ls-remote origin refs/heads/current-state-rolling-t3-candidate-data | awk '{print $1}')"
+          printf '%s' "${HISTORY_SHA}" | grep -Eq '^[a-f0-9]{40}$'
+          printf '%s' "${CURRENT_SHA}" | grep -Eq '^[a-f0-9]{40}$'
+          printf '%s\n' "${HISTORY_SHA}" > "${ROOT}/history-commit-sha.txt"
+          printf '%s\n' "${CURRENT_SHA}" > "${ROOT}/current-state-commit-sha.txt"
+
+      - name: Capture fresh production evidence directly from D1
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=rolling-t3-preflight
+          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote --json --command "SELECT epoch_id,last_processed_ledger,last_processed_hash,latest_observed_ledger,latest_observed_hash,status FROM sync_state WHERE network='devnet'" > "${ROOT}/sync-query.json"
+          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote --json --command "SELECT id FROM network_epochs WHERE network='devnet' AND status='current' LIMIT 1" > "${ROOT}/epoch-query.json"
+          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote --json --command "SELECT epoch_id,base_snapshot_id,base_ledger_index,base_ledger_hash,overlay_ledger_index,overlay_ledger_hash,updated_at FROM current_state_overlay_state WHERE network='devnet' AND epoch_id='devnet-3371675' ORDER BY updated_at DESC,base_snapshot_id ASC" > "${ROOT}/overlay-query.json"
+          jq '[.. | objects | select(has("results")) | .results[]?] | .[0]' "${ROOT}/sync-query.json" > "${ROOT}/sync-row.json"
+          jq '[.. | objects | select(has("results")) | .results[]?] | .[0]' "${ROOT}/epoch-query.json" > "${ROOT}/epoch-row.json"
+          jq '[.. | objects | select(has("results")) | .results[]?]' "${ROOT}/overlay-query.json" > "${ROOT}/overlay-rows.json"
+          jq -e '.epoch_id != null and .last_processed_ledger != null and .last_processed_hash != null' "${ROOT}/sync-row.json" > /dev/null
+          jq -e '.id == "devnet-3371675"' "${ROOT}/epoch-row.json" > /dev/null
+          jq -e 'length > 0' "${ROOT}/overlay-rows.json" > /dev/null
+          jq -n --slurpfile sync "${ROOT}/sync-row.json" --slurpfile epoch "${ROOT}/epoch-row.json" --slurpfile overlays "${ROOT}/overlay-rows.json" '{sync:{network:"devnet",epochId:$sync[0].epoch_id,lastProcessedLedger:$sync[0].last_processed_ledger,lastProcessedHash:$sync[0].last_processed_hash,latestObservedLedger:$sync[0].latest_observed_ledger,latestObservedHash:$sync[0].latest_observed_hash,status:$sync[0].status},currentEpochId:$epoch[0].id,overlayStates:($overlays[0] | map({network:"devnet",epochId:.epoch_id,baseSnapshotId:.base_snapshot_id,baseLedgerIndex:.base_ledger_index,baseLedgerHash:.base_ledger_hash,overlayLedgerIndex:.overlay_ledger_index,overlayLedgerHash:.overlay_ledger_hash,updatedAt:.updated_at}))}' > "${ROOT}/production-evidence.json"
+
+      - name: Add live head and build fail-closed preflight bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=rolling-t3-preflight
+          jq -n '{method:"ledger",params:[{ledger_index:"validated",transactions:false,expand:false}]}' > "${ROOT}/live-head-request.json"
+          curl --fail-with-body --silent --show-error --retry 3 -H 'Content-Type: application/json' --data @"${ROOT}/live-head-request.json" https://devnet.honeycluster.io/ > "${ROOT}/live-head-response.json"
+          LIVE_LEDGER="$(jq -r '.result.ledger_index // .result.ledger.ledger_index // empty' "${ROOT}/live-head-response.json")"
+          LIVE_HASH="$(jq -r '.result.ledger_hash // .result.ledger.ledger_hash // empty' "${ROOT}/live-head-response.json")"
+          CANDIDATE_LEDGER="$(jq -r '.ledgerIndex' "${ROOT}/candidate-summary.json")"
+          test "${LIVE_LEDGER}" -ge "${CANDIDATE_LEDGER}"
+          printf '%s' "${LIVE_HASH}" | grep -Eq '^[A-F0-9]{64}$'
+          jq --argjson ledger "${LIVE_LEDGER}" --arg hash "${LIVE_HASH}" '.sync.latestObservedLedger=$ledger | .sync.latestObservedHash=$hash' "${ROOT}/production-evidence.json" > "${ROOT}/production-evidence-refreshed.json"
+          HISTORY_SHA="$(cat "${ROOT}/history-commit-sha.txt")"
+          CURRENT_SHA="$(cat "${ROOT}/current-state-commit-sha.txt")"
+          node .t5-cutover-preflight-build/build-t5-cutover-preflight-bundle.mjs --local --candidate-summary "${ROOT}/candidate-summary.json" --history-publication .local/history-candidate/history/publication.json --production-evidence "${ROOT}/production-evidence-refreshed.json" --history-commit-sha "${HISTORY_SHA}" --current-state-commit-sha "${CURRENT_SHA}" > "${ROOT}/preflight-bundle.json"
+          jq -e '(.rebasePlan.action == "rebase" or .rebasePlan.action == "replay") and .candidate.historyBranch == "history-rolling-t3-candidate-data" and .candidate.currentStateBranch == "current-state-rolling-t3-candidate-data" and .candidate.ledgerIndex == .target.ledgerIndex and .candidate.ledgerHash == .target.ledgerHash and .production.latestObservedLedger >= .target.ledgerIndex' "${ROOT}/preflight-bundle.json" > /dev/null
+
+      - name: Capture current UTC-day D1 headroom
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=rolling-t3-preflight
+          TODAY="$(date -u +%F)"
+          read -r -d '' QUERY <<'GRAPHQL' || true
+          query D1Usage($accountTag:string!,$start:Date,$end:Date,$databaseId:string){viewer{accounts(filter:{accountTag:$accountTag}){d1AnalyticsAdaptiveGroups(limit:10000,filter:{date_geq:$start,date_leq:$end,databaseId:$databaseId}){sum{rowsRead rowsWritten}}}}}
+          GRAPHQL
+          jq -n --arg query "${QUERY}" --arg accountTag "${CLOUDFLARE_ACCOUNT_ID}" --arg start "${TODAY}" --arg end "${TODAY}" --arg databaseId "${D1_DATABASE_ID}" '{query:$query,variables:{accountTag:$accountTag,start:$start,end:$end,databaseId:$databaseId}}' > "${ROOT}/d1-usage-request.json"
+          curl --fail-with-body --silent --show-error --retry 3 -X POST -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -H 'Content-Type: application/json' --data @"${ROOT}/d1-usage-request.json" https://api.cloudflare.com/client/v4/graphql > "${ROOT}/d1-usage-response.json"
+          jq -e '((.errors // []) | length)==0 and (.data.viewer.accounts | length)>0' "${ROOT}/d1-usage-response.json" > /dev/null
+          jq '[.data.viewer.accounts[0].d1AnalyticsAdaptiveGroups[]] as $groups | {rows_read:([$groups[].sum.rowsRead // 0] | add // 0),rows_written:([$groups[].sum.rowsWritten // 0] | add // 0)} | .rows_read_remaining=(5000000-.rows_read) | .rows_written_remaining=(100000-.rows_written)' "${ROOT}/d1-usage-response.json" > "${ROOT}/d1-usage-summary.json"
+
+      - name: Upload retained T3 preflight evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: rolling-t3-preflight
+          path: rolling-t3-preflight
+          if-no-files-found: error
+          retention-days: 30
