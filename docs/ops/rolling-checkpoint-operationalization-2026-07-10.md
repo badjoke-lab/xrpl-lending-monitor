@@ -25,6 +25,7 @@ verified history/current-state source pair
   -> remote candidate rehearsal
   -> read-only fail-closed preflight
   -> separately guarded production promotion
+  -> canonical production-config reconciliation
   -> bounded Worker live-tail continuation
 ```
 
@@ -98,12 +99,14 @@ Before production writes, the workflow:
 2. cross-checks publication, exact-index, current-state summary, manifest, and channel identities;
 3. re-runs the remote candidate-pair rehearsal;
 4. captures production history/current-state branch heads;
-5. captures fresh production sync, epoch, and overlay evidence through SELECT-only D1 queries;
-6. refreshes the evidence with the live validated Devnet head;
-7. rebuilds the fail-closed rebase/replay preflight bundle;
-8. requires current UTC-day D1 write headroom with rollback margin;
-9. renders target-bound temporary-minute and protected-four-hour Worker configs;
-10. rechecks candidate branch HEADs immediately before production writes.
+5. pins the pre-promotion production history ref locally for rollback;
+6. captures fresh production sync, epoch, and overlay evidence through SELECT-only D1 queries;
+7. requires canonical `wrangler.jsonc` rollback-base identity and protected cron to match the current production D1 base before any write;
+8. refreshes the evidence with the live validated Devnet head;
+9. rebuilds the fail-closed rebase/replay preflight bundle;
+10. requires current UTC-day D1 write headroom with rollback margin;
+11. renders target-bound temporary-minute and protected-four-hour Worker configs;
+12. rechecks candidate branch HEADs immediately before production writes.
 
 The production sequence is:
 
@@ -122,8 +125,10 @@ Cleanup behavior is fail-closed:
 
 - after a confirmed rebase, current-state promotion is retried in an `always()` path;
 - after any temporary minute deployment, a four-hour protected Worker configuration is restored;
-- if rebase is not confirmed, the original Worker configuration is restored and a history promotion performed by the workflow is rolled back with force-with-lease;
+- if rebase is not confirmed, the original Worker configuration is restored and a history promotion performed by the workflow is rolled back with force-with-lease to the locally pinned pre-promotion ref;
 - unexpected production branch movement is never overwritten blindly.
+
+A successful promotion emits `canonicalConfigReconciliationRequired: true`. The canonical `wrangler.jsonc` target identity must be reconciled to the successful production target before another guarded promotion is allowed. The promotion workflow itself enforces this by requiring the canonical rollback base to match current D1 production state at the start of each run.
 
 This workflow must not be used until its PR CI is green and an exact candidate pair has separately passed the reusable read-only preflight workflow.
 
@@ -144,7 +149,8 @@ The reusable guarded promotion path preserves the successful T1 safety propertie
 9. replacement-base `replayed` alignment before current-state promotion;
 10. protected cadence restoration in success and cleanup paths;
 11. final history/current-state/cursor/overlay/source invariants;
-12. retained operational evidence.
+12. retained operational evidence;
+13. mandatory canonical config reconciliation before another production cycle.
 
 Production execution remains manual. A merged workflow is an operational tool, not automatic authorization to run a promotion.
 
@@ -157,9 +163,10 @@ The next order is:
 3. run the reusable read-only preflight against that exact candidate pair;
 4. compare candidate and preflight retained evidence against the pinned target identity;
 5. execute guarded production promotion only after fresh D1 headroom and fail-closed preflight gates pass;
-6. validate post-promotion live-tail continuation, cursor movement, failures, lag, and D1 burn;
-7. repeat enough production cycles to establish ordinary operation rather than one-time recovery;
-8. only then resume production-shaped M5-5 browser evidence;
-9. keep M6 blocked until M5-5 exits.
+6. immediately reconcile canonical `wrangler.jsonc` target identity and production current-state source after successful promotion, before another production cycle;
+7. validate post-promotion live-tail continuation, cursor movement, failures, lag, and D1 burn;
+8. repeat enough production cycles to establish ordinary operation rather than one-time recovery;
+9. only then resume production-shaped M5-5 browser evidence;
+10. keep M6 blocked until M5-5 exits.
 
 Mainnet remains disabled.
