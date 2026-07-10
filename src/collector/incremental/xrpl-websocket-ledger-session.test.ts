@@ -260,10 +260,11 @@ describe('XRPL WebSocket ledger session', () => {
       const session = createOpenedSession(socket)
       const pending = session.reader({ endpoint: 'https://ignored.example', ledgerIndex: 601, timeoutMs: 50 })
       await flushMicrotasks()
+      const rejection = expect(pending).rejects.toThrow('timed out after 50 ms')
 
       await vi.advanceTimersByTimeAsync(51)
 
-      await expect(pending).rejects.toThrow('timed out after 50 ms')
+      await rejection
       expect(socket.closed).toBe(true)
     } finally {
       vi.useRealTimers()
