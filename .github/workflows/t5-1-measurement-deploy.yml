@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - ops/t5-1-measurement-deploy
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: read
