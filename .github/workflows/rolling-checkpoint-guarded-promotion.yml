@@ -1,0 +1,632 @@
+name: Rolling checkpoint guarded promotion
+
+on:
+  workflow_dispatch:
+    inputs:
+      history_candidate_branch:
+        description: Candidate history branch to promote
+        required: true
+        default: history-rolling-next-candidate-data
+        type: string
+      current_state_candidate_branch:
+        description: Candidate current-state branch to promote
+        required: true
+        default: current-state-rolling-next-candidate-data
+        type: string
+      history_candidate_sha:
+        description: Exact 40-character history candidate branch HEAD SHA
+        required: true
+        type: string
+      current_state_candidate_sha:
+        description: Exact 40-character current-state candidate branch HEAD SHA
+        required: true
+        type: string
+      confirm_production_write:
+        description: Explicitly authorize Devnet production branch, D1 rebase, Worker deploy, and cron writes
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: rolling-checkpoint-production-promotion
+  cancel-in-progress: false
+
+env:
+  HISTORY_CANDIDATE_BRANCH: ${{ inputs.history_candidate_branch }}
+  CURRENT_STATE_CANDIDATE_BRANCH: ${{ inputs.current_state_candidate_branch }}
+  HISTORY_CANDIDATE_SHA: ${{ inputs.history_candidate_sha }}
+  CURRENT_STATE_CANDIDATE_SHA: ${{ inputs.current_state_candidate_sha }}
+  CONFIRM_PRODUCTION_WRITE: ${{ inputs.confirm_production_write }}
+  PRODUCTION_HISTORY_BRANCH: history-data
+  PRODUCTION_CURRENT_STATE_BRANCH: current-state-data
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  D1_DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Validate explicit production inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${CONFIRM_PRODUCTION_WRITE}" = "true"
+          git check-ref-format --branch "${HISTORY_CANDIDATE_BRANCH}" > /dev/null
+          git check-ref-format --branch "${CURRENT_STATE_CANDIDATE_BRANCH}" > /dev/null
+          test "${HISTORY_CANDIDATE_BRANCH}" != "${CURRENT_STATE_CANDIDATE_BRANCH}"
+          printf '%s' "${HISTORY_CANDIDATE_SHA}" | grep -Eq '^[a-f0-9]{40}$'
+          printf '%s' "${CURRENT_STATE_CANDIDATE_SHA}" | grep -Eq '^[a-f0-9]{40}$'
+
+      - name: Check out implementation
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Check out pinned history candidate metadata
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.history_candidate_branch }}
+          path: .local/history-candidate
+          sparse-checkout: |
+            history-channel.json
+            history/publication.json
+            history/index/exact/manifest.json
+          sparse-checkout-cone-mode: false
+
+      - name: Check out pinned current-state candidate metadata
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.current_state_candidate_branch }}
+          path: .local/current-candidate
+          sparse-checkout: |
+            channel.json
+            rolling-read-model-summary.json
+            read-model/manifest.json
+          sparse-checkout-cone-mode: false
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build candidate rehearsal and preflight tools
+        run: |
+          pnpm build:candidate-source-rehearsal
+          pnpm build:t5-cutover-preflight
+
+      - name: Bind candidate heads and derive exact target identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=rolling-promotion-evidence
+          mkdir -p "${ROOT}"
+
+          LOCAL_HISTORY_SHA="$(git -C .local/history-candidate rev-parse HEAD)"
+          LOCAL_CURRENT_SHA="$(git -C .local/current-candidate rev-parse HEAD)"
+          REMOTE_HISTORY_SHA="$(git ls-remote origin "refs/heads/${HISTORY_CANDIDATE_BRANCH}" | awk '{print $1}')"
+          REMOTE_CURRENT_SHA="$(git ls-remote origin "refs/heads/${CURRENT_STATE_CANDIDATE_BRANCH}" | awk '{print $1}')"
+
+          test "${LOCAL_HISTORY_SHA}" = "${HISTORY_CANDIDATE_SHA}"
+          test "${LOCAL_CURRENT_SHA}" = "${CURRENT_STATE_CANDIDATE_SHA}"
+          test "${REMOTE_HISTORY_SHA}" = "${HISTORY_CANDIDATE_SHA}"
+          test "${REMOTE_CURRENT_SHA}" = "${CURRENT_STATE_CANDIDATE_SHA}"
+
+          PUBLICATION=.local/history-candidate/history/publication.json
+          EXACT=.local/history-candidate/history/index/exact/manifest.json
+          CURRENT_SUMMARY=.local/current-candidate/rolling-read-model-summary.json
+          CURRENT_MANIFEST=.local/current-candidate/read-model/manifest.json
+          CURRENT_CHANNEL=.local/current-candidate/channel.json
+
+          TARGET_LEDGER_INDEX="$(jq -r '.endLedgerIndex' "${PUBLICATION}")"
+          TARGET_LEDGER_HASH="$(jq -r '.endLedgerHash' "${PUBLICATION}")"
+          TARGET_PUBLICATION_SHA="$(jq -r '.publicationSha256' "${PUBLICATION}")"
+          TARGET_SNAPSHOT_ID="$(jq -r '.target.snapshotId' "${CURRENT_SUMMARY}")"
+          TARGET_CURRENT_MANIFEST_SHA="$(jq -r '.target.manifestSha256' "${CURRENT_SUMMARY}")"
+
+          printf '%s' "${TARGET_LEDGER_INDEX}" | grep -Eq '^[0-9]+$'
+          printf '%s' "${TARGET_LEDGER_HASH}" | grep -Eq '^[A-F0-9]{64}$'
+          printf '%s' "${TARGET_PUBLICATION_SHA}" | grep -Eq '^[a-f0-9]{64}$'
+          printf '%s' "${TARGET_CURRENT_MANIFEST_SHA}" | grep -Eq '^[a-f0-9]{64}$'
+          test -n "${TARGET_SNAPSHOT_ID}"
+
+          jq -e --arg publication "${TARGET_PUBLICATION_SHA}" \
+            '.publicationSha256 == $publication and .bucketCount == 256 and .totalRecords > 0' \
+            "${EXACT}" > /dev/null
+
+          jq -e --argjson ledger "${TARGET_LEDGER_INDEX}" --arg hash "${TARGET_LEDGER_HASH}" --arg snapshot "${TARGET_SNAPSHOT_ID}" --arg manifest "${TARGET_CURRENT_MANIFEST_SHA}" '
+            .target.ledgerIndex == $ledger
+            and .target.ledgerHash == $hash
+            and .target.snapshotId == $snapshot
+            and .target.manifestSha256 == $manifest
+            and .rollingBase.segmentCount == 64
+          ' "${CURRENT_SUMMARY}" > /dev/null
+
+          jq -e --argjson ledger "${TARGET_LEDGER_INDEX}" --arg hash "${TARGET_LEDGER_HASH}" --arg snapshot "${TARGET_SNAPSHOT_ID}" --arg manifest "${TARGET_CURRENT_MANIFEST_SHA}" '
+            .complete == true
+            and .ledgerIndex == $ledger
+            and .ledgerHash == $hash
+            and .snapshotId == $snapshot
+            and .manifestSha256 == $manifest
+          ' "${CURRENT_MANIFEST}" > /dev/null
+
+          jq -e --arg snapshot "${TARGET_SNAPSHOT_ID}" --arg manifest "${TARGET_CURRENT_MANIFEST_SHA}" '
+            .active.snapshotId == $snapshot
+            and .active.manifestSha256 == $manifest
+          ' "${CURRENT_CHANNEL}" > /dev/null
+
+          {
+            echo "TARGET_LEDGER_INDEX=${TARGET_LEDGER_INDEX}"
+            echo "TARGET_LEDGER_HASH=${TARGET_LEDGER_HASH}"
+            echo "TARGET_PUBLICATION_SHA=${TARGET_PUBLICATION_SHA}"
+            echo "TARGET_SNAPSHOT_ID=${TARGET_SNAPSHOT_ID}"
+            echo "TARGET_CURRENT_MANIFEST_SHA=${TARGET_CURRENT_MANIFEST_SHA}"
+          } >> "${GITHUB_ENV}"
+
+          jq -n \
+            --arg historyBranch "${HISTORY_CANDIDATE_BRANCH}" \
+            --arg historyCommitSha "${HISTORY_CANDIDATE_SHA}" \
+            --arg currentStateBranch "${CURRENT_STATE_CANDIDATE_BRANCH}" \
+            --arg currentStateCommitSha "${CURRENT_STATE_CANDIDATE_SHA}" \
+            --argjson ledgerIndex "${TARGET_LEDGER_INDEX}" \
+            --arg ledgerHash "${TARGET_LEDGER_HASH}" \
+            --arg publicationSha256 "${TARGET_PUBLICATION_SHA}" \
+            --arg snapshotId "${TARGET_SNAPSHOT_ID}" \
+            --arg currentManifestSha256 "${TARGET_CURRENT_MANIFEST_SHA}" '
+            {
+              historyBranch:$historyBranch,
+              historyCommitSha:$historyCommitSha,
+              currentStateBranch:$currentStateBranch,
+              currentStateCommitSha:$currentStateCommitSha,
+              target:{ledgerIndex:$ledgerIndex,ledgerHash:$ledgerHash,publicationSha256:$publicationSha256,snapshotId:$snapshotId,currentManifestSha256:$currentManifestSha256}
+            }' > "${ROOT}/target-identity.json"
+
+      - name: Rehearse exact remote candidate pair
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=rolling-promotion-evidence
+          node .candidate-source-rehearsal-build/rehearse-candidate-sources.mjs \
+            --local \
+            --repository badjoke-lab/xrpl-lending-monitor \
+            --history-branch "${HISTORY_CANDIDATE_BRANCH}" \
+            --current-state-branch "${CURRENT_STATE_CANDIDATE_BRANCH}" \
+            > "${ROOT}/candidate-summary.json"
+
+          jq -e --argjson ledger "${TARGET_LEDGER_INDEX}" --arg hash "${TARGET_LEDGER_HASH}" --arg manifest "${TARGET_CURRENT_MANIFEST_SHA}" '
+            .passed == true
+            and (.exactReads | length) == 3
+            and .recentHistory.items == 1
+            and .ledgerIndex == $ledger
+            and .ledgerHash == $hash
+            and .currentStateManifestSha256 == $manifest
+          ' "${ROOT}/candidate-summary.json" > /dev/null
+
+      - name: Capture production refs and fresh D1 evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=rolling-promotion-evidence
+
+          PROD_HISTORY_SHA_BEFORE="$(git ls-remote origin "refs/heads/${PRODUCTION_HISTORY_BRANCH}" | awk '{print $1}')"
+          PROD_CURRENT_SHA_BEFORE="$(git ls-remote origin "refs/heads/${PRODUCTION_CURRENT_STATE_BRANCH}" | awk '{print $1}')"
+          printf '%s' "${PROD_HISTORY_SHA_BEFORE}" | grep -Eq '^[a-f0-9]{40}$'
+          printf '%s' "${PROD_CURRENT_SHA_BEFORE}" | grep -Eq '^[a-f0-9]{40}$'
+          printf '%s\n' "${PROD_HISTORY_SHA_BEFORE}" > "${ROOT}/production-history-sha-before.txt"
+          printf '%s\n' "${PROD_CURRENT_SHA_BEFORE}" > "${ROOT}/production-current-sha-before.txt"
+          {
+            echo "PROD_HISTORY_SHA_BEFORE=${PROD_HISTORY_SHA_BEFORE}"
+            echo "PROD_CURRENT_SHA_BEFORE=${PROD_CURRENT_SHA_BEFORE}"
+          } >> "${GITHUB_ENV}"
+
+          git fetch origin "refs/heads/${PRODUCTION_HISTORY_BRANCH}:refs/remotes/origin/${PRODUCTION_HISTORY_BRANCH}-before"
+          test "$(git rev-parse "refs/remotes/origin/${PRODUCTION_HISTORY_BRANCH}-before")" = "${PROD_HISTORY_SHA_BEFORE}"
+
+          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote --json \
+            --command "SELECT epoch_id,last_processed_ledger,last_processed_hash,latest_observed_ledger,latest_observed_hash,status FROM sync_state WHERE network='devnet'" \
+            > "${ROOT}/sync-query.json"
+
+          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote --json \
+            --command "SELECT id FROM network_epochs WHERE network='devnet' AND status='current' LIMIT 1" \
+            > "${ROOT}/epoch-query.json"
+
+          jq '[.. | objects | select(has("results")) | .results[]?] | .[0]' "${ROOT}/sync-query.json" > "${ROOT}/sync-row.json"
+          jq '[.. | objects | select(has("results")) | .results[]?] | .[0]' "${ROOT}/epoch-query.json" > "${ROOT}/epoch-row.json"
+
+          CURRENT_EPOCH="$(jq -r '.id // empty' "${ROOT}/epoch-row.json")"
+          printf '%s' "${CURRENT_EPOCH}" | grep -Eq '^[a-z0-9-]+$'
+
+          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote --json \
+            --command "SELECT epoch_id,base_snapshot_id,base_ledger_index,base_ledger_hash,overlay_ledger_index,overlay_ledger_hash,updated_at FROM current_state_overlay_state WHERE network='devnet' AND epoch_id='${CURRENT_EPOCH}' ORDER BY updated_at DESC,base_snapshot_id ASC" \
+            > "${ROOT}/overlay-query.json"
+
+          jq '[.. | objects | select(has("results")) | .results[]?]' "${ROOT}/overlay-query.json" > "${ROOT}/overlay-rows.json"
+          jq -e '.epoch_id != null and .last_processed_ledger != null and .last_processed_hash != null' "${ROOT}/sync-row.json" > /dev/null
+          jq -e '.id != null' "${ROOT}/epoch-row.json" > /dev/null
+          jq -e 'length > 0' "${ROOT}/overlay-rows.json" > /dev/null
+
+          jq -n \
+            --slurpfile sync "${ROOT}/sync-row.json" \
+            --slurpfile epoch "${ROOT}/epoch-row.json" \
+            --slurpfile overlays "${ROOT}/overlay-rows.json" '
+            {
+              sync:{network:"devnet",epochId:$sync[0].epoch_id,lastProcessedLedger:$sync[0].last_processed_ledger,lastProcessedHash:$sync[0].last_processed_hash,latestObservedLedger:$sync[0].latest_observed_ledger,latestObservedHash:$sync[0].latest_observed_hash,status:$sync[0].status},
+              currentEpochId:$epoch[0].id,
+              overlayStates:($overlays[0] | map({network:"devnet",epochId:.epoch_id,baseSnapshotId:.base_snapshot_id,baseLedgerIndex:.base_ledger_index,baseLedgerHash:.base_ledger_hash,overlayLedgerIndex:.overlay_ledger_index,overlayLedgerHash:.overlay_ledger_hash,updatedAt:.updated_at}))
+            }' > "${ROOT}/production-evidence.json"
+
+      - name: Verify canonical rollback config matches current production base
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=rolling-promotion-evidence
+          BASE_SNAPSHOT="$(jq -r '.vars.REPLACEMENT_BASE_SNAPSHOT_ID' wrangler.jsonc)"
+          BASE_LEDGER="$(jq -r '.vars.REPLACEMENT_BASE_LEDGER_INDEX | tonumber' wrangler.jsonc)"
+          BASE_HASH="$(jq -r '.vars.REPLACEMENT_BASE_LEDGER_HASH' wrangler.jsonc)"
+
+          jq -e '.triggers.crons == ["0 */4 * * *"]' wrangler.jsonc > /dev/null
+          jq -e --arg snapshot "${BASE_SNAPSHOT}" --argjson ledger "${BASE_LEDGER}" --arg hash "${BASE_HASH}" '
+            .sync.lastProcessedLedger >= $ledger
+            and any(.overlayStates[]; .baseSnapshotId == $snapshot and .baseLedgerIndex == $ledger and .baseLedgerHash == $hash)
+          ' "${ROOT}/production-evidence.json" > /dev/null
+
+          jq -n --arg snapshotId "${BASE_SNAPSHOT}" --argjson ledgerIndex "${BASE_LEDGER}" --arg ledgerHash "${BASE_HASH}" \
+            '{snapshotId:$snapshotId,ledgerIndex:$ledgerIndex,ledgerHash:$ledgerHash,protectedCron:"0 */4 * * *"}' \
+            > "${ROOT}/canonical-rollback-base.json"
+
+      - name: Refresh live head and build fresh fail-closed preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=rolling-promotion-evidence
+          jq -n '{method:"ledger",params:[{ledger_index:"validated",transactions:false,expand:false}]}' > "${ROOT}/live-head-request.json"
+          curl --fail-with-body --silent --show-error --retry 3 \
+            -H 'Content-Type: application/json' \
+            --data @"${ROOT}/live-head-request.json" \
+            https://devnet.honeycluster.io/ \
+            > "${ROOT}/live-head-response.json"
+
+          LIVE_LEDGER="$(jq -r '.result.ledger_index // .result.ledger.ledger_index // empty' "${ROOT}/live-head-response.json")"
+          LIVE_HASH="$(jq -r '.result.ledger_hash // .result.ledger.ledger_hash // empty' "${ROOT}/live-head-response.json")"
+          printf '%s' "${LIVE_HASH}" | grep -Eq '^[A-F0-9]{64}$'
+          test "${LIVE_LEDGER}" -ge "${TARGET_LEDGER_INDEX}"
+
+          jq --argjson ledger "${LIVE_LEDGER}" --arg hash "${LIVE_HASH}" \
+            '.sync.latestObservedLedger=$ledger | .sync.latestObservedHash=$hash' \
+            "${ROOT}/production-evidence.json" \
+            > "${ROOT}/production-evidence-refreshed.json"
+
+          node .t5-cutover-preflight-build/build-t5-cutover-preflight-bundle.mjs \
+            --local \
+            --candidate-summary "${ROOT}/candidate-summary.json" \
+            --history-publication .local/history-candidate/history/publication.json \
+            --production-evidence "${ROOT}/production-evidence-refreshed.json" \
+            --history-commit-sha "${HISTORY_CANDIDATE_SHA}" \
+            --current-state-commit-sha "${CURRENT_STATE_CANDIDATE_SHA}" \
+            > "${ROOT}/preflight-bundle.json"
+
+          jq -e --arg history "${HISTORY_CANDIDATE_BRANCH}" --arg current "${CURRENT_STATE_CANDIDATE_BRANCH}" --arg snapshot "${TARGET_SNAPSHOT_ID}" --argjson ledger "${TARGET_LEDGER_INDEX}" --arg hash "${TARGET_LEDGER_HASH}" '
+            (.rebasePlan.action == "rebase" or .rebasePlan.action == "replay")
+            and .candidate.historyBranch == $history
+            and .candidate.currentStateBranch == $current
+            and .target.snapshotId == $snapshot
+            and .target.ledgerIndex == $ledger
+            and .target.ledgerHash == $hash
+            and .production.latestObservedLedger >= $ledger
+          ' "${ROOT}/preflight-bundle.json" > /dev/null
+
+      - name: Enforce current UTC-day D1 write headroom
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=rolling-promotion-evidence
+          TODAY="$(date -u +%F)"
+          read -r -d '' QUERY <<'GRAPHQL' || true
+          query D1Usage($accountTag:string!,$start:Date,$end:Date,$databaseId:string){viewer{accounts(filter:{accountTag:$accountTag}){d1AnalyticsAdaptiveGroups(limit:10000,filter:{date_geq:$start,date_leq:$end,databaseId:$databaseId}){sum{rowsRead rowsWritten}}}}}
+          GRAPHQL
+
+          jq -n --arg query "${QUERY}" --arg accountTag "${CLOUDFLARE_ACCOUNT_ID}" --arg start "${TODAY}" --arg end "${TODAY}" --arg databaseId "${D1_DATABASE_ID}" \
+            '{query:$query,variables:{accountTag:$accountTag,start:$start,end:$end,databaseId:$databaseId}}' \
+            > "${ROOT}/d1-request.json"
+
+          curl --fail-with-body --silent --show-error --retry 3 -X POST \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            -H 'Content-Type: application/json' \
+            --data @"${ROOT}/d1-request.json" \
+            https://api.cloudflare.com/client/v4/graphql \
+            > "${ROOT}/d1-response.json"
+
+          jq -e '((.errors // []) | length) == 0 and (.data.viewer.accounts | length) > 0' "${ROOT}/d1-response.json" > /dev/null
+          jq '[.data.viewer.accounts[0].d1AnalyticsAdaptiveGroups[]] as $groups | {rows_read:([$groups[].sum.rowsRead // 0] | add // 0),rows_written:([$groups[].sum.rowsWritten // 0] | add // 0)} | .rows_read_remaining=(5000000-.rows_read) | .rows_written_remaining=(100000-.rows_written)' \
+            "${ROOT}/d1-response.json" > "${ROOT}/d1-summary.json"
+          jq -e '.rows_written < 95000 and .rows_written_remaining >= 5000' "${ROOT}/d1-summary.json" > /dev/null
+
+      - name: Render exact minute and protected Worker configs
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import copy
+          import json
+          import os
+          from pathlib import Path
+
+          source = json.loads(Path('wrangler.jsonc').read_text())
+
+          def render(cron: str, replacement_branch: str) -> dict:
+              cfg = copy.deepcopy(source)
+              cfg['triggers']['crons'] = [cron]
+              vars_ = cfg['vars']
+              vars_['CURRENT_STATE_REPLACEMENT_SNAPSHOT_ID'] = os.environ['TARGET_SNAPSHOT_ID']
+              vars_['CURRENT_STATE_REPLACEMENT_GITHUB_BRANCH'] = replacement_branch
+              vars_['REPLACEMENT_BASE_SNAPSHOT_ID'] = os.environ['TARGET_SNAPSHOT_ID']
+              vars_['REPLACEMENT_BASE_LEDGER_INDEX'] = os.environ['TARGET_LEDGER_INDEX']
+              vars_['REPLACEMENT_BASE_LEDGER_HASH'] = os.environ['TARGET_LEDGER_HASH']
+              vars_['REPLACEMENT_BASE_REBASE_ENABLED'] = 'true'
+              return cfg
+
+          minute = render('* * * * *', os.environ['CURRENT_STATE_CANDIDATE_BRANCH'])
+          protected = render('0 */4 * * *', os.environ['PRODUCTION_CURRENT_STATE_BRANCH'])
+          Path('wrangler.rolling-minute.jsonc').write_text(json.dumps(minute, indent=2) + '\n')
+          Path('wrangler.rolling-protected.jsonc').write_text(json.dumps(protected, indent=2) + '\n')
+          PY
+
+          jq -e --arg snapshot "${TARGET_SNAPSHOT_ID}" --arg branch "${CURRENT_STATE_CANDIDATE_BRANCH}" --argjson ledger "${TARGET_LEDGER_INDEX}" --arg hash "${TARGET_LEDGER_HASH}" '
+            .triggers.crons == ["* * * * *"]
+            and .vars.CURRENT_STATE_REPLACEMENT_SNAPSHOT_ID == $snapshot
+            and .vars.CURRENT_STATE_REPLACEMENT_GITHUB_BRANCH == $branch
+            and (.vars.REPLACEMENT_BASE_LEDGER_INDEX | tonumber) == $ledger
+            and .vars.REPLACEMENT_BASE_LEDGER_HASH == $hash
+          ' wrangler.rolling-minute.jsonc > /dev/null
+
+          jq -e --arg snapshot "${TARGET_SNAPSHOT_ID}" --arg branch "${PRODUCTION_CURRENT_STATE_BRANCH}" --argjson ledger "${TARGET_LEDGER_INDEX}" --arg hash "${TARGET_LEDGER_HASH}" '
+            .triggers.crons == ["0 */4 * * *"]
+            and .vars.CURRENT_STATE_REPLACEMENT_SNAPSHOT_ID == $snapshot
+            and .vars.CURRENT_STATE_REPLACEMENT_GITHUB_BRANCH == $branch
+            and (.vars.REPLACEMENT_BASE_LEDGER_INDEX | tonumber) == $ledger
+            and .vars.REPLACEMENT_BASE_LEDGER_HASH == $hash
+          ' wrangler.rolling-protected.jsonc > /dev/null
+
+      - name: Recheck candidate branch heads before production writes
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git ls-remote origin "refs/heads/${HISTORY_CANDIDATE_BRANCH}" | awk '{print $1}')" = "${HISTORY_CANDIDATE_SHA}"
+          test "$(git ls-remote origin "refs/heads/${CURRENT_STATE_CANDIDATE_BRANCH}" | awk '{print $1}')" = "${CURRENT_STATE_CANDIDATE_SHA}"
+
+      - name: Promote exact history candidate with force-with-lease
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=rolling-promotion-evidence
+          REMOTE_HISTORY="$(git ls-remote origin "refs/heads/${PRODUCTION_HISTORY_BRANCH}" | awk '{print $1}')"
+          if [ "${REMOTE_HISTORY}" != "${HISTORY_CANDIDATE_SHA}" ]; then
+            test "${REMOTE_HISTORY}" = "${PROD_HISTORY_SHA_BEFORE}"
+            git fetch origin "refs/heads/${HISTORY_CANDIDATE_BRANCH}:refs/remotes/origin/${HISTORY_CANDIDATE_BRANCH}"
+            git push --force-with-lease="refs/heads/${PRODUCTION_HISTORY_BRANCH}:${PROD_HISTORY_SHA_BEFORE}" \
+              origin "${HISTORY_CANDIDATE_SHA}:refs/heads/${PRODUCTION_HISTORY_BRANCH}"
+            touch "${ROOT}/history-promoted"
+          fi
+          test "$(git ls-remote origin "refs/heads/${PRODUCTION_HISTORY_BRANCH}" | awk '{print $1}')" = "${HISTORY_CANDIDATE_SHA}"
+
+      - name: Wait for exact production history source
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=rolling-promotion-evidence
+          for I in $(seq 1 18); do
+            curl --fail-with-body --silent --show-error --retry 2 \
+              https://xrpl-lending-monitor.badjoke-lab.workers.dev/api/status/history-source \
+              > "${ROOT}/history-source-after-promotion.json" || true
+            if jq -e --arg publication "${TARGET_PUBLICATION_SHA}" --argjson ledger "${TARGET_LEDGER_INDEX}" '
+              .status == "ok"
+              and .mode == "hybrid"
+              and .chain.end_ledger_index == $ledger
+              and .chain.publication_sha256 == $publication
+              and .exact_index.total_records > 0
+            ' "${ROOT}/history-source-after-promotion.json" > /dev/null 2>&1; then
+              touch "${ROOT}/history-source-confirmed"
+              break
+            fi
+            sleep 10
+          done
+          test -f "${ROOT}/history-source-confirmed"
+
+      - name: Detect whether target D1 rebase is already aligned
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=rolling-promotion-evidence
+          curl --fail-with-body --silent --show-error --retry 3 \
+            https://xrpl-lending-monitor.badjoke-lab.workers.dev/api/status/replacement-base-rebase \
+            > "${ROOT}/rebase-before-minute.json"
+          if jq -e --arg snapshot "${TARGET_SNAPSHOT_ID}" --argjson ledger "${TARGET_LEDGER_INDEX}" '
+            .status == "replayed"
+            and .target.snapshotId == $snapshot
+            and .target.ledgerIndex == $ledger
+            and .evidence.sync.lastProcessedLedger >= $ledger
+          ' "${ROOT}/rebase-before-minute.json" > /dev/null 2>&1; then
+            touch "${ROOT}/rebase-confirmed"
+          fi
+
+      - name: Deploy exact target with temporary minute cadence when needed
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=rolling-promotion-evidence
+          if [ ! -f "${ROOT}/rebase-confirmed" ]; then
+            pnpm exec wrangler deploy --config wrangler.rolling-minute.jsonc
+            touch "${ROOT}/minute-deployed"
+            curl --fail-with-body --silent --show-error --retry 3 \
+              -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+              "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/xrpl-lending-monitor/schedules" \
+              > "${ROOT}/schedule-minute.json"
+            jq -e '.result.schedules | length == 1 and .[0].cron == "* * * * *"' "${ROOT}/schedule-minute.json" > /dev/null
+          fi
+
+      - name: Wait for guarded D1 rebase alignment
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=rolling-promotion-evidence
+          if [ ! -f "${ROOT}/rebase-confirmed" ]; then
+            for I in $(seq 1 30); do
+              curl --fail-with-body --silent --show-error --retry 2 \
+                https://xrpl-lending-monitor.badjoke-lab.workers.dev/api/status/replacement-base-rebase \
+                > "${ROOT}/rebase-status.json" || true
+              if jq -e --arg snapshot "${TARGET_SNAPSHOT_ID}" --argjson ledger "${TARGET_LEDGER_INDEX}" '
+                .status == "replayed"
+                and .target.snapshotId == $snapshot
+                and .target.ledgerIndex == $ledger
+                and .evidence.sync.lastProcessedLedger >= $ledger
+              ' "${ROOT}/rebase-status.json" > /dev/null 2>&1; then
+                touch "${ROOT}/rebase-confirmed"
+                break
+              fi
+              sleep 10
+            done
+          fi
+          test -f "${ROOT}/rebase-confirmed"
+
+      - name: Promote exact current-state candidate after confirmed rebase
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=rolling-promotion-evidence
+          test "$(git ls-remote origin "refs/heads/${CURRENT_STATE_CANDIDATE_BRANCH}" | awk '{print $1}')" = "${CURRENT_STATE_CANDIDATE_SHA}"
+          REMOTE_CURRENT="$(git ls-remote origin "refs/heads/${PRODUCTION_CURRENT_STATE_BRANCH}" | awk '{print $1}')"
+          if [ "${REMOTE_CURRENT}" != "${CURRENT_STATE_CANDIDATE_SHA}" ]; then
+            test "${REMOTE_CURRENT}" = "${PROD_CURRENT_SHA_BEFORE}"
+            git fetch origin "refs/heads/${CURRENT_STATE_CANDIDATE_BRANCH}:refs/remotes/origin/${CURRENT_STATE_CANDIDATE_BRANCH}"
+            git push --force-with-lease="refs/heads/${PRODUCTION_CURRENT_STATE_BRANCH}:${PROD_CURRENT_SHA_BEFORE}" \
+              origin "${CURRENT_STATE_CANDIDATE_SHA}:refs/heads/${PRODUCTION_CURRENT_STATE_BRANCH}"
+          fi
+          test "$(git ls-remote origin "refs/heads/${PRODUCTION_CURRENT_STATE_BRANCH}" | awk '{print $1}')" = "${CURRENT_STATE_CANDIDATE_SHA}"
+          touch "${ROOT}/current-promoted"
+
+      - name: Deploy protected cadence bound to production current-state branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=rolling-promotion-evidence
+          pnpm exec wrangler deploy --config wrangler.rolling-protected.jsonc
+          touch "${ROOT}/protected-target-deployed"
+          curl --fail-with-body --silent --show-error --retry 3 \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/xrpl-lending-monitor/schedules" \
+            > "${ROOT}/schedule-protected.json"
+          jq -e '.result.schedules | length == 1 and .[0].cron == "0 */4 * * *"' "${ROOT}/schedule-protected.json" > /dev/null
+
+      - name: Verify final production identity and live-tail safety
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=rolling-promotion-evidence
+          for I in $(seq 1 18); do
+            curl --fail-with-body --silent --show-error --retry 2 https://xrpl-lending-monitor.badjoke-lab.workers.dev/api/status/replacement-base-rebase > "${ROOT}/rebase-final.json" || true
+            curl --fail-with-body --silent --show-error --retry 2 https://xrpl-lending-monitor.badjoke-lab.workers.dev/api/status/history-source > "${ROOT}/history-final.json" || true
+            curl --fail-with-body --silent --show-error --retry 2 https://xrpl-lending-monitor.badjoke-lab.workers.dev/api/status/collector > "${ROOT}/collector-final.json" || true
+            curl --fail-with-body --silent --show-error --retry 2 https://xrpl-lending-monitor.badjoke-lab.workers.dev/api/overview > "${ROOT}/overview-final.json" || true
+
+            if jq -e --arg snapshot "${TARGET_SNAPSHOT_ID}" --argjson ledger "${TARGET_LEDGER_INDEX}" '
+                .status == "replayed" and .target.snapshotId == $snapshot and .target.ledgerIndex == $ledger and .evidence.sync.lastProcessedLedger >= $ledger
+              ' "${ROOT}/rebase-final.json" > /dev/null 2>&1 \
+              && jq -e --arg publication "${TARGET_PUBLICATION_SHA}" --argjson ledger "${TARGET_LEDGER_INDEX}" '
+                .status == "ok" and .mode == "hybrid" and .chain.end_ledger_index == $ledger and .chain.publication_sha256 == $publication
+              ' "${ROOT}/history-final.json" > /dev/null 2>&1 \
+              && jq -e --argjson ledger "${TARGET_LEDGER_INDEX}" '
+                .cursor.last_processed_ledger >= $ledger and .consecutive_failures == 0 and .error == null
+              ' "${ROOT}/collector-final.json" > /dev/null 2>&1 \
+              && grep -q "${TARGET_SNAPSHOT_ID}" "${ROOT}/overview-final.json"; then
+              touch "${ROOT}/final-confirmed"
+              break
+            fi
+            sleep 10
+          done
+
+          test -f "${ROOT}/final-confirmed"
+          test "$(git ls-remote origin "refs/heads/${PRODUCTION_HISTORY_BRANCH}" | awk '{print $1}')" = "${HISTORY_CANDIDATE_SHA}"
+          test "$(git ls-remote origin "refs/heads/${PRODUCTION_CURRENT_STATE_BRANCH}" | awk '{print $1}')" = "${CURRENT_STATE_CANDIDATE_SHA}"
+
+          jq -n \
+            --slurpfile target "${ROOT}/target-identity.json" \
+            --slurpfile rollback "${ROOT}/canonical-rollback-base.json" \
+            --slurpfile preflight "${ROOT}/preflight-bundle.json" \
+            --slurpfile usage "${ROOT}/d1-summary.json" \
+            --slurpfile collector "${ROOT}/collector-final.json" '
+            {passed:true,target:$target[0],canonicalRollbackBase:$rollback[0],rebasePlan:$preflight[0].rebasePlan,d1UsageAtGate:$usage[0],collector:$collector[0],canonicalConfigReconciliationRequired:true}
+          ' > "${ROOT}/evidence.json"
+
+      - name: Ensure current-state promotion after confirmed rebase
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=rolling-promotion-evidence
+          if [ -f "${ROOT}/rebase-confirmed" ]; then
+            REMOTE_CURRENT="$(git ls-remote origin "refs/heads/${PRODUCTION_CURRENT_STATE_BRANCH}" | awk '{print $1}')"
+            if [ "${REMOTE_CURRENT}" != "${CURRENT_STATE_CANDIDATE_SHA}" ]; then
+              test "${REMOTE_CURRENT}" = "${PROD_CURRENT_SHA_BEFORE}"
+              test "$(git ls-remote origin "refs/heads/${CURRENT_STATE_CANDIDATE_BRANCH}" | awk '{print $1}')" = "${CURRENT_STATE_CANDIDATE_SHA}"
+              git fetch origin "refs/heads/${CURRENT_STATE_CANDIDATE_BRANCH}:refs/remotes/origin/${CURRENT_STATE_CANDIDATE_BRANCH}"
+              git push --force-with-lease="refs/heads/${PRODUCTION_CURRENT_STATE_BRANCH}:${PROD_CURRENT_SHA_BEFORE}" \
+                origin "${CURRENT_STATE_CANDIDATE_SHA}:refs/heads/${PRODUCTION_CURRENT_STATE_BRANCH}"
+            fi
+            test "$(git ls-remote origin "refs/heads/${PRODUCTION_CURRENT_STATE_BRANCH}" | awk '{print $1}')" = "${CURRENT_STATE_CANDIDATE_SHA}"
+          fi
+
+      - name: Always restore a protected four-hour Worker configuration
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=rolling-promotion-evidence
+          if [ -f "${ROOT}/rebase-confirmed" ] && [ ! -f "${ROOT}/protected-target-deployed" ]; then
+            pnpm exec wrangler deploy --config wrangler.rolling-protected.jsonc
+            touch "${ROOT}/protected-target-deployed"
+          elif [ -f "${ROOT}/minute-deployed" ] && [ ! -f "${ROOT}/rebase-confirmed" ]; then
+            pnpm exec wrangler deploy --config wrangler.jsonc
+            touch "${ROOT}/original-protected-restored"
+          fi
+
+          if [ -f "${ROOT}/minute-deployed" ] || [ -f "${ROOT}/protected-target-deployed" ]; then
+            curl --fail-with-body --silent --show-error --retry 3 \
+              -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+              "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/xrpl-lending-monitor/schedules" \
+              > "${ROOT}/schedule-cleanup.json"
+            jq -e '.result.schedules | length == 1 and .[0].cron == "0 */4 * * *"' "${ROOT}/schedule-cleanup.json" > /dev/null
+          fi
+
+      - name: Roll back history branch when rebase was not confirmed
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=rolling-promotion-evidence
+          if [ -f "${ROOT}/history-promoted" ] && [ ! -f "${ROOT}/rebase-confirmed" ]; then
+            REMOTE_HISTORY="$(git ls-remote origin "refs/heads/${PRODUCTION_HISTORY_BRANCH}" | awk '{print $1}')"
+            if [ "${REMOTE_HISTORY}" = "${HISTORY_CANDIDATE_SHA}" ]; then
+              test "$(git rev-parse "refs/remotes/origin/${PRODUCTION_HISTORY_BRANCH}-before")" = "${PROD_HISTORY_SHA_BEFORE}"
+              git push --force-with-lease="refs/heads/${PRODUCTION_HISTORY_BRANCH}:${HISTORY_CANDIDATE_SHA}" \
+                origin "${PROD_HISTORY_SHA_BEFORE}:refs/heads/${PRODUCTION_HISTORY_BRANCH}"
+            else
+              test "${REMOTE_HISTORY}" = "${PROD_HISTORY_SHA_BEFORE}"
+            fi
+            test "$(git ls-remote origin "refs/heads/${PRODUCTION_HISTORY_BRANCH}" | awk '{print $1}')" = "${PROD_HISTORY_SHA_BEFORE}"
+          fi
+
+      - name: Upload retained guarded promotion evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: rolling-checkpoint-guarded-promotion
+          path: rolling-promotion-evidence
+          if-no-files-found: warn
+          retention-days: 30
