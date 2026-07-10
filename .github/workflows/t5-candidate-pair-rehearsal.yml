@@ -1,0 +1,251 @@
+name: T5 candidate-pair rehearsal
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: t5-candidate-pair-rehearsal
+  cancel-in-progress: false
+
+jobs:
+  build-publish-rehearse:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Check out implementation
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Check out active immutable history data
+        uses: actions/checkout@v4
+        with:
+          ref: history-data
+          path: .local/history-root
+          sparse-checkout: |
+            history
+          sparse-checkout-cone-mode: true
+
+      - name: Download retained multi-segment extension artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: t5-multi-segment-extension-rehearsal
+          path: .local/extension
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: 29073900381
+
+      - name: Download retained extended publication artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: t5-extended-publication-rehearsal
+          path: .local/extended-publication
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: 29074302912
+
+      - name: Download verified release-native base artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: current-state-release-assets
+          path: .local/current-state-release
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: 28699460881
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Assemble fixed-target history source
+        shell: bash
+        run: |
+          set -euo pipefail
+          PLAN=.local/extension/plan.json
+          EPOCH="$(jq -r '.epochId' "${PLAN}")"
+          cp -R ".local/extension/history/${EPOCH}/." ".local/history-root/history/${EPOCH}/"
+          cp .local/extended-publication/history/publication.json \
+            .local/history-root/history/publication.json
+          jq -e --slurpfile plan "${PLAN}" '
+            .segmentCount == 126
+            and .ledgerCount == 61261
+            and .endLedgerIndex == $plan[0].target.ledgerIndex
+            and .endLedgerHash == $plan[0].target.ledgerHash
+          ' .local/history-root/history/publication.json > /dev/null
+
+      - name: Build candidate tools
+        run: |
+          pnpm build:history-exact-index
+          pnpm build:history-segment-channel
+          pnpm build:replacement-current-state-read-model
+          pnpm build:candidate-source-rehearsal
+          cp .history-segment-channel-build/build-history-segment-channel.mjs /tmp/build-history-segment-channel.mjs
+          cp .candidate-source-rehearsal-build/rehearse-candidate-sources.mjs /tmp/rehearse-candidate-sources.mjs
+
+      - name: Build extended exact index
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=.local/history-root
+          STARTED="$(date +%s)"
+          node .history-exact-index-build/build-history-exact-index.mjs \
+            --local \
+            --publication "${ROOT}/history/publication.json" \
+            --artifact-root "${ROOT}" \
+            --output-dir "${ROOT}/history/index/exact" \
+            --asset-prefix history/index/exact \
+            --bucket-count 256 \
+            --source-revision "${GITHUB_SHA}" \
+            > .local/exact-index.stdout.json
+          echo $(( $(date +%s) - STARTED )) > .local/exact-index-elapsed-seconds.txt
+
+      - name: Build replacement current-state candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          STARTED="$(date +%s)"
+          node .replacement-current-state-read-model-build/build-replacement-current-state-read-model.mjs \
+            --local \
+            --input-dir .local/current-state-release/assets \
+            --history-root .local/history-root \
+            --publication .local/history-root/history/publication.json \
+            --output-dir .local/replacement-current-state \
+            --page-size 50 \
+            --lookup-prefix-length 3 \
+            --snapshot-id devnet-3432936-754afb3a2138 \
+            --release-tag replacement-current-state-3432936 \
+            > .local/replacement-current-state.stdout.json
+          echo $(( $(date +%s) - STARTED )) > .local/replacement-current-state-elapsed-seconds.txt
+
+      - name: Verify fixed-target candidate alignment
+        shell: bash
+        run: |
+          set -euo pipefail
+          PLAN=.local/extension/plan.json
+          PUBLICATION=.local/history-root/history/publication.json
+          EXACT=.local/history-root/history/index/exact/manifest.json
+          SUMMARY=.local/replacement-current-state/replacement-read-model-summary.json
+          MANIFEST=.local/replacement-current-state/read-model/manifest.json
+          TARGET_INDEX="$(jq -r '.target.ledgerIndex' "${PLAN}")"
+          TARGET_HASH="$(jq -r '.target.ledgerHash' "${PLAN}")"
+          PUBLICATION_SHA="$(jq -r '.publicationSha256' "${PUBLICATION}")"
+
+          jq -e --argjson target_index "${TARGET_INDEX}" --arg target_hash "${TARGET_HASH}" '
+            .endLedgerIndex == $target_index and .endLedgerHash == $target_hash and .segmentCount == 126 and .ledgerCount == 61261
+          ' "${PUBLICATION}" > /dev/null
+          jq -e --arg publication_sha "${PUBLICATION_SHA}" '
+            .publicationSha256 == $publication_sha and .bucketCount == 256 and .totalRecords > 0
+          ' "${EXACT}" > /dev/null
+          jq -e --argjson target_index "${TARGET_INDEX}" --arg target_hash "${TARGET_HASH}" '
+            .target.ledgerIndex == $target_index and .target.ledgerHash == $target_hash and .segmentCount == 126 and .ledgerCount == 61261
+          ' "${SUMMARY}" > /dev/null
+          jq -e --argjson target_index "${TARGET_INDEX}" --arg target_hash "${TARGET_HASH}" '
+            .ledgerIndex == $target_index and .ledgerHash == $target_hash
+          ' "${MANIFEST}" > /dev/null
+          test "$(find .local/replacement-current-state/read-model/lookup -type f | wc -l)" -eq 4096
+
+      - name: Stage T5 candidate payloads
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/history-t5-candidate /tmp/current-state-t5-candidate
+          mkdir -p /tmp/history-t5-candidate /tmp/current-state-t5-candidate
+          cp -R .local/history-root/history /tmp/history-t5-candidate/history
+          cp -R .local/replacement-current-state/read-model /tmp/current-state-t5-candidate/read-model
+          cp .local/replacement-current-state/replacement-read-model-summary.json /tmp/current-state-t5-candidate/replacement-read-model-summary.json
+          cp .local/replacement-current-state-elapsed-seconds.txt /tmp/current-state-t5-candidate/replacement-current-state-elapsed-seconds.txt
+
+      - name: Publish T5 history candidate branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git checkout --orphan history-t5-candidate-publish
+          git rm -rf . || true
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -R /tmp/history-t5-candidate/. .
+          git add history
+          git commit -m "Publish T5 fixed-target history candidate data"
+          DATA_SHA="$(git rev-parse HEAD)"
+          node /tmp/build-history-segment-channel.mjs \
+            --local \
+            --publication history/publication.json \
+            --publication-path history/publication.json \
+            --exact-index-manifest history/index/exact/manifest.json \
+            --exact-index-manifest-path history/index/exact/manifest.json \
+            --data-commit-sha "${DATA_SHA}" \
+            --output history-channel.json
+          git add history-channel.json
+          git commit -m "Activate T5 fixed-target history candidate channel"
+          git push --force origin HEAD:refs/heads/history-t5-candidate-data
+
+      - name: Publish T5 current-state candidate branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git checkout --orphan current-state-t5-candidate-publish
+          git rm -rf . || true
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -R /tmp/current-state-t5-candidate/. .
+          git add read-model replacement-read-model-summary.json replacement-current-state-elapsed-seconds.txt
+          git commit -m "Publish T5 fixed-target current-state candidate data"
+          DATA_SHA="$(git rev-parse HEAD)"
+          MANIFEST_SHA="$(jq -r .target.manifestSha256 replacement-read-model-summary.json)"
+          RELEASE_TAG="$(jq -r .target.releaseTag replacement-read-model-summary.json)"
+          SNAPSHOT_ID="$(jq -r .target.snapshotId replacement-read-model-summary.json)"
+          jq -n \
+            --arg dataCommitSha "${DATA_SHA}" \
+            --arg manifestSha256 "${MANIFEST_SHA}" \
+            --arg releaseTag "${RELEASE_TAG}" \
+            --arg snapshotId "${SNAPSHOT_ID}" \
+            --arg updatedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{schemaVersion:1,active:{dataCommitSha:$dataCommitSha,manifestPath:"read-model/manifest.json",manifestSha256:$manifestSha256,releaseTag:$releaseTag,snapshotId:$snapshotId},updatedAt:$updatedAt}' \
+            > channel.json
+          git add channel.json
+          git commit -m "Activate T5 fixed-target current-state candidate channel"
+          git push --force origin HEAD:refs/heads/current-state-t5-candidate-data
+
+      - name: Rehearse remote T5 candidate pair
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/t5-candidate-pair-evidence
+          node /tmp/rehearse-candidate-sources.mjs \
+            --local \
+            --repository badjoke-lab/xrpl-lending-monitor \
+            --history-branch history-t5-candidate-data \
+            --current-state-branch current-state-t5-candidate-data \
+            > /tmp/t5-candidate-pair-evidence/remote-rehearsal-summary.json
+          jq -e '
+            .passed == true
+            and .ledgerIndex == 3432936
+            and .segmentCount == 126
+            and .ledgerCount == 61261
+            and (.exactReads | length) == 3
+            and .recentHistory.items == 1
+          ' /tmp/t5-candidate-pair-evidence/remote-rehearsal-summary.json > /dev/null
+
+          jq -n \
+            --slurpfile rehearsal /tmp/t5-candidate-pair-evidence/remote-rehearsal-summary.json \
+            --argjson exactIndexElapsedSeconds "$(cat /tmp/history-t5-candidate/../history-t5-candidate/../does-not-exist 2>/dev/null || echo 0)" '
+            {passed:true,remoteRehearsal:$rehearsal[0]}
+          ' > /tmp/t5-candidate-pair-evidence/evidence.json
+
+      - name: Upload retained T5 candidate-pair evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: t5-candidate-pair-rehearsal
+          path: /tmp/t5-candidate-pair-evidence
+          if-no-files-found: warn
+          retention-days: 30
