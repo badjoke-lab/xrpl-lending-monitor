@@ -92,6 +92,12 @@ T4 temporary production 64-ledger WSS window-4 test was merged in PR #309 and me
 
 PR #310 restored the production-validated WSS32 window-4 baseline after T4. This is a control baseline for T5 resource measurement, not a reversal of the WebSocket architecture.
 
+T5-1 measurement instrumentation was merged in PR #311. Runtime monitor artifact `8219138203` captured three measured WSS32 window-4 runs in a dense backlog region. Each run read 32 ledgers through one WSS endpoint attempt, but commit-prefix budgeting allowed only 9, 10, and 9 ledgers. Persistence rows written were 2493, 2578, and 2294. Across the window, cursor advanced `+19`, observed head advanced `+199`, and lag grew `+180`, with zero collector failures and `error=null`. The same artifact recorded D1 rows written `77,113 / 100,000` and rows read `3,759,947 / 5,000,000` at `2026-07-10T05:37Z`.
+
+The measured dense-region result moves the active bottleneck from transport capacity to D1 persistence capacity. A temporary operational deployment changed production cadence to `0 */4 * * *`; the Cloudflare schedules API confirmed that exact active cron. The temporary deployment PR was closed without merge. The four-hour cadence is a D1 protection profile, not a catch-up profile.
+
+Detailed evidence and the protection decision are recorded in `docs/ops/t5-d1-persistence-bottleneck-2026-07-10.md`.
+
 ## Latest retained runtime evidence
 
 ### HYB-7 and M1
@@ -104,7 +110,7 @@ At `2026-07-08 00:52:38 UTC`, the D1-gated production cross-audit passed with co
 
 ### Browser prerequisite and resource gate
 
-The durable production browser-regression path is merged and validated in CI. It discovers bounded live witnesses, traverses 15 representative routes, performs relationship/history/archive/Search/freshness behavior checks, records request-count evidence, retains `runner.log`, and fails on rendered state errors, console errors, page errors, HTTP 5xx findings, or missing required behavior.
+The durable production browser-regression path is merged and validated in CI. It discovers bounded live witnesses, traverses 15 representative public routes, performs relationship/history/archive/Search/freshness behavior checks, records request-count evidence, retains `runner.log`, and fails on rendered state errors, console errors, page errors, HTTP 5xx findings, or missing required behavior.
 
 The browser exit evaluator is merged and writes `exit-evaluation.json` and `exit-evaluation.md`. A passing evaluator marks browser evidence ready for M5-5 exit reconciliation, but retained API cross-audit evidence remains a separate prerequisite.
 
@@ -134,7 +140,7 @@ M5-5 completion
   -> M6 integrity/reset baseline
   -> M6 runtime/resource guardrail baseline
   -> Explorer v1
-  -> remaining M6 visual/release hardening
+  -> remaining M6 release hardening
   -> public Devnet release and real soak
   -> O1 XRPL Lending Observatory data foundation
   -> O2 Observatory monitoring view
@@ -145,17 +151,17 @@ Explorer v1 is a bounded presentation layer over approved contracts. It must not
 
 ## Active unit
 
-The active operational unit is T5-1: measure the D1 cost of the incremental persistence batch before selecting another sustained or temporary throughput increase.
+The active operational unit is T5-2: resolve the measured D1 persistence bottleneck before any further production throughput increase.
 
 The unit boundary is:
 
-1. Keep production on the passing WSS32 window-4, five-minute baseline while the measurement path is introduced.
-2. Measure only the existing atomic incremental `db.batch()` result metadata without changing commit ordering, cursor atomicity, overlay watermark checks, or continuity checks.
-3. Persist and expose `persistence_batch_results`, `persistence_statements`, `persistence_rows_read`, and `persistence_rows_written` separately from estimated rows/statements.
-4. Treat these fields as persistence-batch measurements, not total scheduled-invocation cost; network-status refresh, preflight reads, collector-state save, public reads, and diagnostics remain outside the metric.
-5. Retain passing production evidence for WSS32 after the measurement deployment.
-6. Compare WSS32 and a bounded temporary WSS64 profile using the same metric contract before any window-8 or 128-ledger production test.
-7. Do not increase capacity from arithmetic alone. Use measured persistence cost, daily D1 macro burn, wall time, Worker outcome, cursor slope, head slope, and lag slope together.
+1. Keep production on WSS32 window-4 with the temporary four-hour protection cadence while the redesign is evaluated.
+2. Treat artifact `8219138203` as the retained WSS32 dense-region baseline: 9/10/9 ledgers committed, persistence writes 2493/2578/2294, cursor `+19`, head `+199`, lag `+180`, zero failures.
+3. Do not deploy the prepared WSS64 comparison while remaining current-day D1 write headroom is insufficient for the comparison plus rollback margin.
+4. Do not run window-8 or 128-ledger production tests until D1 persistence cost is reduced or backlog history is moved out of the Worker/D1 hot path.
+5. Evaluate D1 write amplification by table/index contract and identify only changes that preserve required public history, exact lookup, relationship, lifecycle, archive, balance-history, current overlay, and cursor integrity behavior.
+6. Evaluate extension of the existing canonical-history segment pipeline from the current immutable boundary to a fixed verified catch-up target, including chain verification, publication, exact index, replacement-base/current-state cutover, and bounded live-tail continuation.
+7. Prefer a fixed-target, fail-closed cutover design over parallel independent cursor writers or blind capacity increases.
 
 Track A — M5-5 browser evidence — remains blocked until collector capacity and freshness are adequate for valid production-shaped evidence. Track B — production UI audit — also remains gated by measured current-day headroom and collector health.
 
@@ -173,21 +179,23 @@ M6-I1 may begin only after M5-5 exits and after issue #283, the fixture catalog,
 
 ## Next order
 
-1. Merge T5-1 persistence-batch D1 measurement only after normal CI, Release-native CI, migration rehearsal, and unit coverage pass.
-2. Retain production WSS32 window-4 measurement evidence with zero collector failures.
-3. Run one bounded temporary WSS64 comparison only after the WSS32 measurement baseline is retained.
-4. Decide whether window `8` read-only probing and a later 128-ledger production test are justified from measured D1 cost, daily macro burn, wall time, Worker outcome, and head/cursor slope.
-5. Keep M5-5 browser regression blocked until collector preflight and D1 headroom gates pass and the collector is sufficiently current for production-shaped evidence.
-6. Reconcile M5-5 exit only when retained API and browser evidence both satisfy their gates.
-7. After M5-5 exits, begin M6-I1 using `docs/m6-integrity-reset-plan.md`, `docs/m6-i1-fixture-catalog.md`, and issue #283 after inventorying existing helpers.
+1. Merge and retain the D1 protection cadence in canonical `main` after CI and Release-native CI pass.
+2. Inventory existing canonical-history continuation and replacement-current-state tooling against the required fixed-target catch-up cutover.
+3. Produce a bounded T5-2 design that separates immutable backlog history generation from the Worker/D1 hot path without weakening current-state correctness or hybrid-history guarantees.
+4. Implement the smallest missing deterministic tooling and run a non-production fixed-range rehearsal before any production cutover.
+5. Keep WSS64, window-8, and 128-ledger production experiments blocked until resource evidence justifies reopening them.
+6. Keep M5-5 browser regression blocked until collector preflight and D1 headroom gates pass and the collector is sufficiently current for production-shaped evidence.
+7. Reconcile M5-5 exit only when retained API and browser evidence both satisfy their gates.
+8. After M5-5 exits, begin M6-I1 using `docs/m6-integrity-reset-plan.md`, `docs/m6-i1-fixture-catalog.md`, and issue #283 after inventorying existing helpers.
 
 ## Remaining blockers
 
-- Production is back on the passing 32-ledger WSS window-4 baseline, but catch-up-grade sustained capacity has not yet been selected.
+- Production uses a four-hour D1 protection cadence and is not in catch-up mode.
 - The 64-ledger HTTP profile is rejected because it exceeds the Worker per-invocation subrequest limit and stops cursor advancement.
-- T4 proved the 64-ledger WSS window-4 profile is technically safe but did not outpace the sampled Devnet head growth.
-- Collector-specific persistence-batch D1 cost has not yet been retained from production for a 32-versus-64 comparison.
-- Current-day D1 usage is material and must remain an independent sustained-operation gate.
+- T4 proved the 64-ledger WSS window-4 profile is technically safe in a sparse sampled region but did not outpace the sampled Devnet head growth.
+- T5-1 proved dense backlog regions can hit persistence row/statement budgets long before the 32-ledger scan range is committed.
+- Current-day D1 write usage reached `77,113 / 100,000` at the retained T5-1 capture, so further production throughput experiments are blocked by resource headroom.
+- The canonical-history fixed-range pipeline exists, but a verified extension/cutover design from the current immutable boundary through a newer fixed target has not yet been approved or rehearsed.
 - M5-5 API cross-audit evidence is passing, but real-data browser regression and representative browser production behavior evidence remain pending before M5-5 exit.
 - The independent production UI audit remains separately gated by measured current-day headroom and collector health.
 - M6 plans and M6-I1 fixture catalog are prepared, but M6 execution remains blocked until M5-5 exit.
