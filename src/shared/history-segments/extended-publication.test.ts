@@ -196,7 +196,7 @@ describe('extended history publication', () => {
   it('rejects a source publication that differs from the frozen plan identity', async () => {
     const source = await sourcePublication()
     const frozenPlan = plan(source)
-    frozenPlan.source.endLedgerHash = D
+    frozenPlan.source.chainId = 'canonical-devnet-other-source'
 
     await expect(buildExtendedHistoryPublication({
       sourcePublication: source,
