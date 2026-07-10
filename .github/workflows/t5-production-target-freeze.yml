@@ -1,0 +1,195 @@
+name: T5 production target freeze
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  freeze-plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out implementation
+        uses: actions/checkout@v4
+
+      - name: Check out active history source metadata
+        uses: actions/checkout@v4
+        with:
+          ref: history-data
+          path: .local/history-source
+          sparse-checkout: |
+            history-channel.json
+            history/publication.json
+          sparse-checkout-cone-mode: false
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build read-only planning tools
+        run: |
+          pnpm build:history-extension-plan
+          pnpm build:replacement-base-rebase-plan
+
+      - name: Capture production rebase evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=t5-production-target-freeze
+          mkdir -p "${ROOT}"
+
+          curl --fail-with-body --silent --show-error --retry 3 \
+            https://xrpl-lending-monitor.badjoke-lab.workers.dev/api/status/replacement-base-rebase \
+            > "${ROOT}/production-rebase-dry-run.json"
+
+          jq -e '
+            .evidence.sync.epochId != null
+            and .evidence.sync.lastProcessedLedger != null
+            and .evidence.sync.lastProcessedHash != null
+            and .evidence.sync.latestObservedLedger != null
+            and .evidence.sync.latestObservedHash != null
+            and .evidence.currentEpochId != null
+            and (.evidence.overlayStates | type) == "array"
+          ' "${ROOT}/production-rebase-dry-run.json" > /dev/null
+
+          jq '.evidence' "${ROOT}/production-rebase-dry-run.json" \
+            > "${ROOT}/production-rebase-evidence.json"
+
+      - name: Freeze production-eligible target identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=t5-production-target-freeze
+          EVIDENCE="${ROOT}/production-rebase-evidence.json"
+          SOURCE=.local/history-source/history/publication.json
+
+          EPOCH_ID="$(jq -r '.sync.epochId' "${EVIDENCE}")"
+          CURRENT_EPOCH_ID="$(jq -r '.currentEpochId' "${EVIDENCE}")"
+          CURSOR_LEDGER="$(jq -r '.sync.lastProcessedLedger' "${EVIDENCE}")"
+          TARGET_LEDGER="$(jq -r '.sync.latestObservedLedger' "${EVIDENCE}")"
+          TARGET_HASH="$(jq -r '.sync.latestObservedHash' "${EVIDENCE}")"
+          SOURCE_END="$(jq -r '.endLedgerIndex' "${SOURCE}")"
+
+          test "${EPOCH_ID}" = "${CURRENT_EPOCH_ID}"
+          test "${TARGET_LEDGER}" -gt "${CURSOR_LEDGER}"
+          test "${TARGET_LEDGER}" -gt "${SOURCE_END}"
+          printf '%s' "${TARGET_HASH}" | grep -Eq '^[A-F0-9]{64}$'
+
+          HASH_PREFIX="$(printf '%s' "${TARGET_HASH}" | tr '[:upper:]' '[:lower:]' | cut -c1-12)"
+          SNAPSHOT_ID="devnet-${TARGET_LEDGER}-${HASH_PREFIX}"
+
+          jq -n \
+            --arg epochId "${EPOCH_ID}" \
+            --arg snapshotId "${SNAPSHOT_ID}" \
+            --argjson ledgerIndex "${TARGET_LEDGER}" \
+            --arg ledgerHash "${TARGET_HASH}" \
+            '{epochId:$epochId,snapshotId:$snapshotId,ledgerIndex:$ledgerIndex,ledgerHash:$ledgerHash}' \
+            > "${ROOT}/target.json"
+
+      - name: Build real fixed-target history extension plan
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=t5-production-target-freeze
+          SOURCE=.local/history-source/history/publication.json
+          TARGET="${ROOT}/target.json"
+
+          node .history-extension-plan-build/plan-history-extension.mjs \
+            --local \
+            --publication "${SOURCE}" \
+            --target-ledger "$(jq -r '.ledgerIndex' "${TARGET}")" \
+            --target-ledger-hash "$(jq -r '.ledgerHash' "${TARGET}")" \
+            --segment-ledgers 500 \
+            --checkpoint-every-segments 10 \
+            --output "${ROOT}/extension-plan.json" \
+            > "${ROOT}/extension-plan.stdout.json"
+
+          jq -e --slurpfile target "${TARGET}" '
+            .extension.startLedgerIndex == (.source.endLedgerIndex + 1)
+            and .extension.endLedgerIndex == $target[0].ledgerIndex
+            and .target.ledgerHash == $target[0].ledgerHash
+            and .extension.segmentCount > 0
+            and .extension.ledgerCount > 0
+          ' "${ROOT}/extension-plan.json" > /dev/null
+
+      - name: Plan rebase against captured production evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=t5-production-target-freeze
+
+          node .replacement-base-rebase-plan-build/plan-replacement-base-rebase.mjs \
+            --local \
+            --target "${ROOT}/target.json" \
+            --evidence "${ROOT}/production-rebase-evidence.json" \
+            > "${ROOT}/rebase-plan.json"
+
+          jq -e '.plan.action == "rebase"' "${ROOT}/rebase-plan.json" > /dev/null
+
+      - name: Build retained planning evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=t5-production-target-freeze
+          SOURCE=.local/history-source/history/publication.json
+
+          jq -n \
+            --slurpfile source "${SOURCE}" \
+            --slurpfile evidence "${ROOT}/production-rebase-evidence.json" \
+            --slurpfile target "${ROOT}/target.json" \
+            --slurpfile extension "${ROOT}/extension-plan.json" \
+            --slurpfile rebase "${ROOT}/rebase-plan.json" '
+            {
+              passed: true,
+              source: {
+                chainId: $source[0].chainId,
+                publicationSha256: $source[0].publicationSha256,
+                segmentCount: $source[0].segmentCount,
+                ledgerCount: $source[0].ledgerCount,
+                endLedgerIndex: $source[0].endLedgerIndex,
+                endLedgerHash: $source[0].endLedgerHash
+              },
+              production: {
+                epochId: $evidence[0].sync.epochId,
+                cursorLedgerIndex: $evidence[0].sync.lastProcessedLedger,
+                cursorLedgerHash: $evidence[0].sync.lastProcessedHash,
+                latestObservedLedger: $evidence[0].sync.latestObservedLedger,
+                latestObservedHash: $evidence[0].sync.latestObservedHash,
+                overlayStateCount: ($evidence[0].overlayStates | length)
+              },
+              target: $target[0],
+              extension: {
+                startLedgerIndex: $extension[0].extension.startLedgerIndex,
+                endLedgerIndex: $extension[0].extension.endLedgerIndex,
+                ledgerCount: $extension[0].extension.ledgerCount,
+                segmentLedgerLimit: $extension[0].extension.segmentLedgerLimit,
+                segmentCount: $extension[0].extension.segmentCount,
+                checkpointEverySegments: $extension[0].extension.checkpointEverySegments,
+                checkpointCount: $extension[0].extension.checkpointCount
+              },
+              rebase: $rebase[0].plan
+            }' > "${ROOT}/evidence.json"
+
+          jq -e '
+            .target.ledgerIndex > .production.cursorLedgerIndex
+            and .target.ledgerIndex == .production.latestObservedLedger
+            and .target.ledgerHash == .production.latestObservedHash
+            and .extension.endLedgerIndex == .target.ledgerIndex
+            and .rebase.action == "rebase"
+          ' "${ROOT}/evidence.json" > /dev/null
+
+      - name: Upload retained target-freeze evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: t5-production-target-freeze
+          path: t5-production-target-freeze
+          if-no-files-found: error
+          retention-days: 30
