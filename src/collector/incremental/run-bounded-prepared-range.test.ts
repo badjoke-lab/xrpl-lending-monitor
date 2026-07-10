@@ -6,10 +6,15 @@ import { resolveRuntimeConfig } from '../../shared/runtime-config'
 const mocks = vi.hoisted(() => ({
   runPreparedIncrementalRange: vi.fn(),
   createXrplWebSocketLedgerSession: vi.fn(),
+  scanValidatedLedgerRange: vi.fn(),
 }))
 
 vi.mock('./run-prepared-range', () => ({
   runPreparedIncrementalRange: mocks.runPreparedIncrementalRange,
+}))
+
+vi.mock('./scan-validated-ledgers', () => ({
+  scanValidatedLedgerRange: mocks.scanValidatedLedgerRange,
 }))
 
 vi.mock('./xrpl-websocket-ledger-session', () => ({
@@ -29,6 +34,7 @@ function websocketConfig() {
   return resolveIncrementalRuntimeConfig({
     INCREMENTAL_LEDGER_TRANSPORT: 'websocket',
     INCREMENTAL_WEBSOCKET_ENDPOINT: 'wss://devnet.example/socket',
+    INCREMENTAL_WEBSOCKET_READ_WINDOW: '4',
   })
 }
 
@@ -63,9 +69,10 @@ describe('configured bounded prepared range transport', () => {
   beforeEach(() => {
     mocks.runPreparedIncrementalRange.mockReset()
     mocks.createXrplWebSocketLedgerSession.mockReset()
+    mocks.scanValidatedLedgerRange.mockReset()
   })
 
-  it('routes the range through one configured WebSocket session and records logical usage', async () => {
+  it('routes the range through one configured WebSocket session and read window', async () => {
     const close = vi.fn()
     const reader = vi.fn()
     mocks.createXrplWebSocketLedgerSession.mockReturnValue({
@@ -85,6 +92,7 @@ describe('configured bounded prepared range transport', () => {
       },
       rowsWritten: 10,
     })
+    mocks.scanValidatedLedgerRange.mockResolvedValue({ ledgers: [] })
 
     const result = await runBoundedPreparedIncrementalRange(options())
 
@@ -95,6 +103,23 @@ describe('configured bounded prepared range transport', () => {
     expect(preparedOptions).toBeDefined()
     const scan = preparedOptions.scan
     expect(typeof scan).toBe('function')
+
+    const scanOptions = {
+      endpoint: 'https://ignored.example',
+      timeoutMs: 1_000,
+      startLedgerIndex: 101,
+      latestValidatedLedger: 132,
+      maxLedgers: 32,
+      expectedPreviousHash: 'A'.repeat(64),
+    }
+    await scan(scanOptions)
+    expect(mocks.scanValidatedLedgerRange).toHaveBeenCalledWith({
+      ...scanOptions,
+      endpoint: 'wss://devnet.example/socket',
+      reader,
+      readWindowSize: 4,
+    })
+
     expect(result.state).toMatchObject({
       endpoint: 'wss://devnet.example/socket',
       lastRpcRequests: 32,
