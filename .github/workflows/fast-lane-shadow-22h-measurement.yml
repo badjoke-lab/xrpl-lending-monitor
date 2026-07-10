@@ -1,5 +1,6 @@
 name: Fast lane shadow 22h measurement
 
+# Dedicated long-run measurement; this edit intentionally triggers the first run.
 on:
   workflow_dispatch:
   push:
