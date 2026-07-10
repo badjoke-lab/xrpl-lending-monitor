@@ -1,0 +1,321 @@
+name: T5 production-target bulk generation
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: t5-production-target-bulk-generation
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          ref: history-data
+          path: .local/history-source
+          sparse-checkout: history/publication.json
+          sparse-checkout-cone-mode: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build fixed-target planning tools
+        run: |
+          pnpm build:history-extension-plan
+          pnpm exec vite build --config vite.history-extension-shards.config.ts
+      - name: Rebuild and verify frozen production-target plan
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=t5-production-target-bulk
+          SOURCE=.local/history-source/history/publication.json
+          mkdir -p "${ROOT}"
+
+          jq -e '
+            .chainId == "canonical-devnet-3371676-3432924"
+            and .publicationSha256 == "0849bffd04a0e429031ea731ee3a46c72c02134bec7cc7d4ed3b6b9a4f4f2864"
+            and .endLedgerIndex == 3432924
+            and .endLedgerHash == "52C13CBFFC3433750DBBB986390C4C6E6F7CC82CF70B4B909C506536A8BD9218"
+          ' "${SOURCE}" > /dev/null
+
+          node .history-extension-plan-build/plan-history-extension.mjs \
+            --local \
+            --publication "${SOURCE}" \
+            --target-ledger 3536520 \
+            --target-ledger-hash 6462640F28B507F09A1AD4E9A5E9B1378080D73D9B0CE235CBB4C413F97890C9 \
+            --segment-ledgers 500 \
+            --checkpoint-every-segments 10 \
+            --output "${ROOT}/extension-plan.json" \
+            > "${ROOT}/extension-plan.stdout.json"
+
+          node .history-extension-shards-build/plan-history-extension-shards.mjs \
+            --local \
+            --plan "${ROOT}/extension-plan.json" \
+            --segments-per-shard 26 \
+            --output "${ROOT}/shard-plan.json" \
+            > "${ROOT}/shard-plan.stdout.json"
+
+          jq -e '
+            .extension.startLedgerIndex == 3432925
+            and .extension.endLedgerIndex == 3536520
+            and .extension.ledgerCount == 103596
+            and .extension.segmentCount == 208
+            and .target.ledgerHash == "6462640F28B507F09A1AD4E9A5E9B1378080D73D9B0CE235CBB4C413F97890C9"
+          ' "${ROOT}/extension-plan.json" > /dev/null
+          jq -e '
+            .shardCount == 8
+            and .extensionSegmentCount == 208
+            and .segmentsPerShard == 26
+            and ([.shards[0:7][].segmentCount] | all(. == 26))
+            and .shards[7].segmentCount == 26
+          ' "${ROOT}/shard-plan.json" > /dev/null
+      - id: matrix
+        shell: bash
+        run: |
+          echo "matrix=$(jq -c '{shard:[.shards[].ordinal]}' t5-production-target-bulk/shard-plan.json)" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: t5-production-target-plan
+          path: t5-production-target-bulk
+          if-no-files-found: error
+          retention-days: 30
+
+  generate:
+    needs: plan
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: |
+          pnpm build:history-segment
+          pnpm build:history-segment-checkpoint
+      - uses: actions/download-artifact@v4
+        with:
+          name: t5-production-target-plan
+          path: .local/plan
+      - name: Generate fixed-target shard
+        shell: bash
+        env:
+          SHARD_ORDINAL: ${{ matrix.shard }}
+        run: |
+          set -euo pipefail
+          PLAN=.local/plan/extension-plan.json
+          SHARDS=.local/plan/shard-plan.json
+          SHARD="$(jq -c --argjson ordinal "${SHARD_ORDINAL}" '.shards[] | select(.ordinal == $ordinal)' "${SHARDS}")"
+          EPOCH="$(jq -r '.epochId' "${PLAN}")"
+          START="$(jq -r '.startLedgerIndex' <<<"${SHARD}")"
+          END="$(jq -r '.endLedgerIndex' <<<"${SHARD}")"
+          ANCHOR_LEDGER="$(jq -r '.anchorPreviousLedgerIndex' <<<"${SHARD}")"
+          ANCHOR_ID="$(jq -r '.anchorPreviousSegmentId' <<<"${SHARD}")"
+          ROOT="production-target-shard-${SHARD_ORDINAL}"
+          CHECKPOINT="${ROOT}/checkpoint.json"
+          METRICS="${ROOT}/segment-metrics.ndjson"
+          mkdir -p "${ROOT}/history/${EPOCH}"
+          : > "${METRICS}"
+          STARTED="$(date +%s)"
+
+          jq -n --argjson ledger_index "${ANCHOR_LEDGER}" '{method:"ledger",params:[{ledger_index:$ledger_index,transactions:false,expand:false}]}' > "${ROOT}/anchor-request.json"
+          curl --fail-with-body --silent --show-error --retry 3 \
+            -H 'Content-Type: application/json' \
+            --data @"${ROOT}/anchor-request.json" \
+            https://devnet.honeycluster.io/ \
+            > "${ROOT}/anchor-response.json"
+          ANCHOR_HASH="$(jq -r '.result.ledger_hash // .result.ledger.ledger_hash // empty' "${ROOT}/anchor-response.json")"
+          printf '%s' "${ANCHOR_HASH}" | grep -Eq '^[A-F0-9]{64}$'
+          if [ "${SHARD_ORDINAL}" = "1" ]; then test "${ANCHOR_HASH}" = "$(jq -r '.source.endLedgerHash' "${PLAN}")"; fi
+
+          PREV_ID="${ANCHOR_ID}"
+          PREV_HASH="${ANCHOR_HASH}"
+          while IFS= read -r SEGMENT; do
+            ORDINAL="$(jq -r '.ordinal' <<<"${SEGMENT}")"
+            SEGMENT_ID="$(jq -r '.segmentId' <<<"${SEGMENT}")"
+            SEGMENT_START="$(jq -r '.startLedgerIndex' <<<"${SEGMENT}")"
+            SEGMENT_END="$(jq -r '.endLedgerIndex' <<<"${SEGMENT}")"
+            OUT="${ROOT}/history/${EPOCH}/${SEGMENT_ID}"
+            SEGMENT_STARTED="$(date +%s)"
+            PASSED=false
+            ATTEMPTS=0
+
+            for ATTEMPT in 1 2 3; do
+              ATTEMPTS="${ATTEMPT}"
+              if node .history-segment-build/run-history-segment.mjs \
+                --local \
+                --endpoint https://devnet.honeycluster.io/ \
+                --timeout-ms 12000 \
+                --start-ledger "${SEGMENT_START}" \
+                --end-ledger "${SEGMENT_END}" \
+                --epoch-id "${EPOCH}" \
+                --segment-id "${SEGMENT_ID}" \
+                --previous-segment-id "${PREV_ID}" \
+                --previous-segment-end-hash "${PREV_HASH}" \
+                --source-revision "${GITHUB_SHA}" \
+                --output-dir "${OUT}" \
+                > "${ROOT}/segment-${ORDINAL}.stdout.json"; then
+                PASSED=true
+                break
+              fi
+              sleep $((ATTEMPT * 10))
+            done
+            if [ "${PASSED}" != true ]; then echo "Segment ${ORDINAL} failed after ${ATTEMPTS} attempts" >&2; exit 1; fi
+
+            node .history-segment-checkpoint-build/update-history-segment-checkpoint.mjs \
+              --local \
+              --checkpoint "${CHECKPOINT}" \
+              --manifest "${OUT}/manifest.json" \
+              --epoch-id "${EPOCH}" \
+              --range-start-ledger "${START}" \
+              --range-end-ledger "${END}" \
+              --previous-segment-id "${ANCHOR_ID}" \
+              --previous-segment-end-hash "${ANCHOR_HASH}" \
+              > "${ROOT}/checkpoint-${ORDINAL}.stdout.json"
+
+            ELAPSED="$(( $(date +%s) - SEGMENT_STARTED ))"
+            TOTAL_RECORDS="$(jq '[.files[].records] | add' "${OUT}/manifest.json")"
+            ARTIFACT_BYTES="$(du -sb "${OUT}" | cut -f1)"
+            jq -nc \
+              --argjson ordinal "${ORDINAL}" \
+              --arg segmentId "${SEGMENT_ID}" \
+              --argjson startLedgerIndex "${SEGMENT_START}" \
+              --argjson endLedgerIndex "${SEGMENT_END}" \
+              --argjson attempts "${ATTEMPTS}" \
+              --argjson elapsedSeconds "${ELAPSED}" \
+              --argjson totalRecords "${TOTAL_RECORDS}" \
+              --argjson artifactBytes "${ARTIFACT_BYTES}" \
+              '{ordinal:$ordinal,segmentId:$segmentId,startLedgerIndex:$startLedgerIndex,endLedgerIndex:$endLedgerIndex,attempts:$attempts,elapsedSeconds:$elapsedSeconds,totalRecords:$totalRecords,artifactBytes:$artifactBytes}' \
+              >> "${METRICS}"
+
+            PREV_ID="${SEGMENT_ID}"
+            PREV_HASH="$(jq -r '.endLedgerHash' "${OUT}/manifest.json")"
+          done < <(jq -c '.segments[]' <<<"${SHARD}")
+
+          EXPECTED_COUNT="$(jq -r '.segmentCount' <<<"${SHARD}")"
+          jq -e --argjson end "${END}" --argjson count "${EXPECTED_COUNT}" '.nextLedgerIndex == ($end + 1) and (.completedSegments | length) == $count' "${CHECKPOINT}" > /dev/null
+          TOTAL_ELAPSED="$(( $(date +%s) - STARTED ))"
+          jq -s '.' "${METRICS}" > "${ROOT}/segment-metrics.json"
+          jq -n \
+            --argjson shardOrdinal "${SHARD_ORDINAL}" \
+            --argjson elapsedSeconds "${TOTAL_ELAPSED}" \
+            --argjson ledgerCount "$((END - START + 1))" \
+            --argjson segmentCount "${EXPECTED_COUNT}" \
+            --arg anchorLedgerHash "${ANCHOR_HASH}" \
+            --slurpfile metrics "${ROOT}/segment-metrics.json" \
+            '{passed:true,shardOrdinal:$shardOrdinal,elapsedSeconds:$elapsedSeconds,ledgerCount:$ledgerCount,segmentCount:$segmentCount,anchorLedgerHash:$anchorLedgerHash,metrics:$metrics[0]}' \
+            > "${ROOT}/evidence.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: t5-production-target-shard-${{ matrix.shard }}
+          path: production-target-shard-${{ matrix.shard }}
+          if-no-files-found: error
+          retention-days: 30
+
+  verify:
+    needs: [plan, generate]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          ref: history-data
+          path: .local/history-source
+          sparse-checkout: history/publication.json
+          sparse-checkout-cone-mode: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: |
+          pnpm build:history-extension-artifacts
+          pnpm build:history-segment-chain
+          pnpm build:extended-history-publication
+      - uses: actions/download-artifact@v4
+        with:
+          name: t5-production-target-plan
+          path: .local/plan
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: t5-production-target-shard-*
+          path: .local/shards
+          merge-multiple: true
+      - name: Verify full fixed-target suffix and build extended publication
+        shell: bash
+        run: |
+          set -euo pipefail
+          PLAN=.local/plan/extension-plan.json
+          EPOCH="$(jq -r '.epochId' "${PLAN}")"
+          MANIFEST_ARGS=()
+          while IFS= read -r SEGMENT_ID; do
+            MANIFEST="$(find .local/shards -path "*/history/${EPOCH}/${SEGMENT_ID}/manifest.json" -print -quit)"
+            test -n "${MANIFEST}"
+            MANIFEST_ARGS+=(--manifest "${MANIFEST}")
+          done < <(jq -r '.extension.segments[].segmentId' "${PLAN}")
+
+          mkdir -p t5-production-target-result/history
+          node .history-extension-artifacts-build/verify-history-extension-artifacts.mjs \
+            --local --plan "${PLAN}" "${MANIFEST_ARGS[@]}" \
+            > t5-production-target-result/plan-bound-summary.json
+
+          node .history-segment-chain-build/verify-history-segment-chain.mjs \
+            --local "${MANIFEST_ARGS[@]}" \
+            --epoch-id "${EPOCH}" \
+            --start-ledger "$(jq -r '.extension.startLedgerIndex' "${PLAN}")" \
+            --start-parent-hash "$(jq -r '.source.endLedgerHash' "${PLAN}")" \
+            --previous-segment-id "$(jq -r '.source.lastSegmentId' "${PLAN}")" \
+            --previous-segment-end-hash "$(jq -r '.source.endLedgerHash' "${PLAN}")" \
+            --end-ledger "$(jq -r '.target.ledgerIndex' "${PLAN}")" \
+            --end-ledger-hash "$(jq -r '.target.ledgerHash' "${PLAN}")" \
+            > t5-production-target-result/chain-summary.json
+
+          node .extended-history-publication-build/build-extended-history-publication.mjs \
+            --local \
+            --source-publication .local/history-source/history/publication.json \
+            --plan "${PLAN}" \
+            "${MANIFEST_ARGS[@]}" \
+            --chain-id canonical-devnet-3371676-3536520 \
+            --source-revision "${GITHUB_SHA}" \
+            --output t5-production-target-result/history/publication.json \
+            > t5-production-target-result/publication.stdout.json
+
+          jq -e '
+            .segmentCount == 331
+            and .ledgerCount == 164845
+            and .endLedgerIndex == 3536520
+            and .endLedgerHash == "6462640F28B507F09A1AD4E9A5E9B1378080D73D9B0CE235CBB4C413F97890C9"
+          ' t5-production-target-result/history/publication.json > /dev/null
+
+          find .local/shards -name evidence.json -print0 | xargs -0 jq -s 'map(select(.shardOrdinal != null)) | sort_by(.shardOrdinal)' > t5-production-target-result/shard-evidence.json
+          jq -n \
+            --slurpfile shards t5-production-target-result/shard-evidence.json \
+            --slurpfile planBound t5-production-target-result/plan-bound-summary.json \
+            --slurpfile chain t5-production-target-result/chain-summary.json \
+            --slurpfile publication t5-production-target-result/history/publication.json \
+            '{passed:true,shards:$shards[0],maxShardSeconds:([$shards[0][].elapsedSeconds] | max),totalGeneratedLedgers:([$shards[0][].ledgerCount] | add),totalGeneratedSegments:([$shards[0][].segmentCount] | add),planBound:$planBound[0],chain:$chain[0],publication:{chainId:$publication[0].chainId,publicationSha256:$publication[0].publicationSha256,segmentCount:$publication[0].segmentCount,ledgerCount:$publication[0].ledgerCount,endLedgerIndex:$publication[0].endLedgerIndex,endLedgerHash:$publication[0].endLedgerHash}}' \
+            > t5-production-target-result/evidence.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: t5-production-target-bulk-result
+          path: t5-production-target-result
+          if-no-files-found: error
+          retention-days: 30
