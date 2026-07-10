@@ -14,6 +14,7 @@ interface ProbeEnvironment {
   XRPL_WSS_PROBE_HTTP_ENDPOINT?: string
   XRPL_WSS_PROBE_ENDPOINT?: string
   XRPL_WSS_PROBE_LEDGER_COUNT?: string
+  XRPL_WSS_PROBE_READ_WINDOW?: string
   XRPL_WSS_PROBE_TIMEOUT_MS?: string
   XRPL_WSS_PROBE_OUTPUT?: string
 }
@@ -26,6 +27,7 @@ interface ProbeEvidence {
   http_endpoint: string
   wss_endpoint: string
   requested_range_ledgers: number
+  read_window: number
   timeout_ms: number
   node_websocket_type: string
   validated_head: {
@@ -119,6 +121,11 @@ describe.skipIf(!liveProbeEnabled)('live XRPL Devnet WebSocket ledger probe', ()
       64,
       'XRPL_WSS_PROBE_LEDGER_COUNT',
     )
+    const readWindow = positiveInteger(
+      environment.XRPL_WSS_PROBE_READ_WINDOW,
+      1,
+      'XRPL_WSS_PROBE_READ_WINDOW',
+    )
     const timeoutMs = positiveInteger(
       environment.XRPL_WSS_PROBE_TIMEOUT_MS,
       15_000,
@@ -126,6 +133,10 @@ describe.skipIf(!liveProbeEnabled)('live XRPL Devnet WebSocket ledger probe', ()
     )
     const outputPath = environment.XRPL_WSS_PROBE_OUTPUT
       ?? 'artifacts/wss-probe/evidence.json'
+
+    if (readWindow > ledgerCount) {
+      throw new Error('XRPL_WSS_PROBE_READ_WINDOW must not exceed XRPL_WSS_PROBE_LEDGER_COUNT')
+    }
 
     const evidence: ProbeEvidence = {
       schema_version: 1,
@@ -135,6 +146,7 @@ describe.skipIf(!liveProbeEnabled)('live XRPL Devnet WebSocket ledger probe', ()
       http_endpoint: httpEndpoint,
       wss_endpoint: wssEndpoint,
       requested_range_ledgers: ledgerCount,
+      read_window: readWindow,
       timeout_ms: timeoutMs,
       node_websocket_type: typeof globalThis.WebSocket,
       validated_head: {
@@ -212,6 +224,7 @@ describe.skipIf(!liveProbeEnabled)('live XRPL Devnet WebSocket ledger probe', ()
         maxLedgers: ledgerCount,
         expectedPreviousHash: anchor.ledgerHash,
         reader: session.reader,
+        readWindowSize: readWindow,
       })
 
       const first = scan.ledgers.at(0)
