@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { resolveIncrementalRuntimeConfig } from './incremental-runtime-config'
 
 describe('incremental runtime config', () => {
-  it('uses bounded defaults', () => {
+  it('uses bounded HTTP defaults', () => {
     const config = resolveIncrementalRuntimeConfig({})
+    expect(config.ledgerTransport).toBe('http')
+    expect(config.webSocketEndpoint).toBeNull()
     expect(config.maxLedgersPerRun).toBe(12)
     expect(config.maxLedgerRpcRequestsPerRun).toBe(16)
     expect(config.maxStatementsPerRun).toBe(28)
@@ -15,17 +17,38 @@ describe('incremental runtime config', () => {
     expect(config.retainPayloads).toBe(false)
   })
 
-  it('accepts explicit overrides', () => {
+  it('accepts explicit WebSocket transport and bounded overrides', () => {
     const config = resolveIncrementalRuntimeConfig({
+      INCREMENTAL_LEDGER_TRANSPORT: 'websocket',
+      INCREMENTAL_WEBSOCKET_ENDPOINT: 'wss://devnet.example/socket',
       INCREMENTAL_MAX_LEDGERS_PER_RUN: '4',
       INCREMENTAL_MAX_LEDGER_RPC_REQUESTS_PER_RUN: '6',
       INCREMENTAL_MAX_RETRIES_PER_ENDPOINT: '0',
       INCREMENTAL_RETAIN_PAYLOADS: 'true',
     })
+    expect(config.ledgerTransport).toBe('websocket')
+    expect(config.webSocketEndpoint).toBe('wss://devnet.example/socket')
     expect(config.maxLedgersPerRun).toBe(4)
     expect(config.maxLedgerRpcRequestsPerRun).toBe(6)
     expect(config.maxRetriesPerEndpoint).toBe(0)
     expect(config.retainPayloads).toBe(true)
+  })
+
+  it('rejects WebSocket transport without a WSS endpoint', () => {
+    expect(() => resolveIncrementalRuntimeConfig({
+      INCREMENTAL_LEDGER_TRANSPORT: 'websocket',
+    })).toThrow('INCREMENTAL_WEBSOCKET_ENDPOINT is required')
+
+    expect(() => resolveIncrementalRuntimeConfig({
+      INCREMENTAL_LEDGER_TRANSPORT: 'websocket',
+      INCREMENTAL_WEBSOCKET_ENDPOINT: 'https://devnet.example',
+    })).toThrow('must use WSS')
+  })
+
+  it('rejects an unknown transport', () => {
+    expect(() => resolveIncrementalRuntimeConfig({
+      INCREMENTAL_LEDGER_TRANSPORT: 'socket',
+    })).toThrow('must be http or websocket')
   })
 
   it('rejects inconsistent request limits', () => {
