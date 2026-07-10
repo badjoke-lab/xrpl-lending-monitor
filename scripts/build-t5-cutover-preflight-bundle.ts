@@ -3,7 +3,10 @@ import { resolve } from 'node:path'
 
 import { canonicalJson } from '../src/shared/current-state/canonical-json'
 import type { HistorySegmentChainPublication } from '../src/shared/history-segments/publication'
-import { buildT5CutoverPreflightBundle, type T5CandidateRehearsalSummary } from '../src/shared/t5-cutover-preflight'
+import {
+  buildT5CutoverPreflightBundle,
+  type T5CandidateRehearsalSummary,
+} from '../src/worker/operator/t5-cutover-preflight'
 import type { ReplacementBaseRebaseEvidence } from '../src/worker/operator/replacement-base-rebase-plan'
 
 function value(args: readonly string[], name: string): string {
