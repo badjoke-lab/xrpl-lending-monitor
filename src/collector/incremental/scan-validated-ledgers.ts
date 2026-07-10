@@ -33,6 +33,10 @@ function safeInteger(value: number, field: string, minimum: number): number {
   return value
 }
 
+function ledgerIndexes(start: number, end: number): number[] {
+  return Array.from({ length: end - start + 1 }, (_, offset) => start + offset)
+}
+
 export async function scanValidatedLedgerRange(options: {
   endpoint: string
   timeoutMs: number
@@ -41,6 +45,7 @@ export async function scanValidatedLedgerRange(options: {
   maxLedgers: number
   expectedPreviousHash: string | null
   reader?: LedgerReader
+  readWindowSize?: number
   now?: () => number
   shouldContinue?: (nextLedgerIndex: number, ledgersRead: number) => boolean
 }): Promise<IncrementalScanResult> {
@@ -51,6 +56,7 @@ export async function scanValidatedLedgerRange(options: {
     0,
   )
   const maxLedgers = safeInteger(options.maxLedgers, 'maxLedgers', 1)
+  const readWindowSize = safeInteger(options.readWindowSize ?? 1, 'readWindowSize', 1)
   const now = options.now ?? Date.now
   const startedAt = now()
 
@@ -77,28 +83,45 @@ export async function scanValidatedLedgerRange(options: {
   let expectedParentHash = options.expectedPreviousHash
   let inspectedTransactions = 0
   let lendingTransactions = 0
+  let nextLedgerIndex = startLedgerIndex
 
-  for (let ledgerIndex = startLedgerIndex; ledgerIndex <= plannedEndLedgerIndex; ledgerIndex += 1) {
-    if (options.shouldContinue && !options.shouldContinue(ledgerIndex, ledgers.length)) break
-    const ledger = await reader({
+  while (nextLedgerIndex <= plannedEndLedgerIndex) {
+    if (options.shouldContinue && !options.shouldContinue(nextLedgerIndex, ledgers.length)) break
+
+    const windowEndLedgerIndex = Math.min(
+      plannedEndLedgerIndex,
+      nextLedgerIndex + readWindowSize - 1,
+    )
+    const indexes = ledgerIndexes(nextLedgerIndex, windowEndLedgerIndex)
+    const windowLedgers = await Promise.all(indexes.map((ledgerIndex) => reader({
       endpoint: options.endpoint,
       ledgerIndex,
       timeoutMs: options.timeoutMs,
-    })
-    if (ledger.ledgerIndex !== ledgerIndex) {
-      throw new Error(`Incremental reader returned ledger ${ledger.ledgerIndex} for ${ledgerIndex}`)
-    }
-    if (expectedParentHash && ledger.parentHash !== expectedParentHash) {
-      throw new Error(`Ledger ${ledgerIndex} parent hash does not match the prior ledger`)
+    })))
+
+    for (let offset = 0; offset < indexes.length; offset += 1) {
+      const ledgerIndex = indexes[offset]
+      const ledger = windowLedgers[offset]
+      if (!ledger || ledgerIndex === undefined) {
+        throw new Error('Incremental reader window returned an incomplete result')
+      }
+      if (ledger.ledgerIndex !== ledgerIndex) {
+        throw new Error(`Incremental reader returned ledger ${ledger.ledgerIndex} for ${ledgerIndex}`)
+      }
+      if (expectedParentHash && ledger.parentHash !== expectedParentHash) {
+        throw new Error(`Ledger ${ledgerIndex} parent hash does not match the prior ledger`)
+      }
+
+      const matching = ledger.transactions.filter((item) =>
+        isLendingTransactionType(item.transactionType),
+      )
+      inspectedTransactions += ledger.transactions.length
+      lendingTransactions += matching.length
+      ledgers.push({ ...ledger, lendingTransactions: matching })
+      expectedParentHash = ledger.ledgerHash
     }
 
-    const matching = ledger.transactions.filter((item) =>
-      isLendingTransactionType(item.transactionType),
-    )
-    inspectedTransactions += ledger.transactions.length
-    lendingTransactions += matching.length
-    ledgers.push({ ...ledger, lendingTransactions: matching })
-    expectedParentHash = ledger.ledgerHash
+    nextLedgerIndex = windowEndLedgerIndex + 1
   }
 
   const endLedgerIndex = ledgers.at(-1)?.ledgerIndex ?? null
