@@ -59,9 +59,20 @@ The rerun of runtime monitor run `29060806372` then passed both `deep-diagnostic
 
 Therefore the collector is recovered but remains materially behind. The 32-ledger HTTP profile is the temporary production safety baseline, not a catch-up-grade capacity solution. Configuration-only HTTP increases above this baseline are blocked. The active design direction is documented in `docs/ops/free-tier-collector-throughput-design-2026-07-10.md`.
 
-T1 now provides a production-disabled WebSocket ledger-transport seam behind the existing reader contract. HTTP and WebSocket paths share the same validated-ledger parser. The WebSocket session uses unique request IDs, supports correlated out-of-order responses, separates connection and logical-message usage, fails closed on ambiguous or invalid responses, and guarantees scoped close behavior. Deterministic coverage includes correlation, timeout, malformed JSON, XRPL error, wrong ledger identity, connection error, unexpected close, success/failure finalization, and no commit after an incomplete scan. Production remains on the five-minute 32-ledger HTTP profile until later evidence gates pass.
+T1 provides a WebSocket ledger-transport seam behind the existing reader contract. HTTP and WebSocket paths share the same validated-ledger parser. The WebSocket session uses unique request IDs, supports correlated out-of-order responses, separates connection and logical-message usage, fails closed on ambiguous or invalid responses, and guarantees scoped close behavior. Deterministic coverage includes correlation, timeout, malformed JSON, XRPL error, wrong ledger identity, connection error, unexpected close, success/failure finalization, and no commit after an incomplete scan.
 
-T2 bounded non-production Devnet WSS probe run `29066850176` passed and retained artifact `8217450764`. The read-only probe fixed validated head `3534008` with hash `C1ED28988F304695134502DAB4CEA279F8C8A33E253940908EB15CDDB001D018`, read anchor ledger `3533944`, then scanned the contiguous 64-ledger range `3533945..3534008` through one WebSocket session. Retained transport evidence recorded `connections=1`, `logical_messages=65`, `successful_ledgers=65`, `response_failures=0`, `reconnects=0`, `continuity.passed=true`, exact first-parent/anchor-hash agreement, exact last-ledger/head-hash agreement, `522` inspected transactions, `77` Lending transactions, and `wall_time_ms=8837`. This proves the T1 transport seam can reuse one real Devnet WebSocket connection for a bounded multi-ledger range without D1 writes or cursor mutation. It does not yet prove Cloudflare Worker production runtime safety; T3 remains required.
+T2 bounded non-production Devnet WSS probe run `29066850176` passed and retained artifact `8217450764`. The read-only probe fixed validated head `3534008` with hash `C1ED28988F304695134502DAB4CEA279F8C8A33E253940908EB15CDDB001D018`, read anchor ledger `3533944`, then scanned the contiguous 64-ledger range `3533945..3534008` through one WebSocket session. Retained transport evidence recorded `connections=1`, `logical_messages=65`, `successful_ledgers=65`, `response_failures=0`, `reconnects=0`, `continuity.passed=true`, exact first-parent/anchor-hash agreement, exact last-ledger/head-hash agreement, `522` inspected transactions, `77` Lending transactions, and `wall_time_ms=8837`.
+
+T3 production 32-ledger WebSocket canary was merged in PR #305 and measured with runtime monitor run `29060806372`, retained lightweight artifact `8217720983`. The monitor passed all lightweight invariants and the two post-propagation WebSocket samples showed real production use of `wss://s.devnet.rippletest.net:51233/`, `endpoint_attempts=1`, zero consecutive failures, and `error=null`. However, the sequential WebSocket scan did not reach the configured 32-ledger maximum inside the existing execution window:
+
+- WSS sample 1: cursor/head/lag `3501761 / 3534259 / 32498`, `ledgers_processed=17`, `rpc_requests=17`, `endpoint_attempts=1`, run duration `9932ms`;
+- WSS sample 2: cursor/head/lag `3501781 / 3534353 / 32572`, `ledgers_processed=20`, `rpc_requests=20`, `endpoint_attempts=1`, run duration `9600ms`;
+- WSS-only five-minute interval: `cursor_delta=20`, `head_delta=94`, `lag_delta=+74`;
+- whole three-sample monitor window, including the pre-propagation HTTP first sample: `cursor_delta=37`, `head_delta=181`, `lag_delta=+144`, `samples_with_failures=0`;
+- D1 rows read at capture: `2,457,495 / 5,000,000`;
+- D1 rows written at capture: `20,574 / 100,000`.
+
+T3 therefore passed the transport-safety canary but failed the throughput objective. The result proves one production Worker invocation can reuse one WebSocket connection without subrequest, continuity, persistence, or collector-failure evidence, but the current sequential scan loop underutilizes that transport. A configuration-only jump to 64 ledgers/run is blocked. Production is restored to the retained 32-ledger HTTP baseline while the next unit adds a bounded WebSocket read window and validates ordered continuity after concurrent response collection.
 
 ## Latest retained runtime evidence
 
@@ -116,17 +127,19 @@ Explorer v1 is a bounded presentation layer over approved contracts. It must not
 
 ## Active unit
 
-The active implementation unit is T3 from `docs/ops/free-tier-collector-throughput-design-2026-07-10.md`: wire the tested WebSocket ledger session into a production 32-ledger canary without increasing the current batch size or cadence.
+The active implementation unit is T3b, an evidence-driven refinement inserted before the original T4 profile test: add a bounded WebSocket read window so multiple ledger requests can be in flight on the already-tested single connection while preserving ordered validation and the existing guarded commit boundary.
 
 The unit boundary is:
 
-1. Keep production cron at five-minute cadence and keep the maximum at 32 ledgers/run.
-2. Change only the scheduled incremental ledger transport from the current HTTP reader path to the tested WebSocket session path.
-3. Preserve exact requested-ledger checks, parent-hash continuity, budget selection, guarded D1 commit, cursor atomicity, and collector error-state behavior.
-4. Preserve an immediate rollback path to the passing 32-ledger HTTP profile.
-5. After deployment propagation, run one retained production runtime monitor and inspect collector cursor movement, failures, current error, duration, D1 usage, and transport-specific evidence.
-6. Treat any subrequest, CPU, timeout, continuity, persistence, or cursor-stall result as canary failure and restore the 32-ledger HTTP profile.
-7. Do not test 64-ledger WebSocket throughput until the 32-ledger production WebSocket canary passes.
+1. Keep production on the five-minute 32-ledger HTTP safety baseline while T3b is implemented and tested.
+2. Do not change the WebSocket session fail-closed correlation semantics.
+3. Add a small explicit maximum in-flight window; do not enqueue an unbounded range.
+4. Collect each bounded window concurrently through the one WebSocket session, then validate requested ledger identity and parent-hash continuity in ledger-index order before exposing the window to downstream budgeting or persistence.
+5. Preserve execution-budget stop behavior between windows and never commit a non-contiguous prefix.
+6. Add deterministic tests for out-of-order responses across a window, failure of one request rejecting the window, wrong ledger identity, parent-hash discontinuity, deadline stop between windows, and contiguous ordered output.
+7. Run a read-only Devnet probe with the chosen small window before another production canary.
+8. Only after windowed read-only evidence passes may production test the windowed 32-ledger WebSocket profile again.
+9. Do not test the 64-ledger WebSocket profile until the windowed 32-ledger production canary demonstrates both safety and processing capacity at least comparable to the retained HTTP 32 baseline.
 
 Track A — M5-5 browser evidence — remains blocked until collector capacity and freshness are adequate for valid production-shaped evidence. Track B — production UI audit — also remains gated by measured current-day headroom and collector health.
 
@@ -144,19 +157,21 @@ M6-I1 may begin only after M5-5 exits and after issue #283, the fixture catalog,
 
 ## Next order
 
-1. Run the production 32-ledger WebSocket transport canary and retain one post-propagation runtime monitor artifact.
-2. Only after the canary passes, test a 64-ledger WebSocket profile with one retained runtime monitor artifact.
-3. Select any higher capacity target from measured head slope, transport wall time, CPU outcome, D1 usage, and retained runtime evidence rather than configuration arithmetic alone.
-4. Run or rerun M5-5 browser regression only after collector preflight and D1 headroom gates pass and the collector is sufficiently current for production-shaped evidence.
-5. Inspect `summary.json`, `summary.md`, `runner.log`, `exit-evaluation.json`, `exit-evaluation.md`, collector preflight, and D1 headroom evidence.
-6. Reconcile M5-5 exit only when retained API and browser evidence both satisfy their gates.
-7. After M5-5 exits, begin M6-I1 using `docs/m6-integrity-reset-plan.md`, `docs/m6-i1-fixture-catalog.md`, and issue #283 after inventorying existing helpers.
+1. Merge the 32-ledger HTTP rollback and confirm collector recovery with one retained lightweight runtime monitor.
+2. Implement and deterministically test the bounded WebSocket read window without changing production transport.
+3. Run a bounded read-only Devnet probe with the chosen window and retain connection, logical-message, wall-time, response, and continuity evidence.
+4. Only after the probe passes, run a second production 32-ledger WebSocket canary using the bounded window.
+5. Only after the windowed canary is safe and at least comparable to HTTP 32 capacity, test a 64-ledger WebSocket profile.
+6. Select any higher capacity target from measured head slope, transport wall time, CPU outcome, D1 usage, and retained runtime evidence rather than configuration arithmetic alone.
+7. Run or rerun M5-5 browser regression only after collector preflight and D1 headroom gates pass and the collector is sufficiently current for production-shaped evidence.
+8. Reconcile M5-5 exit only when retained API and browser evidence both satisfy their gates.
+9. After M5-5 exits, begin M6-I1 using `docs/m6-integrity-reset-plan.md`, `docs/m6-i1-fixture-catalog.md`, and issue #283 after inventorying existing helpers.
 
 ## Remaining blockers
 
-- The production collector is recovered at the five-minute 32-ledger HTTP profile, but retained evidence still shows growing lag and no catch-up-grade capacity.
+- The production collector is restored to the five-minute 32-ledger HTTP safety baseline after the safe but throughput-insufficient sequential WebSocket canary.
 - The 64-ledger HTTP profile is rejected because it exceeds the Worker per-invocation subrequest limit and stops cursor advancement.
-- The bounded non-production WSS probe passed, but the tested transport has not yet passed the production 32-ledger WebSocket canary; production remains on HTTP until T3 is deployed and measured.
+- The bounded non-production WSS probe and production sequential WSS safety canary passed, but the sequential scan processes fewer than 32 ledgers inside the production execution window; bounded in-flight windowing remains unimplemented and unmeasured.
 - M5-5 API cross-audit evidence is passing, but real-data browser regression and representative browser production behavior evidence remain pending before M5-5 exit.
 - The independent production UI audit remains separately gated by measured current-day headroom and collector health.
 - M6 plans and M6-I1 fixture catalog are prepared, but M6 execution remains blocked until M5-5 exit.
