@@ -6,6 +6,7 @@ describe('incremental runtime config', () => {
     const config = resolveIncrementalRuntimeConfig({})
     expect(config.ledgerTransport).toBe('http')
     expect(config.webSocketEndpoint).toBeNull()
+    expect(config.webSocketReadWindow).toBe(1)
     expect(config.maxLedgersPerRun).toBe(12)
     expect(config.maxLedgerRpcRequestsPerRun).toBe(16)
     expect(config.maxStatementsPerRun).toBe(28)
@@ -17,19 +18,21 @@ describe('incremental runtime config', () => {
     expect(config.retainPayloads).toBe(false)
   })
 
-  it('accepts explicit WebSocket transport and bounded overrides', () => {
+  it('accepts explicit WebSocket transport, bounded read window, and overrides', () => {
     const config = resolveIncrementalRuntimeConfig({
       INCREMENTAL_LEDGER_TRANSPORT: 'websocket',
       INCREMENTAL_WEBSOCKET_ENDPOINT: 'wss://devnet.example/socket',
-      INCREMENTAL_MAX_LEDGERS_PER_RUN: '4',
-      INCREMENTAL_MAX_LEDGER_RPC_REQUESTS_PER_RUN: '6',
+      INCREMENTAL_WEBSOCKET_READ_WINDOW: '4',
+      INCREMENTAL_MAX_LEDGERS_PER_RUN: '8',
+      INCREMENTAL_MAX_LEDGER_RPC_REQUESTS_PER_RUN: '10',
       INCREMENTAL_MAX_RETRIES_PER_ENDPOINT: '0',
       INCREMENTAL_RETAIN_PAYLOADS: 'true',
     })
     expect(config.ledgerTransport).toBe('websocket')
     expect(config.webSocketEndpoint).toBe('wss://devnet.example/socket')
-    expect(config.maxLedgersPerRun).toBe(4)
-    expect(config.maxLedgerRpcRequestsPerRun).toBe(6)
+    expect(config.webSocketReadWindow).toBe(4)
+    expect(config.maxLedgersPerRun).toBe(8)
+    expect(config.maxLedgerRpcRequestsPerRun).toBe(10)
     expect(config.maxRetriesPerEndpoint).toBe(0)
     expect(config.retainPayloads).toBe(true)
   })
@@ -49,6 +52,13 @@ describe('incremental runtime config', () => {
     expect(() => resolveIncrementalRuntimeConfig({
       INCREMENTAL_LEDGER_TRANSPORT: 'socket',
     })).toThrow('must be http or websocket')
+  })
+
+  it('rejects a read window larger than the ledger batch', () => {
+    expect(() => resolveIncrementalRuntimeConfig({
+      INCREMENTAL_WEBSOCKET_READ_WINDOW: '5',
+      INCREMENTAL_MAX_LEDGERS_PER_RUN: '4',
+    })).toThrow('must not exceed')
   })
 
   it('rejects inconsistent request limits', () => {
