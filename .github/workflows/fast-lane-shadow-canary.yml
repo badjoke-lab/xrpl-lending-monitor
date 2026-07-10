@@ -1,0 +1,183 @@
+name: Fast lane shadow canary
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '*/5 * * * *'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fast-lane-shadow-canary
+  cancel-in-progress: false
+
+jobs:
+  sample:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out implementation
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+
+      - name: Prepare retained canary data worktree
+        id: prepare
+        shell: bash
+        run: |
+          set -euo pipefail
+          DATA=/tmp/fast-lane-shadow-canary-data
+          BRANCH=fast-lane-shadow-canary-data
+          rm -rf "${DATA}"
+
+          if git ls-remote --exit-code origin "refs/heads/${BRANCH}" > /dev/null 2>&1; then
+            git fetch origin "refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}"
+            git worktree add -B "${BRANCH}" "${DATA}" "refs/remotes/origin/${BRANCH}"
+          else
+            git worktree add --detach "${DATA}"
+            git -C "${DATA}" checkout --orphan "${BRANCH}"
+            git -C "${DATA}" rm -rf . || true
+            git -C "${DATA}" clean -fdx
+          fi
+
+          START_LEDGER=''
+          if [ -f "${DATA}/state.json" ]; then
+            LAST_END="$(jq -r '.lastEndLedger // empty' "${DATA}/state.json")"
+            if printf '%s' "${LAST_END}" | grep -Eq '^[0-9]+$'; then
+              START_LEDGER="$((LAST_END + 1))"
+            fi
+          fi
+
+          echo "data_dir=${DATA}" >> "${GITHUB_OUTPUT}"
+          echo "start_ledger=${START_LEDGER}" >> "${GITHUB_OUTPUT}"
+
+      - name: Measure real five-minute lending window
+        shell: bash
+        env:
+          START_LEDGER: ${{ steps.prepare.outputs.start_ledger }}
+        run: |
+          set -euo pipefail
+          ARGS=(
+            --endpoint https://devnet.honeycluster.io/
+            --max-ledgers 180
+            --read-window 4
+            --bootstrap-ledgers 90
+            --output /tmp/fast-lane-shadow-sample.json
+          )
+          if [ -n "${START_LEDGER}" ]; then
+            ARGS+=(--start-ledger "${START_LEDGER}")
+          fi
+          node scripts/measure-fast-lane-shadow-canary.mjs "${ARGS[@]}"
+          jq -e '.mode == "read-only-shadow" and .source.cadenceTargetSeconds == 300' /tmp/fast-lane-shadow-sample.json > /dev/null
+
+      - name: Retain sample and rolling aggregate on data branch
+        shell: bash
+        env:
+          DATA_DIR: ${{ steps.prepare.outputs.data_dir }}
+        run: |
+          set -euo pipefail
+          BRANCH=fast-lane-shadow-canary-data
+          SAMPLE=/tmp/fast-lane-shadow-sample.json
+          STAMP="$(jq -r '.sampledAt' "${SAMPLE}" | tr ':.' '--')"
+          mkdir -p "${DATA_DIR}/samples"
+          cp "${SAMPLE}" "${DATA_DIR}/samples/${STAMP}-${GITHUB_RUN_ID}.json"
+          jq -c . "${SAMPLE}" >> "${DATA_DIR}/samples.ndjson"
+
+          END_LEDGER="$(jq -r '.source.endLedger // empty' "${SAMPLE}")"
+          LATEST_LEDGER="$(jq -r '.source.latestValidatedLedger' "${SAMPLE}")"
+          SAMPLED_AT="$(jq -r '.sampledAt' "${SAMPLE}")"
+          if printf '%s' "${END_LEDGER}" | grep -Eq '^[0-9]+$'; then
+            jq -n \
+              --argjson lastEndLedger "${END_LEDGER}" \
+              --argjson latestValidatedLedger "${LATEST_LEDGER}" \
+              --arg sampledAt "${SAMPLED_AT}" \
+              '{schemaVersion:1,lastEndLedger:$lastEndLedger,latestValidatedLedger:$latestValidatedLedger,updatedAt:$sampledAt}' \
+              > "${DATA_DIR}/state.json"
+          elif [ ! -f "${DATA_DIR}/state.json" ]; then
+            jq -n \
+              --argjson latestValidatedLedger "${LATEST_LEDGER}" \
+              --arg sampledAt "${SAMPLED_AT}" \
+              '{schemaVersion:1,lastEndLedger:null,latestValidatedLedger:$latestValidatedLedger,updatedAt:$sampledAt}' \
+              > "${DATA_DIR}/state.json"
+          fi
+
+          DATA_DIR="${DATA_DIR}" node <<'NODE'
+          const fs = require('node:fs')
+          const path = require('node:path')
+          const dataDir = process.env.DATA_DIR
+          const lines = fs.readFileSync(path.join(dataDir, 'samples.ndjson'), 'utf8').trim().split('\n').filter(Boolean)
+          const samples = lines.map((line) => JSON.parse(line))
+          const totals = samples.reduce((acc, sample) => {
+            acc.ledgersRead += sample.source.ledgersRead
+            acc.inspectedTransactions += sample.metrics.inspectedTransactions
+            acc.lendingTransactions += sample.metrics.lendingTransactions
+            acc.successfulLendingTransactions += sample.metrics.successfulLendingTransactions
+            acc.affectedObjectTouches += sample.metrics.affectedObjects.total
+            acc.minimalProjectionWriteLowerBound += sample.metrics.minimalProjectionWriteLowerBound
+            acc.elapsedMs += sample.timing.elapsedMs
+            if (sample.source.completeToHead) acc.completeToHeadSamples += 1
+            acc.maxBacklogBefore = Math.max(acc.maxBacklogBefore, sample.source.backlogBefore)
+            return acc
+          }, {
+            ledgersRead: 0,
+            inspectedTransactions: 0,
+            lendingTransactions: 0,
+            successfulLendingTransactions: 0,
+            affectedObjectTouches: 0,
+            minimalProjectionWriteLowerBound: 0,
+            elapsedMs: 0,
+            completeToHeadSamples: 0,
+            maxBacklogBefore: 0,
+          })
+          const sampledTimes = samples.map((sample) => Date.parse(sample.sampledAt)).filter(Number.isFinite).sort((a, b) => a - b)
+          const gaps = sampledTimes.slice(1).map((value, index) => (value - sampledTimes[index]) / 1000)
+          const aggregate = {
+            schemaVersion: 1,
+            mode: 'read-only-shadow-aggregate',
+            sampleCount: samples.length,
+            firstSampledAt: samples[0]?.sampledAt ?? null,
+            lastSampledAt: samples.at(-1)?.sampledAt ?? null,
+            coverage: {
+              firstRequestedStartLedger: samples[0]?.source.requestedStartLedger ?? null,
+              lastEndLedger: samples.at(-1)?.source.endLedger ?? null,
+              lastValidatedLedger: samples.at(-1)?.source.latestValidatedLedger ?? null,
+            },
+            cadence: {
+              targetSeconds: 300,
+              averageObservedGapSeconds: gaps.length ? gaps.reduce((sum, value) => sum + value, 0) / gaps.length : null,
+              maxObservedGapSeconds: gaps.length ? Math.max(...gaps) : null,
+              completeToHeadRate: samples.length ? totals.completeToHeadSamples / samples.length : null,
+            },
+            totals,
+            averagesPerSample: {
+              ledgersRead: samples.length ? totals.ledgersRead / samples.length : 0,
+              lendingTransactions: samples.length ? totals.lendingTransactions / samples.length : 0,
+              affectedObjectTouches: samples.length ? totals.affectedObjectTouches / samples.length : 0,
+              minimalProjectionWriteLowerBound: samples.length ? totals.minimalProjectionWriteLowerBound / samples.length : 0,
+              elapsedMs: samples.length ? totals.elapsedMs / samples.length : 0,
+            },
+          }
+          fs.writeFileSync(path.join(dataDir, 'summary.json'), `${JSON.stringify(aggregate, null, 2)}\n`)
+          NODE
+
+          git -C "${DATA_DIR}" config user.name github-actions[bot]
+          git -C "${DATA_DIR}" config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git -C "${DATA_DIR}" add samples samples.ndjson state.json summary.json
+          if git -C "${DATA_DIR}" diff --cached --quiet; then
+            exit 0
+          fi
+          git -C "${DATA_DIR}" commit -m "Record fast-lane shadow sample ${GITHUB_RUN_ID}"
+          git -C "${DATA_DIR}" push origin "HEAD:refs/heads/${BRANCH}"
+
+      - name: Upload current sample
+        uses: actions/upload-artifact@v4
+        with:
+          name: fast-lane-shadow-sample
+          path: /tmp/fast-lane-shadow-sample.json
+          if-no-files-found: error
+          retention-days: 7
