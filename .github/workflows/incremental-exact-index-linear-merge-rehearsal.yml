@@ -87,27 +87,47 @@ jobs:
             > "${ROOT}/incremental.stdout.json"
           echo $(( $(date +%s%3N) - STARTED )) > "${ROOT}/incremental-elapsed-ms.txt"
 
-      - name: Analyze full and incremental index equality
+      - name: Analyze manifest-referenced full and incremental index equality
         shell: bash
         run: |
           set -euo pipefail
           ROOT=incremental-exact-index-linear-merge
-          (cd .local/t3-history/history/index/exact && find . -type f -print0 | sort -z | xargs -0 sha256sum) > "${ROOT}/full-sha256.txt"
-          (cd "${ROOT}/incremental" && find . -type f -print0 | sort -z | xargs -0 sha256sum) > "${ROOT}/incremental-sha256.txt"
+          FULL_DIR=.local/t3-history/history/index/exact
+          INC_DIR="${ROOT}/incremental"
+          jq -r '.assets[].path | split("/")[-1]' "${FULL_DIR}/manifest.json" > "${ROOT}/referenced-assets.txt"
+          test "$(wc -l < "${ROOT}/referenced-assets.txt")" -eq "$(jq -r '.bucketCount' "${FULL_DIR}/manifest.json")"
+          : > "${ROOT}/full-sha256.txt"
+          : > "${ROOT}/incremental-sha256.txt"
+          while IFS= read -r NAME; do
+            test -f "${FULL_DIR}/${NAME}"
+            test -f "${INC_DIR}/${NAME}"
+            FULL_SHA="$(sha256sum "${FULL_DIR}/${NAME}" | awk '{print $1}')"
+            INC_SHA="$(sha256sum "${INC_DIR}/${NAME}" | awk '{print $1}')"
+            printf '%s  ./%s\n' "${FULL_SHA}" "${NAME}" >> "${ROOT}/full-sha256.txt"
+            printf '%s  ./%s\n' "${INC_SHA}" "${NAME}" >> "${ROOT}/incremental-sha256.txt"
+          done < "${ROOT}/referenced-assets.txt"
+          FULL_MANIFEST_SHA="$(sha256sum "${FULL_DIR}/manifest.json" | awk '{print $1}')"
+          INC_MANIFEST_SHA="$(sha256sum "${INC_DIR}/manifest.json" | awk '{print $1}')"
+          printf '%s  ./manifest.json\n' "${FULL_MANIFEST_SHA}" >> "${ROOT}/full-sha256.txt"
+          printf '%s  ./manifest.json\n' "${INC_MANIFEST_SHA}" >> "${ROOT}/incremental-sha256.txt"
           if diff -u "${ROOT}/full-sha256.txt" "${ROOT}/incremental-sha256.txt" > "${ROOT}/sha256.diff.txt"; then
             BYTE_IDENTICAL=true
           else
             BYTE_IDENTICAL=false
           fi
-          cp .local/t3-history/history/index/exact/manifest.json "${ROOT}/full-manifest.json"
-          cp "${ROOT}/incremental/manifest.json" "${ROOT}/incremental-manifest.json"
+          cp "${FULL_DIR}/manifest.json" "${ROOT}/full-manifest.json"
+          cp "${INC_DIR}/manifest.json" "${ROOT}/incremental-manifest.json"
+          FULL_FILE_COUNT="$(find "${FULL_DIR}" -maxdepth 1 -type f | wc -l)"
+          REFERENCED_FILE_COUNT="$(( $(wc -l < "${ROOT}/referenced-assets.txt") + 1 ))"
           jq -n \
             --slurpfile plan "${ROOT}/plan.json" \
             --slurpfile incremental "${ROOT}/incremental.stdout.json" \
             --slurpfile fullManifest "${ROOT}/full-manifest.json" \
             --slurpfile incrementalManifest "${ROOT}/incremental-manifest.json" \
             --argjson incrementalElapsedMs "$(cat "${ROOT}/incremental-elapsed-ms.txt")" \
-            --argjson byteIdentical "${BYTE_IDENTICAL}" '
+            --argjson byteIdentical "${BYTE_IDENTICAL}" \
+            --argjson fullDirectoryFileCount "${FULL_FILE_COUNT}" \
+            --argjson referencedFileCount "${REFERENCED_FILE_COUNT}" '
             {
               passed: $byteIdentical,
               sourceLedgerIndex: $plan[0].source.endLedgerIndex,
@@ -122,7 +142,10 @@ jobs:
               fullManifestSha256: $fullManifest[0].manifestSha256,
               incrementalManifestSha256: $incrementalManifest[0].manifestSha256,
               fullTotalRecords: $fullManifest[0].totalRecords,
-              incrementalTotalRecords: $incrementalManifest[0].totalRecords
+              incrementalTotalRecords: $incrementalManifest[0].totalRecords,
+              fullDirectoryFileCount: $fullDirectoryFileCount,
+              referencedFileCount: $referencedFileCount,
+              staleUnreferencedFileCount: ($fullDirectoryFileCount - $referencedFileCount)
             }' > "${ROOT}/evidence.json"
 
       - name: Upload retained linear-merge evidence
@@ -134,8 +157,8 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Require byte-identical index output
+      - name: Require byte-identical manifest-referenced index output
         shell: bash
         run: |
           set -euo pipefail
-          jq -e '.passed == true and .mergeStrategy == "sorted-linear-merge" and .byteIdentical == true' incremental-exact-index-linear-merge/evidence.json > /dev/null
+          jq -e '.passed == true and .mergeStrategy == "sorted-linear-merge" and .byteIdentical == true and .fullManifestSha256 == .incrementalManifestSha256 and .fullTotalRecords == .incrementalTotalRecords' incremental-exact-index-linear-merge/evidence.json > /dev/null
