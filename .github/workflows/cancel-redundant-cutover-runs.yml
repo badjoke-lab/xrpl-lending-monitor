@@ -1,0 +1,28 @@
+name: Cancel redundant cutover orchestrators
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/cancel-redundant-cutover-runs.yml'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  cancel:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Cancel redundant runs only
+        shell: bash
+        run: |
+          set -euo pipefail
+          for RUN_ID in 29162696947 29162696966; do
+            gh api --method POST \
+              "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/cancel" || true
+          done
