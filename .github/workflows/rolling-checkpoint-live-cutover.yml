@@ -80,6 +80,10 @@ jobs:
         shell: bash
         run: bash scripts/run-live-checkpoint-cutover.sh
 
+      - name: Verify post-cutover live freshness
+        shell: bash
+        run: bash scripts/verify-live-checkpoint-cutover.sh
+
       - name: Upload retained live-cutover evidence
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
