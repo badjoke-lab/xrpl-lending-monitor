@@ -8,6 +8,7 @@ import { commitFastLaneShadowWindow } from '../src/worker/repositories/fast-lane
 
 interface Arguments {
   endpoint: string
+  endLedger: number | null
   maxLedgers: number
   readWindow: number
   timeoutMs: number
@@ -40,9 +41,17 @@ function positiveInteger(value: string | null, fallback: number, field: string):
   return parsed
 }
 
+function optionalPositiveInteger(value: string | null, field: string): number | null {
+  if (value === null) return null
+  const parsed = Number(value)
+  if (!Number.isSafeInteger(parsed) || parsed < 1) throw new Error(`${field} must be a positive integer`)
+  return parsed
+}
+
 function parseArguments(args: string[]): Arguments {
   return {
     endpoint: argumentValue(args, '--endpoint') ?? 'https://devnet.honeycluster.io/',
+    endLedger: optionalPositiveInteger(argumentValue(args, '--end-ledger'), 'endLedger'),
     maxLedgers: positiveInteger(argumentValue(args, '--max-ledgers'), 90, 'maxLedgers'),
     readWindow: positiveInteger(argumentValue(args, '--read-window'), 8, 'readWindow'),
     timeoutMs: positiveInteger(argumentValue(args, '--timeout-ms'), 8_000, 'timeoutMs'),
@@ -153,10 +162,22 @@ function recordingDatabase(options: {
 async function main(): Promise<void> {
   const args = parseArguments(process.argv.slice(2))
   const processedAt = new Date().toISOString()
-  const head = await validatedHead(args.endpoint)
-  if (head.ledgerIndex <= args.maxLedgers) throw new Error('Validated head is too low for requested canary window')
+  const currentHead = await validatedHead(args.endpoint)
+  const selectedEndLedger = args.endLedger ?? currentHead.ledgerIndex
+  if (selectedEndLedger > currentHead.ledgerIndex) {
+    throw new Error(`Requested end ledger ${selectedEndLedger} is ahead of validated head ${currentHead.ledgerIndex}`)
+  }
+  if (selectedEndLedger <= args.maxLedgers) throw new Error('Selected end ledger is too low for requested canary window')
 
-  const startLedgerIndex = head.ledgerIndex - args.maxLedgers + 1
+  const selectedEnd = args.endLedger === null
+    ? currentHead
+    : await readValidatedLedger({
+        endpoint: args.endpoint,
+        ledgerIndex: selectedEndLedger,
+        timeoutMs: args.timeoutMs,
+      })
+
+  const startLedgerIndex = selectedEndLedger - args.maxLedgers + 1
   const previous = await readValidatedLedger({
     endpoint: args.endpoint,
     ledgerIndex: startLedgerIndex - 1,
@@ -166,17 +187,17 @@ async function main(): Promise<void> {
     endpoint: args.endpoint,
     timeoutMs: args.timeoutMs,
     startLedgerIndex,
-    latestValidatedLedger: head.ledgerIndex,
+    latestValidatedLedger: selectedEndLedger,
     maxLedgers: args.maxLedgers,
     expectedPreviousHash: previous.ledgerHash,
     readWindowSize: args.readWindow,
   })
-  if (!scan.completeToLatest) throw new Error('Fast-lane canary scan did not reach the selected validated head')
+  if (!scan.completeToLatest) throw new Error('Fast-lane canary scan did not reach the selected end ledger')
 
   const plan = buildFastLaneShadowWindowPlan({
     epochId: 'fast-lane-shadow-devnet',
     scan,
-    latestObservedHash: head.ledgerHash,
+    latestObservedHash: selectedEnd.ledgerHash,
     processedAt,
   })
   const recording = recordingDatabase({
@@ -206,6 +227,8 @@ async function main(): Promise<void> {
     generatedAt: processedAt,
     source: {
       endpoint: args.endpoint,
+      currentValidatedHeadLedger: currentHead.ledgerIndex,
+      currentValidatedHeadHash: currentHead.ledgerHash,
       previousLedgerIndex: previous.ledgerIndex,
       previousLedgerHash: previous.ledgerHash,
       startLedgerIndex: plan.startLedgerIndex,
