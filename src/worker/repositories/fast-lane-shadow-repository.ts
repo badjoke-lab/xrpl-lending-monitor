@@ -1,0 +1,273 @@
+import type { FastLaneShadowWindowPlan } from '../../collector/incremental/fast-lane-shadow-plan'
+
+export interface FastLaneShadowState {
+  epochId: string
+  lastProcessedLedger: number
+  lastProcessedHash: string
+  latestObservedLedger: number
+  latestObservedHash: string
+  status: 'healthy' | 'behind' | 'error'
+  updatedAt: string
+}
+
+export interface FastLaneShadowPersistenceUsage {
+  statements: number
+  rowsRead: number
+  rowsWritten: number
+}
+
+interface StateRow {
+  epoch_id: string
+  last_processed_ledger: number
+  last_processed_hash: string
+  latest_observed_ledger: number
+  latest_observed_hash: string
+  status: 'healthy' | 'behind' | 'error'
+  updated_at: string
+}
+
+function finiteMetric(meta: unknown, key: 'rows_read' | 'rows_written'): number {
+  if (!meta || typeof meta !== 'object') return 0
+  const value = (meta as Record<string, unknown>)[key]
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0
+}
+
+export async function readFastLaneShadowState(db: D1Database): Promise<FastLaneShadowState | null> {
+  const row = await db
+    .prepare(
+      `SELECT epoch_id, last_processed_ledger, last_processed_hash,
+              latest_observed_ledger, latest_observed_hash, status, updated_at
+       FROM fast_lane_shadow_state
+       WHERE network = 'devnet'`,
+    )
+    .first<StateRow>()
+
+  return row
+    ? {
+        epochId: row.epoch_id,
+        lastProcessedLedger: row.last_processed_ledger,
+        lastProcessedHash: row.last_processed_hash,
+        latestObservedLedger: row.latest_observed_ledger,
+        latestObservedHash: row.latest_observed_hash,
+        status: row.status,
+        updatedAt: row.updated_at,
+      }
+    : null
+}
+
+function commitToken(options: {
+  epochId: string
+  previousLedger: number
+  previousHash: string
+  finalLedger: number
+  finalHash: string
+}): string {
+  return [
+    'fast-lane-shadow',
+    options.epochId,
+    options.previousLedger,
+    options.previousHash,
+    options.finalLedger,
+    options.finalHash,
+  ].join(':')
+}
+
+export async function commitFastLaneShadowWindow(options: {
+  db: D1Database
+  plan: FastLaneShadowWindowPlan
+  expectedPreviousLedger: number
+  expectedPreviousHash: string
+  processedAt: string
+}): Promise<FastLaneShadowPersistenceUsage> {
+  const { db, plan } = options
+  if (plan.startLedgerIndex !== options.expectedPreviousLedger + 1) {
+    throw new Error('Fast-lane shadow window does not begin after the expected cursor')
+  }
+  if (plan.endLedgerIndex < plan.startLedgerIndex) {
+    throw new Error('Fast-lane shadow window ledger range is invalid')
+  }
+
+  const token = commitToken({
+    epochId: plan.epochId,
+    previousLedger: options.expectedPreviousLedger,
+    previousHash: options.expectedPreviousHash,
+    finalLedger: plan.endLedgerIndex,
+    finalHash: plan.endLedgerHash,
+  })
+  const statements: D1PreparedStatement[] = []
+
+  statements.push(
+    db.prepare(
+      `INSERT INTO fast_lane_shadow_state (
+         network, epoch_id, last_processed_ledger, last_processed_hash,
+         latest_observed_ledger, latest_observed_hash, status, updated_at
+       ) VALUES ('devnet', ?1, ?2, ?3, ?4, ?5, ?6, ?7)
+       ON CONFLICT(network) DO NOTHING`,
+    ).bind(
+      plan.epochId,
+      options.expectedPreviousLedger,
+      options.expectedPreviousHash,
+      plan.latestObservedLedger,
+      plan.latestObservedHash,
+      plan.latestObservedLedger === options.expectedPreviousLedger ? 'healthy' : 'behind',
+      options.processedAt,
+    ),
+  )
+
+  statements.push(
+    db.prepare(
+      `INSERT INTO fast_lane_shadow_commit_guards (
+         commit_token, network, expected_ledger, expected_hash,
+         observed_ledger, observed_hash, checked_at
+       ) VALUES (
+         ?1, 'devnet', ?2, ?3,
+         (SELECT last_processed_ledger FROM fast_lane_shadow_state WHERE network = 'devnet'),
+         (SELECT last_processed_hash FROM fast_lane_shadow_state WHERE network = 'devnet'),
+         ?4
+       )`,
+    ).bind(token, options.expectedPreviousLedger, options.expectedPreviousHash, options.processedAt),
+  )
+
+  for (const entry of plan.mutations) {
+    const projection = entry.mutation.operation === 'upsert' ? entry.mutation.projectionJson : null
+    const relationships = entry.mutation.relationships ?? {}
+    statements.push(
+      db.prepare(
+        `INSERT INTO fast_lane_shadow_objects (
+           network, epoch_id, object_type, object_id, operation, projection_json,
+           owner, account, borrower, vault_id, loan_broker_id, asset_key,
+           on_ledger_status, source_ledger_index, source_ledger_hash,
+           source_transaction_hash, source_transaction_index, updated_at
+         ) VALUES (
+           'devnet', ?1, ?2, ?3, ?4, ?5,
+           ?6, ?7, ?8, ?9, ?10, ?11,
+           ?12, ?13, ?14, ?15, ?16, ?17
+         )
+         ON CONFLICT(network, epoch_id, object_type, object_id)
+         DO UPDATE SET
+           operation = excluded.operation,
+           projection_json = excluded.projection_json,
+           owner = excluded.owner,
+           account = excluded.account,
+           borrower = excluded.borrower,
+           vault_id = excluded.vault_id,
+           loan_broker_id = excluded.loan_broker_id,
+           asset_key = excluded.asset_key,
+           on_ledger_status = excluded.on_ledger_status,
+           source_ledger_index = excluded.source_ledger_index,
+           source_ledger_hash = excluded.source_ledger_hash,
+           source_transaction_hash = excluded.source_transaction_hash,
+           source_transaction_index = excluded.source_transaction_index,
+           updated_at = excluded.updated_at
+         WHERE excluded.source_ledger_index > fast_lane_shadow_objects.source_ledger_index
+            OR (
+              excluded.source_ledger_index = fast_lane_shadow_objects.source_ledger_index
+              AND excluded.source_transaction_index > fast_lane_shadow_objects.source_transaction_index
+            )`,
+      ).bind(
+        plan.epochId,
+        entry.mutation.objectType,
+        entry.mutation.objectId,
+        entry.mutation.operation,
+        projection,
+        relationships.owner ?? null,
+        relationships.account ?? null,
+        relationships.borrower ?? null,
+        relationships.vaultId ?? null,
+        relationships.loanBrokerId ?? null,
+        relationships.assetKey ?? null,
+        relationships.onLedgerStatus ?? null,
+        entry.ledgerIndex,
+        entry.ledgerHash,
+        entry.transactionHash,
+        entry.transactionIndex,
+        entry.updatedAt,
+      ),
+    )
+  }
+
+  statements.push(
+    db.prepare(
+      `INSERT INTO fast_lane_shadow_windows (
+         network, epoch_id, window_start_close_time, window_end_close_time,
+         start_ledger_index, end_ledger_index, end_ledger_hash,
+         inspected_transaction_count, lending_transaction_count,
+         successful_lending_transaction_count, affected_object_count,
+         activity_bundle_json, created_at
+       ) VALUES (
+         'devnet', ?1, ?2, ?3,
+         ?4, ?5, ?6,
+         ?7, ?8,
+         ?9, ?10,
+         ?11, ?12
+       )
+       ON CONFLICT(network, epoch_id, window_start_close_time) DO NOTHING`,
+    ).bind(
+      plan.epochId,
+      plan.windowStartCloseTime,
+      plan.windowEndCloseTime,
+      plan.startLedgerIndex,
+      plan.endLedgerIndex,
+      plan.endLedgerHash,
+      plan.inspectedTransactions,
+      plan.lendingTransactions,
+      plan.successfulLendingTransactions,
+      plan.mutations.length,
+      JSON.stringify(plan.activity),
+      options.processedAt,
+    ),
+  )
+
+  statements.push(
+    db.prepare(
+      `UPDATE fast_lane_shadow_state
+       SET epoch_id = ?1,
+           last_processed_ledger = ?2,
+           last_processed_hash = ?3,
+           latest_observed_ledger = ?4,
+           latest_observed_hash = ?5,
+           status = ?6,
+           updated_at = ?7
+       WHERE network = 'devnet'
+         AND epoch_id = ?1
+         AND last_processed_ledger = ?8
+         AND last_processed_hash = ?9`,
+    ).bind(
+      plan.epochId,
+      plan.endLedgerIndex,
+      plan.endLedgerHash,
+      plan.latestObservedLedger,
+      plan.latestObservedHash,
+      plan.endLedgerIndex === plan.latestObservedLedger ? 'healthy' : 'behind',
+      options.processedAt,
+      options.expectedPreviousLedger,
+      options.expectedPreviousHash,
+    ),
+  )
+
+  statements.push(
+    db.prepare('DELETE FROM fast_lane_shadow_commit_guards WHERE commit_token = ?1').bind(token),
+  )
+
+  const results = await db.batch(statements)
+  const usage = results.reduce<FastLaneShadowPersistenceUsage>(
+    (total, result) => ({
+      statements: total.statements,
+      rowsRead: total.rowsRead + finiteMetric(result.meta, 'rows_read'),
+      rowsWritten: total.rowsWritten + finiteMetric(result.meta, 'rows_written'),
+    }),
+    { statements: statements.length, rowsRead: 0, rowsWritten: 0 },
+  )
+
+  const committed = await readFastLaneShadowState(db)
+  if (
+    !committed
+    || committed.epochId !== plan.epochId
+    || committed.lastProcessedLedger !== plan.endLedgerIndex
+    || committed.lastProcessedHash !== plan.endLedgerHash
+  ) {
+    throw new Error('Fast-lane shadow commit did not advance its isolated cursor')
+  }
+
+  return usage
+}
