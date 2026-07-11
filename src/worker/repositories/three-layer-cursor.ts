@@ -33,6 +33,33 @@ interface CompactCursor {
   t: string | null
 }
 
+interface CanonicalCursorContext {
+  snapshot: string
+  kind: ReadModelKind
+  direction: 'asc' | 'desc'
+  scope: string
+}
+
+interface CanonicalCursorPayload extends CanonicalCursorContext {
+  v: 1
+  baseCursor: string | null
+  baseOffset: number
+  baseDone: boolean
+  overlayAfter: string | null
+  overlayOffset: number
+  overlayDone: boolean
+}
+
+interface CompactCanonicalCursor {
+  v: 1
+  b: string | null
+  o: number
+  x: boolean
+  a: string | null
+  p: number
+  y: boolean
+}
+
 function encodeBytes(bytes: Uint8Array): string {
   let binary = ''
   for (const byte of bytes) binary += String.fromCharCode(byte)
@@ -69,7 +96,7 @@ function textToHex(value: string): string {
   ).join('')
 }
 
-function compactCanonicalCursor(value: string | null): string | null {
+function compactNestedCursor(value: string | null): string | null {
   if (value === null) return null
   if (value.length % 2 === 0 && /^[a-f0-9]+$/i.test(value)) {
     try {
@@ -81,8 +108,99 @@ function compactCanonicalCursor(value: string | null): string | null {
   return `u${value}`
 }
 
-function expandCanonicalCursor(value: string | null): string | null {
+function expandNestedCursor(value: string | null): string | null {
   if (value === null) return null
+  if (value.startsWith('j')) return textToHex(value.slice(1))
+  if (value.startsWith('u')) return value.slice(1)
+  throw new Error('invalid nested cursor encoding')
+}
+
+function canonicalPayload(
+  value: string,
+  context: CanonicalCursorContext,
+): CanonicalCursorPayload | null {
+  try {
+    const source = JSON.parse(value) as Partial<CanonicalCursorPayload>
+    if (
+      source.v !== 1
+      || source.snapshot !== context.snapshot
+      || source.kind !== context.kind
+      || source.direction !== context.direction
+      || source.scope !== context.scope
+      || (source.baseCursor !== null && typeof source.baseCursor !== 'string')
+      || !Number.isSafeInteger(source.baseOffset)
+      || Number(source.baseOffset) < 0
+      || typeof source.baseDone !== 'boolean'
+      || (source.overlayAfter !== null && typeof source.overlayAfter !== 'string')
+      || !Number.isSafeInteger(source.overlayOffset)
+      || Number(source.overlayOffset) < 0
+      || typeof source.overlayDone !== 'boolean'
+    ) return null
+    return source as CanonicalCursorPayload
+  } catch {
+    return null
+  }
+}
+
+function compactCanonicalCursor(
+  value: string | null,
+  context: CanonicalCursorContext,
+): string | null {
+  if (value === null) return null
+  if (value.length % 2 === 0 && /^[a-f0-9]+$/i.test(value)) {
+    try {
+      const text = hexToText(value)
+      const payload = canonicalPayload(text, context)
+      if (payload) {
+        const compact: CompactCanonicalCursor = {
+          v: 1,
+          b: compactNestedCursor(payload.baseCursor),
+          o: payload.baseOffset,
+          x: payload.baseDone,
+          a: payload.overlayAfter,
+          p: payload.overlayOffset,
+          y: payload.overlayDone,
+        }
+        return `h${JSON.stringify(compact)}`
+      }
+      return `j${text}`
+    } catch {
+      // Preserve unusual non-UTF-8 cursors through the generic representation.
+    }
+  }
+  return `u${value}`
+}
+
+function expandCanonicalCursor(
+  value: string | null,
+  context: CanonicalCursorContext,
+): string | null {
+  if (value === null) return null
+  if (value.startsWith('h')) {
+    const compact = JSON.parse(value.slice(1)) as Partial<CompactCanonicalCursor>
+    if (
+      compact.v !== 1
+      || (compact.b !== null && typeof compact.b !== 'string')
+      || !Number.isSafeInteger(compact.o)
+      || Number(compact.o) < 0
+      || typeof compact.x !== 'boolean'
+      || (compact.a !== null && typeof compact.a !== 'string')
+      || !Number.isSafeInteger(compact.p)
+      || Number(compact.p) < 0
+      || typeof compact.y !== 'boolean'
+    ) throw new Error('invalid compact canonical cursor')
+    const payload: CanonicalCursorPayload = {
+      v: 1,
+      ...context,
+      baseCursor: expandNestedCursor(compact.b),
+      baseOffset: Number(compact.o),
+      baseDone: compact.x,
+      overlayAfter: compact.a,
+      overlayOffset: Number(compact.p),
+      overlayDone: compact.y,
+    }
+    return textToHex(JSON.stringify(payload))
+  }
   if (value.startsWith('j')) return textToHex(value.slice(1))
   if (value.startsWith('u')) return value.slice(1)
   throw new Error('invalid canonical cursor encoding')
@@ -117,7 +235,7 @@ export function encodeThreeLayerCursor(cursor: ThreeLayerCursorState): string {
     k: cursor.kind,
     d: cursor.direction === 'asc' ? 'a' : 'z',
     q: cursor.scope,
-    c: compactCanonicalCursor(cursor.canonicalCursor),
+    c: compactCanonicalCursor(cursor.canonicalCursor, cursor),
     o: cursor.canonicalOffset,
     x: cursor.canonicalDone,
     f: cursor.fastAfter,
@@ -160,13 +278,16 @@ export function readThreeLayerCursor(options: {
         'fast-lane read context changed during pagination',
       )
     }
-    return {
-      v: 1,
+    const context: CanonicalCursorContext = {
       snapshot: compact.s,
       kind: compact.k,
       direction: compact.d === 'a' ? 'asc' : 'desc',
       scope: compact.q,
-      canonicalCursor: expandCanonicalCursor(compact.c),
+    }
+    return {
+      v: 1,
+      ...context,
+      canonicalCursor: expandCanonicalCursor(compact.c, context),
       canonicalOffset: Number(compact.o),
       canonicalDone: compact.x,
       fastAfter: compact.f,
