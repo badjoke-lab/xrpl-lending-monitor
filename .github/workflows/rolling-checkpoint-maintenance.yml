@@ -1,0 +1,306 @@
+name: Rolling checkpoint maintenance
+
+on:
+  schedule:
+    - cron: '43 */3 * * *'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: rolling-checkpoint-maintenance
+  cancel-in-progress: false
+
+jobs:
+  maintain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+      SOURCE_HISTORY_BRANCH: history-data
+      SOURCE_CURRENT_BRANCH: current-state-data
+      CANDIDATE_HISTORY_BRANCH: history-rolling-maintenance-candidate-data
+      CANDIDATE_CURRENT_BRANCH: current-state-rolling-maintenance-candidate-data
+      MINIMUM_ENABLED_LEDGER: '3560000'
+      MAX_DELTA_LEDGERS: '5000'
+      MAX_CUTOVER_LAG_LEDGERS: '300'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Skip while a live cutover is already active
+        id: active-cutover
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p rolling-maintenance
+          gh api \
+            "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/runs?status=in_progress&per_page=20" \
+            > rolling-maintenance/active-cutovers.json
+          COUNT="$(jq '[.workflow_runs[] | select(.status == "in_progress" or .status == "queued")] | length' rolling-maintenance/active-cutovers.json)"
+          if [ "${COUNT}" -gt 0 ]; then
+            echo 'skip=true' >> "${GITHUB_OUTPUT}"
+            echo 'reason=live_cutover_active' >> "${GITHUB_OUTPUT}"
+          else
+            echo 'skip=false' >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Read and bind production checkpoint
+        if: steps.active-cutover.outputs.skip != 'true'
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api --method GET \
+            "repos/${REPOSITORY}/contents/history/publication.json" \
+            -f ref="${SOURCE_HISTORY_BRANCH}" --jq '.content' \
+            | tr -d '\n' | base64 --decode \
+            > rolling-maintenance/source-publication.json
+          gh api --method GET \
+            "repos/${REPOSITORY}/contents/read-model/manifest.json" \
+            -f ref="${SOURCE_CURRENT_BRANCH}" --jq '.content' \
+            | tr -d '\n' | base64 --decode \
+            > rolling-maintenance/source-current-manifest.json
+
+          SOURCE_LEDGER="$(jq -r '.endLedgerIndex' rolling-maintenance/source-publication.json)"
+          SOURCE_HASH="$(jq -r '.endLedgerHash' rolling-maintenance/source-publication.json)"
+          CURRENT_LEDGER="$(jq -r '.ledgerIndex' rolling-maintenance/source-current-manifest.json)"
+          CURRENT_HASH="$(jq -r '.ledgerHash' rolling-maintenance/source-current-manifest.json)"
+          test "${SOURCE_LEDGER}" = "${CURRENT_LEDGER}"
+          test "${SOURCE_HASH}" = "${CURRENT_HASH}"
+          test "$(jq -r '.complete' rolling-maintenance/source-publication.json)" = true
+          test "$(jq -r '.complete' rolling-maintenance/source-current-manifest.json)" = true
+
+          if [ "${SOURCE_LEDGER}" -lt "${MINIMUM_ENABLED_LEDGER}" ]; then
+            echo 'skip=true' >> "${GITHUB_OUTPUT}"
+            echo 'reason=initial_recovery_not_promoted' >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          jq -n '{method:"ledger",params:[{ledger_index:"validated",transactions:false,expand:false}]}' \
+            > rolling-maintenance/live-head-request.json
+          curl --fail-with-body --silent --show-error --retry 3 \
+            -H 'content-type: application/json' \
+            --data @rolling-maintenance/live-head-request.json \
+            https://devnet.honeycluster.io/ \
+            > rolling-maintenance/live-head-response.json
+          LIVE_LEDGER="$(jq -r '.result.ledger_index // .result.ledger.ledger_index' rolling-maintenance/live-head-response.json)"
+          LAG="$((LIVE_LEDGER - SOURCE_LEDGER))"
+          if [ "${LAG}" -lt 0 ]; then LAG=0; fi
+
+          if [ "${LAG}" -le "${MAX_CUTOVER_LAG_LEDGERS}" ]; then
+            echo 'skip=true' >> "${GITHUB_OUTPUT}"
+            echo 'reason=checkpoint_already_fresh' >> "${GITHUB_OUTPUT}"
+          else
+            test "${LAG}" -le "${MAX_DELTA_LEDGERS}"
+            echo 'skip=false' >> "${GITHUB_OUTPUT}"
+          fi
+          {
+            echo "source_ledger=${SOURCE_LEDGER}"
+            echo "source_hash=${SOURCE_HASH}"
+            echo "live_ledger=${LIVE_LEDGER}"
+            echo "lag_ledgers=${LAG}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Capture existing candidate runs
+        if: steps.active-cutover.outputs.skip != 'true' && steps.source.outputs.skip != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api \
+            "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-candidate.yml/runs?event=workflow_dispatch&per_page=100" \
+            --jq '.workflow_runs[].id' \
+            > rolling-maintenance/candidate-run-ids-before.txt
+
+      - name: Dispatch bounded rolling candidate
+        if: steps.active-cutover.outputs.skip != 'true' && steps.source.outputs.skip != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -n \
+            --arg ref main \
+            --arg sourceHistory "${SOURCE_HISTORY_BRANCH}" \
+            --arg sourceCurrent "${SOURCE_CURRENT_BRANCH}" \
+            --arg outputHistory "${CANDIDATE_HISTORY_BRANCH}" \
+            --arg outputCurrent "${CANDIDATE_CURRENT_BRANCH}" \
+            --arg maxDelta "${MAX_DELTA_LEDGERS}" \
+            '{ref:$ref,inputs:{source_history_branch:$sourceHistory,source_current_state_branch:$sourceCurrent,history_candidate_branch:$outputHistory,current_state_candidate_branch:$outputCurrent,max_delta_ledgers:$maxDelta,segment_ledgers:"500",read_window_size:"4"}}' \
+            > rolling-maintenance/candidate-dispatch.json
+          gh api --method POST \
+            "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-candidate.yml/dispatches" \
+            --input rolling-maintenance/candidate-dispatch.json
+
+      - name: Resolve and wait for candidate
+        if: steps.active-cutover.outputs.skip != 'true' && steps.source.outputs.skip != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          CANDIDATE_RUN_ID=''
+          for ATTEMPT in $(seq 1 60); do
+            gh api \
+              "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-candidate.yml/runs?event=workflow_dispatch&per_page=100" \
+              > rolling-maintenance/candidate-runs-after.json
+            while IFS= read -r ID; do
+              if ! grep -Fxq "${ID}" rolling-maintenance/candidate-run-ids-before.txt; then
+                CANDIDATE_RUN_ID="${ID}"
+                break
+              fi
+            done < <(jq -r '.workflow_runs | sort_by(.created_at) | reverse | .[].id' rolling-maintenance/candidate-runs-after.json)
+            test -n "${CANDIDATE_RUN_ID}" && break
+            sleep 10
+          done
+          test -n "${CANDIDATE_RUN_ID}"
+          echo "CANDIDATE_RUN_ID=${CANDIDATE_RUN_ID}" >> "${GITHUB_ENV}"
+          printf '%s\n' "${CANDIDATE_RUN_ID}" > rolling-maintenance/candidate-run-id.txt
+
+          for ATTEMPT in $(seq 1 240); do
+            gh api "repos/${REPOSITORY}/actions/runs/${CANDIDATE_RUN_ID}" \
+              > rolling-maintenance/candidate-run.json
+            STATUS="$(jq -r '.status' rolling-maintenance/candidate-run.json)"
+            if [ "${STATUS}" = completed ]; then break; fi
+            sleep 30
+          done
+          test "$(jq -r '.status' rolling-maintenance/candidate-run.json)" = completed
+
+          gh api "repos/${REPOSITORY}/actions/runs/${CANDIDATE_RUN_ID}/jobs?per_page=100" \
+            > rolling-maintenance/candidate-jobs.json
+          for REQUIRED_STEP in \
+            'Bind source pair and freeze bounded target' \
+            'Generate bounded delta with configured read window' \
+            'Verify delta and build target publication' \
+            'Build target exact index incrementally' \
+            'Build target current state from best available base' \
+            'Publish history candidate branch' \
+            'Publish current-state candidate branch' \
+            'Rehearse remote candidate pair'; do
+            jq -e --arg name "${REQUIRED_STEP}" \
+              '[.jobs[].steps[] | select(.name == $name)] | length == 1 and .[0].conclusion == "success"' \
+              rolling-maintenance/candidate-jobs.json > /dev/null
+          done
+
+      - name: Verify aligned candidate and freshness
+        if: steps.active-cutover.outputs.skip != 'true' && steps.source.outputs.skip != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api --method GET \
+            "repos/${REPOSITORY}/contents/history/publication.json" \
+            -f ref="${CANDIDATE_HISTORY_BRANCH}" --jq '.content' \
+            | tr -d '\n' | base64 --decode \
+            > rolling-maintenance/candidate-publication.json
+          gh api --method GET \
+            "repos/${REPOSITORY}/contents/read-model/manifest.json" \
+            -f ref="${CANDIDATE_CURRENT_BRANCH}" --jq '.content' \
+            | tr -d '\n' | base64 --decode \
+            > rolling-maintenance/candidate-current-manifest.json
+
+          TARGET_LEDGER="$(jq -r '.endLedgerIndex' rolling-maintenance/candidate-publication.json)"
+          TARGET_HASH="$(jq -r '.endLedgerHash' rolling-maintenance/candidate-publication.json)"
+          CURRENT_LEDGER="$(jq -r '.ledgerIndex' rolling-maintenance/candidate-current-manifest.json)"
+          CURRENT_HASH="$(jq -r '.ledgerHash' rolling-maintenance/candidate-current-manifest.json)"
+          test "${TARGET_LEDGER}" = "${CURRENT_LEDGER}"
+          test "${TARGET_HASH}" = "${CURRENT_HASH}"
+          test "${TARGET_LEDGER}" -gt "${{ steps.source.outputs.source_ledger }}"
+          test "${TARGET_LEDGER}" -le "$(( ${{ steps.source.outputs.source_ledger }} + MAX_DELTA_LEDGERS ))"
+
+          jq -n '{method:"ledger",params:[{ledger_index:"validated",transactions:false,expand:false}]}' \
+            > rolling-maintenance/post-candidate-head-request.json
+          curl --fail-with-body --silent --show-error --retry 3 \
+            -H 'content-type: application/json' \
+            --data @rolling-maintenance/post-candidate-head-request.json \
+            https://devnet.honeycluster.io/ \
+            > rolling-maintenance/post-candidate-head-response.json
+          LIVE_LEDGER="$(jq -r '.result.ledger_index // .result.ledger.ledger_index' rolling-maintenance/post-candidate-head-response.json)"
+          LAG="$((LIVE_LEDGER - TARGET_LEDGER))"
+          if [ "${LAG}" -lt 0 ]; then LAG=0; fi
+          test "${LAG}" -le "${MAX_CUTOVER_LAG_LEDGERS}"
+
+          {
+            echo "TARGET_LEDGER=${TARGET_LEDGER}"
+            echo "TARGET_HASH=${TARGET_HASH}"
+            echo "TARGET_LAG=${LAG}"
+          } >> "${GITHUB_ENV}"
+
+      - name: Dispatch guarded live cutover
+        if: steps.active-cutover.outputs.skip != 'true' && steps.source.outputs.skip != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api \
+            "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/runs?event=workflow_dispatch&per_page=100" \
+            --jq '.workflow_runs[].id' \
+            > rolling-maintenance/cutover-run-ids-before.txt
+          jq -n \
+            --arg ref main \
+            --arg history "${CANDIDATE_HISTORY_BRANCH}" \
+            --arg current "${CANDIDATE_CURRENT_BRANCH}" \
+            '{ref:$ref,inputs:{history_candidate_branch:$history,current_state_candidate_branch:$current,confirm_production_write:"true"}}' \
+            > rolling-maintenance/cutover-dispatch.json
+          gh api --method POST \
+            "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/dispatches" \
+            --input rolling-maintenance/cutover-dispatch.json
+
+          CUTOVER_RUN_ID=''
+          for ATTEMPT in $(seq 1 60); do
+            gh api \
+              "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/runs?event=workflow_dispatch&per_page=100" \
+              > rolling-maintenance/cutover-runs-after.json
+            while IFS= read -r ID; do
+              if ! grep -Fxq "${ID}" rolling-maintenance/cutover-run-ids-before.txt; then
+                CUTOVER_RUN_ID="${ID}"
+                break
+              fi
+            done < <(jq -r '.workflow_runs | sort_by(.created_at) | reverse | .[].id' rolling-maintenance/cutover-runs-after.json)
+            test -n "${CUTOVER_RUN_ID}" && break
+            sleep 10
+          done
+          test -n "${CUTOVER_RUN_ID}"
+          echo "CUTOVER_RUN_ID=${CUTOVER_RUN_ID}" >> "${GITHUB_ENV}"
+          printf '%s\n' "${CUTOVER_RUN_ID}" > rolling-maintenance/cutover-run-id.txt
+
+      - name: Require successful live cutover
+        if: steps.active-cutover.outputs.skip != 'true' && steps.source.outputs.skip != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for ATTEMPT in $(seq 1 180); do
+            gh api "repos/${REPOSITORY}/actions/runs/${CUTOVER_RUN_ID}" \
+              > rolling-maintenance/cutover-run.json
+            STATUS="$(jq -r '.status' rolling-maintenance/cutover-run.json)"
+            if [ "${STATUS}" = completed ]; then break; fi
+            sleep 30
+          done
+          test "$(jq -r '.status' rolling-maintenance/cutover-run.json)" = completed
+          test "$(jq -r '.conclusion' rolling-maintenance/cutover-run.json)" = success
+
+          jq -n \
+            --argjson sourceLedger "${{ steps.source.outputs.source_ledger }}" \
+            --argjson targetLedger "${TARGET_LEDGER}" \
+            --arg targetHash "${TARGET_HASH}" \
+            --argjson targetLag "${TARGET_LAG}" \
+            --argjson candidateRunId "${CANDIDATE_RUN_ID}" \
+            --argjson cutoverRunId "${CUTOVER_RUN_ID}" \
+            '{passed:true,sourceLedger:$sourceLedger,target:{ledgerIndex:$targetLedger,ledgerHash:$targetHash,lagAtCutover:$targetLag},candidateRunId:$candidateRunId,cutoverRunId:$cutoverRunId,schedule:"every three hours",productionCron:"*/5 * * * *",mainnetEnabled:false}' \
+            > rolling-maintenance/summary.json
+
+      - name: Record no-op decision
+        if: steps.active-cutover.outputs.skip == 'true' || steps.source.outputs.skip == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ACTIVE_REASON='${{ steps.active-cutover.outputs.reason }}'
+          SOURCE_REASON='${{ steps.source.outputs.reason }}'
+          REASON="${ACTIVE_REASON:-${SOURCE_REASON:-no_action_required}}"
+          jq -n --arg reason "${REASON}" '{passed:true,skipped:true,reason:$reason}' \
+            > rolling-maintenance/summary.json
+
+      - name: Upload rolling maintenance evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: rolling-checkpoint-maintenance
+          path: rolling-maintenance
+          if-no-files-found: warn
+          retention-days: 30
