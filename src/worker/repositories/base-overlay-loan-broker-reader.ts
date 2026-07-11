@@ -10,6 +10,7 @@ import type {
 } from './d1-current-loan-broker-reader'
 import {
   getThreeLayerCurrentProjection as getResolvedCurrentProjection,
+  getThreeLayerCurrentProjections as getResolvedCurrentProjections,
   listThreeLayerCurrentProjections as listResolvedCurrentProjections,
 } from './three-layer-current-reader'
 import { CurrentStateObjectReadError } from './current-state-read-error'
@@ -42,6 +43,17 @@ function matches(broker: LoanBrokerCurrentProjection, options: ListCurrentLoanBr
   const query = options.query?.toLowerCase()
   return !query || [broker.id, broker.owner, broker.account, broker.vaultId]
     .some((value) => value.toLowerCase().includes(query))
+}
+
+function requiredVault(
+  vaults: Map<string, VaultCurrentProjection | LoanBrokerCurrentProjection | null>,
+  vaultId: string,
+): VaultCurrentProjection {
+  const found = vaults.get(vaultId.toUpperCase())
+  if (!found || found.kind !== 'vault') {
+    throw new CurrentStateObjectReadError('manifest_integrity_error', 'broker Vault relationship is missing')
+  }
+  return found
 }
 
 async function resolvedVault(
@@ -86,20 +98,25 @@ export async function listBaseOverlayLoanBrokers(
     },
   })
 
-  const data: CurrentLoanBrokerRecord[] = []
-  for (const projection of result.items) {
-    const broker = projection as LoanBrokerCurrentProjection
-    data.push({
-      broker,
-      vault: await resolvedVault(db, source, snapshot, broker.vaultId),
-    })
-  }
+  const brokers = result.items as LoanBrokerCurrentProjection[]
+  const vaultResult = await getResolvedCurrentProjections({
+    db,
+    source,
+    snapshot,
+    kind: 'vault',
+    objectIds: brokers.map((broker) => broker.vaultId),
+  })
+  const vaults = vaultResult.items as Map<string, VaultCurrentProjection | LoanBrokerCurrentProjection | null>
+  const data: CurrentLoanBrokerRecord[] = brokers.map((broker) => ({
+    broker,
+    vault: requiredVault(vaults, broker.vaultId),
+  }))
 
   return {
     data,
     nextCursor: result.nextCursor,
     brokerShardsRead: result.basePageReads,
-    relationShardsRead: 0,
+    relationShardsRead: vaultResult.assetReads,
     objectsExamined: result.objectsExamined,
   }
 }

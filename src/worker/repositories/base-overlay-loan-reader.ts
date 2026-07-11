@@ -12,6 +12,7 @@ import type {
 } from './d1-current-loan-reader'
 import {
   getThreeLayerCurrentProjection as getResolvedCurrentProjection,
+  getThreeLayerCurrentProjections as getResolvedCurrentProjections,
   listThreeLayerCurrentProjections as listResolvedCurrentProjections,
 } from './three-layer-current-reader'
 import { CurrentStateObjectReadError } from './current-state-read-error'
@@ -22,6 +23,10 @@ import {
 } from './release-current-state'
 
 const MAX_LIST_ASSET_READS = 16
+
+type RelatedProjection = LoanBrokerCurrentProjection | LoanCurrentProjection | VaultCurrentProjection
+
+type RelatedProjectionMap = Map<string, RelatedProjection | null>
 
 function releaseSource(storage: CurrentStateStorage): ReleaseCurrentStateSource {
   if (!isReleaseCurrentStateSource(storage)) {
@@ -84,6 +89,28 @@ function matches(loan: LoanCurrentProjection, options: ListCurrentLoansOptions):
   return queryMatches
     && (options.onLedgerStatus === undefined || loan.onLedgerStatus === options.onLedgerStatus)
     && (options.scheduleStatus === undefined || schedule.status === options.scheduleStatus)
+}
+
+function requiredBroker(
+  brokers: RelatedProjectionMap,
+  brokerId: string,
+): LoanBrokerCurrentProjection {
+  const found = brokers.get(brokerId.toUpperCase())
+  if (!found || found.kind !== 'loan_broker') {
+    throw new CurrentStateObjectReadError('manifest_integrity_error', 'Loan Broker relationship is missing')
+  }
+  return found
+}
+
+function requiredVault(
+  vaults: RelatedProjectionMap,
+  vaultId: string,
+): VaultCurrentProjection {
+  const found = vaults.get(vaultId.toUpperCase())
+  if (!found || found.kind !== 'vault') {
+    throw new CurrentStateObjectReadError('manifest_integrity_error', 'Loan Vault relationship is missing')
+  }
+  return found
 }
 
 async function resolvedBroker(
@@ -176,24 +203,40 @@ export async function listBaseOverlayLoans(
     },
   })
 
-  const data: CurrentLoanRecord[] = []
-  for (const projection of result.items) {
-    const loan = projection as LoanCurrentProjection
-    if (!matches(loan, options)) continue
-    data.push(await materialize(
-      db,
-      source,
-      snapshot,
+  const loans = (result.items as LoanCurrentProjection[])
+    .filter((loan) => matches(loan, options))
+  const brokerResult = await getResolvedCurrentProjections({
+    db,
+    source,
+    snapshot,
+    kind: 'loan-broker',
+    objectIds: loans.map((loan) => loan.loanBrokerId),
+  })
+  const brokers = brokerResult.items as RelatedProjectionMap
+  const resolvedBrokers = loans.map((loan) => requiredBroker(brokers, loan.loanBrokerId))
+  const vaultResult = await getResolvedCurrentProjections({
+    db,
+    source,
+    snapshot,
+    kind: 'vault',
+    objectIds: resolvedBrokers.map((broker) => broker.vaultId),
+  })
+  const vaults = vaultResult.items as RelatedProjectionMap
+  const data: CurrentLoanRecord[] = loans.map((loan, index) => {
+    const broker = resolvedBrokers[index]!
+    return {
       loan,
-      options.evaluatedAtRippleTime,
-    ))
-  }
+      broker,
+      vault: requiredVault(vaults, broker.vaultId),
+      schedule: evaluateSchedule(loan, options.evaluatedAtRippleTime),
+    }
+  })
 
   return {
     data,
     nextCursor: result.nextCursor,
     loanShardsRead: result.basePageReads,
-    relationShardsRead: 0,
+    relationShardsRead: brokerResult.assetReads + vaultResult.assetReads,
     objectsExamined: result.objectsExamined,
   }
 }
