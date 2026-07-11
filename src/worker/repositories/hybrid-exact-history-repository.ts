@@ -6,6 +6,7 @@ import type { HistoryExactIndexReader } from '../../shared/history-segments/exac
 import type { HistorySegmentChainReader } from '../../shared/history-segments/reader'
 import type {
   HistoryPageOptions,
+  LoanLifecycleListOptions,
   LoanLifecycleRecord,
   ObjectChangeRecord,
   ProtocolEventRecord,
@@ -18,12 +19,14 @@ import {
 } from './history-segment-adapter'
 import {
   listLiveLoanLifecycleAfterBoundary,
+  listLiveLoanLifecycleEventsAfterBoundary,
   listLiveObjectHistoryAfterBoundary,
 } from './live-history-after-boundary'
 import { getLiveTransactionDetailAfterBoundary } from './live-transaction-detail-after-boundary'
 import { searchLiveHistoryAfterBoundary } from './live-search-after-boundary'
 import {
   mergeLoanLifecycleDetail,
+  mergeLoanLifecycleExplorer,
   mergeObjectHistory,
 } from './merged-history-source'
 
@@ -168,6 +171,42 @@ export async function listHybridExactLoanLifecycle(options: {
     live,
     boundaryLedgerIndex: options.reader.publication.endLedgerIndex,
     limit: options.page.limit,
+  }).items
+}
+
+export async function listHybridExactLoanLifecycleEvents(options: {
+  db: D1Database
+  reader: HistorySegmentChainReader
+  exactIndex: HistoryExactIndexReader
+  list: LoanLifecycleListOptions & { loanId: string }
+}): Promise<LoanLifecycleRecord[]> {
+  const lookup = await options.exactIndex.find(options.list.loanId, {
+    limit: EXACT_DETAIL_MAX_RECORDS,
+    referenceKinds: ['loan_lifecycle'],
+    referencePredicate: (reference) => reference.searchResult?.loanId === options.list.loanId,
+    direction: 'desc',
+  })
+  const transactionHashes = referencedTransactionHashes(lookup.references)
+  const immutable = lookup.references.length === 0 ? [] : (await options.reader.readReferenced<SegmentLoanLifecycleEvent>({
+    references: references(lookup.references),
+    predicate: (event) =>
+      event.loanId === options.list.loanId
+      && (options.list.eventType === null || options.list.eventType === undefined || event.eventType === options.list.eventType)
+      && transactionHashes.has(event.transactionHash),
+    limit: EXACT_DETAIL_MAX_RECORDS,
+    direction: 'desc',
+    maxAssetReads: EXACT_DETAIL_MAX_ASSET_READS,
+  })).items.map(segmentLoanLifecycleToApi)
+  const live = await listLiveLoanLifecycleEventsAfterBoundary(
+    options.db,
+    options.reader.publication.endLedgerIndex,
+    options.list,
+  )
+  return mergeLoanLifecycleExplorer({
+    immutable,
+    live,
+    boundaryLedgerIndex: options.reader.publication.endLedgerIndex,
+    limit: options.list.limit,
   }).items
 }
 
