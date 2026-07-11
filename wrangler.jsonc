@@ -4,7 +4,7 @@
   "main": "src/worker/entry.ts",
   "compatibility_date": "2026-07-01",
   "triggers": {
-    "crons": ["0 */4 * * *"]
+    "crons": ["*/5 * * * *"]
   },
   "assets": {
     "directory": "./dist",
@@ -63,7 +63,12 @@
     "INCREMENTAL_MAX_RETRIES_PER_ENDPOINT": "1",
     "INCREMENTAL_EXECUTION_BUDGET_MS": "8000",
     "INCREMENTAL_DEADLINE_MARGIN_MS": "1000",
-    "INCREMENTAL_RETAIN_PAYLOADS": "false"
+    "INCREMENTAL_RETAIN_PAYLOADS": "false",
+    "FAST_LANE_WEBSOCKET_ENDPOINT": "wss://s.devnet.rippletest.net:51233/",
+    "FAST_LANE_BOOTSTRAP_LEDGERS": "90",
+    "FAST_LANE_MAX_LEDGERS_PER_RUN": "180",
+    "FAST_LANE_REANCHOR_LAG_LEDGERS": "720",
+    "FAST_LANE_READ_WINDOW": "8"
   },
   "observability": {
     "enabled": true
