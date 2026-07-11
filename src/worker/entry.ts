@@ -21,6 +21,7 @@ import { getSyncState } from './repositories/network-status-repository'
 import { openConfiguredReleaseCurrentState } from './repositories/release-current-state'
 import { handleHybridExactHistoryOverride } from './routes/hybrid-exact-history-override'
 import { handleHybridHistoryOverride } from './routes/hybrid-history-override'
+import { handleThreeLayerOverview } from './routes/three-layer-overview'
 import { scheduledCadenceDecision } from './scheduled-cadence'
 import { serializeCollectorStatus } from './serializers/collector-status'
 
@@ -71,6 +72,9 @@ async function runFastLaneCycle(env: Bindings): Promise<void> {
 
 const worker: ExportedHandler<Bindings> = {
   async fetch(request, env, executionContext) {
+    const overview = await handleThreeLayerOverview(request, env)
+    if (overview) return overview
+
     const url = new URL(request.url)
     if (request.method === 'GET' && url.pathname === '/api/status/history-source') {
       const runtimeConfig = resolveRuntimeConfig(env)
