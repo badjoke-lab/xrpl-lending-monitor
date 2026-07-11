@@ -79,8 +79,9 @@ function exactIndex(): HistoryExactIndexReader {
   } as unknown as HistoryExactIndexReader
 }
 
-function db(options: { liveObjectTransactionHash?: string } = {}): D1Database {
+function db(options: { liveObjectTransactionHash?: string; liveLifecycle?: boolean } = {}): D1Database {
   const liveObjectTransactionHash = options.liveObjectTransactionHash ?? 'TX1'
+  const liveLifecycle = options.liveLifecycle ?? true
   return {
     prepare(sql: string) {
       const statement = {
@@ -113,6 +114,7 @@ function db(options: { liveObjectTransactionHash?: string } = {}): D1Database {
             }] as T[] }
           }
           if (sql.includes('FROM loan_lifecycle_events')) {
+            if (!liveLifecycle) return { results: [] as T[] }
             return { results: [{
               loan_id: 'LOAN1', epoch_id: 'epoch-live', transaction_hash: 'TX2', ledger_index: 106,
               transaction_index: 1, close_time: 800_000_001, event_type: 'payment', transaction_type: 'LoanPay',
@@ -166,7 +168,7 @@ describe('hybrid exact history repository', () => {
 
   it('filters immutable lifecycle events before Explorer merge', async () => {
     const result = await listHybridExactLoanLifecycleEvents({
-      db: db(), reader: reader(), exactIndex: exactIndex(),
+      db: db({ liveLifecycle: false }), reader: reader(), exactIndex: exactIndex(),
       list: { limit: 25, loanId: 'LOAN1', eventType: 'created' },
     })
     expect(result).toEqual([])
