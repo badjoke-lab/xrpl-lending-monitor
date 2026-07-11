@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "mode": "read-only-shadow",
+  "sampledAt": "2026-07-11T04:23:22.066Z",
+  "source": {
+    "endpoint": "https://devnet.honeycluster.io/",
+    "cadenceTargetSeconds": 300,
+    "requestedStartLedger": 3550490,
+    "endLedger": 3550669,
+    "latestValidatedLedger": 3560625,
+    "latestValidatedHash": "908BA5171EDF90B84E81DC33076FEEFF1572CA966BC12677F1BD91272920EF3B",
+    "backlogBefore": 10136,
+    "completeToHead": false,
+    "ledgersRead": 180,
+    "readWindow": 4,
+    "maxLedgers": 180,
+    "closeTimeSpanSeconds": 639
+  },
+  "metrics": {
+    "inspectedTransactions": 6206,
+    "lendingTransactions": 952,
+    "uniqueLendingTransactions": 952,
+    "successfulLendingTransactions": 855,
+    "transactionTypes": {
+      "LoanBrokerCoverClawback": 7,
+      "LoanBrokerCoverDeposit": 32,
+      "LoanBrokerCoverWithdraw": 10,
+      "LoanBrokerDelete": 5,
+      "LoanBrokerSet": 97,
+      "LoanDelete": 7,
+      "LoanManage": 19,
+      "LoanPay": 20,
+      "LoanSet": 51,
+      "VaultClawback": 23,
+      "VaultCreate": 326,
+      "VaultDelete": 23,
+      "VaultDeposit": 249,
+      "VaultSet": 34,
+      "VaultWithdraw": 49
+    },
+    "affectedObjects": {
+      "total": 484,
+      "vaults": 330,
+      "loanBrokers": 102,
+      "loans": 52
+    },
+    "minimalProjectionWriteLowerBound": 1341
+  },
+  "timing": {
+    "elapsedMs": 14038
+  }
+}
