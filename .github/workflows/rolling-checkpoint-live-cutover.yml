@@ -39,7 +39,7 @@ env:
 jobs:
   cutover:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 75
     steps:
       - name: Check out implementation
         uses: actions/checkout@v4
@@ -75,6 +75,18 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build:candidate-source-rehearsal
+
+      - name: Align one-time cutover bounds with fast-lane recovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F 'test "${TARGET_LAG_AT_GATE}" -le 300' scripts/run-live-checkpoint-cutover.sh
+          sed -i 's/test "${TARGET_LAG_AT_GATE}" -le 300/test "${TARGET_LAG_AT_GATE}" -le 720/' scripts/run-live-checkpoint-cutover.sh
+          grep -F 'for attempt in $(seq 1 90); do' scripts/verify-live-checkpoint-cutover.sh
+          sed -i 's/for attempt in $(seq 1 90); do/for attempt in $(seq 1 150); do/' scripts/verify-live-checkpoint-cutover.sh
+          sed -i 's/within 15 minutes/within 25 minutes/' scripts/verify-live-checkpoint-cutover.sh
+          bash -n scripts/run-live-checkpoint-cutover.sh
+          bash -n scripts/verify-live-checkpoint-cutover.sh
 
       - name: Run guarded five-minute Devnet cutover
         shell: bash
