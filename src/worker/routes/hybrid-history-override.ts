@@ -1,6 +1,7 @@
 import { resolveRuntimeConfig } from '../../shared/runtime-config'
 import type { Bindings } from '../env'
 import {
+  getHybridExactArchivedObject,
   listHybridExactLoanLifecycle,
   listHybridExactLoanLifecycleEvents,
   listHybridExactObjectHistory,
@@ -237,6 +238,18 @@ export async function handleHybridHistoryOverride(
         error: 'invalid_object_type',
         message: 'objectType must be Vault, LoanBroker, or Loan',
       }, { status: 400 })
+    }
+    if (source.exactIndex) {
+      const archive = await getHybridExactArchivedObject({
+        ...common,
+        exactIndex: source.exactIndex.reader,
+        objectType,
+        objectId,
+      })
+      return Response.json(
+        serializeArchivedObjectResponse({ objectType, objectId, archive }),
+        { status: archive ? 200 : 404 },
+      )
     }
     const result = await listHybridArchivedObjects({
       ...common,
