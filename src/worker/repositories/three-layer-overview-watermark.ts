@@ -9,14 +9,14 @@ export interface CurrentStateWatermark {
   source: CurrentStateWatermarkSource
   ledgerIndex: number
   ledgerHash: string
-  updatedAt: string
+  updatedAt: string | null
 }
 
 export interface CountsWatermark {
   source: CountsWatermarkSource
   ledgerIndex: number
   ledgerHash: string
-  updatedAt: string
+  updatedAt: string | null
 }
 
 export interface CanonicalOverlayWatermark {
