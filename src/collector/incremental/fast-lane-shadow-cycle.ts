@@ -2,6 +2,7 @@ import { XrplJsonRpcClient } from '../network/xrpl-rpc'
 import type { RuntimeConfig } from '../../shared/runtime-config'
 import type { FastLaneShadowRuntimeConfig } from '../../shared/fast-lane-shadow-runtime-config'
 import { buildFastLaneShadowWindowPlan } from './fast-lane-shadow-plan'
+import { fastLaneShadowReanchorReason } from './fast-lane-shadow-reanchor'
 import { scanValidatedLedgerRange } from './scan-validated-ledgers'
 import { createXrplWebSocketLedgerSession } from './xrpl-websocket-ledger-session'
 import {
@@ -96,12 +97,13 @@ export async function runFastLaneShadowCycle(options: {
   let state = await readFastLaneShadowState(options.db)
   let reanchored = false
 
-  const staleLag = state ? Math.max(0, head.ledgerIndex - state.lastProcessedLedger) : null
-  if (
-    !state
-    || state.epochId !== 'fast-lane-shadow-devnet'
-    || (staleLag !== null && staleLag > options.fastLaneConfig.reanchorLagLedgers)
-  ) {
+  const reanchorReason = fastLaneShadowReanchorReason({
+    state,
+    head,
+    expectedEpochId: 'fast-lane-shadow-devnet',
+    reanchorLagLedgers: options.fastLaneConfig.reanchorLagLedgers,
+  })
+  if (reanchorReason !== null) {
     await resetFastLaneCompactShadow(options.db)
     state = null
     reanchored = true
