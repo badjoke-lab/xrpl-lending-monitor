@@ -11,6 +11,10 @@ import type {
   LoanScheduleEvaluation,
 } from './d1-current-loan-reader'
 import {
+  loanPaginationScope,
+  resolveLoanPaginationEvaluationTime,
+} from './loan-pagination-time'
+import {
   getThreeLayerCurrentProjection as getResolvedCurrentProjection,
   getThreeLayerCurrentProjections as getResolvedCurrentProjections,
   listThreeLayerCurrentProjections as listResolvedCurrentProjections,
@@ -176,6 +180,11 @@ export async function listBaseOverlayLoans(
 ): Promise<ListCurrentLoansResult> {
   const source = releaseSource(storage)
   validateSnapshot(snapshot, source)
+  const evaluatedAtRippleTime = resolveLoanPaginationEvaluationTime(options)
+  const effectiveOptions: ListCurrentLoansOptions = {
+    ...options,
+    evaluatedAtRippleTime,
+  }
 
   // Keep the release-asset scan bounded independently of filter selectivity.
   // Filtering inside the release reader can force a single request to walk a
@@ -191,20 +200,13 @@ export async function listBaseOverlayLoans(
       limit: options.limit,
       cursor: options.cursor,
       direction: (options.sort ?? 'id_asc') === 'id_desc' ? 'desc' : 'asc',
-      scope: [
-        'loan',
-        options.sort ?? 'id_asc',
-        options.query ?? '',
-        options.onLedgerStatus ?? '',
-        options.scheduleStatus ?? '',
-        options.evaluatedAtRippleTime,
-      ].join(':'),
+      scope: loanPaginationScope(effectiveOptions, evaluatedAtRippleTime),
       maxBasePageReads: MAX_LIST_ASSET_READS,
     },
   })
 
   const loans = (result.items as LoanCurrentProjection[])
-    .filter((loan) => matches(loan, options))
+    .filter((loan) => matches(loan, effectiveOptions))
   const brokerResult = await getResolvedCurrentProjections({
     db,
     source,
@@ -228,7 +230,7 @@ export async function listBaseOverlayLoans(
       loan,
       broker,
       vault: requiredVault(vaults, broker.vaultId),
-      schedule: evaluateSchedule(loan, options.evaluatedAtRippleTime),
+      schedule: evaluateSchedule(loan, evaluatedAtRippleTime),
     }
   })
 
