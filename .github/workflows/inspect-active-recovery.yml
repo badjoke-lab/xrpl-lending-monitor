@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  actions: read
+  actions: write
   contents: read
 
 jobs:
@@ -17,8 +17,18 @@ jobs:
     timeout-minutes: 10
     env:
       GH_TOKEN: ${{ github.token }}
+      REDUNDANT_CANDIDATE_RUN_ID: '29161339637'
     steps:
       - uses: actions/checkout@v4
+
+      - name: Cancel redundant queued candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p active-recovery-inspection
+          gh api --method POST \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${REDUNDANT_CANDIDATE_RUN_ID}/cancel" \
+            > active-recovery-inspection/cancel-redundant.json 2>&1 || true
 
       - name: Capture active recovery runs and candidate heads
         shell: bash
@@ -26,6 +36,7 @@ jobs:
           set -euo pipefail
           ROOT=active-recovery-inspection
           mkdir -p "${ROOT}"
+          sleep 5
 
           gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/rolling-checkpoint-candidate.yml/runs?event=workflow_dispatch&per_page=30" \
             > "${ROOT}/candidate-runs.json"
@@ -50,7 +61,7 @@ jobs:
               > "${ROOT}/branch-${BRANCH}.json"
           done
 
-          ACTIVE_CANDIDATE_IDS="$(jq -r '[.workflow_runs[] | select(.status == "in_progress" or .status == "queued") | .id] | join(",")' "${ROOT}/candidate-runs.json")"
+          ACTIVE_CANDIDATE_IDS="$(jq -r '[.workflow_runs[] | select(.status == "in_progress" or .status == "queued" or .status == "pending") | .id] | join(",")' "${ROOT}/candidate-runs.json")"
           jq -n \
             --arg activeCandidateIds "${ACTIVE_CANDIDATE_IDS}" \
             --slurpfile parent "${ROOT}/recovery-parent.json" \
