@@ -1,6 +1,8 @@
 import { runIncrementalCollectorCycle } from '../collector/incremental/collector-cycle'
+import { runFastLaneShadowCycle } from '../collector/incremental/fast-lane-shadow-cycle'
 import { refreshNetworkStatus } from '../collector/network/refresh-network-status'
 import { resolveCatchUpRuntimeConfig } from '../shared/catch-up-runtime-config'
+import { resolveFastLaneShadowRuntimeConfig } from '../shared/fast-lane-shadow-runtime-config'
 import { resolveIncrementalRuntimeConfig } from '../shared/incremental-runtime-config'
 import { resolveReplacementBaseRuntimeConfig } from '../shared/replacement-base-runtime-config'
 import { resolveRuntimeConfig } from '../shared/runtime-config'
@@ -10,6 +12,7 @@ import { initializeCatchUpFromVerifiedBase } from './operator/catch-up-initializ
 import { diagnoseLiveContinuation, verifyLiveContinuation } from './operator/live-continuation-verification'
 import { diagnoseM1RuntimeExit, reviewM1RuntimeExit } from './operator/m1-runtime-exit'
 import { rebaseToReplacementBase } from './operator/replacement-base-rebase'
+import { saveFastLaneShadowRunMetric } from './repositories/fast-lane-shadow-run-metrics'
 import { resolveHistorySource } from './repositories/history-source'
 import { getIncrementalCollectorState } from './repositories/incremental-collector-state'
 import { readLoanActivityDiagnostics } from './repositories/loan-activity-diagnostics'
@@ -17,9 +20,50 @@ import { getSyncState } from './repositories/network-status-repository'
 import { openConfiguredReleaseCurrentState } from './repositories/release-current-state'
 import { handleHybridExactHistoryOverride } from './routes/hybrid-exact-history-override'
 import { handleHybridHistoryOverride } from './routes/hybrid-history-override'
+import { scheduledCadenceDecision } from './scheduled-cadence'
 import { serializeCollectorStatus } from './serializers/collector-status'
 
 const COLLECTOR_STATUS_STALE_AFTER_SECONDS = 120
+
+async function runProtectedHeavyCycle(env: Bindings): Promise<void> {
+  const runtimeConfig = resolveRuntimeConfig(env)
+  await refreshNetworkStatus({ db: env.DB, config: runtimeConfig })
+
+  const catchUpConfig = resolveCatchUpRuntimeConfig(env)
+  if (catchUpConfig.initializationEnabled && catchUpConfig.base) {
+    await initializeCatchUpFromVerifiedBase({
+      db: env.DB,
+      base: catchUpConfig.base,
+      initializedAt: new Date().toISOString(),
+    })
+  }
+
+  const replacementBaseConfig = resolveReplacementBaseRuntimeConfig(env)
+  if (replacementBaseConfig.rebaseEnabled && replacementBaseConfig.target) {
+    await rebaseToReplacementBase({
+      db: env.DB,
+      target: replacementBaseConfig.target,
+      rebasedAt: new Date().toISOString(),
+    })
+  }
+
+  await runIncrementalCollectorCycle({
+    db: env.DB,
+    runtimeConfig,
+    incrementalConfig: resolveIncrementalRuntimeConfig(env),
+  })
+}
+
+async function runFastLaneCycle(env: Bindings): Promise<void> {
+  const runAt = new Date().toISOString()
+  const result = await runFastLaneShadowCycle({
+    db: env.DB,
+    runtimeConfig: resolveRuntimeConfig(env),
+    fastLaneConfig: resolveFastLaneShadowRuntimeConfig(env),
+  })
+  await saveFastLaneShadowRunMetric({ db: env.DB, runAt, result })
+  console.log(JSON.stringify({ event: 'fast_lane_shadow_cycle', runAt, ...result }))
+}
 
 const worker: ExportedHandler<Bindings> = {
   async fetch(request, env, executionContext) {
@@ -110,22 +154,28 @@ const worker: ExportedHandler<Bindings> = {
     if (hybridHistory) return hybridHistory
     return app.fetch(request, env, executionContext)
   },
-  async scheduled(_controller, env) {
-    const runtimeConfig = resolveRuntimeConfig(env)
-    await refreshNetworkStatus({ db: env.DB, config: runtimeConfig })
-    const catchUpConfig = resolveCatchUpRuntimeConfig(env)
-    if (catchUpConfig.initializationEnabled && catchUpConfig.base) {
-      await initializeCatchUpFromVerifiedBase({ db: env.DB, base: catchUpConfig.base, initializedAt: new Date().toISOString() })
+
+  async scheduled(controller, env) {
+    const decision = scheduledCadenceDecision(controller.scheduledTime)
+    let protectedError: unknown = null
+    let fastLaneError: unknown = null
+
+    if (decision.runProtectedHeavyCycle) {
+      try {
+        await runProtectedHeavyCycle(env)
+      } catch (error) {
+        protectedError = error
+      }
     }
-    const replacementBaseConfig = resolveReplacementBaseRuntimeConfig(env)
-    if (replacementBaseConfig.rebaseEnabled && replacementBaseConfig.target) {
-      await rebaseToReplacementBase({
-        db: env.DB,
-        target: replacementBaseConfig.target,
-        rebasedAt: new Date().toISOString(),
-      })
+
+    try {
+      await runFastLaneCycle(env)
+    } catch (error) {
+      fastLaneError = error
     }
-    await runIncrementalCollectorCycle({ db: env.DB, runtimeConfig, incrementalConfig: resolveIncrementalRuntimeConfig(env) })
+
+    if (protectedError) throw protectedError
+    if (fastLaneError) throw fastLaneError
   },
 }
 
