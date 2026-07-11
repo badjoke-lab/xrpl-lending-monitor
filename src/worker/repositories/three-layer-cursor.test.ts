@@ -31,6 +31,25 @@ const list: BaseOverlayListOptions = {
   scope: 'loan:id_asc::active:current:836000000',
 }
 
+function hexUtf8(value: string): string {
+  return Array.from(
+    new TextEncoder().encode(value),
+    (byte) => byte.toString(16).padStart(2, '0'),
+  ).join('')
+}
+
+function canonicalCursor(): string {
+  return hexUtf8(JSON.stringify({
+    v: 1,
+    snapshot: snapshot.id,
+    kind: 'loan',
+    direction: 'asc',
+    scope: list.scope,
+    page: 123,
+    offset: 45,
+  }))
+}
+
 function cursor(): ThreeLayerCursorState {
   return {
     v: 1,
@@ -38,7 +57,7 @@ function cursor(): ThreeLayerCursorState {
     kind: 'loan',
     direction: 'asc',
     scope: list.scope,
-    canonicalCursor: 'ab'.repeat(400),
+    canonicalCursor: canonicalCursor(),
     canonicalOffset: 37,
     canonicalDone: false,
     fastAfter: 'C'.repeat(64),
