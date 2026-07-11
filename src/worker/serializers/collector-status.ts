@@ -5,6 +5,8 @@ export function serializeCollectorStatus(options: {
   collector: IncrementalCollectorState | null
   sync: StoredSyncState | null
   staleAfterSeconds: number
+  expectedIntervalSeconds?: number
+  role?: string
   nowMs?: number
 }) {
   const collector = options.collector
@@ -30,6 +32,11 @@ export function serializeCollectorStatus(options: {
 
   return {
     network: 'devnet',
+    role: options.role ?? 'incremental_collector',
+    cadence: {
+      expected_interval_seconds: options.expectedIntervalSeconds ?? null,
+      stale_after_seconds: options.staleAfterSeconds,
+    },
     status,
     cursor: {
       epoch_id: sync?.epochId ?? null,
