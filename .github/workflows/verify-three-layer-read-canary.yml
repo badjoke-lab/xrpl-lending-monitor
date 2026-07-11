@@ -113,6 +113,18 @@ jobs:
           jq -e '.passed == true and .sampleSize > 0 and ((.counts.mismatch // 0) == 0) and ((.counts.unexpected_present // 0) == 0) and ((.counts.rpc_error // 0) == 0)' \
             three-layer-canary-evidence/exact-ledger-summary.json > /dev/null
 
+      - name: Capture candidate collection smoke responses
+        shell: bash
+        run: |
+          CANDIDATE_BASE="$(cat three-layer-canary-evidence/candidate-url.txt)"
+          for RESOURCE in vaults loan-brokers loans; do
+            STATUS="$(curl --silent --show-error \
+              --output "three-layer-canary-evidence/candidate-${RESOURCE}.json" \
+              --write-out '%{http_code}' \
+              "${CANDIDATE_BASE}/api/${RESOURCE}?limit=1&sort=id_asc")"
+            printf '%s\n' "${STATUS}" > "three-layer-canary-evidence/candidate-${RESOURCE}.status"
+          done
+
       - name: Compare production and candidate read paths
         shell: bash
         run: |
