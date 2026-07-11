@@ -167,10 +167,10 @@ export function readThreeLayerCursor(options: {
       direction: compact.d === 'a' ? 'asc' : 'desc',
       scope: compact.q,
       canonicalCursor: expandCanonicalCursor(compact.c),
-      canonicalOffset: compact.o,
+      canonicalOffset: Number(compact.o),
       canonicalDone: compact.x,
       fastAfter: compact.f,
-      fastOffset: compact.p,
+      fastOffset: Number(compact.p),
       fastDone: compact.y,
       fastToken: compact.t,
     }
