@@ -18,6 +18,7 @@ import type {
   CurrentLoanBrokerRecord,
 } from '../repositories/current-state-loan-broker-reader'
 import type { ListCurrentVaultsResult, VaultSort } from '../repositories/current-state-object-reader'
+import type { ThreeLayerOverviewWatermarks } from '../repositories/three-layer-overview-watermark'
 
 export type EntityCollectionKind = 'vaults' | 'loan_brokers' | 'loans'
 
@@ -188,6 +189,7 @@ export function serializeOverview(options: {
     overlayLedgerHash: string
     updatedAt: string
   } | null
+  watermarks?: ThreeLayerOverviewWatermarks | null
 }) {
   return {
     network: 'devnet',
@@ -201,6 +203,22 @@ export function serializeOverview(options: {
           updated_at: options.overlay.updatedAt,
         }
       : null,
+    current_state_watermark: options.watermarks
+      ? {
+          source: options.watermarks.currentState.source,
+          ledger_index: options.watermarks.currentState.ledgerIndex,
+          ledger_hash: options.watermarks.currentState.ledgerHash,
+          updated_at: options.watermarks.currentState.updatedAt,
+        }
+      : null,
+    counts_watermark: options.watermarks
+      ? {
+          source: options.watermarks.counts.source,
+          ledger_index: options.watermarks.counts.ledgerIndex,
+          ledger_hash: options.watermarks.counts.ledgerHash,
+          updated_at: options.watermarks.counts.updatedAt,
+        }
+      : null,
     freshness: {
       collector_status: options.state?.status ?? 'uninitialized',
       latest_validated_ledger: options.state?.latestObservedLedger ?? null,
@@ -210,6 +228,10 @@ export function serializeOverview(options: {
       overlay_ledger: options.overlay?.overlayLedgerIndex ?? null,
       overlay_hash: options.overlay?.overlayLedgerHash ?? null,
       overlay_updated_at: options.overlay?.updatedAt ?? null,
+      current_state_source: options.watermarks?.currentState.source ?? null,
+      current_state_ledger: options.watermarks?.currentState.ledgerIndex ?? null,
+      current_state_hash: options.watermarks?.currentState.ledgerHash ?? null,
+      current_state_updated_at: options.watermarks?.currentState.updatedAt ?? null,
     },
     counts: {
       vaults: options.snapshot?.vaultCount ?? null,
@@ -221,6 +243,8 @@ export function serializeOverview(options: {
       counts: options.snapshot ? 'direct' : 'unavailable',
       freshness: options.state ? 'direct' : 'unavailable',
       overlay_watermark: options.overlay ? 'direct' : 'unavailable',
+      current_state_watermark: options.watermarks ? 'direct' : 'unavailable',
+      counts_watermark: options.watermarks ? 'direct' : 'unavailable',
     },
     unavailable: options.snapshot ? [] : ['active current-state snapshot has not been activated'],
   }
