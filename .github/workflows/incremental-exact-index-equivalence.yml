@@ -21,7 +21,7 @@ jobs:
       - name: Check out implementation
         uses: actions/checkout@v4
 
-      - name: Check out active T1 history and exact index
+      - name: Check out active history and exact index
         uses: actions/checkout@v4
         with:
           ref: history-data
@@ -47,7 +47,7 @@ jobs:
           pnpm build:history-exact-index
           pnpm build:incremental-history-exact-index
 
-      - name: Preserve T1 publication and exact index base
+      - name: Preserve current publication and exact index base
         shell: bash
         run: |
           set -euo pipefail
@@ -55,9 +55,23 @@ jobs:
           mkdir -p "${ROOT}" .local/base-index
           cp .local/history-root/history/publication.json "${ROOT}/base-publication.json"
           cp -R .local/history-root/history/index/exact/. .local/base-index/
-          jq -e '.endLedgerIndex == 3539657 and .publicationSha256 == "71b5766984f7529a7691aa3851470c7706e2087ab03e2c6da30503df9109f8cd"' "${ROOT}/base-publication.json" > /dev/null
+          jq -e '
+            .complete == true
+            and .network == "devnet"
+            and .endLedgerIndex >= 3539657
+            and (.endLedgerHash | test("^[A-F0-9]{64}$"))
+            and (.publicationSha256 | test("^[a-f0-9]{64}$"))
+          ' "${ROOT}/base-publication.json" > /dev/null
+          jq -e --slurpfile publication "${ROOT}/base-publication.json" '
+            .network == "devnet"
+            and .epochId == $publication[0].epochId
+            and .chainId == $publication[0].chainId
+            and .publicationSha256 == $publication[0].publicationSha256
+            and .bucketCount == 256
+            and .totalRecords > 0
+          ' .local/base-index/manifest.json > /dev/null
 
-      - name: Freeze T1-plus-8 target and build extension plan
+      - name: Freeze current-base-plus-8 target and build extension plan
         shell: bash
         run: |
           set -euo pipefail

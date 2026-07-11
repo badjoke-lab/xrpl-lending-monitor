@@ -118,35 +118,45 @@ function mergeSortedRecords(
   return merged
 }
 
-async function loadBaseBuckets(options: {
+type ExactIndexAsset = HistoryExactIndexManifest['assets'][number]
+
+function assetsByBucket(manifest: HistoryExactIndexManifest): Map<number, ExactIndexAsset> {
+  const result = new Map<number, ExactIndexAsset>()
+  for (const asset of manifest.assets) {
+    if (result.has(asset.bucket)) throw new Error(`Duplicate base exact-index bucket: ${asset.bucket}`)
+    result.set(asset.bucket, asset)
+  }
+  for (let bucket = 0; bucket < manifest.bucketCount; bucket += 1) {
+    if (!result.has(bucket)) throw new Error(`Missing base exact-index bucket: ${bucket}`)
+  }
+  return result
+}
+
+async function loadBaseBucket(options: {
   manifest: HistoryExactIndexManifest
-  publication: HistorySegmentChainPublication
   indexDir: string
-}): Promise<HistoryExactIndexRecord[][]> {
-  assertHistoryExactIndexManifest(options.manifest, options.publication)
-  if (await historyExactIndexManifestDigest(options.manifest) !== options.manifest.manifestSha256) {
-    throw new Error('Base exact-index manifest digest mismatch')
+  asset: ExactIndexAsset
+}): Promise<HistoryExactIndexRecord[]> {
+  const path = join(options.indexDir, basename(options.asset.path))
+  const bytes = new Uint8Array(await readFile(path))
+  if (
+    bytes.byteLength !== options.asset.compressedBytes
+    || await sha256Hex(bytes) !== options.asset.sha256
+  ) throw new Error(`Base exact-index asset integrity mismatch: ${options.asset.path}`)
+
+  const decoded = await decodeGzipNdjsonWithMetadata({ bytes, sha256: options.asset.sha256 })
+  if (decoded.records.length !== options.asset.recordCount) {
+    throw new Error(`Base exact-index record count mismatch: ${options.asset.path}`)
   }
-  const buckets = Array.from({ length: options.manifest.bucketCount }, () => [] as HistoryExactIndexRecord[])
-  for (const asset of options.manifest.assets) {
-    const path = join(options.indexDir, basename(asset.path))
-    const bytes = new Uint8Array(await readFile(path))
-    if (bytes.byteLength !== asset.compressedBytes || await sha256Hex(bytes) !== asset.sha256) {
-      throw new Error(`Base exact-index asset integrity mismatch: ${asset.path}`)
+  const records = decoded.records as HistoryExactIndexRecord[]
+  for (const indexRecord of records) {
+    assertHistoryExactIndexRecord(indexRecord, options.manifest.bucketCount)
+    if (indexRecord.bucket !== options.asset.bucket) {
+      throw new Error(`Base exact-index bucket mismatch: ${options.asset.path}`)
     }
-    const decoded = await decodeGzipNdjsonWithMetadata({ bytes, sha256: asset.sha256 })
-    if (decoded.records.length !== asset.recordCount) {
-      throw new Error(`Base exact-index record count mismatch: ${asset.path}`)
-    }
-    const records = decoded.records as HistoryExactIndexRecord[]
-    for (const indexRecord of records) {
-      assertHistoryExactIndexRecord(indexRecord, options.manifest.bucketCount)
-      if (indexRecord.bucket !== asset.bucket) throw new Error(`Base exact-index bucket mismatch: ${asset.path}`)
-    }
-    assertSorted(records, `Base exact-index bucket ${asset.bucket}`)
-    buckets[asset.bucket] = records
   }
-  return buckets
+  assertSorted(records, `Base exact-index bucket ${options.asset.bucket}`)
+  return records
 }
 
 async function appendDeltaEntries(options: {
@@ -201,6 +211,10 @@ async function main(): Promise<void> {
   await assertHistorySegmentPublicationDigest(publication)
   await assertHistorySegmentPublicationDigest(basePublication)
   assertHistoryExtensionPlan(plan)
+  assertHistoryExactIndexManifest(baseManifest, basePublication)
+  if (await historyExactIndexManifestDigest(baseManifest) !== baseManifest.manifestSha256) {
+    throw new Error('Base exact-index manifest digest mismatch')
+  }
 
   if (
     plan.source.chainId !== basePublication.chainId
@@ -214,11 +228,7 @@ async function main(): Promise<void> {
     || plan.epochId !== publication.epochId
   ) throw new Error('Incremental exact-index plan target does not match target publication')
 
-  const baseBuckets = await loadBaseBuckets({
-    manifest: baseManifest,
-    publication: basePublication,
-    indexDir: options.baseIndexDir,
-  })
+  const baseAssets = assetsByBucket(baseManifest)
   const deltaBuckets = Array.from({ length: baseManifest.bucketCount }, () => [] as HistoryExactIndexRecord[])
   const baseRecords = baseManifest.totalRecords
   const addedRecords = await appendDeltaEntries({
@@ -233,7 +243,13 @@ async function main(): Promise<void> {
   const assets: HistoryExactIndexManifest['assets'] = []
   let totalRecords = 0
   for (let bucket = 0; bucket < baseManifest.bucketCount; bucket += 1) {
-    const records = mergeSortedRecords(baseBuckets[bucket]!, deltaBuckets[bucket]!)
+    const asset = baseAssets.get(bucket)!
+    const baseBucket = await loadBaseBucket({
+      manifest: baseManifest,
+      indexDir: options.baseIndexDir,
+      asset,
+    })
+    const records = mergeSortedRecords(baseBucket, deltaBuckets[bucket]!)
     for (const indexRecord of records) assertHistoryExactIndexRecord(indexRecord, baseManifest.bucketCount)
     const text = records.length ? `${records.map((entry) => canonicalJson(entry)).join('\n')}\n` : ''
     const bytes = await gzipDeterministic(utf8(text))
@@ -249,6 +265,7 @@ async function main(): Promise<void> {
       lastTerm: records.at(-1)?.term ?? null,
     })
     totalRecords += records.length
+    deltaBuckets[bucket] = []
   }
   if (totalRecords !== baseRecords + addedRecords) throw new Error('Incremental exact-index accounting mismatch')
 
