@@ -70,10 +70,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 async function fetchJson(url: string): Promise<HttpResult> {
-  const response = await fetch(url, {
-    headers: { accept: 'application/json' },
-    signal: AbortSignal.timeout(20_000),
-  })
+  let response: Response
+  try {
+    response = await fetch(url, {
+      headers: { accept: 'application/json' },
+      signal: AbortSignal.timeout(20_000),
+    })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    throw new Error(`Request failed for ${url}: ${message}`)
+  }
   const text = await response.text()
   let body: unknown = null
   if (text.length > 0) {
