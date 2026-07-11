@@ -9,9 +9,9 @@ import type {
   ListCurrentLoanBrokersResult,
 } from './d1-current-loan-broker-reader'
 import {
-  getResolvedCurrentProjection,
-  listResolvedCurrentProjections,
-} from './base-overlay-current-reader'
+  getThreeLayerCurrentProjection as getResolvedCurrentProjection,
+  listThreeLayerCurrentProjections as listResolvedCurrentProjections,
+} from './three-layer-current-reader'
 import { CurrentStateObjectReadError } from './current-state-read-error'
 import {
   isReleaseCurrentStateSource,
