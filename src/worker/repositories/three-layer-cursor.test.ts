@@ -38,7 +38,22 @@ function hexUtf8(value: string): string {
   ).join('')
 }
 
-function canonicalCursor(): string {
+function textFromHex(value: string): string {
+  const bytes = new Uint8Array(value.length / 2)
+  for (let index = 0; index < bytes.length; index += 1) {
+    bytes[index] = Number.parseInt(value.slice(index * 2, index * 2 + 2), 16)
+  }
+  return new TextDecoder().decode(bytes)
+}
+
+function encodeBase64Url(value: string): string {
+  const bytes = new TextEncoder().encode(value)
+  let binary = ''
+  for (const byte of bytes) binary += String.fromCharCode(byte)
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
+}
+
+function readModelCursor(): string {
   return hexUtf8(JSON.stringify({
     v: 1,
     snapshot: snapshot.id,
@@ -47,6 +62,22 @@ function canonicalCursor(): string {
     scope: list.scope,
     page: 123,
     offset: 45,
+  }))
+}
+
+function canonicalCursor(): string {
+  return hexUtf8(JSON.stringify({
+    v: 1,
+    snapshot: snapshot.id,
+    kind: 'loan',
+    direction: 'asc',
+    scope: list.scope,
+    baseCursor: readModelCursor(),
+    baseOffset: 0,
+    baseDone: false,
+    overlayAfter: 'D'.repeat(64),
+    overlayOffset: 12,
+    overlayDone: false,
   }))
 }
 
@@ -67,12 +98,39 @@ function cursor(): ThreeLayerCursorState {
   }
 }
 
+function legacyCursor(state: ThreeLayerCursorState): string {
+  return encodeBase64Url(JSON.stringify({
+    v: 1,
+    s: state.snapshot,
+    k: state.kind,
+    d: state.direction === 'asc' ? 'a' : 'z',
+    q: state.scope,
+    c: `j${textFromHex(state.canonicalCursor!)}`,
+    o: state.canonicalOffset,
+    x: state.canonicalDone,
+    f: state.fastAfter,
+    p: state.fastOffset,
+    y: state.fastDone,
+    t: state.fastToken,
+  }))
+}
+
 describe('three-layer cursor', () => {
-  it('round-trips a nested canonical cursor below the public cursor length guard', () => {
+  it('round-trips a real nested canonical and base cursor below the public length guard', () => {
     const value = encodeThreeLayerCursor(cursor())
     expect(value.length).toBeLessThanOrEqual(1024)
     expect(readThreeLayerCursor({
       value,
+      snapshot,
+      kind: 'loan',
+      list,
+      fastToken: cursor().fastToken,
+    })).toEqual(cursor())
+  })
+
+  it('continues to decode the previous one-level compact cursor format', () => {
+    expect(readThreeLayerCursor({
+      value: legacyCursor(cursor()),
       snapshot,
       kind: 'loan',
       list,
