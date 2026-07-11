@@ -38,7 +38,9 @@ jobs:
         run: bash -n scripts/check-d1-headroom.sh
 
       - name: Validate live cutover shell syntax
-        run: bash -n scripts/run-live-checkpoint-cutover.sh
+        run: |
+          bash -n scripts/run-live-checkpoint-cutover.sh
+          bash -n scripts/verify-live-checkpoint-cutover.sh
 
       - name: Type-check
         run: pnpm typecheck
