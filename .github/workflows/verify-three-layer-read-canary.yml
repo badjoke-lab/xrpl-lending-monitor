@@ -114,14 +114,17 @@ jobs:
             three-layer-canary-evidence/exact-ledger-summary.json > /dev/null
 
       - name: Compare production and candidate read paths
+        shell: bash
         run: |
+          set -o pipefail
           PRODUCTION_BASE="$(cat three-layer-canary-evidence/production-url.txt)"
           CANDIDATE_BASE="$(cat three-layer-canary-evidence/candidate-url.txt)"
           node .three-layer-read-canary-build/verify-three-layer-read-canary.mjs \
             --production-base "${PRODUCTION_BASE}" \
             --candidate-base "${CANDIDATE_BASE}" \
             --witnesses three-layer-canary-evidence/witnesses.json \
-            --output three-layer-canary-evidence/summary.json
+            --output three-layer-canary-evidence/summary.json \
+            2>&1 | tee three-layer-canary-evidence/compare.log
           jq -e '.passed == true and .witnessCount > 0 and .candidateFailureCount == 0 and .effectiveDifferences > 0' \
             three-layer-canary-evidence/summary.json > /dev/null
 
