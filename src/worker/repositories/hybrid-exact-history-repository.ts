@@ -1,10 +1,12 @@
 import type { SegmentProtocolEventRecord } from '../../collector/history-segments/build-segment-records'
 import type { NormalizedObjectChange } from '../../collector/incremental/affected-nodes'
+import type { ArchivedObjectRecord as SegmentArchivedObjectRecord } from '../../collector/incremental/deleted-object-archive'
 import type { LoanLifecycleEvent as SegmentLoanLifecycleEvent } from '../../collector/incremental/loan-lifecycle'
 import { normalizeHistoryExactTerm, type HistoryExactIndexReference } from '../../shared/history-segments/exact-index'
 import type { HistoryExactIndexReader } from '../../shared/history-segments/exact-index-reader'
 import type { HistorySegmentChainReader } from '../../shared/history-segments/reader'
 import type {
+  ArchivedObjectRecord,
   HistoryPageOptions,
   LoanLifecycleListOptions,
   LoanLifecycleRecord,
@@ -13,11 +15,13 @@ import type {
   SearchResultRecord,
 } from './history-api-repository'
 import {
+  segmentArchivedObjectToApi,
   segmentLoanLifecycleToApi,
   segmentObjectChangeToApi,
   segmentProtocolEventToApi,
 } from './history-segment-adapter'
 import {
+  listLiveArchivedObjectsAfterBoundary,
   listLiveLoanLifecycleAfterBoundary,
   listLiveLoanLifecycleEventsAfterBoundary,
   listLiveObjectHistoryAfterBoundary,
@@ -25,6 +29,7 @@ import {
 import { getLiveTransactionDetailAfterBoundary } from './live-transaction-detail-after-boundary'
 import { searchLiveHistoryAfterBoundary } from './live-search-after-boundary'
 import {
+  mergeArchivedObjects,
   mergeLoanLifecycleDetail,
   mergeLoanLifecycleExplorer,
   mergeObjectHistory,
@@ -208,6 +213,45 @@ export async function listHybridExactLoanLifecycleEvents(options: {
     boundaryLedgerIndex: options.reader.publication.endLedgerIndex,
     limit: options.list.limit,
   }).items
+}
+
+export async function getHybridExactArchivedObject(options: {
+  db: D1Database
+  reader: HistorySegmentChainReader
+  exactIndex: HistoryExactIndexReader
+  objectType: string
+  objectId: string
+}): Promise<ArchivedObjectRecord | null> {
+  const lookup = await options.exactIndex.find(options.objectId, {
+    limit: EXACT_DETAIL_MAX_RECORDS,
+    referenceKinds: ['archived_object'],
+    referencePredicate: (reference) =>
+      reference.searchResult?.objectType === options.objectType
+      && reference.searchResult.objectId === options.objectId,
+    direction: 'desc',
+  })
+  const transactionHashes = referencedTransactionHashes(lookup.references)
+  const immutable = lookup.references.length === 0 ? [] : (await options.reader.readReferenced<SegmentArchivedObjectRecord>({
+    references: references(lookup.references),
+    predicate: (archive) =>
+      archive.objectType === options.objectType
+      && archive.objectId === options.objectId
+      && transactionHashes.has(archive.deletionTransactionHash),
+    limit: EXACT_DETAIL_MAX_RECORDS,
+    direction: 'desc',
+    maxAssetReads: EXACT_DETAIL_MAX_ASSET_READS,
+  })).items.map(segmentArchivedObjectToApi)
+  const live = await listLiveArchivedObjectsAfterBoundary(
+    options.db,
+    options.reader.publication.endLedgerIndex,
+    { limit: EXACT_DETAIL_MAX_RECORDS, objectType: options.objectType, query: options.objectId },
+  )
+  return mergeArchivedObjects({
+    immutable,
+    live,
+    boundaryLedgerIndex: options.reader.publication.endLedgerIndex,
+    limit: EXACT_DETAIL_MAX_RECORDS,
+  }).items.find((archive) => archive.objectType === options.objectType && archive.objectId === options.objectId) ?? null
 }
 
 function compareSearch(left: SearchResultRecord, right: SearchResultRecord): number {
