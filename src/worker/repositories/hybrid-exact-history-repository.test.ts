@@ -4,6 +4,7 @@ import type { HistorySegmentChainReader } from '../../shared/history-segments/re
 import {
   getHybridTransactionDetail,
   listHybridExactLoanLifecycle,
+  listHybridExactLoanLifecycleEvents,
   listHybridExactObjectHistory,
   searchHybridHistory,
 } from './hybrid-exact-history-repository'
@@ -34,14 +35,15 @@ const immutableLifecycle = {
 function reader(): HistorySegmentChainReader {
   return {
     publication: { epochId: 'epoch-1', endLedgerIndex: 105 },
-    async readReferenced<T>(options: { references: { fileKind: string }[] }) {
+    async readReferenced<T>(options: { references: { fileKind: string }[]; predicate?: (value: unknown) => boolean }) {
       const fileKind = options.references[0]?.fileKind
       const item = fileKind === 'protocol_events'
         ? immutableEvent
         : fileKind === 'loan_lifecycle'
           ? immutableLifecycle
           : immutableChange
-      return { items: [item] as T[], assetReads: 1, compressedBytes: 100, decompressedBytes: 200, recordsExamined: 1 }
+      const items = options.predicate && !options.predicate(item) ? [] : [item]
+      return { items: items as T[], assetReads: 1, compressedBytes: 100, decompressedBytes: 200, recordsExamined: 1 }
     },
   } as unknown as HistorySegmentChainReader
 }
@@ -151,6 +153,23 @@ describe('hybrid exact history repository', () => {
     })
     expect(result.map((event) => event.ledgerIndex)).toEqual([105, 106])
     expect(result.every((event) => event.loanId === 'LOAN1')).toBe(true)
+  })
+
+  it('merges a filtered exact lifecycle explorer newest first', async () => {
+    const result = await listHybridExactLoanLifecycleEvents({
+      db: db(), reader: reader(), exactIndex: exactIndex(),
+      list: { limit: 25, loanId: 'LOAN1', eventType: 'payment' },
+    })
+    expect(result.map((event) => event.ledgerIndex)).toEqual([106, 105])
+    expect(result.every((event) => event.loanId === 'LOAN1' && event.eventType === 'payment')).toBe(true)
+  })
+
+  it('filters immutable lifecycle events before Explorer merge', async () => {
+    const result = await listHybridExactLoanLifecycleEvents({
+      db: db(), reader: reader(), exactIndex: exactIndex(),
+      list: { limit: 25, loanId: 'LOAN1', eventType: 'created' },
+    })
+    expect(result).toEqual([])
   })
 
   it('merges live and immutable search results newest first', async () => {
