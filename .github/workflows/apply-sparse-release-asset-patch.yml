@@ -1,0 +1,41 @@
+name: Apply sparse release asset patch
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/apply-sparse-release-asset-patch.yml'
+      - 'src/shared/current-state/release-native-sparse-kind.test.ts'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+      - name: Apply exact reader patch
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/shared/current-state/release-native-reader.ts')
+          source = path.read_text()
+          old = """    for (let assetIndex = cursor.asset; assetIndex >= 0 && assetIndex < this.manifest.dataAssets.length; assetIndex += step) {\n      const loaded = await this.#data(this.manifest.dataAssets[assetIndex]!)\n"""
+          new = """    for (let assetIndex = cursor.asset; assetIndex >= 0 && assetIndex < this.manifest.dataAssets.length; assetIndex += step) {\n      const asset = this.manifest.dataAssets[assetIndex]!\n      const kindCount = kindValue === 'vault'\n        ? asset.counts.vaults\n        : kindValue === 'loan-broker'\n          ? asset.counts.loanBrokers\n          : asset.counts.loans\n      if (kindCount === 0) continue\n      const loaded = await this.#data(asset)\n"""
+          if source.count(old) != 1:
+              raise SystemExit(f'expected exact patch target once, found {source.count(old)}')
+          path.write_text(source.replace(old, new))
+          PY
+      - name: Remove temporary workflow and commit patch
+        run: |
+          git rm .github/workflows/apply-sparse-release-asset-patch.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/shared/current-state/release-native-reader.ts
+          git commit -m "perf: skip zero-kind release data assets"
+          git push origin HEAD:${{ github.head_ref }}
