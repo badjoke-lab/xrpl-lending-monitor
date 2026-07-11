@@ -12,6 +12,13 @@ on:
       - 'src/collector/incremental/fast-lane-shadow-plan.ts'
       - 'src/worker/repositories/fast-lane-shadow-repository.ts'
       - 'vite.fast-lane-shadow-canary.config.ts'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/fast-lane-shadow-write-canary.yml'
+      - 'scripts/build-fast-lane-shadow-canary.ts'
+      - 'vite.fast-lane-shadow-canary.config.ts'
   workflow_dispatch:
 
 permissions:
