@@ -1,0 +1,150 @@
+name: Deploy fast lane shadow worker
+
+on:
+  push:
+    branches:
+      - ops/deploy-fast-lane-shadow-worker
+    paths:
+      - '.github/workflows/deploy-fast-lane-shadow-worker.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+concurrency:
+  group: deploy-fast-lane-shadow-worker
+  cancel-in-progress: false
+
+jobs:
+  deploy-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Create evidence directory
+        run: mkdir -p fast-lane-shadow-deploy-evidence
+
+      - name: Apply pending remote D1 migrations
+        run: pnpm exec wrangler d1 migrations apply xrpl-lending-monitor --remote | tee fast-lane-shadow-deploy-evidence/migrations.txt
+
+      - name: Reset isolated shadow runtime state before first scheduled cycle
+        shell: bash
+        run: |
+          cat > /tmp/reset-fast-lane-shadow.sql <<'SQL'
+          DELETE FROM fast_lane_shadow_commit_guards;
+          DELETE FROM fast_lane_shadow_windows;
+          DELETE FROM fast_lane_shadow_objects_compact;
+          DELETE FROM fast_lane_shadow_state;
+          SQL
+          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote \
+            --file /tmp/reset-fast-lane-shadow.sql \
+            --json > fast-lane-shadow-deploy-evidence/reset.json
+
+      - name: Validate dedicated Worker config
+        run: pnpm exec wrangler deploy --config wrangler.fast-lane-shadow.jsonc --dry-run
+
+      - name: Deploy dedicated five-minute shadow Worker
+        run: |
+          DEPLOYED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          printf '%s\n' "${DEPLOYED_AT}" > fast-lane-shadow-deploy-evidence/deployed-at.txt
+          pnpm exec wrangler deploy --config wrangler.fast-lane-shadow.jsonc | tee fast-lane-shadow-deploy-evidence/deploy.txt
+
+      - name: Resolve Worker URL
+        shell: bash
+        run: |
+          curl --fail-with-body --silent --show-error --retry 3 \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/subdomain" \
+            > fast-lane-shadow-deploy-evidence/subdomain.json
+          SUBDOMAIN="$(jq -r '.result.subdomain // empty' fast-lane-shadow-deploy-evidence/subdomain.json)"
+          test -n "${SUBDOMAIN}"
+          BASE="https://xrpl-lending-fast-lane-shadow.${SUBDOMAIN}.workers.dev"
+          printf '%s\n' "${BASE}" > fast-lane-shadow-deploy-evidence/base-url.txt
+          curl --fail-with-body --silent --show-error --retry 3 \
+            "${BASE}/status" > fast-lane-shadow-deploy-evidence/status-before.json
+
+      - name: Wait for first five-minute scheduled cycle
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE="$(cat fast-lane-shadow-deploy-evidence/base-url.txt)"
+          DEPLOYED_AT="$(cat fast-lane-shadow-deploy-evidence/deployed-at.txt)"
+          DEPLOYED_MS="$(node -e 'process.stdout.write(String(Date.parse(process.argv[1])))' "${DEPLOYED_AT}")"
+
+          for ATTEMPT in $(seq 1 20); do
+            curl --fail-with-body --silent --show-error --retry 3 \
+              "${BASE}/status" > fast-lane-shadow-deploy-evidence/status-latest.json
+            UPDATED_AT="$(jq -r '.state.updated_at // empty' fast-lane-shadow-deploy-evidence/status-latest.json)"
+            UPDATED_MS="$(node -e 'const v=Date.parse(process.argv[1]||""); process.stdout.write(Number.isFinite(v)?String(v):"0")' "${UPDATED_AT}")"
+            LAST_LEDGER="$(jq -r '.state.last_processed_ledger // 0' fast-lane-shadow-deploy-evidence/status-latest.json)"
+            if [ "${UPDATED_MS}" -gt "${DEPLOYED_MS}" ] && [ "${LAST_LEDGER}" -gt 0 ]; then
+              cp fast-lane-shadow-deploy-evidence/status-latest.json fast-lane-shadow-deploy-evidence/status-first.json
+              break
+            fi
+            sleep 30
+          done
+
+          test -f fast-lane-shadow-deploy-evidence/status-first.json
+
+      - name: Wait for second scheduled cycle and cursor advance
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE="$(cat fast-lane-shadow-deploy-evidence/base-url.txt)"
+          FIRST_UPDATED="$(jq -r '.state.updated_at' fast-lane-shadow-deploy-evidence/status-first.json)"
+          FIRST_UPDATED_MS="$(node -e 'process.stdout.write(String(Date.parse(process.argv[1])))' "${FIRST_UPDATED}")"
+          FIRST_LEDGER="$(jq -r '.state.last_processed_ledger' fast-lane-shadow-deploy-evidence/status-first.json)"
+
+          for ATTEMPT in $(seq 1 20); do
+            sleep 30
+            curl --fail-with-body --silent --show-error --retry 3 \
+              "${BASE}/status" > fast-lane-shadow-deploy-evidence/status-latest.json
+            UPDATED_AT="$(jq -r '.state.updated_at // empty' fast-lane-shadow-deploy-evidence/status-latest.json)"
+            UPDATED_MS="$(node -e 'const v=Date.parse(process.argv[1]||""); process.stdout.write(Number.isFinite(v)?String(v):"0")' "${UPDATED_AT}")"
+            LAST_LEDGER="$(jq -r '.state.last_processed_ledger // 0' fast-lane-shadow-deploy-evidence/status-latest.json)"
+            if [ "${UPDATED_MS}" -gt "${FIRST_UPDATED_MS}" ] && [ "${LAST_LEDGER}" -gt "${FIRST_LEDGER}" ]; then
+              cp fast-lane-shadow-deploy-evidence/status-latest.json fast-lane-shadow-deploy-evidence/status-second.json
+              break
+            fi
+          done
+
+          test -f fast-lane-shadow-deploy-evidence/status-second.json
+
+      - name: Build retained deployment summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          FIRST_LEDGER="$(jq -r '.state.last_processed_ledger' fast-lane-shadow-deploy-evidence/status-first.json)"
+          SECOND_LEDGER="$(jq -r '.state.last_processed_ledger' fast-lane-shadow-deploy-evidence/status-second.json)"
+          FIRST_UPDATED="$(jq -r '.state.updated_at' fast-lane-shadow-deploy-evidence/status-first.json)"
+          SECOND_UPDATED="$(jq -r '.state.updated_at' fast-lane-shadow-deploy-evidence/status-second.json)"
+          GAP_SECONDS="$(node -e 'process.stdout.write(String((Date.parse(process.argv[2])-Date.parse(process.argv[1]))/1000))' "${FIRST_UPDATED}" "${SECOND_UPDATED}")"
+          jq -n \
+            --argjson first_ledger "${FIRST_LEDGER}" \
+            --argjson second_ledger "${SECOND_LEDGER}" \
+            --arg first_updated_at "${FIRST_UPDATED}" \
+            --arg second_updated_at "${SECOND_UPDATED}" \
+            --argjson observed_gap_seconds "${GAP_SECONDS}" \
+            '{schemaVersion:1,passed:true,first_ledger:$first_ledger,second_ledger:$second_ledger,ledger_advance:($second_ledger-$first_ledger),first_updated_at:$first_updated_at,second_updated_at:$second_updated_at,observed_gap_seconds:$observed_gap_seconds}' \
+            > fast-lane-shadow-deploy-evidence/summary.json
+          cat fast-lane-shadow-deploy-evidence/summary.json
+
+      - name: Upload retained deployment evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: fast-lane-shadow-worker-deploy-evidence
+          path: fast-lane-shadow-deploy-evidence
+          if-no-files-found: warn
+          retention-days: 14
