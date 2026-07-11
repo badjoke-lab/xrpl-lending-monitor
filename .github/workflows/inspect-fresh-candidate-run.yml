@@ -1,0 +1,43 @@
+name: Inspect fresh candidate child run
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/inspect-fresh-candidate-run.yml'
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Capture latest dispatched candidate runs
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=fresh-candidate-run-inspection
+          mkdir -p "${ROOT}"
+          gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/rolling-checkpoint-candidate.yml/runs?event=workflow_dispatch&per_page=20" \
+            > "${ROOT}/runs.json"
+          jq '[.workflow_runs[] | {id,status,conclusion,created_at,updated_at,head_sha,html_url}]' \
+            "${ROOT}/runs.json" > "${ROOT}/runs-summary.json"
+          LATEST_ID="$(jq -r '.workflow_runs | sort_by(.created_at) | reverse | .[0].id' "${ROOT}/runs.json")"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${LATEST_ID}/jobs?per_page=100" \
+            > "${ROOT}/latest-jobs.json"
+          jq -n --argjson latestRunId "${LATEST_ID}" --slurpfile runs "${ROOT}/runs-summary.json" --slurpfile jobs "${ROOT}/latest-jobs.json" \
+            '{latestRunId:$latestRunId,runs:$runs[0],jobs:$jobs[0].jobs}' > "${ROOT}/summary.json"
+          cat "${ROOT}/summary.json"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fresh-candidate-run-inspection
+          path: fresh-candidate-run-inspection
+          retention-days: 7
