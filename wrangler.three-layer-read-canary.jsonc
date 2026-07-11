@@ -1,0 +1,73 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "xrpl-lending-three-layer-read-canary",
+  "main": "src/worker/entry.ts",
+  "compatibility_date": "2026-07-01",
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "xrpl-lending-monitor",
+      "database_id": "bebc2c68-03d2-4a1c-98a7-46b34ee4e25d",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "vars": {
+    "APP_NETWORK": "devnet",
+    "MAINNET_ENABLED": "false",
+    "XRPL_DEVNET_RPC_URL": "https://devnet.honeycluster.io/",
+    "XRPL_DEVNET_RPC_FALLBACK_URL": "https://s.devnet.rippletest.net:51234/",
+    "XRPL_RPC_TIMEOUT_MS": "8000",
+    "NETWORK_STATUS_STALE_AFTER_SECONDS": "600",
+    "CURRENT_STATE_GITHUB_REPOSITORY": "badjoke-lab/xrpl-lending-monitor",
+    "CURRENT_STATE_GITHUB_BRANCH": "current-state-data",
+    "CURRENT_STATE_REPLACEMENT_SNAPSHOT_ID": "devnet-3540657-de23e44e0906",
+    "CURRENT_STATE_REPLACEMENT_GITHUB_BRANCH": "current-state-data",
+    "CURRENT_STATE_RELEASE_CHANNEL_TAG": "current-state-channel",
+    "CURRENT_STATE_MAX_ASSET_BYTES": "33554432",
+    "CURRENT_STATE_MAX_DECOMPRESSED_BYTES": "100663296",
+    "HISTORY_GITHUB_REPOSITORY": "badjoke-lab/xrpl-lending-monitor",
+    "HISTORY_GITHUB_BRANCH": "history-data",
+    "HISTORY_CHANNEL_PATH": "history-channel.json",
+    "HISTORY_MAX_ASSET_BYTES": "33554432",
+    "HISTORY_FETCH_TIMEOUT_MS": "8000",
+    "CATCH_UP_INITIALIZATION_ENABLED": "false",
+    "CATCH_UP_BASE_EPOCH_ID": "devnet-3371675",
+    "CATCH_UP_BASE_SNAPSHOT_ID": "devnet-3371675-0ba2ed766c19",
+    "CATCH_UP_BASE_LEDGER_INDEX": "3371675",
+    "CATCH_UP_BASE_LEDGER_HASH": "0BA2ED766C190C733F8F26288785CBDF01D0FC26E1A6C03EDB7E9DFF6F8BCB90",
+    "REPLACEMENT_BASE_REBASE_ENABLED": "true",
+    "REPLACEMENT_BASE_EPOCH_ID": "devnet-3371675",
+    "REPLACEMENT_BASE_SNAPSHOT_ID": "devnet-3540657-de23e44e0906",
+    "REPLACEMENT_BASE_LEDGER_INDEX": "3540657",
+    "REPLACEMENT_BASE_LEDGER_HASH": "DE23E44E0906D0D664D58152FEF8D42C43E581CA431A96F9E3AD0B83531ED835",
+    "INCREMENTAL_LEDGER_TRANSPORT": "websocket",
+    "INCREMENTAL_WEBSOCKET_ENDPOINT": "wss://s.devnet.rippletest.net:51233/",
+    "INCREMENTAL_WEBSOCKET_READ_WINDOW": "4",
+    "INCREMENTAL_MAX_LEDGERS_PER_RUN": "32",
+    "INCREMENTAL_MAX_LEDGER_RPC_REQUESTS_PER_RUN": "40",
+    "INCREMENTAL_MAX_TRANSACTIONS_PER_LEDGER": "5000",
+    "INCREMENTAL_MAX_INSPECTED_TRANSACTIONS_PER_RUN": "10000",
+    "INCREMENTAL_MAX_LENDING_TRANSACTIONS_PER_RUN": "250",
+    "INCREMENTAL_MAX_STATEMENTS_PER_RUN": "512",
+    "INCREMENTAL_MAX_ROWS_PER_RUN": "512",
+    "INCREMENTAL_MAX_OVERLAY_MUTATIONS_PER_RUN": "48",
+    "INCREMENTAL_MAX_RETRIES_PER_ENDPOINT": "1",
+    "INCREMENTAL_EXECUTION_BUDGET_MS": "8000",
+    "INCREMENTAL_DEADLINE_MARGIN_MS": "1000",
+    "INCREMENTAL_RETAIN_PAYLOADS": "false",
+    "FAST_LANE_WEBSOCKET_ENDPOINT": "wss://s.devnet.rippletest.net:51233/",
+    "FAST_LANE_BOOTSTRAP_LEDGERS": "90",
+    "FAST_LANE_MAX_LEDGERS_PER_RUN": "180",
+    "FAST_LANE_REANCHOR_LAG_LEDGERS": "720",
+    "FAST_LANE_READ_WINDOW": "8"
+  },
+  "observability": {
+    "enabled": true
+  }
+}
