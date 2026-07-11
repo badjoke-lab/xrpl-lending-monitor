@@ -1,0 +1,199 @@
+name: Run history catch-up cycle
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/run-history-catchup-cycle.yml'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: history-catchup-cycle-20260711
+  cancel-in-progress: false
+
+jobs:
+  dispatch-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_HISTORY_BRANCH: history-rolling-next-candidate-data
+      SOURCE_CURRENT_BRANCH: current-state-rolling-next-candidate-data
+      OUTPUT_HISTORY_BRANCH: history-rolling-recovery-b-data
+      OUTPUT_CURRENT_BRANCH: current-state-rolling-recovery-b-data
+      MAX_DELTA_LEDGERS: '5000'
+      SEGMENT_LEDGERS: '500'
+      READ_WINDOW_SIZE: '4'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify aligned source pair
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p history-catchup-cycle
+
+          gh api --method GET \
+            "repos/${GITHUB_REPOSITORY}/contents/history/publication.json" \
+            -f ref="${SOURCE_HISTORY_BRANCH}" \
+            --jq '.content' | tr -d '\n' | base64 --decode \
+            > history-catchup-cycle/source-publication.json
+
+          gh api --method GET \
+            "repos/${GITHUB_REPOSITORY}/contents/read-model/manifest.json" \
+            -f ref="${SOURCE_CURRENT_BRANCH}" \
+            --jq '.content' | tr -d '\n' | base64 --decode \
+            > history-catchup-cycle/source-current-manifest.json
+
+          SOURCE_LEDGER="$(jq -r '.endLedgerIndex' history-catchup-cycle/source-publication.json)"
+          SOURCE_HASH="$(jq -r '.endLedgerHash' history-catchup-cycle/source-publication.json)"
+          CURRENT_LEDGER="$(jq -r '.ledgerIndex' history-catchup-cycle/source-current-manifest.json)"
+          CURRENT_HASH="$(jq -r '.ledgerHash' history-catchup-cycle/source-current-manifest.json)"
+
+          test "${SOURCE_LEDGER}" = "${CURRENT_LEDGER}"
+          test "${SOURCE_HASH}" = "${CURRENT_HASH}"
+          test "${SOURCE_LEDGER}" = "3540657"
+          printf '%s\n' "${SOURCE_LEDGER}" > history-catchup-cycle/source-ledger.txt
+          printf '%s\n' "${SOURCE_HASH}" > history-catchup-cycle/source-hash.txt
+
+      - name: Capture existing candidate workflow runs
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/rolling-checkpoint-candidate.yml/runs?event=workflow_dispatch&per_page=100" \
+            --jq '.workflow_runs[].id' \
+            > history-catchup-cycle/run-ids-before.txt
+
+      - name: Dispatch 5000-ledger rolling candidate cycle
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -n \
+            --arg ref main \
+            --arg sourceHistory "${SOURCE_HISTORY_BRANCH}" \
+            --arg sourceCurrent "${SOURCE_CURRENT_BRANCH}" \
+            --arg outputHistory "${OUTPUT_HISTORY_BRANCH}" \
+            --arg outputCurrent "${OUTPUT_CURRENT_BRANCH}" \
+            --arg maxDelta "${MAX_DELTA_LEDGERS}" \
+            --arg segment "${SEGMENT_LEDGERS}" \
+            --arg window "${READ_WINDOW_SIZE}" \
+            '{
+              ref:$ref,
+              inputs:{
+                source_history_branch:$sourceHistory,
+                source_current_state_branch:$sourceCurrent,
+                history_candidate_branch:$outputHistory,
+                current_state_candidate_branch:$outputCurrent,
+                max_delta_ledgers:$maxDelta,
+                segment_ledgers:$segment,
+                read_window_size:$window
+              }
+            }' > history-catchup-cycle/dispatch.json
+
+          gh api --method POST \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/rolling-checkpoint-candidate.yml/dispatches" \
+            --input history-catchup-cycle/dispatch.json
+
+      - name: Resolve dispatched run
+        shell: bash
+        run: |
+          set -euo pipefail
+          RUN_ID=''
+          for ATTEMPT in $(seq 1 60); do
+            gh api \
+              "repos/${GITHUB_REPOSITORY}/actions/workflows/rolling-checkpoint-candidate.yml/runs?event=workflow_dispatch&per_page=100" \
+              > history-catchup-cycle/runs-after.json
+            while IFS= read -r CANDIDATE_ID; do
+              if ! grep -Fxq "${CANDIDATE_ID}" history-catchup-cycle/run-ids-before.txt; then
+                RUN_ID="${CANDIDATE_ID}"
+                break
+              fi
+            done < <(jq -r '.workflow_runs | sort_by(.created_at) | reverse | .[].id' history-catchup-cycle/runs-after.json)
+            if [ -n "${RUN_ID}" ]; then break; fi
+            sleep 10
+          done
+          test -n "${RUN_ID}"
+          printf '%s\n' "${RUN_ID}" | tee history-catchup-cycle/run-id.txt
+          echo "CANDIDATE_RUN_ID=${RUN_ID}" >> "${GITHUB_ENV}"
+
+      - name: Wait for rolling candidate completion
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh run watch "${CANDIDATE_RUN_ID}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --interval 30 \
+            --exit-status
+
+      - name: Verify aligned advanced output pair
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api --method GET \
+            "repos/${GITHUB_REPOSITORY}/contents/history/publication.json" \
+            -f ref="${OUTPUT_HISTORY_BRANCH}" \
+            --jq '.content' | tr -d '\n' | base64 --decode \
+            > history-catchup-cycle/output-publication.json
+
+          gh api --method GET \
+            "repos/${GITHUB_REPOSITORY}/contents/read-model/manifest.json" \
+            -f ref="${OUTPUT_CURRENT_BRANCH}" \
+            --jq '.content' | tr -d '\n' | base64 --decode \
+            > history-catchup-cycle/output-current-manifest.json
+
+          SOURCE_LEDGER="$(cat history-catchup-cycle/source-ledger.txt)"
+          OUTPUT_LEDGER="$(jq -r '.endLedgerIndex' history-catchup-cycle/output-publication.json)"
+          OUTPUT_HASH="$(jq -r '.endLedgerHash' history-catchup-cycle/output-publication.json)"
+          CURRENT_LEDGER="$(jq -r '.ledgerIndex' history-catchup-cycle/output-current-manifest.json)"
+          CURRENT_HASH="$(jq -r '.ledgerHash' history-catchup-cycle/output-current-manifest.json)"
+
+          test "${OUTPUT_LEDGER}" -gt "${SOURCE_LEDGER}"
+          test "${OUTPUT_LEDGER}" -le "$((SOURCE_LEDGER + MAX_DELTA_LEDGERS))"
+          test "${OUTPUT_LEDGER}" = "${CURRENT_LEDGER}"
+          test "${OUTPUT_HASH}" = "${CURRENT_HASH}"
+
+          jq -n '{method:"ledger",params:[{ledger_index:"validated",transactions:false,expand:false}]}' \
+            > history-catchup-cycle/live-head-request.json
+          curl --fail-with-body --silent --show-error --retry 3 \
+            -H 'content-type: application/json' \
+            --data @history-catchup-cycle/live-head-request.json \
+            https://devnet.honeycluster.io/ \
+            > history-catchup-cycle/live-head-response.json
+          LIVE_LEDGER="$(jq -r '.result.ledger_index // .result.ledger.ledger_index' history-catchup-cycle/live-head-response.json)"
+          LAG="$((LIVE_LEDGER - OUTPUT_LEDGER))"
+          if [ "${LAG}" -lt 0 ]; then LAG=0; fi
+
+          jq -n \
+            --arg sourceHistoryBranch "${SOURCE_HISTORY_BRANCH}" \
+            --arg sourceCurrentBranch "${SOURCE_CURRENT_BRANCH}" \
+            --arg outputHistoryBranch "${OUTPUT_HISTORY_BRANCH}" \
+            --arg outputCurrentBranch "${OUTPUT_CURRENT_BRANCH}" \
+            --argjson runId "${CANDIDATE_RUN_ID}" \
+            --argjson sourceLedger "${SOURCE_LEDGER}" \
+            --argjson outputLedger "${OUTPUT_LEDGER}" \
+            --arg outputHash "${OUTPUT_HASH}" \
+            --argjson liveLedger "${LIVE_LEDGER}" \
+            --argjson remainingLagLedgers "${LAG}" \
+            '{
+              passed:true,
+              candidateRunId:$runId,
+              source:{historyBranch:$sourceHistoryBranch,currentStateBranch:$sourceCurrentBranch,ledgerIndex:$sourceLedger},
+              output:{historyBranch:$outputHistoryBranch,currentStateBranch:$outputCurrentBranch,ledgerIndex:$outputLedger,ledgerHash:$outputHash},
+              live:{ledgerIndex:$liveLedger,remainingLagLedgers:$remainingLagLedgers}
+            }' > history-catchup-cycle/summary.json
+
+          cat history-catchup-cycle/summary.json
+
+      - name: Upload catch-up cycle evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: history-catchup-cycle-1
+          path: history-catchup-cycle
+          if-no-files-found: warn
+          retention-days: 30
