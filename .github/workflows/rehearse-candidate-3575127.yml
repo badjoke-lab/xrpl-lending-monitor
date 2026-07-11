@@ -1,0 +1,59 @@
+name: Rehearse candidate 3575127
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/rehearse-candidate-3575127.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rehearse:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build:candidate-source-rehearsal
+
+      - name: Run rehearsal and retain stdout/stderr
+        shell: bash
+        run: |
+          set -uo pipefail
+          ROOT=candidate-3575127-rehearsal
+          mkdir -p "${ROOT}"
+          set +e
+          node .candidate-source-rehearsal-build/rehearse-candidate-sources.mjs \
+            --local \
+            --repository badjoke-lab/xrpl-lending-monitor \
+            --history-branch history-rolling-recovery-b-data \
+            --current-state-branch current-state-rolling-recovery-b-data \
+            > "${ROOT}/stdout.json" \
+            2> "${ROOT}/stderr.txt"
+          EXIT_CODE=$?
+          set -e
+          printf '%s\n' "${EXIT_CODE}" > "${ROOT}/exit-code.txt"
+          jq -n \
+            --argjson exitCode "${EXIT_CODE}" \
+            --arg stdoutBytes "$(wc -c < "${ROOT}/stdout.json")" \
+            --arg stderrBytes "$(wc -c < "${ROOT}/stderr.txt")" \
+            '{exitCode:$exitCode,stdoutBytes:($stdoutBytes|tonumber),stderrBytes:($stderrBytes|tonumber)}' \
+            > "${ROOT}/summary.json"
+          cat "${ROOT}/summary.json"
+          cat "${ROOT}/stderr.txt" >&2 || true
+
+      - name: Upload rehearsal diagnostics
+        uses: actions/upload-artifact@v4
+        with:
+          name: candidate-3575127-rehearsal
+          path: candidate-3575127-rehearsal
+          if-no-files-found: error
+          retention-days: 7
