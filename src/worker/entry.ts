@@ -25,7 +25,8 @@ import { handleThreeLayerOverview } from './routes/three-layer-overview'
 import { scheduledCadenceDecision } from './scheduled-cadence'
 import { serializeCollectorStatus } from './serializers/collector-status'
 
-const COLLECTOR_STATUS_STALE_AFTER_SECONDS = 120
+const PROTECTED_HEAVY_INTERVAL_SECONDS = 4 * 60 * 60
+const PROTECTED_HEAVY_STATUS_STALE_AFTER_SECONDS = 5 * 60 * 60
 
 async function runProtectedHeavyCycle(env: Bindings): Promise<void> {
   const runtimeConfig = resolveRuntimeConfig(env)
@@ -103,7 +104,12 @@ const worker: ExportedHandler<Bindings> = {
       return Response.json(serializeCollectorStatus({
         collector,
         sync,
-        staleAfterSeconds: Math.max(runtimeConfig.staleAfterSeconds, COLLECTOR_STATUS_STALE_AFTER_SECONDS),
+        role: 'canonical_overlay_refresh',
+        expectedIntervalSeconds: PROTECTED_HEAVY_INTERVAL_SECONDS,
+        staleAfterSeconds: Math.max(
+          runtimeConfig.staleAfterSeconds,
+          PROTECTED_HEAVY_STATUS_STALE_AFTER_SECONDS,
+        ),
       }))
     }
     if (request.method === 'GET' && url.pathname === '/api/status/fast-lane-diff') {
