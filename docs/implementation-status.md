@@ -1,164 +1,194 @@
 # Implementation status
 
-Last updated: 2026-07-11 18:00 JST.
+Last updated: 2026-07-11, after the live XRPL Devnet source audit.
 
 ## Current phase
 
-XRPL Lending Monitor is publicly operating on XRPL Devnet and is in its first bounded 24-hour production soak.
+XRPL Lending Monitor remains publicly reachable on XRPL Devnet, but public-release acceptance is withdrawn.
 
-Public-release acceptance followed passing production API, shared-cron/runtime, exact-ledger, cron-free canary, and real Chromium browser gates. Mainnet remains disabled.
+The project is now in:
 
-The active operational unit is:
+> Current-state continuity recovery and immutable-history rolling catch-up.
 
-> Public Devnet operation from 2026-07-11 18:00 JST, with soak through 2026-07-12 18:00 JST and final reconciliation at approximately 18:17 JST.
+Mainnet remains disabled.
 
-This status supersedes earlier T5-2 and M5-5 blocked entries.
+The previous statement that the first 24-hour production soak was active and healthy is superseded by the live-source audit described below.
 
-## Production runtime
+## Confirmed live-source audit result
 
-Production has exactly one Worker schedule:
+At approximately `2026-07-11T12:27Z`, the public API was compared in one run with both configured XRPL Devnet RPC sources and with direct ledger, ledger-entry, and transaction lookups.
+
+Source heads:
+
+- Honeycluster: ledger `3,569,175`;
+- Ripple Devnet: ledger `3,569,176`;
+- source spread: `1` ledger.
+
+### Five-minute current-state layer
+
+At the audit instant:
+
+- public fast-lane watermark: ledger `3,569,165`;
+- live XRPL source head: ledger `3,569,176`;
+- lag: `11` ledgers;
+- watermark age: `41` seconds;
+- watermark ledger hash: exact match with XRPL;
+- sampled objects: three Vaults, three Loan Brokers, and three Loans;
+- all nine sampled objects existed in the live validated ledger and matched substantively.
+
+Therefore the current-state list/detail path was fresh at the audit instant.
+
+However, continuity failed during the preceding period:
+
+- previous run: `2026-07-11T11:20:55Z`;
+- next run: `2026-07-11T12:10:57Z`;
+- observed gap: `3,002` seconds, approximately 50 minutes;
+- recovery run status: `reanchored`;
+- lag after recovery: `0`.
+
+The five-minute continuity requirement was not met. The existing `Healthy` presentation did not disclose this gap and is not an acceptable public freshness signal.
+
+### Overview counts and indexed history
+
+At the same audit instant:
+
+- counts/canonical coverage ledger: `3,540,803`;
+- live source head: `3,569,176`;
+- lag: `28,373` ledgers;
+- coverage close time: `2026-07-10T09:36:21Z`;
+- coverage age: approximately `26.84` hours;
+- stored coverage hash: valid for ledger `3,540,803`.
+
+The data was internally valid but stale for the declared four-hour cadence.
+
+Affected public values and APIs include:
+
+- Overview Vault, Loan Broker, Loan, and Current Objects counts;
+- Activity and activity exports/feeds;
+- transaction detail for post-coverage transactions;
+- object history;
+- Loan lifecycle and Lifecycle Explorer;
+- archived objects;
+- Cover, Debt, and Loss history;
+- history-side Search results.
+
+The stale Activity result was not caused by a quiet Devnet. Recent fast-lane runs observed substantial Lending transaction counts after the indexed-history boundary.
+
+## Root cause
+
+The protected canonical heavy cycle was introduced as a D1 headroom protection measure, not as a complete catch-up mechanism.
+
+Production currently has one schedule:
 
 ```text
 */5 * * * *
 ```
 
-- every invocation runs the five-minute fast lane;
-- UTC four-hour boundaries also run the protected canonical heavy cycle;
-- no second production cron exists;
+Inside that schedule:
+
+- every tick attempts the compact fast lane;
+- UTC four-hour boundaries additionally attempt the protected heavy cycle.
+
+The protected heavy configuration is bounded to at most `32` ledgers per run. Running this once every four hours cannot keep pace with Devnet ledger production. It is suitable only as a protected reconciliation tail, not as the mechanism for closing a large history backlog.
+
+The intended large-backlog path already exists separately:
+
+- fixed-target immutable history extension;
+- incremental exact-index construction;
+- rolling current-state reconstruction;
+- candidate history/current-state branch publication;
+- remote candidate rehearsal;
+- guarded production promotion and base rebind.
+
+The rolling candidate workflow is merged. The reusable preflight and guarded promotion work remained unmerged/outdated, so the rolling path was never completed as normal production operation.
+
+Existing aligned rolling candidate branches currently cover ledger `3,540,657` for both immutable history and current state.
+
+## Recovery plan
+
+### R1 — Preserve service but withdraw the success claim
+
+- keep the public Devnet endpoint reachable;
+- do not call it normally operating or release-complete;
+- keep Mainnet disabled;
+- retain the five-minute fast lane because it is currently useful and can recover by reanchor;
+- treat the failed soak and live-source audit as the active evidence baseline.
+
+### R2 — Catch immutable history and current state up outside D1
+
+Use the merged rolling checkpoint candidate pipeline from the aligned candidate pair at ledger `3,540,657`.
+
+- advance in bounded steps of at most `5,000` ledgers;
+- generate immutable history, exact index, and current state together;
+- verify ledger index/hash equality for every candidate pair;
+- alternate isolated candidate branches between cycles;
+- continue until the final candidate is within the accepted freshness window of the live Devnet head.
+
+The initial measured gap requires approximately six bounded cycles, plus another cycle if Devnet advancement during generation requires it.
+
+### R3 — Restore reusable preflight and guarded promotion
+
+Port the useful parts of PRs `#356` and `#357` onto current `main` instead of merging their stale heads directly.
+
+The restored gates must additionally require:
+
+- candidate history/current state ledger and hash identity match;
+- candidate source rehearsal passes;
+- candidate coverage age is within the declared history freshness window;
+- current-state and history candidates are promoted as one logical checkpoint;
+- D1 write headroom remains fail-closed;
+- the fast-lane base binding is updated to the promoted checkpoint;
+- rollback refs are pinned before any production write;
+- no Mainnet mutation is possible.
+
+### R4 — Promote one aligned checkpoint
+
+After the final candidate and preflight pass:
+
+1. promote immutable history;
+2. confirm the public hybrid history source reads the promoted publication;
+3. rebind/rebase the compact current-state tail to the same target ledger/hash;
+4. promote the matching current-state branch;
+5. deploy the reconciled Worker configuration;
+6. verify all public API classes against live XRPL source data.
+
+The 28,000-ledger backlog must not be replayed into D1 row-by-row. Immutable history and rebuilt current state are the backlog recovery path; D1 remains the bounded post-checkpoint tail.
+
+### R5 — Fix continuity and public freshness reporting
+
+Independently investigate the 3,002-second fast-lane gap.
+
+Public status must be split into at least:
+
+- current-state ledger, age, lag, and last successful five-minute run;
+- immutable/indexed-history coverage ledger and age;
+- separate current-state and history verdicts.
+
+A missing fast-lane metric for more than ten minutes must show `Degraded` or `Stale`, never `Healthy`.
+
+### R6 — Restart release qualification
+
+The previous soak is failed and cannot be resumed.
+
+After recovery, start a new 24-hour soak from zero.
+
+Required exit conditions:
+
+- no fast-lane run gap above `420` seconds;
+- current-state age within ten minutes and source lag within the accepted ledger bound;
+- immutable/indexed-history coverage age within five hours;
+- exact ledger hashes match XRPL source data;
+- sampled Vault, Loan Broker, and Loan objects match live ledger entries;
+- Overview counts identify their own coverage watermark;
+- Activity/Lifecycle/Archive/Cover-Loss coverage is proven, not inferred from HTTP success;
+- no projection mismatch, cursor gap, tombstone regression, pagination failure, or HTTP 5xx;
+- D1 remains within free-plan headroom;
 - Mainnet remains disabled.
 
-The canonical collector role is `canonical_overlay_refresh`, with a four-hour expected interval and five-hour stale threshold. `behind` is expected between protected boundaries. Public freshness is determined by the fast lane.
+## Formal decision
 
-## Current-state read path
+Current formal state:
 
-Public current state resolves through:
+> Publicly reachable Devnet recovery build; current-state layer recovered at the latest audit instant, five-minute continuity not yet proven, immutable history and counts stale, release acceptance withdrawn.
 
-```text
-verified base snapshot
-  -> canonical overlay
-  -> five-minute fast lane
-```
-
-Rules:
-
-1. compare `(source_ledger_index, source_transaction_index)` lexicographically;
-2. require fast-lane base binding to match the active canonical base;
-3. allow only newer rows to supersede older layers;
-4. preserve deletion tombstones;
-5. fail closed on identity, binding, cursor, manifest, or relationship errors;
-6. use semantic projections for collections;
-7. keep raw enrichment bounded to detail paths.
-
-Vault, Loan Broker, and Loan collections use batched and deduplicated relationship resolution.
-
-## Pagination
-
-The public cursor is opaque and fail closed.
-
-Production includes nested cursor compaction, previous-format compatibility, first-page Loan evaluation-time pinning, duplicate-free ordered page boundaries, and rejection when binding, filters, query scope, or sort change.
-
-Two-page production checks passed for Vaults, Loan Brokers, and Loans at `limit=25`.
-
-## History and exact lookup
-
-Verified hybrid history serves immutable release history plus post-boundary D1 continuation.
-
-Production browser discovery found and fixed three sparse-history/current-search defects:
-
-- PR #399: filtered Lifecycle Explorer uses exact Loan references;
-- PR #401: Archived Object detail uses exact archive references;
-- PR #403: 64-character object-ID Search uses bounded three-layer detail lookup.
-
-No scan, Worker, or D1 limit was increased to hide these failures.
-
-## Accepted production evidence
-
-The cron-free canary passed with zero canary schedules, one production `*/5` schedule, exact-ledger verification, zero candidate failures, 30 witnesses, collection smoke, pagination, and cleanup. The durable gate was merged in PR #386.
-
-The production-only audit passed with six consecutive runs at approximately 300-second intervals, lag `0`, exact projection mismatches `0`, matching Overview/D1 watermarks, matching base binding, and passing first/second pages and details. The audit and cadence fixes were merged in PRs #395-#397.
-
-The final browser exit was merged in PR #398. Retained evidence at `2026-07-11T08:37:52Z` recorded:
-
-- routes: `15 / 15`;
-- behaviors: `8 / 8`;
-- technical findings: `0`;
-- current-state source: `fast_lane`;
-- cursor/head: `3565204 / 3565204`;
-- public lag: `0`;
-- consecutive failures: `0`;
-- D1 rows read: `2,280,454 / 5,000,000` (`45.60908%`);
-- D1 rows written: `15,830 / 100,000` (`15.83%`);
-- browser API requests: `60`;
-- failed exit checks: `0`.
-
-The browser matrix covered Overview, all current lists/details, Activity, transaction detail, Lifecycle, Archive list/detail, Cover & Loss, Search, and Network Status. It failed closed on rendered state errors, console/page errors, HTTP 5xx, missing routes or behaviors, and excessive D1 usage.
-
-## Public-release decision
-
-Public Devnet operation is accepted as of 2026-07-11 18:00 JST.
-
-The site may remain public. The fast lane is the accepted freshness source, the four-hour canonical cycle remains the reconciliation source, no rollback is required, and Mainnet remains out of scope.
-
-## Active 24-hour soak
-
-The soak window is:
-
-```text
-start: 2026-07-11 18:00 JST
-end: 2026-07-12 18:00 JST
-final audit: approximately 2026-07-12 18:17 JST
-```
-
-A temporary dated GitHub Actions schedule runs a read-only production audit about every two hours.
-
-Each audit verifies:
-
-- exactly one production `*/5 * * * *` schedule;
-- current fast-lane state and base binding;
-- six recent run intervals and statuses;
-- cumulative health since public-release start;
-- elapsed-time-adjusted minimum run count;
-- failure count, maximum lag, and maximum run gap;
-- Overview and counts watermarks;
-- fast-lane differential health;
-- Vault/Broker/Loan pagination and detail consistency;
-- collector and history-source status.
-
-The metrics table does not contain a full pre-release 24 hours. Therefore the soak gate measures from `2026-07-11T09:00:00Z` and calculates the minimum expected run count from elapsed time at five-minute cadence, with a two-run timing margin.
-
-Requirements:
-
-- observed runs at least the elapsed-time minimum;
-- failure count `0`;
-- maximum lag `<= 10` ledgers;
-- maximum gap `<= 420` seconds;
-- exact projection mismatches `0`;
-- no additional production cron;
-- no pagination or detail failure.
-
-The first diagnostic capture found 62 stored runs since `2026-07-11T04:00:51Z`, failure count `0`, maximum lag `0`, maximum gap `305` seconds, and a healthy caught-up fast lane. This proved the original fixed 200-run assumption was invalid for retention length, not that production was unhealthy.
-
-## Soak exit criteria
-
-The soak passes only if every retained audit is green, elapsed run counts are met, no run enters error, lag stays within 10, gaps stay within 420 seconds, D1 remains within headroom, watermarks remain ordered, mismatches remain zero, deleted objects do not reappear, pagination remains consistent, and Lifecycle/Archive/Search/relationship routes remain free of HTTP 5xx.
-
-A failure does not authorize weakening a gate. Diagnose, isolate, fix, re-run, and retain evidence.
-
-## Remaining exclusions
-
-- Mainnet enablement and guarantees;
-- completion and reconciliation of the 24-hour soak;
-- removal of the temporary dated soak schedule;
-- separate human visual review;
-- final-host SEO and later release hardening;
-- Observatory O1-O3;
-- throughput experiments that weaken Worker or D1 margins.
-
-## Next order
-
-1. Complete and reconcile the soak.
-2. Remove temporary dated schedules.
-3. Record final soak evidence and conclusion.
-4. Run separate human visual review.
-5. Continue post-release hardening without changing the one-cron architecture.
-6. Keep Mainnet disabled until separately approved.
+No public-release completion claim is permitted until R2-R6 pass.
