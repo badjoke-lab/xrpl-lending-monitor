@@ -1,0 +1,290 @@
+name: Final fresh checkpoint cutover
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/final-fresh-checkpoint-cutover.yml'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: write
+
+concurrency:
+  group: final-fresh-checkpoint-cutover-20260712
+  cancel-in-progress: false
+
+jobs:
+  generate-and-cutover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+      SOURCE_HISTORY_BRANCH: history-cutover-3575127-source-data
+      SOURCE_CURRENT_BRANCH: current-state-cutover-3575127-source-data
+      OUTPUT_HISTORY_BRANCH: history-cutover-20260712-candidate-data
+      OUTPUT_CURRENT_BRANCH: current-state-cutover-20260712-candidate-data
+      FINAL_HISTORY_BRANCH: history-cutover-20260712-final-data
+      FINAL_CURRENT_BRANCH: current-state-cutover-20260712-final-data
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build:candidate-source-rehearsal
+
+      - name: Bind immutable source checkpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=final-fresh-checkpoint-cutover
+          mkdir -p "${ROOT}"
+
+          fetch_json() {
+            local ref="$1"
+            local path="$2"
+            local output="$3"
+            gh api --method GET \
+              "repos/${REPOSITORY}/contents/${path}" \
+              -f ref="${ref}" --jq '.content' \
+              | tr -d '\n' | base64 --decode > "${output}"
+            jq -e . "${output}" > /dev/null
+          }
+
+          fetch_json "${SOURCE_HISTORY_BRANCH}" history/publication.json "${ROOT}/source-publication.json"
+          fetch_json "${SOURCE_CURRENT_BRANCH}" read-model/manifest.json "${ROOT}/source-current.json"
+          test "$(jq -r '.endLedgerIndex' "${ROOT}/source-publication.json")" = 3575127
+          test "$(jq -r '.ledgerIndex' "${ROOT}/source-current.json")" = 3575127
+          test "$(jq -r '.endLedgerHash' "${ROOT}/source-publication.json")" = "$(jq -r '.ledgerHash' "${ROOT}/source-current.json")"
+          test "$(jq -r '.complete' "${ROOT}/source-publication.json")" = true
+          test "$(jq -r '.complete' "${ROOT}/source-current.json")" = true
+
+          gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-candidate.yml/runs?per_page=100" \
+            > "${ROOT}/candidate-active.json"
+          jq -e '
+            [.workflow_runs[] | select(.status == "queued" or .status == "in_progress" or .status == "pending" or .status == "waiting" or .status == "requested")] | length == 0
+          ' "${ROOT}/candidate-active.json" > /dev/null
+          jq -r '.workflow_runs[].id' "${ROOT}/candidate-active.json" > "${ROOT}/candidate-run-ids-before.txt"
+
+      - name: Dispatch one fresh bounded candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=final-fresh-checkpoint-cutover
+          jq -n \
+            --arg ref main \
+            --arg sourceHistory "${SOURCE_HISTORY_BRANCH}" \
+            --arg sourceCurrent "${SOURCE_CURRENT_BRANCH}" \
+            --arg outputHistory "${OUTPUT_HISTORY_BRANCH}" \
+            --arg outputCurrent "${OUTPUT_CURRENT_BRANCH}" \
+            '{ref:$ref,inputs:{source_history_branch:$sourceHistory,source_current_state_branch:$sourceCurrent,history_candidate_branch:$outputHistory,current_state_candidate_branch:$outputCurrent,max_delta_ledgers:"5000",segment_ledgers:"500",read_window_size:"4"}}' \
+            > "${ROOT}/candidate-dispatch.json"
+          gh api --method POST \
+            "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-candidate.yml/dispatches" \
+            --input "${ROOT}/candidate-dispatch.json"
+
+          CANDIDATE_RUN_ID=''
+          for attempt in $(seq 1 60); do
+            gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-candidate.yml/runs?event=workflow_dispatch&per_page=100" \
+              > "${ROOT}/candidate-runs-after.json"
+            mapfile -t NEW_IDS < <(
+              jq -r '.workflow_runs | sort_by(.created_at) | reverse | .[].id' "${ROOT}/candidate-runs-after.json" \
+                | while IFS= read -r id; do
+                    if ! grep -Fxq "${id}" "${ROOT}/candidate-run-ids-before.txt"; then printf '%s\n' "${id}"; fi
+                  done
+            )
+            if [ "${#NEW_IDS[@]}" -eq 1 ]; then CANDIDATE_RUN_ID="${NEW_IDS[0]}"; break; fi
+            if [ "${#NEW_IDS[@]}" -gt 1 ]; then exit 1; fi
+            sleep 10
+          done
+          test -n "${CANDIDATE_RUN_ID}"
+          echo "CANDIDATE_RUN_ID=${CANDIDATE_RUN_ID}" >> "${GITHUB_ENV}"
+          printf '%s\n' "${CANDIDATE_RUN_ID}" > "${ROOT}/candidate-run-id.txt"
+
+      - name: Require candidate core publication
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=final-fresh-checkpoint-cutover
+          for attempt in $(seq 1 360); do
+            gh api "repos/${REPOSITORY}/actions/runs/${CANDIDATE_RUN_ID}" > "${ROOT}/candidate-run.json"
+            if [ "$(jq -r '.status' "${ROOT}/candidate-run.json")" = completed ]; then break; fi
+            sleep 30
+          done
+          test "$(jq -r '.status' "${ROOT}/candidate-run.json")" = completed
+          gh api "repos/${REPOSITORY}/actions/runs/${CANDIDATE_RUN_ID}/jobs?per_page=100" > "${ROOT}/candidate-jobs.json"
+          for step in \
+            'Bind source pair and freeze bounded target' \
+            'Generate bounded delta with configured read window' \
+            'Verify delta and build target publication' \
+            'Build target exact index incrementally' \
+            'Build target current state from best available base' \
+            'Publish history candidate branch' \
+            'Publish current-state candidate branch'; do
+            jq -e --arg name "${step}" '
+              [.jobs[].steps[] | select(.name == $name)] | length == 1 and .[0].conclusion == "success"
+            ' "${ROOT}/candidate-jobs.json" > /dev/null
+          done
+
+      - name: Seal output commits behind unique immutable branch names
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=final-fresh-checkpoint-cutover
+          HISTORY_SHA="$(gh api "repos/${REPOSITORY}/branches/${OUTPUT_HISTORY_BRANCH}" --jq '.commit.sha')"
+          CURRENT_SHA="$(gh api "repos/${REPOSITORY}/branches/${OUTPUT_CURRENT_BRANCH}" --jq '.commit.sha')"
+          printf '%s' "${HISTORY_SHA}" | grep -Eq '^[a-f0-9]{40}$'
+          printf '%s' "${CURRENT_SHA}" | grep -Eq '^[a-f0-9]{40}$'
+
+          create_or_move_ref() {
+            local branch="$1"
+            local sha="$2"
+            if gh api "repos/${REPOSITORY}/git/ref/heads/${branch}" > /dev/null 2>&1; then
+              gh api --method PATCH "repos/${REPOSITORY}/git/refs/heads/${branch}" \
+                -f sha="${sha}" -F force=true > /dev/null
+            else
+              gh api --method POST "repos/${REPOSITORY}/git/refs" \
+                -f ref="refs/heads/${branch}" -f sha="${sha}" > /dev/null
+            fi
+          }
+          create_or_move_ref "${FINAL_HISTORY_BRANCH}" "${HISTORY_SHA}"
+          create_or_move_ref "${FINAL_CURRENT_BRANCH}" "${CURRENT_SHA}"
+          test "$(gh api "repos/${REPOSITORY}/branches/${FINAL_HISTORY_BRANCH}" --jq '.commit.sha')" = "${HISTORY_SHA}"
+          test "$(gh api "repos/${REPOSITORY}/branches/${FINAL_CURRENT_BRANCH}" --jq '.commit.sha')" = "${CURRENT_SHA}"
+          {
+            echo "FINAL_HISTORY_SHA=${HISTORY_SHA}"
+            echo "FINAL_CURRENT_SHA=${CURRENT_SHA}"
+          } >> "${GITHUB_ENV}"
+          sleep 15
+
+      - name: Rehearse immutable aliases and bind live target
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=final-fresh-checkpoint-cutover
+          node .candidate-source-rehearsal-build/rehearse-candidate-sources.mjs \
+            --local \
+            --repository badjoke-lab/xrpl-lending-monitor \
+            --history-branch "${FINAL_HISTORY_BRANCH}" \
+            --current-state-branch "${FINAL_CURRENT_BRANCH}" \
+            > "${ROOT}/candidate-rehearsal.json"
+          jq -e '.passed == true and (.exactReads | length) == 3 and .recentHistory.items == 1' \
+            "${ROOT}/candidate-rehearsal.json" > /dev/null
+
+          TARGET_LEDGER="$(jq -r '.ledgerIndex' "${ROOT}/candidate-rehearsal.json")"
+          TARGET_HASH="$(jq -r '.ledgerHash' "${ROOT}/candidate-rehearsal.json")"
+          test "${TARGET_LEDGER}" -gt 3575127
+          jq -n '{method:"ledger",params:[{ledger_index:"validated",transactions:false,expand:false}]}' \
+            > "${ROOT}/live-head-request.json"
+          curl --fail-with-body --silent --show-error --retry 3 \
+            -H 'content-type: application/json' \
+            --data @"${ROOT}/live-head-request.json" \
+            https://devnet.honeycluster.io/ > "${ROOT}/live-head-response.json"
+          LIVE_LEDGER="$(jq -r '.result.ledger_index // .result.ledger.ledger_index' "${ROOT}/live-head-response.json")"
+          TARGET_LAG="$((LIVE_LEDGER - TARGET_LEDGER))"
+          if [ "${TARGET_LAG}" -lt 0 ]; then TARGET_LAG=0; fi
+          test "${TARGET_LAG}" -le 720
+          {
+            echo "TARGET_LEDGER=${TARGET_LEDGER}"
+            echo "TARGET_HASH=${TARGET_HASH}"
+            echo "LIVE_LEDGER=${LIVE_LEDGER}"
+            echo "TARGET_LAG=${TARGET_LAG}"
+          } >> "${GITHUB_ENV}"
+
+      - name: Dispatch one guarded production cutover
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=final-fresh-checkpoint-cutover
+          gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/runs?per_page=100" \
+            > "${ROOT}/cutover-before.json"
+          jq -e '
+            [.workflow_runs[] | select(.status == "queued" or .status == "in_progress" or .status == "pending" or .status == "waiting" or .status == "requested")] | length == 0
+          ' "${ROOT}/cutover-before.json" > /dev/null
+          jq -r '.workflow_runs[].id' "${ROOT}/cutover-before.json" > "${ROOT}/cutover-run-ids-before.txt"
+
+          jq -n \
+            --arg ref main \
+            --arg history "${FINAL_HISTORY_BRANCH}" \
+            --arg current "${FINAL_CURRENT_BRANCH}" \
+            '{ref:$ref,inputs:{history_candidate_branch:$history,current_state_candidate_branch:$current,confirm_production_write:"true"}}' \
+            > "${ROOT}/cutover-dispatch.json"
+          gh api --method POST "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/dispatches" \
+            --input "${ROOT}/cutover-dispatch.json"
+
+          CUTOVER_RUN_ID=''
+          for attempt in $(seq 1 60); do
+            gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/runs?event=workflow_dispatch&per_page=100" \
+              > "${ROOT}/cutover-after.json"
+            mapfile -t NEW_IDS < <(
+              jq -r '.workflow_runs | sort_by(.created_at) | reverse | .[].id' "${ROOT}/cutover-after.json" \
+                | while IFS= read -r id; do
+                    if ! grep -Fxq "${id}" "${ROOT}/cutover-run-ids-before.txt"; then printf '%s\n' "${id}"; fi
+                  done
+            )
+            if [ "${#NEW_IDS[@]}" -eq 1 ]; then CUTOVER_RUN_ID="${NEW_IDS[0]}"; break; fi
+            if [ "${#NEW_IDS[@]}" -gt 1 ]; then exit 1; fi
+            sleep 10
+          done
+          test -n "${CUTOVER_RUN_ID}"
+          echo "CUTOVER_RUN_ID=${CUTOVER_RUN_ID}" >> "${GITHUB_ENV}"
+          printf '%s\n' "${CUTOVER_RUN_ID}" > "${ROOT}/cutover-run-id.txt"
+
+      - name: Require cutover and post-cutover freshness evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=final-fresh-checkpoint-cutover
+          for attempt in $(seq 1 180); do
+            gh api "repos/${REPOSITORY}/actions/runs/${CUTOVER_RUN_ID}" > "${ROOT}/cutover-run.json"
+            if [ "$(jq -r '.status' "${ROOT}/cutover-run.json")" = completed ]; then break; fi
+            sleep 30
+          done
+          test "$(jq -r '.status' "${ROOT}/cutover-run.json")" = completed
+          test "$(jq -r '.conclusion' "${ROOT}/cutover-run.json")" = success
+
+          gh run download "${CUTOVER_RUN_ID}" --repo "${REPOSITORY}" \
+            --name rolling-checkpoint-live-cutover --dir "${ROOT}/cutover-artifact"
+          EVIDENCE="$(find "${ROOT}/cutover-artifact" -name evidence.json -type f | head -n 1)"
+          POST="$(find "${ROOT}/cutover-artifact" -name post-cutover-verification.json -type f | head -n 1)"
+          test -n "${EVIDENCE}"
+          test -n "${POST}"
+          cp "${EVIDENCE}" "${ROOT}/cutover-evidence.json"
+          cp "${POST}" "${ROOT}/post-cutover-verification.json"
+          jq -e --argjson target "${TARGET_LEDGER}" '
+            .passed == true and .target.target.ledgerIndex == $target
+            and .schedule == "*/5 * * * *" and .mainnetEnabled == false
+          ' "${ROOT}/cutover-evidence.json" > /dev/null
+          jq -e --argjson target "${TARGET_LEDGER}" '
+            .passed == true and .target.ledgerIndex == $target
+            and .lagLedgers <= 10 and .currentStateAgeSeconds <= 600
+            and .schedule == "*/5 * * * *" and .mainnetEnabled == false
+          ' "${ROOT}/post-cutover-verification.json" > /dev/null
+
+          jq -n \
+            --argjson candidateRunId "${CANDIDATE_RUN_ID}" \
+            --argjson cutoverRunId "${CUTOVER_RUN_ID}" \
+            --arg historyBranch "${FINAL_HISTORY_BRANCH}" \
+            --arg currentStateBranch "${FINAL_CURRENT_BRANCH}" \
+            --argjson ledgerIndex "${TARGET_LEDGER}" \
+            --arg ledgerHash "${TARGET_HASH}" \
+            --argjson liveLedgerAtGate "${LIVE_LEDGER}" \
+            --argjson lagAtGate "${TARGET_LAG}" \
+            --slurpfile cutover "${ROOT}/cutover-evidence.json" \
+            --slurpfile post "${ROOT}/post-cutover-verification.json" \
+            '{passed:true,candidateRunId:$candidateRunId,cutoverRunId:$cutoverRunId,checkpoint:{historyBranch:$historyBranch,currentStateBranch:$currentStateBranch,ledgerIndex:$ledgerIndex,ledgerHash:$ledgerHash,liveLedgerAtGate:$liveLedgerAtGate,lagAtGate:$lagAtGate},cutover:$cutover[0],postCutover:$post[0]}' \
+            > "${ROOT}/summary.json"
+
+      - name: Upload final operation evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: final-fresh-checkpoint-cutover
+          path: final-fresh-checkpoint-cutover
+          if-no-files-found: warn
+          retention-days: 30
