@@ -15,11 +15,25 @@ describe('fast-lane shadow runtime config', () => {
     })
   })
 
-  it('rejects an undersized catch-up window', () => {
+  it('allows a multi-run bootstrap window larger than one run', () => {
+    expect(resolveFastLaneShadowRuntimeConfig({
+      FAST_LANE_WEBSOCKET_ENDPOINT: 'wss://devnet.example/ws',
+      FAST_LANE_BOOTSTRAP_LEDGERS: '720',
+      FAST_LANE_MAX_LEDGERS_PER_RUN: '180',
+      FAST_LANE_REANCHOR_LAG_LEDGERS: '720',
+    })).toMatchObject({
+      bootstrapLedgers: 720,
+      maxLedgersPerRun: 180,
+      reanchorLagLedgers: 720,
+    })
+  })
+
+  it('rejects a bootstrap window larger than the reanchor bound', () => {
     expect(() => resolveFastLaneShadowRuntimeConfig({
       FAST_LANE_WEBSOCKET_ENDPOINT: 'wss://devnet.example/ws',
-      FAST_LANE_BOOTSTRAP_LEDGERS: '90',
-      FAST_LANE_MAX_LEDGERS_PER_RUN: '60',
+      FAST_LANE_BOOTSTRAP_LEDGERS: '721',
+      FAST_LANE_MAX_LEDGERS_PER_RUN: '180',
+      FAST_LANE_REANCHOR_LAG_LEDGERS: '720',
     })).toThrow('must be at least FAST_LANE_BOOTSTRAP_LEDGERS')
   })
 
