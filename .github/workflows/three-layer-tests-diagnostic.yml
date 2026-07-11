@@ -26,23 +26,24 @@ jobs:
         shell: bash
         run: |
           set +e
-          pnpm exec vitest run \
-            src/worker/repositories/three-layer-cursor.test.ts \
-            src/worker/repositories/three-layer-fast-read.test.ts \
-            src/worker/repositories/three-layer-current-detail.test.ts \
-            > three-layer-tests.log 2>&1
+          pnpm test > full-suite.log 2>&1
           STATUS=$?
           echo "status=${STATUS}" >> "$GITHUB_OUTPUT"
+          {
+            grep -nE 'FAIL|Failed|AssertionError|expected|Test Files|Tests|×|❯' full-suite.log || true
+            echo '--- tail ---'
+            tail -n 180 full-suite.log
+          } > failure-summary.log
           exit 0
       - name: Post diagnostic to PR
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           {
-            echo '### Temporary three-layer test diagnostic'
+            echo '### Temporary full-suite failure summary'
             echo
             echo '```text'
-            cat three-layer-tests.log
+            head -c 60000 failure-summary.log
             echo
             echo '```'
             echo
