@@ -79,6 +79,7 @@ describe('release-native sparse-kind listing', () => {
       },
     }
 
+    // The manifest count is authoritative for deciding that this asset cannot contain a Vault.
     const reader = ReleaseNativeReader.openFromManifest({ store, manifest: manifest() })
     const result = await reader.listObjects('vault', { limit: 1, maxAssetReads: 4 })
 
