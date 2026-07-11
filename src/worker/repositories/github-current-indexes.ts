@@ -8,6 +8,7 @@ import type {
   ReleaseNativeIndexRecord,
   ReleaseNativeObjectReference,
 } from '../../shared/current-state/release-native-reader'
+import type { ReadModelKind } from '../../shared/current-state/github-read-model-reader'
 import type { ActiveSnapshotRecord } from './core-api-repository'
 import { CurrentStateObjectReadError } from './current-state-read-error'
 import {
@@ -15,8 +16,10 @@ import {
   type CurrentStateStorage,
   type ReleaseCurrentStateSource,
 } from './release-current-state'
+import { getThreeLayerCurrentProjection } from './three-layer-current-reader'
 
 const MAX_INDEX_ASSET_READS = 16
+const OBJECT_ID = /^[a-f0-9]{64}$/i
 
 function sourceOf(storage: CurrentStateStorage): ReleaseCurrentStateSource {
   if (!isReleaseCurrentStateSource(storage)) {
@@ -37,6 +40,10 @@ function assertSnapshot(snapshot: ActiveSnapshotRecord, source: ReleaseCurrentSt
 
 function storedReference(reference: ReleaseNativeObjectReference): ObjectReference {
   return { id: reference.id, kind: reference.kind, dataKey: reference.assetName }
+}
+
+function directReference(kind: ReadModelKind, objectId: string): ObjectReference {
+  return { id: objectId, kind, dataKey: 'read-model' }
 }
 
 function accountValue(record: ReleaseNativeIndexRecord): AccountIndexValue | null {
@@ -97,6 +104,47 @@ export async function findGithubRelationships(
   }
 }
 
+function crossKindMiss(error: unknown): boolean {
+  return error instanceof CurrentStateObjectReadError
+    && error.code === 'manifest_integrity_error'
+    && error.message === 'base object kind mismatch'
+}
+
+async function searchCurrentObjectId(
+  source: ReleaseCurrentStateSource,
+  snapshot: ActiveSnapshotRecord,
+  objectId: string,
+): Promise<{ data: SearchIndexValue[]; nextCursor: null; complete: true; assetReads: number }> {
+  const normalized = objectId.toUpperCase()
+  const kinds: readonly ReadModelKind[] = ['vault', 'loan-broker', 'loan']
+  let assetReads = 0
+
+  for (const kind of kinds) {
+    try {
+      const result = await getThreeLayerCurrentProjection({
+        db: source.db,
+        source,
+        snapshot,
+        kind,
+        objectId: normalized,
+      })
+      assetReads += result.assetReads
+      if (result.item) {
+        return {
+          data: [{ category: 'object-id', reference: directReference(kind, normalized) }],
+          nextCursor: null,
+          complete: true,
+          assetReads,
+        }
+      }
+    } catch (error) {
+      if (!crossKindMiss(error)) throw error
+    }
+  }
+
+  return { data: [], nextCursor: null, complete: true, assetReads }
+}
+
 export async function searchGithubCurrentStateExact(
   storage: CurrentStateStorage,
   snapshot: ActiveSnapshotRecord,
@@ -105,6 +153,11 @@ export async function searchGithubCurrentStateExact(
 ): Promise<{ data: SearchIndexValue[]; nextCursor: string | null; complete: boolean; assetReads: number }> {
   const source = sourceOf(storage)
   assertSnapshot(snapshot, source)
+  if (OBJECT_ID.test(term)) {
+    if (options.cursor) return { data: [], nextCursor: null, complete: true, assetReads: 0 }
+    return searchCurrentObjectId(source, snapshot, term)
+  }
+
   const result = await source.opened.reader.searchExact(term, {
     limit: options.limit,
     cursor: options.cursor,
