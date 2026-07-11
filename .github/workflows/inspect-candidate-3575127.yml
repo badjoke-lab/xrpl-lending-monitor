@@ -1,0 +1,88 @@
+name: Inspect candidate 3575127
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/inspect-candidate-3575127.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      HISTORY_BRANCH: history-rolling-recovery-b-data
+      CURRENT_BRANCH: current-state-rolling-recovery-b-data
+    steps:
+      - name: Fetch and compare candidate metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=candidate-3575127-inspection
+          mkdir -p "${ROOT}"
+
+          fetch_json() {
+            local branch="$1"
+            local path="$2"
+            local output="$3"
+            gh api --method GET \
+              "repos/${GITHUB_REPOSITORY}/contents/${path}" \
+              -f ref="${branch}" --jq '.content' \
+              | tr -d '\n' | base64 --decode > "${output}"
+            jq -e . "${output}" > /dev/null
+          }
+
+          fetch_json "${HISTORY_BRANCH}" history/publication.json "${ROOT}/publication.json"
+          fetch_json "${HISTORY_BRANCH}" history/index/exact/manifest.json "${ROOT}/exact-manifest.json"
+          fetch_json "${HISTORY_BRANCH}" history-channel.json "${ROOT}/history-channel.json"
+          fetch_json "${CURRENT_BRANCH}" read-model/manifest.json "${ROOT}/current-manifest.json"
+          fetch_json "${CURRENT_BRANCH}" channel.json "${ROOT}/current-channel.json"
+
+          HISTORY_HEAD="$(gh api "repos/${GITHUB_REPOSITORY}/branches/${HISTORY_BRANCH}" --jq '.commit.sha')"
+          CURRENT_HEAD="$(gh api "repos/${GITHUB_REPOSITORY}/branches/${CURRENT_BRANCH}" --jq '.commit.sha')"
+          CHANNEL_DATA_COMMIT="$(jq -r '.active.dataCommitSha' "${ROOT}/history-channel.json")"
+          CURRENT_DATA_COMMIT="$(jq -r '.active.dataCommitSha' "${ROOT}/current-channel.json")"
+
+          jq -n \
+            --arg historyHead "${HISTORY_HEAD}" \
+            --arg currentHead "${CURRENT_HEAD}" \
+            --arg channelDataCommit "${CHANNEL_DATA_COMMIT}" \
+            --arg currentDataCommit "${CURRENT_DATA_COMMIT}" \
+            --slurpfile publication "${ROOT}/publication.json" \
+            --slurpfile exact "${ROOT}/exact-manifest.json" \
+            --slurpfile historyChannel "${ROOT}/history-channel.json" \
+            --slurpfile currentManifest "${ROOT}/current-manifest.json" \
+            --slurpfile currentChannel "${ROOT}/current-channel.json" \
+            '{
+              historyHead:$historyHead,
+              currentHead:$currentHead,
+              historyChannelDataCommit:$channelDataCommit,
+              currentChannelDataCommit:$currentDataCommit,
+              publication:{chainId:$publication[0].chainId,epochId:$publication[0].epochId,endLedgerIndex:$publication[0].endLedgerIndex,endLedgerHash:$publication[0].endLedgerHash,publicationSha256:$publication[0].publicationSha256,publishedAt:$publication[0].publishedAt,complete:$publication[0].complete},
+              exactIndex:{chainId:$exact[0].chainId,epochId:$exact[0].epochId,publicationSha256:$exact[0].publicationSha256,manifestSha256:$exact[0].manifestSha256,bucketCount:$exact[0].bucketCount,totalRecords:$exact[0].totalRecords},
+              historyChannel:$historyChannel[0],
+              currentManifest:{ledgerIndex:$currentManifest[0].ledgerIndex,ledgerHash:$currentManifest[0].ledgerHash,manifestSha256:$currentManifest[0].manifestSha256,snapshotId:$currentManifest[0].snapshotId,complete:$currentManifest[0].complete},
+              currentChannel:$currentChannel[0],
+              checks:{
+                publicationExactMatch:($publication[0].publicationSha256 == $exact[0].publicationSha256),
+                publicationChannelMatch:($publication[0].publicationSha256 == $historyChannel[0].active.publicationSha256),
+                exactChannelMatch:($exact[0].manifestSha256 == $historyChannel[0].active.exactIndex.manifestSha256),
+                currentChannelMatch:($currentManifest[0].manifestSha256 == $currentChannel[0].active.manifestSha256 and $currentManifest[0].snapshotId == $currentChannel[0].active.snapshotId),
+                crossLayerTargetMatch:($publication[0].endLedgerIndex == $currentManifest[0].ledgerIndex and $publication[0].endLedgerHash == $currentManifest[0].ledgerHash)
+              }
+            }' > "${ROOT}/summary.json"
+
+          cat "${ROOT}/summary.json"
+
+      - name: Upload inspection evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: candidate-3575127-inspection
+          path: candidate-3575127-inspection
+          if-no-files-found: error
+          retention-days: 7
