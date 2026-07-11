@@ -1,4 +1,5 @@
 import { XrplJsonRpcClient } from '../network/xrpl-rpc'
+import type { CatchUpBaseIdentity } from '../../shared/catch-up-base-identity'
 import type { RuntimeConfig } from '../../shared/runtime-config'
 import type { FastLaneShadowRuntimeConfig } from '../../shared/fast-lane-shadow-runtime-config'
 import { buildFastLaneShadowWindowPlan } from './fast-lane-shadow-plan'
@@ -9,8 +10,15 @@ import {
   commitFastLaneCompactShadowWindow,
 } from '../../worker/repositories/fast-lane-compact-shadow-repository'
 import {
+  bindFastLaneShadowBase,
+  readFastLaneShadowBaseBinding,
+  sameFastLaneShadowBaseBinding,
+} from '../../worker/repositories/fast-lane-shadow-base-binding'
+import {
   readFastLaneShadowState,
 } from '../../worker/repositories/fast-lane-shadow-repository'
+
+const SHADOW_EPOCH_ID = 'fast-lane-shadow-devnet'
 
 export interface FastLaneShadowCycleResult {
   status: 'caught_up' | 'committed' | 'reanchored'
@@ -45,16 +53,17 @@ function stringValue(value: unknown, field: string): string {
   return value
 }
 
-export async function readFastLaneValidatedHead(options: {
+async function readLedgerIdentity(options: {
   endpoint: string
   timeoutMs: number
+  ledgerIndex: number | 'validated'
 }): Promise<ValidatedHead> {
   const client = new XrplJsonRpcClient({
     endpoint: options.endpoint,
     timeoutMs: options.timeoutMs,
   })
   const result = await client.call<Record<string, unknown>>('ledger', {
-    ledger_index: 'validated',
+    ledger_index: options.ledgerIndex,
     transactions: false,
     expand: false,
   })
@@ -67,7 +76,36 @@ export async function readFastLaneValidatedHead(options: {
     result.ledger_hash ?? ledger?.ledger_hash ?? ledger?.hash,
     'validated ledger hash',
   )
-  return { ledgerIndex, ledgerHash }
+  return { ledgerIndex, ledgerHash: ledgerHash.toUpperCase() }
+}
+
+export async function readFastLaneValidatedHead(options: {
+  endpoint: string
+  timeoutMs: number
+}): Promise<ValidatedHead> {
+  return readLedgerIdentity({ ...options, ledgerIndex: 'validated' })
+}
+
+async function verifyFastLaneBaseIdentity(options: {
+  endpoint: string
+  timeoutMs: number
+  head: ValidatedHead
+  base: CatchUpBaseIdentity
+}): Promise<void> {
+  if (options.head.ledgerIndex < options.base.ledgerIndex) {
+    throw new Error('Fast-lane validated head is below the configured canonical base ledger')
+  }
+  const observed = await readLedgerIdentity({
+    endpoint: options.endpoint,
+    timeoutMs: options.timeoutMs,
+    ledgerIndex: options.base.ledgerIndex,
+  })
+  if (
+    observed.ledgerIndex !== options.base.ledgerIndex
+    || observed.ledgerHash !== options.base.ledgerHash.toUpperCase()
+  ) {
+    throw new Error('Fast-lane canonical base ledger identity verification failed')
+  }
 }
 
 export async function resetFastLaneCompactShadow(db: D1Database): Promise<void> {
@@ -76,6 +114,7 @@ export async function resetFastLaneCompactShadow(db: D1Database): Promise<void> 
     db.prepare('DELETE FROM fast_lane_shadow_windows'),
     db.prepare('DELETE FROM fast_lane_shadow_objects_compact'),
     db.prepare('DELETE FROM fast_lane_shadow_state'),
+    db.prepare('DELETE FROM fast_lane_shadow_base_binding'),
   ])
 }
 
@@ -83,6 +122,7 @@ export async function runFastLaneShadowCycle(options: {
   db: D1Database
   runtimeConfig: RuntimeConfig
   fastLaneConfig: FastLaneShadowRuntimeConfig
+  base: CatchUpBaseIdentity
   now?: () => Date
 }): Promise<FastLaneShadowCycleResult> {
   const now = options.now ?? (() => new Date())
@@ -95,16 +135,35 @@ export async function runFastLaneShadowCycle(options: {
     timeoutMs: options.runtimeConfig.rpcTimeoutMs,
   })
   let state = await readFastLaneShadowState(options.db)
+  const binding = await readFastLaneShadowBaseBinding(options.db)
   let reanchored = false
 
+  const bindingMatches = sameFastLaneShadowBaseBinding({
+    binding,
+    shadowEpochId: SHADOW_EPOCH_ID,
+    base: options.base,
+  })
   const reanchorReason = fastLaneShadowReanchorReason({
     state,
     head,
-    expectedEpochId: 'fast-lane-shadow-devnet',
+    expectedEpochId: SHADOW_EPOCH_ID,
     reanchorLagLedgers: options.fastLaneConfig.reanchorLagLedgers,
   })
-  if (reanchorReason !== null) {
+
+  if (!bindingMatches || reanchorReason !== null) {
+    await verifyFastLaneBaseIdentity({
+      endpoint,
+      timeoutMs: options.runtimeConfig.rpcTimeoutMs,
+      head,
+      base: options.base,
+    })
     await resetFastLaneCompactShadow(options.db)
+    await bindFastLaneShadowBase({
+      db: options.db,
+      shadowEpochId: SHADOW_EPOCH_ID,
+      base: options.base,
+      boundAt: processedAt,
+    })
     state = null
     reanchored = true
   }
@@ -126,7 +185,7 @@ export async function runFastLaneShadowCycle(options: {
 
   const startLedgerIndex = state
     ? state.lastProcessedLedger + 1
-    : Math.max(1, head.ledgerIndex - options.fastLaneConfig.bootstrapLedgers + 1)
+    : Math.max(options.base.ledgerIndex + 1, head.ledgerIndex - options.fastLaneConfig.bootstrapLedgers + 1)
   const expectedPreviousLedger = startLedgerIndex - 1
 
   const session = createXrplWebSocketLedgerSession({
@@ -168,7 +227,7 @@ export async function runFastLaneShadowCycle(options: {
     }
 
     const plan = buildFastLaneShadowWindowPlan({
-      epochId: 'fast-lane-shadow-devnet',
+      epochId: SHADOW_EPOCH_ID,
       scan,
       latestObservedHash: head.ledgerHash,
       processedAt,

@@ -12,6 +12,7 @@ import { initializeCatchUpFromVerifiedBase } from './operator/catch-up-initializ
 import { diagnoseLiveContinuation, verifyLiveContinuation } from './operator/live-continuation-verification'
 import { diagnoseM1RuntimeExit, reviewM1RuntimeExit } from './operator/m1-runtime-exit'
 import { rebaseToReplacementBase } from './operator/replacement-base-rebase'
+import { readFastLaneShadowDiff } from './repositories/fast-lane-shadow-diff'
 import { saveFastLaneShadowRunMetric } from './repositories/fast-lane-shadow-run-metrics'
 import { resolveHistorySource } from './repositories/history-source'
 import { getIncrementalCollectorState } from './repositories/incremental-collector-state'
@@ -56,10 +57,13 @@ async function runProtectedHeavyCycle(env: Bindings): Promise<void> {
 
 async function runFastLaneCycle(env: Bindings): Promise<void> {
   const runAt = new Date().toISOString()
+  const replacementBase = resolveReplacementBaseRuntimeConfig(env).target
+  if (!replacementBase) throw new Error('Fast-lane shadow requires the canonical replacement base target')
   const result = await runFastLaneShadowCycle({
     db: env.DB,
     runtimeConfig: resolveRuntimeConfig(env),
     fastLaneConfig: resolveFastLaneShadowRuntimeConfig(env),
+    base: replacementBase,
   })
   await saveFastLaneShadowRunMetric({ db: env.DB, runAt, result })
   console.log(JSON.stringify({ event: 'fast_lane_shadow_cycle', runAt, ...result }))
@@ -97,6 +101,11 @@ const worker: ExportedHandler<Bindings> = {
         sync,
         staleAfterSeconds: Math.max(runtimeConfig.staleAfterSeconds, COLLECTOR_STATUS_STALE_AFTER_SECONDS),
       }))
+    }
+    if (request.method === 'GET' && url.pathname === '/api/status/fast-lane-diff') {
+      const sampleLimitText = url.searchParams.get('limit')
+      const sampleLimit = sampleLimitText === null ? 200 : Number(sampleLimitText)
+      return Response.json(await readFastLaneShadowDiff({ db: env.DB, sampleLimit }))
     }
     if (request.method === 'GET' && url.pathname === '/api/status/loan-activity-witnesses') {
       return Response.json(await readLoanActivityDiagnostics(env.DB))
