@@ -30,6 +30,7 @@ jobs:
           set -uo pipefail
           ROOT=candidate-3575127-rehearsal
           mkdir -p "${ROOT}"
+          printf '%s\n' restored-file-digests > "${ROOT}/channel-state.txt"
           set +e
           node .candidate-source-rehearsal-build/rehearse-candidate-sources.mjs \
             --local \
