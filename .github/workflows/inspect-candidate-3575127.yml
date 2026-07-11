@@ -27,12 +27,12 @@ jobs:
           mkdir -p "${ROOT}"
 
           fetch_json() {
-            local branch="$1"
+            local ref="$1"
             local path="$2"
             local output="$3"
             gh api --method GET \
               "repos/${GITHUB_REPOSITORY}/contents/${path}" \
-              -f ref="${branch}" --jq '.content' \
+              -f ref="${ref}" --jq '.content' \
               | tr -d '\n' | base64 --decode > "${output}"
             jq -e . "${output}" > /dev/null
           }
@@ -48,6 +48,9 @@ jobs:
           CHANNEL_DATA_COMMIT="$(jq -r '.active.dataCommitSha' "${ROOT}/history-channel.json")"
           CURRENT_DATA_COMMIT="$(jq -r '.active.dataCommitSha' "${ROOT}/current-channel.json")"
 
+          fetch_json "${CHANNEL_DATA_COMMIT}" history/publication.json "${ROOT}/data-commit-publication.json"
+          fetch_json "${CHANNEL_DATA_COMMIT}" history/index/exact/manifest.json "${ROOT}/data-commit-exact-manifest.json"
+
           jq -n \
             --arg historyHead "${HISTORY_HEAD}" \
             --arg currentHead "${CURRENT_HEAD}" \
@@ -58,6 +61,8 @@ jobs:
             --slurpfile historyChannel "${ROOT}/history-channel.json" \
             --slurpfile currentManifest "${ROOT}/current-manifest.json" \
             --slurpfile currentChannel "${ROOT}/current-channel.json" \
+            --slurpfile dataCommitPublication "${ROOT}/data-commit-publication.json" \
+            --slurpfile dataCommitExact "${ROOT}/data-commit-exact-manifest.json" \
             '{
               historyHead:$historyHead,
               currentHead:$currentHead,
@@ -66,12 +71,14 @@ jobs:
               publication:{chainId:$publication[0].chainId,epochId:$publication[0].epochId,endLedgerIndex:$publication[0].endLedgerIndex,endLedgerHash:$publication[0].endLedgerHash,publicationSha256:$publication[0].publicationSha256,publishedAt:$publication[0].publishedAt,complete:$publication[0].complete},
               exactIndex:{chainId:$exact[0].chainId,epochId:$exact[0].epochId,publicationSha256:$exact[0].publicationSha256,manifestSha256:$exact[0].manifestSha256,bucketCount:$exact[0].bucketCount,totalRecords:$exact[0].totalRecords},
               historyChannel:$historyChannel[0],
+              dataCommit:{publicationSha256:$dataCommitPublication[0].publicationSha256,exactPublicationSha256:$dataCommitExact[0].publicationSha256,exactManifestSha256:$dataCommitExact[0].manifestSha256,endLedgerIndex:$dataCommitPublication[0].endLedgerIndex,endLedgerHash:$dataCommitPublication[0].endLedgerHash},
               currentManifest:{ledgerIndex:$currentManifest[0].ledgerIndex,ledgerHash:$currentManifest[0].ledgerHash,manifestSha256:$currentManifest[0].manifestSha256,snapshotId:$currentManifest[0].snapshotId,complete:$currentManifest[0].complete},
               currentChannel:$currentChannel[0],
               checks:{
                 publicationExactMatch:($publication[0].publicationSha256 == $exact[0].publicationSha256),
                 publicationChannelMatch:($publication[0].publicationSha256 == $historyChannel[0].active.publicationSha256),
                 exactChannelMatch:($exact[0].manifestSha256 == $historyChannel[0].active.exactIndex.manifestSha256),
+                channelDataCommitMatchesBranch:($publication[0].publicationSha256 == $dataCommitPublication[0].publicationSha256 and $exact[0].manifestSha256 == $dataCommitExact[0].manifestSha256 and $dataCommitPublication[0].publicationSha256 == $dataCommitExact[0].publicationSha256),
                 currentChannelMatch:($currentManifest[0].manifestSha256 == $currentChannel[0].active.manifestSha256 and $currentManifest[0].snapshotId == $currentChannel[0].active.snapshotId),
                 crossLayerTargetMatch:($publication[0].endLedgerIndex == $currentManifest[0].ledgerIndex and $publication[0].endLedgerHash == $currentManifest[0].ledgerHash)
               }
