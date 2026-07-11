@@ -1,17 +1,6 @@
 name: Fast lane shadow remote write canary
 
 on:
-  push:
-    branches:
-      - ops/fast-lane-shadow-write-canary
-    paths:
-      - '.github/workflows/fast-lane-shadow-write-canary.yml'
-      - 'migrations/0018_fast_lane_shadow_persistence.sql'
-      - 'scripts/build-fast-lane-shadow-canary.ts'
-      - 'src/collector/incremental/coalesced-overlay-mutations.ts'
-      - 'src/collector/incremental/fast-lane-shadow-plan.ts'
-      - 'src/worker/repositories/fast-lane-shadow-repository.ts'
-      - 'vite.fast-lane-shadow-canary.config.ts'
   pull_request:
     branches:
       - main
@@ -23,6 +12,10 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  group: fast-lane-shadow-remote-write-canary
+  cancel-in-progress: true
 
 env:
   CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
