@@ -47,7 +47,13 @@ interface VerificationRow {
   objectType: SampleRow['object_type']
   objectId: string
   operation: SampleRow['operation']
-  status: 'matched' | 'deleted_matched' | 'mismatch' | 'unexpected_present' | 'rpc_error'
+  status:
+    | 'matched'
+    | 'semantic_matched_raw_diff'
+    | 'deleted_matched'
+    | 'mismatch'
+    | 'unexpected_present'
+    | 'rpc_error'
   message: string | null
   mismatchPaths?: string[]
 }
@@ -125,6 +131,13 @@ function mismatchPaths(left: unknown, right: unknown, prefix = '', output: strin
 
   output.push(prefix || '$')
   return output
+}
+
+function withoutRaw(value: unknown): unknown {
+  if (!isRecord(value)) return value
+  const copy: Record<string, unknown> = { ...value }
+  delete copy.raw
+  return copy
 }
 
 function isEntryNotFound(result: LedgerEntryResult | undefined): boolean {
@@ -251,15 +264,28 @@ async function verifyOne(endpoint: string, row: SampleRow): Promise<Verification
         message: null,
       }
     }
+
     const expectedValue = JSON.parse(row.projection_json ?? 'null') as unknown
     const observedValue = JSON.parse(observed) as unknown
+    const paths = mismatchPaths(expectedValue, observedValue)
+    if (canonicalJson(withoutRaw(expectedValue)) === canonicalJson(withoutRaw(observedValue))) {
+      return {
+        objectType: row.object_type,
+        objectId: row.object_id,
+        operation: row.operation,
+        status: 'semantic_matched_raw_diff',
+        message: 'Semantic projection matches exact ledger state; only raw metadata fields differ',
+        mismatchPaths: paths,
+      }
+    }
+
     return {
       objectType: row.object_type,
       objectId: row.object_id,
       operation: row.operation,
       status: 'mismatch',
-      message: 'Canonical projection JSON differs from exact ledger_entry normalization',
-      mismatchPaths: mismatchPaths(expectedValue, observedValue),
+      message: 'Semantic projection differs from exact ledger_entry normalization',
+      mismatchPaths: paths,
     }
   } catch (error) {
     return {
@@ -310,7 +336,12 @@ async function main(): Promise<void> {
     total[item.status] = (total[item.status] ?? 0) + 1
     return total
   }, {})
-  const failures = evidence.filter((item) => item.status !== 'matched' && item.status !== 'deleted_matched')
+  const failures = evidence.filter((item) => (
+    item.status !== 'matched'
+    && item.status !== 'semantic_matched_raw_diff'
+    && item.status !== 'deleted_matched'
+  ))
+  const rawDifferences = evidence.filter((item) => item.status === 'semantic_matched_raw_diff')
   const summary = {
     schemaVersion: 1,
     generatedAt: new Date().toISOString(),
@@ -323,6 +354,7 @@ async function main(): Promise<void> {
     },
     sampleSize: rows.length,
     counts,
+    rawDifferences,
     failures,
   }
 
