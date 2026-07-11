@@ -2,9 +2,9 @@ import type { VaultCurrentProjection } from '../../domain/lending/current-projec
 import type { ActiveSnapshotRecord } from './core-api-repository'
 import type { ListCurrentVaultsOptions, ListCurrentVaultsResult } from './d1-current-vault-reader'
 import {
-  getResolvedCurrentProjection,
-  listResolvedCurrentProjections,
-} from './base-overlay-current-reader'
+  getThreeLayerCurrentProjection as getResolvedCurrentProjection,
+  listThreeLayerCurrentProjections as listResolvedCurrentProjections,
+} from './three-layer-current-reader'
 import { CurrentStateObjectReadError } from './current-state-read-error'
 import {
   isReleaseCurrentStateSource,
