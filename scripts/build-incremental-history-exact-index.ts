@@ -287,7 +287,7 @@ async function main(): Promise<void> {
   await writeFile(join(options.outputDir, 'manifest.json'), `${canonicalJson(manifest)}\n`, 'utf8')
   process.stdout.write(`${canonicalJson({
     passed: true,
-    mergeStrategy: 'bucket-at-a-time-sorted-linear-merge',
+    mergeStrategy: 'sorted-linear-merge',
     basePublicationSha256: basePublication.publicationSha256,
     targetPublicationSha256: publication.publicationSha256,
     baseRecords,
