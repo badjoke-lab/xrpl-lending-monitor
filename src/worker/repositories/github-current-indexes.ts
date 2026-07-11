@@ -104,6 +104,12 @@ export async function findGithubRelationships(
   }
 }
 
+function crossKindMiss(error: unknown): boolean {
+  return error instanceof CurrentStateObjectReadError
+    && error.code === 'manifest_integrity_error'
+    && error.message === 'base object kind mismatch'
+}
+
 async function searchCurrentObjectId(
   source: ReleaseCurrentStateSource,
   snapshot: ActiveSnapshotRecord,
@@ -111,25 +117,32 @@ async function searchCurrentObjectId(
 ): Promise<{ data: SearchIndexValue[]; nextCursor: null; complete: true; assetReads: number }> {
   const normalized = objectId.toUpperCase()
   const kinds: readonly ReadModelKind[] = ['vault', 'loan-broker', 'loan']
-  const results = await Promise.all(kinds.map(async (kind) => ({
-    kind,
-    result: await getThreeLayerCurrentProjection({
-      db: source.db,
-      source,
-      snapshot,
-      kind,
-      objectId: normalized,
-    }),
-  })))
-  const found = results.find(({ result }) => result.item !== null)
-  return {
-    data: found
-      ? [{ category: 'object-id', reference: directReference(found.kind, normalized) }]
-      : [],
-    nextCursor: null,
-    complete: true,
-    assetReads: results.reduce((total, { result }) => total + result.assetReads, 0),
+  let assetReads = 0
+
+  for (const kind of kinds) {
+    try {
+      const result = await getThreeLayerCurrentProjection({
+        db: source.db,
+        source,
+        snapshot,
+        kind,
+        objectId: normalized,
+      })
+      assetReads += result.assetReads
+      if (result.item) {
+        return {
+          data: [{ category: 'object-id', reference: directReference(kind, normalized) }],
+          nextCursor: null,
+          complete: true,
+          assetReads,
+        }
+      }
+    } catch (error) {
+      if (!crossKindMiss(error)) throw error
+    }
   }
+
+  return { data: [], nextCursor: null, complete: true, assetReads }
 }
 
 export async function searchGithubCurrentStateExact(
