@@ -12,4 +12,5 @@ export interface Bindings
     FastLaneShadowRuntimeEnvironment {
   ASSETS: Fetcher
   DB: D1Database
+  REPLACEMENT_BASE_CUTOVER_TOKEN?: string
 }

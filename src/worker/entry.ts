@@ -1,5 +1,8 @@
 import { runIncrementalCollectorCycle } from '../collector/incremental/collector-cycle'
-import { runFastLaneShadowCycle } from '../collector/incremental/fast-lane-shadow-cycle'
+import {
+  resetFastLaneCompactShadow,
+  runFastLaneShadowCycle,
+} from '../collector/incremental/fast-lane-shadow-cycle'
 import { refreshNetworkStatus } from '../collector/network/refresh-network-status'
 import { resolveCatchUpRuntimeConfig } from '../shared/catch-up-runtime-config'
 import { resolveFastLaneShadowRuntimeConfig } from '../shared/fast-lane-shadow-runtime-config'
@@ -12,6 +15,7 @@ import { initializeCatchUpFromVerifiedBase } from './operator/catch-up-initializ
 import { diagnoseLiveContinuation, verifyLiveContinuation } from './operator/live-continuation-verification'
 import { diagnoseM1RuntimeExit, reviewM1RuntimeExit } from './operator/m1-runtime-exit'
 import { rebaseToReplacementBase } from './operator/replacement-base-rebase'
+import { bindFastLaneShadowBase } from './repositories/fast-lane-shadow-base-binding'
 import { readFastLaneShadowDiff } from './repositories/fast-lane-shadow-diff'
 import { saveFastLaneShadowRunMetric } from './repositories/fast-lane-shadow-run-metrics'
 import { resolveHistorySource } from './repositories/history-source'
@@ -27,6 +31,9 @@ import { serializeCollectorStatus } from './serializers/collector-status'
 
 const PROTECTED_HEAVY_INTERVAL_SECONDS = 4 * 60 * 60
 const PROTECTED_HEAVY_STATUS_STALE_AFTER_SECONDS = 5 * 60 * 60
+const FAST_LANE_SHADOW_EPOCH_ID = 'fast-lane-shadow-devnet'
+const CUTOVER_PATH = '/api/operator/replacement-base-cutover'
+const CUTOVER_TOKEN_HEADER = 'x-replacement-base-cutover-token'
 
 async function runProtectedHeavyCycle(env: Bindings): Promise<void> {
   const runtimeConfig = resolveRuntimeConfig(env)
@@ -71,8 +78,73 @@ async function runFastLaneCycle(env: Bindings): Promise<void> {
   console.log(JSON.stringify({ event: 'fast_lane_shadow_cycle', runAt, ...result }))
 }
 
+async function handleReplacementBaseCutover(
+  request: Request,
+  env: Bindings,
+): Promise<Response | null> {
+  const url = new URL(request.url)
+  if (url.pathname !== CUTOVER_PATH) return null
+  if (request.method !== 'POST') {
+    return Response.json({ error: 'method_not_allowed' }, {
+      status: 405,
+      headers: { allow: 'POST' },
+    })
+  }
+
+  const expectedToken = env.REPLACEMENT_BASE_CUTOVER_TOKEN?.trim()
+  if (!expectedToken) return new Response(null, { status: 404 })
+  const suppliedToken = request.headers.get(CUTOVER_TOKEN_HEADER)
+  if (suppliedToken !== expectedToken) {
+    return Response.json({ error: 'cutover_authorization_failed' }, { status: 403 })
+  }
+  if (env.APP_NETWORK !== 'devnet' || env.MAINNET_ENABLED !== 'false') {
+    return Response.json({ error: 'cutover_requires_devnet_only_runtime' }, { status: 409 })
+  }
+
+  const replacementBaseConfig = resolveReplacementBaseRuntimeConfig(env)
+  if (!replacementBaseConfig.rebaseEnabled || !replacementBaseConfig.target) {
+    return Response.json({ error: 'replacement_base_target_unconfigured' }, { status: 503 })
+  }
+
+  const cutoverAt = new Date().toISOString()
+  const target = replacementBaseConfig.target
+  try {
+    const rebase = await rebaseToReplacementBase({
+      db: env.DB,
+      target,
+      rebasedAt: cutoverAt,
+    })
+    await resetFastLaneCompactShadow(env.DB)
+    await bindFastLaneShadowBase({
+      db: env.DB,
+      shadowEpochId: FAST_LANE_SHADOW_EPOCH_ID,
+      base: target,
+      boundAt: cutoverAt,
+    })
+    return Response.json({
+      status: 'cutover_applied',
+      network: 'devnet',
+      target,
+      rebase,
+      fast_lane: {
+        state: 'reset_for_next_five_minute_cycle',
+        shadow_epoch_id: FAST_LANE_SHADOW_EPOCH_ID,
+        bound_at: cutoverAt,
+      },
+    })
+  } catch (error) {
+    return Response.json({
+      status: 'cutover_failed',
+      reason: error instanceof Error ? error.message : 'replacement_base_cutover_failed',
+    }, { status: 503 })
+  }
+}
+
 const worker: ExportedHandler<Bindings> = {
   async fetch(request, env, executionContext) {
+    const cutover = await handleReplacementBaseCutover(request, env)
+    if (cutover) return cutover
+
     const overview = await handleThreeLayerOverview(request, env)
     if (overview) return overview
 

@@ -50,11 +50,11 @@ export function resolveFastLaneShadowRuntimeConfig(
   )
   const readWindow = positiveInteger(env.FAST_LANE_READ_WINDOW, 8, 'FAST_LANE_READ_WINDOW')
 
-  if (maxLedgersPerRun < bootstrapLedgers) {
-    throw new Error('FAST_LANE_MAX_LEDGERS_PER_RUN must be at least FAST_LANE_BOOTSTRAP_LEDGERS')
-  }
   if (reanchorLagLedgers < maxLedgersPerRun) {
     throw new Error('FAST_LANE_REANCHOR_LAG_LEDGERS must be at least FAST_LANE_MAX_LEDGERS_PER_RUN')
+  }
+  if (reanchorLagLedgers < bootstrapLedgers) {
+    throw new Error('FAST_LANE_REANCHOR_LAG_LEDGERS must be at least FAST_LANE_BOOTSTRAP_LEDGERS')
   }
 
   return {
