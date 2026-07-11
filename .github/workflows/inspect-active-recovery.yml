@@ -1,0 +1,70 @@
+name: Inspect active history recovery
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/inspect-active-recovery.yml'
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Capture active recovery runs and candidate heads
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=active-recovery-inspection
+          mkdir -p "${ROOT}"
+
+          gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/rolling-checkpoint-candidate.yml/runs?event=workflow_dispatch&per_page=30" \
+            > "${ROOT}/candidate-runs.json"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/runs?event=workflow_dispatch&per_page=30" \
+            > "${ROOT}/cutover-runs.json"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/29159331856" \
+            > "${ROOT}/recovery-parent.json"
+
+          jq '[.workflow_runs[] | {id,name,status,conclusion,created_at,updated_at,head_branch,head_sha,html_url}]' \
+            "${ROOT}/candidate-runs.json" > "${ROOT}/candidate-runs-summary.json"
+          jq '[.workflow_runs[] | {id,name,status,conclusion,created_at,updated_at,head_branch,head_sha,html_url}]' \
+            "${ROOT}/cutover-runs.json" > "${ROOT}/cutover-runs-summary.json"
+
+          for BRANCH in \
+            history-rolling-next-candidate-data \
+            current-state-rolling-next-candidate-data \
+            history-rolling-recovery-b-data \
+            current-state-rolling-recovery-b-data \
+            history-data \
+            current-state-data; do
+            gh api "repos/${GITHUB_REPOSITORY}/branches/${BRANCH}" \
+              > "${ROOT}/branch-${BRANCH}.json"
+          done
+
+          ACTIVE_CANDIDATE_IDS="$(jq -r '[.workflow_runs[] | select(.status == "in_progress" or .status == "queued") | .id] | join(",")' "${ROOT}/candidate-runs.json")"
+          jq -n \
+            --arg activeCandidateIds "${ACTIVE_CANDIDATE_IDS}" \
+            --slurpfile parent "${ROOT}/recovery-parent.json" \
+            --slurpfile candidates "${ROOT}/candidate-runs-summary.json" \
+            --slurpfile cutovers "${ROOT}/cutover-runs-summary.json" \
+            '{activeCandidateRunIds:($activeCandidateIds | split(",") | map(select(length > 0) | tonumber)),parent:$parent[0],candidateRuns:$candidates[0],cutoverRuns:$cutovers[0]}' \
+            > "${ROOT}/summary.json"
+
+          cat "${ROOT}/summary.json"
+
+      - name: Upload inspection
+        uses: actions/upload-artifact@v4
+        with:
+          name: active-recovery-inspection
+          path: active-recovery-inspection
+          if-no-files-found: error
+          retention-days: 7
