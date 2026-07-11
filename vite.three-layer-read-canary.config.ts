@@ -12,3 +12,5 @@ export default defineConfig({
     },
   },
 })
+
+// Keep the verifier build isolated from the Worker bundle.
