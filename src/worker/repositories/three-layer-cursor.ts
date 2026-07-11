@@ -54,24 +54,37 @@ function decodeText(value: string): string {
   return new TextDecoder().decode(decodeBytes(value))
 }
 
+function hexToText(value: string): string {
+  const bytes = new Uint8Array(value.length / 2)
+  for (let index = 0; index < bytes.length; index += 1) {
+    bytes[index] = Number.parseInt(value.slice(index * 2, index * 2 + 2), 16)
+  }
+  return new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+}
+
+function textToHex(value: string): string {
+  return Array.from(
+    new TextEncoder().encode(value),
+    (byte) => byte.toString(16).padStart(2, '0'),
+  ).join('')
+}
+
 function compactCanonicalCursor(value: string | null): string | null {
   if (value === null) return null
   if (value.length % 2 === 0 && /^[a-f0-9]+$/i.test(value)) {
-    const bytes = new Uint8Array(value.length / 2)
-    for (let index = 0; index < bytes.length; index += 1) {
-      bytes[index] = Number.parseInt(value.slice(index * 2, index * 2 + 2), 16)
+    try {
+      return `j${hexToText(value)}`
+    } catch {
+      // Preserve unusual non-UTF-8 cursors through the generic representation.
     }
-    return `h${encodeBytes(bytes)}`
   }
-  return `u${encodeText(value)}`
+  return `u${value}`
 }
 
 function expandCanonicalCursor(value: string | null): string | null {
   if (value === null) return null
-  if (value.startsWith('h')) {
-    return Array.from(decodeBytes(value.slice(1)), (byte) => byte.toString(16).padStart(2, '0')).join('')
-  }
-  if (value.startsWith('u')) return decodeText(value.slice(1))
+  if (value.startsWith('j')) return textToHex(value.slice(1))
+  if (value.startsWith('u')) return value.slice(1)
   throw new Error('invalid canonical cursor encoding')
 }
 
