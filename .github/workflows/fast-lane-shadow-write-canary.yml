@@ -1,0 +1,127 @@
+name: Fast lane shadow remote write canary
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/fast-lane-shadow-write-canary.yml'
+      - 'scripts/build-fast-lane-shadow-canary.ts'
+      - 'vite.fast-lane-shadow-canary.config.ts'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fast-lane-shadow-remote-write-canary
+  cancel-in-progress: true
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+jobs:
+  write-canary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Create evidence directory
+        run: mkdir -p fast-lane-shadow-canary-evidence
+
+      - name: Capture remote migration state before apply
+        run: pnpm exec wrangler d1 migrations list xrpl-lending-monitor --remote | tee fast-lane-shadow-canary-evidence/migrations-before.txt
+
+      - name: Apply isolated shadow migration
+        run: pnpm exec wrangler d1 migrations apply xrpl-lending-monitor --remote
+
+      - name: Verify remote migration state after apply
+        run: pnpm exec wrangler d1 migrations list xrpl-lending-monitor --remote | tee fast-lane-shadow-canary-evidence/migrations-after.txt
+
+      - name: Reset isolated shadow tables
+        shell: bash
+        run: |
+          cat > /tmp/fast-lane-shadow-reset.sql <<'SQL'
+          DELETE FROM fast_lane_shadow_commit_guards;
+          DELETE FROM fast_lane_shadow_windows;
+          DELETE FROM fast_lane_shadow_objects;
+          DELETE FROM fast_lane_shadow_state;
+          SQL
+          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote \
+            --file /tmp/fast-lane-shadow-reset.sql \
+            --json > fast-lane-shadow-canary-evidence/reset.json
+
+      - name: Build canary runner
+        run: pnpm exec vite build --config vite.fast-lane-shadow-canary.config.ts
+
+      - name: Replay one verified active five-minute Devnet window and render exact shadow SQL
+        run: |
+          node .fast-lane-shadow-canary-build/build-fast-lane-shadow-canary.mjs \
+            --endpoint https://devnet.honeycluster.io/ \
+            --end-ledger 3549229 \
+            --max-ledgers 90 \
+            --read-window 8 \
+            --output-sql /tmp/fast-lane-shadow-canary.sql \
+            --output-summary fast-lane-shadow-canary-evidence/plan.json
+          test "$(jq -r '.source.lendingTransactions' fast-lane-shadow-canary-evidence/plan.json)" -gt 0
+          test "$(jq -r '.persistencePlan.coalescedObjectRows' fast-lane-shadow-canary-evidence/plan.json)" -gt 0
+
+      - name: Execute isolated shadow write canary
+        run: |
+          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote \
+            --file /tmp/fast-lane-shadow-canary.sql \
+            --json > fast-lane-shadow-canary-evidence/execute-raw.txt
+          sed -n '/^\[/,$p' fast-lane-shadow-canary-evidence/execute-raw.txt \
+            > fast-lane-shadow-canary-evidence/execute.json
+          jq -e 'type == "array" and length > 0 and all(.[]; .success == true)' \
+            fast-lane-shadow-canary-evidence/execute.json > /dev/null
+
+      - name: Query isolated shadow state after canary
+        run: |
+          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote \
+            --command "SELECT * FROM fast_lane_shadow_state; SELECT COUNT(*) AS object_count FROM fast_lane_shadow_objects; SELECT COUNT(*) AS window_count FROM fast_lane_shadow_windows;" \
+            --json > fast-lane-shadow-canary-evidence/state-after.json
+
+      - name: Build and verify retained canary evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROWS_WRITTEN="$(jq '[.. | objects | .meta?.rows_written? // empty] | add // 0' fast-lane-shadow-canary-evidence/execute.json)"
+          ROWS_READ="$(jq '[.. | objects | .meta?.rows_read? // empty] | add // 0' fast-lane-shadow-canary-evidence/execute.json)"
+          PLANNED_OBJECTS="$(jq -r '.persistencePlan.coalescedObjectRows' fast-lane-shadow-canary-evidence/plan.json)"
+          PREPARED_STATEMENTS="$(jq -r '.persistencePlan.preparedStatements' fast-lane-shadow-canary-evidence/plan.json)"
+          LENDING_TX="$(jq -r '.source.lendingTransactions' fast-lane-shadow-canary-evidence/plan.json)"
+          OBJECT_COUNT="$(jq -r '.[1].results[0].object_count' fast-lane-shadow-canary-evidence/state-after.json)"
+          WINDOW_COUNT="$(jq -r '.[2].results[0].window_count' fast-lane-shadow-canary-evidence/state-after.json)"
+          test "${ROWS_WRITTEN}" -gt 0
+          test "${ROWS_WRITTEN}" -lt 2000
+          test "${OBJECT_COUNT}" -eq "${PLANNED_OBJECTS}"
+          test "${WINDOW_COUNT}" -eq 1
+          jq -n \
+            --argjson rows_written "${ROWS_WRITTEN}" \
+            --argjson rows_read "${ROWS_READ}" \
+            --argjson planned_objects "${PLANNED_OBJECTS}" \
+            --argjson prepared_statements "${PREPARED_STATEMENTS}" \
+            --argjson lending_transactions "${LENDING_TX}" \
+            --argjson object_count "${OBJECT_COUNT}" \
+            --argjson window_count "${WINDOW_COUNT}" \
+            '{schemaVersion:1,passed:true,rows_written:$rows_written,rows_read:$rows_read,planned_coalesced_objects:$planned_objects,prepared_statements:$prepared_statements,lending_transactions:$lending_transactions,object_count:$object_count,window_count:$window_count}' \
+            > fast-lane-shadow-canary-evidence/summary.json
+          cat fast-lane-shadow-canary-evidence/summary.json
+
+      - name: Upload retained canary evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: fast-lane-shadow-remote-write-canary
+          path: fast-lane-shadow-canary-evidence
+          if-no-files-found: warn
+          retention-days: 14
