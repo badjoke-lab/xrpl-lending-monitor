@@ -115,16 +115,6 @@ source = replaceExactlyOnce(
   'summary collector evidence',
 )
 
-source = replaceExactlyOnce(
-  source,
-  `  \`- Collector: **\${summary.collector.status}**, cursor \`\${summary.collector.cursor}\`, head \`\${summary.collector.head}\`, lag \`\${summary.collector.lag}\`\`,
-`,
-  `  \`- Current state: **\${summary.collector.status}** via \`\${summary.collector.freshness_source}\`, ledger \`\${summary.collector.cursor}\`, lag \`\${summary.collector.lag}\`\`,
-  \`- Canonical refresh: **\${summary.collector.canonical_status}**, cursor \`\${summary.collector.canonical_cursor}\`, head \`\${summary.collector.canonical_head}\`, lag \`\${summary.collector.canonical_lag}\`\`,
-`,
-  'summary markdown freshness evidence',
-)
-
 await writeFile(generatedPath, source, 'utf8')
 try {
   await import(`${pathToFileURL(generatedPath).href}?run=${Date.now()}`)
