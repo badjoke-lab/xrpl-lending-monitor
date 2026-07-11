@@ -1,0 +1,383 @@
+name: Final near-head recovery and cutover
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/final-near-head-cutover.yml'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: final-near-head-recovery-and-cutover-20260712
+  cancel-in-progress: false
+
+jobs:
+  recover-and-cutover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+      MAX_CYCLES: '3'
+      MAX_DELTA_LEDGERS: '5000'
+      TARGET_MAX_LAG_LEDGERS: '600'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Bind aligned 3570657 source pair
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=final-near-head-cutover
+          mkdir -p "${ROOT}"
+
+          fetch_json() {
+            local branch="$1"
+            local path="$2"
+            local output="$3"
+            for attempt in $(seq 1 30); do
+              if gh api --method GET \
+                "repos/${REPOSITORY}/contents/${path}" \
+                -f ref="${branch}" \
+                --jq '.content' 2>/dev/null \
+                | tr -d '\n' | base64 --decode > "${output}"; then
+                test -s "${output}" && return 0
+              fi
+              sleep 10
+            done
+            return 1
+          }
+
+          fetch_json history-rolling-next-candidate-data history/publication.json "${ROOT}/initial-publication.json"
+          fetch_json current-state-rolling-next-candidate-data read-model/manifest.json "${ROOT}/initial-current.json"
+
+          SOURCE_LEDGER="$(jq -r '.endLedgerIndex' "${ROOT}/initial-publication.json")"
+          SOURCE_HASH="$(jq -r '.endLedgerHash' "${ROOT}/initial-publication.json")"
+          test "${SOURCE_LEDGER}" = '3570657'
+          test "${SOURCE_LEDGER}" = "$(jq -r '.ledgerIndex' "${ROOT}/initial-current.json")"
+          test "${SOURCE_HASH}" = "$(jq -r '.ledgerHash' "${ROOT}/initial-current.json")"
+          test "$(jq -r '.complete' "${ROOT}/initial-publication.json")" = true
+          test "$(jq -r '.complete' "${ROOT}/initial-current.json")" = true
+
+      - name: Advance one aligned candidate at a time to near head
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=final-near-head-cutover
+          : > "${ROOT}/cycles.ndjson"
+
+          SOURCE_HISTORY='history-rolling-next-candidate-data'
+          SOURCE_CURRENT='current-state-rolling-next-candidate-data'
+          OUTPUT_HISTORY='history-rolling-recovery-b-data'
+          OUTPUT_CURRENT='current-state-rolling-recovery-b-data'
+
+          fetch_json() {
+            local branch="$1"
+            local path="$2"
+            local output="$3"
+            for attempt in $(seq 1 30); do
+              if gh api --method GET \
+                "repos/${REPOSITORY}/contents/${path}" \
+                -f ref="${branch}" \
+                --jq '.content' 2>/dev/null \
+                | tr -d '\n' | base64 --decode > "${output}"; then
+                test -s "${output}" && return 0
+              fi
+              sleep 10
+            done
+            return 1
+          }
+
+          live_head() {
+            local prefix="$1"
+            jq -n '{method:"ledger",params:[{ledger_index:"validated",transactions:false,expand:false}]}' \
+              > "${ROOT}/${prefix}-request.json"
+            curl --fail-with-body --silent --show-error --retry 3 \
+              -H 'content-type: application/json' \
+              --data @"${ROOT}/${prefix}-request.json" \
+              https://devnet.honeycluster.io/ \
+              > "${ROOT}/${prefix}-response.json"
+            jq -r '.result.ledger_index // .result.ledger.ledger_index' \
+              "${ROOT}/${prefix}-response.json"
+          }
+
+          require_no_active_candidate() {
+            local output="$1"
+            gh api \
+              "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-candidate.yml/runs?per_page=100" \
+              > "${output}"
+            jq -e '
+              [.workflow_runs[] | select(.status == "queued" or .status == "in_progress" or .status == "pending" or .status == "waiting" or .status == "requested")] | length == 0
+            ' "${output}" > /dev/null
+          }
+
+          for cycle in $(seq 1 "${MAX_CYCLES}"); do
+            CYCLE_ROOT="${ROOT}/cycle-${cycle}"
+            mkdir -p "${CYCLE_ROOT}"
+
+            fetch_json "${SOURCE_HISTORY}" history/publication.json "${CYCLE_ROOT}/source-publication.json"
+            fetch_json "${SOURCE_CURRENT}" read-model/manifest.json "${CYCLE_ROOT}/source-current.json"
+            SOURCE_LEDGER="$(jq -r '.endLedgerIndex' "${CYCLE_ROOT}/source-publication.json")"
+            SOURCE_HASH="$(jq -r '.endLedgerHash' "${CYCLE_ROOT}/source-publication.json")"
+            test "${SOURCE_LEDGER}" = "$(jq -r '.ledgerIndex' "${CYCLE_ROOT}/source-current.json")"
+            test "${SOURCE_HASH}" = "$(jq -r '.ledgerHash' "${CYCLE_ROOT}/source-current.json")"
+
+            LIVE_BEFORE="$(live_head "cycle-${cycle}-before")"
+            LAG_BEFORE="$((LIVE_BEFORE - SOURCE_LEDGER))"
+            if [ "${LAG_BEFORE}" -lt 0 ]; then LAG_BEFORE=0; fi
+
+            if [ "${LAG_BEFORE}" -le "${TARGET_MAX_LAG_LEDGERS}" ]; then
+              jq -n \
+                --argjson cycle "${cycle}" \
+                --arg history "${SOURCE_HISTORY}" \
+                --arg current "${SOURCE_CURRENT}" \
+                --argjson ledger "${SOURCE_LEDGER}" \
+                --arg hash "${SOURCE_HASH}" \
+                --argjson live "${LIVE_BEFORE}" \
+                --argjson lag "${LAG_BEFORE}" \
+                '{cycle:$cycle,skipped:true,reason:"near_head",output:{historyBranch:$history,currentStateBranch:$current,ledgerIndex:$ledger,ledgerHash:$hash},live:{ledgerIndex:$live,lagLedgers:$lag}}' \
+                | tee "${CYCLE_ROOT}/summary.json" >> "${ROOT}/cycles.ndjson"
+              break
+            fi
+
+            require_no_active_candidate "${CYCLE_ROOT}/active-before.json"
+            gh api \
+              "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-candidate.yml/runs?per_page=100" \
+              --jq '.workflow_runs[].id' \
+              > "${CYCLE_ROOT}/run-ids-before.txt"
+
+            jq -n \
+              --arg ref main \
+              --arg sourceHistory "${SOURCE_HISTORY}" \
+              --arg sourceCurrent "${SOURCE_CURRENT}" \
+              --arg outputHistory "${OUTPUT_HISTORY}" \
+              --arg outputCurrent "${OUTPUT_CURRENT}" \
+              '{ref:$ref,inputs:{source_history_branch:$sourceHistory,source_current_state_branch:$sourceCurrent,history_candidate_branch:$outputHistory,current_state_candidate_branch:$outputCurrent,max_delta_ledgers:"5000",segment_ledgers:"500",read_window_size:"4"}}' \
+              > "${CYCLE_ROOT}/dispatch.json"
+            gh api --method POST \
+              "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-candidate.yml/dispatches" \
+              --input "${CYCLE_ROOT}/dispatch.json"
+
+            RUN_ID=''
+            for attempt in $(seq 1 60); do
+              gh api \
+                "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-candidate.yml/runs?event=workflow_dispatch&per_page=100" \
+                > "${CYCLE_ROOT}/runs-after.json"
+              mapfile -t NEW_IDS < <(
+                jq -r '.workflow_runs | sort_by(.created_at) | reverse | .[].id' "${CYCLE_ROOT}/runs-after.json" \
+                  | while IFS= read -r id; do
+                      if ! grep -Fxq "${id}" "${CYCLE_ROOT}/run-ids-before.txt"; then printf '%s\n' "${id}"; fi
+                    done
+              )
+              if [ "${#NEW_IDS[@]}" -eq 1 ]; then
+                RUN_ID="${NEW_IDS[0]}"
+                break
+              fi
+              if [ "${#NEW_IDS[@]}" -gt 1 ]; then
+                echo 'More than one new rolling candidate run appeared' >&2
+                exit 1
+              fi
+              sleep 10
+            done
+            test -n "${RUN_ID}"
+            printf '%s\n' "${RUN_ID}" > "${CYCLE_ROOT}/run-id.txt"
+
+            for attempt in $(seq 1 360); do
+              gh api "repos/${REPOSITORY}/actions/runs/${RUN_ID}" > "${CYCLE_ROOT}/run.json"
+              if [ "$(jq -r '.status' "${CYCLE_ROOT}/run.json")" = completed ]; then break; fi
+              sleep 30
+            done
+            test "$(jq -r '.status' "${CYCLE_ROOT}/run.json")" = completed
+
+            gh api "repos/${REPOSITORY}/actions/runs/${RUN_ID}/jobs?per_page=100" \
+              > "${CYCLE_ROOT}/jobs.json"
+            for step in \
+              'Bind source pair and freeze bounded target' \
+              'Generate bounded delta with configured read window' \
+              'Verify delta and build target publication' \
+              'Build target exact index incrementally' \
+              'Build target current state from best available base' \
+              'Publish history candidate branch' \
+              'Publish current-state candidate branch' \
+              'Rehearse remote candidate pair'; do
+              jq -e --arg name "${step}" '
+                [.jobs[].steps[] | select(.name == $name)] | length == 1 and .[0].conclusion == "success"
+              ' "${CYCLE_ROOT}/jobs.json" > /dev/null
+            done
+
+            fetch_json "${OUTPUT_HISTORY}" history/publication.json "${CYCLE_ROOT}/output-publication.json"
+            fetch_json "${OUTPUT_CURRENT}" read-model/manifest.json "${CYCLE_ROOT}/output-current.json"
+            OUTPUT_LEDGER="$(jq -r '.endLedgerIndex' "${CYCLE_ROOT}/output-publication.json")"
+            OUTPUT_HASH="$(jq -r '.endLedgerHash' "${CYCLE_ROOT}/output-publication.json")"
+            test "$(jq -r '.complete' "${CYCLE_ROOT}/output-publication.json")" = true
+            test "$(jq -r '.complete' "${CYCLE_ROOT}/output-current.json")" = true
+            test "${OUTPUT_LEDGER}" -gt "${SOURCE_LEDGER}"
+            test "${OUTPUT_LEDGER}" -le "$((SOURCE_LEDGER + MAX_DELTA_LEDGERS))"
+            test "${OUTPUT_LEDGER}" = "$(jq -r '.ledgerIndex' "${CYCLE_ROOT}/output-current.json")"
+            test "${OUTPUT_HASH}" = "$(jq -r '.ledgerHash' "${CYCLE_ROOT}/output-current.json")"
+
+            LIVE_AFTER="$(live_head "cycle-${cycle}-after")"
+            LAG_AFTER="$((LIVE_AFTER - OUTPUT_LEDGER))"
+            if [ "${LAG_AFTER}" -lt 0 ]; then LAG_AFTER=0; fi
+            jq -n \
+              --argjson cycle "${cycle}" \
+              --argjson runId "${RUN_ID}" \
+              --arg childConclusion "$(jq -r '.conclusion' "${CYCLE_ROOT}/run.json")" \
+              --arg history "${OUTPUT_HISTORY}" \
+              --arg current "${OUTPUT_CURRENT}" \
+              --argjson ledger "${OUTPUT_LEDGER}" \
+              --arg hash "${OUTPUT_HASH}" \
+              --argjson live "${LIVE_AFTER}" \
+              --argjson lag "${LAG_AFTER}" \
+              '{cycle:$cycle,passed:true,childRunId:$runId,childConclusion:$childConclusion,coreCandidateStepsPassed:true,output:{historyBranch:$history,currentStateBranch:$current,ledgerIndex:$ledger,ledgerHash:$hash},live:{ledgerIndex:$live,lagLedgers:$lag}}' \
+              | tee "${CYCLE_ROOT}/summary.json" >> "${ROOT}/cycles.ndjson"
+
+            SOURCE_HISTORY="${OUTPUT_HISTORY}"
+            SOURCE_CURRENT="${OUTPUT_CURRENT}"
+            if [ "${OUTPUT_HISTORY}" = 'history-rolling-recovery-b-data' ]; then
+              OUTPUT_HISTORY='history-rolling-next-candidate-data'
+              OUTPUT_CURRENT='current-state-rolling-next-candidate-data'
+            else
+              OUTPUT_HISTORY='history-rolling-recovery-b-data'
+              OUTPUT_CURRENT='current-state-rolling-recovery-b-data'
+            fi
+
+            if [ "${LAG_AFTER}" -le "${TARGET_MAX_LAG_LEDGERS}" ]; then break; fi
+          done
+
+          jq -s '.' "${ROOT}/cycles.ndjson" > "${ROOT}/cycles.json"
+          FINAL_HISTORY="$(jq -r '[.[] | select(.output != null)][-1].output.historyBranch' "${ROOT}/cycles.json")"
+          FINAL_CURRENT="$(jq -r '[.[] | select(.output != null)][-1].output.currentStateBranch' "${ROOT}/cycles.json")"
+          FINAL_LEDGER="$(jq -r '[.[] | select(.output != null)][-1].output.ledgerIndex' "${ROOT}/cycles.json")"
+          FINAL_HASH="$(jq -r '[.[] | select(.output != null)][-1].output.ledgerHash' "${ROOT}/cycles.json")"
+          FINAL_LIVE="$(live_head final)"
+          FINAL_LAG="$((FINAL_LIVE - FINAL_LEDGER))"
+          if [ "${FINAL_LAG}" -lt 0 ]; then FINAL_LAG=0; fi
+          test "${FINAL_LAG}" -le "${TARGET_MAX_LAG_LEDGERS}"
+
+          {
+            echo "FINAL_HISTORY=${FINAL_HISTORY}"
+            echo "FINAL_CURRENT=${FINAL_CURRENT}"
+            echo "FINAL_LEDGER=${FINAL_LEDGER}"
+            echo "FINAL_HASH=${FINAL_HASH}"
+            echo "FINAL_LIVE=${FINAL_LIVE}"
+            echo "FINAL_LAG=${FINAL_LAG}"
+          } >> "${GITHUB_ENV}"
+
+      - name: Dispatch exactly one guarded live cutover
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=final-near-head-cutover
+
+          gh api \
+            "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/runs?per_page=100" \
+            > "${ROOT}/cutover-active-before.json"
+          jq -e '
+            [.workflow_runs[] | select(.status == "queued" or .status == "in_progress" or .status == "pending" or .status == "waiting" or .status == "requested")] | length == 0
+          ' "${ROOT}/cutover-active-before.json" > /dev/null
+          jq -r '.workflow_runs[].id' "${ROOT}/cutover-active-before.json" \
+            > "${ROOT}/cutover-run-ids-before.txt"
+
+          jq -n \
+            --arg ref main \
+            --arg history "${FINAL_HISTORY}" \
+            --arg current "${FINAL_CURRENT}" \
+            '{ref:$ref,inputs:{history_candidate_branch:$history,current_state_candidate_branch:$current,confirm_production_write:"true"}}' \
+            > "${ROOT}/cutover-dispatch.json"
+          gh api --method POST \
+            "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/dispatches" \
+            --input "${ROOT}/cutover-dispatch.json"
+
+          CUTOVER_RUN_ID=''
+          for attempt in $(seq 1 60); do
+            gh api \
+              "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/runs?event=workflow_dispatch&per_page=100" \
+              > "${ROOT}/cutover-runs-after.json"
+            mapfile -t NEW_IDS < <(
+              jq -r '.workflow_runs | sort_by(.created_at) | reverse | .[].id' "${ROOT}/cutover-runs-after.json" \
+                | while IFS= read -r id; do
+                    if ! grep -Fxq "${id}" "${ROOT}/cutover-run-ids-before.txt"; then printf '%s\n' "${id}"; fi
+                  done
+            )
+            if [ "${#NEW_IDS[@]}" -eq 1 ]; then
+              CUTOVER_RUN_ID="${NEW_IDS[0]}"
+              break
+            fi
+            if [ "${#NEW_IDS[@]}" -gt 1 ]; then
+              echo 'More than one new live cutover run appeared' >&2
+              exit 1
+            fi
+            sleep 10
+          done
+          test -n "${CUTOVER_RUN_ID}"
+          echo "CUTOVER_RUN_ID=${CUTOVER_RUN_ID}" >> "${GITHUB_ENV}"
+          printf '%s\n' "${CUTOVER_RUN_ID}" > "${ROOT}/cutover-run-id.txt"
+
+      - name: Require successful cutover and retained evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=final-near-head-cutover
+
+          for attempt in $(seq 1 180); do
+            gh api "repos/${REPOSITORY}/actions/runs/${CUTOVER_RUN_ID}" > "${ROOT}/cutover-run.json"
+            if [ "$(jq -r '.status' "${ROOT}/cutover-run.json")" = completed ]; then break; fi
+            sleep 30
+          done
+          test "$(jq -r '.status' "${ROOT}/cutover-run.json")" = completed
+          test "$(jq -r '.conclusion' "${ROOT}/cutover-run.json")" = success
+
+          gh run download "${CUTOVER_RUN_ID}" \
+            --repo "${REPOSITORY}" \
+            --name rolling-checkpoint-live-cutover \
+            --dir "${ROOT}/cutover-artifact"
+
+          EVIDENCE="$(find "${ROOT}/cutover-artifact" -name evidence.json -type f | head -n 1)"
+          POST="$(find "${ROOT}/cutover-artifact" -name post-cutover-verification.json -type f | head -n 1)"
+          test -n "${EVIDENCE}"
+          test -n "${POST}"
+          cp "${EVIDENCE}" "${ROOT}/cutover-evidence.json"
+          cp "${POST}" "${ROOT}/post-cutover-verification.json"
+
+          jq -e --argjson target "${FINAL_LEDGER}" '
+            .passed == true
+            and .target.target.ledgerIndex == $target
+            and .schedule == "*/5 * * * *"
+            and .mainnetEnabled == false
+          ' "${ROOT}/cutover-evidence.json" > /dev/null
+          jq -e --argjson target "${FINAL_LEDGER}" '
+            .passed == true
+            and .target.ledgerIndex == $target
+            and .lagLedgers <= 10
+            and .currentStateAgeSeconds <= 600
+            and .schedule == "*/5 * * * *"
+            and .mainnetEnabled == false
+          ' "${ROOT}/post-cutover-verification.json" > /dev/null
+
+          jq -n \
+            --arg history "${FINAL_HISTORY}" \
+            --arg current "${FINAL_CURRENT}" \
+            --argjson ledger "${FINAL_LEDGER}" \
+            --arg hash "${FINAL_HASH}" \
+            --argjson liveAtDispatch "${FINAL_LIVE}" \
+            --argjson lagAtDispatch "${FINAL_LAG}" \
+            --argjson cutoverRunId "${CUTOVER_RUN_ID}" \
+            --slurpfile cycles "${ROOT}/cycles.json" \
+            --slurpfile cutover "${ROOT}/cutover-evidence.json" \
+            --slurpfile post "${ROOT}/post-cutover-verification.json" \
+            '{passed:true,finalCandidate:{historyBranch:$history,currentStateBranch:$current,ledgerIndex:$ledger,ledgerHash:$hash,liveLedgerAtDispatch:$liveAtDispatch,lagAtDispatch:$lagAtDispatch},cutoverRunId:$cutoverRunId,cycles:$cycles[0],cutover:$cutover[0],postCutover:$post[0]}' \
+            > "${ROOT}/summary.json"
+
+      - name: Upload final recovery evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: final-near-head-cutover
+          path: final-near-head-cutover
+          if-no-files-found: warn
+          retention-days: 30
