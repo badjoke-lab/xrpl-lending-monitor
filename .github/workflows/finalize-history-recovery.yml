@@ -1,0 +1,204 @@
+name: Finalize history recovery
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/finalize-history-recovery.yml'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: finalize-history-recovery-20260711
+  cancel-in-progress: false
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+      CATCHUP_RUN_ID: '29156372106'
+      REDUNDANT_CATCHUP_RUN_ID: '29157409110'
+      OLD_COMPLETION_RUN_ID: '29157409104'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Stop redundant recovery runs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p recovery-finalization
+          for RUN_ID in "${REDUNDANT_CATCHUP_RUN_ID}" "${OLD_COMPLETION_RUN_ID}"; do
+            gh api --method POST "repos/${REPOSITORY}/actions/runs/${RUN_ID}/cancel" \
+              > "recovery-finalization/cancel-${RUN_ID}.json" 2>&1 || true
+          done
+
+      - name: Wait for the pinned catch-up batch
+        shell: bash
+        run: |
+          set -euo pipefail
+          for ATTEMPT in $(seq 1 720); do
+            gh api "repos/${REPOSITORY}/actions/runs/${CATCHUP_RUN_ID}" \
+              > recovery-finalization/catchup-run.json
+            STATUS="$(jq -r '.status' recovery-finalization/catchup-run.json)"
+            if [ "${STATUS}" = completed ]; then break; fi
+            sleep 30
+          done
+          test "$(jq -r '.status' recovery-finalization/catchup-run.json)" = completed
+          test "$(jq -r '.conclusion' recovery-finalization/catchup-run.json)" = success
+
+      - name: Resolve and verify the final aligned candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh run download "${CATCHUP_RUN_ID}" \
+            --repo "${REPOSITORY}" \
+            --name history-catchup-batch \
+            --dir recovery-finalization/catchup-artifact
+
+          SUMMARY="$(find recovery-finalization/catchup-artifact -name summary.json -type f | head -n 1)"
+          test -n "${SUMMARY}"
+          cp "${SUMMARY}" recovery-finalization/catchup-summary.json
+          jq -e '
+            .passed == true
+            and .live.remainingLagLedgers <= 300
+            and (.finalCandidate.historyBranch | type == "string" and length > 0)
+            and (.finalCandidate.currentStateBranch | type == "string" and length > 0)
+            and (.finalCandidate.ledgerIndex | type == "number")
+            and (.finalCandidate.ledgerHash | test("^[A-F0-9]{64}$"))
+          ' recovery-finalization/catchup-summary.json > /dev/null
+
+          HISTORY_BRANCH="$(jq -r '.finalCandidate.historyBranch' recovery-finalization/catchup-summary.json)"
+          CURRENT_BRANCH="$(jq -r '.finalCandidate.currentStateBranch' recovery-finalization/catchup-summary.json)"
+          TARGET_LEDGER="$(jq -r '.finalCandidate.ledgerIndex' recovery-finalization/catchup-summary.json)"
+          TARGET_HASH="$(jq -r '.finalCandidate.ledgerHash' recovery-finalization/catchup-summary.json)"
+
+          gh api --method GET \
+            "repos/${REPOSITORY}/contents/history/publication.json" \
+            -f ref="${HISTORY_BRANCH}" --jq '.content' \
+            | tr -d '\n' | base64 --decode \
+            > recovery-finalization/final-publication.json
+          gh api --method GET \
+            "repos/${REPOSITORY}/contents/read-model/manifest.json" \
+            -f ref="${CURRENT_BRANCH}" --jq '.content' \
+            | tr -d '\n' | base64 --decode \
+            > recovery-finalization/final-current-manifest.json
+
+          jq -e --argjson ledger "${TARGET_LEDGER}" --arg hash "${TARGET_HASH}" '
+            .complete == true and .endLedgerIndex == $ledger and .endLedgerHash == $hash
+          ' recovery-finalization/final-publication.json > /dev/null
+          jq -e --argjson ledger "${TARGET_LEDGER}" --arg hash "${TARGET_HASH}" '
+            .complete == true and .ledgerIndex == $ledger and .ledgerHash == $hash
+          ' recovery-finalization/final-current-manifest.json > /dev/null
+
+          {
+            echo "FINAL_HISTORY_BRANCH=${HISTORY_BRANCH}"
+            echo "FINAL_CURRENT_BRANCH=${CURRENT_BRANCH}"
+            echo "FINAL_TARGET_LEDGER=${TARGET_LEDGER}"
+            echo "FINAL_TARGET_HASH=${TARGET_HASH}"
+          } >> "${GITHUB_ENV}"
+
+      - name: Dispatch exactly one guarded live cutover
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api \
+            "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/runs?event=workflow_dispatch&per_page=100" \
+            --jq '.workflow_runs[].id' \
+            > recovery-finalization/cutover-run-ids-before.txt
+
+          jq -n \
+            --arg ref main \
+            --arg history "${FINAL_HISTORY_BRANCH}" \
+            --arg current "${FINAL_CURRENT_BRANCH}" \
+            '{ref:$ref,inputs:{history_candidate_branch:$history,current_state_candidate_branch:$current,confirm_production_write:"true"}}' \
+            > recovery-finalization/cutover-dispatch.json
+          gh api --method POST \
+            "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/dispatches" \
+            --input recovery-finalization/cutover-dispatch.json
+
+          CUTOVER_RUN_ID=''
+          for ATTEMPT in $(seq 1 60); do
+            gh api \
+              "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/runs?event=workflow_dispatch&per_page=100" \
+              > recovery-finalization/cutover-runs-after.json
+            while IFS= read -r CANDIDATE_ID; do
+              if ! grep -Fxq "${CANDIDATE_ID}" recovery-finalization/cutover-run-ids-before.txt; then
+                CUTOVER_RUN_ID="${CANDIDATE_ID}"
+                break
+              fi
+            done < <(jq -r '.workflow_runs | sort_by(.created_at) | reverse | .[].id' recovery-finalization/cutover-runs-after.json)
+            test -n "${CUTOVER_RUN_ID}" && break
+            sleep 10
+          done
+          test -n "${CUTOVER_RUN_ID}"
+          echo "CUTOVER_RUN_ID=${CUTOVER_RUN_ID}" >> "${GITHUB_ENV}"
+          printf '%s\n' "${CUTOVER_RUN_ID}" > recovery-finalization/cutover-run-id.txt
+
+      - name: Wait for guarded live cutover
+        shell: bash
+        run: |
+          set -euo pipefail
+          for ATTEMPT in $(seq 1 180); do
+            gh api "repos/${REPOSITORY}/actions/runs/${CUTOVER_RUN_ID}" \
+              > recovery-finalization/cutover-run.json
+            STATUS="$(jq -r '.status' recovery-finalization/cutover-run.json)"
+            if [ "${STATUS}" = completed ]; then break; fi
+            sleep 30
+          done
+          test "$(jq -r '.status' recovery-finalization/cutover-run.json)" = completed
+          test "$(jq -r '.conclusion' recovery-finalization/cutover-run.json)" = success
+
+      - name: Verify retained cutover evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh run download "${CUTOVER_RUN_ID}" \
+            --repo "${REPOSITORY}" \
+            --name rolling-checkpoint-live-cutover \
+            --dir recovery-finalization/cutover-artifact
+
+          EVIDENCE="$(find recovery-finalization/cutover-artifact -name evidence.json -type f | head -n 1)"
+          POST="$(find recovery-finalization/cutover-artifact -name post-cutover-verification.json -type f | head -n 1)"
+          test -n "${EVIDENCE}"
+          test -n "${POST}"
+          cp "${EVIDENCE}" recovery-finalization/cutover-evidence.json
+          cp "${POST}" recovery-finalization/post-cutover-verification.json
+
+          jq -e --argjson target "${FINAL_TARGET_LEDGER}" '
+            .passed == true
+            and .target.target.ledgerIndex == $target
+            and .schedule == "*/5 * * * *"
+            and .mainnetEnabled == false
+          ' recovery-finalization/cutover-evidence.json > /dev/null
+          jq -e --argjson target "${FINAL_TARGET_LEDGER}" '
+            .passed == true
+            and .target.ledgerIndex == $target
+            and .lagLedgers <= 10
+            and .currentStateAgeSeconds <= 600
+            and .schedule == "*/5 * * * *"
+            and .mainnetEnabled == false
+          ' recovery-finalization/post-cutover-verification.json > /dev/null
+
+          jq -n \
+            --slurpfile catchup recovery-finalization/catchup-summary.json \
+            --slurpfile cutover recovery-finalization/cutover-evidence.json \
+            --slurpfile post recovery-finalization/post-cutover-verification.json \
+            --argjson catchupRunId "${CATCHUP_RUN_ID}" \
+            --argjson cutoverRunId "${CUTOVER_RUN_ID}" \
+            '{passed:true,catchupRunId:$catchupRunId,cutoverRunId:$cutoverRunId,catchup:$catchup[0],cutover:$cutover[0],postCutover:$post[0]}' \
+            > recovery-finalization/summary.json
+
+      - name: Upload final recovery evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: finalized-history-recovery
+          path: recovery-finalization
+          if-no-files-found: warn
+          retention-days: 30
