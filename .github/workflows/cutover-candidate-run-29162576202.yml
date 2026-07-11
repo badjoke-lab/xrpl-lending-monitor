@@ -1,0 +1,203 @@
+name: Cut over final recovery candidate
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/cutover-candidate-run-29162576202.yml'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: final-recovery-cutover-29162576202
+  cancel-in-progress: false
+
+jobs:
+  cutover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+      CANDIDATE_RUN_ID: '29162576202'
+      HISTORY_BRANCH: history-rolling-recovery-b-data
+      CURRENT_BRANCH: current-state-rolling-recovery-b-data
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Wait for final candidate core completion
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=final-recovery-cutover
+          mkdir -p "${ROOT}"
+          for attempt in $(seq 1 360); do
+            gh api "repos/${REPOSITORY}/actions/runs/${CANDIDATE_RUN_ID}" \
+              > "${ROOT}/candidate-run.json"
+            if [ "$(jq -r '.status' "${ROOT}/candidate-run.json")" = completed ]; then break; fi
+            sleep 30
+          done
+          test "$(jq -r '.status' "${ROOT}/candidate-run.json")" = completed
+
+          gh api "repos/${REPOSITORY}/actions/runs/${CANDIDATE_RUN_ID}/jobs?per_page=100" \
+            > "${ROOT}/candidate-jobs.json"
+          for step in \
+            'Bind source pair and freeze bounded target' \
+            'Generate bounded delta with configured read window' \
+            'Verify delta and build target publication' \
+            'Build target exact index incrementally' \
+            'Build target current state from best available base' \
+            'Publish history candidate branch' \
+            'Publish current-state candidate branch' \
+            'Rehearse remote candidate pair'; do
+            jq -e --arg name "${step}" '
+              [.jobs[].steps[] | select(.name == $name)] | length == 1 and .[0].conclusion == "success"
+            ' "${ROOT}/candidate-jobs.json" > /dev/null
+          done
+
+      - name: Bind aligned near-head candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=final-recovery-cutover
+
+          gh api --method GET \
+            "repos/${REPOSITORY}/contents/history/publication.json" \
+            -f ref="${HISTORY_BRANCH}" --jq '.content' \
+            | tr -d '\n' | base64 --decode > "${ROOT}/publication.json"
+          gh api --method GET \
+            "repos/${REPOSITORY}/contents/read-model/manifest.json" \
+            -f ref="${CURRENT_BRANCH}" --jq '.content' \
+            | tr -d '\n' | base64 --decode > "${ROOT}/current.json"
+
+          TARGET_LEDGER="$(jq -r '.endLedgerIndex' "${ROOT}/publication.json")"
+          TARGET_HASH="$(jq -r '.endLedgerHash' "${ROOT}/publication.json")"
+          test "$(jq -r '.complete' "${ROOT}/publication.json")" = true
+          test "$(jq -r '.complete' "${ROOT}/current.json")" = true
+          test "${TARGET_LEDGER}" -gt 3570657
+          test "${TARGET_LEDGER}" = "$(jq -r '.ledgerIndex' "${ROOT}/current.json")"
+          test "${TARGET_HASH}" = "$(jq -r '.ledgerHash' "${ROOT}/current.json")"
+
+          jq -n '{method:"ledger",params:[{ledger_index:"validated",transactions:false,expand:false}]}' \
+            > "${ROOT}/live-head-request.json"
+          curl --fail-with-body --silent --show-error --retry 3 \
+            -H 'content-type: application/json' \
+            --data @"${ROOT}/live-head-request.json" \
+            https://devnet.honeycluster.io/ > "${ROOT}/live-head-response.json"
+          LIVE_LEDGER="$(jq -r '.result.ledger_index // .result.ledger.ledger_index' "${ROOT}/live-head-response.json")"
+          TARGET_LAG="$((LIVE_LEDGER - TARGET_LEDGER))"
+          if [ "${TARGET_LAG}" -lt 0 ]; then TARGET_LAG=0; fi
+          test "${TARGET_LAG}" -le 720
+
+          {
+            echo "TARGET_LEDGER=${TARGET_LEDGER}"
+            echo "TARGET_HASH=${TARGET_HASH}"
+            echo "LIVE_LEDGER=${LIVE_LEDGER}"
+            echo "TARGET_LAG=${TARGET_LAG}"
+          } >> "${GITHUB_ENV}"
+
+      - name: Dispatch one guarded live cutover
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=final-recovery-cutover
+          gh api \
+            "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/runs?per_page=100" \
+            > "${ROOT}/cutover-before.json"
+          jq -e '
+            [.workflow_runs[] | select(.status == "queued" or .status == "in_progress" or .status == "pending" or .status == "waiting" or .status == "requested")] | length == 0
+          ' "${ROOT}/cutover-before.json" > /dev/null
+          jq -r '.workflow_runs[].id' "${ROOT}/cutover-before.json" > "${ROOT}/cutover-run-ids-before.txt"
+
+          jq -n \
+            --arg ref main \
+            --arg history "${HISTORY_BRANCH}" \
+            --arg current "${CURRENT_BRANCH}" \
+            '{ref:$ref,inputs:{history_candidate_branch:$history,current_state_candidate_branch:$current,confirm_production_write:"true"}}' \
+            > "${ROOT}/cutover-dispatch.json"
+          gh api --method POST \
+            "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/dispatches" \
+            --input "${ROOT}/cutover-dispatch.json"
+
+          CUTOVER_RUN_ID=''
+          for attempt in $(seq 1 60); do
+            gh api \
+              "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/runs?event=workflow_dispatch&per_page=100" \
+              > "${ROOT}/cutover-after.json"
+            while IFS= read -r id; do
+              if ! grep -Fxq "${id}" "${ROOT}/cutover-run-ids-before.txt"; then
+                CUTOVER_RUN_ID="${id}"
+                break
+              fi
+            done < <(jq -r '.workflow_runs | sort_by(.created_at) | reverse | .[].id' "${ROOT}/cutover-after.json")
+            test -n "${CUTOVER_RUN_ID}" && break
+            sleep 10
+          done
+          test -n "${CUTOVER_RUN_ID}"
+          echo "CUTOVER_RUN_ID=${CUTOVER_RUN_ID}" >> "${GITHUB_ENV}"
+          printf '%s\n' "${CUTOVER_RUN_ID}" > "${ROOT}/cutover-run-id.txt"
+
+      - name: Require live cutover and freshness evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=final-recovery-cutover
+          for attempt in $(seq 1 180); do
+            gh api "repos/${REPOSITORY}/actions/runs/${CUTOVER_RUN_ID}" > "${ROOT}/cutover-run.json"
+            if [ "$(jq -r '.status' "${ROOT}/cutover-run.json")" = completed ]; then break; fi
+            sleep 30
+          done
+          test "$(jq -r '.status' "${ROOT}/cutover-run.json")" = completed
+          test "$(jq -r '.conclusion' "${ROOT}/cutover-run.json")" = success
+
+          gh run download "${CUTOVER_RUN_ID}" \
+            --repo "${REPOSITORY}" \
+            --name rolling-checkpoint-live-cutover \
+            --dir "${ROOT}/cutover-artifact"
+          EVIDENCE="$(find "${ROOT}/cutover-artifact" -name evidence.json -type f | head -n 1)"
+          POST="$(find "${ROOT}/cutover-artifact" -name post-cutover-verification.json -type f | head -n 1)"
+          test -n "${EVIDENCE}"
+          test -n "${POST}"
+          cp "${EVIDENCE}" "${ROOT}/cutover-evidence.json"
+          cp "${POST}" "${ROOT}/post-cutover-verification.json"
+
+          jq -e --argjson target "${TARGET_LEDGER}" '
+            .passed == true
+            and .target.target.ledgerIndex == $target
+            and .schedule == "*/5 * * * *"
+            and .mainnetEnabled == false
+          ' "${ROOT}/cutover-evidence.json" > /dev/null
+          jq -e --argjson target "${TARGET_LEDGER}" '
+            .passed == true
+            and .target.ledgerIndex == $target
+            and .lagLedgers <= 10
+            and .currentStateAgeSeconds <= 600
+            and .schedule == "*/5 * * * *"
+            and .mainnetEnabled == false
+          ' "${ROOT}/post-cutover-verification.json" > /dev/null
+
+          jq -n \
+            --argjson candidateRunId "${CANDIDATE_RUN_ID}" \
+            --argjson cutoverRunId "${CUTOVER_RUN_ID}" \
+            --arg historyBranch "${HISTORY_BRANCH}" \
+            --arg currentStateBranch "${CURRENT_BRANCH}" \
+            --argjson ledgerIndex "${TARGET_LEDGER}" \
+            --arg ledgerHash "${TARGET_HASH}" \
+            --argjson liveLedgerAtGate "${LIVE_LEDGER}" \
+            --argjson lagAtGate "${TARGET_LAG}" \
+            --slurpfile cutover "${ROOT}/cutover-evidence.json" \
+            --slurpfile post "${ROOT}/post-cutover-verification.json" \
+            '{passed:true,candidateRunId:$candidateRunId,cutoverRunId:$cutoverRunId,checkpoint:{historyBranch:$historyBranch,currentStateBranch:$currentStateBranch,ledgerIndex:$ledgerIndex,ledgerHash:$ledgerHash,liveLedgerAtGate:$liveLedgerAtGate,lagAtGate:$lagAtGate},cutover:$cutover[0],postCutover:$post[0]}' \
+            > "${ROOT}/summary.json"
+
+      - name: Upload final cutover evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: final-recovery-cutover
+          path: final-recovery-cutover
+          if-no-files-found: warn
+          retention-days: 30
