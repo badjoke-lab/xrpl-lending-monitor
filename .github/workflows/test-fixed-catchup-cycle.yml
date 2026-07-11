@@ -1,0 +1,102 @@
+name: Test fixed catch-up candidate
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/test-fixed-catchup-cycle.yml'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: test-fixed-catchup-candidate
+  cancel-in-progress: false
+
+jobs:
+  candidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      GH_TOKEN: ${{ github.token }}
+      IMPLEMENTATION_REF: fix/stream-incremental-exact-index
+      SOURCE_HISTORY_BRANCH: history-rolling-recovery-b-data
+      SOURCE_CURRENT_BRANCH: current-state-rolling-recovery-b-data
+      OUTPUT_HISTORY_BRANCH: history-rolling-next-candidate-data
+      OUTPUT_CURRENT_BRANCH: current-state-rolling-next-candidate-data
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Bind source at 3555657
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p fixed-catchup-candidate
+          gh api --method GET "repos/${GITHUB_REPOSITORY}/contents/history/publication.json" -f ref="${SOURCE_HISTORY_BRANCH}" --jq '.content' | tr -d '\n' | base64 --decode > fixed-catchup-candidate/source-publication.json
+          gh api --method GET "repos/${GITHUB_REPOSITORY}/contents/read-model/manifest.json" -f ref="${SOURCE_CURRENT_BRANCH}" --jq '.content' | tr -d '\n' | base64 --decode > fixed-catchup-candidate/source-current.json
+          test "$(jq -r '.endLedgerIndex' fixed-catchup-candidate/source-publication.json)" = 3555657
+          test "$(jq -r '.ledgerIndex' fixed-catchup-candidate/source-current.json)" = 3555657
+          test "$(jq -r '.endLedgerHash' fixed-catchup-candidate/source-publication.json)" = "$(jq -r '.ledgerHash' fixed-catchup-candidate/source-current.json)"
+
+      - name: Capture existing candidate runs
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/rolling-checkpoint-candidate.yml/runs?event=workflow_dispatch&per_page=100" --jq '.workflow_runs[].id' > fixed-catchup-candidate/run-ids-before.txt
+
+      - name: Dispatch candidate with fixed implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -n --arg ref "${IMPLEMENTATION_REF}" --arg sourceHistory "${SOURCE_HISTORY_BRANCH}" --arg sourceCurrent "${SOURCE_CURRENT_BRANCH}" --arg outputHistory "${OUTPUT_HISTORY_BRANCH}" --arg outputCurrent "${OUTPUT_CURRENT_BRANCH}" '{ref:$ref,inputs:{source_history_branch:$sourceHistory,source_current_state_branch:$sourceCurrent,history_candidate_branch:$outputHistory,current_state_candidate_branch:$outputCurrent,max_delta_ledgers:"5000",segment_ledgers:"500",read_window_size:"4"}}' > fixed-catchup-candidate/dispatch.json
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/actions/workflows/rolling-checkpoint-candidate.yml/dispatches" --input fixed-catchup-candidate/dispatch.json
+
+      - name: Resolve and wait for candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          RUN_ID=''
+          for ATTEMPT in $(seq 1 60); do
+            gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/rolling-checkpoint-candidate.yml/runs?event=workflow_dispatch&per_page=100" > fixed-catchup-candidate/runs-after.json
+            while IFS= read -r ID; do
+              if ! grep -Fxq "${ID}" fixed-catchup-candidate/run-ids-before.txt; then RUN_ID="${ID}"; break; fi
+            done < <(jq -r '.workflow_runs | sort_by(.created_at) | reverse | .[].id' fixed-catchup-candidate/runs-after.json)
+            test -n "${RUN_ID}" && break
+            sleep 10
+          done
+          test -n "${RUN_ID}"
+          echo "RUN_ID=${RUN_ID}" >> "${GITHUB_ENV}"
+          printf '%s\n' "${RUN_ID}" > fixed-catchup-candidate/run-id.txt
+          for ATTEMPT in $(seq 1 360); do
+            gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}" > fixed-catchup-candidate/run.json
+            test "$(jq -r '.status' fixed-catchup-candidate/run.json)" = completed && break
+            sleep 30
+          done
+          test "$(jq -r '.status' fixed-catchup-candidate/run.json)" = completed
+
+      - name: Require successful core candidate and aligned output
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/jobs?per_page=100" > fixed-catchup-candidate/jobs.json
+          for STEP in 'Bind source pair and freeze bounded target' 'Generate bounded delta with configured read window' 'Verify delta and build target publication' 'Build target exact index incrementally' 'Build target current state from best available base' 'Publish history candidate branch' 'Publish current-state candidate branch' 'Rehearse remote candidate pair'; do
+            jq -e --arg name "${STEP}" '[.jobs[].steps[] | select(.name == $name)] | length == 1 and .[0].conclusion == "success"' fixed-catchup-candidate/jobs.json > /dev/null
+          done
+          gh api --method GET "repos/${GITHUB_REPOSITORY}/contents/history/publication.json" -f ref="${OUTPUT_HISTORY_BRANCH}" --jq '.content' | tr -d '\n' | base64 --decode > fixed-catchup-candidate/output-publication.json
+          gh api --method GET "repos/${GITHUB_REPOSITORY}/contents/read-model/manifest.json" -f ref="${OUTPUT_CURRENT_BRANCH}" --jq '.content' | tr -d '\n' | base64 --decode > fixed-catchup-candidate/output-current.json
+          TARGET="$(jq -r '.endLedgerIndex' fixed-catchup-candidate/output-publication.json)"
+          test "${TARGET}" = 3560657
+          test "${TARGET}" = "$(jq -r '.ledgerIndex' fixed-catchup-candidate/output-current.json)"
+          test "$(jq -r '.endLedgerHash' fixed-catchup-candidate/output-publication.json)" = "$(jq -r '.ledgerHash' fixed-catchup-candidate/output-current.json)"
+          jq -n --argjson runId "${RUN_ID}" --argjson ledger "${TARGET}" --arg hash "$(jq -r '.endLedgerHash' fixed-catchup-candidate/output-publication.json)" '{passed:true,childRunId:$runId,target:{ledgerIndex:$ledger,ledgerHash:$hash}}' > fixed-catchup-candidate/summary.json
+
+      - name: Upload fixed candidate evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: fixed-catchup-candidate
+          path: fixed-catchup-candidate
+          if-no-files-found: warn
+          retention-days: 30
