@@ -70,6 +70,44 @@ jobs:
           printf '%s\n' "https://xrpl-lending-three-layer-read-canary.${SUBDOMAIN}.workers.dev" \
             > three-layer-canary-evidence/candidate-url.txt
 
+      - name: Capture production collection smoke responses
+        shell: bash
+        run: |
+          PRODUCTION_BASE="$(cat three-layer-canary-evidence/production-url.txt)"
+          for RESOURCE in vaults loan-brokers loans; do
+            STATUS="$(curl --silent --show-error \
+              --dump-header "three-layer-canary-evidence/production-${RESOURCE}.headers" \
+              --output "three-layer-canary-evidence/production-${RESOURCE}.json" \
+              --write-out '%{http_code}' \
+              "${PRODUCTION_BASE}/api/${RESOURCE}?limit=1&sort=id_asc")"
+            printf '%s\n' "${STATUS}" > "three-layer-canary-evidence/production-${RESOURCE}.status"
+          done
+
+      - name: Tail repeated candidate Vault requests
+        shell: bash
+        run: |
+          set +e
+          CANDIDATE_BASE="$(cat three-layer-canary-evidence/candidate-url.txt)"
+          timeout 45s pnpm exec wrangler tail \
+            --config wrangler.three-layer-read-canary.jsonc \
+            --format json \
+            > three-layer-canary-evidence/candidate-tail.jsonl 2>&1 &
+          TAIL_PID=$!
+          sleep 5
+          for ATTEMPT in 1 2 3; do
+            STATUS="$(curl --silent --show-error \
+              --dump-header "three-layer-canary-evidence/candidate-vault-attempt-${ATTEMPT}.headers" \
+              --output "three-layer-canary-evidence/candidate-vault-attempt-${ATTEMPT}.body" \
+              --write-out '%{http_code}' \
+              "${CANDIDATE_BASE}/api/vaults?limit=1&sort=id_asc")"
+            printf '%s\n' "${STATUS}" > "three-layer-canary-evidence/candidate-vault-attempt-${ATTEMPT}.status"
+            sleep 2
+          done
+          sleep 8
+          kill "${TAIL_PID}" 2>/dev/null || true
+          wait "${TAIL_PID}" 2>/dev/null || true
+          exit 0
+
       - name: Require current fast-lane differential health
         run: |
           PRODUCTION_BASE="$(cat three-layer-canary-evidence/production-url.txt)"
@@ -119,6 +157,7 @@ jobs:
           CANDIDATE_BASE="$(cat three-layer-canary-evidence/candidate-url.txt)"
           for RESOURCE in vaults loan-brokers loans; do
             STATUS="$(curl --silent --show-error \
+              --dump-header "three-layer-canary-evidence/candidate-${RESOURCE}.headers" \
               --output "three-layer-canary-evidence/candidate-${RESOURCE}.json" \
               --write-out '%{http_code}' \
               "${CANDIDATE_BASE}/api/${RESOURCE}?limit=1&sort=id_asc")"
