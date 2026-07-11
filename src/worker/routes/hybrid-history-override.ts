@@ -2,6 +2,7 @@ import { resolveRuntimeConfig } from '../../shared/runtime-config'
 import type { Bindings } from '../env'
 import {
   listHybridExactLoanLifecycle,
+  listHybridExactLoanLifecycleEvents,
   listHybridExactObjectHistory,
 } from '../repositories/hybrid-exact-history-repository'
 import {
@@ -182,6 +183,18 @@ export async function handleHybridHistoryOverride(
         error: 'invalid_filter',
         message: 'event_type is not a supported lifecycle event type',
       }, { status: 400 })
+    }
+    if (source.exactIndex && loanId !== null) {
+      const events = await listHybridExactLoanLifecycleEvents({
+        ...common,
+        exactIndex: source.exactIndex.reader,
+        list: { limit, eventType, loanId },
+      })
+      return Response.json(serializeLifecycleExplorerResponse({
+        events,
+        filters: { eventType, loanId },
+        limit,
+      }))
     }
     const result = await listHybridLoanLifecycleEvents({
       ...common,
