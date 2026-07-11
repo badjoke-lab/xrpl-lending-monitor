@@ -1,0 +1,40 @@
+name: Patch canary verifier request context
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/patch-canary-verifier-request-context.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+      - name: Add request URL context to verifier failures
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('scripts/verify-three-layer-read-canary.ts')
+          source = path.read_text()
+          old = """async function fetchJson(url: string): Promise<HttpResult> {\n  const response = await fetch(url, {\n    headers: { accept: 'application/json' },\n    signal: AbortSignal.timeout(20_000),\n  })\n  const text = await response.text()\n"""
+          new = """async function fetchJson(url: string): Promise<HttpResult> {\n  let response: Response\n  try {\n    response = await fetch(url, {\n      headers: { accept: 'application/json' },\n      signal: AbortSignal.timeout(20_000),\n    })\n  } catch (error) {\n    const message = error instanceof Error ? error.message : String(error)\n    throw new Error(`Request failed for ${url}: ${message}`)\n  }\n  const text = await response.text()\n"""
+          if source.count(old) != 1:
+              raise SystemExit(f'expected exact patch target once, found {source.count(old)}')
+          path.write_text(source.replace(old, new))
+          PY
+      - name: Remove temporary workflow and commit
+        run: |
+          git rm .github/workflows/patch-canary-verifier-request-context.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add scripts/verify-three-layer-read-canary.ts
+          git commit -m "ops: include request URL in canary timeout failures"
+          git push origin HEAD:${{ github.head_ref }}
