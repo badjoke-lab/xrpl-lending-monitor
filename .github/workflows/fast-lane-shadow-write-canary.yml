@@ -69,20 +69,27 @@ jobs:
       - name: Build canary runner
         run: pnpm exec vite build --config vite.fast-lane-shadow-canary.config.ts
 
-      - name: Scan one real five-minute Devnet window and render exact shadow SQL
+      - name: Replay one verified active five-minute Devnet window and render exact shadow SQL
         run: |
           node .fast-lane-shadow-canary-build/build-fast-lane-shadow-canary.mjs \
             --endpoint https://devnet.honeycluster.io/ \
+            --end-ledger 3549229 \
             --max-ledgers 90 \
             --read-window 8 \
             --output-sql /tmp/fast-lane-shadow-canary.sql \
             --output-summary fast-lane-shadow-canary-evidence/plan.json
+          test "$(jq -r '.source.lendingTransactions' fast-lane-shadow-canary-evidence/plan.json)" -gt 0
+          test "$(jq -r '.persistencePlan.coalescedObjectRows' fast-lane-shadow-canary-evidence/plan.json)" -gt 0
 
       - name: Execute isolated shadow write canary
         run: |
           pnpm exec wrangler d1 execute xrpl-lending-monitor --remote \
             --file /tmp/fast-lane-shadow-canary.sql \
-            --json > fast-lane-shadow-canary-evidence/execute.json
+            --json > fast-lane-shadow-canary-evidence/execute-raw.txt
+          sed -n '/^\[/,$p' fast-lane-shadow-canary-evidence/execute-raw.txt \
+            > fast-lane-shadow-canary-evidence/execute.json
+          jq -e 'type == "array" and length > 0 and all(.[]; .success == true)' \
+            fast-lane-shadow-canary-evidence/execute.json > /dev/null
 
       - name: Query isolated shadow state after canary
         run: |
@@ -99,15 +106,21 @@ jobs:
           PLANNED_OBJECTS="$(jq -r '.persistencePlan.coalescedObjectRows' fast-lane-shadow-canary-evidence/plan.json)"
           PREPARED_STATEMENTS="$(jq -r '.persistencePlan.preparedStatements' fast-lane-shadow-canary-evidence/plan.json)"
           LENDING_TX="$(jq -r '.source.lendingTransactions' fast-lane-shadow-canary-evidence/plan.json)"
+          OBJECT_COUNT="$(jq -r '.[1].results[0].object_count' fast-lane-shadow-canary-evidence/state-after.json)"
+          WINDOW_COUNT="$(jq -r '.[2].results[0].window_count' fast-lane-shadow-canary-evidence/state-after.json)"
           test "${ROWS_WRITTEN}" -gt 0
           test "${ROWS_WRITTEN}" -lt 2000
+          test "${OBJECT_COUNT}" -eq "${PLANNED_OBJECTS}"
+          test "${WINDOW_COUNT}" -eq 1
           jq -n \
             --argjson rows_written "${ROWS_WRITTEN}" \
             --argjson rows_read "${ROWS_READ}" \
             --argjson planned_objects "${PLANNED_OBJECTS}" \
             --argjson prepared_statements "${PREPARED_STATEMENTS}" \
             --argjson lending_transactions "${LENDING_TX}" \
-            '{schemaVersion:1,passed:true,rows_written:$rows_written,rows_read:$rows_read,planned_coalesced_objects:$planned_objects,prepared_statements:$prepared_statements,lending_transactions:$lending_transactions}' \
+            --argjson object_count "${OBJECT_COUNT}" \
+            --argjson window_count "${WINDOW_COUNT}" \
+            '{schemaVersion:1,passed:true,rows_written:$rows_written,rows_read:$rows_read,planned_coalesced_objects:$planned_objects,prepared_statements:$prepared_statements,lending_transactions:$lending_transactions,object_count:$object_count,window_count:$window_count}' \
             > fast-lane-shadow-canary-evidence/summary.json
           cat fast-lane-shadow-canary-evidence/summary.json
 
