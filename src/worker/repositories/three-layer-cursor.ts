@@ -18,19 +18,61 @@ export interface ThreeLayerCursorState {
   fastToken: string | null
 }
 
-function encodeBase64Url(value: string): string {
-  const bytes = new TextEncoder().encode(value)
+interface CompactCursor {
+  v: 1
+  s: string
+  k: ReadModelKind
+  d: 'a' | 'z'
+  q: string
+  c: string | null
+  o: number
+  x: boolean
+  f: string | null
+  p: number
+  y: boolean
+  t: string | null
+}
+
+function encodeBytes(bytes: Uint8Array): string {
   let binary = ''
   for (const byte of bytes) binary += String.fromCharCode(byte)
   return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
 }
 
-function decodeBase64Url(value: string): string {
+function decodeBytes(value: string): Uint8Array {
   const normalized = value.replace(/-/g, '+').replace(/_/g, '/')
   const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=')
   const binary = atob(padded)
-  const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0))
-  return new TextDecoder().decode(bytes)
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0))
+}
+
+function encodeText(value: string): string {
+  return encodeBytes(new TextEncoder().encode(value))
+}
+
+function decodeText(value: string): string {
+  return new TextDecoder().decode(decodeBytes(value))
+}
+
+function compactCanonicalCursor(value: string | null): string | null {
+  if (value === null) return null
+  if (value.length % 2 === 0 && /^[a-f0-9]+$/i.test(value)) {
+    const bytes = new Uint8Array(value.length / 2)
+    for (let index = 0; index < bytes.length; index += 1) {
+      bytes[index] = Number.parseInt(value.slice(index * 2, index * 2 + 2), 16)
+    }
+    return `h${encodeBytes(bytes)}`
+  }
+  return `u${encodeText(value)}`
+}
+
+function expandCanonicalCursor(value: string | null): string | null {
+  if (value === null) return null
+  if (value.startsWith('h')) {
+    return Array.from(decodeBytes(value.slice(1)), (byte) => byte.toString(16).padStart(2, '0')).join('')
+  }
+  if (value.startsWith('u')) return decodeText(value.slice(1))
+  throw new Error('invalid canonical cursor encoding')
 }
 
 function initialCursor(options: {
@@ -56,7 +98,21 @@ function initialCursor(options: {
 }
 
 export function encodeThreeLayerCursor(cursor: ThreeLayerCursorState): string {
-  return encodeBase64Url(JSON.stringify(cursor))
+  const compact: CompactCursor = {
+    v: 1,
+    s: cursor.snapshot,
+    k: cursor.kind,
+    d: cursor.direction === 'asc' ? 'a' : 'z',
+    q: cursor.scope,
+    c: compactCanonicalCursor(cursor.canonicalCursor),
+    o: cursor.canonicalOffset,
+    x: cursor.canonicalDone,
+    f: cursor.fastAfter,
+    p: cursor.fastOffset,
+    y: cursor.fastDone,
+    t: cursor.fastToken,
+  }
+  return encodeText(JSON.stringify(compact))
 }
 
 export function readThreeLayerCursor(options: {
@@ -68,30 +124,43 @@ export function readThreeLayerCursor(options: {
 }): ThreeLayerCursorState {
   if (!options.value) return initialCursor(options)
   try {
-    const cursor = JSON.parse(decodeBase64Url(options.value)) as Partial<ThreeLayerCursorState>
+    const compact = JSON.parse(decodeText(options.value)) as Partial<CompactCursor>
     if (
-      cursor.v !== 1
-      || cursor.snapshot !== options.snapshot.id
-      || cursor.kind !== options.kind
-      || cursor.direction !== options.list.direction
-      || cursor.scope !== options.list.scope
-      || (cursor.canonicalCursor !== null && typeof cursor.canonicalCursor !== 'string')
-      || !Number.isSafeInteger(cursor.canonicalOffset)
-      || Number(cursor.canonicalOffset) < 0
-      || typeof cursor.canonicalDone !== 'boolean'
-      || (cursor.fastAfter !== null && typeof cursor.fastAfter !== 'string')
-      || !Number.isSafeInteger(cursor.fastOffset)
-      || Number(cursor.fastOffset) < 0
-      || typeof cursor.fastDone !== 'boolean'
-      || (cursor.fastToken !== null && typeof cursor.fastToken !== 'string')
+      compact.v !== 1
+      || compact.s !== options.snapshot.id
+      || compact.k !== options.kind
+      || compact.d !== (options.list.direction === 'asc' ? 'a' : 'z')
+      || compact.q !== options.list.scope
+      || (compact.c !== null && typeof compact.c !== 'string')
+      || !Number.isSafeInteger(compact.o)
+      || Number(compact.o) < 0
+      || typeof compact.x !== 'boolean'
+      || (compact.f !== null && typeof compact.f !== 'string')
+      || !Number.isSafeInteger(compact.p)
+      || Number(compact.p) < 0
+      || typeof compact.y !== 'boolean'
+      || (compact.t !== null && typeof compact.t !== 'string')
     ) throw new Error('invalid')
-    if (cursor.fastToken !== null && cursor.fastToken !== options.fastToken) {
+    if (compact.t !== null && compact.t !== options.fastToken) {
       throw new CurrentStateObjectReadError(
         'manifest_integrity_error',
         'fast-lane read context changed during pagination',
       )
     }
-    return cursor as ThreeLayerCursorState
+    return {
+      v: 1,
+      snapshot: compact.s,
+      kind: compact.k,
+      direction: compact.d === 'a' ? 'asc' : 'desc',
+      scope: compact.q,
+      canonicalCursor: expandCanonicalCursor(compact.c),
+      canonicalOffset: compact.o,
+      canonicalDone: compact.x,
+      fastAfter: compact.f,
+      fastOffset: compact.p,
+      fastDone: compact.y,
+      fastToken: compact.t,
+    }
   } catch (error) {
     if (error instanceof CurrentStateObjectReadError) throw error
     return {
