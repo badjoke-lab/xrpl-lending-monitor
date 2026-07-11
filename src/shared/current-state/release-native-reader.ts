@@ -408,7 +408,14 @@ export class ReleaseNativeReader {
     const items: ReleaseNativeDataRecord[] = []
     let reads = 0
     for (let assetIndex = cursor.asset; assetIndex >= 0 && assetIndex < this.manifest.dataAssets.length; assetIndex += step) {
-      const loaded = await this.#data(this.manifest.dataAssets[assetIndex]!)
+      const asset = this.manifest.dataAssets[assetIndex]!
+      const kindCount = kindValue === 'vault'
+        ? asset.counts.vaults
+        : kindValue === 'loan-broker'
+          ? asset.counts.loanBrokers
+          : asset.counts.loans
+      if (kindCount === 0) continue
+      const loaded = await this.#data(asset)
       if (reads + loaded.reads > maxAssetReads) return { items, nextCursor: encodeCursor({ ...cursor, asset: assetIndex, line: 0 }), complete: false, assetReads: reads }
       reads += loaded.reads
       const records = direction === 'asc' ? loaded.records : [...loaded.records].reverse()
