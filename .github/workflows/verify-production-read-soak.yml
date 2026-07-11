@@ -11,6 +11,7 @@ on:
     paths:
       - '.github/workflows/verify-production-read-soak.yml'
       - 'scripts/verify-production-read-audit.ts'
+      - 'scripts/audit-live-source-freshness.mjs'
       - 'vite.production-read-audit.config.ts'
   workflow_dispatch:
 
@@ -28,7 +29,7 @@ concurrency:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -131,6 +132,16 @@ jobs:
             2>&1 | tee production-read-audit/verify.log
           jq -e '.passed == true and .schedule.count == 1 and .state.lagLedgers <= 10 and .fastLaneDiff.exactProjectionMismatches == 0' \
             production-read-audit/summary.json > /dev/null
+
+      - name: Compare public APIs with live XRPL Devnet source
+        run: |
+          PRODUCTION_BASE="$(cat production-read-audit/production-url.txt)"
+          PRODUCTION_BASE="${PRODUCTION_BASE}" \
+          OUTPUT_DIR="production-read-audit/live-source" \
+          XRPL_PRIMARY_RPC="https://devnet.honeycluster.io/" \
+          XRPL_FALLBACK_RPC="https://s.devnet.rippletest.net:51234/" \
+            node scripts/audit-live-source-freshness.mjs \
+            2>&1 | tee production-read-audit/live-source-audit.log
 
       - uses: actions/upload-artifact@v4
         if: ${{ always() }}
