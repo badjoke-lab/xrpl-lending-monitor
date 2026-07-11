@@ -49,6 +49,7 @@ interface VerificationRow {
   operation: SampleRow['operation']
   status: 'matched' | 'deleted_matched' | 'mismatch' | 'unexpected_present' | 'rpc_error'
   message: string | null
+  mismatchPaths?: string[]
 }
 
 function argumentValue(args: string[], name: string): string | null {
@@ -96,6 +97,34 @@ function normalizeProjection(row: SampleRow, node: Record<string, unknown>): str
   if (row.object_type === 'vault') return canonicalJson(normalizeVault(object))
   if (row.object_type === 'loan_broker') return canonicalJson(normalizeLoanBroker(object))
   return canonicalJson(normalizeLoan(object))
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function mismatchPaths(left: unknown, right: unknown, prefix = '', output: string[] = []): string[] {
+  if (output.length >= 30) return output
+  if (Object.is(left, right)) return output
+
+  if (Array.isArray(left) || Array.isArray(right)) {
+    if (!Array.isArray(left) || !Array.isArray(right) || canonicalJson(left) !== canonicalJson(right)) {
+      output.push(prefix || '$')
+    }
+    return output
+  }
+
+  if (isRecord(left) && isRecord(right)) {
+    const keys = [...new Set([...Object.keys(left), ...Object.keys(right)])].sort()
+    for (const key of keys) {
+      mismatchPaths(left[key], right[key], prefix ? `${prefix}.${key}` : key, output)
+      if (output.length >= 30) break
+    }
+    return output
+  }
+
+  output.push(prefix || '$')
+  return output
 }
 
 function isEntryNotFound(result: LedgerEntryResult | undefined): boolean {
@@ -222,12 +251,15 @@ async function verifyOne(endpoint: string, row: SampleRow): Promise<Verification
         message: null,
       }
     }
+    const expectedValue = JSON.parse(row.projection_json ?? 'null') as unknown
+    const observedValue = JSON.parse(observed) as unknown
     return {
       objectType: row.object_type,
       objectId: row.object_id,
       operation: row.operation,
       status: 'mismatch',
       message: 'Canonical projection JSON differs from exact ledger_entry normalization',
+      mismatchPaths: mismatchPaths(expectedValue, observedValue),
     }
   } catch (error) {
     return {
