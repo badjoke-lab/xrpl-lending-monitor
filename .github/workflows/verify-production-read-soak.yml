@@ -134,6 +134,7 @@ jobs:
             production-read-audit/summary.json > /dev/null
 
       - name: Compare public APIs with live XRPL Devnet source
+        if: ${{ always() }}
         run: |
           PRODUCTION_BASE="$(cat production-read-audit/production-url.txt)"
           PRODUCTION_BASE="${PRODUCTION_BASE}" \
