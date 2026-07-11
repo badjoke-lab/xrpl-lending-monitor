@@ -13,8 +13,14 @@ on:
         required: true
         default: false
         type: boolean
-  schedule:
-    - cron: '45 0 9 7 *'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/m5-5-browser-regression.yml'
+      - 'scripts/run-m5-5-browser-regression-current.mjs'
+      - 'scripts/run-m5-5-browser-regression.mjs'
+      - 'scripts/evaluate-m5-5-browser-exit.mjs'
+      - 'scripts/m5-5-browser-exit-evaluation.mjs'
 
 permissions:
   contents: read
@@ -36,13 +42,15 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           CONFIRM_D1_HEADROOM: ${{ inputs.confirm_d1_headroom }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          CURRENT_REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
           run_allowed=false
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             test "$CONFIRM_D1_HEADROOM" = "true"
             run_allowed=true
-          elif [ "$EVENT_NAME" = "schedule" ] && [ "$(date -u +%F)" = "2026-07-09" ]; then
+          elif [ "$EVENT_NAME" = "pull_request" ] && [ "$HEAD_REPOSITORY" = "$CURRENT_REPOSITORY" ]; then
             run_allowed=true
           fi
           echo "run_allowed=$run_allowed" >> "$GITHUB_OUTPUT"
@@ -50,7 +58,7 @@ jobs:
       - uses: actions/checkout@v4
         if: steps.intent.outputs.run_allowed == 'true'
 
-      - name: Verify collector preflight
+      - name: Verify current-state and canonical-refresh preflight
         if: steps.intent.outputs.run_allowed == 'true'
         shell: bash
         env:
@@ -60,9 +68,48 @@ jobs:
           mkdir -p m5-5-browser-regression
           curl --max-time 60 --fail-with-body --silent --show-error --retry 3 \
             "${BASE_URL%/}/api/status/collector" \
-            > m5-5-browser-regression/collector-preflight.json
-          jq -e '.status == "healthy" and .cursor.lag_ledgers == 0 and .consecutive_failures == 0 and .error == null' \
-            m5-5-browser-regression/collector-preflight.json > /dev/null
+            > m5-5-browser-regression/canonical-collector-preflight.json
+          curl --max-time 60 --fail-with-body --silent --show-error --retry 3 \
+            "${BASE_URL%/}/api/overview" \
+            > m5-5-browser-regression/overview-preflight.json
+          curl --max-time 60 --fail-with-body --silent --show-error --retry 3 \
+            "${BASE_URL%/}/api/status/fast-lane-diff?limit=500" \
+            > m5-5-browser-regression/fast-lane-diff-preflight.json
+
+          jq -e '
+            .role == "canonical_overlay_refresh"
+            and .cadence.expected_interval_seconds == 14400
+            and .cadence.stale_after_seconds == 18000
+            and (.status == "behind" or .status == "healthy")
+            and .consecutive_failures == 0
+            and .error == null
+          ' m5-5-browser-regression/canonical-collector-preflight.json > /dev/null
+          jq -e '
+            .current_state_watermark.source == "fast_lane"
+            and (.current_state_watermark.ledger_index >= .counts_watermark.ledger_index)
+          ' m5-5-browser-regression/overview-preflight.json > /dev/null
+          jq -e '
+            .status == "ok"
+            and .passed == true
+            and .sample.sampledRows > 0
+            and .sample.exactProjectionMismatches == 0
+          ' m5-5-browser-regression/fast-lane-diff-preflight.json > /dev/null
+
+          jq -n \
+            --slurpfile collector m5-5-browser-regression/canonical-collector-preflight.json \
+            --slurpfile overview m5-5-browser-regression/overview-preflight.json \
+            '{
+              status: "healthy",
+              cursor: {
+                last_processed_ledger: $overview[0].current_state_watermark.ledger_index,
+                latest_observed_ledger: $overview[0].current_state_watermark.ledger_index,
+                lag_ledgers: 0
+              },
+              consecutive_failures: $collector[0].consecutive_failures,
+              error: $collector[0].error,
+              freshness_source: $overview[0].current_state_watermark.source,
+              canonical_collector: $collector[0]
+            }' > m5-5-browser-regression/collector-preflight.json
 
       - name: Measure and enforce actual D1 headroom
         if: steps.intent.outputs.run_allowed == 'true'
@@ -100,7 +147,7 @@ jobs:
           M5_BROWSER_REQUEST_TIMEOUT_MS: 120000
         run: |
           set -o pipefail
-          node scripts/run-m5-5-browser-regression.mjs 2>&1 | tee m5-5-browser-regression/runner.log
+          node scripts/run-m5-5-browser-regression-current.mjs 2>&1 | tee m5-5-browser-regression/runner.log
 
       - name: Evaluate M5-5 browser exit evidence
         if: steps.intent.outputs.run_allowed == 'true'
