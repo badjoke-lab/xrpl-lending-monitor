@@ -2,10 +2,10 @@ name: Verify production read soak
 
 on:
   schedule:
-    # Temporary public-release soak window: 2026-07-11 19:17 JST through 2026-07-12 17:17 JST.
+    # Temporary public-release soak window: 2026-07-11 19:17 JST through 2026-07-12 18:17 JST.
     # Remove these dated schedules after the 24-hour reconciliation.
     - cron: '17 10,12,14,16,18,20,22 11 7 *'
-    - cron: '17 0,2,4,6,8 12 7 *'
+    - cron: '17 0,2,4,6,8,9 12 7 *'
   pull_request:
     branches: [main]
     paths:
@@ -98,25 +98,25 @@ jobs:
           jq -e 'type == "array" and length > 0 and .[0].success == true and (.[0].results | length >= 3)' \
             production-read-audit/metrics.json > /dev/null
 
-      - name: Capture rolling 24-hour fast-lane health
+      - name: Capture public-release soak-window health
         shell: bash
         run: |
           set -euo pipefail
           pnpm exec wrangler d1 execute xrpl-lending-monitor --remote \
-            --command "WITH ordered AS (SELECT run_at,status,lag_ledgers,LAG(run_at) OVER (ORDER BY run_at) AS previous_run_at FROM fast_lane_shadow_run_metrics WHERE network='devnet' AND julianday(run_at) >= julianday('now','-24 hours')) SELECT COUNT(*) AS run_count,SUM(CASE WHEN status NOT IN ('caught_up','committed','reanchored') THEN 1 ELSE 0 END) AS failure_count,COALESCE(MAX(lag_ledgers),0) AS max_lag_ledgers,COALESCE(MAX(CASE WHEN previous_run_at IS NULL THEN 0 ELSE ROUND((julianday(run_at)-julianday(previous_run_at))*86400) END),0) AS max_gap_seconds,MIN(run_at) AS first_run_at,MAX(run_at) AS last_run_at FROM ordered;" \
-            --json > production-read-audit/window-24h-raw.txt
-          sed -n '/^\[/,$p' production-read-audit/window-24h-raw.txt \
-            > production-read-audit/window-24h.json
+            --command "WITH params AS (SELECT julianday('2026-07-11T09:00:00Z') AS start_jd,julianday('2026-07-12T09:00:00Z') AS end_jd,julianday('now') AS now_jd),ordered AS (SELECT run_at,status,lag_ledgers,LAG(run_at) OVER (ORDER BY run_at) AS previous_run_at FROM fast_lane_shadow_run_metrics,params WHERE network='devnet' AND julianday(run_at) >= start_jd AND julianday(run_at) <= MIN(now_jd,end_jd)),summary AS (SELECT COUNT(*) AS run_count,SUM(CASE WHEN status NOT IN ('caught_up','committed','reanchored') THEN 1 ELSE 0 END) AS failure_count,COALESCE(MAX(lag_ledgers),0) AS max_lag_ledgers,COALESCE(MAX(CASE WHEN previous_run_at IS NULL THEN 0 ELSE ROUND((julianday(run_at)-julianday(previous_run_at))*86400) END),0) AS max_gap_seconds,MIN(run_at) AS first_run_at,MAX(run_at) AS last_run_at FROM ordered) SELECT summary.*,MAX(1,CAST(((MIN(params.now_jd,params.end_jd)-params.start_jd)*86400)/300 AS INTEGER)-2) AS expected_min_runs FROM summary,params;" \
+            --json > production-read-audit/soak-window-raw.txt
+          sed -n '/^\[/,$p' production-read-audit/soak-window-raw.txt \
+            > production-read-audit/soak-window.json
           jq -e '
             type == "array"
             and length > 0
             and .[0].success == true
             and (.[0].results | length == 1)
-            and (.[0].results[0].run_count >= 200)
+            and (.[0].results[0].run_count >= .[0].results[0].expected_min_runs)
             and (.[0].results[0].failure_count == 0)
             and (.[0].results[0].max_lag_ledgers <= 10)
             and (.[0].results[0].max_gap_seconds <= 420)
-          ' production-read-audit/window-24h.json > /dev/null
+          ' production-read-audit/soak-window.json > /dev/null
 
       - name: Verify production current-state reads and recent cron cycles
         run: |
