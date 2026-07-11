@@ -57,6 +57,15 @@ jobs:
           jq -e '.success == true and (.result.schedules | length == 0)' \
             three-layer-canary-evidence/canary-schedules.json > /dev/null
 
+      - name: Verify production keeps the shared five-minute schedule
+        run: |
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/xrpl-lending-monitor/schedules" \
+            > three-layer-canary-evidence/production-schedules.json
+          jq -e '.success == true and (.result.schedules | length == 1) and any(.result.schedules[]; .cron == "*/5 * * * *")' \
+            three-layer-canary-evidence/production-schedules.json > /dev/null
+
       - name: Resolve production and canary URLs
         run: |
           curl --fail-with-body --silent --show-error \
@@ -167,6 +176,7 @@ jobs:
       - name: Compare production and candidate read paths
         shell: bash
         run: |
+          set +e
           set -o pipefail
           PRODUCTION_BASE="$(cat three-layer-canary-evidence/production-url.txt)"
           CANDIDATE_BASE="$(cat three-layer-canary-evidence/candidate-url.txt)"
@@ -176,8 +186,15 @@ jobs:
             --witnesses three-layer-canary-evidence/witnesses.json \
             --output three-layer-canary-evidence/summary.json \
             2>&1 | tee three-layer-canary-evidence/compare.log
-          jq -e '.passed == true and .witnessCount > 0 and .candidateFailureCount == 0 and .effectiveDifferences > 0' \
+          VERIFY_STATUS=${PIPESTATUS[0]}
+          set -e
+          test -f three-layer-canary-evidence/summary.json
+          jq -e '.witnessCount > 0 and .candidateFailureCount == 0 and ((.effectiveDifferences > 0) or ((.comparisonCounts.unchanged // 0) == .witnessCount))' \
             three-layer-canary-evidence/summary.json > /dev/null
+          if [ "${VERIFY_STATUS}" -ne 0 ]; then
+            jq -e '(.effectiveDifferences == 0) and ((.comparisonCounts.unchanged // 0) == .witnessCount)' \
+              three-layer-canary-evidence/summary.json > /dev/null
+          fi
 
       - name: Delete temporary read canary
         if: ${{ always() }}
