@@ -23,7 +23,6 @@ import {
 } from './three-layer-fast-read'
 import type { ReleaseCurrentStateSource } from './release-current-state'
 
-const PAGE_SIZE = 100
 const MAX_PAGES_PER_REQUEST = 4
 
 function compareIds(left: string, right: string, direction: 'asc' | 'desc'): number {
@@ -80,7 +79,7 @@ export async function listThreeLayerCurrentProjections(options: {
         kind: options.kind,
         list: {
           ...options.list,
-          limit: PAGE_SIZE,
+          limit: options.list.limit,
           cursor: cursor.canonicalCursor ?? undefined,
         },
       })
