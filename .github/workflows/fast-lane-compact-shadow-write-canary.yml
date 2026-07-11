@@ -1,0 +1,143 @@
+name: Fast lane compact shadow remote write canary
+
+on:
+  push:
+    branches:
+      - ops/fast-lane-compact-shadow-write-canary
+    paths:
+      - '.github/workflows/fast-lane-compact-shadow-write-canary.yml'
+      - 'migrations/0019_fast_lane_compact_shadow_objects.sql'
+      - 'src/worker/repositories/fast-lane-compact-shadow-repository.ts'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fast-lane-compact-shadow-remote-write-canary
+  cancel-in-progress: true
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+jobs:
+  write-canary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Create evidence directory
+        run: mkdir -p fast-lane-compact-shadow-canary-evidence
+
+      - name: Capture remote migration state before apply
+        run: pnpm exec wrangler d1 migrations list xrpl-lending-monitor --remote | tee fast-lane-compact-shadow-canary-evidence/migrations-before.txt
+
+      - name: Apply compact shadow migration
+        run: pnpm exec wrangler d1 migrations apply xrpl-lending-monitor --remote
+
+      - name: Verify remote migration state after apply
+        run: pnpm exec wrangler d1 migrations list xrpl-lending-monitor --remote | tee fast-lane-compact-shadow-canary-evidence/migrations-after.txt
+
+      - name: Reset isolated compact shadow tables
+        shell: bash
+        run: |
+          cat > /tmp/fast-lane-compact-shadow-reset.sql <<'SQL'
+          DELETE FROM fast_lane_shadow_commit_guards;
+          DELETE FROM fast_lane_shadow_windows;
+          DELETE FROM fast_lane_shadow_objects_compact;
+          DELETE FROM fast_lane_shadow_state;
+          SQL
+          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote \
+            --file /tmp/fast-lane-compact-shadow-reset.sql \
+            --json > fast-lane-compact-shadow-canary-evidence/reset.json
+
+      - name: Bind canary runner to compact repository
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/build-fast-lane-shadow-canary.ts')
+          text = path.read_text()
+          text = text.replace(
+              "import { commitFastLaneShadowWindow } from '../src/worker/repositories/fast-lane-shadow-repository'",
+              "import { commitFastLaneCompactShadowWindow } from '../src/worker/repositories/fast-lane-compact-shadow-repository'",
+          )
+          text = text.replace('await commitFastLaneShadowWindow({', 'await commitFastLaneCompactShadowWindow({')
+          path.write_text(text)
+          PY
+          grep -q 'commitFastLaneCompactShadowWindow' scripts/build-fast-lane-shadow-canary.ts
+
+      - name: Build compact canary runner
+        run: pnpm exec vite build --config vite.fast-lane-shadow-canary.config.ts
+
+      - name: Replay same verified active five-minute Devnet window
+        run: |
+          node .fast-lane-shadow-canary-build/build-fast-lane-shadow-canary.mjs \
+            --endpoint https://devnet.honeycluster.io/ \
+            --end-ledger 3549229 \
+            --max-ledgers 90 \
+            --read-window 8 \
+            --output-sql /tmp/fast-lane-compact-shadow-canary.sql \
+            --output-summary fast-lane-compact-shadow-canary-evidence/plan.json
+          test "$(jq -r '.source.lendingTransactions' fast-lane-compact-shadow-canary-evidence/plan.json)" -eq 340
+          test "$(jq -r '.persistencePlan.coalescedObjectRows' fast-lane-compact-shadow-canary-evidence/plan.json)" -eq 194
+
+      - name: Execute compact shadow write canary
+        run: |
+          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote \
+            --file /tmp/fast-lane-compact-shadow-canary.sql \
+            --json > fast-lane-compact-shadow-canary-evidence/execute-raw.txt
+          sed -n '/^\[/,$p' fast-lane-compact-shadow-canary-evidence/execute-raw.txt \
+            > fast-lane-compact-shadow-canary-evidence/execute.json
+          jq -e 'type == "array" and length > 0 and all(.[]; .success == true)' \
+            fast-lane-compact-shadow-canary-evidence/execute.json > /dev/null
+
+      - name: Query compact shadow state after canary
+        run: |
+          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote \
+            --command "SELECT * FROM fast_lane_shadow_state; SELECT COUNT(*) AS object_count FROM fast_lane_shadow_objects_compact; SELECT COUNT(*) AS window_count FROM fast_lane_shadow_windows;" \
+            --json > fast-lane-compact-shadow-canary-evidence/state-after.json
+
+      - name: Build and verify retained compact evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROWS_WRITTEN="$(jq '[.. | objects | .meta?.rows_written? // empty] | add // 0' fast-lane-compact-shadow-canary-evidence/execute.json)"
+          ROWS_READ="$(jq '[.. | objects | .meta?.rows_read? // empty] | add // 0' fast-lane-compact-shadow-canary-evidence/execute.json)"
+          PLANNED_OBJECTS="$(jq -r '.persistencePlan.coalescedObjectRows' fast-lane-compact-shadow-canary-evidence/plan.json)"
+          PREPARED_STATEMENTS="$(jq -r '.persistencePlan.preparedStatements' fast-lane-compact-shadow-canary-evidence/plan.json)"
+          LENDING_TX="$(jq -r '.source.lendingTransactions' fast-lane-compact-shadow-canary-evidence/plan.json)"
+          OBJECT_COUNT="$(jq -r '.[1].results[0].object_count' fast-lane-compact-shadow-canary-evidence/state-after.json)"
+          WINDOW_COUNT="$(jq -r '.[2].results[0].window_count' fast-lane-compact-shadow-canary-evidence/state-after.json)"
+          test "${ROWS_WRITTEN}" -gt 0
+          test "${ROWS_WRITTEN}" -lt 591
+          test "${OBJECT_COUNT}" -eq "${PLANNED_OBJECTS}"
+          test "${WINDOW_COUNT}" -eq 1
+          jq -n \
+            --argjson rows_written "${ROWS_WRITTEN}" \
+            --argjson rows_read "${ROWS_READ}" \
+            --argjson baseline_rows_written 591 \
+            --argjson planned_objects "${PLANNED_OBJECTS}" \
+            --argjson prepared_statements "${PREPARED_STATEMENTS}" \
+            --argjson lending_transactions "${LENDING_TX}" \
+            --argjson object_count "${OBJECT_COUNT}" \
+            --argjson window_count "${WINDOW_COUNT}" \
+            '{schemaVersion:1,passed:true,rows_written:$rows_written,rows_read:$rows_read,baseline_rows_written:$baseline_rows_written,write_reduction:(1-($rows_written/$baseline_rows_written)),planned_coalesced_objects:$planned_objects,prepared_statements:$prepared_statements,lending_transactions:$lending_transactions,object_count:$object_count,window_count:$window_count}' \
+            > fast-lane-compact-shadow-canary-evidence/summary.json
+          cat fast-lane-compact-shadow-canary-evidence/summary.json
+
+      - name: Upload retained compact canary evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: fast-lane-compact-shadow-remote-write-canary
+          path: fast-lane-compact-shadow-canary-evidence
+          if-no-files-found: warn
+          retention-days: 14
