@@ -11,9 +11,9 @@ import type {
   LoanScheduleEvaluation,
 } from './d1-current-loan-reader'
 import {
-  getResolvedCurrentProjection,
-  listResolvedCurrentProjections,
-} from './base-overlay-current-reader'
+  getThreeLayerCurrentProjection as getResolvedCurrentProjection,
+  listThreeLayerCurrentProjections as listResolvedCurrentProjections,
+} from './three-layer-current-reader'
 import { CurrentStateObjectReadError } from './current-state-read-error'
 import {
   isReleaseCurrentStateSource,
