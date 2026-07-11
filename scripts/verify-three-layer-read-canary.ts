@@ -78,7 +78,7 @@ async function fetchJson(url: string): Promise<HttpResult> {
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    throw new Error(`Request failed for ${url}: ${message}`)
+    throw new Error(`Request failed for ${url}: ${message}`, { cause: error })
   }
   const text = await response.text()
   let body: unknown = null
