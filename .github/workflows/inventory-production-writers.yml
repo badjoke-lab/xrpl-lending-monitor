@@ -1,0 +1,39 @@
+name: Inventory production writers
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/inventory-production-writers.yml'
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Find every Worker deployment path
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=production-writer-inventory
+          mkdir -p "$ROOT"
+          grep -RInE 'wrangler[[:space:]]+deploy|workers/scripts|version_upload|production-deploy-trigger|replacement-base-cutover' .github scripts package.json pnpm-lock.yaml \
+            > "$ROOT/matches.txt" || true
+          find .github/workflows -maxdepth 1 -type f -name '*.yml' -o -name '*.yaml' | sort > "$ROOT/workflow-files.txt"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs?per_page=100" > "$ROOT/recent-runs.json"
+          jq '[.workflow_runs[] | {id,name,path,event,status,conclusion,created_at,updated_at,head_branch,head_sha,run_started_at}]' "$ROOT/recent-runs.json" > "$ROOT/recent-runs-compact.json"
+          cat "$ROOT/matches.txt"
+          cat "$ROOT/recent-runs-compact.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: production-writer-inventory
+          path: production-writer-inventory
+          if-no-files-found: error
+          retention-days: 14
