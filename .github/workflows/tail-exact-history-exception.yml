@@ -1,0 +1,59 @@
+name: Tail exact history exception
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/tail-exact-history-exception.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tail:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Tail and reproduce exception
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p exact-history-tail
+          URL='https://xrpl-lending-monitor.badjoke-lab.workers.dev/api/objects/Loan/ECBCA3B65B3CF3A45F06ECF844B764B0BD8FF8B33A9C3CAC4E04784AE183FE4E/history?limit=25'
+          timeout 75s pnpm exec wrangler tail xrpl-lending-monitor \
+            --format json --status error \
+            > exact-history-tail/tail.ndjson \
+            2> exact-history-tail/tail.stderr &
+          TAIL_PID=$!
+          sleep 10
+          STATUS="$(curl --silent --show-error --retry 1 \
+            -D exact-history-tail/headers.txt \
+            -o exact-history-tail/body.txt \
+            -w '%{http_code}' "${URL}" || true)"
+          printf '%s\n' "${STATUS}" > exact-history-tail/status.txt
+          sleep 20
+          wait "${TAIL_PID}" || true
+          test -s exact-history-tail/tail.ndjson
+          cat exact-history-tail/tail.ndjson
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: exact-history-tail
+          path: exact-history-tail
+          if-no-files-found: error
+          retention-days: 3
