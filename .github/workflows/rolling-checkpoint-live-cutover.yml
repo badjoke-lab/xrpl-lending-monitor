@@ -22,7 +22,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: rolling-checkpoint-live-cutover
+  group: production-worker-write
   cancel-in-progress: false
 
 env:
@@ -98,10 +98,10 @@ jobs:
           touch "${ROOT}/cutover-config-deployed"
 
           for attempt in 1 2 3; do
-            http_status="$(curl --silent --show-error --retry 2 \\
-              -o "${ROOT}/cutover-response-${attempt}.json" -w '%{http_code}' \\
-              -X POST \\
-              -H "x-replacement-base-cutover-token: ${CUTOVER_TOKEN}" \\
+            http_status="$(curl --silent --show-error --retry 2 \
+              -o "${ROOT}/cutover-response-${attempt}.json" -w '%{http_code}' \
+              -X POST \
+              -H "x-replacement-base-cutover-token: ${CUTOVER_TOKEN}" \
               "${PRODUCTION_BASE}/api/operator/replacement-base-cutover")"
             if [ "${http_status}" = 200 ] && jq -e --arg snapshot "${TARGET_SNAPSHOT_ID}" --argjson ledger "${TARGET_LEDGER_INDEX}" '
               .status == "cutover_applied"
@@ -119,11 +119,11 @@ jobs:
 
           cutover_binding_ready=false
           for attempt in $(seq 1 30); do
-            readiness_status="$(curl --silent --show-error --retry 2 \\
-              -o "${ROOT}/cutover-readiness-${attempt}.json" -w '%{http_code}' \\
-              -X POST \\
+            readiness_status="$(curl --silent --show-error --retry 2 \
+              -o "${ROOT}/cutover-readiness-${attempt}.json" -w '%{http_code}' \
+              -X POST \
               "${PRODUCTION_BASE}/api/operator/replacement-base-cutover")"
-            printf '%s\\n' "${readiness_status}" > "${ROOT}/cutover-readiness-${attempt}.status"
+            printf '%s\n' "${readiness_status}" > "${ROOT}/cutover-readiness-${attempt}.status"
             if [ "${readiness_status}" = 403 ]; then
               cutover_binding_ready=true
               touch "${ROOT}/cutover-binding-ready"
@@ -134,12 +134,12 @@ jobs:
           test "${cutover_binding_ready}" = true
 
           for attempt in $(seq 1 12); do
-            http_status="$(curl --silent --show-error --retry 2 \\
-              -o "${ROOT}/cutover-response-${attempt}.json" -w '%{http_code}' \\
-              -X POST \\
-              -H "x-replacement-base-cutover-token: ${CUTOVER_TOKEN}" \\
+            http_status="$(curl --silent --show-error --retry 2 \
+              -o "${ROOT}/cutover-response-${attempt}.json" -w '%{http_code}' \
+              -X POST \
+              -H "x-replacement-base-cutover-token: ${CUTOVER_TOKEN}" \
               "${PRODUCTION_BASE}/api/operator/replacement-base-cutover")"
-            printf '%s\\n' "${http_status}" > "${ROOT}/cutover-response-${attempt}.status"
+            printf '%s\n' "${http_status}" > "${ROOT}/cutover-response-${attempt}.status"
             if [ "${http_status}" = 200 ] && jq -e --arg snapshot "${TARGET_SNAPSHOT_ID}" --argjson ledger "${TARGET_LEDGER_INDEX}" '
               .status == "cutover_applied"
               and .target.snapshotId == $snapshot
