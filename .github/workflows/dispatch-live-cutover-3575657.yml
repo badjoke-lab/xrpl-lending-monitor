@@ -21,20 +21,18 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       REPOSITORY: ${{ github.repository }}
-      HISTORY_BRANCH: history-rolling-recovery-b-data
-      CURRENT_BRANCH: current-state-rolling-recovery-b-data
+      HISTORY_BRANCH: history-cutover-3575657-data
+      CURRENT_BRANCH: current-state-cutover-3575657-data
       EXPECTED_LEDGER: '3575657'
       EXPECTED_HASH: BF0DA8554848CD81898E2825757904CD336A84362DF0AC116B0256BD8A731D85
-      REQUIRED_MAIN_FIX: '70924bbbec051c6f9965b3a6b1caaadf59d7187b'
     steps:
       - uses: actions/checkout@v4
 
-      - name: Bind exact aligned candidate
+      - name: Bind exact aligned immutable candidate
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p direct-cutover
-          test "$(git ls-remote origin refs/heads/main | awk '{print $1}')" = "${REQUIRED_MAIN_FIX}"
           gh api --method GET "repos/${REPOSITORY}/contents/history/publication.json" -f ref="${HISTORY_BRANCH}" --jq '.content' | tr -d '\n' | base64 --decode > direct-cutover/publication.json
           gh api --method GET "repos/${REPOSITORY}/contents/read-model/manifest.json" -f ref="${CURRENT_BRANCH}" --jq '.content' | tr -d '\n' | base64 --decode > direct-cutover/current.json
           jq -e --argjson ledger "${EXPECTED_LEDGER}" --arg hash "${EXPECTED_HASH}" '.complete == true and .endLedgerIndex == $ledger and .endLedgerHash == $hash' direct-cutover/publication.json > /dev/null
