@@ -62,7 +62,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
 
-      - name: Wait for legacy production writes to quiesce
+      - name: Wait for production writes to quiesce
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -97,7 +97,7 @@ jobs:
           done
           test "${quiescent}" = true
 
-      - name: Bind deploy config to the active production checkpoint
+      - name: Bind root Wrangler config to the active production checkpoint
         shell: bash
         run: |
           set -euo pipefail
@@ -122,6 +122,7 @@ jobs:
           assert isinstance(current['ledgerHash'], str) and len(current['ledgerHash']) == 64
 
           config = json.loads(json.dumps(source))
+          config['keep_vars'] = False
           variables = config['vars']
           variables['CURRENT_STATE_REPLACEMENT_GITHUB_BRANCH'] = 'current-state-data'
           variables['CURRENT_STATE_REPLACEMENT_SNAPSHOT_ID'] = current['snapshotId']
@@ -132,7 +133,9 @@ jobs:
           variables['REPLACEMENT_BASE_LEDGER_HASH'] = current['ledgerHash']
           variables.pop('REPLACEMENT_BASE_CUTOVER_TOKEN', None)
 
-          Path('wrangler.production.jsonc').write_text(json.dumps(config, indent=2) + '\n')
+          rendered = json.dumps(config, indent=2) + '\n'
+          Path('wrangler.jsonc').write_text(rendered)
+          Path('wrangler.production.jsonc').write_text(rendered)
           identity = {
               'epochId': current['epochId'],
               'snapshotId': current['snapshotId'],
@@ -144,20 +147,22 @@ jobs:
           PY
 
           jq -e '
-            .triggers.crons == ["*/5 * * * *"]
+            .keep_vars == false
+            and .triggers.crons == ["*/5 * * * *"]
             and .vars.APP_NETWORK == "devnet"
             and .vars.MAINNET_ENABLED == "false"
             and .vars.CURRENT_STATE_REPLACEMENT_GITHUB_BRANCH == "current-state-data"
             and (.vars.REPLACEMENT_BASE_LEDGER_INDEX | tonumber) > 0
             and (.vars | has("REPLACEMENT_BASE_CUTOVER_TOKEN") | not)
-          ' wrangler.production.jsonc > /dev/null
+          ' wrangler.jsonc > /dev/null
+          cmp wrangler.jsonc wrangler.production.jsonc
 
       - name: Build application
         run: pnpm build
 
-      - name: Deploy Worker
+      - name: Deploy Worker from bound root config
         id: deploy
-        run: pnpm exec wrangler deploy --config wrangler.production.jsonc
+        run: pnpm exec wrangler deploy
 
       - name: Verify deployed runtime checkpoint
         id: verify
@@ -171,7 +176,7 @@ jobs:
           AUTH=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
           verified=false
 
-          for attempt in $(seq 1 40); do
+          for attempt in $(seq 1 60); do
             curl --fail-with-body --silent --show-error "${AUTH[@]}" \
               "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/xrpl-lending-monitor/settings" \
               > deployed-worker-settings.json || true
@@ -265,6 +270,7 @@ jobs:
           path: |
             production-deploy-checkpoint.json
             production-deploy-verification.json
+            wrangler.production.jsonc
             deployed-worker-settings.json
             deployed-worker-schedules.json
             deployed-rebase-status.json
