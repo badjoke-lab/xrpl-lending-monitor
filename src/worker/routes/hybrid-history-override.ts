@@ -4,8 +4,8 @@ import {
   getHybridExactArchivedObject,
   listHybridExactLoanLifecycle,
   listHybridExactLoanLifecycleEvents,
-  listHybridExactObjectHistory,
 } from '../repositories/hybrid-exact-history-repository'
+import { listBudgetedHybridExactObjectHistory } from '../repositories/hybrid-exact-object-history-budgeted'
 import {
   listHybridActivity,
   listHybridArchivedObjects,
@@ -146,7 +146,7 @@ export async function handleHybridHistoryOverride(
     const objectType = parts[2] ?? ''
     const objectId = parts[3] ?? ''
     if (source.exactIndex) {
-      const changes = await listHybridExactObjectHistory({
+      const changes = await listBudgetedHybridExactObjectHistory({
         ...common,
         exactIndex: source.exactIndex.reader,
         objectType,
