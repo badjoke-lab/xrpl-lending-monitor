@@ -1,0 +1,42 @@
+name: Cancel stale production deploys
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/cancel-stale-production-deploys.yml'
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  cancel:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Keep only the newest active production deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p cancel-stale-production-deploys
+          gh api "repos/$GITHUB_REPOSITORY/actions/workflows/deploy-production-worker.yml/runs?per_page=100" > cancel-stale-production-deploys/runs.json
+          jq '[.workflow_runs[] | select(.status == "queued" or .status == "in_progress" or .status == "waiting" or .status == "pending" or .status == "requested") | {id,status,created_at,head_sha}] | sort_by(.created_at,.id)' cancel-stale-production-deploys/runs.json > cancel-stale-production-deploys/active.json
+          KEEP_ID="$(jq -r 'last.id // empty' cancel-stale-production-deploys/active.json)"
+          : > cancel-stale-production-deploys/cancelled.ndjson
+          while IFS= read -r id; do
+            [ -z "$id" ] && continue
+            [ "$id" = "$KEEP_ID" ] && continue
+            gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$id/cancel" > "cancel-stale-production-deploys/cancel-$id.json" 2> "cancel-stale-production-deploys/cancel-$id.stderr" || true
+            jq -n --argjson id "$id" --argjson kept "${KEEP_ID:-0}" '{cancelledRunId:$id,keptNewestRunId:$kept}' >> cancel-stale-production-deploys/cancelled.ndjson
+          done < <(jq -r '.[].id' cancel-stale-production-deploys/active.json)
+          jq -n --argjson kept "${KEEP_ID:-0}" --slurpfile active cancel-stale-production-deploys/active.json --slurpfile cancelled cancel-stale-production-deploys/cancelled.ndjson '{keptNewestRunId:$kept,activeBefore:$active[0],cancelled:$cancelled}' > cancel-stale-production-deploys/summary.json
+          cat cancel-stale-production-deploys/summary.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cancel-stale-production-deploys
+          path: cancel-stale-production-deploys
+          if-no-files-found: error
+          retention-days: 3
