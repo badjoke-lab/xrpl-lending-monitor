@@ -18,7 +18,7 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 55
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -62,7 +62,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
 
-      - name: Wait for legacy live-cutover runs to quiesce
+      - name: Wait for legacy production writes to quiesce
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -70,13 +70,24 @@ jobs:
           set -euo pipefail
           mkdir -p production-deploy-wait
           quiescent=false
-          for attempt in $(seq 1 180); do
+          for attempt in $(seq 1 240); do
             gh api \
               "repos/${GITHUB_REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/runs?per_page=100" \
               > production-deploy-wait/live-cutover-runs.json
-            ACTIVE="$(jq '[.workflow_runs[] | select(.status == "queued" or .status == "in_progress" or .status == "waiting" or .status == "pending")] | length' production-deploy-wait/live-cutover-runs.json)"
-            jq -n --argjson attempt "${attempt}" --argjson active "${ACTIVE}" \
-              '{attempt:$attempt,activeLiveCutovers:$active}' \
+            gh api \
+              "repos/${GITHUB_REPOSITORY}/actions/workflows/deploy-production-worker.yml/runs?per_page=100" \
+              > production-deploy-wait/production-deploy-runs.json
+
+            ACTIVE_CUTOVERS="$(jq '[.workflow_runs[] | select(.status == "queued" or .status == "in_progress" or .status == "waiting" or .status == "pending")] | length' production-deploy-wait/live-cutover-runs.json)"
+            ACTIVE_DEPLOYS="$(jq --argjson current "${GITHUB_RUN_ID}" '[.workflow_runs[] | select(.id != $current) | select(.status == "queued" or .status == "in_progress" or .status == "waiting" or .status == "pending")] | length' production-deploy-wait/production-deploy-runs.json)"
+            ACTIVE="$((ACTIVE_CUTOVERS + ACTIVE_DEPLOYS))"
+
+            jq -n \
+              --argjson attempt "${attempt}" \
+              --argjson activeCutovers "${ACTIVE_CUTOVERS}" \
+              --argjson activeDeploys "${ACTIVE_DEPLOYS}" \
+              --argjson activeTotal "${ACTIVE}" \
+              '{attempt:$attempt,activeLiveCutovers:$activeCutovers,activeProductionDeploys:$activeDeploys,activeProductionWrites:$activeTotal}' \
               >> production-deploy-wait/attempts.ndjson
             if [ "${ACTIVE}" -eq 0 ]; then
               quiescent=true
