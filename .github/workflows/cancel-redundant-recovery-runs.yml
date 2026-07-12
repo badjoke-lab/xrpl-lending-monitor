@@ -28,6 +28,9 @@ jobs:
             complete-history-recovery.yml
             test-fixed-catchup-cycle.yml
             resume-history-recovery-after-fixed-index.yml
+            resume-history-recovery-v2.yml
+            execute-live-cutover-now.yml
+            rolling-checkpoint-live-cutover.yml
           )
           : > cancel-redundant-recovery/cancelled.txt
           for workflow in "${WORKFLOWS[@]}"; do
