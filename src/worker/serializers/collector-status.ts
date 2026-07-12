@@ -22,13 +22,14 @@ export function serializeCollectorStatus(options: {
     ) status = 'stale'
   }
 
-  const lagLedgers = collector?.lagLedgers ?? (
+  const syncLagLedgers = (
     sync?.latestObservedLedger !== null
     && sync?.latestObservedLedger !== undefined
     && sync.lastProcessedLedger !== null
-      ? Math.max(0, sync.latestObservedLedger - sync.lastProcessedLedger)
-      : null
   )
+    ? Math.max(0, sync.latestObservedLedger - sync.lastProcessedLedger)
+    : null
+  const lagLedgers = syncLagLedgers ?? collector?.lagLedgers ?? null
 
   return {
     network: 'devnet',
