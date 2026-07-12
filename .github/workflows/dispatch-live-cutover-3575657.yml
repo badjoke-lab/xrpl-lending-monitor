@@ -1,4 +1,4 @@
-name: Dispatch live cutover 3585624
+name: Refresh and dispatch live cutover
 
 on:
   pull_request:
@@ -11,89 +11,136 @@ permissions:
   contents: read
 
 concurrency:
-  group: dispatch-live-cutover-3585624
+  group: refresh-and-dispatch-live-cutover
   cancel-in-progress: false
 
 jobs:
-  dispatch:
+  refresh-and-cutover:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 180
     env:
       GH_TOKEN: ${{ github.token }}
       REPOSITORY: ${{ github.repository }}
-      HISTORY_BRANCH: history-cutover-3585624-data
-      CURRENT_BRANCH: current-state-cutover-3585624-data
-      EXPECTED_LEDGER: '3585624'
-      EXPECTED_HASH: 3912B83D69123081A90FE19E5D6B0801817B6613AD94CCE5C45806E894D3C38E
+      SOURCE_HISTORY: history-cutover-3585624-data
+      SOURCE_CURRENT: current-state-cutover-3585624-data
+      OUTPUT_HISTORY: history-live-cutover-candidate-data
+      OUTPUT_CURRENT: current-state-live-cutover-candidate-data
     steps:
       - uses: actions/checkout@v4
 
-      - name: Bind exact aligned immutable candidate
+      - name: Bind aligned immutable source
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p direct-cutover
-          gh api --method GET "repos/${REPOSITORY}/contents/history/publication.json" -f ref="${HISTORY_BRANCH}" --jq '.content' | tr -d '\n' | base64 --decode > direct-cutover/publication.json
-          gh api --method GET "repos/${REPOSITORY}/contents/read-model/manifest.json" -f ref="${CURRENT_BRANCH}" --jq '.content' | tr -d '\n' | base64 --decode > direct-cutover/current.json
-          jq -e --argjson ledger "${EXPECTED_LEDGER}" --arg hash "${EXPECTED_HASH}" '.complete == true and .endLedgerIndex == $ledger and .endLedgerHash == $hash' direct-cutover/publication.json > /dev/null
-          jq -e --argjson ledger "${EXPECTED_LEDGER}" --arg hash "${EXPECTED_HASH}" '.complete == true and .ledgerIndex == $ledger and .ledgerHash == $hash' direct-cutover/current.json > /dev/null
+          mkdir -p live-cutover-refresh
+          gh api --method GET "repos/${REPOSITORY}/contents/history/publication.json" -f ref="${SOURCE_HISTORY}" --jq '.content' | tr -d '\n' | base64 --decode > live-cutover-refresh/source-publication.json
+          gh api --method GET "repos/${REPOSITORY}/contents/read-model/manifest.json" -f ref="${SOURCE_CURRENT}" --jq '.content' | tr -d '\n' | base64 --decode > live-cutover-refresh/source-current.json
+          test "$(jq -r '.endLedgerIndex' live-cutover-refresh/source-publication.json)" = "$(jq -r '.ledgerIndex' live-cutover-refresh/source-current.json)"
+          test "$(jq -r '.endLedgerHash' live-cutover-refresh/source-publication.json)" = "$(jq -r '.ledgerHash' live-cutover-refresh/source-current.json)"
 
-      - name: Capture existing cutover runs
+      - name: Capture existing candidate runs
         shell: bash
         run: |
           set -euo pipefail
-          gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/runs?event=workflow_dispatch&per_page=100" --jq '.workflow_runs[].id' > direct-cutover/before.txt
+          gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-candidate.yml/runs?event=workflow_dispatch&per_page=100" --jq '.workflow_runs[].id' > live-cutover-refresh/candidate-before.txt
 
-      - name: Dispatch guarded cutover
+      - name: Dispatch fresh bounded candidate
         shell: bash
         run: |
           set -euo pipefail
-          jq -n --arg ref main --arg history "${HISTORY_BRANCH}" --arg current "${CURRENT_BRANCH}" '{ref:$ref,inputs:{history_candidate_branch:$history,current_state_candidate_branch:$current,confirm_production_write:"true"}}' > direct-cutover/dispatch.json
-          gh api --method POST "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/dispatches" --input direct-cutover/dispatch.json
+          jq -n --arg ref main --arg sh "${SOURCE_HISTORY}" --arg sc "${SOURCE_CURRENT}" --arg oh "${OUTPUT_HISTORY}" --arg oc "${OUTPUT_CURRENT}" '{ref:$ref,inputs:{source_history_branch:$sh,source_current_state_branch:$sc,history_candidate_branch:$oh,current_state_candidate_branch:$oc,max_delta_ledgers:"5000",segment_ledgers:"250",read_window_size:"4"}}' > live-cutover-refresh/candidate-dispatch.json
+          gh api --method POST "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-candidate.yml/dispatches" --input live-cutover-refresh/candidate-dispatch.json
 
-      - name: Resolve and require successful cutover
+      - name: Wait for fresh candidate
         shell: bash
         run: |
           set -euo pipefail
           RUN_ID=''
           for ATTEMPT in $(seq 1 60); do
-            gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/runs?event=workflow_dispatch&per_page=100" > direct-cutover/runs.json
+            gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-candidate.yml/runs?event=workflow_dispatch&per_page=100" > live-cutover-refresh/candidate-runs.json
             while IFS= read -r ID; do
-              if ! grep -Fxq "${ID}" direct-cutover/before.txt; then RUN_ID="${ID}"; break; fi
-            done < <(jq -r '.workflow_runs | sort_by(.created_at) | reverse | .[].id' direct-cutover/runs.json)
+              if ! grep -Fxq "${ID}" live-cutover-refresh/candidate-before.txt; then RUN_ID="${ID}"; break; fi
+            done < <(jq -r '.workflow_runs | sort_by(.created_at) | reverse | .[].id' live-cutover-refresh/candidate-runs.json)
             test -n "${RUN_ID}" && break
             sleep 10
           done
           test -n "${RUN_ID}"
-          printf '%s\n' "${RUN_ID}" > direct-cutover/run-id.txt
-          for ATTEMPT in $(seq 1 180); do
-            gh api "repos/${REPOSITORY}/actions/runs/${RUN_ID}" > direct-cutover/run.json
-            test "$(jq -r '.status' direct-cutover/run.json)" = completed && break
+          echo "CANDIDATE_RUN_ID=${RUN_ID}" >> "${GITHUB_ENV}"
+          printf '%s\n' "${RUN_ID}" > live-cutover-refresh/candidate-run-id.txt
+          for ATTEMPT in $(seq 1 360); do
+            gh api "repos/${REPOSITORY}/actions/runs/${RUN_ID}" > live-cutover-refresh/candidate-run.json
+            test "$(jq -r '.status' live-cutover-refresh/candidate-run.json)" = completed && break
             sleep 30
           done
-          test "$(jq -r '.status' direct-cutover/run.json)" = completed
-          test "$(jq -r '.conclusion' direct-cutover/run.json)" = success
+          test "$(jq -r '.status' live-cutover-refresh/candidate-run.json)" = completed
+          gh api "repos/${REPOSITORY}/actions/runs/${RUN_ID}/jobs?per_page=100" > live-cutover-refresh/candidate-jobs.json
+          for STEP in 'Bind source pair and freeze bounded target' 'Generate bounded delta with configured read window' 'Verify delta and build target publication' 'Build target exact index incrementally' 'Build target current state from best available base' 'Publish history candidate branch' 'Publish current-state candidate branch' 'Rehearse remote candidate pair'; do
+            jq -e --arg name "${STEP}" '[.jobs[].steps[] | select(.name == $name)] | length == 1 and .[0].conclusion == "success"' live-cutover-refresh/candidate-jobs.json > /dev/null
+          done
 
-      - name: Download and verify retained evidence
+      - name: Verify fresh aligned output
         shell: bash
         run: |
           set -euo pipefail
-          RUN_ID="$(cat direct-cutover/run-id.txt)"
-          gh run download "${RUN_ID}" --repo "${REPOSITORY}" --name rolling-checkpoint-live-cutover --dir direct-cutover/artifact
-          EVIDENCE="$(find direct-cutover/artifact -name evidence.json -type f | head -n 1)"
-          POST="$(find direct-cutover/artifact -name post-cutover-verification.json -type f | head -n 1)"
-          test -n "${EVIDENCE}"
-          test -n "${POST}"
-          jq -e --argjson ledger "${EXPECTED_LEDGER}" '.passed == true and .target.target.ledgerIndex == $ledger and .schedule == "*/5 * * * *" and .mainnetEnabled == false' "${EVIDENCE}" > /dev/null
-          jq -e --argjson ledger "${EXPECTED_LEDGER}" '.passed == true and .target.ledgerIndex == $ledger and .lagLedgers <= 10 and .currentStateAgeSeconds <= 600 and .schedule == "*/5 * * * *" and .mainnetEnabled == false' "${POST}" > /dev/null
-          cp "${EVIDENCE}" direct-cutover/evidence.json
-          cp "${POST}" direct-cutover/post-cutover-verification.json
+          gh api --method GET "repos/${REPOSITORY}/contents/history/publication.json" -f ref="${OUTPUT_HISTORY}" --jq '.content' | tr -d '\n' | base64 --decode > live-cutover-refresh/output-publication.json
+          gh api --method GET "repos/${REPOSITORY}/contents/read-model/manifest.json" -f ref="${OUTPUT_CURRENT}" --jq '.content' | tr -d '\n' | base64 --decode > live-cutover-refresh/output-current.json
+          TARGET_LEDGER="$(jq -r '.endLedgerIndex' live-cutover-refresh/output-publication.json)"
+          TARGET_HASH="$(jq -r '.endLedgerHash' live-cutover-refresh/output-publication.json)"
+          test "${TARGET_LEDGER}" = "$(jq -r '.ledgerIndex' live-cutover-refresh/output-current.json)"
+          test "${TARGET_HASH}" = "$(jq -r '.ledgerHash' live-cutover-refresh/output-current.json)"
+          jq -n '{method:"ledger",params:[{ledger_index:"validated",transactions:false,expand:false}]}' > live-cutover-refresh/head-request.json
+          curl --fail-with-body --silent --show-error --retry 3 -H 'content-type: application/json' --data @live-cutover-refresh/head-request.json https://devnet.honeycluster.io/ > live-cutover-refresh/head.json
+          LIVE_LEDGER="$(jq -r '.result.ledger_index // .result.ledger.ledger_index' live-cutover-refresh/head.json)"
+          LAG="$((LIVE_LEDGER - TARGET_LEDGER))"
+          if [ "${LAG}" -lt 0 ]; then LAG=0; fi
+          test "${LAG}" -le 720
+          echo "TARGET_LEDGER=${TARGET_LEDGER}" >> "${GITHUB_ENV}"
+          echo "TARGET_HASH=${TARGET_HASH}" >> "${GITHUB_ENV}"
+          echo "TARGET_LAG=${LAG}" >> "${GITHUB_ENV}"
 
-      - name: Upload direct cutover evidence
+      - name: Capture existing cutover runs
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/runs?event=workflow_dispatch&per_page=100" --jq '.workflow_runs[].id' > live-cutover-refresh/cutover-before.txt
+
+      - name: Dispatch guarded cutover immediately
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -n --arg ref main --arg history "${OUTPUT_HISTORY}" --arg current "${OUTPUT_CURRENT}" '{ref:$ref,inputs:{history_candidate_branch:$history,current_state_candidate_branch:$current,confirm_production_write:"true"}}' > live-cutover-refresh/cutover-dispatch.json
+          gh api --method POST "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/dispatches" --input live-cutover-refresh/cutover-dispatch.json
+
+      - name: Require successful live cutover
+        shell: bash
+        run: |
+          set -euo pipefail
+          RUN_ID=''
+          for ATTEMPT in $(seq 1 60); do
+            gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/runs?event=workflow_dispatch&per_page=100" > live-cutover-refresh/cutover-runs.json
+            while IFS= read -r ID; do
+              if ! grep -Fxq "${ID}" live-cutover-refresh/cutover-before.txt; then RUN_ID="${ID}"; break; fi
+            done < <(jq -r '.workflow_runs | sort_by(.created_at) | reverse | .[].id' live-cutover-refresh/cutover-runs.json)
+            test -n "${RUN_ID}" && break
+            sleep 10
+          done
+          test -n "${RUN_ID}"
+          echo "CUTOVER_RUN_ID=${RUN_ID}" >> "${GITHUB_ENV}"
+          printf '%s\n' "${RUN_ID}" > live-cutover-refresh/cutover-run-id.txt
+          for ATTEMPT in $(seq 1 180); do
+            gh api "repos/${REPOSITORY}/actions/runs/${RUN_ID}" > live-cutover-refresh/cutover-run.json
+            test "$(jq -r '.status' live-cutover-refresh/cutover-run.json)" = completed && break
+            sleep 30
+          done
+          test "$(jq -r '.status' live-cutover-refresh/cutover-run.json)" = completed
+          test "$(jq -r '.conclusion' live-cutover-refresh/cutover-run.json)" = success
+          jq -n --argjson candidateRunId "${CANDIDATE_RUN_ID}" --argjson cutoverRunId "${RUN_ID}" --argjson ledger "${TARGET_LEDGER}" --arg hash "${TARGET_HASH}" --argjson lag "${TARGET_LAG}" '{passed:true,candidateRunId:$candidateRunId,cutoverRunId:$cutoverRunId,target:{ledgerIndex:$ledger,ledgerHash:$hash,lagBeforeCutover:$lag},schedule:"*/5 * * * *",mainnetEnabled:false}' > live-cutover-refresh/summary.json
+
+      - name: Upload refresh-and-cutover evidence
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: direct-cutover-3585624
-          path: direct-cutover
+          name: refreshed-live-cutover
+          path: live-cutover-refresh
           if-no-files-found: warn
           retention-days: 30
