@@ -86,7 +86,7 @@ jobs:
           heavy_write_budget=max(measured_heavy_write,1000)
           audit_read_buffer=30000
           audit_write_buffer=1000
-          safety_multiplier=1.20
+          safety_multiplier=1.15
           pre_read=math.ceil((ticks_to_reset*fast_read_budget+reanchors_before_reset*reanchor_read_budget+heavy_to_reset*heavy_read_budget+audit_read_buffer)*safety_multiplier)
           pre_write=math.ceil((ticks_to_reset*fast_write_budget+reanchors_before_reset*reanchor_write_budget+heavy_to_reset*heavy_write_budget+audit_write_buffer)*safety_multiplier)
           day_read=math.ceil((288*fast_read_budget+reanchors_per_day*reanchor_read_budget+7*heavy_read_budget+audit_read_buffer)*safety_multiplier)
