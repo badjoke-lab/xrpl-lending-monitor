@@ -160,6 +160,29 @@ jobs:
       - name: Build application
         run: pnpm build
 
+      - name: Reassert bound root config after build
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp wrangler.production.jsonc wrangler.jsonc
+          EXPECTED_LEDGER="$(jq -r '.ledgerIndex' production-deploy-checkpoint.json)"
+          EXPECTED_SNAPSHOT="$(jq -r '.snapshotId' production-deploy-checkpoint.json)"
+          EXPECTED_HASH="$(jq -r '.ledgerHash' production-deploy-checkpoint.json)"
+          jq -e \
+            --arg ledger "${EXPECTED_LEDGER}" \
+            --arg snapshot "${EXPECTED_SNAPSHOT}" \
+            --arg hash "${EXPECTED_HASH}" '
+              .keep_vars == false
+              and .vars.APP_NETWORK == "devnet"
+              and .vars.MAINNET_ENABLED == "false"
+              and .vars.CURRENT_STATE_REPLACEMENT_SNAPSHOT_ID == $snapshot
+              and .vars.REPLACEMENT_BASE_SNAPSHOT_ID == $snapshot
+              and .vars.REPLACEMENT_BASE_LEDGER_INDEX == $ledger
+              and .vars.REPLACEMENT_BASE_LEDGER_HASH == $hash
+              and (.vars | has("REPLACEMENT_BASE_CUTOVER_TOKEN") | not)
+            ' wrangler.jsonc > /dev/null
+          cmp wrangler.jsonc wrangler.production.jsonc
+
       - name: Deploy Worker from bound root config
         id: deploy
         run: pnpm exec wrangler deploy
