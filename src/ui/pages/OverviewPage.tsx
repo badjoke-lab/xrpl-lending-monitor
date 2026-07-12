@@ -20,10 +20,31 @@ interface OverviewPageProps {
   onReload: () => void
 }
 
+interface OverviewWatermark {
+  source: string
+  ledger_index: number
+  ledger_hash: string
+  updated_at: string
+}
+
 function snapshotProvenance(resources: DashboardResources): Provenance {
   return resources.overview.state === 'ready' && resources.overview.data.snapshot
     ? 'direct'
     : 'unavailable'
+}
+
+function ageSeconds(value: string | null | undefined): number | null {
+  if (!value) return null
+  const timestamp = Date.parse(value)
+  if (!Number.isFinite(timestamp)) return null
+  return Math.max(0, (Date.now() - timestamp) / 1000)
+}
+
+function currentStateStatus(age: number | null): 'healthy' | 'delayed' | 'stale' | 'unavailable' {
+  if (age === null) return 'unavailable'
+  if (age <= 10 * 60) return 'healthy'
+  if (age <= 30 * 60) return 'delayed'
+  return 'stale'
 }
 
 export function OverviewPage({ resources, onNavigate, onReload }: OverviewPageProps) {
@@ -35,6 +56,20 @@ export function OverviewPage({ resources, onNavigate, onReload }: OverviewPagePr
   const partialFailure = [resources.status, resources.overview, resources.activity].some(
     (resource) => resource.state === 'error',
   )
+  const extendedOverview = overview as (typeof overview & {
+    current_state_watermark?: OverviewWatermark | null
+    counts_watermark?: OverviewWatermark | null
+  }) | null
+  const currentWatermark = extendedOverview?.current_state_watermark ?? null
+  const countsWatermark = extendedOverview?.counts_watermark ?? null
+  const currentAge = ageSeconds(currentWatermark?.updated_at)
+  const countsAge = ageSeconds(countsWatermark?.updated_at)
+  const currentStatus = currentStateStatus(currentAge)
+  const indexedCountDetail = countsProvenance === 'unavailable'
+    ? unavailableReason
+    : countsWatermark
+      ? `Indexed through ledger ${formatInteger(countsWatermark.ledger_index)}`
+      : 'Indexed snapshot count'
 
   return (
     <div className="page-stack">
@@ -63,37 +98,60 @@ export function OverviewPage({ resources, onNavigate, onReload }: OverviewPagePr
         </div>
       ) : null}
 
-      <section className="metrics-grid" aria-label="Current protocol counts">
+      <Panel
+        title="Current-state freshness"
+        description="Five-minute current object state is separate from indexed counts and historical records"
+      >
+        {currentStatus !== 'healthy' ? (
+          <div className="stale-warning" role="status">
+            <strong>Current-state data is not within the ten-minute freshness window</strong>
+            <span>The five-minute layer last updated {formatDuration(currentAge)} ago.</span>
+          </div>
+        ) : null}
+        <DefinitionGrid
+          items={[
+            { label: 'Current state', value: <StatusBadge value={currentStatus} /> },
+            { label: 'Current-state ledger', value: formatInteger(currentWatermark?.ledger_index), mono: true },
+            { label: 'Current-state age', value: formatDuration(currentAge) },
+            { label: 'Current-state updated', value: formatUtc(currentWatermark?.updated_at), wide: true },
+            { label: 'Indexed counts ledger', value: formatInteger(countsWatermark?.ledger_index), mono: true },
+            { label: 'Indexed counts age', value: formatDuration(countsAge) },
+            { label: 'Indexed counts updated', value: formatUtc(countsWatermark?.updated_at), wide: true },
+          ]}
+        />
+      </Panel>
+
+      <section className="metrics-grid" aria-label="Indexed protocol counts">
         <MetricCard
           label="Vaults"
           value={formatInteger(overview?.counts.vaults)}
-          detail={countsProvenance === 'unavailable' ? unavailableReason : 'Active snapshot count'}
+          detail={indexedCountDetail}
           provenance={countsProvenance}
         />
         <MetricCard
           label="Loan Brokers"
           value={formatInteger(overview?.counts.loan_brokers)}
-          detail={countsProvenance === 'unavailable' ? unavailableReason : 'Active snapshot count'}
+          detail={indexedCountDetail}
           provenance={countsProvenance}
         />
         <MetricCard
           label="Loans"
           value={formatInteger(overview?.counts.loans)}
-          detail={countsProvenance === 'unavailable' ? unavailableReason : 'Active snapshot count'}
+          detail={indexedCountDetail}
           provenance={countsProvenance}
         />
         <MetricCard
-          label="Current objects"
+          label="Indexed objects"
           value={formatInteger(overview?.counts.current_objects)}
-          detail={countsProvenance === 'unavailable' ? unavailableReason : 'Vault, Broker, and Loan objects'}
+          detail={indexedCountDetail}
           provenance={countsProvenance}
         />
         <MetricCard
-          label="Active snapshot"
-          value={overview?.snapshot ? 'Active' : 'Unavailable'}
+          label="Current-state base"
+          value={overview?.snapshot ? 'Available' : 'Unavailable'}
           detail={
             overview?.snapshot
-              ? `Ledger ${formatInteger(overview.snapshot.ledger_index)}`
+              ? `Base ledger ${formatInteger(overview.snapshot.ledger_index)}`
               : unavailableReason
           }
           provenance={snapshotProvenance(resources)}
@@ -102,8 +160,8 @@ export function OverviewPage({ resources, onNavigate, onReload }: OverviewPagePr
 
       <div className="overview-grid">
         <Panel
-          title="Collector and network"
-          description="Latest committed operational context"
+          title="Indexed history and network"
+          description="Canonical history indexing status; separate from the five-minute current state"
           action={
             <a
               href="/network-status"
@@ -124,19 +182,19 @@ export function OverviewPage({ resources, onNavigate, onReload }: OverviewPagePr
             <>
               {status.collector.status === 'stale' ? (
                 <div className="stale-warning" role="status">
-                  <strong>Stale collector data</strong>
-                  <span>Last successful update was {formatDuration(status.collector.data_age_seconds)} ago.</span>
+                  <strong>Indexed history is stale</strong>
+                  <span>Last successful history update was {formatDuration(status.collector.data_age_seconds)} ago.</span>
                 </div>
               ) : null}
               <DefinitionGrid
                 items={[
-                  { label: 'Collector', value: <StatusBadge value={status.collector.status} /> },
+                  { label: 'History indexer', value: <StatusBadge value={status.collector.status} /> },
                   { label: 'Server state', value: status.server.state ? <StatusBadge value={status.server.state} /> : 'Unavailable' },
-                  { label: 'Validated ledger', value: formatInteger(status.server.latest_validated_ledger), mono: true },
-                  { label: 'Processed ledger', value: formatInteger(status.collector.last_processed_ledger), mono: true },
-                  { label: 'Ledger age', value: formatDuration(status.server.latest_ledger_age_seconds) },
-                  { label: 'Data age', value: formatDuration(status.collector.data_age_seconds) },
-                  { label: 'Last success', value: formatUtc(status.collector.last_success_at), wide: true },
+                  { label: 'Observed at history run', value: formatInteger(status.server.latest_validated_ledger), mono: true },
+                  { label: 'History processed through', value: formatInteger(status.collector.last_processed_ledger), mono: true },
+                  { label: 'Observed ledger age', value: formatDuration(status.server.latest_ledger_age_seconds) },
+                  { label: 'History index age', value: formatDuration(status.collector.data_age_seconds) },
+                  { label: 'History last success', value: formatUtc(status.collector.last_success_at), wide: true },
                   { label: 'Failures', value: formatInteger(status.collector.consecutive_failures) },
                 ]}
               />
@@ -186,7 +244,7 @@ export function OverviewPage({ resources, onNavigate, onReload }: OverviewPagePr
 
       <Panel
         title="Recent protocol activity"
-        description="Indexed events from committed validated ledgers"
+        description="Indexed history events; this panel may trail the five-minute current-state layer"
         className="activity-panel"
         action={<a href="/api/activity?limit=20">Activity API</a>}
       >
