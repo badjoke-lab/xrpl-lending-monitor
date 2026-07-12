@@ -13,10 +13,22 @@ permissions:
 jobs:
   snapshot:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     env:
       PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
       - name: Capture public runtime status
         shell: bash
         run: |
@@ -32,10 +44,41 @@ jobs:
             'm1-exit:/api/status/m1-exit'; do
             name="${spec%%:*}"
             path="${spec#*:}"
-            curl --fail-with-body --silent --show-error --retry 3 \
-              "${PRODUCTION_BASE}${path}" > "pre-soak-status/${name}.json"
+            status="$(curl --silent --show-error --retry 2 \
+              -o "pre-soak-status/${name}.json" -w '%{http_code}' \
+              "${PRODUCTION_BASE}${path}" || true)"
+            printf '%s\n' "${status}" > "pre-soak-status/${name}.status"
           done
           date -u +'%Y-%m-%dT%H:%M:%SZ' > pre-soak-status/captured-at.txt
+
+      - name: Capture D1 cursor and overlay rows
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote \
+            --command "SELECT network,epoch_id,last_processed_ledger,last_processed_hash,latest_observed_ledger,latest_observed_hash,status,last_success_at,updated_at FROM sync_state WHERE network='devnet';" \
+            --json > pre-soak-status/sync-state-raw.txt
+          sed -n '/^\[/,$p' pre-soak-status/sync-state-raw.txt > pre-soak-status/sync-state.json
+
+          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote \
+            --command "SELECT network,epoch_id,base_snapshot_id,base_ledger_index,base_ledger_hash,overlay_ledger_index,overlay_ledger_hash,updated_at FROM current_state_overlay_state WHERE network='devnet' ORDER BY updated_at DESC,base_snapshot_id ASC;" \
+            --json > pre-soak-status/overlay-state-raw.txt
+          sed -n '/^\[/,$p' pre-soak-status/overlay-state-raw.txt > pre-soak-status/overlay-state.json
+
+          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote \
+            --command "SELECT shadow_epoch_id,base_epoch_id,base_snapshot_id,base_ledger_index,base_ledger_hash,bound_at FROM fast_lane_shadow_base_binding WHERE network='devnet';" \
+            --json > pre-soak-status/fast-lane-binding-raw.txt
+          sed -n '/^\[/,$p' pre-soak-status/fast-lane-binding-raw.txt > pre-soak-status/fast-lane-binding.json
+
+          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote \
+            --command "SELECT epoch_id,last_processed_ledger,last_processed_hash,latest_observed_ledger,latest_observed_hash,status,updated_at FROM fast_lane_shadow_state WHERE network='devnet';" \
+            --json > pre-soak-status/fast-lane-state-raw.txt
+          sed -n '/^\[/,$p' pre-soak-status/fast-lane-state-raw.txt > pre-soak-status/fast-lane-state.json
+
+      - name: Build snapshot summary
+        shell: bash
+        run: |
+          set -euo pipefail
           jq -n \
             --slurpfile overview pre-soak-status/overview.json \
             --slurpfile collector pre-soak-status/collector.json \
@@ -44,7 +87,11 @@ jobs:
             --slurpfile diff pre-soak-status/fast-lane-diff.json \
             --slurpfile continuation pre-soak-status/continuation-verification.json \
             --slurpfile m1 pre-soak-status/m1-exit.json \
-            '{overview:$overview[0],collector:$collector[0],history:$history[0],rebase:$rebase[0],diff:$diff[0],continuation:$continuation[0],m1:$m1[0]}' \
+            --slurpfile sync pre-soak-status/sync-state.json \
+            --slurpfile overlays pre-soak-status/overlay-state.json \
+            --slurpfile binding pre-soak-status/fast-lane-binding.json \
+            --slurpfile fastState pre-soak-status/fast-lane-state.json \
+            '{overview:$overview[0],collector:$collector[0],history:$history[0],rebase:$rebase[0],diff:$diff[0],continuation:$continuation[0],m1:$m1[0],sync:$sync[0],overlays:$overlays[0],fastLaneBinding:$binding[0],fastLaneState:$fastState[0]}' \
             > pre-soak-status/summary.json
           cat pre-soak-status/summary.json
 
