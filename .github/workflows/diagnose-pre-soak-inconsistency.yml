@@ -1,0 +1,73 @@
+name: Diagnose pre-soak inconsistency
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/diagnose-pre-soak-inconsistency.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Capture public, runtime, and D1 state
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=pre-soak-inconsistency
+          mkdir -p "$ROOT"
+          for spec in overview:/api/overview collector:/api/status/collector history:/api/status/history-source rebase:/api/status/replacement-base-rebase diff:'/api/status/fast-lane-diff?limit=500' continuation:/api/status/continuation-verification m1:/api/status/m1-exit; do
+            name="${spec%%:*}"; path="${spec#*:}"
+            curl --silent --show-error --retry 2 -o "$ROOT/$name.json" -w '%{http_code}\n' "$BASE$path" > "$ROOT/$name.status" || true
+          done
+          curl --fail-with-body --silent --show-error -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/xrpl-lending-monitor/settings" > "$ROOT/settings.json"
+          curl --fail-with-body --silent --show-error -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/xrpl-lending-monitor/schedules" > "$ROOT/schedules.json"
+          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote --command "SELECT network,epoch_id,last_processed_ledger,last_processed_hash,latest_observed_ledger,latest_observed_hash,status,updated_at FROM sync_state WHERE network='devnet';" --json > "$ROOT/sync-raw.txt"
+          sed -n '/^\[/,$p' "$ROOT/sync-raw.txt" > "$ROOT/sync.json"
+          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote --command "SELECT network,epoch_id,base_snapshot_id,base_ledger_index,base_ledger_hash,overlay_ledger_index,overlay_ledger_hash,updated_at FROM current_state_overlay_state WHERE network='devnet' ORDER BY updated_at DESC;" --json > "$ROOT/overlay-raw.txt"
+          sed -n '/^\[/,$p' "$ROOT/overlay-raw.txt" > "$ROOT/overlay.json"
+          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote --command "SELECT epoch_id,last_processed_ledger,last_processed_hash,latest_observed_ledger,latest_observed_hash,status,updated_at FROM fast_lane_shadow_state WHERE network='devnet';" --json > "$ROOT/fast-state-raw.txt"
+          sed -n '/^\[/,$p' "$ROOT/fast-state-raw.txt" > "$ROOT/fast-state.json"
+          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote --command "SELECT shadow_epoch_id,base_epoch_id,base_snapshot_id,base_ledger_index,base_ledger_hash,bound_at FROM fast_lane_shadow_base_binding WHERE network='devnet';" --json > "$ROOT/fast-binding-raw.txt"
+          sed -n '/^\[/,$p' "$ROOT/fast-binding-raw.txt" > "$ROOT/fast-binding.json"
+      - name: Build summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=pre-soak-inconsistency
+          jq -n \
+            --slurpfile overview "$ROOT/overview.json" \
+            --slurpfile rebase "$ROOT/rebase.json" \
+            --slurpfile diff "$ROOT/diff.json" \
+            --slurpfile settings "$ROOT/settings.json" \
+            --slurpfile schedules "$ROOT/schedules.json" \
+            --slurpfile sync "$ROOT/sync.json" \
+            --slurpfile overlay "$ROOT/overlay.json" \
+            --slurpfile fastState "$ROOT/fast-state.json" \
+            --slurpfile fastBinding "$ROOT/fast-binding.json" \
+            '{overview:$overview[0],rebase:$rebase[0],diff:$diff[0],runtimeBindings:[$settings[0].result.bindings[]|select(.name|test("APP_NETWORK|MAINNET_ENABLED|CURRENT_STATE_REPLACEMENT_SNAPSHOT_ID|REPLACEMENT_BASE_"))|{name,text,value}],schedules:$schedules[0].result.schedules,sync:$sync[0][0].results,overlay:$overlay[0][0].results,fastState:$fastState[0][0].results,fastBinding:$fastBinding[0][0].results}' > "$ROOT/summary.json"
+          cat "$ROOT/summary.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pre-soak-inconsistency
+          path: pre-soak-inconsistency
+          if-no-files-found: error
+          retention-days: 14
