@@ -1,194 +1,121 @@
 # Implementation status
 
-Last updated: 2026-07-11, after the live XRPL Devnet source audit.
+Last updated: 2026-07-12, after the recovered live Devnet checkpoint cutover.
 
 ## Current phase
 
-XRPL Lending Monitor remains publicly reachable on XRPL Devnet, but public-release acceptance is withdrawn.
+XRPL Lending Monitor is publicly operating on XRPL Devnet.
 
-The project is now in:
+Current formal state:
 
-> Current-state continuity recovery and immutable-history rolling catch-up.
+> Public Devnet operation restored; a new 24-hour release-qualification soak is active.
 
 Mainnet remains disabled.
 
-The previous statement that the first 24-hour production soak was active and healthy is superseded by the live-source audit described below.
+The previous release acceptance was correctly withdrawn after the live-source audit found stale immutable history and a fast-lane continuity gap. That stale checkpoint has now been replaced and the old soak remains invalid. Release completion is not claimed until the new soak finishes.
 
-## Confirmed live-source audit result
+## Recovered production checkpoint
 
-At approximately `2026-07-11T12:27Z`, the public API was compared in one run with both configured XRPL Devnet RPC sources and with direct ledger, ledger-entry, and transaction lookups.
+The guarded recovery cutover completed successfully on GitHub Actions run `29182796719`.
 
-Source heads:
+Production history and current state were promoted as one aligned checkpoint:
 
-- Honeycluster: ledger `3,569,175`;
-- Ripple Devnet: ledger `3,569,176`;
-- source spread: `1` ledger.
+- network: `devnet`;
+- epoch: `devnet-3371675`;
+- ledger index: `3,589,759`;
+- ledger hash: `1F2A8F4C9BC1A4CBED24DE04E6D5963E10BD7A77C334E97B51E74887CF277286`;
+- snapshot: `devnet-3589759-1f2a8f4c9bc1`;
+- history publication SHA-256: `b293b309c0b320ab5ea88a2327457128e901632f5781f76842fbc6e19d941d29`;
+- current-state manifest SHA-256: `2038e0cd5f75748e46adae9d4bd4bd4f2a26e7190b69bdfc02ffc7bbaa8f3995`.
 
-### Five-minute current-state layer
+The target ledger/hash matched both configured live XRPL Devnet sources before production writes.
 
-At the audit instant:
+## Post-cutover live verification
 
-- public fast-lane watermark: ledger `3,569,165`;
-- live XRPL source head: ledger `3,569,176`;
-- lag: `11` ledgers;
-- watermark age: `41` seconds;
-- watermark ledger hash: exact match with XRPL;
-- sampled objects: three Vaults, three Loan Brokers, and three Loans;
-- all nine sampled objects existed in the live validated ledger and matched substantively.
+The retained final verification passed with:
 
-Therefore the current-state list/detail path was fresh at the audit instant.
+- live XRPL ledger: `3,590,433`;
+- public current-state ledger: `3,590,432`;
+- source lag: `1` ledger;
+- current-state age: `6` seconds;
+- fast-lane source: `fast_lane`;
+- exact projection mismatches: `0`;
+- collector status: `healthy`;
+- Mainnet enabled: `false`.
 
-However, continuity failed during the preceding period:
+Immutable/indexed history was confirmed at:
 
-- previous run: `2026-07-11T11:20:55Z`;
-- next run: `2026-07-11T12:10:57Z`;
-- observed gap: `3,002` seconds, approximately 50 minutes;
-- recovery run status: `reanchored`;
-- lag after recovery: `0`.
+- end ledger: `3,589,759`;
+- ledger count: `218,084`;
+- segment count: `441`;
+- exact-index buckets: `256`;
+- exact-index records: `8,195,203`.
 
-The five-minute continuity requirement was not met. The existing `Healthy` presentation did not disclose this gap and is not an acceptable public freshness signal.
+Production current-object counts at the promoted checkpoint were:
 
-### Overview counts and indexed history
+- Vaults: `837,791`;
+- Loan Brokers: `553,468`;
+- Loans: `238,226`;
+- total current objects: `1,629,485`.
 
-At the same audit instant:
+## Production schedules
 
-- counts/canonical coverage ledger: `3,540,803`;
-- live source head: `3,569,176`;
-- lag: `28,373` ledgers;
-- coverage close time: `2026-07-10T09:36:21Z`;
-- coverage age: approximately `26.84` hours;
-- stored coverage hash: valid for ledger `3,540,803`.
-
-The data was internally valid but stale for the declared four-hour cadence.
-
-Affected public values and APIs include:
-
-- Overview Vault, Loan Broker, Loan, and Current Objects counts;
-- Activity and activity exports/feeds;
-- transaction detail for post-coverage transactions;
-- object history;
-- Loan lifecycle and Lifecycle Explorer;
-- archived objects;
-- Cover, Debt, and Loss history;
-- history-side Search results.
-
-The stale Activity result was not caused by a quiet Devnet. Recent fast-lane runs observed substantial Lending transaction counts after the indexed-history boundary.
-
-## Root cause
-
-The protected canonical heavy cycle was introduced as a D1 headroom protection measure, not as a complete catch-up mechanism.
-
-Production currently has one schedule:
+Cloudflare Workers has exactly one production cron schedule:
 
 ```text
 */5 * * * *
 ```
 
-Inside that schedule:
+Inside that single five-minute schedule:
 
-- every tick attempts the compact fast lane;
-- UTC four-hour boundaries additionally attempt the protected heavy cycle.
+- every tick runs the compact current-state fast lane;
+- UTC four-hour boundaries additionally run the protected canonical reconciliation tail.
 
-The protected heavy configuration is bounded to at most `32` ledgers per run. Running this once every four hours cannot keep pace with Devnet ledger production. It is suitable only as a protected reconciliation tail, not as the mechanism for closing a large history backlog.
+Separately, GitHub Actions runs rolling checkpoint maintenance every three hours. That maintenance advances immutable history, exact index, and rebuilt current state together when required, verifies their ledger/hash identity, and uses the guarded cutover path. It is not a second Cloudflare cron.
 
-The intended large-backlog path already exists separately:
+## D1 free-plan headroom at cutover
 
-- fixed-target immutable history extension;
-- incremental exact-index construction;
-- rolling current-state reconstruction;
-- candidate history/current-state branch publication;
-- remote candidate rehearsal;
-- guarded production promotion and base rebind.
+- rows read: `473,223`;
+- rows written: `11,574`;
+- rows read remaining: `4,526,777`;
+- rows written remaining: `88,426`.
 
-The rolling candidate workflow is merged. The reusable preflight and guarded promotion work remained unmerged/outdated, so the rolling path was never completed as normal production operation.
+The cutover remained inside the configured fail-closed free-plan gates.
 
-Existing aligned rolling candidate branches currently cover ledger `3,540,657` for both immutable history and current state.
+## New 24-hour soak
 
-## Recovery plan
+The failed earlier soak is not reused.
 
-### R1 — Preserve service but withdraw the success claim
+The new qualification window is:
 
-- keep the public Devnet endpoint reachable;
-- do not call it normally operating or release-complete;
-- keep Mainnet disabled;
-- retain the five-minute fast lane because it is currently useful and can recover by reanchor;
-- treat the failed soak and live-source audit as the active evidence baseline.
+- start: `2026-07-12T07:00:00Z` (`2026-07-12 16:00 JST`);
+- end: `2026-07-13T07:00:00Z` (`2026-07-13 16:00 JST`).
 
-### R2 — Catch immutable history and current state up outside D1
-
-Use the merged rolling checkpoint candidate pipeline from the aligned candidate pair at ledger `3,540,657`.
-
-- advance in bounded steps of at most `5,000` ledgers;
-- generate immutable history, exact index, and current state together;
-- verify ledger index/hash equality for every candidate pair;
-- alternate isolated candidate branches between cycles;
-- continue until the final candidate is within the accepted freshness window of the live Devnet head.
-
-The initial measured gap requires approximately six bounded cycles, plus another cycle if Devnet advancement during generation requires it.
-
-### R3 — Restore reusable preflight and guarded promotion
-
-Port the useful parts of PRs `#356` and `#357` onto current `main` instead of merging their stale heads directly.
-
-The restored gates must additionally require:
-
-- candidate history/current state ledger and hash identity match;
-- candidate source rehearsal passes;
-- candidate coverage age is within the declared history freshness window;
-- current-state and history candidates are promoted as one logical checkpoint;
-- D1 write headroom remains fail-closed;
-- the fast-lane base binding is updated to the promoted checkpoint;
-- rollback refs are pinned before any production write;
-- no Mainnet mutation is possible.
-
-### R4 — Promote one aligned checkpoint
-
-After the final candidate and preflight pass:
-
-1. promote immutable history;
-2. confirm the public hybrid history source reads the promoted publication;
-3. rebind/rebase the compact current-state tail to the same target ledger/hash;
-4. promote the matching current-state branch;
-5. deploy the reconciled Worker configuration;
-6. verify all public API classes against live XRPL source data.
-
-The 28,000-ledger backlog must not be replayed into D1 row-by-row. Immutable history and rebuilt current state are the backlog recovery path; D1 remains the bounded post-checkpoint tail.
-
-### R5 — Fix continuity and public freshness reporting
-
-Independently investigate the 3,002-second fast-lane gap.
-
-Public status must be split into at least:
-
-- current-state ledger, age, lag, and last successful five-minute run;
-- immutable/indexed-history coverage ledger and age;
-- separate current-state and history verdicts.
-
-A missing fast-lane metric for more than ten minutes must show `Degraded` or `Stale`, never `Healthy`.
-
-### R6 — Restart release qualification
-
-The previous soak is failed and cannot be resumed.
-
-After recovery, start a new 24-hour soak from zero.
-
-Required exit conditions:
+Required exit conditions remain:
 
 - no fast-lane run gap above `420` seconds;
-- current-state age within ten minutes and source lag within the accepted ledger bound;
-- immutable/indexed-history coverage age within five hours;
+- no failed fast-lane status;
+- current-state source lag no greater than `10` ledgers at audit time;
+- current-state age within ten minutes;
+- immutable/indexed-history coverage within the declared five-hour bound;
 - exact ledger hashes match XRPL source data;
 - sampled Vault, Loan Broker, and Loan objects match live ledger entries;
-- Overview counts identify their own coverage watermark;
-- Activity/Lifecycle/Archive/Cover-Loss coverage is proven, not inferred from HTTP success;
 - no projection mismatch, cursor gap, tombstone regression, pagination failure, or HTTP 5xx;
 - D1 remains within free-plan headroom;
 - Mainnet remains disabled.
 
+## Evidence
+
+- recovery orchestration run: `29182498185`;
+- guarded live cutover run: `29182796719`;
+- recovery artifact: `transient-rehearsal-recovery`;
+- cutover artifact: `rolling-checkpoint-live-cutover`;
+- final current-state lag: `1` ledger;
+- final current-state age: `6` seconds;
+- production cron: one `*/5 * * * *` schedule.
+
 ## Formal decision
 
-Current formal state:
+The site is now in real public Devnet operation, not merely a static or stale recovery build.
 
-> Publicly reachable Devnet recovery build; current-state layer recovered at the latest audit instant, five-minute continuity not yet proven, immutable history and counts stale, release acceptance withdrawn.
-
-No public-release completion claim is permitted until R2-R6 pass.
+Release qualification remains open until the new 24-hour soak is reconciled. No Mainnet transition is authorized by this status.
