@@ -1,5 +1,5 @@
 name: Final pre-soak snapshot
-# Trigger final pre-soak evidence capture: 2026-07-12
+# Current-architecture final gate: rolling checkpoint plus five-minute fast lane.
 
 on:
   pull_request:
@@ -14,11 +14,12 @@ permissions:
 jobs:
   snapshot:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 55
     env:
       BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      LOAN_ID: ECBCA3B65B3CF3A45F06ECF844B764B0BD8FF8B33A9C3CAC4E04784AE183FE4E
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -29,26 +30,70 @@ jobs:
           node-version: 24.18.0
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Capture public and source state
+
+      - name: Wait for current pre-soak readiness
         shell: bash
         run: |
           set -euo pipefail
           ROOT=final-pre-soak-snapshot
           mkdir -p "$ROOT"
-          for spec in \
-            'overview:/api/overview' \
-            'collector:/api/status/collector' \
-            'history:/api/status/history-source' \
-            'rebase:/api/status/replacement-base-rebase' \
-            'diff:/api/status/fast-lane-diff?limit=500' \
-            'continuation:/api/status/continuation-verification' \
-            'm1:/api/status/m1-exit'; do
-            name="${spec%%:*}"; path="${spec#*:}"
-            curl --fail-with-body --silent --show-error --retry 3 "$BASE$path" > "$ROOT/$name.json"
+          : > "$ROOT/readiness-attempts.ndjson"
+          for attempt in $(seq 1 480); do
+            curl --silent --show-error --retry 2 -o "$ROOT/readiness-probe.json" -w '%{http_code}\n' \
+              "$BASE/api/status/pre-soak-readiness" > "$ROOT/readiness-probe.status" || true
+            curl --silent --show-error --retry 2 -o "$ROOT/overview-probe.json" -w '%{http_code}\n' \
+              "$BASE/api/overview" > "$ROOT/overview-probe.status" || true
+            jq -n '{method:"ledger",params:[{ledger_index:"validated",transactions:false,expand:false}]}' > "$ROOT/head-request.json"
+            curl --silent --show-error --retry 2 -H 'content-type: application/json' --data @"$ROOT/head-request.json" \
+              -o "$ROOT/head-primary-probe.json" https://devnet.honeycluster.io/ || true
+            curl --silent --show-error --retry 2 -H 'content-type: application/json' --data @"$ROOT/head-request.json" \
+              -o "$ROOT/head-fallback-probe.json" https://s.devnet.rippletest.net:51234/ || true
+
+            READY="$(jq -r '.passed // false' "$ROOT/readiness-probe.json" 2>/dev/null || echo false)"
+            SOURCE="$(jq -r '.current_state_watermark.source // empty' "$ROOT/overview-probe.json" 2>/dev/null || true)"
+            CURRENT="$(jq -r '.current_state_watermark.ledger_index // 0' "$ROOT/overview-probe.json" 2>/dev/null || echo 0)"
+            UPDATED="$(jq -r '.current_state_watermark.updated_at // empty' "$ROOT/overview-probe.json" 2>/dev/null || true)"
+            PRIMARY="$(jq -r '.result.ledger_index // .result.ledger.ledger_index // 0' "$ROOT/head-primary-probe.json" 2>/dev/null || echo 0)"
+            FALLBACK="$(jq -r '.result.ledger_index // .result.ledger.ledger_index // 0' "$ROOT/head-fallback-probe.json" 2>/dev/null || echo 0)"
+            LIVE="$PRIMARY"
+            if [ "$FALLBACK" -gt 0 ] && { [ "$LIVE" -eq 0 ] || [ "$FALLBACK" -lt "$LIVE" ]; }; then LIVE="$FALLBACK"; fi
+            LAG="$((LIVE - CURRENT))"; [ "$LAG" -lt 0 ] && LAG=0
+            AGE=999999
+            if [ -n "$UPDATED" ]; then
+              EPOCH="$(date -u -d "$UPDATED" +%s 2>/dev/null || echo 0)"
+              [ "$EPOCH" -gt 0 ] && AGE="$(( $(date -u +%s) - EPOCH ))"
+              [ "$AGE" -lt 0 ] && AGE=0
+            fi
+            jq -n --argjson attempt "$attempt" --arg ready "$READY" --arg source "$SOURCE" \
+              --argjson current "$CURRENT" --argjson live "$LIVE" --argjson lag "$LAG" --argjson age "$AGE" \
+              '{attempt:$attempt,readinessPassed:($ready=="true"),source:$source,currentLedger:$current,liveLedger:$live,lagLedgers:$lag,ageSeconds:$age,observedAt:(now|todateiso8601)}' \
+              >> "$ROOT/readiness-attempts.ndjson"
+            if [ "$READY" = true ] && [ "$SOURCE" = fast_lane ] && [ "$CURRENT" -gt 0 ] && [ "$LAG" -le 10 ] && [ "$AGE" -le 600 ]; then
+              cp "$ROOT/readiness-probe.json" "$ROOT/readiness.json"
+              cp "$ROOT/overview-probe.json" "$ROOT/overview.json"
+              cp "$ROOT/head-primary-probe.json" "$ROOT/head-primary.json"
+              cp "$ROOT/head-fallback-probe.json" "$ROOT/head-fallback.json"
+              touch "$ROOT/readiness-observed"
+              break
+            fi
+            sleep 5
           done
-          jq -n '{method:"ledger",params:[{ledger_index:"validated",transactions:false,expand:false}]}' > "$ROOT/head-request.json"
-          curl --fail-with-body --silent --show-error --retry 3 -H 'content-type: application/json' --data @"$ROOT/head-request.json" https://devnet.honeycluster.io/ > "$ROOT/head-primary.json"
-          curl --fail-with-body --silent --show-error --retry 3 -H 'content-type: application/json' --data @"$ROOT/head-request.json" https://s.devnet.rippletest.net:51234/ > "$ROOT/head-fallback.json"
+          test -f "$ROOT/readiness-observed"
+
+      - name: Capture exact watermark, history, and Loan evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=final-pre-soak-snapshot
+          LEDGER="$(jq -r '.current_state_watermark.ledger_index' "$ROOT/overview.json")"
+          jq -n --argjson ledger "$LEDGER" '{method:"ledger",params:[{ledger_index:$ledger,transactions:false,expand:false}]}' > "$ROOT/watermark-request.json"
+          curl --fail-with-body --silent --show-error --retry 3 -H 'content-type: application/json' --data @"$ROOT/watermark-request.json" https://devnet.honeycluster.io/ > "$ROOT/watermark-primary.json"
+          curl --fail-with-body --silent --show-error --retry 3 -H 'content-type: application/json' --data @"$ROOT/watermark-request.json" https://s.devnet.rippletest.net:51234/ > "$ROOT/watermark-fallback.json"
+          curl --fail-with-body --silent --show-error --retry 3 "$BASE/api/status/history-source" > "$ROOT/history.json"
+          curl --fail-with-body --silent --show-error --retry 3 "$BASE/api/status/replacement-base-rebase" > "$ROOT/rebase.json"
+          curl --fail-with-body --silent --show-error --retry 3 "$BASE/api/status/fast-lane-diff?limit=500" > "$ROOT/diff.json"
+          curl --fail-with-body --silent --show-error --retry 3 "$BASE/api/objects/Loan/$LOAN_ID/history?limit=25" > "$ROOT/loan-history.json"
+
       - name: Capture Cloudflare and D1 state
         shell: bash
         run: |
@@ -64,53 +109,60 @@ jobs:
           sed -n '/^\[/,$p' "$ROOT/binding-raw.txt" > "$ROOT/binding.json"
           pnpm exec wrangler d1 execute xrpl-lending-monitor --remote --command "SELECT run_at,status,start_ledger_index,end_ledger_index,latest_observed_ledger,lag_ledgers,ledgers_processed,lending_transactions,persistence_rows_read,persistence_rows_written FROM fast_lane_shadow_run_metrics WHERE network='devnet' ORDER BY run_at DESC LIMIT 12;" --json > "$ROOT/metrics-raw.txt"
           sed -n '/^\[/,$p' "$ROOT/metrics-raw.txt" > "$ROOT/metrics.json"
-      - name: Build verdict
+
+      - name: Build final pre-soak verdict
         shell: bash
         run: |
           set -euo pipefail
           python - <<'PY'
           import datetime, json, pathlib
-          root = pathlib.Path('final-pre-soak-snapshot')
+          root=pathlib.Path('final-pre-soak-snapshot')
           def load(name): return json.loads((root/name).read_text())
           def rows(name):
               data=load(name); return data[0].get('results',[]) if data else []
-          def head(data):
-              r=data.get('result',{}); l=r.get('ledger',{}) if isinstance(r.get('ledger'),dict) else {}
-              return int(r.get('ledger_index') or l.get('ledger_index') or l.get('seqNum') or 0)
+          def ledger_identity(data):
+              result=data.get('result',{}); ledger=result.get('ledger',{}) if isinstance(result.get('ledger'),dict) else {}
+              return int(result.get('ledger_index') or ledger.get('ledger_index') or ledger.get('seqNum') or 0), result.get('ledger_hash') or ledger.get('ledger_hash') or ledger.get('hash')
           def binding(settings,name):
               for item in settings.get('result',{}).get('bindings',[]):
                   if item.get('name')==name: return item.get('text',item.get('value'))
-          overview=load('overview.json'); collector=load('collector.json'); history=load('history.json'); rebase=load('rebase.json'); diff=load('diff.json'); continuation=load('continuation.json'); m1=load('m1.json')
-          settings=load('settings.json'); schedules=load('schedules.json'); state=(rows('state.json') or [{}])[0]; base=(rows('binding.json') or [{}])[0]; metrics=rows('metrics.json')
-          heads=[x for x in (head(load('head-primary.json')),head(load('head-fallback.json'))) if x>0]; live=min(heads) if heads else 0
-          wm=overview.get('current_state_watermark') or {}; current=int(wm.get('ledger_index') or 0); lag=max(0,live-current)
-          updated=wm.get('updated_at'); age=None
-          if updated: age=(datetime.datetime.now(datetime.timezone.utc)-datetime.datetime.fromisoformat(updated.replace('Z','+00:00'))).total_seconds()
+          readiness=load('readiness.json'); overview=load('overview.json'); history=load('history.json'); rebase=load('rebase.json'); diff=load('diff.json')
+          settings=load('settings.json'); schedules=load('schedules.json'); state=(rows('state.json') or [{}])[0]; base=(rows('binding.json') or [{}])[0]; metrics=rows('metrics.json'); loan=load('loan-history.json')
+          watermark=overview.get('current_state_watermark') or {}; ledger=int(watermark.get('ledger_index') or 0); ledger_hash=watermark.get('ledger_hash')
+          p_index,p_hash=ledger_identity(load('watermark-primary.json')); f_index,f_hash=ledger_identity(load('watermark-fallback.json'))
           hist=int((history.get('chain') or {}).get('end_ledger_index') or 0)
-          cursor=collector.get('cursor') or {}; expected_cursor_lag=None
-          if cursor.get('last_processed_ledger') is not None and cursor.get('latest_observed_ledger') is not None:
-              expected_cursor_lag=max(0,int(cursor['latest_observed_ledger'])-int(cursor['last_processed_ledger']))
           checks={
-            'devnet': binding(settings,'APP_NETWORK')=='devnet',
+            'current_architecture_readiness': readiness.get('passed') is True and readiness.get('architecture')=='rolling_checkpoint_fast_lane_v1',
+            'all_readiness_checks': all(item.get('passed') is True for item in (readiness.get('checks') or {}).values()),
+            'public_source_fast_lane': watermark.get('source')=='fast_lane',
+            'both_devnet_sources_match_watermark': p_index==ledger==f_index and p_hash==ledger_hash==f_hash,
+            'devnet_runtime': binding(settings,'APP_NETWORK')=='devnet',
             'mainnet_disabled': str(binding(settings,'MAINNET_ENABLED')).lower()=='false',
-            'single_5m_cron': [x.get('cron') for x in schedules.get('result',{}).get('schedules',[])]==['*/5 * * * *'],
-            'rebase_replayed': rebase.get('status')=='replayed' and int((rebase.get('target') or {}).get('ledgerIndex') or 0)==hist,
-            'binding_checkpoint': int(base.get('base_ledger_index') or 0)==hist,
-            'diff_zero': diff.get('status')=='ok' and diff.get('passed') is True and int((diff.get('sample') or {}).get('exactProjectionMismatches') or 0)==0,
-            'source_fast_lane': wm.get('source')=='fast_lane',
-            'age_600': age is not None and age<=600,
-            'lag_10': lag<=10,
-            'd1_matches_public': int(state.get('last_processed_ledger') or 0)==current,
-            'collector_consistent': expected_cursor_lag is not None and int(cursor.get('lag_ledgers') or 0)==expected_cursor_lag,
-            'collector_no_failures': int(collector.get('consecutive_failures') or 0)==0 and collector.get('error') is None,
-            'continuation': continuation.get('passed') is True,
-            'm1': m1.get('ready') is True,
-            'metrics_present': len(metrics)>=3,
+            'single_five_minute_cron': [item.get('cron') for item in schedules.get('result',{}).get('schedules',[])]==['*/5 * * * *'],
+            'history_checkpoint_matches_binding': int(base.get('base_ledger_index') or 0)==hist and base.get('base_ledger_hash')==ledger_hash if ledger==hist else int(base.get('base_ledger_index') or 0)==hist,
+            'replacement_base_replayed': rebase.get('status')=='replayed' and int((rebase.get('target') or {}).get('ledgerIndex') or 0)==hist,
+            'projection_diff_zero': diff.get('status')=='ok' and diff.get('passed') is True and int((diff.get('sample') or {}).get('exactProjectionMismatches') or 0)==0,
+            'd1_state_matches_public': int(state.get('last_processed_ledger') or 0)==ledger and state.get('last_processed_hash')==ledger_hash,
+            'recent_runs_present': len(metrics)>=3 and all(row.get('status')!='error' for row in metrics[:3]),
+            'loan_history_nonempty': len(loan.get('data') or [])>=1,
           }
-          out={'capturedAt':datetime.datetime.now(datetime.timezone.utc).isoformat().replace('+00:00','Z'),'liveHead':live,'current':{'source':wm.get('source'),'ledger':current,'updatedAt':updated,'ageSeconds':age,'lagLedgers':lag},'checkpoint':hist,'state':state,'binding':base,'metrics':metrics,'checks':checks,'passed':all(checks.values())}
-          (root/'summary.json').write_text(json.dumps(out,indent=2)+'\n'); print(json.dumps(out,indent=2))
+          out={
+            'schemaVersion':1,
+            'capturedAt':datetime.datetime.now(datetime.timezone.utc).isoformat().replace('+00:00','Z'),
+            'architecture':readiness.get('architecture'),
+            'checkpoint':{'ledgerIndex':hist,'ledgerHash':base.get('base_ledger_hash'),'snapshotId':base.get('base_snapshot_id')},
+            'currentState':watermark,
+            'sourceWatermarks':{'primary':{'ledgerIndex':p_index,'ledgerHash':p_hash},'fallback':{'ledgerIndex':f_index,'ledgerHash':f_hash}},
+            'loanHistoryRows':len(loan.get('data') or []),
+            'checks':checks,
+            'passed':all(checks.values()),
+            'readiness':readiness,
+          }
+          (root/'summary.json').write_text(json.dumps(out,indent=2)+'\n')
+          print(json.dumps(out,indent=2))
           raise SystemExit(0 if out['passed'] else 2)
           PY
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
