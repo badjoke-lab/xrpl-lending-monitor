@@ -44,6 +44,7 @@ import {
 } from './merged-history-source'
 
 
+const ACTIVITY_HISTORY_SEGMENT_READS = 24
 const ARCHIVED_HISTORY_SEGMENT_READS = 24
 const BALANCE_HISTORY_SEGMENT_READS = 16
 const AUDIT_HISTORY_WALL_TIME_MS = 5_000
@@ -89,6 +90,8 @@ export async function listHybridActivity(options: {
     direction: 'desc',
     limit: options.page.limit,
     cursor: options.immutableCursor,
+    maxSegmentReads: ACTIVITY_HISTORY_SEGMENT_READS,
+    maxWallTimeMs: AUDIT_HISTORY_WALL_TIME_MS,
   })
   const live = await listLiveActivityAfterBoundary(options.db, boundary(options.reader), options.page)
   const merged = mergeActivityHistory({
