@@ -1,4 +1,5 @@
 name: Audit live freshness now
+# Final pre-soak audit after checkpoint-bound production deploy
 
 on:
   pull_request:
@@ -18,7 +19,7 @@ env:
 jobs:
   audit:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 55
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -39,7 +40,7 @@ jobs:
           BASELINE_UPDATED="$(jq -r '.current_state_watermark.updated_at // empty' "${ROOT}/overview-baseline.json")"
           : > "${ROOT}/freshness-attempts.ndjson"
 
-          for attempt in $(seq 1 180); do
+          for attempt in $(seq 1 480); do
             curl --fail-with-body --silent --show-error --retry 2 \
               "${PRODUCTION_BASE}/api/overview" > "${ROOT}/overview-probe.json" || true
             jq -n '{method:"ledger",params:[{ledger_index:"validated",transactions:false,expand:false}]}' \
@@ -65,14 +66,16 @@ jobs:
               if [ "${UPDATED_EPOCH}" -gt 0 ]; then AGE="$(( $(date -u +%s) - UPDATED_EPOCH ))"; fi
               if [ "${AGE}" -lt 0 ]; then AGE=0; fi
             fi
-            jq -n --argjson attempt "${attempt}" --arg updated "${UPDATED}" \
+            SOURCE="$(jq -r '.current_state_watermark.source // empty' "${ROOT}/overview-probe.json" 2>/dev/null || true)"
+            jq -n --argjson attempt "${attempt}" --arg updated "${UPDATED}" --arg source "${SOURCE}" \
               --argjson current "${CURRENT}" --argjson live "${LIVE}" \
               --argjson lag "${LAG}" --argjson age "${AGE}" \
-              '{attempt:$attempt,updatedAt:$updated,currentLedger:$current,liveLedger:$live,lagLedgers:$lag,ageSeconds:$age}' \
+              '{attempt:$attempt,updatedAt:$updated,currentStateSource:$source,currentLedger:$current,liveLedger:$live,lagLedgers:$lag,ageSeconds:$age}' \
               >> "${ROOT}/freshness-attempts.ndjson"
 
             if [ "${CURRENT}" -gt 0 ] && [ "${LIVE}" -gt 0 ] \
               && [ "${UPDATED}" != "${BASELINE_UPDATED}" ] \
+              && [ "${SOURCE}" = fast_lane ] \
               && [ "${LAG}" -le 10 ] && [ "${AGE}" -le 600 ]; then
               cp "${ROOT}/overview-probe.json" "${ROOT}/overview.json"
               cp "${ROOT}/head-primary-probe.json" "${ROOT}/head-primary.json"
@@ -163,7 +166,8 @@ jobs:
           binding_rows = result_rows('binding.json')
           metrics = result_rows('metrics.json')
 
-          live = min(x for x in (head(primary), head(fallback)) if x > 0)
+          heads = [value for value in (head(primary), head(fallback)) if value > 0]
+          live = min(heads) if heads else 0
           current_wm = overview.get('current_state_watermark') or {}
           counts_wm = overview.get('counts_watermark') or {}
           current = int(current_wm.get('ledger_index') or 0)
@@ -175,7 +179,6 @@ jobs:
           lag = max(0, live - current)
 
           history_ledger = int((history.get('chain') or {}).get('end_ledger_index') or 0)
-          history_hash = (history.get('chain') or {}).get('end_ledger_hash')
           counts_ledger = int(counts_wm.get('ledger_index') or 0)
           counts_hash = counts_wm.get('ledger_hash')
           rebase_target = rebase.get('target') or {}
@@ -194,16 +197,17 @@ jobs:
               'devnet_runtime': binding_value(settings, 'APP_NETWORK') == 'devnet',
               'mainnet_disabled': str(binding_value(settings, 'MAINNET_ENABLED')).lower() == 'false',
               'single_five_minute_cron': crons == ['*/5 * * * *'],
+              'current_state_source_fast_lane': current_wm.get('source') == 'fast_lane',
               'current_state_age_within_600s': age is not None and age <= 600,
               'current_state_lag_within_10': lag <= 10,
               'current_state_at_or_after_checkpoint': current >= history_ledger > 0,
               'history_source_ok': history.get('status') == 'ok' and history.get('mode') == 'hybrid',
-              'history_counts_same_checkpoint': counts_ledger == history_ledger and counts_hash == current_wm.get('base_ledger_hash', counts_hash),
+              'history_counts_same_checkpoint': counts_ledger == history_ledger,
               'replacement_base_replayed': rebase.get('status') == 'replayed' and int(rebase_target.get('ledgerIndex') or 0) == history_ledger,
               'fast_lane_binding_same_checkpoint': int(diff_binding.get('baseLedgerIndex') or 0) == history_ledger,
               'fast_lane_diff_zero': diff.get('status') == 'ok' and diff.get('passed') is True and int(diff_sample.get('exactProjectionMismatches') or 0) == 0,
               'd1_state_matches_public_current': int(state.get('last_processed_ledger') or 0) == current,
-              'd1_binding_same_checkpoint': int(binding.get('base_ledger_index') or 0) == history_ledger,
+              'd1_binding_same_checkpoint': int(binding.get('base_ledger_index') or 0) == history_ledger and binding.get('base_ledger_hash') == counts_hash,
               'collector_cursor_self_consistent': cursor_expected_lag is not None and int(cursor.get('lag_ledgers') or 0) == cursor_expected_lag,
               'collector_has_no_failures': int(collector.get('consecutive_failures') or 0) == 0 and collector.get('error') is None,
               'continuation_verification_passed': continuation.get('passed') is True,
@@ -214,8 +218,8 @@ jobs:
           summary = {
               'captured_at': now.isoformat().replace('+00:00', 'Z'),
               'live_head': live,
-              'current_state': {'ledger': current, 'updated_at': updated, 'age_seconds': age, 'lag_ledgers': lag},
-              'checkpoint': {'history_ledger': history_ledger, 'history_hash': history_hash, 'counts_ledger': counts_ledger, 'counts_hash': counts_hash},
+              'current_state': {'source': current_wm.get('source'), 'ledger': current, 'updated_at': updated, 'age_seconds': age, 'lag_ledgers': lag},
+              'checkpoint': {'history_ledger': history_ledger, 'counts_ledger': counts_ledger, 'counts_hash': counts_hash},
               'runtime': {'app_network': binding_value(settings, 'APP_NETWORK'), 'mainnet_enabled': binding_value(settings, 'MAINNET_ENABLED'), 'crons': crons},
               'collector_cursor_expected_lag': cursor_expected_lag,
               'checks': checks,
