@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   diagnose:
@@ -16,8 +17,9 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      GH_TOKEN: ${{ github.token }}
     steps:
-      - name: Capture active deployments and versions
+      - name: Capture active deployments, versions, and concurrent Actions runs
         shell: bash
         run: |
           set -euo pipefail
@@ -29,14 +31,17 @@ jobs:
             status="$(curl --silent --show-error "${auth[@]}" -o "$ROOT/$endpoint.json" -w '%{http_code}' "$base/$endpoint" || true)"
             printf '%s\n' "$status" > "$ROOT/$endpoint.status"
           done
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs?per_page=100" > "$ROOT/actions-runs.json"
+          jq '[.workflow_runs[] | select(.created_at >= "2026-07-12T14:45:00Z") | {id,name,path,event,status,conclusion,head_branch,head_sha,created_at,run_started_at,updated_at}]' "$ROOT/actions-runs.json" > "$ROOT/actions-runs-after-1445.json"
           jq -n \
             --slurpfile settings "$ROOT/settings.json" \
             --slurpfile deployments "$ROOT/deployments.json" \
             --slurpfile versions "$ROOT/versions.json" \
-            '{settingsHttpStatus:(input_filename|length),settings:$settings[0],deployments:$deployments[0],versions:$versions[0]}' \
+            --slurpfile runs "$ROOT/actions-runs-after-1445.json" \
+            '{settings:$settings[0],deployments:$deployments[0],versions:$versions[0],actionsRunsAfter1445:$runs[0]}' \
             > "$ROOT/summary.json"
+          cat "$ROOT/actions-runs-after-1445.json"
           cat "$ROOT/deployments.json"
-          cat "$ROOT/versions.json"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
