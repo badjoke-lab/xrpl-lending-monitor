@@ -1,0 +1,36 @@
+name: Diagnose exact history 500
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/diagnose-exact-history-500.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Capture failing response
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p exact-history-diagnostic
+          URL='https://xrpl-lending-monitor.badjoke-lab.workers.dev/api/objects/Loan/ECBCA3B65B3CF3A45F06ECF844B764B0BD8FF8B33A9C3CAC4E04784AE183FE4E/history?limit=25'
+          STATUS="$(curl --silent --show-error --retry 2 -D exact-history-diagnostic/headers.txt -o exact-history-diagnostic/body.json -w '%{http_code}' "${URL}" || true)"
+          printf '%s\n' "${STATUS}" > exact-history-diagnostic/status.txt
+          jq -n --arg url "${URL}" --arg status "${STATUS}" --slurpfile body exact-history-diagnostic/body.json \
+            '{url:$url,httpStatus:($status|tonumber),body:$body[0]}' > exact-history-diagnostic/summary.json
+          cat exact-history-diagnostic/summary.json
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: exact-history-diagnostic
+          path: exact-history-diagnostic
+          if-no-files-found: error
+          retention-days: 3
