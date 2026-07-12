@@ -1,0 +1,99 @@
+name: Dispatch live cutover 3575657
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/dispatch-live-cutover-3575657.yml'
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: dispatch-live-cutover-3575657
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+      HISTORY_BRANCH: history-rolling-recovery-b-data
+      CURRENT_BRANCH: current-state-rolling-recovery-b-data
+      EXPECTED_LEDGER: '3575657'
+      EXPECTED_HASH: BF0DA8554848CD81898E2825757904CD336A84362DF0AC116B0256BD8A731D85
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Bind exact aligned candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p direct-cutover
+          gh api --method GET "repos/${REPOSITORY}/contents/history/publication.json" -f ref="${HISTORY_BRANCH}" --jq '.content' | tr -d '\n' | base64 --decode > direct-cutover/publication.json
+          gh api --method GET "repos/${REPOSITORY}/contents/read-model/manifest.json" -f ref="${CURRENT_BRANCH}" --jq '.content' | tr -d '\n' | base64 --decode > direct-cutover/current.json
+          jq -e --argjson ledger "${EXPECTED_LEDGER}" --arg hash "${EXPECTED_HASH}" '.complete == true and .endLedgerIndex == $ledger and .endLedgerHash == $hash' direct-cutover/publication.json > /dev/null
+          jq -e --argjson ledger "${EXPECTED_LEDGER}" --arg hash "${EXPECTED_HASH}" '.complete == true and .ledgerIndex == $ledger and .ledgerHash == $hash' direct-cutover/current.json > /dev/null
+
+      - name: Capture existing cutover runs
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/runs?event=workflow_dispatch&per_page=100" --jq '.workflow_runs[].id' > direct-cutover/before.txt
+
+      - name: Dispatch guarded cutover
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -n --arg ref main --arg history "${HISTORY_BRANCH}" --arg current "${CURRENT_BRANCH}" '{ref:$ref,inputs:{history_candidate_branch:$history,current_state_candidate_branch:$current,confirm_production_write:"true"}}' > direct-cutover/dispatch.json
+          gh api --method POST "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/dispatches" --input direct-cutover/dispatch.json
+
+      - name: Resolve and require successful cutover
+        shell: bash
+        run: |
+          set -euo pipefail
+          RUN_ID=''
+          for ATTEMPT in $(seq 1 60); do
+            gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/runs?event=workflow_dispatch&per_page=100" > direct-cutover/runs.json
+            while IFS= read -r ID; do
+              if ! grep -Fxq "${ID}" direct-cutover/before.txt; then RUN_ID="${ID}"; break; fi
+            done < <(jq -r '.workflow_runs | sort_by(.created_at) | reverse | .[].id' direct-cutover/runs.json)
+            test -n "${RUN_ID}" && break
+            sleep 10
+          done
+          test -n "${RUN_ID}"
+          printf '%s\n' "${RUN_ID}" > direct-cutover/run-id.txt
+          for ATTEMPT in $(seq 1 180); do
+            gh api "repos/${REPOSITORY}/actions/runs/${RUN_ID}" > direct-cutover/run.json
+            test "$(jq -r '.status' direct-cutover/run.json)" = completed && break
+            sleep 30
+          done
+          test "$(jq -r '.status' direct-cutover/run.json)" = completed
+          test "$(jq -r '.conclusion' direct-cutover/run.json)" = success
+
+      - name: Download and verify retained evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          RUN_ID="$(cat direct-cutover/run-id.txt)"
+          gh run download "${RUN_ID}" --repo "${REPOSITORY}" --name rolling-checkpoint-live-cutover --dir direct-cutover/artifact
+          EVIDENCE="$(find direct-cutover/artifact -name evidence.json -type f | head -n 1)"
+          POST="$(find direct-cutover/artifact -name post-cutover-verification.json -type f | head -n 1)"
+          test -n "${EVIDENCE}"
+          test -n "${POST}"
+          jq -e --argjson ledger "${EXPECTED_LEDGER}" '.passed == true and .target.target.ledgerIndex == $ledger and .schedule == "*/5 * * * *" and .mainnetEnabled == false' "${EVIDENCE}" > /dev/null
+          jq -e --argjson ledger "${EXPECTED_LEDGER}" '.passed == true and .target.ledgerIndex == $ledger and .lagLedgers <= 10 and .currentStateAgeSeconds <= 600 and .schedule == "*/5 * * * *" and .mainnetEnabled == false' "${POST}" > /dev/null
+          cp "${EVIDENCE}" direct-cutover/evidence.json
+          cp "${POST}" direct-cutover/post-cutover-verification.json
+
+      - name: Upload direct cutover evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: direct-cutover-3575657
+          path: direct-cutover
+          if-no-files-found: warn
+          retention-days: 30
