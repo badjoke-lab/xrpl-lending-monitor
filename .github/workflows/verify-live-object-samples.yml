@@ -1,0 +1,204 @@
+name: Verify live object samples
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/verify-live-object-samples.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    env:
+      PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+    steps:
+      - name: Wait for a fresh fast-lane watermark
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p live-object-samples
+          : > live-object-samples/freshness-attempts.ndjson
+          for attempt in $(seq 1 480); do
+            curl --fail-with-body --silent --show-error --retry 2 \
+              "${PRODUCTION_BASE}/api/overview" > live-object-samples/overview-probe.json || true
+            jq -n '{method:"ledger",params:[{ledger_index:"validated",transactions:false,expand:false}]}' \
+              > live-object-samples/head-request.json
+            curl --fail-with-body --silent --show-error --retry 2 \
+              -H 'content-type: application/json' --data @live-object-samples/head-request.json \
+              https://devnet.honeycluster.io/ > live-object-samples/head-primary-probe.json || true
+            curl --fail-with-body --silent --show-error --retry 2 \
+              -H 'content-type: application/json' --data @live-object-samples/head-request.json \
+              https://s.devnet.rippletest.net:51234/ > live-object-samples/head-fallback-probe.json || true
+
+            SOURCE="$(jq -r '.current_state_watermark.source // empty' live-object-samples/overview-probe.json 2>/dev/null || true)"
+            CURRENT="$(jq -r '.current_state_watermark.ledger_index // 0' live-object-samples/overview-probe.json 2>/dev/null || echo 0)"
+            UPDATED="$(jq -r '.current_state_watermark.updated_at // empty' live-object-samples/overview-probe.json 2>/dev/null || true)"
+            PRIMARY="$(jq -r '.result.ledger_index // .result.ledger.ledger_index // 0' live-object-samples/head-primary-probe.json 2>/dev/null || echo 0)"
+            FALLBACK="$(jq -r '.result.ledger_index // .result.ledger.ledger_index // 0' live-object-samples/head-fallback-probe.json 2>/dev/null || echo 0)"
+            LIVE="${PRIMARY}"
+            if [ "${FALLBACK}" -gt 0 ] && { [ "${LIVE}" -eq 0 ] || [ "${FALLBACK}" -lt "${LIVE}" ]; }; then LIVE="${FALLBACK}"; fi
+            LAG="$((LIVE - CURRENT))"
+            if [ "${LAG}" -lt 0 ]; then LAG=0; fi
+            AGE=999999
+            if [ -n "${UPDATED}" ]; then
+              UPDATED_EPOCH="$(date -u -d "${UPDATED}" +%s 2>/dev/null || echo 0)"
+              if [ "${UPDATED_EPOCH}" -gt 0 ]; then AGE="$(( $(date -u +%s) - UPDATED_EPOCH ))"; fi
+              if [ "${AGE}" -lt 0 ]; then AGE=0; fi
+            fi
+            jq -n --argjson attempt "${attempt}" --arg source "${SOURCE}" \
+              --argjson current "${CURRENT}" --argjson live "${LIVE}" \
+              --argjson lag "${LAG}" --argjson age "${AGE}" \
+              '{attempt:$attempt,source:$source,currentLedger:$current,liveLedger:$live,lagLedgers:$lag,ageSeconds:$age}' \
+              >> live-object-samples/freshness-attempts.ndjson
+            if [ "${SOURCE}" = fast_lane ] && [ "${CURRENT}" -gt 0 ] && [ "${LAG}" -le 10 ] && [ "${AGE}" -le 600 ]; then
+              cp live-object-samples/overview-probe.json live-object-samples/overview.json
+              cp live-object-samples/head-primary-probe.json live-object-samples/head-primary.json
+              cp live-object-samples/head-fallback-probe.json live-object-samples/head-fallback.json
+              touch live-object-samples/fresh-watermark-observed
+              break
+            fi
+            sleep 5
+          done
+          test -f live-object-samples/fresh-watermark-observed
+
+      - name: Compare Vault, LoanBroker, and Loan samples with XRPL Devnet
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import datetime
+          import json
+          import pathlib
+          import re
+          import time
+          import urllib.error
+          import urllib.request
+
+          ROOT = pathlib.Path('live-object-samples')
+          BASE = 'https://xrpl-lending-monitor.badjoke-lab.workers.dev'
+          RPCS = ['https://devnet.honeycluster.io/', 'https://s.devnet.rippletest.net:51234/']
+
+          def get_json(url, retries=4):
+              last = None
+              for attempt in range(retries):
+                  try:
+                      with urllib.request.urlopen(url, timeout=30) as response:
+                          return response.status, json.loads(response.read().decode())
+                  except Exception as error:
+                      last = error
+                      time.sleep(attempt + 1)
+              raise last
+
+          def post_json(url, payload, retries=4):
+              body = json.dumps(payload).encode()
+              last = None
+              for attempt in range(retries):
+                  try:
+                      request = urllib.request.Request(url, data=body, headers={'content-type': 'application/json'})
+                      with urllib.request.urlopen(request, timeout=30) as response:
+                          return response.status, json.loads(response.read().decode())
+                  except Exception as error:
+                      last = error
+                      time.sleep(attempt + 1)
+              raise last
+
+          def normalize(value, key=None):
+              if isinstance(value, dict):
+                  return {name: normalize(item, name) for name, item in sorted(value.items())}
+              if isinstance(value, list):
+                  return [normalize(item) for item in value]
+              if key and key.endswith('Node') and isinstance(value, str) and re.fullmatch(r'[0-9A-Fa-f]+', value):
+                  return int(value, 16)
+              return value
+
+          overview = json.loads((ROOT / 'overview.json').read_text())
+          watermark = overview['current_state_watermark']
+          ledger_index = int(watermark['ledger_index'])
+          ledger_hash = watermark['ledger_hash']
+
+          source_ledgers = []
+          for index, rpc in enumerate(RPCS, start=1):
+              status, payload = post_json(rpc, {'method': 'ledger', 'params': [{'ledger_index': ledger_index, 'transactions': False, 'expand': False}]})
+              (ROOT / f'rpc-ledger-{index}.json').write_text(json.dumps(payload, indent=2) + '\n')
+              result = payload.get('result', {})
+              ledger = result.get('ledger', {}) if isinstance(result.get('ledger'), dict) else {}
+              found_index = int(result.get('ledger_index') or ledger.get('ledger_index') or ledger.get('seqNum') or 0)
+              found_hash = result.get('ledger_hash') or ledger.get('ledger_hash') or ledger.get('hash')
+              source_ledgers.append({'endpoint': rpc, 'httpStatus': status, 'ledgerIndex': found_index, 'ledgerHash': found_hash})
+          if not all(item['ledgerIndex'] == ledger_index and item['ledgerHash'] == ledger_hash for item in source_ledgers):
+              raise SystemExit('public current-state watermark does not match both Devnet sources')
+
+          kinds = [
+              ('vaults', 'Vault', '/api/vaults'),
+              ('loan-brokers', 'LoanBroker', '/api/loan-brokers'),
+              ('loans', 'Loan', '/api/loans'),
+          ]
+          comparisons = {}
+          all_passed = True
+
+          for route_kind, ledger_type, collection_path in kinds:
+              collection_status, collection = get_json(f'{BASE}{collection_path}?limit=3&sort=id_asc')
+              (ROOT / f'public-{route_kind}-collection.json').write_text(json.dumps(collection, indent=2) + '\n')
+              samples = []
+              for position, listed in enumerate(collection.get('data', []), start=1):
+                  object_id = listed['id']
+                  detail_status, detail = get_json(f'{BASE}{collection_path}/{object_id}')
+                  (ROOT / f'public-{route_kind}-{position}.json').write_text(json.dumps(detail, indent=2) + '\n')
+                  raw = detail.get('data', {}).get('raw')
+                  if not isinstance(raw, dict):
+                      raise SystemExit(f'{route_kind} {object_id} detail has no raw object')
+
+                  rpc_status, rpc_payload = post_json(RPCS[0], {'method': 'ledger_entry', 'params': [{'index': object_id, 'ledger_index': ledger_index}]})
+                  (ROOT / f'rpc-{route_kind}-{position}.json').write_text(json.dumps(rpc_payload, indent=2) + '\n')
+                  rpc_result = rpc_payload.get('result', {})
+                  node = rpc_result.get('node')
+                  if not isinstance(node, dict):
+                      raise SystemExit(f'{route_kind} {object_id} is missing from source ledger')
+
+                  common = sorted(set(raw) & set(node))
+                  mismatches = [name for name in common if normalize(raw[name], name) != normalize(node[name], name)]
+                  identity_ok = raw.get('index') == node.get('index') == object_id and raw.get('LedgerEntryType') == node.get('LedgerEntryType') == ledger_type
+                  passed = detail_status == 200 and rpc_status == 200 and len(common) >= 8 and not mismatches and identity_ok
+                  all_passed = all_passed and passed
+                  samples.append({
+                      'id': object_id,
+                      'publicHttpStatus': detail_status,
+                      'rpcHttpStatus': rpc_status,
+                      'commonFields': len(common),
+                      'normalizedNodeFields': [name for name in common if name.endswith('Node')],
+                      'mismatches': mismatches,
+                      'identityMatches': identity_ok,
+                      'passed': passed,
+                  })
+              kind_passed = collection_status == 200 and len(samples) == 3 and all(sample['passed'] for sample in samples)
+              all_passed = all_passed and kind_passed
+              comparisons[route_kind] = {'collectionHttpStatus': collection_status, 'sampleCount': len(samples), 'samples': samples, 'passed': kind_passed}
+
+          summary = {
+              'schemaVersion': 1,
+              'generatedAt': datetime.datetime.now(datetime.timezone.utc).isoformat().replace('+00:00', 'Z'),
+              'publicWatermark': watermark,
+              'sourceLedgers': source_ledgers,
+              'normalization': {'nodeFields': 'hexadecimal numeric equivalence'},
+              'comparisons': comparisons,
+              'totalSamples': sum(item['sampleCount'] for item in comparisons.values()),
+              'passed': all_passed,
+          }
+          (ROOT / 'summary.json').write_text(json.dumps(summary, indent=2) + '\n')
+          print(json.dumps(summary, indent=2))
+          raise SystemExit(0 if all_passed else 2)
+          PY
+
+      - name: Upload live-object source evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-object-source-samples
+          path: live-object-samples
+          if-no-files-found: error
+          retention-days: 14
