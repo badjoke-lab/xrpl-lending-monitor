@@ -1,8 +1,8 @@
 {
-  "runId": "29196339885",
-  "runUrl": "https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/29196339885",
-  "headSha": "8235b7b460a4e421de37131e92f3110c3ce8278c",
-  "outcome": "cancelled",
+  "runId": "29196424863",
+  "runUrl": "https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/29196424863",
+  "headSha": "1b66b5327cf8bad7b7014a282cc9ffe9e52e954b",
+  "outcome": "success",
   "checkpoint": {
     "epochId": "devnet-3371675",
     "snapshotId": "devnet-3592674-0373cda0b0cd",
