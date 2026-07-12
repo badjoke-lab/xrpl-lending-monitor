@@ -1,5 +1,5 @@
 name: Cancel stale production deploys
-# Refresh active production deploy inventory after root-config fix.
+# Final quiescence cleanup for every workflow that can write the production Worker.
 
 on:
   pull_request:
@@ -14,30 +14,88 @@ permissions:
 jobs:
   cancel:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
-      - name: Keep only the newest active production deploy
+      - name: Cancel every active production writer except this cleanup run
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p cancel-stale-production-deploys
-          gh api "repos/$GITHUB_REPOSITORY/actions/workflows/deploy-production-worker.yml/runs?per_page=100" > cancel-stale-production-deploys/runs.json
-          jq '[.workflow_runs[] | select(.status == "queued" or .status == "in_progress" or .status == "waiting" or .status == "pending" or .status == "requested") | {id,status,created_at,head_sha}] | sort_by(.created_at,.id)' cancel-stale-production-deploys/runs.json > cancel-stale-production-deploys/active.json
-          KEEP_ID="$(jq -r 'last.id // empty' cancel-stale-production-deploys/active.json)"
-          : > cancel-stale-production-deploys/cancelled.ndjson
-          while IFS= read -r id; do
-            [ -z "$id" ] && continue
-            [ "$id" = "$KEEP_ID" ] && continue
-            gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$id/cancel" > "cancel-stale-production-deploys/cancel-$id.json" 2> "cancel-stale-production-deploys/cancel-$id.stderr" || true
-            jq -n --argjson id "$id" --argjson kept "${KEEP_ID:-0}" '{cancelledRunId:$id,keptNewestRunId:$kept}' >> cancel-stale-production-deploys/cancelled.ndjson
-          done < <(jq -r '.[].id' cancel-stale-production-deploys/active.json)
-          jq -n --argjson kept "${KEEP_ID:-0}" --slurpfile active cancel-stale-production-deploys/active.json --slurpfile cancelled cancel-stale-production-deploys/cancelled.ndjson '{keptNewestRunId:$kept,activeBefore:$active[0],cancelled:$cancelled}' > cancel-stale-production-deploys/summary.json
-          cat cancel-stale-production-deploys/summary.json
+          ROOT=cancel-stale-production-deploys
+          mkdir -p "$ROOT"
+          : > "$ROOT/cancelled.ndjson"
+          WRITERS=(
+            deploy-production-worker.yml
+            rolling-checkpoint-live-cutover.yml
+            rolling-checkpoint-maintenance.yml
+            resume-history-recovery-after-fixed-index.yml
+            stabilize-production-runtime.yml
+            quiesce-and-restore-production.yml
+            rolling-checkpoint-promotion.yml
+          )
+
+          for workflow in "${WRITERS[@]}"; do
+            if ! gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/runs?per_page=100" > "$ROOT/runs-$workflow.json" 2> "$ROOT/runs-$workflow.stderr"; then
+              printf '{"workflow_runs":[]}\n' > "$ROOT/runs-$workflow.json"
+            fi
+            while IFS= read -r run; do
+              id="$(jq -r '.id' <<<"$run")"
+              [ "$id" = "$GITHUB_RUN_ID" ] && continue
+              gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$id/cancel" > "$ROOT/cancel-$id.json" 2> "$ROOT/cancel-$id.stderr" || true
+              jq -n \
+                --arg workflow "$workflow" \
+                --argjson id "$id" \
+                --arg status "$(jq -r '.status' <<<"$run")" \
+                --arg createdAt "$(jq -r '.created_at' <<<"$run")" \
+                --arg headSha "$(jq -r '.head_sha // ""' <<<"$run")" \
+                '{workflow:$workflow,runId:$id,statusBeforeCancel:$status,createdAt:$createdAt,headSha:$headSha}' \
+                >> "$ROOT/cancelled.ndjson"
+            done < <(jq -c '.workflow_runs[] | select(.status == "queued" or .status == "in_progress" or .status == "waiting" or .status == "pending" or .status == "requested")' "$ROOT/runs-$workflow.json")
+          done
+
+          for workflow in stabilize-production-runtime.yml quiesce-and-restore-production.yml; do
+            gh api --method PUT "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/disable" > "$ROOT/disable-$workflow.json" 2> "$ROOT/disable-$workflow.stderr" || true
+          done
+
+      - name: Require all production writers to become quiescent
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=cancel-stale-production-deploys
+          WRITERS=(
+            deploy-production-worker.yml
+            rolling-checkpoint-live-cutover.yml
+            rolling-checkpoint-maintenance.yml
+            resume-history-recovery-after-fixed-index.yml
+            stabilize-production-runtime.yml
+            quiesce-and-restore-production.yml
+            rolling-checkpoint-promotion.yml
+          )
+          : > "$ROOT/quiescence.ndjson"
+          QUIESCENT=false
+          for attempt in $(seq 1 120); do
+            active=0
+            for workflow in "${WRITERS[@]}"; do
+              if ! gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/runs?per_page=100" > "$ROOT/wait-$workflow.json" 2>/dev/null; then
+                printf '{"workflow_runs":[]}\n' > "$ROOT/wait-$workflow.json"
+              fi
+              count="$(jq --argjson current "$GITHUB_RUN_ID" '[.workflow_runs[] | select(.id != $current) | select(.status == "queued" or .status == "in_progress" or .status == "waiting" or .status == "pending" or .status == "requested")] | length' "$ROOT/wait-$workflow.json")"
+              active="$((active + count))"
+            done
+            jq -n --argjson attempt "$attempt" --argjson active "$active" '{attempt:$attempt,activeProductionWriters:$active,observedAt:(now|todateiso8601)}' >> "$ROOT/quiescence.ndjson"
+            if [ "$active" -eq 0 ]; then QUIESCENT=true; break; fi
+            sleep 5
+          done
+          test "$QUIESCENT" = true
+          cancelled="$(wc -l < "$ROOT/cancelled.ndjson")"
+          jq -n --argjson cancelled "$cancelled" '{passed:true,cancelledRuns:$cancelled,activeProductionWriters:0,disabledOneTimeWorkflows:["stabilize-production-runtime.yml","quiesce-and-restore-production.yml"]}' > "$ROOT/summary.json"
+          cat "$ROOT/summary.json"
+
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: cancel-stale-production-deploys
           path: cancel-stale-production-deploys
           if-no-files-found: error
-          retention-days: 3
+          retention-days: 14
