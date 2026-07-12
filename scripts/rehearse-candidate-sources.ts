@@ -94,9 +94,12 @@ async function main(): Promise<void> {
     kind: 'protocol_events',
     limit: 1,
     direction: 'desc',
-    maxSegmentReads: 4,
-    maxWallTimeMs: 5_000,
+    maxSegmentReads: 64,
+    maxWallTimeMs: 20_000,
   })
+  if (recent.items.length !== 1) {
+    throw new Error('Candidate recent protocol history is unavailable within the retained 64-segment window')
+  }
 
   const summary = {
     schemaVersion: 1,
