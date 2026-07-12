@@ -1,0 +1,83 @@
+name: Inspect Loan history references
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/inspect-loan-history-references.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out production history index
+        uses: actions/checkout@v4
+        with:
+          ref: history-data
+          path: history-data
+          sparse-checkout: |
+            history/publication.json
+            history/index/exact
+          sparse-checkout-cone-mode: false
+      - name: Inspect exact references and segment scan sizes
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p loan-history-reference-inspection
+          python - <<'PY'
+          import gzip, hashlib, json, pathlib
+          root=pathlib.Path('history-data')
+          out=pathlib.Path('loan-history-reference-inspection')
+          term='ECBCA3B65B3CF3A45F06ECF844B764B0BD8FF8B33A9C3CAC4E04784AE183FE4E'
+          manifest=json.loads((root/'history/index/exact/manifest.json').read_text())
+          publication=json.loads((root/'history/publication.json').read_text())
+          bucket=int(hashlib.sha256(term.encode()).hexdigest()[:8],16)%int(manifest['bucketCount'])
+          asset=manifest['assets'][bucket]
+          records=[]
+          with gzip.open(root/asset['path'],'rt') as handle:
+            for line in handle:
+              record=json.loads(line)
+              if record.get('term')==term and record.get('reference',{}).get('kind')=='object_change':
+                records.append(record)
+          records.sort(key=lambda item:item['reference']['ledgerIndex'],reverse=True)
+          segments={item['segmentId']:item for item in publication['segments']}
+          refs=[]
+          for record in records:
+            ref=record['reference']
+            segment=segments[ref['segmentId']]
+            refs.append({
+              'ledgerIndex':ref['ledgerIndex'],
+              'segmentId':ref['segmentId'],
+              'fileKind':ref['fileKind'],
+              'transactionHash':(ref.get('searchResult') or {}).get('transactionHash'),
+              'objectChangeRecordCount':segment['recordCounts']['object_changes'],
+              'segmentStartLedger':segment['startLedgerIndex'],
+              'segmentEndLedger':segment['endLedgerIndex'],
+              'assetPath':segment['files']['object_changes']['path'],
+            })
+          summary={
+            'term':term,
+            'bucket':bucket,
+            'bucketAsset':asset,
+            'referenceCount':len(refs),
+            'latest25':refs[:25],
+            'uniqueSegments':[],
+          }
+          seen=set()
+          for ref in refs:
+            if ref['segmentId'] in seen: continue
+            seen.add(ref['segmentId'])
+            summary['uniqueSegments'].append({k:ref[k] for k in ('segmentId','segmentStartLedger','segmentEndLedger','objectChangeRecordCount','assetPath')})
+          (out/'summary.json').write_text(json.dumps(summary,indent=2)+'\n')
+          print(json.dumps(summary,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: loan-history-reference-inspection
+          path: loan-history-reference-inspection
+          if-no-files-found: error
+          retention-days: 7
