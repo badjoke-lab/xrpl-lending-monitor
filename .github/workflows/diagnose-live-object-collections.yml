@@ -1,0 +1,44 @@
+name: Diagnose live object collections
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/diagnose-live-object-collections.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Capture collection responses
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=live-object-collection-diagnostic
+          BASE=https://xrpl-lending-monitor.badjoke-lab.workers.dev
+          mkdir -p "$ROOT"
+          for spec in vaults:'/api/vaults?limit=3&sort=id_asc' brokers:'/api/loan-brokers?limit=3&sort=id_asc' loans:'/api/loans?limit=3&sort=id_asc'; do
+            name="${spec%%:*}"
+            path="${spec#*:}"
+            curl --silent --show-error --retry 2 -D "$ROOT/$name.headers" -o "$ROOT/$name.json" -w '%{http_code}\n' "$BASE$path" > "$ROOT/$name.status" || true
+          done
+          jq -n \
+            --arg vaults "$(cat "$ROOT/vaults.status")" \
+            --arg brokers "$(cat "$ROOT/brokers.status")" \
+            --arg loans "$(cat "$ROOT/loans.status")" \
+            --slurpfile vaultBody "$ROOT/vaults.json" \
+            --slurpfile brokerBody "$ROOT/brokers.json" \
+            --slurpfile loanBody "$ROOT/loans.json" \
+            '{statuses:{vaults:$vaults,brokers:$brokers,loans:$loans},counts:{vaults:($vaultBody[0].data|length),brokers:($brokerBody[0].data|length),loans:($loanBody[0].data|length)},bodies:{vaults:$vaultBody[0],brokers:$brokerBody[0],loans:$loanBody[0]}}' > "$ROOT/summary.json"
+          cat "$ROOT/summary.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: live-object-collection-diagnostic
+          path: live-object-collection-diagnostic
+          if-no-files-found: error
+          retention-days: 7
