@@ -22,8 +22,8 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       REPOSITORY: ${{ github.repository }}
-      HISTORY_BRANCH: history-cutover-3586950-data
-      CURRENT_BRANCH: current-state-cutover-3586950-data
+      HISTORY_BRANCH: history-cutover-3586950-release
+      CURRENT_BRANCH: current-state-cutover-3586950-release
       TARGET_LEDGER: '3586950'
       TARGET_HASH: 5D5DD87F295BFE3F3899066E343F0829D8AEB0DD59AABC646CBC618CD090B5D8
     steps:
@@ -102,8 +102,8 @@ jobs:
           min_head=''
           for index in 0 1; do
             if [ "${index}" = 0 ]; then endpoint=https://devnet.honeycluster.io/; else endpoint=https://s.devnet.rippletest.net:51234/; fi
-            curl --fail-with-body --silent --show-error --retry 3 -H 'content-type: application/json' --data @"${ROOT}/head-request.json" "${endpoint}" > "${ROOT}/head-${index}.json"
-            curl --fail-with-body --silent --show-error --retry 3 -H 'content-type: application/json' --data @"${ROOT}/target-request.json" "${endpoint}" > "${ROOT}/target-${index}.json"
+            curl --fail-with-body --silent --show-error --retry 3 --connect-timeout 10 --max-time 45 -H 'content-type: application/json' --data @"${ROOT}/head-request.json" "${endpoint}" > "${ROOT}/head-${index}.json"
+            curl --fail-with-body --silent --show-error --retry 3 --connect-timeout 10 --max-time 45 -H 'content-type: application/json' --data @"${ROOT}/target-request.json" "${endpoint}" > "${ROOT}/target-${index}.json"
             head="$(jq -r '.result.ledger_index // .result.ledger.ledger_index' "${ROOT}/head-${index}.json")"
             hash="$(jq -r '.result.ledger_hash // .result.ledger.ledger_hash' "${ROOT}/target-${index}.json")"
             test "${hash}" = "${TARGET_HASH}"
