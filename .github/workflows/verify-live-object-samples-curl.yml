@@ -1,0 +1,170 @@
+name: Verify live object samples with curl
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/verify-live-object-samples-curl.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+    steps:
+      - name: Compare three Vaults, three LoanBrokers, and three Loans
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p live-object-samples-curl
+          python - <<'PY'
+          import datetime
+          import json
+          import pathlib
+          import re
+          import subprocess
+          import time
+          import urllib.parse
+
+          ROOT = pathlib.Path('live-object-samples-curl')
+          BASE = 'https://xrpl-lending-monitor.badjoke-lab.workers.dev'
+          RPCS = ['https://devnet.honeycluster.io/', 'https://s.devnet.rippletest.net:51234/']
+
+          def curl_json(url, payload=None):
+              command = [
+                  'curl', '--fail-with-body', '--silent', '--show-error', '--retry', '3',
+                  '-H', 'user-agent: xrpl-lending-monitor-source-audit/1.0',
+              ]
+              if payload is not None:
+                  command += ['-H', 'content-type: application/json', '--data', json.dumps(payload)]
+              command.append(url)
+              raw = subprocess.run(command, check=True, capture_output=True, text=True).stdout
+              return json.loads(raw)
+
+          def normalize(value, key=None):
+              if isinstance(value, dict):
+                  return {name: normalize(item, name) for name, item in sorted(value.items())}
+              if isinstance(value, list):
+                  return [normalize(item) for item in value]
+              if key and key.endswith('Node') and isinstance(value, str) and re.fullmatch(r'[0-9A-Fa-f]+', value):
+                  return int(value, 16)
+              return value
+
+          def find_raw(payload):
+              if not isinstance(payload, dict):
+                  return None
+              if isinstance(payload.get('LedgerEntryType'), str):
+                  return payload
+              for key in ('raw', 'object', 'ledgerObject', 'ledger_object', 'data'):
+                  value = payload.get(key)
+                  if isinstance(value, dict):
+                      found = find_raw(value)
+                      if found:
+                          return found
+              for value in payload.values():
+                  if isinstance(value, dict):
+                      found = find_raw(value)
+                      if found:
+                          return found
+              return None
+
+          overview = None
+          heads = None
+          for attempt in range(120):
+              overview = curl_json(f'{BASE}/api/overview')
+              primary = curl_json(RPCS[0], {'method': 'ledger', 'params': [{'ledger_index': 'validated', 'transactions': False, 'expand': False}]})
+              fallback = curl_json(RPCS[1], {'method': 'ledger', 'params': [{'ledger_index': 'validated', 'transactions': False, 'expand': False}]})
+              def ledger_index(payload):
+                  result = payload.get('result', {})
+                  ledger = result.get('ledger', {}) if isinstance(result.get('ledger'), dict) else {}
+                  return int(result.get('ledger_index') or ledger.get('ledger_index') or ledger.get('seqNum') or 0)
+              live = min(value for value in (ledger_index(primary), ledger_index(fallback)) if value > 0)
+              watermark = overview.get('current_state_watermark') or {}
+              current = int(watermark.get('ledger_index') or 0)
+              updated = watermark.get('updated_at')
+              age = 999999
+              if updated:
+                  age = max(0, (datetime.datetime.now(datetime.timezone.utc) - datetime.datetime.fromisoformat(updated.replace('Z', '+00:00'))).total_seconds())
+              lag = max(0, live - current)
+              with (ROOT / 'freshness-attempts.ndjson').open('a') as handle:
+                  handle.write(json.dumps({'attempt': attempt + 1, 'source': watermark.get('source'), 'currentLedger': current, 'liveLedger': live, 'lagLedgers': lag, 'ageSeconds': age}) + '\n')
+              if watermark.get('source') == 'fast_lane' and current > 0 and lag <= 10 and age <= 600:
+                  heads = [primary, fallback]
+                  break
+              time.sleep(5)
+          if heads is None:
+              raise SystemExit('fresh fast-lane watermark was not observed')
+
+          watermark = overview['current_state_watermark']
+          ledger_index = int(watermark['ledger_index'])
+          ledger_hash = watermark['ledger_hash']
+          (ROOT / 'overview.json').write_text(json.dumps(overview, indent=2) + '\n')
+
+          source_ledgers = []
+          for index, rpc in enumerate(RPCS, start=1):
+              payload = curl_json(rpc, {'method': 'ledger', 'params': [{'ledger_index': ledger_index, 'transactions': False, 'expand': False}]})
+              (ROOT / f'rpc-ledger-{index}.json').write_text(json.dumps(payload, indent=2) + '\n')
+              result = payload.get('result', {})
+              ledger = result.get('ledger', {}) if isinstance(result.get('ledger'), dict) else {}
+              found_index = int(result.get('ledger_index') or ledger.get('ledger_index') or ledger.get('seqNum') or 0)
+              found_hash = result.get('ledger_hash') or ledger.get('ledger_hash') or ledger.get('hash')
+              source_ledgers.append({'endpoint': rpc, 'ledgerIndex': found_index, 'ledgerHash': found_hash})
+          if not all(item['ledgerIndex'] == ledger_index and item['ledgerHash'] == ledger_hash for item in source_ledgers):
+              raise SystemExit('watermark does not match both Devnet sources')
+
+          kinds = [
+              ('vaults', 'Vault', '/api/vaults'),
+              ('loan-brokers', 'LoanBroker', '/api/loan-brokers'),
+              ('loans', 'Loan', '/api/loans'),
+          ]
+          comparisons = {}
+          all_passed = True
+          for route_kind, ledger_type, collection_path in kinds:
+              collection = curl_json(f'{BASE}{collection_path}?limit=3')
+              (ROOT / f'public-{route_kind}-collection.json').write_text(json.dumps(collection, indent=2) + '\n')
+              listed_items = collection.get('data') if isinstance(collection, dict) else None
+              listed_items = listed_items if isinstance(listed_items, list) else []
+              samples = []
+              for position, listed in enumerate(listed_items[:3], start=1):
+                  object_id = listed['id']
+                  detail = curl_json(f'{BASE}{collection_path}/{urllib.parse.quote(object_id)}')
+                  (ROOT / f'public-{route_kind}-{position}.json').write_text(json.dumps(detail, indent=2) + '\n')
+                  raw = find_raw(detail)
+                  rpc_payload = curl_json(RPCS[0], {'method': 'ledger_entry', 'params': [{'index': object_id, 'ledger_index': ledger_index}]})
+                  (ROOT / f'rpc-{route_kind}-{position}.json').write_text(json.dumps(rpc_payload, indent=2) + '\n')
+                  node = (rpc_payload.get('result') or {}).get('node')
+                  common = sorted(set(raw or {}) & set(node or {}))
+                  mismatches = [name for name in common if normalize(raw[name], name) != normalize(node[name], name)] if raw and node else ['missing_raw_or_node']
+                  identity_ok = bool(raw and node and node.get('index') == object_id and node.get('LedgerEntryType') == ledger_type and raw.get('LedgerEntryType') == ledger_type and raw.get('index') in (None, object_id))
+                  passed = len(common) >= 8 and not mismatches and identity_ok
+                  all_passed = all_passed and passed
+                  samples.append({'id': object_id, 'commonFields': len(common), 'mismatches': mismatches, 'identityMatches': identity_ok, 'passed': passed})
+              kind_passed = len(samples) == 3 and all(sample['passed'] for sample in samples)
+              all_passed = all_passed and kind_passed
+              comparisons[route_kind] = {'sampleCount': len(samples), 'samples': samples, 'passed': kind_passed}
+
+          summary = {
+              'schemaVersion': 3,
+              'generatedAt': datetime.datetime.now(datetime.timezone.utc).isoformat().replace('+00:00', 'Z'),
+              'publicWatermark': watermark,
+              'sourceLedgers': source_ledgers,
+              'comparisons': comparisons,
+              'totalSamples': sum(item['sampleCount'] for item in comparisons.values()),
+              'passed': all_passed,
+          }
+          (ROOT / 'summary.json').write_text(json.dumps(summary, indent=2) + '\n')
+          print(json.dumps(summary, indent=2))
+          raise SystemExit(0 if all_passed and summary['totalSamples'] == 9 else 2)
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: live-object-source-samples-curl
+          path: live-object-samples-curl
+          if-no-files-found: error
+          retention-days: 14
