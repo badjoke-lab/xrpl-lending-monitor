@@ -1,0 +1,57 @@
+name: Snapshot pre-soak status
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/snapshot-pre-soak-status.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+    steps:
+      - name: Capture public runtime status
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p pre-soak-status
+          for spec in \
+            'overview:/api/overview' \
+            'collector:/api/status/collector' \
+            'history-source:/api/status/history-source' \
+            'replacement-base-rebase:/api/status/replacement-base-rebase' \
+            'fast-lane-diff:/api/status/fast-lane-diff?limit=500' \
+            'continuation-verification:/api/status/continuation-verification' \
+            'm1-exit:/api/status/m1-exit'; do
+            name="${spec%%:*}"
+            path="${spec#*:}"
+            curl --fail-with-body --silent --show-error --retry 3 \
+              "${PRODUCTION_BASE}${path}" > "pre-soak-status/${name}.json"
+          done
+          date -u +'%Y-%m-%dT%H:%M:%SZ' > pre-soak-status/captured-at.txt
+          jq -n \
+            --slurpfile overview pre-soak-status/overview.json \
+            --slurpfile collector pre-soak-status/collector.json \
+            --slurpfile history pre-soak-status/history-source.json \
+            --slurpfile rebase pre-soak-status/replacement-base-rebase.json \
+            --slurpfile diff pre-soak-status/fast-lane-diff.json \
+            --slurpfile continuation pre-soak-status/continuation-verification.json \
+            --slurpfile m1 pre-soak-status/m1-exit.json \
+            '{overview:$overview[0],collector:$collector[0],history:$history[0],rebase:$rebase[0],diff:$diff[0],continuation:$continuation[0],m1:$m1[0]}' \
+            > pre-soak-status/summary.json
+          cat pre-soak-status/summary.json
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: pre-soak-status-snapshot
+          path: pre-soak-status
+          if-no-files-found: error
+          retention-days: 3
