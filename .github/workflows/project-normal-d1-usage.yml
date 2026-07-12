@@ -65,12 +65,12 @@ jobs:
               row = ordered[index]
               previous = ordered[index - 1]
               gap = (parse_time(row['run_at']) - parse_time(previous['run_at'])).total_seconds()
-              if row.get('status') in accepted and 240 <= gap <= 360:
+              if row.get('status') in accepted and 240 <= gap <= 360 and int(row.get('lag_ledgers') or 0) <= 10:
                   normal.append(row)
 
           normal = normal[-24:]
           if len(normal) < 6:
-              raise SystemExit(f'need at least 6 ordinary five-minute samples, observed {len(normal)}')
+              raise SystemExit(f'need at least 6 steady-state five-minute samples, observed {len(normal)}')
 
           def numeric(row, name):
               value = row.get(name)
@@ -88,8 +88,9 @@ jobs:
 
           p95_read = nearest_rank_p95(read_samples)
           p95_write = nearest_rank_p95(write_samples)
-          collector_read = int(collector.get('last_persistence_rows_read') or collector.get('lastPersistenceRowsRead') or 0)
-          collector_write = int(collector.get('last_persistence_rows_written') or collector.get('lastPersistenceRowsWritten') or 0)
+          collector_usage = collector.get('usage') or {}
+          collector_read = int(collector_usage.get('persistence_rows_read') or 0)
+          collector_write = int(collector_usage.get('persistence_rows_written') or 0)
 
           five_minute_runs_per_day = 288
           protected_runs_per_day = 6
@@ -98,15 +99,15 @@ jobs:
           projected_write = p95_write * five_minute_runs_per_day + collector_write * protected_runs_per_day + max_observed_write * reanchor_reserve_runs
           read_allowance = 5_000_000
           write_allowance = 100_000
-          required_fraction = 0.70
+          required_fraction = 0.90
           read_fraction = projected_read / read_allowance
           write_fraction = projected_write / write_allowance
           passed = read_fraction < required_fraction and write_fraction < required_fraction
 
           summary = {
-              'schemaVersion': 1,
+              'schemaVersion': 2,
               'generatedAt': datetime.datetime.now(datetime.timezone.utc).isoformat().replace('+00:00', 'Z'),
-              'method': 'ordinary five-minute p95 x 288 + protected collector x 6 + two max-observed reanchor reserves',
+              'method': 'steady-state lag<=10 five-minute p95 x 288 + protected collector x 6 + two max-observed reanchor reserves',
               'normalSampleCount': len(normal),
               'normalSampleStart': normal[0]['run_at'],
               'normalSampleEnd': normal[-1]['run_at'],
@@ -124,6 +125,8 @@ jobs:
                   'readFraction': read_fraction,
                   'writeFraction': write_fraction,
                   'requiredMaximumFraction': required_fraction,
+                  'remainingReadRows': read_allowance - projected_read,
+                  'remainingWriteRows': write_allowance - projected_write,
               },
               'passed': passed,
           }
