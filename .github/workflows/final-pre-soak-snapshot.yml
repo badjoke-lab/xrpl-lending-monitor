@@ -1,4 +1,5 @@
 name: Final pre-soak snapshot
+# Trigger final pre-soak evidence capture: 2026-07-12
 
 on:
   pull_request:
