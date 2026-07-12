@@ -1,0 +1,55 @@
+name: Probe live cutover state
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/probe-live-cutover-state.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Read live public state and XRPL head
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=live-cutover-probe
+          BASE=https://xrpl-lending-monitor.badjoke-lab.workers.dev
+          mkdir -p "${ROOT}"
+          jq -n '{method:"ledger",params:[{ledger_index:"validated",transactions:false,expand:false}]}' > "${ROOT}/head-request.json"
+          curl --fail-with-body --silent --show-error --retry 3 -H 'content-type: application/json' --data @"${ROOT}/head-request.json" https://devnet.honeycluster.io/ > "${ROOT}/head.json"
+          curl --fail-with-body --silent --show-error --retry 3 "${BASE}/api/overview" > "${ROOT}/overview.json"
+          curl --fail-with-body --silent --show-error --retry 3 "${BASE}/api/status/history-source" > "${ROOT}/history.json"
+          curl --fail-with-body --silent --show-error --retry 3 "${BASE}/api/status/replacement-base-rebase" > "${ROOT}/rebase.json"
+          curl --fail-with-body --silent --show-error --retry 3 "${BASE}/api/status/fast-lane-diff?limit=500" > "${ROOT}/diff.json"
+          curl --fail-with-body --silent --show-error --retry 3 "${BASE}/api/status/collector" > "${ROOT}/collector.json"
+
+          live="$(jq -r '.result.ledger_index // .result.ledger.ledger_index' "${ROOT}/head.json")"
+          current="$(jq -r '.current_state_watermark.ledger_index // 0' "${ROOT}/overview.json")"
+          lag="$((live - current))"
+          if [ "${lag}" -lt 0 ]; then lag=0; fi
+          jq -n \
+            --argjson liveLedger "${live}" \
+            --argjson currentLedger "${current}" \
+            --argjson lagLedgers "${lag}" \
+            --slurpfile overview "${ROOT}/overview.json" \
+            --slurpfile history "${ROOT}/history.json" \
+            --slurpfile rebase "${ROOT}/rebase.json" \
+            --slurpfile diff "${ROOT}/diff.json" \
+            --slurpfile collector "${ROOT}/collector.json" \
+            '{liveLedger:$liveLedger,currentLedger:$currentLedger,lagLedgers:$lagLedgers,overview:$overview[0],history:$history[0],rebase:$rebase[0],diff:$diff[0],collector:$collector[0]}' \
+            | tee "${ROOT}/summary.json"
+
+      - name: Upload live probe
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-cutover-probe
+          path: live-cutover-probe
+          if-no-files-found: error
+          retention-days: 7
