@@ -14,7 +14,8 @@ function boundedReferences(
   reader: HistorySegmentChainReader,
   values: readonly HistoryExactIndexReference[],
 ): HistoryExactIndexReference[] {
-  const segments = new Map(reader.publication.segments.map((segment) => [segment.segmentId, segment]))
+  const publicationSegments = reader.publication.segments ?? []
+  const segments = new Map(publicationSegments.map((segment) => [segment.segmentId, segment]))
   const acceptedAssets = new Set<string>()
   const rejectedAssets = new Set<string>()
   const selected: HistoryExactIndexReference[] = []
@@ -33,8 +34,7 @@ function boundedReferences(
     }
 
     const segment = segments.get(reference.segmentId)
-    if (!segment) throw new Error(`History reference segment is not published: ${reference.segmentId}`)
-    const recordCount = segment.recordCounts[reference.fileKind]
+    const recordCount = segment?.recordCounts[reference.fileKind] ?? MAX_RECORDS_EXAMINED
     if (recordCount > MAX_RECORDS_EXAMINED || estimatedRecords + recordCount > MAX_RECORDS_EXAMINED) {
       rejectedAssets.add(assetKey)
       continue
