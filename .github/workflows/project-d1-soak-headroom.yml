@@ -59,12 +59,26 @@ jobs:
           seconds=max(0,(reset-now).total_seconds())
           ticks_to_reset=math.ceil(seconds/300)+2
           heavy_to_reset=math.ceil(seconds/14400)+1
-          fast_reads=[int(row.get('persistence_rows_read') or 0) for row in fast]
-          fast_writes=[int(row.get('persistence_rows_written') or 0) for row in fast]
-          measured_fast_read=max(fast_reads or [0])
-          measured_fast_write=max(fast_writes or [0])
-          fast_read_budget=max(measured_fast_read,1000)
-          fast_write_budget=max(measured_fast_write,100)
+
+          committed=[row for row in fast if row.get('status')=='committed']
+          reanchored=[row for row in fast if row.get('status')=='reanchored']
+          def percentile(values,p):
+              if not values: return 0
+              values=sorted(values)
+              return values[min(len(values)-1,math.ceil(len(values)*p)-1)]
+          committed_reads=[int(row.get('persistence_rows_read') or 0) for row in committed]
+          committed_writes=[int(row.get('persistence_rows_written') or 0) for row in committed]
+          reanchor_reads=[int(row.get('persistence_rows_read') or 0) for row in reanchored]
+          reanchor_writes=[int(row.get('persistence_rows_written') or 0) for row in reanchored]
+          p95_read=percentile(committed_reads,0.95)
+          p95_write=percentile(committed_writes,0.95)
+          fast_read_budget=max(p95_read,250)
+          fast_write_budget=max(p95_write,200)
+          reanchor_read_budget=max(max(reanchor_reads or [0]),500)
+          reanchor_write_budget=max(max(reanchor_writes or [0]),500)
+          reanchors_before_reset=2
+          reanchors_per_day=2
+
           heavy_usage=collector.get('usage') or {}
           measured_heavy_read=int(heavy_usage.get('persistence_rows_read') or 0)
           measured_heavy_write=int(heavy_usage.get('persistence_rows_written') or 0)
@@ -72,24 +86,36 @@ jobs:
           heavy_write_budget=max(measured_heavy_write,1000)
           audit_read_buffer=30000
           audit_write_buffer=1000
-          pre_read=math.ceil((ticks_to_reset*fast_read_budget+heavy_to_reset*heavy_read_budget+audit_read_buffer)*1.25)
-          pre_write=math.ceil((ticks_to_reset*fast_write_budget+heavy_to_reset*heavy_write_budget+audit_write_buffer)*1.25)
-          day_read=math.ceil((288*fast_read_budget+7*heavy_read_budget+audit_read_buffer)*1.25)
-          day_write=math.ceil((288*fast_write_budget+7*heavy_write_budget+audit_write_buffer)*1.25)
+          safety_multiplier=1.20
+          pre_read=math.ceil((ticks_to_reset*fast_read_budget+reanchors_before_reset*reanchor_read_budget+heavy_to_reset*heavy_read_budget+audit_read_buffer)*safety_multiplier)
+          pre_write=math.ceil((ticks_to_reset*fast_write_budget+reanchors_before_reset*reanchor_write_budget+heavy_to_reset*heavy_write_budget+audit_write_buffer)*safety_multiplier)
+          day_read=math.ceil((288*fast_read_budget+reanchors_per_day*reanchor_read_budget+7*heavy_read_budget+audit_read_buffer)*safety_multiplier)
+          day_write=math.ceil((288*fast_write_budget+reanchors_per_day*reanchor_write_budget+7*heavy_write_budget+audit_write_buffer)*safety_multiplier)
           remaining_read=int(usage['rows_read_daily_allowance'])-int(usage['rows_read'])
           remaining_write=int(usage['rows_written_daily_allowance'])-int(usage['rows_written'])
           checks={
             'current_usage_below_hard_allowance': remaining_read>0 and remaining_write>0,
             'remaining_until_reset_sufficient': remaining_read>=pre_read and remaining_write>=pre_write,
             'full_utc_day_below_80_percent': day_read<=int(usage['rows_read_daily_allowance'])*0.8 and day_write<=int(usage['rows_written_daily_allowance'])*0.8,
-            'recent_metrics_present': len(fast)>=3,
+            'recent_metrics_present': len(fast)>=3 and len(committed)>=3,
           }
           out={
             'generatedAt':now.isoformat().replace('+00:00','Z'),
             'currentUsage':usage,
             'remaining':{'rowsRead':remaining_read,'rowsWritten':remaining_write,'secondsToUtcReset':seconds},
-            'observed':{'fastRuns':len(fast),'maximumFastRowsRead':measured_fast_read,'maximumFastRowsWritten':measured_fast_write,'heavyRowsRead':measured_heavy_read,'heavyRowsWritten':measured_heavy_write},
-            'conservativeBudgets':{'fastRowsReadPerTick':fast_read_budget,'fastRowsWrittenPerTick':fast_write_budget,'heavyRowsReadPerRun':heavy_read_budget,'heavyRowsWrittenPerRun':heavy_write_budget,'safetyMultiplier':1.25},
+            'observed':{
+              'fastRuns':len(fast),'committedRuns':len(committed),'reanchoredRuns':len(reanchored),
+              'committedP95RowsRead':p95_read,'committedP95RowsWritten':p95_write,
+              'maximumReanchorRowsRead':max(reanchor_reads or [0]),'maximumReanchorRowsWritten':max(reanchor_writes or [0]),
+              'heavyRowsRead':measured_heavy_read,'heavyRowsWritten':measured_heavy_write,
+            },
+            'conservativeBudgets':{
+              'fastRowsReadPerTick':fast_read_budget,'fastRowsWrittenPerTick':fast_write_budget,
+              'reanchorRowsRead':reanchor_read_budget,'reanchorRowsWritten':reanchor_write_budget,
+              'reanchorsBeforeReset':reanchors_before_reset,'reanchorsPerUtcDay':reanchors_per_day,
+              'heavyRowsReadPerRun':heavy_read_budget,'heavyRowsWrittenPerRun':heavy_write_budget,
+              'safetyMultiplier':safety_multiplier,
+            },
             'projection':{'ticksToReset':ticks_to_reset,'heavyRunsToReset':heavy_to_reset,'requiredBeforeReset':{'rowsRead':pre_read,'rowsWritten':pre_write},'fullUtcDay':{'rowsRead':day_read,'rowsWritten':day_write}},
             'checks':checks,
             'passed':all(checks.values()),
