@@ -1,0 +1,195 @@
+name: Reconcile live XRPL source now
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/reconcile-live-source-now.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read aligned candidate pairs
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=live-source-reconciliation
+          mkdir -p "${ROOT}"
+
+          fetch_json() {
+            local branch="$1"
+            local path="$2"
+            local output="$3"
+            gh api --method GET \
+              "repos/${GITHUB_REPOSITORY}/contents/${path}" \
+              -f ref="${branch}" --jq '.content' \
+              | tr -d '\n' | base64 --decode > "${output}"
+            jq -e . "${output}" > /dev/null
+          }
+
+          PAIRS=(
+            'history-rolling-recovery-b-data current-state-rolling-recovery-b-data recovery-b'
+            'history-rolling-next-candidate-data current-state-rolling-next-candidate-data next-candidate'
+          )
+          : > "${ROOT}/pairs.ndjson"
+          for row in "${PAIRS[@]}"; do
+            read -r HISTORY CURRENT NAME <<<"${row}"
+            fetch_json "${HISTORY}" history/publication.json "${ROOT}/${NAME}-publication.json"
+            fetch_json "${CURRENT}" read-model/manifest.json "${ROOT}/${NAME}-current.json"
+            HISTORY_LEDGER="$(jq -r '.endLedgerIndex' "${ROOT}/${NAME}-publication.json")"
+            HISTORY_HASH="$(jq -r '.endLedgerHash' "${ROOT}/${NAME}-publication.json")"
+            CURRENT_LEDGER="$(jq -r '.ledgerIndex' "${ROOT}/${NAME}-current.json")"
+            CURRENT_HASH="$(jq -r '.ledgerHash' "${ROOT}/${NAME}-current.json")"
+            MATCH=false
+            if [ "${HISTORY_LEDGER}" = "${CURRENT_LEDGER}" ] && [ "${HISTORY_HASH}" = "${CURRENT_HASH}" ]; then MATCH=true; fi
+            jq -n \
+              --arg name "${NAME}" \
+              --arg historyBranch "${HISTORY}" \
+              --arg currentBranch "${CURRENT}" \
+              --argjson historyLedger "${HISTORY_LEDGER}" \
+              --arg historyHash "${HISTORY_HASH}" \
+              --argjson currentLedger "${CURRENT_LEDGER}" \
+              --arg currentHash "${CURRENT_HASH}" \
+              --argjson matched "${MATCH}" \
+              '{name:$name,historyBranch:$historyBranch,currentStateBranch:$currentBranch,historyLedger:$historyLedger,historyHash:$historyHash,currentLedger:$currentLedger,currentHash:$currentHash,matched:$matched}' \
+              >> "${ROOT}/pairs.ndjson"
+          done
+          jq -s '.' "${ROOT}/pairs.ndjson" > "${ROOT}/pairs.json"
+          jq -e 'all(.[]; .matched == true)' "${ROOT}/pairs.json" > /dev/null
+          jq '[.[] | select(.matched == true)] | max_by(.historyLedger)' "${ROOT}/pairs.json" > "${ROOT}/selected-candidate.json"
+          SELECTED_LEDGER="$(jq -r '.historyLedger' "${ROOT}/selected-candidate.json")"
+          SELECTED_HASH="$(jq -r '.historyHash' "${ROOT}/selected-candidate.json")"
+          {
+            echo "SELECTED_LEDGER=${SELECTED_LEDGER}"
+            echo "SELECTED_HASH=${SELECTED_HASH}"
+          } >> "${GITHUB_ENV}"
+
+      - name: Compare candidate target with both live XRPL sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=live-source-reconciliation
+          jq -n '{method:"ledger",params:[{ledger_index:"validated",transactions:false,expand:false}]}' > "${ROOT}/head-request.json"
+          jq -n --argjson ledger "${SELECTED_LEDGER}" '{method:"ledger",params:[{ledger_index:$ledger,transactions:false,expand:false}]}' > "${ROOT}/target-request.json"
+
+          ENDPOINT_NAMES=(honeycluster rippletest)
+          ENDPOINTS=('https://devnet.honeycluster.io/' 'https://s.devnet.rippletest.net:51234/')
+          : > "${ROOT}/sources.ndjson"
+          for I in 0 1; do
+            NAME="${ENDPOINT_NAMES[$I]}"
+            ENDPOINT="${ENDPOINTS[$I]}"
+            curl --fail-with-body --silent --show-error --retry 3 \
+              -H 'content-type: application/json' --data @"${ROOT}/head-request.json" "${ENDPOINT}" \
+              > "${ROOT}/${NAME}-head.json"
+            curl --fail-with-body --silent --show-error --retry 3 \
+              -H 'content-type: application/json' --data @"${ROOT}/target-request.json" "${ENDPOINT}" \
+              > "${ROOT}/${NAME}-target.json"
+            HEAD="$(jq -r '.result.ledger_index // .result.ledger.ledger_index' "${ROOT}/${NAME}-head.json")"
+            TARGET_HASH="$(jq -r '.result.ledger_hash // .result.ledger.ledger_hash' "${ROOT}/${NAME}-target.json")"
+            HASH_MATCH=false
+            if [ "${TARGET_HASH}" = "${SELECTED_HASH}" ]; then HASH_MATCH=true; fi
+            LAG="$((HEAD - SELECTED_LEDGER))"
+            if [ "${LAG}" -lt 0 ]; then LAG=0; fi
+            jq -n --arg name "${NAME}" --arg endpoint "${ENDPOINT}" --argjson head "${HEAD}" --arg targetHash "${TARGET_HASH}" --argjson hashMatch "${HASH_MATCH}" --argjson candidateLag "${LAG}" \
+              '{name:$name,endpoint:$endpoint,validatedHead:$head,targetHash:$targetHash,targetHashMatchesCandidate:$hashMatch,candidateLagLedgers:$candidateLag}' \
+              >> "${ROOT}/sources.ndjson"
+          done
+          jq -s '.' "${ROOT}/sources.ndjson" > "${ROOT}/sources.json"
+          jq -e 'all(.[]; .targetHashMatchesCandidate == true)' "${ROOT}/sources.json" > /dev/null
+          MIN_HEAD="$(jq '[.[].validatedHead] | min' "${ROOT}/sources.json")"
+          MAX_HEAD="$(jq '[.[].validatedHead] | max' "${ROOT}/sources.json")"
+          CANDIDATE_LAG="$((MIN_HEAD - SELECTED_LEDGER))"
+          if [ "${CANDIDATE_LAG}" -lt 0 ]; then CANDIDATE_LAG=0; fi
+          {
+            echo "MIN_HEAD=${MIN_HEAD}"
+            echo "MAX_HEAD=${MAX_HEAD}"
+            echo "CANDIDATE_LAG=${CANDIDATE_LAG}"
+          } >> "${GITHUB_ENV}"
+
+      - name: Read production APIs
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=live-source-reconciliation
+          curl --fail-with-body --silent --show-error --retry 3 "${PRODUCTION_BASE}/api/overview" > "${ROOT}/production-overview.json"
+          curl --fail-with-body --silent --show-error --retry 3 "${PRODUCTION_BASE}/api/status/history-source" > "${ROOT}/production-history.json"
+          curl --fail-with-body --silent --show-error --retry 3 "${PRODUCTION_BASE}/api/status/collector" > "${ROOT}/production-collector.json"
+          curl --fail-with-body --silent --show-error --retry 3 "${PRODUCTION_BASE}/api/status/fast-lane-diff?limit=500" > "${ROOT}/production-fast-lane-diff.json"
+          for FILE in production-overview production-history production-collector production-fast-lane-diff; do jq -e . "${ROOT}/${FILE}.json" > /dev/null; done
+
+          CURRENT_LEDGER="$(jq -r '.current_state_watermark.ledger_index // 0' "${ROOT}/production-overview.json")"
+          COUNTS_LEDGER="$(jq -r '.counts_watermark.ledger_index // 0' "${ROOT}/production-overview.json")"
+          HISTORY_LEDGER="$(jq -r '.chain.end_ledger_index // 0' "${ROOT}/production-history.json")"
+          CURRENT_LAG="$((MIN_HEAD - CURRENT_LEDGER))"
+          COUNTS_LAG="$((MIN_HEAD - COUNTS_LEDGER))"
+          HISTORY_LAG="$((MIN_HEAD - HISTORY_LEDGER))"
+          if [ "${CURRENT_LAG}" -lt 0 ]; then CURRENT_LAG=0; fi
+          if [ "${COUNTS_LAG}" -lt 0 ]; then COUNTS_LAG=0; fi
+          if [ "${HISTORY_LAG}" -lt 0 ]; then HISTORY_LAG=0; fi
+
+          jq -n \
+            --argjson currentLedger "${CURRENT_LEDGER}" \
+            --argjson countsLedger "${COUNTS_LEDGER}" \
+            --argjson historyLedger "${HISTORY_LEDGER}" \
+            --argjson currentLag "${CURRENT_LAG}" \
+            --argjson countsLag "${COUNTS_LAG}" \
+            --argjson historyLag "${HISTORY_LAG}" \
+            --slurpfile overview "${ROOT}/production-overview.json" \
+            --slurpfile history "${ROOT}/production-history.json" \
+            --slurpfile collector "${ROOT}/production-collector.json" \
+            --slurpfile diff "${ROOT}/production-fast-lane-diff.json" \
+            '{currentStateLedger:$currentLedger,countsLedger:$countsLedger,historyLedger:$historyLedger,currentStateLagLedgers:$currentLag,countsLagLedgers:$countsLag,historyLagLedgers:$historyLag,overview:$overview[0],historyStatus:$history[0],collectorStatus:$collector[0],fastLaneDiff:$diff[0]}' \
+            > "${ROOT}/production-summary.json"
+
+      - name: Build reconciliation verdict
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=live-source-reconciliation
+          PRODUCTION_CURRENT_LAG="$(jq -r '.currentStateLagLedgers' "${ROOT}/production-summary.json")"
+          PRODUCTION_HISTORY_LAG="$(jq -r '.historyLagLedgers' "${ROOT}/production-summary.json")"
+          FAST_LANE_PASSED="$(jq -r '.fastLaneDiff.passed // false' "${ROOT}/production-summary.json")"
+          CANDIDATE_NEAR_HEAD=false
+          if [ "${CANDIDATE_LAG}" -le 300 ]; then CANDIDATE_NEAR_HEAD=true; fi
+          PRODUCTION_CURRENT_FRESH=false
+          if [ "${PRODUCTION_CURRENT_LAG}" -le 10 ]; then PRODUCTION_CURRENT_FRESH=true; fi
+          PRODUCTION_HISTORY_CURRENT=false
+          if [ "${PRODUCTION_HISTORY_LAG}" -le 300 ]; then PRODUCTION_HISTORY_CURRENT=true; fi
+
+          jq -n \
+            --arg generatedAt "$(date -u +%FT%TZ)" \
+            --argjson selectedLedger "${SELECTED_LEDGER}" \
+            --arg selectedHash "${SELECTED_HASH}" \
+            --argjson minLiveHead "${MIN_HEAD}" \
+            --argjson maxLiveHead "${MAX_HEAD}" \
+            --argjson candidateLagLedgers "${CANDIDATE_LAG}" \
+            --argjson candidateNearHead "${CANDIDATE_NEAR_HEAD}" \
+            --argjson productionCurrentFresh "${PRODUCTION_CURRENT_FRESH}" \
+            --argjson productionHistoryCurrent "${PRODUCTION_HISTORY_CURRENT}" \
+            --argjson fastLanePassed "${FAST_LANE_PASSED}" \
+            --slurpfile candidate "${ROOT}/selected-candidate.json" \
+            --slurpfile pairs "${ROOT}/pairs.json" \
+            --slurpfile sources "${ROOT}/sources.json" \
+            --slurpfile production "${ROOT}/production-summary.json" \
+            '{generatedAt:$generatedAt,sourceComparisonPassed:(all($sources[0][]; .targetHashMatchesCandidate == true)),candidate:{selected:$candidate[0],ledgerIndex:$selectedLedger,ledgerHash:$selectedHash,lagLedgers:$candidateLagLedgers,nearHead:$candidateNearHead,allPairs:$pairs[0]},liveSources:{minimumValidatedHead:$minLiveHead,maximumValidatedHead:$maxLiveHead,sources:$sources[0]},production:{currentStateFresh:$productionCurrentFresh,historyCurrent:$productionHistoryCurrent,fastLaneDiffPassed:$fastLanePassed,details:$production[0]},releaseReady:($candidateNearHead and $productionCurrentFresh and $productionHistoryCurrent and $fastLanePassed)}' \
+            | tee "${ROOT}/reconciliation.json"
+
+      - name: Upload live-source reconciliation
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-source-reconciliation
+          path: live-source-reconciliation
+          if-no-files-found: error
+          retention-days: 30
