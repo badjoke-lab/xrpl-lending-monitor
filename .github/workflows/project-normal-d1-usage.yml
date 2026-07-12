@@ -1,0 +1,141 @@
+name: Project normal D1 usage
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/project-normal-d1-usage.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  project:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Capture fast-lane run metrics and protected collector cost
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p normal-d1-usage
+          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote \
+            --command "SELECT run_at,status,start_ledger_index,end_ledger_index,latest_observed_ledger,lag_ledgers,ledgers_processed,lending_transactions,coalesced_object_rows,persistence_rows_read,persistence_rows_written FROM fast_lane_shadow_run_metrics WHERE network='devnet' ORDER BY run_at DESC LIMIT 100;" \
+            --json > normal-d1-usage/metrics-raw.txt
+          sed -n '/^\[/,$p' normal-d1-usage/metrics-raw.txt > normal-d1-usage/metrics.json
+          curl --fail-with-body --silent --show-error --retry 3 "$BASE/api/status/collector" > normal-d1-usage/collector.json
+
+      - name: Compute conservative daily projection
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import datetime
+          import json
+          import math
+          import pathlib
+          import statistics
+
+          root = pathlib.Path('normal-d1-usage')
+          payload = json.loads((root / 'metrics.json').read_text())
+          rows = payload[0].get('results', []) if payload else []
+          collector = json.loads((root / 'collector.json').read_text())
+
+          def parse_time(value):
+              return datetime.datetime.fromisoformat(value.replace('Z', '+00:00'))
+
+          ordered = sorted(rows, key=lambda row: parse_time(row['run_at']))
+          accepted = {'committed', 'caught_up'}
+          normal = []
+          for index in range(1, len(ordered)):
+              row = ordered[index]
+              previous = ordered[index - 1]
+              gap = (parse_time(row['run_at']) - parse_time(previous['run_at'])).total_seconds()
+              if row.get('status') in accepted and 240 <= gap <= 360:
+                  normal.append(row)
+
+          normal = normal[-24:]
+          if len(normal) < 6:
+              raise SystemExit(f'need at least 6 ordinary five-minute samples, observed {len(normal)}')
+
+          def numeric(row, name):
+              value = row.get(name)
+              return int(value or 0)
+
+          read_samples = [numeric(row, 'persistence_rows_read') for row in normal]
+          write_samples = [numeric(row, 'persistence_rows_written') for row in normal]
+          all_success = [row for row in rows if row.get('status') in {'committed', 'caught_up', 'reanchored'}]
+          max_observed_read = max([numeric(row, 'persistence_rows_read') for row in all_success] or [0])
+          max_observed_write = max([numeric(row, 'persistence_rows_written') for row in all_success] or [0])
+
+          def nearest_rank_p95(values):
+              values = sorted(values)
+              return values[max(0, math.ceil(0.95 * len(values)) - 1)]
+
+          p95_read = nearest_rank_p95(read_samples)
+          p95_write = nearest_rank_p95(write_samples)
+          collector_read = int(collector.get('last_persistence_rows_read') or collector.get('lastPersistenceRowsRead') or 0)
+          collector_write = int(collector.get('last_persistence_rows_written') or collector.get('lastPersistenceRowsWritten') or 0)
+
+          five_minute_runs_per_day = 288
+          protected_runs_per_day = 6
+          reanchor_reserve_runs = 2
+          projected_read = p95_read * five_minute_runs_per_day + collector_read * protected_runs_per_day + max_observed_read * reanchor_reserve_runs
+          projected_write = p95_write * five_minute_runs_per_day + collector_write * protected_runs_per_day + max_observed_write * reanchor_reserve_runs
+          read_allowance = 5_000_000
+          write_allowance = 100_000
+          required_fraction = 0.70
+          read_fraction = projected_read / read_allowance
+          write_fraction = projected_write / write_allowance
+          passed = read_fraction < required_fraction and write_fraction < required_fraction
+
+          summary = {
+              'schemaVersion': 1,
+              'generatedAt': datetime.datetime.now(datetime.timezone.utc).isoformat().replace('+00:00', 'Z'),
+              'method': 'ordinary five-minute p95 x 288 + protected collector x 6 + two max-observed reanchor reserves',
+              'normalSampleCount': len(normal),
+              'normalSampleStart': normal[0]['run_at'],
+              'normalSampleEnd': normal[-1]['run_at'],
+              'fiveMinute': {
+                  'readRows': {'min': min(read_samples), 'average': statistics.mean(read_samples), 'p95': p95_read, 'max': max(read_samples)},
+                  'writeRows': {'min': min(write_samples), 'average': statistics.mean(write_samples), 'p95': p95_write, 'max': max(write_samples)},
+              },
+              'protectedCollectorPerRun': {'readRows': collector_read, 'writeRows': collector_write},
+              'reanchorReservePerRun': {'readRows': max_observed_read, 'writeRows': max_observed_write},
+              'dailyProjection': {
+                  'readRows': projected_read,
+                  'writeRows': projected_write,
+                  'readAllowance': read_allowance,
+                  'writeAllowance': write_allowance,
+                  'readFraction': read_fraction,
+                  'writeFraction': write_fraction,
+                  'requiredMaximumFraction': required_fraction,
+              },
+              'passed': passed,
+          }
+          (root / 'summary.json').write_text(json.dumps(summary, indent=2) + '\n')
+          print(json.dumps(summary, indent=2))
+          raise SystemExit(0 if passed else 2)
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: normal-d1-usage
+          path: normal-d1-usage
+          if-no-files-found: error
+          retention-days: 30
