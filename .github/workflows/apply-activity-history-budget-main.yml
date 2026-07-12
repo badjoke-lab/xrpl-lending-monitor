@@ -1,4 +1,5 @@
 name: Apply activity history budget to main
+# Retrigger after the workflow exists on the default branch.
 
 on:
   push:
