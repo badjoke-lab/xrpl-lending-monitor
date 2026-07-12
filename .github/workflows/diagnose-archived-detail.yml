@@ -1,0 +1,43 @@
+name: Diagnose archived detail
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/diagnose-archived-detail.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      URL: https://xrpl-lending-monitor.badjoke-lab.workers.dev/api/audit/archived/Vault/EB8F8A434ED1E1A304585BEC752F790BBBEEFD233D6CD075078606FD362A95FD
+    steps:
+      - name: Repeat exact archived detail request
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p archived-detail-diagnostic
+          : > archived-detail-diagnostic/summary.ndjson
+          for attempt in $(seq 1 12); do
+            curl --silent --show-error --retry 0 \
+              -H 'user-agent: xrpl-lending-monitor-archive-diagnostic/1.0' \
+              -D "archived-detail-diagnostic/$attempt.headers" \
+              -o "archived-detail-diagnostic/$attempt.body" \
+              -w '%{http_code} %{time_total}\n' "$URL" > "archived-detail-diagnostic/$attempt.meta" || true
+            read -r status elapsed < "archived-detail-diagnostic/$attempt.meta"
+            jq -n --argjson attempt "$attempt" --arg status "$status" --arg elapsed "$elapsed" --rawfile body "archived-detail-diagnostic/$attempt.body" '{attempt:$attempt,httpStatus:($status|tonumber),seconds:($elapsed|tonumber),body:$body}' >> archived-detail-diagnostic/summary.ndjson
+            sleep 1
+          done
+          jq -s '.' archived-detail-diagnostic/summary.ndjson > archived-detail-diagnostic/summary.json
+          jq -r '.[] | [.attempt,.httpStatus,.seconds,.body] | @tsv' archived-detail-diagnostic/summary.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: archived-detail-diagnostic
+          path: archived-detail-diagnostic
+          if-no-files-found: error
+          retention-days: 7
