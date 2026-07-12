@@ -51,6 +51,17 @@ jobs:
           done
           date -u +'%Y-%m-%dT%H:%M:%SZ' > pre-soak-status/captured-at.txt
 
+      - name: Capture Cloudflare Worker settings
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/xrpl-lending-monitor/settings" \
+            > pre-soak-status/worker-settings.json
+          jq '[.result.bindings[] | select(.name == "APP_NETWORK" or .name == "MAINNET_ENABLED" or .name == "CURRENT_STATE_REPLACEMENT_SNAPSHOT_ID" or .name == "REPLACEMENT_BASE_EPOCH_ID" or .name == "REPLACEMENT_BASE_SNAPSHOT_ID" or .name == "REPLACEMENT_BASE_LEDGER_INDEX" or .name == "REPLACEMENT_BASE_LEDGER_HASH") | {name,type,text,value}]' \
+            pre-soak-status/worker-settings.json > pre-soak-status/runtime-bindings.json
+
       - name: Capture D1 cursor and overlay rows
         shell: bash
         run: |
@@ -87,11 +98,12 @@ jobs:
             --slurpfile diff pre-soak-status/fast-lane-diff.json \
             --slurpfile continuation pre-soak-status/continuation-verification.json \
             --slurpfile m1 pre-soak-status/m1-exit.json \
+            --slurpfile runtime pre-soak-status/runtime-bindings.json \
             --slurpfile sync pre-soak-status/sync-state.json \
             --slurpfile overlays pre-soak-status/overlay-state.json \
             --slurpfile binding pre-soak-status/fast-lane-binding.json \
             --slurpfile fastState pre-soak-status/fast-lane-state.json \
-            '{overview:$overview[0],collector:$collector[0],history:$history[0],rebase:$rebase[0],diff:$diff[0],continuation:$continuation[0],m1:$m1[0],sync:$sync[0],overlays:$overlays[0],fastLaneBinding:$binding[0],fastLaneState:$fastState[0]}' \
+            '{overview:$overview[0],collector:$collector[0],history:$history[0],rebase:$rebase[0],diff:$diff[0],continuation:$continuation[0],m1:$m1[0],runtimeBindings:$runtime[0],sync:$sync[0],overlays:$overlays[0],fastLaneBinding:$binding[0],fastLaneState:$fastState[0]}' \
             > pre-soak-status/summary.json
           cat pre-soak-status/summary.json
 
