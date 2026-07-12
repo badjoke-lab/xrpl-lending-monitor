@@ -57,7 +57,7 @@ jobs:
               'objectChangeRecordCount':segment['recordCounts']['object_changes'],
               'segmentStartLedger':segment['startLedgerIndex'],
               'segmentEndLedger':segment['endLedgerIndex'],
-              'assetPath':segment['files']['object_changes']['path'],
+              'manifestPath':segment['manifestPath'],
             })
           summary={
             'term':term,
@@ -71,11 +71,12 @@ jobs:
           for ref in refs:
             if ref['segmentId'] in seen: continue
             seen.add(ref['segmentId'])
-            summary['uniqueSegments'].append({k:ref[k] for k in ('segmentId','segmentStartLedger','segmentEndLedger','objectChangeRecordCount','assetPath')})
+            summary['uniqueSegments'].append({k:ref[k] for k in ('segmentId','segmentStartLedger','segmentEndLedger','objectChangeRecordCount','manifestPath')})
           (out/'summary.json').write_text(json.dumps(summary,indent=2)+'\n')
           print(json.dumps(summary,indent=2))
           PY
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: loan-history-reference-inspection
           path: loan-history-reference-inspection
