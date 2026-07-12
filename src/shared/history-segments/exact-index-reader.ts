@@ -13,8 +13,9 @@ import {
 } from './exact-index'
 import type { HistorySegmentChainPublication } from './publication'
 
-const DEFAULT_MAX_DECOMPRESSED_BYTES = 16 * 1024 * 1024
+const DEFAULT_MAX_DECOMPRESSED_BYTES = 64 * 1024 * 1024
 const MAX_RESULT_LIMIT = 100
+const MAX_CACHED_BUCKETS = 1
 
 export interface HistoryExactLookupResult {
   term: string
@@ -100,7 +101,7 @@ export class HistoryExactIndexReader {
         || previous.reference.segmentId.localeCompare(current.reference.segmentId)
       if (order > 0) throw new Error('History exact index asset records are not deterministically ordered')
     }
-    if (this.#cache.size >= 4) this.#cache.delete(this.#cache.keys().next().value as number)
+    if (this.#cache.size >= MAX_CACHED_BUCKETS) this.#cache.delete(this.#cache.keys().next().value as number)
     this.#cache.set(bucket, records)
     return { records, assetReads: 1, compressedBytes: bytes.byteLength, decompressedBytes: decoded.decompressedBytes }
   }
