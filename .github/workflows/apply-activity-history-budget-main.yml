@@ -1,0 +1,63 @@
+name: Apply activity history budget to main
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/apply-activity-history-budget-main.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Apply bounded activity read budget
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/worker/repositories/hybrid-history-repository.ts')
+          text = path.read_text()
+          old_constants = "const ARCHIVED_HISTORY_SEGMENT_READS = 24\nconst BALANCE_HISTORY_SEGMENT_READS = 16\nconst AUDIT_HISTORY_WALL_TIME_MS = 5_000"
+          new_constants = "const ACTIVITY_HISTORY_SEGMENT_READS = 24\nconst ARCHIVED_HISTORY_SEGMENT_READS = 24\nconst BALANCE_HISTORY_SEGMENT_READS = 16\nconst AUDIT_HISTORY_WALL_TIME_MS = 5_000"
+          if old_constants not in text:
+              raise SystemExit('activity budget constants anchor not found')
+          text = text.replace(old_constants, new_constants, 1)
+
+          old_call = """    kind: 'protocol_events',
+    direction: 'desc',
+    limit: options.page.limit,
+    cursor: options.immutableCursor,
+  })"""
+          new_call = """    kind: 'protocol_events',
+    direction: 'desc',
+    limit: options.page.limit,
+    cursor: options.immutableCursor,
+    maxSegmentReads: ACTIVITY_HISTORY_SEGMENT_READS,
+    maxWallTimeMs: AUDIT_HISTORY_WALL_TIME_MS,
+  })"""
+          if old_call not in text:
+              raise SystemExit('activity reader anchor not found')
+          text = text.replace(old_call, new_call, 1)
+          path.write_text(text)
+          PY
+          git diff --check
+          git diff -- src/worker/repositories/hybrid-history-repository.ts
+      - name: Commit source fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/worker/repositories/hybrid-history-repository.ts
+          git commit -m "fix: widen bounded activity history read"
+          git push origin HEAD:main
