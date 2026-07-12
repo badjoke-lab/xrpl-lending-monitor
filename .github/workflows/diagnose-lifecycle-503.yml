@@ -1,0 +1,43 @@
+name: Diagnose lifecycle 503
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/diagnose-lifecycle-503.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Compare lifecycle query forms
+        shell: bash
+        env:
+          BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+          LOAN_ID: ABFDB92A4D0AE8A1983FA06A40605F9A358BD08A3DAD4B6C49474656A489B57D
+        run: |
+          set -euo pipefail
+          mkdir -p lifecycle-503-diagnostic
+          for spec in \
+            audit-1:"/api/audit/lifecycle?limit=1&loan_id=$LOAN_ID" \
+            audit-25:"/api/audit/lifecycle?limit=25&loan_id=$LOAN_ID" \
+            audit-100:"/api/audit/lifecycle?limit=100&loan_id=$LOAN_ID" \
+            direct-1:"/api/loans/$LOAN_ID/lifecycle?limit=1" \
+            direct-25:"/api/loans/$LOAN_ID/lifecycle?limit=25" \
+            direct-100:"/api/loans/$LOAN_ID/lifecycle?limit=100"; do
+            name="${spec%%:*}"; path="${spec#*:}"
+            curl --silent --show-error --retry 1 -D "lifecycle-503-diagnostic/$name.headers" -o "lifecycle-503-diagnostic/$name.body" -w '%{http_code}\n%{time_total}\n' "$BASE$path" > "lifecycle-503-diagnostic/$name.meta" || true
+          done
+          for f in lifecycle-503-diagnostic/*.meta; do echo "=== $f"; cat "$f"; done
+          for f in lifecycle-503-diagnostic/*.body; do echo "=== $f"; head -c 1000 "$f"; echo; done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lifecycle-503-diagnostic
+          path: lifecycle-503-diagnostic
+          if-no-files-found: error
+          retention-days: 7
