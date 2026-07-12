@@ -18,7 +18,7 @@ env:
 jobs:
   audit:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -29,81 +29,206 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: mkdir -p live-freshness-audit
 
-      - name: Capture public API and XRPL Devnet head
+      - name: Wait for a fresh five-minute current-state tick
         shell: bash
         run: |
           set -euo pipefail
           ROOT=live-freshness-audit
+          curl --fail-with-body --silent --show-error --retry 3 \
+            "${PRODUCTION_BASE}/api/overview" > "${ROOT}/overview-baseline.json"
+          BASELINE_UPDATED="$(jq -r '.current_state_watermark.updated_at // empty' "${ROOT}/overview-baseline.json")"
+          : > "${ROOT}/freshness-attempts.ndjson"
+
+          for attempt in $(seq 1 180); do
+            curl --fail-with-body --silent --show-error --retry 2 \
+              "${PRODUCTION_BASE}/api/overview" > "${ROOT}/overview-probe.json" || true
+            jq -n '{method:"ledger",params:[{ledger_index:"validated",transactions:false,expand:false}]}' \
+              > "${ROOT}/head-request.json"
+            curl --fail-with-body --silent --show-error --retry 2 \
+              -H 'content-type: application/json' --data @"${ROOT}/head-request.json" \
+              https://devnet.honeycluster.io/ > "${ROOT}/head-primary-probe.json" || true
+            curl --fail-with-body --silent --show-error --retry 2 \
+              -H 'content-type: application/json' --data @"${ROOT}/head-request.json" \
+              https://s.devnet.rippletest.net:51234/ > "${ROOT}/head-fallback-probe.json" || true
+
+            CURRENT="$(jq -r '.current_state_watermark.ledger_index // 0' "${ROOT}/overview-probe.json" 2>/dev/null || echo 0)"
+            UPDATED="$(jq -r '.current_state_watermark.updated_at // empty' "${ROOT}/overview-probe.json" 2>/dev/null || true)"
+            PRIMARY="$(jq -r '.result.ledger_index // .result.ledger.ledger_index // 0' "${ROOT}/head-primary-probe.json" 2>/dev/null || echo 0)"
+            FALLBACK="$(jq -r '.result.ledger_index // .result.ledger.ledger_index // 0' "${ROOT}/head-fallback-probe.json" 2>/dev/null || echo 0)"
+            LIVE="${PRIMARY}"
+            if [ "${FALLBACK}" -gt 0 ] && { [ "${LIVE}" -eq 0 ] || [ "${FALLBACK}" -lt "${LIVE}" ]; }; then LIVE="${FALLBACK}"; fi
+            LAG="$((LIVE - CURRENT))"
+            if [ "${LAG}" -lt 0 ]; then LAG=0; fi
+            AGE=999999
+            if [ -n "${UPDATED}" ]; then
+              UPDATED_EPOCH="$(date -u -d "${UPDATED}" +%s 2>/dev/null || echo 0)"
+              if [ "${UPDATED_EPOCH}" -gt 0 ]; then AGE="$(( $(date -u +%s) - UPDATED_EPOCH ))"; fi
+              if [ "${AGE}" -lt 0 ]; then AGE=0; fi
+            fi
+            jq -n --argjson attempt "${attempt}" --arg updated "${UPDATED}" \
+              --argjson current "${CURRENT}" --argjson live "${LIVE}" \
+              --argjson lag "${LAG}" --argjson age "${AGE}" \
+              '{attempt:$attempt,updatedAt:$updated,currentLedger:$current,liveLedger:$live,lagLedgers:$lag,ageSeconds:$age}' \
+              >> "${ROOT}/freshness-attempts.ndjson"
+
+            if [ "${CURRENT}" -gt 0 ] && [ "${LIVE}" -gt 0 ] \
+              && [ "${UPDATED}" != "${BASELINE_UPDATED}" ] \
+              && [ "${LAG}" -le 10 ] && [ "${AGE}" -le 600 ]; then
+              cp "${ROOT}/overview-probe.json" "${ROOT}/overview.json"
+              cp "${ROOT}/head-primary-probe.json" "${ROOT}/head-primary.json"
+              cp "${ROOT}/head-fallback-probe.json" "${ROOT}/head-fallback.json"
+              touch "${ROOT}/fresh-tick-observed"
+              break
+            fi
+            sleep 5
+          done
+          test -f "${ROOT}/fresh-tick-observed"
           date -u +'%Y-%m-%dT%H:%M:%SZ' > "${ROOT}/captured-at.txt"
-          curl --fail-with-body --silent --show-error --retry 3 "${PRODUCTION_BASE}/api/overview" > "${ROOT}/overview.json"
+
+      - name: Capture all required public status APIs
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=live-freshness-audit
           curl --fail-with-body --silent --show-error --retry 3 "${PRODUCTION_BASE}/api/status/collector" > "${ROOT}/collector.json"
           curl --fail-with-body --silent --show-error --retry 3 "${PRODUCTION_BASE}/api/status/history-source" > "${ROOT}/history-source.json"
+          curl --fail-with-body --silent --show-error --retry 3 "${PRODUCTION_BASE}/api/status/replacement-base-rebase" > "${ROOT}/replacement-base-rebase.json"
           curl --fail-with-body --silent --show-error --retry 3 "${PRODUCTION_BASE}/api/status/fast-lane-diff?limit=500" > "${ROOT}/fast-lane-diff.json"
-          jq -n '{method:"ledger",params:[{ledger_index:"validated",transactions:false,expand:false}]}' > "${ROOT}/head-request.json"
-          curl --fail-with-body --silent --show-error --retry 3 -H 'content-type: application/json' --data @"${ROOT}/head-request.json" https://devnet.honeycluster.io/ > "${ROOT}/head-primary.json"
-          curl --fail-with-body --silent --show-error --retry 3 -H 'content-type: application/json' --data @"${ROOT}/head-request.json" https://s.devnet.rippletest.net:51234/ > "${ROOT}/head-fallback.json"
+          curl --fail-with-body --silent --show-error --retry 3 "${PRODUCTION_BASE}/api/status/continuation-verification" > "${ROOT}/continuation-verification.json"
+          curl --fail-with-body --silent --show-error --retry 3 "${PRODUCTION_BASE}/api/status/m1-exit" > "${ROOT}/m1-exit.json"
 
-      - name: Capture production cron and fast-lane D1 state
+      - name: Capture Cloudflare runtime and D1 state
         shell: bash
         run: |
           set -euo pipefail
           ROOT=live-freshness-audit
-          curl --fail-with-body --silent --show-error -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/xrpl-lending-monitor/schedules" > "${ROOT}/schedules.json"
-          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote --command "SELECT epoch_id,last_processed_ledger,last_processed_hash,latest_observed_ledger,latest_observed_hash,status,updated_at FROM fast_lane_shadow_state WHERE network='devnet';" --json > "${ROOT}/state-raw.txt"
+          AUTH=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          curl --fail-with-body --silent --show-error "${AUTH[@]}" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/xrpl-lending-monitor/schedules" \
+            > "${ROOT}/schedules.json"
+          curl --fail-with-body --silent --show-error "${AUTH[@]}" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/xrpl-lending-monitor/settings" \
+            > "${ROOT}/worker-settings.json"
+
+          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote \
+            --command "SELECT epoch_id,last_processed_ledger,last_processed_hash,latest_observed_ledger,latest_observed_hash,status,updated_at FROM fast_lane_shadow_state WHERE network='devnet';" \
+            --json > "${ROOT}/state-raw.txt"
           sed -n '/^\[/,$p' "${ROOT}/state-raw.txt" > "${ROOT}/state.json"
-          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote --command "SELECT run_at,status,start_ledger_index,end_ledger_index,latest_observed_ledger,lag_ledgers,ledgers_processed,lending_transactions,coalesced_object_rows,persistence_rows_read,persistence_rows_written FROM fast_lane_shadow_run_metrics WHERE network='devnet' ORDER BY run_at DESC LIMIT 30;" --json > "${ROOT}/metrics-raw.txt"
+
+          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote \
+            --command "SELECT shadow_epoch_id,base_epoch_id,base_snapshot_id,base_ledger_index,base_ledger_hash,bound_at FROM fast_lane_shadow_base_binding WHERE network='devnet';" \
+            --json > "${ROOT}/binding-raw.txt"
+          sed -n '/^\[/,$p' "${ROOT}/binding-raw.txt" > "${ROOT}/binding.json"
+
+          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote \
+            --command "SELECT run_at,status,start_ledger_index,end_ledger_index,latest_observed_ledger,lag_ledgers,ledgers_processed,lending_transactions,coalesced_object_rows,persistence_rows_read,persistence_rows_written FROM fast_lane_shadow_run_metrics WHERE network='devnet' ORDER BY run_at DESC LIMIT 30;" \
+            --json > "${ROOT}/metrics-raw.txt"
           sed -n '/^\[/,$p' "${ROOT}/metrics-raw.txt" > "${ROOT}/metrics.json"
 
-      - name: Compute freshness verdict
+      - name: Compute pre-soak gate verdict
         shell: bash
         run: |
           set -euo pipefail
-          ROOT=live-freshness-audit
           python - <<'PY'
-          import json, datetime, pathlib
-          root=pathlib.Path('live-freshness-audit')
-          def load(name): return json.loads((root/name).read_text())
-          overview=load('overview.json')
-          collector=load('collector.json')
-          history=load('history-source.json')
-          schedules=load('schedules.json')
-          state_raw=load('state.json')
-          metrics_raw=load('metrics.json')
-          p=load('head-primary.json'); f=load('head-fallback.json')
-          def head(x):
-              r=x.get('result',{}); l=r.get('ledger',{}) if isinstance(r.get('ledger'),dict) else {}
-              return int(r.get('ledger_index') or l.get('ledger_index') or l.get('seqNum'))
-          live=min(head(p),head(f))
-          wm=overview.get('current_state_watermark') or {}
-          current=int(wm.get('ledger_index') or 0)
-          updated=wm.get('updated_at')
-          now=datetime.datetime.now(datetime.timezone.utc)
-          age=None
+          import datetime, json, pathlib
+
+          root = pathlib.Path('live-freshness-audit')
+          def load(name): return json.loads((root / name).read_text())
+          def result_rows(name):
+              payload = load(name)
+              return payload[0].get('results', []) if payload else []
+          def head(payload):
+              result = payload.get('result', {})
+              ledger = result.get('ledger', {}) if isinstance(result.get('ledger'), dict) else {}
+              return int(result.get('ledger_index') or ledger.get('ledger_index') or ledger.get('seqNum') or 0)
+          def binding_value(settings, name):
+              bindings = settings.get('result', {}).get('bindings', [])
+              for item in bindings:
+                  if item.get('name') == name:
+                      return item.get('text', item.get('value'))
+              return None
+
+          overview = load('overview.json')
+          collector = load('collector.json')
+          history = load('history-source.json')
+          rebase = load('replacement-base-rebase.json')
+          diff = load('fast-lane-diff.json')
+          continuation = load('continuation-verification.json')
+          m1 = load('m1-exit.json')
+          schedules = load('schedules.json')
+          settings = load('worker-settings.json')
+          primary = load('head-primary.json')
+          fallback = load('head-fallback.json')
+          state_rows = result_rows('state.json')
+          binding_rows = result_rows('binding.json')
+          metrics = result_rows('metrics.json')
+
+          live = min(x for x in (head(primary), head(fallback)) if x > 0)
+          current_wm = overview.get('current_state_watermark') or {}
+          counts_wm = overview.get('counts_watermark') or {}
+          current = int(current_wm.get('ledger_index') or 0)
+          updated = current_wm.get('updated_at')
+          now = datetime.datetime.now(datetime.timezone.utc)
+          age = None
           if updated:
-              age=(now-datetime.datetime.fromisoformat(updated.replace('Z','+00:00'))).total_seconds()
-          state_rows=state_raw[0].get('results',[]) if state_raw else []
-          metrics=metrics_raw[0].get('results',[]) if metrics_raw else []
-          last_metric=metrics[0] if metrics else None
-          verdict={
-              'captured_at': now.isoformat().replace('+00:00','Z'),
-              'live_head': live,
-              'public_current_ledger': current,
-              'public_current_updated_at': updated,
-              'public_current_age_seconds': age,
-              'public_current_lag_ledgers': max(0, live-current),
-              'cron_schedules': [x.get('cron') for x in schedules.get('result',{}).get('schedules',[])],
-              'fast_lane_state': state_rows[0] if state_rows else None,
-              'last_metric': last_metric,
-              'recent_metrics': metrics,
-              'collector': collector,
-              'history': history,
+              age = (now - datetime.datetime.fromisoformat(updated.replace('Z', '+00:00'))).total_seconds()
+          lag = max(0, live - current)
+
+          history_ledger = int((history.get('chain') or {}).get('end_ledger_index') or 0)
+          history_hash = (history.get('chain') or {}).get('end_ledger_hash')
+          counts_ledger = int(counts_wm.get('ledger_index') or 0)
+          counts_hash = counts_wm.get('ledger_hash')
+          rebase_target = rebase.get('target') or {}
+          diff_binding = diff.get('binding') or {}
+          diff_sample = diff.get('sample') or {}
+          state = state_rows[0] if state_rows else {}
+          binding = binding_rows[0] if binding_rows else {}
+          cursor = collector.get('cursor') or {}
+          cursor_expected_lag = None
+          if cursor.get('last_processed_ledger') is not None and cursor.get('latest_observed_ledger') is not None:
+              cursor_expected_lag = max(0, int(cursor['latest_observed_ledger']) - int(cursor['last_processed_ledger']))
+
+          crons = [x.get('cron') for x in schedules.get('result', {}).get('schedules', [])]
+          accepted_metric_statuses = {'caught_up', 'committed', 'reanchored'}
+          checks = {
+              'devnet_runtime': binding_value(settings, 'APP_NETWORK') == 'devnet',
+              'mainnet_disabled': str(binding_value(settings, 'MAINNET_ENABLED')).lower() == 'false',
+              'single_five_minute_cron': crons == ['*/5 * * * *'],
+              'current_state_age_within_600s': age is not None and age <= 600,
+              'current_state_lag_within_10': lag <= 10,
+              'current_state_at_or_after_checkpoint': current >= history_ledger > 0,
+              'history_source_ok': history.get('status') == 'ok' and history.get('mode') == 'hybrid',
+              'history_counts_same_checkpoint': counts_ledger == history_ledger and counts_hash == current_wm.get('base_ledger_hash', counts_hash),
+              'replacement_base_replayed': rebase.get('status') == 'replayed' and int(rebase_target.get('ledgerIndex') or 0) == history_ledger,
+              'fast_lane_binding_same_checkpoint': int(diff_binding.get('baseLedgerIndex') or 0) == history_ledger,
+              'fast_lane_diff_zero': diff.get('status') == 'ok' and diff.get('passed') is True and int(diff_sample.get('exactProjectionMismatches') or 0) == 0,
+              'd1_state_matches_public_current': int(state.get('last_processed_ledger') or 0) == current,
+              'd1_binding_same_checkpoint': int(binding.get('base_ledger_index') or 0) == history_ledger,
+              'collector_cursor_self_consistent': cursor_expected_lag is not None and int(cursor.get('lag_ledgers') or 0) == cursor_expected_lag,
+              'collector_has_no_failures': int(collector.get('consecutive_failures') or 0) == 0 and collector.get('error') is None,
+              'continuation_verification_passed': continuation.get('passed') is True,
+              'm1_exit_ready': m1.get('ready') is True,
+              'recent_fast_lane_runs_present': len(metrics) >= 3,
+              'recent_fast_lane_runs_successful': bool(metrics) and all(row.get('status') in accepted_metric_statuses for row in metrics),
           }
-          verdict['current_state_fresh']=bool(age is not None and age <= 600 and verdict['public_current_lag_ledgers'] <= 10)
-          (root/'summary.json').write_text(json.dumps(verdict,indent=2)+'\n')
-          print(json.dumps(verdict,indent=2))
-          if verdict['current_state_fresh']:
-              raise SystemExit(0)
-          raise SystemExit(2)
+          summary = {
+              'captured_at': now.isoformat().replace('+00:00', 'Z'),
+              'live_head': live,
+              'current_state': {'ledger': current, 'updated_at': updated, 'age_seconds': age, 'lag_ledgers': lag},
+              'checkpoint': {'history_ledger': history_ledger, 'history_hash': history_hash, 'counts_ledger': counts_ledger, 'counts_hash': counts_hash},
+              'runtime': {'app_network': binding_value(settings, 'APP_NETWORK'), 'mainnet_enabled': binding_value(settings, 'MAINNET_ENABLED'), 'crons': crons},
+              'collector_cursor_expected_lag': cursor_expected_lag,
+              'checks': checks,
+              'passed': all(checks.values()),
+              'collector': collector,
+              'continuation': continuation,
+              'm1_exit': m1,
+              'replacement_base': rebase,
+              'fast_lane_diff': diff,
+          }
+          (root / 'summary.json').write_text(json.dumps(summary, indent=2) + '\n')
+          print(json.dumps(summary, indent=2))
+          raise SystemExit(0 if summary['passed'] else 2)
           PY
 
       - uses: actions/upload-artifact@v4
