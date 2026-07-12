@@ -1,0 +1,178 @@
+name: Build direct current-state candidate
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/build-direct-current-state-candidate.yml'
+      - 'scripts/build-direct-current-state-read-model.ts'
+      - 'vite.direct-current-state-read-model.config.ts'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-direct-current-state-candidate
+  cancel-in-progress: false
+
+env:
+  CANDIDATE_BRANCH: current-state-live-head-data
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build direct current-state tools
+        run: |
+          pnpm build:release-current-state
+          pnpm exec vite build --config vite.direct-current-state-read-model.config.ts
+
+      - name: Materialize a complete snapshot from the live Devnet head
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=direct-current-state-candidate
+          mkdir -p "${ROOT}"
+          RELEASE_TAG="live-current-state-${GITHUB_RUN_ID}"
+          STARTED="$(date +%s)"
+          node .release-current-state-build/run-release-current-state.mjs \
+            --local \
+            --endpoint https://devnet.honeycluster.io/ \
+            --timeout-ms 20000 \
+            --page-limit 5000 \
+            --object-limit-per-page 2048 \
+            --output-dir .local/live-release \
+            --release-tag "${RELEASE_TAG}" \
+            --epoch-id devnet-3371675 \
+            --index-buckets 64 \
+            --data-segments 64 \
+            > "${ROOT}/release.stdout.json"
+          echo $(( $(date +%s) - STARTED )) > "${ROOT}/release-seconds.txt"
+          cp .local/live-release/release-summary.json "${ROOT}/release-summary.json"
+          cp .local/live-release/assets/manifest.json "${ROOT}/source-manifest.json"
+          jq -e '
+            .complete == true
+            and .network == "devnet"
+            and .epochId == "devnet-3371675"
+            and .sourcePages > 0
+            and .relevantObjectCount > 0
+            and .counts.vaults > 0
+            and .counts.loanBrokers > 0
+            and .counts.loans > 0
+          ' "${ROOT}/source-manifest.json" > /dev/null
+
+      - name: Build direct read model without waiting for history
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=direct-current-state-candidate
+          SNAPSHOT="$(jq -r '.snapshotId' "${ROOT}/source-manifest.json")"
+          LEDGER="$(jq -r '.ledgerIndex' "${ROOT}/source-manifest.json")"
+          STARTED="$(date +%s)"
+          node .direct-current-state-read-model-build/build-direct-current-state-read-model.mjs \
+            --local \
+            --input-dir .local/live-release/assets \
+            --output-dir .local/live-read-model \
+            --page-size 50 \
+            --lookup-prefix-length 3 \
+            --snapshot-id "${SNAPSHOT}" \
+            --release-tag "direct-current-state-${LEDGER}" \
+            > "${ROOT}/read-model.stdout.json"
+          echo $(( $(date +%s) - STARTED )) > "${ROOT}/read-model-seconds.txt"
+          cp .local/live-read-model/direct-current-state-summary.json "${ROOT}/summary.json"
+          cp .local/live-read-model/read-model/manifest.json "${ROOT}/target-manifest.json"
+          jq -e --slurpfile source "${ROOT}/source-manifest.json" '
+            .mode == "direct-live-ledger"
+            and .target.ledgerIndex == $source[0].ledgerIndex
+            and .target.ledgerHash == $source[0].ledgerHash
+            and .target.counts == $source[0].counts
+          ' "${ROOT}/summary.json" > /dev/null
+
+      - name: Verify target against both Devnet RPC sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=direct-current-state-candidate
+          LEDGER="$(jq -r '.ledgerIndex' "${ROOT}/target-manifest.json")"
+          HASH="$(jq -r '.ledgerHash' "${ROOT}/target-manifest.json")"
+          jq -n --argjson ledger "${LEDGER}" '{method:"ledger",params:[{ledger_index:$ledger,transactions:false,expand:false}]}' > "${ROOT}/target-request.json"
+          for NAME in primary fallback; do
+            if [ "${NAME}" = primary ]; then ENDPOINT=https://devnet.honeycluster.io/; else ENDPOINT=https://s.devnet.rippletest.net:51234/; fi
+            curl --fail-with-body --silent --show-error --retry 3 -H 'content-type: application/json' --data @"${ROOT}/target-request.json" "${ENDPOINT}" > "${ROOT}/target-${NAME}.json"
+            test "$(jq -r '.result.ledger_hash // .result.ledger.ledger_hash' "${ROOT}/target-${NAME}.json")" = "${HASH}"
+          done
+
+      - name: Publish current-state candidate branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="${GITHUB_WORKSPACE}/direct-current-state-candidate"
+          PUBLISH=/tmp/direct-current-publish
+          rm -rf "${PUBLISH}"
+          mkdir -p "${PUBLISH}"
+          cp -R .local/live-read-model/read-model "${PUBLISH}/"
+          cp .local/live-read-model/direct-current-state-summary.json "${PUBLISH}/"
+          cd "${PUBLISH}"
+          git init
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          gh auth setup-git
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git add read-model direct-current-state-summary.json
+          git commit -m "Publish direct live-head current-state data"
+          DATA_SHA="$(git rev-parse HEAD)"
+          MANIFEST_SHA="$(jq -r '.target.manifestSha256' direct-current-state-summary.json)"
+          RELEASE_TAG="$(jq -r '.target.releaseTag' direct-current-state-summary.json)"
+          SNAPSHOT_ID="$(jq -r '.target.snapshotId' direct-current-state-summary.json)"
+          jq -n \
+            --arg dataCommitSha "${DATA_SHA}" \
+            --arg manifestSha256 "${MANIFEST_SHA}" \
+            --arg releaseTag "${RELEASE_TAG}" \
+            --arg snapshotId "${SNAPSHOT_ID}" \
+            --arg updatedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{schemaVersion:1,active:{dataCommitSha:$dataCommitSha,manifestPath:"read-model/manifest.json",manifestSha256:$manifestSha256,releaseTag:$releaseTag,snapshotId:$snapshotId},updatedAt:$updatedAt}' \
+            > channel.json
+          git add channel.json
+          git commit -m "Activate direct live-head current-state channel"
+          git push --force origin "HEAD:refs/heads/${CANDIDATE_BRANCH}"
+          git rev-parse HEAD > "${ROOT}/candidate-commit-sha.txt"
+
+      - name: Verify remote candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=direct-current-state-candidate
+          gh api --method GET "repos/${GITHUB_REPOSITORY}/contents/read-model/manifest.json" -f ref="${CANDIDATE_BRANCH}" --jq '.content' | tr -d '\n' | base64 --decode > "${ROOT}/remote-manifest.json"
+          jq -e --slurpfile local "${ROOT}/target-manifest.json" '
+            .complete == true
+            and .snapshotId == $local[0].snapshotId
+            and .ledgerIndex == $local[0].ledgerIndex
+            and .ledgerHash == $local[0].ledgerHash
+            and .manifestSha256 == $local[0].manifestSha256
+          ' "${ROOT}/remote-manifest.json" > /dev/null
+
+      - name: Upload candidate evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: direct-current-state-candidate
+          path: direct-current-state-candidate
+          if-no-files-found: warn
+          retention-days: 30
