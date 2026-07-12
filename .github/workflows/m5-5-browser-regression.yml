@@ -1,5 +1,5 @@
 name: M5-5 browser regression
-# Pre-soak production rerun: 2026-07-12, wait for bounded fast-lane recovery
+# Final pre-soak production rerun: hard D1 allowance plus separate soak projection
 
 on:
   workflow_dispatch:
@@ -10,7 +10,7 @@ on:
         default: https://xrpl-lending-monitor.badjoke-lab.workers.dev
         type: string
       confirm_d1_headroom:
-        description: Confirm the operator expects the workflow to measure actual current UTC-day D1 headroom before browser regression
+        description: Confirm the operator expects the workflow to measure actual current UTC-day D1 usage before browser regression
         required: true
         default: false
         type: boolean
@@ -28,7 +28,7 @@ permissions:
 
 concurrency:
   group: m5-5-browser-regression
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   browser-regression:
@@ -132,12 +132,13 @@ jobs:
               canonical_collector: $collector[0]
             }' > "${ROOT}/collector-preflight.json"
 
-      - name: Measure and enforce actual D1 headroom
+      - name: Measure current D1 hard allowance
         if: steps.intent.outputs.run_allowed == 'true'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           D1_HEADROOM_OUTPUT_DIR: m5-5-browser-regression
+          D1_HEADROOM_FRACTION: '1.0'
         run: bash scripts/check-d1-headroom.sh
 
       - uses: pnpm/action-setup@v4
@@ -183,11 +184,11 @@ jobs:
         run: |
           if [ -f m5-5-browser-regression/d1-headroom-summary.json ]; then
             {
-              echo '## D1 headroom gate'
+              echo '## D1 hard allowance'
               echo
               jq -r '"- Rows read: `\(.rows_read)` / `\(.rows_read_daily_allowance)`"' m5-5-browser-regression/d1-headroom-summary.json
               jq -r '"- Rows written: `\(.rows_written)` / `\(.rows_written_daily_allowance)`"' m5-5-browser-regression/d1-headroom-summary.json
-              jq -r '"- Passed: **\(.passed)**"' m5-5-browser-regression/d1-headroom-summary.json
+              jq -r '"- Below hard allowance: **\(.passed)**"' m5-5-browser-regression/d1-headroom-summary.json
               echo
             } >> "${GITHUB_STEP_SUMMARY}"
           fi
