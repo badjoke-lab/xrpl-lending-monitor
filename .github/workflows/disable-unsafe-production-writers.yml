@@ -1,0 +1,163 @@
+name: Disable unsafe production writers
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/disable-unsafe-production-writers.yml'
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: production-worker-write
+  cancel-in-progress: false
+
+jobs:
+  disable-and-restore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      GH_TOKEN: ${{ github.token }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          ref: current-state-data
+          path: .local/current-state-data
+          sparse-checkout: read-model/manifest.json
+          sparse-checkout-cone-mode: false
+      - uses: actions/checkout@v4
+        with:
+          ref: history-data
+          path: .local/history-data
+          sparse-checkout: history/publication.json
+          sparse-checkout-cone-mode: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Cancel and disable obsolete direct deploy workflows
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=unsafe-production-writers
+          mkdir -p "$ROOT"
+          : > "$ROOT/actions.ndjson"
+          WORKFLOWS=(
+            deploy-fast-lane-base-binding-diff.yml
+            rolling-checkpoint-production-promotion.yml
+            manual-devnet-deploy.yml
+          )
+          for workflow in "${WORKFLOWS[@]}"; do
+            gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/runs?per_page=100" > "$ROOT/runs-$workflow.json"
+            while IFS= read -r id; do
+              gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$id/cancel" > "$ROOT/cancel-$id.json" 2> "$ROOT/cancel-$id.stderr" || true
+              jq -n --arg workflow "$workflow" --argjson id "$id" '{action:"cancel",workflow:$workflow,runId:$id}' >> "$ROOT/actions.ndjson"
+            done < <(jq -r '.workflow_runs[] | select(.status == "queued" or .status == "in_progress" or .status == "waiting" or .status == "pending" or .status == "requested") | .id' "$ROOT/runs-$workflow.json")
+            gh api --method PUT "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/disable" > "$ROOT/disable-$workflow.json"
+            jq -n --arg workflow "$workflow" '{action:"disable",workflow:$workflow}' >> "$ROOT/actions.ndjson"
+          done
+
+          for attempt in $(seq 1 60); do
+            active=0
+            for workflow in "${WORKFLOWS[@]}"; do
+              gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/runs?per_page=100" > "$ROOT/wait-$workflow.json"
+              count="$(jq '[.workflow_runs[] | select(.status == "queued" or .status == "in_progress" or .status == "waiting" or .status == "pending" or .status == "requested")] | length' "$ROOT/wait-$workflow.json")"
+              active="$((active + count))"
+            done
+            jq -n --argjson attempt "$attempt" --argjson active "$active" '{attempt:$attempt,activeUnsafeWriters:$active}' >> "$ROOT/quiescence.ndjson"
+            [ "$active" -eq 0 ] && break
+            sleep 5
+          done
+          test "$active" -eq 0
+
+      - name: Build checkpoint-bound production config
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          source=json.loads(Path('wrangler.jsonc').read_text())
+          current=json.loads(Path('.local/current-state-data/read-model/manifest.json').read_text())
+          history=json.loads(Path('.local/history-data/history/publication.json').read_text())
+          assert source['triggers']['crons']==['*/5 * * * *']
+          assert source['vars']['APP_NETWORK']=='devnet'
+          assert source['vars']['MAINNET_ENABLED']=='false'
+          assert current['complete'] is True and history['complete'] is True
+          assert current['epochId']==history['epochId']=='devnet-3371675'
+          assert current['ledgerIndex']==history['endLedgerIndex']
+          assert current['ledgerHash']==history['endLedgerHash']
+          config=json.loads(json.dumps(source))
+          variables=config['vars']
+          variables['CURRENT_STATE_REPLACEMENT_GITHUB_BRANCH']='current-state-data'
+          variables['CURRENT_STATE_REPLACEMENT_SNAPSHOT_ID']=current['snapshotId']
+          variables['REPLACEMENT_BASE_REBASE_ENABLED']='true'
+          variables['REPLACEMENT_BASE_EPOCH_ID']=current['epochId']
+          variables['REPLACEMENT_BASE_SNAPSHOT_ID']=current['snapshotId']
+          variables['REPLACEMENT_BASE_LEDGER_INDEX']=str(current['ledgerIndex'])
+          variables['REPLACEMENT_BASE_LEDGER_HASH']=current['ledgerHash']
+          variables.pop('REPLACEMENT_BASE_CUTOVER_TOKEN',None)
+          Path('wrangler.safe-production.jsonc').write_text(json.dumps(config,indent=2)+'\n')
+          Path('unsafe-production-writers/expected.json').write_text(json.dumps({'epochId':current['epochId'],'snapshotId':current['snapshotId'],'ledgerIndex':current['ledgerIndex'],'ledgerHash':current['ledgerHash']},indent=2)+'\n')
+          PY
+          pnpm build
+
+      - name: Restore and hold safe runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=unsafe-production-writers
+          epoch="$(jq -r '.epochId' "$ROOT/expected.json")"
+          snapshot="$(jq -r '.snapshotId' "$ROOT/expected.json")"
+          ledger="$(jq -r '.ledgerIndex' "$ROOT/expected.json")"
+          hash="$(jq -r '.ledgerHash' "$ROOT/expected.json")"
+          auth=(-H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")
+          pnpm exec wrangler deploy --config wrangler.safe-production.jsonc > "$ROOT/deploy.log" 2>&1
+          stable=0
+          repairs=0
+          : > "$ROOT/stability.ndjson"
+          for attempt in $(seq 1 40); do
+            curl --fail-with-body --silent --show-error "${auth[@]}" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/xrpl-lending-monitor/settings" > "$ROOT/settings.json" || true
+            curl --fail-with-body --silent --show-error "${auth[@]}" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/xrpl-lending-monitor/schedules" > "$ROOT/schedules.json" || true
+            http="$(curl --silent --show-error --retry 1 -o "$ROOT/rebase.json" -w '%{http_code}' "$PRODUCTION_BASE/api/status/replacement-base-rebase" || true)"
+            ok=false
+            if jq -e --arg epoch "$epoch" --arg snapshot "$snapshot" --arg ledger "$ledger" --arg hash "$hash" '
+              def b($n): [.result.bindings[]|select(.name==$n)|(.text//.value)]|first;
+              b("APP_NETWORK")=="devnet" and b("MAINNET_ENABLED")=="false" and b("CURRENT_STATE_REPLACEMENT_SNAPSHOT_ID")==$snapshot and b("REPLACEMENT_BASE_EPOCH_ID")==$epoch and b("REPLACEMENT_BASE_SNAPSHOT_ID")==$snapshot and b("REPLACEMENT_BASE_LEDGER_INDEX")==$ledger and b("REPLACEMENT_BASE_LEDGER_HASH")==$hash and ([.result.bindings[]|select(.name=="REPLACEMENT_BASE_CUTOVER_TOKEN")]|length)==0
+            ' "$ROOT/settings.json" >/dev/null 2>&1 \
+              && jq -e '.result.schedules|length==1 and .[0].cron=="*/5 * * * *"' "$ROOT/schedules.json" >/dev/null 2>&1 \
+              && [ "$http" = 200 ] \
+              && jq -e --arg snapshot "$snapshot" --argjson ledger "$ledger" --arg hash "$hash" '.status=="replayed" and .target.snapshotId==$snapshot and .target.ledgerIndex==$ledger and .target.ledgerHash==$hash' "$ROOT/rebase.json" >/dev/null 2>&1; then
+              ok=true
+              stable="$((stable+1))"
+            else
+              stable=0
+              repairs="$((repairs+1))"
+              pnpm exec wrangler deploy --config wrangler.safe-production.jsonc > "$ROOT/repair-$repairs.log" 2>&1
+              sleep 5
+            fi
+            jq -n --argjson attempt "$attempt" --argjson stable "$stable" --argjson repairs "$repairs" --arg ok "$ok" '{attempt:$attempt,stableStreak:$stable,repairs:$repairs,healthy:($ok=="true"),observedAt:(now|todateiso8601)}' >> "$ROOT/stability.ndjson"
+            sleep 15
+          done
+          test "$stable" -ge 20
+          jq -n --slurpfile expected "$ROOT/expected.json" --argjson stable "$stable" --argjson repairs "$repairs" '{passed:true,expected:$expected[0],disabledWorkflows:["deploy-fast-lane-base-binding-diff.yml","rolling-checkpoint-production-promotion.yml","manual-devnet-deploy.yml"],finalStableObservations:$stable,repairs:$repairs,cron:"*/5 * * * *",mainnetEnabled:false}' > "$ROOT/summary.json"
+          cat "$ROOT/summary.json"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: unsafe-production-writers-disabled
+          path: unsafe-production-writers
+          if-no-files-found: error
+          retention-days: 14
