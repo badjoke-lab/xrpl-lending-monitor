@@ -33,7 +33,7 @@ jobs:
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
             "$endpoint" -d '[{"cron":"* * * * *"}]' \
             > fast-lane-temporary-catch-up/minute-register.json
-          jq -e '.success==true and .result.schedules==[{"cron":"* * * * *"}]' fast-lane-temporary-catch-up/minute-register.json >/dev/null
+          jq -e '.success==true and (.result.schedules|length)==1 and .result.schedules[0].cron=="* * * * *"' fast-lane-temporary-catch-up/minute-register.json >/dev/null
 
       - name: Wait for fast lane to reach Devnet head
         shell: bash
@@ -77,7 +77,7 @@ jobs:
             "$endpoint" -d '[{"cron":"*/5 * * * *"}]' \
             > fast-lane-temporary-catch-up/five-minute-register.json
           curl --fail-with-body --silent --show-error -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$endpoint" > fast-lane-temporary-catch-up/schedules-final.json
-          jq -e '.success==true and .result.schedules==[{"cron":"*/5 * * * *"}]' fast-lane-temporary-catch-up/schedules-final.json >/dev/null
+          jq -e '.success==true and (.result.schedules|length)==1 and .result.schedules[0].cron=="*/5 * * * *"' fast-lane-temporary-catch-up/schedules-final.json >/dev/null
 
       - uses: actions/upload-artifact@v4
         if: always()
