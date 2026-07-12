@@ -36,16 +36,16 @@ jobs:
             if jq -e '
               .passed == true
               and .architecture == "rolling_checkpoint_fast_lane_v1"
-              and .checks.devnet_boundary.passed == true
-              and .checks.production_base.passed == true
-              and .checks.immutable_history.passed == true
-              and .checks.replacement_base.passed == true
-              and .checks.fast_lane_binding.passed == true
-              and .checks.fast_lane_state.passed == true
-              and .checks.fast_lane_freshness.passed == true
-              and .checks.projection_parity.passed == true
-              and .checks.recent_five_minute_runs.passed == true
-              and .checks.protected_collector.passed == true
+              and .checks.devnetBoundary.passed == true
+              and .checks.productionBase.passed == true
+              and .checks.immutableHistory.passed == true
+              and .checks.replacementBase.passed == true
+              and .checks.fastLaneBinding.passed == true
+              and .checks.fastLaneState.passed == true
+              and .checks.fastLaneFreshness.passed == true
+              and .checks.projectionParity.passed == true
+              and .checks.recentFiveMinuteRuns.passed == true
+              and .checks.protectedCollector.passed == true
             ' "$OUTPUT/pre-soak-readiness.json" > /dev/null 2>&1; then
               passed=true
               break
