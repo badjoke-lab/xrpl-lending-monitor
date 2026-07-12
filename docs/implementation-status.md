@@ -1,194 +1,126 @@
 # Implementation status
 
-Last updated: 2026-07-11, after the live XRPL Devnet source audit.
+Last updated: `2026-07-12T16:30Z`.
 
 ## Current phase
 
-XRPL Lending Monitor remains publicly reachable on XRPL Devnet, but public-release acceptance is withdrawn.
+XRPL Lending Monitor has completed the runtime, source-comparison, browser, and free-tier projection gates required before the first 24-hour production soak.
 
 The project is now in:
 
-> Current-state continuity recovery and immutable-history rolling catch-up.
+> Pre-soak ready on XRPL Devnet. The 24-hour soak has not started.
 
 Mainnet remains disabled.
 
-The previous statement that the first 24-hour production soak was active and healthy is superseded by the live-source audit described below.
+## Active production architecture
 
-## Confirmed live-source audit result
+The active architecture is `rolling_checkpoint_fast_lane_v1`.
 
-At approximately `2026-07-11T12:27Z`, the public API was compared in one run with both configured XRPL Devnet RPC sources and with direct ledger, ledger-entry, and transaction lookups.
+- Network: `devnet`
+- Mainnet enabled: `false`
+- Public Worker: `https://xrpl-lending-monitor.badjoke-lab.workers.dev`
+- Production cron: exactly one `*/5 * * * *` schedule
+- Protected canonical-overlay collector cadence: four hours
+- Current-state source: five-minute `fast_lane`
+- Immutable history mode: `hybrid`
 
-Source heads:
+## Production checkpoint
 
-- Honeycluster: ledger `3,569,175`;
-- Ripple Devnet: ledger `3,569,176`;
-- source spread: `1` ledger.
+The Worker, immutable history, replacement base, and fast-lane binding use the same checkpoint identity:
 
-### Five-minute current-state layer
+- Epoch: `devnet-3371675`
+- Snapshot: `devnet-3592674-0373cda0b0cd`
+- Ledger: `3,592,674`
+- Ledger hash: `0373CDA0B0CD8486C0C55C5B5DD460501419367BD76D146E4A718EBD9DD8A893`
+- History publication SHA-256: `8efd8f6af2055ffb0ff64d92585edbb70ad574666a887548e601f7b202dbb440`
 
-At the audit instant:
+The final checkpoint-bound production deploy completed successfully in run `29199475629`.
 
-- public fast-lane watermark: ledger `3,569,165`;
-- live XRPL source head: ledger `3,569,176`;
-- lag: `11` ledgers;
-- watermark age: `41` seconds;
-- watermark ledger hash: exact match with XRPL;
-- sampled objects: three Vaults, three Loan Brokers, and three Loans;
-- all nine sampled objects existed in the live validated ledger and matched substantively.
+## Completed pre-soak gates
 
-Therefore the current-state list/detail path was fresh at the audit instant.
+### Runtime acceptance
 
-However, continuity failed during the preceding period:
+Run `29198248935` passed the current-architecture runtime acceptance gate.
 
-- previous run: `2026-07-11T11:20:55Z`;
-- next run: `2026-07-11T12:10:57Z`;
-- observed gap: `3,002` seconds, approximately 50 minutes;
-- recovery run status: `reanchored`;
-- lag after recovery: `0`.
+Confirmed:
 
-The five-minute continuity requirement was not met. The existing `Healthy` presentation did not disclose this gap and is not an acceptable public freshness signal.
+- Devnet-only runtime boundary;
+- Mainnet disabled;
+- one protected five-minute cron;
+- replacement base replayed at the production checkpoint;
+- fast-lane base binding aligned with the production checkpoint;
+- public current-state source set to `fast_lane`;
+- current-state freshness within 10 ledgers and 10 minutes;
+- zero exact projection mismatches;
+- recent successful five-minute runs;
+- protected collector with zero consecutive failures and no current error.
 
-### Overview counts and indexed history
+### Direct XRPL source comparison
 
-At the same audit instant:
+Run `29198537310` compared nine public objects with XRPL Devnet at the exact public watermark:
 
-- counts/canonical coverage ledger: `3,540,803`;
-- live source head: `3,569,176`;
-- lag: `28,373` ledgers;
-- coverage close time: `2026-07-10T09:36:21Z`;
-- coverage age: approximately `26.84` hours;
-- stored coverage hash: valid for ledger `3,540,803`.
+- 3 Vaults;
+- 3 LoanBrokers;
+- 3 Loans.
 
-The data was internally valid but stale for the declared four-hour cadence.
+Both configured Devnet RPC sources returned the same ledger index and ledger hash as the public watermark. All nine object identities and common fields matched after directory-node hexadecimal normalization. Total samples: `9`; mismatches: `0`; result: passed.
 
-Affected public values and APIs include:
+### Browser and behavior regression
 
-- Overview Vault, Loan Broker, Loan, and Current Objects counts;
-- Activity and activity exports/feeds;
-- transaction detail for post-coverage transactions;
-- object history;
-- Loan lifecycle and Lifecycle Explorer;
-- archived objects;
-- Cover, Debt, and Loss history;
-- history-side Search results.
+Run `29199948639` passed the current-architecture browser exit gate.
 
-The stale Activity result was not caused by a quiet Devnet. Recent fast-lane runs observed substantial Lending transaction counts after the indexed-history boundary.
+- Routes: `15 / 15`
+- Required behavior checks: `8 / 8`
+- Technical findings: `0`
+- Collector status presented to the browser: healthy
+- Browser-observed fast-lane lag: `0`
 
-## Root cause
+The verified route matrix includes overview, object lists and details, activity and transaction detail, lifecycle, archive list and detail, cover/loss, search, and network status.
 
-The protected canonical heavy cycle was introduced as a D1 headroom protection measure, not as a complete catch-up mechanism.
+### D1 free-tier projection
 
-Production currently has one schedule:
+Run `29200220649` passed the conservative normal-operation projection.
 
-```text
-*/5 * * * *
-```
+Method:
 
-Inside that schedule:
+- 24 steady-state five-minute samples with `lag_ledgers <= 10`;
+- five-minute p95 multiplied by 288 daily runs;
+- six protected four-hour collector runs;
+- reserve for two maximum-observed reanchor runs.
 
-- every tick attempts the compact fast lane;
-- UTC four-hour boundaries additionally attempt the protected heavy cycle.
+Projection:
 
-The protected heavy configuration is bounded to at most `32` ledgers per run. Running this once every four hours cannot keep pace with Devnet ledger production. It is suitable only as a protected reconciliation tail, not as the mechanism for closing a large history backlog.
+- Read rows: `77,152 / 5,000,000` (`1.54304%`)
+- Write rows: `87,276 / 100,000` (`87.276%`)
+- Remaining read rows: `4,922,848`
+- Remaining write rows: `12,724`
+- Required maximum: below `90%`
+- Result: passed
 
-The intended large-backlog path already exists separately:
+The write-side margin is materially tighter than the read-side margin. Five-minute operation is accepted for the soak, but no three-minute, two-minute, or one-minute cadence is authorized by this result.
 
-- fixed-target immutable history extension;
-- incremental exact-index construction;
-- rolling current-state reconstruction;
-- candidate history/current-state branch publication;
-- remote candidate rehearsal;
-- guarded production promotion and base rebind.
+## Repairs completed before acceptance
 
-The rolling candidate workflow is merged. The reusable preflight and guarded promotion work remained unmerged/outdated, so the rolling path was never completed as normal production operation.
+- Fixed the exact Loan history HTTP 500 / Cloudflare 1101 failure.
+- Capped exact-history asset and record reads.
+- Removed three obsolete workflows that could overwrite the active production checkpoint.
+- Pinned the static Wrangler fallback identity to ledger `3,592,674` so plain or fallback deployments cannot restore ledger `3,540,657`.
+- Rebound the D1 fast-lane shadow to the active production base.
+- Restored the protected five-minute cron after bounded catch-up.
+- Increased only the immutable activity read budget from the generic four-segment/one-second budget to the existing audit budget of 24 segments/five seconds, preventing sparse activity reads from intermittently returning a bounded-read 503.
+- Replaced the superseded browser exit dependency on a same-day D1-total file with the current-architecture readiness gate and a separate normal-operation D1 projection.
 
-Existing aligned rolling candidate branches currently cover ledger `3,540,657` for both immutable history and current state.
+## Operating restrictions
 
-## Recovery plan
+- Do not enable Mainnet.
+- Do not add another production cron.
+- Do not shorten the five-minute cadence during the first soak.
+- Do not treat diagnostic-day D1 totals as normal operating cost.
+- Do not start a reanchor, rolling checkpoint cutover, or heavy audit during the soak unless recovery requires it.
+- Preserve the production checkpoint identity across all deployment paths.
 
-### R1 — Preserve service but withdraw the success claim
+## Next action
 
-- keep the public Devnet endpoint reachable;
-- do not call it normally operating or release-complete;
-- keep Mainnet disabled;
-- retain the five-minute fast lane because it is currently useful and can recover by reanchor;
-- treat the failed soak and live-source audit as the active evidence baseline.
+The next action is the first 24-hour Devnet production soak. It must start as a separate, explicit operation with retained start and end evidence.
 
-### R2 — Catch immutable history and current state up outside D1
-
-Use the merged rolling checkpoint candidate pipeline from the aligned candidate pair at ledger `3,540,657`.
-
-- advance in bounded steps of at most `5,000` ledgers;
-- generate immutable history, exact index, and current state together;
-- verify ledger index/hash equality for every candidate pair;
-- alternate isolated candidate branches between cycles;
-- continue until the final candidate is within the accepted freshness window of the live Devnet head.
-
-The initial measured gap requires approximately six bounded cycles, plus another cycle if Devnet advancement during generation requires it.
-
-### R3 — Restore reusable preflight and guarded promotion
-
-Port the useful parts of PRs `#356` and `#357` onto current `main` instead of merging their stale heads directly.
-
-The restored gates must additionally require:
-
-- candidate history/current state ledger and hash identity match;
-- candidate source rehearsal passes;
-- candidate coverage age is within the declared history freshness window;
-- current-state and history candidates are promoted as one logical checkpoint;
-- D1 write headroom remains fail-closed;
-- the fast-lane base binding is updated to the promoted checkpoint;
-- rollback refs are pinned before any production write;
-- no Mainnet mutation is possible.
-
-### R4 — Promote one aligned checkpoint
-
-After the final candidate and preflight pass:
-
-1. promote immutable history;
-2. confirm the public hybrid history source reads the promoted publication;
-3. rebind/rebase the compact current-state tail to the same target ledger/hash;
-4. promote the matching current-state branch;
-5. deploy the reconciled Worker configuration;
-6. verify all public API classes against live XRPL source data.
-
-The 28,000-ledger backlog must not be replayed into D1 row-by-row. Immutable history and rebuilt current state are the backlog recovery path; D1 remains the bounded post-checkpoint tail.
-
-### R5 — Fix continuity and public freshness reporting
-
-Independently investigate the 3,002-second fast-lane gap.
-
-Public status must be split into at least:
-
-- current-state ledger, age, lag, and last successful five-minute run;
-- immutable/indexed-history coverage ledger and age;
-- separate current-state and history verdicts.
-
-A missing fast-lane metric for more than ten minutes must show `Degraded` or `Stale`, never `Healthy`.
-
-### R6 — Restart release qualification
-
-The previous soak is failed and cannot be resumed.
-
-After recovery, start a new 24-hour soak from zero.
-
-Required exit conditions:
-
-- no fast-lane run gap above `420` seconds;
-- current-state age within ten minutes and source lag within the accepted ledger bound;
-- immutable/indexed-history coverage age within five hours;
-- exact ledger hashes match XRPL source data;
-- sampled Vault, Loan Broker, and Loan objects match live ledger entries;
-- Overview counts identify their own coverage watermark;
-- Activity/Lifecycle/Archive/Cover-Loss coverage is proven, not inferred from HTTP success;
-- no projection mismatch, cursor gap, tombstone regression, pagination failure, or HTTP 5xx;
-- D1 remains within free-plan headroom;
-- Mainnet remains disabled.
-
-## Formal decision
-
-Current formal state:
-
-> Publicly reachable Devnet recovery build; current-state layer recovered at the latest audit instant, five-minute continuity not yet proven, immutable history and counts stale, release acceptance withdrawn.
-
-No public-release completion claim is permitted until R2-R6 pass.
+At this status timestamp, the soak has not started.
