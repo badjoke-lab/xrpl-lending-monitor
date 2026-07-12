@@ -25,6 +25,7 @@ import { getSyncState } from './repositories/network-status-repository'
 import { openConfiguredReleaseCurrentState } from './repositories/release-current-state'
 import { handleHybridExactHistoryOverride } from './routes/hybrid-exact-history-override'
 import { handleHybridHistoryOverride } from './routes/hybrid-history-override'
+import { handlePreSoakReadiness } from './routes/pre-soak-readiness'
 import { handleThreeLayerOverview } from './routes/three-layer-overview'
 import { scheduledCadenceDecision } from './scheduled-cadence'
 import { serializeCollectorStatus } from './serializers/collector-status'
@@ -34,6 +35,7 @@ const PROTECTED_HEAVY_STATUS_STALE_AFTER_SECONDS = 5 * 60 * 60
 const FAST_LANE_SHADOW_EPOCH_ID = 'fast-lane-shadow-devnet'
 const CUTOVER_PATH = '/api/operator/replacement-base-cutover'
 const CUTOVER_TOKEN_HEADER = 'x-replacement-base-cutover-token'
+const PRE_SOAK_READINESS_PATH = '/api/status/pre-soak-readiness'
 
 async function runProtectedHeavyCycle(env: Bindings): Promise<void> {
   const runtimeConfig = resolveRuntimeConfig(env)
@@ -151,6 +153,9 @@ const worker: ExportedHandler<Bindings> = {
     if (overview) return overview
 
     const url = new URL(request.url)
+    const preSoakReadiness = await handlePreSoakReadiness(request, env)
+    if (preSoakReadiness) return preSoakReadiness
+
     if (request.method === 'GET' && url.pathname === '/api/status/history-source') {
       const runtimeConfig = resolveRuntimeConfig(env)
       const history = await resolveHistorySource(runtimeConfig)
@@ -194,8 +199,20 @@ const worker: ExportedHandler<Bindings> = {
     if (request.method === 'GET' && url.pathname === '/api/status/loan-activity-witnesses') {
       return Response.json(await readLoanActivityDiagnostics(env.DB))
     }
-    if (request.method === 'GET' && url.pathname === '/api/status/continuation-verification') return Response.json(await verifyLiveContinuation(env.DB))
-    if (request.method === 'GET' && url.pathname === '/api/status/continuation-diagnostics') return Response.json(await diagnoseLiveContinuation(env.DB))
+    if (request.method === 'GET' && url.pathname === '/api/status/continuation-verification') {
+      return Response.json({
+        ...(await verifyLiveContinuation(env.DB)),
+        scope: 'legacy_canonical_continuation',
+        superseded_by: PRE_SOAK_READINESS_PATH,
+      })
+    }
+    if (request.method === 'GET' && url.pathname === '/api/status/continuation-diagnostics') {
+      return Response.json({
+        ...(await diagnoseLiveContinuation(env.DB)),
+        scope: 'legacy_canonical_continuation',
+        superseded_by: PRE_SOAK_READINESS_PATH,
+      })
+    }
     if (request.method === 'GET' && url.pathname === '/api/status/catch-up-initialization') {
       const runtimeConfig = resolveRuntimeConfig(env)
       const release = await openConfiguredReleaseCurrentState(runtimeConfig, env.DB)
@@ -228,18 +245,26 @@ const worker: ExportedHandler<Bindings> = {
     if (request.method === 'GET' && url.pathname === '/api/status/m1-exit') {
       const replacementBaseConfig = resolveReplacementBaseRuntimeConfig(env)
       const catchUpConfig = resolveCatchUpRuntimeConfig(env)
-      return Response.json(await reviewM1RuntimeExit({
-        db: env.DB,
-        expectedBase: replacementBaseConfig.target ?? catchUpConfig.base,
-      }))
+      return Response.json({
+        ...(await reviewM1RuntimeExit({
+          db: env.DB,
+          expectedBase: replacementBaseConfig.target ?? catchUpConfig.base,
+        })),
+        scope: 'legacy_canonical_m1',
+        superseded_by: PRE_SOAK_READINESS_PATH,
+      })
     }
     if (request.method === 'GET' && url.pathname === '/api/status/m1-exit-diagnostics') {
       const replacementBaseConfig = resolveReplacementBaseRuntimeConfig(env)
       const catchUpConfig = resolveCatchUpRuntimeConfig(env)
-      return Response.json(await diagnoseM1RuntimeExit({
-        db: env.DB,
-        expectedBase: replacementBaseConfig.target ?? catchUpConfig.base,
-      }))
+      return Response.json({
+        ...(await diagnoseM1RuntimeExit({
+          db: env.DB,
+          expectedBase: replacementBaseConfig.target ?? catchUpConfig.base,
+        })),
+        scope: 'legacy_canonical_m1',
+        superseded_by: PRE_SOAK_READINESS_PATH,
+      })
     }
     const hybridExactHistory = await handleHybridExactHistoryOverride(request, env)
     if (hybridExactHistory) return hybridExactHistory
