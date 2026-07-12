@@ -1,4 +1,5 @@
 name: Inventory production writers
+# Include historical runs for every direct production deploy workflow.
 
 on:
   pull_request:
@@ -26,11 +27,20 @@ jobs:
           mkdir -p "$ROOT"
           grep -RInE 'wrangler[[:space:]]+deploy|workers/scripts|version_upload|production-deploy-trigger|replacement-base-cutover' .github scripts package.json pnpm-lock.yaml \
             > "$ROOT/matches.txt" || true
-          find .github/workflows -maxdepth 1 -type f -name '*.yml' -o -name '*.yaml' | sort > "$ROOT/workflow-files.txt"
+          find .github/workflows -maxdepth 1 \( -name '*.yml' -o -name '*.yaml' \) -type f | sort > "$ROOT/workflow-files.txt"
           gh api "repos/$GITHUB_REPOSITORY/actions/runs?per_page=100" > "$ROOT/recent-runs.json"
-          jq '[.workflow_runs[] | {id,name,path,event,status,conclusion,created_at,updated_at,head_branch,head_sha,run_started_at}]' "$ROOT/recent-runs.json" > "$ROOT/recent-runs-compact.json"
+          jq '[.workflow_runs[] | {id,name,path,event,status,conclusion,created_at,updated_at,head_branch,head_sha,run_started_at,run_attempt}]' "$ROOT/recent-runs.json" > "$ROOT/recent-runs-compact.json"
+          for workflow in \
+            deploy-fast-lane-base-binding-diff.yml \
+            rolling-checkpoint-production-promotion.yml \
+            manual-devnet-deploy.yml \
+            rolling-checkpoint-live-cutover.yml \
+            deploy-production-worker.yml \
+            stabilize-production-runtime.yml \
+            quiesce-and-restore-production.yml; do
+            gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/runs?per_page=100" > "$ROOT/runs-$workflow.json" || printf '{"workflow_runs":[]}\n' > "$ROOT/runs-$workflow.json"
+          done
           cat "$ROOT/matches.txt"
-          cat "$ROOT/recent-runs-compact.json"
       - uses: actions/upload-artifact@v4
         with:
           name: production-writer-inventory
