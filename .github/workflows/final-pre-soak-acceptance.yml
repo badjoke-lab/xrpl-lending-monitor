@@ -1,0 +1,137 @@
+name: Final pre-soak acceptance
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/final-pre-soak-acceptance.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  accept:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Wait for fresh public fast-lane state
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=final-pre-soak-acceptance
+          mkdir -p "$ROOT"
+          : > "$ROOT/freshness-attempts.ndjson"
+          for attempt in $(seq 1 480); do
+            curl --fail-with-body --silent --show-error --retry 2 "$BASE/api/overview" > "$ROOT/overview-probe.json" || true
+            jq -n '{method:"ledger",params:[{ledger_index:"validated",transactions:false,expand:false}]}' > "$ROOT/head-request.json"
+            curl --fail-with-body --silent --show-error --retry 2 -H 'content-type: application/json' --data @"$ROOT/head-request.json" https://devnet.honeycluster.io/ > "$ROOT/head-primary-probe.json" || true
+            curl --fail-with-body --silent --show-error --retry 2 -H 'content-type: application/json' --data @"$ROOT/head-request.json" https://s.devnet.rippletest.net:51234/ > "$ROOT/head-fallback-probe.json" || true
+            source="$(jq -r '.current_state_watermark.source // empty' "$ROOT/overview-probe.json" 2>/dev/null || true)"
+            current="$(jq -r '.current_state_watermark.ledger_index // 0' "$ROOT/overview-probe.json" 2>/dev/null || echo 0)"
+            updated="$(jq -r '.current_state_watermark.updated_at // empty' "$ROOT/overview-probe.json" 2>/dev/null || true)"
+            primary="$(jq -r '.result.ledger_index // .result.ledger.ledger_index // 0' "$ROOT/head-primary-probe.json" 2>/dev/null || echo 0)"
+            fallback="$(jq -r '.result.ledger_index // .result.ledger.ledger_index // 0' "$ROOT/head-fallback-probe.json" 2>/dev/null || echo 0)"
+            live="$primary"
+            if [ "$fallback" -gt 0 ] && { [ "$live" -eq 0 ] || [ "$fallback" -lt "$live" ]; }; then live="$fallback"; fi
+            lag="$((live-current))"; [ "$lag" -lt 0 ] && lag=0
+            age=999999
+            if [ -n "$updated" ]; then
+              epoch="$(date -u -d "$updated" +%s 2>/dev/null || echo 0)"
+              [ "$epoch" -gt 0 ] && age="$(( $(date -u +%s) - epoch ))"
+              [ "$age" -lt 0 ] && age=0
+            fi
+            jq -n --argjson attempt "$attempt" --arg source "$source" --argjson current "$current" --argjson live "$live" --argjson lag "$lag" --argjson age "$age" '{attempt:$attempt,source:$source,currentLedger:$current,liveLedger:$live,lagLedgers:$lag,ageSeconds:$age}' >> "$ROOT/freshness-attempts.ndjson"
+            if [ "$source" = fast_lane ] && [ "$current" -gt 0 ] && [ "$lag" -le 10 ] && [ "$age" -le 600 ]; then
+              cp "$ROOT/overview-probe.json" "$ROOT/overview.json"
+              cp "$ROOT/head-primary-probe.json" "$ROOT/head-primary.json"
+              cp "$ROOT/head-fallback-probe.json" "$ROOT/head-fallback.json"
+              touch "$ROOT/fresh"
+              break
+            fi
+            sleep 5
+          done
+          test -f "$ROOT/fresh"
+
+      - name: Capture public status and Cloudflare runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=final-pre-soak-acceptance
+          for spec in \
+            collector:/api/status/collector \
+            history:/api/status/history-source \
+            rebase:/api/status/replacement-base-rebase \
+            diff:'/api/status/fast-lane-diff?limit=500' \
+            continuation:/api/status/continuation-verification \
+            m1:/api/status/m1-exit; do
+            name="${spec%%:*}"; path="${spec#*:}"
+            curl --fail-with-body --silent --show-error --retry 3 "$BASE$path" > "$ROOT/$name.json"
+          done
+          auth=(-H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")
+          curl --fail-with-body --silent --show-error "${auth[@]}" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/xrpl-lending-monitor/settings" > "$ROOT/settings.json"
+          curl --fail-with-body --silent --show-error "${auth[@]}" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/xrpl-lending-monitor/schedules" > "$ROOT/schedules.json"
+
+      - name: Evaluate all pre-soak runtime gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import datetime, json, pathlib
+          root=pathlib.Path('final-pre-soak-acceptance')
+          def load(name): return json.loads((root/name).read_text())
+          def head(data):
+              result=data.get('result',{})
+              ledger=result.get('ledger',{}) if isinstance(result.get('ledger'),dict) else {}
+              return int(result.get('ledger_index') or ledger.get('ledger_index') or ledger.get('seqNum') or 0)
+          def binding(settings,name):
+              for item in settings.get('result',{}).get('bindings',[]):
+                  if item.get('name')==name: return item.get('text',item.get('value'))
+              return None
+          overview=load('overview.json'); collector=load('collector.json'); history=load('history.json'); rebase=load('rebase.json'); diff=load('diff.json'); continuation=load('continuation.json'); m1=load('m1.json'); settings=load('settings.json'); schedules=load('schedules.json')
+          heads=[x for x in (head(load('head-primary.json')),head(load('head-fallback.json'))) if x>0]
+          live=min(heads) if heads else 0
+          wm=overview.get('current_state_watermark') or {}; counts=overview.get('counts_watermark') or {}
+          current=int(wm.get('ledger_index') or 0); lag=max(0,live-current)
+          updated=wm.get('updated_at'); age=None
+          if updated: age=(datetime.datetime.now(datetime.timezone.utc)-datetime.datetime.fromisoformat(updated.replace('Z','+00:00'))).total_seconds()
+          history_ledger=int((history.get('chain') or {}).get('end_ledger_index') or 0)
+          cursor=collector.get('cursor') or {}
+          expected_cursor_lag=None
+          if cursor.get('last_processed_ledger') is not None and cursor.get('latest_observed_ledger') is not None:
+              expected_cursor_lag=max(0,int(cursor['latest_observed_ledger'])-int(cursor['last_processed_ledger']))
+          checks={
+              'devnet_runtime': binding(settings,'APP_NETWORK')=='devnet',
+              'mainnet_disabled': str(binding(settings,'MAINNET_ENABLED')).lower()=='false',
+              'single_five_minute_cron': [x.get('cron') for x in schedules.get('result',{}).get('schedules',[])]==['*/5 * * * *'],
+              'fast_lane_source': wm.get('source')=='fast_lane',
+              'fresh_within_600_seconds': age is not None and age<=600,
+              'head_lag_within_10': lag<=10,
+              'history_source_ok': history.get('status')=='ok' and history.get('mode')=='hybrid',
+              'counts_match_history_checkpoint': int(counts.get('ledger_index') or 0)==history_ledger,
+              'current_at_or_after_checkpoint': current>=history_ledger>0,
+              'replacement_base_replayed': rebase.get('status')=='replayed' and int((rebase.get('target') or {}).get('ledgerIndex') or 0)==history_ledger,
+              'fast_lane_binding_matches_checkpoint': int(((diff.get('binding') or {}).get('base') or {}).get('ledgerIndex') or 0)==history_ledger,
+              'projection_diff_zero': diff.get('status')=='ok' and diff.get('passed') is True and int((diff.get('sample') or {}).get('exactProjectionMismatches') or 0)==0,
+              'collector_cursor_consistent': expected_cursor_lag is not None and int(cursor.get('lag_ledgers') or 0)==expected_cursor_lag,
+              'collector_no_failures': int(collector.get('consecutive_failures') or 0)==0 and collector.get('error') is None,
+              'continuation_passed': continuation.get('passed') is True,
+              'm1_ready': m1.get('ready') is True,
+          }
+          summary={'generatedAt':datetime.datetime.now(datetime.timezone.utc).isoformat().replace('+00:00','Z'),'liveHead':live,'current':{'ledger':current,'lagLedgers':lag,'ageSeconds':age,'source':wm.get('source')},'historyCheckpoint':history_ledger,'runtime':{'appNetwork':binding(settings,'APP_NETWORK'),'mainnetEnabled':binding(settings,'MAINNET_ENABLED'),'crons':[x.get('cron') for x in schedules.get('result',{}).get('schedules',[])]},'checks':checks,'passed':all(checks.values())}
+          (root/'summary.json').write_text(json.dumps(summary,indent=2)+'\n')
+          print(json.dumps(summary,indent=2))
+          raise SystemExit(0 if summary['passed'] else 2)
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: final-pre-soak-acceptance
+          path: final-pre-soak-acceptance
+          if-no-files-found: error
+          retention-days: 30
