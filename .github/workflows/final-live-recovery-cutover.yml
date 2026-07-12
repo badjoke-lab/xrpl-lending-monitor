@@ -1,0 +1,146 @@
+name: Final live recovery cutover
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/final-live-recovery-cutover.yml'
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: final-live-recovery-cutover
+  cancel-in-progress: false
+
+jobs:
+  recover-and-cutover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+      SOURCE_HISTORY_BRANCH: history-recovery-3589759-frozen
+      SOURCE_CURRENT_BRANCH: current-state-recovery-3589759-frozen
+      TARGET_HISTORY_BRANCH: history-final-live-candidate-data
+      TARGET_CURRENT_BRANCH: current-state-final-live-candidate-data
+    steps:
+      - name: Require dedicated operational branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${GITHUB_HEAD_REF}" = 'ops/final-live-recovery-cutover'
+          mkdir -p final-live-recovery
+
+      - name: Capture existing candidate runs
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-candidate.yml/runs?event=workflow_dispatch&per_page=100" --jq '.workflow_runs[].id' > final-live-recovery/candidate-before.txt
+
+      - name: Dispatch one fresh candidate from frozen 3589759
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -n --arg ref main --arg sh "${SOURCE_HISTORY_BRANCH}" --arg sc "${SOURCE_CURRENT_BRANCH}" --arg oh "${TARGET_HISTORY_BRANCH}" --arg oc "${TARGET_CURRENT_BRANCH}" '{ref:$ref,inputs:{source_history_branch:$sh,source_current_state_branch:$sc,history_candidate_branch:$oh,current_state_candidate_branch:$oc,max_delta_ledgers:"5000",segment_ledgers:"500",read_window_size:"4"}}' > final-live-recovery/candidate-dispatch.json
+          gh api --method POST "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-candidate.yml/dispatches" --input final-live-recovery/candidate-dispatch.json
+
+      - name: Resolve and require successful candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          RUN_ID=''
+          for ATTEMPT in $(seq 1 60); do
+            gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-candidate.yml/runs?event=workflow_dispatch&per_page=100" > final-live-recovery/candidate-after.json
+            while IFS= read -r ID; do
+              if ! grep -Fxq "${ID}" final-live-recovery/candidate-before.txt; then RUN_ID="${ID}"; break; fi
+            done < <(jq -r '.workflow_runs | sort_by(.created_at) | reverse | .[].id' final-live-recovery/candidate-after.json)
+            test -n "${RUN_ID}" && break
+            sleep 10
+          done
+          test -n "${RUN_ID}"
+          echo "CANDIDATE_RUN_ID=${RUN_ID}" >> "${GITHUB_ENV}"
+          printf '%s\n' "${RUN_ID}" > final-live-recovery/candidate-run-id.txt
+          for ATTEMPT in $(seq 1 360); do
+            gh api "repos/${REPOSITORY}/actions/runs/${RUN_ID}" > final-live-recovery/candidate-run.json
+            test "$(jq -r '.status' final-live-recovery/candidate-run.json)" = completed && break
+            sleep 30
+          done
+          test "$(jq -r '.status' final-live-recovery/candidate-run.json)" = completed
+          test "$(jq -r '.conclusion' final-live-recovery/candidate-run.json)" = success
+
+      - name: Verify aligned final candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api --method GET "repos/${REPOSITORY}/contents/history/publication.json" -f ref="${TARGET_HISTORY_BRANCH}" --jq '.content' | tr -d '\n' | base64 --decode > final-live-recovery/publication.json
+          gh api --method GET "repos/${REPOSITORY}/contents/read-model/manifest.json" -f ref="${TARGET_CURRENT_BRANCH}" --jq '.content' | tr -d '\n' | base64 --decode > final-live-recovery/current.json
+          LEDGER="$(jq -r '.endLedgerIndex' final-live-recovery/publication.json)"
+          HASH="$(jq -r '.endLedgerHash' final-live-recovery/publication.json)"
+          test "${LEDGER}" -gt 3589759
+          test "${LEDGER}" = "$(jq -r '.ledgerIndex' final-live-recovery/current.json)"
+          test "${HASH}" = "$(jq -r '.ledgerHash' final-live-recovery/current.json)"
+          {
+            echo "TARGET_LEDGER=${LEDGER}"
+            echo "TARGET_HASH=${HASH}"
+          } >> "${GITHUB_ENV}"
+
+      - name: Capture existing cutover runs
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/runs?event=workflow_dispatch&per_page=100" --jq '.workflow_runs[].id' > final-live-recovery/cutover-before.txt
+
+      - name: Dispatch audited guarded cutover
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -n --arg ref main --arg history "${TARGET_HISTORY_BRANCH}" --arg current "${TARGET_CURRENT_BRANCH}" '{ref:$ref,inputs:{history_candidate_branch:$history,current_state_candidate_branch:$current,confirm_production_write:"true"}}' > final-live-recovery/cutover-dispatch.json
+          gh api --method POST "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/dispatches" --input final-live-recovery/cutover-dispatch.json
+
+      - name: Resolve and require successful cutover
+        shell: bash
+        run: |
+          set -euo pipefail
+          RUN_ID=''
+          for ATTEMPT in $(seq 1 60); do
+            gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/runs?event=workflow_dispatch&per_page=100" > final-live-recovery/cutover-after.json
+            while IFS= read -r ID; do
+              if ! grep -Fxq "${ID}" final-live-recovery/cutover-before.txt; then RUN_ID="${ID}"; break; fi
+            done < <(jq -r '.workflow_runs | sort_by(.created_at) | reverse | .[].id' final-live-recovery/cutover-after.json)
+            test -n "${RUN_ID}" && break
+            sleep 10
+          done
+          test -n "${RUN_ID}"
+          echo "CUTOVER_RUN_ID=${RUN_ID}" >> "${GITHUB_ENV}"
+          printf '%s\n' "${RUN_ID}" > final-live-recovery/cutover-run-id.txt
+          for ATTEMPT in $(seq 1 180); do
+            gh api "repos/${REPOSITORY}/actions/runs/${RUN_ID}" > final-live-recovery/cutover-run.json
+            test "$(jq -r '.status' final-live-recovery/cutover-run.json)" = completed && break
+            sleep 30
+          done
+          test "$(jq -r '.status' final-live-recovery/cutover-run.json)" = completed
+          test "$(jq -r '.conclusion' final-live-recovery/cutover-run.json)" = success
+
+      - name: Verify retained live evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh run download "${CUTOVER_RUN_ID}" --repo "${REPOSITORY}" --name rolling-checkpoint-live-cutover --dir final-live-recovery/cutover-artifact
+          POST="$(find final-live-recovery/cutover-artifact -name post-cutover-verification.json -type f | head -n 1)"
+          EVIDENCE="$(find final-live-recovery/cutover-artifact -name evidence.json -type f | head -n 1)"
+          test -n "${POST}"
+          test -n "${EVIDENCE}"
+          jq -e --argjson ledger "${TARGET_LEDGER}" '.passed == true and .target.ledgerIndex == $ledger and .lagLedgers <= 10 and .currentStateAgeSeconds <= 600 and .schedule == "*/5 * * * *" and .mainnetEnabled == false' "${POST}" > /dev/null
+          jq -e --argjson ledger "${TARGET_LEDGER}" '.passed == true and .target.target.ledgerIndex == $ledger and .schedule == "*/5 * * * *" and .mainnetEnabled == false' "${EVIDENCE}" > /dev/null
+          jq -n --argjson candidateRunId "${CANDIDATE_RUN_ID}" --argjson cutoverRunId "${CUTOVER_RUN_ID}" --argjson ledger "${TARGET_LEDGER}" --arg hash "${TARGET_HASH}" '{passed:true,candidateRunId:$candidateRunId,cutoverRunId:$cutoverRunId,target:{ledgerIndex:$ledger,ledgerHash:$hash},schedule:"*/5 * * * *",mainnetEnabled:false}' > final-live-recovery/summary.json
+
+      - name: Upload final recovery evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: final-live-recovery-cutover
+          path: final-live-recovery
+          if-no-files-found: warn
+          retention-days: 30
