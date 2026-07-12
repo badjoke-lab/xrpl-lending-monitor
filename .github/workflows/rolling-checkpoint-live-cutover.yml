@@ -22,7 +22,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: rolling-checkpoint-live-cutover
+  group: production-worker-write
   cancel-in-progress: false
 
 env:
@@ -68,6 +68,14 @@ jobs:
             read-model/manifest.json
           sparse-checkout-cone-mode: false
 
+      - name: Check out production current-state rollback identity
+        uses: actions/checkout@v4
+        with:
+          ref: current-state-data
+          path: .local/production-current-before
+          sparse-checkout: read-model/manifest.json
+          sparse-checkout-cone-mode: false
+
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -83,6 +91,46 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          source = json.loads(Path('wrangler.jsonc').read_text())
+          previous = json.loads(Path('.local/production-current-before/read-model/manifest.json').read_text())
+          assert source['triggers']['crons'] == ['*/5 * * * *']
+          assert source['vars']['APP_NETWORK'] == 'devnet'
+          assert source['vars']['MAINNET_ENABLED'] == 'false'
+          assert previous['complete'] is True
+          assert previous['epochId'] == 'devnet-3371675'
+          assert isinstance(previous['snapshotId'], str) and previous['snapshotId']
+          assert isinstance(previous['ledgerIndex'], int) and previous['ledgerIndex'] > 0
+          assert isinstance(previous['ledgerHash'], str) and len(previous['ledgerHash']) == 64
+
+          rollback = json.loads(json.dumps(source))
+          variables = rollback['vars']
+          variables['CURRENT_STATE_REPLACEMENT_GITHUB_BRANCH'] = 'current-state-data'
+          variables['CURRENT_STATE_REPLACEMENT_SNAPSHOT_ID'] = previous['snapshotId']
+          variables['REPLACEMENT_BASE_REBASE_ENABLED'] = 'true'
+          variables['REPLACEMENT_BASE_EPOCH_ID'] = previous['epochId']
+          variables['REPLACEMENT_BASE_SNAPSHOT_ID'] = previous['snapshotId']
+          variables['REPLACEMENT_BASE_LEDGER_INDEX'] = str(previous['ledgerIndex'])
+          variables['REPLACEMENT_BASE_LEDGER_HASH'] = previous['ledgerHash']
+          variables.pop('REPLACEMENT_BASE_CUTOVER_TOKEN', None)
+          Path('wrangler.rollback.jsonc').write_text(json.dumps(rollback, indent=2) + '\n')
+          PY
+
+          jq -e '
+            .triggers.crons == ["*/5 * * * *"]
+            and .vars.APP_NETWORK == "devnet"
+            and .vars.MAINNET_ENABLED == "false"
+            and .vars.CURRENT_STATE_REPLACEMENT_GITHUB_BRANCH == "current-state-data"
+            and (.vars.REPLACEMENT_BASE_LEDGER_INDEX | tonumber) > 0
+            and (.vars | has("REPLACEMENT_BASE_CUTOVER_TOKEN") | not)
+          ' wrangler.rollback.jsonc > /dev/null
+
+          grep -F 'pnpm exec wrangler deploy --config wrangler.jsonc' scripts/run-live-checkpoint-cutover.sh
+          sed -i 's#pnpm exec wrangler deploy --config wrangler.jsonc#pnpm exec wrangler deploy --config wrangler.rollback.jsonc#' scripts/run-live-checkpoint-cutover.sh
           grep -F 'test "${TARGET_LAG_AT_GATE}" -le 300' scripts/run-live-checkpoint-cutover.sh
           sed -i 's/test "${TARGET_LAG_AT_GATE}" -le 300/test "${TARGET_LAG_AT_GATE}" -le 720/' scripts/run-live-checkpoint-cutover.sh
           grep -F 'for attempt in $(seq 1 90); do' scripts/verify-live-checkpoint-cutover.sh
@@ -98,10 +146,10 @@ jobs:
           touch "${ROOT}/cutover-config-deployed"
 
           for attempt in 1 2 3; do
-            http_status="$(curl --silent --show-error --retry 2 \\
-              -o "${ROOT}/cutover-response-${attempt}.json" -w '%{http_code}' \\
-              -X POST \\
-              -H "x-replacement-base-cutover-token: ${CUTOVER_TOKEN}" \\
+            http_status="$(curl --silent --show-error --retry 2 \
+              -o "${ROOT}/cutover-response-${attempt}.json" -w '%{http_code}' \
+              -X POST \
+              -H "x-replacement-base-cutover-token: ${CUTOVER_TOKEN}" \
               "${PRODUCTION_BASE}/api/operator/replacement-base-cutover")"
             if [ "${http_status}" = 200 ] && jq -e --arg snapshot "${TARGET_SNAPSHOT_ID}" --argjson ledger "${TARGET_LEDGER_INDEX}" '
               .status == "cutover_applied"
@@ -119,11 +167,11 @@ jobs:
 
           cutover_binding_ready=false
           for attempt in $(seq 1 30); do
-            readiness_status="$(curl --silent --show-error --retry 2 \\
-              -o "${ROOT}/cutover-readiness-${attempt}.json" -w '%{http_code}' \\
-              -X POST \\
+            readiness_status="$(curl --silent --show-error --retry 2 \
+              -o "${ROOT}/cutover-readiness-${attempt}.json" -w '%{http_code}' \
+              -X POST \
               "${PRODUCTION_BASE}/api/operator/replacement-base-cutover")"
-            printf '%s\\n' "${readiness_status}" > "${ROOT}/cutover-readiness-${attempt}.status"
+            printf '%s\n' "${readiness_status}" > "${ROOT}/cutover-readiness-${attempt}.status"
             if [ "${readiness_status}" = 403 ]; then
               cutover_binding_ready=true
               touch "${ROOT}/cutover-binding-ready"
@@ -134,12 +182,12 @@ jobs:
           test "${cutover_binding_ready}" = true
 
           for attempt in $(seq 1 12); do
-            http_status="$(curl --silent --show-error --retry 2 \\
-              -o "${ROOT}/cutover-response-${attempt}.json" -w '%{http_code}' \\
-              -X POST \\
-              -H "x-replacement-base-cutover-token: ${CUTOVER_TOKEN}" \\
+            http_status="$(curl --silent --show-error --retry 2 \
+              -o "${ROOT}/cutover-response-${attempt}.json" -w '%{http_code}' \
+              -X POST \
+              -H "x-replacement-base-cutover-token: ${CUTOVER_TOKEN}" \
               "${PRODUCTION_BASE}/api/operator/replacement-base-cutover")"
-            printf '%s\\n' "${http_status}" > "${ROOT}/cutover-response-${attempt}.status"
+            printf '%s\n' "${http_status}" > "${ROOT}/cutover-response-${attempt}.status"
             if [ "${http_status}" = 200 ] && jq -e --arg snapshot "${TARGET_SNAPSHOT_ID}" --argjson ledger "${TARGET_LEDGER_INDEX}" '
               .status == "cutover_applied"
               and .target.snapshotId == $snapshot

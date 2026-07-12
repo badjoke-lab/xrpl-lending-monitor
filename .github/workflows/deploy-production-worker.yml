@@ -8,19 +8,21 @@ on:
       - .github/production-deploy-trigger
 
 permissions:
+  actions: read
   contents: write
 
 concurrency:
-  group: production-worker-deploy
+  group: production-worker-write
   cancel-in-progress: false
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 50
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
     steps:
       - name: Check out implementation
         uses: actions/checkout@v4
@@ -52,10 +54,37 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - name: Check Cloudflare credentials
+      - name: Check production credentials
         run: |
           test -n "$CLOUDFLARE_API_TOKEN" || { echo "CLOUDFLARE_API_TOKEN is unavailable" >&2; exit 1; }
           test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "CLOUDFLARE_ACCOUNT_ID is unavailable" >&2; exit 1; }
+          test -n "$GITHUB_TOKEN" || { echo "GITHUB_TOKEN is unavailable" >&2; exit 1; }
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - name: Wait for legacy live-cutover runs to quiesce
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p production-deploy-wait
+          quiescent=false
+          for attempt in $(seq 1 180); do
+            gh api \
+              "repos/${GITHUB_REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/runs?per_page=100" \
+              > production-deploy-wait/live-cutover-runs.json
+            ACTIVE="$(jq '[.workflow_runs[] | select(.status == "queued" or .status == "in_progress" or .status == "waiting" or .status == "pending")] | length' production-deploy-wait/live-cutover-runs.json)"
+            jq -n --argjson attempt "${attempt}" --argjson active "${ACTIVE}" \
+              '{attempt:$attempt,activeLiveCutovers:$active}' \
+              >> production-deploy-wait/attempts.ndjson
+            if [ "${ACTIVE}" -eq 0 ]; then
+              quiescent=true
+              break
+            fi
+            sleep 10
+          done
+          test "${quiescent}" = true
 
       - name: Bind deploy config to the active production checkpoint
         shell: bash
@@ -119,18 +148,83 @@ jobs:
         id: deploy
         run: pnpm exec wrangler deploy --config wrangler.production.jsonc
 
+      - name: Verify deployed runtime checkpoint
+        id: verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXPECTED_EPOCH="$(jq -r '.epochId' production-deploy-checkpoint.json)"
+          EXPECTED_SNAPSHOT="$(jq -r '.snapshotId' production-deploy-checkpoint.json)"
+          EXPECTED_LEDGER="$(jq -r '.ledgerIndex' production-deploy-checkpoint.json)"
+          EXPECTED_HASH="$(jq -r '.ledgerHash' production-deploy-checkpoint.json)"
+          AUTH=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          verified=false
+
+          for attempt in $(seq 1 40); do
+            curl --fail-with-body --silent --show-error "${AUTH[@]}" \
+              "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/xrpl-lending-monitor/settings" \
+              > deployed-worker-settings.json || true
+            curl --fail-with-body --silent --show-error "${AUTH[@]}" \
+              "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/xrpl-lending-monitor/schedules" \
+              > deployed-worker-schedules.json || true
+            rebase_status="$(curl --silent --show-error --retry 1 \
+              -o deployed-rebase-status.json -w '%{http_code}' \
+              "${PRODUCTION_BASE}/api/status/replacement-base-rebase" || true)"
+
+            if jq -e \
+              --arg epoch "${EXPECTED_EPOCH}" \
+              --arg snapshot "${EXPECTED_SNAPSHOT}" \
+              --arg ledger "${EXPECTED_LEDGER}" \
+              --arg hash "${EXPECTED_HASH}" '
+                def binding($name):
+                  [.result.bindings[] | select(.name == $name) | (.text // .value)] | first;
+                binding("APP_NETWORK") == "devnet"
+                and binding("MAINNET_ENABLED") == "false"
+                and binding("CURRENT_STATE_REPLACEMENT_SNAPSHOT_ID") == $snapshot
+                and binding("REPLACEMENT_BASE_EPOCH_ID") == $epoch
+                and binding("REPLACEMENT_BASE_SNAPSHOT_ID") == $snapshot
+                and binding("REPLACEMENT_BASE_LEDGER_INDEX") == $ledger
+                and binding("REPLACEMENT_BASE_LEDGER_HASH") == $hash
+                and ([.result.bindings[] | select(.name == "REPLACEMENT_BASE_CUTOVER_TOKEN")] | length) == 0
+              ' deployed-worker-settings.json > /dev/null 2>&1 \
+              && jq -e '.result.schedules | length == 1 and .[0].cron == "*/5 * * * *"' \
+                deployed-worker-schedules.json > /dev/null 2>&1 \
+              && [ "${rebase_status}" = 200 ] \
+              && jq -e --arg epoch "${EXPECTED_EPOCH}" --arg snapshot "${EXPECTED_SNAPSHOT}" --argjson ledger "${EXPECTED_LEDGER}" --arg hash "${EXPECTED_HASH}" '
+                .status == "replayed"
+                and .target.epochId == $epoch
+                and .target.snapshotId == $snapshot
+                and .target.ledgerIndex == $ledger
+                and .target.ledgerHash == $hash
+              ' deployed-rebase-status.json > /dev/null 2>&1; then
+              verified=true
+              break
+            fi
+            sleep 3
+          done
+
+          test "${verified}" = true
+          jq -n \
+            --slurpfile checkpoint production-deploy-checkpoint.json \
+            --slurpfile rebase deployed-rebase-status.json \
+            '{passed:true,checkpoint:$checkpoint[0],replacementBase:$rebase[0],schedule:"*/5 * * * *",mainnetEnabled:false}' \
+            > production-deploy-verification.json
+
       - name: Report deploy status
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
           DEPLOY_OUTCOME: ${{ steps.deploy.outcome }}
+          VERIFY_OUTCOME: ${{ steps.verify.outcome }}
         run: |
+          FINAL_OUTCOME="${VERIFY_OUTCOME}"
+          if [ -z "${FINAL_OUTCOME}" ] || [ "${FINAL_OUTCOME}" = skipped ]; then FINAL_OUTCOME="${DEPLOY_OUTCOME}"; fi
           if [ -s production-deploy-checkpoint.json ]; then
             jq -n \
               --arg runId "$GITHUB_RUN_ID" \
               --arg runUrl "https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
               --arg headSha "$GITHUB_SHA" \
-              --arg outcome "$DEPLOY_OUTCOME" \
+              --arg outcome "$FINAL_OUTCOME" \
               --slurpfile checkpoint production-deploy-checkpoint.json \
               '{runId:$runId,runUrl:$runUrl,headSha:$headSha,outcome:$outcome,checkpoint:$checkpoint[0]}' \
               > deploy-status.json
@@ -139,7 +233,7 @@ jobs:
               --arg runId "$GITHUB_RUN_ID" \
               --arg runUrl "https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
               --arg headSha "$GITHUB_SHA" \
-              --arg outcome "$DEPLOY_OUTCOME" \
+              --arg outcome "$FINAL_OUTCOME" \
               '{runId:$runId,runUrl:$runUrl,headSha:$headSha,outcome:$outcome,checkpoint:null}' \
               > deploy-status.json
           fi
@@ -151,3 +245,18 @@ jobs:
           else
             gh api --method PUT "$API_PATH" -f message="Create production deploy status" -f content="$CONTENT" >/dev/null
           fi
+
+      - name: Upload deploy verification
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-deploy-verification
+          path: |
+            production-deploy-checkpoint.json
+            production-deploy-verification.json
+            deployed-worker-settings.json
+            deployed-worker-schedules.json
+            deployed-rebase-status.json
+            production-deploy-wait
+          if-no-files-found: warn
+          retention-days: 14
