@@ -1,0 +1,88 @@
+name: Fast-lane temporary catch-up
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/fast-lane-temporary-catch-up.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fast-lane-temporary-catch-up
+  cancel-in-progress: false
+
+jobs:
+  catch-up:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+    steps:
+      - name: Enable temporary one-minute cadence
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p fast-lane-temporary-catch-up
+          endpoint="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/xrpl-lending-monitor/schedules"
+          curl --fail-with-body --silent --show-error -X PUT \
+            -H 'Content-Type: application/json' \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "$endpoint" -d '[{"cron":"* * * * *"}]' \
+            > fast-lane-temporary-catch-up/minute-register.json
+          jq -e '.success==true and .result.schedules==[{"cron":"* * * * *"}]' fast-lane-temporary-catch-up/minute-register.json >/dev/null
+
+      - name: Wait for fast lane to reach Devnet head
+        shell: bash
+        run: |
+          set -euo pipefail
+          : > fast-lane-temporary-catch-up/attempts.ndjson
+          passed=false
+          for attempt in $(seq 1 40); do
+            curl --fail-with-body --silent --show-error --retry 2 "$BASE/api/overview" > fast-lane-temporary-catch-up/overview.json || true
+            curl --fail-with-body --silent --show-error --retry 2 "$BASE/api/status/fast-lane-diff?limit=500" > fast-lane-temporary-catch-up/diff.json || true
+            jq -n '{method:"ledger",params:[{ledger_index:"validated",transactions:false,expand:false}]}' > fast-lane-temporary-catch-up/head-request.json
+            curl --fail-with-body --silent --show-error --retry 2 -H 'content-type: application/json' --data @fast-lane-temporary-catch-up/head-request.json https://devnet.honeycluster.io/ > fast-lane-temporary-catch-up/head-primary.json || true
+            curl --fail-with-body --silent --show-error --retry 2 -H 'content-type: application/json' --data @fast-lane-temporary-catch-up/head-request.json https://s.devnet.rippletest.net:51234/ > fast-lane-temporary-catch-up/head-fallback.json || true
+            current="$(jq -r '.current_state_watermark.ledger_index // 0' fast-lane-temporary-catch-up/overview.json 2>/dev/null || echo 0)"
+            source="$(jq -r '.current_state_watermark.source // empty' fast-lane-temporary-catch-up/overview.json 2>/dev/null || true)"
+            primary="$(jq -r '.result.ledger_index // .result.ledger.ledger_index // 0' fast-lane-temporary-catch-up/head-primary.json 2>/dev/null || echo 0)"
+            fallback="$(jq -r '.result.ledger_index // .result.ledger.ledger_index // 0' fast-lane-temporary-catch-up/head-fallback.json 2>/dev/null || echo 0)"
+            live="$primary"
+            if [ "$fallback" -gt 0 ] && { [ "$live" -eq 0 ] || [ "$fallback" -lt "$live" ]; }; then live="$fallback"; fi
+            lag="$((live-current))"; [ "$lag" -lt 0 ] && lag=0
+            jq -n --argjson attempt "$attempt" --arg source "$source" --argjson current "$current" --argjson live "$live" --argjson lag "$lag" '{attempt:$attempt,source:$source,currentLedger:$current,liveLedger:$live,lagLedgers:$lag}' >> fast-lane-temporary-catch-up/attempts.ndjson
+            if [ "$source" = fast_lane ] && [ "$current" -gt 0 ] && [ "$lag" -le 10 ] \
+              && jq -e '.status=="ok" and .passed==true and .binding.base.snapshotId=="devnet-3592674-0373cda0b0cd" and .binding.base.ledgerIndex==3592674 and .sample.exactProjectionMismatches==0' fast-lane-temporary-catch-up/diff.json >/dev/null 2>&1; then
+              passed=true
+              break
+            fi
+            sleep 15
+          done
+          test "$passed" = true
+          jq -n --slurpfile overview fast-lane-temporary-catch-up/overview.json --slurpfile diff fast-lane-temporary-catch-up/diff.json --slurpfile attempts fast-lane-temporary-catch-up/attempts.ndjson '{passed:true,overview:$overview[0],diff:$diff[0],attempts:$attempts}' > fast-lane-temporary-catch-up/summary.json
+
+      - name: Restore protected five-minute cadence
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          endpoint="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/xrpl-lending-monitor/schedules"
+          curl --fail-with-body --silent --show-error -X PUT \
+            -H 'Content-Type: application/json' \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "$endpoint" -d '[{"cron":"*/5 * * * *"}]' \
+            > fast-lane-temporary-catch-up/five-minute-register.json
+          curl --fail-with-body --silent --show-error -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$endpoint" > fast-lane-temporary-catch-up/schedules-final.json
+          jq -e '.success==true and .result.schedules==[{"cron":"*/5 * * * *"}]' fast-lane-temporary-catch-up/schedules-final.json >/dev/null
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fast-lane-temporary-catch-up
+          path: fast-lane-temporary-catch-up
+          if-no-files-found: error
+          retention-days: 14
