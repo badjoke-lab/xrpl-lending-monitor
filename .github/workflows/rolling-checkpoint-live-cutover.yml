@@ -76,6 +76,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build:candidate-source-rehearsal
 
+      - name: Build deployable application assets
+        run: pnpm build:deploy-assets
+
       - name: Align one-time cutover bounds with fast-lane recovery
         shell: bash
         run: |
@@ -87,6 +90,7 @@ jobs:
           sed -i 's/within 15 minutes/within 25 minutes/' scripts/verify-live-checkpoint-cutover.sh
           bash -n scripts/run-live-checkpoint-cutover.sh
           bash -n scripts/verify-live-checkpoint-cutover.sh
+          test -f dist/index.html
 
       - name: Run guarded five-minute Devnet cutover
         shell: bash
