@@ -1,0 +1,204 @@
+name: Stabilize production runtime
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/stabilize-production-runtime.yml'
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: production-worker-write
+  cancel-in-progress: false
+
+jobs:
+  stabilize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+    steps:
+      - name: Check out implementation
+        uses: actions/checkout@v4
+
+      - name: Check out production current-state identity
+        uses: actions/checkout@v4
+        with:
+          ref: current-state-data
+          path: .local/current-state-data
+          sparse-checkout: read-model/manifest.json
+          sparse-checkout-cone-mode: false
+
+      - name: Check out production history identity
+        uses: actions/checkout@v4
+        with:
+          ref: history-data
+          path: .local/history-data
+          sparse-checkout: history/publication.json
+          sparse-checkout-cone-mode: false
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build checkpoint-bound deploy config
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${CLOUDFLARE_API_TOKEN}"
+          test -n "${CLOUDFLARE_ACCOUNT_ID}"
+          mkdir -p production-runtime-stability
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          source = json.loads(Path('wrangler.jsonc').read_text())
+          current = json.loads(Path('.local/current-state-data/read-model/manifest.json').read_text())
+          history = json.loads(Path('.local/history-data/history/publication.json').read_text())
+          assert source['triggers']['crons'] == ['*/5 * * * *']
+          assert source['vars']['APP_NETWORK'] == 'devnet'
+          assert source['vars']['MAINNET_ENABLED'] == 'false'
+          assert current['complete'] is True and history['complete'] is True
+          assert current['epochId'] == history['epochId'] == 'devnet-3371675'
+          assert current['ledgerIndex'] == history['endLedgerIndex']
+          assert current['ledgerHash'] == history['endLedgerHash']
+
+          config = json.loads(json.dumps(source))
+          variables = config['vars']
+          variables['CURRENT_STATE_REPLACEMENT_GITHUB_BRANCH'] = 'current-state-data'
+          variables['CURRENT_STATE_REPLACEMENT_SNAPSHOT_ID'] = current['snapshotId']
+          variables['REPLACEMENT_BASE_REBASE_ENABLED'] = 'true'
+          variables['REPLACEMENT_BASE_EPOCH_ID'] = current['epochId']
+          variables['REPLACEMENT_BASE_SNAPSHOT_ID'] = current['snapshotId']
+          variables['REPLACEMENT_BASE_LEDGER_INDEX'] = str(current['ledgerIndex'])
+          variables['REPLACEMENT_BASE_LEDGER_HASH'] = current['ledgerHash']
+          variables.pop('REPLACEMENT_BASE_CUTOVER_TOKEN', None)
+
+          Path('wrangler.production-stable.jsonc').write_text(json.dumps(config, indent=2) + '\n')
+          Path('production-runtime-stability/expected.json').write_text(json.dumps({
+              'epochId': current['epochId'],
+              'snapshotId': current['snapshotId'],
+              'ledgerIndex': current['ledgerIndex'],
+              'ledgerHash': current['ledgerHash'],
+              'historyPublicationSha256': history['publicationSha256'],
+          }, indent=2) + '\n')
+          PY
+          pnpm build
+
+      - name: Deploy and hold the production identity stable
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=production-runtime-stability
+          EXPECTED_EPOCH="$(jq -r '.epochId' "${ROOT}/expected.json")"
+          EXPECTED_SNAPSHOT="$(jq -r '.snapshotId' "${ROOT}/expected.json")"
+          EXPECTED_LEDGER="$(jq -r '.ledgerIndex' "${ROOT}/expected.json")"
+          EXPECTED_HASH="$(jq -r '.ledgerHash' "${ROOT}/expected.json")"
+          AUTH=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          REPAIRS=0
+          STABLE_STREAK=0
+          : > "${ROOT}/observations.ndjson"
+
+          pnpm exec wrangler deploy --config wrangler.production-stable.jsonc \
+            > "${ROOT}/initial-deploy.log" 2>&1
+
+          for attempt in $(seq 1 80); do
+            curl --fail-with-body --silent --show-error "${AUTH[@]}" \
+              "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/xrpl-lending-monitor/settings" \
+              > "${ROOT}/settings-${attempt}.json" || true
+            curl --fail-with-body --silent --show-error "${AUTH[@]}" \
+              "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/xrpl-lending-monitor/schedules" \
+              > "${ROOT}/schedules-${attempt}.json" || true
+            REBASE_STATUS="$(curl --silent --show-error --retry 1 \
+              -o "${ROOT}/rebase-${attempt}.json" -w '%{http_code}' \
+              "${PRODUCTION_BASE}/api/status/replacement-base-rebase" || true)"
+
+            SETTINGS_OK=false
+            SCHEDULE_OK=false
+            REBASE_OK=false
+            if jq -e \
+              --arg epoch "${EXPECTED_EPOCH}" \
+              --arg snapshot "${EXPECTED_SNAPSHOT}" \
+              --arg ledger "${EXPECTED_LEDGER}" \
+              --arg hash "${EXPECTED_HASH}" '
+                def binding($name):
+                  [.result.bindings[] | select(.name == $name) | (.text // .value)] | first;
+                binding("APP_NETWORK") == "devnet"
+                and binding("MAINNET_ENABLED") == "false"
+                and binding("CURRENT_STATE_REPLACEMENT_SNAPSHOT_ID") == $snapshot
+                and binding("REPLACEMENT_BASE_EPOCH_ID") == $epoch
+                and binding("REPLACEMENT_BASE_SNAPSHOT_ID") == $snapshot
+                and binding("REPLACEMENT_BASE_LEDGER_INDEX") == $ledger
+                and binding("REPLACEMENT_BASE_LEDGER_HASH") == $hash
+                and ([.result.bindings[] | select(.name == "REPLACEMENT_BASE_CUTOVER_TOKEN")] | length) == 0
+              ' "${ROOT}/settings-${attempt}.json" > /dev/null 2>&1; then SETTINGS_OK=true; fi
+            if jq -e '.result.schedules | length == 1 and .[0].cron == "*/5 * * * *"' \
+              "${ROOT}/schedules-${attempt}.json" > /dev/null 2>&1; then SCHEDULE_OK=true; fi
+            if [ "${REBASE_STATUS}" = 200 ] && jq -e \
+              --arg epoch "${EXPECTED_EPOCH}" \
+              --arg snapshot "${EXPECTED_SNAPSHOT}" \
+              --argjson ledger "${EXPECTED_LEDGER}" \
+              --arg hash "${EXPECTED_HASH}" '
+                .status == "replayed"
+                and .target.epochId == $epoch
+                and .target.snapshotId == $snapshot
+                and .target.ledgerIndex == $ledger
+                and .target.ledgerHash == $hash
+              ' "${ROOT}/rebase-${attempt}.json" > /dev/null 2>&1; then REBASE_OK=true; fi
+
+            HEALTHY=false
+            if [ "${SETTINGS_OK}" = true ] && [ "${SCHEDULE_OK}" = true ] && [ "${REBASE_OK}" = true ]; then
+              HEALTHY=true
+              STABLE_STREAK="$((STABLE_STREAK + 1))"
+            else
+              STABLE_STREAK=0
+              REPAIRS="$((REPAIRS + 1))"
+              pnpm exec wrangler deploy --config wrangler.production-stable.jsonc \
+                > "${ROOT}/repair-${REPAIRS}.log" 2>&1
+              sleep 5
+            fi
+
+            jq -n \
+              --argjson attempt "${attempt}" \
+              --argjson repairs "${REPAIRS}" \
+              --argjson stableStreak "${STABLE_STREAK}" \
+              --argjson rebaseStatus "${REBASE_STATUS:-0}" \
+              --arg settingsOk "${SETTINGS_OK}" \
+              --arg scheduleOk "${SCHEDULE_OK}" \
+              --arg rebaseOk "${REBASE_OK}" \
+              --arg healthy "${HEALTHY}" \
+              '{attempt:$attempt,repairs:$repairs,stableStreak:$stableStreak,httpStatus:$rebaseStatus,settingsOk:($settingsOk=="true"),scheduleOk:($scheduleOk=="true"),rebaseOk:($rebaseOk=="true"),healthy:($healthy=="true"),observedAt:(now|todateiso8601)}' \
+              >> "${ROOT}/observations.ndjson"
+            sleep 15
+          done
+
+          test "${STABLE_STREAK}" -ge 20
+          jq -n \
+            --slurpfile expected "${ROOT}/expected.json" \
+            --argjson repairs "${REPAIRS}" \
+            --argjson finalStableObservations "${STABLE_STREAK}" \
+            '{passed:true,expected:$expected[0],repairs:$repairs,finalStableObservations:$finalStableObservations,observationIntervalSeconds:15,minimumFinalStableSeconds:300,schedule:"*/5 * * * *",mainnetEnabled:false}' \
+            > "${ROOT}/summary.json"
+          cat "${ROOT}/summary.json"
+
+      - name: Upload runtime-stability evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-runtime-stability
+          path: production-runtime-stability
+          if-no-files-found: error
+          retention-days: 14
