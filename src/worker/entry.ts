@@ -108,7 +108,9 @@ async function handleReplacementBaseCutover(
 
   const cutoverAt = new Date().toISOString()
   const target = replacementBaseConfig.target
+  const runtimeConfig = resolveRuntimeConfig(env)
   try {
+    await refreshNetworkStatus({ db: env.DB, config: runtimeConfig })
     const rebase = await rebaseToReplacementBase({
       db: env.DB,
       target,
