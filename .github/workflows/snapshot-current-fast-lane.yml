@@ -1,0 +1,39 @@
+name: Snapshot current fast lane
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/snapshot-current-fast-lane.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Capture current public watermark and both Devnet heads
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p current-fast-lane
+          curl --fail-with-body --silent --show-error --retry 3 https://xrpl-lending-monitor.badjoke-lab.workers.dev/api/overview > current-fast-lane/overview.json
+          curl --fail-with-body --silent --show-error --retry 3 https://xrpl-lending-monitor.badjoke-lab.workers.dev/api/status/fast-lane-diff?limit=50 > current-fast-lane/diff.json
+          jq -n '{method:"ledger",params:[{ledger_index:"validated",transactions:false,expand:false}]}' > current-fast-lane/request.json
+          curl --fail-with-body --silent --show-error --retry 3 -H 'content-type: application/json' --data @current-fast-lane/request.json https://devnet.honeycluster.io/ > current-fast-lane/primary.json
+          curl --fail-with-body --silent --show-error --retry 3 -H 'content-type: application/json' --data @current-fast-lane/request.json https://s.devnet.rippletest.net:51234/ > current-fast-lane/fallback.json
+          jq -n --slurpfile overview current-fast-lane/overview.json --slurpfile diff current-fast-lane/diff.json --slurpfile primary current-fast-lane/primary.json --slurpfile fallback current-fast-lane/fallback.json '
+            def head($x): ($x.result.ledger_index // $x.result.ledger.ledger_index // 0);
+            ($overview[0].current_state_watermark.ledger_index // 0) as $current |
+            ([head($primary[0]),head($fallback[0])] | map(select(.>0)) | min) as $live |
+            {capturedAt:(now|todateiso8601),currentState:$overview[0].current_state_watermark,counts:$overview[0].counts_watermark,liveHead:$live,lagLedgers:([$live-$current,0]|max),diff:$diff[0]}
+          ' > current-fast-lane/summary.json
+          cat current-fast-lane/summary.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: current-fast-lane-snapshot
+          path: current-fast-lane
+          if-no-files-found: error
+          retention-days: 3
