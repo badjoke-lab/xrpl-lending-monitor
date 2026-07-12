@@ -1,0 +1,32 @@
+name: Cancel duplicate disable runs
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/cancel-duplicate-disable-runs.yml'
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  cancel:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      KEEP_RUN_ID: '29191073750'
+    steps:
+      - name: Cancel duplicate stabilization runs
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/workflows/disable-unsafe-production-writers.yml/runs?per_page=100" > runs.json
+          : > cancelled.ndjson
+          while IFS= read -r id; do
+            [ "$id" = "$KEEP_RUN_ID" ] && continue
+            gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$id/cancel" >/dev/null 2>&1 || true
+            jq -n --argjson id "$id" '{cancelledRunId:$id}' >> cancelled.ndjson
+          done < <(jq -r '.workflow_runs[] | select(.status == "queued" or .status == "in_progress" or .status == "waiting" or .status == "pending" or .status == "requested") | .id' runs.json)
+          cat cancelled.ndjson
