@@ -1,0 +1,21 @@
+name: Cancel duplicate cutover 29180589136
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/cancel-duplicate-cutover-29180589136.yml'
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  cancel:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cancel duplicate queued run only
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: gh api --method POST "repos/${REPOSITORY}/actions/runs/29180589136/cancel" || true
