@@ -1,5 +1,5 @@
 name: M5-5 browser regression
-# Final pre-soak read-only production browser audit; D1 usage is not queried here.
+# Final pre-soak read-only production browser audit using the current architecture gate.
 
 on:
   pull_request:
@@ -28,65 +28,49 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Wait for current-state and canonical-refresh preflight
+      - name: Wait for current-architecture pre-soak readiness
         shell: bash
         env:
           BASE_URL: ${{ env.TARGET_BASE_URL }}
         run: |
           set -euo pipefail
           ROOT=m5-5-browser-regression
-          mkdir -p "${ROOT}"
-          : > "${ROOT}/preflight-attempts.ndjson"
+          mkdir -p "$ROOT"
+          : > "$ROOT/preflight-attempts.ndjson"
 
           for attempt in $(seq 1 480); do
-            curl --max-time 60 --fail-with-body --silent --show-error --retry 2 \
-              "${BASE_URL%/}/api/status/collector" \
-              > "${ROOT}/canonical-collector-preflight.json" || true
-            curl --max-time 60 --fail-with-body --silent --show-error --retry 2 \
-              "${BASE_URL%/}/api/overview" \
-              > "${ROOT}/overview-preflight.json" || true
-            curl --max-time 60 --fail-with-body --silent --show-error --retry 2 \
-              "${BASE_URL%/}/api/status/fast-lane-diff?limit=500" \
-              > "${ROOT}/fast-lane-diff-preflight.json" || true
+            readiness_status="$(curl --silent --show-error --retry 2 \
+              -o "$ROOT/pre-soak-readiness.json" -w '%{http_code}' \
+              "${BASE_URL%/}/api/status/pre-soak-readiness" || true)"
+            curl --fail-with-body --silent --show-error --retry 2 \
+              "${BASE_URL%/}/api/overview" > "$ROOT/overview-preflight.json" || true
+            curl --fail-with-body --silent --show-error --retry 2 \
+              "${BASE_URL%/}/api/status/collector" > "$ROOT/canonical-collector-preflight.json" || true
 
-            SOURCE="$(jq -r '.current_state_watermark.source // empty' "${ROOT}/overview-preflight.json" 2>/dev/null || true)"
-            CURRENT="$(jq -r '.current_state_watermark.ledger_index // 0' "${ROOT}/overview-preflight.json" 2>/dev/null || echo 0)"
-            COUNTS="$(jq -r '.counts_watermark.ledger_index // 0' "${ROOT}/overview-preflight.json" 2>/dev/null || echo 0)"
-            BINDING="$(jq -r '.binding.base.ledgerIndex // 0' "${ROOT}/fast-lane-diff-preflight.json" 2>/dev/null || echo 0)"
-            jq -n --argjson attempt "${attempt}" --arg source "${SOURCE}" \
-              --argjson current "${CURRENT}" --argjson counts "${COUNTS}" --argjson binding "${BINDING}" \
-              '{attempt:$attempt,currentStateSource:$source,currentLedger:$current,countsLedger:$counts,fastLaneBaseLedger:$binding}' \
-              >> "${ROOT}/preflight-attempts.ndjson"
+            passed="$(jq -r '.passed // false' "$ROOT/pre-soak-readiness.json" 2>/dev/null || echo false)"
+            source="$(jq -r '.current_state_watermark.source // empty' "$ROOT/overview-preflight.json" 2>/dev/null || true)"
+            jq -n \
+              --argjson attempt "$attempt" \
+              --argjson httpStatus "${readiness_status:-0}" \
+              --arg passed "$passed" \
+              --arg source "$source" \
+              '{attempt:$attempt,httpStatus:$httpStatus,readinessPassed:($passed=="true"),currentStateSource:$source}' \
+              >> "$ROOT/preflight-attempts.ndjson"
 
-            if jq -e '
-                .role == "canonical_overlay_refresh"
-                and .cadence.expected_interval_seconds == 14400
-                and .cadence.stale_after_seconds == 18000
-                and (.status == "behind" or .status == "healthy")
-                and .consecutive_failures == 0
-                and .error == null
-              ' "${ROOT}/canonical-collector-preflight.json" > /dev/null 2>&1 \
-              && jq -e '
-                .current_state_watermark.source == "fast_lane"
-                and (.current_state_watermark.ledger_index >= .counts_watermark.ledger_index)
-              ' "${ROOT}/overview-preflight.json" > /dev/null 2>&1 \
-              && jq -e '
-                .status == "ok"
-                and .passed == true
-                and .binding.base.ledgerIndex == input.counts_watermark.ledger_index
-                and .sample.sampledRows > 0
-                and .sample.exactProjectionMismatches == 0
-              ' "${ROOT}/fast-lane-diff-preflight.json" "${ROOT}/overview-preflight.json" > /dev/null 2>&1; then
-              touch "${ROOT}/preflight-passed"
+            if [ "$readiness_status" = 200 ] \
+              && [ "$passed" = true ] \
+              && [ "$source" = fast_lane ]; then
+              touch "$ROOT/preflight-passed"
               break
             fi
             sleep 5
           done
-          test -f "${ROOT}/preflight-passed"
+          test -f "$ROOT/preflight-passed"
 
           jq -n \
-            --slurpfile collector "${ROOT}/canonical-collector-preflight.json" \
-            --slurpfile overview "${ROOT}/overview-preflight.json" \
+            --slurpfile collector "$ROOT/canonical-collector-preflight.json" \
+            --slurpfile overview "$ROOT/overview-preflight.json" \
+            --slurpfile readiness "$ROOT/pre-soak-readiness.json" \
             '{
               status: "healthy",
               cursor: {
@@ -97,8 +81,9 @@ jobs:
               consecutive_failures: $collector[0].consecutive_failures,
               error: $collector[0].error,
               freshness_source: $overview[0].current_state_watermark.source,
+              pre_soak_readiness: $readiness[0],
               canonical_collector: $collector[0]
-            }' > "${ROOT}/collector-preflight.json"
+            }' > "$ROOT/collector-preflight.json"
 
       - uses: pnpm/action-setup@v4
         with:
@@ -136,10 +121,10 @@ jobs:
         shell: bash
         run: |
           if [ -f m5-5-browser-regression/summary.md ]; then
-            cat m5-5-browser-regression/summary.md >> "${GITHUB_STEP_SUMMARY}"
+            cat m5-5-browser-regression/summary.md >> "$GITHUB_STEP_SUMMARY"
           fi
           if [ -f m5-5-browser-regression/exit-evaluation.md ]; then
-            cat m5-5-browser-regression/exit-evaluation.md >> "${GITHUB_STEP_SUMMARY}"
+            cat m5-5-browser-regression/exit-evaluation.md >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Upload browser-regression evidence
