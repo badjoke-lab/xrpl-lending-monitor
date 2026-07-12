@@ -1,0 +1,27 @@
+name: Cancel redundant recovery runs
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/cancel-redundant-recovery-runs.yml'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  cancel:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cancel redundant recovery workflows
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for run_id in 29178506511 29178506533 29178506513 29178506518; do
+            gh api --method POST "repos/${REPOSITORY}/actions/runs/${run_id}/cancel" || true
+          done
