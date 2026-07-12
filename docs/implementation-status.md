@@ -88,8 +88,10 @@ The failed earlier soak is not reused.
 
 The new qualification window is:
 
-- start: `2026-07-12T07:00:00Z` (`2026-07-12 16:00 JST`);
-- end: `2026-07-13T07:00:00Z` (`2026-07-13 16:00 JST`).
+- start: `2026-07-12T06:40:00Z` (`2026-07-12 15:40 JST`);
+- end: `2026-07-13T06:40:00Z` (`2026-07-13 15:40 JST`).
+
+The start is the first clean five-minute boundary after the recovered fast lane was rebound and began refilling from the promoted checkpoint.
 
 Required exit conditions remain:
 
