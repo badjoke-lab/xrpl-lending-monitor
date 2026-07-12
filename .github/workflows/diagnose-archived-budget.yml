@@ -1,0 +1,47 @@
+name: Diagnose archived budget
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/diagnose-archived-budget.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Probe archived limits and filters
+        shell: bash
+        env:
+          BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+        run: |
+          set -euo pipefail
+          mkdir -p archived-budget-diagnostic
+          : > archived-budget-diagnostic/summary.ndjson
+          for limit in 1 5 10 25 50 100; do
+            for kind in all Vault LoanBroker Loan; do
+              name="${kind}-${limit}"
+              path="/api/audit/archived?limit=${limit}"
+              if [ "$kind" != all ]; then path="${path}&object_type=${kind}"; fi
+              curl --silent --show-error --retry 1 \
+                -D "archived-budget-diagnostic/${name}.headers" \
+                -o "archived-budget-diagnostic/${name}.body" \
+                -w '%{http_code} %{time_total}\n' \
+                "$BASE$path" > "archived-budget-diagnostic/${name}.meta" || true
+              read -r status elapsed < "archived-budget-diagnostic/${name}.meta"
+              jq -n --arg kind "$kind" --argjson limit "$limit" --arg status "$status" --arg elapsed "$elapsed" --rawfile body "archived-budget-diagnostic/${name}.body" '{objectType:$kind,limit:$limit,httpStatus:($status|tonumber),seconds:($elapsed|tonumber),body:$body}' >> archived-budget-diagnostic/summary.ndjson
+            done
+          done
+          jq -s '.' archived-budget-diagnostic/summary.ndjson > archived-budget-diagnostic/summary.json
+          jq -r '.[] | [.objectType,.limit,.httpStatus,.seconds] | @tsv' archived-budget-diagnostic/summary.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: archived-budget-diagnostic
+          path: archived-budget-diagnostic
+          if-no-files-found: error
+          retention-days: 7
