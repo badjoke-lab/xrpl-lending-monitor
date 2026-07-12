@@ -1,0 +1,142 @@
+name: Execute live cutover now
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/execute-live-cutover-now.yml'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: execute-live-cutover-now
+  cancel-in-progress: false
+
+jobs:
+  execute:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+      HISTORY_BRANCH: history-rolling-next-candidate-data
+      CURRENT_BRANCH: current-state-rolling-next-candidate-data
+      EXPECTED_MIN_LEDGER: '3586623'
+    steps:
+      - name: Cancel recovery orchestrators
+        shell: bash
+        run: |
+          set -euo pipefail
+          for workflow in resume-history-recovery-v2.yml resume-history-recovery-after-fixed-index.yml run-history-catchup-cycle.yml complete-history-recovery.yml test-fixed-catchup-cycle.yml; do
+            gh api "repos/${REPOSITORY}/actions/workflows/${workflow}/runs?per_page=100" > "${workflow}.json" || continue
+            while IFS= read -r run_id; do
+              test "${run_id}" = "${GITHUB_RUN_ID}" && continue
+              gh api --method POST "repos/${REPOSITORY}/actions/runs/${run_id}/cancel" || true
+            done < <(jq -r '.workflow_runs[] | select(.status == "queued" or .status == "in_progress" or .status == "requested" or .status == "waiting" or .status == "pending") | .id' "${workflow}.json")
+          done
+
+      - name: Verify aligned near-head candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=execute-live-cutover-now
+          mkdir -p "${ROOT}"
+          fetch_json() {
+            local branch="$1" path="$2" output="$3"
+            for attempt in $(seq 1 60); do
+              if gh api --method GET "repos/${REPOSITORY}/contents/${path}" -f ref="${branch}" --jq '.content' 2>/dev/null \
+                | tr -d '\n' | base64 --decode > "${output}"; then
+                test -s "${output}" && jq -e . "${output}" > /dev/null && return 0
+              fi
+              sleep 10
+            done
+            return 1
+          }
+          fetch_json "${HISTORY_BRANCH}" history/publication.json "${ROOT}/publication.json"
+          fetch_json "${HISTORY_BRANCH}" history/index/exact/manifest.json "${ROOT}/exact.json"
+          fetch_json "${CURRENT_BRANCH}" read-model/manifest.json "${ROOT}/current.json"
+          fetch_json "${CURRENT_BRANCH}" channel.json "${ROOT}/channel.json"
+
+          ledger="$(jq -r '.endLedgerIndex' "${ROOT}/publication.json")"
+          hash="$(jq -r '.endLedgerHash' "${ROOT}/publication.json")"
+          publication="$(jq -r '.publicationSha256' "${ROOT}/publication.json")"
+          manifest="$(jq -r '.manifestSha256' "${ROOT}/current.json")"
+          snapshot="$(jq -r '.snapshotId' "${ROOT}/current.json")"
+          test "${ledger}" -ge "${EXPECTED_MIN_LEDGER}"
+          jq -e --argjson ledger "${ledger}" --arg hash "${hash}" '.complete == true and .ledgerIndex == $ledger and .ledgerHash == $hash' "${ROOT}/current.json" > /dev/null
+          jq -e --arg publication "${publication}" '.publicationSha256 == $publication and .bucketCount == 256 and .totalRecords > 0' "${ROOT}/exact.json" > /dev/null
+          jq -e --arg manifest "${manifest}" --arg snapshot "${snapshot}" '.active.manifestSha256 == $manifest and .active.snapshotId == $snapshot' "${ROOT}/channel.json" > /dev/null
+
+          jq -n '{method:"ledger",params:[{ledger_index:"validated",transactions:false,expand:false}]}' > "${ROOT}/head-request.json"
+          jq -n --argjson ledger "${ledger}" '{method:"ledger",params:[{ledger_index:$ledger,transactions:false,expand:false}]}' > "${ROOT}/target-request.json"
+          min_head=''
+          for index in 0 1; do
+            if [ "${index}" = 0 ]; then endpoint=https://devnet.honeycluster.io/; else endpoint=https://s.devnet.rippletest.net:51234/; fi
+            curl --fail-with-body --silent --show-error --retry 3 -H 'content-type: application/json' --data @"${ROOT}/head-request.json" "${endpoint}" > "${ROOT}/head-${index}.json"
+            curl --fail-with-body --silent --show-error --retry 3 -H 'content-type: application/json' --data @"${ROOT}/target-request.json" "${endpoint}" > "${ROOT}/target-${index}.json"
+            head="$(jq -r '.result.ledger_index // .result.ledger.ledger_index' "${ROOT}/head-${index}.json")"
+            target_hash="$(jq -r '.result.ledger_hash // .result.ledger.ledger_hash' "${ROOT}/target-${index}.json")"
+            test "${target_hash}" = "${hash}"
+            if [ -z "${min_head}" ] || [ "${head}" -lt "${min_head}" ]; then min_head="${head}"; fi
+          done
+          lag="$((min_head - ledger))"
+          if [ "${lag}" -lt 0 ]; then lag=0; fi
+          test "${lag}" -le 720
+          {
+            echo "TARGET_LEDGER=${ledger}"
+            echo "TARGET_HASH=${hash}"
+            echo "TARGET_LAG=${lag}"
+          } >> "${GITHUB_ENV}"
+
+      - name: Dispatch guarded production cutover
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=execute-live-cutover-now
+          gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/runs?event=workflow_dispatch&per_page=100" --jq '.workflow_runs[].id' > "${ROOT}/before.txt"
+          jq -n --arg ref main --arg history "${HISTORY_BRANCH}" --arg current "${CURRENT_BRANCH}" '{ref:$ref,inputs:{history_candidate_branch:$history,current_state_candidate_branch:$current,confirm_production_write:"true"}}' > "${ROOT}/dispatch.json"
+          gh api --method POST "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/dispatches" --input "${ROOT}/dispatch.json"
+          run_id=''
+          for attempt in $(seq 1 60); do
+            gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/runs?event=workflow_dispatch&per_page=100" > "${ROOT}/runs.json"
+            while IFS= read -r id; do
+              if ! grep -Fxq "${id}" "${ROOT}/before.txt"; then run_id="${id}"; break; fi
+            done < <(jq -r '.workflow_runs | sort_by(.created_at) | reverse | .[].id' "${ROOT}/runs.json")
+            test -n "${run_id}" && break
+            sleep 10
+          done
+          test -n "${run_id}"
+          echo "CUTOVER_RUN_ID=${run_id}" >> "${GITHUB_ENV}"
+          printf '%s\n' "${run_id}" > "${ROOT}/cutover-run-id.txt"
+
+      - name: Require successful cutover and live freshness
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=execute-live-cutover-now
+          for attempt in $(seq 1 180); do
+            gh api "repos/${REPOSITORY}/actions/runs/${CUTOVER_RUN_ID}" > "${ROOT}/cutover-run.json"
+            test "$(jq -r '.status' "${ROOT}/cutover-run.json")" = completed && break
+            sleep 30
+          done
+          test "$(jq -r '.status' "${ROOT}/cutover-run.json")" = completed
+          test "$(jq -r '.conclusion' "${ROOT}/cutover-run.json")" = success
+          gh run download "${CUTOVER_RUN_ID}" --repo "${REPOSITORY}" --name rolling-checkpoint-live-cutover --dir "${ROOT}/artifact"
+          evidence="$(find "${ROOT}/artifact" -name evidence.json -type f | head -n 1)"
+          post="$(find "${ROOT}/artifact" -name post-cutover-verification.json -type f | head -n 1)"
+          test -n "${evidence}" && test -n "${post}"
+          jq -e --argjson ledger "${TARGET_LEDGER}" '.passed == true and .target.target.ledgerIndex == $ledger and .schedule == "*/5 * * * *" and .mainnetEnabled == false' "${evidence}" > /dev/null
+          jq -e --argjson ledger "${TARGET_LEDGER}" '.passed == true and .target.ledgerIndex == $ledger and .lagLedgers <= 10 and .currentStateAgeSeconds <= 600 and .schedule == "*/5 * * * *" and .mainnetEnabled == false' "${post}" > /dev/null
+          jq -n --argjson cutoverRunId "${CUTOVER_RUN_ID}" --argjson ledger "${TARGET_LEDGER}" --arg hash "${TARGET_HASH}" --argjson lag "${TARGET_LAG}" '{passed:true,cutoverRunId:$cutoverRunId,target:{ledgerIndex:$ledger,ledgerHash:$hash,lagAtDispatch:$lag},schedule:"*/5 * * * *",mainnetEnabled:false}' > "${ROOT}/summary.json"
+
+      - name: Upload execution evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: execute-live-cutover-now
+          path: execute-live-cutover-now
+          if-no-files-found: warn
+          retention-days: 30
