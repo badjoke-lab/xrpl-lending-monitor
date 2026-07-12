@@ -2,7 +2,7 @@ name: Verify production read soak
 
 on:
   schedule:
-    # Recovered public Devnet soak: 2026-07-12 16:00 JST through 2026-07-13 16:00 JST.
+    # Recovered public Devnet soak: 2026-07-12 15:40 JST through 2026-07-13 15:40 JST.
     # Remove these dated schedules after the 24-hour reconciliation.
     - cron: '17 8,10,12,14,16,18,20,22 12 7 *'
     - cron: '17 0,2,4,6,7 13 7 *'
@@ -103,7 +103,7 @@ jobs:
         run: |
           set -euo pipefail
           pnpm exec wrangler d1 execute xrpl-lending-monitor --remote \
-            --command "WITH params AS (SELECT julianday('2026-07-12T07:00:00Z') AS start_jd,julianday('2026-07-13T07:00:00Z') AS end_jd,julianday('now') AS now_jd),ordered AS (SELECT run_at,status,lag_ledgers,LAG(run_at) OVER (ORDER BY run_at) AS previous_run_at FROM fast_lane_shadow_run_metrics,params WHERE network='devnet' AND julianday(run_at) >= start_jd AND julianday(run_at) <= MIN(now_jd,end_jd)),summary AS (SELECT COUNT(*) AS run_count,SUM(CASE WHEN status NOT IN ('caught_up','committed','reanchored') THEN 1 ELSE 0 END) AS failure_count,COALESCE(MAX(lag_ledgers),0) AS max_lag_ledgers,COALESCE(MAX(CASE WHEN previous_run_at IS NULL THEN 0 ELSE ROUND((julianday(run_at)-julianday(previous_run_at))*86400) END),0) AS max_gap_seconds,MIN(run_at) AS first_run_at,MAX(run_at) AS last_run_at FROM ordered) SELECT summary.*,MAX(1,CAST(((MIN(params.now_jd,params.end_jd)-params.start_jd)*86400)/300 AS INTEGER)-2) AS expected_min_runs FROM summary,params;" \
+            --command "WITH params AS (SELECT julianday('2026-07-12T06:40:00Z') AS start_jd,julianday('2026-07-13T06:40:00Z') AS end_jd,julianday('now') AS now_jd),ordered AS (SELECT run_at,status,lag_ledgers,LAG(run_at) OVER (ORDER BY run_at) AS previous_run_at FROM fast_lane_shadow_run_metrics,params WHERE network='devnet' AND julianday(run_at) >= start_jd AND julianday(run_at) <= MIN(now_jd,end_jd)),summary AS (SELECT COUNT(*) AS run_count,SUM(CASE WHEN status NOT IN ('caught_up','committed','reanchored') THEN 1 ELSE 0 END) AS failure_count,COALESCE(MAX(lag_ledgers),0) AS max_lag_ledgers,COALESCE(MAX(CASE WHEN previous_run_at IS NULL THEN 0 ELSE ROUND((julianday(run_at)-julianday(previous_run_at))*86400) END),0) AS max_gap_seconds,MIN(run_at) AS first_run_at,MAX(run_at) AS last_run_at FROM ordered) SELECT summary.*,MAX(1,CAST(((MIN(params.now_jd,params.end_jd)-params.start_jd)*86400)/300 AS INTEGER)-2) AS expected_min_runs FROM summary,params;" \
             --json > production-read-audit/soak-window-raw.txt
           sed -n '/^\[/,$p' production-read-audit/soak-window-raw.txt \
             > production-read-audit/soak-window.json
