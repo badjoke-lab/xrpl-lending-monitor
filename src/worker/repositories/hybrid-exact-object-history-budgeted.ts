@@ -8,7 +8,7 @@ import { listLiveObjectHistoryAfterBoundary } from './live-history-after-boundar
 import { mergeObjectHistory } from './merged-history-source'
 
 const MAX_ASSET_READS = 16
-const MAX_RECORDS_EXAMINED = 9_500
+const MAX_RECORDS_EXAMINED = 10_050
 
 function boundedReferences(
   reader: HistorySegmentChainReader,
