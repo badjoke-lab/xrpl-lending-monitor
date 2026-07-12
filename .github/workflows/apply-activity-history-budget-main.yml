@@ -1,5 +1,4 @@
 name: Apply activity history budget to main
-# Retrigger after the workflow exists on the default branch.
 
 on:
   push:
@@ -27,32 +26,31 @@ jobs:
           from pathlib import Path
 
           path = Path('src/worker/repositories/hybrid-history-repository.ts')
-          text = path.read_text()
-          old_constants = "const ARCHIVED_HISTORY_SEGMENT_READS = 24\nconst BALANCE_HISTORY_SEGMENT_READS = 16\nconst AUDIT_HISTORY_WALL_TIME_MS = 5_000"
-          new_constants = "const ACTIVITY_HISTORY_SEGMENT_READS = 24\nconst ARCHIVED_HISTORY_SEGMENT_READS = 24\nconst BALANCE_HISTORY_SEGMENT_READS = 16\nconst AUDIT_HISTORY_WALL_TIME_MS = 5_000"
-          if old_constants not in text:
-              raise SystemExit('activity budget constants anchor not found')
-          text = text.replace(old_constants, new_constants, 1)
+          lines = path.read_text().splitlines()
+          output = []
+          constant_inserted = False
+          activity_inserted = False
+          inside_activity = False
 
-          old_call = """    kind: 'protocol_events',
-    direction: 'desc',
-    limit: options.page.limit,
-    cursor: options.immutableCursor,
-  })"""
-          new_call = """    kind: 'protocol_events',
-    direction: 'desc',
-    limit: options.page.limit,
-    cursor: options.immutableCursor,
-    maxSegmentReads: ACTIVITY_HISTORY_SEGMENT_READS,
-    maxWallTimeMs: AUDIT_HISTORY_WALL_TIME_MS,
-  })"""
-          if old_call not in text:
-              raise SystemExit('activity reader anchor not found')
-          text = text.replace(old_call, new_call, 1)
-          path.write_text(text)
+          for line in lines:
+              if line == 'const ARCHIVED_HISTORY_SEGMENT_READS = 24' and not constant_inserted:
+                  output.append('const ACTIVITY_HISTORY_SEGMENT_READS = 24')
+                  constant_inserted = True
+              if line.startswith('export async function listHybridActivity('):
+                  inside_activity = True
+              output.append(line)
+              if inside_activity and line == '    cursor: options.immutableCursor,':
+                  output.append('    maxSegmentReads: ACTIVITY_HISTORY_SEGMENT_READS,')
+                  output.append('    maxWallTimeMs: AUDIT_HISTORY_WALL_TIME_MS,')
+                  activity_inserted = True
+                  inside_activity = False
+
+          if not constant_inserted or not activity_inserted:
+              raise SystemExit('activity history edit anchors were not found')
+          path.write_text('\n'.join(output) + '\n')
           PY
           git diff --check
-          git diff -- src/worker/repositories/hybrid-history-repository.ts
+          grep -n 'ACTIVITY_HISTORY_SEGMENT_READS\|maxWallTimeMs' src/worker/repositories/hybrid-history-repository.ts
       - name: Commit source fix
         shell: bash
         run: |
@@ -60,5 +58,5 @@ jobs:
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add src/worker/repositories/hybrid-history-repository.ts
-          git commit -m "fix: widen bounded activity history read"
+          git commit -m 'fix: widen bounded activity history read'
           git push origin HEAD:main
