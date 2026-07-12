@@ -77,31 +77,30 @@ jobs:
           import re
           import time
           import urllib.error
+          import urllib.parse
           import urllib.request
 
           ROOT = pathlib.Path('live-object-samples')
           BASE = 'https://xrpl-lending-monitor.badjoke-lab.workers.dev'
           RPCS = ['https://devnet.honeycluster.io/', 'https://s.devnet.rippletest.net:51234/']
 
-          def get_json(url, retries=4):
+          def request_json(url, *, payload=None, retries=4):
               last = None
               for attempt in range(retries):
                   try:
-                      with urllib.request.urlopen(url, timeout=30) as response:
-                          return response.status, json.loads(response.read().decode())
-                  except Exception as error:
-                      last = error
-                      time.sleep(attempt + 1)
-              raise last
-
-          def post_json(url, payload, retries=4):
-              body = json.dumps(payload).encode()
-              last = None
-              for attempt in range(retries):
-                  try:
-                      request = urllib.request.Request(url, data=body, headers={'content-type': 'application/json'})
+                      data = None if payload is None else json.dumps(payload).encode()
+                      headers = {} if payload is None else {'content-type': 'application/json'}
+                      request = urllib.request.Request(url, data=data, headers=headers)
                       with urllib.request.urlopen(request, timeout=30) as response:
-                          return response.status, json.loads(response.read().decode())
+                          raw = response.read().decode()
+                          return response.status, json.loads(raw), raw
+                  except urllib.error.HTTPError as error:
+                      raw = error.read().decode(errors='replace')
+                      try:
+                          body = json.loads(raw)
+                      except Exception:
+                          body = {'raw': raw}
+                      return error.code, body, raw
                   except Exception as error:
                       last = error
                       time.sleep(attempt + 1)
@@ -116,6 +115,53 @@ jobs:
                   return int(value, 16)
               return value
 
+          def find_items(payload):
+              if isinstance(payload, list):
+                  return payload
+              if not isinstance(payload, dict):
+                  return []
+              for key in ('data', 'items', 'records', 'results'):
+                  value = payload.get(key)
+                  if isinstance(value, list):
+                      return value
+                  if isinstance(value, dict):
+                      nested = find_items(value)
+                      if nested:
+                          return nested
+              return []
+
+          def find_object_id(item):
+              if not isinstance(item, dict):
+                  return None
+              for key in ('id', 'objectId', 'object_id', 'index'):
+                  value = item.get(key)
+                  if isinstance(value, str) and len(value) == 64:
+                      return value.upper()
+              for value in item.values():
+                  if isinstance(value, dict):
+                      found = find_object_id(value)
+                      if found:
+                          return found
+              return None
+
+          def find_raw_object(payload):
+              if not isinstance(payload, dict):
+                  return None
+              if isinstance(payload.get('index'), str) and isinstance(payload.get('LedgerEntryType'), str):
+                  return payload
+              for key in ('raw', 'object', 'ledgerObject', 'ledger_object', 'data'):
+                  value = payload.get(key)
+                  if isinstance(value, dict):
+                      found = find_raw_object(value)
+                      if found:
+                          return found
+              for value in payload.values():
+                  if isinstance(value, dict):
+                      found = find_raw_object(value)
+                      if found:
+                          return found
+              return None
+
           overview = json.loads((ROOT / 'overview.json').read_text())
           watermark = overview['current_state_watermark']
           ledger_index = int(watermark['ledger_index'])
@@ -123,7 +169,7 @@ jobs:
 
           source_ledgers = []
           for index, rpc in enumerate(RPCS, start=1):
-              status, payload = post_json(rpc, {'method': 'ledger', 'params': [{'ledger_index': ledger_index, 'transactions': False, 'expand': False}]})
+              status, payload, _ = request_json(rpc, payload={'method': 'ledger', 'params': [{'ledger_index': ledger_index, 'transactions': False, 'expand': False}]})
               (ROOT / f'rpc-ledger-{index}.json').write_text(json.dumps(payload, indent=2) + '\n')
               result = payload.get('result', {})
               ledger = result.get('ledger', {}) if isinstance(result.get('ledger'), dict) else {}
@@ -142,27 +188,44 @@ jobs:
           all_passed = True
 
           for route_kind, ledger_type, collection_path in kinds:
-              collection_status, collection = get_json(f'{BASE}{collection_path}?limit=3&sort=id_asc')
+              collection_url = f'{BASE}{collection_path}?limit=3'
+              collection_status, collection, collection_raw = request_json(collection_url)
               (ROOT / f'public-{route_kind}-collection.json').write_text(json.dumps(collection, indent=2) + '\n')
-              samples = []
-              for position, listed in enumerate(collection.get('data', []), start=1):
-                  object_id = listed['id']
-                  detail_status, detail = get_json(f'{BASE}{collection_path}/{object_id}')
-                  (ROOT / f'public-{route_kind}-{position}.json').write_text(json.dumps(detail, indent=2) + '\n')
-                  raw = detail.get('data', {}).get('raw')
-                  if not isinstance(raw, dict):
-                      raise SystemExit(f'{route_kind} {object_id} detail has no raw object')
+              (ROOT / f'public-{route_kind}-collection.status').write_text(str(collection_status) + '\n')
+              items = find_items(collection)
+              ids = []
+              for item in items:
+                  object_id = find_object_id(item)
+                  if object_id and object_id not in ids:
+                      ids.append(object_id)
+                  if len(ids) == 3:
+                      break
 
-                  rpc_status, rpc_payload = post_json(RPCS[0], {'method': 'ledger_entry', 'params': [{'index': object_id, 'ledger_index': ledger_index}]})
+              samples = []
+              for position, object_id in enumerate(ids, start=1):
+                  detail_url = f'{BASE}{collection_path}/{urllib.parse.quote(object_id)}'
+                  detail_status, detail, _ = request_json(detail_url)
+                  (ROOT / f'public-{route_kind}-{position}.json').write_text(json.dumps(detail, indent=2) + '\n')
+                  raw = find_raw_object(detail)
+
+                  rpc_status, rpc_payload, _ = request_json(
+                      RPCS[0],
+                      payload={'method': 'ledger_entry', 'params': [{'index': object_id, 'ledger_index': ledger_index}]},
+                  )
                   (ROOT / f'rpc-{route_kind}-{position}.json').write_text(json.dumps(rpc_payload, indent=2) + '\n')
                   rpc_result = rpc_payload.get('result', {})
                   node = rpc_result.get('node')
-                  if not isinstance(node, dict):
-                      raise SystemExit(f'{route_kind} {object_id} is missing from source ledger')
 
-                  common = sorted(set(raw) & set(node))
-                  mismatches = [name for name in common if normalize(raw[name], name) != normalize(node[name], name)]
-                  identity_ok = raw.get('index') == node.get('index') == object_id and raw.get('LedgerEntryType') == node.get('LedgerEntryType') == ledger_type
+                  common = sorted(set(raw or {}) & set(node or {}))
+                  mismatches = [name for name in common if normalize(raw[name], name) != normalize(node[name], name)] if raw and node else ['missing_raw_or_node']
+                  identity_ok = bool(
+                      raw
+                      and node
+                      and node.get('index') == object_id
+                      and node.get('LedgerEntryType') == ledger_type
+                      and (raw.get('index') in (None, object_id))
+                      and raw.get('LedgerEntryType') == ledger_type
+                  )
                   passed = detail_status == 200 and rpc_status == 200 and len(common) >= 8 and not mismatches and identity_ok
                   all_passed = all_passed and passed
                   samples.append({
@@ -175,12 +238,20 @@ jobs:
                       'identityMatches': identity_ok,
                       'passed': passed,
                   })
-              kind_passed = collection_status == 200 and len(samples) == 3 and all(sample['passed'] for sample in samples)
+
+              kind_passed = collection_status == 200 and len(ids) == 3 and len(samples) == 3 and all(sample['passed'] for sample in samples)
               all_passed = all_passed and kind_passed
-              comparisons[route_kind] = {'collectionHttpStatus': collection_status, 'sampleCount': len(samples), 'samples': samples, 'passed': kind_passed}
+              comparisons[route_kind] = {
+                  'collectionUrl': collection_url,
+                  'collectionHttpStatus': collection_status,
+                  'collectionItemCount': len(items),
+                  'sampleCount': len(samples),
+                  'samples': samples,
+                  'passed': kind_passed,
+              }
 
           summary = {
-              'schemaVersion': 1,
+              'schemaVersion': 2,
               'generatedAt': datetime.datetime.now(datetime.timezone.utc).isoformat().replace('+00:00', 'Z'),
               'publicWatermark': watermark,
               'sourceLedgers': source_ledgers,
