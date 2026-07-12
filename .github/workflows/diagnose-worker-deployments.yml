@@ -1,0 +1,46 @@
+name: Diagnose Worker deployments
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/diagnose-worker-deployments.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Capture active deployments and versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=worker-deployments
+          mkdir -p "$ROOT"
+          base="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/xrpl-lending-monitor"
+          auth=(-H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")
+          for endpoint in settings deployments versions; do
+            status="$(curl --silent --show-error "${auth[@]}" -o "$ROOT/$endpoint.json" -w '%{http_code}' "$base/$endpoint" || true)"
+            printf '%s\n' "$status" > "$ROOT/$endpoint.status"
+          done
+          jq -n \
+            --slurpfile settings "$ROOT/settings.json" \
+            --slurpfile deployments "$ROOT/deployments.json" \
+            --slurpfile versions "$ROOT/versions.json" \
+            '{settingsHttpStatus:(input_filename|length),settings:$settings[0],deployments:$deployments[0],versions:$versions[0]}' \
+            > "$ROOT/summary.json"
+          cat "$ROOT/deployments.json"
+          cat "$ROOT/versions.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: worker-deployments
+          path: worker-deployments
+          if-no-files-found: error
+          retention-days: 7
