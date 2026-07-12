@@ -22,7 +22,24 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out implementation
+        uses: actions/checkout@v4
+
+      - name: Check out production current-state identity
+        uses: actions/checkout@v4
+        with:
+          ref: current-state-data
+          path: .local/current-state-data
+          sparse-checkout: read-model/manifest.json
+          sparse-checkout-cone-mode: false
+
+      - name: Check out production history identity
+        uses: actions/checkout@v4
+        with:
+          ref: history-data
+          path: .local/history-data
+          sparse-checkout: history/publication.json
+          sparse-checkout-cone-mode: false
 
       - uses: pnpm/action-setup@v4
         with:
@@ -40,12 +57,67 @@ jobs:
           test -n "$CLOUDFLARE_API_TOKEN" || { echo "CLOUDFLARE_API_TOKEN is unavailable" >&2; exit 1; }
           test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "CLOUDFLARE_ACCOUNT_ID is unavailable" >&2; exit 1; }
 
+      - name: Bind deploy config to the active production checkpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          source = json.loads(Path('wrangler.jsonc').read_text())
+          current = json.loads(Path('.local/current-state-data/read-model/manifest.json').read_text())
+          history = json.loads(Path('.local/history-data/history/publication.json').read_text())
+
+          assert source['triggers']['crons'] == ['*/5 * * * *']
+          assert source['vars']['APP_NETWORK'] == 'devnet'
+          assert source['vars']['MAINNET_ENABLED'] == 'false'
+          assert current['complete'] is True
+          assert history['complete'] is True
+          assert current['epochId'] == history['epochId'] == 'devnet-3371675'
+          assert current['ledgerIndex'] == history['endLedgerIndex']
+          assert current['ledgerHash'] == history['endLedgerHash']
+          assert isinstance(current['snapshotId'], str) and current['snapshotId']
+          assert isinstance(current['ledgerIndex'], int) and current['ledgerIndex'] > 0
+          assert isinstance(current['ledgerHash'], str) and len(current['ledgerHash']) == 64
+
+          config = json.loads(json.dumps(source))
+          variables = config['vars']
+          variables['CURRENT_STATE_REPLACEMENT_GITHUB_BRANCH'] = 'current-state-data'
+          variables['CURRENT_STATE_REPLACEMENT_SNAPSHOT_ID'] = current['snapshotId']
+          variables['REPLACEMENT_BASE_REBASE_ENABLED'] = 'true'
+          variables['REPLACEMENT_BASE_EPOCH_ID'] = current['epochId']
+          variables['REPLACEMENT_BASE_SNAPSHOT_ID'] = current['snapshotId']
+          variables['REPLACEMENT_BASE_LEDGER_INDEX'] = str(current['ledgerIndex'])
+          variables['REPLACEMENT_BASE_LEDGER_HASH'] = current['ledgerHash']
+          variables.pop('REPLACEMENT_BASE_CUTOVER_TOKEN', None)
+
+          Path('wrangler.production.jsonc').write_text(json.dumps(config, indent=2) + '\n')
+          identity = {
+              'epochId': current['epochId'],
+              'snapshotId': current['snapshotId'],
+              'ledgerIndex': current['ledgerIndex'],
+              'ledgerHash': current['ledgerHash'],
+              'historyPublicationSha256': history['publicationSha256'],
+          }
+          Path('production-deploy-checkpoint.json').write_text(json.dumps(identity, indent=2) + '\n')
+          PY
+
+          jq -e '
+            .triggers.crons == ["*/5 * * * *"]
+            and .vars.APP_NETWORK == "devnet"
+            and .vars.MAINNET_ENABLED == "false"
+            and .vars.CURRENT_STATE_REPLACEMENT_GITHUB_BRANCH == "current-state-data"
+            and (.vars.REPLACEMENT_BASE_LEDGER_INDEX | tonumber) > 0
+            and (.vars | has("REPLACEMENT_BASE_CUTOVER_TOKEN") | not)
+          ' wrangler.production.jsonc > /dev/null
+
       - name: Build application
         run: pnpm build
 
       - name: Deploy Worker
         id: deploy
-        run: pnpm exec wrangler deploy
+        run: pnpm exec wrangler deploy --config wrangler.production.jsonc
 
       - name: Report deploy status
         if: always()
@@ -53,13 +125,24 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           DEPLOY_OUTCOME: ${{ steps.deploy.outcome }}
         run: |
-          jq -n \
-            --arg runId "$GITHUB_RUN_ID" \
-            --arg runUrl "https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
-            --arg headSha "$GITHUB_SHA" \
-            --arg outcome "$DEPLOY_OUTCOME" \
-            '{runId:$runId,runUrl:$runUrl,headSha:$headSha,outcome:$outcome}' \
-            > deploy-status.json
+          if [ -s production-deploy-checkpoint.json ]; then
+            jq -n \
+              --arg runId "$GITHUB_RUN_ID" \
+              --arg runUrl "https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+              --arg headSha "$GITHUB_SHA" \
+              --arg outcome "$DEPLOY_OUTCOME" \
+              --slurpfile checkpoint production-deploy-checkpoint.json \
+              '{runId:$runId,runUrl:$runUrl,headSha:$headSha,outcome:$outcome,checkpoint:$checkpoint[0]}' \
+              > deploy-status.json
+          else
+            jq -n \
+              --arg runId "$GITHUB_RUN_ID" \
+              --arg runUrl "https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+              --arg headSha "$GITHUB_SHA" \
+              --arg outcome "$DEPLOY_OUTCOME" \
+              '{runId:$runId,runUrl:$runUrl,headSha:$headSha,outcome:$outcome,checkpoint:null}' \
+              > deploy-status.json
+          fi
           API_PATH="repos/${GITHUB_REPOSITORY}/contents/.github/production-deploy-status.json"
           CONTENT=$(base64 -w0 deploy-status.json)
           EXISTING_SHA=$(gh api "$API_PATH" --jq .sha 2>/dev/null || true)
