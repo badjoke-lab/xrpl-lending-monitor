@@ -1,0 +1,149 @@
+name: M5-5 browser final current architecture
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/m5-5-browser-final-current.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: m5-5-browser-final-current
+  cancel-in-progress: true
+
+jobs:
+  browser-final:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      BASE_URL: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+      OUTPUT: m5-5-browser-final-current
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Require current-architecture pre-soak readiness
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$OUTPUT"
+          : > "$OUTPUT/readiness-attempts.ndjson"
+          passed=false
+          for attempt in $(seq 1 120); do
+            curl --fail-with-body --silent --show-error --retry 2 "$BASE_URL/api/status/pre-soak-readiness" > "$OUTPUT/pre-soak-readiness.json" || true
+            jq -n --argjson attempt "$attempt" --slurpfile readiness "$OUTPUT/pre-soak-readiness.json" '{attempt:$attempt,readiness:($readiness[0] // null)}' >> "$OUTPUT/readiness-attempts.ndjson"
+            if jq -e '
+              .passed == true
+              and .architecture == "rolling_checkpoint_fast_lane_v1"
+              and .checks.devnet_boundary.passed == true
+              and .checks.production_base.passed == true
+              and .checks.immutable_history.passed == true
+              and .checks.replacement_base.passed == true
+              and .checks.fast_lane_binding.passed == true
+              and .checks.fast_lane_state.passed == true
+              and .checks.fast_lane_freshness.passed == true
+              and .checks.projection_parity.passed == true
+              and .checks.recent_five_minute_runs.passed == true
+              and .checks.protected_collector.passed == true
+            ' "$OUTPUT/pre-soak-readiness.json" > /dev/null 2>&1; then
+              passed=true
+              break
+            fi
+            sleep 5
+          done
+          test "$passed" = true
+
+      - name: Capture collector preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error --retry 3 "$BASE_URL/api/status/collector" > "$OUTPUT/canonical-collector.json"
+          curl --fail-with-body --silent --show-error --retry 3 "$BASE_URL/api/overview" > "$OUTPUT/overview.json"
+          jq -n \
+            --slurpfile collector "$OUTPUT/canonical-collector.json" \
+            --slurpfile overview "$OUTPUT/overview.json" \
+            '{
+              status:"healthy",
+              cursor:{
+                last_processed_ledger:$overview[0].current_state_watermark.ledger_index,
+                latest_observed_ledger:$overview[0].current_state_watermark.ledger_index,
+                lag_ledgers:0
+              },
+              consecutive_failures:$collector[0].consecutive_failures,
+              error:$collector[0].error,
+              freshness_source:$overview[0].current_state_watermark.source,
+              canonical_collector:$collector[0]
+            }' > "$OUTPUT/collector-preflight.json"
+          jq -e '
+            .status == "healthy"
+            and .cursor.lag_ledgers == 0
+            and .consecutive_failures == 0
+            and .error == null
+            and .freshness_source == "fast_lane"
+          ' "$OUTPUT/collector-preflight.json" > /dev/null
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run 15-route browser regression and behavior smoke
+        shell: bash
+        env:
+          M5_BROWSER_OUTPUT_DIR: m5-5-browser-final-current
+          M5_BROWSER_REQUEST_TIMEOUT_MS: 120000
+        run: |
+          set -o pipefail
+          node scripts/run-m5-5-browser-regression-current.mjs 2>&1 | tee "$OUTPUT/runner.log"
+
+      - name: Evaluate current-architecture browser exit evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          node - <<'NODE'
+          const fs = require('node:fs')
+          const path = require('node:path')
+          const root = 'm5-5-browser-final-current'
+          const browser = JSON.parse(fs.readFileSync(path.join(root, 'summary.json'), 'utf8'))
+          const readiness = JSON.parse(fs.readFileSync(path.join(root, 'pre-soak-readiness.json'), 'utf8'))
+          const collector = JSON.parse(fs.readFileSync(path.join(root, 'collector-preflight.json'), 'utf8'))
+          const expectedRoutes = ['overview','vaults','vault-detail','loan-brokers','loan-broker-detail','loans','loan-detail','activity','transaction-detail','lifecycle','archived-objects','archived-detail','cover-loss','search','network-status']
+          const expectedBehaviors = ['vault_detail_rendering','loan_broker_vault_link','loan_relationship_links','loan_lifecycle_history_rendering','lifecycle_current_link','archived_context_presentation','search_current_loan_link','network_status_freshness_presentation']
+          const exact = (values, expected) => values.length === expected.length && new Set(values).size === expected.length && expected.every((value) => values.includes(value))
+          const checks = {
+            exact_route_matrix: exact(browser.routes.map((item) => item.name), expectedRoutes) && browser.routes.every((item) => item.passed === true),
+            required_behavior_checks: exact(browser.behavior_checks.map((item) => item.check), expectedBehaviors) && browser.behavior_checks.every((item) => item.passed === true),
+            browser_result: browser.result?.passed === true && browser.result?.route_count === 15 && browser.result?.behavior_check_count === 8,
+            technical_findings_empty: Array.isArray(browser.technical_findings) && browser.technical_findings.length === 0,
+            browser_collector_healthy: browser.collector?.status === 'healthy' && browser.collector?.lag === 0 && browser.collector?.consecutive_failures === 0,
+            preflight_collector_healthy: collector.status === 'healthy' && collector.cursor?.lag_ledgers === 0 && collector.consecutive_failures === 0 && collector.error === null,
+            current_architecture_readiness: readiness.passed === true && readiness.architecture === 'rolling_checkpoint_fast_lane_v1',
+            bounded_witness_selection: ['bounded_set_intersection','bounded_detail_fallback'].includes(browser.witnesses?.lifecycle_selection_mode) && Number.isSafeInteger(browser.witnesses?.lifecycle_detail_probes) && browser.witnesses.lifecycle_detail_probes <= 4,
+            request_count_evidence_present: browser.request_counts?.discovery_logical_api_requests > 0 && browser.request_counts?.discovery_http_attempts >= browser.request_counts?.discovery_logical_api_requests && browser.request_counts?.browser_api_requests > 0,
+          }
+          const failed = Object.entries(checks).filter(([, passed]) => !passed).map(([name]) => name)
+          const evaluation = {
+            evaluated_at: new Date().toISOString(),
+            gate: 'm5-5-browser-current-architecture-exit',
+            checks: Object.entries(checks).map(([name, passed]) => ({name, passed})),
+            result: {passed: failed.length === 0, failed_checks: failed, route_count: browser.routes.length, behavior_check_count: browser.behavior_checks.length},
+          }
+          fs.writeFileSync(path.join(root, 'exit-evaluation.json'), JSON.stringify(evaluation, null, 2) + '\n')
+          fs.writeFileSync(path.join(root, 'exit-evaluation.md'), `# M5-5 current-architecture browser exit\n\n- Result: **${evaluation.result.passed ? 'passed' : 'failed'}**\n- Routes: **${evaluation.result.route_count}/15**\n- Behavior checks: **${evaluation.result.behavior_check_count}/8**\n- Failed checks: **${failed.length}**\n`)
+          console.log(JSON.stringify(evaluation, null, 2))
+          if (!evaluation.result.passed) process.exit(1)
+          NODE
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: m5-5-browser-final-current
+          path: m5-5-browser-final-current
+          if-no-files-found: error
+          retention-days: 30
