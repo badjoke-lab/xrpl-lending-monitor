@@ -54,6 +54,23 @@ function references(
   }))
 }
 
+function boundedAssetReferences(
+  values: readonly HistoryExactIndexReference[],
+  maxAssetReads = EXACT_DETAIL_MAX_ASSET_READS,
+): HistoryExactIndexReference[] {
+  const selectedAssets = new Set<string>()
+  const selected: HistoryExactIndexReference[] = []
+  for (const reference of values) {
+    const assetKey = `${reference.segmentId}:${reference.fileKind}`
+    if (!selectedAssets.has(assetKey)) {
+      if (selectedAssets.size >= maxAssetReads) continue
+      selectedAssets.add(assetKey)
+    }
+    selected.push(reference)
+  }
+  return selected
+}
+
 function referencedTransactionHashes(values: readonly HistoryExactIndexReference[]): Set<string> {
   return new Set(values.map((reference) => reference.searchResult?.transactionHash).filter((value): value is string => Boolean(value)))
 }
@@ -118,9 +135,10 @@ export async function listHybridExactObjectHistory(options: {
       && reference.searchResult.objectId === options.objectId,
     direction: 'desc',
   })
-  const transactionHashes = referencedTransactionHashes(lookup.references)
-  const immutable = lookup.references.length === 0 ? [] : (await options.reader.readReferenced<NormalizedObjectChange>({
-    references: references(lookup.references),
+  const bounded = boundedAssetReferences(lookup.references)
+  const transactionHashes = referencedTransactionHashes(bounded)
+  const immutable = bounded.length === 0 ? [] : (await options.reader.readReferenced<NormalizedObjectChange>({
+    references: references(bounded),
     predicate: (change) =>
       change.objectType === options.objectType
       && change.objectId === options.objectId
@@ -157,9 +175,10 @@ export async function listHybridExactLoanLifecycle(options: {
     referencePredicate: (reference) => reference.searchResult?.loanId === options.loanId,
     direction: 'asc',
   })
-  const transactionHashes = referencedTransactionHashes(lookup.references)
-  const immutable = lookup.references.length === 0 ? [] : (await options.reader.readReferenced<SegmentLoanLifecycleEvent>({
-    references: references(lookup.references),
+  const bounded = boundedAssetReferences(lookup.references)
+  const transactionHashes = referencedTransactionHashes(bounded)
+  const immutable = bounded.length === 0 ? [] : (await options.reader.readReferenced<SegmentLoanLifecycleEvent>({
+    references: references(bounded),
     predicate: (event) => event.loanId === options.loanId && transactionHashes.has(event.transactionHash),
     limit: EXACT_DETAIL_MAX_RECORDS,
     direction: 'asc',
@@ -191,9 +210,10 @@ export async function listHybridExactLoanLifecycleEvents(options: {
     referencePredicate: (reference) => reference.searchResult?.loanId === options.list.loanId,
     direction: 'desc',
   })
-  const transactionHashes = referencedTransactionHashes(lookup.references)
-  const immutable = lookup.references.length === 0 ? [] : (await options.reader.readReferenced<SegmentLoanLifecycleEvent>({
-    references: references(lookup.references),
+  const bounded = boundedAssetReferences(lookup.references)
+  const transactionHashes = referencedTransactionHashes(bounded)
+  const immutable = bounded.length === 0 ? [] : (await options.reader.readReferenced<SegmentLoanLifecycleEvent>({
+    references: references(bounded),
     predicate: (event) =>
       event.loanId === options.list.loanId
       && (options.list.eventType === null || options.list.eventType === undefined || event.eventType === options.list.eventType)
@@ -230,9 +250,10 @@ export async function getHybridExactArchivedObject(options: {
       && reference.searchResult.objectId === options.objectId,
     direction: 'desc',
   })
-  const transactionHashes = referencedTransactionHashes(lookup.references)
-  const immutable = lookup.references.length === 0 ? [] : (await options.reader.readReferenced<SegmentArchivedObjectRecord>({
-    references: references(lookup.references),
+  const bounded = boundedAssetReferences(lookup.references)
+  const transactionHashes = referencedTransactionHashes(bounded)
+  const immutable = bounded.length === 0 ? [] : (await options.reader.readReferenced<SegmentArchivedObjectRecord>({
+    references: references(bounded),
     predicate: (archive) =>
       archive.objectType === options.objectType
       && archive.objectId === options.objectId
