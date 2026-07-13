@@ -1,0 +1,53 @@
+name: Diagnose stalled fast lane before soak
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/diagnose-soak-fast-lane-state.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      BASE_URL: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Capture D1 fast-lane state and public status
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=diagnose-soak-fast-lane-state
+          mkdir -p "$ROOT"
+          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote --command "SELECT * FROM fast_lane_shadow_state WHERE network='devnet';" --json > "$ROOT/state-raw.txt"
+          sed -n '/^\[/,$p' "$ROOT/state-raw.txt" > "$ROOT/state.json"
+          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote --command "SELECT * FROM fast_lane_shadow_base_binding WHERE network='devnet';" --json > "$ROOT/binding-raw.txt"
+          sed -n '/^\[/,$p' "$ROOT/binding-raw.txt" > "$ROOT/binding.json"
+          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote --command "SELECT run_at,status,start_ledger_index,end_ledger_index,latest_observed_ledger,lag_ledgers,ledgers_processed,lending_transactions,coalesced_object_rows,persistence_rows_read,persistence_rows_written FROM fast_lane_shadow_run_metrics WHERE network='devnet' ORDER BY run_at DESC LIMIT 40;" --json > "$ROOT/metrics-raw.txt"
+          sed -n '/^\[/,$p' "$ROOT/metrics-raw.txt" > "$ROOT/metrics.json"
+          curl --fail-with-body --silent --show-error --retry 3 "$BASE_URL/api/status/pre-soak-readiness" > "$ROOT/readiness.json"
+          curl --fail-with-body --silent --show-error --retry 3 "$BASE_URL/api/overview" > "$ROOT/overview.json"
+          curl --fail-with-body --silent --show-error --retry 3 "$BASE_URL/api/status/fast-lane-diff?limit=500" > "$ROOT/diff.json"
+          jq -n --slurpfile state "$ROOT/state.json" --slurpfile binding "$ROOT/binding.json" --slurpfile metrics "$ROOT/metrics.json" --slurpfile readiness "$ROOT/readiness.json" --slurpfile overview "$ROOT/overview.json" --slurpfile diff "$ROOT/diff.json" '{state:$state[0],binding:$binding[0],metrics:$metrics[0],readiness:$readiness[0],overview:$overview[0],diff:$diff[0]}' > "$ROOT/summary.json"
+          jq '{state:.state[0].results,binding:.binding[0].results,latestMetrics:(.metrics[0].results[0:10]),readinessPassed:.readiness.passed,current:.overview.current_state_watermark,diffStatus:.diff.status,diffReason:.diff.reason}' "$ROOT/summary.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: diagnose-soak-fast-lane-state
+          path: diagnose-soak-fast-lane-state
+          if-no-files-found: error
+          retention-days: 7
