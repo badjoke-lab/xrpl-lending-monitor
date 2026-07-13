@@ -15,7 +15,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 10
     steps:
-      - name: Capture emergency recovery status
+      - name: Capture emergency recovery and child status
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -25,6 +25,8 @@ jobs:
           $run = $runs.workflow_runs | Sort-Object {[datetime]$_.created_at} -Descending | Select-Object -First 1
           if (-not $run) { throw 'No emergency recovery run found' }
           $jobs = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$($run.id)/jobs?per_page=100" | ConvertFrom-Json
+          $children = gh api "repos/$env:GITHUB_REPOSITORY/actions/workflows/rolling-checkpoint-candidate.yml/runs?event=workflow_dispatch&per_page=20" | ConvertFrom-Json
+          $cutovers = gh api "repos/$env:GITHUB_REPOSITORY/actions/workflows/rolling-checkpoint-live-cutover.yml/runs?event=workflow_dispatch&per_page=20" | ConvertFrom-Json
           $payload = [ordered]@{
             capturedAt = (Get-Date).ToUniversalTime().ToString('o')
             run = [ordered]@{
@@ -48,6 +50,12 @@ jobs:
                   [ordered]@{name=$_.name;status=$_.status;conclusion=$_.conclusion;number=$_.number}
                 })
               }
+            })
+            latestCandidateRuns = @($children.workflow_runs | Sort-Object {[datetime]$_.created_at} -Descending | Select-Object -First 8 | ForEach-Object {
+              [ordered]@{id=$_.id;status=$_.status;conclusion=$_.conclusion;headSha=$_.head_sha;createdAt=$_.created_at;updatedAt=$_.updated_at;url=$_.html_url}
+            })
+            latestCutoverRuns = @($cutovers.workflow_runs | Sort-Object {[datetime]$_.created_at} -Descending | Select-Object -First 5 | ForEach-Object {
+              [ordered]@{id=$_.id;status=$_.status;conclusion=$_.conclusion;headSha=$_.head_sha;createdAt=$_.created_at;updatedAt=$_.updated_at;url=$_.html_url}
             })
           } | ConvertTo-Json -Depth 8
           $bytes = [System.Text.Encoding]::UTF8.GetBytes($payload + "`n")
