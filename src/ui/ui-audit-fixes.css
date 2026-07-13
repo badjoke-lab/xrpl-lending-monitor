@@ -74,6 +74,13 @@ body,
   max-width: 100%;
 }
 
+.schedule-derived-card {
+  border-color: rgba(94, 216, 255, 0.28);
+  background:
+    linear-gradient(180deg, rgba(26, 65, 82, 0.42), rgba(11, 25, 36, 0.88)),
+    var(--surface-panel);
+}
+
 .lifecycle-delta-list {
   display: grid;
   gap: 1px;
