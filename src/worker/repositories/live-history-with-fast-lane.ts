@@ -17,7 +17,7 @@ import {
   listLiveLoanLifecycleAfterBoundary as listD1LoanLifecycle,
   listLiveLoanLifecycleEventsAfterBoundary as listD1LoanLifecycleEvents,
   listLiveObjectHistoryAfterBoundary as listD1ObjectHistory,
-} from './live-history-after-boundary'
+} from './live-history-d1-after-boundary'
 
 function dedupe<T>(items: readonly T[], key: (item: T) => string): T[] {
   const seen = new Set<string>()
