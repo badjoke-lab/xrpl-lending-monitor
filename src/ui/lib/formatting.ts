@@ -56,7 +56,7 @@ export function statusTone(status: string | null | undefined): 'positive' | 'war
   if (!status) return 'neutral'
 
   const normalized = status.toLowerCase()
-  if (['healthy', 'current', 'enabled', 'supported', 'success', 'ready'].includes(normalized)) {
+  if (['healthy', 'current', 'enabled', 'supported', 'success', 'ready', 'tessuccess'].includes(normalized)) {
     return 'positive'
   }
   if (['stale', 'delayed', 'building', 'payment_due', 'default_eligible'].includes(normalized)) {
@@ -69,6 +69,12 @@ export function statusTone(status: string | null | undefined): 'positive' | 'war
 }
 
 export function titleCase(value: string): string {
+  const hasSeparator = /[_\s-]/.test(value)
+  const hasUppercase = /[A-Z]/.test(value)
+  const hasLowercase = /[a-z]/.test(value)
+
+  if (!hasSeparator && hasUppercase && hasLowercase) return value
+
   return value
     .split(/[_\s-]+/)
     .filter(Boolean)

@@ -152,13 +152,11 @@ function collection(data: unknown[], availability: 'available' | 'unavailable' =
   }
 }
 
-test('renders independent Loan states and opens verified detail relationships', async ({ page }) => {
-  await mockBase(page)
-  await page.route('**/api/loans?*', (route) => route.fulfill({ json: collection([loan]) }))
+async function mockLoanDetail(page: Page, detail = loan) {
   await page.route(`**/api/loans/${loanId}`, (route) => route.fulfill({
     json: {
       network: 'devnet', kind: 'loan', epoch: { id: 'epoch-1', status: 'current' }, snapshot,
-      data: loan, availability: { state: 'available', reason: null },
+      data: detail, availability: { state: 'available', reason: null },
       provenance: { object: 'direct', asset_relationship: 'direct', schedule_status: 'derived' },
     },
   }))
@@ -168,6 +166,12 @@ test('renders independent Loan states and opens verified detail relationships', 
   await page.route(`**/api/objects/Loan/${loanId}/history?limit=25`, (route) => route.fulfill({
     json: { network: 'devnet', object_type: 'Loan', object_id: loanId, data: [objectChange], page: { limit: 25, next_cursor: null } },
   }))
+}
+
+test('renders independent Loan states and opens verified detail relationships', async ({ page }) => {
+  await mockBase(page)
+  await page.route('**/api/loans?*', (route) => route.fulfill({ json: collection([loan]) }))
+  await mockLoanDetail(page)
 
   await page.goto('/loans')
   await expect(page.getByRole('heading', { level: 1, name: 'Loans' })).toBeVisible()
@@ -179,7 +183,8 @@ test('renders independent Loan states and opens verified detail relationships', 
   await page.locator('.loan-table').getByRole('link', { name: /C{8}/ }).click()
   await expect(page).toHaveURL(new RegExp(`/loans/${loanId}$`))
   await expect(page.getByRole('heading', { level: 2, name: 'Payment schedule' })).toBeVisible()
-  await expect(page.getByText('Default eligibility is a schedule calculation. It does not mean the on-ledger Loan is defaulted.')).toBeVisible()
+  await expect(page.getByText('Schedule-derived eligibility is a calculation. It does not mean the on-ledger Loan is defaulted.')).toBeVisible()
+  await expect(page.getByText('Schedule-derived state', { exact: true }).first()).toBeVisible()
   await expect(page.getByRole('link', { name: 'Open Broker' })).toHaveAttribute('href', `/loan-brokers/${brokerId}`)
   await expect(page.getByRole('link', { name: 'Open Vault' })).toHaveAttribute('href', `/vaults/${vaultId}`)
   await expect(page.getByRole('heading', { level: 2, name: 'Payment history and lifecycle' })).toBeVisible()
@@ -219,4 +224,32 @@ test('exposes Loans as a primary mobile destination', async ({ page }) => {
   await expect(page.locator('.sidebar')).toBeHidden()
   await expect(page.locator('.mobile-bottom-nav').getByRole('link', { name: 'Loans' })).toHaveAttribute('aria-current', 'page')
   await expect(page.locator('.loan-filter-form')).toBeVisible()
+})
+
+test('keeps a long-asset Loan detail inside the mobile viewport', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockBase(page)
+  const longAssetKey = `MPT:${'D'.repeat(96)}`
+  const longAssetLoan = {
+    ...loan,
+    asset: { ...loan.asset, type: 'mpt', key: longAssetKey, symbol: longAssetKey },
+    related_vault: {
+      ...loan.related_vault,
+      asset: { ...loan.related_vault.asset, type: 'mpt', key: longAssetKey, symbol: longAssetKey },
+    },
+  }
+  await mockLoanDetail(page, longAssetLoan)
+
+  await page.goto(`/loans/${loanId}`)
+  await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
+  await expect(page.locator('.main-content > .breadcrumbs')).toBeVisible()
+  await expect(page.locator('.page-stack > .breadcrumbs')).toBeHidden()
+  await expect(page.getByText('Schedule-derived eligibility at', { exact: true })).toBeVisible()
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+  await expect.poll(() => page.evaluate(() => {
+    const body = document.querySelector<HTMLElement>('.application-body')
+    const nav = document.querySelector<HTMLElement>('.mobile-bottom-nav')
+    if (!body || !nav) return false
+    return Number.parseFloat(getComputedStyle(body).paddingBottom) >= nav.getBoundingClientRect().height
+  })).toBe(true)
 })

@@ -32,10 +32,19 @@ function utilization(vault: VaultRecord): string {
     : `${(vault.derived.utilization_bps / 100).toFixed(2)}%`
 }
 
+function initiallyShowFilters(): boolean {
+  return typeof window === 'undefined' || !window.matchMedia('(max-width: 680px)').matches
+}
+
+function copyVaultId(value: string): void {
+  void navigator.clipboard?.writeText(value)
+}
+
 export function VaultsPage({ onNavigate }: VaultsPageProps) {
   const [draftQuery, setDraftQuery] = useState('')
   const [draftSort, setDraftSort] = useState<'id_asc' | 'id_desc'>('id_asc')
   const [draftLoss, setDraftLoss] = useState<'all' | 'true' | 'false'>('all')
+  const [filtersOpen, setFiltersOpen] = useState(initiallyShowFilters)
   const [filters, setFilters] = useState<VaultFilters>({
     query: '',
     sort: 'id_asc',
@@ -67,46 +76,66 @@ export function VaultsPage({ onNavigate }: VaultsPageProps) {
         </div>
         <div className="page-actions">
           <button className="secondary-button" type="button" onClick={reload}>Refresh</button>
-          <a className="primary-button" href={url}>Vault JSON</a>
+          <a className="secondary-button developer-action" href={url}>Vault JSON</a>
         </div>
       </header>
 
       <Panel title="Find Vaults" description="Search factual identity fields and retain bounded snapshot pagination">
-        <form
-          className="vault-filter-form"
-          onSubmit={(event) => {
-            event.preventDefault()
-            setFilters({ query: draftQuery.trim(), sort: draftSort, loss: draftLoss })
-            setCursor(null)
-            setHistory([])
-          }}
-        >
-          <label>
-            <span>Search</span>
-            <input
-              value={draftQuery}
-              onChange={(event) => setDraftQuery(event.target.value)}
-              placeholder="Vault ID, owner, account, asset, domain"
-              maxLength={128}
-            />
-          </label>
-          <label>
-            <span>Loss</span>
-            <select value={draftLoss} onChange={(event) => setDraftLoss(event.target.value as 'all' | 'true' | 'false')}>
-              <option value="all">All</option>
-              <option value="true">Has unrealized loss</option>
-              <option value="false">No unrealized loss</option>
-            </select>
-          </label>
-          <label>
-            <span>Order</span>
-            <select value={draftSort} onChange={(event) => setDraftSort(event.target.value as 'id_asc' | 'id_desc')}>
-              <option value="id_asc">Vault ID ascending</option>
-              <option value="id_desc">Vault ID descending</option>
-            </select>
-          </label>
-          <button className="primary-button" type="submit">Apply</button>
-        </form>
+        <div className="vault-filter-toolbar">
+          <button
+            className="secondary-button"
+            type="button"
+            aria-expanded={filtersOpen}
+            aria-controls="vault-filter-fields"
+            onClick={() => setFiltersOpen((open) => !open)}
+          >
+            {filtersOpen ? 'Hide filters' : 'Filters'}
+          </button>
+          {filters.query || filters.loss !== 'all' || filters.sort !== 'id_asc' ? (
+            <span>Filters applied</span>
+          ) : (
+            <span>Default order · no loss filter</span>
+          )}
+        </div>
+        {filtersOpen ? (
+          <form
+            id="vault-filter-fields"
+            className="vault-filter-form"
+            onSubmit={(event) => {
+              event.preventDefault()
+              setFilters({ query: draftQuery.trim(), sort: draftSort, loss: draftLoss })
+              setCursor(null)
+              setHistory([])
+              if (window.matchMedia('(max-width: 680px)').matches) setFiltersOpen(false)
+            }}
+          >
+            <label>
+              <span>Search</span>
+              <input
+                value={draftQuery}
+                onChange={(event) => setDraftQuery(event.target.value)}
+                placeholder="Vault ID, owner, account, asset, domain"
+                maxLength={128}
+              />
+            </label>
+            <label>
+              <span>Loss</span>
+              <select value={draftLoss} onChange={(event) => setDraftLoss(event.target.value as 'all' | 'true' | 'false')}>
+                <option value="all">All</option>
+                <option value="true">Has unrealized loss</option>
+                <option value="false">No unrealized loss</option>
+              </select>
+            </label>
+            <label>
+              <span>Order</span>
+              <select value={draftSort} onChange={(event) => setDraftSort(event.target.value as 'id_asc' | 'id_desc')}>
+                <option value="id_asc">Vault ID ascending</option>
+                <option value="id_desc">Vault ID descending</option>
+              </select>
+            </label>
+            <button className="primary-button" type="submit">Apply</button>
+          </form>
+        ) : null}
       </Panel>
 
       {resource.state === 'loading' ? <LoadingBlock label="Loading current Vaults" /> : null}
@@ -124,26 +153,59 @@ export function VaultsPage({ onNavigate }: VaultsPageProps) {
           {response.data.length === 0 ? (
             <EmptyBlock message={response.page.next_cursor ? 'No Vaults matched in this bounded shard window. Continue to scan the next window.' : 'No Vaults matched the current filters.'} />
           ) : (
-            <div className="table-scroll" tabIndex={0} aria-label="Current Vaults table">
-              <table className="data-table vault-table">
-                <thead>
-                  <tr>
-                    <th scope="col">Vault</th>
-                    <th scope="col">Asset</th>
-                    <th scope="col">Total</th>
-                    <th scope="col">Available</th>
-                    <th scope="col">Used</th>
-                    <th scope="col">Utilization</th>
-                    <th scope="col">Loss</th>
-                    <th scope="col">Last ledger</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {response.data.map((vault) => (
-                    <tr key={vault.id}>
-                      <td>
+            <>
+              <div className="table-scroll vault-desktop-table" tabIndex={0} aria-label="Current Vaults table">
+                <table className="data-table vault-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Vault</th>
+                      <th scope="col">Asset</th>
+                      <th scope="col">Total</th>
+                      <th scope="col">Available</th>
+                      <th scope="col">Used</th>
+                      <th scope="col">Utilization</th>
+                      <th scope="col">Loss</th>
+                      <th scope="col">Last ledger</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {response.data.map((vault) => (
+                      <tr key={vault.id}>
+                        <td>
+                          <a
+                            className="identifier-link mono"
+                            href={`/vaults/${vault.id}`}
+                            title={vault.id}
+                            onClick={(event) => {
+                              event.preventDefault()
+                              onNavigate(`/vaults/${vault.id}`)
+                            }}
+                          >
+                            {truncateMiddle(vault.id)}
+                          </a>
+                          <small className="table-secondary mono">{truncateMiddle(vault.owner, 6)}</small>
+                        </td>
+                        <td><span className="asset-chip">{vault.asset.key}</span></td>
+                        <td className="mono">{amount(vault.assets_total, vault.asset.key)}</td>
+                        <td className="mono">{amount(vault.assets_available, vault.asset.key)}</td>
+                        <td className="mono">{amount(vault.derived.used_assets, vault.asset.key)}</td>
+                        <td>{utilization(vault)}</td>
+                        <td className="mono">{amount(vault.loss_unrealized, vault.asset.key)}</td>
+                        <td className="mono">{formatInteger(vault.previous_ledger_index)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="vault-card-list" aria-label="Current Vaults cards">
+                {response.data.map((vault) => (
+                  <article className="vault-list-card" key={vault.id}>
+                    <header>
+                      <div>
+                        <span>Vault</span>
                         <a
-                          className="identifier-link mono"
+                          className="mono"
                           href={`/vaults/${vault.id}`}
                           title={vault.id}
                           onClick={(event) => {
@@ -151,22 +213,31 @@ export function VaultsPage({ onNavigate }: VaultsPageProps) {
                             onNavigate(`/vaults/${vault.id}`)
                           }}
                         >
-                          {truncateMiddle(vault.id)}
+                          {truncateMiddle(vault.id, 10)}
                         </a>
-                        <small className="table-secondary mono">{truncateMiddle(vault.owner, 6)}</small>
-                      </td>
-                      <td><span className="asset-chip">{vault.asset.key}</span></td>
-                      <td className="mono">{amount(vault.assets_total, vault.asset.key)}</td>
-                      <td className="mono">{amount(vault.assets_available, vault.asset.key)}</td>
-                      <td className="mono">{amount(vault.derived.used_assets, vault.asset.key)}</td>
-                      <td>{utilization(vault)}</td>
-                      <td className="mono">{amount(vault.loss_unrealized, vault.asset.key)}</td>
-                      <td className="mono">{formatInteger(vault.previous_ledger_index)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                      </div>
+                      <button
+                        className="copy-id-button"
+                        type="button"
+                        onClick={() => copyVaultId(vault.id)}
+                        aria-label="Copy full Vault ID"
+                      >Copy ID</button>
+                    </header>
+                    <div className="vault-card-asset"><span className="asset-chip">{vault.asset.key}</span></div>
+                    <dl>
+                      <div><dt>Total</dt><dd className="mono">{amount(vault.assets_total, vault.asset.key)}</dd></div>
+                      <div><dt>Available</dt><dd className="mono">{amount(vault.assets_available, vault.asset.key)}</dd></div>
+                      <div><dt>Used</dt><dd className="mono">{amount(vault.derived.used_assets, vault.asset.key)}</dd></div>
+                      <div><dt>Utilization</dt><dd>{utilization(vault)}</dd></div>
+                    </dl>
+                    <footer>
+                      <span className="mono">Owner {truncateMiddle(vault.owner, 6)}</span>
+                      <span>Ledger {formatInteger(vault.previous_ledger_index)}</span>
+                    </footer>
+                  </article>
+                ))}
+              </div>
+            </>
           )}
 
           <div className="pagination-bar">

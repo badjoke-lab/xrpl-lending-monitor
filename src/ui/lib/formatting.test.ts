@@ -36,6 +36,7 @@ describe('UI formatting helpers', () => {
 
   it('maps statuses to semantic tones', () => {
     expect(statusTone('healthy')).toBe('positive')
+    expect(statusTone('tesSUCCESS')).toBe('positive')
     expect(statusTone('stale')).toBe('warning')
     expect(statusTone('error')).toBe('negative')
     expect(statusTone('uninitialized')).toBe('neutral')
@@ -46,5 +47,11 @@ describe('UI formatting helpers', () => {
     expect(booleanLabel(true)).toBe('Yes')
     expect(booleanLabel(false)).toBe('No')
     expect(titleCase('default_eligible')).toBe('Default Eligible')
+  })
+
+  it('preserves XRPL mixed-case identifiers', () => {
+    expect(titleCase('LoanBrokerSet')).toBe('LoanBrokerSet')
+    expect(titleCase('VaultCreate')).toBe('VaultCreate')
+    expect(titleCase('tesSUCCESS')).toBe('tesSUCCESS')
   })
 })

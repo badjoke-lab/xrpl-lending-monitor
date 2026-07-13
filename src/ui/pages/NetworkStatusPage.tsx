@@ -24,14 +24,14 @@ export function NetworkStatusPage({ status, onReload }: NetworkStatusPageProps) 
           <p className="page-kicker">System</p>
           <h1>Network Status</h1>
           <p className="page-summary">
-            Public operational context for the read-only Devnet collector and its current epoch.
+            Public operational context for the read-only Devnet history indexer and its current epoch.
           </p>
         </div>
         <div className="page-actions">
           <button className="secondary-button" type="button" onClick={onReload}>
             Refresh data
           </button>
-          <a className="primary-button" href="/api/status">
+          <a className="secondary-button developer-action" href="/api/status">
             Status JSON
           </a>
         </div>
@@ -50,9 +50,9 @@ export function NetworkStatusPage({ status, onReload }: NetworkStatusPageProps) 
         <>
           {data.collector.status === 'stale' ? (
             <div className="stale-warning stale-warning-page" role="status">
-              <strong>Collector data is stale</strong>
+              <strong>History index is stale</strong>
               <span>
-                Last successful collection was {formatDuration(data.collector.data_age_seconds)} ago.
+                Last successful history update was {formatDuration(data.collector.data_age_seconds)} ago.
               </span>
             </div>
           ) : null}
@@ -69,12 +69,12 @@ export function NetworkStatusPage({ status, onReload }: NetworkStatusPageProps) 
 
           <section className="status-summary-grid" aria-label="Network status summary">
             <article className="status-summary-card">
-              <span>Collector</span>
+              <span>History indexer</span>
               <StatusBadge value={data.collector.status} />
-              <small>{formatInteger(data.collector.consecutive_failures)} consecutive failures</small>
+              <small>{formatDuration(data.collector.data_age_seconds)} since last success</small>
             </article>
             <article className="status-summary-card">
-              <span>Server</span>
+              <span>XRPL server</span>
               {data.server.state ? <StatusBadge value={data.server.state} /> : <strong>Unavailable</strong>}
               <small>{data.server.version ?? 'Version unavailable'}</small>
             </article>
@@ -84,101 +84,107 @@ export function NetworkStatusPage({ status, onReload }: NetworkStatusPageProps) 
               <small>{formatDuration(data.server.latest_ledger_age_seconds)} old</small>
             </article>
             <article className="status-summary-card">
-              <span>Epoch</span>
+              <span>Current epoch</span>
               <strong className="mono">{data.epoch?.id ?? 'Unavailable'}</strong>
               <small>{data.epoch ? data.epoch.status : 'No current epoch'}</small>
             </article>
           </section>
 
-          <div className="status-detail-grid">
-            <Panel title="Server" description="Validated-ledger source reported by the status API">
-              <DefinitionGrid
-                items={[
-                  { label: 'Network', value: data.network.toUpperCase() },
-                  { label: 'State', value: data.server.state ? <StatusBadge value={data.server.state} /> : 'Unavailable' },
-                  { label: 'Version', value: data.server.version ?? 'Unavailable' },
-                  { label: 'Endpoint', value: data.server.endpoint ?? 'Unavailable', wide: true, mono: true },
-                  { label: 'Complete ledgers', value: data.server.complete_ledgers ?? 'Unavailable', wide: true, mono: true },
-                  { label: 'Validated ledger', value: formatInteger(data.server.latest_validated_ledger), mono: true },
-                  { label: 'Ledger age', value: formatDuration(data.server.latest_ledger_age_seconds) },
-                  {
-                    label: 'Validated hash',
-                    value: data.server.latest_validated_hash ? truncateMiddle(data.server.latest_validated_hash, 12) : 'Unavailable',
-                    wide: true,
-                    mono: true,
-                  },
-                ]}
-              />
-            </Panel>
-
-            <Panel title="Collector" description="Committed cursor and collection health">
-              <DefinitionGrid
-                items={[
-                  { label: 'Status', value: <StatusBadge value={data.collector.status} /> },
-                  { label: 'Data age', value: formatDuration(data.collector.data_age_seconds) },
-                  { label: 'Last processed ledger', value: formatInteger(data.collector.last_processed_ledger), mono: true },
-                  { label: 'Failures', value: formatInteger(data.collector.consecutive_failures) },
-                  { label: 'Last attempt', value: formatUtc(data.collector.last_attempt_at), wide: true },
-                  { label: 'Last success', value: formatUtc(data.collector.last_success_at), wide: true },
-                  {
-                    label: 'Processed hash',
-                    value: data.collector.last_processed_hash ? truncateMiddle(data.collector.last_processed_hash, 12) : 'Unavailable',
-                    wide: true,
-                    mono: true,
-                  },
-                  { label: 'Reset reason', value: data.collector.reset_reason ?? 'None reported', wide: true },
-                ]}
-              />
-            </Panel>
-
-            <Panel title="Current epoch" description="Network reset and historical isolation boundary">
-              {data.epoch ? (
+          <details className="status-details">
+            <summary>
+              <span>Technical status details</span>
+              <small>Server endpoint, hashes, history cursor, epoch boundary, and amendment facts</small>
+            </summary>
+            <div className="status-detail-grid">
+              <Panel title="Server" description="Validated-ledger source reported by the status API">
                 <DefinitionGrid
                   items={[
-                    { label: 'Epoch ID', value: data.epoch.id, mono: true },
-                    { label: 'Status', value: <StatusBadge value={data.epoch.status} /> },
-                    { label: 'First ledger', value: formatInteger(data.epoch.first_ledger_index), mono: true },
-                    { label: 'Last ledger', value: formatInteger(data.epoch.last_ledger_index), mono: true },
-                    { label: 'Started', value: formatUtc(data.epoch.started_at), wide: true },
+                    { label: 'Network', value: data.network.toUpperCase() },
+                    { label: 'State', value: data.server.state ? <StatusBadge value={data.server.state} /> : 'Unavailable' },
+                    { label: 'Version', value: data.server.version ?? 'Unavailable' },
+                    { label: 'Endpoint', value: data.server.endpoint ?? 'Unavailable', wide: true, mono: true },
+                    { label: 'Complete ledgers', value: data.server.complete_ledgers ?? 'Unavailable', wide: true, mono: true },
+                    { label: 'Validated ledger', value: formatInteger(data.server.latest_validated_ledger), mono: true },
+                    { label: 'Ledger age', value: formatDuration(data.server.latest_ledger_age_seconds) },
                     {
-                      label: 'First hash',
-                      value: truncateMiddle(data.epoch.first_ledger_hash, 12),
-                      wide: true,
-                      mono: true,
-                    },
-                    {
-                      label: 'Last hash',
-                      value: data.epoch.last_ledger_hash ? truncateMiddle(data.epoch.last_ledger_hash, 12) : 'Unavailable',
+                      label: 'Validated hash',
+                      value: data.server.latest_validated_hash ? truncateMiddle(data.server.latest_validated_hash, 12) : 'Unavailable',
                       wide: true,
                       mono: true,
                     },
                   ]}
                 />
-              ) : (
-                <UnavailableBlock reason="No epoch record is available from the status API." />
-              )}
-            </Panel>
+              </Panel>
 
-            <Panel title="Amendments" description="Enabled and supported are separate protocol facts">
-              <div className="amendment-status-table">
-                <div className="amendment-status-row amendment-status-head">
-                  <span>Amendment</span>
-                  <span>Enabled</span>
-                  <span>Supported</span>
+              <Panel title="History indexer" description="Committed cursor and indexed-history health">
+                <DefinitionGrid
+                  items={[
+                    { label: 'Status', value: <StatusBadge value={data.collector.status} /> },
+                    { label: 'History index age', value: formatDuration(data.collector.data_age_seconds) },
+                    { label: 'Last processed ledger', value: formatInteger(data.collector.last_processed_ledger), mono: true },
+                    { label: 'Failures', value: formatInteger(data.collector.consecutive_failures) },
+                    { label: 'Last attempt', value: formatUtc(data.collector.last_attempt_at), wide: true },
+                    { label: 'Last success', value: formatUtc(data.collector.last_success_at), wide: true },
+                    {
+                      label: 'Processed hash',
+                      value: data.collector.last_processed_hash ? truncateMiddle(data.collector.last_processed_hash, 12) : 'Unavailable',
+                      wide: true,
+                      mono: true,
+                    },
+                    { label: 'Reset reason', value: data.collector.reset_reason ?? 'None reported', wide: true },
+                  ]}
+                />
+              </Panel>
+
+              <Panel title="Current epoch" description="Network reset and historical isolation boundary">
+                {data.epoch ? (
+                  <DefinitionGrid
+                    items={[
+                      { label: 'Epoch ID', value: data.epoch.id, mono: true },
+                      { label: 'Status', value: <StatusBadge value={data.epoch.status} /> },
+                      { label: 'First ledger', value: formatInteger(data.epoch.first_ledger_index), mono: true },
+                      { label: 'Last ledger', value: formatInteger(data.epoch.last_ledger_index), mono: true },
+                      { label: 'Started', value: formatUtc(data.epoch.started_at), wide: true },
+                      {
+                        label: 'First hash',
+                        value: truncateMiddle(data.epoch.first_ledger_hash, 12),
+                        wide: true,
+                        mono: true,
+                      },
+                      {
+                        label: 'Last hash',
+                        value: data.epoch.last_ledger_hash ? truncateMiddle(data.epoch.last_ledger_hash, 12) : 'Unavailable',
+                        wide: true,
+                        mono: true,
+                      },
+                    ]}
+                  />
+                ) : (
+                  <UnavailableBlock reason="No epoch record is available from the status API." />
+                )}
+              </Panel>
+
+              <Panel title="Amendments" description="Enabled and supported are separate protocol facts">
+                <div className="amendment-status-table">
+                  <div className="amendment-status-row amendment-status-head">
+                    <span>Amendment</span>
+                    <span>Enabled</span>
+                    <span>Supported</span>
+                  </div>
+                  <div className="amendment-status-row">
+                    <strong>Lending Protocol</strong>
+                    <span>{booleanLabel(data.amendments.lending_protocol.enabled)}</span>
+                    <span>{booleanLabel(data.amendments.lending_protocol.supported)}</span>
+                  </div>
+                  <div className="amendment-status-row">
+                    <strong>Single Asset Vault</strong>
+                    <span>{booleanLabel(data.amendments.single_asset_vault.enabled)}</span>
+                    <span>{booleanLabel(data.amendments.single_asset_vault.supported)}</span>
+                  </div>
                 </div>
-                <div className="amendment-status-row">
-                  <strong>Lending Protocol</strong>
-                  <span>{booleanLabel(data.amendments.lending_protocol.enabled)}</span>
-                  <span>{booleanLabel(data.amendments.lending_protocol.supported)}</span>
-                </div>
-                <div className="amendment-status-row">
-                  <strong>Single Asset Vault</strong>
-                  <span>{booleanLabel(data.amendments.single_asset_vault.enabled)}</span>
-                  <span>{booleanLabel(data.amendments.single_asset_vault.supported)}</span>
-                </div>
-              </div>
-            </Panel>
-          </div>
+              </Panel>
+            </div>
+          </details>
 
           <div className="method-note">
             <strong>Interpretation boundary</strong>

@@ -71,7 +71,7 @@ function archivedListResponse() {
     kind: 'archived_objects',
     data: [archiveRecord()],
     filters: { object_type: null, query: null },
-    page: { limit: 100, next_cursor: null },
+    page: { limit: 25, next_cursor: null },
     provenance: { collection: 'indexed' },
   }
 }
@@ -93,15 +93,21 @@ test('renders archived object explorer and filters bounded archive evidence', as
   await page.route('**/api/audit/archived?*', (route) => route.fulfill({ json: archivedListResponse() }))
   await page.route(`**/api/audit/archived/Loan/${loanId}`, (route) => route.fulfill({ json: archivedDetailResponse() }))
 
+  const initialRequest = page.waitForRequest((value) =>
+    value.url().includes('/api/audit/archived?') && value.url().includes('limit=25'),
+  )
   await page.goto('/audit/archived')
+  await initialRequest
   await expect(page.getByRole('heading', { level: 1, name: 'Archived Objects' })).toBeVisible()
   await expect(page.getByText('Archived records are not current objects.')).toBeVisible()
   await expect(page.getByText('Loan Delete')).toBeVisible()
+  await expect(page.getByText('latest bounded 25-record window')).toBeVisible()
   await expect(page.getByRole('link', { name: /B{8}/ })).toHaveAttribute('href', `/audit/archived/Loan/${loanId}`)
 
   await page.getByLabel('Object type').selectOption('Loan')
   const request = page.waitForRequest((value) =>
     value.url().includes('/api/audit/archived?') &&
+    value.url().includes('limit=25') &&
     value.url().includes('object_type=Loan') &&
     value.url().includes(`q=${loanId}`),
   )

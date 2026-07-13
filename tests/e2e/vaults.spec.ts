@@ -67,16 +67,18 @@ async function mockBase(page: Page) {
   await page.route('**/api/activity?limit=6', (route) => route.fulfill({ json: { network: 'devnet', data: [], page: { limit: 6, next_cursor: null } } }))
 }
 
+function collection(data = [vault]) {
+  return {
+    network: 'devnet', kind: 'vaults', epoch: { id: 'epoch-1', status: 'current' }, snapshot,
+    data, page: { limit: 25, next_cursor: null, sort: 'id_asc', shards_read: 1, objects_examined: data.length },
+    filters: { query: null, has_loss: null }, availability: { state: 'available', reason: null },
+    provenance: { collection: 'direct' },
+  }
+}
+
 test('renders current Vaults and opens verified detail', async ({ page }) => {
   await mockBase(page)
-  await page.route('**/api/vaults?*', (route) => route.fulfill({
-    json: {
-      network: 'devnet', kind: 'vaults', epoch: { id: 'epoch-1', status: 'current' }, snapshot,
-      data: [vault], page: { limit: 25, next_cursor: null, sort: 'id_asc', shards_read: 1, objects_examined: 1 },
-      filters: { query: null, has_loss: null }, availability: { state: 'available', reason: null },
-      provenance: { collection: 'direct' },
-    },
-  }))
+  await page.route('**/api/vaults?*', (route) => route.fulfill({ json: collection() }))
   await page.route(`**/api/vaults/${vaultId}`, (route) => route.fulfill({
     json: {
       network: 'devnet', kind: 'vault', epoch: { id: 'epoch-1', status: 'current' }, snapshot,
@@ -86,11 +88,11 @@ test('renders current Vaults and opens verified detail', async ({ page }) => {
 
   await page.goto('/vaults')
   await expect(page.getByRole('heading', { level: 1, name: 'Vaults' })).toBeVisible()
-  await expect(page.getByText('25.00%', { exact: true })).toBeVisible()
-  await expect(page.getByText('10000000 XRP', { exact: true })).toBeVisible()
+  await expect(page.locator('.vault-desktop-table').getByText('25.00%', { exact: true })).toBeVisible()
+  await expect(page.locator('.vault-desktop-table').getByText('10000000 XRP', { exact: true })).toBeVisible()
   await expect(page.locator('body')).not.toContainText('USD')
 
-  await page.getByRole('link', { name: /A{8}/ }).click()
+  await page.locator('.vault-desktop-table').getByRole('link', { name: /A{8}/ }).click()
   await expect(page).toHaveURL(new RegExp(`/vaults/${vaultId}$`))
   await expect(page.getByRole('heading', { level: 1 })).toContainText('…')
   await expect(page.getByText('Raw decoded object')).toBeVisible()
@@ -120,21 +122,34 @@ test('applies factual filters and keeps unavailable state explicit', async ({ pa
   await request
 })
 
-test('keeps Vault navigation available on mobile', async ({ page }) => {
+test('shows mobile Vault cards without overflow or bottom-nav overlap', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await mockBase(page)
-  await page.route('**/api/vaults?*', (route) => route.fulfill({
-    json: {
-      network: 'devnet', kind: 'vaults', epoch: { id: 'epoch-1', status: 'current' }, snapshot,
-      data: [], page: { limit: 25, next_cursor: null, sort: 'id_asc', shards_read: 1, objects_examined: 0 },
-      filters: { query: null, has_loss: null }, availability: { state: 'available', reason: null },
-      provenance: { collection: 'direct' },
-    },
-  }))
+  await page.route('**/api/vaults?*', (route) => route.fulfill({ json: collection() }))
 
   await page.goto('/vaults')
   await expect(page.locator('.sidebar')).toBeHidden()
+  await expect(page.locator('.vault-desktop-table')).toBeHidden()
+  await expect(page.locator('.vault-filter-form')).toBeHidden()
+  await expect(page.getByRole('button', { name: 'Filters' })).toBeVisible()
+
+  const card = page.locator('.vault-list-card')
+  await expect(card).toBeVisible()
+  await expect(card.getByText('10000000 XRP', { exact: true })).toBeVisible()
+  await expect(card.getByText('7500000 XRP', { exact: true })).toBeVisible()
+  await expect(card.getByRole('button', { name: 'Copy full Vault ID' })).toBeVisible()
+
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+  await expect.poll(() => page.evaluate(() => {
+    const body = document.querySelector<HTMLElement>('.application-body')
+    const nav = document.querySelector<HTMLElement>('.mobile-bottom-nav')
+    if (!body || !nav) return false
+    return Number.parseFloat(getComputedStyle(body).paddingBottom) >= nav.getBoundingClientRect().height
+  })).toBe(true)
+
+  await page.getByRole('button', { name: 'Filters' }).click()
+  await expect(page.locator('.vault-filter-form')).toBeVisible()
+
   await page.locator('.mobile-bottom-nav').getByRole('button', { name: 'More' }).click()
   await expect(page.locator('.mobile-more-panel').getByRole('link', { name: 'Vaults' })).toBeVisible()
-  await expect(page.locator('.vault-filter-form')).toBeVisible()
 })

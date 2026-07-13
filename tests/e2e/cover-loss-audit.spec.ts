@@ -81,7 +81,7 @@ function coverLossResponse() {
       },
     ],
     filters: { metric_type: null, subject_type: null, subject_id: null, asset_key: null },
-    page: { limit: 100, next_cursor: null },
+    page: { limit: 25, next_cursor: null },
     provenance: { collection: 'indexed' },
     formulas: {
       required_minimum_cover: 'required_minimum_cover = DebtTotal * CoverRateMinimum / 100000',
@@ -94,9 +94,14 @@ test('renders cover and loss audit without cross-asset aggregation', async ({ pa
   await mockSharedState(page)
   await page.route('**/api/audit/cover-loss?*', (route) => route.fulfill({ json: coverLossResponse() }))
 
+  const initialRequest = page.waitForRequest((value) =>
+    value.url().includes('/api/audit/cover-loss?') && value.url().includes('limit=25'),
+  )
   await page.goto('/audit/cover-loss')
+  await initialRequest
   await expect(page.getByRole('heading', { level: 1, name: 'Cover & Loss' })).toBeVisible()
   await expect(page.getByText('Unlike assets are never aggregated.')).toBeVisible()
+  await expect(page.getByText('latest bounded 25-row window')).toBeVisible()
   await expect(page.getByLabel('Cover and loss history').getByText('Required Minimum Cover')).toBeVisible()
   await expect(page.getByText('10.00000 XRP')).toBeVisible()
   await expect(page.getByText('18.00000 XRP')).toBeVisible()
@@ -108,6 +113,7 @@ test('renders cover and loss audit without cross-asset aggregation', async ({ pa
   await page.getByLabel('Subject ID').fill(brokerId)
   const request = page.waitForRequest((value) =>
     value.url().includes('/api/audit/cover-loss?') &&
+    value.url().includes('limit=25') &&
     value.url().includes('metric_type=cover_available') &&
     value.url().includes('subject_type=LoanBroker') &&
     value.url().includes(`subject_id=${brokerId}`) &&

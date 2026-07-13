@@ -127,8 +127,10 @@ test('renders the approved observatory Overview and navigates to Network Status'
   await expect(
     page.locator('.network-context').getByText('5,432,109', { exact: true }),
   ).toBeVisible()
+  await expect(page.getByText('Indexed Vault records', { exact: true })).toBeVisible()
   await expect(page.locator('.metrics-grid').getByText('12', { exact: true })).toBeVisible()
   await expect(page.getByText('LoanPay', { exact: true })).toBeVisible()
+  await expect(page.getByText('tesSUCCESS', { exact: true })).toBeVisible()
   await expect(page.getByText(/02 Jul 2026, 01:02:00 UTC/)).toBeVisible()
   await expect(page.locator('.activity-panel tbody a.identifier-link')).toHaveAttribute(
     'href',
@@ -139,6 +141,9 @@ test('renders the approved observatory Overview and navigates to Network Status'
   await page.locator('.sidebar').getByRole('link', { name: 'Network Status' }).click()
   await expect(page).toHaveURL(/\/network-status$/)
   await expect(page.getByRole('heading', { level: 1, name: 'Network Status' })).toBeVisible()
+  await expect(page.getByText('History indexer', { exact: true }).first()).toBeVisible()
+  await expect(page.getByText('Complete ledgers')).toBeHidden()
+  await page.locator('.status-details > summary').click()
   await expect(page.getByText('Complete ledgers')).toBeVisible()
   await expect(page.getByText('Single Asset Vault')).toBeVisible()
 })
@@ -161,7 +166,7 @@ test('preserves successful panels when the activity API fails', async ({ page })
   await expect(page.getByText('/api/activity?limit=6 returned HTTP 500')).toBeVisible()
 })
 
-test('uses mobile navigation, closes More explicitly, toggles it, and closes it after navigation', async ({ page }) => {
+test('uses compact mobile metrics and closes More after navigation', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await mockDashboardApi(page)
   await page.goto('/')
@@ -174,6 +179,13 @@ test('uses mobile navigation, closes More explicitly, toggles it, and closes it 
   await expect(page.locator('.mobile-appbar')).toBeVisible()
   await expect(mobileNav).toBeVisible()
   await expect(page.locator('.network-context').getByText('DEVNET', { exact: true })).toBeVisible()
+
+  const metricCards = page.locator('.metrics-grid .metric-card')
+  const firstBox = await metricCards.nth(0).boundingBox()
+  const secondBox = await metricCards.nth(1).boundingBox()
+  expect(firstBox).not.toBeNull()
+  expect(secondBox).not.toBeNull()
+  expect(Math.abs((firstBox?.y ?? 0) - (secondBox?.y ?? 0))).toBeLessThan(2)
 
   await more.click()
   await expect(panel.getByText('Network Status', { exact: true })).toBeVisible()

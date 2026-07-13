@@ -85,7 +85,7 @@ export function OverviewPage({ resources, onNavigate, onReload }: OverviewPagePr
           <button className="secondary-button" type="button" onClick={onReload}>
             Refresh data
           </button>
-          <a className="primary-button" href="/api/overview">
+          <a className="secondary-button developer-action" href="/api/overview">
             Overview JSON
           </a>
         </div>
@@ -121,27 +121,27 @@ export function OverviewPage({ resources, onNavigate, onReload }: OverviewPagePr
         />
       </Panel>
 
-      <section className="metrics-grid" aria-label="Indexed protocol counts">
+      <section className="metrics-grid" aria-label="Indexed protocol record counts">
         <MetricCard
-          label="Vaults"
+          label="Indexed Vault records"
           value={formatInteger(overview?.counts.vaults)}
           detail={indexedCountDetail}
           provenance={countsProvenance}
         />
         <MetricCard
-          label="Loan Brokers"
+          label="Indexed Loan Broker records"
           value={formatInteger(overview?.counts.loan_brokers)}
           detail={indexedCountDetail}
           provenance={countsProvenance}
         />
         <MetricCard
-          label="Loans"
+          label="Indexed Loan records"
           value={formatInteger(overview?.counts.loans)}
           detail={indexedCountDetail}
           provenance={countsProvenance}
         />
         <MetricCard
-          label="Indexed objects"
+          label="All indexed object records"
           value={formatInteger(overview?.counts.current_objects)}
           detail={indexedCountDetail}
           provenance={countsProvenance}
