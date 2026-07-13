@@ -30,12 +30,44 @@
 }
 
 .field-help {
-  color: var(--text-muted);
+  color: var(--text-secondary);
 }
 
 .field-error {
   color: var(--status-negative);
   font-weight: 700;
+}
+
+.search-format-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+  margin-top: 0.9rem;
+}
+
+.search-format-grid > div {
+  min-width: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 0.75rem;
+  background: rgba(7, 24, 33, 0.5);
+}
+
+.search-format-grid strong,
+.search-format-grid code {
+  display: block;
+}
+
+.search-format-grid strong {
+  margin-bottom: 0.3rem;
+  font-size: 0.76rem;
+}
+
+.search-format-grid code {
+  overflow-wrap: anywhere;
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  white-space: normal;
 }
 
 .search-guidance-grid,
@@ -202,7 +234,8 @@
 }
 
 @media (max-width: 640px) {
-  .global-search-form {
+  .global-search-form,
+  .search-format-grid {
     grid-template-columns: 1fr;
   }
 
