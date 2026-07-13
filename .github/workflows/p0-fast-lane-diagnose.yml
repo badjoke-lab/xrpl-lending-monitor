@@ -36,11 +36,71 @@ jobs:
           for pair in "primary|https://devnet.honeycluster.io/" "fallback|https://s.devnet.rippletest.net:51234/"; do
             name="${pair%%|*}"
             url="${pair#*|}"
+            : > "rpc-${name}.json"
             code="$(curl --max-time 12 --silent --show-error --output "rpc-${name}.json" --write-out '%{http_code}' -H 'content-type: application/json' --data "${BODY}" "${url}")"
             rc=$?
             jq -n --arg name "$name" --arg url "$url" --arg code "$code" --argjson curl_rc "$rc" --rawfile body "rpc-${name}.json" '{name:$name,url:$url,httpCode:$code,curlExit:$curl_rc,body:$body}' > "rpc-${name}-result.json"
           done
           set -e
+
+      - name: Test XRPL WebSocket endpoint
+        shell: bash
+        run: |
+          cat > test-wss.mjs <<'EOF'
+          const endpoint = 'wss://s.devnet.rippletest.net:51233/'
+          const result = { endpoint, opened: false, received: false, ledgerIndex: null, error: null }
+          const finish = (code = 0) => {
+            process.stdout.write(JSON.stringify(result) + '\n')
+            process.exit(code)
+          }
+          const timer = setTimeout(() => {
+            result.error = 'timeout'
+            finish(0)
+          }, 15000)
+          try {
+            const ws = new WebSocket(endpoint)
+            ws.addEventListener('open', () => {
+              result.opened = true
+              ws.send(JSON.stringify({
+                id: 'diagnose-ledger',
+                command: 'ledger',
+                ledger_index: 'validated',
+                transactions: false,
+                expand: false,
+                api_version: 2,
+              }))
+            })
+            ws.addEventListener('message', (event) => {
+              try {
+                const body = JSON.parse(String(event.data))
+                result.received = true
+                result.ledgerIndex = body?.result?.ledger_index ?? body?.result?.ledger?.ledger_index ?? null
+              } catch (error) {
+                result.error = error instanceof Error ? error.message : String(error)
+              }
+              clearTimeout(timer)
+              try { ws.close() } catch {}
+              finish(0)
+            })
+            ws.addEventListener('error', () => {
+              result.error = 'websocket_error'
+              clearTimeout(timer)
+              finish(0)
+            })
+            ws.addEventListener('close', () => {
+              if (!result.received && !result.error) {
+                result.error = 'closed_before_response'
+                clearTimeout(timer)
+                finish(0)
+              }
+            })
+          } catch (error) {
+            result.error = error instanceof Error ? error.message : String(error)
+            clearTimeout(timer)
+            finish(0)
+          }
+          EOF
+          node test-wss.mjs > websocket-result.json
 
       - name: Capture production schedule
         shell: bash
@@ -73,10 +133,11 @@ jobs:
             --arg capturedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --slurpfile primary rpc-primary-result.json \
             --slurpfile fallback rpc-fallback-result.json \
+            --slurpfile websocket websocket-result.json \
             --slurpfile schedules schedules.json \
             --slurpfile state state.json \
             --slurpfile metrics metrics.json \
-            '{capturedAt:$capturedAt,rpc:{primary:$primary[0],fallback:$fallback[0]},schedules:$schedules[0],state:$state[0],metrics:$metrics[0]}' \
+            '{capturedAt:$capturedAt,rpc:{primary:$primary[0],fallback:$fallback[0]},websocket:$websocket[0],schedules:$schedules[0],state:$state[0],metrics:$metrics[0]}' \
             > diagnosis.json
           content="$(base64 -w0 diagnosis.json)"
           api="repos/${GITHUB_REPOSITORY}/contents/.github/p0-fast-lane-diagnosis.json"
