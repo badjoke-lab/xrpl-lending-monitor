@@ -188,3 +188,21 @@ body,
     content: 'After: ';
   }
 }
+
+@media (max-width: 430px) {
+  .metrics-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .metrics-grid .metric-card:last-child {
+    grid-column: 1 / -1;
+  }
+
+  .metric-card {
+    padding: 13px;
+  }
+
+  .metric-card > strong {
+    font-size: 1.18rem;
+  }
+}
