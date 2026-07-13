@@ -88,6 +88,7 @@ body,
 }
 
 .status-details > summary {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -212,6 +213,7 @@ body,
   .status-details > summary {
     display: grid;
     gap: 4px;
+    padding-right: 46px;
   }
 
   .status-details > summary small {
@@ -221,7 +223,9 @@ body,
 
   .status-details > summary::after {
     position: absolute;
-    right: 30px;
+    top: 50%;
+    right: 18px;
+    transform: translateY(-50%);
   }
 
   .lifecycle-delta-head {
