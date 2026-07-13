@@ -9,6 +9,7 @@ import { createXrplWebSocketLedgerSession } from './xrpl-websocket-ledger-sessio
 import {
   commitFastLaneCompactShadowWindow,
 } from '../../worker/repositories/fast-lane-compact-shadow-repository'
+import { buildFastLaneHistoryBundle } from '../../worker/repositories/fast-lane-history-window'
 import {
   bindFastLaneShadowBase,
   readFastLaneShadowBaseBinding,
@@ -232,9 +233,15 @@ export async function runFastLaneShadowCycle(options: {
       latestObservedHash: head.ledgerHash,
       processedAt,
     })
+    const historyBundle = buildFastLaneHistoryBundle({
+      scan,
+      epochId: options.base.epochId,
+      processedAt,
+    })
     const persistence = await commitFastLaneCompactShadowWindow({
       db: options.db,
       plan,
+      historyBundle,
       expectedPreviousLedger,
       expectedPreviousHash: previousHash,
       processedAt,
