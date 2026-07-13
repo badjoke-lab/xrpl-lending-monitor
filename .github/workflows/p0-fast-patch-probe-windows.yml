@@ -21,7 +21,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $runs = gh api "repos/$env:GITHUB_REPOSITORY/actions/workflows/p0-direct-fast-patch-windows.yml/runs?per_page=20" | ConvertFrom-Json
+          $runs = gh api "repos/$env:GITHUB_REPOSITORY/actions/workflows/p0-api-fast-patch-windows.yml/runs?per_page=20" | ConvertFrom-Json
           $run = $runs.workflow_runs | Sort-Object {[datetime]$_.created_at} -Descending | Select-Object -First 1
           if (-not $run) { throw 'No patch run found' }
           $jobs = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$($run.id)/jobs?per_page=100" | ConvertFrom-Json
