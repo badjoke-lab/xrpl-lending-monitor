@@ -1,0 +1,78 @@
+{
+  "capturedAt": "2026-07-13T11:54:32.0609430Z",
+  "run": {
+    "id": 29247777997,
+    "url": "https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/29247777997",
+    "status": "in_progress",
+    "conclusion": null,
+    "headSha": "2595d2d42ef6158f136e08b3f50e077883c5733c",
+    "createdAt": "2026-07-13T11:52:43Z",
+    "updatedAt": "2026-07-13T11:52:47Z"
+  },
+  "jobs": [
+    {
+      "id": 86808746897,
+      "name": "recover",
+      "status": "in_progress",
+      "conclusion": null,
+      "startedAt": "2026-07-13T11:52:46Z",
+      "completedAt": null,
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 1
+        },
+        {
+          "name": "Run actions/checkout@v4",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 2
+        },
+        {
+          "name": "Reject unauthorized or non-Devnet recovery",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 3
+        },
+        {
+          "name": "Resume catch-up from verified candidate A",
+          "status": "in_progress",
+          "conclusion": null,
+          "number": 4
+        },
+        {
+          "name": "Dispatch guarded production cutover",
+          "status": "pending",
+          "conclusion": null,
+          "number": 5
+        },
+        {
+          "name": "Verify post-cutover production data",
+          "status": "pending",
+          "conclusion": null,
+          "number": 6
+        },
+        {
+          "name": "Publish emergency recovery status",
+          "status": "pending",
+          "conclusion": null,
+          "number": 7
+        },
+        {
+          "name": "Upload emergency recovery evidence",
+          "status": "pending",
+          "conclusion": null,
+          "number": 8
+        },
+        {
+          "name": "Post Run actions/checkout@v4",
+          "status": "pending",
+          "conclusion": null,
+          "number": 16
+        }
+      ]
+    }
+  ]
+}
