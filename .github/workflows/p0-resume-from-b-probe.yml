@@ -1,14 +1,11 @@
 name: P0 resume-from-B probe
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - .github/p0-resume-from-b-probe-trigger
+  workflow_dispatch:
 
 permissions:
   actions: read
-  contents: write
+  contents: read
 
 jobs:
   probe:
@@ -37,9 +34,10 @@ jobs:
             latestCutoverRuns = @($cutovers.workflow_runs | Sort-Object {[datetime]$_.created_at} -Descending | Select-Object -First 6 | ForEach-Object {[ordered]@{id=$_.id;status=$_.status;conclusion=$_.conclusion;createdAt=$_.created_at;updatedAt=$_.updated_at;url=$_.html_url}})
             latestMonitorRuns = @($monitors.workflow_runs | Sort-Object {[datetime]$_.created_at} -Descending | Select-Object -First 6 | ForEach-Object {[ordered]@{id=$_.id;event=$_.event;status=$_.status;conclusion=$_.conclusion;createdAt=$_.created_at;updatedAt=$_.updated_at;url=$_.html_url;headSha=$_.head_sha}})
           } | ConvertTo-Json -Depth 8
-          $content = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($payload + "`n"))
-          $api = "repos/$repo/contents/.github/p0-resume-from-b-probe.json"
-          $sha = ''
-          try { $sha = gh api $api --jq .sha } catch {}
-          if ($sha) { gh api --method PUT $api -f message='Update P0 resume-from-B probe' -f content=$content -f sha=$sha | Out-Null }
-          else { gh api --method PUT $api -f message='Create P0 resume-from-B probe' -f content=$content | Out-Null }
+          $payload | Set-Content -Path p0-resume-from-b-probe.json -Encoding utf8
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p0-resume-from-b-probe
+          path: p0-resume-from-b-probe.json
+          retention-days: 14
