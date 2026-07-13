@@ -1,17 +1,17 @@
 {
-  "capturedAt": "2026-07-13T13:20:34.2225341Z",
+  "capturedAt": "2026-07-13T13:25:02.0178334Z",
   "run": {
-    "id": 29253351903,
+    "id": 29253631016,
     "status": "in_progress",
     "conclusion": null,
-    "createdAt": "2026-07-13T13:19:46Z",
-    "updatedAt": "2026-07-13T13:19:49Z",
-    "url": "https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/29253351903",
-    "headSha": "c7fa8cfbebbd17fd3b50f4a3a0daa35e37e6e534"
+    "createdAt": "2026-07-13T13:24:12Z",
+    "updatedAt": "2026-07-13T13:24:16Z",
+    "url": "https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/29253631016",
+    "headSha": "45906d5679af6aeaca94d1713118acd94a341ea3"
   },
   "jobs": [
     {
-      "id": 86826976631,
+      "id": 86827930405,
       "name": "cutover",
       "status": "in_progress",
       "conclusion": null,
@@ -39,6 +39,589 @@
           "status": "pending",
           "conclusion": null,
           "number": 4
+        }
+      ]
+    }
+  ],
+  "latestLiveCutoverRuns": [
+    {
+      "id": 29253647138,
+      "status": "in_progress",
+      "conclusion": null,
+      "createdAt": "2026-07-13T13:24:27Z",
+      "updatedAt": "2026-07-13T13:24:32Z",
+      "url": "https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/29253647138",
+      "headSha": "45906d5679af6aeaca94d1713118acd94a341ea3",
+      "jobs": [
+        {
+          "id": 86827989347,
+          "name": "cutover",
+          "status": "in_progress",
+          "conclusion": null,
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "in_progress",
+              "conclusion": null,
+              "number": 1
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 29253425277,
+      "status": "completed",
+      "conclusion": "failure",
+      "createdAt": "2026-07-13T13:20:55Z",
+      "updatedAt": "2026-07-13T13:21:27Z",
+      "url": "https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/29253425277",
+      "headSha": "8b8ed77cd21415ba0eb03564adc93a753b8925c1",
+      "jobs": [
+        {
+          "id": 86827234579,
+          "name": "cutover",
+          "status": "completed",
+          "conclusion": "failure",
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1
+            },
+            {
+              "name": "Check out implementation",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2
+            },
+            {
+              "name": "Check out history candidate metadata",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3
+            },
+            {
+              "name": "Check out current-state candidate metadata",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4
+            },
+            {
+              "name": "Check out production current-state rollback identity",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5
+            },
+            {
+              "name": "Run pnpm/action-setup@v4",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 6
+            },
+            {
+              "name": "Run actions/setup-node@v4",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 7
+            },
+            {
+              "name": "Run pnpm install --frozen-lockfile",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 8
+            },
+            {
+              "name": "Run pnpm build:candidate-source-rehearsal",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 9
+            },
+            {
+              "name": "Build deployable application assets",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 10
+            },
+            {
+              "name": "Align one-time cutover bounds and deployment readiness",
+              "status": "completed",
+              "conclusion": "failure",
+              "number": 11
+            },
+            {
+              "name": "Run guarded five-minute Devnet cutover",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 12
+            },
+            {
+              "name": "Verify post-cutover live freshness",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 13
+            },
+            {
+              "name": "Upload retained live-cutover evidence",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 14
+            },
+            {
+              "name": "Post Run actions/setup-node@v4",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 23
+            },
+            {
+              "name": "Post Run pnpm/action-setup@v4",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 24
+            },
+            {
+              "name": "Post Check out production current-state rollback identity",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 25
+            },
+            {
+              "name": "Post Check out current-state candidate metadata",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 26
+            },
+            {
+              "name": "Post Check out history candidate metadata",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 27
+            },
+            {
+              "name": "Post Check out implementation",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 28
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 29
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 29253358548,
+      "status": "completed",
+      "conclusion": "failure",
+      "createdAt": "2026-07-13T13:19:52Z",
+      "updatedAt": "2026-07-13T13:20:41Z",
+      "url": "https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/29253358548",
+      "headSha": "c7fa8cfbebbd17fd3b50f4a3a0daa35e37e6e534",
+      "jobs": [
+        {
+          "id": 86827002424,
+          "name": "cutover",
+          "status": "completed",
+          "conclusion": "failure",
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1
+            },
+            {
+              "name": "Check out implementation",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2
+            },
+            {
+              "name": "Check out history candidate metadata",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3
+            },
+            {
+              "name": "Check out current-state candidate metadata",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4
+            },
+            {
+              "name": "Check out production current-state rollback identity",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5
+            },
+            {
+              "name": "Run pnpm/action-setup@v4",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 6
+            },
+            {
+              "name": "Run actions/setup-node@v4",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 7
+            },
+            {
+              "name": "Run pnpm install --frozen-lockfile",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 8
+            },
+            {
+              "name": "Run pnpm build:candidate-source-rehearsal",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 9
+            },
+            {
+              "name": "Build deployable application assets",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 10
+            },
+            {
+              "name": "Align one-time cutover bounds and deployment readiness",
+              "status": "completed",
+              "conclusion": "failure",
+              "number": 11
+            },
+            {
+              "name": "Run guarded five-minute Devnet cutover",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 12
+            },
+            {
+              "name": "Verify post-cutover live freshness",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 13
+            },
+            {
+              "name": "Upload retained live-cutover evidence",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 14
+            },
+            {
+              "name": "Post Run actions/setup-node@v4",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 23
+            },
+            {
+              "name": "Post Run pnpm/action-setup@v4",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 24
+            },
+            {
+              "name": "Post Check out production current-state rollback identity",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 25
+            },
+            {
+              "name": "Post Check out current-state candidate metadata",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 26
+            },
+            {
+              "name": "Post Check out history candidate metadata",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 27
+            },
+            {
+              "name": "Post Check out implementation",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 28
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 29
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 29187006846,
+      "status": "completed",
+      "conclusion": "success",
+      "createdAt": "2026-07-12T09:09:29Z",
+      "updatedAt": "2026-07-12T09:21:12Z",
+      "url": "https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/29187006846",
+      "headSha": "d658a73084c97c6d68d2973512d50a80f8982433",
+      "jobs": [
+        {
+          "id": 86634856554,
+          "name": "cutover",
+          "status": "completed",
+          "conclusion": "success",
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1
+            },
+            {
+              "name": "Check out implementation",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2
+            },
+            {
+              "name": "Check out history candidate metadata",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3
+            },
+            {
+              "name": "Check out current-state candidate metadata",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4
+            },
+            {
+              "name": "Run pnpm/action-setup@v4",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5
+            },
+            {
+              "name": "Run actions/setup-node@v4",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 6
+            },
+            {
+              "name": "Run pnpm install --frozen-lockfile",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 7
+            },
+            {
+              "name": "Run pnpm build:candidate-source-rehearsal",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 8
+            },
+            {
+              "name": "Build deployable application assets",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 9
+            },
+            {
+              "name": "Align one-time cutover bounds and deployment readiness",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 10
+            },
+            {
+              "name": "Run guarded five-minute Devnet cutover",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 11
+            },
+            {
+              "name": "Verify post-cutover live freshness",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 12
+            },
+            {
+              "name": "Upload retained live-cutover evidence",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 13
+            },
+            {
+              "name": "Post Run actions/setup-node@v4",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 22
+            },
+            {
+              "name": "Post Run pnpm/action-setup@v4",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 23
+            },
+            {
+              "name": "Post Check out current-state candidate metadata",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 24
+            },
+            {
+              "name": "Post Check out history candidate metadata",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 25
+            },
+            {
+              "name": "Post Check out implementation",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 26
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 27
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 29185816266,
+      "status": "completed",
+      "conclusion": "cancelled",
+      "createdAt": "2026-07-12T08:25:17Z",
+      "updatedAt": "2026-07-12T08:28:51Z",
+      "url": "https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/29185816266",
+      "headSha": "d658a73084c97c6d68d2973512d50a80f8982433",
+      "jobs": [
+        {
+          "id": 86631596121,
+          "name": "cutover",
+          "status": "completed",
+          "conclusion": "cancelled",
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1
+            },
+            {
+              "name": "Check out implementation",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2
+            },
+            {
+              "name": "Check out history candidate metadata",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3
+            },
+            {
+              "name": "Check out current-state candidate metadata",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4
+            },
+            {
+              "name": "Run pnpm/action-setup@v4",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5
+            },
+            {
+              "name": "Run actions/setup-node@v4",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 6
+            },
+            {
+              "name": "Run pnpm install --frozen-lockfile",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 7
+            },
+            {
+              "name": "Run pnpm build:candidate-source-rehearsal",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 8
+            },
+            {
+              "name": "Build deployable application assets",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 9
+            },
+            {
+              "name": "Align one-time cutover bounds and deployment readiness",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 10
+            },
+            {
+              "name": "Run guarded five-minute Devnet cutover",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 11
+            },
+            {
+              "name": "Verify post-cutover live freshness",
+              "status": "completed",
+              "conclusion": "cancelled",
+              "number": 12
+            },
+            {
+              "name": "Upload retained live-cutover evidence",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 13
+            },
+            {
+              "name": "Post Run actions/setup-node@v4",
+              "status": "completed",
+              "conclusion": "skipped",
+              "number": 22
+            },
+            {
+              "name": "Post Run pnpm/action-setup@v4",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 23
+            },
+            {
+              "name": "Post Check out current-state candidate metadata",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 24
+            },
+            {
+              "name": "Post Check out history candidate metadata",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 25
+            },
+            {
+              "name": "Post Check out implementation",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 26
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 27
+            }
+          ]
         }
       ]
     }
