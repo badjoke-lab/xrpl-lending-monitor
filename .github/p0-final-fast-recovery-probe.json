@@ -1,0 +1,124 @@
+{
+  "capturedAt": "2026-07-13T12:53:15.5853578Z",
+  "run": {
+    "id": 29251504447,
+    "status": "in_progress",
+    "conclusion": null,
+    "createdAt": "2026-07-13T12:52:24Z",
+    "updatedAt": "2026-07-13T12:52:29Z",
+    "url": "https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/29251504447",
+    "headSha": "8fb518114a47d47feef09afc5d087f11e9cbd69a"
+  },
+  "jobs": [
+    {
+      "id": 86820946551,
+      "name": "recover",
+      "status": "in_progress",
+      "conclusion": null,
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 1
+        },
+        {
+          "name": "Check out implementation",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 2
+        },
+        {
+          "name": "Wait for verified second-cycle candidate B",
+          "status": "in_progress",
+          "conclusion": null,
+          "number": 3
+        },
+        {
+          "name": "Stop superseded recovery writers",
+          "status": "pending",
+          "conclusion": null,
+          "number": 4
+        },
+        {
+          "name": "Check out source history",
+          "status": "pending",
+          "conclusion": null,
+          "number": 5
+        },
+        {
+          "name": "Check out source current state",
+          "status": "pending",
+          "conclusion": null,
+          "number": 6
+        },
+        {
+          "name": "Run pnpm/action-setup@v4",
+          "status": "pending",
+          "conclusion": null,
+          "number": 7
+        },
+        {
+          "name": "Run actions/setup-node@v4",
+          "status": "pending",
+          "conclusion": null,
+          "number": 8
+        },
+        {
+          "name": "Run pnpm install --frozen-lockfile",
+          "status": "pending",
+          "conclusion": null,
+          "number": 9
+        },
+        {
+          "name": "Build recovery tools",
+          "status": "pending",
+          "conclusion": null,
+          "number": 10
+        },
+        {
+          "name": "Bind source and freeze final target",
+          "status": "pending",
+          "conclusion": null,
+          "number": 11
+        },
+        {
+          "name": "Generate final bounded delta",
+          "status": "pending",
+          "conclusion": null,
+          "number": 12
+        },
+        {
+          "name": "Build final publication, exact index, and current state",
+          "status": "pending",
+          "conclusion": null,
+          "number": 13
+        },
+        {
+          "name": "Publish final candidate pair",
+          "status": "pending",
+          "conclusion": null,
+          "number": 14
+        },
+        {
+          "name": "Cut over and verify production",
+          "status": "pending",
+          "conclusion": null,
+          "number": 15
+        },
+        {
+          "name": "Upload final recovery evidence",
+          "status": "pending",
+          "conclusion": null,
+          "number": 16
+        },
+        {
+          "name": "Post Check out implementation",
+          "status": "pending",
+          "conclusion": null,
+          "number": 32
+        }
+      ]
+    }
+  ]
+}
