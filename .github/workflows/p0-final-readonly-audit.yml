@@ -1,0 +1,86 @@
+name: P0 final read-only audit
+on:
+  push:
+    branches: [ops/p0-direct-recovery]
+    paths: [.github/workflows/p0-final-readonly-audit.yml]
+permissions:
+  contents: write
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Collect read-only production evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p audit
+          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote --command "SELECT * FROM fast_lane_shadow_state WHERE network='devnet'; SELECT run_at,status,start_ledger_index,end_ledger_index,latest_observed_ledger,lag_ledgers,ledgers_processed,lending_transactions,persistence_rows_written FROM fast_lane_shadow_run_metrics WHERE network='devnet' AND julianday(run_at) >= julianday('now','-70 minutes') ORDER BY run_at ASC;" --json > audit/d1.txt
+          curl -fsS --retry 3 -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/xrpl-lending-monitor/schedules" > audit/schedules.json
+          curl -fsS --retry 3 https://xrpl-lending-monitor.badjoke-lab.workers.dev/api/overview > audit/overview.json
+          curl -fsS --retry 3 -H 'content-type: application/json' --data '{"method":"ledger","params":[{"ledger_index":"validated","transactions":false,"expand":false,"api_version":2}]}' https://devnet.honeycluster.io/ > audit/head.json
+          python - <<'PY'
+          import json, pathlib, re, datetime
+          now=datetime.datetime.now(datetime.timezone.utc)
+          text=pathlib.Path('audit/d1.txt').read_text()
+          m=re.search(r'\[', text)
+          envelopes=json.loads(text[m.start():]) if m else []
+          results=[e.get('results',[]) for e in envelopes]
+          state=(results[0][0] if len(results)>0 and results[0] else None)
+          metrics=(results[1] if len(results)>1 else [])
+          def parse_ts(s):
+              return datetime.datetime.fromisoformat(s.replace('Z','+00:00'))
+          metrics60=[x for x in metrics if (now-parse_ts(x['run_at'])).total_seconds() <= 3600]
+          times=sorted(parse_ts(x['run_at']) for x in metrics60)
+          gaps=[(b-a).total_seconds() for a,b in zip(times,times[1:])]
+          good={'committed','reanchored'}
+          failures=[x for x in metrics60 if x.get('status') not in good]
+          schedules=json.load(open('audit/schedules.json'))
+          overview=json.load(open('audit/overview.json'))
+          head=json.load(open('audit/head.json'))
+          live=head.get('result',{}).get('ledger_index') or head.get('result',{}).get('ledger',{}).get('ledger_index')
+          processed=state.get('last_processed_ledger') if state else None
+          schedule_rows=schedules.get('result',{}).get('schedules',[])
+          meta=[e.get('meta',{}) for e in envelopes]
+          size_after=max([x.get('size_after',0) or 0 for x in meta] or [0])
+          result={
+            'captured_at':now.isoformat(),
+            'run_count_60m':len(metrics60),
+            'max_gap_seconds_60m':max(gaps) if gaps else None,
+            'failure_count_60m':len(failures),
+            'statuses_60m':[x.get('status') for x in metrics60],
+            'first_run_60m':metrics60[0] if metrics60 else None,
+            'last_run_60m':metrics60[-1] if metrics60 else None,
+            'state':state,
+            'live_ledger':live,
+            'live_lag_ledgers':(live-processed) if isinstance(live,int) and isinstance(processed,int) else None,
+            'schedule_count':len(schedule_rows),
+            'schedules':schedule_rows,
+            'cron_ok':len(schedule_rows)==1 and schedule_rows[0].get('cron')=='*/5 * * * *',
+            'd1_size_after_bytes':size_after,
+            'overview':overview,
+            'pass_60m':len(metrics60)>=12 and (max(gaps) if gaps else 999999)<=420 and len(failures)==0,
+          }
+          pathlib.Path('audit/result.json').write_text(json.dumps(result,indent=2)+'\n')
+          PY
+          content=$(base64 -w0 audit/result.json)
+          api="repos/${GITHUB_REPOSITORY}/contents/.github/p0-final-readonly-audit-result.json"
+          sha=$(gh api "$api?ref=ops/p0-direct-recovery" --jq .sha 2>/dev/null || true)
+          if [ -n "$sha" ]; then
+            gh api --method PUT "$api" -f message='Update final read-only audit result' -f content="$content" -f sha="$sha" -f branch='ops/p0-direct-recovery' >/dev/null
+          else
+            gh api --method PUT "$api" -f message='Create final read-only audit result' -f content="$content" -f branch='ops/p0-direct-recovery' >/dev/null
+          fi
