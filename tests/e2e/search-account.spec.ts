@@ -71,7 +71,7 @@ const searchResponse = {
       provenance: 'indexed',
     },
   ],
-  page: { limit: 100, next_cursor: null },
+  page: { limit: 25, next_cursor: null },
 }
 
 test('searches exact indexed records and opens separated account relationships', async ({ page }) => {
@@ -87,7 +87,11 @@ test('searches exact indexed records and opens separated account relationships',
     json: collection('loans', [{ id: loanId, borrower: account }]),
   }))
 
+  const searchRequest = page.waitForRequest((value) =>
+    value.url().includes('/api/search?') && value.url().includes('limit=25'),
+  )
   await page.goto(`/search?q=${account}`)
+  await searchRequest
   await expect(page.getByRole('heading', { level: 1, name: 'Global Search' })).toBeVisible()
   await expect(page.getByText('Archived context only. Current-state existence is not implied.')).toBeVisible()
   await expect(page.getByText('3', { exact: true })).toBeVisible()
@@ -117,11 +121,14 @@ test('rejects a malformed account route without issuing relationship queries', a
   expect(relationshipRequests).toBe(0)
 })
 
-test('exposes Search as a primary mobile destination', async ({ page }) => {
+test('explains accepted Search formats on mobile', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await mockBase(page)
   await page.goto('/search')
   await expect(page.locator('.sidebar')).toBeHidden()
   await expect(page.locator('.mobile-bottom-nav').getByRole('link', { name: 'Search' })).toHaveAttribute('aria-current', 'page')
   await expect(page.getByLabel('Exact identifier or relationship value')).toBeVisible()
+  await expect(page.getByText('64 hexadecimal characters')).toBeVisible()
+  await expect(page.getByText('Classic address beginning with r')).toBeVisible()
+  await expect(page.getByText('Search does not accept shortened IDs containing an ellipsis.')).toBeVisible()
 })
