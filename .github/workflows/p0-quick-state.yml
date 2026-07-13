@@ -1,5 +1,5 @@
 name: P0 quick state
-# refresh: 2
+# refresh: 3
 on:
   push:
     branches: [ops/p0-direct-recovery]
