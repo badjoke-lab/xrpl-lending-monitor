@@ -150,7 +150,7 @@ describe('verified release current-state fallback', () => {
   })
 
   it('does not reuse a cached reader after the configured snapshot identity changes', async () => {
-    const open = vi.spyOn(GithubCurrentStateReadModelReader, 'open')
+    vi.spyOn(GithubCurrentStateReadModelReader, 'open')
       .mockResolvedValueOnce(verifiedReader('snapshot-a'))
       .mockRejectedValueOnce(new Error('temporary GitHub Raw failure'))
     const db = {} as D1Database
