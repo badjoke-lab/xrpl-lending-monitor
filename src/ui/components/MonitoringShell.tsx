@@ -84,7 +84,7 @@ function Context({ status }: { status: ResourceState<NetworkStatusResponse> }) {
       <dl className="context-facts">
         <div><dt>Epoch</dt><dd>{status.state === 'loading' ? 'Loading' : data?.epoch?.id ?? 'Unavailable'}</dd></div>
         <div><dt>Validated ledger</dt><dd>{status.state === 'loading' ? 'Loading' : formatInteger(data?.server.latest_validated_ledger)}</dd></div>
-        <div><dt>Data age</dt><dd>{status.state === 'loading' ? 'Loading' : formatDuration(data?.collector.data_age_seconds)}</dd></div>
+        <div title="Age of the indexed history collector, not the five-minute current-state layer"><dt>History index age</dt><dd>{status.state === 'loading' ? 'Loading' : formatDuration(data?.collector.data_age_seconds)}</dd></div>
         <div><dt>Collector</dt><dd><span className={`status-dot status-${tone}`} aria-hidden="true" />{collector}</dd></div>
       </dl>
     </section>
