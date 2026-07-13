@@ -15,6 +15,7 @@ interface Filters {
 }
 
 const RIPPLE_EPOCH_UNIX_SECONDS = 946_684_800
+const PAGE_SIZE = 25
 
 function initialFilters(): Filters {
   const params = new URLSearchParams(window.location.search)
@@ -25,7 +26,7 @@ function initialFilters(): Filters {
 }
 
 function archiveUrl(filters: Filters): string {
-  const params = new URLSearchParams({ limit: '100' })
+  const params = new URLSearchParams({ limit: String(PAGE_SIZE) })
   if (filters.objectType) params.set('object_type', filters.objectType)
   if (filters.query) params.set('q', filters.query)
   return `/api/audit/archived?${params.toString()}`
@@ -61,7 +62,7 @@ export function ArchivedObjectsPage({ onNavigate }: ArchivedObjectsPageProps) {
         </div>
         <div className="page-actions">
           <button className="secondary-button" type="button" onClick={reload}>Refresh</button>
-          <a className="primary-button" href={archiveUrl(filters)}>Archive JSON</a>
+          <a className="secondary-button developer-action" href={archiveUrl(filters)}>Archive JSON</a>
         </div>
       </header>
 
@@ -70,7 +71,7 @@ export function ArchivedObjectsPage({ onNavigate }: ArchivedObjectsPageProps) {
         <span>These records left current projections and remain searchable as historical evidence. Unknown deletion classifications remain unknown.</span>
       </div>
 
-      <Panel title="Filter archived objects" description="Filters apply to the latest bounded 100 archived-object API window">
+      <Panel title="Filter archived objects" description={`Filters apply to the latest bounded ${PAGE_SIZE}-record archived-object API window`}>
         <form
           className="activity-filter-form"
           onSubmit={(event) => {
@@ -108,7 +109,7 @@ export function ArchivedObjectsPage({ onNavigate }: ArchivedObjectsPageProps) {
       {response ? (
         <Panel
           title="Indexed archives"
-          description={`${formatInteger(response.data.length)} archived object(s) returned from the bounded API`}
+          description={`${formatInteger(response.data.length)} archived object(s) returned · latest bounded ${PAGE_SIZE}-record window`}
           action={<ProvenanceBadge value={response.provenance.collection} />}
         >
           {response.data.length === 0 ? (
