@@ -1,0 +1,38 @@
+name: P0 fast patch probe from Windows
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/p0-fast-patch-probe-windows-trigger
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  probe:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Capture patch run
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $runs = gh api "repos/$env:GITHUB_REPOSITORY/actions/workflows/p0-cancel-obsolete-windows.yml/runs?per_page=20" | ConvertFrom-Json
+          $run = $runs.workflow_runs | Sort-Object {[datetime]$_.created_at} -Descending | Select-Object -First 1
+          if (-not $run) { throw 'No patch run found' }
+          $jobs = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$($run.id)/jobs?per_page=100" | ConvertFrom-Json
+          $payload = [ordered]@{
+            capturedAt = (Get-Date).ToUniversalTime().ToString('o')
+            run = [ordered]@{id=$run.id;status=$run.status;conclusion=$run.conclusion;createdAt=$run.created_at;updatedAt=$run.updated_at;url=$run.html_url;headSha=$run.head_sha}
+            jobs = @($jobs.jobs | ForEach-Object {[ordered]@{id=$_.id;name=$_.name;status=$_.status;conclusion=$_.conclusion;steps=@($_.steps | ForEach-Object {[ordered]@{name=$_.name;status=$_.status;conclusion=$_.conclusion;number=$_.number}})}})
+          } | ConvertTo-Json -Depth 8
+          $content = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($payload + "`n"))
+          $apiPath = "repos/$env:GITHUB_REPOSITORY/contents/.github/p0-fast-patch-status.json"
+          $existingSha = ''
+          try { $existingSha = gh api $apiPath --jq .sha } catch {}
+          if ($existingSha) { gh api --method PUT $apiPath -f message='Update P0 fast patch status' -f content=$content -f sha=$existingSha | Out-Null }
+          else { gh api --method PUT $apiPath -f message='Create P0 fast patch status' -f content=$content | Out-Null }
