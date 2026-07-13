@@ -1,15 +1,10 @@
 name: P0 fast-lane manual cycle
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/p0-fast-lane-manual-cycle.yml'
-      - '.github/p0-fast-lane-manual-cycle-trigger'
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -28,6 +23,18 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build:deploy-assets
+
+      - name: Expose scheduled test route to the Worker
+        shell: bash
+        run: |
+          node <<'EOF'
+          const fs = require('node:fs')
+          const path = 'wrangler.jsonc'
+          const config = JSON.parse(fs.readFileSync(path, 'utf8'))
+          const current = Array.isArray(config.assets?.run_worker_first) ? config.assets.run_worker_first : []
+          config.assets.run_worker_first = [...new Set([...current, '/__scheduled*'])]
+          fs.writeFileSync(path, JSON.stringify(config, null, 2) + '\n')
+          EOF
 
       - name: Invoke one remote scheduled cycle and capture logs
         shell: bash
@@ -74,13 +81,6 @@ jobs:
             --command "SELECT run_at,status,start_ledger_index,end_ledger_index,latest_observed_ledger,lag_ledgers,ledgers_processed,persistence_rows_written FROM fast_lane_shadow_run_metrics WHERE network='devnet' ORDER BY run_at DESC LIMIT 12;" \
             --json > metrics-raw.txt
           sed -n '/^\[/,$p' metrics-raw.txt > metrics.json
-
-      - name: Publish manual-cycle result
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
           tail -n 240 wrangler-dev.log > wrangler-dev-tail.log || true
           jq -n \
             --arg capturedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
@@ -91,11 +91,9 @@ jobs:
             --slurpfile metrics metrics.json \
             '{capturedAt:$capturedAt,responseHeaders:$responseHeaders,responseBody:$responseBody,wranglerLog:$wranglerLog,state:$state[0],metrics:$metrics[0]}' \
             > result.json
-          content="$(base64 -w0 result.json)"
-          api="repos/${GITHUB_REPOSITORY}/contents/.github/p0-fast-lane-manual-cycle-result.json"
-          sha="$(gh api "$api" --jq .sha 2>/dev/null || true)"
-          if [ -n "$sha" ]; then
-            gh api --method PUT "$api" -f message='Update P0 fast-lane manual-cycle result' -f content="$content" -f sha="$sha" >/dev/null
-          else
-            gh api --method PUT "$api" -f message='Create P0 fast-lane manual-cycle result' -f content="$content" >/dev/null
-          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p0-fast-lane-manual-cycle
+          path: result.json
+          retention-days: 14
