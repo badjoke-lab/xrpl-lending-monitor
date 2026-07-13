@@ -52,6 +52,33 @@ function positiveLimit(value: number): number {
   return value
 }
 
+export function evaluateFastLaneShadowDiffSample(
+  sample: NonNullable<FastLaneShadowDiffEvidence['sample']>,
+): { passed: boolean; reason: string | null } {
+  if (sample.sampledRows <= 0) {
+    return { passed: false, reason: 'fast_lane_sample_empty' }
+  }
+
+  const canonicalComparisonRows = Math.max(0, sample.sampledRows - sample.canonicalMissingRows)
+  if (canonicalComparisonRows <= 0) {
+    return { passed: false, reason: 'canonical_comparison_population_empty' }
+  }
+
+  if (sample.exactSourceMatches <= 0) {
+    return { passed: false, reason: 'exact_source_comparison_population_empty' }
+  }
+
+  if (sample.exactProjectionMismatches > 0) {
+    return { passed: false, reason: 'exact_source_projection_mismatch' }
+  }
+
+  if (sample.exactProjectionMatches !== sample.exactSourceMatches) {
+    return { passed: false, reason: 'exact_source_projection_comparison_incomplete' }
+  }
+
+  return { passed: true, reason: null }
+}
+
 export async function readFastLaneShadowDiff(options: {
   db: D1Database
   sampleLimit?: number
@@ -192,12 +219,13 @@ export async function readFastLaneShadowDiff(options: {
     exactProjectionMatches: Number(aggregate?.exact_projection_matches ?? 0),
     exactProjectionMismatches: Number(aggregate?.exact_projection_mismatches ?? 0),
   }
+  const result = evaluateFastLaneShadowDiffSample(sample)
 
   return {
     schemaVersion: 1,
     status: 'ok',
-    passed: sample.exactProjectionMismatches === 0,
-    reason: sample.exactProjectionMismatches === 0 ? null : 'exact_source_projection_mismatch',
+    passed: result.passed,
+    reason: result.reason,
     binding,
     fastLane: {
       ledgerIndex: state.lastProcessedLedger,
