@@ -1,19 +1,19 @@
 {
-  "capturedAt": "2026-07-13T13:46:05Z",
+  "capturedAt": "2026-07-13T13:46:55Z",
   "rpc": {
     "primary": {
       "name": "primary",
       "url": "https://devnet.honeycluster.io/",
       "httpCode": "200",
       "curlExit": 0,
-      "body": "{\"result\":{\"ledger\":{\"account_hash\":\"E6F2514C6F9B6703E7BD631861BB7523EAF3D2F2CD040FB9DFF0D47C537380FD\",\"close_flags\":0,\"close_time\":837265560,\"close_time_human\":\"2026-Jul-13 13:46:00.000000000 UTC\",\"close_time_iso\":\"2026-07-13T13:46:00Z\",\"close_time_resolution\":10,\"closed\":true,\"ledger_hash\":\"3F64C434CB28DE5EEF0CCE4BCC497C09BDCFD674623C690F4F7119F2B69AA695\",\"ledger_index\":3624196,\"parent_close_time\":837265552,\"parent_hash\":\"7488ECE43ED5D6B6128E74E066EDDC0C04D6A6F85A8E606E6C7C8B11E6645063\",\"total_coins\":\"99999489213146818\",\"transaction_hash\":\"29D6B7E3DE2DB9B212054AFE67C59764A53C3F9DFD297ED7568A5D8EF768146C\"},\"ledger_hash\":\"3F64C434CB28DE5EEF0CCE4BCC497C09BDCFD674623C690F4F7119F2B69AA695\",\"ledger_index\":3624196,\"status\":\"success\",\"validated\":true}}\n\r\n"
+      "body": "{\"result\":{\"ledger\":{\"account_hash\":\"BC83C7DC0DE8E365EA3CC888DD2E22E53C8392EABFED58F5C7016449905D7733\",\"close_flags\":0,\"close_time\":837265610,\"close_time_human\":\"2026-Jul-13 13:46:50.000000000 UTC\",\"close_time_iso\":\"2026-07-13T13:46:50Z\",\"close_time_resolution\":10,\"closed\":true,\"ledger_hash\":\"3D192B89A0F5BBA05C52EE823EBBD1B26D2DD9A620885A98C470DF626F155EDC\",\"ledger_index\":3624210,\"parent_close_time\":837265602,\"parent_hash\":\"D1E68D29C62282E263A70149076909DCEEEB0E000C1C152E8E0D31B98169ED9B\",\"total_coins\":\"99999489212746685\",\"transaction_hash\":\"904B257AF9E7ADC9E79AE974B0E67E8E5DDE280CBF84F3CE60B0E105562A9E96\"},\"ledger_hash\":\"3D192B89A0F5BBA05C52EE823EBBD1B26D2DD9A620885A98C470DF626F155EDC\",\"ledger_index\":3624210,\"status\":\"success\",\"validated\":true}}\n\r\n"
     },
     "fallback": {
       "name": "fallback",
       "url": "https://s.devnet.rippletest.net:51234/",
       "httpCode": "200",
       "curlExit": 0,
-      "body": "{\"result\":{\"ledger\":{\"account_hash\":\"E6F2514C6F9B6703E7BD631861BB7523EAF3D2F2CD040FB9DFF0D47C537380FD\",\"close_flags\":0,\"close_time\":837265560,\"close_time_human\":\"2026-Jul-13 13:46:00.000000000 UTC\",\"close_time_iso\":\"2026-07-13T13:46:00Z\",\"close_time_resolution\":10,\"closed\":true,\"ledger_hash\":\"3F64C434CB28DE5EEF0CCE4BCC497C09BDCFD674623C690F4F7119F2B69AA695\",\"ledger_index\":3624196,\"parent_close_time\":837265552,\"parent_hash\":\"7488ECE43ED5D6B6128E74E066EDDC0C04D6A6F85A8E606E6C7C8B11E6645063\",\"total_coins\":\"99999489213146818\",\"transaction_hash\":\"29D6B7E3DE2DB9B212054AFE67C59764A53C3F9DFD297ED7568A5D8EF768146C\"},\"ledger_hash\":\"3F64C434CB28DE5EEF0CCE4BCC497C09BDCFD674623C690F4F7119F2B69AA695\",\"ledger_index\":3624196,\"status\":\"success\",\"validated\":true}}\n\r\n"
+      "body": "{\"result\":{\"ledger\":{\"account_hash\":\"BC83C7DC0DE8E365EA3CC888DD2E22E53C8392EABFED58F5C7016449905D7733\",\"close_flags\":0,\"close_time\":837265610,\"close_time_human\":\"2026-Jul-13 13:46:50.000000000 UTC\",\"close_time_iso\":\"2026-07-13T13:46:50Z\",\"close_time_resolution\":10,\"closed\":true,\"ledger_hash\":\"3D192B89A0F5BBA05C52EE823EBBD1B26D2DD9A620885A98C470DF626F155EDC\",\"ledger_index\":3624210,\"parent_close_time\":837265602,\"parent_hash\":\"D1E68D29C62282E263A70149076909DCEEEB0E000C1C152E8E0D31B98169ED9B\",\"total_coins\":\"99999489212746685\",\"transaction_hash\":\"904B257AF9E7ADC9E79AE974B0E67E8E5DDE280CBF84F3CE60B0E105562A9E96\"},\"ledger_hash\":\"3D192B89A0F5BBA05C52EE823EBBD1B26D2DD9A620885A98C470DF626F155EDC\",\"ledger_index\":3624210,\"status\":\"success\",\"validated\":true}}\n\r\n"
     }
   },
   "schedules": {
@@ -22,7 +22,7 @@
         {
           "cron": "*/5 * * * *",
           "created_on": "2026-07-13T08:15:39.158898Z",
-          "modified_on": "2026-07-13T13:37:37.46285Z"
+          "modified_on": "2026-07-13T13:46:42.61557Z"
         }
       ]
     },
@@ -50,9 +50,9 @@
         "served_by_colo": "NRT",
         "served_by_primary": true,
         "timings": {
-          "sql_duration_ms": 0.288
+          "sql_duration_ms": 0.3184
         },
-        "duration": 0.288,
+        "duration": 0.3184,
         "changes": 0,
         "last_row_id": 0,
         "changed_db": false,
@@ -194,9 +194,9 @@
         "served_by_colo": "NRT",
         "served_by_primary": true,
         "timings": {
-          "sql_duration_ms": 0.4373
+          "sql_duration_ms": 0.4774
         },
-        "duration": 0.4373,
+        "duration": 0.4774,
         "changes": 0,
         "last_row_id": 0,
         "changed_db": false,
