@@ -1,0 +1,39 @@
+name: Route production Worker deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/production-deploy-trigger
+
+permissions:
+  contents: write
+
+concurrency:
+  group: production-deploy-router
+  cancel-in-progress: false
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger serialized production deploy
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          API_PATH="repos/${GITHUB_REPOSITORY}/contents/.github/p0-emergency-production-deploy-trigger"
+          printf 'production-deploy-%s-%s\n' "${GITHUB_SHA}" "${GITHUB_RUN_ID}" > trigger.txt
+          CONTENT="$(base64 -w0 trigger.txt)"
+          for attempt in $(seq 1 10); do
+            EXISTING_SHA="$(gh api "$API_PATH" --jq .sha 2>/dev/null || true)"
+            if [ -n "$EXISTING_SHA" ] && gh api --method PUT "$API_PATH" \
+              -f message="ops: route production deploy" \
+              -f content="$CONTENT" \
+              -f sha="$EXISTING_SHA" >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1
