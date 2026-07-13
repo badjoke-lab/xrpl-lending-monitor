@@ -44,13 +44,13 @@ describe('fastLaneShadowReanchorReason', () => {
     })).toBe('head_hash_mismatch')
   })
 
-  it('reanchors when lag exceeds the configured threshold', () => {
+  it('keeps a forward-only lag for bounded catch-up instead of skipping ledgers', () => {
     expect(fastLaneShadowReanchorReason({
       state: state({ lastProcessedLedger: 100 }),
       head: { ledgerIndex: 821, ledgerHash: 'B'.repeat(64) },
       expectedEpochId: 'fast-lane-shadow-devnet',
       reanchorLagLedgers: 720,
-    })).toBe('lag_threshold_exceeded')
+    })).toBeNull()
   })
 
   it('keeps a healthy continuation state', () => {
