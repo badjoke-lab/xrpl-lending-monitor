@@ -1,5 +1,5 @@
 {
-  "capturedAt": "2026-07-13T17:31:04Z",
+  "capturedAt": "2026-07-13T17:48:13Z",
   "overview": {
     "network": "devnet",
     "epoch": {
@@ -27,9 +27,9 @@
     },
     "current_state_watermark": {
       "source": "fast_lane",
-      "ledger_index": 3628437,
-      "ledger_hash": "24CC43AD57D4BC137C9EDEFF6DFEC3E79052CC0132BEE4AB7EAC92094337D70A",
-      "updated_at": "2026-07-13T17:30:24.763Z"
+      "ledger_index": 3628729,
+      "ledger_hash": "7430BC4C95D4D7F1481B189D30A7A6422696C5088E4FA1EF91544B7BA6ABA69F",
+      "updated_at": "2026-07-13T17:45:24.707Z"
     },
     "counts_watermark": {
       "source": "canonical_overlay",
@@ -47,9 +47,9 @@
       "overlay_hash": "39D838E15F106E3305038540F7BDD47BA8832062748B6D9D2881AAC7677CF667",
       "overlay_updated_at": "2026-07-13T14:33:14.236Z",
       "current_state_source": "fast_lane",
-      "current_state_ledger": 3628437,
-      "current_state_hash": "24CC43AD57D4BC137C9EDEFF6DFEC3E79052CC0132BEE4AB7EAC92094337D70A",
-      "current_state_updated_at": "2026-07-13T17:30:24.763Z"
+      "current_state_ledger": 3628729,
+      "current_state_hash": "7430BC4C95D4D7F1481B189D30A7A6422696C5088E4FA1EF91544B7BA6ABA69F",
+      "current_state_updated_at": "2026-07-13T17:45:24.707Z"
     },
     "counts": {
       "vaults": 849264,
@@ -69,22 +69,22 @@
   "head": {
     "result": {
       "ledger": {
-        "account_hash": "4879F6D5D960B02CB4525EAF757DDD80B9D00636040024DBD46F8C0202D4E243",
+        "account_hash": "7B7DE52E188D5F7D8F0FABC22672C569201C786E72D0BFB7F716E3101B8C1EAB",
         "close_flags": 0,
-        "close_time": 837279061,
-        "close_time_human": "2026-Jul-13 17:31:01.000000000 UTC",
-        "close_time_iso": "2026-07-13T17:31:01Z",
+        "close_time": 837280091,
+        "close_time_human": "2026-Jul-13 17:48:11.000000000 UTC",
+        "close_time_iso": "2026-07-13T17:48:11Z",
         "close_time_resolution": 10,
         "closed": true,
-        "ledger_hash": "1AF5A02D10B934B320430E8DE5E3E8486FFA1B5F8B3FB063FA6FE6F3A435DE79",
-        "ledger_index": 3628449,
-        "parent_close_time": 837279060,
-        "parent_hash": "A0115DA6410C043D94186C0D488F3F974957AC5150960D834B4C8EAD1F938BA9",
-        "total_coins": "99999488990931826",
-        "transaction_hash": "CD35CF3B9A584807696F0242BECBF0D47E9ED1C81C3C017E7BA23A7FF695FF71"
+        "ledger_hash": "C4FF76CE8201A55FB8955FF4F764EBC0F24CC7FF362D8DB39F0EFE9A519ADAAF",
+        "ledger_index": 3628783,
+        "parent_close_time": 837280090,
+        "parent_hash": "2A1A0AD975AEB56002ECB6671C0324FA3FB684AE1505817749C1C2A6395A0F5B",
+        "total_coins": "99999488985129782",
+        "transaction_hash": "F7834B65BC2FDCF537D73FBE9AD644CBE23100B02BBB896273E2818D21550F4D"
       },
-      "ledger_hash": "1AF5A02D10B934B320430E8DE5E3E8486FFA1B5F8B3FB063FA6FE6F3A435DE79",
-      "ledger_index": 3628449,
+      "ledger_hash": "C4FF76CE8201A55FB8955FF4F764EBC0F24CC7FF362D8DB39F0EFE9A519ADAAF",
+      "ledger_index": 3628783,
       "status": "success",
       "validated": true
     }
