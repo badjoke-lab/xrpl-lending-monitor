@@ -23,7 +23,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Wait for scheduled run
-        run: sleep 10
+        run: sleep 15
       - name: Capture production state
         env:
           GH_TOKEN: ${{ github.token }}
