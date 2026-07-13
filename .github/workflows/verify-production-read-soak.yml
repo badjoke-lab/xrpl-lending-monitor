@@ -19,6 +19,7 @@ on:
 
 permissions:
   contents: read
+  issues: write
 
 env:
   CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -143,3 +144,20 @@ jobs:
           path: production-read-audit
           if-no-files-found: warn
           retention-days: 14
+
+      - name: Open production freshness incident
+        if: ${{ failure() && github.event_name != 'pull_request' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TITLE='P0: production freshness regression'
+          EXISTING="$(gh issue list --repo "${GITHUB_REPOSITORY}" --state open --search 'P0 production freshness regression in:title' --json number,title --jq 'map(select(.title == "P0: production freshness regression")) | .[0].number // empty')"
+          if [ -n "${EXISTING}" ]; then
+            exit 0
+          fi
+          gh issue create \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "${TITLE}" \
+            --body "The permanent production freshness monitor failed. Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}. Treat this as a P0 until the five-minute cron, rolling run count, maximum gap, ledger lag, current-state reads, and fast-lane parity are verified healthy again."
