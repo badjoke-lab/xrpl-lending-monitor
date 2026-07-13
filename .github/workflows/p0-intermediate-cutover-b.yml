@@ -61,8 +61,16 @@ jobs:
           jq -n --arg ref main --arg h "$HISTORY_BRANCH" --arg c "$CURRENT_BRANCH" \
             '{ref:$ref,inputs:{history_candidate_branch:$h,current_state_candidate_branch:$c,confirm_production_write:"true"}}' \
             > "$ROOT/dispatch.json"
-          gh api --method POST "repos/${GITHUB_REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/dispatches" \
-            --input "$ROOT/dispatch.json"
+          dispatched=false
+          for attempt in $(seq 1 12); do
+            if gh api --method POST "repos/${GITHUB_REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/dispatches" \
+              --input "$ROOT/dispatch.json"; then
+              dispatched=true
+              break
+            fi
+            sleep $((attempt * 5))
+          done
+          test "$dispatched" = true
           RUN_ID=''
           for attempt in $(seq 1 90); do
             gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/runs?event=workflow_dispatch&per_page=100" \
