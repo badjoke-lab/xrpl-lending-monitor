@@ -1,20 +1,20 @@
 {
-  "capturedAt": "2026-07-13T13:18:32.6777361Z",
+  "capturedAt": "2026-07-13T13:20:34.2225341Z",
   "run": {
-    "id": 29253153256,
-    "status": "completed",
-    "conclusion": "failure",
-    "createdAt": "2026-07-13T13:16:42Z",
-    "updatedAt": "2026-07-13T13:16:52Z",
-    "url": "https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/29253153256",
-    "headSha": "7d1603070db9f43cf76dde78cef198038fbb4a41"
+    "id": 29253351903,
+    "status": "in_progress",
+    "conclusion": null,
+    "createdAt": "2026-07-13T13:19:46Z",
+    "updatedAt": "2026-07-13T13:19:49Z",
+    "url": "https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/29253351903",
+    "headSha": "c7fa8cfbebbd17fd3b50f4a3a0daa35e37e6e534"
   },
   "jobs": [
     {
-      "id": 86826325233,
+      "id": 86826976631,
       "name": "cutover",
-      "status": "completed",
-      "conclusion": "failure",
+      "status": "in_progress",
+      "conclusion": null,
       "steps": [
         {
           "name": "Set up job",
@@ -30,21 +30,15 @@
         },
         {
           "name": "Dispatch guarded live cutover",
-          "status": "completed",
-          "conclusion": "failure",
+          "status": "in_progress",
+          "conclusion": null,
           "number": 3
         },
         {
           "name": "Publish intermediate cutover status",
-          "status": "completed",
-          "conclusion": "skipped",
+          "status": "pending",
+          "conclusion": null,
           "number": 4
-        },
-        {
-          "name": "Complete job",
-          "status": "completed",
-          "conclusion": "success",
-          "number": 5
         }
       ]
     }
