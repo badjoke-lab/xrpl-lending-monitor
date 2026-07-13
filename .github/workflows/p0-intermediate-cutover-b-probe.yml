@@ -26,11 +26,26 @@ jobs:
           $run = $runs.workflow_runs | Sort-Object {[datetime]$_.created_at} -Descending | Select-Object -First 1
           if (-not $run) { throw 'No intermediate cutover run found' }
           $jobs = gh api "repos/$repo/actions/runs/$($run.id)/jobs?per_page=100" | ConvertFrom-Json
+          $cutoverRuns = gh api "repos/$repo/actions/workflows/rolling-checkpoint-live-cutover.yml/runs?event=workflow_dispatch&per_page=20" | ConvertFrom-Json
+          $latestCutovers = @($cutoverRuns.workflow_runs | Sort-Object {[datetime]$_.created_at} -Descending | Select-Object -First 5 | ForEach-Object {
+            $cutoverJobs = gh api "repos/$repo/actions/runs/$($_.id)/jobs?per_page=100" | ConvertFrom-Json
+            [ordered]@{
+              id=$_.id
+              status=$_.status
+              conclusion=$_.conclusion
+              createdAt=$_.created_at
+              updatedAt=$_.updated_at
+              url=$_.html_url
+              headSha=$_.head_sha
+              jobs=@($cutoverJobs.jobs | ForEach-Object {[ordered]@{id=$_.id;name=$_.name;status=$_.status;conclusion=$_.conclusion;steps=@($_.steps | ForEach-Object {[ordered]@{name=$_.name;status=$_.status;conclusion=$_.conclusion;number=$_.number}})}})
+            }
+          })
           $payload = [ordered]@{
             capturedAt=(Get-Date).ToUniversalTime().ToString('o')
             run=[ordered]@{id=$run.id;status=$run.status;conclusion=$run.conclusion;createdAt=$run.created_at;updatedAt=$run.updated_at;url=$run.html_url;headSha=$run.head_sha}
             jobs=@($jobs.jobs | ForEach-Object {[ordered]@{id=$_.id;name=$_.name;status=$_.status;conclusion=$_.conclusion;steps=@($_.steps | ForEach-Object {[ordered]@{name=$_.name;status=$_.status;conclusion=$_.conclusion;number=$_.number}})}})
-          } | ConvertTo-Json -Depth 8
+            latestLiveCutoverRuns=$latestCutovers
+          } | ConvertTo-Json -Depth 12
           $content=[Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($payload+"`n"))
           $api="repos/$repo/contents/.github/p0-intermediate-cutover-b-probe.json"
           $sha=''
