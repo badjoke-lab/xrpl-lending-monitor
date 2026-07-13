@@ -1,11 +1,11 @@
 {
-  "capturedAt": "2026-07-13T12:22:52.6390905Z",
+  "capturedAt": "2026-07-13T12:23:36.3160134Z",
   "run": {
     "id": 29249584609,
-    "status": "queued",
+    "status": "in_progress",
     "conclusion": null,
     "createdAt": "2026-07-13T12:22:03Z",
-    "updatedAt": "2026-07-13T12:22:03Z",
+    "updatedAt": "2026-07-13T12:23:20Z",
     "url": "https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/29249584609",
     "headSha": "087e1b62aa45dfe73caf0c19aacd57dbf372b817"
   },
@@ -13,12 +13,33 @@
     {
       "id": 86814587440,
       "name": "recover",
-      "status": "queued",
+      "status": "in_progress",
       "conclusion": null,
-      "steps": []
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 1
+        },
+        {
+          "name": "Resume bounded recovery and cut over",
+          "status": "in_progress",
+          "conclusion": null,
+          "number": 2
+        }
+      ]
     }
   ],
   "latestCandidateRuns": [
+    {
+      "id": 29249670017,
+      "status": "queued",
+      "conclusion": null,
+      "createdAt": "2026-07-13T12:23:25Z",
+      "updatedAt": "2026-07-13T12:23:25Z",
+      "url": "https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/29249670017"
+    },
     {
       "id": 29247790101,
       "status": "in_progress",
@@ -58,14 +79,6 @@
       "createdAt": "2026-07-12T08:25:26Z",
       "updatedAt": "2026-07-12T08:42:08Z",
       "url": "https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/29185820598"
-    },
-    {
-      "id": 29185299331,
-      "status": "completed",
-      "conclusion": "failure",
-      "createdAt": "2026-07-12T08:06:13Z",
-      "updatedAt": "2026-07-12T08:22:40Z",
-      "url": "https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/29185299331"
     }
   ]
 }
