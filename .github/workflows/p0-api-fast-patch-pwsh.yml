@@ -1,0 +1,91 @@
+name: P0 API fast patch PowerShell
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/p0-api-fast-patch-pwsh-trigger
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Patch workflow files through Contents API
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $repo = $env:GITHUB_REPOSITORY
+
+          function Read-File([string]$path) {
+            $raw = gh api "repos/$repo/contents/$path" | ConvertFrom-Json
+            $text = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(($raw.content -replace '\s','')))
+            return @{ Path=$path; Sha=$raw.sha; Text=($text -replace "`r`n","`n") }
+          }
+
+          function Write-File($file, [string]$text, [string]$message) {
+            $content = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($text))
+            gh api --method PUT "repos/$repo/contents/$($file.Path)" -f message=$message -f content=$content -f sha=$($file.Sha) | Out-Null
+          }
+
+          $candidate = Read-File '.github/workflows/rolling-checkpoint-candidate.yml'
+          $oldLimit = '          test "${MAX_DELTA_LEDGERS}" -le 5000' + "`n"
+          $newLimit = (@(
+            '          if [ "${MAX_DELTA_LEDGERS}" -gt 5000 ]; then',
+            '            test "${MAX_DELTA_LEDGERS}" -le 30000',
+            '            PAIR="${SOURCE_HISTORY_BRANCH}:${SOURCE_CURRENT_STATE_BRANCH}:${HISTORY_CANDIDATE_BRANCH}:${CURRENT_STATE_CANDIDATE_BRANCH}"',
+            '            case "${PAIR}" in',
+            '              history-p0-recovery-a-data:current-state-p0-recovery-a-data:history-p0-recovery-b-data:current-state-p0-recovery-b-data|history-p0-recovery-b-data:current-state-p0-recovery-b-data:history-p0-recovery-a-data:current-state-p0-recovery-a-data) ;;',
+            '              *) echo "Large delta is restricted to aligned P0 recovery branches" >&2; exit 1 ;;',
+            '            esac',
+            '          fi'
+          ) -join "`n") + "`n"
+          $candidateText = $candidate.Text
+          if ($candidateText.Contains($oldLimit)) {
+            $candidateText = $candidateText.Replace($oldLimit, $newLimit)
+          } elseif (-not $candidateText.Contains('test "${MAX_DELTA_LEDGERS}" -le 30000')) {
+            throw 'candidate max-delta anchor missing'
+          }
+          $oldEvidence = '          ROOT=rolling-checkpoint-candidate' + "`n" + '          PUBLICATION=.local/history-root/history/publication.json'
+          $newEvidence = '          ROOT=rolling-checkpoint-candidate' + "`n" + '          mkdir -p "${ROOT}"' + "`n" + '          PUBLICATION=.local/history-root/history/publication.json'
+          if ($candidateText.Contains($oldEvidence)) {
+            $candidateText = $candidateText.Replace($oldEvidence, $newEvidence)
+          } elseif (-not $candidateText.Contains('mkdir -p "${ROOT}"')) {
+            throw 'candidate evidence anchor missing'
+          }
+          if ($candidateText -ne $candidate.Text) {
+            Write-File $candidate $candidateText 'fix: enable bounded P0 fast candidate'
+          }
+
+          $recovery = Read-File '.github/workflows/p0-history-recovery.yml'
+          $recoveryText = $recovery.Text.Replace("      MAX_DELTA_LEDGERS: '5000'`n", "      MAX_DELTA_LEDGERS: '30000'`n")
+          $recoveryText = $recoveryText.Replace("      MAX_CYCLES: '8'`n", "      MAX_CYCLES: '1'`n")
+          $oldSource = (@(
+            "          SOURCE_HISTORY='history-data'",
+            "          SOURCE_CURRENT='current-state-data'",
+            "          OUTPUT_HISTORY='history-p0-recovery-a-data'",
+            "          OUTPUT_CURRENT='current-state-p0-recovery-a-data'"
+          ) -join "`n") + "`n"
+          $newSource = (@(
+            "          SOURCE_HISTORY='history-p0-recovery-b-data'",
+            "          SOURCE_CURRENT='current-state-p0-recovery-b-data'",
+            "          OUTPUT_HISTORY='history-p0-recovery-a-data'",
+            "          OUTPUT_CURRENT='current-state-p0-recovery-a-data'"
+          ) -join "`n") + "`n"
+          if ($recoveryText.Contains($oldSource)) {
+            $recoveryText = $recoveryText.Replace($oldSource, $newSource)
+          } elseif (-not $recoveryText.Contains("SOURCE_HISTORY='history-p0-recovery-b-data'")) {
+            throw 'recovery source anchor missing'
+          }
+          if ($recoveryText -ne $recovery.Text) {
+            $recovery = Read-File '.github/workflows/p0-history-recovery.yml'
+            $recoveryText = $recovery.Text.Replace("      MAX_DELTA_LEDGERS: '5000'`n", "      MAX_DELTA_LEDGERS: '30000'`n")
+            $recoveryText = $recoveryText.Replace("      MAX_CYCLES: '8'`n", "      MAX_CYCLES: '1'`n")
+            if ($recoveryText.Contains($oldSource)) { $recoveryText = $recoveryText.Replace($oldSource, $newSource) }
+            Write-File $recovery $recoveryText 'fix: continue P0 recovery from candidate B'
+          }
