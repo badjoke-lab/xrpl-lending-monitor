@@ -69,7 +69,7 @@ function lifecycleResponse() {
       },
     ],
     filters: { event_type: null, loan_id: null },
-    page: { limit: 100, next_cursor: null },
+    page: { limit: 25, next_cursor: null },
     provenance: { collection: 'indexed' },
   }
 }
@@ -78,17 +78,24 @@ test('renders the protocol-wide lifecycle explorer with indexed event evidence',
   await mockSharedState(page)
   await page.route('**/api/audit/lifecycle?*', (route) => route.fulfill({ json: lifecycleResponse() }))
 
+  const initialRequest = page.waitForRequest((value) =>
+    value.url().includes('/api/audit/lifecycle?') && value.url().includes('limit=25'),
+  )
   await page.goto('/audit/lifecycle')
+  await initialRequest
   await expect(page.getByRole('heading', { level: 1, name: 'Loan Lifecycle' })).toBeVisible()
   await expect(page.getByText('Events are not inferred when source evidence is unavailable.')).toBeVisible()
   await expect(page.getByText('LoanPay')).toBeVisible()
-  await expect(page.getByText('Principal 11000 -> 10000')).toBeVisible()
+  const principalDelta = page.locator('.lifecycle-delta-row').filter({ hasText: 'Principal' })
+  await expect(principalDelta.getByText('11000', { exact: true })).toBeVisible()
+  await expect(principalDelta.getByText('10000', { exact: true })).toBeVisible()
   await expect(page.getByRole('link', { name: /C{8}/ })).toHaveAttribute('href', `/loans/${loanId}`)
   await expect(page.getByRole('link', { name: /E{8}/ })).toHaveAttribute('href', `/transactions/${transactionHash}`)
 
   await page.getByLabel('Event type').selectOption('payment')
   const request = page.waitForRequest((value) =>
     value.url().includes('/api/audit/lifecycle?') &&
+    value.url().includes('limit=25') &&
     value.url().includes('event_type=payment') &&
     value.url().includes(`loan_id=${loanId}`),
   )
