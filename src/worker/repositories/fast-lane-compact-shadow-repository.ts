@@ -1,4 +1,5 @@
 import type { FastLaneShadowWindowPlan } from '../../collector/incremental/fast-lane-shadow-plan'
+import type { FastLaneHistoryBundle } from './fast-lane-history-window'
 import {
   readFastLaneShadowState,
   type FastLaneShadowPersistenceUsage,
@@ -30,6 +31,7 @@ function commitToken(options: {
 export async function commitFastLaneCompactShadowWindow(options: {
   db: D1Database
   plan: FastLaneShadowWindowPlan
+  historyBundle: FastLaneHistoryBundle
   expectedPreviousLedger: number
   expectedPreviousHash: string
   processedAt: string
@@ -40,6 +42,13 @@ export async function commitFastLaneCompactShadowWindow(options: {
   }
   if (plan.endLedgerIndex < plan.startLedgerIndex) {
     throw new Error('Fast-lane compact shadow window ledger range is invalid')
+  }
+  if (
+    options.historyBundle.startLedgerIndex !== plan.startLedgerIndex
+    || options.historyBundle.endLedgerIndex !== plan.endLedgerIndex
+    || options.historyBundle.endLedgerHash !== plan.endLedgerHash
+  ) {
+    throw new Error('Fast-lane history bundle does not match the compact shadow window')
   }
 
   const token = commitToken({
@@ -140,6 +149,29 @@ export async function commitFastLaneCompactShadowWindow(options: {
       ),
     )
   }
+
+  statements.push(
+    db.prepare(
+      `INSERT INTO fast_lane_history_windows (
+         network, epoch_id, start_ledger_index, end_ledger_index,
+         end_ledger_hash, bundle_json, created_at
+       ) VALUES ('devnet', ?1, ?2, ?3, ?4, ?5, ?6)
+       ON CONFLICT(network, epoch_id, start_ledger_index)
+       DO UPDATE SET
+         end_ledger_index = excluded.end_ledger_index,
+         end_ledger_hash = excluded.end_ledger_hash,
+         bundle_json = excluded.bundle_json,
+         created_at = excluded.created_at
+       WHERE excluded.end_ledger_index >= fast_lane_history_windows.end_ledger_index`,
+    ).bind(
+      options.historyBundle.epochId,
+      options.historyBundle.startLedgerIndex,
+      options.historyBundle.endLedgerIndex,
+      options.historyBundle.endLedgerHash,
+      JSON.stringify(options.historyBundle),
+      options.historyBundle.createdAt,
+    ),
+  )
 
   statements.push(
     db.prepare(

@@ -10,7 +10,6 @@ export type FastLaneShadowReanchorReason =
   | 'epoch_mismatch'
   | 'head_regression'
   | 'head_hash_mismatch'
-  | 'lag_threshold_exceeded'
   | null
 
 export function fastLaneShadowReanchorReason(options: {
@@ -27,8 +26,11 @@ export function fastLaneShadowReanchorReason(options: {
     state.lastProcessedLedger === head.ledgerIndex
     && state.lastProcessedHash !== head.ledgerHash
   ) return 'head_hash_mismatch'
-  if (head.ledgerIndex - state.lastProcessedLedger > options.reanchorLagLedgers) {
-    return 'lag_threshold_exceeded'
-  }
+
+  // A large but forward-only lag is catch-up work, not a reset signal. Reanchoring
+  // here would skip validated ledgers and create a permanent live-history gap.
+  // The retained option remains part of the runtime contract while deployments
+  // transition away from lag-driven reanchoring.
+  void options.reanchorLagLedgers
   return null
 }
