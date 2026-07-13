@@ -1,0 +1,13 @@
+{
+  "capturedAt": "2026-07-13T12:06:06.9638872Z",
+  "run": {
+    "id": 29248544083,
+    "status": "completed",
+    "conclusion": "failure",
+    "createdAt": "2026-07-13T12:05:34Z",
+    "updatedAt": "2026-07-13T12:05:34Z",
+    "url": "https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/29248544083",
+    "headSha": "4f5816b51a39d8b9eb938e9a9e1b2a12717fef6c"
+  },
+  "jobs": []
+}
