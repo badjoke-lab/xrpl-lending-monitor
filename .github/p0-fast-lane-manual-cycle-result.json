@@ -1,0 +1,183 @@
+{
+  "capturedAt": "2026-07-13T13:58:18Z",
+  "responseHeaders": "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nDate: Mon, 13 Jul 2026 13:57:54 GMT\r\nContent-Type: text/html\r\nCache-Control: public, max-age=0, must-revalidate\r\nServer: cloudflare\r\nVary: Accept-Encoding\r\nCF-Cache-Status: HIT\r\nCF-Ray: a1a8ccaa6d7469b0-LAX\r\nNEL: {\"success_fraction\":0,\"report_to\":\"cf-nel\",\"max_age\":604800}\r\nReport-To: {\"endpoints\":[{\"url\":\"https:\\/\\/a.nel.cloudflare.com\\/report\\/v4?s=OOaHXYiWNd%2B9vPgn6492B0sddGVY60mgX7ZZn0Oljo379HXhV8BvInCkWzB%2FlWJQiy6cQ6rZ%2By7Nm36VQJACLKMuh8TOrwic2kpCnuzur3mn5ldqxLWbpwzSsxnezZFCs9vApOWCiy6zs8%2F1bwK%2BU05xHPgKPctrId7%2B2NYvyw%3D%3D\"}],\"group\":\"cf-nel\",\"max_age\":604800}\r\nalt-svc: h3=\":443\"; ma=86400\r\n\r\n",
+  "responseBody": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"UTF-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />\n    <meta\n      name=\"description\"\n      content=\"Read-only monitoring, history, and audit tooling for the XRPL Lending Protocol.\"\n    />\n    <title>XRPL Lending Monitor</title>\n    <script type=\"module\" crossorigin src=\"/assets/index-hNxaA-5j.js\"></script>\n    <link rel=\"stylesheet\" crossorigin href=\"/assets/index-V3GqCldv.css\">\n  </head>\n  <body>\n    <div id=\"root\"></div>\n  </body>\n</html>\n",
+  "wranglerLog": "\n ⛅️ wrangler 4.105.0\n────────────────────\nSupport for remote bindings in `wrangler dev` is now available as a replacement for `wrangler dev --remote`. Try it out now by running `wrangler dev` with the `remote` option enabled on your resources and let us know how it goes!\nThis gives you access to remote resources in development while retaining all the usual benefits of local dev: fast iteration speed, breakpoint debugging, and more.\n\nRefer to https://developers.cloudflare.com/workers/development-testing/#remote-bindings for more information.\nYour Worker has access to the following bindings:\nBinding                                                                                              Resource                  \nenv.DB (xrpl-lending-monitor)                                                                        D1 Database               \nenv.ASSETS                                                                                           Assets                    \nenv.APP_NETWORK (\"devnet\")                                                                           Environment Variable      \nenv.MAINNET_ENABLED (\"false\")                                                                        Environment Variable      \nenv.XRPL_DEVNET_RPC_URL (\"https://devnet.honeycluster.io/\")                                          Environment Variable      \nenv.XRPL_DEVNET_RPC_FALLBACK_URL (\"https://s.devnet.rippletest.net:51234/\")                          Environment Variable      \nenv.XRPL_RPC_TIMEOUT_MS (\"8000\")                                                                     Environment Variable      \nenv.NETWORK_STATUS_STALE_AFTER_SECONDS (\"600\")                                                       Environment Variable      \nenv.CURRENT_STATE_GITHUB_REPOSITORY (\"badjoke-lab/xrpl-lending-monitor\")                             Environment Variable      \nenv.CURRENT_STATE_GITHUB_BRANCH (\"current-state-data\")                                               Environment Variable      \nenv.CURRENT_STATE_REPLACEMENT_SNAPSHOT_ID (\"devnet-3592674-0373cda0b0cd\")                            Environment Variable      \nenv.CURRENT_STATE_REPLACEMENT_GITHUB_BRANCH (\"current-state-data\")                                   Environment Variable      \nenv.CURRENT_STATE_RELEASE_CHANNEL_TAG (\"current-state-channel\")                                      Environment Variable      \nenv.CURRENT_STATE_MAX_ASSET_BYTES (\"33554432\")                                                       Environment Variable      \nenv.CURRENT_STATE_MAX_DECOMPRESSED_BYTES (\"100663296\")                                               Environment Variable      \nenv.HISTORY_GITHUB_REPOSITORY (\"badjoke-lab/xrpl-lending-monitor\")                                   Environment Variable      \nenv.HISTORY_GITHUB_BRANCH (\"history-data\")                                                           Environment Variable      \nenv.HISTORY_CHANNEL_PATH (\"history-channel.json\")                                                    Environment Variable      \nenv.HISTORY_MAX_ASSET_BYTES (\"33554432\")                                                             Environment Variable      \nenv.HISTORY_FETCH_TIMEOUT_MS (\"8000\")                                                                Environment Variable      \nenv.CATCH_UP_INITIALIZATION_ENABLED (\"false\")                                                        Environment Variable      \nenv.CATCH_UP_BASE_EPOCH_ID (\"devnet-3371675\")                                                        Environment Variable      \nenv.CATCH_UP_BASE_SNAPSHOT_ID (\"devnet-3371675-0ba2ed766c19\")                                        Environment Variable      \nenv.CATCH_UP_BASE_LEDGER_INDEX (\"3371675\")                                                           Environment Variable      \nenv.CATCH_UP_BASE_LEDGER_HASH (\"0BA2ED766C190C733F8F26288785CBDF01D0F...\")                           Environment Variable      \nenv.REPLACEMENT_BASE_REBASE_ENABLED (\"true\")                                                         Environment Variable      \nenv.REPLACEMENT_BASE_EPOCH_ID (\"devnet-3371675\")                                                     Environment Variable      \nenv.REPLACEMENT_BASE_SNAPSHOT_ID (\"devnet-3592674-0373cda0b0cd\")                                     Environment Variable      \nenv.REPLACEMENT_BASE_LEDGER_INDEX (\"3592674\")                                                        Environment Variable      \nenv.REPLACEMENT_BASE_LEDGER_HASH (\"0373CDA0B0CD8486C0C55C5B5DD4605014193...\")                        Environment Variable      \nenv.INCREMENTAL_LEDGER_TRANSPORT (\"websocket\")                                                       Environment Variable      \nenv.INCREMENTAL_WEBSOCKET_ENDPOINT (\"wss://s.devnet.rippletest.net:51233/\")                          Environment Variable      \nenv.INCREMENTAL_WEBSOCKET_READ_WINDOW (\"4\")                                                          Environment Variable      \nenv.INCREMENTAL_MAX_LEDGERS_PER_RUN (\"32\")                                                           Environment Variable      \nenv.INCREMENTAL_MAX_LEDGER_RPC_REQUESTS_PER_RUN (\"40\")                                               Environment Variable      \nenv.INCREMENTAL_MAX_TRANSACTIONS_PER_LEDGER (\"5000\")                                                 Environment Variable      \nenv.INCREMENTAL_MAX_INSPECTED_TRANSACTIONS_PER_RUN (\"10000\")                                         Environment Variable      \nenv.INCREMENTAL_MAX_LENDING_TRANSACTIONS_PER_RUN (\"250\")                                             Environment Variable      \nenv.INCREMENTAL_MAX_STATEMENTS_PER_RUN (\"512\")                                                       Environment Variable      \nenv.INCREMENTAL_MAX_ROWS_PER_RUN (\"512\")                                                             Environment Variable      \nenv.INCREMENTAL_MAX_OVERLAY_MUTATIONS_PER_RUN (\"48\")                                                 Environment Variable      \nenv.INCREMENTAL_MAX_RETRIES_PER_ENDPOINT (\"1\")                                                       Environment Variable      \nenv.INCREMENTAL_EXECUTION_BUDGET_MS (\"8000\")                                                         Environment Variable      \nenv.INCREMENTAL_DEADLINE_MARGIN_MS (\"1000\")                                                          Environment Variable      \nenv.INCREMENTAL_RETAIN_PAYLOADS (\"false\")                                                            Environment Variable      \nenv.FAST_LANE_WEBSOCKET_ENDPOINT (\"wss://s.devnet.rippletest.net:51233/\")                            Environment Variable      \nenv.FAST_LANE_BOOTSTRAP_LEDGERS (\"720\")                                                              Environment Variable      \nenv.FAST_LANE_MAX_LEDGERS_PER_RUN (\"180\")                                                            Environment Variable      \nenv.FAST_LANE_REANCHOR_LAG_LEDGERS (\"720\")                                                           Environment Variable      \nenv.FAST_LANE_READ_WINDOW (\"8\")                                                                      Environment Variable      \n\n⎔ Starting remote preview...\n🌀 Building list of assets...\nTotal Upload: 643.69 KiB / gzip: 120.87 KiB\n✨ Read 5 files from the assets directory /home/runner/work/xrpl-lending-monitor/xrpl-lending-monitor/dist\n🌀 Starting asset upload...\nNo updated asset files to upload. Proceeding with deployment...\n[wrangler:info] Ready on http://127.0.0.1:8787\n[wrangler:info] GET / 200 OK (4270ms)\n[wrangler:info] GET / 200 OK (1282ms)\n[wrangler:info] GET /__scheduled 200 OK (52ms)\n",
+  "state": [
+    {
+      "results": [
+        {
+          "epoch_id": "fast-lane-shadow-devnet",
+          "last_processed_ledger": 3620399,
+          "last_processed_hash": "449A7C181735D6BA2C6AEC54CA5F745DC3D06E9F4671E8CB13E8C7A015ED9BA0",
+          "latest_observed_ledger": 3620399,
+          "latest_observed_hash": "449A7C181735D6BA2C6AEC54CA5F745DC3D06E9F4671E8CB13E8C7A015ED9BA0",
+          "status": "healthy",
+          "updated_at": "2026-07-13T10:05:34.640Z"
+        }
+      ],
+      "success": true,
+      "meta": {
+        "served_by": "v3-prod",
+        "served_by_region": "APAC",
+        "served_by_colo": "NRT",
+        "served_by_primary": true,
+        "timings": {
+          "sql_duration_ms": 0.37
+        },
+        "duration": 0.37,
+        "changes": 0,
+        "last_row_id": 0,
+        "changed_db": false,
+        "size_after": 158846976,
+        "rows_read": 1,
+        "rows_written": 0,
+        "total_attempts": 1
+      }
+    }
+  ],
+  "metrics": [
+    {
+      "results": [
+        {
+          "run_at": "2026-07-13T10:05:34.640Z",
+          "status": "committed",
+          "start_ledger_index": 3620314,
+          "end_ledger_index": 3620399,
+          "latest_observed_ledger": 3620399,
+          "lag_ledgers": 0,
+          "ledgers_processed": 86,
+          "persistence_rows_written": 128
+        },
+        {
+          "run_at": "2026-07-13T10:00:34.610Z",
+          "status": "committed",
+          "start_ledger_index": 3620227,
+          "end_ledger_index": 3620313,
+          "latest_observed_ledger": 3620313,
+          "lag_ledgers": 0,
+          "ledgers_processed": 87,
+          "persistence_rows_written": 97
+        },
+        {
+          "run_at": "2026-07-13T09:55:34.609Z",
+          "status": "committed",
+          "start_ledger_index": 3620140,
+          "end_ledger_index": 3620226,
+          "latest_observed_ledger": 3620226,
+          "lag_ledgers": 0,
+          "ledgers_processed": 87,
+          "persistence_rows_written": 55
+        },
+        {
+          "run_at": "2026-07-13T09:50:34.611Z",
+          "status": "committed",
+          "start_ledger_index": 3620054,
+          "end_ledger_index": 3620139,
+          "latest_observed_ledger": 3620139,
+          "lag_ledgers": 0,
+          "ledgers_processed": 86,
+          "persistence_rows_written": 53
+        },
+        {
+          "run_at": "2026-07-13T09:45:34.611Z",
+          "status": "committed",
+          "start_ledger_index": 3619967,
+          "end_ledger_index": 3620053,
+          "latest_observed_ledger": 3620053,
+          "lag_ledgers": 0,
+          "ledgers_processed": 87,
+          "persistence_rows_written": 97
+        },
+        {
+          "run_at": "2026-07-13T09:40:34.610Z",
+          "status": "committed",
+          "start_ledger_index": 3619880,
+          "end_ledger_index": 3619966,
+          "latest_observed_ledger": 3619966,
+          "lag_ledgers": 0,
+          "ledgers_processed": 87,
+          "persistence_rows_written": 72
+        },
+        {
+          "run_at": "2026-07-13T09:35:34.635Z",
+          "status": "committed",
+          "start_ledger_index": 3619794,
+          "end_ledger_index": 3619879,
+          "latest_observed_ledger": 3619879,
+          "lag_ledgers": 0,
+          "ledgers_processed": 86,
+          "persistence_rows_written": 75
+        },
+        {
+          "run_at": "2026-07-13T09:30:34.615Z",
+          "status": "committed",
+          "start_ledger_index": 3619707,
+          "end_ledger_index": 3619793,
+          "latest_observed_ledger": 3619793,
+          "lag_ledgers": 0,
+          "ledgers_processed": 87,
+          "persistence_rows_written": 57
+        },
+        {
+          "run_at": "2026-07-13T09:25:34.609Z",
+          "status": "committed",
+          "start_ledger_index": 3619619,
+          "end_ledger_index": 3619706,
+          "latest_observed_ledger": 3619706,
+          "lag_ledgers": 0,
+          "ledgers_processed": 88,
+          "persistence_rows_written": 50
+        },
+        {
+          "run_at": "2026-07-13T09:20:34.609Z",
+          "status": "committed",
+          "start_ledger_index": 3619533,
+          "end_ledger_index": 3619618,
+          "latest_observed_ledger": 3619618,
+          "lag_ledgers": 0,
+          "ledgers_processed": 86,
+          "persistence_rows_written": 48
+        },
+        {
+          "run_at": "2026-07-13T09:15:34.611Z",
+          "status": "committed",
+          "start_ledger_index": 3619449,
+          "end_ledger_index": 3619532,
+          "latest_observed_ledger": 3619532,
+          "lag_ledgers": 0,
+          "ledgers_processed": 84,
+          "persistence_rows_written": 43
+        },
+        {
+          "run_at": "2026-07-13T09:10:34.610Z",
+          "status": "committed",
+          "start_ledger_index": 3619365,
+          "end_ledger_index": 3619448,
+          "latest_observed_ledger": 3619448,
+          "lag_ledgers": 0,
+          "ledgers_processed": 84,
+          "persistence_rows_written": 46
+        }
+      ],
+      "success": true,
+      "meta": {
+        "served_by": "v3-prod",
+        "served_by_region": "APAC",
+        "served_by_colo": "NRT",
+        "served_by_primary": true,
+        "timings": {
+          "sql_duration_ms": 0.3905
+        },
+        "duration": 0.3905,
+        "changes": 0,
+        "last_row_id": 0,
+        "changed_db": false,
+        "size_after": 158846976,
+        "rows_read": 12,
+        "rows_written": 0,
+        "total_attempts": 1
+      }
+    }
+  ]
+}
