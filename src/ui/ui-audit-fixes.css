@@ -1,0 +1,101 @@
+/*
+ * UI audit fixes isolated from the production collector and data pipeline.
+ * This file contains presentation-only corrections discovered in the
+ * 2026-07-13 desktop/mobile visual audit.
+ */
+
+html,
+body,
+#root,
+.application-frame,
+.application-body,
+.main-content,
+.page-stack,
+.page-header,
+.page-header > *,
+.panel,
+.panel-header,
+.panel-header > *,
+.definition-grid,
+.definition-grid > *,
+.notice-content,
+.notice-content > * {
+  min-width: 0;
+}
+
+html,
+body,
+#root {
+  max-width: 100%;
+  overflow-x: clip;
+}
+
+.page-header h1,
+.page-summary,
+.breadcrumbs,
+.definition-grid dd,
+.table-secondary,
+.raw-data-panel,
+.mono {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.page-actions {
+  min-width: 0;
+  max-width: 100%;
+  flex-wrap: wrap;
+}
+
+.page-actions > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.table-scroll,
+.raw-data-panel {
+  max-width: 100%;
+}
+
+@media (max-width: 960px) {
+  .application-body {
+    padding-bottom: calc(88px + env(safe-area-inset-bottom));
+  }
+
+  .mobile-bottom-nav {
+    min-height: calc(62px + env(safe-area-inset-bottom));
+  }
+}
+
+@media (max-width: 680px) {
+  .page-header,
+  .panel-header,
+  .notice-content {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .page-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    width: 100%;
+  }
+
+  .page-actions > * {
+    width: 100%;
+  }
+
+  .identifier-link,
+  .asset-chip {
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .data-table th,
+  .data-table td {
+    overflow-wrap: anywhere;
+  }
+}
