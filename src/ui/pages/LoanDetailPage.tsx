@@ -60,7 +60,7 @@ export function LoanDetailPage({ loanId, onNavigate }: LoanDetailPageProps) {
         </div>
         <div className="page-actions">
           <button className="secondary-button" type="button" onClick={reload}>Refresh</button>
-          <a className="primary-button" href={`/api/loans/${loanId}`}>Loan JSON</a>
+          <a className="secondary-button developer-action" href={`/api/loans/${loanId}`}>Loan JSON</a>
         </div>
       </header>
 
@@ -77,7 +77,7 @@ export function LoanDetailPage({ loanId, onNavigate }: LoanDetailPageProps) {
         <>
           <div className="loan-state-note" role="note">
             <strong>State interpretation</strong>
-            <span>Default eligibility is a schedule calculation. It does not mean the on-ledger Loan is defaulted.</span>
+            <span>Schedule-derived eligibility is a calculation. It does not mean the on-ledger Loan is defaulted.</span>
           </div>
 
           <section className="loan-summary-grid" aria-label="Loan summary">
@@ -91,10 +91,10 @@ export function LoanDetailPage({ loanId, onNavigate }: LoanDetailPageProps) {
               <strong><StatusBadge value={loan.on_ledger_status} /></strong>
               <small>Direct · flags {loan.flags}</small>
             </article>
-            <article className="status-summary-card">
-              <span>Schedule state</span>
+            <article className="status-summary-card schedule-derived-card">
+              <span>Schedule-derived state</span>
               <strong><StatusBadge value={loan.schedule_status} /></strong>
-              <small>Derived at {formatUtc(loan.status_source.evaluated_at)}</small>
+              <small>Derived calculation at {formatUtc(loan.status_source.evaluated_at)}</small>
             </article>
             <article className="status-summary-card">
               <span>Total outstanding</span>
@@ -115,7 +115,7 @@ export function LoanDetailPage({ loanId, onNavigate }: LoanDetailPageProps) {
                   { label: 'Borrower', value: loan.borrower, wide: true, mono: true },
                   { label: 'Loan sequence', value: formatInteger(loan.loan_sequence) },
                   { label: 'On-ledger state', value: <StatusBadge value={loan.on_ledger_status} /> },
-                  { label: 'Schedule state', value: <StatusBadge value={loan.schedule_status} /> },
+                  { label: 'Schedule-derived state', value: <StatusBadge value={loan.schedule_status} /> },
                   { label: 'Supports overpayment', value: loan.supports_overpayment ? 'Yes' : 'No' },
                   { label: 'Flags', value: formatInteger(loan.flags), mono: true },
                   { label: 'Previous ledger', value: formatInteger(loan.previous_ledger_index), mono: true },
@@ -148,11 +148,11 @@ export function LoanDetailPage({ loanId, onNavigate }: LoanDetailPageProps) {
                 { label: 'Grace period', value: `${formatInteger(loan.grace_period_seconds)} seconds` },
                 { label: 'Previous payment due', value: formatUtc(loan.previous_payment_due), wide: true },
                 { label: 'Next payment due', value: formatUtc(loan.next_payment_due), wide: true },
-                { label: 'Default eligible at', value: formatUtc(loan.default_eligible_at), wide: true },
+                { label: 'Schedule-derived eligibility at', value: formatUtc(loan.default_eligible_at), wide: true },
                 { label: 'Evaluated at', value: formatUtc(loan.status_source.evaluated_at), wide: true },
                 { label: 'Schedule provenance', value: <ProvenanceBadge value={loan.provenance.schedule_status} /> },
                 { label: 'Raw next due', value: formatInteger(loan.next_payment_due_ripple_time), mono: true },
-                { label: 'Raw default eligibility', value: formatInteger(loan.default_eligible_ripple_time), mono: true },
+                { label: 'Raw schedule eligibility', value: formatInteger(loan.default_eligible_ripple_time), mono: true },
               ]}
             />
           </Panel>
