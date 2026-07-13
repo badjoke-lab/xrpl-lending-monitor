@@ -24,8 +24,8 @@ jobs:
             gh workflow run rolling-checkpoint-live-cutover.yml \
               --repo "$GITHUB_REPOSITORY" \
               --ref main \
-              -f history_candidate_branch=history-p0-recovery-a-data \
-              -f current_state_candidate_branch=current-state-p0-recovery-a-data \
+              -f history_candidate_branch=history-p0-recovery-b-data \
+              -f current_state_candidate_branch=current-state-p0-recovery-b-data \
               -f confirm_production_write=true
             for _ in $(seq 1 60); do
               RUN_ID="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow rolling-checkpoint-live-cutover.yml --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
@@ -39,8 +39,4 @@ jobs:
           CONTENT="$(base64 -w0 result.json)"
           API="repos/${GITHUB_REPOSITORY}/contents/.github/p0-direct-cutover-result.json"
           SHA="$(gh api "$API?ref=ops/p0-direct-recovery" --jq .sha 2>/dev/null || true)"
-          if [ -n "$SHA" ]; then
-            gh api --method PUT "$API" -f message='Update direct cutover result' -f content="$CONTENT" -f sha="$SHA" -f branch='ops/p0-direct-recovery' >/dev/null
-          else
-            gh api --method PUT "$API" -f message='Create direct cutover result' -f content="$CONTENT" -f branch='ops/p0-direct-recovery' >/dev/null
-          fi
+          gh api --method PUT "$API" -f message='Update direct cutover result' -f content="$CONTENT" -f sha="$SHA" -f branch='ops/p0-direct-recovery' >/dev/null
