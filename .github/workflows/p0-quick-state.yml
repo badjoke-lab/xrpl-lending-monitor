@@ -1,5 +1,5 @@
 name: P0 quick public state
-# refresh: 2026-07-14T02:27:40+09:00
+# refresh: 2026-07-14T02:31:00+09:00
 on:
   push:
     branches: [ops/p0-direct-recovery]
