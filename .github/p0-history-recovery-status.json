@@ -1,0 +1,32 @@
+{
+  "run": {
+    "id": 29244796458,
+    "url": "https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/29244796458",
+    "event": "push",
+    "headSha": "aa104b335a295fa4cc7d25255cd5ac9762d858cc",
+    "status": "queued",
+    "conclusion": null,
+    "createdAt": "2026-07-13T11:01:45Z",
+    "updatedAt": "2026-07-13T11:01:45Z"
+  },
+  "jobs": [
+    {
+      "id": 86799010575,
+      "name": "recover",
+      "status": "queued",
+      "conclusion": null,
+      "startedAt": "2026-07-13T11:01:45Z",
+      "completedAt": null,
+      "steps": []
+    },
+    {
+      "id": 86799011119,
+      "name": "validate",
+      "status": "completed",
+      "conclusion": "skipped",
+      "startedAt": "2026-07-13T11:01:46Z",
+      "completedAt": "2026-07-13T11:01:45Z",
+      "steps": []
+    }
+  ]
+}
