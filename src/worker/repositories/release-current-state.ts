@@ -45,6 +45,23 @@ type AdapterIndexCursor = {
 }
 
 const SEARCH_ACCOUNT_START = '__read_model_search_account_start__'
+const RELEASE_REFRESH_INTERVAL_MS = 5 * 60 * 1000
+const RELEASE_RETRY_INTERVAL_MS = 30 * 1000
+
+interface CachedReleaseCurrentState {
+  release: {
+    source: ReleaseCurrentStateSource
+    snapshot: ActiveSnapshotRecord
+  }
+  nextRefreshAtMs: number
+  verifiedAt: string
+}
+
+let verifiedReleaseCache = new WeakMap<object, Map<string, CachedReleaseCurrentState>>()
+
+export function clearVerifiedReleaseCurrentStateCacheForTest(): void {
+  verifiedReleaseCache = new WeakMap<object, Map<string, CachedReleaseCurrentState>>()
+}
 
 function fakeRecord(kind: ReadModelKind, projection: Projection): ReleaseNativeDataRecord {
   return {
@@ -486,6 +503,8 @@ export interface ResolvedCurrentStateStorage {
   source: CurrentStateStorage
   snapshot: ActiveSnapshotRecord | null
   releaseUnavailable: boolean
+  releaseFallback?: boolean
+  releaseVerifiedAt?: string
 }
 
 export function isReleaseCurrentStateSource(value: CurrentStateStorage): value is ReleaseCurrentStateSource {
@@ -511,10 +530,16 @@ export async function openConfiguredReleaseCurrentState(
   try {
     const readModel = await GithubCurrentStateReadModelReader.open({
       githubRepository: config.currentState.githubRepository,
-      githubBranch: 'current-state-data',
+      githubBranch: config.currentState.githubBranch ?? 'current-state-data',
     })
     const manifest = readModel.manifest
     const snapshot = snapshotFromManifest(manifest, readModel.updatedAt)
+    if (
+      config.currentState.replacement
+      && snapshot.id !== config.currentState.replacement.snapshotId
+    ) {
+      throw new Error('read-model snapshot does not match the configured replacement snapshot')
+    }
     const holder: { source?: ReleaseCurrentStateSource } = {}
     const reader = createReadModelAdapter(readModel, () => {
       if (!holder.source) throw new CurrentStateObjectReadError('manifest_integrity_error', 'release source is unavailable')
@@ -539,17 +564,70 @@ export async function openConfiguredReleaseCurrentState(
   }
 }
 
+function releaseCacheKey(config: RuntimeConfig): string {
+  return [
+    config.currentState.githubRepository,
+    config.currentState.githubBranch ?? 'current-state-data',
+    config.currentState.replacement?.snapshotId ?? '',
+  ].join(':')
+}
+
+function cacheForDatabase(db: D1Database): Map<string, CachedReleaseCurrentState> {
+  const key = db as unknown as object
+  const existing = verifiedReleaseCache.get(key)
+  if (existing) return existing
+  const created = new Map<string, CachedReleaseCurrentState>()
+  verifiedReleaseCache.set(key, created)
+  return created
+}
+
 export async function resolveCurrentStateStorage(
   config: RuntimeConfig,
   db: D1Database,
+  nowMs = Date.now(),
 ): Promise<ResolvedCurrentStateStorage> {
   const releaseConfigured = Boolean(config.currentState.githubRepository)
   if (releaseConfigured) {
+    const cache = cacheForDatabase(db)
+    const key = releaseCacheKey(config)
+    const cached = cache.get(key)
+    if (cached && nowMs < cached.nextRefreshAtMs) {
+      return {
+        source: cached.release.source,
+        snapshot: cached.release.snapshot,
+        releaseUnavailable: false,
+        releaseFallback: false,
+        releaseVerifiedAt: cached.verifiedAt,
+      }
+    }
+
     try {
       const release = await openConfiguredReleaseCurrentState(config, db)
       if (!release) return { source: db, snapshot: null, releaseUnavailable: true }
-      return { source: release.source, snapshot: release.snapshot, releaseUnavailable: false }
+      const verifiedAt = new Date(nowMs).toISOString()
+      cache.set(key, {
+        release,
+        nextRefreshAtMs: nowMs + RELEASE_REFRESH_INTERVAL_MS,
+        verifiedAt,
+      })
+      return {
+        source: release.source,
+        snapshot: release.snapshot,
+        releaseUnavailable: false,
+        releaseFallback: false,
+        releaseVerifiedAt: verifiedAt,
+      }
     } catch {
+      if (cached) {
+        cached.nextRefreshAtMs = nowMs + RELEASE_RETRY_INTERVAL_MS
+        return {
+          source: cached.release.source,
+          snapshot: cached.release.snapshot,
+          releaseUnavailable: false,
+          releaseFallback: true,
+          releaseVerifiedAt: cached.verifiedAt,
+        }
+      }
       return { source: db, snapshot: null, releaseUnavailable: true }
     }
   }
@@ -557,5 +635,6 @@ export async function resolveCurrentStateStorage(
     source: db,
     snapshot: await getActiveSnapshot(db),
     releaseUnavailable: false,
+    releaseFallback: false,
   }
 }

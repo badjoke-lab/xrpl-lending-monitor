@@ -64,9 +64,9 @@ function evidence(): PreSoakRuntimeEvidence {
         sampledRows: 10,
         canonicalMissingRows: 0,
         canonicalAheadRows: 0,
-        fastAheadRows: 10,
-        exactSourceMatches: 0,
-        exactProjectionMatches: 0,
+        fastAheadRows: 0,
+        exactSourceMatches: 10,
+        exactProjectionMatches: 10,
         exactProjectionMismatches: 0,
       },
     },
@@ -127,5 +127,22 @@ describe('current pre-soak runtime readiness', () => {
 
     expect(report.passed).toBe(false)
     expect(report.checks.recentFiveMinuteRuns.passed).toBe(false)
+  })
+
+  it('fails when every sampled fast-lane row is missing from canonical comparison data', () => {
+    const input = evidence()
+    input.diff.passed = false
+    input.diff.reason = 'canonical_comparison_population_empty'
+    input.diff.sample = {
+      ...input.diff.sample!,
+      canonicalMissingRows: input.diff.sample!.sampledRows,
+      exactSourceMatches: 0,
+      exactProjectionMatches: 0,
+    }
+
+    const report = evaluatePreSoakRuntimeReadiness(input, now)
+
+    expect(report.passed).toBe(false)
+    expect(report.checks.projectionParity.passed).toBe(false)
   })
 })
