@@ -1,5 +1,5 @@
 {
-  "capturedAt": "2026-07-13T16:45:13Z",
+  "capturedAt": "2026-07-13T16:46:25Z",
   "d1": [
     [
       {
@@ -7,12 +7,12 @@
           {
             "network": "devnet",
             "epoch_id": "fast-lane-shadow-devnet",
-            "last_processed_ledger": 3627161,
-            "last_processed_hash": "9BA644CBBF6212D79AB5B14F7BFFFA38334F92E790C854EE3DAB3C5C925F7771",
-            "latest_observed_ledger": 3627456,
-            "latest_observed_hash": "75B4D1E2AD739E542E1790FE1902B27BE8444C1CB429BD3B3C736F1123BCBCC5",
+            "last_processed_ledger": 3627341,
+            "last_processed_hash": "FA540F581CD1A68122AB95730330D6E7A93FDF9B435A88632CC47DE92D14A02C",
+            "latest_observed_ledger": 3627555,
+            "latest_observed_hash": "B74EF63EFEE68FD5D3583A33B945DB5E01F60C0638A9492389683FEDC079DA8F",
             "status": "behind",
-            "updated_at": "2026-07-13T16:40:24.714Z"
+            "updated_at": "2026-07-13T16:45:24.711Z"
           }
         ],
         "success": true,
@@ -22,13 +22,13 @@
           "served_by_colo": "NRT",
           "served_by_primary": true,
           "timings": {
-            "sql_duration_ms": 0.2211
+            "sql_duration_ms": 0.1794
           },
-          "duration": 0.2211,
+          "duration": 0.1794,
           "changes": 0,
           "last_row_id": 0,
           "changed_db": false,
-          "size_after": 140013568,
+          "size_after": 140750848,
           "rows_read": 1,
           "rows_written": 0,
           "total_attempts": 1
@@ -36,6 +36,20 @@
       },
       {
         "results": [
+          {
+            "network": "devnet",
+            "run_at": "2026-07-13T16:45:24.711Z",
+            "status": "committed",
+            "start_ledger_index": 3627162,
+            "end_ledger_index": 3627341,
+            "latest_observed_ledger": 3627555,
+            "lag_ledgers": 214,
+            "ledgers_processed": 180,
+            "lending_transactions": 52,
+            "coalesced_object_rows": 31,
+            "persistence_rows_read": 37,
+            "persistence_rows_written": 41
+          },
           {
             "network": "devnet",
             "run_at": "2026-07-13T16:40:24.714Z",
@@ -189,20 +203,6 @@
             "coalesced_object_rows": 68,
             "persistence_rows_read": 74,
             "persistence_rows_written": 75
-          },
-          {
-            "network": "devnet",
-            "run_at": "2026-07-13T09:30:34.615Z",
-            "status": "committed",
-            "start_ledger_index": 3619707,
-            "end_ledger_index": 3619793,
-            "latest_observed_ledger": 3619793,
-            "lag_ledgers": 0,
-            "ledgers_processed": 87,
-            "lending_transactions": 72,
-            "coalesced_object_rows": 50,
-            "persistence_rows_read": 56,
-            "persistence_rows_written": 57
           }
         ],
         "success": true,
@@ -212,13 +212,13 @@
           "served_by_colo": "NRT",
           "served_by_primary": true,
           "timings": {
-            "sql_duration_ms": 0.2433
+            "sql_duration_ms": 0.2134
           },
-          "duration": 0.2433,
+          "duration": 0.2134,
           "changes": 0,
           "last_row_id": 0,
           "changed_db": false,
-          "size_after": 140013568,
+          "size_after": 140750848,
           "rows_read": 12,
           "rows_written": 0,
           "total_attempts": 1
@@ -230,22 +230,22 @@
     {
       "result": {
         "ledger": {
-          "account_hash": "ACBAC99EF7A118D4D48F83BDFDD0D654F296ACE63D2D2CDC1CB9D2A0F1787E02",
+          "account_hash": "70932E4FBBE2B8714D360134855428D64657375B9AB1D1CA4DD5116C7EF6CA8B",
           "close_flags": 0,
-          "close_time": 837276311,
-          "close_time_human": "2026-Jul-13 16:45:11.000000000 UTC",
-          "close_time_iso": "2026-07-13T16:45:11Z",
+          "close_time": 837276381,
+          "close_time_human": "2026-Jul-13 16:46:21.000000000 UTC",
+          "close_time_iso": "2026-07-13T16:46:21Z",
           "close_time_resolution": 10,
           "closed": true,
-          "ledger_hash": "9126C36D4B3A238F9E3F2E2228FCAA94FFA0FE17550F589005E753347AC6CA77",
-          "ledger_index": 3627551,
-          "parent_close_time": 837276310,
-          "parent_hash": "6B68B22484F0718D4D8A3B77AA946193D1EF2EBECF5ACE7944B3FBAFB42560B9",
-          "total_coins": "99999489002153845",
-          "transaction_hash": "0000000000000000000000000000000000000000000000000000000000000000"
+          "ledger_hash": "3763C5B1EB49E4E2C3F9FACA88E44BFED08C40DFB562587090ED2B682394A1C8",
+          "ledger_index": 3627574,
+          "parent_close_time": 837276380,
+          "parent_hash": "832812E525EA55945BC6DBD408058CCE94379E09A5D66BBADD54A1AA59652AAD",
+          "total_coins": "99999489002153823",
+          "transaction_hash": "71AF096ED5B93980E5648BDEA639F4B985A34FD3CD1EDB3136726D6FEBC05B37"
         },
-        "ledger_hash": "9126C36D4B3A238F9E3F2E2228FCAA94FFA0FE17550F589005E753347AC6CA77",
-        "ledger_index": 3627551,
+        "ledger_hash": "3763C5B1EB49E4E2C3F9FACA88E44BFED08C40DFB562587090ED2B682394A1C8",
+        "ledger_index": 3627574,
         "status": "success",
         "validated": true
       }
