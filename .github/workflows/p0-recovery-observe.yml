@@ -1,0 +1,40 @@
+name: P0 recovery observe
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/p0-recovery-observe-trigger
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  observe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Capture recovery state
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          RECOVERY_RUNS="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/p0-history-recovery.yml/runs?event=push&per_page=20")"
+          RECOVERY_RUN_ID="$(jq -r '.workflow_runs | sort_by(.created_at) | reverse | .[0].id // empty' <<<"${RECOVERY_RUNS}")"
+          test -n "${RECOVERY_RUN_ID}"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RECOVERY_RUN_ID}" > recovery-run.json
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RECOVERY_RUN_ID}/jobs?per_page=100" > recovery-jobs.json
+          gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/rolling-checkpoint-candidate.yml/runs?event=workflow_dispatch&per_page=20" > child-runs.json
+          jq -n \
+            --slurpfile run recovery-run.json \
+            --slurpfile jobs recovery-jobs.json \
+            --slurpfile children child-runs.json \
+            '{capturedAt:(now|todateiso8601),recovery:{id:$run[0].id,status:$run[0].status,conclusion:$run[0].conclusion,createdAt:$run[0].created_at,updatedAt:$run[0].updated_at,url:$run[0].html_url,headSha:$run[0].head_sha},jobs:[$jobs[0].jobs[]|{id,name,status,conclusion,startedAt:.started_at,completedAt:.completed_at}],latestCandidateRuns:[$children[0].workflow_runs[:5][]|{id,status,conclusion,createdAt:.created_at,updatedAt:.updated_at,url:.html_url,headSha:.head_sha}]}' \
+            > .github/p0-history-recovery-status.json
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add .github/p0-history-recovery-status.json
+          git commit -m "Update P0 history recovery status" || exit 0
+          git push origin HEAD:main
