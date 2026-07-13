@@ -1,0 +1,61 @@
+name: Capture production UI baseline
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/capture-production-ui-baseline.yml'
+      - 'scripts/capture-production-ui-baseline.mjs'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: capture-production-ui-baseline-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      BASE_URL: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+      OUTPUT_DIR: ui-visual-baseline
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Capture representative production pages
+        run: node scripts/capture-production-ui-baseline.mjs
+
+      - name: Publish capture summary
+        if: always()
+        shell: bash
+        run: |
+          if [ -f "$OUTPUT_DIR/manifest.json" ]; then
+            jq '{generatedAt,baseUrl,readOnlyProductionCapture,productionMutations,summary,resolvedRoutes}' "$OUTPUT_DIR/manifest.json" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ -f "$OUTPUT_DIR/fatal-error.txt" ]; then
+            cat "$OUTPUT_DIR/fatal-error.txt" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: xrpl-lending-ui-baseline-${{ github.sha }}
+          path: ui-visual-baseline
+          if-no-files-found: error
+          retention-days: 30
