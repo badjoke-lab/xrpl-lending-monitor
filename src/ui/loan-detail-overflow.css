@@ -1,0 +1,24 @@
+.loan-detail-header h1,
+.loan-state-note span,
+.loan-summary-grid .status-summary-card > strong {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+  white-space: normal;
+}
+
+.loan-summary-grid .status-summary-card > strong {
+  line-height: 1.35;
+}
+
+@media (max-width: 680px) {
+  .loan-detail-header h1 {
+    font-size: 1.45rem;
+    letter-spacing: -0.03em;
+  }
+
+  .loan-state-note span {
+    line-height: 1.55;
+  }
+}
