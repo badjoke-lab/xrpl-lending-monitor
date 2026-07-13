@@ -74,6 +74,46 @@ body,
   max-width: 100%;
 }
 
+.lifecycle-delta-list {
+  display: grid;
+  gap: 1px;
+  margin: 14px 0;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--border-subtle);
+}
+
+.lifecycle-delta-head,
+.lifecycle-delta-row {
+  display: grid;
+  grid-template-columns: minmax(130px, 0.8fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 9px 11px;
+  background: rgba(6, 18, 27, 0.96);
+}
+
+.lifecycle-delta-head {
+  color: var(--text-muted);
+  font-size: 0.64rem;
+  font-weight: 850;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.lifecycle-delta-row strong {
+  font-size: 0.74rem;
+}
+
+.lifecycle-delta-row code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  white-space: normal;
+}
+
 @media (max-width: 960px) {
   .application-body {
     padding-bottom: calc(88px + env(safe-area-inset-bottom));
@@ -113,5 +153,31 @@ body,
   .data-table th,
   .data-table td {
     overflow-wrap: anywhere;
+  }
+
+  .lifecycle-delta-head {
+    display: none;
+  }
+
+  .lifecycle-delta-row {
+    grid-template-columns: 1fr;
+    gap: 5px;
+  }
+
+  .lifecycle-delta-row code::before {
+    color: var(--text-muted);
+    font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+    font-size: 0.62rem;
+    font-weight: 800;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+
+  .lifecycle-delta-row code:nth-child(2)::before {
+    content: 'Before: ';
+  }
+
+  .lifecycle-delta-row code:nth-child(3)::before {
+    content: 'After: ';
   }
 }
