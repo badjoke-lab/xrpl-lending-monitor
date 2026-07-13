@@ -1,20 +1,20 @@
 {
-  "capturedAt": "2026-07-13T12:12:34.9351145Z",
+  "capturedAt": "2026-07-13T12:16:44.0785585Z",
   "run": {
-    "id": 29248847249,
-    "status": "in_progress",
-    "conclusion": null,
-    "createdAt": "2026-07-13T12:10:19Z",
-    "updatedAt": "2026-07-13T12:11:06Z",
-    "url": "https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/29248847249",
-    "headSha": "e5ea045e85d9822a08e13df830ec82b6302274b2"
+    "id": 29249127439,
+    "status": "completed",
+    "conclusion": "failure",
+    "createdAt": "2026-07-13T12:14:38Z",
+    "updatedAt": "2026-07-13T12:15:24Z",
+    "url": "https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/29249127439",
+    "headSha": "03e47dbf31276b7fd075d93144b7fd530ba40205"
   },
   "jobs": [
     {
-      "id": 86812204977,
+      "id": 86813093872,
       "name": "patch",
-      "status": "in_progress",
-      "conclusion": null,
+      "status": "completed",
+      "conclusion": "failure",
       "steps": [
         {
           "name": "Set up job",
@@ -23,22 +23,16 @@
           "number": 1
         },
         {
-          "name": "Run actions/checkout@v4",
-          "status": "in_progress",
-          "conclusion": null,
+          "name": "Patch through Contents API",
+          "status": "completed",
+          "conclusion": "failure",
           "number": 2
         },
         {
-          "name": "Apply bounded fast recovery patch",
-          "status": "pending",
-          "conclusion": null,
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
           "number": 3
-        },
-        {
-          "name": "Post Run actions/checkout@v4",
-          "status": "pending",
-          "conclusion": null,
-          "number": 6
         }
       ]
     }
