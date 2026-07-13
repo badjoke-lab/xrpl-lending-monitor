@@ -1,0 +1,217 @@
+{
+  "capturedAt": "2026-07-13T14:04:17Z",
+  "head": {
+    "result": {
+      "ledger": {
+        "account_hash": "7A6D7841607B3B74413CC2498500545E0A8E81E4E194B1A9F3FC1AEDC7C7D9AA",
+        "close_flags": 0,
+        "close_time": 837266651,
+        "close_time_human": "2026-Jul-13 14:04:11.000000000 UTC",
+        "close_time_iso": "2026-07-13T14:04:11Z",
+        "close_time_resolution": 10,
+        "closed": true,
+        "ledger_hash": "8FBA3A67C4B5AA2398745CCBC515F7D9EF50CFA4A2EA37BE58D79DFFCB93F10B",
+        "ledger_index": 3624510,
+        "parent_close_time": 837266650,
+        "parent_hash": "18EF26C2164A59B43A6919BA023DDCE3D969C29A48ABBFD2761CC361FCAADE26",
+        "total_coins": "99999489207141931",
+        "transaction_hash": "AB3B44D0A5B3CDE5578FB5B065A60CC0281B0962EB56235D8BEBB1D8A3E62AAD"
+      },
+      "ledger_hash": "8FBA3A67C4B5AA2398745CCBC515F7D9EF50CFA4A2EA37BE58D79DFFCB93F10B",
+      "ledger_index": 3624510,
+      "status": "success",
+      "validated": true
+    }
+  },
+  "schedules": {
+    "result": {
+      "schedules": [
+        {
+          "cron": "*/5 * * * *",
+          "created_on": "2026-07-13T08:15:39.158898Z",
+          "modified_on": "2026-07-13T14:02:47.741286Z"
+        }
+      ]
+    },
+    "success": true,
+    "errors": [],
+    "messages": []
+  },
+  "state": [
+    {
+      "results": [
+        {
+          "epoch_id": "fast-lane-shadow-devnet",
+          "last_processed_ledger": 3620399,
+          "last_processed_hash": "449A7C181735D6BA2C6AEC54CA5F745DC3D06E9F4671E8CB13E8C7A015ED9BA0",
+          "latest_observed_ledger": 3620399,
+          "latest_observed_hash": "449A7C181735D6BA2C6AEC54CA5F745DC3D06E9F4671E8CB13E8C7A015ED9BA0",
+          "status": "healthy",
+          "updated_at": "2026-07-13T10:05:34.640Z"
+        }
+      ],
+      "success": true,
+      "meta": {
+        "served_by": "v3-prod",
+        "served_by_region": "APAC",
+        "served_by_colo": "NRT",
+        "served_by_primary": true,
+        "timings": {
+          "sql_duration_ms": 0.209
+        },
+        "duration": 0.209,
+        "changes": 0,
+        "last_row_id": 0,
+        "changed_db": false,
+        "size_after": 158846976,
+        "rows_read": 1,
+        "rows_written": 0,
+        "total_attempts": 1
+      }
+    }
+  ],
+  "metrics": [
+    {
+      "results": [
+        {
+          "run_at": "2026-07-13T10:05:34.640Z",
+          "status": "committed",
+          "start_ledger_index": 3620314,
+          "end_ledger_index": 3620399,
+          "latest_observed_ledger": 3620399,
+          "lag_ledgers": 0,
+          "ledgers_processed": 86,
+          "persistence_rows_written": 128
+        },
+        {
+          "run_at": "2026-07-13T10:00:34.610Z",
+          "status": "committed",
+          "start_ledger_index": 3620227,
+          "end_ledger_index": 3620313,
+          "latest_observed_ledger": 3620313,
+          "lag_ledgers": 0,
+          "ledgers_processed": 87,
+          "persistence_rows_written": 97
+        },
+        {
+          "run_at": "2026-07-13T09:55:34.609Z",
+          "status": "committed",
+          "start_ledger_index": 3620140,
+          "end_ledger_index": 3620226,
+          "latest_observed_ledger": 3620226,
+          "lag_ledgers": 0,
+          "ledgers_processed": 87,
+          "persistence_rows_written": 55
+        },
+        {
+          "run_at": "2026-07-13T09:50:34.611Z",
+          "status": "committed",
+          "start_ledger_index": 3620054,
+          "end_ledger_index": 3620139,
+          "latest_observed_ledger": 3620139,
+          "lag_ledgers": 0,
+          "ledgers_processed": 86,
+          "persistence_rows_written": 53
+        },
+        {
+          "run_at": "2026-07-13T09:45:34.611Z",
+          "status": "committed",
+          "start_ledger_index": 3619967,
+          "end_ledger_index": 3620053,
+          "latest_observed_ledger": 3620053,
+          "lag_ledgers": 0,
+          "ledgers_processed": 87,
+          "persistence_rows_written": 97
+        },
+        {
+          "run_at": "2026-07-13T09:40:34.610Z",
+          "status": "committed",
+          "start_ledger_index": 3619880,
+          "end_ledger_index": 3619966,
+          "latest_observed_ledger": 3619966,
+          "lag_ledgers": 0,
+          "ledgers_processed": 87,
+          "persistence_rows_written": 72
+        },
+        {
+          "run_at": "2026-07-13T09:35:34.635Z",
+          "status": "committed",
+          "start_ledger_index": 3619794,
+          "end_ledger_index": 3619879,
+          "latest_observed_ledger": 3619879,
+          "lag_ledgers": 0,
+          "ledgers_processed": 86,
+          "persistence_rows_written": 75
+        },
+        {
+          "run_at": "2026-07-13T09:30:34.615Z",
+          "status": "committed",
+          "start_ledger_index": 3619707,
+          "end_ledger_index": 3619793,
+          "latest_observed_ledger": 3619793,
+          "lag_ledgers": 0,
+          "ledgers_processed": 87,
+          "persistence_rows_written": 57
+        },
+        {
+          "run_at": "2026-07-13T09:25:34.609Z",
+          "status": "committed",
+          "start_ledger_index": 3619619,
+          "end_ledger_index": 3619706,
+          "latest_observed_ledger": 3619706,
+          "lag_ledgers": 0,
+          "ledgers_processed": 88,
+          "persistence_rows_written": 50
+        },
+        {
+          "run_at": "2026-07-13T09:20:34.609Z",
+          "status": "committed",
+          "start_ledger_index": 3619533,
+          "end_ledger_index": 3619618,
+          "latest_observed_ledger": 3619618,
+          "lag_ledgers": 0,
+          "ledgers_processed": 86,
+          "persistence_rows_written": 48
+        },
+        {
+          "run_at": "2026-07-13T09:15:34.611Z",
+          "status": "committed",
+          "start_ledger_index": 3619449,
+          "end_ledger_index": 3619532,
+          "latest_observed_ledger": 3619532,
+          "lag_ledgers": 0,
+          "ledgers_processed": 84,
+          "persistence_rows_written": 43
+        },
+        {
+          "run_at": "2026-07-13T09:10:34.610Z",
+          "status": "committed",
+          "start_ledger_index": 3619365,
+          "end_ledger_index": 3619448,
+          "latest_observed_ledger": 3619448,
+          "lag_ledgers": 0,
+          "ledgers_processed": 84,
+          "persistence_rows_written": 46
+        }
+      ],
+      "success": true,
+      "meta": {
+        "served_by": "v3-prod",
+        "served_by_region": "APAC",
+        "served_by_colo": "NRT",
+        "served_by_primary": true,
+        "timings": {
+          "sql_duration_ms": 0.5428
+        },
+        "duration": 0.5428,
+        "changes": 0,
+        "last_row_id": 0,
+        "changed_db": false,
+        "size_after": 158846976,
+        "rows_read": 12,
+        "rows_written": 0,
+        "total_attempts": 1
+      }
+    }
+  ]
+}
