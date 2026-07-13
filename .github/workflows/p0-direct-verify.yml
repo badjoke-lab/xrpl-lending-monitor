@@ -1,0 +1,78 @@
+name: P0 direct verify
+
+on:
+  push:
+    branches: [ops/p0-direct-recovery]
+    paths: [.github/workflows/p0-direct-verify.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Wait for scheduled run
+        run: sleep 360
+      - name: Capture production state
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set +e
+          mkdir -p verify
+          curl --silent --show-error -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/xrpl-lending-monitor/schedules" > verify/schedules.json
+          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote --command "SELECT * FROM fast_lane_shadow_state WHERE network='devnet';" --json > verify/state-raw.txt 2>&1
+          STATE_RC=$?
+          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote --command "SELECT * FROM fast_lane_shadow_run_metrics WHERE network='devnet' ORDER BY run_at DESC LIMIT 20;" --json > verify/metrics-raw.txt 2>&1
+          METRICS_RC=$?
+          curl --silent --show-error -H 'content-type: application/json' --data '{"method":"ledger","params":[{"ledger_index":"validated","transactions":false,"expand":false,"api_version":2}]}' https://devnet.honeycluster.io/ > verify/head.json
+          curl --silent --show-error https://xrpl-lending-monitor.badjoke-lab.workers.dev/api/overview > verify/overview.json
+          python - <<PY
+          import json, pathlib, re, datetime
+          def array_from(path):
+              text=pathlib.Path(path).read_text()
+              m=re.search(r'\[', text)
+              if not m: return []
+              try: return json.loads(text[m.start():])
+              except Exception: return []
+          state_env=array_from('verify/state-raw.txt')
+          metrics_env=array_from('verify/metrics-raw.txt')
+          state=[r for e in state_env for r in e.get('results',[]) ]
+          metrics=[r for e in metrics_env for r in e.get('results',[]) ]
+          schedules=json.load(open('verify/schedules.json')) if pathlib.Path('verify/schedules.json').stat().st_size else {}
+          head=json.load(open('verify/head.json')) if pathlib.Path('verify/head.json').stat().st_size else {}
+          overview=json.load(open('verify/overview.json')) if pathlib.Path('verify/overview.json').stat().st_size else {}
+          result={
+            'capturedAt':datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            'stateQueryExit':$STATE_RC,
+            'metricsQueryExit':$METRICS_RC,
+            'schedule':schedules,
+            'state':state,
+            'metrics':metrics,
+            'liveLedger':head.get('result',{}).get('ledger_index') or head.get('result',{}).get('ledger',{}).get('ledger_index'),
+            'overview':overview,
+          }
+          pathlib.Path('verify/result.json').write_text(json.dumps(result,indent=2)+'\n')
+          PY
+          CONTENT="$(base64 -w0 verify/result.json)"
+          API="repos/${GITHUB_REPOSITORY}/contents/.github/p0-direct-verify-result.json"
+          SHA="$(gh api "$API?ref=ops/p0-direct-recovery" --jq .sha 2>/dev/null || true)"
+          if [ -n "$SHA" ]; then
+            gh api --method PUT "$API" -f message='Update direct verification result' -f content="$CONTENT" -f sha="$SHA" -f branch='ops/p0-direct-recovery' >/dev/null
+          else
+            gh api --method PUT "$API" -f message='Create direct verification result' -f content="$CONTENT" -f branch='ops/p0-direct-recovery' >/dev/null
+          fi
