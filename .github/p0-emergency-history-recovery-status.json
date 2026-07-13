@@ -1,5 +1,5 @@
 {
-  "capturedAt": "2026-07-13T11:54:32.0609430Z",
+  "capturedAt": "2026-07-13T11:56:43.2472265Z",
   "run": {
     "id": 29247777997,
     "url": "https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/29247777997",
@@ -73,6 +73,127 @@
           "number": 16
         }
       ]
+    }
+  ],
+  "latestCandidateRuns": [
+    {
+      "id": 29247790101,
+      "status": "pending",
+      "conclusion": null,
+      "headSha": "2595d2d42ef6158f136e08b3f50e077883c5733c",
+      "createdAt": "2026-07-13T11:52:55Z",
+      "updatedAt": "2026-07-13T11:52:58Z",
+      "url": "https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/29247790101"
+    },
+    {
+      "id": 29247572039,
+      "status": "in_progress",
+      "conclusion": null,
+      "headSha": "e7007ded263efc1f442f8b1991ea1a38c7e6bc19",
+      "createdAt": "2026-07-13T11:49:11Z",
+      "updatedAt": "2026-07-13T11:49:16Z",
+      "url": "https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/29247572039"
+    },
+    {
+      "id": 29245377052,
+      "status": "completed",
+      "conclusion": "failure",
+      "headSha": "83dc6029388ab2bf0d97a7aeb8f73375dc6073df",
+      "createdAt": "2026-07-13T11:11:15Z",
+      "updatedAt": "2026-07-13T11:34:22Z",
+      "url": "https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/29245377052"
+    },
+    {
+      "id": 29186524558,
+      "status": "completed",
+      "conclusion": "failure",
+      "headSha": "d658a73084c97c6d68d2973512d50a80f8982433",
+      "createdAt": "2026-07-12T08:52:06Z",
+      "updatedAt": "2026-07-12T09:09:21Z",
+      "url": "https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/29186524558"
+    },
+    {
+      "id": 29185820598,
+      "status": "completed",
+      "conclusion": "failure",
+      "headSha": "d658a73084c97c6d68d2973512d50a80f8982433",
+      "createdAt": "2026-07-12T08:25:26Z",
+      "updatedAt": "2026-07-12T08:42:08Z",
+      "url": "https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/29185820598"
+    },
+    {
+      "id": 29185299331,
+      "status": "completed",
+      "conclusion": "failure",
+      "headSha": "d658a73084c97c6d68d2973512d50a80f8982433",
+      "createdAt": "2026-07-12T08:06:13Z",
+      "updatedAt": "2026-07-12T08:22:40Z",
+      "url": "https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/29185299331"
+    },
+    {
+      "id": 29185251688,
+      "status": "completed",
+      "conclusion": "failure",
+      "headSha": "d658a73084c97c6d68d2973512d50a80f8982433",
+      "createdAt": "2026-07-12T08:04:30Z",
+      "updatedAt": "2026-07-12T08:25:18Z",
+      "url": "https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/29185251688"
+    },
+    {
+      "id": 29180094234,
+      "status": "completed",
+      "conclusion": "failure",
+      "headSha": "bdc0834ffea1f5fb01e159a32b6993ebc6404519",
+      "createdAt": "2026-07-12T04:42:08Z",
+      "updatedAt": "2026-07-12T04:58:05Z",
+      "url": "https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/29180094234"
+    }
+  ],
+  "latestCutoverRuns": [
+    {
+      "id": 29187006846,
+      "status": "completed",
+      "conclusion": "success",
+      "headSha": "d658a73084c97c6d68d2973512d50a80f8982433",
+      "createdAt": "2026-07-12T09:09:29Z",
+      "updatedAt": "2026-07-12T09:21:12Z",
+      "url": "https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/29187006846"
+    },
+    {
+      "id": 29185816266,
+      "status": "completed",
+      "conclusion": "cancelled",
+      "headSha": "d658a73084c97c6d68d2973512d50a80f8982433",
+      "createdAt": "2026-07-12T08:25:17Z",
+      "updatedAt": "2026-07-12T08:28:51Z",
+      "url": "https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/29185816266"
+    },
+    {
+      "id": 29182796719,
+      "status": "completed",
+      "conclusion": "success",
+      "headSha": "bdc0834ffea1f5fb01e159a32b6993ebc6404519",
+      "createdAt": "2026-07-12T06:32:02Z",
+      "updatedAt": "2026-07-12T06:51:09Z",
+      "url": "https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/29182796719"
+    },
+    {
+      "id": 29180479358,
+      "status": "completed",
+      "conclusion": "success",
+      "headSha": "bdc0834ffea1f5fb01e159a32b6993ebc6404519",
+      "createdAt": "2026-07-12T04:58:36Z",
+      "updatedAt": "2026-07-12T05:11:03Z",
+      "url": "https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/29180479358"
+    },
+    {
+      "id": 29179455228,
+      "status": "completed",
+      "conclusion": "cancelled",
+      "headSha": "bdc0834ffea1f5fb01e159a32b6993ebc6404519",
+      "createdAt": "2026-07-12T04:16:04Z",
+      "updatedAt": "2026-07-12T04:28:52Z",
+      "url": "https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/29179455228"
     }
   ]
 }
