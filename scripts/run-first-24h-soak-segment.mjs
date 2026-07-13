@@ -79,7 +79,7 @@ function cfBase() {
 function bindingValue(settings, name) {
   const bindings = settings?.result?.bindings ?? []
   const binding = bindings.find((item) => item?.name === name)
-  return firstDefined(binding?.text, binding?.value, null)
+  return firstDefined(binding?.text, binding?.value, null) ?? null
 }
 
 function activeDeployment(deployments) {
@@ -129,7 +129,7 @@ export async function captureSample({
     ? Object.values(readiness.checks).every((item) => item?.passed === true)
     : false
   const collectorFailures = Number(firstDefined(collector?.consecutiveFailures, collector?.consecutive_failures, 0))
-  const collectorError = firstDefined(collector?.error, collector?.errorMessage, collector?.error_message, null)
+  const collectorError = firstDefined(collector?.error, collector?.errorMessage, collector?.error_message, null) ?? null
   const expectedBase = readiness?.evidence?.expectedBase ?? {}
   const overviewBase = overview?.base ?? {}
   const overviewSnapshot = overview?.snapshot ?? {}
@@ -219,7 +219,7 @@ export async function captureSample({
       status: collector?.status ?? null,
       consecutiveFailures: collectorFailures,
       error: collectorError,
-      lastSuccessAt: firstDefined(collector?.lastSuccessAt, collector?.last_success_at, null),
+      lastSuccessAt: firstDefined(collector?.lastSuccessAt, collector?.last_success_at, null) ?? null,
     },
     readiness,
   }
