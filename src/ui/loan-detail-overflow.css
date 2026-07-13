@@ -1,10 +1,18 @@
 .loan-detail-header h1,
-.loan-state-note span,
 .loan-summary-grid .status-summary-card > strong {
   min-width: 0;
   max-width: 100%;
   overflow-wrap: anywhere;
   word-break: break-all;
+  white-space: normal;
+}
+
+.page-summary,
+.loan-state-note span {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: normal;
   white-space: normal;
 }
 
