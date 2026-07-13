@@ -1,0 +1,75 @@
+name: Capture UI PR preview
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/capture-ui-pr-preview.yml'
+      - 'scripts/capture-ui-pr-preview.mjs'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: capture-ui-pr-preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      UI_BASE_URL: http://127.0.0.1:4173
+      API_BASE_URL: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+      OUTPUT_DIR: ui-pr-preview
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build:deploy-assets
+      - run: pnpm exec playwright install --with-deps chromium
+
+      - name: Start local UI preview
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm preview > /tmp/ui-preview.log 2>&1 &
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:4173/ > /dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/ui-preview.log
+          exit 1
+
+      - name: Capture repaired UI against read-only production APIs
+        run: node scripts/capture-ui-pr-preview.mjs
+
+      - name: Publish manifest summary
+        if: always()
+        shell: bash
+        run: |
+          if [ -f "$OUTPUT_DIR/manifest.json" ]; then
+            jq '{generatedAt,productionMutations,summary,pages:[.pages[]|{name,path,viewport,status,metrics,consoleErrors,pageErrors}]}' "$OUTPUT_DIR/manifest.json" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ -f "$OUTPUT_DIR/fatal-error.txt" ]; then
+            cat "$OUTPUT_DIR/fatal-error.txt" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ui-pr461-visual-recapture-${{ github.sha }}
+          path: ui-pr-preview
+          if-no-files-found: error
+          retention-days: 14
