@@ -59,7 +59,7 @@ jobs:
           gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/runs?event=workflow_dispatch&per_page=100" \
             --jq '.workflow_runs[].id' > "$ROOT/before.txt"
           jq -n --arg ref main --arg h "$HISTORY_BRANCH" --arg c "$CURRENT_BRANCH" \
-            '{ref:$ref,inputs:{history_candidate_branch:$h,current_state_candidate_branch:$c,confirm_production_write:"true"}}' \
+            '{ref:$ref,inputs:{history_candidate_branch:$h,current_state_candidate_branch:$c,confirm_production_write:true}}' \
             > "$ROOT/dispatch.json"
           dispatched=false
           for attempt in $(seq 1 12); do
