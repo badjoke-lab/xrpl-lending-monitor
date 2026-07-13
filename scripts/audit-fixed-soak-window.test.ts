@@ -25,10 +25,10 @@ function metricRows(startMs: number, count: number) {
   }))
 }
 
-function finalSample(): any {
+function finalSample() {
   return {
     passed: true,
-    failedChecks: [],
+    failedChecks: [] as string[],
     checks: {
       deployment_identity_fixed: true,
       deployment_version_fixed: true,
@@ -44,7 +44,7 @@ function finalSample(): any {
       schedules: ['*/5 * * * *'],
     },
     observationPolicy: {
-      deferredToFinalRunMetrics: [],
+      deferredToFinalRunMetrics: [] as string[],
     },
   }
 }
