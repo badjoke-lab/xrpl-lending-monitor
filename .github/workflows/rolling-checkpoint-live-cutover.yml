@@ -164,47 +164,46 @@ jobs:
           jq -e '.passed == true and (.relation == "same" or .relation == "forward") and .candidate.ledgerIndex >= .production.ledgerIndex' \
             live-cutover-evidence/monotonicity-preflight.json > /dev/null
 
-          grep -F 'pnpm exec wrangler deploy --config wrangler.jsonc' scripts/run-live-checkpoint-cutover.sh
-          sed -i 's#pnpm exec wrangler deploy --config wrangler.jsonc#pnpm exec wrangler deploy --config wrangler.rollback.jsonc#' scripts/run-live-checkpoint-cutover.sh
-          grep -F 'test "${TARGET_LAG_AT_GATE}" -le 300' scripts/run-live-checkpoint-cutover.sh
-          sed -i 's/test "${TARGET_LAG_AT_GATE}" -le 300/test "${TARGET_LAG_AT_GATE}" -le 720/' scripts/run-live-checkpoint-cutover.sh
-          grep -F 'for attempt in $(seq 1 90); do' scripts/verify-live-checkpoint-cutover.sh
-          sed -i 's/for attempt in $(seq 1 90); do/for attempt in $(seq 1 150); do/' scripts/verify-live-checkpoint-cutover.sh
-          sed -i 's/within 15 minutes/within 25 minutes/' scripts/verify-live-checkpoint-cutover.sh
-
           python - <<'PY'
+          import re
           from pathlib import Path
 
-          path = Path('scripts/run-live-checkpoint-cutover.sh')
-          text = path.read_text()
-          old = '''pnpm exec wrangler deploy --config wrangler.live-cutover.jsonc
-          touch "${ROOT}/cutover-config-deployed"
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected one match, found {count}')
+              return text.replace(old, new, 1)
 
-          for attempt in 1 2 3; do
-            http_status="$(curl --silent --show-error --retry 2 \
-              -o "${ROOT}/cutover-response-${attempt}.json" -w '%{http_code}' \
-              -X POST \
-              -H "x-replacement-base-cutover-token: ${CUTOVER_TOKEN}" \
-              "${PRODUCTION_BASE}/api/operator/replacement-base-cutover")"
-            if [ "${http_status}" = 200 ] && jq -e --arg snapshot "${TARGET_SNAPSHOT_ID}" --argjson ledger "${TARGET_LEDGER_INDEX}" '
-              .status == "cutover_applied"
-              and .target.snapshotId == $snapshot
-              and .target.ledgerIndex == $ledger
-            ' "${ROOT}/cutover-response-${attempt}.json" > /dev/null 2>&1; then
-              touch "${ROOT}/cutover-applied"
-              break
-            fi
-            sleep 5
-          done
-          '''
-          new = '''pnpm exec wrangler deploy --config wrangler.live-cutover.jsonc
+          run_path = Path('scripts/run-live-checkpoint-cutover.sh')
+          run_text = run_path.read_text()
+          run_text = replace_once(
+              run_text,
+              'pnpm exec wrangler deploy --config wrangler.jsonc',
+              'pnpm exec wrangler deploy --config "${ROLLBACK_CONFIG:-wrangler.jsonc}"',
+              'rollback deploy command',
+          )
+          run_text = replace_once(
+              run_text,
+              'test "${TARGET_LAG_AT_GATE}" -le 300',
+              'test "${TARGET_LAG_AT_GATE}" -le "${MAX_TARGET_LAG_AT_GATE:-300}"',
+              'target lag gate',
+          )
+
+          pattern = re.compile(
+              r'pnpm exec wrangler deploy --config wrangler\.live-cutover\.jsonc\n'
+              r'touch "\$\{ROOT\}/cutover-config-deployed"\n\n'
+              r'for attempt in 1 2 3; do\n.*?'
+              r'test -f "\$\{ROOT\}/cutover-applied"',
+              re.S,
+          )
+          replacement = '''pnpm exec wrangler deploy --config wrangler.live-cutover.jsonc
           touch "${ROOT}/cutover-config-deployed"
 
           cutover_binding_ready=false
           for attempt in $(seq 1 30); do
-            readiness_status="$(curl --silent --show-error --retry 2 \
-              -o "${ROOT}/cutover-readiness-${attempt}.json" -w '%{http_code}' \
-              -X POST \
+            readiness_status="$(curl --silent --show-error --retry 2 \\
+              -o "${ROOT}/cutover-readiness-${attempt}.json" -w '%{http_code}' \\
+              -X POST \\
               "${PRODUCTION_BASE}/api/operator/replacement-base-cutover")"
             printf '%s\n' "${readiness_status}" > "${ROOT}/cutover-readiness-${attempt}.status"
             if [ "${readiness_status}" = 403 ]; then
@@ -217,10 +216,10 @@ jobs:
           test "${cutover_binding_ready}" = true
 
           for attempt in $(seq 1 12); do
-            http_status="$(curl --silent --show-error --retry 2 \
-              -o "${ROOT}/cutover-response-${attempt}.json" -w '%{http_code}' \
-              -X POST \
-              -H "x-replacement-base-cutover-token: ${CUTOVER_TOKEN}" \
+            http_status="$(curl --silent --show-error --retry 2 \\
+              -o "${ROOT}/cutover-response-${attempt}.json" -w '%{http_code}' \\
+              -X POST \\
+              -H "x-replacement-base-cutover-token: ${CUTOVER_TOKEN}" \\
               "${PRODUCTION_BASE}/api/operator/replacement-base-cutover")"
             printf '%s\n' "${http_status}" > "${ROOT}/cutover-response-${attempt}.status"
             if [ "${http_status}" = 200 ] && jq -e --arg snapshot "${TARGET_SNAPSHOT_ID}" --argjson ledger "${TARGET_LEDGER_INDEX}" '
@@ -233,22 +232,47 @@ jobs:
             fi
             sleep 5
           done
-          '''
-          if old not in text:
-              raise SystemExit('cutover invocation block not found')
-          path.write_text(text.replace(old, new, 1))
+          test -f "${ROOT}/cutover-applied"'''
+          run_text, count = pattern.subn(replacement, run_text, count=1)
+          if count != 1:
+              raise SystemExit(f'cutover invocation block: expected one match, found {count}')
+          run_path.write_text(run_text)
+
+          verify_path = Path('scripts/verify-live-checkpoint-cutover.sh')
+          verify_text = verify_path.read_text()
+          verify_text = replace_once(
+              verify_text,
+              'for attempt in $(seq 1 90); do',
+              'for attempt in $(seq 1 "${VERIFY_MAX_ATTEMPTS:-90}"); do',
+              'verification attempt loop',
+          )
+          verify_text = replace_once(
+              verify_text,
+              "echo 'Post-cutover current-state freshness did not converge within 15 minutes' >&2",
+              "echo 'Post-cutover current-state freshness did not converge within the configured verification window' >&2",
+              'verification timeout message',
+          )
+          verify_path.write_text(verify_text)
           PY
 
+          grep -F 'MAX_TARGET_LAG_AT_GATE' scripts/run-live-checkpoint-cutover.sh
+          grep -F 'cutover_binding_ready=false' scripts/run-live-checkpoint-cutover.sh
+          grep -F 'VERIFY_MAX_ATTEMPTS' scripts/verify-live-checkpoint-cutover.sh
           bash -n scripts/run-live-checkpoint-cutover.sh
           bash -n scripts/verify-live-checkpoint-cutover.sh
           test -f dist/index.html
 
       - name: Run guarded five-minute Devnet cutover
         shell: bash
+        env:
+          ROLLBACK_CONFIG: wrangler.rollback.jsonc
+          MAX_TARGET_LAG_AT_GATE: '720'
         run: bash scripts/run-live-checkpoint-cutover.sh
 
       - name: Verify post-cutover live freshness
         shell: bash
+        env:
+          VERIFY_MAX_ATTEMPTS: '150'
         run: bash scripts/verify-live-checkpoint-cutover.sh
 
       - name: Upload retained live-cutover evidence
