@@ -1,0 +1,234 @@
+name: P0 recovery continuation from candidate A
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/p0-recovery-continuation-windows-trigger
+
+permissions:
+  actions: write
+  contents: write
+
+concurrency:
+  group: p0-history-recovery-continuation
+  cancel-in-progress: false
+
+jobs:
+  continue-recovery:
+    runs-on: windows-latest
+    timeout-minutes: 480
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+    steps:
+      - name: Continue verified P0 candidates and cut over
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $repo = $env:GITHUB_REPOSITORY
+          $candidateWorkflow = 'rolling-checkpoint-candidate.yml'
+          $cutoverWorkflow = 'rolling-checkpoint-live-cutover.yml'
+          $targetMaxLag = 300L
+          $maxCycles = 8
+          $maxDelta = '5000'
+          $segmentLedgers = '500'
+          $readWindow = '4'
+          $status = [ordered]@{
+            schemaVersion = 1
+            startedAt = (Get-Date).ToUniversalTime().ToString('o')
+            source = 'candidate-a'
+            cycles = @()
+            final = $null
+            cutover = $null
+            production = $null
+          }
+
+          function Get-RepoJson([string]$Branch, [string]$Path) {
+            for ($attempt = 1; $attempt -le 40; $attempt++) {
+              try {
+                $raw = gh api --method GET "repos/$repo/contents/$Path" -f ref=$Branch | ConvertFrom-Json
+                $bytes = [Convert]::FromBase64String(($raw.content -replace '\s',''))
+                $text = [System.Text.Encoding]::UTF8.GetString($bytes)
+                return ($text | ConvertFrom-Json)
+              } catch {
+                Start-Sleep -Seconds 5
+              }
+            }
+            throw "Unable to read $Path from $Branch"
+          }
+
+          function Get-Ledger([object]$Index) {
+            $request = @{ method = 'ledger'; params = @(@{ ledger_index = $Index; transactions = $false; expand = $false }) } | ConvertTo-Json -Depth 6 -Compress
+            $response = Invoke-RestMethod -Method Post -Uri 'https://devnet.honeycluster.io/' -ContentType 'application/json' -Body $request -TimeoutSec 30
+            $ledgerIndex = if ($null -ne $response.result.ledger_index) { [int64]$response.result.ledger_index } else { [int64]$response.result.ledger.ledger_index }
+            $ledgerHash = if ($response.result.ledger_hash) { [string]$response.result.ledger_hash } else { [string]$response.result.ledger.ledger_hash }
+            return [ordered]@{ ledgerIndex = $ledgerIndex; ledgerHash = $ledgerHash }
+          }
+
+          function Get-WorkflowRunIds([string]$Workflow, [string]$Event) {
+            $runs = gh api "repos/$repo/actions/workflows/$Workflow/runs?event=$Event&per_page=100" | ConvertFrom-Json
+            return @($runs.workflow_runs | ForEach-Object { [string]$_.id })
+          }
+
+          function Dispatch-Workflow([string]$Workflow, [hashtable]$Inputs) {
+            $before = [System.Collections.Generic.HashSet[string]]::new()
+            foreach ($id in (Get-WorkflowRunIds $Workflow 'workflow_dispatch')) { [void]$before.Add($id) }
+            $payload = @{ ref = 'main'; inputs = $Inputs } | ConvertTo-Json -Depth 10 -Compress
+            $path = Join-Path $env:RUNNER_TEMP ("dispatch-" + [guid]::NewGuid().ToString('n') + '.json')
+            [System.IO.File]::WriteAllText($path, $payload, [System.Text.UTF8Encoding]::new($false))
+            gh api --method POST "repos/$repo/actions/workflows/$Workflow/dispatches" --input $path | Out-Null
+
+            for ($attempt = 1; $attempt -le 90; $attempt++) {
+              $runs = gh api "repos/$repo/actions/workflows/$Workflow/runs?event=workflow_dispatch&per_page=100" | ConvertFrom-Json
+              $newRun = $runs.workflow_runs | Sort-Object created_at -Descending | Where-Object { -not $before.Contains([string]$_.id) } | Select-Object -First 1
+              if ($null -ne $newRun) { return [int64]$newRun.id }
+              Start-Sleep -Seconds 10
+            }
+            throw "Unable to locate dispatched run for $Workflow"
+          }
+
+          function Wait-Run([int64]$RunId) {
+            for ($attempt = 1; $attempt -le 480; $attempt++) {
+              $run = gh api "repos/$repo/actions/runs/$RunId" | ConvertFrom-Json
+              if ($run.status -eq 'completed') { return $run }
+              Start-Sleep -Seconds 15
+            }
+            throw "Run $RunId did not complete"
+          }
+
+          function Write-Status([object]$Value) {
+            $Value.finishedAt = (Get-Date).ToUniversalTime().ToString('o')
+            $json = $Value | ConvertTo-Json -Depth 20
+            $content = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($json + "`n"))
+            $apiPath = "repos/$repo/contents/.github/p0-recovery-continuation-status.json"
+            $existingSha = ''
+            try { $existingSha = gh api $apiPath --jq .sha } catch {}
+            if ($existingSha) {
+              gh api --method PUT $apiPath -f message='Update P0 recovery continuation status' -f content=$content -f sha=$existingSha | Out-Null
+            } else {
+              gh api --method PUT $apiPath -f message='Create P0 recovery continuation status' -f content=$content | Out-Null
+            }
+          }
+
+          try {
+            $runs = gh api "repos/$repo/actions/runs?per_page=100" | ConvertFrom-Json
+            $nonCritical = @('CI','Release-native CI','P0 recovery status probe','P0 recovery observe','P0 fast continuation patch','P0 fast continuation patch Windows','P0 apply recovery continuation patch from Windows')
+            foreach ($run in $runs.workflow_runs) {
+              if ([string]$run.id -eq [string]$env:GITHUB_RUN_ID) { continue }
+              if (($run.status -in @('queued','in_progress','waiting','pending')) -and ($run.name -in $nonCritical)) {
+                try { gh api --method POST "repos/$repo/actions/runs/$($run.id)/cancel" | Out-Null } catch {}
+              }
+            }
+
+            $sourceHistory = 'history-p0-recovery-a-data'
+            $sourceCurrent = 'current-state-p0-recovery-a-data'
+            $outputHistory = 'history-p0-recovery-b-data'
+            $outputCurrent = 'current-state-p0-recovery-b-data'
+
+            for ($cycle = 1; $cycle -le $maxCycles; $cycle++) {
+              $sourcePublication = Get-RepoJson $sourceHistory 'history/publication.json'
+              $sourceManifest = Get-RepoJson $sourceCurrent 'read-model/manifest.json'
+              if (-not $sourcePublication.complete -or -not $sourceManifest.complete) { throw 'Source candidate is incomplete' }
+              if ([int64]$sourcePublication.endLedgerIndex -ne [int64]$sourceManifest.ledgerIndex) { throw 'Source ledger mismatch' }
+              if ([string]$sourcePublication.endLedgerHash -ne [string]$sourceManifest.ledgerHash) { throw 'Source hash mismatch' }
+
+              $liveBefore = Get-Ledger 'validated'
+              $lagBefore = [Math]::Max(0L, [int64]$liveBefore.ledgerIndex - [int64]$sourcePublication.endLedgerIndex)
+              if ($lagBefore -le $targetMaxLag) { break }
+
+              $runId = Dispatch-Workflow $candidateWorkflow @{
+                source_history_branch = $sourceHistory
+                source_current_state_branch = $sourceCurrent
+                history_candidate_branch = $outputHistory
+                current_state_candidate_branch = $outputCurrent
+                max_delta_ledgers = $maxDelta
+                segment_ledgers = $segmentLedgers
+                read_window_size = $readWindow
+              }
+              $child = Wait-Run $runId
+
+              $outputPublication = Get-RepoJson $outputHistory 'history/publication.json'
+              $outputManifest = Get-RepoJson $outputCurrent 'read-model/manifest.json'
+              $sourceLedger = [int64]$sourcePublication.endLedgerIndex
+              $outputLedger = [int64]$outputPublication.endLedgerIndex
+              if (-not $outputPublication.complete -or -not $outputManifest.complete) { throw "Cycle $cycle output is incomplete" }
+              if ($outputLedger -le $sourceLedger -or $outputLedger -gt ($sourceLedger + [int64]$maxDelta)) { throw "Cycle $cycle output did not advance within bounds" }
+              if ($outputLedger -ne [int64]$outputManifest.ledgerIndex) { throw "Cycle $cycle output ledger mismatch" }
+              if ([string]$outputPublication.endLedgerHash -ne [string]$outputManifest.ledgerHash) { throw "Cycle $cycle output hash mismatch" }
+              $canonical = Get-Ledger $outputLedger
+              if ([string]$canonical.ledgerHash -ne [string]$outputPublication.endLedgerHash) { throw "Cycle $cycle canonical hash mismatch" }
+
+              $liveAfter = Get-Ledger 'validated'
+              $lagAfter = [Math]::Max(0L, [int64]$liveAfter.ledgerIndex - $outputLedger)
+              $status.cycles += [ordered]@{
+                cycle = $cycle
+                childRunId = $runId
+                childConclusion = [string]$child.conclusion
+                sourceHistory = $sourceHistory
+                sourceCurrent = $sourceCurrent
+                sourceLedger = $sourceLedger
+                outputHistory = $outputHistory
+                outputCurrent = $outputCurrent
+                outputLedger = $outputLedger
+                outputHash = [string]$outputPublication.endLedgerHash
+                liveLedger = [int64]$liveAfter.ledgerIndex
+                remainingLagLedgers = $lagAfter
+                verified = $true
+              }
+
+              $sourceHistory = $outputHistory
+              $sourceCurrent = $outputCurrent
+              if ($outputHistory -eq 'history-p0-recovery-a-data') {
+                $outputHistory = 'history-p0-recovery-b-data'
+                $outputCurrent = 'current-state-p0-recovery-b-data'
+              } else {
+                $outputHistory = 'history-p0-recovery-a-data'
+                $outputCurrent = 'current-state-p0-recovery-a-data'
+              }
+              if ($lagAfter -le $targetMaxLag) { break }
+            }
+
+            $finalPublication = Get-RepoJson $sourceHistory 'history/publication.json'
+            $finalManifest = Get-RepoJson $sourceCurrent 'read-model/manifest.json'
+            $finalLedger = [int64]$finalPublication.endLedgerIndex
+            if ($finalLedger -ne [int64]$finalManifest.ledgerIndex -or [string]$finalPublication.endLedgerHash -ne [string]$finalManifest.ledgerHash) { throw 'Final candidate pair mismatch' }
+            $finalLive = Get-Ledger 'validated'
+            $finalLag = [Math]::Max(0L, [int64]$finalLive.ledgerIndex - $finalLedger)
+            if ($finalLag -gt $targetMaxLag) { throw "Final lag remains $finalLag ledgers" }
+            $status.final = [ordered]@{ historyBranch = $sourceHistory; currentStateBranch = $sourceCurrent; ledgerIndex = $finalLedger; ledgerHash = [string]$finalPublication.endLedgerHash; liveLedger = [int64]$finalLive.ledgerIndex; remainingLagLedgers = $finalLag }
+
+            $cutoverRunId = Dispatch-Workflow $cutoverWorkflow @{
+              history_candidate_branch = $sourceHistory
+              current_state_candidate_branch = $sourceCurrent
+              confirm_production_write = 'true'
+            }
+            $cutoverRun = Wait-Run $cutoverRunId
+            if ($cutoverRun.conclusion -ne 'success') { throw "Cutover run $cutoverRunId failed: $($cutoverRun.conclusion)" }
+            $status.cutover = [ordered]@{ runId = $cutoverRunId; conclusion = [string]$cutoverRun.conclusion; verified = $true }
+
+            $overview = $null
+            $activity = $null
+            for ($attempt = 1; $attempt -le 60; $attempt++) {
+              try {
+                $overview = Invoke-RestMethod -Uri "$env:PRODUCTION_BASE/api/overview" -TimeoutSec 20
+                $activity = Invoke-RestMethod -Uri "$env:PRODUCTION_BASE/api/activity?limit=25" -TimeoutSec 20
+                $observed = 0L
+                if ($overview.snapshot.ledger_index) { $observed = [int64]$overview.snapshot.ledger_index }
+                elseif ($overview.snapshot.ledgerIndex) { $observed = [int64]$overview.snapshot.ledgerIndex }
+                elseif ($overview.current_state_watermark.ledger_index) { $observed = [int64]$overview.current_state_watermark.ledger_index }
+                elseif ($overview.current_state_watermark.ledgerIndex) { $observed = [int64]$overview.current_state_watermark.ledgerIndex }
+                if ($observed -ge $finalLedger -and $null -ne $activity.events) { break }
+              } catch {}
+              Start-Sleep -Seconds 5
+            }
+            if ($null -eq $activity -or $null -eq $activity.events) { throw 'Production activity verification failed' }
+            $status.production = [ordered]@{ overviewVerified = $true; activityVerified = $true; targetLedger = $finalLedger }
+            $status.passed = $true
+            Write-Status $status
+          } catch {
+            $status.passed = $false
+            $status.error = $_.Exception.Message
+            Write-Status $status
+            throw
+          }
