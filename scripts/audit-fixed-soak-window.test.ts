@@ -3,20 +3,21 @@ import { describe, expect, it } from 'vitest'
 import { evaluateFixedSoakWindow } from './audit-fixed-soak-window.mjs'
 
 const T0 = Date.parse('2026-07-13T08:15:00.000Z')
-const END = T0 + 24 * 60 * 60 * 1000
+const FIRST_RUN = T0 + 5 * 60 * 1000
+const FIRST_ELIGIBLE_END = FIRST_RUN + 24 * 60 * 60 * 1000
 
 function anchor() {
   return {
     t0Iso: new Date(T0).toISOString(),
-    expectedEndIso: new Date(END).toISOString(),
+    expectedEndIso: new Date(T0 + 24 * 60 * 60 * 1000).toISOString(),
     deployment: { id: 'deployment-1', versionId: 'version-1' },
     firstSample: { passed: true },
   }
 }
 
-function metrics() {
-  return Array.from({ length: 288 }, (_, index) => ({
-    run_at: new Date(T0 + (index + 1) * 5 * 60 * 1000).toISOString(),
+function metricRows(startMs: number, count: number) {
+  return Array.from({ length: count }, (_, index) => ({
+    run_at: new Date(startMs + index * 5 * 60 * 1000).toISOString(),
     status: 'committed',
     lag_ledgers: 0,
     persistence_rows_read: 1,
@@ -24,7 +25,7 @@ function metrics() {
   }))
 }
 
-function finalSample() {
+function finalSample(): any {
   return {
     passed: true,
     failedChecks: [],
@@ -48,62 +49,86 @@ function finalSample() {
   }
 }
 
-describe('fixed-window soak audit', () => {
-  it('passes from the immutable anchor and exact D1 runs without monitor artifacts', () => {
+describe('restart-safe soak audit', () => {
+  it('passes from the immutable anchor and one continuous D1 sequence', () => {
     const result = evaluateFixedSoakWindow({
       start: anchor(),
-      metrics: metrics(),
+      metrics: metricRows(FIRST_RUN, 288),
       finalSample: finalSample(),
-      nowMs: END,
+      nowMs: FIRST_ELIGIBLE_END,
     })
 
     expect(result.result.state).toBe('passed')
     expect(result.result.passed).toBe(true)
     expect(result.result.clockResetRequired).toBe(false)
-    expect(result.metrics.observedRuns).toBe(288)
-    expect(result.metrics.maximumGapSeconds).toBe(300)
+    expect(result.selectedWindow.observedRuns).toBe(288)
+    expect(result.selectedWindow.maximumGapSeconds).toBe(300)
   })
 
-  it('keeps the same clock when an audit is run before the window ends', () => {
+  it('keeps the same anchor when an audit runs before 24 hours are available', () => {
     const result = evaluateFixedSoakWindow({
       start: anchor(),
-      metrics: metrics(),
+      metrics: metricRows(FIRST_RUN, 288),
       finalSample: finalSample(),
-      nowMs: END - 1,
+      nowMs: FIRST_ELIGIBLE_END - 1,
     })
 
     expect(result.result.state).toBe('not_ready')
     expect(result.result.clockResetRequired).toBe(false)
+    expect(result.result.retryWithSameAnchor).toBe(true)
     expect(result.anchor.t0Iso).toBe(new Date(T0).toISOString())
-    expect(result.result.failedChecks).toContain('fixed_24_hour_window_elapsed')
+    expect(result.result.failedChecks).toContain('continuous_24h_window_found')
   })
 
-  it('fails a real D1 execution gap without inventing a new T0', () => {
-    const rows = metrics()
+  it('does not invent a new manual T0 after a real execution gap', () => {
+    const rows = metricRows(FIRST_RUN, 288)
     rows.splice(100, 1)
 
     const result = evaluateFixedSoakWindow({
       start: anchor(),
       metrics: rows,
       finalSample: finalSample(),
-      nowMs: END,
+      nowMs: FIRST_ELIGIBLE_END,
     })
 
-    expect(result.result.state).toBe('failed')
+    expect(result.result.state).toBe('not_ready')
     expect(result.result.clockResetRequired).toBe(false)
-    expect(result.result.failedChecks).toContain('maximum_run_gap_within_420s')
-    expect(result.metrics.maximumGapSeconds).toBe(600)
+    expect(result.result.retryWithSameAnchor).toBe(true)
+    expect(result.metrics.discontinuities).toEqual(expect.arrayContaining([
+      expect.objectContaining({ reason: 'execution_gap_exceeded', gapSeconds: 600 }),
+    ]))
   })
 
-  it('allows a delayed final RPC observation only when exact D1 metrics support it', () => {
+  it('automatically accepts the first later 24-hour sequence after a real gap', () => {
+    const firstSequence = metricRows(FIRST_RUN, 100)
+    const secondStart = Date.parse(firstSequence.at(-1)!.run_at) + 10 * 60 * 1000
+    const secondSequence = metricRows(secondStart, 288)
+
+    const result = evaluateFixedSoakWindow({
+      start: anchor(),
+      metrics: [...firstSequence, ...secondSequence],
+      finalSample: finalSample(),
+      nowMs: secondStart + 24 * 60 * 60 * 1000,
+    })
+
+    expect(result.result.state).toBe('passed')
+    expect(result.result.clockResetRequired).toBe(false)
+    expect(result.anchor.t0Iso).toBe(new Date(T0).toISOString())
+    expect(result.selectedWindow.startIso).toBe(new Date(secondStart).toISOString())
+    expect(result.metrics.discontinuities).toEqual(expect.arrayContaining([
+      expect.objectContaining({ reason: 'execution_gap_exceeded' }),
+    ]))
+  })
+
+  it('backs a delayed final RPC observation with the selected exact D1 window', () => {
     const delayed = finalSample()
     delayed.observationPolicy.deferredToFinalRunMetrics = ['current_state_lag_within_10']
 
     const result = evaluateFixedSoakWindow({
       start: anchor(),
-      metrics: metrics(),
+      metrics: metricRows(FIRST_RUN, 288),
       finalSample: delayed,
-      nowMs: END,
+      nowMs: FIRST_ELIGIBLE_END,
     })
 
     expect(result.result.state).toBe('passed')
