@@ -1,0 +1,50 @@
+name: P0 cancel obsolete run from Windows
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/p0-cancel-obsolete-windows-trigger
+
+permissions:
+  actions: write
+  contents: write
+
+jobs:
+  cancel:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Cancel obsolete canonical continuation
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OBSOLETE_RUN_ID: '29241432797'
+          RECOVERY_RUN_ID: '29244796458'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $obsoleteBefore = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:OBSOLETE_RUN_ID" --jq .status
+          if ($obsoleteBefore -in @('queued','in_progress','waiting','pending')) {
+            gh api --method POST "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:OBSOLETE_RUN_ID/cancel"
+          }
+          Start-Sleep -Seconds 5
+          $obsoleteAfter = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:OBSOLETE_RUN_ID" --jq .status
+          $recoveryStatus = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:RECOVERY_RUN_ID" --jq .status
+          $result = [ordered]@{
+            capturedAt = (Get-Date).ToUniversalTime().ToString('o')
+            obsoleteRunId = $env:OBSOLETE_RUN_ID
+            obsoleteStatusBefore = $obsoleteBefore
+            obsoleteStatusAfter = $obsoleteAfter
+            recoveryRunId = $env:RECOVERY_RUN_ID
+            recoveryStatus = $recoveryStatus
+          } | ConvertTo-Json -Depth 5
+          $bytes = [System.Text.Encoding]::UTF8.GetBytes($result + "`n")
+          $content = [Convert]::ToBase64String($bytes)
+          $apiPath = "repos/$env:GITHUB_REPOSITORY/contents/.github/p0-cancel-obsolete-result.json"
+          $existingSha = ''
+          try { $existingSha = gh api $apiPath --jq .sha } catch {}
+          if ($existingSha) {
+            gh api --method PUT $apiPath -f message='Update P0 obsolete cancellation result' -f content=$content -f sha=$existingSha | Out-Null
+          } else {
+            gh api --method PUT $apiPath -f message='Create P0 obsolete cancellation result' -f content=$content | Out-Null
+          }
