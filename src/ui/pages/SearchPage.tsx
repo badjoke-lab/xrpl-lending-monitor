@@ -18,6 +18,7 @@ interface SearchPageProps {
 
 const ACCOUNT_PATTERN = /^r[1-9A-HJ-NP-Za-km-z]{24,34}$/
 const HEX_256_PATTERN = /^[A-Fa-f0-9]{64}$/
+const PAGE_SIZE = 25
 
 function initialQuery(): string {
   return new URLSearchParams(window.location.search).get('q')?.trim() ?? ''
@@ -82,7 +83,7 @@ export function SearchPage({ onNavigate }: SearchPageProps) {
   const [submittedQuery, setSubmittedQuery] = useState(startingError ? '' : startingQuery)
   const [validationError, setValidationError] = useState<string | null>(startingError)
   const requestUrl = submittedQuery
-    ? `/api/search?q=${encodeURIComponent(submittedQuery)}&limit=100`
+    ? `/api/search?q=${encodeURIComponent(submittedQuery)}&limit=${PAGE_SIZE}`
     : null
   const { resource, reload } = useApiResource<SearchResponse>(requestUrl)
   const response = resource.state === 'ready' ? resource.data : null
@@ -115,11 +116,11 @@ export function SearchPage({ onNavigate }: SearchPageProps) {
         </div>
         <div className="page-actions">
           {submittedQuery ? <button className="secondary-button" type="button" onClick={reload}>Refresh</button> : null}
-          <a className="secondary-button" href={submittedQuery ? `/api/search?q=${encodeURIComponent(submittedQuery)}&limit=100` : '/api#search'}>Search API</a>
+          <a className="secondary-button developer-action" href={submittedQuery ? `/api/search?q=${encodeURIComponent(submittedQuery)}&limit=${PAGE_SIZE}` : '/api#search'}>Search API</a>
         </div>
       </header>
 
-      <Panel title="Search the indexed record" description="The API performs exact matching; no fuzzy identity or off-chain attribution is added.">
+      <Panel title="Search the indexed record" description="Paste one complete value. The API performs exact matching; partial names and fuzzy text do not match.">
         <form
           className="global-search-form"
           onSubmit={(event) => {
@@ -140,7 +141,7 @@ export function SearchPage({ onNavigate }: SearchPageProps) {
             <input
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
-              placeholder="Transaction hash, object ID, XRPL account, MPT issuance ID, or asset key"
+              placeholder="Paste a full hash, object ID, classic address, MPT issuance ID, or asset key"
               maxLength={128}
               aria-describedby={validationError ? 'search-help search-error' : 'search-help'}
             />
@@ -148,13 +149,19 @@ export function SearchPage({ onNavigate }: SearchPageProps) {
           <button className="primary-button" type="submit">Search</button>
         </form>
         <p id="search-help" className="field-help">
-          Supported indexed targets include Vault, Loan Broker, and Loan IDs; transaction hashes; XRPL accounts; MPT issuance IDs; and canonical asset keys.
+          Copy the complete value from a detail page or XRPL source. Search does not accept shortened IDs containing an ellipsis.
         </p>
+        <div className="search-format-grid" aria-label="Accepted search value formats">
+          <div><strong>Transaction or object ID</strong><code>64 hexadecimal characters</code></div>
+          <div><strong>XRPL account</strong><code>Classic address beginning with r</code></div>
+          <div><strong>MPT issuance</strong><code>Complete issuance identifier</code></div>
+          <div><strong>Asset key</strong><code>Exact canonical key shown by the monitor</code></div>
+        </div>
         {validationError ? <p id="search-error" className="field-error" role="alert">{validationError}</p> : null}
       </Panel>
 
       {!submittedQuery ? (
-        <Panel title="Search behavior" description="Network and epoch boundaries are preserved in every result.">
+        <Panel title="Search behavior" description={`Network and epoch boundaries are preserved. At most ${PAGE_SIZE} latest exact matches are returned per request.`}>
           <div className="search-guidance-grid">
             <div><strong>Exact, bounded results</strong><p>Results come from the latest bounded read-only Search API response.</p></div>
             <div><strong>Current versus archived</strong><p>Archived records are labeled separately and are not presented as current objects.</p></div>
