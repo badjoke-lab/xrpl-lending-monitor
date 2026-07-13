@@ -123,6 +123,10 @@ export function MonitoringShell({ children, currentPath, status, onNavigate, onR
           <button type="button" className="icon-button" onClick={onReload} aria-label="Refresh monitoring data">↻</button>
         </header>
         <Context status={status} />
+        <section className="degraded-data-banner" role="status" aria-label="Degraded data notice">
+          <strong>Degraded data:</strong>
+          <span>History, activity, audit records, and indexed counts are under recovery and may lag behind the five-minute current-state layer. Do not treat them as equally fresh.</span>
+        </section>
         <main id="main-content" className="main-content" tabIndex={-1}>
           <Breadcrumbs currentPath={currentPath} onNavigate={onNavigate} />
           {children}
