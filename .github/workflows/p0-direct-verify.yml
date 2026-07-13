@@ -23,7 +23,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Wait for scheduled run
-        run: sleep 360
+        run: sleep 120
       - name: Capture production state
         env:
           GH_TOKEN: ${{ github.token }}
@@ -56,16 +56,7 @@ jobs:
           schedules=json.load(open('verify/schedules.json')) if pathlib.Path('verify/schedules.json').stat().st_size else {}
           head=json.load(open('verify/head.json')) if pathlib.Path('verify/head.json').stat().st_size else {}
           overview=json.load(open('verify/overview.json')) if pathlib.Path('verify/overview.json').stat().st_size else {}
-          result={
-            'capturedAt':datetime.datetime.now(datetime.timezone.utc).isoformat(),
-            'stateQueryExit':$STATE_RC,
-            'metricsQueryExit':$METRICS_RC,
-            'schedule':schedules,
-            'state':state,
-            'metrics':metrics,
-            'liveLedger':head.get('result',{}).get('ledger_index') or head.get('result',{}).get('ledger',{}).get('ledger_index'),
-            'overview':overview,
-          }
+          result={'capturedAt':datetime.datetime.now(datetime.timezone.utc).isoformat(),'stateQueryExit':$STATE_RC,'metricsQueryExit':$METRICS_RC,'schedule':schedules,'state':state,'metrics':metrics,'liveLedger':head.get('result',{}).get('ledger_index') or head.get('result',{}).get('ledger',{}).get('ledger_index'),'overview':overview}
           pathlib.Path('verify/result.json').write_text(json.dumps(result,indent=2)+'\n')
           PY
           CONTENT="$(base64 -w0 verify/result.json)"
