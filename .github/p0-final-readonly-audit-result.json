@@ -1,0 +1,131 @@
+{
+  "captured_at": "2026-07-13T18:02:12.279269+00:00",
+  "run_count_60m": 12,
+  "max_gap_seconds_60m": 300.06,
+  "failure_count_60m": 0,
+  "statuses_60m": [
+    "committed",
+    "committed",
+    "committed",
+    "committed",
+    "committed",
+    "committed",
+    "committed",
+    "committed",
+    "committed",
+    "committed",
+    "committed",
+    "committed"
+  ],
+  "first_run_60m": {
+    "run_at": "2026-07-13T17:05:24.733Z",
+    "status": "committed",
+    "start_ledger_index": 3627850,
+    "end_ledger_index": 3627946,
+    "latest_observed_ledger": 3627946,
+    "lag_ledgers": 0,
+    "ledgers_processed": 97,
+    "lending_transactions": 29,
+    "persistence_rows_written": 29
+  },
+  "last_run_60m": {
+    "run_at": "2026-07-13T18:00:24.731Z",
+    "status": "committed",
+    "start_ledger_index": 3628927,
+    "end_ledger_index": 3629024,
+    "latest_observed_ledger": 3629024,
+    "lag_ledgers": 0,
+    "ledgers_processed": 98,
+    "lending_transactions": 0,
+    "persistence_rows_written": 10
+  },
+  "state": {
+    "network": "devnet",
+    "epoch_id": "fast-lane-shadow-devnet",
+    "last_processed_ledger": 3629024,
+    "last_processed_hash": "172C4C3CF608AFE0AEC7C124D1FBF86CEDFE64675B8C5F3B9260FCEFF2D43AF1",
+    "latest_observed_ledger": 3629024,
+    "latest_observed_hash": "172C4C3CF608AFE0AEC7C124D1FBF86CEDFE64675B8C5F3B9260FCEFF2D43AF1",
+    "status": "healthy",
+    "updated_at": "2026-07-13T18:00:24.731Z"
+  },
+  "live_ledger": 3629059,
+  "live_lag_ledgers": 35,
+  "schedule_count": 1,
+  "schedules": [
+    {
+      "cron": "*/5 * * * *",
+      "created_on": "2026-07-13T08:15:39.158898Z",
+      "modified_on": "2026-07-13T16:24:09.373569Z"
+    }
+  ],
+  "cron_ok": true,
+  "d1_size_after_bytes": 147083264,
+  "overview": {
+    "network": "devnet",
+    "epoch": {
+      "id": "devnet-3371675",
+      "status": "current"
+    },
+    "snapshot": {
+      "id": "devnet-3624709-39d838e15f10",
+      "epoch_id": "devnet-3371675",
+      "ledger_index": 3624709,
+      "ledger_hash": "39D838E15F106E3305038540F7BDD47BA8832062748B6D9D2881AAC7677CF667",
+      "completed_at": "2026-07-13T14:29:58Z"
+    },
+    "base": {
+      "id": "devnet-3624709-39d838e15f10",
+      "epoch_id": "devnet-3371675",
+      "ledger_index": 3624709,
+      "ledger_hash": "39D838E15F106E3305038540F7BDD47BA8832062748B6D9D2881AAC7677CF667",
+      "completed_at": "2026-07-13T14:29:58Z"
+    },
+    "overlay_watermark": {
+      "ledger_index": 3624709,
+      "ledger_hash": "39D838E15F106E3305038540F7BDD47BA8832062748B6D9D2881AAC7677CF667",
+      "updated_at": "2026-07-13T14:33:14.236Z"
+    },
+    "current_state_watermark": {
+      "source": "fast_lane",
+      "ledger_index": 3629024,
+      "ledger_hash": "172C4C3CF608AFE0AEC7C124D1FBF86CEDFE64675B8C5F3B9260FCEFF2D43AF1",
+      "updated_at": "2026-07-13T18:00:24.731Z"
+    },
+    "counts_watermark": {
+      "source": "canonical_overlay",
+      "ledger_index": 3624709,
+      "ledger_hash": "39D838E15F106E3305038540F7BDD47BA8832062748B6D9D2881AAC7677CF667",
+      "updated_at": "2026-07-13T14:33:14.236Z"
+    },
+    "freshness": {
+      "collector_status": "healthy",
+      "latest_validated_ledger": 3626673,
+      "last_processed_ledger": 3624709,
+      "last_processed_hash": "39D838E15F106E3305038540F7BDD47BA8832062748B6D9D2881AAC7677CF667",
+      "last_success_at": "2026-07-13T16:00:27.054Z",
+      "overlay_ledger": 3624709,
+      "overlay_hash": "39D838E15F106E3305038540F7BDD47BA8832062748B6D9D2881AAC7677CF667",
+      "overlay_updated_at": "2026-07-13T14:33:14.236Z",
+      "current_state_source": "fast_lane",
+      "current_state_ledger": 3629024,
+      "current_state_hash": "172C4C3CF608AFE0AEC7C124D1FBF86CEDFE64675B8C5F3B9260FCEFF2D43AF1",
+      "current_state_updated_at": "2026-07-13T18:00:24.731Z"
+    },
+    "counts": {
+      "vaults": 849264,
+      "loan_brokers": 560660,
+      "loans": 241480,
+      "current_objects": 1651404
+    },
+    "provenance": {
+      "counts": "direct",
+      "freshness": "direct",
+      "overlay_watermark": "direct",
+      "current_state_watermark": "direct",
+      "counts_watermark": "direct"
+    },
+    "unavailable": []
+  },
+  "pass_60m": true
+}
