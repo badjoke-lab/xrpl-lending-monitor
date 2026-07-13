@@ -140,7 +140,13 @@ export async function readFastLaneHistoryBundlesAfterBoundary(options: {
   const result = await options.db.prepare(
     `SELECT bundle_json
      FROM fast_lane_history_windows
-     WHERE network = 'devnet' AND end_ledger_index > ?1
+     WHERE network = 'devnet'
+       AND epoch_id = (
+         SELECT base_epoch_id
+         FROM fast_lane_shadow_base_binding
+         WHERE network = 'devnet'
+       )
+       AND end_ledger_index > ?1
      ORDER BY end_ledger_index DESC
      LIMIT ?2`,
   ).bind(options.boundaryLedgerIndex, maxWindows).all<FastLaneHistoryWindowRow>()
