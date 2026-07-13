@@ -1,0 +1,21 @@
+name: Kick quick state check
+on:
+  push:
+    branches: [ops/p0-direct-recovery]
+    paths: [.github/workflows/p0-kick-quick-state.yml]
+permissions:
+  contents: write
+jobs:
+  kick:
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          api="repos/${GITHUB_REPOSITORY}/contents/.github/workflows/p0-quick-state.yml"
+          gh api "$api?ref=ops/p0-direct-recovery" > current.json
+          sha=$(jq -r .sha current.json)
+          jq -r .content current.json | tr -d '\n' | base64 -d > workflow.yml
+          printf '\n# kick: %s\n' "$(date -u +%s)" >> workflow.yml
+          content=$(base64 -w0 workflow.yml)
+          gh api --method PUT "$api" -f message='Kick fresh quick production check' -f content="$content" -f sha="$sha" -f branch='ops/p0-direct-recovery' >/dev/null
