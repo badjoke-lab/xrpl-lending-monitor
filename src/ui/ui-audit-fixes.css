@@ -42,6 +42,28 @@ body,
   word-break: break-word;
 }
 
+.degraded-data-banner {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin: 14px 24px 0;
+  padding: 13px 15px;
+  border: 1px solid rgba(255, 184, 77, 0.55);
+  border-radius: 10px;
+  background: rgba(85, 52, 8, 0.72);
+  color: var(--text-primary);
+  line-height: 1.5;
+}
+
+.degraded-data-banner strong {
+  flex: 0 0 auto;
+  color: #ffd28a;
+}
+
+.degraded-data-banner span {
+  min-width: 0;
+}
+
 .page-actions {
   min-width: 0;
   max-width: 100%;
@@ -180,6 +202,13 @@ body,
 }
 
 @media (max-width: 680px) {
+  .degraded-data-banner {
+    display: grid;
+    gap: 4px;
+    margin: 10px 12px 0;
+    padding: 12px;
+  }
+
   .page-header,
   .panel-header,
   .notice-content {
