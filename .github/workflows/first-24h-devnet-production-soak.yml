@@ -14,7 +14,7 @@ permissions:
 
 concurrency:
   group: first-24h-devnet-production-soak
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 env:
   BASE_URL: https://xrpl-lending-monitor.badjoke-lab.workers.dev
