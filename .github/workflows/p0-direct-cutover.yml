@@ -1,0 +1,28 @@
+name: P0 direct cutover
+
+on:
+  push:
+    branches: [ops/p0-direct-recovery]
+    paths: [.github/workflows/p0-direct-cutover.yml]
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Start corrected cutover
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run rolling-checkpoint-live-cutover.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f history_candidate_branch=history-p0-recovery-a-data \
+            -f current_state_candidate_branch=current-state-p0-recovery-a-data \
+            -f confirm_production_write=true
+          sleep 10
+          gh run list --repo "$GITHUB_REPOSITORY" --workflow rolling-checkpoint-live-cutover.yml --event workflow_dispatch --limit 1 --json databaseId,status,conclusion,url > cutover-run.json
+          cat cutover-run.json
