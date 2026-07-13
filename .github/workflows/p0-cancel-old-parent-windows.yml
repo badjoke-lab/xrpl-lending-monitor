@@ -1,0 +1,38 @@
+name: P0 cancel old recovery parent
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/p0-cancel-old-parent-windows-trigger
+
+permissions:
+  actions: write
+  contents: write
+
+jobs:
+  cancel:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Cancel old parent only
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OLD_PARENT_RUN_ID: '29247545785'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $run = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:OLD_PARENT_RUN_ID" | ConvertFrom-Json
+          $before = [string]$run.status
+          if ($before -in @('queued','in_progress','waiting','pending')) {
+            gh api --method POST "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:OLD_PARENT_RUN_ID/cancel" | Out-Null
+          }
+          Start-Sleep -Seconds 3
+          $after = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:OLD_PARENT_RUN_ID" --jq .status
+          $payload = [ordered]@{runId=[int64]$env:OLD_PARENT_RUN_ID;statusBefore=$before;statusAfter=$after;childRunPreserved=29247572039;capturedAt=(Get-Date).ToUniversalTime().ToString('o')} | ConvertTo-Json
+          $content = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($payload + "`n"))
+          $apiPath = "repos/$env:GITHUB_REPOSITORY/contents/.github/p0-cancel-old-parent-status.json"
+          $existingSha = ''
+          try { $existingSha = gh api $apiPath --jq .sha } catch {}
+          if ($existingSha) { gh api --method PUT $apiPath -f message='Update old parent cancellation status' -f content=$content -f sha=$existingSha | Out-Null }
+          else { gh api --method PUT $apiPath -f message='Create old parent cancellation status' -f content=$content | Out-Null }
