@@ -1,0 +1,380 @@
+{
+  "capturedAt": "2026-07-13T16:27:08.330359+00:00",
+  "stateQueryExit": 0,
+  "metricsQueryExit": 0,
+  "schedule": {
+    "result": {
+      "schedules": [
+        {
+          "cron": "*/5 * * * *",
+          "created_on": "2026-07-13T08:15:39.158898Z",
+          "modified_on": "2026-07-13T16:24:09.373569Z"
+        }
+      ]
+    },
+    "success": true,
+    "errors": [],
+    "messages": []
+  },
+  "state": [
+    {
+      "network": "devnet",
+      "epoch_id": "fast-lane-shadow-devnet",
+      "last_processed_ledger": 3626621,
+      "last_processed_hash": "047C9DE3610E83C4AB69DA969F1890FB0977780D94406A9DF5203D0F6CBAEA37",
+      "latest_observed_ledger": 3627161,
+      "latest_observed_hash": "9BA644CBBF6212D79AB5B14F7BFFFA38334F92E790C854EE3DAB3C5C925F7771",
+      "status": "behind",
+      "updated_at": "2026-07-13T16:25:24.766Z"
+    }
+  ],
+  "metrics": [
+    {
+      "network": "devnet",
+      "run_at": "2026-07-13T16:25:24.766Z",
+      "status": "reanchored",
+      "start_ledger_index": 3626442,
+      "end_ledger_index": 3626621,
+      "latest_observed_ledger": 3627161,
+      "lag_ledgers": 540,
+      "ledgers_processed": 180,
+      "lending_transactions": 58,
+      "coalesced_object_rows": 35,
+      "persistence_rows_read": 41,
+      "persistence_rows_written": 47
+    },
+    {
+      "network": "devnet",
+      "run_at": "2026-07-13T10:05:34.640Z",
+      "status": "committed",
+      "start_ledger_index": 3620314,
+      "end_ledger_index": 3620399,
+      "latest_observed_ledger": 3620399,
+      "lag_ledgers": 0,
+      "ledgers_processed": 86,
+      "lending_transactions": 212,
+      "coalesced_object_rows": 121,
+      "persistence_rows_read": 127,
+      "persistence_rows_written": 128
+    },
+    {
+      "network": "devnet",
+      "run_at": "2026-07-13T10:00:34.610Z",
+      "status": "committed",
+      "start_ledger_index": 3620227,
+      "end_ledger_index": 3620313,
+      "latest_observed_ledger": 3620313,
+      "lag_ledgers": 0,
+      "ledgers_processed": 87,
+      "lending_transactions": 173,
+      "coalesced_object_rows": 90,
+      "persistence_rows_read": 96,
+      "persistence_rows_written": 97
+    },
+    {
+      "network": "devnet",
+      "run_at": "2026-07-13T09:55:34.609Z",
+      "status": "committed",
+      "start_ledger_index": 3620140,
+      "end_ledger_index": 3620226,
+      "latest_observed_ledger": 3620226,
+      "lag_ledgers": 0,
+      "ledgers_processed": 87,
+      "lending_transactions": 102,
+      "coalesced_object_rows": 48,
+      "persistence_rows_read": 54,
+      "persistence_rows_written": 55
+    },
+    {
+      "network": "devnet",
+      "run_at": "2026-07-13T09:50:34.611Z",
+      "status": "committed",
+      "start_ledger_index": 3620054,
+      "end_ledger_index": 3620139,
+      "latest_observed_ledger": 3620139,
+      "lag_ledgers": 0,
+      "ledgers_processed": 86,
+      "lending_transactions": 94,
+      "coalesced_object_rows": 46,
+      "persistence_rows_read": 52,
+      "persistence_rows_written": 53
+    },
+    {
+      "network": "devnet",
+      "run_at": "2026-07-13T09:45:34.611Z",
+      "status": "committed",
+      "start_ledger_index": 3619967,
+      "end_ledger_index": 3620053,
+      "latest_observed_ledger": 3620053,
+      "lag_ledgers": 0,
+      "ledgers_processed": 87,
+      "lending_transactions": 190,
+      "coalesced_object_rows": 90,
+      "persistence_rows_read": 96,
+      "persistence_rows_written": 97
+    },
+    {
+      "network": "devnet",
+      "run_at": "2026-07-13T09:40:34.610Z",
+      "status": "committed",
+      "start_ledger_index": 3619880,
+      "end_ledger_index": 3619966,
+      "latest_observed_ledger": 3619966,
+      "lag_ledgers": 0,
+      "ledgers_processed": 87,
+      "lending_transactions": 129,
+      "coalesced_object_rows": 65,
+      "persistence_rows_read": 71,
+      "persistence_rows_written": 72
+    },
+    {
+      "network": "devnet",
+      "run_at": "2026-07-13T09:35:34.635Z",
+      "status": "committed",
+      "start_ledger_index": 3619794,
+      "end_ledger_index": 3619879,
+      "latest_observed_ledger": 3619879,
+      "lag_ledgers": 0,
+      "ledgers_processed": 86,
+      "lending_transactions": 114,
+      "coalesced_object_rows": 68,
+      "persistence_rows_read": 74,
+      "persistence_rows_written": 75
+    },
+    {
+      "network": "devnet",
+      "run_at": "2026-07-13T09:30:34.615Z",
+      "status": "committed",
+      "start_ledger_index": 3619707,
+      "end_ledger_index": 3619793,
+      "latest_observed_ledger": 3619793,
+      "lag_ledgers": 0,
+      "ledgers_processed": 87,
+      "lending_transactions": 72,
+      "coalesced_object_rows": 50,
+      "persistence_rows_read": 56,
+      "persistence_rows_written": 57
+    },
+    {
+      "network": "devnet",
+      "run_at": "2026-07-13T09:25:34.609Z",
+      "status": "committed",
+      "start_ledger_index": 3619619,
+      "end_ledger_index": 3619706,
+      "latest_observed_ledger": 3619706,
+      "lag_ledgers": 0,
+      "ledgers_processed": 88,
+      "lending_transactions": 72,
+      "coalesced_object_rows": 43,
+      "persistence_rows_read": 49,
+      "persistence_rows_written": 50
+    },
+    {
+      "network": "devnet",
+      "run_at": "2026-07-13T09:20:34.609Z",
+      "status": "committed",
+      "start_ledger_index": 3619533,
+      "end_ledger_index": 3619618,
+      "latest_observed_ledger": 3619618,
+      "lag_ledgers": 0,
+      "ledgers_processed": 86,
+      "lending_transactions": 69,
+      "coalesced_object_rows": 41,
+      "persistence_rows_read": 47,
+      "persistence_rows_written": 48
+    },
+    {
+      "network": "devnet",
+      "run_at": "2026-07-13T09:15:34.611Z",
+      "status": "committed",
+      "start_ledger_index": 3619449,
+      "end_ledger_index": 3619532,
+      "latest_observed_ledger": 3619532,
+      "lag_ledgers": 0,
+      "ledgers_processed": 84,
+      "lending_transactions": 55,
+      "coalesced_object_rows": 36,
+      "persistence_rows_read": 42,
+      "persistence_rows_written": 43
+    },
+    {
+      "network": "devnet",
+      "run_at": "2026-07-13T09:10:34.610Z",
+      "status": "committed",
+      "start_ledger_index": 3619365,
+      "end_ledger_index": 3619448,
+      "latest_observed_ledger": 3619448,
+      "lag_ledgers": 0,
+      "ledgers_processed": 84,
+      "lending_transactions": 90,
+      "coalesced_object_rows": 39,
+      "persistence_rows_read": 45,
+      "persistence_rows_written": 46
+    },
+    {
+      "network": "devnet",
+      "run_at": "2026-07-13T09:05:34.610Z",
+      "status": "committed",
+      "start_ledger_index": 3619278,
+      "end_ledger_index": 3619364,
+      "latest_observed_ledger": 3619364,
+      "lag_ledgers": 0,
+      "ledgers_processed": 87,
+      "lending_transactions": 80,
+      "coalesced_object_rows": 33,
+      "persistence_rows_read": 39,
+      "persistence_rows_written": 40
+    },
+    {
+      "network": "devnet",
+      "run_at": "2026-07-13T09:00:34.648Z",
+      "status": "committed",
+      "start_ledger_index": 3619190,
+      "end_ledger_index": 3619277,
+      "latest_observed_ledger": 3619277,
+      "lag_ledgers": 0,
+      "ledgers_processed": 88,
+      "lending_transactions": 62,
+      "coalesced_object_rows": 31,
+      "persistence_rows_read": 37,
+      "persistence_rows_written": 38
+    },
+    {
+      "network": "devnet",
+      "run_at": "2026-07-13T08:55:34.609Z",
+      "status": "committed",
+      "start_ledger_index": 3619103,
+      "end_ledger_index": 3619189,
+      "latest_observed_ledger": 3619189,
+      "lag_ledgers": 0,
+      "ledgers_processed": 87,
+      "lending_transactions": 35,
+      "coalesced_object_rows": 27,
+      "persistence_rows_read": 33,
+      "persistence_rows_written": 34
+    },
+    {
+      "network": "devnet",
+      "run_at": "2026-07-13T08:50:34.609Z",
+      "status": "committed",
+      "start_ledger_index": 3619017,
+      "end_ledger_index": 3619102,
+      "latest_observed_ledger": 3619102,
+      "lag_ledgers": 0,
+      "ledgers_processed": 86,
+      "lending_transactions": 45,
+      "coalesced_object_rows": 26,
+      "persistence_rows_read": 32,
+      "persistence_rows_written": 33
+    },
+    {
+      "network": "devnet",
+      "run_at": "2026-07-13T08:45:34.611Z",
+      "status": "committed",
+      "start_ledger_index": 3618929,
+      "end_ledger_index": 3619016,
+      "latest_observed_ledger": 3619016,
+      "lag_ledgers": 0,
+      "ledgers_processed": 88,
+      "lending_transactions": 39,
+      "coalesced_object_rows": 24,
+      "persistence_rows_read": 30,
+      "persistence_rows_written": 31
+    },
+    {
+      "network": "devnet",
+      "run_at": "2026-07-13T08:40:34.612Z",
+      "status": "committed",
+      "start_ledger_index": 3618839,
+      "end_ledger_index": 3618928,
+      "latest_observed_ledger": 3618928,
+      "lag_ledgers": 0,
+      "ledgers_processed": 90,
+      "lending_transactions": 38,
+      "coalesced_object_rows": 21,
+      "persistence_rows_read": 27,
+      "persistence_rows_written": 28
+    },
+    {
+      "network": "devnet",
+      "run_at": "2026-07-13T08:35:34.609Z",
+      "status": "committed",
+      "start_ledger_index": 3618747,
+      "end_ledger_index": 3618838,
+      "latest_observed_ledger": 3618838,
+      "lag_ledgers": 0,
+      "ledgers_processed": 92,
+      "lending_transactions": 39,
+      "coalesced_object_rows": 29,
+      "persistence_rows_read": 35,
+      "persistence_rows_written": 36
+    }
+  ],
+  "liveLedger": 3627195,
+  "overview": {
+    "network": "devnet",
+    "epoch": {
+      "id": "devnet-3371675",
+      "status": "current"
+    },
+    "snapshot": {
+      "id": "devnet-3624709-39d838e15f10",
+      "epoch_id": "devnet-3371675",
+      "ledger_index": 3624709,
+      "ledger_hash": "39D838E15F106E3305038540F7BDD47BA8832062748B6D9D2881AAC7677CF667",
+      "completed_at": "2026-07-13T14:29:58Z"
+    },
+    "base": {
+      "id": "devnet-3624709-39d838e15f10",
+      "epoch_id": "devnet-3371675",
+      "ledger_index": 3624709,
+      "ledger_hash": "39D838E15F106E3305038540F7BDD47BA8832062748B6D9D2881AAC7677CF667",
+      "completed_at": "2026-07-13T14:29:58Z"
+    },
+    "overlay_watermark": {
+      "ledger_index": 3624709,
+      "ledger_hash": "39D838E15F106E3305038540F7BDD47BA8832062748B6D9D2881AAC7677CF667",
+      "updated_at": "2026-07-13T14:33:14.236Z"
+    },
+    "current_state_watermark": {
+      "source": "fast_lane",
+      "ledger_index": 3626621,
+      "ledger_hash": "047C9DE3610E83C4AB69DA969F1890FB0977780D94406A9DF5203D0F6CBAEA37",
+      "updated_at": "2026-07-13T16:25:24.766Z"
+    },
+    "counts_watermark": {
+      "source": "canonical_overlay",
+      "ledger_index": 3624709,
+      "ledger_hash": "39D838E15F106E3305038540F7BDD47BA8832062748B6D9D2881AAC7677CF667",
+      "updated_at": "2026-07-13T14:33:14.236Z"
+    },
+    "freshness": {
+      "collector_status": "healthy",
+      "latest_validated_ledger": 3626673,
+      "last_processed_ledger": 3624709,
+      "last_processed_hash": "39D838E15F106E3305038540F7BDD47BA8832062748B6D9D2881AAC7677CF667",
+      "last_success_at": "2026-07-13T16:00:27.054Z",
+      "overlay_ledger": 3624709,
+      "overlay_hash": "39D838E15F106E3305038540F7BDD47BA8832062748B6D9D2881AAC7677CF667",
+      "overlay_updated_at": "2026-07-13T14:33:14.236Z",
+      "current_state_source": "fast_lane",
+      "current_state_ledger": 3626621,
+      "current_state_hash": "047C9DE3610E83C4AB69DA969F1890FB0977780D94406A9DF5203D0F6CBAEA37",
+      "current_state_updated_at": "2026-07-13T16:25:24.766Z"
+    },
+    "counts": {
+      "vaults": 849264,
+      "loan_brokers": 560660,
+      "loans": 241480,
+      "current_objects": 1651404
+    },
+    "provenance": {
+      "counts": "direct",
+      "freshness": "direct",
+      "overlay_watermark": "direct",
+      "current_state_watermark": "direct",
+      "counts_watermark": "direct"
+    },
+    "unavailable": []
+  }
+}
