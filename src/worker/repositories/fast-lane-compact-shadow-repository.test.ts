@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { FastLaneShadowWindowPlan } from '../../collector/incremental/fast-lane-shadow-plan'
 import { commitFastLaneCompactShadowWindow } from './fast-lane-compact-shadow-repository'
+import type { FastLaneHistoryBundle } from './fast-lane-history-window'
 
 interface PreparedRecord {
   sql: string
@@ -10,7 +11,7 @@ interface PreparedRecord {
 
 function plan(): FastLaneShadowWindowPlan {
   return {
-    epochId: 'epoch-1',
+    epochId: 'fast-lane-shadow-devnet',
     startLedgerIndex: 101,
     endLedgerIndex: 101,
     endLedgerHash: 'C'.repeat(64),
@@ -45,6 +46,22 @@ function plan(): FastLaneShadowWindowPlan {
   }
 }
 
+function historyBundle(): FastLaneHistoryBundle {
+  return {
+    schemaVersion: 1,
+    epochId: 'devnet-epoch-1',
+    startLedgerIndex: 101,
+    endLedgerIndex: 101,
+    endLedgerHash: 'C'.repeat(64),
+    createdAt: '2026-07-11T03:00:00.000Z',
+    protocolEvents: [],
+    objectChanges: [],
+    loanLifecycle: [],
+    archivedObjects: [],
+    balanceHistory: [],
+  }
+}
+
 function fakeDatabase() {
   const prepared: PreparedRecord[] = []
   const batches: number[][] = []
@@ -62,7 +79,7 @@ function fakeDatabase() {
         async first<T>() {
           if (sql.includes('FROM fast_lane_shadow_state')) {
             return {
-              epoch_id: 'epoch-1',
+              epoch_id: 'fast-lane-shadow-devnet',
               last_processed_ledger: 101,
               last_processed_hash: 'C'.repeat(64),
               latest_observed_ledger: 101,
@@ -85,11 +102,12 @@ function fakeDatabase() {
 }
 
 describe('compact fast-lane shadow persistence', () => {
-  it('writes current objects only through the compact hot table', async () => {
+  it('writes current objects and one compact history bundle in the same batch', async () => {
     const state = fakeDatabase()
     await commitFastLaneCompactShadowWindow({
       db: state.db,
       plan: plan(),
+      historyBundle: historyBundle(),
       expectedPreviousLedger: 100,
       expectedPreviousHash: 'P'.repeat(64),
       processedAt: '2026-07-11T03:00:00.000Z',
@@ -97,6 +115,20 @@ describe('compact fast-lane shadow persistence', () => {
 
     const sql = state.batches[0]?.map((index) => state.prepared[index]?.sql ?? '') ?? []
     expect(sql.some((item) => item.includes('INSERT INTO fast_lane_shadow_objects_compact'))).toBe(true)
+    expect(sql.some((item) => item.includes('INSERT INTO fast_lane_history_windows'))).toBe(true)
     expect(sql.some((item) => item.includes('INSERT INTO fast_lane_shadow_objects ('))).toBe(false)
+  })
+
+  it('rejects a history bundle from a different ledger window', async () => {
+    const state = fakeDatabase()
+    await expect(commitFastLaneCompactShadowWindow({
+      db: state.db,
+      plan: plan(),
+      historyBundle: { ...historyBundle(), endLedgerIndex: 102 },
+      expectedPreviousLedger: 100,
+      expectedPreviousHash: 'P'.repeat(64),
+      processedAt: '2026-07-11T03:00:00.000Z',
+    })).rejects.toThrow('Fast-lane history bundle does not match')
+    expect(state.batches).toHaveLength(0)
   })
 })
