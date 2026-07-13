@@ -6,6 +6,7 @@ import { initializeAnalytics } from './lib/analytics'
 import './styles.css'
 import './vaults.css'
 import './brokers.css'
+import './ui-audit-fixes.css'
 
 const rootElement = document.getElementById('root')
 
