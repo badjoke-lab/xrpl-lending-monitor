@@ -1,0 +1,326 @@
+name: First 24-hour XRPL Devnet production soak stable
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/first-24h-devnet-production-soak-stable.yml'
+      - 'scripts/run-first-24h-soak-segment.mjs'
+      - 'scripts/finalize-first-24h-soak.mjs'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: first-24h-devnet-production-soak-stable
+  cancel-in-progress: false
+
+env:
+  BASE_URL: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+  PRIMARY_RPC: https://devnet.honeycluster.io/
+  FALLBACK_RPC: https://s.devnet.rippletest.net:51234/
+  EXPECTED_EPOCH_ID: devnet-3371675
+  EXPECTED_SNAPSHOT_ID: devnet-3592674-0373cda0b0cd
+  EXPECTED_LEDGER_INDEX: '3592674'
+  EXPECTED_LEDGER_HASH: 0373CDA0B0CD8486C0C55C5B5DD460501419367BD76D146E4A718EBD9DD8A893
+
+jobs:
+  start:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      t0_epoch_ms: ${{ steps.meta.outputs.t0_epoch_ms }}
+      deployment_id: ${{ steps.meta.outputs.deployment_id }}
+      version_id: ${{ steps.meta.outputs.version_id }}
+      last_updated_at: ${{ steps.meta.outputs.last_updated_at }}
+      last_ledger: ${{ steps.meta.outputs.last_ledger }}
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      OUTPUT_DIR: stable-soak-start
+    steps:
+      - uses: actions/checkout@v4
+      - name: Establish immutable T0 after CI and deployment quiescence
+        run: node scripts/run-first-24h-soak-segment.mjs start
+      - name: Publish start outputs
+        id: meta
+        run: |
+          echo "t0_epoch_ms=$(jq -r '.t0EpochMs' "$OUTPUT_DIR/summary.json")" >> "$GITHUB_OUTPUT"
+          echo "deployment_id=$(jq -r '.deploymentId' "$OUTPUT_DIR/summary.json")" >> "$GITHUB_OUTPUT"
+          echo "version_id=$(jq -r '.versionId' "$OUTPUT_DIR/summary.json")" >> "$GITHUB_OUTPUT"
+          echo "last_updated_at=$(jq -r '.lastUpdatedAt' "$OUTPUT_DIR/summary.json")" >> "$GITHUB_OUTPUT"
+          echo "last_ledger=$(jq -r '.lastLedger' "$OUTPUT_DIR/summary.json")" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: stable-soak-start
+          path: stable-soak-start
+          if-no-files-found: error
+          retention-days: 30
+
+  segment_1:
+    needs: [start]
+    if: ${{ needs.start.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 270
+    outputs:
+      last_updated_at: ${{ steps.meta.outputs.last_updated_at }}
+      last_ledger: ${{ steps.meta.outputs.last_ledger }}
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      OUTPUT_DIR: stable-soak-segment-1
+      SEGMENT_INDEX: '1'
+      T0_EPOCH_MS: ${{ needs.start.outputs.t0_epoch_ms }}
+      START_DEPLOYMENT_ID: ${{ needs.start.outputs.deployment_id }}
+      START_VERSION_ID: ${{ needs.start.outputs.version_id }}
+      PREVIOUS_UPDATED_AT: ${{ needs.start.outputs.last_updated_at }}
+      PREVIOUS_LEDGER: ${{ needs.start.outputs.last_ledger }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Monitor production hours 0–4
+        run: node scripts/run-first-24h-soak-segment.mjs segment
+      - name: Publish segment outputs
+        id: meta
+        run: |
+          echo "last_updated_at=$(jq -r '.lastUpdatedAt' "$OUTPUT_DIR/summary.json")" >> "$GITHUB_OUTPUT"
+          echo "last_ledger=$(jq -r '.lastLedger' "$OUTPUT_DIR/summary.json")" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: stable-soak-segment-1
+          path: stable-soak-segment-1
+          if-no-files-found: error
+          retention-days: 30
+
+  segment_2:
+    needs: [segment_1, start]
+    if: ${{ needs.segment_1.result == 'success' && needs.start.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 270
+    outputs:
+      last_updated_at: ${{ steps.meta.outputs.last_updated_at }}
+      last_ledger: ${{ steps.meta.outputs.last_ledger }}
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      OUTPUT_DIR: stable-soak-segment-2
+      SEGMENT_INDEX: '2'
+      T0_EPOCH_MS: ${{ needs.start.outputs.t0_epoch_ms }}
+      START_DEPLOYMENT_ID: ${{ needs.start.outputs.deployment_id }}
+      START_VERSION_ID: ${{ needs.start.outputs.version_id }}
+      PREVIOUS_UPDATED_AT: ${{ needs.segment_1.outputs.last_updated_at }}
+      PREVIOUS_LEDGER: ${{ needs.segment_1.outputs.last_ledger }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Monitor production hours 4–8
+        run: node scripts/run-first-24h-soak-segment.mjs segment
+      - name: Publish segment outputs
+        id: meta
+        run: |
+          echo "last_updated_at=$(jq -r '.lastUpdatedAt' "$OUTPUT_DIR/summary.json")" >> "$GITHUB_OUTPUT"
+          echo "last_ledger=$(jq -r '.lastLedger' "$OUTPUT_DIR/summary.json")" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: stable-soak-segment-2
+          path: stable-soak-segment-2
+          if-no-files-found: error
+          retention-days: 30
+
+  segment_3:
+    needs: [segment_2, start]
+    if: ${{ needs.segment_2.result == 'success' && needs.start.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 270
+    outputs:
+      last_updated_at: ${{ steps.meta.outputs.last_updated_at }}
+      last_ledger: ${{ steps.meta.outputs.last_ledger }}
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      OUTPUT_DIR: stable-soak-segment-3
+      SEGMENT_INDEX: '3'
+      T0_EPOCH_MS: ${{ needs.start.outputs.t0_epoch_ms }}
+      START_DEPLOYMENT_ID: ${{ needs.start.outputs.deployment_id }}
+      START_VERSION_ID: ${{ needs.start.outputs.version_id }}
+      PREVIOUS_UPDATED_AT: ${{ needs.segment_2.outputs.last_updated_at }}
+      PREVIOUS_LEDGER: ${{ needs.segment_2.outputs.last_ledger }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Monitor production hours 8–12
+        run: node scripts/run-first-24h-soak-segment.mjs segment
+      - name: Publish segment outputs
+        id: meta
+        run: |
+          echo "last_updated_at=$(jq -r '.lastUpdatedAt' "$OUTPUT_DIR/summary.json")" >> "$GITHUB_OUTPUT"
+          echo "last_ledger=$(jq -r '.lastLedger' "$OUTPUT_DIR/summary.json")" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: stable-soak-segment-3
+          path: stable-soak-segment-3
+          if-no-files-found: error
+          retention-days: 30
+
+  segment_4:
+    needs: [segment_3, start]
+    if: ${{ needs.segment_3.result == 'success' && needs.start.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 270
+    outputs:
+      last_updated_at: ${{ steps.meta.outputs.last_updated_at }}
+      last_ledger: ${{ steps.meta.outputs.last_ledger }}
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      OUTPUT_DIR: stable-soak-segment-4
+      SEGMENT_INDEX: '4'
+      T0_EPOCH_MS: ${{ needs.start.outputs.t0_epoch_ms }}
+      START_DEPLOYMENT_ID: ${{ needs.start.outputs.deployment_id }}
+      START_VERSION_ID: ${{ needs.start.outputs.version_id }}
+      PREVIOUS_UPDATED_AT: ${{ needs.segment_3.outputs.last_updated_at }}
+      PREVIOUS_LEDGER: ${{ needs.segment_3.outputs.last_ledger }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Monitor production hours 12–16
+        run: node scripts/run-first-24h-soak-segment.mjs segment
+      - name: Publish segment outputs
+        id: meta
+        run: |
+          echo "last_updated_at=$(jq -r '.lastUpdatedAt' "$OUTPUT_DIR/summary.json")" >> "$GITHUB_OUTPUT"
+          echo "last_ledger=$(jq -r '.lastLedger' "$OUTPUT_DIR/summary.json")" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: stable-soak-segment-4
+          path: stable-soak-segment-4
+          if-no-files-found: error
+          retention-days: 30
+
+  segment_5:
+    needs: [segment_4, start]
+    if: ${{ needs.segment_4.result == 'success' && needs.start.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 270
+    outputs:
+      last_updated_at: ${{ steps.meta.outputs.last_updated_at }}
+      last_ledger: ${{ steps.meta.outputs.last_ledger }}
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      OUTPUT_DIR: stable-soak-segment-5
+      SEGMENT_INDEX: '5'
+      T0_EPOCH_MS: ${{ needs.start.outputs.t0_epoch_ms }}
+      START_DEPLOYMENT_ID: ${{ needs.start.outputs.deployment_id }}
+      START_VERSION_ID: ${{ needs.start.outputs.version_id }}
+      PREVIOUS_UPDATED_AT: ${{ needs.segment_4.outputs.last_updated_at }}
+      PREVIOUS_LEDGER: ${{ needs.segment_4.outputs.last_ledger }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Monitor production hours 16–20
+        run: node scripts/run-first-24h-soak-segment.mjs segment
+      - name: Publish segment outputs
+        id: meta
+        run: |
+          echo "last_updated_at=$(jq -r '.lastUpdatedAt' "$OUTPUT_DIR/summary.json")" >> "$GITHUB_OUTPUT"
+          echo "last_ledger=$(jq -r '.lastLedger' "$OUTPUT_DIR/summary.json")" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: stable-soak-segment-5
+          path: stable-soak-segment-5
+          if-no-files-found: error
+          retention-days: 30
+
+  segment_6:
+    needs: [segment_5, start]
+    if: ${{ needs.segment_5.result == 'success' && needs.start.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 270
+    outputs:
+      last_updated_at: ${{ steps.meta.outputs.last_updated_at }}
+      last_ledger: ${{ steps.meta.outputs.last_ledger }}
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      OUTPUT_DIR: stable-soak-segment-6
+      SEGMENT_INDEX: '6'
+      T0_EPOCH_MS: ${{ needs.start.outputs.t0_epoch_ms }}
+      START_DEPLOYMENT_ID: ${{ needs.start.outputs.deployment_id }}
+      START_VERSION_ID: ${{ needs.start.outputs.version_id }}
+      PREVIOUS_UPDATED_AT: ${{ needs.segment_5.outputs.last_updated_at }}
+      PREVIOUS_LEDGER: ${{ needs.segment_5.outputs.last_ledger }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Monitor production hours 20–24
+        run: node scripts/run-first-24h-soak-segment.mjs segment
+      - name: Publish segment outputs
+        id: meta
+        run: |
+          echo "last_updated_at=$(jq -r '.lastUpdatedAt' "$OUTPUT_DIR/summary.json")" >> "$GITHUB_OUTPUT"
+          echo "last_ledger=$(jq -r '.lastLedger' "$OUTPUT_DIR/summary.json")" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: stable-soak-segment-6
+          path: stable-soak-segment-6
+          if-no-files-found: error
+          retention-days: 30
+
+  final:
+    needs: [start, segment_1, segment_2, segment_3, segment_4, segment_5, segment_6]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      ARTIFACT_ROOT: stable-soak-artifacts
+      OUTPUT_DIR: stable-soak-final
+      METRICS_PATH: stable-soak-final/metrics.json
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: stable-soak-*
+          path: stable-soak-artifacts
+          merge-multiple: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Capture exact fast-lane run metrics for the soak window
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$OUTPUT_DIR"
+          START_JSON="$(find "$ARTIFACT_ROOT" -name start.json -print -quit)"
+          if [ -z "$START_JSON" ]; then
+            printf '%s\n' '[]' > "$METRICS_PATH"
+            exit 0
+          fi
+          T0="$(jq -r '.t0Iso' "$START_JSON")"
+          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote \
+            --command "SELECT run_at,status,start_ledger_index,end_ledger_index,latest_observed_ledger,lag_ledgers,ledgers_processed,lending_transactions,coalesced_object_rows,persistence_rows_read,persistence_rows_written FROM fast_lane_shadow_run_metrics WHERE network='devnet' AND run_at >= '$T0' ORDER BY run_at ASC;" \
+            --json > "$OUTPUT_DIR/metrics-raw.txt"
+          sed -n '/^\[/,$p' "$OUTPUT_DIR/metrics-raw.txt" > "$METRICS_PATH"
+      - name: Evaluate the complete 24-hour soak
+        run: node scripts/finalize-first-24h-soak.mjs
+      - name: Publish job summary
+        if: always()
+        run: |
+          if [ -f "$OUTPUT_DIR/result.md" ]; then cat "$OUTPUT_DIR/result.md" >> "$GITHUB_STEP_SUMMARY"; fi
+          if [ -f "$OUTPUT_DIR/fatal-error.json" ]; then cat "$OUTPUT_DIR/fatal-error.json" >> "$GITHUB_STEP_SUMMARY"; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: stable-soak-final
+          path: stable-soak-final
+          if-no-files-found: error
+          retention-days: 90
