@@ -1,0 +1,100 @@
+name: P0 intermediate cutover candidate B
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/p0-intermediate-cutover-b-trigger
+
+permissions:
+  actions: write
+  contents: write
+
+concurrency:
+  group: p0-intermediate-cutover-b
+  cancel-in-progress: false
+
+jobs:
+  cutover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ github.token }}
+      HISTORY_BRANCH: history-p0-recovery-b-data
+      CURRENT_BRANCH: current-state-p0-recovery-b-data
+    steps:
+      - name: Verify aligned candidate B
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p p0-intermediate-cutover-b
+          fetch_json() {
+            local branch="$1" path="$2" out="$3"
+            gh api --method GET "repos/${GITHUB_REPOSITORY}/contents/${path}" -f ref="$branch" --jq .content \
+              | tr -d '\n' | base64 --decode > "$out"
+          }
+          fetch_json "$HISTORY_BRANCH" history/publication.json p0-intermediate-cutover-b/publication.json
+          fetch_json "$CURRENT_BRANCH" read-model/manifest.json p0-intermediate-cutover-b/manifest.json
+          LEDGER="$(jq -r .endLedgerIndex p0-intermediate-cutover-b/publication.json)"
+          HASH="$(jq -r .endLedgerHash p0-intermediate-cutover-b/publication.json)"
+          test "$(jq -r .complete p0-intermediate-cutover-b/publication.json)" = true
+          test "$(jq -r .complete p0-intermediate-cutover-b/manifest.json)" = true
+          test "$LEDGER" = "$(jq -r .ledgerIndex p0-intermediate-cutover-b/manifest.json)"
+          test "$HASH" = "$(jq -r .ledgerHash p0-intermediate-cutover-b/manifest.json)"
+          test "$LEDGER" -ge 3612674
+          jq -n --argjson ledger_index "$LEDGER" '{method:"ledger",params:[{ledger_index:$ledger_index,transactions:false,expand:false}]}' \
+            > p0-intermediate-cutover-b/ledger-request.json
+          curl --fail-with-body --silent --show-error --retry 3 -H 'content-type: application/json' \
+            --data @p0-intermediate-cutover-b/ledger-request.json https://devnet.honeycluster.io/ \
+            > p0-intermediate-cutover-b/ledger-response.json
+          test "$HASH" = "$(jq -r '.result.ledger_hash // .result.ledger.ledger_hash' p0-intermediate-cutover-b/ledger-response.json)"
+          echo "TARGET_LEDGER=$LEDGER" >> "$GITHUB_ENV"
+          echo "TARGET_HASH=$HASH" >> "$GITHUB_ENV"
+
+      - name: Dispatch guarded live cutover
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=p0-intermediate-cutover-b
+          gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/runs?event=workflow_dispatch&per_page=100" \
+            --jq '.workflow_runs[].id' > "$ROOT/before.txt"
+          jq -n --arg ref main --arg h "$HISTORY_BRANCH" --arg c "$CURRENT_BRANCH" \
+            '{ref:$ref,inputs:{history_candidate_branch:$h,current_state_candidate_branch:$c,confirm_production_write:"true"}}' \
+            > "$ROOT/dispatch.json"
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/dispatches" \
+            --input "$ROOT/dispatch.json"
+          RUN_ID=''
+          for attempt in $(seq 1 90); do
+            gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/runs?event=workflow_dispatch&per_page=100" \
+              > "$ROOT/runs.json"
+            while read -r id; do
+              if ! grep -Fxq "$id" "$ROOT/before.txt"; then RUN_ID="$id"; break; fi
+            done < <(jq -r '.workflow_runs | sort_by(.created_at) | reverse | .[].id' "$ROOT/runs.json")
+            test -n "$RUN_ID" && break
+            sleep 10
+          done
+          test -n "$RUN_ID"
+          echo "CUTOVER_RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
+          for attempt in $(seq 1 360); do
+            gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}" > "$ROOT/run.json"
+            test "$(jq -r .status "$ROOT/run.json")" = completed && break
+            sleep 10
+          done
+          test "$(jq -r .status "$ROOT/run.json")" = completed
+          test "$(jq -r .conclusion "$ROOT/run.json")" = success
+
+      - name: Publish intermediate cutover status
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -n --argjson targetLedger "$TARGET_LEDGER" --arg targetHash "$TARGET_HASH" --argjson cutoverRunId "$CUTOVER_RUN_ID" \
+            '{passed:true,targetLedger:$targetLedger,targetHash:$targetHash,cutoverRunId:$cutoverRunId}' \
+            > p0-intermediate-cutover-b/status.json
+          CONTENT="$(base64 -w0 p0-intermediate-cutover-b/status.json)"
+          API="repos/${GITHUB_REPOSITORY}/contents/.github/p0-intermediate-cutover-b-status.json"
+          SHA="$(gh api "$API" --jq .sha 2>/dev/null || true)"
+          if [ -n "$SHA" ]; then
+            gh api --method PUT "$API" -f message='Update P0 intermediate cutover status' -f content="$CONTENT" -f sha="$SHA" >/dev/null
+          else
+            gh api --method PUT "$API" -f message='Create P0 intermediate cutover status' -f content="$CONTENT" >/dev/null
+          fi
