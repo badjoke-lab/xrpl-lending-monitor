@@ -7,6 +7,7 @@ import './styles.css'
 import './vaults.css'
 import './brokers.css'
 import './ui-audit-fixes.css'
+import './loan-detail-overflow.css'
 
 const rootElement = document.getElementById('root')
 
