@@ -1,10 +1,10 @@
-name: First 24-hour Devnet fixed-window audit
+name: First 24-hour Devnet restart-safe audit
 
 on:
   workflow_dispatch:
     inputs:
       mode:
-        description: Start one immutable 24-hour window or audit an existing start run
+        description: Create one immutable anchor or audit all D1 history since that anchor
         required: true
         type: choice
         options:
@@ -24,7 +24,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: first-24h-devnet-fixed-window-${{ inputs.mode }}-${{ inputs.start_run_id || github.run_id }}
+  group: first-24h-devnet-restart-safe-${{ inputs.mode }}-${{ inputs.start_run_id || github.run_id }}
   cancel-in-progress: false
 
 env:
@@ -61,7 +61,7 @@ jobs:
       OUTPUT_DIR: first-24h-soak-anchor
     steps:
       - uses: actions/checkout@v4
-      - name: Establish one immutable production T0
+      - name: Establish the one immutable production anchor
         run: node scripts/run-first-24h-soak-segment.mjs start
       - name: Publish immutable anchor
         uses: actions/upload-artifact@v4
@@ -73,12 +73,14 @@ jobs:
       - name: Publish start instructions
         run: |
           {
-            echo '# Fixed 24-hour soak window started'
+            echo '# Restart-safe 24-hour soak anchor created'
             echo
             echo "- Start workflow run ID: **${GITHUB_RUN_ID}**"
-            echo "- T0: **$(jq -r '.t0Iso' first-24h-soak-anchor/start.json)**"
-            echo "- Audit after: **$(jq -r '.expectedEndIso' first-24h-soak-anchor/start.json)**"
-            echo '- On every audit retry, use this same start workflow run ID. Never create a replacement T0 because an audit run failed.'
+            echo "- Immutable anchor: **$(jq -r '.t0Iso' first-24h-soak-anchor/start.json)**"
+            echo "- Initial audit eligibility: **$(jq -r '.expectedEndIso' first-24h-soak-anchor/start.json)**"
+            echo '- Every audit retry must use this same start workflow run ID.'
+            echo '- A monitor or audit failure never creates a replacement anchor.'
+            echo '- A real D1 discontinuity is handled by automatically selecting the first later continuous 24-hour sequence.'
           } >> "$GITHUB_STEP_SUMMARY"
 
   audit:
@@ -113,19 +115,18 @@ jobs:
           node-version: 24.18.0
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Read the exact D1 execution window
+      - name: Read all exact D1 execution history since the anchor
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p "$OUTPUT_DIR"
           T0="$(jq -r '.t0Iso' "$START_PATH")"
-          END="$(jq -r '.expectedEndIso' "$START_PATH")"
           pnpm exec wrangler d1 execute xrpl-lending-monitor --remote \
-            --command "SELECT run_at,status,start_ledger_index,end_ledger_index,latest_observed_ledger,lag_ledgers,ledgers_processed,lending_transactions,coalesced_object_rows,persistence_rows_read,persistence_rows_written FROM fast_lane_shadow_run_metrics WHERE network='devnet' AND run_at >= '$T0' AND run_at <= '$END' ORDER BY run_at ASC;" \
+            --command "SELECT run_at,status,start_ledger_index,end_ledger_index,latest_observed_ledger,lag_ledgers,ledgers_processed,lending_transactions,coalesced_object_rows,persistence_rows_read,persistence_rows_written FROM fast_lane_shadow_run_metrics WHERE network='devnet' AND run_at >= '$T0' ORDER BY run_at ASC;" \
             --json > "$OUTPUT_DIR/metrics-raw.txt"
           sed -n '/^\[/,$p' "$OUTPUT_DIR/metrics-raw.txt" > "$METRICS_PATH"
           jq -e 'type == "array"' "$METRICS_PATH" >/dev/null
-      - name: Audit the fixed window without resetting its clock
+      - name: Audit continuity without resetting the anchor
         run: node scripts/audit-fixed-soak-window.mjs
       - name: Publish audit summary
         if: always()
