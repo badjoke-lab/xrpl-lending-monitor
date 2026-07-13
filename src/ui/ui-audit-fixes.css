@@ -53,6 +53,22 @@ body,
   max-width: 100%;
 }
 
+.developer-action {
+  border-color: var(--border-subtle);
+  color: var(--text-secondary);
+  background: rgba(8, 19, 29, 0.72);
+  font-weight: 700;
+}
+
+.developer-action:hover {
+  color: var(--text-primary);
+  background: rgba(20, 45, 60, 0.72);
+}
+
+.main-content > .breadcrumbs + .page-stack > .breadcrumbs {
+  display: none;
+}
+
 .table-scroll,
 .raw-data-panel {
   max-width: 100%;
