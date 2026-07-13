@@ -18,6 +18,7 @@ interface Filters {
 
 const METRICS = ['', 'debt_total', 'debt_maximum', 'cover_available', 'loss_unrealized', 'required_minimum_cover', 'cover_surplus']
 const RIPPLE_EPOCH_UNIX_SECONDS = 946_684_800
+const PAGE_SIZE = 25
 
 function initialFilters(): Filters {
   const params = new URLSearchParams(window.location.search)
@@ -35,7 +36,7 @@ function rippleTimeToIso(value: number): string | null {
 }
 
 function coverLossUrl(filters: Filters): string {
-  const params = new URLSearchParams({ limit: '100' })
+  const params = new URLSearchParams({ limit: String(PAGE_SIZE) })
   if (filters.metricType) params.set('metric_type', filters.metricType)
   if (filters.subjectType) params.set('subject_type', filters.subjectType)
   if (filters.subjectId) params.set('subject_id', filters.subjectId)
@@ -85,7 +86,7 @@ export function CoverLossAuditPage({ onNavigate }: CoverLossAuditPageProps) {
         </div>
         <div className="page-actions">
           <button className="secondary-button" type="button" onClick={reload}>Refresh</button>
-          <a className="primary-button" href={coverLossUrl(filters)}>Cover JSON</a>
+          <a className="secondary-button developer-action" href={coverLossUrl(filters)}>Cover JSON</a>
         </div>
       </header>
 
@@ -94,7 +95,7 @@ export function CoverLossAuditPage({ onNavigate }: CoverLossAuditPageProps) {
         <span>Required minimum cover and cover surplus appear only when indexed source fields are present. Missing inputs remain unavailable.</span>
       </div>
 
-      <Panel title="Filter cover and loss history" description="Filters apply to the latest bounded 100-row cover/debt/loss API window">
+      <Panel title="Filter cover and loss history" description={`Filters apply to the latest bounded ${PAGE_SIZE}-row cover/debt/loss API window`}>
         <form
           className="activity-filter-form audit-filter-wide"
           onSubmit={(event) => {
@@ -141,7 +142,7 @@ export function CoverLossAuditPage({ onNavigate }: CoverLossAuditPageProps) {
       {response ? (
         <Panel
           title="Indexed cover and loss events"
-          description={`${formatInteger(records.length)} row(s) returned from the bounded cover/debt/loss API`}
+          description={`${formatInteger(records.length)} row(s) returned · latest bounded ${PAGE_SIZE}-row window`}
           action={<ProvenanceBadge value={response.provenance.collection} />}
         >
           {records.length === 0 ? (
