@@ -1,5 +1,5 @@
 {
-  "capturedAt": "2026-07-13T16:34:32.070752+00:00",
+  "capturedAt": "2026-07-13T16:35:53.188193+00:00",
   "stateQueryExit": 0,
   "metricsQueryExit": 0,
   "schedule": {
@@ -20,15 +20,29 @@
     {
       "network": "devnet",
       "epoch_id": "fast-lane-shadow-devnet",
-      "last_processed_ledger": 3626801,
-      "last_processed_hash": "51CF519F9AD21FA773C2D7F1C57929FB7F8C97AB3D3B738A70DEE345815BD10D",
-      "latest_observed_ledger": 3627260,
-      "latest_observed_hash": "D7822B9677C8DC586E84119CAD5680321CC8F131126B0B0E9D6C20DCA47668DC",
+      "last_processed_ledger": 3626981,
+      "last_processed_hash": "835F2839A3E7565DB47DAEC8BF43066E67BBCA155C135287BE56DBE6B8CBFC8C",
+      "latest_observed_ledger": 3627357,
+      "latest_observed_hash": "CB59E28E4734875F9D93F5EF81A93523500E2EEA067493A4E5A11321E05FFED5",
       "status": "behind",
-      "updated_at": "2026-07-13T16:30:24.740Z"
+      "updated_at": "2026-07-13T16:35:24.714Z"
     }
   ],
   "metrics": [
+    {
+      "network": "devnet",
+      "run_at": "2026-07-13T16:35:24.714Z",
+      "status": "committed",
+      "start_ledger_index": 3626802,
+      "end_ledger_index": 3626981,
+      "latest_observed_ledger": 3627357,
+      "lag_ledgers": 376,
+      "ledgers_processed": 180,
+      "lending_transactions": 63,
+      "coalesced_object_rows": 39,
+      "persistence_rows_read": 45,
+      "persistence_rows_written": 49
+    },
     {
       "network": "devnet",
       "run_at": "2026-07-13T16:30:24.740Z",
@@ -294,23 +308,9 @@
       "coalesced_object_rows": 24,
       "persistence_rows_read": 30,
       "persistence_rows_written": 31
-    },
-    {
-      "network": "devnet",
-      "run_at": "2026-07-13T08:40:34.612Z",
-      "status": "committed",
-      "start_ledger_index": 3618839,
-      "end_ledger_index": 3618928,
-      "latest_observed_ledger": 3618928,
-      "lag_ledgers": 0,
-      "ledgers_processed": 90,
-      "lending_transactions": 38,
-      "coalesced_object_rows": 21,
-      "persistence_rows_read": 27,
-      "persistence_rows_written": 28
     }
   ],
-  "liveLedger": 3627340,
+  "liveLedger": 3627366,
   "overview": {
     "network": "devnet",
     "epoch": {
@@ -338,9 +338,9 @@
     },
     "current_state_watermark": {
       "source": "fast_lane",
-      "ledger_index": 3626801,
-      "ledger_hash": "51CF519F9AD21FA773C2D7F1C57929FB7F8C97AB3D3B738A70DEE345815BD10D",
-      "updated_at": "2026-07-13T16:30:24.740Z"
+      "ledger_index": 3626981,
+      "ledger_hash": "835F2839A3E7565DB47DAEC8BF43066E67BBCA155C135287BE56DBE6B8CBFC8C",
+      "updated_at": "2026-07-13T16:35:24.714Z"
     },
     "counts_watermark": {
       "source": "canonical_overlay",
@@ -358,9 +358,9 @@
       "overlay_hash": "39D838E15F106E3305038540F7BDD47BA8832062748B6D9D2881AAC7677CF667",
       "overlay_updated_at": "2026-07-13T14:33:14.236Z",
       "current_state_source": "fast_lane",
-      "current_state_ledger": 3626801,
-      "current_state_hash": "51CF519F9AD21FA773C2D7F1C57929FB7F8C97AB3D3B738A70DEE345815BD10D",
-      "current_state_updated_at": "2026-07-13T16:30:24.740Z"
+      "current_state_ledger": 3626981,
+      "current_state_hash": "835F2839A3E7565DB47DAEC8BF43066E67BBCA155C135287BE56DBE6B8CBFC8C",
+      "current_state_updated_at": "2026-07-13T16:35:24.714Z"
     },
     "counts": {
       "vaults": 849264,
