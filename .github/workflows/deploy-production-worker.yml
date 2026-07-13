@@ -183,6 +183,24 @@ jobs:
             ' wrangler.jsonc > /dev/null
           cmp wrangler.jsonc wrangler.production.jsonc
 
+      - name: Apply pending additive D1 migrations
+        id: migrations
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p production-d1-migrations
+          pnpm exec wrangler d1 migrations list xrpl-lending-monitor --remote \
+            | tee production-d1-migrations/before.txt
+          pnpm exec wrangler d1 migrations apply xrpl-lending-monitor --remote \
+            | tee production-d1-migrations/apply.txt
+          pnpm exec wrangler d1 migrations list xrpl-lending-monitor --remote \
+            | tee production-d1-migrations/after.txt
+          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote --json \
+            --command "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'fast_lane_history_windows'" \
+            > production-d1-migrations/schema.json
+          jq -e '[.[].results[]? | select(.name == "fast_lane_history_windows")] | length == 1' \
+            production-d1-migrations/schema.json > /dev/null
+
       - name: Deploy Worker from bound root config
         id: deploy
         run: pnpm exec wrangler deploy
@@ -298,5 +316,6 @@ jobs:
             deployed-worker-schedules.json
             deployed-rebase-status.json
             production-deploy-wait
+            production-d1-migrations
           if-no-files-found: warn
           retention-days: 14
