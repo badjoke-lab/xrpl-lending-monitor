@@ -7,22 +7,40 @@ on:
 
 permissions:
   actions: write
-  contents: read
+  contents: write
 
 jobs:
   trigger:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
-      - name: Start corrected cutover
+      - name: Start or follow corrected cutover
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh workflow run rolling-checkpoint-live-cutover.yml \
-            --repo "$GITHUB_REPOSITORY" \
-            --ref main \
-            -f history_candidate_branch=history-p0-recovery-a-data \
-            -f current_state_candidate_branch=current-state-p0-recovery-a-data \
-            -f confirm_production_write=true
-          sleep 10
-          gh run list --repo "$GITHUB_REPOSITORY" --workflow rolling-checkpoint-live-cutover.yml --event workflow_dispatch --limit 1 --json databaseId,status,conclusion,url > cutover-run.json
-          cat cutover-run.json
+          set -euo pipefail
+          RUN_ID="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow rolling-checkpoint-live-cutover.yml --event workflow_dispatch --limit 10 --json databaseId,status,createdAt --jq '[.[] | select(.status != "completed")][0].databaseId // empty')"
+          if [ -z "$RUN_ID" ]; then
+            gh workflow run rolling-checkpoint-live-cutover.yml \
+              --repo "$GITHUB_REPOSITORY" \
+              --ref main \
+              -f history_candidate_branch=history-p0-recovery-a-data \
+              -f current_state_candidate_branch=current-state-p0-recovery-a-data \
+              -f confirm_production_write=true
+            for _ in $(seq 1 60); do
+              RUN_ID="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow rolling-checkpoint-live-cutover.yml --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+              [ -n "$RUN_ID" ] && break
+              sleep 5
+            done
+          fi
+          [ -n "$RUN_ID" ]
+          gh run watch "$RUN_ID" --repo "$GITHUB_REPOSITORY" --exit-status || true
+          gh run view "$RUN_ID" --repo "$GITHUB_REPOSITORY" --json databaseId,status,conclusion,url,createdAt,updatedAt > result.json
+          CONTENT="$(base64 -w0 result.json)"
+          API="repos/${GITHUB_REPOSITORY}/contents/.github/p0-direct-cutover-result.json"
+          SHA="$(gh api "$API?ref=ops/p0-direct-recovery" --jq .sha 2>/dev/null || true)"
+          if [ -n "$SHA" ]; then
+            gh api --method PUT "$API" -f message='Update direct cutover result' -f content="$CONTENT" -f sha="$SHA" -f branch='ops/p0-direct-recovery' >/dev/null
+          else
+            gh api --method PUT "$API" -f message='Create direct cutover result' -f content="$CONTENT" -f branch='ops/p0-direct-recovery' >/dev/null
+          fi
