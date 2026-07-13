@@ -1,0 +1,39 @@
+name: P0 final fast recovery probe
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/p0-final-fast-recovery-probe-trigger
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  probe:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Capture final recovery state
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $repo = $env:GITHUB_REPOSITORY
+          $runs = gh api "repos/$repo/actions/workflows/p0-final-fast-recovery.yml/runs?per_page=20" | ConvertFrom-Json
+          $run = $runs.workflow_runs | Sort-Object {[datetime]$_.created_at} -Descending | Select-Object -First 1
+          if (-not $run) { throw 'No final recovery run found' }
+          $jobs = gh api "repos/$repo/actions/runs/$($run.id)/jobs?per_page=100" | ConvertFrom-Json
+          $payload = [ordered]@{
+            capturedAt=(Get-Date).ToUniversalTime().ToString('o')
+            run=[ordered]@{id=$run.id;status=$run.status;conclusion=$run.conclusion;createdAt=$run.created_at;updatedAt=$run.updated_at;url=$run.html_url;headSha=$run.head_sha}
+            jobs=@($jobs.jobs | ForEach-Object {[ordered]@{id=$_.id;name=$_.name;status=$_.status;conclusion=$_.conclusion;steps=@($_.steps | ForEach-Object {[ordered]@{name=$_.name;status=$_.status;conclusion=$_.conclusion;number=$_.number}})}})
+          } | ConvertTo-Json -Depth 8
+          $content=[Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($payload+"`n"))
+          $api="repos/$repo/contents/.github/p0-final-fast-recovery-probe.json"
+          $sha=''
+          try {$sha=gh api $api --jq .sha} catch {}
+          if($sha){gh api --method PUT $api -f message='Update final P0 recovery probe' -f content=$content -f sha=$sha | Out-Null}
+          else{gh api --method PUT $api -f message='Create final P0 recovery probe' -f content=$content | Out-Null}
