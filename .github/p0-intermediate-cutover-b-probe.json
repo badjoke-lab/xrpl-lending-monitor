@@ -1,0 +1,52 @@
+{
+  "capturedAt": "2026-07-13T13:18:32.6777361Z",
+  "run": {
+    "id": 29253153256,
+    "status": "completed",
+    "conclusion": "failure",
+    "createdAt": "2026-07-13T13:16:42Z",
+    "updatedAt": "2026-07-13T13:16:52Z",
+    "url": "https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/29253153256",
+    "headSha": "7d1603070db9f43cf76dde78cef198038fbb4a41"
+  },
+  "jobs": [
+    {
+      "id": 86826325233,
+      "name": "cutover",
+      "status": "completed",
+      "conclusion": "failure",
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 1
+        },
+        {
+          "name": "Verify aligned candidate B",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 2
+        },
+        {
+          "name": "Dispatch guarded live cutover",
+          "status": "completed",
+          "conclusion": "failure",
+          "number": 3
+        },
+        {
+          "name": "Publish intermediate cutover status",
+          "status": "completed",
+          "conclusion": "skipped",
+          "number": 4
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 5
+        }
+      ]
+    }
+  ]
+}
