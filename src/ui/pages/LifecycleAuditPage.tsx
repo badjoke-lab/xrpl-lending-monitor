@@ -21,8 +21,15 @@ interface Filters {
   loanId: string
 }
 
+interface LifecycleDelta {
+  label: string
+  before: string
+  after: string
+}
+
 const EVENT_TYPES = ['', 'created', 'payment', 'paid', 'impaired', 'unimpaired', 'defaulted', 'deleted', 'updated']
 const RIPPLE_EPOCH_UNIX_SECONDS = 946_684_800
+const PAGE_SIZE = 25
 
 function initialFilters(): Filters {
   const params = new URLSearchParams(window.location.search)
@@ -38,7 +45,7 @@ function rippleTimeToIso(value: number): string | null {
 }
 
 function lifecycleUrl(filters: Filters): string {
-  const params = new URLSearchParams({ limit: '100' })
+  const params = new URLSearchParams({ limit: String(PAGE_SIZE) })
   if (filters.eventType) params.set('event_type', filters.eventType)
   if (filters.loanId) params.set('loan_id', filters.loanId)
   return `/api/audit/lifecycle?${params.toString()}`
@@ -52,17 +59,30 @@ function saveFilters(filters: Filters): void {
   window.history.replaceState({}, '', suffix ? `/audit/lifecycle?${suffix}` : '/audit/lifecycle')
 }
 
-function changeSummary(event: LoanLifecycleEvent): string {
-  const principal = event.principal_before !== event.principal_after
-    ? `Principal ${event.principal_before ?? 'Unavailable'} -> ${event.principal_after ?? 'Unavailable'}`
-    : null
-  const total = event.total_value_before !== event.total_value_after
-    ? `Total ${event.total_value_before ?? 'Unavailable'} -> ${event.total_value_after ?? 'Unavailable'}`
-    : null
-  const payments = event.payment_remaining_before !== event.payment_remaining_after
-    ? `Payments ${formatInteger(event.payment_remaining_before)} -> ${formatInteger(event.payment_remaining_after)}`
-    : null
-  return [principal, total, payments].filter(Boolean).join('; ') || 'No balance or payment-count delta recorded'
+function lifecycleDeltas(event: LoanLifecycleEvent): LifecycleDelta[] {
+  const rows: LifecycleDelta[] = []
+  if (event.principal_before !== event.principal_after) {
+    rows.push({
+      label: 'Principal',
+      before: event.principal_before ?? 'Unavailable',
+      after: event.principal_after ?? 'Unavailable',
+    })
+  }
+  if (event.total_value_before !== event.total_value_after) {
+    rows.push({
+      label: 'Total outstanding',
+      before: event.total_value_before ?? 'Unavailable',
+      after: event.total_value_after ?? 'Unavailable',
+    })
+  }
+  if (event.payment_remaining_before !== event.payment_remaining_after) {
+    rows.push({
+      label: 'Payments remaining',
+      before: formatInteger(event.payment_remaining_before),
+      after: formatInteger(event.payment_remaining_after),
+    })
+  }
+  return rows
 }
 
 export function LifecycleAuditPage({ onNavigate }: LifecycleAuditPageProps) {
@@ -85,7 +105,7 @@ export function LifecycleAuditPage({ onNavigate }: LifecycleAuditPageProps) {
         </div>
         <div className="page-actions">
           <button className="secondary-button" type="button" onClick={reload}>Refresh</button>
-          <a className="primary-button" href={lifecycleUrl(filters)}>Lifecycle JSON</a>
+          <a className="secondary-button developer-action" href={lifecycleUrl(filters)}>Lifecycle JSON</a>
         </div>
       </header>
 
@@ -94,7 +114,7 @@ export function LifecycleAuditPage({ onNavigate }: LifecycleAuditPageProps) {
         <span>Payment, impairment, default, repayment, and deletion records are indexed facts. Schedule-derived default eligibility is not shown as an on-ledger default.</span>
       </div>
 
-      <Panel title="Filter lifecycle events" description="Filters apply to the latest bounded 100-event lifecycle API window">
+      <Panel title="Filter lifecycle events" description={`Filters apply to the latest bounded ${PAGE_SIZE}-event lifecycle API window`}>
         <form
           className="activity-filter-form"
           onSubmit={(event) => {
@@ -134,36 +154,54 @@ export function LifecycleAuditPage({ onNavigate }: LifecycleAuditPageProps) {
       {response ? (
         <Panel
           title="Indexed lifecycle timeline"
-          description={`${formatInteger(events.length)} event(s) returned from the bounded lifecycle API`}
+          description={`${formatInteger(events.length)} event(s) returned · latest bounded ${PAGE_SIZE}-event window`}
           action={<ProvenanceBadge value={response.provenance.collection} />}
         >
           {events.length === 0 ? (
             <EmptyBlock message="No indexed Loan lifecycle events matched the current filters." />
           ) : (
             <div className="lifecycle-timeline" aria-label="Loan lifecycle events">
-              {events.map((event) => (
-                <article className="lifecycle-event-card" key={`${event.loan_id}:${event.transaction_hash}:${event.event_type}`}>
-                  <header>
-                    <div>
-                      <span className="node-index">Ledger {formatInteger(event.ledger_index)} · #{formatInteger(event.transaction_index)}</span>
-                      <h2><StatusBadge value={event.event_type} /> <span>{event.transaction_type}</span></h2>
-                      <p>{formatUtc(rippleTimeToIso(event.close_time))} UTC · {event.result_code}</p>
-                    </div>
-                    <ProvenanceBadge value={event.provenance} />
-                  </header>
-                  <dl className="lifecycle-state-grid">
-                    <div><dt>Loan</dt><dd><a href={`/loans/${event.loan_id}`} onClick={(click) => { click.preventDefault(); onNavigate(`/loans/${event.loan_id}`) }}>{truncateMiddle(event.loan_id, 12)}</a></dd></div>
-                    <div><dt>Transaction</dt><dd><a href={`/transactions/${event.transaction_hash}`} onClick={(click) => { click.preventDefault(); onNavigate(`/transactions/${event.transaction_hash}`) }}>{truncateMiddle(event.transaction_hash, 12)}</a></dd></div>
-                    <div><dt>Before</dt><dd><StatusBadge value={event.status_before} /></dd></div>
-                    <div><dt>After</dt><dd><StatusBadge value={event.status_after} /></dd></div>
-                  </dl>
-                  <p className="lifecycle-change-summary">{changeSummary(event)}</p>
-                  <details>
-                    <summary>Indexed details</summary>
-                    <pre className="raw-data-panel"><code>{JSON.stringify(event.details_json, null, 2)}</code></pre>
-                  </details>
-                </article>
-              ))}
+              {events.map((event) => {
+                const deltas = lifecycleDeltas(event)
+                return (
+                  <article className="lifecycle-event-card" key={`${event.loan_id}:${event.transaction_hash}:${event.event_type}`}>
+                    <header>
+                      <div>
+                        <span className="node-index">Ledger {formatInteger(event.ledger_index)} · #{formatInteger(event.transaction_index)}</span>
+                        <h2><StatusBadge value={event.event_type} /> <span>{event.transaction_type}</span></h2>
+                        <p>{formatUtc(rippleTimeToIso(event.close_time))} UTC · {event.result_code}</p>
+                      </div>
+                      <ProvenanceBadge value={event.provenance} />
+                    </header>
+                    <dl className="lifecycle-state-grid">
+                      <div><dt>Loan</dt><dd><a href={`/loans/${event.loan_id}`} onClick={(click) => { click.preventDefault(); onNavigate(`/loans/${event.loan_id}`) }}>{truncateMiddle(event.loan_id, 12)}</a></dd></div>
+                      <div><dt>Transaction</dt><dd><a href={`/transactions/${event.transaction_hash}`} onClick={(click) => { click.preventDefault(); onNavigate(`/transactions/${event.transaction_hash}`) }}>{truncateMiddle(event.transaction_hash, 12)}</a></dd></div>
+                      <div><dt>Status before</dt><dd><StatusBadge value={event.status_before} /></dd></div>
+                      <div><dt>Status after</dt><dd><StatusBadge value={event.status_after} /></dd></div>
+                    </dl>
+                    {deltas.length > 0 ? (
+                      <div className="lifecycle-delta-list" aria-label="Recorded value changes">
+                        <div className="lifecycle-delta-head" aria-hidden="true">
+                          <span>Field</span><span>Before</span><span>After</span>
+                        </div>
+                        {deltas.map((delta) => (
+                          <div className="lifecycle-delta-row" key={delta.label}>
+                            <strong>{delta.label}</strong>
+                            <code>{delta.before}</code>
+                            <code>{delta.after}</code>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="lifecycle-change-summary">No balance or payment-count delta recorded.</p>
+                    )}
+                    <details>
+                      <summary>Indexed details</summary>
+                      <pre className="raw-data-panel"><code>{JSON.stringify(event.details_json, null, 2)}</code></pre>
+                    </details>
+                  </article>
+                )
+              })}
             </div>
           )}
         </Panel>
