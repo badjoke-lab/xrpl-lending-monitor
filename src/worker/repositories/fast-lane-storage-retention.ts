@@ -2,6 +2,30 @@ const MAX_HISTORY_WINDOWS = 256
 const MAX_SHADOW_WINDOWS = 256
 const MAX_RUN_METRICS = 1_000
 const MAX_HISTORY_BUNDLE_BYTES = 131_072
+const MAX_COMPACT_ROWS = 30_000
+const MAX_COMPACT_PAYLOAD_BYTES = 40 * 1024 * 1024
+
+interface CompactStorageUsageRow {
+  row_count: number
+  payload_bytes: number
+}
+
+export async function assertFastLaneStorageCapacity(db: D1Database): Promise<void> {
+  const usage = await db.prepare(
+    `SELECT COUNT(*) AS row_count,
+            COALESCE(SUM(LENGTH(projection_json)), 0) AS payload_bytes
+     FROM fast_lane_shadow_objects_compact
+     WHERE network = 'devnet'`,
+  ).first<CompactStorageUsageRow>()
+
+  const rowCount = usage?.row_count ?? 0
+  const payloadBytes = usage?.payload_bytes ?? 0
+  if (rowCount >= MAX_COMPACT_ROWS || payloadBytes >= MAX_COMPACT_PAYLOAD_BYTES) {
+    throw new Error(
+      `fast-lane compact capacity guard reached: rows=${rowCount}, payload_bytes=${payloadBytes}`,
+    )
+  }
+}
 
 export async function pruneFastLaneStorage(db: D1Database): Promise<void> {
   await db.batch([
