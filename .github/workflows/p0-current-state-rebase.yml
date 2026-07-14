@@ -29,12 +29,14 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Build complete current-state release
+        id: build
         shell: bash
         run: |
           set -euo pipefail
           TAG="current-state-rebase-$(date -u +%Y%m%d-%H%M%S)"
           echo "TAG=$TAG" >> "$GITHUB_ENV"
-          pnpm exec tsx scripts/run-release-current-state.ts \
+          pnpm build:release-current-state
+          node .release-current-state-build/run-release-current-state.mjs \
             --local \
             --release-tag "$TAG" \
             --epoch-id devnet-3371675 \
@@ -67,6 +69,7 @@ jobs:
               --notes 'Mutable channel pointer for the active current-state release.'
           fi
       - name: Report result
+        if: success()
         shell: bash
         run: |
           {
@@ -83,3 +86,8 @@ jobs:
           else
             cat /tmp/comment.md
           fi
+      - name: Report failure
+        if: failure() && env.ISSUE_NUMBER != ''
+        shell: bash
+        run: |
+          gh issue comment "$ISSUE_NUMBER" --repo "$REPOSITORY" --body 'P0 current-state rebase failed. Inspect the workflow run before changing production.'
