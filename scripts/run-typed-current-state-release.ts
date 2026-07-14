@@ -56,7 +56,7 @@ function parseArguments(args: readonly string[]): Arguments {
   return {
     endpoint: argumentValue(args, '--endpoint') ?? DEFAULT_ENDPOINT,
     timeoutMs: positiveInteger(args, '--timeout-ms', 8_000),
-    pageLimit: positiveInteger(args, '--page-limit', 2_000),
+    pageLimit: positiveInteger(args, '--page-limit', 10_000),
     objectLimitPerPage: positiveInteger(args, '--object-limit-per-page', 2_048),
     outputDir: resolve(argumentValue(args, '--output-dir') ?? '.local/typed-current-state-release'),
     releaseTag,
@@ -81,7 +81,7 @@ function objectId(value: unknown, field: string): string {
   return result
 }
 
-function ledgerIndex(value: unknown): number {
+function parseLedgerIndex(value: unknown): number {
   const parsed = typeof value === 'string' ? Number(value) : value
   if (!Number.isSafeInteger(parsed) || Number(parsed) < 1) throw new Error('ledger_index must be a positive safe integer')
   return Number(parsed)
@@ -96,7 +96,7 @@ async function validatedLedger(endpoint: string, timeoutMs: number): Promise<Led
   }), 'ledger result')
   return {
     ledgerHash: objectId(result.ledger_hash, 'ledger_hash'),
-    ledgerIndex: ledgerIndex(result.ledger_index),
+    ledgerIndex: parseLedgerIndex(result.ledger_index),
   }
 }
 
@@ -141,6 +141,30 @@ function releaseValue(object: ScannedLedgerObject): Record<string, unknown> {
   return value
 }
 
+async function dataRecords(options: {
+  objects: readonly ScannedLedgerObject[]
+  filter: CurrentObjectFilter
+  segmentId: string
+}): Promise<ReleaseNativeDataRecord[]> {
+  const kind = readKind(options.filter)
+  const records: ReleaseNativeDataRecord[] = []
+  for (const object of options.objects) {
+    const value = releaseValue(object)
+    const id = objectId(object.index, `${options.filter}.index`)
+    records.push({
+      schemaVersion: 1,
+      segmentId: options.segmentId,
+      sourcePage: 1,
+      id,
+      kind,
+      valueSha256: await sha256Hex(canonicalJson(value)),
+      value,
+    })
+  }
+  records.sort((left, right) => left.id.localeCompare(right.id))
+  return records
+}
+
 async function main(): Promise<void> {
   const args = parseArguments(process.argv.slice(2))
   const assetsDir = join(args.outputDir, 'assets')
@@ -150,16 +174,8 @@ async function main(): Promise<void> {
   const ledger = await validatedLedger(args.endpoint, args.timeoutMs)
   const epochId = flatText(args.epochId ?? `devnet-${ledger.ledgerIndex}`, 'epochId')
   const snapshotId = flatText(args.snapshotId ?? `devnet-${ledger.ledgerIndex}-${ledger.ledgerHash.slice(0, 12).toLowerCase()}`, 'snapshotId')
-  const dataAssets: ReleaseNativeDataAsset[] = []
-  const totalCounts: Counts = { vaults: 0, loanBrokers: 0, loans: 0 }
-  let totalPages = 0
-  let totalRecords = 0
-  let dataCompressedBytes = 0
-  let dataUncompressedBytes = 0
 
-  for (let filterIndex = 0; filterIndex < FILTERS.length; filterIndex += 1) {
-    const filter = FILTERS[filterIndex]!
-    const kind = readKind(filter)
+  const scans = await Promise.all(FILTERS.map(async (filter) => {
     process.stderr.write(`Scanning ${filter} objects at ledger ${ledger.ledgerIndex}.\n`)
     const scan = await scanLedgerObjects({
       endpoint: args.endpoint,
@@ -171,23 +187,23 @@ async function main(): Promise<void> {
       requestLimit: args.pageLimit,
       objectLimitPerPage: args.objectLimitPerPage,
     })
+    process.stderr.write(`Completed ${filter}: ${scan.objects.length} objects across ${scan.metrics.pages} pages.\n`)
+    return { filter, scan }
+  }))
+
+  const dataAssets: ReleaseNativeDataAsset[] = []
+  const totalCounts: Counts = { vaults: 0, loanBrokers: 0, loans: 0 }
+  let totalPages = 0
+  let totalRecords = 0
+  let dataCompressedBytes = 0
+  let dataUncompressedBytes = 0
+
+  for (let filterIndex = 0; filterIndex < scans.length; filterIndex += 1) {
+    const { filter, scan } = scans[filterIndex]!
+    const kind = readKind(filter)
     const segmentId = `segment-${String(filterIndex).padStart(5, '0')}`
     const assetName = `data-segment-${String(filterIndex).padStart(5, '0')}.ndjson.gz`
-    const records: ReleaseNativeDataRecord[] = []
-    for (const object of scan.objects) {
-      const value = releaseValue(object)
-      const id = objectId(object.index, `${filter}.index`)
-      records.push({
-        schemaVersion: 1,
-        segmentId,
-        sourcePage: 1,
-        id,
-        kind,
-        valueSha256: await sha256Hex(canonicalJson(value)),
-        value,
-      })
-    }
-    records.sort((left, right) => left.id.localeCompare(right.id))
+    const records = await dataRecords({ objects: scan.objects, filter, segmentId })
     const stats = await writeGzipNdjson(join(assetsDir, assetName), records)
     const assetCounts = countsFor(kind, records.length)
     addCounts(totalCounts, assetCounts)
@@ -207,7 +223,6 @@ async function main(): Promise<void> {
       lastObjectId: records.at(-1)?.id ?? null,
       counts: assetCounts,
     })
-    process.stderr.write(`Completed ${filter}: ${records.length} objects across ${scan.metrics.pages} pages.\n`)
   }
 
   const emptyIndexStats = await writeGzipNdjson(join(assetsDir, 'index-bucket-00000.ndjson.gz'), [])
