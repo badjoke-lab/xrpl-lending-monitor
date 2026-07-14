@@ -43,7 +43,7 @@ jobs:
             --local \
             --release-tag "$TAG" \
             --epoch-id devnet-3371675 \
-            --page-limit 2000 \
+            --page-limit 10000 \
             --object-limit-per-page 2048 \
             --output-dir .local/current-state-release \
             2>&1 | tee -a /tmp/rebase.log
