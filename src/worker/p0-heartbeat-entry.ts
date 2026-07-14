@@ -14,8 +14,10 @@ import {
   pruneFastLaneStorage,
 } from './repositories/fast-lane-storage-retention'
 
+const FAST_LANE_CRON = '*/5 * * * *'
+const CANONICAL_BRIDGE_CRON = '2,7,12,17,22,27,32,37,42,47,52,57 * * * *'
 const FAST_LANE_PASSES_PER_CRON = 8
-const CANONICAL_BRIDGE_PASSES_PER_CRON = 16
+const CANONICAL_BRIDGE_PASSES_PER_CRON = 4
 const SYNTHETIC_PASS_OFFSET_MS = 60_000
 
 interface FastLaneStateRow {
@@ -36,11 +38,46 @@ function errorReason(error: unknown): string {
   return error instanceof Error ? error.message : 'unknown_error'
 }
 
+async function runCanonicalBridgeInvocation(env: Bindings, runAt: string): Promise<void> {
+  const bridge = await runCanonicalBridgePasses({
+    env,
+    maxPasses: CANONICAL_BRIDGE_PASSES_PER_CRON,
+  })
+  console.log(JSON.stringify({ event: 'canonical_bridge_cycle', runAt, ...bridge }))
+  if (bridge.bridgeReady) {
+    const promotion = await promoteFastLaneCompactToCanonicalOverlay(env.DB)
+    if (promotion) {
+      console.log(JSON.stringify({ event: 'fast_lane_canonical_promotion_bridge', runAt, ...promotion }))
+    }
+  }
+  await pruneFastLaneStorage(env.DB)
+  await assertFastLaneStorageCapacity(env.DB)
+}
+
 const wrappedWorker: ExportedHandler<Bindings> = {
   ...worker,
 
   async scheduled(controller, env, executionContext) {
     const runAt = new Date().toISOString()
+
+    if (controller.cron === CANONICAL_BRIDGE_CRON) {
+      try {
+        await runCanonicalBridgeInvocation(env, runAt)
+      } catch (error) {
+        console.error(JSON.stringify({
+          event: 'canonical_bridge_failed',
+          runAt,
+          reason: errorReason(error),
+        }))
+        throw error
+      }
+      return
+    }
+
+    if (controller.cron !== FAST_LANE_CRON) {
+      console.warn(JSON.stringify({ event: 'unknown_cron_ignored', runAt, cron: controller.cron }))
+      return
+    }
 
     try {
       await saveFastLaneShadowRunHeartbeat({ db: env.DB, runAt })
@@ -58,26 +95,6 @@ const wrappedWorker: ExportedHandler<Bindings> = {
       }
 
       await assertFastLaneStorageCapacity(env.DB)
-
-      try {
-        const bridge = await runCanonicalBridgePasses({
-          env,
-          maxPasses: CANONICAL_BRIDGE_PASSES_PER_CRON,
-        })
-        console.log(JSON.stringify({ event: 'canonical_bridge_cycle', runAt, ...bridge }))
-        if (bridge.bridgeReady) {
-          const promotion = await promoteFastLaneCompactToCanonicalOverlay(env.DB)
-          if (promotion) {
-            console.log(JSON.stringify({ event: 'fast_lane_canonical_promotion_before', runAt, ...promotion }))
-          }
-        }
-      } catch (error) {
-        console.error(JSON.stringify({
-          event: 'canonical_bridge_failed',
-          runAt,
-          reason: errorReason(error),
-        }))
-      }
 
       for (let pass = 0; pass < FAST_LANE_PASSES_PER_CRON; pass += 1) {
         const passController = pass === 0
