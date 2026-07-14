@@ -1,0 +1,34 @@
+name: P0 workflow log tail
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  actions: read
+  issues: write
+
+jobs:
+  logs:
+    if: startsWith(github.event.issue.title, 'P0 run log')
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+      ISSUE_NUMBER: ${{ github.event.issue.number }}
+      ISSUE_BODY: ${{ github.event.issue.body }}
+    steps:
+      - shell: bash
+        run: |
+          set -euo pipefail
+          RUN_ID=$(grep -oE '[0-9]{8,}' <<<"$ISSUE_BODY" | head -n 1)
+          test -n "$RUN_ID"
+          gh run view "$RUN_ID" --repo "$REPOSITORY" --log-failed > /tmp/log.txt 2>&1 || true
+          {
+            echo "Failed log for run ${RUN_ID}:"
+            echo
+            echo '```text'
+            tail -n 160 /tmp/log.txt
+            echo '```'
+          } > /tmp/comment.md
+          gh issue comment "$ISSUE_NUMBER" --repo "$REPOSITORY" --body-file /tmp/comment.md
