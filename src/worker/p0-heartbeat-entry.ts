@@ -58,16 +58,7 @@ const wrappedWorker: ExportedHandler<Bindings> = {
         if (await fastLaneCaughtUp(env.DB)) break
       }
 
-      try {
-        await pruneFastLaneStorage(env.DB)
-      } catch (error) {
-        console.error(JSON.stringify({
-          event: 'fast_lane_storage_retention_failed',
-          runAt,
-          reason: error instanceof Error ? error.message : 'unknown_error',
-        }))
-      }
-
+      await pruneFastLaneStorage(env.DB)
       await deleteFastLaneShadowRunHeartbeat({ db: env.DB, runAt })
     } catch (error) {
       const reason = error instanceof Error ? error.message : 'unknown_error'
