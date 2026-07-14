@@ -1,0 +1,27 @@
+name: P0 cancel workflow run
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  actions: write
+  issues: write
+
+jobs:
+  cancel:
+    if: startsWith(github.event.issue.title, 'P0 cancel run')
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+      ISSUE_NUMBER: ${{ github.event.issue.number }}
+      ISSUE_BODY: ${{ github.event.issue.body }}
+    steps:
+      - shell: bash
+        run: |
+          set -euo pipefail
+          RUN_ID=$(grep -oE '[0-9]{8,}' <<<"$ISSUE_BODY" | head -n 1)
+          test -n "$RUN_ID"
+          gh api -X POST "repos/${REPOSITORY}/actions/runs/${RUN_ID}/cancel"
+          gh issue comment "$ISSUE_NUMBER" --repo "$REPOSITORY" --body "Cancellation requested for workflow run ${RUN_ID}."
