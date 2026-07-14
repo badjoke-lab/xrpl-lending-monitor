@@ -1,13 +1,7 @@
 {
-  "runId": "29327949500",
-  "runUrl": "https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/29327949500",
-  "headSha": "ba5c5a146ac57d447d7615bf72d557e0420792ea",
-  "outcome": "success",
-  "checkpoint": {
-    "epochId": "devnet-3371675",
-    "snapshotId": "devnet-3624709-39d838e15f10",
-    "ledgerIndex": 3624709,
-    "ledgerHash": "39D838E15F106E3305038540F7BDD47BA8832062748B6D9D2881AAC7677CF667",
-    "historyPublicationSha256": "09434966a7d316ec0a2200e978c3eb2243c7b94e305e787a9b0102f1a3a03e9a"
-  }
+  "runId": "29328509512",
+  "runUrl": "https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/29328509512",
+  "headSha": "85efd9e25b0ef575ac25cade5e6658fc53435905",
+  "outcome": "skipped",
+  "checkpoint": null
 }
