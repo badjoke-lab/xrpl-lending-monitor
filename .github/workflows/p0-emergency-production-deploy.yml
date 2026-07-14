@@ -57,12 +57,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          FAST_CRON='*/5 * * * *'
+          BRIDGE_CRON='2,7,12,17,22,27,32,37,42,47,52,57 * * * *'
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
           test "$(jq -r '.vars.APP_NETWORK' wrangler.jsonc)" = devnet
           test "$(jq -r '.vars.MAINNET_ENABLED' wrangler.jsonc)" = false
-          test "$(jq -r '.triggers.crons | length' wrangler.jsonc)" -eq 1
-          test "$(jq -r '.triggers.crons[0]' wrangler.jsonc)" = '*/5 * * * *'
+          test "$(jq -r '.triggers.crons | length' wrangler.jsonc)" -eq 2
+          jq -e --arg fast "$FAST_CRON" --arg bridge "$BRIDGE_CRON" '
+            (.triggers.crons | sort) == ([$fast, $bridge] | sort)
+          ' wrangler.jsonc > /dev/null
           test "$(jq -r '.vars | has("REPLACEMENT_BASE_CUTOVER_TOKEN")' wrangler.jsonc)" = false
           cp wrangler.jsonc wrangler.production.jsonc
           python - <<'PY'
@@ -100,10 +104,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          FAST_CRON='*/5 * * * *'
+          BRIDGE_CRON='2,7,12,17,22,27,32,37,42,47,52,57 * * * *'
           cp wrangler.production.jsonc wrangler.jsonc
           test "$(jq -r '.vars.APP_NETWORK' wrangler.jsonc)" = devnet
           test "$(jq -r '.vars.MAINNET_ENABLED' wrangler.jsonc)" = false
-          test "$(jq -r '.triggers.crons[0]' wrangler.jsonc)" = '*/5 * * * *'
+          jq -e --arg fast "$FAST_CRON" --arg bridge "$BRIDGE_CRON" '
+            (.triggers.crons | sort) == ([$fast, $bridge] | sort)
+          ' wrangler.jsonc > /dev/null
 
       - name: Apply P0 D1 migration
         id: migrations
@@ -136,6 +144,8 @@ jobs:
           EXPECTED_SNAPSHOT="$(jq -r '.snapshotId' production-deploy-checkpoint.json)"
           EXPECTED_LEDGER="$(jq -r '.ledgerIndex' production-deploy-checkpoint.json)"
           EXPECTED_HASH="$(jq -r '.ledgerHash' production-deploy-checkpoint.json)"
+          FAST_CRON='*/5 * * * *'
+          BRIDGE_CRON='2,7,12,17,22,27,32,37,42,47,52,57 * * * *'
           AUTH=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
           verified=false
 
@@ -165,8 +175,11 @@ jobs:
                 and binding("REPLACEMENT_BASE_LEDGER_HASH") == $hash
                 and ([.result.bindings[] | select(.name == "REPLACEMENT_BASE_CUTOVER_TOKEN")] | length) == 0
               ' deployed-worker-settings.json > /dev/null 2>&1 \
-              && jq -e '.result.schedules | length == 1 and .[0].cron == "*/5 * * * *"' \
-                deployed-worker-schedules.json > /dev/null 2>&1 \
+              && jq -e --arg fast "$FAST_CRON" --arg bridge "$BRIDGE_CRON" '
+                [.result.schedules[].cron] as $actual
+                | ($actual | length) == 2
+                and ($actual | sort) == ([$fast, $bridge] | sort)
+              ' deployed-worker-schedules.json > /dev/null 2>&1 \
               && [ "${rebase_status}" = 200 ] \
               && jq -e --arg epoch "${EXPECTED_EPOCH}" --arg snapshot "${EXPECTED_SNAPSHOT}" --argjson ledger "${EXPECTED_LEDGER}" --arg hash "${EXPECTED_HASH}" '
                 .status == "replayed"
@@ -185,7 +198,9 @@ jobs:
           jq -n \
             --slurpfile checkpoint production-deploy-checkpoint.json \
             --slurpfile rebase deployed-rebase-status.json \
-            '{passed:true,checkpoint:$checkpoint[0],replacementBase:$rebase[0],schedule:"*/5 * * * *",mainnetEnabled:false}' \
+            --arg fastCron "$FAST_CRON" \
+            --arg bridgeCron "$BRIDGE_CRON" \
+            '{passed:true,checkpoint:$checkpoint[0],replacementBase:$rebase[0],schedules:[$fastCron,$bridgeCron],mainnetEnabled:false}' \
             > production-deploy-verification.json
 
       - name: Report emergency deploy status
