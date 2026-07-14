@@ -1,12 +1,24 @@
 import type { FastLaneShadowCycleResult } from '../../collector/incremental/fast-lane-shadow-cycle'
 
-export interface FastLaneShadowRunMetric extends FastLaneShadowCycleResult {
+export type FastLaneShadowRunStatus = FastLaneShadowCycleResult['status'] | 'error'
+
+export interface FastLaneShadowRunMetric {
   runAt: string
+  status: FastLaneShadowRunStatus
+  startLedgerIndex: number | null
+  endLedgerIndex: number | null
+  latestObservedLedger: number
+  lagLedgers: number
+  ledgersProcessed: number
+  lendingTransactions: number
+  coalescedObjectRows: number
+  persistenceRowsRead: number
+  persistenceRowsWritten: number
 }
 
 interface MetricRow {
   run_at: string
-  status: FastLaneShadowCycleResult['status'] | 'error'
+  status: FastLaneShadowRunStatus
   start_ledger_index: number | null
   end_ledger_index: number | null
   latest_observed_ledger: number
@@ -16,6 +28,29 @@ interface MetricRow {
   coalesced_object_rows: number
   persistence_rows_read: number
   persistence_rows_written: number
+}
+
+export async function saveFastLaneShadowRunHeartbeat(options: {
+  db: D1Database
+  runAt: string
+}): Promise<void> {
+  await options.db
+    .prepare(
+      `INSERT INTO fast_lane_shadow_run_metrics (
+         network, run_at, status, start_ledger_index, end_ledger_index,
+         latest_observed_ledger, lag_ledgers, ledgers_processed,
+         lending_transactions, coalesced_object_rows,
+         persistence_rows_read, persistence_rows_written
+       ) VALUES (
+         'devnet', ?1, 'error', NULL, NULL,
+         0, 0, 0,
+         0, 0,
+         0, 0
+       )
+       ON CONFLICT(network, run_at) DO NOTHING`,
+    )
+    .bind(options.runAt)
+    .run()
 }
 
 export async function saveFastLaneShadowRunMetric(options: {
@@ -36,7 +71,17 @@ export async function saveFastLaneShadowRunMetric(options: {
          ?8, ?9,
          ?10, ?11
        )
-       ON CONFLICT(network, run_at) DO NOTHING`,
+       ON CONFLICT(network, run_at) DO UPDATE SET
+         status = excluded.status,
+         start_ledger_index = excluded.start_ledger_index,
+         end_ledger_index = excluded.end_ledger_index,
+         latest_observed_ledger = excluded.latest_observed_ledger,
+         lag_ledgers = excluded.lag_ledgers,
+         ledgers_processed = excluded.ledgers_processed,
+         lending_transactions = excluded.lending_transactions,
+         coalesced_object_rows = excluded.coalesced_object_rows,
+         persistence_rows_read = excluded.persistence_rows_read,
+         persistence_rows_written = excluded.persistence_rows_written`,
     )
     .bind(
       options.runAt,
@@ -79,7 +124,7 @@ export async function readRecentFastLaneShadowRunMetrics(options: {
 
   return (response.results ?? []).map((row) => ({
     runAt: row.run_at,
-    status: row.status === 'error' ? 'caught_up' : row.status,
+    status: row.status,
     startLedgerIndex: row.start_ledger_index,
     endLedgerIndex: row.end_ledger_index,
     latestObservedLedger: row.latest_observed_ledger,
