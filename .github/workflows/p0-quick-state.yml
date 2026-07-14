@@ -1,5 +1,5 @@
 name: P0 point-in-time production audit
-# refresh: 2026-07-14T10:43:00+09:00
+# refresh: 2026-07-14T10:47:00+09:00
 on:
   push:
     branches: [ops/p0-direct-recovery]
@@ -51,6 +51,30 @@ jobs:
         name: Execute audit
         continue-on-error: true
         run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('.github/scripts/point-in-time-audit.py')
+          text = path.read_text()
+          old = '    schedule_list = schedules.get("result") or []\n'
+          new = '''    schedule_value = schedules.get("result") or []
+              if isinstance(schedule_value, list):
+                  schedule_list = schedule_value
+              elif isinstance(schedule_value, dict):
+                  schedule_list = []
+                  for schedule_key in ("schedules", "items", "triggers", "result"):
+                      candidate = schedule_value.get(schedule_key)
+                      if isinstance(candidate, list):
+                          schedule_list = candidate
+                          break
+                  if not schedule_list and "cron" in schedule_value:
+                      schedule_list = [schedule_value]
+              else:
+                  schedule_list = []
+          '''
+          if old not in text:
+              raise SystemExit('schedule parser target not found')
+          path.write_text(text.replace(old, new))
+          PY
           python .github/scripts/point-in-time-audit.py > audit.stdout 2> audit.stderr
       - name: Publish audit result
         if: always()
@@ -73,7 +97,8 @@ jobs:
             --arg cron "$CRON_OUTCOME" \
             --arg audit "$AUDIT_OUTCOME" \
             --arg stderr "$(cat audit.stderr 2>/dev/null | tail -c 4000 || true)" \
-            '{checkout:$checkout,pnpm:$pnpm,node:$node,install:$install,d1:$d1,cron:$cron,audit:$audit,audit_stderr:$stderr}' > workflow-steps.json
+            --arg schedules "$(cat schedules.json 2>/dev/null | head -c 2000 || true)" \
+            '{checkout:$checkout,pnpm:$pnpm,node:$node,install:$install,d1:$d1,cron:$cron,audit:$audit,audit_stderr:$stderr,schedules_preview:$schedules}' > workflow-steps.json
           if [ -f point-audit-result.json ]; then
             jq --slurpfile stages workflow-steps.json '. + {workflow_stages:$stages[0]}' point-audit-result.json > published.json
           else
