@@ -1,26 +1,26 @@
 {
-  "capturedAt": "2026-07-13T13:55:20Z",
+  "capturedAt": "2026-07-14T02:39:05Z",
   "rpc": {
     "primary": {
       "name": "primary",
       "url": "https://devnet.honeycluster.io/",
       "httpCode": "200",
       "curlExit": 0,
-      "body": "{\"result\":{\"ledger\":{\"account_hash\":\"BCC47DCA1639485DCA686161E2FC32382A4638C97910290B5F32684C5DACF026\",\"close_flags\":0,\"close_time\":837266112,\"close_time_human\":\"2026-Jul-13 13:55:12.000000000 UTC\",\"close_time_iso\":\"2026-07-13T13:55:12Z\",\"close_time_resolution\":10,\"closed\":true,\"ledger_hash\":\"28E4E0023C2B4E0E23FD88D4A32B8173273D4F28F7EE54079B2C4ED8D0276448\",\"ledger_index\":3624356,\"parent_close_time\":837266111,\"parent_hash\":\"1A10AFF1C668C0D0D384847ADAF7ED90D0051599F85FF187D23CC5A34ACB26E1\",\"total_coins\":\"99999489209944239\",\"transaction_hash\":\"A2C68C1979CB0576F7363BE52BB0D9F01E2A39E617B8140DCDC2CC20D325587D\"},\"ledger_hash\":\"28E4E0023C2B4E0E23FD88D4A32B8173273D4F28F7EE54079B2C4ED8D0276448\",\"ledger_index\":3624356,\"status\":\"success\",\"validated\":true}}\n\r\n"
+      "body": "{\"result\":{\"ledger\":{\"account_hash\":\"9040326F09F10F8292E62068B0498A4EA9B91CF63F5D1000E9EE77D48C0C6FAB\",\"close_flags\":0,\"close_time\":837311940,\"close_time_human\":\"2026-Jul-14 02:39:00.000000000 UTC\",\"close_time_iso\":\"2026-07-14T02:39:00Z\",\"close_time_resolution\":10,\"closed\":true,\"ledger_hash\":\"674B369EF479B35F4431B8B22F57F17A9B9A0D042F9310EA710B93A1CC229078\",\"ledger_index\":3638525,\"parent_close_time\":837311932,\"parent_hash\":\"47230D5026AF9E347B9E6E13BDEA887B33AE148C9F69215B784A3DF859C075CE\",\"total_coins\":\"99999487946612183\",\"transaction_hash\":\"63F4B90D2ECBDEEDA6A3D6425354C9D92D4B73C7D6EB1F47BE19E3CA5CBC8A28\"},\"ledger_hash\":\"674B369EF479B35F4431B8B22F57F17A9B9A0D042F9310EA710B93A1CC229078\",\"ledger_index\":3638525,\"status\":\"success\",\"validated\":true}}\n\r\n"
     },
     "fallback": {
       "name": "fallback",
       "url": "https://s.devnet.rippletest.net:51234/",
       "httpCode": "200",
       "curlExit": 0,
-      "body": "{\"result\":{\"ledger\":{\"account_hash\":\"BCC47DCA1639485DCA686161E2FC32382A4638C97910290B5F32684C5DACF026\",\"close_flags\":0,\"close_time\":837266112,\"close_time_human\":\"2026-Jul-13 13:55:12.000000000 UTC\",\"close_time_iso\":\"2026-07-13T13:55:12Z\",\"close_time_resolution\":10,\"closed\":true,\"ledger_hash\":\"28E4E0023C2B4E0E23FD88D4A32B8173273D4F28F7EE54079B2C4ED8D0276448\",\"ledger_index\":3624356,\"parent_close_time\":837266111,\"parent_hash\":\"1A10AFF1C668C0D0D384847ADAF7ED90D0051599F85FF187D23CC5A34ACB26E1\",\"total_coins\":\"99999489209944239\",\"transaction_hash\":\"A2C68C1979CB0576F7363BE52BB0D9F01E2A39E617B8140DCDC2CC20D325587D\"},\"ledger_hash\":\"28E4E0023C2B4E0E23FD88D4A32B8173273D4F28F7EE54079B2C4ED8D0276448\",\"ledger_index\":3624356,\"status\":\"success\",\"validated\":true}}\n\r\n"
+      "body": "{\"result\":{\"ledger\":{\"account_hash\":\"9040326F09F10F8292E62068B0498A4EA9B91CF63F5D1000E9EE77D48C0C6FAB\",\"close_flags\":0,\"close_time\":837311940,\"close_time_human\":\"2026-Jul-14 02:39:00.000000000 UTC\",\"close_time_iso\":\"2026-07-14T02:39:00Z\",\"close_time_resolution\":10,\"closed\":true,\"ledger_hash\":\"674B369EF479B35F4431B8B22F57F17A9B9A0D042F9310EA710B93A1CC229078\",\"ledger_index\":3638525,\"parent_close_time\":837311932,\"parent_hash\":\"47230D5026AF9E347B9E6E13BDEA887B33AE148C9F69215B784A3DF859C075CE\",\"total_coins\":\"99999487946612183\",\"transaction_hash\":\"63F4B90D2ECBDEEDA6A3D6425354C9D92D4B73C7D6EB1F47BE19E3CA5CBC8A28\"},\"ledger_hash\":\"674B369EF479B35F4431B8B22F57F17A9B9A0D042F9310EA710B93A1CC229078\",\"ledger_index\":3638525,\"status\":\"success\",\"validated\":true}}\n\r\n"
     }
   },
   "websocket": {
     "endpoint": "wss://s.devnet.rippletest.net:51233/",
     "opened": true,
     "received": true,
-    "ledgerIndex": 3624356,
+    "ledgerIndex": 3638525,
     "error": null
   },
   "schedules": {
@@ -29,7 +29,7 @@
         {
           "cron": "*/5 * * * *",
           "created_on": "2026-07-13T08:15:39.158898Z",
-          "modified_on": "2026-07-13T13:52:18.09466Z"
+          "modified_on": "2026-07-14T02:38:40.337593Z"
         }
       ]
     },
@@ -42,12 +42,12 @@
       "results": [
         {
           "epoch_id": "fast-lane-shadow-devnet",
-          "last_processed_ledger": 3620399,
-          "last_processed_hash": "449A7C181735D6BA2C6AEC54CA5F745DC3D06E9F4671E8CB13E8C7A015ED9BA0",
-          "latest_observed_ledger": 3620399,
-          "latest_observed_hash": "449A7C181735D6BA2C6AEC54CA5F745DC3D06E9F4671E8CB13E8C7A015ED9BA0",
+          "last_processed_ledger": 3637246,
+          "last_processed_hash": "1D03113D6D3E2F1245E4D6F9CB96863AF41EFDCBF5D08DE9EAF15C09A2B73D8F",
+          "latest_observed_ledger": 3637246,
+          "latest_observed_hash": "1D03113D6D3E2F1245E4D6F9CB96863AF41EFDCBF5D08DE9EAF15C09A2B73D8F",
           "status": "healthy",
-          "updated_at": "2026-07-13T10:05:34.640Z"
+          "updated_at": "2026-07-14T01:20:18.765Z"
         }
       ],
       "success": true,
@@ -57,13 +57,13 @@
         "served_by_colo": "NRT",
         "served_by_primary": true,
         "timings": {
-          "sql_duration_ms": 0.3608
+          "sql_duration_ms": 0.35
         },
-        "duration": 0.3608,
+        "duration": 0.35,
         "changes": 0,
         "last_row_id": 0,
         "changed_db": false,
-        "size_after": 158846976,
+        "size_after": 163909632,
         "rows_read": 1,
         "rows_written": 0,
         "total_attempts": 1
@@ -74,124 +74,124 @@
     {
       "results": [
         {
-          "run_at": "2026-07-13T10:05:34.640Z",
+          "run_at": "2026-07-14T01:20:18.765Z",
           "status": "committed",
-          "start_ledger_index": 3620314,
-          "end_ledger_index": 3620399,
-          "latest_observed_ledger": 3620399,
+          "start_ledger_index": 3637167,
+          "end_ledger_index": 3637246,
+          "latest_observed_ledger": 3637246,
+          "lag_ledgers": 0,
+          "ledgers_processed": 80,
+          "persistence_rows_written": 123
+        },
+        {
+          "run_at": "2026-07-14T01:15:18.767Z",
+          "status": "committed",
+          "start_ledger_index": 3637087,
+          "end_ledger_index": 3637166,
+          "latest_observed_ledger": 3637166,
+          "lag_ledgers": 0,
+          "ledgers_processed": 80,
+          "persistence_rows_written": 95
+        },
+        {
+          "run_at": "2026-07-14T01:10:18.767Z",
+          "status": "committed",
+          "start_ledger_index": 3637007,
+          "end_ledger_index": 3637086,
+          "latest_observed_ledger": 3637086,
+          "lag_ledgers": 0,
+          "ledgers_processed": 80,
+          "persistence_rows_written": 59
+        },
+        {
+          "run_at": "2026-07-14T01:05:18.766Z",
+          "status": "committed",
+          "start_ledger_index": 3636926,
+          "end_ledger_index": 3637006,
+          "latest_observed_ledger": 3637006,
+          "lag_ledgers": 0,
+          "ledgers_processed": 81,
+          "persistence_rows_written": 36
+        },
+        {
+          "run_at": "2026-07-14T01:00:18.767Z",
+          "status": "committed",
+          "start_ledger_index": 3636844,
+          "end_ledger_index": 3636925,
+          "latest_observed_ledger": 3636925,
+          "lag_ledgers": 0,
+          "ledgers_processed": 82,
+          "persistence_rows_written": 29
+        },
+        {
+          "run_at": "2026-07-14T00:55:18.766Z",
+          "status": "committed",
+          "start_ledger_index": 3636763,
+          "end_ledger_index": 3636843,
+          "latest_observed_ledger": 3636843,
+          "lag_ledgers": 0,
+          "ledgers_processed": 81,
+          "persistence_rows_written": 39
+        },
+        {
+          "run_at": "2026-07-14T00:50:18.766Z",
+          "status": "committed",
+          "start_ledger_index": 3636683,
+          "end_ledger_index": 3636762,
+          "latest_observed_ledger": 3636762,
+          "lag_ledgers": 0,
+          "ledgers_processed": 80,
+          "persistence_rows_written": 32
+        },
+        {
+          "run_at": "2026-07-14T00:45:18.765Z",
+          "status": "committed",
+          "start_ledger_index": 3636601,
+          "end_ledger_index": 3636682,
+          "latest_observed_ledger": 3636682,
+          "lag_ledgers": 0,
+          "ledgers_processed": 82,
+          "persistence_rows_written": 26
+        },
+        {
+          "run_at": "2026-07-14T00:40:18.767Z",
+          "status": "committed",
+          "start_ledger_index": 3636520,
+          "end_ledger_index": 3636600,
+          "latest_observed_ledger": 3636600,
+          "lag_ledgers": 0,
+          "ledgers_processed": 81,
+          "persistence_rows_written": 22
+        },
+        {
+          "run_at": "2026-07-14T00:35:18.767Z",
+          "status": "committed",
+          "start_ledger_index": 3636438,
+          "end_ledger_index": 3636519,
+          "latest_observed_ledger": 3636519,
+          "lag_ledgers": 0,
+          "ledgers_processed": 82,
+          "persistence_rows_written": 14
+        },
+        {
+          "run_at": "2026-07-14T00:30:18.769Z",
+          "status": "committed",
+          "start_ledger_index": 3636352,
+          "end_ledger_index": 3636437,
+          "latest_observed_ledger": 3636437,
           "lag_ledgers": 0,
           "ledgers_processed": 86,
-          "persistence_rows_written": 128
+          "persistence_rows_written": 11
         },
         {
-          "run_at": "2026-07-13T10:00:34.610Z",
+          "run_at": "2026-07-14T00:25:18.765Z",
           "status": "committed",
-          "start_ledger_index": 3620227,
-          "end_ledger_index": 3620313,
-          "latest_observed_ledger": 3620313,
-          "lag_ledgers": 0,
-          "ledgers_processed": 87,
-          "persistence_rows_written": 97
-        },
-        {
-          "run_at": "2026-07-13T09:55:34.609Z",
-          "status": "committed",
-          "start_ledger_index": 3620140,
-          "end_ledger_index": 3620226,
-          "latest_observed_ledger": 3620226,
-          "lag_ledgers": 0,
-          "ledgers_processed": 87,
-          "persistence_rows_written": 55
-        },
-        {
-          "run_at": "2026-07-13T09:50:34.611Z",
-          "status": "committed",
-          "start_ledger_index": 3620054,
-          "end_ledger_index": 3620139,
-          "latest_observed_ledger": 3620139,
-          "lag_ledgers": 0,
-          "ledgers_processed": 86,
-          "persistence_rows_written": 53
-        },
-        {
-          "run_at": "2026-07-13T09:45:34.611Z",
-          "status": "committed",
-          "start_ledger_index": 3619967,
-          "end_ledger_index": 3620053,
-          "latest_observed_ledger": 3620053,
-          "lag_ledgers": 0,
-          "ledgers_processed": 87,
-          "persistence_rows_written": 97
-        },
-        {
-          "run_at": "2026-07-13T09:40:34.610Z",
-          "status": "committed",
-          "start_ledger_index": 3619880,
-          "end_ledger_index": 3619966,
-          "latest_observed_ledger": 3619966,
-          "lag_ledgers": 0,
-          "ledgers_processed": 87,
-          "persistence_rows_written": 72
-        },
-        {
-          "run_at": "2026-07-13T09:35:34.635Z",
-          "status": "committed",
-          "start_ledger_index": 3619794,
-          "end_ledger_index": 3619879,
-          "latest_observed_ledger": 3619879,
-          "lag_ledgers": 0,
-          "ledgers_processed": 86,
-          "persistence_rows_written": 75
-        },
-        {
-          "run_at": "2026-07-13T09:30:34.615Z",
-          "status": "committed",
-          "start_ledger_index": 3619707,
-          "end_ledger_index": 3619793,
-          "latest_observed_ledger": 3619793,
-          "lag_ledgers": 0,
-          "ledgers_processed": 87,
-          "persistence_rows_written": 57
-        },
-        {
-          "run_at": "2026-07-13T09:25:34.609Z",
-          "status": "committed",
-          "start_ledger_index": 3619619,
-          "end_ledger_index": 3619706,
-          "latest_observed_ledger": 3619706,
+          "start_ledger_index": 3636264,
+          "end_ledger_index": 3636351,
+          "latest_observed_ledger": 3636351,
           "lag_ledgers": 0,
           "ledgers_processed": 88,
-          "persistence_rows_written": 50
-        },
-        {
-          "run_at": "2026-07-13T09:20:34.609Z",
-          "status": "committed",
-          "start_ledger_index": 3619533,
-          "end_ledger_index": 3619618,
-          "latest_observed_ledger": 3619618,
-          "lag_ledgers": 0,
-          "ledgers_processed": 86,
-          "persistence_rows_written": 48
-        },
-        {
-          "run_at": "2026-07-13T09:15:34.611Z",
-          "status": "committed",
-          "start_ledger_index": 3619449,
-          "end_ledger_index": 3619532,
-          "latest_observed_ledger": 3619532,
-          "lag_ledgers": 0,
-          "ledgers_processed": 84,
-          "persistence_rows_written": 43
-        },
-        {
-          "run_at": "2026-07-13T09:10:34.610Z",
-          "status": "committed",
-          "start_ledger_index": 3619365,
-          "end_ledger_index": 3619448,
-          "latest_observed_ledger": 3619448,
-          "lag_ledgers": 0,
-          "ledgers_processed": 84,
-          "persistence_rows_written": 46
+          "persistence_rows_written": 10
         }
       ],
       "success": true,
@@ -201,13 +201,13 @@
         "served_by_colo": "NRT",
         "served_by_primary": true,
         "timings": {
-          "sql_duration_ms": 0.455
+          "sql_duration_ms": 0.4262
         },
-        "duration": 0.455,
+        "duration": 0.4262,
         "changes": 0,
         "last_row_id": 0,
         "changed_db": false,
-        "size_after": 158846976,
+        "size_after": 163909632,
         "rows_read": 12,
         "rows_written": 0,
         "total_attempts": 1
