@@ -55,6 +55,28 @@ export async function saveFastLaneShadowRunHeartbeat(options: {
     .run()
 }
 
+export async function deleteFastLaneShadowRunHeartbeat(options: {
+  db: D1Database
+  runAt: string
+}): Promise<void> {
+  await options.db
+    .prepare(
+      `DELETE FROM fast_lane_shadow_run_metrics
+       WHERE network = 'devnet'
+         AND run_at = ?1
+         AND status = 'error'
+         AND error_message IS NULL
+         AND start_ledger_index IS NULL
+         AND end_ledger_index IS NULL
+         AND latest_observed_ledger = 0
+         AND lag_ledgers = 0
+         AND ledgers_processed = 0
+         AND persistence_rows_written = 0`,
+    )
+    .bind(options.runAt)
+    .run()
+}
+
 export async function saveFastLaneShadowRunError(options: {
   db: D1Database
   runAt: string
