@@ -13,8 +13,8 @@ export async function pruneFastLaneStorage(db: D1Database): Promise<void> {
     db.prepare(
       `DELETE FROM fast_lane_history_windows
        WHERE network = 'devnet'
-         AND rowid NOT IN (
-           SELECT rowid
+         AND (epoch_id, start_ledger_index) NOT IN (
+           SELECT epoch_id, start_ledger_index
            FROM fast_lane_history_windows
            WHERE network = 'devnet'
            ORDER BY end_ledger_index DESC
@@ -24,8 +24,8 @@ export async function pruneFastLaneStorage(db: D1Database): Promise<void> {
     db.prepare(
       `DELETE FROM fast_lane_shadow_windows
        WHERE network = 'devnet'
-         AND rowid NOT IN (
-           SELECT rowid
+         AND (epoch_id, window_start_close_time) NOT IN (
+           SELECT epoch_id, window_start_close_time
            FROM fast_lane_shadow_windows
            WHERE network = 'devnet'
            ORDER BY end_ledger_index DESC
@@ -35,8 +35,8 @@ export async function pruneFastLaneStorage(db: D1Database): Promise<void> {
     db.prepare(
       `DELETE FROM fast_lane_shadow_run_metrics
        WHERE network = 'devnet'
-         AND rowid NOT IN (
-           SELECT rowid
+         AND run_at NOT IN (
+           SELECT run_at
            FROM fast_lane_shadow_run_metrics
            WHERE network = 'devnet'
            ORDER BY run_at DESC
