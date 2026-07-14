@@ -2,8 +2,12 @@ const MAX_HISTORY_WINDOWS = 256
 const MAX_SHADOW_WINDOWS = 256
 const MAX_RUN_METRICS = 1_000
 const MAX_HISTORY_BUNDLE_BYTES = 131_072
-const MAX_COMPACT_ROWS = 30_000
-const MAX_COMPACT_PAYLOAD_BYTES = 40 * 1024 * 1024
+
+// Temporary five-minute soak envelope. At the measured 2026-07-14 Devnet
+// growth rate this leaves enough room for a full 24-hour run while retaining
+// a hard stop well below the D1 500 MB free-plan database limit.
+const MAX_COMPACT_ROWS = 45_000
+const MAX_COMPACT_PAYLOAD_BYTES = 60 * 1024 * 1024
 
 interface CompactStorageUsageRow {
   row_count: number
