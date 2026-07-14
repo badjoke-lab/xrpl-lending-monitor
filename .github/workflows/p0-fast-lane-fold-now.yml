@@ -1,0 +1,144 @@
+name: P0 fast-lane fold absorbed rows
+
+on:
+  issues:
+    types: [opened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  fold:
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.issue.title, 'P0 fast-lane fold now')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
+      ISSUE_NUMBER: ${{ github.event.issue.number }}
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+    steps:
+      - name: Fold canonicalized fast-lane rows
+        shell: bash
+        run: |
+          set -euo pipefail
+          query_d1() {
+            local sql="$1"
+            jq -n --arg sql "$sql" '{sql: $sql}' | \
+              curl --fail-with-body --silent --show-error \
+                -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+                -H 'Content-Type: application/json' \
+                --data-binary @- \
+                "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database/${DATABASE_ID}/query"
+          }
+
+          BEFORE_SQL=$(cat <<'SQL'
+          SELECT COUNT(*) AS foldable_rows
+          FROM fast_lane_shadow_objects_compact AS fast
+          JOIN fast_lane_shadow_base_binding AS binding
+            ON binding.network = 'devnet'
+          WHERE fast.network = 'devnet'
+            AND EXISTS (
+              SELECT 1
+              FROM current_state_overlay_objects AS overlay
+              WHERE overlay.network = 'devnet'
+                AND overlay.epoch_id = binding.base_epoch_id
+                AND overlay.base_snapshot_id = binding.base_snapshot_id
+                AND overlay.object_type = fast.object_type
+                AND overlay.object_id = fast.object_id
+                AND (
+                  overlay.source_ledger_index > fast.source_ledger_index
+                  OR (
+                    overlay.source_ledger_index = fast.source_ledger_index
+                    AND overlay.source_transaction_index >= fast.source_transaction_index
+                  )
+                )
+            )
+          SQL
+          )
+          query_d1 "$BEFORE_SQL" > /tmp/before.json
+
+          DELETE_SQL=$(cat <<'SQL'
+          DELETE FROM fast_lane_shadow_objects_compact AS fast
+          WHERE fast.network = 'devnet'
+            AND EXISTS (
+              SELECT 1
+              FROM fast_lane_shadow_base_binding AS binding
+              JOIN current_state_overlay_objects AS overlay
+                ON overlay.network = 'devnet'
+               AND overlay.epoch_id = binding.base_epoch_id
+               AND overlay.base_snapshot_id = binding.base_snapshot_id
+               AND overlay.object_type = fast.object_type
+               AND overlay.object_id = fast.object_id
+              WHERE binding.network = 'devnet'
+                AND (
+                  overlay.source_ledger_index > fast.source_ledger_index
+                  OR (
+                    overlay.source_ledger_index = fast.source_ledger_index
+                    AND overlay.source_transaction_index >= fast.source_transaction_index
+                  )
+                )
+            )
+          SQL
+          )
+          query_d1 "$DELETE_SQL" > /tmp/delete.json
+
+          AFTER_SQL=$(cat <<'SQL'
+          SELECT 'fast_lane_shadow_objects_compact' AS metric,
+                 COUNT(*) AS value,
+                 COALESCE(SUM(LENGTH(projection_json)), 0) AS payload_bytes
+          FROM fast_lane_shadow_objects_compact
+          WHERE network = 'devnet'
+          UNION ALL
+          SELECT 'current_state_overlay_objects', COUNT(*),
+                 COALESCE(SUM(LENGTH(projection_json)), 0)
+          FROM current_state_overlay_objects
+          WHERE network = 'devnet'
+          SQL
+          )
+          query_d1 "$AFTER_SQL" > /tmp/after.json
+
+          STATUS_SQL=$(cat <<'SQL'
+          SELECT run_at, status, end_ledger_index, latest_observed_ledger,
+                 lag_ledgers, error_message
+          FROM fast_lane_shadow_run_metrics
+          WHERE network = 'devnet'
+          ORDER BY run_at DESC
+          LIMIT 3
+          SQL
+          )
+          query_d1 "$STATUS_SQL" > /tmp/status.json
+
+          {
+            echo 'P0 fast-lane fold result:'
+            echo
+            echo 'Foldable before:'
+            echo '```json'
+            jq . /tmp/before.json
+            echo '```'
+            echo
+            echo 'Delete result:'
+            echo '```json'
+            jq . /tmp/delete.json
+            echo '```'
+            echo
+            echo 'Storage after:'
+            echo '```json'
+            jq . /tmp/after.json
+            echo '```'
+            echo
+            echo 'Collector status:'
+            echo '```json'
+            jq . /tmp/status.json
+            echo '```'
+          } > /tmp/comment.md
+
+          if [ -n "${ISSUE_NUMBER:-}" ]; then
+            gh issue comment "$ISSUE_NUMBER" --repo "$REPOSITORY" --body-file /tmp/comment.md
+          else
+            cat /tmp/comment.md
+          fi
