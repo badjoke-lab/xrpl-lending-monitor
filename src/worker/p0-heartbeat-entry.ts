@@ -5,7 +5,10 @@ import {
   saveFastLaneShadowRunError,
   saveFastLaneShadowRunHeartbeat,
 } from './repositories/fast-lane-shadow-run-metrics'
-import { pruneFastLaneStorage } from './repositories/fast-lane-storage-retention'
+import {
+  assertFastLaneStorageCapacity,
+  pruneFastLaneStorage,
+} from './repositories/fast-lane-storage-retention'
 
 const FAST_LANE_PASSES_PER_CRON = 8
 const SYNTHETIC_PASS_OFFSET_MS = 60_000
@@ -45,6 +48,8 @@ const wrappedWorker: ExportedHandler<Bindings> = {
         throw new Error('Wrapped Worker does not expose a scheduled handler')
       }
 
+      await assertFastLaneStorageCapacity(env.DB)
+
       for (let pass = 0; pass < FAST_LANE_PASSES_PER_CRON; pass += 1) {
         const passController = pass === 0
           ? controller
@@ -59,6 +64,7 @@ const wrappedWorker: ExportedHandler<Bindings> = {
       }
 
       await pruneFastLaneStorage(env.DB)
+      await assertFastLaneStorageCapacity(env.DB)
       await deleteFastLaneShadowRunHeartbeat({ db: env.DB, runAt })
     } catch (error) {
       const reason = error instanceof Error ? error.message : 'unknown_error'
