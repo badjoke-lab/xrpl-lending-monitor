@@ -3,30 +3,62 @@ const MAX_SHADOW_WINDOWS = 256
 const MAX_RUN_METRICS = 1_000
 const MAX_HISTORY_BUNDLE_BYTES = 131_072
 
-// Temporary five-minute soak envelope. At the measured 2026-07-14 Devnet
-// growth rate this leaves enough room for a full 24-hour run while retaining
-// a hard stop well below the D1 500 MB free-plan database limit.
+// The compact table is transient and should normally return to zero after every
+// completed five-minute cycle. These limits retain a fail-closed escape hatch
+// if promotion stops working.
 const MAX_COMPACT_ROWS = 45_000
 const MAX_COMPACT_PAYLOAD_BYTES = 60 * 1024 * 1024
 
-interface CompactStorageUsageRow {
+// The canonical overlay is allowed to retain the current live lending object
+// population, but must stop well before the D1 500 MB free-plan database cap.
+// The 2026-07-15 production baseline was 25,342 rows / 29.8 MB of projection
+// payload at a 265.9 MB physical database size. These limits preserve material
+// headroom for indexes, retained windows, SQLite page reuse, and intervention.
+const MAX_OVERLAY_ROWS = 50_000
+const MAX_OVERLAY_PAYLOAD_BYTES = 64 * 1024 * 1024
+
+interface StorageUsageRow {
   row_count: number
   payload_bytes: number
 }
 
-export async function assertFastLaneStorageCapacity(db: D1Database): Promise<void> {
-  const usage = await db.prepare(
+async function storageUsage(
+  db: D1Database,
+  table: 'fast_lane_shadow_objects_compact' | 'current_state_overlay_objects',
+): Promise<StorageUsageRow> {
+  const row = await db.prepare(
     `SELECT COUNT(*) AS row_count,
             COALESCE(SUM(LENGTH(projection_json)), 0) AS payload_bytes
-     FROM fast_lane_shadow_objects_compact
+     FROM ${table}
      WHERE network = 'devnet'`,
-  ).first<CompactStorageUsageRow>()
+  ).first<StorageUsageRow>()
+  return {
+    row_count: row?.row_count ?? 0,
+    payload_bytes: row?.payload_bytes ?? 0,
+  }
+}
 
-  const rowCount = usage?.row_count ?? 0
-  const payloadBytes = usage?.payload_bytes ?? 0
-  if (rowCount >= MAX_COMPACT_ROWS || payloadBytes >= MAX_COMPACT_PAYLOAD_BYTES) {
+export async function assertFastLaneStorageCapacity(db: D1Database): Promise<void> {
+  const [compact, overlay] = await Promise.all([
+    storageUsage(db, 'fast_lane_shadow_objects_compact'),
+    storageUsage(db, 'current_state_overlay_objects'),
+  ])
+
+  if (
+    compact.row_count >= MAX_COMPACT_ROWS
+    || compact.payload_bytes >= MAX_COMPACT_PAYLOAD_BYTES
+  ) {
     throw new Error(
-      `fast-lane compact capacity guard reached: rows=${rowCount}, payload_bytes=${payloadBytes}`,
+      `fast-lane compact capacity guard reached: rows=${compact.row_count}, payload_bytes=${compact.payload_bytes}`,
+    )
+  }
+
+  if (
+    overlay.row_count >= MAX_OVERLAY_ROWS
+    || overlay.payload_bytes >= MAX_OVERLAY_PAYLOAD_BYTES
+  ) {
+    throw new Error(
+      `canonical overlay capacity guard reached: rows=${overlay.row_count}, payload_bytes=${overlay.payload_bytes}`,
     )
   }
 }
