@@ -1,8 +1,6 @@
 name: P0 canonical bridge maintenance
 
 on:
-  schedule:
-    - cron: '23 * * * *'
   issues:
     types: [opened]
 
@@ -16,7 +14,7 @@ concurrency:
 
 jobs:
   bridge:
-    if: github.event_name == 'schedule' || startsWith(github.event.issue.title, 'P0 canonical bridge bootstrap')
+    if: startsWith(github.event.issue.title, 'P0 canonical bridge bootstrap')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -28,28 +26,23 @@ jobs:
 
     steps:
       - name: Check out repository for bootstrap
-        if: github.event_name == 'issues'
         uses: actions/checkout@v4
 
       - name: Set up pnpm for bootstrap
-        if: github.event_name == 'issues'
         uses: pnpm/action-setup@v4
         with:
           version: 11.9.0
 
       - name: Set up Node.js for bootstrap
-        if: github.event_name == 'issues'
         uses: actions/setup-node@v4
         with:
           node-version: 24.18.0
           cache: pnpm
 
       - name: Install dependencies for bootstrap
-        if: github.event_name == 'issues'
         run: pnpm install --frozen-lockfile
 
       - name: Configure bridge operator secret
-        if: github.event_name == 'issues'
         shell: bash
         run: |
           set -euo pipefail
@@ -63,8 +56,7 @@ jobs:
         run: |
           set -euo pipefail
           BRIDGE_TOKEN="$(printf '%s' "${CLOUDFLARE_API_TOKEN}:${CLOUDFLARE_ACCOUNT_ID}:xrpl-canonical-bridge-v1" | sha256sum | awk '{print $1}')"
-          ATTEMPTS=1
-          if [ "${GITHUB_EVENT_NAME}" = issues ]; then ATTEMPTS=60; fi
+          ATTEMPTS=60
           : > /tmp/bridge-attempts.ndjson
           printf '{"status":"not_started"}\n' > /tmp/bridge-final.json
           promoted=false
@@ -92,7 +84,6 @@ jobs:
               break
             fi
 
-            if [ "${GITHUB_EVENT_NAME}" != issues ]; then break; fi
             sleep 2
           done
 
@@ -103,7 +94,7 @@ jobs:
           fi
 
       - name: Report bootstrap result
-        if: always() && github.event_name == 'issues'
+        if: always()
         shell: bash
         run: |
           set -euo pipefail
