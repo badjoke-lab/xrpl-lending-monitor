@@ -1,5 +1,5 @@
-name: P0 quick public state
-# refresh: 2026-07-14T10:24:00+09:00
+name: P0 point-in-time production audit
+# refresh: 2026-07-14T10:35:00+09:00
 on:
   push:
     branches: [ops/p0-direct-recovery]
@@ -9,15 +9,50 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - env:
+      - uses: actions/checkout@v4
+        with:
+          ref: ops/p0-direct-recovery
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Read D1 state
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote --json --command "SELECT * FROM fast_lane_shadow_state WHERE network='devnet'; SELECT * FROM fast_lane_shadow_run_metrics WHERE network='devnet' ORDER BY run_at DESC LIMIT 12; SELECT * FROM fast_lane_shadow_base_binding WHERE network='devnet'; PRAGMA quick_check;" > d1.json
+      - name: Read cron schedules
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          curl -fsS --retry 3 \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/xrpl-lending-monitor/schedules" \
+            > schedules.json
+      - name: Execute audit
+        run: python .github/scripts/point-in-time-audit.py
+      - name: Publish audit result
+        if: always()
+        env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          set -euo pipefail
-          curl -fsS --retry 3 https://xrpl-lending-monitor.badjoke-lab.workers.dev/api/overview > overview.json
-          curl -fsS --retry 3 -H 'content-type: application/json' --data '{"method":"ledger","params":[{"ledger_index":"validated","transactions":false,"expand":false,"api_version":2}]}' https://devnet.honeycluster.io/ > head.json
-          jq -n --slurpfile overview overview.json --slurpfile head head.json '{capturedAt:(now|todateiso8601),overview:$overview[0],head:$head[0]}' > result.json
-          content=$(base64 -w0 result.json)
-          api="repos/${GITHUB_REPOSITORY}/contents/.github/p0-quick-state-result.json"
-          sha=$(gh api "$api?ref=ops/p0-direct-recovery" --jq .sha)
-          gh api --method PUT "$api" -f message='Update quick public production state' -f content="$content" -f sha="$sha" -f branch='ops/p0-direct-recovery' >/dev/null
+          if [ ! -f point-audit-result.json ]; then
+            jq -n --arg captured "$(date -u +%FT%TZ)" --arg job "${{ job.status }}" \
+              '{generated_at:$captured,audit_type:"point_in_time_read_only",production_mutated:false,verdict:"workflow_failed",summary:{job_status:$job},checks:[],limits:["The audit workflow failed before producing the detailed result."]}' \
+              > point-audit-result.json
+          fi
+          content=$(base64 -w0 point-audit-result.json)
+          path='.github/point-in-time-audit-result.json'
+          api="repos/${GITHUB_REPOSITORY}/contents/${path}"
+          sha=$(gh api "$api?ref=ops/p0-direct-recovery" --jq .sha 2>/dev/null || true)
+          if [ -n "$sha" ]; then
+            gh api --method PUT "$api" -f message='Update point-in-time production audit result' -f content="$content" -f sha="$sha" -f branch='ops/p0-direct-recovery' >/dev/null
+          else
+            gh api --method PUT "$api" -f message='Create point-in-time production audit result' -f content="$content" -f branch='ops/p0-direct-recovery' >/dev/null
+          fi
