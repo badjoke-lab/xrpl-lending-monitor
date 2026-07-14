@@ -32,9 +32,11 @@ const wrappedWorker: ExportedHandler<Bindings> = {
       for (let pass = 0; pass < FAST_LANE_PASSES_PER_CRON; pass += 1) {
         const passController = pass === 0
           ? controller
-          : Object.assign(Object.create(controller), {
+          : {
               scheduledTime: controller.scheduledTime + pass * SYNTHETIC_PASS_OFFSET_MS,
-            }) as typeof controller
+              cron: controller.cron,
+              noRetry: () => controller.noRetry(),
+            } as typeof controller
 
         await worker.scheduled(passController, env, executionContext)
       }
