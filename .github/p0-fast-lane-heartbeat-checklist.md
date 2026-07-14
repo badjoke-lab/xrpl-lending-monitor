@@ -1,0 +1,4 @@
+- [x] Preserve existing five-minute scheduled handler
+- [x] Write a D1 heartbeat before the handler starts
+- [x] Replace the heartbeat with the successful result
+- [x] Expose error rows instead of disguising them as caught-up runs
