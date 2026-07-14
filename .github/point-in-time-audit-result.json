@@ -1,0 +1,13 @@
+{
+  "generated_at": "2026-07-14T01:41:09Z",
+  "audit_type": "point_in_time_read_only",
+  "production_mutated": false,
+  "verdict": "workflow_failed",
+  "summary": {
+    "job_status": "failure"
+  },
+  "checks": [],
+  "limits": [
+    "The audit workflow failed before producing the detailed result."
+  ]
+}
