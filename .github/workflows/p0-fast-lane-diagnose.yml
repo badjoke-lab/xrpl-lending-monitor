@@ -1,6 +1,11 @@
 name: P0 fast-lane diagnose
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/p0-fast-lane-diagnose.yml'
+      - '.github/p0-fast-lane-diagnose-trigger'
   workflow_dispatch:
 
 permissions:
