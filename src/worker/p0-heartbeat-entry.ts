@@ -6,7 +6,7 @@ import {
   saveFastLaneShadowRunHeartbeat,
 } from './repositories/fast-lane-shadow-run-metrics'
 
-const FAST_LANE_PASSES_PER_CRON = 4
+const FAST_LANE_PASSES_PER_CRON = 8
 const SYNTHETIC_PASS_OFFSET_MS = 60_000
 
 const wrappedWorker: ExportedHandler<Bindings> = {
