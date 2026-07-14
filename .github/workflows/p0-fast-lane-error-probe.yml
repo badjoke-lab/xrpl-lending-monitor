@@ -22,24 +22,40 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       REPOSITORY: ${{ github.repository }}
     steps:
-      - name: Query recent fast-lane errors
+      - name: Query fast-lane status and storage
         shell: bash
         run: |
           set -euo pipefail
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
+
           curl --fail-with-body --silent --show-error \
             -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
             -H 'Content-Type: application/json' \
             --data '{"sql":"SELECT run_at, status, start_ledger_index, end_ledger_index, latest_observed_ledger, lag_ledgers, ledgers_processed, persistence_rows_written, error_message FROM fast_lane_shadow_run_metrics WHERE network = '\''devnet'\'' ORDER BY run_at DESC LIMIT 8"}' \
             "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database/${DATABASE_ID}/query" \
             > /tmp/result.json
+
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            -H 'Content-Type: application/json' \
+            --data '{"sql":"SELECT '\''fast_lane_history_windows'\'' AS table_name, COUNT(*) AS row_count, COALESCE(SUM(LENGTH(bundle_json)), 0) AS payload_bytes FROM fast_lane_history_windows UNION ALL SELECT '\''fast_lane_shadow_windows'\'', COUNT(*), COALESCE(SUM(LENGTH(activity_bundle_json)), 0) FROM fast_lane_shadow_windows UNION ALL SELECT '\''fast_lane_shadow_objects_compact'\'', COUNT(*), COALESCE(SUM(LENGTH(projection_json)), 0) FROM fast_lane_shadow_objects_compact UNION ALL SELECT '\''fast_lane_shadow_run_metrics'\'', COUNT(*), COALESCE(SUM(LENGTH(COALESCE(error_message, '\'''\''))), 0) FROM fast_lane_shadow_run_metrics"}' \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database/${DATABASE_ID}/query" \
+            > /tmp/storage.json
+
           jq . /tmp/result.json > /tmp/result.pretty.json
+          jq . /tmp/storage.json > /tmp/storage.pretty.json
           {
             echo 'P0 fast-lane error probe result:'
             echo
             echo '```json'
             cat /tmp/result.pretty.json
+            echo '```'
+            echo
+            echo 'D1 storage breakdown:'
+            echo
+            echo '```json'
+            cat /tmp/storage.pretty.json
             echo '```'
           } > /tmp/comment.md
           if [ -n "${ISSUE_NUMBER:-}" ]; then
