@@ -6,6 +6,29 @@ const MAX_HISTORY_BUNDLE_BYTES = 131_072
 export async function pruneFastLaneStorage(db: D1Database): Promise<void> {
   await db.batch([
     db.prepare(
+      `DELETE FROM fast_lane_shadow_objects_compact
+       WHERE network = 'devnet'
+         AND EXISTS (
+           SELECT 1
+           FROM fast_lane_shadow_base_binding AS binding
+           JOIN current_state_overlay_objects AS overlay
+             ON overlay.network = 'devnet'
+            AND overlay.epoch_id = binding.base_epoch_id
+            AND overlay.base_snapshot_id = binding.base_snapshot_id
+            AND overlay.object_type = fast_lane_shadow_objects_compact.object_type
+            AND overlay.object_id = fast_lane_shadow_objects_compact.object_id
+           WHERE binding.network = 'devnet'
+             AND binding.shadow_epoch_id = fast_lane_shadow_objects_compact.epoch_id
+             AND (
+               overlay.source_ledger_index > fast_lane_shadow_objects_compact.source_ledger_index
+               OR (
+                 overlay.source_ledger_index = fast_lane_shadow_objects_compact.source_ledger_index
+                 AND overlay.source_transaction_index >= fast_lane_shadow_objects_compact.source_transaction_index
+               )
+             )
+         )`,
+    ),
+    db.prepare(
       `DELETE FROM fast_lane_history_windows
        WHERE network = 'devnet'
          AND LENGTH(bundle_json) > ?1`,
