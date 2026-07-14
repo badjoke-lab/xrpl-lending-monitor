@@ -1,10 +1,1508 @@
 {
-  "generated_at": "2026-07-14T01:42:31Z",
+  "generated_at": "2026-07-14T01:43:51.874434+00:00",
+  "completed_at": "2026-07-14T01:44:55.506067+00:00",
   "audit_type": "point_in_time_read_only",
   "production_mutated": false,
-  "verdict": "workflow_failed",
-  "summary": {},
-  "checks": [],
+  "verdict": "fail",
+  "summary": {
+    "required_checks": 37,
+    "passed": 32,
+    "failed": 5,
+    "failed_names": [
+      "current_state_age",
+      "live_gap_within_one_cycle",
+      "collector_endpoint_healthy",
+      "diagnostic_counts_match_overview",
+      "source_object_samples_exact"
+    ],
+    "current_state_ledger": 3637246,
+    "current_state_hash": "1D03113D6D3E2F1245E4D6F9CB96863AF41EFDCBF5D08DE9EAF15C09A2B73D8F",
+    "current_state_age_seconds": 1414.134848,
+    "live_ledger": 3637627,
+    "live_gap_ledgers": 381,
+    "source_samples_passed": 0,
+    "source_samples_total": 12,
+    "cron_count": 1,
+    "d1_size_after_bytes": 163909632
+  },
+  "checks": [
+    {
+      "name": "d1_quick_check",
+      "ok": true,
+      "scope": "required",
+      "observed": "ok",
+      "expected": "ok",
+      "details": null
+    },
+    {
+      "name": "d1_fast_lane_state_present",
+      "ok": true,
+      "scope": "required",
+      "observed": {
+        "network": "devnet",
+        "epoch_id": "fast-lane-shadow-devnet",
+        "last_processed_ledger": 3637246,
+        "last_processed_hash": "1D03113D6D3E2F1245E4D6F9CB96863AF41EFDCBF5D08DE9EAF15C09A2B73D8F",
+        "latest_observed_ledger": 3637246,
+        "latest_observed_hash": "1D03113D6D3E2F1245E4D6F9CB96863AF41EFDCBF5D08DE9EAF15C09A2B73D8F",
+        "status": "healthy",
+        "updated_at": "2026-07-14T01:20:18.765Z"
+      },
+      "expected": "one devnet state row",
+      "details": null
+    },
+    {
+      "name": "d1_fast_lane_status",
+      "ok": true,
+      "scope": "required",
+      "observed": "healthy",
+      "expected": "healthy",
+      "details": null
+    },
+    {
+      "name": "d1_cycle_closed_at_zero_lag",
+      "ok": true,
+      "scope": "required",
+      "observed": {
+        "processed": 3637246,
+        "observed": 3637246
+      },
+      "expected": "equal",
+      "details": null
+    },
+    {
+      "name": "d1_latest_metric_committed",
+      "ok": true,
+      "scope": "required",
+      "observed": {
+        "network": "devnet",
+        "run_at": "2026-07-14T01:20:18.765Z",
+        "status": "committed",
+        "start_ledger_index": 3637167,
+        "end_ledger_index": 3637246,
+        "latest_observed_ledger": 3637246,
+        "lag_ledgers": 0,
+        "ledgers_processed": 80,
+        "lending_transactions": 188,
+        "coalesced_object_rows": 113,
+        "persistence_rows_read": 119,
+        "persistence_rows_written": 123
+      },
+      "expected": "committed with lag_ledgers=0",
+      "details": null
+    },
+    {
+      "name": "d1_recent_ranges_contiguous",
+      "ok": true,
+      "scope": "required",
+      "observed": [
+        {
+          "run_at": "2026-07-14T01:20:18.765Z",
+          "status": "committed",
+          "start": 3637167,
+          "end": 3637246,
+          "lag": 0
+        },
+        {
+          "run_at": "2026-07-14T01:15:18.767Z",
+          "status": "committed",
+          "start": 3637087,
+          "end": 3637166,
+          "lag": 0
+        },
+        {
+          "run_at": "2026-07-14T01:10:18.767Z",
+          "status": "committed",
+          "start": 3637007,
+          "end": 3637086,
+          "lag": 0
+        }
+      ],
+      "expected": "latest three committed ranges are contiguous",
+      "details": null
+    },
+    {
+      "name": "cloudflare_cron_exactly_one",
+      "ok": true,
+      "scope": "required",
+      "observed": [
+        {
+          "cron": "*/5 * * * *",
+          "created_on": "2026-07-13T08:15:39.158898Z",
+          "modified_on": "2026-07-13T16:24:09.373569Z"
+        }
+      ],
+      "expected": "one */5 * * * * schedule",
+      "details": null
+    },
+    {
+      "name": "worker_health",
+      "ok": true,
+      "scope": "required",
+      "observed": {
+        "ok": true,
+        "service": "xrpl-lending-monitor",
+        "network": "devnet",
+        "mainnet_enabled": false
+      },
+      "expected": "ok=true, devnet, mainnet disabled",
+      "details": null
+    },
+    {
+      "name": "overview_http",
+      "ok": true,
+      "scope": "required",
+      "observed": 200,
+      "expected": 200,
+      "details": null
+    },
+    {
+      "name": "overview_no_unavailable",
+      "ok": true,
+      "scope": "required",
+      "observed": [],
+      "expected": [],
+      "details": null
+    },
+    {
+      "name": "overview_epoch_current",
+      "ok": true,
+      "scope": "required",
+      "observed": {
+        "id": "devnet-3371675",
+        "status": "current"
+      },
+      "expected": "current",
+      "details": null
+    },
+    {
+      "name": "overview_fast_lane_selected",
+      "ok": true,
+      "scope": "required",
+      "observed": {
+        "source": "fast_lane",
+        "ledger_index": 3637246,
+        "ledger_hash": "1D03113D6D3E2F1245E4D6F9CB96863AF41EFDCBF5D08DE9EAF15C09A2B73D8F",
+        "updated_at": "2026-07-14T01:20:18.765Z"
+      },
+      "expected": "source=fast_lane",
+      "details": null
+    },
+    {
+      "name": "overview_counts_arithmetic",
+      "ok": true,
+      "scope": "required",
+      "observed": {
+        "vaults": 849276,
+        "loan_brokers": 560669,
+        "loans": 241483,
+        "current_objects": 1651428
+      },
+      "expected": "positive counts and exact sum",
+      "details": null
+    },
+    {
+      "name": "overview_matches_d1_state",
+      "ok": true,
+      "scope": "required",
+      "observed": {
+        "overview": {
+          "source": "fast_lane",
+          "ledger_index": 3637246,
+          "ledger_hash": "1D03113D6D3E2F1245E4D6F9CB96863AF41EFDCBF5D08DE9EAF15C09A2B73D8F",
+          "updated_at": "2026-07-14T01:20:18.765Z"
+        },
+        "d1": {
+          "network": "devnet",
+          "epoch_id": "fast-lane-shadow-devnet",
+          "last_processed_ledger": 3637246,
+          "last_processed_hash": "1D03113D6D3E2F1245E4D6F9CB96863AF41EFDCBF5D08DE9EAF15C09A2B73D8F",
+          "latest_observed_ledger": 3637246,
+          "latest_observed_hash": "1D03113D6D3E2F1245E4D6F9CB96863AF41EFDCBF5D08DE9EAF15C09A2B73D8F",
+          "status": "healthy",
+          "updated_at": "2026-07-14T01:20:18.765Z"
+        }
+      },
+      "expected": "ledger, hash, and updated_at identical",
+      "details": null
+    },
+    {
+      "name": "base_binding_matches_overview",
+      "ok": true,
+      "scope": "required",
+      "observed": {
+        "binding": {
+          "network": "devnet",
+          "shadow_epoch_id": "fast-lane-shadow-devnet",
+          "base_epoch_id": "devnet-3371675",
+          "base_snapshot_id": "devnet-3624709-39d838e15f10",
+          "base_ledger_index": 3624709,
+          "base_ledger_hash": "39D838E15F106E3305038540F7BDD47BA8832062748B6D9D2881AAC7677CF667",
+          "bound_at": "2026-07-13T16:25:24.766Z"
+        },
+        "base": {
+          "id": "devnet-3624709-39d838e15f10",
+          "epoch_id": "devnet-3371675",
+          "ledger_index": 3624709,
+          "ledger_hash": "39D838E15F106E3305038540F7BDD47BA8832062748B6D9D2881AAC7677CF667",
+          "completed_at": "2026-07-13T14:29:58Z"
+        },
+        "state_epoch": "fast-lane-shadow-devnet"
+      },
+      "expected": "D1 binding equals active base",
+      "details": null
+    },
+    {
+      "name": "current_state_age",
+      "ok": false,
+      "scope": "required",
+      "observed": 1414.134848,
+      "expected": "0..370 seconds",
+      "details": null
+    },
+    {
+      "name": "xrpl_live_head",
+      "ok": true,
+      "scope": "required",
+      "observed": {
+        "ledger": 3637627,
+        "hash": "24299B28473B5F81ACFD97ABB85B1579431B2D886EC073ED8B1836C2E6C3FBAB"
+      },
+      "expected": "validated ledger",
+      "details": null
+    },
+    {
+      "name": "live_gap_within_one_cycle",
+      "ok": false,
+      "scope": "required",
+      "observed": 381,
+      "expected": "0..130 ledgers",
+      "details": null
+    },
+    {
+      "name": "current_watermark_hash_matches_xrpl",
+      "ok": true,
+      "scope": "required",
+      "observed": {
+        "worker": {
+          "source": "fast_lane",
+          "ledger_index": 3637246,
+          "ledger_hash": "1D03113D6D3E2F1245E4D6F9CB96863AF41EFDCBF5D08DE9EAF15C09A2B73D8F",
+          "updated_at": "2026-07-14T01:20:18.765Z"
+        },
+        "xrpl": {
+          "ledger_index": 3637246,
+          "ledger_hash": "1D03113D6D3E2F1245E4D6F9CB96863AF41EFDCBF5D08DE9EAF15C09A2B73D8F"
+        }
+      },
+      "expected": "same ledger index and hash",
+      "details": null
+    },
+    {
+      "name": "base_snapshot_hash_matches_xrpl",
+      "ok": true,
+      "scope": "required",
+      "observed": {
+        "worker": {
+          "id": "devnet-3624709-39d838e15f10",
+          "epoch_id": "devnet-3371675",
+          "ledger_index": 3624709,
+          "ledger_hash": "39D838E15F106E3305038540F7BDD47BA8832062748B6D9D2881AAC7677CF667",
+          "completed_at": "2026-07-13T14:29:58Z"
+        },
+        "xrpl": {
+          "ledger_index": 3624709,
+          "ledger_hash": "39D838E15F106E3305038540F7BDD47BA8832062748B6D9D2881AAC7677CF667"
+        }
+      },
+      "expected": "same base ledger index and hash",
+      "details": null
+    },
+    {
+      "name": "status_endpoint",
+      "ok": true,
+      "scope": "required",
+      "observed": {
+        "network": "devnet",
+        "epoch": {
+          "id": "devnet-3371675",
+          "status": "current",
+          "first_ledger_index": 3371675,
+          "first_ledger_hash": "0BA2ED766C190C733F8F26288785CBDF01D0FC26E1A6C03EDB7E9DFF6F8BCB90",
+          "last_ledger_index": 3635914,
+          "last_ledger_hash": "A60CC065EA5C687C267154FB0C0FA07DEDBC8A3D65D02674EC8E47CC94803442",
+          "started_at": "2026-07-05T08:27:29.483Z"
+        },
+        "server": {
+          "endpoint": "wss://s.devnet.rippletest.net:51233/",
+          "version": "3.2.0",
+          "state": "full",
+          "complete_ledgers": "2407901-3635914",
+          "latest_validated_ledger": 3635914,
+          "latest_validated_hash": "A60CC065EA5C687C267154FB0C0FA07DEDBC8A3D65D02674EC8E47CC94803442",
+          "latest_ledger_age_seconds": 1
+        },
+        "amendments": {
+          "lending_protocol": {
+            "enabled": true,
+            "supported": true
+          },
+          "single_asset_vault": {
+            "enabled": true,
+            "supported": true
+          }
+        },
+        "collector": {
+          "status": "healthy",
+          "last_processed_ledger": 3624724,
+          "last_processed_hash": "B49FEF69CC38FA2027082B59CF0AD3075418AC604E2865DE7E4D5A1B3CF5D8BF",
+          "last_attempt_at": "2026-07-14T00:00:20.227Z",
+          "last_success_at": "2026-07-14T00:00:21.208Z",
+          "data_age_seconds": 6212,
+          "consecutive_failures": 0,
+          "reset_reason": null,
+          "error": null
+        }
+      },
+      "expected": "HTTP 200",
+      "details": null
+    },
+    {
+      "name": "collector_endpoint_healthy",
+      "ok": false,
+      "scope": "required",
+      "observed": {
+        "network": "devnet",
+        "role": "canonical_overlay_refresh",
+        "cadence": {
+          "expected_interval_seconds": 14400,
+          "stale_after_seconds": 18000
+        },
+        "status": "behind",
+        "cursor": {
+          "epoch_id": "devnet-3371675",
+          "last_processed_ledger": 3624724,
+          "last_processed_hash": "B49FEF69CC38FA2027082B59CF0AD3075418AC604E2865DE7E4D5A1B3CF5D8BF",
+          "latest_observed_ledger": 3635914,
+          "latest_observed_hash": "A60CC065EA5C687C267154FB0C0FA07DEDBC8A3D65D02674EC8E47CC94803442",
+          "lag_ledgers": 11190
+        },
+        "timing": {
+          "last_attempt_at": "2026-07-14T00:00:21.208Z",
+          "last_success_at": "2026-07-14T00:00:21.208Z",
+          "run_duration_ms": 8241
+        },
+        "usage": {
+          "rpc_requests": 32,
+          "endpoint_attempts": 1,
+          "ledgers_processed": 5,
+          "inspected_transactions": 39,
+          "lending_transactions": 24,
+          "estimated_rows": 454,
+          "estimated_statements": 453,
+          "overlay_mutations": 28,
+          "persistence_batch_results": 453,
+          "persistence_statements": 453,
+          "persistence_rows_read": 841,
+          "persistence_rows_written": 2342
+        },
+        "endpoint": "wss://s.devnet.rippletest.net:51233/",
+        "consecutive_failures": 0,
+        "error": null
+      },
+      "expected": "HTTP 200 and healthy/ok",
+      "details": null
+    },
+    {
+      "name": "history_source_resolves",
+      "ok": true,
+      "scope": "required",
+      "observed": {
+        "status": "ok",
+        "mode": "hybrid",
+        "configured": true,
+        "channel": {
+          "updated_at": "2026-07-13T14:15:30.000Z",
+          "data_commit_sha": "bba0a0af520c36e13e57dfaf57a9819b91cf2e6c"
+        },
+        "chain": {
+          "chain_id": "canonical-devnet-3371676-3624709",
+          "epoch_id": "devnet-3371675",
+          "start_ledger_index": 3371676,
+          "end_ledger_index": 3624709,
+          "segment_count": 513,
+          "ledger_count": 253034,
+          "publication_sha256": "09434966a7d316ec0a2200e978c3eb2243c7b94e305e787a9b0102f1a3a03e9a"
+        },
+        "exact_index": {
+          "bucket_count": 256,
+          "total_records": 10516898,
+          "manifest_sha256": "b270a7da5a026640d017c9234f5f3b50ee4750700164a49ad31a9cfb1ad5498e"
+        }
+      },
+      "expected": "verified history source",
+      "details": null
+    },
+    {
+      "name": "history_chain_reaches_base",
+      "ok": true,
+      "scope": "required",
+      "observed": {
+        "history_end": 3624709,
+        "base": 3624709
+      },
+      "expected": "history end equals active base",
+      "details": null
+    },
+    {
+      "name": "read_model_diagnostic",
+      "ok": true,
+      "scope": "required",
+      "observed": {
+        "ok": true,
+        "stage": "read_model_navigation",
+        "snapshot_id": "devnet-3624709-39d838e15f10",
+        "ledger_index": 3624709,
+        "counts": {
+          "vaults": 849264,
+          "loan_brokers": 560660,
+          "loans": 241480
+        },
+        "probes": {
+          "vaults": {
+            "first_count": 2,
+            "first_id": "000053B23A56D11CC5A348B0344E80EBBCC6C6424708CC629872FA0A2A2E868E",
+            "detail_found": true,
+            "next_cursor": true,
+            "second_count": 2
+          },
+          "loan_brokers": {
+            "first_count": 2,
+            "first_id": "0000018A4E54F377D5B1FFD573CB3000A8F135FA068A16BA68BC998349FBEF72",
+            "detail_found": true,
+            "next_cursor": true,
+            "second_count": 2
+          },
+          "loans": {
+            "first_count": 2,
+            "first_id": "0000264C3DDAAFD5A96A5017088B7666F6E91DF0B0BE6B478FFD68A344BA310C",
+            "detail_found": true,
+            "next_cursor": true,
+            "second_count": 2
+          },
+          "invalid_cursor": "invalid_cursor"
+        }
+      },
+      "expected": "all navigation probes pass",
+      "details": null
+    },
+    {
+      "name": "diagnostic_counts_match_overview",
+      "ok": false,
+      "scope": "required",
+      "observed": {
+        "diagnostic": {
+          "vaults": 849264,
+          "loan_brokers": 560660,
+          "loans": 241480
+        },
+        "overview": {
+          "vaults": 849276,
+          "loan_brokers": 560669,
+          "loans": 241483,
+          "current_objects": 1651428
+        }
+      },
+      "expected": "same counts",
+      "details": null
+    },
+    {
+      "name": "api_vaults_collections_available",
+      "ok": true,
+      "scope": "required",
+      "observed": {
+        "asc": 2,
+        "desc": 2
+      },
+      "expected": "HTTP 200, available, non-empty in both directions",
+      "details": null
+    },
+    {
+      "name": "api_vaults_pagination",
+      "ok": true,
+      "scope": "required",
+      "observed": {
+        "status": 200,
+        "count": 2
+      },
+      "expected": "valid second page",
+      "details": null
+    },
+    {
+      "name": "api_loan_brokers_collections_available",
+      "ok": true,
+      "scope": "required",
+      "observed": {
+        "asc": 2,
+        "desc": 2
+      },
+      "expected": "HTTP 200, available, non-empty in both directions",
+      "details": null
+    },
+    {
+      "name": "api_loan_brokers_pagination",
+      "ok": true,
+      "scope": "required",
+      "observed": {
+        "status": 200,
+        "count": 2
+      },
+      "expected": "valid second page",
+      "details": null
+    },
+    {
+      "name": "api_loans_collections_available",
+      "ok": true,
+      "scope": "required",
+      "observed": {
+        "asc": 2,
+        "desc": 2
+      },
+      "expected": "HTTP 200, available, non-empty in both directions",
+      "details": null
+    },
+    {
+      "name": "api_loans_pagination",
+      "ok": true,
+      "scope": "required",
+      "observed": {
+        "status": 200,
+        "count": 2
+      },
+      "expected": "valid second page",
+      "details": null
+    },
+    {
+      "name": "source_object_samples_exact",
+      "ok": false,
+      "scope": "required",
+      "observed": {
+        "passed": 0,
+        "total": 12,
+        "samples": [
+          {
+            "kind": "vault",
+            "id": "000053B23A56D11CC5A348B0344E80EBBCC6C6424708CC629872FA0A2A2E868E",
+            "detail_status": 200,
+            "ledger_entry_status": 200,
+            "match": false,
+            "mismatches": [
+              {
+                "field": "OwnerNode",
+                "worker": "0000000000000000",
+                "source": "0"
+              }
+            ],
+            "previous_ledger_index": 3288597
+          },
+          {
+            "kind": "vault",
+            "id": "000062C7857FD1996D2DDD536BF21815108E9703AEEFB1B99EF85CA850CA5588",
+            "detail_status": 200,
+            "ledger_entry_status": 200,
+            "match": false,
+            "mismatches": [
+              {
+                "field": "OwnerNode",
+                "worker": "0000000000000000",
+                "source": "0"
+              }
+            ],
+            "previous_ledger_index": 423680
+          },
+          {
+            "kind": "vault",
+            "id": "FFFFD625AB1C2913BCFA6A0E7D5BDF7C44E35F0393ADE7ABF2272A6C7557F370",
+            "detail_status": 200,
+            "ledger_entry_status": 200,
+            "match": false,
+            "mismatches": [
+              {
+                "field": "OwnerNode",
+                "worker": "0000000000000000",
+                "source": "0"
+              }
+            ],
+            "previous_ledger_index": 2588435
+          },
+          {
+            "kind": "vault",
+            "id": "FFFF925323EA8B3DE24E06BA1366E7F3CA3FBCBDCE75F13D9C8531412CB55F15",
+            "detail_status": 200,
+            "ledger_entry_status": 200,
+            "match": false,
+            "mismatches": [
+              {
+                "field": "OwnerNode",
+                "worker": "0000000000000000",
+                "source": "0"
+              }
+            ],
+            "previous_ledger_index": 1465924
+          },
+          {
+            "kind": "loan_broker",
+            "id": "0000018A4E54F377D5B1FFD573CB3000A8F135FA068A16BA68BC998349FBEF72",
+            "detail_status": 200,
+            "ledger_entry_status": 200,
+            "match": false,
+            "mismatches": [
+              {
+                "field": "OwnerNode",
+                "worker": "0000000000000000",
+                "source": "0"
+              },
+              {
+                "field": "VaultNode",
+                "worker": "0000000000000000",
+                "source": "0"
+              }
+            ],
+            "previous_ledger_index": 2980845
+          },
+          {
+            "kind": "loan_broker",
+            "id": "0000210A5FE1D13E98AC7E1B2639594E362A9B1B210F0B7BA0AF03427F821082",
+            "detail_status": 200,
+            "ledger_entry_status": 200,
+            "match": false,
+            "mismatches": [
+              {
+                "field": "OwnerNode",
+                "worker": "0000000000000000",
+                "source": "0"
+              },
+              {
+                "field": "VaultNode",
+                "worker": "0000000000000000",
+                "source": "0"
+              }
+            ],
+            "previous_ledger_index": 63189
+          },
+          {
+            "kind": "loan_broker",
+            "id": "FFFFE6601910CBFE324CCADB7E41C32380688DB9469F4435236F0F05B5591768",
+            "detail_status": 200,
+            "ledger_entry_status": 200,
+            "match": false,
+            "mismatches": [
+              {
+                "field": "OwnerNode",
+                "worker": "0000000000000000",
+                "source": "0"
+              },
+              {
+                "field": "VaultNode",
+                "worker": "0000000000000000",
+                "source": "0"
+              }
+            ],
+            "previous_ledger_index": 188032
+          },
+          {
+            "kind": "loan_broker",
+            "id": "FFFFAD0FE71C4FC5D8383D08F0D8238D05414164299492C8FD4C3E0EAEF169EE",
+            "detail_status": 200,
+            "ledger_entry_status": 200,
+            "match": false,
+            "mismatches": [
+              {
+                "field": "OwnerNode",
+                "worker": "0000000000000000",
+                "source": "0"
+              },
+              {
+                "field": "VaultNode",
+                "worker": "0000000000000000",
+                "source": "0"
+              }
+            ],
+            "previous_ledger_index": 941925
+          },
+          {
+            "kind": "loan",
+            "id": "0000264C3DDAAFD5A96A5017088B7666F6E91DF0B0BE6B478FFD68A344BA310C",
+            "detail_status": 200,
+            "ledger_entry_status": 200,
+            "match": false,
+            "mismatches": [
+              {
+                "field": "LoanBrokerNode",
+                "worker": "0000000000000000",
+                "source": "0"
+              },
+              {
+                "field": "OwnerNode",
+                "worker": "0000000000000000",
+                "source": "0"
+              }
+            ],
+            "previous_ledger_index": 1801434
+          },
+          {
+            "kind": "loan",
+            "id": "00004A21309D30F1E4DAD0A3E15CB1EB6126BA789C7C1A425D821F534BE2335D",
+            "detail_status": 200,
+            "ledger_entry_status": 200,
+            "match": false,
+            "mismatches": [
+              {
+                "field": "LoanBrokerNode",
+                "worker": "0000000000000000",
+                "source": "0"
+              },
+              {
+                "field": "OwnerNode",
+                "worker": "0000000000000000",
+                "source": "0"
+              }
+            ],
+            "previous_ledger_index": 3045687
+          },
+          {
+            "kind": "loan",
+            "id": "FFFFC3C3A84E0B827AF014D9BEEBB309B18476D371D36F6E7E95C89BA2BC1518",
+            "detail_status": 200,
+            "ledger_entry_status": 200,
+            "match": false,
+            "mismatches": [
+              {
+                "field": "LoanBrokerNode",
+                "worker": "0000000000000000",
+                "source": "0"
+              },
+              {
+                "field": "OwnerNode",
+                "worker": "0000000000000000",
+                "source": "0"
+              }
+            ],
+            "previous_ledger_index": 364646
+          },
+          {
+            "kind": "loan",
+            "id": "FFFED6622C5F7A8D7CCAF0630280DC3385C0BCECF64FC1EC04B30177AE737922",
+            "detail_status": 200,
+            "ledger_entry_status": 200,
+            "match": false,
+            "mismatches": [
+              {
+                "field": "LoanBrokerNode",
+                "worker": "0000000000000000",
+                "source": "0"
+              },
+              {
+                "field": "OwnerNode",
+                "worker": "0000000000000000",
+                "source": "0"
+              }
+            ],
+            "previous_ledger_index": 526300
+          }
+        ]
+      },
+      "expected": "all sampled current objects exactly match XRPL ledger_entry at current watermark",
+      "details": null
+    },
+    {
+      "name": "relationship_resolution",
+      "ok": true,
+      "scope": "required",
+      "observed": [
+        {
+          "kind": "broker_to_vault",
+          "broker": "0000018A4E54F377D5B1FFD573CB3000A8F135FA068A16BA68BC998349FBEF72",
+          "vault": "F230A0F8FECBA93727CFE50B5A40EC747D4EBE50A3262D2C83A2CC09D09E5DA8",
+          "ok": true
+        },
+        {
+          "kind": "broker_to_vault",
+          "broker": "0000210A5FE1D13E98AC7E1B2639594E362A9B1B210F0B7BA0AF03427F821082",
+          "vault": "D64980234E0D51284FBC7BC1539C5415F5A9B59215AE63EEF787AAA56D543FD7",
+          "ok": true
+        },
+        {
+          "kind": "broker_to_vault",
+          "broker": "FFFFE6601910CBFE324CCADB7E41C32380688DB9469F4435236F0F05B5591768",
+          "vault": "1D5BC9096BDD70075DFC29911E92F13B5B6E965BA400145F333142587D9A1A67",
+          "ok": true
+        },
+        {
+          "kind": "loan_to_broker_to_vault",
+          "loan": "0000264C3DDAAFD5A96A5017088B7666F6E91DF0B0BE6B478FFD68A344BA310C",
+          "broker": "1E1528911A82103080F339C1CE570C7E5D2CC28362C795C3AB7C5A7371772C95",
+          "vault": "AD8A7B497A854EEEAAB06616F0895C01E119C156512552DDE279A5674BFAFE4B",
+          "ok": true
+        },
+        {
+          "kind": "loan_to_broker_to_vault",
+          "loan": "00004A21309D30F1E4DAD0A3E15CB1EB6126BA789C7C1A425D821F534BE2335D",
+          "broker": "EB41DB29ECA0C2866DC1F63479B41E862B0C44164722E6488E7AF2F6C6F8E4C2",
+          "vault": "620EA7C123E18F60D9C1A81FBCA437FCB114769184EE856E46F592619C732D62",
+          "ok": true
+        },
+        {
+          "kind": "loan_to_broker_to_vault",
+          "loan": "FFFFC3C3A84E0B827AF014D9BEEBB309B18476D371D36F6E7E95C89BA2BC1518",
+          "broker": "0BC392B418F450C733B9D4EF2CA6AB0F7878FD1D162B6D136AB160F5A31E3A10",
+          "vault": "01B73BC1C95ED4D420E827FA4922C0BBD74CC55BDB24EDC0ACE076A696C59D9D",
+          "ok": true
+        }
+      ],
+      "expected": "all sampled relationships resolve exactly",
+      "details": null
+    },
+    {
+      "name": "activity_api",
+      "ok": true,
+      "scope": "required",
+      "observed": {
+        "status": 200,
+        "keys": [
+          "data",
+          "network",
+          "page"
+        ]
+      },
+      "expected": "HTTP 200 JSON",
+      "details": null
+    },
+    {
+      "name": "lifecycle_audit_api",
+      "ok": true,
+      "scope": "required",
+      "observed": {
+        "status": 200,
+        "keys": [
+          "data",
+          "filters",
+          "kind",
+          "network",
+          "page",
+          "provenance"
+        ]
+      },
+      "expected": "HTTP 200",
+      "details": null
+    },
+    {
+      "name": "archive_audit_api",
+      "ok": true,
+      "scope": "required",
+      "observed": {
+        "status": 200,
+        "keys": [
+          "data",
+          "filters",
+          "kind",
+          "network",
+          "page",
+          "provenance"
+        ]
+      },
+      "expected": "HTTP 200",
+      "details": null
+    }
+  ],
+  "http_observations": {
+    "health": {
+      "status": 200,
+      "latency_ms": 244.0,
+      "headers": {
+        "cf-ray": "a1acd6c65f42244d-DFW",
+        "content-type": "application/json",
+        "server": "cloudflare"
+      },
+      "error": null
+    },
+    "overview": {
+      "status": 200,
+      "latency_ms": 780.9,
+      "headers": {
+        "cf-ray": "a1acd6c71d499b2f-DFW",
+        "content-type": "application/json",
+        "server": "cloudflare"
+      },
+      "error": null
+    },
+    "status": {
+      "status": 200,
+      "latency_ms": 316.1,
+      "headers": {
+        "cf-ray": "a1acd6d0ca076b14-DFW",
+        "content-type": "application/json",
+        "server": "cloudflare"
+      },
+      "error": null
+    },
+    "collector": {
+      "status": 200,
+      "latency_ms": 252.7,
+      "headers": {
+        "cf-ray": "a1acd6d2bd391711-DFW",
+        "content-type": "application/json",
+        "server": "cloudflare"
+      },
+      "error": null
+    },
+    "history_source": {
+      "status": 200,
+      "latency_ms": 741.1,
+      "headers": {
+        "cf-ray": "a1acd6d448ac11de-DFW",
+        "content-type": "application/json",
+        "server": "cloudflare"
+      },
+      "error": null
+    },
+    "current_state_diagnostic": {
+      "status": 200,
+      "latency_ms": 1201.5,
+      "headers": {
+        "cf-ray": "a1acd6d8fd2ffe58-DFW",
+        "content-type": "application/json",
+        "server": "cloudflare"
+      },
+      "error": null
+    },
+    "vaults_asc": {
+      "status": 200,
+      "latency_ms": 1964.6,
+      "headers": {
+        "cf-ray": "a1acd6e07c03e993-DFW",
+        "content-type": "application/json",
+        "server": "cloudflare"
+      },
+      "error": null
+    },
+    "vaults_desc": {
+      "status": 200,
+      "latency_ms": 2384.5,
+      "headers": {
+        "cf-ray": "a1acd6ecc9e9345b-DFW",
+        "content-type": "application/json",
+        "server": "cloudflare"
+      },
+      "error": null
+    },
+    "vaults_page2": {
+      "status": 200,
+      "latency_ms": 1837.9,
+      "headers": {
+        "cf-ray": "a1acd6fb9ae61711-DFW",
+        "content-type": "application/json",
+        "server": "cloudflare"
+      },
+      "error": null
+    },
+    "loan_brokers_asc": {
+      "status": 200,
+      "latency_ms": 2599.7,
+      "headers": {
+        "cf-ray": "a1acd7071d8f03ca-DFW",
+        "content-type": "application/json",
+        "server": "cloudflare"
+      },
+      "error": null
+    },
+    "loan_brokers_desc": {
+      "status": 200,
+      "latency_ms": 2846.4,
+      "headers": {
+        "cf-ray": "a1acd7175e23244d-DFW",
+        "content-type": "application/json",
+        "server": "cloudflare"
+      },
+      "error": null
+    },
+    "loan_brokers_page2": {
+      "status": 200,
+      "latency_ms": 2562.8,
+      "headers": {
+        "cf-ray": "a1acd72939746b3d-DFW",
+        "content-type": "application/json",
+        "server": "cloudflare"
+      },
+      "error": null
+    },
+    "loans_asc": {
+      "status": 200,
+      "latency_ms": 3366.1,
+      "headers": {
+        "cf-ray": "a1acd73939cce993-DFW",
+        "content-type": "application/json",
+        "server": "cloudflare"
+      },
+      "error": null
+    },
+    "loans_desc": {
+      "status": 200,
+      "latency_ms": 3523.2,
+      "headers": {
+        "cf-ray": "a1acd74e3a939b2f-DFW",
+        "content-type": "application/json",
+        "server": "cloudflare"
+      },
+      "error": null
+    },
+    "loans_page2": {
+      "status": 200,
+      "latency_ms": 3063.2,
+      "headers": {
+        "cf-ray": "a1acd7643b26244d-DFW",
+        "content-type": "application/json",
+        "server": "cloudflare"
+      },
+      "error": null
+    },
+    "detail_vault_000053B2": {
+      "status": 200,
+      "latency_ms": 1022.5,
+      "headers": {
+        "cf-ray": "a1acd777586d6b14-DFW",
+        "content-type": "application/json",
+        "server": "cloudflare"
+      },
+      "error": null
+    },
+    "detail_vault_000062C7": {
+      "status": 200,
+      "latency_ms": 834.3,
+      "headers": {
+        "cf-ray": "a1acd77f19571711-DFW",
+        "content-type": "application/json",
+        "server": "cloudflare"
+      },
+      "error": null
+    },
+    "detail_vault_FFFFD625": {
+      "status": 200,
+      "latency_ms": 1027.4,
+      "headers": {
+        "cf-ray": "a1acd785ab1411de-DFW",
+        "content-type": "application/json",
+        "server": "cloudflare"
+      },
+      "error": null
+    },
+    "detail_vault_FFFF9253": {
+      "status": 200,
+      "latency_ms": 863.0,
+      "headers": {
+        "cf-ray": "a1acd78d598e9b2f-DFW",
+        "content-type": "application/json",
+        "server": "cloudflare"
+      },
+      "error": null
+    },
+    "detail_loan_broker_0000018A": {
+      "status": 200,
+      "latency_ms": 1533.7,
+      "headers": {
+        "cf-ray": "a1acd793fd2de993-DFW",
+        "content-type": "application/json",
+        "server": "cloudflare"
+      },
+      "error": null
+    },
+    "detail_loan_broker_0000210A": {
+      "status": 200,
+      "latency_ms": 1524.1,
+      "headers": {
+        "cf-ray": "a1acd79edb52345b-DFW",
+        "content-type": "application/json",
+        "server": "cloudflare"
+      },
+      "error": null
+    },
+    "detail_loan_broker_FFFFE660": {
+      "status": 200,
+      "latency_ms": 1511.3,
+      "headers": {
+        "cf-ray": "a1acd7a99a856b14-DFW",
+        "content-type": "application/json",
+        "server": "cloudflare"
+      },
+      "error": null
+    },
+    "detail_loan_broker_FFFFAD0F": {
+      "status": 200,
+      "latency_ms": 1467.2,
+      "headers": {
+        "cf-ray": "a1acd7b46ce4244d-DFW",
+        "content-type": "application/json",
+        "server": "cloudflare"
+      },
+      "error": null
+    },
+    "detail_loan_0000264C": {
+      "status": 200,
+      "latency_ms": 2074.7,
+      "headers": {
+        "cf-ray": "a1acd7becd5f03ca-DFW",
+        "content-type": "application/json",
+        "server": "cloudflare"
+      },
+      "error": null
+    },
+    "detail_loan_00004A21": {
+      "status": 200,
+      "latency_ms": 2063.3,
+      "headers": {
+        "cf-ray": "a1acd7ccf95e1711-DFW",
+        "content-type": "application/json",
+        "server": "cloudflare"
+      },
+      "error": null
+    },
+    "detail_loan_FFFFC3C3": {
+      "status": 200,
+      "latency_ms": 2186.4,
+      "headers": {
+        "cf-ray": "a1acd7db282e6b3d-DFW",
+        "content-type": "application/json",
+        "server": "cloudflare"
+      },
+      "error": null
+    },
+    "detail_loan_FFFED662": {
+      "status": 200,
+      "latency_ms": 2135.8,
+      "headers": {
+        "cf-ray": "a1acd7ea1b61e993-DFW",
+        "content-type": "application/json",
+        "server": "cloudflare"
+      },
+      "error": null
+    },
+    "relation_vault_F230A0F8": {
+      "status": 200,
+      "latency_ms": 833.5,
+      "headers": {
+        "cf-ray": "a1acd7f8aab9244d-DFW",
+        "content-type": "application/json",
+        "server": "cloudflare"
+      },
+      "error": null
+    },
+    "relation_vault_D6498023": {
+      "status": 200,
+      "latency_ms": 838.0,
+      "headers": {
+        "cf-ray": "a1acd7fddd6d9b2f-DFW",
+        "content-type": "application/json",
+        "server": "cloudflare"
+      },
+      "error": null
+    },
+    "relation_vault_1D5BC909": {
+      "status": 200,
+      "latency_ms": 1119.6,
+      "headers": {
+        "cf-ray": "a1acd803188d345b-DFW",
+        "content-type": "application/json",
+        "server": "cloudflare"
+      },
+      "error": null
+    },
+    "relation_broker_1E152891": {
+      "status": 200,
+      "latency_ms": 1918.8,
+      "headers": {
+        "cf-ray": "a1acd80a18926b14-DFW",
+        "content-type": "application/json",
+        "server": "cloudflare"
+      },
+      "error": null
+    },
+    "relation_broker_EB41DB29": {
+      "status": 200,
+      "latency_ms": 1498.7,
+      "headers": {
+        "cf-ray": "a1acd8161d8b11de-DFW",
+        "content-type": "application/json",
+        "server": "cloudflare"
+      },
+      "error": null
+    },
+    "relation_broker_0BC392B4": {
+      "status": 200,
+      "latency_ms": 2042.7,
+      "headers": {
+        "cf-ray": "a1acd81f7ab3e993-DFW",
+        "content-type": "application/json",
+        "server": "cloudflare"
+      },
+      "error": null
+    },
+    "activity": {
+      "status": 200,
+      "latency_ms": 2073.0,
+      "headers": {
+        "cf-ray": "a1acd82c3c6503ca-DFW",
+        "content-type": "application/json",
+        "server": "cloudflare"
+      },
+      "error": null
+    },
+    "lifecycle": {
+      "status": 200,
+      "latency_ms": 2083.6,
+      "headers": {
+        "cf-ray": "a1acd8392b761711-DFW",
+        "content-type": "application/json",
+        "server": "cloudflare"
+      },
+      "error": null
+    },
+    "archived": {
+      "status": 200,
+      "latency_ms": 2085.2,
+      "headers": {
+        "cf-ray": "a1acd8463ccd9b2f-DFW",
+        "content-type": "application/json",
+        "server": "cloudflare"
+      },
+      "error": null
+    }
+  },
+  "source_samples": [
+    {
+      "kind": "vault",
+      "id": "000053B23A56D11CC5A348B0344E80EBBCC6C6424708CC629872FA0A2A2E868E",
+      "detail_status": 200,
+      "ledger_entry_status": 200,
+      "match": false,
+      "mismatches": [
+        {
+          "field": "OwnerNode",
+          "worker": "0000000000000000",
+          "source": "0"
+        }
+      ],
+      "previous_ledger_index": 3288597
+    },
+    {
+      "kind": "vault",
+      "id": "000062C7857FD1996D2DDD536BF21815108E9703AEEFB1B99EF85CA850CA5588",
+      "detail_status": 200,
+      "ledger_entry_status": 200,
+      "match": false,
+      "mismatches": [
+        {
+          "field": "OwnerNode",
+          "worker": "0000000000000000",
+          "source": "0"
+        }
+      ],
+      "previous_ledger_index": 423680
+    },
+    {
+      "kind": "vault",
+      "id": "FFFFD625AB1C2913BCFA6A0E7D5BDF7C44E35F0393ADE7ABF2272A6C7557F370",
+      "detail_status": 200,
+      "ledger_entry_status": 200,
+      "match": false,
+      "mismatches": [
+        {
+          "field": "OwnerNode",
+          "worker": "0000000000000000",
+          "source": "0"
+        }
+      ],
+      "previous_ledger_index": 2588435
+    },
+    {
+      "kind": "vault",
+      "id": "FFFF925323EA8B3DE24E06BA1366E7F3CA3FBCBDCE75F13D9C8531412CB55F15",
+      "detail_status": 200,
+      "ledger_entry_status": 200,
+      "match": false,
+      "mismatches": [
+        {
+          "field": "OwnerNode",
+          "worker": "0000000000000000",
+          "source": "0"
+        }
+      ],
+      "previous_ledger_index": 1465924
+    },
+    {
+      "kind": "loan_broker",
+      "id": "0000018A4E54F377D5B1FFD573CB3000A8F135FA068A16BA68BC998349FBEF72",
+      "detail_status": 200,
+      "ledger_entry_status": 200,
+      "match": false,
+      "mismatches": [
+        {
+          "field": "OwnerNode",
+          "worker": "0000000000000000",
+          "source": "0"
+        },
+        {
+          "field": "VaultNode",
+          "worker": "0000000000000000",
+          "source": "0"
+        }
+      ],
+      "previous_ledger_index": 2980845
+    },
+    {
+      "kind": "loan_broker",
+      "id": "0000210A5FE1D13E98AC7E1B2639594E362A9B1B210F0B7BA0AF03427F821082",
+      "detail_status": 200,
+      "ledger_entry_status": 200,
+      "match": false,
+      "mismatches": [
+        {
+          "field": "OwnerNode",
+          "worker": "0000000000000000",
+          "source": "0"
+        },
+        {
+          "field": "VaultNode",
+          "worker": "0000000000000000",
+          "source": "0"
+        }
+      ],
+      "previous_ledger_index": 63189
+    },
+    {
+      "kind": "loan_broker",
+      "id": "FFFFE6601910CBFE324CCADB7E41C32380688DB9469F4435236F0F05B5591768",
+      "detail_status": 200,
+      "ledger_entry_status": 200,
+      "match": false,
+      "mismatches": [
+        {
+          "field": "OwnerNode",
+          "worker": "0000000000000000",
+          "source": "0"
+        },
+        {
+          "field": "VaultNode",
+          "worker": "0000000000000000",
+          "source": "0"
+        }
+      ],
+      "previous_ledger_index": 188032
+    },
+    {
+      "kind": "loan_broker",
+      "id": "FFFFAD0FE71C4FC5D8383D08F0D8238D05414164299492C8FD4C3E0EAEF169EE",
+      "detail_status": 200,
+      "ledger_entry_status": 200,
+      "match": false,
+      "mismatches": [
+        {
+          "field": "OwnerNode",
+          "worker": "0000000000000000",
+          "source": "0"
+        },
+        {
+          "field": "VaultNode",
+          "worker": "0000000000000000",
+          "source": "0"
+        }
+      ],
+      "previous_ledger_index": 941925
+    },
+    {
+      "kind": "loan",
+      "id": "0000264C3DDAAFD5A96A5017088B7666F6E91DF0B0BE6B478FFD68A344BA310C",
+      "detail_status": 200,
+      "ledger_entry_status": 200,
+      "match": false,
+      "mismatches": [
+        {
+          "field": "LoanBrokerNode",
+          "worker": "0000000000000000",
+          "source": "0"
+        },
+        {
+          "field": "OwnerNode",
+          "worker": "0000000000000000",
+          "source": "0"
+        }
+      ],
+      "previous_ledger_index": 1801434
+    },
+    {
+      "kind": "loan",
+      "id": "00004A21309D30F1E4DAD0A3E15CB1EB6126BA789C7C1A425D821F534BE2335D",
+      "detail_status": 200,
+      "ledger_entry_status": 200,
+      "match": false,
+      "mismatches": [
+        {
+          "field": "LoanBrokerNode",
+          "worker": "0000000000000000",
+          "source": "0"
+        },
+        {
+          "field": "OwnerNode",
+          "worker": "0000000000000000",
+          "source": "0"
+        }
+      ],
+      "previous_ledger_index": 3045687
+    },
+    {
+      "kind": "loan",
+      "id": "FFFFC3C3A84E0B827AF014D9BEEBB309B18476D371D36F6E7E95C89BA2BC1518",
+      "detail_status": 200,
+      "ledger_entry_status": 200,
+      "match": false,
+      "mismatches": [
+        {
+          "field": "LoanBrokerNode",
+          "worker": "0000000000000000",
+          "source": "0"
+        },
+        {
+          "field": "OwnerNode",
+          "worker": "0000000000000000",
+          "source": "0"
+        }
+      ],
+      "previous_ledger_index": 364646
+    },
+    {
+      "kind": "loan",
+      "id": "FFFED6622C5F7A8D7CCAF0630280DC3385C0BCECF64FC1EC04B30177AE737922",
+      "detail_status": 200,
+      "ledger_entry_status": 200,
+      "match": false,
+      "mismatches": [
+        {
+          "field": "LoanBrokerNode",
+          "worker": "0000000000000000",
+          "source": "0"
+        },
+        {
+          "field": "OwnerNode",
+          "worker": "0000000000000000",
+          "source": "0"
+        }
+      ],
+      "previous_ledger_index": 526300
+    }
+  ],
+  "limits": [
+    "This is a point-in-time audit, not proof of uninterrupted operation before or after the captured interval.",
+    "Full re-enumeration of every XRPL ledger object was not performed; exact source comparison uses ledger/hash anchors plus distributed samples from all three current object types."
+  ],
   "workflow_stages": {
     "checkout": "success",
     "pnpm": "success",
@@ -12,10 +1510,8 @@
     "install": "success",
     "d1": "success",
     "cron": "success",
-    "audit": "failure",
-    "audit_stderr": "Traceback (most recent call last):\n  File \"/home/runner/work/xrpl-lending-monitor/xrpl-lending-monitor/.github/scripts/point-in-time-audit.py\", line 461, in <module>\n    main()\n  File \"/home/runner/work/xrpl-lending-monitor/xrpl-lending-monitor/.github/scripts/point-in-time-audit.py\", line 237, in main\n    cron_ok = schedules.get(\"success\") is True and len(schedule_list) == 1 and schedule_list[0].get(\"cron\") == \"*/5 * * * *\"\n                                                                               ~~~~~~~~~~~~~^^^\nKeyError: 0"
-  },
-  "limits": [
-    "The audit workflow failed before producing the detailed result."
-  ]
+    "audit": "success",
+    "audit_stderr": "FAILED: current_state_age, live_gap_within_one_cycle, collector_endpoint_healthy, diagnostic_counts_match_overview, source_object_samples_exact",
+    "schedules_preview": "{\n  \"result\": {\n    \"schedules\": [\n      {\n        \"cron\": \"*/5 * * * *\",\n        \"created_on\": \"2026-07-13T08:15:39.158898Z\",\n        \"modified_on\": \"2026-07-13T16:24:09.373569Z\"\n      }\n    ]\n  },\n  \"success\": true,\n  \"errors\": [],\n  \"messages\": []\n}"
+  }
 }
