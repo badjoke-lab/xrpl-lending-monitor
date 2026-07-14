@@ -1,0 +1,124 @@
+name: P0 canonical bridge maintenance
+
+on:
+  schedule:
+    - cron: '23 * * * *'
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: p0-canonical-bridge-maintenance
+  cancel-in-progress: false
+
+jobs:
+  bridge:
+    if: github.event_name == 'schedule' || startsWith(github.event.issue.title, 'P0 canonical bridge bootstrap')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+      ISSUE_NUMBER: ${{ github.event.issue.number }}
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Check out repository for bootstrap
+        if: github.event_name == 'issues'
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm for bootstrap
+        if: github.event_name == 'issues'
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - name: Set up Node.js for bootstrap
+        if: github.event_name == 'issues'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+
+      - name: Install dependencies for bootstrap
+        if: github.event_name == 'issues'
+        run: pnpm install --frozen-lockfile
+
+      - name: Configure bridge operator secret
+        if: github.event_name == 'issues'
+        shell: bash
+        run: |
+          set -euo pipefail
+          BRIDGE_TOKEN="$(printf '%s' "${CLOUDFLARE_API_TOKEN}:${CLOUDFLARE_ACCOUNT_ID}:xrpl-canonical-bridge-v1" | sha256sum | awk '{print $1}')"
+          printf '%s' "$BRIDGE_TOKEN" | pnpm exec wrangler secret put P0_CANONICAL_BRIDGE_TOKEN
+          sleep 5
+
+      - name: Run isolated bridge and promotion
+        id: bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          BRIDGE_TOKEN="$(printf '%s' "${CLOUDFLARE_API_TOKEN}:${CLOUDFLARE_ACCOUNT_ID}:xrpl-canonical-bridge-v1" | sha256sum | awk '{print $1}')"
+          ATTEMPTS=1
+          if [ "${GITHUB_EVENT_NAME}" = issues ]; then ATTEMPTS=30; fi
+          : > /tmp/bridge-attempts.ndjson
+          printf '{"status":"not_started"}\n' > /tmp/bridge-final.json
+          promoted=false
+
+          for attempt in $(seq 1 "$ATTEMPTS"); do
+            http_code="$(curl --silent --show-error --max-time 60 \
+              -o /tmp/bridge-response.json -w '%{http_code}' \
+              -X POST \
+              -H "x-p0-canonical-bridge-token: ${BRIDGE_TOKEN}" \
+              "${PRODUCTION_BASE}/api/operator/p0-canonical-bridge" || true)"
+
+            if [ ! -s /tmp/bridge-response.json ]; then
+              printf '{"status":"failed","reason":"empty_operator_response","http_code":"%s"}\n' "$http_code" \
+                > /tmp/bridge-response.json
+            fi
+            jq -c --arg attempt "$attempt" --arg httpCode "$http_code" \
+              '{attempt:($attempt|tonumber),httpCode:$httpCode,response:.}' \
+              /tmp/bridge-response.json >> /tmp/bridge-attempts.ndjson
+            cp /tmp/bridge-response.json /tmp/bridge-final.json
+
+            if [ "$http_code" = 200 ] \
+              && jq -e '.status == "promoted" and .bridge.bridgeReady == true and .promotion != null' \
+                /tmp/bridge-response.json > /dev/null; then
+              promoted=true
+              break
+            fi
+
+            if [ "${GITHUB_EVENT_NAME}" != issues ]; then break; fi
+            sleep 2
+          done
+
+          cat /tmp/bridge-final.json
+          if [ "$promoted" != true ]; then
+            echo 'Canonical bridge did not reach a promoted state.' >&2
+            exit 1
+          fi
+
+      - name: Report bootstrap result
+        if: always() && github.event_name == 'issues'
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo 'P0 canonical bridge bootstrap result:'
+            echo
+            echo '```json'
+            if [ -s /tmp/bridge-final.json ]; then jq . /tmp/bridge-final.json; else echo '{"status":"missing_result"}'; fi
+            echo '```'
+            echo
+            echo '<details><summary>Invocation attempts</summary>'
+            echo
+            echo '```json'
+            if [ -s /tmp/bridge-attempts.ndjson ]; then jq -s . /tmp/bridge-attempts.ndjson; else echo '[]'; fi
+            echo '```'
+            echo '</details>'
+          } > /tmp/bridge-comment.md
+          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file /tmp/bridge-comment.md
