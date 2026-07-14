@@ -132,6 +132,15 @@ const wrappedWorker: ExportedHandler<Bindings> = {
         if (await fastLaneCaughtUp(env.DB)) break
       }
 
+      const promotion = await promoteFastLaneCompactToCanonicalOverlay(env.DB)
+      if (promotion) {
+        console.log(JSON.stringify({
+          event: 'fast_lane_compact_promoted',
+          runAt,
+          ...promotion,
+        }))
+      }
+
       await pruneFastLaneStorage(env.DB)
       await assertFastLaneStorageCapacity(env.DB)
       await deleteFastLaneShadowRunHeartbeat({ db: env.DB, runAt })
