@@ -9,6 +9,20 @@ import {
 const FAST_LANE_PASSES_PER_CRON = 8
 const SYNTHETIC_PASS_OFFSET_MS = 60_000
 
+interface FastLaneStateRow {
+  last_processed_ledger: number
+  latest_observed_ledger: number
+}
+
+async function fastLaneCaughtUp(db: D1Database): Promise<boolean> {
+  const row = await db.prepare(
+    `SELECT last_processed_ledger, latest_observed_ledger
+     FROM fast_lane_shadow_state
+     WHERE network = 'devnet'`,
+  ).first<FastLaneStateRow>()
+  return Boolean(row && row.last_processed_ledger >= row.latest_observed_ledger)
+}
+
 const wrappedWorker: ExportedHandler<Bindings> = {
   ...worker,
 
@@ -40,6 +54,7 @@ const wrappedWorker: ExportedHandler<Bindings> = {
             } as typeof controller
 
         await worker.scheduled(passController, env, executionContext)
+        if (await fastLaneCaughtUp(env.DB)) break
       }
 
       await deleteFastLaneShadowRunHeartbeat({ db: env.DB, runAt })
