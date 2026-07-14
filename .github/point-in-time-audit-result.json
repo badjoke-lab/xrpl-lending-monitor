@@ -1,12 +1,20 @@
 {
-  "generated_at": "2026-07-14T01:41:09Z",
+  "generated_at": "2026-07-14T01:42:31Z",
   "audit_type": "point_in_time_read_only",
   "production_mutated": false,
   "verdict": "workflow_failed",
-  "summary": {
-    "job_status": "failure"
-  },
+  "summary": {},
   "checks": [],
+  "workflow_stages": {
+    "checkout": "success",
+    "pnpm": "success",
+    "node": "success",
+    "install": "success",
+    "d1": "success",
+    "cron": "success",
+    "audit": "failure",
+    "audit_stderr": "Traceback (most recent call last):\n  File \"/home/runner/work/xrpl-lending-monitor/xrpl-lending-monitor/.github/scripts/point-in-time-audit.py\", line 461, in <module>\n    main()\n  File \"/home/runner/work/xrpl-lending-monitor/xrpl-lending-monitor/.github/scripts/point-in-time-audit.py\", line 237, in main\n    cron_ok = schedules.get(\"success\") is True and len(schedule_list) == 1 and schedule_list[0].get(\"cron\") == \"*/5 * * * *\"\n                                                                               ~~~~~~~~~~~~~^^^\nKeyError: 0"
+  },
   "limits": [
     "The audit workflow failed before producing the detailed result."
   ]
