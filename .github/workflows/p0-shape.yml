@@ -1,0 +1,21 @@
+name: P0 compact shape
+on:
+  issues:
+    types: [opened]
+permissions:
+  issues: write
+jobs:
+  query:
+    if: startsWith(github.event.issue.title, 'P0 compact shape')
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - shell: bash
+        run: |
+          SQL="SELECT object_type, operation, COUNT(*) AS rows, COALESCE(SUM(LENGTH(projection_json)),0) AS bytes, MIN(source_ledger_index) AS min_ledger, MAX(source_ledger_index) AS max_ledger FROM fast_lane_shadow_objects_compact WHERE network='devnet' GROUP BY object_type, operation ORDER BY object_type, operation"
+          jq -n --arg sql "$SQL" '{sql:$sql}' | curl --fail-with-body --silent --show-error -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -H 'Content-Type: application/json' --data-binary @- "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database/bebc2c68-03d2-4a1c-98a7-46b34ee4e25d/query" > /tmp/result.json
+          { echo 'Compact shape:'; echo '```json'; jq . /tmp/result.json; echo '```'; } > /tmp/comment.md
+          gh issue comment "${{ github.event.issue.number }}" --repo "${{ github.repository }}" --body-file /tmp/comment.md
