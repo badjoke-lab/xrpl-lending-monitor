@@ -5,6 +5,7 @@ import {
   saveFastLaneShadowRunError,
   saveFastLaneShadowRunHeartbeat,
 } from './repositories/fast-lane-shadow-run-metrics'
+import { pruneFastLaneStorage } from './repositories/fast-lane-storage-retention'
 
 const FAST_LANE_PASSES_PER_CRON = 8
 const SYNTHETIC_PASS_OFFSET_MS = 60_000
@@ -55,6 +56,16 @@ const wrappedWorker: ExportedHandler<Bindings> = {
 
         await worker.scheduled(passController, env, executionContext)
         if (await fastLaneCaughtUp(env.DB)) break
+      }
+
+      try {
+        await pruneFastLaneStorage(env.DB)
+      } catch (error) {
+        console.error(JSON.stringify({
+          event: 'fast_lane_storage_retention_failed',
+          runAt,
+          reason: error instanceof Error ? error.message : 'unknown_error',
+        }))
       }
 
       await deleteFastLaneShadowRunHeartbeat({ db: env.DB, runAt })
