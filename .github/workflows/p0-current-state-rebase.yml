@@ -1,0 +1,85 @@
+name: P0 current-state base rebuild
+
+on:
+  issues:
+    types: [opened]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  rebuild:
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.issue.title, 'P0 current-state rebase now')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+      ISSUE_NUMBER: ${{ github.event.issue.number }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build complete current-state release
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="current-state-rebase-$(date -u +%Y%m%d-%H%M%S)"
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          pnpm exec tsx scripts/run-release-current-state.ts \
+            --local \
+            --release-tag "$TAG" \
+            --epoch-id devnet-3371675 \
+            --page-limit 500 \
+            --object-limit-per-page 2048 \
+            --data-segments 20 \
+            --index-buckets 64 \
+            --output-dir .local/current-state-release \
+            > .local/current-state-release.stdout.json
+          jq -e '.complete == true' .local/current-state-release/release-summary.json >/dev/null
+      - name: Publish immutable release and activate channel
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" \
+            .local/current-state-release/assets/* \
+            --repo "$REPOSITORY" \
+            --title "$TAG" \
+            --notes-file .local/current-state-release/release-notes.md
+          if gh release view current-state-channel --repo "$REPOSITORY" >/dev/null 2>&1; then
+            gh release upload current-state-channel \
+              .local/current-state-release/channel/channel.json \
+              --repo "$REPOSITORY" \
+              --clobber
+          else
+            gh release create current-state-channel \
+              .local/current-state-release/channel/channel.json \
+              --repo "$REPOSITORY" \
+              --title current-state-channel \
+              --notes 'Mutable channel pointer for the active current-state release.'
+          fi
+      - name: Report result
+        shell: bash
+        run: |
+          {
+            echo 'P0 current-state rebase result:'
+            echo
+            echo '```json'
+            jq . .local/current-state-release/release-summary.json
+            echo '```'
+            echo
+            echo "release_tag: $TAG"
+          } > /tmp/comment.md
+          if [ -n "${ISSUE_NUMBER:-}" ]; then
+            gh issue comment "$ISSUE_NUMBER" --repo "$REPOSITORY" --body-file /tmp/comment.md
+          else
+            cat /tmp/comment.md
+          fi
