@@ -20,11 +20,11 @@ jobs:
       - shell: bash
         run: |
           set -euo pipefail
-          gh api "repos/${REPOSITORY}/actions/runs?event=issues&per_page=20" \
-            --jq '{runs: [.workflow_runs[] | {id, name, display_title, status, conclusion, head_sha, created_at, updated_at, html_url}]}' \
+          gh api "repos/${REPOSITORY}/actions/runs?per_page=30" \
+            --jq '{runs: [.workflow_runs[] | {id, name, event, display_title, status, conclusion, head_sha, created_at, updated_at, html_url}]}' \
             > /tmp/runs.json
           {
-            echo 'Recent issue-triggered workflow runs:'
+            echo 'Recent workflow runs:'
             echo
             echo '```json'
             jq . /tmp/runs.json
