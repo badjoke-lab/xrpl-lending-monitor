@@ -5,6 +5,9 @@ import {
   saveFastLaneShadowRunHeartbeat,
 } from './repositories/fast-lane-shadow-run-metrics'
 
+const FAST_LANE_PASSES_PER_CRON = 4
+const SYNTHETIC_PASS_OFFSET_MS = 60_000
+
 const wrappedWorker: ExportedHandler<Bindings> = {
   ...worker,
 
@@ -26,7 +29,15 @@ const wrappedWorker: ExportedHandler<Bindings> = {
         throw new Error('Wrapped Worker does not expose a scheduled handler')
       }
 
-      return await worker.scheduled(controller, env, executionContext)
+      for (let pass = 0; pass < FAST_LANE_PASSES_PER_CRON; pass += 1) {
+        const passController = pass === 0
+          ? controller
+          : Object.assign(Object.create(controller), {
+              scheduledTime: controller.scheduledTime + pass * SYNTHETIC_PASS_OFFSET_MS,
+            }) as typeof controller
+
+        await worker.scheduled(passController, env, executionContext)
+      }
     } catch (error) {
       const reason = error instanceof Error ? error.message : 'unknown_error'
       try {
