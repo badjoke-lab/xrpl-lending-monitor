@@ -1,6 +1,7 @@
 import type { Bindings } from './env'
 import worker from './entry'
 import {
+  deleteFastLaneShadowRunHeartbeat,
   saveFastLaneShadowRunError,
   saveFastLaneShadowRunHeartbeat,
 } from './repositories/fast-lane-shadow-run-metrics'
@@ -40,6 +41,8 @@ const wrappedWorker: ExportedHandler<Bindings> = {
 
         await worker.scheduled(passController, env, executionContext)
       }
+
+      await deleteFastLaneShadowRunHeartbeat({ db: env.DB, runAt })
     } catch (error) {
       const reason = error instanceof Error ? error.message : 'unknown_error'
       try {
