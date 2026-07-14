@@ -1,5 +1,5 @@
 name: P0 point-in-time production audit
-# refresh: 2026-07-14T10:35:00+09:00
+# refresh: 2026-07-14T10:43:00+09:00
 on:
   push:
     branches: [ops/p0-direct-recovery]
@@ -11,22 +11,34 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - id: checkout
+        continue-on-error: true
+        uses: actions/checkout@v4
         with:
           ref: ops/p0-direct-recovery
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - id: pnpm
+        continue-on-error: true
+        uses: pnpm/action-setup@v4
+      - id: node
+        continue-on-error: true
+        uses: actions/setup-node@v4
         with:
           node-version: 24.18.0
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - name: Read D1 state
+      - id: install
+        continue-on-error: true
+        run: pnpm install --frozen-lockfile
+      - id: d1
+        name: Read D1 state
+        continue-on-error: true
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           pnpm exec wrangler d1 execute xrpl-lending-monitor --remote --json --command "SELECT * FROM fast_lane_shadow_state WHERE network='devnet'; SELECT * FROM fast_lane_shadow_run_metrics WHERE network='devnet' ORDER BY run_at DESC LIMIT 12; SELECT * FROM fast_lane_shadow_base_binding WHERE network='devnet'; PRAGMA quick_check;" > d1.json
-      - name: Read cron schedules
+      - id: cron
+        name: Read cron schedules
+        continue-on-error: true
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -35,24 +47,41 @@ jobs:
             -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
             "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/xrpl-lending-monitor/schedules" \
             > schedules.json
-      - name: Execute audit
-        run: python .github/scripts/point-in-time-audit.py
+      - id: audit
+        name: Execute audit
+        continue-on-error: true
+        run: |
+          python .github/scripts/point-in-time-audit.py > audit.stdout 2> audit.stderr
       - name: Publish audit result
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
+          CHECKOUT_OUTCOME: ${{ steps.checkout.outcome }}
+          PNPM_OUTCOME: ${{ steps.pnpm.outcome }}
+          NODE_OUTCOME: ${{ steps.node.outcome }}
+          INSTALL_OUTCOME: ${{ steps.install.outcome }}
+          D1_OUTCOME: ${{ steps.d1.outcome }}
+          CRON_OUTCOME: ${{ steps.cron.outcome }}
+          AUDIT_OUTCOME: ${{ steps.audit.outcome }}
         run: |
-          if [ ! -f point-audit-result.json ]; then
-            jq -n --arg captured "$(date -u +%FT%TZ)" --arg job "${{ job.status }}" \
-              '{generated_at:$captured,audit_type:"point_in_time_read_only",production_mutated:false,verdict:"workflow_failed",summary:{job_status:$job},checks:[],limits:["The audit workflow failed before producing the detailed result."]}' \
-              > point-audit-result.json
+          jq -n \
+            --arg checkout "$CHECKOUT_OUTCOME" \
+            --arg pnpm "$PNPM_OUTCOME" \
+            --arg node "$NODE_OUTCOME" \
+            --arg install "$INSTALL_OUTCOME" \
+            --arg d1 "$D1_OUTCOME" \
+            --arg cron "$CRON_OUTCOME" \
+            --arg audit "$AUDIT_OUTCOME" \
+            --arg stderr "$(cat audit.stderr 2>/dev/null | tail -c 4000 || true)" \
+            '{checkout:$checkout,pnpm:$pnpm,node:$node,install:$install,d1:$d1,cron:$cron,audit:$audit,audit_stderr:$stderr}' > workflow-steps.json
+          if [ -f point-audit-result.json ]; then
+            jq --slurpfile stages workflow-steps.json '. + {workflow_stages:$stages[0]}' point-audit-result.json > published.json
+          else
+            jq -n --slurpfile stages workflow-steps.json --arg captured "$(date -u +%FT%TZ)" \
+              '{generated_at:$captured,audit_type:"point_in_time_read_only",production_mutated:false,verdict:"workflow_failed",summary:{},checks:[],workflow_stages:$stages[0],limits:["The audit workflow failed before producing the detailed result."]}' > published.json
           fi
-          content=$(base64 -w0 point-audit-result.json)
+          content=$(base64 -w0 published.json)
           path='.github/point-in-time-audit-result.json'
           api="repos/${GITHUB_REPOSITORY}/contents/${path}"
           sha=$(gh api "$api?ref=ops/p0-direct-recovery" --jq .sha 2>/dev/null || true)
-          if [ -n "$sha" ]; then
-            gh api --method PUT "$api" -f message='Update point-in-time production audit result' -f content="$content" -f sha="$sha" -f branch='ops/p0-direct-recovery' >/dev/null
-          else
-            gh api --method PUT "$api" -f message='Create point-in-time production audit result' -f content="$content" -f branch='ops/p0-direct-recovery' >/dev/null
-          fi
+          gh api --method PUT "$api" -f message='Update point-in-time production audit result' -f content="$content" ${sha:+-f sha="$sha"} -f branch='ops/p0-direct-recovery' >/dev/null
