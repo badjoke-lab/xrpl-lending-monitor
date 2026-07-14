@@ -13,13 +13,15 @@ jobs:
   rebuild:
     if: github.event_name == 'workflow_dispatch' || startsWith(github.event.issue.title, 'P0 current-state rebase now')
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
     env:
       GH_TOKEN: ${{ github.token }}
       REPOSITORY: ${{ github.repository }}
       ISSUE_NUMBER: ${{ github.event.issue.number }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
       - uses: pnpm/action-setup@v4
         with:
           version: 11.9.0
@@ -41,14 +43,35 @@ jobs:
             --local \
             --release-tag "$TAG" \
             --epoch-id devnet-3371675 \
-            --page-limit 500 \
+            --page-limit 5000 \
             --object-limit-per-page 2048 \
             --data-segments 20 \
             --index-buckets 64 \
             --output-dir .local/current-state-release \
             2>&1 | tee -a /tmp/rebase.log
           jq -e '.complete == true' .local/current-state-release/release-summary.json >/dev/null
-      - name: Publish immutable release and activate channel
+          SNAPSHOT_ID=$(jq -r '.snapshotId // empty' .local/current-state-release/assets/manifest.json)
+          LEDGER_INDEX=$(jq -r '.ledgerIndex' .local/current-state-release/assets/manifest.json)
+          LEDGER_HASH=$(jq -r '.ledgerHash' .local/current-state-release/assets/manifest.json)
+          test -n "$SNAPSHOT_ID"
+          echo "SNAPSHOT_ID=$SNAPSHOT_ID" >> "$GITHUB_ENV"
+          echo "LEDGER_INDEX=$LEDGER_INDEX" >> "$GITHUB_ENV"
+          echo "LEDGER_HASH=$LEDGER_HASH" >> "$GITHUB_ENV"
+      - name: Build branch read model
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm exec vite build --config vite.base-current-state-read-model.config.ts 2>&1 | tee -a /tmp/rebase.log
+          node .base-current-state-read-model-build/build-base-current-state-read-model.mjs \
+            --local \
+            --input-dir .local/current-state-release/assets \
+            --output-dir .local/current-state-read-model \
+            --snapshot-id "$SNAPSHOT_ID" \
+            --release-tag "$TAG" \
+            --page-size 50 \
+            --lookup-prefix-length 3 \
+            2>&1 | tee -a /tmp/rebase.log
+      - name: Publish immutable release
         shell: bash
         run: |
           set -euo pipefail
@@ -57,18 +80,35 @@ jobs:
             --repo "$REPOSITORY" \
             --title "$TAG" \
             --notes-file .local/current-state-release/release-notes.md
-          if gh release view current-state-channel --repo "$REPOSITORY" >/dev/null 2>&1; then
-            gh release upload current-state-channel \
-              .local/current-state-release/channel/channel.json \
-              --repo "$REPOSITORY" \
-              --clobber
-          else
-            gh release create current-state-channel \
-              .local/current-state-release/channel/channel.json \
-              --repo "$REPOSITORY" \
-              --title current-state-channel \
-              --notes 'Mutable channel pointer for the active current-state release.'
-          fi
+      - name: Publish current-state data branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin current-state-data:refs/remotes/origin/current-state-data
+          rm -rf /tmp/current-state-data
+          git worktree add --detach /tmp/current-state-data origin/current-state-data
+          cd /tmp/current-state-data
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          rm -rf read-model
+          cp -R "$GITHUB_WORKSPACE/.local/current-state-read-model/read-model" ./read-model
+          git add -A read-model
+          git commit -m "data: publish $TAG"
+          DATA_COMMIT_SHA=$(git rev-parse HEAD)
+          MANIFEST_SHA=$(jq -r '.manifestSha256' read-model/manifest.json)
+          UPDATED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          jq -n \
+            --arg dataCommitSha "$DATA_COMMIT_SHA" \
+            --arg manifestSha256 "$MANIFEST_SHA" \
+            --arg releaseTag "$TAG" \
+            --arg snapshotId "$SNAPSHOT_ID" \
+            --arg updatedAt "$UPDATED_AT" \
+            '{schemaVersion:1,active:{dataCommitSha:$dataCommitSha,manifestPath:"read-model/manifest.json",manifestSha256:$manifestSha256,releaseTag:$releaseTag,snapshotId:$snapshotId},updatedAt:$updatedAt}' \
+            > channel.json
+          git add channel.json
+          git commit -m "data: activate $TAG"
+          git push origin HEAD:current-state-data
+          echo "DATA_COMMIT_SHA=$DATA_COMMIT_SHA" >> "$GITHUB_ENV"
       - name: Report result
         if: success()
         shell: bash
@@ -76,11 +116,17 @@ jobs:
           {
             echo 'P0 current-state rebase result:'
             echo
+            echo 'Release snapshot:'
             echo '```json'
             jq . .local/current-state-release/release-summary.json
             echo '```'
             echo
-            echo "release_tag: $TAG"
+            echo 'Read model:'
+            echo '```json'
+            jq . .local/current-state-read-model/base-read-model-summary.json
+            echo '```'
+            echo
+            echo "data_commit_sha: $DATA_COMMIT_SHA"
           } > /tmp/comment.md
           if [ -n "${ISSUE_NUMBER:-}" ]; then
             gh issue comment "$ISSUE_NUMBER" --repo "$REPOSITORY" --body-file /tmp/comment.md
@@ -95,7 +141,7 @@ jobs:
             echo 'P0 current-state rebase failed.'
             echo
             echo '```text'
-            if [ -f /tmp/rebase.log ]; then tail -n 80 /tmp/rebase.log; else echo 'No rebuild log was produced.'; fi
+            if [ -f /tmp/rebase.log ]; then tail -n 120 /tmp/rebase.log; else echo 'No rebuild log was produced.'; fi
             echo '```'
           } > /tmp/failure.md
           gh issue comment "$ISSUE_NUMBER" --repo "$REPOSITORY" --body-file /tmp/failure.md
