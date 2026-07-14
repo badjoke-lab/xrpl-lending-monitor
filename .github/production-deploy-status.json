@@ -1,7 +1,7 @@
 {
-  "runId": "29328668851",
-  "runUrl": "https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/29328668851",
-  "headSha": "5041e922484238c618a5ee8c0aa707f23a7b18c8",
+  "runId": "29328918960",
+  "runUrl": "https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/29328918960",
+  "headSha": "6d8acfd159784e99eadbfbddd6ef29b4f1efff06",
   "outcome": "failure",
   "checkpoint": {
     "epochId": "devnet-3371675",
