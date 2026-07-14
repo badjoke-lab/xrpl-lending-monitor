@@ -33,9 +33,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -p .local
           TAG="current-state-rebase-$(date -u +%Y%m%d-%H%M%S)"
           echo "TAG=$TAG" >> "$GITHUB_ENV"
-          pnpm build:release-current-state
+          pnpm build:release-current-state 2>&1 | tee /tmp/rebase.log
           node .release-current-state-build/run-release-current-state.mjs \
             --local \
             --release-tag "$TAG" \
@@ -45,7 +46,7 @@ jobs:
             --data-segments 20 \
             --index-buckets 64 \
             --output-dir .local/current-state-release \
-            > .local/current-state-release.stdout.json
+            2>&1 | tee -a /tmp/rebase.log
           jq -e '.complete == true' .local/current-state-release/release-summary.json >/dev/null
       - name: Publish immutable release and activate channel
         shell: bash
@@ -90,4 +91,11 @@ jobs:
         if: failure() && env.ISSUE_NUMBER != ''
         shell: bash
         run: |
-          gh issue comment "$ISSUE_NUMBER" --repo "$REPOSITORY" --body 'P0 current-state rebase failed. Inspect the workflow run before changing production.'
+          {
+            echo 'P0 current-state rebase failed.'
+            echo
+            echo '```text'
+            if [ -f /tmp/rebase.log ]; then tail -n 80 /tmp/rebase.log; else echo 'No rebuild log was produced.'; fi
+            echo '```'
+          } > /tmp/failure.md
+          gh issue comment "$ISSUE_NUMBER" --repo "$REPOSITORY" --body-file /tmp/failure.md
