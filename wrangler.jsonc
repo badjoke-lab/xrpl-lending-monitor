@@ -1,7 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "xrpl-lending-monitor",
-  "main": "src/worker/entry.ts",
+  "main": "src/worker/p0-heartbeat-entry.ts",
   "compatibility_date": "2026-07-01",
   "triggers": {
     "crons": ["*/5 * * * *"]
