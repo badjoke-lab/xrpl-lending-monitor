@@ -13,4 +13,5 @@ export interface Bindings
   ASSETS: Fetcher
   DB: D1Database
   REPLACEMENT_BASE_CUTOVER_TOKEN?: string
+  P0_CANONICAL_BRIDGE_TOKEN?: string
 }
