@@ -1,7 +1,3 @@
-import { normalizeAffectedNodes } from '../../collector/incremental/affected-nodes'
-import { deriveArchivedObjects } from '../../collector/incremental/deleted-object-archive'
-import { deriveBalanceHistory } from '../../collector/incremental/cover-debt-loss'
-import { deriveLoanLifecycleEvents } from '../../collector/incremental/loan-lifecycle'
 import type { IncrementalScanResult } from '../../collector/incremental/scan-validated-ledgers'
 import type {
   ArchivedObjectRecord,
@@ -10,12 +6,6 @@ import type {
   ObjectChangeRecord,
   ProtocolEventRecord,
 } from './history-api-repository'
-import {
-  segmentArchivedObjectToApi,
-  segmentBalanceHistoryToApi,
-  segmentLoanLifecycleToApi,
-  segmentObjectChangeToApi,
-} from './history-segment-adapter'
 
 const DEFAULT_MAX_WINDOWS = 400
 
@@ -72,11 +62,6 @@ export function buildFastLaneHistoryBundle(options: {
   if (!first || !final) throw new Error('Fast-lane history bundle requires a non-empty scan')
 
   const protocolEvents: ProtocolEventRecord[] = []
-  const objectChanges: ObjectChangeRecord[] = []
-  const loanLifecycle: LoanLifecycleRecord[] = []
-  const archivedObjects: ArchivedObjectRecord[] = []
-  const balanceHistory: BalanceHistoryApiRecord[] = []
-
   for (const ledger of options.scan.ledgers) {
     for (const event of ledger.lendingTransactions) {
       protocolEvents.push({
@@ -92,21 +77,6 @@ export function buildFastLaneHistoryBundle(options: {
         metadataJson: null,
         createdAt: options.processedAt,
       })
-
-      const changes = normalizeAffectedNodes(event.metadata, {
-        network: 'devnet',
-        epochId: options.epochId,
-        ledgerIndex: ledger.ledgerIndex,
-        closeTime: ledger.closeTime,
-        transactionHash: event.hash,
-        transactionIndex: event.transactionIndex,
-        transactionType: event.transactionType,
-        result: event.result,
-      })
-      objectChanges.push(...changes.map(segmentObjectChangeToApi))
-      loanLifecycle.push(...deriveLoanLifecycleEvents(changes).map(segmentLoanLifecycleToApi))
-      archivedObjects.push(...deriveArchivedObjects(changes).map(segmentArchivedObjectToApi))
-      balanceHistory.push(...deriveBalanceHistory(changes).map(segmentBalanceHistoryToApi))
     }
   }
 
@@ -118,10 +88,10 @@ export function buildFastLaneHistoryBundle(options: {
     endLedgerHash: final.ledgerHash,
     createdAt: options.processedAt,
     protocolEvents,
-    objectChanges,
-    loanLifecycle,
-    archivedObjects,
-    balanceHistory,
+    objectChanges: [],
+    loanLifecycle: [],
+    archivedObjects: [],
+    balanceHistory: [],
   }
 }
 
