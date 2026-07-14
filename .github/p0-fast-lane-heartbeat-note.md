@@ -1,0 +1,1 @@
+This emergency branch makes every scheduled invocation write a durable D1 heartbeat before delegating to the existing five-minute collector. Successful runs replace the provisional error row with their actual result.
