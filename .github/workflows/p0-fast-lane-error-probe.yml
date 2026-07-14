@@ -39,12 +39,20 @@ jobs:
           curl --fail-with-body --silent --show-error \
             -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
             -H 'Content-Type: application/json' \
-            --data '{"sql":"SELECT '\''fast_lane_history_windows'\'' AS table_name, COUNT(*) AS row_count, COALESCE(SUM(LENGTH(bundle_json)), 0) AS payload_bytes FROM fast_lane_history_windows UNION ALL SELECT '\''fast_lane_shadow_windows'\'', COUNT(*), COALESCE(SUM(LENGTH(activity_bundle_json)), 0) FROM fast_lane_shadow_windows UNION ALL SELECT '\''fast_lane_shadow_objects_compact'\'', COUNT(*), COALESCE(SUM(LENGTH(projection_json)), 0) FROM fast_lane_shadow_objects_compact UNION ALL SELECT '\''fast_lane_shadow_run_metrics'\'', COUNT(*), COALESCE(SUM(LENGTH(COALESCE(error_message, '\'''\''))), 0) FROM fast_lane_shadow_run_metrics"}' \
+            --data '{"sql":"SELECT '\''fast_lane_history_windows'\'' AS table_name, COUNT(*) AS row_count, COALESCE(SUM(LENGTH(bundle_json)), 0) AS payload_bytes FROM fast_lane_history_windows UNION ALL SELECT '\''fast_lane_shadow_windows'\'', COUNT(*), COALESCE(SUM(LENGTH(activity_bundle_json)), 0) FROM fast_lane_shadow_windows UNION ALL SELECT '\''fast_lane_shadow_objects_compact'\'', COUNT(*), COALESCE(SUM(LENGTH(projection_json)), 0) FROM fast_lane_shadow_objects_compact UNION ALL SELECT '\''fast_lane_shadow_run_metrics'\'', COUNT(*), COALESCE(SUM(LENGTH(COALESCE(error_message, '\''\''))), 0) FROM fast_lane_shadow_run_metrics UNION ALL SELECT '\''current_state_overlay_objects'\'', COUNT(*), COALESCE(SUM(LENGTH(projection_json)), 0) FROM current_state_overlay_objects"}' \
             "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database/${DATABASE_ID}/query" \
             > /tmp/storage.json
 
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            -H 'Content-Type: application/json' \
+            --data '{"sql":"SELECT state.overlay_ledger_index, state.overlay_ledger_hash, state.updated_at, (SELECT COUNT(*) FROM fast_lane_shadow_objects_compact AS fast WHERE fast.network = '\''devnet'\'' AND EXISTS (SELECT 1 FROM current_state_overlay_objects AS overlay WHERE overlay.network = '\''devnet'\'' AND overlay.epoch_id = binding.base_epoch_id AND overlay.base_snapshot_id = binding.base_snapshot_id AND overlay.object_type = fast.object_type AND overlay.object_id = fast.object_id AND (overlay.source_ledger_index > fast.source_ledger_index OR (overlay.source_ledger_index = fast.source_ledger_index AND overlay.source_transaction_index >= fast.source_transaction_index)))) AS foldable_fast_rows FROM current_state_overlay_state AS state JOIN fast_lane_shadow_base_binding AS binding ON binding.network = '\''devnet'\'' AND state.network = '\''devnet'\'' AND state.epoch_id = binding.base_epoch_id AND state.base_snapshot_id = binding.base_snapshot_id LIMIT 1"}' \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database/${DATABASE_ID}/query" \
+            > /tmp/fold.json
+
           jq . /tmp/result.json > /tmp/result.pretty.json
           jq . /tmp/storage.json > /tmp/storage.pretty.json
+          jq . /tmp/fold.json > /tmp/fold.pretty.json
           {
             echo 'P0 fast-lane error probe result:'
             echo
@@ -56,6 +64,12 @@ jobs:
             echo
             echo '```json'
             cat /tmp/storage.pretty.json
+            echo '```'
+            echo
+            echo 'Canonical fold diagnostics:'
+            echo
+            echo '```json'
+            cat /tmp/fold.pretty.json
             echo '```'
           } > /tmp/comment.md
           if [ -n "${ISSUE_NUMBER:-}" ]; then
