@@ -30,7 +30,7 @@ jobs:
           node-version: 24.18.0
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Build complete current-state release
+      - name: Build complete typed current-state release
         id: build
         shell: bash
         run: |
@@ -38,21 +38,19 @@ jobs:
           mkdir -p .local
           TAG="current-state-rebase-$(date -u +%Y%m%d-%H%M%S)"
           echo "TAG=$TAG" >> "$GITHUB_ENV"
-          pnpm build:release-current-state 2>&1 | tee /tmp/rebase.log
-          node .release-current-state-build/run-release-current-state.mjs \
+          pnpm exec vite build --config vite.typed-current-state-release.config.ts 2>&1 | tee /tmp/rebase.log
+          node .typed-current-state-release-build/run-typed-current-state-release.mjs \
             --local \
             --release-tag "$TAG" \
             --epoch-id devnet-3371675 \
-            --page-limit 5000 \
+            --page-limit 2000 \
             --object-limit-per-page 2048 \
-            --data-segments 20 \
-            --index-buckets 64 \
             --output-dir .local/current-state-release \
             2>&1 | tee -a /tmp/rebase.log
           jq -e '.complete == true' .local/current-state-release/release-summary.json >/dev/null
-          SNAPSHOT_ID=$(jq -r '.snapshotId // empty' .local/current-state-release/assets/manifest.json)
-          LEDGER_INDEX=$(jq -r '.ledgerIndex' .local/current-state-release/assets/manifest.json)
-          LEDGER_HASH=$(jq -r '.ledgerHash' .local/current-state-release/assets/manifest.json)
+          SNAPSHOT_ID=$(jq -r '.snapshotId' .local/current-state-release/release-summary.json)
+          LEDGER_INDEX=$(jq -r '.ledger.ledgerIndex' .local/current-state-release/release-summary.json)
+          LEDGER_HASH=$(jq -r '.ledger.ledgerHash' .local/current-state-release/release-summary.json)
           test -n "$SNAPSHOT_ID"
           echo "SNAPSHOT_ID=$SNAPSHOT_ID" >> "$GITHUB_ENV"
           echo "LEDGER_INDEX=$LEDGER_INDEX" >> "$GITHUB_ENV"
@@ -116,7 +114,7 @@ jobs:
           {
             echo 'P0 current-state rebase result:'
             echo
-            echo 'Release snapshot:'
+            echo 'Typed release snapshot:'
             echo '```json'
             jq . .local/current-state-release/release-summary.json
             echo '```'
@@ -141,7 +139,7 @@ jobs:
             echo 'P0 current-state rebase failed.'
             echo
             echo '```text'
-            if [ -f /tmp/rebase.log ]; then tail -n 120 /tmp/rebase.log; else echo 'No rebuild log was produced.'; fi
+            if [ -f /tmp/rebase.log ]; then tail -n 160 /tmp/rebase.log; else echo 'No rebuild log was produced.'; fi
             echo '```'
           } > /tmp/failure.md
           gh issue comment "$ISSUE_NUMBER" --repo "$REPOSITORY" --body-file /tmp/failure.md
