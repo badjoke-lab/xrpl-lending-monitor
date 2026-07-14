@@ -1,6 +1,10 @@
 import type { Bindings } from './env'
 import worker from './entry'
 import {
+  promoteFastLaneCompactToCanonicalOverlay,
+  runCanonicalBridgePasses,
+} from './operator/fast-lane-canonical-bridge'
+import {
   deleteFastLaneShadowRunHeartbeat,
   saveFastLaneShadowRunError,
   saveFastLaneShadowRunHeartbeat,
@@ -11,6 +15,7 @@ import {
 } from './repositories/fast-lane-storage-retention'
 
 const FAST_LANE_PASSES_PER_CRON = 8
+const CANONICAL_BRIDGE_PASSES_PER_CRON = 16
 const SYNTHETIC_PASS_OFFSET_MS = 60_000
 
 interface FastLaneStateRow {
@@ -27,6 +32,10 @@ async function fastLaneCaughtUp(db: D1Database): Promise<boolean> {
   return Boolean(row && row.last_processed_ledger >= row.latest_observed_ledger)
 }
 
+function errorReason(error: unknown): string {
+  return error instanceof Error ? error.message : 'unknown_error'
+}
+
 const wrappedWorker: ExportedHandler<Bindings> = {
   ...worker,
 
@@ -39,7 +48,7 @@ const wrappedWorker: ExportedHandler<Bindings> = {
       console.error(JSON.stringify({
         event: 'fast_lane_shadow_heartbeat_failed',
         runAt,
-        reason: error instanceof Error ? error.message : 'unknown_error',
+        reason: errorReason(error),
       }))
     }
 
@@ -49,6 +58,26 @@ const wrappedWorker: ExportedHandler<Bindings> = {
       }
 
       await assertFastLaneStorageCapacity(env.DB)
+
+      try {
+        const bridge = await runCanonicalBridgePasses({
+          env,
+          maxPasses: CANONICAL_BRIDGE_PASSES_PER_CRON,
+        })
+        console.log(JSON.stringify({ event: 'canonical_bridge_cycle', runAt, ...bridge }))
+        if (bridge.bridgeReady) {
+          const promotion = await promoteFastLaneCompactToCanonicalOverlay(env.DB)
+          if (promotion) {
+            console.log(JSON.stringify({ event: 'fast_lane_canonical_promotion_before', runAt, ...promotion }))
+          }
+        }
+      } catch (error) {
+        console.error(JSON.stringify({
+          event: 'canonical_bridge_failed',
+          runAt,
+          reason: errorReason(error),
+        }))
+      }
 
       for (let pass = 0; pass < FAST_LANE_PASSES_PER_CRON; pass += 1) {
         const passController = pass === 0
@@ -63,18 +92,31 @@ const wrappedWorker: ExportedHandler<Bindings> = {
         if (await fastLaneCaughtUp(env.DB)) break
       }
 
+      try {
+        const promotion = await promoteFastLaneCompactToCanonicalOverlay(env.DB)
+        if (promotion) {
+          console.log(JSON.stringify({ event: 'fast_lane_canonical_promotion_after', runAt, ...promotion }))
+        }
+      } catch (error) {
+        console.error(JSON.stringify({
+          event: 'fast_lane_canonical_promotion_failed',
+          runAt,
+          reason: errorReason(error),
+        }))
+      }
+
       await pruneFastLaneStorage(env.DB)
       await assertFastLaneStorageCapacity(env.DB)
       await deleteFastLaneShadowRunHeartbeat({ db: env.DB, runAt })
     } catch (error) {
-      const reason = error instanceof Error ? error.message : 'unknown_error'
+      const reason = errorReason(error)
       try {
         await saveFastLaneShadowRunError({ db: env.DB, runAt, errorMessage: reason })
       } catch (persistenceError) {
         console.error(JSON.stringify({
           event: 'fast_lane_shadow_error_persistence_failed',
           runAt,
-          reason: persistenceError instanceof Error ? persistenceError.message : 'unknown_error',
+          reason: errorReason(persistenceError),
         }))
       }
       console.error(JSON.stringify({ event: 'fast_lane_shadow_cycle_failed', runAt, reason }))
