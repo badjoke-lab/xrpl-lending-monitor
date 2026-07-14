@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 env:
   CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -121,6 +121,26 @@ jobs:
             --slurpfile metrics metrics.json \
             '{capturedAt:$capturedAt,rpc:{primary:$primary[0],fallback:$fallback[0]},websocket:$websocket[0],schedules:$schedules[0],state:$state[0],metrics:$metrics[0]}' \
             > diagnosis.json
+
+      - name: Publish diagnosis snapshot
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          API_PATH="repos/${GITHUB_REPOSITORY}/contents/.github/p0-fast-lane-diagnosis.json"
+          CONTENT="$(base64 -w0 diagnosis.json)"
+          for attempt in $(seq 1 10); do
+            EXISTING_SHA="$(gh api "$API_PATH" --jq .sha 2>/dev/null || true)"
+            if [ -n "$EXISTING_SHA" ] && gh api --method PUT "$API_PATH" \
+              -f message="Update P0 fast-lane diagnosis" \
+              -f content="$CONTENT" \
+              -f sha="$EXISTING_SHA" >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1
 
       - uses: actions/upload-artifact@v4
         with:
