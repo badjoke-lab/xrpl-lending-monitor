@@ -5,6 +5,12 @@ import {
   runCanonicalBridgePasses,
 } from './operator/fast-lane-canonical-bridge'
 import {
+  claimFastLaneQueueSlot,
+  completeFastLaneQueueSlot,
+  markFastLaneQueueSlotError,
+  pruneFastLaneQueueSlots,
+} from './repositories/fast-lane-queue-slot'
+import {
   deleteFastLaneShadowRunHeartbeat,
   saveFastLaneShadowRunError,
   saveFastLaneShadowRunHeartbeat,
@@ -18,6 +24,8 @@ const FAST_LANE_PASSES_PER_QUEUE_MESSAGE = 8
 const SYNTHETIC_PASS_OFFSET_MS = 60_000
 const FIVE_MINUTE_INTERVAL_MS = 5 * 60_000
 const OVERLAY_CAPACITY_CHECK_INTERVAL_MS = 60 * 60_000
+const QUEUE_SLOT_RETENTION_MS = 7 * 24 * 60 * 60_000
+const SELF_SCHEDULE_CRON = 'queue-self-schedule'
 const CANONICAL_BRIDGE_PATH = '/api/operator/p0-canonical-bridge'
 const CANONICAL_BRIDGE_TOKEN_HEADER = 'x-p0-canonical-bridge-token'
 const CANONICAL_BRIDGE_PASSES_PER_INVOCATION = 2
@@ -71,6 +79,17 @@ function syntheticScheduledController(message: FastLaneQueueMessage, pass: numbe
     cron: message.cron,
     noRetry: () => undefined,
   } as ScheduledController
+}
+
+function nextFiveMinuteSlot(currentScheduledTime: number, now: number): number {
+  const nextFromCurrent = currentScheduledTime + FIVE_MINUTE_INTERVAL_MS
+  const nextWallClockBoundary = Math.ceil((now + 1_000) / FIVE_MINUTE_INTERVAL_MS)
+    * FIVE_MINUTE_INTERVAL_MS
+  return Math.max(nextFromCurrent, nextWallClockBoundary)
+}
+
+function delaySecondsUntil(scheduledTime: number, now: number): number {
+  return Math.max(1, Math.ceil((scheduledTime - now) / 1_000))
 }
 
 async function handleCanonicalBridgeOperator(
@@ -128,7 +147,7 @@ async function runQueuedFastLaneCycle(options: {
   message: FastLaneQueueMessage
   env: Bindings
   executionContext: ExecutionContext
-}): Promise<void> {
+}): Promise<boolean> {
   const { message, env, executionContext } = options
   const runAt = new Date().toISOString()
 
@@ -191,6 +210,7 @@ async function runQueuedFastLaneCycle(options: {
       enqueuedAt: message.enqueuedAt,
       caughtUp,
     }))
+    return caughtUp
   } catch (error) {
     const reason = errorReason(error)
     try {
@@ -225,28 +245,96 @@ const wrappedWorker: ExportedHandler<Bindings> = {
   async scheduled(controller, env) {
     const message: FastLaneQueueMessage = {
       scheduledTime: controller.scheduledTime,
-      cron: controller.cron,
+      cron: SELF_SCHEDULE_CRON,
       enqueuedAt: new Date().toISOString(),
     }
     await env.FAST_LANE_QUEUE.send(message)
     console.log(JSON.stringify({
       event: 'fast_lane_queue_message_enqueued',
+      source: 'scheduled-fallback',
       ...message,
     }))
   },
 
   async queue(batch, env, executionContext) {
     for (const queueMessage of batch.messages) {
+      let message: FastLaneQueueMessage | null = null
       try {
-        const message = parseQueueMessage(queueMessage.body)
-        await runQueuedFastLaneCycle({ message, env, executionContext })
+        message = parseQueueMessage(queueMessage.body)
+        const claimedAt = new Date().toISOString()
+        const claimed = await claimFastLaneQueueSlot({
+          db: env.DB,
+          scheduledTime: message.scheduledTime,
+          messageId: queueMessage.id,
+          claimedAt,
+        })
+        if (!claimed) {
+          console.warn(JSON.stringify({
+            event: 'fast_lane_queue_duplicate_ignored',
+            messageId: queueMessage.id,
+            scheduledTime: message.scheduledTime,
+          }))
+          queueMessage.ack()
+          continue
+        }
+
+        const caughtUp = await runQueuedFastLaneCycle({ message, env, executionContext })
+        const now = Date.now()
+        const nextScheduledTime = nextFiveMinuteSlot(message.scheduledTime, now)
+        const nextMessage: FastLaneQueueMessage = {
+          scheduledTime: nextScheduledTime,
+          cron: SELF_SCHEDULE_CRON,
+          enqueuedAt: new Date(now).toISOString(),
+        }
+        const delaySeconds = delaySecondsUntil(nextScheduledTime, now)
+        await env.FAST_LANE_QUEUE.send(nextMessage, { delaySeconds })
+
+        const completedAt = new Date().toISOString()
+        await completeFastLaneQueueSlot({
+          db: env.DB,
+          scheduledTime: message.scheduledTime,
+          messageId: queueMessage.id,
+          nextScheduledTime,
+          completedAt,
+        })
+        await pruneFastLaneQueueSlots({
+          db: env.DB,
+          cutoff: new Date(Date.now() - QUEUE_SLOT_RETENTION_MS).toISOString(),
+        })
+        console.log(JSON.stringify({
+          event: 'fast_lane_queue_next_scheduled',
+          messageId: queueMessage.id,
+          scheduledTime: message.scheduledTime,
+          nextScheduledTime,
+          delaySeconds,
+          caughtUp,
+        }))
         queueMessage.ack()
       } catch (error) {
+        const reason = errorReason(error)
+        if (message) {
+          try {
+            await markFastLaneQueueSlotError({
+              db: env.DB,
+              scheduledTime: message.scheduledTime,
+              messageId: queueMessage.id,
+              errorMessage: reason,
+              updatedAt: new Date().toISOString(),
+            })
+          } catch (slotError) {
+            console.error(JSON.stringify({
+              event: 'fast_lane_queue_slot_error_persistence_failed',
+              messageId: queueMessage.id,
+              reason: errorReason(slotError),
+            }))
+          }
+        }
         console.error(JSON.stringify({
           event: 'fast_lane_queue_delivery_failed',
           messageId: queueMessage.id,
           attempts: queueMessage.attempts,
-          reason: errorReason(error),
+          scheduledTime: message?.scheduledTime ?? null,
+          reason,
         }))
         queueMessage.retry()
       }
