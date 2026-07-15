@@ -2,7 +2,7 @@ name: Five-minute fast-lane collector
 
 on:
   schedule:
-    - cron: '2-57/5 * * * *'
+    - cron: '*/5 * * * *'
   workflow_dispatch:
 
 permissions:
