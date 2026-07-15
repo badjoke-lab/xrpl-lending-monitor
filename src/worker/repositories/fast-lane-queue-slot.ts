@@ -1,0 +1,149 @@
+export type FastLaneQueueSlotStatus = 'processing' | 'error' | 'completed'
+
+interface FastLaneQueueSlotRow {
+  scheduled_time: number
+  message_id: string
+  status: FastLaneQueueSlotStatus
+  started_at: string
+  completed_at: string | null
+  next_scheduled_time: number | null
+  error_message: string | null
+  updated_at: string
+}
+
+export interface FastLaneQueueSlot {
+  scheduledTime: number
+  messageId: string
+  status: FastLaneQueueSlotStatus
+  startedAt: string
+  completedAt: string | null
+  nextScheduledTime: number | null
+  errorMessage: string | null
+  updatedAt: string
+}
+
+function mapSlot(row: FastLaneQueueSlotRow): FastLaneQueueSlot {
+  return {
+    scheduledTime: row.scheduled_time,
+    messageId: row.message_id,
+    status: row.status,
+    startedAt: row.started_at,
+    completedAt: row.completed_at,
+    nextScheduledTime: row.next_scheduled_time,
+    errorMessage: row.error_message,
+    updatedAt: row.updated_at,
+  }
+}
+
+export async function readFastLaneQueueSlot(options: {
+  db: D1Database
+  scheduledTime: number
+}): Promise<FastLaneQueueSlot | null> {
+  const row = await options.db.prepare(
+    `SELECT scheduled_time, message_id, status, started_at, completed_at,
+            next_scheduled_time, error_message, updated_at
+     FROM fast_lane_queue_slots
+     WHERE scheduled_time = ?1`,
+  ).bind(options.scheduledTime).first<FastLaneQueueSlotRow>()
+  return row ? mapSlot(row) : null
+}
+
+export async function claimFastLaneQueueSlot(options: {
+  db: D1Database
+  scheduledTime: number
+  messageId: string
+  claimedAt: string
+}): Promise<boolean> {
+  await options.db.prepare(
+    `INSERT INTO fast_lane_queue_slots (
+       scheduled_time, message_id, status, started_at, completed_at,
+       next_scheduled_time, error_message, updated_at
+     ) VALUES (?1, ?2, 'processing', ?3, NULL, NULL, NULL, ?3)
+     ON CONFLICT(scheduled_time) DO UPDATE SET
+       status = 'processing',
+       started_at = excluded.started_at,
+       completed_at = NULL,
+       next_scheduled_time = NULL,
+       error_message = NULL,
+       updated_at = excluded.updated_at
+     WHERE fast_lane_queue_slots.message_id = excluded.message_id
+       AND fast_lane_queue_slots.status != 'completed'`,
+  ).bind(options.scheduledTime, options.messageId, options.claimedAt).run()
+
+  const slot = await readFastLaneQueueSlot({
+    db: options.db,
+    scheduledTime: options.scheduledTime,
+  })
+  return slot?.messageId === options.messageId && slot.status === 'processing'
+}
+
+export async function markFastLaneQueueSlotError(options: {
+  db: D1Database
+  scheduledTime: number
+  messageId: string
+  errorMessage: string
+  updatedAt: string
+}): Promise<void> {
+  await options.db.prepare(
+    `UPDATE fast_lane_queue_slots
+     SET status = 'error',
+         error_message = ?3,
+         updated_at = ?4
+     WHERE scheduled_time = ?1
+       AND message_id = ?2
+       AND status != 'completed'`,
+  ).bind(
+    options.scheduledTime,
+    options.messageId,
+    options.errorMessage.slice(0, 2_000),
+    options.updatedAt,
+  ).run()
+}
+
+export async function completeFastLaneQueueSlot(options: {
+  db: D1Database
+  scheduledTime: number
+  messageId: string
+  nextScheduledTime: number
+  completedAt: string
+}): Promise<void> {
+  await options.db.prepare(
+    `UPDATE fast_lane_queue_slots
+     SET status = 'completed',
+         completed_at = ?3,
+         next_scheduled_time = ?4,
+         error_message = NULL,
+         updated_at = ?3
+     WHERE scheduled_time = ?1
+       AND message_id = ?2`,
+  ).bind(
+    options.scheduledTime,
+    options.messageId,
+    options.completedAt,
+    options.nextScheduledTime,
+  ).run()
+
+  const slot = await readFastLaneQueueSlot({
+    db: options.db,
+    scheduledTime: options.scheduledTime,
+  })
+  if (
+    !slot
+    || slot.messageId !== options.messageId
+    || slot.status !== 'completed'
+    || slot.nextScheduledTime !== options.nextScheduledTime
+  ) {
+    throw new Error('fast-lane Queue slot completion was not persisted')
+  }
+}
+
+export async function pruneFastLaneQueueSlots(options: {
+  db: D1Database
+  cutoff: string
+}): Promise<void> {
+  await options.db.prepare(
+    `DELETE FROM fast_lane_queue_slots
+     WHERE status = 'completed'
+       AND updated_at < ?1`,
+  ).bind(options.cutoff).run()
+}
