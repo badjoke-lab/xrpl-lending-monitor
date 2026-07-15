@@ -1,8 +1,6 @@
-name: Five-minute fast-lane collector
+name: Manual fast-lane collector fallback
 
 on:
-  schedule:
-    - cron: '*/5 * * * *'
   workflow_dispatch:
 
 permissions:
