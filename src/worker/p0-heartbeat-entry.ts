@@ -16,6 +16,8 @@ import {
 
 const FAST_LANE_PASSES_PER_CRON = 8
 const SYNTHETIC_PASS_OFFSET_MS = 60_000
+const FIVE_MINUTE_INTERVAL_MS = 5 * 60_000
+const OVERLAY_CAPACITY_CHECK_INTERVAL_MS = 60 * 60_000
 const CANONICAL_BRIDGE_PATH = '/api/operator/p0-canonical-bridge'
 const CANONICAL_BRIDGE_TOKEN_HEADER = 'x-p0-canonical-bridge-token'
 const CANONICAL_BRIDGE_PASSES_PER_INVOCATION = 2
@@ -32,6 +34,12 @@ async function fastLaneCaughtUp(db: D1Database): Promise<boolean> {
      WHERE network = 'devnet'`,
   ).first<FastLaneStateRow>()
   return Boolean(row && row.last_processed_ledger >= row.latest_observed_ledger)
+}
+
+function shouldCheckCanonicalOverlayCapacity(scheduledTime: number): boolean {
+  const previousScheduledTime = scheduledTime - FIVE_MINUTE_INTERVAL_MS
+  return Math.floor(scheduledTime / OVERLAY_CAPACITY_CHECK_INTERVAL_MS)
+    !== Math.floor(previousScheduledTime / OVERLAY_CAPACITY_CHECK_INTERVAL_MS)
 }
 
 function errorReason(error: unknown): string {
@@ -117,7 +125,9 @@ const wrappedWorker: ExportedHandler<Bindings> = {
         throw new Error('Wrapped Worker does not expose a scheduled handler')
       }
 
-      await assertFastLaneStorageCapacity(env.DB)
+      await assertFastLaneStorageCapacity(env.DB, {
+        includeOverlay: shouldCheckCanonicalOverlayCapacity(controller.scheduledTime),
+      })
 
       let caughtUp = false
       for (let pass = 0; pass < FAST_LANE_PASSES_PER_CRON; pass += 1) {
@@ -152,7 +162,7 @@ const wrappedWorker: ExportedHandler<Bindings> = {
       }
 
       await pruneFastLaneStorage(env.DB)
-      await assertFastLaneStorageCapacity(env.DB)
+      await assertFastLaneStorageCapacity(env.DB, { includeOverlay: false })
       await deleteFastLaneShadowRunHeartbeat({ db: env.DB, runAt })
     } catch (error) {
       const reason = errorReason(error)
