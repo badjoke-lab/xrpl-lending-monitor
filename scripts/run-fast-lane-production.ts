@@ -20,7 +20,8 @@ import {
 } from '../src/worker/repositories/fast-lane-storage-retention'
 import { createD1HttpDatabase } from './d1-http-adapter'
 
-const FAST_LANE_PASSES_PER_RUN = 8
+const DEFAULT_FAST_LANE_PASSES_PER_RUN = 8
+const MAX_FAST_LANE_PASSES_PER_RUN = 64
 const FIVE_MINUTE_MS = 5 * 60_000
 
 interface WranglerD1Binding {
@@ -41,6 +42,16 @@ function requiredEnvironment(name: string): string {
 
 function errorReason(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+function passesPerRun(): number {
+  const raw = process.env.FAST_LANE_PASSES_PER_RUN?.trim()
+  if (!raw) return DEFAULT_FAST_LANE_PASSES_PER_RUN
+  const value = Number(raw)
+  if (!Number.isSafeInteger(value) || value < 1 || value > MAX_FAST_LANE_PASSES_PER_RUN) {
+    throw new Error(`FAST_LANE_PASSES_PER_RUN must be an integer from 1 to ${MAX_FAST_LANE_PASSES_PER_RUN}`)
+  }
+  return value
 }
 
 function scheduledSlot(now: number): string {
@@ -86,6 +97,7 @@ function validateRuntimeVars(vars: Record<string, string>): void {
 async function main(): Promise<void> {
   const config = await readWranglerConfig()
   const vars = config.vars ?? {}
+  const maxPasses = passesPerRun()
   validateRuntimeVars(vars)
   const databaseId = process.env.CLOUDFLARE_D1_DATABASE_ID?.trim()
     ?? config.d1_databases?.find((entry) => entry.binding === 'DB')?.database_id
@@ -96,7 +108,7 @@ async function main(): Promise<void> {
       status: 'valid',
       network: vars.APP_NETWORK,
       databaseId,
-      passesPerRun: FAST_LANE_PASSES_PER_RUN,
+      passesPerRun: maxPasses,
     }, null, 2)}\n`)
     return
   }
@@ -127,7 +139,7 @@ async function main(): Promise<void> {
     phase = 'collecting'
     let caughtUp = false
     let lastResult: Awaited<ReturnType<typeof runFastLaneShadowCycle>> | null = null
-    for (let pass = 0; pass < FAST_LANE_PASSES_PER_RUN; pass += 1) {
+    for (let pass = 0; pass < maxPasses; pass += 1) {
       const result = await runFastLaneShadowCycle({
         db: database,
         runtimeConfig,
@@ -148,7 +160,7 @@ async function main(): Promise<void> {
     }
 
     if (!caughtUp || !lastResult) {
-      throw new Error(`fast-lane action did not catch up within ${FAST_LANE_PASSES_PER_RUN} passes; lag=${lastResult?.lagLedgers ?? 'unknown'}`)
+      throw new Error(`fast-lane action did not catch up within ${maxPasses} passes; lag=${lastResult?.lagLedgers ?? 'unknown'}`)
     }
 
     phase = 'promoting'
