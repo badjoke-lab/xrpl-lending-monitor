@@ -22,7 +22,7 @@ jobs:
         run: |
           set -euo pipefail
           gh api "repos/${REPOSITORY}/actions/runs?per_page=100" \
-            --jq '{runs: [.workflow_runs[] | select(.name == "Five-minute fast-lane collector" or .name == "P0 disable Worker cron deploy" or .name == "CI" or .name == "Release-native CI") | {id, name, event, display_title, status, conclusion, head_sha, created_at, updated_at, html_url}]}' \
+            --jq '{runs: [.workflow_runs[] | select(.name == "Five-minute fast-lane collector" or .name == "P0 run Actions collector" or .name == "P0 disable Worker cron deploy" or .name == "CI" or .name == "Release-native CI") | {id, name, event, display_title, status, conclusion, head_sha, created_at, updated_at, html_url}]}' \
             > /tmp/runs.json
           {
             echo 'Targeted workflow runs:'
