@@ -1,0 +1,59 @@
+name: P0 Queue slot probe
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  probe:
+    if: startsWith(github.event.issue.title, 'P0 Queue slot probe')
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      GH_TOKEN: ${{ github.token }}
+      ISSUE_NUMBER: ${{ github.event.issue.number }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Read Queue slot state
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote --json \
+            --command "SELECT scheduled_time, message_id, status, started_at, completed_at, next_scheduled_time, error_message, updated_at FROM fast_lane_queue_slots ORDER BY scheduled_time DESC LIMIT 12" \
+            > /tmp/slots.json
+          pnpm exec wrangler queues info xrpl-lending-fast-lane > /tmp/queue.txt
+
+      - name: Report Queue slot state
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo 'Self-scheduled Queue slot state:'
+            echo
+            echo '```json'
+            jq . /tmp/slots.json
+            echo '```'
+            echo
+            echo '```text'
+            cat /tmp/queue.txt
+            echo '```'
+          } > /tmp/comment.md
+          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file /tmp/comment.md
