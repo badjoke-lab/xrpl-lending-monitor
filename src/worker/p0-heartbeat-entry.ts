@@ -119,6 +119,7 @@ const wrappedWorker: ExportedHandler<Bindings> = {
 
       await assertFastLaneStorageCapacity(env.DB)
 
+      let caughtUp = false
       for (let pass = 0; pass < FAST_LANE_PASSES_PER_CRON; pass += 1) {
         const passController = pass === 0
           ? controller
@@ -129,15 +130,24 @@ const wrappedWorker: ExportedHandler<Bindings> = {
             } as typeof controller
 
         await worker.scheduled(passController, env, executionContext)
-        if (await fastLaneCaughtUp(env.DB)) break
+        caughtUp = await fastLaneCaughtUp(env.DB)
+        if (caughtUp) break
       }
 
-      const promotion = await promoteFastLaneCompactToCanonicalOverlay(env.DB)
-      if (promotion) {
-        console.log(JSON.stringify({
-          event: 'fast_lane_compact_promoted',
+      if (caughtUp) {
+        const promotion = await promoteFastLaneCompactToCanonicalOverlay(env.DB)
+        if (promotion) {
+          console.log(JSON.stringify({
+            event: 'fast_lane_compact_promoted',
+            runAt,
+            ...promotion,
+          }))
+        }
+      } else {
+        console.warn(JSON.stringify({
+          event: 'fast_lane_compact_promotion_deferred',
           runAt,
-          ...promotion,
+          reason: 'fast_lane_not_caught_up',
         }))
       }
 
