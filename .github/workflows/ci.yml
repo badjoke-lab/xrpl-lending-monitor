@@ -45,6 +45,12 @@ jobs:
       - name: Type-check
         run: pnpm typecheck
 
+      - name: Bundle production fast-lane runner
+        run: pnpm exec vite build --config vite.fast-lane-production.config.ts
+
+      - name: Validate production fast-lane configuration
+        run: node .fast-lane-production-build/run-fast-lane-production.mjs --validate-config
+
       - name: Unit tests
         run: pnpm test
 
