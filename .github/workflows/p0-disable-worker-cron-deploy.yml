@@ -1,0 +1,78 @@
+name: P0 disable Worker cron deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/p0-disable-worker-cron-deploy-trigger
+
+permissions:
+  contents: read
+
+concurrency:
+  group: p0-emergency-production-worker-write
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate Actions collector production boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          test "$(jq -r '.vars.APP_NETWORK' wrangler.jsonc)" = devnet
+          test "$(jq -r '.vars.MAINNET_ENABLED' wrangler.jsonc)" = false
+          test "$(jq -r '.triggers.crons | length' wrangler.jsonc)" -eq 0
+
+      - name: Build application
+        run: pnpm build
+
+      - name: Apply D1 migrations
+        run: pnpm exec wrangler d1 migrations apply xrpl-lending-monitor --remote
+
+      - name: Deploy Worker without Cron trigger
+        run: pnpm exec wrangler deploy
+
+      - name: Verify Worker Cron removed
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/xrpl-lending-monitor/schedules" \
+            > deployed-worker-schedules.json
+          jq -e '.success == true and (.result.schedules | length) == 0' \
+            deployed-worker-schedules.json > /dev/null
+
+      - name: Upload deployment evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p0-disable-worker-cron-deploy-evidence
+          path: deployed-worker-schedules.json
+          if-no-files-found: warn
+          retention-days: 14
