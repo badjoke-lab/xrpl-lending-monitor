@@ -8,13 +8,12 @@ permissions:
   contents: read
   issues: write
 
-concurrency:
-  group: production-five-minute-fast-lane
-  cancel-in-progress: false
-
 jobs:
   collect:
     if: startsWith(github.event.issue.title, 'P0 run Actions collector')
+    concurrency:
+      group: production-five-minute-fast-lane
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
