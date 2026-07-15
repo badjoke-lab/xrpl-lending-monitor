@@ -22,6 +22,10 @@ interface StorageUsageRow {
   payload_bytes: number
 }
 
+export interface FastLaneStorageCapacityOptions {
+  includeOverlay?: boolean
+}
+
 async function storageUsage(
   db: D1Database,
   table: 'fast_lane_shadow_objects_compact' | 'current_state_overlay_objects',
@@ -38,11 +42,11 @@ async function storageUsage(
   }
 }
 
-export async function assertFastLaneStorageCapacity(db: D1Database): Promise<void> {
-  const [compact, overlay] = await Promise.all([
-    storageUsage(db, 'fast_lane_shadow_objects_compact'),
-    storageUsage(db, 'current_state_overlay_objects'),
-  ])
+export async function assertFastLaneStorageCapacity(
+  db: D1Database,
+  options: FastLaneStorageCapacityOptions = {},
+): Promise<void> {
+  const compact = await storageUsage(db, 'fast_lane_shadow_objects_compact')
 
   if (
     compact.row_count >= MAX_COMPACT_ROWS
@@ -53,6 +57,9 @@ export async function assertFastLaneStorageCapacity(db: D1Database): Promise<voi
     )
   }
 
+  if (options.includeOverlay === false) return
+
+  const overlay = await storageUsage(db, 'current_state_overlay_objects')
   if (
     overlay.row_count >= MAX_OVERLAY_ROWS
     || overlay.payload_bytes >= MAX_OVERLAY_PAYLOAD_BYTES
