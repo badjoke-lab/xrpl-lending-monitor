@@ -1,4 +1,4 @@
-import type { Bindings } from './env'
+import type { Bindings, FastLaneQueueMessage } from './env'
 import worker from './entry'
 import {
   promoteFastLaneCompactToCanonicalOverlay,
@@ -14,7 +14,7 @@ import {
   pruneFastLaneStorage,
 } from './repositories/fast-lane-storage-retention'
 
-const FAST_LANE_PASSES_PER_CRON = 8
+const FAST_LANE_PASSES_PER_QUEUE_MESSAGE = 8
 const SYNTHETIC_PASS_OFFSET_MS = 60_000
 const FIVE_MINUTE_INTERVAL_MS = 5 * 60_000
 const OVERLAY_CAPACITY_CHECK_INTERVAL_MS = 60 * 60_000
@@ -44,6 +44,33 @@ function shouldCheckCanonicalOverlayCapacity(scheduledTime: number): boolean {
 
 function errorReason(error: unknown): string {
   return error instanceof Error ? error.message : 'unknown_error'
+}
+
+function parseQueueMessage(value: unknown): FastLaneQueueMessage {
+  if (!value || typeof value !== 'object') throw new Error('fast-lane queue message is invalid')
+  const record = value as Record<string, unknown>
+  if (!Number.isSafeInteger(record.scheduledTime) || Number(record.scheduledTime) < 0) {
+    throw new Error('fast-lane queue scheduledTime is invalid')
+  }
+  if (typeof record.cron !== 'string' || record.cron.length === 0) {
+    throw new Error('fast-lane queue cron is invalid')
+  }
+  if (typeof record.enqueuedAt !== 'string' || !Number.isFinite(Date.parse(record.enqueuedAt))) {
+    throw new Error('fast-lane queue enqueuedAt is invalid')
+  }
+  return {
+    scheduledTime: Number(record.scheduledTime),
+    cron: record.cron,
+    enqueuedAt: record.enqueuedAt,
+  }
+}
+
+function syntheticScheduledController(message: FastLaneQueueMessage, pass: number): ScheduledController {
+  return {
+    scheduledTime: message.scheduledTime + pass * SYNTHETIC_PASS_OFFSET_MS,
+    cron: message.cron,
+    noRetry: () => undefined,
+  } as ScheduledController
 }
 
 async function handleCanonicalBridgeOperator(
@@ -97,6 +124,94 @@ async function handleCanonicalBridgeOperator(
   }
 }
 
+async function runQueuedFastLaneCycle(options: {
+  message: FastLaneQueueMessage
+  env: Bindings
+  executionContext: ExecutionContext
+}): Promise<void> {
+  const { message, env, executionContext } = options
+  const runAt = new Date().toISOString()
+
+  try {
+    await saveFastLaneShadowRunHeartbeat({ db: env.DB, runAt })
+  } catch (error) {
+    console.error(JSON.stringify({
+      event: 'fast_lane_shadow_heartbeat_failed',
+      runAt,
+      reason: errorReason(error),
+    }))
+  }
+
+  try {
+    if (!worker.scheduled) {
+      throw new Error('Wrapped Worker does not expose a scheduled handler')
+    }
+
+    await assertFastLaneStorageCapacity(env.DB, {
+      includeOverlay: shouldCheckCanonicalOverlayCapacity(message.scheduledTime),
+    })
+
+    let caughtUp = false
+    for (let pass = 0; pass < FAST_LANE_PASSES_PER_QUEUE_MESSAGE; pass += 1) {
+      await worker.scheduled(
+        syntheticScheduledController(message, pass),
+        env,
+        executionContext,
+      )
+      caughtUp = await fastLaneCaughtUp(env.DB)
+      if (caughtUp) break
+    }
+
+    if (caughtUp) {
+      const promotion = await promoteFastLaneCompactToCanonicalOverlay(env.DB)
+      if (promotion) {
+        console.log(JSON.stringify({
+          event: 'fast_lane_compact_promoted',
+          runAt,
+          scheduledTime: message.scheduledTime,
+          ...promotion,
+        }))
+      }
+    } else {
+      console.warn(JSON.stringify({
+        event: 'fast_lane_compact_promotion_deferred',
+        runAt,
+        scheduledTime: message.scheduledTime,
+        reason: 'fast_lane_not_caught_up',
+      }))
+    }
+
+    await pruneFastLaneStorage(env.DB)
+    await assertFastLaneStorageCapacity(env.DB, { includeOverlay: false })
+    await deleteFastLaneShadowRunHeartbeat({ db: env.DB, runAt })
+    console.log(JSON.stringify({
+      event: 'fast_lane_queue_message_completed',
+      runAt,
+      scheduledTime: message.scheduledTime,
+      enqueuedAt: message.enqueuedAt,
+      caughtUp,
+    }))
+  } catch (error) {
+    const reason = errorReason(error)
+    try {
+      await saveFastLaneShadowRunError({ db: env.DB, runAt, errorMessage: reason })
+    } catch (persistenceError) {
+      console.error(JSON.stringify({
+        event: 'fast_lane_shadow_error_persistence_failed',
+        runAt,
+        reason: errorReason(persistenceError),
+      }))
+    }
+    console.error(JSON.stringify({
+      event: 'fast_lane_queue_message_failed',
+      runAt,
+      scheduledTime: message.scheduledTime,
+      reason,
+    }))
+    throw error
+  }
+}
+
 const wrappedWorker: ExportedHandler<Bindings> = {
   ...worker,
 
@@ -107,76 +222,34 @@ const wrappedWorker: ExportedHandler<Bindings> = {
     return worker.fetch(request, env, executionContext)
   },
 
-  async scheduled(controller, env, executionContext) {
-    const runAt = new Date().toISOString()
-
-    try {
-      await saveFastLaneShadowRunHeartbeat({ db: env.DB, runAt })
-    } catch (error) {
-      console.error(JSON.stringify({
-        event: 'fast_lane_shadow_heartbeat_failed',
-        runAt,
-        reason: errorReason(error),
-      }))
+  async scheduled(controller, env) {
+    const message: FastLaneQueueMessage = {
+      scheduledTime: controller.scheduledTime,
+      cron: controller.cron,
+      enqueuedAt: new Date().toISOString(),
     }
+    await env.FAST_LANE_QUEUE.send(message)
+    console.log(JSON.stringify({
+      event: 'fast_lane_queue_message_enqueued',
+      ...message,
+    }))
+  },
 
-    try {
-      if (!worker.scheduled) {
-        throw new Error('Wrapped Worker does not expose a scheduled handler')
-      }
-
-      await assertFastLaneStorageCapacity(env.DB, {
-        includeOverlay: shouldCheckCanonicalOverlayCapacity(controller.scheduledTime),
-      })
-
-      let caughtUp = false
-      for (let pass = 0; pass < FAST_LANE_PASSES_PER_CRON; pass += 1) {
-        const passController = pass === 0
-          ? controller
-          : {
-              scheduledTime: controller.scheduledTime + pass * SYNTHETIC_PASS_OFFSET_MS,
-              cron: controller.cron,
-              noRetry: () => controller.noRetry(),
-            } as typeof controller
-
-        await worker.scheduled(passController, env, executionContext)
-        caughtUp = await fastLaneCaughtUp(env.DB)
-        if (caughtUp) break
-      }
-
-      if (caughtUp) {
-        const promotion = await promoteFastLaneCompactToCanonicalOverlay(env.DB)
-        if (promotion) {
-          console.log(JSON.stringify({
-            event: 'fast_lane_compact_promoted',
-            runAt,
-            ...promotion,
-          }))
-        }
-      } else {
-        console.warn(JSON.stringify({
-          event: 'fast_lane_compact_promotion_deferred',
-          runAt,
-          reason: 'fast_lane_not_caught_up',
-        }))
-      }
-
-      await pruneFastLaneStorage(env.DB)
-      await assertFastLaneStorageCapacity(env.DB, { includeOverlay: false })
-      await deleteFastLaneShadowRunHeartbeat({ db: env.DB, runAt })
-    } catch (error) {
-      const reason = errorReason(error)
+  async queue(batch, env, executionContext) {
+    for (const queueMessage of batch.messages) {
       try {
-        await saveFastLaneShadowRunError({ db: env.DB, runAt, errorMessage: reason })
-      } catch (persistenceError) {
+        const message = parseQueueMessage(queueMessage.body)
+        await runQueuedFastLaneCycle({ message, env, executionContext })
+        queueMessage.ack()
+      } catch (error) {
         console.error(JSON.stringify({
-          event: 'fast_lane_shadow_error_persistence_failed',
-          runAt,
-          reason: errorReason(persistenceError),
+          event: 'fast_lane_queue_delivery_failed',
+          messageId: queueMessage.id,
+          attempts: queueMessage.attempts,
+          reason: errorReason(error),
         }))
+        queueMessage.retry()
       }
-      console.error(JSON.stringify({ event: 'fast_lane_shadow_cycle_failed', runAt, reason }))
-      throw error
     }
   },
 }
