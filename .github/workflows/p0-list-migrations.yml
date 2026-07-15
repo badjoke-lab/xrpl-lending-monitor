@@ -1,0 +1,32 @@
+name: P0 list migrations
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  list:
+    if: startsWith(github.event.issue.title, 'P0 list migrations')
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ISSUE_NUMBER: ${{ github.event.issue.number }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: List migrations
+        shell: bash
+        run: |
+          set -euo pipefail
+          find migrations -maxdepth 1 -type f -printf '%f\n' | sort > /tmp/migrations.txt
+          {
+            echo 'Migration inventory:'
+            echo
+            echo '```text'
+            cat /tmp/migrations.txt
+            echo '```'
+          } > /tmp/comment.md
+          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file /tmp/comment.md
