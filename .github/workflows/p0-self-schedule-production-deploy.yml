@@ -91,13 +91,15 @@ jobs:
         run: |
           set -euo pipefail
           NOW_MS="$(date +%s%3N)"
-          SLOT_MS="$((NOW_MS / 300000 * 300000))"
+          SLOT_MS="$((((NOW_MS + 60000 + 299999) / 300000) * 300000))"
+          DELAY_SECONDS="$(((SLOT_MS - NOW_MS + 999) / 1000))"
           ENQUEUED_AT="$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)"
           jq -nc \
             --argjson scheduledTime "$SLOT_MS" \
+            --argjson delaySeconds "$DELAY_SECONDS" \
             --arg cron 'queue-self-schedule' \
             --arg enqueuedAt "$ENQUEUED_AT" \
-            '{body:{scheduledTime:$scheduledTime,cron:$cron,enqueuedAt:$enqueuedAt},content_type:"json"}' \
+            '{body:{scheduledTime:$scheduledTime,cron:$cron,enqueuedAt:$enqueuedAt},content_type:"json",delay_seconds:$delaySeconds}' \
             > bootstrap-message.json
           curl --fail-with-body --silent --show-error \
             -X POST \
@@ -107,6 +109,40 @@ jobs:
             "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/queues/${QUEUE_ID}/messages" \
             > bootstrap-response.json
           jq -e '.success == true' bootstrap-response.json > /dev/null
+          printf '%s\n' "$SLOT_MS" > bootstrap-slot-ms.txt
+
+      - name: Verify bootstrap slot completed and next slot scheduled
+        shell: bash
+        run: |
+          set -euo pipefail
+          SLOT_MS="$(cat bootstrap-slot-ms.txt)"
+          DEADLINE_MS="$((SLOT_MS + 180000))"
+          while true; do
+            pnpm exec wrangler d1 execute xrpl-lending-monitor --remote --json \
+              --command "SELECT scheduled_time, message_id, status, started_at, completed_at, next_scheduled_time, error_message, updated_at FROM fast_lane_queue_slots WHERE scheduled_time = ${SLOT_MS}" \
+              > bootstrap-slot.json
+
+            if jq -e --argjson slot "$SLOT_MS" \
+              '[.[].results[]? | select(.scheduled_time == $slot)] | length == 1 and .[0].status == "completed" and .[0].next_scheduled_time > $slot and .[0].error_message == null' \
+              bootstrap-slot.json > /dev/null; then
+              break
+            fi
+
+            if jq -e --argjson slot "$SLOT_MS" \
+              '[.[].results[]? | select(.scheduled_time == $slot and .status == "error")] | length > 0' \
+              bootstrap-slot.json > /dev/null; then
+              cat bootstrap-slot.json
+              exit 1
+            fi
+
+            if [ "$(date +%s%3N)" -ge "$DEADLINE_MS" ]; then
+              cat bootstrap-slot.json
+              echo "bootstrap slot did not complete and schedule the next slot before the deadline" >&2
+              exit 1
+            fi
+            sleep 10
+          done
+          cat bootstrap-slot.json
 
       - name: Upload self-schedule deployment evidence
         if: always()
@@ -122,5 +158,7 @@ jobs:
             queue-info-deployed.txt
             bootstrap-message.json
             bootstrap-response.json
+            bootstrap-slot-ms.txt
+            bootstrap-slot.json
           if-no-files-found: warn
           retention-days: 14
