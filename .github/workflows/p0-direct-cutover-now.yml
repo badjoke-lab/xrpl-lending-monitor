@@ -7,7 +7,7 @@ on:
       - '.github/workflows/p0-direct-cutover-now.yml'
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: p0-direct-fresh-candidate-cutover
@@ -19,28 +19,25 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - name: Locate replacement-base cursor rejection
+      - name: Locate and retain replacement-base cursor rejection
         shell: bash
         run: |
           set -euo pipefail
-          ROOT=/tmp/p0-rebase-diagnosis
-          mkdir -p "${ROOT}"
-          MATCHES="${ROOT}/matches.txt"
+          mkdir -p .ops
+          MATCHES=.ops/rebase-matches.txt
           grep -R -n -F 'Replacement-base rebase refuses to regress or replace a later incremental cursor' \
-            --exclude-dir=.git --exclude-dir=node_modules . > "${MATCHES}"
+            --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=.ops . > "${MATCHES}"
           test -s "${MATCHES}"
-          cut -d: -f1 "${MATCHES}" | sort -u > "${ROOT}/files.txt"
-          while IFS= read -r file; do
-            safe="$(printf '%s' "${file}" | tr '/.' '__')"
-            grep -n -B 100 -A 140 -F 'Replacement-base rebase refuses to regress or replace a later incremental cursor' "${file}" \
-              > "${ROOT}/${safe}.context.txt"
-            cp "${file}" "${ROOT}/${safe}.full.txt"
-          done < "${ROOT}/files.txt"
-      - name: Upload rebase diagnosis
-        if: ${{ always() }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: p0-rebase-cursor-diagnosis
-          path: /tmp/p0-rebase-diagnosis
-          if-no-files-found: error
-          retention-days: 30
+          : > .ops/rebase-diagnosis.txt
+          while IFS=: read -r file line rest; do
+            printf 'FILE=%s LINE=%s\n' "${file}" "${line}" >> .ops/rebase-diagnosis.txt
+            start=$(( line > 120 ? line - 120 : 1 ))
+            end=$(( line + 180 ))
+            sed -n "${start},${end}p" "${file}" >> .ops/rebase-diagnosis.txt
+            printf '\n--- END CONTEXT ---\n' >> .ops/rebase-diagnosis.txt
+          done < "${MATCHES}"
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add .ops/rebase-matches.txt .ops/rebase-diagnosis.txt
+          git commit -m 'ops: retain rebase cursor diagnosis'
+          git push origin HEAD:ops/direct-cutover-now
