@@ -23,24 +23,26 @@ jobs:
       REPOSITORY: ${{ github.repository }}
     steps:
       - uses: actions/checkout@v4
-      - name: Publish replacement-base cursor diagnosis to issue
+      - name: Publish complete replacement-base rebase context
         shell: bash
         run: |
           set -euo pipefail
           ROOT=/tmp/p0-rebase-diagnosis
           mkdir -p "${ROOT}"
-          MATCHES="${ROOT}/matches.txt"
-          grep -R -n -F 'Replacement-base rebase refuses to regress or replace a later incremental cursor' \
-            --exclude-dir=.git --exclude-dir=node_modules . > "${MATCHES}"
-          test -s "${MATCHES}"
+          FILES="${ROOT}/files.txt"
           {
-            printf '# Replacement-base cursor diagnosis\n\n'
-            while IFS=: read -r file line rest; do
-              printf '## `%s` line %s\n\n```text\n' "${file}" "${line}"
-              start=$(( line > 120 ? line - 120 : 1 ))
-              end=$(( line + 180 ))
-              sed -n "${start},${end}p" "${file}"
+            grep -R -l -F 'planReplacementBaseRebase' src test tests 2>/dev/null || true
+            grep -R -l -F 'replacement-base-rebase' src test tests 2>/dev/null || true
+            grep -R -l -F 'ReplacementBaseRebase' src test tests 2>/dev/null || true
+            grep -R -l -F 'rebase refuses to regress' src test tests 2>/dev/null || true
+          } | sort -u > "${FILES}"
+          test -s "${FILES}"
+          {
+            printf '# Complete replacement-base rebase context\n\n'
+            while IFS= read -r file; do
+              printf '## `%s`\n\n```text\n' "${file}"
+              cat "${file}"
               printf '\n```\n\n'
-            done < "${MATCHES}"
+            done < "${FILES}"
           } > "${ROOT}/issue-body.md"
           gh issue edit 748 --repo "${REPOSITORY}" --body-file "${ROOT}/issue-body.md"
