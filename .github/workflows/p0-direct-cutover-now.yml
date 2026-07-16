@@ -15,34 +15,50 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  diagnose:
+  verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     env:
       GH_TOKEN: ${{ github.token }}
       REPOSITORY: ${{ github.repository }}
     steps:
       - uses: actions/checkout@v4
-      - name: Publish complete replacement-base rebase context
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Run focused tests and typecheck
         shell: bash
         run: |
-          set -euo pipefail
-          ROOT=/tmp/p0-rebase-diagnosis
+          set +e
+          ROOT=/tmp/p0-rebase-verification
           mkdir -p "${ROOT}"
-          FILES="${ROOT}/files.txt"
+          pnpm exec vitest run \
+            src/worker/operator/replacement-base-rebase-plan.test.ts \
+            src/worker/operator/replacement-base-rebase.test.ts \
+            > "${ROOT}/tests.log" 2>&1
+          TEST_STATUS=$?
+          pnpm typecheck > "${ROOT}/typecheck.log" 2>&1
+          TYPECHECK_STATUS=$?
+          pnpm lint > "${ROOT}/lint.log" 2>&1
+          LINT_STATUS=$?
           {
-            grep -R -l -F 'planReplacementBaseRebase' src test tests 2>/dev/null || true
-            grep -R -l -F 'replacement-base-rebase' src test tests 2>/dev/null || true
-            grep -R -l -F 'ReplacementBaseRebase' src test tests 2>/dev/null || true
-            grep -R -l -F 'rebase refuses to regress' src test tests 2>/dev/null || true
-          } | sort -u > "${FILES}"
-          test -s "${FILES}"
-          {
-            printf '# Complete replacement-base rebase context\n\n'
-            while IFS= read -r file; do
-              printf '## `%s`\n\n```text\n' "${file}"
-              cat "${file}"
-              printf '\n```\n\n'
-            done < "${FILES}"
+            printf '# Cursor-preserving rebase verification\n\n'
+            printf -- '- commit: `%s`\n' "${GITHUB_SHA}"
+            printf -- '- focused tests: `%s`\n' "${TEST_STATUS}"
+            printf -- '- typecheck: `%s`\n' "${TYPECHECK_STATUS}"
+            printf -- '- lint: `%s`\n\n' "${LINT_STATUS}"
+            printf '## Focused tests\n\n```text\n'
+            tail -n 200 "${ROOT}/tests.log"
+            printf '\n```\n\n## Typecheck\n\n```text\n'
+            tail -n 200 "${ROOT}/typecheck.log"
+            printf '\n```\n\n## Lint\n\n```text\n'
+            tail -n 200 "${ROOT}/lint.log"
+            printf '\n```\n'
           } > "${ROOT}/issue-body.md"
-          gh issue edit 748 --repo "${REPOSITORY}" --body-file "${ROOT}/issue-body.md"
+          gh issue edit 749 --repo "${REPOSITORY}" --body-file "${ROOT}/issue-body.md"
+          test "${TEST_STATUS}" -eq 0
+          test "${TYPECHECK_STATUS}" -eq 0
+          test "${LINT_STATUS}" -eq 0
