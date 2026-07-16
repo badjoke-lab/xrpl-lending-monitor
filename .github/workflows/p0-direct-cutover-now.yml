@@ -7,7 +7,8 @@ on:
       - '.github/workflows/p0-direct-cutover-now.yml'
 
 permissions:
-  contents: write
+  contents: read
+  issues: write
 
 concurrency:
   group: p0-direct-fresh-candidate-cutover
@@ -17,27 +18,29 @@ jobs:
   diagnose:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
     steps:
       - uses: actions/checkout@v4
-      - name: Locate and retain replacement-base cursor rejection
+      - name: Publish replacement-base cursor diagnosis to issue
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p .ops
-          MATCHES=.ops/rebase-matches.txt
+          ROOT=/tmp/p0-rebase-diagnosis
+          mkdir -p "${ROOT}"
+          MATCHES="${ROOT}/matches.txt"
           grep -R -n -F 'Replacement-base rebase refuses to regress or replace a later incremental cursor' \
-            --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=.ops . > "${MATCHES}"
+            --exclude-dir=.git --exclude-dir=node_modules . > "${MATCHES}"
           test -s "${MATCHES}"
-          : > .ops/rebase-diagnosis.txt
-          while IFS=: read -r file line rest; do
-            printf 'FILE=%s LINE=%s\n' "${file}" "${line}" >> .ops/rebase-diagnosis.txt
-            start=$(( line > 120 ? line - 120 : 1 ))
-            end=$(( line + 180 ))
-            sed -n "${start},${end}p" "${file}" >> .ops/rebase-diagnosis.txt
-            printf '\n--- END CONTEXT ---\n' >> .ops/rebase-diagnosis.txt
-          done < "${MATCHES}"
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add .ops/rebase-matches.txt .ops/rebase-diagnosis.txt
-          git commit -m 'ops: retain rebase cursor diagnosis'
-          git push origin HEAD:ops/direct-cutover-now
+          {
+            printf '# Replacement-base cursor diagnosis\n\n'
+            while IFS=: read -r file line rest; do
+              printf '## `%s` line %s\n\n```text\n' "${file}" "${line}"
+              start=$(( line > 120 ? line - 120 : 1 ))
+              end=$(( line + 180 ))
+              sed -n "${start},${end}p" "${file}"
+              printf '\n```\n\n'
+            done < "${MATCHES}"
+          } > "${ROOT}/issue-body.md"
+          gh issue edit 748 --repo "${REPOSITORY}" --body-file "${ROOT}/issue-body.md"
