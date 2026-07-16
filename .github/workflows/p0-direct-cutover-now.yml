@@ -7,146 +7,89 @@ on:
       - '.github/workflows/p0-direct-cutover-now.yml'
 
 permissions:
-  contents: write
+  contents: read
   issues: write
 
-concurrency:
-  group: p0-direct-fresh-candidate-cutover
-  cancel-in-progress: true
-
 jobs:
-  repair:
+  validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 10
     env:
       GH_TOKEN: ${{ github.token }}
-      STATUS_ISSUE: '751'
-      HISTORY_CANDIDATE_BRANCH: history-rolling-recovery-b-data
-      CURRENT_STATE_CANDIDATE_BRANCH: current-state-rolling-recovery-b-data
-      CONFIRM_PRODUCTION_WRITE: 'true'
-      PRODUCTION_HISTORY_BRANCH: history-data
-      PRODUCTION_CURRENT_STATE_BRANCH: current-state-data
+      REPOSITORY: ${{ github.repository }}
+      ISSUE_NUMBER: '756'
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      D1_DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
+      DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
       PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
     steps:
-      - name: Record run start
-        run: |
-          printf '# Direct repair status\n\n- run: `%s`\n- state: `started`\n- commit: `%s`\n' "${GITHUB_RUN_ID}" "${GITHUB_SHA}" > /tmp/status.md
-          gh issue edit "${STATUS_ISSUE}" --repo "${GITHUB_REPOSITORY}" --body-file /tmp/status.md
-
-      - name: Check out repaired implementation
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-
-      - name: Check out history candidate
-        uses: actions/checkout@v4
-        with:
-          ref: history-rolling-recovery-b-data
-          path: .local/history-candidate
-          sparse-checkout: |
-            history-channel.json
-            history/publication.json
-            history/index/exact/manifest.json
-          sparse-checkout-cone-mode: false
-
-      - name: Check out current-state candidate
-        uses: actions/checkout@v4
-        with:
-          ref: current-state-rolling-recovery-b-data
-          path: .local/current-candidate
-          sparse-checkout: |
-            channel.json
-            rolling-read-model-summary.json
-            read-model/manifest.json
-          sparse-checkout-cone-mode: false
-
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24.18.0
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-
-      - name: Verify cursor-preserving implementation
-        id: verify
+      - name: Query post-repair production state
         shell: bash
         run: |
-          set +e
+          set -euo pipefail
+          ROOT=/tmp/post-repair
+          mkdir -p "${ROOT}"
+
+          query_d1() {
+            local sql="$1"
+            local output="$2"
+            jq -n --arg sql "$sql" '{sql:$sql}' \
+              | curl --fail-with-body --silent --show-error \
+                  -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+                  -H 'Content-Type: application/json' \
+                  --data-binary @- \
+                  "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database/${DATABASE_ID}/query" \
+              > "$output"
+          }
+
+          STATUS_SQL='SELECT run_at,status,start_ledger_index,end_ledger_index,latest_observed_ledger,lag_ledgers,ledgers_processed,persistence_rows_written,error_message FROM fast_lane_shadow_run_metrics WHERE network = "devnet" ORDER BY run_at DESC LIMIT 12'
+          ACTIVE_SQL='SELECT binding.base_epoch_id,binding.base_snapshot_id,binding.base_ledger_index,binding.base_ledger_hash,state.overlay_ledger_index,state.overlay_ledger_hash,state.updated_at,COUNT(objects.object_id) AS active_rows,COALESCE(SUM(LENGTH(objects.projection_json)),0) AS active_payload_bytes FROM fast_lane_shadow_base_binding AS binding JOIN current_state_overlay_state AS state ON state.network=binding.network AND state.epoch_id=binding.base_epoch_id AND state.base_snapshot_id=binding.base_snapshot_id LEFT JOIN current_state_overlay_objects AS objects ON objects.network=binding.network AND objects.epoch_id=binding.base_epoch_id AND objects.base_snapshot_id=binding.base_snapshot_id WHERE binding.network="devnet" GROUP BY binding.base_epoch_id,binding.base_snapshot_id,binding.base_ledger_index,binding.base_ledger_hash,state.overlay_ledger_index,state.overlay_ledger_hash,state.updated_at'
+          TOTAL_SQL='SELECT COUNT(*) AS total_rows,COALESCE(SUM(LENGTH(projection_json)),0) AS total_payload_bytes FROM current_state_overlay_objects WHERE network="devnet"'
+          BASES_SQL='SELECT base_snapshot_id,COUNT(*) AS rows,COALESCE(SUM(LENGTH(projection_json)),0) AS payload_bytes,MIN(source_ledger_index) AS min_source_ledger,MAX(source_ledger_index) AS max_source_ledger FROM current_state_overlay_objects WHERE network="devnet" GROUP BY base_snapshot_id ORDER BY rows DESC LIMIT 15'
+          COMPACT_SQL='SELECT COUNT(*) AS compact_rows,COALESCE(SUM(LENGTH(projection_json)),0) AS compact_payload_bytes FROM fast_lane_shadow_objects_compact WHERE network="devnet"'
+
+          query_d1 "$STATUS_SQL" "${ROOT}/runs.json"
+          query_d1 "$ACTIVE_SQL" "${ROOT}/active.json"
+          query_d1 "$TOTAL_SQL" "${ROOT}/total.json"
+          query_d1 "$BASES_SQL" "${ROOT}/bases.json"
+          query_d1 "$COMPACT_SQL" "${ROOT}/compact.json"
+
+          curl --fail-with-body --silent --show-error --retry 3 "${PRODUCTION_BASE}/api/overview" > "${ROOT}/overview.json"
+          curl --fail-with-body --silent --show-error --retry 3 "${PRODUCTION_BASE}/api/status/replacement-base-rebase" > "${ROOT}/rebase.json"
+          curl --fail-with-body --silent --show-error --retry 3 "${PRODUCTION_BASE}/api/status/fast-lane-diff?limit=500" > "${ROOT}/diff.json"
+          curl --fail-with-body --silent --show-error --retry 3 "${PRODUCTION_BASE}/api/status/history-source" > "${ROOT}/history.json"
+
+          jq -n \
+            --slurpfile runs "${ROOT}/runs.json" \
+            --slurpfile active "${ROOT}/active.json" \
+            --slurpfile total "${ROOT}/total.json" \
+            --slurpfile bases "${ROOT}/bases.json" \
+            --slurpfile compact "${ROOT}/compact.json" \
+            --slurpfile overview "${ROOT}/overview.json" \
+            --slurpfile rebase "${ROOT}/rebase.json" \
+            --slurpfile diff "${ROOT}/diff.json" \
+            --slurpfile history "${ROOT}/history.json" \
+            '{
+              checkedAt:(now|todate),
+              d1:{
+                latestRuns:$runs[0].result[0].results,
+                activeOverlay:$active[0].result[0].results,
+                totalOverlay:$total[0].result[0].results,
+                overlayBases:$bases[0].result[0].results,
+                compact:$compact[0].result[0].results,
+                sizeAfterBytes:$total[0].result[0].meta.size_after
+              },
+              overview:$overview[0],
+              rebase:$rebase[0],
+              diff:$diff[0],
+              history:$history[0]
+            }' > "${ROOT}/summary.json"
+
           {
-            pnpm exec vitest run src/worker/operator/replacement-base-rebase-plan.test.ts src/worker/operator/replacement-base-rebase.test.ts
-            pnpm typecheck
-            pnpm lint
-            grep -F "cursorMode: 'preserve_current'" src/worker/operator/replacement-base-rebase-plan.ts
-            grep -F 'source_ledger_index > ?4' src/worker/operator/replacement-base-rebase.ts
-            grep -F 'd1-emergency-override.json' scripts/run-live-checkpoint-cutover.sh
-          } > /tmp/implementation.log 2>&1
-          STATUS=$?
-          if [ "${STATUS}" -eq 0 ]; then
-            printf '# Direct repair status\n\n- run: `%s`\n- state: `implementation_verified`\n' "${GITHUB_RUN_ID}" > /tmp/status.md
-            gh issue edit "${STATUS_ISSUE}" --repo "${GITHUB_REPOSITORY}" --body-file /tmp/status.md
-          fi
-          exit "${STATUS}"
-
-      - name: Build cutover assets
-        id: build
-        run: |
-          pnpm build:candidate-source-rehearsal
-          pnpm build:deploy-assets
-          printf '# Direct repair status\n\n- run: `%s`\n- state: `assets_built`\n' "${GITHUB_RUN_ID}" > /tmp/status.md
-          gh issue edit "${STATUS_ISSUE}" --repo "${GITHUB_REPOSITORY}" --body-file /tmp/status.md
-
-      - name: Apply temporary repair bounds
-        id: patch
-        run: |
-          sed -i 's/test "${TARGET_LAG_AT_GATE}" -le 300/test "${TARGET_LAG_AT_GATE}" -le 5000/' scripts/run-live-checkpoint-cutover.sh
-          sed -i 's/for attempt in 1 2 3; do/for attempt in $(seq 1 12); do/' scripts/run-live-checkpoint-cutover.sh
-          grep -F 'test "${TARGET_LAG_AT_GATE}" -le 5000' scripts/run-live-checkpoint-cutover.sh
-          grep -F 'for attempt in $(seq 1 12); do' scripts/run-live-checkpoint-cutover.sh
-          bash -n scripts/run-live-checkpoint-cutover.sh
-          printf '# Direct repair status\n\n- run: `%s`\n- state: `repair_starting`\n' "${GITHUB_RUN_ID}" > /tmp/status.md
-          gh issue edit "${STATUS_ISSUE}" --repo "${GITHUB_REPOSITORY}" --body-file /tmp/status.md
-
-      - name: Run cursor-preserving repair
-        id: repair
-        shell: bash
-        run: |
-          set -o pipefail
-          bash scripts/run-live-checkpoint-cutover.sh > >(tee /tmp/repair.log) 2> >(tee /tmp/repair.err >&2)
-
-      - name: Verify repaired production
-        id: production_verify
-        run: bash scripts/verify-live-checkpoint-cutover.sh
-
-      - name: Record final status
-        if: ${{ always() }}
-        run: |
-          {
-            echo '# Direct repair status'
+            echo '# Post-repair production validation'
             echo
-            printf -- '- run: `%s`\n' "${GITHUB_RUN_ID}"
-            printf -- '- job: `%s`\n' "${{ job.status }}"
-            printf -- '- implementation: `%s`\n' "${{ steps.verify.outcome }}"
-            printf -- '- build: `%s`\n' "${{ steps.build.outcome }}"
-            printf -- '- patch: `%s`\n' "${{ steps.patch.outcome }}"
-            printf -- '- repair: `%s`\n' "${{ steps.repair.outcome }}"
-            printf -- '- production verification: `%s`\n' "${{ steps.production_verify.outcome }}"
-            echo
-            echo '```text'
-            if [ -s /tmp/implementation.log ]; then tail -n 120 /tmp/implementation.log; fi
-            if [ -s /tmp/repair.err ]; then tail -n 80 /tmp/repair.err; fi
-            if [ -s /tmp/repair.log ]; then tail -n 80 /tmp/repair.log; fi
+            echo '```json'
+            cat "${ROOT}/summary.json"
             echo '```'
-          } > /tmp/status.md
-          gh issue edit "${STATUS_ISSUE}" --repo "${GITHUB_REPOSITORY}" --body-file /tmp/status.md
-
-      - name: Upload repair evidence
-        if: ${{ always() }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: p0-cursor-preserving-repair
-          path: live-cutover-evidence
-          if-no-files-found: warn
-          retention-days: 30
+          } > "${ROOT}/issue-body.md"
+          gh issue edit "${ISSUE_NUMBER}" --repo "${REPOSITORY}" --body-file "${ROOT}/issue-body.md"
