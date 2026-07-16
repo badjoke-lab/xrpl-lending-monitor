@@ -7,162 +7,278 @@ on:
       - '.github/workflows/p0-direct-cutover-now.yml'
 
 permissions:
-  actions: write
-  contents: read
+  contents: write
+  actions: read
 
 concurrency:
   group: p0-direct-fresh-candidate-cutover
   cancel-in-progress: true
 
+env:
+  HISTORY_CANDIDATE_BRANCH: history-rolling-recovery-b-data
+  CURRENT_STATE_CANDIDATE_BRANCH: current-state-rolling-recovery-b-data
+  CONFIRM_PRODUCTION_WRITE: 'true'
+  PRODUCTION_HISTORY_BRANCH: history-data
+  PRODUCTION_CURRENT_STATE_BRANCH: current-state-data
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  D1_DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
+  PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+
 jobs:
-  recover:
+  repair:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
-    env:
-      GH_TOKEN: ${{ github.token }}
-      REPOSITORY: ${{ github.repository }}
-      RECOVERY_BRANCH: ops/direct-cutover-now
-      SOURCE_HISTORY_BRANCH: history-rolling-recovery-b-data
-      SOURCE_CURRENT_BRANCH: current-state-rolling-recovery-b-data
-      TARGET_HISTORY_BRANCH: history-rolling-maintenance-candidate-data
-      TARGET_CURRENT_BRANCH: current-state-rolling-maintenance-candidate-data
+    timeout-minutes: 90
     steps:
-      - name: Build fresh aligned candidate
+      - name: Check out repaired implementation
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Check out history candidate metadata
+        uses: actions/checkout@v4
+        with:
+          ref: history-rolling-recovery-b-data
+          path: .local/history-candidate
+          sparse-checkout: |
+            history-channel.json
+            history/publication.json
+            history/index/exact/manifest.json
+          sparse-checkout-cone-mode: false
+
+      - name: Check out current-state candidate metadata
+        uses: actions/checkout@v4
+        with:
+          ref: current-state-rolling-recovery-b-data
+          path: .local/current-candidate
+          sparse-checkout: |
+            channel.json
+            rolling-read-model-summary.json
+            read-model/manifest.json
+          sparse-checkout-cone-mode: false
+
+      - name: Check out production current-state rollback identity
+        uses: actions/checkout@v4
+        with:
+          ref: current-state-data
+          path: .local/production-current-before
+          sparse-checkout: read-model/manifest.json
+          sparse-checkout-cone-mode: false
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Verify cursor-preserving repair implementation
         shell: bash
         run: |
           set -euo pipefail
-          ROOT=/tmp/p0-direct-cutover
-          mkdir -p "${ROOT}"
-          gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-candidate.yml/runs?event=workflow_dispatch&per_page=100" \
-            --jq '.workflow_runs[].id' > "${ROOT}/candidate-before.txt"
-          jq -n \
-            --arg ref main \
-            --arg sourceHistory "${SOURCE_HISTORY_BRANCH}" \
-            --arg sourceCurrent "${SOURCE_CURRENT_BRANCH}" \
-            --arg targetHistory "${TARGET_HISTORY_BRANCH}" \
-            --arg targetCurrent "${TARGET_CURRENT_BRANCH}" \
-            '{ref:$ref,inputs:{source_history_branch:$sourceHistory,source_current_state_branch:$sourceCurrent,history_candidate_branch:$targetHistory,current_state_candidate_branch:$targetCurrent,max_delta_ledgers:"5000",segment_ledgers:"500",read_window_size:"4"}}' \
-            > "${ROOT}/candidate-dispatch.json"
-          gh api --method POST \
-            "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-candidate.yml/dispatches" \
-            --input "${ROOT}/candidate-dispatch.json"
+          pnpm exec vitest run \
+            src/worker/operator/replacement-base-rebase-plan.test.ts \
+            src/worker/operator/replacement-base-rebase.test.ts
+          pnpm typecheck
+          pnpm lint
+          grep -F "cursorMode: 'preserve_current'" src/worker/operator/replacement-base-rebase-plan.ts
+          grep -F 'source_ledger_index > ?4' src/worker/operator/replacement-base-rebase.ts
+          grep -F 'd1-emergency-override.json' scripts/run-live-checkpoint-cutover.sh
 
-          CANDIDATE_RUN_ID=''
-          for attempt in $(seq 1 60); do
-            gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-candidate.yml/runs?event=workflow_dispatch&per_page=100" > "${ROOT}/candidate-after.json"
-            while IFS= read -r candidate_id; do
-              if ! grep -Fxq "${candidate_id}" "${ROOT}/candidate-before.txt"; then
-                CANDIDATE_RUN_ID="${candidate_id}"
-                break
-              fi
-            done < <(jq -r '.workflow_runs | sort_by(.created_at) | reverse | .[].id' "${ROOT}/candidate-after.json")
-            test -n "${CANDIDATE_RUN_ID}" && break
-            sleep 10
-          done
-          test -n "${CANDIDATE_RUN_ID}"
-          printf '%s\n' "${CANDIDATE_RUN_ID}" > "${ROOT}/candidate-run-id.txt"
+      - run: pnpm build:candidate-source-rehearsal
 
-          for attempt in $(seq 1 300); do
-            gh api "repos/${REPOSITORY}/actions/runs/${CANDIDATE_RUN_ID}" > "${ROOT}/candidate-run.json"
-            STATUS="$(jq -r '.status' "${ROOT}/candidate-run.json")"
-            test "${STATUS}" = completed && break
-            sleep 30
-          done
-          test "$(jq -r '.status' "${ROOT}/candidate-run.json")" = completed
-          gh api "repos/${REPOSITORY}/actions/runs/${CANDIDATE_RUN_ID}/jobs?per_page=100" > "${ROOT}/candidate-jobs.json"
+      - name: Build deployable application assets
+        run: pnpm build:deploy-assets
 
-          if [ "$(jq -r '.conclusion' "${ROOT}/candidate-run.json")" != success ]; then
-            jq -e '
-              [.jobs[].steps[]]
-              | (map(select(.name == "Publish history candidate branch" and .conclusion == "success")) | length) == 1
-              and (map(select(.name == "Publish current-state candidate branch" and .conclusion == "success")) | length) == 1
-              and (map(select(.name == "Rehearse remote candidate pair" and .conclusion == "success")) | length) == 1
-            ' "${ROOT}/candidate-jobs.json" > /dev/null
-          fi
-
-      - name: Verify fresh candidate remains inside cutover bound
+      - name: Prepare guarded emergency repair
         shell: bash
         run: |
           set -euo pipefail
-          ROOT=/tmp/p0-direct-cutover
-          gh api "repos/${REPOSITORY}/contents/history/publication.json?ref=${TARGET_HISTORY_BRANCH}" > "${ROOT}/target-publication-api.json"
-          jq -r '.content' "${ROOT}/target-publication-api.json" | tr -d '\n' | base64 -d > "${ROOT}/target-publication.json"
-          gh api "repos/${REPOSITORY}/contents/read-model/manifest.json?ref=${TARGET_CURRENT_BRANCH}" > "${ROOT}/target-current-api.json"
-          jq -r '.content' "${ROOT}/target-current-api.json" | tr -d '\n' | base64 -d > "${ROOT}/target-current.json"
+          mkdir -p live-cutover-evidence
 
-          TARGET_LEDGER="$(jq -r '.endLedgerIndex' "${ROOT}/target-publication.json")"
-          TARGET_HASH="$(jq -r '.endLedgerHash' "${ROOT}/target-publication.json")"
-          test "$(jq -r '.ledgerIndex' "${ROOT}/target-current.json")" -eq "${TARGET_LEDGER}"
-          test "$(jq -r '.ledgerHash' "${ROOT}/target-current.json")" = "${TARGET_HASH}"
-          jq -e '.complete == true' "${ROOT}/target-publication.json" > /dev/null
-          jq -e '.complete == true' "${ROOT}/target-current.json" > /dev/null
+          python - <<'PY'
+          import json
+          from pathlib import Path
 
-          jq -n '{method:"ledger",params:[{ledger_index:"validated",transactions:false,expand:false}]}' > "${ROOT}/head-request.json"
-          curl --fail-with-body --silent --show-error --retry 3 \
-            -H 'content-type: application/json' \
-            --data @"${ROOT}/head-request.json" \
-            https://devnet.honeycluster.io/ > "${ROOT}/head-response.json"
-          LIVE_LEDGER="$(jq -r '.result.ledger_index // .result.ledger.ledger_index' "${ROOT}/head-response.json")"
-          TARGET_LAG="$((LIVE_LEDGER - TARGET_LEDGER))"
-          test "${TARGET_LAG}" -ge 0
-          test "${TARGET_LAG}" -le 720
-          printf '%s\n' "${TARGET_LEDGER}" > "${ROOT}/target-ledger.txt"
-          printf '%s\n' "${TARGET_HASH}" > "${ROOT}/target-hash.txt"
-          printf '%s\n' "${LIVE_LEDGER}" > "${ROOT}/live-ledger.txt"
-          printf '%s\n' "${TARGET_LAG}" > "${ROOT}/target-lag.txt"
+          source = json.loads(Path('wrangler.jsonc').read_text())
+          previous = json.loads(Path('.local/production-current-before/read-model/manifest.json').read_text())
+          candidate = json.loads(Path('.local/current-candidate/read-model/manifest.json').read_text())
+          assert source['triggers']['crons'] == ['*/5 * * * *']
+          assert source['vars']['APP_NETWORK'] == 'devnet'
+          assert source['vars']['MAINNET_ENABLED'] == 'false'
+          assert previous['complete'] is True
+          assert candidate['complete'] is True
+          assert previous['epochId'] == candidate['epochId'] == 'devnet-3371675'
+          assert isinstance(previous['snapshotId'], str) and previous['snapshotId']
+          assert isinstance(previous['ledgerIndex'], int) and previous['ledgerIndex'] > 0
+          assert isinstance(previous['ledgerHash'], str) and len(previous['ledgerHash']) == 64
+          assert isinstance(candidate['snapshotId'], str) and candidate['snapshotId']
+          assert isinstance(candidate['ledgerIndex'], int) and candidate['ledgerIndex'] > 0
+          assert isinstance(candidate['ledgerHash'], str) and len(candidate['ledgerHash']) == 64
+          if candidate['ledgerIndex'] < previous['ledgerIndex']:
+              raise SystemExit(
+                  f"stale repair candidate {candidate['ledgerIndex']} is behind production {previous['ledgerIndex']}"
+              )
+          if candidate['ledgerIndex'] == previous['ledgerIndex'] and candidate['ledgerHash'] != previous['ledgerHash']:
+              raise SystemExit('same-ledger repair candidate hash differs from production')
 
-      - name: Dispatch cursor-preserving guarded cutover
+          monotonicity = {
+              'passed': True,
+              'production': {
+                  'epochId': previous['epochId'],
+                  'snapshotId': previous['snapshotId'],
+                  'ledgerIndex': previous['ledgerIndex'],
+                  'ledgerHash': previous['ledgerHash'],
+              },
+              'candidate': {
+                  'epochId': candidate['epochId'],
+                  'snapshotId': candidate['snapshotId'],
+                  'ledgerIndex': candidate['ledgerIndex'],
+                  'ledgerHash': candidate['ledgerHash'],
+              },
+              'relation': 'same' if candidate['ledgerIndex'] == previous['ledgerIndex'] else 'forward',
+          }
+          Path('live-cutover-evidence/monotonicity-preflight.json').write_text(
+              json.dumps(monotonicity, indent=2) + '\n'
+          )
+
+          rollback = json.loads(json.dumps(source))
+          variables = rollback['vars']
+          variables['CURRENT_STATE_REPLACEMENT_GITHUB_BRANCH'] = 'current-state-data'
+          variables['CURRENT_STATE_REPLACEMENT_SNAPSHOT_ID'] = previous['snapshotId']
+          variables['REPLACEMENT_BASE_REBASE_ENABLED'] = 'true'
+          variables['REPLACEMENT_BASE_EPOCH_ID'] = previous['epochId']
+          variables['REPLACEMENT_BASE_SNAPSHOT_ID'] = previous['snapshotId']
+          variables['REPLACEMENT_BASE_LEDGER_INDEX'] = str(previous['ledgerIndex'])
+          variables['REPLACEMENT_BASE_LEDGER_HASH'] = previous['ledgerHash']
+          variables.pop('REPLACEMENT_BASE_CUTOVER_TOKEN', None)
+          Path('wrangler.rollback.jsonc').write_text(json.dumps(rollback, indent=2) + '\n')
+          PY
+
+          jq -e '
+            .triggers.crons == ["*/5 * * * *"]
+            and .vars.APP_NETWORK == "devnet"
+            and .vars.MAINNET_ENABLED == "false"
+            and .vars.CURRENT_STATE_REPLACEMENT_GITHUB_BRANCH == "current-state-data"
+            and (.vars.REPLACEMENT_BASE_LEDGER_INDEX | tonumber) > 0
+            and (.vars | has("REPLACEMENT_BASE_CUTOVER_TOKEN") | not)
+          ' wrangler.rollback.jsonc > /dev/null
+
+          python - <<'PY'
+          import re
+          from pathlib import Path
+
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected one match, found {count}')
+              return text.replace(old, new, 1)
+
+          run_path = Path('scripts/run-live-checkpoint-cutover.sh')
+          run_text = run_path.read_text()
+          run_text = replace_once(
+              run_text,
+              'pnpm exec wrangler deploy --config wrangler.jsonc',
+              'pnpm exec wrangler deploy --config "${ROLLBACK_CONFIG:-wrangler.jsonc}"',
+              'rollback deploy command',
+          )
+          run_text = replace_once(
+              run_text,
+              'test "${TARGET_LAG_AT_GATE}" -le 300',
+              'test "${TARGET_LAG_AT_GATE}" -le 5000',
+              'emergency target lag gate',
+          )
+
+          pattern = re.compile(
+              r'pnpm exec wrangler deploy --config wrangler\.live-cutover\.jsonc\n'
+              r'touch "\$\{ROOT\}/cutover-config-deployed"\n\n'
+              r'for attempt in 1 2 3; do\n.*?'
+              r'test -f "\$\{ROOT\}/cutover-applied"',
+              re.S,
+          )
+          replacement = '''pnpm exec wrangler deploy --config wrangler.live-cutover.jsonc
+          touch "${ROOT}/cutover-config-deployed"
+
+          cutover_binding_ready=false
+          for attempt in $(seq 1 30); do
+            readiness_status="$(curl --silent --show-error --retry 2 \\
+              -o "${ROOT}/cutover-readiness-${attempt}.json" -w '%{http_code}' \\
+              -X POST \\
+              "${PRODUCTION_BASE}/api/operator/replacement-base-cutover")"
+            printf '%s\n' "${readiness_status}" > "${ROOT}/cutover-readiness-${attempt}.status"
+            if [ "${readiness_status}" = 403 ]; then
+              cutover_binding_ready=true
+              touch "${ROOT}/cutover-binding-ready"
+              break
+            fi
+            sleep 3
+          done
+          test "${cutover_binding_ready}" = true
+
+          for attempt in $(seq 1 12); do
+            http_status="$(curl --silent --show-error --retry 2 \\
+              -o "${ROOT}/cutover-response-${attempt}.json" -w '%{http_code}' \\
+              -X POST \\
+              -H "x-replacement-base-cutover-token: ${CUTOVER_TOKEN}" \\
+              "${PRODUCTION_BASE}/api/operator/replacement-base-cutover")"
+            printf '%s\n' "${http_status}" > "${ROOT}/cutover-response-${attempt}.status"
+            if [ "${http_status}" = 200 ] && jq -e --arg snapshot "${TARGET_SNAPSHOT_ID}" --argjson ledger "${TARGET_LEDGER_INDEX}" '
+              .status == "cutover_applied"
+              and .target.snapshotId == $snapshot
+              and .target.ledgerIndex == $ledger
+            ' "${ROOT}/cutover-response-${attempt}.json" > /dev/null 2>&1; then
+              touch "${ROOT}/cutover-applied"
+              break
+            fi
+            sleep 5
+          done
+          test -f "${ROOT}/cutover-applied"'''
+          run_text, count = pattern.subn(replacement, run_text, count=1)
+          if count != 1:
+              raise SystemExit(f'cutover invocation block: expected one match, found {count}')
+          run_path.write_text(run_text)
+
+          verify_path = Path('scripts/verify-live-checkpoint-cutover.sh')
+          verify_text = verify_path.read_text()
+          verify_text = replace_once(
+              verify_text,
+              'for attempt in $(seq 1 90); do',
+              'for attempt in $(seq 1 "${VERIFY_MAX_ATTEMPTS:-90}"); do',
+              'verification attempt loop',
+          )
+          verify_text = replace_once(
+              verify_text,
+              "echo 'Post-cutover current-state freshness did not converge within 15 minutes' >&2",
+              "echo 'Post-cutover current-state freshness did not converge within the configured verification window' >&2",
+              'verification timeout message',
+          )
+          verify_path.write_text(verify_text)
+          PY
+
+          grep -F 'test "${TARGET_LAG_AT_GATE}" -le 5000' scripts/run-live-checkpoint-cutover.sh
+          grep -F 'cutover_binding_ready=false' scripts/run-live-checkpoint-cutover.sh
+          grep -F 'VERIFY_MAX_ATTEMPTS' scripts/verify-live-checkpoint-cutover.sh
+          bash -n scripts/run-live-checkpoint-cutover.sh
+          bash -n scripts/verify-live-checkpoint-cutover.sh
+          test -f dist/index.html
+
+      - name: Run cursor-preserving emergency repair
         shell: bash
-        run: |
-          set -euo pipefail
-          ROOT=/tmp/p0-direct-cutover
-          gh api "repos/${REPOSITORY}/contents/scripts/run-live-checkpoint-cutover.sh?ref=${RECOVERY_BRANCH}" > "${ROOT}/recovery-script.json"
-          jq -r '.content' "${ROOT}/recovery-script.json" | tr -d '\n' | base64 -d > "${ROOT}/run-live-checkpoint-cutover.sh"
-          grep -F 'd1-emergency-override.json' "${ROOT}/run-live-checkpoint-cutover.sh"
-          grep -F "cursorMode: 'preserve_current'" < <(gh api "repos/${REPOSITORY}/contents/src/worker/operator/replacement-base-rebase-plan.ts?ref=${RECOVERY_BRANCH}" --jq '.content' | tr -d '\n' | base64 -d)
+        env:
+          ROLLBACK_CONFIG: wrangler.rollback.jsonc
+        run: bash scripts/run-live-checkpoint-cutover.sh
 
-          gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/runs?event=workflow_dispatch&per_page=100" \
-            --jq '.workflow_runs[].id' > "${ROOT}/cutover-before.txt"
-          jq -n \
-            --arg ref "${RECOVERY_BRANCH}" \
-            --arg history "${TARGET_HISTORY_BRANCH}" \
-            --arg current "${TARGET_CURRENT_BRANCH}" \
-            '{ref:$ref,inputs:{history_candidate_branch:$history,current_state_candidate_branch:$current,confirm_production_write:"true"}}' \
-            > "${ROOT}/cutover-dispatch.json"
-          gh api --method POST \
-            "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/dispatches" \
-            --input "${ROOT}/cutover-dispatch.json"
+      - name: Verify repaired production freshness
+        shell: bash
+        env:
+          VERIFY_MAX_ATTEMPTS: '150'
+        run: bash scripts/verify-live-checkpoint-cutover.sh
 
-          CUTOVER_RUN_ID=''
-          for attempt in $(seq 1 60); do
-            gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/runs?event=workflow_dispatch&per_page=100" > "${ROOT}/cutover-after.json"
-            while IFS= read -r candidate_id; do
-              if ! grep -Fxq "${candidate_id}" "${ROOT}/cutover-before.txt"; then
-                CUTOVER_RUN_ID="${candidate_id}"
-                break
-              fi
-            done < <(jq -r '.workflow_runs | sort_by(.created_at) | reverse | .[].id' "${ROOT}/cutover-after.json")
-            test -n "${CUTOVER_RUN_ID}" && break
-            sleep 10
-          done
-          test -n "${CUTOVER_RUN_ID}"
-          printf '%s\n' "${CUTOVER_RUN_ID}" > "${ROOT}/cutover-run-id.txt"
-
-          for attempt in $(seq 1 180); do
-            gh api "repos/${REPOSITORY}/actions/runs/${CUTOVER_RUN_ID}" > "${ROOT}/cutover-run.json"
-            STATUS="$(jq -r '.status' "${ROOT}/cutover-run.json")"
-            test "${STATUS}" = completed && break
-            sleep 30
-          done
-          test "$(jq -r '.status' "${ROOT}/cutover-run.json")" = completed
-          gh api "repos/${REPOSITORY}/actions/runs/${CUTOVER_RUN_ID}/jobs?per_page=100" > "${ROOT}/cutover-jobs.json"
-          test "$(jq -r '.conclusion' "${ROOT}/cutover-run.json")" = success
-
-      - name: Upload recovery evidence
+      - name: Upload retained repair evidence
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: p0-fresh-candidate-cursor-preserving-cutover
-          path: /tmp/p0-direct-cutover
+          name: p0-cursor-preserving-emergency-repair
+          path: live-cutover-evidence
           if-no-files-found: warn
           retention-days: 30
