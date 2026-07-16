@@ -13,7 +13,7 @@ permissions:
 
 concurrency:
   group: p0-oneoff-rolling-checkpoint-backlog
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   recover:
@@ -26,7 +26,7 @@ jobs:
       SEGMENT_LEDGERS: '500'
       READ_WINDOW_SIZE: '4'
       MAX_CYCLES: '16'
-      TARGET_MAX_LAG_LEDGERS: '300'
+      TARGET_MAX_LAG_LEDGERS: '720'
       PRODUCTION_HISTORY_BRANCH: history-data
       PRODUCTION_CURRENT_BRANCH: current-state-data
       CANDIDATE_HISTORY_A: history-rolling-maintenance-candidate-data
