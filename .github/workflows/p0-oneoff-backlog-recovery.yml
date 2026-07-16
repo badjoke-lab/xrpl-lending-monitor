@@ -1,0 +1,102 @@
+name: P0 one-off rolling checkpoint backlog recovery
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/p0-oneoff-backlog-recovery.yml'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: p0-oneoff-rolling-checkpoint-backlog
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+      MAX_DELTA_LEDGERS: '5000'
+      SEGMENT_LEDGERS: '500'
+      READ_WINDOW_SIZE: '4'
+      MAX_CYCLES: '16'
+      TARGET_MAX_LAG_LEDGERS: '300'
+      PRODUCTION_HISTORY_BRANCH: history-data
+      PRODUCTION_CURRENT_BRANCH: current-state-data
+      CANDIDATE_HISTORY_A: history-rolling-maintenance-candidate-data
+      CANDIDATE_CURRENT_A: current-state-rolling-maintenance-candidate-data
+      CANDIDATE_HISTORY_B: history-rolling-recovery-b-data
+      CANDIDATE_CURRENT_B: current-state-rolling-recovery-b-data
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract and run verified recovery logic
+        shell: bash
+        run: |
+          set -euo pipefail
+          awk '
+            /- name: Build resumable near-head candidate/ { found=1; next }
+            found && /run: \|/ { capture=1; next }
+            capture && /^      - name: Dispatch guarded production cutover/ { exit }
+            capture { sub(/^          /, ""); print }
+          ' .github/workflows/p0-recover-rolling-backlog.yml > /tmp/recover-backlog.sh
+          test -s /tmp/recover-backlog.sh
+          bash -n /tmp/recover-backlog.sh
+          bash /tmp/recover-backlog.sh
+
+      - name: Dispatch guarded production cutover
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=p0-rolling-backlog-recovery
+          gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/runs?event=workflow_dispatch&per_page=100" \
+            --jq '.workflow_runs[].id' > "${ROOT}/cutover-run-ids-before.txt"
+          jq -n \
+            --arg ref main \
+            --arg history "${FINAL_HISTORY_BRANCH}" \
+            --arg current "${FINAL_CURRENT_BRANCH}" \
+            '{ref:$ref,inputs:{history_candidate_branch:$history,current_state_candidate_branch:$current,confirm_production_write:"true"}}' \
+            > "${ROOT}/cutover-dispatch.json"
+          gh api --method POST \
+            "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/dispatches" \
+            --input "${ROOT}/cutover-dispatch.json"
+
+          CUTOVER_RUN_ID=''
+          for attempt in $(seq 1 60); do
+            gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/runs?event=workflow_dispatch&per_page=100" \
+              > "${ROOT}/cutover-runs-after.json"
+            while IFS= read -r candidate_id; do
+              if ! grep -Fxq "${candidate_id}" "${ROOT}/cutover-run-ids-before.txt"; then
+                CUTOVER_RUN_ID="${candidate_id}"
+                break
+              fi
+            done < <(jq -r '.workflow_runs | sort_by(.created_at) | reverse | .[].id' "${ROOT}/cutover-runs-after.json")
+            test -n "${CUTOVER_RUN_ID}" && break
+            sleep 10
+          done
+          test -n "${CUTOVER_RUN_ID}"
+          printf '%s\n' "${CUTOVER_RUN_ID}" > "${ROOT}/cutover-run-id.txt"
+
+          for attempt in $(seq 1 180); do
+            gh api "repos/${REPOSITORY}/actions/runs/${CUTOVER_RUN_ID}" > "${ROOT}/cutover-run.json"
+            STATUS="$(jq -r '.status' "${ROOT}/cutover-run.json")"
+            test "${STATUS}" = completed && break
+            sleep 30
+          done
+          test "$(jq -r '.status' "${ROOT}/cutover-run.json")" = completed
+          test "$(jq -r '.conclusion' "${ROOT}/cutover-run.json")" = success
+
+      - name: Upload recovery evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: p0-oneoff-rolling-backlog-recovery
+          path: p0-rolling-backlog-recovery
+          if-no-files-found: warn
+          retention-days: 30
