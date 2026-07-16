@@ -11,7 +11,7 @@ permissions:
   issues: write
 
 jobs:
-  cleanup:
+  observe:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -23,11 +23,11 @@ jobs:
       DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
       PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
     steps:
-      - name: Delete only stale overlay bases
+      - name: Observe canonical recovery after stale-overlay cleanup
         shell: bash
         run: |
           set -euo pipefail
-          ROOT=/tmp/overlay-cleanup
+          ROOT=/tmp/canonical-recovery
           mkdir -p "${ROOT}"
 
           query_d1() {
@@ -43,51 +43,51 @@ jobs:
             jq -e '.success == true and ((.errors // []) | length) == 0' "$output" > /dev/null
           }
 
-          PRECHECK_SQL='SELECT b.base_epoch_id,b.base_snapshot_id,b.base_ledger_index,b.base_ledger_hash,(SELECT COUNT(*) FROM current_state_overlay_state s WHERE s.network=b.network AND s.epoch_id=b.base_epoch_id AND s.base_snapshot_id=b.base_snapshot_id) AS active_state_rows,(SELECT COUNT(*) FROM current_state_overlay_objects o WHERE o.network=b.network AND o.epoch_id=b.base_epoch_id AND o.base_snapshot_id=b.base_snapshot_id) AS active_object_rows,(SELECT COALESCE(SUM(LENGTH(o.projection_json)),0) FROM current_state_overlay_objects o WHERE o.network=b.network AND o.epoch_id=b.base_epoch_id AND o.base_snapshot_id=b.base_snapshot_id) AS active_payload_bytes,(SELECT COUNT(*) FROM current_state_overlay_objects o WHERE o.network="devnet" AND NOT EXISTS (SELECT 1 FROM fast_lane_shadow_base_binding x WHERE x.network=o.network AND x.base_epoch_id=o.epoch_id AND x.base_snapshot_id=o.base_snapshot_id)) AS stale_object_rows,(SELECT COALESCE(SUM(LENGTH(o.projection_json)),0) FROM current_state_overlay_objects o WHERE o.network="devnet" AND NOT EXISTS (SELECT 1 FROM fast_lane_shadow_base_binding x WHERE x.network=o.network AND x.base_epoch_id=o.epoch_id AND x.base_snapshot_id=o.base_snapshot_id)) AS stale_payload_bytes,(SELECT COUNT(*) FROM current_state_overlay_state s WHERE s.network="devnet" AND NOT EXISTS (SELECT 1 FROM fast_lane_shadow_base_binding x WHERE x.network=s.network AND x.base_epoch_id=s.epoch_id AND x.base_snapshot_id=s.base_snapshot_id)) AS stale_state_rows FROM fast_lane_shadow_base_binding b WHERE b.network="devnet"'
-          query_d1 "$PRECHECK_SQL" "${ROOT}/before.json"
-          curl --fail-with-body --silent --show-error --retry 3 "${PRODUCTION_BASE}/api/overview" > "${ROOT}/overview-before.json"
+          SYNC_SQL='SELECT network,epoch_id,last_processed_ledger,last_processed_hash,latest_observed_ledger,latest_observed_hash,last_attempt_at,last_success_at,status,consecutive_failures,error_code,error_message,updated_at FROM sync_state WHERE network="devnet"'
+          ACTIVE_SQL='SELECT b.base_snapshot_id,b.base_ledger_index,s.overlay_ledger_index,s.overlay_ledger_hash,s.updated_at,COUNT(o.object_id) AS active_rows,COALESCE(SUM(LENGTH(o.projection_json)),0) AS active_payload_bytes FROM fast_lane_shadow_base_binding b JOIN current_state_overlay_state s ON s.network=b.network AND s.epoch_id=b.base_epoch_id AND s.base_snapshot_id=b.base_snapshot_id LEFT JOIN current_state_overlay_objects o ON o.network=b.network AND o.epoch_id=b.base_epoch_id AND o.base_snapshot_id=b.base_snapshot_id WHERE b.network="devnet" GROUP BY b.base_snapshot_id,b.base_ledger_index,s.overlay_ledger_index,s.overlay_ledger_hash,s.updated_at'
+          TOTAL_SQL='SELECT COUNT(*) AS total_rows,COALESCE(SUM(LENGTH(projection_json)),0) AS total_payload_bytes FROM current_state_overlay_objects WHERE network="devnet"'
 
-          jq -e '.result[0].results | length == 1' "${ROOT}/before.json" > /dev/null
-          jq -e '.result[0].results[0].active_state_rows == 1' "${ROOT}/before.json" > /dev/null
-          jq -e '.result[0].results[0].active_object_rows > 0' "${ROOT}/before.json" > /dev/null
-          jq -e '.result[0].results[0].stale_object_rows > 0' "${ROOT}/before.json" > /dev/null
-          ACTIVE_SNAPSHOT="$(jq -r '.result[0].results[0].base_snapshot_id' "${ROOT}/before.json")"
-          ACTIVE_ROWS="$(jq -r '.result[0].results[0].active_object_rows' "${ROOT}/before.json")"
-          ACTIVE_BYTES="$(jq -r '.result[0].results[0].active_payload_bytes' "${ROOT}/before.json")"
-          test "$(jq -r '.base.id' "${ROOT}/overview-before.json")" = "${ACTIVE_SNAPSHOT}"
+          RECOVERED=false
+          for attempt in $(seq 1 29); do
+            query_d1 "$SYNC_SQL" "${ROOT}/sync-${attempt}.json"
+            query_d1 "$ACTIVE_SQL" "${ROOT}/active-${attempt}.json"
+            LAST_PROCESSED="$(jq -r '.result[0].results[0].last_processed_ledger // 0' "${ROOT}/sync-${attempt}.json")"
+            LAST_SUCCESS="$(jq -r '.result[0].results[0].last_success_at // ""' "${ROOT}/sync-${attempt}.json")"
+            STATUS="$(jq -r '.result[0].results[0].status // ""' "${ROOT}/sync-${attempt}.json")"
+            if [ "${LAST_PROCESSED}" -gt 3711028 ] && [ "${LAST_SUCCESS}" ">" "2026-07-16T23:36:46Z" ] && [ "${STATUS}" != error ]; then
+              RECOVERED=true
+              cp "${ROOT}/sync-${attempt}.json" "${ROOT}/sync-final.json"
+              cp "${ROOT}/active-${attempt}.json" "${ROOT}/active-final.json"
+              break
+            fi
+            cp "${ROOT}/sync-${attempt}.json" "${ROOT}/sync-final.json"
+            cp "${ROOT}/active-${attempt}.json" "${ROOT}/active-final.json"
+            sleep 15
+          done
 
-          DELETE_OBJECTS_SQL='DELETE FROM current_state_overlay_objects AS o WHERE o.network="devnet" AND NOT EXISTS (SELECT 1 FROM fast_lane_shadow_base_binding b WHERE b.network=o.network AND b.base_epoch_id=o.epoch_id AND b.base_snapshot_id=o.base_snapshot_id)'
-          DELETE_STATES_SQL='DELETE FROM current_state_overlay_state AS s WHERE s.network="devnet" AND NOT EXISTS (SELECT 1 FROM fast_lane_shadow_base_binding b WHERE b.network=s.network AND b.base_epoch_id=s.epoch_id AND b.base_snapshot_id=s.base_snapshot_id)'
-          query_d1 "$DELETE_OBJECTS_SQL" "${ROOT}/delete-objects.json"
-          query_d1 "$DELETE_STATES_SQL" "${ROOT}/delete-states.json"
-
-          query_d1 "$PRECHECK_SQL" "${ROOT}/after.json"
-          curl --fail-with-body --silent --show-error --retry 3 "${PRODUCTION_BASE}/api/overview" > "${ROOT}/overview-after.json"
-
-          jq -e '.result[0].results | length == 1' "${ROOT}/after.json" > /dev/null
-          jq -e '.result[0].results[0].active_state_rows == 1' "${ROOT}/after.json" > /dev/null
-          jq -e '.result[0].results[0].stale_object_rows == 0' "${ROOT}/after.json" > /dev/null
-          jq -e '.result[0].results[0].stale_state_rows == 0' "${ROOT}/after.json" > /dev/null
-          test "$(jq -r '.result[0].results[0].base_snapshot_id' "${ROOT}/after.json")" = "${ACTIVE_SNAPSHOT}"
-          test "$(jq -r '.result[0].results[0].active_object_rows' "${ROOT}/after.json")" = "${ACTIVE_ROWS}"
-          test "$(jq -r '.result[0].results[0].active_payload_bytes' "${ROOT}/after.json")" = "${ACTIVE_BYTES}"
-          test "$(jq -r '.base.id' "${ROOT}/overview-after.json")" = "${ACTIVE_SNAPSHOT}"
+          query_d1 "$TOTAL_SQL" "${ROOT}/total.json"
+          curl --fail-with-body --silent --show-error --retry 3 "${PRODUCTION_BASE}/api/overview" > "${ROOT}/overview.json"
+          curl --fail-with-body --silent --show-error --retry 3 "${PRODUCTION_BASE}/api/status/fast-lane-diff?limit=500" > "${ROOT}/diff.json"
+          curl --fail-with-body --silent --show-error --retry 3 "${PRODUCTION_BASE}/api/status/replacement-base-rebase" > "${ROOT}/rebase.json"
 
           jq -n \
-            --slurpfile before "${ROOT}/before.json" \
-            --slurpfile after "${ROOT}/after.json" \
-            --slurpfile deleteObjects "${ROOT}/delete-objects.json" \
-            --slurpfile deleteStates "${ROOT}/delete-states.json" \
-            --slurpfile overviewBefore "${ROOT}/overview-before.json" \
-            --slurpfile overviewAfter "${ROOT}/overview-after.json" \
-            '{checkedAt:(now|todate),passed:true,before:$before[0],after:$after[0],deleteObjects:$deleteObjects[0],deleteStates:$deleteStates[0],overviewBefore:$overviewBefore[0],overviewAfter:$overviewAfter[0]}' \
+            --argjson recovered "${RECOVERED}" \
+            --slurpfile sync "${ROOT}/sync-final.json" \
+            --slurpfile active "${ROOT}/active-final.json" \
+            --slurpfile total "${ROOT}/total.json" \
+            --slurpfile overview "${ROOT}/overview.json" \
+            --slurpfile diff "${ROOT}/diff.json" \
+            --slurpfile rebase "${ROOT}/rebase.json" \
+            '{checkedAt:(now|todate),canonicalRecovered:$recovered,sync:$sync[0],activeOverlay:$active[0],totalOverlay:$total[0],overview:$overview[0],fastLaneDiff:$diff[0],rebase:$rebase[0]}' \
             > "${ROOT}/summary.json"
 
           {
-            echo '# Stale overlay cleanup result'
+            echo '# Canonical recovery after cleanup'
             echo
             echo '```json'
             cat "${ROOT}/summary.json"
             echo '```'
           } > "${ROOT}/issue-body.md"
           gh issue edit "${ISSUE_NUMBER}" --repo "${REPOSITORY}" --body-file "${ROOT}/issue-body.md"
+
+          test "${RECOVERED}" = true
