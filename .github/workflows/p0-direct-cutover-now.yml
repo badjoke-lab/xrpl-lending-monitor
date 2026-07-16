@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: write
+  issues: write
 
 concurrency:
   group: p0-direct-fresh-candidate-cutover
@@ -18,6 +19,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
+      GH_TOKEN: ${{ github.token }}
+      STATUS_ISSUE: '751'
       HISTORY_CANDIDATE_BRANCH: history-rolling-recovery-b-data
       CURRENT_STATE_CANDIDATE_BRANCH: current-state-rolling-recovery-b-data
       CONFIRM_PRODUCTION_WRITE: 'true'
@@ -28,6 +31,11 @@ jobs:
       D1_DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
       PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
     steps:
+      - name: Record run start
+        run: |
+          printf '# Direct repair status\n\n- run: `%s`\n- state: `started`\n- commit: `%s`\n' "${GITHUB_RUN_ID}" "${GITHUB_SHA}" > /tmp/status.md
+          gh issue edit "${STATUS_ISSUE}" --repo "${GITHUB_REPOSITORY}" --body-file /tmp/status.md
+
       - name: Check out repaired implementation
         uses: actions/checkout@v4
         with:
@@ -63,6 +71,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Verify cursor-preserving implementation
+        id: verify
         run: |
           pnpm exec vitest run src/worker/operator/replacement-base-rebase-plan.test.ts src/worker/operator/replacement-base-rebase.test.ts
           pnpm typecheck
@@ -70,25 +79,59 @@ jobs:
           grep -F "cursorMode: 'preserve_current'" src/worker/operator/replacement-base-rebase-plan.ts
           grep -F 'source_ledger_index > ?4' src/worker/operator/replacement-base-rebase.ts
           grep -F 'd1-emergency-override.json' scripts/run-live-checkpoint-cutover.sh
+          printf '# Direct repair status\n\n- run: `%s`\n- state: `implementation_verified`\n' "${GITHUB_RUN_ID}" > /tmp/status.md
+          gh issue edit "${STATUS_ISSUE}" --repo "${GITHUB_REPOSITORY}" --body-file /tmp/status.md
 
       - name: Build cutover assets
+        id: build
         run: |
           pnpm build:candidate-source-rehearsal
           pnpm build:deploy-assets
+          printf '# Direct repair status\n\n- run: `%s`\n- state: `assets_built`\n' "${GITHUB_RUN_ID}" > /tmp/status.md
+          gh issue edit "${STATUS_ISSUE}" --repo "${GITHUB_REPOSITORY}" --body-file /tmp/status.md
 
       - name: Apply temporary repair bounds
+        id: patch
         run: |
           sed -i 's/test "${TARGET_LAG_AT_GATE}" -le 300/test "${TARGET_LAG_AT_GATE}" -le 5000/' scripts/run-live-checkpoint-cutover.sh
           sed -i 's/for attempt in 1 2 3; do/for attempt in $(seq 1 12); do/' scripts/run-live-checkpoint-cutover.sh
           grep -F 'test "${TARGET_LAG_AT_GATE}" -le 5000' scripts/run-live-checkpoint-cutover.sh
           grep -F 'for attempt in $(seq 1 12); do' scripts/run-live-checkpoint-cutover.sh
           bash -n scripts/run-live-checkpoint-cutover.sh
+          printf '# Direct repair status\n\n- run: `%s`\n- state: `repair_starting`\n' "${GITHUB_RUN_ID}" > /tmp/status.md
+          gh issue edit "${STATUS_ISSUE}" --repo "${GITHUB_REPOSITORY}" --body-file /tmp/status.md
 
       - name: Run cursor-preserving repair
-        run: bash scripts/run-live-checkpoint-cutover.sh
+        id: repair
+        shell: bash
+        run: |
+          set -o pipefail
+          bash scripts/run-live-checkpoint-cutover.sh > >(tee /tmp/repair.log) 2> >(tee /tmp/repair.err >&2)
 
       - name: Verify repaired production
+        id: production_verify
         run: bash scripts/verify-live-checkpoint-cutover.sh
+
+      - name: Record final status
+        if: ${{ always() }}
+        run: |
+          {
+            echo '# Direct repair status'
+            echo
+            printf -- '- run: `%s`\n' "${GITHUB_RUN_ID}"
+            printf -- '- job: `%s`\n' "${{ job.status }}"
+            printf -- '- implementation: `%s`\n' "${{ steps.verify.outcome }}"
+            printf -- '- build: `%s`\n' "${{ steps.build.outcome }}"
+            printf -- '- patch: `%s`\n' "${{ steps.patch.outcome }}"
+            printf -- '- repair: `%s`\n' "${{ steps.repair.outcome }}"
+            printf -- '- production verification: `%s`\n' "${{ steps.production_verify.outcome }}"
+            echo
+            echo '```text'
+            if [ -s /tmp/repair.err ]; then tail -n 80 /tmp/repair.err; fi
+            if [ -s /tmp/repair.log ]; then tail -n 80 /tmp/repair.log; fi
+            echo '```'
+          } > /tmp/status.md
+          gh issue edit "${STATUS_ISSUE}" --repo "${GITHUB_REPOSITORY}" --body-file /tmp/status.md
 
       - name: Upload repair evidence
         if: ${{ always() }}
