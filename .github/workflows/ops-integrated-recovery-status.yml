@@ -1,0 +1,90 @@
+name: Ops integrated recovery status
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/ops-integrated-recovery-status.yml'
+
+permissions:
+  actions: read
+  contents: read
+  issues: write
+
+jobs:
+  status:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+      TARGET_SHA: c5c712b20b8e682d882c721201978c58714647dc
+      ISSUE_NUMBER: '751'
+    steps:
+      - name: Collect recovery workflow state
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=/tmp/ops-status
+          mkdir -p "${ROOT}"
+
+          gh api "repos/${REPOSITORY}/actions/runs?head_sha=${TARGET_SHA}&per_page=100" > "${ROOT}/parent-runs.json"
+          gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-candidate.yml/runs?event=workflow_dispatch&per_page=30" > "${ROOT}/candidate-runs.json"
+          gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/runs?event=workflow_dispatch&per_page=30" > "${ROOT}/cutover-runs.json"
+
+          PARENT_ID="$(jq -r '.workflow_runs | sort_by(.created_at) | reverse | .[0].id // empty' "${ROOT}/parent-runs.json")"
+          if [ -n "${PARENT_ID}" ]; then
+            gh api "repos/${REPOSITORY}/actions/runs/${PARENT_ID}/jobs?per_page=100" > "${ROOT}/parent-jobs.json"
+          else
+            printf '{"jobs":[]}' > "${ROOT}/parent-jobs.json"
+          fi
+
+          CANDIDATE_ID="$(jq -r '[.workflow_runs[] | select(.created_at >= "2026-07-16T22:40:00Z")] | sort_by(.created_at) | reverse | .[0].id // empty' "${ROOT}/candidate-runs.json")"
+          if [ -n "${CANDIDATE_ID}" ]; then
+            gh api "repos/${REPOSITORY}/actions/runs/${CANDIDATE_ID}/jobs?per_page=100" > "${ROOT}/candidate-jobs.json"
+          else
+            printf '{"jobs":[]}' > "${ROOT}/candidate-jobs.json"
+          fi
+
+          CUTOVER_ID="$(jq -r '[.workflow_runs[] | select(.created_at >= "2026-07-16T22:40:00Z")] | sort_by(.created_at) | reverse | .[0].id // empty' "${ROOT}/cutover-runs.json")"
+          if [ -n "${CUTOVER_ID}" ]; then
+            gh api "repos/${REPOSITORY}/actions/runs/${CUTOVER_ID}/jobs?per_page=100" > "${ROOT}/cutover-jobs.json"
+          else
+            printf '{"jobs":[]}' > "${ROOT}/cutover-jobs.json"
+          fi
+
+          jq -n \
+            --slurpfile parents "${ROOT}/parent-runs.json" \
+            --slurpfile parentJobs "${ROOT}/parent-jobs.json" \
+            --slurpfile candidates "${ROOT}/candidate-runs.json" \
+            --slurpfile candidateJobs "${ROOT}/candidate-jobs.json" \
+            --slurpfile cutovers "${ROOT}/cutover-runs.json" \
+            --slurpfile cutoverJobs "${ROOT}/cutover-jobs.json" '
+            def run($runs; $id):
+              if ($id | length) == 0 then null
+              else ($runs[0].workflow_runs[] | select((.id|tostring) == $id))
+              end;
+            def compactRun($r; $jobs):
+              if $r == null then null else {
+                id:$r.id,name:$r.name,status:$r.status,conclusion:$r.conclusion,event:$r.event,
+                head_branch:$r.head_branch,head_sha:$r.head_sha,created_at:$r.created_at,updated_at:$r.updated_at,
+                jobs:[$jobs[0].jobs[]? | {id,name,status,conclusion,steps:[.steps[]? | {name,status,conclusion}]}]
+              } end;
+            ($parentJobs[0].jobs[0].run_id // null) as $parentId |
+            ([ $candidates[0].workflow_runs[] | select(.created_at >= "2026-07-16T22:40:00Z") ] | sort_by(.created_at) | reverse | .[0] // null) as $candidate |
+            ([ $cutovers[0].workflow_runs[] | select(.created_at >= "2026-07-16T22:40:00Z") ] | sort_by(.created_at) | reverse | .[0] // null) as $cutover |
+            {
+              target_sha:"c5c712b20b8e682d882c721201978c58714647dc",
+              parent: compactRun(($parents[0].workflow_runs | sort_by(.created_at) | reverse | .[0] // null); $parentJobs),
+              candidate: compactRun($candidate; $candidateJobs),
+              cutover: compactRun($cutover; $cutoverJobs)
+            }' > "${ROOT}/status.json"
+
+          {
+            echo '# Integrated recovery status'
+            echo
+            echo '```json'
+            cat "${ROOT}/status.json"
+            echo '```'
+          } > "${ROOT}/issue-body.md"
+          gh issue edit "${ISSUE_NUMBER}" --repo "${REPOSITORY}" --body-file "${ROOT}/issue-body.md"
