@@ -1,0 +1,61 @@
+name: P0 direct guarded cutover now
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/p0-direct-cutover-now.yml'
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+      HISTORY_CANDIDATE_BRANCH: history-rolling-maintenance-candidate-data
+      CURRENT_STATE_CANDIDATE_BRANCH: current-state-rolling-maintenance-candidate-data
+    steps:
+      - name: Dispatch existing guarded cutover
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/runs?event=workflow_dispatch&per_page=100" \
+            --jq '.workflow_runs[].id' > /tmp/cutover-before.txt
+          jq -n \
+            --arg ref main \
+            --arg history "${HISTORY_CANDIDATE_BRANCH}" \
+            --arg current "${CURRENT_STATE_CANDIDATE_BRANCH}" \
+            '{ref:$ref,inputs:{history_candidate_branch:$history,current_state_candidate_branch:$current,confirm_production_write:"true"}}' \
+            > /tmp/cutover-dispatch.json
+          gh api --method POST \
+            "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/dispatches" \
+            --input /tmp/cutover-dispatch.json
+
+          CUTOVER_RUN_ID=''
+          for attempt in $(seq 1 60); do
+            gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/runs?event=workflow_dispatch&per_page=100" > /tmp/cutover-after.json
+            while IFS= read -r candidate_id; do
+              if ! grep -Fxq "${candidate_id}" /tmp/cutover-before.txt; then
+                CUTOVER_RUN_ID="${candidate_id}"
+                break
+              fi
+            done < <(jq -r '.workflow_runs | sort_by(.created_at) | reverse | .[].id' /tmp/cutover-after.json)
+            test -n "${CUTOVER_RUN_ID}" && break
+            sleep 10
+          done
+          test -n "${CUTOVER_RUN_ID}"
+          printf '%s\n' "${CUTOVER_RUN_ID}"
+
+          for attempt in $(seq 1 180); do
+            gh api "repos/${REPOSITORY}/actions/runs/${CUTOVER_RUN_ID}" > /tmp/cutover-run.json
+            STATUS="$(jq -r '.status' /tmp/cutover-run.json)"
+            test "${STATUS}" = completed && break
+            sleep 30
+          done
+          test "$(jq -r '.status' /tmp/cutover-run.json)" = completed
+          test "$(jq -r '.conclusion' /tmp/cutover-run.json)" = success
