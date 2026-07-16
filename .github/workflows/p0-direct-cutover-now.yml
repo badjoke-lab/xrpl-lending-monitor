@@ -11,7 +11,7 @@ permissions:
   issues: write
 
 jobs:
-  validate:
+  cleanup:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -23,11 +23,11 @@ jobs:
       DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
       PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
     steps:
-      - name: Query post-repair production state
+      - name: Delete only stale overlay bases
         shell: bash
         run: |
           set -euo pipefail
-          ROOT=/tmp/post-repair
+          ROOT=/tmp/overlay-cleanup
           mkdir -p "${ROOT}"
 
           query_d1() {
@@ -40,53 +40,51 @@ jobs:
                   --data-binary @- \
                   "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database/${DATABASE_ID}/query" \
               > "$output"
+            jq -e '.success == true and ((.errors // []) | length) == 0' "$output" > /dev/null
           }
 
-          STATUS_SQL='SELECT run_at,status,start_ledger_index,end_ledger_index,latest_observed_ledger,lag_ledgers,ledgers_processed,persistence_rows_written,error_message FROM fast_lane_shadow_run_metrics WHERE network = "devnet" ORDER BY run_at DESC LIMIT 12'
-          ACTIVE_SQL='SELECT binding.base_epoch_id,binding.base_snapshot_id,binding.base_ledger_index,binding.base_ledger_hash,state.overlay_ledger_index,state.overlay_ledger_hash,state.updated_at,COUNT(objects.object_id) AS active_rows,COALESCE(SUM(LENGTH(objects.projection_json)),0) AS active_payload_bytes FROM fast_lane_shadow_base_binding AS binding JOIN current_state_overlay_state AS state ON state.network=binding.network AND state.epoch_id=binding.base_epoch_id AND state.base_snapshot_id=binding.base_snapshot_id LEFT JOIN current_state_overlay_objects AS objects ON objects.network=binding.network AND objects.epoch_id=binding.base_epoch_id AND objects.base_snapshot_id=binding.base_snapshot_id WHERE binding.network="devnet" GROUP BY binding.base_epoch_id,binding.base_snapshot_id,binding.base_ledger_index,binding.base_ledger_hash,state.overlay_ledger_index,state.overlay_ledger_hash,state.updated_at'
-          TOTAL_SQL='SELECT COUNT(*) AS total_rows,COALESCE(SUM(LENGTH(projection_json)),0) AS total_payload_bytes FROM current_state_overlay_objects WHERE network="devnet"'
-          BASES_SQL='SELECT base_snapshot_id,COUNT(*) AS rows,COALESCE(SUM(LENGTH(projection_json)),0) AS payload_bytes,MIN(source_ledger_index) AS min_source_ledger,MAX(source_ledger_index) AS max_source_ledger FROM current_state_overlay_objects WHERE network="devnet" GROUP BY base_snapshot_id ORDER BY rows DESC LIMIT 15'
-          COMPACT_SQL='SELECT COUNT(*) AS compact_rows,COALESCE(SUM(LENGTH(projection_json)),0) AS compact_payload_bytes FROM fast_lane_shadow_objects_compact WHERE network="devnet"'
+          PRECHECK_SQL='SELECT b.base_epoch_id,b.base_snapshot_id,b.base_ledger_index,b.base_ledger_hash,(SELECT COUNT(*) FROM current_state_overlay_state s WHERE s.network=b.network AND s.epoch_id=b.base_epoch_id AND s.base_snapshot_id=b.base_snapshot_id) AS active_state_rows,(SELECT COUNT(*) FROM current_state_overlay_objects o WHERE o.network=b.network AND o.epoch_id=b.base_epoch_id AND o.base_snapshot_id=b.base_snapshot_id) AS active_object_rows,(SELECT COALESCE(SUM(LENGTH(o.projection_json)),0) FROM current_state_overlay_objects o WHERE o.network=b.network AND o.epoch_id=b.base_epoch_id AND o.base_snapshot_id=b.base_snapshot_id) AS active_payload_bytes,(SELECT COUNT(*) FROM current_state_overlay_objects o WHERE o.network="devnet" AND NOT EXISTS (SELECT 1 FROM fast_lane_shadow_base_binding x WHERE x.network=o.network AND x.base_epoch_id=o.epoch_id AND x.base_snapshot_id=o.base_snapshot_id)) AS stale_object_rows,(SELECT COALESCE(SUM(LENGTH(o.projection_json)),0) FROM current_state_overlay_objects o WHERE o.network="devnet" AND NOT EXISTS (SELECT 1 FROM fast_lane_shadow_base_binding x WHERE x.network=o.network AND x.base_epoch_id=o.epoch_id AND x.base_snapshot_id=o.base_snapshot_id)) AS stale_payload_bytes,(SELECT COUNT(*) FROM current_state_overlay_state s WHERE s.network="devnet" AND NOT EXISTS (SELECT 1 FROM fast_lane_shadow_base_binding x WHERE x.network=s.network AND x.base_epoch_id=s.epoch_id AND x.base_snapshot_id=s.base_snapshot_id)) AS stale_state_rows FROM fast_lane_shadow_base_binding b WHERE b.network="devnet"'
+          query_d1 "$PRECHECK_SQL" "${ROOT}/before.json"
+          curl --fail-with-body --silent --show-error --retry 3 "${PRODUCTION_BASE}/api/overview" > "${ROOT}/overview-before.json"
 
-          query_d1 "$STATUS_SQL" "${ROOT}/runs.json"
-          query_d1 "$ACTIVE_SQL" "${ROOT}/active.json"
-          query_d1 "$TOTAL_SQL" "${ROOT}/total.json"
-          query_d1 "$BASES_SQL" "${ROOT}/bases.json"
-          query_d1 "$COMPACT_SQL" "${ROOT}/compact.json"
+          jq -e '.result[0].results | length == 1' "${ROOT}/before.json" > /dev/null
+          jq -e '.result[0].results[0].active_state_rows == 1' "${ROOT}/before.json" > /dev/null
+          jq -e '.result[0].results[0].active_object_rows > 0' "${ROOT}/before.json" > /dev/null
+          jq -e '.result[0].results[0].stale_object_rows > 0' "${ROOT}/before.json" > /dev/null
+          ACTIVE_SNAPSHOT="$(jq -r '.result[0].results[0].base_snapshot_id' "${ROOT}/before.json")"
+          ACTIVE_ROWS="$(jq -r '.result[0].results[0].active_object_rows' "${ROOT}/before.json")"
+          ACTIVE_BYTES="$(jq -r '.result[0].results[0].active_payload_bytes' "${ROOT}/before.json")"
+          test "$(jq -r '.base.id' "${ROOT}/overview-before.json")" = "${ACTIVE_SNAPSHOT}"
 
-          curl --fail-with-body --silent --show-error --retry 3 "${PRODUCTION_BASE}/api/overview" > "${ROOT}/overview.json"
-          curl --fail-with-body --silent --show-error --retry 3 "${PRODUCTION_BASE}/api/status/replacement-base-rebase" > "${ROOT}/rebase.json"
-          curl --fail-with-body --silent --show-error --retry 3 "${PRODUCTION_BASE}/api/status/fast-lane-diff?limit=500" > "${ROOT}/diff.json"
-          curl --fail-with-body --silent --show-error --retry 3 "${PRODUCTION_BASE}/api/status/history-source" > "${ROOT}/history.json"
+          DELETE_OBJECTS_SQL='DELETE FROM current_state_overlay_objects AS o WHERE o.network="devnet" AND NOT EXISTS (SELECT 1 FROM fast_lane_shadow_base_binding b WHERE b.network=o.network AND b.base_epoch_id=o.epoch_id AND b.base_snapshot_id=o.base_snapshot_id)'
+          DELETE_STATES_SQL='DELETE FROM current_state_overlay_state AS s WHERE s.network="devnet" AND NOT EXISTS (SELECT 1 FROM fast_lane_shadow_base_binding b WHERE b.network=s.network AND b.base_epoch_id=s.epoch_id AND b.base_snapshot_id=s.base_snapshot_id)'
+          query_d1 "$DELETE_OBJECTS_SQL" "${ROOT}/delete-objects.json"
+          query_d1 "$DELETE_STATES_SQL" "${ROOT}/delete-states.json"
+
+          query_d1 "$PRECHECK_SQL" "${ROOT}/after.json"
+          curl --fail-with-body --silent --show-error --retry 3 "${PRODUCTION_BASE}/api/overview" > "${ROOT}/overview-after.json"
+
+          jq -e '.result[0].results | length == 1' "${ROOT}/after.json" > /dev/null
+          jq -e '.result[0].results[0].active_state_rows == 1' "${ROOT}/after.json" > /dev/null
+          jq -e '.result[0].results[0].stale_object_rows == 0' "${ROOT}/after.json" > /dev/null
+          jq -e '.result[0].results[0].stale_state_rows == 0' "${ROOT}/after.json" > /dev/null
+          test "$(jq -r '.result[0].results[0].base_snapshot_id' "${ROOT}/after.json")" = "${ACTIVE_SNAPSHOT}"
+          test "$(jq -r '.result[0].results[0].active_object_rows' "${ROOT}/after.json")" = "${ACTIVE_ROWS}"
+          test "$(jq -r '.result[0].results[0].active_payload_bytes' "${ROOT}/after.json")" = "${ACTIVE_BYTES}"
+          test "$(jq -r '.base.id' "${ROOT}/overview-after.json")" = "${ACTIVE_SNAPSHOT}"
 
           jq -n \
-            --slurpfile runs "${ROOT}/runs.json" \
-            --slurpfile active "${ROOT}/active.json" \
-            --slurpfile total "${ROOT}/total.json" \
-            --slurpfile bases "${ROOT}/bases.json" \
-            --slurpfile compact "${ROOT}/compact.json" \
-            --slurpfile overview "${ROOT}/overview.json" \
-            --slurpfile rebase "${ROOT}/rebase.json" \
-            --slurpfile diff "${ROOT}/diff.json" \
-            --slurpfile history "${ROOT}/history.json" \
-            '{
-              checkedAt:(now|todate),
-              d1:{
-                latestRuns:$runs[0].result[0].results,
-                activeOverlay:$active[0].result[0].results,
-                totalOverlay:$total[0].result[0].results,
-                overlayBases:$bases[0].result[0].results,
-                compact:$compact[0].result[0].results,
-                sizeAfterBytes:$total[0].result[0].meta.size_after
-              },
-              overview:$overview[0],
-              rebase:$rebase[0],
-              diff:$diff[0],
-              history:$history[0]
-            }' > "${ROOT}/summary.json"
+            --slurpfile before "${ROOT}/before.json" \
+            --slurpfile after "${ROOT}/after.json" \
+            --slurpfile deleteObjects "${ROOT}/delete-objects.json" \
+            --slurpfile deleteStates "${ROOT}/delete-states.json" \
+            --slurpfile overviewBefore "${ROOT}/overview-before.json" \
+            --slurpfile overviewAfter "${ROOT}/overview-after.json" \
+            '{checkedAt:(now|todate),passed:true,before:$before[0],after:$after[0],deleteObjects:$deleteObjects[0],deleteStates:$deleteStates[0],overviewBefore:$overviewBefore[0],overviewAfter:$overviewAfter[0]}' \
+            > "${ROOT}/summary.json"
 
           {
-            echo '# Post-repair production validation'
+            echo '# Stale overlay cleanup result'
             echo
             echo '```json'
             cat "${ROOT}/summary.json"
