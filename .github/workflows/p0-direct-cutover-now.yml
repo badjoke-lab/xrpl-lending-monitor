@@ -72,15 +72,23 @@ jobs:
 
       - name: Verify cursor-preserving implementation
         id: verify
+        shell: bash
         run: |
-          pnpm exec vitest run src/worker/operator/replacement-base-rebase-plan.test.ts src/worker/operator/replacement-base-rebase.test.ts
-          pnpm typecheck
-          pnpm lint
-          grep -F "cursorMode: 'preserve_current'" src/worker/operator/replacement-base-rebase-plan.ts
-          grep -F 'source_ledger_index > ?4' src/worker/operator/replacement-base-rebase.ts
-          grep -F 'd1-emergency-override.json' scripts/run-live-checkpoint-cutover.sh
-          printf '# Direct repair status\n\n- run: `%s`\n- state: `implementation_verified`\n' "${GITHUB_RUN_ID}" > /tmp/status.md
-          gh issue edit "${STATUS_ISSUE}" --repo "${GITHUB_REPOSITORY}" --body-file /tmp/status.md
+          set +e
+          {
+            pnpm exec vitest run src/worker/operator/replacement-base-rebase-plan.test.ts src/worker/operator/replacement-base-rebase.test.ts
+            pnpm typecheck
+            pnpm lint
+            grep -F "cursorMode: 'preserve_current'" src/worker/operator/replacement-base-rebase-plan.ts
+            grep -F 'source_ledger_index > ?4' src/worker/operator/replacement-base-rebase.ts
+            grep -F 'd1-emergency-override.json' scripts/run-live-checkpoint-cutover.sh
+          } > /tmp/implementation.log 2>&1
+          STATUS=$?
+          if [ "${STATUS}" -eq 0 ]; then
+            printf '# Direct repair status\n\n- run: `%s`\n- state: `implementation_verified`\n' "${GITHUB_RUN_ID}" > /tmp/status.md
+            gh issue edit "${STATUS_ISSUE}" --repo "${GITHUB_REPOSITORY}" --body-file /tmp/status.md
+          fi
+          exit "${STATUS}"
 
       - name: Build cutover assets
         id: build
@@ -127,6 +135,7 @@ jobs:
             printf -- '- production verification: `%s`\n' "${{ steps.production_verify.outcome }}"
             echo
             echo '```text'
+            if [ -s /tmp/implementation.log ]; then tail -n 120 /tmp/implementation.log; fi
             if [ -s /tmp/repair.err ]; then tail -n 80 /tmp/repair.err; fi
             if [ -s /tmp/repair.log ]; then tail -n 80 /tmp/repair.log; fi
             echo '```'
