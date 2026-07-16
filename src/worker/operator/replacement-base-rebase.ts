@@ -120,13 +120,13 @@ function overlayGuardStatement(options: {
      ) VALUES (
        ?1, 'devnet',
        ?2, (SELECT epoch_id FROM current_state_overlay_state
-             WHERE network = 'devnet' AND epoch_id = ?2 AND base_snapshot_id = ?3 LIMIT 1),
+            WHERE network = 'devnet' AND epoch_id = ?2 AND base_snapshot_id = ?3 LIMIT 1),
        ?3, (SELECT base_snapshot_id FROM current_state_overlay_state
-             WHERE network = 'devnet' AND epoch_id = ?2 AND base_snapshot_id = ?3 LIMIT 1),
+            WHERE network = 'devnet' AND epoch_id = ?2 AND base_snapshot_id = ?3 LIMIT 1),
        ?4, (SELECT overlay_ledger_index FROM current_state_overlay_state
-             WHERE network = 'devnet' AND epoch_id = ?2 AND base_snapshot_id = ?3 LIMIT 1),
+            WHERE network = 'devnet' AND epoch_id = ?2 AND base_snapshot_id = ?3 LIMIT 1),
        ?5, (SELECT overlay_ledger_hash FROM current_state_overlay_state
-             WHERE network = 'devnet' AND epoch_id = ?2 AND base_snapshot_id = ?3 LIMIT 1),
+            WHERE network = 'devnet' AND epoch_id = ?2 AND base_snapshot_id = ?3 LIMIT 1),
        ?6
      )`,
   ).bind(
@@ -160,6 +160,66 @@ function epochGuardStatement(options: {
   ).bind(options.token, options.epochId, options.checkedAt)
 }
 
+function advanceCursorStatement(options: {
+  db: D1Database
+  target: CatchUpBaseIdentity
+  plan: Extract<ReplacementBaseRebasePlan, { action: 'rebase' }>
+  rebasedAt: string
+}): D1PreparedStatement {
+  return options.db.prepare(
+    `UPDATE sync_state
+     SET last_processed_ledger = ?1,
+         last_processed_hash = ?2,
+         updated_at = ?3
+     WHERE network = 'devnet'
+       AND epoch_id = ?4
+       AND last_processed_ledger = ?5
+       AND last_processed_hash = ?6
+       AND latest_observed_ledger = ?7
+       AND latest_observed_hash = ?8`,
+  ).bind(
+    options.target.ledgerIndex,
+    options.target.ledgerHash,
+    options.rebasedAt,
+    options.target.epochId,
+    options.plan.previousCursorLedgerIndex,
+    options.plan.previousCursorLedgerHash,
+    options.plan.latestObservedLedger,
+    options.plan.latestObservedHash,
+  )
+}
+
+function copyPostBaseOverlayStatement(options: {
+  db: D1Database
+  target: CatchUpBaseIdentity
+  plan: Extract<ReplacementBaseRebasePlan, { action: 'rebase' }>
+}): D1PreparedStatement {
+  return options.db.prepare(
+    `INSERT INTO current_state_overlay_objects (
+       network, epoch_id, base_snapshot_id, object_type, object_id, operation,
+       projection_json, owner, account, borrower, vault_id, loan_broker_id,
+       asset_key, on_ledger_status, source_ledger_index, source_ledger_hash,
+       source_transaction_hash, source_transaction_index, updated_at
+     )
+     SELECT network, epoch_id, ?1, object_type, object_id, operation,
+            projection_json, owner, account, borrower, vault_id, loan_broker_id,
+            asset_key, on_ledger_status, source_ledger_index, source_ledger_hash,
+            source_transaction_hash, source_transaction_index, updated_at
+     FROM current_state_overlay_objects
+     WHERE network = 'devnet'
+       AND epoch_id = ?2
+       AND base_snapshot_id = ?3
+       AND source_ledger_index > ?4
+       AND source_ledger_index <= ?5`,
+  ).bind(
+    options.target.snapshotId,
+    options.target.epochId,
+    options.plan.previousSnapshotId,
+    options.target.ledgerIndex,
+    options.plan.previousCursorLedgerIndex,
+  )
+}
+
 export async function rebaseToReplacementBase(options: {
   db: D1Database
   target: CatchUpBaseIdentity
@@ -175,6 +235,14 @@ export async function rebaseToReplacementBase(options: {
   if (options.dryRun) {
     return { status: 'ready', plan, evidence }
   }
+
+  const preserveCursor = plan.cursorMode === 'preserve_current'
+  const nextCursorLedgerIndex = preserveCursor
+    ? plan.previousCursorLedgerIndex
+    : options.target.ledgerIndex
+  const nextCursorLedgerHash = preserveCursor
+    ? plan.previousCursorLedgerHash
+    : options.target.ledgerHash
 
   const token = `${options.target.snapshotId}:${options.rebasedAt}`
   const beforeSync = `${token}:before-sync`
@@ -214,41 +282,25 @@ export async function rebaseToReplacementBase(options: {
       `INSERT INTO current_state_overlay_state (
          network, epoch_id, base_snapshot_id, base_ledger_index,
          base_ledger_hash, overlay_ledger_index, overlay_ledger_hash, updated_at
-       ) VALUES ('devnet', ?1, ?2, ?3, ?4, ?3, ?4, ?5)`,
+       ) VALUES ('devnet', ?1, ?2, ?3, ?4, ?5, ?6, ?7)`,
     ).bind(
       options.target.epochId,
       options.target.snapshotId,
       options.target.ledgerIndex,
       options.target.ledgerHash,
+      nextCursorLedgerIndex,
+      nextCursorLedgerHash,
       options.rebasedAt,
     ),
-    options.db.prepare(
-      `UPDATE sync_state
-       SET last_processed_ledger = ?1,
-           last_processed_hash = ?2,
-           updated_at = ?3
-       WHERE network = 'devnet'
-         AND epoch_id = ?4
-         AND last_processed_ledger = ?5
-         AND last_processed_hash = ?6
-         AND latest_observed_ledger = ?7
-         AND latest_observed_hash = ?8`,
-    ).bind(
-      options.target.ledgerIndex,
-      options.target.ledgerHash,
-      options.rebasedAt,
-      options.target.epochId,
-      plan.previousCursorLedgerIndex,
-      plan.previousCursorLedgerHash,
-      plan.latestObservedLedger,
-      plan.latestObservedHash,
-    ),
+    preserveCursor
+      ? copyPostBaseOverlayStatement({ db: options.db, target: options.target, plan })
+      : advanceCursorStatement({ db: options.db, target: options.target, plan, rebasedAt: options.rebasedAt }),
     syncGuardStatement({
       db: options.db,
       token: afterSync,
       epochId: options.target.epochId,
-      cursorLedgerIndex: options.target.ledgerIndex,
-      cursorLedgerHash: options.target.ledgerHash,
+      cursorLedgerIndex: nextCursorLedgerIndex,
+      cursorLedgerHash: nextCursorLedgerHash,
       latestObservedLedger: plan.latestObservedLedger,
       latestObservedHash: plan.latestObservedHash,
       checkedAt: options.rebasedAt,
@@ -258,8 +310,8 @@ export async function rebaseToReplacementBase(options: {
       token: afterOverlay,
       epochId: options.target.epochId,
       snapshotId: options.target.snapshotId,
-      overlayLedgerIndex: options.target.ledgerIndex,
-      overlayLedgerHash: options.target.ledgerHash,
+      overlayLedgerIndex: nextCursorLedgerIndex,
+      overlayLedgerHash: nextCursorLedgerHash,
       checkedAt: options.rebasedAt,
     }),
     epochGuardStatement({
