@@ -17,17 +17,15 @@ concurrency:
 jobs:
   dispatch:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 90
     env:
       GH_TOKEN: ${{ github.token }}
       REPOSITORY: ${{ github.repository }}
       RECOVERY_BRANCH: ops/direct-cutover-now
-      SOURCE_HISTORY_BRANCH: history-rolling-maintenance-candidate-data
-      SOURCE_CURRENT_BRANCH: current-state-rolling-maintenance-candidate-data
-      TARGET_HISTORY_BRANCH: history-rolling-recovery-b-data
-      TARGET_CURRENT_BRANCH: current-state-rolling-recovery-b-data
+      HISTORY_CANDIDATE_BRANCH: history-rolling-recovery-b-data
+      CURRENT_STATE_CANDIDATE_BRANCH: current-state-rolling-recovery-b-data
     steps:
-      - name: Build fresh aligned candidate and run guarded cutover
+      - name: Verify aligned near-head candidate
         shell: bash
         run: |
           set -euo pipefail
@@ -39,56 +37,9 @@ jobs:
           grep -F 'd1-emergency-override.json' "${ROOT}/run-live-checkpoint-cutover.sh"
           bash -n "${ROOT}/run-live-checkpoint-cutover.sh"
 
-          gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-candidate.yml/runs?event=workflow_dispatch&per_page=100" \
-            --jq '.workflow_runs[].id' > "${ROOT}/candidate-before.txt"
-          jq -n \
-            --arg ref main \
-            --arg sourceHistory "${SOURCE_HISTORY_BRANCH}" \
-            --arg sourceCurrent "${SOURCE_CURRENT_BRANCH}" \
-            --arg targetHistory "${TARGET_HISTORY_BRANCH}" \
-            --arg targetCurrent "${TARGET_CURRENT_BRANCH}" \
-            '{ref:$ref,inputs:{source_history_branch:$sourceHistory,source_current_state_branch:$sourceCurrent,history_candidate_branch:$targetHistory,current_state_candidate_branch:$targetCurrent,max_delta_ledgers:"5000",segment_ledgers:"500",read_window_size:"4"}}' \
-            > "${ROOT}/candidate-dispatch.json"
-          gh api --method POST \
-            "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-candidate.yml/dispatches" \
-            --input "${ROOT}/candidate-dispatch.json"
-
-          CANDIDATE_RUN_ID=''
-          for attempt in $(seq 1 60); do
-            gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-candidate.yml/runs?event=workflow_dispatch&per_page=100" > "${ROOT}/candidate-after.json"
-            while IFS= read -r candidate_id; do
-              if ! grep -Fxq "${candidate_id}" "${ROOT}/candidate-before.txt"; then
-                CANDIDATE_RUN_ID="${candidate_id}"
-                break
-              fi
-            done < <(jq -r '.workflow_runs | sort_by(.created_at) | reverse | .[].id' "${ROOT}/candidate-after.json")
-            test -n "${CANDIDATE_RUN_ID}" && break
-            sleep 10
-          done
-          test -n "${CANDIDATE_RUN_ID}"
-          printf '%s\n' "${CANDIDATE_RUN_ID}" > "${ROOT}/candidate-run-id.txt"
-
-          for attempt in $(seq 1 240); do
-            gh api "repos/${REPOSITORY}/actions/runs/${CANDIDATE_RUN_ID}" > "${ROOT}/candidate-run.json"
-            STATUS="$(jq -r '.status' "${ROOT}/candidate-run.json")"
-            test "${STATUS}" = completed && break
-            sleep 30
-          done
-          test "$(jq -r '.status' "${ROOT}/candidate-run.json")" = completed
-          gh api "repos/${REPOSITORY}/actions/runs/${CANDIDATE_RUN_ID}/jobs?per_page=100" > "${ROOT}/candidate-jobs.json"
-
-          if [ "$(jq -r '.conclusion' "${ROOT}/candidate-run.json")" != success ]; then
-            jq -e '
-              [.jobs[].steps[]]
-              | (map(select(.name == "Publish history candidate branch" and .conclusion == "success")) | length) == 1
-              and (map(select(.name == "Publish current-state candidate branch" and .conclusion == "success")) | length) == 1
-              and (map(select(.name == "Rehearse remote candidate pair" and .conclusion == "success")) | length) == 1
-            ' "${ROOT}/candidate-jobs.json" > /dev/null
-          fi
-
-          gh api "repos/${REPOSITORY}/contents/history/publication.json?ref=${TARGET_HISTORY_BRANCH}" > "${ROOT}/target-publication-api.json"
+          gh api "repos/${REPOSITORY}/contents/history/publication.json?ref=${HISTORY_CANDIDATE_BRANCH}" > "${ROOT}/target-publication-api.json"
           jq -r '.content' "${ROOT}/target-publication-api.json" | tr -d '\n' | base64 -d > "${ROOT}/target-publication.json"
-          gh api "repos/${REPOSITORY}/contents/read-model/manifest.json?ref=${TARGET_CURRENT_BRANCH}" > "${ROOT}/target-current-api.json"
+          gh api "repos/${REPOSITORY}/contents/read-model/manifest.json?ref=${CURRENT_STATE_CANDIDATE_BRANCH}" > "${ROOT}/target-current-api.json"
           jq -r '.content' "${ROOT}/target-current-api.json" | tr -d '\n' | base64 -d > "${ROOT}/target-current.json"
 
           TARGET_LEDGER="$(jq -r '.endLedgerIndex' "${ROOT}/target-publication.json")"
@@ -107,14 +58,22 @@ jobs:
           TARGET_LAG="$((LIVE_LEDGER - TARGET_LEDGER))"
           test "${TARGET_LAG}" -ge 0
           test "${TARGET_LAG}" -le 720
+          printf '%s\n' "${TARGET_LEDGER}" > "${ROOT}/target-ledger.txt"
+          printf '%s\n' "${TARGET_HASH}" > "${ROOT}/target-hash.txt"
+          printf '%s\n' "${LIVE_LEDGER}" > "${ROOT}/live-ledger.txt"
           printf '%s\n' "${TARGET_LAG}" > "${ROOT}/target-lag.txt"
 
+      - name: Dispatch guarded cutover
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=/tmp/p0-direct-cutover
           gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/runs?event=workflow_dispatch&per_page=100" \
             --jq '.workflow_runs[].id' > "${ROOT}/cutover-before.txt"
           jq -n \
             --arg ref "${RECOVERY_BRANCH}" \
-            --arg history "${TARGET_HISTORY_BRANCH}" \
-            --arg current "${TARGET_CURRENT_BRANCH}" \
+            --arg history "${HISTORY_CANDIDATE_BRANCH}" \
+            --arg current "${CURRENT_STATE_CANDIDATE_BRANCH}" \
             '{ref:$ref,inputs:{history_candidate_branch:$history,current_state_candidate_branch:$current,confirm_production_write:"true"}}' \
             > "${ROOT}/cutover-dispatch.json"
           gh api --method POST \
@@ -146,21 +105,11 @@ jobs:
           gh api "repos/${REPOSITORY}/actions/runs/${CUTOVER_RUN_ID}/jobs?per_page=100" > "${ROOT}/cutover-jobs.json"
           test "$(jq -r '.conclusion' "${ROOT}/cutover-run.json")" = success
 
-          jq -n \
-            --argjson candidateRunId "${CANDIDATE_RUN_ID}" \
-            --argjson cutoverRunId "${CUTOVER_RUN_ID}" \
-            --argjson targetLedger "${TARGET_LEDGER}" \
-            --arg targetHash "${TARGET_HASH}" \
-            --argjson liveLedgerAtDispatch "${LIVE_LEDGER}" \
-            --argjson targetLagAtDispatch "${TARGET_LAG}" \
-            '{passed:true,candidateRunId:$candidateRunId,cutoverRunId:$cutoverRunId,target:{ledgerIndex:$targetLedger,ledgerHash:$targetHash},liveLedgerAtDispatch:$liveLedgerAtDispatch,targetLagAtDispatch:$targetLagAtDispatch}' \
-            > "${ROOT}/summary.json"
-
       - name: Upload direct cutover evidence
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: p0-direct-fresh-candidate-cutover
+          name: p0-direct-guarded-cutover
           path: /tmp/p0-direct-cutover
           if-no-files-found: warn
           retention-days: 30
