@@ -1,0 +1,143 @@
+name: P0 redundant five-minute scheduler production deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/p0-redundant-scheduler-production-deploy-trigger
+
+permissions:
+  contents: read
+
+concurrency:
+  group: p0-emergency-production-worker-write
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      QUEUE_NAME: xrpl-lending-fast-lane
+      QUEUE_ID: 2ae398f2edbf43749e45cd7ede77c6cd
+      CRON_EXPRESSION: '*/5 * * * *'
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate redundant scheduler boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          test "$(jq -r '.main' wrangler.jsonc)" = src/worker/p0-redundant-scheduler-entry.ts
+          test "$(jq -r '.vars.APP_NETWORK' wrangler.jsonc)" = devnet
+          test "$(jq -r '.vars.MAINNET_ENABLED' wrangler.jsonc)" = false
+          test "$(jq -r '.triggers.crons | length' wrangler.jsonc)" -eq 1
+          test "$(jq -r '.triggers.crons[0]' wrangler.jsonc)" = "$CRON_EXPRESSION"
+          test "$(jq -r '.queues.producers[0].binding' wrangler.jsonc)" = FAST_LANE_QUEUE
+          test "$(jq -r '.queues.producers[0].queue' wrangler.jsonc)" = "$QUEUE_NAME"
+          test "$(jq -r '.queues.consumers[0].queue' wrangler.jsonc)" = "$QUEUE_NAME"
+          test "$(jq -r '.queues.consumers[0].max_batch_size' wrangler.jsonc)" -eq 1
+          test "$(jq -r '.queues.consumers[0].max_concurrency' wrangler.jsonc)" -eq 1
+
+      - name: Build application
+        run: pnpm build
+
+      - name: Deploy redundant scheduler Worker
+        run: pnpm exec wrangler deploy | tee deploy.txt
+
+      - name: Verify Cron and Queue attachment
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/xrpl-lending-monitor/schedules" \
+            > deployed-worker-schedules.json
+          jq -e --arg cron "$CRON_EXPRESSION" \
+            '.success == true and (.result.schedules | length) == 1 and .result.schedules[0].cron == $cron' \
+            deployed-worker-schedules.json > /dev/null
+          pnpm exec wrangler queues info "$QUEUE_NAME" | tee queue-info-deployed.txt
+          grep -F 'Number of Producers: 1' queue-info-deployed.txt
+          grep -F 'Number of Consumers: 1' queue-info-deployed.txt
+
+      - name: Bootstrap stopped collection chain
+        id: bootstrap
+        shell: bash
+        run: |
+          set -euo pipefail
+          NOW_MS="$(date +%s%3N)"
+          SLOT_MS="$((NOW_MS / 300000 * 300000))"
+          NEXT_SLOT_MS="$((SLOT_MS + 300000))"
+          ENQUEUED_AT="$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)"
+          echo "slot_ms=$SLOT_MS" >> "$GITHUB_OUTPUT"
+          echo "next_slot_ms=$NEXT_SLOT_MS" >> "$GITHUB_OUTPUT"
+          jq -nc \
+            --argjson scheduledTime "$SLOT_MS" \
+            --arg cron 'deployment-bootstrap' \
+            --arg enqueuedAt "$ENQUEUED_AT" \
+            '{body:{scheduledTime:$scheduledTime,cron:$cron,enqueuedAt:$enqueuedAt},content_type:"json"}' \
+            > bootstrap-message.json
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            -H 'Content-Type: application/json' \
+            --data-binary @bootstrap-message.json \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/queues/${QUEUE_ID}/messages" \
+            > bootstrap-response.json
+          jq -e '.success == true' bootstrap-response.json > /dev/null
+
+      - name: Verify bootstrap completion and next reservation
+        shell: bash
+        env:
+          SLOT_MS: ${{ steps.bootstrap.outputs.slot_ms }}
+          NEXT_SLOT_MS: ${{ steps.bootstrap.outputs.next_slot_ms }}
+        run: |
+          set -euo pipefail
+          completed=false
+          for attempt in $(seq 1 18); do
+            pnpm exec wrangler d1 execute xrpl-lending-monitor --remote --json \
+              --command "SELECT scheduled_time, status, completed_at, next_scheduled_time, error_message FROM fast_lane_queue_slots WHERE scheduled_time = ${SLOT_MS}" \
+              > bootstrap-slot.json
+            if jq -e --argjson slot "$SLOT_MS" --argjson next "$NEXT_SLOT_MS" \
+              '[.[].results[]? | select(.scheduled_time == $slot and .status == "completed" and .next_scheduled_time == $next and .error_message == null)] | length == 1' \
+              bootstrap-slot.json > /dev/null; then
+              completed=true
+              break
+            fi
+            sleep 5
+          done
+          test "$completed" = true
+
+      - name: Upload redundant scheduler deployment evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p0-redundant-scheduler-production-deploy-evidence
+          path: |
+            deploy.txt
+            deployed-worker-schedules.json
+            queue-info-deployed.txt
+            bootstrap-message.json
+            bootstrap-response.json
+            bootstrap-slot.json
+          if-no-files-found: warn
+          retention-days: 14
