@@ -76,7 +76,7 @@ function targetOverlay(overrides: Partial<CurrentStateOverlayState> = {}): Curre
 }
 
 describe('replacement-base rebase planning', () => {
-  it('plans a forward rebase from the active cursor-aligned overlay', () => {
+  it('plans a forward rebase that advances a cursor behind the target', () => {
     expect(planReplacementBaseRebase({
       target,
       evidence: {
@@ -86,11 +86,40 @@ describe('replacement-base rebase planning', () => {
       },
     })).toEqual({
       action: 'rebase',
+      cursorMode: 'advance_to_target',
       previousSnapshotId: 'devnet-3371675-0ba2ed766c19',
       previousBaseLedgerIndex: 3371675,
       previousBaseLedgerHash: '0'.repeat(64),
       previousCursorLedgerIndex: 3390079,
       previousCursorLedgerHash: OLD_HASH,
+      latestObservedLedger: 3435000,
+      latestObservedHash: HEAD_HASH,
+    })
+  })
+
+  it('plans a forward base replacement while preserving a later cursor', () => {
+    const continuedLedger = target.ledgerIndex + 40
+    expect(planReplacementBaseRebase({
+      target,
+      evidence: {
+        sync: sync({
+          lastProcessedLedger: continuedLedger,
+          lastProcessedHash: CONTINUED_HASH,
+        }),
+        currentEpochId: EPOCH,
+        overlayStates: [oldOverlay({
+          overlayLedgerIndex: continuedLedger,
+          overlayLedgerHash: CONTINUED_HASH,
+        })],
+      },
+    })).toEqual({
+      action: 'rebase',
+      cursorMode: 'preserve_current',
+      previousSnapshotId: 'devnet-3371675-0ba2ed766c19',
+      previousBaseLedgerIndex: 3371675,
+      previousBaseLedgerHash: '0'.repeat(64),
+      previousCursorLedgerIndex: continuedLedger,
+      previousCursorLedgerHash: CONTINUED_HASH,
       latestObservedLedger: 3435000,
       latestObservedHash: HEAD_HASH,
     })
@@ -131,23 +160,6 @@ describe('replacement-base rebase planning', () => {
     })).toEqual({ action: 'replay' })
   })
 
-  it('blocks later cursors that are not bound to the replacement target', () => {
-    expect(() => planReplacementBaseRebase({
-      target,
-      evidence: {
-        sync: sync({
-          lastProcessedLedger: target.ledgerIndex + 1,
-          lastProcessedHash: CONTINUED_HASH,
-        }),
-        currentEpochId: EPOCH,
-        overlayStates: [oldOverlay({
-          overlayLedgerIndex: target.ledgerIndex + 1,
-          overlayLedgerHash: CONTINUED_HASH,
-        })],
-      },
-    })).toThrow('refuses to regress')
-  })
-
   it('blocks target reuse without an aligned replay state', () => {
     expect(() => planReplacementBaseRebase({
       target,
@@ -182,6 +194,17 @@ describe('replacement-base rebase planning', () => {
         overlayStates: [targetOverlay()],
       },
     })).toThrow('target overlay watermark is inconsistent')
+  })
+
+  it('blocks a replacement base behind the active base', () => {
+    expect(() => planReplacementBaseRebase({
+      target: { ...target, ledgerIndex: 3371674 },
+      evidence: {
+        sync: sync(),
+        currentEpochId: EPOCH,
+        overlayStates: [oldOverlay()],
+      },
+    })).toThrow('must not regress')
   })
 
   it('blocks epoch mismatch, bad health, and observed head behind target', () => {

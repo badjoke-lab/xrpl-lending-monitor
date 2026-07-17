@@ -12,6 +12,7 @@ export type ReplacementBaseRebasePlan =
   | { action: 'replay' }
   | {
       action: 'rebase'
+      cursorMode: 'advance_to_target' | 'preserve_current'
       previousSnapshotId: string
       previousBaseLedgerIndex: number
       previousBaseLedgerHash: string
@@ -72,6 +73,9 @@ export function planReplacementBaseRebase(options: {
   if (sync.lastProcessedLedger === null || !sync.lastProcessedHash) {
     throw new Error('Replacement-base rebase requires an existing incremental cursor')
   }
+  if (sync.lastProcessedLedger === target.ledgerIndex && sync.lastProcessedHash !== target.ledgerHash) {
+    throw new Error('Incremental cursor conflicts with the replacement base ledger')
+  }
 
   const targetStates = evidence.overlayStates.filter((state) => sameBase(state, target))
 
@@ -86,9 +90,6 @@ export function planReplacementBaseRebase(options: {
     return { action: 'replay' }
   }
 
-  if (sync.lastProcessedLedger >= target.ledgerIndex) {
-    throw new Error('Replacement-base rebase refuses to regress or replace a later incremental cursor')
-  }
   if (targetStates.length !== 0) {
     throw new Error('Replacement target snapshot already exists without an aligned replay state')
   }
@@ -102,9 +103,18 @@ export function planReplacementBaseRebase(options: {
   if (active.baseLedgerIndex > sync.lastProcessedLedger) {
     throw new Error('Active overlay base is ahead of the incremental cursor')
   }
+  if (target.ledgerIndex < active.baseLedgerIndex) {
+    throw new Error('Replacement base must not regress behind the active overlay base')
+  }
+  if (target.ledgerIndex === active.baseLedgerIndex && target.ledgerHash !== active.baseLedgerHash) {
+    throw new Error('Replacement base conflicts with the active overlay base ledger')
+  }
 
   return {
     action: 'rebase',
+    cursorMode: sync.lastProcessedLedger >= target.ledgerIndex
+      ? 'preserve_current'
+      : 'advance_to_target',
     previousSnapshotId: active.baseSnapshotId,
     previousBaseLedgerIndex: active.baseLedgerIndex,
     previousBaseLedgerHash: active.baseLedgerHash,
