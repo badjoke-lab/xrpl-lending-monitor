@@ -41,6 +41,14 @@ jobs:
         run: |
           bash -n scripts/run-live-checkpoint-cutover.sh
           bash -n scripts/verify-live-checkpoint-cutover.sh
+          bash -n scripts/check-canonical-production-base.sh
+
+      - name: Validate canonical production base identity
+        run: |
+          git fetch --no-tags --depth=1 origin \
+            refs/heads/current-state-data:refs/remotes/origin/current-state-data \
+            refs/heads/history-data:refs/remotes/origin/history-data
+          bash scripts/check-canonical-production-base.sh
 
       - name: Type-check
         run: pnpm typecheck
