@@ -1,0 +1,94 @@
+name: P0 deploy reconciled production base now
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/p0-deploy-reconciled-base-now.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: p0-deploy-reconciled-production-base
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+    steps:
+      - name: Check out reconciled main
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify reconciled production identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -e '
+            .triggers.crons == ["*/5 * * * *"]
+            and .vars.APP_NETWORK == "devnet"
+            and .vars.MAINNET_ENABLED == "false"
+            and .vars.CURRENT_STATE_REPLACEMENT_GITHUB_BRANCH == "current-state-data"
+            and .vars.CURRENT_STATE_REPLACEMENT_SNAPSHOT_ID == "devnet-3709980-541b639f0b20"
+            and .vars.REPLACEMENT_BASE_REBASE_ENABLED == "true"
+            and .vars.REPLACEMENT_BASE_EPOCH_ID == "devnet-3371675"
+            and .vars.REPLACEMENT_BASE_SNAPSHOT_ID == "devnet-3709980-541b639f0b20"
+            and .vars.REPLACEMENT_BASE_LEDGER_INDEX == "3709980"
+            and .vars.REPLACEMENT_BASE_LEDGER_HASH == "541B639F0B20E66DB9D270931E1640B56E60E704673C474AA05966CB0465E1EA"
+            and (.vars | has("REPLACEMENT_BASE_CUTOVER_TOKEN") | not)
+          ' wrangler.jsonc > /dev/null
+
+      - name: Build deployable assets
+        run: pnpm build:deploy-assets
+
+      - name: Deploy reconciled production Worker
+        run: pnpm exec wrangler deploy --config wrangler.jsonc
+
+      - name: Verify live base identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=/tmp/p0-deploy-reconciled-base
+          mkdir -p "${ROOT}"
+          for attempt in $(seq 1 30); do
+            curl --fail-with-body --silent --show-error --retry 2 \
+              "${PRODUCTION_BASE}/api/overview" > "${ROOT}/overview.json" || true
+            curl --fail-with-body --silent --show-error --retry 2 \
+              "${PRODUCTION_BASE}/api/status/replacement-base-rebase" > "${ROOT}/rebase.json" || true
+            if jq -e '
+              .base.id == "devnet-3709980-541b639f0b20"
+              and .base.ledger_index == 3709980
+              and .base.ledger_hash == "541B639F0B20E66DB9D270931E1640B56E60E704673C474AA05966CB0465E1EA"
+            ' "${ROOT}/overview.json" > /dev/null 2>&1 \
+              && jq -e '
+                .target.snapshotId == "devnet-3709980-541b639f0b20"
+                and .target.ledgerIndex == 3709980
+                and .target.ledgerHash == "541B639F0B20E66DB9D270931E1640B56E60E704673C474AA05966CB0465E1EA"
+                and (.status == "replayed" or .status == "ready")
+              ' "${ROOT}/rebase.json" > /dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 10
+          done
+          cat "${ROOT}/overview.json"
+          cat "${ROOT}/rebase.json"
+          exit 1
