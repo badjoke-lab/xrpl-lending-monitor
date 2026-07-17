@@ -1,36 +1,36 @@
 {
   "schemaVersion": 1,
   "mode": "read-only-shadow-aggregate",
-  "sampleCount": 103,
+  "sampleCount": 104,
   "firstSampledAt": "2026-07-10T17:43:27.354Z",
-  "lastSampledAt": "2026-07-17T08:37:45.305Z",
+  "lastSampledAt": "2026-07-17T10:24:01.114Z",
   "coverage": {
     "firstRequestedStartLedger": 3549140,
-    "lastEndLedger": 3567589,
-    "lastValidatedLedger": 3720569
+    "lastEndLedger": 3567769,
+    "lastValidatedLedger": 3722271
   },
   "cadence": {
     "targetSeconds": 300,
-    "averageObservedGapSeconds": 5608.411284313728,
+    "averageObservedGapSeconds": 5615.861747572818,
     "maxObservedGapSeconds": 13691.185,
-    "completeToHeadRate": 0.009708737864077669
+    "completeToHeadRate": 0.009615384615384616
   },
   "totals": {
-    "ledgersRead": 18450,
-    "inspectedTransactions": 350547,
-    "lendingTransactions": 44426,
-    "successfulLendingTransactions": 41093,
-    "affectedObjectTouches": 24464,
-    "minimalProjectionWriteLowerBound": 65763,
-    "elapsedMs": 1064543,
+    "ledgersRead": 18630,
+    "inspectedTransactions": 353427,
+    "lendingTransactions": 45018,
+    "successfulLendingTransactions": 41658,
+    "affectedObjectTouches": 24819,
+    "minimalProjectionWriteLowerBound": 66685,
+    "elapsedMs": 1078198,
     "completeToHeadSamples": 1,
-    "maxBacklogBefore": 153160
+    "maxBacklogBefore": 154682
   },
   "averagesPerSample": {
-    "ledgersRead": 179.126213592233,
-    "lendingTransactions": 431.3203883495146,
-    "affectedObjectTouches": 237.51456310679612,
-    "minimalProjectionWriteLowerBound": 638.4757281553398,
-    "elapsedMs": 10335.368932038835
+    "ledgersRead": 179.1346153846154,
+    "lendingTransactions": 432.86538461538464,
+    "affectedObjectTouches": 238.64423076923077,
+    "minimalProjectionWriteLowerBound": 641.2019230769231,
+    "elapsedMs": 10367.288461538461
   }
 }
