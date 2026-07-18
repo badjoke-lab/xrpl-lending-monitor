@@ -10,6 +10,7 @@ import { resolveIncrementalRuntimeConfig } from '../shared/incremental-runtime-c
 import { resolveReplacementBaseRuntimeConfig } from '../shared/replacement-base-runtime-config'
 import { resolveRuntimeConfig } from '../shared/runtime-config'
 import type { Bindings } from './env'
+import { withFastLaneTransientRetry } from './fast-lane-transient-retry'
 import { app } from './index'
 import { initializeCatchUpFromVerifiedBase } from './operator/catch-up-initialization'
 import { diagnoseLiveContinuation, verifyLiveContinuation } from './operator/live-continuation-verification'
@@ -36,6 +37,10 @@ const FAST_LANE_SHADOW_EPOCH_ID = 'fast-lane-shadow-devnet'
 const CUTOVER_PATH = '/api/operator/replacement-base-cutover'
 const CUTOVER_TOKEN_HEADER = 'x-replacement-base-cutover-token'
 const PRE_SOAK_READINESS_PATH = '/api/status/pre-soak-readiness'
+
+function errorReason(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
 
 async function runProtectedHeavyCycle(env: Bindings): Promise<void> {
   const runtimeConfig = resolveRuntimeConfig(env)
@@ -70,11 +75,28 @@ async function runFastLaneCycle(env: Bindings): Promise<void> {
   const runAt = new Date().toISOString()
   const replacementBase = resolveReplacementBaseRuntimeConfig(env).target
   if (!replacementBase) throw new Error('Fast-lane shadow requires the canonical replacement base target')
-  const result = await runFastLaneShadowCycle({
+
+  const runtimeConfig = resolveRuntimeConfig(env)
+  const fastLaneConfig = resolveFastLaneShadowRuntimeConfig(env)
+  const result = await withFastLaneTransientRetry(() => runFastLaneShadowCycle({
     db: env.DB,
-    runtimeConfig: resolveRuntimeConfig(env),
-    fastLaneConfig: resolveFastLaneShadowRuntimeConfig(env),
+    runtimeConfig,
+    fastLaneConfig,
     base: replacementBase,
+  }), {
+    maxAttempts: 3,
+    baseDelayMs: 250,
+    onRetry: ({ attempt, nextAttempt, maxAttempts, delayMs, error }) => {
+      console.warn(JSON.stringify({
+        event: 'fast_lane_transient_retry',
+        runAt,
+        attempt,
+        nextAttempt,
+        maxAttempts,
+        delayMs,
+        reason: errorReason(error),
+      }))
+    },
   })
   await saveFastLaneShadowRunMetric({ db: env.DB, runAt, result })
   console.log(JSON.stringify({ event: 'fast_lane_shadow_cycle', runAt, ...result }))
