@@ -84,8 +84,6 @@ async function runFastLaneCycle(env: Bindings): Promise<void> {
     fastLaneConfig,
     base: replacementBase,
   }), {
-    maxAttempts: 3,
-    baseDelayMs: 250,
     onRetry: ({ attempt, nextAttempt, maxAttempts, delayMs, error }) => {
       console.warn(JSON.stringify({
         event: 'fast_lane_transient_retry',
