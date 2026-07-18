@@ -14,6 +14,12 @@ describe('fast-lane transient retry', () => {
       code: 'ledgerNotFound',
       message: 'ledgerNotFound',
     }))).toBe(true)
+    expect(isTransientFastLaneXrplError(new XrplRpcError({
+      endpoint: 'https://s.devnet.rippletest.net:51234/',
+      method: 'ledger',
+      code: 'notSynced',
+      message: 'notSynced',
+    }))).toBe(true)
     expect(isTransientFastLaneXrplError(new Error('XRPL WebSocket connection closed unexpectedly')))
       .toBe(true)
     expect(isTransientFastLaneXrplError(new Error('fast-lane promotion base identity mismatch')))
