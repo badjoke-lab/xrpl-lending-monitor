@@ -5,6 +5,7 @@ const DEFAULT_BASE_DELAY_MS = 250
 
 const TRANSIENT_RPC_CODES = new Set([
   'ledgerNotFound',
+  'notSynced',
   'timeout',
   'network_error',
   'tooBusy',
@@ -12,6 +13,8 @@ const TRANSIENT_RPC_CODES = new Set([
 
 const TRANSIENT_MESSAGE_FRAGMENTS = [
   'ledgernotfound',
+  'notsynced',
+  'not synced',
   'timed out',
   'connection error',
   'connection closed unexpectedly',
