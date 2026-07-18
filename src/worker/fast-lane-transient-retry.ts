@@ -1,7 +1,7 @@
 import { XrplRpcError } from '../collector/network/xrpl-rpc'
 
-const DEFAULT_MAX_ATTEMPTS = 3
-const DEFAULT_BASE_DELAY_MS = 250
+const DEFAULT_MAX_ATTEMPTS = 6
+const DEFAULT_BASE_DELAY_MS = 500
 
 const TRANSIENT_RPC_CODES = new Set([
   'ledgerNotFound',
