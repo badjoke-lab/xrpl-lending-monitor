@@ -54,6 +54,19 @@ function stringValue(value: unknown, field: string): string {
   return value
 }
 
+export function selectFastLaneHeadRpcEndpoint(options: {
+  rpcEndpoints: readonly string[]
+  webSocketEndpoint: string
+}): string {
+  const fallback = options.rpcEndpoints[0]
+  if (!fallback) throw new Error('Fast-lane shadow requires a Devnet RPC endpoint')
+
+  const webSocketHost = new URL(options.webSocketEndpoint).hostname.toLowerCase()
+  return options.rpcEndpoints.find((endpoint) => (
+    new URL(endpoint).hostname.toLowerCase() === webSocketHost
+  )) ?? fallback
+}
+
 async function readLedgerIdentity(options: {
   endpoint: string
   timeoutMs: number
@@ -128,8 +141,10 @@ export async function runFastLaneShadowCycle(options: {
 }): Promise<FastLaneShadowCycleResult> {
   const now = options.now ?? (() => new Date())
   const processedAt = now().toISOString()
-  const endpoint = options.runtimeConfig.xrplRpcUrls[0]
-  if (!endpoint) throw new Error('Fast-lane shadow requires a Devnet RPC endpoint')
+  const endpoint = selectFastLaneHeadRpcEndpoint({
+    rpcEndpoints: options.runtimeConfig.xrplRpcUrls,
+    webSocketEndpoint: options.fastLaneConfig.webSocketEndpoint,
+  })
 
   const head = await readFastLaneValidatedHead({
     endpoint,
