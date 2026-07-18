@@ -55,6 +55,38 @@ describe('fast-lane transient retry', () => {
     }))
   })
 
+  it('keeps the default retry window open through a multi-second Devnet gap', async () => {
+    const failure = new XrplRpcError({
+      endpoint: 'wss://s.devnet.rippletest.net:51233/',
+      method: 'ledger',
+      code: 'ledgerNotFound',
+      message: 'ledgerNotFound',
+    })
+    const operation = vi.fn()
+      .mockRejectedValueOnce(failure)
+      .mockRejectedValueOnce(failure)
+      .mockRejectedValueOnce(failure)
+      .mockRejectedValueOnce(failure)
+      .mockResolvedValueOnce('recovered')
+    const sleep = vi.fn(async () => undefined)
+    const onRetry = vi.fn()
+
+    await expect(withFastLaneTransientRetry(operation, { sleep, onRetry }))
+      .resolves.toBe('recovered')
+
+    expect(operation).toHaveBeenCalledTimes(5)
+    expect(sleep).toHaveBeenNthCalledWith(1, 500)
+    expect(sleep).toHaveBeenNthCalledWith(2, 1_000)
+    expect(sleep).toHaveBeenNthCalledWith(3, 1_500)
+    expect(sleep).toHaveBeenNthCalledWith(4, 2_000)
+    expect(onRetry).toHaveBeenLastCalledWith(expect.objectContaining({
+      attempt: 4,
+      nextAttempt: 5,
+      maxAttempts: 6,
+      delayMs: 2_000,
+    }))
+  })
+
   it('does not retry a permanent invariant failure', async () => {
     const failure = new Error('fast-lane promotion base identity mismatch')
     const operation = vi.fn().mockRejectedValue(failure)
