@@ -1,0 +1,481 @@
+name: Rolling checkpoint candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_history_branch:
+        description: Source history branch
+        required: true
+        default: history-data
+        type: string
+      source_current_state_branch:
+        description: Source current-state branch
+        required: true
+        default: current-state-data
+        type: string
+      history_candidate_branch:
+        description: Output history candidate branch
+        required: true
+        default: history-rolling-next-candidate-data
+        type: string
+      current_state_candidate_branch:
+        description: Output current-state candidate branch
+        required: true
+        default: current-state-rolling-next-candidate-data
+        type: string
+      max_delta_ledgers:
+        description: Maximum ledgers to advance in one cycle
+        required: true
+        default: '1000'
+        type: string
+      segment_ledgers:
+        description: Ledgers per immutable history segment
+        required: true
+        default: '250'
+        type: string
+      read_window_size:
+        description: Bounded history read window
+        required: true
+        default: '4'
+        type: string
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: rolling-checkpoint-candidate
+  cancel-in-progress: false
+
+jobs:
+  candidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      SOURCE_HISTORY_BRANCH: ${{ inputs.source_history_branch }}
+      SOURCE_CURRENT_STATE_BRANCH: ${{ inputs.source_current_state_branch }}
+      HISTORY_CANDIDATE_BRANCH: ${{ inputs.history_candidate_branch }}
+      CURRENT_STATE_CANDIDATE_BRANCH: ${{ inputs.current_state_candidate_branch }}
+      MAX_DELTA_LEDGERS: ${{ inputs.max_delta_ledgers }}
+      SEGMENT_LEDGERS: ${{ inputs.segment_ledgers }}
+      READ_WINDOW_SIZE: ${{ inputs.read_window_size }}
+    steps:
+      - name: Validate workflow inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          for REF in "${SOURCE_HISTORY_BRANCH}" "${SOURCE_CURRENT_STATE_BRANCH}" "${HISTORY_CANDIDATE_BRANCH}" "${CURRENT_STATE_CANDIDATE_BRANCH}"; do
+            git check-ref-format --branch "${REF}" > /dev/null
+          done
+          test "${SOURCE_HISTORY_BRANCH}" != "${HISTORY_CANDIDATE_BRANCH}"
+          test "${SOURCE_CURRENT_STATE_BRANCH}" != "${CURRENT_STATE_CANDIDATE_BRANCH}"
+          for VALUE in "${MAX_DELTA_LEDGERS}" "${SEGMENT_LEDGERS}" "${READ_WINDOW_SIZE}"; do
+            printf '%s' "${VALUE}" | grep -Eq '^[1-9][0-9]*$'
+          done
+          test "${MAX_DELTA_LEDGERS}" -le 5000
+          test "${SEGMENT_LEDGERS}" -le 500
+          test "${READ_WINDOW_SIZE}" -le 16
+
+      - name: Check out implementation
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Check out source history
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_history_branch }}
+          path: .local/history-root
+          sparse-checkout: history
+          sparse-checkout-cone-mode: true
+
+      - name: Check out source current state
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_current_state_branch }}
+          path: .local/current-state-root
+          sparse-checkout: |
+            read-model
+            rolling-base
+          sparse-checkout-cone-mode: true
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build rolling checkpoint tools
+        run: |
+          pnpm build:history-extension-plan
+          pnpm build:history-extension-artifacts
+          pnpm build:history-segment
+          pnpm build:history-segment-checkpoint
+          pnpm build:history-segment-chain
+          pnpm build:extended-history-publication
+          pnpm build:incremental-history-exact-index
+          pnpm build:history-segment-channel
+          pnpm build:rolling-current-state
+          pnpm build:candidate-source-rehearsal
+          cp .history-segment-channel-build/build-history-segment-channel.mjs /tmp/build-history-segment-channel.mjs
+          cp .candidate-source-rehearsal-build/rehearse-candidate-sources.mjs /tmp/rehearse-candidate-sources.mjs
+
+      - name: Bind source pair and freeze bounded target
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=rolling-checkpoint-candidate
+          SOURCE=.local/history-root/history/publication.json
+          CURRENT=.local/current-state-root/read-model/manifest.json
+          mkdir -p "${ROOT}"
+
+          SOURCE_LEDGER="$(jq -r '.endLedgerIndex' "${SOURCE}")"
+          SOURCE_HASH="$(jq -r '.endLedgerHash' "${SOURCE}")"
+          CURRENT_LEDGER="$(jq -r '.ledgerIndex' "${CURRENT}")"
+          CURRENT_HASH="$(jq -r '.ledgerHash' "${CURRENT}")"
+          test "${SOURCE_LEDGER}" -eq "${CURRENT_LEDGER}"
+          test "${SOURCE_HASH}" = "${CURRENT_HASH}"
+          cp "${SOURCE}" "${ROOT}/source-publication.json"
+          rm -rf .local/base-exact-index
+          cp -R .local/history-root/history/index/exact .local/base-exact-index
+
+          jq -n '{method:"ledger",params:[{ledger_index:"validated",transactions:false,expand:false}]}' > "${ROOT}/live-head-request.json"
+          curl --fail-with-body --silent --show-error --retry 3 \
+            -H 'Content-Type: application/json' \
+            --data @"${ROOT}/live-head-request.json" \
+            https://devnet.honeycluster.io/ \
+            > "${ROOT}/live-head-response.json"
+          LIVE_LEDGER="$(jq -r '.result.ledger_index // .result.ledger.ledger_index // empty' "${ROOT}/live-head-response.json")"
+          test "${LIVE_LEDGER}" -gt "${SOURCE_LEDGER}"
+          MAX_TARGET="$((SOURCE_LEDGER + MAX_DELTA_LEDGERS))"
+          if [ "${LIVE_LEDGER}" -lt "${MAX_TARGET}" ]; then TARGET="${LIVE_LEDGER}"; else TARGET="${MAX_TARGET}"; fi
+
+          jq -n --argjson ledger_index "${TARGET}" '{method:"ledger",params:[{ledger_index:$ledger_index,transactions:false,expand:false}]}' > "${ROOT}/target-request.json"
+          curl --fail-with-body --silent --show-error --retry 3 \
+            -H 'Content-Type: application/json' \
+            --data @"${ROOT}/target-request.json" \
+            https://devnet.honeycluster.io/ \
+            > "${ROOT}/target-response.json"
+          TARGET_HASH="$(jq -r '.result.ledger_hash // .result.ledger.ledger_hash // empty' "${ROOT}/target-response.json")"
+          printf '%s' "${TARGET_HASH}" | grep -Eq '^[A-F0-9]{64}$'
+
+          node .history-extension-plan-build/plan-history-extension.mjs \
+            --local \
+            --publication "${SOURCE}" \
+            --target-ledger "${TARGET}" \
+            --target-ledger-hash "${TARGET_HASH}" \
+            --segment-ledgers "${SEGMENT_LEDGERS}" \
+            --checkpoint-every-segments 10 \
+            --output "${ROOT}/plan.json" \
+            > "${ROOT}/plan.stdout.json"
+
+          jq -e --argjson source "${SOURCE_LEDGER}" --argjson target "${TARGET}" --argjson maximum "${MAX_DELTA_LEDGERS}" '
+            .source.endLedgerIndex == $source
+            and .extension.startLedgerIndex == ($source + 1)
+            and .extension.endLedgerIndex == $target
+            and .extension.ledgerCount > 0
+            and .extension.ledgerCount <= $maximum
+          ' "${ROOT}/plan.json" > /dev/null
+
+      - name: Generate bounded delta with configured read window
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=rolling-checkpoint-candidate
+          PLAN="${ROOT}/plan.json"
+          EPOCH="$(jq -r '.epochId' "${PLAN}")"
+          RANGE_START="$(jq -r '.extension.startLedgerIndex' "${PLAN}")"
+          RANGE_END="$(jq -r '.extension.endLedgerIndex' "${PLAN}")"
+          ANCHOR_ID="$(jq -r '.extension.anchorPreviousSegmentId' "${PLAN}")"
+          ANCHOR_HASH="$(jq -r '.extension.anchorPreviousSegmentEndHash' "${PLAN}")"
+          CHECKPOINT="${ROOT}/checkpoint.json"
+          MANIFEST_PATHS="${ROOT}/manifest-paths.txt"
+          : > "${MANIFEST_PATHS}"
+          PREV_ID="${ANCHOR_ID}"
+          PREV_HASH="${ANCHOR_HASH}"
+          STARTED="$(date +%s)"
+
+          while IFS= read -r SEGMENT; do
+            ORDINAL="$(jq -r '.ordinal' <<<"${SEGMENT}")"
+            SEGMENT_ID="$(jq -r '.segmentId' <<<"${SEGMENT}")"
+            START="$(jq -r '.startLedgerIndex' <<<"${SEGMENT}")"
+            END="$(jq -r '.endLedgerIndex' <<<"${SEGMENT}")"
+            OUT=".local/history-root/history/${EPOCH}/${SEGMENT_ID}"
+            PASSED=false
+            for ATTEMPT in 1 2 3; do
+              if node .history-segment-build/run-history-segment.mjs \
+                --local \
+                --endpoint https://devnet.honeycluster.io/ \
+                --timeout-ms 12000 \
+                --read-window-size "${READ_WINDOW_SIZE}" \
+                --start-ledger "${START}" \
+                --end-ledger "${END}" \
+                --epoch-id "${EPOCH}" \
+                --segment-id "${SEGMENT_ID}" \
+                --previous-segment-id "${PREV_ID}" \
+                --previous-segment-end-hash "${PREV_HASH}" \
+                --source-revision "${GITHUB_SHA}" \
+                --output-dir "${OUT}" \
+                > "${ROOT}/segment-${ORDINAL}.stdout.json"; then
+                PASSED=true
+                break
+              fi
+              sleep $((ATTEMPT * 10))
+            done
+            test "${PASSED}" = true
+
+            node .history-segment-checkpoint-build/update-history-segment-checkpoint.mjs \
+              --local \
+              --checkpoint "${CHECKPOINT}" \
+              --manifest "${OUT}/manifest.json" \
+              --epoch-id "${EPOCH}" \
+              --range-start-ledger "${RANGE_START}" \
+              --range-end-ledger "${RANGE_END}" \
+              --previous-segment-id "${ANCHOR_ID}" \
+              --previous-segment-end-hash "${ANCHOR_HASH}" \
+              > "${ROOT}/checkpoint-${ORDINAL}.stdout.json"
+
+            printf '%s\n' "${OUT}/manifest.json" >> "${MANIFEST_PATHS}"
+            PREV_ID="${SEGMENT_ID}"
+            PREV_HASH="$(jq -r '.endLedgerHash' "${OUT}/manifest.json")"
+          done < <(jq -c '.extension.segments[]' "${PLAN}")
+
+          echo $(( $(date +%s) - STARTED )) > "${ROOT}/delta-elapsed-seconds.txt"
+          EXPECTED_SEGMENTS="$(jq -r '.extension.segmentCount' "${PLAN}")"
+          jq -e --argjson end "${RANGE_END}" --argjson count "${EXPECTED_SEGMENTS}" '.nextLedgerIndex == ($end + 1) and (.completedSegments | length) == $count' "${CHECKPOINT}" > /dev/null
+
+      - name: Verify delta and build target publication
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=rolling-checkpoint-candidate
+          PLAN="${ROOT}/plan.json"
+          MANIFEST_ARGS=()
+          while IFS= read -r MANIFEST; do MANIFEST_ARGS+=(--manifest "${MANIFEST}"); done < "${ROOT}/manifest-paths.txt"
+
+          node .history-extension-artifacts-build/verify-history-extension-artifacts.mjs \
+            --local --plan "${PLAN}" "${MANIFEST_ARGS[@]}" \
+            > "${ROOT}/plan-bound-summary.json"
+
+          node .history-segment-chain-build/verify-history-segment-chain.mjs \
+            --local "${MANIFEST_ARGS[@]}" \
+            --epoch-id "$(jq -r '.epochId' "${PLAN}")" \
+            --start-ledger "$(jq -r '.extension.startLedgerIndex' "${PLAN}")" \
+            --start-parent-hash "$(jq -r '.source.endLedgerHash' "${PLAN}")" \
+            --previous-segment-id "$(jq -r '.source.lastSegmentId' "${PLAN}")" \
+            --previous-segment-end-hash "$(jq -r '.source.endLedgerHash' "${PLAN}")" \
+            --end-ledger "$(jq -r '.target.ledgerIndex' "${PLAN}")" \
+            --end-ledger-hash "$(jq -r '.target.ledgerHash' "${PLAN}")" \
+            > "${ROOT}/chain-summary.json"
+
+          TARGET="$(jq -r '.target.ledgerIndex' "${PLAN}")"
+          node .extended-history-publication-build/build-extended-history-publication.mjs \
+            --local \
+            --source-publication "${ROOT}/source-publication.json" \
+            --plan "${PLAN}" \
+            "${MANIFEST_ARGS[@]}" \
+            --chain-id "canonical-devnet-3371676-${TARGET}" \
+            --source-revision "${GITHUB_SHA}" \
+            --output "${ROOT}/publication.json" \
+            > "${ROOT}/publication.stdout.json"
+          cp "${ROOT}/publication.json" .local/history-root/history/publication.json
+
+      - name: Build target exact index incrementally
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=rolling-checkpoint-candidate
+          STARTED="$(date +%s)"
+          rm -rf .local/next-exact-index
+          node .incremental-history-exact-index-build/build-incremental-history-exact-index.mjs \
+            --local \
+            --publication .local/history-root/history/publication.json \
+            --plan "${ROOT}/plan.json" \
+            --artifact-root .local/history-root \
+            --base-index-dir .local/base-exact-index \
+            --base-publication "${ROOT}/source-publication.json" \
+            --output-dir .local/next-exact-index \
+            --asset-prefix history/index/exact \
+            --source-revision "${GITHUB_SHA}" \
+            > "${ROOT}/incremental-exact-index.stdout.json"
+          rm -rf .local/history-root/history/index/exact
+          mv .local/next-exact-index .local/history-root/history/index/exact
+          echo $(( $(date +%s) - STARTED )) > "${ROOT}/exact-index-elapsed-seconds.txt"
+
+      - name: Build target current state from best available base
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=rolling-checkpoint-candidate
+          PLAN="${ROOT}/plan.json"
+          TARGET="$(jq -r '.target.ledgerIndex' "${PLAN}")"
+          HASH="$(jq -r '.target.ledgerHash' "${PLAN}")"
+          PREFIX="$(printf '%s' "${HASH}" | tr '[:upper:]' '[:lower:]' | cut -c1-12)"
+          STARTED="$(date +%s)"
+
+          if [ -f .local/current-state-root/rolling-base/manifest.json ]; then
+            BASE_ARGS=(--base-rolling-dir .local/current-state-root/rolling-base)
+            BASE_MODE=rolling-base
+          else
+            BASE_ARGS=(--base-read-model-dir .local/current-state-root/read-model)
+            BASE_MODE=read-model-bootstrap
+          fi
+          printf '%s\n' "${BASE_MODE}" > "${ROOT}/base-mode.txt"
+
+          node .rolling-current-state-build/build-rolling-current-state-read-model.mjs \
+            --local \
+            "${BASE_ARGS[@]}" \
+            --history-root .local/history-root \
+            --plan "${PLAN}" \
+            --output-dir .local/next-current-state \
+            --page-size 50 \
+            --lookup-prefix-length 3 \
+            --rolling-segments 64 \
+            --snapshot-id "devnet-${TARGET}-${PREFIX}" \
+            --release-tag "replacement-current-state-${TARGET}" \
+            > "${ROOT}/current-state.stdout.json"
+          echo $(( $(date +%s) - STARTED )) > "${ROOT}/current-state-elapsed-seconds.txt"
+          jq -e --argjson target "${TARGET}" --arg hash "${HASH}" '.target.ledgerIndex == $target and .target.ledgerHash == $hash and .rollingBase.segmentCount == 64' .local/next-current-state/rolling-read-model-summary.json > /dev/null
+
+      - name: Stage candidate payloads
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/rolling-history-candidate /tmp/rolling-current-candidate /tmp/rolling-candidate-evidence
+          mkdir -p /tmp/rolling-history-candidate /tmp/rolling-current-candidate /tmp/rolling-candidate-evidence
+          cp -R .local/history-root/history /tmp/rolling-history-candidate/history
+          cp -R .local/next-current-state/read-model /tmp/rolling-current-candidate/read-model
+          cp -R .local/next-current-state/rolling-base /tmp/rolling-current-candidate/rolling-base
+          cp .local/next-current-state/rolling-read-model-summary.json /tmp/rolling-current-candidate/rolling-read-model-summary.json
+          cp rolling-checkpoint-candidate/plan.json /tmp/rolling-candidate-evidence/plan.json
+          cp .local/history-root/history/publication.json /tmp/rolling-candidate-evidence/publication.json
+          cp .local/history-root/history/index/exact/manifest.json /tmp/rolling-candidate-evidence/exact-manifest.json
+          cp .local/next-current-state/rolling-read-model-summary.json /tmp/rolling-candidate-evidence/current-summary.json
+          cp rolling-checkpoint-candidate/base-mode.txt /tmp/rolling-candidate-evidence/base-mode.txt
+          cp rolling-checkpoint-candidate/delta-elapsed-seconds.txt /tmp/rolling-candidate-evidence/delta-elapsed-seconds.txt
+          cp rolling-checkpoint-candidate/exact-index-elapsed-seconds.txt /tmp/rolling-candidate-evidence/exact-index-elapsed-seconds.txt
+          cp rolling-checkpoint-candidate/current-state-elapsed-seconds.txt /tmp/rolling-candidate-evidence/current-state-elapsed-seconds.txt
+
+      - name: Publish history candidate branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git checkout --orphan rolling-history-publish
+          git rm -rf . || true
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -R /tmp/rolling-history-candidate/. .
+          git add history
+          git commit -m "Publish rolling checkpoint history candidate data"
+          DATA_SHA="$(git rev-parse HEAD)"
+          node /tmp/build-history-segment-channel.mjs \
+            --local \
+            --publication history/publication.json \
+            --publication-path history/publication.json \
+            --exact-index-manifest history/index/exact/manifest.json \
+            --exact-index-manifest-path history/index/exact/manifest.json \
+            --data-commit-sha "${DATA_SHA}" \
+            --output history-channel.json
+          git add history-channel.json
+          git commit -m "Activate rolling checkpoint history candidate channel"
+          git push --force origin "HEAD:refs/heads/${HISTORY_CANDIDATE_BRANCH}"
+          git rev-parse HEAD > /tmp/rolling-candidate-evidence/history-commit-sha.txt
+
+      - name: Publish current-state candidate branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git checkout --orphan rolling-current-publish
+          git rm -rf . || true
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -R /tmp/rolling-current-candidate/. .
+          git add read-model rolling-base rolling-read-model-summary.json
+          git commit -m "Publish rolling checkpoint current-state candidate data"
+          DATA_SHA="$(git rev-parse HEAD)"
+          MANIFEST_SHA="$(jq -r .target.manifestSha256 rolling-read-model-summary.json)"
+          RELEASE_TAG="$(jq -r .target.releaseTag rolling-read-model-summary.json)"
+          SNAPSHOT_ID="$(jq -r .target.snapshotId rolling-read-model-summary.json)"
+          jq -n \
+            --arg dataCommitSha "${DATA_SHA}" \
+            --arg manifestSha256 "${MANIFEST_SHA}" \
+            --arg releaseTag "${RELEASE_TAG}" \
+            --arg snapshotId "${SNAPSHOT_ID}" \
+            --arg updatedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{schemaVersion:1,active:{dataCommitSha:$dataCommitSha,manifestPath:"read-model/manifest.json",manifestSha256:$manifestSha256,releaseTag:$releaseTag,snapshotId:$snapshotId},updatedAt:$updatedAt}' \
+            > channel.json
+          git add channel.json
+          git commit -m "Activate rolling checkpoint current-state candidate channel"
+          git push --force origin "HEAD:refs/heads/${CURRENT_STATE_CANDIDATE_BRANCH}"
+          git rev-parse HEAD > /tmp/rolling-candidate-evidence/current-state-commit-sha.txt
+
+      - name: Rehearse remote candidate pair
+        shell: bash
+        run: |
+          set -euo pipefail
+          node /tmp/rehearse-candidate-sources.mjs \
+            --local \
+            --repository badjoke-lab/xrpl-lending-monitor \
+            --history-branch "${HISTORY_CANDIDATE_BRANCH}" \
+            --current-state-branch "${CURRENT_STATE_CANDIDATE_BRANCH}" \
+            > /tmp/rolling-candidate-evidence/remote-rehearsal-summary.json
+          jq -e '.passed == true and (.exactReads | length) == 3 and .recentHistory.items == 1' /tmp/rolling-candidate-evidence/remote-rehearsal-summary.json > /dev/null
+
+      - name: Build retained candidate evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=rolling-checkpoint-candidate
+          mkdir -p "${ROOT}"
+          cp /tmp/rolling-candidate-evidence/* "${ROOT}/"
+          PUBLICATION="${ROOT}/publication.json"
+          EXACT="${ROOT}/exact-manifest.json"
+          CURRENT="${ROOT}/current-summary.json"
+
+          jq -n \
+            --slurpfile plan "${ROOT}/plan.json" \
+            --slurpfile publication "${PUBLICATION}" \
+            --slurpfile exact "${EXACT}" \
+            --slurpfile current "${CURRENT}" \
+            --slurpfile remote "${ROOT}/remote-rehearsal-summary.json" \
+            --arg sourceHistoryBranch "${SOURCE_HISTORY_BRANCH}" \
+            --arg sourceCurrentStateBranch "${SOURCE_CURRENT_STATE_BRANCH}" \
+            --arg historyCandidateBranch "${HISTORY_CANDIDATE_BRANCH}" \
+            --arg currentStateCandidateBranch "${CURRENT_STATE_CANDIDATE_BRANCH}" \
+            --arg baseMode "$(cat "${ROOT}/base-mode.txt")" \
+            --arg historyCommitSha "$(cat "${ROOT}/history-commit-sha.txt")" \
+            --arg currentStateCommitSha "$(cat "${ROOT}/current-state-commit-sha.txt")" \
+            --argjson readWindowSize "${READ_WINDOW_SIZE}" \
+            --argjson deltaElapsedSeconds "$(cat "${ROOT}/delta-elapsed-seconds.txt")" \
+            --argjson exactIndexElapsedSeconds "$(cat "${ROOT}/exact-index-elapsed-seconds.txt")" \
+            --argjson currentStateElapsedSeconds "$(cat "${ROOT}/current-state-elapsed-seconds.txt")" '
+            {
+              passed:true,
+              source:{historyBranch:$sourceHistoryBranch,currentStateBranch:$sourceCurrentStateBranch,chainId:$plan[0].source.chainId,publicationSha256:$plan[0].source.publicationSha256,ledgerIndex:$plan[0].source.endLedgerIndex,ledgerHash:$plan[0].source.endLedgerHash,currentStateMode:$baseMode},
+              delta:{startLedgerIndex:$plan[0].extension.startLedgerIndex,endLedgerIndex:$plan[0].extension.endLedgerIndex,ledgerCount:$plan[0].extension.ledgerCount,segmentCount:$plan[0].extension.segmentCount,readWindowSize:$readWindowSize,elapsedSeconds:$deltaElapsedSeconds},
+              target:{chainId:$publication[0].chainId,publicationSha256:$publication[0].publicationSha256,segmentCount:$publication[0].segmentCount,ledgerCount:$publication[0].ledgerCount,ledgerIndex:$publication[0].endLedgerIndex,ledgerHash:$publication[0].endLedgerHash},
+              exactIndex:{manifestSha256:$exact[0].manifestSha256,totalRecords:$exact[0].totalRecords,elapsedSeconds:$exactIndexElapsedSeconds,mode:"incremental-linear-merge"},
+              currentState:{target:$current[0].target,mutationStats:$current[0].mutationStats,rollingBase:$current[0].rollingBase,elapsedSeconds:$currentStateElapsedSeconds},
+              candidate:{historyBranch:$historyCandidateBranch,historyCommitSha:$historyCommitSha,currentStateBranch:$currentStateCandidateBranch,currentStateCommitSha:$currentStateCommitSha},
+              remoteRehearsal:$remote[0]
+            }' > "${ROOT}/evidence.json"
+
+          jq -e '
+            .passed == true
+            and .target.ledgerIndex == .remoteRehearsal.ledgerIndex
+            and .target.ledgerHash == .remoteRehearsal.ledgerHash
+            and .currentState.target.ledgerIndex == .target.ledgerIndex
+            and .currentState.target.ledgerHash == .target.ledgerHash
+            and .currentState.rollingBase.segmentCount == 64
+            and .exactIndex.mode == "incremental-linear-merge"
+          ' "${ROOT}/evidence.json" > /dev/null
+
+      - name: Upload retained rolling checkpoint candidate evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: rolling-checkpoint-candidate
+          path: rolling-checkpoint-candidate
+          if-no-files-found: warn
+          retention-days: 30
