@@ -1,0 +1,47 @@
+name: P0 self-patch recovery threshold
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: p0-self-patch-recovery-threshold
+  cancel-in-progress: false
+
+jobs:
+  patch:
+    if: github.head_ref == 'fix/recovery-runtime-lag-threshold'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/recovery-runtime-lag-threshold
+          fetch-depth: 0
+
+      - name: Apply exact bounded threshold patch and remove helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('.github/workflows/p0-recover-rolling-backlog.yml')
+          text = path.read_text()
+          old = "      TARGET_MAX_LAG_LEDGERS: '300'"
+          new = "      # One candidate cycle takes long enough for Devnet to advance roughly 400-500 ledgers.\n      # A 300-ledger gate is operationally unreachable and causes endless A/B cycling.\n      # 720 remains bounded and matches the guarded live-cutover runtime gate.\n      TARGET_MAX_LAG_LEDGERS: '720'"
+          if text.count(old) == 1:
+              path.write_text(text.replace(old, new, 1))
+          elif "TARGET_MAX_LAG_LEDGERS: '720'" not in text:
+              raise SystemExit('expected recovery threshold not found')
+          PY
+          git rm .github/workflows/p0-self-patch-recovery-threshold.yml
+          git diff --check
+          grep -F "TARGET_MAX_LAG_LEDGERS: '720'" .github/workflows/p0-recover-rolling-backlog.yml
+          git add .github/workflows/p0-recover-rolling-backlog.yml
+          git commit -m "Use achievable bounded recovery lag gate"
+          git push origin fix/recovery-runtime-lag-threshold
