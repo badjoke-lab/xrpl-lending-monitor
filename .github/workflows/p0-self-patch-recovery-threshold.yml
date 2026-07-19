@@ -9,7 +9,7 @@ permissions:
 
 concurrency:
   group: p0-self-patch-recovery-threshold
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   patch:
@@ -19,7 +19,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: fix/recovery-runtime-lag-threshold
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: Apply exact bounded threshold patch and remove helper
         shell: bash
