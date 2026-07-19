@@ -1,0 +1,145 @@
+name: P0 guarded cutover stable candidate
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  actions: write
+  contents: read
+  issues: write
+
+concurrency:
+  group: p0-guarded-cutover-stable-candidate
+  cancel-in-progress: false
+
+jobs:
+  cutover:
+    if: startsWith(github.event.issue.title, 'P0 guarded cutover stable candidate')
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+      ISSUE_NUMBER: ${{ github.event.issue.number }}
+      OLD_PARENT_RUN_ID: '29689500341'
+      OLD_CHILD_RUN_ID: '29694812168'
+      HISTORY_CANDIDATE_BRANCH: history-rolling-maintenance-candidate-data
+      CURRENT_CANDIDATE_BRANCH: current-state-rolling-maintenance-candidate-data
+      EXPECTED_LEDGER: '3781035'
+      EXPECTED_HASH: AEA09E50B41EEB9498A213525C08EE9C9530802A9A70652DED28B4C8C54F5CC2
+      MAX_CUTOVER_LAG: '720'
+    steps:
+      - name: Cancel impossible 300-ledger recovery loop
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p p0-guarded-cutover
+          for RUN_ID in "${OLD_PARENT_RUN_ID}" "${OLD_CHILD_RUN_ID}"; do
+            gh api --method POST "repos/${REPOSITORY}/actions/runs/${RUN_ID}/cancel" > /dev/null 2>&1 || true
+          done
+          for attempt in $(seq 1 60); do
+            PARENT_STATUS="$(gh api "repos/${REPOSITORY}/actions/runs/${OLD_PARENT_RUN_ID}" --jq '.status')"
+            CHILD_STATUS="$(gh api "repos/${REPOSITORY}/actions/runs/${OLD_CHILD_RUN_ID}" --jq '.status')"
+            if [ "${PARENT_STATUS}" = completed ] && [ "${CHILD_STATUS}" = completed ]; then
+              break
+            fi
+            sleep 5
+          done
+          gh api "repos/${REPOSITORY}/actions/runs/${OLD_PARENT_RUN_ID}" > p0-guarded-cutover/old-parent.json
+          gh api "repos/${REPOSITORY}/actions/runs/${OLD_CHILD_RUN_ID}" > p0-guarded-cutover/old-child.json
+          test "$(jq -r '.status' p0-guarded-cutover/old-parent.json)" = completed
+          test "$(jq -r '.status' p0-guarded-cutover/old-child.json)" = completed
+
+      - name: Verify fixed aligned candidate and live lag
+        shell: bash
+        run: |
+          set -euo pipefail
+          fetch_json() {
+            local branch="$1" path="$2" output="$3"
+            gh api --method GET "repos/${REPOSITORY}/contents/${path}" -f ref="${branch}" --jq '.content' \
+              | tr -d '\n' | base64 --decode > "${output}"
+          }
+          fetch_json "${HISTORY_CANDIDATE_BRANCH}" history/publication.json p0-guarded-cutover/publication.json
+          fetch_json "${CURRENT_CANDIDATE_BRANCH}" read-model/manifest.json p0-guarded-cutover/current-manifest.json
+
+          test "$(jq -r '.complete' p0-guarded-cutover/publication.json)" = true
+          test "$(jq -r '.complete' p0-guarded-cutover/current-manifest.json)" = true
+          test "$(jq -r '.epochId' p0-guarded-cutover/publication.json)" = devnet-3371675
+          test "$(jq -r '.epochId' p0-guarded-cutover/current-manifest.json)" = devnet-3371675
+          test "$(jq -r '.endLedgerIndex' p0-guarded-cutover/publication.json)" = "${EXPECTED_LEDGER}"
+          test "$(jq -r '.ledgerIndex' p0-guarded-cutover/current-manifest.json)" = "${EXPECTED_LEDGER}"
+          test "$(jq -r '.endLedgerHash' p0-guarded-cutover/publication.json)" = "${EXPECTED_HASH}"
+          test "$(jq -r '.ledgerHash' p0-guarded-cutover/current-manifest.json)" = "${EXPECTED_HASH}"
+
+          jq -n --argjson ledger "${EXPECTED_LEDGER}" \
+            '{method:"ledger",params:[{ledger_index:$ledger,transactions:false,expand:false}]}' \
+            > p0-guarded-cutover/candidate-ledger-request.json
+          curl --fail-with-body --silent --show-error --retry 3 \
+            -H 'content-type: application/json' \
+            --data @p0-guarded-cutover/candidate-ledger-request.json \
+            https://devnet.honeycluster.io/ > p0-guarded-cutover/candidate-ledger-response.json
+          test "$(jq -r '.result.ledger_hash // .result.ledger.ledger_hash' p0-guarded-cutover/candidate-ledger-response.json)" = "${EXPECTED_HASH}"
+
+          jq -n '{method:"ledger",params:[{ledger_index:"validated",transactions:false,expand:false}]}' \
+            > p0-guarded-cutover/live-request.json
+          curl --fail-with-body --silent --show-error --retry 3 \
+            -H 'content-type: application/json' \
+            --data @p0-guarded-cutover/live-request.json \
+            https://devnet.honeycluster.io/ > p0-guarded-cutover/live-response.json
+          LIVE_LEDGER="$(jq -r '.result.ledger_index // .result.ledger.ledger_index' p0-guarded-cutover/live-response.json)"
+          LAG="$((LIVE_LEDGER - EXPECTED_LEDGER))"
+          if [ "${LAG}" -lt 0 ]; then LAG=0; fi
+          test "${LAG}" -le "${MAX_CUTOVER_LAG}"
+          jq -n --argjson candidateLedger "${EXPECTED_LEDGER}" --arg candidateHash "${EXPECTED_HASH}" \
+            --argjson liveLedger "${LIVE_LEDGER}" --argjson lagLedgers "${LAG}" --argjson maxLag "${MAX_CUTOVER_LAG}" \
+            '{passed:($lagLedgers <= $maxLag),candidate:{ledgerIndex:$candidateLedger,ledgerHash:$candidateHash},live:{ledgerIndex:$liveLedger,lagLedgers:$lagLedgers,maxLagLedgers:$maxLag}}' \
+            > p0-guarded-cutover/pre-cutover.json
+
+      - name: Dispatch and verify guarded production cutover
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/runs?event=workflow_dispatch&per_page=100" \
+            --jq '.workflow_runs[].id' > p0-guarded-cutover/cutover-before.txt
+          jq -n --arg ref main --arg history "${HISTORY_CANDIDATE_BRANCH}" --arg current "${CURRENT_CANDIDATE_BRANCH}" \
+            '{ref:$ref,inputs:{history_candidate_branch:$history,current_state_candidate_branch:$current,confirm_production_write:"true"}}' \
+            > p0-guarded-cutover/cutover-dispatch.json
+          gh api --method POST "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/dispatches" \
+            --input p0-guarded-cutover/cutover-dispatch.json
+
+          CUTOVER_RUN_ID=''
+          for attempt in $(seq 1 60); do
+            gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/runs?event=workflow_dispatch&per_page=100" \
+              > p0-guarded-cutover/cutover-after.json
+            while IFS= read -r id; do
+              if ! grep -Fxq "${id}" p0-guarded-cutover/cutover-before.txt; then
+                CUTOVER_RUN_ID="${id}"
+                break
+              fi
+            done < <(jq -r '.workflow_runs | sort_by(.created_at) | reverse | .[].id' p0-guarded-cutover/cutover-after.json)
+            test -n "${CUTOVER_RUN_ID}" && break
+            sleep 5
+          done
+          test -n "${CUTOVER_RUN_ID}"
+          printf '%s\n' "${CUTOVER_RUN_ID}" > p0-guarded-cutover/cutover-run-id.txt
+
+          for attempt in $(seq 1 180); do
+            gh api "repos/${REPOSITORY}/actions/runs/${CUTOVER_RUN_ID}" > p0-guarded-cutover/cutover-run.json
+            test "$(jq -r '.status' p0-guarded-cutover/cutover-run.json)" = completed && break
+            sleep 30
+          done
+          test "$(jq -r '.status' p0-guarded-cutover/cutover-run.json)" = completed
+          test "$(jq -r '.conclusion' p0-guarded-cutover/cutover-run.json)" = success
+          gh api "repos/${REPOSITORY}/actions/runs/${CUTOVER_RUN_ID}/jobs?per_page=100" > p0-guarded-cutover/cutover-jobs.json
+          gh issue comment "${ISSUE_NUMBER}" --repo "${REPOSITORY}" \
+            --body "Guarded production cutover succeeded from candidate ledger ${EXPECTED_LEDGER}. Cutover run: ${CUTOVER_RUN_ID}."
+
+      - name: Upload guarded cutover evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: p0-guarded-cutover-stable-candidate
+          path: p0-guarded-cutover
+          if-no-files-found: warn
+          retention-days: 30
