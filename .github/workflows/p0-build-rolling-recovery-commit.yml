@@ -1,0 +1,61 @@
+name: P0 build rolling recovery commit
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  actions: read
+  contents: write
+  issues: write
+
+jobs:
+  build:
+    if: startsWith(github.event.issue.title, 'P0 build rolling recovery commit')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+      ISSUE_NUMBER: ${{ github.event.issue.number }}
+      ARTIFACT_ID: '8442004739'
+    steps:
+      - name: Download and verify patched files
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/${REPOSITORY}/actions/artifacts/${ARTIFACT_ID}/zip" > /tmp/fix.zip
+          mkdir -p /tmp/fix
+          unzip -q /tmp/fix.zip -d /tmp/fix
+          echo 'de01f651b9729118d3f175a4c5eaf27f76a61ce72f7b894aeca6885e6ed07687  /tmp/fix/p0-recover-rolling-backlog.yml' | sha256sum -c -
+          echo 'c41fcbd1df77e67e840d4d3920f08ee82a7f1211a0a9e366828822e4768fea5a  /tmp/fix/rolling-checkpoint-candidate.yml' | sha256sum -c -
+
+      - name: Create unattached Git commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          make_blob() {
+            local file="$1"
+            jq -n --rawfile content "${file}" '{content:$content,encoding:"utf-8"}' |
+              gh api --method POST "repos/${REPOSITORY}/git/blobs" --input - --jq '.sha'
+          }
+          PARENT_SHA="$(gh api "repos/${REPOSITORY}/commits/main" --jq '.sha')"
+          BASE_TREE="$(gh api "repos/${REPOSITORY}/git/commits/${PARENT_SHA}" --jq '.tree.sha')"
+          CANDIDATE_BLOB="$(make_blob /tmp/fix/rolling-checkpoint-candidate.yml)"
+          PARENT_BLOB="$(make_blob /tmp/fix/p0-recover-rolling-backlog.yml)"
+          jq -n \
+            --arg base_tree "${BASE_TREE}" \
+            --arg candidate "${CANDIDATE_BLOB}" \
+            --arg parent "${PARENT_BLOB}" \
+            '{base_tree:$base_tree,tree:[
+              {path:".github/workflows/rolling-checkpoint-candidate.yml",mode:"100644",type:"blob",sha:$candidate},
+              {path:".github/workflows/p0-recover-rolling-backlog.yml",mode:"100644",type:"blob",sha:$parent}
+            ]}' > /tmp/tree.json
+          TREE_SHA="$(gh api --method POST "repos/${REPOSITORY}/git/trees" --input /tmp/tree.json --jq '.sha')"
+          jq -n \
+            --arg message 'Fix rolling recovery serialization and evidence retention' \
+            --arg tree "${TREE_SHA}" \
+            --arg parent "${PARENT_SHA}" \
+            '{message:$message,tree:$tree,parents:[$parent]}' > /tmp/commit.json
+          COMMIT_SHA="$(gh api --method POST "repos/${REPOSITORY}/git/commits" --input /tmp/commit.json --jq '.sha')"
+          gh issue comment "${ISSUE_NUMBER}" --repo "${REPOSITORY}" --body "Unattached repair commit created: ${COMMIT_SHA}. Parent: ${PARENT_SHA}. Tree: ${TREE_SHA}."
