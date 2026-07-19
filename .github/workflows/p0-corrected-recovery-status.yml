@@ -1,0 +1,70 @@
+name: P0 corrected recovery status
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  actions: read
+  issues: write
+
+jobs:
+  status:
+    if: startsWith(github.event.issue.title, 'P0 corrected recovery status')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+      ISSUE_NUMBER: ${{ github.event.issue.number }}
+    steps:
+      - name: Read latest corrected recovery state
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/${REPOSITORY}/actions/workflows/p0-recover-rolling-backlog.yml/runs?event=issues&per_page=10" > /tmp/parents.json
+          PARENT_ID="$(jq -r '[.workflow_runs[] | select(.display_title | contains("corrected single orchestrator"))][0].id // empty' /tmp/parents.json)"
+          test -n "${PARENT_ID}"
+          gh api "repos/${REPOSITORY}/actions/runs/${PARENT_ID}/jobs?per_page=100" > /tmp/parent-jobs.json
+
+          gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-candidate.yml/runs?event=workflow_dispatch&per_page=10" > /tmp/candidates.json
+          CANDIDATE_ID="$(jq -r '[.workflow_runs[] | select(.created_at >= "2026-07-19T12:01:52Z")][0].id // empty' /tmp/candidates.json)"
+          if [ -n "${CANDIDATE_ID}" ]; then
+            gh api "repos/${REPOSITORY}/actions/runs/${CANDIDATE_ID}/jobs?per_page=100" > /tmp/candidate-jobs.json
+          else
+            printf '{"jobs":[]}' > /tmp/candidate-jobs.json
+          fi
+
+          gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/runs?event=workflow_dispatch&per_page=10" > /tmp/cutovers.json
+          CUTOVER_ID="$(jq -r '[.workflow_runs[] | select(.created_at >= "2026-07-19T12:01:52Z")][0].id // empty' /tmp/cutovers.json)"
+          if [ -n "${CUTOVER_ID}" ]; then
+            gh api "repos/${REPOSITORY}/actions/runs/${CUTOVER_ID}/jobs?per_page=100" > /tmp/cutover-jobs.json
+          else
+            printf '{"jobs":[]}' > /tmp/cutover-jobs.json
+          fi
+
+          jq -n \
+            --slurpfile parents /tmp/parents.json \
+            --slurpfile parentJobs /tmp/parent-jobs.json \
+            --slurpfile candidates /tmp/candidates.json \
+            --slurpfile candidateJobs /tmp/candidate-jobs.json \
+            --slurpfile cutovers /tmp/cutovers.json \
+            --slurpfile cutoverJobs /tmp/cutover-jobs.json \
+            --argjson parentId "${PARENT_ID}" \
+            --arg candidateId "${CANDIDATE_ID}" \
+            --arg cutoverId "${CUTOVER_ID}" '
+              {
+                parent:([ $parents[0].workflow_runs[] | select(.id == $parentId) | {id,status,conclusion,created_at,updated_at,html_url} ][0]),
+                parentJobs:[$parentJobs[0].jobs[] | {id,name,status,conclusion,steps:[.steps[] | {name,status,conclusion,number}]}],
+                candidate:(if $candidateId == "" then null else [ $candidates[0].workflow_runs[] | select((.id|tostring) == $candidateId) | {id,status,conclusion,created_at,updated_at,html_url} ][0] end),
+                candidateJobs:[$candidateJobs[0].jobs[] | {id,name,status,conclusion,steps:[.steps[] | {name,status,conclusion,number}]}],
+                cutover:(if $cutoverId == "" then null else [ $cutovers[0].workflow_runs[] | select((.id|tostring) == $cutoverId) | {id,status,conclusion,created_at,updated_at,html_url} ][0] end),
+                cutoverJobs:[$cutoverJobs[0].jobs[] | {id,name,status,conclusion,steps:[.steps[] | {name,status,conclusion,number}]}]
+              }' > /tmp/status.json
+          {
+            echo 'Corrected recovery status:'
+            echo '```json'
+            jq . /tmp/status.json
+            echo '```'
+          } > /tmp/comment.md
+          gh issue comment "${ISSUE_NUMBER}" --repo "${REPOSITORY}" --body-file /tmp/comment.md
