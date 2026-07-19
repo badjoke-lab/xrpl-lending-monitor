@@ -1,0 +1,51 @@
+name: P0 publish rolling recovery export
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  actions: read
+  contents: write
+  issues: write
+
+jobs:
+  publish:
+    if: startsWith(github.event.issue.title, 'P0 publish rolling recovery export')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+      ISSUE_NUMBER: ${{ github.event.issue.number }}
+      ARTIFACT_ID: '8442004739'
+      EXPORT_BRANCH: fix/rolling-recovery-export
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Download verified files
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/${REPOSITORY}/actions/artifacts/${ARTIFACT_ID}/zip" > /tmp/fix.zip
+          mkdir -p /tmp/fix
+          unzip -q /tmp/fix.zip -d /tmp/fix
+          echo 'de01f651b9729118d3f175a4c5eaf27f76a61ce72f7b894aeca6885e6ed07687  /tmp/fix/p0-recover-rolling-backlog.yml' | sha256sum -c -
+          echo 'c41fcbd1df77e67e840d4d3920f08ee82a7f1211a0a9e366828822e4768fea5a  /tmp/fix/rolling-checkpoint-candidate.yml' | sha256sum -c -
+
+      - name: Publish files under non-workflow paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git checkout -B "${EXPORT_BRANCH}"
+          mkdir -p ops-export
+          cp /tmp/fix/rolling-checkpoint-candidate.yml ops-export/rolling-checkpoint-candidate.yml
+          cp /tmp/fix/p0-recover-rolling-backlog.yml ops-export/p0-recover-rolling-backlog.yml
+          git add ops-export
+          git commit -m 'Export verified rolling recovery workflow fixes'
+          git push --force origin "HEAD:refs/heads/${EXPORT_BRANCH}"
+          gh issue comment "${ISSUE_NUMBER}" --repo "${REPOSITORY}" --body "Verified files published on ${EXPORT_BRANCH} at $(git rev-parse HEAD)."
