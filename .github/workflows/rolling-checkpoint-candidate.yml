@@ -44,7 +44,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: rolling-checkpoint-candidate-${{ inputs.history_candidate_branch }}-${{ inputs.current_state_candidate_branch }}
+  group: rolling-checkpoint-candidate
   cancel-in-progress: false
 
 jobs:
@@ -348,6 +348,14 @@ jobs:
           cp -R .local/next-current-state/read-model /tmp/rolling-current-candidate/read-model
           cp -R .local/next-current-state/rolling-base /tmp/rolling-current-candidate/rolling-base
           cp .local/next-current-state/rolling-read-model-summary.json /tmp/rolling-current-candidate/rolling-read-model-summary.json
+          cp rolling-checkpoint-candidate/plan.json /tmp/rolling-candidate-evidence/plan.json
+          cp .local/history-root/history/publication.json /tmp/rolling-candidate-evidence/publication.json
+          cp .local/history-root/history/index/exact/manifest.json /tmp/rolling-candidate-evidence/exact-manifest.json
+          cp .local/next-current-state/rolling-read-model-summary.json /tmp/rolling-candidate-evidence/current-summary.json
+          cp rolling-checkpoint-candidate/base-mode.txt /tmp/rolling-candidate-evidence/base-mode.txt
+          cp rolling-checkpoint-candidate/delta-elapsed-seconds.txt /tmp/rolling-candidate-evidence/delta-elapsed-seconds.txt
+          cp rolling-checkpoint-candidate/exact-index-elapsed-seconds.txt /tmp/rolling-candidate-evidence/exact-index-elapsed-seconds.txt
+          cp rolling-checkpoint-candidate/current-state-elapsed-seconds.txt /tmp/rolling-candidate-evidence/current-state-elapsed-seconds.txt
 
       - name: Publish history candidate branch
         shell: bash
@@ -419,10 +427,11 @@ jobs:
         run: |
           set -euo pipefail
           ROOT=rolling-checkpoint-candidate
-          PUBLICATION=.local/history-root/history/publication.json
-          EXACT=.local/history-root/history/index/exact/manifest.json
-          CURRENT=.local/next-current-state/rolling-read-model-summary.json
+          mkdir -p "${ROOT}"
           cp /tmp/rolling-candidate-evidence/* "${ROOT}/"
+          PUBLICATION="${ROOT}/publication.json"
+          EXACT="${ROOT}/exact-manifest.json"
+          CURRENT="${ROOT}/current-summary.json"
 
           jq -n \
             --slurpfile plan "${ROOT}/plan.json" \
