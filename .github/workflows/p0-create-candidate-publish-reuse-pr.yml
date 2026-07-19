@@ -1,0 +1,154 @@
+name: P0 create candidate publish reuse PR
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  create:
+    if: startsWith(github.event.issue.title, 'P0 create candidate publish reuse PR')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+      ISSUE_NUMBER: ${{ github.event.issue.number }}
+      BRANCH: fix/reuse-candidate-publish-objects
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Patch candidate publisher and open PR
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git checkout -b "${BRANCH}"
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('.github/workflows/rolling-checkpoint-candidate.yml')
+          text = path.read_text()
+          old_history = '''      - name: Publish history candidate branch
+                shell: bash
+                run: |
+                  set -euo pipefail
+                  git config user.name github-actions[bot]
+                  git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+                  git checkout --orphan rolling-history-publish
+                  git rm -rf . || true
+                  find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+                  cp -R /tmp/rolling-history-candidate/. .
+                  git add history
+                  git commit -m "Publish rolling checkpoint history candidate data"
+                  DATA_SHA="$(git rev-parse HEAD)"
+                  node /tmp/build-history-segment-channel.mjs \\
+                    --local \\
+                    --publication history/publication.json \\
+                    --publication-path history/publication.json \\
+                    --exact-index-manifest history/index/exact/manifest.json \\
+                    --exact-index-manifest-path history/index/exact/manifest.json \\
+                    --data-commit-sha "${DATA_SHA}" \\
+                    --output history-channel.json
+                  git add history-channel.json
+                  git commit -m "Activate rolling checkpoint history candidate channel"
+                  git push --force origin "HEAD:refs/heads/${HISTORY_CANDIDATE_BRANCH}"
+                  git rev-parse HEAD > /tmp/rolling-candidate-evidence/history-commit-sha.txt
+          '''
+          new_history = '''      - name: Publish history candidate branch
+                shell: bash
+                run: |
+                  set -euo pipefail
+                  PUBLISH_ROOT=.local/history-root
+                  git -C "${PUBLISH_ROOT}" config user.name github-actions[bot]
+                  git -C "${PUBLISH_ROOT}" config user.email 41898282+github-actions[bot]@users.noreply.github.com
+                  git -C "${PUBLISH_ROOT}" sparse-checkout disable
+                  git -C "${PUBLISH_ROOT}" add history
+                  git -C "${PUBLISH_ROOT}" commit -m "Publish rolling checkpoint history candidate data"
+                  DATA_SHA="$(git -C "${PUBLISH_ROOT}" rev-parse HEAD)"
+                  node /tmp/build-history-segment-channel.mjs \\
+                    --local \\
+                    --publication "${PUBLISH_ROOT}/history/publication.json" \\
+                    --publication-path history/publication.json \\
+                    --exact-index-manifest "${PUBLISH_ROOT}/history/index/exact/manifest.json" \\
+                    --exact-index-manifest-path history/index/exact/manifest.json \\
+                    --data-commit-sha "${DATA_SHA}" \\
+                    --output "${PUBLISH_ROOT}/history-channel.json"
+                  git -C "${PUBLISH_ROOT}" add history-channel.json
+                  git -C "${PUBLISH_ROOT}" commit -m "Activate rolling checkpoint history candidate channel"
+                  git -C "${PUBLISH_ROOT}" push --force origin "HEAD:refs/heads/${HISTORY_CANDIDATE_BRANCH}"
+                  git -C "${PUBLISH_ROOT}" rev-parse HEAD > /tmp/rolling-candidate-evidence/history-commit-sha.txt
+          '''
+          old_current = '''      - name: Publish current-state candidate branch
+                shell: bash
+                run: |
+                  set -euo pipefail
+                  git checkout --orphan rolling-current-publish
+                  git rm -rf . || true
+                  find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+                  cp -R /tmp/rolling-current-candidate/. .
+                  git add read-model rolling-base rolling-read-model-summary.json
+                  git commit -m "Publish rolling checkpoint current-state candidate data"
+                  DATA_SHA="$(git rev-parse HEAD)"
+                  MANIFEST_SHA="$(jq -r .target.manifestSha256 rolling-read-model-summary.json)"
+                  RELEASE_TAG="$(jq -r .target.releaseTag rolling-read-model-summary.json)"
+                  SNAPSHOT_ID="$(jq -r .target.snapshotId rolling-read-model-summary.json)"
+                  jq -n \\
+                    --arg dataCommitSha "${DATA_SHA}" \\
+                    --arg manifestSha256 "${MANIFEST_SHA}" \\
+                    --arg releaseTag "${RELEASE_TAG}" \\
+                    --arg snapshotId "${SNAPSHOT_ID}" \\
+                    --arg updatedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \\
+                    '{schemaVersion:1,active:{dataCommitSha:$dataCommitSha,manifestPath:"read-model/manifest.json",manifestSha256:$manifestSha256,releaseTag:$releaseTag,snapshotId:$snapshotId},updatedAt:$updatedAt}' \\
+                    > channel.json
+                  git add channel.json
+                  git commit -m "Activate rolling checkpoint current-state candidate channel"
+                  git push --force origin "HEAD:refs/heads/${CURRENT_STATE_CANDIDATE_BRANCH}"
+                  git rev-parse HEAD > /tmp/rolling-candidate-evidence/current-state-commit-sha.txt
+          '''
+          new_current = '''      - name: Publish current-state candidate branch
+                shell: bash
+                run: |
+                  set -euo pipefail
+                  PUBLISH_ROOT=.local/current-state-root
+                  git -C "${PUBLISH_ROOT}" config user.name github-actions[bot]
+                  git -C "${PUBLISH_ROOT}" config user.email 41898282+github-actions[bot]@users.noreply.github.com
+                  git -C "${PUBLISH_ROOT}" sparse-checkout disable
+                  rm -rf "${PUBLISH_ROOT}/read-model" "${PUBLISH_ROOT}/rolling-base" "${PUBLISH_ROOT}/rolling-read-model-summary.json"
+                  cp -R /tmp/rolling-current-candidate/. "${PUBLISH_ROOT}/"
+                  git -C "${PUBLISH_ROOT}" add -A read-model rolling-base rolling-read-model-summary.json
+                  git -C "${PUBLISH_ROOT}" commit -m "Publish rolling checkpoint current-state candidate data"
+                  DATA_SHA="$(git -C "${PUBLISH_ROOT}" rev-parse HEAD)"
+                  MANIFEST_SHA="$(jq -r .target.manifestSha256 "${PUBLISH_ROOT}/rolling-read-model-summary.json")"
+                  RELEASE_TAG="$(jq -r .target.releaseTag "${PUBLISH_ROOT}/rolling-read-model-summary.json")"
+                  SNAPSHOT_ID="$(jq -r .target.snapshotId "${PUBLISH_ROOT}/rolling-read-model-summary.json")"
+                  jq -n \\
+                    --arg dataCommitSha "${DATA_SHA}" \\
+                    --arg manifestSha256 "${MANIFEST_SHA}" \\
+                    --arg releaseTag "${RELEASE_TAG}" \\
+                    --arg snapshotId "${SNAPSHOT_ID}" \\
+                    --arg updatedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \\
+                    '{schemaVersion:1,active:{dataCommitSha:$dataCommitSha,manifestPath:"read-model/manifest.json",manifestSha256:$manifestSha256,releaseTag:$releaseTag,snapshotId:$snapshotId},updatedAt:$updatedAt}' \\
+                    > "${PUBLISH_ROOT}/channel.json"
+                  git -C "${PUBLISH_ROOT}" add channel.json
+                  git -C "${PUBLISH_ROOT}" commit -m "Activate rolling checkpoint current-state candidate channel"
+                  git -C "${PUBLISH_ROOT}" push --force origin "HEAD:refs/heads/${CURRENT_STATE_CANDIDATE_BRANCH}"
+                  git -C "${PUBLISH_ROOT}" rev-parse HEAD > /tmp/rolling-candidate-evidence/current-state-commit-sha.txt
+          '''
+          if text.count(old_history) != 1:
+              raise SystemExit('history publish block mismatch')
+          if text.count(old_current) != 1:
+              raise SystemExit('current-state publish block mismatch')
+          path.write_text(text.replace(old_history, new_history).replace(old_current, new_current))
+          PY
+          git add .github/workflows/rolling-checkpoint-candidate.yml
+          git commit -m "Reuse candidate branch objects during publication"
+          git push origin "${BRANCH}"
+          PR_URL="$(gh pr create --repo "${REPOSITORY}" --base main --head "${BRANCH}" --title 'Reuse Git objects when publishing rolling candidates' --body 'Publishes from the checked-out source candidate repositories instead of rebuilding orphan branches. This preserves guarded A/B semantics while allowing Git to transfer only changed objects. No ledger, Mainnet, capacity, cadence, or cutover guard changes.')"
+          gh issue comment "${ISSUE_NUMBER}" --repo "${REPOSITORY}" --body "Created ${PR_URL}"
