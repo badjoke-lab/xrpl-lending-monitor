@@ -1,0 +1,1 @@
+Operational note: this branch expands the existing read-only Actions status probe so it reports the one-off overlay maintenance parent run, rolling checkpoint candidate child runs, live cutover runs, and their job/step states. No production data path or Mainnet setting is changed.
