@@ -1,0 +1,34 @@
+name: P0 probe refresh candidate 720
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  actions: read
+  issues: write
+  contents: read
+
+jobs:
+  probe:
+    if: startsWith(github.event.issue.title, 'P0 probe refresh candidate 720')
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+      ISSUE_NUMBER: ${{ github.event.issue.number }}
+    steps:
+      - name: Report latest refresh run
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/${REPOSITORY}/actions/workflows/p0-refresh-candidate-720.yml/runs?per_page=5" > runs.json
+          RUN_ID=$(jq -r '.workflow_runs[0].id // empty' runs.json)
+          test -n "$RUN_ID"
+          gh api "repos/${REPOSITORY}/actions/runs/${RUN_ID}/jobs?per_page=100" > jobs.json
+          STATUS=$(jq -r '.workflow_runs[0].status' runs.json)
+          CONCLUSION=$(jq -r '.workflow_runs[0].conclusion // "pending"' runs.json)
+          CREATED=$(jq -r '.workflow_runs[0].created_at' runs.json)
+          JOBS=$(jq -r '[.jobs[] | {name,status,conclusion,steps:[.steps[]|{name,status,conclusion}]}]' jobs.json)
+          BODY=$(jq -n --argjson runId "$RUN_ID" --arg status "$STATUS" --arg conclusion "$CONCLUSION" --arg created "$CREATED" --argjson jobs "$JOBS" '{runId:$runId,status:$status,conclusion:$conclusion,createdAt:$created,jobs:$jobs}' | jq -r '```json\n\(.)\n```')
+          gh issue comment "$ISSUE_NUMBER" --body "$BODY"
