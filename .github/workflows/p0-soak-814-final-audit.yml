@@ -1,0 +1,223 @@
+name: P0 soak 814 final audit
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/p0-soak-814-final-audit.yml
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run read-only final soak audit
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import subprocess
+          from pathlib import Path
+
+          DB = "xrpl-lending-monitor"
+          START_MS = 1784346600000
+          END_MS = 1784432700000
+          START_ISO = "2026-07-18T03:50:00.000Z"
+          END_EXCLUSIVE_ISO = "2026-07-19T03:50:00.000Z"
+
+          def execute(name: str, sql: str):
+              cmd = [
+                  "pnpm", "exec", "wrangler", "d1", "execute", DB,
+                  "--remote", "--json", "--command", sql,
+              ]
+              completed = subprocess.run(cmd, check=True, text=True, capture_output=True, env=os.environ.copy())
+              raw = completed.stdout.strip()
+              data = json.loads(raw)
+              Path(f"audit-{name}.json").write_text(json.dumps(data, indent=2), encoding="utf-8")
+              return data
+
+          def result_rows(data):
+              if isinstance(data, dict) and isinstance(data.get("result"), list) and data["result"]:
+                  return data["result"][0].get("results", [])
+              if isinstance(data, list) and data:
+                  return data[0].get("results", [])
+              if isinstance(data, dict):
+                  return data.get("results", [])
+              return []
+
+          queue_summary_sql = f"""
+          WITH RECURSIVE expected(scheduled_time) AS (
+            SELECT {START_MS}
+            UNION ALL
+            SELECT scheduled_time + 300000 FROM expected WHERE scheduled_time < {END_MS}
+          ), actual AS (
+            SELECT scheduled_time, status, error_message
+            FROM fast_lane_queue_slots
+            WHERE scheduled_time BETWEEN {START_MS} AND {END_MS}
+          )
+          SELECT
+            (SELECT COUNT(*) FROM expected) AS expected_slots,
+            (SELECT COUNT(*) FROM actual) AS observed_rows,
+            (SELECT COUNT(DISTINCT scheduled_time) FROM actual) AS observed_distinct_slots,
+            (SELECT COUNT(*) FROM expected e LEFT JOIN actual a ON a.scheduled_time = e.scheduled_time WHERE a.scheduled_time IS NULL) AS missing_slots,
+            (SELECT COUNT(*) FROM (SELECT scheduled_time FROM actual GROUP BY scheduled_time HAVING COUNT(*) <> 1)) AS duplicate_slot_keys,
+            (SELECT COUNT(*) FROM actual WHERE status <> 'completed') AS non_completed_rows,
+            (SELECT COUNT(*) FROM actual WHERE error_message IS NOT NULL) AS error_rows,
+            (SELECT MIN(scheduled_time) FROM actual) AS first_observed_slot,
+            (SELECT MAX(scheduled_time) FROM actual) AS last_observed_slot;
+          """
+
+          queue_missing_sql = f"""
+          WITH RECURSIVE expected(scheduled_time) AS (
+            SELECT {START_MS}
+            UNION ALL
+            SELECT scheduled_time + 300000 FROM expected WHERE scheduled_time < {END_MS}
+          )
+          SELECT e.scheduled_time
+          FROM expected e
+          LEFT JOIN fast_lane_queue_slots q ON q.scheduled_time = e.scheduled_time
+          WHERE q.scheduled_time IS NULL
+          ORDER BY e.scheduled_time;
+          """
+
+          queue_problem_sql = f"""
+          SELECT scheduled_time, status, error_message, COUNT(*) AS row_count
+          FROM fast_lane_queue_slots
+          WHERE scheduled_time BETWEEN {START_MS} AND {END_MS}
+          GROUP BY scheduled_time, status, error_message
+          HAVING COUNT(*) <> 1 OR status <> 'completed' OR error_message IS NOT NULL
+          ORDER BY scheduled_time;
+          """
+
+          metric_summary_sql = f"""
+          SELECT
+            COUNT(*) AS retained_metrics,
+            MIN(run_at) AS first_retained_run,
+            MAX(run_at) AS last_retained_run,
+            SUM(CASE WHEN status <> 'committed' THEN 1 ELSE 0 END) AS non_committed_metrics,
+            SUM(CASE WHEN error_message IS NOT NULL THEN 1 ELSE 0 END) AS error_metrics
+          FROM fast_lane_shadow_run_metrics
+          WHERE run_at >= '{START_ISO}' AND run_at < '{END_EXCLUSIVE_ISO}';
+          """
+
+          metric_terminal_sql = f"""
+          WITH ranked AS (
+            SELECT
+              run_at,
+              status,
+              lag_ledgers,
+              error_message,
+              ROW_NUMBER() OVER (
+                PARTITION BY substr(run_at, 1, 16)
+                ORDER BY run_at DESC
+              ) AS rank_in_slot
+            FROM fast_lane_shadow_run_metrics
+            WHERE run_at >= '{START_ISO}' AND run_at < '{END_EXCLUSIVE_ISO}'
+          )
+          SELECT
+            COUNT(*) AS retained_terminal_slots,
+            SUM(CASE WHEN lag_ledgers <> 0 THEN 1 ELSE 0 END) AS nonzero_terminal_lag_slots,
+            SUM(CASE WHEN status <> 'committed' OR error_message IS NOT NULL THEN 1 ELSE 0 END) AS terminal_error_slots,
+            MIN(run_at) AS first_terminal_run,
+            MAX(run_at) AS last_terminal_run
+          FROM ranked
+          WHERE rank_in_slot = 1;
+          """
+
+          metric_problem_sql = f"""
+          SELECT run_at, status, lag_ledgers, error_message
+          FROM fast_lane_shadow_run_metrics
+          WHERE run_at >= '{START_ISO}' AND run_at < '{END_EXCLUSIVE_ISO}'
+            AND (status <> 'committed' OR error_message IS NOT NULL)
+          ORDER BY run_at;
+          """
+
+          queue_summary_raw = execute("queue-summary", queue_summary_sql)
+          queue_missing_raw = execute("queue-missing", queue_missing_sql)
+          queue_problem_raw = execute("queue-problems", queue_problem_sql)
+          metric_summary_raw = execute("metric-summary", metric_summary_sql)
+          metric_terminal_raw = execute("metric-terminal", metric_terminal_sql)
+          metric_problem_raw = execute("metric-problems", metric_problem_sql)
+
+          queue_summary = (result_rows(queue_summary_raw) or [{}])[0]
+          metric_summary = (result_rows(metric_summary_raw) or [{}])[0]
+          metric_terminal = (result_rows(metric_terminal_raw) or [{}])[0]
+          missing = result_rows(queue_missing_raw)
+          queue_problems = result_rows(queue_problem_raw)
+          metric_problems = result_rows(metric_problem_raw)
+
+          queue_pass = (
+              queue_summary.get("expected_slots") == 288
+              and queue_summary.get("observed_rows") == 288
+              and queue_summary.get("observed_distinct_slots") == 288
+              and queue_summary.get("missing_slots") == 0
+              and queue_summary.get("duplicate_slot_keys") == 0
+              and queue_summary.get("non_completed_rows") == 0
+              and queue_summary.get("error_rows") == 0
+              and queue_summary.get("first_observed_slot") == START_MS
+              and queue_summary.get("last_observed_slot") == END_MS
+          )
+
+          retained_metrics_clean = (
+              (metric_summary.get("non_committed_metrics") or 0) == 0
+              and (metric_summary.get("error_metrics") or 0) == 0
+              and (metric_terminal.get("nonzero_terminal_lag_slots") or 0) == 0
+              and (metric_terminal.get("terminal_error_slots") or 0) == 0
+          )
+
+          audit = {
+              "window": {
+                  "start_ms": START_MS,
+                  "end_ms": END_MS,
+                  "start_iso": START_ISO,
+                  "end_exclusive_iso": END_EXCLUSIVE_ISO,
+                  "expected_slots": 288,
+              },
+              "queue": {
+                  "summary": queue_summary,
+                  "missing": missing,
+                  "problems": queue_problems,
+                  "pass": queue_pass,
+              },
+              "retained_metrics": {
+                  "summary": metric_summary,
+                  "terminal_summary": metric_terminal,
+                  "problems": metric_problems,
+                  "clean": retained_metrics_clean,
+                  "coverage_note": "Retention may not preserve all metric rows; Queue continuity is audited independently for all 288 exact slots.",
+              },
+              "verdict": "pass" if queue_pass and retained_metrics_clean else "fail",
+          }
+          Path("soak-814-final-audit.json").write_text(json.dumps(audit, indent=2), encoding="utf-8")
+          print(json.dumps(audit, indent=2))
+          PY
+
+      - name: Upload final soak audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: p0-soak-814-final-audit
+          path: |
+            soak-814-final-audit.json
+            audit-*.json
+          if-no-files-found: error
