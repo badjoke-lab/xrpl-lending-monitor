@@ -18,17 +18,18 @@ jobs:
       REPOSITORY: ${{ github.repository }}
       ISSUE_NUMBER: ${{ github.event.issue.number }}
     steps:
-      - name: Read latest bounded recovery state
+      - name: Read Issue 881 recovery state
         shell: bash
         run: |
           set -euo pipefail
           STARTED_AT='2026-07-19T13:45:42Z'
-          gh api "repos/${REPOSITORY}/actions/workflows/p0-recover-rolling-backlog.yml/runs?event=issues&per_page=10" > /tmp/parents.json
-          PARENT_ID="$(jq -r --arg started "${STARTED_AT}" '[.workflow_runs[] | select(.created_at >= $started)][0].id // empty' /tmp/parents.json)"
+          PARENT_TITLE='P0 recover rolling checkpoint backlog 2026-07-19 22:46 JST bounded exact-index repair'
+          gh api "repos/${REPOSITORY}/actions/workflows/p0-recover-rolling-backlog.yml/runs?event=issues&per_page=30" > /tmp/parents.json
+          PARENT_ID="$(jq -r --arg title "${PARENT_TITLE}" '[.workflow_runs[] | select(.display_title == $title)][0].id // empty' /tmp/parents.json)"
           test -n "${PARENT_ID}"
           gh api "repos/${REPOSITORY}/actions/runs/${PARENT_ID}/jobs?per_page=100" > /tmp/parent-jobs.json
 
-          gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-candidate.yml/runs?event=workflow_dispatch&per_page=20" > /tmp/candidates.json
+          gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-candidate.yml/runs?event=workflow_dispatch&per_page=30" > /tmp/candidates.json
           CANDIDATE_ID="$(jq -r --arg started "${STARTED_AT}" '[.workflow_runs[] | select(.created_at >= $started)][0].id // empty' /tmp/candidates.json)"
           if [ -n "${CANDIDATE_ID}" ]; then
             gh api "repos/${REPOSITORY}/actions/runs/${CANDIDATE_ID}/jobs?per_page=100" > /tmp/candidate-jobs.json
@@ -36,7 +37,7 @@ jobs:
             printf '{"jobs":[]}' > /tmp/candidate-jobs.json
           fi
 
-          gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/runs?event=workflow_dispatch&per_page=10" > /tmp/cutovers.json
+          gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/runs?event=workflow_dispatch&per_page=20" > /tmp/cutovers.json
           CUTOVER_ID="$(jq -r --arg started "${STARTED_AT}" '[.workflow_runs[] | select(.created_at >= $started)][0].id // empty' /tmp/cutovers.json)"
           if [ -n "${CUTOVER_ID}" ]; then
             gh api "repos/${REPOSITORY}/actions/runs/${CUTOVER_ID}/jobs?per_page=100" > /tmp/cutover-jobs.json
@@ -63,7 +64,7 @@ jobs:
                 cutoverJobs:[$cutoverJobs[0].jobs[] | {id,name,status,conclusion,steps:[.steps[] | {name,status,conclusion,number}]}]
               }' > /tmp/status.json
           {
-            echo 'Bounded exact-index recovery status:'
+            echo 'Issue 881 recovery status:'
             echo '```json'
             jq . /tmp/status.json
             echo '```'
