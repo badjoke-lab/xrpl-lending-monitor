@@ -1,0 +1,102 @@
+name: P0 export rolling recovery fix
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  export:
+    if: startsWith(github.event.issue.title, 'P0 export rolling recovery fix')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+      ISSUE_NUMBER: ${{ github.event.issue.number }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build verified patched workflow files
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          candidate_path = Path('.github/workflows/rolling-checkpoint-candidate.yml')
+          candidate = candidate_path.read_text()
+          candidate, count = re.subn(r'(?m)^  group: rolling-checkpoint-candidate-.*$', '  group: rolling-checkpoint-candidate', candidate)
+          if count != 1:
+              raise SystemExit(f'candidate concurrency replacement count={count}')
+
+          stage_anchor = '          cp .local/next-current-state/rolling-read-model-summary.json /tmp/rolling-current-candidate/rolling-read-model-summary.json\n'
+          stage_extra = '''          cp rolling-checkpoint-candidate/plan.json /tmp/rolling-candidate-evidence/plan.json
+                    cp .local/history-root/history/publication.json /tmp/rolling-candidate-evidence/publication.json
+                    cp .local/history-root/history/index/exact/manifest.json /tmp/rolling-candidate-evidence/exact-manifest.json
+                    cp .local/next-current-state/rolling-read-model-summary.json /tmp/rolling-candidate-evidence/current-summary.json
+                    cp rolling-checkpoint-candidate/base-mode.txt /tmp/rolling-candidate-evidence/base-mode.txt
+                    cp rolling-checkpoint-candidate/delta-elapsed-seconds.txt /tmp/rolling-candidate-evidence/delta-elapsed-seconds.txt
+                    cp rolling-checkpoint-candidate/exact-index-elapsed-seconds.txt /tmp/rolling-candidate-evidence/exact-index-elapsed-seconds.txt
+                    cp rolling-checkpoint-candidate/current-state-elapsed-seconds.txt /tmp/rolling-candidate-evidence/current-state-elapsed-seconds.txt
+          '''
+          if candidate.count(stage_anchor) != 1:
+              raise SystemExit('candidate stage anchor mismatch')
+          candidate = candidate.replace(stage_anchor, stage_anchor + stage_extra)
+
+          pattern = re.compile(
+              r'(?m)^          ROOT=rolling-checkpoint-candidate\n'
+              r'^          PUBLICATION=\.local/history-root/history/publication\.json\n'
+              r'^          EXACT=\.local/history-root/history/index/exact/manifest\.json\n'
+              r'^          CURRENT=\.local/next-current-state/rolling-read-model-summary\.json\n'
+              r'^          cp /tmp/rolling-candidate-evidence/\* "\$\{ROOT\}/"\n'
+          )
+          replacement = '''          ROOT=rolling-checkpoint-candidate
+                    mkdir -p "${ROOT}"
+                    cp /tmp/rolling-candidate-evidence/* "${ROOT}/"
+                    PUBLICATION="${ROOT}/publication.json"
+                    EXACT="${ROOT}/exact-manifest.json"
+                    CURRENT="${ROOT}/current-summary.json"
+          '''
+          candidate, count = pattern.subn(replacement, candidate)
+          if count != 1:
+              raise SystemExit(f'candidate evidence replacement count={count}')
+          candidate_path.write_text(candidate)
+
+          parent_path = Path('.github/workflows/p0-recover-rolling-backlog.yml')
+          parent = parent_path.read_text()
+          parent, count = re.subn(r'(?m)^  group: p0-recover-rolling-checkpoint-backlog$', '  group: p0-rolling-overlay-recovery', parent)
+          if count != 1:
+              raise SystemExit(f'parent concurrency replacement count={count}')
+
+          status_anchor = '            test "$(jq -r \'.status\' "${CYCLE_ROOT}/run.json")" = completed\n'
+          if parent.count(status_anchor) != 1:
+              raise SystemExit('parent child status anchor mismatch')
+          parent = parent.replace(status_anchor, status_anchor + '            test "$(jq -r \'.conclusion\' "${CYCLE_ROOT}/run.json")" = success\n')
+
+          required_anchor = "              'Rehearse remote candidate pair'; do\n"
+          if parent.count(required_anchor) != 1:
+              raise SystemExit('parent required step anchor mismatch')
+          parent = parent.replace(required_anchor, "              'Rehearse remote candidate pair' \\\n              'Build retained candidate evidence'; do\n")
+          parent_path.write_text(parent)
+          PY
+          git diff --check
+          mkdir -p /tmp/rolling-recovery-fix/.github/workflows
+          cp .github/workflows/rolling-checkpoint-candidate.yml /tmp/rolling-recovery-fix/.github/workflows/
+          cp .github/workflows/p0-recover-rolling-backlog.yml /tmp/rolling-recovery-fix/.github/workflows/
+
+      - name: Upload patched workflow files
+        uses: actions/upload-artifact@v4
+        with:
+          name: rolling-recovery-workflow-fix
+          path: /tmp/rolling-recovery-fix
+          retention-days: 7
+
+      - name: Report export run
+        shell: bash
+        run: |
+          gh issue comment "${ISSUE_NUMBER}" --repo "${REPOSITORY}" --body "Patched workflow artifact exported. Run: ${GITHUB_RUN_ID}. Artifact: rolling-recovery-workflow-fix."
