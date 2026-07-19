@@ -17,15 +17,22 @@ jobs:
       REPOSITORY: ${{ github.repository }}
       ISSUE_NUMBER: ${{ github.event.issue.number }}
     steps:
-      - name: Report failed repair log tail
+      - name: Report commit builder runs
         shell: bash
         run: |
           set -euo pipefail
-          gh run view 29685452599 --repo "${REPOSITORY}" --log-failed > /tmp/failed.log || true
+          gh api "repos/${REPOSITORY}/actions/workflows/p0-build-rolling-recovery-commit.yml/runs?per_page=20" > /tmp/runs.json
+          RUN_ID="$(jq -r '[.workflow_runs[] | select(.display_title | startswith("P0 build rolling recovery commit"))][0].id // empty' /tmp/runs.json)"
+          test -n "${RUN_ID}"
+          gh api "repos/${REPOSITORY}/actions/runs/${RUN_ID}/jobs?per_page=100" > /tmp/jobs.json
           {
-            echo 'Failed repair log tail:'
-            echo '```text'
-            tail -n 120 /tmp/failed.log
+            echo 'Commit builder runs:'
+            echo '```json'
+            jq '{runs:[.workflow_runs[] | {id,display_title,status,conclusion,created_at,updated_at,html_url}]}' /tmp/runs.json
+            echo '```'
+            echo 'Selected jobs:'
+            echo '```json'
+            jq '{jobs:[.jobs[] | {id,name,status,conclusion,steps:[.steps[] | {name,status,conclusion,number}]}]}' /tmp/jobs.json
             echo '```'
           } > /tmp/comment.md
           gh issue comment "${ISSUE_NUMBER}" --repo "${REPOSITORY}" --body-file /tmp/comment.md
