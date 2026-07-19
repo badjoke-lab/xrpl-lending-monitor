@@ -61,10 +61,17 @@ jobs:
                 cutover:(if $cutoverId == "" then null else [ $cutovers[0].workflow_runs[] | select((.id|tostring) == $cutoverId) | {id,status,conclusion,created_at,updated_at,html_url} ][0] end),
                 cutoverJobs:[$cutoverJobs[0].jobs[] | {id,name,status,conclusion,steps:[.steps[] | {name,status,conclusion,number}]}]
               }' > /tmp/status.json
+
+          gh run view 29686998150 --repo "${REPOSITORY}" --log-failed > /tmp/failed.log || true
           {
             echo 'Corrected recovery status:'
             echo '```json'
             jq . /tmp/status.json
+            echo '```'
+            echo
+            echo 'Latest failed candidate log tail:'
+            echo '```text'
+            tail -n 120 /tmp/failed.log
             echo '```'
           } > /tmp/comment.md
           gh issue comment "${ISSUE_NUMBER}" --repo "${REPOSITORY}" --body-file /tmp/comment.md
