@@ -17,18 +17,55 @@ jobs:
       REPOSITORY: ${{ github.repository }}
       ISSUE_NUMBER: ${{ github.event.issue.number }}
     steps:
-      - name: Report collector and deploy workflows
+      - name: Report collector, overlay recovery, candidate, and cutover workflows
         shell: bash
         run: |
           set -euo pipefail
-          gh api "repos/${REPOSITORY}/actions/runs?per_page=100" \
-            --jq '{runs: [.workflow_runs[] | select(.name == "P0 self-scheduled Queue production deploy" or .name == "P0 redundant five-minute scheduler production deploy" or .name == "P0 tail Queue runtime" or .name == "Manual fast-lane collector fallback" or .name == "P0 run Actions collector" or .name == "P0 Queue production deploy" or .name == "P0 disable Worker cron deploy" or .name == "CI" or .name == "Release-native CI") | {id, name, event, display_title, status, conclusion, head_sha, created_at, updated_at, html_url}]}' \
-            > /tmp/runs.json
+
+          gh api "repos/${REPOSITORY}/actions/runs?per_page=100" > /tmp/all-runs.json
+          jq '{runs: [.workflow_runs[]
+            | select(
+                .id == 29678012062
+                or .name == "P0 one-off overlay maintenance now"
+                or .name == "Rolling checkpoint candidate"
+                or .name == "Rolling checkpoint live cutover"
+                or .name == "P0 self-scheduled Queue production deploy"
+                or .name == "P0 redundant five-minute scheduler production deploy"
+                or .name == "P0 tail Queue runtime"
+                or .name == "Manual fast-lane collector fallback"
+                or .name == "P0 run Actions collector"
+                or .name == "P0 Queue production deploy"
+                or .name == "P0 disable Worker cron deploy"
+                or .name == "CI"
+                or .name == "Release-native CI"
+              )
+            | {id, name, event, display_title, status, conclusion, head_branch, head_sha, created_at, updated_at, run_attempt, html_url}]}' \
+            /tmp/all-runs.json > /tmp/runs.json
+
+          jq -r '.runs[] | select(.id == 29678012062 or .name == "Rolling checkpoint candidate" or .name == "Rolling checkpoint live cutover") | .id' \
+            /tmp/runs.json > /tmp/relevant-run-ids.txt
+
+          : > /tmp/jobs.ndjson
+          while IFS= read -r run_id; do
+            test -n "$run_id" || continue
+            gh api "repos/${REPOSITORY}/actions/runs/${run_id}/jobs?per_page=100" \
+              | jq --argjson run_id "$run_id" '{run_id:$run_id,jobs:[.jobs[] | {id,name,status,conclusion,started_at,completed_at,steps:[.steps[] | {name,status,conclusion,number}]}]}' \
+              >> /tmp/jobs.ndjson
+          done < /tmp/relevant-run-ids.txt
+
+          jq -s '{run_jobs:.}' /tmp/jobs.ndjson > /tmp/jobs.json
+
           {
             echo 'Targeted workflow runs:'
             echo
             echo '```json'
             jq . /tmp/runs.json
+            echo '```'
+            echo
+            echo 'Relevant run jobs and steps:'
+            echo
+            echo '```json'
+            jq . /tmp/jobs.json
             echo '```'
           } > /tmp/comment.md
           gh issue comment "$ISSUE_NUMBER" --repo "$REPOSITORY" --body-file /tmp/comment.md
