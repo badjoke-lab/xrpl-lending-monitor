@@ -1,0 +1,54 @@
+name: P0 exact-index bucket size probe
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  probe:
+    if: startsWith(github.event.issue.title, 'P0 exact-index bucket size probe')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+      ISSUE_NUMBER: ${{ github.event.issue.number }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: history-rolling-maintenance-candidate-data
+          sparse-checkout: history/index/exact
+          sparse-checkout-cone-mode: true
+      - name: Measure exact-index bucket sizes
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=history/index/exact
+          jq -r '.assets[] | [.bucket,.path,.compressedBytes,.recordCount] | @tsv' "${ROOT}/manifest.json" > /tmp/assets.tsv
+          : > /tmp/sizes.ndjson
+          while IFS=$'\t' read -r bucket path compressed records; do
+            file="${ROOT}/$(basename "${path}")"
+            actual_compressed="$(stat -c '%s' "${file}")"
+            uncompressed="$(gzip -l "${file}" | awk 'NR==2 {print $2}')"
+            jq -n \
+              --argjson bucket "${bucket}" \
+              --arg path "${path}" \
+              --argjson manifestCompressed "${compressed}" \
+              --argjson actualCompressed "${actual_compressed}" \
+              --argjson uncompressed "${uncompressed}" \
+              --argjson records "${records}" \
+              '{bucket:$bucket,path:$path,manifestCompressedBytes:$manifestCompressed,actualCompressedBytes:$actualCompressed,uncompressedBytes:$uncompressed,recordCount:$records,averageRecordBytes:(if $records == 0 then 0 else ($uncompressed / $records) end)}' \
+              >> /tmp/sizes.ndjson
+          done < /tmp/assets.tsv
+          jq -s '{bucketCount:length,totalCompressedBytes:(map(.actualCompressedBytes)|add),totalUncompressedBytes:(map(.uncompressedBytes)|add),maximum:(max_by(.uncompressedBytes)),minimum:(min_by(.uncompressedBytes)),over64MiB:[.[]|select(.uncompressedBytes > 67108864)],buckets:.}' /tmp/sizes.ndjson > /tmp/summary.json
+          {
+            echo 'Exact-index bucket size summary:'
+            echo '```json'
+            jq '{bucketCount,totalCompressedBytes,totalUncompressedBytes,maximum,minimum,over64MiB}' /tmp/summary.json
+            echo '```'
+          } > /tmp/comment.md
+          gh issue comment "${ISSUE_NUMBER}" --repo "${REPOSITORY}" --body-file /tmp/comment.md
