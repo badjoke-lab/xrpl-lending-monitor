@@ -1,0 +1,37 @@
+name: P0 soak 814 queue history audit
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/p0-soak-814-queue-history-audit.yml
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Inspect Queue persistence history
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote --json --command "PRAGMA table_info(fast_lane_queue_slots);" > queue-schema.json
+          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote --json --command "SELECT * FROM fast_lane_queue_slots WHERE scheduled_time IN (1784344800000,1784346600000,1784346900000,1784347200000) ORDER BY scheduled_time;" > queue-control-rows.json
+          pnpm exec wrangler d1 execute xrpl-lending-monitor --remote --json --command "SELECT * FROM fast_lane_queue_slots WHERE scheduled_time BETWEEN 1784346600000 AND 1784432700000 ORDER BY scheduled_time;" > queue-soak-rows.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p0-soak-814-queue-history-audit
+          path: queue-*.json
+          if-no-files-found: error
