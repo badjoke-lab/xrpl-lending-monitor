@@ -1,6 +1,10 @@
 const MAX_HISTORY_WINDOWS = 256
 const MAX_SHADOW_WINDOWS = 256
-const MAX_RUN_METRICS = 1_000
+// A normal exact five-minute slot records multiple bounded catch-up attempts. The
+// former 1,000-row ring was only barely larger than one 24-hour window and
+// deleted the earliest attempt evidence before the delayed final audit ran.
+// Retain several full days so a completed soak remains independently auditable.
+const MAX_RUN_METRICS = 4_096
 const MAX_HISTORY_BUNDLE_BYTES = 131_072
 
 // The compact table is transient and should normally return to zero after every
