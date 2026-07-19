@@ -10,7 +10,7 @@ permissions:
   issues: write
 
 concurrency:
-  group: p0-recover-rolling-checkpoint-backlog
+  group: p0-rolling-overlay-recovery
   cancel-in-progress: false
 
 jobs:
@@ -211,6 +211,7 @@ jobs:
               sleep 30
             done
             test "$(jq -r '.status' "${CYCLE_ROOT}/run.json")" = completed
+            test "$(jq -r '.conclusion' "${CYCLE_ROOT}/run.json")" = success
 
             gh api "repos/${REPOSITORY}/actions/runs/${RUN_ID}/jobs?per_page=100" > "${CYCLE_ROOT}/jobs.json"
             for REQUIRED_STEP in \
@@ -221,7 +222,8 @@ jobs:
               'Build target current state from best available base' \
               'Publish history candidate branch' \
               'Publish current-state candidate branch' \
-              'Rehearse remote candidate pair'; do
+              'Rehearse remote candidate pair' \
+              'Build retained candidate evidence'; do
               jq -e --arg name "${REQUIRED_STEP}" \
                 '[.jobs[].steps[] | select(.name == $name)] | length == 1 and .[0].conclusion == "success"' \
                 "${CYCLE_ROOT}/jobs.json" > /dev/null
