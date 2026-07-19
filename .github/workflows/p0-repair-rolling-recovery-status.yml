@@ -17,21 +17,15 @@ jobs:
       REPOSITORY: ${{ github.repository }}
       ISSUE_NUMBER: ${{ github.event.issue.number }}
     steps:
-      - name: Report repair runs and jobs
+      - name: Report failed repair log tail
         shell: bash
         run: |
           set -euo pipefail
-          gh api "repos/${REPOSITORY}/actions/workflows/p0-repair-rolling-recovery-v2.yml/runs?per_page=10" > /tmp/runs.json
-          RUN_ID="$(jq -r '.workflow_runs[0].id' /tmp/runs.json)"
-          gh api "repos/${REPOSITORY}/actions/runs/${RUN_ID}/jobs?per_page=100" > /tmp/jobs.json
+          gh run view 29685452599 --repo "${REPOSITORY}" --log-failed > /tmp/failed.log || true
           {
-            echo 'Repair runs:'
-            echo '```json'
-            jq '{runs:[.workflow_runs[] | {id,status,conclusion,created_at,updated_at,html_url}]}' /tmp/runs.json
-            echo '```'
-            echo 'Repair jobs:'
-            echo '```json'
-            jq '{jobs:[.jobs[] | {id,name,status,conclusion,steps:[.steps[] | {name,status,conclusion,number}]}]}' /tmp/jobs.json
+            echo 'Failed repair log tail:'
+            echo '```text'
+            tail -n 120 /tmp/failed.log
             echo '```'
           } > /tmp/comment.md
           gh issue comment "${ISSUE_NUMBER}" --repo "${REPOSITORY}" --body-file /tmp/comment.md
