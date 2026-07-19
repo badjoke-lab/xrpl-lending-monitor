@@ -118,6 +118,8 @@ function mergeSortedRecords(
   return merged
 }
 
+const MAX_BASE_EXACT_INDEX_DECOMPRESSED_BYTES = 128 * 1024 * 1024
+
 type ExactIndexAsset = HistoryExactIndexManifest['assets'][number]
 
 function assetsByBucket(manifest: HistoryExactIndexManifest): Map<number, ExactIndexAsset> {
@@ -144,7 +146,11 @@ async function loadBaseBucket(options: {
     || await sha256Hex(bytes) !== options.asset.sha256
   ) throw new Error(`Base exact-index asset integrity mismatch: ${options.asset.path}`)
 
-  const decoded = await decodeGzipNdjsonWithMetadata({ bytes, sha256: options.asset.sha256 })
+  const decoded = await decodeGzipNdjsonWithMetadata({
+    bytes,
+    sha256: options.asset.sha256,
+    maxDecompressedBytes: MAX_BASE_EXACT_INDEX_DECOMPRESSED_BYTES,
+  })
   if (decoded.records.length !== options.asset.recordCount) {
     throw new Error(`Base exact-index record count mismatch: ${options.asset.path}`)
   }
