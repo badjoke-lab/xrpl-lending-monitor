@@ -1,0 +1,164 @@
+name: P0 execute rolling recovery repair
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  actions: write
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  repair:
+    if: startsWith(github.event.issue.title, 'P0 execute rolling recovery repair')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+      ISSUE_NUMBER: ${{ github.event.issue.number }}
+      REPAIR_BRANCH: fix/rolling-recovery-serialization-evidence
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Cancel duplicate recovery runs
+        shell: bash
+        run: |
+          set -euo pipefail
+          : > /tmp/cancelled.txt
+          cancel_run() {
+            local run_id="$1"
+            local status
+            status="$(gh api "repos/${REPOSITORY}/actions/runs/${run_id}" --jq '.status' 2>/dev/null || true)"
+            case "${status}" in
+              queued|in_progress|waiting|requested)
+                gh api --method POST "repos/${REPOSITORY}/actions/runs/${run_id}/cancel" >/dev/null || true
+                printf '%s\n' "${run_id}" >> /tmp/cancelled.txt
+                ;;
+            esac
+          }
+          cancel_run 29678012062
+          for workflow in p0-recover-rolling-backlog.yml rolling-checkpoint-candidate.yml rolling-checkpoint-live-cutover.yml; do
+            gh api "repos/${REPOSITORY}/actions/workflows/${workflow}/runs?per_page=100" > "/tmp/${workflow}.json"
+            jq -r '.workflow_runs[]
+              | select(.created_at >= "2026-07-19T07:00:00Z")
+              | select(.status == "queued" or .status == "in_progress" or .status == "waiting" or .status == "requested")
+              | .id' "/tmp/${workflow}.json" |
+            while IFS= read -r run_id; do
+              test -n "${run_id}" && cancel_run "${run_id}"
+            done
+          done
+
+      - name: Patch recovery workflows with verified replacements
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          candidate_path = Path('.github/workflows/rolling-checkpoint-candidate.yml')
+          candidate = candidate_path.read_text()
+
+          candidate, count = re.subn(
+              r'(?m)^  group: rolling-checkpoint-candidate-.*$',
+              '  group: rolling-checkpoint-candidate',
+              candidate,
+          )
+          if count != 1:
+              raise SystemExit(f'candidate concurrency replacement count={count}')
+
+          stage_anchor = '          cp .local/next-current-state/rolling-read-model-summary.json /tmp/rolling-current-candidate/rolling-read-model-summary.json\n'
+          stage_extra = '''          cp rolling-checkpoint-candidate/plan.json /tmp/rolling-candidate-evidence/plan.json
+                    cp .local/history-root/history/publication.json /tmp/rolling-candidate-evidence/publication.json
+                    cp .local/history-root/history/index/exact/manifest.json /tmp/rolling-candidate-evidence/exact-manifest.json
+                    cp .local/next-current-state/rolling-read-model-summary.json /tmp/rolling-candidate-evidence/current-summary.json
+                    cp rolling-checkpoint-candidate/base-mode.txt /tmp/rolling-candidate-evidence/base-mode.txt
+                    cp rolling-checkpoint-candidate/delta-elapsed-seconds.txt /tmp/rolling-candidate-evidence/delta-elapsed-seconds.txt
+                    cp rolling-checkpoint-candidate/exact-index-elapsed-seconds.txt /tmp/rolling-candidate-evidence/exact-index-elapsed-seconds.txt
+                    cp rolling-checkpoint-candidate/current-state-elapsed-seconds.txt /tmp/rolling-candidate-evidence/current-state-elapsed-seconds.txt
+          '''
+          if candidate.count(stage_anchor) != 1:
+              raise SystemExit('candidate stage anchor mismatch')
+          candidate = candidate.replace(stage_anchor, stage_anchor + stage_extra)
+
+          evidence_pattern = re.compile(
+              r'(?m)^          ROOT=rolling-checkpoint-candidate\n'
+              r'^          PUBLICATION=\.local/history-root/history/publication\.json\n'
+              r'^          EXACT=\.local/history-root/history/index/exact/manifest\.json\n'
+              r'^          CURRENT=\.local/next-current-state/rolling-read-model-summary\.json\n'
+              r'^          cp /tmp/rolling-candidate-evidence/\* "\$\{ROOT\}/"\n'
+          )
+          evidence_replacement = '''          ROOT=rolling-checkpoint-candidate
+                    mkdir -p "${ROOT}"
+                    cp /tmp/rolling-candidate-evidence/* "${ROOT}/"
+                    PUBLICATION="${ROOT}/publication.json"
+                    EXACT="${ROOT}/exact-manifest.json"
+                    CURRENT="${ROOT}/current-summary.json"
+          '''
+          candidate, count = evidence_pattern.subn(evidence_replacement, candidate)
+          if count != 1:
+              raise SystemExit(f'candidate evidence replacement count={count}')
+          candidate_path.write_text(candidate)
+
+          parent_path = Path('.github/workflows/p0-recover-rolling-backlog.yml')
+          parent = parent_path.read_text()
+          parent, count = re.subn(
+              r'(?m)^  group: p0-recover-rolling-checkpoint-backlog$',
+              '  group: p0-rolling-overlay-recovery',
+              parent,
+          )
+          if count != 1:
+              raise SystemExit(f'parent concurrency replacement count={count}')
+
+          status_anchor = '            test "$(jq -r \'.status\' "${CYCLE_ROOT}/run.json")" = completed\n'
+          if parent.count(status_anchor) != 1:
+              raise SystemExit('parent child status anchor mismatch')
+          parent = parent.replace(
+              status_anchor,
+              status_anchor + '            test "$(jq -r \'.conclusion\' "${CYCLE_ROOT}/run.json")" = success\n',
+          )
+
+          required_anchor = "              'Rehearse remote candidate pair'; do\n"
+          if parent.count(required_anchor) != 1:
+              raise SystemExit('parent required step anchor mismatch')
+          parent = parent.replace(
+              required_anchor,
+              "              'Rehearse remote candidate pair' \\\n              'Build retained candidate evidence'; do\n",
+          )
+          parent_path.write_text(parent)
+          PY
+
+          git diff --check
+          grep -F 'group: rolling-checkpoint-candidate' .github/workflows/rolling-checkpoint-candidate.yml
+          grep -F 'Build retained candidate evidence' .github/workflows/p0-recover-rolling-backlog.yml
+
+      - name: Publish repair branch and PR
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git checkout -B "${REPAIR_BRANCH}"
+          git add .github/workflows/rolling-checkpoint-candidate.yml .github/workflows/p0-recover-rolling-backlog.yml
+          git commit -m "Fix rolling recovery serialization and evidence retention"
+          git push --force origin "HEAD:refs/heads/${REPAIR_BRANCH}"
+
+          PR_URL="$(gh pr list --repo "${REPOSITORY}" --head "${REPAIR_BRANCH}" --state open --json url --jq '.[0].url // empty')"
+          if [ -z "${PR_URL}" ]; then
+            PR_URL="$(gh pr create --repo "${REPOSITORY}" --base main --head "${REPAIR_BRANCH}" \
+              --title 'Fix rolling recovery serialization and evidence retention' \
+              --body 'Serializes all rolling checkpoint candidate writes, preserves evidence inputs before orphan publication checkouts, and makes the issue-triggered recovery require a successful child conclusion plus retained evidence. No capacity guard or Mainnet setting is weakened.')"
+          fi
+          {
+            echo 'Cancelled runs:'
+            echo '```text'
+            cat /tmp/cancelled.txt
+            echo '```'
+            echo "Repair PR: ${PR_URL}"
+          } > /tmp/comment.md
+          gh issue comment "${ISSUE_NUMBER}" --repo "${REPOSITORY}" --body-file /tmp/comment.md
