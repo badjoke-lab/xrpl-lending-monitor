@@ -17,21 +17,23 @@ jobs:
       REPOSITORY: ${{ github.repository }}
       ISSUE_NUMBER: ${{ github.event.issue.number }}
     steps:
-      - name: Report overlay recovery parent, candidate, and cutover workflows
+      - name: Report all overlay recovery orchestrators and children
         shell: bash
         run: |
           set -euo pipefail
 
-          gh api "repos/${REPOSITORY}/actions/runs/29678012062" > /tmp/parent.json
+          gh api "repos/${REPOSITORY}/actions/runs/29678012062" > /tmp/pr-parent.json
+          gh api "repos/${REPOSITORY}/actions/runs?event=issues&per_page=100" > /tmp/issue-runs.json
           gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-candidate.yml/runs?event=workflow_dispatch&per_page=30" > /tmp/candidates.json
           gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/runs?event=workflow_dispatch&per_page=30" > /tmp/cutovers.json
 
           jq -s '{runs: (
             [.[0]]
-            + [.[1].workflow_runs[] | select(.created_at >= "2026-07-19T07:22:54Z")]
-            + [.[2].workflow_runs[] | select(.created_at >= "2026-07-19T07:22:54Z")]
-          ) | map({id,name,event,display_title,status,conclusion,head_branch,head_sha,created_at,updated_at,run_attempt,html_url})}' \
-            /tmp/parent.json /tmp/candidates.json /tmp/cutovers.json > /tmp/runs.json
+            + [.[1].workflow_runs[] | select(.name == "P0 recover rolling checkpoint backlog" and .created_at >= "2026-07-19T07:00:00Z")]
+            + [.[2].workflow_runs[] | select(.created_at >= "2026-07-19T07:00:00Z")]
+            + [.[3].workflow_runs[] | select(.created_at >= "2026-07-19T07:00:00Z")]
+          ) | unique_by(.id) | map({id,name,event,display_title,status,conclusion,head_branch,head_sha,created_at,updated_at,run_attempt,html_url})}' \
+            /tmp/pr-parent.json /tmp/issue-runs.json /tmp/candidates.json /tmp/cutovers.json > /tmp/runs.json
 
           jq -r '.runs[].id' /tmp/runs.json > /tmp/run-ids.txt
           : > /tmp/jobs.ndjson
