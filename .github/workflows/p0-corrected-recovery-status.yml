@@ -9,7 +9,7 @@ permissions:
   issues: write
 
 concurrency:
-  group: rolling-checkpoint-maintenance
+  group: p0-stale-overlay-cleanup-3800885
   cancel-in-progress: false
 
 jobs:
