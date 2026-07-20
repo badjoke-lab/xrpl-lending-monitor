@@ -21,8 +21,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gh api "repos/${REPOSITORY}/actions/workflows/p0-guarded-cutover-current-candidate.yml/runs?event=issues&per_page=10" > /tmp/runs.json
-          RUN_ID="$(jq -r '.workflow_runs | sort_by(.created_at) | reverse | .[0].id // empty' /tmp/runs.json)"
+          gh api "repos/${REPOSITORY}/actions/workflows/p0-guarded-cutover-current-candidate.yml/runs?event=issues&per_page=100" > /tmp/runs.json
+          RUN_ID="$(jq -r '[.workflow_runs[] | select(.display_title | startswith("P0 guarded cutover current candidate"))] | sort_by(.created_at) | reverse | .[0].id // empty' /tmp/runs.json)"
           test -n "${RUN_ID}"
           gh api "repos/${REPOSITORY}/actions/runs/${RUN_ID}" > /tmp/run.json
           gh api "repos/${REPOSITORY}/actions/runs/${RUN_ID}/jobs?per_page=100" > /tmp/jobs.json
