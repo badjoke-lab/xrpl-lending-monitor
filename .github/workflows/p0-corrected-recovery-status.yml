@@ -1,43 +1,36 @@
-name: P0 guarded stale overlay cleanup
+name: P0 exact D1 binding diagnostic
 
 on:
   push:
     branches: [main]
     paths:
       - .github/p0-stale-overlay-cleanup-trigger
-  issues:
-    types: [opened]
 
 permissions:
   contents: read
   issues: write
 
 concurrency:
-  group: p0-stale-overlay-cleanup-3800885
+  group: p0-d1-binding-diagnostic-3800885
   cancel-in-progress: false
 
 jobs:
-  cleanup:
-    if: github.event_name == 'push' || startsWith(github.event.issue.title, 'P0 stale overlay cleanup after base 3800885')
+  diagnose:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
       GH_TOKEN: ${{ github.token }}
       REPOSITORY: ${{ github.repository }}
-      ISSUE_NUMBER: ${{ github.event.issue.number || 945 }}
-      TARGET_EPOCH: devnet-3371675
-      TARGET_SNAPSHOT: devnet-3800885-eaa0d29666e7
-      TARGET_LEDGER: '3800885'
-      TARGET_HASH: EAA0D29666E73D7594A52DF8000B07F346CD4DA24A9A07549612CDC7D727B700
+      ISSUE_NUMBER: '946'
     steps:
-      - name: Verify active binding and delete only stale overlay snapshots
+      - name: Read active binding, overlay identities, storage, and write usage
         shell: bash
         run: |
           set -Eeuo pipefail
-          mkdir -p cleanup-evidence
+          mkdir -p diagnostic-evidence
 
           query_d1() {
             local sql="$1"
@@ -52,63 +45,53 @@ jobs:
             jq -e '.success == true and ((.errors // []) | length) == 0' "$output" > /dev/null
           }
 
-          query_d1 "SELECT base_epoch_id,base_snapshot_id,base_ledger_index,base_ledger_hash FROM fast_lane_shadow_base_binding WHERE network='devnet'" cleanup-evidence/binding.json
-          jq -e --arg epoch "$TARGET_EPOCH" --arg snapshot "$TARGET_SNAPSHOT" --argjson ledger "$TARGET_LEDGER" --arg hash "$TARGET_HASH" '
-            .result[0].results | length == 1
-            and .[0].base_epoch_id == $epoch
-            and .[0].base_snapshot_id == $snapshot
-            and .[0].base_ledger_index == $ledger
-            and .[0].base_ledger_hash == $hash
-          ' cleanup-evidence/binding.json > /dev/null
+          query_d1 "SELECT base_epoch_id,base_snapshot_id,base_ledger_index,base_ledger_hash,updated_at FROM fast_lane_shadow_base_binding WHERE network='devnet'" diagnostic-evidence/binding.json
+          query_d1 "SELECT o.epoch_id,o.base_snapshot_id,CASE WHEN b.network IS NULL THEN 'stale' ELSE 'active' END AS binding_state,COUNT(*) AS row_count,COALESCE(SUM(LENGTH(o.projection_json)),0) AS payload_bytes,MIN(o.source_ledger_index) AS min_source_ledger,MAX(o.source_ledger_index) AS max_source_ledger FROM current_state_overlay_objects o LEFT JOIN fast_lane_shadow_base_binding b ON b.network=o.network AND b.base_epoch_id=o.epoch_id AND b.base_snapshot_id=o.base_snapshot_id WHERE o.network='devnet' GROUP BY o.epoch_id,o.base_snapshot_id,binding_state ORDER BY binding_state,row_count DESC" diagnostic-evidence/overlay-identities.json
+          query_d1 "SELECT COUNT(*) AS total_rows,COALESCE(SUM(LENGTH(projection_json)),0) AS total_payload_bytes FROM current_state_overlay_objects WHERE network='devnet'" diagnostic-evidence/overlay-total.json
+          query_d1 "SELECT overlay_ledger_index,overlay_ledger_hash,updated_at FROM current_state_overlay_state WHERE network='devnet' ORDER BY updated_at DESC" diagnostic-evidence/overlay-state.json
+          query_d1 "SELECT run_at,status,start_ledger_index,end_ledger_index,latest_observed_ledger,lag_ledgers,ledgers_processed,persistence_rows_written,error_message FROM fast_lane_shadow_run_metrics WHERE network='devnet' ORDER BY run_at DESC LIMIT 12" diagnostic-evidence/runs.json
+          query_d1 "SELECT page_count AS page_count,page_size AS page_size,freelist_count AS freelist_count FROM pragma_page_count(),pragma_page_size(),pragma_freelist_count()" diagnostic-evidence/pages.json || true
 
-          query_d1 "SELECT COUNT(*) AS stale_rows,COALESCE(SUM(LENGTH(projection_json)),0) AS stale_payload_bytes FROM current_state_overlay_objects o WHERE o.network='devnet' AND NOT EXISTS (SELECT 1 FROM fast_lane_shadow_base_binding b WHERE b.network=o.network AND b.base_epoch_id=o.epoch_id AND b.base_snapshot_id=o.base_snapshot_id)" cleanup-evidence/stale-before.json
-          stale_rows="$(jq -r '.result[0].results[0].stale_rows' cleanup-evidence/stale-before.json)"
-
-          if [ "$stale_rows" -gt 0 ]; then
-            today="$(date -u +%F)"
-            read -r -d '' query <<'GRAPHQL' || true
+          today="$(date -u +%F)"
+          read -r -d '' query <<'GRAPHQL' || true
           query D1Usage($accountTag:string!,$start:Date,$end:Date,$databaseId:string){viewer{accounts(filter:{accountTag:$accountTag}){d1AnalyticsAdaptiveGroups(limit:10000,filter:{date_geq:$start,date_leq:$end,databaseId:$databaseId}){sum{rowsRead rowsWritten}}}}}
           GRAPHQL
-            jq -n --arg query "$query" --arg accountTag "$CLOUDFLARE_ACCOUNT_ID" --arg start "$today" --arg end "$today" --arg databaseId "$DATABASE_ID" '{query:$query,variables:{accountTag:$accountTag,start:$start,end:$end,databaseId:$databaseId}}' > cleanup-evidence/usage-request.json
-            curl --fail-with-body --silent --show-error -X POST \
-              -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-              -H 'content-type: application/json' \
-              --data @cleanup-evidence/usage-request.json \
-              https://api.cloudflare.com/client/v4/graphql > cleanup-evidence/usage-response.json
-            jq -e '((.errors // []) | length) == 0 and (.data.viewer.accounts | length) > 0' cleanup-evidence/usage-response.json > /dev/null
-            rows_written="$(jq '[.data.viewer.accounts[0].d1AnalyticsAdaptiveGroups[].sum.rowsWritten // 0] | add // 0' cleanup-evidence/usage-response.json)"
-            remaining=$((100000 - rows_written))
-            test "$remaining" -ge "$((stale_rows + 5000))"
+          jq -n --arg query "$query" --arg accountTag "$CLOUDFLARE_ACCOUNT_ID" --arg start "$today" --arg end "$today" --arg databaseId "$DATABASE_ID" '{query:$query,variables:{accountTag:$accountTag,start:$start,end:$end,databaseId:$databaseId}}' > diagnostic-evidence/usage-request.json
+          curl --fail-with-body --silent --show-error -X POST \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            -H 'content-type: application/json' \
+            --data @diagnostic-evidence/usage-request.json \
+            https://api.cloudflare.com/client/v4/graphql > diagnostic-evidence/usage-response.json
 
-            query_d1 "DELETE FROM current_state_overlay_objects WHERE network='devnet' AND NOT EXISTS (SELECT 1 FROM fast_lane_shadow_base_binding b WHERE b.network=current_state_overlay_objects.network AND b.base_epoch_id=current_state_overlay_objects.epoch_id AND b.base_snapshot_id=current_state_overlay_objects.base_snapshot_id)" cleanup-evidence/delete-objects.json
-            query_d1 "DELETE FROM current_state_overlay_state WHERE network='devnet' AND NOT EXISTS (SELECT 1 FROM fast_lane_shadow_base_binding b WHERE b.network=current_state_overlay_state.network AND b.base_epoch_id=current_state_overlay_state.epoch_id AND b.base_snapshot_id=current_state_overlay_state.base_snapshot_id)" cleanup-evidence/delete-state.json
-          fi
+          jq -n \
+            --slurpfile binding diagnostic-evidence/binding.json \
+            --slurpfile identities diagnostic-evidence/overlay-identities.json \
+            --slurpfile total diagnostic-evidence/overlay-total.json \
+            --slurpfile state diagnostic-evidence/overlay-state.json \
+            --slurpfile runs diagnostic-evidence/runs.json \
+            --slurpfile usage diagnostic-evidence/usage-response.json \
+            '{binding:$binding[0],overlayIdentities:$identities[0],overlayTotal:$total[0],overlayState:$state[0],runs:$runs[0],usage:$usage[0]}' \
+            > diagnostic-evidence/summary.json
 
-          query_d1 "SELECT COUNT(*) AS total_rows,COALESCE(SUM(LENGTH(projection_json)),0) AS total_payload_bytes FROM current_state_overlay_objects WHERE network='devnet'" cleanup-evidence/overlay-after.json
-          query_d1 "SELECT COUNT(*) AS stale_rows FROM current_state_overlay_objects o WHERE o.network='devnet' AND NOT EXISTS (SELECT 1 FROM fast_lane_shadow_base_binding b WHERE b.network=o.network AND b.base_epoch_id=o.epoch_id AND b.base_snapshot_id=o.base_snapshot_id)" cleanup-evidence/stale-after.json
-          test "$(jq -r '.result[0].results[0].stale_rows' cleanup-evidence/stale-after.json)" = 0
-
-          jq -n --argjson passed true --argjson staleRowsBefore "$stale_rows" --slurpfile binding cleanup-evidence/binding.json --slurpfile overlayAfter cleanup-evidence/overlay-after.json '{passed:$passed,staleRowsBefore:$staleRowsBefore,binding:$binding[0],overlayAfter:$overlayAfter[0]}' > cleanup-evidence/summary.json
-
-      - name: Report cleanup result
+      - name: Report exact diagnostic
         if: always()
         shell: bash
         run: |
-          test -s cleanup-evidence/summary.json || echo '{"passed":false}' > cleanup-evidence/summary.json
+          test -s diagnostic-evidence/summary.json || echo '{"passed":false,"reason":"diagnostic step failed before summary"}' > diagnostic-evidence/summary.json
           {
-            echo 'Guarded stale overlay cleanup result:'
+            echo 'Exact D1 binding diagnostic:'
             echo
             echo '```json'
-            cat cleanup-evidence/summary.json
+            cat diagnostic-evidence/summary.json
             echo '```'
-          } > cleanup-evidence/comment.md
-          gh issue comment "$ISSUE_NUMBER" --repo "$REPOSITORY" --body-file cleanup-evidence/comment.md
+          } > diagnostic-evidence/comment.md
+          gh issue comment "$ISSUE_NUMBER" --repo "$REPOSITORY" --body-file diagnostic-evidence/comment.md
 
-      - name: Upload cleanup evidence
+      - name: Upload diagnostic evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: guarded-stale-overlay-cleanup
-          path: cleanup-evidence
+          name: exact-d1-binding-diagnostic
+          path: diagnostic-evidence
           if-no-files-found: warn
           retention-days: 14
