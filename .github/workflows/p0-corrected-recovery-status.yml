@@ -26,10 +26,10 @@ jobs:
       REPOSITORY: ${{ github.repository }}
       ISSUE_NUMBER: '946'
     steps:
-      - name: Read active binding, overlay identities, storage, and write usage
+      - name: Read active binding and overlay identities
         shell: bash
         run: |
-          set -Eeuo pipefail
+          set -u
           mkdir -p diagnostic-evidence
 
           query_d1() {
@@ -41,36 +41,27 @@ jobs:
                   -H 'Content-Type: application/json' \
                   --data-binary @- \
                   "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database/${DATABASE_ID}/query" \
-              > "$output"
-            jq -e '.success == true and ((.errors // []) | length) == 0' "$output" > /dev/null
+              > "$output" 2> "${output}.stderr"
+            return 0
           }
 
-          query_d1 "SELECT base_epoch_id,base_snapshot_id,base_ledger_index,base_ledger_hash,updated_at FROM fast_lane_shadow_base_binding WHERE network='devnet'" diagnostic-evidence/binding.json
-          query_d1 "SELECT o.epoch_id,o.base_snapshot_id,CASE WHEN b.network IS NULL THEN 'stale' ELSE 'active' END AS binding_state,COUNT(*) AS row_count,COALESCE(SUM(LENGTH(o.projection_json)),0) AS payload_bytes,MIN(o.source_ledger_index) AS min_source_ledger,MAX(o.source_ledger_index) AS max_source_ledger FROM current_state_overlay_objects o LEFT JOIN fast_lane_shadow_base_binding b ON b.network=o.network AND b.base_epoch_id=o.epoch_id AND b.base_snapshot_id=o.base_snapshot_id WHERE o.network='devnet' GROUP BY o.epoch_id,o.base_snapshot_id,binding_state ORDER BY binding_state,row_count DESC" diagnostic-evidence/overlay-identities.json
-          query_d1 "SELECT COUNT(*) AS total_rows,COALESCE(SUM(LENGTH(projection_json)),0) AS total_payload_bytes FROM current_state_overlay_objects WHERE network='devnet'" diagnostic-evidence/overlay-total.json
-          query_d1 "SELECT overlay_ledger_index,overlay_ledger_hash,updated_at FROM current_state_overlay_state WHERE network='devnet' ORDER BY updated_at DESC" diagnostic-evidence/overlay-state.json
-          query_d1 "SELECT run_at,status,start_ledger_index,end_ledger_index,latest_observed_ledger,lag_ledgers,ledgers_processed,persistence_rows_written,error_message FROM fast_lane_shadow_run_metrics WHERE network='devnet' ORDER BY run_at DESC LIMIT 12" diagnostic-evidence/runs.json
-          query_d1 "SELECT page_count AS page_count,page_size AS page_size,freelist_count AS freelist_count FROM pragma_page_count(),pragma_page_size(),pragma_freelist_count()" diagnostic-evidence/pages.json || true
-
-          today="$(date -u +%F)"
-          read -r -d '' query <<'GRAPHQL' || true
-          query D1Usage($accountTag:string!,$start:Date,$end:Date,$databaseId:string){viewer{accounts(filter:{accountTag:$accountTag}){d1AnalyticsAdaptiveGroups(limit:10000,filter:{date_geq:$start,date_leq:$end,databaseId:$databaseId}){sum{rowsRead rowsWritten}}}}}
-          GRAPHQL
-          jq -n --arg query "$query" --arg accountTag "$CLOUDFLARE_ACCOUNT_ID" --arg start "$today" --arg end "$today" --arg databaseId "$DATABASE_ID" '{query:$query,variables:{accountTag:$accountTag,start:$start,end:$end,databaseId:$databaseId}}' > diagnostic-evidence/usage-request.json
-          curl --fail-with-body --silent --show-error -X POST \
-            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-            -H 'content-type: application/json' \
-            --data @diagnostic-evidence/usage-request.json \
-            https://api.cloudflare.com/client/v4/graphql > diagnostic-evidence/usage-response.json
+          query_d1 "SELECT base_epoch_id,base_snapshot_id,base_ledger_index,base_ledger_hash FROM fast_lane_shadow_base_binding WHERE network='devnet'" diagnostic-evidence/binding.json
+          query_d1 "SELECT epoch_id,base_snapshot_id,COUNT(*) AS row_count,COALESCE(SUM(LENGTH(projection_json)),0) AS payload_bytes FROM current_state_overlay_objects WHERE network='devnet' GROUP BY epoch_id,base_snapshot_id ORDER BY row_count DESC" diagnostic-evidence/overlay-identities.json
+          query_d1 "SELECT COUNT(*) AS stale_rows,COALESCE(SUM(LENGTH(o.projection_json)),0) AS stale_payload_bytes FROM current_state_overlay_objects o WHERE o.network='devnet' AND NOT EXISTS (SELECT 1 FROM fast_lane_shadow_base_binding b WHERE b.network=o.network AND b.base_epoch_id=o.epoch_id AND b.base_snapshot_id=o.base_snapshot_id)" diagnostic-evidence/stale.json
+          query_d1 "SELECT COUNT(*) AS active_rows,COALESCE(SUM(LENGTH(o.projection_json)),0) AS active_payload_bytes FROM current_state_overlay_objects o WHERE o.network='devnet' AND EXISTS (SELECT 1 FROM fast_lane_shadow_base_binding b WHERE b.network=o.network AND b.base_epoch_id=o.epoch_id AND b.base_snapshot_id=o.base_snapshot_id)" diagnostic-evidence/active.json
+          query_d1 "SELECT COUNT(*) AS total_rows,COALESCE(SUM(LENGTH(projection_json)),0) AS total_payload_bytes FROM current_state_overlay_objects WHERE network='devnet'" diagnostic-evidence/total.json
+          query_d1 "SELECT overlay_ledger_index,overlay_ledger_hash,epoch_id,base_snapshot_id FROM current_state_overlay_state WHERE network='devnet'" diagnostic-evidence/state.json
+          query_d1 "SELECT run_at,status,start_ledger_index,end_ledger_index,latest_observed_ledger,lag_ledgers,ledgers_processed,persistence_rows_written,error_message FROM fast_lane_shadow_run_metrics WHERE network='devnet' ORDER BY run_at DESC LIMIT 8" diagnostic-evidence/runs.json
 
           jq -n \
             --slurpfile binding diagnostic-evidence/binding.json \
             --slurpfile identities diagnostic-evidence/overlay-identities.json \
-            --slurpfile total diagnostic-evidence/overlay-total.json \
-            --slurpfile state diagnostic-evidence/overlay-state.json \
+            --slurpfile stale diagnostic-evidence/stale.json \
+            --slurpfile active diagnostic-evidence/active.json \
+            --slurpfile total diagnostic-evidence/total.json \
+            --slurpfile state diagnostic-evidence/state.json \
             --slurpfile runs diagnostic-evidence/runs.json \
-            --slurpfile usage diagnostic-evidence/usage-response.json \
-            '{binding:$binding[0],overlayIdentities:$identities[0],overlayTotal:$total[0],overlayState:$state[0],runs:$runs[0],usage:$usage[0]}' \
+            '{binding:$binding[0],overlayIdentities:$identities[0],stale:$stale[0],active:$active[0],total:$total[0],state:$state[0],runs:$runs[0]}' \
             > diagnostic-evidence/summary.json
 
       - name: Report exact diagnostic
