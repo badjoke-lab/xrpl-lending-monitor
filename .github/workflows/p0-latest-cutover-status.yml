@@ -1,0 +1,42 @@
+name: P0 latest cutover status
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  actions: read
+  issues: write
+
+jobs:
+  status:
+    if: startsWith(github.event.issue.title, 'P0 latest cutover status')
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+      ISSUE_NUMBER: ${{ github.event.issue.number }}
+    steps:
+      - name: Report latest live cutover run
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/runs?event=workflow_dispatch&per_page=10" > /tmp/runs.json
+          RUN_ID="$(jq -r '.workflow_runs | sort_by(.created_at) | reverse | .[0].id // empty' /tmp/runs.json)"
+          test -n "${RUN_ID}"
+          gh api "repos/${REPOSITORY}/actions/runs/${RUN_ID}" > /tmp/run.json
+          gh api "repos/${REPOSITORY}/actions/runs/${RUN_ID}/jobs?per_page=100" > /tmp/jobs.json
+          {
+            echo 'Latest live cutover run:'
+            echo
+            echo '```json'
+            jq '{id,name,display_title,status,conclusion,event,head_branch,head_sha,created_at,updated_at,run_attempt,html_url}' /tmp/run.json
+            echo '```'
+            echo
+            echo 'Jobs and steps:'
+            echo
+            echo '```json'
+            jq '{jobs:[.jobs[] | {id,name,status,conclusion,started_at,completed_at,steps:[.steps[] | {name,status,conclusion,number}]}]}' /tmp/jobs.json
+            echo '```'
+          } > /tmp/comment.md
+          gh issue comment "${ISSUE_NUMBER}" --repo "${REPOSITORY}" --body-file /tmp/comment.md
