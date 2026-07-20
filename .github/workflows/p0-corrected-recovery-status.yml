@@ -1,4 +1,4 @@
-name: P0 corrected recovery status
+name: P0 current maintenance status
 
 on:
   issues:
@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   status:
-    if: startsWith(github.event.issue.title, 'P0 corrected recovery status')
+    if: startsWith(github.event.issue.title, 'P0 current maintenance status')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
@@ -18,16 +18,18 @@ jobs:
       REPOSITORY: ${{ github.repository }}
       ISSUE_NUMBER: ${{ github.event.issue.number }}
     steps:
-      - name: Read Issue 881 recovery state
+      - name: Report current maintenance and child runs
         shell: bash
         run: |
           set -euo pipefail
-          STARTED_AT='2026-07-19T13:45:42Z'
-          PARENT_TITLE='P0 recover rolling checkpoint backlog 2026-07-19 22:46 JST bounded exact-index repair'
-          gh api "repos/${REPOSITORY}/actions/workflows/p0-recover-rolling-backlog.yml/runs?event=issues&per_page=30" > /tmp/parents.json
-          PARENT_ID="$(jq -r --arg title "${PARENT_TITLE}" '[.workflow_runs[] | select(.display_title == $title)][0].id // empty' /tmp/parents.json)"
-          test -n "${PARENT_ID}"
-          gh api "repos/${REPOSITORY}/actions/runs/${PARENT_ID}/jobs?per_page=100" > /tmp/parent-jobs.json
+          STARTED_AT='2026-07-20T08:49:00Z'
+          gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-maintenance.yml/runs?event=issues&per_page=30" > /tmp/maintenance.json
+          MAINTENANCE_ID="$(jq -r --arg started "${STARTED_AT}" '[.workflow_runs[] | select(.created_at >= $started)][0].id // empty' /tmp/maintenance.json)"
+          if [ -n "${MAINTENANCE_ID}" ]; then
+            gh api "repos/${REPOSITORY}/actions/runs/${MAINTENANCE_ID}/jobs?per_page=100" > /tmp/maintenance-jobs.json
+          else
+            printf '{"jobs":[]}' > /tmp/maintenance-jobs.json
+          fi
 
           gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-candidate.yml/runs?event=workflow_dispatch&per_page=30" > /tmp/candidates.json
           CANDIDATE_ID="$(jq -r --arg started "${STARTED_AT}" '[.workflow_runs[] | select(.created_at >= $started)][0].id // empty' /tmp/candidates.json)"
@@ -37,7 +39,7 @@ jobs:
             printf '{"jobs":[]}' > /tmp/candidate-jobs.json
           fi
 
-          gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/runs?event=workflow_dispatch&per_page=20" > /tmp/cutovers.json
+          gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/runs?event=workflow_dispatch&per_page=30" > /tmp/cutovers.json
           CUTOVER_ID="$(jq -r --arg started "${STARTED_AT}" '[.workflow_runs[] | select(.created_at >= $started)][0].id // empty' /tmp/cutovers.json)"
           if [ -n "${CUTOVER_ID}" ]; then
             gh api "repos/${REPOSITORY}/actions/runs/${CUTOVER_ID}/jobs?per_page=100" > /tmp/cutover-jobs.json
@@ -45,26 +47,20 @@ jobs:
             printf '{"jobs":[]}' > /tmp/cutover-jobs.json
           fi
 
-          jq -n \
-            --slurpfile parents /tmp/parents.json \
-            --slurpfile parentJobs /tmp/parent-jobs.json \
-            --slurpfile candidates /tmp/candidates.json \
-            --slurpfile candidateJobs /tmp/candidate-jobs.json \
-            --slurpfile cutovers /tmp/cutovers.json \
-            --slurpfile cutoverJobs /tmp/cutover-jobs.json \
-            --argjson parentId "${PARENT_ID}" \
-            --arg candidateId "${CANDIDATE_ID}" \
-            --arg cutoverId "${CUTOVER_ID}" '
-              {
-                parent:([ $parents[0].workflow_runs[] | select(.id == $parentId) | {id,status,conclusion,created_at,updated_at,html_url} ][0]),
-                parentJobs:[$parentJobs[0].jobs[] | {id,name,status,conclusion,steps:[.steps[] | {name,status,conclusion,number}]}],
-                candidate:(if $candidateId == "" then null else [ $candidates[0].workflow_runs[] | select((.id|tostring) == $candidateId) | {id,status,conclusion,created_at,updated_at,html_url} ][0] end),
-                candidateJobs:[$candidateJobs[0].jobs[] | {id,name,status,conclusion,steps:[.steps[] | {name,status,conclusion,number}]}],
-                cutover:(if $cutoverId == "" then null else [ $cutovers[0].workflow_runs[] | select((.id|tostring) == $cutoverId) | {id,status,conclusion,created_at,updated_at,html_url} ][0] end),
-                cutoverJobs:[$cutoverJobs[0].jobs[] | {id,name,status,conclusion,steps:[.steps[] | {name,status,conclusion,number}]}]
-              }' > /tmp/status.json
+          jq -n --arg maintenanceId "${MAINTENANCE_ID}" --arg candidateId "${CANDIDATE_ID}" --arg cutoverId "${CUTOVER_ID}" \
+            --slurpfile maintenance /tmp/maintenance.json --slurpfile maintenanceJobs /tmp/maintenance-jobs.json \
+            --slurpfile candidates /tmp/candidates.json --slurpfile candidateJobs /tmp/candidate-jobs.json \
+            --slurpfile cutovers /tmp/cutovers.json --slurpfile cutoverJobs /tmp/cutover-jobs.json '
+            {
+              maintenance:(if $maintenanceId == "" then null else [$maintenance[0].workflow_runs[] | select((.id|tostring) == $maintenanceId) | {id,status,conclusion,created_at,updated_at,html_url}][0] end),
+              maintenanceJobs:[$maintenanceJobs[0].jobs[] | {id,name,status,conclusion,steps:[.steps[] | {name,status,conclusion,number}]}],
+              candidate:(if $candidateId == "" then null else [$candidates[0].workflow_runs[] | select((.id|tostring) == $candidateId) | {id,status,conclusion,created_at,updated_at,html_url}][0] end),
+              candidateJobs:[$candidateJobs[0].jobs[] | {id,name,status,conclusion,steps:[.steps[] | {name,status,conclusion,number}]}],
+              cutover:(if $cutoverId == "" then null else [$cutovers[0].workflow_runs[] | select((.id|tostring) == $cutoverId) | {id,status,conclusion,created_at,updated_at,html_url}][0] end),
+              cutoverJobs:[$cutoverJobs[0].jobs[] | {id,name,status,conclusion,steps:[.steps[] | {name,status,conclusion,number}]}]
+            }' > /tmp/status.json
           {
-            echo 'Issue 881 recovery status:'
+            echo 'Current maintenance status:'
             echo '```json'
             jq . /tmp/status.json
             echo '```'
