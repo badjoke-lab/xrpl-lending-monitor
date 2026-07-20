@@ -26,7 +26,7 @@ jobs:
       REPOSITORY: ${{ github.repository }}
       ISSUE_NUMBER: '946'
     steps:
-      - name: Read active binding and overlay identities
+      - name: Read D1 write usage and overlay schema
         shell: bash
         run: |
           set -u
@@ -45,23 +45,29 @@ jobs:
             return 0
           }
 
-          query_d1 "SELECT base_epoch_id,base_snapshot_id,base_ledger_index,base_ledger_hash FROM fast_lane_shadow_base_binding WHERE network='devnet'" diagnostic-evidence/binding.json
-          query_d1 "SELECT epoch_id,base_snapshot_id,COUNT(*) AS row_count,COALESCE(SUM(LENGTH(projection_json)),0) AS payload_bytes FROM current_state_overlay_objects WHERE network='devnet' GROUP BY epoch_id,base_snapshot_id ORDER BY row_count DESC" diagnostic-evidence/overlay-identities.json
+          query_d1 "SELECT type,name,tbl_name,sql FROM sqlite_master WHERE tbl_name IN ('current_state_overlay_objects','current_state_overlay_state') OR name LIKE 'current_state_overlay_%' ORDER BY type,name" diagnostic-evidence/schema.json
+          query_d1 "PRAGMA table_info(current_state_overlay_objects)" diagnostic-evidence/objects-columns.json
+          query_d1 "PRAGMA table_info(current_state_overlay_state)" diagnostic-evidence/state-columns.json
           query_d1 "SELECT COUNT(*) AS stale_rows,COALESCE(SUM(LENGTH(o.projection_json)),0) AS stale_payload_bytes FROM current_state_overlay_objects o WHERE o.network='devnet' AND NOT EXISTS (SELECT 1 FROM fast_lane_shadow_base_binding b WHERE b.network=o.network AND b.base_epoch_id=o.epoch_id AND b.base_snapshot_id=o.base_snapshot_id)" diagnostic-evidence/stale.json
-          query_d1 "SELECT COUNT(*) AS active_rows,COALESCE(SUM(LENGTH(o.projection_json)),0) AS active_payload_bytes FROM current_state_overlay_objects o WHERE o.network='devnet' AND EXISTS (SELECT 1 FROM fast_lane_shadow_base_binding b WHERE b.network=o.network AND b.base_epoch_id=o.epoch_id AND b.base_snapshot_id=o.base_snapshot_id)" diagnostic-evidence/active.json
-          query_d1 "SELECT COUNT(*) AS total_rows,COALESCE(SUM(LENGTH(projection_json)),0) AS total_payload_bytes FROM current_state_overlay_objects WHERE network='devnet'" diagnostic-evidence/total.json
-          query_d1 "SELECT overlay_ledger_index,overlay_ledger_hash,epoch_id,base_snapshot_id FROM current_state_overlay_state WHERE network='devnet'" diagnostic-evidence/state.json
-          query_d1 "SELECT run_at,status,start_ledger_index,end_ledger_index,latest_observed_ledger,lag_ledgers,ledgers_processed,persistence_rows_written,error_message FROM fast_lane_shadow_run_metrics WHERE network='devnet' ORDER BY run_at DESC LIMIT 8" diagnostic-evidence/runs.json
+
+          today="$(date -u +%F)"
+          read -r -d '' query <<'GRAPHQL' || true
+          query D1Usage($accountTag:string!,$start:Date,$end:Date,$databaseId:string){viewer{accounts(filter:{accountTag:$accountTag}){d1AnalyticsAdaptiveGroups(limit:10000,filter:{date_geq:$start,date_leq:$end,databaseId:$databaseId}){sum{rowsRead rowsWritten}}}}}
+          GRAPHQL
+          jq -n --arg query "$query" --arg accountTag "$CLOUDFLARE_ACCOUNT_ID" --arg start "$today" --arg end "$today" --arg databaseId "$DATABASE_ID" '{query:$query,variables:{accountTag:$accountTag,start:$start,end:$end,databaseId:$databaseId}}' > diagnostic-evidence/usage-request.json
+          curl --fail-with-body --silent --show-error -X POST \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            -H 'content-type: application/json' \
+            --data @diagnostic-evidence/usage-request.json \
+            https://api.cloudflare.com/client/v4/graphql > diagnostic-evidence/usage.json
 
           jq -n \
-            --slurpfile binding diagnostic-evidence/binding.json \
-            --slurpfile identities diagnostic-evidence/overlay-identities.json \
+            --slurpfile schema diagnostic-evidence/schema.json \
+            --slurpfile objectColumns diagnostic-evidence/objects-columns.json \
+            --slurpfile stateColumns diagnostic-evidence/state-columns.json \
             --slurpfile stale diagnostic-evidence/stale.json \
-            --slurpfile active diagnostic-evidence/active.json \
-            --slurpfile total diagnostic-evidence/total.json \
-            --slurpfile state diagnostic-evidence/state.json \
-            --slurpfile runs diagnostic-evidence/runs.json \
-            '{binding:$binding[0],overlayIdentities:$identities[0],stale:$stale[0],active:$active[0],total:$total[0],state:$state[0],runs:$runs[0]}' \
+            --slurpfile usage diagnostic-evidence/usage.json \
+            '{schema:$schema[0],objectColumns:$objectColumns[0],stateColumns:$stateColumns[0],stale:$stale[0],usage:$usage[0]}' \
             > diagnostic-evidence/summary.json
 
       - name: Report exact diagnostic
@@ -70,7 +76,7 @@ jobs:
         run: |
           test -s diagnostic-evidence/summary.json || echo '{"passed":false,"reason":"diagnostic step failed before summary"}' > diagnostic-evidence/summary.json
           {
-            echo 'Exact D1 binding diagnostic:'
+            echo 'D1 cleanup feasibility diagnostic:'
             echo
             echo '```json'
             cat diagnostic-evidence/summary.json
@@ -82,7 +88,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: exact-d1-binding-diagnostic
+          name: d1-cleanup-feasibility-diagnostic
           path: diagnostic-evidence
           if-no-files-found: warn
           retention-days: 14
