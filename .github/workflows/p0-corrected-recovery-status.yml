@@ -1,6 +1,10 @@
 name: P0 guarded stale overlay cleanup
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - .github/p0-stale-overlay-cleanup-trigger
   issues:
     types: [opened]
 
@@ -14,7 +18,7 @@ concurrency:
 
 jobs:
   cleanup:
-    if: startsWith(github.event.issue.title, 'P0 stale overlay cleanup after base 3800885')
+    if: github.event_name == 'push' || startsWith(github.event.issue.title, 'P0 stale overlay cleanup after base 3800885')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -86,8 +90,8 @@ jobs:
 
           jq -n --argjson passed true --argjson staleRowsBefore "$stale_rows" --slurpfile binding cleanup-evidence/binding.json --slurpfile overlayAfter cleanup-evidence/overlay-after.json '{passed:$passed,staleRowsBefore:$staleRowsBefore,binding:$binding[0],overlayAfter:$overlayAfter[0]}' > cleanup-evidence/summary.json
 
-      - name: Report cleanup result
-        if: always()
+      - name: Report cleanup result to issue
+        if: always() && github.event_name == 'issues'
         shell: bash
         run: |
           test -s cleanup-evidence/summary.json || echo '{"passed":false}' > cleanup-evidence/summary.json
