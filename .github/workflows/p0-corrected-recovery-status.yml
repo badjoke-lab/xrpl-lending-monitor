@@ -1,4 +1,4 @@
-name: P0 D1 write headroom
+name: P0 pause collector at D1 write limit
 
 on:
   push:
@@ -11,62 +11,109 @@ permissions:
   issues: write
 
 concurrency:
-  group: p0-d1-write-headroom
+  group: production-worker-write
   cancel-in-progress: false
 
 jobs:
-  report:
+  pause:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
       GH_TOKEN: ${{ github.token }}
       REPOSITORY: ${{ github.repository }}
-      ISSUE_NUMBER: '948'
+      ISSUE_NUMBER: '949'
+      PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
     steps:
-      - name: Read rows written and stale rows
+      - name: Check out implementation
+        uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build deployable assets
+        run: pnpm build:deploy-assets
+
+      - name: Build guarded pause configuration
         shell: bash
         run: |
           set -Eeuo pipefail
-          mkdir -p headroom-evidence
+          mkdir -p pause-evidence
+          python - <<'PY'
+          import json
+          from pathlib import Path
 
-          jq -n --arg sql "SELECT COUNT(*) AS stale_rows FROM current_state_overlay_objects o WHERE o.network='devnet' AND NOT EXISTS (SELECT 1 FROM fast_lane_shadow_base_binding b WHERE b.network=o.network AND b.base_epoch_id=o.epoch_id AND b.base_snapshot_id=o.base_snapshot_id)" '{sql:$sql}' \
-            | curl --fail-with-body --silent --show-error \
-                -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-                -H 'Content-Type: application/json' \
-                --data-binary @- \
-                "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database/${DATABASE_ID}/query" \
-            > headroom-evidence/stale.json
-          stale_rows="$(jq -r '.result[0].results[0].stale_rows' headroom-evidence/stale.json)"
+          source = json.loads(Path('wrangler.jsonc').read_text())
+          assert source['triggers']['crons'] == ['*/5 * * * *']
+          assert source['vars']['APP_NETWORK'] == 'devnet'
+          assert source['vars']['MAINNET_ENABLED'] == 'false'
+          assert source['vars']['REPLACEMENT_BASE_EPOCH_ID'] == 'devnet-3371675'
+          assert source['vars']['REPLACEMENT_BASE_SNAPSHOT_ID'] == 'devnet-3800885-eaa0d29666e7'
+          assert source['vars']['REPLACEMENT_BASE_LEDGER_INDEX'] == '3800885'
+          assert source['vars']['REPLACEMENT_BASE_LEDGER_HASH'] == 'EAA0D29666E73D7594A52DF8000B07F346CD4DA24A9A07549612CDC7D727B700'
 
-          today="$(date -u +%F)"
-          read -r -d '' query <<'GRAPHQL' || true
-          query D1Usage($accountTag:string!,$start:Date,$end:Date,$databaseId:string){viewer{accounts(filter:{accountTag:$accountTag}){d1AnalyticsAdaptiveGroups(limit:10000,filter:{date_geq:$start,date_leq:$end,databaseId:$databaseId}){sum{rowsRead rowsWritten}}}}}
-          GRAPHQL
-          jq -n --arg query "$query" --arg accountTag "$CLOUDFLARE_ACCOUNT_ID" --arg start "$today" --arg end "$today" --arg databaseId "$DATABASE_ID" '{query:$query,variables:{accountTag:$accountTag,start:$start,end:$end,databaseId:$databaseId}}' > headroom-evidence/request.json
-          curl --fail-with-body --silent --show-error -X POST \
+          paused = json.loads(json.dumps(source))
+          paused['triggers']['crons'] = []
+          Path('wrangler.pause.jsonc').write_text(json.dumps(paused, indent=2) + '\n')
+          Path('pause-evidence/config.json').write_text(json.dumps({
+              'appNetwork': paused['vars']['APP_NETWORK'],
+              'mainnetEnabled': paused['vars']['MAINNET_ENABLED'],
+              'replacementBaseSnapshotId': paused['vars']['REPLACEMENT_BASE_SNAPSHOT_ID'],
+              'replacementBaseLedgerIndex': paused['vars']['REPLACEMENT_BASE_LEDGER_INDEX'],
+              'replacementBaseLedgerHash': paused['vars']['REPLACEMENT_BASE_LEDGER_HASH'],
+              'crons': paused['triggers']['crons'],
+          }, indent=2) + '\n')
+          PY
+          jq -e '.triggers.crons == [] and .vars.APP_NETWORK == "devnet" and .vars.MAINNET_ENABLED == "false" and .vars.REPLACEMENT_BASE_LEDGER_INDEX == "3800885"' wrangler.pause.jsonc > /dev/null
+
+      - name: Deploy Worker with Cron Triggers removed
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          pnpm exec wrangler deploy --config wrangler.pause.jsonc | tee pause-evidence/deploy.log
+
+      - name: Verify schedules empty and API remains online
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          curl --fail-with-body --silent --show-error --retry 3 \
             -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-            -H 'content-type: application/json' \
-            --data @headroom-evidence/request.json \
-            https://api.cloudflare.com/client/v4/graphql > headroom-evidence/usage.json
-          rows_written="$(jq '[.data.viewer.accounts[0].d1AnalyticsAdaptiveGroups[].sum.rowsWritten // 0] | add // 0' headroom-evidence/usage.json)"
-          remaining=$((100000 - rows_written))
-          required=$((stale_rows + 5000))
-          if [ "$remaining" -ge "$required" ]; then allowed=true; else allowed=false; fi
-          jq -n --argjson rowsWritten "$rows_written" --argjson remaining "$remaining" --argjson staleRows "$stale_rows" --argjson required "$required" --argjson directDeleteAllowed "$allowed" '{rowsWritten:$rowsWritten,rowsWrittenRemaining:$remaining,staleRows:$staleRows,requiredWithSafetyMargin:$required,directDeleteAllowed:$directDeleteAllowed}' > headroom-evidence/summary.json
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/xrpl-lending-monitor/schedules" \
+            > pause-evidence/schedules.json
+          jq -e '.success == true and .result.schedules == []' pause-evidence/schedules.json > /dev/null
 
-      - name: Report
+          overview_status="$(curl --silent --show-error --retry 3 -o pause-evidence/overview.json -w '%{http_code}' "${PRODUCTION_BASE}/api/overview")"
+          history_status="$(curl --silent --show-error --retry 3 -o pause-evidence/history.json -w '%{http_code}' "${PRODUCTION_BASE}/api/status/history-source")"
+          test "$overview_status" = 200
+          test "$history_status" = 200
+          jq -n --argjson passed true --slurpfile config pause-evidence/config.json --slurpfile schedules pause-evidence/schedules.json --arg overviewHttp "$overview_status" --arg historyHttp "$history_status" '{passed:$passed,config:$config[0],schedules:$schedules[0].result.schedules,overviewHttp:$overviewHttp,historyHttp:$historyHttp}' > pause-evidence/summary.json
+
+      - name: Report pause result
         if: always()
         shell: bash
         run: |
-          test -s headroom-evidence/summary.json || echo '{"passed":false}' > headroom-evidence/summary.json
+          test -s pause-evidence/summary.json || echo '{"passed":false}' > pause-evidence/summary.json
           {
-            echo 'D1 write headroom:'
+            echo 'Temporary collector pause result:'
             echo
             echo '```json'
-            cat headroom-evidence/summary.json
+            cat pause-evidence/summary.json
             echo '```'
-          } > headroom-evidence/comment.md
-          gh issue comment "$ISSUE_NUMBER" --repo "$REPOSITORY" --body-file headroom-evidence/comment.md
+          } > pause-evidence/comment.md
+          gh issue comment "$ISSUE_NUMBER" --repo "$REPOSITORY" --body-file pause-evidence/comment.md
+
+      - name: Upload pause evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p0-collector-pause-evidence
+          path: pause-evidence
+          if-no-files-found: warn
+          retention-days: 14
