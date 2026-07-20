@@ -27,7 +27,7 @@ jobs:
       DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
       GH_TOKEN: ${{ github.token }}
       REPOSITORY: ${{ github.repository }}
-      ISSUE_NUMBER: ${{ github.event.issue.number }}
+      ISSUE_NUMBER: ${{ github.event.issue.number || 945 }}
       TARGET_EPOCH: devnet-3371675
       TARGET_SNAPSHOT: devnet-3800885-eaa0d29666e7
       TARGET_LEDGER: '3800885'
@@ -90,8 +90,8 @@ jobs:
 
           jq -n --argjson passed true --argjson staleRowsBefore "$stale_rows" --slurpfile binding cleanup-evidence/binding.json --slurpfile overlayAfter cleanup-evidence/overlay-after.json '{passed:$passed,staleRowsBefore:$staleRowsBefore,binding:$binding[0],overlayAfter:$overlayAfter[0]}' > cleanup-evidence/summary.json
 
-      - name: Report cleanup result to issue
-        if: always() && github.event_name == 'issues'
+      - name: Report cleanup result
+        if: always()
         shell: bash
         run: |
           test -s cleanup-evidence/summary.json || echo '{"passed":false}' > cleanup-evidence/summary.json
