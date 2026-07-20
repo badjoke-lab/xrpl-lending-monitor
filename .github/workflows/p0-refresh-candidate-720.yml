@@ -142,8 +142,32 @@ jobs:
           FINAL_LAG=$((FINAL_LIVE - SOURCE_LEDGER)); test "$FINAL_LAG" -ge 0 || FINAL_LAG=0
           test "$FINAL_LAG" -le "$TARGET_MAX_LAG_LEDGERS"
           jq -n --arg historyBranch "$SOURCE_HISTORY" --arg currentStateBranch "$SOURCE_CURRENT" --argjson ledgerIndex "$SOURCE_LEDGER" --arg ledgerHash "$SOURCE_HASH" --argjson liveLedger "$FINAL_LIVE" --argjson lagLedgers "$FINAL_LAG" '{candidate:{historyBranch:$historyBranch,currentStateBranch:$currentStateBranch,ledgerIndex:$ledgerIndex,ledgerHash:$ledgerHash},live:{ledgerIndex:$liveLedger,lagLedgers:$lagLedgers},verified:true,targetMaxLagLedgers:720,maxDeltaLedgers:5000}' > "$ROOT/final.json"
-          BODY=$(jq -r '"Verified candidate pair: `" + .candidate.historyBranch + "` / `" + .candidate.currentStateBranch + "`; ledger `" + (.candidate.ledgerIndex|tostring) + "`; hash `" + .candidate.ledgerHash + "`; live Devnet head `" + (.live.ledgerIndex|tostring) + "`; remaining lag `" + (.live.lagLedgers|tostring) + "` ledgers. Each cycle was bounded to 5,000 ledgers and the 720-ledger target was enforced. Production branches, D1, cadence, network, and Mainnet settings were not modified."' "$ROOT/final.json")
+          BODY=$(jq -r '"Verified candidate pair: `" + .candidate.historyBranch + "` / `" + .candidate.currentStateBranch + "`; ledger `" + (.candidate.ledgerIndex|tostring) + "`; hash `" + .candidate.ledgerHash + "`; live Devnet head `" + (.live.ledgerIndex|tostring) + "`; remaining lag `" + (.live.lagLedgers|tostring) + "` ledgers. Each cycle was bounded to 5,000 ledgers and the 720-ledger target was enforced."' "$ROOT/final.json")
           gh issue comment "$ISSUE_NUMBER" --body "$BODY"
+
+          gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/runs?event=workflow_dispatch&per_page=100" --jq '.workflow_runs[].id' > "$ROOT/cutover-before.txt"
+          jq -n --arg ref main --arg history "$SOURCE_HISTORY" --arg current "$SOURCE_CURRENT" '{ref:$ref,inputs:{history_candidate_branch:$history,current_state_candidate_branch:$current,confirm_production_write:"true"}}' > "$ROOT/cutover-dispatch.json"
+          gh api --method POST "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/dispatches" --input "$ROOT/cutover-dispatch.json"
+
+          CUTOVER_RUN_ID=''
+          for attempt in $(seq 1 60); do
+            gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/runs?event=workflow_dispatch&per_page=100" > "$ROOT/cutover-runs.json"
+            CUTOVER_RUN_ID=$(jq -r '.workflow_runs | sort_by(.created_at) | reverse | .[].id' "$ROOT/cutover-runs.json" | while read id; do grep -Fxq "$id" "$ROOT/cutover-before.txt" || { echo "$id"; break; }; done)
+            test -n "$CUTOVER_RUN_ID" && break
+            sleep 5
+          done
+          test -n "$CUTOVER_RUN_ID"
+          printf '%s\n' "$CUTOVER_RUN_ID" > "$ROOT/cutover-run-id.txt"
+
+          for attempt in $(seq 1 180); do
+            gh api "repos/${REPOSITORY}/actions/runs/${CUTOVER_RUN_ID}" > "$ROOT/cutover-run.json"
+            test "$(jq -r '.status' "$ROOT/cutover-run.json")" = completed && break
+            sleep 30
+          done
+          test "$(jq -r '.status' "$ROOT/cutover-run.json")" = completed
+          gh api "repos/${REPOSITORY}/actions/runs/${CUTOVER_RUN_ID}/jobs?per_page=100" > "$ROOT/cutover-jobs.json"
+          test "$(jq -r '.conclusion' "$ROOT/cutover-run.json")" = success
+          gh issue comment "$ISSUE_NUMBER" --body "Guarded production cutover succeeded. Live cutover run: ${CUTOVER_RUN_ID}."
 
       - name: Preserve recovery evidence
         if: always()
