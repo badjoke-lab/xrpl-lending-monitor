@@ -1,0 +1,45 @@
+name: P0 refresh status now
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  actions: read
+  issues: write
+
+jobs:
+  report:
+    if: startsWith(github.event.issue.title, 'P0 refresh status now')
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+      ISSUE_NUMBER: ${{ github.event.issue.number }}
+    steps:
+      - name: Report exact latest refresh and child run
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/${REPOSITORY}/actions/workflows/p0-refresh-candidate-720.yml/runs?per_page=10" > refresh-runs.json
+          REFRESH_ID=$(jq -r '.workflow_runs[0].id // empty' refresh-runs.json)
+          test -n "$REFRESH_ID"
+          gh api "repos/${REPOSITORY}/actions/runs/${REFRESH_ID}/jobs?per_page=100" > refresh-jobs.json
+          CHILD_ID=''
+          if jq -e '.jobs | length > 0' refresh-jobs.json >/dev/null; then
+            CHILD_ID=$(gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-candidate.yml/runs?event=workflow_dispatch&per_page=20" --jq '.workflow_runs | map(select(.created_at >= "'"$(jq -r '.workflow_runs[0].created_at' refresh-runs.json)"'")) | sort_by(.created_at) | reverse | .[0].id // empty')
+          fi
+          if test -n "$CHILD_ID"; then
+            gh api "repos/${REPOSITORY}/actions/runs/${CHILD_ID}" > child-run.json
+            gh api "repos/${REPOSITORY}/actions/runs/${CHILD_ID}/jobs?per_page=100" > child-jobs.json
+          else
+            echo '{"jobs":[]}' > child-jobs.json
+            echo '{}' > child-run.json
+          fi
+          jq -n \
+            --argjson refresh "$(jq '.workflow_runs[0] | {id,status,conclusion,created_at,updated_at,html_url}' refresh-runs.json)" \
+            --argjson refreshJobs "$(jq '[.jobs[] | {id,name,status,conclusion,steps:[.steps[]|{name,status,conclusion}]}]' refresh-jobs.json)" \
+            --argjson child "$(jq '{id,status,conclusion,created_at,updated_at,html_url}' child-run.json)" \
+            --argjson childJobs "$(jq '[.jobs[] | {id,name,status,conclusion,steps:[.steps[]|{name,status,conclusion}]}]' child-jobs.json)" \
+            '{refresh:$refresh,refreshJobs:$refreshJobs,child:$child,childJobs:$childJobs}' > status.json
+          gh issue comment "$ISSUE_NUMBER" --body "$(printf '```json\n%s\n```' "$(cat status.json)")"
