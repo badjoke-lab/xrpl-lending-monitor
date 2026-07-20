@@ -24,7 +24,7 @@ jobs:
       DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
       GH_TOKEN: ${{ github.token }}
       REPOSITORY: ${{ github.repository }}
-      ISSUE_NUMBER: '946'
+      ISSUE_NUMBER: '947'
     steps:
       - name: Read D1 write usage and overlay schema
         shell: bash
