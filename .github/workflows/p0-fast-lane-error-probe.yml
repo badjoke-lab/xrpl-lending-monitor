@@ -99,6 +99,31 @@ jobs:
           SQL
           )
 
+          BINDING_SQL=$(cat <<'SQL'
+          SELECT base_epoch_id, base_snapshot_id, base_ledger_index, base_ledger_hash, updated_at
+          FROM fast_lane_shadow_base_binding
+          WHERE network = 'devnet'
+          SQL
+          )
+
+          OVERLAY_IDENTITY_SQL=$(cat <<'SQL'
+          SELECT o.epoch_id, o.base_snapshot_id,
+                 CASE WHEN b.network IS NULL THEN 'stale' ELSE 'active' END AS binding_state,
+                 COUNT(*) AS row_count,
+                 COALESCE(SUM(LENGTH(o.projection_json)), 0) AS payload_bytes,
+                 MIN(o.source_ledger_index) AS min_source_ledger,
+                 MAX(o.source_ledger_index) AS max_source_ledger
+          FROM current_state_overlay_objects AS o
+          LEFT JOIN fast_lane_shadow_base_binding AS b
+            ON b.network = o.network
+           AND b.base_epoch_id = o.epoch_id
+           AND b.base_snapshot_id = o.base_snapshot_id
+          WHERE o.network = 'devnet'
+          GROUP BY o.epoch_id, o.base_snapshot_id, binding_state
+          ORDER BY binding_state, row_count DESC
+          SQL
+          )
+
           query_d1() {
             local sql="$1"
             local output="$2"
@@ -114,6 +139,8 @@ jobs:
           query_d1 "$STATUS_SQL" /tmp/result.json
           query_d1 "$STORAGE_SQL" /tmp/storage.json
           query_d1 "$FOLD_SQL" /tmp/fold.json
+          query_d1 "$BINDING_SQL" /tmp/binding.json
+          query_d1 "$OVERLAY_IDENTITY_SQL" /tmp/overlay-identities.json
 
           {
             echo 'P0 fast-lane error probe result:'
@@ -132,6 +159,18 @@ jobs:
             echo
             echo '```json'
             jq . /tmp/fold.json
+            echo '```'
+            echo
+            echo 'Active base binding:'
+            echo
+            echo '```json'
+            jq . /tmp/binding.json
+            echo '```'
+            echo
+            echo 'Overlay identities:'
+            echo
+            echo '```json'
+            jq . /tmp/overlay-identities.json
             echo '```'
           } > /tmp/comment.md
 
