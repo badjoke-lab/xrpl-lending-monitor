@@ -18,20 +18,21 @@ jobs:
       REPOSITORY: ${{ github.repository }}
       ISSUE_NUMBER: ${{ github.event.issue.number }}
     steps:
-      - name: Report current maintenance and child runs
+      - name: Report Issue 937 maintenance and child runs
         shell: bash
         run: |
           set -euo pipefail
           STARTED_AT='2026-07-20T08:49:00Z'
-          gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-maintenance.yml/runs?event=issues&per_page=30" > /tmp/maintenance.json
-          MAINTENANCE_ID="$(jq -r --arg started "${STARTED_AT}" '[.workflow_runs[] | select(.created_at >= $started)][0].id // empty' /tmp/maintenance.json)"
+          PARENT_TITLE='P0 rolling checkpoint maintenance now 2026-07-20 17:49 JST immediate recovery'
+          gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-maintenance.yml/runs?event=issues&per_page=100" > /tmp/maintenance.json
+          MAINTENANCE_ID="$(jq -r --arg title "${PARENT_TITLE}" '[.workflow_runs[] | select(.display_title == $title)][0].id // empty' /tmp/maintenance.json)"
           if [ -n "${MAINTENANCE_ID}" ]; then
             gh api "repos/${REPOSITORY}/actions/runs/${MAINTENANCE_ID}/jobs?per_page=100" > /tmp/maintenance-jobs.json
           else
             printf '{"jobs":[]}' > /tmp/maintenance-jobs.json
           fi
 
-          gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-candidate.yml/runs?event=workflow_dispatch&per_page=30" > /tmp/candidates.json
+          gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-candidate.yml/runs?event=workflow_dispatch&per_page=100" > /tmp/candidates.json
           CANDIDATE_ID="$(jq -r --arg started "${STARTED_AT}" '[.workflow_runs[] | select(.created_at >= $started)][0].id // empty' /tmp/candidates.json)"
           if [ -n "${CANDIDATE_ID}" ]; then
             gh api "repos/${REPOSITORY}/actions/runs/${CANDIDATE_ID}/jobs?per_page=100" > /tmp/candidate-jobs.json
@@ -39,7 +40,7 @@ jobs:
             printf '{"jobs":[]}' > /tmp/candidate-jobs.json
           fi
 
-          gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/runs?event=workflow_dispatch&per_page=30" > /tmp/cutovers.json
+          gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/runs?event=workflow_dispatch&per_page=100" > /tmp/cutovers.json
           CUTOVER_ID="$(jq -r --arg started "${STARTED_AT}" '[.workflow_runs[] | select(.created_at >= $started)][0].id // empty' /tmp/cutovers.json)"
           if [ -n "${CUTOVER_ID}" ]; then
             gh api "repos/${REPOSITORY}/actions/runs/${CUTOVER_ID}/jobs?per_page=100" > /tmp/cutover-jobs.json
@@ -52,7 +53,7 @@ jobs:
             --slurpfile candidates /tmp/candidates.json --slurpfile candidateJobs /tmp/candidate-jobs.json \
             --slurpfile cutovers /tmp/cutovers.json --slurpfile cutoverJobs /tmp/cutover-jobs.json '
             {
-              maintenance:(if $maintenanceId == "" then null else [$maintenance[0].workflow_runs[] | select((.id|tostring) == $maintenanceId) | {id,status,conclusion,created_at,updated_at,html_url}][0] end),
+              maintenance:(if $maintenanceId == "" then null else [$maintenance[0].workflow_runs[] | select((.id|tostring) == $maintenanceId) | {id,status,conclusion,created_at,updated_at,html_url,display_title}][0] end),
               maintenanceJobs:[$maintenanceJobs[0].jobs[] | {id,name,status,conclusion,steps:[.steps[] | {name,status,conclusion,number}]}],
               candidate:(if $candidateId == "" then null else [$candidates[0].workflow_runs[] | select((.id|tostring) == $candidateId) | {id,status,conclusion,created_at,updated_at,html_url}][0] end),
               candidateJobs:[$candidateJobs[0].jobs[] | {id,name,status,conclusion,steps:[.steps[] | {name,status,conclusion,number}]}],
