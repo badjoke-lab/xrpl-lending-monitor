@@ -82,6 +82,12 @@ jobs:
             > compaction-evidence/schedules-before.json
           jq -e '.success == true and .result.schedules == []' compaction-evidence/schedules-before.json > /dev/null
 
+          curl --fail-with-body --silent --show-error --retry 3 \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database/${DATABASE_ID}" \
+            > compaction-evidence/database-before.json
+          jq -e '.success == true and (.result.file_size | type == "number")' compaction-evidence/database-before.json > /dev/null
+
           query_d1 "SELECT base_epoch_id,base_snapshot_id,base_ledger_index,base_ledger_hash FROM fast_lane_shadow_base_binding WHERE network='devnet'" compaction-evidence/binding-before.json
           jq -e --arg epoch "$TARGET_EPOCH" --arg snapshot "$TARGET_SNAPSHOT" --argjson ledger "$TARGET_LEDGER" --arg hash "$TARGET_HASH" '
             .result[0].results | length == 1
@@ -106,6 +112,8 @@ jobs:
         run: |
           set -Eeuo pipefail
           cat > compaction-evidence/compact.sql <<'SQL'
+          DROP TABLE IF EXISTS current_state_overlay_objects_compacted;
+
           CREATE TABLE current_state_overlay_objects_compacted (
             network TEXT NOT NULL CHECK (network = 'devnet'),
             epoch_id TEXT NOT NULL,
@@ -175,6 +183,10 @@ jobs:
           CREATE INDEX current_state_overlay_objects_vault
             ON current_state_overlay_objects (network,epoch_id,base_snapshot_id,vault_id,object_type,operation,object_id);
 
+          DELETE FROM current_state_overlay_commit_guards
+          WHERE network='devnet'
+            AND NOT (epoch_id='devnet-3371675' AND base_snapshot_id='devnet-3800885-eaa0d29666e7');
+
           DELETE FROM current_state_overlay_state
           WHERE network='devnet'
             AND NOT (epoch_id='devnet-3371675' AND base_snapshot_id='devnet-3800885-eaa0d29666e7');
@@ -214,6 +226,7 @@ jobs:
           query_d1 "SELECT COUNT(*) AS state_rows FROM current_state_overlay_state WHERE network='devnet'" compaction-evidence/state-after.json
           query_d1 "SELECT COUNT(*) AS stale_guard_rows FROM current_state_overlay_commit_guards WHERE network='devnet' AND NOT (epoch_id='${TARGET_EPOCH}' AND base_snapshot_id='${TARGET_SNAPSHOT}')" compaction-evidence/guards-after.json
           query_d1 "SELECT COUNT(*) AS secondary_indexes FROM sqlite_master WHERE type='index' AND tbl_name='current_state_overlay_objects' AND sql IS NOT NULL" compaction-evidence/indexes-after.json
+          query_d1 "SELECT COUNT(*) AS temporary_tables FROM sqlite_master WHERE type='table' AND name='current_state_overlay_objects_compacted'" compaction-evidence/temp-after.json
 
           before="$(cat compaction-evidence/active-rows-before.txt)"
           after="$(jq -r '.result[0].results[0].active_rows' compaction-evidence/active-after.json)"
@@ -222,6 +235,13 @@ jobs:
           test "$(jq -r '.result[0].results[0].state_rows' compaction-evidence/state-after.json)" = 1
           test "$(jq -r '.result[0].results[0].stale_guard_rows' compaction-evidence/guards-after.json)" = 0
           test "$(jq -r '.result[0].results[0].secondary_indexes' compaction-evidence/indexes-after.json)" = 9
+          test "$(jq -r '.result[0].results[0].temporary_tables' compaction-evidence/temp-after.json)" = 0
+
+          curl --fail-with-body --silent --show-error --retry 3 \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database/${DATABASE_ID}" \
+            > compaction-evidence/database-after.json
+          jq -e '.success == true and (.result.file_size | type == "number")' compaction-evidence/database-after.json > /dev/null
 
       - name: Restore canonical five-minute deployment
         shell: bash
@@ -242,23 +262,28 @@ jobs:
             -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
             "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/xrpl-lending-monitor/schedules" \
             > compaction-evidence/schedules-after.json
-          jq -e '.success == true and .result.schedules | length == 1 and .[0].cron == "*/5 * * * *"' compaction-evidence/schedules-after.json > /dev/null
+          jq -e '.success == true and (.result.schedules | length == 1) and .result.schedules[0].cron == "*/5 * * * *"' compaction-evidence/schedules-after.json > /dev/null
 
           overview_status="$(curl --silent --show-error --retry 3 -o compaction-evidence/overview-after.json -w '%{http_code}' "${PRODUCTION_BASE}/api/overview")"
           history_status="$(curl --silent --show-error --retry 3 -o compaction-evidence/history-after.json -w '%{http_code}' "${PRODUCTION_BASE}/api/status/history-source")"
           test "$overview_status" = 200
           test "$history_status" = 200
 
+          size_before="$(jq -r '.result.file_size' compaction-evidence/database-before.json)"
+          size_after="$(jq -r '.result.file_size' compaction-evidence/database-after.json)"
           jq -n \
             --argjson passed true \
             --argjson activeRows "$(jq -r '.result[0].results[0].active_rows' compaction-evidence/active-after.json)" \
             --argjson activePayloadBytes "$(jq -r '.result[0].results[0].active_payload_bytes' compaction-evidence/active-after.json)" \
             --argjson staleRows "$(jq -r '.result[0].results[0].stale_rows' compaction-evidence/stale-after.json)" \
             --argjson compactionRowsWritten "$(cat compaction-evidence/compaction-rows-written.json)" \
+            --argjson databaseBytesBefore "$size_before" \
+            --argjson databaseBytesAfter "$size_after" \
+            --argjson databaseBytesDelta "$((size_after - size_before))" \
             --slurpfile schedules compaction-evidence/schedules-after.json \
             --arg overviewHttp "$overview_status" \
             --arg historyHttp "$history_status" \
-            '{passed:$passed,activeRows:$activeRows,activePayloadBytes:$activePayloadBytes,staleRows:$staleRows,compactionRowsWritten:$compactionRowsWritten,schedules:$schedules[0].result.schedules,overviewHttp:$overviewHttp,historyHttp:$historyHttp,verification12Slots:"pending"}' \
+            '{passed:$passed,activeRows:$activeRows,activePayloadBytes:$activePayloadBytes,staleRows:$staleRows,compactionRowsWritten:$compactionRowsWritten,databaseBytesBefore:$databaseBytesBefore,databaseBytesAfter:$databaseBytesAfter,databaseBytesDelta:$databaseBytesDelta,schedules:$schedules[0].result.schedules,overviewHttp:$overviewHttp,historyHttp:$historyHttp,verification12Slots:"pending"}' \
             > compaction-evidence/summary.json
 
       - name: Report compaction and resume result
