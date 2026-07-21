@@ -1,8 +1,8 @@
 {
   "state": "running",
-  "phase": "initialize",
-  "message": "maintenance started",
-  "checkedAt": "2026-07-21T15:39:21Z",
+  "phase": "action_ready",
+  "message": "composite action published; wrapper conversion required",
+  "checkedAt": "2026-07-21T15:39:24Z",
   "runId": "29844976480",
   "commit": "9ba7ca7905eeae489960e0177fc3b98b194af0fd",
   "collectorCadence": "five_minutes",
