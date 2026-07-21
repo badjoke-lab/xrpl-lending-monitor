@@ -1,8 +1,8 @@
 {
   "state": "running",
-  "phase": "cycle_2_candidate_29851555876",
-  "message": "candidate run 29851555876 is active",
-  "checkedAt": "2026-07-21T17:07:01Z",
+  "phase": "cycle_2_verify_candidate",
+  "message": "candidate cycle 2 completed",
+  "checkedAt": "2026-07-21T17:31:44Z",
   "runId": "29849538461",
   "commit": "0ce03152ff7135d450c4b1bb0c3bfc101de816b5",
   "childRunId": "29851555876",
@@ -16,6 +16,13 @@
         "sourceLedger": 3800885,
         "outputLedger": 3805885,
         "lagLedgers": 29445
+      },
+      {
+        "cycle": 2,
+        "runId": 29851555876,
+        "sourceLedger": 3805885,
+        "outputLedger": 3810885,
+        "lagLedgers": 24935
       }
     ]
   }
