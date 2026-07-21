@@ -11,11 +11,11 @@ on:
 
 permissions:
   actions: write
-  contents: read
+  contents: write
 
 concurrency:
   group: four-hour-history-maintenance
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   maintain:
@@ -34,13 +34,76 @@ jobs:
       TARGET_MAX_LAG_LEDGERS: '720'
       MAX_CYCLES: '8'
       PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      D1_DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
     steps:
       - uses: actions/checkout@v4
 
-      - name: Validate production boundary
+      - name: Advance aligned history and current state
         shell: bash
         run: |
-          set -euo pipefail
+          set -Eeuo pipefail
+          ROOT=four-hour-history-maintenance
+          STATUS_PATH=.github/four-hour-history-maintenance-status.json
+          PHASE=initialize
+          mkdir -p "$ROOT"
+          : > "$ROOT/cycles.ndjson"
+
+          publish_status() {
+            local state="$1" phase="$2" message="${3:-}"
+            local now source_ledger source_hash current_ledger current_hash
+            now="$(date -u +%FT%TZ)"
+            source_ledger="$(jq -r '.endLedgerIndex // null' "$ROOT/source-publication.json" 2>/dev/null || echo null)"
+            source_hash="$(jq -r '.endLedgerHash // ""' "$ROOT/source-publication.json" 2>/dev/null || true)"
+            current_ledger="$(jq -r '.ledgerIndex // null' "$ROOT/source-current.json" 2>/dev/null || echo null)"
+            current_hash="$(jq -r '.ledgerHash // ""' "$ROOT/source-current.json" 2>/dev/null || true)"
+            jq -n \
+              --arg state "$state" --arg phase "$phase" --arg message "$message" \
+              --arg checkedAt "$now" --arg runId "${GITHUB_RUN_ID}" --arg runAttempt "${GITHUB_RUN_ATTEMPT}" \
+              --arg commit "${GITHUB_SHA}" --argjson sourceLedger "${source_ledger:-null}" \
+              --arg sourceHash "$source_hash" --argjson currentLedger "${current_ledger:-null}" \
+              --arg currentHash "$current_hash" \
+              '{state:$state,phase:$phase,message:$message,checkedAt:$checkedAt,runId:$runId,runAttempt:$runAttempt,commit:$commit,source:{historyLedger:$sourceLedger,historyHash:$sourceHash,currentLedger:$currentLedger,currentHash:$currentHash},collectorCadence:"five_minutes",historyCadence:"four_hours"}' \
+              > "$ROOT/status.json"
+            if test -s "$ROOT/summary.json"; then
+              jq -s '.[0] + {summary:.[1]}' "$ROOT/status.json" "$ROOT/summary.json" > "$ROOT/status-next.json"
+              mv "$ROOT/status-next.json" "$ROOT/status.json"
+            fi
+            local api encoded sha
+            api="repos/${REPOSITORY}/contents/${STATUS_PATH}"
+            encoded="$(base64 -w0 "$ROOT/status.json")"
+            for attempt in 1 2 3 4 5; do
+              sha="$(gh api "$api" --jq .sha 2>/dev/null || true)"
+              if test -n "$sha"; then
+                if gh api --method PUT "$api" -f message="ops: record four-hour maintenance ${state}" -f content="$encoded" -f sha="$sha" -f branch=main >/dev/null; then
+                  return 0
+                fi
+              else
+                if gh api --method PUT "$api" -f message="ops: record four-hour maintenance ${state}" -f content="$encoded" -f branch=main >/dev/null; then
+                  return 0
+                fi
+              fi
+              sleep $((attempt * 2))
+            done
+            return 1
+          }
+
+          finish() {
+            local code=$?
+            trap - EXIT
+            set +e
+            if test "$code" -eq 0; then
+              publish_status passed complete "history/current-state maintenance completed"
+            else
+              publish_status failed "$PHASE" "maintenance exited with code ${code}"
+            fi
+            exit "$code"
+          }
+          trap finish EXIT
+          publish_status running "$PHASE" "maintenance started"
+
+          PHASE=validate_boundary
           jq -e '
             .triggers.crons == ["*/5 * * * *"]
             and .vars.APP_NETWORK == "devnet"
@@ -50,14 +113,6 @@ jobs:
             and .queues.consumers[0].max_batch_size == 1
             and .queues.consumers[0].max_concurrency == 1
           ' wrangler.jsonc > /dev/null
-
-      - name: Advance aligned history and current state
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          ROOT=four-hour-history-maintenance
-          mkdir -p "$ROOT"
-          : > "$ROOT/cycles.ndjson"
 
           fetch_json() {
             local branch="$1" path="$2" output="$3"
@@ -92,14 +147,28 @@ jobs:
             local run_id="$1" output="$2"
             for _ in $(seq 1 720); do
               gh api "repos/${REPOSITORY}/actions/runs/${run_id}" > "$output"
-              status="$(jq -r '.status' "$output")"
-              test "$status" = completed && break
+              test "$(jq -r '.status' "$output")" = completed && break
               sleep 30
             done
             test "$(jq -r '.status' "$output")" = completed
             test "$(jq -r '.conclusion' "$output")" = success
           }
 
+          capture_d1_usage() {
+            local output="$1" today query
+            today="$(date -u +%F)"
+            query='query D1Usage($accountTag:string!,$start:Date,$end:Date,$databaseId:string){viewer{accounts(filter:{accountTag:$accountTag}){d1AnalyticsAdaptiveGroups(limit:10000,filter:{date_geq:$start,date_leq:$end,databaseId:$databaseId}){sum{rowsRead rowsWritten}}}}}'
+            jq -n --arg query "$query" --arg accountTag "$CLOUDFLARE_ACCOUNT_ID" \
+              --arg start "$today" --arg end "$today" --arg databaseId "$D1_DATABASE_ID" \
+              '{query:$query,variables:{accountTag:$accountTag,start:$start,end:$end,databaseId:$databaseId}}' \
+              | curl --fail-with-body --silent --show-error -X POST \
+                  -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -H 'content-type: application/json' \
+                  --data-binary @- https://api.cloudflare.com/client/v4/graphql \
+              | jq '{date:"'"$today"'",rowsRead:([.data.viewer.accounts[0].d1AnalyticsAdaptiveGroups[].sum.rowsRead // 0]|add//0),rowsWritten:([.data.viewer.accounts[0].d1AnalyticsAdaptiveGroups[].sum.rowsWritten // 0]|add//0),errors:(.errors//[])}' \
+              > "$output"
+          }
+
+          capture_d1_usage "$ROOT/d1-start.json" || echo '{"unavailable":true}' > "$ROOT/d1-start.json"
           source_history="$SOURCE_HISTORY"
           source_current="$SOURCE_CURRENT"
           final_history="$SOURCE_HISTORY"
@@ -107,6 +176,7 @@ jobs:
           target_lag=999999999
 
           for cycle in $(seq 1 "$MAX_CYCLES"); do
+            PHASE="candidate_cycle_${cycle}_prepare"
             fetch_json "$source_history" history/publication.json "$ROOT/source-publication.json"
             fetch_json "$source_current" read-model/manifest.json "$ROOT/source-current.json"
             source_ledger="$(jq -r '.endLedgerIndex' "$ROOT/source-publication.json")"
@@ -135,6 +205,7 @@ jobs:
             test "$output_history" != "$source_history"
             test "$output_current" != "$source_current"
 
+            PHASE="candidate_cycle_${cycle}_run"
             gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-candidate.yml/runs?event=workflow_dispatch&per_page=100" \
               --jq '.workflow_runs[].id' > "$ROOT/candidate-before.txt"
             jq -n --arg ref main \
@@ -148,6 +219,7 @@ jobs:
             run_id="$(wait_new_run rolling-checkpoint-candidate.yml "$ROOT/candidate-before.txt" "$ROOT/candidate-run-id.txt")"
             wait_success "$run_id" "$ROOT/candidate-run.json"
 
+            PHASE="candidate_cycle_${cycle}_verify"
             fetch_json "$output_history" history/publication.json "$ROOT/output-publication.json"
             fetch_json "$output_current" read-model/manifest.json "$ROOT/output-current.json"
             output_ledger="$(jq -r '.endLedgerIndex' "$ROOT/output-publication.json")"
@@ -164,6 +236,8 @@ jobs:
               --argjson lag "$target_lag" \
               '{cycle:$cycle,candidateRunId:$runId,sourceLedger:$sourceLedger,outputLedger:$outputLedger,lagLedgers:$lag}' \
               >> "$ROOT/cycles.ndjson"
+            jq -s '{cycles:.}' "$ROOT/cycles.ndjson" > "$ROOT/summary.json"
+            publish_status running "$PHASE" "candidate cycle ${cycle} completed"
 
             source_history="$output_history"
             source_current="$output_current"
@@ -174,6 +248,7 @@ jobs:
           test "$target_lag" -le "$TARGET_MAX_LAG_LEDGERS"
 
           if test "$final_history" != "$SOURCE_HISTORY" || test "$final_current" != "$SOURCE_CURRENT"; then
+            PHASE=cutover
             gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/runs?event=workflow_dispatch&per_page=100" \
               --jq '.workflow_runs[].id' > "$ROOT/cutover-before.txt"
             jq -n --arg ref main --arg history "$final_history" --arg current "$final_current" \
@@ -185,6 +260,7 @@ jobs:
             wait_success "$cutover_id" "$ROOT/cutover-run.json"
           fi
 
+          PHASE=verify_production
           fetch_json "$SOURCE_HISTORY" history/publication.json "$ROOT/production-publication.json"
           fetch_json "$SOURCE_CURRENT" read-model/manifest.json "$ROOT/production-current.json"
           production_ledger="$(jq -r '.endLedgerIndex' "$ROOT/production-publication.json")"
@@ -200,10 +276,12 @@ jobs:
           test "$overview_http" = 200
           test "$diff_http" = 200
           jq -e '.status == "ok" and .passed == true' "$ROOT/diff.json" > /dev/null
+          capture_d1_usage "$ROOT/d1-end.json" || echo '{"unavailable":true}' > "$ROOT/d1-end.json"
 
           jq -n --arg checkedAt "$(date -u +%FT%TZ)" --argjson ledger "$production_ledger" \
             --arg hash "$production_hash" --argjson lag "$final_lag" \
-            '{checkedAt:$checkedAt,passed:true,production:{ledgerIndex:$ledger,ledgerHash:$hash,lagLedgers:$lag},cadence:"four_hours",collectorCadence:"five_minutes"}' \
+            --slurpfile cycles "$ROOT/cycles.ndjson" --slurpfile d1Start "$ROOT/d1-start.json" --slurpfile d1End "$ROOT/d1-end.json" \
+            '{checkedAt:$checkedAt,passed:true,production:{ledgerIndex:$ledger,ledgerHash:$hash,lagLedgers:$lag},cycles:$cycles,d1:{start:$d1Start[0],end:$d1End[0]},cadence:"four_hours",collectorCadence:"five_minutes"}' \
             > "$ROOT/summary.json"
 
       - uses: actions/upload-artifact@v4
