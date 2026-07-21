@@ -1,0 +1,211 @@
+name: Four-hour history maintenance
+
+on:
+  schedule:
+    - cron: '17 */4 * * *'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: four-hour-history-maintenance
+  cancel-in-progress: false
+
+jobs:
+  maintain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+      SOURCE_HISTORY: history-data
+      SOURCE_CURRENT: current-state-data
+      CANDIDATE_A_HISTORY: history-four-hour-a-data
+      CANDIDATE_A_CURRENT: current-state-four-hour-a-data
+      CANDIDATE_B_HISTORY: history-four-hour-b-data
+      CANDIDATE_B_CURRENT: current-state-four-hour-b-data
+      MAX_DELTA_LEDGERS: '5000'
+      TARGET_MAX_LAG_LEDGERS: '720'
+      MAX_CYCLES: '8'
+      PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate production boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -e '
+            .triggers.crons == ["*/5 * * * *"]
+            and .vars.APP_NETWORK == "devnet"
+            and .vars.MAINNET_ENABLED == "false"
+            and (.queues.producers | length) == 1
+            and (.queues.consumers | length) == 1
+            and .queues.consumers[0].max_batch_size == 1
+            and .queues.consumers[0].max_concurrency == 1
+          ' wrangler.jsonc > /dev/null
+
+      - name: Advance aligned history and current state
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ROOT=four-hour-history-maintenance
+          mkdir -p "$ROOT"
+          : > "$ROOT/cycles.ndjson"
+
+          fetch_json() {
+            local branch="$1" path="$2" output="$3"
+            gh api --method GET "repos/${REPOSITORY}/contents/${path}" -f ref="$branch" --jq '.content' \
+              | tr -d '\n' | base64 --decode > "$output"
+            jq -e . "$output" > /dev/null
+          }
+
+          live_head() {
+            jq -n '{method:"ledger",params:[{ledger_index:"validated",transactions:false,expand:false}]}' \
+              | curl --fail-with-body --silent --show-error --retry 3 \
+                  -H 'content-type: application/json' --data-binary @- \
+                  https://devnet.honeycluster.io/ \
+              | jq -r '.result.ledger_index // .result.ledger.ledger_index'
+          }
+
+          wait_new_run() {
+            local workflow="$1" before="$2" output="$3" run_id=''
+            for _ in $(seq 1 90); do
+              gh api "repos/${REPOSITORY}/actions/workflows/${workflow}/runs?event=workflow_dispatch&per_page=100" > "$ROOT/runs-after.json"
+              while IFS= read -r candidate; do
+                if ! grep -Fxq "$candidate" "$before"; then run_id="$candidate"; break; fi
+              done < <(jq -r '.workflow_runs | sort_by(.created_at) | reverse | .[].id' "$ROOT/runs-after.json")
+              test -n "$run_id" && break
+              sleep 10
+            done
+            test -n "$run_id"
+            printf '%s\n' "$run_id" | tee "$output"
+          }
+
+          wait_success() {
+            local run_id="$1" output="$2"
+            for _ in $(seq 1 720); do
+              gh api "repos/${REPOSITORY}/actions/runs/${run_id}" > "$output"
+              status="$(jq -r '.status' "$output")"
+              test "$status" = completed && break
+              sleep 30
+            done
+            test "$(jq -r '.status' "$output")" = completed
+            test "$(jq -r '.conclusion' "$output")" = success
+          }
+
+          source_history="$SOURCE_HISTORY"
+          source_current="$SOURCE_CURRENT"
+          final_history="$SOURCE_HISTORY"
+          final_current="$SOURCE_CURRENT"
+          target_lag=999999999
+
+          for cycle in $(seq 1 "$MAX_CYCLES"); do
+            fetch_json "$source_history" history/publication.json "$ROOT/source-publication.json"
+            fetch_json "$source_current" read-model/manifest.json "$ROOT/source-current.json"
+            source_ledger="$(jq -r '.endLedgerIndex' "$ROOT/source-publication.json")"
+            source_hash="$(jq -r '.endLedgerHash' "$ROOT/source-publication.json")"
+            test "$(jq -r '.complete' "$ROOT/source-publication.json")" = true
+            test "$(jq -r '.complete' "$ROOT/source-current.json")" = true
+            test "$source_ledger" = "$(jq -r '.ledgerIndex' "$ROOT/source-current.json")"
+            test "$source_hash" = "$(jq -r '.ledgerHash' "$ROOT/source-current.json")"
+
+            head="$(live_head)"
+            target_lag=$((head - source_ledger))
+            test "$target_lag" -ge 0
+            if test "$target_lag" -le "$TARGET_MAX_LAG_LEDGERS"; then
+              final_history="$source_history"
+              final_current="$source_current"
+              break
+            fi
+
+            if test $((cycle % 2)) -eq 1; then
+              output_history="$CANDIDATE_A_HISTORY"
+              output_current="$CANDIDATE_A_CURRENT"
+            else
+              output_history="$CANDIDATE_B_HISTORY"
+              output_current="$CANDIDATE_B_CURRENT"
+            fi
+            test "$output_history" != "$source_history"
+            test "$output_current" != "$source_current"
+
+            gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-candidate.yml/runs?event=workflow_dispatch&per_page=100" \
+              --jq '.workflow_runs[].id' > "$ROOT/candidate-before.txt"
+            jq -n --arg ref main \
+              --arg sourceHistory "$source_history" --arg sourceCurrent "$source_current" \
+              --arg outputHistory "$output_history" --arg outputCurrent "$output_current" \
+              --arg maxDelta "$MAX_DELTA_LEDGERS" \
+              '{ref:$ref,inputs:{source_history_branch:$sourceHistory,source_current_state_branch:$sourceCurrent,history_candidate_branch:$outputHistory,current_state_candidate_branch:$outputCurrent,max_delta_ledgers:$maxDelta,segment_ledgers:"500",read_window_size:"4"}}' \
+              > "$ROOT/candidate-dispatch.json"
+            gh api --method POST "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-candidate.yml/dispatches" \
+              --input "$ROOT/candidate-dispatch.json"
+            run_id="$(wait_new_run rolling-checkpoint-candidate.yml "$ROOT/candidate-before.txt" "$ROOT/candidate-run-id.txt")"
+            wait_success "$run_id" "$ROOT/candidate-run.json"
+
+            fetch_json "$output_history" history/publication.json "$ROOT/output-publication.json"
+            fetch_json "$output_current" read-model/manifest.json "$ROOT/output-current.json"
+            output_ledger="$(jq -r '.endLedgerIndex' "$ROOT/output-publication.json")"
+            output_hash="$(jq -r '.endLedgerHash' "$ROOT/output-publication.json")"
+            test "$output_ledger" -gt "$source_ledger"
+            test "$output_ledger" -le $((source_ledger + MAX_DELTA_LEDGERS))
+            test "$output_ledger" = "$(jq -r '.ledgerIndex' "$ROOT/output-current.json")"
+            test "$output_hash" = "$(jq -r '.ledgerHash' "$ROOT/output-current.json")"
+
+            head="$(live_head)"
+            target_lag=$((head - output_ledger))
+            jq -n --argjson cycle "$cycle" --argjson runId "$run_id" \
+              --argjson sourceLedger "$source_ledger" --argjson outputLedger "$output_ledger" \
+              --argjson lag "$target_lag" \
+              '{cycle:$cycle,candidateRunId:$runId,sourceLedger:$sourceLedger,outputLedger:$outputLedger,lagLedgers:$lag}' \
+              >> "$ROOT/cycles.ndjson"
+
+            source_history="$output_history"
+            source_current="$output_current"
+            final_history="$output_history"
+            final_current="$output_current"
+          done
+
+          test "$target_lag" -le "$TARGET_MAX_LAG_LEDGERS"
+
+          if test "$final_history" != "$SOURCE_HISTORY" || test "$final_current" != "$SOURCE_CURRENT"; then
+            gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/runs?event=workflow_dispatch&per_page=100" \
+              --jq '.workflow_runs[].id' > "$ROOT/cutover-before.txt"
+            jq -n --arg ref main --arg history "$final_history" --arg current "$final_current" \
+              '{ref:$ref,inputs:{history_candidate_branch:$history,current_state_candidate_branch:$current,confirm_production_write:true}}' \
+              > "$ROOT/cutover-dispatch.json"
+            gh api --method POST "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/dispatches" \
+              --input "$ROOT/cutover-dispatch.json"
+            cutover_id="$(wait_new_run rolling-checkpoint-live-cutover.yml "$ROOT/cutover-before.txt" "$ROOT/cutover-run-id.txt")"
+            wait_success "$cutover_id" "$ROOT/cutover-run.json"
+          fi
+
+          fetch_json "$SOURCE_HISTORY" history/publication.json "$ROOT/production-publication.json"
+          fetch_json "$SOURCE_CURRENT" read-model/manifest.json "$ROOT/production-current.json"
+          production_ledger="$(jq -r '.endLedgerIndex' "$ROOT/production-publication.json")"
+          production_hash="$(jq -r '.endLedgerHash' "$ROOT/production-publication.json")"
+          test "$production_ledger" = "$(jq -r '.ledgerIndex' "$ROOT/production-current.json")"
+          test "$production_hash" = "$(jq -r '.ledgerHash' "$ROOT/production-current.json")"
+          head="$(live_head)"
+          final_lag=$((head - production_ledger))
+          test "$final_lag" -le "$TARGET_MAX_LAG_LEDGERS"
+
+          overview_http="$(curl --silent --show-error --retry 3 -o "$ROOT/overview.json" -w '%{http_code}' "$PRODUCTION_BASE/api/overview")"
+          diff_http="$(curl --silent --show-error --retry 3 -o "$ROOT/diff.json" -w '%{http_code}' "$PRODUCTION_BASE/api/status/fast-lane-diff?limit=500")"
+          test "$overview_http" = 200
+          test "$diff_http" = 200
+          jq -e '.status == "ok" and .passed == true' "$ROOT/diff.json" > /dev/null
+
+          jq -n --arg checkedAt "$(date -u +%FT%TZ)" --argjson ledger "$production_ledger" \
+            --arg hash "$production_hash" --argjson lag "$final_lag" \
+            '{checkedAt:$checkedAt,passed:true,production:{ledgerIndex:$ledger,ledgerHash:$hash,lagLedgers:$lag},cadence:"four_hours",collectorCadence:"five_minutes"}' \
+            > "$ROOT/summary.json"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: four-hour-history-maintenance
+          path: four-hour-history-maintenance
+          if-no-files-found: warn
+          retention-days: 30
