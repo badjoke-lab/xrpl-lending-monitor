@@ -20,7 +20,7 @@ jobs:
       DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
       GH_TOKEN: ${{ github.token }}
       REPOSITORY: ${{ github.repository }}
-      ISSUE_NUMBER: '957'
+      ISSUE_NUMBER: '958'
     steps:
       - name: Query exact current recovery state
         shell: bash
