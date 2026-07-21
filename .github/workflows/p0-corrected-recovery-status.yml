@@ -1,4 +1,4 @@
-name: P0 pause collector at D1 write limit
+name: P0 compaction preflight diagnostic
 
 on:
   push:
@@ -10,110 +10,34 @@ permissions:
   contents: read
   issues: write
 
-concurrency:
-  group: production-worker-write
-  cancel-in-progress: false
-
 jobs:
-  pause:
+  diagnose:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
       GH_TOKEN: ${{ github.token }}
       REPOSITORY: ${{ github.repository }}
-      ISSUE_NUMBER: '949'
-      PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
     steps:
-      - name: Check out implementation
-        uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24.18.0
-          cache: pnpm
-
-      - run: pnpm install --frozen-lockfile
-
-      - name: Build deployable assets
-        run: pnpm build:deploy-assets
-
-      - name: Build guarded pause configuration
+      - name: Read preflight state
         shell: bash
         run: |
           set -Eeuo pipefail
-          mkdir -p pause-evidence
-          python - <<'PY'
-          import json
-          from pathlib import Path
-
-          source = json.loads(Path('wrangler.jsonc').read_text())
-          assert source['triggers']['crons'] == ['*/5 * * * *']
-          assert source['vars']['APP_NETWORK'] == 'devnet'
-          assert source['vars']['MAINNET_ENABLED'] == 'false'
-          assert source['vars']['REPLACEMENT_BASE_EPOCH_ID'] == 'devnet-3371675'
-          assert source['vars']['REPLACEMENT_BASE_SNAPSHOT_ID'] == 'devnet-3800885-eaa0d29666e7'
-          assert source['vars']['REPLACEMENT_BASE_LEDGER_INDEX'] == '3800885'
-          assert source['vars']['REPLACEMENT_BASE_LEDGER_HASH'] == 'EAA0D29666E73D7594A52DF8000B07F346CD4DA24A9A07549612CDC7D727B700'
-
-          paused = json.loads(json.dumps(source))
-          paused['triggers']['crons'] = []
-          Path('wrangler.pause.jsonc').write_text(json.dumps(paused, indent=2) + '\n')
-          Path('pause-evidence/config.json').write_text(json.dumps({
-              'appNetwork': paused['vars']['APP_NETWORK'],
-              'mainnetEnabled': paused['vars']['MAINNET_ENABLED'],
-              'replacementBaseSnapshotId': paused['vars']['REPLACEMENT_BASE_SNAPSHOT_ID'],
-              'replacementBaseLedgerIndex': paused['vars']['REPLACEMENT_BASE_LEDGER_INDEX'],
-              'replacementBaseLedgerHash': paused['vars']['REPLACEMENT_BASE_LEDGER_HASH'],
-              'crons': paused['triggers']['crons'],
-          }, indent=2) + '\n')
-          PY
-          jq -e '.triggers.crons == [] and .vars.APP_NETWORK == "devnet" and .vars.MAINNET_ENABLED == "false" and .vars.REPLACEMENT_BASE_LEDGER_INDEX == "3800885"' wrangler.pause.jsonc > /dev/null
-
-      - name: Deploy Worker with Cron Triggers removed
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          pnpm exec wrangler deploy --config wrangler.pause.jsonc | tee pause-evidence/deploy.log
-
-      - name: Verify schedules empty and API remains online
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          curl --fail-with-body --silent --show-error --retry 3 \
-            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/xrpl-lending-monitor/schedules" \
-            > pause-evidence/schedules.json
-          jq -e '.success == true and .result.schedules == []' pause-evidence/schedules.json > /dev/null
-
-          overview_status="$(curl --silent --show-error --retry 3 -o pause-evidence/overview.json -w '%{http_code}' "${PRODUCTION_BASE}/api/overview")"
-          history_status="$(curl --silent --show-error --retry 3 -o pause-evidence/history.json -w '%{http_code}' "${PRODUCTION_BASE}/api/status/history-source")"
-          test "$overview_status" = 200
-          test "$history_status" = 200
-          jq -n --argjson passed true --slurpfile config pause-evidence/config.json --slurpfile schedules pause-evidence/schedules.json --arg overviewHttp "$overview_status" --arg historyHttp "$history_status" '{passed:$passed,config:$config[0],schedules:$schedules[0].result.schedules,overviewHttp:$overviewHttp,historyHttp:$historyHttp}' > pause-evidence/summary.json
-
-      - name: Report pause result
+          mkdir -p out
+          q(){ jq -n --arg sql "$1" '{sql:$sql}' | curl -fsS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -H 'Content-Type: application/json' --data-binary @- "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database/${DATABASE_ID}/query"; }
+          q "SELECT base_epoch_id,base_snapshot_id,base_ledger_index,base_ledger_hash FROM fast_lane_shadow_base_binding WHERE network='devnet'" > out/binding.json
+          q "SELECT COUNT(*) AS active_rows FROM current_state_overlay_objects WHERE network='devnet' AND epoch_id='devnet-3371675' AND base_snapshot_id='devnet-3800885-eaa0d29666e7'" > out/active.json
+          q "SELECT COUNT(*) AS stale_rows FROM current_state_overlay_objects WHERE network='devnet' AND NOT (epoch_id='devnet-3371675' AND base_snapshot_id='devnet-3800885-eaa0d29666e7')" > out/stale.json
+          curl -fsS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/xrpl-lending-monitor/schedules" > out/schedules.json
+          d=$(date -u +%F)
+          jq -n --arg q 'query($a:string!,$d:Date,$i:string){viewer{accounts(filter:{accountTag:$a}){d1AnalyticsAdaptiveGroups(limit:10000,filter:{date_geq:$d,date_leq:$d,databaseId:$i}){sum{rowsWritten}}}}}' --arg a "$CLOUDFLARE_ACCOUNT_ID" --arg d "$d" --arg i "$DATABASE_ID" '{query:$q,variables:{a:$a,d:$d,i:$i}}' | curl -fsS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -H 'Content-Type: application/json' --data-binary @- https://api.cloudflare.com/client/v4/graphql > out/usage.json
+          jq -n --slurpfile b out/binding.json --slurpfile a out/active.json --slurpfile s out/stale.json --slurpfile c out/schedules.json --slurpfile u out/usage.json '{binding:$b[0],active:$a[0],stale:$s[0],schedules:$c[0],usage:$u[0]}' > out/summary.json
+      - name: Report
         if: always()
         shell: bash
         run: |
-          test -s pause-evidence/summary.json || echo '{"passed":false}' > pause-evidence/summary.json
-          {
-            echo 'Temporary collector pause result:'
-            echo
-            echo '```json'
-            cat pause-evidence/summary.json
-            echo '```'
-          } > pause-evidence/comment.md
-          gh issue comment "$ISSUE_NUMBER" --repo "$REPOSITORY" --body-file pause-evidence/comment.md
-
-      - name: Upload pause evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: p0-collector-pause-evidence
-          path: pause-evidence
-          if-no-files-found: warn
-          retention-days: 14
+          test -s out/summary.json || echo '{"passed":false}' > out/summary.json
+          { echo 'Compaction preflight diagnostic:'; echo; echo '```json'; cat out/summary.json; echo '```'; } > out/comment.md
+          gh issue comment 950 --repo "$REPOSITORY" --body-file out/comment.md
