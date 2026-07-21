@@ -116,7 +116,31 @@ jobs:
           PHASE=ensure_candidate_action
           ACTION_PATH=.github/actions/rolling-checkpoint-candidate/action.yml
           ACTION_API="repos/${REPOSITORY}/contents/${ACTION_PATH}"
-          if ! gh api "$ACTION_API" --jq .content 2>/dev/null | tr -d '\n' | base64 --decode > "$ROOT/action.yml"; then
+          if gh api "$ACTION_API" --jq .content 2>/dev/null | tr -d '\n' | base64 --decode > "$ROOT/action.yml"; then
+            python3 - <<'PY'
+          from pathlib import Path
+          path = Path('.local/four-hour-maintenance/action.yml')
+          text = path.read_text()
+          old = '    - run: pnpm install --frozen-lockfile\n'
+          new = '    - shell: bash\n      run: pnpm install --frozen-lockfile\n'
+          changed = False
+          if old in text:
+              text = text.replace(old, new, 1)
+              changed = True
+          if 'https://devnet.honeycluster.io/' in text:
+              raise SystemExit('Honeycluster endpoint remained in composite action')
+          if text.count('https://s.devnet.rippletest.net:51234/') < 3:
+              raise SystemExit('Ripple endpoint missing in composite action')
+          path.write_text(text)
+          Path('.local/four-hour-maintenance/action-changed').write_text('true\n' if changed else 'false\n')
+          PY
+            if test "$(cat "$ROOT/action-changed")" = true; then
+              sha="$(gh api "$ACTION_API" --jq .sha)"
+              content="$(base64 -w0 "$ROOT/action.yml")"
+              gh api --method PUT "$ACTION_API" -f message='fix: declare shell for composite install step' -f content="$content" -f sha="$sha" -f branch=main >/dev/null
+              sleep 3
+            fi
+          else
             CANDIDATE_API="repos/${REPOSITORY}/contents/.github/workflows/rolling-checkpoint-candidate.yml"
             gh api "$CANDIDATE_API" --jq .content | tr -d '\n' | base64 --decode > "$ROOT/candidate.yml"
             python3 - <<'PY'
