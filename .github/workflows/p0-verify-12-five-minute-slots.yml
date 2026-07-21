@@ -32,7 +32,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: Verify schedule, D1 identity, storage, and twelve exact slots
+      - name: Collect exact recovery evidence
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -55,39 +55,17 @@ jobs:
             -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
             "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/xrpl-lending-monitor/schedules" \
             > verification-evidence/schedules.json
-          jq -e '.success == true and (.result.schedules | length == 1) and .result.schedules[0].cron == "*/5 * * * *"' verification-evidence/schedules.json > /dev/null
-
           curl --fail-with-body --silent --show-error --retry 3 \
             -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
             "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database/${DATABASE_ID}" \
             > verification-evidence/database.json
-          database_bytes="$(jq -r '.result.file_size' verification-evidence/database.json)"
-          test "$database_bytes" -lt 400000000
 
           query_d1 "SELECT base_epoch_id,base_snapshot_id,base_ledger_index,base_ledger_hash FROM fast_lane_shadow_base_binding WHERE network='devnet'" verification-evidence/binding.json
-          jq -e --arg epoch "$TARGET_EPOCH" --arg snapshot "$TARGET_SNAPSHOT" --argjson ledger "$TARGET_LEDGER" --arg hash "$TARGET_HASH" '
-            .result[0].results | length == 1
-            and .[0].base_epoch_id == $epoch
-            and .[0].base_snapshot_id == $snapshot
-            and .[0].base_ledger_index == $ledger
-            and .[0].base_ledger_hash == $hash
-          ' verification-evidence/binding.json > /dev/null
-
           query_d1 "SELECT COUNT(*) AS total_rows,COALESCE(SUM(LENGTH(projection_json)),0) AS total_payload_bytes FROM current_state_overlay_objects WHERE network='devnet'" verification-evidence/overlay.json
           query_d1 "SELECT COUNT(*) AS stale_rows FROM current_state_overlay_objects WHERE network='devnet' AND NOT (epoch_id='${TARGET_EPOCH}' AND base_snapshot_id='${TARGET_SNAPSHOT}')" verification-evidence/stale.json
           query_d1 "SELECT COUNT(*) AS state_rows,MAX(overlay_ledger_index) AS overlay_ledger_index FROM current_state_overlay_state WHERE network='devnet'" verification-evidence/state.json
           query_d1 "SELECT COUNT(*) AS compact_rows FROM fast_lane_shadow_objects_compact WHERE network='devnet'" verification-evidence/compact.json
           query_d1 "SELECT COUNT(*) AS foldable_fast_rows FROM fast_lane_shadow_objects_compact AS fast WHERE fast.network='devnet' AND EXISTS (SELECT 1 FROM current_state_overlay_objects AS overlay JOIN fast_lane_shadow_base_binding AS binding ON binding.network='devnet' WHERE overlay.network='devnet' AND overlay.epoch_id=binding.base_epoch_id AND overlay.base_snapshot_id=binding.base_snapshot_id AND overlay.object_type=fast.object_type AND overlay.object_id=fast.object_id AND (overlay.source_ledger_index>fast.source_ledger_index OR (overlay.source_ledger_index=fast.source_ledger_index AND overlay.source_transaction_index>=fast.source_transaction_index)))" verification-evidence/foldable.json
-
-          total_rows="$(jq -r '.result[0].results[0].total_rows' verification-evidence/overlay.json)"
-          total_payload="$(jq -r '.result[0].results[0].total_payload_bytes' verification-evidence/overlay.json)"
-          test "$total_rows" -gt 0
-          test "$total_rows" -lt 10000
-          test "$total_payload" -lt 12000000
-          test "$(jq -r '.result[0].results[0].stale_rows' verification-evidence/stale.json)" = 0
-          test "$(jq -r '.result[0].results[0].state_rows' verification-evidence/state.json)" = 1
-          test "$(jq -r '.result[0].results[0].compact_rows' verification-evidence/compact.json)" = 0
-          test "$(jq -r '.result[0].results[0].foldable_fast_rows' verification-evidence/foldable.json)" = 0
 
           SLOTS_SQL=$(cat <<'SQL'
           WITH base AS (
@@ -112,15 +90,8 @@ jobs:
             FROM base
           ), terminal AS (
             SELECT
-              slot_id,
-              run_at,
-              status,
-              end_ledger_index,
-              latest_observed_ledger,
-              lag_ledgers,
-              error_message,
-              runs_in_slot,
-              errors_in_slot,
+              slot_id, run_at, status, end_ledger_index, latest_observed_ledger,
+              lag_ledgers, error_message, runs_in_slot, errors_in_slot,
               CAST(strftime('%s','now') AS INTEGER) - CAST(strftime('%s',run_at) AS INTEGER) AS age_seconds
             FROM ranked
             WHERE terminal_rank=1
@@ -132,43 +103,57 @@ jobs:
           )
           query_d1 "$SLOTS_SQL" verification-evidence/slots.json
 
-          jq -e '
-            .result[0].results as $slots
-            | ($slots | length) == 12
-            and (($slots[11].slot_id - $slots[0].slot_id) == 11)
-            and ($slots | all(
-              (.status == "committed" or .status == "caught_up")
-              and .lag_ledgers == 0
-              and .error_message == null
-              and .errors_in_slot == 0
-              and (.end_ledger_index | type == "number")
-            ))
-            and ($slots[11].age_seconds >= 0 and $slots[11].age_seconds <= 600)
-          ' verification-evidence/slots.json > /dev/null
-
           overview_status="$(curl --silent --show-error --retry 3 -o verification-evidence/overview.json -w '%{http_code}' "${PRODUCTION_BASE}/api/overview")"
           history_status="$(curl --silent --show-error --retry 3 -o verification-evidence/history.json -w '%{http_code}' "${PRODUCTION_BASE}/api/status/history-source")"
-          test "$overview_status" = 200
-          test "$history_status" = 200
 
           jq -n \
-            --argjson passed true \
-            --argjson databaseBytes "$database_bytes" \
-            --argjson overlayRows "$total_rows" \
-            --argjson overlayPayloadBytes "$total_payload" \
+            --argjson databaseBytes "$(jq -r '.result.file_size' verification-evidence/database.json)" \
+            --argjson overlayRows "$(jq -r '.result[0].results[0].total_rows' verification-evidence/overlay.json)" \
+            --argjson overlayPayloadBytes "$(jq -r '.result[0].results[0].total_payload_bytes' verification-evidence/overlay.json)" \
+            --argjson staleRows "$(jq -r '.result[0].results[0].stale_rows' verification-evidence/stale.json)" \
+            --argjson stateRows "$(jq -r '.result[0].results[0].state_rows' verification-evidence/state.json)" \
             --argjson overlayLedger "$(jq -r '.result[0].results[0].overlay_ledger_index' verification-evidence/state.json)" \
+            --argjson compactRows "$(jq -r '.result[0].results[0].compact_rows' verification-evidence/compact.json)" \
+            --argjson foldableRows "$(jq -r '.result[0].results[0].foldable_fast_rows' verification-evidence/foldable.json)" \
             --slurpfile slots verification-evidence/slots.json \
             --slurpfile schedule verification-evidence/schedules.json \
+            --slurpfile binding verification-evidence/binding.json \
             --arg overviewHttp "$overview_status" \
-            --arg historyHttp "$history_status" \
-            '{passed:$passed,verification:"12_consecutive_exact_five_minute_slots",databaseBytes:$databaseBytes,overlayRows:$overlayRows,overlayPayloadBytes:$overlayPayloadBytes,overlayLedger:$overlayLedger,slots:$slots[0].result[0].results,schedules:$schedule[0].result.schedules,overviewHttp:$overviewHttp,historyHttp:$historyHttp,base:{epochId:"devnet-3371675",snapshotId:"devnet-3800885-eaa0d29666e7",ledgerIndex:3800885,ledgerHash:"EAA0D29666E73D7594A52DF8000B07F346CD4DA24A9A07549612CDC7D727B700"}}' \
-            > verification-evidence/summary.json
+            --arg historyHttp "$history_status" '
+              ($schedule[0].success == true and ($schedule[0].result.schedules | length == 1) and $schedule[0].result.schedules[0].cron == "*/5 * * * *") as $scheduleOk
+              | ($databaseBytes < 400000000) as $databaseOk
+              | ($binding[0].result[0].results | length == 1
+                 and $binding[0].result[0].results[0].base_epoch_id == "devnet-3371675"
+                 and $binding[0].result[0].results[0].base_snapshot_id == "devnet-3800885-eaa0d29666e7"
+                 and $binding[0].result[0].results[0].base_ledger_index == 3800885
+                 and $binding[0].result[0].results[0].base_ledger_hash == "EAA0D29666E73D7594A52DF8000B07F346CD4DA24A9A07549612CDC7D727B700") as $bindingOk
+              | ($overlayRows > 0 and $overlayRows < 10000 and $overlayPayloadBytes < 12000000) as $overlayOk
+              | ($staleRows == 0) as $staleOk
+              | ($stateRows == 1) as $stateOk
+              | ($compactRows == 0) as $compactOk
+              | ($foldableRows == 0) as $foldableOk
+              | ($slots[0].result[0].results) as $slotRows
+              | (($slotRows | length) == 12) as $slotCountOk
+              | (if ($slotRows | length) == 12 then (($slotRows[11].slot_id - $slotRows[0].slot_id) == 11) else false end) as $slotContinuityOk
+              | ($slotRows | all((.status == "committed" or .status == "caught_up") and .lag_ledgers == 0 and .error_message == null and .errors_in_slot == 0 and (.end_ledger_index | type == "number"))) as $slotContentOk
+              | (if ($slotRows | length) > 0 then ($slotRows[-1].age_seconds >= 0 and $slotRows[-1].age_seconds <= 600) else false end) as $freshOk
+              | ($overviewHttp == "200" and $historyHttp == "200") as $apiOk
+              | {
+                  passed: ($scheduleOk and $databaseOk and $bindingOk and $overlayOk and $staleOk and $stateOk and $compactOk and $foldableOk and $slotCountOk and $slotContinuityOk and $slotContentOk and $freshOk and $apiOk),
+                  verification:"12_consecutive_exact_five_minute_slots",
+                  checks:{scheduleOk:$scheduleOk,databaseOk:$databaseOk,bindingOk:$bindingOk,overlayOk:$overlayOk,staleOk:$staleOk,stateOk:$stateOk,compactOk:$compactOk,foldableOk:$foldableOk,slotCountOk:$slotCountOk,slotContinuityOk:$slotContinuityOk,slotContentOk:$slotContentOk,freshOk:$freshOk,apiOk:$apiOk},
+                  databaseBytes:$databaseBytes,overlayRows:$overlayRows,overlayPayloadBytes:$overlayPayloadBytes,staleRows:$staleRows,stateRows:$stateRows,overlayLedger:$overlayLedger,compactRows:$compactRows,foldableRows:$foldableRows,slots:$slotRows,schedules:$schedule[0].result.schedules,overviewHttp:$overviewHttp,historyHttp:$historyHttp,
+                  base:$binding[0].result[0].results[0]
+                }
+            ' > verification-evidence/summary.json
+
+          jq -e '.passed == true' verification-evidence/summary.json > /dev/null
 
       - name: Report verification result
         if: always()
         shell: bash
         run: |
-          test -s verification-evidence/summary.json || echo '{"passed":false,"verification":"12_consecutive_exact_five_minute_slots"}' > verification-evidence/summary.json
+          test -s verification-evidence/summary.json || echo '{"passed":false,"verification":"12_consecutive_exact_five_minute_slots","reason":"evidence collection failed before summary"}' > verification-evidence/summary.json
           {
             echo 'Twelve-slot recovery verification result:'
             echo
