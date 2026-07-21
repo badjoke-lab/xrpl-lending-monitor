@@ -1,0 +1,83 @@
+name: P0 isolated pre-soak diagnostic
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/p0-isolated-pre-soak-diagnostic-trigger
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+      ISSUE_NUMBER: '961'
+      PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+    steps:
+      - name: Capture diagnostic
+        shell: bash
+        run: |
+          set -u
+          mkdir -p isolated
+
+          curl --silent --show-error -o isolated/subscriptions.json -w '%{http_code}' \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/subscriptions" > isolated/subscriptions.status || true
+
+          curl --silent --show-error -o isolated/diff.json -w '%{http_code}' \
+            "${PRODUCTION_BASE}/api/status/fast-lane-diff?limit=500" > isolated/diff.status || true
+
+          jq -n --arg sql "SELECT COUNT(*) AS metric_rows,MAX(run_at) AS latest_run_at FROM fast_lane_shadow_run_metrics WHERE network='devnet'" '{sql:$sql}' \
+            | curl --silent --show-error -o isolated/d1.json -w '%{http_code}' \
+                -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+                -H 'Content-Type: application/json' --data-binary @- \
+                "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database/${DATABASE_ID}/query" > isolated/d1.status || true
+
+          today="$(date -u +%F)"
+          read -r -d '' q <<'GRAPHQL' || true
+          query D1Usage($accountTag:string!,$start:Date,$end:Date,$databaseId:string){viewer{accounts(filter:{accountTag:$accountTag}){d1AnalyticsAdaptiveGroups(limit:10000,filter:{date_geq:$start,date_leq:$end,databaseId:$databaseId}){sum{rowsRead rowsWritten}}}}}
+          GRAPHQL
+          jq -n --arg query "$q" --arg accountTag "$CLOUDFLARE_ACCOUNT_ID" --arg start "$today" --arg end "$today" --arg databaseId "$DATABASE_ID" '{query:$query,variables:{accountTag:$accountTag,start:$start,end:$end,databaseId:$databaseId}}' > isolated/usage-request.json
+          curl --silent --show-error -o isolated/usage.json -w '%{http_code}' -X POST \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -H 'content-type: application/json' \
+            --data @isolated/usage-request.json https://api.cloudflare.com/client/v4/graphql > isolated/usage.status || true
+
+          jq 'if .success==true then [.result[]? | {id,status,frequency,rate_plan:(.rate_plan // {} | {id,public_name,currency,externally_managed})}] else {success,errors} end' isolated/subscriptions.json > isolated/subscriptions-sanitized.json 2>/dev/null || echo '{}' > isolated/subscriptions-sanitized.json
+          jq '{status,passed,sample,fast_lane_diff:.fast_lane_diff,base_binding:.base_binding,error,message}' isolated/diff.json > isolated/diff-sanitized.json 2>/dev/null || cp isolated/diff.json isolated/diff-sanitized.json
+
+          rows_read="$(jq '[.data.viewer.accounts[0].d1AnalyticsAdaptiveGroups[].sum.rowsRead // 0] | add // 0' isolated/usage.json 2>/dev/null || echo null)"
+          rows_written="$(jq '[.data.viewer.accounts[0].d1AnalyticsAdaptiveGroups[].sum.rowsWritten // 0] | add // 0' isolated/usage.json 2>/dev/null || echo null)"
+          d1_success="$(jq '.success==true and ((.errors // [])|length)==0 and ([.result[].success]|all)' isolated/d1.json 2>/dev/null || echo false)"
+
+          jq -n --arg subscriptionsHttp "$(cat isolated/subscriptions.status)" --arg diffHttp "$(cat isolated/diff.status)" --arg d1Http "$(cat isolated/d1.status)" --arg usageHttp "$(cat isolated/usage.status)" --argjson rowsRead "$rows_read" --argjson rowsWritten "$rows_written" --argjson d1QuerySucceeded "$d1_success" --slurpfile subscriptions isolated/subscriptions-sanitized.json --slurpfile diff isolated/diff-sanitized.json --slurpfile d1 isolated/d1.json '{subscriptionsHttp:$subscriptionsHttp,subscriptions:$subscriptions[0],d1UsageHttp:$usageHttp,d1Today:{rowsRead:$rowsRead,rowsWritten:$rowsWritten},liveD1QueryHttp:$d1Http,liveD1QuerySucceeded:$d1QuerySucceeded,liveD1Query:$d1[0],diffHttp:$diffHttp,diff:$diff[0]}' > isolated/summary.json
+
+      - name: Report
+        if: always()
+        shell: bash
+        run: |
+          test -s isolated/summary.json || echo '{"diagnostic":"failed before summary"}' > isolated/summary.json
+          {
+            echo 'Isolated pre-soak diagnostic:'
+            echo
+            echo '```json'
+            cat isolated/summary.json
+            echo '```'
+          } > isolated/comment.md
+          gh issue comment "$ISSUE_NUMBER" --repo "$REPOSITORY" --body-file isolated/comment.md
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: p0-isolated-pre-soak-diagnostic
+          path: isolated
+          if-no-files-found: warn
+          retention-days: 14
