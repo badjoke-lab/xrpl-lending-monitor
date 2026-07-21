@@ -65,13 +65,44 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Run bounded candidate implementation
-        uses: ./.github/actions/rolling-checkpoint-candidate
+      - name: Check out source history
+        uses: actions/checkout@v4
         with:
-          source_history_branch: ${{ inputs.source_history_branch }}
-          source_current_state_branch: ${{ inputs.source_current_state_branch }}
-          history_candidate_branch: ${{ inputs.history_candidate_branch }}
-          current_state_candidate_branch: ${{ inputs.current_state_candidate_branch }}
-          max_delta_ledgers: ${{ inputs.max_delta_ledgers }}
-          segment_ledgers: ${{ inputs.segment_ledgers }}
-          read_window_size: ${{ inputs.read_window_size }}
+          ref: ${{ inputs.source_history_branch }}
+          path: .local/history-root
+          sparse-checkout: history
+          sparse-checkout-cone-mode: true
+
+      - name: Check out source current state
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_current_state_branch }}
+          path: .local/current-state-root
+          sparse-checkout: |
+            read-model
+            rolling-base
+          sparse-checkout-cone-mode: true
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Run bounded candidate implementation
+        shell: bash
+        run: bash .github/scripts/run-rolling-checkpoint-candidate.sh
+
+      - name: Upload retained rolling checkpoint candidate evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: rolling-checkpoint-candidate
+          path: rolling-checkpoint-candidate
+          if-no-files-found: warn
+          retention-days: 30
