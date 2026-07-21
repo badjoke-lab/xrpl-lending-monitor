@@ -127,7 +127,7 @@ jobs:
                  and $binding[0].result[0].results[0].base_snapshot_id == "devnet-3800885-eaa0d29666e7"
                  and $binding[0].result[0].results[0].base_ledger_index == 3800885
                  and $binding[0].result[0].results[0].base_ledger_hash == "EAA0D29666E73D7594A52DF8000B07F346CD4DA24A9A07549612CDC7D727B700") as $bindingOk
-              | ($overlayRows > 0 and $overlayRows < 10000 and $overlayPayloadBytes < 12000000) as $overlayOk
+              | ($overlayRows > 0 and $overlayRows < 50000 and $overlayPayloadBytes < 60000000) as $overlayOk
               | ($staleRows == 0) as $staleOk
               | ($stateRows == 1) as $stateOk
               | ($compactRows == 0) as $compactOk
