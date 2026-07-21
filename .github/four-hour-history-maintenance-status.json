@@ -1,11 +1,11 @@
 {
   "state": "running",
-  "phase": "cycle_6_verify_candidate",
-  "message": "candidate cycle 6 completed",
-  "checkedAt": "2026-07-21T19:15:43Z",
+  "phase": "cycle_7_candidate_29860768775",
+  "message": "candidate run 29860768775 is active",
+  "checkedAt": "2026-07-21T19:16:01Z",
   "runId": "29849538461",
   "commit": "0ce03152ff7135d450c4b1bb0c3bfc101de816b5",
-  "childRunId": "29858678594",
+  "childRunId": "29860768775",
   "collectorCadence": "five_minutes",
   "historyCadence": "four_hours",
   "summary": {
