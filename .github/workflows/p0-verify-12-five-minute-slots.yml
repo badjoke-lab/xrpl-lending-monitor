@@ -20,7 +20,7 @@ env:
   DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
   GH_TOKEN: ${{ github.token }}
   REPOSITORY: ${{ github.repository }}
-  ISSUE_NUMBER: '950'
+  ISSUE_NUMBER: '958'
   TARGET_EPOCH: devnet-3371675
   TARGET_SNAPSHOT: devnet-3800885-eaa0d29666e7
   TARGET_LEDGER: '3800885'
