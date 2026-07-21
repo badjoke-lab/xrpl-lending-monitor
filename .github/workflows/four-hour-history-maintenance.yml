@@ -122,11 +122,25 @@ jobs:
           }
 
           live_head() {
-            jq -n '{method:"ledger",params:[{ledger_index:"validated",transactions:false,expand:false}]}' \
-              | curl --fail-with-body --silent --show-error --retry 3 \
-                  -H 'content-type: application/json' --data-binary @- \
-                  https://devnet.honeycluster.io/ \
-              | jq -r '.result.ledger_index // .result.ledger.ledger_index'
+            local request endpoint response head attempt
+            request="$ROOT/live-head-request.json"
+            jq -n '{method:"ledger",params:[{ledger_index:"validated",transactions:false,expand:false}]}' > "$request"
+            attempt=0
+            for endpoint in 'https://devnet.honeycluster.io/' 'https://s.devnet.rippletest.net:51234/'; do
+              attempt=$((attempt + 1))
+              response="$ROOT/live-head-response-${attempt}.json"
+              if curl --fail-with-body --silent --show-error --retry 4 --retry-all-errors \
+                --connect-timeout 10 --max-time 45 \
+                -H 'content-type: application/json' --data-binary @"$request" \
+                "$endpoint" > "$response"; then
+                head="$(jq -r '.result.ledger_index // .result.ledger.ledger_index // empty' "$response")"
+                if printf '%s' "$head" | grep -Eq '^[0-9]+$'; then
+                  printf '%s\n' "$head"
+                  return 0
+                fi
+              fi
+            done
+            return 1
           }
 
           wait_new_run() {
@@ -186,6 +200,7 @@ jobs:
             test "$source_ledger" = "$(jq -r '.ledgerIndex' "$ROOT/source-current.json")"
             test "$source_hash" = "$(jq -r '.ledgerHash' "$ROOT/source-current.json")"
 
+            PHASE="candidate_cycle_${cycle}_live_head"
             head="$(live_head)"
             target_lag=$((head - source_ledger))
             test "$target_lag" -ge 0
