@@ -1,10 +1,10 @@
 {
-  "state": "failed",
-  "phase": "candidate_cycle_1_child_29846577974",
-  "message": "exit 1",
-  "checkedAt": "2026-07-21T16:00:07Z",
-  "runId": "29846564178",
-  "commit": "dd0dfd7106db43c4157a753f3cdd8a7e2f290aaf",
+  "state": "running",
+  "phase": "initialize",
+  "message": "maintenance started",
+  "checkedAt": "2026-07-21T16:06:22Z",
+  "runId": "29847081750",
+  "commit": "18761d4d30a8ea6f78c9bfc13b0fd24b3bac746c",
   "collectorCadence": "five_minutes",
   "historyCadence": "four_hours"
 }
