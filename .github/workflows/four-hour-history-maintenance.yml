@@ -30,316 +30,209 @@ jobs:
       CANDIDATE_A_CURRENT: current-state-four-hour-a-data
       CANDIDATE_B_HISTORY: history-four-hour-b-data
       CANDIDATE_B_CURRENT: current-state-four-hour-b-data
-      MAX_DELTA_LEDGERS: '5000'
-      TARGET_MAX_LAG_LEDGERS: '720'
-      MAX_CYCLES: '8'
+      MAX_DELTA: '5000'
+      MAX_LAG: '720'
       PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      D1_DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
     steps:
       - uses: actions/checkout@v4
 
-      - name: Advance aligned history and current state
+      - name: Maintain aligned history and current state
         shell: bash
         run: |
           set -Eeuo pipefail
-          ROOT=four-hour-history-maintenance
-          STATUS_PATH=.github/four-hour-history-maintenance-status.json
+          ROOT=.local/four-hour-maintenance
+          STATUS=.github/four-hour-history-maintenance-status.json
           PHASE=initialize
           mkdir -p "$ROOT"
           : > "$ROOT/cycles.ndjson"
 
-          publish_status() {
-            local state="$1" phase="$2" message="${3:-}"
-            local now source_ledger source_hash current_ledger current_hash
-            now="$(date -u +%FT%TZ)"
-            source_ledger="$(jq -r '.endLedgerIndex // null' "$ROOT/source-publication.json" 2>/dev/null || echo null)"
-            source_hash="$(jq -r '.endLedgerHash // ""' "$ROOT/source-publication.json" 2>/dev/null || true)"
-            current_ledger="$(jq -r '.ledgerIndex // null' "$ROOT/source-current.json" 2>/dev/null || echo null)"
-            current_hash="$(jq -r '.ledgerHash // ""' "$ROOT/source-current.json" 2>/dev/null || true)"
-            jq -n \
-              --arg state "$state" --arg phase "$phase" --arg message "$message" \
-              --arg checkedAt "$now" --arg runId "${GITHUB_RUN_ID}" --arg runAttempt "${GITHUB_RUN_ATTEMPT}" \
-              --arg commit "${GITHUB_SHA}" --argjson sourceLedger "${source_ledger:-null}" \
-              --arg sourceHash "$source_hash" --argjson currentLedger "${current_ledger:-null}" \
-              --arg currentHash "$current_hash" \
-              '{state:$state,phase:$phase,message:$message,checkedAt:$checkedAt,runId:$runId,runAttempt:$runAttempt,commit:$commit,source:{historyLedger:$sourceLedger,historyHash:$sourceHash,currentLedger:$currentLedger,currentHash:$currentHash},collectorCadence:"five_minutes",historyCadence:"four_hours"}' \
+          put_status() {
+            local state="$1" message="$2" api sha content
+            jq -n --arg state "$state" --arg phase "$PHASE" --arg message "$message" \
+              --arg checkedAt "$(date -u +%FT%TZ)" --arg runId "$GITHUB_RUN_ID" \
+              --arg commit "$GITHUB_SHA" \
+              '{state:$state,phase:$phase,message:$message,checkedAt:$checkedAt,runId:$runId,commit:$commit,collectorCadence:"five_minutes",historyCadence:"four_hours"}' \
               > "$ROOT/status.json"
-            if test -s "$ROOT/summary.json"; then
-              jq -s '.[0] + {summary:.[1]}' "$ROOT/status.json" "$ROOT/summary.json" > "$ROOT/status-next.json"
-              mv "$ROOT/status-next.json" "$ROOT/status.json"
+            api="repos/${REPOSITORY}/contents/${STATUS}"
+            sha="$(gh api "$api" --jq .sha 2>/dev/null || true)"
+            content="$(base64 -w0 "$ROOT/status.json")"
+            if test -n "$sha"; then
+              gh api --method PUT "$api" -f message="ops: four-hour maintenance ${state}" -f content="$content" -f sha="$sha" -f branch=main >/dev/null
+            else
+              gh api --method PUT "$api" -f message="ops: four-hour maintenance ${state}" -f content="$content" -f branch=main >/dev/null
             fi
-            local api encoded sha
-            api="repos/${REPOSITORY}/contents/${STATUS_PATH}"
-            encoded="$(base64 -w0 "$ROOT/status.json")"
-            for attempt in 1 2 3 4 5; do
-              sha="$(gh api "$api" --jq .sha 2>/dev/null || true)"
-              if test -n "$sha"; then
-                if gh api --method PUT "$api" -f message="ops: record four-hour maintenance ${state}" -f content="$encoded" -f sha="$sha" -f branch=main >/dev/null; then
-                  return 0
-                fi
-              else
-                if gh api --method PUT "$api" -f message="ops: record four-hour maintenance ${state}" -f content="$encoded" -f branch=main >/dev/null; then
-                  return 0
-                fi
-              fi
-              sleep $((attempt * 2))
-            done
-            return 1
           }
 
           finish() {
             local code=$?
             trap - EXIT
             set +e
-            if test "$code" -eq 0; then
-              publish_status passed complete "history/current-state maintenance completed"
-            else
-              publish_status failed "$PHASE" "maintenance exited with code ${code}"
-            fi
+            if test "$code" -eq 0; then put_status passed 'maintenance completed'; else put_status failed "exit ${code}"; fi
             exit "$code"
           }
           trap finish EXIT
-          publish_status running "$PHASE" "maintenance started"
-
-          PHASE=validate_boundary
-          jq -e '
-            .triggers.crons == ["*/5 * * * *"]
-            and .vars.APP_NETWORK == "devnet"
-            and .vars.MAINNET_ENABLED == "false"
-            and (.queues.producers | length) == 1
-            and (.queues.consumers | length) == 1
-            and .queues.consumers[0].max_batch_size == 1
-            and .queues.consumers[0].max_concurrency == 1
-          ' wrangler.jsonc > /dev/null
+          put_status running 'maintenance started'
 
           fetch_json() {
-            local branch="$1" path="$2" output="$3"
-            gh api --method GET "repos/${REPOSITORY}/contents/${path}" -f ref="$branch" --jq '.content' \
-              | tr -d '\n' | base64 --decode > "$output"
-            jq -e . "$output" > /dev/null
+            gh api --method GET "repos/${REPOSITORY}/contents/$2" -f ref="$1" --jq .content \
+              | tr -d '\n' | base64 --decode > "$3"
+            jq -e . "$3" >/dev/null
           }
 
           live_head() {
-            local request endpoint response head attempt
-            request="$ROOT/live-head-request.json"
-            jq -n '{method:"ledger",params:[{ledger_index:"validated",transactions:false,expand:false}]}' > "$request"
-            attempt=0
-            for endpoint in 'https://devnet.honeycluster.io/' 'https://s.devnet.rippletest.net:51234/'; do
-              attempt=$((attempt + 1))
-              response="$ROOT/live-head-response-${attempt}.json"
-              if curl --fail-with-body --silent --show-error --retry 4 --retry-all-errors \
-                --connect-timeout 10 --max-time 45 \
-                -H 'content-type: application/json' --data-binary @"$request" \
-                "$endpoint" > "$response"; then
-                head="$(jq -r '.result.ledger_index // .result.ledger.ledger_index // empty' "$response")"
-                if printf '%s' "$head" | grep -Eq '^[0-9]+$'; then
-                  printf '%s\n' "$head"
-                  return 0
-                fi
-              fi
-            done
-            return 1
+            jq -n '{method:"ledger",params:[{ledger_index:"validated",transactions:false,expand:false}]}' \
+              | curl --fail-with-body --silent --show-error --retry 5 --retry-all-errors \
+                  --connect-timeout 10 --max-time 45 -H 'content-type: application/json' \
+                  --data-binary @- https://s.devnet.rippletest.net:51234/ \
+              | jq -er '.result.ledger_index // .result.ledger.ledger_index'
           }
 
           wait_new_run() {
-            local workflow="$1" before="$2" output="$3" run_id=''
+            local workflow="$1" before="$2" run_id=''
             for _ in $(seq 1 90); do
-              gh api "repos/${REPOSITORY}/actions/workflows/${workflow}/runs?event=workflow_dispatch&per_page=100" > "$ROOT/runs-after.json"
-              while IFS= read -r candidate; do
-                if ! grep -Fxq "$candidate" "$before"; then run_id="$candidate"; break; fi
-              done < <(jq -r '.workflow_runs | sort_by(.created_at) | reverse | .[].id' "$ROOT/runs-after.json")
+              while IFS= read -r id; do
+                if ! grep -Fxq "$id" "$before"; then run_id="$id"; break; fi
+              done < <(gh api "repos/${REPOSITORY}/actions/workflows/${workflow}/runs?event=workflow_dispatch&per_page=100" --jq '.workflow_runs | sort_by(.created_at) | reverse | .[].id')
               test -n "$run_id" && break
-              sleep 10
+              sleep 5
             done
             test -n "$run_id"
-            printf '%s\n' "$run_id" | tee "$output"
+            printf '%s\n' "$run_id"
           }
 
           wait_success() {
-            local run_id="$1" output="$2"
+            local id="$1" json="$ROOT/run-${id}.json"
             for _ in $(seq 1 720); do
-              gh api "repos/${REPOSITORY}/actions/runs/${run_id}" > "$output"
-              test "$(jq -r '.status' "$output")" = completed && break
+              gh api "repos/${REPOSITORY}/actions/runs/${id}" > "$json"
+              test "$(jq -r .status "$json")" = completed && break
               sleep 30
             done
-            test "$(jq -r '.status' "$output")" = completed
-            test "$(jq -r '.conclusion' "$output")" = success
+            test "$(jq -r .conclusion "$json")" = success
           }
 
-          repair_candidate_endpoint() {
-            local api sha encoded
-            api="repos/${REPOSITORY}/contents/.github/workflows/rolling-checkpoint-candidate.yml"
-            gh api "$api" --jq '.content' | tr -d '\n' | base64 --decode > "$ROOT/rolling-checkpoint-candidate.yml"
+          PHASE=validate_boundary
+          jq -e '.triggers.crons == ["*/5 * * * *"] and .vars.APP_NETWORK == "devnet" and .vars.MAINNET_ENABLED == "false" and .queues.consumers[0].max_batch_size == 1 and .queues.consumers[0].max_concurrency == 1' wrangler.jsonc >/dev/null
+
+          PHASE=ensure_candidate_action
+          ACTION_PATH=.github/actions/rolling-checkpoint-candidate/action.yml
+          ACTION_API="repos/${REPOSITORY}/contents/${ACTION_PATH}"
+          if ! gh api "$ACTION_API" --jq .content 2>/dev/null | tr -d '\n' | base64 --decode > "$ROOT/action.yml"; then
+            CANDIDATE_API="repos/${REPOSITORY}/contents/.github/workflows/rolling-checkpoint-candidate.yml"
+            gh api "$CANDIDATE_API" --jq .content | tr -d '\n' | base64 --decode > "$ROOT/candidate.yml"
             python3 - <<'PY'
           from pathlib import Path
-          path = Path('four-hour-history-maintenance/rolling-checkpoint-candidate.yml')
-          text = path.read_text()
+          import re
+          root = Path('.local/four-hour-maintenance')
+          source = root.joinpath('candidate.yml').read_text()
           old = 'https://devnet.honeycluster.io/'
           new = 'https://s.devnet.rippletest.net:51234/'
-          count = text.count(old)
-          if count == 0:
-              Path('four-hour-history-maintenance/candidate-endpoint-unchanged').write_text('already repaired\n')
-          else:
-              if count < 3:
-                  raise SystemExit(f'expected at least 3 Honeycluster references, found {count}')
-              path.write_text(text.replace(old, new))
-              Path('four-hour-history-maintenance/candidate-endpoint-repaired').write_text(f'{count} replacements\n')
+          if source.count(old) < 3:
+              raise SystemExit('candidate template does not contain expected endpoints')
+          source = source.replace(old, new)
+          steps = source.split('    steps:\n', 1)[1]
+          steps, count = re.subn(
+              r"      - name: Check out implementation\n        uses: actions/checkout@v4\n        with:\n          fetch-depth: 1\n\n",
+              '', steps, count=1)
+          if count != 1:
+              raise SystemExit('implementation checkout block missing')
+          blocks = re.split(r'(?=^      - )', steps, flags=re.M)
+          fixed = []
+          for block in blocks:
+              if not block:
+                  continue
+              if re.search(r'^        run:', block, flags=re.M) and not re.search(r'^        shell:', block, flags=re.M):
+                  block = re.sub(r'(^        run:)', '        shell: bash\\n\\1', block, count=1, flags=re.M)
+              fixed.append(block)
+          steps = ''.join(fixed)
+          steps = '\n'.join(line[2:] if line.startswith('  ') else line for line in steps.splitlines()) + '\n'
+          header = (
+              'name: Rolling checkpoint candidate implementation\n'
+              'description: Build and publish one bounded candidate pair\n'
+              'inputs:\n'
+              '  source_history_branch:\n    required: true\n'
+              '  source_current_state_branch:\n    required: true\n'
+              '  history_candidate_branch:\n    required: true\n'
+              '  current_state_candidate_branch:\n    required: true\n'
+              '  max_delta_ledgers:\n    required: true\n'
+              '  segment_ledgers:\n    required: true\n'
+              '  read_window_size:\n    required: true\n'
+              'runs:\n  using: composite\n  steps:\n'
+          )
+          action = header + steps
+          if old in action or action.count(new) < 3:
+              raise SystemExit('generated action endpoint validation failed')
+          root.joinpath('action.yml').write_text(action)
           PY
-            if test -f "$ROOT/candidate-endpoint-repaired"; then
-              encoded="$(base64 -w0 "$ROOT/rolling-checkpoint-candidate.yml")"
-              for attempt in 1 2 3 4 5; do
-                sha="$(gh api "$api" --jq .sha)"
-                if gh api --method PUT "$api" \
-                  -f message='fix: use available Ripple Devnet endpoint for history candidates' \
-                  -f content="$encoded" -f sha="$sha" -f branch=main > "$ROOT/candidate-endpoint-update.json"; then
-                  sleep 3
-                  return 0
-                fi
-                sleep $((attempt * 2))
-              done
-              return 1
-            fi
-          }
+            content="$(base64 -w0 "$ROOT/action.yml")"
+            gh api --method PUT "$ACTION_API" -f message='ops: publish rolling candidate composite action' -f content="$content" -f branch=main >/dev/null
+            PHASE=action_ready
+            put_status running 'composite action published; wrapper conversion required'
+            trap - EXIT
+            exit 0
+          fi
+          grep -F 'using: composite' "$ROOT/action.yml" >/dev/null
+          grep -F 'https://s.devnet.rippletest.net:51234/' "$ROOT/action.yml" >/dev/null
+          ! grep -F 'https://devnet.honeycluster.io/' "$ROOT/action.yml" >/dev/null
 
-          capture_d1_usage() {
-            local output="$1" today query
-            today="$(date -u +%F)"
-            query='query D1Usage($accountTag:string!,$start:Date,$end:Date,$databaseId:string){viewer{accounts(filter:{accountTag:$accountTag}){d1AnalyticsAdaptiveGroups(limit:10000,filter:{date_geq:$start,date_leq:$end,databaseId:$databaseId}){sum{rowsRead rowsWritten}}}}}'
-            jq -n --arg query "$query" --arg accountTag "$CLOUDFLARE_ACCOUNT_ID" \
-              --arg start "$today" --arg end "$today" --arg databaseId "$D1_DATABASE_ID" \
-              '{query:$query,variables:{accountTag:$accountTag,start:$start,end:$end,databaseId:$databaseId}}' \
-              | curl --fail-with-body --silent --show-error -X POST \
-                  -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -H 'content-type: application/json' \
-                  --data-binary @- https://api.cloudflare.com/client/v4/graphql \
-              | jq '{date:"'"$today"'",rowsRead:([.data.viewer.accounts[0].d1AnalyticsAdaptiveGroups[].sum.rowsRead // 0]|add//0),rowsWritten:([.data.viewer.accounts[0].d1AnalyticsAdaptiveGroups[].sum.rowsWritten // 0]|add//0),errors:(.errors//[])}' \
-              > "$output"
-          }
-
-          PHASE=repair_candidate_endpoint
-          repair_candidate_endpoint
-          capture_d1_usage "$ROOT/d1-start.json" || echo '{"unavailable":true}' > "$ROOT/d1-start.json"
+          PHASE=advance
           source_history="$SOURCE_HISTORY"
           source_current="$SOURCE_CURRENT"
           final_history="$SOURCE_HISTORY"
           final_current="$SOURCE_CURRENT"
-          target_lag=999999999
-
-          for cycle in $(seq 1 "$MAX_CYCLES"); do
-            PHASE="candidate_cycle_${cycle}_prepare"
-            fetch_json "$source_history" history/publication.json "$ROOT/source-publication.json"
+          lag=999999999
+          for cycle in $(seq 1 8); do
+            fetch_json "$source_history" history/publication.json "$ROOT/source-history.json"
             fetch_json "$source_current" read-model/manifest.json "$ROOT/source-current.json"
-            source_ledger="$(jq -r '.endLedgerIndex' "$ROOT/source-publication.json")"
-            source_hash="$(jq -r '.endLedgerHash' "$ROOT/source-publication.json")"
-            test "$(jq -r '.complete' "$ROOT/source-publication.json")" = true
-            test "$(jq -r '.complete' "$ROOT/source-current.json")" = true
-            test "$source_ledger" = "$(jq -r '.ledgerIndex' "$ROOT/source-current.json")"
-            test "$source_hash" = "$(jq -r '.ledgerHash' "$ROOT/source-current.json")"
-
-            PHASE="candidate_cycle_${cycle}_live_head"
+            ledger="$(jq -r .endLedgerIndex "$ROOT/source-history.json")"
+            hash="$(jq -r .endLedgerHash "$ROOT/source-history.json")"
+            test "$ledger" = "$(jq -r .ledgerIndex "$ROOT/source-current.json")"
+            test "$hash" = "$(jq -r .ledgerHash "$ROOT/source-current.json")"
             head="$(live_head)"
-            target_lag=$((head - source_ledger))
-            test "$target_lag" -ge 0
-            if test "$target_lag" -le "$TARGET_MAX_LAG_LEDGERS"; then
-              final_history="$source_history"
-              final_current="$source_current"
-              break
-            fi
+            lag=$((head - ledger))
+            test "$lag" -ge 0
+            if test "$lag" -le "$MAX_LAG"; then break; fi
 
             if test $((cycle % 2)) -eq 1; then
-              output_history="$CANDIDATE_A_HISTORY"
-              output_current="$CANDIDATE_A_CURRENT"
+              out_history="$CANDIDATE_A_HISTORY"; out_current="$CANDIDATE_A_CURRENT"
             else
-              output_history="$CANDIDATE_B_HISTORY"
-              output_current="$CANDIDATE_B_CURRENT"
+              out_history="$CANDIDATE_B_HISTORY"; out_current="$CANDIDATE_B_CURRENT"
             fi
-            test "$output_history" != "$source_history"
-            test "$output_current" != "$source_current"
-
-            PHASE="candidate_cycle_${cycle}_run"
-            gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-candidate.yml/runs?event=workflow_dispatch&per_page=100" \
-              --jq '.workflow_runs[].id' > "$ROOT/candidate-before.txt"
-            jq -n --arg ref main \
-              --arg sourceHistory "$source_history" --arg sourceCurrent "$source_current" \
-              --arg outputHistory "$output_history" --arg outputCurrent "$output_current" \
-              --arg maxDelta "$MAX_DELTA_LEDGERS" \
-              '{ref:$ref,inputs:{source_history_branch:$sourceHistory,source_current_state_branch:$sourceCurrent,history_candidate_branch:$outputHistory,current_state_candidate_branch:$outputCurrent,max_delta_ledgers:$maxDelta,segment_ledgers:"500",read_window_size:"4"}}' \
-              > "$ROOT/candidate-dispatch.json"
-            gh api --method POST "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-candidate.yml/dispatches" \
-              --input "$ROOT/candidate-dispatch.json"
-            run_id="$(wait_new_run rolling-checkpoint-candidate.yml "$ROOT/candidate-before.txt" "$ROOT/candidate-run-id.txt")"
-            wait_success "$run_id" "$ROOT/candidate-run.json"
-
-            PHASE="candidate_cycle_${cycle}_verify"
-            fetch_json "$output_history" history/publication.json "$ROOT/output-publication.json"
-            fetch_json "$output_current" read-model/manifest.json "$ROOT/output-current.json"
-            output_ledger="$(jq -r '.endLedgerIndex' "$ROOT/output-publication.json")"
-            output_hash="$(jq -r '.endLedgerHash' "$ROOT/output-publication.json")"
-            test "$output_ledger" -gt "$source_ledger"
-            test "$output_ledger" -le $((source_ledger + MAX_DELTA_LEDGERS))
-            test "$output_ledger" = "$(jq -r '.ledgerIndex' "$ROOT/output-current.json")"
-            test "$output_hash" = "$(jq -r '.ledgerHash' "$ROOT/output-current.json")"
-
-            head="$(live_head)"
-            target_lag=$((head - output_ledger))
-            jq -n --argjson cycle "$cycle" --argjson runId "$run_id" \
-              --argjson sourceLedger "$source_ledger" --argjson outputLedger "$output_ledger" \
-              --argjson lag "$target_lag" \
-              '{cycle:$cycle,candidateRunId:$runId,sourceLedger:$sourceLedger,outputLedger:$outputLedger,lagLedgers:$lag}' \
-              >> "$ROOT/cycles.ndjson"
-            jq -s '{cycles:.}' "$ROOT/cycles.ndjson" > "$ROOT/summary.json"
-            publish_status running "$PHASE" "candidate cycle ${cycle} completed"
-
-            source_history="$output_history"
-            source_current="$output_current"
-            final_history="$output_history"
-            final_current="$output_current"
+            gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-candidate.yml/runs?event=workflow_dispatch&per_page=100" --jq '.workflow_runs[].id' > "$ROOT/before.txt"
+            jq -n --arg ref main --arg sh "$source_history" --arg sc "$source_current" --arg oh "$out_history" --arg oc "$out_current" --arg max "$MAX_DELTA" \
+              '{ref:$ref,inputs:{source_history_branch:$sh,source_current_state_branch:$sc,history_candidate_branch:$oh,current_state_candidate_branch:$oc,max_delta_ledgers:$max,segment_ledgers:"500",read_window_size:"4"}}' > "$ROOT/dispatch.json"
+            gh api --method POST "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-candidate.yml/dispatches" --input "$ROOT/dispatch.json"
+            child="$(wait_new_run rolling-checkpoint-candidate.yml "$ROOT/before.txt")"
+            wait_success "$child"
+            fetch_json "$out_history" history/publication.json "$ROOT/output-history.json"
+            fetch_json "$out_current" read-model/manifest.json "$ROOT/output-current.json"
+            out_ledger="$(jq -r .endLedgerIndex "$ROOT/output-history.json")"
+            out_hash="$(jq -r .endLedgerHash "$ROOT/output-history.json")"
+            test "$out_ledger" -gt "$ledger"
+            test "$out_ledger" = "$(jq -r .ledgerIndex "$ROOT/output-current.json")"
+            test "$out_hash" = "$(jq -r .ledgerHash "$ROOT/output-current.json")"
+            jq -n --argjson cycle "$cycle" --argjson runId "$child" --argjson source "$ledger" --argjson output "$out_ledger" '{cycle:$cycle,runId:$runId,sourceLedger:$source,outputLedger:$output}' >> "$ROOT/cycles.ndjson"
+            source_history="$out_history"; source_current="$out_current"
+            final_history="$out_history"; final_current="$out_current"
           done
+          test "$lag" -le "$MAX_LAG"
 
-          test "$target_lag" -le "$TARGET_MAX_LAG_LEDGERS"
-
-          if test "$final_history" != "$SOURCE_HISTORY" || test "$final_current" != "$SOURCE_CURRENT"; then
+          if test "$final_history" != "$SOURCE_HISTORY"; then
             PHASE=cutover
-            gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/runs?event=workflow_dispatch&per_page=100" \
-              --jq '.workflow_runs[].id' > "$ROOT/cutover-before.txt"
-            jq -n --arg ref main --arg history "$final_history" --arg current "$final_current" \
-              '{ref:$ref,inputs:{history_candidate_branch:$history,current_state_candidate_branch:$current,confirm_production_write:true}}' \
-              > "$ROOT/cutover-dispatch.json"
-            gh api --method POST "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/dispatches" \
-              --input "$ROOT/cutover-dispatch.json"
-            cutover_id="$(wait_new_run rolling-checkpoint-live-cutover.yml "$ROOT/cutover-before.txt" "$ROOT/cutover-run-id.txt")"
-            wait_success "$cutover_id" "$ROOT/cutover-run.json"
+            gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/runs?event=workflow_dispatch&per_page=100" --jq '.workflow_runs[].id' > "$ROOT/cutover-before.txt"
+            jq -n --arg ref main --arg h "$final_history" --arg c "$final_current" '{ref:$ref,inputs:{history_candidate_branch:$h,current_state_candidate_branch:$c,confirm_production_write:true}}' > "$ROOT/cutover.json"
+            gh api --method POST "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/dispatches" --input "$ROOT/cutover.json"
+            cutover="$(wait_new_run rolling-checkpoint-live-cutover.yml "$ROOT/cutover-before.txt")"
+            wait_success "$cutover"
           fi
 
-          PHASE=verify_production
-          fetch_json "$SOURCE_HISTORY" history/publication.json "$ROOT/production-publication.json"
+          PHASE=verify
+          fetch_json "$SOURCE_HISTORY" history/publication.json "$ROOT/production-history.json"
           fetch_json "$SOURCE_CURRENT" read-model/manifest.json "$ROOT/production-current.json"
-          production_ledger="$(jq -r '.endLedgerIndex' "$ROOT/production-publication.json")"
-          production_hash="$(jq -r '.endLedgerHash' "$ROOT/production-publication.json")"
-          test "$production_ledger" = "$(jq -r '.ledgerIndex' "$ROOT/production-current.json")"
-          test "$production_hash" = "$(jq -r '.ledgerHash' "$ROOT/production-current.json")"
-          head="$(live_head)"
-          final_lag=$((head - production_ledger))
-          test "$final_lag" -le "$TARGET_MAX_LAG_LEDGERS"
-
-          overview_http="$(curl --silent --show-error --retry 3 -o "$ROOT/overview.json" -w '%{http_code}' "$PRODUCTION_BASE/api/overview")"
-          diff_http="$(curl --silent --show-error --retry 3 -o "$ROOT/diff.json" -w '%{http_code}' "$PRODUCTION_BASE/api/status/fast-lane-diff?limit=500")"
-          test "$overview_http" = 200
-          test "$diff_http" = 200
-          jq -e '.status == "ok" and .passed == true' "$ROOT/diff.json" > /dev/null
-          capture_d1_usage "$ROOT/d1-end.json" || echo '{"unavailable":true}' > "$ROOT/d1-end.json"
-
-          jq -n --arg checkedAt "$(date -u +%FT%TZ)" --argjson ledger "$production_ledger" \
-            --arg hash "$production_hash" --argjson lag "$final_lag" \
-            --slurpfile cycles "$ROOT/cycles.ndjson" --slurpfile d1Start "$ROOT/d1-start.json" --slurpfile d1End "$ROOT/d1-end.json" \
-            '{checkedAt:$checkedAt,passed:true,production:{ledgerIndex:$ledger,ledgerHash:$hash,lagLedgers:$lag},cycles:$cycles,d1:{start:$d1Start[0],end:$d1End[0]},cadence:"four_hours",collectorCadence:"five_minutes"}' \
-            > "$ROOT/summary.json"
-
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: four-hour-history-maintenance
-          path: four-hour-history-maintenance
-          if-no-files-found: warn
-          retention-days: 30
+          ledger="$(jq -r .endLedgerIndex "$ROOT/production-history.json")"
+          hash="$(jq -r .endLedgerHash "$ROOT/production-history.json")"
+          test "$ledger" = "$(jq -r .ledgerIndex "$ROOT/production-current.json")"
+          test "$hash" = "$(jq -r .ledgerHash "$ROOT/production-current.json")"
+          test $(( $(live_head) - ledger )) -le "$MAX_LAG"
+          curl --fail-with-body --silent --show-error --retry 3 "$PRODUCTION_BASE/api/overview" > "$ROOT/overview.json"
+          curl --fail-with-body --silent --show-error --retry 3 "$PRODUCTION_BASE/api/status/fast-lane-diff?limit=500" > "$ROOT/diff.json"
+          jq -e '.status == "ok" and .passed == true' "$ROOT/diff.json" >/dev/null
