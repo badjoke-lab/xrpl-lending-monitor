@@ -4,30 +4,37 @@ on:
   workflow_dispatch:
     inputs:
       source_history_branch:
+        description: Source history branch
         required: true
         default: history-data
         type: string
       source_current_state_branch:
+        description: Source current-state branch
         required: true
         default: current-state-data
         type: string
       history_candidate_branch:
+        description: Output history candidate branch
         required: true
         default: history-rolling-next-candidate-data
         type: string
       current_state_candidate_branch:
+        description: Output current-state candidate branch
         required: true
         default: current-state-rolling-next-candidate-data
         type: string
       max_delta_ledgers:
+        description: Maximum ledgers to advance in one cycle
         required: true
         default: '1000'
         type: string
       segment_ledgers:
+        description: Ledgers per immutable history segment
         required: true
         default: '250'
         type: string
       read_window_size:
+        description: Bounded history read window
         required: true
         default: '4'
         type: string
