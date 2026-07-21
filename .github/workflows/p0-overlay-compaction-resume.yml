@@ -1,4 +1,4 @@
-name: P0 overlay compaction and collector resume
+name: P0 overlay cleanup and collector resume
 
 on:
   push:
@@ -28,7 +28,7 @@ env:
   PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
 
 jobs:
-  compact-and-resume:
+  cleanup-and-resume:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -44,12 +44,37 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - name: Verify quota reset, paused schedule, and exact active binding
+      - name: Build and deploy temporary paused Worker
         shell: bash
         run: |
           set -Eeuo pipefail
-          mkdir -p compaction-evidence
+          mkdir -p recovery-evidence
+          pnpm build:deploy-assets
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          cfg = json.loads(Path('wrangler.jsonc').read_text())
+          assert cfg['triggers']['crons'] == ['*/5 * * * *']
+          assert cfg['vars']['APP_NETWORK'] == 'devnet'
+          assert cfg['vars']['MAINNET_ENABLED'] == 'false'
+          assert cfg['vars']['REPLACEMENT_BASE_EPOCH_ID'] == 'devnet-3371675'
+          assert cfg['vars']['REPLACEMENT_BASE_SNAPSHOT_ID'] == 'devnet-3800885-eaa0d29666e7'
+          assert cfg['vars']['REPLACEMENT_BASE_LEDGER_INDEX'] == '3800885'
+          assert cfg['vars']['REPLACEMENT_BASE_LEDGER_HASH'] == 'EAA0D29666E73D7594A52DF8000B07F346CD4DA24A9A07549612CDC7D727B700'
+          cfg['triggers']['crons'] = []
+          Path('wrangler.recovery-paused.jsonc').write_text(json.dumps(cfg, indent=2) + '\n')
+          PY
+          pnpm exec wrangler deploy --config wrangler.recovery-paused.jsonc | tee recovery-evidence/pause-deploy.log
+          curl --fail-with-body --silent --show-error --retry 3 \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/xrpl-lending-monitor/schedules" \
+            > recovery-evidence/schedules-paused.json
+          jq -e '.success == true and .result.schedules == []' recovery-evidence/schedules-paused.json > /dev/null
 
+      - name: Verify quota, binding, and exact delete scope
+        shell: bash
+        run: |
+          set -Eeuo pipefail
           query_d1() {
             local sql="$1"
             local output="$2"
@@ -67,147 +92,65 @@ jobs:
           read -r -d '' query <<'GRAPHQL' || true
           query D1Usage($accountTag:string!,$start:Date,$end:Date,$databaseId:string){viewer{accounts(filter:{accountTag:$accountTag}){d1AnalyticsAdaptiveGroups(limit:10000,filter:{date_geq:$start,date_leq:$end,databaseId:$databaseId}){sum{rowsRead rowsWritten}}}}}
           GRAPHQL
-          jq -n --arg query "$query" --arg accountTag "$CLOUDFLARE_ACCOUNT_ID" --arg start "$today" --arg end "$today" --arg databaseId "$DATABASE_ID" '{query:$query,variables:{accountTag:$accountTag,start:$start,end:$end,databaseId:$databaseId}}' > compaction-evidence/usage-request.json
+          jq -n --arg query "$query" --arg accountTag "$CLOUDFLARE_ACCOUNT_ID" --arg start "$today" --arg end "$today" --arg databaseId "$DATABASE_ID" '{query:$query,variables:{accountTag:$accountTag,start:$start,end:$end,databaseId:$databaseId}}' > recovery-evidence/usage-request.json
           curl --fail-with-body --silent --show-error -X POST \
             -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
             -H 'content-type: application/json' \
-            --data @compaction-evidence/usage-request.json \
-            https://api.cloudflare.com/client/v4/graphql > compaction-evidence/usage-before.json
-          rows_written="$(jq '[.data.viewer.accounts[0].d1AnalyticsAdaptiveGroups[].sum.rowsWritten // 0] | add // 0' compaction-evidence/usage-before.json)"
+            --data @recovery-evidence/usage-request.json \
+            https://api.cloudflare.com/client/v4/graphql > recovery-evidence/usage-before.json
+          rows_written="$(jq '[.data.viewer.accounts[0].d1AnalyticsAdaptiveGroups[].sum.rowsWritten // 0] | add // 0' recovery-evidence/usage-before.json)"
           test "$rows_written" -le 5000
 
-          curl --fail-with-body --silent --show-error --retry 3 \
-            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/xrpl-lending-monitor/schedules" \
-            > compaction-evidence/schedules-before.json
-          jq -e '.success == true and .result.schedules == []' compaction-evidence/schedules-before.json > /dev/null
-
-          curl --fail-with-body --silent --show-error --retry 3 \
-            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database/${DATABASE_ID}" \
-            > compaction-evidence/database-before.json
-          jq -e '.success == true and (.result.file_size | type == "number")' compaction-evidence/database-before.json > /dev/null
-
-          query_d1 "SELECT base_epoch_id,base_snapshot_id,base_ledger_index,base_ledger_hash FROM fast_lane_shadow_base_binding WHERE network='devnet'" compaction-evidence/binding-before.json
+          query_d1 "SELECT base_epoch_id,base_snapshot_id,base_ledger_index,base_ledger_hash FROM fast_lane_shadow_base_binding WHERE network='devnet'" recovery-evidence/binding-before.json
           jq -e --arg epoch "$TARGET_EPOCH" --arg snapshot "$TARGET_SNAPSHOT" --argjson ledger "$TARGET_LEDGER" --arg hash "$TARGET_HASH" '
             .result[0].results | length == 1
             and .[0].base_epoch_id == $epoch
             and .[0].base_snapshot_id == $snapshot
             and .[0].base_ledger_index == $ledger
             and .[0].base_ledger_hash == $hash
-          ' compaction-evidence/binding-before.json > /dev/null
+          ' recovery-evidence/binding-before.json > /dev/null
 
-          query_d1 "SELECT COUNT(*) AS active_rows,COALESCE(SUM(LENGTH(projection_json)),0) AS active_payload_bytes FROM current_state_overlay_objects WHERE network='devnet' AND epoch_id='${TARGET_EPOCH}' AND base_snapshot_id='${TARGET_SNAPSHOT}'" compaction-evidence/active-before.json
-          query_d1 "SELECT COUNT(*) AS stale_rows,COALESCE(SUM(LENGTH(o.projection_json)),0) AS stale_payload_bytes FROM current_state_overlay_objects o WHERE o.network='devnet' AND NOT (o.epoch_id='${TARGET_EPOCH}' AND o.base_snapshot_id='${TARGET_SNAPSHOT}')" compaction-evidence/stale-before.json
-          active_rows="$(jq -r '.result[0].results[0].active_rows' compaction-evidence/active-before.json)"
-          stale_rows="$(jq -r '.result[0].results[0].stale_rows' compaction-evidence/stale-before.json)"
+          query_d1 "SELECT COUNT(*) AS active_rows,COALESCE(SUM(LENGTH(projection_json)),0) AS active_payload_bytes FROM current_state_overlay_objects WHERE network='devnet' AND epoch_id='${TARGET_EPOCH}' AND base_snapshot_id='${TARGET_SNAPSHOT}'" recovery-evidence/active-before.json
+          query_d1 "SELECT COUNT(*) AS stale_rows,COALESCE(SUM(LENGTH(projection_json)),0) AS stale_payload_bytes FROM current_state_overlay_objects WHERE network='devnet' AND NOT (epoch_id='${TARGET_EPOCH}' AND base_snapshot_id='${TARGET_SNAPSHOT}')" recovery-evidence/stale-before.json
+          active_rows="$(jq -r '.result[0].results[0].active_rows' recovery-evidence/active-before.json)"
+          stale_rows="$(jq -r '.result[0].results[0].stale_rows' recovery-evidence/stale-before.json)"
+          remaining=$((100000 - rows_written))
+          required=$((stale_rows + 5000))
           test "$active_rows" -gt 0
-          test "$active_rows" -le 5000
           test "$stale_rows" -gt 0
-          printf '%s\n' "$active_rows" > compaction-evidence/active-rows-before.txt
-          printf '%s\n' "$stale_rows" > compaction-evidence/stale-rows-before.txt
+          test "$remaining" -ge "$required"
+          printf '%s\n' "$active_rows" > recovery-evidence/active-rows-before.txt
+          printf '%s\n' "$stale_rows" > recovery-evidence/stale-rows-before.txt
 
-      - name: Atomically rebuild overlay objects with active identity only
+          curl --fail-with-body --silent --show-error --retry 3 \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database/${DATABASE_ID}" \
+            > recovery-evidence/database-before.json
+
+      - name: Delete only non-active overlay identities
         shell: bash
         run: |
           set -Eeuo pipefail
-          cat > compaction-evidence/compact.sql <<'SQL'
-          DROP TABLE IF EXISTS current_state_overlay_objects_compacted;
+          exec_d1() {
+            local sql="$1"
+            local output="$2"
+            jq -n --arg sql "$sql" '{sql:$sql}' \
+              | curl --fail-with-body --silent --show-error \
+                  -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+                  -H 'Content-Type: application/json' \
+                  --data-binary @- \
+                  "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database/${DATABASE_ID}/query" \
+              > "$output"
+            jq -e '.success == true and ((.errors // []) | length) == 0 and ([.result[].success] | all)' "$output" > /dev/null
+          }
+          exec_d1 "DELETE FROM current_state_overlay_objects WHERE network='devnet' AND NOT (epoch_id='${TARGET_EPOCH}' AND base_snapshot_id='${TARGET_SNAPSHOT}')" recovery-evidence/delete-objects.json
+          exec_d1 "DELETE FROM current_state_overlay_commit_guards WHERE network='devnet' AND NOT (epoch_id='${TARGET_EPOCH}' AND base_snapshot_id='${TARGET_SNAPSHOT}')" recovery-evidence/delete-guards.json
+          exec_d1 "DELETE FROM current_state_overlay_state WHERE network='devnet' AND NOT (epoch_id='${TARGET_EPOCH}' AND base_snapshot_id='${TARGET_SNAPSHOT}')" recovery-evidence/delete-state.json
 
-          CREATE TABLE current_state_overlay_objects_compacted (
-            network TEXT NOT NULL CHECK (network = 'devnet'),
-            epoch_id TEXT NOT NULL,
-            base_snapshot_id TEXT NOT NULL,
-            object_type TEXT NOT NULL CHECK (object_type IN ('vault', 'loan_broker', 'loan')),
-            object_id TEXT NOT NULL,
-            operation TEXT NOT NULL CHECK (operation IN ('upsert', 'deleted')),
-            projection_json TEXT,
-            owner TEXT,
-            account TEXT,
-            borrower TEXT,
-            vault_id TEXT,
-            loan_broker_id TEXT,
-            asset_key TEXT,
-            on_ledger_status TEXT CHECK (
-              on_ledger_status IS NULL OR
-              on_ledger_status IN ('active', 'impaired', 'defaulted')
-            ),
-            source_ledger_index INTEGER NOT NULL CHECK (source_ledger_index >= 0),
-            source_ledger_hash TEXT NOT NULL,
-            source_transaction_hash TEXT NOT NULL,
-            source_transaction_index INTEGER NOT NULL CHECK (source_transaction_index >= 0),
-            updated_at TEXT NOT NULL,
-            PRIMARY KEY (network, epoch_id, base_snapshot_id, object_type, object_id),
-            FOREIGN KEY (network, epoch_id, base_snapshot_id)
-              REFERENCES current_state_overlay_state(network, epoch_id, base_snapshot_id)
-              ON DELETE CASCADE,
-            CHECK (
-              (operation = 'upsert' AND projection_json IS NOT NULL) OR
-              (operation = 'deleted' AND projection_json IS NULL)
-            )
-          );
-
-          INSERT INTO current_state_overlay_objects_compacted (
-            network,epoch_id,base_snapshot_id,object_type,object_id,operation,projection_json,
-            owner,account,borrower,vault_id,loan_broker_id,asset_key,on_ledger_status,
-            source_ledger_index,source_ledger_hash,source_transaction_hash,source_transaction_index,updated_at
-          )
-          SELECT
-            network,epoch_id,base_snapshot_id,object_type,object_id,operation,projection_json,
-            owner,account,borrower,vault_id,loan_broker_id,asset_key,on_ledger_status,
-            source_ledger_index,source_ledger_hash,source_transaction_hash,source_transaction_index,updated_at
-          FROM current_state_overlay_objects
-          WHERE network='devnet'
-            AND epoch_id='devnet-3371675'
-            AND base_snapshot_id='devnet-3800885-eaa0d29666e7';
-
-          DROP TABLE current_state_overlay_objects;
-          ALTER TABLE current_state_overlay_objects_compacted RENAME TO current_state_overlay_objects;
-
-          CREATE INDEX current_state_overlay_objects_account
-            ON current_state_overlay_objects (network,epoch_id,base_snapshot_id,account,object_type,operation,object_id);
-          CREATE INDEX current_state_overlay_objects_asset
-            ON current_state_overlay_objects (network,epoch_id,base_snapshot_id,asset_key,object_type,operation,object_id);
-          CREATE INDEX current_state_overlay_objects_borrower
-            ON current_state_overlay_objects (network,epoch_id,base_snapshot_id,borrower,operation,object_id);
-          CREATE INDEX current_state_overlay_objects_broker
-            ON current_state_overlay_objects (network,epoch_id,base_snapshot_id,loan_broker_id,object_type,operation,object_id);
-          CREATE INDEX current_state_overlay_objects_ledger
-            ON current_state_overlay_objects (network,epoch_id,base_snapshot_id,source_ledger_index,source_transaction_index,object_type,object_id);
-          CREATE INDEX current_state_overlay_objects_list
-            ON current_state_overlay_objects (network,epoch_id,base_snapshot_id,object_type,operation,object_id);
-          CREATE INDEX current_state_overlay_objects_owner
-            ON current_state_overlay_objects (network,epoch_id,base_snapshot_id,owner,object_type,operation,object_id);
-          CREATE INDEX current_state_overlay_objects_status
-            ON current_state_overlay_objects (network,epoch_id,base_snapshot_id,on_ledger_status,operation,object_id);
-          CREATE INDEX current_state_overlay_objects_vault
-            ON current_state_overlay_objects (network,epoch_id,base_snapshot_id,vault_id,object_type,operation,object_id);
-
-          DELETE FROM current_state_overlay_commit_guards
-          WHERE network='devnet'
-            AND NOT (epoch_id='devnet-3371675' AND base_snapshot_id='devnet-3800885-eaa0d29666e7');
-
-          DELETE FROM current_state_overlay_state
-          WHERE network='devnet'
-            AND NOT (epoch_id='devnet-3371675' AND base_snapshot_id='devnet-3800885-eaa0d29666e7');
-          SQL
-
-          jq -Rs '{sql:.}' compaction-evidence/compact.sql \
-            | curl --fail-with-body --silent --show-error \
-                -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-                -H 'Content-Type: application/json' \
-                --data-binary @- \
-                "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database/${DATABASE_ID}/query" \
-            > compaction-evidence/compact-response.json
-          jq -e '.success == true and ((.errors // []) | length) == 0 and ([.result[].success] | all)' compaction-evidence/compact-response.json > /dev/null
-          jq '[.result[].meta.rows_written // 0] | add // 0' compaction-evidence/compact-response.json > compaction-evidence/compaction-rows-written.json
-          test "$(cat compaction-evidence/compaction-rows-written.json)" -le 50000
-
-      - name: Verify compacted overlay and schema
+      - name: Verify preserved active state and schema
         shell: bash
         run: |
           set -Eeuo pipefail
-
           query_d1() {
             local sql="$1"
             local output="$2"
@@ -220,91 +163,70 @@ jobs:
               > "$output"
             jq -e '.success == true and ((.errors // []) | length) == 0 and ([.result[].success] | all)' "$output" > /dev/null
           }
+          query_d1 "SELECT COUNT(*) AS active_rows,COALESCE(SUM(LENGTH(projection_json)),0) AS active_payload_bytes FROM current_state_overlay_objects WHERE network='devnet' AND epoch_id='${TARGET_EPOCH}' AND base_snapshot_id='${TARGET_SNAPSHOT}'" recovery-evidence/active-after.json
+          query_d1 "SELECT COUNT(*) AS stale_rows FROM current_state_overlay_objects WHERE network='devnet' AND NOT (epoch_id='${TARGET_EPOCH}' AND base_snapshot_id='${TARGET_SNAPSHOT}')" recovery-evidence/stale-after.json
+          query_d1 "SELECT COUNT(*) AS state_rows FROM current_state_overlay_state WHERE network='devnet'" recovery-evidence/state-after.json
+          query_d1 "SELECT COUNT(*) AS stale_guard_rows FROM current_state_overlay_commit_guards WHERE network='devnet' AND NOT (epoch_id='${TARGET_EPOCH}' AND base_snapshot_id='${TARGET_SNAPSHOT}')" recovery-evidence/guards-after.json
+          query_d1 "SELECT COUNT(*) AS secondary_indexes FROM sqlite_master WHERE type='index' AND tbl_name='current_state_overlay_objects' AND sql IS NOT NULL" recovery-evidence/indexes-after.json
 
-          query_d1 "SELECT COUNT(*) AS active_rows,COALESCE(SUM(LENGTH(projection_json)),0) AS active_payload_bytes FROM current_state_overlay_objects WHERE network='devnet' AND epoch_id='${TARGET_EPOCH}' AND base_snapshot_id='${TARGET_SNAPSHOT}'" compaction-evidence/active-after.json
-          query_d1 "SELECT COUNT(*) AS stale_rows FROM current_state_overlay_objects WHERE network='devnet' AND NOT (epoch_id='${TARGET_EPOCH}' AND base_snapshot_id='${TARGET_SNAPSHOT}')" compaction-evidence/stale-after.json
-          query_d1 "SELECT COUNT(*) AS state_rows FROM current_state_overlay_state WHERE network='devnet'" compaction-evidence/state-after.json
-          query_d1 "SELECT COUNT(*) AS stale_guard_rows FROM current_state_overlay_commit_guards WHERE network='devnet' AND NOT (epoch_id='${TARGET_EPOCH}' AND base_snapshot_id='${TARGET_SNAPSHOT}')" compaction-evidence/guards-after.json
-          query_d1 "SELECT COUNT(*) AS secondary_indexes FROM sqlite_master WHERE type='index' AND tbl_name='current_state_overlay_objects' AND sql IS NOT NULL" compaction-evidence/indexes-after.json
-          query_d1 "SELECT COUNT(*) AS temporary_tables FROM sqlite_master WHERE type='table' AND name='current_state_overlay_objects_compacted'" compaction-evidence/temp-after.json
-
-          before="$(cat compaction-evidence/active-rows-before.txt)"
-          after="$(jq -r '.result[0].results[0].active_rows' compaction-evidence/active-after.json)"
+          before="$(cat recovery-evidence/active-rows-before.txt)"
+          after="$(jq -r '.result[0].results[0].active_rows' recovery-evidence/active-after.json)"
           test "$after" = "$before"
-          test "$(jq -r '.result[0].results[0].stale_rows' compaction-evidence/stale-after.json)" = 0
-          test "$(jq -r '.result[0].results[0].state_rows' compaction-evidence/state-after.json)" = 1
-          test "$(jq -r '.result[0].results[0].stale_guard_rows' compaction-evidence/guards-after.json)" = 0
-          test "$(jq -r '.result[0].results[0].secondary_indexes' compaction-evidence/indexes-after.json)" = 9
-          test "$(jq -r '.result[0].results[0].temporary_tables' compaction-evidence/temp-after.json)" = 0
+          test "$(jq -r '.result[0].results[0].stale_rows' recovery-evidence/stale-after.json)" = 0
+          test "$(jq -r '.result[0].results[0].state_rows' recovery-evidence/state-after.json)" = 1
+          test "$(jq -r '.result[0].results[0].stale_guard_rows' recovery-evidence/guards-after.json)" = 0
+          test "$(jq -r '.result[0].results[0].secondary_indexes' recovery-evidence/indexes-after.json)" = 9
 
           curl --fail-with-body --silent --show-error --retry 3 \
             -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
             "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database/${DATABASE_ID}" \
-            > compaction-evidence/database-after.json
-          jq -e '.success == true and (.result.file_size | type == "number")' compaction-evidence/database-after.json > /dev/null
+            > recovery-evidence/database-after.json
 
-      - name: Restore canonical five-minute deployment
+      - name: Restore canonical five-minute Worker only after validation
         shell: bash
         run: |
           set -Eeuo pipefail
-          jq -e '
-            .triggers.crons == ["*/5 * * * *"]
-            and .vars.APP_NETWORK == "devnet"
-            and .vars.MAINNET_ENABLED == "false"
-            and .vars.REPLACEMENT_BASE_SNAPSHOT_ID == "devnet-3800885-eaa0d29666e7"
-            and .vars.REPLACEMENT_BASE_LEDGER_INDEX == "3800885"
-            and .vars.REPLACEMENT_BASE_LEDGER_HASH == "EAA0D29666E73D7594A52DF8000B07F346CD4DA24A9A07549612CDC7D727B700"
-          ' wrangler.jsonc > /dev/null
-          pnpm build:deploy-assets
-          pnpm exec wrangler deploy --config wrangler.jsonc | tee compaction-evidence/resume-deploy.log
-
+          jq -e '.triggers.crons == ["*/5 * * * *"] and .vars.APP_NETWORK == "devnet" and .vars.MAINNET_ENABLED == "false" and .vars.REPLACEMENT_BASE_SNAPSHOT_ID == "devnet-3800885-eaa0d29666e7" and .vars.REPLACEMENT_BASE_LEDGER_INDEX == "3800885" and .vars.REPLACEMENT_BASE_LEDGER_HASH == "EAA0D29666E73D7594A52DF8000B07F346CD4DA24A9A07549612CDC7D727B700"' wrangler.jsonc > /dev/null
+          pnpm exec wrangler deploy --config wrangler.jsonc | tee recovery-evidence/resume-deploy.log
           curl --fail-with-body --silent --show-error --retry 3 \
             -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
             "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/xrpl-lending-monitor/schedules" \
-            > compaction-evidence/schedules-after.json
-          jq -e '.success == true and (.result.schedules | length == 1) and .result.schedules[0].cron == "*/5 * * * *"' compaction-evidence/schedules-after.json > /dev/null
-
-          overview_status="$(curl --silent --show-error --retry 3 -o compaction-evidence/overview-after.json -w '%{http_code}' "${PRODUCTION_BASE}/api/overview")"
-          history_status="$(curl --silent --show-error --retry 3 -o compaction-evidence/history-after.json -w '%{http_code}' "${PRODUCTION_BASE}/api/status/history-source")"
+            > recovery-evidence/schedules-after.json
+          jq -e '.success == true and (.result.schedules | length == 1) and .result.schedules[0].cron == "*/5 * * * *"' recovery-evidence/schedules-after.json > /dev/null
+          overview_status="$(curl --silent --show-error --retry 3 -o recovery-evidence/overview.json -w '%{http_code}' "${PRODUCTION_BASE}/api/overview")"
+          history_status="$(curl --silent --show-error --retry 3 -o recovery-evidence/history.json -w '%{http_code}' "${PRODUCTION_BASE}/api/status/history-source")"
           test "$overview_status" = 200
           test "$history_status" = 200
 
-          size_before="$(jq -r '.result.file_size' compaction-evidence/database-before.json)"
-          size_after="$(jq -r '.result.file_size' compaction-evidence/database-after.json)"
+          before_bytes="$(jq -r '.result.file_size // 0' recovery-evidence/database-before.json)"
+          after_bytes="$(jq -r '.result.file_size // 0' recovery-evidence/database-after.json)"
           jq -n \
             --argjson passed true \
-            --argjson activeRows "$(jq -r '.result[0].results[0].active_rows' compaction-evidence/active-after.json)" \
-            --argjson activePayloadBytes "$(jq -r '.result[0].results[0].active_payload_bytes' compaction-evidence/active-after.json)" \
-            --argjson staleRows "$(jq -r '.result[0].results[0].stale_rows' compaction-evidence/stale-after.json)" \
-            --argjson compactionRowsWritten "$(cat compaction-evidence/compaction-rows-written.json)" \
-            --argjson databaseBytesBefore "$size_before" \
-            --argjson databaseBytesAfter "$size_after" \
-            --argjson databaseBytesDelta "$((size_after - size_before))" \
-            --slurpfile schedules compaction-evidence/schedules-after.json \
+            --argjson activeRows "$(jq -r '.result[0].results[0].active_rows' recovery-evidence/active-after.json)" \
+            --argjson activePayloadBytes "$(jq -r '.result[0].results[0].active_payload_bytes' recovery-evidence/active-after.json)" \
+            --argjson staleRows "$(jq -r '.result[0].results[0].stale_rows' recovery-evidence/stale-after.json)" \
+            --argjson indexes "$(jq -r '.result[0].results[0].secondary_indexes' recovery-evidence/indexes-after.json)" \
+            --argjson stateRows "$(jq -r '.result[0].results[0].state_rows' recovery-evidence/state-after.json)" \
+            --argjson databaseBytesBefore "$before_bytes" \
+            --argjson databaseBytesAfter "$after_bytes" \
             --arg overviewHttp "$overview_status" \
             --arg historyHttp "$history_status" \
-            '{passed:$passed,activeRows:$activeRows,activePayloadBytes:$activePayloadBytes,staleRows:$staleRows,compactionRowsWritten:$compactionRowsWritten,databaseBytesBefore:$databaseBytesBefore,databaseBytesAfter:$databaseBytesAfter,databaseBytesDelta:$databaseBytesDelta,schedules:$schedules[0].result.schedules,overviewHttp:$overviewHttp,historyHttp:$historyHttp,verification12Slots:"pending"}' \
-            > compaction-evidence/summary.json
+            '{passed:$passed,activeRows:$activeRows,activePayloadBytes:$activePayloadBytes,staleRows:$staleRows,secondaryIndexes:$indexes,stateRows:$stateRows,databaseBytesBefore:$databaseBytesBefore,databaseBytesAfter:$databaseBytesAfter,schedule:"*/5 * * * *",overviewHttp:$overviewHttp,historyHttp:$historyHttp,devnet:true,mainnet:false,verification12Slots:"pending"}' \
+            > recovery-evidence/summary.json
 
-      - name: Report compaction and resume result
+      - name: Report recovery operation result
         if: always()
         shell: bash
         run: |
-          test -s compaction-evidence/summary.json || echo '{"passed":false}' > compaction-evidence/summary.json
-          {
-            echo 'Overlay compaction and collector resume result:'
-            echo
-            echo '```json'
-            cat compaction-evidence/summary.json
-            echo '```'
-          } > compaction-evidence/comment.md
-          gh issue comment "$ISSUE_NUMBER" --repo "$REPOSITORY" --body-file compaction-evidence/comment.md
+          test -s recovery-evidence/summary.json || echo '{"passed":false}' > recovery-evidence/summary.json
+          { echo 'Overlay cleanup and collector resume result:'; echo; echo '```json'; cat recovery-evidence/summary.json; echo '```'; } > recovery-evidence/comment.md
+          gh issue comment "$ISSUE_NUMBER" --repo "$REPOSITORY" --body-file recovery-evidence/comment.md
 
-      - name: Upload compaction evidence
+      - name: Upload recovery evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: p0-overlay-compaction-resume
-          path: compaction-evidence
+          name: p0-overlay-cleanup-resume
+          path: recovery-evidence
           if-no-files-found: warn
           retention-days: 30
