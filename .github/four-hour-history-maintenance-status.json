@@ -1,10 +1,10 @@
 {
   "state": "running",
-  "phase": "script_ready",
-  "message": "candidate script published; wrapper conversion required",
-  "checkedAt": "2026-07-21T16:06:27Z",
-  "runId": "29847081750",
-  "commit": "18761d4d30a8ea6f78c9bfc13b0fd24b3bac746c",
+  "phase": "initialize",
+  "message": "maintenance started",
+  "checkedAt": "2026-07-21T16:07:27Z",
+  "runId": "29847163702",
+  "commit": "2a3fe4f00effd977bc5db2260ec799591671f004",
   "collectorCadence": "five_minutes",
   "historyCadence": "four_hours"
 }
