@@ -1,16 +1,16 @@
 {
-  "state": "running",
-  "phase": "initialize",
-  "message": "maintenance started",
-  "checkedAt": "2026-07-21T15:13:47Z",
+  "state": "failed",
+  "phase": "candidate_cycle_1_prepare",
+  "message": "maintenance exited with code 1",
+  "checkedAt": "2026-07-21T15:13:50Z",
   "runId": "29842961861",
   "runAttempt": "1",
   "commit": "fa4de546ae66c4c79cc875ede1e0aad8ac904d60",
   "source": {
-    "historyLedger": null,
-    "historyHash": "",
-    "currentLedger": null,
-    "currentHash": ""
+    "historyLedger": 3800885,
+    "historyHash": "EAA0D29666E73D7594A52DF8000B07F346CD4DA24A9A07549612CDC7D727B700",
+    "currentLedger": 3800885,
+    "currentHash": "EAA0D29666E73D7594A52DF8000B07F346CD4DA24A9A07549612CDC7D727B700"
   },
   "collectorCadence": "five_minutes",
   "historyCadence": "four_hours"
