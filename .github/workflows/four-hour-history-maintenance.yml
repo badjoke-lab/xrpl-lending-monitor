@@ -168,6 +168,41 @@ jobs:
             test "$(jq -r '.conclusion' "$output")" = success
           }
 
+          repair_candidate_endpoint() {
+            local api sha encoded
+            api="repos/${REPOSITORY}/contents/.github/workflows/rolling-checkpoint-candidate.yml"
+            gh api "$api" --jq '.content' | tr -d '\n' | base64 --decode > "$ROOT/rolling-checkpoint-candidate.yml"
+            python3 - <<'PY'
+          from pathlib import Path
+          path = Path('four-hour-history-maintenance/rolling-checkpoint-candidate.yml')
+          text = path.read_text()
+          old = 'https://devnet.honeycluster.io/'
+          new = 'https://s.devnet.rippletest.net:51234/'
+          count = text.count(old)
+          if count == 0:
+              Path('four-hour-history-maintenance/candidate-endpoint-unchanged').write_text('already repaired\n')
+          else:
+              if count < 3:
+                  raise SystemExit(f'expected at least 3 Honeycluster references, found {count}')
+              path.write_text(text.replace(old, new))
+              Path('four-hour-history-maintenance/candidate-endpoint-repaired').write_text(f'{count} replacements\n')
+          PY
+            if test -f "$ROOT/candidate-endpoint-repaired"; then
+              encoded="$(base64 -w0 "$ROOT/rolling-checkpoint-candidate.yml")"
+              for attempt in 1 2 3 4 5; do
+                sha="$(gh api "$api" --jq .sha)"
+                if gh api --method PUT "$api" \
+                  -f message='fix: use available Ripple Devnet endpoint for history candidates' \
+                  -f content="$encoded" -f sha="$sha" -f branch=main > "$ROOT/candidate-endpoint-update.json"; then
+                  sleep 3
+                  return 0
+                fi
+                sleep $((attempt * 2))
+              done
+              return 1
+            fi
+          }
+
           capture_d1_usage() {
             local output="$1" today query
             today="$(date -u +%F)"
@@ -182,6 +217,8 @@ jobs:
               > "$output"
           }
 
+          PHASE=repair_candidate_endpoint
+          repair_candidate_endpoint
           capture_d1_usage "$ROOT/d1-start.json" || echo '{"unavailable":true}' > "$ROOT/d1-start.json"
           source_history="$SOURCE_HISTORY"
           source_current="$SOURCE_CURRENT"
