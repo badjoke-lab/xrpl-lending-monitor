@@ -1,0 +1,78 @@
+name: P0 harden formal soak gates 2026-07-21
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/p0-harden-formal-soak-gates-20260721-trigger
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Require accepted parity in start and hourly gates
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          start = Path('.github/workflows/formal-free-operation-soak-start-gate.yml')
+          monitor = Path('.github/workflows/formal-free-operation-soak-monitor.yml')
+
+          start_text = start.read_text()
+          if '  workflow_dispatch:' not in start_text:
+              trigger = """on:
+            push:
+              branches: [main]
+              paths:
+                - .github/formal-free-soak-start-trigger
+          """
+              replacement = """on:
+            push:
+              branches: [main]
+              paths:
+                - .github/formal-free-soak-start-trigger
+            workflow_dispatch:
+          """
+              if trigger not in start_text:
+                  raise SystemExit('start-gate trigger block not found')
+              start_text = start_text.replace(trigger, replacement, 1)
+
+          old = '$overview=="200" and $history=="200" and $diff=="200" and $d[0].status=="ok" and $d[0].sample.exactProjectionMismatches==0 and $d[0].sample.canonicalAheadRows==0'
+          new = '$overview=="200" and $history=="200" and $diff=="200" and $d[0].status=="ok" and $d[0].passed==true and $d[0].reason==null and $d[0].fastLane.ledgerIndex==$d[0].canonicalOverlay.ledgerIndex and $d[0].fastLane.ledgerHash==$d[0].canonicalOverlay.ledgerHash and $d[0].sample.exactProjectionMismatches==0 and $d[0].sample.canonicalAheadRows==0'
+
+          if old in start_text:
+              start_text = start_text.replace(old, new, 1)
+          elif new not in start_text:
+              raise SystemExit('start-gate api predicate not found')
+          start.write_text(start_text)
+
+          monitor_text = monitor.read_text()
+          if old in monitor_text:
+              monitor_text = monitor_text.replace(old, new, 1)
+          elif new not in monitor_text:
+              raise SystemExit('hourly-monitor api predicate not found')
+          monitor.write_text(monitor_text)
+          PY
+
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add \
+            .github/workflows/formal-free-operation-soak-start-gate.yml \
+            .github/workflows/formal-free-operation-soak-monitor.yml
+          if git diff --cached --quiet; then
+            echo 'Formal soak gates already hardened.'
+          else
+            git commit -m 'Require accepted parity in formal soak gates'
+            git push origin HEAD:main
+          fi
