@@ -1,0 +1,98 @@
+name: Dispatch formal Free-operation soak start 2026-07-22
+
+on:
+  schedule:
+    - cron: '6 0 22 7 *'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+  issues: write
+
+concurrency:
+  group: formal-free-operation-soak-start-dispatch-20260722
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+      ISSUE_NUMBER: '962'
+      START_GATE_WORKFLOW: formal-free-operation-soak-start-gate.yml
+      PRODUCTION_DIFF: https://xrpl-lending-monitor.badjoke-lab.workers.dev/api/status/fast-lane-diff?limit=500
+      SOAK_START: '2026-07-22T00:15:00Z'
+    steps:
+      - name: Verify parity and dispatch formal start gate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          if test "$(date -u +%F)" != '2026-07-22'; then
+            echo 'Outside the one-time 2026-07-22 start date; no action.'
+            exit 0
+          fi
+
+          fail_not_started() {
+            local reason="$1"
+            gh issue comment "$ISSUE_NUMBER" --repo "$REPOSITORY" --body "Automatic formal start dispatch failed: ${reason}. The 09:15 JST window must not be treated as started."
+            gh issue edit "$ISSUE_NUMBER" --repo "$REPOSITORY" \
+              --title 'NOT STARTED — 24h five-minute Free-operation soak post-recovery 2026-07-22 09:15 JST' \
+              --state closed
+            exit 1
+          }
+
+          start_epoch="$(date -u -d "$SOAK_START" +%s)"
+          earliest_epoch="$((start_epoch - 540))"
+          now_epoch="$(date -u +%s)"
+
+          if test "$now_epoch" -lt "$earliest_epoch"; then
+            sleep "$((earliest_epoch - now_epoch))"
+            now_epoch="$(date -u +%s)"
+          fi
+          if test "$now_epoch" -ge "$start_epoch"; then
+            fail_not_started 'dispatcher ran after the exact pre-start window'
+          fi
+
+          mkdir -p dispatch-evidence
+          parity_ok=false
+          for attempt in $(seq 1 12); do
+            http="$(curl --silent --show-error --retry 2 -o dispatch-evidence/diff.json -w '%{http_code}' "$PRODUCTION_DIFF")"
+            if test "$http" = 200 && jq -e '
+              .status == "ok"
+              and .passed == true
+              and .reason == null
+              and .fastLane.ledgerIndex == .canonicalOverlay.ledgerIndex
+              and .fastLane.ledgerHash == .canonicalOverlay.ledgerHash
+              and (.sample.canonicalAheadRows // 0) == 0
+              and (.sample.exactProjectionMismatches // 0) == 0
+            ' dispatch-evidence/diff.json > /dev/null; then
+              parity_ok=true
+              break
+            fi
+            sleep 5
+          done
+          test "$parity_ok" = true || fail_not_started 'production fast-lane parity was not accepted'
+
+          if ! gh workflow view "$START_GATE_WORKFLOW" --repo "$REPOSITORY" > dispatch-evidence/workflow.txt 2>&1; then
+            cat dispatch-evidence/workflow.txt
+            fail_not_started 'formal start-gate workflow is unavailable'
+          fi
+
+          if ! gh workflow run "$START_GATE_WORKFLOW" --repo "$REPOSITORY" --ref main; then
+            fail_not_started 'workflow_dispatch request failed'
+          fi
+
+          gh issue comment "$ISSUE_NUMBER" --repo "$REPOSITORY" --body 'Automatic dispatcher accepted live production parity and dispatched the formal start gate. This dispatch alone does not start the soak; the start-gate result is authoritative.'
+
+      - name: Upload dispatch evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: formal-free-operation-soak-start-dispatch-20260722
+          path: dispatch-evidence
+          if-no-files-found: warn
+          retention-days: 30
