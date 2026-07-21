@@ -1,71 +1,11 @@
 {
-  "state": "failed",
-  "phase": "cutover_29864759832",
-  "message": "maintenance exited with code 1",
-  "checkedAt": "2026-07-21T20:13:29Z",
-  "runId": "29849538461",
-  "commit": "0ce03152ff7135d450c4b1bb0c3bfc101de816b5",
+  "state": "running",
+  "phase": "initialize",
+  "message": "maintenance started",
+  "checkedAt": "2026-07-21T21:35:01Z",
+  "runId": "29870529227",
+  "commit": "7e3a43439ed28846160978c8697d97c7b8d3d957",
   "childRunId": null,
   "collectorCadence": "five_minutes",
-  "historyCadence": "four_hours",
-  "summary": {
-    "cycles": [
-      {
-        "cycle": 1,
-        "runId": 29849600609,
-        "sourceLedger": 3800885,
-        "outputLedger": 3805885,
-        "lagLedgers": 29445
-      },
-      {
-        "cycle": 2,
-        "runId": 29851555876,
-        "sourceLedger": 3805885,
-        "outputLedger": 3810885,
-        "lagLedgers": 24935
-      },
-      {
-        "cycle": 3,
-        "runId": 29853328101,
-        "sourceLedger": 3810885,
-        "outputLedger": 3815885,
-        "lagLedgers": 20473
-      },
-      {
-        "cycle": 4,
-        "runId": 29855245358,
-        "sourceLedger": 3815885,
-        "outputLedger": 3820885,
-        "lagLedgers": 15954
-      },
-      {
-        "cycle": 5,
-        "runId": 29856995974,
-        "sourceLedger": 3820885,
-        "outputLedger": 3825885,
-        "lagLedgers": 11419
-      },
-      {
-        "cycle": 6,
-        "runId": 29858678594,
-        "sourceLedger": 3825885,
-        "outputLedger": 3830885,
-        "lagLedgers": 6950
-      },
-      {
-        "cycle": 7,
-        "runId": 29860768775,
-        "sourceLedger": 3830885,
-        "outputLedger": 3835885,
-        "lagLedgers": 2455
-      },
-      {
-        "cycle": 8,
-        "runId": 29862748930,
-        "sourceLedger": 3835885,
-        "outputLedger": 3838395,
-        "lagLedgers": 453
-      }
-    ]
-  }
+  "historyCadence": "four_hours"
 }
