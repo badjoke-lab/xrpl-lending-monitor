@@ -113,90 +113,53 @@ jobs:
           PHASE=validate_boundary
           jq -e '.triggers.crons == ["*/5 * * * *"] and .vars.APP_NETWORK == "devnet" and .vars.MAINNET_ENABLED == "false" and .queues.consumers[0].max_batch_size == 1 and .queues.consumers[0].max_concurrency == 1' wrangler.jsonc >/dev/null
 
-          PHASE=ensure_candidate_action
+          PHASE=repair_action_metadata
           ACTION_PATH=.github/actions/rolling-checkpoint-candidate/action.yml
           ACTION_API="repos/${REPOSITORY}/contents/${ACTION_PATH}"
-          if gh api "$ACTION_API" --jq .content 2>/dev/null | tr -d '\n' | base64 --decode > "$ROOT/action.yml"; then
-            python3 - <<'PY'
+          gh api "$ACTION_API" --jq .content | tr -d '\n' | base64 --decode > "$ROOT/action.yml"
+          python3 - <<'PY'
           from pathlib import Path
           path = Path('.local/four-hour-maintenance/action.yml')
           text = path.read_text()
-          old = '    - run: pnpm install --frozen-lockfile\n'
-          new = '    - shell: bash\n      run: pnpm install --frozen-lockfile\n'
+          descriptions = {
+              'source_history_branch': 'Source history branch',
+              'source_current_state_branch': 'Source current-state branch',
+              'history_candidate_branch': 'Output history candidate branch',
+              'current_state_candidate_branch': 'Output current-state candidate branch',
+              'max_delta_ledgers': 'Maximum ledgers to advance in one cycle',
+              'segment_ledgers': 'Ledgers per immutable history segment',
+              'read_window_size': 'Bounded history read window',
+          }
           changed = False
-          if old in text:
-              text = text.replace(old, new, 1)
+          for key, description in descriptions.items():
+              old = f'  {key}:\n    required: true'
+              new = f'  {key}:\n    description: {description}\n    required: true'
+              if old in text:
+                  text = text.replace(old, new, 1)
+                  changed = True
+              marker = f'  {key}:\n    description:'
+              if marker not in text:
+                  raise SystemExit(f'missing input description: {key}')
+          if '    - run: pnpm install --frozen-lockfile' in text:
+              text = text.replace(
+                  '    - run: pnpm install --frozen-lockfile',
+                  '    - shell: bash\n      run: pnpm install --frozen-lockfile',
+                  1,
+              )
               changed = True
           if 'https://devnet.honeycluster.io/' in text:
-              raise SystemExit('Honeycluster endpoint remained in composite action')
+              raise SystemExit('unavailable Honeycluster endpoint remains')
           if text.count('https://s.devnet.rippletest.net:51234/') < 3:
-              raise SystemExit('Ripple endpoint missing in composite action')
+              raise SystemExit('Ripple Devnet endpoint count is invalid')
           path.write_text(text)
           Path('.local/four-hour-maintenance/action-changed').write_text('true\n' if changed else 'false\n')
           PY
-            if test "$(cat "$ROOT/action-changed")" = true; then
-              sha="$(gh api "$ACTION_API" --jq .sha)"
-              content="$(base64 -w0 "$ROOT/action.yml")"
-              gh api --method PUT "$ACTION_API" -f message='fix: declare shell for composite install step' -f content="$content" -f sha="$sha" -f branch=main >/dev/null
-              sleep 3
-            fi
-          else
-            CANDIDATE_API="repos/${REPOSITORY}/contents/.github/workflows/rolling-checkpoint-candidate.yml"
-            gh api "$CANDIDATE_API" --jq .content | tr -d '\n' | base64 --decode > "$ROOT/candidate.yml"
-            python3 - <<'PY'
-          from pathlib import Path
-          import re
-          root = Path('.local/four-hour-maintenance')
-          source = root.joinpath('candidate.yml').read_text()
-          old = 'https://devnet.honeycluster.io/'
-          new = 'https://s.devnet.rippletest.net:51234/'
-          if source.count(old) < 3:
-              raise SystemExit('candidate template does not contain expected endpoints')
-          source = source.replace(old, new)
-          steps = source.split('    steps:\n', 1)[1]
-          steps, count = re.subn(
-              r"      - name: Check out implementation\n        uses: actions/checkout@v4\n        with:\n          fetch-depth: 1\n\n",
-              '', steps, count=1)
-          if count != 1:
-              raise SystemExit('implementation checkout block missing')
-          blocks = re.split(r'(?=^      - )', steps, flags=re.M)
-          fixed = []
-          for block in blocks:
-              if not block:
-                  continue
-              if re.search(r'^        run:', block, flags=re.M) and not re.search(r'^        shell:', block, flags=re.M):
-                  block = re.sub(r'(^        run:)', '        shell: bash\\n\\1', block, count=1, flags=re.M)
-              fixed.append(block)
-          steps = ''.join(fixed)
-          steps = '\n'.join(line[2:] if line.startswith('  ') else line for line in steps.splitlines()) + '\n'
-          header = (
-              'name: Rolling checkpoint candidate implementation\n'
-              'description: Build and publish one bounded candidate pair\n'
-              'inputs:\n'
-              '  source_history_branch:\n    required: true\n'
-              '  source_current_state_branch:\n    required: true\n'
-              '  history_candidate_branch:\n    required: true\n'
-              '  current_state_candidate_branch:\n    required: true\n'
-              '  max_delta_ledgers:\n    required: true\n'
-              '  segment_ledgers:\n    required: true\n'
-              '  read_window_size:\n    required: true\n'
-              'runs:\n  using: composite\n  steps:\n'
-          )
-          action = header + steps
-          if old in action or action.count(new) < 3:
-              raise SystemExit('generated action endpoint validation failed')
-          root.joinpath('action.yml').write_text(action)
-          PY
+          if test "$(cat "$ROOT/action-changed")" = true; then
+            sha="$(gh api "$ACTION_API" --jq .sha)"
             content="$(base64 -w0 "$ROOT/action.yml")"
-            gh api --method PUT "$ACTION_API" -f message='ops: publish rolling candidate composite action' -f content="$content" -f branch=main >/dev/null
-            PHASE=action_ready
-            put_status running 'composite action published; wrapper conversion required'
-            trap - EXIT
-            exit 0
+            gh api --method PUT "$ACTION_API" -f message='fix: complete rolling candidate action metadata' -f content="$content" -f sha="$sha" -f branch=main >/dev/null
+            sleep 5
           fi
-          grep -F 'using: composite' "$ROOT/action.yml" >/dev/null
-          grep -F 'https://s.devnet.rippletest.net:51234/' "$ROOT/action.yml" >/dev/null
-          ! grep -F 'https://devnet.honeycluster.io/' "$ROOT/action.yml" >/dev/null
 
           PHASE=advance
           source_history="$SOURCE_HISTORY"
@@ -204,6 +167,7 @@ jobs:
           final_history="$SOURCE_HISTORY"
           final_current="$SOURCE_CURRENT"
           lag=999999999
+
           for cycle in $(seq 1 8); do
             fetch_json "$source_history" history/publication.json "$ROOT/source-history.json"
             fetch_json "$source_current" read-model/manifest.json "$ROOT/source-current.json"
@@ -217,10 +181,13 @@ jobs:
             if test "$lag" -le "$MAX_LAG"; then break; fi
 
             if test $((cycle % 2)) -eq 1; then
-              out_history="$CANDIDATE_A_HISTORY"; out_current="$CANDIDATE_A_CURRENT"
+              out_history="$CANDIDATE_A_HISTORY"
+              out_current="$CANDIDATE_A_CURRENT"
             else
-              out_history="$CANDIDATE_B_HISTORY"; out_current="$CANDIDATE_B_CURRENT"
+              out_history="$CANDIDATE_B_HISTORY"
+              out_current="$CANDIDATE_B_CURRENT"
             fi
+
             gh api "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-candidate.yml/runs?event=workflow_dispatch&per_page=100" --jq '.workflow_runs[].id' > "$ROOT/before.txt"
             jq -n --arg ref main --arg sh "$source_history" --arg sc "$source_current" --arg oh "$out_history" --arg oc "$out_current" --arg max "$MAX_DELTA" \
               '{ref:$ref,inputs:{source_history_branch:$sh,source_current_state_branch:$sc,history_candidate_branch:$oh,current_state_candidate_branch:$oc,max_delta_ledgers:$max,segment_ledgers:"500",read_window_size:"4"}}' > "$ROOT/dispatch.json"
@@ -233,6 +200,7 @@ jobs:
               put_status failed "candidate child ${child} concluded ${conclusion}"
               exit 1
             fi
+
             fetch_json "$out_history" history/publication.json "$ROOT/output-history.json"
             fetch_json "$out_current" read-model/manifest.json "$ROOT/output-current.json"
             out_ledger="$(jq -r .endLedgerIndex "$ROOT/output-history.json")"
@@ -241,9 +209,12 @@ jobs:
             test "$out_ledger" = "$(jq -r .ledgerIndex "$ROOT/output-current.json")"
             test "$out_hash" = "$(jq -r .ledgerHash "$ROOT/output-current.json")"
             jq -n --argjson cycle "$cycle" --argjson runId "$child" --argjson source "$ledger" --argjson output "$out_ledger" '{cycle:$cycle,runId:$runId,sourceLedger:$source,outputLedger:$output}' >> "$ROOT/cycles.ndjson"
-            source_history="$out_history"; source_current="$out_current"
-            final_history="$out_history"; final_current="$out_current"
+            source_history="$out_history"
+            source_current="$out_current"
+            final_history="$out_history"
+            final_current="$out_current"
           done
+
           test "$lag" -le "$MAX_LAG"
 
           if test "$final_history" != "$SOURCE_HISTORY"; then
@@ -252,6 +223,8 @@ jobs:
             jq -n --arg ref main --arg h "$final_history" --arg c "$final_current" '{ref:$ref,inputs:{history_candidate_branch:$h,current_state_candidate_branch:$c,confirm_production_write:true}}' > "$ROOT/cutover.json"
             gh api --method POST "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-live-cutover.yml/dispatches" --input "$ROOT/cutover.json"
             cutover="$(wait_new_run rolling-checkpoint-live-cutover.yml "$ROOT/cutover-before.txt")"
+            PHASE="cutover_${cutover}"
+            put_status running "cutover ${cutover} started"
             wait_success "$cutover"
           fi
 
