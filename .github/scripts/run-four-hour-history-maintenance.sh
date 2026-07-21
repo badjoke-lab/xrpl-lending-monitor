@@ -27,7 +27,7 @@ publish_status() {
     --arg runId "$GITHUB_RUN_ID" \
     --arg commit "$GITHUB_SHA" \
     --arg childRunId "$child_run_id" \
-    '{state:$state,phase:$phase,message:$message,checkedAt:$checkedAt,runId:$runId,commit:$commit,childRunId:($childRunId|select(length>0)),collectorCadence:"five_minutes",historyCadence:"four_hours"}' \
+    '{state:$state,phase:$phase,message:$message,checkedAt:$checkedAt,runId:$runId,commit:$commit,childRunId:(if $childRunId == "" then null else $childRunId end),collectorCadence:"five_minutes",historyCadence:"four_hours"}' \
     > "$ROOT/status.json"
   if test -s "$ROOT/summary.json"; then
     jq -s '.[0] + {summary:.[1]}' "$ROOT/status.json" "$ROOT/summary.json" > "$ROOT/status-next.json"
