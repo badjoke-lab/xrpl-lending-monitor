@@ -1,11 +1,11 @@
 {
-  "state": "running",
+  "state": "failed",
   "phase": "cutover_29864759832",
-  "message": "cutover run 29864759832 is active",
-  "checkedAt": "2026-07-21T20:12:27Z",
+  "message": "maintenance exited with code 1",
+  "checkedAt": "2026-07-21T20:13:29Z",
   "runId": "29849538461",
   "commit": "0ce03152ff7135d450c4b1bb0c3bfc101de816b5",
-  "childRunId": "29864759832",
+  "childRunId": null,
   "collectorCadence": "five_minutes",
   "historyCadence": "four_hours",
   "summary": {
