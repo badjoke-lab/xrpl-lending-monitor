@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   isolate:
-    if: startsWith(github.event.issue.title, 'P0 apply formal soak isolation fix')
+    if: startsWith(github.event.issue.title, 'P0 apply formal soak isolation fix stage 1')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -26,19 +26,24 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Isolate formal soak and harden lifecycle
+      - name: Disable legacy scheduled triggers
         shell: bash
         run: |
           set -Eeuo pipefail
+          stage='initialization'
           report_failure() {
             code=$?
-            gh issue comment "$ISSUE_NUMBER" --repo "$REPOSITORY" --body "Isolation fixer failed with exit code ${code}. No success claim is valid until the resulting commit is verified."
+            gh issue comment "$ISSUE_NUMBER" --repo "$REPOSITORY" --body "Stage 1 isolation failed during: ${stage}. Exit code: ${code}."
             exit "$code"
           }
           trap report_failure ERR
 
+          stage='remove scheduled and issue triggers'
           python - <<'PY'
           from pathlib import Path
+
+          def indentation(line: str) -> int:
+              return len(line) - len(line.lstrip(' '))
 
           def remove_on_key(path: str, key: str) -> None:
               p = Path(path)
@@ -46,11 +51,15 @@ jobs:
               out = []
               removed = False
               i = 0
+              target = f'  {key}:'
               while i < len(lines):
-                  if lines[i] == f'  {key}:\n':
+                  if lines[i].rstrip('\n') == target:
                       removed = True
                       i += 1
-                      while i < len(lines) and not (lines[i].startswith('  ') and not lines[i].startswith('    ') and lines[i].strip().endswith(':')):
+                      while i < len(lines):
+                          stripped = lines[i].strip()
+                          if stripped and indentation(lines[i]) <= 2:
+                              break
                           i += 1
                       continue
                   out.append(lines[i])
@@ -59,78 +68,52 @@ jobs:
                   raise SystemExit(f'missing on.{key}: {path}')
               p.write_text(''.join(out))
 
-          for path in [
+          scheduled = [
               '.github/workflows/catch-up-monitor.yml',
               '.github/workflows/fast-lane-shadow-canary.yml',
               '.github/workflows/m1-exit-review.yml',
               '.github/workflows/ui-screenshot-audit.yml',
               '.github/workflows/rolling-checkpoint-maintenance.yml',
               '.github/workflows/verify-production-read-soak.yml',
-          ]:
+          ]
+          for path in scheduled:
               remove_on_key(path, 'schedule')
           remove_on_key('.github/workflows/rolling-checkpoint-maintenance.yml', 'issues')
-
-          monitor = Path('.github/workflows/formal-free-operation-soak-monitor.yml')
-          text = monitor.read_text()
-          needle = '''          now_epoch="$(date -u +%s)"\n          start_epoch="$(date -u -d "$start" +%s)"\n          end_epoch="$(date -u -d "$end" +%s)"\n'''
-          insert = needle + '''          gh issue view "$issue" --repo "$REPOSITORY" --json state,title,labels > soak-monitor-evidence/issue.json\n          issue_active="$(jq -r 'if .state=="OPEN" and (([.labels[].name] | index("in-progress")) != null) and ((.title|startswith("FAILED"))|not) and ((.title|startswith("NOT STARTED"))|not) then "true" else "false" end' soak-monitor-evidence/issue.json)"\n'''
-          if 'issue_active=' not in text:
-              if needle not in text: raise SystemExit('hourly monitor insertion point missing')
-              text = text.replace(needle, insert, 1)
-          old = '''          elif [ "$now_epoch" -lt "$end_epoch" ]; then\n            echo 'active=true' >> "$GITHUB_OUTPUT"\n            echo 'phase=running' >> "$GITHUB_OUTPUT"\n          else\n            echo 'active=false' >> "$GITHUB_OUTPUT"\n            echo 'phase=ended' >> "$GITHUB_OUTPUT"\n          fi\n'''
-          new = '''          elif [ "$now_epoch" -ge "$end_epoch" ]; then\n            echo 'active=false' >> "$GITHUB_OUTPUT"\n            echo 'phase=ended' >> "$GITHUB_OUTPUT"\n          elif [ "$issue_active" = true ]; then\n            echo 'active=true' >> "$GITHUB_OUTPUT"\n            echo 'phase=running' >> "$GITHUB_OUTPUT"\n          else\n            echo 'active=false' >> "$GITHUB_OUTPUT"\n            echo 'phase=not-started-or-closed' >> "$GITHUB_OUTPUT"\n          fi\n'''
-          if old not in text: raise SystemExit('hourly monitor active block missing')
-          text = text.replace(old, new, 1)
-          text = text.replace('2026-07-22 09:10 JST', '2026-07-22 09:15 JST')
-          monitor.write_text(text)
-
-          strict = Path('.github/workflows/formal-free-operation-soak-strict-parity-monitor.yml')
-          text = strict.read_text()
-          needle = '''          mkdir -p strict-parity-evidence\n          http="$(curl --silent --show-error --retry 3 -o strict-parity-evidence/diff.json -w '%{http_code}' "$PRODUCTION_DIFF")"\n'''
-          replacement = '''          mkdir -p strict-parity-evidence\n          gh issue view "$issue" --repo "$REPOSITORY" --json state,title,labels > strict-parity-evidence/issue.json\n          if ! jq -e '.state=="OPEN" and (([.labels[].name] | index("in-progress")) != null) and ((.title|startswith("FAILED"))|not) and ((.title|startswith("NOT STARTED"))|not)' strict-parity-evidence/issue.json > /dev/null; then\n            echo 'Formal soak was not accepted or is already closed.'\n            exit 0\n          fi\n          http="$(curl --silent --show-error --retry 3 -o strict-parity-evidence/diff.json -w '%{http_code}' "$PRODUCTION_DIFF")"\n'''
-          if 'strict-parity-evidence/issue.json' not in text:
-              if needle not in text: raise SystemExit('strict monitor insertion point missing')
-              text = text.replace(needle, replacement, 1)
-          strict.write_text(text)
-
-          final = Path('.github/workflows/formal-free-operation-soak-final-audit.yml')
-          text = final.read_text()
-          if '  workflow_dispatch:\n' not in text.split('permissions:', 1)[0]:
-              if 'on:\n  push:\n' not in text: raise SystemExit('final audit trigger block missing')
-              text = text.replace('on:\n  push:\n', 'on:\n  workflow_dispatch:\n  push:\n', 1)
-          old_issue = '''          issue_open="$(jq '.state=="OPEN" and (.title|startswith("FAILED")|not) and (.title|startswith("NOT STARTED")|not)' final-soak-evidence/issue-before.json)"\n'''
-          new_issue = '''          issue_open="$(jq '.state=="OPEN" and (([.labels[].name] | index("in-progress")) != null) and ((.title|startswith("FAILED"))|not) and ((.title|startswith("NOT STARTED"))|not)' final-soak-evidence/issue-before.json)"\n'''
-          if old_issue not in text: raise SystemExit('final audit issue guard missing')
-          text = text.replace(old_issue, new_issue, 1)
-          lines = text.splitlines(keepends=True)
-          strict_api = '''          api_ok="$(jq -n --arg overview "$overview_http" --arg history "$history_http" --arg diff "$diff_http" --slurpfile d final-soak-evidence/diff.json '$overview=="200" and $history=="200" and $diff=="200" and $d[0].status=="ok" and $d[0].passed==true and $d[0].reason==null and $d[0].fastLane.ledgerIndex==$d[0].canonicalOverlay.ledgerIndex and $d[0].fastLane.ledgerHash==$d[0].canonicalOverlay.ledgerHash and ($d[0].sample.exactProjectionMismatches // 0)==0 and ($d[0].sample.canonicalAheadRows // 0)==0')"\n'''
-          found = False
-          for i, line in enumerate(lines):
-              if line.startswith('          api_ok='):
-                  lines[i] = strict_api
-                  found = True
-                  break
-          if not found: raise SystemExit('final audit api check missing')
-          final.write_text(''.join(lines))
-
-          expr_token = '$' + '{{ github.token }}'
-          expr_repo = '$' + '{{ github.repository }}'
-          dispatcher = f'''name: Dispatch formal Free-operation soak final audit 2026-07-23\n\non:\n  schedule:\n    - cron: '20 0 23 7 *'\n  workflow_dispatch:\n\npermissions:\n  actions: write\n  contents: read\n  issues: read\n\nconcurrency:\n  group: formal-free-operation-soak-final-dispatch-20260723\n  cancel-in-progress: false\n\njobs:\n  dispatch:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n    env:\n      GH_TOKEN: {expr_token}\n      REPOSITORY: {expr_repo}\n    steps:\n      - name: Dispatch only the accepted one-time formal soak\n        shell: bash\n        run: |\n          set -Eeuo pipefail\n          if test "$(date -u +%F)" != '2026-07-23'; then\n            echo 'Outside the one-time final-audit date.'\n            exit 0\n          fi\n          gh issue view 962 --repo "$REPOSITORY" --json state,title,labels > /tmp/issue.json\n          if ! jq -e '.state=="OPEN" and (([.labels[].name] | index("in-progress")) != null) and ((.title|startswith("FAILED"))|not) and ((.title|startswith("NOT STARTED"))|not)' /tmp/issue.json > /dev/null; then\n            echo 'Formal soak was not accepted or is already closed; final audit not dispatched.'\n            exit 0\n          fi\n          gh workflow run formal-free-operation-soak-final-audit.yml --repo "$REPOSITORY" --ref main\n'''
-          Path('.github/workflows/formal-free-operation-soak-final-dispatch-20260723.yml').write_text(dispatcher)
           PY
 
+          stage='verify trigger cleanup'
+          for file in \
+            catch-up-monitor.yml \
+            fast-lane-shadow-canary.yml \
+            m1-exit-review.yml \
+            ui-screenshot-audit.yml \
+            rolling-checkpoint-maintenance.yml \
+            verify-production-read-soak.yml; do
+            if grep -Eq '^  schedule:' ".github/workflows/${file}"; then
+              echo "schedule still present in ${file}" >&2
+              exit 1
+            fi
+          done
+          if grep -Eq '^  issues:' .github/workflows/rolling-checkpoint-maintenance.yml; then
+            echo 'issues trigger still present in rolling checkpoint maintenance' >&2
+            exit 1
+          fi
+
+          stage='remove expired and failed one-shot workflows'
           rm -f \
             .github/workflows/p0-oneoff-verify-12-slots-20260721.yml \
             .github/workflows/p0-soak-action-interference-audit-20260721.yml \
             .github/workflows/p0-isolate-formal-soak-actions-20260721.yml \
             .github/p0-soak-action-audit-target-20260721 \
-            .github/p0-soak-action-audit-target-20260721-2 \
-            .github/workflows/p0-apply-soak-isolation-fix-20260721.yml
+            .github/p0-soak-action-audit-target-20260721-2
 
+          stage='commit and push'
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add -A
           git diff --cached --check
-          git commit -m 'Isolate formal five-minute soak from legacy scheduled Actions'
+          git commit -m 'Disable legacy scheduled Actions during formal five-minute soak'
           git push origin HEAD:main
-          gh issue comment "$ISSUE_NUMBER" --repo "$REPOSITORY" --body "Isolation fix committed and pushed. Verify the resulting main commit and active workflow triggers before treating the formal soak as isolated."
+
+          stage='report success'
+          gh issue comment "$ISSUE_NUMBER" --repo "$REPOSITORY" --body 'Stage 1 isolation committed and pushed. Legacy scheduled Actions were changed to non-scheduled/manual triggers; verify main before relying on this result.'
