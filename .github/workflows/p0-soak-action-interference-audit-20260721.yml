@@ -36,7 +36,7 @@ jobs:
 
           root = Path('.github/workflows')
           files = sorted(root.glob('*.yml')) + sorted(root.glob('*.yaml'))
-          print('## Workflow interference audit')
+          print('# P0 soak and GitHub Actions interference audit')
           print()
           print('This audit only reads repository files. It does not call Cloudflare, D1, the Worker, or XRPL endpoints.')
           print()
@@ -58,18 +58,18 @@ jobs:
               if deploy: risky.append(p.name)
               if reads: diagnostic.append(p.name)
           print()
-          print('### Scheduled workflows')
+          print('## Scheduled workflows')
           for x in scheduled: print(f'- `{x}`')
           if not scheduled: print('- none')
           print()
-          print('### Workflows capable of production/D1/Cloudflare interaction')
+          print('## Workflows capable of production/D1/Cloudflare interaction')
           for x in risky: print(f'- `{x}`')
           if not risky: print('- none')
           print()
-          print('### Diagnostic workflows that can add D1/API usage when triggered')
+          print('## Diagnostic workflows that can add D1/API usage when triggered')
           for x in diagnostic: print(f'- `{x}`')
           if not diagnostic: print('- none')
           print()
-          print('Conclusion is not inferred here; the inventory is evidence for manual review of trigger guards and overlap.')
+          print('The inventory is evidence for manual review of trigger guards and overlap. It is not itself a pass/fail conclusion.')
           PY
-          gh issue comment 962 --repo "$REPOSITORY" --body-file /tmp/workflow-audit.md
+          gh issue edit 966 --repo "$REPOSITORY" --body-file /tmp/workflow-audit.md
