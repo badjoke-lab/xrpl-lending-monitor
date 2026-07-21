@@ -1,0 +1,36 @@
+{
+  "vaults": {
+    "listCode": "200",
+    "id": "000053B23A56D11CC5A348B0344E80EBBCC6C6424708CC629872FA0A2A2E868E",
+    "snapshot": "devnet-3800885-eaa0d29666e7",
+    "detailCode": "200",
+    "page2Code": "200",
+    "page2Count": 2,
+    "detailBody": "{\"network\":\"devnet\",\"kind\":\"vault\",\"epoch\":{\"id\":\"devnet-3371675\",\"status\":\"current\"},\"snapshot\":{\"id\":\"devnet-3800885-eaa0d29666e7\",\"epoch_id\":\"devnet-3371675\",\"ledger_index\":3800885,\"ledger_hash\":\"E",
+    "page2Body": "{\"network\":\"devnet\",\"kind\":\"vaults\",\"epoch\":{\"id\":\"devnet-3371675\",\"status\":\"current\"},\"snapshot\":{\"id\":\"devnet-3800885-eaa0d29666e7\",\"epoch_id\":\"devnet-3371675\",\"ledger_index\":3800885,\"ledger_hash\":\""
+  },
+  "loanBrokers": {
+    "listCode": "200",
+    "id": "0000018A4E54F377D5B1FFD573CB3000A8F135FA068A16BA68BC998349FBEF72",
+    "snapshot": "devnet-3800885-eaa0d29666e7",
+    "detailCode": "200",
+    "page2Code": "200",
+    "page2Count": 2,
+    "detailBody": "{\"network\":\"devnet\",\"kind\":\"loan_broker\",\"epoch\":{\"id\":\"devnet-3371675\",\"status\":\"current\"},\"snapshot\":{\"id\":\"devnet-3800885-eaa0d29666e7\",\"epoch_id\":\"devnet-3371675\",\"ledger_index\":3800885,\"ledger_ha",
+    "page2Body": "{\"network\":\"devnet\",\"kind\":\"loan_brokers\",\"epoch\":{\"id\":\"devnet-3371675\",\"status\":\"current\"},\"snapshot\":{\"id\":\"devnet-3800885-eaa0d29666e7\",\"epoch_id\":\"devnet-3371675\",\"ledger_index\":3800885,\"ledger_h"
+  },
+  "loans": {
+    "listCode": "200",
+    "id": "0000264C3DDAAFD5A96A5017088B7666F6E91DF0B0BE6B478FFD68A344BA310C",
+    "snapshot": "devnet-3800885-eaa0d29666e7",
+    "detailCode": "200",
+    "page2Code": "200",
+    "page2Count": 2,
+    "detailBody": "{\"network\":\"devnet\",\"kind\":\"loan\",\"epoch\":{\"id\":\"devnet-3371675\",\"status\":\"current\"},\"snapshot\":{\"id\":\"devnet-3800885-eaa0d29666e7\",\"epoch_id\":\"devnet-3371675\",\"ledger_index\":3800885,\"ledger_hash\":\"EA",
+    "page2Body": "{\"network\":\"devnet\",\"kind\":\"loans\",\"epoch\":{\"id\":\"devnet-3371675\",\"status\":\"current\"},\"snapshot\":{\"id\":\"devnet-3800885-eaa0d29666e7\",\"epoch_id\":\"devnet-3371675\",\"ledger_index\":3800885,\"ledger_hash\":\"E"
+  },
+  "invalidCursor": {
+    "code": "400",
+    "body": "{\"error\":\"invalid_cursor\",\"message\":\"cursor does not match the base-plus-overlay query\"}"
+  }
+}
