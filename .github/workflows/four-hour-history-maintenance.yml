@@ -226,7 +226,13 @@ jobs:
               '{ref:$ref,inputs:{source_history_branch:$sh,source_current_state_branch:$sc,history_candidate_branch:$oh,current_state_candidate_branch:$oc,max_delta_ledgers:$max,segment_ledgers:"500",read_window_size:"4"}}' > "$ROOT/dispatch.json"
             gh api --method POST "repos/${REPOSITORY}/actions/workflows/rolling-checkpoint-candidate.yml/dispatches" --input "$ROOT/dispatch.json"
             child="$(wait_new_run rolling-checkpoint-candidate.yml "$ROOT/before.txt")"
-            wait_success "$child"
+            PHASE="candidate_cycle_${cycle}_child_${child}"
+            put_status running "candidate child ${child} started"
+            if ! wait_success "$child"; then
+              conclusion="$(jq -r '.conclusion // "unknown"' "$ROOT/run-${child}.json" 2>/dev/null || echo unknown)"
+              put_status failed "candidate child ${child} concluded ${conclusion}"
+              exit 1
+            fi
             fetch_json "$out_history" history/publication.json "$ROOT/output-history.json"
             fetch_json "$out_current" read-model/manifest.json "$ROOT/output-current.json"
             out_ledger="$(jq -r .endLedgerIndex "$ROOT/output-history.json")"
