@@ -2,18 +2,25 @@ name: Rolling checkpoint candidate implementation
 description: Build and publish one bounded candidate pair
 inputs:
   source_history_branch:
+    description: Source history branch
     required: true
   source_current_state_branch:
+    description: Source current-state branch
     required: true
   history_candidate_branch:
+    description: Output history candidate branch
     required: true
   current_state_candidate_branch:
+    description: Output current-state candidate branch
     required: true
   max_delta_ledgers:
+    description: Maximum ledgers to advance in one cycle
     required: true
   segment_ledgers:
+    description: Ledgers per immutable history segment
     required: true
   read_window_size:
+    description: Bounded history read window
     required: true
 runs:
   using: composite
