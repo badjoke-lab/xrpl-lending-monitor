@@ -1,17 +1,10 @@
 {
-  "state": "failed",
-  "phase": "repair_candidate_endpoint",
-  "message": "maintenance exited with code 1",
-  "checkedAt": "2026-07-21T15:29:02Z",
-  "runId": "29844125596",
-  "runAttempt": "1",
-  "commit": "6bb4dca3eab440e939253393039913cdfe1a2a3f",
-  "source": {
-    "historyLedger": null,
-    "historyHash": "",
-    "currentLedger": null,
-    "currentHash": ""
-  },
+  "state": "running",
+  "phase": "initialize",
+  "message": "maintenance started",
+  "checkedAt": "2026-07-21T15:39:21Z",
+  "runId": "29844976480",
+  "commit": "9ba7ca7905eeae489960e0177fc3b98b194af0fd",
   "collectorCadence": "five_minutes",
   "historyCadence": "four_hours"
 }
