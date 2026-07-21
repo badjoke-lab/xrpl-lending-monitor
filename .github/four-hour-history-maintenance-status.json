@@ -1,0 +1,17 @@
+{
+  "state": "running",
+  "phase": "initialize",
+  "message": "maintenance started",
+  "checkedAt": "2026-07-21T15:13:47Z",
+  "runId": "29842961861",
+  "runAttempt": "1",
+  "commit": "fa4de546ae66c4c79cc875ede1e0aad8ac904d60",
+  "source": {
+    "historyLedger": null,
+    "historyHash": "",
+    "currentLedger": null,
+    "currentHash": ""
+  },
+  "collectorCadence": "five_minutes",
+  "historyCadence": "four_hours"
+}
