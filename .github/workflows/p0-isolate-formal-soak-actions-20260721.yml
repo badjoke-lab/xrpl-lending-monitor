@@ -1,0 +1,105 @@
+name: P0 isolate formal soak from legacy Actions 2026-07-21
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/p0-isolate-formal-soak-actions-20260721.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: p0-isolate-formal-soak-actions-20260721
+  cancel-in-progress: false
+
+jobs:
+  isolate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Remove legacy schedules and harden formal soak lifecycle
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          def exact(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              if old not in text:
+                  raise SystemExit(f'expected block missing: {path}')
+              p.write_text(text.replace(old, new, 1))
+
+          exact('.github/workflows/catch-up-monitor.yml',
+          """on:\n  schedule:\n    - cron: '17,47 * * * *'\n    - cron: '23 */6 * * *'\n  workflow_dispatch:\n""",
+          """on:\n  workflow_dispatch:\n""")
+
+          exact('.github/workflows/fast-lane-shadow-canary.yml',
+          """on:\n  workflow_dispatch:\n  schedule:\n    - cron: '*/5 * * * *'\n""",
+          """on:\n  workflow_dispatch:\n""")
+
+          exact('.github/workflows/m1-exit-review.yml',
+          """on:\n  schedule:\n    - cron: '10 0 8 7 *'\n  workflow_dispatch:\n""",
+          """on:\n  workflow_dispatch:\n""")
+
+          exact('.github/workflows/ui-screenshot-audit.yml',
+          """on:\n  schedule:\n    - cron: '30 0 8 7 *'\n  workflow_dispatch:\n""",
+          """on:\n  workflow_dispatch:\n""")
+
+          exact('.github/workflows/rolling-checkpoint-maintenance.yml',
+          """on:\n  schedule:\n    - cron: '43 */3 * * *'\n  workflow_dispatch:\n  issues:\n    types: [opened]\n""",
+          """on:\n  workflow_dispatch:\n""")
+
+          p = Path('.github/workflows/verify-production-read-soak.yml')
+          text = p.read_text()
+          text2, n = re.subn(r"on:\n.*?\npermissions:\n", "on:\n  workflow_dispatch:\n\npermissions:\n", text, count=1, flags=re.S)
+          if n != 1:
+              raise SystemExit('could not isolate verify-production-read-soak.yml')
+          p.write_text(text2)
+
+          monitor = '.github/workflows/formal-free-operation-soak-monitor.yml'
+          exact(monitor,
+          """          if [ \"$now_epoch\" -lt \"$start_epoch\" ]; then\n            echo 'active=false' >> \"$GITHUB_OUTPUT\"\n            echo 'phase=scheduled' >> \"$GITHUB_OUTPUT\"\n          elif [ \"$now_epoch\" -lt \"$end_epoch\" ]; then\n            echo 'active=true' >> \"$GITHUB_OUTPUT\"\n            echo 'phase=running' >> \"$GITHUB_OUTPUT\"\n          else\n            echo 'active=false' >> \"$GITHUB_OUTPUT\"\n            echo 'phase=ended' >> \"$GITHUB_OUTPUT\"\n          fi\n""",
+          """          gh issue view \"$issue\" --repo \"$REPOSITORY\" --json state,title,labels > soak-monitor-evidence/issue.json\n          issue_active=\"$(jq -r 'if .state==\"OPEN\" and (([.labels[].name] | index(\"in-progress\")) != null) and ((.title|startswith(\"FAILED\"))|not) and ((.title|startswith(\"NOT STARTED\"))|not) then \"true\" else \"false\" end' soak-monitor-evidence/issue.json)\"\n          if [ \"$now_epoch\" -lt \"$start_epoch\" ]; then\n            echo 'active=false' >> \"$GITHUB_OUTPUT\"\n            echo 'phase=scheduled' >> \"$GITHUB_OUTPUT\"\n          elif [ \"$now_epoch\" -ge \"$end_epoch\" ]; then\n            echo 'active=false' >> \"$GITHUB_OUTPUT\"\n            echo 'phase=ended' >> \"$GITHUB_OUTPUT\"\n          elif [ \"$issue_active\" = true ]; then\n            echo 'active=true' >> \"$GITHUB_OUTPUT\"\n            echo 'phase=running' >> \"$GITHUB_OUTPUT\"\n          else\n            echo 'active=false' >> \"$GITHUB_OUTPUT\"\n            echo 'phase=not-started-or-closed' >> \"$GITHUB_OUTPUT\"\n          fi\n""")
+          exact(monitor,
+                "FAILED — 24h five-minute Free-operation soak post-recovery 2026-07-22 09:10 JST",
+                "FAILED — 24h five-minute Free-operation soak post-recovery 2026-07-22 09:15 JST")
+
+          strict = '.github/workflows/formal-free-operation-soak-strict-parity-monitor.yml'
+          exact(strict,
+          """          if test \"$now_epoch\" -lt \"$start_epoch\" || test \"$now_epoch\" -ge \"$end_epoch\"; then\n            echo 'Formal soak window is not active.'\n            exit 0\n          fi\n\n          mkdir -p strict-parity-evidence\n""",
+          """          if test \"$now_epoch\" -lt \"$start_epoch\" || test \"$now_epoch\" -ge \"$end_epoch\"; then\n            echo 'Formal soak window is not active.'\n            exit 0\n          fi\n\n          mkdir -p strict-parity-evidence\n          gh issue view \"$issue\" --repo \"$REPOSITORY\" --json state,title,labels > strict-parity-evidence/issue.json\n          if ! jq -e '.state==\"OPEN\" and (([.labels[].name] | index(\"in-progress\")) != null) and ((.title|startswith(\"FAILED\"))|not) and ((.title|startswith(\"NOT STARTED\"))|not)' strict-parity-evidence/issue.json > /dev/null; then\n            echo 'Formal soak was not accepted or is already closed.'\n            exit 0\n          fi\n""")
+
+          final = '.github/workflows/formal-free-operation-soak-final-audit.yml'
+          exact(final,
+          """on:\n  push:\n""",
+          """on:\n  workflow_dispatch:\n  push:\n""")
+          exact(final,
+          """          issue_open=\"$(jq '.state==\"OPEN\" and (.title|startswith(\"FAILED\")|not) and (.title|startswith(\"NOT STARTED\")|not)' final-soak-evidence/issue-before.json)\"\n""",
+          """          issue_open=\"$(jq '.state==\"OPEN\" and (([.labels[].name] | index(\"in-progress\")) != null) and ((.title|startswith(\"FAILED\"))|not) and ((.title|startswith(\"NOT STARTED\"))|not)' final-soak-evidence/issue-before.json)\"\n""")
+          exact(final,
+          """          api_ok=\"$(jq -n --arg overview \"$overview_http\" --arg history \"$history_http\" --arg diff \"$diff_http\" --slurpfile d final-soak-evidence/diff.json '$overview==\"200\" and $history==\"200\" and $diff==\"200\" and $d[0].status==\"ok\" and $d[0].sample.exactProjectionMismatches==0 and $d[0].sample.canonicalAheadRows==0')\"\n""",
+          """          api_ok=\"$(jq -n --arg overview \"$overview_http\" --arg history \"$history_http\" --arg diff \"$diff_http\" --slurpfile d final-soak-evidence/diff.json '$overview==\"200\" and $history==\"200\" and $diff==\"200\" and $d[0].status==\"ok\" and $d[0].passed==true and $d[0].reason==null and $d[0].fastLane.ledgerIndex==$d[0].canonicalOverlay.ledgerIndex and $d[0].fastLane.ledgerHash==$d[0].canonicalOverlay.ledgerHash and ($d[0].sample.exactProjectionMismatches // 0)==0 and ($d[0].sample.canonicalAheadRows // 0)==0')\"\n""")
+
+          Path('.github/workflows/formal-free-operation-soak-final-dispatch-20260723.yml').write_text("""name: Dispatch formal Free-operation soak final audit 2026-07-23\n\non:\n  schedule:\n    - cron: '20 0 23 7 *'\n  workflow_dispatch:\n\npermissions:\n  actions: write\n  contents: read\n  issues: read\n\nconcurrency:\n  group: formal-free-operation-soak-final-dispatch-20260723\n  cancel-in-progress: false\n\njobs:\n  dispatch:\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n    steps:\n      - name: Dispatch only the accepted one-time formal soak\n        shell: bash\n        env:\n          GH_TOKEN: ${{ github.token }}\n          REPOSITORY: ${{ github.repository }}\n        run: |\n          set -Eeuo pipefail\n          if test \"$(date -u +%F)\" != '2026-07-23'; then\n            echo 'Outside the one-time final-audit date.'\n            exit 0\n          fi\n          gh issue view 962 --repo \"$REPOSITORY\" --json state,title,labels > /tmp/issue.json\n          if ! jq -e '.state==\"OPEN\" and (([.labels[].name] | index(\"in-progress\")) != null) and ((.title|startswith(\"FAILED\"))|not) and ((.title|startswith(\"NOT STARTED\"))|not)' /tmp/issue.json > /dev/null; then\n            echo 'Formal soak was not accepted or is already closed; final audit not dispatched.'\n            exit 0\n          fi\n          gh workflow run formal-free-operation-soak-final-audit.yml --repo \"$REPOSITORY\" --ref main\n""")
+          PY
+
+          rm -f \
+            .github/workflows/p0-oneoff-verify-12-slots-20260721.yml \
+            .github/workflows/p0-soak-action-interference-audit-20260721.yml \
+            .github/p0-soak-action-audit-target-20260721 \
+            .github/p0-soak-action-audit-target-20260721-2 \
+            .github/workflows/p0-isolate-formal-soak-actions-20260721.yml
+
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m 'Isolate formal five-minute soak from legacy scheduled Actions'
+          git push origin HEAD:main
