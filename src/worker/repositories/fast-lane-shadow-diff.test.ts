@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 
-import { evaluateFastLaneShadowDiffSample } from './fast-lane-shadow-diff'
+import {
+  evaluateFastLaneShadowDiff,
+  evaluateFastLaneShadowDiffSample,
+} from './fast-lane-shadow-diff'
 
 function sample(overrides: Partial<Parameters<typeof evaluateFastLaneShadowDiffSample>[0]> = {}) {
   return {
@@ -24,7 +27,7 @@ describe('fast-lane shadow differential gate', () => {
     })
   })
 
-  it('rejects an empty sample', () => {
+  it('rejects an empty sample without aligned-head evidence', () => {
     expect(evaluateFastLaneShadowDiffSample(sample({
       sampledRows: 0,
       exactSourceMatches: 0,
@@ -32,6 +35,48 @@ describe('fast-lane shadow differential gate', () => {
     }))).toEqual({
       passed: false,
       reason: 'fast_lane_sample_empty',
+    })
+  })
+
+  it('passes an empty residual sample when canonical overlay is exactly at the fast-lane head', () => {
+    expect(evaluateFastLaneShadowDiff({
+      sample: sample({
+        sampledRows: 0,
+        exactSourceMatches: 0,
+        exactProjectionMatches: 0,
+      }),
+      fastLane: {
+        ledgerIndex: 3826708,
+        ledgerHash: 'ABC',
+      },
+      canonicalOverlay: {
+        ledgerIndex: 3826708,
+        ledgerHash: 'ABC',
+      },
+    })).toEqual({
+      passed: true,
+      reason: null,
+    })
+  })
+
+  it('rejects an empty residual sample when canonical overlay is not at the fast-lane head', () => {
+    expect(evaluateFastLaneShadowDiff({
+      sample: sample({
+        sampledRows: 0,
+        exactSourceMatches: 0,
+        exactProjectionMatches: 0,
+      }),
+      fastLane: {
+        ledgerIndex: 3826708,
+        ledgerHash: 'ABC',
+      },
+      canonicalOverlay: {
+        ledgerIndex: 3826707,
+        ledgerHash: 'DEF',
+      },
+    })).toEqual({
+      passed: false,
+      reason: 'empty_fast_lane_sample_head_mismatch',
     })
   })
 

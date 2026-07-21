@@ -79,6 +79,24 @@ export function evaluateFastLaneShadowDiffSample(
   return { passed: true, reason: null }
 }
 
+export function evaluateFastLaneShadowDiff(options: {
+  sample: NonNullable<FastLaneShadowDiffEvidence['sample']>
+  fastLane: { ledgerIndex: number; ledgerHash: string }
+  canonicalOverlay: { ledgerIndex: number; ledgerHash: string }
+}): { passed: boolean; reason: string | null } {
+  if (options.sample.sampledRows > 0) {
+    return evaluateFastLaneShadowDiffSample(options.sample)
+  }
+
+  const headsMatch = options.fastLane.ledgerIndex === options.canonicalOverlay.ledgerIndex
+    && options.fastLane.ledgerHash === options.canonicalOverlay.ledgerHash
+  if (!headsMatch) {
+    return { passed: false, reason: 'empty_fast_lane_sample_head_mismatch' }
+  }
+
+  return { passed: true, reason: null }
+}
+
 export async function readFastLaneShadowDiff(options: {
   db: D1Database
   sampleLimit?: number
@@ -219,7 +237,17 @@ export async function readFastLaneShadowDiff(options: {
     exactProjectionMatches: Number(aggregate?.exact_projection_matches ?? 0),
     exactProjectionMismatches: Number(aggregate?.exact_projection_mismatches ?? 0),
   }
-  const result = evaluateFastLaneShadowDiffSample(sample)
+  const result = evaluateFastLaneShadowDiff({
+    sample,
+    fastLane: {
+      ledgerIndex: state.lastProcessedLedger,
+      ledgerHash: state.lastProcessedHash,
+    },
+    canonicalOverlay: {
+      ledgerIndex: canonical.overlay_ledger_index,
+      ledgerHash: canonical.overlay_ledger_hash,
+    },
+  })
 
   return {
     schemaVersion: 1,
