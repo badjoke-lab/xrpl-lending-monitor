@@ -1,34 +1,34 @@
 {
   "vaults": {
     "httpCode": "200",
-    "responseBytes": 1696,
+    "responseBytes": 1836,
     "validJson": true,
     "itemCount": 1,
     "errorCode": "",
-    "snapshotId": "devnet-3371675-0ba2ed766c19",
-    "ledgerIndex": 3371675,
+    "snapshotId": "devnet-3800885-eaa0d29666e7",
+    "ledgerIndex": 3800885,
     "availability": "available",
     "reason": ""
   },
   "loanBrokers": {
     "httpCode": "200",
-    "responseBytes": 2165,
+    "responseBytes": 2295,
     "validJson": true,
     "itemCount": 1,
     "errorCode": "",
-    "snapshotId": "devnet-3371675-0ba2ed766c19",
-    "ledgerIndex": 3371675,
+    "snapshotId": "devnet-3800885-eaa0d29666e7",
+    "ledgerIndex": 3800885,
     "availability": "available",
     "reason": ""
   },
   "loans": {
     "httpCode": "200",
-    "responseBytes": 3503,
+    "responseBytes": 3659,
     "validJson": true,
     "itemCount": 1,
     "errorCode": "",
-    "snapshotId": "devnet-3371675-0ba2ed766c19",
-    "ledgerIndex": 3371675,
+    "snapshotId": "devnet-3800885-eaa0d29666e7",
+    "ledgerIndex": 3800885,
     "availability": "available",
     "reason": ""
   }
