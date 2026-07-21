@@ -1,0 +1,7 @@
+{
+  "issueNumber": 962,
+  "startUtc": "2026-07-22T00:10:00Z",
+  "endUtc": "2026-07-23T00:10:00Z",
+  "expectedSlots": 288,
+  "status": "scheduled"
+}
