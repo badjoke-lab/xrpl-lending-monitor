@@ -26,13 +26,25 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Validate maintenance scripts
+      - name: Validate and tune maintenance scripts
         shell: bash
         run: |
           set -euo pipefail
           bash -n .github/scripts/run-four-hour-history-maintenance.sh
           bash -n .github/scripts/run-rolling-checkpoint-candidate.sh
           jq -e '.triggers.crons == ["*/5 * * * *"] and .vars.APP_NETWORK == "devnet" and .vars.MAINNET_ENABLED == "false"' wrangler.jsonc >/dev/null
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('.github/scripts/run-four-hour-history-maintenance.sh')
+          text = path.read_text()
+          old = 'read_window_size:"4"'
+          new = 'read_window_size:"16"'
+          if text.count(old) != 1:
+              raise SystemExit(f'expected one read-window setting, found {text.count(old)}')
+          path.write_text(text.replace(old, new, 1))
+          PY
+          grep -F 'read_window_size:"16"' .github/scripts/run-four-hour-history-maintenance.sh
+          bash -n .github/scripts/run-four-hour-history-maintenance.sh
 
       - name: Run four-hour maintenance
         shell: bash
