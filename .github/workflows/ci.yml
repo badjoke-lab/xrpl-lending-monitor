@@ -5,6 +5,9 @@ on:
   push:
     branches:
       - main
+    paths-ignore:
+      - .github/four-hour-history-maintenance-status.json
+      - .github/four-hour-history-maintenance-trigger
 
 permissions:
   contents: read
