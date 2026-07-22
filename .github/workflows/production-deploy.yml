@@ -34,7 +34,7 @@ jobs:
           sparse-checkout: read-model/manifest.json
           sparse-checkout-cone-mode: false
 
-      - name: Check out production history identity
+      - name: Check out archived history identity
         uses: actions/checkout@v4
         with:
           ref: history-data
@@ -76,8 +76,10 @@ jobs:
           assert current['complete'] is True
           assert history['complete'] is True
           assert current['epochId'] == history['epochId']
-          assert current['ledgerIndex'] == history['endLedgerIndex']
-          assert current['ledgerHash'] == history['endLedgerHash']
+          assert history['endLedgerIndex'] <= current['ledgerIndex']
+          if history['endLedgerIndex'] == current['ledgerIndex']:
+              assert history['endLedgerHash'] == current['ledgerHash']
+
           assert config['vars']['REPLACEMENT_BASE_EPOCH_ID'] == current['epochId']
           assert config['vars']['REPLACEMENT_BASE_SNAPSHOT_ID'] == current['snapshotId']
           assert int(config['vars']['REPLACEMENT_BASE_LEDGER_INDEX']) == current['ledgerIndex']
@@ -88,6 +90,9 @@ jobs:
               'snapshotId': current['snapshotId'],
               'ledgerIndex': current['ledgerIndex'],
               'ledgerHash': current['ledgerHash'],
+              'historyMode': 'd1_fast_lane_windows_with_archived_branch',
+              'historyArchiveLedgerIndex': history['endLedgerIndex'],
+              'historyArchiveLedgerHash': history['endLedgerHash'],
               'historyPublicationSha256': history['publicationSha256'],
           }
           Path('production-deploy-checkpoint.json').write_text(json.dumps(checkpoint, indent=2) + '\n')
