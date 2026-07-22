@@ -1,11 +1,22 @@
 {
   "state": "running",
-  "phase": "cycle_1_candidate_29897602979",
-  "message": "candidate run 29897602979 is active",
-  "checkedAt": "2026-07-22T06:42:18Z",
+  "phase": "cycle_1_verify_candidate",
+  "message": "candidate cycle 1 completed",
+  "checkedAt": "2026-07-22T07:30:10Z",
   "runId": "29897585190",
   "commit": "c48f82def0f9ad214ae0d8c41203186290835166",
   "childRunId": "29897602979",
   "collectorCadence": "five_minutes",
-  "historyCadence": "four_hours"
+  "historyCadence": "four_hours",
+  "summary": {
+    "cycles": [
+      {
+        "cycle": 1,
+        "runId": 29897602979,
+        "sourceLedger": 3810885,
+        "outputLedger": 3815885,
+        "lagLedgers": 35126
+      }
+    ]
+  }
 }
