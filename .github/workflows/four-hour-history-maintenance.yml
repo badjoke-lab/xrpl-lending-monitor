@@ -32,16 +32,18 @@ jobs:
           set -euo pipefail
           jq -e '.triggers.crons == ["*/5 * * * *"] and .vars.APP_NETWORK == "devnet" and .vars.MAINNET_ENABLED == "false"' wrangler.jsonc >/dev/null
           python3 .github/scripts/persist-resilient-history-transport.py
+          python3 .github/scripts/persist-candidate-ledger-rpc-fallback.py
           bash -n .github/scripts/run-four-hour-history-maintenance.sh
           bash -n .github/scripts/run-rolling-checkpoint-candidate.sh
           grep -F 'read_window_size:"16"' .github/scripts/run-four-hour-history-maintenance.sh
           grep -F 'https://devnet.honeycluster.io/' .github/scripts/run-four-hour-history-maintenance.sh
           grep -F 'segment-${ORDINAL}.attempts.log' .github/scripts/run-rolling-checkpoint-candidate.sh
+          grep -F 'rpc_ledger() {' .github/scripts/run-rolling-checkpoint-candidate.sh
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           if ! git diff --quiet -- .github/scripts/run-four-hour-history-maintenance.sh .github/scripts/run-rolling-checkpoint-candidate.sh; then
             git add .github/scripts/run-four-hour-history-maintenance.sh .github/scripts/run-rolling-checkpoint-candidate.sh
-            git commit -m 'fix: add resilient XRPL history transport fallback'
+            git commit -m 'fix: add resilient XRPL history RPC fallback'
             git push origin HEAD:main
           fi
 
