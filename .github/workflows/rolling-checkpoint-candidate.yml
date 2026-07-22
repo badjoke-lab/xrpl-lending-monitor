@@ -71,6 +71,7 @@ jobs:
         run: |
           set -euo pipefail
           rm -rf .local/next-current-state /tmp/current-state-checkpoint-evidence
+          mkdir -p /tmp/current-state-checkpoint-evidence
           node scripts/build-overlay-current-state-checkpoint.mjs \
             --base-dir .local/source-current/rolling-base \
             --output-dir .local/next-current-state \
