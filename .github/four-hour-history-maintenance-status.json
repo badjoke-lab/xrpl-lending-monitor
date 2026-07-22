@@ -1,22 +1,17 @@
 {
-  "state": "failed",
-  "phase": "cycle_2_dispatch_candidate",
-  "message": "maintenance exited with code 1",
-  "checkedAt": "2026-07-22T07:30:15Z",
-  "runId": "29897585190",
-  "commit": "c48f82def0f9ad214ae0d8c41203186290835166",
-  "childRunId": null,
-  "collectorCadence": "five_minutes",
-  "historyCadence": "four_hours",
-  "summary": {
-    "cycles": [
-      {
-        "cycle": 1,
-        "runId": 29897602979,
-        "sourceLedger": 3810885,
-        "outputLedger": 3815885,
-        "lagLedgers": 35126
-      }
-    ]
-  }
+  "state": "running",
+  "phase": "initialize",
+  "message": "current-state checkpoint started",
+  "checkedAt": "2026-07-22T07:37:11Z",
+  "runId": "29900807829",
+  "commit": "70a320d34100022e82fd240868b41ed77e291686",
+  "candidateRunId": null,
+  "cutoverRunId": null,
+  "sourceBranch": null,
+  "outputBranch": null,
+  "sourceLedger": null,
+  "targetLedger": null,
+  "currentStateCadence": "five_minutes",
+  "checkpointCadence": "four_hours",
+  "historyMode": "archived_plus_forward_only"
 }
