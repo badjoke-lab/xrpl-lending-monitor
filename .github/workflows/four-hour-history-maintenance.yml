@@ -11,7 +11,7 @@ on:
 
 permissions:
   actions: write
-  contents: read
+  contents: write
 
 concurrency:
   group: four-hour-current-state-checkpoint
@@ -54,6 +54,62 @@ jobs:
         run: |
           set -Eeuo pipefail
           ROOT=current-state-checkpoint-evidence
+          PHASE=initialize
+          candidate_run_id=""
+          cutover_run_id=""
+          source_branch=""
+          output_branch=""
+          source_ledger=-1
+          target_ledger=-1
+
+          write_status() {
+            local state="$1"
+            local message="$2"
+            jq -n \
+              --arg state "$state" \
+              --arg phase "$PHASE" \
+              --arg message "$message" \
+              --arg checkedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+              --arg runId "$GITHUB_RUN_ID" \
+              --arg commit "$GITHUB_SHA" \
+              --arg candidateRunId "$candidate_run_id" \
+              --arg cutoverRunId "$cutover_run_id" \
+              --arg sourceBranch "$source_branch" \
+              --arg outputBranch "$output_branch" \
+              --argjson sourceLedger "$source_ledger" \
+              --argjson targetLedger "$target_ledger" '
+              {
+                state:$state,
+                phase:$phase,
+                message:$message,
+                checkedAt:$checkedAt,
+                runId:$runId,
+                commit:$commit,
+                candidateRunId:(if $candidateRunId == "" then null else $candidateRunId end),
+                cutoverRunId:(if $cutoverRunId == "" then null else $cutoverRunId end),
+                sourceBranch:(if $sourceBranch == "" then null else $sourceBranch end),
+                outputBranch:(if $outputBranch == "" then null else $outputBranch end),
+                sourceLedger:(if $sourceLedger < 0 then null else $sourceLedger end),
+                targetLedger:(if $targetLedger < 0 then null else $targetLedger end),
+                currentStateCadence:"five_minutes",
+                checkpointCadence:"four_hours",
+                historyMode:"archived_plus_forward_only"
+              }
+            ' > "$ROOT/status.json"
+          }
+
+          on_exit() {
+            local code=$?
+            trap - EXIT
+            if test "$code" -eq 0; then
+              write_status success "current-state checkpoint completed"
+            else
+              write_status failed "current-state checkpoint exited with code $code"
+            fi
+            exit "$code"
+          }
+          trap on_exit EXIT
+          write_status running "current-state checkpoint started"
 
           fetch_json() {
             local branch="$1"
@@ -95,8 +151,7 @@ jobs:
             return 1
           }
 
-          source_branch=""
-          source_ledger=-1
+          PHASE=select_source
           for branch in "$PRODUCTION_CURRENT" "$CANDIDATE_A" "$CANDIDATE_B"; do
             key="${branch//[^A-Za-z0-9]/_}"
             manifest="$ROOT/$key-manifest.json"
@@ -125,7 +180,9 @@ jobs:
           fi
           jq -n --arg source "$source_branch" --arg output "$output_branch" --argjson ledger "$source_ledger" \
             '{sourceBranch:$source,outputBranch:$output,sourceLedger:$ledger}' > "$ROOT/selection.json"
+          write_status running "selected newest verified rolling base"
 
+          PHASE=dispatch_candidate
           gh api "repos/$REPOSITORY/actions/workflows/rolling-checkpoint-candidate.yml/runs?event=workflow_dispatch&per_page=50" \
             --jq '.workflow_runs[].id' > "$ROOT/candidate-before.txt"
           jq -n --arg ref main --arg source "$source_branch" --arg output "$output_branch" \
@@ -135,8 +192,11 @@ jobs:
             --input "$ROOT/candidate-dispatch.json"
           wait_new_run rolling-checkpoint-candidate.yml "$ROOT/candidate-before.txt" "$ROOT/candidate-run-id.txt"
           candidate_run_id="$(cat "$ROOT/candidate-run-id.txt")"
+          PHASE="candidate_${candidate_run_id}"
+          write_status running "candidate run is active"
           wait_success "$candidate_run_id" "$ROOT/candidate-run.json"
 
+          PHASE=verify_candidate
           fetch_json "$output_branch" read-model/manifest.json "$ROOT/output-manifest.json"
           fetch_json "$output_branch" rolling-read-model-summary.json "$ROOT/output-summary.json"
           target_ledger="$(jq -r .ledgerIndex "$ROOT/output-manifest.json")"
@@ -148,18 +208,23 @@ jobs:
             and .target.ledgerHash == $hash
             and .rollingBase.segmentCount == 64
           ' "$ROOT/output-summary.json" >/dev/null
+          write_status running "candidate checkpoint verified"
 
+          PHASE=dispatch_cutover
           gh api "repos/$REPOSITORY/actions/workflows/rolling-checkpoint-live-cutover.yml/runs?event=workflow_dispatch&per_page=50" \
             --jq '.workflow_runs[].id' > "$ROOT/cutover-before.txt"
           jq -n --arg ref main --arg branch "$output_branch" \
-            '{ref:$ref,inputs:{current_state_candidate_branch:$branch,confirm_production_write:true}}' \
+            '{ref:$ref,inputs:{current_state_candidate_branch:$branch,confirm_production_write:"true"}}' \
             > "$ROOT/cutover-dispatch.json"
           gh api --method POST "repos/$REPOSITORY/actions/workflows/rolling-checkpoint-live-cutover.yml/dispatches" \
             --input "$ROOT/cutover-dispatch.json"
           wait_new_run rolling-checkpoint-live-cutover.yml "$ROOT/cutover-before.txt" "$ROOT/cutover-run-id.txt"
           cutover_run_id="$(cat "$ROOT/cutover-run-id.txt")"
+          PHASE="cutover_${cutover_run_id}"
+          write_status running "current-state cutover run is active"
           wait_success "$cutover_run_id" "$ROOT/cutover-run.json"
 
+          PHASE=verify_production
           fetch_json "$PRODUCTION_CURRENT" read-model/manifest.json "$ROOT/production-final.json"
           jq -e --argjson ledger "$target_ledger" --arg hash "$target_hash" '
             .complete == true and .ledgerIndex == $ledger and .ledgerHash == $hash
@@ -172,6 +237,44 @@ jobs:
             --arg cutoverRunId "$cutover_run_id" \
             '{passed:true,selection:$selection[0],target:$target[0],production:$production[0],candidateRunId:$candidateRunId,cutoverRunId:$cutoverRunId,currentStateCadence:"five_minutes",checkpointCadence:"four_hours",historyMode:"archived_plus_forward_only"}' \
             > "$ROOT/evidence.json"
+          PHASE=completed
+
+      - name: Publish checkpoint status
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          STATUS=current-state-checkpoint-evidence/status.json
+          if ! test -s "$STATUS"; then
+            jq -n \
+              --arg state failed \
+              --arg phase workflow_setup \
+              --arg message "checkpoint workflow failed before local status initialization" \
+              --arg checkedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+              --arg runId "$GITHUB_RUN_ID" \
+              --arg commit "$GITHUB_SHA" \
+              '{state:$state,phase:$phase,message:$message,checkedAt:$checkedAt,runId:$runId,commit:$commit,candidateRunId:null,cutoverRunId:null,currentStateCadence:"five_minutes",checkpointCadence:"four_hours",historyMode:"archived_plus_forward_only"}' \
+              > "$STATUS"
+          fi
+          API_PATH="repos/$REPOSITORY/contents/.github/four-hour-history-maintenance-status.json"
+          CONTENT="$(base64 -w0 "$STATUS")"
+          for attempt in $(seq 1 10); do
+            EXISTING_SHA="$(gh api "$API_PATH" --jq .sha 2>/dev/null || true)"
+            if test -n "$EXISTING_SHA"; then
+              if gh api --method PUT "$API_PATH" \
+                -f message="ops: update current-state checkpoint status" \
+                -f content="$CONTENT" \
+                -f sha="$EXISTING_SHA" >/dev/null; then
+                exit 0
+              fi
+            elif gh api --method PUT "$API_PATH" \
+              -f message="ops: create current-state checkpoint status" \
+              -f content="$CONTENT" >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1
 
       - name: Upload four-hour current-state checkpoint evidence
         if: ${{ always() }}
