@@ -1,11 +1,11 @@
 {
   "state": "running",
-  "phase": "initialize",
-  "message": "maintenance started",
-  "checkedAt": "2026-07-22T01:16:45Z",
+  "phase": "cycle_1_candidate_29882670930",
+  "message": "candidate run 29882670930 is active",
+  "checkedAt": "2026-07-22T01:17:07Z",
   "runId": "29882658111",
   "commit": "5166dcb6391720de7f8dbf40a05d2bfa23af368b",
-  "childRunId": null,
+  "childRunId": "29882670930",
   "collectorCadence": "five_minutes",
   "historyCadence": "four_hours"
 }
