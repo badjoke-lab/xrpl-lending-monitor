@@ -1,1 +1,1 @@
-retry D1 overlay current-state checkpoint after evidence-directory fix 2026-07-22T16:50:00+09:00
+rerun restored four-hour checkpoint path 2026-07-23T10:35:00Z
