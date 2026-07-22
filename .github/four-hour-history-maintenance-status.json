@@ -1,29 +1,11 @@
 {
-  "state": "failed",
-  "phase": "cycle_3_verify_candidate",
-  "message": "maintenance exited with code 1",
-  "checkedAt": "2026-07-21T22:51:25Z",
-  "runId": "29870529227",
-  "commit": "7e3a43439ed28846160978c8697d97c7b8d3d957",
+  "state": "running",
+  "phase": "initialize",
+  "message": "maintenance started",
+  "checkedAt": "2026-07-22T01:16:45Z",
+  "runId": "29882658111",
+  "commit": "5166dcb6391720de7f8dbf40a05d2bfa23af368b",
   "childRunId": null,
   "collectorCadence": "five_minutes",
-  "historyCadence": "four_hours",
-  "summary": {
-    "cycles": [
-      {
-        "cycle": 1,
-        "runId": 29870551459,
-        "sourceLedger": 3800885,
-        "outputLedger": 3805885,
-        "lagLedgers": 34811
-      },
-      {
-        "cycle": 2,
-        "runId": 29872083859,
-        "sourceLedger": 3805885,
-        "outputLedger": 3810885,
-        "lagLedgers": 30246
-      }
-    ]
-  }
+  "historyCadence": "four_hours"
 }
