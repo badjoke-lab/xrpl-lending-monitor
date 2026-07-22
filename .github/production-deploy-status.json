@@ -1,13 +1,16 @@
 {
-  "runId": "29407756999",
-  "runUrl": "https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/29407756999",
-  "headSha": "2921d195520049628b01a0217dbd457a3288407d",
+  "runId": "29946880497",
+  "runUrl": "https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/29946880497",
+  "headSha": "bcfc298996b8250ca1330d978eacd971ba044034",
   "outcome": "success",
   "checkpoint": {
     "epochId": "devnet-3371675",
-    "snapshotId": "devnet-3624709-39d838e15f10",
-    "ledgerIndex": 3624709,
-    "ledgerHash": "39D838E15F106E3305038540F7BDD47BA8832062748B6D9D2881AAC7677CF667",
-    "historyPublicationSha256": "09434966a7d316ec0a2200e978c3eb2243c7b94e305e787a9b0102f1a3a03e9a"
+    "snapshotId": "devnet-3860021-fbba23eeffd1",
+    "ledgerIndex": 3860021,
+    "ledgerHash": "FBBA23EEFFD19FFD81F2E6A0A9A5D3E503EE78AA8EB6F3653F756BA90655B4A7",
+    "historyMode": "d1_fast_lane_windows_with_archived_branch",
+    "historyArchiveLedgerIndex": 3800885,
+    "historyArchiveLedgerHash": "EAA0D29666E73D7594A52DF8000B07F346CD4DA24A9A07549612CDC7D727B700",
+    "historyPublicationSha256": "7041ddcd0885a77730c7e9deb29ada59c0326f4948816db4878c5c9394d5d31d"
   }
 }
