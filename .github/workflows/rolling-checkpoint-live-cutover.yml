@@ -92,6 +92,25 @@ jobs:
               raise SystemExit(f'expected one obsolete counts-watermark equality, found {text.count(old_counts)}')
           text = text.replace(old_counts, new_counts, 1)
 
+          marker = "' \"$CURRENT_SUMMARY\" >/dev/null\n\n"
+          no_op = '''PRODUCTION_LEDGER_HASH="$(jq -r .ledgerHash "$PRODUCTION_MANIFEST")"
+          if test "$TARGET_LEDGER_INDEX" = "$PRODUCTION_LEDGER_INDEX" \\
+            && test "$TARGET_LEDGER_HASH" = "$PRODUCTION_LEDGER_HASH"; then
+            cp "$PRODUCTION_MANIFEST" "$ROOT/production-current.json"
+            jq -n \\
+              --argjson ledgerIndex "$TARGET_LEDGER_INDEX" \\
+              --arg ledgerHash "$TARGET_LEDGER_HASH" \\
+              --arg snapshotId "$TARGET_SNAPSHOT_ID" \\
+              '{passed:true,noOp:true,target:{ledgerIndex:$ledgerIndex,ledgerHash:$ledgerHash,snapshotId:$snapshotId},schedule:"*/5 * * * *",mainnetEnabled:false}' \\
+              > "$ROOT/evidence.json"
+            exit 0
+          fi
+
+          '''
+          if text.count(marker) != 1:
+              raise SystemExit(f'expected one candidate-summary validation marker, found {text.count(marker)}')
+          text = text.replace(marker, marker + no_op, 1)
+
           path.write_text(text)
           PY
           bash -n scripts/run-current-state-checkpoint-cutover.sh
