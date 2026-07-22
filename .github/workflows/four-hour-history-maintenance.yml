@@ -26,7 +26,7 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Validate and tune maintenance scripts
+      - name: Validate and persist resilient maintenance scripts
         shell: bash
         run: |
           set -euo pipefail
@@ -37,16 +37,11 @@ jobs:
           from pathlib import Path
           import re
 
-          path = Path('.github/scripts/run-four-hour-history-maintenance.sh')
-          text = path.read_text()
+          parent = Path('.github/scripts/run-four-hour-history-maintenance.sh')
+          parent_text = parent.read_text()
+          parent_text = parent_text.replace('read_window_size:"4"', 'read_window_size:"16"')
 
-          old = 'read_window_size:"4"'
-          new = 'read_window_size:"16"'
-          if text.count(old) != 1:
-              raise SystemExit(f'expected one read-window setting, found {text.count(old)}')
-          text = text.replace(old, new, 1)
-
-          replacement = r'''live_head() {
+          live_head = r'''live_head() {
             local request response endpoint value attempt
             request='{"method":"ledger","params":[{"ledger_index":"validated","transactions":false,"expand":false}]}'
             for endpoint in \
@@ -70,23 +65,105 @@ jobs:
             done
             return 1
           }'''
-
-          pattern = r'live_head\(\) \{\n.*?\n\}\n\ncancel_obsolete_runs\(\)'
-          text, count = re.subn(
-              pattern,
-              replacement + '\n\ncancel_obsolete_runs()',
-              text,
+          parent_text, count = re.subn(
+              r'live_head\(\) \{\n.*?\n\}\n\ncancel_obsolete_runs\(\)',
+              live_head + '\n\ncancel_obsolete_runs()',
+              parent_text,
               count=1,
               flags=re.S,
           )
           if count != 1:
               raise SystemExit(f'expected one live_head function, found {count}')
+          parent.write_text(parent_text)
 
-          path.write_text(text)
+          candidate = Path('.github/scripts/run-rolling-checkpoint-candidate.sh')
+          candidate_text = candidate.read_text()
+          old = '''  PASSED=false
+  for ATTEMPT in 1 2 3; do
+    if node .history-segment-build/run-history-segment.mjs \\
+      --local \\
+      --endpoint https://s.devnet.rippletest.net:51234/ \\
+      --timeout-ms 12000 \\
+      --read-window-size "${READ_WINDOW_SIZE}" \\
+      --start-ledger "${START}" \\
+      --end-ledger "${END}" \\
+      --epoch-id "${EPOCH}" \\
+      --segment-id "${SEGMENT_ID}" \\
+      --previous-segment-id "${PREV_ID}" \\
+      --previous-segment-end-hash "${PREV_HASH}" \\
+      --source-revision "${GITHUB_SHA}" \\
+      --output-dir "${OUT}" \\
+      > "${ROOT}/segment-${ORDINAL}.stdout.json"; then
+      PASSED=true
+      break
+    fi
+    sleep $((ATTEMPT * 10))
+  done
+  test "${PASSED}" = true
+'''
+          new = '''  PASSED=false
+  : > "${ROOT}/segment-${ORDINAL}.attempts.log"
+  WINDOWS=("${READ_WINDOW_SIZE}" 8 4 2 1)
+  ENDPOINTS=("https://s.devnet.rippletest.net:51234/" "https://devnet.honeycluster.io/")
+  LAST_WINDOW=""
+  for WINDOW in "${WINDOWS[@]}"; do
+    if [ "${WINDOW}" -gt "${READ_WINDOW_SIZE}" ] || [ "${WINDOW}" = "${LAST_WINDOW}" ]; then
+      continue
+    fi
+    LAST_WINDOW="${WINDOW}"
+    for ENDPOINT in "${ENDPOINTS[@]}"; do
+      for ATTEMPT in 1 2; do
+        rm -rf "${OUT}"
+        ATTEMPT_STDOUT="${ROOT}/segment-${ORDINAL}-w${WINDOW}-a${ATTEMPT}.stdout.json"
+        printf 'segment=%s window=%s endpoint=%s attempt=%s\\n' "${ORDINAL}" "${WINDOW}" "${ENDPOINT}" "${ATTEMPT}" >> "${ROOT}/segment-${ORDINAL}.attempts.log"
+        if node .history-segment-build/run-history-segment.mjs \\
+          --local \\
+          --endpoint "${ENDPOINT}" \\
+          --timeout-ms 20000 \\
+          --read-window-size "${WINDOW}" \\
+          --start-ledger "${START}" \\
+          --end-ledger "${END}" \\
+          --epoch-id "${EPOCH}" \\
+          --segment-id "${SEGMENT_ID}" \\
+          --previous-segment-id "${PREV_ID}" \\
+          --previous-segment-end-hash "${PREV_HASH}" \\
+          --source-revision "${GITHUB_SHA}" \\
+          --output-dir "${OUT}" \\
+          > "${ATTEMPT_STDOUT}" 2>> "${ROOT}/segment-${ORDINAL}.attempts.log"; then
+          cp "${ATTEMPT_STDOUT}" "${ROOT}/segment-${ORDINAL}.stdout.json"
+          jq -n --arg endpoint "${ENDPOINT}" --argjson readWindowSize "${WINDOW}" --argjson attempt "${ATTEMPT}" \\
+            '{endpoint:$endpoint,readWindowSize:$readWindowSize,attempt:$attempt}' \\
+            > "${ROOT}/segment-${ORDINAL}.transport.json"
+          PASSED=true
+          break 3
+        fi
+        sleep $((ATTEMPT * 5))
+      done
+    done
+  done
+  if [ "${PASSED}" != true ]; then
+    cat "${ROOT}/segment-${ORDINAL}.attempts.log" >&2
+    exit 1
+  fi
+'''
+          if old in candidate_text:
+              candidate_text = candidate_text.replace(old, new, 1)
+          elif 'segment-${ORDINAL}.attempts.log' not in candidate_text:
+              raise SystemExit('candidate retry block not found')
+          candidate.write_text(candidate_text)
           PY
+          bash -n .github/scripts/run-four-hour-history-maintenance.sh
+          bash -n .github/scripts/run-rolling-checkpoint-candidate.sh
           grep -F 'read_window_size:"16"' .github/scripts/run-four-hour-history-maintenance.sh
           grep -F 'https://devnet.honeycluster.io/' .github/scripts/run-four-hour-history-maintenance.sh
-          bash -n .github/scripts/run-four-hour-history-maintenance.sh
+          grep -F 'segment-${ORDINAL}.attempts.log' .github/scripts/run-rolling-checkpoint-candidate.sh
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          if ! git diff --quiet -- .github/scripts/run-four-hour-history-maintenance.sh .github/scripts/run-rolling-checkpoint-candidate.sh; then
+            git add .github/scripts/run-four-hour-history-maintenance.sh .github/scripts/run-rolling-checkpoint-candidate.sh
+            git commit -m 'fix: add resilient XRPL history transport fallback'
+            git push origin HEAD:main
+          fi
 
       - name: Run four-hour maintenance
         shell: bash
