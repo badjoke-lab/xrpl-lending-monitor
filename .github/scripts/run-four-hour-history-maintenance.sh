@@ -65,12 +65,29 @@ fetch_json() {
 }
 
 live_head() {
-  jq -n '{method:"ledger",params:[{ledger_index:"validated",transactions:false,expand:false}]}' \
-    | curl --fail-with-body --silent --show-error --retry 5 --retry-all-errors \
-        --connect-timeout 10 --max-time 45 \
-        -H 'content-type: application/json' \
-        --data-binary @- https://s.devnet.rippletest.net:51234/ \
-    | jq -er '.result.ledger_index // .result.ledger.ledger_index'
+  local request response endpoint value attempt
+  request='{"method":"ledger","params":[{"ledger_index":"validated","transactions":false,"expand":false}]}'
+  for endpoint in \
+    https://s.devnet.rippletest.net:51234/ \
+    https://devnet.honeycluster.io/; do
+    for attempt in 1 2 3; do
+      if response="$(printf '%s' "$request" \
+        | curl --fail-with-body --silent --show-error --retry 2 --retry-all-errors \
+            --connect-timeout 10 --max-time 45 \
+            -H 'content-type: application/json' \
+            --data-binary @- "$endpoint" 2>/dev/null)"; then
+        value="$(printf '%s' "$response" \
+          | jq -er '.result.ledger_index // .result.ledger.ledger_index // empty' 2>/dev/null || true)"
+        if [[ "$value" =~ ^[0-9]+$ ]]; then
+          printf '%s
+' "$value"
+          return 0
+        fi
+      fi
+      sleep $((attempt * 2))
+    done
+  done
+  return 1
 }
 
 cancel_obsolete_runs() {
@@ -183,7 +200,7 @@ for cycle in $(seq 1 "$MAX_CYCLES"); do
     --arg outputHistory "$output_history" \
     --arg outputCurrent "$output_current" \
     --arg maxDelta "$MAX_DELTA_LEDGERS" \
-    '{ref:$ref,inputs:{source_history_branch:$sourceHistory,source_current_state_branch:$sourceCurrent,history_candidate_branch:$outputHistory,current_state_candidate_branch:$outputCurrent,max_delta_ledgers:$maxDelta,segment_ledgers:"500",read_window_size:"4"}}' \
+    '{ref:$ref,inputs:{source_history_branch:$sourceHistory,source_current_state_branch:$sourceCurrent,history_candidate_branch:$outputHistory,current_state_candidate_branch:$outputCurrent,max_delta_ledgers:$maxDelta,segment_ledgers:"500",read_window_size:"16"}}' \
     > "$ROOT/candidate-dispatch.json"
   gh api --method POST "repos/${GITHUB_REPOSITORY}/actions/workflows/rolling-checkpoint-candidate.yml/dispatches" --input "$ROOT/candidate-dispatch.json"
   child_run_id="$(wait_new_run rolling-checkpoint-candidate.yml "$ROOT/candidate-before.txt")"

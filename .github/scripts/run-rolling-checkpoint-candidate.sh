@@ -107,27 +107,49 @@ while IFS= read -r SEGMENT; do
   END="$(jq -r '.endLedgerIndex' <<<"${SEGMENT}")"
   OUT=".local/history-root/history/${EPOCH}/${SEGMENT_ID}"
   PASSED=false
-  for ATTEMPT in 1 2 3; do
-    if node .history-segment-build/run-history-segment.mjs \
-      --local \
-      --endpoint https://s.devnet.rippletest.net:51234/ \
-      --timeout-ms 12000 \
-      --read-window-size "${READ_WINDOW_SIZE}" \
-      --start-ledger "${START}" \
-      --end-ledger "${END}" \
-      --epoch-id "${EPOCH}" \
-      --segment-id "${SEGMENT_ID}" \
-      --previous-segment-id "${PREV_ID}" \
-      --previous-segment-end-hash "${PREV_HASH}" \
-      --source-revision "${GITHUB_SHA}" \
-      --output-dir "${OUT}" \
-      > "${ROOT}/segment-${ORDINAL}.stdout.json"; then
-      PASSED=true
-      break
+  : > "${ROOT}/segment-${ORDINAL}.attempts.log"
+  WINDOWS=("${READ_WINDOW_SIZE}" 8 4 2 1)
+  ENDPOINTS=("https://s.devnet.rippletest.net:51234/" "https://devnet.honeycluster.io/")
+  LAST_WINDOW=""
+  for WINDOW in "${WINDOWS[@]}"; do
+    if [ "${WINDOW}" -gt "${READ_WINDOW_SIZE}" ] || [ "${WINDOW}" = "${LAST_WINDOW}" ]; then
+      continue
     fi
-    sleep $((ATTEMPT * 10))
+    LAST_WINDOW="${WINDOW}"
+    for ENDPOINT in "${ENDPOINTS[@]}"; do
+      for ATTEMPT in 1 2; do
+        rm -rf "${OUT}"
+        ATTEMPT_STDOUT="${ROOT}/segment-${ORDINAL}-w${WINDOW}-a${ATTEMPT}.stdout.json"
+        printf 'segment=%s window=%s endpoint=%s attempt=%s\n' "${ORDINAL}" "${WINDOW}" "${ENDPOINT}" "${ATTEMPT}" >> "${ROOT}/segment-${ORDINAL}.attempts.log"
+        if node .history-segment-build/run-history-segment.mjs \
+          --local \
+          --endpoint "${ENDPOINT}" \
+          --timeout-ms 20000 \
+          --read-window-size "${WINDOW}" \
+          --start-ledger "${START}" \
+          --end-ledger "${END}" \
+          --epoch-id "${EPOCH}" \
+          --segment-id "${SEGMENT_ID}" \
+          --previous-segment-id "${PREV_ID}" \
+          --previous-segment-end-hash "${PREV_HASH}" \
+          --source-revision "${GITHUB_SHA}" \
+          --output-dir "${OUT}" \
+          > "${ATTEMPT_STDOUT}" 2>> "${ROOT}/segment-${ORDINAL}.attempts.log"; then
+          cp "${ATTEMPT_STDOUT}" "${ROOT}/segment-${ORDINAL}.stdout.json"
+          jq -n --arg endpoint "${ENDPOINT}" --argjson readWindowSize "${WINDOW}" --argjson attempt "${ATTEMPT}" \
+            '{endpoint:$endpoint,readWindowSize:$readWindowSize,attempt:$attempt}' \
+            > "${ROOT}/segment-${ORDINAL}.transport.json"
+          PASSED=true
+          break 3
+        fi
+        sleep $((ATTEMPT * 5))
+      done
+    done
   done
-  test "${PASSED}" = true
+  if [ "${PASSED}" != true ]; then
+    cat "${ROOT}/segment-${ORDINAL}.attempts.log" >&2
+    exit 1
+  fi
 
   node .history-segment-checkpoint-build/update-history-segment-checkpoint.mjs \
     --local \
