@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "issueNumber": 974,
+  "network": "devnet",
+  "startAt": "2026-07-22T01:00:00Z",
+  "endAt": "2026-07-23T01:00:00Z",
+  "expectedSlots": 288,
+  "status": "planned",
+  "cadence": "*/5 * * * *",
+  "baseSnapshotId": "devnet-3800885-eaa0d29666e7",
+  "baseLedgerIndex": 3800885
+}
