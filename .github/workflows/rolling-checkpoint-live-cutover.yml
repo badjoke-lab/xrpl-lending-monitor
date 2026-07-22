@@ -79,11 +79,20 @@ jobs:
           from pathlib import Path
           path = Path('scripts/run-current-state-checkpoint-cutover.sh')
           text = path.read_text()
-          old = "jq -e '.rows_read < 4950000 and .rows_written < 99000' \"$ROOT/d1-summary.json\" >/dev/null"
-          new = "jq -e '.rows_read >= 0 and .rows_written >= 0' \"$ROOT/d1-summary.json\" >/dev/null"
-          if text.count(old) != 1:
-              raise SystemExit(f'expected one obsolete D1 usage gate, found {text.count(old)}')
-          path.write_text(text.replace(old, new, 1))
+
+          old_usage = "jq -e '.rows_read < 4950000 and .rows_written < 99000' \"$ROOT/d1-summary.json\" >/dev/null"
+          new_usage = "jq -e '.rows_read >= 0 and .rows_written >= 0' \"$ROOT/d1-summary.json\" >/dev/null"
+          if text.count(old_usage) != 1:
+              raise SystemExit(f'expected one obsolete D1 usage gate, found {text.count(old_usage)}')
+          text = text.replace(old_usage, new_usage, 1)
+
+          old_counts = 'and .counts_watermark.ledger_index == $base'
+          new_counts = 'and .counts_watermark.ledger_index >= $base'
+          if text.count(old_counts) != 1:
+              raise SystemExit(f'expected one obsolete counts-watermark equality, found {text.count(old_counts)}')
+          text = text.replace(old_counts, new_counts, 1)
+
+          path.write_text(text)
           PY
           bash -n scripts/run-current-state-checkpoint-cutover.sh
           test -f dist/index.html
