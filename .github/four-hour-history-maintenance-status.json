@@ -1,11 +1,11 @@
 {
-  "state": "running",
-  "phase": "cycle_1_verify_candidate",
-  "message": "candidate cycle 1 completed",
-  "checkedAt": "2026-07-22T07:30:10Z",
+  "state": "failed",
+  "phase": "cycle_2_dispatch_candidate",
+  "message": "maintenance exited with code 1",
+  "checkedAt": "2026-07-22T07:30:15Z",
   "runId": "29897585190",
   "commit": "c48f82def0f9ad214ae0d8c41203186290835166",
-  "childRunId": "29897602979",
+  "childRunId": null,
   "collectorCadence": "five_minutes",
   "historyCadence": "four_hours",
   "summary": {
