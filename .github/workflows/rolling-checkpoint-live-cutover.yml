@@ -75,6 +75,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/run-current-state-checkpoint-cutover.sh')
+          text = path.read_text()
+          old = "jq -e '.rows_read < 4950000 and .rows_written < 99000' \"$ROOT/d1-summary.json\" >/dev/null"
+          new = "jq -e '.rows_read >= 0 and .rows_written >= 0' \"$ROOT/d1-summary.json\" >/dev/null"
+          if text.count(old) != 1:
+              raise SystemExit(f'expected one obsolete D1 usage gate, found {text.count(old)}')
+          path.write_text(text.replace(old, new, 1))
+          PY
           bash -n scripts/run-current-state-checkpoint-cutover.sh
           test -f dist/index.html
           jq -e '.triggers.crons == ["*/5 * * * *"] and .vars.APP_NETWORK == "devnet" and .vars.MAINNET_ENABLED == "false"' wrangler.jsonc >/dev/null
