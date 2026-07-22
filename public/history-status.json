@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "network": "devnet",
+  "currentStateCadence": "five_minutes",
+  "historyMode": "archived_plus_forward_only",
+  "archive": {
+    "completeThroughLedger": 3800885,
+    "completeThroughHash": "EAA0D29666E73D7594A52DF8000B07F346CD4DA24A9A07549612CDC7D727B700"
+  },
+  "gap": {
+    "status": "declared",
+    "reason": "Public Devnet RPC endpoints no longer serve every ledger required to reconstruct a continuous historical chain after the archived cutoff.",
+    "syntheticRecordsAllowed": false
+  },
+  "forwardHistory": {
+    "source": "five-minute collector observations",
+    "status": "implementation_in_progress"
+  },
+  "updatedAt": "2026-07-22T05:40:00Z"
+}
