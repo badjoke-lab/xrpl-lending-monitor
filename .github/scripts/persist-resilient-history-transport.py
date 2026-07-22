@@ -41,6 +41,66 @@ parent_text, count = re.subn(
 )
 if count != 1:
     raise SystemExit(f'expected one live_head function, found {count}')
+
+resume_block = r'''source_history="$SOURCE_HISTORY"
+source_current="$SOURCE_CURRENT"
+best_ledger=-1
+for source_pair in \
+  "$SOURCE_HISTORY:$SOURCE_CURRENT" \
+  "$CANDIDATE_A_HISTORY:$CANDIDATE_A_CURRENT" \
+  "$CANDIDATE_B_HISTORY:$CANDIDATE_B_CURRENT"; do
+  IFS=':' read -r candidate_history candidate_current <<< "$source_pair"
+  candidate_key="${candidate_history//[^A-Za-z0-9]/_}"
+  candidate_history_json="$ROOT/source-${candidate_key}-history.json"
+  candidate_current_json="$ROOT/source-${candidate_key}-current.json"
+  if fetch_json "$candidate_history" history/publication.json "$candidate_history_json" \
+    && fetch_json "$candidate_current" read-model/manifest.json "$candidate_current_json"; then
+    candidate_ledger="$(jq -r '.endLedgerIndex // -1' "$candidate_history_json")"
+    candidate_hash="$(jq -r '.endLedgerHash // empty' "$candidate_history_json")"
+    if test "$(jq -r '.complete // false' "$candidate_history_json")" = true \
+      && test "$(jq -r '.complete // false' "$candidate_current_json")" = true \
+      && test "$candidate_ledger" = "$(jq -r '.ledgerIndex // -2' "$candidate_current_json")" \
+      && test "$candidate_hash" = "$(jq -r '.ledgerHash // empty' "$candidate_current_json")" \
+      && test "$candidate_ledger" -gt "$best_ledger"; then
+      source_history="$candidate_history"
+      source_current="$candidate_current"
+      best_ledger="$candidate_ledger"
+    fi
+  fi
+done
+test "$best_ledger" -ge 0
+final_history="$source_history"
+final_current="$source_current"
+final_lag=999999999'''
+
+if 'best_ledger=-1' not in parent_text:
+    parent_text, count = re.subn(
+        r'source_history="\$SOURCE_HISTORY"\nsource_current="\$SOURCE_CURRENT"\nfinal_history="\$SOURCE_HISTORY"\nfinal_current="\$SOURCE_CURRENT"\nfinal_lag=999999999',
+        resume_block,
+        parent_text,
+        count=1,
+    )
+    if count != 1:
+        raise SystemExit(f'expected one source initialization block, found {count}')
+
+alternating_output = r'''  if test "$source_history" = "$CANDIDATE_A_HISTORY"; then
+    output_history="$CANDIDATE_B_HISTORY"
+    output_current="$CANDIDATE_B_CURRENT"
+  else
+    output_history="$CANDIDATE_A_HISTORY"
+    output_current="$CANDIDATE_A_CURRENT"
+  fi'''
+
+if 'test "$source_history" = "$CANDIDATE_A_HISTORY"' not in parent_text:
+    parent_text, count = re.subn(
+        r'  if test \$\(\(cycle % 2\)\) -eq 1; then\n    output_history="\$CANDIDATE_A_HISTORY"\n    output_current="\$CANDIDATE_A_CURRENT"\n  else\n    output_history="\$CANDIDATE_B_HISTORY"\n    output_current="\$CANDIDATE_B_CURRENT"\n  fi',
+        alternating_output,
+        parent_text,
+        count=1,
+    )
+    if count != 1:
+        raise SystemExit(f'expected one candidate output selection block, found {count}')
+
 PARENT.write_text(parent_text)
 
 candidate_text = CANDIDATE.read_text()
