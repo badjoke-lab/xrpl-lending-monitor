@@ -35,15 +35,57 @@ jobs:
           jq -e '.triggers.crons == ["*/5 * * * *"] and .vars.APP_NETWORK == "devnet" and .vars.MAINNET_ENABLED == "false"' wrangler.jsonc >/dev/null
           python3 - <<'PY'
           from pathlib import Path
+          import re
+
           path = Path('.github/scripts/run-four-hour-history-maintenance.sh')
           text = path.read_text()
+
           old = 'read_window_size:"4"'
           new = 'read_window_size:"16"'
           if text.count(old) != 1:
               raise SystemExit(f'expected one read-window setting, found {text.count(old)}')
-          path.write_text(text.replace(old, new, 1))
+          text = text.replace(old, new, 1)
+
+          replacement = r'''live_head() {
+            local request response endpoint value attempt
+            request='{"method":"ledger","params":[{"ledger_index":"validated","transactions":false,"expand":false}]}'
+            for endpoint in \
+              https://s.devnet.rippletest.net:51234/ \
+              https://devnet.honeycluster.io/; do
+              for attempt in 1 2 3; do
+                if response="$(printf '%s' "$request" \
+                  | curl --fail-with-body --silent --show-error --retry 2 --retry-all-errors \
+                      --connect-timeout 10 --max-time 45 \
+                      -H 'content-type: application/json' \
+                      --data-binary @- "$endpoint" 2>/dev/null)"; then
+                  value="$(printf '%s' "$response" \
+                    | jq -er '.result.ledger_index // .result.ledger.ledger_index // empty' 2>/dev/null || true)"
+                  if [[ "$value" =~ ^[0-9]+$ ]]; then
+                    printf '%s\n' "$value"
+                    return 0
+                  fi
+                fi
+                sleep $((attempt * 2))
+              done
+            done
+            return 1
+          }'''
+
+          pattern = r'live_head\(\) \{\n.*?\n\}\n\ncancel_obsolete_runs\(\)'
+          text, count = re.subn(
+              pattern,
+              replacement + '\n\ncancel_obsolete_runs()',
+              text,
+              count=1,
+              flags=re.S,
+          )
+          if count != 1:
+              raise SystemExit(f'expected one live_head function, found {count}')
+
+          path.write_text(text)
           PY
           grep -F 'read_window_size:"16"' .github/scripts/run-four-hour-history-maintenance.sh
+          grep -F 'https://devnet.honeycluster.io/' .github/scripts/run-four-hour-history-maintenance.sh
           bash -n .github/scripts/run-four-hour-history-maintenance.sh
 
       - name: Run four-hour maintenance
