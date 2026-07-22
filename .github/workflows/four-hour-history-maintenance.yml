@@ -1,4 +1,4 @@
-name: Four-hour current-state checkpoint
+name: Four-hour current-state and history checkpoint
 
 on:
   schedule:
@@ -14,11 +14,11 @@ permissions:
   contents: write
 
 concurrency:
-  group: four-hour-current-state-checkpoint
-  cancel-in-progress: true
+  group: four-hour-current-state-history-checkpoint
+  cancel-in-progress: false
 
 jobs:
-  maintain:
+  checkpoint:
     runs-on: ubuntu-latest
     timeout-minutes: 360
     env:
@@ -27,17 +27,24 @@ jobs:
       CANDIDATE_A: current-state-four-hour-a-data
       CANDIDATE_B: current-state-four-hour-b-data
       PRODUCTION_CURRENT: current-state-data
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      D1_DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
+      HISTORY_EPOCH_ID: devnet-3371675
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
-      - name: Validate five-minute production boundary
+      - name: Validate fixed five-minute and four-hour boundaries
         shell: bash
         run: |
           set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
           jq -e '
-            .triggers.crons == ["*/5 * * * *"]
+            .main == "src/worker/p0-redundant-scheduler-entry.ts"
+            and .triggers.crons == ["*/5 * * * *"]
             and .vars.APP_NETWORK == "devnet"
             and .vars.MAINNET_ENABLED == "false"
             and (.queues.producers | length) == 1
@@ -48,16 +55,147 @@ jobs:
           node --check scripts/build-overlay-current-state-checkpoint.mjs
           bash -n scripts/run-current-state-checkpoint-cutover.sh
           bash -n scripts/run-four-hour-current-state-checkpoint.sh
+          mkdir -p current-state-checkpoint-evidence/history
 
-      - name: Build and cut over the newest current-state checkpoint
+      - name: Build and cut over the current-state checkpoint
+        id: current_state_checkpoint
         shell: bash
         run: bash scripts/run-four-hour-current-state-checkpoint.sh
 
-      - name: Upload four-hour current-state checkpoint evidence
+      - name: Verify retained five-minute history and four-hour checkpoint coverage
+        id: history_checkpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=current-state-checkpoint-evidence/history
+          PRODUCTION_MANIFEST=current-state-checkpoint-evidence/production-final.json
+          test -s "$PRODUCTION_MANIFEST"
+          PRODUCTION_LEDGER="$(jq -r .ledgerIndex "$PRODUCTION_MANIFEST")"
+          printf '%s' "$PRODUCTION_LEDGER" | grep -Eq '^[0-9]+$'
+
+          cat > "$ROOT/query.sql" <<'SQL'
+          WITH ordered AS (
+            SELECT start_ledger_index,
+                   end_ledger_index,
+                   created_at,
+                   LAG(end_ledger_index) OVER (ORDER BY start_ledger_index) AS previous_end
+            FROM fast_lane_history_windows
+            WHERE network = 'devnet' AND epoch_id = ?1
+          )
+          SELECT COUNT(*) AS windows,
+                 MIN(start_ledger_index) AS first_ledger,
+                 MAX(end_ledger_index) AS last_ledger,
+                 MAX(created_at) AS latest_created_at,
+                 COALESCE(SUM(
+                   CASE
+                     WHEN previous_end IS NOT NULL AND start_ledger_index > previous_end + 1 THEN 1
+                     ELSE 0
+                   END
+                 ), 0) AS internal_gaps
+          FROM ordered
+          SQL
+          jq -n \
+            --rawfile sql "$ROOT/query.sql" \
+            --arg epoch "$HISTORY_EPOCH_ID" \
+            '{sql:$sql,params:[$epoch]}' \
+            > "$ROOT/request.json"
+
+          curl --fail-with-body --silent --show-error --retry 4 \
+            -X POST \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H 'content-type: application/json' \
+            --data @"$ROOT/request.json" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database/$D1_DATABASE_ID/query" \
+            > "$ROOT/response.json"
+
+          jq -e '.success == true and .result[0].success == true and (.result[0].results | length) == 1' \
+            "$ROOT/response.json" >/dev/null
+          jq '.result[0].results[0]' "$ROOT/response.json" > "$ROOT/summary.json"
+          jq -e --argjson production "$PRODUCTION_LEDGER" '
+            (.windows | tonumber) > 0
+            and (.internal_gaps | tonumber) == 0
+            and (.last_ledger | tonumber) >= $production
+            and (.first_ledger | tonumber) > 0
+            and (.latest_created_at | type) == "string"
+          ' "$ROOT/summary.json" >/dev/null
+
+          python3 - <<'PY'
+          import json
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          summary = json.loads(Path('current-state-checkpoint-evidence/history/summary.json').read_text())
+          value = summary['latest_created_at']
+          latest = datetime.fromisoformat(value.replace('Z', '+00:00'))
+          age = (datetime.now(timezone.utc) - latest).total_seconds()
+          if age < 0 or age > 1200:
+              raise SystemExit(f'latest history window is stale: {age:.0f}s')
+          Path('current-state-checkpoint-evidence/history/freshness.json').write_text(
+              json.dumps({'latestCreatedAt': value, 'ageSeconds': round(age), 'maximumAgeSeconds': 1200}, indent=2) + '\n'
+          )
+          PY
+
+          jq -n \
+            --slurpfile production "$PRODUCTION_MANIFEST" \
+            --slurpfile history "$ROOT/summary.json" \
+            --slurpfile freshness "$ROOT/freshness.json" \
+            '{passed:true,currentState:$production[0],history:$history[0],freshness:$freshness[0],currentStateCadence:"five_minutes",historyCheckpointCadence:"four_hours"}' \
+            > "$ROOT/evidence.json"
+
+      - name: Publish combined checkpoint status
+        if: ${{ always() }}
+        env:
+          CURRENT_STATE_OUTCOME: ${{ steps.current_state_checkpoint.outcome }}
+          HISTORY_OUTCOME: ${{ steps.history_checkpoint.outcome }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=current-state-checkpoint-evidence
+          mkdir -p "$ROOT"
+          state=failed
+          if test "$CURRENT_STATE_OUTCOME" = success && test "$HISTORY_OUTCOME" = success; then
+            state=success
+          fi
+          production_file="$ROOT/production-final.json"
+          history_file="$ROOT/history/summary.json"
+          test -s "$production_file" || printf 'null\n' > "$production_file"
+          test -s "$history_file" || printf 'null\n' > "$history_file"
+          jq -n \
+            --arg state "$state" \
+            --arg checkedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg runId "$GITHUB_RUN_ID" \
+            --arg commit "$GITHUB_SHA" \
+            --arg currentStateOutcome "$CURRENT_STATE_OUTCOME" \
+            --arg historyOutcome "$HISTORY_OUTCOME" \
+            --slurpfile production "$production_file" \
+            --slurpfile history "$history_file" \
+            '{state:$state,phase:"four_hour_current_state_and_history",checkedAt:$checkedAt,runId:$runId,commit:$commit,currentStateOutcome:$currentStateOutcome,historyOutcome:$historyOutcome,production:$production[0],history:$history[0],currentStateCadence:"five_minutes",historyCheckpointCadence:"four_hours",automaticCheckpointScheduleEnabled:true}' \
+            > "$ROOT/combined-status.json"
+
+          API_PATH="repos/$REPOSITORY/contents/.github/four-hour-history-maintenance-status.json"
+          CONTENT="$(base64 -w0 "$ROOT/combined-status.json")"
+          published=false
+          for attempt in $(seq 1 10); do
+            EXISTING_SHA="$(gh api "$API_PATH" --jq .sha 2>/dev/null || true)"
+            if test -n "$EXISTING_SHA"; then
+              if gh api --method PUT "$API_PATH" \
+                -f message="ops: update four-hour current-state and history status" \
+                -f content="$CONTENT" \
+                -f sha="$EXISTING_SHA" >/dev/null; then
+                published=true
+                break
+              fi
+            fi
+            sleep 2
+          done
+          test "$published" = true
+          test "$state" = success
+
+      - name: Upload four-hour checkpoint evidence
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: four-hour-current-state-checkpoint
+          name: four-hour-current-state-and-history-checkpoint
           path: current-state-checkpoint-evidence
           if-no-files-found: warn
           retention-days: 30
