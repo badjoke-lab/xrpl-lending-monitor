@@ -84,9 +84,19 @@ function Context({ status }: { status: ResourceState<NetworkStatusResponse> }) {
       <dl className="context-facts">
         <div><dt>Epoch</dt><dd>{status.state === 'loading' ? 'Loading' : data?.epoch?.id ?? 'Unavailable'}</dd></div>
         <div><dt>Validated ledger</dt><dd>{status.state === 'loading' ? 'Loading' : formatInteger(data?.server.latest_validated_ledger)}</dd></div>
-        <div title="Age of the indexed history collector, not the five-minute current-state layer"><dt>History index age</dt><dd>{status.state === 'loading' ? 'Loading' : formatDuration(data?.collector.data_age_seconds)}</dd></div>
+        <div title="Age of the indexed historical archive, not the five-minute current-state layer"><dt>History archive age</dt><dd>{status.state === 'loading' ? 'Loading' : formatDuration(data?.collector.data_age_seconds)}</dd></div>
         <div><dt>Collector</dt><dd><span className={`status-dot status-${tone}`} aria-hidden="true" />{collector}</dd></div>
       </dl>
+    </section>
+  )
+}
+
+function HistoryStatusNotice() {
+  return (
+    <section className="history-status-notice" aria-label="History coverage notice">
+      <strong>Current state updates every five minutes.</strong>{' '}
+      The continuous Devnet historical archive is complete through ledger 3,800,885. Public Devnet RPC gaps prevent synthetic backfill; later history is being rebuilt forward-only from collector observations.
+      <a href="/history-status.json">Coverage JSON</a>
     </section>
   )
 }
@@ -123,11 +133,12 @@ export function MonitoringShell({ children, currentPath, status, onNavigate, onR
           <button type="button" className="icon-button" onClick={onReload} aria-label="Refresh monitoring data">↻</button>
         </header>
         <Context status={status} />
+        <HistoryStatusNotice />
         <main id="main-content" className="main-content" tabIndex={-1}>
           <Breadcrumbs currentPath={currentPath} onNavigate={onNavigate} />
           {children}
         </main>
-        <footer className="site-footer"><p>XRPL Lending Devnet data. Independent read-only monitor.</p><div><a href="/api/status">Status JSON</a><a href="https://github.com/badjoke-lab/xrpl-lending-monitor">Source</a></div></footer>
+        <footer className="site-footer"><p>XRPL Lending Devnet data. Independent read-only monitor.</p><div><a href="/api/status">Status JSON</a><a href="/history-status.json">History coverage</a><a href="https://github.com/badjoke-lab/xrpl-lending-monitor">Source</a></div></footer>
       </div>
       <nav className="mobile-bottom-nav" aria-label="Mobile navigation">
         <a className={currentPath === '/' ? 'is-active' : ''} href="/" aria-current={currentPath === '/' ? 'page' : undefined} onClick={home}>Overview</a>
