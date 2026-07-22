@@ -1,1 +1,1 @@
-restart from newest aligned candidate 2026-07-22
+start D1 overlay current-state checkpoint 2026-07-22T15:00:00+09:00
