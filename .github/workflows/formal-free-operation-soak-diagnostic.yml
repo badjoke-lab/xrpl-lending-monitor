@@ -57,7 +57,7 @@ jobs:
           fi
 
           for item in \
-            "state|SELECT epoch_id,last_processed_ledger,last_processed_hash,latest_observed_ledger,latest_observed_hash,status,lag_ledgers FROM fast_lane_shadow_state WHERE network='devnet'" \
+            "state|SELECT epoch_id,last_processed_ledger,last_processed_hash,latest_observed_ledger,latest_observed_hash,status,(latest_observed_ledger-last_processed_ledger) AS lag_ledgers FROM fast_lane_shadow_state WHERE network='devnet'" \
             "binding|SELECT base_epoch_id,base_snapshot_id,base_ledger_index,base_ledger_hash FROM fast_lane_shadow_base_binding WHERE network='devnet'" \
             "overlay|SELECT COUNT(*) overlay_rows,COALESCE(SUM(LENGTH(projection_json)),0) overlay_payload_bytes FROM current_state_overlay_objects WHERE network='devnet'" \
             "stale|SELECT COUNT(*) stale_rows FROM current_state_overlay_objects o WHERE o.network='devnet' AND NOT EXISTS (SELECT 1 FROM fast_lane_shadow_base_binding b WHERE b.network=o.network AND b.base_epoch_id=o.epoch_id AND b.base_snapshot_id=o.base_snapshot_id)" \
