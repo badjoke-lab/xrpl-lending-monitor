@@ -1,0 +1,115 @@
+name: Formal Free-operation soak diagnostic
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/formal-free-soak-diagnostic-trigger
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
+      GH_TOKEN: ${{ github.token }}
+      ISSUE_NUMBER: '976'
+      PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run explicit diagnostics
+        shell: bash
+        run: |
+          set -u
+          mkdir -p formal-soak-evidence
+          : > formal-soak-evidence/checks.jsonl
+
+          record() {
+            local name="$1" passed="$2" expected="$3" actual="$4"
+            jq -n --arg name "$name" --argjson passed "$passed" --arg expected "$expected" --arg actual "$actual" \
+              '{name:$name,passed:$passed,expected:$expected,actual:$actual}' >> formal-soak-evidence/checks.jsonl
+          }
+
+          query() {
+            local sql="$1" out="$2"
+            if jq -n --arg sql "$sql" '{sql:$sql}' | curl --fail-with-body --silent --show-error \
+              -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+              -H 'Content-Type: application/json' --data-binary @- \
+              "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database/${DATABASE_ID}/query" > "$out"; then
+              if jq -e '.success==true and ((.errors//[])|length)==0 and ([.result[].success]|all)' "$out" >/dev/null; then
+                return 0
+              fi
+            fi
+            return 1
+          }
+
+          if jq -e '.triggers.crons==["*/5 * * * *"] and .vars.APP_NETWORK=="devnet" and .vars.MAINNET_ENABLED=="false" and (.queues.producers|length)==1 and (.queues.consumers|length)==1 and .queues.consumers[0].max_batch_size==1 and .queues.consumers[0].max_concurrency==1' wrangler.jsonc >/dev/null; then
+            record wrangler true 'exact five-minute devnet single-concurrency config' 'matched'
+          else
+            record wrangler false 'exact five-minute devnet single-concurrency config' "$(jq -c '{triggers,vars,queues}' wrangler.jsonc 2>/dev/null || echo unreadable)"
+          fi
+
+          for item in \
+            "state|SELECT epoch_id,last_processed_ledger,last_processed_hash,latest_observed_ledger,latest_observed_hash,status,lag_ledgers FROM fast_lane_shadow_state WHERE network='devnet'" \
+            "binding|SELECT base_epoch_id,base_snapshot_id,base_ledger_index,base_ledger_hash FROM fast_lane_shadow_base_binding WHERE network='devnet'" \
+            "overlay|SELECT COUNT(*) overlay_rows,COALESCE(SUM(LENGTH(projection_json)),0) overlay_payload_bytes FROM current_state_overlay_objects WHERE network='devnet'" \
+            "stale|SELECT COUNT(*) stale_rows FROM current_state_overlay_objects o WHERE o.network='devnet' AND NOT EXISTS (SELECT 1 FROM fast_lane_shadow_base_binding b WHERE b.network=o.network AND b.base_epoch_id=o.epoch_id AND b.base_snapshot_id=o.base_snapshot_id)" \
+            "overlay_state|SELECT COUNT(*) state_rows,MAX(overlay_ledger_index) overlay_ledger_index FROM current_state_overlay_state WHERE network='devnet'" \
+            "compact|SELECT COUNT(*) compact_rows FROM fast_lane_shadow_objects_compact WHERE network='devnet'" \
+            "slots|WITH b AS (SELECT run_at,status,end_ledger_index,lag_ledgers,error_message,CAST(strftime('%s',run_at)/300 AS INTEGER) slot_id FROM fast_lane_shadow_run_metrics WHERE network='devnet' AND julianday(run_at)>=julianday('now','-45 minutes')),r AS (SELECT *,ROW_NUMBER() OVER(PARTITION BY slot_id ORDER BY run_at DESC) rn,SUM(CASE WHEN status='error' OR error_message IS NOT NULL THEN 1 ELSE 0 END) OVER(PARTITION BY slot_id) errors FROM b) SELECT slot_id,run_at,status,end_ledger_index,lag_ledgers,error_message,errors FROM r WHERE rn=1 ORDER BY slot_id DESC LIMIT 6"; do
+            name="${item%%|*}"; sql="${item#*|}"; out="formal-soak-evidence/${name}.json"
+            if query "$sql" "$out"; then
+              record "query_${name}" true 'Cloudflare D1 query succeeds' "$(jq -c '.result[0].results' "$out")"
+            else
+              record "query_${name}" false 'Cloudflare D1 query succeeds' "$(cat "$out" 2>/dev/null || echo no-response)"
+            fi
+          done
+
+          state="$(jq -c '.result[0].results[0] // {}' formal-soak-evidence/state.json 2>/dev/null || echo '{}')"
+          if jq -e '.status=="healthy" and .lag_ledgers==0 and .last_processed_ledger==.latest_observed_ledger and .last_processed_hash==.latest_observed_hash' <<<"$state" >/dev/null; then
+            record fast_lane true 'healthy, lag 0, processed equals observed' "$state"
+          else
+            record fast_lane false 'healthy, lag 0, processed equals observed' "$state"
+          fi
+
+          binding="$(jq -c '.result[0].results[0] // {}' formal-soak-evidence/binding.json 2>/dev/null || echo '{}')"
+          if jq -e '.base_epoch_id=="devnet-3371675" and .base_snapshot_id=="devnet-3860021-fbba23eeffd1" and .base_ledger_index==3860021 and .base_ledger_hash=="FBBA23EEFFD19FFD81F2E6A0A9A5D3E503EE78AA8EB6F3653F756BA90655B4A7"' <<<"$binding" >/dev/null; then
+            record binding true 'expected canonical base identity' "$binding"
+          else
+            record binding false 'expected canonical base identity' "$binding"
+          fi
+
+          overlay="$(jq -c '.result[0].results[0] // {}' formal-soak-evidence/overlay.json 2>/dev/null || echo '{}')"
+          stale="$(jq -c '.result[0].results[0] // {}' formal-soak-evidence/stale.json 2>/dev/null || echo '{}')"
+          os="$(jq -c '.result[0].results[0] // {}' formal-soak-evidence/overlay_state.json 2>/dev/null || echo '{}')"
+          compact="$(jq -c '.result[0].results[0] // {}' formal-soak-evidence/compact.json 2>/dev/null || echo '{}')"
+          if jq -e --argjson o "$overlay" --argjson s "$stale" --argjson os "$os" --argjson c "$compact" '$o.overlay_rows>0 and $o.overlay_rows<59000 and $o.overlay_payload_bytes<70000000 and $s.stale_rows==0 and $os.state_rows==1 and $c.compact_rows==0' >/dev/null; then
+            record overlay_guards true 'rows and payload below guards; stale 0; state 1; compact 0' "$(jq -nc --argjson o "$overlay" --argjson s "$stale" --argjson os "$os" --argjson c "$compact" '{overlay:$o,stale:$s,overlayState:$os,compact:$c}')"
+          else
+            record overlay_guards false 'rows and payload below guards; stale 0; state 1; compact 0' "$(jq -nc --argjson o "$overlay" --argjson s "$stale" --argjson os "$os" --argjson c "$compact" '{overlay:$o,stale:$s,overlayState:$os,compact:$c}')"
+          fi
+
+          for endpoint in overview status/history-source 'status/fast-lane-diff?limit=500'; do
+            code="$(curl --silent --show-error -o "formal-soak-evidence/$(echo "$endpoint" | tr '/?' '__').json" -w '%{http_code}' "${PRODUCTION_BASE}/api/${endpoint}" || echo 000)"
+            if [ "$code" = 200 ]; then record "api_${endpoint}" true 'HTTP 200' "$code"; else record "api_${endpoint}" false 'HTTP 200' "$code"; fi
+          done
+
+          slots="$(jq -c '.result[0].results // []' formal-soak-evidence/slots.json 2>/dev/null || echo '[]')"
+          if jq -e 'length==6 and (.[0].slot_id-.[5].slot_id)==5 and all((.status=="committed" or .status=="caught_up") and .lag_ledgers==0 and .error_message==null and .errors==0)' <<<"$slots" >/dev/null; then
+            record recent_slots true 'six consecutive clean terminal slots' "$slots"
+          else
+            record recent_slots false 'six consecutive clean terminal slots' "$slots"
+          fi
+
+          jq -s '{passed:all(.passed),checkedAt:(now|todate),checks:.}' formal-soak-evidence/checks.jsonl > formal-soak-evidence/summary.json
+          { echo 'Formal Free-operation soak diagnostic:'; echo; echo '```json'; cat formal-soak-evidence/summary.json; echo '```'; } > formal-soak-evidence/comment.md
+          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file formal-soak-evidence/comment.md
+
+          jq -e '.passed==true' formal-soak-evidence/summary.json >/dev/null
