@@ -26,7 +26,7 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
       GH_TOKEN: ${{ github.token }}
-      ISSUE_NUMBER: '974'
+      ISSUE_NUMBER: '976'
       PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
     steps:
       - uses: actions/checkout@v4
@@ -38,8 +38,8 @@ jobs:
         run: |
           set -Eeuo pipefail
           mkdir -p formal-soak-evidence
-          test "$(date -u +%s)" -lt "$(date -u -d '2026-07-22T01:00:00Z' +%s)"
-          jq -e '.issueNumber==974 and .startAt=="2026-07-22T01:00:00Z" and .endAt=="2026-07-23T01:00:00Z" and .expectedSlots==288 and .status=="planned" and .cadence=="*/5 * * * *" and .network=="devnet"' .github/formal-free-soak-window.json >/dev/null
+          test "$(date -u +%s)" -lt "$(date -u -d '2026-07-23T11:00:00Z' +%s)"
+          jq -e '.issueNumber==976 and .startAt=="2026-07-23T11:00:00Z" and .endAt=="2026-07-24T11:00:00Z" and .expectedSlots==288 and .status=="planned" and .cadence=="*/5 * * * *" and .network=="devnet" and .baseSnapshotId=="devnet-3860021-fbba23eeffd1" and .baseLedgerIndex==3860021' .github/formal-free-soak-window.json >/dev/null
           jq -e '.triggers.crons==["*/5 * * * *"] and .vars.APP_NETWORK=="devnet" and .vars.MAINNET_ENABLED=="false" and (.queues.producers|length)==1 and (.queues.consumers|length)==1 and .queues.consumers[0].max_batch_size==1 and .queues.consumers[0].max_concurrency==1' wrangler.jsonc >/dev/null
 
           query(){ jq -n --arg sql "$1" '{sql:$sql}' | curl --fail-with-body --silent --show-error -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -H 'Content-Type: application/json' --data-binary @- "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database/${DATABASE_ID}/query" > "$2"; jq -e '.success==true and ((.errors//[])|length)==0 and ([.result[].success]|all)' "$2" >/dev/null; }
@@ -80,7 +80,7 @@ jobs:
           jq -e --argjson rr "$rr" --argjson rw "$rw" --argjson db "$db" --argjson state "$state" --argjson binding "$binding" --argjson overlay "$overlay" --argjson stale "$stale" --argjson os "$os" --argjson compact "$compact" --argjson foldable "$foldable" --arg oh "$oh" --arg hh "$hh" --arg dh "$dh" --slurpfile slots formal-soak-evidence/slots.json --slurpfile schedules formal-soak-evidence/schedules.json --slurpfile diff formal-soak-evidence/diff.json '
             $rr<1000000 and $rw<20000 and $db<400000000
             and $state.status=="healthy" and $state.lag_ledgers==0 and $state.last_processed_ledger==$state.latest_observed_ledger and $state.last_processed_hash==$state.latest_observed_hash
-            and $binding.base_epoch_id=="devnet-3371675" and $binding.base_snapshot_id=="devnet-3800885-eaa0d29666e7" and $binding.base_ledger_index==3800885 and $binding.base_ledger_hash=="EAA0D29666E73D7594A52DF8000B07F346CD4DA24A9A07549612CDC7D727B700"
+            and $binding.base_epoch_id=="devnet-3371675" and $binding.base_snapshot_id=="devnet-3860021-fbba23eeffd1" and $binding.base_ledger_index==3860021 and $binding.base_ledger_hash=="FBBA23EEFFD19FFD81F2E6A0A9A5D3E503EE78AA8EB6F3653F756BA90655B4A7"
             and $overlay.overlay_rows>0 and $overlay.overlay_rows<59000 and $overlay.overlay_payload_bytes<70000000 and $stale.stale_rows==0 and $os.state_rows==1 and $compact.compact_rows==0 and $foldable.foldable_rows==0
             and $oh=="200" and $hh=="200" and $dh=="200" and ($diff[0].sample.exactProjectionMismatches//0)==0 and ($diff[0].sample.canonicalAheadRows//0)==0
             and $schedules[0].success==true and ($schedules[0].result.schedules|length)==1 and $schedules[0].result.schedules[0].cron=="*/5 * * * *"
@@ -88,7 +88,7 @@ jobs:
             and ($slots[0].result[0].results|all((.status=="committed" or .status=="caught_up") and .lag_ledgers==0 and .error_message==null and .errors==0))
           ' >/dev/null
 
-          jq -n --argjson passed true --argjson rowsRead "$rr" --argjson rowsWritten "$rw" --argjson databaseBytes "$db" --argjson state "$state" --argjson binding "$binding" --argjson overlay "$overlay" --argjson stale "$stale" --argjson overlayState "$os" --argjson compact "$compact" --argjson foldable "$foldable" --slurpfile slots formal-soak-evidence/slots.json --slurpfile diff formal-soak-evidence/diff.json '{passed:$passed,checkedAt:(now|todate),window:{startAt:"2026-07-22T01:00:00Z",endAt:"2026-07-23T01:00:00Z"},d1Today:{rowsRead:$rowsRead,rowsWritten:$rowsWritten},databaseBytes:$databaseBytes,state:$state,binding:$binding,overlay:$overlay,stale:$stale,overlayState:$overlayState,compact:$compact,foldable:$foldable,slots:$slots[0].result[0].results,diff:$diff[0]}' > formal-soak-evidence/summary.json
+          jq -n --argjson passed true --argjson rowsRead "$rr" --argjson rowsWritten "$rw" --argjson databaseBytes "$db" --argjson state "$state" --argjson binding "$binding" --argjson overlay "$overlay" --argjson stale "$stale" --argjson overlayState "$os" --argjson compact "$compact" --argjson foldable "$foldable" --slurpfile slots formal-soak-evidence/slots.json --slurpfile diff formal-soak-evidence/diff.json '{passed:$passed,checkedAt:(now|todate),window:{startAt:"2026-07-23T11:00:00Z",endAt:"2026-07-24T11:00:00Z"},d1Today:{rowsRead:$rowsRead,rowsWritten:$rowsWritten},databaseBytes:$databaseBytes,state:$state,binding:$binding,overlay:$overlay,stale:$stale,overlayState:$overlayState,compact:$compact,foldable:$foldable,slots:$slots[0].result[0].results,diff:$diff[0]}' > formal-soak-evidence/summary.json
 
       - name: Accept and mark running
         if: success()
@@ -101,7 +101,7 @@ jobs:
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add .github/formal-free-soak-window.json
-          git commit -m 'Start formal Free-operation soak at 2026-07-22 10:00 JST'
+          git commit -m 'Start formal Free-operation soak at 2026-07-23 20:00 JST'
           git push
           { echo 'Accepted formal Free-operation soak baseline:'; echo; echo '```json'; cat formal-soak-evidence/summary.json; echo '```'; } > formal-soak-evidence/comment.md
           gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file formal-soak-evidence/comment.md
