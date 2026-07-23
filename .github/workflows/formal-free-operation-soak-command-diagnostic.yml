@@ -58,6 +58,7 @@ jobs:
           compact="$(query "SELECT COUNT(*) AS compact_rows FROM fast_lane_shadow_objects_compact WHERE network='devnet'")"
           metrics_schema="$(query "PRAGMA table_info(fast_lane_shadow_run_metrics)")"
           recent_metrics="$(query "SELECT * FROM fast_lane_shadow_run_metrics WHERE network='devnet' ORDER BY run_at DESC LIMIT 12")"
+          formal_metrics="$(query "SELECT * FROM fast_lane_shadow_run_metrics WHERE network='devnet' AND run_at >= '2026-07-23T16:13:00Z' ORDER BY run_at ASC")"
 
           overview_code="$(curl --silent --show-error -o overview.json -w '%{http_code}' "${PRODUCTION_BASE}/api/overview" || true)"
           history_code="$(curl --silent --show-error -o history.json -w '%{http_code}' "${PRODUCTION_BASE}/api/status/history-source" || true)"
@@ -72,8 +73,9 @@ jobs:
             --argjson compact "$(jq '.result[0].results // []' <<<"$compact")" \
             --argjson metricsSchema "$(jq '.result[0].results // []' <<<"$metrics_schema")" \
             --argjson recentMetrics "$(jq '.result[0].results // []' <<<"$recent_metrics")" \
+            --argjson formalMetrics "$(jq '.result[0].results // []' <<<"$formal_metrics")" \
             --arg overview "$overview_code" --arg history "$history_code" --arg diff "$diff_code" \
-            '{checkedAt:(now|todate),formalSoakStart:"2026-07-23T16:13:00Z",state:$state,binding:$binding,overlay:$overlay,stale:$stale,overlayState:$overlayState,compact:$compact,metricsSchema:$metricsSchema,recentMetrics:$recentMetrics,api:{overview:$overview,historySource:$history,fastLaneDiff:$diff}}' > summary.json
+            '{checkedAt:(now|todate),formalSoakStart:"2026-07-23T16:13:00Z",formalSoakEnd:"2026-07-24T16:13:00Z",state:$state,binding:$binding,overlay:$overlay,stale:$stale,overlayState:$overlayState,compact:$compact,metricsSchema:$metricsSchema,recentMetrics:$recentMetrics,formalMetrics:$formalMetrics,formalMetricCount:($formalMetrics|length),api:{overview:$overview,historySource:$history,fastLaneDiff:$diff}}' > summary.json
 
           {
             echo 'Formal soak production evidence:'
