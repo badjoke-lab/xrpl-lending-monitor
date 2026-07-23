@@ -23,7 +23,7 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
       GH_TOKEN: ${{ github.token }}
-      ISSUE_NUMBER: '974'
+      ISSUE_NUMBER: '976'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -32,15 +32,15 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          jq -e '.issueNumber==974 and .startAt=="2026-07-22T01:00:00Z" and .endAt=="2026-07-23T01:00:00Z" and .expectedSlots==288 and .status=="running"' .github/formal-free-soak-window.json >/dev/null
-          test "$(date -u +%s)" -ge "$(date -u -d '2026-07-23T01:00:00Z' +%s)"
+          jq -e '.issueNumber==976 and .startAt=="2026-07-23T11:00:00Z" and .endAt=="2026-07-24T11:00:00Z" and .expectedSlots==288 and .status=="running"' .github/formal-free-soak-window.json >/dev/null
+          test "$(date -u +%s)" -ge "$(date -u -d '2026-07-24T11:00:00Z' +%s)"
           mkdir -p final-evidence
           SQL=$(cat <<'SQL'
           WITH base AS (
             SELECT run_at,status,end_ledger_index,latest_observed_ledger,lag_ledgers,error_message,
                    CAST(strftime('%s',run_at)/300 AS INTEGER) slot_id
             FROM fast_lane_shadow_run_metrics
-            WHERE network='devnet' AND run_at>='2026-07-22T01:00:00Z' AND run_at<'2026-07-23T01:00:00Z'
+            WHERE network='devnet' AND run_at>='2026-07-23T11:00:00Z' AND run_at<'2026-07-24T11:00:00Z'
           ), ranked AS (
             SELECT *,ROW_NUMBER() OVER(PARTITION BY slot_id ORDER BY run_at DESC) rn,
                    SUM(CASE WHEN status='error' OR error_message IS NOT NULL THEN 1 ELSE 0 END) OVER(PARTITION BY slot_id) errors
@@ -53,7 +53,7 @@ jobs:
           jq -n --arg sql "$SQL" '{sql:$sql}' | curl --fail-with-body --silent --show-error -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -H 'Content-Type: application/json' --data-binary @- "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database/${DATABASE_ID}/query" > final-evidence/slots.json
           jq -e '.success==true and ([.result[].success]|all)' final-evidence/slots.json >/dev/null
           passed="$(jq '.result[0].results as $s | ($s|length)==288 and (($s[-1].slot_id-$s[0].slot_id)==287) and ($s|all((.status=="committed" or .status=="caught_up") and .lag_ledgers==0 and .error_message==null and .errors==0))' final-evidence/slots.json)"
-          jq -n --argjson passed "$passed" --slurpfile slots final-evidence/slots.json '{passed:$passed,window:{startAt:"2026-07-22T01:00:00Z",endAt:"2026-07-23T01:00:00Z"},slotCount:($slots[0].result[0].results|length),firstSlot:$slots[0].result[0].results[0],lastSlot:$slots[0].result[0].results[-1]}' > final-evidence/summary.json
+          jq -n --argjson passed "$passed" --slurpfile slots final-evidence/slots.json '{passed:$passed,window:{startAt:"2026-07-23T11:00:00Z",endAt:"2026-07-24T11:00:00Z"},slotCount:($slots[0].result[0].results|length),firstSlot:$slots[0].result[0].results[0],lastSlot:$slots[0].result[0].results[-1]}' > final-evidence/summary.json
           test "$passed" = true
       - name: Mark passed and close Issue
         if: success()
