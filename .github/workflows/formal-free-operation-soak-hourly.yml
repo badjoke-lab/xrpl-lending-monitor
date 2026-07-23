@@ -22,7 +22,7 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
       GH_TOKEN: ${{ github.token }}
-      ISSUE_NUMBER: '974'
+      ISSUE_NUMBER: '976'
     steps:
       - uses: actions/checkout@v4
       - name: Check active formal window and hourly invariants
