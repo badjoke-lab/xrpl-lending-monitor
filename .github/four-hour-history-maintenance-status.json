@@ -1,8 +1,8 @@
 {
-  "state": "running",
-  "phase": "cutover_30047260425",
-  "message": "current-state cutover run is active",
-  "checkedAt": "2026-07-23T21:43:10Z",
+  "state": "success",
+  "phase": "completed",
+  "message": "current-state checkpoint completed",
+  "checkedAt": "2026-07-23T21:43:43Z",
   "runId": "30046385638",
   "commit": "50fad1cfe13603699b8b960d22992f3bda785899",
   "candidateRunId": "30046398522",
