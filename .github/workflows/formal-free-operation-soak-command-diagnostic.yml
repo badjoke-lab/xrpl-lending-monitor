@@ -3,6 +3,7 @@ name: Formal soak command diagnostic
 on:
   issue_comment:
     types: [created]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -10,7 +11,10 @@ permissions:
 
 jobs:
   diagnose:
-    if: github.event.issue.number == 976 && github.event.comment.body == '/run-formal-soak-diagnostic'
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.issue.number == 976 &&
+       contains(github.event.comment.body, '/run-formal-soak-diagnostic'))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
