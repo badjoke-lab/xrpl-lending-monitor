@@ -5,8 +5,13 @@
   "startAt": "2026-07-22T01:00:00Z",
   "endAt": "2026-07-23T01:00:00Z",
   "expectedSlots": 288,
-  "status": "planned",
+  "status": "failed",
   "cadence": "*/5 * * * *",
   "baseSnapshotId": "devnet-3800885-eaa0d29666e7",
-  "baseLedgerIndex": 3800885
+  "baseLedgerIndex": 3800885,
+  "failedAt": "2026-07-23T01:15:58Z",
+  "firstFailedInvariant": "formal window status never became running before the fixed start boundary",
+  "startGateAccepted": false,
+  "finalAuditTriggered": false,
+  "finalAuditReason": "final audit is authorized only for a committed running window; this window cannot be backdated into a pass"
 }
