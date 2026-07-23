@@ -1,0 +1,59 @@
+name: Formal soak command diagnostic
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  diagnose:
+    if: github.event.issue.number == 976 && github.event.comment.body == '/run-formal-soak-diagnostic'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
+      GH_TOKEN: ${{ github.token }}
+      ISSUE_NUMBER: '976'
+      PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+    steps:
+      - name: Query production state
+        shell: bash
+        run: |
+          set -euo pipefail
+          query() {
+            jq -n --arg sql "$1" '{sql:$sql}' | curl --fail-with-body --silent --show-error \
+              -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+              -H 'Content-Type: application/json' --data-binary @- \
+              "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database/${DATABASE_ID}/query"
+          }
+
+          state="$(query "SELECT epoch_id,last_processed_ledger,last_processed_hash,latest_observed_ledger,latest_observed_hash,status,(latest_observed_ledger-last_processed_ledger) AS lag_ledgers FROM fast_lane_shadow_state WHERE network='devnet'")"
+          binding="$(query "SELECT base_epoch_id,base_snapshot_id,base_ledger_index,base_ledger_hash FROM fast_lane_shadow_base_binding WHERE network='devnet'")"
+          overlay="$(query "SELECT COUNT(*) overlay_rows,COALESCE(SUM(LENGTH(projection_json)),0) overlay_payload_bytes FROM current_state_overlay_objects WHERE network='devnet'")"
+          stale="$(query "SELECT COUNT(*) stale_rows FROM current_state_overlay_objects o WHERE o.network='devnet' AND NOT EXISTS (SELECT 1 FROM fast_lane_shadow_base_binding b WHERE b.network=o.network AND b.base_epoch_id=o.epoch_id AND b.base_snapshot_id=o.base_snapshot_id)")"
+          overlay_state="$(query "SELECT COUNT(*) state_rows,MAX(overlay_ledger_index) overlay_ledger_index FROM current_state_overlay_state WHERE network='devnet'")"
+          compact="$(query "SELECT COUNT(*) compact_rows FROM fast_lane_shadow_objects_compact WHERE network='devnet'")"
+          slots="$(query "WITH b AS (SELECT run_at,status,end_ledger_index,lag_ledgers,error_message,CAST(strftime('%s',run_at)/300 AS INTEGER) slot_id FROM fast_lane_shadow_run_metrics WHERE network='devnet' AND julianday(run_at)>=julianday('now','-45 minutes')),r AS (SELECT *,ROW_NUMBER() OVER(PARTITION BY slot_id ORDER BY run_at DESC) rn,SUM(CASE WHEN status='error' OR error_message IS NOT NULL THEN 1 ELSE 0 END) OVER(PARTITION BY slot_id) errors FROM b) SELECT slot_id,run_at,status,end_ledger_index,lag_ledgers,error_message,errors FROM r WHERE rn=1 ORDER BY slot_id DESC LIMIT 6")"
+
+          overview_code="$(curl --silent --show-error -o /dev/null -w '%{http_code}' "${PRODUCTION_BASE}/api/overview")"
+          history_code="$(curl --silent --show-error -o /dev/null -w '%{http_code}' "${PRODUCTION_BASE}/api/status/history-source")"
+          diff_code="$(curl --silent --show-error -o /dev/null -w '%{http_code}' "${PRODUCTION_BASE}/api/status/fast-lane-diff?limit=500")"
+
+          jq -n \
+            --argjson state "$(jq '.result[0].results // []' <<<"$state")" \
+            --argjson binding "$(jq '.result[0].results // []' <<<"$binding")" \
+            --argjson overlay "$(jq '.result[0].results // []' <<<"$overlay")" \
+            --argjson stale "$(jq '.result[0].results // []' <<<"$stale")" \
+            --argjson overlayState "$(jq '.result[0].results // []' <<<"$overlay_state")" \
+            --argjson compact "$(jq '.result[0].results // []' <<<"$compact")" \
+            --argjson slots "$(jq '.result[0].results // []' <<<"$slots")" \
+            --arg overview "$overview_code" --arg history "$history_code" --arg diff "$diff_code" \
+            '{checkedAt:(now|todate),state:$state,binding:$binding,overlay:$overlay,stale:$stale,overlayState:$overlayState,compact:$compact,slots:$slots,api:{overview:$overview,historySource:$history,fastLaneDiff:$diff}}' > summary.json
+
+          { echo 'Formal soak command diagnostic:'; echo; echo '```json'; cat summary.json; echo '```'; } > comment.md
+          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file comment.md
