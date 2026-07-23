@@ -1,41 +1,17 @@
 {
-  "state": "failed",
-  "phase": "four_hour_current_state_and_history",
-  "checkedAt": "2026-07-22T18:43:06Z",
-  "runId": "29947007525",
-  "commit": "6cf89e5398387a20e5c93abbc95f42e91f2b6ad5",
-  "currentStateOutcome": "success",
-  "historyOutcome": "failure",
-  "production": {
-    "complete": true,
-    "counts": {
-      "loanBrokers": 618283,
-      "loans": 267449,
-      "vaults": 940219
-    },
-    "epochId": "devnet-3371675",
-    "ledgerHash": "FBBA23EEFFD19FFD81F2E6A0A9A5D3E503EE78AA8EB6F3653F756BA90655B4A7",
-    "ledgerIndex": 3860021,
-    "lookupPrefixLength": 3,
-    "manifestSha256": "e6c0b6fab9b8ed94f9eaad901a0523fdb9948056f940d3b6cc02dba139494a7a",
-    "pageCounts": {
-      "loanBrokers": 12366,
-      "loans": 5349,
-      "vaults": 18805
-    },
-    "pageSize": 50,
-    "releaseTag": "replacement-current-state-3860021",
-    "schemaVersion": 1,
-    "snapshotId": "devnet-3860021-fbba23eeffd1"
-  },
-  "history": {
-    "windows": 275,
-    "first_ledger": 3858940,
-    "last_ledger": 3862708,
-    "latest_created_at": "2026-07-22T18:41:01.663Z",
-    "internal_gaps": 1
-  },
+  "state": "running",
+  "phase": "initialize",
+  "message": "current-state checkpoint started",
+  "checkedAt": "2026-07-23T00:56:17Z",
+  "runId": "29970453836",
+  "commit": "84c554d48b451279f723d7dd0da90137f8bb9a0f",
+  "candidateRunId": null,
+  "cutoverRunId": null,
+  "sourceBranch": null,
+  "outputBranch": null,
+  "sourceLedger": null,
+  "targetLedger": null,
   "currentStateCadence": "five_minutes",
-  "historyCheckpointCadence": "four_hours",
-  "automaticCheckpointScheduleEnabled": true
+  "checkpointCadence": "four_hours",
+  "historyMode": "archived_plus_forward_only"
 }
