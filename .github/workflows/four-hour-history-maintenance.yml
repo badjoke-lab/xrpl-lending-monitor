@@ -1,4 +1,4 @@
-name: Four-hour history gap inspection
+name: Four-hour current-state checkpoint
 
 on:
   schedule:
@@ -10,136 +10,54 @@ on:
       - .github/four-hour-history-maintenance-trigger
 
 permissions:
+  actions: write
   contents: write
 
 concurrency:
-  group: four-hour-current-state-history-checkpoint
-  cancel-in-progress: false
+  group: four-hour-current-state-checkpoint
+  cancel-in-progress: true
 
 jobs:
-  inspect:
+  maintain:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 360
     env:
       GH_TOKEN: ${{ github.token }}
       REPOSITORY: badjoke-lab/xrpl-lending-monitor
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      D1_DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
-      HISTORY_EPOCH_ID: devnet-3371675
+      CANDIDATE_A: current-state-four-hour-a-data
+      CANDIDATE_B: current-state-four-hour-b-data
+      PRODUCTION_CURRENT: current-state-data
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
-      - name: Inspect exact D1 history gap
+      - name: Validate five-minute production boundary
         shell: bash
         run: |
           set -euo pipefail
-          ROOT=four-hour-history-gap-evidence
-          mkdir -p "$ROOT"
-          test -n "$CLOUDFLARE_API_TOKEN"
-          test -n "$CLOUDFLARE_ACCOUNT_ID"
-          jq -e '.triggers.crons == ["*/5 * * * *"] and .vars.APP_NETWORK == "devnet" and .vars.MAINNET_ENABLED == "false"' wrangler.jsonc >/dev/null
+          jq -e '
+            .triggers.crons == ["*/5 * * * *"]
+            and .vars.APP_NETWORK == "devnet"
+            and .vars.MAINNET_ENABLED == "false"
+            and (.queues.producers | length) == 1
+            and (.queues.consumers | length) == 1
+            and .queues.consumers[0].max_batch_size == 1
+            and .queues.consumers[0].max_concurrency == 1
+          ' wrangler.jsonc >/dev/null
+          node --check scripts/build-overlay-current-state-checkpoint.mjs
+          bash -n scripts/run-current-state-checkpoint-cutover.sh
+          bash -n scripts/run-four-hour-current-state-checkpoint.sh
 
-          query_d1() {
-            local name="$1"
-            local sql_file="$2"
-            shift 2
-            jq -n --rawfile sql "$sql_file" --args '$ARGS.positional as $params | {sql:$sql,params:$params}' -- "$@" > "$ROOT/$name-request.json"
-            curl --fail-with-body --silent --show-error --retry 4 \
-              -X POST \
-              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-              -H 'content-type: application/json' \
-              --data @"$ROOT/$name-request.json" \
-              "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database/$D1_DATABASE_ID/query" \
-              > "$ROOT/$name-response.json"
-            jq -e '.success == true and .result[0].success == true' "$ROOT/$name-response.json" >/dev/null
-            jq '.result[0].results' "$ROOT/$name-response.json" > "$ROOT/$name-results.json"
-          }
+      - name: Build and cut over the newest current-state checkpoint
+        shell: bash
+        run: bash scripts/run-four-hour-current-state-checkpoint.sh
 
-          cat > "$ROOT/gaps.sql" <<'SQL'
-          WITH ordered AS (
-            SELECT rowid,
-                   start_ledger_index,
-                   end_ledger_index,
-                   created_at,
-                   LAG(rowid) OVER (ORDER BY start_ledger_index, end_ledger_index, rowid) AS previous_rowid,
-                   LAG(start_ledger_index) OVER (ORDER BY start_ledger_index, end_ledger_index, rowid) AS previous_start,
-                   LAG(end_ledger_index) OVER (ORDER BY start_ledger_index, end_ledger_index, rowid) AS previous_end,
-                   LAG(created_at) OVER (ORDER BY start_ledger_index, end_ledger_index, rowid) AS previous_created_at
-            FROM fast_lane_history_windows
-            WHERE network = ?1 AND epoch_id = ?2
-          )
-          SELECT previous_rowid,
-                 previous_start,
-                 previous_end,
-                 previous_created_at,
-                 rowid AS next_rowid,
-                 start_ledger_index AS next_start,
-                 end_ledger_index AS next_end,
-                 created_at AS next_created_at,
-                 previous_end + 1 AS missing_start,
-                 start_ledger_index - 1 AS missing_end,
-                 start_ledger_index - previous_end - 1 AS missing_ledgers
-          FROM ordered
-          WHERE previous_end IS NOT NULL AND start_ledger_index > previous_end + 1
-          ORDER BY missing_start
-          SQL
-          query_d1 gaps "$ROOT/gaps.sql" devnet "$HISTORY_EPOCH_ID"
-          jq -e 'length == 1 and .[0].missing_ledgers > 0' "$ROOT/gaps-results.json" >/dev/null
-
-          PREVIOUS_ROWID="$(jq -r '.[0].previous_rowid' "$ROOT/gaps-results.json")"
-          NEXT_ROWID="$(jq -r '.[0].next_rowid' "$ROOT/gaps-results.json")"
-          cat > "$ROOT/adjacent.sql" <<'SQL'
-          SELECT rowid, *
-          FROM fast_lane_history_windows
-          WHERE rowid IN (?1, ?2)
-          ORDER BY start_ledger_index, end_ledger_index, rowid
-          SQL
-          query_d1 adjacent "$ROOT/adjacent.sql" "$PREVIOUS_ROWID" "$NEXT_ROWID"
-
-          cat > "$ROOT/schema.sql" <<'SQL'
-          PRAGMA table_info(fast_lane_history_windows)
-          SQL
-          query_d1 schema "$ROOT/schema.sql"
-
-          cat > "$ROOT/history-tables.sql" <<'SQL'
-          SELECT name, sql
-          FROM sqlite_master
-          WHERE type = 'table' AND (name LIKE '%history%' OR name LIKE '%fast_lane%')
-          ORDER BY name
-          SQL
-          query_d1 history-tables "$ROOT/history-tables.sql"
-
-          jq -n \
-            --arg state success \
-            --arg checkedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            --arg runId "$GITHUB_RUN_ID" \
-            --arg commit "$GITHUB_SHA" \
-            --slurpfile gaps "$ROOT/gaps-results.json" \
-            --slurpfile adjacent "$ROOT/adjacent-results.json" \
-            --slurpfile schema "$ROOT/schema-results.json" \
-            --slurpfile tables "$ROOT/history-tables-results.json" \
-            '{state:$state,checkedAt:$checkedAt,runId:$runId,commit:$commit,gaps:$gaps[0],adjacentWindows:$adjacent[0],windowSchema:$schema[0],historyTables:$tables[0]}' \
-            > "$ROOT/status.json"
-
-          API_PATH="repos/$REPOSITORY/contents/.github/four-hour-history-gap-status.json"
-          CONTENT="$(base64 -w0 "$ROOT/status.json")"
-          for attempt in $(seq 1 10); do
-            EXISTING_SHA="$(gh api "$API_PATH" --jq .sha 2>/dev/null || true)"
-            if test -n "$EXISTING_SHA"; then
-              gh api --method PUT "$API_PATH" -f message="ops: update exact history gap status" -f content="$CONTENT" -f sha="$EXISTING_SHA" >/dev/null && exit 0
-            else
-              gh api --method PUT "$API_PATH" -f message="ops: publish exact history gap status" -f content="$CONTENT" >/dev/null && exit 0
-            fi
-            sleep 2
-          done
-          exit 1
-
-      - name: Upload exact history gap evidence
+      - name: Upload four-hour current-state checkpoint evidence
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: four-hour-history-gap-evidence
-          path: four-hour-history-gap-evidence
+          name: four-hour-current-state-checkpoint
+          path: current-state-checkpoint-evidence
           if-no-files-found: warn
           retention-days: 30
