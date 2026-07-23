@@ -1,17 +1,12 @@
 {
   "schemaVersion": 1,
-  "issueNumber": 974,
+  "issueNumber": 976,
   "network": "devnet",
-  "startAt": "2026-07-22T01:00:00Z",
-  "endAt": "2026-07-23T01:00:00Z",
+  "startAt": "2026-07-23T11:00:00Z",
+  "endAt": "2026-07-24T11:00:00Z",
   "expectedSlots": 288,
-  "status": "failed",
+  "status": "planned",
   "cadence": "*/5 * * * *",
-  "baseSnapshotId": "devnet-3800885-eaa0d29666e7",
-  "baseLedgerIndex": 3800885,
-  "failedAt": "2026-07-23T01:15:58Z",
-  "firstFailedInvariant": "formal window status never became running before the fixed start boundary",
-  "startGateAccepted": false,
-  "finalAuditTriggered": false,
-  "finalAuditReason": "final audit is authorized only for a committed running window; this window cannot be backdated into a pass"
+  "baseSnapshotId": "devnet-3860021-fbba23eeffd1",
+  "baseLedgerIndex": 3860021
 }
