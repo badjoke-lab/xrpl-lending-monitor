@@ -1,8 +1,8 @@
 {
-  "state": "running",
-  "phase": "select_source",
-  "message": "selected newest verified rolling base",
-  "checkedAt": "2026-07-24T01:40:30Z",
+  "state": "failed",
+  "phase": "dispatch_candidate",
+  "message": "current-state checkpoint exited with code 1",
+  "checkedAt": "2026-07-24T01:40:34Z",
   "runId": "30059582788",
   "commit": "4c2dd0e55f9432e94dca4f929303d3d9a791d013",
   "candidateRunId": null,
