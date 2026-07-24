@@ -42,19 +42,35 @@ jobs:
       - name: Bundle production collector
         run: pnpm exec vite build --config vite.fast-lane-production.config.ts
 
-      - name: Run bounded production catch-up rounds
+      - name: Run retry-tolerant bounded production catch-up
         id: collector
         shell: bash
         run: |
-          set -euo pipefail
+          set -uo pipefail
           : > /tmp/collector.log
           : > /tmp/collector.err
-          for round in $(seq 1 10); do
-            echo "=== catch-up round ${round}/10 ===" | tee -a /tmp/collector.log
+          caught_up=0
+          for attempt in $(seq 1 650); do
+            echo "=== catch-up attempt ${attempt}/650 ===" >> /tmp/collector.log
+            set +e
             node .fast-lane-production-build/run-fast-lane-production.mjs \
-              > >(tee -a /tmp/collector.log) \
-              2> >(tee -a /tmp/collector.err >&2)
+              > /tmp/attempt.out 2> /tmp/attempt.err
+            rc=$?
+            set -e
+            cat /tmp/attempt.out >> /tmp/collector.log
+            cat /tmp/attempt.err >> /tmp/collector.err
+            lag="$(grep -o '"lagLedgers":[0-9]*' /tmp/attempt.out | tail -n 1 | cut -d: -f2 || true)"
+            if [ "$lag" = "0" ]; then
+              echo "caught up on attempt ${attempt}" >> /tmp/collector.log
+              caught_up=1
+              break
+            fi
+            if [ "$rc" -ne 0 ]; then
+              echo "attempt ${attempt} exited ${rc}; retrying" >> /tmp/collector.err
+              sleep 1
+            fi
           done
+          echo "caught_up=${caught_up}" >> /tmp/collector.log
 
       - name: Report catch-up result
         if: always()
@@ -65,8 +81,8 @@ jobs:
             echo 'P0 emergency production catch-up result:'
             echo
             echo '```text'
-            if [ -s /tmp/collector.log ]; then tail -n 160 /tmp/collector.log; else echo 'collector produced no stdout'; fi
-            if [ -s /tmp/collector.err ]; then echo; echo 'stderr:'; tail -n 80 /tmp/collector.err; fi
+            if [ -s /tmp/collector.log ]; then tail -n 220 /tmp/collector.log; else echo 'collector produced no stdout'; fi
+            if [ -s /tmp/collector.err ]; then echo; echo 'stderr:'; tail -n 120 /tmp/collector.err; fi
             echo '```'
             echo
             echo "Run: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
