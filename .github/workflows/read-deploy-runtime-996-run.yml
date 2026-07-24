@@ -1,0 +1,32 @@
+name: Read runtime repair 996 deploy run
+
+on:
+  push:
+    branches:
+      - agent/current-production-probe-20260724-2246
+    paths:
+      - .github/workflows/read-deploy-runtime-996-run.yml
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  read:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read latest deployment workflow run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/deploy-runtime-repair-996.yml/runs?branch=main&per_page=1" --jq '.workflow_runs[0]' > run.json
+          api="repos/${GITHUB_REPOSITORY}/contents/.github/runtime-repair-996-run.json"
+          old="$(gh api "$api?ref=${GITHUB_REF_NAME}" --jq .sha 2>/dev/null || true)"
+          content="$(base64 -w0 run.json)"
+          if [ -n "$old" ]; then
+            gh api --method PUT "$api" -f message='Update runtime repair 996 run status' -f content="$content" -f sha="$old" -f branch="$GITHUB_REF_NAME" >/dev/null
+          else
+            gh api --method PUT "$api" -f message='Create runtime repair 996 run status' -f content="$content" -f branch="$GITHUB_REF_NAME" >/dev/null
+          fi
