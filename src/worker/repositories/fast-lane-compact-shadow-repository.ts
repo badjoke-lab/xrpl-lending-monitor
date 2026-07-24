@@ -32,6 +32,7 @@ export async function commitFastLaneCompactShadowWindow(options: {
   db: D1Database
   plan: FastLaneShadowWindowPlan
   historyBundle: FastLaneHistoryBundle
+  encodedHistoryBundle: string
   expectedPreviousLedger: number
   expectedPreviousHash: string
   processedAt: string
@@ -49,6 +50,9 @@ export async function commitFastLaneCompactShadowWindow(options: {
     || options.historyBundle.endLedgerHash !== plan.endLedgerHash
   ) {
     throw new Error('Fast-lane history bundle does not match the compact shadow window')
+  }
+  if (options.encodedHistoryBundle.length === 0) {
+    throw new Error('Fast-lane encoded history bundle is empty')
   }
 
   const token = commitToken({
@@ -168,7 +172,7 @@ export async function commitFastLaneCompactShadowWindow(options: {
       options.historyBundle.startLedgerIndex,
       options.historyBundle.endLedgerIndex,
       options.historyBundle.endLedgerHash,
-      JSON.stringify(options.historyBundle),
+      options.encodedHistoryBundle,
       options.historyBundle.createdAt,
     ),
   )
