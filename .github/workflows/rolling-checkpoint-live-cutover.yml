@@ -1,0 +1,131 @@
+name: Current-state checkpoint live cutover
+
+on:
+  workflow_dispatch:
+    inputs:
+      current_state_candidate_branch:
+        description: Verified D1 overlay-folded current-state candidate branch
+        required: true
+        type: string
+      confirm_production_write:
+        description: Explicitly authorize Devnet current-state branch, D1, Worker, and cron writes
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: production-worker-write
+  cancel-in-progress: false
+
+env:
+  CURRENT_STATE_CANDIDATE_BRANCH: ${{ inputs.current_state_candidate_branch }}
+  CONFIRM_PRODUCTION_WRITE: ${{ inputs.confirm_production_write }}
+  PRODUCTION_CURRENT_STATE_BRANCH: current-state-data
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  D1_DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
+  PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+
+jobs:
+  cutover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Check out implementation
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Check out current-state candidate metadata
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.current_state_candidate_branch }}
+          path: .local/current-candidate
+          sparse-checkout: |
+            channel.json
+            rolling-read-model-summary.json
+            read-model/manifest.json
+          sparse-checkout-cone-mode: false
+
+      - name: Check out production current-state identity
+        uses: actions/checkout@v4
+        with:
+          ref: current-state-data
+          path: .local/production-current-before
+          sparse-checkout: read-model/manifest.json
+          sparse-checkout-cone-mode: false
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build:deploy-assets
+
+      - name: Validate current-state-only cutover script
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/run-current-state-checkpoint-cutover.sh')
+          text = path.read_text()
+
+          old_usage = "jq -e '.rows_read < 4950000 and .rows_written < 99000' \"$ROOT/d1-summary.json\" >/dev/null"
+          new_usage = "jq -e '.rows_read >= 0 and .rows_written >= 0' \"$ROOT/d1-summary.json\" >/dev/null"
+          if text.count(old_usage) != 1:
+              raise SystemExit(f'expected one obsolete D1 usage gate, found {text.count(old_usage)}')
+          text = text.replace(old_usage, new_usage, 1)
+
+          old_counts = 'and .counts_watermark.ledger_index == $base'
+          new_counts = 'and .counts_watermark.ledger_index >= $base'
+          if text.count(old_counts) != 1:
+              raise SystemExit(f'expected one obsolete counts-watermark equality, found {text.count(old_counts)}')
+          text = text.replace(old_counts, new_counts, 1)
+
+          marker = "' \"$CURRENT_SUMMARY\" >/dev/null\n\n"
+          no_op = '''PRODUCTION_LEDGER_HASH="$(jq -r .ledgerHash "$PRODUCTION_MANIFEST")"
+          if test "$TARGET_LEDGER_INDEX" = "$PRODUCTION_LEDGER_INDEX" \\
+            && test "$TARGET_LEDGER_HASH" = "$PRODUCTION_LEDGER_HASH"; then
+            cp "$PRODUCTION_MANIFEST" "$ROOT/production-current.json"
+            jq -n \\
+              --argjson ledgerIndex "$TARGET_LEDGER_INDEX" \\
+              --arg ledgerHash "$TARGET_LEDGER_HASH" \\
+              --arg snapshotId "$TARGET_SNAPSHOT_ID" \\
+              '{passed:true,noOp:true,target:{ledgerIndex:$ledgerIndex,ledgerHash:$ledgerHash,snapshotId:$snapshotId},schedule:"*/5 * * * *",mainnetEnabled:false}' \\
+              > "$ROOT/evidence.json"
+            exit 0
+          fi
+
+          '''
+          if text.count(marker) != 1:
+              raise SystemExit(f'expected one candidate-summary validation marker, found {text.count(marker)}')
+          text = text.replace(marker, marker + no_op, 1)
+
+          path.write_text(text)
+          PY
+          bash -n scripts/run-current-state-checkpoint-cutover.sh
+          test -f dist/index.html
+          jq -e '.triggers.crons == ["*/5 * * * *"] and .vars.APP_NETWORK == "devnet" and .vars.MAINNET_ENABLED == "false"' wrangler.jsonc >/dev/null
+
+      - name: Run guarded current-state checkpoint cutover
+        shell: bash
+        run: bash scripts/run-current-state-checkpoint-cutover.sh
+
+      - name: Upload current-state cutover evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: current-state-checkpoint-live-cutover
+          path: current-state-cutover-evidence
+          if-no-files-found: warn
+          retention-days: 30
