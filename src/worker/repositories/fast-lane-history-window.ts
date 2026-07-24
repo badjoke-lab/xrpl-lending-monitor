@@ -1,3 +1,4 @@
+import { buildHistorySegmentRecords } from '../../collector/history-segments/build-segment-records'
 import type { IncrementalScanResult } from '../../collector/incremental/scan-validated-ledgers'
 import type {
   ArchivedObjectRecord,
@@ -6,6 +7,12 @@ import type {
   ObjectChangeRecord,
   ProtocolEventRecord,
 } from './history-api-repository'
+import {
+  segmentArchivedObjectToApi,
+  segmentBalanceHistoryToApi,
+  segmentLoanLifecycleToApi,
+  segmentObjectChangeToApi,
+} from './history-segment-adapter'
 
 const DEFAULT_MAX_WINDOWS = 400
 
@@ -61,6 +68,10 @@ export function buildFastLaneHistoryBundle(options: {
   const final = options.scan.ledgers.at(-1)
   if (!first || !final) throw new Error('Fast-lane history bundle requires a non-empty scan')
 
+  const records = buildHistorySegmentRecords({
+    scan: options.scan,
+    epochId: options.epochId,
+  })
   const protocolEvents: ProtocolEventRecord[] = []
   for (const ledger of options.scan.ledgers) {
     for (const event of ledger.lendingTransactions) {
@@ -88,10 +99,10 @@ export function buildFastLaneHistoryBundle(options: {
     endLedgerHash: final.ledgerHash,
     createdAt: options.processedAt,
     protocolEvents,
-    objectChanges: [],
-    loanLifecycle: [],
-    archivedObjects: [],
-    balanceHistory: [],
+    objectChanges: records.objectChanges.map(segmentObjectChangeToApi),
+    loanLifecycle: records.lifecycleEvents.map(segmentLoanLifecycleToApi),
+    archivedObjects: records.archivedObjects.map(segmentArchivedObjectToApi),
+    balanceHistory: records.balanceHistory.map(segmentBalanceHistoryToApi),
   }
 }
 
