@@ -1,0 +1,241 @@
+name: Post-deploy semantic history probe
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/post-deploy-semantic-probe-trigger
+
+permissions:
+  contents: write
+
+concurrency:
+  group: post-deploy-semantic-history-probe
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
+      PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+      DEPLOYED_AFTER: '2026-07-24T08:33:00Z'
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Read post-deploy semantic evidence
+        id: probe
+        shell: bash
+        run: |
+          set -uo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN" || exit 1
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || exit 1
+
+          query_d1() {
+            local sql="$1" output="$2"
+            jq -n --arg sql "$sql" '{sql:$sql}' \
+              | curl --silent --show-error --retry 3 --retry-all-errors \
+                  --connect-timeout 10 --max-time 45 \
+                  -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+                  -H 'Content-Type: application/json' \
+                  --data-binary @- \
+                  "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database/${DATABASE_ID}/query" \
+              > "$output"
+          }
+
+          fetch_api() {
+            local path="$1" output="$2" code_file="$3"
+            local code
+            code="$(curl --silent --show-error --retry 3 --retry-all-errors \
+              --connect-timeout 10 --max-time 45 \
+              -o "$output" -w '%{http_code}' "${PRODUCTION_BASE}${path}" || true)"
+            printf '%s' "$code" > "$code_file"
+          }
+
+          witness_found=false
+          for attempt in $(seq 1 30); do
+            query_d1 "WITH windows AS (
+              SELECT start_ledger_index,end_ledger_index,end_ledger_hash,created_at,LENGTH(bundle_json) AS bundle_bytes,
+                     json_type(bundle_json,'$.protocolEvents') AS protocol_type,
+                     json_type(bundle_json,'$.objectChanges') AS changes_type,
+                     json_type(bundle_json,'$.loanLifecycle') AS lifecycle_type,
+                     json_type(bundle_json,'$.archivedObjects') AS archives_type,
+                     json_type(bundle_json,'$.balanceHistory') AS balance_type,
+                     COALESCE(json_array_length(json_extract(bundle_json,'$.protocolEvents')),0) AS protocol_events,
+                     COALESCE(json_array_length(json_extract(bundle_json,'$.objectChanges')),0) AS object_changes,
+                     COALESCE(json_array_length(json_extract(bundle_json,'$.loanLifecycle')),0) AS loan_lifecycle,
+                     COALESCE(json_array_length(json_extract(bundle_json,'$.archivedObjects')),0) AS archived_objects,
+                     COALESCE(json_array_length(json_extract(bundle_json,'$.balanceHistory')),0) AS balance_history,
+                     MAX(end_ledger_index) OVER (ORDER BY start_ledger_index,end_ledger_index,created_at ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS previously_covered_through
+              FROM fast_lane_history_windows
+              WHERE network='devnet' AND created_at>='${DEPLOYED_AFTER}'
+            )
+            SELECT COUNT(*) AS window_count,MIN(start_ledger_index) AS first_ledger,MAX(end_ledger_index) AS last_ledger,
+                   COALESCE(SUM(CASE WHEN previously_covered_through IS NOT NULL AND start_ledger_index>previously_covered_through+1 THEN 1 ELSE 0 END),0) AS gap_count,
+                   COALESCE(SUM(CASE WHEN protocol_type!='array' OR changes_type!='array' OR lifecycle_type!='array' OR archives_type!='array' OR balance_type!='array' THEN 1 ELSE 0 END),0) AS invalid_schema_windows,
+                   COALESCE(SUM(protocol_events),0) AS protocol_events,
+                   COALESCE(SUM(object_changes),0) AS object_changes,
+                   COALESCE(SUM(loan_lifecycle),0) AS loan_lifecycle,
+                   COALESCE(SUM(archived_objects),0) AS archived_objects,
+                   COALESCE(SUM(balance_history),0) AS balance_history,
+                   COALESCE(MAX(bundle_bytes),0) AS max_bundle_bytes
+            FROM windows" aggregate.json
+
+            query_d1 "SELECT start_ledger_index,end_ledger_index,created_at,
+                     json_extract(bundle_json,'$.objectChanges[0].objectType') AS object_type,
+                     json_extract(bundle_json,'$.objectChanges[0].objectId') AS object_id,
+                     json_extract(bundle_json,'$.objectChanges[0].transactionHash') AS transaction_hash
+              FROM fast_lane_history_windows
+              WHERE network='devnet' AND created_at>='${DEPLOYED_AFTER}'
+                AND COALESCE(json_array_length(json_extract(bundle_json,'$.objectChanges')),0)>0
+              ORDER BY end_ledger_index DESC LIMIT 1" witness.json
+
+            window_count="$(jq -r '.result[0].results[0].window_count // 0' aggregate.json 2>/dev/null || echo 0)"
+            object_type="$(jq -r '.result[0].results[0].object_type // empty' witness.json 2>/dev/null || true)"
+            object_id="$(jq -r '.result[0].results[0].object_id // empty' witness.json 2>/dev/null || true)"
+            transaction_hash="$(jq -r '.result[0].results[0].transaction_hash // empty' witness.json 2>/dev/null || true)"
+            if [ "$window_count" -gt 0 ] && [ -n "$object_type" ] && [ -n "$object_id" ] && [ -n "$transaction_hash" ]; then
+              witness_found=true
+              break
+            fi
+            sleep 20
+          done
+
+          query_d1 "SELECT epoch_id,last_processed_ledger,last_processed_hash,latest_observed_ledger,latest_observed_hash,status,(latest_observed_ledger-last_processed_ledger) AS lag_ledgers,updated_at FROM fast_lane_shadow_state WHERE network='devnet'" state.json
+          query_d1 "SELECT epoch_id,base_snapshot_id,base_ledger_index,base_ledger_hash,overlay_ledger_index,overlay_ledger_hash,updated_at FROM current_state_overlay_state WHERE network='devnet'" overlay.json
+          query_d1 "SELECT COUNT(*) AS compact_rows FROM fast_lane_shadow_objects_compact WHERE network='devnet'" compact.json
+          query_d1 "SELECT COUNT(*) AS stale_rows FROM current_state_overlay_objects o WHERE o.network='devnet' AND NOT EXISTS (SELECT 1 FROM fast_lane_shadow_base_binding b WHERE b.network=o.network AND b.base_epoch_id=o.epoch_id AND b.base_snapshot_id=o.base_snapshot_id)" stale.json
+
+          fetch_api '/api/overview' overview.json overview.code
+          fetch_api '/api/status/history-source' history-source.json history-source.code
+          fetch_api '/api/status/fast-lane-diff?limit=1' diff.json diff.code
+
+          object_history_http=000
+          object_history_match=false
+          if [ "$witness_found" = true ]; then
+            encoded_type="$(jq -rn --arg value "$object_type" '$value|@uri')"
+            encoded_id="$(jq -rn --arg value "$object_id" '$value|@uri')"
+            fetch_api "/api/objects/${encoded_type}/${encoded_id}/history?limit=100" object-history.json object-history.code
+            object_history_http="$(cat object-history.code)"
+            if [ "$object_history_http" = 200 ] && jq -e \
+              --arg type "$object_type" --arg id "$object_id" --arg tx "$transaction_hash" \
+              '.data | any(.object_type == $type and .object_id == $id and .transaction_hash == $tx)' \
+              object-history.json > /dev/null 2>&1; then
+              object_history_match=true
+            fi
+          fi
+
+          aggregate="$(jq -c '.result[0].results[0] // {}' aggregate.json 2>/dev/null || echo '{}')"
+          state="$(jq -c '.result[0].results[0] // {}' state.json 2>/dev/null || echo '{}')"
+          overlay="$(jq -c '.result[0].results[0] // {}' overlay.json 2>/dev/null || echo '{}')"
+          compact_rows="$(jq -r '.result[0].results[0].compact_rows // -1' compact.json 2>/dev/null || echo -1)"
+          stale_rows="$(jq -r '.result[0].results[0].stale_rows // -1' stale.json 2>/dev/null || echo -1)"
+          lag="$(jq -r '.lag_ledgers // -1' <<<"$state")"
+          fast_status="$(jq -r '.status // "missing"' <<<"$state")"
+          fast_ledger="$(jq -r '.last_processed_ledger // -1' <<<"$state")"
+          fast_hash="$(jq -r '.last_processed_hash // empty' <<<"$state")"
+          overlay_ledger="$(jq -r '.overlay_ledger_index // -1' <<<"$overlay")"
+          overlay_hash="$(jq -r '.overlay_ledger_hash // empty' <<<"$overlay")"
+          window_count="$(jq -r '.window_count // 0' <<<"$aggregate")"
+          gap_count="$(jq -r '.gap_count // -1' <<<"$aggregate")"
+          invalid_schema_windows="$(jq -r '.invalid_schema_windows // -1' <<<"$aggregate")"
+          object_changes="$(jq -r '.object_changes // 0' <<<"$aggregate")"
+          max_bundle_bytes="$(jq -r '.max_bundle_bytes // -1' <<<"$aggregate")"
+          overview_http="$(cat overview.code)"
+          history_http="$(cat history-source.code)"
+          diff_http="$(cat diff.code)"
+
+          passed=false
+          if [ "$witness_found" = true ] \
+             && [ "$window_count" -gt 0 ] \
+             && [ "$gap_count" -eq 0 ] \
+             && [ "$invalid_schema_windows" -eq 0 ] \
+             && [ "$object_changes" -gt 0 ] \
+             && [ "$max_bundle_bytes" -le 131072 ] \
+             && [ "$fast_status" = healthy ] \
+             && [ "$lag" -eq 0 ] \
+             && [ "$fast_ledger" -eq "$overlay_ledger" ] \
+             && [ "$fast_hash" = "$overlay_hash" ] \
+             && [ "$compact_rows" -eq 0 ] \
+             && [ "$stale_rows" -eq 0 ] \
+             && [ "$overview_http" = 200 ] \
+             && [ "$history_http" = 200 ] \
+             && [ "$diff_http" = 200 ] \
+             && [ "$object_history_match" = true ]; then
+            passed=true
+          fi
+
+          checked_at="$(date -u +%FT%TZ)"
+          jq -n \
+            --arg checkedAt "$checked_at" \
+            --arg deployedAfter "$DEPLOYED_AFTER" \
+            --argjson passed "$passed" \
+            --argjson witnessFound "$witness_found" \
+            --arg objectType "$object_type" \
+            --arg objectId "$object_id" \
+            --arg transactionHash "$transaction_hash" \
+            --argjson objectHistoryMatch "$object_history_match" \
+            --arg objectHistoryHttp "$object_history_http" \
+            --argjson aggregate "$aggregate" \
+            --argjson state "$state" \
+            --argjson overlay "$overlay" \
+            --argjson compactRows "$compact_rows" \
+            --argjson staleRows "$stale_rows" \
+            --arg overviewHttp "$overview_http" \
+            --arg historyHttp "$history_http" \
+            --arg diffHttp "$diff_http" \
+            '{checkedAt:$checkedAt,deployedAfter:$deployedAfter,passed:$passed,witness:{found:$witnessFound,objectType:$objectType,objectId:$objectId,transactionHash:$transactionHash,publicObjectHistoryMatch:$objectHistoryMatch,publicObjectHistoryHttp:$objectHistoryHttp},historyWindows:$aggregate,fastLane:$state,canonicalOverlay:$overlay,compactRows:$compactRows,staleRows:$staleRows,http:{overview:$overviewHttp,historySource:$historyHttp,fastLaneDiff:$diffHttp}}' \
+            > semantic-probe-result.json
+
+          test "$passed" = true
+
+      - name: Publish probe status
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PROBE_OUTCOME: ${{ steps.probe.outcome }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -s semantic-probe-result.json ]; then
+            jq -n --arg checkedAt "$(date -u +%FT%TZ)" --arg outcome "$PROBE_OUTCOME" \
+              '{checkedAt:$checkedAt,passed:false,workflowOutcome:$outcome,error:"probe_result_missing"}' \
+              > semantic-probe-result.json
+          fi
+          API_PATH="repos/${GITHUB_REPOSITORY}/contents/.github/post-deploy-semantic-probe-status.json"
+          CONTENT="$(base64 -w0 semantic-probe-result.json)"
+          EXISTING_SHA="$(gh api "$API_PATH" --jq .sha 2>/dev/null || true)"
+          if [ -n "$EXISTING_SHA" ]; then
+            gh api --method PUT "$API_PATH" \
+              -f message="Update post-deploy semantic probe status" \
+              -f content="$CONTENT" \
+              -f sha="$EXISTING_SHA" > /dev/null
+          else
+            gh api --method PUT "$API_PATH" \
+              -f message="Create post-deploy semantic probe status" \
+              -f content="$CONTENT" > /dev/null
+          fi
+
+      - name: Upload probe evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: post-deploy-semantic-history-probe
+          path: |
+            semantic-probe-result.json
+            aggregate.json
+            witness.json
+            state.json
+            overlay.json
+            compact.json
+            stale.json
+            overview.json
+            history-source.json
+            diff.json
+            object-history.json
+          if-no-files-found: warn
+          retention-days: 14
