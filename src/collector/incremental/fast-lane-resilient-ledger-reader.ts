@@ -27,6 +27,7 @@ export function createFastLaneResilientLedgerReader(options: {
       }
       throw new Error(
         `Fast-lane ledger ${request.ledgerIndex} failed on WebSocket and all HTTP fallbacks: ${failures.join('; ')}`,
+        { cause: primaryError },
       )
     }
   }
