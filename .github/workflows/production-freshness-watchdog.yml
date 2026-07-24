@@ -1,0 +1,142 @@
+name: Production freshness watchdog
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/production-freshness-watchdog.yml
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: production-freshness-watchdog
+  cancel-in-progress: true
+
+env:
+  GH_TOKEN: ${{ github.token }}
+  STATUS_ISSUE: '978'
+  PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Read public production APIs only
+        shell: bash
+        run: |
+          set -uo pipefail
+
+          fetch_api() {
+            local path="$1" output="$2" code_file="$3"
+            local code
+            code="$(curl --silent --show-error --retry 3 --retry-all-errors \
+              --connect-timeout 10 --max-time 45 \
+              -o "$output" -w '%{http_code}' "${PRODUCTION_BASE}${path}" || true)"
+            printf '%s' "$code" > "$code_file"
+            jq -e . "$output" >/dev/null 2>&1 || printf '{}\n' > "$output"
+          }
+
+          fetch_api '/api/overview' overview.json overview.code
+          fetch_api '/api/status/history-source' history.json history.code
+          fetch_api '/api/status/fast-lane-diff?limit=1' diff.json diff.code
+
+          overview_code="$(cat overview.code)"
+          history_code="$(cat history.code)"
+          diff_code="$(cat diff.code)"
+
+          extract_first_number() {
+            local file="$1" expression="$2"
+            jq -r "$expression" "$file" 2>/dev/null || true
+          }
+
+          processed="$(extract_first_number overview.json '[.. | objects | (.lastProcessedLedger? // .last_processed_ledger? // .processedLedger? // empty)] | map(select(type=="number")) | first // empty')"
+          observed="$(extract_first_number overview.json '[.. | objects | (.latestObservedLedger? // .latest_observed_ledger? // .observedLedger? // empty)] | map(select(type=="number")) | first // empty')"
+          lag="$(extract_first_number overview.json '[.. | objects | (.lagLedgers? // .lag_ledgers? // empty)] | map(select(type=="number")) | first // empty')"
+          state_status="$(jq -r '[.. | objects | (.status? // empty)] | map(select(type=="string" and (. == "healthy" or . == "behind" or . == "error"))) | first // empty' overview.json 2>/dev/null || true)"
+
+          if ! [[ "$processed" =~ ^[0-9]+$ ]]; then
+            processed="$(extract_first_number diff.json '[.. | objects | (.lastProcessedLedger? // .last_processed_ledger? // .fastLaneLedger? // empty)] | map(select(type=="number")) | first // empty')"
+          fi
+          if ! [[ "$observed" =~ ^[0-9]+$ ]]; then
+            observed="$(extract_first_number diff.json '[.. | objects | (.latestObservedLedger? // .latest_observed_ledger? // .observedLedger? // empty)] | map(select(type=="number")) | first // empty')"
+          fi
+          if ! [[ "$lag" =~ ^[0-9]+$ ]] && [[ "$processed" =~ ^[0-9]+$ ]] && [[ "$observed" =~ ^[0-9]+$ ]]; then
+            lag="$((observed - processed))"
+          fi
+
+          history_ledger="$(extract_first_number history.json '[.. | objects | (.canonicalLedgerIndex? // .baseLedgerIndex? // .ledgerIndex? // .ledger_index? // empty)] | map(select(type=="number")) | max // empty')"
+          history_timestamp="$(jq -r '[.. | objects | (.updatedAt? // .generatedAt? // .createdAt? // .runAt? // .run_at? // empty)] | map(select(type=="string")) | first // empty' history.json 2>/dev/null || true)"
+
+          previous_body="$(gh issue view "$STATUS_ISSUE" --repo "$GITHUB_REPOSITORY" --json body --jq .body 2>/dev/null || true)"
+          previous_state="$(printf '%s\n' "$previous_body" | sed -n 's/^<!-- watchdog-state: \(.*\) -->$/\1/p' | tail -n1)"
+          previous_processed="$(jq -r '.lastProcessedLedger // empty' <<<"${previous_state:-{}}" 2>/dev/null || true)"
+          previous_history="$(jq -r '.historyLedger // empty' <<<"${previous_state:-{}}" 2>/dev/null || true)"
+          previous_history_change="$(jq -r '.historyLastChangedAt // empty' <<<"${previous_state:-{}}" 2>/dev/null || true)"
+
+          checked_at="$(date -u +%FT%TZ)"
+          advanced=false
+          if [[ "$processed" =~ ^[0-9]+$ ]] && [[ "$previous_processed" =~ ^[0-9]+$ ]] && [ "$processed" -gt "$previous_processed" ]; then
+            advanced=true
+          fi
+
+          history_change_at="$previous_history_change"
+          if [[ "$history_ledger" =~ ^[0-9]+$ ]] && { ! [[ "$previous_history" =~ ^[0-9]+$ ]] || [ "$history_ledger" -ne "$previous_history" ]; }; then
+            history_change_at="$checked_at"
+          fi
+
+          first_sample=false
+          if ! [[ "$previous_processed" =~ ^[0-9]+$ ]]; then
+            first_sample=true
+          fi
+
+          healthy=false
+          if [ "$overview_code" = 200 ] && [ "$history_code" = 200 ] && [ "$diff_code" = 200 ] \
+             && [[ "$lag" =~ ^[0-9]+$ ]] && [ "$lag" -eq 0 ] \
+             && { [ "$advanced" = true ] || [ "$first_sample" = true ]; }; then
+            healthy=true
+          fi
+
+          jq -n \
+            --arg checkedAt "$checked_at" \
+            --arg overviewHttp "$overview_code" \
+            --arg historyHttp "$history_code" \
+            --arg diffHttp "$diff_code" \
+            --arg stateStatus "$state_status" \
+            --arg processed "$processed" \
+            --arg observed "$observed" \
+            --arg lag "$lag" \
+            --arg historyLedger "$history_ledger" \
+            --arg historyTimestamp "$history_timestamp" \
+            --arg historyLastChangedAt "$history_change_at" \
+            --argjson advanced "$advanced" \
+            --argjson firstSample "$first_sample" \
+            --argjson healthy "$healthy" \
+            '{checkedAt:$checkedAt,healthy:$healthy,firstSample:$firstSample,advancedSincePreviousCheck:$advanced,http:{overview:$overviewHttp,historySource:$historyHttp,fastLaneDiff:$diffHttp},fastLane:{status:$stateStatus,lastProcessedLedger:($processed|tonumber? // null),latestObservedLedger:($observed|tonumber? // null),lagLedgers:($lag|tonumber? // null)},history:{ledger:($historyLedger|tonumber? // null),sourceTimestamp:($historyTimestamp|select(length>0) // null),lastChangedAt:($historyLastChangedAt|select(length>0) // null)}}' > summary.json
+
+          jq -n \
+            --arg checkedAt "$checked_at" \
+            --arg processed "$processed" \
+            --arg historyLedger "$history_ledger" \
+            --arg historyLastChangedAt "$history_change_at" \
+            '{checkedAt:$checkedAt,lastProcessedLedger:($processed|tonumber? // null),historyLedger:($historyLedger|tonumber? // null),historyLastChangedAt:($historyLastChangedAt|select(length>0) // null)}' > state.json
+
+          {
+            echo '# Production freshness watchdog'
+            echo
+            echo 'Public API read-only check. This workflow never queries or writes D1 and never calls collector, deploy, maintenance, or repair endpoints.'
+            echo
+            echo '```json'
+            cat summary.json
+            echo '```'
+            echo
+            printf '<!-- watchdog-state: %s -->\n' "$(jq -c . state.json)"
+          } > issue.md
+
+          gh issue edit "$STATUS_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file issue.md
+          test "$healthy" = true
