@@ -1,0 +1,30 @@
+name: Patch deploy hybrid 1000
+
+on:
+  push:
+    branches:
+      - agent/deploy-hybrid-transaction-detail-999
+    paths:
+      - .github/workflows/patch-deploy-hybrid-1000.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/deploy-hybrid-transaction-detail-999
+      - name: Correct merged migration filename and remove patch helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          sed -i 's#10000_hybrid_transaction_lookup_indexes.sql#10000_fast_lane_transaction_lookup.sql#g' .github/workflows/deploy-hybrid-transaction-detail-999.yml
+          git rm .github/workflows/patch-deploy-hybrid-1000.yml
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add .github/workflows/deploy-hybrid-transaction-detail-999.yml
+          git commit -m 'Fix hybrid deployment migration filename'
+          git push origin HEAD:agent/deploy-hybrid-transaction-detail-999
