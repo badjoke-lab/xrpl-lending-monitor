@@ -1,5 +1,6 @@
 import type { Bindings, FastLaneQueueMessage } from './env'
 import worker from './p0-heartbeat-entry'
+import { handleHybridTransactionDetail } from './routes/hybrid-transaction-detail'
 
 const FIVE_MINUTE_INTERVAL_MS = 5 * 60_000
 const CRON_RESEED_SOURCE = 'cron-five-minute-reseed'
@@ -47,6 +48,13 @@ function normalizeQueueMessage<T>(message: Message<T>): Message<T> {
 
 const redundantSchedulerWorker: ExportedHandler<Bindings> = {
   ...worker,
+
+  async fetch(request, env, executionContext) {
+    const transactionDetail = await handleHybridTransactionDetail(request, env)
+    if (transactionDetail) return transactionDetail
+    if (!worker.fetch) return new Response(null, { status: 404 })
+    return worker.fetch(request, env, executionContext)
+  },
 
   async scheduled(controller, env) {
     const scheduledTime = normalizeScheduledTime(controller.scheduledTime)
