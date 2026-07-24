@@ -28,11 +28,97 @@ function commitToken(options: {
   ].join(':')
 }
 
-export async function commitFastLaneCompactShadowWindow(options: {
-  db: D1Database
-  plan: FastLaneShadowWindowPlan
+export interface EncodedFastLaneHistoryWindow {
   historyBundle: FastLaneHistoryBundle
   encodedHistoryBundle: string
+  activityPlan?: FastLaneShadowWindowPlan
+}
+
+function validateHistoryWindows(
+  plan: FastLaneShadowWindowPlan,
+  historyWindows: readonly EncodedFastLaneHistoryWindow[],
+): void {
+  if (historyWindows.length === 0) {
+    throw new Error('Fast-lane compact shadow commit requires history windows')
+  }
+  let expectedStart = plan.startLedgerIndex
+  for (const window of historyWindows) {
+    const { historyBundle, encodedHistoryBundle, activityPlan } = window
+    if (encodedHistoryBundle.length === 0) {
+      throw new Error('Fast-lane encoded history bundle is empty')
+    }
+    if (historyBundle.startLedgerIndex !== expectedStart) {
+      throw new Error('Fast-lane history windows are not contiguous with the compact shadow plan')
+    }
+    if (historyBundle.endLedgerIndex < historyBundle.startLedgerIndex) {
+      throw new Error('Fast-lane history bundle ledger range is invalid')
+    }
+    if (
+      activityPlan
+      && (
+        activityPlan.startLedgerIndex !== historyBundle.startLedgerIndex
+        || activityPlan.endLedgerIndex !== historyBundle.endLedgerIndex
+        || activityPlan.endLedgerHash !== historyBundle.endLedgerHash
+      )
+    ) {
+      throw new Error('Fast-lane activity partition does not match its history partition')
+    }
+    expectedStart = historyBundle.endLedgerIndex + 1
+  }
+  const final = historyWindows.at(-1)?.historyBundle
+  if (
+    !final
+    || historyWindows[0]?.historyBundle.startLedgerIndex !== plan.startLedgerIndex
+    || final.endLedgerIndex !== plan.endLedgerIndex
+    || final.endLedgerHash !== plan.endLedgerHash
+  ) {
+    throw new Error('Fast-lane history windows do not cover the compact shadow window')
+  }
+}
+
+function appendActivityWindow(
+  db: D1Database,
+  statements: D1PreparedStatement[],
+  activityPlan: FastLaneShadowWindowPlan,
+  processedAt: string,
+): void {
+  statements.push(
+    db.prepare(
+      `INSERT INTO fast_lane_shadow_windows (
+         network, epoch_id, window_start_close_time, window_end_close_time,
+         start_ledger_index, end_ledger_index, end_ledger_hash,
+         inspected_transaction_count, lending_transaction_count,
+         successful_lending_transaction_count, affected_object_count,
+         activity_bundle_json, created_at
+       ) VALUES (
+         'devnet', ?1, ?2, ?3,
+         ?4, ?5, ?6,
+         ?7, ?8,
+         ?9, ?10,
+         ?11, ?12
+       )
+       ON CONFLICT(network, epoch_id, window_start_close_time) DO NOTHING`,
+    ).bind(
+      activityPlan.epochId,
+      activityPlan.windowStartCloseTime,
+      activityPlan.windowEndCloseTime,
+      activityPlan.startLedgerIndex,
+      activityPlan.endLedgerIndex,
+      activityPlan.endLedgerHash,
+      activityPlan.inspectedTransactions,
+      activityPlan.lendingTransactions,
+      activityPlan.successfulLendingTransactions,
+      activityPlan.mutations.length,
+      JSON.stringify(activityPlan.activity),
+      processedAt,
+    ),
+  )
+}
+
+export async function commitFastLaneCompactShadowWindows(options: {
+  db: D1Database
+  plan: FastLaneShadowWindowPlan
+  historyWindows: readonly EncodedFastLaneHistoryWindow[]
   expectedPreviousLedger: number
   expectedPreviousHash: string
   processedAt: string
@@ -44,16 +130,7 @@ export async function commitFastLaneCompactShadowWindow(options: {
   if (plan.endLedgerIndex < plan.startLedgerIndex) {
     throw new Error('Fast-lane compact shadow window ledger range is invalid')
   }
-  if (
-    options.historyBundle.startLedgerIndex !== plan.startLedgerIndex
-    || options.historyBundle.endLedgerIndex !== plan.endLedgerIndex
-    || options.historyBundle.endLedgerHash !== plan.endLedgerHash
-  ) {
-    throw new Error('Fast-lane history bundle does not match the compact shadow window')
-  }
-  if (options.encodedHistoryBundle.length === 0) {
-    throw new Error('Fast-lane encoded history bundle is empty')
-  }
+  validateHistoryWindows(plan, options.historyWindows)
 
   const token = commitToken({
     epochId: plan.epochId,
@@ -154,60 +231,32 @@ export async function commitFastLaneCompactShadowWindow(options: {
     )
   }
 
-  statements.push(
-    db.prepare(
-      `INSERT INTO fast_lane_history_windows (
-         network, epoch_id, start_ledger_index, end_ledger_index,
-         end_ledger_hash, bundle_json, created_at
-       ) VALUES ('devnet', ?1, ?2, ?3, ?4, ?5, ?6)
-       ON CONFLICT(network, epoch_id, start_ledger_index)
-       DO UPDATE SET
-         end_ledger_index = excluded.end_ledger_index,
-         end_ledger_hash = excluded.end_ledger_hash,
-         bundle_json = excluded.bundle_json,
-         created_at = excluded.created_at
-       WHERE excluded.end_ledger_index >= fast_lane_history_windows.end_ledger_index`,
-    ).bind(
-      options.historyBundle.epochId,
-      options.historyBundle.startLedgerIndex,
-      options.historyBundle.endLedgerIndex,
-      options.historyBundle.endLedgerHash,
-      options.encodedHistoryBundle,
-      options.historyBundle.createdAt,
-    ),
-  )
-
-  statements.push(
-    db.prepare(
-      `INSERT INTO fast_lane_shadow_windows (
-         network, epoch_id, window_start_close_time, window_end_close_time,
-         start_ledger_index, end_ledger_index, end_ledger_hash,
-         inspected_transaction_count, lending_transaction_count,
-         successful_lending_transaction_count, affected_object_count,
-         activity_bundle_json, created_at
-       ) VALUES (
-         'devnet', ?1, ?2, ?3,
-         ?4, ?5, ?6,
-         ?7, ?8,
-         ?9, ?10,
-         ?11, ?12
-       )
-       ON CONFLICT(network, epoch_id, window_start_close_time) DO NOTHING`,
-    ).bind(
-      plan.epochId,
-      plan.windowStartCloseTime,
-      plan.windowEndCloseTime,
-      plan.startLedgerIndex,
-      plan.endLedgerIndex,
-      plan.endLedgerHash,
-      plan.inspectedTransactions,
-      plan.lendingTransactions,
-      plan.successfulLendingTransactions,
-      plan.mutations.length,
-      JSON.stringify(plan.activity),
-      options.processedAt,
-    ),
-  )
+  for (const window of options.historyWindows) {
+    const { historyBundle, encodedHistoryBundle } = window
+    statements.push(
+      db.prepare(
+        `INSERT INTO fast_lane_history_windows (
+           network, epoch_id, start_ledger_index, end_ledger_index,
+           end_ledger_hash, bundle_json, created_at
+         ) VALUES ('devnet', ?1, ?2, ?3, ?4, ?5, ?6)
+         ON CONFLICT(network, epoch_id, start_ledger_index)
+         DO UPDATE SET
+           end_ledger_index = excluded.end_ledger_index,
+           end_ledger_hash = excluded.end_ledger_hash,
+           bundle_json = excluded.bundle_json,
+           created_at = excluded.created_at
+         WHERE excluded.end_ledger_index >= fast_lane_history_windows.end_ledger_index`,
+      ).bind(
+        historyBundle.epochId,
+        historyBundle.startLedgerIndex,
+        historyBundle.endLedgerIndex,
+        historyBundle.endLedgerHash,
+        encodedHistoryBundle,
+        historyBundle.createdAt,
+      ),
+    )
+    appendActivityWindow(db, statements, window.activityPlan ?? plan, options.processedAt)
+  }
 
   statements.push(
     db.prepare(
@@ -261,4 +310,27 @@ export async function commitFastLaneCompactShadowWindow(options: {
   }
 
   return usage
+}
+
+export async function commitFastLaneCompactShadowWindow(options: {
+  db: D1Database
+  plan: FastLaneShadowWindowPlan
+  historyBundle: FastLaneHistoryBundle
+  encodedHistoryBundle: string
+  expectedPreviousLedger: number
+  expectedPreviousHash: string
+  processedAt: string
+}): Promise<FastLaneShadowPersistenceUsage> {
+  return commitFastLaneCompactShadowWindows({
+    db: options.db,
+    plan: options.plan,
+    historyWindows: [{
+      historyBundle: options.historyBundle,
+      encodedHistoryBundle: options.encodedHistoryBundle,
+      activityPlan: options.plan,
+    }],
+    expectedPreviousLedger: options.expectedPreviousLedger,
+    expectedPreviousHash: options.expectedPreviousHash,
+    processedAt: options.processedAt,
+  })
 }

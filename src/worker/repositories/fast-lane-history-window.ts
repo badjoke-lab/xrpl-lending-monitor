@@ -88,15 +88,16 @@ async function decodeBundle(value: string): Promise<FastLaneHistoryBundle> {
   return validateBundle(await decodeFastLaneHistoryPayload(value))
 }
 
-function scanPrefix(scan: IncrementalScanResult, ledgerCount: number): IncrementalScanResult {
-  if (!Number.isSafeInteger(ledgerCount) || ledgerCount < 1 || ledgerCount > scan.ledgers.length) {
-    throw new Error('Fast-lane history scan prefix is invalid')
-  }
-  const ledgers = scan.ledgers.slice(0, ledgerCount)
+function scanWithLedgers(
+  scan: IncrementalScanResult,
+  ledgers: IncrementalScanResult['ledgers'],
+): IncrementalScanResult {
+  const first = ledgers[0]
   const final = ledgers.at(-1)
-  if (!final) throw new Error('Fast-lane history scan prefix is empty')
+  if (!first || !final) throw new Error('Fast-lane history scan slice is empty')
   return {
     ...scan,
+    startLedgerIndex: first.ledgerIndex,
     endLedgerIndex: final.ledgerIndex,
     completeToLatest: final.ledgerIndex === scan.latestValidatedLedger,
     ledgers,
@@ -107,6 +108,20 @@ function scanPrefix(scan: IncrementalScanResult, ledgerCount: number): Increment
       lendingTransactions: ledgers.reduce((total, ledger) => total + ledger.lendingTransactions.length, 0),
     },
   }
+}
+
+function scanPrefix(scan: IncrementalScanResult, ledgerCount: number): IncrementalScanResult {
+  if (!Number.isSafeInteger(ledgerCount) || ledgerCount < 1 || ledgerCount > scan.ledgers.length) {
+    throw new Error('Fast-lane history scan prefix is invalid')
+  }
+  return scanWithLedgers(scan, scan.ledgers.slice(0, ledgerCount))
+}
+
+function scanSuffix(scan: IncrementalScanResult, offset: number): IncrementalScanResult {
+  if (!Number.isSafeInteger(offset) || offset < 0 || offset >= scan.ledgers.length) {
+    throw new Error('Fast-lane history scan suffix is invalid')
+  }
+  return scanWithLedgers(scan, scan.ledgers.slice(offset))
 }
 
 export function buildFastLaneHistoryBundle(options: {
@@ -211,6 +226,26 @@ export async function buildBoundedFastLaneHistoryWindow(options: {
   const singleLedgerScan = scanPrefix(options.scan, 1)
   const single = await encodedCandidate({ ...options, scan: singleLedgerScan })
   return { ...single, reduced: options.scan.ledgers.length !== 1 }
+}
+
+export async function buildBoundedFastLaneHistoryWindows(options: {
+  scan: IncrementalScanResult
+  epochId: string
+  processedAt: string
+}): Promise<BoundedFastLaneHistoryWindow[]> {
+  if (options.scan.ledgers.length === 0) {
+    throw new Error('Fast-lane history bundle requires a non-empty scan')
+  }
+
+  const windows: BoundedFastLaneHistoryWindow[] = []
+  let offset = 0
+  while (offset < options.scan.ledgers.length) {
+    const remaining = offset === 0 ? options.scan : scanSuffix(options.scan, offset)
+    const window = await buildBoundedFastLaneHistoryWindow({ ...options, scan: remaining })
+    windows.push(window)
+    offset += window.scan.ledgers.length
+  }
+  return windows
 }
 
 export async function readFastLaneHistoryBundlesAfterBoundary(options: {
