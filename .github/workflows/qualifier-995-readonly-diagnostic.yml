@@ -8,7 +8,7 @@ on:
       - .github/workflows/qualifier-995-readonly-diagnostic.yml
 
 permissions:
-  contents: read
+  contents: write
   issues: write
 
 env:
@@ -51,7 +51,7 @@ jobs:
           set -euo pipefail
           python - <<'PY'
           import json
-          from datetime import datetime
+          from datetime import datetime, timezone
           from pathlib import Path
 
           SLOT_MS=300000
@@ -89,7 +89,7 @@ jobs:
               placeholder=(item.get('error_message') in (None,'') and item.get('start_ledger_index') is None and item.get('end_ledger_index') is None and int(item.get('latest_observed_ledger') or 0)==0 and int(item.get('persistence_rows_written') or 0)==0)
               (placeholders if placeholder else genuine).append(item)
           result={
-              'checkedAt':datetime.utcnow().isoformat(timespec='seconds')+'Z',
+              'checkedAt':datetime.now(timezone.utc).isoformat().replace('+00:00','Z'),
               'readOnly':True,
               'qualificationRunId':30089272692,
               'window':{'start':'2026-07-24T11:25:00Z','end':'2026-07-24T12:20:00Z'},
@@ -119,3 +119,16 @@ jobs:
             echo '```'
           } > comment.md
           gh issue comment 995 --repo "$GITHUB_REPOSITORY" --body-file comment.md
+
+      - name: Retain diagnostic on this branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          api="repos/${GITHUB_REPOSITORY}/contents/.github/qualifier-995-readonly-diagnostic.json"
+          sha="$(gh api "$api?ref=${GITHUB_REF_NAME}" --jq .sha 2>/dev/null || true)"
+          content="$(base64 -w0 diagnostic.json)"
+          if [ -n "$sha" ]; then
+            gh api --method PUT "$api" -f message='Retain qualifier 995 read-only diagnostic' -f content="$content" -f sha="$sha" -f branch="$GITHUB_REF_NAME" >/dev/null
+          else
+            gh api --method PUT "$api" -f message='Retain qualifier 995 read-only diagnostic' -f content="$content" -f branch="$GITHUB_REF_NAME" >/dev/null
+          fi
