@@ -1,0 +1,46 @@
+name: Branch typecheck diagnostic
+
+on:
+  push:
+    branches:
+      - agent/compress-fast-lane-history-bundles
+    paths:
+      - .github/branch-typecheck-diagnostic-trigger
+
+permissions:
+  contents: read
+
+jobs:
+  typecheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Capture typecheck output
+        id: check
+        shell: bash
+        run: |
+          set +e
+          pnpm typecheck > typecheck.log 2>&1
+          code=$?
+          printf '%s\n' "$code" > typecheck-exit-code.txt
+          cat typecheck.log
+          exit "$code"
+      - name: Upload typecheck output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: branch-typecheck-diagnostic
+          path: |
+            typecheck.log
+            typecheck-exit-code.txt
+          if-no-files-found: error
+          retention-days: 1
