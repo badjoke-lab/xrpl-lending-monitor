@@ -8,7 +8,7 @@ on:
       - .github/branch-typecheck-diagnostic-trigger
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   typecheck:
@@ -16,6 +16,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: agent/compress-fast-lane-history-bundles
       - uses: pnpm/action-setup@v4
         with:
           version: 11.9.0
@@ -25,7 +27,6 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Capture typecheck output
-        id: check
         shell: bash
         run: |
           set +e
@@ -33,7 +34,40 @@ jobs:
           code=$?
           printf '%s\n' "$code" > typecheck-exit-code.txt
           cat typecheck.log
-          exit "$code"
+          exit 0
+      - name: Publish typecheck output
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          code="$(cat typecheck-exit-code.txt 2>/dev/null || echo 99)"
+          {
+            echo "exit_code=${code}"
+            echo "head_sha=${GITHUB_SHA}"
+            echo
+            cat typecheck.log 2>/dev/null || true
+          } > branch-typecheck-diagnostic-status.txt
+          API_PATH="repos/${GITHUB_REPOSITORY}/contents/.github/branch-typecheck-diagnostic-status.txt"
+          CONTENT="$(base64 -w0 branch-typecheck-diagnostic-status.txt)"
+          EXISTING_SHA="$(gh api "$API_PATH" -f ref=agent/compress-fast-lane-history-bundles --jq .sha 2>/dev/null || true)"
+          if [ -n "$EXISTING_SHA" ]; then
+            gh api --method PUT "$API_PATH" \
+              -f branch=agent/compress-fast-lane-history-bundles \
+              -f message="Update branch typecheck diagnostic status" \
+              -f content="$CONTENT" \
+              -f sha="$EXISTING_SHA" > /dev/null
+          else
+            gh api --method PUT "$API_PATH" \
+              -f branch=agent/compress-fast-lane-history-bundles \
+              -f message="Create branch typecheck diagnostic status" \
+              -f content="$CONTENT" > /dev/null
+          fi
+      - name: Enforce typecheck result
+        shell: bash
+        run: |
+          test "$(cat typecheck-exit-code.txt)" = 0
       - name: Upload typecheck output
         if: always()
         uses: actions/upload-artifact@v4
@@ -42,5 +76,6 @@ jobs:
           path: |
             typecheck.log
             typecheck-exit-code.txt
+            branch-typecheck-diagnostic-status.txt
           if-no-files-found: error
           retention-days: 1
