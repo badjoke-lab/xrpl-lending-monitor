@@ -1,5 +1,10 @@
 import { buildHistorySegmentRecords } from '../../collector/history-segments/build-segment-records'
 import type { IncrementalScanResult } from '../../collector/incremental/scan-validated-ledgers'
+import {
+  decodeFastLaneHistoryPayload,
+  encodeFastLaneHistoryBundle,
+  fastLaneHistoryPayloadBytes,
+} from './fast-lane-history-codec'
 import type {
   ArchivedObjectRecord,
   BalanceHistoryApiRecord,
@@ -34,6 +39,8 @@ export interface FastLaneHistoryBundle {
 export interface BoundedFastLaneHistoryWindow {
   scan: IncrementalScanResult
   bundle: FastLaneHistoryBundle
+  encodedBundle: string
+  encodedBytes: number
   reduced: boolean
 }
 
@@ -57,8 +64,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-function parseBundle(value: string): FastLaneHistoryBundle {
-  const parsed: unknown = JSON.parse(value)
+function validateBundle(parsed: unknown): FastLaneHistoryBundle {
   if (
     !isRecord(parsed)
     || parsed.schemaVersion !== 1
@@ -78,11 +84,8 @@ function parseBundle(value: string): FastLaneHistoryBundle {
   return parsed as unknown as FastLaneHistoryBundle
 }
 
-function assertBundleSize(bundle: FastLaneHistoryBundle): void {
-  const bytes = new TextEncoder().encode(JSON.stringify(bundle)).byteLength
-  if (bytes > MAX_FAST_LANE_HISTORY_BUNDLE_BYTES) {
-    throw new FastLaneHistoryBundleTooLargeError(bytes, MAX_FAST_LANE_HISTORY_BUNDLE_BYTES)
-  }
+async function decodeBundle(value: string): Promise<FastLaneHistoryBundle> {
+  return validateBundle(await decodeFastLaneHistoryPayload(value))
 }
 
 function scanPrefix(scan: IncrementalScanResult, ledgerCount: number): IncrementalScanResult {
@@ -138,7 +141,7 @@ export function buildFastLaneHistoryBundle(options: {
     }
   }
 
-  const bundle: FastLaneHistoryBundle = {
+  return {
     schemaVersion: 1,
     epochId: options.epochId,
     startLedgerIndex: first.ledgerIndex,
@@ -151,33 +154,51 @@ export function buildFastLaneHistoryBundle(options: {
     archivedObjects: records.archivedObjects.map(segmentArchivedObjectToApi),
     balanceHistory: records.balanceHistory.map(segmentBalanceHistoryToApi),
   }
-  assertBundleSize(bundle)
-  return bundle
 }
 
-export function buildBoundedFastLaneHistoryWindow(options: {
+async function encodedCandidate(options: {
   scan: IncrementalScanResult
   epochId: string
   processedAt: string
-}): BoundedFastLaneHistoryWindow {
+}): Promise<Omit<BoundedFastLaneHistoryWindow, 'reduced'>> {
+  const bundle = buildFastLaneHistoryBundle(options)
+  const encodedBundle = await encodeFastLaneHistoryBundle(bundle)
+  const encodedBytes = fastLaneHistoryPayloadBytes(encodedBundle)
+  if (encodedBytes > MAX_FAST_LANE_HISTORY_BUNDLE_BYTES) {
+    throw new FastLaneHistoryBundleTooLargeError(
+      encodedBytes,
+      MAX_FAST_LANE_HISTORY_BUNDLE_BYTES,
+    )
+  }
+  return { scan: options.scan, bundle, encodedBundle, encodedBytes }
+}
+
+export async function buildBoundedFastLaneHistoryWindow(options: {
+  scan: IncrementalScanResult
+  epochId: string
+  processedAt: string
+}): Promise<BoundedFastLaneHistoryWindow> {
   if (options.scan.ledgers.length === 0) {
     throw new Error('Fast-lane history bundle requires a non-empty scan')
   }
 
+  try {
+    const full = await encodedCandidate(options)
+    return { ...full, reduced: false }
+  } catch (error) {
+    if (!(error instanceof FastLaneHistoryBundleTooLargeError)) throw error
+  }
+
   let lower = 1
-  let upper = options.scan.ledgers.length
+  let upper = options.scan.ledgers.length - 1
   let best: BoundedFastLaneHistoryWindow | null = null
 
   while (lower <= upper) {
     const count = Math.floor((lower + upper) / 2)
     const candidateScan = scanPrefix(options.scan, count)
     try {
-      const bundle = buildFastLaneHistoryBundle({ ...options, scan: candidateScan })
-      best = {
-        scan: candidateScan,
-        bundle,
-        reduced: candidateScan.ledgers.length !== options.scan.ledgers.length,
-      }
+      const candidate = await encodedCandidate({ ...options, scan: candidateScan })
+      best = { ...candidate, reduced: true }
       lower = count + 1
     } catch (error) {
       if (!(error instanceof FastLaneHistoryBundleTooLargeError)) throw error
@@ -188,11 +209,8 @@ export function buildBoundedFastLaneHistoryWindow(options: {
   if (best) return best
 
   const singleLedgerScan = scanPrefix(options.scan, 1)
-  return {
-    scan: singleLedgerScan,
-    bundle: buildFastLaneHistoryBundle({ ...options, scan: singleLedgerScan }),
-    reduced: options.scan.ledgers.length !== 1,
-  }
+  const single = await encodedCandidate({ ...options, scan: singleLedgerScan })
+  return { ...single, reduced: options.scan.ledgers.length !== 1 }
 }
 
 export async function readFastLaneHistoryBundlesAfterBoundary(options: {
@@ -220,5 +238,5 @@ export async function readFastLaneHistoryBundlesAfterBoundary(options: {
      ORDER BY end_ledger_index DESC
      LIMIT ?2`,
   ).bind(options.boundaryLedgerIndex, maxWindows).all<FastLaneHistoryWindowRow>()
-  return (result.results ?? []).map((row) => parseBundle(row.bundle_json))
+  return Promise.all((result.results ?? []).map((row) => decodeBundle(row.bundle_json)))
 }
