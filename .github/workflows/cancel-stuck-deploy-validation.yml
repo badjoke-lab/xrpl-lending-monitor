@@ -1,0 +1,20 @@
+name: Cancel stuck deploy validation
+
+on:
+  push:
+    branches:
+      - agent/current-production-probe-20260724-2246
+    paths:
+      - .github/workflows/cancel-stuck-deploy-validation.yml
+
+permissions:
+  actions: write
+
+jobs:
+  cancel:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cancel only the stuck validation run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api --method POST repos/${GITHUB_REPOSITORY}/actions/runs/30099170324/cancel
