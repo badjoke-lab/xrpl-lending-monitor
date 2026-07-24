@@ -3,12 +3,32 @@ set -euo pipefail
 
 CURRENT_REF="${CURRENT_STATE_DATA_REF:-refs/remotes/origin/current-state-data}"
 HISTORY_REF="${HISTORY_DATA_REF:-refs/remotes/origin/history-data}"
+CURRENT_BRANCH="${CURRENT_STATE_DATA_BRANCH:-current-state-data}"
+HISTORY_BRANCH="${HISTORY_DATA_BRANCH:-history-data}"
+REPOSITORY="${GITHUB_REPOSITORY:-badjoke-lab/xrpl-lending-monitor}"
 ROOT="${CANONICAL_BASE_CHECK_DIR:-.local/canonical-base-check}"
 
 mkdir -p "${ROOT}"
-git show "${CURRENT_REF}:read-model/manifest.json" > "${ROOT}/current-manifest.json"
-git show "${CURRENT_REF}:rolling-read-model-summary.json" > "${ROOT}/current-summary.json"
-git show "${HISTORY_REF}:history/publication.json" > "${ROOT}/history-publication.json"
+
+load_json() {
+  local ref="$1" branch="$2" path="$3" output="$4"
+  if git cat-file -e "${ref}:${path}" 2>/dev/null; then
+    git show "${ref}:${path}" > "${output}"
+  else
+    command -v gh >/dev/null
+    gh api \
+      -H 'Accept: application/vnd.github.raw+json' \
+      "repos/${REPOSITORY}/contents/${path}?ref=${branch}" > "${output}"
+  fi
+  jq -e . "${output}" >/dev/null
+}
+
+load_json "${CURRENT_REF}" "${CURRENT_BRANCH}" read-model/manifest.json \
+  "${ROOT}/current-manifest.json"
+load_json "${CURRENT_REF}" "${CURRENT_BRANCH}" rolling-read-model-summary.json \
+  "${ROOT}/current-summary.json"
+load_json "${HISTORY_REF}" "${HISTORY_BRANCH}" history/publication.json \
+  "${ROOT}/history-publication.json"
 
 jq -e '.complete == true and .epochId == "devnet-3371675"' \
   "${ROOT}/current-manifest.json" > /dev/null
