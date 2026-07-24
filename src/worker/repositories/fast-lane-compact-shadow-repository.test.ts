@@ -134,7 +134,7 @@ describe('compact fast-lane shadow persistence', () => {
       expectedPreviousLedger: 100,
       expectedPreviousHash: 'P'.repeat(64),
       processedAt: '2026-07-11T03:00:00.000Z',
-    })).rejects.toThrow('Fast-lane history bundle does not match')
+    })).rejects.toThrow('Fast-lane activity partition does not match its history partition')
     expect(state.batches).toHaveLength(0)
   })
 })
