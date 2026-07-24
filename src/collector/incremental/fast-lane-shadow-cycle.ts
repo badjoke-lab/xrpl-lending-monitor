@@ -111,7 +111,7 @@ async function verifyFastLaneBaseIdentity(options: {
   }
   const observed = await readLedgerIdentity({
     endpoint: options.endpoint,
-    timeoutMs: options.runtimeConfig?.rpcTimeoutMs ?? options.timeoutMs,
+    timeoutMs: options.timeoutMs,
     ledgerIndex: options.base.ledgerIndex,
   })
   if (
