@@ -242,7 +242,7 @@ export async function runFastLaneShadowCycle(options: {
       }
     }
 
-    const bounded = buildBoundedFastLaneHistoryWindow({
+    const bounded = await buildBoundedFastLaneHistoryWindow({
       scan: scanned,
       epochId: options.base.epochId,
       processedAt,
@@ -257,6 +257,7 @@ export async function runFastLaneShadowCycle(options: {
       db: options.db,
       plan,
       historyBundle: bounded.bundle,
+      encodedHistoryBundle: bounded.encodedBundle,
       expectedPreviousLedger,
       expectedPreviousHash: previousHash,
       processedAt,

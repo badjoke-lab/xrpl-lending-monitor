@@ -35,13 +35,15 @@ Only validated Devnet ledgers are in scope. Mainnet remains disabled.
    - Loan lifecycle events;
    - deleted-object archives;
    - debt, cover, and loss history.
-8. Reject an oversized history bundle before cursor advancement. Do not commit and later delete evidence silently.
-9. Atomically commit the fast-lane cursor, compact current mutations, history bundle, and window evidence.
-10. When caught up, promote compact current mutations to the canonical overlay.
-11. Mark the Queue slot completed and reserve the next five-minute slot.
-12. On failure, leave the cursor before the failed range, mark the slot error, and retry through Queue policy.
+8. Encode the complete semantic bundle as versioned `gzip-base64-v1:` text before applying the 131,072-byte persistence guard.
+9. Try the full configured contiguous ledger range first. Reduce only to the largest contiguous prefix when the **encoded** bundle exceeds the guard. Never remove a semantic history class to make a bundle fit.
+10. If one ledger cannot fit after encoding, fail before cursor advancement. Do not commit and later delete evidence silently.
+11. Atomically commit the fast-lane cursor, compact current mutations, encoded history bundle, and window evidence.
+12. When caught up, promote compact current mutations to the canonical overlay.
+13. Mark the Queue slot completed and reserve the next five-minute slot.
+14. On failure, leave the cursor before the failed range, mark the slot error, and retry through Queue policy.
 
-Catch-up passes are internal bounded work. Their synthetic timestamps must never create another protected full-collector invocation.
+Readers must transparently decode `gzip-base64-v1:` rows and continue to read legacy plain-JSON rows during the rolling format transition. Catch-up passes are internal bounded work. Their synthetic timestamps must never create another protected full-collector invocation.
 
 ## Protected full-collector atomic boundary
 
@@ -87,7 +89,7 @@ The five-minute bundle is immediate live-tail evidence. The protected D1 collect
 
 ## Retention roles
 
-`fast_lane_history_windows` is a bounded live-tail cache and recovery witness. Its ring retention is not, by itself, valid 24-hour certification evidence. A formal qualification must retain an independent immutable audit artifact containing the accepted starting cursor, every committed range, final cursor/hash, semantic record counts and witnesses, configuration identities, and measured resource usage.
+`fast_lane_history_windows` is a bounded live-tail cache and recovery witness. Its ring retention is not, by itself, valid 24-hour certification evidence. The encoded-byte guard prevents oversized rows from advancing the cursor; retention must never delete a row merely because its payload is oversized. A formal qualification must retain an independent immutable audit artifact containing the accepted starting cursor, every committed range, final cursor/hash, semantic record counts and witnesses, configuration identities, and measured resource usage.
 
 Queue slots are retained for seven days and run metrics retain several days, but neither substitutes for semantic-history evidence.
 
@@ -103,7 +105,7 @@ No new 24-hour soak may start until all of the following pass before the fixed b
 6. no synthetic catch-up pass triggers the protected collector;
 7. representative Devnet transactions cross-audit protocol event, object change, lifecycle/archive/balance records, and final current projection;
 8. immutable boundary plus D1 plus fast-lane merge has no missing or conflicting canonical identity;
-9. measured steady-state D1 reads, writes, storage, Queue work, Worker runtime, and RPC usage satisfy Issue #963 limits;
+9. measured steady-state D1 reads, writes, storage, Queue work, Worker runtime, RPC usage, compression cost, and catch-up throughput satisfy Issue #963 limits;
 10. the evidence collector is deployed and armed before the window and does not mutate or repeatedly charge production during the window.
 
 ## Formal 24-hour evidence

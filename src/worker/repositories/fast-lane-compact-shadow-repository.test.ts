@@ -4,6 +4,8 @@ import type { FastLaneShadowWindowPlan } from '../../collector/incremental/fast-
 import { commitFastLaneCompactShadowWindow } from './fast-lane-compact-shadow-repository'
 import type { FastLaneHistoryBundle } from './fast-lane-history-window'
 
+const ENCODED_HISTORY_BUNDLE = 'gzip-base64-v1:test-payload'
+
 interface PreparedRecord {
   sql: string
   values: unknown[]
@@ -102,12 +104,13 @@ function fakeDatabase() {
 }
 
 describe('compact fast-lane shadow persistence', () => {
-  it('writes current objects and one compact history bundle in the same batch', async () => {
+  it('writes current objects and one encoded compact history bundle in the same batch', async () => {
     const state = fakeDatabase()
     await commitFastLaneCompactShadowWindow({
       db: state.db,
       plan: plan(),
       historyBundle: historyBundle(),
+      encodedHistoryBundle: ENCODED_HISTORY_BUNDLE,
       expectedPreviousLedger: 100,
       expectedPreviousHash: 'P'.repeat(64),
       processedAt: '2026-07-11T03:00:00.000Z',
@@ -117,6 +120,8 @@ describe('compact fast-lane shadow persistence', () => {
     expect(sql.some((item) => item.includes('INSERT INTO fast_lane_shadow_objects_compact'))).toBe(true)
     expect(sql.some((item) => item.includes('INSERT INTO fast_lane_history_windows'))).toBe(true)
     expect(sql.some((item) => item.includes('INSERT INTO fast_lane_shadow_objects ('))).toBe(false)
+    const historyStatement = state.prepared.find((item) => item.sql.includes('INSERT INTO fast_lane_history_windows'))
+    expect(historyStatement?.values).toContain(ENCODED_HISTORY_BUNDLE)
   })
 
   it('rejects a history bundle from a different ledger window', async () => {
@@ -125,6 +130,7 @@ describe('compact fast-lane shadow persistence', () => {
       db: state.db,
       plan: plan(),
       historyBundle: { ...historyBundle(), endLedgerIndex: 102 },
+      encodedHistoryBundle: ENCODED_HISTORY_BUNDLE,
       expectedPreviousLedger: 100,
       expectedPreviousHash: 'P'.repeat(64),
       processedAt: '2026-07-11T03:00:00.000Z',
