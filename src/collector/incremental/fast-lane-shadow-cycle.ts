@@ -2,14 +2,15 @@ import { XrplJsonRpcClient } from '../network/xrpl-rpc'
 import type { CatchUpBaseIdentity } from '../../shared/catch-up-base-identity'
 import type { RuntimeConfig } from '../../shared/runtime-config'
 import type { FastLaneShadowRuntimeConfig } from '../../shared/fast-lane-shadow-runtime-config'
+import { createFastLaneResilientLedgerReader } from './fast-lane-resilient-ledger-reader'
 import { buildFastLaneShadowWindowPlan } from './fast-lane-shadow-plan'
 import { fastLaneShadowReanchorReason } from './fast-lane-shadow-reanchor'
 import { scanValidatedLedgerRange } from './scan-validated-ledgers'
 import { createXrplWebSocketLedgerSession } from './xrpl-websocket-ledger-session'
 import {
-  commitFastLaneCompactShadowWindow,
+  commitFastLaneCompactShadowWindows,
 } from '../../worker/repositories/fast-lane-compact-shadow-repository'
-import { buildBoundedFastLaneHistoryWindow } from '../../worker/repositories/fast-lane-history-window'
+import { buildBoundedFastLaneHistoryWindows } from '../../worker/repositories/fast-lane-history-window'
 import {
   bindFastLaneShadowBase,
   readFastLaneShadowBaseBinding,
@@ -207,9 +208,13 @@ export async function runFastLaneShadowCycle(options: {
   const session = createXrplWebSocketLedgerSession({
     endpoint: options.fastLaneConfig.webSocketEndpoint,
   })
+  const reader = createFastLaneResilientLedgerReader({
+    primary: session.reader,
+    fallbackEndpoints: options.runtimeConfig.xrplRpcUrls,
+  })
   try {
     const previousHash = state?.lastProcessedHash ?? (
-      await session.reader({
+      await reader({
         endpoint: options.fastLaneConfig.webSocketEndpoint,
         ledgerIndex: expectedPreviousLedger,
         timeoutMs: options.runtimeConfig.rpcTimeoutMs,
@@ -223,7 +228,7 @@ export async function runFastLaneShadowCycle(options: {
       latestValidatedLedger: head.ledgerIndex,
       maxLedgers: options.fastLaneConfig.maxLedgersPerRun,
       expectedPreviousHash: previousHash,
-      reader: session.reader,
+      reader,
       readWindowSize: options.fastLaneConfig.readWindow,
     })
     const scannedFinalLedger = scanned.ledgers.at(-1)
@@ -242,22 +247,24 @@ export async function runFastLaneShadowCycle(options: {
       }
     }
 
-    const bounded = await buildBoundedFastLaneHistoryWindow({
+    const boundedWindows = await buildBoundedFastLaneHistoryWindows({
       scan: scanned,
       epochId: options.base.epochId,
       processedAt,
     })
     const plan = buildFastLaneShadowWindowPlan({
       epochId: SHADOW_EPOCH_ID,
-      scan: bounded.scan,
+      scan: scanned,
       latestObservedHash: head.ledgerHash,
       processedAt,
     })
-    const persistence = await commitFastLaneCompactShadowWindow({
+    const persistence = await commitFastLaneCompactShadowWindows({
       db: options.db,
       plan,
-      historyBundle: bounded.bundle,
-      encodedHistoryBundle: bounded.encodedBundle,
+      historyWindows: boundedWindows.map((window) => ({
+        historyBundle: window.bundle,
+        encodedHistoryBundle: window.encodedBundle,
+      })),
       expectedPreviousLedger,
       expectedPreviousHash: previousHash,
       processedAt,
@@ -270,7 +277,7 @@ export async function runFastLaneShadowCycle(options: {
       endLedgerIndex: plan.endLedgerIndex,
       latestObservedLedger: head.ledgerIndex,
       lagLedgers,
-      ledgersProcessed: bounded.scan.metrics.ledgers,
+      ledgersProcessed: scanned.metrics.ledgers,
       lendingTransactions: plan.lendingTransactions,
       coalescedObjectRows: plan.mutations.length,
       persistenceRowsRead: persistence.rowsRead,
