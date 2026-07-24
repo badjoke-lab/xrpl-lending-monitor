@@ -33,6 +33,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Validate one-time deployment boundary
         shell: bash
         run: |
@@ -47,6 +49,7 @@ jobs:
           test "$(jq -r '.queues.producers | length' wrangler.jsonc)" -eq 1
           test "$(jq -r '.queues.consumers | length' wrangler.jsonc)" -eq 1
           test "$(jq -r '.vars.FAST_LANE_MAX_LEDGERS_PER_RUN' wrangler.jsonc)" = 96
+          git cat-file -e "${RUNTIME_REPAIR_SHA}^{commit}"
           git diff --quiet "${RUNTIME_REPAIR_SHA}" -- src wrangler.jsonc package.json pnpm-lock.yaml
 
   deploy:
@@ -56,6 +59,8 @@ jobs:
     steps:
       - name: Check out implementation
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Check out production current-state identity
         uses: actions/checkout@v4
@@ -93,6 +98,7 @@ jobs:
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
           test "$(cat .github/runtime-repair-996-deploy-trigger)" = "deploy-${RUNTIME_REPAIR_SHA}"
+          git cat-file -e "${RUNTIME_REPAIR_SHA}^{commit}"
           git diff --quiet "${RUNTIME_REPAIR_SHA}" -- src wrangler.jsonc package.json pnpm-lock.yaml
           python - <<'PY'
           import json
@@ -185,7 +191,7 @@ jobs:
             sleep 2
           done
           test "$deployed" = true
-          jq -e '.result.deployments[0].versions | length == 1 and .result.deployments[0].versions[0].percentage == 100' post-deployments.json >/dev/null
+          jq -e '(.result.deployments[0].versions | length)==1 and .result.deployments[0].versions[0].percentage==100' post-deployments.json >/dev/null
           jq '.result.deployments[0]' post-deployments.json > deployed-identity.json
           jq -r '.created_on' deployed-identity.json > deployed-at.txt
 
