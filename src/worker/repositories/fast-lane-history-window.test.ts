@@ -122,6 +122,28 @@ describe('fast-lane compact history bundle', () => {
     expect(bundle.balanceHistory).toEqual([])
   })
 
+  it('fails before persistence when the semantic bundle exceeds its byte limit', () => {
+    const oversized = scan()
+    const template = oversized.ledgers[0]?.lendingTransactions[0]
+    if (!template || !oversized.ledgers[0]) throw new Error('test fixture is incomplete')
+    const events = Array.from({ length: 1_000 }, (_, index) => ({
+      ...template,
+      hash: index.toString(16).padStart(64, '0').toUpperCase(),
+      transactionIndex: index,
+      metadata: { TransactionResult: 'tesSUCCESS', TransactionIndex: index, AffectedNodes: [] },
+    }))
+    oversized.ledgers[0].transactions = events
+    oversized.ledgers[0].lendingTransactions = events
+    oversized.metrics.inspectedTransactions = events.length
+    oversized.metrics.lendingTransactions = events.length
+
+    expect(() => buildFastLaneHistoryBundle({
+      scan: oversized,
+      epochId: 'devnet-epoch-1',
+      processedAt: '2026-07-13T09:00:00.000Z',
+    })).toThrow('exceeds the persistence limit')
+  })
+
   it('rejects an empty scan', () => {
     const empty = scan()
     empty.ledgers = []
