@@ -16,14 +16,13 @@ env:
   DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
   GH_TOKEN: ${{ github.token }}
   STATUS_ISSUE: '982'
-  FORMAL_OPERATION_START: '2026-07-24T02:40:00Z'
 
 jobs:
   diagnose:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Identify scheduler gaps and true ledger coverage
+      - name: Inspect suspected ledger coverage gap
         shell: bash
         run: |
           set -euo pipefail
@@ -41,40 +40,27 @@ jobs:
             jq -e '.success == true and ((.errors // []) | length) == 0' "$output" >/dev/null
           }
 
-          query_d1 "WITH RECURSIVE ranked AS (SELECT run_at,status,lag_ledgers,error_message,start_ledger_index,end_ledger_index,CAST(strftime('%s',run_at)/300 AS INTEGER) AS slot,ROW_NUMBER() OVER (PARTITION BY CAST(strftime('%s',run_at)/300 AS INTEGER) ORDER BY run_at DESC) AS rn FROM fast_lane_shadow_run_metrics WHERE network='devnet' AND run_at >= '${FORMAL_OPERATION_START}'), terminal AS (SELECT * FROM ranked WHERE rn=1), bounds AS (SELECT MIN(slot) AS first_slot,MAX(slot) AS last_slot FROM terminal), seq(slot) AS (SELECT first_slot FROM bounds WHERE first_slot IS NOT NULL UNION ALL SELECT seq.slot+1 FROM seq,bounds WHERE seq.slot<bounds.last_slot) SELECT seq.slot,datetime(seq.slot*300,'unixepoch') AS slot_start_utc FROM seq LEFT JOIN terminal t ON t.slot=seq.slot WHERE t.slot IS NULL ORDER BY seq.slot" missing.json
+          query_d1 "SELECT network,run_at,status,start_ledger_index,end_ledger_index,latest_observed_ledger,lag_ledgers,ledgers_processed,persistence_rows_read,persistence_rows_written,error_message FROM fast_lane_shadow_run_metrics WHERE network='devnet' AND run_at >= '2026-07-24T02:50:00Z' AND run_at < '2026-07-24T03:01:00Z' ORDER BY run_at" metrics.json
 
-          query_d1 "WITH committed AS (SELECT run_at,start_ledger_index,end_ledger_index,MAX(end_ledger_index) OVER (ORDER BY start_ledger_index,run_at ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS previously_covered_through FROM fast_lane_shadow_run_metrics WHERE network='devnet' AND run_at >= '${FORMAL_OPERATION_START}' AND status='committed' AND error_message IS NULL AND start_ledger_index IS NOT NULL AND end_ledger_index IS NOT NULL) SELECT run_at,previously_covered_through,start_ledger_index,end_ledger_index,(start_ledger_index-previously_covered_through-1) AS missing_ledgers FROM committed WHERE previously_covered_through IS NOT NULL AND start_ledger_index>previously_covered_through+1 ORDER BY start_ledger_index" true-ledger-gaps.json
+          query_d1 "SELECT scheduled_time,datetime(scheduled_time/1000,'unixepoch') AS scheduled_at_utc,message_id,status,started_at,completed_at,next_scheduled_time,datetime(next_scheduled_time/1000,'unixepoch') AS next_scheduled_at_utc,error_message,updated_at FROM fast_lane_queue_slots WHERE scheduled_time >= 1784861400000 AND scheduled_time <= 1784862000000 ORDER BY scheduled_time" queue.json
 
-          query_d1 "SELECT scheduled_time,datetime(scheduled_time/1000,'unixepoch') AS scheduled_at_utc,message_id,status,started_at,completed_at,next_scheduled_time,datetime(next_scheduled_time/1000,'unixepoch') AS next_scheduled_at_utc,error_message,updated_at FROM fast_lane_queue_slots WHERE scheduled_time IN (1784864100000,1784865600000,1784865900000) ORDER BY scheduled_time" queue.json
+          query_d1 "WITH committed AS (SELECT run_at,start_ledger_index,end_ledger_index,MAX(end_ledger_index) OVER (ORDER BY start_ledger_index,run_at ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS previously_covered_through FROM fast_lane_shadow_run_metrics WHERE network='devnet' AND run_at >= '2026-07-24T02:40:00Z' AND status='committed' AND error_message IS NULL AND start_ledger_index IS NOT NULL AND end_ledger_index IS NOT NULL) SELECT run_at,previously_covered_through,start_ledger_index,end_ledger_index,(start_ledger_index-previously_covered_through-1) AS missing_ledgers FROM committed WHERE previously_covered_through IS NOT NULL AND start_ledger_index>previously_covered_through+1 ORDER BY start_ledger_index" gaps.json
 
-          query_d1 "WITH ranked AS (SELECT run_at,status,lag_ledgers,error_message,start_ledger_index,end_ledger_index,latest_observed_ledger,CAST(strftime('%s',run_at)/300 AS INTEGER) AS slot,ROW_NUMBER() OVER (PARTITION BY CAST(strftime('%s',run_at)/300 AS INTEGER) ORDER BY run_at DESC) AS rn FROM fast_lane_shadow_run_metrics WHERE network='devnet' AND run_at >= '${FORMAL_OPERATION_START}') SELECT slot,datetime(slot*300,'unixepoch') AS slot_start_utc,run_at,status,lag_ledgers,error_message,start_ledger_index,end_ledger_index,latest_observed_ledger FROM ranked WHERE rn=1 ORDER BY slot" terminal.json
-
-          missing="$(jq -c '.result[0].results // []' missing.json)"
-          true_ledger_gaps="$(jq -c '.result[0].results // []' true-ledger-gaps.json)"
-          queue_slots="$(jq -c '.result[0].results // []' queue.json)"
-          terminal="$(jq -c '.result[0].results // []' terminal.json)"
-          missing_count="$(jq 'length' <<<"$missing")"
-          true_ledger_gap_count="$(jq 'length' <<<"$true_ledger_gaps")"
-          bad_terminal_count="$(jq '[.[] | select(.status != "committed" or (.lag_ledgers // -1) != 0 or .error_message != null)] | length' <<<"$terminal")"
+          metrics="$(jq -c '.result[0].results // []' metrics.json)"
+          queue="$(jq -c '.result[0].results // []' queue.json)"
+          gaps="$(jq -c '.result[0].results // []' gaps.json)"
           run_url="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
 
           jq -n \
             --arg checkedAt "$(date -u +%FT%TZ)" \
             --arg runUrl "$run_url" \
-            --arg eventName "$GITHUB_EVENT_NAME" \
-            --arg formalOperationStart "$FORMAL_OPERATION_START" \
-            --argjson missingSlots "$missing" \
-            --argjson trueLedgerGaps "$true_ledger_gaps" \
-            --argjson queueSlots "$queue_slots" \
-            --argjson missingSlotCount "$missing_count" \
-            --argjson trueLedgerGapCount "$true_ledger_gap_count" \
-            --argjson badTerminalCount "$bad_terminal_count" \
-            '{checkedAt:$checkedAt,eventName:$eventName,runUrl:$runUrl,formalOperationStart:$formalOperationStart,missingSlotCount:$missingSlotCount,missingSlots:$missingSlots,trueLedgerGapCount:$trueLedgerGapCount,trueLedgerGaps:$trueLedgerGaps,missingSlotQueueRecords:$queueSlots,badTerminalCount:$badTerminalCount}' > diagnostic.json
+            --argjson metrics "$metrics" \
+            --argjson queue "$queue" \
+            --argjson gaps "$gaps" \
+            '{checkedAt:$checkedAt,runUrl:$runUrl,suspectedRange:{fromLedger:3898562,toLedger:3898593},metrics:$metrics,queueSlots:$queue,currentCommittedCoverageGaps:$gaps}' > diagnostic.json
 
           {
-            echo '# Corrected one-time production continuity diagnostic'
-            echo
-            echo 'The ledger-gap calculation below uses every committed collector pass, not only the terminal pass in each five-minute slot.'
+            echo '# Suspected ledger coverage gap diagnostic'
             echo
             echo '```json'
             cat diagnostic.json
