@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
 
 import type { IncrementalScanResult } from '../../collector/incremental/scan-validated-ledgers'
-import { buildFastLaneHistoryBundle } from './fast-lane-history-window'
+import {
+  buildBoundedFastLaneHistoryWindow,
+  buildFastLaneHistoryBundle,
+} from './fast-lane-history-window'
 
 const TRANSACTION = 'A'.repeat(64)
 const LEDGER = 'C'.repeat(64)
@@ -73,6 +76,15 @@ function scan(): IncrementalScanResult {
   }
 }
 
+function manyEvents(template: IncrementalScanResult['ledgers'][number]['lendingTransactions'][number], count: number) {
+  return Array.from({ length: count }, (_, index) => ({
+    ...template,
+    hash: index.toString(16).padStart(64, '0').toUpperCase(),
+    transactionIndex: index,
+    metadata: { TransactionResult: 'tesSUCCESS', TransactionIndex: index, AffectedNodes: [] },
+  }))
+}
+
 describe('fast-lane compact history bundle', () => {
   it('records activity and semantic history from the exact fast-lane scan window', () => {
     const bundle = buildFastLaneHistoryBundle({
@@ -122,22 +134,53 @@ describe('fast-lane compact history bundle', () => {
     expect(bundle.balanceHistory).toEqual([])
   })
 
-  it('fails before persistence when the semantic bundle exceeds its byte limit', () => {
+  it('reduces a multi-ledger range to the largest contiguous prefix that fits', () => {
+    const input = scan()
+    const first = input.ledgers[0]
+    const template = first?.lendingTransactions[0]
+    if (!first || !template) throw new Error('test fixture is incomplete')
+    const denseEvents = manyEvents(template, 1_000)
+    input.ledgers = [
+      first,
+      {
+        ...first,
+        ledgerIndex: 102,
+        ledgerHash: 'D'.repeat(64),
+        parentHash: first.ledgerHash,
+        closeTime: 1235,
+        transactions: denseEvents,
+        lendingTransactions: denseEvents,
+      },
+    ]
+    input.endLedgerIndex = 102
+    input.latestValidatedLedger = 102
+    input.metrics.ledgers = 2
+    input.metrics.inspectedTransactions = 1 + denseEvents.length
+    input.metrics.lendingTransactions = 1 + denseEvents.length
+
+    const bounded = buildBoundedFastLaneHistoryWindow({
+      scan: input,
+      epochId: 'devnet-epoch-1',
+      processedAt: '2026-07-13T09:00:00.000Z',
+    })
+
+    expect(bounded.reduced).toBe(true)
+    expect(bounded.scan.ledgers).toHaveLength(1)
+    expect(bounded.scan.endLedgerIndex).toBe(101)
+    expect(bounded.bundle.endLedgerIndex).toBe(101)
+  })
+
+  it('fails before persistence when one ledger exceeds the semantic byte limit', () => {
     const oversized = scan()
     const template = oversized.ledgers[0]?.lendingTransactions[0]
     if (!template || !oversized.ledgers[0]) throw new Error('test fixture is incomplete')
-    const events = Array.from({ length: 1_000 }, (_, index) => ({
-      ...template,
-      hash: index.toString(16).padStart(64, '0').toUpperCase(),
-      transactionIndex: index,
-      metadata: { TransactionResult: 'tesSUCCESS', TransactionIndex: index, AffectedNodes: [] },
-    }))
+    const events = manyEvents(template, 1_000)
     oversized.ledgers[0].transactions = events
     oversized.ledgers[0].lendingTransactions = events
     oversized.metrics.inspectedTransactions = events.length
     oversized.metrics.lendingTransactions = events.length
 
-    expect(() => buildFastLaneHistoryBundle({
+    expect(() => buildBoundedFastLaneHistoryWindow({
       scan: oversized,
       epochId: 'devnet-epoch-1',
       processedAt: '2026-07-13T09:00:00.000Z',
