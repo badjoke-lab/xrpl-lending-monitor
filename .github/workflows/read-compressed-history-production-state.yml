@@ -1,0 +1,304 @@
+name: Read compressed history production state
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/compressed-history-readonly-probe-trigger
+
+permissions:
+  contents: write
+
+concurrency:
+  group: compressed-history-readonly-probe
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
+      PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+      CUTOVER_FLOOR: '2026-07-24T09:20:00Z'
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Read production state
+        id: probe
+        shell: bash
+        run: |
+          set -uo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+
+          query_d1() {
+            local sql="$1" output="$2"
+            jq -n --arg sql "$sql" '{sql:$sql}' \
+              | curl --silent --show-error --retry 3 --retry-all-errors \
+                  --connect-timeout 10 --max-time 45 \
+                  -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+                  -H 'Content-Type: application/json' --data-binary @- \
+                  "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database/${DATABASE_ID}/query" \
+              > "$output" || true
+          }
+
+          fetch_api() {
+            local path="$1" output="$2" code_file="$3"
+            local code
+            code="$(curl --silent --show-error --retry 3 --retry-all-errors \
+              --connect-timeout 10 --max-time 45 -o "$output" -w '%{http_code}' \
+              "${PRODUCTION_BASE}${path}" || true)"
+            printf '%s' "$code" > "$code_file"
+          }
+
+          query_d1 "SELECT start_ledger_index,end_ledger_index,end_ledger_hash,created_at,LENGTH(bundle_json) AS encoded_bytes,bundle_json
+            FROM fast_lane_history_windows
+            WHERE network='devnet' AND created_at>='${CUTOVER_FLOOR}' AND SUBSTR(bundle_json,1,15)='gzip-base64-v1:'
+            ORDER BY end_ledger_index DESC LIMIT 12" compressed-rows.json
+
+          query_d1 "SELECT epoch_id,last_processed_ledger,last_processed_hash,latest_observed_ledger,latest_observed_hash,status,
+                   (latest_observed_ledger-last_processed_ledger) AS lag_ledgers,updated_at
+            FROM fast_lane_shadow_state WHERE network='devnet'" state.json
+          query_d1 "SELECT epoch_id,base_snapshot_id,base_ledger_index,base_ledger_hash,overlay_ledger_index,overlay_ledger_hash,updated_at
+            FROM current_state_overlay_state WHERE network='devnet'" overlay.json
+          query_d1 "SELECT COUNT(*) AS compact_rows FROM fast_lane_shadow_objects_compact WHERE network='devnet'" compact.json
+          query_d1 "SELECT COUNT(*) AS stale_rows FROM current_state_overlay_objects o
+            WHERE o.network='devnet' AND NOT EXISTS (
+              SELECT 1 FROM fast_lane_shadow_base_binding b
+              WHERE b.network=o.network AND b.base_epoch_id=o.epoch_id AND b.base_snapshot_id=o.base_snapshot_id
+            )" stale.json
+          query_d1 "SELECT run_at,status,start_ledger_index,end_ledger_index,latest_observed_ledger,lag_ledgers,
+                   ledgers_processed,persistence_rows_read,persistence_rows_written,error_message
+            FROM fast_lane_shadow_run_metrics WHERE network='devnet'
+            ORDER BY run_at DESC LIMIT 10" metrics.json
+
+          python - <<'PY'
+          import base64
+          import gzip
+          import json
+          from pathlib import Path
+
+          def read_results(path):
+              try:
+                  payload = json.loads(Path(path).read_text())
+                  return payload.get('result', [{}])[0].get('results', [])
+              except Exception:
+                  return []
+
+          rows = read_results('compressed-rows.json')
+          decoded = []
+          witness = None
+          errors = []
+          for row in rows:
+              value = row.get('bundle_json')
+              try:
+                  if not isinstance(value, str) or not value.startswith('gzip-base64-v1:'):
+                      raise ValueError('missing gzip-base64-v1 prefix')
+                  raw = gzip.decompress(base64.b64decode(value.split(':', 1)[1])).decode('utf-8')
+                  bundle = json.loads(raw)
+                  arrays = {
+                      key: bundle.get(key)
+                      for key in ('protocolEvents', 'objectChanges', 'loanLifecycle', 'archivedObjects', 'balanceHistory')
+                  }
+                  all_arrays = all(isinstance(value, list) for value in arrays.values())
+                  item = {
+                      'startLedgerIndex': row.get('start_ledger_index'),
+                      'endLedgerIndex': row.get('end_ledger_index'),
+                      'endLedgerHash': row.get('end_ledger_hash'),
+                      'createdAt': row.get('created_at'),
+                      'encodedBytes': row.get('encoded_bytes'),
+                      'allSemanticArraysPresent': all_arrays,
+                      'counts': {key: len(value) if isinstance(value, list) else None for key, value in arrays.items()},
+                  }
+                  decoded.append(item)
+                  if witness is None and all_arrays:
+                      if arrays['objectChanges']:
+                          change = arrays['objectChanges'][0]
+                          witness = {
+                              'kind': 'objectChange',
+                              'transactionHash': change.get('transactionHash'),
+                              'objectType': change.get('objectType'),
+                              'objectId': change.get('objectId'),
+                          }
+                      elif arrays['protocolEvents']:
+                          event = arrays['protocolEvents'][0]
+                          witness = {
+                              'kind': 'protocolEvent',
+                              'transactionHash': event.get('eventHash'),
+                          }
+              except Exception as exc:
+                  errors.append({
+                      'startLedgerIndex': row.get('start_ledger_index'),
+                      'endLedgerIndex': row.get('end_ledger_index'),
+                      'error': str(exc),
+                  })
+
+          summary = {
+              'compressedRowCount': len(rows),
+              'decodedRowCount': len(decoded),
+              'allRowsDecoded': len(rows) > 0 and len(decoded) == len(rows) and not errors,
+              'allRowsHaveSemanticArrays': len(decoded) > 0 and all(item['allSemanticArraysPresent'] for item in decoded),
+              'firstLedger': min((item['startLedgerIndex'] for item in decoded), default=None),
+              'lastLedger': max((item['endLedgerIndex'] for item in decoded), default=None),
+              'maxEncodedBytes': max((item['encodedBytes'] or 0 for item in decoded), default=0),
+              'decodedRows': decoded,
+              'decodeErrors': errors,
+              'witness': witness,
+          }
+          Path('decoded-summary.json').write_text(json.dumps(summary, indent=2) + '\n')
+          PY
+
+          witness_kind="$(jq -r '.witness.kind // empty' decoded-summary.json)"
+          witness_tx="$(jq -r '.witness.transactionHash // empty' decoded-summary.json)"
+          public_match=false
+          public_http=000
+          public_path=''
+          if [ "$witness_kind" = objectChange ]; then
+            witness_type="$(jq -r '.witness.objectType // empty' decoded-summary.json)"
+            witness_id="$(jq -r '.witness.objectId // empty' decoded-summary.json)"
+            if [ -n "$witness_type" ] && [ -n "$witness_id" ] && [ -n "$witness_tx" ]; then
+              encoded_type="$(jq -rn --arg value "$witness_type" '$value|@uri')"
+              encoded_id="$(jq -rn --arg value "$witness_id" '$value|@uri')"
+              public_path="/api/objects/${encoded_type}/${encoded_id}/history?limit=100"
+              fetch_api "$public_path" public-witness.json public-witness.code
+              public_http="$(cat public-witness.code)"
+              if [ "$public_http" = 200 ] && jq -e --arg tx "$witness_tx" '.data | any(.transaction_hash == $tx)' public-witness.json >/dev/null 2>&1; then
+                public_match=true
+              fi
+            fi
+          elif [ "$witness_kind" = protocolEvent ]; then
+            public_path='/api/activity?limit=100'
+            fetch_api "$public_path" public-witness.json public-witness.code
+            public_http="$(cat public-witness.code)"
+            if [ "$public_http" = 200 ] && jq -e --arg tx "$witness_tx" '.data | any(.transaction_hash == $tx)' public-witness.json >/dev/null 2>&1; then
+              public_match=true
+            fi
+          fi
+
+          fetch_api '/api/overview' overview.json overview.code
+          fetch_api '/api/status/history-source' history-source.json history-source.code
+          fetch_api '/api/status/fast-lane-diff?limit=1' fast-lane-diff.json fast-lane-diff.code
+          fetch_api '/api/status/replacement-base-rebase' rebase.json rebase.code
+
+          state="$(jq -c '.result[0].results[0] // {}' state.json 2>/dev/null || echo '{}')"
+          overlay="$(jq -c '.result[0].results[0] // {}' overlay.json 2>/dev/null || echo '{}')"
+          compact_rows="$(jq -r '.result[0].results[0].compact_rows // -1' compact.json 2>/dev/null || echo -1)"
+          stale_rows="$(jq -r '.result[0].results[0].stale_rows // -1' stale.json 2>/dev/null || echo -1)"
+          fast_status="$(jq -r '.status // "missing"' <<<"$state")"
+          lag="$(jq -r '.lag_ledgers // -1' <<<"$state")"
+          fast_ledger="$(jq -r '.last_processed_ledger // -1' <<<"$state")"
+          fast_hash="$(jq -r '.last_processed_hash // empty' <<<"$state")"
+          overlay_ledger="$(jq -r '.overlay_ledger_index // -1' <<<"$overlay")"
+          overlay_hash="$(jq -r '.overlay_ledger_hash // empty' <<<"$overlay")"
+          compressed_rows="$(jq -r '.compressedRowCount // 0' decoded-summary.json)"
+          decoded_rows="$(jq -r '.decodedRowCount // 0' decoded-summary.json)"
+          all_decoded="$(jq -r '.allRowsDecoded // false' decoded-summary.json)"
+          all_arrays="$(jq -r '.allRowsHaveSemanticArrays // false' decoded-summary.json)"
+          max_encoded="$(jq -r '.maxEncodedBytes // 0' decoded-summary.json)"
+          overview_http="$(cat overview.code)"
+          history_http="$(cat history-source.code)"
+          diff_http="$(cat fast-lane-diff.code)"
+          rebase_http="$(cat rebase.code)"
+
+          code_observed=false
+          [ "$compressed_rows" -gt 0 ] && code_observed=true
+          current_healthy=false
+          if [ "$fast_status" = healthy ] && [ "$lag" -eq 0 ] \
+             && [ "$fast_ledger" -eq "$overlay_ledger" ] && [ "$fast_hash" = "$overlay_hash" ] \
+             && [ "$compact_rows" -eq 0 ] && [ "$stale_rows" -eq 0 ]; then
+            current_healthy=true
+          fi
+          passed=false
+          if [ "$code_observed" = true ] && [ "$all_decoded" = true ] && [ "$all_arrays" = true ] \
+             && [ "$max_encoded" -le 131072 ] && [ "$current_healthy" = true ] \
+             && [ "$overview_http" = 200 ] && [ "$history_http" = 200 ] \
+             && [ "$diff_http" = 200 ] && [ "$rebase_http" = 200 ]; then
+            passed=true
+          fi
+
+          checked_at="$(date -u +%FT%TZ)"
+          jq -n \
+            --arg checkedAt "$checked_at" \
+            --arg cutoverFloor "$CUTOVER_FLOOR" \
+            --arg runId "$GITHUB_RUN_ID" \
+            --arg runUrl "https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            --arg headSha "$GITHUB_SHA" \
+            --argjson passed "$passed" \
+            --argjson codeObserved "$code_observed" \
+            --argjson currentHealthy "$current_healthy" \
+            --argjson decoded "$(cat decoded-summary.json)" \
+            --argjson state "$state" \
+            --argjson overlay "$overlay" \
+            --argjson compactRows "$compact_rows" \
+            --argjson staleRows "$stale_rows" \
+            --argjson metrics "$(jq -c '.result[0].results // []' metrics.json 2>/dev/null || echo '[]')" \
+            --arg witnessPath "$public_path" \
+            --arg witnessHttp "$public_http" \
+            --argjson publicWitnessMatch "$public_match" \
+            --arg overviewHttp "$overview_http" \
+            --arg historyHttp "$history_http" \
+            --arg diffHttp "$diff_http" \
+            --arg rebaseHttp "$rebase_http" \
+            '{checkedAt:$checkedAt,cutoverFloor:$cutoverFloor,runId:$runId,runUrl:$runUrl,headSha:$headSha,passed:$passed,compressedCodeObserved:$codeObserved,currentStateHealthy:$currentHealthy,history:$decoded,fastLane:$state,canonicalOverlay:$overlay,compactRows:$compactRows,staleRows:$staleRows,recentMetrics:$metrics,publicWitness:{path:$witnessPath,http:$witnessHttp,match:$publicWitnessMatch},http:{overview:$overviewHttp,historySource:$historyHttp,fastLaneDiff:$diffHttp,replacementBaseRebase:$rebaseHttp}}' \
+            > compressed-history-production-state.json
+          echo "passed=$passed" >> "$GITHUB_OUTPUT"
+
+      - name: Publish probe status
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -s compressed-history-production-state.json ]; then
+            jq -n \
+              --arg checkedAt "$(date -u +%FT%TZ)" \
+              --arg runId "$GITHUB_RUN_ID" \
+              --arg runUrl "https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+              --arg headSha "$GITHUB_SHA" \
+              '{checkedAt:$checkedAt,runId:$runId,runUrl:$runUrl,headSha:$headSha,passed:false,error:"probe_result_missing"}' \
+              > compressed-history-production-state.json
+          fi
+          API_PATH="repos/${GITHUB_REPOSITORY}/contents/.github/compressed-history-production-state.json"
+          CONTENT="$(base64 -w0 compressed-history-production-state.json)"
+          EXISTING_SHA="$(gh api "$API_PATH" --jq .sha 2>/dev/null || true)"
+          if [ -n "$EXISTING_SHA" ]; then
+            gh api --method PUT "$API_PATH" \
+              -f message="Update compressed history production state" \
+              -f content="$CONTENT" -f sha="$EXISTING_SHA" >/dev/null
+          else
+            gh api --method PUT "$API_PATH" \
+              -f message="Create compressed history production state" \
+              -f content="$CONTENT" >/dev/null
+          fi
+
+      - name: Upload probe evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compressed-history-production-state
+          path: |
+            compressed-history-production-state.json
+            compressed-rows.json
+            decoded-summary.json
+            state.json
+            overlay.json
+            compact.json
+            stale.json
+            metrics.json
+            overview.json
+            history-source.json
+            fast-lane-diff.json
+            rebase.json
+            public-witness.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Enforce probe result
+        if: always()
+        shell: bash
+        run: test "${{ steps.probe.outputs.passed }}" = true
