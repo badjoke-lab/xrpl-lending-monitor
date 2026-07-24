@@ -1,0 +1,52 @@
+{
+  "checkedAt": "2026-07-24T08:44:33Z",
+  "deployedAfter": "2026-07-24T08:33:00Z",
+  "passed": false,
+  "witness": {
+    "found": true,
+    "objectType": "unknown",
+    "objectId": "1CE1C8CD48111EBD38DBD4E03E6379DEE398941FA0532543D825081BE95598D0",
+    "transactionHash": "CAFA7B52C223A604508D2067488A03DE064D79D4799FCC55EF6DF4B8B5A4F03F",
+    "publicObjectHistoryMatch": true,
+    "publicObjectHistoryHttp": "200"
+  },
+  "historyWindows": {
+    "window_count": 16,
+    "first_ledger": 3904739,
+    "last_ledger": 3904826,
+    "gap_count": 0,
+    "invalid_schema_windows": 0,
+    "protocol_events": 163,
+    "object_changes": 2301,
+    "loan_lifecycle": 9,
+    "archived_objects": 0,
+    "balance_history": 7,
+    "max_bundle_bytes": 130399
+  },
+  "fastLane": {
+    "epoch_id": "fast-lane-shadow-devnet",
+    "last_processed_ledger": 3904826,
+    "last_processed_hash": "D6115953F354D8AB78014A7320D76171F63364B6EA5FCCB830469C5F53A5C172",
+    "latest_observed_ledger": 3904995,
+    "latest_observed_hash": "233D68F13806F3D3743E8A50C26518AD7FB9AC50862444BAE8BACADB29D38295",
+    "status": "behind",
+    "lag_ledgers": 169,
+    "updated_at": "2026-07-24T08:40:20.660Z"
+  },
+  "canonicalOverlay": {
+    "epoch_id": "devnet-3371675",
+    "base_snapshot_id": "devnet-3860021-fbba23eeffd1",
+    "base_ledger_index": 3860021,
+    "base_ledger_hash": "FBBA23EEFFD19FFD81F2E6A0A9A5D3E503EE78AA8EB6F3653F756BA90655B4A7",
+    "overlay_ledger_index": 3904648,
+    "overlay_ledger_hash": "801B7087C858365A7A869DD540767C9F06E21A9F6EE32B336E8D312B1AACD724",
+    "updated_at": "2026-07-24T08:20:16.112Z"
+  },
+  "compactRows": 183,
+  "staleRows": 0,
+  "http": {
+    "overview": "200",
+    "historySource": "200",
+    "fastLaneDiff": "200"
+  }
+}
