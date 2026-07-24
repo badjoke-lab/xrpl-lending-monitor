@@ -1,4 +1,5 @@
 import type { Bindings, FastLaneQueueMessage } from './env'
+import { fastLanePassScheduledTime } from './fast-lane-pass-cadence'
 import worker from './entry'
 import {
   promoteFastLaneCompactToCanonicalOverlay,
@@ -21,7 +22,6 @@ import {
 } from './repositories/fast-lane-storage-retention'
 
 const FAST_LANE_PASSES_PER_QUEUE_MESSAGE = 8
-const SYNTHETIC_PASS_OFFSET_MS = 60_000
 const FIVE_MINUTE_INTERVAL_MS = 5 * 60_000
 const OVERLAY_CAPACITY_CHECK_INTERVAL_MS = 60 * 60_000
 const QUEUE_SLOT_RETENTION_MS = 7 * 24 * 60 * 60_000
@@ -75,7 +75,7 @@ function parseQueueMessage(value: unknown): FastLaneQueueMessage {
 
 function syntheticScheduledController(message: FastLaneQueueMessage, pass: number): ScheduledController {
   return {
-    scheduledTime: message.scheduledTime + pass * SYNTHETIC_PASS_OFFSET_MS,
+    scheduledTime: fastLanePassScheduledTime(message.scheduledTime, pass),
     cron: message.cron,
     noRetry: () => undefined,
   } as ScheduledController

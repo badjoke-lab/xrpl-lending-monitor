@@ -9,7 +9,7 @@ import { createXrplWebSocketLedgerSession } from './xrpl-websocket-ledger-sessio
 import {
   commitFastLaneCompactShadowWindow,
 } from '../../worker/repositories/fast-lane-compact-shadow-repository'
-import { buildFastLaneHistoryBundle } from '../../worker/repositories/fast-lane-history-window'
+import { buildBoundedFastLaneHistoryWindow } from '../../worker/repositories/fast-lane-history-window'
 import {
   bindFastLaneShadowBase,
   readFastLaneShadowBaseBinding,
@@ -216,7 +216,7 @@ export async function runFastLaneShadowCycle(options: {
       })
     ).ledgerHash
 
-    const scan = await scanValidatedLedgerRange({
+    const scanned = await scanValidatedLedgerRange({
       endpoint: options.fastLaneConfig.webSocketEndpoint,
       timeoutMs: options.runtimeConfig.rpcTimeoutMs,
       startLedgerIndex,
@@ -226,8 +226,8 @@ export async function runFastLaneShadowCycle(options: {
       reader: session.reader,
       readWindowSize: options.fastLaneConfig.readWindow,
     })
-    const finalLedger = scan.ledgers.at(-1)
-    if (!finalLedger) {
+    const scannedFinalLedger = scanned.ledgers.at(-1)
+    if (!scannedFinalLedger) {
       return {
         status: 'caught_up',
         startLedgerIndex: null,
@@ -242,21 +242,21 @@ export async function runFastLaneShadowCycle(options: {
       }
     }
 
-    const plan = buildFastLaneShadowWindowPlan({
-      epochId: SHADOW_EPOCH_ID,
-      scan,
-      latestObservedHash: head.ledgerHash,
+    const bounded = buildBoundedFastLaneHistoryWindow({
+      scan: scanned,
+      epochId: options.base.epochId,
       processedAt,
     })
-    const historyBundle = buildFastLaneHistoryBundle({
-      scan,
-      epochId: options.base.epochId,
+    const plan = buildFastLaneShadowWindowPlan({
+      epochId: SHADOW_EPOCH_ID,
+      scan: bounded.scan,
+      latestObservedHash: head.ledgerHash,
       processedAt,
     })
     const persistence = await commitFastLaneCompactShadowWindow({
       db: options.db,
       plan,
-      historyBundle,
+      historyBundle: bounded.bundle,
       expectedPreviousLedger,
       expectedPreviousHash: previousHash,
       processedAt,
@@ -269,7 +269,7 @@ export async function runFastLaneShadowCycle(options: {
       endLedgerIndex: plan.endLedgerIndex,
       latestObservedLedger: head.ledgerIndex,
       lagLedgers,
-      ledgersProcessed: scan.metrics.ledgers,
+      ledgersProcessed: bounded.scan.metrics.ledgers,
       lendingTransactions: plan.lendingTransactions,
       coalescedObjectRows: plan.mutations.length,
       persistenceRowsRead: persistence.rowsRead,
