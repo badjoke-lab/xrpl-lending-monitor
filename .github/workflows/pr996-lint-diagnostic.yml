@@ -1,0 +1,48 @@
+name: PR 996 lint diagnostic
+
+on:
+  push:
+    branches:
+      - agent/qualifier-995-diagnose
+    paths:
+      - .github/workflows/pr996-lint-diagnostic.yml
+
+permissions:
+  contents: write
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Capture lint output
+        shell: bash
+        run: |
+          set +e
+          pnpm lint > pr996-lint.txt 2>&1
+          status=$?
+          printf '\nexit_status=%s\n' "$status" >> pr996-lint.txt
+          exit 0
+      - name: Retain lint output on branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          api="repos/${GITHUB_REPOSITORY}/contents/.github/pr996-lint.txt"
+          sha="$(gh api "$api?ref=${GITHUB_REF_NAME}" --jq .sha 2>/dev/null || true)"
+          content="$(base64 -w0 pr996-lint.txt)"
+          if [ -n "$sha" ]; then
+            gh api --method PUT "$api" -f message='Retain PR 996 lint diagnostics' -f content="$content" -f sha="$sha" -f branch="$GITHUB_REF_NAME" >/dev/null
+          else
+            gh api --method PUT "$api" -f message='Retain PR 996 lint diagnostics' -f content="$content" -f branch="$GITHUB_REF_NAME" >/dev/null
+          fi
