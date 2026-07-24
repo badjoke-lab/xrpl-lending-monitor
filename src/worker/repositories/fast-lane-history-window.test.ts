@@ -1,9 +1,16 @@
+import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 
 import type { IncrementalScanResult } from '../../collector/incremental/scan-validated-ledgers'
 import {
+  decodeFastLaneHistoryPayload,
+  fastLaneHistoryPayloadBytes,
+  isCompressedFastLaneHistoryPayload,
+} from './fast-lane-history-codec'
+import {
   buildBoundedFastLaneHistoryWindow,
   buildFastLaneHistoryBundle,
+  MAX_FAST_LANE_HISTORY_BUNDLE_BYTES,
 } from './fast-lane-history-window'
 
 const TRANSACTION = 'A'.repeat(64)
@@ -76,10 +83,17 @@ function scan(): IncrementalScanResult {
   }
 }
 
-function manyEvents(template: IncrementalScanResult['ledgers'][number]['lendingTransactions'][number], count: number) {
+function uniqueHash(index: number): string {
+  return createHash('sha256').update(`fast-lane-history-${index}`).digest('hex').toUpperCase()
+}
+
+function manyEvents(
+  template: IncrementalScanResult['ledgers'][number]['lendingTransactions'][number],
+  count: number,
+) {
   return Array.from({ length: count }, (_, index) => ({
     ...template,
-    hash: index.toString(16).padStart(64, '0').toUpperCase(),
+    hash: uniqueHash(index),
     transactionIndex: index,
     metadata: { TransactionResult: 'tesSUCCESS', TransactionIndex: index, AffectedNodes: [] },
   }))
@@ -134,12 +148,26 @@ describe('fast-lane compact history bundle', () => {
     expect(bundle.balanceHistory).toEqual([])
   })
 
-  it('reduces a multi-ledger range to the largest contiguous prefix that fits', () => {
+  it('compresses, bounds, and round-trips the full semantic bundle', async () => {
+    const bounded = await buildBoundedFastLaneHistoryWindow({
+      scan: scan(),
+      epochId: 'devnet-epoch-1',
+      processedAt: '2026-07-13T09:00:00.000Z',
+    })
+
+    expect(bounded.reduced).toBe(false)
+    expect(isCompressedFastLaneHistoryPayload(bounded.encodedBundle)).toBe(true)
+    expect(bounded.encodedBytes).toBe(fastLaneHistoryPayloadBytes(bounded.encodedBundle))
+    expect(bounded.encodedBytes).toBeLessThanOrEqual(MAX_FAST_LANE_HISTORY_BUNDLE_BYTES)
+    await expect(decodeFastLaneHistoryPayload(bounded.encodedBundle)).resolves.toEqual(bounded.bundle)
+  })
+
+  it('reduces a range only when its compressed representation exceeds the limit', async () => {
     const input = scan()
     const first = input.ledgers[0]
     const template = first?.lendingTransactions[0]
     if (!first || !template) throw new Error('test fixture is incomplete')
-    const denseEvents = manyEvents(template, 1_000)
+    const denseEvents = manyEvents(template, 8_000)
     input.ledgers = [
       first,
       {
@@ -158,7 +186,7 @@ describe('fast-lane compact history bundle', () => {
     input.metrics.inspectedTransactions = 1 + denseEvents.length
     input.metrics.lendingTransactions = 1 + denseEvents.length
 
-    const bounded = buildBoundedFastLaneHistoryWindow({
+    const bounded = await buildBoundedFastLaneHistoryWindow({
       scan: input,
       epochId: 'devnet-epoch-1',
       processedAt: '2026-07-13T09:00:00.000Z',
@@ -168,23 +196,33 @@ describe('fast-lane compact history bundle', () => {
     expect(bounded.scan.ledgers).toHaveLength(1)
     expect(bounded.scan.endLedgerIndex).toBe(101)
     expect(bounded.bundle.endLedgerIndex).toBe(101)
-  })
+    expect(bounded.encodedBytes).toBeLessThanOrEqual(MAX_FAST_LANE_HISTORY_BUNDLE_BYTES)
+  }, 30_000)
 
-  it('fails before persistence when one ledger exceeds the semantic byte limit', () => {
+  it('fails before persistence when one ledger exceeds the compressed byte limit', async () => {
     const oversized = scan()
     const template = oversized.ledgers[0]?.lendingTransactions[0]
     if (!template || !oversized.ledgers[0]) throw new Error('test fixture is incomplete')
-    const events = manyEvents(template, 1_000)
+    const events = manyEvents(template, 8_000)
     oversized.ledgers[0].transactions = events
     oversized.ledgers[0].lendingTransactions = events
     oversized.metrics.inspectedTransactions = events.length
     oversized.metrics.lendingTransactions = events.length
 
-    expect(() => buildBoundedFastLaneHistoryWindow({
+    await expect(buildBoundedFastLaneHistoryWindow({
       scan: oversized,
       epochId: 'devnet-epoch-1',
       processedAt: '2026-07-13T09:00:00.000Z',
-    })).toThrow('exceeds the persistence limit')
+    })).rejects.toThrow('exceeds the persistence limit')
+  }, 30_000)
+
+  it('keeps legacy plain JSON readable during the rolling format transition', async () => {
+    const bundle = buildFastLaneHistoryBundle({
+      scan: scan(),
+      epochId: 'devnet-epoch-1',
+      processedAt: '2026-07-13T09:00:00.000Z',
+    })
+    await expect(decodeFastLaneHistoryPayload(JSON.stringify(bundle))).resolves.toEqual(bundle)
   })
 
   it('rejects an empty scan', () => {
