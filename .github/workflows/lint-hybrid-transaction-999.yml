@@ -1,0 +1,41 @@
+name: Capture hybrid transaction lint 999
+
+on:
+  push:
+    branches:
+      - agent/current-production-probe-20260724-2246
+    paths:
+      - .github/workflows/lint-hybrid-transaction-999.yml
+
+permissions:
+  contents: write
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/hybrid-transaction-detail-999
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - shell: bash
+        run: |
+          set +e
+          pnpm lint > lint-999.txt 2>&1
+          printf '\nexit_status=%s\n' "$?" >> lint-999.txt
+          exit 0
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          api="repos/${GITHUB_REPOSITORY}/contents/.github/lint-999.txt"
+          old="$(gh api "$api?ref=${GITHUB_REF_NAME}" --jq .sha 2>/dev/null || true)"
+          content="$(base64 -w0 lint-999.txt)"
+          if [ -n "$old" ]; then gh api --method PUT "$api" -f message='Update hybrid transaction lint 999' -f content="$content" -f sha="$old" -f branch="$GITHUB_REF_NAME" >/dev/null; else gh api --method PUT "$api" -f message='Create hybrid transaction lint 999' -f content="$content" -f branch="$GITHUB_REF_NAME" >/dev/null; fi
