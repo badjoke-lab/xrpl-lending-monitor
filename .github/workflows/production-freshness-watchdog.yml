@@ -18,6 +18,9 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
   GH_TOKEN: ${{ github.token }}
   STATUS_ISSUE: '978'
   PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
@@ -27,10 +30,22 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Read public production APIs only
+      - name: Read exact production freshness
         shell: bash
         run: |
           set -uo pipefail
+
+          query_d1() {
+            local sql="$1" output="$2"
+            jq -n --arg sql "$sql" '{sql:$sql}' \
+              | curl --silent --show-error --retry 3 --retry-all-errors \
+                  --connect-timeout 10 --max-time 45 \
+                  -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+                  -H 'Content-Type: application/json' \
+                  --data-binary @- \
+                  "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database/${DATABASE_ID}/query" \
+              > "$output" || printf '{"success":false,"result":[],"errors":[{"message":"transport_failure"}]}' > "$output"
+          }
 
           fetch_api() {
             local path="$1" output="$2" code_file="$3"
@@ -39,140 +54,89 @@ jobs:
               --connect-timeout 10 --max-time 45 \
               -o "$output" -w '%{http_code}' "${PRODUCTION_BASE}${path}" || true)"
             printf '%s' "$code" > "$code_file"
-            jq -e . "$output" >/dev/null 2>&1 || printf '{}\n' > "$output"
           }
 
-          scalar_candidates() {
-            local file="$1" regex="$2"
-            jq -c --arg regex "$regex" '
-              [paths(scalars) as $p
-               | {path:($p|map(tostring)|join(".")), value:getpath($p)}
-               | select(.path|test($regex; "i"))]
-            ' "$file" 2>/dev/null || printf '[]\n'
-          }
-
-          first_numeric_candidate() {
-            local candidates="$1"
-            jq -r '[.[] | select(.value|type == "number")][0].value // empty' <<<"$candidates"
-          }
+          query_d1 "SELECT epoch_id,last_processed_ledger,last_processed_hash,latest_observed_ledger,latest_observed_hash,status,(latest_observed_ledger-last_processed_ledger) AS lag_ledgers,updated_at FROM fast_lane_shadow_state WHERE network='devnet'" state.json
+          query_d1 "SELECT epoch_id,base_snapshot_id,base_ledger_index,base_ledger_hash,overlay_ledger_index,overlay_ledger_hash,updated_at FROM current_state_overlay_state WHERE network='devnet'" overlay-state.json
+          query_d1 "SELECT COUNT(*) AS compact_rows FROM fast_lane_shadow_objects_compact WHERE network='devnet'" compact.json
+          query_d1 "SELECT COUNT(*) AS stale_rows FROM current_state_overlay_objects o WHERE o.network='devnet' AND NOT EXISTS (SELECT 1 FROM fast_lane_shadow_base_binding b WHERE b.network=o.network AND b.base_epoch_id=o.epoch_id AND b.base_snapshot_id=o.base_snapshot_id)" stale.json
+          query_d1 "SELECT network,run_at,status,start_ledger_index,end_ledger_index,latest_observed_ledger,lag_ledgers,ledgers_processed,persistence_rows_read,persistence_rows_written,error_message FROM fast_lane_shadow_run_metrics WHERE network='devnet' ORDER BY run_at DESC LIMIT 1" metric.json
 
           fetch_api '/api/overview' overview.json overview.code
           fetch_api '/api/status/history-source' history.json history.code
           fetch_api '/api/status/fast-lane-diff?limit=1' diff.json diff.code
 
-          overview_code="$(cat overview.code)"
-          history_code="$(cat history.code)"
-          diff_code="$(cat diff.code)"
+          state_ok="$(jq -r '.success == true and ((.errors // [])|length)==0 and (.result[0].results|length)==1' state.json 2>/dev/null || echo false)"
+          overlay_ok="$(jq -r '.success == true and ((.errors // [])|length)==0 and (.result[0].results|length)==1' overlay-state.json 2>/dev/null || echo false)"
+          compact_ok="$(jq -r '.success == true and ((.errors // [])|length)==0 and (.result[0].results|length)==1' compact.json 2>/dev/null || echo false)"
+          stale_ok="$(jq -r '.success == true and ((.errors // [])|length)==0 and (.result[0].results|length)==1' stale.json 2>/dev/null || echo false)"
+          metric_ok="$(jq -r '.success == true and ((.errors // [])|length)==0 and (.result[0].results|length)==1' metric.json 2>/dev/null || echo false)"
 
-          overview_processed="$(scalar_candidates overview.json '(last.*processed|processed.*ledger|fast.*lane.*ledger)')"
-          diff_processed="$(scalar_candidates diff.json '(last.*processed|processed.*ledger|fast.*lane.*ledger)')"
-          overview_observed="$(scalar_candidates overview.json '(latest.*observed|observed.*ledger)')"
-          diff_observed="$(scalar_candidates diff.json '(latest.*observed|observed.*ledger)')"
-          overview_lag="$(scalar_candidates overview.json '(^|\.)(lag|lagLedgers|lag_ledgers)($|\.)')"
-          diff_lag="$(scalar_candidates diff.json '(^|\.)(lag|lagLedgers|lag_ledgers)($|\.)')"
-          overview_status="$(scalar_candidates overview.json '(status|state)')"
-          diff_status="$(scalar_candidates diff.json '(status|state)')"
-          history_ledgers="$(scalar_candidates history.json '(ledgerIndex|ledger_index|ledger)')"
-          history_times="$(scalar_candidates history.json '(updatedAt|generatedAt|createdAt|runAt|run_at|timestamp)')"
+          state="$(jq -c '.result[0].results[0] // {}' state.json 2>/dev/null || echo '{}')"
+          overlay="$(jq -c '.result[0].results[0] // {}' overlay-state.json 2>/dev/null || echo '{}')"
+          compact_rows="$(jq -r '.result[0].results[0].compact_rows // -1' compact.json 2>/dev/null || echo -1)"
+          stale_rows="$(jq -r '.result[0].results[0].stale_rows // -1' stale.json 2>/dev/null || echo -1)"
+          metric="$(jq -c '.result[0].results[0] // {}' metric.json 2>/dev/null || echo '{}')"
 
-          processed="$(first_numeric_candidate "$overview_processed")"
-          if ! [[ "$processed" =~ ^[0-9]+$ ]]; then
-            processed="$(first_numeric_candidate "$diff_processed")"
-          fi
-
-          observed="$(first_numeric_candidate "$overview_observed")"
-          if ! [[ "$observed" =~ ^[0-9]+$ ]]; then
-            observed="$(first_numeric_candidate "$diff_observed")"
-          fi
-
-          lag="$(first_numeric_candidate "$overview_lag")"
-          if ! [[ "$lag" =~ ^[0-9]+$ ]]; then
-            lag="$(first_numeric_candidate "$diff_lag")"
-          fi
-          if ! [[ "$lag" =~ ^-?[0-9]+$ ]] && [[ "$processed" =~ ^[0-9]+$ ]] && [[ "$observed" =~ ^[0-9]+$ ]]; then
-            lag="$((observed - processed))"
-          fi
-
-          state_status="$(jq -r '[.[] | select(.value|type == "string") | .value | select(. == "healthy" or . == "behind" or . == "error")][0] // empty' <<<"$overview_status" 2>/dev/null || true)"
-          if [ -z "$state_status" ]; then
-            state_status="$(jq -r '[.[] | select(.value|type == "string") | .value | select(. == "healthy" or . == "behind" or . == "error")][0] // empty' <<<"$diff_status" 2>/dev/null || true)"
-          fi
-
-          history_ledger="$(jq -r '[.[] | select(.value|type == "number") | .value] | max // empty' <<<"$history_ledgers" 2>/dev/null || true)"
-          history_timestamp="$(jq -r '[.[] | select(.value|type == "string") | .value][0] // empty' <<<"$history_times" 2>/dev/null || true)"
-
-          previous_body="$(gh issue view "$STATUS_ISSUE" --repo "$GITHUB_REPOSITORY" --json body --jq .body 2>/dev/null || true)"
-          previous_state="$(printf '%s\n' "$previous_body" | sed -n 's/^<!-- watchdog-state: \(.*\) -->$/\1/p' | tail -n1)"
-          previous_processed="$(jq -r '.lastProcessedLedger // empty' <<<"${previous_state:-{}}" 2>/dev/null || true)"
-          previous_history="$(jq -r '.historyLedger // empty' <<<"${previous_state:-{}}" 2>/dev/null || true)"
-          previous_history_change="$(jq -r '.historyLastChangedAt // empty' <<<"${previous_state:-{}}" 2>/dev/null || true)"
+          processed="$(jq -r '.last_processed_ledger // -1' <<<"$state")"
+          observed="$(jq -r '.latest_observed_ledger // -1' <<<"$state")"
+          lag="$(jq -r '.lag_ledgers // -1' <<<"$state")"
+          fast_status="$(jq -r '.status // "missing"' <<<"$state")"
+          overlay_ledger="$(jq -r '.overlay_ledger_index // -1' <<<"$overlay")"
+          metric_run_at="$(jq -r '.run_at // empty' <<<"$metric")"
+          metric_status="$(jq -r '.status // "missing"' <<<"$metric")"
+          metric_error="$(jq -r '.error_message // empty' <<<"$metric")"
 
           checked_at="$(date -u +%FT%TZ)"
-          advanced=false
-          if [[ "$processed" =~ ^[0-9]+$ ]] && [[ "$previous_processed" =~ ^[0-9]+$ ]] && [ "$processed" -gt "$previous_processed" ]; then
-            advanced=true
+          now_epoch="$(date -u +%s)"
+          metric_age_seconds=-1
+          if [ -n "$metric_run_at" ]; then
+            metric_epoch="$(date -u -d "$metric_run_at" +%s 2>/dev/null || echo 0)"
+            if [ "$metric_epoch" -gt 0 ]; then metric_age_seconds="$((now_epoch - metric_epoch))"; fi
           fi
 
-          first_sample=false
-          if ! [[ "$previous_processed" =~ ^[0-9]+$ ]]; then
-            first_sample=true
-          fi
-
-          history_change_at="$previous_history_change"
-          if [[ "$history_ledger" =~ ^[0-9]+$ ]] && { ! [[ "$previous_history" =~ ^[0-9]+$ ]] || [ "$history_ledger" -ne "$previous_history" ]; }; then
-            history_change_at="$checked_at"
-          fi
+          overview_http="$(cat overview.code)"
+          history_http="$(cat history.code)"
+          diff_http="$(cat diff.code)"
 
           healthy=false
-          if [ "$overview_code" = 200 ] && [ "$history_code" = 200 ] && [ "$diff_code" = 200 ] \
-             && [[ "$processed" =~ ^[0-9]+$ ]] \
-             && [[ "$lag" =~ ^-?[0-9]+$ ]] && [ "$lag" -eq 0 ] \
-             && [[ "$history_ledger" =~ ^[0-9]+$ ]] \
-             && { [ "$advanced" = true ] || [ "$first_sample" = true ]; }; then
+          if [ "$state_ok" = true ] && [ "$overlay_ok" = true ] && [ "$compact_ok" = true ] && [ "$stale_ok" = true ] && [ "$metric_ok" = true ] \
+             && [ "$overview_http" = 200 ] && [ "$history_http" = 200 ] && [ "$diff_http" = 200 ] \
+             && [ "$fast_status" = healthy ] && [ "$lag" -eq 0 ] \
+             && [ "$metric_status" = committed ] && [ -z "$metric_error" ] \
+             && [ "$metric_age_seconds" -ge 0 ] && [ "$metric_age_seconds" -le 600 ] \
+             && [ "$stale_rows" -eq 0 ] && [ "$compact_rows" -eq 0 ] \
+             && [ "$overlay_ledger" -eq "$processed" ]; then
             healthy=true
           fi
 
           jq -n \
             --arg checkedAt "$checked_at" \
-            --arg overviewHttp "$overview_code" \
-            --arg historyHttp "$history_code" \
-            --arg diffHttp "$diff_code" \
-            --arg stateStatus "$state_status" \
-            --arg processed "$processed" \
-            --arg observed "$observed" \
-            --arg lag "$lag" \
-            --arg historyLedger "$history_ledger" \
-            --arg historyTimestamp "$history_timestamp" \
-            --arg historyLastChangedAt "$history_change_at" \
-            --argjson advanced "$advanced" \
-            --argjson firstSample "$first_sample" \
             --argjson healthy "$healthy" \
-            --argjson overviewProcessed "$overview_processed" \
-            --argjson diffProcessed "$diff_processed" \
-            --argjson overviewObserved "$overview_observed" \
-            --argjson diffObserved "$diff_observed" \
-            --argjson overviewLag "$overview_lag" \
-            --argjson diffLag "$diff_lag" \
-            --argjson historyLedgers "$history_ledgers" \
-            '{checkedAt:$checkedAt,healthy:$healthy,firstSample:$firstSample,advancedSincePreviousCheck:$advanced,http:{overview:$overviewHttp,historySource:$historyHttp,fastLaneDiff:$diffHttp},fastLane:{status:$stateStatus,lastProcessedLedger:($processed|tonumber? // null),latestObservedLedger:($observed|tonumber? // null),lagLedgers:($lag|tonumber? // null)},history:{ledger:($historyLedger|tonumber? // null),sourceTimestamp:($historyTimestamp|select(length>0) // null),lastChangedAt:($historyLastChangedAt|select(length>0) // null)},diagnostics:{overviewProcessed:$overviewProcessed,diffProcessed:$diffProcessed,overviewObserved:$overviewObserved,diffObserved:$diffObserved,overviewLag:$overviewLag,diffLag:$diffLag,historyLedgers:$historyLedgers}}' > summary.json
-
-          jq -n \
-            --arg checkedAt "$checked_at" \
-            --arg processed "$processed" \
-            --arg historyLedger "$history_ledger" \
-            --arg historyLastChangedAt "$history_change_at" \
-            '{checkedAt:$checkedAt,lastProcessedLedger:($processed|tonumber? // null),historyLedger:($historyLedger|tonumber? // null),historyLastChangedAt:($historyLastChangedAt|select(length>0) // null)}' > state.json
+            --argjson stateQueryOk "$state_ok" \
+            --argjson overlayQueryOk "$overlay_ok" \
+            --argjson compactQueryOk "$compact_ok" \
+            --argjson staleQueryOk "$stale_ok" \
+            --argjson metricQueryOk "$metric_ok" \
+            --argjson state "$state" \
+            --argjson overlay "$overlay" \
+            --argjson compactRows "$compact_rows" \
+            --argjson staleRows "$stale_rows" \
+            --argjson latestMetric "$metric" \
+            --argjson metricAgeSeconds "$metric_age_seconds" \
+            --arg overviewHttp "$overview_http" \
+            --arg historyHttp "$history_http" \
+            --arg diffHttp "$diff_http" \
+            '{checkedAt:$checkedAt,healthy:$healthy,queryOk:{fastLaneState:$stateQueryOk,overlayState:$overlayQueryOk,compact:$compactQueryOk,stale:$staleQueryOk,latestMetric:$metricQueryOk},fastLane:$state,canonicalOverlay:$overlay,compactRows:$compactRows,staleRows:$staleRows,latestMetric:$latestMetric,metricAgeSeconds:$metricAgeSeconds,http:{overview:$overviewHttp,historySource:$historyHttp,fastLaneDiff:$diffHttp}}' > summary.json
 
           {
             echo '# Production freshness watchdog'
             echo
-            echo 'Public API read-only check. This workflow never queries or writes D1 and never calls collector, deploy, maintenance, or repair endpoints.'
+            echo 'Exact read-only D1 and public API check. It does not invoke the collector, deploy, repair, or maintenance paths.'
             echo
             echo '```json'
             cat summary.json
             echo '```'
-            echo
-            printf '<!-- watchdog-state: %s -->\n' "$(jq -c . state.json)"
           } > issue.md
 
           gh issue edit "$STATUS_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file issue.md
