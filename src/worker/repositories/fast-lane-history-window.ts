@@ -15,6 +15,7 @@ import {
 } from './history-segment-adapter'
 
 const DEFAULT_MAX_WINDOWS = 400
+export const MAX_FAST_LANE_HISTORY_BUNDLE_BYTES = 131_072
 
 export interface FastLaneHistoryBundle {
   schemaVersion: 1
@@ -59,6 +60,15 @@ function parseBundle(value: string): FastLaneHistoryBundle {
   return parsed as unknown as FastLaneHistoryBundle
 }
 
+function assertBundleSize(bundle: FastLaneHistoryBundle): void {
+  const bytes = new TextEncoder().encode(JSON.stringify(bundle)).byteLength
+  if (bytes > MAX_FAST_LANE_HISTORY_BUNDLE_BYTES) {
+    throw new Error(
+      `Fast-lane history bundle exceeds the persistence limit: bytes=${bytes}, limit=${MAX_FAST_LANE_HISTORY_BUNDLE_BYTES}`,
+    )
+  }
+}
+
 export function buildFastLaneHistoryBundle(options: {
   scan: IncrementalScanResult
   epochId: string
@@ -91,7 +101,7 @@ export function buildFastLaneHistoryBundle(options: {
     }
   }
 
-  return {
+  const bundle: FastLaneHistoryBundle = {
     schemaVersion: 1,
     epochId: options.epochId,
     startLedgerIndex: first.ledgerIndex,
@@ -104,6 +114,8 @@ export function buildFastLaneHistoryBundle(options: {
     archivedObjects: records.archivedObjects.map(segmentArchivedObjectToApi),
     balanceHistory: records.balanceHistory.map(segmentBalanceHistoryToApi),
   }
+  assertBundleSize(bundle)
+  return bundle
 }
 
 export async function readFastLaneHistoryBundlesAfterBoundary(options: {
