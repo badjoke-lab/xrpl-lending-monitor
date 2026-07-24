@@ -1,0 +1,928 @@
+{
+  "checkedAt": "2026-07-24T17:16:34.573492Z",
+  "status": "failed",
+  "passed": false,
+  "fixedWindow": {
+    "startUtc": "2026-07-24T16:15:00Z",
+    "endUtc": "2026-07-24T17:10:00Z",
+    "evaluateUtc": "2026-07-24T17:15:30Z",
+    "startJst": "2026-07-25T01:15:00+09:00",
+    "endJst": "2026-07-25T02:10:00+09:00",
+    "expectedSlots": 12,
+    "spacingMs": 300000
+  },
+  "runtimeSha": "ead8f7a2d06c7d010d2dbba076ec4d3fb6118c74",
+  "checks": {
+    "exact12CompletedQueueSlots": true,
+    "metricsExactlyAttributedCommittedTerminalLagZero": true,
+    "ledgerWindowCoverageExact": true,
+    "ledgerHashAndParentContinuity": true,
+    "allBundlesDecodedWithFiveSemanticArrays": true,
+    "allFiveSemanticWitnessesPublicAndSourceVerified": false,
+    "fastLaneCanonicalFinalAlignment": true,
+    "compactZero": true,
+    "staleZero": true,
+    "deploymentBaseEpochPublicationIdentityStable": true,
+    "resourceEnvelope": true,
+    "retentionFor24HourAudit": true,
+    "publicStatusApis": true,
+    "protectedCollectorBoundaryRule": true
+  },
+  "failures": [
+    "allFiveSemanticWitnessesPublicAndSourceVerified"
+  ],
+  "slots": [
+    {
+      "scheduled_time": 1784909700000,
+      "message_id": "5e28ad83fb90bb72586254eba66228ad",
+      "status": "completed",
+      "started_at": "2026-07-24T16:15:11.324Z",
+      "completed_at": "2026-07-24T16:15:15.755Z",
+      "next_scheduled_time": 1784910000000,
+      "error_message": null,
+      "updated_at": "2026-07-24T16:15:15.755Z"
+    },
+    {
+      "scheduled_time": 1784910000000,
+      "message_id": "cad6bf02192eaf99b7d6a939e1594b02",
+      "status": "completed",
+      "started_at": "2026-07-24T16:20:11.911Z",
+      "completed_at": "2026-07-24T16:20:17.492Z",
+      "next_scheduled_time": 1784910300000,
+      "error_message": null,
+      "updated_at": "2026-07-24T16:20:17.492Z"
+    },
+    {
+      "scheduled_time": 1784910300000,
+      "message_id": "cda791dac5c9d8045905bddf26574314",
+      "status": "completed",
+      "started_at": "2026-07-24T16:25:11.741Z",
+      "completed_at": "2026-07-24T16:25:16.850Z",
+      "next_scheduled_time": 1784910600000,
+      "error_message": null,
+      "updated_at": "2026-07-24T16:25:16.850Z"
+    },
+    {
+      "scheduled_time": 1784910600000,
+      "message_id": "2885088cd58452be4d606cd06d38c1ca",
+      "status": "completed",
+      "started_at": "2026-07-24T16:30:11.949Z",
+      "completed_at": "2026-07-24T16:30:16.885Z",
+      "next_scheduled_time": 1784910900000,
+      "error_message": null,
+      "updated_at": "2026-07-24T16:30:16.885Z"
+    },
+    {
+      "scheduled_time": 1784910900000,
+      "message_id": "971c28653be4e7a6617532e4995ea689",
+      "status": "completed",
+      "started_at": "2026-07-24T16:35:12.200Z",
+      "completed_at": "2026-07-24T16:35:16.332Z",
+      "next_scheduled_time": 1784911200000,
+      "error_message": null,
+      "updated_at": "2026-07-24T16:35:16.332Z"
+    },
+    {
+      "scheduled_time": 1784911200000,
+      "message_id": "9a2ce3c4b9bbb2d559335e4ad0cf4d86",
+      "status": "completed",
+      "started_at": "2026-07-24T16:40:11.473Z",
+      "completed_at": "2026-07-24T16:40:15.985Z",
+      "next_scheduled_time": 1784911500000,
+      "error_message": null,
+      "updated_at": "2026-07-24T16:40:15.985Z"
+    },
+    {
+      "scheduled_time": 1784911500000,
+      "message_id": "3f2138af6cac11c5ac7d58284c7da259",
+      "status": "completed",
+      "started_at": "2026-07-24T16:45:11.939Z",
+      "completed_at": "2026-07-24T16:45:16.201Z",
+      "next_scheduled_time": 1784911800000,
+      "error_message": null,
+      "updated_at": "2026-07-24T16:45:16.201Z"
+    },
+    {
+      "scheduled_time": 1784911800000,
+      "message_id": "0cf6c22d82f6d5d84098953d2950a99c",
+      "status": "completed",
+      "started_at": "2026-07-24T16:50:12.445Z",
+      "completed_at": "2026-07-24T16:50:17.007Z",
+      "next_scheduled_time": 1784912100000,
+      "error_message": null,
+      "updated_at": "2026-07-24T16:50:17.007Z"
+    },
+    {
+      "scheduled_time": 1784912100000,
+      "message_id": "c8229720adad329b32d7bad0cd2927ff",
+      "status": "completed",
+      "started_at": "2026-07-24T16:55:12.501Z",
+      "completed_at": "2026-07-24T16:55:17.067Z",
+      "next_scheduled_time": 1784912400000,
+      "error_message": null,
+      "updated_at": "2026-07-24T16:55:17.067Z"
+    },
+    {
+      "scheduled_time": 1784912400000,
+      "message_id": "290731963780286d516f6daa1b42bd52",
+      "status": "completed",
+      "started_at": "2026-07-24T17:00:12.246Z",
+      "completed_at": "2026-07-24T17:00:16.909Z",
+      "next_scheduled_time": 1784912700000,
+      "error_message": null,
+      "updated_at": "2026-07-24T17:00:16.909Z"
+    },
+    {
+      "scheduled_time": 1784912700000,
+      "message_id": "8a6ad0c1951b99f4eb374c1fad2ed916",
+      "status": "completed",
+      "started_at": "2026-07-24T17:05:11.858Z",
+      "completed_at": "2026-07-24T17:05:16.113Z",
+      "next_scheduled_time": 1784913000000,
+      "error_message": null,
+      "updated_at": "2026-07-24T17:05:16.113Z"
+    },
+    {
+      "scheduled_time": 1784913000000,
+      "message_id": "b3086ec96354974951a7d173d2eb7b41",
+      "status": "completed",
+      "started_at": "2026-07-24T17:10:12.172Z",
+      "completed_at": "2026-07-24T17:10:17.436Z",
+      "next_scheduled_time": 1784913300000,
+      "error_message": null,
+      "updated_at": "2026-07-24T17:10:17.436Z"
+    }
+  ],
+  "metricErrors": [],
+  "metricsBySlot": [
+    {
+      "slot": 1784909700000,
+      "metricCount": 2,
+      "rowsRead": 14,
+      "rowsWritten": 22,
+      "terminalLag": 0
+    },
+    {
+      "slot": 1784910000000,
+      "metricCount": 2,
+      "rowsRead": 18,
+      "rowsWritten": 26,
+      "terminalLag": 0
+    },
+    {
+      "slot": 1784910300000,
+      "metricCount": 2,
+      "rowsRead": 12,
+      "rowsWritten": 20,
+      "terminalLag": 0
+    },
+    {
+      "slot": 1784910600000,
+      "metricCount": 2,
+      "rowsRead": 12,
+      "rowsWritten": 20,
+      "terminalLag": 0
+    },
+    {
+      "slot": 1784910900000,
+      "metricCount": 2,
+      "rowsRead": 12,
+      "rowsWritten": 20,
+      "terminalLag": 0
+    },
+    {
+      "slot": 1784911200000,
+      "metricCount": 2,
+      "rowsRead": 12,
+      "rowsWritten": 20,
+      "terminalLag": 0
+    },
+    {
+      "slot": 1784911500000,
+      "metricCount": 2,
+      "rowsRead": 12,
+      "rowsWritten": 20,
+      "terminalLag": 0
+    },
+    {
+      "slot": 1784911800000,
+      "metricCount": 2,
+      "rowsRead": 12,
+      "rowsWritten": 20,
+      "terminalLag": 0
+    },
+    {
+      "slot": 1784912100000,
+      "metricCount": 2,
+      "rowsRead": 12,
+      "rowsWritten": 20,
+      "terminalLag": 0
+    },
+    {
+      "slot": 1784912400000,
+      "metricCount": 2,
+      "rowsRead": 12,
+      "rowsWritten": 20,
+      "terminalLag": 0
+    },
+    {
+      "slot": 1784912700000,
+      "metricCount": 2,
+      "rowsRead": 12,
+      "rowsWritten": 20,
+      "terminalLag": 0
+    },
+    {
+      "slot": 1784913000000,
+      "metricCount": 1,
+      "rowsRead": 6,
+      "rowsWritten": 10,
+      "terminalLag": 0
+    }
+  ],
+  "history": {
+    "windowCount": 23,
+    "decodedWindowCount": 23,
+    "acceptedStartLedger": 3913030,
+    "acceptedEndLedger": 3914216,
+    "coverageFirstLedger": 3913030,
+    "coverageLastLedger": 3914216,
+    "semanticTotals": {
+      "protocolEvents": 16,
+      "objectChanges": 264,
+      "loanLifecycle": 0,
+      "archivedObjects": 0,
+      "balanceHistory": 0
+    },
+    "maxEncodedBytes": 10995,
+    "decodeErrors": [],
+    "ledgerContinuity": [
+      {
+        "startLedgerIndex": 3913030,
+        "endLedgerIndex": 3913125,
+        "endHashMatch": true,
+        "parentHashMatch": true,
+        "rpcEnd": {
+          "index": 3913125,
+          "hash": "9D054EB3B4CA43A84ADA05ED4D5215ABC2D1AD6DBE8E7F1BFC0A61D99695590E",
+          "parentHash": "068183241FF3B35E6568AA892DC0FE117D215F7945D74F9B2A0E0A109F464C06",
+          "validated": true,
+          "endpoint": "https://s.devnet.rippletest.net:51234/"
+        }
+      },
+      {
+        "startLedgerIndex": 3913126,
+        "endLedgerIndex": 3913127,
+        "endHashMatch": true,
+        "parentHashMatch": true,
+        "rpcEnd": {
+          "index": 3913127,
+          "hash": "C5A268AC4443269D29BE4A5189862678131EB1BD20FD1E1CE26502AB83605F1C",
+          "parentHash": "2D60A57F4E8D220AF95314437B99E3F76B7140B570DEFD919420EFA6FDB583F4",
+          "validated": true,
+          "endpoint": "https://s.devnet.rippletest.net:51234/"
+        }
+      },
+      {
+        "startLedgerIndex": 3913128,
+        "endLedgerIndex": 3913223,
+        "endHashMatch": true,
+        "parentHashMatch": true,
+        "rpcEnd": {
+          "index": 3913223,
+          "hash": "9F2FAA0FECD7A7672BB249B3552072FBD9B633888732CD4E1F8226D033F09BC7",
+          "parentHash": "92C73108CBC1A2B56E353723F11C3A97F6D3182A6E4521741054FE6D73B24B74",
+          "validated": true,
+          "endpoint": "https://s.devnet.rippletest.net:51234/"
+        }
+      },
+      {
+        "startLedgerIndex": 3913224,
+        "endLedgerIndex": 3913226,
+        "endHashMatch": true,
+        "parentHashMatch": true,
+        "rpcEnd": {
+          "index": 3913226,
+          "hash": "3C8CB70F7D648D2E178E8CEBCF50099A6FB61F03D13876D7BFD71FB1FCD6D681",
+          "parentHash": "EA16F7F2DF04DEEDDBF3F48C8DA986B2E87E5A0601863FE3BAB68E3A92ABD3C6",
+          "validated": true,
+          "endpoint": "https://s.devnet.rippletest.net:51234/"
+        }
+      },
+      {
+        "startLedgerIndex": 3913227,
+        "endLedgerIndex": 3913322,
+        "endHashMatch": true,
+        "parentHashMatch": true,
+        "rpcEnd": {
+          "index": 3913322,
+          "hash": "7C6508AFAC3E384261244EF6FEC7C5FB3A6141159E37B42221DFB473931F57F7",
+          "parentHash": "B2034B1CA316FD07D0C38C82334CBD8971AD786AC68535268AA24BB15516E2BC",
+          "validated": true,
+          "endpoint": "https://s.devnet.rippletest.net:51234/"
+        }
+      },
+      {
+        "startLedgerIndex": 3913323,
+        "endLedgerIndex": 3913326,
+        "endHashMatch": true,
+        "parentHashMatch": true,
+        "rpcEnd": {
+          "index": 3913326,
+          "hash": "6F19D11810E2483931DC98FB4269979445D8BB2D9F45DBBE1629727C354FAE74",
+          "parentHash": "37E5ACCC1BFDDCCAD8F7D017056431D388C528A01A9789154E9040FBED86744A",
+          "validated": true,
+          "endpoint": "https://s.devnet.rippletest.net:51234/"
+        }
+      },
+      {
+        "startLedgerIndex": 3913327,
+        "endLedgerIndex": 3913422,
+        "endHashMatch": true,
+        "parentHashMatch": true,
+        "rpcEnd": {
+          "index": 3913422,
+          "hash": "D923D8202476236C732E201CD854F6595A74A7481644ED4EC940BDAFA3ED5199",
+          "parentHash": "A7327A450C9C964AC0E0062924AB18AD0A828EC3A75F027D54FBD24D16545D99",
+          "validated": true,
+          "endpoint": "https://s.devnet.rippletest.net:51234/"
+        }
+      },
+      {
+        "startLedgerIndex": 3913423,
+        "endLedgerIndex": 3913426,
+        "endHashMatch": true,
+        "parentHashMatch": true,
+        "rpcEnd": {
+          "index": 3913426,
+          "hash": "7E17805F01AD51888D59A499C1731741586E86209FB329F102F54E01CEBC827A",
+          "parentHash": "9429BFD883AF79912618BB027929367CB38B88DA497422932FBA300728C5684B",
+          "validated": true,
+          "endpoint": "https://s.devnet.rippletest.net:51234/"
+        }
+      },
+      {
+        "startLedgerIndex": 3913427,
+        "endLedgerIndex": 3913522,
+        "endHashMatch": true,
+        "parentHashMatch": true,
+        "rpcEnd": {
+          "index": 3913522,
+          "hash": "57A99F16D62666D5E79B393B5745C04982845B4E96F52C8FC4F7EC618EBF1803",
+          "parentHash": "83003E961E2EB2EBC6DB075EA952EA07A53661189EDBEC0F2BECCA97224B8E2D",
+          "validated": true,
+          "endpoint": "https://s.devnet.rippletest.net:51234/"
+        }
+      },
+      {
+        "startLedgerIndex": 3913523,
+        "endLedgerIndex": 3913525,
+        "endHashMatch": true,
+        "parentHashMatch": true,
+        "rpcEnd": {
+          "index": 3913525,
+          "hash": "A29784A8708271DB6B1B864D8F8C29C1BE9BE0F93270011CBAAB5CC40ADA0CED",
+          "parentHash": "0E2CACDA31EE5EB968D59BD088E93E65C654D1F98D4C11808CEF0080CD2F3990",
+          "validated": true,
+          "endpoint": "https://s.devnet.rippletest.net:51234/"
+        }
+      },
+      {
+        "startLedgerIndex": 3913526,
+        "endLedgerIndex": 3913621,
+        "endHashMatch": true,
+        "parentHashMatch": true,
+        "rpcEnd": {
+          "index": 3913621,
+          "hash": "5E42B1332075B8E82D27DE5AB3297B780850C7B5AF585C2B00D36964780F4A6B",
+          "parentHash": "E6A8B66880948BCD5F7F860B80B0FD927733AC27646AE01454D4734EFA37E628",
+          "validated": true,
+          "endpoint": "https://s.devnet.rippletest.net:51234/"
+        }
+      },
+      {
+        "startLedgerIndex": 3913622,
+        "endLedgerIndex": 3913625,
+        "endHashMatch": true,
+        "parentHashMatch": true,
+        "rpcEnd": {
+          "index": 3913625,
+          "hash": "09CBB916D95FF51DD433479E97851C3E12E7409E770E8BF405FAC354FAB96573",
+          "parentHash": "91FFDCBF30BB6CD1E69468BAA7621FA5F81BEF0F90749A0657059A09C1B606C3",
+          "validated": true,
+          "endpoint": "https://s.devnet.rippletest.net:51234/"
+        }
+      },
+      {
+        "startLedgerIndex": 3913626,
+        "endLedgerIndex": 3913721,
+        "endHashMatch": true,
+        "parentHashMatch": true,
+        "rpcEnd": {
+          "index": 3913721,
+          "hash": "C6B86C1B8AD8E592B244943BF1E80C6178BD51D833D90B1AEF12F206D647E38E",
+          "parentHash": "2FD952A82E29B2097BF8A19505C160667478DD929E266025DF97FC0A8DBE58F5",
+          "validated": true,
+          "endpoint": "https://s.devnet.rippletest.net:51234/"
+        }
+      },
+      {
+        "startLedgerIndex": 3913722,
+        "endLedgerIndex": 3913725,
+        "endHashMatch": true,
+        "parentHashMatch": true,
+        "rpcEnd": {
+          "index": 3913725,
+          "hash": "9B47B981D55B257BB13936485DEF3A6B4870CABA99A1D1966C3401BEA198AB06",
+          "parentHash": "12237C0DB4FFB24C919888665627BFA7817B5821F5381BEB3502761E894DE81E",
+          "validated": true,
+          "endpoint": "https://s.devnet.rippletest.net:51234/"
+        }
+      },
+      {
+        "startLedgerIndex": 3913726,
+        "endLedgerIndex": 3913821,
+        "endHashMatch": true,
+        "parentHashMatch": true,
+        "rpcEnd": {
+          "index": 3913821,
+          "hash": "9FD7169E4F96DFF358F03123E4BA38BFFA1D693168030D01B46487D9123C3593",
+          "parentHash": "ED60E8651AC50B61FF28D4D7ECDAE4949042513C0847102875471123895D3893",
+          "validated": true,
+          "endpoint": "https://s.devnet.rippletest.net:51234/"
+        }
+      },
+      {
+        "startLedgerIndex": 3913822,
+        "endLedgerIndex": 3913824,
+        "endHashMatch": true,
+        "parentHashMatch": true,
+        "rpcEnd": {
+          "index": 3913824,
+          "hash": "C5DF4BCEDB00D73117D5CB7EECF9D895BC8257D5C4AF7CC22B8D67B78DBC502C",
+          "parentHash": "A6967686B6F372313B84EDC8A0C34C6D6269179AEFD55EE082952FCFEC1FAB47",
+          "validated": true,
+          "endpoint": "https://s.devnet.rippletest.net:51234/"
+        }
+      },
+      {
+        "startLedgerIndex": 3913825,
+        "endLedgerIndex": 3913920,
+        "endHashMatch": true,
+        "parentHashMatch": true,
+        "rpcEnd": {
+          "index": 3913920,
+          "hash": "73771DD25402E9336CB96802862BAF1738411E283FD66A0CBAA6078F7CCB20D2",
+          "parentHash": "980071B805E328647DCA62202B33597391E0D6FDA55E873B5948BA0649AF832E",
+          "validated": true,
+          "endpoint": "https://s.devnet.rippletest.net:51234/"
+        }
+      },
+      {
+        "startLedgerIndex": 3913921,
+        "endLedgerIndex": 3913924,
+        "endHashMatch": true,
+        "parentHashMatch": true,
+        "rpcEnd": {
+          "index": 3913924,
+          "hash": "6C9880C24DB95BB948FA21507F3C252263F308A183A690E0DF99FF3AE0B479F6",
+          "parentHash": "877BF953B9EF1E169E133D88E06AA0CC383E4857ECEA22DF20B23251F727B1E1",
+          "validated": true,
+          "endpoint": "https://s.devnet.rippletest.net:51234/"
+        }
+      },
+      {
+        "startLedgerIndex": 3913925,
+        "endLedgerIndex": 3914020,
+        "endHashMatch": true,
+        "parentHashMatch": true,
+        "rpcEnd": {
+          "index": 3914020,
+          "hash": "9853A58D414B630759ED827E001EBA5BF9AC9B7D5E81A78E16BE3F41D24D60D9",
+          "parentHash": "659EDFAF289808E4C3601F6BA65A677DD392FB21EBBD24827B989C0FA58067E8",
+          "validated": true,
+          "endpoint": "https://s.devnet.rippletest.net:51234/"
+        }
+      },
+      {
+        "startLedgerIndex": 3914021,
+        "endLedgerIndex": 3914022,
+        "endHashMatch": true,
+        "parentHashMatch": true,
+        "rpcEnd": {
+          "index": 3914022,
+          "hash": "1A34310BE1C77D9D8859A1D0115A042FD83798EED16F40B74AD7242E792D6D15",
+          "parentHash": "EE2D27EF267ACA432C606BE8C8BAB3C2ADFB8750D77484001C79FF479A80B263",
+          "validated": true,
+          "endpoint": "https://s.devnet.rippletest.net:51234/"
+        }
+      },
+      {
+        "startLedgerIndex": 3914023,
+        "endLedgerIndex": 3914118,
+        "endHashMatch": true,
+        "parentHashMatch": true,
+        "rpcEnd": {
+          "index": 3914118,
+          "hash": "4B7E9F8EC1A372F9086641ED36DDBD40AB102809ADF1133205CA15CAE16DC342",
+          "parentHash": "72A5D1D76DBFB7CAD58D6F0299F9910102E09CF535F820C017DF3F6861F74E82",
+          "validated": true,
+          "endpoint": "https://s.devnet.rippletest.net:51234/"
+        }
+      },
+      {
+        "startLedgerIndex": 3914119,
+        "endLedgerIndex": 3914120,
+        "endHashMatch": true,
+        "parentHashMatch": true,
+        "rpcEnd": {
+          "index": 3914120,
+          "hash": "BCBE9AF365A06BE298AC4569CAC3142303DBF392149494E4BFED32A419C120B5",
+          "parentHash": "6968732B05385E43E869B11C9FB74B3D22BB811C82DC558E9BF54FF6EF85543F",
+          "validated": true,
+          "endpoint": "https://s.devnet.rippletest.net:51234/"
+        }
+      },
+      {
+        "startLedgerIndex": 3914121,
+        "endLedgerIndex": 3914216,
+        "endHashMatch": true,
+        "parentHashMatch": true,
+        "rpcEnd": {
+          "index": 3914216,
+          "hash": "6099F1D79706B985DA61E7D0373432A83849C19F71E26EE5DCEBEBDAC17257ED",
+          "parentHash": "691B7732C7139DFE4E38C94FE7A0C0DB60F0D2826A20D0214BAAD45D2E3FF026",
+          "validated": true,
+          "endpoint": "https://s.devnet.rippletest.net:51234/"
+        }
+      }
+    ]
+  },
+  "semanticWitnesses": {
+    "protocolEvents": {
+      "observed": 16,
+      "found": true,
+      "hash": "70A489701D68B89E04923A7845F81F2C615760992C55119A8FC0ED8C759DE684",
+      "path": "/api/transactions/70A489701D68B89E04923A7845F81F2C615760992C55119A8FC0ED8C759DE684",
+      "publicMatch": true,
+      "sourceValidated": true,
+      "transactionTypeMatch": true,
+      "affectedNodeMatch": true,
+      "passed": true,
+      "record": {
+        "eventHash": "70A489701D68B89E04923A7845F81F2C615760992C55119A8FC0ED8C759DE684",
+        "epochId": "devnet-3371675",
+        "ledgerIndex": 3913030,
+        "eventIndex": 0,
+        "closeTime": 838224612,
+        "eventType": "VaultCreate",
+        "resultCode": "tesSUCCESS",
+        "payloadRetained": false,
+        "sourceJson": null,
+        "metadataJson": null,
+        "createdAt": "2026-07-24T16:15:12.553Z"
+      }
+    },
+    "objectChanges": {
+      "observed": 264,
+      "found": true,
+      "hash": "70A489701D68B89E04923A7845F81F2C615760992C55119A8FC0ED8C759DE684",
+      "passed": false,
+      "error": "curl: (22) The requested URL returned error: 503\ncurl: (22) The requested URL returned error: 503\ncurl: (22) The requested URL returned error: 503\ncurl: (22) The requested URL returned error: 503",
+      "record": {
+        "transactionHash": "70A489701D68B89E04923A7845F81F2C615760992C55119A8FC0ED8C759DE684",
+        "epochId": "devnet-3371675",
+        "ledgerIndex": 3913030,
+        "transactionIndex": 0,
+        "transactionType": "VaultCreate",
+        "resultCode": "tesSUCCESS",
+        "closeTime": 838224612,
+        "nodeIndex": 4,
+        "objectType": "Vault",
+        "objectId": "AD0980A254BC7262C57001315A9B6C7C65A020F29FAB2D0A0915933C55FF3BB1",
+        "action": "created",
+        "fieldName": "Account",
+        "beforeJson": null,
+        "afterJson": "rEHSJ98Xy3XVTUEEqkkj3jC7jLJPaYBsUj",
+        "valueType": "string",
+        "unsupportedField": false,
+        "vaultId": "AD0980A254BC7262C57001315A9B6C7C65A020F29FAB2D0A0915933C55FF3BB1",
+        "loanBrokerId": null,
+        "loanId": null,
+        "account": "rEHSJ98Xy3XVTUEEqkkj3jC7jLJPaYBsUj",
+        "owner": "rpNNv4ikeU5neZXM1BaoN2XZyMjK3yZqQP",
+        "borrower": null,
+        "assetKey": null,
+        "mptIssuanceId": "000000019CAD883BB3751D2E32EAF1A223A5FE8AB16568F8",
+        "createdAt": "2026-07-24T16:10:12.000Z"
+      }
+    },
+    "loanLifecycle": {
+      "observed": 0,
+      "found": false,
+      "hash": null,
+      "passed": false,
+      "reason": "no_valid_class_witness"
+    },
+    "archivedObjects": {
+      "observed": 0,
+      "found": false,
+      "hash": null,
+      "passed": false,
+      "reason": "no_valid_class_witness"
+    },
+    "balanceHistory": {
+      "observed": 0,
+      "found": false,
+      "hash": null,
+      "passed": false,
+      "reason": "no_valid_class_witness"
+    }
+  },
+  "preIdentity": {
+    "deploymentId": "6e712cde-c147-45f2-bf34-990ed57748b6",
+    "versionId": "bbfd73a0-aab0-4db7-a1b2-dc7f42a69bae",
+    "deploymentCreatedOn": "2026-07-24T15:36:42.775547Z",
+    "appNetwork": "devnet",
+    "mainnetEnabled": "false",
+    "maxLedgersPerRun": "96",
+    "queueBindings": [
+      {
+        "name": "FAST_LANE_QUEUE",
+        "queue_name": "xrpl-lending-fast-lane",
+        "type": "queue"
+      }
+    ],
+    "schedules": [
+      {
+        "cron": "*/5 * * * *",
+        "created_on": "2026-07-21T00:16:25.002241Z",
+        "modified_on": "2026-07-24T15:36:44.437511Z"
+      }
+    ],
+    "baseBinding": {
+      "network": "devnet",
+      "shadow_epoch_id": "fast-lane-shadow-devnet",
+      "base_epoch_id": "devnet-3371675",
+      "base_snapshot_id": "devnet-3860021-fbba23eeffd1",
+      "base_ledger_index": 3860021,
+      "base_ledger_hash": "FBBA23EEFFD19FFD81F2E6A0A9A5D3E503EE78AA8EB6F3653F756BA90655B4A7",
+      "bound_at": "2026-07-22T18:15:12.742Z"
+    },
+    "overlayBase": {
+      "epoch_id": "devnet-3371675",
+      "base_snapshot_id": "devnet-3860021-fbba23eeffd1",
+      "base_ledger_index": 3860021,
+      "base_ledger_hash": "FBBA23EEFFD19FFD81F2E6A0A9A5D3E503EE78AA8EB6F3653F756BA90655B4A7",
+      "overlay_ledger_index": 3912929,
+      "overlay_ledger_hash": "40BE1441A230F7D53C5C7FC2A54A180E9AA5070641886D019252B14BAFB2CBCC"
+    },
+    "fastEpoch": "fast-lane-shadow-devnet",
+    "historySource": {
+      "status": "ok",
+      "mode": "hybrid",
+      "configured": true,
+      "channel": {
+        "updated_at": "2026-07-20T09:14:10.000Z",
+        "data_commit_sha": "260423fa9afef059c0d47612d27854cac029af22"
+      },
+      "chain": {
+        "chain_id": "canonical-devnet-3371676-3800885",
+        "epoch_id": "devnet-3371675",
+        "start_ledger_index": 3371676,
+        "end_ledger_index": 3800885,
+        "segment_count": 873,
+        "ledger_count": 429210,
+        "publication_sha256": "7041ddcd0885a77730c7e9deb29ada59c0326f4948816db4878c5c9394d5d31d"
+      },
+      "exact_index": {
+        "bucket_count": 256,
+        "total_records": 23049415,
+        "manifest_sha256": "2971fb5b3e55d63576e2c80283c79dafec5482d567715c83d53820cc1f8b1873"
+      }
+    }
+  },
+  "postIdentity": {
+    "deploymentId": "6e712cde-c147-45f2-bf34-990ed57748b6",
+    "versionId": "bbfd73a0-aab0-4db7-a1b2-dc7f42a69bae",
+    "appNetwork": "devnet",
+    "mainnetEnabled": "false",
+    "maxLedgersPerRun": "96",
+    "queueBindings": [
+      {
+        "name": "FAST_LANE_QUEUE",
+        "queue_name": "xrpl-lending-fast-lane",
+        "type": "queue"
+      }
+    ],
+    "schedules": [
+      {
+        "cron": "*/5 * * * *",
+        "created_on": "2026-07-21T00:16:25.002241Z",
+        "modified_on": "2026-07-24T15:36:44.437511Z"
+      }
+    ],
+    "baseBinding": {
+      "network": "devnet",
+      "shadow_epoch_id": "fast-lane-shadow-devnet",
+      "base_epoch_id": "devnet-3371675",
+      "base_snapshot_id": "devnet-3860021-fbba23eeffd1",
+      "base_ledger_index": 3860021,
+      "base_ledger_hash": "FBBA23EEFFD19FFD81F2E6A0A9A5D3E503EE78AA8EB6F3653F756BA90655B4A7",
+      "bound_at": "2026-07-22T18:15:12.742Z"
+    },
+    "overlayBase": {
+      "epoch_id": "devnet-3371675",
+      "base_snapshot_id": "devnet-3860021-fbba23eeffd1",
+      "base_ledger_index": 3860021,
+      "base_ledger_hash": "FBBA23EEFFD19FFD81F2E6A0A9A5D3E503EE78AA8EB6F3653F756BA90655B4A7",
+      "overlay_ledger_index": 3914313,
+      "overlay_ledger_hash": "6BC5D86D9F8D946F67AC207A502D5A2066428DDDCC76B38FA931DD8D213B2863",
+      "updated_at": "2026-07-24T17:15:15.148Z"
+    },
+    "fastEpoch": "fast-lane-shadow-devnet",
+    "historySource": {
+      "status": "ok",
+      "mode": "hybrid",
+      "configured": true,
+      "channel": {
+        "updated_at": "2026-07-20T09:14:10.000Z",
+        "data_commit_sha": "260423fa9afef059c0d47612d27854cac029af22"
+      },
+      "chain": {
+        "chain_id": "canonical-devnet-3371676-3800885",
+        "epoch_id": "devnet-3371675",
+        "start_ledger_index": 3371676,
+        "end_ledger_index": 3800885,
+        "segment_count": 873,
+        "ledger_count": 429210,
+        "publication_sha256": "7041ddcd0885a77730c7e9deb29ada59c0326f4948816db4878c5c9394d5d31d"
+      },
+      "exact_index": {
+        "bucket_count": 256,
+        "total_records": 23049415,
+        "manifest_sha256": "2971fb5b3e55d63576e2c80283c79dafec5482d567715c83d53820cc1f8b1873"
+      }
+    }
+  },
+  "identityChecks": {
+    "deploymentId": true,
+    "versionId": true,
+    "baseBinding": true,
+    "overlayBase": true,
+    "fastEpoch": true,
+    "historySource": true,
+    "appNetwork": true,
+    "mainnetDisabled": true,
+    "maxLedgers": true,
+    "oneQueueBinding": true,
+    "oneCron": true
+  },
+  "finalFastLane": {
+    "epoch_id": "fast-lane-shadow-devnet",
+    "last_processed_ledger": 3914313,
+    "last_processed_hash": "6BC5D86D9F8D946F67AC207A502D5A2066428DDDCC76B38FA931DD8D213B2863",
+    "latest_observed_ledger": 3914313,
+    "latest_observed_hash": "6BC5D86D9F8D946F67AC207A502D5A2066428DDDCC76B38FA931DD8D213B2863",
+    "status": "healthy",
+    "lag_ledgers": 0,
+    "updated_at": "2026-07-24T17:15:14.237Z"
+  },
+  "finalCanonicalOverlay": {
+    "epoch_id": "devnet-3371675",
+    "base_snapshot_id": "devnet-3860021-fbba23eeffd1",
+    "base_ledger_index": 3860021,
+    "base_ledger_hash": "FBBA23EEFFD19FFD81F2E6A0A9A5D3E503EE78AA8EB6F3653F756BA90655B4A7",
+    "overlay_ledger_index": 3914313,
+    "overlay_ledger_hash": "6BC5D86D9F8D946F67AC207A502D5A2066428DDDCC76B38FA931DD8D213B2863",
+    "updated_at": "2026-07-24T17:15:15.148Z"
+  },
+  "compactRows": 0,
+  "staleRows": 0,
+  "resource": {
+    "perSlot": [
+      {
+        "slot": 1784909700000,
+        "metricCount": 2,
+        "rowsRead": 14,
+        "rowsWritten": 22,
+        "terminalLag": 0
+      },
+      {
+        "slot": 1784910000000,
+        "metricCount": 2,
+        "rowsRead": 18,
+        "rowsWritten": 26,
+        "terminalLag": 0
+      },
+      {
+        "slot": 1784910300000,
+        "metricCount": 2,
+        "rowsRead": 12,
+        "rowsWritten": 20,
+        "terminalLag": 0
+      },
+      {
+        "slot": 1784910600000,
+        "metricCount": 2,
+        "rowsRead": 12,
+        "rowsWritten": 20,
+        "terminalLag": 0
+      },
+      {
+        "slot": 1784910900000,
+        "metricCount": 2,
+        "rowsRead": 12,
+        "rowsWritten": 20,
+        "terminalLag": 0
+      },
+      {
+        "slot": 1784911200000,
+        "metricCount": 2,
+        "rowsRead": 12,
+        "rowsWritten": 20,
+        "terminalLag": 0
+      },
+      {
+        "slot": 1784911500000,
+        "metricCount": 2,
+        "rowsRead": 12,
+        "rowsWritten": 20,
+        "terminalLag": 0
+      },
+      {
+        "slot": 1784911800000,
+        "metricCount": 2,
+        "rowsRead": 12,
+        "rowsWritten": 20,
+        "terminalLag": 0
+      },
+      {
+        "slot": 1784912100000,
+        "metricCount": 2,
+        "rowsRead": 12,
+        "rowsWritten": 20,
+        "terminalLag": 0
+      },
+      {
+        "slot": 1784912400000,
+        "metricCount": 2,
+        "rowsRead": 12,
+        "rowsWritten": 20,
+        "terminalLag": 0
+      },
+      {
+        "slot": 1784912700000,
+        "metricCount": 2,
+        "rowsRead": 12,
+        "rowsWritten": 20,
+        "terminalLag": 0
+      },
+      {
+        "slot": 1784913000000,
+        "metricCount": 1,
+        "rowsRead": 6,
+        "rowsWritten": 10,
+        "terminalLag": 0
+      }
+    ],
+    "maxWritesPerSlot": 26,
+    "projectedDailyRowsWritten": 5712,
+    "projectedDailyRowsRead": 3504,
+    "maxEncodedBytes": 10995,
+    "passed": true
+  },
+  "retention": {
+    "queue": {
+      "retained_queue_slots": 1340,
+      "first_slot": 1784308500000,
+      "last_slot": 1784913300000
+    },
+    "metrics": {
+      "retained_metrics": 4095,
+      "first_metric": "2026-07-22T06:50:12.712Z",
+      "last_metric": "2026-07-24T17:15:14.237Z"
+    },
+    "historyWindows": {
+      "retained_windows": 256,
+      "first_ledger": 3905133,
+      "last_ledger": 3914313,
+      "payload_bytes": 14744284
+    }
+  },
+  "http": {
+    "overview": "200",
+    "history-source": "200",
+    "fast-lane-diff": "200",
+    "replacement-base": "200",
+    "pre-soak-readiness": "200"
+  },
+  "protectedCollectorBoundariesInWindow": [],
+  "qualificationScope": {
+    "automatedSourceAudit": "all five semantic classes with public API and XRPL source transaction validation; object change additionally matched to AffectedNodes",
+    "releaseCertification": false,
+    "note": "A pass qualifies the 12-slot pre-soak window only. It does not by itself certify the following 24-hour soak or Mainnet."
+  },
+  "runUrl": "https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/30105991187",
+  "runId": 30105991187
+}
