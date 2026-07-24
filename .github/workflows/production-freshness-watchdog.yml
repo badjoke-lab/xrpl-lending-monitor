@@ -140,3 +140,5 @@ jobs:
 
           gh issue edit "$STATUS_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file issue.md
           test "$healthy" = true
+
+# Retriggered after successful four-hour checkpoint cutover on 2026-07-24.
