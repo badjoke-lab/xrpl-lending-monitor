@@ -1,14 +1,12 @@
 # Implementation status
 
-Last updated: `2026-07-13T09:27Z`.
+Last updated: `2026-07-24T07:10Z`.
 
 ## Current phase
 
-XRPL Lending Monitor is in P0 recovery on XRPL Devnet.
+XRPL Lending Monitor remains in P0 recovery on XRPL Devnet.
 
-The earlier `Pre-soak ready` state is revoked. Newer retained production evidence showed that the five-minute current-state tail could remain recent while other public data paths were not reliable enough for a release claim.
-
-Mainnet remains disabled.
+The product has not passed a complete-history release qualification. Mainnet remains disabled.
 
 ## Active production architecture
 
@@ -21,70 +19,45 @@ Mainnet remains disabled.
 - Current-state source: five-minute `fast_lane`
 - Immutable history mode: `hybrid`
 
-## Active production checkpoint
+## Verified claims
 
-- Epoch: `devnet-3371675`
-- Snapshot: `devnet-3592674-0373cda0b0cd`
-- Ledger: `3,592,674`
-- Ledger hash: `0373CDA0B0CD8486C0C55C5B5DD460501419367BD76D146E4A718EBD9DD8A893`
+The five-minute fast lane is designed to resume from the ledger immediately after its committed cursor, reject parent-hash discontinuity, record Lending protocol activity, derive current-state overlay mutations, and promote those mutations to the canonical overlay after bounded catch-up.
 
-The checkpoint identity remains fixed. The current blockers concern public availability, sustained history advancement, freshness classification, and health-gate correctness.
+These properties do not by themselves certify the complete product history contract.
 
-## P0 findings
+## Unverified release-critical claims
 
-1. A transient current-state release-source read failure could remove the verified snapshot from public current-state responses.
-2. The protected history/current-overlay path was far behind the validated head and did not demonstrate sustainable catch-up.
-3. The fast-lane differential could pass when all sampled canonical comparison rows were missing.
-4. A recent successful protected-collector run did not prove acceptable history freshness.
+A new formal soak must not begin until an evidence design can prove all of the following for the fixed qualification window:
 
-Issue #463 is the controlling recovery issue.
+1. exact five-minute queue-slot continuity;
+2. complete contiguous validated-ledger coverage from the accepted starting cursor;
+3. no reanchor, reset, skipped ledger, or retention loss within the evidence window;
+4. protocol-event completeness for every supported Lending transaction;
+5. object-change, Loan lifecycle, deleted-object archive, and debt/cover/loss history completeness through the protected full-history path;
+6. agreement between the final historical state and the public current-state projection;
+7. stable network, epoch, base snapshot, deployment, and production configuration identities;
+8. public API availability and semantic correctness, not HTTP status alone;
+9. Worker, Queue, RPC, D1 read/write, storage, overlay, retention, and catch-up use within the documented Free-operation envelope;
+10. immutable retained evidence sufficient for an independent final audit.
 
-## P0 recovery order
-
-### Current-state availability
-
-- retain the last verified release reader within the active Worker isolate;
-- refresh it periodically instead of reopening the release channel on every public request;
-- allow fallback only for the same repository, branch, and configured replacement snapshot identity;
-- fail closed when no verified reader exists or the configured identity changes;
-- verify the behavior with injected source failures.
-
-### Truthful comparison and readiness
-
-- reject empty samples;
-- reject samples with no canonical comparison population;
-- require at least one exact source-position comparison;
-- require zero exact projection mismatches;
-- do not use a successful soak process as a substitute for product-data health.
-
-### Sustainable history freshness
-
-- replace or redesign the history tail so measured daily advancement exceeds observed ledger production;
-- preserve atomic cursor, history, lifecycle, archive, balance, current-overlay, and tombstone persistence;
-- preserve idempotency, gap rejection, epoch/base binding, reconciliation, and free-tier resource limits;
-- do not increase limits or cadence without measurement.
-
-## Previous evidence status
-
-Prior runtime, source-comparison, browser, and free-tier measurements remain historical engineering evidence. They no longer establish current release readiness because they did not catch the active availability, sustained-history, and empty-comparison findings.
-
-The previous free-tier projection also showed a tight write-side margin, so P0 persistence changes require fresh measurement before deployment.
+The ad-hoc complete-history soak issues #983 and #984 were invalidated because their workflows could not prove this contract. They are not release evidence.
 
 ## Operating restrictions
 
 - Do not enable Mainnet.
-- Do not add another production cron.
+- Do not add another production collector cron.
 - Do not shorten the five-minute cadence.
-- Do not describe the product as healthy, release ready, pre-soak ready, or stably operating while issue #463 remains open.
-- Do not treat HTTP 200 as healthy when the response represents unavailable data.
-- Preserve the active checkpoint identity.
-- Preserve free-tier safety margins.
+- Do not describe the product as healthy, release ready, pre-soak ready, stably operating, or complete-history qualified.
+- Do not equate fast-lane ledger coverage with complete semantic history.
+- Do not start another timed soak until the qualification contract and retention strategy are implemented and reviewed against the repository source of truth.
+- Do not abandon, shrink, or remove the history product scope without an explicit owner decision.
+- Preserve free-tier safety margins and fail closed on continuity, identity, or persistence errors.
 
 ## Next action
 
-1. Complete CI for PR #464.
-2. Merge and deploy the current-state fallback and truthful differential gate only after all checks pass.
-3. Verify public current-state behavior under a controlled release-source failure.
-4. Implement and measure the sustainable history-tail repair.
-5. Restore independent current-state, history, counts, and reconciliation freshness gates.
-6. Start a new release-qualifying Devnet window only after the P0 exit criteria pass.
+1. Reconstruct the accepted production behavior from the current code paths: five-minute fast lane, four-hour protected collector, immutable history boundary, live-tail merge, canonical overlay promotion, retention, and reconciliation.
+2. Produce one implementation-to-spec matrix identifying which history classes are written by each path and how gaps are recovered.
+3. Repair the qualification and retention design so a full 24-hour window remains independently auditable.
+4. Add fixture and Devnet cross-audits for protocol events, object changes, Loan lifecycle, archives, balance history, and current-state agreement.
+5. Run a bounded pre-soak qualification only after all gates pass.
+6. Start a new fixed 24-hour soak only after the evidence system is already deployed and armed before the boundary.
