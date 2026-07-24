@@ -22,7 +22,7 @@ async function getFastLaneTransactionDetail(
   db: D1Database,
   transactionHash: string,
 ): Promise<{ event: ProtocolEventRecord | null; changes: ObjectChangeRecord[] } | null> {
-  const needle = `"hash":"${transactionHash}"`.replaceAll('\\"', '"')
+  const needle = `"hash":"${transactionHash}"`
   const row = await db.prepare(
     `SELECT history.bundle_json
      FROM fast_lane_shadow_windows AS activity
