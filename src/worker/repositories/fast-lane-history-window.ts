@@ -31,8 +31,26 @@ export interface FastLaneHistoryBundle {
   balanceHistory: BalanceHistoryApiRecord[]
 }
 
+export interface BoundedFastLaneHistoryWindow {
+  scan: IncrementalScanResult
+  bundle: FastLaneHistoryBundle
+  reduced: boolean
+}
+
 interface FastLaneHistoryWindowRow {
   bundle_json: string
+}
+
+export class FastLaneHistoryBundleTooLargeError extends Error {
+  readonly bytes: number
+  readonly limit: number
+
+  constructor(bytes: number, limit: number) {
+    super(`Fast-lane history bundle exceeds the persistence limit: bytes=${bytes}, limit=${limit}`)
+    this.name = 'FastLaneHistoryBundleTooLargeError'
+    this.bytes = bytes
+    this.limit = limit
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -63,9 +81,28 @@ function parseBundle(value: string): FastLaneHistoryBundle {
 function assertBundleSize(bundle: FastLaneHistoryBundle): void {
   const bytes = new TextEncoder().encode(JSON.stringify(bundle)).byteLength
   if (bytes > MAX_FAST_LANE_HISTORY_BUNDLE_BYTES) {
-    throw new Error(
-      `Fast-lane history bundle exceeds the persistence limit: bytes=${bytes}, limit=${MAX_FAST_LANE_HISTORY_BUNDLE_BYTES}`,
-    )
+    throw new FastLaneHistoryBundleTooLargeError(bytes, MAX_FAST_LANE_HISTORY_BUNDLE_BYTES)
+  }
+}
+
+function scanPrefix(scan: IncrementalScanResult, ledgerCount: number): IncrementalScanResult {
+  if (!Number.isSafeInteger(ledgerCount) || ledgerCount < 1 || ledgerCount > scan.ledgers.length) {
+    throw new Error('Fast-lane history scan prefix is invalid')
+  }
+  const ledgers = scan.ledgers.slice(0, ledgerCount)
+  const final = ledgers.at(-1)
+  if (!final) throw new Error('Fast-lane history scan prefix is empty')
+  return {
+    ...scan,
+    endLedgerIndex: final.ledgerIndex,
+    completeToLatest: final.ledgerIndex === scan.latestValidatedLedger,
+    ledgers,
+    metrics: {
+      ...scan.metrics,
+      ledgers: ledgers.length,
+      inspectedTransactions: ledgers.reduce((total, ledger) => total + ledger.transactions.length, 0),
+      lendingTransactions: ledgers.reduce((total, ledger) => total + ledger.lendingTransactions.length, 0),
+    },
   }
 }
 
@@ -116,6 +153,46 @@ export function buildFastLaneHistoryBundle(options: {
   }
   assertBundleSize(bundle)
   return bundle
+}
+
+export function buildBoundedFastLaneHistoryWindow(options: {
+  scan: IncrementalScanResult
+  epochId: string
+  processedAt: string
+}): BoundedFastLaneHistoryWindow {
+  if (options.scan.ledgers.length === 0) {
+    throw new Error('Fast-lane history bundle requires a non-empty scan')
+  }
+
+  let lower = 1
+  let upper = options.scan.ledgers.length
+  let best: BoundedFastLaneHistoryWindow | null = null
+
+  while (lower <= upper) {
+    const count = Math.floor((lower + upper) / 2)
+    const candidateScan = scanPrefix(options.scan, count)
+    try {
+      const bundle = buildFastLaneHistoryBundle({ ...options, scan: candidateScan })
+      best = {
+        scan: candidateScan,
+        bundle,
+        reduced: candidateScan.ledgers.length !== options.scan.ledgers.length,
+      }
+      lower = count + 1
+    } catch (error) {
+      if (!(error instanceof FastLaneHistoryBundleTooLargeError)) throw error
+      upper = count - 1
+    }
+  }
+
+  if (best) return best
+
+  const singleLedgerScan = scanPrefix(options.scan, 1)
+  return {
+    scan: singleLedgerScan,
+    bundle: buildFastLaneHistoryBundle({ ...options, scan: singleLedgerScan }),
+    reduced: options.scan.ledgers.length !== 1,
+  }
 }
 
 export async function readFastLaneHistoryBundlesAfterBoundary(options: {
