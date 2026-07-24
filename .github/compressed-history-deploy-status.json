@@ -1,0 +1,20 @@
+{
+  "checkedAt": "2026-07-24T09:25:45Z",
+  "passed": false,
+  "workflowOutcome": "failure",
+  "checkpoint": {
+    "implementationSha": "6555cf5c34ed68e862013293253796205415a1c8",
+    "epochId": "devnet-3371675",
+    "snapshotId": "devnet-3860021-fbba23eeffd1",
+    "ledgerIndex": 3860021,
+    "ledgerHash": "FBBA23EEFFD19FFD81F2E6A0A9A5D3E503EE78AA8EB6F3653F756BA90655B4A7",
+    "historyMode": "d1_fast_lane_windows_with_archived_branch",
+    "historyArchiveLedgerIndex": 3800885,
+    "historyArchiveLedgerHash": "EAA0D29666E73D7594A52DF8000B07F346CD4DA24A9A07549612CDC7D727B700",
+    "historyPublicationSha256": "7041ddcd0885a77730c7e9deb29ada59c0326f4948816db4878c5c9394d5d31d",
+    "historyGapLedgers": 59136,
+    "fastLaneHistoryEncoding": "gzip-base64-v1",
+    "fastLaneEncodedBundleLimitBytes": 131072
+  },
+  "error": "verification_result_missing"
+}
