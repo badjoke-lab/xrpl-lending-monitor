@@ -1,0 +1,210 @@
+name: Apply hybrid transaction patch 999
+
+on:
+  push:
+    branches:
+      - agent/current-production-probe-20260724-2246
+    paths:
+      - .github/workflows/apply-hybrid-transaction-patch-999.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/hybrid-transaction-detail-999
+      - name: Patch compact history and hybrid transaction reads
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          compact=Path('src/worker/repositories/fast-lane-compact-shadow-repository.ts')
+          text=compact.read_text()
+          replacements=[
+            ("""  for (const window of options.historyWindows) {
+    const { historyBundle, encodedHistoryBundle } = window
+    statements.push(
+""", """  for (const window of options.historyWindows) {
+    const { historyBundle, encodedHistoryBundle } = window
+    const transactionHashes = [...new Set([
+      ...historyBundle.protocolEvents.map((event) => event.eventHash.toUpperCase()),
+      ...historyBundle.objectChanges.map((change) => change.transactionHash.toUpperCase()),
+    ])].sort()
+    statements.push(
+"""),
+            ("""           end_ledger_hash, bundle_json, created_at
+         ) VALUES ('devnet', ?1, ?2, ?3, ?4, ?5, ?6)
+""", """           end_ledger_hash, bundle_json, transaction_hashes_json, created_at
+         ) VALUES ('devnet', ?1, ?2, ?3, ?4, ?5, ?6, ?7)
+"""),
+            ("""           end_ledger_hash = excluded.end_ledger_hash,
+           bundle_json = excluded.bundle_json,
+           created_at = excluded.created_at
+""", """           end_ledger_hash = excluded.end_ledger_hash,
+           bundle_json = excluded.bundle_json,
+           transaction_hashes_json = excluded.transaction_hashes_json,
+           created_at = excluded.created_at
+"""),
+            ("""        historyBundle.endLedgerHash,
+        encodedHistoryBundle,
+        historyBundle.createdAt,
+""", """        historyBundle.endLedgerHash,
+        encodedHistoryBundle,
+        JSON.stringify(transactionHashes),
+        historyBundle.createdAt,
+"""),
+          ]
+          for old,new in replacements:
+              assert old in text, old
+              text=text.replace(old,new,1)
+          compact.write_text(text)
+
+          repository=Path('src/worker/repositories/history-api-repository.ts')
+          text=repository.read_text()
+          imports="""import { decodeFastLaneHistoryPayload } from './fast-lane-history-codec'
+import type { FastLaneHistoryBundle } from './fast-lane-history-window'
+
+"""
+          if not text.startswith('import '): text=imports+text
+          marker='interface BalanceHistoryRow {\n'
+          assert marker in text
+          text=text.replace(marker,"""interface FastLaneTransactionWindowRow {
+  bundle_json: string
+}
+
+"""+marker,1)
+          old="""export async function getTransactionDetail(
+  db: D1Database,
+  transactionHash: string,
+): Promise<{ event: ProtocolEventRecord | null; changes: ObjectChangeRecord[] }> {
+  const [eventRow, changeRows] = await Promise.all([
+    db
+      .prepare(
+        `SELECT event_hash, epoch_id, ledger_index, event_index, close_time,
+                event_type, result_code, payload_retained, source_json,
+                metadata_json, created_at
+         FROM protocol_events
+         WHERE network = 'devnet'
+           AND event_hash = ?1
+         LIMIT 1`,
+      )
+      .bind(transactionHash)
+      .first<ProtocolEventRow>(),
+    allRows<ObjectChangeRow>(
+      db
+        .prepare(
+          `SELECT *
+           FROM object_changes
+           WHERE network = 'devnet'
+             AND transaction_hash = ?1
+           ORDER BY node_index ASC, field_name ASC
+           LIMIT 100`,
+        )
+        .bind(transactionHash),
+    ),
+  ])
+
+  return {
+    event: eventRow ? mapProtocolEvent(eventRow) : null,
+    changes: changeRows.map(mapObjectChange),
+  }
+}
+"""
+          new="""async function getFastLaneTransactionDetail(
+  db: D1Database,
+  transactionHash: string,
+): Promise<{ event: ProtocolEventRecord | null; changes: ObjectChangeRecord[] } | null> {
+  const row = await db.prepare(
+    `SELECT bundle_json
+     FROM fast_lane_history_windows
+     WHERE network = 'devnet'
+       AND epoch_id = (
+         SELECT base_epoch_id
+         FROM fast_lane_shadow_base_binding
+         WHERE network = 'devnet'
+       )
+       AND EXISTS (
+         SELECT 1
+         FROM json_each(transaction_hashes_json)
+         WHERE value = ?1
+       )
+     ORDER BY end_ledger_index DESC
+     LIMIT 1`,
+  ).bind(transactionHash).first<FastLaneTransactionWindowRow>()
+  if (!row) return null
+
+  const decoded = await decodeFastLaneHistoryPayload(row.bundle_json) as Partial<FastLaneHistoryBundle>
+  if (!Array.isArray(decoded.protocolEvents) || !Array.isArray(decoded.objectChanges)) {
+    throw new Error('Fast-lane transaction history bundle is invalid')
+  }
+  return {
+    event: decoded.protocolEvents.find((event) => event.eventHash.toUpperCase() === transactionHash) ?? null,
+    changes: decoded.objectChanges.filter(
+      (change) => change.transactionHash.toUpperCase() === transactionHash,
+    ),
+  }
+}
+
+export async function getTransactionDetail(
+  db: D1Database,
+  transactionHash: string,
+): Promise<{ event: ProtocolEventRecord | null; changes: ObjectChangeRecord[] }> {
+  const normalizedHash = transactionHash.toUpperCase()
+  const [eventRow, changeRows, fastLane] = await Promise.all([
+    db
+      .prepare(
+        `SELECT event_hash, epoch_id, ledger_index, event_index, close_time,
+                event_type, result_code, payload_retained, source_json,
+                metadata_json, created_at
+         FROM protocol_events
+         WHERE network = 'devnet'
+           AND event_hash = ?1
+         LIMIT 1`,
+      )
+      .bind(normalizedHash)
+      .first<ProtocolEventRow>(),
+    allRows<ObjectChangeRow>(
+      db
+        .prepare(
+          `SELECT *
+           FROM object_changes
+           WHERE network = 'devnet'
+             AND transaction_hash = ?1
+           ORDER BY node_index ASC, field_name ASC
+           LIMIT 100`,
+        )
+        .bind(normalizedHash),
+    ),
+    getFastLaneTransactionDetail(db, normalizedHash),
+  ])
+
+  const changes = new Map<string, ObjectChangeRecord>()
+  for (const change of [...changeRows.map(mapObjectChange), ...(fastLane?.changes ?? [])]) {
+    changes.set(`${change.transactionHash}:${change.nodeIndex}:${change.fieldName}`, change)
+  }
+  return {
+    event: eventRow ? mapProtocolEvent(eventRow) : fastLane?.event ?? null,
+    changes: [...changes.values()].sort((left, right) => (
+      left.nodeIndex - right.nodeIndex || left.fieldName.localeCompare(right.fieldName)
+    )),
+  }
+}
+"""
+          assert old in text
+          repository.write_text(text.replace(old,new,1))
+          PY
+      - name: Commit target branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/worker/repositories/fast-lane-compact-shadow-repository.ts src/worker/repositories/history-api-repository.ts
+          git commit -m 'Implement hybrid transaction detail lookup'
+          git push origin HEAD:agent/hybrid-transaction-detail-999
