@@ -1,0 +1,439 @@
+name: Deploy runtime repair 996
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/deploy-runtime-repair-996.yml
+      - .github/runtime-repair-996-deploy-trigger
+  push:
+    branches: [main]
+    paths:
+      - .github/runtime-repair-996-deploy-trigger
+
+permissions:
+  contents: write
+
+concurrency:
+  group: production-worker-write
+  cancel-in-progress: false
+
+env:
+  RUNTIME_REPAIR_SHA: 4acc2ea40e3a1b2ef7d9c6c3d21b583e3aa3b7ba
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
+  PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  validate:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate one-time deployment boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f .github/runtime-repair-996-deploy-trigger
+          test "$(cat .github/runtime-repair-996-deploy-trigger)" = "deploy-${RUNTIME_REPAIR_SHA}"
+          test "$(jq -r '.main' wrangler.jsonc)" = 'src/worker/p0-redundant-scheduler-entry.ts'
+          test "$(jq -r '.vars.APP_NETWORK' wrangler.jsonc)" = devnet
+          test "$(jq -r '.vars.MAINNET_ENABLED' wrangler.jsonc)" = false
+          test "$(jq -r '.triggers.crons | length' wrangler.jsonc)" -eq 1
+          test "$(jq -r '.triggers.crons[0]' wrangler.jsonc)" = '*/5 * * * *'
+          test "$(jq -r '.queues.producers | length' wrangler.jsonc)" -eq 1
+          test "$(jq -r '.queues.consumers | length' wrangler.jsonc)" -eq 1
+          test "$(jq -r '.vars.FAST_LANE_MAX_LEDGERS_PER_RUN' wrangler.jsonc)" = 96
+          git diff --quiet "${RUNTIME_REPAIR_SHA}" -- src wrangler.jsonc package.json pnpm-lock.yaml
+
+  deploy:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Check out implementation
+        uses: actions/checkout@v4
+
+      - name: Check out production current-state identity
+        uses: actions/checkout@v4
+        with:
+          ref: current-state-data
+          path: .local/current-state-data
+          sparse-checkout: |
+            read-model/manifest.json
+            rolling-read-model-summary.json
+          sparse-checkout-cone-mode: false
+
+      - name: Check out archived history identity
+        uses: actions/checkout@v4
+        with:
+          ref: history-data
+          path: .local/history-data
+          sparse-checkout: history/publication.json
+          sparse-checkout-cone-mode: false
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Validate guarded Devnet production contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          test "$(cat .github/runtime-repair-996-deploy-trigger)" = "deploy-${RUNTIME_REPAIR_SHA}"
+          git diff --quiet "${RUNTIME_REPAIR_SHA}" -- src wrangler.jsonc package.json pnpm-lock.yaml
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          config=json.loads(Path('wrangler.jsonc').read_text())
+          current=json.loads(Path('.local/current-state-data/read-model/manifest.json').read_text())
+          summary=json.loads(Path('.local/current-state-data/rolling-read-model-summary.json').read_text())
+          history=json.loads(Path('.local/history-data/history/publication.json').read_text())
+
+          assert config['main']=='src/worker/p0-redundant-scheduler-entry.ts'
+          assert config['triggers']['crons']==['*/5 * * * *']
+          assert config['vars']['APP_NETWORK']=='devnet'
+          assert config['vars']['MAINNET_ENABLED']=='false'
+          assert config['vars']['FAST_LANE_MAX_LEDGERS_PER_RUN']=='96'
+          assert len(config['queues']['producers'])==1
+          assert len(config['queues']['consumers'])==1
+          assert config['queues']['consumers'][0]['max_batch_size']==1
+          assert config['queues']['consumers'][0]['max_concurrency']==1
+          assert 'REPLACEMENT_BASE_CUTOVER_TOKEN' not in config['vars']
+
+          assert current['complete'] is True
+          assert history['complete'] is True
+          assert current['epochId']==history['epochId']=='devnet-3371675'
+          assert summary['mode']=='d1-overlay-fold'
+          assert summary['source']['snapshotId']==current['snapshotId']
+          assert summary['target']['snapshotId']==current['snapshotId']
+
+          variables=config['vars']
+          assert variables['CURRENT_STATE_REPLACEMENT_SNAPSHOT_ID']==current['snapshotId']
+          assert variables['REPLACEMENT_BASE_EPOCH_ID']==current['epochId']
+          assert variables['REPLACEMENT_BASE_SNAPSHOT_ID']==current['snapshotId']
+          assert int(variables['REPLACEMENT_BASE_LEDGER_INDEX'])==current['ledgerIndex']
+          assert variables['REPLACEMENT_BASE_LEDGER_HASH']==current['ledgerHash']
+
+          checkpoint={
+            'runtimeRepairSha':'4acc2ea40e3a1b2ef7d9c6c3d21b583e3aa3b7ba',
+            'workflowSha':'${{ github.sha }}',
+            'epochId':current['epochId'],
+            'snapshotId':current['snapshotId'],
+            'ledgerIndex':current['ledgerIndex'],
+            'ledgerHash':current['ledgerHash'],
+            'historyArchiveLedgerIndex':history['endLedgerIndex'],
+            'historyArchiveLedgerHash':history['endLedgerHash'],
+            'historyPublicationSha256':history['publicationSha256'],
+          }
+          Path('runtime-repair-996-checkpoint.json').write_text(json.dumps(checkpoint,indent=2)+'\n')
+          PY
+
+      - name: Build application
+        run: pnpm build
+
+      - name: Apply pending additive D1 migrations
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p runtime-repair-996-migrations
+          pnpm exec wrangler d1 migrations list xrpl-lending-monitor --remote | tee runtime-repair-996-migrations/before.txt
+          pnpm exec wrangler d1 migrations apply xrpl-lending-monitor --remote | tee runtime-repair-996-migrations/apply.txt
+          pnpm exec wrangler d1 migrations list xrpl-lending-monitor --remote | tee runtime-repair-996-migrations/after.txt
+
+      - name: Capture pre-deploy identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error --retry 3 --retry-all-errors \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/xrpl-lending-monitor/deployments" \
+            > pre-deployments.json
+          jq -e '.result.deployments | length > 0' pre-deployments.json >/dev/null
+
+      - name: Deploy Worker
+        id: deploy
+        run: pnpm exec wrangler deploy
+
+      - name: Capture and validate deployed identity
+        id: identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          previous="$(jq -r '.result.deployments[0].id' pre-deployments.json)"
+          deployed=false
+          for attempt in $(seq 1 60); do
+            curl --fail-with-body --silent --show-error --retry 2 --retry-all-errors \
+              -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+              "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/xrpl-lending-monitor/deployments" \
+              > post-deployments.json || true
+            current="$(jq -r '.result.deployments[0].id // empty' post-deployments.json 2>/dev/null || true)"
+            if [ -n "$current" ] && [ "$current" != "$previous" ]; then deployed=true; break; fi
+            sleep 2
+          done
+          test "$deployed" = true
+          jq -e '.result.deployments[0].versions | length == 1 and .result.deployments[0].versions[0].percentage == 100' post-deployments.json >/dev/null
+          jq '.result.deployments[0]' post-deployments.json > deployed-identity.json
+          jq -r '.created_on' deployed-identity.json > deployed-at.txt
+
+      - name: Verify active settings and schedule
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 30); do
+            curl --fail-with-body --silent --show-error --retry 2 --retry-all-errors \
+              -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+              "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/xrpl-lending-monitor/settings" \
+              > deployed-settings.json || true
+            curl --fail-with-body --silent --show-error --retry 2 --retry-all-errors \
+              -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+              "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/xrpl-lending-monitor/schedules" \
+              > deployed-schedules.json || true
+            if jq -e '
+              def binding($name): [.result.bindings[] | select(.name==$name) | (.text // .value)] | first;
+              binding("APP_NETWORK")=="devnet"
+              and binding("MAINNET_ENABLED")=="false"
+              and binding("FAST_LANE_MAX_LEDGERS_PER_RUN")=="96"
+              and ([.result.bindings[] | select(.name=="FAST_LANE_QUEUE" and .type=="queue")] | length)==1
+              and ([.result.bindings[] | select(.name=="REPLACEMENT_BASE_CUTOVER_TOKEN")] | length)==0
+            ' deployed-settings.json >/dev/null 2>&1 \
+              && jq -e '.result.schedules | length==1 and .[0].cron=="*/5 * * * *"' deployed-schedules.json >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1
+
+      - name: Wait for first completed post-deploy five-minute slot
+        shell: bash
+        run: |
+          set -euo pipefail
+          query_d1() {
+            local sql="$1" output="$2"
+            jq -n --arg sql "$sql" '{sql:$sql}' \
+              | curl --fail-with-body --silent --show-error --retry 3 --retry-all-errors \
+                  --connect-timeout 10 --max-time 45 \
+                  -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+                  -H 'Content-Type: application/json' --data-binary @- \
+                  "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database/${DATABASE_ID}/query" \
+              > "$output"
+          }
+          DEPLOYED_AT="$(cat deployed-at.txt)"
+          found=false
+          for attempt in $(seq 1 90); do
+            query_d1 "SELECT scheduled_time,status,started_at,completed_at,next_scheduled_time,error_message,updated_at FROM fast_lane_queue_slots WHERE started_at>='${DEPLOYED_AT}' AND status='completed' ORDER BY scheduled_time ASC LIMIT 1" post-slot.json
+            count="$(jq '[.result[0].results[]?] | length' post-slot.json)"
+            if [ "$count" -eq 1 ]; then found=true; break; fi
+            sleep 10
+          done
+          test "$found" = true
+          jq -e '.result[0].results[0].status=="completed" and .result[0].results[0].error_message==null' post-slot.json >/dev/null
+
+      - name: Read post-deploy semantic and resource evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          query_d1() {
+            local sql="$1" output="$2"
+            jq -n --arg sql "$sql" '{sql:$sql}' \
+              | curl --fail-with-body --silent --show-error --retry 3 --retry-all-errors \
+                  --connect-timeout 10 --max-time 45 \
+                  -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+                  -H 'Content-Type: application/json' --data-binary @- \
+                  "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database/${DATABASE_ID}/query" \
+              > "$output"
+          }
+          STARTED_AT="$(jq -r '.result[0].results[0].started_at' post-slot.json)"
+          COMPLETED_AT="$(jq -r '.result[0].results[0].completed_at' post-slot.json)"
+          query_d1 "SELECT run_at,status,start_ledger_index,end_ledger_index,latest_observed_ledger,lag_ledgers,ledgers_processed,persistence_rows_read,persistence_rows_written,error_message FROM fast_lane_shadow_run_metrics WHERE network='devnet' AND run_at>='${STARTED_AT}' AND run_at<='${COMPLETED_AT}' ORDER BY run_at" post-metrics.json
+          query_d1 "SELECT start_ledger_index,end_ledger_index,end_ledger_hash,created_at,LENGTH(bundle_json) AS encoded_bytes,bundle_json FROM fast_lane_history_windows WHERE network='devnet' AND created_at>='${STARTED_AT}' AND created_at<='${COMPLETED_AT}' ORDER BY start_ledger_index,end_ledger_index" post-windows.json
+          query_d1 "SELECT epoch_id,last_processed_ledger,last_processed_hash,latest_observed_ledger,latest_observed_hash,status,(latest_observed_ledger-last_processed_ledger) AS lag_ledgers,updated_at FROM fast_lane_shadow_state WHERE network='devnet'" post-fast.json
+          query_d1 "SELECT epoch_id,base_snapshot_id,base_ledger_index,base_ledger_hash,overlay_ledger_index,overlay_ledger_hash,updated_at FROM current_state_overlay_state WHERE network='devnet'" post-overlay.json
+          query_d1 "SELECT COUNT(*) AS compact_rows FROM fast_lane_shadow_objects_compact WHERE network='devnet'" post-compact.json
+          query_d1 "SELECT COUNT(*) AS stale_rows FROM current_state_overlay_objects o WHERE o.network='devnet' AND NOT EXISTS (SELECT 1 FROM fast_lane_shadow_base_binding b WHERE b.network=o.network AND b.base_epoch_id=o.epoch_id AND b.base_snapshot_id=o.base_snapshot_id)" post-stale.json
+
+          for path in /api/overview /api/status/history-source '/api/status/fast-lane-diff?limit=1' /api/status/replacement-base-rebase; do
+            name="$(printf '%s' "$path" | tr '/?=&' '----')"
+            code="$(curl --silent --show-error --retry 3 --retry-all-errors -o "api-${name}.json" -w '%{http_code}' "${PRODUCTION_BASE}${path}")"
+            test "$code" = 200
+          done
+
+      - name: Decode, cross-audit, and enforce post-deploy gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import base64, gzip, json, subprocess
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          def rows(path):
+              payload=json.loads(Path(path).read_text())
+              return payload.get('result',[{}])[0].get('results',[])
+          def one(path):
+              values=rows(path)
+              return values[0] if values else {}
+
+          metrics=rows('post-metrics.json')
+          windows=rows('post-windows.json')
+          fast=one('post-fast.json')
+          overlay=one('post-overlay.json')
+          compact=int(one('post-compact.json').get('compact_rows',-1))
+          stale=int(one('post-stale.json').get('stale_rows',-1))
+
+          assert metrics, 'post-deploy slot has no metrics'
+          assert all(m.get('status') in ('committed','caught_up') and m.get('error_message') in (None,'') for m in metrics)
+          assert int(metrics[-1].get('lag_ledgers',-1))==0
+          writes=sum(int(m.get('persistence_rows_written') or 0) for m in metrics)
+          reads=sum(int(m.get('persistence_rows_read') or 0) for m in metrics)
+          assert writes<=300, f'post-deploy writes exceeded 300: {writes}'
+
+          assert windows, 'post-deploy slot has no semantic history windows'
+          expected_start=None
+          max_encoded=0
+          semantic_totals={k:0 for k in ('protocolEvents','objectChanges','loanLifecycle','archivedObjects','balanceHistory')}
+          witness=None
+          decoded=[]
+          for row in windows:
+              start=int(row['start_ledger_index']); end=int(row['end_ledger_index'])
+              if expected_start is not None:
+                  assert start==expected_start, f'non-contiguous history: expected {expected_start}, got {start}'
+              expected_start=end+1
+              encoded=str(row['bundle_json'])
+              assert encoded.startswith('gzip-base64-v1:')
+              max_encoded=max(max_encoded,int(row.get('encoded_bytes') or 0))
+              assert max_encoded<=131072
+              bundle=json.loads(gzip.decompress(base64.b64decode(encoded.split(':',1)[1])).decode())
+              for key in semantic_totals:
+                  value=bundle.get(key)
+                  assert isinstance(value,list), f'missing semantic array {key}'
+                  semantic_totals[key]+=len(value)
+              if witness is None and bundle['protocolEvents']:
+                  witness=bundle['protocolEvents'][0].get('eventHash')
+              if witness is None:
+                  for change in bundle['objectChanges']:
+                      if change.get('transactionHash'):
+                          witness=change['transactionHash']; break
+              decoded.append({'startLedgerIndex':start,'endLedgerIndex':end,'encodedBytes':int(row.get('encoded_bytes') or 0)})
+
+          assert fast.get('status')=='healthy'
+          assert int(fast.get('lag_ledgers',-1))==0
+          assert int(fast.get('last_processed_ledger',-1))==int(overlay.get('overlay_ledger_index',-2))
+          assert fast.get('last_processed_hash')==overlay.get('overlay_ledger_hash')
+          assert compact==0 and stale==0
+          assert witness, 'no supported transaction witness in post-deploy slot'
+
+          public_code=subprocess.check_output([
+              'curl','--silent','--show-error','--retry','3','--retry-all-errors',
+              '-A','xrpl-lending-monitor-deploy-verifier/1.0','-o','witness-public.json','-w','%{http_code}',
+              f'https://xrpl-lending-monitor.badjoke-lab.workers.dev/api/transactions/{witness}'
+          ],text=True).strip()
+          assert public_code=='200', f'public witness HTTP {public_code}'
+          public=json.loads(Path('witness-public.json').read_text())
+          assert public.get('found') is True
+          assert public.get('transaction_hash')==witness
+
+          request=json.dumps({'method':'tx','params':[{'transaction':witness,'binary':False}]})
+          validated=False
+          xrpl_payload=None
+          for endpoint in ('https://devnet.honeycluster.io/','https://s.devnet.rippletest.net:51234/'):
+              completed=subprocess.run([
+                  'curl','--silent','--show-error','--retry','2','--retry-all-errors',
+                  '-H','content-type: application/json','--data',request,endpoint
+              ],text=True,capture_output=True)
+              if completed.returncode!=0: continue
+              try: payload=json.loads(completed.stdout)
+              except json.JSONDecodeError: continue
+              if payload.get('result',{}).get('validated') is True:
+                  validated=True; xrpl_payload=payload; break
+          assert validated, 'XRPL transaction witness was not validated'
+          Path('witness-xrpl.json').write_text(json.dumps(xrpl_payload,indent=2)+'\n')
+
+          result={
+            'checkedAt':datetime.now(timezone.utc).isoformat().replace('+00:00','Z'),
+            'passed':True,
+            'runtimeRepairSha':'4acc2ea40e3a1b2ef7d9c6c3d21b583e3aa3b7ba',
+            'deployment':json.loads(Path('deployed-identity.json').read_text()),
+            'slot':one('post-slot.json'),
+            'metrics':metrics,
+            'resource':{'rowsRead':reads,'rowsWritten':writes,'maxEncodedBytes':max_encoded},
+            'history':{'windows':decoded,'semanticTotals':semantic_totals},
+            'witness':{'transactionHash':witness,'publicMatched':True,'xrplValidated':True},
+            'fastLane':fast,
+            'canonicalOverlay':overlay,
+            'compactRows':compact,
+            'staleRows':stale,
+          }
+          Path('runtime-repair-996-deploy-result.json').write_text(json.dumps(result,indent=2)+'\n')
+          PY
+
+      - name: Retain deploy result
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -s runtime-repair-996-deploy-result.json ]; then
+            jq -n \
+              --arg checkedAt "$(date -u +%FT%TZ)" \
+              --arg runId "$GITHUB_RUN_ID" \
+              --arg runUrl "https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+              --arg deployOutcome "${{ steps.deploy.outcome }}" \
+              --arg identityOutcome "${{ steps.identity.outcome }}" \
+              '{checkedAt:$checkedAt,passed:false,runtimeRepairSha:"4acc2ea40e3a1b2ef7d9c6c3d21b583e3aa3b7ba",runId:($runId|tonumber),runUrl:$runUrl,deployOutcome:$deployOutcome,identityOutcome:$identityOutcome,failure:"post_deploy_verification_failed"}' \
+              > runtime-repair-996-deploy-result.json
+          fi
+          tmp="$(mktemp)"
+          jq \
+            --arg runId "$GITHUB_RUN_ID" \
+            --arg runUrl "https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            '. + {runId:($runId|tonumber),runUrl:$runUrl}' \
+            runtime-repair-996-deploy-result.json > "$tmp"
+          mv "$tmp" runtime-repair-996-deploy-result.json
+          api="repos/${GITHUB_REPOSITORY}/contents/.github/runtime-repair-996-deploy-status.json"
+          existing="$(gh api "$api" --jq .sha 2>/dev/null || true)"
+          content="$(base64 -w0 runtime-repair-996-deploy-result.json)"
+          if [ -n "$existing" ]; then
+            gh api --method PUT "$api" -f message='Update runtime repair 996 deploy status' -f content="$content" -f sha="$existing" -f branch=main >/dev/null
+          else
+            gh api --method PUT "$api" -f message='Create runtime repair 996 deploy status' -f content="$content" -f branch=main >/dev/null
+          fi
+          test "$(jq -r '.passed' runtime-repair-996-deploy-result.json)" = true
+
+      - name: Upload deploy evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-repair-996-deploy-evidence
+          path: |
+            runtime-repair-996-checkpoint.json
+            pre-deployments.json
+            post-deployments.json
+            deployed-identity.json
+            deployed-settings.json
+            deployed-schedules.json
+            post-slot.json
+            post-metrics.json
+            post-windows.json
+            post-fast.json
+            post-overlay.json
+            post-compact.json
+            post-stale.json
+            witness-public.json
+            witness-xrpl.json
+            runtime-repair-996-deploy-result.json
+            runtime-repair-996-migrations
+          if-no-files-found: warn
+          retention-days: 14
