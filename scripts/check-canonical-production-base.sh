@@ -7,6 +7,7 @@ ROOT="${CANONICAL_BASE_CHECK_DIR:-.local/canonical-base-check}"
 
 mkdir -p "${ROOT}"
 git show "${CURRENT_REF}:read-model/manifest.json" > "${ROOT}/current-manifest.json"
+git show "${CURRENT_REF}:rolling-read-model-summary.json" > "${ROOT}/current-summary.json"
 git show "${HISTORY_REF}:history/publication.json" > "${ROOT}/history-publication.json"
 
 jq -e '.complete == true and .epochId == "devnet-3371675"' \
@@ -23,12 +24,34 @@ HISTORY_HASH="$(jq -r '.endLedgerHash' "${ROOT}/history-publication.json")"
 HISTORY_EPOCH="$(jq -r '.epochId' "${ROOT}/history-publication.json")"
 
 printf '%s' "${CURRENT_LEDGER}" | grep -Eq '^[0-9]+$'
+printf '%s' "${HISTORY_LEDGER}" | grep -Eq '^[0-9]+$'
 printf '%s' "${CURRENT_HASH}" | grep -Eq '^[A-F0-9]{64}$'
+printf '%s' "${HISTORY_HASH}" | grep -Eq '^[A-F0-9]{64}$'
 printf '%s' "${CURRENT_SNAPSHOT}" | grep -Eq '^devnet-[0-9]+-[a-f0-9]{12}$'
 
-test "${CURRENT_LEDGER}" = "${HISTORY_LEDGER}"
-test "${CURRENT_HASH}" = "${HISTORY_HASH}"
 test "${CURRENT_EPOCH}" = "${HISTORY_EPOCH}"
+test "${CURRENT_LEDGER}" -ge "${HISTORY_LEDGER}"
+if test "${CURRENT_LEDGER}" -eq "${HISTORY_LEDGER}"; then
+  test "${CURRENT_HASH}" = "${HISTORY_HASH}"
+fi
+
+jq -e \
+  --arg snapshot "${CURRENT_SNAPSHOT}" \
+  --arg epoch "${CURRENT_EPOCH}" \
+  --arg ledger "${CURRENT_LEDGER}" \
+  --arg hash "${CURRENT_HASH}" '
+    .mode == "d1-overlay-fold"
+    and .source.epochId == $epoch
+    and (.source.ledgerIndex | tostring) == $ledger
+    and .source.ledgerHash == $hash
+    and .source.snapshotId == $snapshot
+    and (.target.ledgerIndex | tostring) == $ledger
+    and .target.ledgerHash == $hash
+    and .target.snapshotId == $snapshot
+    and .overlaySource.epochId == $epoch
+    and (.overlaySource.overlayLedgerIndex | tostring) == $ledger
+    and .overlaySource.overlayLedgerHash == $hash
+  ' "${ROOT}/current-summary.json" > /dev/null
 
 jq -e \
   --arg snapshot "${CURRENT_SNAPSHOT}" \
@@ -49,9 +72,17 @@ jq -e \
     and (.vars | has("REPLACEMENT_BASE_CUTOVER_TOKEN") | not)
   ' wrangler.jsonc > /dev/null
 
+HISTORY_GAP="$((CURRENT_LEDGER - HISTORY_LEDGER))"
+MODE="aligned"
+if test "${HISTORY_GAP}" -gt 0; then MODE="archived_plus_forward_only"; fi
+
 jq -n \
   --arg epochId "${CURRENT_EPOCH}" \
   --arg snapshotId "${CURRENT_SNAPSHOT}" \
-  --argjson ledgerIndex "${CURRENT_LEDGER}" \
-  --arg ledgerHash "${CURRENT_HASH}" \
-  '{passed:true,epochId:$epochId,snapshotId:$snapshotId,ledgerIndex:$ledgerIndex,ledgerHash:$ledgerHash}'
+  --argjson currentLedgerIndex "${CURRENT_LEDGER}" \
+  --arg currentLedgerHash "${CURRENT_HASH}" \
+  --argjson historyLedgerIndex "${HISTORY_LEDGER}" \
+  --arg historyLedgerHash "${HISTORY_HASH}" \
+  --argjson historyGapLedgers "${HISTORY_GAP}" \
+  --arg historyMode "${MODE}" \
+  '{passed:true,epochId:$epochId,snapshotId:$snapshotId,currentLedgerIndex:$currentLedgerIndex,currentLedgerHash:$currentLedgerHash,historyLedgerIndex:$historyLedgerIndex,historyLedgerHash:$historyLedgerHash,historyGapLedgers:$historyGapLedgers,historyMode:$historyMode}'
