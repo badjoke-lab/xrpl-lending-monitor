@@ -60,7 +60,7 @@ jobs:
           query_d1 "SELECT epoch_id,base_snapshot_id,base_ledger_index,base_ledger_hash,overlay_ledger_index,overlay_ledger_hash,updated_at FROM current_state_overlay_state WHERE network='devnet'" overlay-state.json
           query_d1 "SELECT COUNT(*) AS compact_rows FROM fast_lane_shadow_objects_compact WHERE network='devnet'" compact.json
           query_d1 "SELECT COUNT(*) AS stale_rows FROM current_state_overlay_objects o WHERE o.network='devnet' AND NOT EXISTS (SELECT 1 FROM fast_lane_shadow_base_binding b WHERE b.network=o.network AND b.base_epoch_id=o.epoch_id AND b.base_snapshot_id=o.base_snapshot_id)" stale.json
-          query_d1 "SELECT network,run_at,status,start_ledger_index,end_ledger_index,latest_observed_ledger,lag_ledgers,ledgers_processed,persistence_rows_read,persistence_rows_written,error_message FROM fast_lane_shadow_run_metrics WHERE network='devnet' ORDER BY run_at DESC LIMIT 1" metric.json
+          query_d1 "SELECT network,run_at,status,start_ledger_index,end_ledger_index,latest_observed_ledger,lag_ledgers,ledgers_processed,persistence_rows_read,persistence_rows_written,error_message FROM fast_lane_shadow_run_metrics WHERE network='devnet' ORDER BY run_at DESC LIMIT 6" metrics.json
 
           fetch_api '/api/overview' overview.json overview.code
           fetch_api '/api/status/history-source' history.json history.code
@@ -70,22 +70,22 @@ jobs:
           overlay_ok="$(jq -r '.success == true and ((.errors // [])|length)==0 and (.result[0].results|length)==1' overlay-state.json 2>/dev/null || echo false)"
           compact_ok="$(jq -r '.success == true and ((.errors // [])|length)==0 and (.result[0].results|length)==1' compact.json 2>/dev/null || echo false)"
           stale_ok="$(jq -r '.success == true and ((.errors // [])|length)==0 and (.result[0].results|length)==1' stale.json 2>/dev/null || echo false)"
-          metric_ok="$(jq -r '.success == true and ((.errors // [])|length)==0 and (.result[0].results|length)==1' metric.json 2>/dev/null || echo false)"
+          metrics_ok="$(jq -r '.success == true and ((.errors // [])|length)==0 and (.result[0].results|length)>=3' metrics.json 2>/dev/null || echo false)"
 
           state="$(jq -c '.result[0].results[0] // {}' state.json 2>/dev/null || echo '{}')"
           overlay="$(jq -c '.result[0].results[0] // {}' overlay-state.json 2>/dev/null || echo '{}')"
           compact_rows="$(jq -r '.result[0].results[0].compact_rows // -1' compact.json 2>/dev/null || echo -1)"
           stale_rows="$(jq -r '.result[0].results[0].stale_rows // -1' stale.json 2>/dev/null || echo -1)"
-          metric="$(jq -c '.result[0].results[0] // {}' metric.json 2>/dev/null || echo '{}')"
+          recent_metrics="$(jq -c '.result[0].results // []' metrics.json 2>/dev/null || echo '[]')"
+          latest_metric="$(jq -c '.[0] // {}' <<<"$recent_metrics")"
 
           processed="$(jq -r '.last_processed_ledger // -1' <<<"$state")"
-          observed="$(jq -r '.latest_observed_ledger // -1' <<<"$state")"
           lag="$(jq -r '.lag_ledgers // -1' <<<"$state")"
           fast_status="$(jq -r '.status // "missing"' <<<"$state")"
           overlay_ledger="$(jq -r '.overlay_ledger_index // -1' <<<"$overlay")"
-          metric_run_at="$(jq -r '.run_at // empty' <<<"$metric")"
-          metric_status="$(jq -r '.status // "missing"' <<<"$metric")"
-          metric_error="$(jq -r '.error_message // empty' <<<"$metric")"
+          metric_run_at="$(jq -r '.run_at // empty' <<<"$latest_metric")"
+          metric_status="$(jq -r '.status // "missing"' <<<"$latest_metric")"
+          metric_error="$(jq -r '.error_message // empty' <<<"$latest_metric")"
 
           checked_at="$(date -u +%FT%TZ)"
           now_epoch="$(date -u +%s)"
@@ -95,16 +95,33 @@ jobs:
             if [ "$metric_epoch" -gt 0 ]; then metric_age_seconds="$((now_epoch - metric_epoch))"; fi
           fi
 
+          consecutive_runs=false
+          all_recent_good="$(jq -r 'length >= 3 and all(.[]; .status == "committed" and (.lag_ledgers // -1) == 0 and .error_message == null)' <<<"$recent_metrics")"
+          if [ "$all_recent_good" = true ]; then
+            mapfile -t run_times < <(jq -r '.[].run_at' <<<"$recent_metrics")
+            consecutive_runs=true
+            for ((i=0; i<${#run_times[@]}-1; i++)); do
+              newer="$(date -u -d "${run_times[$i]}" +%s 2>/dev/null || echo 0)"
+              older="$(date -u -d "${run_times[$((i+1))]}" +%s 2>/dev/null || echo 0)"
+              gap="$((newer - older))"
+              if [ "$newer" -le 0 ] || [ "$older" -le 0 ] || [ "$gap" -le 0 ] || [ "$gap" -gt 600 ]; then
+                consecutive_runs=false
+                break
+              fi
+            done
+          fi
+
           overview_http="$(cat overview.code)"
           history_http="$(cat history.code)"
           diff_http="$(cat diff.code)"
 
           healthy=false
-          if [ "$state_ok" = true ] && [ "$overlay_ok" = true ] && [ "$compact_ok" = true ] && [ "$stale_ok" = true ] && [ "$metric_ok" = true ] \
+          if [ "$state_ok" = true ] && [ "$overlay_ok" = true ] && [ "$compact_ok" = true ] && [ "$stale_ok" = true ] && [ "$metrics_ok" = true ] \
              && [ "$overview_http" = 200 ] && [ "$history_http" = 200 ] && [ "$diff_http" = 200 ] \
              && [ "$fast_status" = healthy ] && [ "$lag" -eq 0 ] \
              && [ "$metric_status" = committed ] && [ -z "$metric_error" ] \
              && [ "$metric_age_seconds" -ge 0 ] && [ "$metric_age_seconds" -le 600 ] \
+             && [ "$consecutive_runs" = true ] \
              && [ "$stale_rows" -eq 0 ] && [ "$compact_rows" -eq 0 ] \
              && [ "$overlay_ledger" -eq "$processed" ]; then
             healthy=true
@@ -113,21 +130,22 @@ jobs:
           jq -n \
             --arg checkedAt "$checked_at" \
             --argjson healthy "$healthy" \
+            --argjson consecutiveRuns "$consecutive_runs" \
             --argjson stateQueryOk "$state_ok" \
             --argjson overlayQueryOk "$overlay_ok" \
             --argjson compactQueryOk "$compact_ok" \
             --argjson staleQueryOk "$stale_ok" \
-            --argjson metricQueryOk "$metric_ok" \
+            --argjson metricsQueryOk "$metrics_ok" \
             --argjson state "$state" \
             --argjson overlay "$overlay" \
             --argjson compactRows "$compact_rows" \
             --argjson staleRows "$stale_rows" \
-            --argjson latestMetric "$metric" \
+            --argjson recentMetrics "$recent_metrics" \
             --argjson metricAgeSeconds "$metric_age_seconds" \
             --arg overviewHttp "$overview_http" \
             --arg historyHttp "$history_http" \
             --arg diffHttp "$diff_http" \
-            '{checkedAt:$checkedAt,healthy:$healthy,queryOk:{fastLaneState:$stateQueryOk,overlayState:$overlayQueryOk,compact:$compactQueryOk,stale:$staleQueryOk,latestMetric:$metricQueryOk},fastLane:$state,canonicalOverlay:$overlay,compactRows:$compactRows,staleRows:$staleRows,latestMetric:$latestMetric,metricAgeSeconds:$metricAgeSeconds,http:{overview:$overviewHttp,historySource:$historyHttp,fastLaneDiff:$diffHttp}}' > summary.json
+            '{checkedAt:$checkedAt,healthy:$healthy,consecutiveFiveMinuteRuns:$consecutiveRuns,queryOk:{fastLaneState:$stateQueryOk,overlayState:$overlayQueryOk,compact:$compactQueryOk,stale:$staleQueryOk,recentMetrics:$metricsQueryOk},fastLane:$state,canonicalOverlay:$overlay,compactRows:$compactRows,staleRows:$staleRows,recentMetrics:$recentMetrics,metricAgeSeconds:$metricAgeSeconds,http:{overview:$overviewHttp,historySource:$historyHttp,fastLaneDiff:$diffHttp}}' > summary.json
 
           {
             echo '# Production freshness watchdog'
@@ -141,5 +159,3 @@ jobs:
 
           gh issue edit "$STATUS_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file issue.md
           test "$healthy" = true
-
-# Manual freshness recheck requested at 2026-07-24T02:28Z.
