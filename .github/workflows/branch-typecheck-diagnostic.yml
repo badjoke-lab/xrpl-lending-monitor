@@ -1,4 +1,4 @@
-name: Branch typecheck diagnostic
+name: Branch compressed-history diagnostic
 
 on:
   push:
@@ -11,9 +11,9 @@ permissions:
   contents: write
 
 jobs:
-  typecheck:
+  diagnose:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -26,28 +26,39 @@ jobs:
           node-version: 24.18.0
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Capture typecheck output
+      - name: Capture diagnostic output
         shell: bash
         run: |
           set +e
           pnpm typecheck > typecheck.log 2>&1
-          code=$?
-          printf '%s\n' "$code" > typecheck-exit-code.txt
+          typecheck_code=$?
+          pnpm exec vitest run src/worker/repositories/fast-lane-history-window.test.ts \
+            --reporter=verbose > unit-test.log 2>&1
+          unit_code=$?
+          printf '%s\n' "$typecheck_code" > typecheck-exit-code.txt
+          printf '%s\n' "$unit_code" > unit-test-exit-code.txt
           cat typecheck.log
+          cat unit-test.log
           exit 0
-      - name: Publish typecheck output
+      - name: Publish diagnostic output
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          code="$(cat typecheck-exit-code.txt 2>/dev/null || echo 99)"
+          typecheck_code="$(cat typecheck-exit-code.txt 2>/dev/null || echo 99)"
+          unit_code="$(cat unit-test-exit-code.txt 2>/dev/null || echo 99)"
           {
-            echo "exit_code=${code}"
+            echo "typecheck_exit_code=${typecheck_code}"
+            echo "unit_test_exit_code=${unit_code}"
             echo "head_sha=${GITHUB_SHA}"
             echo
+            echo '--- typecheck ---'
             cat typecheck.log 2>/dev/null || true
+            echo
+            echo '--- compressed history unit test ---'
+            cat unit-test.log 2>/dev/null || true
           } > branch-typecheck-diagnostic-status.txt
           API_PATH="repos/${GITHUB_REPOSITORY}/contents/.github/branch-typecheck-diagnostic-status.txt"
           CONTENT="$(base64 -w0 branch-typecheck-diagnostic-status.txt)"
@@ -55,27 +66,30 @@ jobs:
           if [ -n "$EXISTING_SHA" ]; then
             gh api --method PUT "$API_PATH" \
               -f branch=agent/compress-fast-lane-history-bundles \
-              -f message="Update branch typecheck diagnostic status" \
+              -f message="Update compressed history diagnostic status" \
               -f content="$CONTENT" \
               -f sha="$EXISTING_SHA" > /dev/null
           else
             gh api --method PUT "$API_PATH" \
               -f branch=agent/compress-fast-lane-history-bundles \
-              -f message="Create branch typecheck diagnostic status" \
+              -f message="Create compressed history diagnostic status" \
               -f content="$CONTENT" > /dev/null
           fi
-      - name: Enforce typecheck result
+      - name: Enforce diagnostic result
         shell: bash
         run: |
           test "$(cat typecheck-exit-code.txt)" = 0
-      - name: Upload typecheck output
+          test "$(cat unit-test-exit-code.txt)" = 0
+      - name: Upload diagnostic output
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: branch-typecheck-diagnostic
+          name: branch-compressed-history-diagnostic
           path: |
             typecheck.log
+            unit-test.log
             typecheck-exit-code.txt
+            unit-test-exit-code.txt
             branch-typecheck-diagnostic-status.txt
           if-no-files-found: error
           retention-days: 1
