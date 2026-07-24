@@ -28,11 +28,47 @@ function commitToken(options: {
   ].join(':')
 }
 
-export async function commitFastLaneCompactShadowWindow(options: {
-  db: D1Database
-  plan: FastLaneShadowWindowPlan
+export interface EncodedFastLaneHistoryWindow {
   historyBundle: FastLaneHistoryBundle
   encodedHistoryBundle: string
+}
+
+function validateHistoryWindows(
+  plan: FastLaneShadowWindowPlan,
+  historyWindows: readonly EncodedFastLaneHistoryWindow[],
+): void {
+  if (historyWindows.length === 0) {
+    throw new Error('Fast-lane compact shadow commit requires history windows')
+  }
+  let expectedStart = plan.startLedgerIndex
+  for (const window of historyWindows) {
+    const { historyBundle, encodedHistoryBundle } = window
+    if (encodedHistoryBundle.length === 0) {
+      throw new Error('Fast-lane encoded history bundle is empty')
+    }
+    if (historyBundle.startLedgerIndex !== expectedStart) {
+      throw new Error('Fast-lane history windows are not contiguous with the compact shadow plan')
+    }
+    if (historyBundle.endLedgerIndex < historyBundle.startLedgerIndex) {
+      throw new Error('Fast-lane history bundle ledger range is invalid')
+    }
+    expectedStart = historyBundle.endLedgerIndex + 1
+  }
+  const final = historyWindows.at(-1)?.historyBundle
+  if (
+    !final
+    || historyWindows[0]?.historyBundle.startLedgerIndex !== plan.startLedgerIndex
+    || final.endLedgerIndex !== plan.endLedgerIndex
+    || final.endLedgerHash !== plan.endLedgerHash
+  ) {
+    throw new Error('Fast-lane history windows do not cover the compact shadow window')
+  }
+}
+
+export async function commitFastLaneCompactShadowWindows(options: {
+  db: D1Database
+  plan: FastLaneShadowWindowPlan
+  historyWindows: readonly EncodedFastLaneHistoryWindow[]
   expectedPreviousLedger: number
   expectedPreviousHash: string
   processedAt: string
@@ -44,16 +80,7 @@ export async function commitFastLaneCompactShadowWindow(options: {
   if (plan.endLedgerIndex < plan.startLedgerIndex) {
     throw new Error('Fast-lane compact shadow window ledger range is invalid')
   }
-  if (
-    options.historyBundle.startLedgerIndex !== plan.startLedgerIndex
-    || options.historyBundle.endLedgerIndex !== plan.endLedgerIndex
-    || options.historyBundle.endLedgerHash !== plan.endLedgerHash
-  ) {
-    throw new Error('Fast-lane history bundle does not match the compact shadow window')
-  }
-  if (options.encodedHistoryBundle.length === 0) {
-    throw new Error('Fast-lane encoded history bundle is empty')
-  }
+  validateHistoryWindows(plan, options.historyWindows)
 
   const token = commitToken({
     epochId: plan.epochId,
@@ -154,28 +181,31 @@ export async function commitFastLaneCompactShadowWindow(options: {
     )
   }
 
-  statements.push(
-    db.prepare(
-      `INSERT INTO fast_lane_history_windows (
-         network, epoch_id, start_ledger_index, end_ledger_index,
-         end_ledger_hash, bundle_json, created_at
-       ) VALUES ('devnet', ?1, ?2, ?3, ?4, ?5, ?6)
-       ON CONFLICT(network, epoch_id, start_ledger_index)
-       DO UPDATE SET
-         end_ledger_index = excluded.end_ledger_index,
-         end_ledger_hash = excluded.end_ledger_hash,
-         bundle_json = excluded.bundle_json,
-         created_at = excluded.created_at
-       WHERE excluded.end_ledger_index >= fast_lane_history_windows.end_ledger_index`,
-    ).bind(
-      options.historyBundle.epochId,
-      options.historyBundle.startLedgerIndex,
-      options.historyBundle.endLedgerIndex,
-      options.historyBundle.endLedgerHash,
-      options.encodedHistoryBundle,
-      options.historyBundle.createdAt,
-    ),
-  )
+  for (const window of options.historyWindows) {
+    const { historyBundle, encodedHistoryBundle } = window
+    statements.push(
+      db.prepare(
+        `INSERT INTO fast_lane_history_windows (
+           network, epoch_id, start_ledger_index, end_ledger_index,
+           end_ledger_hash, bundle_json, created_at
+         ) VALUES ('devnet', ?1, ?2, ?3, ?4, ?5, ?6)
+         ON CONFLICT(network, epoch_id, start_ledger_index)
+         DO UPDATE SET
+           end_ledger_index = excluded.end_ledger_index,
+           end_ledger_hash = excluded.end_ledger_hash,
+           bundle_json = excluded.bundle_json,
+           created_at = excluded.created_at
+         WHERE excluded.end_ledger_index >= fast_lane_history_windows.end_ledger_index`,
+      ).bind(
+        historyBundle.epochId,
+        historyBundle.startLedgerIndex,
+        historyBundle.endLedgerIndex,
+        historyBundle.endLedgerHash,
+        encodedHistoryBundle,
+        historyBundle.createdAt,
+      ),
+    )
+  }
 
   statements.push(
     db.prepare(
@@ -261,4 +291,26 @@ export async function commitFastLaneCompactShadowWindow(options: {
   }
 
   return usage
+}
+
+export async function commitFastLaneCompactShadowWindow(options: {
+  db: D1Database
+  plan: FastLaneShadowWindowPlan
+  historyBundle: FastLaneHistoryBundle
+  encodedHistoryBundle: string
+  expectedPreviousLedger: number
+  expectedPreviousHash: string
+  processedAt: string
+}): Promise<FastLaneShadowPersistenceUsage> {
+  return commitFastLaneCompactShadowWindows({
+    db: options.db,
+    plan: options.plan,
+    historyWindows: [{
+      historyBundle: options.historyBundle,
+      encodedHistoryBundle: options.encodedHistoryBundle,
+    }],
+    expectedPreviousLedger: options.expectedPreviousLedger,
+    expectedPreviousHash: options.expectedPreviousHash,
+    processedAt: options.processedAt,
+  })
 }
