@@ -1,0 +1,175 @@
+{
+  "checkedAt": "2026-07-24T13:47:49.241764Z",
+  "healthy": true,
+  "fastLane": {
+    "epoch_id": "fast-lane-shadow-devnet",
+    "last_processed_ledger": 3910253,
+    "last_processed_hash": "4967F42A4475CAEDEA8581B0C6F844BC0BC8716F341FF6CC4574E883058B1F7A",
+    "latest_observed_ledger": 3910253,
+    "latest_observed_hash": "4967F42A4475CAEDEA8581B0C6F844BC0BC8716F341FF6CC4574E883058B1F7A",
+    "status": "healthy",
+    "lag_ledgers": 0,
+    "updated_at": "2026-07-24T13:45:15.870Z"
+  },
+  "canonicalOverlay": {
+    "epoch_id": "devnet-3371675",
+    "base_snapshot_id": "devnet-3860021-fbba23eeffd1",
+    "base_ledger_index": 3860021,
+    "base_ledger_hash": "FBBA23EEFFD19FFD81F2E6A0A9A5D3E503EE78AA8EB6F3653F756BA90655B4A7",
+    "overlay_ledger_index": 3910253,
+    "overlay_ledger_hash": "4967F42A4475CAEDEA8581B0C6F844BC0BC8716F341FF6CC4574E883058B1F7A",
+    "updated_at": "2026-07-24T13:45:17.217Z"
+  },
+  "latestMetric": {
+    "run_at": "2026-07-24T13:45:15.870Z",
+    "status": "committed",
+    "start_ledger_index": 3910230,
+    "end_ledger_index": 3910253,
+    "latest_observed_ledger": 3910253,
+    "lag_ledgers": 0,
+    "ledgers_processed": 24,
+    "persistence_rows_read": 46,
+    "persistence_rows_written": 50,
+    "error_message": null
+  },
+  "recentQueueSlots": [
+    {
+      "scheduled_time": 1784900700000,
+      "status": "completed",
+      "started_at": "2026-07-24T13:45:11.830Z",
+      "completed_at": "2026-07-24T13:45:18.175Z",
+      "next_scheduled_time": 1784901000000,
+      "error_message": null,
+      "updated_at": "2026-07-24T13:45:18.175Z"
+    },
+    {
+      "scheduled_time": 1784900400000,
+      "status": "completed",
+      "started_at": "2026-07-24T13:40:11.716Z",
+      "completed_at": "2026-07-24T13:40:17.810Z",
+      "next_scheduled_time": 1784900700000,
+      "error_message": null,
+      "updated_at": "2026-07-24T13:40:17.810Z"
+    },
+    {
+      "scheduled_time": 1784900100000,
+      "status": "completed",
+      "started_at": "2026-07-24T13:35:12.091Z",
+      "completed_at": "2026-07-24T13:35:18.499Z",
+      "next_scheduled_time": 1784900400000,
+      "error_message": null,
+      "updated_at": "2026-07-24T13:35:18.499Z"
+    },
+    {
+      "scheduled_time": 1784899800000,
+      "status": "completed",
+      "started_at": "2026-07-24T13:30:11.713Z",
+      "completed_at": "2026-07-24T13:30:17.894Z",
+      "next_scheduled_time": 1784900100000,
+      "error_message": null,
+      "updated_at": "2026-07-24T13:30:17.894Z"
+    },
+    {
+      "scheduled_time": 1784899500000,
+      "status": "completed",
+      "started_at": "2026-07-24T13:25:11.704Z",
+      "completed_at": "2026-07-24T13:25:18.524Z",
+      "next_scheduled_time": 1784899800000,
+      "error_message": null,
+      "updated_at": "2026-07-24T13:25:18.524Z"
+    },
+    {
+      "scheduled_time": 1784899200000,
+      "status": "completed",
+      "started_at": "2026-07-24T13:20:11.840Z",
+      "completed_at": "2026-07-24T13:20:18.493Z",
+      "next_scheduled_time": 1784899500000,
+      "error_message": null,
+      "updated_at": "2026-07-24T13:20:18.493Z"
+    },
+    {
+      "scheduled_time": 1784898900000,
+      "status": "completed",
+      "started_at": "2026-07-24T13:15:11.780Z",
+      "completed_at": "2026-07-24T13:15:18.472Z",
+      "next_scheduled_time": 1784899200000,
+      "error_message": null,
+      "updated_at": "2026-07-24T13:15:18.472Z"
+    },
+    {
+      "scheduled_time": 1784898600000,
+      "status": "completed",
+      "started_at": "2026-07-24T13:10:11.986Z",
+      "completed_at": "2026-07-24T13:10:18.775Z",
+      "next_scheduled_time": 1784898900000,
+      "error_message": null,
+      "updated_at": "2026-07-24T13:10:18.775Z"
+    },
+    {
+      "scheduled_time": 1784898300000,
+      "status": "completed",
+      "started_at": "2026-07-24T13:05:12.040Z",
+      "completed_at": "2026-07-24T13:05:18.824Z",
+      "next_scheduled_time": 1784898600000,
+      "error_message": null,
+      "updated_at": "2026-07-24T13:05:18.824Z"
+    },
+    {
+      "scheduled_time": 1784898000000,
+      "status": "completed",
+      "started_at": "2026-07-24T13:00:12.266Z",
+      "completed_at": "2026-07-24T13:00:21.942Z",
+      "next_scheduled_time": 1784898300000,
+      "error_message": null,
+      "updated_at": "2026-07-24T13:00:21.942Z"
+    },
+    {
+      "scheduled_time": 1784897700000,
+      "status": "completed",
+      "started_at": "2026-07-24T12:55:11.773Z",
+      "completed_at": "2026-07-24T12:55:19.180Z",
+      "next_scheduled_time": 1784898000000,
+      "error_message": null,
+      "updated_at": "2026-07-24T12:55:19.180Z"
+    },
+    {
+      "scheduled_time": 1784897400000,
+      "status": "completed",
+      "started_at": "2026-07-24T12:50:11.824Z",
+      "completed_at": "2026-07-24T12:50:18.660Z",
+      "next_scheduled_time": 1784897700000,
+      "error_message": null,
+      "updated_at": "2026-07-24T12:50:18.660Z"
+    }
+  ],
+  "compactRows": 0,
+  "staleRows": 0,
+  "historyWindows": {
+    "retained_windows": 256,
+    "first_ledger": 3904727,
+    "last_ledger": 3910253,
+    "max_encoded_bytes": 130997
+  },
+  "http": {
+    "overview": "200",
+    "history-source": "200",
+    "fast-lane-diff": "200",
+    "replacement-base": "200"
+  },
+  "latestDeployment": {
+    "id": "41f1f375-54f6-469d-90ff-4a534adf42cf",
+    "source": "wrangler",
+    "strategy": "percentage",
+    "author_email": "badjoke.lab@gmail.com",
+    "annotations": {
+      "workers/triggered_by": "deployment"
+    },
+    "versions": [
+      {
+        "version_id": "b260c231-2fdd-4b87-aa47-19ff448e26b6",
+        "percentage": 100
+      }
+    ],
+    "created_on": "2026-07-24T12:26:14.506477Z"
+  }
+}
