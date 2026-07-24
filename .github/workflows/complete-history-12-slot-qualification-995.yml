@@ -1,0 +1,276 @@
+name: Complete-history 12-slot qualification 995
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/complete-history-12-slot-qualification-995-trigger
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: complete-history-12-slot-qualification-995
+  cancel-in-progress: false
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
+  PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+  XRPL_RPC: https://devnet.honeycluster.io/
+  STATUS_ISSUE: '995'
+  START_UTC: '2026-07-24T11:25:00Z'
+  END_UTC: '2026-07-24T12:20:00Z'
+  EVALUATE_UTC: '2026-07-24T12:25:30Z'
+  START_MS: '1784892300000'
+  END_MS: '1784895600000'
+
+jobs:
+  qualify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Wait for fixed qualification window to close
+        shell: bash
+        run: |
+          set -euo pipefail
+          target="$(date -u -d "$EVALUATE_UTC" +%s)"
+          now="$(date -u +%s)"
+          if [ "$now" -lt "$target" ]; then sleep "$((target-now))"; fi
+
+      - name: Read bounded production evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+
+          query_d1() {
+            local sql="$1" output="$2"
+            jq -n --arg sql "$sql" '{sql:$sql}' \
+              | curl --fail-with-body --silent --show-error --retry 3 --retry-all-errors \
+                  --connect-timeout 10 --max-time 45 \
+                  -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+                  -H 'Content-Type: application/json' --data-binary @- \
+                  "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database/${DATABASE_ID}/query" \
+              > "$output"
+          }
+
+          fetch_api() {
+            local path="$1" output="$2" code_file="$3"
+            curl --silent --show-error --retry 3 --retry-all-errors \
+              --connect-timeout 10 --max-time 45 -o "$output" -w '%{http_code}' \
+              "${PRODUCTION_BASE}${path}" > "$code_file"
+          }
+
+          query_d1 "SELECT scheduled_time,status,started_at,completed_at,next_scheduled_time,error_message,updated_at FROM fast_lane_queue_slots WHERE scheduled_time BETWEEN ${START_MS} AND ${END_MS} ORDER BY scheduled_time" slots.json
+          query_d1 "SELECT run_at,status,start_ledger_index,end_ledger_index,latest_observed_ledger,lag_ledgers,ledgers_processed,persistence_rows_read,persistence_rows_written,error_message FROM fast_lane_shadow_run_metrics WHERE network='devnet' AND run_at>='${START_UTC}' AND run_at<'2026-07-24T12:25:00Z' ORDER BY run_at" metrics.json
+          query_d1 "SELECT start_ledger_index,end_ledger_index,end_ledger_hash,created_at,LENGTH(bundle_json) AS encoded_bytes,bundle_json FROM fast_lane_history_windows WHERE network='devnet' AND created_at>='${START_UTC}' AND created_at<'2026-07-24T12:25:00Z' ORDER BY start_ledger_index,end_ledger_index,created_at" windows.json
+          query_d1 "SELECT epoch_id,last_processed_ledger,last_processed_hash,latest_observed_ledger,latest_observed_hash,status,(latest_observed_ledger-last_processed_ledger) AS lag_ledgers,updated_at FROM fast_lane_shadow_state WHERE network='devnet'" fast-state.json
+          query_d1 "SELECT epoch_id,base_snapshot_id,base_ledger_index,base_ledger_hash,overlay_ledger_index,overlay_ledger_hash,updated_at FROM current_state_overlay_state WHERE network='devnet'" overlay-state.json
+          query_d1 "SELECT COUNT(*) AS compact_rows FROM fast_lane_shadow_objects_compact WHERE network='devnet'" compact.json
+          query_d1 "SELECT COUNT(*) AS stale_rows FROM current_state_overlay_objects o WHERE o.network='devnet' AND NOT EXISTS (SELECT 1 FROM fast_lane_shadow_base_binding b WHERE b.network=o.network AND b.base_epoch_id=o.epoch_id AND b.base_snapshot_id=o.base_snapshot_id)" stale.json
+          query_d1 "SELECT COUNT(*) AS retained_queue_slots,MIN(scheduled_time) AS first_slot,MAX(scheduled_time) AS last_slot FROM fast_lane_queue_slots" queue-retention.json
+          query_d1 "SELECT COUNT(*) AS retained_metrics,MIN(run_at) AS first_metric,MAX(run_at) AS last_metric FROM fast_lane_shadow_run_metrics WHERE network='devnet'" metric-retention.json
+          query_d1 "SELECT COUNT(*) AS retained_windows,MIN(start_ledger_index) AS first_ledger,MAX(end_ledger_index) AS last_ledger,COALESCE(SUM(LENGTH(bundle_json)),0) AS payload_bytes FROM fast_lane_history_windows WHERE network='devnet'" window-retention.json
+
+          fetch_api '/api/overview' overview.json overview.code
+          fetch_api '/api/status/history-source' history-source.json history-source.code
+          fetch_api '/api/status/fast-lane-diff?limit=1' fast-lane-diff.json fast-lane-diff.code
+          fetch_api '/api/status/replacement-base-rebase' replacement-base.json replacement-base.code
+
+          curl --fail-with-body --silent --show-error --retry 3 --retry-all-errors \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/xrpl-lending-monitor/settings" > worker-settings.json
+          curl --fail-with-body --silent --show-error --retry 3 --retry-all-errors \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/xrpl-lending-monitor/schedules" > worker-schedules.json
+          curl --fail-with-body --silent --show-error --retry 3 --retry-all-errors \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/xrpl-lending-monitor/deployments" > worker-deployments.json
+
+      - name: Decode, cross-audit, and evaluate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import base64, gzip, json, urllib.parse, urllib.request
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          START_MS = 1784892300000
+          END_MS = 1784895600000
+          SLOT_MS = 300000
+          EXPECTED = [START_MS + SLOT_MS*i for i in range(12)]
+
+          def results(path):
+              p=json.loads(Path(path).read_text())
+              return p.get('result',[{}])[0].get('results',[])
+          def one(path):
+              r=results(path)
+              return r[0] if r else {}
+          def epoch_ms(value):
+              if not value: return None
+              return int(datetime.fromisoformat(value.replace('Z','+00:00')).timestamp()*1000)
+
+          slots=results('slots.json')
+          metrics=results('metrics.json')
+          windows=results('windows.json')
+          fast=one('fast-state.json')
+          overlay=one('overlay-state.json')
+          compact=one('compact.json').get('compact_rows',-1)
+          stale=one('stale.json').get('stale_rows',-1)
+
+          slot_times=[int(x.get('scheduled_time')) for x in slots]
+          slot_spacing_ok=slot_times==EXPECTED
+          slots_completed=slot_spacing_ok and all(x.get('status')=='completed' and not x.get('error_message') for x in slots)
+
+          grouped={s:[] for s in EXPECTED}
+          for m in metrics:
+              t=epoch_ms(m.get('run_at'))
+              if t is None: continue
+              s=(t//SLOT_MS)*SLOT_MS
+              if s in grouped: grouped[s].append(m)
+          metric_errors=[]
+          terminal_lag_zero=True
+          for s in EXPECTED:
+              group=grouped[s]
+              if not group:
+                  terminal_lag_zero=False
+                  metric_errors.append({'slot':s,'reason':'missing_metrics'})
+                  continue
+              if any(m.get('status')!='committed' or m.get('error_message') not in (None,'') for m in group):
+                  metric_errors.append({'slot':s,'reason':'non_committed_or_error'})
+              if int(group[-1].get('lag_ledgers',-1))!=0:
+                  terminal_lag_zero=False
+                  metric_errors.append({'slot':s,'reason':'terminal_lag_nonzero','lag':group[-1].get('lag_ledgers')})
+          metrics_ok=not metric_errors
+
+          decoded=[]; decode_errors=[]; semantic_totals={k:0 for k in ('protocolEvents','objectChanges','loanLifecycle','archivedObjects','balanceHistory')}
+          max_encoded=0; witness=None
+          coverage_ok=bool(windows)
+          previous_end=None
+          for row in windows:
+              start=int(row['start_ledger_index']); end=int(row['end_ledger_index'])
+              if previous_end is not None and start!=previous_end+1: coverage_ok=False
+              previous_end=end
+              max_encoded=max(max_encoded,int(row.get('encoded_bytes') or 0))
+              try:
+                  value=row['bundle_json']
+                  if not value.startswith('gzip-base64-v1:'): raise ValueError('unexpected_encoding')
+                  bundle=json.loads(gzip.decompress(base64.b64decode(value.split(':',1)[1])).decode())
+                  counts={}
+                  for key in semantic_totals:
+                      arr=bundle.get(key)
+                      if not isinstance(arr,list): raise ValueError(f'missing_array:{key}')
+                      counts[key]=len(arr); semantic_totals[key]+=len(arr)
+                  decoded.append({'startLedgerIndex':start,'endLedgerIndex':end,'endLedgerHash':row.get('end_ledger_hash'),'encodedBytes':row.get('encoded_bytes'),'counts':counts})
+                  if witness is None and bundle['objectChanges']:
+                      c=bundle['objectChanges'][0]
+                      witness={'transactionHash':c.get('transactionHash'),'objectType':c.get('objectType'),'objectId':c.get('objectId')}
+              except Exception as exc:
+                  decode_errors.append({'startLedgerIndex':start,'endLedgerIndex':end,'error':str(exc)})
+          decode_ok=bool(decoded) and not decode_errors and len(decoded)==len(windows)
+
+          public_witness={'attempted':False,'http':None,'match':False,'path':None}
+          xrpl_witness={'attempted':False,'success':False,'validated':False}
+          if witness and all(witness.values()):
+              path=f"/api/objects/{urllib.parse.quote(str(witness['objectType']))}/{urllib.parse.quote(str(witness['objectId']))}/history?limit=100"
+              public_witness.update({'attempted':True,'path':path})
+              try:
+                  with urllib.request.urlopen('https://xrpl-lending-monitor.badjoke-lab.workers.dev'+path,timeout=30) as r:
+                      body=json.load(r); public_witness['http']=r.status
+                  public_witness['match']=any(x.get('transaction_hash')==witness['transactionHash'] for x in body.get('data',[]))
+              except Exception as exc: public_witness['error']=str(exc)
+              try:
+                  req=urllib.request.Request('https://devnet.honeycluster.io/',data=json.dumps({'method':'tx','params':[{'transaction':witness['transactionHash'],'binary':False}]}).encode(),headers={'Content-Type':'application/json'})
+                  xrpl_witness['attempted']=True
+                  with urllib.request.urlopen(req,timeout=30) as r: payload=json.load(r)
+                  result=payload.get('result',{})
+                  xrpl_witness['success']=result.get('status')=='success' or ('hash' in result and 'error' not in result)
+                  xrpl_witness['validated']=bool(result.get('validated'))
+                  xrpl_witness['ledger_index']=result.get('ledger_index')
+              except Exception as exc: xrpl_witness['error']=str(exc)
+
+          fast_overlay_match=(int(fast.get('last_processed_ledger',-1))==int(overlay.get('overlay_ledger_index',-2)) and fast.get('last_processed_hash')==overlay.get('overlay_ledger_hash'))
+          config=json.loads(Path('worker-settings.json').read_text())
+          schedules=json.loads(Path('worker-schedules.json').read_text())
+          deployments=json.loads(Path('worker-deployments.json').read_text())
+          bindings=config.get('result',{}).get('bindings',[])
+          def binding(name):
+              for b in bindings:
+                  if b.get('name')==name: return b.get('text',b.get('value'))
+              return None
+          schedule_rows=schedules.get('result',{}).get('schedules',[])
+          config_ok=(binding('APP_NETWORK')=='devnet' and binding('MAINNET_ENABLED')=='false' and len(schedule_rows)==1 and schedule_rows[0].get('cron')=='*/5 * * * *')
+
+          writes_by_slot=[]; reads_by_slot=[]
+          for s in EXPECTED:
+              writes_by_slot.append(sum(int(m.get('persistence_rows_written') or 0) for m in grouped[s]))
+              reads_by_slot.append(sum(int(m.get('persistence_rows_read') or 0) for m in grouped[s]))
+          resource={
+              'maxWritesPerSlot':max(writes_by_slot,default=-1),
+              'projectedDailyRowsWritten':sum(writes_by_slot)*24,
+              'projectedDailyRowsRead':sum(reads_by_slot)*24,
+              'maxEncodedBytes':max_encoded,
+          }
+          resource['passed']=(resource['maxWritesPerSlot']<=300 and resource['projectedDailyRowsWritten']<100000 and resource['projectedDailyRowsRead']<4000000 and max_encoded<=131072)
+
+          http={name:Path(f'{name}.code').read_text().strip() for name in ('overview','history-source','fast-lane-diff','replacement-base')}
+          http_ok=all(v=='200' for v in http.values())
+          passed=all([slots_completed,metrics_ok,terminal_lag_zero,coverage_ok,decode_ok,public_witness.get('match'),xrpl_witness.get('validated'),fast_overlay_match,int(compact)==0,int(stale)==0,config_ok,resource['passed'],http_ok])
+          failures=[]
+          checks={'slotsCompleted':slots_completed,'metricsCommittedAndTerminalLagZero':metrics_ok and terminal_lag_zero,'ledgerCoverageContiguous':coverage_ok,'allBundlesDecoded':decode_ok,'publicWitnessMatch':public_witness.get('match',False),'xrplWitnessValidated':xrpl_witness.get('validated',False),'fastLaneCanonicalMatch':fast_overlay_match,'compactZero':int(compact)==0,'staleZero':int(stale)==0,'configurationIdentity':config_ok,'resourceEnvelope':resource['passed'],'publicApis':http_ok}
+          failures=[k for k,v in checks.items() if not v]
+          summary={
+              'checkedAt':datetime.now(timezone.utc).isoformat().replace('+00:00','Z'),
+              'status':'passed' if passed else 'failed', 'passed':passed,
+              'fixedWindow':{'startUtc':'2026-07-24T11:25:00Z','endUtc':'2026-07-24T12:20:00Z','expectedSlots':12},
+              'checks':checks,'failures':failures,'slots':slots,'metricErrors':metric_errors,
+              'history':{'windowCount':len(windows),'decodedWindowCount':len(decoded),'coverageFirstLedger':decoded[0]['startLedgerIndex'] if decoded else None,'coverageLastLedger':decoded[-1]['endLedgerIndex'] if decoded else None,'semanticTotals':semantic_totals,'maxEncodedBytes':max_encoded,'decodeErrors':decode_errors},
+              'witness':witness,'publicWitness':public_witness,'xrplWitness':xrpl_witness,
+              'fastLane':fast,'canonicalOverlay':overlay,'compactRows':compact,'staleRows':stale,
+              'configuration':{'appNetwork':binding('APP_NETWORK'),'mainnetEnabled':binding('MAINNET_ENABLED'),'schedules':schedule_rows,'latestDeployment':(deployments.get('result',{}).get('deployments') or [None])[0]},
+              'retention':{'queue':one('queue-retention.json'),'metrics':one('metric-retention.json'),'historyWindows':one('window-retention.json')},
+              'resource':resource,'http':http,
+              'sourceIdentities':{'runtimeImplementation':'505ca01af53ae1371943b1f12a117fc9d60e666f','deploymentPathMerge':'6555cf5c34ed68e862013293253796205415a1c8','workflowHead':Path('.git/HEAD').read_text().strip() if Path('.git/HEAD').exists() else None}
+          }
+          Path('complete-history-12-slot-qualification-995.json').write_text(json.dumps(summary,indent=2)+'\n')
+          Path('qualification-status.txt').write_text(summary['status']+'\n')
+          PY
+
+      - name: Publish retained evidence and Issue status
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -s complete-history-12-slot-qualification-995.json ]; then
+            jq -n --arg checkedAt "$(date -u +%FT%TZ)" --arg runUrl "https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" '{checkedAt:$checkedAt,status:"failed",passed:false,failures:["qualification_result_missing"],runUrl:$runUrl}' > complete-history-12-slot-qualification-995.json
+          fi
+          tmp="$(mktemp)"
+          jq --arg runUrl "https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" --arg runId "$GITHUB_RUN_ID" '. + {runUrl:$runUrl,runId:($runId|tonumber)}' complete-history-12-slot-qualification-995.json > "$tmp"
+          mv "$tmp" complete-history-12-slot-qualification-995.json
+          status="$(jq -r '.status' complete-history-12-slot-qualification-995.json)"
+          {
+            echo '## Complete-history 12-slot qualification result'
+            echo
+            echo '```json'
+            cat complete-history-12-slot-qualification-995.json
+            echo '```'
+          } > issue-body.md
+          gh issue comment "$STATUS_ISSUE" --body-file issue-body.md
+          api="repos/${GITHUB_REPOSITORY}/contents/.github/complete-history-12-slot-qualification-995.json"
+          sha="$(gh api "$api" --jq .sha 2>/dev/null || true)"
+          content="$(base64 -w0 complete-history-12-slot-qualification-995.json)"
+          if [ -n "$sha" ]; then
+            gh api --method PUT "$api" -f message="Record ${status} complete-history qualification 995" -f content="$content" -f sha="$sha" -f branch=main >/dev/null
+          else
+            gh api --method PUT "$api" -f message="Record ${status} complete-history qualification 995" -f content="$content" -f branch=main >/dev/null
+          fi
+          test "$status" = passed
