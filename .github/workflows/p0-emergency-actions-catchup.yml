@@ -20,7 +20,7 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      FAST_LANE_PASSES_PER_RUN: '640'
+      FAST_LANE_PASSES_PER_RUN: '64'
       ISSUE_NUMBER: ${{ github.event.issue.number }}
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -42,14 +42,19 @@ jobs:
       - name: Bundle production collector
         run: pnpm exec vite build --config vite.fast-lane-production.config.ts
 
-      - name: Run bounded production catch-up
+      - name: Run bounded production catch-up rounds
         id: collector
         shell: bash
         run: |
           set -euo pipefail
-          node .fast-lane-production-build/run-fast-lane-production.mjs \
-            > >(tee /tmp/collector.log) \
-            2> >(tee /tmp/collector.err >&2)
+          : > /tmp/collector.log
+          : > /tmp/collector.err
+          for round in $(seq 1 10); do
+            echo "=== catch-up round ${round}/10 ===" | tee -a /tmp/collector.log
+            node .fast-lane-production-build/run-fast-lane-production.mjs \
+              > >(tee -a /tmp/collector.log) \
+              2> >(tee -a /tmp/collector.err >&2)
+          done
 
       - name: Report catch-up result
         if: always()
@@ -60,8 +65,8 @@ jobs:
             echo 'P0 emergency production catch-up result:'
             echo
             echo '```text'
-            if [ -s /tmp/collector.log ]; then tail -n 100 /tmp/collector.log; else echo 'collector produced no stdout'; fi
-            if [ -s /tmp/collector.err ]; then echo; echo 'stderr:'; tail -n 40 /tmp/collector.err; fi
+            if [ -s /tmp/collector.log ]; then tail -n 160 /tmp/collector.log; else echo 'collector produced no stdout'; fi
+            if [ -s /tmp/collector.err ]; then echo; echo 'stderr:'; tail -n 80 /tmp/collector.err; fi
             echo '```'
             echo
             echo "Run: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
