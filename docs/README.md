@@ -10,38 +10,39 @@ This directory is the source of truth for XRPL Lending Monitor and its approved 
 4. [`status-model.md`](status-model.md) — on-ledger and schedule-derived states
 5. [`asset-model.md`](asset-model.md) — XRP, IOU, and MPT handling
 6. [`collector-design.md`](collector-design.md) — complete base bootstrap, incremental collection, overlay resolution, idempotency, and reset handling
-7. [`testing-strategy.md`](testing-strategy.md) — required validation and release tests
-8. [`resource-envelope.md`](resource-envelope.md) — runtime, storage, collection, base-read, overlay, catch-up, and public-query limits
-9. [`m6-integrity-reset-plan.md`](m6-integrity-reset-plan.md) — first post-M5-5 M6 integrity, replay, reset, epoch-transition, catch-up, and reconciliation baseline
-10. [`m6-i1-fixture-catalog.md`](m6-i1-fixture-catalog.md) — deterministic M6-I1 F00-F14 scenario catalog, evidence snapshot shape, and later M6 reuse map
-11. [`m6-resource-guardrail-plan.md`](m6-resource-guardrail-plan.md) — early M6 runtime/resource measurement baseline and Explorer v1 guardrail harness contract
-12. [`d1-migration-plan.md`](d1-migration-plan.md) — superseded D1-only full-snapshot evaluation retained as architecture and resource history
-13. [`d1-command-interface.md`](d1-command-interface.md) — local non-public D1 evaluation actions, limits, evidence, and operation order
-14. [`storage-artifact-format.md`](storage-artifact-format.md) — deterministic compressed complete-base artifact format
-15. [`local-artifact-measurement.md`](local-artifact-measurement.md) — resumable local capacity measurement and evidence output
-16. [`competitor-positioning.md`](competitor-positioning.md) — baseline parity and differentiators
-17. [`explorer-spec.md`](explorer-spec.md) — Explorer v1 and v2 scope, data boundaries, page behavior, and completion gates
-18. [`explorer-v1-visual-direction.md`](explorer-v1-visual-direction.md) — approved Guided Dashboard + Relationship Explorer visual composition and Hero restrictions
-19. [`explorer-v1-contract-matrix.md`](explorer-v1-contract-matrix.md) — pre-entry section-to-data/state/load/resource mapping
-20. [`explorer-v1-translation-dictionary.md`](explorer-v1-translation-dictionary.md) — pre-entry concept, field, and Activity plain-language translation rules
-21. [`explorer-v1-content-copy.md`](explorer-v1-content-copy.md) — baseline English Hero, section, state, Loan-summary, Activity, glossary, and technical-transition copy
-22. [`explorer-v1-relationship-contract.md`](explorer-v1-relationship-contract.md) — bounded relationship view, lazy loading, same-context, accessibility, and measurement contract
-23. [`explorer-v1-static-api-shape-audit.md`](explorer-v1-static-api-shape-audit.md) — static audit of current list/detail response shapes and provisional low-fan-out relationship seed candidates
-24. [`ui-information-architecture.md`](ui-information-architecture.md) — Monitor, Audit, System, Project, and approved Explore navigation relationships
-25. [`ui-page-map.md`](ui-page-map.md) — canonical routes and route ownership
-26. [`ui-page-specifications.md`](ui-page-specifications.md) — page responsibilities, API dependencies, unavailable behavior, and milestone assignment
-27. [`ui-design-spec.md`](ui-design-spec.md) — visual system, state treatment, tables, charts, provenance, and accessibility
-28. [`ui-component-inventory.md`](ui-component-inventory.md) — reusable UI component contracts and required states
-29. [`ui-responsive-rules.md`](ui-responsive-rules.md) — desktop, tablet, mobile, zoom, and long-content behavior
-30. [`ui-reference/README.md`](ui-reference/README.md) — approved mockup interpretation and prohibited invented data
-31. [`development-roadmap.md`](development-roadmap.md) — active M0-M6 implementation order, dependencies, target dates, and exit conditions
-32. [`observatory-roadmap.md`](observatory-roadmap.md) — approved Explorer v1 insertion and post-release Observatory O1-O3 expansion order
-33. [`implementation-status.md`](implementation-status.md) — public implementation state, active unit, and current release blockers
-34. [`ops/free-tier-collector-recovery-2026-07-09.md`](ops/free-tier-collector-recovery-2026-07-09.md) — retained Cloudflare Worker Free collector CPU blocker evidence and recovery boundary
-35. [`ops/free-tier-collector-throughput-design-2026-07-10.md`](ops/free-tier-collector-throughput-design-2026-07-10.md) — HTTP subrequest failure evidence, 32-ledger production baseline, and staged WebSocket transport validation plan
-36. [`operations-public-discovery.md`](operations-public-discovery.md) — final-host canonical, robots, sitemap, analytics, and Search Console operation
-37. [`operations-unimpairment-witness.md`](operations-unimpairment-witness.md) — bounded external Devnet semantic-witness operation for the remaining M1 unimpairment path
-38. [`decision-log.md`](decision-log.md) — accepted and superseded architectural and product decisions
+7. [`history-runtime-contract.md`](history-runtime-contract.md) — active five-minute, protected full-history, immutable publication, hybrid read, retention, and qualification responsibilities
+8. [`testing-strategy.md`](testing-strategy.md) — required validation and release tests
+9. [`resource-envelope.md`](resource-envelope.md) — runtime, storage, collection, base-read, overlay, catch-up, and public-query limits
+10. [`m6-integrity-reset-plan.md`](m6-integrity-reset-plan.md) — first post-M5-5 M6 integrity, replay, reset, epoch-transition, catch-up, and reconciliation baseline
+11. [`m6-i1-fixture-catalog.md`](m6-i1-fixture-catalog.md) — deterministic M6-I1 F00-F14 scenario catalog, evidence snapshot shape, and later M6 reuse map
+12. [`m6-resource-guardrail-plan.md`](m6-resource-guardrail-plan.md) — early M6 runtime/resource measurement baseline and Explorer v1 guardrail harness contract
+13. [`d1-migration-plan.md`](d1-migration-plan.md) — superseded D1-only full-snapshot evaluation retained as architecture and resource history
+14. [`d1-command-interface.md`](d1-command-interface.md) — local non-public D1 evaluation actions, limits, evidence, and operation order
+15. [`storage-artifact-format.md`](storage-artifact-format.md) — deterministic compressed complete-base artifact format
+16. [`local-artifact-measurement.md`](local-artifact-measurement.md) — resumable local capacity measurement and evidence output
+17. [`competitor-positioning.md`](competitor-positioning.md) — baseline parity and differentiators
+18. [`explorer-spec.md`](explorer-spec.md) — Explorer v1 and v2 scope, data boundaries, page behavior, and completion gates
+19. [`explorer-v1-visual-direction.md`](explorer-v1-visual-direction.md) — approved Guided Dashboard + Relationship Explorer visual composition and Hero restrictions
+20. [`explorer-v1-contract-matrix.md`](explorer-v1-contract-matrix.md) — pre-entry section-to-data/state/load/resource mapping
+21. [`explorer-v1-translation-dictionary.md`](explorer-v1-translation-dictionary.md) — pre-entry concept, field, and Activity plain-language translation rules
+22. [`explorer-v1-content-copy.md`](explorer-v1-content-copy.md) — baseline English Hero, section, state, Loan-summary, Activity, glossary, and technical-transition copy
+23. [`explorer-v1-relationship-contract.md`](explorer-v1-relationship-contract.md) — bounded relationship view, lazy loading, same-context, accessibility, and measurement contract
+24. [`explorer-v1-static-api-shape-audit.md`](explorer-v1-static-api-shape-audit.md) — static audit of current list/detail response shapes and provisional low-fan-out relationship seed candidates
+25. [`ui-information-architecture.md`](ui-information-architecture.md) — Monitor, Audit, System, Project, and approved Explore navigation relationships
+26. [`ui-page-map.md`](ui-page-map.md) — canonical routes and route ownership
+27. [`ui-page-specifications.md`](ui-page-specifications.md) — page responsibilities, API dependencies, unavailable behavior, and milestone assignment
+28. [`ui-design-spec.md`](ui-design-spec.md) — visual system, state treatment, tables, charts, provenance, and accessibility
+29. [`ui-component-inventory.md`](ui-component-inventory.md) — reusable UI component contracts and required states
+30. [`ui-responsive-rules.md`](ui-responsive-rules.md) — desktop, tablet, mobile, zoom, and long-content behavior
+31. [`ui-reference/README.md`](ui-reference/README.md) — approved mockup interpretation and prohibited invented data
+32. [`development-roadmap.md`](development-roadmap.md) — active M0-M6 implementation order, dependencies, target dates, and exit conditions
+33. [`observatory-roadmap.md`](observatory-roadmap.md) — approved Explorer v1 insertion and post-release Observatory O1-O3 expansion order
+34. [`implementation-status.md`](implementation-status.md) — public implementation state, active unit, and current release blockers
+35. [`ops/free-tier-collector-recovery-2026-07-09.md`](ops/free-tier-collector-recovery-2026-07-09.md) — retained Cloudflare Worker Free collector CPU blocker evidence and recovery boundary
+36. [`ops/free-tier-collector-throughput-design-2026-07-10.md`](ops/free-tier-collector-throughput-design-2026-07-10.md) — HTTP subrequest failure evidence, 32-ledger production baseline, and staged WebSocket transport validation plan
+37. [`operations-public-discovery.md`](operations-public-discovery.md) — final-host canonical, robots, sitemap, analytics, and Search Console operation
+38. [`operations-unimpairment-witness.md`](operations-unimpairment-witness.md) — bounded external Devnet semantic-witness operation for the remaining M1 unimpairment path
+39. [`decision-log.md`](decision-log.md) — accepted and superseded architectural and product decisions
 
 ## Authority rules
 
@@ -50,6 +51,7 @@ This directory is the source of truth for XRPL Lending Monitor and its approved 
 - `architecture.md` defines the active system and runtime architecture.
 - Domain documents define how their data and behavior work.
 - `collector-design.md` defines complete base bootstrap, incremental continuation, current overlay behavior, and reset handling.
+- `history-runtime-contract.md` defines the active division of responsibility between the five-minute fast lane, protected full collector, immutable history publication, hybrid reads, retention, and release qualification.
 - `resource-envelope.md` defines measurable runtime, storage, public-query, and evidence gates.
 - `m6-integrity-reset-plan.md` defines the first executable M6 integrity/reset baseline after M5-5 exit; it does not authorize early M6 implementation.
 - `m6-i1-fixture-catalog.md` prepares deterministic M6-I1 scenario IDs, shared context/object/asset families, evidence snapshot requirements, and M6-I2-I5 reuse; the catalog is not passing implementation evidence.
