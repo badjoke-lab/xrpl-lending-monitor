@@ -25,13 +25,14 @@ env:
   STATUS_ISSUE: '978'
   PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
   FORMAL_OPERATION_START: '2026-07-24T02:40:00Z'
+  FORMAL_OPERATION_START_MS: '1784860800000'
 
 jobs:
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Read exact production freshness
+      - name: Read exact production freshness and continuity
         shell: bash
         run: |
           set -uo pipefail
@@ -58,40 +59,38 @@ jobs:
           }
 
           query_d1 "SELECT epoch_id,last_processed_ledger,last_processed_hash,latest_observed_ledger,latest_observed_hash,status,(latest_observed_ledger-last_processed_ledger) AS lag_ledgers,updated_at FROM fast_lane_shadow_state WHERE network='devnet'" state.json
-          query_d1 "SELECT epoch_id,base_snapshot_id,base_ledger_index,base_ledger_hash,overlay_ledger_index,overlay_ledger_hash,updated_at FROM current_state_overlay_state WHERE network='devnet'" overlay-state.json
+          query_d1 "SELECT epoch_id,base_snapshot_id,base_ledger_index,base_ledger_hash,overlay_ledger_index,overlay_ledger_hash,updated_at FROM current_state_overlay_state WHERE network='devnet'" overlay.json
           query_d1 "SELECT COUNT(*) AS compact_rows FROM fast_lane_shadow_objects_compact WHERE network='devnet'" compact.json
           query_d1 "SELECT COUNT(*) AS stale_rows FROM current_state_overlay_objects o WHERE o.network='devnet' AND NOT EXISTS (SELECT 1 FROM fast_lane_shadow_base_binding b WHERE b.network=o.network AND b.base_epoch_id=o.epoch_id AND b.base_snapshot_id=o.base_snapshot_id)" stale.json
-          query_d1 "SELECT network,run_at,status,start_ledger_index,end_ledger_index,latest_observed_ledger,lag_ledgers,ledgers_processed,persistence_rows_read,persistence_rows_written,error_message FROM fast_lane_shadow_run_metrics WHERE network='devnet' ORDER BY run_at DESC LIMIT 64" metrics.json
-          query_d1 "WITH ranked AS (SELECT run_at,status,lag_ledgers,error_message,start_ledger_index,end_ledger_index,CAST(strftime('%s',run_at)/300 AS INTEGER) AS slot,ROW_NUMBER() OVER (PARTITION BY CAST(strftime('%s',run_at)/300 AS INTEGER) ORDER BY run_at DESC) AS rn FROM fast_lane_shadow_run_metrics WHERE network='devnet' AND run_at >= '${FORMAL_OPERATION_START}'), terminal AS (SELECT * FROM ranked WHERE rn=1) SELECT COUNT(*) AS observed_slots,COALESCE(SUM(CASE WHEN status='committed' AND lag_ledgers=0 AND error_message IS NULL THEN 1 ELSE 0 END),0) AS good_slots,COALESCE(SUM(CASE WHEN status<>'committed' OR lag_ledgers<>0 OR error_message IS NOT NULL THEN 1 ELSE 0 END),0) AS bad_slots,MIN(slot) AS first_slot,MAX(slot) AS last_slot,CASE WHEN COUNT(*)=0 THEN 0 ELSE MAX(slot)-MIN(slot)+1-COUNT(*) END AS missing_slots,MIN(run_at) AS first_run_at,MAX(run_at) AS last_run_at,MIN(start_ledger_index) AS first_start_ledger,MAX(end_ledger_index) AS last_end_ledger FROM terminal" continuity.json
+          query_d1 "SELECT network,run_at,status,start_ledger_index,end_ledger_index,latest_observed_ledger,lag_ledgers,ledgers_processed,persistence_rows_read,persistence_rows_written,error_message FROM fast_lane_shadow_run_metrics WHERE network='devnet' ORDER BY run_at DESC LIMIT 1" metric.json
+          query_d1 "SELECT scheduled_time,datetime(scheduled_time/1000,'unixepoch') AS scheduled_at_utc,status,started_at,completed_at,CAST(strftime('%s',started_at)-scheduled_time/1000 AS INTEGER) AS start_delay_seconds,next_scheduled_time,error_message,updated_at FROM fast_lane_queue_slots ORDER BY scheduled_time DESC LIMIT 6" recent-queue.json
+          query_d1 "WITH params AS (SELECT ${FORMAL_OPERATION_START_MS} AS first_ms,CAST((CAST(strftime('%s','now') AS INTEGER)-300)/300 AS INTEGER)*300000 AS expected_last_ms),q AS (SELECT scheduled_time,status,started_at,completed_at,error_message,CAST(strftime('%s',started_at)-scheduled_time/1000 AS INTEGER) AS start_delay_seconds FROM fast_lane_queue_slots,params WHERE scheduled_time BETWEEN params.first_ms AND params.expected_last_ms) SELECT COUNT(*) AS observed_slots,CAST((params.expected_last_ms-params.first_ms)/300000+1 AS INTEGER) AS expected_slots,CAST((params.expected_last_ms-params.first_ms)/300000+1 AS INTEGER)-COUNT(*) AS missing_slots,COALESCE(SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END),0) AS completed_slots,COALESCE(SUM(CASE WHEN status='error' THEN 1 ELSE 0 END),0) AS error_slots,COALESCE(SUM(CASE WHEN status='processing' THEN 1 ELSE 0 END),0) AS processing_slots,COALESCE(SUM(CASE WHEN start_delay_seconds>300 THEN 1 ELSE 0 END),0) AS delayed_over_5m_slots,COALESCE(SUM(CASE WHEN start_delay_seconds>600 THEN 1 ELSE 0 END),0) AS delayed_over_10m_slots,COALESCE(MAX(start_delay_seconds),0) AS max_start_delay_seconds,MIN(scheduled_time) AS first_scheduled_time,MAX(scheduled_time) AS last_scheduled_time,MAX(completed_at) AS latest_completed_at FROM q,params" queue-continuity.json
+          query_d1 "WITH windows AS (SELECT start_ledger_index,end_ledger_index,created_at,MAX(end_ledger_index) OVER (ORDER BY start_ledger_index,end_ledger_index,created_at ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS previously_covered_through FROM fast_lane_history_windows WHERE network='devnet' AND created_at>='${FORMAL_OPERATION_START}') SELECT COUNT(*) AS window_count,MIN(start_ledger_index) AS first_ledger,MAX(end_ledger_index) AS last_ledger,COALESCE(SUM(CASE WHEN previously_covered_through IS NOT NULL AND start_ledger_index>previously_covered_through+1 THEN 1 ELSE 0 END),0) AS gap_count,COALESCE(SUM(CASE WHEN previously_covered_through IS NOT NULL AND start_ledger_index>previously_covered_through+1 THEN start_ledger_index-previously_covered_through-1 ELSE 0 END),0) AS missing_ledgers,MIN(created_at) AS first_window_at,MAX(created_at) AS last_window_at FROM windows" ledger-coverage.json
+          query_d1 "SELECT COUNT(*) AS telemetry_error_count,MIN(run_at) AS first_error_at,MAX(run_at) AS last_error_at FROM fast_lane_shadow_run_metrics WHERE network='devnet' AND run_at>='${FORMAL_OPERATION_START}' AND status='error'" telemetry-errors.json
 
           fetch_api '/api/overview' overview.json overview.code
           fetch_api '/api/status/history-source' history.json history.code
           fetch_api '/api/status/fast-lane-diff?limit=1' diff.json diff.code
 
-          state_ok="$(jq -r '.success == true and ((.errors // [])|length)==0 and (.result[0].results|length)==1' state.json 2>/dev/null || echo false)"
-          overlay_ok="$(jq -r '.success == true and ((.errors // [])|length)==0 and (.result[0].results|length)==1' overlay-state.json 2>/dev/null || echo false)"
-          compact_ok="$(jq -r '.success == true and ((.errors // [])|length)==0 and (.result[0].results|length)==1' compact.json 2>/dev/null || echo false)"
-          stale_ok="$(jq -r '.success == true and ((.errors // [])|length)==0 and (.result[0].results|length)==1' stale.json 2>/dev/null || echo false)"
-          continuity_ok="$(jq -r '.success == true and ((.errors // [])|length)==0 and (.result[0].results|length)==1' continuity.json 2>/dev/null || echo false)"
+          row_ok() { jq -r '.success == true and ((.errors // [])|length)==0 and (.result[0].results|length)==1' "$1" 2>/dev/null || echo false; }
+          state_ok="$(row_ok state.json)"
+          overlay_ok="$(row_ok overlay.json)"
+          compact_ok="$(row_ok compact.json)"
+          stale_ok="$(row_ok stale.json)"
+          metric_ok="$(row_ok metric.json)"
+          queue_ok="$(row_ok queue-continuity.json)"
+          coverage_ok="$(row_ok ledger-coverage.json)"
+          telemetry_ok="$(row_ok telemetry-errors.json)"
 
           state="$(jq -c '.result[0].results[0] // {}' state.json 2>/dev/null || echo '{}')"
-          overlay="$(jq -c '.result[0].results[0] // {}' overlay-state.json 2>/dev/null || echo '{}')"
+          overlay="$(jq -c '.result[0].results[0] // {}' overlay.json 2>/dev/null || echo '{}')"
           compact_rows="$(jq -r '.result[0].results[0].compact_rows // -1' compact.json 2>/dev/null || echo -1)"
           stale_rows="$(jq -r '.result[0].results[0].stale_rows // -1' stale.json 2>/dev/null || echo -1)"
-          continuity="$(jq -c '.result[0].results[0] // {}' continuity.json 2>/dev/null || echo '{}')"
-
-          terminal_metrics="$(jq -c '
-            [.result[0].results[]?
-              | . + {slot: (((.run_at | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) / 300) | floor)}]
-            | sort_by([.slot, .run_at])
-            | group_by(.slot)
-            | map(last)
-            | sort_by(.slot)
-            | reverse
-            | .[:6]
-          ' metrics.json 2>/dev/null || echo '[]')"
-          metrics_ok="$(jq -r 'length >= 3' <<<"$terminal_metrics")"
-          latest_metric="$(jq -c '.[0] // {}' <<<"$terminal_metrics")"
+          latest_metric="$(jq -c '.result[0].results[0] // {}' metric.json 2>/dev/null || echo '{}')"
+          recent_queue="$(jq -c '.result[0].results // []' recent-queue.json 2>/dev/null || echo '[]')"
+          queue_continuity="$(jq -c '.result[0].results[0] // {}' queue-continuity.json 2>/dev/null || echo '{}')"
+          ledger_coverage="$(jq -c '.result[0].results[0] // {}' ledger-coverage.json 2>/dev/null || echo '{}')"
+          telemetry_errors="$(jq -c '.result[0].results[0] // {}' telemetry-errors.json 2>/dev/null || echo '{}')"
 
           processed="$(jq -r '.last_processed_ledger // -1' <<<"$state")"
           lag="$(jq -r '.lag_ledgers // -1' <<<"$state")"
@@ -100,51 +99,47 @@ jobs:
           metric_run_at="$(jq -r '.run_at // empty' <<<"$latest_metric")"
           metric_status="$(jq -r '.status // "missing"' <<<"$latest_metric")"
           metric_error="$(jq -r '.error_message // empty' <<<"$latest_metric")"
-          observed_slots="$(jq -r '.observed_slots // 0' <<<"$continuity")"
-          bad_slots="$(jq -r '.bad_slots // -1' <<<"$continuity")"
-          missing_slots="$(jq -r '.missing_slots // -1' <<<"$continuity")"
+          missing_slots="$(jq -r '.missing_slots // -1' <<<"$queue_continuity")"
+          completed_slots="$(jq -r '.completed_slots // -1' <<<"$queue_continuity")"
+          expected_slots="$(jq -r '.expected_slots // -1' <<<"$queue_continuity")"
+          error_slots="$(jq -r '.error_slots // -1' <<<"$queue_continuity")"
+          processing_slots="$(jq -r '.processing_slots // -1' <<<"$queue_continuity")"
+          coverage_gaps="$(jq -r '.gap_count // -1' <<<"$ledger_coverage")"
+          missing_ledgers="$(jq -r '.missing_ledgers // -1' <<<"$ledger_coverage")"
 
           checked_at="$(date -u +%FT%TZ)"
           now_epoch="$(date -u +%s)"
           metric_age_seconds=-1
           if [ -n "$metric_run_at" ]; then
             metric_epoch="$(date -u -d "$metric_run_at" +%s 2>/dev/null || echo 0)"
-            if [ "$metric_epoch" -gt 0 ]; then metric_age_seconds="$((now_epoch - metric_epoch))"; fi
-          fi
-
-          consecutive_runs=false
-          all_terminal_good="$(jq -r 'length >= 3 and all(.[]; .status == "committed" and (.lag_ledgers // -1) == 0 and .error_message == null)' <<<"$terminal_metrics")"
-          if [ "$all_terminal_good" = true ]; then
-            mapfile -t slots < <(jq -r '.[].slot' <<<"$terminal_metrics")
-            consecutive_runs=true
-            for ((i=0; i<${#slots[@]}-1; i++)); do
-              gap="$((slots[$i] - slots[$((i+1))]))"
-              if [ "$gap" -ne 1 ]; then
-                consecutive_runs=false
-                break
-              fi
-            done
+            if [ "$metric_epoch" -gt 0 ]; then metric_age_seconds="$((now_epoch-metric_epoch))"; fi
           fi
 
           overview_http="$(cat overview.code)"
           history_http="$(cat history.code)"
           diff_http="$(cat diff.code)"
 
+          evidence_complete=false
+          if [ "$queue_ok" = true ] && [ "$coverage_ok" = true ] \
+             && [ "$missing_slots" -eq 0 ] && [ "$completed_slots" -eq "$expected_slots" ] \
+             && [ "$error_slots" -eq 0 ] && [ "$processing_slots" -eq 0 ] \
+             && [ "$coverage_gaps" -eq 0 ] && [ "$missing_ledgers" -eq 0 ]; then
+            evidence_complete=true
+          fi
+
           healthy=false
-          if [ "$state_ok" = true ] && [ "$overlay_ok" = true ] && [ "$compact_ok" = true ] && [ "$stale_ok" = true ] && [ "$continuity_ok" = true ] && [ "$metrics_ok" = true ] \
+          if [ "$state_ok" = true ] && [ "$overlay_ok" = true ] && [ "$compact_ok" = true ] && [ "$stale_ok" = true ] && [ "$metric_ok" = true ] && [ "$telemetry_ok" = true ] \
              && [ "$overview_http" = 200 ] && [ "$history_http" = 200 ] && [ "$diff_http" = 200 ] \
              && [ "$fast_status" = healthy ] && [ "$lag" -eq 0 ] \
              && [ "$metric_status" = committed ] && [ -z "$metric_error" ] \
              && [ "$metric_age_seconds" -ge 0 ] && [ "$metric_age_seconds" -le 600 ] \
-             && [ "$consecutive_runs" = true ] \
-             && [ "$observed_slots" -ge 3 ] && [ "$bad_slots" -eq 0 ] && [ "$missing_slots" -eq 0 ] \
+             && [ "$evidence_complete" = true ] \
              && [ "$stale_rows" -eq 0 ] && [ "$compact_rows" -eq 0 ] \
              && [ "$overlay_ledger" -eq "$processed" ]; then
             healthy=true
           fi
 
           run_url="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-
           jq -n \
             --arg checkedAt "$checked_at" \
             --arg formalOperationStart "$FORMAL_OPERATION_START" \
@@ -157,31 +152,34 @@ jobs:
             --arg actor "$GITHUB_ACTOR" \
             --arg schedule '*/5 * * * *' \
             --argjson healthy "$healthy" \
-            --argjson consecutiveRuns "$consecutive_runs" \
+            --argjson evidenceComplete "$evidence_complete" \
             --argjson stateQueryOk "$state_ok" \
             --argjson overlayQueryOk "$overlay_ok" \
             --argjson compactQueryOk "$compact_ok" \
             --argjson staleQueryOk "$stale_ok" \
-            --argjson continuityQueryOk "$continuity_ok" \
-            --argjson metricsQueryOk "$metrics_ok" \
+            --argjson metricQueryOk "$metric_ok" \
+            --argjson queueQueryOk "$queue_ok" \
+            --argjson coverageQueryOk "$coverage_ok" \
+            --argjson telemetryQueryOk "$telemetry_ok" \
             --argjson state "$state" \
             --argjson overlay "$overlay" \
             --argjson compactRows "$compact_rows" \
             --argjson staleRows "$stale_rows" \
-            --argjson continuity "$continuity" \
-            --argjson terminalMetrics "$terminal_metrics" \
+            --argjson latestMetric "$latest_metric" \
+            --argjson recentQueue "$recent_queue" \
+            --argjson queueContinuity "$queue_continuity" \
+            --argjson ledgerCoverage "$ledger_coverage" \
+            --argjson telemetryErrors "$telemetry_errors" \
             --argjson metricAgeSeconds "$metric_age_seconds" \
             --arg overviewHttp "$overview_http" \
             --arg historyHttp "$history_http" \
             --arg diffHttp "$diff_http" \
-            '{checkedAt:$checkedAt,healthy:$healthy,watchdog:{schedule:$schedule,eventName:$eventName,runId:($runId|tonumber),runAttempt:($runAttempt|tonumber),runUrl:$runUrl,workflowSha:$workflowSha,workflowRef:$workflowRef,actor:$actor},formalOperation:{startedAt:$formalOperationStart,continuity:$continuity},consecutiveFiveMinuteSlots:$consecutiveRuns,queryOk:{fastLaneState:$stateQueryOk,overlayState:$overlayQueryOk,compact:$compactQueryOk,stale:$staleQueryOk,continuity:$continuityQueryOk,terminalMetrics:$metricsQueryOk},fastLane:$state,canonicalOverlay:$overlay,compactRows:$compactRows,staleRows:$staleRows,terminalMetrics:$terminalMetrics,metricAgeSeconds:$metricAgeSeconds,http:{overview:$overviewHttp,historySource:$historyHttp,fastLaneDiff:$diffHttp}}' > summary.json
+            '{checkedAt:$checkedAt,healthy:$healthy,watchdog:{schedule:$schedule,eventName:$eventName,runId:($runId|tonumber),runAttempt:($runAttempt|tonumber),runUrl:$runUrl,workflowSha:$workflowSha,workflowRef:$workflowRef,actor:$actor},formalOperation:{startedAt:$formalOperationStart,evidenceComplete:$evidenceComplete,queueContinuity:$queueContinuity,ledgerCoverage:$ledgerCoverage,telemetryErrors:$telemetryErrors},queryOk:{fastLaneState:$stateQueryOk,overlayState:$overlayQueryOk,compact:$compactQueryOk,stale:$staleQueryOk,latestMetric:$metricQueryOk,queueContinuity:$queueQueryOk,ledgerCoverage:$coverageQueryOk,telemetryErrors:$telemetryQueryOk},fastLane:$state,canonicalOverlay:$overlay,compactRows:$compactRows,staleRows:$staleRows,latestMetric:$latestMetric,metricAgeSeconds:$metricAgeSeconds,recentQueueSlots:$recentQueue,http:{overview:$overviewHttp,historySource:$historyHttp,fastLaneDiff:$diffHttp}}' > summary.json
 
           {
             echo '# Production freshness watchdog'
             echo
-            echo 'Exact read-only D1 and public API check. It does not invoke the collector, deploy, repair, or maintenance paths.'
-            echo
-            echo 'The `watchdog.eventName` and linked Actions run distinguish scheduled checks from manual or push-triggered checks. The continuity aggregate is computed from the terminal run in every five-minute slot since formal operation started.'
+            echo 'Read-only D1 and public API proof. Queue scheduled times prove five-minute slot continuity; persisted history windows prove ledger coverage. Delayed starts and telemetry errors remain visible but do not imply data loss when queue and ledger coverage are complete.'
             echo
             echo '```json'
             cat summary.json
