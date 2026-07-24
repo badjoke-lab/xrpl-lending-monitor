@@ -1,0 +1,174 @@
+name: Formal complete-history soak 984
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/formal-complete-history-soak-984.yml
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: formal-complete-history-soak-984
+  cancel-in-progress: true
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
+  GH_TOKEN: ${{ github.token }}
+  STATUS_ISSUE: '984'
+  PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+  FORMAL_START: '2026-07-24T07:15:00Z'
+  FORMAL_START_MS: '1784877300000'
+  FORMAL_LAST_SLOT_MS: '1784963400000'
+  FORMAL_END_MS: '1784963700000'
+
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Read complete-history certification evidence
+        shell: bash
+        run: |
+          set -uo pipefail
+
+          query_d1() {
+            local sql="$1" output="$2"
+            jq -n --arg sql "$sql" '{sql:$sql}' \
+              | curl --silent --show-error --retry 3 --retry-all-errors \
+                  --connect-timeout 10 --max-time 45 \
+                  -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+                  -H 'Content-Type: application/json' \
+                  --data-binary @- \
+                  "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database/${DATABASE_ID}/query" \
+              > "$output" || printf '{"success":false,"result":[],"errors":[{"message":"transport_failure"}]}' > "$output"
+          }
+
+          fetch_api() {
+            local path="$1" output="$2" code_file="$3"
+            local code
+            code="$(curl --silent --show-error --retry 3 --retry-all-errors \
+              --connect-timeout 10 --max-time 45 \
+              -o "$output" -w '%{http_code}' "${PRODUCTION_BASE}${path}" || true)"
+            printf '%s' "$code" > "$code_file"
+          }
+
+          now_seconds="$(date -u +%s)"
+          now_ms="$((now_seconds * 1000))"
+          expected_last_ms="$((((now_seconds - 300) / 300) * 300000))"
+          if [ "$expected_last_ms" -gt "$FORMAL_LAST_SLOT_MS" ]; then expected_last_ms="$FORMAL_LAST_SLOT_MS"; fi
+
+          phase=armed
+          if [ "$now_ms" -ge "$FORMAL_START_MS" ] && [ "$now_ms" -lt "$FORMAL_END_MS" ]; then phase=running; fi
+          if [ "$now_ms" -ge "$FORMAL_END_MS" ]; then phase=final; fi
+
+          query_d1 "SELECT epoch_id,last_processed_ledger,last_processed_hash,latest_observed_ledger,latest_observed_hash,status,(latest_observed_ledger-last_processed_ledger) AS lag_ledgers,updated_at FROM fast_lane_shadow_state WHERE network='devnet'" state.json
+          query_d1 "SELECT epoch_id,base_snapshot_id,base_ledger_index,base_ledger_hash,overlay_ledger_index,overlay_ledger_hash,updated_at FROM current_state_overlay_state WHERE network='devnet'" overlay.json
+          query_d1 "SELECT COUNT(*) AS compact_rows FROM fast_lane_shadow_objects_compact WHERE network='devnet'" compact.json
+          query_d1 "SELECT COUNT(*) AS stale_rows FROM current_state_overlay_objects o WHERE o.network='devnet' AND NOT EXISTS (SELECT 1 FROM fast_lane_shadow_base_binding b WHERE b.network=o.network AND b.base_epoch_id=o.epoch_id AND b.base_snapshot_id=o.base_snapshot_id)" stale.json
+          query_d1 "WITH params AS (SELECT ${FORMAL_START_MS} AS first_ms,${expected_last_ms} AS expected_last_ms),q AS (SELECT scheduled_time,status,started_at,completed_at,error_message,CAST(strftime('%s',started_at)-scheduled_time/1000 AS INTEGER) AS start_delay_seconds FROM fast_lane_queue_slots,params WHERE scheduled_time BETWEEN params.first_ms AND params.expected_last_ms) SELECT COUNT(*) AS observed_slots,CASE WHEN params.expected_last_ms<params.first_ms THEN 0 ELSE CAST((params.expected_last_ms-params.first_ms)/300000+1 AS INTEGER) END AS expected_slots,CASE WHEN params.expected_last_ms<params.first_ms THEN 0 ELSE CAST((params.expected_last_ms-params.first_ms)/300000+1 AS INTEGER)-COUNT(*) END AS missing_slots,COALESCE(SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END),0) AS completed_slots,COALESCE(SUM(CASE WHEN status='error' THEN 1 ELSE 0 END),0) AS error_slots,COALESCE(SUM(CASE WHEN status='processing' THEN 1 ELSE 0 END),0) AS processing_slots,COALESCE(SUM(CASE WHEN start_delay_seconds>300 THEN 1 ELSE 0 END),0) AS delayed_over_5m_slots,COALESCE(MAX(start_delay_seconds),0) AS max_start_delay_seconds,MAX(completed_at) AS latest_completed_at FROM q,params" queue.json
+          query_d1 "WITH windows AS (SELECT start_ledger_index,end_ledger_index,created_at,MAX(end_ledger_index) OVER (ORDER BY start_ledger_index,end_ledger_index,created_at ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS previously_covered_through FROM fast_lane_history_windows WHERE network='devnet' AND created_at>='${FORMAL_START}') SELECT COUNT(*) AS window_count,MIN(start_ledger_index) AS first_ledger,MAX(end_ledger_index) AS last_ledger,COALESCE(SUM(CASE WHEN previously_covered_through IS NOT NULL AND start_ledger_index>previously_covered_through+1 THEN 1 ELSE 0 END),0) AS gap_count,COALESCE(SUM(CASE WHEN previously_covered_through IS NOT NULL AND start_ledger_index>previously_covered_through+1 THEN start_ledger_index-previously_covered_through-1 ELSE 0 END),0) AS missing_ledgers,MIN(created_at) AS first_window_at,MAX(created_at) AS last_window_at FROM windows" coverage.json
+          query_d1 "SELECT COUNT(*) AS telemetry_error_count,MIN(run_at) AS first_error_at,MAX(run_at) AS last_error_at FROM fast_lane_shadow_run_metrics WHERE network='devnet' AND run_at>='${FORMAL_START}' AND status='error'" errors.json
+          query_d1 "SELECT COALESCE(SUM(persistence_rows_read),0) AS persistence_rows_read,COALESCE(SUM(persistence_rows_written),0) AS persistence_rows_written,COUNT(*) AS metric_rows FROM fast_lane_shadow_run_metrics WHERE network='devnet' AND run_at>='${FORMAL_START}'" usage.json
+          query_d1 "SELECT COUNT(*) AS overlay_rows,COALESCE(SUM(LENGTH(projection_json)),0) AS overlay_payload_bytes FROM current_state_overlay_objects WHERE network='devnet'" storage.json
+
+          fetch_api '/api/overview' overview.json overview.code
+          fetch_api '/api/status/history-source' history.json history.code
+          fetch_api '/api/status/fast-lane-diff?limit=1' diff.json diff.code
+
+          row_ok() { jq -r '.success == true and ((.errors // [])|length)==0 and (.result[0].results|length)==1' "$1" 2>/dev/null || echo false; }
+          state_ok="$(row_ok state.json)"
+          overlay_ok="$(row_ok overlay.json)"
+          compact_ok="$(row_ok compact.json)"
+          stale_ok="$(row_ok stale.json)"
+          queue_ok="$(row_ok queue.json)"
+          coverage_ok="$(row_ok coverage.json)"
+          errors_ok="$(row_ok errors.json)"
+          usage_ok="$(row_ok usage.json)"
+          storage_ok="$(row_ok storage.json)"
+
+          state="$(jq -c '.result[0].results[0] // {}' state.json 2>/dev/null || echo '{}')"
+          overlay="$(jq -c '.result[0].results[0] // {}' overlay.json 2>/dev/null || echo '{}')"
+          compact_rows="$(jq -r '.result[0].results[0].compact_rows // -1' compact.json 2>/dev/null || echo -1)"
+          stale_rows="$(jq -r '.result[0].results[0].stale_rows // -1' stale.json 2>/dev/null || echo -1)"
+          queue="$(jq -c '.result[0].results[0] // {}' queue.json 2>/dev/null || echo '{}')"
+          coverage="$(jq -c '.result[0].results[0] // {}' coverage.json 2>/dev/null || echo '{}')"
+          errors="$(jq -c '.result[0].results[0] // {}' errors.json 2>/dev/null || echo '{}')"
+          usage="$(jq -c '.result[0].results[0] // {}' usage.json 2>/dev/null || echo '{}')"
+          storage="$(jq -c '.result[0].results[0] // {}' storage.json 2>/dev/null || echo '{}')"
+
+          expected_slots="$(jq -r '.expected_slots // -1' <<<"$queue")"
+          observed_slots="$(jq -r '.observed_slots // -1' <<<"$queue")"
+          completed_slots="$(jq -r '.completed_slots // -1' <<<"$queue")"
+          missing_slots="$(jq -r '.missing_slots // -1' <<<"$queue")"
+          error_slots="$(jq -r '.error_slots // -1' <<<"$queue")"
+          processing_slots="$(jq -r '.processing_slots // -1' <<<"$queue")"
+          gap_count="$(jq -r '.gap_count // -1' <<<"$coverage")"
+          missing_ledgers="$(jq -r '.missing_ledgers // -1' <<<"$coverage")"
+          window_count="$(jq -r '.window_count // -1' <<<"$coverage")"
+          telemetry_error_count="$(jq -r '.telemetry_error_count // -1' <<<"$errors")"
+          processed="$(jq -r '.last_processed_ledger // -1' <<<"$state")"
+          lag="$(jq -r '.lag_ledgers // -1' <<<"$state")"
+          fast_status="$(jq -r '.status // "missing"' <<<"$state")"
+          overlay_ledger="$(jq -r '.overlay_ledger_index // -1' <<<"$overlay")"
+          overview_http="$(cat overview.code)"
+          history_http="$(cat history.code)"
+          diff_http="$(cat diff.code)"
+
+          current_healthy=false
+          if [ "$state_ok" = true ] && [ "$overlay_ok" = true ] && [ "$compact_ok" = true ] && [ "$stale_ok" = true ] \
+             && [ "$fast_status" = healthy ] && [ "$lag" -eq 0 ] && [ "$overlay_ledger" -eq "$processed" ] \
+             && [ "$compact_rows" -eq 0 ] && [ "$stale_rows" -eq 0 ] \
+             && [ "$overview_http" = 200 ] && [ "$history_http" = 200 ] && [ "$diff_http" = 200 ]; then
+            current_healthy=true
+          fi
+
+          evidence_complete=false
+          if [ "$queue_ok" = true ] && [ "$coverage_ok" = true ] && [ "$errors_ok" = true ] \
+             && [ "$expected_slots" -gt 0 ] && [ "$observed_slots" -eq "$expected_slots" ] \
+             && [ "$completed_slots" -eq "$expected_slots" ] && [ "$missing_slots" -eq 0 ] \
+             && [ "$error_slots" -eq 0 ] && [ "$processing_slots" -eq 0 ] \
+             && [ "$window_count" -gt 0 ] && [ "$gap_count" -eq 0 ] && [ "$missing_ledgers" -eq 0 ] \
+             && [ "$telemetry_error_count" -eq 0 ]; then
+            evidence_complete=true
+          fi
+
+          status=armed
+          if [ "$phase" = running ]; then status=passing_so_far; fi
+          if [ "$phase" = running ] && { [ "$current_healthy" != true ] || [ "$evidence_complete" != true ]; }; then status=not_passing; fi
+          if [ "$phase" = final ]; then status=failed; fi
+          if [ "$phase" = final ] && [ "$current_healthy" = true ] && [ "$evidence_complete" = true ] && [ "$expected_slots" -eq 288 ]; then status=passed; fi
+
+          checked_at="$(date -u +%FT%TZ)"
+          run_url="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          jq -n \
+            --arg checkedAt "$checked_at" --arg phase "$phase" --arg status "$status" \
+            --arg start "$FORMAL_START" --arg eventName "$GITHUB_EVENT_NAME" --arg runUrl "$run_url" \
+            --argjson currentHealthy "$current_healthy" --argjson evidenceComplete "$evidence_complete" \
+            --argjson queue "$queue" --argjson coverage "$coverage" --argjson errors "$errors" \
+            --argjson state "$state" --argjson overlay "$overlay" --argjson compactRows "$compact_rows" \
+            --argjson staleRows "$stale_rows" --argjson usage "$usage" --argjson storage "$storage" \
+            --arg overviewHttp "$overview_http" --arg historyHttp "$history_http" --arg diffHttp "$diff_http" \
+            '{checkedAt:$checkedAt,phase:$phase,status:$status,formalStart:$start,watchdog:{eventName:$eventName,runUrl:$runUrl,readOnly:true},currentHealthy:$currentHealthy,evidenceComplete:$evidenceComplete,queueContinuity:$queue,ledgerCoverage:$coverage,telemetryErrors:$errors,fastLane:$state,canonicalOverlay:$overlay,compactRows:$compactRows,staleRows:$staleRows,resourceEvidence:{persistence:$usage,storage:$storage},http:{overview:$overviewHttp,historySource:$historyHttp,fastLaneDiff:$diffHttp}}' > summary.json
+
+          {
+            echo '# Formal complete-history five-minute soak'
+            echo
+            echo '- Window: 2026-07-24 16:15 JST to 2026-07-25 16:15 JST'
+            echo '- Required slots: 288'
+            echo '- Scope: complete persisted lending history, not current-state-only monitoring'
+            echo '- This workflow is read-only and does not invoke the collector, deploy, or repair production.'
+            echo
+            echo '```json'
+            cat summary.json
+            echo '```'
+          } > issue.md
+
+          gh issue edit "$STATUS_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file issue.md
