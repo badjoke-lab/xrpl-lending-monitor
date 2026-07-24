@@ -15,7 +15,7 @@ env:
   CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
   DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
   GH_TOKEN: ${{ github.token }}
-  STATUS_ISSUE: '978'
+  STATUS_ISSUE: '982'
   FORMAL_OPERATION_START: '2026-07-24T02:40:00Z'
 
 jobs:
@@ -72,13 +72,13 @@ jobs:
             '{checkedAt:$checkedAt,eventName:$eventName,runUrl:$runUrl,formalOperationStart:$formalOperationStart,missingSlotCount:$missingSlotCount,missingSlots:$missingSlots,trueLedgerGapCount:$trueLedgerGapCount,trueLedgerGaps:$trueLedgerGaps,missingSlotQueueRecords:$queueSlots,badTerminalCount:$badTerminalCount}' > diagnostic.json
 
           {
-            echo '## Corrected one-time production continuity diagnostic'
+            echo '# Corrected one-time production continuity diagnostic'
             echo
             echo 'The ledger-gap calculation below uses every committed collector pass, not only the terminal pass in each five-minute slot.'
             echo
             echo '```json'
             cat diagnostic.json
             echo '```'
-          } > comment.md
+          } > issue.md
 
-          gh issue comment "$STATUS_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file comment.md
+          gh issue edit "$STATUS_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file issue.md
