@@ -36,6 +36,7 @@ jobs:
       DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
       GH_TOKEN: ${{ github.token }}
       ISSUE_NUMBER: '976'
+      STATUS_ISSUE_NUMBER: '978'
       PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
       FORMAL_SOAK_START: '2026-07-23T16:13:00Z'
       FORMAL_SOAK_END: '2026-07-24T16:13:00Z'
@@ -159,6 +160,21 @@ jobs:
             }' > summary.json
 
           {
+            echo '# Live production monitor status for formal soak #976'
+            echo
+            echo 'This issue is overwritten by every five-minute production probe. Canonical discussion and final judgment remain in #976.'
+            echo
+            echo '```json'
+            cat summary.json
+            echo '```'
+          } > status.md
+
+          status_update_ok=true
+          if ! gh issue edit "$STATUS_ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file status.md; then
+            status_update_ok=false
+          fi
+
+          {
             echo 'Formal soak production evidence:'
             echo
             echo '```json'
@@ -167,7 +183,7 @@ jobs:
           } > comment.md
 
           if ! gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file comment.md; then
-            fallback="$(jq -c '{checkedAt,event,runId,formalSoakStart,formalSoakEnd,expectedCronSlotsToDate,formalSummary,queryOk,api,monitorError:"full bounded evidence post failed"}' summary.json)"
+            fallback="$(jq -c --argjson statusUpdateOk "$status_update_ok" '{checkedAt,event,runId,formalSoakStart,formalSoakEnd,expectedCronSlotsToDate,formalSummary,queryOk,api,statusUpdateOk:$statusUpdateOk,monitorError:"full bounded evidence post failed"}' summary.json)"
             gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body "Formal soak monitor failure:\n\n\`\`\`json\n${fallback}\n\`\`\`"
             exit 1
           fi
