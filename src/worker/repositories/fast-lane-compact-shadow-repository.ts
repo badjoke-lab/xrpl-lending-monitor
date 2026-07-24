@@ -31,6 +31,7 @@ function commitToken(options: {
 export interface EncodedFastLaneHistoryWindow {
   historyBundle: FastLaneHistoryBundle
   encodedHistoryBundle: string
+  activityPlan?: FastLaneShadowWindowPlan
 }
 
 function validateHistoryWindows(
@@ -42,7 +43,7 @@ function validateHistoryWindows(
   }
   let expectedStart = plan.startLedgerIndex
   for (const window of historyWindows) {
-    const { historyBundle, encodedHistoryBundle } = window
+    const { historyBundle, encodedHistoryBundle, activityPlan } = window
     if (encodedHistoryBundle.length === 0) {
       throw new Error('Fast-lane encoded history bundle is empty')
     }
@@ -51,6 +52,16 @@ function validateHistoryWindows(
     }
     if (historyBundle.endLedgerIndex < historyBundle.startLedgerIndex) {
       throw new Error('Fast-lane history bundle ledger range is invalid')
+    }
+    if (
+      activityPlan
+      && (
+        activityPlan.startLedgerIndex !== historyBundle.startLedgerIndex
+        || activityPlan.endLedgerIndex !== historyBundle.endLedgerIndex
+        || activityPlan.endLedgerHash !== historyBundle.endLedgerHash
+      )
+    ) {
+      throw new Error('Fast-lane activity partition does not match its history partition')
     }
     expectedStart = historyBundle.endLedgerIndex + 1
   }
@@ -63,6 +74,45 @@ function validateHistoryWindows(
   ) {
     throw new Error('Fast-lane history windows do not cover the compact shadow window')
   }
+}
+
+function appendActivityWindow(
+  db: D1Database,
+  statements: D1PreparedStatement[],
+  activityPlan: FastLaneShadowWindowPlan,
+  processedAt: string,
+): void {
+  statements.push(
+    db.prepare(
+      `INSERT INTO fast_lane_shadow_windows (
+         network, epoch_id, window_start_close_time, window_end_close_time,
+         start_ledger_index, end_ledger_index, end_ledger_hash,
+         inspected_transaction_count, lending_transaction_count,
+         successful_lending_transaction_count, affected_object_count,
+         activity_bundle_json, created_at
+       ) VALUES (
+         'devnet', ?1, ?2, ?3,
+         ?4, ?5, ?6,
+         ?7, ?8,
+         ?9, ?10,
+         ?11, ?12
+       )
+       ON CONFLICT(network, epoch_id, window_start_close_time) DO NOTHING`,
+    ).bind(
+      activityPlan.epochId,
+      activityPlan.windowStartCloseTime,
+      activityPlan.windowEndCloseTime,
+      activityPlan.startLedgerIndex,
+      activityPlan.endLedgerIndex,
+      activityPlan.endLedgerHash,
+      activityPlan.inspectedTransactions,
+      activityPlan.lendingTransactions,
+      activityPlan.successfulLendingTransactions,
+      activityPlan.mutations.length,
+      JSON.stringify(activityPlan.activity),
+      processedAt,
+    ),
+  )
 }
 
 export async function commitFastLaneCompactShadowWindows(options: {
@@ -205,39 +255,8 @@ export async function commitFastLaneCompactShadowWindows(options: {
         historyBundle.createdAt,
       ),
     )
+    appendActivityWindow(db, statements, window.activityPlan ?? plan, options.processedAt)
   }
-
-  statements.push(
-    db.prepare(
-      `INSERT INTO fast_lane_shadow_windows (
-         network, epoch_id, window_start_close_time, window_end_close_time,
-         start_ledger_index, end_ledger_index, end_ledger_hash,
-         inspected_transaction_count, lending_transaction_count,
-         successful_lending_transaction_count, affected_object_count,
-         activity_bundle_json, created_at
-       ) VALUES (
-         'devnet', ?1, ?2, ?3,
-         ?4, ?5, ?6,
-         ?7, ?8,
-         ?9, ?10,
-         ?11, ?12
-       )
-       ON CONFLICT(network, epoch_id, window_start_close_time) DO NOTHING`,
-    ).bind(
-      plan.epochId,
-      plan.windowStartCloseTime,
-      plan.windowEndCloseTime,
-      plan.startLedgerIndex,
-      plan.endLedgerIndex,
-      plan.endLedgerHash,
-      plan.inspectedTransactions,
-      plan.lendingTransactions,
-      plan.successfulLendingTransactions,
-      plan.mutations.length,
-      JSON.stringify(plan.activity),
-      options.processedAt,
-    ),
-  )
 
   statements.push(
     db.prepare(
@@ -308,6 +327,7 @@ export async function commitFastLaneCompactShadowWindow(options: {
     historyWindows: [{
       historyBundle: options.historyBundle,
       encodedHistoryBundle: options.encodedHistoryBundle,
+      activityPlan: options.plan,
     }],
     expectedPreviousLedger: options.expectedPreviousLedger,
     expectedPreviousHash: options.expectedPreviousHash,
