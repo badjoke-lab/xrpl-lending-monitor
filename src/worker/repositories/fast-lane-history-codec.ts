@@ -20,6 +20,12 @@ function base64ToBytes(value: string): Uint8Array {
   return bytes
 }
 
+function exactArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const copy = new Uint8Array(bytes.byteLength)
+  copy.set(bytes)
+  return copy.buffer
+}
+
 async function gzip(value: string): Promise<Uint8Array> {
   const input = new Blob([value]).stream()
   const compressed = input.pipeThrough(new CompressionStream('gzip'))
@@ -27,7 +33,7 @@ async function gzip(value: string): Promise<Uint8Array> {
 }
 
 async function gunzip(value: Uint8Array): Promise<string> {
-  const input = new Blob([value]).stream()
+  const input = new Blob([exactArrayBuffer(value)]).stream()
   const decompressed = input.pipeThrough(new DecompressionStream('gzip'))
   return new Response(decompressed).text()
 }
