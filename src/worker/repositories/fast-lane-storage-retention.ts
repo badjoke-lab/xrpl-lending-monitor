@@ -1,11 +1,8 @@
 const MAX_HISTORY_WINDOWS = 256
 const MAX_SHADOW_WINDOWS = 256
 // A normal exact five-minute slot records multiple bounded catch-up attempts. The
-// former 1,000-row ring was only barely larger than one 24-hour window and
-// deleted the earliest attempt evidence before the delayed final audit ran.
-// Retain several full days so a completed soak remains independently auditable.
+// live-tail ring is intentionally bounded and is not formal soak evidence.
 const MAX_RUN_METRICS = 4_096
-const MAX_HISTORY_BUNDLE_BYTES = 131_072
 
 // The compact table is transient and should normally return to zero after every
 // completed five-minute cycle. These limits retain a fail-closed escape hatch
@@ -99,11 +96,6 @@ export async function pruneFastLaneStorage(db: D1Database): Promise<void> {
              )
          )`,
     ),
-    db.prepare(
-      `DELETE FROM fast_lane_history_windows
-       WHERE network = 'devnet'
-         AND LENGTH(bundle_json) > ?1`,
-    ).bind(MAX_HISTORY_BUNDLE_BYTES),
     db.prepare(
       `DELETE FROM fast_lane_history_windows
        WHERE network = 'devnet'
