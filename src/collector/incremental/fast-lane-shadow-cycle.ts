@@ -264,6 +264,12 @@ export async function runFastLaneShadowCycle(options: {
       historyWindows: boundedWindows.map((window) => ({
         historyBundle: window.bundle,
         encodedHistoryBundle: window.encodedBundle,
+        activityPlan: buildFastLaneShadowWindowPlan({
+          epochId: SHADOW_EPOCH_ID,
+          scan: window.scan,
+          latestObservedHash: head.ledgerHash,
+          processedAt,
+        }),
       })),
       expectedPreviousLedger,
       expectedPreviousHash: previousHash,
