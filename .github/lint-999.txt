@@ -1,0 +1,13 @@
+$ eslint .
+
+/home/runner/work/xrpl-lending-monitor/xrpl-lending-monitor/src/worker/routes/hybrid-transaction-detail.ts
+  25:19  error  Unnecessary escape character: \"  no-useless-escape
+  25:25  error  Unnecessary escape character: \"  no-useless-escape
+  25:28  error  Unnecessary escape character: \"  no-useless-escape
+  25:48  error  Unnecessary escape character: \"  no-useless-escape
+
+✖ 4 problems (4 errors, 0 warnings)
+
+[ELIFECYCLE] Command failed with exit code 1.
+
+exit_status=1
