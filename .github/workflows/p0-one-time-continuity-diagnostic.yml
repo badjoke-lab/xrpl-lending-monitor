@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Inspect suspected ledger coverage gap
+      - name: Verify persisted metricless ledger range
         shell: bash
         run: |
           set -euo pipefail
@@ -40,27 +40,27 @@ jobs:
             jq -e '.success == true and ((.errors // []) | length) == 0' "$output" >/dev/null
           }
 
-          query_d1 "SELECT network,run_at,status,start_ledger_index,end_ledger_index,latest_observed_ledger,lag_ledgers,ledgers_processed,persistence_rows_read,persistence_rows_written,error_message FROM fast_lane_shadow_run_metrics WHERE network='devnet' AND run_at >= '2026-07-24T02:50:00Z' AND run_at < '2026-07-24T03:01:00Z' ORDER BY run_at" metrics.json
+          query_d1 "SELECT network,epoch_id,start_ledger_index,end_ledger_index,end_ledger_hash,created_at,length(bundle_json) AS bundle_bytes FROM fast_lane_history_windows WHERE network='devnet' AND start_ledger_index=3898562 AND end_ledger_index=3898593" history-window.json
 
-          query_d1 "SELECT scheduled_time,datetime(scheduled_time/1000,'unixepoch') AS scheduled_at_utc,message_id,status,started_at,completed_at,next_scheduled_time,datetime(next_scheduled_time/1000,'unixepoch') AS next_scheduled_at_utc,error_message,updated_at FROM fast_lane_queue_slots WHERE scheduled_time >= 1784861400000 AND scheduled_time <= 1784862000000 ORDER BY scheduled_time" queue.json
+          query_d1 "SELECT network,epoch_id,start_ledger_index,end_ledger_index,end_ledger_hash,inspected_transaction_count,lending_transaction_count,successful_lending_transaction_count,affected_object_count,created_at,length(activity_bundle_json) AS activity_bundle_bytes FROM fast_lane_shadow_windows WHERE network='devnet' AND start_ledger_index=3898562 AND end_ledger_index=3898593" shadow-window.json
 
-          query_d1 "WITH committed AS (SELECT run_at,start_ledger_index,end_ledger_index,MAX(end_ledger_index) OVER (ORDER BY start_ledger_index,run_at ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS previously_covered_through FROM fast_lane_shadow_run_metrics WHERE network='devnet' AND run_at >= '2026-07-24T02:40:00Z' AND status='committed' AND error_message IS NULL AND start_ledger_index IS NOT NULL AND end_ledger_index IS NOT NULL) SELECT run_at,previously_covered_through,start_ledger_index,end_ledger_index,(start_ledger_index-previously_covered_through-1) AS missing_ledgers FROM committed WHERE previously_covered_through IS NOT NULL AND start_ledger_index>previously_covered_through+1 ORDER BY start_ledger_index" gaps.json
+          query_d1 "SELECT epoch_id,last_processed_ledger,last_processed_hash,latest_observed_ledger,latest_observed_hash,status,updated_at FROM fast_lane_shadow_state WHERE network='devnet'" state.json
 
-          metrics="$(jq -c '.result[0].results // []' metrics.json)"
-          queue="$(jq -c '.result[0].results // []' queue.json)"
-          gaps="$(jq -c '.result[0].results // []' gaps.json)"
+          history_window="$(jq -c '.result[0].results // []' history-window.json)"
+          shadow_window="$(jq -c '.result[0].results // []' shadow-window.json)"
+          state="$(jq -c '.result[0].results[0] // {}' state.json)"
           run_url="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
 
           jq -n \
             --arg checkedAt "$(date -u +%FT%TZ)" \
             --arg runUrl "$run_url" \
-            --argjson metrics "$metrics" \
-            --argjson queue "$queue" \
-            --argjson gaps "$gaps" \
-            '{checkedAt:$checkedAt,runUrl:$runUrl,suspectedRange:{fromLedger:3898562,toLedger:3898593},metrics:$metrics,queueSlots:$queue,currentCommittedCoverageGaps:$gaps}' > diagnostic.json
+            --argjson historyWindow "$history_window" \
+            --argjson shadowWindow "$shadow_window" \
+            --argjson state "$state" \
+            '{checkedAt:$checkedAt,runUrl:$runUrl,verifiedRange:{startLedger:3898562,endLedger:3898593},historyWindow:$historyWindow,shadowWindow:$shadowWindow,currentState:$state,persisted:((($historyWindow|length)==1) and (($shadowWindow|length)==1))}' > diagnostic.json
 
           {
-            echo '# Suspected ledger coverage gap diagnostic'
+            echo '# Metricless ledger range persistence verification'
             echo
             echo '```json'
             cat diagnostic.json
