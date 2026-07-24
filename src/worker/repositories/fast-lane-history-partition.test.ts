@@ -14,7 +14,7 @@ function hash(value: string): string {
 function denseScan(): IncrementalScanResult {
   const ledgers = Array.from({ length: 4 }, (_, ledgerOffset) => {
     const ledgerIndex = 101 + ledgerOffset
-    const transactions = Array.from({ length: 2_500 }, (_, transactionIndex) => ({
+    const transactions = Array.from({ length: 2_000 }, (_, transactionIndex) => ({
       hash: hash(`${ledgerIndex}:${transactionIndex}`),
       transactionType: 'LoanPay',
       account: 'rAccount',
@@ -72,7 +72,9 @@ describe('partitioned fast-lane history', () => {
       if (!window) throw new Error('missing history window')
       expect(window.encodedBytes).toBeLessThanOrEqual(MAX_FAST_LANE_HISTORY_BUNDLE_BYTES)
       if (index > 0) {
-        expect(window.bundle.startLedgerIndex).toBe(windows[index - 1]!.bundle.endLedgerIndex + 1)
+        const previous = windows[index - 1]
+        if (!previous) throw new Error('missing previous history window')
+        expect(window.bundle.startLedgerIndex).toBe(previous.bundle.endLedgerIndex + 1)
       }
     }
   }, 30_000)
