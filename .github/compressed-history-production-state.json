@@ -1,0 +1,362 @@
+{
+  "checkedAt": "2026-07-24T10:30:50Z",
+  "cutoverFloor": "2026-07-24T09:20:00Z",
+  "runId": "30086414062",
+  "runUrl": "https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/30086414062",
+  "headSha": "4103b13d108d3e345ea784dbb4fdfed7ed2a882e",
+  "passed": true,
+  "compressedCodeObserved": true,
+  "currentStateHealthy": true,
+  "history": {
+    "compressedRowCount": 12,
+    "decodedRowCount": 12,
+    "allRowsDecoded": true,
+    "allRowsHaveSemanticArrays": true,
+    "firstLedger": 3906577,
+    "lastLedger": 3906900,
+    "maxEncodedBytes": 40675,
+    "decodedRows": [
+      {
+        "startLedgerIndex": 3906879,
+        "endLedgerIndex": 3906900,
+        "endLedgerHash": "2CD5393F9DD2E0EABEAEC8D7ED163E2152AA6E6A2D6EAA29AE96513835FF4425",
+        "createdAt": "2026-07-24T10:30:12.568Z",
+        "encodedBytes": 14259,
+        "allSemanticArraysPresent": true,
+        "counts": {
+          "protocolEvents": 17,
+          "objectChanges": 247,
+          "loanLifecycle": 1,
+          "archivedObjects": 0,
+          "balanceHistory": 1
+        }
+      },
+      {
+        "startLedgerIndex": 3906847,
+        "endLedgerIndex": 3906878,
+        "endLedgerHash": "5DAF357A36865775B698752C27BB7A381020E96BDB2AE5F6209306BABAC0D312",
+        "createdAt": "2026-07-24T10:30:11.044Z",
+        "encodedBytes": 23935,
+        "allSemanticArraysPresent": true,
+        "counts": {
+          "protocolEvents": 28,
+          "objectChanges": 433,
+          "loanLifecycle": 1,
+          "archivedObjects": 0,
+          "balanceHistory": 0
+        }
+      },
+      {
+        "startLedgerIndex": 3906815,
+        "endLedgerIndex": 3906846,
+        "endLedgerHash": "CC8B215E219D64221A9A061F4FD06E2842C0995515A446E002C3AB0CBE1FB761",
+        "createdAt": "2026-07-24T10:30:09.787Z",
+        "encodedBytes": 28283,
+        "allSemanticArraysPresent": true,
+        "counts": {
+          "protocolEvents": 32,
+          "objectChanges": 504,
+          "loanLifecycle": 1,
+          "archivedObjects": 0,
+          "balanceHistory": 0
+        }
+      },
+      {
+        "startLedgerIndex": 3906791,
+        "endLedgerIndex": 3906814,
+        "endLedgerHash": "A6E0F646B7C235323977169AC282ABB14F938EB12F86A7EE47672831607FB005",
+        "createdAt": "2026-07-24T10:25:15.953Z",
+        "encodedBytes": 14583,
+        "allSemanticArraysPresent": true,
+        "counts": {
+          "protocolEvents": 24,
+          "objectChanges": 261,
+          "loanLifecycle": 0,
+          "archivedObjects": 0,
+          "balanceHistory": 0
+        }
+      },
+      {
+        "startLedgerIndex": 3906759,
+        "endLedgerIndex": 3906790,
+        "endLedgerHash": "80A84C6DCAF5021C5653AA7AFF99355F92917AE8A9892A4E2EEC2FC870E30F72",
+        "createdAt": "2026-07-24T10:25:14.803Z",
+        "encodedBytes": 25495,
+        "allSemanticArraysPresent": true,
+        "counts": {
+          "protocolEvents": 28,
+          "objectChanges": 473,
+          "loanLifecycle": 3,
+          "archivedObjects": 1,
+          "balanceHistory": 2
+        }
+      },
+      {
+        "startLedgerIndex": 3906727,
+        "endLedgerIndex": 3906758,
+        "endLedgerHash": "4C2E1CFE284A8DB73C367E9E11CE1B32C043081C74506072BEC93C007D076E10",
+        "createdAt": "2026-07-24T10:25:13.258Z",
+        "encodedBytes": 34563,
+        "allSemanticArraysPresent": true,
+        "counts": {
+          "protocolEvents": 40,
+          "objectChanges": 605,
+          "loanLifecycle": 2,
+          "archivedObjects": 0,
+          "balanceHistory": 1
+        }
+      },
+      {
+        "startLedgerIndex": 3906722,
+        "endLedgerIndex": 3906726,
+        "endLedgerHash": "8F6052E795B3B757853D99197AC096B91438B154D21302EEFC9BA0BED8810B38",
+        "createdAt": "2026-07-24T10:20:26.194Z",
+        "encodedBytes": 5383,
+        "allSemanticArraysPresent": true,
+        "counts": {
+          "protocolEvents": 4,
+          "objectChanges": 91,
+          "loanLifecycle": 0,
+          "archivedObjects": 0,
+          "balanceHistory": 0
+        }
+      },
+      {
+        "startLedgerIndex": 3906690,
+        "endLedgerIndex": 3906721,
+        "endLedgerHash": "A83719CE0F2E7B561648E2969495F62BB8D308101D9F26E1C3112CDD2D6C0447",
+        "createdAt": "2026-07-24T10:20:22.044Z",
+        "encodedBytes": 40579,
+        "allSemanticArraysPresent": true,
+        "counts": {
+          "protocolEvents": 48,
+          "objectChanges": 713,
+          "loanLifecycle": 7,
+          "archivedObjects": 0,
+          "balanceHistory": 3
+        }
+      },
+      {
+        "startLedgerIndex": 3906658,
+        "endLedgerIndex": 3906689,
+        "endLedgerHash": "9C55AD5F630FD342D91F1633FAD3B2AECA0B2A568AC6D539FCFF2462D7D7634E",
+        "createdAt": "2026-07-24T10:20:18.226Z",
+        "encodedBytes": 40675,
+        "allSemanticArraysPresent": true,
+        "counts": {
+          "protocolEvents": 44,
+          "objectChanges": 741,
+          "loanLifecycle": 2,
+          "archivedObjects": 0,
+          "balanceHistory": 1
+        }
+      },
+      {
+        "startLedgerIndex": 3906641,
+        "endLedgerIndex": 3906657,
+        "endLedgerHash": "8B3BA198940F8A6DC0771681F1898CB387A4273CBDC014CF317DA5D23F0D4737",
+        "createdAt": "2026-07-24T10:16:34.357Z",
+        "encodedBytes": 16807,
+        "allSemanticArraysPresent": true,
+        "counts": {
+          "protocolEvents": 19,
+          "objectChanges": 295,
+          "loanLifecycle": 0,
+          "archivedObjects": 0,
+          "balanceHistory": 0
+        }
+      },
+      {
+        "startLedgerIndex": 3906609,
+        "endLedgerIndex": 3906640,
+        "endLedgerHash": "ABA1F0DD004CE3A0E6354C797295588AB097E77383FCD16E0E5317E98DC04EF7",
+        "createdAt": "2026-07-24T10:16:33.299Z",
+        "encodedBytes": 24495,
+        "allSemanticArraysPresent": true,
+        "counts": {
+          "protocolEvents": 33,
+          "objectChanges": 441,
+          "loanLifecycle": 0,
+          "archivedObjects": 0,
+          "balanceHistory": 0
+        }
+      },
+      {
+        "startLedgerIndex": 3906577,
+        "endLedgerIndex": 3906608,
+        "endLedgerHash": "1D4DC9F748407CB87FE07F5ED4867BA60CFF0FE845B9047C0E4EEB49B91A5C3D",
+        "createdAt": "2026-07-24T10:16:32.234Z",
+        "encodedBytes": 19155,
+        "allSemanticArraysPresent": true,
+        "counts": {
+          "protocolEvents": 20,
+          "objectChanges": 358,
+          "loanLifecycle": 0,
+          "archivedObjects": 0,
+          "balanceHistory": 0
+        }
+      }
+    ],
+    "decodeErrors": [],
+    "witness": {
+      "kind": "objectChange",
+      "transactionHash": "065F7A4F6B316D74609B685DA47DB3E736B42B083BA2CADDF29660A5F2AD1847",
+      "objectType": "Vault",
+      "objectId": "1A39AFC503622B33B460614211AB7EFDEC8FC23B642A605815A39BE80B562052"
+    }
+  },
+  "fastLane": {
+    "epoch_id": "fast-lane-shadow-devnet",
+    "last_processed_ledger": 3906900,
+    "last_processed_hash": "2CD5393F9DD2E0EABEAEC8D7ED163E2152AA6E6A2D6EAA29AE96513835FF4425",
+    "latest_observed_ledger": 3906900,
+    "latest_observed_hash": "2CD5393F9DD2E0EABEAEC8D7ED163E2152AA6E6A2D6EAA29AE96513835FF4425",
+    "status": "healthy",
+    "lag_ledgers": 0,
+    "updated_at": "2026-07-24T10:30:12.568Z"
+  },
+  "canonicalOverlay": {
+    "epoch_id": "devnet-3371675",
+    "base_snapshot_id": "devnet-3860021-fbba23eeffd1",
+    "base_ledger_index": 3860021,
+    "base_ledger_hash": "FBBA23EEFFD19FFD81F2E6A0A9A5D3E503EE78AA8EB6F3653F756BA90655B4A7",
+    "overlay_ledger_index": 3906900,
+    "overlay_ledger_hash": "2CD5393F9DD2E0EABEAEC8D7ED163E2152AA6E6A2D6EAA29AE96513835FF4425",
+    "updated_at": "2026-07-24T10:30:13.613Z"
+  },
+  "compactRows": 0,
+  "staleRows": 0,
+  "recentMetrics": [
+    {
+      "run_at": "2026-07-24T10:30:12.568Z",
+      "status": "committed",
+      "start_ledger_index": 3906879,
+      "end_ledger_index": 3906900,
+      "latest_observed_ledger": 3906900,
+      "lag_ledgers": 0,
+      "ledgers_processed": 22,
+      "persistence_rows_read": 15,
+      "persistence_rows_written": 19,
+      "error_message": null
+    },
+    {
+      "run_at": "2026-07-24T10:30:11.044Z",
+      "status": "committed",
+      "start_ledger_index": 3906847,
+      "end_ledger_index": 3906878,
+      "latest_observed_ledger": 3906900,
+      "lag_ledgers": 22,
+      "ledgers_processed": 32,
+      "persistence_rows_read": 19,
+      "persistence_rows_written": 23,
+      "error_message": null
+    },
+    {
+      "run_at": "2026-07-24T10:30:09.787Z",
+      "status": "committed",
+      "start_ledger_index": 3906815,
+      "end_ledger_index": 3906846,
+      "latest_observed_ledger": 3906900,
+      "lag_ledgers": 54,
+      "ledgers_processed": 32,
+      "persistence_rows_read": 23,
+      "persistence_rows_written": 27,
+      "error_message": null
+    },
+    {
+      "run_at": "2026-07-24T10:25:15.953Z",
+      "status": "committed",
+      "start_ledger_index": 3906791,
+      "end_ledger_index": 3906814,
+      "latest_observed_ledger": 3906814,
+      "lag_ledgers": 0,
+      "ledgers_processed": 24,
+      "persistence_rows_read": 14,
+      "persistence_rows_written": 18,
+      "error_message": null
+    },
+    {
+      "run_at": "2026-07-24T10:25:14.803Z",
+      "status": "committed",
+      "start_ledger_index": 3906759,
+      "end_ledger_index": 3906790,
+      "latest_observed_ledger": 3906814,
+      "lag_ledgers": 24,
+      "ledgers_processed": 32,
+      "persistence_rows_read": 22,
+      "persistence_rows_written": 26,
+      "error_message": null
+    },
+    {
+      "run_at": "2026-07-24T10:25:13.258Z",
+      "status": "committed",
+      "start_ledger_index": 3906727,
+      "end_ledger_index": 3906758,
+      "latest_observed_ledger": 3906813,
+      "lag_ledgers": 55,
+      "ledgers_processed": 32,
+      "persistence_rows_read": 25,
+      "persistence_rows_written": 29,
+      "error_message": null
+    },
+    {
+      "run_at": "2026-07-24T10:20:26.194Z",
+      "status": "committed",
+      "start_ledger_index": 3906722,
+      "end_ledger_index": 3906726,
+      "latest_observed_ledger": 3906726,
+      "lag_ledgers": 0,
+      "ledgers_processed": 5,
+      "persistence_rows_read": 10,
+      "persistence_rows_written": 14,
+      "error_message": null
+    },
+    {
+      "run_at": "2026-07-24T10:20:22.044Z",
+      "status": "committed",
+      "start_ledger_index": 3906690,
+      "end_ledger_index": 3906721,
+      "latest_observed_ledger": 3906724,
+      "lag_ledgers": 3,
+      "ledgers_processed": 32,
+      "persistence_rows_read": 28,
+      "persistence_rows_written": 32,
+      "error_message": null
+    },
+    {
+      "run_at": "2026-07-24T10:20:18.226Z",
+      "status": "committed",
+      "start_ledger_index": 3906658,
+      "end_ledger_index": 3906689,
+      "latest_observed_ledger": 3906723,
+      "lag_ledgers": 34,
+      "ledgers_processed": 32,
+      "persistence_rows_read": 32,
+      "persistence_rows_written": 36,
+      "error_message": null
+    },
+    {
+      "run_at": "2026-07-24T10:16:34.357Z",
+      "status": "committed",
+      "start_ledger_index": 3906641,
+      "end_ledger_index": 3906657,
+      "latest_observed_ledger": 3906657,
+      "lag_ledgers": 0,
+      "ledgers_processed": 17,
+      "persistence_rows_read": 15,
+      "persistence_rows_written": 19,
+      "error_message": null
+    }
+  ],
+  "publicWitness": {
+    "path": "/api/objects/Vault/1A39AFC503622B33B460614211AB7EFDEC8FC23B642A605815A39BE80B562052/history?limit=100",
+    "http": "200",
+    "match": true
+  },
+  "http": {
+    "overview": "200",
+    "historySource": "200",
+    "fastLaneDiff": "200",
+    "replacementBaseRebase": "200"
+  }
+}
