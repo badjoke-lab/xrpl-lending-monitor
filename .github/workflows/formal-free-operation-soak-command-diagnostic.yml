@@ -37,45 +37,126 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       ISSUE_NUMBER: '976'
       PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+      FORMAL_SOAK_START: '2026-07-23T16:13:00Z'
+      FORMAL_SOAK_END: '2026-07-24T16:13:00Z'
+      FIRST_EXPECTED_CRON_SLOT: '2026-07-23T16:15:00Z'
     steps:
-      - name: Query and record production evidence
+      - name: Query and record bounded production evidence
         shell: bash
         run: |
-          set -u
+          set -uo pipefail
 
           query() {
-            jq -n --arg sql "$1" '{sql:$sql}' | curl --silent --show-error \
+            local sql="$1"
+            local response
+            if ! response="$(jq -n --arg sql "$sql" '{sql:$sql}' | curl --silent --show-error --fail-with-body \
               -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
               -H 'Content-Type: application/json' --data-binary @- \
-              "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database/${DATABASE_ID}/query"
+              "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database/${DATABASE_ID}/query")"; then
+              jq -n --arg sql "$sql" '{success:false,result:[],errors:[{message:"D1 transport failure",sql:$sql}]}'
+              return 0
+            fi
+            if ! jq -e . >/dev/null 2>&1 <<<"$response"; then
+              jq -n --arg sql "$sql" --arg response "$response" '{success:false,result:[],errors:[{message:"D1 returned non-JSON",sql:$sql,response:$response}]}'
+              return 0
+            fi
+            printf '%s\n' "$response"
           }
 
-          state="$(query "SELECT epoch_id,last_processed_ledger,last_processed_hash,latest_observed_ledger,latest_observed_hash,status,(latest_observed_ledger-last_processed_ledger) AS lag_ledgers FROM fast_lane_shadow_state WHERE network='devnet'")"
-          binding="$(query "SELECT base_epoch_id,base_snapshot_id,base_ledger_index,base_ledger_hash FROM fast_lane_shadow_base_binding WHERE network='devnet'")"
-          overlay="$(query "SELECT COUNT(*) AS overlay_rows,COALESCE(SUM(LENGTH(projection_json)),0) AS overlay_payload_bytes FROM current_state_overlay_objects WHERE network='devnet'")"
-          stale="$(query "SELECT COUNT(*) AS stale_rows FROM current_state_overlay_objects o WHERE o.network='devnet' AND NOT EXISTS (SELECT 1 FROM fast_lane_shadow_base_binding b WHERE b.network=o.network AND b.base_epoch_id=o.epoch_id AND b.base_snapshot_id=o.base_snapshot_id)")"
-          overlay_state="$(query "SELECT COUNT(*) AS state_rows,MAX(overlay_ledger_index) AS overlay_ledger_index FROM current_state_overlay_state WHERE network='devnet'")"
-          compact="$(query "SELECT COUNT(*) AS compact_rows FROM fast_lane_shadow_objects_compact WHERE network='devnet'")"
-          metrics_schema="$(query "PRAGMA table_info(fast_lane_shadow_run_metrics)")"
-          recent_metrics="$(query "SELECT * FROM fast_lane_shadow_run_metrics WHERE network='devnet' ORDER BY run_at DESC LIMIT 12")"
-          formal_metrics="$(query "SELECT * FROM fast_lane_shadow_run_metrics WHERE network='devnet' AND run_at >= '2026-07-23T16:13:00Z' ORDER BY run_at ASC")"
+          rows() {
+            jq -c 'try (.result[0].results // []) catch []' <<<"$1"
+          }
+
+          succeeded() {
+            jq -c 'try (.success // false) catch false' <<<"$1"
+          }
+
+          state_raw="$(query "SELECT epoch_id,last_processed_ledger,last_processed_hash,latest_observed_ledger,latest_observed_hash,status,(latest_observed_ledger-last_processed_ledger) AS lag_ledgers FROM fast_lane_shadow_state WHERE network='devnet'")"
+          binding_raw="$(query "SELECT base_epoch_id,base_snapshot_id,base_ledger_index,base_ledger_hash FROM fast_lane_shadow_base_binding WHERE network='devnet'")"
+          overlay_raw="$(query "SELECT COUNT(*) AS overlay_rows,COALESCE(SUM(LENGTH(projection_json)),0) AS overlay_payload_bytes FROM current_state_overlay_objects WHERE network='devnet'")"
+          stale_raw="$(query "SELECT COUNT(*) AS stale_rows FROM current_state_overlay_objects o WHERE o.network='devnet' AND NOT EXISTS (SELECT 1 FROM fast_lane_shadow_base_binding b WHERE b.network=o.network AND b.base_epoch_id=o.epoch_id AND b.base_snapshot_id=o.base_snapshot_id)")"
+          overlay_state_raw="$(query "SELECT COUNT(*) AS state_rows,MAX(overlay_ledger_index) AS overlay_ledger_index FROM current_state_overlay_state WHERE network='devnet'")"
+          compact_raw="$(query "SELECT COUNT(*) AS compact_rows FROM fast_lane_shadow_objects_compact WHERE network='devnet'")"
+          metrics_schema_raw="$(query "PRAGMA table_info(fast_lane_shadow_run_metrics)")"
+          recent_metrics_raw="$(query "SELECT * FROM fast_lane_shadow_run_metrics WHERE network='devnet' ORDER BY run_at DESC LIMIT 12")"
+          formal_summary_raw="$(query "SELECT COUNT(*) AS metric_count,MIN(run_at) AS first_run_at,MAX(run_at) AS last_run_at FROM fast_lane_shadow_run_metrics WHERE network='devnet' AND run_at >= '${FORMAL_SOAK_START}' AND run_at < '${FORMAL_SOAK_END}'")"
+          formal_health_raw="$(query "SELECT status,COUNT(*) AS row_count,MAX(COALESCE(lag_ledgers,0)) AS max_lag,SUM(CASE WHEN COALESCE(error_message,'') <> '' THEN 1 ELSE 0 END) AS error_rows FROM fast_lane_shadow_run_metrics WHERE network='devnet' AND run_at >= '${FORMAL_SOAK_START}' AND run_at < '${FORMAL_SOAK_END}' GROUP BY status ORDER BY status")"
 
           overview_code="$(curl --silent --show-error -o overview.json -w '%{http_code}' "${PRODUCTION_BASE}/api/overview" || true)"
           history_code="$(curl --silent --show-error -o history.json -w '%{http_code}' "${PRODUCTION_BASE}/api/status/history-source" || true)"
           diff_code="$(curl --silent --show-error -o diff.json -w '%{http_code}' "${PRODUCTION_BASE}/api/status/fast-lane-diff?limit=500" || true)"
 
+          state="$(rows "$state_raw")"
+          binding="$(rows "$binding_raw")"
+          overlay="$(rows "$overlay_raw")"
+          stale="$(rows "$stale_raw")"
+          overlay_state="$(rows "$overlay_state_raw")"
+          compact="$(rows "$compact_raw")"
+          metrics_schema="$(rows "$metrics_schema_raw")"
+          recent_metrics="$(rows "$recent_metrics_raw")"
+          formal_summary="$(rows "$formal_summary_raw")"
+          formal_health="$(rows "$formal_health_raw")"
+
           jq -n \
-            --argjson state "$(jq '.result[0].results // []' <<<"$state")" \
-            --argjson binding "$(jq '.result[0].results // []' <<<"$binding")" \
-            --argjson overlay "$(jq '.result[0].results // []' <<<"$overlay")" \
-            --argjson stale "$(jq '.result[0].results // []' <<<"$stale")" \
-            --argjson overlayState "$(jq '.result[0].results // []' <<<"$overlay_state")" \
-            --argjson compact "$(jq '.result[0].results // []' <<<"$compact")" \
-            --argjson metricsSchema "$(jq '.result[0].results // []' <<<"$metrics_schema")" \
-            --argjson recentMetrics "$(jq '.result[0].results // []' <<<"$recent_metrics")" \
-            --argjson formalMetrics "$(jq '.result[0].results // []' <<<"$formal_metrics")" \
-            --arg overview "$overview_code" --arg history "$history_code" --arg diff "$diff_code" \
-            '{checkedAt:(now|todate),formalSoakStart:"2026-07-23T16:13:00Z",formalSoakEnd:"2026-07-24T16:13:00Z",state:$state,binding:$binding,overlay:$overlay,stale:$stale,overlayState:$overlayState,compact:$compact,metricsSchema:$metricsSchema,recentMetrics:$recentMetrics,formalMetrics:$formalMetrics,formalMetricCount:($formalMetrics|length),api:{overview:$overview,historySource:$history,fastLaneDiff:$diff}}' > summary.json
+            --arg formalSoakStart "$FORMAL_SOAK_START" \
+            --arg formalSoakEnd "$FORMAL_SOAK_END" \
+            --arg firstExpectedCronSlot "$FIRST_EXPECTED_CRON_SLOT" \
+            --arg eventName "$GITHUB_EVENT_NAME" \
+            --arg runId "$GITHUB_RUN_ID" \
+            --argjson state "$state" \
+            --argjson binding "$binding" \
+            --argjson overlay "$overlay" \
+            --argjson stale "$stale" \
+            --argjson overlayState "$overlay_state" \
+            --argjson compact "$compact" \
+            --argjson metricsSchema "$metrics_schema" \
+            --argjson recentMetrics "$recent_metrics" \
+            --argjson formalSummary "$formal_summary" \
+            --argjson formalHealth "$formal_health" \
+            --argjson stateQueryOk "$(succeeded "$state_raw")" \
+            --argjson bindingQueryOk "$(succeeded "$binding_raw")" \
+            --argjson overlayQueryOk "$(succeeded "$overlay_raw")" \
+            --argjson staleQueryOk "$(succeeded "$stale_raw")" \
+            --argjson overlayStateQueryOk "$(succeeded "$overlay_state_raw")" \
+            --argjson compactQueryOk "$(succeeded "$compact_raw")" \
+            --argjson metricsSchemaQueryOk "$(succeeded "$metrics_schema_raw")" \
+            --argjson recentMetricsQueryOk "$(succeeded "$recent_metrics_raw")" \
+            --argjson formalSummaryQueryOk "$(succeeded "$formal_summary_raw")" \
+            --argjson formalHealthQueryOk "$(succeeded "$formal_health_raw")" \
+            --arg overview "$overview_code" \
+            --arg history "$history_code" \
+            --arg diff "$diff_code" \
+            '{
+              checkedAt:(now|todate),
+              event:$eventName,
+              runId:$runId,
+              formalSoakStart:$formalSoakStart,
+              formalSoakEnd:$formalSoakEnd,
+              expectedCronSlotsToDate:((((now-($firstExpectedCronSlot|fromdateiso8601))/300)|floor)+1 | if . < 0 then 0 elif . > 288 then 288 else . end),
+              state:$state,
+              binding:$binding,
+              overlay:$overlay,
+              stale:$stale,
+              overlayState:$overlayState,
+              compact:$compact,
+              metricsSchema:$metricsSchema,
+              recentMetrics:$recentMetrics,
+              formalSummary:$formalSummary,
+              formalHealth:$formalHealth,
+              queryOk:{
+                state:$stateQueryOk,
+                binding:$bindingQueryOk,
+                overlay:$overlayQueryOk,
+                stale:$staleQueryOk,
+                overlayState:$overlayStateQueryOk,
+                compact:$compactQueryOk,
+                metricsSchema:$metricsSchemaQueryOk,
+                recentMetrics:$recentMetricsQueryOk,
+                formalSummary:$formalSummaryQueryOk,
+                formalHealth:$formalHealthQueryOk
+              },
+              api:{overview:$overview,historySource:$history,fastLaneDiff:$diff}
+            }' > summary.json
 
           {
             echo 'Formal soak production evidence:'
@@ -85,4 +166,8 @@ jobs:
             echo '```'
           } > comment.md
 
-          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file comment.md
+          if ! gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file comment.md; then
+            fallback="$(jq -c '{checkedAt,event,runId,formalSoakStart,formalSoakEnd,expectedCronSlotsToDate,formalSummary,queryOk,api,monitorError:"full bounded evidence post failed"}' summary.json)"
+            gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body "Formal soak monitor failure:\n\n\`\`\`json\n${fallback}\n\`\`\`"
+            exit 1
+          fi
