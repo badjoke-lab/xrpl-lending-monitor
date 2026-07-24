@@ -1,8 +1,8 @@
 {
-  "state": "running",
+  "state": "failed",
   "phase": "candidate_30100179867",
-  "message": "candidate run is active",
-  "checkedAt": "2026-07-24T14:14:36Z",
+  "message": "current-state checkpoint exited with code 1",
+  "checkedAt": "2026-07-24T14:16:41Z",
   "runId": "30100159288",
   "commit": "7b8bb9d632c3ba94b133337469e8c85fe8282962",
   "candidateRunId": "30100179867",
