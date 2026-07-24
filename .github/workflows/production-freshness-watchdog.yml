@@ -141,3 +141,5 @@ jobs:
 
           gh issue edit "$STATUS_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file issue.md
           test "$healthy" = true
+
+# Manual freshness recheck requested at 2026-07-24T02:28Z.
