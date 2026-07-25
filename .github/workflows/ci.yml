@@ -20,6 +20,15 @@ jobs:
       - name: Enforce minimal Actions workflow surface
         run: bash scripts/check-actions-workflow-allowlist.sh
 
+      - name: Upload Actions workflow policy evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: actions-workflow-policy-evidence
+          path: actions-workflow-policy-evidence
+          if-no-files-found: warn
+          retention-days: 7
+
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
         with:
