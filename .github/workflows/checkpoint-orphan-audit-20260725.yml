@@ -33,21 +33,26 @@ jobs:
           set -euo pipefail
           mkdir -p audit
           query_d1() {
-            local sql="$1" output="$2" payload
-            payload="$(mktemp)"
+            local name="$1" sql="$2" payload="audit/${name}.request.json" output="audit/${name}.json" code
             jq -n --arg sql "$sql" '{sql:$sql}' > "$payload"
-            curl --fail-with-body --silent --show-error --connect-timeout 10 --max-time 60 \
+            code="$(curl --silent --show-error --connect-timeout 10 --max-time 60 \
+              -o "$output" -w '%{http_code}' \
               -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
               -H 'Content-Type: application/json' --data-binary @"$payload" \
-              "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database/${DATABASE_ID}/query" > "$output"
-            jq -e '.success==true and .result[0].success==true' "$output" >/dev/null
+              "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database/${DATABASE_ID}/query" || true)"
+            jq -n --arg name "$name" --arg code "$code" --arg sql "$sql" \
+              --argjson success "$(jq -r '(.success==true and .result[0].success==true)' "$output" 2>/dev/null || echo false)" \
+              '{name:$name,httpCode:$code,success:$success,sql:$sql}' > "audit/${name}.meta.json"
           }
-          query_d1 "SELECT * FROM current_state_overlay_objects WHERE network='devnet' AND object_id IN ('${VAULT_ID}','${BROKER_ID}') ORDER BY object_id" audit/overlay.json
-          query_d1 "SELECT * FROM fast_lane_shadow_objects_compact WHERE network='devnet' AND object_id IN ('${VAULT_ID}','${BROKER_ID}') ORDER BY object_id" audit/compact.json
-          query_d1 "SELECT object_type,object_id,deletion_ledger_index,deletion_ledger_hash,transaction_hash,vault_id,loan_broker_id FROM archived_objects WHERE network='devnet' AND object_id IN ('${VAULT_ID}','${BROKER_ID}') ORDER BY deletion_ledger_index" audit/archive.json
-          query_d1 "SELECT id,epoch_id,ledger_index,ledger_hash,status,completed_at FROM current_state_d1_snapshots ORDER BY completed_at DESC LIMIT 5" audit/d1-snapshots.json
-          query_d1 "SELECT snapshot_id,object_id,projection_json FROM current_state_d1_vaults WHERE object_id='${VAULT_ID}' ORDER BY snapshot_id" audit/d1-vault.json
-          query_d1 "SELECT snapshot_id,object_id,vault_id,projection_json FROM current_state_d1_loan_brokers WHERE object_id='${BROKER_ID}' ORDER BY snapshot_id" audit/d1-broker.json
+
+          query_d1 schema "SELECT name,type,sql FROM sqlite_master WHERE type IN ('table','view') AND (name LIKE '%current_state%' OR name LIKE '%archive%' OR name LIKE '%fast_lane%') ORDER BY name"
+          query_d1 overlay "SELECT object_type,object_id,operation,projection_json,source_ledger_index,source_ledger_hash,source_transaction_hash,source_transaction_index,epoch_id,base_snapshot_id FROM current_state_overlay_objects WHERE network='devnet' AND object_id IN ('${VAULT_ID}','${BROKER_ID}') ORDER BY object_id"
+          query_d1 compact "SELECT * FROM fast_lane_shadow_objects_compact WHERE network='devnet' AND object_id IN ('${VAULT_ID}','${BROKER_ID}') ORDER BY object_id"
+          query_d1 archive-object "SELECT * FROM archived_objects WHERE network='devnet' AND object_id IN ('${VAULT_ID}','${BROKER_ID}') ORDER BY object_id"
+          query_d1 archive-projection "SELECT * FROM archived_object_projections WHERE network='devnet' AND object_id IN ('${VAULT_ID}','${BROKER_ID}') ORDER BY object_id"
+          query_d1 d1-snapshots "SELECT * FROM current_state_d1_snapshots ORDER BY rowid DESC LIMIT 5"
+          query_d1 d1-vault "SELECT * FROM current_state_d1_vaults WHERE object_id='${VAULT_ID}' ORDER BY rowid"
+          query_d1 d1-broker "SELECT * FROM current_state_d1_loan_brokers WHERE object_id='${BROKER_ID}' ORDER BY rowid"
 
           rpc() {
             local endpoint="$1" ledger="$2" id="$3" output="$4"
