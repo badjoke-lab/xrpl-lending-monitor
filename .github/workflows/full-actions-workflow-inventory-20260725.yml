@@ -11,11 +11,15 @@ permissions:
   actions: read
   contents: read
 
+concurrency:
+  group: full-actions-workflow-inventory-20260725
+  cancel-in-progress: true
+
 jobs:
   inventory:
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -30,7 +34,7 @@ jobs:
         run: |
           set -u
           root=actions-workflow-audit
-          mkdir -p "$root/workflow-trees"
+          mkdir -p "$root"
           cp -R .github/workflows "$root/workflows"
           git rev-parse HEAD > "$root/main-head.txt"
           date -u +%FT%TZ > "$root/checked-at.txt"
@@ -46,21 +50,22 @@ jobs:
           jq -r '.[] | [.name,.commit.sha] | @tsv' "$root/branches.json" > "$root/branches.tsv"
           : > "$root/branch-workflow-presence.tsv"
           : > "$root/branch-tree-errors.tsv"
+          tmp="$(mktemp)"
+          err="$(mktemp)"
           while IFS=$'\t' read -r branch sha; do
-            tree="$root/workflow-trees/${sha}.json"
-            if gh api "repos/${GITHUB_REPOSITORY}/git/trees/${sha}?recursive=1" > "$tree" 2> "$tree.error"; then
+            encoded="$(jq -rn --arg value "$branch" '$value|@uri')"
+            if gh api "repos/${GITHUB_REPOSITORY}/contents/.github/workflows?ref=${encoded}" > "$tmp" 2> "$err"; then
               jq -r --arg branch "$branch" --arg sha "$sha" '
-                .tree[]
-                | select(.type=="blob" and (.path|test("^\\.github/workflows/[^/]+\\.(yml|yaml)$")))
+                .[]
+                | select(.type=="file" and (.path|test("^\\.github/workflows/[^/]+\\.(yml|yaml)$")))
                 | [.path,$branch,$sha] | @tsv
-              ' "$tree" >> "$root/branch-workflow-presence.tsv"
-              rm -f "$tree.error"
+              ' "$tmp" >> "$root/branch-workflow-presence.tsv"
             else
-              printf '%s\t%s\t%s\n' "$branch" "$sha" "$(tr '\n' ' ' < "$tree.error")" >> "$root/branch-tree-errors.tsv"
+              printf '%s\t%s\t%s\n' "$branch" "$sha" "$(tr '\n' ' ' < "$err")" >> "$root/branch-tree-errors.tsv"
             fi
           done < "$root/branches.tsv"
+          rm -f "$tmp" "$err"
           sort -u -o "$root/branch-workflow-presence.tsv" "$root/branch-workflow-presence.tsv"
-          rm -rf "$root/workflow-trees"
 
       - name: Upload complete inventory
         if: always()
