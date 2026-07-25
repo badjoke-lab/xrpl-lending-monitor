@@ -1,0 +1,10 @@
+{
+  "checkedAt": "2026-07-25T02:40:05Z",
+  "passed": false,
+  "runtimeSha": "5b56de459e97495a9358f0e203c056d2a99afc6b",
+  "runId": "30140835704",
+  "runUrl": "https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/30140835704",
+  "verifyOutcome": "failure",
+  "witnessHash": "70A489701D68B89E04923A7845F81F2C615760992C55119A8FC0ED8C759DE684",
+  "witnessObjectId": "AD0980A254BC7262C57001315A9B6C7C65A020F29FAB2D0A0915933C55FF3BB1"
+}
