@@ -1,8 +1,10 @@
 name: Capture checkpoint failure tail 20260725
 
 on:
-  schedule:
-    - cron: '*/5 * * * *'
+  push:
+    branches: [main]
+    paths:
+      - .github/capture-checkpoint-failure-tail-20260725-trigger
   workflow_dispatch:
 
 permissions:
@@ -19,7 +21,7 @@ jobs:
     timeout-minutes: 10
     env:
       GH_TOKEN: ${{ github.token }}
-      JOB_ID: '89638729491'
+      JOB_ID: '89652303548'
     steps:
       - uses: actions/checkout@v4
         with:
