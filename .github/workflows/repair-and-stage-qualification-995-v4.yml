@@ -1,10 +1,10 @@
 name: Repair and stage qualification 995 v4
 
 on:
-  push:
-    branches: [main]
+  pull_request_target:
+    types: [opened, synchronize, reopened]
     paths:
-      - .github/repair-and-stage-qualification-995-v4-trigger
+      - .github/xrpl-lending-recovery-trigger-pr
   workflow_dispatch:
 
 permissions:
@@ -16,11 +16,13 @@ concurrency:
 
 jobs:
   repair:
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: main
           fetch-depth: 0
 
       - name: Build corrected scheduled v4 workflow
