@@ -1,7 +1,7 @@
 name: Repair and stage qualification 995 v4
 
 on:
-  pull_request_target:
+  pull_request:
     types: [opened, synchronize, reopened]
     paths:
       - .github/xrpl-lending-recovery-trigger-pr
