@@ -29,7 +29,7 @@ jobs:
           ref: main
           fetch-depth: 1
 
-      - name: Capture exact failure tail
+      - name: Capture exact failure tail and bounded source
         shell: bash
         run: |
           set -euo pipefail
@@ -41,6 +41,12 @@ jobs:
           grep -Ein 'error|fail|exception|fatal|killed|heap|ENOMEM|ENOSPC|SQLITE|timeout|exit code' checkpoint-job.log \
             | tail -n 120 > four-hour-checkpoint-failure-errors-20260725.txt || true
           test -s four-hour-checkpoint-failure-tail-20260725.log
+          tar --exclude=.git --exclude=node_modules --exclude=dist --exclude=.local \
+            -czf xrpl-lending-source-20260725.tar.gz \
+            scripts src tests package.json pnpm-lock.yaml vitest.config.* .github/workflows/repair-and-stage-qualification-995-v4.yml 2>/dev/null || \
+          tar --exclude=.git --exclude=node_modules --exclude=dist --exclude=.local \
+            -czf xrpl-lending-source-20260725.tar.gz \
+            scripts src package.json pnpm-lock.yaml .github/workflows/repair-and-stage-qualification-995-v4.yml
 
       - name: Upload exact failure evidence
         uses: actions/upload-artifact@v4
@@ -49,5 +55,6 @@ jobs:
           path: |
             four-hour-checkpoint-failure-tail-20260725.log
             four-hour-checkpoint-failure-errors-20260725.txt
+            xrpl-lending-source-20260725.tar.gz
           if-no-files-found: error
           retention-days: 30
