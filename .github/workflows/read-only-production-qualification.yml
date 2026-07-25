@@ -1,0 +1,155 @@
+name: Read-only production qualification
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+    paths:
+      - .github/workflows/read-only-production-qualification.yml
+      - scripts/qualification-995-read-only/**
+      - scripts/check-actions-workflow-allowlist.sh
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Read-only operation
+        required: true
+        type: choice
+        options: [probe, arm, evaluate]
+      start_ms:
+        description: Five-minute-aligned qualification start timestamp in milliseconds; required for arm/evaluate
+        required: false
+        type: string
+      arm_run_id:
+        description: Arm workflow run ID; required for evaluate
+        required: false
+        type: string
+  issue_comment:
+    types: [created]
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: read-only-production-qualification-${{ github.event_name == 'pull_request' && github.event.pull_request.number || 'operate' }}
+  cancel-in-progress: false
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
+  PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+
+jobs:
+  validate:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: python -m py_compile scripts/qualification-995-read-only/bootstrap.py scripts/qualification-995-read-only/run.py
+      - run: bash scripts/check-actions-workflow-allowlist.sh
+
+  pull-request-probe:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Capture fresh read-only production state
+        continue-on-error: true
+        env:
+          MODE: probe
+          FAIL_ON_UNHEALTHY: 'false'
+        run: python scripts/qualification-995-read-only/bootstrap.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: qualification-pr-probe
+          path: qualification-evidence
+          if-no-files-found: error
+          retention-days: 30
+
+  operate:
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || (
+        github.event_name == 'issue_comment'
+        && github.event.issue.number == 995
+        && github.actor == 'badjoke-lab'
+        && startsWith(github.event.comment.body, '/qualification ')
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Parse explicit operation
+        id: operation
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          INPUT_MODE: ${{ inputs.mode }}
+          INPUT_START_MS: ${{ inputs.start_ms }}
+          INPUT_ARM_RUN_ID: ${{ inputs.arm_run_id }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            mode="$INPUT_MODE"
+            start_ms="$INPUT_START_MS"
+            arm_run_id="$INPUT_ARM_RUN_ID"
+          else
+            read -r command mode start_ms arm_run_id extra <<< "$COMMENT_BODY"
+            test "$command" = "/qualification"
+            test -z "${extra:-}"
+          fi
+          case "$mode" in
+            probe)
+              test -z "${start_ms:-}"
+              test -z "${arm_run_id:-}"
+              artifact="qualification-probe-${GITHUB_RUN_ID}"
+              ;;
+            arm)
+              [[ "${start_ms:-}" =~ ^[0-9]+$ ]]
+              test -z "${arm_run_id:-}"
+              artifact="qualification-arm-${start_ms}"
+              ;;
+            evaluate)
+              [[ "${start_ms:-}" =~ ^[0-9]+$ ]]
+              [[ "${arm_run_id:-}" =~ ^[0-9]+$ ]]
+              artifact="qualification-evaluate-${start_ms}"
+              ;;
+            *) exit 2 ;;
+          esac
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          echo "start_ms=${start_ms:-}" >> "$GITHUB_OUTPUT"
+          echo "arm_run_id=${arm_run_id:-}" >> "$GITHUB_OUTPUT"
+          echo "artifact=$artifact" >> "$GITHUB_OUTPUT"
+
+      - name: Download exact arm evidence
+        if: steps.operation.outputs.mode == 'evaluate'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARM_RUN_ID: ${{ steps.operation.outputs.arm_run_id }}
+          START_MS: ${{ steps.operation.outputs.start_ms }}
+        run: gh run download "$ARM_RUN_ID" --repo "$GITHUB_REPOSITORY" --name "qualification-arm-${START_MS}" --dir arm-evidence
+
+      - name: Execute read-only operation
+        env:
+          MODE: ${{ steps.operation.outputs.mode }}
+          START_MS: ${{ steps.operation.outputs.start_ms }}
+          ARM_EVIDENCE_DIR: arm-evidence
+          FAIL_ON_UNHEALTHY: 'true'
+        run: python scripts/qualification-995-read-only/bootstrap.py
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ${{ steps.operation.outputs.artifact }}
+          path: qualification-evidence
+          if-no-files-found: error
+          retention-days: 30
