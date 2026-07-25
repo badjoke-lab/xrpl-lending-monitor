@@ -1,6 +1,6 @@
 production-probe=false
 stage-qualification-v4=false
-capture-checkpoint-log=false
-checkpoint-orphan-audit=true
+capture-checkpoint-log=true
+checkpoint-orphan-audit=false
 created-at-jst=2026-07-25T15:55:00+09:00
-synchronize-nonce=6
+synchronize-nonce=7
