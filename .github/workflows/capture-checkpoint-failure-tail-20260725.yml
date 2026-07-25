@@ -1,10 +1,10 @@
 name: Capture checkpoint failure tail 20260725
 
 on:
-  push:
-    branches: [main]
+  pull_request_target:
+    types: [opened, synchronize, reopened]
     paths:
-      - .github/capture-checkpoint-failure-tail-20260725-trigger
+      - .github/xrpl-lending-recovery-trigger-pr
   workflow_dispatch:
 
 permissions:
@@ -17,6 +17,7 @@ concurrency:
 
 jobs:
   capture:
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -25,6 +26,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: main
           fetch-depth: 0
 
       - name: Capture exact failure tail
