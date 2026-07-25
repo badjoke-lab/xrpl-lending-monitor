@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "active": {
+    "dataCommitSha": "73ccc74466f04d82615d8748ebf0d85ab4a5f415",
+    "manifestPath": "read-model/manifest.json",
+    "manifestSha256": "53c6178a1bff7ba2cb0955d92b8e0870d0b8e3ce119e2adf4fd0be5f13989ad9",
+    "releaseTag": "replacement-current-state-3932301",
+    "snapshotId": "devnet-3932301-7d026fed85bc"
+  },
+  "updatedAt": "2026-07-25T10:13:19Z"
+}
