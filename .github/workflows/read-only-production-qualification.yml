@@ -47,7 +47,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - run: python -m py_compile scripts/qualification-995-read-only/run.py
+      - run: python -m py_compile scripts/qualification-995-read-only/bootstrap.py scripts/qualification-995-read-only/run.py
       - run: bash scripts/check-actions-workflow-allowlist.sh
 
   pull-request-probe:
@@ -61,7 +61,7 @@ jobs:
         env:
           MODE: probe
           FAIL_ON_UNHEALTHY: 'false'
-        run: python scripts/qualification-995-read-only/run.py
+        run: python scripts/qualification-995-read-only/bootstrap.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -144,7 +144,7 @@ jobs:
           START_MS: ${{ steps.operation.outputs.start_ms }}
           ARM_EVIDENCE_DIR: arm-evidence
           FAIL_ON_UNHEALTHY: 'true'
-        run: python scripts/qualification-995-read-only/run.py
+        run: python scripts/qualification-995-read-only/bootstrap.py
 
       - uses: actions/upload-artifact@v4
         if: always()
