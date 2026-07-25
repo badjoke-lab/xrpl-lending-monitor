@@ -1,0 +1,49 @@
+name: Full Actions workflow inventory 20260725
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+    paths:
+      - .github/actions-workflow-audit-trigger-20260725
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  inventory:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out current main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Capture complete workflow inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=actions-workflow-audit
+          mkdir -p "$root"
+          cp -R .github/workflows "$root/workflows"
+          git rev-parse HEAD > "$root/main-head.txt"
+          date -u +%FT%TZ > "$root/checked-at.txt"
+          find .github/workflows -maxdepth 1 -type f -printf '%f\n' | sort > "$root/default-branch-workflow-files.txt"
+          gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/actions/workflows?per_page=100" > "$root/registered-workflow-pages.json"
+          jq '[.[].workflows[]] | sort_by(.path, .id)' "$root/registered-workflow-pages.json" > "$root/registered-workflows.json"
+          jq '{registeredCount:length, activeCount:map(select(.state=="active"))|length, disabledCount:map(select(.state!="active"))|length}' "$root/registered-workflows.json" > "$root/counts.json"
+          jq -r '.[] | [.id,.name,.path,.state,.created_at,.updated_at,.html_url] | @tsv' "$root/registered-workflows.json" > "$root/registered-workflows.tsv"
+
+      - name: Upload complete inventory
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-actions-workflow-inventory-20260725
+          path: actions-workflow-audit
+          if-no-files-found: error
+          retention-days: 30
