@@ -1,0 +1,354 @@
+name: Verify object-window index 995 v3
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/verify-object-window-index-995-v3.yml
+      - .github/object-window-index-995-verify-v3-trigger
+  push:
+    branches: [main]
+    paths:
+      - .github/object-window-index-995-verify-v3-trigger
+
+permissions:
+  contents: write
+
+concurrency:
+  group: object-window-index-995-verification-v3
+  cancel-in-progress: false
+
+env:
+  RUNTIME_SHA: 5b56de459e97495a9358f0e203c056d2a99afc6b
+  DEPLOY_STATUS_PATH: .github/object-window-index-995-deploy-status.json
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
+  PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+  WITNESS_HASH: 70A489701D68B89E04923A7845F81F2C615760992C55119A8FC0ED8C759DE684
+  WITNESS_OBJECT_TYPE: Vault
+  WITNESS_OBJECT_ID: AD0980A254BC7262C57001315A9B6C7C65A020F29FAB2D0A0915933C55FF3BB1
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  validate:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate resilient read-only verification boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(cat .github/object-window-index-995-verify-v3-trigger)" = "verify-v3-${RUNTIME_SHA}"
+          jq -e --arg runtime "$RUNTIME_SHA" '
+            .runtimeSha==$runtime
+            and .deployOutcome=="success"
+            and .identityOutcome=="success"
+            and .backfillOutcome=="success"
+          ' "$DEPLOY_STATUS_PATH" >/dev/null
+          jq -e '
+            .main=="src/worker/p0-redundant-scheduler-entry.ts"
+            and .triggers.crons==["*/5 * * * *"]
+            and .vars.APP_NETWORK=="devnet"
+            and .vars.MAINNET_ENABLED=="false"
+            and .vars.XRPL_DEVNET_RPC_URL=="https://devnet.honeycluster.io/"
+            and .vars.FAST_LANE_MAX_LEDGERS_PER_RUN=="96"
+            and (.queues.producers|length)==1
+            and (.queues.consumers|length)==1
+            and .queues.consumers[0].max_batch_size==1
+            and .queues.consumers[0].max_concurrency==1
+            and (.vars|has("REPLACEMENT_BASE_CUTOVER_TOKEN")|not)
+          ' wrangler.jsonc >/dev/null
+
+  verify:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Capture fixed production identity
+        id: identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+
+          cf_get() {
+            curl --fail-with-body --silent --show-error --connect-timeout 10 --max-time 45 \
+              -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+              "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}$1" > "$2"
+          }
+
+          cf_get /workers/scripts/xrpl-lending-monitor/deployments pre-deployments.json
+          cf_get /workers/scripts/xrpl-lending-monitor/settings settings.json
+          cf_get /workers/scripts/xrpl-lending-monitor/schedules schedules.json
+          jq -e '(.result.deployments[0].versions|length)==1 and .result.deployments[0].versions[0].percentage==100' pre-deployments.json >/dev/null
+          jq '.result.deployments[0]' pre-deployments.json > deployment.json
+          jq -r '.created_on' deployment.json > deployment-created-on.txt
+          jq -e '
+            def binding($name): [.result.bindings[]|select(.name==$name)|(.text//.value)]|first;
+            binding("APP_NETWORK")=="devnet"
+            and binding("MAINNET_ENABLED")=="false"
+            and binding("XRPL_DEVNET_RPC_URL")=="https://devnet.honeycluster.io/"
+            and binding("FAST_LANE_MAX_LEDGERS_PER_RUN")=="96"
+            and ([.result.bindings[]|select(.name=="FAST_LANE_QUEUE" and .type=="queue")]|length)==1
+            and ([.result.bindings[]|select(.name=="REPLACEMENT_BASE_CUTOVER_TOKEN")]|length)==0
+          ' settings.json >/dev/null
+          jq -e '.result.schedules|length==1 and .[0].cron=="*/5 * * * *"' schedules.json >/dev/null
+
+      - name: Verify indexed public object and XRPL source witnesses
+        id: witness
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          d1_query() {
+            local sql="$1" output="$2" payload tmp code
+            payload="$(mktemp)"
+            jq -n --arg sql "$sql" '{sql:$sql}' > "$payload"
+            for attempt in $(seq 1 6); do
+              tmp="${output}.attempt-${attempt}.json"
+              code="$(curl --silent --show-error --connect-timeout 10 --max-time 60 \
+                -o "$tmp" -w '%{http_code}' \
+                -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+                -H 'Content-Type: application/json' --data-binary @"$payload" \
+                "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database/${DATABASE_ID}/query" || true)"
+              if [ "$code" = 200 ] && jq -e '.success==true and .result[0].success==true' "$tmp" >/dev/null 2>&1; then
+                mv "$tmp" "$output"
+                rm -f "$payload"
+                return 0
+              fi
+              sleep "$((attempt * 2))"
+            done
+            echo "D1 query failed after bounded independent attempts" >&2
+            cat "${output}.attempt-6.json" >&2 || true
+            rm -f "$payload"
+            return 1
+          }
+
+          needle="\"objectType\":\"${WITNESS_OBJECT_TYPE}\",\"objectId\":\"${WITNESS_OBJECT_ID}\""
+          escaped_needle="${needle//\'/\'\'}"
+          d1_query "SELECT COUNT(*) AS total_windows, SUM(CASE WHEN object_lookup_json<>'[]' THEN 1 ELSE 0 END) AS nonempty_windows, SUM(CASE WHEN instr(object_lookup_json, '${escaped_needle}')>0 THEN 1 ELSE 0 END) AS witness_windows FROM fast_lane_shadow_windows WHERE network='devnet' AND epoch_id='fast-lane-shadow-devnet'" lookup.json
+          jq -e '.result[0].results[0].total_windows>=1 and .result[0].results[0].nonempty_windows>=1 and .result[0].results[0].witness_windows>=1' lookup.json >/dev/null
+
+          code="$(curl --silent --show-error --connect-timeout 10 --max-time 45 --retry 3 --retry-all-errors \
+            -o object-history.json -w '%{http_code}' \
+            "${PRODUCTION_BASE}/api/objects/${WITNESS_OBJECT_TYPE}/${WITNESS_OBJECT_ID}/history?limit=100")"
+          test "$code" = 200
+          jq -e --arg type "$WITNESS_OBJECT_TYPE" --arg id "$WITNESS_OBJECT_ID" --arg hash "$WITNESS_HASH" '
+            .network=="devnet"
+            and .object_type==$type
+            and .object_id==$id
+            and ([.data[]|select(.transaction_hash==$hash and .object_type==$type and .object_id==$id)]|length)>0
+          ' object-history.json >/dev/null
+
+          code="$(curl --silent --show-error --connect-timeout 10 --max-time 45 --retry 3 --retry-all-errors \
+            -o transaction.json -w '%{http_code}' \
+            "${PRODUCTION_BASE}/api/transactions/${WITNESS_HASH}")"
+          test "$code" = 200
+          jq -e --arg hash "$WITNESS_HASH" '.found==true and .transaction_hash==$hash and (.object_changes|length)>0' transaction.json >/dev/null
+
+          verified=false
+          : > xrpl-attempts.ndjson
+          for endpoint in https://devnet.honeycluster.io/ https://s.devnet.rippletest.net:51234/ https://s.altnet.rippletest.net:51234/; do
+            jq -n --arg hash "$WITNESS_HASH" '{method:"tx",params:[{transaction:$hash,binary:false}]}' \
+              | curl --silent --show-error --connect-timeout 10 --max-time 45 \
+                  -H 'Content-Type: application/json' --data-binary @- "$endpoint" > xrpl-candidate.json || true
+            jq -c --arg endpoint "$endpoint" '{endpoint:$endpoint,response:.}' xrpl-candidate.json >> xrpl-attempts.ndjson || true
+            if python - <<'PY'
+          import json
+          import os
+
+          payload = json.load(open('xrpl-candidate.json'))
+          result = payload.get('result') or {}
+          assert result.get('validated') is True
+          observed = str(result.get('hash') or (result.get('tx_json') or {}).get('hash') or '').upper()
+          assert observed == os.environ['WITNESS_HASH']
+          target = os.environ['WITNESS_OBJECT_ID']
+          found = False
+          for wrapper in (result.get('meta') or {}).get('AffectedNodes') or []:
+              if not isinstance(wrapper, dict):
+                  continue
+              for node in wrapper.values():
+                  if isinstance(node, dict) and str(node.get('LedgerIndex') or '').upper() == target:
+                      found = True
+          assert found
+          PY
+            then
+              cp xrpl-candidate.json xrpl-tx.json
+              printf '%s\n' "$endpoint" > xrpl-endpoint.txt
+              verified=true
+              break
+            fi
+          done
+          test "$verified" = true
+
+      - name: Verify a completed post-deploy five-minute slot
+        id: slot
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          d1_query() {
+            local sql="$1" output="$2" payload tmp code
+            payload="$(mktemp)"
+            jq -n --arg sql "$sql" '{sql:$sql}' > "$payload"
+            for attempt in $(seq 1 6); do
+              tmp="${output}.attempt-${attempt}.json"
+              code="$(curl --silent --show-error --connect-timeout 10 --max-time 60 \
+                -o "$tmp" -w '%{http_code}' \
+                -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+                -H 'Content-Type: application/json' --data-binary @"$payload" \
+                "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database/${DATABASE_ID}/query" || true)"
+              if [ "$code" = 200 ] && jq -e '.success==true and .result[0].success==true' "$tmp" >/dev/null 2>&1; then
+                mv "$tmp" "$output"
+                rm -f "$payload"
+                return 0
+              fi
+              sleep "$((attempt * 2))"
+            done
+            echo "D1 query failed after bounded independent attempts" >&2
+            cat "${output}.attempt-6.json" >&2 || true
+            rm -f "$payload"
+            return 1
+          }
+
+          deployed="$(cat deployment-created-on.txt)"
+          d1_query "SELECT scheduled_time,status,started_at,completed_at,error_message FROM fast_lane_queue_slots WHERE status='completed' AND started_at>='${deployed}' ORDER BY started_at DESC LIMIT 1" slot.json
+          jq -e '.result[0].results|length==1' slot.json >/dev/null
+          start="$(jq -er '.result[0].results[0].started_at' slot.json)"
+          complete="$(jq -er '.result[0].results[0].completed_at' slot.json)"
+          test "$start" != null
+          test "$complete" != null
+
+          d1_query "SELECT run_at,status,start_ledger_index,end_ledger_index,latest_observed_ledger,lag_ledgers,ledgers_processed,persistence_rows_read,persistence_rows_written,error_message FROM fast_lane_shadow_run_metrics WHERE network='devnet' AND run_at>='${start}' AND run_at<='${complete}' ORDER BY run_at" metrics.json
+          d1_query "SELECT start_ledger_index,end_ledger_index,end_ledger_hash,created_at,bundle_json FROM fast_lane_history_windows WHERE network='devnet' AND created_at>='${start}' AND created_at<='${complete}' ORDER BY start_ledger_index" history.json
+          d1_query "SELECT start_ledger_index,end_ledger_index,object_lookup_json,created_at FROM fast_lane_shadow_windows WHERE network='devnet' AND created_at>='${start}' AND created_at<='${complete}' ORDER BY start_ledger_index" slot-lookups.json
+          d1_query "SELECT epoch_id,last_processed_ledger,last_processed_hash,latest_observed_ledger,latest_observed_hash,status,(latest_observed_ledger-last_processed_ledger) AS lag_ledgers FROM fast_lane_shadow_state WHERE network='devnet'" fast.json
+          d1_query "SELECT epoch_id,overlay_ledger_index,overlay_ledger_hash FROM current_state_overlay_state WHERE network='devnet'" overlay.json
+          d1_query "SELECT COUNT(*) AS compact_rows FROM fast_lane_shadow_objects_compact WHERE network='devnet'" compact.json
+          d1_query "SELECT COUNT(*) AS stale_rows FROM current_state_overlay_objects o WHERE o.network='devnet' AND NOT EXISTS (SELECT 1 FROM fast_lane_shadow_base_binding b WHERE b.network=o.network AND b.base_epoch_id=o.epoch_id AND b.base_snapshot_id=o.base_snapshot_id)" stale.json
+
+          python - <<'PY'
+          import base64
+          import gzip
+          import json
+
+          slot = json.load(open('slot.json'))['result'][0]['results'][0]
+          assert slot['status'] == 'completed' and slot['error_message'] is None
+          metrics = json.load(open('metrics.json'))['result'][0]['results']
+          assert metrics
+          assert all(m['status'] == 'committed' and m['error_message'] is None for m in metrics)
+          assert metrics[-1]['lag_ledgers'] == 0
+          assert sum(m['persistence_rows_written'] for m in metrics) <= 300
+          rows = json.load(open('history.json'))['result'][0]['results']
+          lookups = json.load(open('slot-lookups.json'))['result'][0]['results']
+          assert rows and lookups
+          for row in rows:
+              payload = row['bundle_json']
+              if payload.startswith('gzip-base64-v1:'):
+                  value = json.loads(gzip.decompress(base64.b64decode(payload.split(':', 1)[1])))
+              else:
+                  value = json.loads(payload)
+              for key in ('protocolEvents', 'objectChanges', 'loanLifecycle', 'archivedObjects', 'balanceHistory'):
+                  assert isinstance(value.get(key), list), (row['start_ledger_index'], key)
+          for row in lookups:
+              assert isinstance(json.loads(row['object_lookup_json']), list)
+          fast = json.load(open('fast.json'))['result'][0]['results'][0]
+          overlay = json.load(open('overlay.json'))['result'][0]['results'][0]
+          assert fast['status'] == 'healthy' and fast['lag_ledgers'] == 0
+          assert fast['last_processed_ledger'] == overlay['overlay_ledger_index']
+          assert fast['last_processed_hash'] == overlay['overlay_ledger_hash']
+          assert json.load(open('compact.json'))['result'][0]['results'][0]['compact_rows'] == 0
+          assert json.load(open('stale.json'))['result'][0]['results'][0]['stale_rows'] == 0
+          PY
+
+          for path in /api/overview /api/status/history-source '/api/status/fast-lane-diff?limit=1' /api/status/replacement-base-rebase; do
+            status="$(curl --silent --show-error --connect-timeout 10 --max-time 45 --retry 3 --retry-all-errors \
+              -o /dev/null -w '%{http_code}' "${PRODUCTION_BASE}${path}")"
+            test "$status" = 200
+          done
+
+      - name: Confirm production identity remained fixed
+        id: final_identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error --connect-timeout 10 --max-time 45 \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/xrpl-lending-monitor/deployments" \
+            > post-deployments.json
+          test "$(jq -r '.result.deployments[0].id' pre-deployments.json)" = "$(jq -r '.result.deployments[0].id' post-deployments.json)"
+          test "$(jq -r '.result.deployments[0].versions[0].version_id' pre-deployments.json)" = "$(jq -r '.result.deployments[0].versions[0].version_id' post-deployments.json)"
+
+      - name: Retain resilient verification result
+        if: always()
+        shell: bash
+        env:
+          IDENTITY_OUTCOME: ${{ steps.identity.outcome }}
+          WITNESS_OUTCOME: ${{ steps.witness.outcome }}
+          SLOT_OUTCOME: ${{ steps.slot.outcome }}
+          FINAL_IDENTITY_OUTCOME: ${{ steps.final_identity.outcome }}
+        run: |
+          set -euo pipefail
+          passed=false
+          if [ "$IDENTITY_OUTCOME" = success ] && [ "$WITNESS_OUTCOME" = success ] && [ "$SLOT_OUTCOME" = success ] && [ "$FINAL_IDENTITY_OUTCOME" = success ]; then passed=true; fi
+          jq -n \
+            --arg checkedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg runtimeSha "$RUNTIME_SHA" \
+            --arg runId "$GITHUB_RUN_ID" \
+            --arg runUrl "https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            --arg identityOutcome "${IDENTITY_OUTCOME:-unknown}" \
+            --arg witnessOutcome "${WITNESS_OUTCOME:-unknown}" \
+            --arg slotOutcome "${SLOT_OUTCOME:-unknown}" \
+            --arg finalIdentityOutcome "${FINAL_IDENTITY_OUTCOME:-unknown}" \
+            --arg witnessHash "$WITNESS_HASH" \
+            --arg witnessObjectId "$WITNESS_OBJECT_ID" \
+            --argjson passed "$passed" \
+            '{checkedAt:$checkedAt,passed:$passed,runtimeSha:$runtimeSha,runId:$runId,runUrl:$runUrl,identityOutcome:$identityOutcome,witnessOutcome:$witnessOutcome,slotOutcome:$slotOutcome,finalIdentityOutcome:$finalIdentityOutcome,witnessHash:$witnessHash,witnessObjectId:$witnessObjectId}' \
+            > verification-status.json
+          API_PATH="repos/${GITHUB_REPOSITORY}/contents/.github/object-window-index-995-verification-v3-status.json"
+          CONTENT="$(base64 -w0 verification-status.json)"
+          EXISTING_SHA="$(gh api "$API_PATH" --jq .sha 2>/dev/null || true)"
+          if [ -n "$EXISTING_SHA" ]; then
+            gh api --method PUT "$API_PATH" -f message='Update resilient object-window verification status' -f content="$CONTENT" -f sha="$EXISTING_SHA" >/dev/null
+          else
+            gh api --method PUT "$API_PATH" -f message='Create resilient object-window verification status' -f content="$CONTENT" >/dev/null
+          fi
+          test "$passed" = true
+
+      - name: Upload resilient verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: object-window-index-995-verification-v3-evidence
+          path: |
+            pre-deployments.json
+            post-deployments.json
+            deployment.json
+            deployment-created-on.txt
+            settings.json
+            schedules.json
+            lookup.json
+            object-history.json
+            transaction.json
+            xrpl-attempts.ndjson
+            xrpl-candidate.json
+            xrpl-tx.json
+            xrpl-endpoint.txt
+            slot.json
+            metrics.json
+            history.json
+            slot-lookups.json
+            fast.json
+            overlay.json
+            compact.json
+            stale.json
+            verification-status.json
+            *.attempt-*.json
+          if-no-files-found: warn
+          retention-days: 14
