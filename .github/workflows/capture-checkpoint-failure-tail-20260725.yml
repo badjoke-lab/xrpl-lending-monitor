@@ -1,0 +1,52 @@
+name: Capture checkpoint failure tail 20260725
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: capture-checkpoint-failure-tail-20260725
+  cancel-in-progress: true
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      JOB_ID: '89638729491'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Capture exact failure tail
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "/repos/${GITHUB_REPOSITORY}/actions/jobs/${JOB_ID}/logs" > checkpoint-job.log
+          tail -n 260 checkpoint-job.log > .github/four-hour-checkpoint-failure-tail-20260725.log
+          grep -Ein 'error|fail|exception|fatal|killed|heap|ENOMEM|ENOSPC|SQLITE|timeout|exit code' checkpoint-job.log \
+            | tail -n 120 > .github/four-hour-checkpoint-failure-errors-20260725.txt || true
+          test -s .github/four-hour-checkpoint-failure-tail-20260725.log
+
+      - name: Retain evidence and self-clean
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/capture-checkpoint-failure-tail-20260725.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add .github/four-hour-checkpoint-failure-tail-20260725.log \
+                  .github/four-hour-checkpoint-failure-errors-20260725.txt \
+                  .github/workflows/capture-checkpoint-failure-tail-20260725.yml
+          git commit -m 'Retain exact four-hour checkpoint failure tail'
+          git push origin HEAD:main
