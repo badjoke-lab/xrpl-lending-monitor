@@ -1,0 +1,166 @@
+name: Current production probe 20260725
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+    paths:
+      - .github/current-production-probe-trigger-20260725
+
+permissions:
+  contents: read
+
+concurrency:
+  group: current-production-probe-20260725
+  cancel-in-progress: true
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
+  PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+
+jobs:
+  probe:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Read current production state
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p current-production-probe-evidence
+          query_d1() {
+            local sql="$1" output="$2" payload tmp code
+            payload="$(mktemp)"
+            jq -n --arg sql "$sql" '{sql:$sql}' > "$payload"
+            for attempt in $(seq 1 6); do
+              tmp="${output}.attempt-${attempt}.json"
+              code="$(curl --silent --show-error --connect-timeout 10 --max-time 60 \
+                -o "$tmp" -w '%{http_code}' \
+                -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+                -H 'Content-Type: application/json' --data-binary @"$payload" \
+                "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database/${DATABASE_ID}/query" || true)"
+              if [ "$code" = 200 ] && jq -e '.success==true and .result[0].success==true' "$tmp" >/dev/null 2>&1; then
+                mv "$tmp" "$output"
+                rm -f "$payload"
+                return 0
+              fi
+              sleep "$((attempt * 2))"
+            done
+            return 1
+          }
+          fetch_api() {
+            local path="$1" output="$2" code_file="$3"
+            curl --silent --show-error --retry 3 --retry-all-errors \
+              --connect-timeout 10 --max-time 45 -o "$output" -w '%{http_code}' \
+              "${PRODUCTION_BASE}${path}" > "$code_file"
+          }
+
+          query_d1 "SELECT epoch_id,last_processed_ledger,last_processed_hash,latest_observed_ledger,latest_observed_hash,status,(latest_observed_ledger-last_processed_ledger) AS lag_ledgers,updated_at FROM fast_lane_shadow_state WHERE network='devnet'" fast.json
+          query_d1 "SELECT epoch_id,base_snapshot_id,base_ledger_index,base_ledger_hash,overlay_ledger_index,overlay_ledger_hash,updated_at FROM current_state_overlay_state WHERE network='devnet'" overlay.json
+          query_d1 "SELECT network,run_at,status,start_ledger_index,end_ledger_index,latest_observed_ledger,lag_ledgers,ledgers_processed,persistence_rows_read,persistence_rows_written,error_message FROM fast_lane_shadow_run_metrics WHERE network='devnet' ORDER BY run_at DESC LIMIT 1" metric.json
+          query_d1 "SELECT scheduled_time,datetime(scheduled_time/1000,'unixepoch') AS scheduled_at_utc,status,started_at,completed_at,next_scheduled_time,error_message,updated_at FROM fast_lane_queue_slots ORDER BY scheduled_time DESC LIMIT 12" slots.json
+          query_d1 "SELECT COUNT(*) AS compact_rows FROM fast_lane_shadow_objects_compact WHERE network='devnet'" compact.json
+          query_d1 "SELECT COUNT(*) AS stale_rows FROM current_state_overlay_objects o WHERE o.network='devnet' AND NOT EXISTS (SELECT 1 FROM fast_lane_shadow_base_binding b WHERE b.network=o.network AND b.base_epoch_id=o.epoch_id AND b.base_snapshot_id=o.base_snapshot_id)" stale.json
+          query_d1 "SELECT COUNT(*) AS compressed_rows,MIN(start_ledger_index) AS first_ledger,MAX(end_ledger_index) AS last_ledger,MAX(LENGTH(bundle_json)) AS max_encoded_bytes FROM fast_lane_history_windows WHERE network='devnet' AND SUBSTR(bundle_json,1,15)='gzip-base64-v1:'" history.json
+
+          fetch_api '/api/overview' overview.json overview.code
+          fetch_api '/api/status/history-source' history-source.json history-source.code
+          fetch_api '/api/status/fast-lane-diff?limit=500' fast-lane-diff.json fast-lane-diff.code
+          fetch_api '/api/status/replacement-base-rebase' replacement-base.json replacement-base.code
+
+          curl --fail-with-body --silent --show-error --retry 3 \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/xrpl-lending-monitor/schedules" \
+            > schedules.json
+          curl --fail-with-body --silent --show-error --retry 3 \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/xrpl-lending-monitor/deployments" \
+            > deployments.json
+
+          python - <<'PY'
+          import json
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          def load(path):
+              return json.loads(Path(path).read_text())
+          def results(path):
+              return load(path).get('result',[{}])[0].get('results',[])
+          def one(path):
+              rows=results(path); return rows[0] if rows else {}
+
+          fast=one('fast.json')
+          overlay=one('overlay.json')
+          metric=one('metric.json')
+          slots=results('slots.json')
+          compact=int(one('compact.json').get('compact_rows',-1))
+          stale=int(one('stale.json').get('stale_rows',-1))
+          history=one('history.json')
+          overview=load('overview.json')
+          history_source=load('history-source.json')
+          diff=load('fast-lane-diff.json')
+          rebase=load('replacement-base.json')
+          http={name:Path(f'{name}.code').read_text().strip() for name in ('overview','history-source','fast-lane-diff','replacement-base')}
+          schedules=load('schedules.json').get('result',{}).get('schedules',[])
+          deployments=load('deployments.json').get('result',{}).get('deployments',[])
+          latest_deployment=deployments[0] if deployments else None
+          latest=slots[:3]
+          slot_ok=len(latest)==3 and all(row.get('status')=='completed' and row.get('error_message') in (None,'') for row in latest)
+          aligned=(int(fast.get('last_processed_ledger',-1))==int(overlay.get('overlay_ledger_index',-2)) and str(fast.get('last_processed_hash','')).upper()==str(overlay.get('overlay_ledger_hash','')).upper())
+          schedule_ok=len(schedules)==1 and schedules[0].get('cron')=='*/5 * * * *'
+          rebase_ok=rebase.get('status')=='replayed' and rebase.get('target',{}).get('snapshotId')=='devnet-3932301-7d026fed85bc' and int(rebase.get('target',{}).get('ledgerIndex',-1))==3932301
+          diff_ok=diff.get('passed') is True and diff.get('sample',{}).get('exactProjectionMismatches')==0
+          healthy=all((
+              fast.get('status')=='healthy',
+              int(fast.get('lag_ledgers',-1))==0,
+              metric.get('status')=='committed',
+              metric.get('error_message') in (None,''),
+              aligned,
+              compact==0,
+              stale==0,
+              slot_ok,
+              all(code=='200' for code in http.values()),
+              int(history.get('compressed_rows') or 0)>0,
+              schedule_ok,
+              rebase_ok,
+              diff_ok,
+          ))
+          out={
+              'checkedAt':datetime.now(timezone.utc).isoformat().replace('+00:00','Z'),
+              'healthy':healthy,
+              'fastLane':fast,
+              'canonicalOverlay':overlay,
+              'latestMetric':metric,
+              'recentQueueSlots':slots,
+              'compactRows':compact,
+              'staleRows':stale,
+              'compressedHistory':history,
+              'http':http,
+              'overview':overview,
+              'historySource':history_source,
+              'fastLaneDiff':diff,
+              'replacementBase':rebase,
+              'schedules':schedules,
+              'latestDeployment':latest_deployment,
+          }
+          Path('current-production-probe-evidence/current-production-probe-20260725.json').write_text(json.dumps(out,indent=2)+'\n')
+          if not healthy:
+              raise SystemExit('production probe failed')
+          PY
+
+      - name: Upload current production evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: current-production-probe-20260725
+          path: current-production-probe-evidence
+          if-no-files-found: error
+          retention-days: 30
