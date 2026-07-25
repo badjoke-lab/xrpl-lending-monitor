@@ -1,0 +1,174 @@
+{
+  "checkedAt": "2026-07-25T07:04:25.023459Z",
+  "healthy": true,
+  "fastLane": {
+    "epoch_id": "fast-lane-shadow-devnet",
+    "last_processed_ledger": 3929151,
+    "last_processed_hash": "D115690A96C1FD68F1ED6412210A2453DDD38BEF54CDF49472FFB43E385D617B",
+    "latest_observed_ledger": 3929151,
+    "latest_observed_hash": "D115690A96C1FD68F1ED6412210A2453DDD38BEF54CDF49472FFB43E385D617B",
+    "status": "healthy",
+    "lag_ledgers": 0,
+    "updated_at": "2026-07-25T07:00:12.127Z"
+  },
+  "canonicalOverlay": {
+    "epoch_id": "devnet-3371675",
+    "base_snapshot_id": "devnet-3860021-fbba23eeffd1",
+    "base_ledger_index": 3860021,
+    "base_ledger_hash": "FBBA23EEFFD19FFD81F2E6A0A9A5D3E503EE78AA8EB6F3653F756BA90655B4A7",
+    "overlay_ledger_index": 3929151,
+    "overlay_ledger_hash": "D115690A96C1FD68F1ED6412210A2453DDD38BEF54CDF49472FFB43E385D617B",
+    "updated_at": "2026-07-25T07:00:13.682Z"
+  },
+  "latestMetric": {
+    "network": "devnet",
+    "run_at": "2026-07-25T07:00:12.127Z",
+    "status": "committed",
+    "start_ledger_index": 3929064,
+    "end_ledger_index": 3929151,
+    "latest_observed_ledger": 3929151,
+    "lag_ledgers": 0,
+    "ledgers_processed": 88,
+    "persistence_rows_read": 9,
+    "persistence_rows_written": 13,
+    "error_message": null
+  },
+  "recentQueueSlots": [
+    {
+      "scheduled_time": 1784962800000,
+      "scheduled_at_utc": "2026-07-25 07:00:00",
+      "status": "completed",
+      "started_at": "2026-07-25T07:00:10.492Z",
+      "completed_at": "2026-07-25T07:00:14.511Z",
+      "next_scheduled_time": 1784963100000,
+      "error_message": null,
+      "updated_at": "2026-07-25T07:00:14.511Z"
+    },
+    {
+      "scheduled_time": 1784962500000,
+      "scheduled_at_utc": "2026-07-25 06:55:00",
+      "status": "completed",
+      "started_at": "2026-07-25T06:55:11.685Z",
+      "completed_at": "2026-07-25T06:55:15.360Z",
+      "next_scheduled_time": 1784962800000,
+      "error_message": null,
+      "updated_at": "2026-07-25T06:55:15.360Z"
+    },
+    {
+      "scheduled_time": 1784962200000,
+      "scheduled_at_utc": "2026-07-25 06:50:00",
+      "status": "completed",
+      "started_at": "2026-07-25T06:50:12.488Z",
+      "completed_at": "2026-07-25T06:50:16.516Z",
+      "next_scheduled_time": 1784962500000,
+      "error_message": null,
+      "updated_at": "2026-07-25T06:50:16.516Z"
+    },
+    {
+      "scheduled_time": 1784961900000,
+      "scheduled_at_utc": "2026-07-25 06:45:00",
+      "status": "completed",
+      "started_at": "2026-07-25T06:45:12.336Z",
+      "completed_at": "2026-07-25T06:45:15.928Z",
+      "next_scheduled_time": 1784962200000,
+      "error_message": null,
+      "updated_at": "2026-07-25T06:45:15.928Z"
+    },
+    {
+      "scheduled_time": 1784961600000,
+      "scheduled_at_utc": "2026-07-25 06:40:00",
+      "status": "completed",
+      "started_at": "2026-07-25T06:40:12.158Z",
+      "completed_at": "2026-07-25T06:40:15.788Z",
+      "next_scheduled_time": 1784961900000,
+      "error_message": null,
+      "updated_at": "2026-07-25T06:40:15.788Z"
+    },
+    {
+      "scheduled_time": 1784961300000,
+      "scheduled_at_utc": "2026-07-25 06:35:00",
+      "status": "completed",
+      "started_at": "2026-07-25T06:35:11.930Z",
+      "completed_at": "2026-07-25T06:35:15.668Z",
+      "next_scheduled_time": 1784961600000,
+      "error_message": null,
+      "updated_at": "2026-07-25T06:35:15.668Z"
+    },
+    {
+      "scheduled_time": 1784961000000,
+      "scheduled_at_utc": "2026-07-25 06:30:00",
+      "status": "completed",
+      "started_at": "2026-07-25T06:30:11.429Z",
+      "completed_at": "2026-07-25T06:30:14.818Z",
+      "next_scheduled_time": 1784961300000,
+      "error_message": null,
+      "updated_at": "2026-07-25T06:30:14.818Z"
+    },
+    {
+      "scheduled_time": 1784960700000,
+      "scheduled_at_utc": "2026-07-25 06:25:00",
+      "status": "completed",
+      "started_at": "2026-07-25T06:25:11.806Z",
+      "completed_at": "2026-07-25T06:25:15.253Z",
+      "next_scheduled_time": 1784961000000,
+      "error_message": null,
+      "updated_at": "2026-07-25T06:25:15.253Z"
+    },
+    {
+      "scheduled_time": 1784960400000,
+      "scheduled_at_utc": "2026-07-25 06:20:00",
+      "status": "completed",
+      "started_at": "2026-07-25T06:20:11.956Z",
+      "completed_at": "2026-07-25T06:20:15.822Z",
+      "next_scheduled_time": 1784960700000,
+      "error_message": null,
+      "updated_at": "2026-07-25T06:20:15.822Z"
+    },
+    {
+      "scheduled_time": 1784960100000,
+      "scheduled_at_utc": "2026-07-25 06:15:00",
+      "status": "completed",
+      "started_at": "2026-07-25T06:15:11.522Z",
+      "completed_at": "2026-07-25T06:15:22.189Z",
+      "next_scheduled_time": 1784960400000,
+      "error_message": null,
+      "updated_at": "2026-07-25T06:15:22.189Z"
+    },
+    {
+      "scheduled_time": 1784959800000,
+      "scheduled_at_utc": "2026-07-25 06:10:00",
+      "status": "completed",
+      "started_at": "2026-07-25T06:10:11.526Z",
+      "completed_at": "2026-07-25T06:10:15.160Z",
+      "next_scheduled_time": 1784960100000,
+      "error_message": null,
+      "updated_at": "2026-07-25T06:10:15.160Z"
+    },
+    {
+      "scheduled_time": 1784959500000,
+      "scheduled_at_utc": "2026-07-25 06:05:00",
+      "status": "completed",
+      "started_at": "2026-07-25T06:05:11.862Z",
+      "completed_at": "2026-07-25T06:05:15.144Z",
+      "next_scheduled_time": 1784959800000,
+      "error_message": null,
+      "updated_at": "2026-07-25T06:05:15.144Z"
+    }
+  ],
+  "compactRows": 0,
+  "staleRows": 0,
+  "compressedHistory": {
+    "compressed_rows": 256,
+    "first_ledger": 3913622,
+    "last_ledger": 3929151,
+    "max_encoded_bytes": 131063
+  },
+  "http": {
+    "overview": "200",
+    "history-source": "200",
+    "fast-lane-diff": "200",
+    "replacement-base": "200"
+  },
+  "runUrl": "https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/30148641657",
+  "runId": 30148641657
+}
