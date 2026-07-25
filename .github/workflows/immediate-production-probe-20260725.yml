@@ -1,8 +1,10 @@
 name: Immediate production probe 20260725
 
 on:
-  schedule:
-    - cron: '*/5 * * * *'
+  push:
+    branches: [main]
+    paths:
+      - .github/immediate-production-probe-20260725-trigger
   workflow_dispatch:
 
 permissions:
