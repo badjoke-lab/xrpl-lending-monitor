@@ -15,7 +15,7 @@ jobs:
   inventory:
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -24,14 +24,13 @@ jobs:
         with:
           ref: main
           fetch-depth: 1
-          filter: blob:none
 
       - name: Capture complete workflow inventory
         shell: bash
         run: |
-          set -euo pipefail
+          set -u
           root=actions-workflow-audit
-          mkdir -p "$root"
+          mkdir -p "$root/workflow-trees"
           cp -R .github/workflows "$root/workflows"
           git rev-parse HEAD > "$root/main-head.txt"
           date -u +%FT%TZ > "$root/checked-at.txt"
@@ -42,19 +41,29 @@ jobs:
           jq '{registeredCount:length, activeCount:map(select(.state=="active"))|length, disabledCount:map(select(.state!="active"))|length}' "$root/registered-workflows.json" > "$root/counts.json"
           jq -r '.[] | [.id,.name,.path,.state,.created_at,.updated_at,.html_url] | @tsv' "$root/registered-workflows.json" > "$root/registered-workflows.tsv"
 
-          git fetch --filter=blob:none --depth=1 origin '+refs/heads/*:refs/remotes/origin/*'
-          git for-each-ref --format='%(refname:short)\t%(objectname)' refs/remotes/origin \
-            | grep -v '^origin/HEAD\t' | sort > "$root/branches.tsv"
+          gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/branches?per_page=100" > "$root/branch-pages.json"
+          jq '[.[][]] | sort_by(.name)' "$root/branch-pages.json" > "$root/branches.json"
+          jq -r '.[] | [.name,.commit.sha] | @tsv' "$root/branches.json" > "$root/branches.tsv"
           : > "$root/branch-workflow-presence.tsv"
-          while IFS=$'\t' read -r ref sha; do
-            branch="${ref#origin/}"
-            git ls-tree -r --name-only "$sha" -- .github/workflows \
-              | awk -v branch="$branch" -v sha="$sha" '{print $0 "\t" branch "\t" sha}' \
-              >> "$root/branch-workflow-presence.tsv"
+          : > "$root/branch-tree-errors.tsv"
+          while IFS=$'\t' read -r branch sha; do
+            tree="$root/workflow-trees/${sha}.json"
+            if gh api "repos/${GITHUB_REPOSITORY}/git/trees/${sha}?recursive=1" > "$tree" 2> "$tree.error"; then
+              jq -r --arg branch "$branch" --arg sha "$sha" '
+                .tree[]
+                | select(.type=="blob" and (.path|test("^\\.github/workflows/[^/]+\\.(yml|yaml)$")))
+                | [.path,$branch,$sha] | @tsv
+              ' "$tree" >> "$root/branch-workflow-presence.tsv"
+              rm -f "$tree.error"
+            else
+              printf '%s\t%s\t%s\n' "$branch" "$sha" "$(tr '\n' ' ' < "$tree.error")" >> "$root/branch-tree-errors.tsv"
+            fi
           done < "$root/branches.tsv"
           sort -u -o "$root/branch-workflow-presence.tsv" "$root/branch-workflow-presence.tsv"
+          rm -rf "$root/workflow-trees"
 
       - name: Upload complete inventory
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: full-actions-workflow-inventory-20260725
