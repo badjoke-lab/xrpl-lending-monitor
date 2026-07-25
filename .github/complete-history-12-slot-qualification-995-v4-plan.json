@@ -1,0 +1,15 @@
+{
+  "generatedAt": "2026-07-25T07:34:55.426853Z",
+  "workflowArmUtc": "2026-07-25T08:05:00Z",
+  "prepareUtc": "2026-07-25T08:25:00Z",
+  "startUtc": "2026-07-25T08:30:00Z",
+  "endUtc": "2026-07-25T09:25:00Z",
+  "evaluateUtc": "2026-07-25T09:30:30Z",
+  "startJst": "2026-07-25T17:30:00+09:00",
+  "endJst": "2026-07-25T18:25:00+09:00",
+  "evaluateJst": "2026-07-25T18:30:30+09:00",
+  "timeoutMinutes": 180,
+  "finalizationBudgetSeconds": 1200,
+  "runtimeSha": "5b56de459e97495a9358f0e203c056d2a99afc6b",
+  "status": "staged"
+}
