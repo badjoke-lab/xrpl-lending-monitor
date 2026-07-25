@@ -1,0 +1,215 @@
+name: Cleanup stale overlay after checkpoint cutover
+
+on:
+  workflow_run:
+    workflows: ["Current-state checkpoint live cutover"]
+    types: [completed]
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+    paths:
+      - .github/cleanup-stale-overlay-trigger
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-worker-write
+  cancel-in-progress: false
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  DATABASE_NAME: xrpl-lending-monitor
+  PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+
+jobs:
+  cleanup:
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
+      || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Capture and validate active production identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p stale-overlay-cleanup-evidence
+          pnpm exec wrangler d1 execute "$DATABASE_NAME" --remote --json --command "
+            SELECT base_epoch_id,base_snapshot_id,base_ledger_index,base_ledger_hash
+            FROM fast_lane_shadow_base_binding WHERE network='devnet';
+            SELECT epoch_id,base_snapshot_id,base_ledger_index,base_ledger_hash,overlay_ledger_index,overlay_ledger_hash,updated_at
+            FROM current_state_overlay_state WHERE network='devnet'
+            ORDER BY base_ledger_index DESC,updated_at DESC LIMIT 1;
+            SELECT epoch_id,last_processed_ledger,last_processed_hash,latest_observed_ledger,latest_observed_hash,status
+            FROM fast_lane_shadow_state WHERE network='devnet';
+            SELECT COUNT(*) AS stale_rows FROM current_state_overlay_objects o
+            WHERE o.network='devnet' AND NOT EXISTS (
+              SELECT 1 FROM fast_lane_shadow_base_binding b
+              WHERE b.network=o.network AND b.base_epoch_id=o.epoch_id AND b.base_snapshot_id=o.base_snapshot_id
+            );
+            SELECT COUNT(*) AS stale_states FROM current_state_overlay_state s
+            WHERE s.network='devnet' AND NOT EXISTS (
+              SELECT 1 FROM fast_lane_shadow_base_binding b
+              WHERE b.network=s.network AND b.base_epoch_id=s.epoch_id AND b.base_snapshot_id=s.base_snapshot_id
+            );
+            SELECT name,sql FROM sqlite_master WHERE type='table' AND name LIKE 'current_state_overlay%';
+          " > stale-overlay-cleanup-evidence/before-raw.txt
+          sed -n '/^\[/,$p' stale-overlay-cleanup-evidence/before-raw.txt > stale-overlay-cleanup-evidence/before.json
+          jq -e '
+            length == 6
+            and all(.[]; .success == true)
+            and .[0].results[0].base_epoch_id == .[1].results[0].epoch_id
+            and .[0].results[0].base_snapshot_id == .[1].results[0].base_snapshot_id
+            and .[0].results[0].base_ledger_index == .[1].results[0].base_ledger_index
+            and .[0].results[0].base_ledger_hash == .[1].results[0].base_ledger_hash
+            and .[2].results[0].status == "healthy"
+            and .[2].results[0].last_processed_ledger == .[2].results[0].latest_observed_ledger
+            and .[2].results[0].last_processed_ledger == .[1].results[0].overlay_ledger_index
+            and .[2].results[0].last_processed_hash == .[1].results[0].overlay_ledger_hash
+          ' stale-overlay-cleanup-evidence/before.json >/dev/null
+
+          curl --fail-with-body --silent --show-error --retry 3 \
+            "$PRODUCTION_BASE/api/status/fast-lane-diff?limit=500" \
+            > stale-overlay-cleanup-evidence/diff-before.json
+          jq -e '.status == "ok" and .passed == true and .sample.exactProjectionMismatches == 0' \
+            stale-overlay-cleanup-evidence/diff-before.json >/dev/null
+
+      - name: Delete only rows outside the active fast-lane binding
+        shell: bash
+        run: |
+          set -euo pipefail
+          total=0
+          for batch in $(seq 1 20); do
+            raw="stale-overlay-cleanup-evidence/delete-${batch}-raw.txt"
+            json="stale-overlay-cleanup-evidence/delete-${batch}.json"
+            pnpm exec wrangler d1 execute "$DATABASE_NAME" --remote --json --command "
+              DELETE FROM current_state_overlay_objects
+              WHERE rowid IN (
+                SELECT o.rowid FROM current_state_overlay_objects o
+                WHERE o.network='devnet' AND NOT EXISTS (
+                  SELECT 1 FROM fast_lane_shadow_base_binding b
+                  WHERE b.network=o.network AND b.base_epoch_id=o.epoch_id AND b.base_snapshot_id=o.base_snapshot_id
+                )
+                LIMIT 5000
+              );
+            " > "$raw"
+            sed -n '/^\[/,$p' "$raw" > "$json"
+            jq -e 'type == "array" and length == 1 and .[0].success == true' "$json" >/dev/null
+            deleted="$(jq -r '.[0].meta.changes // 0' "$json")"
+            total="$((total + deleted))"
+            if [ "$deleted" -eq 0 ]; then break; fi
+          done
+          printf '%s\n' "$total" > stale-overlay-cleanup-evidence/deleted-object-rows.txt
+
+          pnpm exec wrangler d1 execute "$DATABASE_NAME" --remote --json --command "
+            DELETE FROM current_state_overlay_state
+            WHERE network='devnet' AND NOT EXISTS (
+              SELECT 1 FROM fast_lane_shadow_base_binding b
+              WHERE b.network=current_state_overlay_state.network
+                AND b.base_epoch_id=current_state_overlay_state.epoch_id
+                AND b.base_snapshot_id=current_state_overlay_state.base_snapshot_id
+            );
+          " > stale-overlay-cleanup-evidence/delete-states-raw.txt
+          sed -n '/^\[/,$p' stale-overlay-cleanup-evidence/delete-states-raw.txt > stale-overlay-cleanup-evidence/delete-states.json
+          jq -e 'type == "array" and length == 1 and .[0].success == true' stale-overlay-cleanup-evidence/delete-states.json >/dev/null
+
+      - name: Verify cleanup and full production health
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm exec wrangler d1 execute "$DATABASE_NAME" --remote --json --command "
+            SELECT base_epoch_id,base_snapshot_id,base_ledger_index,base_ledger_hash
+            FROM fast_lane_shadow_base_binding WHERE network='devnet';
+            SELECT epoch_id,base_snapshot_id,base_ledger_index,base_ledger_hash,overlay_ledger_index,overlay_ledger_hash,updated_at
+            FROM current_state_overlay_state WHERE network='devnet'
+            ORDER BY base_ledger_index DESC,updated_at DESC LIMIT 1;
+            SELECT epoch_id,last_processed_ledger,last_processed_hash,latest_observed_ledger,latest_observed_hash,status
+            FROM fast_lane_shadow_state WHERE network='devnet';
+            SELECT COUNT(*) AS stale_rows FROM current_state_overlay_objects o
+            WHERE o.network='devnet' AND NOT EXISTS (
+              SELECT 1 FROM fast_lane_shadow_base_binding b
+              WHERE b.network=o.network AND b.base_epoch_id=o.epoch_id AND b.base_snapshot_id=o.base_snapshot_id
+            );
+            SELECT COUNT(*) AS stale_states FROM current_state_overlay_state s
+            WHERE s.network='devnet' AND NOT EXISTS (
+              SELECT 1 FROM fast_lane_shadow_base_binding b
+              WHERE b.network=s.network AND b.base_epoch_id=s.epoch_id AND b.base_snapshot_id=s.base_snapshot_id
+            );
+            SELECT COUNT(*) AS compact_rows FROM fast_lane_shadow_objects_compact WHERE network='devnet';
+            SELECT network,run_at,status,lag_ledgers,error_message FROM fast_lane_shadow_run_metrics
+            WHERE network='devnet' ORDER BY run_at DESC LIMIT 1;
+            SELECT scheduled_time,status,error_message FROM fast_lane_queue_slots ORDER BY scheduled_time DESC LIMIT 3;
+          " > stale-overlay-cleanup-evidence/after-raw.txt
+          sed -n '/^\[/,$p' stale-overlay-cleanup-evidence/after-raw.txt > stale-overlay-cleanup-evidence/after.json
+          jq -e '
+            length == 8
+            and all(.[]; .success == true)
+            and .[0].results[0].base_epoch_id == .[1].results[0].epoch_id
+            and .[0].results[0].base_snapshot_id == .[1].results[0].base_snapshot_id
+            and .[0].results[0].base_ledger_index == .[1].results[0].base_ledger_index
+            and .[0].results[0].base_ledger_hash == .[1].results[0].base_ledger_hash
+            and .[2].results[0].status == "healthy"
+            and .[2].results[0].last_processed_ledger == .[2].results[0].latest_observed_ledger
+            and .[2].results[0].last_processed_ledger == .[1].results[0].overlay_ledger_index
+            and .[2].results[0].last_processed_hash == .[1].results[0].overlay_ledger_hash
+            and .[3].results[0].stale_rows == 0
+            and .[4].results[0].stale_states == 0
+            and .[5].results[0].compact_rows == 0
+            and .[6].results[0].status == "committed"
+            and .[6].results[0].lag_ledgers == 0
+            and .[6].results[0].error_message == null
+            and (.[7].results | length) == 3
+            and all(.[7].results[]; .status == "completed" and .error_message == null)
+          ' stale-overlay-cleanup-evidence/after.json >/dev/null
+
+          for pair in \
+            'overview:/api/overview' \
+            'history-source:/api/status/history-source' \
+            'fast-lane-diff:/api/status/fast-lane-diff?limit=500' \
+            'replacement-base:/api/status/replacement-base-rebase'; do
+            name="${pair%%:*}"
+            path="${pair#*:}"
+            code="$(curl --silent --show-error --retry 3 --retry-all-errors \
+              --connect-timeout 10 --max-time 45 -o "stale-overlay-cleanup-evidence/${name}.json" -w '%{http_code}' \
+              "${PRODUCTION_BASE}${path}")"
+            printf '%s\n' "$code" > "stale-overlay-cleanup-evidence/${name}.code"
+            test "$code" = 200
+          done
+          jq -e '.status == "ok" and .passed == true and .sample.exactProjectionMismatches == 0' \
+            stale-overlay-cleanup-evidence/fast-lane-diff.json >/dev/null
+
+          curl --fail-with-body --silent --show-error --retry 3 \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/xrpl-lending-monitor/schedules" \
+            > stale-overlay-cleanup-evidence/schedules.json
+          jq -e '.result.schedules | length == 1 and .[0].cron == "*/5 * * * *"' \
+            stale-overlay-cleanup-evidence/schedules.json >/dev/null
+
+      - name: Upload cleanup evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stale-overlay-cleanup-evidence
+          path: stale-overlay-cleanup-evidence
+          if-no-files-found: error
+          retention-days: 30
