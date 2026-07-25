@@ -101,6 +101,26 @@ export async function readFastLaneValidatedHead(options: {
   return readLedgerIdentity({ ...options, ledgerIndex: 'validated' })
 }
 
+export function selectFastLaneStartLedger(options: {
+  baseLedgerIndex: number
+  lastProcessedLedger: number | null
+}): number {
+  if (
+    !Number.isSafeInteger(options.baseLedgerIndex)
+    || options.baseLedgerIndex < 0
+  ) {
+    throw new Error('Fast-lane base ledger index is invalid')
+  }
+  if (options.lastProcessedLedger === null) return options.baseLedgerIndex + 1
+  if (
+    !Number.isSafeInteger(options.lastProcessedLedger)
+    || options.lastProcessedLedger < options.baseLedgerIndex
+  ) {
+    throw new Error('Fast-lane last processed ledger is invalid')
+  }
+  return options.lastProcessedLedger + 1
+}
+
 async function verifyFastLaneBaseIdentity(options: {
   endpoint: string
   timeoutMs: number
@@ -200,9 +220,10 @@ export async function runFastLaneShadowCycle(options: {
     }
   }
 
-  const startLedgerIndex = state
-    ? state.lastProcessedLedger + 1
-    : Math.max(options.base.ledgerIndex + 1, head.ledgerIndex - options.fastLaneConfig.bootstrapLedgers + 1)
+  const startLedgerIndex = selectFastLaneStartLedger({
+    baseLedgerIndex: options.base.ledgerIndex,
+    lastProcessedLedger: state?.lastProcessedLedger ?? null,
+  })
   const expectedPreviousLedger = startLedgerIndex - 1
 
   const session = createXrplWebSocketLedgerSession({
