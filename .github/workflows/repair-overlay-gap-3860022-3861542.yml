@@ -191,7 +191,9 @@ jobs:
           gh run download "$RUN_ID" --name current-state-overlay-checkpoint-candidate \
             --dir overlay-gap-repair-evidence/checkpoint-artifact
           test -s overlay-gap-repair-evidence/checkpoint-artifact/candidate-commit-sha.txt
-          test -s overlay-gap-repair-evidence/checkpoint-artifact/builder.stdout.json
+          test -s overlay-gap-repair-evidence/checkpoint-artifact/checkpoint-summary.json
+          jq -e '.mode == "d1-overlay-fold" and .target.ledgerIndex >= .source.ledgerIndex' \
+            overlay-gap-repair-evidence/checkpoint-artifact/checkpoint-summary.json >/dev/null
 
       - name: Upload retained repair evidence
         if: always()
