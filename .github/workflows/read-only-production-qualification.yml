@@ -25,6 +25,7 @@ on:
 permissions:
   actions: read
   contents: read
+  issues: write
 
 concurrency:
   group: read-only-production-qualification-${{ github.event_name == 'pull_request' && github.event.pull_request.number || 'operate' }}
@@ -121,7 +122,9 @@ jobs:
           echo "artifact=$artifact" >> "$GITHUB_OUTPUT"
 
       - name: Download unique arm evidence
+        id: arm-download
         if: steps.operation.outputs.mode == 'evaluate'
+        continue-on-error: true
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -145,6 +148,9 @@ jobs:
           test -f arm-evidence/arm.json
 
       - name: Execute read-only operation
+        id: execute
+        if: steps.operation.outputs.mode != 'evaluate' || steps.arm-download.outcome == 'success'
+        continue-on-error: true
         env:
           MODE: ${{ steps.operation.outputs.mode }}
           START_MS: ${{ steps.operation.outputs.start_ms }}
@@ -157,5 +163,72 @@ jobs:
         with:
           name: ${{ steps.operation.outputs.artifact }}
           path: qualification-evidence
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 30
+
+      - name: Report bounded result to Issue 995
+        if: always() && steps.operation.outcome == 'success'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MODE: ${{ steps.operation.outputs.mode }}
+          START_MS: ${{ steps.operation.outputs.start_ms }}
+          EXECUTE_OUTCOME: ${{ steps.execute.outcome }}
+          ARM_DOWNLOAD_OUTCOME: ${{ steps.arm-download.outcome }}
+        run: |
+          set -euo pipefail
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          {
+            echo "## Read-only qualification ${MODE} result"
+            echo
+            echo "- workflow run: ${run_url}"
+            echo "- start_ms: ${START_MS:-not-applicable}"
+            echo "- production mutation: none"
+            case "$MODE" in
+              probe)
+                if test -f qualification-evidence/result.json; then
+                  echo "- healthy: $(jq -r '.healthy' qualification-evidence/result.json)"
+                  echo "- checked_at: $(jq -r '.checkedAt' qualification-evidence/result.json)"
+                  echo "- ledger: $(jq -r '.fastLane.last_processed_ledger' qualification-evidence/result.json)"
+                  echo "- failures: $(jq -c '.failures' qualification-evidence/result.json)"
+                else
+                  echo "- status: failed before result generation"
+                fi
+                ;;
+              arm)
+                if test -f qualification-evidence/arm.json; then
+                  echo "- armed: true"
+                  echo "- armed_at: $(jq -r '.armedAt' qualification-evidence/arm.json)"
+                  echo "- start_utc: $(jq -r '.startUtc' qualification-evidence/arm.json)"
+                  echo "- end_utc: $(jq -r '.endUtc' qualification-evidence/arm.json)"
+                  echo "- deployment_id: $(jq -r '.identity.deploymentId' qualification-evidence/arm.json)"
+                  echo "- version_id: $(jq -r '.identity.versionId' qualification-evidence/arm.json)"
+                else
+                  echo "- armed: false"
+                  echo "- execute_outcome: ${EXECUTE_OUTCOME}"
+                fi
+                ;;
+              evaluate)
+                echo "- arm_download_outcome: ${ARM_DOWNLOAD_OUTCOME}"
+                if test -f qualification-evidence/qualification-result.json; then
+                  echo "- passed: $(jq -r '.passed' qualification-evidence/qualification-result.json)"
+                  echo "- checked_at: $(jq -r '.checkedAt' qualification-evidence/qualification-result.json)"
+                  echo "- failures: $(jq -c '.failures' qualification-evidence/qualification-result.json)"
+                else
+                  echo "- passed: false"
+                  echo "- status: failed before result generation"
+                fi
+                ;;
+            esac
+          } > qualification-report.md
+          gh issue comment 995 --repo "$GITHUB_REPOSITORY" --body-file qualification-report.md
+
+      - name: Preserve operation failure
+        if: >-
+          always()
+          && steps.operation.outcome == 'success'
+          && (
+            steps.execute.outcome != 'success'
+            || (steps.operation.outputs.mode == 'evaluate' && steps.arm-download.outcome != 'success')
+          )
+        run: exit 1
