@@ -119,3 +119,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: bash scripts/qualification-995-v4/publish.sh
+
+# validation-trigger: 2026-07-25T16:41:12+09:00
