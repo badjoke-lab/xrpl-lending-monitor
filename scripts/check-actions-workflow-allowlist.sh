@@ -17,13 +17,14 @@ printf '  %s\n' "${actual[@]}"
 
 expected=(
   ci.yml
+  read-only-production-qualification.yml
   rolling-checkpoint-candidate.yml
   rolling-checkpoint-live-cutover.yml
 )
 printf '%s\n' "${expected[@]}" > "$evidence/expected-workflows.txt"
 
 if [[ "${#actual[@]}" -ne "${#expected[@]}" ]]; then
-  echo "GitHub Actions workflow count must remain exactly three." >&2
+  echo "GitHub Actions workflow count must remain exactly four." >&2
   exit 1
 fi
 
@@ -42,43 +43,46 @@ import sys
 
 root = Path(sys.argv[1])
 evidence = Path(sys.argv[2])
-manual = [
-    root / "rolling-checkpoint-candidate.yml",
-    root / "rolling-checkpoint-live-cutover.yml",
-]
+policies = {
+    "rolling-checkpoint-candidate.yml": ["workflow_dispatch"],
+    "rolling-checkpoint-live-cutover.yml": ["workflow_dispatch"],
+    "read-only-production-qualification.yml": ["pull_request", "workflow_dispatch", "issue_comment"],
+}
 parsed = {}
 
-for path in manual:
+for name, expected in policies.items():
+    path = root / name
     lines = path.read_text().splitlines()
     try:
         start = lines.index("on:") + 1
     except ValueError as exc:
         raise SystemExit(f"{path} has no top-level on block") from exc
-
-    triggers: list[str] = []
+    triggers = []
     for line in lines[start:]:
         if line and not line.startswith(" "):
             break
         match = re.match(r"^  ([A-Za-z_]+):", line)
         if match:
             triggers.append(match.group(1))
-    parsed[path.name] = triggers
+    parsed[name] = triggers
+    if triggers != expected:
+        raise SystemExit(f"{name} trigger policy violation: expected={expected}, found={triggers}")
 
-(evidence / "manual-triggers.json").write_text(json.dumps(parsed, indent=2) + "\n")
-
-for name, triggers in parsed.items():
-    if triggers != ["workflow_dispatch"]:
-        raise SystemExit(
-            f"{name} must remain workflow_dispatch-only; found triggers={triggers}"
-        )
+qualification = (root / "read-only-production-qualification.yml").read_text()
+for forbidden in ("  schedule:", "  push:", "  workflow_run:", "contents: write", "issues: write"):
+    if forbidden in qualification:
+        raise SystemExit(f"read-only qualification contains forbidden capability: {forbidden.strip()}")
+if "CLOUDFLARE_API_TOKEN" not in qualification or "DATABASE_ID" not in qualification:
+    raise SystemExit("read-only qualification must declare its bounded production-read dependencies")
 
 scheduled = []
 for path in root.glob("*.y*ml"):
     if re.search(r"^  schedule:", path.read_text(), flags=re.MULTILINE):
         scheduled.append(path.name)
+(evidence / "workflow-triggers.json").write_text(json.dumps(parsed, indent=2) + "\n")
 (evidence / "scheduled-workflows.json").write_text(json.dumps(scheduled, indent=2) + "\n")
 if scheduled:
     raise SystemExit(f"scheduled workflows are forbidden: {scheduled}")
 PY
 
-echo "Actions workflow allowlist passed: CI plus two manual checkpoint workflows."
+echo "Actions workflow allowlist passed: CI, one bounded read-only qualification runner, and two manual checkpoint workflows."
