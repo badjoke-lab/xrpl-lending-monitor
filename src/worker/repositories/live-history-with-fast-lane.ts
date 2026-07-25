@@ -40,6 +40,10 @@ function newestChange(left: ObjectChangeRecord, right: ObjectChangeRecord): numb
     || left.fieldName.localeCompare(right.fieldName)
 }
 
+function objectChangeKey(item: ObjectChangeRecord): string {
+  return [item.transactionHash, item.nodeIndex, item.objectId, item.fieldName, item.action].join(':')
+}
+
 function newestLifecycle(left: LoanLifecycleRecord, right: LoanLifecycleRecord): number {
   return right.ledgerIndex - left.ledgerIndex || right.transactionIndex - left.transactionIndex
 }
@@ -105,15 +109,19 @@ export async function listLiveObjectHistoryAfterBoundary(
   boundaryLedgerIndex: number,
   options: HistoryPageOptions,
 ): Promise<ObjectChangeRecord[]> {
-  const [stored, bundles] = await Promise.all([
-    listD1ObjectHistory(db, objectType, objectId, boundaryLedgerIndex, options),
-    readFastLaneHistoryBundlesAfterBoundary({ db, boundaryLedgerIndex }),
-  ])
-  const compact = bundles.flatMap((bundle) => bundle.objectChanges)
-    .filter((item) => item.ledgerIndex > boundaryLedgerIndex && item.objectType === objectType && item.objectId === objectId)
+  const bundles = await readFastLaneHistoryBundlesAfterBoundary({ db, boundaryLedgerIndex })
+  const compact = dedupe(
+    bundles.flatMap((bundle) => bundle.objectChanges)
+      .filter((item) => item.ledgerIndex > boundaryLedgerIndex && item.objectType === objectType && item.objectId === objectId)
+      .sort(newestChange),
+    objectChangeKey,
+  )
+  if (compact.length >= options.limit) return compact.slice(0, options.limit)
+
+  const stored = await listD1ObjectHistory(db, objectType, objectId, boundaryLedgerIndex, options)
   return dedupe(
     [...stored, ...compact].sort(newestChange),
-    (item) => [item.transactionHash, item.nodeIndex, item.objectId, item.fieldName, item.action].join(':'),
+    objectChangeKey,
   ).slice(0, options.limit)
 }
 
