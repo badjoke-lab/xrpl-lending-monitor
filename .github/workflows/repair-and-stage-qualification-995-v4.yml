@@ -1,0 +1,123 @@
+name: Repair and stage qualification 995 v4
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/repair-and-stage-qualification-995-v4.yml
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Build corrected v4 workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          source = Path('.github/workflows/complete-history-12-slot-qualification-995-v3.yml')
+          target = Path('.github/workflows/complete-history-12-slot-qualification-995-v4.yml')
+          text = source.read_text()
+
+          replacements = {
+              'Complete-history 12-slot qualification 995 v3': 'Complete-history 12-slot qualification 995 v4',
+              'complete-history-12-slot-qualification-995-v3': 'complete-history-12-slot-qualification-995-v4',
+              'qualification 995 v3': 'qualification 995 v4',
+              'pre-soak qualification v3': 'pre-soak qualification v4',
+              "PREPARE_UTC: '2026-07-25T04:05:00Z'": "PREPARE_UTC: '2026-07-25T06:25:00Z'",
+              "START_UTC: '2026-07-25T04:10:00Z'": "START_UTC: '2026-07-25T06:30:00Z'",
+              "END_UTC: '2026-07-25T05:05:00Z'": "END_UTC: '2026-07-25T07:25:00Z'",
+              "EVALUATE_UTC: '2026-07-25T05:10:30Z'": "EVALUATE_UTC: '2026-07-25T07:30:30Z'",
+              "START_MS: '1784952600000'": "START_MS: '1784961000000'",
+              "END_MS: '1784955900000'": "END_MS: '1784964300000'",
+              "start=datetime.fromisoformat('2026-07-25T04:10:00+00:00')": "start=datetime.fromisoformat('2026-07-25T06:30:00+00:00')",
+              "end=datetime.fromisoformat('2026-07-25T05:05:00+00:00')": "end=datetime.fromisoformat('2026-07-25T07:25:00+00:00')",
+              "evaluate=datetime.fromisoformat('2026-07-25T05:10:30+00:00')": "evaluate=datetime.fromisoformat('2026-07-25T07:30:30+00:00')",
+              'assert int(start.timestamp()*1000)==1784952600000': 'assert int(start.timestamp()*1000)==1784961000000',
+              'assert int(end.timestamp()*1000)==1784955900000': 'assert int(end.timestamp()*1000)==1784964300000',
+              '2026-07-25 13:10 JST': '2026-07-25 15:30 JST',
+              '2026-07-25 14:05 JST': '2026-07-25 16:25 JST',
+              '2026-07-25 14:10:30 JST': '2026-07-25 16:30:30 JST',
+              'timeout-minutes: 115': 'timeout-minutes: 180',
+          }
+          for old, new in replacements.items():
+              if old not in text:
+                  raise SystemExit(f'missing replacement anchor: {old}')
+              text = text.replace(old, new)
+
+          env_anchor = "  END_MS: '1784964300000'\n"
+          if env_anchor not in text:
+              raise SystemExit('missing env anchor')
+          text = text.replace(
+              env_anchor,
+              env_anchor + "  QUALIFY_TIMEOUT_MINUTES: '180'\n  FINALIZATION_BUDGET_SECONDS: '1200'\n",
+              1,
+          )
+
+          arm_anchor = """          set -euo pipefail
+          start_epoch=\"$(date -u -d \"$START_UTC\" +%s)\"
+"""
+          guard = """          set -euo pipefail
+          now_epoch=\"$(date -u +%s)\"
+          evaluate_epoch=\"$(date -u -d \"$EVALUATE_UTC\" +%s)\"
+          budget_seconds=\"$((QUALIFY_TIMEOUT_MINUTES * 60))\"
+          required_seconds=\"$((evaluate_epoch - now_epoch + FINALIZATION_BUDGET_SECONDS))\"
+          test \"$required_seconds\" -gt 0
+          if [ \"$required_seconds\" -ge \"$((budget_seconds - 300))\" ]; then
+            echo \"::error::Qualification time budget invalid: required=${required_seconds}s budget=${budget_seconds}s\"
+            exit 1
+          fi
+          start_epoch=\"$(date -u -d \"$START_UTC\" +%s)\"
+"""
+          if arm_anchor not in text:
+              raise SystemExit('missing arm anchor')
+          text = text.replace(arm_anchor, guard, 1)
+
+          validation_anchor = """          assert (evaluate-end).total_seconds()>=300
+"""
+          validation = """          assert (evaluate-end).total_seconds()>=300
+          prepare=datetime.fromisoformat('2026-07-25T06:25:00+00:00')
+          timeout_seconds=180*60
+          finalization_seconds=1200
+          assert (evaluate-prepare).total_seconds()+finalization_seconds < timeout_seconds-300
+          workflow=Path('.github/workflows/complete-history-12-slot-qualification-995-v4.yml').read_text()
+          assert 'timeout-minutes: 180' in workflow
+          assert 'QUALIFY_TIMEOUT_MINUTES: \'180\'' in workflow
+          assert 'FINALIZATION_BUDGET_SECONDS: \'1200\'' in workflow
+"""
+          if validation_anchor not in text:
+              raise SystemExit('missing validation anchor')
+          text = text.replace(validation_anchor, validation, 1)
+          text = text.replace('from datetime import datetime, timezone\n', 'from datetime import datetime, timezone\nfrom pathlib import Path\n', 1)
+
+          target.write_text(text)
+          trigger = Path('.github/complete-history-12-slot-qualification-995-v4-trigger')
+          trigger.write_text('staged-v4-1784961000000-1784964300000-5b56de459e97495a9358f0e203c056d2a99afc6b\n')
+          PY
+
+          python - <<'PY'
+          from pathlib import Path
+          text=Path('.github/workflows/complete-history-12-slot-qualification-995-v4.yml').read_text()
+          assert 'timeout-minutes: 180' in text
+          assert 'Qualification time budget invalid' in text
+          assert "START_UTC: '2026-07-25T06:30:00Z'" in text
+          assert "EVALUATE_UTC: '2026-07-25T07:30:30Z'" in text
+          PY
+
+          rm .github/workflows/repair-and-stage-qualification-995-v4.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add .github/workflows/complete-history-12-slot-qualification-995-v4.yml \
+                  .github/complete-history-12-slot-qualification-995-v4-trigger \
+                  .github/workflows/repair-and-stage-qualification-995-v4.yml
+          git commit -m 'Stage corrected complete-history qualification 995 v4'
+          git push origin HEAD:main
