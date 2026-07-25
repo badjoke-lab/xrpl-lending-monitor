@@ -1,8 +1,8 @@
 {
   "state": "running",
-  "phase": "candidate_30153768478",
-  "message": "candidate run is active",
-  "checkedAt": "2026-07-25T10:02:12Z",
+  "phase": "verify_candidate",
+  "message": "candidate checkpoint verified",
+  "checkedAt": "2026-07-25T10:16:36Z",
   "runId": "30153724432",
   "commit": "b9d91f5544bbe2a5d8c548693f32013b6febd6cd",
   "candidateRunId": "30153768478",
@@ -10,7 +10,7 @@
   "sourceBranch": "current-state-four-hour-a-data",
   "outputBranch": "current-state-four-hour-b-data",
   "sourceLedger": 3930906,
-  "targetLedger": null,
+  "targetLedger": 3932301,
   "currentStateCadence": "five_minutes",
   "checkpointCadence": "four_hours",
   "historyMode": "archived_plus_forward_only"
