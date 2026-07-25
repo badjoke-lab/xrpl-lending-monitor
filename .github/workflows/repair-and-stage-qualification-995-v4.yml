@@ -36,7 +36,8 @@ jobs:
           from datetime import datetime
           from pathlib import Path
 
-          workflow = Path('.github/workflows/complete-history-12-slot-qualification-995-v4.yml').read_text()
+          workflow_path = Path('.github/workflows/complete-history-12-slot-qualification-995-v4.yml')
+          workflow = workflow_path.read_text()
           plan = json.loads(Path('.github/complete-history-12-slot-qualification-995-v4-plan.json').read_text())
           trigger = Path('.github/complete-history-12-slot-qualification-995-v4-trigger').read_text().strip()
           required = [
@@ -59,17 +60,58 @@ jobs:
           assert plan['finalizationBudgetSeconds'] == 1200
           assert datetime.fromisoformat(plan['startUtc'].replace('Z', '+00:00')) < datetime.fromisoformat(plan['endUtc'].replace('Z', '+00:00'))
           assert (datetime.fromisoformat(plan['endUtc'].replace('Z', '+00:00')) - datetime.fromisoformat(plan['startUtc'].replace('Z', '+00:00'))).total_seconds() == 55 * 60
+
+          lines = workflow.splitlines()
+          names = {
+              'Validate fixed qualification v4 boundary': 'validate.sh',
+              'Arm Issue and wait for identity freeze point': 'arm.sh',
+              'Capture pre-window production identity': 'capture-pre.sh',
+              'Wait for fixed qualification window to close': 'wait.sh',
+              'Read exact slot, metric, history and final identity evidence': 'read-evidence.sh',
+              'Decode, source-cross-audit and evaluate': 'evaluate.sh',
+              'Publish retained evidence and Issue result': 'publish.sh',
+          }
+          output_dir = Path('scripts/qualification-995-v4')
+          output_dir.mkdir(parents=True, exist_ok=True)
+          extracted = {}
+          for index, line in enumerate(lines):
+              stripped = line.strip()
+              if not stripped.startswith('- name: '):
+                  continue
+              name = stripped.removeprefix('- name: ')
+              if name not in names:
+                  continue
+              run_index = index + 1
+              while run_index < len(lines) and lines[run_index].strip() != 'run: |':
+                  run_index += 1
+              assert run_index < len(lines), name
+              body = []
+              cursor = run_index + 1
+              while cursor < len(lines):
+                  current = lines[cursor]
+                  if current and len(current) - len(current.lstrip(' ')) < 10:
+                      break
+                  body.append(current[10:] if current.startswith('          ') else '')
+                  cursor += 1
+              script = '#!/usr/bin/env bash\n' + '\n'.join(body).rstrip() + '\n'
+              path = output_dir / names[name]
+              path.write_text(script)
+              extracted[name] = path
+          assert set(extracted) == set(names), (set(names) - set(extracted))
+          assert extracted['Decode, source-cross-audit and evaluate'].stat().st_size > 19000
+          assert 'Qualification time budget invalid' in extracted['Arm Issue and wait for identity freeze point'].read_text()
+          assert 'complete-history-12-slot-qualification-995-v4.json' in extracted['Publish retained evidence and Issue result'].read_text()
+          workflow_path.unlink()
           PY
 
-      - name: Commit staged v4 and remove one-time generator
+      - name: Commit validated non-workflow v4 bundle
         shell: bash
         run: |
           set -euo pipefail
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git rm .github/workflows/repair-and-stage-qualification-995-v4.yml scripts/stage-qualification-995-v4.py
-          git add .github/workflows/complete-history-12-slot-qualification-995-v4.yml \
-                  .github/complete-history-12-slot-qualification-995-v4-trigger \
-                  .github/complete-history-12-slot-qualification-995-v4-plan.json
-          git commit -m 'Stage complete-history qualification 995 v4'
+          git add .github/complete-history-12-slot-qualification-995-v4-trigger \
+                  .github/complete-history-12-slot-qualification-995-v4-plan.json \
+                  scripts/qualification-995-v4
+          git commit -m 'Stage qualification 995 v4 script bundle'
           git push origin HEAD:main
