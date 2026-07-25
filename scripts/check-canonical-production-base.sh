@@ -62,15 +62,17 @@ jq -e \
   --arg hash "${CURRENT_HASH}" '
     .mode == "d1-overlay-fold"
     and .source.epochId == $epoch
-    and (.source.ledgerIndex | tostring) == $ledger
-    and .source.ledgerHash == $hash
-    and .source.snapshotId == $snapshot
+    and (.source.ledgerIndex | tostring) <= $ledger
+    and .source.segmentCount == 64
+    and .target.ledgerIndex >= .source.ledgerIndex
     and (.target.ledgerIndex | tostring) == $ledger
     and .target.ledgerHash == $hash
     and .target.snapshotId == $snapshot
     and .overlaySource.epochId == $epoch
     and (.overlaySource.overlayLedgerIndex | tostring) == $ledger
     and .overlaySource.overlayLedgerHash == $hash
+    and .rollingBase.segmentCount == 64
+    and .rollingBase.counts == .target.counts
   ' "${ROOT}/current-summary.json" > /dev/null
 
 jq -e \
