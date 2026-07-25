@@ -1,0 +1,26 @@
+{
+  "checkedAt": "2026-07-25T06:24:10Z",
+  "sourceParentRunId": 30142643800,
+  "sourceCandidateRunId": 30142651549,
+  "candidateJobId": 89638729491,
+  "status": "failed_after_overlay_mutation_capture",
+  "candidateArtifact": {
+    "name": "current-state-overlay-checkpoint-candidate",
+    "overlayMutationFile": "overlay-mutations.ndjson",
+    "bytes": 68443984,
+    "lines": 41235,
+    "validJsonLines": 41235,
+    "invalidJsonLines": 0,
+    "firstLedgerIndex": 3861543,
+    "lastLedgerIndex": 3923918
+  },
+  "stageFinding": {
+    "overlayMutationReadCompleted": true,
+    "checkpointSummaryPresent": false,
+    "candidateCommitPresent": false,
+    "candidatePublicationRan": false,
+    "cutoverRunId": null,
+    "boundedConclusion": "The candidate failed after retaining the complete observed overlay-mutation stream and before producing the checkpoint summary or publishing a candidate branch. The exact thrown exception is not present in the retained artifact and must be recovered from the job-log tail before a code repair is selected."
+  },
+  "productionMutationFromFailedCandidate": false
+}
