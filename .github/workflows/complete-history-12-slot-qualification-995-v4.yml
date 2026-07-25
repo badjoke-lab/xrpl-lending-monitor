@@ -1,0 +1,121 @@
+name: Complete-history 12-slot qualification 995 v4
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '5 8 25 7 *'
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/complete-history-12-slot-qualification-995-v4.yml
+      - .github/complete-history-12-slot-qualification-995-v4-trigger
+      - .github/complete-history-12-slot-qualification-995-v4-plan.json
+      - scripts/qualification-995-v4/**
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: complete-history-12-slot-qualification-995-v4
+  cancel-in-progress: false
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
+  PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+  STATUS_ISSUE: '995'
+  RUNTIME_SHA: 5b56de459e97495a9358f0e203c056d2a99afc6b
+  DEPLOY_PROOF_PATH: .github/object-window-index-995-verification-v3-status.json
+  PREPARE_UTC: '2026-07-25T08:25:00Z'
+  START_UTC: '2026-07-25T08:30:00Z'
+  END_UTC: '2026-07-25T09:25:00Z'
+  EVALUATE_UTC: '2026-07-25T09:30:30Z'
+  START_MS: '1784968200000'
+  END_MS: '1784971500000'
+  QUALIFY_TIMEOUT_MINUTES: '180'
+  FINALIZATION_BUDGET_SECONDS: '1200'
+
+jobs:
+  validate:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate fixed qualification v4 boundary
+        shell: bash
+        run: bash scripts/qualification-995-v4/validate.sh
+      - name: Reject stale v3 identities in v4 bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          ! grep -R -n -E '2026-07-25T04:10:00Z|2026-07-25T05:05:00Z|2026-07-25T05:10:30Z|qualification 995 v3|qualify-v3' scripts/qualification-995-v4
+          grep -q "'startUtc':'2026-07-25T08:30:00Z'" scripts/qualification-995-v4/evaluate.sh
+          grep -q 'qualification 995 v4' scripts/qualification-995-v4/publish.sh
+          bash -n scripts/qualification-995-v4/*.sh
+
+  qualify:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Validate fixed qualification v4 boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/qualification-995-v4/validate.sh
+          ! grep -R -n -E '2026-07-25T04:10:00Z|2026-07-25T05:05:00Z|2026-07-25T05:10:30Z|qualification 995 v3|qualify-v3' scripts/qualification-995-v4
+          bash -n scripts/qualification-995-v4/*.sh
+
+      - name: Arm Issue and wait for identity freeze point
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: bash scripts/qualification-995-v4/arm.sh
+
+      - name: Capture pre-window production identity
+        shell: bash
+        run: bash scripts/qualification-995-v4/capture-pre.sh
+
+      - name: Wait for fixed qualification window to close
+        shell: bash
+        run: bash scripts/qualification-995-v4/wait.sh
+
+      - name: Read exact slot, metric, history and final identity evidence
+        shell: bash
+        run: bash scripts/qualification-995-v4/read-evidence.sh
+
+      - name: Decode, source-cross-audit and evaluate
+        shell: bash
+        run: bash scripts/qualification-995-v4/evaluate.sh
+
+      - name: Upload qualification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: complete-history-12-slot-qualification-995-v4
+          path: |
+            complete-history-12-slot-qualification-995-v4.json
+            qualification-status.txt
+            pre-identity.json
+            slots.json
+            slot-metrics.json
+            slot-windows.json
+            final-fast.json
+            final-overlay.json
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Publish retained evidence and Issue result
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: bash scripts/qualification-995-v4/publish.sh
