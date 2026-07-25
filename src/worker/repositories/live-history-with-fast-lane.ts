@@ -9,7 +9,11 @@ import type {
   ObjectChangeRecord,
   ProtocolEventRecord,
 } from './history-api-repository'
-import { readFastLaneHistoryBundlesAfterBoundary } from './fast-lane-history-window'
+import { decodeFastLaneHistoryPayload } from './fast-lane-history-codec'
+import {
+  readFastLaneHistoryBundlesAfterBoundary,
+  type FastLaneHistoryBundle,
+} from './fast-lane-history-window'
 import {
   listLiveActivityAfterBoundary as listD1Activity,
   listLiveArchivedObjectsAfterBoundary as listD1ArchivedObjects,
@@ -18,6 +22,10 @@ import {
   listLiveLoanLifecycleEventsAfterBoundary as listD1LoanLifecycleEvents,
   listLiveObjectHistoryAfterBoundary as listD1ObjectHistory,
 } from './live-history-d1-after-boundary'
+
+interface FastLaneObjectWindowRow {
+  bundle_json: string
+}
 
 function dedupe<T>(items: readonly T[], key: (item: T) => string): T[] {
   const seen = new Set<string>()
@@ -87,6 +95,49 @@ function balanceMatches(item: BalanceHistoryApiRecord, options: BalanceHistoryLi
     && (!options.assetKey || item.assetKey === options.assetKey)
 }
 
+async function readFastLaneObjectHistory(options: {
+  db: D1Database
+  objectType: string
+  objectId: string
+  boundaryLedgerIndex: number
+  limit: number
+}): Promise<ObjectChangeRecord[]> {
+  const needle = `"objectType":"${options.objectType}","objectId":"${options.objectId}"`
+  const result = await options.db.prepare(
+    `SELECT history.bundle_json
+     FROM fast_lane_shadow_windows AS lookup
+     JOIN fast_lane_history_windows AS history
+       ON history.network = lookup.network
+      AND history.start_ledger_index = lookup.start_ledger_index
+      AND history.end_ledger_index = lookup.end_ledger_index
+     WHERE lookup.network = 'devnet'
+       AND lookup.epoch_id = 'fast-lane-shadow-devnet'
+       AND history.epoch_id = (
+         SELECT base_epoch_id
+         FROM fast_lane_shadow_base_binding
+         WHERE network = 'devnet'
+       )
+       AND history.end_ledger_index > ?1
+       AND instr(lookup.object_lookup_json, ?2) > 0
+     ORDER BY history.end_ledger_index DESC
+     LIMIT ?3`,
+  ).bind(options.boundaryLedgerIndex, needle, Math.min(options.limit, 256))
+    .all<FastLaneObjectWindowRow>()
+  const bundles = await Promise.all((result.results ?? []).map(async (row) => (
+    await decodeFastLaneHistoryPayload(row.bundle_json) as FastLaneHistoryBundle
+  )))
+  return dedupe(
+    bundles.flatMap((bundle) => bundle.objectChanges)
+      .filter((item) => (
+        item.ledgerIndex > options.boundaryLedgerIndex
+        && item.objectType === options.objectType
+        && item.objectId === options.objectId
+      ))
+      .sort(newestChange),
+    objectChangeKey,
+  ).slice(0, options.limit)
+}
+
 export async function listLiveActivityAfterBoundary(
   db: D1Database,
   boundaryLedgerIndex: number,
@@ -109,14 +160,14 @@ export async function listLiveObjectHistoryAfterBoundary(
   boundaryLedgerIndex: number,
   options: HistoryPageOptions,
 ): Promise<ObjectChangeRecord[]> {
-  const bundles = await readFastLaneHistoryBundlesAfterBoundary({ db, boundaryLedgerIndex })
-  const compact = dedupe(
-    bundles.flatMap((bundle) => bundle.objectChanges)
-      .filter((item) => item.ledgerIndex > boundaryLedgerIndex && item.objectType === objectType && item.objectId === objectId)
-      .sort(newestChange),
-    objectChangeKey,
-  )
-  if (compact.length >= options.limit) return compact.slice(0, options.limit)
+  const compact = await readFastLaneObjectHistory({
+    db,
+    objectType,
+    objectId,
+    boundaryLedgerIndex,
+    limit: options.limit,
+  })
+  if (compact.length >= options.limit) return compact
 
   const stored = await listD1ObjectHistory(db, objectType, objectId, boundaryLedgerIndex, options)
   return dedupe(

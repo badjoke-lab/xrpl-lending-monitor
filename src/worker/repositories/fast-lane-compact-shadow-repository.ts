@@ -76,10 +76,20 @@ function validateHistoryWindows(
   }
 }
 
+function objectLookupJson(historyBundle: FastLaneHistoryBundle): string {
+  const objects = new Map<string, { objectType: string; objectId: string }>()
+  for (const change of historyBundle.objectChanges) {
+    const key = `${change.objectType}:${change.objectId}`
+    objects.set(key, { objectType: change.objectType, objectId: change.objectId })
+  }
+  return JSON.stringify([...objects.values()])
+}
+
 function appendActivityWindow(
   db: D1Database,
   statements: D1PreparedStatement[],
   activityPlan: FastLaneShadowWindowPlan,
+  historyBundle: FastLaneHistoryBundle,
   processedAt: string,
 ): void {
   statements.push(
@@ -89,13 +99,13 @@ function appendActivityWindow(
          start_ledger_index, end_ledger_index, end_ledger_hash,
          inspected_transaction_count, lending_transaction_count,
          successful_lending_transaction_count, affected_object_count,
-         activity_bundle_json, created_at
+         activity_bundle_json, object_lookup_json, created_at
        ) VALUES (
          'devnet', ?1, ?2, ?3,
          ?4, ?5, ?6,
          ?7, ?8,
          ?9, ?10,
-         ?11, ?12
+         ?11, ?12, ?13
        )
        ON CONFLICT(network, epoch_id, window_start_close_time) DO NOTHING`,
     ).bind(
@@ -110,6 +120,7 @@ function appendActivityWindow(
       activityPlan.successfulLendingTransactions,
       activityPlan.mutations.length,
       JSON.stringify(activityPlan.activity),
+      objectLookupJson(historyBundle),
       processedAt,
     ),
   )
@@ -255,7 +266,13 @@ export async function commitFastLaneCompactShadowWindows(options: {
         historyBundle.createdAt,
       ),
     )
-    appendActivityWindow(db, statements, window.activityPlan ?? plan, options.processedAt)
+    appendActivityWindow(
+      db,
+      statements,
+      window.activityPlan ?? plan,
+      historyBundle,
+      options.processedAt,
+    )
   }
 
   statements.push(

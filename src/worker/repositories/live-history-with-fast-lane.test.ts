@@ -63,7 +63,7 @@ async function database(): Promise<{ db: D1Database, canonicalQueries: () => num
           return statement
         },
         async all<T>() {
-          if (sql.includes('FROM fast_lane_history_windows')) {
+          if (sql.includes('object_lookup_json')) {
             return { results: [{ bundle_json: encoded }] as T[] }
           }
           if (sql.includes('FROM object_changes')) {
@@ -80,7 +80,7 @@ async function database(): Promise<{ db: D1Database, canonicalQueries: () => num
 }
 
 describe('live object history with fast-lane bundles', () => {
-  it('does not scan canonical object_changes when fast-lane history fills the page', async () => {
+  it('decodes only matching windows and skips canonical reads when the page is full', async () => {
     const { db, canonicalQueries } = await database()
 
     const changes = await listLiveObjectHistoryAfterBoundary(
