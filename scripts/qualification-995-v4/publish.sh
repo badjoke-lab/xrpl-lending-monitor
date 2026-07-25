@@ -18,8 +18,8 @@ api="repos/${GITHUB_REPOSITORY}/contents/.github/complete-history-12-slot-qualif
 sha="$(gh api "$api" --jq .sha 2>/dev/null || true)"
 content="$(base64 -w0 "$result")"
 if [ -n "$sha" ]; then
-  gh api --method PUT "$api" -f message="Record ${status} complete-history qualification 995 v3" -f content="$content" -f sha="$sha" -f branch=main >/dev/null
+  gh api --method PUT "$api" -f message="Record ${status} complete-history qualification 995 v4" -f content="$content" -f sha="$sha" -f branch=main >/dev/null
 else
-  gh api --method PUT "$api" -f message="Record ${status} complete-history qualification 995 v3" -f content="$content" -f branch=main >/dev/null
+  gh api --method PUT "$api" -f message="Record ${status} complete-history qualification 995 v4" -f content="$content" -f branch=main >/dev/null
 fi
 test "$status" = passed
