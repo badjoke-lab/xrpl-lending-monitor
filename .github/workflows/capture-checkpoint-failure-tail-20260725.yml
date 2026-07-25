@@ -43,10 +43,10 @@ jobs:
           test -s four-hour-checkpoint-failure-tail-20260725.log
           tar --exclude=.git --exclude=node_modules --exclude=dist --exclude=.local \
             -czf xrpl-lending-source-20260725.tar.gz \
-            scripts src tests package.json pnpm-lock.yaml vitest.config.* .github/workflows/repair-and-stage-qualification-995-v4.yml 2>/dev/null || \
+            scripts src tests package.json pnpm-lock.yaml vitest.config.* .github/workflows 2>/dev/null || \
           tar --exclude=.git --exclude=node_modules --exclude=dist --exclude=.local \
             -czf xrpl-lending-source-20260725.tar.gz \
-            scripts src package.json pnpm-lock.yaml .github/workflows/repair-and-stage-qualification-995-v4.yml
+            scripts src package.json pnpm-lock.yaml .github/workflows
 
       - name: Upload exact failure evidence
         uses: actions/upload-artifact@v4
