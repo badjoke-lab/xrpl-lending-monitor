@@ -33,15 +33,19 @@ jobs:
           set -euo pipefail
           mkdir -p audit
           query_d1() {
-            local name="$1" sql="$2" payload="audit/${name}.request.json" output="audit/${name}.json" code
+            local name sql payload output code success
+            name="$1"
+            sql="$2"
+            payload="audit/${name}.request.json"
+            output="audit/${name}.json"
             jq -n --arg sql "$sql" '{sql:$sql}' > "$payload"
             code="$(curl --silent --show-error --connect-timeout 10 --max-time 60 \
               -o "$output" -w '%{http_code}' \
               -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
               -H 'Content-Type: application/json' --data-binary @"$payload" \
               "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database/${DATABASE_ID}/query" || true)"
-            jq -n --arg name "$name" --arg code "$code" --arg sql "$sql" \
-              --argjson success "$(jq -r '(.success==true and .result[0].success==true)' "$output" 2>/dev/null || echo false)" \
+            success="$(jq -r '(.success==true and .result[0].success==true)' "$output" 2>/dev/null || echo false)"
+            jq -n --arg name "$name" --arg code "$code" --arg sql "$sql" --argjson success "$success" \
               '{name:$name,httpCode:$code,success:$success,sql:$sql}' > "audit/${name}.meta.json"
           }
 
