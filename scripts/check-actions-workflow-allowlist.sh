@@ -2,39 +2,66 @@
 set -euo pipefail
 
 root="${1:-.github/workflows}"
-expected="$(mktemp)"
-actual="$(mktemp)"
-trap 'rm -f "$expected" "$actual"' EXIT
+mapfile -t actual < <(
+  find "$root" -maxdepth 1 -type f \( -name '*.yml' -o -name '*.yaml' \) \
+    -printf '%f\n' | LC_ALL=C sort
+)
 
-cat > "$expected" <<'EOF'
-ci.yml
-rolling-checkpoint-candidate.yml
-rolling-checkpoint-live-cutover.yml
-EOF
+printf 'Detected workflow files (%s):\n' "${#actual[@]}"
+printf '  %s\n' "${actual[@]}"
 
-find "$root" -maxdepth 1 -type f \( -name '*.yml' -o -name '*.yaml' \) \
-  -printf '%f\n' | sort > "$actual"
+expected=(
+  ci.yml
+  rolling-checkpoint-candidate.yml
+  rolling-checkpoint-live-cutover.yml
+)
 
-if ! diff -u "$expected" "$actual"; then
-  echo "GitHub Actions workflow allowlist violation." >&2
-  echo "Only CI and the two explicitly manual checkpoint workflows are permitted." >&2
+if [[ "${#actual[@]}" -ne "${#expected[@]}" ]]; then
+  echo "GitHub Actions workflow count must remain exactly three." >&2
   exit 1
 fi
 
-for workflow in \
-  "$root/rolling-checkpoint-candidate.yml" \
-  "$root/rolling-checkpoint-live-cutover.yml"
-do
-  grep -q '^  workflow_dispatch:' "$workflow"
-  if grep -Eq '^  (schedule|push|pull_request):' "$workflow"; then
-    echo "$workflow must remain workflow_dispatch-only." >&2
+for index in "${!expected[@]}"; do
+  if [[ "${actual[$index]}" != "${expected[$index]}" ]]; then
+    echo "Unexpected workflow file: expected ${expected[$index]}, found ${actual[$index]}." >&2
     exit 1
   fi
 done
 
-if grep -R -n -E '^  schedule:' "$root"; then
-  echo "Scheduled GitHub Actions workflows are forbidden by the current operating policy." >&2
-  exit 1
-fi
+python - "$root" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+root = Path(sys.argv[1])
+manual = [
+    root / "rolling-checkpoint-candidate.yml",
+    root / "rolling-checkpoint-live-cutover.yml",
+]
+
+for path in manual:
+    lines = path.read_text().splitlines()
+    try:
+        start = lines.index("on:") + 1
+    except ValueError as exc:
+        raise SystemExit(f"{path} has no top-level on block") from exc
+
+    triggers: list[str] = []
+    for line in lines[start:]:
+        if line and not line.startswith(" "):
+            break
+        match = re.match(r"^  ([A-Za-z_]+):", line)
+        if match:
+            triggers.append(match.group(1))
+
+    if triggers != ["workflow_dispatch"]:
+        raise SystemExit(
+            f"{path} must remain workflow_dispatch-only; found triggers={triggers}"
+        )
+
+for path in root.glob("*.y*ml"):
+    if re.search(r"^  schedule:", path.read_text(), flags=re.MULTILINE):
+        raise SystemExit(f"scheduled workflow is forbidden: {path}")
+PY
 
 echo "Actions workflow allowlist passed: CI plus two manual checkpoint workflows."
