@@ -1,7 +1,7 @@
 name: Capture checkpoint failure tail 20260725
 
 on:
-  pull_request_target:
+  pull_request:
     types: [opened, synchronize, reopened]
     paths:
       - .github/xrpl-lending-recovery-trigger-pr
