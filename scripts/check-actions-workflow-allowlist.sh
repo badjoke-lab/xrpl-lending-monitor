@@ -69,11 +69,12 @@ for name, expected in policies.items():
         raise SystemExit(f"{name} trigger policy violation: expected={expected}, found={triggers}")
 
 qualification = (root / "read-only-production-qualification.yml").read_text()
-for forbidden in ("  schedule:", "  push:", "  workflow_run:", "contents: write", "issues: write"):
+for forbidden in ("  schedule:", "  push:", "  workflow_run:", "contents: write"):
     if forbidden in qualification:
         raise SystemExit(f"read-only qualification contains forbidden capability: {forbidden.strip()}")
-if "CLOUDFLARE_API_TOKEN" not in qualification or "DATABASE_ID" not in qualification:
-    raise SystemExit("read-only qualification must declare its bounded production-read dependencies")
+for required in ("actions: read", "contents: read", "issues: write", "CLOUDFLARE_API_TOKEN", "DATABASE_ID", "gh issue comment 995"):
+    if required not in qualification:
+        raise SystemExit(f"read-only qualification is missing required bounded capability: {required}")
 
 scheduled = []
 for path in root.glob("*.y*ml"):
@@ -85,4 +86,4 @@ if scheduled:
     raise SystemExit(f"scheduled workflows are forbidden: {scheduled}")
 PY
 
-echo "Actions workflow allowlist passed: CI, one bounded read-only qualification runner, and two manual checkpoint workflows."
+echo "Actions workflow allowlist passed: CI, one production-read qualification runner with Issue-only reporting, and two manual checkpoint workflows."
