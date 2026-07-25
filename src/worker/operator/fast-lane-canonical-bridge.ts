@@ -48,6 +48,7 @@ async function readOverlayState(db: D1Database): Promise<OverlayStateRow> {
             overlay_ledger_index, overlay_ledger_hash
      FROM current_state_overlay_state
      WHERE network = 'devnet'
+     ORDER BY base_ledger_index DESC, updated_at DESC
      LIMIT 1`,
   ).first<OverlayStateRow>()
   if (!row) throw new Error('canonical bridge requires current_state_overlay_state')
