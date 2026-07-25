@@ -75,45 +75,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-          path = Path('scripts/run-current-state-checkpoint-cutover.sh')
-          text = path.read_text()
-
-          old_usage = "jq -e '.rows_read < 4950000 and .rows_written < 99000' \"$ROOT/d1-summary.json\" >/dev/null"
-          new_usage = "jq -e '.rows_read >= 0 and .rows_written >= 0' \"$ROOT/d1-summary.json\" >/dev/null"
-          if text.count(old_usage) != 1:
-              raise SystemExit(f'expected one obsolete D1 usage gate, found {text.count(old_usage)}')
-          text = text.replace(old_usage, new_usage, 1)
-
-          old_counts = 'and .counts_watermark.ledger_index == $base'
-          new_counts = 'and .counts_watermark.ledger_index >= $base'
-          if text.count(old_counts) != 1:
-              raise SystemExit(f'expected one obsolete counts-watermark equality, found {text.count(old_counts)}')
-          text = text.replace(old_counts, new_counts, 1)
-
-          marker = "' \"$CURRENT_SUMMARY\" >/dev/null\n\n"
-          no_op = '''PRODUCTION_LEDGER_HASH="$(jq -r .ledgerHash "$PRODUCTION_MANIFEST")"
-          if test "$TARGET_LEDGER_INDEX" = "$PRODUCTION_LEDGER_INDEX" \\
-            && test "$TARGET_LEDGER_HASH" = "$PRODUCTION_LEDGER_HASH"; then
-            cp "$PRODUCTION_MANIFEST" "$ROOT/production-current.json"
-            jq -n \\
-              --argjson ledgerIndex "$TARGET_LEDGER_INDEX" \\
-              --arg ledgerHash "$TARGET_LEDGER_HASH" \\
-              --arg snapshotId "$TARGET_SNAPSHOT_ID" \\
-              '{passed:true,noOp:true,target:{ledgerIndex:$ledgerIndex,ledgerHash:$ledgerHash,snapshotId:$snapshotId},schedule:"*/5 * * * *",mainnetEnabled:false}' \\
-              > "$ROOT/evidence.json"
-            exit 0
-          fi
-
-          '''
-          if text.count(marker) != 1:
-              raise SystemExit(f'expected one candidate-summary validation marker, found {text.count(marker)}')
-          text = text.replace(marker, marker + no_op, 1)
-
-          path.write_text(text)
-          PY
           bash -n scripts/run-current-state-checkpoint-cutover.sh
+          grep -Fq "jq -e '.rows_read >= 0 and .rows_written >= 0'" scripts/run-current-state-checkpoint-cutover.sh
+          grep -Fq 'and .counts_watermark.ledger_index >= $base' scripts/run-current-state-checkpoint-cutover.sh
+          grep -Fq 'sync_main_config()' scripts/run-current-state-checkpoint-cutover.sh
+          grep -Fq 'git reset --hard origin/main' scripts/run-current-state-checkpoint-cutover.sh
           test -f dist/index.html
           jq -e '.triggers.crons == ["*/5 * * * *"] and .vars.APP_NETWORK == "devnet" and .vars.MAINNET_ENABLED == "false"' wrangler.jsonc >/dev/null
 
