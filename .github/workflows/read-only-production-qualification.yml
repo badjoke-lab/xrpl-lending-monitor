@@ -19,10 +19,6 @@ on:
         description: Five-minute-aligned qualification start timestamp in milliseconds; required for arm/evaluate
         required: false
         type: string
-      arm_run_id:
-        description: Arm workflow run ID; required for evaluate
-        required: false
-        type: string
   issue_comment:
     types: [created]
 
@@ -95,48 +91,58 @@ jobs:
           COMMENT_BODY: ${{ github.event.comment.body }}
           INPUT_MODE: ${{ inputs.mode }}
           INPUT_START_MS: ${{ inputs.start_ms }}
-          INPUT_ARM_RUN_ID: ${{ inputs.arm_run_id }}
         run: |
           set -euo pipefail
           if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
             mode="$INPUT_MODE"
             start_ms="$INPUT_START_MS"
-            arm_run_id="$INPUT_ARM_RUN_ID"
           else
-            read -r command mode start_ms arm_run_id extra <<< "$COMMENT_BODY"
+            read -r command mode start_ms extra <<< "$COMMENT_BODY"
             test "$command" = "/qualification"
             test -z "${extra:-}"
           fi
           case "$mode" in
             probe)
               test -z "${start_ms:-}"
-              test -z "${arm_run_id:-}"
               artifact="qualification-probe-${GITHUB_RUN_ID}"
               ;;
             arm)
               [[ "${start_ms:-}" =~ ^[0-9]+$ ]]
-              test -z "${arm_run_id:-}"
               artifact="qualification-arm-${start_ms}"
               ;;
             evaluate)
               [[ "${start_ms:-}" =~ ^[0-9]+$ ]]
-              [[ "${arm_run_id:-}" =~ ^[0-9]+$ ]]
               artifact="qualification-evaluate-${start_ms}"
               ;;
             *) exit 2 ;;
           esac
           echo "mode=$mode" >> "$GITHUB_OUTPUT"
           echo "start_ms=${start_ms:-}" >> "$GITHUB_OUTPUT"
-          echo "arm_run_id=${arm_run_id:-}" >> "$GITHUB_OUTPUT"
           echo "artifact=$artifact" >> "$GITHUB_OUTPUT"
 
-      - name: Download exact arm evidence
+      - name: Download unique arm evidence
         if: steps.operation.outputs.mode == 'evaluate'
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          ARM_RUN_ID: ${{ steps.operation.outputs.arm_run_id }}
           START_MS: ${{ steps.operation.outputs.start_ms }}
-        run: gh run download "$ARM_RUN_ID" --repo "$GITHUB_REPOSITORY" --name "qualification-arm-${START_MS}" --dir arm-evidence
+        run: |
+          set -euo pipefail
+          name="qualification-arm-${START_MS}"
+          gh api --paginate --slurp \
+            "repos/${GITHUB_REPOSITORY}/actions/artifacts?name=${name}&per_page=100" \
+            > arm-artifact-pages.json
+          jq '[.[].artifacts[] | select(.name == $name and .expired == false)]' \
+            --arg name "$name" arm-artifact-pages.json > arm-artifacts.json
+          count="$(jq 'length' arm-artifacts.json)"
+          test "$count" -eq 1
+          artifact_id="$(jq -r '.[0].id' arm-artifacts.json)"
+          mkdir -p arm-evidence
+          gh api -H 'Accept: application/vnd.github+json' \
+            "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" \
+            > arm-evidence.zip
+          unzip -q arm-evidence.zip -d arm-evidence
+          test -f arm-evidence/arm.json
 
       - name: Execute read-only operation
         env:
