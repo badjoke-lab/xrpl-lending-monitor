@@ -29,6 +29,7 @@ jobs:
       - name: Probe boundary ledger and one-ledger segment
         shell: bash
         run: |
+          set +e
           set -uo pipefail
           rm -rf rpc-probe-evidence .local/rpc-probe
           mkdir -p rpc-probe-evidence
