@@ -64,7 +64,10 @@ jobs:
         with:
           ref: history-data
           path: .local/production-history
-          sparse-checkout: history/publication.json
+          sparse-checkout: |
+            history-channel.json
+            history/publication.json
+            history/index/exact/manifest.json
           sparse-checkout-cone-mode: false
 
       - uses: pnpm/action-setup@v4
@@ -87,6 +90,8 @@ jobs:
           node --check scripts/verify-history-current-state-alignment.mjs
           node scripts/verify-history-current-state-alignment.mjs \
             --history-publication .local/production-history/history/publication.json \
+            --history-channel .local/production-history/history-channel.json \
+            --exact-index-manifest .local/production-history/history/index/exact/manifest.json \
             --current-manifest .local/current-candidate/read-model/manifest.json \
             > history-current-state-alignment.json
           jq -e '.passed == true' history-current-state-alignment.json >/dev/null
