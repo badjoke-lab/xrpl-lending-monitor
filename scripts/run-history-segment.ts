@@ -37,6 +37,7 @@ const DEFAULT_ENDPOINT = 'https://devnet.honeycluster.io/'
 const RIPPLE_EPOCH_UNIX_SECONDS = 946_684_800
 const MAX_REHEARSAL_LEDGERS = 500
 const MAX_READ_WINDOW_SIZE = 16
+const DEFAULT_READ_WINDOW_SIZE = 16
 const MAX_FETCH_ATTEMPTS = 5
 
 function argumentValue(args: readonly string[], name: string): string | null {
@@ -84,7 +85,7 @@ function parseArguments(args: readonly string[]): Arguments {
   if (endLedger - startLedger + 1 > MAX_REHEARSAL_LEDGERS) {
     throw new Error(`A rehearsal segment may contain at most ${MAX_REHEARSAL_LEDGERS} ledgers`)
   }
-  const readWindowSize = positiveInteger(args, '--read-window-size', 1)
+  const readWindowSize = positiveInteger(args, '--read-window-size', DEFAULT_READ_WINDOW_SIZE)
   if (readWindowSize > MAX_READ_WINDOW_SIZE) {
     throw new Error(`--read-window-size may be at most ${MAX_READ_WINDOW_SIZE}`)
   }
