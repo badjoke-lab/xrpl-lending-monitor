@@ -1,0 +1,36 @@
+name: Verify production balance-history route
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/verify-balance-history-production.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Require repaired production route
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL='https://xrpl-lending-monitor.badjoke-lab.workers.dev/api/audit/cover-loss?metric_type=debt_total&subject_type=LoanBroker&subject_id=005AA07E30EDDF798346FC107C81343952EC00A451A3CEC4572E8351B02EB6F4&limit=100'
+          HASH='6D5D881F1DBDECCD5F29929DB2AB39E0F2B468CB230ECD13C4B6AC8474F0FFEF'
+          status="$(curl --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 20 --max-time 90 --user-agent 'curl/8.5.0' --header 'Accept: application/json' --silent --show-error --output response.json --write-out '%{http_code}' "$URL")"
+          test "$status" = '200'
+          jq -e --arg hash "$HASH" '.data | type == "array" and any(.[]; .transaction_hash == $hash)' response.json >/dev/null
+          jq -n --arg status "$status" --arg hash "$HASH" --argjson records "$(jq '.data | length' response.json)" '{passed:true,http:($status|tonumber),transactionHash:$hash,records:$records}' | tee result.json
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: production-balance-history-route
+          path: |
+            response.json
+            result.json
+          if-no-files-found: warn
+          retention-days: 7
