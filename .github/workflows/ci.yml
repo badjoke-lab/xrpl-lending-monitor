@@ -107,12 +107,15 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Test compressed spill store
+      - name: Test bounded storage and resumable runner generation
         shell: bash
         run: |
           mkdir -p history-repair-preflight-evidence
           set -o pipefail
-          pnpm exec vitest run scripts/history-exact-index-spill.test.mjs 2>&1 | tee history-repair-preflight-evidence/spill-test.log
+          pnpm exec vitest run \
+            scripts/history-exact-index-spill.test.mjs \
+            scripts/prepare-resumable-history-repair.test.mjs \
+            2>&1 | tee history-repair-preflight-evidence/repair-tests.log
 
       - name: Upload history repair preflight diagnostics
         if: always()
@@ -126,8 +129,13 @@ jobs:
       - name: Bundle memory-bounded exact index
         run: pnpm build:history-exact-index
 
-      - name: Validate repair runner syntax
+      - name: Generate and validate resumable repair runner
         run: |
-          bash -n scripts/run-history-repair-3932301.sh
+          node scripts/prepare-resumable-history-repair.mjs \
+            scripts/run-history-repair-3932301.sh \
+            .local/run-history-repair-resumable-3932301.sh
+          bash -n .local/run-history-repair-resumable-3932301.sh
+          grep -Fq 'Checkpoint immutable history repair through segment' .local/run-history-repair-resumable-3932301.sh
+          grep -Fq 'reusing verified segment' .local/run-history-repair-resumable-3932301.sh
           grep -Fq 'SpillBucketStore' scripts/build-history-exact-index.ts
           grep -Fq 'productionMutation: false' scripts/run-history-repair-3932301.sh
