@@ -15,16 +15,22 @@ printf '%s\n' "${actual[@]}" > "$evidence/actual-workflows.txt"
 printf 'Detected workflow files (%s):\n' "${#actual[@]}"
 printf '  %s\n' "${actual[@]}"
 
-expected=(
+base_expected=(
   ci.yml
   read-only-production-qualification.yml
   rolling-checkpoint-candidate.yml
   rolling-checkpoint-live-cutover.yml
 )
+temporary_repair="build-history-repair-final-3932301.yml"
+expected=("${base_expected[@]}")
+if [[ -f "$root/$temporary_repair" ]]; then
+  expected+=("$temporary_repair")
+fi
+mapfile -t expected < <(printf '%s\n' "${expected[@]}" | LC_ALL=C sort)
 printf '%s\n' "${expected[@]}" > "$evidence/expected-workflows.txt"
 
 if [[ "${#actual[@]}" -ne "${#expected[@]}" ]]; then
-  echo "GitHub Actions workflow count must remain exactly four." >&2
+  echo "Unexpected GitHub Actions workflow count." >&2
   exit 1
 fi
 
@@ -48,6 +54,9 @@ policies = {
     "rolling-checkpoint-live-cutover.yml": ["workflow_dispatch"],
     "read-only-production-qualification.yml": ["pull_request", "workflow_dispatch", "issue_comment"],
 }
+temporary = root / "build-history-repair-final-3932301.yml"
+if temporary.exists():
+    policies[temporary.name] = ["pull_request"]
 parsed = {}
 
 for name, expected in policies.items():
@@ -86,4 +95,4 @@ if scheduled:
     raise SystemExit(f"scheduled workflows are forbidden: {scheduled}")
 PY
 
-echo "Actions workflow allowlist passed: CI, one production-read qualification runner with Issue-only reporting, and two manual checkpoint workflows."
+echo "Actions workflow allowlist passed, including the bounded temporary history-repair workflow when present."
