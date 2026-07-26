@@ -1,0 +1,83 @@
+name: Read qualification 1785032700000 evidence
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/read-qualification-1785032700000.yml
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  read-evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Locate and download retained evaluate artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_NAME: qualification-evaluate-1785032700000
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api --paginate --slurp \
+            "repos/${GITHUB_REPOSITORY}/actions/artifacts?name=${ARTIFACT_NAME}&per_page=100" \
+            > artifact-pages.json
+          jq --arg name "${ARTIFACT_NAME}" \
+            '[.[].artifacts[] | select(.name == $name and .expired == false)] | sort_by(.created_at)' \
+            artifact-pages.json > artifacts.json
+          test "$(jq 'length' artifacts.json)" -ge 1
+          mkdir -p retained
+          jq -c '.[]' artifacts.json | while IFS= read -r artifact; do
+            id="$(jq -r '.id' <<<"${artifact}")"
+            mkdir -p "retained/${id}"
+            gh api -H 'Accept: application/vnd.github+json' \
+              "repos/${GITHUB_REPOSITORY}/actions/artifacts/${id}/zip" \
+              > "retained/${id}.zip"
+            unzip -q "retained/${id}.zip" -d "retained/${id}"
+            test -f "retained/${id}/qualification-result.json"
+          done
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          artifacts = json.loads(Path('artifacts.json').read_text())
+          summaries = []
+          for artifact in artifacts:
+              path = Path('retained') / str(artifact['id']) / 'qualification-result.json'
+              result = json.loads(path.read_text())
+              summaries.append({
+                  'artifact': {
+                      'id': artifact['id'],
+                      'name': artifact['name'],
+                      'created_at': artifact['created_at'],
+                      'updated_at': artifact['updated_at'],
+                      'workflow_run': artifact.get('workflow_run'),
+                  },
+                  'checkedAt': result.get('checkedAt'),
+                  'passed': result.get('passed'),
+                  'failures': result.get('failures'),
+                  'checks': result.get('checks'),
+                  'fixedWindow': result.get('fixedWindow'),
+                  'metricErrors': result.get('metricErrors'),
+                  'history': result.get('history'),
+                  'witnesses': result.get('witnesses'),
+                  'final': result.get('final'),
+                  'identity': result.get('identity'),
+                  'resource': result.get('resource'),
+                  'retention': result.get('retention'),
+                  'protectedBoundaries': result.get('protectedBoundaries'),
+                  'slotCount': len(result.get('slots') or []),
+              })
+          Path('qualification-summaries.json').write_text(json.dumps(summaries, indent=2, sort_keys=True) + '\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qualification-1785032700000-retained-evidence
+          path: |
+            artifacts.json
+            qualification-summaries.json
+            retained/*/qualification-result.json
+          if-no-files-found: error
+          retention-days: 7
