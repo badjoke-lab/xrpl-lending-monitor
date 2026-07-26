@@ -1,0 +1,226 @@
+name: Promote immutable history repair 3932301
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/promote-history-repair-3932301.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: production-worker-write
+  cancel-in-progress: false
+
+env:
+  CANDIDATE_BRANCH: history-repair-3932301-data
+  PRODUCTION_HISTORY_BRANCH: history-data
+  CURRENT_STATE_BRANCH: current-state-data
+  TARGET_LEDGER: '3932301'
+  TARGET_HASH: 7D026FED85BCA2BDCFE450A0F3537707A43B4D08E1D2AE57AFBC54D88EBE1828
+  FIXED_OBJECT_ID: AD0980A254BC7262C57001315A9B6C7C65A020F29FAB2D0A0915933C55FF3BB1
+  FIXED_TRANSACTION_HASH: 70A489701D68B89E04923A7845F81F2C615760992C55119A8FC0ED8C759DE684
+  PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+
+jobs:
+  promote-verify:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out exact main implementation
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Check out immutable-history candidate identity
+        uses: actions/checkout@v4
+        with:
+          ref: history-repair-3932301-data
+          path: .local/candidate-history
+          sparse-checkout: |
+            history-channel.json
+            history/publication.json
+            history/index/exact/manifest.json
+          sparse-checkout-cone-mode: false
+
+      - name: Check out production immutable-history identity
+        uses: actions/checkout@v4
+        with:
+          ref: history-data
+          path: .local/production-history
+          sparse-checkout: |
+            history-channel.json
+            history/publication.json
+            history/index/exact/manifest.json
+          sparse-checkout-cone-mode: false
+
+      - name: Check out production current-state identity
+        uses: actions/checkout@v4
+        with:
+          ref: current-state-data
+          path: .local/current-state
+          sparse-checkout: read-model/manifest.json
+          sparse-checkout-cone-mode: false
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Validate candidate identity and remote source pair
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf history-promotion-evidence
+          mkdir -p history-promotion-evidence
+          node --check scripts/verify-history-current-state-alignment.mjs
+          node scripts/verify-history-current-state-alignment.mjs \
+            --history-publication .local/candidate-history/history/publication.json \
+            --history-channel .local/candidate-history/history-channel.json \
+            --exact-index-manifest .local/candidate-history/history/index/exact/manifest.json \
+            --current-manifest .local/current-state/read-model/manifest.json \
+            > history-promotion-evidence/candidate-alignment.json
+          jq -e --argjson ledger "$TARGET_LEDGER" --arg hash "$TARGET_HASH" '
+            .passed == true
+            and .history.ledgerIndex == $ledger
+            and .history.ledgerHash == $hash
+            and .currentState.ledgerIndex == $ledger
+            and .currentState.ledgerHash == $hash
+            and .exactIndex.bucketCount == 256
+            and .exactIndex.totalRecords > 0
+          ' history-promotion-evidence/candidate-alignment.json >/dev/null
+
+          pnpm build:candidate-source-rehearsal
+          node .candidate-source-rehearsal-build/rehearse-candidate-sources.mjs \
+            --local \
+            --repository badjoke-lab/xrpl-lending-monitor \
+            --history-branch "$CANDIDATE_BRANCH" \
+            --current-state-branch "$CURRENT_STATE_BRANCH" \
+            > history-promotion-evidence/remote-rehearsal.json
+          jq -e --argjson ledger "$TARGET_LEDGER" --arg hash "$TARGET_HASH" '
+            .passed == true
+            and .ledgerIndex == $ledger
+            and .ledgerHash == $hash
+            and (.exactReads | length) == 3
+          ' history-promotion-evidence/remote-rehearsal.json >/dev/null
+
+      - name: Freeze production and candidate branch heads
+        shell: bash
+        run: |
+          set -euo pipefail
+          OLD_SHA="$(git ls-remote origin "refs/heads/${PRODUCTION_HISTORY_BRANCH}" | awk '{print $1}')"
+          CANDIDATE_SHA="$(git ls-remote origin "refs/heads/${CANDIDATE_BRANCH}" | awk '{print $1}')"
+          printf '%s\n' "$OLD_SHA" | grep -Eq '^[a-f0-9]{40}$'
+          printf '%s\n' "$CANDIDATE_SHA" | grep -Eq '^[a-f0-9]{40}$'
+          test "$OLD_SHA" != "$CANDIDATE_SHA"
+          test "$CANDIDATE_SHA" = "$(git -C .local/candidate-history rev-parse HEAD)"
+          test "$OLD_SHA" = "$(git -C .local/production-history rev-parse HEAD)"
+          printf '%s\n' "$OLD_SHA" > history-promotion-evidence/production-history-before.txt
+          printf '%s\n' "$CANDIDATE_SHA" > history-promotion-evidence/candidate-history.txt
+
+      - name: Promote candidate with automatic rollback
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OLD_SHA="$(cat history-promotion-evidence/production-history-before.txt)"
+          CANDIDATE_SHA="$(cat history-promotion-evidence/candidate-history.txt)"
+          promoted=false
+          verified=false
+
+          rollback() {
+            code=$?
+            set +e
+            if test "$promoted" = true && test "$verified" != true; then
+              CURRENT_SHA="$(git ls-remote origin "refs/heads/${PRODUCTION_HISTORY_BRANCH}" | awk '{print $1}')"
+              if test "$CURRENT_SHA" = "$CANDIDATE_SHA"; then
+                git push --force-with-lease="refs/heads/${PRODUCTION_HISTORY_BRANCH}:${CANDIDATE_SHA}" \
+                  origin "${OLD_SHA}:refs/heads/${PRODUCTION_HISTORY_BRANCH}"
+                printf '%s\n' "$OLD_SHA" > history-promotion-evidence/rollback-history-sha.txt
+              fi
+            fi
+            exit "$code"
+          }
+          trap rollback EXIT
+
+          git push --force-with-lease="refs/heads/${PRODUCTION_HISTORY_BRANCH}:${OLD_SHA}" \
+            origin "${CANDIDATE_SHA}:refs/heads/${PRODUCTION_HISTORY_BRANCH}"
+          test "$(git ls-remote origin "refs/heads/${PRODUCTION_HISTORY_BRANCH}" | awk '{print $1}')" = "$CANDIDATE_SHA"
+          promoted=true
+          printf '%s\n' "$CANDIDATE_SHA" > history-promotion-evidence/production-history-after.txt
+
+          object_ok=false
+          readiness_ok=false
+          for attempt in $(seq 1 40); do
+            OBJECT_HTTP="$(curl --silent --show-error --retry 2 --connect-timeout 10 --max-time 60 \
+              -o history-promotion-evidence/fixed-object-history.json -w '%{http_code}' \
+              "$PRODUCTION_BASE/api/objects/Vault/$FIXED_OBJECT_ID/history?limit=100" || true)"
+            READY_HTTP="$(curl --silent --show-error --retry 2 --connect-timeout 10 --max-time 60 \
+              -o history-promotion-evidence/pre-soak-readiness.json -w '%{http_code}' \
+              "$PRODUCTION_BASE/api/status/pre-soak-readiness" || true)"
+            if test "$OBJECT_HTTP" = 200 && grep -Fq "$FIXED_TRANSACTION_HASH" history-promotion-evidence/fixed-object-history.json; then
+              object_ok=true
+            fi
+            if test "$READY_HTTP" = 200 && jq -e '
+              .checks.immutableHistory.passed == true
+              and .checks.projectionParity.passed == true
+            ' history-promotion-evidence/pre-soak-readiness.json >/dev/null 2>&1; then
+              readiness_ok=true
+            fi
+            if test "$object_ok" = true && test "$readiness_ok" = true; then
+              break
+            fi
+            sleep 3
+          done
+          test "$object_ok" = true
+          test "$readiness_ok" = true
+
+          curl --fail-with-body --silent --show-error --retry 3 \
+            "$PRODUCTION_BASE/api/status/history-source" \
+            > history-promotion-evidence/history-source.json
+          jq -e '.status == "ok"' history-promotion-evidence/history-source.json >/dev/null
+
+          jq -n \
+            --arg oldSha "$OLD_SHA" \
+            --arg candidateSha "$CANDIDATE_SHA" \
+            --arg transactionHash "$FIXED_TRANSACTION_HASH" \
+            --slurpfile alignment history-promotion-evidence/candidate-alignment.json \
+            --slurpfile rehearsal history-promotion-evidence/remote-rehearsal.json \
+            --slurpfile readiness history-promotion-evidence/pre-soak-readiness.json '
+            {
+              passed: true,
+              productionHistoryBefore: $oldSha,
+              productionHistoryAfter: $candidateSha,
+              fixedObjectTransactionHash: $transactionHash,
+              alignment: $alignment[0],
+              remoteRehearsal: $rehearsal[0],
+              readiness: {
+                passed: $readiness[0].passed,
+                immutableHistory: $readiness[0].checks.immutableHistory,
+                projectionParity: $readiness[0].checks.projectionParity
+              },
+              productionMutation: "history-data branch only",
+              d1Mutation: false,
+              workerDeploy: false,
+              cadenceChanged: false,
+              mainnetEnabled: false
+            }
+          ' > history-promotion-evidence/evidence.json
+          verified=true
+
+      - name: Upload history promotion evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: immutable-history-promotion-3932301
+          path: history-promotion-evidence
+          if-no-files-found: warn
+          retention-days: 30
