@@ -12,7 +12,7 @@ permissions:
 
 concurrency:
   group: build-final-immutable-history-repair-3932301-${{ github.event.pull_request.number }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   build-publish-rehearse:
