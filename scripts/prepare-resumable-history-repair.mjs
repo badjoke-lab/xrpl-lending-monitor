@@ -29,7 +29,7 @@ const RESUMABLE_GENERATION_START = [
   '    --arg previousId "$PREV_ID" \\',
   '    --arg previousHash "$PREV_HASH" \\',
   '    --argjson start "$START" \\',
-  '    --argjson end "$END" \'',
+  '    --argjson end "$END" \\',
   "    '.schemaVersion == 1",
   "      and .network == \"devnet\"",
   "      and .epochId == $epoch",
