@@ -45,6 +45,10 @@ function usesNonStandardHttpsPort(endpoint: string): boolean {
   return url.protocol === 'https:' && url.port !== '' && url.port !== '443'
 }
 
+function supportsCloudflareSockets(): boolean {
+  return 'WebSocketPair' in globalThis
+}
+
 function abortError(message: string): Error {
   const error = new Error(message)
   error.name = 'AbortError'
@@ -215,7 +219,11 @@ export class XrplJsonRpcClient {
       try {
         response = await this.fetcher(this.endpoint, requestInit)
       } catch (fetchError) {
-        if (this.hasCustomFetcher || !usesNonStandardHttpsPort(this.endpoint)) {
+        if (
+          this.hasCustomFetcher
+          || !usesNonStandardHttpsPort(this.endpoint)
+          || !supportsCloudflareSockets()
+        ) {
           throw fetchError
         }
         response = await socketFetch(this.endpoint, requestInit, this.timeoutMs)
