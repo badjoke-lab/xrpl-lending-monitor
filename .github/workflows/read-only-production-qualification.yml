@@ -8,11 +8,10 @@ on:
       - .github/workflows/read-only-production-qualification.yml
 
 permissions:
-  actions: read
   contents: read
 
 concurrency:
-  group: qualification-995-pr-evaluate
+  group: qualification-995-semantic-route-probe
   cancel-in-progress: false
 
 env:
@@ -20,49 +19,47 @@ env:
   CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
   DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
   PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
-  START_MS: '1784996100000'
 
 jobs:
-  evaluate:
+  diagnose:
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download unique arm evidence
-        shell: bash
+      - name: Capture fresh production state
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          name="qualification-arm-${START_MS}"
-          gh api --paginate --slurp \
-            "repos/${GITHUB_REPOSITORY}/actions/artifacts?name=${name}&per_page=100" \
-            > arm-artifact-pages.json
-          jq '[.[].artifacts[] | select(.name == $name and .expired == false)]' \
-            --arg name "$name" arm-artifact-pages.json > arm-artifacts.json
-          count="$(jq 'length' arm-artifacts.json)"
-          test "$count" -eq 1
-          artifact_id="$(jq -r '.[0].id' arm-artifacts.json)"
-          mkdir -p arm-evidence
-          gh api -H 'Accept: application/vnd.github+json' \
-            "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" \
-            > arm-evidence.zip
-          unzip -q arm-evidence.zip -d arm-evidence
-          test -f arm-evidence/arm.json
-
-      - name: Execute read-only qualification evaluation
-        env:
-          MODE: evaluate
-          ARM_EVIDENCE_DIR: arm-evidence
+          MODE: probe
           FAIL_ON_UNHEALTHY: 'false'
         run: python scripts/qualification-995-read-only/bootstrap.py
+
+      - name: Probe archived and balance witness routes
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p semantic-route-evidence
+          probe() {
+            local name="$1" url="$2"
+            curl --silent --show-error --connect-timeout 10 --max-time 90 \
+              --retry 3 --retry-all-errors \
+              -A 'xrpl-lending-qualification/1.0' \
+              -o "semantic-route-evidence/${name}.body" \
+              -w '%{http_code}\n' "$url" > "semantic-route-evidence/${name}.code"
+          }
+          probe archived "${PRODUCTION_BASE}/api/audit/archived/Loan/04CA9DCF856BC9D15E1162636A07C6B1A270F747A4AC7919E0DDC06A5A99CEDE"
+          probe balance "${PRODUCTION_BASE}/api/audit/cover-loss?metric_type=debt_total&subject_type=LoanBroker&subject_id=005AA07E30EDDF798346FC107C81343952EC00A451A3CEC4572E8351B02EB6F4&limit=100"
+          printf 'archived=%s\nbalance=%s\n' \
+            "$(cat semantic-route-evidence/archived.code)" \
+            "$(cat semantic-route-evidence/balance.code)" \
+            | tee semantic-route-evidence/summary.txt
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: qualification-evaluate-1784996100000
-          path: qualification-evidence
+          name: qualification-semantic-route-probe
+          path: |
+            qualification-evidence
+            semantic-route-evidence
           if-no-files-found: warn
           retention-days: 30
