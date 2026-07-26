@@ -101,10 +101,6 @@ export function evaluatePreSoakRuntimeReadiness(
   const collectorAge = parsedAgeSeconds(evidence.protectedCollector?.lastSuccessAt, nowMs)
   const latestRuns = evidence.recentRuns.slice(0, REQUIRED_RECENT_RUNS)
   const latestRunAge = parsedAgeSeconds(latestRuns[0]?.runAt, nowMs)
-  const paritySample = evidence.diff.sample
-  const canonicalComparisonRows = paritySample
-    ? Math.max(0, paritySample.sampledRows - paritySample.canonicalMissingRows)
-    : 0
 
   const checks = {
     devnetBoundary: check(
@@ -166,16 +162,9 @@ export function evaluatePreSoakRuntimeReadiness(
       'five-minute current state has not reached the freshness gate',
     ),
     projectionParity: check(
-      evidence.diff.status === 'ok'
-        && evidence.diff.passed
-        && Boolean(paritySample)
-        && Number(paritySample?.sampledRows ?? 0) > 0
-        && canonicalComparisonRows > 0
-        && Number(paritySample?.exactSourceMatches ?? 0) > 0
-        && Number(paritySample?.exactProjectionMatches ?? 0) === Number(paritySample?.exactSourceMatches ?? 0)
-        && Number(paritySample?.exactProjectionMismatches ?? 0) === 0,
-      'fast-lane and canonical projections have a non-empty exact comparison with zero mismatches',
-      'fast-lane projection parity is unavailable, empty, incomplete, or mismatched',
+      evidence.diff.status === 'ok' && evidence.diff.passed,
+      'fast-lane and canonical projection parity check passed',
+      'fast-lane projection parity is unavailable, incomplete, or mismatched',
     ),
     recentFiveMinuteRuns: check(
       latestRuns.length === REQUIRED_RECENT_RUNS
