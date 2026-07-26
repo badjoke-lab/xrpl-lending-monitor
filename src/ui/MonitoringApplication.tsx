@@ -87,6 +87,14 @@ export function MonitoringApplication() {
 
   return (
     <MonitoringShell currentPath={currentPath} status={resources.status} onNavigate={navigate} onReload={reload}>
+      {currentPath === '/' ? (
+        <div className="partial-warning" role="status" aria-live="polite">
+          <strong>Historical data incident</strong>
+          <span>
+            Five-minute current-state monitoring remains available. Historical reconstruction is incomplete, so qualification and the 24-hour soak are paused.
+          </span>
+        </div>
+      ) : null}
       {resolveMonitoringPage({ currentPath, resources, navigate, reload })}
     </MonitoringShell>
   )
