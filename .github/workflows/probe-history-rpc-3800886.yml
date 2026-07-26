@@ -1,0 +1,102 @@
+name: Probe immutable history RPC boundary 3800886
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/probe-history-rpc-3800886.yml
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build:history-segment
+
+      - name: Probe boundary ledger and one-ledger segment
+        shell: bash
+        run: |
+          set -uo pipefail
+          rm -rf rpc-probe-evidence .local/rpc-probe
+          mkdir -p rpc-probe-evidence
+          SOURCE_HASH=EAA0D29666E73D7594A52DF8000B07F346CD4DA24A9A07549612CDC7D727B700
+          LEDGER=3800886
+          passed=false
+          : > rpc-probe-evidence/summary.ndjson
+
+          for SPEC in \
+            'primary|https://devnet.honeycluster.io/' \
+            'fallback|https://s.devnet.rippletest.net:51234/'; do
+            NAME="${SPEC%%|*}"
+            ENDPOINT="${SPEC#*|}"
+            curl --silent --show-error --connect-timeout 10 --max-time 45 \
+              -H 'Content-Type: application/json' \
+              --data "{\"method\":\"ledger\",\"params\":[{\"ledger_index\":${LEDGER},\"transactions\":false,\"expand\":false}]}" \
+              "$ENDPOINT" \
+              > "rpc-probe-evidence/${NAME}-ledger.json" \
+              2> "rpc-probe-evidence/${NAME}-ledger.stderr.log"
+            CURL_EXIT=$?
+
+            rm -rf ".local/rpc-probe/${NAME}"
+            node .history-segment-build/run-history-segment.mjs \
+              --local \
+              --endpoint "$ENDPOINT" \
+              --timeout-ms 20000 \
+              --start-ledger "$LEDGER" \
+              --end-ledger "$LEDGER" \
+              --epoch-id devnet-3371675 \
+              --segment-id "devnet-3371675-${LEDGER}-${LEDGER}-${NAME}" \
+              --previous-segment-id devnet-3371675-3800833-3800885 \
+              --previous-segment-end-hash "$SOURCE_HASH" \
+              --source-revision "$GITHUB_SHA" \
+              --output-dir ".local/rpc-probe/${NAME}" \
+              > "rpc-probe-evidence/${NAME}-segment.stdout.json" \
+              2> "rpc-probe-evidence/${NAME}-segment.stderr.log"
+            SEGMENT_EXIT=$?
+            MANIFEST_OK=false
+            if test "$SEGMENT_EXIT" = 0 && test -f ".local/rpc-probe/${NAME}/manifest.json"; then
+              cp ".local/rpc-probe/${NAME}/manifest.json" "rpc-probe-evidence/${NAME}-manifest.json"
+              if jq -e --arg parent "$SOURCE_HASH" --argjson ledger "$LEDGER" '
+                .startLedgerIndex == $ledger
+                and .endLedgerIndex == $ledger
+                and .startParentHash == $parent
+              ' "rpc-probe-evidence/${NAME}-manifest.json" >/dev/null; then
+                MANIFEST_OK=true
+                passed=true
+              fi
+            fi
+            jq -nc \
+              --arg name "$NAME" \
+              --arg endpoint "$ENDPOINT" \
+              --argjson curlExit "$CURL_EXIT" \
+              --argjson segmentExit "$SEGMENT_EXIT" \
+              --argjson manifestOk "$MANIFEST_OK" \
+              '{name:$name,endpoint:$endpoint,curlExit:$curlExit,segmentExit:$segmentExit,manifestOk:$manifestOk}' \
+              >> rpc-probe-evidence/summary.ndjson
+          done
+
+          jq -s --argjson passed "$passed" '{passed:$passed,endpoints:.}' rpc-probe-evidence/summary.ndjson \
+            > rpc-probe-evidence/evidence.json
+          test "$passed" = true
+
+      - name: Upload RPC probe evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: immutable-history-rpc-probe-3800886
+          path: rpc-probe-evidence
+          if-no-files-found: warn
+          retention-days: 30
