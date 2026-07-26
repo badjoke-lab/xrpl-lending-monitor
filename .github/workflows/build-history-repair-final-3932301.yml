@@ -6,6 +6,10 @@ on:
     paths:
       - .github/workflows/build-history-repair-final-3932301.yml
       - scripts/run-history-repair-3932301.sh
+      - scripts/run-history-segment.ts
+      - scripts/build-history-exact-index.ts
+      - scripts/history-exact-index-spill.ts
+      - scripts/history-exact-index-spill.test.ts
 
 permissions:
   contents: write
@@ -55,6 +59,12 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      - name: Validate bounded exact-index implementation
+        run: |
+          pnpm typecheck
+          pnpm exec vitest run scripts/history-exact-index-spill.test.ts
+          pnpm build:history-exact-index
+
       - name: Build deterministic history tools
         run: |
           pnpm build:history-extension-plan
@@ -63,7 +73,6 @@ jobs:
           pnpm build:history-extension-artifacts
           pnpm build:history-segment-chain
           pnpm build:extended-history-publication
-          pnpm build:history-exact-index
           pnpm build:history-segment-channel
           pnpm build:candidate-source-rehearsal
 
@@ -72,6 +81,7 @@ jobs:
           bash -n scripts/run-history-repair-3932301.sh
           grep -Fq 'https://clio.devnet.rippletest.net:51234/' scripts/run-history-repair-3932301.sh
           grep -Fq 'productionMutation: false' scripts/run-history-repair-3932301.sh
+          grep -Fq 'SpillBucketStore' scripts/build-history-exact-index.ts
           jq -e '.vars.APP_NETWORK == "devnet" and .vars.MAINNET_ENABLED == "false" and .triggers.crons == ["*/5 * * * *"]' wrangler.jsonc >/dev/null
 
       - name: Build and publish candidate only
