@@ -2,7 +2,9 @@ import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 
 import { buildHistorySegmentRecords } from '../src/collector/history-segments/build-segment-records'
+import { readValidatedLedger } from '../src/collector/incremental/read-validated-ledger'
 import { scanValidatedLedgerRange } from '../src/collector/incremental/scan-validated-ledgers'
+import { XrplRpcError, type FetchLike } from '../src/collector/network/xrpl-rpc'
 import {
   canonicalJson,
   gzipDeterministic,
@@ -35,6 +37,15 @@ const DEFAULT_ENDPOINT = 'https://devnet.honeycluster.io/'
 const RIPPLE_EPOCH_UNIX_SECONDS = 946_684_800
 const MAX_REHEARSAL_LEDGERS = 500
 const MAX_READ_WINDOW_SIZE = 16
+const DEFAULT_READ_WINDOW_SIZE = 1
+const MAX_FETCH_ATTEMPTS = 5
+const MAX_RPC_ATTEMPTS = 8
+const RETRYABLE_RPC_CODES = new Set([
+  'network_error',
+  'timeout',
+  'http_error',
+  'invalid_json',
+])
 
 function argumentValue(args: readonly string[], name: string): string | null {
   const index = args.indexOf(name)
@@ -81,7 +92,7 @@ function parseArguments(args: readonly string[]): Arguments {
   if (endLedger - startLedger + 1 > MAX_REHEARSAL_LEDGERS) {
     throw new Error(`A rehearsal segment may contain at most ${MAX_REHEARSAL_LEDGERS} ledgers`)
   }
-  const readWindowSize = positiveInteger(args, '--read-window-size', 1)
+  const readWindowSize = positiveInteger(args, '--read-window-size', DEFAULT_READ_WINDOW_SIZE)
   if (readWindowSize > MAX_READ_WINDOW_SIZE) {
     throw new Error(`--read-window-size may be at most ${MAX_READ_WINDOW_SIZE}`)
   }
@@ -116,6 +127,39 @@ function parseArguments(args: readonly string[]): Arguments {
       : flatText(previousSegmentIdValue, 'previousSegmentId'),
     previousSegmentEndHash,
   }
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolveDelay) => setTimeout(resolveDelay, milliseconds))
+}
+
+const retryingNodeFetch: FetchLike = async (input, init) => {
+  let lastError: unknown
+  for (let attempt = 1; attempt <= MAX_FETCH_ATTEMPTS; attempt += 1) {
+    try {
+      return await globalThis.fetch(input, init)
+    } catch (error) {
+      lastError = error
+      if (init?.signal?.aborted || attempt === MAX_FETCH_ATTEMPTS) throw error
+      await delay(attempt * 100)
+    }
+  }
+  throw lastError
+}
+
+async function readValidatedLedgerWithRetry(
+  request: Parameters<typeof readValidatedLedger>[0],
+): Promise<Awaited<ReturnType<typeof readValidatedLedger>>> {
+  for (let attempt = 1; attempt <= MAX_RPC_ATTEMPTS; attempt += 1) {
+    try {
+      return await readValidatedLedger({ ...request, fetcher: retryingNodeFetch })
+    } catch (error) {
+      const retryable = error instanceof XrplRpcError && RETRYABLE_RPC_CODES.has(error.code)
+      if (!retryable || attempt === MAX_RPC_ATTEMPTS) throw error
+      await delay(attempt * 500 + (request.ledgerIndex % MAX_READ_WINDOW_SIZE) * 100)
+    }
+  }
+  throw new Error('Validated ledger retry loop exhausted unexpectedly')
 }
 
 function generatedAtFromRippleCloseTime(closeTime: number): string {
@@ -155,6 +199,7 @@ async function main(): Promise<void> {
     maxLedgers: options.endLedger - options.startLedger + 1,
     expectedPreviousHash: options.previousSegmentEndHash,
     readWindowSize: options.readWindowSize,
+    reader: readValidatedLedgerWithRetry,
   })
   if (!scan.completeToLatest || scan.endLedgerIndex !== options.endLedger) {
     throw new Error('History segment scan did not complete the requested fixed range')

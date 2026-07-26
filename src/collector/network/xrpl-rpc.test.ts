@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { XrplJsonRpcClient } from './xrpl-rpc'
+import { XrplJsonRpcClient, XrplRpcError } from './xrpl-rpc'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -33,5 +33,23 @@ describe('XrplJsonRpcClient', () => {
 
     expect(result.info.build_version).toBe('3.2.0')
     expect(fetchSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not import the Worker socket fallback in Node for non-standard HTTPS ports', async () => {
+    const fetchError = new Error('transient Node fetch failure')
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(fetchError))
+    vi.stubGlobal('WebSocketPair', undefined)
+
+    const client = new XrplJsonRpcClient({
+      endpoint: 'https://clio.devnet.rippletest.net:51234/',
+      timeoutMs: 1000,
+    })
+
+    await expect(client.call('ledger', { ledger_index: 3_800_886 })).rejects.toMatchObject<XrplRpcError>({
+      name: 'XrplRpcError',
+      code: 'network_error',
+      message: 'transient Node fetch failure',
+      details: fetchError,
+    })
   })
 })
