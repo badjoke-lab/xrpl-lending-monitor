@@ -112,7 +112,7 @@ jobs:
         run: |
           mkdir -p history-repair-preflight-evidence
           set -o pipefail
-          pnpm exec vitest run scripts/history-exact-index-spill.test.ts 2>&1 | tee history-repair-preflight-evidence/spill-test.log
+          pnpm exec vitest run scripts/history-exact-index-spill.test.mjs 2>&1 | tee history-repair-preflight-evidence/spill-test.log
 
       - name: Upload history repair preflight diagnostics
         if: always()

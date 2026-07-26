@@ -4,24 +4,19 @@ import { join } from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { SpillBucketStore } from './history-exact-index-spill'
+import { SpillBucketStore } from './history-exact-index-spill.ts'
 
-interface TestRecord {
-  id: number
-  value: string
-}
-
-const temporaryRoots: string[] = []
+const temporaryRoots = []
 
 async function createStore(maxBufferedRecords = 2) {
   const root = await mkdtemp(join(tmpdir(), 'history-exact-index-spill-'))
   temporaryRoots.push(root)
-  const store = new SpillBucketStore<TestRecord>({
+  const store = new SpillBucketStore({
     root,
     bucketCount: 3,
     maxBufferedRecords,
     serialize: (value) => JSON.stringify(value),
-    parse: (value) => JSON.parse(value) as TestRecord,
+    parse: (value) => JSON.parse(value),
   })
   await store.initialize()
   return { root, store }
@@ -29,12 +24,12 @@ async function createStore(maxBufferedRecords = 2) {
 
 afterEach(async () => {
   await Promise.all(temporaryRoots.splice(0).map(async (root) => {
-    const store = new SpillBucketStore<TestRecord>({
+    const store = new SpillBucketStore({
       root,
       bucketCount: 1,
       maxBufferedRecords: 1,
       serialize: (value) => JSON.stringify(value),
-      parse: (value) => JSON.parse(value) as TestRecord,
+      parse: (value) => JSON.parse(value),
     })
     await store.cleanup()
   }))
