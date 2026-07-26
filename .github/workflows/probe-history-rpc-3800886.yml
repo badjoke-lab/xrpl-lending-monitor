@@ -40,7 +40,8 @@ jobs:
 
           for SPEC in \
             'primary|https://devnet.honeycluster.io/' \
-            'fallback|https://s.devnet.rippletest.net:51234/'; do
+            'fallback|https://s.devnet.rippletest.net:51234/' \
+            'clio|https://clio.devnet.rippletest.net:51234/'; do
             NAME="${SPEC%%|*}"
             ENDPOINT="${SPEC#*|}"
             curl --silent --show-error --connect-timeout 10 --max-time 45 \
