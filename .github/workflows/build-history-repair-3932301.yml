@@ -78,6 +78,7 @@ jobs:
           rm -rf /tmp/history-repair-evidence
           mkdir -p /tmp/history-repair-evidence
           PUBLICATION=.local/history-root/history/publication.json
+          EXACT=.local/history-root/history/index/exact/manifest.json
           CURRENT=.local/current-state/read-model/manifest.json
           test "$(jq -r '.endLedgerIndex' "$PUBLICATION")" = "$SOURCE_LEDGER"
           test "$(jq -r '.ledgerIndex' "$CURRENT")" = "$TARGET_LEDGER"
@@ -87,8 +88,17 @@ jobs:
             .complete == true and .ledgerIndex == $ledger and .ledgerHash == $hash
           ' "$CURRENT" >/dev/null
           jq -e --argjson source "$SOURCE_LEDGER" '
-            .complete == true and .endLedgerIndex == $source and .exactIndex.manifestPath == "history/index/exact/manifest.json"
+            .complete == true and .endLedgerIndex == $source
           ' "$PUBLICATION" >/dev/null
+          jq -e --slurpfile publication "$PUBLICATION" '
+            .schemaVersion == 2
+            and .network == "devnet"
+            and .epochId == $publication[0].epochId
+            and .chainId == $publication[0].chainId
+            and .publicationSha256 == $publication[0].publicationSha256
+            and .bucketCount == 256
+            and .totalRecords > 0
+          ' "$EXACT" >/dev/null
           jq -e --argjson ledger "$TARGET_LEDGER" --arg hash "$TARGET_HASH" '
             .vars.APP_NETWORK == "devnet"
             and .vars.MAINNET_ENABLED == "false"
@@ -98,6 +108,7 @@ jobs:
             and .triggers.crons == ["*/5 * * * *"]
           ' wrangler.jsonc >/dev/null
           cp "$PUBLICATION" /tmp/history-repair-evidence/source-publication.json
+          cp "$EXACT" /tmp/history-repair-evidence/source-exact-index-manifest.json
           cp "$CURRENT" /tmp/history-repair-evidence/target-current-state.json
 
       - name: Build fixed history-extension plan
@@ -262,7 +273,15 @@ jobs:
             > "$ROOT/exact-index.stdout.json"
           printf '%s\n' "$(( $(date +%s) - STARTED ))" > "$ROOT/exact-index-elapsed-seconds.txt"
           cp .local/history-root/history/index/exact/manifest.json "$ROOT/exact-index-manifest.json"
-          jq -e '.complete == true and .bucketCount == 256 and .totalRecords > 0' "$ROOT/exact-index-manifest.json" >/dev/null
+          jq -e --slurpfile publication .local/history-root/history/publication.json '
+            .schemaVersion == 2
+            and .network == "devnet"
+            and .epochId == $publication[0].epochId
+            and .chainId == $publication[0].chainId
+            and .publicationSha256 == $publication[0].publicationSha256
+            and .bucketCount == 256
+            and .totalRecords > 0
+          ' "$ROOT/exact-index-manifest.json" >/dev/null
 
       - name: Publish guarded history candidate branch
         shell: bash
