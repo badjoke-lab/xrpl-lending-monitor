@@ -11,7 +11,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: build-final-immutable-history-repair-3932301
+  group: build-final-immutable-history-repair-3932301-${{ github.event.pull_request.number }}
   cancel-in-progress: false
 
 jobs:
