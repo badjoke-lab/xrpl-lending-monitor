@@ -23,6 +23,7 @@ import {
   type HistorySegmentChainPublication,
   type PublishedHistorySegment,
 } from '../src/shared/history-segments/publication'
+import { SpillBucketStore } from './history-exact-index-spill'
 
 interface Arguments {
   publicationPath: string
@@ -30,6 +31,7 @@ interface Arguments {
   outputDir: string
   assetPrefix: string
   bucketCount: number
+  spillRecordLimit: number
   sourceRevision: string
 }
 
@@ -79,6 +81,7 @@ function parseArguments(args: readonly string[]): Arguments {
     outputDir: resolve(required(args, '--output-dir')),
     assetPrefix: safePrefix(value(args, '--asset-prefix') ?? 'history/index/exact'),
     bucketCount: positiveInteger(args, '--bucket-count', 256),
+    spillRecordLimit: positiveInteger(args, '--spill-record-limit', 50_000),
     sourceRevision: safeId(required(args, '--source-revision'), 'sourceRevision'),
   }
 }
@@ -206,47 +209,66 @@ async function loadSegment(artifactRoot: string, descriptor: PublishedHistorySeg
   return { manifest, manifestBase: segmentBasePath(descriptor.manifestPath) }
 }
 
+function parseSpilledRecord(value: string): HistoryExactIndexRecord {
+  return JSON.parse(value) as HistoryExactIndexRecord
+}
+
 async function main(): Promise<void> {
   const options = parseArguments(process.argv.slice(2))
   const publicationBytes = new Uint8Array(await readFile(options.publicationPath))
   const publication = JSON.parse(new TextDecoder().decode(publicationBytes)) as HistorySegmentChainPublication
   await assertHistorySegmentPublicationDigest(publication)
 
-  const buckets = Array.from({ length: options.bucketCount }, () => [] as HistoryExactIndexRecord[])
-  for (const descriptor of publication.segments) {
-    const { manifest, manifestBase } = await loadSegment(options.artifactRoot, descriptor)
-    for (const file of manifest.files) {
-      if (!['protocol_events', 'object_changes', 'archived_objects', 'loan_lifecycle', 'balance_history'].includes(file.kind)) continue
-      const bytes = new Uint8Array(await readFile(join(options.artifactRoot, manifestBase, file.path)))
-      const decoded = await decodeGzipNdjsonWithMetadata({ bytes, sha256: file.sha256 })
-      if (decoded.records.length !== file.records) throw new Error(`Segment record count mismatch: ${descriptor.segmentId}:${file.kind}`)
-      for (const value of decoded.records) {
-        const extracted = extractEntries({ epochId: publication.epochId, segmentId: descriptor.segmentId, fileKind: file.kind, value })
-        if (!extracted) continue
-        for (const term of extracted.terms) {
-          const bucket = await historyExactIndexBucket(term, options.bucketCount)
-          buckets[bucket]!.push({ schemaVersion: 2, bucket, term, reference: extracted.reference })
+  await rm(options.outputDir, { recursive: true, force: true })
+  await mkdir(options.outputDir, { recursive: true })
+  const spill = new SpillBucketStore<HistoryExactIndexRecord>({
+    root: join(options.outputDir, '.spill'),
+    bucketCount: options.bucketCount,
+    maxBufferedRecords: options.spillRecordLimit,
+    serialize: canonicalJson,
+    parse: parseSpilledRecord,
+  })
+  await spill.initialize()
+
+  const assets: HistoryExactIndexManifest['assets'] = []
+  let totalRecords = 0
+  try {
+    for (const descriptor of publication.segments) {
+      const { manifest, manifestBase } = await loadSegment(options.artifactRoot, descriptor)
+      for (const file of manifest.files) {
+        if (!['protocol_events', 'object_changes', 'archived_objects', 'loan_lifecycle', 'balance_history'].includes(file.kind)) continue
+        const bytes = new Uint8Array(await readFile(join(options.artifactRoot, manifestBase, file.path)))
+        const decoded = await decodeGzipNdjsonWithMetadata({ bytes, sha256: file.sha256 })
+        if (decoded.records.length !== file.records) throw new Error(`Segment record count mismatch: ${descriptor.segmentId}:${file.kind}`)
+        for (const value of decoded.records) {
+          const extracted = extractEntries({ epochId: publication.epochId, segmentId: descriptor.segmentId, fileKind: file.kind, value })
+          if (!extracted) continue
+          for (const term of extracted.terms) {
+            const bucket = await historyExactIndexBucket(term, options.bucketCount)
+            if (spill.add(bucket, { schemaVersion: 2, bucket, term, reference: extracted.reference })) {
+              await spill.flush()
+            }
+          }
         }
       }
     }
-  }
+    await spill.flush()
 
-  await rm(options.outputDir, { recursive: true, force: true })
-  await mkdir(options.outputDir, { recursive: true })
-  const assets: HistoryExactIndexManifest['assets'] = []
-  let totalRecords = 0
-  for (let bucket = 0; bucket < options.bucketCount; bucket += 1) {
-    const records = buckets[bucket]!
-    records.sort((left, right) => left.term.localeCompare(right.term)
-      || right.reference.ledgerIndex - left.reference.ledgerIndex
-      || left.reference.kind.localeCompare(right.reference.kind)
-      || left.reference.segmentId.localeCompare(right.reference.segmentId))
-    const text = records.length ? `${records.map((entry) => canonicalJson(entry)).join('\n')}\n` : ''
-    const bytes = await gzipDeterministic(utf8(text))
-    const name = `${String(bucket).padStart(4, '0')}.ndjson.gz`
-    await writeFile(join(options.outputDir, name), bytes)
-    assets.push({ bucket, path: `${options.assetPrefix}/${name}`, sha256: await sha256Hex(bytes), compressedBytes: bytes.byteLength, recordCount: records.length, firstTerm: records[0]?.term ?? null, lastTerm: records.at(-1)?.term ?? null })
-    totalRecords += records.length
+    for (let bucket = 0; bucket < options.bucketCount; bucket += 1) {
+      const records = await spill.readBucket(bucket)
+      records.sort((left, right) => left.term.localeCompare(right.term)
+        || right.reference.ledgerIndex - left.reference.ledgerIndex
+        || left.reference.kind.localeCompare(right.reference.kind)
+        || left.reference.segmentId.localeCompare(right.reference.segmentId))
+      const text = records.length ? `${records.map((entry) => canonicalJson(entry)).join('\n')}\n` : ''
+      const bytes = await gzipDeterministic(utf8(text))
+      const name = `${String(bucket).padStart(4, '0')}.ndjson.gz`
+      await writeFile(join(options.outputDir, name), bytes)
+      assets.push({ bucket, path: `${options.assetPrefix}/${name}`, sha256: await sha256Hex(bytes), compressedBytes: bytes.byteLength, recordCount: records.length, firstTerm: records[0]?.term ?? null, lastTerm: records.at(-1)?.term ?? null })
+      totalRecords += records.length
+    }
+  } finally {
+    await spill.cleanup()
   }
 
   const manifest: HistoryExactIndexManifest = {

@@ -37,7 +37,7 @@ const DEFAULT_ENDPOINT = 'https://devnet.honeycluster.io/'
 const RIPPLE_EPOCH_UNIX_SECONDS = 946_684_800
 const MAX_REHEARSAL_LEDGERS = 500
 const MAX_READ_WINDOW_SIZE = 16
-const DEFAULT_READ_WINDOW_SIZE = 1
+const DEFAULT_READ_WINDOW_SIZE = 8
 const MAX_FETCH_ATTEMPTS = 5
 const MAX_RPC_ATTEMPTS = 8
 const RETRYABLE_RPC_CODES = new Set([
@@ -156,7 +156,7 @@ async function readValidatedLedgerWithRetry(
     } catch (error) {
       const retryable = error instanceof XrplRpcError && RETRYABLE_RPC_CODES.has(error.code)
       if (!retryable || attempt === MAX_RPC_ATTEMPTS) throw error
-      await delay(attempt * 500 + (request.ledgerIndex % MAX_READ_WINDOW_SIZE) * 100)
+      await delay(attempt * 500 + (request.ledgerIndex % DEFAULT_READ_WINDOW_SIZE) * 100)
     }
   }
   throw new Error('Validated ledger retry loop exhausted unexpectedly')
