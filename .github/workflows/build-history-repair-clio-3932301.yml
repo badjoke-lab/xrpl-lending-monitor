@@ -1,0 +1,462 @@
+name: Build immutable history repair with Devnet Clio 3932301
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/build-history-repair-clio-3932301.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-immutable-history-repair-clio-3932301
+  cancel-in-progress: false
+
+env:
+  SOURCE_LEDGER: '3800885'
+  TARGET_LEDGER: '3932301'
+  TARGET_HASH: 7D026FED85BCA2BDCFE450A0F3537707A43B4D08E1D2AE57AFBC54D88EBE1828
+  HISTORY_ENDPOINT: https://clio.devnet.rippletest.net:51234/
+  CANDIDATE_BRANCH: history-repair-3932301-data
+  FIXED_OBJECT_ID: AD0980A254BC7262C57001315A9B6C7C65A020F29FAB2D0A0915933C55FF3BB1
+  FIXED_TRANSACTION_HASH: 70A489701D68B89E04923A7845F81F2C615760992C55119A8FC0ED8C759DE684
+
+jobs:
+  build-publish-rehearse:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Check out exact implementation
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Check out active immutable history
+        uses: actions/checkout@v4
+        with:
+          ref: history-data
+          path: .local/history-root
+          fetch-depth: 1
+          sparse-checkout: |
+            history-channel.json
+            history
+          sparse-checkout-cone-mode: false
+
+      - name: Check out production current-state identity
+        uses: actions/checkout@v4
+        with:
+          ref: current-state-data
+          path: .local/current-state
+          sparse-checkout: read-model/manifest.json
+          sparse-checkout-cone-mode: false
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build deterministic history tools
+        run: |
+          pnpm build:history-extension-plan
+          pnpm build:history-segment
+          pnpm build:history-segment-checkpoint
+          pnpm build:history-extension-artifacts
+          pnpm build:history-segment-chain
+          pnpm build:extended-history-publication
+          pnpm build:history-exact-index
+          pnpm build:history-segment-channel
+          pnpm build:candidate-source-rehearsal
+          cp .history-segment-channel-build/build-history-segment-channel.mjs /tmp/build-history-segment-channel.mjs
+          cp .candidate-source-rehearsal-build/rehearse-candidate-sources.mjs /tmp/rehearse-candidate-sources.mjs
+
+      - name: Freeze and validate repair boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf history-repair-evidence
+          mkdir -p history-repair-evidence
+          PUBLICATION=.local/history-root/history/publication.json
+          CHANNEL=.local/history-root/history-channel.json
+          EXACT=.local/history-root/history/index/exact/manifest.json
+          CURRENT=.local/current-state/read-model/manifest.json
+
+          jq -e --argjson source "$SOURCE_LEDGER" '
+            .complete == true and .network == "devnet" and .endLedgerIndex == $source
+          ' "$PUBLICATION" >/dev/null
+          jq -e --slurpfile publication "$PUBLICATION" --slurpfile exact "$EXACT" '
+            .schemaVersion == 1
+            and .active.publicationPath == "history/publication.json"
+            and .active.publicationSha256 == $publication[0].publicationSha256
+            and .active.exactIndex.manifestPath == "history/index/exact/manifest.json"
+            and .active.exactIndex.manifestSha256 == $exact[0].manifestSha256
+          ' "$CHANNEL" >/dev/null
+          jq -e --slurpfile publication "$PUBLICATION" '
+            .schemaVersion == 2
+            and .network == "devnet"
+            and .epochId == $publication[0].epochId
+            and .chainId == $publication[0].chainId
+            and .publicationSha256 == $publication[0].publicationSha256
+            and .bucketCount == 256
+            and .totalRecords > 0
+          ' "$EXACT" >/dev/null
+          jq -e --argjson ledger "$TARGET_LEDGER" --arg hash "$TARGET_HASH" --slurpfile publication "$PUBLICATION" '
+            .complete == true
+            and .epochId == $publication[0].epochId
+            and .ledgerIndex == $ledger
+            and .ledgerHash == $hash
+            and .snapshotId == "devnet-3932301-7d026fed85bc"
+          ' "$CURRENT" >/dev/null
+          jq -e --argjson ledger "$TARGET_LEDGER" --arg hash "$TARGET_HASH" '
+            .vars.APP_NETWORK == "devnet"
+            and .vars.MAINNET_ENABLED == "false"
+            and .vars.REPLACEMENT_BASE_LEDGER_INDEX == ($ledger | tostring)
+            and .vars.REPLACEMENT_BASE_LEDGER_HASH == $hash
+            and .triggers.crons == ["*/5 * * * *"]
+            and (.queues.producers | length) == 1
+            and (.queues.consumers | length) == 1
+          ' wrangler.jsonc >/dev/null
+          cp "$PUBLICATION" history-repair-evidence/source-publication.json
+          cp "$CHANNEL" history-repair-evidence/source-channel.json
+          cp "$EXACT" history-repair-evidence/source-exact-index.json
+          cp "$CURRENT" history-repair-evidence/target-current-state.json
+
+      - name: Verify official Clio boundary access
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error --retry 3 --connect-timeout 10 --max-time 60 \
+            -H 'Content-Type: application/json' \
+            --data '{"method":"ledger","params":[{"ledger_index":3800886,"transactions":true,"expand":true}]}' \
+            "$HISTORY_ENDPOINT" \
+            > history-repair-evidence/clio-boundary.json
+          jq -e '
+            .result.status == "success"
+            and .result.validated == true
+            and (.result.ledger.ledger_index | tonumber) == 3800886
+            and .result.ledger.parent_hash == "EAA0D29666E73D7594A52DF8000B07F346CD4DA24A9A07549612CDC7D727B700"
+          ' history-repair-evidence/clio-boundary.json >/dev/null
+
+      - name: Build fixed extension plan
+        shell: bash
+        run: |
+          set -euo pipefail
+          node .history-extension-plan-build/plan-history-extension.mjs \
+            --local \
+            --publication .local/history-root/history/publication.json \
+            --target-ledger "$TARGET_LEDGER" \
+            --target-ledger-hash "$TARGET_HASH" \
+            --segment-ledgers 500 \
+            --checkpoint-every-segments 10 \
+            --output history-repair-evidence/plan.json \
+            > history-repair-evidence/plan.stdout.json
+          jq -e --argjson source "$SOURCE_LEDGER" --argjson target "$TARGET_LEDGER" '
+            .source.endLedgerIndex == $source
+            and .extension.startLedgerIndex == ($source + 1)
+            and .extension.endLedgerIndex == $target
+            and .extension.ledgerCount == ($target - $source)
+            and .extension.segmentCount == 263
+            and .target.ledgerIndex == $target
+          ' history-repair-evidence/plan.json >/dev/null
+
+      - name: Generate and checkpoint 263 immutable segments
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=history-repair-evidence
+          PLAN="$ROOT/plan.json"
+          EPOCH="$(jq -r '.epochId' "$PLAN")"
+          RANGE_START="$(jq -r '.extension.startLedgerIndex' "$PLAN")"
+          RANGE_END="$(jq -r '.extension.endLedgerIndex' "$PLAN")"
+          ANCHOR_ID="$(jq -r '.extension.anchorPreviousSegmentId' "$PLAN")"
+          ANCHOR_HASH="$(jq -r '.extension.anchorPreviousSegmentEndHash' "$PLAN")"
+          CHECKPOINT="$ROOT/checkpoint.json"
+          PREV_ID="$ANCHOR_ID"
+          PREV_HASH="$ANCHOR_HASH"
+          : > "$ROOT/manifest-paths.txt"
+          : > "$ROOT/segment-metrics.ndjson"
+          STARTED="$(date +%s)"
+
+          while IFS= read -r SEGMENT; do
+            ORDINAL="$(jq -r '.ordinal' <<<"$SEGMENT")"
+            SEGMENT_ID="$(jq -r '.segmentId' <<<"$SEGMENT")"
+            START="$(jq -r '.startLedgerIndex' <<<"$SEGMENT")"
+            END="$(jq -r '.endLedgerIndex' <<<"$SEGMENT")"
+            OUT=".local/history-root/history/${EPOCH}/${SEGMENT_ID}"
+            PASSED=false
+            ATTEMPTS=0
+            SEGMENT_STARTED="$(date +%s)"
+            for ATTEMPT in 1 2 3 4; do
+              ATTEMPTS="$ATTEMPT"
+              rm -rf "$OUT"
+              if node .history-segment-build/run-history-segment.mjs \
+                --local \
+                --endpoint "$HISTORY_ENDPOINT" \
+                --timeout-ms 30000 \
+                --start-ledger "$START" \
+                --end-ledger "$END" \
+                --epoch-id "$EPOCH" \
+                --segment-id "$SEGMENT_ID" \
+                --previous-segment-id "$PREV_ID" \
+                --previous-segment-end-hash "$PREV_HASH" \
+                --source-revision "$GITHUB_SHA" \
+                --output-dir "$OUT" \
+                > "$ROOT/segment-${ORDINAL}.stdout.json" \
+                2> "$ROOT/segment-${ORDINAL}-attempt-${ATTEMPT}.stderr.log"; then
+                PASSED=true
+                break
+              fi
+              sleep "$((ATTEMPT * 5))"
+            done
+            test "$PASSED" = true
+
+            node .history-segment-checkpoint-build/update-history-segment-checkpoint.mjs \
+              --local \
+              --checkpoint "$CHECKPOINT" \
+              --manifest "$OUT/manifest.json" \
+              --epoch-id "$EPOCH" \
+              --range-start-ledger "$RANGE_START" \
+              --range-end-ledger "$RANGE_END" \
+              --previous-segment-id "$ANCHOR_ID" \
+              --previous-segment-end-hash "$ANCHOR_HASH" \
+              > "$ROOT/checkpoint-${ORDINAL}.stdout.json"
+
+            jq -nc \
+              --argjson ordinal "$ORDINAL" \
+              --arg segmentId "$SEGMENT_ID" \
+              --argjson startLedgerIndex "$START" \
+              --argjson endLedgerIndex "$END" \
+              --argjson attempts "$ATTEMPTS" \
+              --argjson elapsedSeconds "$(( $(date +%s) - SEGMENT_STARTED ))" \
+              --argjson records "$(jq '[.files[].records] | add' "$OUT/manifest.json")" \
+              '{ordinal:$ordinal,segmentId:$segmentId,startLedgerIndex:$startLedgerIndex,endLedgerIndex:$endLedgerIndex,attempts:$attempts,elapsedSeconds:$elapsedSeconds,totalRecords:$records}' \
+              >> "$ROOT/segment-metrics.ndjson"
+            printf '%s\n' "$OUT/manifest.json" >> "$ROOT/manifest-paths.txt"
+            PREV_ID="$SEGMENT_ID"
+            PREV_HASH="$(jq -r '.endLedgerHash' "$OUT/manifest.json")"
+            if (( ORDINAL % 10 == 0 )); then
+              echo "generated ${ORDINAL}/263 segments through ledger ${END}"
+            fi
+          done < <(jq -c '.extension.segments[]' "$PLAN")
+
+          printf '%s\n' "$(( $(date +%s) - STARTED ))" > "$ROOT/delta-elapsed-seconds.txt"
+          jq -s '.' "$ROOT/segment-metrics.ndjson" > "$ROOT/segment-metrics.json"
+          jq -e --argjson end "$RANGE_END" '
+            .nextLedgerIndex == ($end + 1) and (.completedSegments | length) == 263
+          ' "$CHECKPOINT" >/dev/null
+
+      - name: Verify chain and build aligned publication
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=history-repair-evidence
+          PLAN="$ROOT/plan.json"
+          MANIFEST_ARGS=()
+          while IFS= read -r MANIFEST; do MANIFEST_ARGS+=(--manifest "$MANIFEST"); done < "$ROOT/manifest-paths.txt"
+
+          node .history-extension-artifacts-build/verify-history-extension-artifacts.mjs \
+            --local --plan "$PLAN" "${MANIFEST_ARGS[@]}" \
+            > "$ROOT/plan-bound-summary.json"
+          node .history-segment-chain-build/verify-history-segment-chain.mjs \
+            --local \
+            "${MANIFEST_ARGS[@]}" \
+            --epoch-id "$(jq -r '.epochId' "$PLAN")" \
+            --start-ledger "$(jq -r '.extension.startLedgerIndex' "$PLAN")" \
+            --start-parent-hash "$(jq -r '.source.endLedgerHash' "$PLAN")" \
+            --previous-segment-id "$(jq -r '.source.lastSegmentId' "$PLAN")" \
+            --previous-segment-end-hash "$(jq -r '.source.endLedgerHash' "$PLAN")" \
+            --end-ledger "$TARGET_LEDGER" \
+            --end-ledger-hash "$TARGET_HASH" \
+            > "$ROOT/chain-summary.json"
+
+          node .extended-history-publication-build/build-extended-history-publication.mjs \
+            --local \
+            --source-publication .local/history-root/history/publication.json \
+            --plan "$PLAN" \
+            "${MANIFEST_ARGS[@]}" \
+            --chain-id "canonical-devnet-3371676-${TARGET_LEDGER}" \
+            --source-revision "$GITHUB_SHA" \
+            --output "$ROOT/publication.json" \
+            > "$ROOT/publication.stdout.json"
+          cp "$ROOT/publication.json" .local/history-root/history/publication.json
+          jq -e --argjson ledger "$TARGET_LEDGER" --arg hash "$TARGET_HASH" '
+            .complete == true
+            and .endLedgerIndex == $ledger
+            and .endLedgerHash == $hash
+            and .segmentCount == 1136
+          ' .local/history-root/history/publication.json >/dev/null
+
+      - name: Rebuild complete exact index and verify fixed witness
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=history-repair-evidence
+          STARTED="$(date +%s)"
+          node .history-exact-index-build/build-history-exact-index.mjs \
+            --local \
+            --publication .local/history-root/history/publication.json \
+            --artifact-root .local/history-root \
+            --output-dir .local/history-root/history/index/exact \
+            --asset-prefix history/index/exact \
+            --bucket-count 256 \
+            --source-revision "$GITHUB_SHA" \
+            > "$ROOT/exact-index.stdout.json"
+          printf '%s\n' "$(( $(date +%s) - STARTED ))" > "$ROOT/exact-index-elapsed-seconds.txt"
+          cp .local/history-root/history/index/exact/manifest.json "$ROOT/exact-index-manifest.json"
+          jq -e --slurpfile publication .local/history-root/history/publication.json '
+            .schemaVersion == 2
+            and .network == "devnet"
+            and .epochId == $publication[0].epochId
+            and .chainId == $publication[0].chainId
+            and .publicationSha256 == $publication[0].publicationSha256
+            and .bucketCount == 256
+            and .totalRecords > 0
+          ' "$ROOT/exact-index-manifest.json" >/dev/null
+
+          python3 - <<'PY'
+          import gzip, hashlib, json
+          from pathlib import Path
+
+          root = Path('.local/history-root')
+          manifest = json.loads((root / 'history/index/exact/manifest.json').read_text())
+          terms = {
+              'object': 'AD0980A254BC7262C57001315A9B6C7C65A020F29FAB2D0A0915933C55FF3BB1',
+              'transaction': '70A489701D68B89E04923A7845F81F2C615760992C55119A8FC0ED8C759DE684',
+          }
+          found = {}
+          for label, term in terms.items():
+              bucket = int(hashlib.sha256(term.encode()).hexdigest()[:8], 16) % manifest['bucketCount']
+              asset = next(item for item in manifest['assets'] if item['bucket'] == bucket)
+              matches = []
+              with gzip.open(root / asset['path'], 'rt') as handle:
+                  for line in handle:
+                      record = json.loads(line)
+                      if record['term'] == term:
+                          matches.append(record)
+              found[label] = matches
+          object_matches = [
+              record for record in found['object']
+              if record['reference']['kind'] == 'object_change'
+              and record['reference']['ledgerIndex'] == 3913030
+              and record['reference']['searchResult']['transactionHash'] == terms['transaction']
+          ]
+          transaction_matches = [
+              record for record in found['transaction']
+              if record['reference']['ledgerIndex'] == 3913030
+          ]
+          evidence = {
+              'passed': bool(object_matches and transaction_matches),
+              'objectMatches': object_matches,
+              'transactionMatches': transaction_matches,
+          }
+          Path('history-repair-evidence/fixed-witness-exact-index.json').write_text(json.dumps(evidence, indent=2) + '\n')
+          if not evidence['passed']:
+              raise SystemExit('fixed object-change witness is missing from rebuilt exact index')
+          PY
+
+      - name: Commit and publish candidate history branch only
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=history-repair-evidence
+          git -C .local/history-root config user.name github-actions[bot]
+          git -C .local/history-root config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git -C .local/history-root add history
+          git -C .local/history-root commit -m 'Publish immutable history repair through ledger 3932301'
+          DATA_SHA="$(git -C .local/history-root rev-parse HEAD)"
+          node /tmp/build-history-segment-channel.mjs \
+            --local \
+            --publication .local/history-root/history/publication.json \
+            --publication-path history/publication.json \
+            --exact-index-manifest .local/history-root/history/index/exact/manifest.json \
+            --exact-index-manifest-path history/index/exact/manifest.json \
+            --data-commit-sha "$DATA_SHA" \
+            --output .local/history-root/history-channel.json
+          git -C .local/history-root add history-channel.json
+          git -C .local/history-root commit -m 'Activate immutable history repair candidate'
+          CANDIDATE_SHA="$(git -C .local/history-root rev-parse HEAD)"
+          git -C .local/history-root push --force origin "HEAD:refs/heads/${CANDIDATE_BRANCH}"
+          printf '%s\n' "$DATA_SHA" > "$ROOT/candidate-data-commit-sha.txt"
+          printf '%s\n' "$CANDIDATE_SHA" > "$ROOT/candidate-commit-sha.txt"
+
+      - name: Rehearse candidate history against production current state
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=history-repair-evidence
+          node /tmp/rehearse-candidate-sources.mjs \
+            --local \
+            --repository badjoke-lab/xrpl-lending-monitor \
+            --history-branch "$CANDIDATE_BRANCH" \
+            --current-state-branch current-state-data \
+            > "$ROOT/remote-rehearsal.json"
+          jq -e --argjson ledger "$TARGET_LEDGER" --arg hash "$TARGET_HASH" '
+            .passed == true
+            and .ledgerIndex == $ledger
+            and .ledgerHash == $hash
+            and (.exactReads | length) == 3
+          ' "$ROOT/remote-rehearsal.json" >/dev/null
+
+      - name: Build retained candidate evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=history-repair-evidence
+          jq -n \
+            --slurpfile plan "$ROOT/plan.json" \
+            --slurpfile publication "$ROOT/publication.json" \
+            --slurpfile exact "$ROOT/exact-index-manifest.json" \
+            --slurpfile witness "$ROOT/fixed-witness-exact-index.json" \
+            --slurpfile remote "$ROOT/remote-rehearsal.json" \
+            --slurpfile segments "$ROOT/segment-metrics.json" \
+            --arg endpoint "$HISTORY_ENDPOINT" \
+            --arg candidateBranch "$CANDIDATE_BRANCH" \
+            --arg candidateCommitSha "$(cat "$ROOT/candidate-commit-sha.txt")" \
+            --argjson deltaElapsedSeconds "$(cat "$ROOT/delta-elapsed-seconds.txt")" \
+            --argjson exactIndexElapsedSeconds "$(cat "$ROOT/exact-index-elapsed-seconds.txt")" '
+            {
+              passed: true,
+              endpoint: $endpoint,
+              source: $plan[0].source,
+              extension: ($plan[0].extension + {elapsedSeconds:$deltaElapsedSeconds,segments:$segments[0]}),
+              target: {
+                ledgerIndex: $publication[0].endLedgerIndex,
+                ledgerHash: $publication[0].endLedgerHash,
+                publicationSha256: $publication[0].publicationSha256,
+                chainId: $publication[0].chainId
+              },
+              exactIndex: {
+                manifestSha256: $exact[0].manifestSha256,
+                totalRecords: $exact[0].totalRecords,
+                elapsedSeconds: $exactIndexElapsedSeconds
+              },
+              fixedWitness: $witness[0],
+              candidate: {branch:$candidateBranch,commitSha:$candidateCommitSha},
+              remoteRehearsal: $remote[0],
+              productionMutation: false
+            }
+          ' > "$ROOT/evidence.json"
+          jq -e --argjson ledger "$TARGET_LEDGER" --arg hash "$TARGET_HASH" '
+            .passed == true
+            and .target.ledgerIndex == $ledger
+            and .target.ledgerHash == $hash
+            and .fixedWitness.passed == true
+            and .remoteRehearsal.passed == true
+            and .productionMutation == false
+          ' "$ROOT/evidence.json" >/dev/null
+
+      - name: Upload immutable-history candidate evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: immutable-history-repair-clio-3932301
+          path: history-repair-evidence
+          if-no-files-found: warn
+          retention-days: 30
