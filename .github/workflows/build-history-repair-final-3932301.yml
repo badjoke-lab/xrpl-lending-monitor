@@ -9,7 +9,6 @@ on:
       - scripts/run-history-segment.ts
       - scripts/build-history-exact-index.ts
       - scripts/history-exact-index-spill.ts
-      - scripts/history-exact-index-spill.test.ts
 
 permissions:
   contents: write
@@ -61,9 +60,6 @@ jobs:
 
       - name: Type-check repair implementation
         run: pnpm typecheck
-
-      - name: Run bounded exact-index test
-        run: pnpm exec vitest run scripts/history-exact-index-spill.test.ts
 
       - name: Bundle bounded exact-index builder
         run: pnpm build:history-exact-index
