@@ -83,3 +83,38 @@ jobs:
 
       - name: Browser smoke test
         run: pnpm test:e2e
+
+  history-repair-preflight:
+    if: github.event_name == 'pull_request' && github.head_ref == 'ops/history-repair-resumable-3932301'
+    needs: quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repair implementation
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Test compressed spill store
+        run: pnpm exec vitest run scripts/history-exact-index-spill.test.ts
+
+      - name: Bundle memory-bounded exact index
+        run: pnpm build:history-exact-index
+
+      - name: Validate repair runner syntax
+        run: |
+          bash -n scripts/run-history-repair-3932301.sh
+          grep -Fq 'SpillBucketStore' scripts/build-history-exact-index.ts
+          grep -Fq 'productionMutation: false' scripts/run-history-repair-3932301.sh
