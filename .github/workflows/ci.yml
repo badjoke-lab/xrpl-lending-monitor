@@ -70,7 +70,20 @@ jobs:
         run: node .fast-lane-production-build/run-fast-lane-production.mjs --validate-config
 
       - name: Unit tests
-        run: pnpm test
+        shell: bash
+        run: |
+          mkdir -p unit-test-evidence
+          set -o pipefail
+          pnpm test 2>&1 | tee unit-test-evidence/unit-tests.log
+
+      - name: Upload unit-test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-evidence
+          path: unit-test-evidence
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Apply D1 migrations locally
         run: pnpm db:migrate:local
