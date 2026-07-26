@@ -59,6 +59,14 @@ jobs:
           sparse-checkout: read-model/manifest.json
           sparse-checkout-cone-mode: false
 
+      - name: Check out production immutable-history identity
+        uses: actions/checkout@v4
+        with:
+          ref: history-data
+          path: .local/production-history
+          sparse-checkout: history/publication.json
+          sparse-checkout-cone-mode: false
+
       - uses: pnpm/action-setup@v4
         with:
           version: 11.9.0
@@ -71,11 +79,17 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build:deploy-assets
 
-      - name: Validate current-state-only cutover script
+      - name: Validate aligned history and current-state cutover boundary
         shell: bash
         run: |
           set -euo pipefail
           bash -n scripts/run-current-state-checkpoint-cutover.sh
+          node --check scripts/verify-history-current-state-alignment.mjs
+          node scripts/verify-history-current-state-alignment.mjs \
+            --history-publication .local/production-history/history/publication.json \
+            --current-manifest .local/current-candidate/read-model/manifest.json \
+            > history-current-state-alignment.json
+          jq -e '.passed == true' history-current-state-alignment.json >/dev/null
           grep -Fq "jq -e '.rows_read >= 0 and .rows_written >= 0'" scripts/run-current-state-checkpoint-cutover.sh
           grep -Fq 'and .counts_watermark.ledger_index >= $base' scripts/run-current-state-checkpoint-cutover.sh
           grep -Fq 'sync_main_config()' scripts/run-current-state-checkpoint-cutover.sh
@@ -92,6 +106,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: current-state-checkpoint-live-cutover
-          path: current-state-cutover-evidence
+          path: |
+            current-state-cutover-evidence
+            history-current-state-alignment.json
           if-no-files-found: warn
           retention-days: 30

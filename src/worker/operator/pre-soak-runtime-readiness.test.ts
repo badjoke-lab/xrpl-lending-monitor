@@ -109,6 +109,36 @@ describe('current pre-soak runtime readiness', () => {
     expect(report.supersedes).toContain('/api/status/m1-exit')
   })
 
+  it('accepts an empty compact sample when the canonical diff passed by exact head equality', () => {
+    const input = evidence()
+    input.diff.fastLane = {
+      ledgerIndex: 3_593_000,
+      ledgerHash: 'B'.repeat(64),
+      updatedAt: '2026-07-12T12:09:00.000Z',
+    }
+    input.diff.canonicalOverlay = {
+      ledgerIndex: 3_593_000,
+      ledgerHash: 'B'.repeat(64),
+      updatedAt: '2026-07-12T12:09:00.000Z',
+    }
+    input.diff.sample = {
+      limit: 500,
+      sampledRows: 0,
+      canonicalMissingRows: 0,
+      canonicalAheadRows: 0,
+      fastAheadRows: 0,
+      exactSourceMatches: 0,
+      exactProjectionMatches: 0,
+      exactProjectionMismatches: 0,
+    }
+
+    const report = evaluatePreSoakRuntimeReadiness(input, now)
+
+    expect(input.diff.passed).toBe(true)
+    expect(report.checks.projectionParity.passed).toBe(true)
+    expect(report.passed).toBe(true)
+  })
+
   it('fails when the five-minute lag exceeds ten ledgers', () => {
     const input = evidence()
     input.fastLane!.latestObservedLedger = input.fastLane!.lastProcessedLedger + 11
