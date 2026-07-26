@@ -1,0 +1,160 @@
+name: Deploy readiness fix d7b979df
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/deploy-readiness-fix-d7b979df.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-worker-write
+  cancel-in-progress: false
+
+env:
+  EXPECTED_MAIN_SHA: d7b979df64b4d4f6c98f7ec379890d572792b117
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+
+jobs:
+  deploy-verify:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out exact merged main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Guard exact merged runtime and Devnet boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_MAIN_SHA"
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          jq -e '
+            .triggers.crons == ["*/5 * * * *"]
+            and .vars.APP_NETWORK == "devnet"
+            and .vars.MAINNET_ENABLED == "false"
+            and .vars.REPLACEMENT_BASE_LEDGER_INDEX == "3932301"
+            and .vars.REPLACEMENT_BASE_LEDGER_HASH == "7D026FED85BCA2BDCFE450A0F3537707A43B4D08E1D2AE57AFBC54D88EBE1828"
+            and (.vars | has("REPLACEMENT_BASE_CUTOVER_TOKEN") | not)
+            and (.queues.producers | length) == 1
+            and (.queues.consumers | length) == 1
+          ' wrangler.jsonc >/dev/null
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build:deploy-assets
+
+      - name: Capture pre-deploy production identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p readiness-deploy-evidence
+          curl --fail-with-body --silent --show-error --retry 3 \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/xrpl-lending-monitor/deployments" \
+            > readiness-deploy-evidence/pre-deployments.json
+          curl --fail-with-body --silent --show-error --retry 3 \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/xrpl-lending-monitor/settings" \
+            > readiness-deploy-evidence/pre-settings.json
+          curl --fail-with-body --silent --show-error --retry 3 \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/xrpl-lending-monitor/schedules" \
+            > readiness-deploy-evidence/pre-schedules.json
+          jq -e '.result.schedules | length == 1 and .[0].cron == "*/5 * * * *"' readiness-deploy-evidence/pre-schedules.json >/dev/null
+
+      - name: Deploy exact merged runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm exec wrangler deploy | tee readiness-deploy-evidence/deploy.log
+
+      - name: Verify deployment identity and unchanged production topology
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 20); do
+            curl --fail-with-body --silent --show-error --retry 2 \
+              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/xrpl-lending-monitor/deployments" \
+              > readiness-deploy-evidence/post-deployments.json || true
+            if jq -e '(.result.deployments[0].versions | length) == 1 and .result.deployments[0].versions[0].percentage == 100' readiness-deploy-evidence/post-deployments.json >/dev/null 2>&1; then
+              break
+            fi
+            sleep 3
+          done
+          curl --fail-with-body --silent --show-error --retry 3 \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/xrpl-lending-monitor/settings" \
+            > readiness-deploy-evidence/post-settings.json
+          curl --fail-with-body --silent --show-error --retry 3 \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/xrpl-lending-monitor/schedules" \
+            > readiness-deploy-evidence/post-schedules.json
+          jq -e '.result.schedules | length == 1 and .[0].cron == "*/5 * * * *"' readiness-deploy-evidence/post-schedules.json >/dev/null
+          jq -e '
+            def binding($name): [.result.bindings[] | select(.name == $name) | (.text // .value)] | first;
+            binding("APP_NETWORK") == "devnet"
+            and binding("MAINNET_ENABLED") == "false"
+            and binding("REPLACEMENT_BASE_LEDGER_INDEX") == "3932301"
+            and binding("REPLACEMENT_BASE_LEDGER_HASH") == "7D026FED85BCA2BDCFE450A0F3537707A43B4D08E1D2AE57AFBC54D88EBE1828"
+            and ([.result.bindings[] | select(.name == "FAST_LANE_QUEUE" and .type == "queue")] | length) == 1
+            and ([.result.bindings[] | select(.name == "REPLACEMENT_BASE_CUTOVER_TOKEN")] | length) == 0
+          ' readiness-deploy-evidence/post-settings.json >/dev/null
+
+      - name: Verify readiness correction and isolate remaining history blocker
+        shell: bash
+        run: |
+          set -euo pipefail
+          ready=false
+          for attempt in $(seq 1 30); do
+            code="$(curl --silent --show-error --retry 2 --connect-timeout 10 --max-time 45 \
+              -o readiness-deploy-evidence/pre-soak-readiness.json -w '%{http_code}' \
+              "$PRODUCTION_BASE/api/status/pre-soak-readiness" || true)"
+            if test "$code" = 200 && jq -e '
+              .checks.projectionParity.passed == true
+              and .checks.immutableHistory.passed == false
+              and .passed == false
+            ' readiness-deploy-evidence/pre-soak-readiness.json >/dev/null 2>&1; then
+              ready=true
+              break
+            fi
+            sleep 3
+          done
+          test "$ready" = true
+          code="$(curl --silent --show-error --retry 3 --connect-timeout 10 --max-time 45 \
+            -o readiness-deploy-evidence/fixed-object-history.json -w '%{http_code}' \
+            "$PRODUCTION_BASE/api/objects/Vault/AD0980A254BC7262C57001315A9B6C7C65A020F29FAB2D0A0915933C55FF3BB1/history?limit=100")"
+          test "$code" = 200
+          jq -e '.data == []' readiness-deploy-evidence/fixed-object-history.json >/dev/null
+          jq -n \
+            --arg runtimeSha "$EXPECTED_MAIN_SHA" \
+            --slurpfile readiness readiness-deploy-evidence/pre-soak-readiness.json \
+            '{passed:true,runtimeSha:$runtimeSha,projectionParity:$readiness[0].checks.projectionParity,immutableHistory:$readiness[0].checks.immutableHistory,remainingBlocker:"immutable_history_alignment"}' \
+            > readiness-deploy-evidence/evidence.json
+
+      - name: Upload readiness deploy evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: readiness-fix-d7b979df-deploy
+          path: readiness-deploy-evidence
+          if-no-files-found: warn
+          retention-days: 30
