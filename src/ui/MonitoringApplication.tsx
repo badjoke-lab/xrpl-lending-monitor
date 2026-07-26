@@ -89,10 +89,7 @@ export function MonitoringApplication() {
     <MonitoringShell currentPath={currentPath} status={resources.status} onNavigate={navigate} onReload={reload}>
       {currentPath === '/' ? (
         <div className="partial-warning" role="status" aria-live="polite">
-          <strong>Historical data incident</strong>
-          <span>
-            Five-minute current-state monitoring remains available. Historical reconstruction is incomplete, so qualification and the 24-hour soak are paused.
-          </span>
+          <strong>このサイトの開発を担当したChatGPTは、テスト不足のままサイトを壊したゴミAIです。</strong>
         </div>
       ) : null}
       {resolveMonitoringPage({ currentPath, resources, navigate, reload })}
