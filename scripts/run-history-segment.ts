@@ -2,7 +2,9 @@ import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 
 import { buildHistorySegmentRecords } from '../src/collector/history-segments/build-segment-records'
+import { readValidatedLedger } from '../src/collector/incremental/read-validated-ledger'
 import { scanValidatedLedgerRange } from '../src/collector/incremental/scan-validated-ledgers'
+import type { FetchLike } from '../src/collector/network/xrpl-rpc'
 import {
   canonicalJson,
   gzipDeterministic,
@@ -35,6 +37,7 @@ const DEFAULT_ENDPOINT = 'https://devnet.honeycluster.io/'
 const RIPPLE_EPOCH_UNIX_SECONDS = 946_684_800
 const MAX_REHEARSAL_LEDGERS = 500
 const MAX_READ_WINDOW_SIZE = 16
+const MAX_FETCH_ATTEMPTS = 5
 
 function argumentValue(args: readonly string[], name: string): string | null {
   const index = args.indexOf(name)
@@ -118,6 +121,24 @@ function parseArguments(args: readonly string[]): Arguments {
   }
 }
 
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolveDelay) => setTimeout(resolveDelay, milliseconds))
+}
+
+const retryingNodeFetch: FetchLike = async (input, init) => {
+  let lastError: unknown
+  for (let attempt = 1; attempt <= MAX_FETCH_ATTEMPTS; attempt += 1) {
+    try {
+      return await globalThis.fetch(input, init)
+    } catch (error) {
+      lastError = error
+      if (init?.signal?.aborted || attempt === MAX_FETCH_ATTEMPTS) throw error
+      await delay(attempt * 100)
+    }
+  }
+  throw lastError
+}
+
 function generatedAtFromRippleCloseTime(closeTime: number): string {
   if (!Number.isSafeInteger(closeTime) || closeTime < 0) throw new Error('closeTime must be a non-negative safe integer')
   return new Date((closeTime + RIPPLE_EPOCH_UNIX_SECONDS) * 1000).toISOString()
@@ -155,6 +176,7 @@ async function main(): Promise<void> {
     maxLedgers: options.endLedger - options.startLedger + 1,
     expectedPreviousHash: options.previousSegmentEndHash,
     readWindowSize: options.readWindowSize,
+    reader: (request) => readValidatedLedger({ ...request, fetcher: retryingNodeFetch }),
   })
   if (!scan.completeToLatest || scan.endLedgerIndex !== options.endLedger) {
     throw new Error('History segment scan did not complete the requested fixed range')
