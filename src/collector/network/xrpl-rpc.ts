@@ -46,7 +46,7 @@ function usesNonStandardHttpsPort(endpoint: string): boolean {
 }
 
 function supportsCloudflareSockets(): boolean {
-  return 'WebSocketPair' in globalThis
+  return typeof (globalThis as typeof globalThis & { WebSocketPair?: unknown }).WebSocketPair !== 'undefined'
 }
 
 function abortError(message: string): Error {
