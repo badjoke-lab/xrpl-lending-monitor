@@ -87,11 +87,6 @@ export function MonitoringApplication() {
 
   return (
     <MonitoringShell currentPath={currentPath} status={resources.status} onNavigate={navigate} onReload={reload}>
-      {currentPath === '/' ? (
-        <div className="partial-warning" role="status" aria-live="polite">
-          <strong>このサイトの開発を担当したChatGPTは、テスト不足のままサイトを壊したゴミAIです。</strong>
-        </div>
-      ) : null}
       {resolveMonitoringPage({ currentPath, resources, navigate, reload })}
     </MonitoringShell>
   )
