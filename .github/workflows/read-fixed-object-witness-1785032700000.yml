@@ -1,0 +1,46 @@
+name: Read fixed object witness 1785032700000
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/read-fixed-object-witness-1785032700000.yml
+
+permissions:
+  contents: read
+
+jobs:
+  read-witness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fetch fixed object history witness
+        shell: bash
+        env:
+          URL: https://xrpl-lending-monitor.badjoke-lab.workers.dev/api/objects/Vault/AD0980A254BC7262C57001315A9B6C7C65A020F29FAB2D0A0915933C55FF3BB1/history?limit=100
+          HASH: 70A489701D68B89E04923A7845F81F2C615760992C55119A8FC0ED8C759DE684
+        run: |
+          set -euo pipefail
+          http="$(curl --fail-with-body --silent --show-error --retry 3 \
+            -H 'User-Agent: curl/8.5.0' -H 'Accept: application/json' \
+            -o object-history.json -w '%{http_code}' "${URL}")"
+          test "${http}" = 200
+          jq --arg hash "${HASH}" --arg http "${http}" '
+            {
+              http: ($http | tonumber),
+              dataCount: ((.data // []) | length),
+              hashPresent: ([.. | strings | ascii_upcase] | index($hash) != null),
+              nextCursor: (.pagination.next_cursor // .next_cursor // null),
+              hasMore: (.pagination.has_more // .has_more // null),
+              firstLedger: ((.data // [])[0].ledger_index // null),
+              lastLedger: ((.data // [])[-1].ledger_index // null),
+              transactionHashes: [(.data // [])[] | .transaction_hash // empty]
+            }' object-history.json > object-witness-summary.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fixed-object-witness-1785032700000
+          path: |
+            object-witness-summary.json
+            object-history.json
+          if-no-files-found: error
+          retention-days: 7
