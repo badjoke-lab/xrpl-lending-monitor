@@ -5,6 +5,8 @@ import {
   HISTORY_RECONSTRUCTION_ID,
   HISTORY_RECONSTRUCTION_NETWORK,
   HISTORY_RECONSTRUCTION_SEGMENT_COUNT,
+  HISTORY_RECONSTRUCTION_TARGET_HASH,
+  HISTORY_RECONSTRUCTION_TARGET_LEDGER,
   reconstructionSegmentRange,
 } from './identity'
 import { assertRawCheckpoint, type RawCheckpoint } from './schema'
@@ -77,6 +79,13 @@ export async function discoverResume(checkpoints: readonly unknown[]): Promise<R
     rejected.push({ ...item, classification: 'orphan' })
   }
   const nextSegmentId = prefix.length === HISTORY_RECONSTRUCTION_SEGMENT_COUNT ? null : prefix.length
+  if (nextSegmentId === null) {
+    const terminal = prefix.at(-1)?.checkpoint
+    if (terminal?.endLedgerIndex !== HISTORY_RECONSTRUCTION_TARGET_LEDGER
+      || terminal.terminalHash !== HISTORY_RECONSTRUCTION_TARGET_HASH) {
+      throw new Error('Complete reconstruction prefix does not match the fixed terminal ledger and hash')
+    }
+  }
   if (nextSegmentId !== null) reconstructionSegmentRange(nextSegmentId)
   return { prefix, rejected, nextSegmentId }
 }

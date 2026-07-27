@@ -10,12 +10,14 @@ import {
   HISTORY_RECONSTRUCTION_EPOCH_ID,
   HISTORY_RECONSTRUCTION_ID,
   HISTORY_RECONSTRUCTION_SEGMENT_COUNT,
+  HISTORY_RECONSTRUCTION_TARGET_HASH,
   reconstructionSegmentPlan,
   reconstructionSegmentRange,
 } from './identity'
 import { classifyCheckpointPlan, discoverResume } from './resume'
 import {
   assertAttempt,
+  assertFinalReadiness,
   assertRawCheckpoint,
   assertReconciliationEvidence,
   assertSpillShardEvidence,
@@ -65,6 +67,23 @@ async function digest(value: RawCheckpoint): Promise<string> {
   return sha256Hex(canonicalJson(value))
 }
 
+async function completeCheckpointChain(): Promise<RawCheckpoint[]> {
+  const result: RawCheckpoint[] = []
+  let predecessorDigest: string | null = null
+  let parentHash = HISTORY_RECONSTRUCTION_ACTIVE_END_HASH
+  for (let segmentId = 0; segmentId < HISTORY_RECONSTRUCTION_SEGMENT_COUNT; segmentId += 1) {
+    const current = checkpoint(segmentId, {
+      predecessorDigest,
+      firstParentHash: parentHash,
+      terminalHash: segmentId === 262 ? HISTORY_RECONSTRUCTION_TARGET_HASH : H(String((segmentId % 8) + 1)),
+    })
+    result.push(current)
+    predecessorDigest = await digest(current)
+    parentHash = current.terminalHash
+  }
+  return result
+}
+
 describe('history reconstruction identity and schemas', () => {
   it('builds the fixed 263-range plan with the bounded final segment', () => {
     const plan = reconstructionSegmentPlan()
@@ -103,6 +122,13 @@ describe('history reconstruction identity and schemas', () => {
     expect(() => assertSpillShardEvidence({ schemaVersion: 1, kind: 'history-exact-spill-shard', reconstructionId: HISTORY_RECONSTRUCTION_ID, shardId: 0, rawInputDigest: H('a'), firstSegmentId: 0, lastSegmentId: 3, superBucketCount: 16, recordCount: 5, digest: H('b'), productionMutation: false })).not.toThrow()
     expect(() => assertSuperBucketEvidence({ schemaVersion: 1, kind: 'history-exact-super-bucket', reconstructionId: HISTORY_RECONSTRUCTION_ID, superBucket: 2, rawInputDigest: H('a'), firstBucket: 32, lastBucket: 47, recordCount: 5, digest: H('b'), productionMutation: false })).not.toThrow()
     expect(() => assertReconciliationEvidence({ schemaVersion: 1, kind: 'history-reconstruction-reconciliation', reconstructionId: HISTORY_RECONSTRUCTION_ID, phase: 'raw', expectedRecords: 5, actualRecords: 5, conflicts: 0, passed: true, productionMutation: false })).not.toThrow()
+  })
+
+  it('rejects incomplete final readiness and invalid deterministic spill shard ranges', () => {
+    expect(() => assertFinalReadiness({ schemaVersion: 1, kind: 'history-reconstruction-final-readiness', reconstructionId: HISTORY_RECONSTRUCTION_ID, rawComplete: true, exactIndexComplete: true, witnessPassed: true, finalTreePassed: true, remoteRehearsalPassed: false, productionMutation: false })).toThrow('remoteRehearsalPassed must pass')
+    expect(() => assertSpillShardEvidence({ schemaVersion: 1, kind: 'history-exact-spill-shard', reconstructionId: HISTORY_RECONSTRUCTION_ID, shardId: 33, rawInputDigest: H('a'), firstSegmentId: 0, lastSegmentId: 7, superBucketCount: 16, recordCount: 5, digest: H('b'), productionMutation: false })).toThrow('out of range')
+    expect(() => assertSpillShardEvidence({ schemaVersion: 1, kind: 'history-exact-spill-shard', reconstructionId: HISTORY_RECONSTRUCTION_ID, shardId: 1, rawInputDigest: H('a'), firstSegmentId: 7, lastSegmentId: 14, superBucketCount: 16, recordCount: 5, digest: H('b'), productionMutation: false })).toThrow('deterministic segment range')
+    expect(() => assertSpillShardEvidence({ schemaVersion: 1, kind: 'history-exact-spill-shard', reconstructionId: HISTORY_RECONSTRUCTION_ID, shardId: 32, rawInputDigest: H('a'), firstSegmentId: 256, lastSegmentId: 262, superBucketCount: 16, recordCount: 5, digest: H('b'), productionMutation: false })).not.toThrow()
   })
 })
 
@@ -168,6 +194,19 @@ describe('largest contiguous prefix discovery', () => {
   it('classifies a checkpoint from another reconstruction as stale-plan', () => {
     expect(classifyCheckpointPlan({ ...checkpoint(0), reconstructionId: 'old-plan' })).toBe('stale_plan')
   })
+
+  it('requires the fixed terminal ledger and hash for a complete prefix', async () => {
+    const valid = await completeCheckpointChain()
+    await expect(discoverResume(valid)).resolves.toMatchObject({ nextSegmentId: null })
+
+    const wrongHash = structuredClone(valid)
+    wrongHash[262]!.terminalHash = H('F')
+    await expect(discoverResume(wrongHash)).rejects.toThrow('fixed terminal ledger and hash')
+
+    const wrongLedger = structuredClone(valid)
+    wrongLedger[262]!.endLedgerIndex -= 1
+    await expect(discoverResume(wrongLedger)).rejects.toThrow('deterministic plan')
+  })
 })
 
 describe('fixture exact spill planning', () => {
@@ -219,10 +258,14 @@ describe('fixture exact spill planning', () => {
 
 describe('production-compatible final tree planning', () => {
   const digestValue = H('a')
+  const segmentFiles = ['manifest.json', 'ledgers.ndjson.gz', 'protocol-events.ndjson.gz', 'object-changes.ndjson.gz', 'loan-lifecycle.ndjson.gz', 'archived-objects.ndjson.gz', 'balance-history.ndjson.gz', 'current-projection-mutations.ndjson.gz']
   const entries = [
     { path: 'history-channel.json', sha256: digestValue },
     { path: 'history/publication.json', sha256: digestValue },
-    ...['manifest.json', 'ledgers.ndjson.gz', 'protocol-events.ndjson.gz', 'object-changes.ndjson.gz', 'loan-lifecycle.ndjson.gz', 'archived-objects.ndjson.gz', 'balance-history.ndjson.gz', 'current-projection-mutations.ndjson.gz'].map((file) => ({ path: `history/fixture-epoch/fixture-segment/${file}`, sha256: digestValue })),
+    ...reconstructionSegmentPlan().flatMap((range) => {
+      const segmentId = `${HISTORY_RECONSTRUCTION_EPOCH_ID}-${range.startLedgerIndex}-${range.endLedgerIndex}`
+      return segmentFiles.map((file) => ({ path: `history/${HISTORY_RECONSTRUCTION_EPOCH_ID}/${segmentId}/${file}`, sha256: digestValue }))
+    }),
     { path: 'history/index/exact/manifest.json', sha256: digestValue },
     ...Array.from({ length: 256 }, (_, bucket) => ({
       path: `history/index/exact/${String(bucket).padStart(4, '0')}.ndjson.gz`,
@@ -234,6 +277,16 @@ describe('production-compatible final tree planning', () => {
     const first = planFinalTree(entries)
     expect(planFinalTree([...entries].reverse())).toEqual(first)
     expect(first[0]?.path).toBe('history-channel.json')
+  })
+
+  it('rejects wrong bucket ranges, missing buckets, missing segments, and incomplete segments', () => {
+    const wrongBucket = entries.map((entry) => entry.path.endsWith('/0255.ndjson.gz') ? { ...entry, path: 'history/index/exact/0256.ndjson.gz' } : entry)
+    expect(() => planFinalTree(wrongBucket)).toThrow('0000 through 0255')
+    expect(() => planFinalTree(entries.filter((entry) => !entry.path.endsWith('/0255.ndjson.gz')))).toThrow('256 exact-index buckets')
+
+    const missingSegmentPrefix = `history/${HISTORY_RECONSTRUCTION_EPOCH_ID}/${HISTORY_RECONSTRUCTION_EPOCH_ID}-3800886-3801385/`
+    expect(() => planFinalTree(entries.filter((entry) => !entry.path.startsWith(missingSegmentPrefix)))).toThrow('missing reconstruction segment')
+    expect(() => planFinalTree(entries.filter((entry) => entry.path !== `${missingSegmentPrefix}balance-history.ndjson.gz`))).toThrow('segment is incomplete')
   })
 
   it.each(['../history-channel.json', '/history/publication.json', 'repair/v1/state.json', 'history/x/y/unknown.gz'])(

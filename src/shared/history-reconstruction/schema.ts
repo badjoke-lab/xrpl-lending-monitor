@@ -90,7 +90,7 @@ export interface FinalReadinessEvidence {
   exactIndexComplete: true
   witnessPassed: true
   finalTreePassed: true
-  remoteRehearsalPassed: boolean
+  remoteRehearsalPassed: true
   productionMutation: false
 }
 
@@ -177,7 +177,7 @@ export function assertFinalReadiness(value: unknown): asserts value is FinalRead
   exactKeys(evidence, ['schemaVersion', 'kind', 'reconstructionId', 'rawComplete', 'exactIndexComplete', 'witnessPassed', 'finalTreePassed', 'remoteRehearsalPassed', 'productionMutation'], 'finalReadiness')
   if (evidence.schemaVersion !== 1 || evidence.kind !== 'history-reconstruction-final-readiness' || evidence.reconstructionId !== HISTORY_RECONSTRUCTION_ID || evidence.productionMutation !== false) throw new Error('Final readiness identity is invalid')
   for (const field of ['rawComplete', 'exactIndexComplete', 'witnessPassed', 'finalTreePassed'] as const) if (evidence[field] !== true) throw new Error(`${field} must pass`)
-  if (typeof evidence.remoteRehearsalPassed !== 'boolean') throw new Error('remoteRehearsalPassed must be boolean')
+  if (evidence.remoteRehearsalPassed !== true) throw new Error('remoteRehearsalPassed must pass')
 }
 
 export function assertSpillShardEvidence(value: unknown): asserts value is SpillShardEvidence {
@@ -185,8 +185,13 @@ export function assertSpillShardEvidence(value: unknown): asserts value is Spill
   exactKeys(evidence, ['schemaVersion', 'kind', 'reconstructionId', 'shardId', 'rawInputDigest', 'firstSegmentId', 'lastSegmentId', 'superBucketCount', 'recordCount', 'digest', 'productionMutation'], 'spillShard')
   if (evidence.schemaVersion !== 1 || evidence.kind !== 'history-exact-spill-shard' || evidence.reconstructionId !== HISTORY_RECONSTRUCTION_ID || evidence.superBucketCount !== 16 || evidence.productionMutation !== false) throw new Error('Spill shard identity is invalid')
   integer(evidence.shardId, 'shardId'); integer(evidence.firstSegmentId, 'firstSegmentId'); integer(evidence.lastSegmentId, 'lastSegmentId')
+  if (evidence.shardId >= 33) throw new Error('Spill shard ID is out of range')
+  const expectedFirst = evidence.shardId * 8
+  const expectedLast = evidence.shardId === 32 ? 262 : expectedFirst + 7
+  if (evidence.firstSegmentId !== expectedFirst || evidence.lastSegmentId !== expectedLast) {
+    throw new Error('Spill shard does not match the deterministic segment range')
+  }
   reconstructionSegmentRange(evidence.firstSegmentId); reconstructionSegmentRange(evidence.lastSegmentId)
-  if (evidence.lastSegmentId < evidence.firstSegmentId) throw new Error('Spill shard segment range is inverted')
   integer(evidence.recordCount, 'recordCount'); digest(evidence.rawInputDigest, 'rawInputDigest'); digest(evidence.digest, 'digest')
 }
 
