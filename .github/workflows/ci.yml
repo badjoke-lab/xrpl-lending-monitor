@@ -11,27 +11,41 @@ permissions:
   actions: write
 
 jobs:
+  dispatch-history:
+    if: github.event_name == 'pull_request' && github.head_ref == 'ops/one-shot-history-dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Dispatch immutable-history reconstruction once
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/history-dispatch.json" <<'JSON'
+          {
+            "ref": "main",
+            "inputs": {
+              "operation": "immutable_history_reconstruction",
+              "source_current_state_branch": "current-state-four-hour-b-data",
+              "current_state_candidate_branch": "current-state-four-hour-a-data",
+              "history_max_segments": "64",
+              "history_auto_continue": true
+            }
+          }
+          JSON
+          gh api \
+            --method POST \
+            -H "Accept: application/vnd.github+json" \
+            "repos/$GITHUB_REPOSITORY/actions/workflows/rolling-checkpoint-candidate.yml/dispatches" \
+            --input "$RUNNER_TEMP/history-dispatch.json"
+          echo "immutable-history workflow dispatch accepted"
+
   quality:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
-
-      - name: Dispatch immutable-history reconstruction once
-        if: github.event_name == 'pull_request' && github.head_ref == 'ops/one-shot-history-dispatch'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          gh workflow run rolling-checkpoint-candidate.yml \
-            --repo "$GITHUB_REPOSITORY" \
-            --ref main \
-            -f operation=immutable_history_reconstruction \
-            -f source_current_state_branch=current-state-four-hour-b-data \
-            -f current_state_candidate_branch=current-state-four-hour-a-data \
-            -f history_max_segments=64 \
-            -f history_auto_continue=true
 
       - name: Enforce minimal Actions workflow surface
         run: bash scripts/check-actions-workflow-allowlist.sh
