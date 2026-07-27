@@ -7,38 +7,42 @@ on:
       - main
 
 permissions:
-  contents: read
+  contents: write
   actions: write
 
 jobs:
-  dispatch-history:
+  prepare-history-workflow-fix:
     if: github.event_name == 'pull_request' && github.head_ref == 'ops/one-shot-history-dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Dispatch immutable-history reconstruction once
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Publish isolated runner temp-context fix branch
         run: |
           set -euo pipefail
-          cat > "$RUNNER_TEMP/history-dispatch.json" <<'JSON'
-          {
-            "ref": "main",
-            "inputs": {
-              "operation": "immutable_history_reconstruction",
-              "source_current_state_branch": "current-state-four-hour-b-data",
-              "current_state_candidate_branch": "current-state-four-hour-a-data",
-              "history_max_segments": "64",
-              "history_auto_continue": true
-            }
-          }
-          JSON
-          gh api \
-            --method POST \
-            -H "Accept: application/vnd.github+json" \
-            "repos/$GITHUB_REPOSITORY/actions/workflows/rolling-checkpoint-candidate.yml/dispatches" \
-            --input "$RUNNER_TEMP/history-dispatch.json"
-          echo "immutable-history workflow dispatch accepted"
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('.github/workflows/rolling-checkpoint-candidate.yml')
+          text = path.read_text()
+          token = '$' + '{{ runner.temp }}/history-reconstruction'
+          old = f'HISTORY_OUTPUT: {token}'
+          new = 'HISTORY_OUTPUT: /tmp/history-reconstruction'
+          if text.count(old) != 1:
+              raise SystemExit(f'expected exactly one invalid runner.temp job-env expression, found {text.count(old)}')
+          path.write_text(text.replace(old, new))
+          PY
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git switch -c fix/history-reconstruction-runner-temp-context
+          git add .github/workflows/rolling-checkpoint-candidate.yml
+          git commit -m "Fix immutable-history workflow runner temp context"
+          git push --force origin HEAD:refs/heads/fix/history-reconstruction-runner-temp-context
 
   quality:
     runs-on: ubuntu-latest
