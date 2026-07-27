@@ -38,7 +38,6 @@ export function committedCheckpointFiles(names: readonly string[]): string[] {
   const committed: { id: number; name: string }[] = []
   for (const name of names) {
     if (name.includes('.tmp-') || name.endsWith('.partial')) continue
-    if (!name.endsWith('.json')) continue
     const match = CHECKPOINT_FILE.exec(name)
     if (!match) throw new Error(`Unexpected checkpoint file: ${name}`)
     const id = Number(match[1])
@@ -102,6 +101,11 @@ export async function buildRawCheckpoint(options: {
   const range = reconstructionSegmentRange(options.segmentId)
   const manifest = options.manifest
   assertHistorySegmentManifest(manifest)
+  const parsedManifest = JSON.parse(options.manifestText) as HistorySegmentManifest
+  assertHistorySegmentManifest(parsedManifest)
+  if (canonicalJson(parsedManifest) !== canonicalJson(manifest)) {
+    throw new Error('Segment manifest text does not match the validated manifest')
+  }
   const expectedSegmentId = `${HISTORY_RECONSTRUCTION_EPOCH_ID}-${range.startLedgerIndex}-${range.endLedgerIndex}`
   if (manifest.network !== HISTORY_RECONSTRUCTION_NETWORK
     || manifest.epochId !== HISTORY_RECONSTRUCTION_EPOCH_ID
