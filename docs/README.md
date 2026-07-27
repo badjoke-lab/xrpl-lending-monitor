@@ -52,6 +52,7 @@ This directory is the source of truth for XRPL Lending Monitor and its approved 
 - Domain documents define how their data and behavior work.
 - `collector-design.md` defines complete base bootstrap, incremental continuation, current overlay behavior, and reset handling.
 - `history-runtime-contract.md` defines the active division of responsibility between the five-minute fast lane, protected full collector, immutable history publication, hybrid reads, retention, and release qualification.
+- `history-reconstruction-pure-library.md` defines fixture-only reconstruction primitives while preserving the outstanding operational measurement and protection gates.
 - `resource-envelope.md` defines measurable runtime, storage, public-query, and evidence gates.
 - `m6-integrity-reset-plan.md` defines the first executable M6 integrity/reset baseline after M5-5 exit; it does not authorize early M6 implementation.
 - `m6-i1-fixture-catalog.md` prepares deterministic M6-I1 scenario IDs, shared context/object/asset families, evidence snapshot requirements, and M6-I2-I5 reuse; the catalog is not passing implementation evidence.
