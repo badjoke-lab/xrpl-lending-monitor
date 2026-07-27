@@ -53,6 +53,7 @@
     "history-segment:local": "pnpm build:history-segment && node .history-segment-build/run-history-segment.mjs --local",
     "history-reconstruction:build": "pnpm build:history-segment && pnpm build:history-reconstruction-runner",
     "history-reconstruction:local": "pnpm history-reconstruction:build && node .history-reconstruction-runner-build/run-history-reconstruction.mjs --local",
+    "history-reconstruction-finalize:local": "pnpm build:history-reconstruction-runner && node .history-reconstruction-runner-build/finalize-history-reconstruction-candidate.mjs --local",
     "history-segment-checkpoint:build": "pnpm build:history-segment-checkpoint",
     "history-segment-checkpoint:local": "pnpm build:history-segment-checkpoint && node .history-segment-checkpoint-build/update-history-segment-checkpoint.mjs --local",
     "history-segment-chain:build": "pnpm build:history-segment-chain",
