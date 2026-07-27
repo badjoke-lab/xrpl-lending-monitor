@@ -47,4 +47,5 @@ jobs:
           name: history-workflow-parse-fix
           path: ${{ runner.temp }}/history-workflow-fix
           if-no-files-found: error
+          include-hidden-files: true
           retention-days: 1
