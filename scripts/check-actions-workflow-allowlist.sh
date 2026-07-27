@@ -44,7 +44,7 @@ import sys
 root = Path(sys.argv[1])
 evidence = Path(sys.argv[2])
 policies = {
-    "rolling-checkpoint-candidate.yml": ["workflow_dispatch"],
+    "rolling-checkpoint-candidate.yml": ["workflow_dispatch", "issue_comment"],
     "rolling-checkpoint-live-cutover.yml": ["workflow_dispatch"],
     "read-only-production-qualification.yml": ["pull_request", "workflow_dispatch", "issue_comment"],
 }
@@ -76,6 +76,20 @@ for required in ("actions: read", "contents: read", "issues: write", "CLOUDFLARE
     if required not in qualification:
         raise SystemExit(f"read-only qualification is missing required bounded capability: {required}")
 
+candidate = (root / "rolling-checkpoint-candidate.yml").read_text()
+for required in (
+    "github.event.issue.number == 995",
+    "github.actor == 'badjoke-lab'",
+    "github.event.comment.body == '/history-reconstruction run'",
+    "history-repair-3932301-work",
+    "history-repair-3932301-data",
+    "production history mutation: none",
+    "D1 mutation: none",
+    "Worker deploy: none",
+):
+    if required not in candidate:
+        raise SystemExit(f"candidate workflow is missing immutable-history command boundary: {required}")
+
 scheduled = []
 for path in root.glob("*.y*ml"):
     if re.search(r"^  schedule:", path.read_text(), flags=re.MULTILINE):
@@ -86,4 +100,4 @@ if scheduled:
     raise SystemExit(f"scheduled workflows are forbidden: {scheduled}")
 PY
 
-echo "Actions workflow allowlist passed: CI, one production-read qualification runner with Issue-only reporting, and two manual checkpoint workflows."
+echo "Actions workflow allowlist passed: CI, one read-only qualification runner, one bounded candidate builder, and one manual cutover workflow."
