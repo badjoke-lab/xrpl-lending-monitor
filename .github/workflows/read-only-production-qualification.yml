@@ -7,6 +7,9 @@ on:
     paths:
       - .github/workflows/read-only-production-qualification.yml
       - scripts/qualification-995-read-only/**
+      - scripts/history-reconstruction/**
+      - scripts/measure-history-reconstruction.ts
+      - vite.history-reconstruction-measurement.config.ts
       - scripts/check-actions-workflow-allowlist.sh
   workflow_dispatch:
     inputs:
@@ -14,7 +17,7 @@ on:
         description: Read-only operation
         required: true
         type: choice
-        options: [probe, arm, evaluate]
+        options: [probe, arm, evaluate, measure]
       start_ms:
         description: Five-minute-aligned qualification start timestamp in milliseconds; required for arm/evaluate
         required: false
@@ -115,11 +118,42 @@ jobs:
               [[ "${start_ms:-}" =~ ^[0-9]+$ ]]
               artifact="qualification-evaluate-${start_ms}"
               ;;
+            measure)
+              test "$EVENT_NAME" = "workflow_dispatch"
+              test -z "${start_ms:-}"
+              artifact="history-reconstruction-measurement-${GITHUB_RUN_ID}"
+              ;;
             *) exit 2 ;;
           esac
           echo "mode=$mode" >> "$GITHUB_OUTPUT"
           echo "start_ms=${start_ms:-}" >> "$GITHUB_OUTPUT"
           echo "artifact=$artifact" >> "$GITHUB_OUTPUT"
+
+      - uses: pnpm/action-setup@v4
+        if: steps.operation.outputs.mode == 'measure'
+        with:
+          version: 11.9.0
+      - uses: actions/setup-node@v4
+        if: steps.operation.outputs.mode == 'measure'
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - name: Build local read-only measurement harness
+        if: steps.operation.outputs.mode == 'measure'
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build:history-segment
+          pnpm build:history-reconstruction-measurement
+
+      - name: Execute bounded read-only measurement
+        id: measurement
+        if: steps.operation.outputs.mode == 'measure'
+        continue-on-error: true
+        env:
+          XRPL_MEASUREMENT_ENDPOINT: https://clio.devnet.rippletest.net:51234/
+          MEASUREMENT_OUTPUT: history-measurement-evidence
+          GITHUB_READ_TOKEN: ${{ github.token }}
+        run: node .history-reconstruction-measurement-build/measure-history-reconstruction.mjs
 
       - name: Download unique arm evidence
         id: arm-download
@@ -149,7 +183,7 @@ jobs:
 
       - name: Execute read-only operation
         id: execute
-        if: steps.operation.outputs.mode != 'evaluate' || steps.arm-download.outcome == 'success'
+        if: steps.operation.outputs.mode != 'measure' && (steps.operation.outputs.mode != 'evaluate' || steps.arm-download.outcome == 'success')
         continue-on-error: true
         env:
           MODE: ${{ steps.operation.outputs.mode }}
@@ -162,12 +196,14 @@ jobs:
         if: always()
         with:
           name: ${{ steps.operation.outputs.artifact }}
-          path: qualification-evidence
+          path: |
+            qualification-evidence
+            history-measurement-evidence
           if-no-files-found: warn
           retention-days: 30
 
       - name: Report bounded result to Issue 995
-        if: always() && steps.operation.outcome == 'success'
+        if: always() && steps.operation.outcome == 'success' && (steps.operation.outputs.mode == 'measure' || steps.execute.outcome == 'success')
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -219,6 +255,20 @@ jobs:
                   echo "- status: failed before result generation"
                 fi
                 ;;
+              measure)
+                echo "# P0 BLOCKED — qualification failed; immutable history repair in progress"
+                echo "- disposition: read-only measurement only"
+                echo "- artifact: ${{ steps.operation.outputs.artifact }}"
+                echo "- measurement_outcome: ${{ steps.measurement.outcome }}"
+                if test -f history-measurement-evidence/summary.json; then
+                  echo "- measured_segments: $(jq '.segments | length' history-measurement-evidence/summary.json)"
+                  echo "- total_compressed_bytes: $(jq '[.segments[].compressedBytes] | add' history-measurement-evidence/summary.json)"
+                  echo "- failures: $(jq -c '.failures' history-measurement-evidence/summary.json)"
+                else
+                  echo "- measured_segments: 0"
+                  echo "- failures: [\"measurement_summary_missing\"]"
+                fi
+                ;;
             esac
           } > qualification-report.md
           gh issue comment 995 --repo "$GITHUB_REPOSITORY" --body-file qualification-report.md
@@ -228,7 +278,8 @@ jobs:
           always()
           && steps.operation.outcome == 'success'
           && (
-            steps.execute.outcome != 'success'
+            (steps.operation.outputs.mode != 'measure' && steps.execute.outcome != 'success')
+            || (steps.operation.outputs.mode == 'measure' && steps.measurement.outcome != 'success')
             || (steps.operation.outputs.mode == 'evaluate' && steps.arm-download.outcome != 'success')
           )
         run: exit 1
