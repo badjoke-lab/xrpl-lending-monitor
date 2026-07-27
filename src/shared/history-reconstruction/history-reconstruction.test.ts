@@ -119,7 +119,7 @@ describe('history reconstruction identity and schemas', () => {
   })
 
   it('strictly validates spill, super-bucket, and reconciliation evidence', () => {
-    expect(() => assertSpillShardEvidence({ schemaVersion: 1, kind: 'history-exact-spill-shard', reconstructionId: HISTORY_RECONSTRUCTION_ID, shardId: 0, rawInputDigest: H('a'), firstSegmentId: 0, lastSegmentId: 3, superBucketCount: 16, recordCount: 5, digest: H('b'), productionMutation: false })).not.toThrow()
+    expect(() => assertSpillShardEvidence({ schemaVersion: 1, kind: 'history-exact-spill-shard', reconstructionId: HISTORY_RECONSTRUCTION_ID, shardId: 0, rawInputDigest: H('a'), firstSegmentId: 0, lastSegmentId: 7, superBucketCount: 16, recordCount: 5, digest: H('b'), productionMutation: false })).not.toThrow()
     expect(() => assertSuperBucketEvidence({ schemaVersion: 1, kind: 'history-exact-super-bucket', reconstructionId: HISTORY_RECONSTRUCTION_ID, superBucket: 2, rawInputDigest: H('a'), firstBucket: 32, lastBucket: 47, recordCount: 5, digest: H('b'), productionMutation: false })).not.toThrow()
     expect(() => assertReconciliationEvidence({ schemaVersion: 1, kind: 'history-reconstruction-reconciliation', reconstructionId: HISTORY_RECONSTRUCTION_ID, phase: 'raw', expectedRecords: 5, actualRecords: 5, conflicts: 0, passed: true, productionMutation: false })).not.toThrow()
   })
