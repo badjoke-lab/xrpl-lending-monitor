@@ -64,7 +64,7 @@ jobs:
       HISTORY_WORK_BRANCH: history-repair-3932301-work
       HISTORY_CANDIDATE_BRANCH: history-repair-3932301-data
       HISTORY_CURRENT_STATE_BRANCH: current-state-data
-      HISTORY_OUTPUT: ${{ runner.temp }}/history-reconstruction
+      HISTORY_OUTPUT: /tmp/history-reconstruction
     steps:
       - name: Check out implementation
         uses: actions/checkout@v4
