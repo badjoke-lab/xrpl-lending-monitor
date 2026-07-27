@@ -10,6 +10,7 @@ import { assertHistorySegmentManifest, HISTORY_SEGMENT_FILE_KINDS, type HistoryS
 import { planExactSpill, splitExactSuperBuckets } from '../src/shared/history-reconstruction/exact-spill'
 import { HISTORY_RECONSTRUCTION_ACTIVE_END_HASH, HISTORY_RECONSTRUCTION_EPOCH_ID, HISTORY_RECONSTRUCTION_TARGET_HASH, reconstructionSegmentRange } from '../src/shared/history-reconstruction/identity'
 import { assertReadOnlyMeasurementSummary, RECONSTRUCTION_MEASUREMENT_READ_WINDOW_SIZE, RECONSTRUCTION_MEASUREMENT_SEGMENTS } from '../src/shared/history-reconstruction/measurement'
+import { appendWithoutArgumentSpread } from './history-reconstruction/append-without-argument-spread.mjs'
 
 const run = promisify(execFile)
 const unzip = promisify(gunzip)
@@ -75,7 +76,7 @@ async function main() {
     }
     if (id === 224 && (!witnessTransaction || !witnessObject)) throw new Error('Fixed segment 224 witness is absent')
     const planned = await planExactSpill(exactInputs); const fetch = JSON.parse(await readFile(fetchMetrics, 'utf8'))
-    representativeExactInputs.push(...exactInputs)
+    appendWithoutArgumentSpread(representativeExactInputs, exactInputs)
     const time = await readFile(timeMetrics, 'utf8')
     measurements.push({ segmentId: id, range, firstParentHash: manifest.startParentHash, terminalHash: manifest.endLedgerHash, wallMilliseconds: Math.round(performance.now() - started), cpuUserSeconds: Number(/User time \(seconds\): ([\d.]+)/.exec(time)?.[1] ?? 0), cpuSystemSeconds: Number(/System time \(seconds\): ([\d.]+)/.exec(time)?.[1] ?? 0), peakRssKiB: Number(/Maximum resident set size \(kbytes\): (\d+)/.exec(time)?.[1] ?? 0), endpoint, rpc: fetch, files: measuredFiles, compressedBytes, decompressedBytes, semanticCounts: semantic, exactRecords: planned.length, witness: id === 224 ? { transactionFound: witnessTransaction, objectChangeFound: witnessObject } : null, productionMutation: false })
   }
