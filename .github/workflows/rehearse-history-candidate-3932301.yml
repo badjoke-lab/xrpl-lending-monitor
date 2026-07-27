@@ -1,0 +1,75 @@
+name: Rehearse immutable-history candidate 3932301
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+    paths:
+      - .github/workflows/rehearse-history-candidate-3932301.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rehearse-history-candidate-3932301
+  cancel-in-progress: true
+
+jobs:
+  rehearse:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out exact main implementation
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build candidate source rehearsal
+        run: pnpm build:candidate-source-rehearsal
+
+      - name: Rehearse candidate and retain exact failure
+        id: candidate-rehearsal
+        shell: bash
+        run: |
+          set -uo pipefail
+          rm -rf candidate-rehearsal-evidence
+          mkdir -p candidate-rehearsal-evidence
+          set +e
+          node .candidate-source-rehearsal-build/rehearse-candidate-sources.mjs \
+            --local \
+            --repository badjoke-lab/xrpl-lending-monitor \
+            --history-branch history-repair-3932301-data \
+            --current-state-branch current-state-data \
+            > candidate-rehearsal-evidence/result.json \
+            2> candidate-rehearsal-evidence/stderr.log
+          code=$?
+          set -e
+          printf '%s\n' "$code" > candidate-rehearsal-evidence/exit-code.txt
+          printf '%s\n' "$(git rev-parse HEAD)" > candidate-rehearsal-evidence/implementation-sha.txt
+          wc -c candidate-rehearsal-evidence/result.json candidate-rehearsal-evidence/stderr.log \
+            > candidate-rehearsal-evidence/file-sizes.txt
+          cat candidate-rehearsal-evidence/stderr.log || true
+          cat candidate-rehearsal-evidence/result.json || true
+          exit "$code"
+
+      - name: Upload candidate rehearsal evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: immutable-history-candidate-rehearsal-3932301
+          path: candidate-rehearsal-evidence
+          if-no-files-found: error
+          retention-days: 30
