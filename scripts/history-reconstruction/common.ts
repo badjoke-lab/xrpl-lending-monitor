@@ -75,7 +75,7 @@ export async function writeExclusiveCanonical(path: string, value: unknown): Pro
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
     if (await readFile(path, 'utf8') !== text) {
-      throw new Error(`Conflicting immutable evidence already exists: ${path}`)
+      throw new Error(`Conflicting immutable evidence already exists: ${path}`, { cause: error })
     }
   } finally {
     await rm(temporary, { force: true })
