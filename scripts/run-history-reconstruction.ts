@@ -10,7 +10,7 @@ import {
 } from '../src/shared/history-reconstruction/identity'
 import { discoverResume } from '../src/shared/history-reconstruction/resume'
 import type { RawCheckpoint } from '../src/shared/history-reconstruction/schema'
-import { finalizeCandidate } from './history-reconstruction/candidate'
+import { buildCandidateAssets } from './history-reconstruction/candidate'
 import {
   type ReconstructionRuntimeOptions,
   writeAtomic,
@@ -64,7 +64,7 @@ function parseArguments(args: readonly string[]): ReconstructionRuntimeOptions {
 async function writeSummary(options: {
   outputDir: string
   checkpoints: readonly RawCheckpoint[]
-  status: 'incomplete' | 'candidate-ready'
+  status: 'incomplete' | 'candidate-assets-ready'
   failure?: string
 }): Promise<void> {
   const discovery = await discoverResume(options.checkpoints)
@@ -97,14 +97,14 @@ async function main(runtime: ReconstructionRuntimeOptions): Promise<void> {
     process.stdout.write(`${canonicalJson({ status: 'incomplete', completedSegments: checkpoints.length, nextSegmentId: next })}\n`)
     return
   }
-  await finalizeCandidate({
+  await buildCandidateAssets({
     outputDir: runtime.outputDir,
     checkpoints,
     sourceRevision: runtime.sourceRevision,
   })
-  await writeSummary({ outputDir: runtime.outputDir, checkpoints, status: 'candidate-ready' })
+  await writeSummary({ outputDir: runtime.outputDir, checkpoints, status: 'candidate-assets-ready' })
   process.stdout.write(`${canonicalJson({
-    status: 'candidate-ready',
+    status: 'candidate-assets-ready',
     completedSegments: checkpoints.length,
     productionMutation: false,
   })}\n`)
