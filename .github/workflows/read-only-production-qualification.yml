@@ -117,7 +117,6 @@ jobs:
               artifact="qualification-evaluate-${start_ms}"
               ;;
             measure)
-              test "$EVENT_NAME" = "workflow_dispatch"
               test -z "${start_ms:-}"
               artifact="history-reconstruction-measurement-${GITHUB_RUN_ID}"
               ;;
