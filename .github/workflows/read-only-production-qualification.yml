@@ -34,12 +34,6 @@ concurrency:
   group: read-only-production-qualification-${{ github.event_name == 'pull_request' && github.event.pull_request.number || 'operate' }}
   cancel-in-progress: false
 
-env:
-  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-  DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
-  PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
-
 jobs:
   validate:
     if: github.event_name == 'pull_request'
@@ -61,6 +55,10 @@ jobs:
         env:
           MODE: probe
           FAIL_ON_UNHEALTHY: 'false'
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
+          PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
         run: python scripts/qualification-995-read-only/bootstrap.py
       - uses: actions/upload-artifact@v4
         if: always()
@@ -190,6 +188,10 @@ jobs:
           START_MS: ${{ steps.operation.outputs.start_ms }}
           ARM_EVIDENCE_DIR: arm-evidence
           FAIL_ON_UNHEALTHY: 'true'
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
+          PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
         run: python scripts/qualification-995-read-only/bootstrap.py
 
       - uses: actions/upload-artifact@v4
