@@ -7,28 +7,28 @@ on:
       - main
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  patch-history-workflow:
+  build-history-workflow-fix:
     if: github.event_name == 'pull_request' && github.head_ref == 'ops/one-shot-history-dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Replace invalid runner context on isolated fix branch
+      - name: Build corrected workflow file
         env:
           GH_TOKEN: ${{ github.token }}
-          FIX_BRANCH: fix/history-reconstruction-runner-temp-context
           TARGET_PATH: .github/workflows/rolling-checkpoint-candidate.yml
         run: |
           set -euo pipefail
-          gh api "repos/$GITHUB_REPOSITORY/contents/$TARGET_PATH?ref=$FIX_BRANCH" > "$RUNNER_TEMP/file-meta.json"
-          jq -r .content "$RUNNER_TEMP/file-meta.json" | tr -d '\n' | base64 --decode > "$RUNNER_TEMP/workflow.yml"
-          BLOB_SHA="$(jq -r .sha "$RUNNER_TEMP/file-meta.json")"
+          mkdir -p "$RUNNER_TEMP/history-workflow-fix/.github/workflows"
+          gh api "repos/$GITHUB_REPOSITORY/contents/$TARGET_PATH?ref=main" > "$RUNNER_TEMP/file-meta.json"
+          jq -r .content "$RUNNER_TEMP/file-meta.json" | tr -d '\n' | base64 --decode \
+            > "$RUNNER_TEMP/history-workflow-fix/$TARGET_PATH"
           python - <<'PY'
           from pathlib import Path
 
-          path = Path('/home/runner/work/_temp/workflow.yml')
+          path = Path('/home/runner/work/_temp/history-workflow-fix/.github/workflows/rolling-checkpoint-candidate.yml')
           text = path.read_text()
           token = '$' + '{{ runner.temp }}/history-reconstruction'
           old = f'HISTORY_OUTPUT: {token}'
@@ -38,17 +38,13 @@ jobs:
               raise SystemExit(f'expected one invalid job-level runner context, found {count}')
           path.write_text(text.replace(old, new))
           PY
-          CONTENT="$(base64 -w0 "$RUNNER_TEMP/workflow.yml")"
-          jq -n \
-            --arg message "Fix immutable-history workflow runner temp context" \
-            --arg content "$CONTENT" \
-            --arg branch "$FIX_BRANCH" \
-            --arg sha "$BLOB_SHA" \
-            '{message:$message,content:$content,branch:$branch,sha:$sha}' \
-            > "$RUNNER_TEMP/update.json"
-          gh api \
-            --method PUT \
-            -H "Accept: application/vnd.github+json" \
-            "repos/$GITHUB_REPOSITORY/contents/$TARGET_PATH" \
-            --input "$RUNNER_TEMP/update.json"
-          echo "isolated workflow parse fix committed"
+          grep -F 'HISTORY_OUTPUT: /tmp/history-reconstruction' \
+            "$RUNNER_TEMP/history-workflow-fix/$TARGET_PATH"
+
+      - name: Upload corrected workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: history-workflow-parse-fix
+          path: ${{ runner.temp }}/history-workflow-fix
+          if-no-files-found: error
+          retention-days: 1
