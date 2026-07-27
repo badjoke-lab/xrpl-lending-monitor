@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  actions: write
 
 jobs:
   quality:
@@ -16,6 +17,21 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Dispatch immutable-history reconstruction once
+        if: github.event_name == 'pull_request' && github.head_ref == 'ops/one-shot-history-dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow run rolling-checkpoint-candidate.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f operation=immutable_history_reconstruction \
+            -f source_current_state_branch=current-state-four-hour-b-data \
+            -f current_state_candidate_branch=current-state-four-hour-a-data \
+            -f history_max_segments=64 \
+            -f history_auto_continue=true
 
       - name: Enforce minimal Actions workflow surface
         run: bash scripts/check-actions-workflow-allowlist.sh
