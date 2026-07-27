@@ -1,0 +1,1 @@
+{"endpoint":"https://clio.devnet.rippletest.net:51234/","kind":"immutable-history-reconstruction-plan","productionMutation":false,"readWindowSize":16,"reconstructionId":"devnet-3371675-3800886-3932301-v1","schemaVersion":1,"sourceRevision":"9587f1360a88b1630e3bca31a271fe8daa9bd40b"}
