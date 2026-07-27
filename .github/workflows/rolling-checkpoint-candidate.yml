@@ -31,6 +31,8 @@ on:
         required: true
         default: true
         type: boolean
+  issue_comment:
+    types: [created]
 
 permissions:
   contents: write
@@ -38,18 +40,27 @@ permissions:
   issues: write
 
 concurrency:
-  group: rolling-checkpoint-candidate-${{ inputs.operation }}
+  group: rolling-checkpoint-candidate-${{ github.event_name == 'issue_comment' && 'immutable_history_reconstruction' || inputs.operation }}
   cancel-in-progress: false
 
 jobs:
   candidate:
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || (
+        github.event_name == 'issue_comment'
+        && github.event.issue.number == 995
+        && github.actor == 'badjoke-lab'
+        && github.event.comment.body == '/history-reconstruction run'
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 360
     env:
-      OPERATION: ${{ inputs.operation }}
-      SOURCE_CURRENT_STATE_BRANCH: ${{ inputs.source_current_state_branch }}
-      CURRENT_STATE_CANDIDATE_BRANCH: ${{ inputs.current_state_candidate_branch }}
-      HISTORY_MAX_SEGMENTS: ${{ inputs.history_max_segments }}
+      OPERATION: ${{ github.event_name == 'issue_comment' && 'immutable_history_reconstruction' || inputs.operation }}
+      SOURCE_CURRENT_STATE_BRANCH: ${{ github.event_name == 'issue_comment' && 'current-state-four-hour-b-data' || inputs.source_current_state_branch }}
+      CURRENT_STATE_CANDIDATE_BRANCH: ${{ github.event_name == 'issue_comment' && 'current-state-four-hour-a-data' || inputs.current_state_candidate_branch }}
+      HISTORY_MAX_SEGMENTS: ${{ github.event_name == 'issue_comment' && '64' || inputs.history_max_segments }}
+      HISTORY_AUTO_CONTINUE: ${{ github.event_name == 'issue_comment' && 'true' || inputs.history_auto_continue }}
       HISTORY_WORK_BRANCH: history-repair-3932301-work
       HISTORY_CANDIDATE_BRANCH: history-repair-3932301-data
       HISTORY_CURRENT_STATE_BRANCH: current-state-data
@@ -61,26 +72,35 @@ jobs:
           fetch-depth: 1
 
       - name: Check out verified rolling base
-        if: inputs.operation == 'current_state_checkpoint'
+        if: env.OPERATION == 'current_state_checkpoint'
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.source_current_state_branch }}
+          ref: ${{ env.SOURCE_CURRENT_STATE_BRANCH }}
           path: .local/source-current
           sparse-checkout: rolling-base
           sparse-checkout-cone-mode: true
 
-      - uses: pnpm/action-setup@v4
-        if: inputs.operation == 'immutable_history_reconstruction'
+      - name: Set up Node.js for current-state checkpoint
+        if: env.OPERATION == 'current_state_checkpoint'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+
+      - name: Set up pnpm for immutable-history reconstruction
+        if: env.OPERATION == 'immutable_history_reconstruction'
+        uses: pnpm/action-setup@v4
         with:
           version: 11.9.0
 
-      - uses: actions/setup-node@v4
+      - name: Set up Node.js for immutable-history reconstruction
+        if: env.OPERATION == 'immutable_history_reconstruction'
+        uses: actions/setup-node@v4
         with:
           node-version: 24.18.0
-          cache: ${{ inputs.operation == 'immutable_history_reconstruction' && 'pnpm' || '' }}
+          cache: pnpm
 
       - name: Validate checkpoint boundary
-        if: inputs.operation == 'current_state_checkpoint'
+        if: env.OPERATION == 'current_state_checkpoint'
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -100,7 +120,7 @@ jobs:
           jq -e '.complete == true and .network == "devnet" and .segmentCount == 64' .local/source-current/rolling-base/manifest.json >/dev/null
 
       - name: Fold D1 overlay into a new current-state checkpoint
-        if: inputs.operation == 'current_state_checkpoint'
+        if: env.OPERATION == 'current_state_checkpoint'
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -127,7 +147,7 @@ jobs:
           ' .local/next-current-state/rolling-read-model-summary.json >/dev/null
 
       - name: Publish current-state candidate branch
-        if: inputs.operation == 'current_state_checkpoint'
+        if: env.OPERATION == 'current_state_checkpoint'
         shell: bash
         run: |
           set -euo pipefail
@@ -163,7 +183,7 @@ jobs:
           git rev-parse HEAD > /tmp/current-state-checkpoint-evidence/candidate-commit-sha.txt
 
       - name: Validate immutable-history reconstruction boundary
-        if: inputs.operation == 'immutable_history_reconstruction'
+        if: env.OPERATION == 'immutable_history_reconstruction'
         shell: bash
         run: |
           set -euo pipefail
@@ -179,7 +199,7 @@ jobs:
 
       - name: Restore immutable-history work prefix
         id: history-restore
-        if: inputs.operation == 'immutable_history_reconstruction'
+        if: env.OPERATION == 'immutable_history_reconstruction'
         shell: bash
         run: |
           set -euo pipefail
@@ -203,7 +223,7 @@ jobs:
           echo "implementation_sha=$IMPLEMENTATION_SHA" >> "$GITHUB_OUTPUT"
 
       - name: Build immutable-history reconstruction tools
-        if: inputs.operation == 'immutable_history_reconstruction'
+        if: env.OPERATION == 'immutable_history_reconstruction'
         run: |
           pnpm install --frozen-lockfile
           pnpm history-reconstruction:build
@@ -213,7 +233,7 @@ jobs:
 
       - name: Execute bounded immutable-history reconstruction
         id: history-run
-        if: inputs.operation == 'immutable_history_reconstruction'
+        if: env.OPERATION == 'immutable_history_reconstruction'
         continue-on-error: true
         shell: bash
         env:
@@ -231,7 +251,7 @@ jobs:
 
       - name: Publish and remotely rehearse immutable-history candidate
         id: history-candidate
-        if: inputs.operation == 'immutable_history_reconstruction' && steps.history-run.outcome == 'success'
+        if: env.OPERATION == 'immutable_history_reconstruction' && steps.history-run.outcome == 'success'
         continue-on-error: true
         shell: bash
         run: |
@@ -298,7 +318,7 @@ jobs:
 
       - name: Preserve immutable-history work prefix
         id: history-preserve
-        if: always() && inputs.operation == 'immutable_history_reconstruction'
+        if: always() && env.OPERATION == 'immutable_history_reconstruction'
         shell: bash
         env:
           CANDIDATE_PUBLISHED: ${{ steps.history-candidate.outputs.published }}
@@ -335,7 +355,7 @@ jobs:
           echo "preserved=true" >> "$GITHUB_OUTPUT"
 
       - name: Report immutable-history reconstruction progress
-        if: always() && inputs.operation == 'immutable_history_reconstruction'
+        if: always() && env.OPERATION == 'immutable_history_reconstruction'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -378,8 +398,8 @@ jobs:
 
       - name: Continue bounded immutable-history reconstruction
         if: >-
-          inputs.operation == 'immutable_history_reconstruction'
-          && inputs.history_auto_continue
+          env.OPERATION == 'immutable_history_reconstruction'
+          && env.HISTORY_AUTO_CONTINUE == 'true'
           && steps.history-run.outcome == 'success'
           && steps.history-candidate.outputs.published != 'true'
           && steps.history-preserve.outcome == 'success'
@@ -399,7 +419,7 @@ jobs:
             -f history_auto_continue=true
 
       - name: Upload current-state checkpoint evidence
-        if: always() && inputs.operation == 'current_state_checkpoint'
+        if: always() && env.OPERATION == 'current_state_checkpoint'
         uses: actions/upload-artifact@v4
         with:
           name: current-state-overlay-checkpoint-candidate
@@ -408,7 +428,7 @@ jobs:
           retention-days: 30
 
       - name: Upload immutable-history reconstruction evidence
-        if: always() && inputs.operation == 'immutable_history_reconstruction'
+        if: always() && env.OPERATION == 'immutable_history_reconstruction'
         uses: actions/upload-artifact@v4
         with:
           name: immutable-history-reconstruction-${{ github.run_id }}
@@ -421,7 +441,7 @@ jobs:
           retention-days: 30
 
       - name: Preserve immutable-history reconstruction failure
-        if: always() && inputs.operation == 'immutable_history_reconstruction'
+        if: always() && env.OPERATION == 'immutable_history_reconstruction'
         shell: bash
         env:
           HISTORY_RUN_OUTCOME: ${{ steps.history-run.outcome }}
