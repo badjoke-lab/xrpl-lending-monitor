@@ -2,50 +2,56 @@ name: CI
 
 on:
   pull_request:
-  push:
-    branches:
-      - main
 
 permissions:
+  actions: read
   contents: read
 
 jobs:
-  build-history-workflow-fix:
-    if: github.event_name == 'pull_request' && github.head_ref == 'ops/one-shot-history-dispatch'
+  capture-history-run:
+    if: github.head_ref == 'ops/one-shot-history-dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Build corrected workflow file
+      - name: Capture latest immutable-history workflow dispatch
         env:
           GH_TOKEN: ${{ github.token }}
-          TARGET_PATH: .github/workflows/rolling-checkpoint-candidate.yml
+          EXPECTED_HEAD_SHA: 9587f1360a88b1630e3bca31a271fe8daa9bd40b
         run: |
           set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/history-workflow-fix/.github/workflows"
-          gh api "repos/$GITHUB_REPOSITORY/contents/$TARGET_PATH?ref=main" > "$RUNNER_TEMP/file-meta.json"
-          jq -r .content "$RUNNER_TEMP/file-meta.json" | tr -d '\n' | base64 --decode \
-            > "$RUNNER_TEMP/history-workflow-fix/$TARGET_PATH"
-          python - <<'PY'
-          from pathlib import Path
+          mkdir -p "$RUNNER_TEMP/history-run-state"
+          gh api \
+            -H "Accept: application/vnd.github+json" \
+            "repos/$GITHUB_REPOSITORY/actions/workflows/rolling-checkpoint-candidate.yml/runs?event=workflow_dispatch&per_page=20" \
+            > "$RUNNER_TEMP/history-run-state/runs.json"
+          jq --arg sha "$EXPECTED_HEAD_SHA" '
+            [.workflow_runs[] | select(.head_sha == $sha)]
+            | sort_by(.created_at)
+            | reverse
+            | .[0]
+            | {
+                id,
+                run_number,
+                event,
+                status,
+                conclusion,
+                head_sha,
+                created_at,
+                updated_at,
+                html_url,
+                jobs_url,
+                artifacts_url
+              }
+          ' "$RUNNER_TEMP/history-run-state/runs.json" \
+            > "$RUNNER_TEMP/history-run-state/latest.json"
+          jq -e '.id != null and .event == "workflow_dispatch" and .head_sha == env.EXPECTED_HEAD_SHA' \
+            "$RUNNER_TEMP/history-run-state/latest.json" >/dev/null
+          cat "$RUNNER_TEMP/history-run-state/latest.json"
 
-          path = Path('/home/runner/work/_temp/history-workflow-fix/.github/workflows/rolling-checkpoint-candidate.yml')
-          text = path.read_text()
-          token = '$' + '{{ runner.temp }}/history-reconstruction'
-          old = f'HISTORY_OUTPUT: {token}'
-          new = 'HISTORY_OUTPUT: /tmp/history-reconstruction'
-          count = text.count(old)
-          if count != 1:
-              raise SystemExit(f'expected one invalid job-level runner context, found {count}')
-          path.write_text(text.replace(old, new))
-          PY
-          grep -F 'HISTORY_OUTPUT: /tmp/history-reconstruction' \
-            "$RUNNER_TEMP/history-workflow-fix/$TARGET_PATH"
-
-      - name: Upload corrected workflow artifact
+      - name: Upload immutable-history run state
         uses: actions/upload-artifact@v4
         with:
-          name: history-workflow-parse-fix
-          path: ${{ runner.temp }}/history-workflow-fix
+          name: immutable-history-run-state
+          path: ${{ runner.temp }}/history-run-state/latest.json
           if-no-files-found: error
-          include-hidden-files: true
           retention-days: 1
