@@ -34,11 +34,11 @@ async function main() {
     const range = reconstructionSegmentRange(id)
     const segmentId = `${HISTORY_RECONSTRUCTION_EPOCH_ID}-${range.startLedgerIndex}-${range.endLedgerIndex}`
     const directory = join(output, 'segments', String(id).padStart(3, '0'))
-    const fetchMetrics = join(directory, 'fetch.json'); const timeMetrics = join(directory, 'time.txt')
+    const fetchMetrics = join(directory, 'fetch.json')
     await mkdir(directory, { recursive: true })
     const args = ['scripts/history-reconstruction/measure-segment-wrapper.mjs', '--local', '--endpoint', endpoint, '--read-window-size', String(RECONSTRUCTION_MEASUREMENT_READ_WINDOW_SIZE), '--start-ledger', String(range.startLedgerIndex), '--end-ledger', String(range.endLedgerIndex), '--epoch-id', HISTORY_RECONSTRUCTION_EPOCH_ID, '--segment-id', segmentId, '--output-dir', directory, '--source-revision', process.env.GITHUB_SHA ?? 'local']
     const started = performance.now()
-    const execution = await run('/usr/bin/time', ['-v', '-o', timeMetrics, process.execPath, ...args], { env: { ...process.env, MEASUREMENT_FETCH_METRICS: fetchMetrics }, maxBuffer: 16 * 1024 * 1024 })
+    const execution = await run('/usr/bin/time', ['-v', process.execPath, ...args], { env: { ...process.env, MEASUREMENT_FETCH_METRICS: fetchMetrics }, maxBuffer: 16 * 1024 * 1024 })
     await writeFile(join(directory, 'builder.stdout.log'), execution.stdout)
     await writeFile(join(directory, 'builder.stderr.log'), execution.stderr)
     const manifest = JSON.parse(await readFile(join(directory, 'manifest.json'), 'utf8')) as HistorySegmentManifest
@@ -77,7 +77,7 @@ async function main() {
     if (id === 224 && (!witnessTransaction || !witnessObject)) throw new Error('Fixed segment 224 witness is absent')
     const planned = await planExactSpill(exactInputs); const fetch = JSON.parse(await readFile(fetchMetrics, 'utf8'))
     appendWithoutArgumentSpread(representativeExactInputs, exactInputs)
-    const time = await readFile(timeMetrics, 'utf8')
+    const time = execution.stderr
     measurements.push({ segmentId: id, range, firstParentHash: manifest.startParentHash, terminalHash: manifest.endLedgerHash, wallMilliseconds: Math.round(performance.now() - started), cpuUserSeconds: Number(/User time \(seconds\): ([\d.]+)/.exec(time)?.[1] ?? 0), cpuSystemSeconds: Number(/System time \(seconds\): ([\d.]+)/.exec(time)?.[1] ?? 0), peakRssKiB: Number(/Maximum resident set size \(kbytes\): (\d+)/.exec(time)?.[1] ?? 0), endpoint, rpc: fetch, files: measuredFiles, compressedBytes, decompressedBytes, semanticCounts: semantic, exactRecords: planned.length, witness: id === 224 ? { transactionFound: witnessTransaction, objectChangeFound: witnessObject } : null, productionMutation: false })
   }
   activeSegmentId = null
