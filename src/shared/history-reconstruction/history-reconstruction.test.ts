@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { canonicalJson, sha256Hex } from '../current-state/canonical-json'
 import type { HistoryExactIndexRecord } from '../history-segments/exact-index'
+import { HISTORY_SEGMENT_FILE_KINDS } from '../history-segments/manifest'
 import { planExactSpill, splitExactSuperBuckets } from './exact-spill'
 import { assertFixtureContinuity, findFixtureWitness, HISTORY_RECONSTRUCTION_FIXTURE } from './fixture'
 import { assertProductionHistoryPath, planFinalTree } from './final-tree'
@@ -15,6 +16,7 @@ import {
   reconstructionSegmentRange,
 } from './identity'
 import { classifyCheckpointPlan, discoverResume } from './resume'
+import { assertReadOnlyMeasurementSummary, RECONSTRUCTION_MEASUREMENT_READ_WINDOW_SIZE, RECONSTRUCTION_MEASUREMENT_SEGMENTS, RECONSTRUCTION_PROTECTION_PATHS } from './measurement'
 import {
   assertAttempt,
   assertFinalReadiness,
@@ -159,6 +161,27 @@ describe('bounded four-segment fixture', () => {
       })),
     }
     expect(() => assertFixtureContinuity(fixture)).toThrow('parent-hash discontinuity')
+  })
+})
+
+describe('read-only measurement evidence', () => {
+  it('uses the bounded supported read window', () => expect(RECONSTRUCTION_MEASUREMENT_READ_WINDOW_SIZE).toBe(16))
+
+  it('requires the fixed 12 ranges, seven files, witness, and no production mutation', () => {
+    const segments = RECONSTRUCTION_MEASUREMENT_SEGMENTS.map((id) => ({ segmentId: id, range: reconstructionSegmentRange(id), firstParentHash: H('A'), terminalHash: H('B'), wallMilliseconds: 1, cpuUserSeconds: 1, cpuSystemSeconds: 1, peakRssKiB: 1, endpoint: 'fixture', rpc: { requests: 1, retries: 0, timeouts: 0, errors: 0, responseClasses: {} }, files: HISTORY_SEGMENT_FILE_KINDS.map((kind) => ({ kind, compressedBytes: 1, decompressedBytes: 1, recordCount: 0 })), compressedBytes: 7, decompressedBytes: 7, semanticCounts: { protocolEvents: 0, objectChanges: 0, loanLifecycle: 0, archivedObjects: 0, balanceHistory: 0 }, exactRecords: 0, witness: id === 224 ? { transactionFound: true, objectChangeFound: true } : null, productionMutation: false }))
+    const exactIndexMeasurement = { extractedRecords: 0, semanticRecords: 0, amplification: null, serializedBytes: 0, peakRssKiB: 1, bucketDistribution: Array.from({ length: 256 }, () => 0), superBucketDistribution: Array.from({ length: 16 }, () => 0), productionMutation: false }
+    const localGitMeasurement = { beforePack: 'count: 1', afterPack: 'packs: 1', packBytes: 1, largestBlob: 1, productionMutation: false }
+    const githubProtection = RECONSTRUCTION_PROTECTION_PATHS.map((path) => ({ path, status: 404, body: { unavailable: true } }))
+    const summary = { schemaVersion: 1, kind: 'read-only-history-reconstruction-measurement', status: 'passed', failures: [], segments, exactIndexMeasurement, localGitMeasurement, githubProtection, productionMutation: false }
+    expect(() => assertReadOnlyMeasurementSummary(summary)).not.toThrow()
+    expect(() => assertReadOnlyMeasurementSummary({ ...summary, productionMutation: true })).toThrow()
+    expect(() => assertReadOnlyMeasurementSummary({ ...summary, segments: segments.map((segment) => segment.segmentId === 224 ? { ...segment, witness: { transactionFound: true, objectChangeFound: false } } : segment) })).toThrow('witness')
+    expect(() => assertReadOnlyMeasurementSummary({ ...summary, localGitMeasurement: undefined })).toThrow('localGitMeasurement')
+    expect(() => assertReadOnlyMeasurementSummary({ ...summary, segments: segments.map((segment, index) => index === 0 ? { ...segment, peakRssKiB: -1 } : segment) })).toThrow('peakRssKiB')
+    expect(() => assertReadOnlyMeasurementSummary({ ...summary, githubProtection: githubProtection.slice(1) })).toThrow('incomplete')
+    expect(() => assertReadOnlyMeasurementSummary({ ...summary, githubProtection: githubProtection.map((entry, index) => index === 1 ? githubProtection[0]! : entry) })).toThrow('duplicated')
+    expect(() => assertReadOnlyMeasurementSummary({ ...summary, exactIndexMeasurement: { ...exactIndexMeasurement, productionMutation: true } })).toThrow('mutation')
+    expect(() => assertReadOnlyMeasurementSummary({ schemaVersion: 1, kind: summary.kind, status: 'failed', failures: ['RPC timeout'], failedSegmentId: 32, failedPhase: 'segment-generation', segments: segments.slice(0, 2), productionMutation: false })).not.toThrow()
   })
 })
 

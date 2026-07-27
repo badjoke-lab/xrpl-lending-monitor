@@ -17,6 +17,7 @@
     "build:artifact-measurement": "vite build --config vite.artifact-measurement.config.ts",
     "build:release-current-state": "vite build --config vite.release-current-state.config.ts",
     "build:history-segment": "vite build --config vite.history-segment.config.ts",
+    "build:history-reconstruction-measurement": "vite build --config vite.history-reconstruction-measurement.config.ts",
     "build:history-segment-checkpoint": "vite build --config vite.history-segment-checkpoint.config.ts",
     "build:history-segment-chain": "vite build --config vite.history-segment-chain.config.ts",
     "build:history-segment-publication": "vite build --config vite.history-segment-publication.config.ts",
