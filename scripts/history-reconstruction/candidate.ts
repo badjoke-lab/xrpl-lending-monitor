@@ -37,6 +37,7 @@ import {
 import { buildAllExactBuckets, exactDirectory, inspectExactAssets } from './exact-runner'
 
 const unzip = promisify(gunzip)
+const COMMIT_SHA = /^[a-f0-9]{40}$/
 const WITNESS = {
   ledgerIndex: 3_913_030,
   transactionHash: '70A489701D68B89E04923A7845F81F2C615760992C55119A8FC0ED8C759DE684',
@@ -149,7 +150,7 @@ async function buildExactManifest(
   return manifest
 }
 
-export async function finalizeCandidate(options: {
+export async function buildCandidateAssets(options: {
   outputDir: string
   checkpoints: readonly RawCheckpoint[]
   sourceRevision: string
@@ -162,12 +163,37 @@ export async function finalizeCandidate(options: {
   await buildAllExactBuckets(options.outputDir)
   const publication = await buildPublication(options.outputDir, options.checkpoints, options.sourceRevision)
   const exactManifest = await buildExactManifest(options.outputDir, publication, options.sourceRevision)
-  const publicationText = `${canonicalJson(publication)}\n`
-  const exactManifestText = `${canonicalJson(exactManifest)}\n`
+  await writeAtomic(join(options.outputDir, 'evidence', 'candidate-assets.json'), `${canonicalJson({
+    schemaVersion: 1,
+    kind: 'history-reconstruction-candidate-assets',
+    reconstructionId: HISTORY_RECONSTRUCTION_ID,
+    publicationSha256: publication.publicationSha256,
+    exactManifestSha256: exactManifest.manifestSha256,
+    segmentCount: publication.segmentCount,
+    bucketCount: exactManifest.bucketCount,
+    witnessPassed: true,
+    productionMutation: false,
+  })}\n`)
+}
+
+export async function finalizeCandidateChannel(options: {
+  outputDir: string
+  dataCommitSha: string
+}): Promise<void> {
+  if (!COMMIT_SHA.test(options.dataCommitSha)) throw new Error('Candidate data commit SHA is invalid')
+  const publicationText = await readFile(join(options.outputDir, 'candidate', 'history', 'publication.json'), 'utf8')
+  const exactManifestText = await readFile(join(exactDirectory(options.outputDir), 'manifest.json'), 'utf8')
+  const publication = JSON.parse(publicationText) as HistorySegmentChainPublication
+  const exactManifest = JSON.parse(exactManifestText) as HistoryExactIndexManifest
+  await assertHistorySegmentPublicationDigest(publication)
+  assertHistoryExactIndexManifest(exactManifest, publication)
+  if (await historyExactIndexManifestDigest(exactManifest) !== exactManifest.manifestSha256) {
+    throw new Error('Candidate exact manifest semantic digest mismatch')
+  }
   await writeAtomic(join(options.outputDir, 'candidate', 'history-channel.json'), `${canonicalJson({
     schemaVersion: 1,
     active: {
-      dataCommitSha: options.sourceRevision,
+      dataCommitSha: options.dataCommitSha,
       publicationPath: 'history/publication.json',
       publicationSha256: await sha256Hex(utf8(publicationText)),
       chainId: publication.chainId,
@@ -190,6 +216,7 @@ export async function finalizeCandidate(options: {
     schemaVersion: 1,
     kind: 'history-reconstruction-candidate-tree',
     reconstructionId: HISTORY_RECONSTRUCTION_ID,
+    dataCommitSha: options.dataCommitSha,
     entries: tree,
     witnessPassed: true,
     remoteRehearsalPassed: false,
