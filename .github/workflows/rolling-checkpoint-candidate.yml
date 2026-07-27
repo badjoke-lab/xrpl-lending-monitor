@@ -1,8 +1,16 @@
-name: Current-state overlay checkpoint candidate
+name: Current-state and immutable-history candidate builder
 
 on:
   workflow_dispatch:
     inputs:
+      operation:
+        description: Candidate operation
+        required: true
+        default: current_state_checkpoint
+        type: choice
+        options:
+          - current_state_checkpoint
+          - immutable_history_reconstruction
       source_current_state_branch:
         description: Source current-state branch with a verified rolling base
         required: true
@@ -13,13 +21,24 @@ on:
         required: true
         default: current-state-four-hour-a-data
         type: string
+      history_max_segments:
+        description: Maximum fixed reconstruction segments per run
+        required: true
+        default: '64'
+        type: string
+      history_auto_continue:
+        description: Dispatch the next bounded reconstruction run after preserved partial success
+        required: true
+        default: true
+        type: boolean
 
 permissions:
   contents: write
-  actions: read
+  actions: write
+  issues: write
 
 concurrency:
-  group: current-state-overlay-checkpoint-candidate
+  group: rolling-checkpoint-candidate-${{ inputs.operation }}
   cancel-in-progress: false
 
 jobs:
@@ -27,11 +46,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 360
     env:
+      OPERATION: ${{ inputs.operation }}
       SOURCE_CURRENT_STATE_BRANCH: ${{ inputs.source_current_state_branch }}
       CURRENT_STATE_CANDIDATE_BRANCH: ${{ inputs.current_state_candidate_branch }}
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      D1_DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
+      HISTORY_MAX_SEGMENTS: ${{ inputs.history_max_segments }}
+      HISTORY_WORK_BRANCH: history-repair-3932301-work
+      HISTORY_CANDIDATE_BRANCH: history-repair-3932301-data
+      HISTORY_CURRENT_STATE_BRANCH: current-state-data
+      HISTORY_OUTPUT: ${{ runner.temp }}/history-reconstruction
     steps:
       - name: Check out implementation
         uses: actions/checkout@v4
@@ -39,6 +61,7 @@ jobs:
           fetch-depth: 1
 
       - name: Check out verified rolling base
+        if: inputs.operation == 'current_state_checkpoint'
         uses: actions/checkout@v4
         with:
           ref: ${{ inputs.source_current_state_branch }}
@@ -46,12 +69,22 @@ jobs:
           sparse-checkout: rolling-base
           sparse-checkout-cone-mode: true
 
+      - uses: pnpm/action-setup@v4
+        if: inputs.operation == 'immutable_history_reconstruction'
+        with:
+          version: 11.9.0
+
       - uses: actions/setup-node@v4
         with:
           node-version: 24.18.0
+          cache: ${{ inputs.operation == 'immutable_history_reconstruction' && 'pnpm' || '' }}
 
       - name: Validate checkpoint boundary
+        if: inputs.operation == 'current_state_checkpoint'
         shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
           test -n "$CLOUDFLARE_API_TOKEN"
@@ -67,7 +100,12 @@ jobs:
           jq -e '.complete == true and .network == "devnet" and .segmentCount == 64' .local/source-current/rolling-base/manifest.json >/dev/null
 
       - name: Fold D1 overlay into a new current-state checkpoint
+        if: inputs.operation == 'current_state_checkpoint'
         shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          D1_DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
         run: |
           set -euo pipefail
           rm -rf .local/next-current-state /tmp/current-state-checkpoint-evidence
@@ -89,6 +127,7 @@ jobs:
           ' .local/next-current-state/rolling-read-model-summary.json >/dev/null
 
       - name: Publish current-state candidate branch
+        if: inputs.operation == 'current_state_checkpoint'
         shell: bash
         run: |
           set -euo pipefail
@@ -123,11 +162,278 @@ jobs:
           git push --force origin "HEAD:refs/heads/$CURRENT_STATE_CANDIDATE_BRANCH"
           git rev-parse HEAD > /tmp/current-state-checkpoint-evidence/candidate-commit-sha.txt
 
+      - name: Validate immutable-history reconstruction boundary
+        if: inputs.operation == 'immutable_history_reconstruction'
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$HISTORY_MAX_SEGMENTS" =~ ^[0-9]+$ ]]
+          test "$HISTORY_MAX_SEGMENTS" -ge 1
+          test "$HISTORY_MAX_SEGMENTS" -le 263
+          test "$HISTORY_WORK_BRANCH" = history-repair-3932301-work
+          test "$HISTORY_CANDIDATE_BRANCH" = history-repair-3932301-data
+          test "$HISTORY_CURRENT_STATE_BRANCH" = current-state-data
+          git check-ref-format --branch "$HISTORY_WORK_BRANCH" >/dev/null
+          git check-ref-format --branch "$HISTORY_CANDIDATE_BRANCH" >/dev/null
+          jq -e '.triggers.crons == ["*/5 * * * *"] and .vars.APP_NETWORK == "devnet" and .vars.MAINNET_ENABLED == "false"' wrangler.jsonc >/dev/null
+
+      - name: Restore immutable-history work prefix
+        id: history-restore
+        if: inputs.operation == 'immutable_history_reconstruction'
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "$HISTORY_OUTPUT" "$RUNNER_TEMP/history-work-restore"
+          if git ls-remote --exit-code origin "refs/heads/$HISTORY_WORK_BRANCH" >/dev/null 2>&1; then
+            git fetch --depth=1 origin "refs/heads/$HISTORY_WORK_BRANCH:refs/remotes/origin/$HISTORY_WORK_BRANCH"
+            mkdir -p "$RUNNER_TEMP/history-work-restore"
+            git archive "refs/remotes/origin/$HISTORY_WORK_BRANCH" reconstruction \
+              | tar -x -C "$RUNNER_TEMP/history-work-restore"
+            mv "$RUNNER_TEMP/history-work-restore/reconstruction" "$HISTORY_OUTPUT"
+            IMPLEMENTATION_SHA="$(jq -r .sourceRevision "$HISTORY_OUTPUT/plan.json")"
+            printf '%s\n' "$IMPLEMENTATION_SHA" | grep -Eq '^[a-f0-9]{40}$'
+            git fetch --depth=1 origin "$IMPLEMENTATION_SHA"
+            git checkout --detach "$IMPLEMENTATION_SHA"
+            echo "restored=true" >> "$GITHUB_OUTPUT"
+          else
+            mkdir -p "$HISTORY_OUTPUT"
+            IMPLEMENTATION_SHA="$(git rev-parse HEAD)"
+            echo "restored=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "implementation_sha=$IMPLEMENTATION_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Build immutable-history reconstruction tools
+        if: inputs.operation == 'immutable_history_reconstruction'
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm history-reconstruction:build
+          pnpm build:candidate-source-rehearsal
+          cp -R .history-reconstruction-finalizer-build "$RUNNER_TEMP/history-finalizer-build"
+          cp -R .candidate-source-rehearsal-build "$RUNNER_TEMP/candidate-rehearsal-build"
+
+      - name: Execute bounded immutable-history reconstruction
+        id: history-run
+        if: inputs.operation == 'immutable_history_reconstruction'
+        continue-on-error: true
+        shell: bash
+        env:
+          IMPLEMENTATION_SHA: ${{ steps.history-restore.outputs.implementation_sha }}
+        run: |
+          set -euo pipefail
+          node .history-reconstruction-runner-build/run-history-reconstruction.mjs \
+            --local \
+            --endpoint https://clio.devnet.rippletest.net:51234/ \
+            --read-window-size 16 \
+            --max-segments "$HISTORY_MAX_SEGMENTS" \
+            --source-revision "$IMPLEMENTATION_SHA" \
+            --output-dir "$HISTORY_OUTPUT" \
+            | tee "$RUNNER_TEMP/history-reconstruction.stdout.json"
+
+      - name: Publish and remotely rehearse immutable-history candidate
+        id: history-candidate
+        if: inputs.operation == 'immutable_history_reconstruction' && steps.history-run.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          STATUS="$(jq -r .status "$HISTORY_OUTPUT/summary.json")"
+          if test "$STATUS" != candidate-assets-ready; then
+            echo "published=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          rm -rf "$RUNNER_TEMP/history-candidate-copy"
+          mkdir -p "$RUNNER_TEMP/history-candidate-copy"
+          cp -R "$HISTORY_OUTPUT/candidate/." "$RUNNER_TEMP/history-candidate-copy/"
+          test ! -e "$RUNNER_TEMP/history-candidate-copy/history-channel.json"
+
+          OLD_CANDIDATE_SHA="$(git ls-remote origin "refs/heads/$HISTORY_CANDIDATE_BRANCH" | awk '{print $1}')"
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git checkout --orphan immutable-history-candidate-publish
+          git rm -rf . || true
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -R "$RUNNER_TEMP/history-candidate-copy/." .
+          git add history
+          git commit -m "Publish reconstructed immutable-history candidate assets"
+          DATA_SHA="$(git rev-parse HEAD)"
+
+          node "$RUNNER_TEMP/history-finalizer-build/finalize-history-reconstruction-candidate.mjs" \
+            --local \
+            --output-dir "$HISTORY_OUTPUT" \
+            --data-commit-sha "$DATA_SHA"
+          cp "$HISTORY_OUTPUT/candidate/history-channel.json" history-channel.json
+          git add history-channel.json
+          git commit -m "Activate reconstructed immutable-history candidate"
+          CANDIDATE_SHA="$(git rev-parse HEAD)"
+          if test -n "$OLD_CANDIDATE_SHA"; then
+            git push --force-with-lease="refs/heads/$HISTORY_CANDIDATE_BRANCH:$OLD_CANDIDATE_SHA" \
+              origin "HEAD:refs/heads/$HISTORY_CANDIDATE_BRANCH"
+          else
+            git push origin "HEAD:refs/heads/$HISTORY_CANDIDATE_BRANCH"
+          fi
+          test "$(git ls-remote origin "refs/heads/$HISTORY_CANDIDATE_BRANCH" | awk '{print $1}')" = "$CANDIDATE_SHA"
+
+          node "$RUNNER_TEMP/candidate-rehearsal-build/rehearse-candidate-sources.mjs" \
+            --local \
+            --repository "$GITHUB_REPOSITORY" \
+            --history-branch "$HISTORY_CANDIDATE_BRANCH" \
+            --current-state-branch "$HISTORY_CURRENT_STATE_BRANCH" \
+            > "$HISTORY_OUTPUT/evidence/remote-rehearsal.json"
+          jq -e '
+            .passed == true
+            and .ledgerIndex == 3932301
+            and .ledgerHash == "7D026FED85BCA2BDCFE450A0F3537707A43B4D08E1D2AE57AFBC54D88EBE1828"
+            and (.exactReads | length) == 3
+          ' "$HISTORY_OUTPUT/evidence/remote-rehearsal.json" >/dev/null
+          jq --arg candidateBranchHead "$CANDIDATE_SHA" \
+            '.remoteRehearsalPassed = true | .candidateBranchHead = $candidateBranchHead' \
+            "$HISTORY_OUTPUT/evidence/final-tree.json" \
+            > "$HISTORY_OUTPUT/evidence/final-tree.tmp.json"
+          mv "$HISTORY_OUTPUT/evidence/final-tree.tmp.json" "$HISTORY_OUTPUT/evidence/final-tree.json"
+          printf '%s\n' "$DATA_SHA" > "$HISTORY_OUTPUT/evidence/candidate-data-commit-sha.txt"
+          printf '%s\n' "$CANDIDATE_SHA" > "$HISTORY_OUTPUT/evidence/candidate-branch-head.txt"
+          echo "published=true" >> "$GITHUB_OUTPUT"
+          echo "candidate_sha=$CANDIDATE_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Preserve immutable-history work prefix
+        id: history-preserve
+        if: always() && inputs.operation == 'immutable_history_reconstruction'
+        shell: bash
+        env:
+          CANDIDATE_PUBLISHED: ${{ steps.history-candidate.outputs.published }}
+        run: |
+          set -euo pipefail
+          OLD_WORK_SHA="$(git ls-remote origin "refs/heads/$HISTORY_WORK_BRANCH" | awk '{print $1}')"
+          if test "$CANDIDATE_PUBLISHED" = true; then
+            if test -n "$OLD_WORK_SHA"; then
+              git push origin --delete "$HISTORY_WORK_BRANCH"
+            fi
+            echo "preserved=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          test -f "$HISTORY_OUTPUT/plan.json"
+          test -f "$HISTORY_OUTPUT/summary.json"
+          rm -rf "$RUNNER_TEMP/history-work-publish"
+          mkdir -p "$RUNNER_TEMP/history-work-publish/reconstruction"
+          cp -R "$HISTORY_OUTPUT/." "$RUNNER_TEMP/history-work-publish/reconstruction/"
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git checkout --orphan immutable-history-work-publish
+          git rm -rf . || true
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -R "$RUNNER_TEMP/history-work-publish/." .
+          git add reconstruction
+          git commit -m "Preserve resumable immutable-history reconstruction prefix"
+          if test -n "$OLD_WORK_SHA"; then
+            git push --force-with-lease="refs/heads/$HISTORY_WORK_BRANCH:$OLD_WORK_SHA" \
+              origin "HEAD:refs/heads/$HISTORY_WORK_BRANCH"
+          else
+            git push origin "HEAD:refs/heads/$HISTORY_WORK_BRANCH"
+          fi
+          echo "preserved=true" >> "$GITHUB_OUTPUT"
+
+      - name: Report immutable-history reconstruction progress
+        if: always() && inputs.operation == 'immutable_history_reconstruction'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HISTORY_RUN_OUTCOME: ${{ steps.history-run.outcome }}
+          CANDIDATE_OUTCOME: ${{ steps.history-candidate.outcome }}
+          CANDIDATE_PUBLISHED: ${{ steps.history-candidate.outputs.published }}
+          CANDIDATE_SHA: ${{ steps.history-candidate.outputs.candidate_sha }}
+          WORK_PRESERVED: ${{ steps.history-preserve.outputs.preserved }}
+        run: |
+          set -euo pipefail
+          RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          if test -f "$HISTORY_OUTPUT/summary.json"; then
+            STATUS="$(jq -r .status "$HISTORY_OUTPUT/summary.json")"
+            COMPLETED="$(jq -r .completedSegments "$HISTORY_OUTPUT/summary.json")"
+            NEXT="$(jq -r '.nextSegmentId // "none"' "$HISTORY_OUTPUT/summary.json")"
+            FAILURE="$(jq -c .failure "$HISTORY_OUTPUT/summary.json")"
+          else
+            STATUS=missing-summary
+            COMPLETED=0
+            NEXT=unknown
+            FAILURE='"summary_missing"'
+          fi
+          {
+            echo "## Immutable-history reconstruction progress"
+            echo
+            echo "- workflow run: $RUN_URL"
+            echo "- status: $STATUS"
+            echo "- completed segments: $COMPLETED / 263"
+            echo "- next segment: $NEXT"
+            echo "- runner outcome: $HISTORY_RUN_OUTCOME"
+            echo "- work prefix preserved: ${WORK_PRESERVED:-false}"
+            echo "- candidate published: ${CANDIDATE_PUBLISHED:-false}"
+            echo "- candidate branch head: ${CANDIDATE_SHA:-not-applicable}"
+            echo "- failure: $FAILURE"
+            echo "- production history mutation: none"
+            echo "- D1 mutation: none"
+            echo "- Worker deploy: none"
+          } > "$RUNNER_TEMP/history-progress.md"
+          gh issue comment 995 --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/history-progress.md"
+
+      - name: Continue bounded immutable-history reconstruction
+        if: >-
+          inputs.operation == 'immutable_history_reconstruction'
+          && inputs.history_auto_continue
+          && steps.history-run.outcome == 'success'
+          && steps.history-candidate.outputs.published != 'true'
+          && steps.history-preserve.outcome == 'success'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$(jq -r .status "$HISTORY_OUTPUT/summary.json")" = incomplete
+          gh workflow run rolling-checkpoint-candidate.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f operation=immutable_history_reconstruction \
+            -f source_current_state_branch="$SOURCE_CURRENT_STATE_BRANCH" \
+            -f current_state_candidate_branch="$CURRENT_STATE_CANDIDATE_BRANCH" \
+            -f history_max_segments="$HISTORY_MAX_SEGMENTS" \
+            -f history_auto_continue=true
+
       - name: Upload current-state checkpoint evidence
-        if: ${{ always() }}
+        if: always() && inputs.operation == 'current_state_checkpoint'
         uses: actions/upload-artifact@v4
         with:
           name: current-state-overlay-checkpoint-candidate
           path: /tmp/current-state-checkpoint-evidence
           if-no-files-found: warn
           retention-days: 30
+
+      - name: Upload immutable-history reconstruction evidence
+        if: always() && inputs.operation == 'immutable_history_reconstruction'
+        uses: actions/upload-artifact@v4
+        with:
+          name: immutable-history-reconstruction-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/history-reconstruction/summary.json
+            ${{ runner.temp }}/history-reconstruction/plan.json
+            ${{ runner.temp }}/history-reconstruction/evidence
+            ${{ runner.temp }}/history-reconstruction.stdout.json
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Preserve immutable-history reconstruction failure
+        if: always() && inputs.operation == 'immutable_history_reconstruction'
+        shell: bash
+        env:
+          HISTORY_RUN_OUTCOME: ${{ steps.history-run.outcome }}
+          CANDIDATE_OUTCOME: ${{ steps.history-candidate.outcome }}
+          CANDIDATE_PUBLISHED: ${{ steps.history-candidate.outputs.published }}
+        run: |
+          set -euo pipefail
+          test "$HISTORY_RUN_OUTCOME" = success
+          STATUS="$(jq -r .status "$HISTORY_OUTPUT/summary.json")"
+          if test "$STATUS" = candidate-assets-ready; then
+            test "$CANDIDATE_OUTCOME" = success
+            test "$CANDIDATE_PUBLISHED" = true
+          else
+            test "$STATUS" = incomplete
+          fi
