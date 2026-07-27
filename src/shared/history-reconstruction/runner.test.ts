@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest'
 
 import type { HistorySegmentManifest } from '../history-segments/manifest'
+import { planFinalTree } from './final-tree'
 import {
   HISTORY_RECONSTRUCTION_ACTIVE_END_HASH,
   HISTORY_RECONSTRUCTION_EPOCH_ID,
   reconstructionSegmentRange,
 } from './identity'
+import { discoverResume } from './resume'
 import {
   assertAppendableCheckpoint,
   buildRawCheckpoint,
@@ -64,6 +66,7 @@ describe('immutable history reconstruction runner primitives', () => {
       '0001.json',
     ])).toEqual(['0000.json', '0001.json', '0002.json'])
     expect(checkpointFileName(262)).toBe('0262.json')
+    expect(() => committedCheckpointFiles(['0000.json', 'operator-notes.txt'])).toThrow('Unexpected checkpoint file')
   })
 
   it('covers all 263 segments with exactly 33 deterministic spill shards', () => {
@@ -113,6 +116,19 @@ describe('immutable history reconstruction runner primitives', () => {
     })
   })
 
+  it('fails closed on conflicting checkpoint digests', async () => {
+    const manifest = manifestFor(0, { terminalHash: '1'.repeat(64) })
+    const checkpoint = await buildRawCheckpoint({
+      segmentId: 0,
+      manifest,
+      manifestText: `${JSON.stringify(manifest)}\n`,
+      sourceImplementationSha: SOURCE_SHA,
+      predecessor: null,
+    })
+    const conflict = { ...checkpoint, terminalHash: '9'.repeat(64) }
+    await expect(discoverResume([checkpoint, conflict])).rejects.toThrow('Conflicting checkpoint digests')
+  })
+
   it('fails closed on a parent-hash discontinuity', async () => {
     const firstManifest = manifestFor(0, { terminalHash: '1'.repeat(64) })
     const first = await buildRawCheckpoint({
@@ -136,5 +152,18 @@ describe('immutable history reconstruction runner primitives', () => {
       sourceImplementationSha: SOURCE_SHA,
       predecessor: { checkpoint: first, digest: firstDigest },
     })).rejects.toThrow('Parent-hash discontinuity')
+  })
+
+  it('fails closed when one of the 256 exact-index buckets is absent', () => {
+    const entries = [
+      { path: 'history-channel.json', sha256: FILE_SHA },
+      { path: 'history/publication.json', sha256: FILE_SHA },
+      { path: 'history/index/exact/manifest.json', sha256: FILE_SHA },
+      ...Array.from({ length: 255 }, (_, bucket) => ({
+        path: `history/index/exact/${String(bucket).padStart(4, '0')}.ndjson.gz`,
+        sha256: FILE_SHA,
+      })),
+    ]
+    expect(() => planFinalTree(entries)).toThrow('exactly 256 exact-index buckets')
   })
 })
