@@ -1,4 +1,4 @@
-import { mkdir } from 'node:fs/promises'
+import { mkdir, readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 
 import { canonicalJson } from '../src/shared/current-state/canonical-json'
@@ -12,8 +12,10 @@ import { discoverResume } from '../src/shared/history-reconstruction/resume'
 import type { RawCheckpoint } from '../src/shared/history-reconstruction/schema'
 import { buildCandidateAssets } from './history-reconstruction/candidate'
 import {
+  exists,
   type ReconstructionRuntimeOptions,
   writeAtomic,
+  writeExclusiveCanonical,
 } from './history-reconstruction/common'
 import {
   completeSegment,
@@ -61,6 +63,27 @@ function parseArguments(args: readonly string[]): ReconstructionRuntimeOptions {
   }
 }
 
+async function freezePlan(runtime: ReconstructionRuntimeOptions): Promise<void> {
+  const path = join(runtime.outputDir, 'plan.json')
+  const plan = {
+    schemaVersion: 1,
+    kind: 'immutable-history-reconstruction-plan',
+    reconstructionId: HISTORY_RECONSTRUCTION_ID,
+    sourceRevision: runtime.sourceRevision,
+    endpoint: runtime.endpoint,
+    readWindowSize: runtime.readWindowSize,
+    productionMutation: false,
+  }
+  if (await exists(path)) {
+    const existing = JSON.parse(await readFile(path, 'utf8')) as unknown
+    if (canonicalJson(existing) !== canonicalJson(plan)) {
+      throw new Error('Reconstruction resume plan identity mismatch')
+    }
+    return
+  }
+  await writeExclusiveCanonical(path, plan)
+}
+
 async function writeSummary(options: {
   outputDir: string
   checkpoints: readonly RawCheckpoint[]
@@ -84,6 +107,7 @@ async function writeSummary(options: {
 
 async function main(runtime: ReconstructionRuntimeOptions): Promise<void> {
   await mkdir(runtime.outputDir, { recursive: true })
+  await freezePlan(runtime)
   let checkpoints = await readCheckpoints(runtime.outputDir)
   let next = nextSegmentId(checkpoints)
   let processed = 0
