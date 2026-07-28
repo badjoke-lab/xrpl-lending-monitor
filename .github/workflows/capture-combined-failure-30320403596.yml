@@ -1,4 +1,4 @@
-name: Capture chunked bootstrap failure 30333589268
+name: Capture complete chunk bootstrap failure 30333774273
 
 on:
   pull_request:
@@ -21,7 +21,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          JOB_ID: '90193709228'
+          JOB_ID: '90194262918'
         shell: bash
         run: |
           set -euo pipefail
@@ -42,7 +42,7 @@ jobs:
       - name: Upload exact failed job evidence
         uses: actions/upload-artifact@v4
         with:
-          name: chunked-bootstrap-failure-30333589268
+          name: complete-chunk-bootstrap-failure-30333774273
           path: evidence
           if-no-files-found: error
           retention-days: 30
