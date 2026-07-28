@@ -95,8 +95,10 @@ jobs:
         run: |
           set -euo pipefail
           EVIDENCE="$RUNNER_TEMP/combined-history-evidence"
-          rm -rf "$EVIDENCE" .local/combined
-          mkdir -p "$EVIDENCE" .local/combined
+          rm -rf "$EVIDENCE" "$RUNNER_TEMP/combined-exact"
+          mkdir -p "$EVIDENCE"
+          df -h > "$EVIDENCE/disk-before.txt"
+          du -sh .local/base-history .local/delta-history > "$EVIDENCE/source-sizes.txt"
 
           MAIN_SHA="$(git rev-parse HEAD)"
           BASE_HEAD="$(git -C .local/base-history rev-parse HEAD)"
@@ -108,9 +110,10 @@ jobs:
           printf '%s\n' "$BASE_DATA" > "$EVIDENCE/base-data-commit.txt"
           printf '%s\n' "$DELTA_HEAD" > "$EVIDENCE/delta-branch-head.txt"
           printf '%s\n' "$DELTA_DATA" > "$EVIDENCE/delta-data-commit.txt"
+          cp .local/base-history/history/publication.json "$EVIDENCE/base-publication.json"
 
           jq -e '.endLedgerIndex == 3800885 and .segmentCount == 873' \
-            .local/base-history/history/publication.json >/dev/null
+            "$EVIDENCE/base-publication.json" >/dev/null
           jq -e --arg hash "$TARGET_HASH" '
             .startLedgerIndex == 3800886
             and .endLedgerIndex == 3932301
@@ -120,7 +123,7 @@ jobs:
 
           node .history-extension-plan-build/plan-history-extension.mjs \
             --local \
-            --publication .local/base-history/history/publication.json \
+            --publication "$EVIDENCE/base-publication.json" \
             --target-ledger "$TARGET_LEDGER" \
             --target-ledger-hash "$TARGET_HASH" \
             --segment-ledgers 500 \
@@ -151,13 +154,11 @@ jobs:
           printf '\n' >> "$tmp"
           mv "$tmp" "$FIRST"
 
-          mapfile -t MANIFESTS < <(
-            find .local/delta-history/history/devnet-3371675 \
-              -mindepth 2 -maxdepth 2 -type f -name manifest.json | sort -V
-          )
-          test "${#MANIFESTS[@]}" -eq 263
           ARGS=()
-          for manifest in "${MANIFESTS[@]}"; do ARGS+=(--manifest "$manifest"); done
+          while IFS= read -r segment_id; do
+            ARGS+=(--manifest ".local/delta-history/history/devnet-3371675/$segment_id/manifest.json")
+          done < <(jq -r '.extension.segments[].segmentId' "$EVIDENCE/extension-plan.json")
+          test "$((${#ARGS[@]} / 2))" -eq 263
 
           node .history-extension-artifacts-build/verify-history-extension-artifacts.mjs \
             --local \
@@ -167,38 +168,49 @@ jobs:
           jq -e '.extension.segmentCount == 263 and .target.ledgerIndex == 3932301' \
             "$EVIDENCE/extension-artifacts.json" >/dev/null
 
-      - name: Build full 1136-segment publication and merged exact index
+      - name: Prepare combined segment tree and 1136-segment publication
         shell: bash
         run: |
           set -euo pipefail
           EVIDENCE="$RUNNER_TEMP/combined-history-evidence"
+          BASE=.local/base-history
+          DELTA=.local/delta-history
           MAIN_SHA="$(cat "$EVIDENCE/main-sha.txt")"
 
-          cp -a .local/base-history/history .local/combined/history
-          mkdir -p .local/combined/history/devnet-3371675
-          while IFS= read -r -d '' segment; do
-            cp -a "$segment" .local/combined/history/devnet-3371675/
-          done < <(
-            find .local/delta-history/history/devnet-3371675 \
-              -mindepth 1 -maxdepth 1 -type d -print0
-          )
+          mkdir -p "$BASE/history/devnet-3371675"
+          while IFS= read -r segment_id; do
+            source="$DELTA/history/devnet-3371675/$segment_id"
+            target="$BASE/history/devnet-3371675/$segment_id"
+            test -d "$source"
+            test ! -e "$target"
+            mv "$source" "$target"
+          done < <(jq -r '.extension.segments[].segmentId' "$EVIDENCE/extension-plan.json")
 
-          mapfile -t MANIFESTS < <(
-            find .local/delta-history/history/devnet-3371675 \
-              -mindepth 2 -maxdepth 2 -type f -name manifest.json | sort -V
-          )
+          rm -rf "$DELTA/history/index"
+          df -h > "$EVIDENCE/disk-after-segment-move.txt"
+          du -sh "$BASE" "$DELTA" > "$EVIDENCE/sizes-after-segment-move.txt"
+
           ARGS=()
-          for manifest in "${MANIFESTS[@]}"; do ARGS+=(--manifest "$manifest"); done
+          while IFS= read -r segment_id; do
+            ARGS+=(--manifest "$BASE/history/devnet-3371675/$segment_id/manifest.json")
+          done < <(jq -r '.extension.segments[].segmentId' "$EVIDENCE/extension-plan.json")
 
-          node .extended-history-publication-build/build-extended-history-publication.mjs \
-            --local \
-            --source-publication .local/base-history/history/publication.json \
-            --plan "$EVIDENCE/extension-plan.json" \
-            "${ARGS[@]}" \
-            --chain-id "$CHAIN_ID" \
-            --source-revision "$MAIN_SHA" \
-            --output .local/combined/history/publication.json \
-            > "$EVIDENCE/extended-publication.stdout.json"
+          set +e
+          /usr/bin/time -v -o "$EVIDENCE/publication.time.txt" \
+            node .extended-history-publication-build/build-extended-history-publication.mjs \
+              --local \
+              --source-publication "$EVIDENCE/base-publication.json" \
+              --plan "$EVIDENCE/extension-plan.json" \
+              "${ARGS[@]}" \
+              --chain-id "$CHAIN_ID" \
+              --source-revision "$MAIN_SHA" \
+              --output "$EVIDENCE/combined-publication.json" \
+              > "$EVIDENCE/publication.stdout.json" \
+              2> "$EVIDENCE/publication.stderr.log"
+          code=$?
+          set -e
+          printf '%s\n' "$code" > "$EVIDENCE/publication.exit-code.txt"
+          test "$code" -eq 0
 
           jq -e --arg hash "$TARGET_HASH" '
             .startLedgerIndex == 3371676
@@ -210,42 +222,73 @@ jobs:
             and .segments[873].startLedgerIndex == 3800886
             and .segments[873].previousSegmentId == .segments[872].segmentId
             and .segments[873].previousSegmentEndHash == .segments[872].endLedgerHash
-          ' .local/combined/history/publication.json >/dev/null
+          ' "$EVIDENCE/combined-publication.json" >/dev/null
+          cp "$EVIDENCE/combined-publication.json" "$BASE/history/publication.json"
 
-          rm -rf .local/combined/history/index/exact
-          node .incremental-history-exact-index-build/build-incremental-history-exact-index.mjs \
-            --local \
-            --publication .local/combined/history/publication.json \
-            --plan "$EVIDENCE/extension-plan.json" \
-            --artifact-root .local/delta-history \
-            --base-index-dir .local/base-history/history/index/exact \
-            --base-publication .local/base-history/history/publication.json \
-            --output-dir .local/combined/history/index/exact \
-            --asset-prefix history/index/exact \
-            --source-revision "$MAIN_SHA" \
-            > "$EVIDENCE/incremental-exact-index.json"
+      - name: Build merged 256-bucket exact index
+        shell: bash
+        run: |
+          set -euo pipefail
+          EVIDENCE="$RUNNER_TEMP/combined-history-evidence"
+          BASE=.local/base-history
+          MAIN_SHA="$(cat "$EVIDENCE/main-sha.txt")"
+          OUTPUT="$RUNNER_TEMP/combined-exact"
+          rm -rf "$OUTPUT"
+
+          set +e
+          /usr/bin/time -v -o "$EVIDENCE/exact-index.time.txt" \
+            node .incremental-history-exact-index-build/build-incremental-history-exact-index.mjs \
+              --local \
+              --publication "$BASE/history/publication.json" \
+              --plan "$EVIDENCE/extension-plan.json" \
+              --artifact-root "$BASE" \
+              --base-index-dir "$BASE/history/index/exact" \
+              --base-publication "$EVIDENCE/base-publication.json" \
+              --output-dir "$OUTPUT" \
+              --asset-prefix history/index/exact \
+              --source-revision "$MAIN_SHA" \
+              > "$EVIDENCE/incremental-exact-index.json" \
+              2> "$EVIDENCE/exact-index.stderr.log"
+          code=$?
+          set -e
+          printf '%s\n' "$code" > "$EVIDENCE/exact-index.exit-code.txt"
+          df -h > "$EVIDENCE/disk-after-exact-index.txt"
+          du -sh "$BASE/history/index/exact" "$OUTPUT" > "$EVIDENCE/exact-index-sizes.txt" 2>&1 || true
+          test "$code" -eq 0
 
           jq -e '.passed == true and .baseRecords > 0 and .addedRecords > 0 and .totalRecords == (.baseRecords + .addedRecords)' \
             "$EVIDENCE/incremental-exact-index.json" >/dev/null
-          cp .local/combined/history/publication.json "$EVIDENCE/publication.json"
-          cp .local/combined/history/index/exact/manifest.json "$EVIDENCE/exact-index-manifest.json"
+          rm -rf "$BASE/history/index/exact"
+          mkdir -p "$BASE/history/index"
+          mv "$OUTPUT" "$BASE/history/index/exact"
+          cp "$BASE/history/index/exact/manifest.json" "$EVIDENCE/exact-index-manifest.json"
 
       - name: Resolve old and new witnesses against the combined local tree
         shell: bash
         run: |
           set -euo pipefail
           EVIDENCE="$RUNNER_TEMP/combined-history-evidence"
-          node .history-exact-rehearsal-build/rehearse-history-exact-lookups.mjs \
-            --local \
-            --publication .local/combined/history/publication.json \
-            --exact-index-manifest .local/combined/history/index/exact/manifest.json \
-            --artifact-root .local/combined \
-            --term 54A69056FD4D8017F52BB40FA27B6D155F2B07ECF0F24754A26EAF46F82045D0 \
-            --term 351B2FB507346B8B001148ED9D92A394D72FCA6CE87109A95B2C61A27B992F6E \
-            --term 2A3920F5B65CDEB35AEE7E4606736A7F0423D804A874EC3225BCD39A7A30A4D4 \
-            --term 70A489701D68B89E04923A7845F81F2C615760992C55119A8FC0ED8C759DE684 \
-            --term AD0980A254BC7262C57001315A9B6C7C65A020F29FAB2D0A0915933C55FF3BB1 \
-            > "$EVIDENCE/local-exact-rehearsal.json"
+          BASE=.local/base-history
+
+          set +e
+          /usr/bin/time -v -o "$EVIDENCE/local-rehearsal.time.txt" \
+            node .history-exact-rehearsal-build/rehearse-history-exact-lookups.mjs \
+              --local \
+              --publication "$BASE/history/publication.json" \
+              --exact-index-manifest "$BASE/history/index/exact/manifest.json" \
+              --artifact-root "$BASE" \
+              --term 54A69056FD4D8017F52BB40FA27B6D155F2B07ECF0F24754A26EAF46F82045D0 \
+              --term 351B2FB507346B8B001148ED9D92A394D72FCA6CE87109A95B2C61A27B992F6E \
+              --term 2A3920F5B65CDEB35AEE7E4606736A7F0423D804A874EC3225BCD39A7A30A4D4 \
+              --term 70A489701D68B89E04923A7845F81F2C615760992C55119A8FC0ED8C759DE684 \
+              --term AD0980A254BC7262C57001315A9B6C7C65A020F29FAB2D0A0915933C55FF3BB1 \
+              > "$EVIDENCE/local-exact-rehearsal.json" \
+              2> "$EVIDENCE/local-rehearsal.stderr.log"
+          code=$?
+          set -e
+          printf '%s\n' "$code" > "$EVIDENCE/local-rehearsal.exit-code.txt"
+          test "$code" -eq 0
+
           jq -e '
             .passed == true
             and .segmentCount == 1136
@@ -253,31 +296,26 @@ jobs:
             and all(.terms[]; .referenceCount > 0 and .matchedRecords > 0)
           ' "$EVIDENCE/local-exact-rehearsal.json" >/dev/null
 
-          cp -a .candidate-source-rehearsal-build "$RUNNER_TEMP/candidate-source-rehearsal-build"
-          rm -rf "$RUNNER_TEMP/combined-history-candidate"
-          mkdir -p "$RUNNER_TEMP/combined-history-candidate"
-          cp -a .local/combined/history "$RUNNER_TEMP/combined-history-candidate/history"
-
       - name: Publish combined candidate branch without touching production
         id: publish
         shell: bash
         run: |
           set -euo pipefail
           EVIDENCE="$RUNNER_TEMP/combined-history-evidence"
+          BASE=.local/base-history
           OLD_SHA="$(git ls-remote origin "refs/heads/$COMBINED_HISTORY_BRANCH" | awk '{print $1}')"
           printf '%s\n' "$OLD_SHA" > "$EVIDENCE/combined-branch-before.txt"
 
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git checkout --orphan combined-history-candidate-publish
-          git rm -rf . || true
-          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
-          cp -a "$RUNNER_TEMP/combined-history-candidate/." .
-          git add history
-          git commit -m "Publish combined immutable-history candidate through 3932301"
-          DATA_SHA="$(git rev-parse HEAD)"
+          git -C "$BASE" config user.name github-actions[bot]
+          git -C "$BASE" config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git -C "$BASE" switch -C combined-history-candidate-publish
+          git -C "$BASE" add history
+          git -C "$BASE" commit -m "Publish combined immutable-history candidate through 3932301"
+          DATA_SHA="$(git -C "$BASE" rev-parse HEAD)"
 
-          DATA_SHA="$DATA_SHA" node --input-type=module - <<'NODE'
+          (
+            cd "$BASE"
+            DATA_SHA="$DATA_SHA" node --input-type=module - <<'NODE'
           import { createHash } from 'node:crypto'
           import { readFileSync, writeFileSync } from 'node:fs'
           const publicationText = readFileSync('history/publication.json', 'utf8')
@@ -301,22 +339,23 @@ jobs:
           }
           writeFileSync('history-channel.json', `${JSON.stringify(channel)}\n`)
           NODE
+          )
 
-          git add history-channel.json
-          git commit -m "Activate combined immutable-history candidate through 3932301"
-          CANDIDATE_SHA="$(git rev-parse HEAD)"
+          git -C "$BASE" add history-channel.json
+          git -C "$BASE" commit -m "Activate combined immutable-history candidate through 3932301"
+          CANDIDATE_SHA="$(git -C "$BASE" rev-parse HEAD)"
 
           if test -n "$OLD_SHA"; then
-            git push --force-with-lease="refs/heads/$COMBINED_HISTORY_BRANCH:$OLD_SHA" \
+            git -C "$BASE" push --force-with-lease="refs/heads/$COMBINED_HISTORY_BRANCH:$OLD_SHA" \
               origin "HEAD:refs/heads/$COMBINED_HISTORY_BRANCH"
           else
-            git push origin "HEAD:refs/heads/$COMBINED_HISTORY_BRANCH"
+            git -C "$BASE" push origin "HEAD:refs/heads/$COMBINED_HISTORY_BRANCH"
           fi
           test "$(git ls-remote origin "refs/heads/$COMBINED_HISTORY_BRANCH" | awk '{print $1}')" = "$CANDIDATE_SHA"
 
           printf '%s\n' "$DATA_SHA" > "$EVIDENCE/combined-data-commit.txt"
           printf '%s\n' "$CANDIDATE_SHA" > "$EVIDENCE/combined-branch-head.txt"
-          cp history-channel.json "$EVIDENCE/history-channel.json"
+          cp "$BASE/history-channel.json" "$EVIDENCE/history-channel.json"
           echo "data_sha=$DATA_SHA" >> "$GITHUB_OUTPUT"
           echo "candidate_sha=$CANDIDATE_SHA" >> "$GITHUB_OUTPUT"
 
@@ -325,12 +364,21 @@ jobs:
         run: |
           set -euo pipefail
           EVIDENCE="$RUNNER_TEMP/combined-history-evidence"
-          node "$RUNNER_TEMP/candidate-source-rehearsal-build/rehearse-candidate-sources.mjs" \
-            --local \
-            --repository "$GITHUB_REPOSITORY" \
-            --history-branch "$COMBINED_HISTORY_BRANCH" \
-            --current-state-branch "$CURRENT_STATE_BRANCH" \
-            > "$EVIDENCE/remote-rehearsal.json"
+
+          set +e
+          /usr/bin/time -v -o "$EVIDENCE/remote-rehearsal.time.txt" \
+            node .candidate-source-rehearsal-build/rehearse-candidate-sources.mjs \
+              --local \
+              --repository "$GITHUB_REPOSITORY" \
+              --history-branch "$COMBINED_HISTORY_BRANCH" \
+              --current-state-branch "$CURRENT_STATE_BRANCH" \
+              > "$EVIDENCE/remote-rehearsal.json" \
+              2> "$EVIDENCE/remote-rehearsal.stderr.log"
+          code=$?
+          set -e
+          printf '%s\n' "$code" > "$EVIDENCE/remote-rehearsal.exit-code.txt"
+          test "$code" -eq 0
+
           jq -e --arg hash "$TARGET_HASH" '
             .passed == true
             and .ledgerIndex == 3932301
@@ -344,6 +392,7 @@ jobs:
             --arg runId "$GITHUB_RUN_ID" \
             --arg dataSha "${{ steps.publish.outputs.data_sha }}" \
             --arg candidateSha "${{ steps.publish.outputs.candidate_sha }}" \
+            --slurpfile exact "$EVIDENCE/incremental-exact-index.json" \
             --slurpfile localExact "$EVIDENCE/local-exact-rehearsal.json" \
             --slurpfile remote "$EVIDENCE/remote-rehearsal.json" '
             {
@@ -356,8 +405,7 @@ jobs:
               ledgerCount: 560626,
               terminalLedger: 3932301,
               terminalHash: "7D026FED85BCA2BDCFE450A0F3537707A43B4D08E1D2AE57AFBC54D88EBE1828",
-              oldWitnessesPassed: true,
-              newVaultWitnessPassed: true,
+              exactIndex: $exact[0],
               localExactRehearsal: $localExact[0],
               remoteRehearsal: $remote[0],
               productionMutation: false,
@@ -365,6 +413,17 @@ jobs:
               workerDeploy: false
             }
           ' > "$EVIDENCE/result.json"
+
+      - name: Capture final resource state
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          EVIDENCE="$RUNNER_TEMP/combined-history-evidence"
+          mkdir -p "$EVIDENCE"
+          df -h > "$EVIDENCE/disk-final.txt"
+          du -sh .local/base-history .local/delta-history "$RUNNER_TEMP/combined-exact" \
+            > "$EVIDENCE/sizes-final.txt" 2>&1
 
       - name: Upload combined candidate evidence
         if: always()
