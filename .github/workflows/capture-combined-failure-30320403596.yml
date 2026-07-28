@@ -1,4 +1,4 @@
-name: Capture combined candidate failure 30320403596
+name: Capture combined candidate failure 30327015100
 
 on:
   pull_request:
@@ -21,7 +21,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          JOB_ID: '90154900619'
+          JOB_ID: '90174410436'
         shell: bash
         run: |
           set -euo pipefail
@@ -32,17 +32,17 @@ jobs:
             -H "X-GitHub-Api-Version: 2022-11-28" \
             "https://api.github.com/repos/$REPO/actions/jobs/$JOB_ID/logs" \
             -o evidence/job.log
-          tail -n 400 evidence/job.log > evidence/job-tail.log
-          grep -nE '##\[error\]|fatal|FATAL|ENOMEM|ENOSPC|heap out of memory|Killed|No space left|Command terminated|Process completed with exit code' \
-            evidence/job.log > evidence/error-lines.log || true
-          wc -c evidence/job.log evidence/job-tail.log evidence/error-lines.log > evidence/sizes.txt
-          cat evidence/error-lines.log
-          tail -n 120 evidence/job-tail.log
+          tail -n 600 evidence/job.log > evidence/job-tail.log
+          grep -nE 'exact-index|heartbeat|segment|bucket|##\[error\]|fatal|FATAL|ENOMEM|ENOSPC|heap out of memory|Killed|No space left|Command terminated|Process completed with exit code|exit code 143|SIGTERM|runner' \
+            evidence/job.log > evidence/progress-and-error-lines.log || true
+          wc -c evidence/job.log evidence/job-tail.log evidence/progress-and-error-lines.log > evidence/sizes.txt
+          cat evidence/progress-and-error-lines.log
+          tail -n 180 evidence/job-tail.log
 
       - name: Upload exact failed job evidence
         uses: actions/upload-artifact@v4
         with:
-          name: combined-candidate-failure-30320403596
+          name: combined-candidate-failure-30327015100
           path: evidence
           if-no-files-found: error
           retention-days: 30
