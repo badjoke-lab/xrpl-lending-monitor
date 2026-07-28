@@ -1,0 +1,399 @@
+name: Guarded production history promotion 3932301 1024
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+    paths:
+      - .github/workflows/promote-history-3932301-1024.yml
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: production-history-promotion-3932301
+  cancel-in-progress: false
+
+env:
+  MAIN_SHA: 9587f1360a88b1630e3bca31a271fe8daa9bd40b
+  CANDIDATE_BRANCH: history-repair-3932301-combined-1024-data
+  CANDIDATE_HEAD: 5d7bf6d330407c7ead237b3885d4330a8d268ce6
+  CANDIDATE_DATA_SHA: 12252ce9df0d5ab50adc51e2743edb8ff03989dd
+  CANDIDATE_RUN_ID: '30352155485'
+  CANDIDATE_ARTIFACT: combined-immutable-history-1024-candidate-3932301
+  PRODUCTION_HISTORY_BRANCH: history-data
+  EXPECTED_PRODUCTION_HEAD: 06529a8eb5071bb27fe20c1cdac0d5c1c8833012
+  CURRENT_STATE_BRANCH: current-state-data
+  TARGET_LEDGER: '3932301'
+  TARGET_HASH: 7D026FED85BCA2BDCFE450A0F3537707A43B4D08E1D2AE57AFBC54D88EBE1828
+  EXPECTED_CHAIN_ID: canonical-devnet-3371676-3932301-v3
+  EXPECTED_SEGMENTS: '1136'
+  EXPECTED_LEDGERS: '560626'
+  EXPECTED_RECORDS: '33811930'
+  EXPECTED_BUCKETS: '1024'
+  EXPECTED_MAX_DECOMPRESSED_BYTES: '55955582'
+  PRODUCTION_READER_LIMIT: '67108864'
+  FIXED_OBJECT_ID: AD0980A254BC7262C57001315A9B6C7C65A020F29FAB2D0A0915933C55FF3BB1
+  FIXED_TRANSACTION_HASH: 70A489701D68B89E04923A7845F81F2C615760992C55119A8FC0ED8C759DE684
+  PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+
+jobs:
+  promote-verify:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out frozen production implementation
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.MAIN_SHA }}
+          fetch-depth: 1
+
+      - name: Check out candidate identity read-only
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.CANDIDATE_BRANCH }}
+          path: .local/candidate-history
+          fetch-depth: 1
+          sparse-checkout: |
+            history-channel.json
+            history/publication.json
+            history/index/exact/manifest.json
+          sparse-checkout-cone-mode: false
+
+      - name: Check out production history identity read-only
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.PRODUCTION_HISTORY_BRANCH }}
+          path: .local/production-history
+          fetch-depth: 1
+          sparse-checkout: |
+            history-channel.json
+            history/publication.json
+            history/index/exact/manifest.json
+          sparse-checkout-cone-mode: false
+
+      - name: Check out current-state identity read-only
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.CURRENT_STATE_BRANCH }}
+          path: .local/current-state
+          fetch-depth: 1
+          sparse-checkout: read-model/manifest.json
+          sparse-checkout-cone-mode: false
+
+      - name: Download verified candidate evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.CANDIDATE_ARTIFACT }}
+          path: .local/candidate-evidence
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ env.CANDIDATE_RUN_ID }}
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Revalidate candidate artifact and immutable identities
+        shell: bash
+        run: |
+          set -euo pipefail
+          EVIDENCE=history-promotion-evidence
+          rm -rf "$EVIDENCE"
+          mkdir -p "$EVIDENCE"
+
+          test "$(git rev-parse HEAD)" = "$MAIN_SHA"
+          test "$(git -C .local/candidate-history rev-parse HEAD)" = "$CANDIDATE_HEAD"
+
+          jq -e \
+            --arg candidate "$CANDIDATE_HEAD" \
+            --arg data "$CANDIDATE_DATA_SHA" \
+            --argjson buckets "$EXPECTED_BUCKETS" \
+            --argjson records "$EXPECTED_RECORDS" \
+            --argjson max "$EXPECTED_MAX_DECOMPRESSED_BYTES" \
+            --argjson limit "$PRODUCTION_READER_LIMIT" '
+            .passed == true
+            and .candidateBranchHead == $candidate
+            and .dataCommitSha == $data
+            and .bucketCount == $buckets
+            and .totalRecords == $records
+            and .maxDecompressedBytes == $max
+            and .productionReadLimit == $limit
+            and .maxDecompressedBytes < .productionReadLimit
+            and .localRehearsal.passed == true
+            and .localRehearsal.termCount == 5
+            and all(.localRehearsal.terms[]; .referenceCount > 0 and .matchedRecords > 0)
+            and .remoteRehearsal.passed == true
+            and (.remoteRehearsal.exactReads | length) == 5
+            and all(.remoteRehearsal.exactReads[]; .references > 0)
+            and .productionMutation == false
+            and .d1Mutation == false
+            and .workerDeploy == false
+          ' .local/candidate-evidence/result.json >/dev/null
+          cp .local/candidate-evidence/result.json "$EVIDENCE/candidate-result.json"
+
+          jq -e \
+            --arg data "$CANDIDATE_DATA_SHA" \
+            --arg chain "$EXPECTED_CHAIN_ID" '
+            .active.dataCommitSha == $data
+            and .active.chainId == $chain
+            and .active.publicationPath == "history/publication.json"
+            and .active.exactIndex.manifestPath == "history/index/exact/manifest.json"
+          ' .local/candidate-history/history-channel.json >/dev/null
+
+          jq -e \
+            --arg chain "$EXPECTED_CHAIN_ID" \
+            --argjson ledger "$TARGET_LEDGER" \
+            --arg hash "$TARGET_HASH" \
+            --argjson segments "$EXPECTED_SEGMENTS" \
+            --argjson ledgers "$EXPECTED_LEDGERS" '
+            .complete == true
+            and .chainId == $chain
+            and .endLedgerIndex == $ledger
+            and .endLedgerHash == $hash
+            and .segmentCount == $segments
+            and .ledgerCount == $ledgers
+          ' .local/candidate-history/history/publication.json >/dev/null
+
+          jq -e \
+            --argjson buckets "$EXPECTED_BUCKETS" \
+            --argjson records "$EXPECTED_RECORDS" '
+            .bucketCount == $buckets
+            and .totalRecords == $records
+            and (.assets | length) == $buckets
+          ' .local/candidate-history/history/index/exact/manifest.json >/dev/null
+
+      - name: Revalidate alignment and all five remote witnesses
+        shell: bash
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: |
+          set -euo pipefail
+          EVIDENCE=history-promotion-evidence
+          node scripts/verify-history-current-state-alignment.mjs \
+            --history-publication .local/candidate-history/history/publication.json \
+            --history-channel .local/candidate-history/history-channel.json \
+            --exact-index-manifest .local/candidate-history/history/index/exact/manifest.json \
+            --current-manifest .local/current-state/read-model/manifest.json \
+            > "$EVIDENCE/candidate-alignment.json"
+          jq -e \
+            --argjson ledger "$TARGET_LEDGER" \
+            --arg hash "$TARGET_HASH" \
+            --argjson buckets "$EXPECTED_BUCKETS" \
+            --argjson records "$EXPECTED_RECORDS" '
+            .passed == true
+            and .history.ledgerIndex == $ledger
+            and .history.ledgerHash == $hash
+            and .currentState.ledgerIndex == $ledger
+            and .currentState.ledgerHash == $hash
+            and .exactIndex.bucketCount == $buckets
+            and .exactIndex.totalRecords == $records
+          ' "$EVIDENCE/candidate-alignment.json" >/dev/null
+
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/rehearse-candidate-sources.ts')
+          text = path.read_text()
+          needle = "    '2A3920F5B65CDEB35AEE7E4606736A7F0423D804A874EC3225BCD39A7A30A4D4',\n  ]"
+          replacement = "    '2A3920F5B65CDEB35AEE7E4606736A7F0423D804A874EC3225BCD39A7A30A4D4',\n    '70A489701D68B89E04923A7845F81F2C615760992C55119A8FC0ED8C759DE684',\n    'AD0980A254BC7262C57001315A9B6C7C65A020F29FAB2D0A0915933C55FF3BB1',\n  ]"
+          if needle not in text:
+              raise SystemExit('candidate rehearsal witness boundary changed')
+          path.write_text(text.replace(needle, replacement))
+          PY
+          pnpm build:candidate-source-rehearsal
+          node .candidate-source-rehearsal-build/rehearse-candidate-sources.mjs \
+            --local \
+            --repository "$GITHUB_REPOSITORY" \
+            --history-branch "$CANDIDATE_BRANCH" \
+            --current-state-branch "$CURRENT_STATE_BRANCH" \
+            > "$EVIDENCE/remote-rehearsal.json" \
+            2> >(tee "$EVIDENCE/remote-rehearsal.stderr.log" >&2)
+          jq -e \
+            --argjson ledger "$TARGET_LEDGER" \
+            --arg hash "$TARGET_HASH" '
+            .passed == true
+            and .ledgerIndex == $ledger
+            and .ledgerHash == $hash
+            and .segmentCount == 1136
+            and .ledgerCount == 560626
+            and (.exactReads | length) == 5
+            and all(.exactReads[]; .references > 0)
+          ' "$EVIDENCE/remote-rehearsal.json" >/dev/null
+
+      - name: Fresh production probe and ref freeze before mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          EVIDENCE=history-promotion-evidence
+          curl --fail-with-body --silent --show-error --retry 3 \
+            "$PRODUCTION_BASE/api/status/history-source" \
+            > "$EVIDENCE/history-source-before.json"
+          curl --fail-with-body --silent --show-error --retry 3 \
+            "$PRODUCTION_BASE/api/status/pre-soak-readiness" \
+            > "$EVIDENCE/readiness-before.json"
+
+          jq -e '
+            .status == "ok"
+            and .chain.end_ledger_index == 3800885
+            and .chain.segment_count == 873
+            and .exact_index.bucket_count == 256
+            and .exact_index.total_records == 23049415
+          ' "$EVIDENCE/history-source-before.json" >/dev/null
+          jq -e '
+            .passed == false
+            and .checks.immutableHistory.passed == false
+            and .checks.devnetBoundary.passed == true
+            and .checks.productionBase.passed == true
+            and .checks.replacementBase.passed == true
+            and .checks.fastLaneBinding.passed == true
+            and .checks.fastLaneState.passed == true
+            and .checks.fastLaneFreshness.passed == true
+            and .checks.projectionParity.passed == true
+            and .checks.recentFiveMinuteRuns.passed == true
+            and .checks.protectedCollector.passed == true
+          ' "$EVIDENCE/readiness-before.json" >/dev/null
+
+          OLD_SHA="$(git ls-remote origin "refs/heads/$PRODUCTION_HISTORY_BRANCH" | awk '{print $1}')"
+          CANDIDATE_SHA="$(git ls-remote origin "refs/heads/$CANDIDATE_BRANCH" | awk '{print $1}')"
+          CURRENT_SHA="$(git ls-remote origin "refs/heads/$CURRENT_STATE_BRANCH" | awk '{print $1}')"
+          test "$OLD_SHA" = "$EXPECTED_PRODUCTION_HEAD"
+          test "$OLD_SHA" = "$(git -C .local/production-history rev-parse HEAD)"
+          test "$CANDIDATE_SHA" = "$CANDIDATE_HEAD"
+          test "$CANDIDATE_SHA" = "$(git -C .local/candidate-history rev-parse HEAD)"
+          test "$CURRENT_SHA" = "$(git -C .local/current-state rev-parse HEAD)"
+          printf '%s\n' "$OLD_SHA" > "$EVIDENCE/production-history-before.txt"
+          printf '%s\n' "$CANDIDATE_SHA" > "$EVIDENCE/candidate-history.txt"
+          printf '%s\n' "$CURRENT_SHA" > "$EVIDENCE/current-state.txt"
+
+      - name: Promote history-data and verify with automatic rollback
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          EVIDENCE=history-promotion-evidence
+          OLD_SHA="$(cat "$EVIDENCE/production-history-before.txt")"
+          CANDIDATE_SHA="$(cat "$EVIDENCE/candidate-history.txt")"
+          promoted=false
+          verified=false
+
+          rollback() {
+            code=$?
+            set +e
+            if test "$promoted" = true && test "$verified" != true; then
+              CURRENT_SHA="$(git ls-remote origin "refs/heads/$PRODUCTION_HISTORY_BRANCH" | awk '{print $1}')"
+              if test "$CURRENT_SHA" = "$CANDIDATE_SHA"; then
+                git push --force-with-lease="refs/heads/$PRODUCTION_HISTORY_BRANCH:$CANDIDATE_SHA" \
+                  origin "$OLD_SHA:refs/heads/$PRODUCTION_HISTORY_BRANCH"
+                printf '%s\n' "$OLD_SHA" > "$EVIDENCE/rollback-history-sha.txt"
+              fi
+            fi
+            exit "$code"
+          }
+          trap rollback EXIT
+
+          git push --force-with-lease="refs/heads/$PRODUCTION_HISTORY_BRANCH:$OLD_SHA" \
+            origin "$CANDIDATE_SHA:refs/heads/$PRODUCTION_HISTORY_BRANCH"
+          test "$(git ls-remote origin "refs/heads/$PRODUCTION_HISTORY_BRANCH" | awk '{print $1}')" = "$CANDIDATE_SHA"
+          promoted=true
+          printf '%s\n' "$CANDIDATE_SHA" > "$EVIDENCE/production-history-after.txt"
+
+          verified=false
+          for attempt in $(seq 1 120); do
+            HISTORY_HTTP="$(curl --silent --show-error --retry 2 --connect-timeout 10 --max-time 60 \
+              -o "$EVIDENCE/history-source-after.json" -w '%{http_code}' \
+              "$PRODUCTION_BASE/api/status/history-source" || true)"
+            READY_HTTP="$(curl --silent --show-error --retry 2 --connect-timeout 10 --max-time 60 \
+              -o "$EVIDENCE/readiness-after.json" -w '%{http_code}' \
+              "$PRODUCTION_BASE/api/status/pre-soak-readiness" || true)"
+            OBJECT_HTTP="$(curl --silent --show-error --retry 2 --connect-timeout 10 --max-time 60 \
+              -o "$EVIDENCE/fixed-object-history.json" -w '%{http_code}' \
+              "$PRODUCTION_BASE/api/objects/Vault/$FIXED_OBJECT_ID/history?limit=100" || true)"
+
+            history_ok=false
+            readiness_ok=false
+            object_ok=false
+            if test "$HISTORY_HTTP" = 200 && jq -e \
+              --arg data "$CANDIDATE_DATA_SHA" \
+              --arg chain "$EXPECTED_CHAIN_ID" \
+              --argjson ledger "$TARGET_LEDGER" \
+              --argjson segments "$EXPECTED_SEGMENTS" \
+              --argjson ledgers "$EXPECTED_LEDGERS" \
+              --argjson buckets "$EXPECTED_BUCKETS" \
+              --argjson records "$EXPECTED_RECORDS" '
+              .status == "ok"
+              and .channel.data_commit_sha == $data
+              and .chain.chain_id == $chain
+              and .chain.end_ledger_index == $ledger
+              and .chain.segment_count == $segments
+              and .chain.ledger_count == $ledgers
+              and .exact_index.bucket_count == $buckets
+              and .exact_index.total_records == $records
+            ' "$EVIDENCE/history-source-after.json" >/dev/null 2>&1; then
+              history_ok=true
+            fi
+            if test "$READY_HTTP" = 200 && jq -e '
+              .passed == true
+              and .checks.immutableHistory.passed == true
+              and .checks.projectionParity.passed == true
+              and .checks.fastLaneFreshness.passed == true
+              and .checks.recentFiveMinuteRuns.passed == true
+              and .checks.protectedCollector.passed == true
+            ' "$EVIDENCE/readiness-after.json" >/dev/null 2>&1; then
+              readiness_ok=true
+            fi
+            if test "$OBJECT_HTTP" = 200 && grep -Fq "$FIXED_TRANSACTION_HASH" "$EVIDENCE/fixed-object-history.json"; then
+              object_ok=true
+            fi
+            if test "$history_ok" = true && test "$readiness_ok" = true && test "$object_ok" = true; then
+              verified=true
+              break
+            fi
+            sleep 5
+          done
+          test "$verified" = true
+
+          jq -n \
+            --arg oldSha "$OLD_SHA" \
+            --arg candidateSha "$CANDIDATE_SHA" \
+            --arg transactionHash "$FIXED_TRANSACTION_HASH" \
+            --slurpfile alignment "$EVIDENCE/candidate-alignment.json" \
+            --slurpfile rehearsal "$EVIDENCE/remote-rehearsal.json" \
+            --slurpfile history "$EVIDENCE/history-source-after.json" \
+            --slurpfile readiness "$EVIDENCE/readiness-after.json" '
+            {
+              schemaVersion: 1,
+              passed: true,
+              productionHistoryBefore: $oldSha,
+              productionHistoryAfter: $candidateSha,
+              fixedObjectTransactionHash: $transactionHash,
+              alignment: $alignment[0],
+              remoteRehearsal: $rehearsal[0],
+              historySource: $history[0],
+              readiness: $readiness[0],
+              productionMutation: "history-data branch only",
+              d1Mutation: false,
+              workerDeploy: false,
+              cadenceChanged: false,
+              qualificationChanged: false,
+              soakChanged: false,
+              mainnetEnabled: false,
+              rollbackOccurred: false
+            }
+          ' > "$EVIDENCE/result.json"
+
+      - name: Upload guarded promotion evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: immutable-history-production-promotion-3932301-1024
+          path: history-promotion-evidence
+          if-no-files-found: error
+          retention-days: 30
