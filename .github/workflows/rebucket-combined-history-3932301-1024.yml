@@ -1,0 +1,428 @@
+name: Build production-compatible 1024-bucket history candidate 3932301
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+    paths:
+      - .github/workflows/rebucket-combined-history-3932301-1024.yml
+      - scripts/rebucket-history-exact-index-1024.ts
+      - vite.rebucket-history-exact-index-1024.config.ts
+
+permissions:
+  contents: write
+
+concurrency:
+  group: rebucket-combined-history-3932301-1024
+  cancel-in-progress: true
+
+env:
+  SOURCE_HISTORY_BRANCH: history-repair-3932301-combined-data
+  OUTPUT_HISTORY_BRANCH: history-repair-3932301-combined-1024-data
+  CURRENT_STATE_BRANCH: current-state-data
+  EXPECTED_SOURCE_HEAD: 66700d26f5788ef97efca33434cb0af2d945663c
+  EXPECTED_SOURCE_DATA_SHA: 001db759022aeb42c0b3f5d5cfdc40a0f5c87407
+  EXPECTED_CHAIN_ID: canonical-devnet-3371676-3932301-v3
+  TARGET_LEDGER: '3932301'
+  TARGET_HASH: 7D026FED85BCA2BDCFE450A0F3537707A43B4D08E1D2AE57AFBC54D88EBE1828
+  EXPECTED_SEGMENTS: '1136'
+  EXPECTED_LEDGERS: '560626'
+  EXPECTED_RECORDS: '33811930'
+  PRODUCTION_READ_LIMIT: '67108864'
+
+jobs:
+  split:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: 000-064
+            start: 0
+            end: 64
+          - label: 064-128
+            start: 64
+            end: 128
+          - label: 128-192
+            start: 128
+            end: 192
+          - label: 192-256
+            start: 192
+            end: 256
+    steps:
+      - name: Check out 1024-bucket implementation
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+
+      - name: Check out verified combined source index
+        uses: actions/checkout@v4
+        with:
+          ref: history-repair-3932301-combined-data
+          path: .local/source-history
+          fetch-depth: 1
+          sparse-checkout: |
+            history-channel.json
+            history/publication.json
+            history/index/exact
+          sparse-checkout-cone-mode: false
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build 1024-bucket rebucket tool
+        run: pnpm exec vite build --config vite.rebucket-history-exact-index-1024.config.ts
+
+      - name: Freeze verified source identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C .local/source-history rev-parse HEAD)" = "$EXPECTED_SOURCE_HEAD"
+          jq -e \
+            --arg data "$EXPECTED_SOURCE_DATA_SHA" \
+            --arg chain "$EXPECTED_CHAIN_ID" '
+            .active.dataCommitSha == $data
+            and .active.chainId == $chain
+            and .active.exactIndex.manifestPath == "history/index/exact/manifest.json"
+          ' .local/source-history/history-channel.json >/dev/null
+          jq -e \
+            --arg chain "$EXPECTED_CHAIN_ID" \
+            --argjson ledger "$TARGET_LEDGER" \
+            --arg hash "$TARGET_HASH" \
+            --argjson segments "$EXPECTED_SEGMENTS" \
+            --argjson ledgers "$EXPECTED_LEDGERS" '
+            .complete == true
+            and .chainId == $chain
+            and .endLedgerIndex == $ledger
+            and .endLedgerHash == $hash
+            and .segmentCount == $segments
+            and .ledgerCount == $ledgers
+          ' .local/source-history/history/publication.json >/dev/null
+          jq -e \
+            --argjson records "$EXPECTED_RECORDS" '
+            .bucketCount == 256
+            and .totalRecords == $records
+            and (.assets | length) == 256
+          ' .local/source-history/history/index/exact/manifest.json >/dev/null
+
+      - name: Split source buckets ${{ matrix.label }} into 1024-bucket refinement
+        shell: bash
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: |
+          set -euo pipefail
+          OUTPUT="$RUNNER_TEMP/rebucket-${{ matrix.label }}"
+          rm -rf "$OUTPUT"
+          mkdir -p "$OUTPUT"
+          node .rebucket-history-exact-index-1024-build/rebucket-history-exact-index-1024.mjs \
+            --local \
+            --mode split-range \
+            --publication .local/source-history/history/publication.json \
+            --source-manifest .local/source-history/history/index/exact/manifest.json \
+            --input-dir .local/source-history/history/index/exact \
+            --output-dir "$OUTPUT" \
+            --bucket-start '${{ matrix.start }}' \
+            --bucket-end '${{ matrix.end }}' \
+            --asset-prefix history/index/exact \
+            --source-revision '${{ github.event.pull_request.head.sha }}' \
+            > "$OUTPUT/result.json" \
+            2> >(tee "$OUTPUT/stderr.log" >&2)
+          jq -e \
+            --argjson start '${{ matrix.start }}' \
+            --argjson end '${{ matrix.end }}' \
+            --argjson limit "$PRODUCTION_READ_LIMIT" '
+            .passed == true
+            and .sourceBucketStart == $start
+            and .sourceBucketEnd == $end
+            and .sourceRecords == .outputRecords
+            and .targetAssets == 256
+            and .maxDecompressedBytes <= $limit
+            and .productionReadLimit == $limit
+          ' "$OUTPUT/result.json" >/dev/null
+          test "$(find "$OUTPUT" -maxdepth 1 -name '*.ndjson.gz' | wc -l)" -eq 256
+          df -h > "$OUTPUT/disk.txt"
+          du -sh "$OUTPUT" .local/source-history/history/index/exact > "$OUTPUT/sizes.txt"
+
+      - name: Upload 1024-bucket part ${{ matrix.label }}
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: combined-exact-1024-part-${{ matrix.label }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/rebucket-${{ matrix.label }}
+          if-no-files-found: error
+          retention-days: 2
+
+  publish:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    needs: split
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check out 1024-bucket implementation
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+
+      - name: Check out full verified combined source
+        uses: actions/checkout@v4
+        with:
+          ref: history-repair-3932301-combined-data
+          path: .local/source-history
+          fetch-depth: 1
+
+      - name: Download all four 1024-bucket parts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: combined-exact-1024-part-*-${{ github.run_id }}
+          path: .local/rebucket-parts
+          merge-multiple: true
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build assembly and unchanged-reader rehearsal tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm exec vite build --config vite.rebucket-history-exact-index-1024.config.ts
+          pnpm build:history-exact-rehearsal
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/rehearse-candidate-sources.ts')
+          text = path.read_text()
+          needle = "    '2A3920F5B65CDEB35AEE7E4606736A7F0423D804A874EC3225BCD39A7A30A4D4',\n  ]"
+          replacement = "    '2A3920F5B65CDEB35AEE7E4606736A7F0423D804A874EC3225BCD39A7A30A4D4',\n    '70A489701D68B89E04923A7845F81F2C615760992C55119A8FC0ED8C759DE684',\n    'AD0980A254BC7262C57001315A9B6C7C65A020F29FAB2D0A0915933C55FF3BB1',\n  ]"
+          if needle not in text:
+              raise SystemExit('candidate rehearsal witness boundary changed')
+          path.write_text(text.replace(needle, replacement))
+          PY
+          pnpm build:candidate-source-rehearsal
+
+      - name: Assemble and verify 1024-bucket exact index
+        shell: bash
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: |
+          set -euo pipefail
+          EVIDENCE="$RUNNER_TEMP/combined-history-1024-evidence"
+          OUTPUT="$RUNNER_TEMP/combined-exact-1024"
+          rm -rf "$EVIDENCE" "$OUTPUT"
+          mkdir -p "$EVIDENCE" "$OUTPUT"
+          test "$(git -C .local/source-history rev-parse HEAD)" = "$EXPECTED_SOURCE_HEAD"
+          cp .local/rebucket-parts/*.ndjson.gz "$OUTPUT/"
+          test "$(find "$OUTPUT" -maxdepth 1 -name '*.ndjson.gz' | wc -l)" -eq 1024
+          PART_ARGS=()
+          while IFS= read -r part; do
+            PART_ARGS+=(--part-manifest "$part")
+          done < <(find .local/rebucket-parts -maxdepth 1 -name 'part-*.json' | sort)
+          test "$((${#PART_ARGS[@]} / 2))" -eq 4
+
+          node .rebucket-history-exact-index-1024-build/rebucket-history-exact-index-1024.mjs \
+            --local \
+            --mode assemble \
+            --publication .local/source-history/history/publication.json \
+            --source-manifest .local/source-history/history/index/exact/manifest.json \
+            --input-dir .local/source-history/history/index/exact \
+            --output-dir "$OUTPUT" \
+            --asset-prefix history/index/exact \
+            --source-revision '${{ github.event.pull_request.head.sha }}' \
+            "${PART_ARGS[@]}" \
+            > "$EVIDENCE/rebucket-result.json" \
+            2> >(tee "$EVIDENCE/rebucket.stderr.log" >&2)
+          jq -e \
+            --argjson records "$EXPECTED_RECORDS" \
+            --argjson limit "$PRODUCTION_READ_LIMIT" '
+            .passed == true
+            and .sourceBucketCount == 256
+            and .targetBucketCount == 1024
+            and .totalRecords == $records
+            and .maxDecompressedBytes <= $limit
+            and .productionReadLimit == $limit
+          ' "$EVIDENCE/rebucket-result.json" >/dev/null
+          jq -e \
+            --argjson records "$EXPECTED_RECORDS" '
+            .bucketCount == 1024
+            and .totalRecords == $records
+            and (.assets | length) == 1024
+          ' "$OUTPUT/manifest.json" >/dev/null
+
+          rm -rf .local/source-history/history/index/exact
+          mkdir -p .local/source-history/history/index
+          mv "$OUTPUT" .local/source-history/history/index/exact
+          cp .local/source-history/history/publication.json "$EVIDENCE/publication.json"
+          cp .local/source-history/history/index/exact/manifest.json "$EVIDENCE/exact-index-manifest.json"
+
+          node .history-exact-rehearsal-build/rehearse-history-exact-lookups.mjs \
+            --local \
+            --publication .local/source-history/history/publication.json \
+            --exact-index-manifest .local/source-history/history/index/exact/manifest.json \
+            --artifact-root .local/source-history \
+            --term 54A69056FD4D8017F52BB40FA27B6D155F2B07ECF0F24754A26EAF46F82045D0 \
+            --term 351B2FB507346B8B001148ED9D92A394D72FCA6CE87109A95B2C61A27B992F6E \
+            --term 2A3920F5B65CDEB35AEE7E4606736A7F0423D804A874EC3225BCD39A7A30A4D4 \
+            --term 70A489701D68B89E04923A7845F81F2C615760992C55119A8FC0ED8C759DE684 \
+            --term AD0980A254BC7262C57001315A9B6C7C65A020F29FAB2D0A0915933C55FF3BB1 \
+            > "$EVIDENCE/local-rehearsal.json" \
+            2> >(tee "$EVIDENCE/local-rehearsal.stderr.log" >&2)
+          jq -e '
+            .passed == true
+            and .bucketCount == 1024
+            and .segmentCount == 1136
+            and .termCount == 5
+            and all(.terms[]; .referenceCount > 0 and .matchedRecords > 0)
+          ' "$EVIDENCE/local-rehearsal.json" >/dev/null
+          df -h > "$EVIDENCE/disk-after-assembly.txt"
+          du -sh .local/source-history .local/source-history/history/index/exact .local/rebucket-parts > "$EVIDENCE/sizes-after-assembly.txt"
+
+      - name: Publish 1024-bucket candidate branch only
+        id: publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          EVIDENCE="$RUNNER_TEMP/combined-history-1024-evidence"
+          ROOT=.local/source-history
+          OLD_SHA="$(git ls-remote origin "refs/heads/$OUTPUT_HISTORY_BRANCH" | awk '{print $1}')"
+          printf '%s\n' "$OLD_SHA" > "$EVIDENCE/output-branch-before.txt"
+
+          git -C "$ROOT" config user.name github-actions[bot]
+          git -C "$ROOT" config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git -C "$ROOT" switch -C combined-history-1024-candidate-publish
+          git -C "$ROOT" add history/index/exact
+          git -C "$ROOT" commit -m "Rebucket combined immutable history exact index to 1024 buckets"
+          DATA_SHA="$(git -C "$ROOT" rev-parse HEAD)"
+
+          (
+            cd "$ROOT"
+            DATA_SHA="$DATA_SHA" node --input-type=module - <<'NODE'
+          import { createHash } from 'node:crypto'
+          import { readFileSync, writeFileSync } from 'node:fs'
+          const publicationText = readFileSync('history/publication.json', 'utf8')
+          const exactText = readFileSync('history/index/exact/manifest.json', 'utf8')
+          const publication = JSON.parse(publicationText)
+          const sha256 = (text) => createHash('sha256').update(text).digest('hex')
+          const channel = {
+            schemaVersion: 1,
+            active: {
+              dataCommitSha: process.env.DATA_SHA,
+              publicationPath: 'history/publication.json',
+              publicationSha256: sha256(publicationText),
+              chainId: publication.chainId,
+              epochId: publication.epochId,
+              exactIndex: {
+                manifestPath: 'history/index/exact/manifest.json',
+                manifestSha256: sha256(exactText),
+              },
+            },
+            updatedAt: publication.publishedAt,
+          }
+          writeFileSync('history-channel.json', `${JSON.stringify(channel)}\n`)
+          NODE
+          )
+
+          git -C "$ROOT" add history-channel.json
+          git -C "$ROOT" commit -m "Activate 1024-bucket combined immutable-history candidate"
+          CANDIDATE_SHA="$(git -C "$ROOT" rev-parse HEAD)"
+          if test -n "$OLD_SHA"; then
+            git -C "$ROOT" push --force-with-lease="refs/heads/$OUTPUT_HISTORY_BRANCH:$OLD_SHA" \
+              origin "HEAD:refs/heads/$OUTPUT_HISTORY_BRANCH"
+          else
+            git -C "$ROOT" push origin "HEAD:refs/heads/$OUTPUT_HISTORY_BRANCH"
+          fi
+          test "$(git ls-remote origin "refs/heads/$OUTPUT_HISTORY_BRANCH" | awk '{print $1}')" = "$CANDIDATE_SHA"
+          printf '%s\n' "$DATA_SHA" > "$EVIDENCE/data-commit.txt"
+          printf '%s\n' "$CANDIDATE_SHA" > "$EVIDENCE/candidate-branch-head.txt"
+          cp "$ROOT/history-channel.json" "$EVIDENCE/history-channel.json"
+          echo "data_sha=$DATA_SHA" >> "$GITHUB_OUTPUT"
+          echo "candidate_sha=$CANDIDATE_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Remotely rehearse unchanged 64 MiB reader
+        shell: bash
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: |
+          set -euo pipefail
+          EVIDENCE="$RUNNER_TEMP/combined-history-1024-evidence"
+          node .candidate-source-rehearsal-build/rehearse-candidate-sources.mjs \
+            --local \
+            --repository "$GITHUB_REPOSITORY" \
+            --history-branch "$OUTPUT_HISTORY_BRANCH" \
+            --current-state-branch "$CURRENT_STATE_BRANCH" \
+            > "$EVIDENCE/remote-rehearsal.json" \
+            2> >(tee "$EVIDENCE/remote-rehearsal.stderr.log" >&2)
+          jq -e \
+            --argjson ledger "$TARGET_LEDGER" \
+            --arg hash "$TARGET_HASH" '
+            .passed == true
+            and .ledgerIndex == $ledger
+            and .ledgerHash == $hash
+            and .segmentCount == 1136
+            and .ledgerCount == 560626
+            and (.exactReads | length) == 5
+            and all(.exactReads[]; .references > 0)
+          ' "$EVIDENCE/remote-rehearsal.json" >/dev/null
+
+          jq -n \
+            --arg sourceHead "$EXPECTED_SOURCE_HEAD" \
+            --arg dataSha '${{ steps.publish.outputs.data_sha }}' \
+            --arg candidateSha '${{ steps.publish.outputs.candidate_sha }}' \
+            --slurpfile rebucket "$EVIDENCE/rebucket-result.json" \
+            --slurpfile local "$EVIDENCE/local-rehearsal.json" \
+            --slurpfile remote "$EVIDENCE/remote-rehearsal.json" '
+            {
+              schemaVersion: 1,
+              passed: true,
+              sourceCandidateHead: $sourceHead,
+              dataCommitSha: $dataSha,
+              candidateBranchHead: $candidateSha,
+              bucketCount: $rebucket[0].targetBucketCount,
+              totalRecords: $rebucket[0].totalRecords,
+              maxDecompressedBytes: $rebucket[0].maxDecompressedBytes,
+              productionReadLimit: $rebucket[0].productionReadLimit,
+              localRehearsal: $local[0],
+              remoteRehearsal: $remote[0],
+              productionMutation: false,
+              d1Mutation: false,
+              workerDeploy: false,
+              cadenceChanged: false,
+              mainnetEnabled: false
+            }
+          ' > "$EVIDENCE/result.json"
+
+      - name: Capture final resource state
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          EVIDENCE="$RUNNER_TEMP/combined-history-1024-evidence"
+          mkdir -p "$EVIDENCE"
+          df -h > "$EVIDENCE/disk-final.txt"
+          du -sh .local/source-history .local/rebucket-parts > "$EVIDENCE/sizes-final.txt" 2>&1 || true
+
+      - name: Upload production-compatible candidate evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: combined-immutable-history-1024-candidate-3932301
+          path: ${{ runner.temp }}/combined-history-1024-evidence
+          if-no-files-found: error
+          retention-days: 30
