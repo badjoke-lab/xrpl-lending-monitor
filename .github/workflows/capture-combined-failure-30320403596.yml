@@ -1,4 +1,4 @@
-name: Capture corrected bootstrap failure 30334152993
+name: Capture staging failure 30334616930
 
 on:
   pull_request:
@@ -21,7 +21,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          JOB_ID: '90195362260'
+          JOB_ID: '90196753706'
         shell: bash
         run: |
           set -euo pipefail
@@ -33,7 +33,7 @@ jobs:
             "https://api.github.com/repos/$REPO/actions/jobs/$JOB_ID/logs" \
             -o evidence/job.log
           tail -n 320 evidence/job.log > evidence/job-tail.log
-          grep -nE 'sha256sum|gzip|git commit|git push|rejected|non-fast-forward|error|fatal|failed|Process completed|exit code' \
+          grep -nE 'sha256sum|gzip|git commit|git push|rejected|non-fast-forward|error|fatal|failed|Process completed|exit code|No such file|nothing to commit' \
             evidence/job.log > evidence/error-lines.log || true
           wc -c evidence/job.log evidence/job-tail.log evidence/error-lines.log > evidence/sizes.txt
           cat evidence/error-lines.log
@@ -42,7 +42,7 @@ jobs:
       - name: Upload exact failed job evidence
         uses: actions/upload-artifact@v4
         with:
-          name: corrected-bootstrap-failure-30334152993
+          name: staging-failure-30334616930
           path: evidence
           if-no-files-found: error
           retention-days: 30
