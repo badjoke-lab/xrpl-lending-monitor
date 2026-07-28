@@ -12,7 +12,7 @@ permissions:
 jobs:
   export:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
       - name: Check out exact branch commit
         uses: actions/checkout@v4
@@ -31,8 +31,14 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Build exact frontend assets
         run: pnpm build:deploy-assets
-      - name: Pack installed dependencies
-        run: tar --zstd -cf node_modules.tar.zst node_modules
+      - name: Install isolated Playwright Chromium
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: playwright-browsers
+        run: pnpm exec playwright install chromium
+      - name: Pack local runtime
+        run: |
+          tar --zstd -cf node_modules.tar.zst node_modules
+          tar --zstd -cf playwright-browsers.tar.zst playwright-browsers
       - name: Record source identity
         run: |
           printf '%s\n' "${{ github.event.pull_request.head.sha || github.sha }}" > SOURCE_SHA.txt
@@ -40,13 +46,14 @@ jobs:
       - name: Upload exact local e2e bundle
         uses: actions/upload-artifact@v4
         with:
-          name: xrpl-lending-local-e2e-${{ github.event.pull_request.head.sha || github.sha }}
+          name: xrpl-lending-local-e2e-browser-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
             dist
             tests/e2e
             playwright.config.ts
             package.json
             node_modules.tar.zst
+            playwright-browsers.tar.zst
             SOURCE_SHA.txt
           if-no-files-found: error
           retention-days: 1
