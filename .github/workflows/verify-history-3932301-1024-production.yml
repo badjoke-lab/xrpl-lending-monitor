@@ -1,0 +1,118 @@
+name: Verify promoted production history 3932301 1024
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+    paths:
+      - .github/workflows/verify-history-3932301-1024-production.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-production-history-3932301
+  cancel-in-progress: true
+
+env:
+  PRODUCTION_HISTORY_BRANCH: history-data
+  CANDIDATE_HEAD: 5d7bf6d330407c7ead237b3885d4330a8d268ce6
+  CANDIDATE_DATA_SHA: 12252ce9df0d5ab50adc51e2743edb8ff03989dd
+  EXPECTED_CHAIN_ID: canonical-devnet-3371676-3932301-v3
+  TARGET_LEDGER: '3932301'
+  EXPECTED_SEGMENTS: '1136'
+  EXPECTED_LEDGERS: '560626'
+  EXPECTED_BUCKETS: '1024'
+  EXPECTED_RECORDS: '33811930'
+  FIXED_OBJECT_ID: AD0980A254BC7262C57001315A9B6C7C65A020F29FAB2D0A0915933C55FF3BB1
+  FIXED_TRANSACTION_HASH: 70A489701D68B89E04923A7845F81F2C615760992C55119A8FC0ED8C759DE684
+  PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+
+jobs:
+  verify:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out promoted history identity
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.PRODUCTION_HISTORY_BRANCH }}
+          fetch-depth: 1
+          sparse-checkout: |
+            history-channel.json
+            history/publication.json
+            history/index/exact/manifest.json
+          sparse-checkout-cone-mode: false
+
+      - name: Verify ref and immutable files
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p production-history-verification
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_HEAD"
+          jq -e --arg data "$CANDIDATE_DATA_SHA" --arg chain "$EXPECTED_CHAIN_ID" '
+            .active.dataCommitSha == $data
+            and .active.chainId == $chain
+          ' history-channel.json >/dev/null
+          jq -e --arg chain "$EXPECTED_CHAIN_ID" --argjson ledger "$TARGET_LEDGER" --argjson segments "$EXPECTED_SEGMENTS" --argjson ledgers "$EXPECTED_LEDGERS" '
+            .complete == true
+            and .chainId == $chain
+            and .endLedgerIndex == $ledger
+            and .segmentCount == $segments
+            and .ledgerCount == $ledgers
+          ' history/publication.json >/dev/null
+          jq -e --argjson buckets "$EXPECTED_BUCKETS" --argjson records "$EXPECTED_RECORDS" '
+            .bucketCount == $buckets
+            and .totalRecords == $records
+            and (.assets | length) == $buckets
+          ' history/index/exact/manifest.json >/dev/null
+          printf '%s\n' "$(git rev-parse HEAD)" > production-history-verification/history-data-head.txt
+
+      - name: Verify production API and fixed history witness
+        shell: bash
+        run: |
+          set -euo pipefail
+          EVIDENCE=production-history-verification
+          verified=false
+          for attempt in $(seq 1 120); do
+            HISTORY_HTTP="$(curl --silent --show-error --retry 2 --connect-timeout 10 --max-time 60 -o "$EVIDENCE/history-source.json" -w '%{http_code}' "$PRODUCTION_BASE/api/status/history-source" || true)"
+            READY_HTTP="$(curl --silent --show-error --retry 2 --connect-timeout 10 --max-time 60 -o "$EVIDENCE/pre-soak-readiness.json" -w '%{http_code}' "$PRODUCTION_BASE/api/status/pre-soak-readiness" || true)"
+            OBJECT_HTTP="$(curl --silent --show-error --retry 2 --connect-timeout 10 --max-time 60 -o "$EVIDENCE/fixed-object-history.json" -w '%{http_code}' "$PRODUCTION_BASE/api/objects/Vault/$FIXED_OBJECT_ID/history?limit=100" || true)"
+
+            history_ok=false
+            readiness_ok=false
+            object_ok=false
+            if test "$HISTORY_HTTP" = 200 && jq -e --arg data "$CANDIDATE_DATA_SHA" --arg chain "$EXPECTED_CHAIN_ID" --argjson ledger "$TARGET_LEDGER" --argjson segments "$EXPECTED_SEGMENTS" --argjson ledgers "$EXPECTED_LEDGERS" --argjson buckets "$EXPECTED_BUCKETS" --argjson records "$EXPECTED_RECORDS" '
+              .status == "ok"
+              and .channel.data_commit_sha == $data
+              and .chain.chain_id == $chain
+              and .chain.end_ledger_index == $ledger
+              and .chain.segment_count == $segments
+              and .chain.ledger_count == $ledgers
+              and .exact_index.bucket_count == $buckets
+              and .exact_index.total_records == $records
+            ' "$EVIDENCE/history-source.json" >/dev/null 2>&1; then history_ok=true; fi
+            if test "$READY_HTTP" = 200 && jq -e '
+              .passed == true
+              and .checks.immutableHistory.passed == true
+              and .checks.projectionParity.passed == true
+              and .checks.fastLaneFreshness.passed == true
+              and .checks.recentFiveMinuteRuns.passed == true
+              and .checks.protectedCollector.passed == true
+            ' "$EVIDENCE/pre-soak-readiness.json" >/dev/null 2>&1; then readiness_ok=true; fi
+            if test "$OBJECT_HTTP" = 200 && grep -Fq "$FIXED_TRANSACTION_HASH" "$EVIDENCE/fixed-object-history.json"; then object_ok=true; fi
+            if test "$history_ok" = true && test "$readiness_ok" = true && test "$object_ok" = true; then verified=true; break; fi
+            sleep 5
+          done
+          test "$verified" = true
+          jq -n --arg head "$CANDIDATE_HEAD" --slurpfile history "$EVIDENCE/history-source.json" --slurpfile readiness "$EVIDENCE/pre-soak-readiness.json" '{schemaVersion:1,passed:true,historyDataHead:$head,historySource:$history[0],readiness:$readiness[0],fixedWitnessPassed:true}' > "$EVIDENCE/result.json"
+
+      - name: Upload production verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-history-verification-3932301-1024
+          path: production-history-verification
+          if-no-files-found: error
+          retention-days: 30
