@@ -1,1 +1,1 @@
-run complete verified chunked partitioned bootstrap with all corrected chunks
+run partitioned bootstrap with chunk integrity artifact
