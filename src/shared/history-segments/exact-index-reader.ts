@@ -13,7 +13,7 @@ import {
 } from './exact-index'
 import type { HistorySegmentChainPublication } from './publication'
 
-const DEFAULT_MAX_DECOMPRESSED_BYTES = 64 * 1024 * 1024
+const DEFAULT_MAX_DECOMPRESSED_BYTES = 128 * 1024 * 1024
 const MAX_RESULT_LIMIT = 100
 const MAX_CACHED_BUCKETS = 1
 
