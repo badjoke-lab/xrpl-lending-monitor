@@ -1,4 +1,4 @@
-name: Capture complete chunk bootstrap failure 30333774273
+name: Capture corrected bootstrap failure 30334152993
 
 on:
   pull_request:
@@ -21,7 +21,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          JOB_ID: '90194262918'
+          JOB_ID: '90195362260'
         shell: bash
         run: |
           set -euo pipefail
@@ -32,17 +32,17 @@ jobs:
             -H "X-GitHub-Api-Version: 2022-11-28" \
             "https://api.github.com/repos/$REPO/actions/jobs/$JOB_ID/logs" \
             -o evidence/job.log
-          tail -n 300 evidence/job.log > evidence/job-tail.log
-          grep -nE 'sha256sum|base64|gzip|No such file|error|fatal|rejected|failed|Process completed|exit code' \
+          tail -n 320 evidence/job.log > evidence/job-tail.log
+          grep -nE 'sha256sum|gzip|git commit|git push|rejected|non-fast-forward|error|fatal|failed|Process completed|exit code' \
             evidence/job.log > evidence/error-lines.log || true
           wc -c evidence/job.log evidence/job-tail.log evidence/error-lines.log > evidence/sizes.txt
           cat evidence/error-lines.log
-          tail -n 220 evidence/job-tail.log
+          tail -n 240 evidence/job-tail.log
 
       - name: Upload exact failed job evidence
         uses: actions/upload-artifact@v4
         with:
-          name: complete-chunk-bootstrap-failure-30333774273
+          name: corrected-bootstrap-failure-30334152993
           path: evidence
           if-no-files-found: error
           retention-days: 30
