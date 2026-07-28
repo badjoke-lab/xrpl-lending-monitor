@@ -1,0 +1,1 @@
+trigger partitioned combined-history workflow applicator
