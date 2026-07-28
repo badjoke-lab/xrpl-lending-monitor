@@ -17,6 +17,7 @@ printf '  %s\n' "${actual[@]}"
 
 expected=(
   ci.yml
+  complete-history-12-slot-qualification-995-v5.yml
   read-only-production-qualification.yml
   rolling-checkpoint-candidate.yml
   rolling-checkpoint-live-cutover.yml
@@ -24,7 +25,7 @@ expected=(
 printf '%s\n' "${expected[@]}" > "$evidence/expected-workflows.txt"
 
 if [[ "${#actual[@]}" -ne "${#expected[@]}" ]]; then
-  echo "GitHub Actions workflow count must remain exactly four." >&2
+  echo "GitHub Actions workflow count must remain exactly five while the bounded qualification v5 workflow is armed." >&2
   exit 1
 fi
 
@@ -43,10 +44,12 @@ import sys
 
 root = Path(sys.argv[1])
 evidence = Path(sys.argv[2])
+qualification_v5 = "complete-history-12-slot-qualification-995-v5.yml"
 policies = {
     "rolling-checkpoint-candidate.yml": ["workflow_dispatch", "issue_comment"],
     "rolling-checkpoint-live-cutover.yml": ["workflow_dispatch"],
     "read-only-production-qualification.yml": ["pull_request", "workflow_dispatch", "issue_comment"],
+    qualification_v5: ["workflow_dispatch", "schedule", "pull_request"],
 }
 parsed = {}
 
@@ -76,6 +79,25 @@ for required in ("actions: read", "contents: read", "issues: write", "CLOUDFLARE
     if required not in qualification:
         raise SystemExit(f"read-only qualification is missing required bounded capability: {required}")
 
+v5 = (root / qualification_v5).read_text()
+for required in (
+    "cron: '5 16 28 7 *'",
+    "HISTORY_HEAD: 5d7bf6d330407c7ead237b3885d4330a8d268ce6",
+    "HISTORY_DATA_SHA: 12252ce9df0d5ab50adc51e2743edb8ff03989dd",
+    "HISTORY_BUCKETS: '1024'",
+    "HISTORY_RECORDS: '33811930'",
+    "START_UTC: '2026-07-28T16:30:00Z'",
+    "END_UTC: '2026-07-28T17:25:00Z'",
+    "EVALUATE_UTC: '2026-07-28T17:30:30Z'",
+    "MAINNET",
+    "formal",
+):
+    if required not in v5:
+        raise SystemExit(f"qualification v5 workflow is missing bounded identity or non-release marker: {required}")
+for forbidden in ("  push:", "MAINNET_ENABLED: 'true'", "wrangler deploy", "d1 execute"):
+    if forbidden in v5:
+        raise SystemExit(f"qualification v5 workflow contains forbidden mutation capability: {forbidden.strip()}")
+
 candidate = (root / "rolling-checkpoint-candidate.yml").read_text()
 for required in (
     "github.event.issue.number == 995",
@@ -94,10 +116,11 @@ scheduled = []
 for path in root.glob("*.y*ml"):
     if re.search(r"^  schedule:", path.read_text(), flags=re.MULTILINE):
         scheduled.append(path.name)
+scheduled.sort()
 (evidence / "workflow-triggers.json").write_text(json.dumps(parsed, indent=2) + "\n")
 (evidence / "scheduled-workflows.json").write_text(json.dumps(scheduled, indent=2) + "\n")
-if scheduled:
-    raise SystemExit(f"scheduled workflows are forbidden: {scheduled}")
+if scheduled != [qualification_v5]:
+    raise SystemExit(f"only the fixed qualification v5 workflow may be scheduled: {scheduled}")
 PY
 
-echo "Actions workflow allowlist passed: CI, one read-only qualification runner, one bounded candidate builder, and one manual cutover workflow."
+echo "Actions workflow allowlist passed: CI, one read-only runner, one bounded candidate builder, one manual cutover workflow, and one fixed-window qualification v5 exception."
