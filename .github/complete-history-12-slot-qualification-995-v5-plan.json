@@ -1,0 +1,20 @@
+{
+  "generatedAt": "2026-07-28T14:03:27Z",
+  "workflowArmUtc": "2026-07-28T16:05:00Z",
+  "prepareUtc": "2026-07-28T16:25:00Z",
+  "startUtc": "2026-07-28T16:30:00Z",
+  "endUtc": "2026-07-28T17:25:00Z",
+  "evaluateUtc": "2026-07-28T17:30:30Z",
+  "startJst": "2026-07-29T01:30:00+09:00",
+  "endJst": "2026-07-29T02:25:00+09:00",
+  "evaluateJst": "2026-07-29T02:30:30+09:00",
+  "timeoutMinutes": 180,
+  "finalizationBudgetSeconds": 1200,
+  "runtimeSha": "5b56de459e97495a9358f0e203c056d2a99afc6b",
+  "historyHead": "5d7bf6d330407c7ead237b3885d4330a8d268ce6",
+  "historyDataSha": "12252ce9df0d5ab50adc51e2743edb8ff03989dd",
+  "historyChainId": "canonical-devnet-3371676-3932301-v3",
+  "status": "staged",
+  "releaseCertification": false,
+  "nextGateAfterPass": "deploy and arm independent immutable 24-hour semantic evidence retention"
+}
