@@ -1,0 +1,299 @@
+name: Preflight guarded 1024-bucket history promotion 3932301
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+    paths:
+      - .github/workflows/preflight-promote-history-3932301-1024.yml
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: preflight-promote-history-3932301-1024
+  cancel-in-progress: true
+
+env:
+  CANDIDATE_BRANCH: history-repair-3932301-combined-1024-data
+  CANDIDATE_HEAD: 5d7bf6d330407c7ead237b3885d4330a8d268ce6
+  CANDIDATE_DATA_SHA: 12252ce9df0d5ab50adc51e2743edb8ff03989dd
+  CANDIDATE_RUN_ID: '30352155485'
+  CANDIDATE_ARTIFACT: combined-immutable-history-1024-candidate-3932301
+  PRODUCTION_HISTORY_BRANCH: history-data
+  CURRENT_STATE_BRANCH: current-state-data
+  TARGET_LEDGER: '3932301'
+  TARGET_HASH: 7D026FED85BCA2BDCFE450A0F3537707A43B4D08E1D2AE57AFBC54D88EBE1828
+  EXPECTED_CHAIN_ID: canonical-devnet-3371676-3932301-v3
+  EXPECTED_SEGMENTS: '1136'
+  EXPECTED_LEDGERS: '560626'
+  EXPECTED_RECORDS: '33811930'
+  EXPECTED_BUCKETS: '1024'
+  EXPECTED_MAX_DECOMPRESSED_BYTES: '55955582'
+  PRODUCTION_READER_LIMIT: '67108864'
+  PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+
+jobs:
+  preflight:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out exact preflight implementation
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+
+      - name: Check out candidate identity read-only
+        uses: actions/checkout@v4
+        with:
+          ref: history-repair-3932301-combined-1024-data
+          path: .local/candidate-history
+          fetch-depth: 1
+          sparse-checkout: |
+            history-channel.json
+            history/publication.json
+            history/index/exact/manifest.json
+          sparse-checkout-cone-mode: false
+
+      - name: Check out production history identity read-only
+        uses: actions/checkout@v4
+        with:
+          ref: history-data
+          path: .local/production-history
+          fetch-depth: 1
+          sparse-checkout: |
+            history-channel.json
+            history/publication.json
+            history/index/exact/manifest.json
+          sparse-checkout-cone-mode: false
+
+      - name: Check out current-state identity read-only
+        uses: actions/checkout@v4
+        with:
+          ref: current-state-data
+          path: .local/current-state
+          fetch-depth: 1
+          sparse-checkout: read-model/manifest.json
+          sparse-checkout-cone-mode: false
+
+      - name: Download immutable candidate evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.CANDIDATE_ARTIFACT }}
+          path: .local/candidate-evidence
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ env.CANDIDATE_RUN_ID }}
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Freeze candidate production and current-state heads
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p history-promotion-preflight-evidence
+          CANDIDATE_REMOTE="$(git ls-remote origin "refs/heads/$CANDIDATE_BRANCH" | awk '{print $1}')"
+          PRODUCTION_REMOTE="$(git ls-remote origin "refs/heads/$PRODUCTION_HISTORY_BRANCH" | awk '{print $1}')"
+          CURRENT_REMOTE="$(git ls-remote origin "refs/heads/$CURRENT_STATE_BRANCH" | awk '{print $1}')"
+          test "$CANDIDATE_REMOTE" = "$CANDIDATE_HEAD"
+          test "$CANDIDATE_REMOTE" = "$(git -C .local/candidate-history rev-parse HEAD)"
+          test "$PRODUCTION_REMOTE" = "$(git -C .local/production-history rev-parse HEAD)"
+          test "$CURRENT_REMOTE" = "$(git -C .local/current-state rev-parse HEAD)"
+          printf '%s\n' "$CANDIDATE_REMOTE" > history-promotion-preflight-evidence/candidate-head.txt
+          printf '%s\n' "$PRODUCTION_REMOTE" > history-promotion-preflight-evidence/production-history-head.txt
+          printf '%s\n' "$CURRENT_REMOTE" > history-promotion-preflight-evidence/current-state-head.txt
+
+      - name: Validate immutable candidate artifact and identities
+        shell: bash
+        run: |
+          set -euo pipefail
+          EVIDENCE=history-promotion-preflight-evidence
+          jq -e \
+            --arg candidate "$CANDIDATE_HEAD" \
+            --arg data "$CANDIDATE_DATA_SHA" \
+            --argjson buckets "$EXPECTED_BUCKETS" \
+            --argjson records "$EXPECTED_RECORDS" \
+            --argjson max "$EXPECTED_MAX_DECOMPRESSED_BYTES" \
+            --argjson limit "$PRODUCTION_READER_LIMIT" '
+            .passed == true
+            and .candidateBranchHead == $candidate
+            and .dataCommitSha == $data
+            and .bucketCount == $buckets
+            and .totalRecords == $records
+            and .maxDecompressedBytes == $max
+            and .productionReadLimit == $limit
+            and .maxDecompressedBytes < .productionReadLimit
+            and .localRehearsal.passed == true
+            and .localRehearsal.termCount == 5
+            and all(.localRehearsal.terms[]; .referenceCount > 0 and .matchedRecords > 0)
+            and .remoteRehearsal.passed == true
+            and (.remoteRehearsal.exactReads | length) == 5
+            and all(.remoteRehearsal.exactReads[]; .references > 0)
+            and .productionMutation == false
+            and .d1Mutation == false
+            and .workerDeploy == false
+          ' .local/candidate-evidence/result.json >/dev/null
+          cp .local/candidate-evidence/result.json "$EVIDENCE/candidate-result.json"
+
+          jq -e \
+            --arg data "$CANDIDATE_DATA_SHA" \
+            --arg chain "$EXPECTED_CHAIN_ID" '
+            .active.dataCommitSha == $data
+            and .active.chainId == $chain
+            and .active.publicationPath == "history/publication.json"
+            and .active.exactIndex.manifestPath == "history/index/exact/manifest.json"
+          ' .local/candidate-history/history-channel.json >/dev/null
+
+          jq -e \
+            --arg chain "$EXPECTED_CHAIN_ID" \
+            --argjson ledger "$TARGET_LEDGER" \
+            --arg hash "$TARGET_HASH" \
+            --argjson segments "$EXPECTED_SEGMENTS" \
+            --argjson ledgers "$EXPECTED_LEDGERS" '
+            .complete == true
+            and .chainId == $chain
+            and .endLedgerIndex == $ledger
+            and .endLedgerHash == $hash
+            and .segmentCount == $segments
+            and .ledgerCount == $ledgers
+          ' .local/candidate-history/history/publication.json >/dev/null
+
+          jq -e \
+            --argjson buckets "$EXPECTED_BUCKETS" \
+            --argjson records "$EXPECTED_RECORDS" '
+            .bucketCount == $buckets
+            and .totalRecords == $records
+            and (.assets | length) == $buckets
+          ' .local/candidate-history/history/index/exact/manifest.json >/dev/null
+
+      - name: Validate candidate alignment and all five remote witnesses
+        shell: bash
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: |
+          set -euo pipefail
+          EVIDENCE=history-promotion-preflight-evidence
+          node --check scripts/verify-history-current-state-alignment.mjs
+          node scripts/verify-history-current-state-alignment.mjs \
+            --history-publication .local/candidate-history/history/publication.json \
+            --history-channel .local/candidate-history/history-channel.json \
+            --exact-index-manifest .local/candidate-history/history/index/exact/manifest.json \
+            --current-manifest .local/current-state/read-model/manifest.json \
+            > "$EVIDENCE/candidate-alignment.json"
+          jq -e \
+            --argjson ledger "$TARGET_LEDGER" \
+            --arg hash "$TARGET_HASH" \
+            --argjson buckets "$EXPECTED_BUCKETS" \
+            --argjson records "$EXPECTED_RECORDS" '
+            .passed == true
+            and .history.ledgerIndex == $ledger
+            and .history.ledgerHash == $hash
+            and .currentState.ledgerIndex == $ledger
+            and .currentState.ledgerHash == $hash
+            and .exactIndex.bucketCount == $buckets
+            and .exactIndex.totalRecords == $records
+          ' "$EVIDENCE/candidate-alignment.json" >/dev/null
+
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/rehearse-candidate-sources.ts')
+          text = path.read_text()
+          needle = "    '2A3920F5B65CDEB35AEE7E4606736A7F0423D804A874EC3225BCD39A7A30A4D4',\n  ]"
+          replacement = "    '2A3920F5B65CDEB35AEE7E4606736A7F0423D804A874EC3225BCD39A7A30A4D4',\n    '70A489701D68B89E04923A7845F81F2C615760992C55119A8FC0ED8C759DE684',\n    'AD0980A254BC7262C57001315A9B6C7C65A020F29FAB2D0A0915933C55FF3BB1',\n  ]"
+          if needle not in text:
+              raise SystemExit('candidate rehearsal witness boundary changed')
+          path.write_text(text.replace(needle, replacement))
+          PY
+          pnpm build:candidate-source-rehearsal
+          node .candidate-source-rehearsal-build/rehearse-candidate-sources.mjs \
+            --local \
+            --repository "$GITHUB_REPOSITORY" \
+            --history-branch "$CANDIDATE_BRANCH" \
+            --current-state-branch "$CURRENT_STATE_BRANCH" \
+            > "$EVIDENCE/remote-rehearsal.json" \
+            2> >(tee "$EVIDENCE/remote-rehearsal.stderr.log" >&2)
+          jq -e \
+            --argjson ledger "$TARGET_LEDGER" \
+            --arg hash "$TARGET_HASH" '
+            .passed == true
+            and .ledgerIndex == $ledger
+            and .ledgerHash == $hash
+            and .segmentCount == 1136
+            and .ledgerCount == 560626
+            and (.exactReads | length) == 5
+            and all(.exactReads[]; .references > 0)
+          ' "$EVIDENCE/remote-rehearsal.json" >/dev/null
+
+      - name: Capture current production state read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          EVIDENCE=history-promotion-preflight-evidence
+          curl --fail-with-body --silent --show-error --retry 3 \
+            "$PRODUCTION_BASE/api/status/history-source" \
+            > "$EVIDENCE/production-history-source.json"
+          curl --fail-with-body --silent --show-error --retry 3 \
+            "$PRODUCTION_BASE/api/status/pre-soak-readiness" \
+            > "$EVIDENCE/production-pre-soak-readiness.json"
+          jq -e '.status == "ok"' "$EVIDENCE/production-history-source.json" >/dev/null
+          jq -e 'type == "object" and has("checks")' "$EVIDENCE/production-pre-soak-readiness.json" >/dev/null
+
+      - name: Build immutable read-only preflight result
+        shell: bash
+        run: |
+          set -euo pipefail
+          EVIDENCE=history-promotion-preflight-evidence
+          jq -n \
+            --arg candidateHead "$(cat "$EVIDENCE/candidate-head.txt")" \
+            --arg candidateDataSha "$CANDIDATE_DATA_SHA" \
+            --arg productionHead "$(cat "$EVIDENCE/production-history-head.txt")" \
+            --arg currentStateHead "$(cat "$EVIDENCE/current-state-head.txt")" \
+            --slurpfile candidate "$EVIDENCE/candidate-result.json" \
+            --slurpfile alignment "$EVIDENCE/candidate-alignment.json" \
+            --slurpfile rehearsal "$EVIDENCE/remote-rehearsal.json" \
+            --slurpfile historySource "$EVIDENCE/production-history-source.json" \
+            --slurpfile readiness "$EVIDENCE/production-pre-soak-readiness.json" '
+            {
+              schemaVersion: 1,
+              passed: true,
+              candidateBranchHead: $candidateHead,
+              candidateDataCommitSha: $candidateDataSha,
+              productionHistoryHeadBefore: $productionHead,
+              currentStateHead: $currentStateHead,
+              candidate: $candidate[0],
+              alignment: $alignment[0],
+              remoteRehearsal: $rehearsal[0],
+              currentProductionHistorySource: $historySource[0],
+              currentProductionReadiness: $readiness[0],
+              productionMutation: false,
+              d1Mutation: false,
+              workerDeploy: false,
+              cadenceChanged: false,
+              qualificationChanged: false,
+              soakChanged: false,
+              mainnetEnabled: false,
+              nextAction: "separate explicitly authorized guarded history-data promotion with automatic rollback"
+            }
+          ' > "$EVIDENCE/result.json"
+          jq -e '.passed == true and .productionMutation == false' "$EVIDENCE/result.json" >/dev/null
+
+      - name: Upload read-only promotion preflight evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: immutable-history-promotion-preflight-3932301-1024
+          path: history-promotion-preflight-evidence
+          if-no-files-found: error
+          retention-days: 30
