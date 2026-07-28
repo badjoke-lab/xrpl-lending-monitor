@@ -1,6 +1,7 @@
 name: Local source export
 
 on:
+  pull_request:
   push:
     branches:
       - tmp/local-behavior-source-export-20260728
@@ -15,14 +16,16 @@ jobs:
     steps:
       - name: Check out exact branch commit
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Record source identity
         run: |
-          printf '%s\n' "${GITHUB_SHA}" > SOURCE_SHA.txt
+          printf '%s\n' "${{ github.event.pull_request.head.sha || github.sha }}" > SOURCE_SHA.txt
           git status --short
       - name: Upload complete source tree
         uses: actions/upload-artifact@v4
         with:
-          name: xrpl-lending-source-${{ github.sha }}
+          name: xrpl-lending-source-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
             .
             !.git
