@@ -1,1 +1,1 @@
-run verified chunked partitioned bootstrap
+run verified chunked partitioned bootstrap after all 16 chunks staged
