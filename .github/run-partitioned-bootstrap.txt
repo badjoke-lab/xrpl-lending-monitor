@@ -1,0 +1,1 @@
+stage verified partitioned script and workflow blob outside protected path
