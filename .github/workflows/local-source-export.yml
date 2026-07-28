@@ -12,22 +12,36 @@ permissions:
 jobs:
   export:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     steps:
       - name: Check out exact branch commit
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build exact frontend assets
+        run: pnpm build:deploy-assets
       - name: Record source identity
         run: |
           printf '%s\n' "${{ github.event.pull_request.head.sha || github.sha }}" > SOURCE_SHA.txt
           git status --short
-      - name: Upload complete source tree
+      - name: Upload local browser bundle
         uses: actions/upload-artifact@v4
         with:
-          name: xrpl-lending-source-${{ github.event.pull_request.head.sha || github.sha }}
+          name: xrpl-lending-local-browser-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
-            .
-            !.git
-          include-hidden-files: true
+            dist
+            tests/e2e/smoke.spec.ts
+            SOURCE_SHA.txt
+          if-no-files-found: error
           retention-days: 1
