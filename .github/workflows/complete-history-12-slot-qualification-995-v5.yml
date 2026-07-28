@@ -1,3 +1,5 @@
+# Devnet-only qualification. MAINNET remains disabled.
+# A passing run does not certify formal release.
 name: Complete-history 12-slot qualification 995 v5
 
 on:
@@ -12,6 +14,7 @@ on:
       - .github/complete-history-12-slot-qualification-995-v5-plan.json
       - docs/implementation-status.md
       - docs/qualification-995-v5-plan.md
+      - scripts/check-actions-workflow-allowlist.sh
 
 permissions:
   actions: read
