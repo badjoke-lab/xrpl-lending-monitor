@@ -60,7 +60,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          awk '/^PAYLOAD$/{capture=!capture; next} capture' .github/qualification-995-v5-bundle.txt > /tmp/qualification-v5.tar.gz.b64
+          sed -n "/<<'PAYLOAD'$/,/^PAYLOAD$/p" .github/qualification-995-v5-bundle.txt | sed '1d;$d' > /tmp/qualification-v5.tar.gz.b64
           test -s /tmp/qualification-v5.tar.gz.b64
           base64 -d /tmp/qualification-v5.tar.gz.b64 > /tmp/qualification-v5.tar.gz
           tar -xzf /tmp/qualification-v5.tar.gz -C .
@@ -89,7 +89,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          awk '/^PAYLOAD$/{capture=!capture; next} capture' .github/qualification-995-v5-bundle.txt > /tmp/qualification-v5.tar.gz.b64
+          sed -n "/<<'PAYLOAD'$/,/^PAYLOAD$/p" .github/qualification-995-v5-bundle.txt | sed '1d;$d' > /tmp/qualification-v5.tar.gz.b64
           test -s /tmp/qualification-v5.tar.gz.b64
           base64 -d /tmp/qualification-v5.tar.gz.b64 > /tmp/qualification-v5.tar.gz
           tar -xzf /tmp/qualification-v5.tar.gz -C .
