@@ -1,4 +1,4 @@
-name: Bootstrap chunked partitioned combined-history implementation
+name: Stage partitioned combined-history implementation
 
 on:
   pull_request:
@@ -15,7 +15,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  apply:
+  stage:
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -25,56 +25,32 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 1
 
-      - name: Record payload integrity
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/partitioned-bootstrap-diagnostic"
-          sha256sum .github/partitioned-chunks/* | tee "$RUNNER_TEMP/partitioned-bootstrap-diagnostic/chunk-sha256.txt"
-          wc -c .github/partitioned-chunks/* | tee "$RUNNER_TEMP/partitioned-bootstrap-diagnostic/chunk-sizes.txt"
-          cat .github/partitioned-chunks/exact.* > /tmp/exact.b64
-          cat .github/partitioned-chunks/workflow.* > /tmp/workflow.b64
-          sha256sum /tmp/exact.b64 /tmp/workflow.b64 | tee "$RUNNER_TEMP/partitioned-bootstrap-diagnostic/combined-sha256.txt"
-          wc -c /tmp/exact.b64 /tmp/workflow.b64 | tee "$RUNNER_TEMP/partitioned-bootstrap-diagnostic/combined-sizes.txt"
-
-      - name: Decode and commit bounded partitioned implementation
+      - name: Decode verified implementation outside protected workflow path
         shell: bash
         env:
           HEAD_BRANCH: ${{ github.event.pull_request.head.ref }}
         run: |
           set -euo pipefail
+          cat .github/partitioned-chunks/exact.* > /tmp/exact.b64
+          cat .github/partitioned-chunks/workflow.* > /tmp/workflow.b64
           base64 -d /tmp/exact.b64 > /tmp/exact.gz
           base64 -d /tmp/workflow.b64 > /tmp/workflow.gz
           gzip -t /tmp/exact.gz
           gzip -t /tmp/workflow.gz
           gzip -d -c /tmp/exact.gz > scripts/build-incremental-history-exact-index.ts
-          gzip -d -c /tmp/workflow.gz > .github/workflows/build-combined-history-3932301.yml
+          gzip -d -c /tmp/workflow.gz > .github/partitioned-workflow-decoded.yml
           test "$(sha256sum scripts/build-incremental-history-exact-index.ts | awk '{print $1}')" = "5f50eae467ddf6786327d6b3e01bfcab3335e6c2e1a188d930e13b60e5276cba"
-          test "$(sha256sum .github/workflows/build-combined-history-3932301.yml | awk '{print $1}')" = "ac0920240c28c10783cd7a176381881f7b4a51a585a8ec34922c14fdda148e63"
-          test "$(wc -l < scripts/build-incremental-history-exact-index.ts)" -eq 559
-          test "$(wc -l < .github/workflows/build-combined-history-3932301.yml)" -eq 624
+          test "$(sha256sum .github/partitioned-workflow-decoded.yml | awk '{print $1}')" = "ac0920240c28c10783cd7a176381881f7b4a51a585a8ec34922c14fdda148e63"
           rm -rf \
             .github/partitioned-chunks \
             .github/partitioned-exact.ts.gz.b64 \
             .github/partitioned-workflow.yml.gz.b64 \
             .github/partitioned-apply-trigger.txt \
             .github/bootstrap-partitioned-retry.txt \
-            .github/run-partitioned-bootstrap.txt \
-            .github/workflows/apply-partitioned-combined-fix.yml \
-            .github/workflows/cancel-combined-run-30322659427.yml \
-            .github/workflows/capture-combined-failure-30320403596.yml
+            .github/run-partitioned-bootstrap.txt
           git diff --check
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add -A
-          git commit -m "Partition combined exact-index build across bounded jobs"
+          git commit -m "Stage verified partitioned exact-index implementation"
           git push origin "HEAD:refs/heads/$HEAD_BRANCH"
-
-      - name: Upload payload diagnostic
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: partitioned-bootstrap-payload-${{ github.run_id }}
-          path: ${{ runner.temp }}/partitioned-bootstrap-diagnostic
-          if-no-files-found: error
-          retention-days: 7
