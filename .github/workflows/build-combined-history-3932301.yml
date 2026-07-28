@@ -1,34 +1,31 @@
-name: Build partitioned combined immutable-history candidate 3932301
+name: Resume combined immutable-history candidate publish 3932301
 
 on:
   pull_request:
     branches: [main]
-    types: [opened, synchronize, reopened]
+    types: [synchronize]
     paths:
       - .github/workflows/build-combined-history-3932301.yml
-      - scripts/build-incremental-history-exact-index.ts
 
 permissions:
+  actions: read
   contents: write
 
 concurrency:
-  group: build-combined-history-3932301
+  group: resume-combined-history-3932301
   cancel-in-progress: true
 
 env:
-  BASE_HISTORY_BRANCH: history-data
-  DELTA_HISTORY_BRANCH: history-repair-3932301-data
+  SOURCE_RUN_ID: '30334947884'
   COMBINED_HISTORY_BRANCH: history-repair-3932301-combined-data
   CURRENT_STATE_BRANCH: current-state-data
-  TARGET_LEDGER: '3932301'
   TARGET_HASH: 7D026FED85BCA2BDCFE450A0F3537707A43B4D08E1D2AE57AFBC54D88EBE1828
-  CHAIN_ID: canonical-devnet-3371676-3932301-v3
 
 jobs:
-  prepare:
+  resume-publish:
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 60
     steps:
       - name: Check out partitioned implementation
         uses: actions/checkout@v4
@@ -36,19 +33,18 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 1
 
-      - name: Check out production publication and exact index
+      - name: Check out production immutable history read-only
         uses: actions/checkout@v4
         with:
           ref: history-data
           path: .local/base-history
           fetch-depth: 1
           sparse-checkout: |
-            history/publication.json
-            history/index/exact
+            history
             history-channel.json
           sparse-checkout-cone-mode: false
 
-      - name: Check out reconstructed delta history
+      - name: Check out reconstructed delta history read-only
         uses: actions/checkout@v4
         with:
           ref: history-repair-3932301-data
@@ -59,317 +55,24 @@ jobs:
             history-channel.json
           sparse-checkout-cone-mode: false
 
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11.9.0
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24.18.0
-          cache: pnpm
-
-      - run: pnpm install --frozen-lockfile
-
-      - name: Build preparation tools
-        run: |
-          set -euo pipefail
-          pnpm build:history-extension-plan
-          pnpm build:history-extension-artifacts
-          pnpm build:extended-history-publication
-          pnpm build:incremental-history-exact-index
-
-      - name: Freeze source identities and extension plan
-        shell: bash
-        run: |
-          set -euo pipefail
-          ROOT="$RUNNER_TEMP/combined-prepare"
-          EVIDENCE="$ROOT/evidence"
-          rm -rf "$ROOT"
-          mkdir -p "$EVIDENCE"
-          df -h > "$EVIDENCE/disk-before.txt"
-          du -sh .local/base-history .local/delta-history > "$EVIDENCE/source-sizes.txt"
-
-          IMPLEMENTATION_SHA="$(git rev-parse HEAD)"
-          BASE_HEAD="$(git -C .local/base-history rev-parse HEAD)"
-          DELTA_HEAD="$(git -C .local/delta-history rev-parse HEAD)"
-          BASE_DATA="$(jq -r .active.dataCommitSha .local/base-history/history-channel.json)"
-          DELTA_DATA="$(jq -r .active.dataCommitSha .local/delta-history/history-channel.json)"
-          printf '%s\n' "$IMPLEMENTATION_SHA" > "$EVIDENCE/implementation-sha.txt"
-          printf '%s\n' "$BASE_HEAD" > "$EVIDENCE/base-branch-head.txt"
-          printf '%s\n' "$BASE_DATA" > "$EVIDENCE/base-data-commit.txt"
-          printf '%s\n' "$DELTA_HEAD" > "$EVIDENCE/delta-branch-head.txt"
-          printf '%s\n' "$DELTA_DATA" > "$EVIDENCE/delta-data-commit.txt"
-          cp .local/base-history/history/publication.json "$EVIDENCE/base-publication.json"
-
-          jq -e '.endLedgerIndex == 3800885 and .segmentCount == 873' "$EVIDENCE/base-publication.json" >/dev/null
-          jq -e --arg hash "$TARGET_HASH" '
-            .startLedgerIndex == 3800886
-            and .endLedgerIndex == 3932301
-            and .endLedgerHash == $hash
-            and .segmentCount == 263
-          ' .local/delta-history/history/publication.json >/dev/null
-
-          node .history-extension-plan-build/plan-history-extension.mjs \
-            --local \
-            --publication "$EVIDENCE/base-publication.json" \
-            --target-ledger "$TARGET_LEDGER" \
-            --target-ledger-hash "$TARGET_HASH" \
-            --segment-ledgers 500 \
-            --checkpoint-every-segments 16 \
-            --output "$EVIDENCE/extension-plan.json" \
-            > "$EVIDENCE/extension-plan.stdout.json"
-
-          jq -e '
-            .source.endLedgerIndex == 3800885
-            and .source.segmentCount == 873
-            and .extension.startLedgerIndex == 3800886
-            and .extension.endLedgerIndex == 3932301
-            and .extension.segmentCount == 263
-          ' "$EVIDENCE/extension-plan.json" >/dev/null
-
-      - name: Re-anchor and verify all 263 reconstructed manifests
-        shell: bash
-        run: |
-          set -euo pipefail
-          EVIDENCE="$RUNNER_TEMP/combined-prepare/evidence"
-          FIRST=.local/delta-history/history/devnet-3371675/devnet-3371675-3800886-3801385/manifest.json
-          PREVIOUS_ID="$(jq -r .source.lastSegmentId "$EVIDENCE/extension-plan.json")"
-          PREVIOUS_HASH="$(jq -r .source.endLedgerHash "$EVIDENCE/extension-plan.json")"
-          tmp="${FIRST}.tmp"
-          jq -c --arg id "$PREVIOUS_ID" --arg hash "$PREVIOUS_HASH" \
-            '.previousSegmentId = $id | .previousSegmentEndHash = $hash' "$FIRST" > "$tmp"
-          printf '\n' >> "$tmp"
-          mv "$tmp" "$FIRST"
-
-          ARGS=()
-          while IFS= read -r segment_id; do
-            ARGS+=(--manifest ".local/delta-history/history/devnet-3371675/$segment_id/manifest.json")
-          done < <(jq -r '.extension.segments[].segmentId' "$EVIDENCE/extension-plan.json")
-          test "$((${#ARGS[@]} / 2))" -eq 263
-
-          node .history-extension-artifacts-build/verify-history-extension-artifacts.mjs \
-            --local \
-            --plan "$EVIDENCE/extension-plan.json" \
-            "${ARGS[@]}" \
-            > "$EVIDENCE/extension-artifacts.json"
-          jq -e '.extension.segmentCount == 263 and .target.ledgerIndex == 3932301' \
-            "$EVIDENCE/extension-artifacts.json" >/dev/null
-
-      - name: Build 1136-segment combined publication
-        shell: bash
-        run: |
-          set -euo pipefail
-          EVIDENCE="$RUNNER_TEMP/combined-prepare/evidence"
-          IMPLEMENTATION_SHA="$(cat "$EVIDENCE/implementation-sha.txt")"
-          ARGS=()
-          while IFS= read -r segment_id; do
-            ARGS+=(--manifest ".local/delta-history/history/devnet-3371675/$segment_id/manifest.json")
-          done < <(jq -r '.extension.segments[].segmentId' "$EVIDENCE/extension-plan.json")
-
-          node .extended-history-publication-build/build-extended-history-publication.mjs \
-            --local \
-            --source-publication "$EVIDENCE/base-publication.json" \
-            --plan "$EVIDENCE/extension-plan.json" \
-            "${ARGS[@]}" \
-            --chain-id "$CHAIN_ID" \
-            --source-revision "$IMPLEMENTATION_SHA" \
-            --output "$EVIDENCE/combined-publication.json" \
-            > "$EVIDENCE/publication.stdout.json"
-
-          jq -e --arg hash "$TARGET_HASH" '
-            .startLedgerIndex == 3371676
-            and .endLedgerIndex == 3932301
-            and .endLedgerHash == $hash
-            and .segmentCount == 1136
-            and .ledgerCount == 560626
-            and .segments[872].endLedgerIndex == 3800885
-            and .segments[873].startLedgerIndex == 3800886
-            and .segments[873].previousSegmentId == .segments[872].segmentId
-            and .segments[873].previousSegmentEndHash == .segments[872].endLedgerHash
-          ' "$EVIDENCE/combined-publication.json" >/dev/null
-
-      - name: Extract delta exact-index records once
-        shell: bash
-        run: |
-          set -euo pipefail
-          ROOT="$RUNNER_TEMP/combined-prepare"
-          EVIDENCE="$ROOT/evidence"
-          OUTPUT="$ROOT/delta-exact"
-          IMPLEMENTATION_SHA="$(cat "$EVIDENCE/implementation-sha.txt")"
-          mkdir -p "$OUTPUT"
-          export NODE_OPTIONS=--max-old-space-size=5632
-          /usr/bin/time -v -o "$EVIDENCE/delta-extract.time.txt" \
-            node .incremental-history-exact-index-build/build-incremental-history-exact-index.mjs \
-              --local \
-              --mode extract-delta \
-              --publication "$EVIDENCE/combined-publication.json" \
-              --plan "$EVIDENCE/extension-plan.json" \
-              --artifact-root .local/delta-history \
-              --base-index-dir .local/base-history/history/index/exact \
-              --base-publication "$EVIDENCE/base-publication.json" \
-              --output-dir "$OUTPUT" \
-              --source-revision "$IMPLEMENTATION_SHA" \
-              > "$EVIDENCE/delta-extract.json" \
-              2> >(tee "$EVIDENCE/delta-extract.stderr.log" >&2)
-          jq -e '.passed == true and .baseRecords > 0 and .addedRecords > 0 and .bucketCount == 256' \
-            "$EVIDENCE/delta-extract.json" >/dev/null
-          test "$(find "$OUTPUT" -maxdepth 1 -name '*.ndjson.gz' | wc -l)" -eq 256
-          df -h > "$EVIDENCE/disk-after-delta-extract.txt"
-          du -sh "$OUTPUT" > "$EVIDENCE/delta-exact-size.txt"
-
-      - name: Upload preparation and delta exact-index evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: combined-history-prepare-${{ github.run_id }}
-          path: |
-            ${{ runner.temp }}/combined-prepare/evidence
-            ${{ runner.temp }}/combined-prepare/delta-exact
-          if-no-files-found: warn
-          retention-days: 2
-
-  merge:
-    if: github.event.pull_request.head.repo.full_name == github.repository
-    needs: prepare
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - label: 000-064
-            start: 0
-            end: 64
-          - label: 064-128
-            start: 64
-            end: 128
-          - label: 128-192
-            start: 128
-            end: 192
-          - label: 192-256
-            start: 192
-            end: 256
-    steps:
-      - name: Check out partitioned implementation
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 1
-
-      - name: Check out production exact index
-        uses: actions/checkout@v4
-        with:
-          ref: history-data
-          path: .local/base-history
-          fetch-depth: 1
-          sparse-checkout: |
-            history/publication.json
-            history/index/exact
-          sparse-checkout-cone-mode: false
-
-      - name: Download preparation artifact
+      - name: Download preparation artifact from partitioned run
         uses: actions/download-artifact@v4
         with:
-          name: combined-history-prepare-${{ github.run_id }}
+          name: combined-history-prepare-${{ env.SOURCE_RUN_ID }}
           path: .local/prepare
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ env.SOURCE_RUN_ID }}
 
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11.9.0
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24.18.0
-          cache: pnpm
-
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm build:incremental-history-exact-index
-
-      - name: Merge exact-index buckets ${{ matrix.label }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          OUTPUT="$RUNNER_TEMP/exact-part-${{ matrix.label }}"
-          rm -rf "$OUTPUT"
-          mkdir -p "$OUTPUT"
-          IMPLEMENTATION_SHA="$(cat .local/prepare/evidence/implementation-sha.txt)"
-          export NODE_OPTIONS=--max-old-space-size=4096
-          /usr/bin/time -v -o "$OUTPUT/merge.time.txt" \
-            node .incremental-history-exact-index-build/build-incremental-history-exact-index.mjs \
-              --local \
-              --mode merge-range \
-              --publication .local/prepare/evidence/combined-publication.json \
-              --plan .local/prepare/evidence/extension-plan.json \
-              --base-index-dir .local/base-history/history/index/exact \
-              --base-publication .local/prepare/evidence/base-publication.json \
-              --delta-dir .local/prepare/delta-exact \
-              --bucket-start '${{ matrix.start }}' \
-              --bucket-end '${{ matrix.end }}' \
-              --output-dir "$OUTPUT" \
-              --asset-prefix history/index/exact \
-              --source-revision "$IMPLEMENTATION_SHA" \
-              > "$OUTPUT/merge-result.json" \
-              2> >(tee "$OUTPUT/merge.stderr.log" >&2)
-          jq -e --argjson start '${{ matrix.start }}' --argjson end '${{ matrix.end }}' '
-            .passed == true and .bucketStart == $start and .bucketEnd == $end
-          ' "$OUTPUT/merge-result.json" >/dev/null
-          test "$(find "$OUTPUT" -maxdepth 1 -name '*.ndjson.gz' | wc -l)" -eq 64
-
-      - name: Upload exact-index part ${{ matrix.label }}
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: combined-exact-part-${{ matrix.label }}-${{ github.run_id }}
-          path: ${{ runner.temp }}/exact-part-${{ matrix.label }}
-          if-no-files-found: warn
-          retention-days: 2
-
-  publish:
-    if: github.event.pull_request.head.repo.full_name == github.repository
-    needs: merge
-    runs-on: ubuntu-latest
-    timeout-minutes: 40
-    steps:
-      - name: Check out partitioned implementation
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 1
-
-      - name: Check out production immutable history
-        uses: actions/checkout@v4
-        with:
-          ref: history-data
-          path: .local/base-history
-          fetch-depth: 1
-          sparse-checkout: |
-            history
-            history-channel.json
-          sparse-checkout-cone-mode: false
-
-      - name: Check out reconstructed delta history
-        uses: actions/checkout@v4
-        with:
-          ref: history-repair-3932301-data
-          path: .local/delta-history
-          fetch-depth: 1
-          sparse-checkout: |
-            history
-            history-channel.json
-          sparse-checkout-cone-mode: false
-
-      - name: Download preparation artifact
+      - name: Download all four exact-index parts from partitioned run
         uses: actions/download-artifact@v4
         with:
-          name: combined-history-prepare-${{ github.run_id }}
-          path: .local/prepare
-
-      - name: Download all exact-index parts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: combined-exact-part-*-${{ github.run_id }}
+          pattern: combined-exact-part-*-${{ env.SOURCE_RUN_ID }}
           path: .local/exact-parts
           merge-multiple: true
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ env.SOURCE_RUN_ID }}
 
       - uses: pnpm/action-setup@v4
         with:
@@ -401,11 +104,11 @@ jobs:
           PY
           pnpm build:candidate-source-rehearsal
 
-      - name: Assemble combined tree and exact index
+      - name: Assemble combined tree from successful partitioned artifacts
         shell: bash
         run: |
           set -euo pipefail
-          EVIDENCE="$RUNNER_TEMP/combined-history-evidence"
+          EVIDENCE="$RUNNER_TEMP/combined-history-resume-evidence"
           BASE=.local/base-history
           DELTA=.local/delta-history
           OUTPUT="$RUNNER_TEMP/combined-exact"
@@ -470,38 +173,81 @@ jobs:
           mv "$OUTPUT" "$BASE/history/index/exact"
           cp "$BASE/history/index/exact/manifest.json" "$EVIDENCE/exact-index-manifest.json"
           df -h > "$EVIDENCE/disk-after-assembly.txt"
-          du -sh "$BASE" "$BASE/history/index/exact" > "$EVIDENCE/sizes-after-assembly.txt"
+          du -sh "$BASE" "$BASE/history/index/exact" .local/exact-parts > "$EVIDENCE/sizes-after-assembly.txt"
 
-      - name: Resolve all five witnesses locally
+      - name: Resolve five witnesses independently with complete evidence
         shell: bash
         run: |
           set -euo pipefail
-          EVIDENCE="$RUNNER_TEMP/combined-history-evidence"
+          EVIDENCE="$RUNNER_TEMP/combined-history-resume-evidence"
           BASE=.local/base-history
-          node .history-exact-rehearsal-build/rehearse-history-exact-lookups.mjs \
-            --local \
-            --publication "$BASE/history/publication.json" \
-            --exact-index-manifest "$BASE/history/index/exact/manifest.json" \
-            --artifact-root "$BASE" \
-            --term 54A69056FD4D8017F52BB40FA27B6D155F2B07ECF0F24754A26EAF46F82045D0 \
-            --term 351B2FB507346B8B001148ED9D92A394D72FCA6CE87109A95B2C61A27B992F6E \
-            --term 2A3920F5B65CDEB35AEE7E4606736A7F0423D804A874EC3225BCD39A7A30A4D4 \
-            --term 70A489701D68B89E04923A7845F81F2C615760992C55119A8FC0ED8C759DE684 \
-            --term AD0980A254BC7262C57001315A9B6C7C65A020F29FAB2D0A0915933C55FF3BB1 \
-            > "$EVIDENCE/local-exact-rehearsal.json"
-          jq -e '
-            .passed == true
-            and .segmentCount == 1136
-            and .termCount == 5
-            and all(.terms[]; .referenceCount > 0 and .matchedRecords > 0)
-          ' "$EVIDENCE/local-exact-rehearsal.json" >/dev/null
+          TERMS=(
+            54A69056FD4D8017F52BB40FA27B6D155F2B07ECF0F24754A26EAF46F82045D0
+            351B2FB507346B8B001148ED9D92A394D72FCA6CE87109A95B2C61A27B992F6E
+            2A3920F5B65CDEB35AEE7E4606736A7F0423D804A874EC3225BCD39A7A30A4D4
+            70A489701D68B89E04923A7845F81F2C615760992C55119A8FC0ED8C759DE684
+            AD0980A254BC7262C57001315A9B6C7C65A020F29FAB2D0A0915933C55FF3BB1
+          )
+          failed=0
+          for term in "${TERMS[@]}"; do
+            echo "[witness] start term=$term"
+            set +e
+            node .history-exact-rehearsal-build/rehearse-history-exact-lookups.mjs \
+              --local \
+              --publication "$BASE/history/publication.json" \
+              --exact-index-manifest "$BASE/history/index/exact/manifest.json" \
+              --artifact-root "$BASE" \
+              --term "$term" \
+              > "$EVIDENCE/witness-$term.json" \
+              2> >(tee "$EVIDENCE/witness-$term.stderr.log" >&2)
+            code=$?
+            set -e
+            printf '%s\n' "$code" > "$EVIDENCE/witness-$term.exit-code.txt"
+            if test "$code" -ne 0; then
+              failed=1
+              echo "[witness] failed term=$term exit=$code"
+            else
+              jq -e '.passed == true and .termCount == 1 and .terms[0].referenceCount > 0 and .terms[0].matchedRecords > 0' \
+                "$EVIDENCE/witness-$term.json" >/dev/null
+              echo "[witness] passed term=$term"
+            fi
+          done
+
+          python - "$EVIDENCE" "${TERMS[@]}" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+          root = Path(sys.argv[1])
+          terms = sys.argv[2:]
+          results = []
+          for term in terms:
+              code = int((root / f'witness-{term}.exit-code.txt').read_text().strip())
+              stdout = root / f'witness-{term}.json'
+              stderr = root / f'witness-{term}.stderr.log'
+              payload = None
+              if stdout.exists() and stdout.stat().st_size:
+                  payload = json.loads(stdout.read_text())
+              results.append({
+                  'term': term,
+                  'exitCode': code,
+                  'passed': code == 0 and bool(payload and payload.get('passed')),
+                  'result': payload,
+                  'stderr': stderr.read_text() if stderr.exists() else '',
+              })
+          summary = {'schemaVersion': 1, 'passed': all(item['passed'] for item in results), 'terms': results}
+          (root / 'witness-summary.json').write_text(json.dumps(summary, separators=(',', ':')) + '\n')
+          PY
+          jq . "$EVIDENCE/witness-summary.json"
+          test "$failed" -eq 0
+          jq -e '.passed == true and (.terms | length) == 5 and all(.terms[]; .passed == true)' \
+            "$EVIDENCE/witness-summary.json" >/dev/null
 
       - name: Publish candidate branch only
         id: publish
         shell: bash
         run: |
           set -euo pipefail
-          EVIDENCE="$RUNNER_TEMP/combined-history-evidence"
+          EVIDENCE="$RUNNER_TEMP/combined-history-resume-evidence"
           BASE=.local/base-history
           OLD_SHA="$(git ls-remote origin "refs/heads/$COMBINED_HISTORY_BRANCH" | awk '{print $1}')"
           printf '%s\n' "$OLD_SHA" > "$EVIDENCE/combined-branch-before.txt"
@@ -550,7 +296,6 @@ jobs:
             git -C "$BASE" push origin "HEAD:refs/heads/$COMBINED_HISTORY_BRANCH"
           fi
           test "$(git ls-remote origin "refs/heads/$COMBINED_HISTORY_BRANCH" | awk '{print $1}')" = "$CANDIDATE_SHA"
-
           printf '%s\n' "$DATA_SHA" > "$EVIDENCE/combined-data-commit.txt"
           printf '%s\n' "$CANDIDATE_SHA" > "$EVIDENCE/combined-branch-head.txt"
           cp "$BASE/history-channel.json" "$EVIDENCE/history-channel.json"
@@ -561,13 +306,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          EVIDENCE="$RUNNER_TEMP/combined-history-evidence"
+          EVIDENCE="$RUNNER_TEMP/combined-history-resume-evidence"
           node .candidate-source-rehearsal-build/rehearse-candidate-sources.mjs \
             --local \
             --repository "$GITHUB_REPOSITORY" \
             --history-branch "$COMBINED_HISTORY_BRANCH" \
             --current-state-branch "$CURRENT_STATE_BRANCH" \
-            > "$EVIDENCE/remote-rehearsal.json"
+            > "$EVIDENCE/remote-rehearsal.json" \
+            2> >(tee "$EVIDENCE/remote-rehearsal.stderr.log" >&2)
           jq -e --arg hash "$TARGET_HASH" '
             .passed == true
             and .ledgerIndex == 3932301
@@ -578,17 +324,19 @@ jobs:
           ' "$EVIDENCE/remote-rehearsal.json" >/dev/null
 
           jq -n \
-            --arg runId "$GITHUB_RUN_ID" \
+            --arg sourceRunId "$SOURCE_RUN_ID" \
+            --arg resumeRunId "$GITHUB_RUN_ID" \
             --arg dataSha "${{ steps.publish.outputs.data_sha }}" \
             --arg candidateSha "${{ steps.publish.outputs.candidate_sha }}" \
             --slurpfile publication "$EVIDENCE/combined-publication.json" \
             --slurpfile exact "$EVIDENCE/incremental-exact-index.json" \
-            --slurpfile localExact "$EVIDENCE/local-exact-rehearsal.json" \
+            --slurpfile witnesses "$EVIDENCE/witness-summary.json" \
             --slurpfile remote "$EVIDENCE/remote-rehearsal.json" '
             {
               schemaVersion: 1,
               passed: true,
-              runId: $runId,
+              sourceRunId: $sourceRunId,
+              resumeRunId: $resumeRunId,
               dataCommitSha: $dataSha,
               candidateBranchHead: $candidateSha,
               segmentCount: $publication[0].segmentCount,
@@ -596,7 +344,7 @@ jobs:
               terminalLedger: $publication[0].endLedgerIndex,
               terminalHash: $publication[0].endLedgerHash,
               exactIndex: $exact[0],
-              localExactRehearsal: $localExact[0],
+              witnesses: $witnesses[0],
               remoteRehearsal: $remote[0],
               productionMutation: false,
               d1Mutation: false,
@@ -609,16 +357,16 @@ jobs:
         shell: bash
         run: |
           set +e
-          EVIDENCE="$RUNNER_TEMP/combined-history-evidence"
+          EVIDENCE="$RUNNER_TEMP/combined-history-resume-evidence"
           mkdir -p "$EVIDENCE"
           df -h > "$EVIDENCE/disk-final.txt"
           du -sh .local/base-history .local/delta-history .local/exact-parts > "$EVIDENCE/sizes-final.txt" 2>&1 || true
 
-      - name: Upload combined candidate evidence
+      - name: Upload resume candidate evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: combined-immutable-history-candidate-3932301
-          path: ${{ runner.temp }}/combined-history-evidence
+          name: combined-immutable-history-resume-3932301
+          path: ${{ runner.temp }}/combined-history-resume-evidence
           if-no-files-found: error
           retention-days: 30
