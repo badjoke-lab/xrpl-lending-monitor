@@ -23,7 +23,7 @@ import {
   listLiveObjectHistoryAfterBoundary as listD1ObjectHistory,
 } from './live-history-d1-after-boundary'
 
-interface FastLaneObjectWindowRow {
+interface FastLaneLookupWindowRow {
   bundle_json: string
 }
 
@@ -95,14 +95,12 @@ function balanceMatches(item: BalanceHistoryApiRecord, options: BalanceHistoryLi
     && (!options.assetKey || item.assetKey === options.assetKey)
 }
 
-async function readFastLaneObjectHistory(options: {
+async function readFastLaneLookupBundles(options: {
   db: D1Database
-  objectType: string
-  objectId: string
   boundaryLedgerIndex: number
-  limit: number
-}): Promise<ObjectChangeRecord[]> {
-  const needle = `"objectType":"${options.objectType}","objectId":"${options.objectId}"`
+  needle: string
+  maxWindows: number
+}): Promise<FastLaneHistoryBundle[]> {
   const result = await options.db.prepare(
     `SELECT history.bundle_json
      FROM fast_lane_shadow_windows AS lookup
@@ -121,11 +119,40 @@ async function readFastLaneObjectHistory(options: {
        AND instr(lookup.object_lookup_json, ?2) > 0
      ORDER BY history.end_ledger_index DESC
      LIMIT ?3`,
-  ).bind(options.boundaryLedgerIndex, needle, Math.min(options.limit, 256))
-    .all<FastLaneObjectWindowRow>()
-  const bundles = await Promise.all((result.results ?? []).map(async (row) => (
-    await decodeFastLaneHistoryPayload(row.bundle_json) as FastLaneHistoryBundle
-  )))
+  ).bind(
+    options.boundaryLedgerIndex,
+    options.needle,
+    Math.min(options.maxWindows, 256),
+  ).all<FastLaneLookupWindowRow>()
+
+  return Promise.all(
+    (result.results ?? []).map(async (row) => (
+      await decodeFastLaneHistoryPayload(
+        row.bundle_json,
+      ) as FastLaneHistoryBundle
+    )),
+  )
+}
+
+async function readFastLaneObjectHistory(options: {
+  db: D1Database
+  objectType: string
+  objectId: string
+  boundaryLedgerIndex: number
+  limit: number
+}): Promise<ObjectChangeRecord[]> {
+  const needle = JSON.stringify({
+    objectType: options.objectType,
+    objectId: options.objectId,
+  }).slice(1, -1)
+
+  const bundles = await readFastLaneLookupBundles({
+    db: options.db,
+    boundaryLedgerIndex: options.boundaryLedgerIndex,
+    needle,
+    maxWindows: options.limit,
+  })
+
   return dedupe(
     bundles.flatMap((bundle) => bundle.objectChanges)
       .filter((item) => (
@@ -184,13 +211,25 @@ export async function listLiveLoanLifecycleAfterBoundary(
 ): Promise<LoanLifecycleRecord[]> {
   const [stored, bundles] = await Promise.all([
     listD1LoanLifecycle(db, loanId, boundaryLedgerIndex, options),
-    readFastLaneHistoryBundlesAfterBoundary({ db, boundaryLedgerIndex }),
+    readFastLaneLookupBundles({
+      db,
+      boundaryLedgerIndex,
+      needle: JSON.stringify(loanId),
+      maxWindows: 256,
+    }),
   ])
   const compact = bundles.flatMap((bundle) => bundle.loanLifecycle)
-    .filter((item) => item.ledgerIndex > boundaryLedgerIndex && item.loanId === loanId)
+    .filter((item) => (
+      item.ledgerIndex > boundaryLedgerIndex
+      && item.loanId === loanId
+    ))
   return dedupe(
     [...stored, ...compact].sort(oldestLifecycle),
-    (item) => [item.loanId, item.transactionHash, item.eventType].join(':'),
+    (item) => [
+      item.loanId,
+      item.transactionHash,
+      item.eventType,
+    ].join(':'),
   ).slice(0, options.limit)
 }
 
@@ -199,17 +238,39 @@ export async function listLiveLoanLifecycleEventsAfterBoundary(
   boundaryLedgerIndex: number,
   options: LoanLifecycleListOptions,
 ): Promise<LoanLifecycleRecord[]> {
+  const bundleRead = options.loanId
+    ? readFastLaneLookupBundles({
+        db,
+        boundaryLedgerIndex,
+        needle: JSON.stringify(options.loanId),
+        maxWindows: 256,
+      })
+    : readFastLaneHistoryBundlesAfterBoundary({
+        db,
+        boundaryLedgerIndex,
+      })
+
   const [stored, bundles] = await Promise.all([
     listD1LoanLifecycleEvents(db, boundaryLedgerIndex, options),
-    readFastLaneHistoryBundlesAfterBoundary({ db, boundaryLedgerIndex }),
+    bundleRead,
   ])
   const compact = bundles.flatMap((bundle) => bundle.loanLifecycle)
     .filter((item) => item.ledgerIndex > boundaryLedgerIndex)
-    .filter((item) => !options.eventType || item.eventType === options.eventType)
-    .filter((item) => !options.loanId || item.loanId === options.loanId)
+    .filter((item) => (
+      !options.eventType
+      || item.eventType === options.eventType
+    ))
+    .filter((item) => (
+      !options.loanId
+      || item.loanId === options.loanId
+    ))
   return dedupe(
     [...stored, ...compact].sort(newestLifecycle),
-    (item) => [item.loanId, item.transactionHash, item.eventType].join(':'),
+    (item) => [
+      item.loanId,
+      item.transactionHash,
+      item.eventType,
+    ].join(':'),
   ).slice(0, options.limit)
 }
 
@@ -218,12 +279,27 @@ export async function listLiveArchivedObjectsAfterBoundary(
   boundaryLedgerIndex: number,
   options: ArchivedObjectListOptions,
 ): Promise<ArchivedObjectRecord[]> {
+  const bundleRead = options.query
+    ? readFastLaneLookupBundles({
+        db,
+        boundaryLedgerIndex,
+        needle: JSON.stringify(options.query),
+        maxWindows: 256,
+      })
+    : readFastLaneHistoryBundlesAfterBoundary({
+        db,
+        boundaryLedgerIndex,
+      })
+
   const [stored, bundles] = await Promise.all([
     listD1ArchivedObjects(db, boundaryLedgerIndex, options),
-    readFastLaneHistoryBundlesAfterBoundary({ db, boundaryLedgerIndex }),
+    bundleRead,
   ])
   const compact = bundles.flatMap((bundle) => bundle.archivedObjects)
-    .filter((item) => item.deletionLedgerIndex > boundaryLedgerIndex && archiveMatches(item, options))
+    .filter((item) => (
+      item.deletionLedgerIndex > boundaryLedgerIndex
+      && archiveMatches(item, options)
+    ))
   return dedupe(
     [...stored, ...compact].sort(newestArchive),
     (item) => `${item.objectType}:${item.objectId}`,
@@ -235,14 +311,35 @@ export async function listLiveBalanceHistoryAfterBoundary(
   boundaryLedgerIndex: number,
   options: BalanceHistoryListOptions,
 ): Promise<BalanceHistoryApiRecord[]> {
+  const lookupValue = options.subjectId ?? options.assetKey
+  const bundleRead = lookupValue
+    ? readFastLaneLookupBundles({
+        db,
+        boundaryLedgerIndex,
+        needle: JSON.stringify(lookupValue),
+        maxWindows: 256,
+      })
+    : readFastLaneHistoryBundlesAfterBoundary({
+        db,
+        boundaryLedgerIndex,
+      })
+
   const [stored, bundles] = await Promise.all([
     listD1BalanceHistory(db, boundaryLedgerIndex, options),
-    readFastLaneHistoryBundlesAfterBoundary({ db, boundaryLedgerIndex }),
+    bundleRead,
   ])
   const compact = bundles.flatMap((bundle) => bundle.balanceHistory)
-    .filter((item) => item.ledgerIndex > boundaryLedgerIndex && balanceMatches(item, options))
+    .filter((item) => (
+      item.ledgerIndex > boundaryLedgerIndex
+      && balanceMatches(item, options)
+    ))
   return dedupe(
     [...stored, ...compact].sort(newestBalance),
-    (item) => [item.subjectType, item.subjectId, item.transactionHash, item.metricType].join(':'),
+    (item) => [
+      item.subjectType,
+      item.subjectId,
+      item.transactionHash,
+      item.metricType,
+    ].join(':'),
   ).slice(0, options.limit)
 }
