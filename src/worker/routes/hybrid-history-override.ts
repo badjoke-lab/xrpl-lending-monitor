@@ -1,5 +1,6 @@
 import { resolveRuntimeConfig } from '../../shared/runtime-config'
 import type { Bindings } from '../env'
+import { listHybridExactBalanceHistory } from '../repositories/hybrid-exact-balance-history-repository'
 import {
   getHybridExactArchivedObject,
   listHybridExactLoanLifecycle,
@@ -277,9 +278,30 @@ export async function handleHybridHistoryOverride(
     if ((subjectId && subjectId.length > MAX_QUERY_LENGTH) || (assetKey && assetKey.length > MAX_QUERY_LENGTH)) {
       return Response.json({ error: 'invalid_query', message: `q must be at most ${MAX_QUERY_LENGTH} characters` }, { status: 400 })
     }
+    const list = {
+      limit,
+      metricType,
+      subjectType,
+      subjectId,
+      assetKey,
+    }
+
+    if (source.exactIndex && subjectId !== null) {
+      const records = await listHybridExactBalanceHistory({
+        ...common,
+        exactIndex: source.exactIndex.reader,
+        list: { ...list, subjectId },
+      })
+      return Response.json(serializeBalanceHistoryResponse({
+        records,
+        filters: { metricType, subjectType, subjectId, assetKey },
+        limit,
+      }))
+    }
+
     const result = await listHybridBalanceHistory({
       ...common,
-      list: { limit, metricType, subjectType, subjectId, assetKey },
+      list,
     })
     if (!safeNewestFirstHybridResult(result, limit)) return historyUnavailable('bounded_immutable_scan_incomplete')
     return Response.json(serializeBalanceHistoryResponse({

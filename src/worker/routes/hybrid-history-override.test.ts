@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { Bindings } from '../env'
+import { listHybridExactBalanceHistory } from '../repositories/hybrid-exact-balance-history-repository'
 import { resolveHistorySource } from '../repositories/history-source'
 import { handleHybridHistoryOverride } from './hybrid-history-override'
 
@@ -8,7 +9,12 @@ vi.mock('../repositories/history-source', () => ({
   resolveHistorySource: vi.fn(),
 }))
 
+vi.mock('../repositories/hybrid-exact-balance-history-repository', () => ({
+  listHybridExactBalanceHistory: vi.fn(),
+}))
+
 const mockedResolve = vi.mocked(resolveHistorySource)
+const mockedExactBalance = vi.mocked(listHybridExactBalanceHistory)
 
 interface FakeStatement {
   bind: (...values: unknown[]) => FakeStatement
@@ -187,6 +193,8 @@ function hybridSource(options: { exact?: boolean } = {}) {
 
 beforeEach(() => {
   mockedResolve.mockReset()
+  mockedExactBalance.mockReset()
+  mockedExactBalance.mockResolvedValue([])
 })
 
 describe('hybrid history route override', () => {
@@ -248,6 +256,35 @@ describe('hybrid history route override', () => {
     expect(response?.status).toBe(200)
     const body = await response?.json() as { data: { ledger_index: number }[] }
     expect(body.data.map((item) => item.ledger_index)).toEqual([105, 106])
+  })
+
+  it('uses exact targeted reads for filtered balance history', async () => {
+    mockedResolve.mockResolvedValue(hybridSource({ exact: true }) as never)
+
+    const response = await handleHybridHistoryOverride(
+      new Request(
+        'https://example.test/api/audit/cover-loss'
+        + '?metric_type=debt_total'
+        + '&subject_type=LoanBroker'
+        + '&subject_id=BROKER1'
+        + '&limit=25',
+      ),
+      env(),
+    )
+
+    expect(response?.status).toBe(200)
+    expect(mockedExactBalance).toHaveBeenCalledTimes(1)
+    expect(mockedExactBalance).toHaveBeenCalledWith(
+      expect.objectContaining({
+        list: {
+          limit: 25,
+          metricType: 'debt_total',
+          subjectType: 'LoanBroker',
+          subjectId: 'BROKER1',
+          assetKey: null,
+        },
+      }),
+    )
   })
 
   it('fails explicitly for exact history lookup until immutable indexes exist', async () => {
