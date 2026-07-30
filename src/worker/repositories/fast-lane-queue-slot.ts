@@ -85,19 +85,40 @@ export async function markFastLaneQueueSlotError(options: {
   updatedAt: string
 }): Promise<void> {
   await options.db.prepare(
-    `UPDATE fast_lane_queue_slots
-     SET status = 'error',
-         error_message = ?3,
-         updated_at = ?4
-     WHERE scheduled_time = ?1
-       AND message_id = ?2
-       AND status != 'completed'`,
+    `INSERT INTO fast_lane_queue_slots (
+       scheduled_time, message_id, status, started_at, completed_at,
+       next_scheduled_time, error_message, updated_at
+     ) VALUES (?1, ?2, 'error', ?4, NULL, NULL, ?3, ?4)
+     ON CONFLICT(scheduled_time) DO UPDATE SET
+       message_id = excluded.message_id,
+       status = 'error',
+       started_at = excluded.started_at,
+       completed_at = NULL,
+       next_scheduled_time = NULL,
+       error_message = excluded.error_message,
+       updated_at = excluded.updated_at
+     WHERE fast_lane_queue_slots.status != 'completed'`,
   ).bind(
     options.scheduledTime,
     options.messageId,
     options.errorMessage.slice(0, 2_000),
     options.updatedAt,
   ).run()
+
+  const slot = await readFastLaneQueueSlot({
+    db: options.db,
+    scheduledTime: options.scheduledTime,
+  })
+
+  if (slot?.status === 'completed') return
+
+  if (
+    !slot
+    || slot.messageId !== options.messageId
+    || slot.status !== 'error'
+  ) {
+    throw new Error('fast-lane Queue slot error state was not persisted')
+  }
 }
 
 export async function completeFastLaneQueueSlot(options: {
@@ -143,7 +164,7 @@ export async function pruneFastLaneQueueSlots(options: {
 }): Promise<void> {
   await options.db.prepare(
     `DELETE FROM fast_lane_queue_slots
-     WHERE status = 'completed'
-       AND updated_at < ?1`,
+     WHERE status IN ('completed', 'error')
+         AND updated_at < ?1`,
   ).bind(options.cutoff).run()
 }

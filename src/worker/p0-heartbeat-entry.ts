@@ -1,5 +1,6 @@
 import type { Bindings, FastLaneQueueMessage } from './env'
 import { fastLanePassScheduledTime } from './fast-lane-pass-cadence'
+import { fastLaneQueueFailureDisposition } from './fast-lane-queue-failure'
 import worker from './entry'
 import {
   promoteFastLaneCompactToCanonicalOverlay,
@@ -166,10 +167,6 @@ async function runQueuedFastLaneCycle(options: {
       throw new Error('Wrapped Worker does not expose a scheduled handler')
     }
 
-    await assertFastLaneStorageCapacity(env.DB, {
-      includeOverlay: shouldCheckCanonicalOverlayCapacity(message.scheduledTime),
-    })
-
     let caughtUp = false
     for (let pass = 0; pass < FAST_LANE_PASSES_PER_QUEUE_MESSAGE; pass += 1) {
       await worker.scheduled(
@@ -243,6 +240,21 @@ const wrappedWorker: ExportedHandler<Bindings> = {
   },
 
   async scheduled(controller, env) {
+    try {
+      await assertFastLaneStorageCapacity(env.DB, { includeOverlay: false })
+    } catch (error) {
+      if (fastLaneQueueFailureDisposition(error) === 'ack') {
+        console.error(JSON.stringify({
+          event: 'fast_lane_scheduled_capacity_halt',
+          source: 'scheduled-fallback',
+          scheduledTime: controller.scheduledTime,
+          reason: errorReason(error),
+        }))
+        return
+      }
+      throw error
+    }
+
     const message: FastLaneQueueMessage = {
       scheduledTime: controller.scheduledTime,
       cron: SELF_SCHEDULE_CRON,
@@ -261,6 +273,11 @@ const wrappedWorker: ExportedHandler<Bindings> = {
       let message: FastLaneQueueMessage | null = null
       try {
         message = parseQueueMessage(queueMessage.body)
+
+        await assertFastLaneStorageCapacity(env.DB, {
+          includeOverlay: shouldCheckCanonicalOverlayCapacity(message.scheduledTime),
+        })
+
         const claimedAt = new Date().toISOString()
         const claimed = await claimFastLaneQueueSlot({
           db: env.DB,
@@ -312,6 +329,8 @@ const wrappedWorker: ExportedHandler<Bindings> = {
         queueMessage.ack()
       } catch (error) {
         const reason = errorReason(error)
+        const disposition = fastLaneQueueFailureDisposition(error)
+
         if (message) {
           try {
             await markFastLaneQueueSlotError({
@@ -336,6 +355,17 @@ const wrappedWorker: ExportedHandler<Bindings> = {
           scheduledTime: message?.scheduledTime ?? null,
           reason,
         }))
+        if (disposition === 'ack') {
+          console.error(JSON.stringify({
+            event: 'fast_lane_queue_terminal_capacity_halt',
+            messageId: queueMessage.id,
+            scheduledTime: message?.scheduledTime ?? null,
+            reason,
+          }))
+          queueMessage.ack()
+          continue
+        }
+
         queueMessage.retry()
       }
     }
