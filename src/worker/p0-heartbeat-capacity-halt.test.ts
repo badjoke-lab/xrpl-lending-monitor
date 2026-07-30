@@ -55,14 +55,14 @@ vi.mock('./repositories/fast-lane-storage-retention', async (importOriginal) => 
   }
 })
 
-function caughtUpDatabase(): D1Database {
+function caughtUpDatabase(caughtUp = true): D1Database {
   return {
     prepare(sql: string) {
       return {
         async first<T>() {
           if (sql.includes('FROM fast_lane_shadow_state')) {
             return {
-              last_processed_ledger: 100,
+              last_processed_ledger: caughtUp ? 100 : 99,
               latest_observed_ledger: 100,
             } as T
           }
@@ -74,7 +74,7 @@ function caughtUpDatabase(): D1Database {
   } as unknown as D1Database
 }
 
-function environment(): {
+function environment(caughtUp = true): {
   env: Bindings
   send: ReturnType<typeof vi.fn>
 } {
@@ -82,7 +82,7 @@ function environment(): {
 
   return {
     env: {
-      DB: caughtUpDatabase(),
+      DB: caughtUpDatabase(caughtUp),
       FAST_LANE_QUEUE: {
         send,
       },
@@ -154,6 +154,45 @@ beforeEach(() => {
 })
 
 describe('p0 heartbeat capacity halt', () => {
+  it('executes exactly one pass even when the fast lane remains behind', async () => {
+    const { env } = environment(false)
+    const { message, ack } = delivery()
+
+    await runQueue(message, env)
+
+    expect(mocks.workerScheduled).toHaveBeenCalledOnce()
+    expect(mocks.completeSlot).toHaveBeenCalledOnce()
+    expect(ack).toHaveBeenCalledOnce()
+  })
+
+  it('persists completion before sending the deterministic successor', async () => {
+    const { env, send } = environment()
+    const { message, ack, retry } = delivery()
+
+    await runQueue(message, env)
+
+    expect(mocks.completeSlot).toHaveBeenCalledOnce()
+    expect(send).toHaveBeenCalledOnce()
+    expect(mocks.completeSlot.mock.invocationCallOrder[0])
+      .toBeLessThan(send.mock.invocationCallOrder[0])
+    expect(retry).not.toHaveBeenCalled()
+    expect(ack).toHaveBeenCalledOnce()
+  })
+
+  it('acknowledges a completed duplicate without processing or scheduling', async () => {
+    mocks.claimSlot.mockResolvedValueOnce(false)
+    const { env, send } = environment()
+    const { message, ack, retry } = delivery()
+
+    await runQueue(message, env)
+
+    expect(mocks.workerScheduled).not.toHaveBeenCalled()
+    expect(mocks.completeSlot).not.toHaveBeenCalled()
+    expect(send).not.toHaveBeenCalled()
+    expect(retry).not.toHaveBeenCalled()
+    expect(ack).toHaveBeenCalledOnce()
+  })
+
   it('halts before slot claim and acknowledges a capacity-blocked delivery', async () => {
     const capacityError = new FastLaneStorageCapacityError(
       'database_size',

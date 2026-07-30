@@ -22,7 +22,8 @@ import {
   pruneFastLaneStorage,
 } from './repositories/fast-lane-storage-retention'
 
-const FAST_LANE_PASSES_PER_QUEUE_MESSAGE = 8
+export const FAST_LANE_PASSES_PER_QUEUE_MESSAGE = 1
+export const FAST_LANE_QUEUE_PROCESSING_LEASE_MS = 15 * 60_000
 const FIVE_MINUTE_INTERVAL_MS = 5 * 60_000
 const OVERLAY_CAPACITY_CHECK_INTERVAL_MS = 60 * 60_000
 const QUEUE_SLOT_RETENTION_MS = 7 * 24 * 60 * 60_000
@@ -279,11 +280,15 @@ const wrappedWorker: ExportedHandler<Bindings> = {
         })
 
         const claimedAt = new Date().toISOString()
+        const staleBefore = new Date(
+          Date.parse(claimedAt) - FAST_LANE_QUEUE_PROCESSING_LEASE_MS,
+        ).toISOString()
         const claimed = await claimFastLaneQueueSlot({
           db: env.DB,
           scheduledTime: message.scheduledTime,
           messageId: queueMessage.id,
           claimedAt,
+          staleBefore,
         })
         if (!claimed) {
           console.warn(JSON.stringify({
@@ -304,8 +309,6 @@ const wrappedWorker: ExportedHandler<Bindings> = {
           enqueuedAt: new Date(now).toISOString(),
         }
         const delaySeconds = delaySecondsUntil(nextScheduledTime, now)
-        await env.FAST_LANE_QUEUE.send(nextMessage, { delaySeconds })
-
         const completedAt = new Date().toISOString()
         await completeFastLaneQueueSlot({
           db: env.DB,
@@ -314,6 +317,9 @@ const wrappedWorker: ExportedHandler<Bindings> = {
           nextScheduledTime,
           completedAt,
         })
+        // Persist the deterministic successor before publishing it. A terminated
+        // delivery can therefore never leave this slot looking actively owned.
+        await env.FAST_LANE_QUEUE.send(nextMessage, { delaySeconds })
         await pruneFastLaneQueueSlots({
           db: env.DB,
           cutoff: new Date(Date.now() - QUEUE_SLOT_RETENTION_MS).toISOString(),
