@@ -277,21 +277,31 @@ const wrappedWorker: ExportedHandler<Bindings> = {
       try {
         message = parseQueueMessage(queueMessage.body)
 
-        await assertFastLaneStorageCapacity(env.DB, {
-          includeOverlay: shouldCheckCanonicalOverlayCapacity(message.scheduledTime),
-        })
-
-        const claimedAt = new Date().toISOString()
-        const staleBefore = new Date(
-          Date.parse(claimedAt) - FAST_LANE_QUEUE_PROCESSING_LEASE_MS,
-        ).toISOString()
-        const claimed = await claimFastLaneQueueSlot({
+        const preflightSlot = await readFastLaneQueueSlot({
           db: env.DB,
           scheduledTime: message.scheduledTime,
-          messageId: queueMessage.id,
-          claimedAt,
-          staleBefore,
         })
+        const hasPendingSuccessor = preflightSlot?.status === 'processing'
+          && preflightSlot.nextScheduledTime !== null
+
+        if (!hasPendingSuccessor) {
+          await assertFastLaneStorageCapacity(env.DB, {
+            includeOverlay: shouldCheckCanonicalOverlayCapacity(message.scheduledTime),
+          })
+        }
+
+        const claimedAt = new Date().toISOString()
+        const claimed = hasPendingSuccessor
+          ? 'successor_pending'
+          : await claimFastLaneQueueSlot({
+              db: env.DB,
+              scheduledTime: message.scheduledTime,
+              messageId: queueMessage.id,
+              claimedAt,
+              staleBefore: new Date(
+                Date.parse(claimedAt) - FAST_LANE_QUEUE_PROCESSING_LEASE_MS,
+              ).toISOString(),
+            })
         if (claimed === 'duplicate') {
           console.warn(JSON.stringify({
             event: 'fast_lane_queue_duplicate_ignored',
@@ -303,7 +313,9 @@ const wrappedWorker: ExportedHandler<Bindings> = {
         }
 
         const pendingSlot = claimed === 'successor_pending'
-          ? await readFastLaneQueueSlot({ db: env.DB, scheduledTime: message.scheduledTime })
+          ? hasPendingSuccessor
+            ? preflightSlot
+            : await readFastLaneQueueSlot({ db: env.DB, scheduledTime: message.scheduledTime })
           : null
         const caughtUp = claimed === 'claimed'
           ? await runQueuedFastLaneCycle({ message, env, executionContext })

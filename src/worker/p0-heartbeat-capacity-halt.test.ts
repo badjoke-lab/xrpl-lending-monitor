@@ -95,21 +95,22 @@ function environment(caughtUp = true): {
   }
 }
 
-function delivery(): {
+function delivery(options: { id?: string; scheduledTime?: number } = {}): {
   message: Message<FastLaneQueueMessage>
   ack: ReturnType<typeof vi.fn>
   retry: ReturnType<typeof vi.fn>
 } {
   const ack = vi.fn()
   const retry = vi.fn()
+  const scheduledTime = options.scheduledTime ?? Date.parse('2026-07-30T14:00:00.000Z')
 
   return {
     message: {
-      id: 'queue-message-1',
+      id: options.id ?? 'queue-message-1',
       timestamp: new Date('2026-07-30T14:00:00.000Z'),
       attempts: 1,
       body: {
-        scheduledTime: Date.parse('2026-07-30T14:00:00.000Z'),
+        scheduledTime,
         cron: 'queue-self-schedule',
         enqueuedAt: '2026-07-30T14:00:00.000Z',
       },
@@ -142,6 +143,7 @@ beforeEach(() => {
   vi.resetAllMocks()
 
   mocks.assertCapacity.mockResolvedValue(undefined)
+  mocks.readSlot.mockResolvedValue(null)
   mocks.claimSlot.mockResolvedValue('claimed')
   mocks.completeSlot.mockResolvedValue(undefined)
   mocks.stageSuccessor.mockResolvedValue(undefined)
@@ -201,13 +203,27 @@ describe('p0 heartbeat capacity halt', () => {
     expect(ack).toHaveBeenCalledOnce()
   })
 
-  it('retries a failed successor send without processing the scheduled slot twice', async () => {
+  it('publishes a staged successor before a later delivery applies a capacity halt', async () => {
     const { env, send } = environment()
     const first = delivery()
     const nextScheduledTime = Date.parse('2026-07-30T14:05:00.000Z')
+    const next = delivery({ id: 'queue-message-2', scheduledTime: nextScheduledTime })
     send.mockRejectedValueOnce(new Error('Queue send failed')).mockResolvedValueOnce(undefined)
-    mocks.claimSlot.mockResolvedValueOnce('claimed').mockResolvedValueOnce('successor_pending')
-    mocks.readSlot.mockResolvedValueOnce({ nextScheduledTime })
+    mocks.assertCapacity
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new FastLaneStorageCapacityError(
+        'database_size',
+        'physical database capacity guard reached on following slot',
+      ))
+    mocks.readSlot
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        status: 'processing',
+        messageId: first.message.id,
+        nextScheduledTime,
+      })
+      .mockResolvedValueOnce(null)
 
     await runQueue(first.message, env)
 
@@ -219,10 +235,19 @@ describe('p0 heartbeat capacity halt', () => {
     await runQueue(first.message, env)
 
     expect(send).toHaveBeenCalledTimes(2)
+    expect(mocks.assertCapacity).toHaveBeenCalledTimes(2)
     expect(mocks.workerScheduled).toHaveBeenCalledOnce()
     expect(mocks.stageSuccessor).toHaveBeenCalledOnce()
     expect(mocks.completeSlot).toHaveBeenCalledOnce()
     expect(first.ack).toHaveBeenCalledOnce()
+
+    await runQueue(next.message, env)
+
+    expect(next.ack).toHaveBeenCalledOnce()
+    expect(next.retry).not.toHaveBeenCalled()
+    expect(send).toHaveBeenCalledTimes(2)
+    expect(mocks.workerScheduled).toHaveBeenCalledOnce()
+    expect(mocks.claimSlot).toHaveBeenCalledOnce()
   })
 
   it('halts before slot claim and acknowledges a capacity-blocked delivery', async () => {
@@ -238,6 +263,7 @@ describe('p0 heartbeat capacity halt', () => {
 
     await runQueue(message, env)
 
+    expect(mocks.readSlot).toHaveBeenCalledOnce()
     expect(mocks.claimSlot).not.toHaveBeenCalled()
     expect(mocks.workerScheduled).not.toHaveBeenCalled()
     expect(mocks.markSlotError).toHaveBeenCalledWith(expect.objectContaining({
