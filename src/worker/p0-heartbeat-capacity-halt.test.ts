@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   assertCapacity: vi.fn(),
   claimSlot: vi.fn(),
   completeSlot: vi.fn(),
+  readSlot: vi.fn(),
+  stageSuccessor: vi.fn(),
   markSlotError: vi.fn(),
   pruneSlots: vi.fn(),
   pruneStorage: vi.fn(),
@@ -35,6 +37,8 @@ vi.mock('./repositories/fast-lane-queue-slot', () => ({
   completeFastLaneQueueSlot: mocks.completeSlot,
   markFastLaneQueueSlotError: mocks.markSlotError,
   pruneFastLaneQueueSlots: mocks.pruneSlots,
+  readFastLaneQueueSlot: mocks.readSlot,
+  stageFastLaneQueueSuccessor: mocks.stageSuccessor,
 }))
 
 vi.mock('./repositories/fast-lane-shadow-run-metrics', () => ({
@@ -138,8 +142,9 @@ beforeEach(() => {
   vi.resetAllMocks()
 
   mocks.assertCapacity.mockResolvedValue(undefined)
-  mocks.claimSlot.mockResolvedValue(true)
+  mocks.claimSlot.mockResolvedValue('claimed')
   mocks.completeSlot.mockResolvedValue(undefined)
+  mocks.stageSuccessor.mockResolvedValue(undefined)
   mocks.markSlotError.mockResolvedValue(undefined)
   mocks.pruneSlots.mockResolvedValue(undefined)
   mocks.pruneStorage.mockResolvedValue(undefined)
@@ -165,22 +170,25 @@ describe('p0 heartbeat capacity halt', () => {
     expect(ack).toHaveBeenCalledOnce()
   })
 
-  it('persists completion before sending the deterministic successor', async () => {
+  it('durably stages the successor before sending and completes afterward', async () => {
     const { env, send } = environment()
     const { message, ack, retry } = delivery()
 
     await runQueue(message, env)
 
+    expect(mocks.stageSuccessor).toHaveBeenCalledOnce()
     expect(mocks.completeSlot).toHaveBeenCalledOnce()
     expect(send).toHaveBeenCalledOnce()
-    expect(mocks.completeSlot.mock.invocationCallOrder[0])
+    expect(mocks.stageSuccessor.mock.invocationCallOrder[0])
       .toBeLessThan(send.mock.invocationCallOrder[0])
+    expect(send.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.completeSlot.mock.invocationCallOrder[0])
     expect(retry).not.toHaveBeenCalled()
     expect(ack).toHaveBeenCalledOnce()
   })
 
   it('acknowledges a completed duplicate without processing or scheduling', async () => {
-    mocks.claimSlot.mockResolvedValueOnce(false)
+    mocks.claimSlot.mockResolvedValueOnce('duplicate')
     const { env, send } = environment()
     const { message, ack, retry } = delivery()
 
@@ -191,6 +199,30 @@ describe('p0 heartbeat capacity halt', () => {
     expect(send).not.toHaveBeenCalled()
     expect(retry).not.toHaveBeenCalled()
     expect(ack).toHaveBeenCalledOnce()
+  })
+
+  it('retries a failed successor send without processing the scheduled slot twice', async () => {
+    const { env, send } = environment()
+    const first = delivery()
+    const nextScheduledTime = Date.parse('2026-07-30T14:05:00.000Z')
+    send.mockRejectedValueOnce(new Error('Queue send failed')).mockResolvedValueOnce(undefined)
+    mocks.claimSlot.mockResolvedValueOnce('claimed').mockResolvedValueOnce('successor_pending')
+    mocks.readSlot.mockResolvedValueOnce({ nextScheduledTime })
+
+    await runQueue(first.message, env)
+
+    expect(first.retry).toHaveBeenCalledOnce()
+    expect(first.ack).not.toHaveBeenCalled()
+    expect(mocks.workerScheduled).toHaveBeenCalledOnce()
+    expect(mocks.completeSlot).not.toHaveBeenCalled()
+
+    await runQueue(first.message, env)
+
+    expect(send).toHaveBeenCalledTimes(2)
+    expect(mocks.workerScheduled).toHaveBeenCalledOnce()
+    expect(mocks.stageSuccessor).toHaveBeenCalledOnce()
+    expect(mocks.completeSlot).toHaveBeenCalledOnce()
+    expect(first.ack).toHaveBeenCalledOnce()
   })
 
   it('halts before slot claim and acknowledges a capacity-blocked delivery', async () => {

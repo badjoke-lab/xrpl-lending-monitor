@@ -11,6 +11,8 @@ import {
   completeFastLaneQueueSlot,
   markFastLaneQueueSlotError,
   pruneFastLaneQueueSlots,
+  readFastLaneQueueSlot,
+  stageFastLaneQueueSuccessor,
 } from './repositories/fast-lane-queue-slot'
 import {
   deleteFastLaneShadowRunHeartbeat,
@@ -290,7 +292,7 @@ const wrappedWorker: ExportedHandler<Bindings> = {
           claimedAt,
           staleBefore,
         })
-        if (!claimed) {
+        if (claimed === 'duplicate') {
           console.warn(JSON.stringify({
             event: 'fast_lane_queue_duplicate_ignored',
             messageId: queueMessage.id,
@@ -300,26 +302,42 @@ const wrappedWorker: ExportedHandler<Bindings> = {
           continue
         }
 
-        const caughtUp = await runQueuedFastLaneCycle({ message, env, executionContext })
+        const pendingSlot = claimed === 'successor_pending'
+          ? await readFastLaneQueueSlot({ db: env.DB, scheduledTime: message.scheduledTime })
+          : null
+        const caughtUp = claimed === 'claimed'
+          ? await runQueuedFastLaneCycle({ message, env, executionContext })
+          : false
         const now = Date.now()
-        const nextScheduledTime = nextFiveMinuteSlot(message.scheduledTime, now)
+        const nextScheduledTime = claimed === 'successor_pending'
+          ? pendingSlot?.nextScheduledTime
+          : nextFiveMinuteSlot(message.scheduledTime, now)
+        if (nextScheduledTime === null || nextScheduledTime === undefined) {
+          throw new Error('fast-lane Queue pending successor is unavailable')
+        }
         const nextMessage: FastLaneQueueMessage = {
           scheduledTime: nextScheduledTime,
           cron: SELF_SCHEDULE_CRON,
           enqueuedAt: new Date(now).toISOString(),
         }
         const delaySeconds = delaySecondsUntil(nextScheduledTime, now)
-        const completedAt = new Date().toISOString()
+        if (claimed === 'claimed') {
+          await stageFastLaneQueueSuccessor({
+            db: env.DB,
+            scheduledTime: message.scheduledTime,
+            messageId: queueMessage.id,
+            nextScheduledTime,
+            updatedAt: new Date().toISOString(),
+          })
+        }
+        await env.FAST_LANE_QUEUE.send(nextMessage, { delaySeconds })
         await completeFastLaneQueueSlot({
           db: env.DB,
           scheduledTime: message.scheduledTime,
-          messageId: queueMessage.id,
+          messageId: pendingSlot?.messageId ?? queueMessage.id,
           nextScheduledTime,
-          completedAt,
+          completedAt: new Date().toISOString(),
         })
-        // Persist the deterministic successor before publishing it. A terminated
-        // delivery can therefore never leave this slot looking actively owned.
-        await env.FAST_LANE_QUEUE.send(nextMessage, { delaySeconds })
         await pruneFastLaneQueueSlots({
           db: env.DB,
           cutoff: new Date(Date.now() - QUEUE_SLOT_RETENTION_MS).toISOString(),
