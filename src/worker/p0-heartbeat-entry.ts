@@ -11,6 +11,8 @@ import {
   completeFastLaneQueueSlot,
   markFastLaneQueueSlotError,
   pruneFastLaneQueueSlots,
+  readFastLaneQueueSlot,
+  stageFastLaneQueueSuccessor,
 } from './repositories/fast-lane-queue-slot'
 import {
   deleteFastLaneShadowRunHeartbeat,
@@ -22,7 +24,8 @@ import {
   pruneFastLaneStorage,
 } from './repositories/fast-lane-storage-retention'
 
-const FAST_LANE_PASSES_PER_QUEUE_MESSAGE = 8
+export const FAST_LANE_PASSES_PER_QUEUE_MESSAGE = 1
+export const FAST_LANE_QUEUE_PROCESSING_LEASE_MS = 15 * 60_000
 const FIVE_MINUTE_INTERVAL_MS = 5 * 60_000
 const OVERLAY_CAPACITY_CHECK_INTERVAL_MS = 60 * 60_000
 const QUEUE_SLOT_RETENTION_MS = 7 * 24 * 60 * 60_000
@@ -274,18 +277,32 @@ const wrappedWorker: ExportedHandler<Bindings> = {
       try {
         message = parseQueueMessage(queueMessage.body)
 
-        await assertFastLaneStorageCapacity(env.DB, {
-          includeOverlay: shouldCheckCanonicalOverlayCapacity(message.scheduledTime),
-        })
-
-        const claimedAt = new Date().toISOString()
-        const claimed = await claimFastLaneQueueSlot({
+        const preflightSlot = await readFastLaneQueueSlot({
           db: env.DB,
           scheduledTime: message.scheduledTime,
-          messageId: queueMessage.id,
-          claimedAt,
         })
-        if (!claimed) {
+        const hasPendingSuccessor = preflightSlot?.status === 'processing'
+          && preflightSlot.nextScheduledTime !== null
+
+        if (!hasPendingSuccessor) {
+          await assertFastLaneStorageCapacity(env.DB, {
+            includeOverlay: shouldCheckCanonicalOverlayCapacity(message.scheduledTime),
+          })
+        }
+
+        const claimedAt = new Date().toISOString()
+        const claimed = hasPendingSuccessor
+          ? 'successor_pending'
+          : await claimFastLaneQueueSlot({
+              db: env.DB,
+              scheduledTime: message.scheduledTime,
+              messageId: queueMessage.id,
+              claimedAt,
+              staleBefore: new Date(
+                Date.parse(claimedAt) - FAST_LANE_QUEUE_PROCESSING_LEASE_MS,
+              ).toISOString(),
+            })
+        if (claimed === 'duplicate') {
           console.warn(JSON.stringify({
             event: 'fast_lane_queue_duplicate_ignored',
             messageId: queueMessage.id,
@@ -295,24 +312,43 @@ const wrappedWorker: ExportedHandler<Bindings> = {
           continue
         }
 
-        const caughtUp = await runQueuedFastLaneCycle({ message, env, executionContext })
+        const pendingSlot = claimed === 'successor_pending'
+          ? hasPendingSuccessor
+            ? preflightSlot
+            : await readFastLaneQueueSlot({ db: env.DB, scheduledTime: message.scheduledTime })
+          : null
+        const caughtUp = claimed === 'claimed'
+          ? await runQueuedFastLaneCycle({ message, env, executionContext })
+          : false
         const now = Date.now()
-        const nextScheduledTime = nextFiveMinuteSlot(message.scheduledTime, now)
+        const nextScheduledTime = claimed === 'successor_pending'
+          ? pendingSlot?.nextScheduledTime
+          : nextFiveMinuteSlot(message.scheduledTime, now)
+        if (nextScheduledTime === null || nextScheduledTime === undefined) {
+          throw new Error('fast-lane Queue pending successor is unavailable')
+        }
         const nextMessage: FastLaneQueueMessage = {
           scheduledTime: nextScheduledTime,
           cron: SELF_SCHEDULE_CRON,
           enqueuedAt: new Date(now).toISOString(),
         }
         const delaySeconds = delaySecondsUntil(nextScheduledTime, now)
+        if (claimed === 'claimed') {
+          await stageFastLaneQueueSuccessor({
+            db: env.DB,
+            scheduledTime: message.scheduledTime,
+            messageId: queueMessage.id,
+            nextScheduledTime,
+            updatedAt: new Date().toISOString(),
+          })
+        }
         await env.FAST_LANE_QUEUE.send(nextMessage, { delaySeconds })
-
-        const completedAt = new Date().toISOString()
         await completeFastLaneQueueSlot({
           db: env.DB,
           scheduledTime: message.scheduledTime,
-          messageId: queueMessage.id,
+          messageId: pendingSlot?.messageId ?? queueMessage.id,
           nextScheduledTime,
-          completedAt,
+          completedAt: new Date().toISOString(),
         })
         await pruneFastLaneQueueSlots({
           db: env.DB,

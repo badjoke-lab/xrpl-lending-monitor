@@ -22,6 +22,8 @@ export interface FastLaneQueueSlot {
   updatedAt: string
 }
 
+export type FastLaneQueueSlotClaim = 'claimed' | 'successor_pending' | 'duplicate'
+
 function mapSlot(row: FastLaneQueueSlotRow): FastLaneQueueSlot {
   return {
     scheduledTime: row.scheduled_time,
@@ -53,28 +55,70 @@ export async function claimFastLaneQueueSlot(options: {
   scheduledTime: number
   messageId: string
   claimedAt: string
-}): Promise<boolean> {
+  staleBefore: string
+}): Promise<FastLaneQueueSlotClaim> {
   await options.db.prepare(
     `INSERT INTO fast_lane_queue_slots (
        scheduled_time, message_id, status, started_at, completed_at,
        next_scheduled_time, error_message, updated_at
      ) VALUES (?1, ?2, 'processing', ?3, NULL, NULL, NULL, ?3)
      ON CONFLICT(scheduled_time) DO UPDATE SET
+       message_id = excluded.message_id,
        status = 'processing',
        started_at = excluded.started_at,
        completed_at = NULL,
        next_scheduled_time = NULL,
        error_message = NULL,
        updated_at = excluded.updated_at
-     WHERE fast_lane_queue_slots.message_id = excluded.message_id
-       AND fast_lane_queue_slots.status != 'completed'`,
-  ).bind(options.scheduledTime, options.messageId, options.claimedAt).run()
+     WHERE fast_lane_queue_slots.status = 'error'
+        OR (fast_lane_queue_slots.status = 'processing'
+            AND fast_lane_queue_slots.next_scheduled_time IS NULL
+            AND (fast_lane_queue_slots.message_id = excluded.message_id
+                 OR fast_lane_queue_slots.updated_at <= ?4))`,
+  ).bind(
+    options.scheduledTime,
+    options.messageId,
+    options.claimedAt,
+    options.staleBefore,
+  ).run()
 
   const slot = await readFastLaneQueueSlot({
     db: options.db,
     scheduledTime: options.scheduledTime,
   })
+  if (slot?.status === 'processing' && slot.nextScheduledTime !== null) {
+    return 'successor_pending'
+  }
   return slot?.messageId === options.messageId && slot.status === 'processing'
+    ? 'claimed'
+    : 'duplicate'
+}
+
+export async function stageFastLaneQueueSuccessor(options: {
+  db: D1Database
+  scheduledTime: number
+  messageId: string
+  nextScheduledTime: number
+  updatedAt: string
+}): Promise<void> {
+  await options.db.prepare(
+    `UPDATE fast_lane_queue_slots
+     SET next_scheduled_time = ?3,
+         updated_at = ?4
+     WHERE scheduled_time = ?1
+       AND message_id = ?2
+       AND status = 'processing'`,
+  ).bind(
+    options.scheduledTime,
+    options.messageId,
+    options.nextScheduledTime,
+    options.updatedAt,
+  ).run()
+
+  const slot = await readFastLaneQueueSlot({ db: options.db, scheduledTime: options.scheduledTime })
+  if (slot?.status !== 'processing' || slot.nextScheduledTime !== options.nextScheduledTime) {
+    throw new Error('fast-lane Queue successor was not staged')
+  }
 }
 
 export async function markFastLaneQueueSlotError(options: {
@@ -97,7 +141,10 @@ export async function markFastLaneQueueSlotError(options: {
        next_scheduled_time = NULL,
        error_message = excluded.error_message,
        updated_at = excluded.updated_at
-     WHERE fast_lane_queue_slots.status != 'completed'`,
+     WHERE fast_lane_queue_slots.status = 'error'
+        OR (fast_lane_queue_slots.status = 'processing'
+            AND fast_lane_queue_slots.next_scheduled_time IS NULL
+            AND fast_lane_queue_slots.message_id = excluded.message_id)`,
   ).bind(
     options.scheduledTime,
     options.messageId,
@@ -110,7 +157,7 @@ export async function markFastLaneQueueSlotError(options: {
     scheduledTime: options.scheduledTime,
   })
 
-  if (slot?.status === 'completed') return
+  if (slot?.status === 'completed' || (slot?.status === 'processing' && slot.nextScheduledTime !== null)) return
 
   if (
     !slot
@@ -136,7 +183,8 @@ export async function completeFastLaneQueueSlot(options: {
          error_message = NULL,
          updated_at = ?3
      WHERE scheduled_time = ?1
-       AND message_id = ?2`,
+       AND message_id = ?2
+       AND status = 'processing'`,
   ).bind(
     options.scheduledTime,
     options.messageId,

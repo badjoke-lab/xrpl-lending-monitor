@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   assertCapacity: vi.fn(),
   claimSlot: vi.fn(),
   completeSlot: vi.fn(),
+  readSlot: vi.fn(),
+  stageSuccessor: vi.fn(),
   markSlotError: vi.fn(),
   pruneSlots: vi.fn(),
   pruneStorage: vi.fn(),
@@ -35,6 +37,8 @@ vi.mock('./repositories/fast-lane-queue-slot', () => ({
   completeFastLaneQueueSlot: mocks.completeSlot,
   markFastLaneQueueSlotError: mocks.markSlotError,
   pruneFastLaneQueueSlots: mocks.pruneSlots,
+  readFastLaneQueueSlot: mocks.readSlot,
+  stageFastLaneQueueSuccessor: mocks.stageSuccessor,
 }))
 
 vi.mock('./repositories/fast-lane-shadow-run-metrics', () => ({
@@ -55,14 +59,14 @@ vi.mock('./repositories/fast-lane-storage-retention', async (importOriginal) => 
   }
 })
 
-function caughtUpDatabase(): D1Database {
+function caughtUpDatabase(caughtUp = true): D1Database {
   return {
     prepare(sql: string) {
       return {
         async first<T>() {
           if (sql.includes('FROM fast_lane_shadow_state')) {
             return {
-              last_processed_ledger: 100,
+              last_processed_ledger: caughtUp ? 100 : 99,
               latest_observed_ledger: 100,
             } as T
           }
@@ -74,7 +78,7 @@ function caughtUpDatabase(): D1Database {
   } as unknown as D1Database
 }
 
-function environment(): {
+function environment(caughtUp = true): {
   env: Bindings
   send: ReturnType<typeof vi.fn>
 } {
@@ -82,7 +86,7 @@ function environment(): {
 
   return {
     env: {
-      DB: caughtUpDatabase(),
+      DB: caughtUpDatabase(caughtUp),
       FAST_LANE_QUEUE: {
         send,
       },
@@ -91,21 +95,22 @@ function environment(): {
   }
 }
 
-function delivery(): {
+function delivery(options: { id?: string; scheduledTime?: number } = {}): {
   message: Message<FastLaneQueueMessage>
   ack: ReturnType<typeof vi.fn>
   retry: ReturnType<typeof vi.fn>
 } {
   const ack = vi.fn()
   const retry = vi.fn()
+  const scheduledTime = options.scheduledTime ?? Date.parse('2026-07-30T14:00:00.000Z')
 
   return {
     message: {
-      id: 'queue-message-1',
+      id: options.id ?? 'queue-message-1',
       timestamp: new Date('2026-07-30T14:00:00.000Z'),
       attempts: 1,
       body: {
-        scheduledTime: Date.parse('2026-07-30T14:00:00.000Z'),
+        scheduledTime,
         cron: 'queue-self-schedule',
         enqueuedAt: '2026-07-30T14:00:00.000Z',
       },
@@ -138,8 +143,10 @@ beforeEach(() => {
   vi.resetAllMocks()
 
   mocks.assertCapacity.mockResolvedValue(undefined)
-  mocks.claimSlot.mockResolvedValue(true)
+  mocks.readSlot.mockResolvedValue(null)
+  mocks.claimSlot.mockResolvedValue('claimed')
   mocks.completeSlot.mockResolvedValue(undefined)
+  mocks.stageSuccessor.mockResolvedValue(undefined)
   mocks.markSlotError.mockResolvedValue(undefined)
   mocks.pruneSlots.mockResolvedValue(undefined)
   mocks.pruneStorage.mockResolvedValue(undefined)
@@ -154,6 +161,95 @@ beforeEach(() => {
 })
 
 describe('p0 heartbeat capacity halt', () => {
+  it('executes exactly one pass even when the fast lane remains behind', async () => {
+    const { env } = environment(false)
+    const { message, ack } = delivery()
+
+    await runQueue(message, env)
+
+    expect(mocks.workerScheduled).toHaveBeenCalledOnce()
+    expect(mocks.completeSlot).toHaveBeenCalledOnce()
+    expect(ack).toHaveBeenCalledOnce()
+  })
+
+  it('durably stages the successor before sending and completes afterward', async () => {
+    const { env, send } = environment()
+    const { message, ack, retry } = delivery()
+
+    await runQueue(message, env)
+
+    expect(mocks.stageSuccessor).toHaveBeenCalledOnce()
+    expect(mocks.completeSlot).toHaveBeenCalledOnce()
+    expect(send).toHaveBeenCalledOnce()
+    expect(mocks.stageSuccessor.mock.invocationCallOrder[0])
+      .toBeLessThan(send.mock.invocationCallOrder[0])
+    expect(send.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.completeSlot.mock.invocationCallOrder[0])
+    expect(retry).not.toHaveBeenCalled()
+    expect(ack).toHaveBeenCalledOnce()
+  })
+
+  it('acknowledges a completed duplicate without processing or scheduling', async () => {
+    mocks.claimSlot.mockResolvedValueOnce('duplicate')
+    const { env, send } = environment()
+    const { message, ack, retry } = delivery()
+
+    await runQueue(message, env)
+
+    expect(mocks.workerScheduled).not.toHaveBeenCalled()
+    expect(mocks.completeSlot).not.toHaveBeenCalled()
+    expect(send).not.toHaveBeenCalled()
+    expect(retry).not.toHaveBeenCalled()
+    expect(ack).toHaveBeenCalledOnce()
+  })
+
+  it('publishes a staged successor before a later delivery applies a capacity halt', async () => {
+    const { env, send } = environment()
+    const first = delivery()
+    const nextScheduledTime = Date.parse('2026-07-30T14:05:00.000Z')
+    const next = delivery({ id: 'queue-message-2', scheduledTime: nextScheduledTime })
+    send.mockRejectedValueOnce(new Error('Queue send failed')).mockResolvedValueOnce(undefined)
+    mocks.assertCapacity
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new FastLaneStorageCapacityError(
+        'database_size',
+        'physical database capacity guard reached on following slot',
+      ))
+    mocks.readSlot
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        status: 'processing',
+        messageId: first.message.id,
+        nextScheduledTime,
+      })
+      .mockResolvedValueOnce(null)
+
+    await runQueue(first.message, env)
+
+    expect(first.retry).toHaveBeenCalledOnce()
+    expect(first.ack).not.toHaveBeenCalled()
+    expect(mocks.workerScheduled).toHaveBeenCalledOnce()
+    expect(mocks.completeSlot).not.toHaveBeenCalled()
+
+    await runQueue(first.message, env)
+
+    expect(send).toHaveBeenCalledTimes(2)
+    expect(mocks.assertCapacity).toHaveBeenCalledTimes(2)
+    expect(mocks.workerScheduled).toHaveBeenCalledOnce()
+    expect(mocks.stageSuccessor).toHaveBeenCalledOnce()
+    expect(mocks.completeSlot).toHaveBeenCalledOnce()
+    expect(first.ack).toHaveBeenCalledOnce()
+
+    await runQueue(next.message, env)
+
+    expect(next.ack).toHaveBeenCalledOnce()
+    expect(next.retry).not.toHaveBeenCalled()
+    expect(send).toHaveBeenCalledTimes(2)
+    expect(mocks.workerScheduled).toHaveBeenCalledOnce()
+    expect(mocks.claimSlot).toHaveBeenCalledOnce()
+  })
+
   it('halts before slot claim and acknowledges a capacity-blocked delivery', async () => {
     const capacityError = new FastLaneStorageCapacityError(
       'database_size',
@@ -167,6 +263,7 @@ describe('p0 heartbeat capacity halt', () => {
 
     await runQueue(message, env)
 
+    expect(mocks.readSlot).toHaveBeenCalledOnce()
     expect(mocks.claimSlot).not.toHaveBeenCalled()
     expect(mocks.workerScheduled).not.toHaveBeenCalled()
     expect(mocks.markSlotError).toHaveBeenCalledWith(expect.objectContaining({
