@@ -14,6 +14,12 @@ export interface FastLaneShadowRuntimeConfig {
   readWindow: number
 }
 
+// The Queue Worker performs D1 preflight, claim, atomic window commit, retention,
+// successor staging, and completion around each pass. Keep the production-safe
+// ledger bound as the default instead of allowing an omitted binding to restore
+// the previously unsafe 180-ledger shadow profile.
+export const FAST_LANE_SUBREQUEST_SAFE_MAX_LEDGERS = 32
+
 function positiveInteger(value: string | undefined, fallback: number, name: string): number {
   if (!value) return fallback
   const parsed = Number(value)
@@ -40,7 +46,7 @@ export function resolveFastLaneShadowRuntimeConfig(
   )
   const maxLedgersPerRun = positiveInteger(
     env.FAST_LANE_MAX_LEDGERS_PER_RUN,
-    180,
+    FAST_LANE_SUBREQUEST_SAFE_MAX_LEDGERS,
     'FAST_LANE_MAX_LEDGERS_PER_RUN',
   )
   const reanchorLagLedgers = positiveInteger(
@@ -50,6 +56,11 @@ export function resolveFastLaneShadowRuntimeConfig(
   )
   const readWindow = positiveInteger(env.FAST_LANE_READ_WINDOW, 8, 'FAST_LANE_READ_WINDOW')
 
+  if (maxLedgersPerRun > FAST_LANE_SUBREQUEST_SAFE_MAX_LEDGERS) {
+    throw new Error(
+      `FAST_LANE_MAX_LEDGERS_PER_RUN must not exceed the subrequest-safe bound of ${FAST_LANE_SUBREQUEST_SAFE_MAX_LEDGERS}`,
+    )
+  }
   if (reanchorLagLedgers < maxLedgersPerRun) {
     throw new Error('FAST_LANE_REANCHOR_LAG_LEDGERS must be at least FAST_LANE_MAX_LEDGERS_PER_RUN')
   }

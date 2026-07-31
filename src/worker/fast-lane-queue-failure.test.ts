@@ -24,4 +24,10 @@ describe('fast-lane Queue failure disposition', () => {
       new Error('XRPL endpoint temporarily unavailable'),
     )).toBe('retry')
   })
+
+  it('acks subrequest exhaustion as a fail-closed terminal delivery', () => {
+    expect(fastLaneQueueFailureDisposition(
+      new Error('Too many subrequests by single Worker invocation.'),
+    )).toBe('ack')
+  })
 })

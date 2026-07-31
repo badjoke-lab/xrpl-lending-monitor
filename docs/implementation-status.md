@@ -1,23 +1,37 @@
 # Implementation status
 
-Last updated: `2026-07-28T14:03Z`.
+Last updated: `2026-07-31`.
 
 ## Current phase
 
 XRPL Lending Monitor is **not formally released**.
 
-The Devnet production collector, Queue, five-minute cron, fast lane, canonical overlay, public Worker and hybrid history APIs are operating. The P0 immutable-history gap has been repaired and the production `history-data` branch now matches the immutable current-state base at ledger `3,932,301`.
+Production collection is intentionally stopped after extended Queue operation exposed a
+per-invocation subrequest failure. Queue delivery is paused, its backlog is purged, and
+Worker cron is empty. Formal recovery and any new qualification are not approved.
 
-This is a production test state, not a formal Devnet release.
+The public read surface remains a production test state, not a formal Devnet release.
+
+## Active P0 subrequest correction
+
+The fixed first 12 Queue slots completed with 1,152 contiguous ledgers and no slot or
+run errors. Extended operation later recorded 97 committed runs, one transient D1
+connection error, and three subrequest-limit errors in 26 seconds. The repeated
+subrequest failures had no committed ledger range.
+
+The focused correction keeps one pass per delivery, lowers and enforces the fast-lane
+maximum from 96 to the retained 32-ledger safe profile, treats caught subrequest
+exhaustion as terminal without successor publication, and gives retryable failures a
+five-minute Queue delay. This repository change is not deployed.
 
 ## Verified production identities
 
 - Network: `devnet`
 - Mainnet enabled: `false`
 - Public Worker: `https://xrpl-lending-monitor.badjoke-lab.workers.dev`
-- Cron: one `*/5 * * * *`
+- Cron: empty
 - Queue: one producer, one consumer, batch size 1, concurrency 1
-- Runtime SHA: `5b56de459e97495a9358f0e203c056d2a99afc6b`
+- Active Worker version: `0d7eb873`
 - Immutable current-state base: ledger `3,932,301`
 - Base hash: `7D026FED85BCA2BDCFE450A0F3537707A43B4D08E1D2AE57AFBC54D88EBE1828`
 - Production history branch head: `5d7bf6d330407c7ead237b3885d4330a8d268ce6`
@@ -44,16 +58,8 @@ This recovery removes the history/base mismatch blocker. It does not complete th
 
 ## Active next gate
 
-Issue #995 controls the new history-recovered twelve-slot qualification.
-
-- Workflow: `.github/workflows/complete-history-12-slot-qualification-995-v5.yml`
-- Fixed start: `2026-07-28T16:30:00Z` (`2026-07-29 01:30 JST`)
-- Fixed final slot: `2026-07-28T17:25:00Z` (`2026-07-29 02:25 JST`)
-- Evaluation: `2026-07-28T17:30:30Z` (`2026-07-29 02:30:30 JST`)
-- Expected slots: 12
-- Production mutation during the qualification: none
-
-A failed gate invalidates the complete window. The next attempt must restart from slot 1.
+The P0 subrequest correction must be reviewed and merged before a separate production
+recovery decision. Do not start qualification from this implementation pull request.
 
 ## Remaining formal-release gates
 

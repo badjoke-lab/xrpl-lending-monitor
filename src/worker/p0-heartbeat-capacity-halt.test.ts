@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { Bindings, FastLaneQueueMessage } from './env'
-import wrappedWorker from './p0-heartbeat-entry'
+import wrappedWorker, { FAST_LANE_QUEUE_RETRY_DELAY_SECONDS } from './p0-heartbeat-entry'
 import { FastLaneStorageCapacityError } from './repositories/fast-lane-storage-retention'
 
 const mocks = vi.hoisted(() => ({
@@ -312,7 +312,60 @@ describe('p0 heartbeat capacity halt', () => {
     expect(mocks.claimSlot).not.toHaveBeenCalled()
     expect(send).not.toHaveBeenCalled()
     expect(ack).not.toHaveBeenCalled()
-    expect(retry).toHaveBeenCalledOnce()
+    expect(retry).toHaveBeenCalledWith({
+      delaySeconds: FAST_LANE_QUEUE_RETRY_DELAY_SECONDS,
+    })
+  })
+
+  it('fails closed without publishing a successor on subrequest exhaustion', async () => {
+    const exhaustion = new Error('Too many subrequests by single Worker invocation.')
+    mocks.workerScheduled.mockRejectedValueOnce(exhaustion)
+
+    const { env, send } = environment()
+    const { message, ack, retry } = delivery()
+
+    await runQueue(message, env)
+
+    expect(mocks.markSlotError).toHaveBeenCalledWith(expect.objectContaining({
+      scheduledTime: message.body.scheduledTime,
+      messageId: message.id,
+      errorMessage: exhaustion.message,
+    }))
+    expect(mocks.saveRunError).toHaveBeenCalledWith(expect.objectContaining({
+      errorMessage: exhaustion.message,
+    }))
+    expect(mocks.stageSuccessor).not.toHaveBeenCalled()
+    expect(mocks.completeSlot).not.toHaveBeenCalled()
+    expect(send).not.toHaveBeenCalled()
+    expect(retry).not.toHaveBeenCalled()
+    expect(ack).toHaveBeenCalledOnce()
+  })
+
+  it('retries a transient D1 failure with backoff and resumes the same slot exactly once', async () => {
+    const transient = new Error('D1_ERROR: Network connection lost.')
+    mocks.workerScheduled
+      .mockRejectedValueOnce(transient)
+      .mockResolvedValueOnce(undefined)
+
+    const { env, send } = environment()
+    const { message, ack, retry } = delivery()
+
+    await runQueue(message, env)
+
+    expect(retry).toHaveBeenCalledWith({
+      delaySeconds: FAST_LANE_QUEUE_RETRY_DELAY_SECONDS,
+    })
+    expect(ack).not.toHaveBeenCalled()
+    expect(send).not.toHaveBeenCalled()
+    expect(mocks.stageSuccessor).not.toHaveBeenCalled()
+
+    await runQueue(message, env)
+
+    expect(mocks.workerScheduled).toHaveBeenCalledTimes(2)
+    expect(mocks.stageSuccessor).toHaveBeenCalledOnce()
+    expect(mocks.completeSlot).toHaveBeenCalledOnce()
+    expect(send).toHaveBeenCalledOnce()
+    expect(ack).toHaveBeenCalledOnce()
   })
 
   it('does not enqueue from the fallback scheduler during a capacity halt', async () => {

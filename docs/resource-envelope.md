@@ -108,6 +108,21 @@ Scheduled runs:
 - cap D1 statements, rows, and overlay mutations per run;
 - record CPU and wall time;
 - preserve catch-up capacity without skipping ledgers;
+
+### Queue fast-lane subrequest correction
+
+The retained 32-ledger WebSocket profile is the maximum per-delivery fast-lane range.
+The earlier 96-ledger profile usually used one WebSocket transport connection, but
+ledger contents also determine the size of the atomic D1 window commit and its
+surrounding state, slot, retention, capacity, metric, promotion, and successor
+operations. Extended operation demonstrated that the resulting invocation can exceed
+the platform subrequest limit even after many sparse 96-ledger passes succeed.
+
+The runtime therefore rejects a configured fast-lane maximum above 32. This is a
+deterministic range budget rather than an assumption that every ledger has the same
+cost. Any later increase requires retained worst-case content evidence plus the normal
+resource-budget approval process. Subrequest exhaustion does not advance the cursor or
+publish a successor.
 - stop on parent-hash discontinuity, base identity mismatch, persistence failure, or deadline margin.
 
 When behind, the collector catches up across multiple runs rather than exceeding runtime limits.

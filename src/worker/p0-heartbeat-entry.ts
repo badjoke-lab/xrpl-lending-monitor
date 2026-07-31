@@ -33,6 +33,7 @@ const SELF_SCHEDULE_CRON = 'queue-self-schedule'
 const CANONICAL_BRIDGE_PATH = '/api/operator/p0-canonical-bridge'
 const CANONICAL_BRIDGE_TOKEN_HEADER = 'x-p0-canonical-bridge-token'
 const CANONICAL_BRIDGE_PASSES_PER_INVOCATION = 2
+export const FAST_LANE_QUEUE_RETRY_DELAY_SECONDS = 5 * 60
 
 interface FastLaneStateRow {
   last_processed_ledger: number
@@ -402,7 +403,7 @@ const wrappedWorker: ExportedHandler<Bindings> = {
           continue
         }
 
-        queueMessage.retry()
+        queueMessage.retry({ delaySeconds: FAST_LANE_QUEUE_RETRY_DELAY_SECONDS })
       }
     }
   },

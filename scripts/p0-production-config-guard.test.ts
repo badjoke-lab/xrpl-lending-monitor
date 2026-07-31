@@ -13,6 +13,12 @@ describe('P0 production configuration guard', () => {
     expect(config.triggers).toEqual({ crons: [] })
   })
 
+  it('keeps each Queue pass within the subrequest-safe ledger bound', async () => {
+    const config = await wranglerConfig()
+    const vars = config.vars as Record<string, string>
+    expect(vars.FAST_LANE_MAX_LEDGERS_PER_RUN).toBe('32')
+  })
+
   it('keeps the qualified replacement base identity unchanged', async () => {
     const config = await wranglerConfig()
     const vars = config.vars as Record<string, string>
