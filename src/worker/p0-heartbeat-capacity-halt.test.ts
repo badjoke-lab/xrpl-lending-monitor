@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { Bindings, FastLaneQueueMessage } from './env'
 import wrappedWorker, { FAST_LANE_QUEUE_RETRY_DELAY_SECONDS } from './p0-heartbeat-entry'
+import { FAST_LANE_CATCH_UP_CRON, FAST_LANE_NORMAL_CRON } from './fast-lane-successor-cadence'
 import { FastLaneStorageCapacityError } from './repositories/fast-lane-storage-retention'
 
 const mocks = vi.hoisted(() => ({
@@ -162,13 +163,17 @@ beforeEach(() => {
 
 describe('p0 heartbeat capacity halt', () => {
   it('executes exactly one pass even when the fast lane remains behind', async () => {
-    const { env } = environment(false)
+    const { env, send } = environment(false)
     const { message, ack } = delivery()
 
     await runQueue(message, env)
 
     expect(mocks.workerScheduled).toHaveBeenCalledOnce()
     expect(mocks.completeSlot).toHaveBeenCalledOnce()
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({ cron: FAST_LANE_CATCH_UP_CRON }),
+      expect.any(Object),
+    )
     expect(ack).toHaveBeenCalledOnce()
   })
 
@@ -181,6 +186,10 @@ describe('p0 heartbeat capacity halt', () => {
     expect(mocks.stageSuccessor).toHaveBeenCalledOnce()
     expect(mocks.completeSlot).toHaveBeenCalledOnce()
     expect(send).toHaveBeenCalledOnce()
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({ cron: FAST_LANE_NORMAL_CRON }),
+      expect.any(Object),
+    )
     expect(mocks.stageSuccessor.mock.invocationCallOrder[0])
       .toBeLessThan(send.mock.invocationCallOrder[0])
     expect(send.mock.invocationCallOrder[0])

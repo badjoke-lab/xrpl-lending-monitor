@@ -20,8 +20,11 @@ connection error, and three subrequest-limit errors in 26 seconds. The repeated
 subrequest failures had no committed ledger range.
 
 The focused correction keeps one pass per delivery, lowers and enforces the fast-lane
-maximum from 96 to the retained 32-ledger safe profile, treats caught subrequest
-exhaustion as terminal without successor publication, and gives retryable failures a
+maximum from 96 to the retained 32-ledger safe profile, uses serialized one-minute
+successors only while behind (160-ledger nominal five-minute capacity versus 84
+observed Devnet ledgers), and returns to the five-minute boundary at lag zero. Synthetic
+catch-up delivery cannot invoke the protected collector. Caught subrequest exhaustion
+is terminal without successor publication, while retryable failures receive a
 five-minute Queue delay. This repository change is not deployed.
 
 ## Verified production identities

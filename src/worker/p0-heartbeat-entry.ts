@@ -1,6 +1,10 @@
 import type { Bindings, FastLaneQueueMessage } from './env'
 import { fastLanePassScheduledTime } from './fast-lane-pass-cadence'
 import { fastLaneQueueFailureDisposition } from './fast-lane-queue-failure'
+import {
+  FAST_LANE_NORMAL_CRON,
+  nextFastLaneSuccessor,
+} from './fast-lane-successor-cadence'
 import worker from './entry'
 import {
   promoteFastLaneCompactToCanonicalOverlay,
@@ -29,7 +33,6 @@ export const FAST_LANE_QUEUE_PROCESSING_LEASE_MS = 15 * 60_000
 const FIVE_MINUTE_INTERVAL_MS = 5 * 60_000
 const OVERLAY_CAPACITY_CHECK_INTERVAL_MS = 60 * 60_000
 const QUEUE_SLOT_RETENTION_MS = 7 * 24 * 60 * 60_000
-const SELF_SCHEDULE_CRON = 'queue-self-schedule'
 const CANONICAL_BRIDGE_PATH = '/api/operator/p0-canonical-bridge'
 const CANONICAL_BRIDGE_TOKEN_HEADER = 'x-p0-canonical-bridge-token'
 const CANONICAL_BRIDGE_PASSES_PER_INVOCATION = 2
@@ -84,13 +87,6 @@ function syntheticScheduledController(message: FastLaneQueueMessage, pass: numbe
     cron: message.cron,
     noRetry: () => undefined,
   } as ScheduledController
-}
-
-function nextFiveMinuteSlot(currentScheduledTime: number, now: number): number {
-  const nextFromCurrent = currentScheduledTime + FIVE_MINUTE_INTERVAL_MS
-  const nextWallClockBoundary = Math.ceil((now + 1_000) / FIVE_MINUTE_INTERVAL_MS)
-    * FIVE_MINUTE_INTERVAL_MS
-  return Math.max(nextFromCurrent, nextWallClockBoundary)
 }
 
 function delaySecondsUntil(scheduledTime: number, now: number): number {
@@ -261,7 +257,7 @@ const wrappedWorker: ExportedHandler<Bindings> = {
 
     const message: FastLaneQueueMessage = {
       scheduledTime: controller.scheduledTime,
-      cron: SELF_SCHEDULE_CRON,
+      cron: FAST_LANE_NORMAL_CRON,
       enqueuedAt: new Date().toISOString(),
     }
     await env.FAST_LANE_QUEUE.send(message)
@@ -322,15 +318,20 @@ const wrappedWorker: ExportedHandler<Bindings> = {
           ? await runQueuedFastLaneCycle({ message, env, executionContext })
           : false
         const now = Date.now()
+        const successor = nextFastLaneSuccessor({
+          currentScheduledTime: message.scheduledTime,
+          now,
+          caughtUp,
+        })
         const nextScheduledTime = claimed === 'successor_pending'
           ? pendingSlot?.nextScheduledTime
-          : nextFiveMinuteSlot(message.scheduledTime, now)
+          : successor.scheduledTime
         if (nextScheduledTime === null || nextScheduledTime === undefined) {
           throw new Error('fast-lane Queue pending successor is unavailable')
         }
         const nextMessage: FastLaneQueueMessage = {
           scheduledTime: nextScheduledTime,
-          cron: SELF_SCHEDULE_CRON,
+          cron: successor.cron,
           enqueuedAt: new Date(now).toISOString(),
         }
         const delaySeconds = delaySecondsUntil(nextScheduledTime, now)
