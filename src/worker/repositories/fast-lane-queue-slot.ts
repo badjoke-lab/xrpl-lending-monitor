@@ -190,12 +190,12 @@ export async function completeFastLaneQueueSlot(options: {
     `UPDATE fast_lane_queue_slots
      SET status = 'completed',
          completed_at = ?3,
-         next_scheduled_time = ?4,
          error_message = NULL,
          updated_at = ?3
      WHERE scheduled_time = ?1
        AND message_id = ?2
        AND status = 'processing'
+       AND next_scheduled_time = ?4
        AND next_cron = ?5`,
   ).bind(
     options.scheduledTime,

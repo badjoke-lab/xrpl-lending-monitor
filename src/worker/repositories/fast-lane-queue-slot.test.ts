@@ -61,9 +61,10 @@ function database(initial: StoredRow | null = null): { db: D1Database; sql: stri
         }
         if (sql.includes("SET status = 'completed'")) {
           if (row?.message_id === values[1] && row.scheduled_time === values[0]
-            && row.status === 'processing') row = {
+            && row.status === 'processing' && row.next_scheduled_time === values[3]
+            && row.next_cron === values[4]) row = {
             ...row, status: 'completed', completed_at: String(values[2]),
-            next_scheduled_time: Number(values[3]), error_message: null, updated_at: String(values[2]),
+            error_message: null, updated_at: String(values[2]),
           }
           return { meta: {} }
         }
@@ -136,6 +137,7 @@ describe('fast-lane Queue slot leases', () => {
   it('completes only the owning message and prunes no processing slots', async () => {
     const { db, sql } = database()
     await claim(db, 'owner', '2026-07-30T04:30:00.000Z')
+    await stageFastLaneQueueSuccessor({ db, scheduledTime: 123, messageId: 'owner', nextScheduledTime: 456, nextCron: 'queue-self-schedule', updatedAt: '2026-07-30T04:30:30.000Z' })
     await completeFastLaneQueueSlot({ db, scheduledTime: 123, messageId: 'owner', nextScheduledTime: 456, nextCron: 'queue-self-schedule', completedAt: '2026-07-30T04:31:00.000Z' })
     await pruneFastLaneQueueSlots({ db, cutoff: '2026-07-23T00:00:00.000Z' })
     const deletion = sql.find(value => value.includes('DELETE FROM fast_lane_queue_slots'))
