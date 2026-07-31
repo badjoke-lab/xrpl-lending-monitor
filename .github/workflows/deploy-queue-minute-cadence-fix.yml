@@ -1,0 +1,92 @@
+name: Deploy Queue minute-cadence fix
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/deploy-queue-minute-cadence-fix.yml
+      - .github/queue-minute-cadence-deploy-trigger
+      - scripts/controlled-queue-minute-cadence-deploy.py
+      - scripts/check-actions-workflow-allowlist.sh
+  push:
+    branches: [main]
+    paths:
+      - .github/queue-minute-cadence-deploy-trigger
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.event_name == 'push' && 'production-worker-write' || format('queue-cadence-validation-{0}', github.event.pull_request.number) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  RUNTIME_SHA: 088cb45caff2a59511a7def65bd6517ff6a60399
+  SCRIPT_NAME: xrpl-lending-monitor
+  QUEUE_NAME: xrpl-lending-fast-lane
+  QUEUE_ID: 2ae398f2edbf43749e45cd7ede77c6cd
+  DATABASE_NAME: xrpl-lending-monitor
+  DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
+  PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+jobs:
+  validate:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Validate exact source and guarded operation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "${RUNTIME_SHA}"
+          test "$(cat .github/queue-minute-cadence-deploy-trigger)" = "deploy-${RUNTIME_SHA}"
+          git diff --quiet "${RUNTIME_SHA}" -- src wrangler.jsonc package.json pnpm-lock.yaml
+          jq -e '
+            .main == "src/worker/p0-redundant-scheduler-entry.ts"
+            and .triggers.crons == []
+            and .vars.APP_NETWORK == "devnet"
+            and .vars.MAINNET_ENABLED == "false"
+            and .vars.FAST_LANE_MAX_LEDGERS_PER_RUN == "32"
+            and .queues.producers == [{"binding":"FAST_LANE_QUEUE","queue":"xrpl-lending-fast-lane"}]
+            and (.queues.consumers|length) == 1
+            and .queues.consumers[0].queue == "xrpl-lending-fast-lane"
+            and .queues.consumers[0].max_batch_size == 1
+            and .queues.consumers[0].max_concurrency == 1
+          ' wrangler.jsonc >/dev/null
+          python -m py_compile scripts/controlled-queue-minute-cadence-deploy.py
+          python scripts/controlled-queue-minute-cadence-deploy.py --validate-source-only
+
+  deploy-and-probe:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Fetch exact runtime commit
+        run: git fetch --no-tags --depth=1 origin "${RUNTIME_SHA}"
+      - name: Preflight, deploy, one delivery, and fail-closed cleanup
+        run: python scripts/controlled-queue-minute-cadence-deploy.py
+      - name: Upload controlled deployment evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: queue-minute-cadence-controlled-deployment
+          path: queue-minute-cadence-evidence
+          if-no-files-found: error
+          retention-days: 30

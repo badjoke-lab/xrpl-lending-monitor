@@ -18,6 +18,7 @@ printf '  %s\n' "${actual[@]}"
 expected=(
   ci.yml
   complete-history-12-slot-qualification-995-v5.yml
+  deploy-queue-minute-cadence-fix.yml
   read-only-production-qualification.yml
   rolling-checkpoint-candidate.yml
   rolling-checkpoint-live-cutover.yml
@@ -25,7 +26,7 @@ expected=(
 printf '%s\n' "${expected[@]}" > "$evidence/expected-workflows.txt"
 
 if [[ "${#actual[@]}" -ne "${#expected[@]}" ]]; then
-  echo "GitHub Actions workflow count must remain exactly five while the bounded qualification v5 workflow is armed." >&2
+  echo "GitHub Actions workflow count must remain exactly six while the one-shot Queue cadence deployment is armed." >&2
   exit 1
 fi
 
@@ -46,6 +47,7 @@ root = Path(sys.argv[1])
 evidence = Path(sys.argv[2])
 qualification_v5 = "complete-history-12-slot-qualification-995-v5.yml"
 policies = {
+    "deploy-queue-minute-cadence-fix.yml": ["pull_request", "push"],
     "rolling-checkpoint-candidate.yml": ["workflow_dispatch", "issue_comment"],
     "rolling-checkpoint-live-cutover.yml": ["workflow_dispatch"],
     "read-only-production-qualification.yml": ["pull_request", "workflow_dispatch", "issue_comment"],
@@ -123,4 +125,4 @@ if scheduled != [qualification_v5]:
     raise SystemExit(f"only the fixed qualification v5 workflow may be scheduled: {scheduled}")
 PY
 
-echo "Actions workflow allowlist passed: CI, one read-only runner, one bounded candidate builder, one manual cutover workflow, and one fixed-window qualification v5 exception."
+echo "Actions workflow allowlist passed: CI, one guarded one-shot Queue cadence deployment, one read-only runner, one bounded candidate builder, one manual cutover workflow, and one fixed-window qualification v5 exception."
