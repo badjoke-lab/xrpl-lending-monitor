@@ -280,6 +280,7 @@ const wrappedWorker: ExportedHandler<Bindings> = {
         })
         const hasPendingSuccessor = preflightSlot?.status === 'processing'
           && preflightSlot.nextScheduledTime !== null
+          && preflightSlot.nextCron !== null
 
         if (!hasPendingSuccessor) {
           await assertFastLaneStorageCapacity(env.DB, {
@@ -326,12 +327,15 @@ const wrappedWorker: ExportedHandler<Bindings> = {
         const nextScheduledTime = claimed === 'successor_pending'
           ? pendingSlot?.nextScheduledTime
           : successor.scheduledTime
-        if (nextScheduledTime === null || nextScheduledTime === undefined) {
+        const nextCron = claimed === 'successor_pending'
+          ? pendingSlot?.nextCron
+          : successor.cron
+        if (nextScheduledTime === null || nextScheduledTime === undefined || !nextCron) {
           throw new Error('fast-lane Queue pending successor is unavailable')
         }
         const nextMessage: FastLaneQueueMessage = {
           scheduledTime: nextScheduledTime,
-          cron: successor.cron,
+          cron: nextCron,
           enqueuedAt: new Date(now).toISOString(),
         }
         const delaySeconds = delaySecondsUntil(nextScheduledTime, now)
@@ -341,6 +345,7 @@ const wrappedWorker: ExportedHandler<Bindings> = {
             scheduledTime: message.scheduledTime,
             messageId: queueMessage.id,
             nextScheduledTime,
+            nextCron,
             updatedAt: new Date().toISOString(),
           })
         }
@@ -350,6 +355,7 @@ const wrappedWorker: ExportedHandler<Bindings> = {
           scheduledTime: message.scheduledTime,
           messageId: pendingSlot?.messageId ?? queueMessage.id,
           nextScheduledTime,
+          nextCron,
           completedAt: new Date().toISOString(),
         })
         await pruneFastLaneQueueSlots({

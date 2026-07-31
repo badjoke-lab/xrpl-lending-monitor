@@ -25,7 +25,10 @@ successors only while behind (160-ledger nominal five-minute capacity versus 84
 observed Devnet ledgers), and returns to the five-minute boundary at lag zero. Synthetic
 catch-up delivery cannot invoke the protected collector. Caught subrequest exhaustion
 is terminal without successor publication, while retryable failures receive a
-five-minute Queue delay. This repository change is not deployed.
+five-minute Queue delay. Durable successor state includes both timestamp and cadence,
+so a publication retry cannot change a caught-up normal successor into synthetic
+catch-up work or alter the protected-collector decision. This repository change is not
+deployed.
 
 ## Verified production identities
 

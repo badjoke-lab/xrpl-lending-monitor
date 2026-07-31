@@ -44,7 +44,7 @@ approved future recovery, not authorization to deploy or resume delivery.
 10. If one ledger cannot fit after encoding, fail before cursor advancement. Do not commit and later delete evidence silently.
 11. Atomically commit the fast-lane cursor, compact current mutations, encoded history bundle, and window evidence.
 12. When caught up, promote compact current mutations to the canonical overlay.
-13. Mark the Queue slot completed and reserve its successor durably. While lag remains, use a synthetic one-minute successor; after lag reaches zero, return to the next normal five-minute boundary.
+13. Reserve the successor durably before publication by storing both its timestamp and cadence discriminator, then mark the Queue slot completed after publication. A publication retry must replay both staged values without recomputing them. While lag remains, use a synthetic one-minute successor; after lag reaches zero, return to the next normal five-minute boundary.
 14. On failure, leave the cursor before the failed range and mark the slot error. Transient failures, including D1 connection loss, retry at the same slot with a five-minute delay and the Queue's configured retry cap. Caught subrequest-limit or capacity exhaustion is terminal for that delivery: acknowledge it without publishing a successor so rapid retry loops fail closed.
 
 Readers must transparently decode `gzip-base64-v1:` rows and continue to read legacy plain-JSON rows during the rolling format transition. Catch-up passes are internal bounded work. Their synthetic timestamps must never create another protected full-collector invocation.

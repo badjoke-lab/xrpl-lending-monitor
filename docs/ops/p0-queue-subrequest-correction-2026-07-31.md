@@ -45,6 +45,12 @@ discriminator even at a four-hour timestamp. Queue batch size and concurrency re
 one, so successor slots serialize rather than overlap; the collector continues to
 derive every range from committed cursor + 1.
 
+Successor staging persists the discriminator together with its timestamp before Queue
+publication. If publication fails, the retry republishes both staged values without
+recomputing cadence from a new lag assumption. Consequently a recovered normal
+`queue-self-schedule` successor still permits the protected collector at a four-hour
+boundary, while a recovered synthetic `queue-catch-up` successor still suppresses it.
+
 The maximum sustained catch-up schedule is 1,440 Queue deliveries/day. That is a
 design ceiling, not authorization to consume it: a separate production recovery review
 must accept measured daily D1, CPU, Queue, and invocation use before delivery resumes.
@@ -59,6 +65,8 @@ must accept measured daily D1, CPU, Queue, and invocation use before delivery re
 - A retry reclaims the same errored slot. Cursor atomicity makes it either replay the
   uncommitted range or observe the committed cursor; it cannot intentionally skip a
   ledger.
+- A retry after successor staging does not rerun the pass: it republishes the exact
+  staged timestamp and cadence, then completes the owning slot.
 
 ## Production-no-change evidence
 
