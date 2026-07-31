@@ -108,6 +108,39 @@ Scheduled runs:
 - cap D1 statements, rows, and overlay mutations per run;
 - record CPU and wall time;
 - preserve catch-up capacity without skipping ledgers;
+
+### Queue fast-lane subrequest correction
+
+The retained 32-ledger WebSocket profile is the maximum per-delivery fast-lane range.
+The earlier 96-ledger profile usually used one WebSocket transport connection, but
+ledger contents also determine the size of the atomic D1 window commit and its
+surrounding state, slot, retention, capacity, metric, promotion, and successor
+operations. Extended operation demonstrated that the resulting invocation can exceed
+the platform subrequest limit even after many sparse 96-ledger passes succeed.
+
+The runtime therefore rejects a configured fast-lane maximum above 32. This is a
+deterministic range budget rather than an assumption that every ledger has the same
+cost. Any later increase requires retained worst-case content evidence plus the normal
+resource-budget approval process. Subrequest exhaustion does not advance the cursor or
+publish a successor.
+
+The retained passing 32-ledger production profile processed 32 logical ledger reads in
+about 6.8 seconds per sample with zero failures in the cited recovery window. The
+current WSS shape uses one transport connection for those logical reads, while the
+ledger cap also bounds the data-dependent persistence input. This is the demonstrated
+per-invocation rollback bound; caught platform exhaustion remains terminal and cannot
+silently expand it.
+
+Behind-mode successors use a one-minute cadence, at most one Queue delivery at a time
+(`max_batch_size=1`, `max_concurrency=1`). Its nominal capacity is 32 x 5 = 160
+ledgers per five minutes. The fixed-window Devnet observation advanced 924 ledgers over
+11 five-minute intervals, or 84 ledgers per interval. Nominal recovery margin is
+therefore 76 ledgers per five minutes (about 1.9x the observed arrival rate). At lag
+zero the successor returns to the next five-minute boundary, reducing the caught-up
+steady-state ceiling to 32 ledgers per five minutes. Queue Free-plan operations are
+bounded to 1,440 catch-up deliveries/day during sustained lag; production must remain
+stopped until a separate review accepts that daily invocation, D1, CPU, and Queue
+envelope.
 - stop on parent-hash discontinuity, base identity mismatch, persistence failure, or deadline margin.
 
 When behind, the collector catches up across multiple runs rather than exceeding runtime limits.

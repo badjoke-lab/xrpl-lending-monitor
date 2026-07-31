@@ -1,3 +1,5 @@
+import { isSyntheticFastLaneCatchUp } from './fast-lane-successor-cadence'
+
 export interface ScheduledCadenceDecision {
   runFastLane: true
   runProtectedHeavyCycle: boolean
@@ -15,4 +17,9 @@ export function scheduledCadenceDecision(scheduledTimeMs: number): ScheduledCade
     runFastLane: true,
     runProtectedHeavyCycle: minute === 0 && hour % 4 === 0,
   }
+}
+
+export function shouldRunProtectedHeavyCycle(scheduledTimeMs: number, cron: string): boolean {
+  return scheduledCadenceDecision(scheduledTimeMs).runProtectedHeavyCycle
+    && !isSyntheticFastLaneCatchUp(cron)
 }

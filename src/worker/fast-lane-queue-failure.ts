@@ -19,6 +19,7 @@ export function fastLaneQueueFailureDisposition(
     text.includes('exceeded maximum db size')
     || text.includes('capacity guard reached')
     || text.includes('d1 capacity check failed')
+    || text.includes('too many subrequests by single worker invocation')
   ) {
     return 'ack'
   }

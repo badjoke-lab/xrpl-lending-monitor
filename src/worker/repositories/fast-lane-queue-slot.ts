@@ -7,6 +7,7 @@ interface FastLaneQueueSlotRow {
   started_at: string
   completed_at: string | null
   next_scheduled_time: number | null
+  next_cron: string | null
   error_message: string | null
   updated_at: string
 }
@@ -18,6 +19,7 @@ export interface FastLaneQueueSlot {
   startedAt: string
   completedAt: string | null
   nextScheduledTime: number | null
+  nextCron: string | null
   errorMessage: string | null
   updatedAt: string
 }
@@ -32,6 +34,7 @@ function mapSlot(row: FastLaneQueueSlotRow): FastLaneQueueSlot {
     startedAt: row.started_at,
     completedAt: row.completed_at,
     nextScheduledTime: row.next_scheduled_time,
+    nextCron: row.next_cron,
     errorMessage: row.error_message,
     updatedAt: row.updated_at,
   }
@@ -43,7 +46,7 @@ export async function readFastLaneQueueSlot(options: {
 }): Promise<FastLaneQueueSlot | null> {
   const row = await options.db.prepare(
     `SELECT scheduled_time, message_id, status, started_at, completed_at,
-            next_scheduled_time, error_message, updated_at
+            next_scheduled_time, next_cron, error_message, updated_at
      FROM fast_lane_queue_slots
      WHERE scheduled_time = ?1`,
   ).bind(options.scheduledTime).first<FastLaneQueueSlotRow>()
@@ -60,14 +63,15 @@ export async function claimFastLaneQueueSlot(options: {
   await options.db.prepare(
     `INSERT INTO fast_lane_queue_slots (
        scheduled_time, message_id, status, started_at, completed_at,
-       next_scheduled_time, error_message, updated_at
-     ) VALUES (?1, ?2, 'processing', ?3, NULL, NULL, NULL, ?3)
+       next_scheduled_time, next_cron, error_message, updated_at
+     ) VALUES (?1, ?2, 'processing', ?3, NULL, NULL, NULL, NULL, ?3)
      ON CONFLICT(scheduled_time) DO UPDATE SET
        message_id = excluded.message_id,
        status = 'processing',
        started_at = excluded.started_at,
        completed_at = NULL,
        next_scheduled_time = NULL,
+       next_cron = NULL,
        error_message = NULL,
        updated_at = excluded.updated_at
      WHERE fast_lane_queue_slots.status = 'error'
@@ -99,12 +103,14 @@ export async function stageFastLaneQueueSuccessor(options: {
   scheduledTime: number
   messageId: string
   nextScheduledTime: number
+  nextCron: string
   updatedAt: string
 }): Promise<void> {
   await options.db.prepare(
     `UPDATE fast_lane_queue_slots
      SET next_scheduled_time = ?3,
-         updated_at = ?4
+         next_cron = ?4,
+         updated_at = ?5
      WHERE scheduled_time = ?1
        AND message_id = ?2
        AND status = 'processing'`,
@@ -112,11 +118,14 @@ export async function stageFastLaneQueueSuccessor(options: {
     options.scheduledTime,
     options.messageId,
     options.nextScheduledTime,
+    options.nextCron,
     options.updatedAt,
   ).run()
 
   const slot = await readFastLaneQueueSlot({ db: options.db, scheduledTime: options.scheduledTime })
-  if (slot?.status !== 'processing' || slot.nextScheduledTime !== options.nextScheduledTime) {
+  if (slot?.status !== 'processing'
+    || slot.nextScheduledTime !== options.nextScheduledTime
+    || slot.nextCron !== options.nextCron) {
     throw new Error('fast-lane Queue successor was not staged')
   }
 }
@@ -131,14 +140,15 @@ export async function markFastLaneQueueSlotError(options: {
   await options.db.prepare(
     `INSERT INTO fast_lane_queue_slots (
        scheduled_time, message_id, status, started_at, completed_at,
-       next_scheduled_time, error_message, updated_at
-     ) VALUES (?1, ?2, 'error', ?4, NULL, NULL, ?3, ?4)
+       next_scheduled_time, next_cron, error_message, updated_at
+     ) VALUES (?1, ?2, 'error', ?4, NULL, NULL, NULL, ?3, ?4)
      ON CONFLICT(scheduled_time) DO UPDATE SET
        message_id = excluded.message_id,
        status = 'error',
        started_at = excluded.started_at,
        completed_at = NULL,
        next_scheduled_time = NULL,
+       next_cron = NULL,
        error_message = excluded.error_message,
        updated_at = excluded.updated_at
      WHERE fast_lane_queue_slots.status = 'error'
@@ -173,23 +183,26 @@ export async function completeFastLaneQueueSlot(options: {
   scheduledTime: number
   messageId: string
   nextScheduledTime: number
+  nextCron: string
   completedAt: string
 }): Promise<void> {
   await options.db.prepare(
     `UPDATE fast_lane_queue_slots
      SET status = 'completed',
          completed_at = ?3,
-         next_scheduled_time = ?4,
          error_message = NULL,
          updated_at = ?3
      WHERE scheduled_time = ?1
        AND message_id = ?2
-       AND status = 'processing'`,
+       AND status = 'processing'
+       AND next_scheduled_time = ?4
+       AND next_cron = ?5`,
   ).bind(
     options.scheduledTime,
     options.messageId,
     options.completedAt,
     options.nextScheduledTime,
+    options.nextCron,
   ).run()
 
   const slot = await readFastLaneQueueSlot({
@@ -201,6 +214,7 @@ export async function completeFastLaneQueueSlot(options: {
     || slot.messageId !== options.messageId
     || slot.status !== 'completed'
     || slot.nextScheduledTime !== options.nextScheduledTime
+    || slot.nextCron !== options.nextCron
   ) {
     throw new Error('fast-lane Queue slot completion was not persisted')
   }

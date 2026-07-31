@@ -28,7 +28,7 @@ import { handleHybridExactHistoryOverride } from './routes/hybrid-exact-history-
 import { handleHybridHistoryOverride } from './routes/hybrid-history-override'
 import { handlePreSoakReadiness } from './routes/pre-soak-readiness'
 import { handleThreeLayerOverview } from './routes/three-layer-overview'
-import { scheduledCadenceDecision } from './scheduled-cadence'
+import { shouldRunProtectedHeavyCycle } from './scheduled-cadence'
 import { serializeCollectorStatus } from './serializers/collector-status'
 
 const PROTECTED_HEAVY_INTERVAL_SECONDS = 4 * 60 * 60
@@ -294,11 +294,10 @@ const worker: ExportedHandler<Bindings> = {
   },
 
   async scheduled(controller, env) {
-    const decision = scheduledCadenceDecision(controller.scheduledTime)
     let protectedError: unknown = null
     let fastLaneError: unknown = null
 
-    if (decision.runProtectedHeavyCycle) {
+    if (shouldRunProtectedHeavyCycle(controller.scheduledTime, controller.cron)) {
       try {
         await runProtectedHeavyCycle(env)
       } catch (error) {

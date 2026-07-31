@@ -1,7 +1,9 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { Bindings, FastLaneQueueMessage } from './env'
-import wrappedWorker from './p0-heartbeat-entry'
+import wrappedWorker, { FAST_LANE_QUEUE_RETRY_DELAY_SECONDS } from './p0-heartbeat-entry'
+import { FAST_LANE_CATCH_UP_CRON, FAST_LANE_NORMAL_CRON } from './fast-lane-successor-cadence'
+import { shouldRunProtectedHeavyCycle } from './scheduled-cadence'
 import { FastLaneStorageCapacityError } from './repositories/fast-lane-storage-retention'
 
 const mocks = vi.hoisted(() => ({
@@ -160,15 +162,23 @@ beforeEach(() => {
   })
 })
 
+afterEach(() => {
+  vi.useRealTimers()
+})
+
 describe('p0 heartbeat capacity halt', () => {
   it('executes exactly one pass even when the fast lane remains behind', async () => {
-    const { env } = environment(false)
+    const { env, send } = environment(false)
     const { message, ack } = delivery()
 
     await runQueue(message, env)
 
     expect(mocks.workerScheduled).toHaveBeenCalledOnce()
     expect(mocks.completeSlot).toHaveBeenCalledOnce()
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({ cron: FAST_LANE_CATCH_UP_CRON }),
+      expect.any(Object),
+    )
     expect(ack).toHaveBeenCalledOnce()
   })
 
@@ -181,6 +191,10 @@ describe('p0 heartbeat capacity halt', () => {
     expect(mocks.stageSuccessor).toHaveBeenCalledOnce()
     expect(mocks.completeSlot).toHaveBeenCalledOnce()
     expect(send).toHaveBeenCalledOnce()
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({ cron: FAST_LANE_NORMAL_CRON }),
+      expect.any(Object),
+    )
     expect(mocks.stageSuccessor.mock.invocationCallOrder[0])
       .toBeLessThan(send.mock.invocationCallOrder[0])
     expect(send.mock.invocationCallOrder[0])
@@ -222,6 +236,7 @@ describe('p0 heartbeat capacity halt', () => {
         status: 'processing',
         messageId: first.message.id,
         nextScheduledTime,
+        nextCron: FAST_LANE_NORMAL_CRON,
       })
       .mockResolvedValueOnce(null)
 
@@ -312,7 +327,118 @@ describe('p0 heartbeat capacity halt', () => {
     expect(mocks.claimSlot).not.toHaveBeenCalled()
     expect(send).not.toHaveBeenCalled()
     expect(ack).not.toHaveBeenCalled()
-    expect(retry).toHaveBeenCalledOnce()
+    expect(retry).toHaveBeenCalledWith({
+      delaySeconds: FAST_LANE_QUEUE_RETRY_DELAY_SECONDS,
+    })
+  })
+
+  it.each([
+    {
+      label: 'normal',
+      cron: FAST_LANE_NORMAL_CRON,
+      protectedCollectorRuns: true,
+    },
+    {
+      label: 'catch-up',
+      cron: FAST_LANE_CATCH_UP_CRON,
+      protectedCollectorRuns: false,
+    },
+  ])('replays an exact staged $label successor after Queue publication fails', async ({
+    cron,
+    protectedCollectorRuns,
+  }) => {
+    const protectedBoundary = Date.parse('2026-07-31T12:00:00.000Z')
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-31T11:59:59.000Z'))
+    const { env, send } = environment(cron === FAST_LANE_NORMAL_CRON)
+    const { message, ack, retry } = delivery()
+    send.mockRejectedValueOnce(new Error('Queue send failed')).mockResolvedValueOnce(undefined)
+    mocks.readSlot
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        status: 'processing',
+        messageId: message.id,
+        nextScheduledTime: protectedBoundary,
+        nextCron: cron,
+      })
+
+    await runQueue(message, env)
+    expect(retry).toHaveBeenCalledWith({
+      delaySeconds: FAST_LANE_QUEUE_RETRY_DELAY_SECONDS,
+    })
+    expect(mocks.workerScheduled).toHaveBeenCalledOnce()
+    expect(mocks.stageSuccessor).toHaveBeenCalledWith(expect.objectContaining({
+      nextScheduledTime: protectedBoundary,
+      nextCron: cron,
+    }))
+
+    await runQueue(message, env)
+
+    expect(mocks.workerScheduled).toHaveBeenCalledOnce()
+    expect(mocks.stageSuccessor).toHaveBeenCalledOnce()
+    expect(send).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        scheduledTime: protectedBoundary,
+        cron,
+      }),
+      expect.any(Object),
+    )
+    const recovered = send.mock.calls.at(-1)?.[0] as FastLaneQueueMessage
+    expect(shouldRunProtectedHeavyCycle(recovered.scheduledTime, recovered.cron))
+      .toBe(protectedCollectorRuns)
+    expect(mocks.completeSlot).toHaveBeenCalledOnce()
+    expect(ack).toHaveBeenCalledOnce()
+  })
+
+  it('fails closed without publishing a successor on subrequest exhaustion', async () => {
+    const exhaustion = new Error('Too many subrequests by single Worker invocation.')
+    mocks.workerScheduled.mockRejectedValueOnce(exhaustion)
+
+    const { env, send } = environment()
+    const { message, ack, retry } = delivery()
+
+    await runQueue(message, env)
+
+    expect(mocks.markSlotError).toHaveBeenCalledWith(expect.objectContaining({
+      scheduledTime: message.body.scheduledTime,
+      messageId: message.id,
+      errorMessage: exhaustion.message,
+    }))
+    expect(mocks.saveRunError).toHaveBeenCalledWith(expect.objectContaining({
+      errorMessage: exhaustion.message,
+    }))
+    expect(mocks.stageSuccessor).not.toHaveBeenCalled()
+    expect(mocks.completeSlot).not.toHaveBeenCalled()
+    expect(send).not.toHaveBeenCalled()
+    expect(retry).not.toHaveBeenCalled()
+    expect(ack).toHaveBeenCalledOnce()
+  })
+
+  it('retries a transient D1 failure with backoff and resumes the same slot exactly once', async () => {
+    const transient = new Error('D1_ERROR: Network connection lost.')
+    mocks.workerScheduled
+      .mockRejectedValueOnce(transient)
+      .mockResolvedValueOnce(undefined)
+
+    const { env, send } = environment()
+    const { message, ack, retry } = delivery()
+
+    await runQueue(message, env)
+
+    expect(retry).toHaveBeenCalledWith({
+      delaySeconds: FAST_LANE_QUEUE_RETRY_DELAY_SECONDS,
+    })
+    expect(ack).not.toHaveBeenCalled()
+    expect(send).not.toHaveBeenCalled()
+    expect(mocks.stageSuccessor).not.toHaveBeenCalled()
+
+    await runQueue(message, env)
+
+    expect(mocks.workerScheduled).toHaveBeenCalledTimes(2)
+    expect(mocks.stageSuccessor).toHaveBeenCalledOnce()
+    expect(mocks.completeSlot).toHaveBeenCalledOnce()
+    expect(send).toHaveBeenCalledOnce()
+    expect(ack).toHaveBeenCalledOnce()
   })
 
   it('does not enqueue from the fallback scheduler during a capacity halt', async () => {

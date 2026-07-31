@@ -23,11 +23,15 @@ Only validated Devnet ledgers are in scope. Mainnet remains disabled.
 
 ## Five-minute Queue behavior
 
+Production is intentionally stopped while the subrequest correction is reviewed. The
+configuration keeps cron empty; the behavior below is the contract for a separately
+approved future recovery, not authorization to deploy or resume delivery.
+
 1. Normalize each real cron time to one exact five-minute Queue slot.
 2. Claim that slot by `scheduled_time`; ignore duplicate deliveries after a completed owner exists.
 3. Check bounded storage capacity.
 4. Run the protected full collector **once only when the real Queue slot itself is a four-hour UTC boundary**.
-5. Run up to eight bounded fast-lane passes until the fast lane reaches the observed validated head.
+5. Run exactly one bounded fast-lane pass, capped at 32 contiguous ledgers. Later deliveries resume at the committed cursor plus one.
 6. Each pass begins at the committed fast-lane cursor plus one and validates parent-hash continuity.
 7. Build one history bundle from the exact scan. The bundle includes:
    - protocol events;
@@ -40,10 +44,15 @@ Only validated Devnet ledgers are in scope. Mainnet remains disabled.
 10. If one ledger cannot fit after encoding, fail before cursor advancement. Do not commit and later delete evidence silently.
 11. Atomically commit the fast-lane cursor, compact current mutations, encoded history bundle, and window evidence.
 12. When caught up, promote compact current mutations to the canonical overlay.
-13. Mark the Queue slot completed and reserve the next five-minute slot.
-14. On failure, leave the cursor before the failed range, mark the slot error, and retry through Queue policy.
+13. Reserve the successor durably before publication by storing both its timestamp and cadence discriminator, then mark the Queue slot completed after publication. A publication retry must replay both staged values without recomputing them. While lag remains, use a synthetic one-minute successor; after lag reaches zero, return to the next normal five-minute boundary.
+14. On failure, leave the cursor before the failed range and mark the slot error. Transient failures, including D1 connection loss, retry at the same slot with a five-minute delay and the Queue's configured retry cap. Caught subrequest-limit or capacity exhaustion is terminal for that delivery: acknowledge it without publishing a successor so rapid retry loops fail closed.
 
 Readers must transparently decode `gzip-base64-v1:` rows and continue to read legacy plain-JSON rows during the rolling format transition. Catch-up passes are internal bounded work. Their synthetic timestamps must never create another protected full-collector invocation.
+
+Synthetic catch-up messages carry the explicit `queue-catch-up` discriminator. The
+scheduled entry rejects that discriminator for protected-heavy-cycle selection even if
+the synthetic timestamp happens to equal a four-hour boundary. Only a normal Queue
+slot can invoke the protected collector.
 
 ## Protected full-collector atomic boundary
 
