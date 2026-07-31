@@ -39,12 +39,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 1
       - name: Validate exact source and guarded operation
         shell: bash
         run: |
           set -euo pipefail
-          git fetch --no-tags origin "${RUNTIME_SHA}"
+          git fetch --no-tags --depth=1 origin "${RUNTIME_SHA}"
           test "$(cat .github/queue-minute-cadence-deploy-trigger)" = "deploy-${RUNTIME_SHA}"
           git diff --quiet "${RUNTIME_SHA}" -- src wrangler.jsonc package.json pnpm-lock.yaml
           jq -e '
@@ -69,7 +69,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 1
       - uses: pnpm/action-setup@v4
         with:
           version: 11.9.0
@@ -78,6 +78,8 @@ jobs:
           node-version: 24.18.0
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Fetch exact runtime commit
+        run: git fetch --no-tags --depth=1 origin "${RUNTIME_SHA}"
       - name: Preflight, deploy, one delivery, and fail-closed cleanup
         run: python scripts/controlled-queue-minute-cadence-deploy.py
       - name: Upload controlled deployment evidence
