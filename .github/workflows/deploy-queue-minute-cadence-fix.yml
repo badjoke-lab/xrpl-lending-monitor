@@ -17,8 +17,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: production-worker-write
-  cancel-in-progress: false
+  group: ${{ github.event_name == 'push' && 'production-worker-write' || format('queue-cadence-validation-{0}', github.event.pull_request.number) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   RUNTIME_SHA: 088cb45caff2a59511a7def65bd6517ff6a60399
