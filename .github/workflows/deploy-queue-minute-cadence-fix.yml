@@ -6,6 +6,7 @@ on:
     paths:
       - .github/workflows/deploy-queue-minute-cadence-fix.yml
       - .github/queue-minute-cadence-deploy-trigger
+      - scripts/controlled-queue-minute-cadence-deploy.py
       - scripts/check-actions-workflow-allowlist.sh
   push:
     branches: [main]
@@ -58,11 +59,13 @@ jobs:
             and .queues.consumers[0].max_batch_size == 1
             and .queues.consumers[0].max_concurrency == 1
           ' wrangler.jsonc >/dev/null
+          python -m py_compile scripts/controlled-queue-minute-cadence-deploy.py
+          python scripts/controlled-queue-minute-cadence-deploy.py --validate-source-only
 
   deploy-and-probe:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
         with:
@@ -75,178 +78,8 @@ jobs:
           node-version: 24.18.0
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-
       - name: Preflight, deploy, one delivery, and fail-closed cleanup
-        shell: bash
-        run: |
-          cat > /tmp/controlled-deploy.py <<'PY'
-          import base64, datetime, hashlib, json, os, pathlib, subprocess, time, urllib.error, urllib.request
-
-          E = pathlib.Path('queue-minute-cadence-evidence'); E.mkdir(exist_ok=True)
-          account=os.environ['CLOUDFLARE_ACCOUNT_ID']; token=os.environ['CLOUDFLARE_API_TOKEN']
-          script=os.environ['SCRIPT_NAME']; qid=os.environ['QUEUE_ID']; dbid=os.environ['DATABASE_ID']
-          runtime=os.environ['RUNTIME_SHA']; base='https://api.cloudflare.com/client/v4'
-          headers={'Authorization':f'Bearer {token}','Content-Type':'application/json'}
-          old_version=None; deployed=False; rolled_back=False; seed=None; baseline_run_count=None
-
-          def save(name, value):
-              (E/name).write_text(json.dumps(value,indent=2,sort_keys=True)+'\n')
-              return value
-          def api(method,path,body=None):
-              data=None if body is None else json.dumps(body,separators=(',',':')).encode()
-              req=urllib.request.Request(base+path,data=data,headers=headers,method=method)
-              for attempt in range(5):
-                  try:
-                      with urllib.request.urlopen(req,timeout=60) as r: out=json.load(r)
-                      if not out.get('success'): raise RuntimeError(out.get('errors'))
-                      return out
-                  except Exception:
-                      if attempt==4: raise
-                      time.sleep(2*(attempt+1))
-          def d1(sql):
-              out=api('POST',f'/accounts/{account}/d1/database/{dbid}/query',{'sql':sql})
-              if not out['result'][0].get('success',False): raise RuntimeError(out)
-              return out['result'][0].get('results',[])
-          def queue(): return api('GET',f'/accounts/{account}/queues/{qid}')['result']
-          def paused(): return queue().get('settings',{}).get('delivery_paused') is True
-          def pause():
-              api('PATCH',f'/accounts/{account}/queues/{qid}/settings',{'delivery_paused':True})
-              if not paused(): raise RuntimeError('Queue did not pause')
-          def resume(): api('PATCH',f'/accounts/{account}/queues/{qid}/settings',{'delivery_paused':False})
-          def metrics():
-              query='''query($accountTag: string!, $queueId: string!) { viewer { accounts(filter: {accountTag: $accountTag}) { queueBacklogAdaptiveGroups(limit: 1, filter: {queueId: $queueId}) { dimensions { queueId } max { messages bytes oldestMessageAge } } } } }'''
-              req=urllib.request.Request(base+'/graphql',data=json.dumps({'query':query,'variables':{'accountTag':account,'queueId':qid}}).encode(),headers=headers,method='POST')
-              with urllib.request.urlopen(req,timeout=60) as response: out=json.load(response)
-              if out.get('errors'): raise RuntimeError(out['errors'])
-              groups=out['data']['viewer']['accounts'][0]['queueBacklogAdaptiveGroups']
-              values=(groups[0]['max'] if groups else {'messages':0,'bytes':0,'oldestMessageAge':0})
-              return {'messages':int(values.get('messages') or 0),'bytes':int(values.get('bytes') or 0),'oldestMessageAge':int(values.get('oldestMessageAge') or 0)}
-          def wait_metrics(count, attempts=60):
-              for _ in range(attempts):
-                  m=metrics()
-                  if m['messages']==count: return m
-                  time.sleep(2)
-              raise RuntimeError(f'Queue backlog did not reach {count}: {m}')
-          def purge():
-              out=api('POST',f'/accounts/{account}/queues/{qid}/purge',{'delete_messages_permanently':True})
-              for _ in range(90):
-                  status=api('GET',f'/accounts/{account}/queues/{qid}/purge')['result']
-                  if status.get('complete') is True:
-                      save('purge.json',status); break
-                  time.sleep(2)
-              else: raise RuntimeError('Queue purge did not complete')
-              m=wait_metrics(0)
-              if m != {'messages':0,'bytes':0,'oldestMessageAge':0}: raise RuntimeError(f'non-empty Queue after purge: {m}')
-              return m
-          def schedules(): return api('GET',f'/accounts/{account}/workers/scripts/{script}/schedules')['result']['schedules']
-          def deployments(): return api('GET',f'/accounts/{account}/workers/scripts/{script}/deployments')['result']['deployments']
-          def settings(): return api('GET',f'/accounts/{account}/workers/scripts/{script}/settings')['result']
-          def database(): return api('GET',f'/accounts/{account}/d1/database/{dbid}')['result']
-          def q(s): return s.replace("'","''")
-
-          try:
-              subprocess.run(['git','cat-file','-e',runtime+'^{commit}'],check=True)
-              if pathlib.Path('.github/queue-minute-cadence-deploy-trigger').read_text().strip()!=f'deploy-{runtime}': raise RuntimeError('trigger mismatch')
-              subprocess.run(['git','diff','--quiet',runtime,'--','src','wrangler.jsonc','package.json','pnpm-lock.yaml'],check=True)
-              cfg=json.loads(pathlib.Path('wrangler.jsonc').read_text())
-              assert cfg['main']=='src/worker/p0-redundant-scheduler-entry.ts' and cfg['triggers']['crons']==[]
-              assert cfg['vars']['APP_NETWORK']=='devnet' and cfg['vars']['MAINNET_ENABLED']=='false' and cfg['vars']['FAST_LANE_MAX_LEDGERS_PER_RUN']=='32'
-              c=cfg['queues']['consumers']; assert len(c)==1 and c[0]['max_batch_size']==1 and c[0]['max_concurrency']==1
-              if not paused(): raise RuntimeError('Queue delivery is not paused')
-              if schedules(): raise RuntimeError('Cron schedule is not empty')
-              db=database(); size=int(db.get('file_size') or 0)
-              if not 0 < size < 350_000_000: raise RuntimeError(f'D1 size outside guard: {size}')
-              migration=subprocess.run(['pnpm','exec','wrangler','d1','migrations','list',os.environ['DATABASE_NAME'],'--remote'],text=True,capture_output=True,check=True).stdout
-              if 'No migrations to apply' not in migration: raise RuntimeError('unapplied migrations exist')
-              deps=deployments(); old_dep=deps[0]; old_version=old_dep['versions'][0]['version_id']
-              qm=metrics()
-              pre={'checkedAt':datetime.datetime.now(datetime.timezone.utc).isoformat(),'sourceCommit':runtime,'queue':queue(),'queueMetrics':qm,'schedules':schedules(),'databaseSize':size,'deployment':old_dep,'settings':settings(),'unappliedMigrations':0}
-              save('preflight-production-snapshot.json',pre)
-
-              pause(); save('queue-after-initial-purge.json',purge())
-              subprocess.run(['pnpm','build:deploy-assets'],check=True)
-              upload=subprocess.run(['pnpm','exec','wrangler','versions','upload','--message',f'controlled queue cadence {runtime}','--tag',runtime],text=True,capture_output=True,check=True)
-              (E/'version-upload.txt').write_text(upload.stdout)
-              import re
-              ids=re.findall(r'[0-9a-f]{8}-[0-9a-f-]{27,}',upload.stdout,re.I)
-              if not ids: raise RuntimeError('Could not identify uploaded Worker version')
-              new_version=ids[-1]
-              subprocess.run(['pnpm','exec','wrangler','versions','deploy',f'{new_version}@100%','--yes'],check=True)
-              deployed=True
-              for _ in range(60):
-                  dep=deployments()[0]
-                  if len(dep.get('versions',[]))==1 and dep['versions'][0].get('version_id')==new_version and dep['versions'][0].get('percentage')==100: break
-                  time.sleep(2)
-              else: raise RuntimeError('new version did not become 100% deployment')
-              active=settings(); binds=active.get('bindings',[])
-              def binding(name): return next((x.get('text',x.get('value')) for x in binds if x.get('name')==name),None)
-              assert binding('APP_NETWORK')=='devnet' and binding('MAINNET_ENABLED')=='false' and binding('FAST_LANE_MAX_LEDGERS_PER_RUN')=='32'
-              assert len([x for x in binds if x.get('name')=='FAST_LANE_QUEUE' and x.get('type')=='queue'])==1
-              assert not schedules() and paused()
-              smoke={}
-              for path in ('/api/overview','/api/status/history-source','/api/status/fast-lane-diff?limit=1'):
-                  with urllib.request.urlopen(os.environ['PRODUCTION_BASE']+path,timeout=45) as r: smoke[path]=r.status
-              if set(smoke.values())!={200}: raise RuntimeError(f'smoke failed: {smoke}')
-              save('deployment-identity.json',{'sourceCommit':runtime,'oldVersionId':old_version,'oldDeploymentId':old_dep['id'],'newVersionId':new_version,'newDeploymentId':dep['id'],'bindings':binds,'smoke':smoke})
-
-              before_cursor=d1("SELECT last_processed_ledger FROM fast_lane_shadow_state WHERE network='devnet'")[0]['last_processed_ledger']
-              baseline_run_count=d1("SELECT COUNT(*) AS n FROM fast_lane_shadow_run_metrics WHERE network='devnet'")[0]['n']
-              existing={int(x['scheduled_time']) for x in d1('SELECT scheduled_time FROM fast_lane_queue_slots')}
-              candidate=((int(time.time()//60)+1)*60)*1000
-              while candidate%300000==0 or candidate in existing: candidate+=60000
-              seed=candidate; iso=datetime.datetime.fromtimestamp(seed/1000,datetime.timezone.utc).isoformat().replace('+00:00','Z')
-              save('selected-seed-slot.json',{'scheduledTime':seed,'iso':iso})
-              save('queue-metrics-before-seed.json',metrics())
-              body={'scheduledTime':seed,'cron':'queue-catch-up','enqueuedAt':datetime.datetime.now(datetime.timezone.utc).isoformat().replace('+00:00','Z')}
-              api('POST',f'/accounts/{account}/queues/{qid}/messages',{'body':body,'content_type':'json'})
-              one=wait_metrics(1)
-              if d1(f'SELECT COUNT(*) AS n FROM fast_lane_queue_slots WHERE scheduled_time={seed}')[0]['n']!=0: raise RuntimeError('seed mutated while Queue paused')
-              if d1("SELECT COUNT(*) AS n FROM fast_lane_shadow_run_metrics WHERE network='devnet'")[0]['n']!=baseline_run_count: raise RuntimeError('run appeared while Queue paused')
-
-              resume()
-              row=None
-              for _ in range(100):
-                  rows=d1(f"SELECT scheduled_time,status,started_at,completed_at,next_scheduled_time,next_cron,error_message,updated_at FROM fast_lane_queue_slots WHERE scheduled_time={seed}")
-                  wrong=d1(f"SELECT scheduled_time,status FROM fast_lane_queue_slots WHERE updated_at>='{q(body['enqueuedAt'])}' AND scheduled_time!={seed} AND status IN ('running','completed') ORDER BY updated_at")
-                  if wrong: raise RuntimeError(f'unexpected slot processed: {wrong}')
-                  if rows and rows[0]['status']=='completed': row=rows[0]; pause(); break
-                  time.sleep(.5)
-              if row is None: raise RuntimeError('exact seed slot did not complete')
-              pause()
-              runs=d1(f"SELECT run_at,status,start_ledger_index,end_ledger_index,latest_observed_ledger,lag_ledgers,ledgers_processed,error_message FROM fast_lane_shadow_run_metrics WHERE network='devnet' AND run_at>='{q(row['started_at'])}' AND run_at<='{q(row['completed_at'])}' ORDER BY run_at")
-              successor=d1(f"SELECT scheduled_time,status,started_at,completed_at,next_scheduled_time,next_cron,error_message FROM fast_lane_queue_slots WHERE scheduled_time={seed+60000}")
-              after_cursor=d1("SELECT last_processed_ledger FROM fast_lane_shadow_state WHERE network='devnet'")[0]['last_processed_ledger']
-              checks={'exactSeed':row['scheduled_time']==seed,'notFiveMinute':seed%300000!=0,'slotCompleted':row['status']=='completed','slotErrorNull':row['error_message'] is None,'oneRun':len(runs)==1,'runStatus':len(runs)==1 and runs[0]['status'] in ('committed','caught_up'),'boundedLedgers':len(runs)==1 and 1<=int(runs[0]['ledgers_processed'])<=32,'runErrorNull':len(runs)==1 and runs[0]['error_message'] is None,'nextTime':row['next_scheduled_time']==seed+60000,'nextCron':row['next_cron']=='queue-catch-up','cursorBounded':0<int(after_cursor)-int(before_cursor)<=32}
-              if not all(checks.values()): raise RuntimeError(f'controlled test failed: {checks}')
-              save('exact-slot-row.json',row); save('corresponding-run-metrics.json',runs); save('successor-row-fields.json',successor); save('controlled-checks.json',checks)
-              time.sleep(65)
-              quiet_count=d1("SELECT COUNT(*) AS n FROM fast_lane_shadow_run_metrics WHERE network='devnet'")[0]['n']
-              save('post-pause-quiet-window.json',{'seconds':65,'runCount':quiet_count,'expectedRunCount':int(baseline_run_count)+1,'passed':quiet_count==int(baseline_run_count)+1})
-              if quiet_count!=int(baseline_run_count)+1: raise RuntimeError('additional run occurred after pause')
-              success=True
-          except Exception as exc:
-              success=False; failure=repr(exc)
-              if deployed and old_version:
-                  try:
-                      subprocess.run(['pnpm','exec','wrangler','versions','deploy',f'{old_version}@100%','--yes'],check=True); rolled_back=True
-                  except Exception as rollback_exc: failure += f'; rollback failed: {rollback_exc!r}'
-          finally:
-              cleanup_error=None
-              try:
-                  pause(); final_queue=purge()
-                  final_schedules=schedules()
-                  if final_schedules: raise RuntimeError('Cron exists during cleanup')
-                  final_runs=d1("SELECT COUNT(*) AS n FROM fast_lane_shadow_run_metrics WHERE network='devnet'")[0]['n']
-                  final_db=int(database().get('file_size') or 0); final_dep=deployments()[0]
-                  save('final-state.json',{'queuePaused':paused(),'queue':final_queue,'schedules':final_schedules,'databaseSize':final_db,'deployment':final_dep,'runCount':final_runs})
-                  if final_db>=350_000_000: raise RuntimeError('final D1 size outside guard')
-              except Exception as exc: cleanup_error=repr(exc); success=False
-              result={'checkedAt':datetime.datetime.now(datetime.timezone.utc).isoformat(),'passed':bool(success),'sourceCommit':runtime,'seedScheduledTime':seed,'rollback':rolled_back,'failure':None if success else failure,'cleanupError':cleanup_error}
-              save('overall-result.json',result)
-              if not success: raise SystemExit(json.dumps(result))
-          PY
-          python /tmp/controlled-deploy.py
-
+        run: python scripts/controlled-queue-minute-cadence-deploy.py
       - name: Upload controlled deployment evidence
         if: always()
         uses: actions/upload-artifact@v4
