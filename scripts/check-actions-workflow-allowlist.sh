@@ -22,11 +22,12 @@ expected=(
   read-only-production-qualification.yml
   rolling-checkpoint-candidate.yml
   rolling-checkpoint-live-cutover.yml
+  start-continuous-fast-lane-catch-up.yml
 )
 printf '%s\n' "${expected[@]}" > "$evidence/expected-workflows.txt"
 
 if [[ "${#actual[@]}" -ne "${#expected[@]}" ]]; then
-  echo "GitHub Actions workflow count must remain exactly six while the one-shot Queue cadence deployment is armed." >&2
+  echo "GitHub Actions workflow count must remain exactly seven while the Queue deployment and continuous catch-up promotion workflows are armed." >&2
   exit 1
 fi
 
@@ -48,6 +49,7 @@ evidence = Path(sys.argv[2])
 qualification_v5 = "complete-history-12-slot-qualification-995-v5.yml"
 policies = {
     "deploy-queue-minute-cadence-fix.yml": ["pull_request", "push"],
+    "start-continuous-fast-lane-catch-up.yml": ["pull_request", "push"],
     "rolling-checkpoint-candidate.yml": ["workflow_dispatch", "issue_comment"],
     "rolling-checkpoint-live-cutover.yml": ["workflow_dispatch"],
     "read-only-production-qualification.yml": ["pull_request", "workflow_dispatch", "issue_comment"],
@@ -114,6 +116,17 @@ for required in (
     if required not in candidate:
         raise SystemExit(f"candidate workflow is missing immutable-history command boundary: {required}")
 
+promotion = (root / "start-continuous-fast-lane-catch-up.yml").read_text()
+for required in (
+    "production-worker-write",
+    "Deploy exact runtime and prove one controlled delivery",
+    "Promote continuous catch-up after three exact minute slots",
+    "gh issue comment 1072",
+    "issues: write",
+):
+    if required not in promotion:
+        raise SystemExit(f"continuous catch-up promotion is missing fail-closed boundary: {required}")
+
 scheduled = []
 for path in root.glob("*.y*ml"):
     if re.search(r"^  schedule:", path.read_text(), flags=re.MULTILINE):
@@ -125,4 +138,4 @@ if scheduled != [qualification_v5]:
     raise SystemExit(f"only the fixed qualification v5 workflow may be scheduled: {scheduled}")
 PY
 
-echo "Actions workflow allowlist passed: CI, one guarded one-shot Queue cadence deployment, one read-only runner, one bounded candidate builder, one manual cutover workflow, and one fixed-window qualification v5 exception."
+echo "Actions workflow allowlist passed: CI, guarded Queue deployment, guarded continuous catch-up promotion, one read-only runner, one bounded candidate builder, one manual cutover workflow, and one fixed-window qualification v5 exception."
