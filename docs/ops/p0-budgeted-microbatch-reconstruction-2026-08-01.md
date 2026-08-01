@@ -284,21 +284,52 @@ Exit passed: no partial work is publicly visible, no cursor advances before fina
 
 ### R2 — Portable scan/commit/finalize runtime — 2026-08-02 to 2026-08-03
 
-Status: **active contract phase**. The controlling unit is [`r2-portable-runtime-contract-2026-08-01.md`](r2-portable-runtime-contract-2026-08-01.md). Runtime implementation begins only after that contract is merged to `main`.
+Status: **active** under merged contract PR #1083 (`bd1ac985de908bd2f01089304c202ab47d368c9b`).
 
-Implementation unit:
+#### R2a — Typed messages and durable scheduler
+
+Status: **implementation and validation passed in PR #1084; merge pending**.
+
+Delivered on the branch:
 
 - exact versioned scan, commit, and finalize message unions with deterministic IDs;
-- one normalized payload envelope preserving all seven semantic groups;
-- scan-only staging and exact work sealing;
-- bounded resumable commit chunks;
-- atomic finalization and next-scan selection;
-- durable SQLite scheduler inbox, lease, stale-lease recovery, successor outbox, and idempotent dispatcher;
-- explicit retryable and terminal failure classifications;
-- deterministic fixture `ExecutionAdapter` with reset, identity, hash, digest, resource, and interruption injection;
-- no hosted-provider SDK or remote mutation.
+- strict message validation and the 16,000-byte scheduler-message guard;
+- durable SQLite scheduler inbox with atomic lease claim, fresh-lease protection, and stale-lease recovery;
+- retryable and terminal failure classifications with exact message-identity preservation;
+- atomic phase result, optional work mutation, timed successor outbox reservation, and current-message completion;
+- idempotent successor dispatch and duplicate completion;
+- durable successor availability that cannot be changed during re-enqueue, duplicate completion, or delayed dispatch;
+- complete runtime export/restore covering work, chunks, candidate rows, watermarks, scheduler messages, active leases, attempts, errors, outbox state, and reserved successor times.
 
-Exit requires every sparse, dense, oversized, interrupted, retried, duplicate, lease, outbox, reset, identity, parent-hash, digest, export/restore, and semantic-class survival test listed by the R2 contract, plus the complete repository CI suite.
+Retained validation from CI run `30691175822`:
+
+- workflow guard, lint, type-check, complete unit suite, complete local migration sequence, application build, and browser smoke passed;
+- migration `10005_portable_scheduler.sql` applied after the existing migration set on a clean database;
+- injected mutation interruption rolled back the mutation, outbox, and message completion together;
+- fresh lease theft was rejected and stale lease reclaim preserved the same message identity;
+- retry kept the exact phase cursor;
+- terminal failure left no successor;
+- duplicate completion and dispatch converged idempotently;
+- re-enqueue or duplicate completion with a changed successor time was rejected;
+- leased messages and pending timed outbox entries restored exactly into a second SQLite database;
+- canonical runtime re-export after restoration matched byte for byte.
+
+R2a is recorded complete only after PR #1084 merges to `main`.
+
+#### R2b — Normalized payload and bounded phase runtime
+
+Status: **next implementation unit after R2a merge**.
+
+Required work:
+
+- implement `NormalizedCollectorPayloadV1` with all seven semantic groups;
+- implement deterministic serialization, digest, semantic counts, and bounded chunking;
+- implement scan-only staging, bounded commit execution, and scheduler-integrated atomic finalization;
+- expose transaction-aware finalization so scheduler-owned completion does not nest SQLite transactions;
+- implement the deterministic fixture `ExecutionAdapter` and all interruption/failure injections;
+- pass the complete R2 semantic-survival and phase-runtime suite.
+
+R2 exit still requires every sparse, dense, oversized, interrupted, retried, duplicate, lease, outbox, reset, identity, parent-hash, digest, export/restore, and semantic-class survival test listed by the R2 contract, plus the complete repository CI suite.
 
 ### R3 — Adapter conformance, overlay, maintenance, and archive separation — 2026-08-03
 
