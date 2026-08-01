@@ -50,25 +50,36 @@ A configured remote queue does not mean the collector is operating when no succe
 
 ### R0 — Contract and portability reset
 
-Status: active in PR #1081.
+Status: **complete** in merged PR #1081 (`c077e7b16b8b08213bbadcc5e927bba0f9472f6c`).
 
-- close obsolete PR #1080;
-- retire the fixed-32-ledger recovery and its qualification path;
-- rewrite runtime, resource, status, and recovery schedule documents around provider-neutral contracts;
-- define `StorageAdapter`, `SchedulerAdapter`, `ExecutionAdapter`, and `PublicationAdapter`;
-- make SQLite the reference implementation for local and CI proof;
-- freeze remote recovery until the adapter contract and deployment-profile gate exist.
+Delivered:
 
-Exit: source-of-truth documents agree, contain technical rationale only, and no hosted provider is treated as the required architecture.
+- retired the fixed-32-ledger recovery and its qualification path;
+- rewrote runtime, resource, status, and recovery schedule documents around provider-neutral contracts;
+- defined `StorageAdapter`, `SchedulerAdapter`, `ExecutionAdapter`, and `PublicationAdapter` boundaries;
+- selected SQLite as the reference implementation for local and CI proof;
+- froze remote recovery until the adapter contract and deployment-profile gate exist.
+
+Exit condition passed: source-of-truth documents agree, contain technical rationale only, and no hosted provider is treated as the required architecture.
 
 ### R1 — Reference schema and deterministic planner
 
-- add implementation-neutral collector work, payload chunk, commit chunk, and committed-visibility schema;
-- implement the schema first in SQLite;
-- implement deterministic adaptive candidate planning and resource accounting;
-- add dense and content-heavy ledger fixtures;
-- prove that partial work cannot advance the cursor or become visible;
-- define storage migration and export invariants independently of a remote provider.
+Status: **active** in Draft PR #1082.
+
+Implemented on the branch:
+
+- implementation-neutral collector work, payload chunk, commit chunk, reference-row, and committed-watermark schema;
+- real SQLite reference storage for idempotent staging, hidden partial rows, guarded atomic finalization, cursor-parent enforcement, and deterministic export;
+- deterministic adaptive candidate planning from actual per-ledger transaction, byte, payload, and request estimates;
+- the R1 scan ceiling of 48 ledgers as a candidate ceiling rather than a persistence-safety claim;
+- sparse, dense/content-heavy, oversized-single-ledger, discontinuity, incomplete-commit, idempotent-finalize, visibility, watermark, and export tests.
+
+Still required before R1 exit:
+
+- ordinary CI success, including lint, type-check, unit tests, local migrations, build, and browser smoke;
+- retained confirmation that the new migration applies to a clean local database with the existing migration set;
+- review of migration and export invariants against the controlling contract;
+- merge of PR #1082.
 
 Exit: local SQLite and CI tests prove atomic finalization, committed-only visibility, deterministic replay, and full export.
 
