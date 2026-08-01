@@ -9,6 +9,7 @@ import {
   type PortableSqliteDatabase,
   type PortableSqliteValue,
 } from './portable-collector-reference-store'
+import { restorePortableCollectorState } from './portable-collector-reference-restore'
 
 class NodeSqliteReferenceDatabase implements PortableSqliteDatabase {
   constructor(readonly database: DatabaseSync) {}
@@ -42,6 +43,26 @@ class NodeSqliteReferenceDatabase implements PortableSqliteDatabase {
 const createdAt = '2026-08-01T07:00:00.000Z'
 const parentHash = 'A'.repeat(64)
 const finalHash = 'B'.repeat(64)
+const migration = readFileSync(
+  resolve(process.cwd(), 'migrations/10004_portable_collector_work.sql'),
+  'utf8',
+)
+
+function createReferenceDatabase(): {
+  database: DatabaseSync
+  adapter: NodeSqliteReferenceDatabase
+  store: PortableCollectorReferenceStore
+} {
+  const database = new DatabaseSync(':memory:')
+  database.exec('PRAGMA foreign_keys = ON')
+  database.exec(migration)
+  const adapter = new NodeSqliteReferenceDatabase(database)
+  return {
+    database,
+    adapter,
+    store: new PortableCollectorReferenceStore(adapter),
+  }
+}
 
 function definition(overrides: Partial<{
   workId: string
@@ -113,17 +134,14 @@ function stageCompleteWork(
 
 describe('portable collector SQLite reference store', () => {
   let database: DatabaseSync
+  let adapter: NodeSqliteReferenceDatabase
   let store: PortableCollectorReferenceStore
 
   beforeEach(() => {
-    database = new DatabaseSync(':memory:')
-    database.exec('PRAGMA foreign_keys = ON')
-    const migration = readFileSync(
-      resolve(process.cwd(), 'migrations/10004_portable_collector_work.sql'),
-      'utf8',
-    )
-    database.exec(migration)
-    store = new PortableCollectorReferenceStore(new NodeSqliteReferenceDatabase(database))
+    const reference = createReferenceDatabase()
+    database = reference.database
+    adapter = reference.adapter
+    store = reference.store
   })
 
   afterEach(() => {
@@ -211,27 +229,47 @@ describe('portable collector SQLite reference store', () => {
     expect(store.getWatermark('devnet', 'epoch-1', 'base-100')?.ledgerIndex).toBe(102)
   })
 
-  it('exports the complete reference state deterministically', () => {
+  it('exports and restores the complete state with byte-for-byte canonical parity', () => {
     stageCompleteWork(store)
     store.finalizeWork({
       workId: 'work-101-102',
       committedAt: '2026-08-01T07:03:00.000Z',
     })
 
-    const first = store.exportState()
-    const second = store.exportState()
-    expect(first).toBe(second)
+    const exportedState = store.exportState()
+    const restored = createReferenceDatabase()
+    try {
+      restorePortableCollectorState(restored.adapter, exportedState)
+      expect(restored.store.exportState()).toBe(exportedState)
+      expect(restored.store.listCommittedReferenceRows()).toEqual(
+        store.listCommittedReferenceRows(),
+      )
+      expect(restored.store.getWatermark('devnet', 'epoch-1', 'base-100')).toEqual(
+        store.getWatermark('devnet', 'epoch-1', 'base-100'),
+      )
+    } finally {
+      restored.database.close()
+    }
 
-    const exported = JSON.parse(first) as {
+    const parsed = JSON.parse(exportedState) as {
       schemaVersion: number
       work: Array<{ status: string }>
       payloadChunks: Array<{ payload: { encoding: string; value: string } }>
       watermarks: Array<{ ledger_index: number }>
     }
-    expect(exported.schemaVersion).toBe(1)
-    expect(exported.work).toHaveLength(1)
-    expect(exported.work[0]?.status).toBe('committed')
-    expect(exported.payloadChunks[0]?.payload.encoding).toBe('hex')
-    expect(exported.watermarks[0]?.ledger_index).toBe(102)
+    expect(parsed.schemaVersion).toBe(1)
+    expect(parsed.work).toHaveLength(1)
+    expect(parsed.work[0]?.status).toBe('committed')
+    expect(parsed.payloadChunks[0]?.payload.encoding).toBe('hex')
+    expect(parsed.watermarks[0]?.ledger_index).toBe(102)
+  })
+
+  it('refuses to restore into a non-empty target', () => {
+    stageCompleteWork(store)
+    const exportedState = store.exportState()
+
+    expect(() => restorePortableCollectorState(adapter, exportedState)).toThrow(
+      'restore target is not empty',
+    )
   })
 })
