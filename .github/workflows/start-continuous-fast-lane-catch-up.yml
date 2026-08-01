@@ -27,6 +27,7 @@ env:
   QUEUE_ID: 2ae398f2edbf43749e45cd7ede77c6cd
   DATABASE_NAME: xrpl-lending-monitor
   DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
+  PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
   CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
   CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
   GH_TOKEN: ${{ github.token }}
@@ -46,12 +47,13 @@ jobs:
         run: |
           set -euo pipefail
           python -m py_compile scripts/start-continuous-fast-lane-catch-up.py
+          python -m py_compile scripts/controlled-queue-minute-cadence-deploy.py
           python scripts/start-continuous-fast-lane-catch-up.py --validate-source-only
 
   promote:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
         with:
@@ -66,18 +68,28 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Fetch exact runtime commit
         run: git fetch --no-tags --depth=1 origin "${RUNTIME_SHA}"
-      - name: Promote continuous catch-up
+      - name: Deploy exact runtime and prove one controlled delivery
+        run: python scripts/controlled-queue-minute-cadence-deploy.py
+      - name: Promote continuous catch-up after three exact minute slots
         run: python scripts/start-continuous-fast-lane-catch-up.py
       - name: Ensure issue comment exists
         if: always()
         run: |
           if [ ! -s continuous-catch-up-evidence/issue-comment.md ]; then
             mkdir -p continuous-catch-up-evidence
-            printf '## Continuous catch-up promotion: WORKFLOW FAILURE\n\nNo result file was produced. Inspect the workflow logs and keep the Queue paused.\n' > continuous-catch-up-evidence/issue-comment.md
+            printf '## Continuous catch-up promotion: WORKFLOW FAILURE\n\nNo promotion result file was produced. The controlled deployment is fail-closed and the Queue must remain paused.\n' > continuous-catch-up-evidence/issue-comment.md
           fi
       - name: Post result to Issue 1072
         if: always()
         run: gh issue comment 1072 --repo badjoke-lab/xrpl-lending-monitor --body-file continuous-catch-up-evidence/issue-comment.md
+      - name: Upload controlled deployment evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: queue-minute-cadence-controlled-deployment-before-promotion
+          path: queue-minute-cadence-evidence
+          if-no-files-found: warn
+          retention-days: 30
       - name: Upload continuous catch-up evidence
         if: always()
         uses: actions/upload-artifact@v4
