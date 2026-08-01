@@ -18,6 +18,7 @@ printf '  %s\n' "${actual[@]}"
 expected=(
   ci.yml
   complete-history-12-slot-qualification-995-v5.yml
+  continuous-catch-up-checkpoint.yml
   deploy-queue-minute-cadence-fix.yml
   read-only-production-qualification.yml
   rolling-checkpoint-candidate.yml
@@ -27,7 +28,7 @@ expected=(
 printf '%s\n' "${expected[@]}" > "$evidence/expected-workflows.txt"
 
 if [[ "${#actual[@]}" -ne "${#expected[@]}" ]]; then
-  echo "GitHub Actions workflow count must remain exactly seven while the Queue deployment and continuous catch-up promotion workflows are armed." >&2
+  echo "GitHub Actions workflow count must remain exactly eight while the Queue deployment, continuous catch-up promotion, and read-only checkpoint workflows are armed." >&2
   exit 1
 fi
 
@@ -47,9 +48,11 @@ import sys
 root = Path(sys.argv[1])
 evidence = Path(sys.argv[2])
 qualification_v5 = "complete-history-12-slot-qualification-995-v5.yml"
+checkpoint_name = "continuous-catch-up-checkpoint.yml"
 policies = {
     "deploy-queue-minute-cadence-fix.yml": ["pull_request", "push"],
     "start-continuous-fast-lane-catch-up.yml": ["pull_request", "push"],
+    checkpoint_name: ["pull_request", "issue_comment"],
     "rolling-checkpoint-candidate.yml": ["workflow_dispatch", "issue_comment"],
     "rolling-checkpoint-live-cutover.yml": ["workflow_dispatch"],
     "read-only-production-qualification.yml": ["pull_request", "workflow_dispatch", "issue_comment"],
@@ -82,6 +85,22 @@ for forbidden in ("  schedule:", "  push:", "  workflow_run:", "contents: write"
 for required in ("actions: read", "contents: read", "issues: write", "CLOUDFLARE_API_TOKEN", "DATABASE_ID", "gh issue comment 995"):
     if required not in qualification:
         raise SystemExit(f"read-only qualification is missing required bounded capability: {required}")
+
+checkpoint = (root / checkpoint_name).read_text()
+for forbidden in ("  schedule:", "  push:", "contents: write", "wrangler deploy", "d1 execute"):
+    if forbidden in checkpoint:
+        raise SystemExit(f"continuous catch-up checkpoint contains forbidden capability: {forbidden.strip()}")
+for required in (
+    "github.event.issue.number == 1079",
+    "github.actor == 'badjoke-lab'",
+    "github.event.comment.body == '/catch-up checkpoint'",
+    "Capture read-only production checkpoint",
+    "gh issue comment 1079",
+    "EXPECTED_WORKER_VERSION",
+    "issues: write",
+):
+    if required not in checkpoint:
+        raise SystemExit(f"continuous catch-up checkpoint is missing bounded read-only boundary: {required}")
 
 v5 = (root / qualification_v5).read_text()
 for required in (
@@ -138,4 +157,4 @@ if scheduled != [qualification_v5]:
     raise SystemExit(f"only the fixed qualification v5 workflow may be scheduled: {scheduled}")
 PY
 
-echo "Actions workflow allowlist passed: CI, guarded Queue deployment, guarded continuous catch-up promotion, one read-only runner, one bounded candidate builder, one manual cutover workflow, and one fixed-window qualification v5 exception."
+echo "Actions workflow allowlist passed: CI, guarded Queue deployment, guarded continuous catch-up promotion, one guarded read-only catch-up checkpoint, one read-only runner, one bounded candidate builder, one manual cutover workflow, and one fixed-window qualification v5 exception."
