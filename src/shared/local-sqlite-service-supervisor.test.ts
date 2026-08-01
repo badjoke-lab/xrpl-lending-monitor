@@ -215,7 +215,7 @@ describe('R4C1 file-backed local SQLite service supervisor', () => {
     const thirdProcess = openDatabase(path)
     expect(thirdProcess.supervisor.get(profileId)).toEqual(heartbeat)
     expect(thirdProcess.scheduler.getMessage(message.messageId)).toMatchObject({
-      status: 'processing',
+      status: 'leased',
       leaseOwner: 'process-b',
       attemptCount: 1,
     })
