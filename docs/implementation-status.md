@@ -8,15 +8,15 @@ XRPL Lending Monitor is **not formally released**.
 
 The retired fixed-32-ledger recovery halted on a content-dependent Worker subrequest limit. The successor chain is absent, terminal lag was `56,740`, Worker Cron is empty, and no stabilization qualification or 24-hour soak is active.
 
-The public read surface remains a production test surface backed by the last verified immutable base plus committed legacy live data. Mainnet remains disabled. The portable runtime is not connected to a hosted deployment or public reader.
+The public read surface remains a production test surface backed by the last verified immutable base plus committed legacy live data. Mainnet remains disabled. The portable runtime and reader are not connected to a hosted deployment or public route.
 
 ## Controlling documents
 
 - Recovery design and schedule: [`ops/p0-budgeted-microbatch-reconstruction-2026-08-01.md`](ops/p0-budgeted-microbatch-reconstruction-2026-08-01.md)
 - R3 adapter and reader plan: [`ops/r3-adapter-reader-integration-plan-2026-08-01.md`](ops/r3-adapter-reader-integration-plan-2026-08-01.md)
 - R3A evidence: [`ops/r3a-adapter-conformance-evidence-2026-08-01.md`](ops/r3a-adapter-conformance-evidence-2026-08-01.md)
+- R3B evidence: [`ops/r3b-committed-reader-evidence-2026-08-01.md`](ops/r3b-committed-reader-evidence-2026-08-01.md)
 - Parent R2 contract: [`ops/r2-portable-runtime-contract-2026-08-01.md`](ops/r2-portable-runtime-contract-2026-08-01.md)
-- Completed R2b2 evidence: [`ops/r2b2-bounded-phase-runtime-plan-2026-08-01.md`](ops/r2b2-bounded-phase-runtime-plan-2026-08-01.md)
 - Runtime invariants: [`history-runtime-contract.md`](history-runtime-contract.md)
 - Resource gates: [`resource-envelope.md`](resource-envelope.md)
 
@@ -44,42 +44,42 @@ The halted remote deployment is evidence and rollback context only. It is not an
 - R1 reference schema and deterministic planner: PR #1082, merge `85f42e665a5e6f2f519cd372718b9c41c16b3f68`.
 - R2 typed durable runtime and parent exit: PRs #1084–#1095, final merge `fb90cbbd3a44337dc0891552f3618581cfc31e1c`.
 - R3 adapter and reader contract: PR #1096, merge `d38615dc283462dee50605adb535caefb1975f0f`.
+- R3A adapter interfaces and SQLite conformance: PR #1097, merge `741f4ac24396dd21ae100b963ea439782b1696be`.
 
 ## R2 completion
 
-R2 and R2b2 are **complete on `main`**.
-
-The retained suites prove sparse and dense durable phase chains, all seven semantic classes, complete identity, no early visibility, exact retry and lease behavior, staged/committing/committed runtime-version-3 restore, terminal gates, and provider-neutral imports.
-
-Final R2 CI run `30698715057` passed workflow guard, lint, type-check, production runner checks, complete unit suite, clean migrations, build, and browser smoke.
+R2 and R2b2 are complete on `main`. The retained suites prove sparse and dense durable phase chains, all seven semantic classes, complete identity, no early visibility, exact retry and lease behavior, staged/committing/committed runtime-version-3 restore, terminal gates, and provider-neutral imports.
 
 ## Active R3 work
 
 ### R3A — Adapter interfaces and SQLite conformance
 
-Status: **implementation and validation passed in PR #1097; merge pending**.
+Status: **complete on `main`** in PR #1097, merge `741f4ac24396dd21ae100b963ea439782b1696be`.
+
+Delivered provider-neutral adapter interfaces, SQLite reference wrappers, interface-driven phase execution, unchanged R2 atomicity, publication/maintenance type separation, and conformance through the full seven-class chain.
+
+Final R3A CI run `30699572665` passed workflow guard, lint, type-check, runner checks, complete unit suite, clean migrations, build, and browser smoke.
+
+### R3B — Committed generic reader
+
+Status: **implementation and validation passed in PR #1098; merge pending**.
 
 Delivered on the branch:
 
-- provider-neutral storage, scheduler, execution, finalize-execution, publication, and maintenance interfaces;
-- SQLite reference storage and scheduler wrappers;
-- an interface-driven composed runtime bridge for scan, commit, and finalize;
-- unchanged R2 transaction ownership and phase semantics;
-- complete sparse seven-class chain through interface-typed adapters;
-- atomic finalize rollback and exact-identity retry through the interface bridge;
-- publication and maintenance contracts kept separate from collection;
-- provider-neutral import enforcement over import specifiers.
+- immutable read fences bound to source, network, epoch, base, committed ledger/hash, and work;
+- latest exact lookup by semantic class and canonical key;
+- deterministic semantic-class listing;
+- deterministic ledger-range listing;
+- canonical relationship lookup;
+- source/query/order/fence-bound opaque cursors with SHA-256 integrity;
+- stale-fence, source mismatch, query mismatch, tamper, invalid offset, and malformed shape rejection;
+- committed-only filtering with staged rows invisible;
+- strict row/work identity, hash, relationship, tombstone, and canonical-value validation;
+- storage parse failures normalized to `integrity_failure` with no legacy fallback.
 
-The R3A conformance suite proves:
+The SQLite reader suite proves latest exact selection across multiple committed works, stable pagination, ledger-range and relationship queries, tombstone retention, staged-row exclusion, cursor tamper/source/query/fence rejection, and malformed committed identity failure.
 
-- no committed rows or watermark before finalize;
-- complete committed rows and watermark after finalize;
-- next scan at the committed boundary with `scanSequence = 0`;
-- rollback of work state, visibility, watermark, message completion, and outbox after injected storage interruption;
-- completion through the same finalize message ID after retry;
-- no hosted-provider package import in the adapter surface.
-
-Retained CI evidence from run `30699452781`:
+Retained CI evidence from run `30699923812`:
 
 - workflow-surface guard passed;
 - lint passed;
@@ -90,29 +90,26 @@ Retained CI evidence from run `30699452781`:
 - application build passed;
 - browser smoke passed.
 
-The first R3A CI run failed only because a broad source-text regex matched the word `Queue` in a type/interface context. The guard was corrected to inspect import specifiers. Runtime behavior was unchanged.
+The first R3B CI run exposed only the TypeScript Web Crypto `BufferSource` boundary. Cursor bytes are now copied into a dedicated `ArrayBuffer` before hashing. Cursor identity and behavior were unchanged.
 
-R3A is recorded complete only after PR #1097 merges to `main`.
+R3B is recorded complete only after PR #1098 merges to `main`.
 
-### R3B — Committed generic reader
+### R3C — Product mappers and shadow compatibility
 
-Status: **next after PR #1097 merges**.
+Status: **next after PR #1098 merges**.
 
 Required work:
 
-- immutable committed read fences;
-- exact lookup by semantic class and canonical key;
-- deterministic semantic listing;
-- deterministic source-ledger range listing;
-- canonical relationship lookup;
-- source/query/order/fence-bound opaque cursors;
-- malformed identity, value, cursor, and fence rejection;
-- SQLite reader conformance;
-- no public route or legacy authority change.
+- strict versioned mappers for all seven semantic classes;
+- explicit portable source descriptors;
+- `legacy_only` and `shadow_compare` selection only;
+- deterministic bounded comparison evidence;
+- no portable/legacy mixing inside one response;
+- no silent legacy fallback after integrity, identity, digest, cursor, or partial-read failure;
+- no public authority change.
 
-### R3C–R3E
+### R3D–R3E
 
-- R3C: seven product mappers and bounded shadow comparison;
 - R3D: publication and maintenance reference implementations;
 - R3E: cross-adapter export/restore and parent R3 exit.
 
@@ -148,5 +145,6 @@ Pass fixed 24-hour and seven-day evidence windows before reopening formal Devnet
 - Do not skip a failed ledger or advance a cursor after partial persistence.
 - Do not mix portable and legacy reader sources inside one response.
 - Do not silently fall back after integrity or identity failure.
+- Do not expose the portable reader through public routes before an explicit cutover gate.
 - Do not make a provider dashboard, local terminal, or paid runtime dependency part of routine recovery.
 - Do not call a theoretical no-cost projection an operating result.
