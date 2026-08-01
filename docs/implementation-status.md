@@ -83,34 +83,46 @@ Delivered:
 - real SQLite proof of no nested transaction;
 - injected interruption rollback of work status, committed visibility, and watermark advancement.
 
-Retained CI evidence from runs `30694527924` and `30694653827` includes successful workflow guard, lint, type-check, complete unit suite, clean migration sequence, application build, and browser smoke.
+### R2b2-B0 — Repeated scan identity
 
-### R2b2-B0 contract — Repeated scan identity
+Contract complete in PR #1089, merge `51238a35184f5b4815fa79c1144df92ebe8d77a4`.
 
-Complete in PR #1089, merge `51238a35184f5b4815fa79c1144df92ebe8d77a4`.
+Implementation complete in PR #1090, merge `bcb812b9001ea0e47cd2571e2ed3209c450cf84f`.
 
-The amendment defines `scanSequence` as the logical wake-up identity for repeated caught-up scans at one unchanged committed boundary.
+Delivered:
+
+- required non-negative `scanSequence` in `ScanPhaseMessageV1` and canonical scan ID;
+- sequence `0` for initial and post-finalize scans;
+- sequence `+1` for a caught-up successor at one unchanged boundary;
+- exact retry and stale-lease identity preservation;
+- strict invalid-sequence and changed-identity rejection;
+- exact runtime export/restore retention;
+- unchanged commit and finalize identities.
+
+Retained CI evidence includes workflow guard, lint, type-check, complete unit suite, clean migration sequence, application build, and browser smoke.
 
 ## Active R2b2 work
 
-R2b2 is **active and incomplete** under the controlling plan and repeated-scan identity amendment.
+R2b2 is **active and incomplete**.
 
-### R2b2-B0 implementation — Scan sequence messages
+### R2b2-B1 — Fixture execution and scan
 
-Status: **implementation and validation passed in PR #1090; merge pending**.
+Status: **implementation and validation passed in PR #1091; merge pending**.
 
 Delivered on the branch:
 
-- required non-negative `scanSequence` on `ScanPhaseMessageV1`;
-- sequence included in canonical scan ID;
-- sequence `0` canonical for initial and post-finalize scans;
-- separate IDs for repeated logical wake-ups at one boundary;
-- retry and stale-lease reclaim preserve the exact sequence and message ID;
-- missing, negative, fractional, unsafe, changed-ID, and unknown-field rejection;
-- commit and finalize identities unchanged;
-- complete runtime export/restore retains sequence exactly.
+- deterministic provider-neutral `FixtureExecutionAdapter` with immutable-base identity, validated head, planner estimates, normalized ranges, successor timing, counters, and bounded fault injection;
+- `PortableCollectorScanRuntime` with scheduler claim, exact boundary verification, reset detection, adaptive planning, payload/chunk construction, work staging, retry, halt, and successor selection;
+- exact initial immutable-base boundary support;
+- exact existing committed-watermark boundary support;
+- caught-up successor at the same boundary with `scanSequence + 1` and no work creation;
+- retryable transport and storage handling that preserves one scan identity;
+- single-ledger budget halt with no successor;
+- atomic work/chunk staging, current-message completion, and commit-successor outbox reservation;
+- no candidate-row writes, committed visibility, or watermark advance during scan;
+- rollback of work and payload chunks when an injected storage interruption occurs inside the scheduler-owned transaction.
 
-Retained CI evidence from run `30695168683`:
+Retained CI evidence from run `30695623746`:
 
 - workflow-surface guard passed;
 - lint passed;
@@ -121,35 +133,29 @@ Retained CI evidence from run `30695168683`:
 - application build passed;
 - browser smoke passed.
 
-The first implementation CI run failed only because three pre-existing test fixtures omitted the newly required sequence. Those fixtures were updated explicitly. No identity rule was weakened or defaulted silently.
+The first CI attempt exposed two TypeScript narrowing errors for terminal scheduler classifications. The runtime was corrected to map impossible retry/lease classifications from a persisted terminal row to `terminal_internal`. No runtime or failure contract was weakened.
 
-R2b2-B0 implementation is recorded complete only after PR #1090 merges to `main`.
-
-### R2b2-B1 — Fixture execution and scan
-
-Status: **next after PR #1090 merges**.
-
-- deterministic fixture `ExecutionAdapter`;
-- initial and committed-boundary checks;
-- R1 planner integration;
-- normalized payload and chunk staging;
-- caught-up successor using sequence `+1`;
-- retry and stale-lease identity preservation;
-- resource-halt behavior.
+R2b2-B1 is recorded complete only after PR #1091 merges to `main`.
 
 ### R2b2-C — Commit runtime
 
-- exact chunk decode and identity verification;
-- bounded candidate mutations;
-- next-commit or finalize selection;
-- duplicate and interruption convergence.
+Status: **next after PR #1091 merges**.
+
+- claim and validate the exact commit message;
+- read and verify one exact payload chunk;
+- map no more than 40 records to work-scoped candidate rows;
+- complete one commit chunk idempotently;
+- reserve the next commit or finalize successor atomically;
+- prove duplicate, retry, interruption, wrong-index, digest, and resource behavior.
 
 ### R2b2-D — Finalize runtime
 
-- full payload reconstruction and digest/count verification;
-- transaction-aware finalization;
-- committed-only visibility and next-scan reservation with sequence `0`;
-- staged, committing, and committed export/restore resumption.
+- reconstruct and verify the full normalized payload;
+- verify semantic counts, hashes, identities, and complete commit evidence;
+- call transaction-aware finalization;
+- expose rows and advance the watermark atomically;
+- reserve the next scan with sequence `0`;
+- prove staged, committing, and committed export/restore resumption.
 
 R2 remains incomplete until every R2b2 unit and the parent R2 exit suite pass and merge to `main`.
 
