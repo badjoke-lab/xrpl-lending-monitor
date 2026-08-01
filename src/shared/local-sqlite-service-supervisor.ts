@@ -89,7 +89,7 @@ export class LocalSqliteServiceSupervisorError extends Error {
 
 function requireIdentifier(value: string, name: string): string {
   const normalized = value.trim()
-  if (!normalized || !/^[A-Za-z0-9]+(?:[._:-][A-Za-z0-9]+)*$/u.test(normalized)) {
+  if (!normalized || !/^[A-Za-z0-9]+(?:[-._:][A-Za-z0-9]+)*$/u.test(normalized)) {
     throw new LocalSqliteServiceSupervisorError(
       'invalid_input',
       `${name} must be a stable identifier`,
