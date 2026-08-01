@@ -57,12 +57,16 @@ describe('R4C2 Supabase remote probe contract', () => {
       'SUPABASE_ACCESS_TOKEN',
       'SUPABASE_PROJECT_ID',
       'SUPABASE_DB_PASSWORD',
+      'working directory: `.`',
       'deploy to production: enabled',
+      'production branch: `main`',
+      'automatic branching: disabled',
       'xrpl_project_url',
       'xrpl_secret_key',
       'No Supabase dashboard interaction should be needed',
     ]) {
       expect(setup).toContain(required)
     }
+    expect(setup).not.toContain('Supabase directory: `supabase`')
   })
 })
