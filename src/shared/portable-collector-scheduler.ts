@@ -64,6 +64,7 @@ export interface PortableSchedulerOutboxSnapshot {
   currentMessageId: string
   successorMessageId: string
   successorPayloadJson: string
+  successorAvailableAt: string
   status: 'pending' | 'dispatched'
   createdAt: string
   dispatchedAt: string | null
@@ -91,6 +92,7 @@ interface SchedulerOutboxRow {
   current_message_id: string
   successor_message_id: string
   successor_payload_json: string
+  successor_available_at: string
   status: 'pending' | 'dispatched'
   created_at: string
   dispatched_at: string | null
@@ -140,6 +142,7 @@ function mapOutbox(row: SchedulerOutboxRow): PortableSchedulerOutboxSnapshot {
     currentMessageId: row.current_message_id,
     successorMessageId: row.successor_message_id,
     successorPayloadJson: row.successor_payload_json,
+    successorAvailableAt: row.successor_available_at,
     status: row.status,
     createdAt: row.created_at,
     dispatchedAt: row.dispatched_at,
@@ -294,9 +297,12 @@ export class PortableCollectorScheduler {
       const current = this.getMessage(options.messageId)
       if (!current) throw new Error(`scheduler message not found: ${options.messageId}`)
       if (current.status === 'completed') {
+        const existingOutbox = this.getOutbox(options.messageId)
         if (
           current.resultJson !== resultJson ||
-          current.successorMessageId !== options.successor.messageId
+          current.successorMessageId !== options.successor.messageId ||
+          existingOutbox?.successorPayloadJson !== successorPayloadJson ||
+          existingOutbox.successorAvailableAt !== successorAvailableAt
         ) {
           throw new Error(`completed scheduler message result conflict: ${options.messageId}`)
         }
@@ -309,15 +315,22 @@ export class PortableCollectorScheduler {
       this.db.run(
         `INSERT OR IGNORE INTO collector_scheduler_outbox (
            current_message_id, successor_message_id, successor_payload_json,
-           status, created_at, dispatched_at
-         ) VALUES (?, ?, ?, 'pending', ?, NULL)`,
-        [options.messageId, options.successor.messageId, successorPayloadJson, now],
+           successor_available_at, status, created_at, dispatched_at
+         ) VALUES (?, ?, ?, ?, 'pending', ?, NULL)`,
+        [
+          options.messageId,
+          options.successor.messageId,
+          successorPayloadJson,
+          successorAvailableAt,
+          now,
+        ],
       )
       const outbox = this.getOutbox(options.messageId)
       if (
         !outbox ||
         outbox.successorMessageId !== options.successor.messageId ||
-        outbox.successorPayloadJson !== successorPayloadJson
+        outbox.successorPayloadJson !== successorPayloadJson ||
+        outbox.successorAvailableAt !== successorAvailableAt
       ) {
         throw new Error(`scheduler successor outbox conflict: ${options.messageId}`)
       }
@@ -442,7 +455,7 @@ export class PortableCollectorScheduler {
     const row = this.db.get<SchedulerOutboxRow>(
       `SELECT
          current_message_id, successor_message_id, successor_payload_json,
-         status, created_at, dispatched_at
+         successor_available_at, status, created_at, dispatched_at
        FROM collector_scheduler_outbox
        WHERE current_message_id = ?`,
       [currentMessageId],
@@ -452,19 +465,14 @@ export class PortableCollectorScheduler {
 
   dispatchNextOutbox(options: {
     now: string
-    successorAvailableAt?: string
   }): PortableSchedulerOutboxSnapshot | undefined {
     const now = canonicalTimestamp(options.now, 'now')
-    const successorAvailableAt = canonicalTimestamp(
-      options.successorAvailableAt ?? now,
-      'successorAvailableAt',
-    )
 
     return this.db.transaction(() => {
       const row = this.db.get<SchedulerOutboxRow>(
         `SELECT
            current_message_id, successor_message_id, successor_payload_json,
-           status, created_at, dispatched_at
+           successor_available_at, status, created_at, dispatched_at
          FROM collector_scheduler_outbox
          WHERE status = 'pending'
          ORDER BY created_at, current_message_id
@@ -472,7 +480,10 @@ export class PortableCollectorScheduler {
       )
       if (!row) return undefined
       const successor = parsePortablePhaseMessage(row.successor_payload_json)
-      this.enqueue(successor, { availableAt: successorAvailableAt, createdAt: now })
+      this.enqueue(successor, {
+        availableAt: row.successor_available_at,
+        createdAt: now,
+      })
       const dispatched = this.db.run(
         `UPDATE collector_scheduler_outbox
          SET status = 'dispatched', dispatched_at = ?
