@@ -17,6 +17,7 @@ The public read surface remains a production test surface backed by the last ver
 - R2b contract: [`ops/r2b-normalized-payload-phase-runtime-2026-08-01.md`](ops/r2b-normalized-payload-phase-runtime-2026-08-01.md)
 - Active R2b2 plan: [`ops/r2b2-bounded-phase-runtime-plan-2026-08-01.md`](ops/r2b2-bounded-phase-runtime-plan-2026-08-01.md)
 - Repeated-scan identity amendment: [`ops/r2-scan-sequence-amendment-2026-08-01.md`](ops/r2-scan-sequence-amendment-2026-08-01.md)
+- Candidate identity persistence amendment: [`ops/r2b2-candidate-identity-persistence-amendment-2026-08-01.md`](ops/r2b2-candidate-identity-persistence-amendment-2026-08-01.md)
 - Runtime invariants: [`history-runtime-contract.md`](history-runtime-contract.md)
 - Resource gates: [`resource-envelope.md`](resource-envelope.md)
 
@@ -50,67 +51,73 @@ The halted remote deployment is evidence and rollback context only. It is not an
 - R2b2-B0 repeated scan identity contract: PR #1089, merge `51238a35184f5b4815fa79c1144df92ebe8d77a4`.
 - R2b2-B0 scan-sequence implementation: PR #1090, merge `bcb812b9001ea0e47cd2571e2ed3209c450cf84f`.
 - R2b2-B1 fixture execution and scan runtime: PR #1091, merge `7d1f50fa621b650efe0aae14fa074a2aff1ed8f3`.
+- R2b2-C bounded commit runtime: PR #1092, merge `fb40f9400760b00b7d0dfb69cf4392f16e61ff08`.
+- Candidate identity persistence correction: PR #1093, merge `9fb931f78b7ea605d52cee8292728d3d48eb868a`.
 
-R2b2-B1 delivered exact immutable-base and committed-watermark boundaries, adaptive planning, normalized payload/chunk staging, caught-up sequence advancement, retry identity preservation, single-ledger resource halt, atomic staging/outbox reservation, and no early visibility or watermark advance.
+The identity correction added append-only migration `10006_portable_reference_identity.sql`, complete transaction/object/relationship identity persistence, strict identity conflict checks, and runtime export schema version 3.
 
 ## Active R2b2 work
 
 R2b2 is **active and incomplete**.
 
-### R2b2-C — Commit runtime
+### R2b2-D — Identity-complete finalize runtime
 
-Status: **implementation and validation passed in PR #1092; merge pending**.
+Status: **implementation and validation passed in PR #1094; merge pending**.
 
 Delivered on the branch:
 
-- bounded `PortableCollectorCommitRuntime` with exact scheduler claim and commit-message phase validation;
-- exact work and payload-chunk reads through typed reference-store APIs;
-- canonical chunk decoding and verification of work ID, chunk index, total count, payload digest, chunk digest, encoding, byte count, record count, and source-ledger range;
-- strict next-unresolved chunk ordering;
-- canonical record-order and duplicate-identity validation;
-- maximum 40 candidate rows and 40 recorded operations per commit phase;
-- deterministic work-scoped candidate rows using canonical value JSON;
-- idempotent commit-chunk evidence;
-- atomic current-message completion plus next-commit or finalize outbox reservation;
-- completed-message duplicate convergence without repeated mutations;
-- retryable storage rollback after injected interruption;
-- no committed visibility or watermark advancement before finalize.
+- exact finalize-message claim and work-status validation;
+- contiguous payload-chunk reconstruction with encoding, byte count, record count, work ID, chunk index, total count, chunk digest, and full payload digest checks;
+- complete commit-evidence validation for every chunk;
+- reconstruction and survival of all seven semantic classes;
+- semantic-count, network, epoch, base, ledger-range, parent-hash, final-hash, and payload identity verification;
+- complete durable candidate comparison including transaction hash, object ID, relationships, tombstone, and canonical value;
+- `finalizeWorkInTransaction` execution inside scheduler-owned completion;
+- atomic candidate visibility, watermark advancement, finalize-message completion, and next-scan outbox reservation;
+- next scan at the new boundary with `scanSequence = 0`;
+- duplicate-finalize convergence without repeated visibility or cursor movement;
+- integrity mismatch halt with no successor;
+- retryable storage interruption rollback of work state, committed visibility, watermark, message completion, and successor outbox;
+- runtime version 3 restore and finalize resumption;
+- staged, committing, and committed export/restore parity with visibility and watermark preserved exactly.
 
-Retained CI evidence from run `30696015473`:
+Retained CI evidence from run `30698259104`:
 
 - workflow-surface guard passed;
 - lint passed;
 - TypeScript type-check passed;
 - production runner bundle and configuration validation passed;
 - complete unit-test suite passed;
-- complete clean local migration sequence passed;
+- complete clean local migration sequence passed, including migration `10006`;
 - application build passed;
 - browser smoke passed.
 
-R2b2-C tests prove:
+The first two corrective CI runs exposed only:
 
-- one verified chunk reserves finalize;
-- two chunks commit in exact index order and reserve commit then finalize;
-- a non-next chunk halts without mutation;
-- payload tampering halts as `digest_mismatch`;
-- a valid 41-record chunk halts as `resource_halt`;
-- injected commit storage interruption rolls back candidate rows, commit evidence, message completion, and successor outbox while preserving the same retry identity;
-- finalize-before-visibility remains enforced.
+1. a helper type that accepted normalized candidates but not durable reference rows;
+2. a pre-existing scan fixture that had not applied migration `10006`.
 
-R2b2-C is recorded complete only after PR #1092 merges to `main`.
+Both were corrected without weakening any identity, transaction, visibility, or failure invariant.
 
-### R2b2-D — Finalize runtime
+R2b2-D is recorded complete only after PR #1094 merges to `main`.
 
-Status: **next after PR #1092 merges**.
+### Parent R2 exit suite
 
-- reconstruct and verify every payload chunk and the full seven-class normalized payload;
-- verify semantic counts, work identity, range, parent/final hashes, candidate rows, and complete commit evidence;
-- call `finalizeWorkInTransaction` inside scheduler-owned completion;
-- expose candidate rows and advance the watermark atomically;
-- reserve the next scan with sequence `0`;
-- prove duplicate finalization, integrity failures, rollback, and staged/committing/committed export-restore resumption.
+Status: **next after PR #1094 merges**.
 
-R2 remains incomplete until R2b2-D and the parent R2 exit suite pass and merge to `main`.
+A dedicated parent-contract suite must prove the whole state machine as one orchestration rather than relying only on phase-local suites:
+
+- sparse `scan -> commit -> finalize -> next scan`;
+- dense multi-chunk `scan -> commit ... -> finalize -> next scan`;
+- all seven semantic classes end to end;
+- no early visibility or cursor advance;
+- duplicate and stale-lease convergence;
+- scan, commit, and finalize interruption rollback;
+- reset, epoch, base, parent-hash, digest, and resource halts with no successor;
+- staged, committing, and committed export/restore resumption;
+- provider-neutral imports and complete ordinary CI.
+
+R2 remains incomplete until that parent exit suite passes and merges to `main` with retained evidence.
 
 ## Later gates
 
