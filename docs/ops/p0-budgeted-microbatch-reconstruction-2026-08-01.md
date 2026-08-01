@@ -11,7 +11,7 @@ Production proved that:
 - a five-minute fixed 32-ledger pass cannot match the observed Devnet arrival rate; and
 - a one-minute fixed 32-ledger pass can still exceed an invocation limit because persistence cost depends on ledger contents.
 
-A fixed ledger count is not a resource budget. The replacement collector must budget actual operations, make heavy-ledger work resumable, and remain portable across execution and storage profiles.
+A fixed ledger count is not a resource budget. The replacement collector budgets actual operations, makes heavy-ledger work resumable, and remains portable across execution and storage profiles.
 
 No hosted runtime, database, queue, scheduler, or operator console is selected by this document.
 
@@ -108,15 +108,15 @@ Maintenance and immutable publication are separate bounded operations.
 ### Commit
 
 - decode one exact staged chunk;
-- verify work, payload, chunk, range, and digest identity;
+- verify work, payload, chunk, range, digest, and complete candidate identity;
 - write no more than the configured operation and row-mutation budgets;
 - complete the chunk idempotently;
 - reserve the next commit or finalize phase atomically.
 
 ### Finalize
 
-- verify every payload and commit chunk;
-- verify counts, digests, range, hashes, network, epoch, and base identity;
+- reconstruct and verify every payload and commit chunk;
+- verify counts, digests, candidate identity, range, hashes, network, epoch, and base identity;
 - atomically commit work, advance the watermark, expose rows, complete the current message, and reserve the next scan.
 
 No candidate row is public before finalization.
@@ -196,77 +196,47 @@ Dates are planning targets, not claims of completion.
 
 Status: **complete** in PR #1081, merge `c077e7b16b8b08213bbadcc5e927bba0f9472f6c`.
 
-Exit passed: source-of-truth documents agree, contain technical rationale only, and no hosted provider is required architecture.
-
 ### R1 — Reference schema and deterministic planner
 
 Status: **complete** in PR #1082, merge `85f42e665a5e6f2f519cd372718b9c41c16b3f68`.
 
-Delivered:
-
-- portable work/chunk/candidate/watermark schema;
-- deterministic adaptive planner;
-- SQLite reference store;
-- committed-only visibility and atomic finalization;
-- exact state export and restore.
+Delivered portable work/chunk/candidate/watermark schema, deterministic adaptive planning, SQLite reference storage, committed-only visibility, atomic finalization, and exact export/restore.
 
 ### R2 — Portable scan/commit/finalize runtime
 
-Status: **active** under merged contract PR #1083, merge `bd1ac985de908bd2f01089304c202ab47d368c9b`.
+Status: **implementation and validation passed in PR #1095; merge pending**.
 
-#### R2a — Typed messages and durable scheduler
+Controlling contract: PR #1083, merge `bd1ac985de908bd2f01089304c202ab47d368c9b`.
 
-Status: **complete** in PR #1084, merge `f68aea25f6d3b973ceec79e09288fdf626f33bdc`.
+Implemented units:
 
-Delivered:
+- typed messages and durable scheduler: PR #1084, merge `f68aea25f6d3b973ceec79e09288fdf626f33bdc`;
+- normalized payload, digest, and chunks: PR #1086, merge `70f0e79632c51521ff1d6f85d445c797c515c429`;
+- transaction-aware reference store: PR #1088, merge `56dfe67cf969ac29357e7d49970da8b4027eba27`;
+- repeated scan identity contract and implementation: PRs #1089/#1090, merges `51238a35184f5b4815fa79c1144df92ebe8d77a4` and `bcb812b9001ea0e47cd2571e2ed3209c450cf84f`;
+- fixture execution and bounded scan runtime: PR #1091, merge `7d1f50fa621b650efe0aae14fa074a2aff1ed8f3`;
+- bounded commit runtime: PR #1092, merge `fb40f9400760b00b7d0dfb69cf4392f16e61ff08`;
+- complete candidate identity persistence and runtime export version 3: PR #1093, merge `9fb931f78b7ea605d52cee8292728d3d48eb868a`;
+- identity-complete finalize runtime: PR #1094, merge `d1a50ba5988da7222a32f69d1593712fc4bd7f12`.
 
-- deterministic scan/commit/finalize messages;
-- durable SQLite inbox, leases, retries, terminal failures, and timed outbox;
-- duplicate convergence;
-- complete runtime export/restore.
+Parent exit evidence in PR #1095 proves sparse and dense durable chains, all seven classes, no early visibility, exact identity, staged/committing/committed resumption, interruption rollback and retry, lease and duplicate convergence, terminal scan gates, idempotent outbox dispatch, provider-neutral imports, and complete ordinary CI.
 
-#### R2b1 — Normalized payload, digest, and chunks
+Retained validation from CI run `30698568464` passed workflow guard, lint, type-check, production runner checks, complete unit suite, clean migration sequence, build, and browser smoke.
 
-Status: **implementation and validation passed in PR #1086; merge pending**.
-
-Delivered on the branch:
-
-- seven-class `NormalizedCollectorPayloadV1`;
-- exact ledger and source-identity validation;
-- canonical SHA-256 payload and chunk digests;
-- deterministic semantic counts, ordering, duplicate rejection, and chunking;
-- 40-record and 512,000-byte reference chunk guards;
-- single-record resource halt;
-- payload-integrity and chunk-tamper rejection.
-
-Retained validation: normal CI run `30691954060` passed workflow guard, lint, type-check, complete unit suite, clean migration sequence, build, and browser smoke.
-
-R2b1 is complete only after PR #1086 merges to `main`.
-
-#### R2b2 — Bounded scan, commit, and finalize execution
-
-Status: **next after R2b1 merge**.
-
-Required work:
-
-- transaction-aware storage primitives and finalization;
-- exact work/chunk/candidate reads;
-- deterministic fixture `ExecutionAdapter`;
-- scan staging through scheduler-owned transactions;
-- bounded one-chunk commit execution;
-- full payload reconstruction and atomic finalization;
-- retry, interruption, stale lease, reset, epoch, base, hash, digest, and resource failure tests;
-- staged, committing, and committed export/restore resumption.
-
-R2 is complete only after R2b2 and every parent-contract exit test pass and merge to `main`.
+R2 is complete only after PR #1095 merges to `main`.
 
 ### R3 — Adapter and reader integration
 
-- adapter conformance;
-- committed-only current/history readers;
-- legacy compatibility;
-- bounded maintenance and publication separation;
-- cross-adapter export/restore.
+Status: **next after PR #1095 merges**.
+
+Required work:
+
+- formal adapter interfaces and conformance fixtures;
+- committed-only current and history readers over work-scoped rows;
+- legacy read compatibility and explicit cutover rules;
+- bounded maintenance and immutable publication separation;
+- cross-adapter export and restore;
+- no hosted provider selection or production mutation.
 
 ### R4 — Deployment-profile qualification
 
