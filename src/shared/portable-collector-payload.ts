@@ -146,6 +146,18 @@ const SEMANTIC_CLASS_ORDER: Record<NormalizedSemanticClassV1, number> = {
   'current-projection': 6,
 }
 
+const CANDIDATE_KEYS = [
+  'semanticClass',
+  'canonicalKey',
+  'sourceLedgerIndex',
+  'sourceLedgerHash',
+  'sourceTransactionHash',
+  'objectId',
+  'relationshipIds',
+  'isTombstone',
+  'value',
+].sort()
+
 function requiredString(value: unknown, name: string): string {
   if (typeof value !== 'string' || value.trim().length === 0) {
     throw new PortablePayloadValidationError(`${name} must be a non-empty string`)
@@ -175,6 +187,16 @@ function positiveInteger(value: unknown, name: string): number {
 
 function canonicalHash(value: unknown, name: string): string {
   return requiredString(value, name).toUpperCase()
+}
+
+function exactCandidateKeys(candidate: object): void {
+  const actual = Object.keys(candidate).sort()
+  if (
+    actual.length !== CANDIDATE_KEYS.length ||
+    actual.some((key, index) => key !== CANDIDATE_KEYS[index])
+  ) {
+    throw new PortablePayloadValidationError('candidate fields are invalid')
+  }
 }
 
 function normalizePortableJsonValue(value: unknown, path = 'value'): PortableJsonValue {
@@ -211,15 +233,29 @@ function compareCandidates(left: NormalizedCandidateV1, right: NormalizedCandida
   )
 }
 
+function requiresTransactionIdentity(semanticClass: NormalizedSemanticClassV1): boolean {
+  return semanticClass !== 'validated-ledger'
+}
+
+function requiresObjectIdentity(semanticClass: NormalizedSemanticClassV1): boolean {
+  return (
+    semanticClass === 'object-change' ||
+    semanticClass === 'loan-lifecycle' ||
+    semanticClass === 'archived-object' ||
+    semanticClass === 'current-projection'
+  )
+}
+
 function normalizeCandidate(
   candidate: NormalizedCandidateV1,
   expectedClass: NormalizedSemanticClassV1,
   startLedgerIndex: number,
   endLedgerIndex: number,
 ): NormalizedCandidateV1 {
-  if (!candidate || typeof candidate !== 'object') {
+  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
     throw new PortablePayloadValidationError('candidate must be an object')
   }
+  exactCandidateKeys(candidate)
   if (candidate.semanticClass !== expectedClass) {
     throw new PortablePayloadValidationError(
       `candidate semantic class mismatch: expected ${expectedClass}, received ${String(candidate.semanticClass)}`,
@@ -234,9 +270,39 @@ function normalizeCandidate(
       `candidate source ledger ${sourceLedgerIndex} is outside ${startLedgerIndex}-${endLedgerIndex}`,
     )
   }
-  const relationshipIds = [...new Set(candidate.relationshipIds.map((relationshipId) =>
-    requiredString(relationshipId, 'candidate.relationshipIds[]'),
-  ))].sort((left, right) => left.localeCompare(right))
+  if (!Array.isArray(candidate.relationshipIds)) {
+    throw new PortablePayloadValidationError('candidate.relationshipIds must be an array')
+  }
+  if (typeof candidate.isTombstone !== 'boolean') {
+    throw new PortablePayloadValidationError('candidate.isTombstone must be a boolean')
+  }
+
+  const sourceTransactionHash =
+    candidate.sourceTransactionHash === null
+      ? null
+      : canonicalHash(candidate.sourceTransactionHash, 'candidate.sourceTransactionHash')
+  const objectId = optionalString(candidate.objectId, 'candidate.objectId')
+  if (requiresTransactionIdentity(expectedClass) && sourceTransactionHash === null) {
+    throw new PortablePayloadValidationError(
+      `${expectedClass} candidate requires a source transaction hash`,
+    )
+  }
+  if (requiresObjectIdentity(expectedClass) && objectId === null) {
+    throw new PortablePayloadValidationError(`${expectedClass} candidate requires an object ID`)
+  }
+  if (expectedClass === 'validated-ledger' && (sourceTransactionHash !== null || objectId !== null)) {
+    throw new PortablePayloadValidationError(
+      'validated ledger identity must not contain transaction or object identity',
+    )
+  }
+
+  const relationshipIds = [
+    ...new Set(
+      candidate.relationshipIds.map((relationshipId) =>
+        requiredString(relationshipId, 'candidate.relationshipIds[]'),
+      ),
+    ),
+  ].sort((left, right) => left.localeCompare(right))
 
   return {
     semanticClass: expectedClass,
@@ -246,13 +312,10 @@ function normalizeCandidate(
       candidate.sourceLedgerHash,
       'candidate.sourceLedgerHash',
     ),
-    sourceTransactionHash:
-      candidate.sourceTransactionHash === null
-        ? null
-        : canonicalHash(candidate.sourceTransactionHash, 'candidate.sourceTransactionHash'),
-    objectId: optionalString(candidate.objectId, 'candidate.objectId'),
+    sourceTransactionHash,
+    objectId,
     relationshipIds,
-    isTombstone: Boolean(candidate.isTombstone),
+    isTombstone: candidate.isTombstone,
     value: normalizePortableJsonValue(candidate.value),
   }
 }
@@ -315,7 +378,7 @@ function validateLedgerChain(
   endLedgerIndex: number,
   expectedParentHash: string,
   finalLedgerHash: string,
-): void {
+): Map<number, string> {
   const expectedCount = endLedgerIndex - startLedgerIndex + 1
   if (ledgers.length !== expectedCount) {
     throw new PortablePayloadValidationError(
@@ -323,6 +386,7 @@ function validateLedgerChain(
     )
   }
 
+  const ledgerHashes = new Map<number, string>()
   let previousHash = expectedParentHash
   for (let offset = 0; offset < ledgers.length; offset += 1) {
     const candidate = ledgers[offset]!
@@ -343,16 +407,27 @@ function validateLedgerChain(
         `validated ledger parent hash mismatch at ${expectedLedgerIndex}`,
       )
     }
-    if (candidate.sourceTransactionHash !== null || candidate.objectId !== null) {
-      throw new PortablePayloadValidationError(
-        `validated ledger identity must not contain transaction or object identity at ${expectedLedgerIndex}`,
-      )
-    }
     previousHash = value.ledgerHash
+    ledgerHashes.set(expectedLedgerIndex, value.ledgerHash)
   }
 
   if (previousHash !== finalLedgerHash) {
     throw new PortablePayloadValidationError('final ledger hash does not match ledger evidence')
+  }
+  return ledgerHashes
+}
+
+function validateCandidateSourceHashes(
+  groups: readonly NormalizedCandidateV1[][],
+  ledgerHashes: ReadonlyMap<number, string>,
+): void {
+  for (const candidate of groups.flat()) {
+    const expectedHash = ledgerHashes.get(candidate.sourceLedgerIndex)
+    if (!expectedHash || candidate.sourceLedgerHash !== expectedHash) {
+      throw new PortablePayloadValidationError(
+        `candidate source ledger hash mismatch: ${candidate.semanticClass}/${candidate.canonicalKey}`,
+      )
+    }
   }
 }
 
@@ -367,10 +442,6 @@ function validateCandidateUniqueness(groups: readonly NormalizedCandidateV1[][])
     }
     identities.add(identity)
   }
-}
-
-function payloadDigestBody(payload: Omit<NormalizedCollectorPayloadV1, 'digest'>): unknown {
-  return payload
 }
 
 export async function sha256PortableJson(value: unknown): Promise<string> {
@@ -451,14 +522,16 @@ export async function buildNormalizedCollectorPayload(
     ),
   }
 
-  validateCandidateUniqueness(Object.values(normalizedGroups))
-  validateLedgerChain(
+  const groups = Object.values(normalizedGroups)
+  validateCandidateUniqueness(groups)
+  const ledgerHashes = validateLedgerChain(
     normalizedGroups.ledgers,
     startLedgerIndex,
     endLedgerIndex,
     expectedParentHash,
     finalLedgerHash,
   )
+  validateCandidateSourceHashes(groups, ledgerHashes)
 
   const body: Omit<NormalizedCollectorPayloadV1, 'digest'> = {
     schemaVersion: NORMALIZED_COLLECTOR_PAYLOAD_SCHEMA_VERSION,
@@ -477,7 +550,16 @@ export async function buildNormalizedCollectorPayload(
 
   return {
     ...body,
-    digest: await sha256PortableJson(payloadDigestBody(body)),
+    digest: await sha256PortableJson(body),
+  }
+}
+
+export async function verifyNormalizedCollectorPayload(
+  payload: NormalizedCollectorPayloadV1,
+): Promise<void> {
+  const rebuilt = await buildNormalizedCollectorPayload(payload)
+  if (canonicalPortableJson(rebuilt) !== canonicalPortableJson(payload)) {
+    throw new PortablePayloadValidationError('normalized collector payload integrity mismatch')
   }
 }
 
@@ -520,6 +602,7 @@ export async function buildNormalizedPayloadChunks(
     maxEncodedBytes: NORMALIZED_PAYLOAD_CHUNK_MAX_BYTES,
   },
 ): Promise<BuiltNormalizedPayloadChunkV1[]> {
+  await verifyNormalizedCollectorPayload(payload)
   const maxRecords = positiveInteger(limits.maxRecords, 'maxRecords')
   const maxEncodedBytes = positiveInteger(limits.maxEncodedBytes, 'maxEncodedBytes')
   const records = flattenPayload(payload)
@@ -601,8 +684,8 @@ export async function decodeAndVerifyNormalizedPayloadChunk(
   encoded: Uint8Array,
   expectedPayloadDigest?: string,
 ): Promise<NormalizedPayloadChunkV1> {
-  let parsed: unknown
   const encodedJson = new TextDecoder().decode(encoded)
+  let parsed: unknown
   try {
     parsed = JSON.parse(encodedJson)
   } catch {
