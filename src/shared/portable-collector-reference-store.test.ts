@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import {
   PortableCollectorReferenceStore,
+  type PortableReferenceRow,
   type PortableSqliteDatabase,
   type PortableSqliteValue,
 } from './portable-collector-reference-store'
@@ -43,10 +44,7 @@ class NodeSqliteReferenceDatabase implements PortableSqliteDatabase {
 const createdAt = '2026-08-01T07:00:00.000Z'
 const parentHash = 'A'.repeat(64)
 const finalHash = 'B'.repeat(64)
-const migration = readFileSync(
-  resolve(process.cwd(), 'migrations/10004_portable_collector_work.sql'),
-  'utf8',
-)
+const transactionHash = 'C'.repeat(64)
 
 function createReferenceDatabase(): {
   database: DatabaseSync
@@ -55,7 +53,12 @@ function createReferenceDatabase(): {
 } {
   const database = new DatabaseSync(':memory:')
   database.exec('PRAGMA foreign_keys = ON')
-  database.exec(migration)
+  for (const migration of [
+    'migrations/10004_portable_collector_work.sql',
+    'migrations/10006_portable_reference_identity.sql',
+  ]) {
+    database.exec(readFileSync(resolve(process.cwd(), migration), 'utf8'))
+  }
   const adapter = new NodeSqliteReferenceDatabase(database)
   return {
     database,
@@ -83,6 +86,22 @@ function definition(overrides: Partial<{
   }
 }
 
+function candidateRow(workId: string, sourceLedgerIndex: number): PortableReferenceRow {
+  return {
+    workId,
+    semanticClass: 'current-projection',
+    canonicalKey: 'Vault:rVault',
+    sourceLedgerIndex,
+    sourceLedgerHash: finalHash,
+    sourceTransactionHash: transactionHash,
+    objectId: 'rVault',
+    relationshipIds: ['loan:2', 'loan:1', 'loan:2'],
+    valueJson: '{"id":"rVault"}',
+    isTombstone: false,
+    createdAt,
+  }
+}
+
 function stageCompleteWork(
   store: PortableCollectorReferenceStore,
   work = definition(),
@@ -100,16 +119,7 @@ function stageCompleteWork(
     recordCount: 2,
     createdAt,
   })
-  store.stageReferenceRow({
-    workId: work.workId,
-    semanticClass: 'current-projection',
-    canonicalKey: 'Vault:rVault',
-    sourceLedgerIndex: work.plannedEndLedgerIndex,
-    sourceLedgerHash: finalHash,
-    valueJson: '{"id":"rVault"}',
-    isTombstone: false,
-    createdAt,
-  })
+  store.stageReferenceRow(candidateRow(work.workId, work.plannedEndLedgerIndex))
   store.sealScan({
     workId: work.workId,
     scannedEndLedgerIndex: work.plannedEndLedgerIndex,
@@ -148,7 +158,7 @@ describe('portable collector SQLite reference store', () => {
     database.close()
   })
 
-  it('keeps staged rows invisible until one atomic finalization advances the watermark', () => {
+  it('keeps complete identity invisible until atomic finalization', () => {
     stageCompleteWork(store)
 
     expect(store.listCommittedReferenceRows()).toEqual([])
@@ -170,14 +180,8 @@ describe('portable collector SQLite reference store', () => {
     })
     expect(store.listCommittedReferenceRows()).toEqual([
       {
-        workId: 'work-101-102',
-        semanticClass: 'current-projection',
-        canonicalKey: 'Vault:rVault',
-        sourceLedgerIndex: 102,
-        sourceLedgerHash: finalHash,
-        valueJson: '{"id":"rVault"}',
-        isTombstone: false,
-        createdAt,
+        ...candidateRow('work-101-102', 102),
+        relationshipIds: ['loan:1', 'loan:2'],
       },
     ])
 
@@ -187,6 +191,25 @@ describe('portable collector SQLite reference store', () => {
         committedAt: '2026-08-01T07:04:00.000Z',
       }),
     ).toEqual(watermark)
+  })
+
+  it('normalizes relationships and rejects changed durable identity', () => {
+    const work = definition()
+    store.beginWork(work)
+    const row = candidateRow(work.workId, 102)
+    store.stageReferenceRow(row)
+    expect(store.listReferenceRowsForWork(work.workId)[0]?.relationshipIds).toEqual([
+      'loan:1',
+      'loan:2',
+    ])
+
+    for (const changed of [
+      { ...row, sourceTransactionHash: 'D'.repeat(64) },
+      { ...row, objectId: 'rOther' },
+      { ...row, relationshipIds: ['loan:3'] },
+    ]) {
+      expect(() => store.stageReferenceRow(changed)).toThrow('reference row conflict')
+    }
   })
 
   it('does not advance a cursor or expose rows when commit chunks are incomplete', () => {
@@ -229,7 +252,7 @@ describe('portable collector SQLite reference store', () => {
     expect(store.getWatermark('devnet', 'epoch-1', 'base-100')?.ledgerIndex).toBe(102)
   })
 
-  it('exports and restores the complete state with byte-for-byte canonical parity', () => {
+  it('exports and restores complete identity with byte-for-byte parity', () => {
     stageCompleteWork(store)
     store.finalizeWork({
       workId: 'work-101-102',
@@ -253,15 +276,18 @@ describe('portable collector SQLite reference store', () => {
 
     const parsed = JSON.parse(exportedState) as {
       schemaVersion: number
-      work: Array<{ status: string }>
-      payloadChunks: Array<{ payload: { encoding: string; value: string } }>
-      watermarks: Array<{ ledger_index: number }>
+      referenceRows: Array<{
+        source_transaction_hash: string | null
+        object_id: string | null
+        relationship_ids_json: string
+      }>
     }
     expect(parsed.schemaVersion).toBe(1)
-    expect(parsed.work).toHaveLength(1)
-    expect(parsed.work[0]?.status).toBe('committed')
-    expect(parsed.payloadChunks[0]?.payload.encoding).toBe('hex')
-    expect(parsed.watermarks[0]?.ledger_index).toBe(102)
+    expect(parsed.referenceRows[0]).toMatchObject({
+      source_transaction_hash: transactionHash,
+      object_id: 'rVault',
+      relationship_ids_json: '["loan:1","loan:2"]',
+    })
   })
 
   it('refuses to restore into a non-empty target', () => {
