@@ -71,7 +71,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Fetch exact runtime commit
         run: git fetch --no-tags --depth=1 origin "${RUNTIME_SHA}"
-      - name: Deploy exact fixed runtime while Queue is paused
+      - name: Deploy exact runtime and prove one controlled delivery
         run: python scripts/deploy-fixed-runtime-for-catch-up.py
       - name: Promote continuous catch-up after three exact minute slots
         run: python scripts/start-continuous-fast-lane-catch-up.py
