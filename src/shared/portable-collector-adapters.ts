@@ -146,10 +146,21 @@ export interface PortablePublicationWorkIdentityV1 {
   epochId: string
   baseIdentity: string
   workId: string
+  previousLedgerIndex: number
+  expectedParentHash: string
   startLedgerIndex: number
   endLedgerIndex: number
   endLedgerHash: string
   payloadDigest: string
+  semanticCountsJson: string
+}
+
+export interface PortablePublicationAssetV1 {
+  schemaVersion: 1
+  works: Array<{
+    work: PortablePublicationWorkIdentityV1
+    rows: PortableReferenceRow[]
+  }>
 }
 
 export interface PortablePublicationCandidateV1 {
@@ -157,26 +168,47 @@ export interface PortablePublicationCandidateV1 {
   publicationId: string
   previousPublicationId: string | null
   works: PortablePublicationWorkIdentityV1[]
+  assetJson: string
+  assetDigest: string
   manifestJson: string
   manifestDigest: string
+  createdAt: string
 }
 
 export interface PortableVerifiedPublicationV1 extends PortablePublicationCandidateV1 {
   verifiedAt: string
 }
 
+export interface PortablePublicationWatermarkV1 {
+  schemaVersion: 1
+  streamId: string
+  publicationId: string
+  workId: string
+  ledgerIndex: number
+  ledgerHash: string
+  updatedAt: string
+}
+
 export interface PortableCollectorPublicationAdapter {
+  getPublicationWatermark(): PortablePublicationWatermarkV1 | undefined
   selectCommittedAfter(options: {
     publicationWatermarkWorkId: string | null
     limit: number
   }): PortablePublicationWorkIdentityV1[]
-  buildCandidate(works: readonly PortablePublicationWorkIdentityV1[]): Promise<PortablePublicationCandidateV1>
-  verifyCandidate(candidate: PortablePublicationCandidateV1): Promise<PortableVerifiedPublicationV1>
-  advancePublicationWatermark(publication: PortableVerifiedPublicationV1): void
+  buildCandidate(
+    works: readonly PortablePublicationWorkIdentityV1[],
+  ): Promise<PortablePublicationCandidateV1>
+  getCandidate(publicationId: string): PortablePublicationCandidateV1 | undefined
+  verifyCandidate(
+    candidate: PortablePublicationCandidateV1,
+  ): Promise<PortableVerifiedPublicationV1>
+  advancePublicationWatermark(
+    publication: PortableVerifiedPublicationV1,
+  ): PortablePublicationWatermarkV1
 }
 
 export interface PortableMaintenanceMutationV1 {
-  table: string
+  table: 'collector_payload_chunks' | 'collector_commit_chunks'
   workId: string
   reason: 'verified_publication_retention'
 }
@@ -185,14 +217,18 @@ export interface PortableMaintenancePlanV1 {
   schemaVersion: 1
   planId: string
   verifiedPublicationId: string
+  planJson: string
+  planDigest: string
   mutations: PortableMaintenanceMutationV1[]
+  createdAt: string
 }
 
 export interface PortableCollectorMaintenanceAdapter {
+  getPlan(planId: string): PortableMaintenancePlanV1 | undefined
   buildPlan(options: {
     verifiedPublication: PortableVerifiedPublicationV1
     retainCommittedWorks: number
     maxMutations: number
-  }): PortableMaintenancePlanV1
+  }): Promise<PortableMaintenancePlanV1>
   applyPlan(plan: PortableMaintenancePlanV1): { appliedMutations: number }
 }

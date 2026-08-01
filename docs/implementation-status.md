@@ -8,7 +8,7 @@ XRPL Lending Monitor is **not formally released**.
 
 The retired fixed-32-ledger recovery halted on a content-dependent Worker subrequest limit. The successor chain is absent, terminal lag was `56,740`, Worker Cron is empty, and no stabilization qualification or 24-hour soak is active.
 
-The public read surface remains a production test surface backed by the last verified immutable base plus committed legacy live data. Mainnet remains disabled. The portable runtime, reader, mappers, and shadow comparator are not connected to a hosted deployment or public route.
+The public read surface remains a production test surface backed by the last verified immutable base plus committed legacy live data. Mainnet remains disabled. The portable runtime, reader, mappers, shadow comparator, publication adapter, and maintenance adapter are not connected to a hosted deployment or public route.
 
 ## Controlling documents
 
@@ -17,6 +17,7 @@ The public read surface remains a production test surface backed by the last ver
 - R3A evidence: [`ops/r3a-adapter-conformance-evidence-2026-08-01.md`](ops/r3a-adapter-conformance-evidence-2026-08-01.md)
 - R3B evidence: [`ops/r3b-committed-reader-evidence-2026-08-01.md`](ops/r3b-committed-reader-evidence-2026-08-01.md)
 - R3C evidence: [`ops/r3c-product-mapper-shadow-evidence-2026-08-01.md`](ops/r3c-product-mapper-shadow-evidence-2026-08-01.md)
+- R3D evidence: [`ops/r3d-publication-maintenance-evidence-2026-08-01.md`](ops/r3d-publication-maintenance-evidence-2026-08-01.md)
 - Parent R2 contract: [`ops/r2-portable-runtime-contract-2026-08-01.md`](ops/r2-portable-runtime-contract-2026-08-01.md)
 - Runtime invariants: [`history-runtime-contract.md`](history-runtime-contract.md)
 - Resource gates: [`resource-envelope.md`](resource-envelope.md)
@@ -47,6 +48,7 @@ The halted remote deployment is evidence and rollback context only. It is not an
 - R3 adapter and reader contract: PR #1096, merge `d38615dc283462dee50605adb535caefb1975f0f`.
 - R3A adapter interfaces and SQLite conformance: PR #1097, merge `741f4ac24396dd21ae100b963ea439782b1696be`.
 - R3B committed generic reader: PR #1098, merge `fa04ea280525e7c93bf13dd1b8debbfcf78193af`.
+- R3C product mappers and shadow compatibility: PR #1099, merge `e7bcedcf3f597e765da42098a89683e1ba62cd68`.
 
 ## R2 completion
 
@@ -58,65 +60,69 @@ R2 and R2b2 are complete on `main`. The retained suites prove sparse and dense d
 
 Status: **complete on `main`** in PR #1097, merge `741f4ac24396dd21ae100b963ea439782b1696be`.
 
-Final R3A CI run `30699572665` passed workflow guard, lint, type-check, runner checks, complete unit suite, clean migrations, build, and browser smoke.
-
 ### R3B — Committed generic reader
 
 Status: **complete on `main`** in PR #1098, merge `fa04ea280525e7c93bf13dd1b8debbfcf78193af`.
 
-Delivered immutable read fences, latest exact lookup, deterministic semantic/range/relationship queries, source/query/order/fence-bound SHA-256 cursors, strict committed-row integrity, and staged-row exclusion. Final R3B CI run `30700038673` passed the complete ordinary CI suite.
-
 ### R3C — Product mappers and shadow compatibility
 
-Status: **implementation and validation passed in PR #1099; merge pending**.
+Status: **complete on `main`** in PR #1099, merge `e7bcedcf3f597e765da42098a89683e1ba62cd68`.
 
-Delivered on the branch:
-
-- strict versioned mappers for all seven portable semantic classes;
-- complete work, ledger, transaction, object, relationship, tombstone, and creation provenance on every product record;
-- class-specific value and identity verification;
-- explicit present and deleted current-projection products without invented tombstone values;
-- `legacy_only` and `shadow_compare` modes only;
-- unchanged legacy response as the sole authority in both modes;
-- separately fenced portable snapshots used only for bounded comparison evidence;
-- deterministic canonical SHA-256 digests, record counts, and first mismatch index;
-- explicit `match`, `mismatch`, `portable_error`, and `skipped_limit` evidence;
-- no portable rows mixed into legacy responses;
-- no portable-primary or portable-only implementation.
-
-The mapper suite proves all seven successful mappings and transaction, object, ledger, class, and canonical-value rejection. The shadow suite proves that `legacy_only` never invokes portable reads, matching and mismatching evidence remains deterministic, portable failures do not alter legacy responses, and oversized pages skip before portable execution.
-
-Retained CI evidence from run `30700338086`:
-
-- workflow-surface guard passed;
-- lint passed;
-- TypeScript type-check passed;
-- production runner bundle and configuration validation passed;
-- complete unit-test suite passed;
-- complete clean local migration sequence passed, including migration `10006`;
-- application build passed;
-- browser smoke passed.
-
-R3C is recorded complete only after PR #1099 merges to `main`.
+Delivered seven strict portable product mappers, complete provenance, `legacy_only` and `shadow_compare` modes, deterministic bounded comparison evidence, and no public authority change.
 
 ### R3D — Publication and maintenance separation
 
-Status: **next after PR #1099 merges**.
+Status: **implementation and validation passed in PR #1100; merge pending**.
+
+Delivered on the branch:
+
+- migration `10007_portable_publication_maintenance.sql`;
+- independent durable publication candidates, ordered work membership, publication watermarks, maintenance plans, and maintenance mutations;
+- committed-only contiguous publication selection for one network, epoch, base, and stream;
+- canonical immutable assets containing complete work identities and committed reference rows;
+- SHA-256 asset, manifest, publication, and maintenance-plan identities;
+- candidate persistence without publication-watermark movement;
+- independent candidate reopen, asset rebuild, and digest verification;
+- verified-only publication-watermark advancement;
+- unchanged collection watermark throughout publication and maintenance;
+- publication chaining from the stored publication watermark;
+- bounded oldest-first payload and commit chunk compaction after independently verified publication only;
+- retention of work, committed reference rows, collection watermark, publication candidate, and publication watermark;
+- idempotent candidate creation, watermark advancement, and maintenance replay;
+- tamper, stale-watermark, changed-identity, and unverified-publication rejection.
+
+Latest validated head: `199497d73774fd739f37c65e4771b5a4ad9b460a`.
+
+CI run `30701236573` passed:
+
+- workflow-surface guard;
+- lint;
+- D1 headroom and live-cutover shell syntax checks;
+- canonical production base identity validation;
+- TypeScript type-check;
+- production runner bundle and configuration validation;
+- complete unit-test suite;
+- complete clean local migration sequence, including migration `10007`;
+- application build;
+- browser smoke.
+
+R3D is recorded complete only after PR #1100 merges to `main`.
+
+### R3E — Cross-adapter export, restore, and parent R3 exit
+
+Status: **next after PR #1100 merges**.
 
 Required work:
 
-- deterministic committed-only publication selection;
-- immutable publication candidates and canonical manifests;
-- independent reopen and digest verification;
-- publication-watermark advancement after verification only;
-- collection-watermark independence;
-- maintenance authorization only for verified publication coverage;
-- bounded replay-safe maintenance plans;
-- no remote write.
-
-### R3E
-
-R3E proves canonical cross-adapter export/restore, reader fence/cursor behavior after restore, publication and maintenance state transfer, and the parent R3 exit suite.
+- canonical complete-state export including collection, scheduler, publication, and maintenance state;
+- empty-target restore through adapter boundaries;
+- exact state parity after restore;
+- committed reader fence and query parity after restore;
+- source-bound cursor rejection or deterministic continuation according to the restored fence contract;
+- publication candidate, verified status, publication watermark, maintenance plan, and applied-mutation parity;
+- staged, committing, committed, published, and maintained state transfer cases;
+- complete parent R3 conformance suite;
+- no hosted provider selection or production mutation.
 
 R3 remains local and provider-neutral. It does not select Cloudflare or another hosted profile and does not mutate production.
 
@@ -151,6 +157,6 @@ Pass fixed 24-hour and seven-day evidence windows before reopening formal Devnet
 - Do not mix portable and legacy reader sources inside one response.
 - Do not silently fall back after integrity or identity failure.
 - Do not expose the portable reader through public routes before an explicit cutover gate.
-- Do not implement portable-primary or portable-only mode in R3C.
+- Do not implement portable-primary or portable-only mode during R3.
 - Do not make a provider dashboard, local terminal, or paid runtime dependency part of routine recovery.
 - Do not call a theoretical no-cost projection an operating result.
