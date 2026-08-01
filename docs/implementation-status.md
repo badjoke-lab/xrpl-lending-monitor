@@ -85,39 +85,57 @@ Delivered:
 
 Retained CI evidence from runs `30694527924` and `30694653827` includes successful workflow guard, lint, type-check, complete unit suite, clean migration sequence, application build, and browser smoke.
 
+### R2b2-B0 contract — Repeated scan identity
+
+Complete in PR #1089, merge `51238a35184f5b4815fa79c1144df92ebe8d77a4`.
+
+The amendment defines `scanSequence` as the logical wake-up identity for repeated caught-up scans at one unchanged committed boundary.
+
 ## Active R2b2 work
 
 R2b2 is **active and incomplete** under the controlling plan and repeated-scan identity amendment.
 
-### R2b2-B0 — Repeated scan identity
+### R2b2-B0 implementation — Scan sequence messages
 
-Status: **contract correction active; implementation follows after merge**.
+Status: **implementation and validation passed in PR #1090; merge pending**.
 
-Technical finding:
+Delivered on the branch:
 
-- the durable scheduler treats a message ID and its `available_at` as immutable;
-- a caught-up scan must schedule another logical wake-up from the same ledger/hash boundary;
-- the existing scan ID omitted a wake-up sequence, so reusing it at a later time would conflict with the completed message;
-- delivery-attempt count cannot be used because retry and stale-lease reclaim must preserve one semantic ID.
+- required non-negative `scanSequence` on `ScanPhaseMessageV1`;
+- sequence included in canonical scan ID;
+- sequence `0` canonical for initial and post-finalize scans;
+- separate IDs for repeated logical wake-ups at one boundary;
+- retry and stale-lease reclaim preserve the exact sequence and message ID;
+- missing, negative, fractional, unsafe, changed-ID, and unknown-field rejection;
+- commit and finalize identities unchanged;
+- complete runtime export/restore retains sequence exactly.
 
-Controlling correction:
+Retained CI evidence from run `30695168683`:
 
-- add non-negative `scanSequence` to `ScanPhaseMessageV1` and canonical scan ID;
-- use sequence `0` for initial and post-finalize scans;
-- use current sequence `+ 1` only for caught-up successors at the same boundary;
-- preserve the exact sequence and ID for retry, duplicate delivery, and stale-lease recovery;
-- reject missing, negative, fractional, unsafe, and unknown sequence values;
-- leave commit and finalize identities unchanged.
+- workflow-surface guard passed;
+- lint passed;
+- TypeScript type-check passed;
+- production runner bundle and configuration validation passed;
+- complete unit-test suite passed;
+- complete clean local migration sequence passed;
+- application build passed;
+- browser smoke passed.
+
+The first implementation CI run failed only because three pre-existing test fixtures omitted the newly required sequence. Those fixtures were updated explicitly. No identity rule was weakened or defaulted silently.
+
+R2b2-B0 implementation is recorded complete only after PR #1090 merges to `main`.
 
 ### R2b2-B1 — Fixture execution and scan
 
-Status: **next after R2b2-B0 contract and message implementation merge**.
+Status: **next after PR #1090 merges**.
 
 - deterministic fixture `ExecutionAdapter`;
 - initial and committed-boundary checks;
 - R1 planner integration;
 - normalized payload and chunk staging;
-- caught-up successor and resource-halt behavior.
+- caught-up successor using sequence `+1`;
+- retry and stale-lease identity preservation;
+- resource-halt behavior.
 
 ### R2b2-C — Commit runtime
 
@@ -130,7 +148,7 @@ Status: **next after R2b2-B0 contract and message implementation merge**.
 
 - full payload reconstruction and digest/count verification;
 - transaction-aware finalization;
-- committed-only visibility and next-scan reservation;
+- committed-only visibility and next-scan reservation with sequence `0`;
 - staged, committing, and committed export/restore resumption.
 
 R2 remains incomplete until every R2b2 unit and the parent R2 exit suite pass and merge to `main`.

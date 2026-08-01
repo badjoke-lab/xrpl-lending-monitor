@@ -8,6 +8,7 @@ import {
   buildCommitPhaseMessage,
   buildFinalizePhaseMessage,
   buildScanPhaseMessage,
+  parsePortablePhaseMessage,
 } from './portable-collector-messages'
 import {
   exportPortableCollectorRuntimeState,
@@ -83,6 +84,7 @@ const scan = buildScanPhaseMessage({
   baseIdentity: 'base-100',
   expectedPreviousLedgerIndex: 100,
   expectedPreviousLedgerHash: 'A'.repeat(64),
+  scanSequence: 3,
 })
 const commit = buildCommitPhaseMessage({ workId: 'work-101', chunkIndex: 0 })
 const finalize = buildFinalizePhaseMessage({ workId: 'work-other' })
@@ -121,6 +123,15 @@ describe('portable collector complete runtime state', () => {
     restorePortableCollectorRuntimeState(target.adapter, exportedState)
 
     expect(exportPortableCollectorRuntimeState(target.adapter)).toBe(exportedState)
+    const restoredScan = target.scheduler.getMessage(scan.messageId)
+    expect(restoredScan).toMatchObject({
+      status: 'completed',
+      attemptCount: 1,
+    })
+    expect(parsePortablePhaseMessage(restoredScan!.payloadJson)).toMatchObject({
+      messageId: scan.messageId,
+      scanSequence: 3,
+    })
     expect(target.scheduler.getMessage(finalize.messageId)).toMatchObject({
       status: 'leased',
       leaseOwner: 'worker-b',
