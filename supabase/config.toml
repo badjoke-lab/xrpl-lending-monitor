@@ -1,0 +1,4 @@
+project_id = "xrpl-lending-monitor"
+
+[functions.xrpl-collector-tick]
+verify_jwt = false
