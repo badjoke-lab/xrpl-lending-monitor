@@ -60,6 +60,7 @@ const hash101 = 'B'.repeat(64)
 const hash102 = 'C'.repeat(64)
 const hash103 = 'D'.repeat(64)
 const hash104 = 'E'.repeat(64)
+const hash105 = '0'.repeat(64)
 const transactionHash = 'F'.repeat(64)
 
 function createDatabase() {
@@ -317,11 +318,11 @@ async function seedCompleteSource() {
   })
   stageWork({
     storage: state.storage,
-    workId: 'work-104-committing',
-    previousLedgerIndex: 103,
-    expectedParentHash: hash103,
-    endLedgerIndex: 104,
-    finalLedgerHash: hash104,
+    workId: 'work-105-committing',
+    previousLedgerIndex: 104,
+    expectedParentHash: hash104,
+    endLedgerIndex: 105,
+    finalLedgerHash: hash105,
     timestamp: '2026-08-01T18:31:00.000Z',
     completeCommit: true,
   })
@@ -359,7 +360,7 @@ describe('R3E complete portable state transfer', () => {
     expect(targetTransfer.exportCompleteState()).toBe(exported)
 
     expect(target.storage.getWork('work-104-staged')?.status).toBe('staged')
-    expect(target.storage.getWork('work-104-committing')?.status).toBe('committing')
+    expect(target.storage.getWork('work-105-committing')?.status).toBe('committing')
     expect(target.storage.getWork('work-101')?.status).toBe('committed')
     expect(target.storage.listPayloadChunks('work-101')).toEqual([])
     expect(target.storage.listCommitChunks('work-101')).toEqual([])
