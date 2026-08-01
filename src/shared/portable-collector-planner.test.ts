@@ -131,6 +131,7 @@ describe('portable collector planner', () => {
     expect(() =>
       planPortableCollectorScan({
         ...input,
+        latestValidatedLedgerIndex: 103,
         estimates: [estimate(101), estimate(103)],
       }),
     ).toThrow('cost estimates must be contiguous')
