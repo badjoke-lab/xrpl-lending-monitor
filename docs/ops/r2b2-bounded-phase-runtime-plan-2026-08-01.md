@@ -1,8 +1,11 @@
 # R2b2 bounded phase runtime plan — 2026-08-01
 
-Status: controlling R2b2 implementation plan. R2b1, R2b2-A, R2b2-B0, and R2b2-B1 are complete on `main`. R2b2-C implementation and validation passed in PR #1092 and is pending merge. R2b2-D is next.
+Status: controlling R2b2 implementation plan. R2b1, R2b2-A, R2b2-B0, R2b2-B1, and R2b2-C are complete on `main`. The candidate identity correction is complete in PR #1093. R2b2-D implementation and validation passed in PR #1094 and is pending merge. The parent R2 exit suite is next.
 
-Controlling scan-identity amendment: [`r2-scan-sequence-amendment-2026-08-01.md`](r2-scan-sequence-amendment-2026-08-01.md).
+Controlling amendments:
+
+- [`r2-scan-sequence-amendment-2026-08-01.md`](r2-scan-sequence-amendment-2026-08-01.md)
+- [`r2b2-candidate-identity-persistence-amendment-2026-08-01.md`](r2b2-candidate-identity-persistence-amendment-2026-08-01.md)
 
 R2b2 remains local and provider-neutral. It performs no remote deployment, production mutation, provider selection, Mainnet change, recovery, or soak work.
 
@@ -28,24 +31,25 @@ Each invocation executes one bounded phase. Candidate rows remain hidden until f
 
 The storage layer exposes transaction-aware primitives that do not issue a nested `BEGIN`:
 
-- `finalizeWorkInTransaction` performs final guards, work commit, and watermark advancement inside the caller transaction;
+- `finalizeWorkInTransaction` performs all final guards, work commit, and watermark advancement inside the caller transaction;
 - standalone `finalizeWork` opens a transaction and delegates;
 - scan staging and commit methods are safe inside the scheduler-owned transaction;
 - one injected exception rolls back phase mutation, message completion, and successor outbox together;
 - no runtime path may call a transaction-opening store method from a scheduler mutation callback.
 
-## Required storage reads
+## Complete candidate identity
 
-The reference store provides exact typed reads for:
+Every durable candidate preserves:
 
-- complete work identity and sealed scan evidence;
-- one payload chunk by work ID and chunk index;
-- all payload chunks in index order;
-- completed commit chunks and expected counts;
-- candidate rows for one work item;
-- the committed watermark or explicit initial boundary.
+- semantic class and canonical key;
+- source ledger index and hash;
+- source transaction hash;
+- object ID;
+- canonical sorted relationship IDs;
+- tombstone state;
+- canonical value JSON.
 
-Runtime code does not issue ad hoc SQL.
+Migration `10006_portable_reference_identity.sql`, typed reads, conflict checks, commit mapping, committed-only views, and runtime export version 3 enforce this envelope.
 
 ## Scan execution
 
@@ -64,14 +68,14 @@ Caught-up scans reserve the same boundary with sequence `+1`. Retry and lease re
 
 ## Commit execution
 
-The R2b2-C commit runtime:
+The merged commit runtime:
 
 1. claims the exact `commit` message;
 2. loads exact typed work and payload-chunk snapshots;
 3. verifies work status, sealed evidence, encoding, byte count, payload digest, chunk digest, work ID, chunk index, total count, record count, source-ledger range, canonical order, and identity uniqueness;
 4. requires the message chunk to be the first unresolved chunk unless already completed;
 5. decodes no more than 40 records and records no more than 40 operations;
-6. maps each normalized record to one deterministic work-scoped candidate row with canonical value JSON;
+6. maps each normalized record to one complete work-scoped candidate identity;
 7. inserts candidate rows and completes commit evidence inside scheduler-owned completion;
 8. reserves the next commit or finalize message atomically;
 9. leaves public visibility and the watermark unchanged.
@@ -80,19 +84,20 @@ An already completed scheduler message returns its retained result and repeats n
 
 ## Finalize execution
 
-R2b2-D must:
+The R2b2-D finalize runtime:
 
-1. claim the exact `finalize` message;
-2. read work, all payload chunks, commit evidence, and work-scoped candidate rows;
-3. verify work is sealed and every expected payload/commit chunk exists;
-4. decode chunks in exact contiguous index order and verify encoding, byte/record counts, total count, per-chunk digest, and one full payload digest;
-5. reconstruct all seven semantic groups;
-6. rebuild the normalized payload and verify semantic counts, work ID, network, epoch, base, range, parent boundary, final hash, and candidate rows;
-7. build the deterministic next scan from the new committed boundary with `scanSequence = 0`;
-8. call `completeWithSuccessor` with a mutation callback that invokes `finalizeWorkInTransaction`;
-9. commit work visibility, watermark advancement, finalize-message completion, and next-scan outbox atomically.
+1. claims the exact `finalize` message;
+2. reads work, all payload chunks, commit evidence, and work-scoped candidate rows;
+3. verifies work is sealed and every expected payload and commit chunk exists;
+4. decodes chunks in exact contiguous index order and verifies encoding, byte and record counts, total count, per-chunk digest, and full payload digest;
+5. reconstructs all seven semantic groups;
+6. rebuilds the normalized payload and verifies semantic counts, work ID, network, epoch, base, range, parent boundary, and final hash;
+7. compares every durable candidate field to the verified normalized candidate;
+8. builds the deterministic next scan from the new committed boundary with `scanSequence = 0`;
+9. calls `completeWithSuccessor` with a mutation callback that invokes `finalizeWorkInTransaction`;
+10. commits work visibility, watermark advancement, finalize-message completion, and next-scan outbox atomically.
 
-A duplicate finalize moves neither work nor watermark twice. Any integrity mismatch halts with no successor. Retryable storage interruption preserves the exact finalize identity and rolls back every visibility/watermark/outbox mutation.
+A duplicate finalize moves neither work nor watermark twice. Any integrity mismatch halts with no successor. Retryable storage interruption preserves the exact finalize identity and rolls back every visibility, watermark, message, and outbox mutation.
 
 ## Runtime result and failure handling
 
@@ -123,55 +128,51 @@ Implementation complete in PR #1090, merge `bcb812b9001ea0e47cd2571e2ed3209c450c
 
 Complete in PR #1091, merge `7d1f50fa621b650efe0aae14fa074a2aff1ed8f3`.
 
-Delivered exact base/watermark boundary checks, adaptive scan planning, deterministic payload staging, caught-up sequence advancement, retry identity preservation, resource halt, rollback, and no early visibility.
-
 ### R2b2-C — Commit runtime
 
-Status: **implementation and validation passed in PR #1092; merge pending**.
+Complete in PR #1092, merge `fb40f9400760b00b7d0dfb69cf4392f16e61ff08`.
 
-Delivered:
+### Candidate identity persistence correction
 
-- exact work/chunk decode and integrity verification;
-- strict first-unresolved chunk ordering;
-- bounded 40-row and 40-operation candidate mutations;
-- deterministic candidate-row mapping and commit evidence;
-- atomic next-commit or finalize successor selection;
-- completed-message duplicate convergence;
-- wrong-index, digest-tamper, 41-record resource-halt, and storage-interruption rollback tests;
-- no public visibility or watermark advancement before finalize.
+Complete in PR #1093, merge `9fb931f78b7ea605d52cee8292728d3d48eb868a`.
 
-Retained validation from CI run `30696015473` passed workflow guard, lint, type-check, production runner checks, complete unit suite, clean migration sequence, application build, and browser smoke.
+Delivered the append-only identity migration, complete durable identity envelope, commit correction, and strict runtime export version 3.
 
 ### R2b2-D — Finalize runtime
 
-Status: **next after PR #1092 merges to `main`**.
+Status: **implementation and validation passed in PR #1094; merge pending**.
 
-Required work:
+Delivered:
 
 - exact full-payload reconstruction and seven-class survival verification;
-- complete semantic-count, identity, hash, candidate-row, and commit-evidence validation;
-- transaction-aware finalization;
+- complete semantic-count, network, epoch, base, range, hash, candidate, and commit-evidence validation;
+- transaction-aware finalization inside scheduler-owned completion;
 - atomic committed visibility, watermark advancement, and next-scan sequence `0` reservation;
 - duplicate-finalize convergence;
-- integrity-halt and retryable-storage rollback;
-- staged, committing, and committed export/restore resumption.
+- integrity halt and retryable-storage rollback;
+- runtime v3 finalize resumption;
+- staged, committing, and committed export/restore parity.
 
-## Exit tests
+Retained validation from CI run `30698259104` passed workflow guard, lint, type-check, production runner checks, complete unit suite, clean migration sequence, application build, and browser smoke.
 
-R2b2 is not complete until the complete repository suite proves:
+The corrective CI findings were limited to a helper type boundary and one scan fixture that had not applied migration `10006`. Neither correction weakened the runtime contract.
 
-- deterministic scan sequence identity and repeated caught-up wake-ups;
-- retry and stale-lease recovery preserve phase identity;
-- sparse scan -> commit -> finalize -> next scan;
-- dense multi-chunk commit sequence;
-- all seven semantic classes survive end to end;
+## Parent R2 exit suite
+
+Status: **next after PR #1094 merges to `main`**.
+
+A dedicated orchestration suite must prove:
+
+- sparse `scan -> commit -> finalize -> next scan`;
+- dense multi-chunk `scan -> commit ... -> finalize -> next scan`;
+- all seven semantic classes end to end;
 - no early visibility or cursor advance;
 - scan, commit, and finalize rollback after injected interruption;
-- duplicate phase and dispatch convergence;
+- retry and stale-lease recovery preserve exact phase identity;
+- duplicate phase and outbox dispatch convergence;
 - reset, epoch, base, parent-hash, digest, and resource halt with no successor;
 - staged, committing, and committed export/restore resumption;
-- transaction-aware finalize without nested SQLite transactions;
-- no provider SDK import;
+- no hosted-provider SDK import;
 - lint, type-check, complete unit suite, all migrations, build, and browser smoke.
 
-R2 is complete only after R2b2-D and all parent-contract tests pass and merge to `main` with retained evidence.
+R2 and R2b2 are complete only after that parent suite passes and merges to `main` with retained evidence.
