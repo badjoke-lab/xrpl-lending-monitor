@@ -64,24 +64,36 @@ Exit condition passed: source-of-truth documents agree, contain technical ration
 
 ### R1 — Reference schema and deterministic planner
 
-Status: **active** in Draft PR #1082.
+Status: **implementation and exit evidence passed in PR #1082; merge pending**.
 
-Implemented on the branch:
+Delivered on the branch:
 
 - implementation-neutral collector work, payload chunk, commit chunk, reference-row, and committed-watermark schema;
 - real SQLite reference storage for idempotent staging, hidden partial rows, guarded atomic finalization, cursor-parent enforcement, and deterministic export;
 - deterministic adaptive candidate planning from actual per-ledger transaction, byte, payload, and request estimates;
 - the R1 scan ceiling of 48 ledgers as a candidate ceiling rather than a persistence-safety claim;
-- sparse, dense/content-heavy, oversized-single-ledger, discontinuity, incomplete-commit, idempotent-finalize, visibility, watermark, and export tests.
+- deterministic complete-state restoration into a second empty SQLite database with canonical byte-for-byte re-export parity;
+- sparse, dense/content-heavy, oversized-single-ledger, discontinuity, incomplete-commit, idempotent-finalize, visibility, watermark, export, restore, and non-empty-restore rejection tests.
 
-Still required before R1 exit:
+Retained CI evidence from run `30690051871`:
 
-- ordinary CI success, including lint, type-check, unit tests, local migrations, build, and browser smoke;
-- retained confirmation that the new migration applies to a clean local database with the existing migration set;
-- review of migration and export invariants against the controlling contract;
-- merge of PR #1082.
+- minimal Actions workflow surface guard passed;
+- lint passed;
+- TypeScript type-check passed;
+- production runner bundle and configuration validation passed;
+- the complete unit-test suite passed;
+- the complete existing local migration sequence, including `10004_portable_collector_work.sql`, passed on a clean local database;
+- application build passed;
+- browser smoke passed.
 
-Exit: local SQLite and CI tests prove atomic finalization, committed-only visibility, deterministic replay, and full export.
+The first CI attempt exposed one discontinuity-test fixture that placed its witness beyond the declared validated head. The fixture was corrected to test an actual missing ledger inside the declared range. No planner budget or safety condition was weakened.
+
+Remaining before R1 is recorded complete on `main`:
+
+- review the final branch diff against the controlling contract;
+- merge PR #1082.
+
+Exit evidence passed: local SQLite and CI prove atomic finalization, committed-only visibility, deterministic planning and replay, complete export, and complete restore.
 
 ### R2 — Provider-neutral scan, commit, and finalize runtime
 
