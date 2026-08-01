@@ -27,6 +27,11 @@ import {
   PortableFixtureExecutionError,
 } from './portable-collector-fixture-execution'
 
+type PortableTerminalFailureClassification = Exclude<
+  PortableSchedulerFailureClassification,
+  'retryable_transport' | 'retryable_storage' | 'lease_lost'
+>
+
 export type PortableScanRuntimeResult =
   | {
       status: 'completed' | 'duplicate'
@@ -43,10 +48,7 @@ export type PortableScanRuntimeResult =
   | {
       status: 'halted'
       messageId: string
-      classification: Exclude<
-        PortableSchedulerFailureClassification,
-        'retryable_transport' | 'retryable_storage' | 'lease_lost'
-      >
+      classification: PortableTerminalFailureClassification
       errorMessage: string
     }
   | {
@@ -67,10 +69,7 @@ export interface PortableScanRuntimeExecutionOptions {
 
 class PortableScanTerminalError extends Error {
   constructor(
-    readonly classification: Exclude<
-      PortableSchedulerFailureClassification,
-      'retryable_transport' | 'retryable_storage' | 'lease_lost'
-    >,
+    readonly classification: PortableTerminalFailureClassification,
     message: string,
   ) {
     super(message)
@@ -91,6 +90,20 @@ function parseRetainedResult(resultJson: string | null): Record<string, unknown>
 
 function blockedMessage(plan: PortableBlockedScan): string {
   return `ledger ${plan.ledgerIndex} exceeds scan budgets: ${plan.exceededBudgets.join(',')}`
+}
+
+function terminalClassification(
+  classification: PortableSchedulerFailureClassification | null,
+): PortableTerminalFailureClassification {
+  if (
+    classification === null ||
+    classification === 'retryable_transport' ||
+    classification === 'retryable_storage' ||
+    classification === 'lease_lost'
+  ) {
+    return 'terminal_internal'
+  }
+  return classification
 }
 
 export class PortableCollectorScanRuntime {
@@ -120,7 +133,7 @@ export class PortableCollectorScanRuntime {
       return {
         status: 'halted',
         messageId,
-        classification: claim.snapshot.errorClassification ?? 'terminal_internal',
+        classification: terminalClassification(claim.snapshot.errorClassification),
         errorMessage: claim.snapshot.errorMessage ?? 'scheduler message is halted',
       }
     }
@@ -371,7 +384,7 @@ export class PortableCollectorScanRuntime {
     return this.failTerminal(
       message.messageId,
       options,
-      classification === 'lease_lost' ? 'terminal_internal' : classification,
+      terminalClassification(classification),
       errorMessage,
     )
   }
@@ -379,10 +392,7 @@ export class PortableCollectorScanRuntime {
   private failTerminal(
     messageId: string,
     options: PortableScanRuntimeExecutionOptions,
-    classification: Exclude<
-      PortableSchedulerFailureClassification,
-      'retryable_transport' | 'retryable_storage' | 'lease_lost'
-    >,
+    classification: PortableTerminalFailureClassification,
     errorMessage: string,
   ): PortableScanRuntimeResult {
     try {
