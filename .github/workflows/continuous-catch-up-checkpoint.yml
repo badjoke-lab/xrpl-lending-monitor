@@ -1,0 +1,90 @@
+name: Continuous catch-up checkpoint
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/continuous-catch-up-checkpoint.yml
+      - scripts/report-continuous-catch-up-checkpoint.py
+      - scripts/check-actions-workflow-allowlist.sh
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: continuous-catch-up-checkpoint
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate read-only checkpoint source
+        run: |
+          set -euo pipefail
+          python -m py_compile scripts/report-continuous-catch-up-checkpoint.py
+          python scripts/report-continuous-catch-up-checkpoint.py --validate-source-only
+
+  checkpoint:
+    if: >-
+      github.event_name == 'issue_comment' &&
+      github.event.issue.number == 1079 &&
+      github.actor == 'badjoke-lab' &&
+      github.event.comment.body == '/catch-up checkpoint'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      SCRIPT_NAME: xrpl-lending-monitor
+      QUEUE_ID: 2ae398f2edbf43749e45cd7ede77c6cd
+      DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
+      EXPECTED_WORKER_VERSION: fb27bd55-e624-439d-add2-2ed41e903c34
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Capture read-only production checkpoint
+        id: checkpoint
+        run: |
+          set +e
+          python scripts/report-continuous-catch-up-checkpoint.py
+          status=$?
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          mkdir -p continuous-catch-up-checkpoint-evidence
+          if [ ! -s continuous-catch-up-checkpoint-evidence/issue-comment.md ]; then
+            printf '## Continuous catch-up checkpoint: WORKFLOW FAILURE\n\nThe read-only checkpoint did not produce evidence. No production mutation was attempted.\n' > continuous-catch-up-checkpoint-evidence/issue-comment.md
+          fi
+          exit 0
+      - name: Post checkpoint to Issue 1079
+        if: always()
+        run: gh issue comment 1079 --repo badjoke-lab/xrpl-lending-monitor --body-file continuous-catch-up-checkpoint-evidence/issue-comment.md
+      - name: Upload checkpoint evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: continuous-catch-up-checkpoint
+          path: continuous-catch-up-checkpoint-evidence
+          if-no-files-found: error
+          retention-days: 30
+      - name: Enforce checkpoint health
+        if: always()
+        env:
+          SCRIPT_STATUS: ${{ steps.checkpoint.outputs.status }}
+        run: |
+          set -euo pipefail
+          if [ "${SCRIPT_STATUS:-1}" -ne 0 ]; then
+            exit "${SCRIPT_STATUS:-1}"
+          fi
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          result = json.loads(Path('continuous-catch-up-checkpoint-evidence/checkpoint.json').read_text())
+          if result.get('phase') == 'halted':
+              raise SystemExit('production checkpoint is halted')
+          PY
