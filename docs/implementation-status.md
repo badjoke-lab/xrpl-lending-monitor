@@ -14,7 +14,8 @@ The public read surface remains a production test surface backed by the last ver
 
 - Recovery design and schedule: [`ops/p0-budgeted-microbatch-reconstruction-2026-08-01.md`](ops/p0-budgeted-microbatch-reconstruction-2026-08-01.md)
 - Parent R2 contract: [`ops/r2-portable-runtime-contract-2026-08-01.md`](ops/r2-portable-runtime-contract-2026-08-01.md)
-- Active R2b contract: [`ops/r2b-normalized-payload-phase-runtime-2026-08-01.md`](ops/r2b-normalized-payload-phase-runtime-2026-08-01.md)
+- R2b contract: [`ops/r2b-normalized-payload-phase-runtime-2026-08-01.md`](ops/r2b-normalized-payload-phase-runtime-2026-08-01.md)
+- Active R2b2 plan: [`ops/r2b2-bounded-phase-runtime-plan-2026-08-01.md`](ops/r2b2-bounded-phase-runtime-plan-2026-08-01.md)
 - Runtime invariants: [`history-runtime-contract.md`](history-runtime-contract.md)
 - Resource gates: [`resource-envelope.md`](resource-envelope.md)
 
@@ -45,87 +46,64 @@ The halted remote deployment is evidence and rollback context only. It is not an
 
 Complete in PR #1081, merge `c077e7b16b8b08213bbadcc5e927bba0f9472f6c`.
 
-- retired the fixed-ledger-count recovery contract;
-- separated collector semantics from provider-specific execution;
-- defined storage, scheduler, execution, and publication adapter boundaries;
-- froze remote recovery until later deployment-profile qualification.
-
 ### R1 — Reference schema and deterministic planner
 
 Complete in PR #1082, merge `85f42e665a5e6f2f519cd372718b9c41c16b3f68`.
-
-- portable work, payload-chunk, commit-chunk, candidate-row, and committed-watermark schema;
-- deterministic adaptive planner with a 48-ledger candidate ceiling;
-- SQLite reference store;
-- committed-only visibility and atomic finalization;
-- canonical complete-state export and restore.
 
 ### R2a — Typed messages and durable scheduler
 
 Complete in PR #1084, merge `f68aea25f6d3b973ceec79e09288fdf626f33bdc`.
 
-- deterministic versioned scan, commit, and finalize messages;
-- durable SQLite inbox, leases, stale-lease recovery, retry, and terminal halt;
-- atomic timed successor outbox;
-- duplicate completion and dispatch convergence;
-- complete runtime export and restore, including leases and reserved successor times.
-
-## Active R2b work
-
-R2b is **not complete**. It is split into two implementation units under the merged R2b contract.
-
 ### R2b1 — Normalized payload, digest, and chunks
 
-Status: **implementation and validation passed in PR #1086; merge pending**.
+Complete in PR #1086, merge `70f0e79632c51521ff1d6f85d445c797c515c429`.
 
-Delivered on the branch:
+Delivered:
 
 - seven-class `NormalizedCollectorPayloadV1` envelope;
-- common canonical candidate identity;
-- strict portable JSON values and exact candidate fields;
-- contiguous ledger index, hash, and parent-chain validation;
-- source ledger hash binding for every semantic candidate;
-- required transaction and object identities for applicable classes;
+- strict candidate and source identity validation;
+- contiguous ledger index/hash/parent-chain validation;
 - explicit semantic counts, including zero-count groups;
-- duplicate semantic identity rejection;
-- canonical `sha256:<lowercase hex>` payload and chunk digests;
-- deterministic sorting, relationship normalization, and chunk boundaries;
-- reference limits of 40 records and 512,000 encoded bytes per chunk;
+- canonical SHA-256 payload and chunk digests;
+- deterministic sorting, duplicate rejection, and bounded chunks;
 - single-record resource halt;
-- canonical chunk decoding and tamper rejection;
-- complete-payload integrity verification before chunk construction.
+- complete-payload and encoded-chunk tamper rejection.
 
-Retained CI evidence from run `30691954060`:
+Retained CI evidence includes successful workflow guard, lint, type-check, complete unit suite, clean migration sequence, application build, and browser smoke.
 
-- workflow-surface guard passed;
-- lint passed;
-- TypeScript type-check passed;
-- production runner bundle and configuration validation passed;
-- complete unit-test suite passed;
-- complete clean local migration sequence passed;
-- application build passed;
-- browser smoke passed.
+## Active R2b2 work
 
-R2b1 tests cover all seven semantic groups, order-independent canonical digests, zero-count groups, duplicate identities, broken ledger continuity, wrong source hashes, missing applicable identities, deterministic multi-chunk output, oversized-record halt, changed payload rejection, and encoded chunk tamper rejection.
+R2b2 is **not implemented yet**. Its controlling plan is `ops/r2b2-bounded-phase-runtime-plan-2026-08-01.md` and runtime code begins only after that plan reaches `main`.
 
-R2b1 is recorded complete only after PR #1086 merges to `main`.
+### R2b2-A — Transaction-aware store
 
-### R2b2 — Bounded scan, commit, and finalize execution
+- typed work, payload-chunk, commit-chunk, candidate-row, and watermark reads;
+- `finalizeWorkInTransaction` plus the existing standalone wrapper;
+- exact rollback tests proving no nested transaction.
 
-Status: **next unit after R2b1 merge**.
+### R2b2-B — Fixture execution and scan
 
-Required work:
+- deterministic fixture `ExecutionAdapter`;
+- initial and committed-boundary checks;
+- R1 planner integration;
+- normalized payload and chunk staging;
+- caught-up and resource-halt behavior.
 
-- stage a normalized payload through the R1 work schema inside scheduler-owned transactions;
-- decode and commit one bounded chunk per commit message;
-- expose transaction-aware work finalization and remove the nested-transaction hazard;
-- finalize work, advance committed visibility, and reserve the next scan atomically;
-- implement the deterministic fixture `ExecutionAdapter`;
-- inject and verify retry, interruption, stale lease, reset, epoch, base, parent-hash, digest, and resource failures;
-- prove staged, committing, and committed export/restore resumption;
-- pass every remaining R2 and R2b exit test.
+### R2b2-C — Commit runtime
 
-R2 remains incomplete until R2b2 merges with complete retained evidence.
+- exact chunk decode and identity verification;
+- bounded candidate mutations;
+- next-commit or finalize selection;
+- duplicate and interruption convergence.
+
+### R2b2-D — Finalize runtime
+
+- full payload reconstruction and digest/count verification;
+- transaction-aware finalization;
+- committed-only visibility and next-scan reservation;
+- staged, committing, and committed export/restore resumption.
+
+R2 remains incomplete until every R2b2 unit and the parent R2 exit suite pass and merge to `main`.
 
 ## Later gates
 
