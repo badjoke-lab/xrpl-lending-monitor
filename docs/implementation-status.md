@@ -12,7 +12,9 @@ The public read surface remains a production test surface backed by the last ver
 
 ## Controlling recovery design
 
-The controlling design is [`ops/p0-budgeted-microbatch-reconstruction-2026-08-01.md`](ops/p0-budgeted-microbatch-reconstruction-2026-08-01.md).
+The controlling recovery design is [`ops/p0-budgeted-microbatch-reconstruction-2026-08-01.md`](ops/p0-budgeted-microbatch-reconstruction-2026-08-01.md).
+
+The active R2 implementation contract is [`ops/r2-portable-runtime-contract-2026-08-01.md`](ops/r2-portable-runtime-contract-2026-08-01.md).
 
 The replacement collector preserves every public and semantic requirement while separating the collector contract from any one hosted runtime:
 
@@ -64,9 +66,9 @@ Exit condition passed: source-of-truth documents agree, contain technical ration
 
 ### R1 — Reference schema and deterministic planner
 
-Status: **implementation and exit evidence passed in PR #1082; merge pending**.
+Status: **complete** in merged PR #1082 (`85f42e665a5e6f2f519cd372718b9c41c16b3f68`).
 
-Delivered on the branch:
+Delivered:
 
 - implementation-neutral collector work, payload chunk, commit chunk, reference-row, and committed-watermark schema;
 - real SQLite reference storage for idempotent staging, hidden partial rows, guarded atomic finalization, cursor-parent enforcement, and deterministic export;
@@ -75,7 +77,7 @@ Delivered on the branch:
 - deterministic complete-state restoration into a second empty SQLite database with canonical byte-for-byte re-export parity;
 - sparse, dense/content-heavy, oversized-single-ledger, discontinuity, incomplete-commit, idempotent-finalize, visibility, watermark, export, restore, and non-empty-restore rejection tests.
 
-Retained CI evidence from run `30690051871`:
+Retained CI evidence:
 
 - minimal Actions workflow surface guard passed;
 - lint passed;
@@ -88,23 +90,25 @@ Retained CI evidence from run `30690051871`:
 
 The first CI attempt exposed one discontinuity-test fixture that placed its witness beyond the declared validated head. The fixture was corrected to test an actual missing ledger inside the declared range. No planner budget or safety condition was weakened.
 
-Remaining before R1 is recorded complete on `main`:
-
-- review the final branch diff against the controlling contract;
-- merge PR #1082.
-
-Exit evidence passed: local SQLite and CI prove atomic finalization, committed-only visibility, deterministic planning and replay, complete export, and complete restore.
+Exit passed: local SQLite and CI prove atomic finalization, committed-only visibility, deterministic planning and replay, complete export, and complete restore.
 
 ### R2 — Provider-neutral scan, commit, and finalize runtime
 
-- implement typed work-phase messages independent of one queue product;
-- implement scan-only staging through `StorageAdapter`;
-- commit bounded chunks idempotently;
-- finalize atomically;
-- implement a durable local scheduler reference for retry, lease, duplicate, and successor tests;
-- preserve every semantic class and canonical identity.
+Status: **active contract phase** in `ops/r2-portable-runtime-contract-2026-08-01.md`. No R2 runtime code starts until that contract is merged to `main`.
 
-Exit: local and CI tests process sparse, dense, oversized, interrupted, retried, duplicate, reset, and parent-hash-failure fixtures without provider-specific code in the collector core.
+R2 implementation unit:
+
+- implement exact versioned `scan`, `commit`, and `finalize` messages with deterministic identities;
+- implement one normalized payload envelope containing validated ledgers, protocol events, object changes, Loan lifecycle, archived objects, balance history, and current projection mutations;
+- implement scan-only staging through `StorageAdapter`;
+- implement bounded, resumable, idempotent commit chunks;
+- implement atomic finalization and next-scan selection;
+- implement a durable SQLite scheduler reference with leases, stale-lease recovery, atomic successor outbox, and idempotent dispatch;
+- implement explicit retryable and terminal failure classifications;
+- preserve every semantic class and canonical identity;
+- keep hosted-provider SDKs, remote deployment, production mutation, and Mainnet outside R2.
+
+Exit requires all interruption, duplicate, retry, lease, reset, identity, hash, digest, export/restore, and semantic-class survival tests listed by the R2 contract, plus the complete repository CI suite.
 
 ### R3 — Adapters, overlay, maintenance, and publication separation
 
