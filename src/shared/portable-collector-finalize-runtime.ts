@@ -163,7 +163,7 @@ function groupCandidates(records: readonly NormalizedCandidateV1[]) {
   }
 }
 
-function candidateIdentity(record: Pick<NormalizedCandidateV1, 'semanticClass' | 'canonicalKey'>): string {
+function candidateIdentity(record: { semanticClass: string; canonicalKey: string }): string {
   return `${record.semanticClass}\u0000${record.canonicalKey}`
 }
 
