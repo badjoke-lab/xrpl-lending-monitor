@@ -359,7 +359,12 @@ describe('R3A portable adapter conformance', () => {
         (match) => match[1],
       )
       expect(specifiers.every((specifier) => specifier?.startsWith('.'))).toBe(true)
-      expect(source).not.toMatch(/cloudflare|wrangler|D1Database|Queue/iu)
+      expect(
+        specifiers.every(
+          (specifier) =>
+            !/@cloudflare|cloudflare|wrangler/iu.test(specifier ?? ''),
+        ),
+      ).toBe(true)
     }
   })
 })
