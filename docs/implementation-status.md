@@ -15,7 +15,7 @@ The public read surface remains a production test surface backed by the last ver
 - Recovery design and schedule: [`ops/p0-budgeted-microbatch-reconstruction-2026-08-01.md`](ops/p0-budgeted-microbatch-reconstruction-2026-08-01.md)
 - Parent R2 contract: [`ops/r2-portable-runtime-contract-2026-08-01.md`](ops/r2-portable-runtime-contract-2026-08-01.md)
 - R2b contract: [`ops/r2b-normalized-payload-phase-runtime-2026-08-01.md`](ops/r2b-normalized-payload-phase-runtime-2026-08-01.md)
-- Active R2b2 plan: [`ops/r2b2-bounded-phase-runtime-plan-2026-08-01.md`](ops/r2b2-bounded-phase-runtime-plan-2026-08-01.md)
+- R2b2 plan: [`ops/r2b2-bounded-phase-runtime-plan-2026-08-01.md`](ops/r2b2-bounded-phase-runtime-plan-2026-08-01.md)
 - Repeated-scan identity amendment: [`ops/r2-scan-sequence-amendment-2026-08-01.md`](ops/r2-scan-sequence-amendment-2026-08-01.md)
 - Candidate identity persistence amendment: [`ops/r2b2-candidate-identity-persistence-amendment-2026-08-01.md`](ops/r2b2-candidate-identity-persistence-amendment-2026-08-01.md)
 - Runtime invariants: [`history-runtime-contract.md`](history-runtime-contract.md)
@@ -53,35 +53,31 @@ The halted remote deployment is evidence and rollback context only. It is not an
 - R2b2-B1 fixture execution and scan runtime: PR #1091, merge `7d1f50fa621b650efe0aae14fa074a2aff1ed8f3`.
 - R2b2-C bounded commit runtime: PR #1092, merge `fb40f9400760b00b7d0dfb69cf4392f16e61ff08`.
 - Candidate identity persistence correction: PR #1093, merge `9fb931f78b7ea605d52cee8292728d3d48eb868a`.
+- R2b2-D identity-complete finalize runtime: PR #1094, merge `d1a50ba5988da7222a32f69d1593712fc4bd7f12`.
 
-The identity correction added append-only migration `10006_portable_reference_identity.sql`, complete transaction/object/relationship identity persistence, strict identity conflict checks, and runtime export schema version 3.
+R2b2-D delivered complete payload reconstruction, seven-class identity verification, transaction-aware finalization, atomic committed visibility and watermark advancement, next-scan sequence `0`, retry rollback, duplicate convergence, and runtime-version-3 resumption.
 
-## Active R2b2 work
+## Parent R2 exit
 
-R2b2 is **active and incomplete**.
+Status: **implementation and validation passed in PR #1095; merge pending**.
 
-### R2b2-D — Identity-complete finalize runtime
+The dedicated durable-SQLite orchestration suite proves:
 
-Status: **implementation and validation passed in PR #1094; merge pending**.
+- sparse `scan -> commit -> finalize -> next scan` with all seven semantic classes;
+- no candidate visibility or committed watermark before finalize;
+- complete transaction, object, relationship, tombstone, ledger, hash, and canonical-value identity after finalize;
+- dense multi-chunk execution with exact ordered commit messages;
+- staged, committing, and committed runtime-version-3 export/restore parity;
+- scan, commit, and finalize interruption rollback followed by completion using the exact same phase message identity;
+- fresh-lease theft rejection and stale-lease reclaim without changing message identity;
+- duplicate scan and finalize convergence;
+- idempotent outbox dispatch;
+- reset, epoch mismatch, base mismatch, stale boundary, parent-hash mismatch, and resource halt with no work, cursor, or successor;
+- provider-neutral relative imports across the portable runtime surface.
 
-Delivered on the branch:
+The parent suite runs together with retained phase-local tests that already prove message-size and schema rejection, payload and chunk tamper rejection, commit wrong-index and 41-record halts, finalize digest and semantic-count rejection, and scheduler conflict handling.
 
-- exact finalize-message claim and work-status validation;
-- contiguous payload-chunk reconstruction with encoding, byte count, record count, work ID, chunk index, total count, chunk digest, and full payload digest checks;
-- complete commit-evidence validation for every chunk;
-- reconstruction and survival of all seven semantic classes;
-- semantic-count, network, epoch, base, ledger-range, parent-hash, final-hash, and payload identity verification;
-- complete durable candidate comparison including transaction hash, object ID, relationships, tombstone, and canonical value;
-- `finalizeWorkInTransaction` execution inside scheduler-owned completion;
-- atomic candidate visibility, watermark advancement, finalize-message completion, and next-scan outbox reservation;
-- next scan at the new boundary with `scanSequence = 0`;
-- duplicate-finalize convergence without repeated visibility or cursor movement;
-- integrity mismatch halt with no successor;
-- retryable storage interruption rollback of work state, committed visibility, watermark, message completion, and successor outbox;
-- runtime version 3 restore and finalize resumption;
-- staged, committing, and committed export/restore parity with visibility and watermark preserved exactly.
-
-Retained CI evidence from run `30698259104`:
+Retained CI evidence from run `30698568464`:
 
 - workflow-surface guard passed;
 - lint passed;
@@ -92,42 +88,23 @@ Retained CI evidence from run `30698259104`:
 - application build passed;
 - browser smoke passed.
 
-The first two corrective CI runs exposed only:
+R2 and R2b2 are recorded complete only after PR #1095 merges to `main`.
 
-1. a helper type that accepted normalized candidates but not durable reference rows;
-2. a pre-existing scan fixture that had not applied migration `10006`.
-
-Both were corrected without weakening any identity, transaction, visibility, or failure invariant.
-
-R2b2-D is recorded complete only after PR #1094 merges to `main`.
-
-### Parent R2 exit suite
-
-Status: **next after PR #1094 merges**.
-
-A dedicated parent-contract suite must prove the whole state machine as one orchestration rather than relying only on phase-local suites:
-
-- sparse `scan -> commit -> finalize -> next scan`;
-- dense multi-chunk `scan -> commit ... -> finalize -> next scan`;
-- all seven semantic classes end to end;
-- no early visibility or cursor advance;
-- duplicate and stale-lease convergence;
-- scan, commit, and finalize interruption rollback;
-- reset, epoch, base, parent-hash, digest, and resource halts with no successor;
-- staged, committing, and committed export/restore resumption;
-- provider-neutral imports and complete ordinary CI.
-
-R2 remains incomplete until that parent exit suite passes and merges to `main` with retained evidence.
-
-## Later gates
+## Next phase
 
 ### R3 — Adapter and reader integration
 
-- storage and scheduler adapter conformance;
-- committed-only current/history readers;
-- legacy compatibility;
+Status: **next after PR #1095 merges**.
+
+Required work:
+
+- formal `StorageAdapter`, `SchedulerAdapter`, `ExecutionAdapter`, and `PublicationAdapter` boundaries;
+- conformance tests against the SQLite reference runtime;
+- committed-only current and history readers over the new work-scoped rows;
+- explicit legacy read compatibility and cutover rules;
 - bounded maintenance and immutable publication separation;
-- cross-adapter export and restore.
+- exact cross-adapter export and restore;
+- no hosted provider selection or production mutation.
 
 ### R4 — Deployment-profile qualification
 
