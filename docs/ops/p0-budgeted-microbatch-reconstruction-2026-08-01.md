@@ -257,9 +257,9 @@ Exit passed: source-of-truth documents agree, contain technical rationale only, 
 
 ### R1 — Reference schema and deterministic planner — 2026-08-01 to 2026-08-02
 
-Status: **implementation and exit evidence passed in PR #1082; merge pending**.
+Status: **complete** in PR #1082 (`85f42e665a5e6f2f519cd372718b9c41c16b3f68`).
 
-Delivered on the branch:
+Delivered:
 
 - implementation-neutral work, payload-chunk, commit-chunk, reference-row, and committed-visibility schema;
 - SQLite-first migration `10004_portable_collector_work.sql`;
@@ -271,7 +271,7 @@ Delivered on the branch:
 
 Retained validation:
 
-- ordinary CI run `30690051871` passed the workflow guard, lint, type-check, complete unit suite, complete local migration sequence, application build, and browser smoke;
+- the workflow guard, lint, type-check, complete unit suite, complete local migration sequence, application build, and browser smoke passed;
 - the clean local migration sequence included the new R1 migration after every existing migration;
 - incomplete commit chunks did not expose rows or advance a watermark;
 - discontinuous parent boundaries were rejected;
@@ -280,18 +280,25 @@ Retained validation:
 
 The first CI attempt exposed one invalid discontinuity fixture outside its declared validated head. The fixture was corrected to test an actual missing ledger inside the declared range. No runtime guard or acceptance condition changed.
 
-Exit evidence passed: no partial work is publicly visible, no cursor advances before finalization, deterministic planning and replay pass, and complete state can be exported and restored. R1 is recorded complete only after PR #1082 is merged to `main`.
+Exit passed: no partial work is publicly visible, no cursor advances before finalization, deterministic planning and replay pass, and complete state can be exported and restored.
 
 ### R2 — Portable scan/commit/finalize runtime — 2026-08-02 to 2026-08-03
 
-- implement typed phase messages independent of one queue product;
-- implement scan-only staging;
-- implement resumable commit chunks;
-- implement atomic finalization and successor selection;
-- implement the durable local scheduler reference;
-- preserve every semantic class and canonical identity.
+Status: **active contract phase**. The controlling unit is [`r2-portable-runtime-contract-2026-08-01.md`](r2-portable-runtime-contract-2026-08-01.md). Runtime implementation begins only after that contract is merged to `main`.
 
-Exit: local and CI tests process sparse, dense, oversized, interrupted, retried, duplicate, reset, and parent-hash-failure fixtures.
+Implementation unit:
+
+- exact versioned scan, commit, and finalize message unions with deterministic IDs;
+- one normalized payload envelope preserving all seven semantic groups;
+- scan-only staging and exact work sealing;
+- bounded resumable commit chunks;
+- atomic finalization and next-scan selection;
+- durable SQLite scheduler inbox, lease, stale-lease recovery, successor outbox, and idempotent dispatcher;
+- explicit retryable and terminal failure classifications;
+- deterministic fixture `ExecutionAdapter` with reset, identity, hash, digest, resource, and interruption injection;
+- no hosted-provider SDK or remote mutation.
+
+Exit requires every sparse, dense, oversized, interrupted, retried, duplicate, lease, outbox, reset, identity, parent-hash, digest, export/restore, and semantic-class survival test listed by the R2 contract, plus the complete repository CI suite.
 
 ### R3 — Adapter conformance, overlay, maintenance, and archive separation — 2026-08-03
 
