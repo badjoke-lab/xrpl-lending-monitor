@@ -1,10 +1,10 @@
+import type { PortableCollectorStorageAdapter } from './portable-collector-adapters'
 import type { NormalizedSemanticClassV1 } from './portable-collector-payload'
 import {
   canonicalPortableJson,
   type PortableCollectorWorkSnapshot,
   type PortableReferenceRow,
 } from './portable-collector-reference-store'
-import type { PortableCollectorStorageAdapter } from './portable-collector-adapters'
 
 const CURSOR_PREFIX = 'pcr1'
 const CURSOR_MAX_BYTES = 16_000
@@ -85,6 +85,18 @@ export class PortableCommittedReaderError extends Error {
   }
 }
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+function integrityFailure(context: string, error: unknown): never {
+  if (error instanceof PortableCommittedReaderError) throw error
+  throw new PortableCommittedReaderError(
+    'integrity_failure',
+    `${context}: ${errorMessage(error)}`,
+  )
+}
+
 function requireString(value: string, name: string): string {
   const normalized = value.trim()
   if (!normalized) {
@@ -114,6 +126,14 @@ function requireLimit(value: number | undefined): number {
   return limit
 }
 
+function requireOrder(value: 'asc' | 'desc' | undefined): 'asc' | 'desc' {
+  const order = value ?? 'asc'
+  if (order !== 'asc' && order !== 'desc') {
+    throw new PortableCommittedReaderError('invalid_query', `unknown order: ${String(order)}`)
+  }
+  return order
+}
+
 function requireSemanticClass(value: string): NormalizedSemanticClassV1 {
   if (!SEMANTIC_CLASSES.has(value as NormalizedSemanticClassV1)) {
     throw new PortableCommittedReaderError(
@@ -125,11 +145,11 @@ function requireSemanticClass(value: string): NormalizedSemanticClassV1 {
 }
 
 function canonicalHash(value: string, name: string): string {
-  const normalized = requireString(value, name).toUpperCase()
-  if (!/^[0-9A-F]+$/u.test(normalized)) {
+  const normalized = value.trim().toUpperCase()
+  if (!/^[0-9A-F]{64}$/u.test(normalized)) {
     throw new PortableCommittedReaderError(
       'integrity_failure',
-      `${name} is not a canonical hexadecimal hash`,
+      `${name} is not a canonical 64-character hexadecimal hash`,
     )
   }
   return normalized
@@ -153,33 +173,26 @@ function exactKeys(
   }
 }
 
-function bytesToBase64Url(bytes: Uint8Array): string {
-  let binary = ''
-  for (const byte of bytes) binary += String.fromCharCode(byte)
-  return btoa(binary)
-    .replaceAll('+', '-')
-    .replaceAll('/', '_')
-    .replace(/=+$/u, '')
+function bytesToHex(bytes: Uint8Array): string {
+  return [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
-function base64UrlToBytes(value: string): Uint8Array {
-  if (!/^[A-Za-z0-9_-]+$/u.test(value)) {
-    throw new PortableCommittedReaderError('invalid_cursor', 'cursor payload is not base64url')
+function hexToBytes(value: string): Uint8Array {
+  if (value.length === 0 || value.length % 2 !== 0 || !/^[0-9a-f]+$/u.test(value)) {
+    throw new PortableCommittedReaderError('invalid_cursor', 'cursor payload is not valid hex')
   }
-  const padded = value.replaceAll('-', '+').replaceAll('_', '/') +
-    '='.repeat((4 - (value.length % 4)) % 4)
-  let binary: string
-  try {
-    binary = atob(padded)
-  } catch {
-    throw new PortableCommittedReaderError('invalid_cursor', 'cursor payload is not valid base64url')
+  const bytes = new Uint8Array(value.length / 2)
+  for (let index = 0; index < bytes.length; index += 1) {
+    bytes[index] = Number.parseInt(value.slice(index * 2, index * 2 + 2), 16)
   }
-  return Uint8Array.from(binary, (character) => character.charCodeAt(0))
+  return bytes
 }
 
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
-  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))
-  return [...digest].map((byte) => byte.toString(16).padStart(2, '0')).join('')
+  const input = new ArrayBuffer(bytes.byteLength)
+  new Uint8Array(input).set(bytes)
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', input))
+  return bytesToHex(digest)
 }
 
 function parseFence(value: unknown): PortableReadFenceV1 {
@@ -200,10 +213,8 @@ function parseFence(value: unknown): PortableReadFenceV1 {
     ],
     'cursor fence',
   )
-  if (fence.schemaVersion !== 1) {
-    throw new PortableCommittedReaderError('invalid_cursor', 'unsupported cursor fence version')
-  }
   if (
+    fence.schemaVersion !== 1 ||
     typeof fence.network !== 'string' ||
     typeof fence.epochId !== 'string' ||
     typeof fence.baseIdentity !== 'string' ||
@@ -275,7 +286,7 @@ async function encodeCursor(cursor: PortableReaderCursorV1): Promise<string> {
   if (bytes.byteLength > CURSOR_MAX_BYTES) {
     throw new PortableCommittedReaderError('invalid_cursor', 'cursor payload exceeds limit')
   }
-  return `${CURSOR_PREFIX}.${bytesToBase64Url(bytes)}.${await sha256Hex(bytes)}`
+  return `${CURSOR_PREFIX}.${bytesToHex(bytes)}.${await sha256Hex(bytes)}`
 }
 
 async function decodeCursor(value: string): Promise<PortableReaderCursorV1> {
@@ -283,12 +294,11 @@ async function decodeCursor(value: string): Promise<PortableReaderCursorV1> {
   if (parts.length !== 3 || parts[0] !== CURSOR_PREFIX) {
     throw new PortableCommittedReaderError('invalid_cursor', 'cursor envelope is invalid')
   }
-  const bytes = base64UrlToBytes(parts[1] ?? '')
+  const bytes = hexToBytes(parts[1] ?? '')
   if (bytes.byteLength > CURSOR_MAX_BYTES) {
     throw new PortableCommittedReaderError('invalid_cursor', 'cursor payload exceeds limit')
   }
-  const digest = await sha256Hex(bytes)
-  if (digest !== parts[2]) {
+  if ((await sha256Hex(bytes)) !== parts[2]) {
     throw new PortableCommittedReaderError('invalid_cursor', 'cursor digest mismatch')
   }
   let raw: unknown
@@ -320,7 +330,7 @@ async function decodeCursor(value: string): Promise<PortableReaderCursorV1> {
   }
 }
 
-function compareFence(left: PortableReadFenceV1, right: PortableReadFenceV1): boolean {
+function sameFence(left: PortableReadFenceV1, right: PortableReadFenceV1): boolean {
   return canonicalPortableJson(left) === canonicalPortableJson(right)
 }
 
@@ -329,13 +339,30 @@ function compareRows(
   right: PortableReferenceRow,
   order: 'asc' | 'desc',
 ): number {
-  const direction = order === 'asc' ? 1 : -1
-  return direction * (
+  const comparison =
     left.sourceLedgerIndex - right.sourceLedgerIndex ||
     left.semanticClass.localeCompare(right.semanticClass) ||
     left.canonicalKey.localeCompare(right.canonicalKey) ||
     left.workId.localeCompare(right.workId)
-  )
+  return order === 'asc' ? comparison : -comparison
+}
+
+function validateCanonicalJson(value: string, name: string): void {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(value)
+  } catch {
+    throw new PortableCommittedReaderError(
+      'integrity_failure',
+      `${name} is not valid JSON`,
+    )
+  }
+  if (canonicalPortableJson(parsed) !== value) {
+    throw new PortableCommittedReaderError(
+      'integrity_failure',
+      `${name} is not canonical JSON`,
+    )
+  }
 }
 
 function validateRow(row: PortableReferenceRow, work: PortableCollectorWorkSnapshot): void {
@@ -345,23 +372,39 @@ function validateRow(row: PortableReferenceRow, work: PortableCollectorWorkSnaps
       `committed row has unknown semantic class: ${row.semanticClass}`,
     )
   }
-  if (work.status !== 'committed') {
+  if (
+    work.status !== 'committed' ||
+    work.committedAt === null ||
+    work.scannedEndLedgerIndex === null ||
+    work.finalLedgerHash === null
+  ) {
     throw new PortableCommittedReaderError(
       'integrity_failure',
-      `committed view exposed non-committed work: ${work.workId}`,
+      `committed view exposed incomplete work: ${work.workId}`,
     )
   }
   if (
-    work.scannedEndLedgerIndex === null ||
+    row.workId !== work.workId ||
     row.sourceLedgerIndex < work.startLedgerIndex ||
     row.sourceLedgerIndex > work.scannedEndLedgerIndex
   ) {
     throw new PortableCommittedReaderError(
       'integrity_failure',
-      `committed row is outside work range: ${row.workId}/${row.canonicalKey}`,
+      `committed row is outside work identity or range: ${row.workId}/${row.canonicalKey}`,
     )
   }
-  canonicalHash(row.sourceLedgerHash, 'sourceLedgerHash')
+  if (canonicalHash(work.finalLedgerHash, 'work finalLedgerHash') !== work.finalLedgerHash) {
+    throw new PortableCommittedReaderError(
+      'integrity_failure',
+      `work final ledger hash is not canonical: ${work.workId}`,
+    )
+  }
+  if (canonicalHash(row.sourceLedgerHash, 'sourceLedgerHash') !== row.sourceLedgerHash) {
+    throw new PortableCommittedReaderError(
+      'integrity_failure',
+      `committed row ledger hash is not canonical: ${row.canonicalKey}`,
+    )
+  }
   if (
     row.sourceTransactionHash !== null &&
     canonicalHash(row.sourceTransactionHash, 'sourceTransactionHash') !==
@@ -372,18 +415,25 @@ function validateRow(row: PortableReferenceRow, work: PortableCollectorWorkSnaps
       `committed row transaction hash is not canonical: ${row.canonicalKey}`,
     )
   }
-  const normalizedRelationships = [...new Set(row.relationshipIds)].sort((left, right) =>
+  if (!row.canonicalKey.trim() || (row.objectId !== null && !row.objectId.trim())) {
+    throw new PortableCommittedReaderError(
+      'integrity_failure',
+      `committed row contains an empty identity: ${row.canonicalKey}`,
+    )
+  }
+  const relationships = [...new Set(row.relationshipIds)].sort((left, right) =>
     left.localeCompare(right),
   )
   if (
-    normalizedRelationships.some((relationshipId) => !relationshipId.trim()) ||
-    canonicalPortableJson(normalizedRelationships) !== canonicalPortableJson(row.relationshipIds)
+    relationships.some((relationshipId) => !relationshipId.trim()) ||
+    canonicalPortableJson(relationships) !== canonicalPortableJson(row.relationshipIds)
   ) {
     throw new PortableCommittedReaderError(
       'integrity_failure',
       `committed row relationships are not canonical: ${row.canonicalKey}`,
     )
   }
+  if (row.valueJson !== null) validateCanonicalJson(row.valueJson, 'valueJson')
 }
 
 export class PortableCollectorCommittedReader {
@@ -407,47 +457,64 @@ export class PortableCollectorCommittedReader {
   }
 
   getFence(): PortableReadFenceV1 {
-    const watermark = this.storage.getWatermark(
-      this.network,
-      this.epochId,
-      this.baseIdentity,
-    )
-    if (!watermark) {
-      throw new PortableCommittedReaderError(
-        'unavailable',
-        'portable committed watermark is unavailable',
+    try {
+      const watermark = this.storage.getWatermark(
+        this.network,
+        this.epochId,
+        this.baseIdentity,
       )
-    }
-    const work = this.storage.getWork(watermark.workId)
-    if (
-      !work ||
-      work.status !== 'committed' ||
-      work.network !== this.network ||
-      work.epochId !== this.epochId ||
-      work.baseIdentity !== this.baseIdentity ||
-      work.scannedEndLedgerIndex !== watermark.ledgerIndex ||
-      work.finalLedgerHash !== watermark.ledgerHash
-    ) {
-      throw new PortableCommittedReaderError(
-        'integrity_failure',
-        'portable committed watermark does not match its work',
-      )
-    }
-    return {
-      schemaVersion: 1,
-      network: watermark.network,
-      epochId: watermark.epochId,
-      baseIdentity: watermark.baseIdentity,
-      ledgerIndex: watermark.ledgerIndex,
-      ledgerHash: canonicalHash(watermark.ledgerHash, 'watermark ledgerHash'),
-      workId: watermark.workId,
+      if (!watermark) {
+        throw new PortableCommittedReaderError(
+          'unavailable',
+          'portable committed watermark is unavailable',
+        )
+      }
+      const work = this.storage.getWork(watermark.workId)
+      if (
+        !work ||
+        work.status !== 'committed' ||
+        work.committedAt === null ||
+        work.network !== this.network ||
+        work.epochId !== this.epochId ||
+        work.baseIdentity !== this.baseIdentity ||
+        work.scannedEndLedgerIndex !== watermark.ledgerIndex ||
+        work.finalLedgerHash !== watermark.ledgerHash
+      ) {
+        throw new PortableCommittedReaderError(
+          'integrity_failure',
+          'portable committed watermark does not match its work',
+        )
+      }
+      const ledgerHash = canonicalHash(watermark.ledgerHash, 'watermark ledgerHash')
+      if (ledgerHash !== watermark.ledgerHash) {
+        throw new PortableCommittedReaderError(
+          'integrity_failure',
+          'portable committed watermark hash is not canonical',
+        )
+      }
+      return {
+        schemaVersion: 1,
+        network: watermark.network,
+        epochId: watermark.epochId,
+        baseIdentity: watermark.baseIdentity,
+        ledgerIndex: watermark.ledgerIndex,
+        ledgerHash,
+        workId: watermark.workId,
+      }
+    } catch (error) {
+      if (error instanceof PortableCommittedReaderError) throw error
+      return integrityFailure('failed to read portable committed fence', error)
     }
   }
 
   exact(options: {
     semanticClass: NormalizedSemanticClassV1
     canonicalKey: string
-  }): { source: PortableReaderSourceV1; fence: PortableReadFenceV1; row: PortableReferenceRow | null } {
+  }): {
+    source: PortableReaderSourceV1
+    fence: PortableReadFenceV1
+    row: PortableReferenceRow | null
+  } {
     const semanticClass = requireSemanticClass(options.semanticClass)
     const canonicalKey = requireString(options.canonicalKey, 'canonicalKey')
     const fence = this.getFence()
@@ -458,13 +525,13 @@ export class PortableCollectorCommittedReader {
       )
       .sort((left, right) => compareRows(left, right, 'desc'))
     return {
-      source: this.source,
+      source: structuredClone(this.source),
       fence,
       row: rows[0] ?? null,
     }
   }
 
-  listBySemanticClass(options: {
+  async listBySemanticClass(options: {
     semanticClass: NormalizedSemanticClassV1
     order?: 'asc' | 'desc'
     limit?: number
@@ -477,12 +544,12 @@ export class PortableCollectorCommittedReader {
       startLedgerIndex: null,
       endLedgerIndex: null,
       relationshipId: null,
-      order: options.order ?? 'asc',
+      order: requireOrder(options.order),
     }
     return this.page(query, requireLimit(options.limit), options.cursor)
   }
 
-  listByLedgerRange(options: {
+  async listByLedgerRange(options: {
     startLedgerIndex: number
     endLedgerIndex: number
     semanticClass?: NormalizedSemanticClassV1
@@ -490,10 +557,7 @@ export class PortableCollectorCommittedReader {
     limit?: number
     cursor?: string
   }): Promise<PortableCommittedPageV1> {
-    const startLedgerIndex = requireSafeInteger(
-      options.startLedgerIndex,
-      'startLedgerIndex',
-    )
+    const startLedgerIndex = requireSafeInteger(options.startLedgerIndex, 'startLedgerIndex')
     const endLedgerIndex = requireSafeInteger(options.endLedgerIndex, 'endLedgerIndex')
     if (endLedgerIndex < startLedgerIndex) {
       throw new PortableCommittedReaderError(
@@ -511,12 +575,12 @@ export class PortableCollectorCommittedReader {
       startLedgerIndex,
       endLedgerIndex,
       relationshipId: null,
-      order: options.order ?? 'asc',
+      order: requireOrder(options.order),
     }
     return this.page(query, requireLimit(options.limit), options.cursor)
   }
 
-  listByRelationship(options: {
+  async listByRelationship(options: {
     relationshipId: string
     semanticClass?: NormalizedSemanticClassV1
     order?: 'asc' | 'desc'
@@ -533,39 +597,48 @@ export class PortableCollectorCommittedReader {
       startLedgerIndex: null,
       endLedgerIndex: null,
       relationshipId: requireString(options.relationshipId, 'relationshipId'),
-      order: options.order ?? 'asc',
+      order: requireOrder(options.order),
     }
     return this.page(query, requireLimit(options.limit), options.cursor)
   }
 
   private rowsAtFence(fence: PortableReadFenceV1): PortableReferenceRow[] {
-    const workCache = new Map<string, PortableCollectorWorkSnapshot>()
-    const rows: PortableReferenceRow[] = []
-    for (const row of this.storage.listCommittedReferenceRows()) {
-      let work = workCache.get(row.workId)
-      if (!work) {
-        const loaded = this.storage.getWork(row.workId)
-        if (!loaded) {
-          throw new PortableCommittedReaderError(
-            'integrity_failure',
-            `committed row references missing work: ${row.workId}`,
-          )
+    try {
+      const rows = this.storage.listCommittedReferenceRows()
+      const workCache = new Map<string, PortableCollectorWorkSnapshot>()
+      const selected: PortableReferenceRow[] = []
+      for (const row of rows) {
+        let work = workCache.get(row.workId)
+        if (!work) {
+          const loaded = this.storage.getWork(row.workId)
+          if (!loaded) {
+            throw new PortableCommittedReaderError(
+              'integrity_failure',
+              `committed row references missing work: ${row.workId}`,
+            )
+          }
+          work = loaded
+          workCache.set(row.workId, work)
         }
-        work = loaded
-        workCache.set(row.workId, work)
+        if (
+          work.network !== fence.network ||
+          work.epochId !== fence.epochId ||
+          work.baseIdentity !== fence.baseIdentity
+        ) {
+          continue
+        }
+        validateRow(row, work)
+        if (
+          work.scannedEndLedgerIndex !== null &&
+          work.scannedEndLedgerIndex <= fence.ledgerIndex
+        ) {
+          selected.push(structuredClone(row))
+        }
       }
-      validateRow(row, work)
-      if (
-        work.network === fence.network &&
-        work.epochId === fence.epochId &&
-        work.baseIdentity === fence.baseIdentity &&
-        work.scannedEndLedgerIndex !== null &&
-        work.scannedEndLedgerIndex <= fence.ledgerIndex
-      ) {
-        rows.push(structuredClone(row))
-      }
+      return selected
+    } catch (error) {
+      return integrityFailure('failed to read committed portable rows', error)
     }
-    return rows
   }
 
   private async page(
@@ -583,7 +656,7 @@ export class PortableCollectorCommittedReader {
           'cursor belongs to another reader source',
         )
       }
-      if (!compareFence(cursor.fence, currentFence)) {
+      if (!sameFence(cursor.fence, currentFence)) {
         throw new PortableCommittedReaderError(
           'stale_cursor',
           'cursor read fence is no longer current',
@@ -641,7 +714,7 @@ export class PortableCollectorCommittedReader {
 
     return {
       schemaVersion: 1,
-      source: this.source,
+      source: structuredClone(this.source),
       fence: currentFence,
       rows,
       nextCursor,
