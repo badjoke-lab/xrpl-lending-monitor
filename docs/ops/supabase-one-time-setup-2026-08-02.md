@@ -19,6 +19,9 @@ Create one new Supabase project with:
 - project name: `xrpl-lending-monitor`;
 - region: `Northeast Asia (Tokyo)` / `ap-northeast-1`;
 - database password: generate a new unique strong password and save it in a password manager;
+- Data API enabled;
+- automatic grants for new tables disabled;
+- automatic RLS enabled;
 - no payment method.
 
 Wait until project health is `ACTIVE_HEALTHY`.
@@ -31,7 +34,7 @@ Open Supabase Account > Access Tokens and create one token named:
 
 `xrpl-lending-monitor-github`
 
-The token is long-lived account-level management access. Copy it once and store it only as a GitHub Actions secret.
+Use no expiration when available, otherwise the longest available period. The token is account-level management access. Copy it once and store it only as a GitHub Actions secret.
 
 ## 3. Add GitHub Actions secrets
 
@@ -45,49 +48,45 @@ Create exactly:
 - `SUPABASE_PROJECT_ID` — the Supabase project reference;
 - `SUPABASE_DB_PASSWORD` — the unique database password selected at project creation.
 
-Do not add the project secret API key to GitHub. Hosted Edge Functions receive their project URL, database URL, publishable keys, and secret keys as default environment variables.
+Do not add the project secret API key to GitHub. Hosted Edge Functions receive the project URL and service-role credentials as managed environment variables.
 
 ## 4. Connect Supabase to GitHub
 
-In Supabase Dashboard open the project deployment / GitHub integration settings and connect:
+In Supabase Dashboard open Project Settings > Integrations and configure:
 
 - repository: `badjoke-lab/xrpl-lending-monitor`;
-- production branch: `main`;
-- Supabase directory: `supabase`;
+- working directory: `.` because `supabase/` is at repository root;
 - deploy to production: enabled;
-- preview branches: disabled;
-- production data copying: disabled.
+- production branch: `main`;
+- automatic branching: disabled;
+- preview branches: unavailable and unused on Free.
 
-This integration must deploy migrations and Edge Functions from `main`. It must not create paid preview branches.
+This integration deploys new migrations and Edge Functions declared in `supabase/config.toml` from `main`. It must not create paid preview branches.
 
 ## 5. Store Cron secrets in Vault
 
-Open Project Settings > API and copy:
+Open Project Settings > API Keys and copy:
 
 - Project URL;
-- the project secret key named `default` (or the legacy `service_role` key when the new secret key UI is unavailable).
+- the project secret key named `default`, or the legacy `service_role` key only when the new secret-key UI is unavailable.
 
-Open SQL Editor and run the following after replacing both placeholders locally:
+Open Integrations > Vault > Secrets and add exactly two secrets through the Vault UI:
 
-```sql
-create extension if not exists supabase_vault with schema vault;
+### Project URL
 
-select vault.create_secret(
-  'https://YOUR_PROJECT_REF.supabase.co',
-  'xrpl_project_url',
-  'XRPL collector Edge Function base URL'
-);
+- name: `xrpl_project_url`;
+- value: the complete Project URL;
+- description: `XRPL collector Edge Function base URL`.
 
-select vault.create_secret(
-  'YOUR_PROJECT_SECRET_KEY',
-  'xrpl_secret_key',
-  'XRPL collector Cron authentication key'
-);
-```
+### Cron authentication key
+
+- name: `xrpl_secret_key`;
+- value: the project `default` secret key or legacy `service_role` key;
+- description: `XRPL collector Cron authentication key`.
+
+Do not use the publishable or anonymous key. Do not reveal the secret values in screenshots, issues, commits, pull requests, or chat.
 
 The migration deliberately fails if either named Vault secret is absent. This prevents a deployed function with an unauthenticated or broken Cron path.
-
-Do not paste the real values into the repository or any chat.
 
 ## 6. Confirm the setup without exposing secrets
 
@@ -96,8 +95,11 @@ The following non-secret facts are sufficient for handoff:
 - project created: yes;
 - project region: Tokyo;
 - project health: ACTIVE_HEALTHY;
-- GitHub integration connected to `badjoke-lab/xrpl-lending-monitor` and `main`;
+- GitHub integration connected to `badjoke-lab/xrpl-lending-monitor`;
+- working directory: `.`;
+- production branch: `main`;
 - deploy to production enabled;
+- automatic branching disabled;
 - repository secrets created: all three names present;
 - Vault secret names present: `xrpl_project_url`, `xrpl_secret_key`.
 
@@ -116,7 +118,7 @@ After this branch passes CI and merges to `main`, the Supabase GitHub integratio
 7. atomically complete or fail the tick in Postgres;
 8. expose sanitized GET health output from the function URL.
 
-The public GET endpoint reveals only collector status, validated ledger identity, timestamps, counts, and recent run results. POST requires the project secret key and is intended for the Vault-backed Cron job.
+The GET endpoint reveals only collector status, validated ledger identity, timestamps, counts, and recent run results. POST requires the project secret key and is intended for the Vault-backed Cron job.
 
 ## Remote follow-up without Supabase Dashboard
 
