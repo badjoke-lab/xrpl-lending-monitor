@@ -23,11 +23,12 @@ expected=(
   rolling-checkpoint-candidate.yml
   rolling-checkpoint-live-cutover.yml
   start-continuous-fast-lane-catch-up.yml
+  supabase-remote-probe.yml
 )
 printf '%s\n' "${expected[@]}" > "$evidence/expected-workflows.txt"
 
 if [[ "${#actual[@]}" -ne "${#expected[@]}" ]]; then
-  echo "GitHub Actions workflow count must remain exactly seven while the Queue deployment and continuous catch-up promotion workflows are armed." >&2
+  echo "GitHub Actions workflow count must remain exactly eight while the guarded Supabase deployment verifier is active." >&2
   exit 1
 fi
 
@@ -47,6 +48,7 @@ import sys
 root = Path(sys.argv[1])
 evidence = Path(sys.argv[2])
 qualification_v5 = "complete-history-12-slot-qualification-995-v5.yml"
+supabase_remote = "supabase-remote-probe.yml"
 policies = {
     "deploy-queue-minute-cadence-fix.yml": ["pull_request", "push"],
     "start-continuous-fast-lane-catch-up.yml": ["pull_request", "push"],
@@ -54,6 +56,7 @@ policies = {
     "rolling-checkpoint-live-cutover.yml": ["workflow_dispatch"],
     "read-only-production-qualification.yml": ["pull_request", "workflow_dispatch", "issue_comment"],
     qualification_v5: ["workflow_dispatch", "schedule", "pull_request"],
+    supabase_remote: ["workflow_dispatch", "push"],
 }
 parsed = {}
 
@@ -127,6 +130,34 @@ for required in (
     if required not in promotion:
         raise SystemExit(f"continuous catch-up promotion is missing fail-closed boundary: {required}")
 
+supabase = (root / supabase_remote).read_text()
+for required in (
+    "contents: read",
+    "cancel-in-progress: false",
+    "SUPABASE_ACCESS_TOKEN",
+    "SUPABASE_PROJECT_ID",
+    "SUPABASE_DB_PASSWORD",
+    "supabase link --project-ref",
+    "supabase db push --linked --yes",
+    "supabase functions deploy xrpl-collector-tick",
+    "--use-api",
+    "--no-verify-jwt",
+    "node scripts/verify-supabase-remote-probe.mjs",
+    "retention-days: 7",
+):
+    if required not in supabase:
+        raise SystemExit(f"Supabase remote workflow is missing a guarded deployment requirement: {required}")
+for forbidden in (
+    "  schedule:",
+    "pull_request_target",
+    "contents: write",
+    "issues: write",
+    "MAINNET_ENABLED: 'true'",
+    "wrangler deploy",
+):
+    if forbidden in supabase:
+        raise SystemExit(f"Supabase remote workflow contains forbidden capability: {forbidden.strip()}")
+
 scheduled = []
 for path in root.glob("*.y*ml"):
     if re.search(r"^  schedule:", path.read_text(), flags=re.MULTILINE):
@@ -138,4 +169,4 @@ if scheduled != [qualification_v5]:
     raise SystemExit(f"only the fixed qualification v5 workflow may be scheduled: {scheduled}")
 PY
 
-echo "Actions workflow allowlist passed: CI, guarded Queue deployment, guarded continuous catch-up promotion, one read-only runner, one bounded candidate builder, one manual cutover workflow, and one fixed-window qualification v5 exception."
+echo "Actions workflow allowlist passed: CI, guarded legacy recovery workflows, one read-only runner, one fixed-window qualification exception, and one guarded Supabase deployment verifier."
