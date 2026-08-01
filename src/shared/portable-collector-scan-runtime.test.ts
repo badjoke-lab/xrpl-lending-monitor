@@ -198,12 +198,13 @@ function createRuntime(
   const database = new DatabaseSync(':memory:')
   openDatabases.push(database)
   database.exec('PRAGMA foreign_keys = ON')
-  database.exec(
-    readFileSync(resolve(process.cwd(), 'migrations/10004_portable_collector_work.sql'), 'utf8'),
-  )
-  database.exec(
-    readFileSync(resolve(process.cwd(), 'migrations/10005_portable_scheduler.sql'), 'utf8'),
-  )
+  for (const migration of [
+    'migrations/10004_portable_collector_work.sql',
+    'migrations/10005_portable_scheduler.sql',
+    'migrations/10006_portable_reference_identity.sql',
+  ]) {
+    database.exec(readFileSync(resolve(process.cwd(), migration), 'utf8'))
+  }
   const db = new NodeSqliteScanRuntimeDatabase(database)
   const store = new PortableCollectorReferenceStore(db)
   const scheduler = new PortableCollectorScheduler(db)
