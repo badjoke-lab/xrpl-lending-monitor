@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+import sys
 import time
 
 MODULE_PATH = Path(__file__).with_name("start-continuous-fast-lane-catch-up.py")
@@ -44,4 +45,9 @@ def resume_queue_with_polling() -> None:
 
 MODULE.pause_queue = pause_queue_with_polling
 MODULE.resume_queue = resume_queue_with_polling
-raise SystemExit(MODULE.main() if hasattr(MODULE, "main") else MODULE.run())
+
+if "--validate-source-only" in sys.argv:
+    MODULE.save("source-validation.json", MODULE.validate_source())
+    raise SystemExit(0)
+
+raise SystemExit(MODULE.run())
