@@ -1,6 +1,6 @@
 # R4 deployment-profile qualification plan — 2026-08-01
 
-Status: controlling R4 contract. R0–R3 and R4A are complete on `main`. R4B implementation and validation passed in PR #1103 and are pending merge.
+Status: controlling R4 contract. R0–R3, R4A, and R4B are complete on `main`. R4C1 implementation and validation passed in PR #1104 and are pending merge.
 
 R4 is local and read-only. It selects no provider, creates no hosted resource, changes no billing state, deploys no collector, mutates no production data, changes no Queue or Cron, and keeps Mainnet disabled.
 
@@ -8,6 +8,7 @@ Supporting artifacts:
 
 - initial matrix: [`r4-initial-profile-matrix-2026-08-01.json`](r4-initial-profile-matrix-2026-08-01.json)
 - R4B evidence: [`r4b-profile-qualification-evaluator-evidence-2026-08-01.md`](r4b-profile-qualification-evaluator-evidence-2026-08-01.md)
+- R4C1 local SQLite evidence: [`r4c1-local-sqlite-service-evidence-2026-08-01.md`](r4c1-local-sqlite-service-evidence-2026-08-01.md)
 
 ## Decision rule
 
@@ -77,7 +78,7 @@ R4 cannot restart the retired collector, create a production scheduler, mutate p
 
 ### Conditional candidates
 
-- **Cardless self-hosted SQLite service** — closest to proven reference semantics, but continuous host, supervision, restart, network, evidence retention, automation, and throughput remain unproven.
+- **Cardless self-hosted SQLite service** — closest to the proven reference semantics; R4C1 now proves local file-backed process and scheduler recovery, but throughput, full resource envelopes, and actual always-on operations remain unresolved.
 - **Supabase Free Postgres plus pg_cron/Edge Functions** — cardless creation, exact atomic scheduler ownership, complete-state transfer, provider pausing, storage stop thresholds, WebSocket support, and throughput remain unproven.
 - **Turso Free storage plus cardless self-hosted executor** — storage is cardless and quotas fail closed, but scheduler/executor, cross-service atomicity, network interruption, archive behavior, and complete-state transfer remain unproven.
 
@@ -94,20 +95,20 @@ No profile is selected.
 
 ## Machine-readable evaluator
 
-R4B implements a deterministic evaluator with:
+R4B is complete on `main` in PR #1103, merge `683c3b65fc31a2c8ffde289b1c607b94890219de`.
+
+The evaluator provides:
 
 - exact profile ID, revision, label, and component identity;
 - canonical SHA-256 profile identity digest;
-- exactly one evidence record for each of `G1`–`G10`;
-- evidence binding to profile ID, revision, and digest;
-- `pass`, `fail`, and `unresolved` states;
-- deterministic `rejected`, `conditional_candidate`, or `qualified_candidate` classification;
-- permanent `selection: not_selected` during R4B;
+- exactly one profile-bound evidence record for each of `G1`–`G10`;
+- deterministic rejected, conditional, or qualified classification;
+- permanent `selection: not_selected` before R4E;
 - scoring prohibition while any gate fails or remains unresolved;
 - exact ten-dimension scorecards only after every gate passes;
 - canonical decision artifacts and decision digests.
 
-Changed profile identity, foreign evidence, missing or duplicate gates, incomplete scorecards, unsupported versions, extra fields, malformed timestamps, and invalid scores fail closed.
+Final R4B CI run `30703646271` passed the complete ordinary CI suite.
 
 ## Qualification scorecard
 
@@ -126,38 +127,78 @@ Only a profile passing every hard gate can receive scores from `0` to `5` for:
 
 Scoring does not select a profile. Selection belongs to R4E.
 
-## Implementation sequence
+## R4C1 — Local service-managed SQLite harness
 
-### R4A — Contract and initial matrix
+Status: **implementation and validation passed in PR #1104; merge pending**.
 
-Status: **complete** in PR #1102, merge `158087602b1bcde515f0b68eae47133bb93645ea`.
+### Delivered
 
-CI run `30703197136` passed workflow guard, lint, shell and canonical-base checks, type-check, runner checks, complete unit suite, clean migrations through `10007`, build, and browser smoke.
+Migration `10008` and the local supervisor reference implementation prove:
 
-### R4B — Machine-readable evaluator
+- idempotent initialization;
+- process generations;
+- file-backed SQLite WAL and `synchronous = FULL` persistence;
+- fresh process-lease theft rejection;
+- exact-expiry stale process-lease reclaim after database close/reopen;
+- scheduler state persistence across process restart;
+- process lease and scheduler message lease separation;
+- heartbeat persistence;
+- retryable failure with explicit restart time;
+- early restart rejection;
+- graceful stop;
+- terminal halt with no automatic restart;
+- canonical event evidence.
 
-Status: **implementation and validation passed in PR #1103; merge pending**.
+The local process lease is intentionally host-local and is not transferred through the portable cross-host complete-state envelope.
 
-Implementation head `e17020bb001d8e848a32e4fc8ac76bbdcdf6db40` passed CI run `30703462350`: workflow guard, lint, shell and base checks, type-check, runner checks, complete unit suite, clean migrations through `10007`, build, and browser smoke.
+### R4B result
 
-### R4C — Local profile harnesses
+The machine-readable R4C1 decision is:
 
-Status: **next after PR #1103 merges**.
+- `conditional_candidate`;
+- `not_selected`;
+- ineligible for scoring;
+- 7 gates passed;
+- 0 gates failed;
+- G7, G8, and G9 unresolved.
 
-Local-only order:
+Local crash and scheduler recovery prove neither the throughput gate nor an always-on production host.
 
-1. service-managed SQLite profile harness;
-2. Postgres transaction and scheduler semantics harness;
-3. libSQL/Turso-compatible transaction and transfer harness;
-4. Cloudflare Worker/D1/Queue resource model without remote deployment.
+### Validation
 
-Every applicable harness must run the same adapter, reader, publication, maintenance, complete-state, interruption, and restart conformance.
+Implementation and evidence head `0b9cf6b7f42aee4ac1fb93758d8c5cbfedff0f1a` passed CI run `30704517323`: workflow guard, lint, shell and canonical-base checks, type-check, production runner checks, complete unit suite, clean migrations through `10008`, build, and browser smoke.
+
+## R4C2 — Local Postgres transaction and scheduler semantics
+
+Status: **next after PR #1104 merges**.
+
+R4C2 must prove locally, without a hosted Supabase project or credential:
+
+- serializable or equivalent phase ownership;
+- atomic work mutation, message completion, and successor reservation;
+- deterministic message identity and availability;
+- fresh-lease rejection and stale reclaim;
+- retry and duplicate convergence;
+- committed-only reads;
+- publication and maintenance separation;
+- complete-state export and empty-target restore;
+- interruption rollback.
+
+Postgres availability on CI or the local harness is an implementation detail, not provider qualification.
+
+## Later R4 stages
+
+### R4C3 — Local libSQL/Turso-compatible harness
+
+Test transaction, interruption, complete-state, and quota-model behavior without cloud credentials.
+
+### R4C4 — Local Cloudflare resource model
+
+Model Workers, D1, and Queue ceilings without deployment or account mutation. The existing Cloudflare profile remains blocked regardless of a theoretical resource pass until zero-additional-charge operation is proved.
 
 ### R4D — Read-only shadow measurement
 
-A profile reaches R4D only after G1 and G2 are proved.
-
-Required evidence includes exact provider plan and limits, no card/payment requirement, no automatic overage, isolated read-only probes, measured latency and resource usage, and no production or public-reader mutation.
+A profile reaches R4D only after G1 and G2 are proved. Required evidence includes exact plan and limits, no card/payment requirement, no automatic overage, isolated read-only probes, measured latency and resource usage, and no production or public-reader mutation.
 
 ### R4E — Selection or no-qualified-profile decision
 
@@ -187,15 +228,15 @@ Accessed `2026-08-01`:
 
 Provider documentation is qualification input, not operating proof. It must be captured again before any later shadow measurement.
 
-## R4B exit
+## R4C1 exit
 
-R4B passes only when:
+R4C1 passes only when:
 
-- all gate evidence is versioned and profile-bound;
-- failed or unresolved profiles cannot be scored;
-- scored profiles remain unselected;
-- canonical decisions are deterministic;
-- invalid identity and evidence fail closed;
-- no provider SDK or credential enters the evaluator;
+- file-backed supervisor and scheduler state survive process reopen;
+- fresh and stale leases behave exactly;
+- retry, backoff, graceful stop, and terminal halt fail closed;
+- the R4B decision remains conditional and unscored;
+- no always-on host or production claim is made;
+- no provider SDK, credential, payment, hosted resource, or remote mutation is introduced;
 - production remains fail-closed;
 - ordinary CI passes.
