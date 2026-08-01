@@ -7,6 +7,7 @@ on:
       - .github/workflows/start-continuous-fast-lane-catch-up.yml
       - .github/start-continuous-fast-lane-catch-up-trigger
       - scripts/start-continuous-fast-lane-catch-up.py
+      - scripts/run-continuous-catch-up-with-state-polling.py
       - scripts/deploy-fixed-runtime-for-catch-up.py
       - scripts/run-fixed-runtime-deployer-for-promotion.py
       - scripts/check-actions-workflow-allowlist.sh
@@ -14,7 +15,7 @@ on:
     branches: [main]
     paths:
       - .github/workflows/start-continuous-fast-lane-catch-up.yml
-      - scripts/run-fixed-runtime-deployer-for-promotion.py
+      - scripts/run-continuous-catch-up-with-state-polling.py
 
 permissions:
   contents: read
@@ -50,9 +51,10 @@ jobs:
         run: |
           set -euo pipefail
           python -m py_compile scripts/start-continuous-fast-lane-catch-up.py
+          python -m py_compile scripts/run-continuous-catch-up-with-state-polling.py
           python -m py_compile scripts/deploy-fixed-runtime-for-catch-up.py
           python -m py_compile scripts/run-fixed-runtime-deployer-for-promotion.py
-          python scripts/start-continuous-fast-lane-catch-up.py --validate-source-only
+          python scripts/run-continuous-catch-up-with-state-polling.py --validate-source-only
           python scripts/run-fixed-runtime-deployer-for-promotion.py --validate-source-only
 
   promote:
@@ -76,7 +78,7 @@ jobs:
       - name: Deploy exact runtime and prove one controlled delivery
         run: python scripts/run-fixed-runtime-deployer-for-promotion.py
       - name: Promote continuous catch-up after three exact minute slots
-        run: python scripts/start-continuous-fast-lane-catch-up.py
+        run: python scripts/run-continuous-catch-up-with-state-polling.py
       - name: Ensure issue comment exists
         if: always()
         run: |
