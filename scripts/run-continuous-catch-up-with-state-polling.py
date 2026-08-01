@@ -25,21 +25,21 @@ def wait_for_paused(expected: bool, attempts: int = 30) -> None:
     )
 
 
-def pause_queue_with_polling() -> None:
+def update_queue_delivery_paused(value: bool) -> None:
     MODULE.api(
         "PATCH",
-        f"/accounts/{MODULE.ACCOUNT_ID}/queues/{MODULE.QUEUE_ID}/settings",
-        {"delivery_paused": True},
+        f"/accounts/{MODULE.ACCOUNT_ID}/queues/{MODULE.QUEUE_ID}",
+        {"settings": {"delivery_paused": value}},
     )
+
+
+def pause_queue_with_polling() -> None:
+    update_queue_delivery_paused(True)
     wait_for_paused(True)
 
 
 def resume_queue_with_polling() -> None:
-    MODULE.api(
-        "PATCH",
-        f"/accounts/{MODULE.ACCOUNT_ID}/queues/{MODULE.QUEUE_ID}/settings",
-        {"delivery_paused": False},
-    )
+    update_queue_delivery_paused(False)
     wait_for_paused(False)
 
 
