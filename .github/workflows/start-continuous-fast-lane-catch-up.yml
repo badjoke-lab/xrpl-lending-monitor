@@ -8,12 +8,13 @@ on:
       - .github/start-continuous-fast-lane-catch-up-trigger
       - scripts/start-continuous-fast-lane-catch-up.py
       - scripts/deploy-fixed-runtime-for-catch-up.py
+      - scripts/run-fixed-runtime-deployer-for-promotion.py
       - scripts/check-actions-workflow-allowlist.sh
   push:
     branches: [main]
     paths:
       - .github/workflows/start-continuous-fast-lane-catch-up.yml
-      - scripts/deploy-fixed-runtime-for-catch-up.py
+      - scripts/run-fixed-runtime-deployer-for-promotion.py
 
 permissions:
   contents: read
@@ -50,8 +51,9 @@ jobs:
           set -euo pipefail
           python -m py_compile scripts/start-continuous-fast-lane-catch-up.py
           python -m py_compile scripts/deploy-fixed-runtime-for-catch-up.py
+          python -m py_compile scripts/run-fixed-runtime-deployer-for-promotion.py
           python scripts/start-continuous-fast-lane-catch-up.py --validate-source-only
-          python scripts/deploy-fixed-runtime-for-catch-up.py --validate-source-only
+          python scripts/run-fixed-runtime-deployer-for-promotion.py --validate-source-only
 
   promote:
     if: github.event_name == 'push'
@@ -72,7 +74,7 @@ jobs:
       - name: Fetch exact runtime commit
         run: git fetch --no-tags --depth=1 origin "${RUNTIME_SHA}"
       - name: Deploy exact runtime and prove one controlled delivery
-        run: python scripts/deploy-fixed-runtime-for-catch-up.py
+        run: python scripts/run-fixed-runtime-deployer-for-promotion.py
       - name: Promote continuous catch-up after three exact minute slots
         run: python scripts/start-continuous-fast-lane-catch-up.py
       - name: Ensure issue comment exists
