@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS collector_scheduler_outbox (
   current_message_id TEXT PRIMARY KEY,
   successor_message_id TEXT NOT NULL UNIQUE,
   successor_payload_json TEXT NOT NULL,
+  successor_available_at TEXT NOT NULL,
   status TEXT NOT NULL CHECK (status IN ('pending', 'dispatched')),
   created_at TEXT NOT NULL,
   dispatched_at TEXT,
