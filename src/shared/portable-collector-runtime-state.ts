@@ -4,8 +4,8 @@ import {
   type PortableSqliteValue,
 } from './portable-collector-reference-store'
 
-export interface PortableCollectorRuntimeExportV2 {
-  schemaVersion: 2
+export interface PortableCollectorRuntimeExportV3 {
+  schemaVersion: 3
   work: Record<string, unknown>[]
   payloadChunks: Record<string, unknown>[]
   commitChunks: Record<string, unknown>[]
@@ -72,7 +72,7 @@ function hexPayload(row: Record<string, unknown>): Uint8Array {
   return bytes
 }
 
-function parseRuntimeExport(exportedState: string): PortableCollectorRuntimeExportV2 {
+function parseRuntimeExport(exportedState: string): PortableCollectorRuntimeExportV3 {
   let raw: unknown
   try {
     raw = JSON.parse(exportedState)
@@ -80,11 +80,11 @@ function parseRuntimeExport(exportedState: string): PortableCollectorRuntimeExpo
     throw new Error('portable runtime export is not valid JSON')
   }
   const parsed = objectValue(raw, 'export')
-  if (parsed.schemaVersion !== 2) {
+  if (parsed.schemaVersion !== 3) {
     throw new Error('unsupported portable runtime export schema version')
   }
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     work: recordArray(parsed.work, 'work'),
     payloadChunks: recordArray(parsed.payloadChunks, 'payloadChunks'),
     commitChunks: recordArray(parsed.commitChunks, 'commitChunks'),
@@ -199,14 +199,18 @@ function insertReferenceRow(db: PortableSqliteDatabase, row: Record<string, unkn
   db.run(
     `INSERT INTO collector_reference_rows (
        work_id, semantic_class, canonical_key, source_ledger_index,
-       source_ledger_hash, value_json, is_tombstone, created_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+       source_ledger_hash, source_transaction_hash, object_id,
+       relationship_ids_json, value_json, is_tombstone, created_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       stringValue(row, 'work_id'),
       stringValue(row, 'semantic_class'),
       stringValue(row, 'canonical_key'),
       integerValue(row, 'source_ledger_index'),
       stringValue(row, 'source_ledger_hash'),
+      nullableString(row, 'source_transaction_hash'),
+      nullableString(row, 'object_id'),
+      stringValue(row, 'relationship_ids_json'),
       nullableString(row, 'value_json'),
       integerValue(row, 'is_tombstone'),
       stringValue(row, 'created_at'),
@@ -289,7 +293,7 @@ export function exportPortableCollectorRuntimeState(
   db: PortableSqliteDatabase,
 ): string {
   return canonicalPortableJson({
-    schemaVersion: 2,
+    schemaVersion: 3,
     work: db.all<Record<string, unknown>>(
       'SELECT * FROM collector_work ORDER BY created_at, work_id',
     ),
