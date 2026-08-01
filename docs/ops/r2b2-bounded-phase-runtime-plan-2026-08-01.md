@@ -1,6 +1,6 @@
 # R2b2 bounded phase runtime plan — 2026-08-01
 
-Status: controlling R2b2 implementation plan. R2b1 is complete in PR #1086. This plan fixes the storage and scheduler transaction boundaries before scan, commit, or finalize runtime code begins.
+Status: controlling R2b2 implementation plan. R2b1 is complete in PR #1086. R2b2-A implementation and validation passed in PR #1088 and is pending merge; R2b2-B is the next unit after that merge.
 
 R2b2 remains local and provider-neutral. It performs no remote deployment, production mutation, provider selection, Mainnet change, recovery, or soak work.
 
@@ -133,11 +133,23 @@ No generic exception is silently converted to success. Unknown errors become `te
 
 ### R2b2-A — Transaction-aware store
 
+Status: **implementation and validation passed in PR #1088; merge pending**.
+
+Delivered:
+
 - typed work/chunk/candidate read snapshots;
 - `finalizeWorkInTransaction` plus standalone wrapper;
 - tests proving no nested transaction and exact rollback.
 
+Retained validation from CI run `30694527924`:
+
+- workflow guard, lint, type-check, complete unit suite, clean migration sequence, application build, and browser smoke passed;
+- caller-owned SQLite finalization completed without a nested `BEGIN`;
+- an injected exception after storage finalization rolled back work status, committed visibility, and watermark advancement.
+
 ### R2b2-B — Fixture execution and scan
+
+Status: **next after R2b2-A merges to `main`**.
 
 - fixture adapter;
 - initial/watermark boundary checks;
