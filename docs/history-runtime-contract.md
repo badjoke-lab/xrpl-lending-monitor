@@ -13,34 +13,61 @@ Only validated Devnet ledgers are in scope. Mainnet remains disabled.
 
 No recovery implementation may remove a semantic class, skip a ledger, weaken provenance, or expose partially committed work.
 
+## Portability invariant
+
+The collector core must not depend on one scheduler, queue, serverless runtime, hosted database, or operator console.
+
+The core owns:
+
+- deterministic adaptive scan planning;
+- ledger and parent-hash continuity;
+- semantic derivation;
+- work, chunk, and finalize state transitions;
+- committed-only visibility;
+- retry, lease, reconciliation, and halt behavior;
+- resource accounting expressed as implementation-neutral budgets.
+
+Runtime-specific code is isolated behind explicit adapters:
+
+- `StorageAdapter` for transactions, work records, chunks, canonical rows, watermarks, and health state;
+- `SchedulerAdapter` for one-successor serialized execution, leases, retry timing, and wake-up;
+- `ExecutionAdapter` for clocks, deadlines, resource counters, and network transport;
+- `PublicationAdapter` for immutable history and active-channel updates.
+
+SQLite is the reference storage implementation for local and CI proof. Remote storage and scheduling implementations are optional deployment profiles and must pass the same contract tests before production use.
+
 ## Runtime paths
 
 | Path | Trigger | Responsibility | Persistence | Public role |
 |---|---|---|---|---|
-| Budgeted Queue state machine | One Queue producer and one single-concurrency consumer | Alternate adaptive scan, resumable commit, and atomic finalize work; maintain contiguous ledger/hash identity | collector work/chunks, committed live history, current overlay versions, cursor, metrics | Fresh live tail and current-state continuation |
-| Protected full collector | Approved real UTC protected slots only | Produce the existing canonical full semantic evidence path without being invoked by synthetic recovery work | processed ledgers, protocol events, changes, lifecycle, archives, balance history, canonical overlay and cursor | Canonical D1 history and integrity witness |
-| Immutable history publication | Scheduled and threshold-triggered GitHub Actions | Convert committed contiguous history into deterministic immutable segments and exact indexes | GitHub-backed immutable history assets and publication manifests | Long-lived history through the published boundary |
+| Budgeted collector state machine | One serialized scheduler profile | Alternate adaptive scan, resumable commit, and atomic finalize work; maintain contiguous ledger/hash identity | collector work/chunks, committed live history, current overlay versions, cursor, metrics | Fresh live tail and current-state continuation |
+| Protected full collector | Approved real UTC protected slots only | Produce the existing canonical full semantic evidence path without being invoked by synthetic recovery work | processed ledgers, protocol events, changes, lifecycle, archives, balance history, canonical overlay and cursor | Canonical live history and integrity witness |
+| Immutable history publication | Scheduled and threshold-triggered publication workflow | Convert committed contiguous history into deterministic immutable segments and exact indexes | immutable history assets and publication manifests | Long-lived history through the published boundary |
 | Hybrid API merge | Public read request | Verify immutable source, read committed live rows after the boundary, deduplicate, order, and bound results | Read-only | Activity, object history, lifecycle, archive, cover/loss, exports, feeds |
-| Maintenance and compaction | Bounded state-machine or GitHub Actions unit | Archive, compact, reconcile, and prune only after committed/publication guards pass | hot-row compaction, retention and archive watermarks | Keep D1 below the project stop threshold without semantic loss |
+| Maintenance and compaction | Bounded maintenance unit | Archive, compact, reconcile, and prune only after committed/publication guards pass | hot-row compaction, retention and archive watermarks | Keep the active store below its stop threshold without semantic loss |
 
 ## Retired fixed-range contract
 
-The prior one-invocation contract—fetch a fixed number of ledgers, derive every semantic class, write all D1 state, update overlay, run retention, publish a successor, and then declare the range safe—is retired.
+The prior one-invocation contract—fetch a fixed number of ledgers, derive every semantic class, write all live state, update overlay, run retention, publish a successor, and then declare the range safe—is retired.
 
-Production proved that ledger contents make persistence cost variable. A fixed count such as 32 is not a deterministic subrequest or D1-query budget.
+Production proved that ledger contents make persistence cost variable. A fixed count such as 32 is not a deterministic request, query, write, CPU, or byte budget.
 
-## Queue serialization contract
+Changing the ledger count alone is not an accepted repair.
 
-- one Queue;
-- one producer binding;
-- one push consumer;
-- `max_batch_size = 1`;
-- `max_concurrency = 1`;
-- exactly one successor message after each successful invocation;
-- messages contain only versioned control fields and work identifiers;
-- complete payloads remain in bounded D1 staging chunks, not Queue messages;
-- duplicate messages converge through work identity and phase identity;
-- no synthetic message may trigger the protected full collector.
+## Serialization contract
+
+The active scheduler profile must provide:
+
+- one logical producer;
+- one serialized consumer or equivalent single-owner lease;
+- one work phase per invocation;
+- exactly one successor after each successful invocation;
+- bounded, versioned control messages containing only work identifiers and phase cursors;
+- complete payloads in bounded storage chunks, never in scheduler messages;
+- idempotent convergence for duplicate wake-ups;
+- no synthetic recovery wake-up capable of invoking the protected full collector.
+
+A deployment profile may implement this with a managed queue, a durable local runner, or another scheduler. The observable contract is identical.
 
 ## Work lifecycle
 
@@ -67,27 +94,27 @@ Scan work:
 5. validates parent-hash continuity;
 6. derives every supported semantic class and current projection mutation;
 7. stops before configured transaction, normalized-byte, payload-byte, CPU, wall-time, or external-request limits;
-8. stores deterministic compressed payload chunks and exact counts/digests;
+8. stores deterministic compressed payload chunks and exact counts/digests through `StorageAdapter`;
 9. advances no public cursor or watermark.
 
-The initial candidate ceiling is 48 ledgers. It is only a scan ceiling and may be reduced by actual content budgets. It is not a persistence safety claim.
+The initial test ceiling is 48 ledgers. It is only a scan ceiling and may be reduced by actual content budgets. It is not a persistence safety claim.
 
 ### Commit
 
 Commit work:
 
 1. claims the next uncommitted payload chunk;
-2. writes no more than the configured D1 query, statement, row, and byte budgets;
+2. writes no more than the configured query, statement, row, and byte budgets;
 3. tags every candidate canonical/history/current row with `work_id`;
 4. records chunk completion idempotently;
 5. schedules another commit phase when data remains;
 6. schedules finalization only after all expected chunks are complete.
 
-Initial invocation guard: at most 40 D1 queries/statements and 40 canonical row mutations. A single content-heavy ledger may span multiple commit invocations. No semantic class may be discarded to fit one invocation.
+The reference profile starts with at most 40 storage operations and 40 canonical row mutations per invocation. A deployment adapter may impose stricter limits. A single content-heavy ledger may span multiple commit invocations. No semantic class may be discarded to fit one invocation.
 
 ### Finalize
 
-Finalization is one bounded atomic D1 batch that verifies:
+Finalization is one bounded atomic storage transaction that verifies:
 
 - all expected payload and commit chunks exist and are complete;
 - start and end ledger indexes are exact;
@@ -100,10 +127,10 @@ Finalization is one bounded atomic D1 batch that verifies:
 Only then may finalization:
 
 - mark the work `committed`;
-- advance the fast-lane cursor;
+- advance the live cursor;
 - advance the committed current/history watermark;
 - record terminal run metrics;
-- select and publish the next state-machine message.
+- select and publish the next state-machine wake-up.
 
 If finalization fails, the prior cursor and public watermark remain authoritative.
 
@@ -137,21 +164,21 @@ During migration, readers continue to accept legacy canonical rows and `gzip-bas
 
 ## Cadence contract
 
-### Catch-up
+Cadence is an execution-profile parameter, not a collector-core dependency.
 
-- successor delay: 30 seconds;
-- maximum expected successful messages: 2,880/day;
-- projected normal Queue operations: 8,640/day;
-- catch-up continues only while terminal lag is positive and daily resource guards retain headroom.
+### Catch-up target
 
-### Steady
+- a profile must sustain committed throughput above 30 ledgers/minute;
+- successful phases may run more frequently than the public freshness interval;
+- catch-up continues only while terminal lag is positive and measured resource guards retain headroom.
 
-- successor delay: 60 seconds;
-- maximum expected successful messages: 1,440/day;
-- projected normal Queue operations: 4,320/day;
-- committed cursor must remain within five minutes of the validated head.
+### Steady target
 
-The cadence is internal. The public requirement remains five-minute freshness. A resumed Queue without a valid successor is halted, not healthy.
+- a profile must sustain committed throughput above 21 ledgers/minute at p95 windows;
+- the committed cursor must remain within five minutes of the validated head;
+- the scheduler must preserve one-owner serialization and bounded retry behavior.
+
+A configured scheduler without a valid successor or lease holder is halted, not healthy.
 
 ## Failure behavior
 
@@ -162,44 +189,56 @@ The cadence is internal. The public requirement remains five-minute freshness. A
 - do not redo completed commit chunks;
 - abandon stale work only through a deterministic lease and reconciliation process;
 - leave public reads on the last committed boundary with truthful stale/halted metadata;
-- record every mutating recovery in retained GitHub Actions evidence and the controlling Issue.
+- retain machine-readable evidence for every mutating recovery.
 
 ## Maintenance and immutable publication
 
 Maintenance is not part of scan or commit invocations.
 
-A GitHub Actions publication unit:
+A publication unit:
 
 1. reads committed history after the immutable watermark;
 2. verifies complete ledger/hash and semantic-count continuity;
 3. builds deterministic compressed segments and exact indexes;
 4. publishes immutable artifacts;
 5. verifies them independently;
-6. advances the publication watermark through a guarded privileged endpoint;
-7. authorizes bounded D1 compaction only after verification.
+6. advances the publication watermark through a guarded privileged path;
+7. authorizes bounded hot-store compaction only after verification.
 
-No R2 dependency is introduced. Existing GitHub-backed history remains the cold-history path.
+Existing Git-backed immutable history remains the cold-history path. Publication automation is not the normal collection scheduler.
 
-## Deployment contract
+## Deployment-profile contract
 
-The owner is not required to use a local terminal or Cloudflare dashboard.
+No remote deployment profile is approved by documentation alone.
 
-Migration, deployment, Queue pause/purge/seed/resume, rollback, checkpoints, and publication must be performed by exact-SHA guarded GitHub Actions using the production-writer concurrency group. Every branch of a mutating workflow must leave machine-readable pre/post evidence and fail closed.
+Each candidate profile must prove:
+
+- the same SQLite reference tests and adapter conformance suite;
+- exact transactional finalization and committed-only reads;
+- serialized wake-up, duplicate convergence, retry, lease, and halt behavior;
+- XRPL WebSocket compatibility;
+- export and recovery without provider-specific data loss;
+- measured CPU, request, query, write, storage, and cadence headroom;
+- no mandatory paid runtime dependency and fail-closed behavior before any configured operating ceiling;
+- automated deployment, rollback, checkpoint, and evidence paths without routine interactive operator steps.
+
+The current Cloudflare deployment is a halted legacy production profile. It remains evidence and rollback context, not the controlling architecture.
 
 ## Qualification gates
 
 No new 24-hour soak may begin until all of the following pass:
 
-1. local and CI heavy-ledger, retry, duplicate, interruption, reset, and rollback fixtures;
-2. migration and legacy-read compatibility tests;
-3. one staged production work item from scan through finalize;
-4. fixed two-hour catch-up qualification with zero resource-limit errors;
-5. sustained catch-up throughput above 30 ledgers/minute;
-6. terminal lag zero;
-7. automatic transition to 60-second steady mode;
-8. twelve consecutive five-minute freshness checkpoints with sustained throughput above 21 ledgers/minute;
-9. current/history/immutable semantic parity;
-10. Queue, Worker, D1 read/write, storage, CPU, memory, and error budgets within the controlling resource envelope;
-11. independent immutable audit retention armed before the fixed soak boundary.
+1. SQLite reference and CI heavy-ledger, retry, duplicate, interruption, reset, and rollback fixtures;
+2. storage and scheduler adapter conformance tests;
+3. migration and legacy-read compatibility tests;
+4. one staged shadow work item from scan through finalize on the selected remote profile;
+5. fixed two-hour catch-up qualification with zero resource-limit errors;
+6. sustained catch-up throughput above 30 ledgers/minute;
+7. terminal lag zero;
+8. automatic transition to the selected steady cadence;
+9. twelve consecutive five-minute freshness checkpoints with sustained throughput above 21 ledgers/minute;
+10. current/history/immutable semantic parity;
+11. selected-profile request, query, write, storage, CPU, memory, scheduler, and error budgets within the controlling resource envelope;
+12. independent immutable audit retention armed before the fixed soak boundary.
 
-A final 24-hour audit must prove the complete ledger chain, semantic counts and witnesses, committed-only visibility, unchanged runtime identities, no hidden partial work, and Free-plan headroom. HTTP 200 or lag zero alone is insufficient.
+A final 24-hour audit must prove the complete ledger chain, semantic counts and witnesses, committed-only visibility, unchanged runtime identities, no hidden partial work, and no-cost operating headroom. HTTP 200 or lag zero alone is insufficient.
