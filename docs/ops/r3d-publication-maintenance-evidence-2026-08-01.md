@@ -100,22 +100,25 @@ The SQLite suite proves:
 - maintenance replay convergence;
 - changed publication and plan identity rejection.
 
-The R3A interface suite was updated for the expanded publication asset, publication watermark, and asynchronous maintenance-plan contract.
+The R3A interface suite was updated for the expanded publication asset, publication watermark, stored-plan, and asynchronous maintenance-plan contracts. Collection runtime behavior did not change.
 
 ## Retained validation
 
-The latest PR #1100 branch passed:
+Latest validated head: `199497d73774fd739f37c65e4771b5a4ad9b460a`.
+
+CI run `30701236573` passed:
 
 - Actions workflow-surface guard;
 - lint;
+- D1 headroom-gate shell syntax validation;
+- live-cutover shell syntax validation;
+- canonical production base identity validation;
 - TypeScript type-check;
 - production runner bundle and configuration validation;
 - complete unit-test suite;
-- complete clean local migration sequence, including migrations `10006` and `10007`;
+- complete clean local migration sequence, including migration `10007`;
 - application build;
 - browser smoke.
-
-The same branch also passed a direct local reproduction of lint, type-check, the R3D SQLite suite, and the R3A adapter conformance suite.
 
 ## Boundary
 
