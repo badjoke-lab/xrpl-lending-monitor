@@ -4,27 +4,16 @@ Status: controlling recovery design and implementation schedule. This document s
 
 ## Decision
 
-The existing Queue collector is not approved for further production recovery.
+The retired fixed-32-ledger Queue collector is not approved for recovery.
 
 Production proved that:
 
-- a five-minute fixed 32-ledger pass cannot match the observed Devnet arrival rate; and
-- a one-minute fixed 32-ledger pass can still exceed an invocation limit because persistence cost depends on ledger contents.
+- a five-minute fixed 32-ledger pass could not match observed Devnet arrival;
+- a one-minute fixed 32-ledger pass could still exceed an invocation limit because persistence cost depends on ledger contents.
 
-A fixed ledger count is not a resource budget. The replacement collector budgets actual operations, makes heavy-ledger work resumable, and remains portable across execution and storage profiles.
+A fixed ledger count is not a resource budget. The replacement collector budgets actual operations, splits heavy work into durable phases, and remains portable across execution and storage profiles.
 
-No hosted runtime, database, queue, scheduler, or operator console is selected by this document.
-
-## Documentation boundary
-
-The repository records only technical and operational decisions:
-
-- the collector core is provider-neutral;
-- the current remote deployment is halted;
-- future deployment profiles require qualification;
-- the project must remain operable without a mandatory paid runtime dependency.
-
-Non-technical operator circumstances are outside the repository specification.
+No hosted runtime, database, scheduler, queue, or operator console is selected before R4 qualification.
 
 ## Non-negotiable product invariants
 
@@ -38,87 +27,66 @@ The reconstruction retains:
 - debt, cover, and loss history;
 - current Vault, LoanBroker, and Loan projection changes;
 - exact transaction, object, relationship, epoch, ledger, hash, and provenance identities;
-- deterministic base-plus-overlay current reads during legacy compatibility;
-- hybrid immutable/live historical reads during legacy compatibility;
 - truthful stale, halted, partial, reset, and unavailable states;
 - Devnet-only and Mainnet-disabled operation;
 - read-only public behavior with no wallet, signing, or transaction submission.
 
-The public freshness requirement remains five minutes. Internal work may run more frequently.
+The public freshness requirement remains five minutes. Internal phase continuation may run more frequently.
 
-## Architecture boundary
+## Portable architecture
 
-The portable core owns:
+The core owns:
 
 - adaptive contiguous scan planning;
 - XRPL ledger and parent-hash validation;
 - semantic normalization;
-- deterministic chunk construction;
-- work lifecycle and phase transitions;
-- atomic finalization;
-- committed-only current/history visibility;
-- retry, lease, duplicate, reconciliation, and halt semantics;
+- deterministic payload construction;
+- `scan -> commit ... -> finalize -> scan` phase transitions;
+- atomic finalization and committed-only visibility;
+- retry, lease, duplicate, interruption, and halt semantics;
+- read fences, source-bound cursors, and strict product mapping;
+- independently verified immutable publication;
+- verified-publication-gated maintenance;
+- canonical complete-state export and empty-target restore;
 - provider-neutral resource accounting.
 
-Runtime-specific code is isolated behind:
+Provider-specific implementations remain behind storage, scheduler, execution, publication, maintenance, and complete-state-transfer boundaries.
 
-- `StorageAdapter`;
-- `SchedulerAdapter`;
-- `ExecutionAdapter`;
-- `PublicationAdapter`;
-- a bounded maintenance boundary.
+SQLite is the reference storage implementation. The local durable scheduler is the reference scheduler implementation.
 
-SQLite is the reference storage implementation. A durable local scheduler is the reference scheduler implementation. Remote implementations are deployment profiles and must pass the same conformance suite.
-
-## Retired runtime
-
-The following contract is retired:
-
-```text
-one hosted invocation
-  -> fetch a fixed number of ledgers
-  -> derive every semantic class
-  -> write current/history/metrics/retention/successor
-  -> advance the cursor
-```
-
-Changing `32` to another fixed ledger count is not an accepted repair.
-
-## Approved state machine
+## Approved phase state machine
 
 ```text
 scan
   -> commit
-  -> commit (only when another chunk is required)
+  -> commit (when another bounded chunk is required)
   -> finalize
   -> scan
 ```
 
-Maintenance and immutable publication are separate bounded operations.
-
 ### Scan
 
-- verify the exact committed or initial boundary;
+- verify the exact immutable-base or committed-watermark boundary;
 - read the validated head;
 - plan a content-budgeted contiguous range;
-- derive all supported semantic classes;
-- stage deterministic bounded payload chunks;
-- advance no public cursor or watermark;
-- reserve the first commit phase atomically with scan completion.
+- derive all seven semantic classes;
+- stage deterministic payload chunks;
+- reserve the first commit successor atomically;
+- expose no candidate row and advance no collection watermark.
 
 ### Commit
 
-- decode one exact staged chunk;
-- verify work, payload, chunk, range, digest, and complete candidate identity;
-- write no more than the configured operation and row-mutation budgets;
-- complete the chunk idempotently;
-- reserve the next commit or finalize phase atomically.
+- verify exact work, payload, chunk, range, digest, and candidate identities;
+- write within row-mutation and operation limits;
+- complete one chunk idempotently;
+- reserve the next commit or finalize successor atomically;
+- expose no candidate row and advance no collection watermark.
 
 ### Finalize
 
-- reconstruct and verify every payload and commit chunk;
-- verify counts, digests, candidate identity, range, hashes, network, epoch, and base identity;
-- atomically commit work, advance the watermark, expose rows, complete the current message, and reserve the next scan.
+- reconstruct and verify the complete payload and commit evidence;
+- verify semantic counts, ledger range, hashes, network, epoch, base, and candidate identity;
+- atomically commit work, expose rows, advance the collection watermark, complete the message, and reserve the next scan.
 
 No candidate row is public before finalization.
 
@@ -129,9 +97,9 @@ No candidate row is public before finalization.
 - reference storage-operation ceiling: 40 operations;
 - payload chunk ceiling: 512,000 encoded bytes;
 - scheduler message ceiling: 16,000 encoded bytes;
-- no cursor or public watermark advancement during partial work.
+- no cursor or watermark movement during partial work.
 
-These are reference guards, not production-provider limits.
+These are project reference guards, not claims about a provider limit.
 
 ## Scheduler contract
 
@@ -139,72 +107,66 @@ The scheduler provides:
 
 - one serialized owner;
 - deterministic versioned messages;
-- bounded leases and stale-lease recovery;
-- exact retry identity;
+- bounded leases and stale reclaim;
+- retry at the exact message identity;
 - one durable timed successor outbox entry per successful phase;
-- idempotent duplicate completion and dispatch;
-- terminal halt with no successor for identity, hash, digest, reset, or resource failures.
+- duplicate completion and dispatch convergence;
+- terminal halt with no successor for integrity, reset, hash, digest, or resource failure.
 
 GitHub Actions is not the normal collection scheduler. It remains available for CI, immutable publication, evidence, and bounded repair workflows.
 
-## Reader and source-isolation contract
+## Read, publication, and maintenance boundaries
 
-Portable public-read candidates are bound to one committed read fence containing network, epoch, base, ledger index, ledger hash, and committed work ID.
+Portable reads use one source and one committed read fence containing network, epoch, base, ledger index/hash, and committed work ID.
 
-- one response uses one source and one read fence;
-- one cursor is valid for one source, query, order, and fence;
-- portable and legacy rows are never mixed inside one response;
-- integrity and identity failures fail closed and never trigger silent legacy fallback;
-- public authority remains legacy until a later explicit cutover gate;
-- R3 may run bounded shadow comparisons but cannot change public authority.
+- portable and legacy rows are never mixed in one response;
+- cursors are bound to source, query, order, and fence;
+- integrity failure never triggers silent fallback;
+- public authority remains legacy until a later explicit cutover gate.
+
+Publication:
+
+- selects committed work only;
+- verifies contiguous ledger and parent-hash identity;
+- builds a canonical candidate and manifest;
+- independently reopens and verifies the candidate;
+- advances only the publication watermark after verification.
+
+Maintenance:
+
+- requires committed collection coverage;
+- requires independently verified publication coverage;
+- requires an explicit retention rule and bounded replay-safe plan;
+- never advances collection or publication watermarks.
+
+## Complete-state transfer
+
+The complete-state envelope preserves:
+
+- collection work, payload chunks, commit chunks, candidate rows, and collection watermarks;
+- scheduler messages and outbox;
+- publication candidates, ordered work membership, and publication watermarks;
+- maintenance plans and mutations.
+
+Restore is allowed only into an empty compatible target and commits only after an exact canonical re-export parity check succeeds.
 
 ## Resource and throughput gates
 
 Observed Devnet advance was approximately 84 ledgers per five minutes, or 16.8 ledgers/minute.
 
-A production profile is not approved unless retained evidence proves:
+A profile is not approved unless retained evidence proves:
 
 - steady committed throughput above 21 ledgers/minute at p95 windows;
 - catch-up committed throughput above 30 ledgers/minute;
-- no content-heavy ledger permanently blocks the cursor;
-- scheduler, runtime, storage, and network operations remain inside project guards;
+- no content-heavy ledger permanently blocks progress;
+- scheduler, runtime, storage, and network work remains inside project guards;
 - hot storage remains below its stop threshold;
-- request, query, write, CPU, memory, row-size, message-size, and hidden-partial-work errors remain zero;
-- exact export and restore preserve work, cursor, hash, current, history, scheduler, and provenance identities;
-- the selected profile has no mandatory paid runtime dependency and fails closed before an operating ceiling.
-
-Provider limits are deployment-profile inputs, not collector-core invariants.
-
-## Storage and immutable publication
-
-The hot store contains bounded work, chunks, committed live history, current overlay versions, tombstones, indexes, watermarks, health, and reconciliation state.
-
-Long-lived history remains in deterministic immutable segments and exact indexes. Publication reads committed work only, verifies ledger/hash, candidate identity, and semantic counts, writes a candidate publication, independently reopens and verifies it, and advances the publication watermark only after verification.
-
-Compaction requires committed collection, verified publication, an explicit retention rule, and a bounded replay-safe mutation plan. Upload success alone never authorizes deletion.
-
-Publication automation does not own the normal collection clock.
-
-## Deployment-profile qualification
-
-Before remote recovery, a profile must prove:
-
-1. storage and scheduler adapter conformance;
-2. XRPL WebSocket compatibility;
-3. transactional finalization;
-4. committed-only reads;
-5. exact export and restore into the reference format;
-6. duplicate, retry, lease, interruption, and restart recovery;
-7. measured catch-up and steady throughput;
-8. measured no-cost operating headroom;
-9. fail-closed behavior at every project stop threshold;
-10. automated deploy, rollback, checkpoint, and evidence paths without routine interactive operator steps.
-
-No provider is selected until these checks pass.
+- request, query, write, CPU, memory, row-size, message-size, and hidden-partial-work failures remain zero;
+- exact complete-state export and restore;
+- no mandatory paid dependency, payment method, credit-card verification, or automatic paid overage;
+- fail-closed behavior before every provider ceiling.
 
 ## Implementation schedule
-
-Dates are planning targets, not claims of completion.
 
 ### R0 — Contract and portability reset
 
@@ -218,90 +180,77 @@ Status: **complete** in PR #1082, merge `85f42e665a5e6f2f519cd372718b9c41c16b3f6
 
 Status: **complete** in PR #1095, merge `fb90cbbd3a44337dc0891552f3618581cfc31e1c`.
 
-Implemented units:
+Delivered typed messages, durable scheduler, normalized payloads, transaction-aware SQLite storage, repeated-scan identity, bounded scan and commit, identity-complete finalize, runtime schema version 3, and the parent R2 orchestration exit.
 
-- typed messages and durable scheduler: PR #1084;
-- normalized payload, digest, and chunks: PR #1086;
-- transaction-aware reference store: PR #1088;
-- repeated scan identity contract and implementation: PRs #1089/#1090;
-- fixture execution and bounded scan runtime: PR #1091;
-- bounded commit runtime: PR #1092;
-- complete candidate identity persistence and runtime export version 3: PR #1093;
-- identity-complete finalize runtime: PR #1094;
-- durable parent orchestration exit: PR #1095.
+### R3 — Adapter, reader, publication, and complete-state integration
 
-Final R2 CI run `30698715057` passed workflow guard, lint, type-check, production runner checks, complete unit suite, clean migration sequence, build, and browser smoke.
+Status: **complete** in PR #1101, final merge `78e221e17d41c2a8bc55d2b6898d4fc088cdb9d2`.
 
-### R3 — Adapter and reader integration
+Delivered:
 
-Status: **active under `ops/r3-adapter-reader-integration-plan-2026-08-01.md`**.
+- provider-neutral adapter interfaces and SQLite wrappers;
+- unchanged R2 behavior through interfaces;
+- immutable committed read fences and deterministic queries;
+- strict mappers for all seven semantic classes;
+- legacy-authoritative shadow comparison;
+- independently verified publication;
+- publication-gated bounded maintenance;
+- complete collection, scheduler, publication, and maintenance state transfer;
+- one-transaction empty-target restore and continuation parity.
 
-#### R3 contract
-
-Status: **active on branch `agent/r3-adapter-reader-contract`**.
-
-The contract defines:
-
-- provider-neutral storage, scheduler, execution, publication, and maintenance boundaries;
-- reusable adapter and reader conformance suites;
-- committed read fences and source-bound cursors;
-- generic committed lookup, listing, ledger-range, and relationship reads;
-- strict seven-class product mappers;
-- explicit legacy-only and shadow-compare operation before any portable public cutover;
-- no mixed-source response and no silent integrity fallback;
-- verified publication before publication-watermark advance or maintenance authorization;
-- canonical cross-adapter export and restore.
-
-#### R3A — Adapter interfaces and SQLite conformance
-
-- introduce interfaces and SQLite wrappers without changing R2 behavior;
-- move composed transaction ownership behind one reference runtime adapter;
-- run the R2 suites through interfaces;
-- prove no provider SDK import.
-
-#### R3B — Committed generic reader
-
-- implement read fences, exact and relationship lookup, semantic and ledger-range listing, stable pagination, and fence-bound cursors;
-- expose no public route.
-
-#### R3C — Product mappers and shadow compatibility
-
-- implement seven strict product mappers;
-- add source descriptors and bounded shadow comparison;
-- keep legacy public authority.
-
-#### R3D — Publication and maintenance separation
-
-- introduce publication and maintenance interfaces;
-- adapt deterministic local publication builders to candidate and independent verification phases;
-- execute no remote write.
-
-#### R3E — Cross-adapter export, restore, and parent exit
-
-- prove canonical state transfer, reader behavior after restore, publication/maintenance state transfer, and complete R3 conformance.
+Final R3 CI run `30702737272` passed workflow guard, lint, shell and base checks, type-check, production runner checks, complete unit suite, clean migrations through `10007`, build, and browser smoke.
 
 ### R4 — Deployment-profile qualification
 
-- qualify candidates through read-only and shadow evidence;
-- reject mandatory paid runtime dependencies, automatic paid overage, inadequate export, or routine interactive operation.
+Status: **active under `ops/r4-deployment-profile-qualification-plan-2026-08-01.md`**.
+
+#### R4A — Contract and initial matrix
+
+Status: active on branch `agent/r4-deployment-profile-qualification-contract`.
+
+Initial classifications:
+
+- cardless self-hosted SQLite service: conditional candidate;
+- Supabase Free Postgres plus pg_cron/Edge Functions: conditional candidate;
+- Turso Free storage plus cardless self-hosted executor: conditional candidate;
+- existing Cloudflare Workers/D1/Queues profile: blocked;
+- GitHub Actions-only collector: rejected;
+- Deno Deploy Free managed runtime: rejected.
+
+No profile is selected.
+
+#### R4B — Machine-readable evaluator
+
+Implement exact profile descriptors, hard-gate evidence, canonical decision artifacts, and a prohibition on scoring failed or unresolved profiles.
+
+#### R4C — Local profile harnesses
+
+Run the same conformance against local SQLite service management, local Postgres, local libSQL/Turso-compatible targets, and a local Cloudflare resource model.
+
+#### R4D — Read-only shadow measurement
+
+Use isolated read-only evidence only after payment/card and automatic-overage gates pass. No production mutation.
+
+#### R4E — Selection decision
+
+Produce either:
+
+- `qualified_profile_selected`; or
+- `no_profile_qualified`.
+
+Schedule pressure cannot promote a conditional candidate.
 
 ### R5 — Controlled recovery
 
-- deploy only a qualified profile;
-- prove one staged work item, rollback, restore, and a fixed two-hour catch-up qualification.
+Deploy only a qualified R4 profile. Prove one staged work item, rollback, restore, and a fixed two-hour catch-up qualification.
 
 ### R6 — Lag-zero and steady qualification
 
-- reach lag zero;
-- pass twelve consecutive five-minute freshness checkpoints;
-- remain inside the measured no-cost envelope.
+Reach lag zero, pass twelve consecutive five-minute freshness checkpoints, and remain inside the measured no-cost envelope.
 
 ### R7 — Formal operation evidence
 
-- arm independent immutable audit retention;
-- pass a fixed 24-hour evidence window;
-- pass seven days of continuous operation;
-- only then reopen formal Devnet release qualification.
+Arm independent immutable audit retention, pass a fixed 24-hour evidence window, then pass seven days of continuous operation before reopening formal Devnet release qualification.
 
 ## Current production state
 
@@ -311,4 +260,4 @@ The contract defines:
 - Worker Cron is empty;
 - no stabilization or 24-hour soak is active.
 
-The current remote deployment is a halted legacy profile. Production remains fail-closed until a candidate profile passes R4 and an explicit R5 recovery is approved.
+Production remains fail-closed until one profile passes R4 and an explicit R5 recovery is approved.
