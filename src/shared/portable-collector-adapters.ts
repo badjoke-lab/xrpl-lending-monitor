@@ -232,3 +232,8 @@ export interface PortableCollectorMaintenanceAdapter {
   }): Promise<PortableMaintenancePlanV1>
   applyPlan(plan: PortableMaintenancePlanV1): { appliedMutations: number }
 }
+
+export interface PortableCollectorCompleteStateTransferAdapter {
+  exportCompleteState(): string
+  restoreCompleteState(exportedState: string): void
+}
