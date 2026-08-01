@@ -1,6 +1,8 @@
 # R2b2 bounded phase runtime plan — 2026-08-01
 
-Status: controlling R2b2 implementation plan. R2b1 is complete in PR #1086. R2b2-A implementation and validation passed in PR #1088 and is pending merge; R2b2-B is the next unit after that merge.
+Status: controlling R2b2 implementation plan. R2b1 is complete in PR #1086. R2b2-A is complete in PR #1088, merge `56dfe67cf969ac29357e7d49970da8b4027eba27`. R2b2-B is active after the repeated-scan identity amendment is merged.
+
+Controlling scan-identity amendment: [`r2-scan-sequence-amendment-2026-08-01.md`](r2-scan-sequence-amendment-2026-08-01.md).
 
 R2b2 remains local and provider-neutral. It performs no remote deployment, production mutation, provider selection, Mainnet change, recovery, or soak work.
 
@@ -24,17 +26,19 @@ Each invocation executes one bounded phase. Candidate rows remain hidden until f
 
 `PortableCollectorScheduler.completeWithSuccessor` owns the transaction that records one successful phase.
 
-The storage layer must expose transaction-aware primitives that do not issue a nested `BEGIN`:
+The storage layer exposes transaction-aware primitives that do not issue a nested `BEGIN`:
 
-- `finalizeWorkInTransaction` performs all final guards, work commit, and watermark advancement inside the caller transaction;
-- the existing standalone `finalizeWork` becomes a wrapper that opens a transaction and delegates;
-- scan staging methods and commit methods remain safe when called inside the scheduler-owned transaction;
+- `finalizeWorkInTransaction` performs final guards, work commit, and watermark advancement inside the caller transaction;
+- standalone `finalizeWork` opens a transaction and delegates;
+- scan staging and commit methods are safe inside the scheduler-owned transaction;
 - one injected exception rolls back phase mutation, message completion, and successor outbox together;
 - no runtime path may call a transaction-opening store method from a scheduler mutation callback.
 
+R2b2-A proved these boundaries with real SQLite and is complete on `main`.
+
 ## Required storage reads
 
-R2b2 adds exact typed read methods for:
+The reference store provides exact typed reads for:
 
 - complete work identity and sealed scan evidence;
 - one payload chunk by work ID and chunk index;
@@ -45,7 +49,7 @@ R2b2 adds exact typed read methods for:
 
 Runtime code does not issue ad hoc SQL.
 
-## Initial boundary
+## Initial and repeated scan boundary
 
 A scan message is accepted when either:
 
@@ -53,6 +57,15 @@ A scan message is accepted when either:
 2. no watermark exists and the message exactly equals the configured immutable-base boundary.
 
 Any other state is `stale_boundary` or `base_mismatch`. The runtime never silently replans from another cursor.
+
+Every scan message also carries `scanSequence`:
+
+- initial immutable-base scan: `0`;
+- first scan after watermark advancement: `0`;
+- caught-up successor from the same boundary: current sequence `+ 1`;
+- retry or stale-lease reclaim: unchanged sequence and message ID.
+
+The sequence is not wall-clock time or an attempt count. It exists only to distinguish repeated logical wake-ups at one unchanged committed boundary.
 
 ## Fixture execution adapter
 
@@ -72,7 +85,7 @@ The adapter imports no hosted-provider SDK and performs no live network request.
 ## Scan execution
 
 1. claim one `scan` message;
-2. verify the exact committed or initial boundary;
+2. verify its exact boundary and non-negative `scanSequence`;
 3. read the fixture validated head and estimates;
 4. run the R1 adaptive planner;
 5. collect and validate the selected ledger range;
@@ -85,7 +98,15 @@ The adapter imports no hosted-provider SDK and performs no live network request.
 9. commit message completion and successor outbox atomically;
 10. leave committed visibility and the watermark unchanged.
 
-Caught-up scan reserves a deterministic future scan message from the same boundary. A single-ledger resource halt records a terminal result and no successor.
+Caught-up scan behavior:
+
+- complete the current message with a caught-up result;
+- reserve a future scan at the same ledger/hash boundary;
+- set successor `scanSequence = current scanSequence + 1`;
+- keep retry and lease recovery on the current unchanged sequence;
+- write no work item and advance no watermark.
+
+A single-ledger resource halt records a terminal result and no successor.
 
 ## Commit execution
 
@@ -97,7 +118,7 @@ Caught-up scan reserves a deterministic future scan message from the same bounda
 6. enforce at most 40 row mutations and the operation budget;
 7. call `completeWithSuccessor` with one mutation callback that:
    - inserts candidate rows idempotently;
-   - completes the commit chunk with its retained digest and counts;
+   - completes the commit chunk with retained digest and counts;
 8. reserve the next commit message or finalize message atomically.
 
 An already completed chunk repeats no candidate mutation and converges on the retained successor.
@@ -110,7 +131,7 @@ An already completed chunk repeats no candidate mutation and converges on the re
 4. reconstruct the seven semantic groups;
 5. rebuild the normalized payload and verify semantic counts, range, parent boundary, final hash, network, epoch, base, and work ID;
 6. verify every expected commit chunk is complete;
-7. build the deterministic next scan message from the new boundary;
+7. build the deterministic next scan message from the new boundary with `scanSequence = 0`;
 8. call `completeWithSuccessor` with one mutation callback that invokes `finalizeWorkInTransaction`;
 9. commit work visibility, watermark advancement, message completion, and next-scan outbox atomically.
 
@@ -133,7 +154,7 @@ No generic exception is silently converted to success. Unknown errors become `te
 
 ### R2b2-A — Transaction-aware store
 
-Status: **implementation and validation passed in PR #1088; merge pending**.
+Status: **complete** in PR #1088, merge `56dfe67cf969ac29357e7d49970da8b4027eba27`.
 
 Delivered:
 
@@ -141,21 +162,31 @@ Delivered:
 - `finalizeWorkInTransaction` plus standalone wrapper;
 - tests proving no nested transaction and exact rollback.
 
-Retained validation from CI run `30694527924`:
+Retained validation from CI runs `30694527924` and `30694653827`:
 
 - workflow guard, lint, type-check, complete unit suite, clean migration sequence, application build, and browser smoke passed;
 - caller-owned SQLite finalization completed without a nested `BEGIN`;
 - an injected exception after storage finalization rolled back work status, committed visibility, and watermark advancement.
 
-### R2b2-B — Fixture execution and scan
+### R2b2-B0 — Repeated scan identity
 
-Status: **next after R2b2-A merges to `main`**.
+Status: **active contract correction**.
+
+- add `scanSequence` to the canonical scan message and identity;
+- preserve sequence on retry and lease recovery;
+- increment only for caught-up successors at the same boundary;
+- reset to `0` after watermark advancement;
+- pass message, scheduler, and export/restore regression tests.
+
+### R2b2-B1 — Fixture execution and scan
+
+Status: **next after R2b2-B0 merges to `main`**.
 
 - fixture adapter;
 - initial/watermark boundary checks;
 - planner integration;
 - normalized payload and chunk staging;
-- caught-up and resource-halt behavior.
+- caught-up successor and resource-halt behavior.
 
 ### R2b2-C — Commit runtime
 
@@ -175,6 +206,8 @@ Status: **next after R2b2-A merges to `main`**.
 
 R2b2 is not complete until the complete repository suite proves:
 
+- deterministic scan sequence identity and repeated caught-up wake-ups;
+- retry and stale-lease recovery preserve scan identity;
 - sparse scan -> commit -> finalize -> next scan;
 - dense multi-chunk commit sequence;
 - all seven semantic classes survive end to end;
