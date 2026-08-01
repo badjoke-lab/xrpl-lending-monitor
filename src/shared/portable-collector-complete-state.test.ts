@@ -390,7 +390,7 @@ describe('R3E complete portable state transfer', () => {
     ).toMatchObject({ status: 'completed' })
     expect(
       targetScheduler.getMessage(source.schedulerState.successor.messageId),
-    ).toMatchObject({ status: 'queued' })
+    ).toMatchObject({ status: 'pending' })
     expect(
       targetScheduler.getOutbox(source.schedulerState.current.messageId),
     ).toMatchObject({ status: 'dispatched' })
