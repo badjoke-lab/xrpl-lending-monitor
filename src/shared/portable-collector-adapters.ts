@@ -229,6 +229,6 @@ export interface PortableCollectorMaintenanceAdapter {
     verifiedPublication: PortableVerifiedPublicationV1
     retainCommittedWorks: number
     maxMutations: number
-  }): PortableMaintenancePlanV1
+  }): Promise<PortableMaintenancePlanV1>
   applyPlan(plan: PortableMaintenancePlanV1): { appliedMutations: number }
 }
