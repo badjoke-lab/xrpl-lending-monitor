@@ -16,6 +16,7 @@ The public read surface remains legacy-authoritative. Mainnet remains disabled. 
 - R4 qualification contract: [`ops/r4-deployment-profile-qualification-plan-2026-08-01.md`](ops/r4-deployment-profile-qualification-plan-2026-08-01.md)
 - R4 initial matrix: [`ops/r4-initial-profile-matrix-2026-08-01.json`](ops/r4-initial-profile-matrix-2026-08-01.json)
 - R4B evaluator evidence: [`ops/r4b-profile-qualification-evaluator-evidence-2026-08-01.md`](ops/r4b-profile-qualification-evaluator-evidence-2026-08-01.md)
+- R4C1 local SQLite evidence: [`ops/r4c1-local-sqlite-service-evidence-2026-08-01.md`](ops/r4c1-local-sqlite-service-evidence-2026-08-01.md)
 - Completed R3 plan: [`ops/r3-adapter-reader-integration-plan-2026-08-01.md`](ops/r3-adapter-reader-integration-plan-2026-08-01.md)
 - Runtime invariants: [`history-runtime-contract.md`](history-runtime-contract.md)
 - Resource gates: [`resource-envelope.md`](resource-envelope.md)
@@ -45,6 +46,7 @@ The halted remote deployment is evidence and rollback context only. It is not an
 - R2 portable typed runtime and parent exit: PRs #1084–#1095, final merge `fb90cbbd3a44337dc0891552f3618581cfc31e1c`.
 - R3 adapter, reader, mapper, publication, maintenance, and complete-state transfer: PRs #1096–#1101, final merge `78e221e17d41c2a8bc55d2b6898d4fc088cdb9d2`.
 - R4A qualification contract and initial matrix: PR #1102, merge `158087602b1bcde515f0b68eae47133bb93645ea`.
+- R4B machine-readable evaluator: PR #1103, merge `683c3b65fc31a2c8ffde289b1c607b94890219de`.
 
 ## R3 completion
 
@@ -58,35 +60,47 @@ Status: **complete on `main`** in PR #1102, merge `158087602b1bcde515f0b68eae471
 
 R4A defines ten non-overridable hard gates for cost/card safety, automatic overage, scheduler durability, transactionality, committed-only reads, complete-state portability, throughput, resource fail-closed behavior, operator independence, and production isolation.
 
-Initial classifications remain:
-
-- cardless self-hosted SQLite service: conditional candidate;
-- Supabase Free Postgres plus pg_cron/Edge Functions: conditional candidate;
-- Turso Free storage plus cardless self-hosted executor: conditional candidate;
-- existing Cloudflare Workers/D1/Queues profile: blocked;
-- GitHub Actions-only collector: rejected;
-- Deno Deploy Free managed runtime: rejected.
-
-No profile is selected.
-
 ### R4B — Machine-readable evaluator
 
-Status: **implementation and validation passed in PR #1103; merge pending**.
+Status: **complete on `main`** in PR #1103, merge `683c3b65fc31a2c8ffde289b1c607b94890219de`.
+
+R4B binds exact G1–G10 evidence to a canonical profile identity and revision, forbids scoring while any gate fails or remains unresolved, keeps every decision unselected, and emits a deterministic decision digest.
+
+Final R4B CI run `30703646271` passed workflow guard, lint, shell and canonical-base checks, type-check, production runner checks, complete unit suite, clean migrations through `10007`, build, and browser smoke.
+
+### R4C1 — Local service-managed SQLite harness
+
+Status: **implementation and validation passed in PR #1104; merge pending**.
 
 Delivered on the branch:
 
-- exact versioned profile identity and component schema;
-- canonical SHA-256 profile identity digest;
-- exactly one evidence record for each of gates `G1`–`G10`;
-- evidence binding to profile ID, revision, and digest;
-- deterministic rejected, conditional, or qualified classification;
-- permanent `selection: not_selected` in R4B;
-- scoring prohibited while a gate fails or remains unresolved;
-- exact ten-dimension scorecard validation;
-- canonical decision artifact and decision digest;
-- changed identity, foreign evidence, missing/duplicate gate, incomplete scorecard, unsupported version, extra field, non-canonical timestamp, and invalid score rejection.
+- migration `10008_local_sqlite_service_supervisor.sql`;
+- durable process generation, owner, lease, heartbeat, restart count, backoff, error, and terminal-halt state;
+- canonical append-only supervisor events;
+- file-backed SQLite using WAL and `synchronous = FULL`;
+- database close/reopen crash simulation;
+- fresh process-lease theft rejection;
+- exact-expiry stale process-lease reclaim;
+- durable heartbeat and scheduler message persistence across reopen;
+- retryable failure with explicit next-start time;
+- early-restart rejection and exact-time restart;
+- graceful stop without failure count;
+- terminal halt with no automatic restart;
+- process lease kept separate from portable scheduler message lease;
+- R4B-bound machine-readable profile evidence.
 
-Implementation head `e17020bb001d8e848a32e4fc8ac76bbdcdf6db40` passed CI run `30703462350`:
+The R4B decision is deliberately not a qualification:
+
+- classification: `conditional_candidate`;
+- selection: `not_selected`;
+- eligible for scoring: `false`;
+- passed gates: `7`;
+- failed gates: `0`;
+- unresolved gates: `G7`, `G8`, `G9`.
+
+G7 remains unresolved because no retained service-managed throughput evidence proves steady p95 above 21 committed ledgers/minute and catch-up above 30. G8 remains unresolved because sustained CPU, memory, disk, database growth, network, and resource stop thresholds are not measured. G9 remains unresolved because no actual always-on host, OS service manager, unattended boot restart, deploy/rollback automation, power/network continuity, or off-host evidence retention has been proven.
+
+Implementation and evidence head `0b9cf6b7f42aee4ac1fb93758d8c5cbfedff0f1a` passed CI run `30704517323`:
 
 - workflow-surface guard;
 - lint;
@@ -94,25 +108,22 @@ Implementation head `e17020bb001d8e848a32e4fc8ac76bbdcdf6db40` passed CI run `30
 - TypeScript type-check;
 - production runner bundle and configuration validation;
 - complete unit-test suite;
-- clean migrations through `10007`;
+- clean migrations through `10008`;
 - application build;
 - browser smoke.
 
-The final documentation head must pass the same ordinary CI. R4B is complete only after PR #1103 merges to `main`.
+The final documentation head must pass the same ordinary CI. R4C1 is complete only after PR #1104 merges to `main`.
 
-### R4C — Local profile harnesses
+### R4C2 — Local Postgres transaction and scheduler harness
 
-Status: **next after PR #1103 merges**.
+Status: **next after PR #1104 merges**.
 
-Planned local-only order:
+R4C2 will test Postgres transaction ownership, scheduler message identity, lease/retry/successor semantics, committed-only reads, and complete-state parity locally. It creates no hosted Supabase resource or credential.
 
-1. service-managed SQLite profile harness;
-2. Postgres transaction and scheduler semantics harness;
-3. libSQL/Turso-compatible storage and transfer harness;
-4. Cloudflare Worker/D1/Queue resource model without remote deployment.
+### R4C3–R4E
 
-### R4D–R4E
-
+- R4C3: local libSQL/Turso-compatible transaction and transfer harness;
+- R4C4: local Cloudflare Worker/D1/Queue resource model without deployment;
 - R4D: isolated read-only shadow measurement only after cost-safety gates pass;
 - R4E: select one fully qualified profile or record `no_profile_qualified`.
 
@@ -146,4 +157,5 @@ Pass fixed 24-hour and seven-day evidence windows before reopening formal Devnet
 - Do not silently fall back after integrity or identity failure.
 - Do not expose the portable reader publicly before a later explicit cutover gate.
 - Do not make a provider dashboard or interactive terminal part of routine operation.
+- Do not call a local crash-recovery harness an always-on production host.
 - Do not call a theoretical no-cost projection an operating result.
