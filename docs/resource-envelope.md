@@ -1,49 +1,75 @@
 # Resource envelope
 
-Last verified: 2026-07-08.
-
-Official references:
-
-- Cloudflare Workers limits: https://developers.cloudflare.com/workers/platform/limits/
-- Cloudflare D1 pricing and included usage: https://developers.cloudflare.com/d1/platform/pricing/
-- Cloudflare D1 limits: https://developers.cloudflare.com/d1/platform/limits/
+Last updated: 2026-08-01.
 
 ## Purpose
 
-This document defines the measurable runtime, storage, and query envelope for XRPL Lending Monitor.
+This document defines the measurable runtime, storage, scheduler, network, and query envelope for XRPL Lending Monitor.
 
-## Platform boundaries
+The collector core is provider-neutral. Provider limits are recorded in deployment-profile documents and tests, not treated as permanent product architecture.
 
-### Workers
+## Operating principles
 
-- request and CPU limits are treated as hard runtime boundaries;
-- external subrequests are bounded per invocation;
-- memory and wall-time behavior are measured separately from CPU time;
-- scheduled collection stops before its configured deadline margin;
-- the scheduled Worker never performs a complete global bootstrap scan.
+- no fixed ledger count is accepted as a complete resource budget;
+- every scan is bounded by measured transactions, bytes, requests, CPU, and wall time;
+- every commit is bounded by measured storage operations, rows, and bytes;
+- finalization is one bounded atomic transaction;
+- partial work is invisible and cannot advance a cursor;
+- a heavy ledger may span multiple commit phases;
+- the scheduler must preserve one-owner serialization and bounded retry;
+- the selected production profile must have no mandatory paid runtime dependency;
+- configured project guards must halt before provider hard limits or billable overage;
+- complete state must remain exportable into the SQLite reference format.
 
-### D1
+## Reference implementations
 
-D1 stores bounded incremental and historical state:
+### SQLite storage reference
 
-- network and epoch state;
-- synchronization cursor and ledger continuity state;
-- processed-ledger evidence;
-- protocol events;
-- normalized object changes;
-- Loan lifecycle events;
-- deleted-object archive records;
-- balance history;
-- current-state overlay upserts;
-- deletion tombstones;
-- overlay watermark;
-- aggregates, reconciliation state, and collector health.
+SQLite is the normative local and CI implementation for:
 
-D1 does not duplicate the complete immutable base read model.
+- collector work and phase state;
+- payload and commit chunks;
+- current/history candidate rows;
+- committed-only queries;
+- cursor and watermark advancement;
+- deterministic export and restore;
+- interruption, retry, duplicate, lease, and rollback tests.
+
+Passing SQLite tests proves collector semantics. It does not approve a remote production profile.
+
+### Durable local scheduler reference
+
+The local scheduler reference proves:
+
+- exactly one logical owner;
+- exactly one successor after success;
+- deterministic retry timing;
+- lease expiry and recovery;
+- duplicate wake-up convergence;
+- restart persistence;
+- truthful halted state when no successor or owner exists.
+
+It is a conformance reference, not an automatic hosting decision.
+
+## Deployment-profile envelope
+
+Each remote profile must publish a retained profile specification containing:
+
+- runtime request, CPU, memory, and wall-time limits;
+- external network and WebSocket limits;
+- storage transaction, query, statement, row, byte, and size limits;
+- scheduler frequency, retention, retry, and operation limits;
+- outbound and stored-data transfer limits;
+- no-cost included usage and project stop thresholds;
+- export, backup, restore, and rollback procedures;
+- behavior at each limit, including proof that it fails closed;
+- evidence that routine operation does not require interactive operator actions.
+
+A provider hard limit is never an operating target. Project thresholds must retain intervention and retry headroom.
 
 ## Current-state storage decision
 
-The earlier row-per-object D1 full-snapshot layout used a 350 MB project stop threshold before remote current-state bootstrap.
+The earlier row-per-object complete live snapshot layout used a 350 MB project stop threshold before remote current-state bootstrap.
 
 A 500-page local Devnet sample decoded 1,024,000 ledger objects and persisted 67,407 Lending objects in the evaluated layout. Local D1 grew by 218,869,760 bytes.
 
@@ -52,18 +78,18 @@ Measured projection was approximately:
 - 5.03 GB for one complete row-per-object current snapshot;
 - 10.10 GB for active plus rollback plus reserve.
 
-That projection exceeds the project safety envelope. The D1-only complete current-state snapshot layout therefore stops before remote production use.
+That projection exceeds the project safety envelope for the tested profile. The complete row-per-object hot-store layout therefore remains rejected.
 
-The active architecture is:
+The active product architecture remains:
 
 1. one complete verified immutable base read model; plus
-2. bounded D1 incremental history and current-state overlay.
+2. bounded committed incremental history and current-state overlay in the selected hot store.
 
-This is a technical resource decision. Public documentation does not include unrelated operational circumstances.
+This is a technical resource decision.
 
 ## Verified base read model
 
-The base stores complete current Vault, Loan Broker, and Loan state for one fixed validated ledger.
+The base stores complete current Vault, LoanBroker, and Loan state for one fixed validated ledger.
 
 Requirements:
 
@@ -80,13 +106,11 @@ Requirements:
 
 The base is not rebuilt by every scheduled collector run.
 
-## D1 overlay envelope
+## Hot overlay envelope
 
 Overlay storage is limited to changes after the active base ledger.
 
-An overlay upsert records the latest normalized current state for an object changed or created after the base. A deletion tombstone suppresses an object deleted after the base.
-
-Every overlay record is scoped by:
+Every overlay version is scoped by:
 
 - network;
 - epoch;
@@ -95,103 +119,120 @@ Every overlay record is scoped by:
 - object ID;
 - source ledger;
 - source transaction;
-- canonical projection or tombstone state.
+- owning `work_id`;
+- projection or tombstone state.
 
-Overlay growth is measured by row count, bytes, index amplification, and growth per day.
+Only rows owned by committed work are visible. Overlay growth is measured by row count, bytes, index amplification, versions per object, and growth per day.
 
-## Worker execution targets
+## Scan execution targets
 
-Scheduled runs:
+A scan phase:
 
-- process bounded contiguous ledger batches;
-- cap RPC requests and ledgers per run;
-- cap D1 statements, rows, and overlay mutations per run;
-- record CPU and wall time;
-- preserve catch-up capacity without skipping ledgers;
+- reads from the committed cursor plus one;
+- selects an adaptive contiguous range;
+- caps XRPL requests, transactions, decoded bytes, normalized bytes, payload bytes, CPU, and wall time;
+- validates parent-hash continuity;
+- derives every semantic class;
+- writes only bounded staging records and payload chunks;
+- advances no public cursor or watermark.
 
-### Queue fast-lane subrequest correction
+Initial scan ceiling: 48 ledgers for tests only. It may shrink to one heavy ledger. It is not a production safety claim.
 
-The retained 32-ledger WebSocket profile is the maximum per-delivery fast-lane range.
-The earlier 96-ledger profile usually used one WebSocket transport connection, but
-ledger contents also determine the size of the atomic D1 window commit and its
-surrounding state, slot, retention, capacity, metric, promotion, and successor
-operations. Extended operation demonstrated that the resulting invocation can exceed
-the platform subrequest limit even after many sparse 96-ledger passes succeed.
+## Commit execution targets
 
-The runtime therefore rejects a configured fast-lane maximum above 32. This is a
-deterministic range budget rather than an assumption that every ledger has the same
-cost. Any later increase requires retained worst-case content evidence plus the normal
-resource-budget approval process. Subrequest exhaustion does not advance the cursor or
-publish a successor.
+A commit phase:
 
-The retained passing 32-ledger production profile processed 32 logical ledger reads in
-about 6.8 seconds per sample with zero failures in the cited recovery window. The
-current WSS shape uses one transport connection for those logical reads, while the
-ledger cap also bounds the data-dependent persistence input. This is the demonstrated
-per-invocation rollback bound; caught platform exhaustion remains terminal and cannot
-silently expand it.
+- loads one staged chunk;
+- caps storage operations, rows, and bytes;
+- writes candidate rows tagged by `work_id`;
+- records chunk completion idempotently;
+- advances no cursor or public watermark;
+- schedules another commit or finalization.
 
-Behind-mode successors use a one-minute cadence, at most one Queue delivery at a time
-(`max_batch_size=1`, `max_concurrency=1`). Its nominal capacity is 32 x 5 = 160
-ledgers per five minutes. The fixed-window Devnet observation advanced 924 ledgers over
-11 five-minute intervals, or 84 ledgers per interval. Nominal recovery margin is
-therefore 76 ledgers per five minutes (about 1.9x the observed arrival rate). At lag
-zero the successor returns to the next five-minute boundary, reducing the caught-up
-steady-state ceiling to 32 ledgers per five minutes. Queue Free-plan operations are
-bounded to 1,440 catch-up deliveries/day during sustained lag; production must remain
-stopped until a separate review accepts that daily invocation, D1, CPU, and Queue
-envelope.
-- stop on parent-hash discontinuity, base identity mismatch, persistence failure, or deadline margin.
+Initial reference guards:
 
-When behind, the collector catches up across multiple runs rather than exceeding runtime limits.
+- at most 40 storage operations per invocation;
+- at most 40 canonical row mutations per invocation;
+- at most 512,000 encoded bytes per staged payload chunk;
+- at most 16,000 bytes per scheduler message.
 
-## Bootstrap execution targets
+Remote adapters may use stricter values. Any increase requires retained production-shaped evidence.
 
-Complete base bootstrap:
+## Finalize execution targets
 
-- uses one unfiltered binary ledger traversal;
-- caps marker pages and decoded objects per resumable unit;
-- writes deterministic bounded artifacts and manifests;
-- persists the exact marker only after durable artifact output;
-- avoids full in-memory accumulation;
-- rejects changed ledger identity on resume;
-- records requests, pages, decoded objects, relevant objects, bytes, retries, heap, and wall time.
+Finalization must atomically verify:
 
-## Database reads
+- all chunks complete;
+- exact start/end ledger and parent/final hashes;
+- unchanged network, epoch, and base identity;
+- matching semantic counts and payload digests;
+- consistent current/history ownership;
+- no earlier unresolved work blocking the cursor.
+
+Only finalization may mark work committed and advance public watermarks.
+
+## Throughput targets
+
+Observed Devnet advance was approximately 84 ledgers per five minutes, or 16.8 ledgers/minute.
+
+Required sustained committed throughput:
+
+- steady: greater than 21 ledgers/minute at p95 windows;
+- catch-up: greater than 30 ledgers/minute.
+
+These targets include scan, all required commit phases, and finalization. A fast scan with slow persistence does not pass.
+
+## Storage and database reads
 
 - use indexed pagination;
 - prohibit unbounded full-table API scans;
-- query only overlay rows bound to the active network, epoch, and base identity;
-- resolve current state as overlay upsert > base, tombstone > hidden, otherwise base;
+- query only committed rows bound to the active network, epoch, and base identity;
+- resolve current state as newest committed overlay upsert > base, newest committed tombstone > hidden, otherwise base;
 - resolve relationships against the same network, epoch, and base identity;
 - precompute overview and daily aggregates where justified;
-- measure D1 rows read and base pages read for major endpoints.
+- measure rows, bytes, operations, and latency for major endpoints;
+- preserve deterministic full export and restore.
+
+## Storage and database writes
+
+- write only Lending-related normalized history and bounded overlay state;
+- batch related writes within adapter limits;
+- account for index write amplification;
+- never advance the canonical cursor after partial persistence;
+- never advance a watermark beyond the committed cursor;
+- never accept overlay state for the wrong base identity or epoch;
+- preserve idempotent replay behavior;
+- isolate maintenance and compaction from scan and commit phases.
+
+## Immutable publication
+
+Long-lived semantic history remains outside the hot operational store in deterministic immutable segments and exact indexes.
+
+Publication:
+
+- reads committed work only;
+- verifies ledger/hash and semantic-count continuity;
+- publishes immutable artifacts;
+- independently verifies them;
+- advances the publication watermark only after verification;
+- authorizes bounded hot-store compaction only after publication succeeds.
+
+Publication automation is not the normal collection scheduler.
 
 ## Production-shaped browser and audit probes
 
 Production browser regression, screenshot audit, and other expensive read-only probes must preserve the same resource discipline as public runtime work.
 
-- measure current UTC-day D1 rows read and rows written before dependency installation, Playwright installation, or page traversal;
-- require the documented headroom gate to pass rather than relying on operator confirmation alone;
-- prefer reuse of already fetched bounded result windows and in-memory set intersection before issuing exact detail probes;
-- cap fallback witness detail probes explicitly;
-- reuse one representative entity for multiple compatible checks when doing so preserves coverage and source meaning;
-- do not revisit the same route solely to repeat assertions that can be performed during the existing representative route traversal;
-- do not remove representative relationship, history, archive, Search, freshness, error, or provenance checks merely to reduce reads;
-- record discovery logical API requests, discovery HTTP attempts, browser API request count, and bounded witness-selection mode where the probe supports those measurements;
-- retain separate human screenshot review where required; reduced request count does not replace visual review.
+- measure active-profile read/write headroom before dependency installation or traversal;
+- require the documented headroom gate to pass;
+- prefer reuse of bounded result windows and in-memory set intersection;
+- cap fallback witness detail probes;
+- reuse representative entities where coverage is preserved;
+- do not remove relationship, history, archive, Search, freshness, error, or provenance checks merely to reduce reads;
+- record logical API requests, HTTP attempts, and bounded witness-selection mode;
+- retain separate human screenshot review where required.
 
 A failed headroom gate is successful guardrail behavior. No browser or visual-audit result may be claimed when the workflow stops before traversal.
-
-## Database writes
-
-- write only Lending-related normalized history and bounded overlay state;
-- batch related writes within documented statement and row limits;
-- account for index write amplification;
-- never advance the canonical cursor after partial persistence;
-- never advance the overlay watermark beyond the committed cursor;
-- never accept overlay state for the wrong base identity or epoch;
-- preserve idempotent replay behavior.
 
 ## Checkpoint A measurements
 
@@ -202,77 +243,78 @@ The 2026-07-01 Devnet measurements established:
 - a complete filtered LoanBroker traversal required 11,481 requests and approximately 855 seconds;
 - filtered traversal follows the same global marker chain and does not reduce page count enough to justify repeated scans.
 
-These measurements reject a scheduled Worker full bootstrap and reject three separate filtered traversals.
+These measurements reject a scheduled full bootstrap and reject three separate filtered traversals.
 
-## Collector runtime selection
+## Runtime selection
 
-### Scheduled Worker
+### Portable incremental collector
 
-Approved for bounded status refresh and incremental validated-ledger collection, subject to production-shaped evidence for:
+Approved for implementation and local/CI validation.
 
-- p50, p95, and maximum CPU;
-- external subrequests per run;
-- D1 queries and rows read or written per run;
-- overlay mutations per run;
-- catch-up behavior after downtime;
-- multi-day Devnet soak results.
+It must pass:
 
-### Resumable long-running bootstrap runner
+- adaptive budget tests;
+- heavy-ledger split tests;
+- work lifecycle and committed-only visibility tests;
+- interruption, retry, duplicate, lease, and restart tests;
+- full export and restore tests;
+- storage and scheduler adapter conformance tests.
+
+### Candidate remote profile
+
+Not approved until R4.
+
+It must pass:
+
+- XRPL WebSocket compatibility;
+- p50, p95, and maximum CPU/wall time;
+- external requests per phase;
+- storage operations, rows, and bytes per phase and per day;
+- scheduler operation and retry volume;
+- hot-store growth and compaction;
+- one-hour and 24-hour downtime catch-up;
+- no-cost envelope and fail-closed stop thresholds;
+- export, backup, restore, and rollback;
+- multi-day Devnet qualification.
+
+### Resumable bootstrap runner
 
 Selected for initial base generation and explicit replacement bootstrap.
 
-It must pass:
-
-- exact marker resume tests;
-- same-ledger identity enforcement;
-- deterministic artifact generation;
-- complete manifest verification;
-- relationship tests;
-- interruption and resume tests.
-
-### Base read-model publication
-
-Selected for immutable complete current-state base publication.
-
-It must pass:
-
-- verified source manifest identity;
-- deterministic record count checks;
-- bounded page and lookup generation;
-- immutable data publication before active channel change;
-- reader integrity checks;
-- previous-base preservation on failure.
+It must pass exact marker resume, same-ledger identity, deterministic artifact, manifest, relationship, interruption, and resume tests.
 
 ## Measurements required before release
 
-- CPU time per processed ledger at p50, p95, and maximum;
-- external subrequests per run;
-- D1 queries, rows read, and rows written per run;
-- overlay mutations per run;
+- CPU and wall time per phase at p50, p95, and maximum;
+- external requests per scan;
+- storage operations, rows read, rows written, and bytes per phase;
 - index write amplification;
-- database growth per day and per 1,000 protocol events;
-- overlay row count and bytes after catch-up;
-- tombstone count and bytes after catch-up;
-- base page reads and D1 rows read for major endpoints;
-- production browser-regression discovery logical requests, HTTP attempts, and browser API request count;
+- scheduler operations and retries per day;
+- hot-store growth per day and per 1,000 protocol events;
+- overlay versions and tombstones after catch-up;
+- current/history API read cost;
+- publication and compaction cost;
+- complete export and restore duration;
 - catch-up time after 1 hour and 24 hours of downtime;
 - reconciliation cost;
-- real multi-day soak evidence.
+- real multi-day operation evidence.
 
 ## Automatic guardrails
 
-- stop before the execution deadline margin;
-- never advance a cursor for an incomplete ledger;
-- cap ledgers, transactions, retries, marker pages, statements, rows, and overlay mutations per run;
-- persist bootstrap continuation only after durable artifact output;
+- stop before execution deadline margins;
+- never advance a cursor for incomplete work;
+- cap ledgers, transactions, retries, bytes, storage operations, rows, and overlay mutations;
 - never publish an incomplete or digest-invalid base;
-- reject base identity mismatch;
-- never advance the overlay watermark beyond the committed cursor;
-- show stale-data status when collection slows;
+- reject network, epoch, base, or parent-hash mismatch;
+- never advance a watermark beyond the committed cursor;
+- show stale or halted status when collection slows or loses its successor;
 - rate-limit expensive exports;
 - preserve canonical normalized data before optional raw payloads;
-- stop production browser and screenshot probes before traversal when the measured D1 headroom gate does not pass.
+- stop browser and screenshot probes before traversal when measured headroom does not pass;
+- stop before any configured paid overage or provider hard limit.
 
 ## Runtime selection rule
 
-The production collector mode is accepted only after production-shaped evidence demonstrates adequate safety margin for CPU, requests, D1 growth, overlay growth, query volume, reconciliation, and catch-up behavior. When a gate does not pass, choose a documented alternative cadence or bounded runtime path and expose the resulting data freshness accurately.
+The production profile is selected only after production-shaped evidence demonstrates adequate safety margin for cadence, CPU, network requests, scheduler operations, storage growth, query volume, export, restore, reconciliation, and catch-up behavior.
+
+When a profile fails a gate, reject that profile without changing collector semantics. Choose another documented profile or expose the resulting data freshness accurately.
