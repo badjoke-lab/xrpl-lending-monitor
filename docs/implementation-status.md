@@ -14,17 +14,18 @@ The public read surface remains a production test surface backed by the last ver
 
 The controlling design is [`ops/p0-budgeted-microbatch-reconstruction-2026-08-01.md`](ops/p0-budgeted-microbatch-reconstruction-2026-08-01.md).
 
-The replacement collector preserves every public and semantic requirement while replacing the failed all-in-one invocation with:
+The replacement collector preserves every public and semantic requirement while separating the collector contract from any one hosted runtime:
 
 - adaptive scan work bounded by actual transaction, byte, CPU, wall-time, and external-request budgets;
-- resumable D1 commit chunks bounded below the 50-query Free-plan invocation limit;
+- resumable commit chunks bounded by adapter-specific storage limits;
 - one small atomic finalization step that alone advances the cursor and committed watermark;
 - work-scoped current/history rows invisible until finalization;
-- separate bounded maintenance and GitHub-backed immutable publication;
-- Queue catch-up at 30-second successors and steady operation at 60-second successors, subject to measured daily Free-plan budgets;
-- guarded GitHub Actions for migration, deployment, Queue control, rollback, evidence, and publication, with no owner dashboard or terminal step.
+- a SQLite reference implementation and shared adapter conformance tests;
+- provider-neutral storage, scheduler, execution, and publication interfaces;
+- separate bounded maintenance and Git-backed immutable publication;
+- deployment-profile selection only after measured no-cost, cadence, export, rollback, and failure-mode qualification.
 
-A fixed ledger count is no longer accepted as a safety boundary.
+A fixed ledger count and a provider-specific invocation shape are no longer accepted as safety boundaries.
 
 ## Current production evidence
 
@@ -43,61 +44,85 @@ Controlling checkpoint: Issue #1079.
 - successor chain: halted
 - 24-hour soak: not started
 
-Queue delivery being configured as resumed does not mean the collector is operating when no successor exists.
+A configured remote queue does not mean the collector is operating when no successor exists. The halted Cloudflare deployment remains evidence and rollback context only.
 
 ## Active implementation order
 
-### R0 — Contract reset
+### R0 — Contract and portability reset
 
 Status: active in PR #1081.
 
 - close obsolete PR #1080;
-- rewrite architecture, collector, runtime, resource, roadmap, and status documents;
-- freeze all old 32-ledger recovery and qualification paths;
-- record exact no-functionality-reduction invariants.
+- retire the fixed-32-ledger recovery and its qualification path;
+- rewrite runtime, resource, status, and recovery schedule documents around provider-neutral contracts;
+- define `StorageAdapter`, `SchedulerAdapter`, `ExecutionAdapter`, and `PublicationAdapter`;
+- make SQLite the reference implementation for local and CI proof;
+- freeze remote recovery until the adapter contract and deployment-profile gate exist.
 
-### R1 — Work schema and deterministic planner
+Exit: source-of-truth documents agree, contain technical rationale only, and no hosted provider is treated as the required architecture.
 
-- add collector work, payload chunk, commit chunk, and committed-visibility schema;
-- implement adaptive candidate planning;
-- add dense/heavy-ledger fixtures;
-- prove that partial work cannot advance the cursor or become visible.
+### R1 — Reference schema and deterministic planner
 
-### R2 — Scan, commit, and finalize state machine
+- add implementation-neutral collector work, payload chunk, commit chunk, and committed-visibility schema;
+- implement the schema first in SQLite;
+- implement deterministic adaptive candidate planning and resource accounting;
+- add dense and content-heavy ledger fixtures;
+- prove that partial work cannot advance the cursor or become visible;
+- define storage migration and export invariants independently of a remote provider.
 
-- implement typed Queue work messages;
-- stage normalized payloads without canonical writes during scan;
+Exit: local SQLite and CI tests prove atomic finalization, committed-only visibility, deterministic replay, and full export.
+
+### R2 — Provider-neutral scan, commit, and finalize runtime
+
+- implement typed work-phase messages independent of one queue product;
+- implement scan-only staging through `StorageAdapter`;
 - commit bounded chunks idempotently;
 - finalize atomically;
+- implement a durable local scheduler reference for retry, lease, duplicate, and successor tests;
 - preserve every semantic class and canonical identity.
 
-### R3 — Overlay, maintenance, and immutable publication separation
+Exit: local and CI tests process sparse, dense, oversized, interrupted, retried, duplicate, reset, and parent-hash-failure fixtures without provider-specific code in the collector core.
 
+### R3 — Adapters, overlay, maintenance, and publication separation
+
+- implement storage and scheduler adapter conformance suites;
 - make current/history queries read committed work only;
 - compact superseded hot rows safely;
-- publish deterministic immutable segments and indexes through GitHub Actions;
-- advance archive watermarks only after independent verification.
+- preserve hybrid API behavior and legacy rows during migration;
+- keep immutable publication separate from the normal collection scheduler;
+- prove that a complete state export can be restored into a second adapter.
 
-### R4 — Automated deployment and rollback
+Exit: SQLite reference, adapter parity, API parity, deterministic archive/replay, and cross-adapter restore tests pass with no semantic-count loss.
 
-- add exact-SHA migration/deployment workflow;
-- pause/purge/seed/resume Queue automatically;
-- retain pre/post snapshots and Issue evidence;
-- rollback and fail closed without user intervention.
+### R4 — Deployment-profile qualification
 
-### R5 — Controlled production recovery
+- implement guarded deployment and rollback tooling for candidate remote profiles;
+- test scheduler cadence, XRPL WebSocket support, transactional storage, export, recovery, and fail-closed limits;
+- reject profiles that require a paid operating dependency, automatic paid overage, or routine interactive operator steps;
+- select no production profile until production-shaped evidence passes;
+- retain pre/post snapshots and Issue evidence for every remote mutation.
 
-- apply migration and deploy reconstructed runtime;
+Exit: at least one candidate profile passes the adapter suite and a read-only/shadow qualification; production remains halted until an explicit recovery PR is merged.
+
+### R5 — Controlled shadow and production recovery
+
+- deploy only the selected qualified profile;
 - verify one staged work item end to end;
 - run a fixed two-hour catch-up qualification;
-- continue only when throughput, continuity, semantic, Queue, Worker, D1, and storage gates pass.
+- prove rollback, export, and restoration before continuing;
+- continue only when throughput, continuity, semantic, scheduler, runtime, storage, and no-cost operating gates pass.
+
+Exit: exact contiguous cursor advance, zero semantic loss, zero resource-limit errors, and fail-closed rollback are proven.
 
 ### R6 — Lag zero and steady qualification
 
 - reach lag zero automatically;
-- transition from 30-second catch-up to 60-second steady mode;
+- transition from catch-up to the selected steady cadence;
 - pass twelve consecutive five-minute freshness checkpoints;
-- prove immutable/live/current agreement.
+- prove immutable/live/current agreement and no hidden partial work;
+- prove the selected profile remains inside its measured no-cost envelope.
+
+Exit: lag zero and five-minute freshness are stable without manual intervention.
 
 ### R7 — Formal operation evidence
 
@@ -112,12 +137,14 @@ The reconstructed runtime is not approved until production-shaped evidence prove
 
 - steady committed throughput greater than 21 ledgers/minute;
 - catch-up committed throughput greater than 30 ledgers/minute;
-- Queue operations below 9,000/day in catch-up and below 5,000/day in steady mode;
-- D1 rows written below 80,000/day and rows read below 4,000,000/day;
-- D1 physical size below the project stop threshold;
-- zero subrequest, CPU, memory, query-count, row-size, and hidden-partial-work errors;
+- selected scheduler operations remain inside its measured daily guard;
+- selected storage reads, writes, queries, and physical size remain inside project stop thresholds;
+- zero subrequest, CPU, memory, query-count, row-size, hidden-partial-work, and paid-overage events;
+- complete export and restore into the reference format;
 - no supported semantic record loss;
 - no gap, hash discontinuity, or cursor advancement before full finalization.
+
+Provider-specific numeric ceilings belong in the selected deployment profile, not in the collector-core contract.
 
 ## Remaining release gates
 
@@ -134,11 +161,13 @@ After R7:
 
 ## Operating restrictions
 
-- Do not describe the collector as operating while the successor chain is absent.
+- Do not describe the collector as operating while its successor or lease chain is absent.
 - Do not restart the retired fixed-32-ledger runtime.
+- Do not select a hosted provider before R4 qualification.
+- Do not use GitHub Actions as the normal collection clock.
 - Do not start stabilization or soak before R6.
 - Do not enable Mainnet.
 - Do not remove semantic history classes or public product capabilities.
 - Do not skip a failed ledger or advance a cursor after partial persistence.
-- Do not require the owner to use the Cloudflare dashboard or local terminal for recovery.
-- Do not call a theoretical Free-plan projection an operating result.
+- Do not make a provider dashboard, local terminal, or paid runtime dependency part of routine recovery.
+- Do not call a theoretical no-cost projection an operating result.
