@@ -1,6 +1,6 @@
 # P0 budgeted microbatch collector reconstruction — 2026-08-01
 
-Status: controlling recovery design. This document supersedes the fixed-ledger-count Queue recovery described by PRs #1069–#1078 and Issues #1072/#1079.
+Status: controlling recovery design and implementation schedule. This document supersedes the fixed-ledger-count Queue recovery described by PRs #1069–#1078 and Issues #1072/#1079.
 
 ## Decision
 
@@ -242,24 +242,45 @@ Dates are planning targets, not claims of completion.
 
 ### R0 — Contract and portability reset — 2026-08-01
 
-- close the obsolete 32-ledger checkpoint PR;
-- update runtime, resource, implementation-status, and recovery-schedule documents;
-- retire provider-specific assumptions from the collector contract;
-- define adapter boundaries and reference implementations;
-- freeze new soak, promotion, and remote recovery work;
-- record the halted production evidence and exact invariants.
+Status: **complete** in PR #1081 (`c077e7b16b8b08213bbadcc5e927bba0f9472f6c`).
 
-Exit: source-of-truth documents agree, contain technical rationale only, and no hosted provider is the required architecture.
+Delivered:
+
+- closed the obsolete 32-ledger checkpoint PR;
+- updated runtime, resource, implementation-status, and recovery-schedule documents;
+- retired provider-specific assumptions from the collector contract;
+- defined adapter boundaries and reference implementations;
+- froze new soak, promotion, and remote recovery work;
+- recorded the halted production evidence and exact invariants.
+
+Exit passed: source-of-truth documents agree, contain technical rationale only, and no hosted provider is the required architecture.
 
 ### R1 — Reference schema and deterministic planner — 2026-08-01 to 2026-08-02
 
-- add implementation-neutral work, payload-chunk, commit-chunk, and committed-visibility schema;
-- implement and migrate the schema in SQLite first;
-- implement deterministic adaptive scan planning and resource accounting;
-- add heavy-ledger fixtures and replay tests;
-- define complete export and restore format.
+Status: **implementation and exit evidence passed in PR #1082; merge pending**.
 
-Exit: local SQLite tests prove no partial work is publicly visible, no cursor advances before finalization, and complete state can be exported and restored.
+Delivered on the branch:
+
+- implementation-neutral work, payload-chunk, commit-chunk, reference-row, and committed-visibility schema;
+- SQLite-first migration `10004_portable_collector_work.sql`;
+- deterministic adaptive scan planning and provider-neutral resource accounting;
+- content-heavy and oversized-single-ledger planning fixtures;
+- real SQLite atomic-finalize and committed-only visibility tests;
+- deterministic complete-state export and restoration into a second empty SQLite database;
+- canonical byte-for-byte re-export parity after restore.
+
+Retained validation:
+
+- ordinary CI run `30690051871` passed the workflow guard, lint, type-check, complete unit suite, complete local migration sequence, application build, and browser smoke;
+- the clean local migration sequence included the new R1 migration after every existing migration;
+- incomplete commit chunks did not expose rows or advance a watermark;
+- discontinuous parent boundaries were rejected;
+- repeated finalization converged idempotently;
+- restore into a non-empty target was rejected.
+
+The first CI attempt exposed one invalid discontinuity fixture outside its declared validated head. The fixture was corrected to test an actual missing ledger inside the declared range. No runtime guard or acceptance condition changed.
+
+Exit evidence passed: no partial work is publicly visible, no cursor advances before finalization, deterministic planning and replay pass, and complete state can be exported and restored. R1 is recorded complete only after PR #1082 is merged to `main`.
 
 ### R2 — Portable scan/commit/finalize runtime — 2026-08-02 to 2026-08-03
 
