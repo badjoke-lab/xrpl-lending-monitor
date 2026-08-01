@@ -515,4 +515,4 @@ describe('portable collector fixture scan runtime', () => {
       expect(db.get<{ count: number }>('SELECT COUNT(*) AS count FROM collector_work')?.count).toBe(0)
     }
   })
-}
+})
