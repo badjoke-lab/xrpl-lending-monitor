@@ -1,6 +1,6 @@
 # R2b2 bounded phase runtime plan — 2026-08-01
 
-Status: controlling R2b2 implementation plan. R2b1 is complete in PR #1086. R2b2-A is complete in PR #1088. The repeated-scan contract is complete in PR #1089. R2b2-B0 message implementation and validation passed in PR #1090 and is pending merge; R2b2-B1 is next.
+Status: controlling R2b2 implementation plan. R2b1, R2b2-A, and R2b2-B0 are complete on `main`. R2b2-B1 implementation and validation passed in PR #1091 and is pending merge. R2b2-C is next.
 
 Controlling scan-identity amendment: [`r2-scan-sequence-amendment-2026-08-01.md`](r2-scan-sequence-amendment-2026-08-01.md).
 
@@ -56,7 +56,7 @@ A scan message is accepted when either:
 1. the committed watermark exactly equals its expected previous ledger and hash; or
 2. no watermark exists and the message exactly equals the configured immutable-base boundary.
 
-Any other state is `stale_boundary` or `base_mismatch`. The runtime never silently replans from another cursor.
+Any other state is `stale_boundary` or `parent_hash_mismatch`. The runtime never silently replans from another cursor.
 
 Every scan message carries required non-negative `scanSequence`:
 
@@ -72,13 +72,12 @@ The sequence is not wall-clock time or an attempt count. It distinguishes repeat
 The reference `FixtureExecutionAdapter` supplies:
 
 - configured network, epoch, base identity, and immutable-base boundary;
-- deterministic clock and successor timing policy;
+- deterministic successor and retry timing;
 - validated head;
 - contiguous ledger cost estimates for the R1 planner;
 - normalized source candidates for an exact selected range;
-- injected retryable transport/storage failures;
-- injected reset, epoch, base, parent-hash, digest, resource, and interruption failures;
-- request, byte, record, and elapsed counters.
+- injected retryable transport/storage and terminal failures;
+- request, range, selected-ledger, record, and staging counters.
 
 The adapter imports no hosted-provider SDK and performs no live network request.
 
@@ -86,17 +85,18 @@ The adapter imports no hosted-provider SDK and performs no live network request.
 
 1. claim one `scan` message;
 2. verify its exact boundary and non-negative `scanSequence`;
-3. read the fixture validated head and estimates;
-4. run the R1 adaptive planner;
-5. collect and validate the selected ledger range;
-6. build the R2b1 normalized payload and deterministic chunks;
-7. precompute the commit count and successor `commit:0`;
-8. call `completeWithSuccessor` with one mutation callback that:
+3. read the fixture validated head;
+4. halt with `reset_detected` when the head precedes the boundary;
+5. read exact contiguous cost estimates and run the R1 adaptive planner;
+6. collect and validate the selected ledger range;
+7. build the R2b1 normalized payload and deterministic chunks;
+8. precompute the commit count and successor `commit:0`;
+9. call `completeWithSuccessor` with one mutation callback that:
    - creates the deterministic work item;
    - stages every encoded payload chunk with its chunk digest;
    - seals final ledger/hash, semantic counts, full payload digest, and exact chunk counts;
-9. commit message completion and successor outbox atomically;
-10. leave committed visibility and the watermark unchanged.
+10. commit message completion and successor outbox atomically;
+11. leave candidate rows, committed visibility, and the watermark unchanged.
 
 Caught-up scan behavior:
 
@@ -108,14 +108,16 @@ Caught-up scan behavior:
 
 A single-ledger resource halt records a terminal result and no successor.
 
+R2b2-B1 proves this scan behavior with real SQLite and remains pending merge in PR #1091.
+
 ## Commit execution
 
 1. claim the exact `commit` message;
-2. read and decode its exact payload chunk;
-3. verify work ID, payload digest, chunk digest, chunk index, total count, and record order;
+2. load the exact work and payload chunk;
+3. verify work status, chunk index, encoding, payload digest, chunk digest, total chunk count, and canonical record order;
 4. reject a non-next unresolved chunk unless it is already completed;
-5. map each record to one work-scoped reference row using canonical value JSON;
-6. enforce at most 40 row mutations and the operation budget;
+5. decode at most 40 records and map each to one work-scoped reference row using canonical value JSON;
+6. enforce the storage-operation, row-mutation, and byte budgets;
 7. call `completeWithSuccessor` with one mutation callback that:
    - inserts candidate rows idempotently;
    - completes the commit chunk with retained digest and counts;
@@ -139,7 +141,7 @@ A duplicate finalize moves neither work nor watermark twice.
 
 ## Runtime result and failure handling
 
-A `PortableCollectorPhaseRuntime` returns one of:
+A portable phase runtime returns one of:
 
 - `completed` with retained phase result and successor identity;
 - `duplicate` with retained result;
@@ -162,11 +164,7 @@ Delivered:
 - `finalizeWorkInTransaction` plus standalone wrapper;
 - tests proving no nested transaction and exact rollback.
 
-Retained validation from CI runs `30694527924` and `30694653827`:
-
-- workflow guard, lint, type-check, complete unit suite, clean migration sequence, application build, and browser smoke passed;
-- caller-owned SQLite finalization completed without a nested `BEGIN`;
-- an injected exception after storage finalization rolled back work status, committed visibility, and watermark advancement.
+Retained validation from CI runs `30694527924` and `30694653827` passed the complete normal CI suite.
 
 ### R2b2-B0 contract — Repeated scan identity
 
@@ -174,7 +172,7 @@ Status: **complete** in PR #1089, merge `51238a35184f5b4815fa79c1144df92ebe8d77a
 
 ### R2b2-B0 implementation — Scan sequence messages
 
-Status: **implementation and validation passed in PR #1090; merge pending**.
+Status: **complete** in PR #1090, merge `bcb812b9001ea0e47cd2571e2ed3209c450cf84f`.
 
 Delivered:
 
@@ -186,29 +184,36 @@ Delivered:
 - exact runtime export/restore retention;
 - unchanged commit and finalize identities.
 
-Retained validation from CI run `30695168683`:
-
-- workflow guard, lint, type-check, complete unit suite, clean migration sequence, application build, and browser smoke passed;
-- first implementation CI failed only on three pre-existing sequence-less test fixtures, which were corrected explicitly without weakening the contract.
-
 ### R2b2-B1 — Fixture execution and scan
 
-Status: **next after PR #1090 merges to `main`**.
+Status: **implementation and validation passed in PR #1091; merge pending**.
 
-- fixture adapter;
-- initial/watermark boundary checks;
-- planner integration;
-- normalized payload and chunk staging;
+Delivered:
+
+- deterministic fixture execution adapter and counters;
+- exact immutable-base and committed-watermark boundary checks;
+- reset detection and R1 planner integration;
+- normalized payload and chunk construction;
+- atomic work/chunk staging and commit-successor outbox reservation;
 - caught-up successor using sequence `+1`;
-- retry and stale-lease identity preservation;
-- resource-halt behavior.
+- exact retry identity for transport and storage failures;
+- single-ledger resource halt;
+- no early candidate visibility or watermark advancement;
+- scan mutation rollback after an injected storage interruption.
+
+Retained validation from CI run `30695623746`:
+
+- workflow guard, lint, type-check, complete unit suite, clean migration sequence, application build, and browser smoke passed;
+- the first CI attempt exposed two terminal-classification narrowing errors, corrected without weakening any failure rule.
 
 ### R2b2-C — Commit runtime
 
-- exact chunk decode and mapping;
+Status: **next after PR #1091 merges to `main`**.
+
+- exact chunk decode and identity verification;
 - bounded candidate mutations;
 - next-commit/finalize selection;
-- duplicate and interruption convergence.
+- duplicate, retry, wrong-index, digest, resource, and interruption convergence.
 
 ### R2b2-D — Finalize runtime
 
