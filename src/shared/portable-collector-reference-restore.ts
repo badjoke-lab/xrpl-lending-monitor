@@ -5,8 +5,8 @@ import {
   type PortableSqliteValue,
 } from './portable-collector-reference-store'
 
-interface PortableExportStateV2 {
-  schemaVersion: 2
+interface PortableExportStateV1 {
+  schemaVersion: 1
   work: Record<string, unknown>[]
   payloadChunks: Record<string, unknown>[]
   commitChunks: Record<string, unknown>[]
@@ -71,7 +71,7 @@ function hexPayload(row: Record<string, unknown>): Uint8Array {
   return bytes
 }
 
-function parseExport(exportedState: string): PortableExportStateV2 {
+function parseExport(exportedState: string): PortableExportStateV1 {
   let raw: unknown
   try {
     raw = JSON.parse(exportedState)
@@ -79,9 +79,9 @@ function parseExport(exportedState: string): PortableExportStateV2 {
     throw new Error('portable export is not valid JSON')
   }
   const parsed = record(raw, 'export')
-  if (parsed.schemaVersion !== 2) throw new Error('unsupported portable export schema version')
+  if (parsed.schemaVersion !== 1) throw new Error('unsupported portable export schema version')
   return {
-    schemaVersion: 2,
+    schemaVersion: 1,
     work: records(parsed.work, 'work'),
     payloadChunks: records(parsed.payloadChunks, 'payloadChunks'),
     commitChunks: records(parsed.commitChunks, 'commitChunks'),
