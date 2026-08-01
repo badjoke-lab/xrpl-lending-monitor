@@ -16,6 +16,7 @@ The public read surface remains a production test surface backed by the last ver
 - Parent R2 contract: [`ops/r2-portable-runtime-contract-2026-08-01.md`](ops/r2-portable-runtime-contract-2026-08-01.md)
 - R2b contract: [`ops/r2b-normalized-payload-phase-runtime-2026-08-01.md`](ops/r2b-normalized-payload-phase-runtime-2026-08-01.md)
 - Active R2b2 plan: [`ops/r2b2-bounded-phase-runtime-plan-2026-08-01.md`](ops/r2b2-bounded-phase-runtime-plan-2026-08-01.md)
+- Repeated-scan identity amendment: [`ops/r2-scan-sequence-amendment-2026-08-01.md`](ops/r2-scan-sequence-amendment-2026-08-01.md)
 - Runtime invariants: [`history-runtime-contract.md`](history-runtime-contract.md)
 - Resource gates: [`resource-envelope.md`](resource-envelope.md)
 
@@ -69,47 +70,54 @@ Delivered:
 - single-record resource halt;
 - complete-payload and encoded-chunk tamper rejection.
 
-Retained CI evidence includes successful workflow guard, lint, type-check, complete unit suite, clean migration sequence, application build, and browser smoke.
-
-## Active R2b2 work
-
-R2b2 is **active and incomplete** under `ops/r2b2-bounded-phase-runtime-plan-2026-08-01.md`.
-
 ### R2b2-A — Transaction-aware store
 
-Status: **implementation and validation passed in PR #1088; merge pending**.
+Complete in PR #1088, merge `56dfe67cf969ac29357e7d49970da8b4027eba27`.
 
-Delivered on the branch:
+Delivered:
 
 - typed work, payload-chunk, commit-chunk, candidate-row, and watermark snapshots;
 - exact work-scoped reads for runtime use without ad hoc SQL;
-- `finalizeWorkInTransaction` that performs final guards, work commit, and watermark advancement inside the caller transaction;
-- the existing standalone `finalizeWork` retained as the transaction-opening wrapper;
-- real SQLite proof that caller-owned finalization does not open a nested transaction;
-- injected interruption proof that work status, committed visibility, and watermark advancement roll back together.
+- `finalizeWorkInTransaction` inside caller-owned transactions;
+- standalone `finalizeWork` compatibility wrapper;
+- real SQLite proof of no nested transaction;
+- injected interruption rollback of work status, committed visibility, and watermark advancement.
 
-Retained CI evidence from run `30694527924`:
+Retained CI evidence from runs `30694527924` and `30694653827` includes successful workflow guard, lint, type-check, complete unit suite, clean migration sequence, application build, and browser smoke.
 
-- workflow-surface guard passed;
-- lint passed;
-- TypeScript type-check passed;
-- production runner bundle and configuration validation passed;
-- complete unit-test suite passed;
-- complete clean local migration sequence passed;
-- application build passed;
-- browser smoke passed.
+## Active R2b2 work
 
-R2b2-A is recorded complete only after PR #1088 merges to `main`.
+R2b2 is **active and incomplete** under the controlling plan and repeated-scan identity amendment.
 
-### R2b2-B — Fixture execution and scan
+### R2b2-B0 — Repeated scan identity
 
-Status: **next after R2b2-A merge**.
+Status: **contract correction active; implementation follows after merge**.
+
+Technical finding:
+
+- the durable scheduler treats a message ID and its `available_at` as immutable;
+- a caught-up scan must schedule another logical wake-up from the same ledger/hash boundary;
+- the existing scan ID omitted a wake-up sequence, so reusing it at a later time would conflict with the completed message;
+- delivery-attempt count cannot be used because retry and stale-lease reclaim must preserve one semantic ID.
+
+Controlling correction:
+
+- add non-negative `scanSequence` to `ScanPhaseMessageV1` and canonical scan ID;
+- use sequence `0` for initial and post-finalize scans;
+- use current sequence `+ 1` only for caught-up successors at the same boundary;
+- preserve the exact sequence and ID for retry, duplicate delivery, and stale-lease recovery;
+- reject missing, negative, fractional, unsafe, and unknown sequence values;
+- leave commit and finalize identities unchanged.
+
+### R2b2-B1 — Fixture execution and scan
+
+Status: **next after R2b2-B0 contract and message implementation merge**.
 
 - deterministic fixture `ExecutionAdapter`;
 - initial and committed-boundary checks;
 - R1 planner integration;
 - normalized payload and chunk staging;
-- caught-up and resource-halt behavior.
+- caught-up successor and resource-halt behavior.
 
 ### R2b2-C — Commit runtime
 
