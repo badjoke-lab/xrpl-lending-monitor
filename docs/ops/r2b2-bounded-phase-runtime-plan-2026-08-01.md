@@ -1,6 +1,6 @@
 # R2b2 bounded phase runtime plan — 2026-08-01
 
-Status: controlling R2b2 implementation plan. R2b1 is complete in PR #1086. R2b2-A is complete in PR #1088, merge `56dfe67cf969ac29357e7d49970da8b4027eba27`. R2b2-B is active after the repeated-scan identity amendment is merged.
+Status: controlling R2b2 implementation plan. R2b1 is complete in PR #1086. R2b2-A is complete in PR #1088. The repeated-scan contract is complete in PR #1089. R2b2-B0 message implementation and validation passed in PR #1090 and is pending merge; R2b2-B1 is next.
 
 Controlling scan-identity amendment: [`r2-scan-sequence-amendment-2026-08-01.md`](r2-scan-sequence-amendment-2026-08-01.md).
 
@@ -58,14 +58,14 @@ A scan message is accepted when either:
 
 Any other state is `stale_boundary` or `base_mismatch`. The runtime never silently replans from another cursor.
 
-Every scan message also carries `scanSequence`:
+Every scan message carries required non-negative `scanSequence`:
 
 - initial immutable-base scan: `0`;
 - first scan after watermark advancement: `0`;
 - caught-up successor from the same boundary: current sequence `+ 1`;
 - retry or stale-lease reclaim: unchanged sequence and message ID.
 
-The sequence is not wall-clock time or an attempt count. It exists only to distinguish repeated logical wake-ups at one unchanged committed boundary.
+The sequence is not wall-clock time or an attempt count. It distinguishes repeated logical wake-ups at one unchanged committed boundary.
 
 ## Fixture execution adapter
 
@@ -168,25 +168,40 @@ Retained validation from CI runs `30694527924` and `30694653827`:
 - caller-owned SQLite finalization completed without a nested `BEGIN`;
 - an injected exception after storage finalization rolled back work status, committed visibility, and watermark advancement.
 
-### R2b2-B0 — Repeated scan identity
+### R2b2-B0 contract — Repeated scan identity
 
-Status: **active contract correction**.
+Status: **complete** in PR #1089, merge `51238a35184f5b4815fa79c1144df92ebe8d77a4`.
 
-- add `scanSequence` to the canonical scan message and identity;
-- preserve sequence on retry and lease recovery;
-- increment only for caught-up successors at the same boundary;
-- reset to `0` after watermark advancement;
-- pass message, scheduler, and export/restore regression tests.
+### R2b2-B0 implementation — Scan sequence messages
+
+Status: **implementation and validation passed in PR #1090; merge pending**.
+
+Delivered:
+
+- required `scanSequence` field and canonical identity component;
+- initial/post-finalize sequence `0` semantics;
+- distinct caught-up wake-up IDs from one boundary;
+- retry and stale-lease identity preservation;
+- strict invalid-sequence and changed-identity rejection;
+- exact runtime export/restore retention;
+- unchanged commit and finalize identities.
+
+Retained validation from CI run `30695168683`:
+
+- workflow guard, lint, type-check, complete unit suite, clean migration sequence, application build, and browser smoke passed;
+- first implementation CI failed only on three pre-existing sequence-less test fixtures, which were corrected explicitly without weakening the contract.
 
 ### R2b2-B1 — Fixture execution and scan
 
-Status: **next after R2b2-B0 merges to `main`**.
+Status: **next after PR #1090 merges to `main`**.
 
 - fixture adapter;
 - initial/watermark boundary checks;
 - planner integration;
 - normalized payload and chunk staging;
-- caught-up successor and resource-halt behavior.
+- caught-up successor using sequence `+1`;
+- retry and stale-lease identity preservation;
+- resource-halt behavior.
 
 ### R2b2-C — Commit runtime
 
@@ -199,7 +214,7 @@ Status: **next after R2b2-B0 merges to `main`**.
 
 - full payload reconstruction and digest/count verification;
 - transaction-aware finalization;
-- committed-only visibility and next-scan reservation;
+- committed-only visibility and next-scan reservation with sequence `0`;
 - staged, committing, and committed export/restore resumption.
 
 ## Exit tests
