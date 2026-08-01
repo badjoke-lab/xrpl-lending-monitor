@@ -27,6 +27,7 @@ export type PortableFixtureFailureStage =
   | 'cost_estimates'
   | 'normalized_range'
   | 'after_scan_staging'
+  | 'after_commit_mutation'
 
 export interface PortableFixtureFailure {
   stage: PortableFixtureFailureStage
@@ -248,6 +249,10 @@ export class FixtureExecutionAdapter {
   afterScanStaging(): void {
     this.counters.stagedMutationHooks += 1
     this.maybeFail('after_scan_staging')
+  }
+
+  afterCommitMutation(): void {
+    this.maybeFail('after_commit_mutation')
   }
 
   snapshotCounters(): PortableFixtureExecutionCounters {

@@ -28,7 +28,6 @@ Controlling checkpoint: Issue #1079.
 
 - network: `devnet`
 - Mainnet enabled: `false`
-- active Worker version at failure: `fb27bd55-e624-439d-add2-2ed41e903c34`
 - Worker Cron: empty
 - last completed slot: `2026-08-01T03:52:00Z`
 - failed slot: `2026-08-01T03:53:00Z`
@@ -43,86 +42,41 @@ The halted remote deployment is evidence and rollback context only. It is not an
 
 ## Completed reconstruction milestones
 
-### R0 — Contract and portability reset
+- R0 contract and portability reset: PR #1081, merge `c077e7b16b8b08213bbadcc5e927bba0f9472f6c`.
+- R1 reference schema and deterministic planner: PR #1082, merge `85f42e665a5e6f2f519cd372718b9c41c16b3f68`.
+- R2a typed messages and durable scheduler: PR #1084, merge `f68aea25f6d3b973ceec79e09288fdf626f33bdc`.
+- R2b1 normalized payload, digest, and chunks: PR #1086, merge `70f0e79632c51521ff1d6f85d445c797c515c429`.
+- R2b2-A transaction-aware store: PR #1088, merge `56dfe67cf969ac29357e7d49970da8b4027eba27`.
+- R2b2-B0 repeated scan identity contract: PR #1089, merge `51238a35184f5b4815fa79c1144df92ebe8d77a4`.
+- R2b2-B0 scan-sequence implementation: PR #1090, merge `bcb812b9001ea0e47cd2571e2ed3209c450cf84f`.
+- R2b2-B1 fixture execution and scan runtime: PR #1091, merge `7d1f50fa621b650efe0aae14fa074a2aff1ed8f3`.
 
-Complete in PR #1081, merge `c077e7b16b8b08213bbadcc5e927bba0f9472f6c`.
-
-### R1 — Reference schema and deterministic planner
-
-Complete in PR #1082, merge `85f42e665a5e6f2f519cd372718b9c41c16b3f68`.
-
-### R2a — Typed messages and durable scheduler
-
-Complete in PR #1084, merge `f68aea25f6d3b973ceec79e09288fdf626f33bdc`.
-
-### R2b1 — Normalized payload, digest, and chunks
-
-Complete in PR #1086, merge `70f0e79632c51521ff1d6f85d445c797c515c429`.
-
-Delivered:
-
-- seven-class `NormalizedCollectorPayloadV1` envelope;
-- strict candidate and source identity validation;
-- contiguous ledger index/hash/parent-chain validation;
-- explicit semantic counts, including zero-count groups;
-- canonical SHA-256 payload and chunk digests;
-- deterministic sorting, duplicate rejection, and bounded chunks;
-- single-record resource halt;
-- complete-payload and encoded-chunk tamper rejection.
-
-### R2b2-A — Transaction-aware store
-
-Complete in PR #1088, merge `56dfe67cf969ac29357e7d49970da8b4027eba27`.
-
-Delivered:
-
-- typed work, payload-chunk, commit-chunk, candidate-row, and watermark snapshots;
-- exact work-scoped reads for runtime use without ad hoc SQL;
-- `finalizeWorkInTransaction` inside caller-owned transactions;
-- standalone `finalizeWork` compatibility wrapper;
-- real SQLite proof of no nested transaction;
-- injected interruption rollback of work status, committed visibility, and watermark advancement.
-
-### R2b2-B0 — Repeated scan identity
-
-Contract complete in PR #1089, merge `51238a35184f5b4815fa79c1144df92ebe8d77a4`.
-
-Implementation complete in PR #1090, merge `bcb812b9001ea0e47cd2571e2ed3209c450cf84f`.
-
-Delivered:
-
-- required non-negative `scanSequence` in `ScanPhaseMessageV1` and canonical scan ID;
-- sequence `0` for initial and post-finalize scans;
-- sequence `+1` for a caught-up successor at one unchanged boundary;
-- exact retry and stale-lease identity preservation;
-- strict invalid-sequence and changed-identity rejection;
-- exact runtime export/restore retention;
-- unchanged commit and finalize identities.
-
-Retained CI evidence includes workflow guard, lint, type-check, complete unit suite, clean migration sequence, application build, and browser smoke.
+R2b2-B1 delivered exact immutable-base and committed-watermark boundaries, adaptive planning, normalized payload/chunk staging, caught-up sequence advancement, retry identity preservation, single-ledger resource halt, atomic staging/outbox reservation, and no early visibility or watermark advance.
 
 ## Active R2b2 work
 
 R2b2 is **active and incomplete**.
 
-### R2b2-B1 — Fixture execution and scan
+### R2b2-C — Commit runtime
 
-Status: **implementation and validation passed in PR #1091; merge pending**.
+Status: **implementation and validation passed in PR #1092; merge pending**.
 
 Delivered on the branch:
 
-- deterministic provider-neutral `FixtureExecutionAdapter` with immutable-base identity, validated head, planner estimates, normalized ranges, successor timing, counters, and bounded fault injection;
-- `PortableCollectorScanRuntime` with scheduler claim, exact boundary verification, reset detection, adaptive planning, payload/chunk construction, work staging, retry, halt, and successor selection;
-- exact initial immutable-base boundary support;
-- exact existing committed-watermark boundary support;
-- caught-up successor at the same boundary with `scanSequence + 1` and no work creation;
-- retryable transport and storage handling that preserves one scan identity;
-- single-ledger budget halt with no successor;
-- atomic work/chunk staging, current-message completion, and commit-successor outbox reservation;
-- no candidate-row writes, committed visibility, or watermark advance during scan;
-- rollback of work and payload chunks when an injected storage interruption occurs inside the scheduler-owned transaction.
+- bounded `PortableCollectorCommitRuntime` with exact scheduler claim and commit-message phase validation;
+- exact work and payload-chunk reads through typed reference-store APIs;
+- canonical chunk decoding and verification of work ID, chunk index, total count, payload digest, chunk digest, encoding, byte count, record count, and source-ledger range;
+- strict next-unresolved chunk ordering;
+- canonical record-order and duplicate-identity validation;
+- maximum 40 candidate rows and 40 recorded operations per commit phase;
+- deterministic work-scoped candidate rows using canonical value JSON;
+- idempotent commit-chunk evidence;
+- atomic current-message completion plus next-commit or finalize outbox reservation;
+- completed-message duplicate convergence without repeated mutations;
+- retryable storage rollback after injected interruption;
+- no committed visibility or watermark advancement before finalize.
 
-Retained CI evidence from run `30695623746`:
+Retained CI evidence from run `30696015473`:
 
 - workflow-surface guard passed;
 - lint passed;
@@ -133,31 +87,30 @@ Retained CI evidence from run `30695623746`:
 - application build passed;
 - browser smoke passed.
 
-The first CI attempt exposed two TypeScript narrowing errors for terminal scheduler classifications. The runtime was corrected to map impossible retry/lease classifications from a persisted terminal row to `terminal_internal`. No runtime or failure contract was weakened.
+R2b2-C tests prove:
 
-R2b2-B1 is recorded complete only after PR #1091 merges to `main`.
+- one verified chunk reserves finalize;
+- two chunks commit in exact index order and reserve commit then finalize;
+- a non-next chunk halts without mutation;
+- payload tampering halts as `digest_mismatch`;
+- a valid 41-record chunk halts as `resource_halt`;
+- injected commit storage interruption rolls back candidate rows, commit evidence, message completion, and successor outbox while preserving the same retry identity;
+- finalize-before-visibility remains enforced.
 
-### R2b2-C — Commit runtime
-
-Status: **next after PR #1091 merges**.
-
-- claim and validate the exact commit message;
-- read and verify one exact payload chunk;
-- map no more than 40 records to work-scoped candidate rows;
-- complete one commit chunk idempotently;
-- reserve the next commit or finalize successor atomically;
-- prove duplicate, retry, interruption, wrong-index, digest, and resource behavior.
+R2b2-C is recorded complete only after PR #1092 merges to `main`.
 
 ### R2b2-D — Finalize runtime
 
-- reconstruct and verify the full normalized payload;
-- verify semantic counts, hashes, identities, and complete commit evidence;
-- call transaction-aware finalization;
-- expose rows and advance the watermark atomically;
-- reserve the next scan with sequence `0`;
-- prove staged, committing, and committed export/restore resumption.
+Status: **next after PR #1092 merges**.
 
-R2 remains incomplete until every R2b2 unit and the parent R2 exit suite pass and merge to `main`.
+- reconstruct and verify every payload chunk and the full seven-class normalized payload;
+- verify semantic counts, work identity, range, parent/final hashes, candidate rows, and complete commit evidence;
+- call `finalizeWorkInTransaction` inside scheduler-owned completion;
+- expose candidate rows and advance the watermark atomically;
+- reserve the next scan with sequence `0`;
+- prove duplicate finalization, integrity failures, rollback, and staged/committing/committed export-restore resumption.
+
+R2 remains incomplete until R2b2-D and the parent R2 exit suite pass and merge to `main`.
 
 ## Later gates
 
