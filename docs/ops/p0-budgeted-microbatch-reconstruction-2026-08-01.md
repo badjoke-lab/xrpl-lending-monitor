@@ -38,8 +38,8 @@ The reconstruction retains:
 - debt, cover, and loss history;
 - current Vault, LoanBroker, and Loan projection changes;
 - exact transaction, object, relationship, epoch, ledger, hash, and provenance identities;
-- deterministic base-plus-overlay current reads;
-- hybrid immutable/live historical reads;
+- deterministic base-plus-overlay current reads during legacy compatibility;
+- hybrid immutable/live historical reads during legacy compatibility;
 - truthful stale, halted, partial, reset, and unavailable states;
 - Devnet-only and Mainnet-disabled operation;
 - read-only public behavior with no wallet, signing, or transaction submission.
@@ -65,7 +65,8 @@ Runtime-specific code is isolated behind:
 - `StorageAdapter`;
 - `SchedulerAdapter`;
 - `ExecutionAdapter`;
-- `PublicationAdapter`.
+- `PublicationAdapter`;
+- a bounded maintenance boundary.
 
 SQLite is the reference storage implementation. A durable local scheduler is the reference scheduler implementation. Remote implementations are deployment profiles and must pass the same conformance suite.
 
@@ -146,6 +147,17 @@ The scheduler provides:
 
 GitHub Actions is not the normal collection scheduler. It remains available for CI, immutable publication, evidence, and bounded repair workflows.
 
+## Reader and source-isolation contract
+
+Portable public-read candidates are bound to one committed read fence containing network, epoch, base, ledger index, ledger hash, and committed work ID.
+
+- one response uses one source and one read fence;
+- one cursor is valid for one source, query, order, and fence;
+- portable and legacy rows are never mixed inside one response;
+- integrity and identity failures fail closed and never trigger silent legacy fallback;
+- public authority remains legacy until a later explicit cutover gate;
+- R3 may run bounded shadow comparisons but cannot change public authority.
+
 ## Resource and throughput gates
 
 Observed Devnet advance was approximately 84 ledgers per five minutes, or 16.8 ledgers/minute.
@@ -167,7 +179,9 @@ Provider limits are deployment-profile inputs, not collector-core invariants.
 
 The hot store contains bounded work, chunks, committed live history, current overlay versions, tombstones, indexes, watermarks, health, and reconciliation state.
 
-Long-lived history remains in deterministic Git-backed immutable segments and exact indexes. Publication reads committed work only, verifies ledger/hash and semantic counts, publishes immutable assets, advances the publication watermark through a guarded path, and authorizes compaction only after independent verification.
+Long-lived history remains in deterministic immutable segments and exact indexes. Publication reads committed work only, verifies ledger/hash, candidate identity, and semantic counts, writes a candidate publication, independently reopens and verifies it, and advances the publication watermark only after verification.
+
+Compaction requires committed collection, verified publication, an explicit retention rule, and a bounded replay-safe mutation plan. Upload success alone never authorizes deletion.
 
 Publication automation does not own the normal collection clock.
 
@@ -200,43 +214,71 @@ Status: **complete** in PR #1081, merge `c077e7b16b8b08213bbadcc5e927bba0f9472f6
 
 Status: **complete** in PR #1082, merge `85f42e665a5e6f2f519cd372718b9c41c16b3f68`.
 
-Delivered portable work/chunk/candidate/watermark schema, deterministic adaptive planning, SQLite reference storage, committed-only visibility, atomic finalization, and exact export/restore.
-
 ### R2 — Portable scan/commit/finalize runtime
 
-Status: **implementation and validation passed in PR #1095; merge pending**.
-
-Controlling contract: PR #1083, merge `bd1ac985de908bd2f01089304c202ab47d368c9b`.
+Status: **complete** in PR #1095, merge `fb90cbbd3a44337dc0891552f3618581cfc31e1c`.
 
 Implemented units:
 
-- typed messages and durable scheduler: PR #1084, merge `f68aea25f6d3b973ceec79e09288fdf626f33bdc`;
-- normalized payload, digest, and chunks: PR #1086, merge `70f0e79632c51521ff1d6f85d445c797c515c429`;
-- transaction-aware reference store: PR #1088, merge `56dfe67cf969ac29357e7d49970da8b4027eba27`;
-- repeated scan identity contract and implementation: PRs #1089/#1090, merges `51238a35184f5b4815fa79c1144df92ebe8d77a4` and `bcb812b9001ea0e47cd2571e2ed3209c450cf84f`;
-- fixture execution and bounded scan runtime: PR #1091, merge `7d1f50fa621b650efe0aae14fa074a2aff1ed8f3`;
-- bounded commit runtime: PR #1092, merge `fb40f9400760b00b7d0dfb69cf4392f16e61ff08`;
-- complete candidate identity persistence and runtime export version 3: PR #1093, merge `9fb931f78b7ea605d52cee8292728d3d48eb868a`;
-- identity-complete finalize runtime: PR #1094, merge `d1a50ba5988da7222a32f69d1593712fc4bd7f12`.
+- typed messages and durable scheduler: PR #1084;
+- normalized payload, digest, and chunks: PR #1086;
+- transaction-aware reference store: PR #1088;
+- repeated scan identity contract and implementation: PRs #1089/#1090;
+- fixture execution and bounded scan runtime: PR #1091;
+- bounded commit runtime: PR #1092;
+- complete candidate identity persistence and runtime export version 3: PR #1093;
+- identity-complete finalize runtime: PR #1094;
+- durable parent orchestration exit: PR #1095.
 
-Parent exit evidence in PR #1095 proves sparse and dense durable chains, all seven classes, no early visibility, exact identity, staged/committing/committed resumption, interruption rollback and retry, lease and duplicate convergence, terminal scan gates, idempotent outbox dispatch, provider-neutral imports, and complete ordinary CI.
-
-Retained validation from CI run `30698568464` passed workflow guard, lint, type-check, production runner checks, complete unit suite, clean migration sequence, build, and browser smoke.
-
-R2 is complete only after PR #1095 merges to `main`.
+Final R2 CI run `30698715057` passed workflow guard, lint, type-check, production runner checks, complete unit suite, clean migration sequence, build, and browser smoke.
 
 ### R3 — Adapter and reader integration
 
-Status: **next after PR #1095 merges**.
+Status: **active under `ops/r3-adapter-reader-integration-plan-2026-08-01.md`**.
 
-Required work:
+#### R3 contract
 
-- formal adapter interfaces and conformance fixtures;
-- committed-only current and history readers over work-scoped rows;
-- legacy read compatibility and explicit cutover rules;
-- bounded maintenance and immutable publication separation;
-- cross-adapter export and restore;
-- no hosted provider selection or production mutation.
+Status: **active on branch `agent/r3-adapter-reader-contract`**.
+
+The contract defines:
+
+- provider-neutral storage, scheduler, execution, publication, and maintenance boundaries;
+- reusable adapter and reader conformance suites;
+- committed read fences and source-bound cursors;
+- generic committed lookup, listing, ledger-range, and relationship reads;
+- strict seven-class product mappers;
+- explicit legacy-only and shadow-compare operation before any portable public cutover;
+- no mixed-source response and no silent integrity fallback;
+- verified publication before publication-watermark advance or maintenance authorization;
+- canonical cross-adapter export and restore.
+
+#### R3A — Adapter interfaces and SQLite conformance
+
+- introduce interfaces and SQLite wrappers without changing R2 behavior;
+- move composed transaction ownership behind one reference runtime adapter;
+- run the R2 suites through interfaces;
+- prove no provider SDK import.
+
+#### R3B — Committed generic reader
+
+- implement read fences, exact and relationship lookup, semantic and ledger-range listing, stable pagination, and fence-bound cursors;
+- expose no public route.
+
+#### R3C — Product mappers and shadow compatibility
+
+- implement seven strict product mappers;
+- add source descriptors and bounded shadow comparison;
+- keep legacy public authority.
+
+#### R3D — Publication and maintenance separation
+
+- introduce publication and maintenance interfaces;
+- adapt deterministic local publication builders to candidate and independent verification phases;
+- execute no remote write.
+
+#### R3E — Cross-adapter export, restore, and parent exit
+
+- prove canonical state transfer, reader behavior after restore, publication/maintenance state transfer, and complete R3 conformance.
 
 ### R4 — Deployment-profile qualification
 

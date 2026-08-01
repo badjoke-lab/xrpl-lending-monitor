@@ -1,13 +1,13 @@
 # R2b2 bounded phase runtime plan — 2026-08-01
 
-Status: controlling R2b2 implementation plan. Every R2b2 implementation unit is complete on `main`. The parent R2 orchestration exit suite passed validation in PR #1095 and is pending merge.
+Status: **complete and retained as R2 evidence**. Every R2b2 implementation unit and the parent R2 orchestration exit suite are merged on `main` through PR #1095, merge `fb90cbbd3a44337dc0891552f3618581cfc31e1c`.
 
 Controlling amendments:
 
 - [`r2-scan-sequence-amendment-2026-08-01.md`](r2-scan-sequence-amendment-2026-08-01.md)
 - [`r2b2-candidate-identity-persistence-amendment-2026-08-01.md`](r2b2-candidate-identity-persistence-amendment-2026-08-01.md)
 
-R2 remains local and provider-neutral. It performs no remote deployment, production mutation, provider selection, Mainnet change, recovery, or soak work.
+R2 remained local and provider-neutral. It performed no remote deployment, production mutation, provider selection, Mainnet change, recovery, or soak work.
 
 ## Implemented state machine
 
@@ -70,39 +70,25 @@ Migration `10006_portable_reference_identity.sql` and runtime export version 3 p
 - Bounded commit runtime: PR #1092, merge `fb40f9400760b00b7d0dfb69cf4392f16e61ff08`.
 - Candidate identity persistence correction: PR #1093, merge `9fb931f78b7ea605d52cee8292728d3d48eb868a`.
 - Identity-complete finalize runtime: PR #1094, merge `d1a50ba5988da7222a32f69d1593712fc4bd7f12`.
+- Parent R2 orchestration exit: PR #1095, merge `fb90cbbd3a44337dc0891552f3618581cfc31e1c`.
 
-## Parent R2 exit suite
+## Parent exit evidence
 
-Status: **implementation and validation passed in PR #1095; merge pending**.
+The durable orchestration suite proves:
 
-The dedicated durable orchestration suite proves:
-
-- sparse scan, commit, finalize, and next-scan chaining;
-- dense multi-chunk chaining;
+- sparse and dense phase chaining;
 - all seven semantic classes end to end;
 - no early visibility or cursor advance;
 - staged, committing, and committed export/restore resumption;
 - scan, commit, and finalize interruption rollback with exact-identity retry;
-- fresh-lease rejection, stale reclaim, and duplicate convergence;
-- idempotent outbox dispatch;
-- reset, epoch, base, stale-boundary, parent-hash, and resource terminal halts with no successor;
+- fresh-lease rejection, stale reclaim, duplicate convergence, and idempotent outbox dispatch;
+- reset, epoch, base, stale-boundary, parent-hash, digest, and resource terminal halts with no successor;
 - provider-neutral imports.
 
 Retained phase-local suites additionally prove message schema and size rejection, payload and chunk tamper rejection, commit wrong-index and 41-record halts, finalize candidate/digest/semantic-count rejection, scheduler identity conflicts, and transaction-aware finalization without nested SQLite transactions.
 
-Retained validation from CI run `30698568464` passed:
+Final validation run `30698715057` passed workflow guard, lint, type-check, production runner checks, complete unit suite, clean migration sequence, application build, and browser smoke.
 
-- workflow guard;
-- lint;
-- type-check;
-- production runner checks;
-- complete unit suite;
-- clean migration sequence;
-- application build;
-- browser smoke.
+## Successor gate
 
-R2 and R2b2 pass only after PR #1095 merges to `main` with this evidence retained.
-
-## Next gate
-
-R3 begins after the parent R2 exit merge. It adds adapter conformance, committed-only reader integration, legacy compatibility, maintenance/publication separation, and cross-adapter export/restore. R3 does not select a hosted provider or authorize production recovery.
+R3 is controlled by [`r3-adapter-reader-integration-plan-2026-08-01.md`](r3-adapter-reader-integration-plan-2026-08-01.md). R3 adds adapter conformance, committed-only reader integration, legacy source isolation, publication/maintenance separation, and cross-adapter export/restore. R3 does not select a hosted provider or authorize production recovery.
