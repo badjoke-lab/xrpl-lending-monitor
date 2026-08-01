@@ -23,6 +23,26 @@ export interface PortableCollectorWorkDefinition {
   createdAt: string
 }
 
+export interface PortableCollectorWorkSnapshot {
+  workId: string
+  network: string
+  epochId: string
+  baseIdentity: string
+  previousLedgerIndex: number
+  startLedgerIndex: number
+  expectedParentHash: string
+  plannedEndLedgerIndex: number
+  scannedEndLedgerIndex: number | null
+  finalLedgerHash: string | null
+  status: string
+  planJson: string
+  semanticCountsJson: string | null
+  payloadDigest: string | null
+  expectedPayloadChunks: number
+  expectedCommitChunks: number
+  committedAt: string | null
+}
+
 export interface PortablePayloadChunk {
   workId: string
   chunkIndex: number
@@ -31,6 +51,10 @@ export interface PortablePayloadChunk {
   payloadDigest: string
   recordCount: number
   createdAt: string
+}
+
+export interface PortablePayloadChunkSnapshot extends PortablePayloadChunk {
+  byteCount: number
 }
 
 export interface PortableReferenceRow {
@@ -51,6 +75,12 @@ export interface PortableCommitChunk {
   rowMutationCount: number
   chunkDigest: string
   completedAt: string
+}
+
+export interface PortableCommitChunkSnapshot extends PortableCommitChunk {
+  status: string
+  createdAt: string
+  updatedAt: string
 }
 
 export interface PortableCommittedWatermark {
@@ -83,6 +113,29 @@ interface CollectorWorkRow {
   committed_at: string | null
 }
 
+interface PayloadChunkRow {
+  work_id: string
+  chunk_index: number
+  encoding: string
+  payload: Uint8Array
+  payload_digest: string
+  byte_count: number
+  record_count: number
+  created_at: string
+}
+
+interface CommitChunkRow {
+  work_id: string
+  chunk_index: number
+  status: string
+  operation_count: number
+  row_mutation_count: number
+  chunk_digest: string
+  created_at: string
+  updated_at: string
+  completed_at: string | null
+}
+
 interface CountRow {
   count: number
 }
@@ -108,6 +161,14 @@ interface WatermarkRow {
   updated_at: string
 }
 
+const workSelect = `SELECT
+  work_id, network, epoch_id, base_identity, previous_ledger_index,
+  start_ledger_index, expected_parent_hash, planned_end_ledger_index,
+  scanned_end_ledger_index, final_ledger_hash, status, plan_json,
+  semantic_counts_json, payload_digest, expected_payload_chunks,
+  expected_commit_chunks, committed_at
+FROM collector_work`
+
 function requireNonEmpty(value: string, name: string): string {
   const normalized = value.trim()
   if (!normalized) throw new Error(`${name} is required`)
@@ -129,17 +190,7 @@ function requirePositiveInteger(value: number, name: string): number {
 }
 
 function requireWork(db: PortableSqliteDatabase, workId: string): CollectorWorkRow {
-  const work = db.get<CollectorWorkRow>(
-    `SELECT
-       work_id, network, epoch_id, base_identity, previous_ledger_index,
-       start_ledger_index, expected_parent_hash, planned_end_ledger_index,
-       scanned_end_ledger_index, final_ledger_hash, status, plan_json,
-       semantic_counts_json, payload_digest, expected_payload_chunks,
-       expected_commit_chunks, committed_at
-     FROM collector_work
-     WHERE work_id = ?`,
-    [workId],
-  )
+  const work = db.get<CollectorWorkRow>(`${workSelect} WHERE work_id = ?`, [workId])
   if (!work) throw new Error(`collector work not found: ${workId}`)
   return work
 }
@@ -158,6 +209,71 @@ function assertSameWork(existing: CollectorWorkRow, definition: PortableCollecto
   ]
   if (mismatches.some(Boolean)) {
     throw new Error(`collector work identity conflict: ${definition.workId}`)
+  }
+}
+
+function mapWork(row: CollectorWorkRow): PortableCollectorWorkSnapshot {
+  return {
+    workId: row.work_id,
+    network: row.network,
+    epochId: row.epoch_id,
+    baseIdentity: row.base_identity,
+    previousLedgerIndex: row.previous_ledger_index,
+    startLedgerIndex: row.start_ledger_index,
+    expectedParentHash: row.expected_parent_hash,
+    plannedEndLedgerIndex: row.planned_end_ledger_index,
+    scannedEndLedgerIndex: row.scanned_end_ledger_index,
+    finalLedgerHash: row.final_ledger_hash,
+    status: row.status,
+    planJson: row.plan_json,
+    semanticCountsJson: row.semantic_counts_json,
+    payloadDigest: row.payload_digest,
+    expectedPayloadChunks: row.expected_payload_chunks,
+    expectedCommitChunks: row.expected_commit_chunks,
+    committedAt: row.committed_at,
+  }
+}
+
+function mapPayloadChunk(row: PayloadChunkRow): PortablePayloadChunkSnapshot {
+  return {
+    workId: row.work_id,
+    chunkIndex: row.chunk_index,
+    encoding: row.encoding,
+    payload: row.payload,
+    payloadDigest: row.payload_digest,
+    byteCount: row.byte_count,
+    recordCount: row.record_count,
+    createdAt: row.created_at,
+  }
+}
+
+function mapCommitChunk(row: CommitChunkRow): PortableCommitChunkSnapshot {
+  if (row.completed_at === null) {
+    throw new Error(`commit chunk is missing completed_at: ${row.work_id}/${row.chunk_index}`)
+  }
+  return {
+    workId: row.work_id,
+    chunkIndex: row.chunk_index,
+    status: row.status,
+    operationCount: row.operation_count,
+    rowMutationCount: row.row_mutation_count,
+    chunkDigest: row.chunk_digest,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    completedAt: row.completed_at,
+  }
+}
+
+function mapReferenceRow(row: ReferenceRowResult): PortableReferenceRow {
+  return {
+    workId: row.work_id,
+    semanticClass: row.semantic_class,
+    canonicalKey: row.canonical_key,
+    sourceLedgerIndex: row.source_ledger_index,
+    sourceLedgerHash: row.source_ledger_hash,
+    valueJson: row.value_json,
+    isTombstone: row.is_tombstone === 1,
+    createdAt: row.created_at,
   }
 }
 
@@ -201,7 +317,7 @@ export function canonicalPortableJson(value: unknown): string {
 export class PortableCollectorReferenceStore {
   constructor(private readonly db: PortableSqliteDatabase) {}
 
-  beginWork(definition: PortableCollectorWorkDefinition): CollectorWorkRow {
+  beginWork(definition: PortableCollectorWorkDefinition): PortableCollectorWorkSnapshot {
     requireNonEmpty(definition.workId, 'workId')
     requireNonEmpty(definition.network, 'network')
     requireNonEmpty(definition.epochId, 'epochId')
@@ -240,7 +356,57 @@ export class PortableCollectorReferenceStore {
 
     const work = requireWork(this.db, definition.workId)
     assertSameWork(work, definition)
-    return work
+    return mapWork(work)
+  }
+
+  getWork(workId: string): PortableCollectorWorkSnapshot | undefined {
+    const row = this.db.get<CollectorWorkRow>(`${workSelect} WHERE work_id = ?`, [workId])
+    return row ? mapWork(row) : undefined
+  }
+
+  getPayloadChunk(workId: string, chunkIndex: number): PortablePayloadChunkSnapshot | undefined {
+    requireNonNegativeInteger(chunkIndex, 'chunkIndex')
+    const row = this.db.get<PayloadChunkRow>(
+      `SELECT work_id, chunk_index, encoding, payload, payload_digest,
+              byte_count, record_count, created_at
+       FROM collector_payload_chunks
+       WHERE work_id = ? AND chunk_index = ?`,
+      [workId, chunkIndex],
+    )
+    return row ? mapPayloadChunk(row) : undefined
+  }
+
+  listPayloadChunks(workId: string): PortablePayloadChunkSnapshot[] {
+    return this.db.all<PayloadChunkRow>(
+      `SELECT work_id, chunk_index, encoding, payload, payload_digest,
+              byte_count, record_count, created_at
+       FROM collector_payload_chunks
+       WHERE work_id = ?
+       ORDER BY chunk_index`,
+      [workId],
+    ).map(mapPayloadChunk)
+  }
+
+  listCommitChunks(workId: string): PortableCommitChunkSnapshot[] {
+    return this.db.all<CommitChunkRow>(
+      `SELECT work_id, chunk_index, status, operation_count, row_mutation_count,
+              chunk_digest, created_at, updated_at, completed_at
+       FROM collector_commit_chunks
+       WHERE work_id = ?
+       ORDER BY chunk_index`,
+      [workId],
+    ).map(mapCommitChunk)
+  }
+
+  listReferenceRowsForWork(workId: string): PortableReferenceRow[] {
+    return this.db.all<ReferenceRowResult>(
+      `SELECT work_id, semantic_class, canonical_key, source_ledger_index,
+              source_ledger_hash, value_json, is_tombstone, created_at
+       FROM collector_reference_rows
+       WHERE work_id = ?
+       ORDER BY source_ledger_index, semantic_class, canonical_key`,
+      [workId],
+    ).map(mapReferenceRow)
   }
 
   stagePayloadChunk(chunk: PortablePayloadChunk): void {
@@ -453,93 +619,98 @@ export class PortableCollectorReferenceStore {
     workId: string
     committedAt: string
   }): PortableCommittedWatermark {
-    return this.db.transaction(() => {
-      let work = requireWork(this.db, options.workId)
-      if (work.status === 'committed') {
-        const existing = this.getWatermark(work.network, work.epoch_id, work.base_identity)
-        if (!existing || existing.workId !== work.work_id) {
-          throw new Error(`committed work is not the active watermark: ${work.work_id}`)
-        }
-        return existing
-      }
-      if (!['staged', 'committing', 'finalizing'].includes(work.status)) {
-        throw new Error(`collector work cannot finalize from status ${work.status}`)
-      }
-      if (work.scanned_end_ledger_index === null || work.final_ledger_hash === null) {
-        throw new Error('collector work is missing sealed scan evidence')
-      }
+    return this.db.transaction(() => this.finalizeWorkInTransaction(options))
+  }
 
-      const payloadCount = this.db.get<CountRow>(
-        'SELECT COUNT(*) AS count FROM collector_payload_chunks WHERE work_id = ?',
-        [work.work_id],
-      )?.count ?? 0
-      const completedCommitCount = this.db.get<CountRow>(
-        `SELECT COUNT(*) AS count
-         FROM collector_commit_chunks
-         WHERE work_id = ? AND status = 'completed'`,
-        [work.work_id],
-      )?.count ?? 0
-      if (payloadCount !== work.expected_payload_chunks) {
-        throw new Error('cannot finalize before every payload chunk exists')
+  finalizeWorkInTransaction(options: {
+    workId: string
+    committedAt: string
+  }): PortableCommittedWatermark {
+    let work = requireWork(this.db, options.workId)
+    if (work.status === 'committed') {
+      const existing = this.getWatermark(work.network, work.epoch_id, work.base_identity)
+      if (!existing || existing.workId !== work.work_id) {
+        throw new Error(`committed work is not the active watermark: ${work.work_id}`)
       }
-      if (completedCommitCount !== work.expected_commit_chunks) {
-        throw new Error('cannot finalize before every commit chunk is complete')
-      }
+      return existing
+    }
+    if (!['staged', 'committing', 'finalizing'].includes(work.status)) {
+      throw new Error(`collector work cannot finalize from status ${work.status}`)
+    }
+    if (work.scanned_end_ledger_index === null || work.final_ledger_hash === null) {
+      throw new Error('collector work is missing sealed scan evidence')
+    }
 
-      const current = this.getWatermark(work.network, work.epoch_id, work.base_identity)
-      if (
-        current &&
-        (current.ledgerIndex !== work.previous_ledger_index ||
-          current.ledgerHash !== work.expected_parent_hash)
-      ) {
-        throw new Error('committed watermark does not match the work parent boundary')
-      }
+    const payloadCount = this.db.get<CountRow>(
+      'SELECT COUNT(*) AS count FROM collector_payload_chunks WHERE work_id = ?',
+      [work.work_id],
+    )?.count ?? 0
+    const completedCommitCount = this.db.get<CountRow>(
+      `SELECT COUNT(*) AS count
+       FROM collector_commit_chunks
+       WHERE work_id = ? AND status = 'completed'`,
+      [work.work_id],
+    )?.count ?? 0
+    if (payloadCount !== work.expected_payload_chunks) {
+      throw new Error('cannot finalize before every payload chunk exists')
+    }
+    if (completedCommitCount !== work.expected_commit_chunks) {
+      throw new Error('cannot finalize before every commit chunk is complete')
+    }
 
-      const finalizing = this.db.run(
-        `UPDATE collector_work
-         SET status = 'finalizing', updated_at = ?
-         WHERE work_id = ? AND status IN ('staged', 'committing', 'finalizing')`,
-        [options.committedAt, work.work_id],
-      )
-      if (finalizing.changes !== 1) throw new Error(`failed to claim finalization: ${work.work_id}`)
+    const current = this.getWatermark(work.network, work.epoch_id, work.base_identity)
+    if (
+      current &&
+      (current.ledgerIndex !== work.previous_ledger_index ||
+        current.ledgerHash !== work.expected_parent_hash)
+    ) {
+      throw new Error('committed watermark does not match the work parent boundary')
+    }
 
-      this.db.run(
-        `INSERT INTO collector_committed_watermarks (
-           network, epoch_id, base_identity, ledger_index, ledger_hash,
-           work_id, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT (network, epoch_id, base_identity) DO UPDATE SET
-           ledger_index = excluded.ledger_index,
-           ledger_hash = excluded.ledger_hash,
-           work_id = excluded.work_id,
-           updated_at = excluded.updated_at`,
-        [
-          work.network,
-          work.epoch_id,
-          work.base_identity,
-          work.scanned_end_ledger_index,
-          work.final_ledger_hash,
-          work.work_id,
-          options.committedAt,
-        ],
-      )
+    const finalizing = this.db.run(
+      `UPDATE collector_work
+       SET status = 'finalizing', updated_at = ?
+       WHERE work_id = ? AND status IN ('staged', 'committing', 'finalizing')`,
+      [options.committedAt, work.work_id],
+    )
+    if (finalizing.changes !== 1) throw new Error(`failed to claim finalization: ${work.work_id}`)
 
-      const committed = this.db.run(
-        `UPDATE collector_work
-         SET status = 'committed', committed_at = ?, updated_at = ?
-         WHERE work_id = ? AND status = 'finalizing'`,
-        [options.committedAt, options.committedAt, work.work_id],
-      )
-      if (committed.changes !== 1) throw new Error(`failed to commit collector work: ${work.work_id}`)
+    this.db.run(
+      `INSERT INTO collector_committed_watermarks (
+         network, epoch_id, base_identity, ledger_index, ledger_hash,
+         work_id, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (network, epoch_id, base_identity) DO UPDATE SET
+         ledger_index = excluded.ledger_index,
+         ledger_hash = excluded.ledger_hash,
+         work_id = excluded.work_id,
+         updated_at = excluded.updated_at`,
+      [
+        work.network,
+        work.epoch_id,
+        work.base_identity,
+        work.scanned_end_ledger_index,
+        work.final_ledger_hash,
+        work.work_id,
+        options.committedAt,
+      ],
+    )
 
-      work = requireWork(this.db, options.workId)
-      if (work.status !== 'committed') throw new Error(`collector work did not commit: ${work.work_id}`)
-      const watermark = this.getWatermark(work.network, work.epoch_id, work.base_identity)
-      if (!watermark || watermark.workId !== work.work_id) {
-        throw new Error(`collector watermark did not advance: ${work.work_id}`)
-      }
-      return watermark
-    })
+    const committed = this.db.run(
+      `UPDATE collector_work
+       SET status = 'committed', committed_at = ?, updated_at = ?
+       WHERE work_id = ? AND status = 'finalizing'`,
+      [options.committedAt, options.committedAt, work.work_id],
+    )
+    if (committed.changes !== 1) throw new Error(`failed to commit collector work: ${work.work_id}`)
+
+    work = requireWork(this.db, options.workId)
+    if (work.status !== 'committed') throw new Error(`collector work did not commit: ${work.work_id}`)
+    const watermark = this.getWatermark(work.network, work.epoch_id, work.base_identity)
+    if (!watermark || watermark.workId !== work.work_id) {
+      throw new Error(`collector watermark did not advance: ${work.work_id}`)
+    }
+    return watermark
   }
 
   getWatermark(
@@ -563,16 +734,7 @@ export class PortableCollectorReferenceStore {
          source_ledger_hash, value_json, is_tombstone, created_at
        FROM collector_committed_reference_rows
        ORDER BY source_ledger_index, semantic_class, canonical_key, work_id`,
-    ).map((row) => ({
-      workId: row.work_id,
-      semanticClass: row.semantic_class,
-      canonicalKey: row.canonical_key,
-      sourceLedgerIndex: row.source_ledger_index,
-      sourceLedgerHash: row.source_ledger_hash,
-      valueJson: row.value_json,
-      isTombstone: row.is_tombstone === 1,
-      createdAt: row.created_at,
-    }))
+    ).map(mapReferenceRow)
   }
 
   exportState(): string {
