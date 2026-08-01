@@ -288,9 +288,9 @@ Status: **active** under merged contract PR #1083 (`bd1ac985de908bd2f01089304c20
 
 #### R2a — Typed messages and durable scheduler
 
-Status: **implementation and validation passed in PR #1084; merge pending**.
+Status: **complete** in PR #1084 (`f68aea25f6d3b973ceec79e09288fdf626f33bdc`).
 
-Delivered on the branch:
+Delivered:
 
 - exact versioned scan, commit, and finalize message unions with deterministic IDs;
 - strict message validation and the 16,000-byte scheduler-message guard;
@@ -301,7 +301,7 @@ Delivered on the branch:
 - durable successor availability that cannot be changed during re-enqueue, duplicate completion, or delayed dispatch;
 - complete runtime export/restore covering work, chunks, candidate rows, watermarks, scheduler messages, active leases, attempts, errors, outbox state, and reserved successor times.
 
-Retained validation from CI run `30691175822`:
+Retained validation from CI runs `30691175822` and `30691338208`:
 
 - workflow guard, lint, type-check, complete unit suite, complete local migration sequence, application build, and browser smoke passed;
 - migration `10005_portable_scheduler.sql` applied after the existing migration set on a clean database;
@@ -314,22 +314,22 @@ Retained validation from CI run `30691175822`:
 - leased messages and pending timed outbox entries restored exactly into a second SQLite database;
 - canonical runtime re-export after restoration matched byte for byte.
 
-R2a is recorded complete only after PR #1084 merges to `main`.
-
 #### R2b — Normalized payload and bounded phase runtime
 
-Status: **next implementation unit after R2a merge**.
+Status: **active contract phase** under [`r2b-normalized-payload-phase-runtime-2026-08-01.md`](r2b-normalized-payload-phase-runtime-2026-08-01.md). Runtime code begins only after the R2b contract merges to `main`.
 
-Required work:
+Implementation unit:
 
-- implement `NormalizedCollectorPayloadV1` with all seven semantic groups;
-- implement deterministic serialization, digest, semantic counts, and bounded chunking;
-- implement scan-only staging, bounded commit execution, and scheduler-integrated atomic finalization;
-- expose transaction-aware finalization so scheduler-owned completion does not nest SQLite transactions;
-- implement the deterministic fixture `ExecutionAdapter` and all interruption/failure injections;
-- pass the complete R2 semantic-survival and phase-runtime suite.
+- one seven-class `NormalizedCollectorPayloadV1` envelope with common candidate identity;
+- canonical SHA-256 full-payload and chunk digests;
+- deterministic semantic counts, sort order, duplicate rejection, and bounded chunks;
+- scan-only staging through R1 storage;
+- bounded resumable commit execution through R2a scheduling;
+- transaction-aware finalization without nested SQLite transactions;
+- scheduler-owned atomic finalization, visibility advancement, and next-scan reservation;
+- deterministic fixture `ExecutionAdapter` and all required interruption/failure injections.
 
-R2 exit still requires every sparse, dense, oversized, interrupted, retried, duplicate, lease, outbox, reset, identity, parent-hash, digest, export/restore, and semantic-class survival test listed by the R2 contract, plus the complete repository CI suite.
+Exit requires every sparse, dense, oversized, interrupted, retried, duplicate, lease, outbox, reset, identity, parent-hash, digest, export/restore, and semantic-class survival test in the parent R2 and R2b contracts, plus the complete repository CI suite.
 
 ### R3 — Adapter conformance, overlay, maintenance, and archive separation — 2026-08-03
 
