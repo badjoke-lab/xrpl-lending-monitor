@@ -1,0 +1,255 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-01T14:05:00.000Z",
+  "phase": "R4A",
+  "status": "initial_unselected_matrix",
+  "decision": "no_profile_selected",
+  "hardGates": [
+    {
+      "id": "G1",
+      "name": "no_mandatory_payment_or_card",
+      "rule": "The complete normal operating profile must not require a paid subscription, payment method, or credit-card verification."
+    },
+    {
+      "id": "G2",
+      "name": "no_automatic_paid_overage",
+      "rule": "Quota exhaustion must fail closed without creating a charge or debt."
+    },
+    {
+      "id": "G3",
+      "name": "durable_internal_scheduler",
+      "rule": "Normal collection requires a durable scheduler capable of one-minute-or-finer internal continuation; GitHub Actions is not the normal collection clock."
+    },
+    {
+      "id": "G4",
+      "name": "transactional_phase_completion",
+      "rule": "Phase mutation, current-message completion, and successor reservation must share an atomic boundary or a proven equivalent."
+    },
+    {
+      "id": "G5",
+      "name": "committed_only_reads",
+      "rule": "Uncommitted candidate rows must never become public or shadow-authoritative."
+    },
+    {
+      "id": "G6",
+      "name": "exact_complete_state_transfer",
+      "rule": "The profile must export and empty-target restore collection, scheduler, publication, and maintenance state into the canonical reference envelope."
+    },
+    {
+      "id": "G7",
+      "name": "throughput",
+      "rule": "Retained evidence must exceed 21 committed ledgers per minute in steady p95 windows and 30 committed ledgers per minute during catch-up."
+    },
+    {
+      "id": "G8",
+      "name": "resource_fail_closed",
+      "rule": "The profile must halt before request, query, write, CPU, memory, storage, message, or runtime ceilings and must not advance a cursor after partial work."
+    },
+    {
+      "id": "G9",
+      "name": "operator_independence",
+      "rule": "Deploy, rollback, checkpoint, restore, and evidence paths must not require routine interactive dashboard or terminal operation."
+    },
+    {
+      "id": "G10",
+      "name": "production_boundary",
+      "rule": "R4 performs no production mutation, keeps Mainnet disabled, and cannot authorize recovery before R5."
+    }
+  ],
+  "candidates": [
+    {
+      "id": "self_hosted_sqlite_service",
+      "label": "Cardless self-hosted SQLite service",
+      "classification": "conditional_candidate",
+      "selection": "not_selected",
+      "components": {
+        "storage": "local SQLite reference-compatible database",
+        "scheduler": "local durable scheduler and service manager",
+        "execution": "local long-running or frequently awakened process",
+        "publication": "Git-backed immutable publication outside the collection clock"
+      },
+      "gateState": {
+        "G1": "pass_in_principle",
+        "G2": "pass_in_principle",
+        "G3": "unproven",
+        "G4": "reference_semantics_available",
+        "G5": "reference_semantics_available",
+        "G6": "reference_semantics_available",
+        "G7": "unproven",
+        "G8": "unproven",
+        "G9": "unproven",
+        "G10": "pass"
+      },
+      "blockingEvidence": [
+        "No always-on host has been selected or proven.",
+        "Power, network, process supervision, unattended restart, secure ingress, and off-host evidence retention are unproven.",
+        "Routine operation must not depend on an interactive local terminal."
+      ],
+      "nextTest": "Build a local service-manager harness and run deterministic resource and restart qualification without any remote mutation."
+    },
+    {
+      "id": "supabase_free_postgres_pgcron_edge",
+      "label": "Supabase Free Postgres plus pg_cron and Edge Functions",
+      "classification": "conditional_candidate",
+      "selection": "not_selected",
+      "components": {
+        "storage": "Supabase Free Postgres",
+        "scheduler": "pg_cron or scheduled Edge Function",
+        "execution": "Edge Function or transaction procedure",
+        "publication": "separate immutable Git-backed publication"
+      },
+      "gateState": {
+        "G1": "unproven_cardless_signup",
+        "G2": "pass_on_free_plan_only",
+        "G3": "unproven",
+        "G4": "unproven",
+        "G5": "unproven",
+        "G6": "unproven",
+        "G7": "unproven",
+        "G8": "unproven",
+        "G9": "unproven",
+        "G10": "pass"
+      },
+      "blockingEvidence": [
+        "Free projects may pause after low activity.",
+        "The Free database limit and read-only transition require an earlier project stop threshold.",
+        "Exact scheduler ownership, transaction semantics, complete-state transfer, WebSocket behavior, and cardless account creation remain unproven.",
+        "No paid-plan upgrade or payment-method addition is permitted."
+      ],
+      "nextTest": "Implement a local Postgres conformance harness first; no Supabase project or credential is required for R4A/R4B."
+    },
+    {
+      "id": "turso_storage_self_hosted_executor",
+      "label": "Turso Free storage with cardless self-hosted executor",
+      "classification": "conditional_candidate",
+      "selection": "not_selected",
+      "components": {
+        "storage": "Turso Free SQLite-compatible database",
+        "scheduler": "cardless self-hosted durable scheduler",
+        "execution": "cardless self-hosted process",
+        "publication": "separate immutable Git-backed publication"
+      },
+      "gateState": {
+        "G1": "pass_for_storage_only",
+        "G2": "pass_for_storage_quota",
+        "G3": "unproven_external_component",
+        "G4": "unproven",
+        "G5": "unproven",
+        "G6": "unproven",
+        "G7": "unproven",
+        "G8": "unproven",
+        "G9": "unproven",
+        "G10": "pass"
+      },
+      "blockingEvidence": [
+        "Turso supplies storage, not the required normal scheduler and execution profile.",
+        "Remote transaction behavior across scheduler and storage ownership must pass the same atomic conformance suite.",
+        "Free inactive databases may be archived; active-operation and restore behavior require retained evidence.",
+        "A second service must not reintroduce a payment method or routine interactive operation."
+      ],
+      "nextTest": "Implement a transaction and export/restore compatibility harness against a local Turso/libSQL-compatible target before any cloud credential is used."
+    },
+    {
+      "id": "cloudflare_workers_d1_queues_current_profile",
+      "label": "Existing Cloudflare Workers Free plus D1 and Queues profile",
+      "classification": "blocked",
+      "selection": "not_selected",
+      "components": {
+        "storage": "D1",
+        "scheduler": "Queue successor plus optional Cron reseed",
+        "execution": "Workers",
+        "publication": "separate immutable Git-backed publication"
+      },
+      "gateState": {
+        "G1": "blocked_pending_zero_additional_charge_proof",
+        "G2": "unproven_for_current_account",
+        "G3": "technically_available",
+        "G4": "unproven_adapter",
+        "G5": "unproven_adapter",
+        "G6": "unproven_adapter",
+        "G7": "unproven",
+        "G8": "previous_profile_failed_resource_gate",
+        "G9": "unproven",
+        "G10": "pass"
+      },
+      "blockingEvidence": [
+        "The current account/profile cannot be used until access and zero-additional-charge operation are independently proven.",
+        "No new payment method, paid subscription, or billing assumption is permitted.",
+        "The retired production profile already failed a Worker subrequest ceiling.",
+        "Workers Free CPU and subrequest limits require measured microphase evidence rather than theoretical fit."
+      ],
+      "nextTest": "Local adapter conformance and exact resource accounting only; no remote deploy or account mutation."
+    },
+    {
+      "id": "github_actions_only",
+      "label": "GitHub Actions as the complete collector runtime",
+      "classification": "rejected",
+      "selection": "not_selected",
+      "failedGates": ["G3", "G7", "G9"],
+      "reason": "Scheduled workflows have a five-minute minimum and may be delayed or dropped under load, so Actions cannot own the normal collection clock.",
+      "retainedUse": "CI, immutable publication, evidence retention, and bounded repair workflows only."
+    },
+    {
+      "id": "deno_deploy_free",
+      "label": "Deno Deploy Free managed runtime",
+      "classification": "rejected",
+      "selection": "not_selected",
+      "failedGates": ["G1", "G9"],
+      "reason": "Unrestricted Free organization use requires credit-card verification and the current platform provides no uptime guarantee during public beta.",
+      "retainedUse": "None for the production collector profile. Self-hosted Deno remains a different local-runtime option, not this managed profile."
+    }
+  ],
+  "qualificationOrder": [
+    "R4A_contract_and_matrix",
+    "R4B_machine_readable_evaluator",
+    "R4C_local_profile_harnesses",
+    "R4D_read_only_shadow_measurement",
+    "R4E_select_one_profile_or_record_no_qualified_profile"
+  ],
+  "officialEvidence": [
+    {
+      "provider": "Cloudflare Workers",
+      "url": "https://developers.cloudflare.com/workers/platform/limits/"
+    },
+    {
+      "provider": "Cloudflare D1",
+      "url": "https://developers.cloudflare.com/d1/platform/limits/"
+    },
+    {
+      "provider": "Cloudflare Queues",
+      "url": "https://developers.cloudflare.com/queues/platform/limits/"
+    },
+    {
+      "provider": "GitHub Actions schedule",
+      "url": "https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule"
+    },
+    {
+      "provider": "Deno Deploy billing and verification",
+      "url": "https://docs.deno.com/deploy/changelog/"
+    },
+    {
+      "provider": "Deno Deploy beta limits",
+      "url": "https://docs.deno.com/deploy/pricing_and_limits/"
+    },
+    {
+      "provider": "Supabase cost controls",
+      "url": "https://supabase.com/docs/guides/platform/cost-control"
+    },
+    {
+      "provider": "Supabase Free project pausing",
+      "url": "https://supabase.com/docs/guides/platform/free-project-pausing"
+    },
+    {
+      "provider": "Supabase Edge Function limits",
+      "url": "https://supabase.com/docs/guides/functions/limits"
+    },
+    {
+      "provider": "Turso pricing",
+      "url": "https://turso.tech/pricing"
+    },
+    {
+      "provider": "Turso quota behavior",
+      "url": "https://docs.turso.tech/help/usage-and-billing"
+    }
+  ]
+}
