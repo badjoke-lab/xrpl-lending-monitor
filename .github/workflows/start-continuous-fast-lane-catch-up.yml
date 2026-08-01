@@ -7,11 +7,13 @@ on:
       - .github/workflows/start-continuous-fast-lane-catch-up.yml
       - .github/start-continuous-fast-lane-catch-up-trigger
       - scripts/start-continuous-fast-lane-catch-up.py
+      - scripts/deploy-fixed-runtime-for-catch-up.py
       - scripts/check-actions-workflow-allowlist.sh
   push:
     branches: [main]
     paths:
-      - .github/start-continuous-fast-lane-catch-up-trigger
+      - .github/workflows/start-continuous-fast-lane-catch-up.yml
+      - scripts/deploy-fixed-runtime-for-catch-up.py
 
 permissions:
   contents: read
@@ -47,8 +49,9 @@ jobs:
         run: |
           set -euo pipefail
           python -m py_compile scripts/start-continuous-fast-lane-catch-up.py
-          python -m py_compile scripts/controlled-queue-minute-cadence-deploy.py
+          python -m py_compile scripts/deploy-fixed-runtime-for-catch-up.py
           python scripts/start-continuous-fast-lane-catch-up.py --validate-source-only
+          python scripts/deploy-fixed-runtime-for-catch-up.py --validate-source-only
 
   promote:
     if: github.event_name == 'push'
@@ -68,26 +71,30 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Fetch exact runtime commit
         run: git fetch --no-tags --depth=1 origin "${RUNTIME_SHA}"
-      - name: Deploy exact runtime and prove one controlled delivery
-        run: python scripts/controlled-queue-minute-cadence-deploy.py
+      - name: Deploy exact fixed runtime while Queue is paused
+        run: python scripts/deploy-fixed-runtime-for-catch-up.py
       - name: Promote continuous catch-up after three exact minute slots
         run: python scripts/start-continuous-fast-lane-catch-up.py
       - name: Ensure issue comment exists
         if: always()
         run: |
+          mkdir -p continuous-catch-up-evidence
           if [ ! -s continuous-catch-up-evidence/issue-comment.md ]; then
-            mkdir -p continuous-catch-up-evidence
-            printf '## Continuous catch-up promotion: WORKFLOW FAILURE\n\nNo promotion result file was produced. The controlled deployment is fail-closed and the Queue must remain paused.\n' > continuous-catch-up-evidence/issue-comment.md
+            if [ -s fixed-runtime-deploy-evidence/issue-comment.md ]; then
+              cp fixed-runtime-deploy-evidence/issue-comment.md continuous-catch-up-evidence/issue-comment.md
+            else
+              printf '## Continuous catch-up promotion: WORKFLOW FAILURE\n\nNo result file was produced. The Queue must remain paused.\n' > continuous-catch-up-evidence/issue-comment.md
+            fi
           fi
       - name: Post result to Issue 1072
         if: always()
         run: gh issue comment 1072 --repo badjoke-lab/xrpl-lending-monitor --body-file continuous-catch-up-evidence/issue-comment.md
-      - name: Upload controlled deployment evidence
+      - name: Upload fixed runtime deployment evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: queue-minute-cadence-controlled-deployment-before-promotion
-          path: queue-minute-cadence-evidence
+          name: fixed-runtime-deployment-before-promotion
+          path: fixed-runtime-deploy-evidence
           if-no-files-found: warn
           retention-days: 30
       - name: Upload continuous catch-up evidence
