@@ -12,6 +12,7 @@ export interface ScanPhaseMessageV1 {
   baseIdentity: string
   expectedPreviousLedgerIndex: number
   expectedPreviousLedgerHash: string
+  scanSequence: number
 }
 
 export interface CommitPhaseMessageV1 {
@@ -74,6 +75,7 @@ export function buildScanPhaseMessage(input: {
   baseIdentity: string
   expectedPreviousLedgerIndex: number
   expectedPreviousLedgerHash: string
+  scanSequence: number
 }): ScanPhaseMessageV1 {
   const network = requiredString(input.network, 'network')
   const epochId = requiredString(input.epochId, 'epochId')
@@ -86,6 +88,7 @@ export function buildScanPhaseMessage(input: {
     input.expectedPreviousLedgerHash,
     'expectedPreviousLedgerHash',
   )
+  const scanSequence = requiredNonNegativeInteger(input.scanSequence, 'scanSequence')
   const messageId = [
     'scan',
     'v1',
@@ -94,6 +97,7 @@ export function buildScanPhaseMessage(input: {
     encoded(baseIdentity),
     String(expectedPreviousLedgerIndex),
     encoded(expectedPreviousLedgerHash),
+    String(scanSequence),
   ].join(':')
 
   return {
@@ -105,6 +109,7 @@ export function buildScanPhaseMessage(input: {
     baseIdentity,
     expectedPreviousLedgerIndex,
     expectedPreviousLedgerHash,
+    scanSequence,
   }
 }
 
@@ -186,6 +191,7 @@ export function validatePortablePhaseMessage(
         'baseIdentity',
         'expectedPreviousLedgerIndex',
         'expectedPreviousLedgerHash',
+        'scanSequence',
       ],
       'scan phase message',
     )
@@ -201,6 +207,7 @@ export function validatePortablePhaseMessage(
         requiredString(message.expectedPreviousLedgerHash, 'expectedPreviousLedgerHash'),
         'expectedPreviousLedgerHash',
       ),
+      scanSequence: requiredNonNegativeInteger(message.scanSequence, 'scanSequence'),
     })
     if (message.messageId !== expected.messageId) {
       throw new Error('scan phase messageId does not match its semantic identity')
