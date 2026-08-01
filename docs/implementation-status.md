@@ -8,15 +8,15 @@ XRPL Lending Monitor is **not formally released**.
 
 The retired fixed-32-ledger production recovery remains halted after a content-dependent Worker subrequest failure. The successor chain is absent, the recorded terminal lag was `56,740`, Worker Cron is empty, and no stabilization qualification or 24-hour soak is active.
 
-The public read surface remains legacy-authoritative. Mainnet remains disabled. The portable runtime has not been connected to a hosted deployment or public route.
+The public read surface remains legacy-authoritative. Mainnet remains disabled. No R4 profile has been selected or deployed.
 
 ## Controlling documents
 
 - Recovery design and schedule: [`ops/p0-budgeted-microbatch-reconstruction-2026-08-01.md`](ops/p0-budgeted-microbatch-reconstruction-2026-08-01.md)
 - R4 qualification contract: [`ops/r4-deployment-profile-qualification-plan-2026-08-01.md`](ops/r4-deployment-profile-qualification-plan-2026-08-01.md)
 - R4 initial matrix: [`ops/r4-initial-profile-matrix-2026-08-01.json`](ops/r4-initial-profile-matrix-2026-08-01.json)
+- R4B evaluator evidence: [`ops/r4b-profile-qualification-evaluator-evidence-2026-08-01.md`](ops/r4b-profile-qualification-evaluator-evidence-2026-08-01.md)
 - Completed R3 plan: [`ops/r3-adapter-reader-integration-plan-2026-08-01.md`](ops/r3-adapter-reader-integration-plan-2026-08-01.md)
-- R3E and parent exit evidence: [`ops/r3e-complete-state-transfer-evidence-2026-08-01.md`](ops/r3e-complete-state-transfer-evidence-2026-08-01.md)
 - Runtime invariants: [`history-runtime-contract.md`](history-runtime-contract.md)
 - Resource gates: [`resource-envelope.md`](resource-envelope.md)
 
@@ -44,71 +44,77 @@ The halted remote deployment is evidence and rollback context only. It is not an
 - R1 reference schema and deterministic planner: PR #1082, merge `85f42e665a5e6f2f519cd372718b9c41c16b3f68`.
 - R2 portable typed runtime and parent exit: PRs #1084–#1095, final merge `fb90cbbd3a44337dc0891552f3618581cfc31e1c`.
 - R3 adapter, reader, mapper, publication, maintenance, and complete-state transfer: PRs #1096–#1101, final merge `78e221e17d41c2a8bc55d2b6898d4fc088cdb9d2`.
+- R4A qualification contract and initial matrix: PR #1102, merge `158087602b1bcde515f0b68eae47133bb93645ea`.
 
 ## R3 completion
 
-R3 is **complete on `main`**.
-
-The retained R3A–R3E evidence proves:
-
-- R2 phase behavior through provider-neutral interfaces;
-- SQLite storage and scheduler conformance;
-- immutable committed read fences;
-- exact, range, semantic, and relationship reads;
-- source/query/order/fence-bound cursors;
-- strict mappers for all seven semantic classes;
-- legacy-authoritative `legacy_only` and `shadow_compare` modes;
-- deterministic bounded comparison evidence;
-- independently verified immutable publication;
-- verified-publication-gated bounded maintenance;
-- complete collection, scheduler, publication, and maintenance export;
-- one-transaction empty-target restore;
-- exact canonical parity and continuation after restore;
-- no hosted provider selection or production mutation.
-
-Final R3 documentation CI run `30702737272` passed workflow guard, lint, shell and canonical-base checks, TypeScript type-check, production runner checks, complete unit suite, clean migrations through `10007`, build, and browser smoke before merge `78e221e17d41c2a8bc55d2b6898d4fc088cdb9d2`.
+R3 is complete on `main`. The retained R3A–R3E suites prove provider-neutral phase execution, committed-reader semantics, seven strict mappers, legacy-authoritative shadow comparison, independently verified publication, publication-gated maintenance, and exact complete-state export, restore, and continuation.
 
 ## Active R4 work
 
 ### R4A — Qualification contract and initial matrix
 
-Status: **active on branch `agent/r4-deployment-profile-qualification-contract`**.
+Status: **complete on `main`** in PR #1102, merge `158087602b1bcde515f0b68eae47133bb93645ea`.
 
-R4A defines ten non-overridable hard gates:
+R4A defines ten non-overridable hard gates for cost/card safety, automatic overage, scheduler durability, transactionality, committed-only reads, complete-state portability, throughput, resource fail-closed behavior, operator independence, and production isolation.
 
-1. no mandatory payment method or card verification;
-2. no automatic paid overage;
-3. durable one-minute-or-finer internal scheduler;
-4. transactional phase completion and successor reservation;
-5. committed-only reads;
-6. exact complete-state export and restore;
-7. steady throughput above 21 ledgers/minute and catch-up above 30;
-8. resource fail-closed behavior;
-9. unattended operator-independent operation;
-10. no production mutation before R5.
+Initial classifications remain:
 
-Initial classifications:
+- cardless self-hosted SQLite service: conditional candidate;
+- Supabase Free Postgres plus pg_cron/Edge Functions: conditional candidate;
+- Turso Free storage plus cardless self-hosted executor: conditional candidate;
+- existing Cloudflare Workers/D1/Queues profile: blocked;
+- GitHub Actions-only collector: rejected;
+- Deno Deploy Free managed runtime: rejected.
 
-- cardless self-hosted SQLite service: **conditional candidate**;
-- Supabase Free Postgres plus pg_cron/Edge Functions: **conditional candidate**;
-- Turso Free storage plus cardless self-hosted executor: **conditional candidate**;
-- existing Cloudflare Workers/D1/Queues profile: **blocked** pending zero-additional-charge and account-access proof, with separate technical blockers;
-- GitHub Actions-only collector: **rejected** as the normal clock;
-- Deno Deploy Free managed runtime: **rejected** because unrestricted Free use requires card verification and the beta has no uptime guarantee.
-
-No provider or profile is selected. No hosted resource or credential is created by R4A.
+No profile is selected.
 
 ### R4B — Machine-readable evaluator
 
-Status: **next after the R4A contract merges**.
+Status: **implementation and validation passed in PR #1103; merge pending**.
 
-R4B will implement exact profile descriptors, hard-gate evidence validation, canonical decisions, and a rule that prevents scoring while any hard gate fails or remains unresolved.
+Delivered on the branch:
 
-### R4C–R4E
+- exact versioned profile identity and component schema;
+- canonical SHA-256 profile identity digest;
+- exactly one evidence record for each of gates `G1`–`G10`;
+- evidence binding to profile ID, revision, and digest;
+- deterministic rejected, conditional, or qualified classification;
+- permanent `selection: not_selected` in R4B;
+- scoring prohibited while a gate fails or remains unresolved;
+- exact ten-dimension scorecard validation;
+- canonical decision artifact and decision digest;
+- changed identity, foreign evidence, missing/duplicate gate, incomplete scorecard, unsupported version, extra field, non-canonical timestamp, and invalid score rejection.
 
-- R4C: local SQLite, Postgres, libSQL/Turso-compatible, and Cloudflare resource-model harnesses;
-- R4D: read-only shadow measurement only after cost-safety gates pass;
-- R4E: select exactly one qualified profile or record `no_profile_qualified`.
+Implementation head `e17020bb001d8e848a32e4fc8ac76bbdcdf6db40` passed CI run `30703462350`:
+
+- workflow-surface guard;
+- lint;
+- shell syntax and canonical-base checks;
+- TypeScript type-check;
+- production runner bundle and configuration validation;
+- complete unit-test suite;
+- clean migrations through `10007`;
+- application build;
+- browser smoke.
+
+The final documentation head must pass the same ordinary CI. R4B is complete only after PR #1103 merges to `main`.
+
+### R4C — Local profile harnesses
+
+Status: **next after PR #1103 merges**.
+
+Planned local-only order:
+
+1. service-managed SQLite profile harness;
+2. Postgres transaction and scheduler semantics harness;
+3. libSQL/Turso-compatible storage and transfer harness;
+4. Cloudflare Worker/D1/Queue resource model without remote deployment.
+
+### R4D–R4E
+
+- R4D: isolated read-only shadow measurement only after cost-safety gates pass;
+- R4E: select one fully qualified profile or record `no_profile_qualified`.
 
 R4 remains local and read-only. It does not deploy or recover production.
 
