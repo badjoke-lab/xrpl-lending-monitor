@@ -8,21 +8,17 @@ XRPL Lending Monitor is **not formally released**.
 
 The retired fixed-32-ledger recovery halted on a content-dependent Worker subrequest limit. The successor chain is absent, terminal lag was `56,740`, Worker Cron is empty, and no stabilization qualification or 24-hour soak is active.
 
-The public read surface remains a production test surface backed by the last verified immutable base plus committed legacy live data. Mainnet remains disabled. The new portable runtime has not been connected to a hosted deployment or public reader.
+The public read surface remains a production test surface backed by the last verified immutable base plus committed legacy live data. Mainnet remains disabled. The portable runtime is not connected to a hosted deployment or public reader.
 
 ## Controlling documents
 
 - Recovery design and schedule: [`ops/p0-budgeted-microbatch-reconstruction-2026-08-01.md`](ops/p0-budgeted-microbatch-reconstruction-2026-08-01.md)
 - R3 adapter and reader plan: [`ops/r3-adapter-reader-integration-plan-2026-08-01.md`](ops/r3-adapter-reader-integration-plan-2026-08-01.md)
+- R3A evidence: [`ops/r3a-adapter-conformance-evidence-2026-08-01.md`](ops/r3a-adapter-conformance-evidence-2026-08-01.md)
 - Parent R2 contract: [`ops/r2-portable-runtime-contract-2026-08-01.md`](ops/r2-portable-runtime-contract-2026-08-01.md)
-- R2b contract: [`ops/r2b-normalized-payload-phase-runtime-2026-08-01.md`](ops/r2b-normalized-payload-phase-runtime-2026-08-01.md)
-- R2b2 plan: [`ops/r2b2-bounded-phase-runtime-plan-2026-08-01.md`](ops/r2b2-bounded-phase-runtime-plan-2026-08-01.md)
-- Repeated-scan identity amendment: [`ops/r2-scan-sequence-amendment-2026-08-01.md`](ops/r2-scan-sequence-amendment-2026-08-01.md)
-- Candidate identity persistence amendment: [`ops/r2b2-candidate-identity-persistence-amendment-2026-08-01.md`](ops/r2b2-candidate-identity-persistence-amendment-2026-08-01.md)
+- Completed R2b2 evidence: [`ops/r2b2-bounded-phase-runtime-plan-2026-08-01.md`](ops/r2b2-bounded-phase-runtime-plan-2026-08-01.md)
 - Runtime invariants: [`history-runtime-contract.md`](history-runtime-contract.md)
 - Resource gates: [`resource-envelope.md`](resource-envelope.md)
-
-The collector core remains independent of any one hosted runtime, scheduler, queue, database, or operator console.
 
 ## Production evidence
 
@@ -46,99 +42,99 @@ The halted remote deployment is evidence and rollback context only. It is not an
 
 - R0 contract and portability reset: PR #1081, merge `c077e7b16b8b08213bbadcc5e927bba0f9472f6c`.
 - R1 reference schema and deterministic planner: PR #1082, merge `85f42e665a5e6f2f519cd372718b9c41c16b3f68`.
-- R2a typed messages and durable scheduler: PR #1084, merge `f68aea25f6d3b973ceec79e09288fdf626f33bdc`.
-- R2b1 normalized payload, digest, and chunks: PR #1086, merge `70f0e79632c51521ff1d6f85d445c797c515c429`.
-- R2b2-A transaction-aware store: PR #1088, merge `56dfe67cf969ac29357e7d49970da8b4027eba27`.
-- Repeated scan identity contract and implementation: PRs #1089/#1090, merges `51238a35184f5b4815fa79c1144df92ebe8d77a4` and `bcb812b9001ea0e47cd2571e2ed3209c450cf84f`.
-- Fixture execution and scan runtime: PR #1091, merge `7d1f50fa621b650efe0aae14fa074a2aff1ed8f3`.
-- Bounded commit runtime: PR #1092, merge `fb40f9400760b00b7d0dfb69cf4392f16e61ff08`.
-- Candidate identity persistence correction: PR #1093, merge `9fb931f78b7ea605d52cee8292728d3d48eb868a`.
-- Identity-complete finalize runtime: PR #1094, merge `d1a50ba5988da7222a32f69d1593712fc4bd7f12`.
-- Parent R2 portable runtime exit: PR #1095, merge `fb90cbbd3a44337dc0891552f3618581cfc31e1c`.
+- R2 typed durable runtime and parent exit: PRs #1084–#1095, final merge `fb90cbbd3a44337dc0891552f3618581cfc31e1c`.
+- R3 adapter and reader contract: PR #1096, merge `d38615dc283462dee50605adb535caefb1975f0f`.
 
 ## R2 completion
 
 R2 and R2b2 are **complete on `main`**.
 
-The retained parent orchestration suite proves:
+The retained suites prove sparse and dense durable phase chains, all seven semantic classes, complete identity, no early visibility, exact retry and lease behavior, staged/committing/committed runtime-version-3 restore, terminal gates, and provider-neutral imports.
 
-- sparse and dense durable `scan -> commit ... -> finalize -> next scan` chains;
-- all seven semantic classes and complete identity end to end;
-- no early visibility or cursor advance;
-- staged, committing, and committed runtime-version-3 export/restore;
-- scan, commit, and finalize interruption rollback with exact-identity retry;
-- lease, duplicate, and outbox convergence;
-- reset, epoch, base, stale-boundary, parent-hash, digest, and resource failure handling;
-- provider-neutral runtime imports.
-
-Final R2 CI run `30698715057` passed workflow guard, lint, type-check, production runner checks, complete unit suite, clean migrations, build, and browser smoke before merge `fb90cbbd3a44337dc0891552f3618581cfc31e1c`.
+Final R2 CI run `30698715057` passed workflow guard, lint, type-check, production runner checks, complete unit suite, clean migrations, build, and browser smoke.
 
 ## Active R3 work
 
-### R3 contract — Adapter and reader integration
-
-Status: **active on branch `agent/r3-adapter-reader-contract`**.
-
-Repository inspection confirms that the current public reader is a mixed legacy surface:
-
-- current objects use release assets plus D1 overlay, with legacy D1 readers still available;
-- history APIs read legacy D1 tables;
-- exact history and transaction routes may use Git-backed immutable assets and indexes;
-- local scripts create replacement current-state and immutable history publications;
-- the halted Worker entry still contains legacy collector, Queue, maintenance, and operator paths.
-
-The controlling R3 plan therefore requires:
-
-- formal provider-neutral storage, scheduler, execution, publication, and maintenance boundaries;
-- committed read fences and source-bound cursors;
-- a generic committed reader over portable rows;
-- seven strict product read-model mappers;
-- explicit `legacy_only`, `shadow_compare`, later portable-primary, and portable-only cutover states;
-- no mixing of portable and legacy rows in one response;
-- no silent legacy fallback after integrity or identity failure;
-- publication verification before publication-watermark advancement;
-- verified publication before maintenance authorization;
-- canonical cross-adapter export and restore.
-
 ### R3A — Adapter interfaces and SQLite conformance
 
-Status: **next after the R3 contract merges**.
+Status: **implementation and validation passed in PR #1097; merge pending**.
 
-R3A will introduce interfaces and wrappers without changing runtime behavior or public reader authority.
+Delivered on the branch:
 
-### R3B–R3E
+- provider-neutral storage, scheduler, execution, finalize-execution, publication, and maintenance interfaces;
+- SQLite reference storage and scheduler wrappers;
+- an interface-driven composed runtime bridge for scan, commit, and finalize;
+- unchanged R2 transaction ownership and phase semantics;
+- complete sparse seven-class chain through interface-typed adapters;
+- atomic finalize rollback and exact-identity retry through the interface bridge;
+- publication and maintenance contracts kept separate from collection;
+- provider-neutral import enforcement over import specifiers.
 
-- R3B: committed generic reader and fence-bound cursors;
+The R3A conformance suite proves:
+
+- no committed rows or watermark before finalize;
+- complete committed rows and watermark after finalize;
+- next scan at the committed boundary with `scanSequence = 0`;
+- rollback of work state, visibility, watermark, message completion, and outbox after injected storage interruption;
+- completion through the same finalize message ID after retry;
+- no hosted-provider package import in the adapter surface.
+
+Retained CI evidence from run `30699452781`:
+
+- workflow-surface guard passed;
+- lint passed;
+- TypeScript type-check passed;
+- production runner bundle and configuration validation passed;
+- complete unit-test suite passed;
+- complete clean local migration sequence passed, including migration `10006`;
+- application build passed;
+- browser smoke passed.
+
+The first R3A CI run failed only because a broad source-text regex matched the word `Queue` in a type/interface context. The guard was corrected to inspect import specifiers. Runtime behavior was unchanged.
+
+R3A is recorded complete only after PR #1097 merges to `main`.
+
+### R3B — Committed generic reader
+
+Status: **next after PR #1097 merges**.
+
+Required work:
+
+- immutable committed read fences;
+- exact lookup by semantic class and canonical key;
+- deterministic semantic listing;
+- deterministic source-ledger range listing;
+- canonical relationship lookup;
+- source/query/order/fence-bound opaque cursors;
+- malformed identity, value, cursor, and fence rejection;
+- SQLite reader conformance;
+- no public route or legacy authority change.
+
+### R3C–R3E
+
 - R3C: seven product mappers and bounded shadow comparison;
-- R3D: publication and maintenance separation;
+- R3D: publication and maintenance reference implementations;
 - R3E: cross-adapter export/restore and parent R3 exit.
 
-R3 remains local and provider-neutral. It does not select Cloudflare or any other hosted profile and does not mutate production.
+R3 remains local and provider-neutral. It does not select Cloudflare or another hosted profile and does not mutate production.
 
 ## Later gates
 
 ### R4 — Deployment-profile qualification
 
-- no hosted profile is selected before conformance and shadow evidence;
-- reject mandatory paid runtime dependencies, automatic paid overage, inadequate export, or routine interactive operation.
+No hosted profile is selected before conformance and shadow evidence. Mandatory paid dependencies, automatic paid overage, inadequate export, or routine interactive operation are rejection conditions.
 
 ### R5 — Controlled recovery
 
-- deploy only a qualified profile;
-- prove one staged work item, rollback, restore, and a fixed two-hour catch-up qualification.
+Deploy only a qualified profile and prove staged work, rollback, restore, and a fixed two-hour catch-up qualification.
 
 ### R6 — Lag-zero and steady qualification
 
-- reach lag zero;
-- pass twelve consecutive five-minute freshness checkpoints;
-- remain inside the measured no-cost envelope.
+Reach lag zero, pass twelve consecutive five-minute freshness checkpoints, and remain inside the measured no-cost envelope.
 
 ### R7 — Formal operation evidence
 
-- arm independent immutable audit retention;
-- pass a fixed 24-hour evidence window;
-- pass seven days of continuous operation;
-- only then reopen formal Devnet release qualification.
+Pass fixed 24-hour and seven-day evidence windows before reopening formal Devnet release qualification.
 
 ## Operating restrictions
 
