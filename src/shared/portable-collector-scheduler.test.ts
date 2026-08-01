@@ -52,6 +52,7 @@ const scan = buildScanPhaseMessage({
   baseIdentity: 'base-100',
   expectedPreviousLedgerIndex: 100,
   expectedPreviousLedgerHash: 'A'.repeat(64),
+  scanSequence: 0,
 })
 const commit = buildCommitPhaseMessage({ workId: 'work-101-102', chunkIndex: 0 })
 const t0 = '2026-08-01T08:00:00.000Z'
@@ -110,6 +111,7 @@ describe('portable collector durable scheduler', () => {
     expect(reclaimed.status).toBe('claimed')
     if (reclaimed.status === 'claimed') {
       expect(reclaimed.message).toEqual(scan)
+      expect(reclaimed.message.phase === 'scan' && reclaimed.message.scanSequence).toBe(0)
       expect(reclaimed.snapshot.leaseOwner).toBe('worker-b')
       expect(reclaimed.snapshot.attemptCount).toBe(2)
     }
@@ -214,7 +216,7 @@ describe('portable collector durable scheduler', () => {
     })
   })
 
-  it('retries the same message identity after a bounded delay', () => {
+  it('retries the same message identity and sequence after a bounded delay', () => {
     scheduler.enqueue(scan, { availableAt: t0, createdAt: t0 })
     scheduler.claim(scan.messageId, {
       leaseOwner: 'worker-a',
@@ -253,6 +255,7 @@ describe('portable collector durable scheduler', () => {
     expect(retried.status).toBe('claimed')
     if (retried.status === 'claimed') {
       expect(retried.message.messageId).toBe(scan.messageId)
+      expect(retried.message.phase === 'scan' && retried.message.scanSequence).toBe(0)
       expect(retried.snapshot.attemptCount).toBe(2)
     }
   })
