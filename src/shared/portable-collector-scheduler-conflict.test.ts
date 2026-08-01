@@ -49,6 +49,7 @@ const scan = buildScanPhaseMessage({
   baseIdentity: 'base-100',
   expectedPreviousLedgerIndex: 100,
   expectedPreviousLedgerHash: 'A'.repeat(64),
+  scanSequence: 0,
 })
 const commit = buildCommitPhaseMessage({ workId: 'work-101', chunkIndex: 0 })
 const t0 = '2026-08-01T10:00:00.000Z'
@@ -83,6 +84,27 @@ describe('portable scheduler timing identity', () => {
       scheduler.enqueue(scan, { availableAt: minute(1), createdAt: minute(1) }),
     ).toThrow(`scheduler message identity conflict: ${scan.messageId}`)
     expect(scheduler.getMessage(scan.messageId)?.availableAt).toBe(t0)
+  })
+
+  it('allows a later logical scan wake-up only through a new sequence identity', () => {
+    const nextScan = buildScanPhaseMessage({
+      network: scan.network,
+      epochId: scan.epochId,
+      baseIdentity: scan.baseIdentity,
+      expectedPreviousLedgerIndex: scan.expectedPreviousLedgerIndex,
+      expectedPreviousLedgerHash: scan.expectedPreviousLedgerHash,
+      scanSequence: scan.scanSequence + 1,
+    })
+
+    scheduler.enqueue(scan, { availableAt: t0, createdAt: t0 })
+    scheduler.enqueue(nextScan, { availableAt: minute(1), createdAt: minute(1) })
+
+    expect(nextScan.messageId).not.toBe(scan.messageId)
+    expect(scheduler.getMessage(scan.messageId)?.availableAt).toBe(t0)
+    expect(scheduler.getMessage(nextScan.messageId)).toMatchObject({
+      availableAt: minute(1),
+      status: 'pending',
+    })
   })
 
   it('rejects duplicate completion that changes reserved successor timing', () => {
