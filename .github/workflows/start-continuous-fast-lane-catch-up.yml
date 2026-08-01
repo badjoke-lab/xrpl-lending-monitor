@@ -1,0 +1,88 @@
+name: Start continuous fast-lane catch-up
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/start-continuous-fast-lane-catch-up.yml
+      - .github/start-continuous-fast-lane-catch-up-trigger
+      - scripts/start-continuous-fast-lane-catch-up.py
+      - scripts/check-actions-workflow-allowlist.sh
+  push:
+    branches: [main]
+    paths:
+      - .github/start-continuous-fast-lane-catch-up-trigger
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: ${{ github.event_name == 'push' && 'production-worker-write' || format('continuous-catch-up-validation-{0}', github.event.pull_request.number) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  RUNTIME_SHA: 088cb45caff2a59511a7def65bd6517ff6a60399
+  SCRIPT_NAME: xrpl-lending-monitor
+  QUEUE_ID: 2ae398f2edbf43749e45cd7ede77c6cd
+  DATABASE_NAME: xrpl-lending-monitor
+  DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  validate:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Fetch exact runtime commit
+        run: git fetch --no-tags --depth=1 origin "${RUNTIME_SHA}"
+      - name: Validate guarded promotion source
+        run: |
+          set -euo pipefail
+          python -m py_compile scripts/start-continuous-fast-lane-catch-up.py
+          python scripts/start-continuous-fast-lane-catch-up.py --validate-source-only
+
+  promote:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Fetch exact runtime commit
+        run: git fetch --no-tags --depth=1 origin "${RUNTIME_SHA}"
+      - name: Promote continuous catch-up
+        run: python scripts/start-continuous-fast-lane-catch-up.py
+      - name: Ensure issue comment exists
+        if: always()
+        run: |
+          if [ ! -s continuous-catch-up-evidence/issue-comment.md ]; then
+            mkdir -p continuous-catch-up-evidence
+            printf '## Continuous catch-up promotion: WORKFLOW FAILURE\n\nNo result file was produced. Inspect the workflow logs and keep the Queue paused.\n' > continuous-catch-up-evidence/issue-comment.md
+          fi
+      - name: Post result to Issue 1072
+        if: always()
+        run: gh issue comment 1072 --repo badjoke-lab/xrpl-lending-monitor --body-file continuous-catch-up-evidence/issue-comment.md
+      - name: Upload continuous catch-up evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: continuous-fast-lane-catch-up-promotion
+          path: continuous-catch-up-evidence
+          if-no-files-found: error
+          retention-days: 30
