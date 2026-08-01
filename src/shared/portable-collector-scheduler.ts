@@ -178,7 +178,11 @@ export class PortableCollectorScheduler {
 
     const existing = this.getMessage(message.messageId)
     if (!existing) throw new Error(`scheduler message was not persisted: ${message.messageId}`)
-    if (existing.phase !== message.phase || existing.payloadJson !== payloadJson) {
+    if (
+      existing.phase !== message.phase ||
+      existing.payloadJson !== payloadJson ||
+      existing.availableAt !== availableAt
+    ) {
       throw new Error(`scheduler message identity conflict: ${message.messageId}`)
     }
     return existing
@@ -299,9 +303,10 @@ export class PortableCollectorScheduler {
       if (current.status === 'completed') {
         const existingOutbox = this.getOutbox(options.messageId)
         if (
+          !existingOutbox ||
           current.resultJson !== resultJson ||
           current.successorMessageId !== options.successor.messageId ||
-          existingOutbox?.successorPayloadJson !== successorPayloadJson ||
+          existingOutbox.successorPayloadJson !== successorPayloadJson ||
           existingOutbox.successorAvailableAt !== successorAvailableAt
         ) {
           throw new Error(`completed scheduler message result conflict: ${options.messageId}`)
