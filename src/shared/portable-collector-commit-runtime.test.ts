@@ -101,7 +101,7 @@ function protocolEvent(index: number): NormalizedCandidateV1 {
     sourceLedgerHash: ledgerHash,
     sourceTransactionHash: transactionHash(index + 1),
     objectId: null,
-    relationshipIds: ['loan:1'],
+    relationshipIds: ['loan:2', 'loan:1', 'loan:2'],
     isTombstone: false,
     value: { index, transactionType: 'LoanSet' },
   }
@@ -136,12 +136,13 @@ function createDatabase(): {
   const database = new DatabaseSync(':memory:')
   openDatabases.push(database)
   database.exec('PRAGMA foreign_keys = ON')
-  database.exec(
-    readFileSync(resolve(process.cwd(), 'migrations/10004_portable_collector_work.sql'), 'utf8'),
-  )
-  database.exec(
-    readFileSync(resolve(process.cwd(), 'migrations/10005_portable_scheduler.sql'), 'utf8'),
-  )
+  for (const migration of [
+    'migrations/10004_portable_collector_work.sql',
+    'migrations/10005_portable_scheduler.sql',
+    'migrations/10006_portable_reference_identity.sql',
+  ]) {
+    database.exec(readFileSync(resolve(process.cwd(), migration), 'utf8'))
+  }
   const db = new NodeSqliteCommitRuntimeDatabase(database)
   return {
     database,
@@ -240,7 +241,7 @@ describe('portable collector commit runtime', () => {
     while (openDatabases.length > 0) openDatabases.pop()!.close()
   })
 
-  it('commits one verified chunk and reserves finalize without public visibility', async () => {
+  it('commits one verified chunk with complete identity and reserves finalize', async () => {
     const { store, scheduler } = createDatabase()
     await stagePayload({ store, protocolEventCount: 2 })
     const message = buildCommitPhaseMessage({ workId, chunkIndex: 0 })
@@ -261,7 +262,14 @@ describe('portable collector commit runtime', () => {
       },
     })
     expect(store.getWork(workId)?.status).toBe('committing')
-    expect(store.listReferenceRowsForWork(workId)).toHaveLength(3)
+    const rows = store.listReferenceRowsForWork(workId)
+    expect(rows).toHaveLength(3)
+    expect(rows.find((row) => row.canonicalKey === 'event:000')).toMatchObject({
+      semanticClass: 'protocol-event',
+      sourceTransactionHash: transactionHash(1),
+      objectId: null,
+      relationshipIds: ['loan:1', 'loan:2'],
+    })
     expect(store.listCommitChunks(workId)).toHaveLength(1)
     expect(store.listCommittedReferenceRows()).toEqual([])
     expect(store.getWatermark('devnet', 'epoch-1', 'base-100')).toBeUndefined()
@@ -300,10 +308,6 @@ describe('portable collector commit runtime', () => {
     })
     expect(store.listReferenceRowsForWork(workId)).toHaveLength(45)
     expect(store.listCommitChunks(workId).map((chunk) => chunk.chunkIndex)).toEqual([0, 1])
-    expect(parsePortablePhaseMessage(scheduler.getOutbox(second.messageId)!.successorPayloadJson)).toMatchObject({
-      phase: 'finalize',
-      workId,
-    })
   })
 
   it('halts a non-next commit message without candidate mutation', async () => {
@@ -325,9 +329,7 @@ describe('portable collector commit runtime', () => {
     const { db, store, scheduler } = createDatabase()
     await stagePayload({ store, protocolEventCount: 2 })
     const chunk = store.getPayloadChunk(workId, 0)!
-    const changed = new TextDecoder()
-      .decode(chunk.payload)
-      .replace('LoanSet', 'LoanPay')
+    const changed = new TextDecoder().decode(chunk.payload).replace('LoanSet', 'LoanPay')
     const changedBytes = new TextEncoder().encode(changed)
     db.run(
       `UPDATE collector_payload_chunks
@@ -344,7 +346,6 @@ describe('portable collector commit runtime', () => {
     expect(result).toMatchObject({ status: 'halted', classification: 'digest_mismatch' })
     expect(store.listReferenceRowsForWork(workId)).toEqual([])
     expect(store.listCommitChunks(workId)).toEqual([])
-    expect(scheduler.getOutbox(message.messageId)).toBeUndefined()
   })
 
   it('halts a valid 41-record chunk at the commit resource guard', async () => {

@@ -63,6 +63,9 @@ export interface PortableReferenceRow {
   canonicalKey: string
   sourceLedgerIndex: number
   sourceLedgerHash: string
+  sourceTransactionHash: string | null
+  objectId: string | null
+  relationshipIds: string[]
   valueJson: string | null
   isTombstone: boolean
   createdAt: string
@@ -146,6 +149,9 @@ interface ReferenceRowResult {
   canonical_key: string
   source_ledger_index: number
   source_ledger_hash: string
+  source_transaction_hash: string | null
+  object_id: string | null
+  relationship_ids_json: string
   value_json: string | null
   is_tombstone: number
   created_at: string
@@ -169,10 +175,19 @@ const workSelect = `SELECT
   expected_commit_chunks, committed_at
 FROM collector_work`
 
+const referenceRowSelect = `SELECT
+  work_id, semantic_class, canonical_key, source_ledger_index,
+  source_ledger_hash, source_transaction_hash, object_id,
+  relationship_ids_json, value_json, is_tombstone, created_at`
+
 function requireNonEmpty(value: string, name: string): string {
   const normalized = value.trim()
   if (!normalized) throw new Error(`${name} is required`)
   return normalized
+}
+
+function optionalNonEmpty(value: string | null, name: string): string | null {
+  return value === null ? null : requireNonEmpty(value, name)
 }
 
 function requireNonNegativeInteger(value: number, name: string): number {
@@ -187,6 +202,30 @@ function requirePositiveInteger(value: number, name: string): number {
     throw new Error(`${name} must be a positive safe integer`)
   }
   return value
+}
+
+function normalizeRelationshipIds(values: readonly string[]): string[] {
+  if (!Array.isArray(values)) throw new Error('relationshipIds must be an array')
+  return [...new Set(values.map((value) => requireNonEmpty(value, 'relationshipIds[]')))].sort(
+    (left, right) => left.localeCompare(right),
+  )
+}
+
+function parseRelationshipIds(value: string): string[] {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(value)
+  } catch {
+    throw new Error('relationship_ids_json is not valid JSON')
+  }
+  if (!Array.isArray(parsed) || parsed.some((entry) => typeof entry !== 'string')) {
+    throw new Error('relationship_ids_json must contain a string array')
+  }
+  const normalized = normalizeRelationshipIds(parsed)
+  if (canonicalPortableJson(normalized) !== value) {
+    throw new Error('relationship_ids_json is not canonical')
+  }
+  return normalized
 }
 
 function requireWork(db: PortableSqliteDatabase, workId: string): CollectorWorkRow {
@@ -271,6 +310,9 @@ function mapReferenceRow(row: ReferenceRowResult): PortableReferenceRow {
     canonicalKey: row.canonical_key,
     sourceLedgerIndex: row.source_ledger_index,
     sourceLedgerHash: row.source_ledger_hash,
+    sourceTransactionHash: row.source_transaction_hash,
+    objectId: row.object_id,
+    relationshipIds: parseRelationshipIds(row.relationship_ids_json),
     valueJson: row.value_json,
     isTombstone: row.is_tombstone === 1,
     createdAt: row.created_at,
@@ -400,8 +442,7 @@ export class PortableCollectorReferenceStore {
 
   listReferenceRowsForWork(workId: string): PortableReferenceRow[] {
     return this.db.all<ReferenceRowResult>(
-      `SELECT work_id, semantic_class, canonical_key, source_ledger_index,
-              source_ledger_hash, value_json, is_tombstone, created_at
+      `${referenceRowSelect}
        FROM collector_reference_rows
        WHERE work_id = ?
        ORDER BY source_ledger_index, semantic_class, canonical_key`,
@@ -460,19 +501,31 @@ export class PortableCollectorReferenceStore {
     requireNonEmpty(row.canonicalKey, 'canonicalKey')
     requireNonNegativeInteger(row.sourceLedgerIndex, 'sourceLedgerIndex')
     const sourceLedgerHash = requireNonEmpty(row.sourceLedgerHash, 'sourceLedgerHash').toUpperCase()
+    const sourceTransactionHash = optionalNonEmpty(
+      row.sourceTransactionHash,
+      'sourceTransactionHash',
+    )?.toUpperCase() ?? null
+    const objectId = optionalNonEmpty(row.objectId, 'objectId')
+    const relationshipIdsJson = canonicalPortableJson(
+      normalizeRelationshipIds(row.relationshipIds),
+    )
     requireWork(this.db, row.workId)
 
     this.db.run(
       `INSERT OR IGNORE INTO collector_reference_rows (
          work_id, semantic_class, canonical_key, source_ledger_index,
-         source_ledger_hash, value_json, is_tombstone, created_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+         source_ledger_hash, source_transaction_hash, object_id,
+         relationship_ids_json, value_json, is_tombstone, created_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         row.workId,
         row.semanticClass,
         row.canonicalKey,
         row.sourceLedgerIndex,
         sourceLedgerHash,
+        sourceTransactionHash,
+        objectId,
+        relationshipIdsJson,
         row.valueJson,
         row.isTombstone ? 1 : 0,
         row.createdAt,
@@ -482,10 +535,14 @@ export class PortableCollectorReferenceStore {
     const existing = this.db.get<{
       source_ledger_index: number
       source_ledger_hash: string
+      source_transaction_hash: string | null
+      object_id: string | null
+      relationship_ids_json: string
       value_json: string | null
       is_tombstone: number
     }>(
-      `SELECT source_ledger_index, source_ledger_hash, value_json, is_tombstone
+      `SELECT source_ledger_index, source_ledger_hash, source_transaction_hash,
+              object_id, relationship_ids_json, value_json, is_tombstone
        FROM collector_reference_rows
        WHERE work_id = ? AND semantic_class = ? AND canonical_key = ?`,
       [row.workId, row.semanticClass, row.canonicalKey],
@@ -494,6 +551,9 @@ export class PortableCollectorReferenceStore {
       !existing ||
       existing.source_ledger_index !== row.sourceLedgerIndex ||
       existing.source_ledger_hash !== sourceLedgerHash ||
+      existing.source_transaction_hash !== sourceTransactionHash ||
+      existing.object_id !== objectId ||
+      existing.relationship_ids_json !== relationshipIdsJson ||
       existing.value_json !== row.valueJson ||
       existing.is_tombstone !== (row.isTombstone ? 1 : 0)
     ) {
@@ -729,9 +789,7 @@ export class PortableCollectorReferenceStore {
 
   listCommittedReferenceRows(): PortableReferenceRow[] {
     return this.db.all<ReferenceRowResult>(
-      `SELECT
-         work_id, semantic_class, canonical_key, source_ledger_index,
-         source_ledger_hash, value_json, is_tombstone, created_at
+      `${referenceRowSelect}
        FROM collector_committed_reference_rows
        ORDER BY source_ledger_index, semantic_class, canonical_key, work_id`,
     ).map(mapReferenceRow)

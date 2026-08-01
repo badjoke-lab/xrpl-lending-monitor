@@ -39,13 +39,10 @@ class NodeSqliteReferenceDatabase implements PortableSqliteDatabase {
   }
 }
 
-const migration = readFileSync(
-  resolve(process.cwd(), 'migrations/10004_portable_collector_work.sql'),
-  'utf8',
-)
 const createdAt = '2026-08-01T09:00:00.000Z'
 const parentHash = 'A'.repeat(64)
 const finalHash = 'B'.repeat(64)
+const transactionHash = 'C'.repeat(64)
 
 function createReferenceDatabase(): {
   database: DatabaseSync
@@ -54,7 +51,12 @@ function createReferenceDatabase(): {
 } {
   const database = new DatabaseSync(':memory:')
   database.exec('PRAGMA foreign_keys = ON')
-  database.exec(migration)
+  for (const migration of [
+    'migrations/10004_portable_collector_work.sql',
+    'migrations/10006_portable_reference_identity.sql',
+  ]) {
+    database.exec(readFileSync(resolve(process.cwd(), migration), 'utf8'))
+  }
   const adapter = new NodeSqliteReferenceDatabase(database)
   return {
     database,
@@ -90,6 +92,9 @@ function stageCompleteWork(store: PortableCollectorReferenceStore): void {
     canonicalKey: 'Vault:rVault',
     sourceLedgerIndex: 102,
     sourceLedgerHash: finalHash,
+    sourceTransactionHash: transactionHash,
+    objectId: 'rVault',
+    relationshipIds: ['loan:2', 'loan:1', 'loan:2'],
     valueJson: '{"id":"rVault"}',
     isTombstone: false,
     createdAt,
@@ -181,6 +186,9 @@ describe('portable collector transaction-aware store', () => {
         canonicalKey: 'Vault:rVault',
         sourceLedgerIndex: 102,
         sourceLedgerHash: finalHash,
+        sourceTransactionHash: transactionHash,
+        objectId: 'rVault',
+        relationshipIds: ['loan:1', 'loan:2'],
         valueJson: '{"id":"rVault"}',
         isTombstone: false,
         createdAt,
@@ -203,7 +211,9 @@ describe('portable collector transaction-aware store', () => {
       ledgerHash: finalHash,
     })
     expect(store.getWork('work-101-102')?.status).toBe('committed')
-    expect(store.listCommittedReferenceRows()).toHaveLength(1)
+    expect(store.listCommittedReferenceRows()).toEqual(
+      store.listReferenceRowsForWork('work-101-102'),
+    )
   })
 
   it('rolls back work visibility and watermark when the caller transaction fails', () => {
