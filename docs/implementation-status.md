@@ -13,12 +13,10 @@ The public read surface remains legacy-authoritative. Mainnet remains disabled. 
 ## Controlling documents
 
 - Recovery design and schedule: [`ops/p0-budgeted-microbatch-reconstruction-2026-08-01.md`](ops/p0-budgeted-microbatch-reconstruction-2026-08-01.md)
-- R3 contract and exit plan: [`ops/r3-adapter-reader-integration-plan-2026-08-01.md`](ops/r3-adapter-reader-integration-plan-2026-08-01.md)
-- R3A evidence: [`ops/r3a-adapter-conformance-evidence-2026-08-01.md`](ops/r3a-adapter-conformance-evidence-2026-08-01.md)
-- R3B evidence: [`ops/r3b-committed-reader-evidence-2026-08-01.md`](ops/r3b-committed-reader-evidence-2026-08-01.md)
-- R3C evidence: [`ops/r3c-product-mapper-shadow-evidence-2026-08-01.md`](ops/r3c-product-mapper-shadow-evidence-2026-08-01.md)
-- R3D evidence: [`ops/r3d-publication-maintenance-evidence-2026-08-01.md`](ops/r3d-publication-maintenance-evidence-2026-08-01.md)
-- R3E evidence: [`ops/r3e-complete-state-transfer-evidence-2026-08-01.md`](ops/r3e-complete-state-transfer-evidence-2026-08-01.md)
+- R4 qualification contract: [`ops/r4-deployment-profile-qualification-plan-2026-08-01.md`](ops/r4-deployment-profile-qualification-plan-2026-08-01.md)
+- R4 initial matrix: [`ops/r4-initial-profile-matrix-2026-08-01.json`](ops/r4-initial-profile-matrix-2026-08-01.json)
+- Completed R3 plan: [`ops/r3-adapter-reader-integration-plan-2026-08-01.md`](ops/r3-adapter-reader-integration-plan-2026-08-01.md)
+- R3E and parent exit evidence: [`ops/r3e-complete-state-transfer-evidence-2026-08-01.md`](ops/r3e-complete-state-transfer-evidence-2026-08-01.md)
 - Runtime invariants: [`history-runtime-contract.md`](history-runtime-contract.md)
 - Resource gates: [`resource-envelope.md`](resource-envelope.md)
 
@@ -45,68 +43,80 @@ The halted remote deployment is evidence and rollback context only. It is not an
 - R0 contract and portability reset: PR #1081, merge `c077e7b16b8b08213bbadcc5e927bba0f9472f6c`.
 - R1 reference schema and deterministic planner: PR #1082, merge `85f42e665a5e6f2f519cd372718b9c41c16b3f68`.
 - R2 portable typed runtime and parent exit: PRs #1084–#1095, final merge `fb90cbbd3a44337dc0891552f3618581cfc31e1c`.
-- R3 contract: PR #1096, merge `d38615dc283462dee50605adb535caefb1975f0f`.
-- R3A adapter interfaces and SQLite conformance: PR #1097, merge `741f4ac24396dd21ae100b963ea439782b1696be`.
-- R3B committed generic reader: PR #1098, merge `fa04ea280525e7c93bf13dd1b8debbfcf78193af`.
-- R3C product mappers and shadow compatibility: PR #1099, merge `e7bcedcf3f597e765da42098a89683e1ba62cd68`.
-- R3D verified publication and bounded maintenance: PR #1100, merge `25d35741a1e0b60d01ba422e5ab8fba3edf15a3e`.
+- R3 adapter, reader, mapper, publication, maintenance, and complete-state transfer: PRs #1096–#1101, final merge `78e221e17d41c2a8bc55d2b6898d4fc088cdb9d2`.
 
-## R3E and parent R3 exit
+## R3 completion
 
-Status: **implementation and validation passed in PR #1101; merge pending**.
+R3 is **complete on `main`**.
 
-Delivered on the branch:
+The retained R3A–R3E evidence proves:
 
-- provider-neutral complete-state transfer interface;
-- outer complete-state schema version 1 preserving inner runtime schema version 3;
-- canonical export of collection, scheduler, publication, and maintenance state;
-- one-transaction restore into a fully empty target;
-- exact canonical export parity before restore commit;
-- publication candidate parent-chain restoration and cycle/missing-parent rejection;
-- staged, committing, committed, published, and maintained state transfer;
-- committed-reader fence parity after restore;
-- same-source cursor continuation and cross-source cursor rejection;
-- completed scheduler message, dispatched outbox, and pending successor parity;
-- verified publication watermark and applied maintenance-plan parity;
-- publication continuation after restore;
-- non-empty target rejection and failed-restore rollback to empty.
+- R2 phase behavior through provider-neutral interfaces;
+- SQLite storage and scheduler conformance;
+- immutable committed read fences;
+- exact, range, semantic, and relationship reads;
+- source/query/order/fence-bound cursors;
+- strict mappers for all seven semantic classes;
+- legacy-authoritative `legacy_only` and `shadow_compare` modes;
+- deterministic bounded comparison evidence;
+- independently verified immutable publication;
+- verified-publication-gated bounded maintenance;
+- complete collection, scheduler, publication, and maintenance export;
+- one-transaction empty-target restore;
+- exact canonical parity and continuation after restore;
+- no hosted provider selection or production mutation.
 
-Latest implementation head `0fbe87426d6f6e22d8cc1404abd5ed8653639967` passed CI run `30702565940`:
+Final R3 documentation CI run `30702737272` passed workflow guard, lint, shell and canonical-base checks, TypeScript type-check, production runner checks, complete unit suite, clean migrations through `10007`, build, and browser smoke before merge `78e221e17d41c2a8bc55d2b6898d4fc088cdb9d2`.
 
-- workflow-surface guard;
-- lint;
-- shell syntax and canonical-base checks;
-- TypeScript type-check;
-- production runner bundle and configuration validation;
-- complete unit-test suite;
-- clean migration sequence through migration `10007`;
-- application build;
-- browser smoke.
+## Active R4 work
 
-The final documentation head must pass the same ordinary CI before merge. R3 is complete only after PR #1101 merges to `main`.
+### R4A — Qualification contract and initial matrix
 
-## Next phase
+Status: **active on branch `agent/r4-deployment-profile-qualification-contract`**.
 
-### R4 — Deployment-profile qualification
+R4A defines ten non-overridable hard gates:
 
-Status: **next after PR #1101 merges**.
+1. no mandatory payment method or card verification;
+2. no automatic paid overage;
+3. durable one-minute-or-finer internal scheduler;
+4. transactional phase completion and successor reservation;
+5. committed-only reads;
+6. exact complete-state export and restore;
+7. steady throughput above 21 ledgers/minute and catch-up above 30;
+8. resource fail-closed behavior;
+9. unattended operator-independent operation;
+10. no production mutation before R5.
 
-R4 is local and read-only until a candidate passes every gate. It must:
+Initial classifications:
 
-- enumerate candidate storage, scheduler, execution, and publication profiles without selecting one prematurely;
-- reject mandatory paid runtime dependencies and automatic paid overage;
-- prove transaction and committed-read semantics;
-- prove scheduler lease, retry, duplicate, and successor behavior;
-- prove exact export and restore into the reference format;
-- measure request, operation, byte, row, CPU, memory, and elapsed envelopes;
-- demonstrate steady throughput above 21 ledgers/minute and catch-up throughput above 30 ledgers/minute under retained fixtures or shadow evidence;
-- prove fail-closed behavior before any provider ceiling;
-- prove deploy, rollback, checkpoint, and evidence paths without routine interactive dashboard operation;
-- perform no production mutation until a later explicit R5 approval.
+- cardless self-hosted SQLite service: **conditional candidate**;
+- Supabase Free Postgres plus pg_cron/Edge Functions: **conditional candidate**;
+- Turso Free storage plus cardless self-hosted executor: **conditional candidate**;
+- existing Cloudflare Workers/D1/Queues profile: **blocked** pending zero-additional-charge and account-access proof, with separate technical blockers;
+- GitHub Actions-only collector: **rejected** as the normal clock;
+- Deno Deploy Free managed runtime: **rejected** because unrestricted Free use requires card verification and the beta has no uptime guarantee.
+
+No provider or profile is selected. No hosted resource or credential is created by R4A.
+
+### R4B — Machine-readable evaluator
+
+Status: **next after the R4A contract merges**.
+
+R4B will implement exact profile descriptors, hard-gate evidence validation, canonical decisions, and a rule that prevents scoring while any hard gate fails or remains unresolved.
+
+### R4C–R4E
+
+- R4C: local SQLite, Postgres, libSQL/Turso-compatible, and Cloudflare resource-model harnesses;
+- R4D: read-only shadow measurement only after cost-safety gates pass;
+- R4E: select exactly one qualified profile or record `no_profile_qualified`.
+
+R4 remains local and read-only. It does not deploy or recover production.
+
+## Later phases
 
 ### R5 — Controlled recovery
 
-Deploy only a qualified profile, then prove one staged work item, rollback, restore, and a fixed two-hour catch-up qualification.
+Deploy only a qualified R4 profile, then prove one staged work item, rollback, restore, and a fixed two-hour catch-up qualification.
 
 ### R6 — Lag-zero and steady qualification
 
@@ -121,12 +131,13 @@ Pass fixed 24-hour and seven-day evidence windows before reopening formal Devnet
 - Do not describe the collector as operating while its successor or lease chain is absent.
 - Do not restart the retired fixed-32-ledger runtime.
 - Do not select or deploy a hosted provider before R4 qualification.
+- Do not add a payment method, paid plan, or automatic-overage profile.
 - Do not use GitHub Actions as the normal collection clock.
-- Do not start stabilization or soak before R6.
+- Do not start recovery before R5 or stabilization/soak before R6.
 - Do not enable Mainnet.
 - Do not skip a failed ledger or advance a cursor after partial persistence.
 - Do not mix portable and legacy reader sources inside one response.
 - Do not silently fall back after integrity or identity failure.
 - Do not expose the portable reader publicly before a later explicit cutover gate.
-- Do not make a provider dashboard, local terminal, or paid runtime dependency part of routine recovery.
+- Do not make a provider dashboard or interactive terminal part of routine operation.
 - Do not call a theoretical no-cost projection an operating result.
