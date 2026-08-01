@@ -6,32 +6,21 @@ Last updated: `2026-08-01`.
 
 XRPL Lending Monitor is **not formally released**.
 
-The fixed-ledger-count Queue recovery is retired. Production evidence on Issue #1079 proved that a one-minute 32-ledger chain can still halt on a content-dependent Worker subrequest limit. The chain stopped with terminal lag `56,740`; no stabilization qualification or 24-hour soak is active.
+The retired fixed-32-ledger recovery halted on a content-dependent Worker subrequest limit. The successor chain is absent, terminal lag was `56,740`, Worker Cron is empty, and no stabilization qualification or 24-hour soak is active.
 
 The public read surface remains a production test surface backed by the last verified immutable base plus committed live data. Mainnet remains disabled.
 
-## Controlling recovery design
+## Controlling documents
 
-The controlling recovery design is [`ops/p0-budgeted-microbatch-reconstruction-2026-08-01.md`](ops/p0-budgeted-microbatch-reconstruction-2026-08-01.md).
+- Recovery design and schedule: [`ops/p0-budgeted-microbatch-reconstruction-2026-08-01.md`](ops/p0-budgeted-microbatch-reconstruction-2026-08-01.md)
+- Parent R2 contract: [`ops/r2-portable-runtime-contract-2026-08-01.md`](ops/r2-portable-runtime-contract-2026-08-01.md)
+- Active R2b contract: [`ops/r2b-normalized-payload-phase-runtime-2026-08-01.md`](ops/r2b-normalized-payload-phase-runtime-2026-08-01.md)
+- Runtime invariants: [`history-runtime-contract.md`](history-runtime-contract.md)
+- Resource gates: [`resource-envelope.md`](resource-envelope.md)
 
-The parent R2 contract is [`ops/r2-portable-runtime-contract-2026-08-01.md`](ops/r2-portable-runtime-contract-2026-08-01.md).
+The collector core remains independent of any one hosted runtime, scheduler, queue, database, or operator console.
 
-The active R2b implementation contract is [`ops/r2b-normalized-payload-phase-runtime-2026-08-01.md`](ops/r2b-normalized-payload-phase-runtime-2026-08-01.md).
-
-The replacement collector preserves every public and semantic requirement while separating the collector contract from any one hosted runtime:
-
-- adaptive scan work bounded by actual transaction, byte, CPU, wall-time, and external-request budgets;
-- resumable commit chunks bounded by adapter-specific storage limits;
-- one small atomic finalization step that alone advances the cursor and committed watermark;
-- work-scoped current/history rows invisible until finalization;
-- a SQLite reference implementation and shared adapter conformance tests;
-- provider-neutral storage, scheduler, execution, and publication interfaces;
-- separate bounded maintenance and Git-backed immutable publication;
-- deployment-profile selection only after measured no-cost, cadence, export, rollback, and failure-mode qualification.
-
-A fixed ledger count and a provider-specific invocation shape are no longer accepted as safety boundaries.
-
-## Current production evidence
+## Production evidence
 
 Controlling checkpoint: Issue #1079.
 
@@ -48,145 +37,121 @@ Controlling checkpoint: Issue #1079.
 - successor chain: halted
 - 24-hour soak: not started
 
-A configured remote queue does not mean the collector is operating when no successor exists. The halted Cloudflare deployment remains evidence and rollback context only.
+The halted remote deployment is evidence and rollback context only. It is not an operating collector.
 
-## Active implementation order
+## Completed reconstruction milestones
 
 ### R0 — Contract and portability reset
 
-Status: **complete** in merged PR #1081 (`c077e7b16b8b08213bbadcc5e927bba0f9472f6c`).
+Complete in PR #1081, merge `c077e7b16b8b08213bbadcc5e927bba0f9472f6c`.
 
-Delivered:
-
-- retired the fixed-32-ledger recovery and its qualification path;
-- rewrote runtime, resource, status, and recovery schedule documents around provider-neutral contracts;
-- defined `StorageAdapter`, `SchedulerAdapter`, `ExecutionAdapter`, and `PublicationAdapter` boundaries;
-- selected SQLite as the reference implementation for local and CI proof;
-- froze remote recovery until the adapter contract and deployment-profile gate exist.
-
-Exit condition passed: source-of-truth documents agree, contain technical rationale only, and no hosted provider is treated as the required architecture.
+- retired the fixed-ledger-count recovery contract;
+- separated collector semantics from provider-specific execution;
+- defined storage, scheduler, execution, and publication adapter boundaries;
+- froze remote recovery until later deployment-profile qualification.
 
 ### R1 — Reference schema and deterministic planner
 
-Status: **complete** in merged PR #1082 (`85f42e665a5e6f2f519cd372718b9c41c16b3f68`).
+Complete in PR #1082, merge `85f42e665a5e6f2f519cd372718b9c41c16b3f68`.
 
-Delivered:
+- portable work, payload-chunk, commit-chunk, candidate-row, and committed-watermark schema;
+- deterministic adaptive planner with a 48-ledger candidate ceiling;
+- SQLite reference store;
+- committed-only visibility and atomic finalization;
+- canonical complete-state export and restore.
 
-- implementation-neutral collector work, payload chunk, commit chunk, reference-row, and committed-watermark schema;
-- real SQLite reference storage for idempotent staging, hidden partial rows, guarded atomic finalization, cursor-parent enforcement, and deterministic export;
-- deterministic adaptive candidate planning from actual per-ledger transaction, byte, payload, and request estimates;
-- the R1 scan ceiling of 48 ledgers as a candidate ceiling rather than a persistence-safety claim;
-- deterministic complete-state restoration into a second empty SQLite database with canonical byte-for-byte re-export parity;
-- sparse, dense/content-heavy, oversized-single-ledger, discontinuity, incomplete-commit, idempotent-finalize, visibility, watermark, export, restore, and non-empty-restore rejection tests.
+### R2a — Typed messages and durable scheduler
 
-Retained CI evidence:
+Complete in PR #1084, merge `f68aea25f6d3b973ceec79e09288fdf626f33bdc`.
 
-- minimal Actions workflow surface guard passed;
+- deterministic versioned scan, commit, and finalize messages;
+- durable SQLite inbox, leases, stale-lease recovery, retry, and terminal halt;
+- atomic timed successor outbox;
+- duplicate completion and dispatch convergence;
+- complete runtime export and restore, including leases and reserved successor times.
+
+## Active R2b work
+
+R2b is **not complete**. It is split into two implementation units under the merged R2b contract.
+
+### R2b1 — Normalized payload, digest, and chunks
+
+Status: **implementation and validation passed in PR #1086; merge pending**.
+
+Delivered on the branch:
+
+- seven-class `NormalizedCollectorPayloadV1` envelope;
+- common canonical candidate identity;
+- strict portable JSON values and exact candidate fields;
+- contiguous ledger index, hash, and parent-chain validation;
+- source ledger hash binding for every semantic candidate;
+- required transaction and object identities for applicable classes;
+- explicit semantic counts, including zero-count groups;
+- duplicate semantic identity rejection;
+- canonical `sha256:<lowercase hex>` payload and chunk digests;
+- deterministic sorting, relationship normalization, and chunk boundaries;
+- reference limits of 40 records and 512,000 encoded bytes per chunk;
+- single-record resource halt;
+- canonical chunk decoding and tamper rejection;
+- complete-payload integrity verification before chunk construction.
+
+Retained CI evidence from run `30691954060`:
+
+- workflow-surface guard passed;
 - lint passed;
 - TypeScript type-check passed;
 - production runner bundle and configuration validation passed;
-- the complete unit-test suite passed;
-- the complete existing local migration sequence, including `10004_portable_collector_work.sql`, passed on a clean local database;
+- complete unit-test suite passed;
+- complete clean local migration sequence passed;
 - application build passed;
 - browser smoke passed.
 
-The first CI attempt exposed one discontinuity-test fixture that placed its witness beyond the declared validated head. The fixture was corrected to test an actual missing ledger inside the declared range. No planner budget or safety condition was weakened.
+R2b1 tests cover all seven semantic groups, order-independent canonical digests, zero-count groups, duplicate identities, broken ledger continuity, wrong source hashes, missing applicable identities, deterministic multi-chunk output, oversized-record halt, changed payload rejection, and encoded chunk tamper rejection.
 
-Exit passed: local SQLite and CI prove atomic finalization, committed-only visibility, deterministic planning and replay, complete export, and complete restore.
+R2b1 is recorded complete only after PR #1086 merges to `main`.
 
-### R2 — Provider-neutral scan, commit, and finalize runtime
+### R2b2 — Bounded scan, commit, and finalize execution
 
-Status: **active** under merged contract PR #1083 (`bd1ac985de908bd2f01089304c202ab47d368c9b`).
+Status: **next unit after R2b1 merge**.
 
-#### R2a — Typed messages and durable scheduler
+Required work:
 
-Status: **complete** in merged PR #1084 (`f68aea25f6d3b973ceec79e09288fdf626f33bdc`).
+- stage a normalized payload through the R1 work schema inside scheduler-owned transactions;
+- decode and commit one bounded chunk per commit message;
+- expose transaction-aware work finalization and remove the nested-transaction hazard;
+- finalize work, advance committed visibility, and reserve the next scan atomically;
+- implement the deterministic fixture `ExecutionAdapter`;
+- inject and verify retry, interruption, stale lease, reset, epoch, base, parent-hash, digest, and resource failures;
+- prove staged, committing, and committed export/restore resumption;
+- pass every remaining R2 and R2b exit test.
 
-Delivered:
+R2 remains incomplete until R2b2 merges with complete retained evidence.
 
-- canonical versioned `scan`, `commit`, and `finalize` messages with deterministic semantic IDs;
-- strict message-field validation and the 16,000-byte control-message guard;
-- durable SQLite scheduler inbox with `pending`, `leased`, `completed`, and `error` states;
-- fresh-lease theft rejection and deterministic stale-lease recovery;
-- retryable transport/storage handling that preserves the same message identity and phase cursor;
-- terminal failure handling that records the exact classification and publishes no successor;
-- atomic current-message completion, optional work mutation, and timed successor-outbox reservation;
-- idempotent outbox dispatch and duplicate-completion convergence;
-- durable successor availability that cannot be recomputed or changed during dispatch;
-- complete runtime export/restore including work, payload chunks, commit chunks, candidate rows, watermarks, scheduler messages, active leases, retry metadata, outbox rows, and reserved successor times;
-- canonical byte-for-byte runtime re-export parity after restoration into a second empty SQLite database.
+## Later gates
 
-Retained CI evidence from runs `30691175822` and `30691338208`:
+### R3 — Adapter and reader integration
 
-- minimal Actions workflow surface guard passed;
-- lint passed;
-- TypeScript type-check passed;
-- production runner bundle and configuration validation passed;
-- the complete unit-test suite passed;
-- the complete local migration sequence, including `10005_portable_scheduler.sql`, passed on a clean database;
-- application build passed;
-- browser smoke passed.
-
-R2a tests prove deterministic message identity, byte guards, lease ownership, stale reclaim, atomic rollback, retry identity, terminal halt, timing-conflict rejection, idempotent completion and dispatch, and exact runtime export/restore.
-
-#### R2b — Normalized payload and bounded phase runtime
-
-Status: **active contract phase** in `ops/r2b-normalized-payload-phase-runtime-2026-08-01.md`. Runtime code begins only after that contract reaches `main`.
-
-R2b implementation unit:
-
-- implement the seven-class `NormalizedCollectorPayloadV1` envelope and common candidate identity;
-- implement canonical SHA-256 payload and chunk digests;
-- implement deterministic semantic counts, sorting, duplicate rejection, and bounded chunking;
-- implement scan-only staging through the R1 work schema;
-- implement bounded resumable commit execution through the R2a scheduler;
-- expose transaction-aware finalization so scheduler-owned phase completion does not nest SQLite transactions;
-- implement scheduler-integrated finalize and next-scan selection without early visibility;
-- implement deterministic fixture `ExecutionAdapter` with interruption, retry, reset, identity, hash, digest, and resource-failure injection;
-- pass every interruption and semantic-survival test required by the R2 and R2b contracts.
-
-R2 is not complete until R2b and the complete R2 exit suite pass and merge to `main`.
-
-### R3 — Adapters, overlay, maintenance, and publication separation
-
-- implement storage and scheduler adapter conformance suites;
-- make current/history queries read committed work only;
-- compact superseded hot rows safely;
-- preserve hybrid API behavior and legacy rows during migration;
-- keep immutable publication separate from the normal collection scheduler;
-- prove that a complete state export can be restored into a second adapter.
-
-Exit: SQLite reference, adapter parity, API parity, deterministic archive/replay, and cross-adapter restore tests pass with no semantic-count loss.
+- storage and scheduler adapter conformance;
+- committed-only current/history readers;
+- legacy compatibility;
+- bounded maintenance and immutable publication separation;
+- cross-adapter export and restore.
 
 ### R4 — Deployment-profile qualification
 
-- implement guarded deployment and rollback tooling for candidate remote profiles;
-- test scheduler cadence, XRPL WebSocket support, transactional storage, export, recovery, and fail-closed limits;
-- reject profiles that require a paid operating dependency, automatic paid overage, or routine interactive operator steps;
-- select no production profile until production-shaped evidence passes;
-- retain pre/post snapshots and Issue evidence for every remote mutation.
+- no hosted profile is selected before conformance and shadow evidence;
+- reject mandatory paid runtime dependencies, automatic paid overage, inadequate export, or routine interactive operation.
 
-Exit: at least one candidate profile passes the adapter suite and a read-only/shadow qualification; production remains halted until an explicit recovery PR is merged.
+### R5 — Controlled recovery
 
-### R5 — Controlled shadow and production recovery
+- deploy only a qualified profile;
+- prove one staged work item, rollback, restore, and a fixed two-hour catch-up qualification.
 
-- deploy only the selected qualified profile;
-- verify one staged work item end to end;
-- run a fixed two-hour catch-up qualification;
-- prove rollback, export, and restoration before continuing;
-- continue only when throughput, continuity, semantic, scheduler, runtime, storage, and no-cost operating gates pass.
+### R6 — Lag-zero and steady qualification
 
-Exit: exact contiguous cursor advance, zero semantic loss, zero resource-limit errors, and fail-closed rollback are proven.
-
-### R6 — Lag zero and steady qualification
-
-- reach lag zero automatically;
-- transition from catch-up to the selected steady cadence;
+- reach lag zero;
 - pass twelve consecutive five-minute freshness checkpoints;
-- prove immutable/live/current agreement and no hidden partial work;
-- prove the selected profile remains inside its measured no-cost envelope.
-
-Exit: lag zero and five-minute freshness are stable without manual intervention.
+- remain inside the measured no-cost envelope.
 
 ### R7 — Formal operation evidence
 
@@ -194,34 +159,6 @@ Exit: lag zero and five-minute freshness are stable without manual intervention.
 - pass a fixed 24-hour evidence window;
 - pass seven days of continuous operation;
 - only then reopen formal Devnet release qualification.
-
-## Acceptance limits
-
-The reconstructed runtime is not approved until production-shaped evidence proves:
-
-- steady committed throughput greater than 21 ledgers/minute;
-- catch-up committed throughput greater than 30 ledgers/minute;
-- selected scheduler operations remain inside its measured daily guard;
-- selected storage reads, writes, queries, and physical size remain inside project stop thresholds;
-- zero subrequest, CPU, memory, query-count, row-size, hidden-partial-work, and paid-overage events;
-- complete export and restore into the reference format;
-- no supported semantic record loss;
-- no gap, hash discontinuity, or cursor advancement before full finalization.
-
-Provider-specific numeric ceilings belong in the selected deployment profile, not in the collector-core contract.
-
-## Remaining release gates
-
-After R7:
-
-1. complete the final semantic cross-audit against XRPL transactions and AffectedNodes;
-2. complete real-data browser regression and representative production behavior smoke;
-3. complete integrity, reset, backup, restore, replay, and rollback verification;
-4. complete Explorer v1 if it remains a release requirement after roadmap reconciliation;
-5. complete desktop/mobile visual, accessibility, performance, security, and cross-browser audits;
-6. configure the final public host, canonical metadata, sitemap, Search Console, analytics, and feedback routes;
-7. freeze operations runbooks, watchdogs, alerts, backup, and recovery procedures;
-8. produce the final release record and owner sign-off.
 
 ## Operating restrictions
 
