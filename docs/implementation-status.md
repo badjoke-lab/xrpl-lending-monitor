@@ -73,15 +73,37 @@ Retained CI evidence includes successful workflow guard, lint, type-check, compl
 
 ## Active R2b2 work
 
-R2b2 is **not implemented yet**. Its controlling plan is `ops/r2b2-bounded-phase-runtime-plan-2026-08-01.md` and runtime code begins only after that plan reaches `main`.
+R2b2 is **active and incomplete** under `ops/r2b2-bounded-phase-runtime-plan-2026-08-01.md`.
 
 ### R2b2-A — Transaction-aware store
 
-- typed work, payload-chunk, commit-chunk, candidate-row, and watermark reads;
-- `finalizeWorkInTransaction` plus the existing standalone wrapper;
-- exact rollback tests proving no nested transaction.
+Status: **implementation and validation passed in PR #1088; merge pending**.
+
+Delivered on the branch:
+
+- typed work, payload-chunk, commit-chunk, candidate-row, and watermark snapshots;
+- exact work-scoped reads for runtime use without ad hoc SQL;
+- `finalizeWorkInTransaction` that performs final guards, work commit, and watermark advancement inside the caller transaction;
+- the existing standalone `finalizeWork` retained as the transaction-opening wrapper;
+- real SQLite proof that caller-owned finalization does not open a nested transaction;
+- injected interruption proof that work status, committed visibility, and watermark advancement roll back together.
+
+Retained CI evidence from run `30694527924`:
+
+- workflow-surface guard passed;
+- lint passed;
+- TypeScript type-check passed;
+- production runner bundle and configuration validation passed;
+- complete unit-test suite passed;
+- complete clean local migration sequence passed;
+- application build passed;
+- browser smoke passed.
+
+R2b2-A is recorded complete only after PR #1088 merges to `main`.
 
 ### R2b2-B — Fixture execution and scan
+
+Status: **next after R2b2-A merge**.
 
 - deterministic fixture `ExecutionAdapter`;
 - initial and committed-boundary checks;
