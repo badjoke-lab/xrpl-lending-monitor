@@ -5,8 +5,8 @@ import {
   type PortableSqliteValue,
 } from './portable-collector-reference-store'
 
-interface PortableExportState {
-  schemaVersion: number
+interface PortableExportStateV2 {
+  schemaVersion: 2
   work: Record<string, unknown>[]
   payloadChunks: Record<string, unknown>[]
   commitChunks: Record<string, unknown>[]
@@ -71,11 +71,17 @@ function hexPayload(row: Record<string, unknown>): Uint8Array {
   return bytes
 }
 
-function parseExport(exportedState: string): PortableExportState {
-  const parsed = record(JSON.parse(exportedState) as unknown, 'export')
-  if (parsed.schemaVersion !== 1) throw new Error('unsupported portable export schema version')
+function parseExport(exportedState: string): PortableExportStateV2 {
+  let raw: unknown
+  try {
+    raw = JSON.parse(exportedState)
+  } catch {
+    throw new Error('portable export is not valid JSON')
+  }
+  const parsed = record(raw, 'export')
+  if (parsed.schemaVersion !== 2) throw new Error('unsupported portable export schema version')
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     work: records(parsed.work, 'work'),
     payloadChunks: records(parsed.payloadChunks, 'payloadChunks'),
     commitChunks: records(parsed.commitChunks, 'commitChunks'),
@@ -85,14 +91,13 @@ function parseExport(exportedState: string): PortableExportState {
 }
 
 function requireEmptyReferenceStore(db: PortableSqliteDatabase): void {
-  const tables = [
+  for (const table of [
     'collector_work',
     'collector_payload_chunks',
     'collector_commit_chunks',
     'collector_reference_rows',
     'collector_committed_watermarks',
-  ]
-  for (const table of tables) {
+  ]) {
     const count = db.get<{ count: number }>(`SELECT COUNT(*) AS count FROM ${table}`)?.count ?? 0
     if (count !== 0) throw new Error(`restore target is not empty: ${table}`)
   }
@@ -183,14 +188,18 @@ function insertReferenceRow(db: PortableSqliteDatabase, row: Record<string, unkn
   db.run(
     `INSERT INTO collector_reference_rows (
        work_id, semantic_class, canonical_key, source_ledger_index,
-       source_ledger_hash, value_json, is_tombstone, created_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+       source_ledger_hash, source_transaction_hash, object_id,
+       relationship_ids_json, value_json, is_tombstone, created_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       stringValue(row, 'work_id'),
       stringValue(row, 'semantic_class'),
       stringValue(row, 'canonical_key'),
       integerValue(row, 'source_ledger_index'),
       stringValue(row, 'source_ledger_hash'),
+      nullableString(row, 'source_transaction_hash'),
+      nullableString(row, 'object_id'),
+      stringValue(row, 'relationship_ids_json'),
       nullableString(row, 'value_json'),
       integerValue(row, 'is_tombstone'),
       stringValue(row, 'created_at'),
