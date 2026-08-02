@@ -7,6 +7,10 @@ if (!/^[a-z]{20}$/.test(projectRef)) {
 }
 
 const endpoint = `https://${projectRef}.supabase.co/functions/v1/xrpl-committed-reader`
+const verifierToken = process.env.XRPL_READER_VERIFY_TOKEN ?? ''
+if (!/^[a-f0-9]{64}$/.test(verifierToken)) {
+  throw new Error('XRPL_READER_VERIFY_TOKEN must be an exact masked 64-character hex token')
+}
 const evidenceDirectory = 'supabase-remote-probe-evidence'
 const sourceId = 'supabase-r4c2c-qualification'
 const phaseEpochId = 'supabase-r4c2c-v1'
@@ -69,6 +73,7 @@ async function requestReader(body) {
     headers: {
       'content-type': 'application/json',
       'x-xrpl-reader-purpose': 'r4c2c-qualification',
+      'x-xrpl-reader-token': verifierToken,
     },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(10_000),
