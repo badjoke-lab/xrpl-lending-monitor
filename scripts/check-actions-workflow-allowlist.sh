@@ -133,6 +133,7 @@ for required in (
 supabase = (root / supabase_remote).read_text()
 for required in (
     "contents: read",
+    "issues: write",
     "cancel-in-progress: false",
     "SUPABASE_ACCESS_TOKEN",
     "SUPABASE_PROJECT_ID",
@@ -144,6 +145,11 @@ for required in (
     "--no-verify-jwt",
     "node scripts/verify-supabase-remote-probe.mjs",
     "retention-days: 7",
+    "Publish sanitized run locator",
+    "if: always()",
+    "gh issue comment 1109",
+    "verified-health.json",
+    "failed-verification.json",
 ):
     if required not in supabase:
         raise SystemExit(f"Supabase remote workflow is missing a guarded deployment requirement: {required}")
@@ -151,12 +157,13 @@ for forbidden in (
     "  schedule:",
     "pull_request_target",
     "contents: write",
-    "issues: write",
     "MAINNET_ENABLED: 'true'",
     "wrangler deploy",
 ):
     if forbidden in supabase:
         raise SystemExit(f"Supabase remote workflow contains forbidden capability: {forbidden.strip()}")
+if supabase.count("issues: write") != 1 or supabase.count("gh issue comment 1109") != 1:
+    raise SystemExit("Supabase remote issue-write capability must remain bound to one permission and Issue #1109")
 
 scheduled = []
 for path in root.glob("*.y*ml"):
@@ -169,4 +176,4 @@ if scheduled != [qualification_v5]:
     raise SystemExit(f"only the fixed qualification v5 workflow may be scheduled: {scheduled}")
 PY
 
-echo "Actions workflow allowlist passed: CI, guarded legacy recovery workflows, one read-only runner, one fixed-window qualification exception, and one guarded Supabase deployment verifier."
+echo "Actions workflow allowlist passed: CI, guarded legacy recovery workflows, one read-only runner, one fixed-window qualification exception, and one guarded Supabase deployment verifier with bounded Issue #1109 reporting."
