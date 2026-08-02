@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "profileId": "supabase-devnet",
+  "network": "devnet",
+  "workflowRunId": 30709474048,
+  "workflowHeadSha": "ca5c029311a3a50404eedb4ea3f7a0e5c2735c30",
+  "artifactId": 8821390820,
+  "artifactDigest": "sha256:8269161ecbc66f4acfa329402cb02cff2bade31c7de46f7611abe42014f64b32",
+  "verifiedAt": "2026-08-01T17:03:16.005Z",
+  "endpoint": "https://mgzcahzmurbgzvvajfml.supabase.co/functions/v1/xrpl-collector-tick",
+  "requirements": {
+    "minimumCompletedTicks": 2,
+    "minimumSuccessfulCronRuns": 2,
+    "consecutiveFailures": 0
+  },
+  "result": {
+    "ok": true,
+    "service": "xrpl-lending-monitor-supabase-probe",
+    "runtimeStatus": "stopped",
+    "tickCount": 10,
+    "consecutiveFailures": 0,
+    "lastStartedAt": "2026-08-01T17:03:00.311+00:00",
+    "lastCompletedAt": "2026-08-01T17:03:01.102+00:00",
+    "lastFailedAt": null,
+    "lastValidatedLedgerIndex": 4123382,
+    "lastValidatedLedgerHash": "1DEDFD5F3A1074226E683988309B1D0A54F258881536891618AB9EB9A082F4C6",
+    "lastError": null
+  },
+  "recentRuns": [
+    {
+      "status": "completed",
+      "source": "pg_cron",
+      "startedAt": "2026-08-01T17:03:00.311+00:00",
+      "completedAt": "2026-08-01T17:03:01.102+00:00",
+      "validatedLedgerIndex": 4123382,
+      "validatedLedgerHash": "1DEDFD5F3A1074226E683988309B1D0A54F258881536891618AB9EB9A082F4C6",
+      "errorMessage": null
+    },
+    {
+      "status": "completed",
+      "source": "pg_cron",
+      "startedAt": "2026-08-01T17:02:00.230+00:00",
+      "completedAt": "2026-08-01T17:02:00.815+00:00",
+      "validatedLedgerIndex": 4123362,
+      "validatedLedgerHash": "D04371A71B6FF999E98411CBFDCD557AF292E6C488A6C746FD56457106DF9877",
+      "errorMessage": null
+    },
+    {
+      "status": "completed",
+      "source": "pg_cron",
+      "startedAt": "2026-08-01T17:01:00.177+00:00",
+      "completedAt": "2026-08-01T17:01:00.681+00:00",
+      "validatedLedgerIndex": 4123343,
+      "validatedLedgerHash": "02BFB42F1AE4F6424B4A161AB1C007602ACB2E400F23A5061C3CE130A85F1DC8",
+      "errorMessage": null
+    },
+    {
+      "status": "completed",
+      "source": "pg_cron",
+      "startedAt": "2026-08-01T17:00:00.143+00:00",
+      "completedAt": "2026-08-01T17:00:01.157+00:00",
+      "validatedLedgerIndex": 4123323,
+      "validatedLedgerHash": "01B5E4850374E38541D0054CB7E363FAE2D40281BBBC1496D524DA18B8DAFCB6",
+      "errorMessage": null
+    },
+    {
+      "status": "completed",
+      "source": "pg_cron",
+      "startedAt": "2026-08-01T16:59:00.160+00:00",
+      "completedAt": "2026-08-01T16:59:00.900+00:00",
+      "validatedLedgerIndex": 4123303,
+      "validatedLedgerHash": "27DC2020FAA0674E78F1E92638D06C921FBE0FFB8BE0950674D1E0D2CE3C12F7",
+      "errorMessage": null
+    }
+  ],
+  "interpretation": {
+    "remoteDeploymentVerified": true,
+    "migrationVerified": true,
+    "edgeFunctionVerified": true,
+    "cronVerified": true,
+    "fullCollectorQualified": false,
+    "profileSelected": false,
+    "productionRecoveryStarted": false,
+    "mainnetEnabled": false
+  }
+}
