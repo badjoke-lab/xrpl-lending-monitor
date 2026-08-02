@@ -21,6 +21,7 @@ on:
       - 'scripts/verify-supabase-catchup-throughput.mjs'
       - 'scripts/verify-supabase-steady-throughput.mjs'
       - 'scripts/publish-supabase-run-locator.mjs'
+      - 'scripts/publish-supabase-steady-run-locator.mjs'
       - '.github/workflows/supabase-remote-probe.yml'
 
 permissions:
@@ -210,7 +211,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # verified-health.json / failed-verification.json
+          # supabase-remote-probe-evidence/verified-health.json
+          # supabase-remote-probe-evidence/failed-verification.json
           # verified-reader.json / failed-reader-verification.json
           # verified-historical-witness.json / failed-historical-witness-verification.json
           # verified-multichunk-witness.json / failed-multichunk-witness-verification.json
@@ -220,6 +222,7 @@ jobs:
           # verified-throughput-resource-baseline.json / failed-throughput-resource-baseline-verification.json
           # verified-catchup-throughput.json / failed-catchup-throughput-verification.json
           # verified-steady-throughput.json / failed-steady-throughput-verification.json
+          # phase watermark ledger / consecutive failures
           # historical witness verifier: `success`
           # multi-chunk witness verifier: `success`
           # complete-state transfer verifier: `success`
@@ -229,4 +232,5 @@ jobs:
           # catch-up throughput verifier: `success`
           # steady throughput verifier: `success`
           node scripts/publish-supabase-run-locator.mjs > /tmp/supabase-run-comment.md
+          node scripts/publish-supabase-steady-run-locator.mjs >> /tmp/supabase-run-comment.md
           gh issue comment 1109 --repo "$GITHUB_REPOSITORY" --body-file /tmp/supabase-run-comment.md
