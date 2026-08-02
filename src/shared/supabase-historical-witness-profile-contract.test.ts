@@ -79,12 +79,36 @@ describe('R4C2c isolated Supabase historical witness profile', () => {
       'portableReferenceRowsFromChunk',
       'canonicalPortableJson(rows)',
       'rows.length !== 237',
+      "const EXPECTED_RECORDS_DIGEST = 'bac80ec90ba841b683ee9e4b154cf385ffd972ce636f9797cb8f6cff1cdd209a'",
+      'recordsDigest !== EXPECTED_RECORDS_DIGEST',
     ]) {
       expect(loader).toContain(required)
     }
     for (const forbidden of ['submit_multisigned', "method: 'submit'", 'wallet_propose', 'seed']) {
       expect(loader).not.toContain(forbidden)
     }
+  })
+
+  it('reuses and validates the durable committed set before touching prunable Devnet history', () => {
+    for (const required of [
+      'async function readCommittedWitness',
+      'xrpl_historical_witness_sets?set_id=eq.',
+      'xrpl_historical_witness_rows?set_id=eq.',
+      "set.status !== 'committed'",
+      'set.records_digest !== EXPECTED_RECORDS_DIGEST',
+      'persistedRows.length !== 237',
+      'countCommittedClasses(persistedRows)',
+      "source: 'existing-committed-set'",
+      'duplicate: true',
+      'const committed = await readCommittedWitness(supabaseUrl, key)',
+      'if (committed !== null) return committed',
+      "source: 'devnet-reconstruction'",
+    ]) {
+      expect(loader).toContain(required)
+    }
+    expect(loader.indexOf('await readCommittedWitness')).toBeLessThan(
+      loader.indexOf('Promise.all(LEDGERS.map'),
+    )
   })
 
   it('keeps both loader and reader token-gated and qualification-only', () => {
