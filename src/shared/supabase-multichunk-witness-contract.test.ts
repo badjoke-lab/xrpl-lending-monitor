@@ -52,13 +52,36 @@ describe('Supabase isolated standard-phase multi-chunk witness contract', () => 
     expect(migration).not.toContain("delete from public.xrpl_phase_watermarks\n  where profile_id = 'supabase-devnet'")
   })
 
-  it('executes the real ledger through the standard scan, commit, and finalize RPCs', () => {
+  it('reconstructs the exact 116-row source from the committed durable set', () => {
+    for (const required of [
+      "const HISTORICAL_SET_ID = 'r4c2c-devnet-historical-witness-v1'",
+      "const HISTORICAL_SET_DIGEST = 'bac80ec90ba841b683ee9e4b154cf385ffd972ce636f9797cb8f6cff1cdd209a'",
+      'async function buildDurableNormalizedWork',
+      'xrpl_historical_witness_sets?set_id=eq.',
+      'xrpl_historical_witness_rows?set_id=eq.',
+      'set.records_digest !== HISTORICAL_SET_DIGEST',
+      "set.status !== 'committed'",
+      'rows.length !== 116',
+      'canonicalPortableJson(classCounts) !== canonicalPortableJson(EXPECTED_CLASS_COUNTS)',
+      'buildNormalizedCollectorPayload',
+      'buildNormalizedPayloadChunks',
+      "source: 'committed-historical-witness'",
+      'normalizedSource: normalized.source',
+      'sourceRowCount: 116',
+    ]) {
+      expect(executor).toContain(required)
+    }
+    expect(executor).not.toContain("method: 'ledger'")
+    expect(executor).not.toContain('readLedger(')
+    expect(executor).not.toContain('XRPL_DEVNET_RPC_URL')
+  })
+
+  it('executes the durable real-ledger rows through standard scan, commit, and finalize RPCs', () => {
     for (const required of [
       "const PROFILE_ID = 'supabase-devnet-multichunk-witness'",
       "const EPOCH_ID = 'supabase-r4c2c-v1'",
       "const BASE_IDENTITY = 'multichunk-witness-2776760'",
       'const EXPECTED_CHUNK_RECORD_COUNTS = [40, 40, 36]',
-      'buildPortableXrplNormalizedWork',
       'xrpl_claim_multichunk_witness_phase',
       'xrpl_complete_portable_scan_phase',
       'xrpl_complete_portable_commit_phase',

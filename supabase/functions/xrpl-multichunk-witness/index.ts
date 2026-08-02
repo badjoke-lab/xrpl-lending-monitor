@@ -1,15 +1,14 @@
 import {
-  buildPortableXrplNormalizedWork,
   portableReferenceRowsFromChunk,
 } from '../../../src/collector/history-segments/portable-xrpl-normalization.ts'
-import { isLendingTransactionType } from '../../../src/collector/incremental/lending-transaction-types.ts'
-import type { IncrementalScanResult } from '../../../src/collector/incremental/scan-validated-ledgers.ts'
 import {
-  parseValidatedLedgerResult,
-  type ValidatedLedgerRead,
-} from '../../../src/collector/incremental/validated-ledger-parser.ts'
-import {
+  buildNormalizedCollectorPayload,
+  buildNormalizedPayloadChunks,
   decodeAndVerifyNormalizedPayloadChunk,
+  type BuiltNormalizedPayloadChunkV1,
+  type NormalizedCandidateV1,
+  type NormalizedCollectorPayloadV1,
+  type PortableJsonValue,
 } from '../../../src/shared/portable-collector-payload.ts'
 import { buildPortableCollectorWorkId } from '../../../src/shared/portable-collector-planner.ts'
 import { canonicalPortableJson } from '../../../src/shared/portable-collector-reference-store.ts'
@@ -21,7 +20,8 @@ const BASE_IDENTITY = 'multichunk-witness-2776760'
 const PURPOSE = 'r4c2c-multichunk-witness-qualification'
 const PURPOSE_HEADER = 'x-xrpl-reader-purpose'
 const VERIFY_TOKEN_HEADER = 'x-xrpl-reader-token'
-const DEFAULT_ENDPOINT = 'https://s.devnet.rippletest.net:51234/'
+const HISTORICAL_SET_ID = 'r4c2c-devnet-historical-witness-v1'
+const HISTORICAL_SET_DIGEST = 'bac80ec90ba841b683ee9e4b154cf385ffd972ce636f9797cb8f6cff1cdd209a'
 const LEDGER_INDEX = 2_776_760
 const LEDGER_HASH = '83CD41036ADD7F9D8FA247F04BF5156B6826D95C4E6A346B9A5499BE90C43A9D'
 const PARENT_HASH = 'E7E4E253C314D5EBD39E8C063415A99299E48FB23A0E613F1FE5CA534B0C0628'
@@ -36,9 +36,19 @@ const EXPECTED_COUNTS = {
   currentProjectionMutations: 10,
   totalRecords: 116,
 } as const
+const EXPECTED_CLASS_COUNTS = {
+  'validated-ledger': 1,
+  'protocol-event': 8,
+  'object-change': 94,
+  'loan-lifecycle': 1,
+  'archived-object': 0,
+  'balance-history': 2,
+  'current-projection': 10,
+} as const
 
 type Json = Record<string, unknown>
 type Phase = 'scan' | 'commit' | 'finalize'
+type SemanticClass = keyof typeof EXPECTED_CLASS_COUNTS
 type Claim = {
   claimed: boolean
   reason?: string
@@ -66,6 +76,40 @@ type ActiveWatermark = {
   ledgerHash: string
   workId: string
   updatedAt: string
+}
+type HistoricalSetRow = {
+  set_id: string
+  schema_version: number
+  profile_id: string
+  network: string
+  epoch_id: string
+  base_identity: string
+  fence_ledger_index: number
+  fence_ledger_hash: string
+  work_id: string
+  source_run_id: number
+  records_digest: string
+  semantic_counts: Json
+  record_count: number
+  status: string
+  committed_at: string | null
+}
+type HistoricalReferenceRow = {
+  semantic_class: SemanticClass
+  canonical_key: string
+  source_ledger_index: number
+  source_ledger_hash: string
+  source_transaction_hash: string | null
+  object_id: string | null
+  relationship_ids: string[]
+  value_json: string | null
+  is_tombstone: boolean
+}
+type NormalizedWork = {
+  payload: NormalizedCollectorPayloadV1
+  chunks: BuiltNormalizedPayloadChunkV1[]
+  semanticCountsJson: string
+  source: 'committed-historical-witness'
 }
 
 function response(body: unknown, status = 200): Response {
@@ -169,65 +213,160 @@ async function getRows<T>(supabaseUrl: string, key: string, path: string): Promi
   return JSON.parse(text) as T[]
 }
 
-async function readLedger(endpoint: string): Promise<ValidatedLedgerRead> {
-  const result = await fetch(endpoint, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      method: 'ledger',
-      params: [
-        {
-          ledger_index: LEDGER_INDEX,
-          transactions: true,
-          expand: true,
-          owner_funds: false,
-        },
-      ],
-    }),
-    signal: AbortSignal.timeout(15_000),
-  })
-  if (!result.ok) throw new Error(`Devnet ledger ${LEDGER_INDEX} returned HTTP ${result.status}`)
-  const payload = await result.json()
-  if (!isRecord(payload) || !isRecord(payload.result)) {
-    throw new Error(`Devnet ledger ${LEDGER_INDEX} did not return a result object`)
+function parsePortableValue(valueJson: string | null, identity: string): PortableJsonValue {
+  if (valueJson === null) return null
+  let value: unknown
+  try {
+    value = JSON.parse(valueJson)
+  } catch {
+    throw new Error(`Durable witness valueJson is invalid: ${identity}`)
   }
-  if (typeof payload.result.error === 'string') {
-    throw new Error(
-      `Devnet ledger ${LEDGER_INDEX} failed: ${String(payload.result.error_message ?? payload.result.error)}`,
-    )
+  if (canonicalPortableJson(value) !== valueJson) {
+    throw new Error(`Durable witness valueJson is not canonical: ${identity}`)
   }
-  const ledger = parseValidatedLedgerResult({
-    endpoint,
-    requestedLedgerIndex: LEDGER_INDEX,
-    result: payload.result,
-  })
-  if (ledger.ledgerHash !== LEDGER_HASH || ledger.parentHash !== PARENT_HASH) {
-    throw new Error(`Devnet ledger ${LEDGER_INDEX} identity changed`)
-  }
-  return ledger
+  return value as PortableJsonValue
 }
 
-function singleLedgerScan(ledger: ValidatedLedgerRead): IncrementalScanResult {
-  const lendingTransactions = ledger.transactions.filter((transaction) =>
-    isLendingTransactionType(transaction.transactionType),
+function canonicalRelationships(value: unknown, identity: string): string[] {
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string')) {
+    throw new Error(`Durable witness relationships are invalid: ${identity}`)
+  }
+  const relationships = [...new Set(value as string[])].sort((left, right) =>
+    left.localeCompare(right),
   )
+  if (
+    relationships.some((entry) => !entry.trim())
+    || canonicalPortableJson(relationships) !== canonicalPortableJson(value)
+  ) {
+    throw new Error(`Durable witness relationships are not canonical: ${identity}`)
+  }
+  return relationships
+}
+
+function asCandidate(row: HistoricalReferenceRow): NormalizedCandidateV1 {
+  const semanticClass = row.semantic_class
+  if (!(semanticClass in EXPECTED_CLASS_COUNTS)) {
+    throw new Error(`Durable witness semantic class is invalid: ${String(semanticClass)}`)
+  }
+  const identity = `${semanticClass}/${row.canonical_key}`
+  if (
+    row.source_ledger_index !== LEDGER_INDEX
+    || row.source_ledger_hash !== LEDGER_HASH
+    || typeof row.is_tombstone !== 'boolean'
+  ) {
+    throw new Error(`Durable witness source identity changed: ${identity}`)
+  }
   return {
-    endpoint: ledger.endpoint,
-    startLedgerIndex: ledger.ledgerIndex,
-    endLedgerIndex: ledger.ledgerIndex,
-    latestValidatedLedger: ledger.ledgerIndex,
-    completeToLatest: true,
-    ledgers: [{ ...ledger, lendingTransactions }],
-    metrics: {
-      ledgers: 1,
-      inspectedTransactions: ledger.transactions.length,
-      lendingTransactions: lendingTransactions.length,
-      elapsedMs: 0,
-    },
+    semanticClass,
+    canonicalKey: requireString(row.canonical_key, `${identity}.canonicalKey`),
+    sourceLedgerIndex: row.source_ledger_index,
+    sourceLedgerHash: requireHash(row.source_ledger_hash, `${identity}.sourceLedgerHash`),
+    sourceTransactionHash:
+      row.source_transaction_hash === null
+        ? null
+        : requireHash(row.source_transaction_hash, `${identity}.sourceTransactionHash`),
+    objectId:
+      row.object_id === null ? null : requireString(row.object_id, `${identity}.objectId`),
+    relationshipIds: canonicalRelationships(row.relationship_ids, identity),
+    isTombstone: row.is_tombstone,
+    value: parsePortableValue(row.value_json, identity),
   }
 }
 
-function verifyNormalized(normalized: Awaited<ReturnType<typeof buildPortableXrplNormalizedWork>>): void {
+async function buildDurableNormalizedWork(
+  supabaseUrl: string,
+  key: string,
+  workId: string,
+): Promise<NormalizedWork> {
+  const sets = await getRows<HistoricalSetRow>(
+    supabaseUrl,
+    key,
+    `xrpl_historical_witness_sets?set_id=eq.${encodeURIComponent(HISTORICAL_SET_ID)}&select=set_id,schema_version,profile_id,network,epoch_id,base_identity,fence_ledger_index,fence_ledger_hash,work_id,source_run_id,records_digest,semantic_counts,record_count,status,committed_at&limit=2`,
+  )
+  if (sets.length !== 1) throw new Error(`Durable historical witness set returned ${sets.length} rows`)
+  const set = sets[0]!
+  if (
+    set.set_id !== HISTORICAL_SET_ID
+    || set.schema_version !== 1
+    || set.profile_id !== 'supabase-devnet-historical-witness'
+    || set.network !== 'devnet'
+    || set.epoch_id !== 'supabase-r4c2c-historical-witness-v1'
+    || set.base_identity !== 'historical-witness-2776760-2980845-3127240'
+    || set.fence_ledger_index !== 3_127_240
+    || set.fence_ledger_hash !== '6CDB77504546BE14D226CFFDFC61082EC73BF95191E5326536254903D87692B3'
+    || set.work_id !== 'historical-witness-work-v1:2776760:2980845:3127240'
+    || set.source_run_id !== 30_741_004_656
+    || set.records_digest !== HISTORICAL_SET_DIGEST
+    || set.record_count !== 237
+    || set.status !== 'committed'
+    || typeof set.committed_at !== 'string'
+  ) {
+    throw new Error('Durable historical witness set identity or digest is invalid')
+  }
+
+  const rows = await getRows<HistoricalReferenceRow>(
+    supabaseUrl,
+    key,
+    `xrpl_historical_witness_rows?set_id=eq.${encodeURIComponent(HISTORICAL_SET_ID)}&source_ledger_index=eq.${LEDGER_INDEX}&select=semantic_class,canonical_key,source_ledger_index,source_ledger_hash,source_transaction_hash,object_id,relationship_ids,value_json,is_tombstone&order=semantic_class.asc,canonical_key.asc&limit=200`,
+  )
+  if (rows.length !== 116) {
+    throw new Error(`Durable ledger witness contains ${rows.length} rows, expected 116`)
+  }
+
+  const candidates = rows.map(asCandidate)
+  const identities = new Set<string>()
+  const classCounts: Record<SemanticClass, number> = {
+    'validated-ledger': 0,
+    'protocol-event': 0,
+    'object-change': 0,
+    'loan-lifecycle': 0,
+    'archived-object': 0,
+    'balance-history': 0,
+    'current-projection': 0,
+  }
+  for (const candidate of candidates) {
+    const identity = `${candidate.semanticClass}\u0000${candidate.canonicalKey}`
+    if (identities.has(identity)) throw new Error(`Duplicate durable ledger witness: ${identity}`)
+    identities.add(identity)
+    classCounts[candidate.semanticClass] += 1
+  }
+  if (canonicalPortableJson(classCounts) !== canonicalPortableJson(EXPECTED_CLASS_COUNTS)) {
+    throw new Error(`Durable ledger witness class counts changed: ${canonicalPortableJson(classCounts)}`)
+  }
+
+  const byClass = <T extends SemanticClass>(semanticClass: T) =>
+    candidates.filter((candidate) => candidate.semanticClass === semanticClass)
+  const payload = await buildNormalizedCollectorPayload({
+    workId,
+    network: 'devnet',
+    epochId: EPOCH_ID,
+    baseIdentity: BASE_IDENTITY,
+    previousLedgerIndex: LEDGER_INDEX - 1,
+    expectedParentHash: PARENT_HASH,
+    startLedgerIndex: LEDGER_INDEX,
+    endLedgerIndex: LEDGER_INDEX,
+    finalLedgerHash: LEDGER_HASH,
+    ledgers: byClass('validated-ledger'),
+    protocolEvents: byClass('protocol-event'),
+    objectChanges: byClass('object-change'),
+    loanLifecycleEvents: byClass('loan-lifecycle'),
+    archivedObjects: byClass('archived-object'),
+    balanceHistory: byClass('balance-history'),
+    currentProjectionMutations: byClass('current-projection'),
+  })
+  const chunks = await buildNormalizedPayloadChunks(payload)
+  return {
+    payload,
+    chunks,
+    semanticCountsJson: canonicalPortableJson(payload.semanticCounts),
+    source: 'committed-historical-witness',
+  }
+}
+
+function verifyNormalized(normalized: NormalizedWork): void {
+  if (normalized.source !== 'committed-historical-witness') {
+    throw new Error('Multi-chunk normalized source is not durable')
+  }
   if (normalized.chunks.length !== EXPECTED_CHUNK_RECORD_COUNTS.length) {
     throw new Error(`Expected 3 payload chunks, received ${normalized.chunks.length}`)
   }
@@ -350,9 +489,7 @@ function verifyActiveWatermarkIsolation(
 async function execute(): Promise<Json> {
   const supabaseUrl = env('SUPABASE_URL')
   const key = serviceKey()
-  const endpoint = Deno.env.get('XRPL_DEVNET_RPC_URL')?.trim() || DEFAULT_ENDPOINT
   const activeBefore = await activeWatermark(supabaseUrl, key)
-  const ledger = await readLedger(endpoint)
   const workId = buildPortableCollectorWorkId({
     network: 'devnet',
     epochId: EPOCH_ID,
@@ -360,15 +497,7 @@ async function execute(): Promise<Json> {
     previousLedgerIndex: LEDGER_INDEX - 1,
     expectedParentHash: PARENT_HASH,
   })
-  const normalized = await buildPortableXrplNormalizedWork({
-    scan: singleLedgerScan(ledger),
-    workId,
-    network: 'devnet',
-    epochId: EPOCH_ID,
-    baseIdentity: BASE_IDENTITY,
-    previousLedgerIndex: LEDGER_INDEX - 1,
-    expectedParentHash: PARENT_HASH,
-  })
+  const normalized = await buildDurableNormalizedWork(supabaseUrl, key, workId)
   verifyNormalized(normalized)
 
   const owner = `multichunk-${crypto.randomUUID()}`
@@ -541,29 +670,12 @@ async function execute(): Promise<Json> {
   }
 
   const semanticCounts = Object.fromEntries(
-    [
-      'validated-ledger',
-      'protocol-event',
-      'object-change',
-      'loan-lifecycle',
-      'archived-object',
-      'balance-history',
-      'current-projection',
-    ].map((semanticClass) => [
+    Object.keys(EXPECTED_CLASS_COUNTS).map((semanticClass) => [
       semanticClass,
       referenceRows.filter((row) => row.semantic_class === semanticClass).length,
     ]),
   )
-  const expectedReferenceCounts = {
-    'validated-ledger': 1,
-    'protocol-event': 8,
-    'object-change': 94,
-    'loan-lifecycle': 1,
-    'archived-object': 0,
-    'balance-history': 2,
-    'current-projection': 10,
-  }
-  if (canonicalPortableJson(semanticCounts) !== canonicalPortableJson(expectedReferenceCounts)) {
+  if (canonicalPortableJson(semanticCounts) !== canonicalPortableJson(EXPECTED_CLASS_COUNTS)) {
     throw new Error(`Multi-chunk committed semantic counts changed: ${canonicalPortableJson(semanticCounts)}`)
   }
 
@@ -574,6 +686,13 @@ async function execute(): Promise<Json> {
     schemaVersion: 1,
     purpose: PURPOSE,
     profileId: PROFILE_ID,
+    normalizedSource: normalized.source,
+    durableHistoricalSet: {
+      setId: HISTORICAL_SET_ID,
+      recordsDigest: HISTORICAL_SET_DIGEST,
+      sourceLedgerIndex: LEDGER_INDEX,
+      sourceRowCount: 116,
+    },
     sourceLedger: {
       ledgerIndex: LEDGER_INDEX,
       ledgerHash: LEDGER_HASH,
