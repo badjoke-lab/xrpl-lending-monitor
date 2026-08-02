@@ -1,5 +1,24 @@
+import { isLendingTransactionType } from '../../../src/collector/incremental/lending-transaction-types.ts'
+import {
+  parseValidatedLedgerResult,
+  type ValidatedLedgerRead,
+} from '../../../src/collector/incremental/read-validated-ledger.ts'
+import type { IncrementalScanResult } from '../../../src/collector/incremental/scan-validated-ledgers.ts'
+import {
+  decodeAndVerifyNormalizedPayloadChunk,
+  PortablePayloadResourceHaltError,
+  PortablePayloadValidationError,
+} from '../../../src/shared/portable-collector-payload.ts'
+import { buildPortableCollectorWorkId } from '../../../src/shared/portable-collector-planner.ts'
+import { canonicalPortableJson } from '../../../src/shared/portable-collector-reference-store.ts'
+import {
+  buildPortableXrplNormalizedWork,
+  portableReferenceRowsFromChunk,
+} from '../../../src/collector/history-segments/portable-xrpl-normalization.ts'
+
 const DEFAULT_XRPL_DEVNET_RPC_URL = 'https://s.devnet.rippletest.net:51234/'
 const PROFILE_ID = 'supabase-devnet'
+const PHASE_EPOCH_ID = 'supabase-r4c2c-v1'
 const PHASE_LEASE_SECONDS = 45
 const PHASE_RETRY_DELAY_MILLISECONDS = 15_000
 
@@ -76,6 +95,16 @@ type FinalizeMessage = {
 }
 
 type PhaseMessage = ScanMessage | CommitMessage | FinalizeMessage
+
+type PayloadChunkRow = {
+  work_id: string
+  chunk_index: number
+  payload_json: string
+  payload_digest: string
+  encoded_digest: string | null
+  byte_count: number
+  record_count: number
+}
 
 class PhaseExecutionError extends Error {
   constructor(
@@ -163,16 +192,6 @@ function requiredHash(value: unknown, name: string): string {
   return hash
 }
 
-function canonicalJson(value: unknown): string {
-  if (value === null || typeof value !== 'object') return JSON.stringify(value)
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
-  const object = value as Record<string, unknown>
-  return `{${Object.keys(object)
-    .sort()
-    .map((key) => `${JSON.stringify(key)}:${canonicalJson(object[key])}`)
-    .join(',')}}`
-}
-
 async function sha256Hex(value: string): Promise<string> {
   const bytes = new TextEncoder().encode(value)
   const input = new ArrayBuffer(bytes.byteLength)
@@ -180,6 +199,13 @@ async function sha256Hex(value: string): Promise<string> {
   return [...new Uint8Array(await crypto.subtle.digest('SHA-256', input))]
     .map((byte) => byte.toString(16).padStart(2, '0'))
     .join('')
+}
+
+function stripSha256Prefix(value: string, name: string): string {
+  if (!/^sha256:[a-f0-9]{64}$/u.test(value)) {
+    throw new PhaseExecutionError('digest_mismatch', `${name} has an invalid SHA-256 digest`)
+  }
+  return value.slice('sha256:'.length)
 }
 
 function scanMessageId(message: Omit<ScanMessage, 'schemaVersion' | 'phase' | 'messageId'>): string {
@@ -236,8 +262,11 @@ function parsePhaseMessage(claim: PhaseClaim): PhaseMessage {
         'scan message ID does not match semantic identity',
       )
     }
-    if (message.network !== 'devnet' || message.epochId !== 'supabase-r4c2b-v1') {
-      throw new PhaseExecutionError('base_mismatch', 'scan message scope is not R4C2b Devnet')
+    if (message.network !== 'devnet') {
+      throw new PhaseExecutionError('base_mismatch', 'scan message network is not Devnet')
+    }
+    if (message.epochId !== PHASE_EPOCH_ID) {
+      throw new PhaseExecutionError('epoch_mismatch', 'scan message epoch is not R4C2c')
     }
     return message
   }
@@ -307,12 +336,19 @@ async function getRows<T>(
   secretKey: string,
   path: string,
 ): Promise<T[]> {
-  const response = await fetch(`${supabaseUrl}/rest/v1/${path}`, {
-    headers: adminHeaders(secretKey),
-    signal: AbortSignal.timeout(10_000),
-  })
+  let response: Response
+  try {
+    response = await fetch(`${supabaseUrl}/rest/v1/${path}`, {
+      headers: adminHeaders(secretKey),
+      signal: AbortSignal.timeout(10_000),
+    })
+  } catch (error) {
+    throw new RemoteStorageError(
+      `storage read failed for ${path}: ${error instanceof Error ? error.message : String(error)}`,
+    )
+  }
   if (!response.ok) {
-    throw new Error(`health read failed for ${path} (${response.status})`)
+    throw new RemoteStorageError(`storage read failed for ${path} (${response.status})`)
   }
   return (await response.json()) as T[]
 }
@@ -341,22 +377,46 @@ async function readHealth(supabaseUrl: string, secretKey: string): Promise<unkno
   const recentMessages = await getRows<JsonObject>(
     supabaseUrl,
     secretKey,
-    `xrpl_phase_messages?profile_id=eq.${PROFILE_ID}&select=message_id,phase,status,available_at,attempt_count,lease_expires_at,result,successor_message_id,error_classification,error_message,created_at,updated_at,completed_at&order=updated_at.desc,message_id.desc&limit=12`,
+    `xrpl_phase_messages?profile_id=eq.${PROFILE_ID}&select=message_id,phase,status,available_at,attempt_count,lease_expires_at,result,successor_message_id,error_classification,error_message,created_at,updated_at,completed_at&order=updated_at.desc,message_id.desc&limit=24`,
   )
   const recentWorks = await getRows<JsonObject>(
     supabaseUrl,
     secretKey,
-    `xrpl_phase_work?profile_id=eq.${PROFILE_ID}&select=work_id,previous_ledger_index,start_ledger_index,expected_parent_hash,scanned_end_ledger_index,final_ledger_hash,status,payload_digest,expected_payload_chunks,expected_commit_chunks,created_at,updated_at,committed_at&order=updated_at.desc,work_id.desc&limit=5`,
+    `xrpl_phase_work?profile_id=eq.${PROFILE_ID}&select=work_id,epoch_id,previous_ledger_index,start_ledger_index,expected_parent_hash,scanned_end_ledger_index,final_ledger_hash,status,semantic_counts_json,payload_digest,expected_payload_chunks,expected_commit_chunks,created_at,updated_at,committed_at&order=updated_at.desc,work_id.desc&limit=8`,
   )
-  const committedRows = await getRows<JsonObject>(
-    supabaseUrl,
-    secretKey,
-    `xrpl_phase_committed_reference_rows?select=work_id,semantic_class,canonical_key,source_ledger_index,source_ledger_hash,value_json,is_tombstone,created_at&order=source_ledger_index.desc,canonical_key.desc&limit=5`,
+  const latestCommittedWork = recentWorks.find(
+    (work) => work.status === 'committed' && work.epoch_id === PHASE_EPOCH_ID,
+  )
+  const latestWorkId = typeof latestCommittedWork?.work_id === 'string'
+    ? latestCommittedWork.work_id
+    : null
+  const committedRows = latestWorkId
+    ? await getRows<JsonObject>(
+        supabaseUrl,
+        secretKey,
+        `xrpl_phase_committed_reference_rows?work_id=eq.${encodeURIComponent(latestWorkId)}&select=work_id,semantic_class,canonical_key,source_ledger_index,source_ledger_hash,source_transaction_hash,object_id,relationship_ids,value_json,is_tombstone,created_at&order=semantic_class.asc,canonical_key.asc&limit=400`,
+      )
+    : []
+
+  const semanticClassCounts = Object.fromEntries(
+    [
+      'validated-ledger',
+      'protocol-event',
+      'object-change',
+      'loan-lifecycle',
+      'archived-object',
+      'balance-history',
+      'current-projection',
+    ].map((semanticClass) => [
+      semanticClass,
+      committedRows.filter((row) => row.semantic_class === semanticClass).length,
+    ]),
   )
 
   return {
     service: 'xrpl-lending-monitor-supabase-probe',
     profileId: PROFILE_ID,
+    phaseEpochId: PHASE_EPOCH_ID,
     runtime: runtimeRows[0] ?? null,
     recentRuns,
     phaseChain: {
@@ -364,7 +424,9 @@ async function readHealth(supabaseUrl: string, secretKey: string): Promise<unkno
       watermark: watermarks[0] ?? null,
       recentMessages,
       recentWorks,
+      latestCommittedWork: latestCommittedWork ?? null,
       committedRows,
+      semanticClassCounts,
     },
     checkedAt: new Date().toISOString(),
   }
@@ -418,30 +480,73 @@ async function readValidatedLedgerHead(endpoint: string): Promise<{
 async function readExactValidatedLedger(
   endpoint: string,
   ledgerIndex: number,
-): Promise<{
-  index: number
-  hash: string
-  parentHash: string
-  closeTime: number
-}> {
+): Promise<ValidatedLedgerRead> {
   const result = await rpcRequest(endpoint, 'ledger', {
     ledger_index: ledgerIndex,
-    transactions: false,
-    expand: false,
+    transactions: true,
+    expand: true,
     owner_funds: false,
   })
-  const ledger = result.ledger as JsonObject | undefined
-  const index = requiredInteger(result.ledger_index ?? ledger?.ledger_index, 'ledger index')
-  const hash = requiredHash(result.ledger_hash ?? ledger?.hash, 'ledger hash')
-  const parentHash = requiredHash(ledger?.parent_hash, 'parent hash')
-  const closeTime = requiredInteger(ledger?.close_time, 'close time')
-  if (index !== ledgerIndex) {
+  try {
+    const parsed = parseValidatedLedgerResult({
+      endpoint,
+      requestedLedgerIndex: ledgerIndex,
+      result,
+    })
+    return {
+      ...parsed,
+      ledgerHash: parsed.ledgerHash.toUpperCase(),
+      parentHash: parsed.parentHash.toUpperCase(),
+      transactions: parsed.transactions.map((transaction) => ({
+        ...transaction,
+        hash: transaction.hash.toUpperCase(),
+      })),
+    }
+  } catch (error) {
     throw new PhaseExecutionError(
-      'reset_detected',
-      `requested ledger ${ledgerIndex}, received ${index}`,
+      'digest_mismatch',
+      `expanded ledger ${ledgerIndex} is invalid: ${error instanceof Error ? error.message : String(error)}`,
     )
   }
-  return { index, hash, parentHash, closeTime }
+}
+
+function oneLedgerScan(endpoint: string, ledger: ValidatedLedgerRead): IncrementalScanResult {
+  const lendingTransactions = ledger.transactions.filter((transaction) =>
+    isLendingTransactionType(transaction.transactionType),
+  )
+  return {
+    endpoint,
+    startLedgerIndex: ledger.ledgerIndex,
+    endLedgerIndex: ledger.ledgerIndex,
+    latestValidatedLedger: ledger.ledgerIndex,
+    completeToLatest: true,
+    ledgers: [{ ...ledger, lendingTransactions }],
+    metrics: {
+      ledgers: 1,
+      inspectedTransactions: ledger.transactions.length,
+      lendingTransactions: lendingTransactions.length,
+      elapsedMs: 0,
+    },
+  }
+}
+
+async function readPayloadChunk(options: {
+  supabaseUrl: string
+  secretKey: string
+  workId: string
+  chunkIndex: number
+}): Promise<PayloadChunkRow> {
+  const rows = await getRows<PayloadChunkRow>(
+    options.supabaseUrl,
+    options.secretKey,
+    `xrpl_phase_payload_chunks?work_id=eq.${encodeURIComponent(options.workId)}&chunk_index=eq.${options.chunkIndex}&select=work_id,chunk_index,payload_json,payload_digest,encoded_digest,byte_count,record_count&limit=2`,
+  )
+  if (rows.length !== 1) {
+    throw new RemoteStorageError(
+      `payload chunk lookup returned ${rows.length} rows for ${options.workId}/${options.chunkIndex}`,
+    )
+  }
+  return rows[0]!
 }
 
 async function executePhase(options: {
@@ -483,85 +588,119 @@ async function executePhase(options: {
     if (ledger.parentHash !== message.expectedPreviousLedgerHash) {
       throw new PhaseExecutionError(
         'parent_hash_mismatch',
-        `ledger ${ledger.index} parent does not match the committed boundary`,
+        `ledger ${ledger.ledgerIndex} parent does not match the committed boundary`,
       )
     }
-    const payload = {
-      schemaVersion: 1,
-      work: {
-        network: message.network,
-        epochId: message.epochId,
-        baseIdentity: message.baseIdentity,
-        previousLedgerIndex: message.expectedPreviousLedgerIndex,
-        expectedParentHash: message.expectedPreviousLedgerHash,
-        startLedgerIndex: ledger.index,
-        endLedgerIndex: ledger.index,
-      },
-      records: [
-        {
-          semanticClass: 'validated-ledger',
-          canonicalKey: `ledger:${ledger.index}`,
-          sourceLedgerIndex: ledger.index,
-          sourceLedgerHash: ledger.hash,
-          sourceTransactionHash: null,
-          objectId: null,
-          relationshipIds: [],
-          isTombstone: false,
-          value: {
-            closeTime: ledger.closeTime,
-            ledgerHash: ledger.hash,
-            ledgerIndex: ledger.index,
-            parentHash: ledger.parentHash,
-          },
-        },
-      ],
-    }
-    const payloadJson = canonicalJson(payload)
-    const payloadDigest = await sha256Hex(payloadJson)
+
+    const workId = buildPortableCollectorWorkId({
+      network: message.network,
+      epochId: message.epochId,
+      baseIdentity: message.baseIdentity,
+      previousLedgerIndex: message.expectedPreviousLedgerIndex,
+      expectedParentHash: message.expectedPreviousLedgerHash,
+    })
+    const normalized = await buildPortableXrplNormalizedWork({
+      scan: oneLedgerScan(options.endpoint, ledger),
+      workId,
+      network: message.network,
+      epochId: message.epochId,
+      baseIdentity: message.baseIdentity,
+      previousLedgerIndex: message.expectedPreviousLedgerIndex,
+      expectedParentHash: message.expectedPreviousLedgerHash,
+    })
+    const chunks = await Promise.all(
+      normalized.chunks.map(async (built) => ({
+        chunkIndex: built.chunk.chunkIndex,
+        totalChunks: built.chunk.totalChunks,
+        payloadJson: built.encodedJson,
+        chunkDigest: stripSha256Prefix(built.chunk.chunkDigest, 'chunkDigest'),
+        encodedDigest: await sha256Hex(built.encodedJson),
+        recordCount: built.chunk.records.length,
+      })),
+    )
     const completion = await postRpc<JsonObject>(
       options.supabaseUrl,
       options.secretKey,
-      'xrpl_complete_scan_phase',
+      'xrpl_complete_portable_scan_phase',
       {
         p_owner: options.owner,
         p_message_id: message.messageId,
         p_completed_at: completedAt,
-        p_ledger_index: ledger.index,
-        p_ledger_hash: ledger.hash,
+        p_ledger_index: ledger.ledgerIndex,
+        p_ledger_hash: ledger.ledgerHash,
         p_parent_hash: ledger.parentHash,
-        p_close_time: ledger.closeTime,
-        p_payload_json: payloadJson,
-        p_payload_digest: payloadDigest,
-        p_byte_count: new TextEncoder().encode(payloadJson).byteLength,
+        p_payload_digest: stripSha256Prefix(normalized.payload.digest, 'payloadDigest'),
+        p_semantic_counts_json: normalized.semanticCountsJson,
+        p_chunks_json: canonicalPortableJson(chunks),
       },
     )
     return {
       phase: 'scan',
       status: 'staged',
-      ledgerIndex: ledger.index,
-      ledgerHash: ledger.hash,
+      ledgerIndex: ledger.ledgerIndex,
+      ledgerHash: ledger.ledgerHash,
+      inspectedTransactions: ledger.transactions.length,
+      lendingTransactions: ledger.transactions.filter((transaction) =>
+        isLendingTransactionType(transaction.transactionType),
+      ).length,
+      payloadChunks: normalized.chunks.length,
+      semanticCounts: normalized.payload.semanticCounts,
       completion,
     }
   }
 
   if (message.phase === 'commit') {
+    const row = await readPayloadChunk({
+      supabaseUrl: options.supabaseUrl,
+      secretKey: options.secretKey,
+      workId: message.workId,
+      chunkIndex: message.chunkIndex,
+    })
+    if (row.encoded_digest === null || await sha256Hex(row.payload_json) !== row.encoded_digest) {
+      throw new PhaseExecutionError('digest_mismatch', 'stored payload encoded digest mismatch')
+    }
+    if (new TextEncoder().encode(row.payload_json).byteLength !== row.byte_count) {
+      throw new PhaseExecutionError('digest_mismatch', 'stored payload byte count mismatch')
+    }
+    const chunk = await decodeAndVerifyNormalizedPayloadChunk(
+      new TextEncoder().encode(row.payload_json),
+    )
+    if (
+      chunk.workId !== message.workId ||
+      chunk.chunkIndex !== message.chunkIndex ||
+      chunk.records.length !== row.record_count ||
+      stripSha256Prefix(chunk.chunkDigest, 'chunkDigest') !== row.payload_digest
+    ) {
+      throw new PhaseExecutionError('digest_mismatch', 'stored payload chunk identity mismatch')
+    }
+    const referenceRowsJson = canonicalPortableJson(
+      portableReferenceRowsFromChunk(chunk),
+    )
     const completion = await postRpc<JsonObject>(
       options.supabaseUrl,
       options.secretKey,
-      'xrpl_complete_commit_phase',
+      'xrpl_complete_portable_commit_phase',
       {
         p_owner: options.owner,
         p_message_id: message.messageId,
         p_completed_at: completedAt,
+        p_reference_rows_json: referenceRowsJson,
+        p_reference_rows_digest: await sha256Hex(referenceRowsJson),
       },
     )
-    return { phase: 'commit', status: 'committing', completion }
+    return {
+      phase: 'commit',
+      status: 'committing',
+      chunkIndex: message.chunkIndex,
+      rowCount: chunk.records.length,
+      completion,
+    }
   }
 
   const completion = await postRpc<JsonObject>(
     options.supabaseUrl,
     options.secretKey,
-    'xrpl_complete_finalize_phase',
+    'xrpl_complete_portable_finalize_phase',
     {
       p_owner: options.owner,
       p_message_id: message.messageId,
@@ -573,6 +712,12 @@ async function executePhase(options: {
 
 function classifyFailure(error: unknown): PhaseExecutionError {
   if (error instanceof PhaseExecutionError) return error
+  if (error instanceof PortablePayloadResourceHaltError) {
+    return new PhaseExecutionError('resource_halt', error.message)
+  }
+  if (error instanceof PortablePayloadValidationError) {
+    return new PhaseExecutionError('digest_mismatch', error.message)
+  }
   return new PhaseExecutionError(
     'terminal_internal',
     error instanceof Error ? error.message : String(error),

@@ -7,7 +7,7 @@ function read(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
-describe('R4C2 Supabase remote probe and phase-chain contract', () => {
+describe('R4C2 Supabase remote portable collector contract', () => {
   const probeMigration = read(
     'supabase/migrations/20260802002000_xrpl_remote_collector_probe.sql',
   )
@@ -17,7 +17,19 @@ describe('R4C2 Supabase remote probe and phase-chain contract', () => {
   const phaseIdentityMigration = read(
     'supabase/migrations/20260802095100_xrpl_remote_phase_message_identity.sql',
   )
+  const sevenClassMigration = read(
+    'supabase/migrations/20260802104000_xrpl_remote_seven_class_payload.sql',
+  )
+  const activationGuard = read(
+    'supabase/migrations/20260802104100_xrpl_remote_seven_class_activation_guard.sql',
+  )
+  const guardedClaim = read(
+    'supabase/migrations/20260802104200_xrpl_guarded_phase_claim.sql',
+  )
   const edgeFunction = read('supabase/functions/xrpl-collector-tick/index.ts')
+  const normalization = read(
+    'src/collector/history-segments/portable-xrpl-normalization.ts',
+  )
   const verifier = read('scripts/verify-supabase-remote-probe.mjs')
   const workflow = read('.github/workflows/supabase-remote-probe.yml')
   const config = read('supabase/config.toml')
@@ -25,17 +37,18 @@ describe('R4C2 Supabase remote probe and phase-chain contract', () => {
 
   it('keeps the remote runtime Devnet-only and fail-closed', () => {
     expect(edgeFunction).toContain('https://s.devnet.rippletest.net:51234/')
+    expect(edgeFunction).toContain("const PHASE_EPOCH_ID = 'supabase-r4c2c-v1'")
     expect(edgeFunction).toContain("request.headers.get('apikey') !== secretKey")
     expect(edgeFunction).toContain("request.method === 'GET'")
     expect(edgeFunction).toContain("request.method !== 'POST'")
     expect(edgeFunction).toContain('AbortSignal.timeout(8_000)')
     expect(edgeFunction).toContain("message.network !== 'devnet'")
-    expect(edgeFunction).toContain("message.epochId !== 'supabase-r4c2b-v1'")
+    expect(edgeFunction).toContain('message.epochId !== PHASE_EPOCH_ID')
     expect(edgeFunction).not.toContain('xrplcluster.com')
     expect(edgeFunction).not.toContain('MAINNET')
   })
 
-  it('binds the original Cron probe, Vault, RLS, and transactional tick lease', () => {
+  it('binds Cron, Vault, RLS, and the transactional tick lease', () => {
     for (const required of [
       'create extension if not exists pg_cron',
       'create extension if not exists pg_net with schema extensions',
@@ -58,7 +71,7 @@ describe('R4C2 Supabase remote probe and phase-chain contract', () => {
     expect(probeMigration).not.toContain('service_role key')
   })
 
-  it('creates durable exact phase messages and committed-only storage', () => {
+  it('retains the R4C2b durable scheduler and committed-only storage boundary', () => {
     for (const required of [
       'create table if not exists public.xrpl_phase_streams',
       'create table if not exists public.xrpl_phase_messages',
@@ -93,61 +106,150 @@ describe('R4C2 Supabase remote probe and phase-chain contract', () => {
       "status = 'retry'",
       'create or replace function public.xrpl_fail_phase_terminal',
       "status = 'halted'",
-      'create or replace function public.xrpl_complete_scan_phase',
-      'create or replace function public.xrpl_complete_commit_phase',
-      'create or replace function public.xrpl_complete_finalize_phase',
-      'payload digest or byte count mismatch',
-      'finalize watermark conflict',
     ]) {
       expect(phaseMigration).toContain(required)
     }
   })
 
-  it('uses portable-compatible deterministic message IDs', () => {
+  it('uses portable-compatible deterministic message and work identities', () => {
     expect(phaseMigration).toContain("'scan:v1:'")
     expect(phaseMigration).toContain("'collector-work-v1:'")
     expect(phaseIdentityMigration).toContain("replace(p_work_id, ':', '%3A')")
     expect(phaseIdentityMigration).toContain("'commit:v1:'")
     expect(phaseIdentityMigration).toContain("'finalize:v1:'")
+    expect(edgeFunction).toContain('buildPortableCollectorWorkId')
     expect(edgeFunction).toContain('encodeURIComponent(workId)')
     expect(edgeFunction).toContain('scan message ID does not match semantic identity')
     expect(edgeFunction).toContain('commit message ID does not match semantic identity')
     expect(edgeFunction).toContain('finalize message ID does not match semantic identity')
   })
 
-  it('executes one real phase per Cron tick against exact validated Devnet ledgers', () => {
+  it('reuses the existing XRPL and portable normalization stack for all seven classes', () => {
+    for (const required of [
+      "from './build-segment-records'",
+      'buildHistorySegmentRecords',
+      'buildNormalizedCollectorPayload',
+      'buildNormalizedPayloadChunks',
+      "semanticClass: 'validated-ledger'",
+      "semanticClass: 'protocol-event'",
+      "semanticClass: 'object-change'",
+      "semanticClass: 'loan-lifecycle'",
+      "semanticClass: 'archived-object'",
+      "semanticClass: 'balance-history'",
+      "semanticClass: 'current-projection'",
+      'coalescedProjectionCandidates',
+      'portableReferenceRowsFromChunk',
+    ]) {
+      expect(normalization).toContain(required)
+    }
+    expect(edgeFunction).toContain('parseValidatedLedgerResult')
+    expect(edgeFunction).toContain('isLendingTransactionType')
+    expect(edgeFunction).toContain('buildPortableXrplNormalizedWork')
+    expect(edgeFunction).toContain('decodeAndVerifyNormalizedPayloadChunk')
+    expect(edgeFunction).toContain('portableReferenceRowsFromChunk')
+    expect(edgeFunction).toContain('transactions: true')
+    expect(edgeFunction).toContain('expand: true')
+    expect(edgeFunction).not.toContain("transactions: false")
+  })
+
+  it('persists bounded chunks and defers committed candidate insertion to commit phases', () => {
+    for (const semanticClass of [
+      'validated-ledger',
+      'protocol-event',
+      'object-change',
+      'loan-lifecycle',
+      'archived-object',
+      'balance-history',
+      'current-projection',
+    ]) {
+      expect(sevenClassMigration).toContain(`'${semanticClass}'`)
+    }
+    for (const required of [
+      'create or replace function public.xrpl_complete_portable_scan_phase',
+      'create or replace function public.xrpl_complete_portable_commit_phase',
+      'create or replace function public.xrpl_complete_portable_finalize_phase',
+      'v_record_count < 1 or v_record_count > 40',
+      "octet_length(v_chunk_payload_json) > 512000",
+      'portable payload chunks are not contiguous',
+      'portable reference-row does not match payload chunk',
+      'portable commit chunks are out of order',
+      'portable commit evidence is incomplete',
+      'portable reference-row evidence is incomplete',
+      "epoch_id = 'supabase-r4c2c-v1'",
+      "error_classification = 'superseded_epoch'",
+    ]) {
+      expect(sevenClassMigration).toContain(required)
+    }
+
+    const scanStart = sevenClassMigration.indexOf(
+      'create or replace function public.xrpl_complete_portable_scan_phase',
+    )
+    const commitStart = sevenClassMigration.indexOf(
+      'create or replace function public.xrpl_complete_portable_commit_phase',
+    )
+    const finalizeStart = sevenClassMigration.indexOf(
+      'create or replace function public.xrpl_complete_portable_finalize_phase',
+    )
+    const scanSql = sevenClassMigration.slice(scanStart, commitStart)
+    const commitSql = sevenClassMigration.slice(commitStart, finalizeStart)
+    expect(scanSql).not.toContain('insert into public.xrpl_phase_reference_rows')
+    expect(commitSql).toContain('insert into public.xrpl_phase_reference_rows')
+    expect(commitSql).toContain('v_payload_record')
+  })
+
+  it('limits activation-race recovery to the uncommitted R4C2c boundary', () => {
+    for (const required of [
+      'create or replace function public.xrpl_ensure_remote_seven_class_epoch',
+      "v_stream.epoch_id <> 'supabase-r4c2c-v1'",
+      'v_committed_count <> 0',
+      "v_stream.last_error_classification not in ('base_mismatch', 'epoch_mismatch')",
+      "coalesce(v_stream.last_error_message, '') not like '%R4C2b%'",
+      "status = 'pending'",
+      "status = 'active'",
+      "'reason', 'terminal_halt'",
+    ]) {
+      expect(activationGuard).toContain(required)
+    }
+    expect(guardedClaim).toContain('public.xrpl_ensure_remote_seven_class_epoch(p_now)')
+    expect(guardedClaim).toContain("'reason', coalesce(v_epoch->>'reason'")
+    expect(guardedClaim).toContain('for update skip locked')
+  })
+
+  it('executes one durable phase per Cron tick through the R4C2c RPCs', () => {
     for (const required of [
       "'xrpl_claim_next_phase'",
       "'xrpl_complete_caught_up_scan'",
-      "'xrpl_complete_scan_phase'",
-      "'xrpl_complete_commit_phase'",
-      "'xrpl_complete_finalize_phase'",
+      "'xrpl_complete_portable_scan_phase'",
+      "'xrpl_complete_portable_commit_phase'",
+      "'xrpl_complete_portable_finalize_phase'",
       "'xrpl_retry_phase_message'",
       "'xrpl_fail_phase_terminal'",
       "rpcRequest(endpoint, 'server_info'",
       "rpcRequest(endpoint, 'ledger'",
       'message.expectedPreviousLedgerIndex + 1',
       'ledger.parentHash !== message.expectedPreviousLedgerHash',
-      "semanticClass: 'validated-ledger'",
-      'const payloadJson = canonicalJson(payload)',
-      'const payloadDigest = await sha256Hex(payloadJson)',
+      'canonicalPortableJson(chunks)',
+      'p_reference_rows_digest: await sha256Hex(referenceRowsJson)',
     ]) {
       expect(edgeFunction).toContain(required)
     }
   })
 
-  it('requires a complete remote scan, commit, finalize, watermark, row, and successor chain', () => {
+  it('requires remote multi-chunk, semantic-count, committed-row, watermark, and successor parity', () => {
     for (const required of [
-      'const maximumAttempts = 36',
-      'schemaVersion: 2',
-      "phaseEpochId: 'supabase-r4c2b-v1'",
+      'const maximumAttempts = 48',
+      'schemaVersion: 3',
+      "const phaseEpochId = 'supabase-r4c2c-v1'",
       "requiredPhases: ['scan', 'commit', 'finalize']",
+      'orderedMultiChunkCommits: true',
+      'sevenClassEnvelope: true',
       'committedOnlyVisibility: true',
+      'semanticCountParity: true',
       'successorContinuation: true',
-      'watermark has not advanced beyond the immutable base',
-      'watermark work is not committed',
-      'committed row is not visible at the watermark',
-      'scan, commit, finalize, and successor chain is not complete yet',
+      'committed-only row count does not match semantic counts',
+      'semantic count mismatch for',
+      'current-projection tombstone exposes a value',
+      'scan, ordered commits, finalize, and successor chain is not complete yet',
     ]) {
       expect(verifier).toContain(required)
     }
@@ -169,7 +271,7 @@ describe('R4C2 Supabase remote probe and phase-chain contract', () => {
     expect(workflow).not.toContain('echo "$SUPABASE_DB_PASSWORD"')
   })
 
-  it('documents the one-time cardless handoff and automated deployment boundary', () => {
+  it('documents the cardless handoff and automated deployment boundary', () => {
     expect(config).toContain('[functions.xrpl-collector-tick]')
     expect(config).toContain('verify_jwt = false')
     for (const required of [

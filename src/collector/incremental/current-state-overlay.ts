@@ -14,7 +14,7 @@ import {
 import type {
   CurrentStateOverlayMutation,
   CurrentStateOverlayObjectType,
-} from '../../worker/repositories/current-state-overlay'
+} from './current-state-overlay-types'
 
 interface OverlayDerivationContext {
   ledgerIndex: number

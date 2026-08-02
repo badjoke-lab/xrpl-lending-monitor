@@ -7,8 +7,18 @@ if (!/^[a-z]{20}$/.test(projectRef)) {
 
 const endpoint = `https://${projectRef}.supabase.co/functions/v1/xrpl-collector-tick`
 const evidenceDirectory = 'supabase-remote-probe-evidence'
-const maximumAttempts = 36
+const maximumAttempts = 48
 const delayMilliseconds = 15_000
+const phaseEpochId = 'supabase-r4c2c-v1'
+const semanticCountKeys = {
+  'validated-ledger': 'validatedLedgers',
+  'protocol-event': 'protocolEvents',
+  'object-change': 'objectChanges',
+  'loan-lifecycle': 'loanLifecycleEvents',
+  'archived-object': 'archivedObjects',
+  'balance-history': 'balanceHistory',
+  'current-projection': 'currentProjectionMutations',
+}
 
 function asNonNegativeInteger(value) {
   const parsed = typeof value === 'string' ? Number(value) : value
@@ -17,6 +27,16 @@ function asNonNegativeInteger(value) {
 
 function isLedgerHash(value) {
   return typeof value === 'string' && /^[A-F0-9]{64}$/.test(value)
+}
+
+function parseCanonicalObject(value) {
+  if (typeof value !== 'string') return null
+  try {
+    const parsed = JSON.parse(value)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null
+  } catch {
+    return null
+  }
 }
 
 function sanitizeRun(run) {
@@ -52,12 +72,14 @@ function sanitizeMessage(message) {
 function sanitizeWork(work) {
   return {
     work_id: work?.work_id ?? null,
+    epoch_id: work?.epoch_id ?? null,
     previous_ledger_index: asNonNegativeInteger(work?.previous_ledger_index),
     start_ledger_index: asNonNegativeInteger(work?.start_ledger_index),
     expected_parent_hash: work?.expected_parent_hash ?? null,
     scanned_end_ledger_index: asNonNegativeInteger(work?.scanned_end_ledger_index),
     final_ledger_hash: work?.final_ledger_hash ?? null,
     status: work?.status ?? null,
+    semantic_counts_json: work?.semantic_counts_json ?? null,
     payload_digest: work?.payload_digest ?? null,
     expected_payload_chunks: asNonNegativeInteger(work?.expected_payload_chunks),
     expected_commit_chunks: asNonNegativeInteger(work?.expected_commit_chunks),
@@ -74,6 +96,9 @@ function sanitizeCommittedRow(row) {
     canonical_key: row?.canonical_key ?? null,
     source_ledger_index: asNonNegativeInteger(row?.source_ledger_index),
     source_ledger_hash: row?.source_ledger_hash ?? null,
+    source_transaction_hash: row?.source_transaction_hash ?? null,
+    object_id: row?.object_id ?? null,
+    relationship_ids: Array.isArray(row?.relationship_ids) ? row.relationship_ids : null,
     value_json: row?.value_json ?? null,
     is_tombstone: row?.is_tombstone ?? null,
     created_at: row?.created_at ?? null,
@@ -83,6 +108,7 @@ function sanitizeCommittedRow(row) {
 function sanitizePhaseChain(phaseChain) {
   const stream = phaseChain?.stream ?? null
   const watermark = phaseChain?.watermark ?? null
+  const latestCommittedWork = phaseChain?.latestCommittedWork ?? null
   return {
     stream:
       stream === null
@@ -116,14 +142,25 @@ function sanitizePhaseChain(phaseChain) {
             updated_at: watermark.updated_at ?? null,
           },
     recentMessages: Array.isArray(phaseChain?.recentMessages)
-      ? phaseChain.recentMessages.slice(0, 12).map(sanitizeMessage)
+      ? phaseChain.recentMessages.slice(0, 320).map(sanitizeMessage)
       : [],
     recentWorks: Array.isArray(phaseChain?.recentWorks)
-      ? phaseChain.recentWorks.slice(0, 5).map(sanitizeWork)
+      ? phaseChain.recentWorks.slice(0, 8).map(sanitizeWork)
       : [],
+    latestCommittedWork:
+      latestCommittedWork === null ? null : sanitizeWork(latestCommittedWork),
     committedRows: Array.isArray(phaseChain?.committedRows)
-      ? phaseChain.committedRows.slice(0, 5).map(sanitizeCommittedRow)
+      ? phaseChain.committedRows.slice(0, 400).map(sanitizeCommittedRow)
       : [],
+    semanticClassCounts:
+      phaseChain?.semanticClassCounts && typeof phaseChain.semanticClassCounts === 'object'
+        ? Object.fromEntries(
+            Object.keys(semanticCountKeys).map((semanticClass) => [
+              semanticClass,
+              asNonNegativeInteger(phaseChain.semanticClassCounts[semanticClass]),
+            ]),
+          )
+        : {},
   }
 }
 
@@ -133,6 +170,7 @@ function sanitizeHealth(payload) {
     ok: payload?.ok === true,
     service: payload?.service ?? null,
     profileId: payload?.profileId ?? null,
+    phaseEpochId: payload?.phaseEpochId ?? null,
     runtime:
       runtime === null
         ? null
@@ -147,13 +185,10 @@ function sanitizeHealth(payload) {
             last_validated_ledger_index: asNonNegativeInteger(
               runtime.last_validated_ledger_index,
             ),
-            last_validated_ledger_hash:
-              runtime.last_validated_ledger_hash ?? null,
+            last_validated_ledger_hash: runtime.last_validated_ledger_hash ?? null,
             last_error: runtime.last_error ?? null,
             tick_count: asNonNegativeInteger(runtime.tick_count),
-            consecutive_failures: asNonNegativeInteger(
-              runtime.consecutive_failures,
-            ),
+            consecutive_failures: asNonNegativeInteger(runtime.consecutive_failures),
             updated_at: runtime.updated_at ?? null,
           },
     recentRuns: Array.isArray(payload?.recentRuns)
@@ -164,51 +199,62 @@ function sanitizeHealth(payload) {
   }
 }
 
-function findCompletedChain(messages, watermark) {
+function findCompletedChain(messages, watermark, work) {
   const byId = new Map(
     messages
       .filter((message) => typeof message.message_id === 'string')
       .map((message) => [message.message_id, message]),
   )
-  for (const finalize of messages) {
-    if (
-      finalize.phase !== 'finalize' ||
-      finalize.status !== 'completed' ||
-      finalize.result?.status !== 'committed' ||
-      finalize.result?.workId !== watermark.work_id ||
-      asNonNegativeInteger(finalize.result?.ledgerIndex) !== watermark.ledger_index ||
-      finalize.result?.ledgerHash !== watermark.ledger_hash
-    ) {
-      continue
-    }
-    const commit = messages.find(
+  const finalize = messages.find(
+    (message) =>
+      message.phase === 'finalize' &&
+      message.status === 'completed' &&
+      message.result?.status === 'committed' &&
+      message.result?.workId === watermark.work_id &&
+      asNonNegativeInteger(message.result?.ledgerIndex) === watermark.ledger_index &&
+      message.result?.ledgerHash === watermark.ledger_hash,
+  )
+  if (!finalize) return null
+
+  const commits = messages
+    .filter(
       (message) =>
         message.phase === 'commit' &&
         message.status === 'completed' &&
-        message.successor_message_id === finalize.message_id &&
         message.result?.workId === watermark.work_id,
     )
-    if (!commit) continue
-    const scan = messages.find(
-      (message) =>
-        message.phase === 'scan' &&
-        message.status === 'completed' &&
-        message.successor_message_id === commit.message_id &&
-        message.result?.status === 'staged' &&
-        message.result?.workId === watermark.work_id,
+    .sort(
+      (left, right) =>
+        asNonNegativeInteger(left.result?.chunkIndex) -
+        asNonNegativeInteger(right.result?.chunkIndex),
     )
-    if (!scan) continue
-    const successor = byId.get(finalize.successor_message_id)
-    if (
-      !successor ||
-      !['pending', 'leased', 'retry', 'completed'].includes(successor.status) ||
-      successor.phase !== 'scan'
-    ) {
-      continue
-    }
-    return { scan, commit, finalize, successor }
+  if (commits.length !== work.expected_commit_chunks) return null
+  for (let index = 0; index < commits.length; index += 1) {
+    if (asNonNegativeInteger(commits[index]?.result?.chunkIndex) !== index) return null
+    const expectedSuccessor = index + 1 < commits.length
+      ? commits[index + 1]?.message_id
+      : finalize.message_id
+    if (commits[index]?.successor_message_id !== expectedSuccessor) return null
   }
-  return null
+
+  const scan = messages.find(
+    (message) =>
+      message.phase === 'scan' &&
+      message.status === 'completed' &&
+      message.successor_message_id === commits[0]?.message_id &&
+      message.result?.status === 'staged' &&
+      message.result?.workId === watermark.work_id,
+  )
+  if (!scan) return null
+  const successor = byId.get(finalize.successor_message_id)
+  if (
+    !successor ||
+    !['pending', 'leased', 'retry', 'completed'].includes(successor.status) ||
+    successor.phase !== 'scan'
+  ) {
+    return null
+  }
+  return { scan, commits, finalize, successor }
 }
 
 function evaluateHealth(health) {
@@ -218,6 +264,7 @@ function evaluateHealth(health) {
     return 'unexpected service identity'
   }
   if (health.profileId !== 'supabase-devnet') return 'unexpected profile identity'
+  if (health.phaseEpochId !== phaseEpochId) return 'unexpected phase epoch identity'
   if (!runtime) return 'runtime row is not available yet'
   if (runtime.profile_id !== 'supabase-devnet') return 'runtime profile mismatch'
   if (runtime.network !== 'devnet') return 'runtime network is not Devnet'
@@ -245,20 +292,18 @@ function evaluateHealth(health) {
       run.error_message === null,
   )
   if (completedCronRuns.length < 2) return 'fewer than two successful pg_cron runs'
-  if (
-    completedCronRuns[0].validated_ledger_index <
-    completedCronRuns[1].validated_ledger_index
-  ) {
+  if (completedCronRuns[0].validated_ledger_index < completedCronRuns[1].validated_ledger_index) {
     return 'recent Cron ledger order is not descending'
   }
 
   const chain = health.phaseChain
   const stream = chain.stream
   const watermark = chain.watermark
+  const work = chain.latestCommittedWork
   if (!stream) return 'portable phase stream is not available yet'
   if (stream.profile_id !== 'supabase-devnet') return 'phase stream profile mismatch'
   if (stream.network !== 'devnet') return 'phase stream network mismatch'
-  if (stream.epoch_id !== 'supabase-r4c2b-v1') return 'phase stream epoch mismatch'
+  if (stream.epoch_id !== phaseEpochId) return 'phase stream epoch mismatch'
   if (stream.status !== 'active') return `phase stream is ${String(stream.status)}`
   if (stream.last_error_classification !== null || stream.last_error_message !== null) {
     return 'phase stream retains a terminal error'
@@ -281,46 +326,98 @@ function evaluateHealth(health) {
   if (typeof watermark.work_id !== 'string' || watermark.work_id.length === 0) {
     return 'watermark work identity is missing'
   }
-  if (chain.recentMessages.some((message) => message.status === 'error')) {
-    return 'recent phase messages contain a terminal error'
-  }
 
-  const work = chain.recentWorks.find(
-    (candidate) => candidate.work_id === watermark.work_id,
+  const terminalMessages = chain.recentMessages.filter(
+    (message) =>
+      message.status === 'error' && message.error_classification !== 'superseded_epoch',
   )
-  if (!work) return 'watermark work is not retained in recent work evidence'
+  if (terminalMessages.length > 0) return 'current phase messages contain a terminal error'
+
+  if (!work || work.work_id !== watermark.work_id) {
+    return 'latest committed work does not match the watermark'
+  }
+  if (work.epoch_id !== phaseEpochId) return 'watermark work epoch mismatch'
   if (work.status !== 'committed' || work.committed_at === null) {
     return 'watermark work is not committed'
   }
   if (
     work.scanned_end_ledger_index !== watermark.ledger_index ||
     work.final_ledger_hash !== watermark.ledger_hash ||
-    work.expected_payload_chunks !== 1 ||
-    work.expected_commit_chunks !== 1 ||
+    (work.expected_payload_chunks ?? 0) < 1 ||
+    work.expected_payload_chunks !== work.expected_commit_chunks ||
     typeof work.payload_digest !== 'string' ||
     !/^[a-f0-9]{64}$/.test(work.payload_digest)
   ) {
     return 'watermark work identity is incomplete or inconsistent'
   }
 
-  const committedRow = chain.committedRows.find(
-    (row) => row.work_id === watermark.work_id,
-  )
-  if (!committedRow) return 'committed row is not visible at the watermark'
-  if (
-    committedRow.semantic_class !== 'validated-ledger' ||
-    committedRow.canonical_key !== `ledger:${watermark.ledger_index}` ||
-    committedRow.source_ledger_index !== watermark.ledger_index ||
-    committedRow.source_ledger_hash !== watermark.ledger_hash ||
-    committedRow.is_tombstone !== false ||
-    typeof committedRow.value_json !== 'string'
-  ) {
-    return 'committed row identity does not match the watermark'
+  const semanticCounts = parseCanonicalObject(work.semantic_counts_json)
+  if (!semanticCounts) return 'semantic counts are missing or invalid'
+  const totalRecords = asNonNegativeInteger(semanticCounts.totalRecords)
+  if (totalRecords === null || totalRecords < 1) return 'semantic total record count is invalid'
+  if (asNonNegativeInteger(semanticCounts.validatedLedgers) !== 1) {
+    return 'latest work does not contain exactly one validated ledger'
+  }
+  if (chain.committedRows.length !== totalRecords) {
+    return 'committed-only row count does not match semantic counts'
   }
 
-  const completedChain = findCompletedChain(chain.recentMessages, watermark)
+  for (const [semanticClass, countKey] of Object.entries(semanticCountKeys)) {
+    const expectedCount = asNonNegativeInteger(semanticCounts[countKey])
+    const observedCount = chain.semanticClassCounts[semanticClass]
+    if (expectedCount === null || observedCount !== expectedCount) {
+      return `semantic count mismatch for ${semanticClass}`
+    }
+  }
+
+  if (
+    chain.committedRows.some(
+      (row) =>
+        row.work_id !== watermark.work_id ||
+        row.source_ledger_index !== watermark.ledger_index ||
+        row.source_ledger_hash !== watermark.ledger_hash ||
+        !Array.isArray(row.relationship_ids),
+    )
+  ) {
+    return 'committed-only row provenance does not match the watermark work'
+  }
+  const ledgerRow = chain.committedRows.find(
+    (row) => row.semantic_class === 'validated-ledger',
+  )
+  if (
+    !ledgerRow ||
+    ledgerRow.canonical_key !== `ledger:${watermark.ledger_index}` ||
+    ledgerRow.source_transaction_hash !== null ||
+    ledgerRow.object_id !== null ||
+    ledgerRow.is_tombstone !== false ||
+    typeof ledgerRow.value_json !== 'string'
+  ) {
+    return 'validated-ledger row identity does not match the watermark'
+  }
+  if (
+    chain.committedRows.some(
+      (row) =>
+        row.semantic_class !== 'validated-ledger' &&
+        (typeof row.source_transaction_hash !== 'string' ||
+          !/^[A-F0-9]{64}$/.test(row.source_transaction_hash)),
+    )
+  ) {
+    return 'transaction-bound semantic row has an invalid transaction identity'
+  }
+  if (
+    chain.committedRows.some(
+      (row) =>
+        row.semantic_class === 'current-projection' &&
+        row.is_tombstone === true &&
+        row.value_json !== null,
+    )
+  ) {
+    return 'current-projection tombstone exposes a value'
+  }
+
+  const completedChain = findCompletedChain(chain.recentMessages, watermark, work)
   if (!completedChain) {
-    return 'scan, commit, finalize, and successor chain is not complete yet'
+    return 'scan, ordered commits, finalize, and successor chain is not complete yet'
   }
   return null
 }
@@ -345,7 +442,7 @@ for (let attempt = 1; attempt <= maximumAttempts; attempt += 1) {
       finalReason = evaluateHealth(finalObservation)
       if (finalReason === null) {
         const evidence = {
-          schemaVersion: 2,
+          schemaVersion: 3,
           endpoint,
           verifiedAt: new Date().toISOString(),
           attempt,
@@ -354,9 +451,12 @@ for (let attempt = 1; attempt <= maximumAttempts; attempt += 1) {
             minimumSuccessfulCronRuns: 2,
             network: 'devnet',
             profileId: 'supabase-devnet',
-            phaseEpochId: 'supabase-r4c2b-v1',
+            phaseEpochId,
             requiredPhases: ['scan', 'commit', 'finalize'],
+            orderedMultiChunkCommits: true,
+            sevenClassEnvelope: true,
             committedOnlyVisibility: true,
+            semanticCountParity: true,
             successorContinuation: true,
             consecutiveFailures: 0,
           },
@@ -367,7 +467,7 @@ for (let attempt = 1; attempt <= maximumAttempts; attempt += 1) {
           `${JSON.stringify(evidence, null, 2)}\n`,
         )
         console.log(
-          `Supabase portable phase chain verified after ${attempt} attempt(s): tick_count=${finalObservation.runtime.tick_count}, watermark=${finalObservation.phaseChain.watermark.ledger_index}`,
+          `Supabase seven-class portable work verified after ${attempt} attempt(s): tick_count=${finalObservation.runtime.tick_count}, watermark=${finalObservation.phaseChain.watermark.ledger_index}, records=${finalObservation.phaseChain.committedRows.length}`,
         )
         process.exit(0)
       }
@@ -377,7 +477,7 @@ for (let attempt = 1; attempt <= maximumAttempts; attempt += 1) {
   }
 
   console.log(
-    `Supabase remote phase chain not ready (${attempt}/${maximumAttempts}): ${finalReason}`,
+    `Supabase seven-class phase chain not ready (${attempt}/${maximumAttempts}): ${finalReason}`,
   )
   if (attempt < maximumAttempts) {
     await new Promise((resolve) => setTimeout(resolve, delayMilliseconds))
@@ -388,7 +488,7 @@ await writeFile(
   `${evidenceDirectory}/failed-verification.json`,
   `${JSON.stringify(
     {
-      schemaVersion: 2,
+      schemaVersion: 3,
       endpoint,
       failedAt: new Date().toISOString(),
       reason: finalReason,
@@ -398,4 +498,4 @@ await writeFile(
     2,
   )}\n`,
 )
-throw new Error(`Supabase remote phase-chain verification failed: ${finalReason}`)
+throw new Error(`Supabase seven-class phase-chain verification failed: ${finalReason}`)
