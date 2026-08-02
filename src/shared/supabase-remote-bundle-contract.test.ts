@@ -25,9 +25,9 @@ const edgeFunction = readFileSync(
 )
 
 describe('Supabase remote prebundle contract', () => {
-  it('bundles both exact checked-out Edge entries before API deployment', () => {
+  it('bundles all four exact checked-out Edge entries before API deployment', () => {
     for (const required of [
-      'Bundle exact Devnet phase executor and committed reader',
+      'Bundle exact Devnet executors and qualification readers',
       'bundle_function() {',
       'local source_path="$1"',
       'local bundle_path="$2"',
@@ -41,6 +41,12 @@ describe('Supabase remote prebundle contract', () => {
       "'supabase/functions/xrpl-committed-reader/index.ts'",
       "'/tmp/xrpl-committed-reader-index.ts'",
       '"$evidence_dir/reader-bundle.json"',
+      "'supabase/functions/xrpl-historical-witness/index.ts'",
+      "'/tmp/xrpl-historical-witness-index.ts'",
+      '"$evidence_dir/historical-loader-bundle.json"',
+      "'supabase/functions/xrpl-historical-witness-reader/index.ts'",
+      "'/tmp/xrpl-historical-witness-reader-index.ts'",
+      '"$evidence_dir/historical-reader-bundle.json"',
       "const unresolvedRelativeImport = /(?:from\\s*|import\\s*\\()\\s*['\"]\\.{1,2}\\//u",
       "bundle.includes('cloudflare:')",
       "bundle.includes('Deno.serve')",
@@ -51,6 +57,10 @@ describe('Supabase remote prebundle contract', () => {
       'supabase functions deploy xrpl-collector-tick',
       'Deploy qualification-only committed reader bundle',
       'supabase functions deploy xrpl-committed-reader',
+      'Deploy isolated historical witness loader bundle',
+      'supabase functions deploy xrpl-historical-witness',
+      'Deploy isolated historical witness reader bundle',
+      'supabase functions deploy xrpl-historical-witness-reader',
       '--use-api',
       '--no-verify-jwt',
     ]) {
@@ -62,13 +72,19 @@ describe('Supabase remote prebundle contract', () => {
     for (const required of [
       "'supabase-remote-probe-evidence/bundle.json'",
       "'supabase-remote-probe-evidence/reader-bundle.json'",
+      "'supabase-remote-probe-evidence/historical-loader-bundle.json'",
+      "'supabase-remote-probe-evidence/historical-reader-bundle.json'",
       "createHash('sha256').update(bundle).digest('hex')",
-      'bundle bytes:',
-      'bundle sha256:',
-      'reader bundle bytes:',
-      'reader bundle sha256:',
-      'unresolved relative imports:',
-      'Cloudflare runtime imports:',
+      'collector bundle bytes:',
+      'collector bundle sha256:',
+      'committed reader bundle bytes:',
+      'committed reader bundle sha256:',
+      'historical loader bundle bytes:',
+      'historical loader bundle sha256:',
+      'historical reader bundle bytes:',
+      'historical reader bundle sha256:',
+      'relative imports:',
+      'Cloudflare imports:',
       'retention-days: 7',
     ]) {
       expect(workflow).toContain(required)
@@ -93,13 +109,14 @@ describe('Supabase remote prebundle contract', () => {
     expect(rpcReader).toContain('export async function readValidatedLedger')
   })
 
-  it('redeploys when any bundled collector or reader dependency changes', () => {
+  it('redeploys when any bundled collector, reader, or verifier dependency changes', () => {
     for (const required of [
       "- 'supabase/**'",
       "- 'src/collector/history-segments/**'",
       "- 'src/collector/incremental/**'",
       "- 'src/shared/portable-collector-*.ts'",
       "- 'scripts/verify-supabase-committed-reader.mjs'",
+      "- 'scripts/verify-supabase-historical-witness.mjs'",
     ]) {
       expect(workflow).toContain(required)
     }
