@@ -5,3 +5,9 @@ verify_jwt = false
 
 [functions.xrpl-committed-reader]
 verify_jwt = false
+
+[functions.xrpl-historical-witness]
+verify_jwt = false
+
+[functions.xrpl-historical-witness-reader]
+verify_jwt = false
