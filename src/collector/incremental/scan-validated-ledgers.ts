@@ -1,9 +1,9 @@
 import { isLendingTransactionType } from './lending-transaction-types'
-import {
-  readValidatedLedger,
-  type ValidatedLedgerRead,
-  type ValidatedLedgerTransaction,
-} from './read-validated-ledger'
+import { readValidatedLedger } from './read-validated-ledger-rpc'
+import type {
+  ValidatedLedgerRead,
+  ValidatedLedgerTransaction,
+} from './validated-ledger-parser'
 
 export interface IncrementalLedgerRead extends ValidatedLedgerRead {
   lendingTransactions: readonly ValidatedLedgerTransaction[]

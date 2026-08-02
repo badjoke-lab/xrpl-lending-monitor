@@ -2,7 +2,7 @@ import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 
 import { buildHistorySegmentRecords } from '../src/collector/history-segments/build-segment-records'
-import { readValidatedLedger } from '../src/collector/incremental/read-validated-ledger'
+import { readValidatedLedger } from '../src/collector/incremental/read-validated-ledger-rpc'
 import { scanValidatedLedgerRange } from '../src/collector/incremental/scan-validated-ledgers'
 import { XrplRpcError, type FetchLike } from '../src/collector/network/xrpl-rpc'
 import {

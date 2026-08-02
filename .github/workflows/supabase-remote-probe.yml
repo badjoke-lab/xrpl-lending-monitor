@@ -76,6 +76,9 @@ jobs:
           if (unresolvedRelativeImport.test(bundle)) {
             throw new Error('generated Supabase bundle retains a relative import')
           }
+          if (bundle.includes('cloudflare:')) {
+            throw new Error('generated Supabase bundle contains a Cloudflare runtime import')
+          }
           if (!bundle.includes('Deno.serve')) {
             throw new Error('generated Supabase bundle does not contain the Edge entrypoint')
           }
@@ -86,6 +89,7 @@ jobs:
             bytes: Buffer.byteLength(bundle),
             sha256: createHash('sha256').update(bundle).digest('hex'),
             relativeImports: 0,
+            cloudflareImports: 0,
             denoServeEntrypoint: true,
           }
           writeFileSync(
@@ -157,6 +161,7 @@ jobs:
               `- bundle bytes: \`${String(bundle?.bytes ?? 'unknown')}\``,
               `- bundle sha256: \`${String(bundle?.sha256 ?? 'unknown')}\``,
               `- unresolved relative imports: \`${String(bundle?.relativeImports ?? 'unknown')}\``,
+              `- Cloudflare runtime imports: \`${String(bundle?.cloudflareImports ?? 'unknown')}\``,
             )
           }
 

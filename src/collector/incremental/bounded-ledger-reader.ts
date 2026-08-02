@@ -1,6 +1,6 @@
 import type { IncrementalRuntimeConfig } from '../../shared/incremental-runtime-config'
 import type { RuntimeConfig } from '../../shared/runtime-config'
-import { readValidatedLedger } from './read-validated-ledger'
+import { readValidatedLedger } from './read-validated-ledger-rpc'
 import type { LedgerReader } from './scan-validated-ledgers'
 
 export interface BoundedLedgerReaderUsage {
