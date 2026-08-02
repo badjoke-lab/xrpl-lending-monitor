@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 1,
+  "purpose": "r4c2c-remote-fault-qualification-verification",
+  "runId": 30752742177,
+  "commit": "06c4ac9e7d39e9b7ffaa07fc076bd9705f1b86b4",
+  "artifactId": 8834977791,
+  "artifactDigest": "sha256:14f8f4e16ebe4f42b80502047479550a1d94593a7196a7cebf7672d8f8740267",
+  "verifiedAt": "2026-08-02T14:44:51.087Z",
+  "fixtureId": "r4c2c-remote-fault-qualification-v1",
+  "profileId": "supabase-devnet-fault-qualification",
+  "activeProfileId": "supabase-devnet",
+  "preparedDuplicate": false,
+  "messageStatusCounts": {
+    "completed": 3,
+    "error": 1,
+    "pending": 1
+  },
+  "eventTypes": [
+    "retry-scheduled",
+    "rollback-observed",
+    "terminal-halt"
+  ],
+  "rollback": {
+    "injectionHttpStatus": 400,
+    "messageRemainedLeased": true,
+    "sentinelAbsent": true,
+    "successorAbsent": true,
+    "normalCompletionAfterObservation": true,
+    "attemptCount": 1
+  },
+  "retry": {
+    "backoffSeconds": 30,
+    "preDueClaimRejected": true,
+    "preDueReason": "not_ready",
+    "dueClaimAccepted": true,
+    "dueAttemptCount": 2,
+    "completed": true
+  },
+  "staleLease": {
+    "firstAttemptCount": 1,
+    "preExpiryClaimRejected": true,
+    "preExpiryReason": "lease_active",
+    "reclaimedAtExactExpiry": true,
+    "reclaimAttemptCount": 2,
+    "previousOwnerRetained": true,
+    "completed": true
+  },
+  "terminal": {
+    "classification": "integrity",
+    "errorMessage": "injected terminal qualification failure",
+    "messageStatus": "error",
+    "streamStatus": "halted",
+    "successorReserved": false,
+    "exactReplayDuplicate": true,
+    "haltProbeClaimed": false,
+    "haltProbeReason": "stream_halted",
+    "haltProbeStatus": "pending",
+    "haltProbeAttemptCount": 0
+  },
+  "successorCount": 0,
+  "activeWatermarkBefore": {
+    "profileId": "supabase-devnet",
+    "network": "devnet",
+    "epochId": "supabase-r4c2c-v1",
+    "baseIdentity": "seven-class-base-4132417-C9A7A89077EA7F54EBC296EE95E6AE45601088DDA5CFC5538A435C4A21E9CE77",
+    "ledgerIndex": 4132584,
+    "ledgerHash": "33552E6118EEE7CB1C2366353733E1BDCD331432191365E5A1A0185FA4644B6B",
+    "workId": "collector-work-v1:devnet:supabase-r4c2c-v1:seven-class-base-4132417-C9A7A89077EA7F54EBC296EE95E6AE45601088DDA5CFC5538A435C4A21E9CE77:4132584:66FE9FE716A42222E25BD2B2DD906EF4F734CC1D250D0D8093311380BE24C28B"
+  },
+  "activeWatermarkAfter": {
+    "profileId": "supabase-devnet",
+    "network": "devnet",
+    "epochId": "supabase-r4c2c-v1",
+    "baseIdentity": "seven-class-base-4132417-C9A7A89077EA7F54EBC296EE95E6AE45601088DDA5CFC5538A435C4A21E9CE77",
+    "ledgerIndex": 4132584,
+    "ledgerHash": "33552E6118EEE7CB1C2366353733E1BDCD331432191365E5A1A0185FA4644B6B",
+    "workId": "collector-work-v1:devnet:supabase-r4c2c-v1:seven-class-base-4132417-C9A7A89077EA7F54EBC296EE95E6AE45601088DDA5CFC5538A435C4A21E9CE77:4132584:66FE9FE716A42222E25BD2B2DD906EF4F734CC1D250D0D8093311380BE24C28B"
+  },
+  "activeIsolation": {
+    "ledgerAdvance": 0,
+    "nonRegressing": true,
+    "sourceIdentityPreserved": true
+  },
+  "credentialChecks": {
+    "missingTokenRejected": true,
+    "wrongPurposeRejected": true
+  },
+  "checks": {
+    "interruptionRollbackProved": true,
+    "retryBackoffProved": true,
+    "staleLeaseReclaimProved": true,
+    "terminalFailClosedHaltProved": true,
+    "terminalReplayConverged": true,
+    "activeProfileIsolated": true,
+    "remoteFaultQualificationProved": true
+  }
+}
