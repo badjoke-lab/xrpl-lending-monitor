@@ -1,4 +1,4 @@
-import { readValidatedLedger } from './read-validated-ledger'
+import { readValidatedLedger } from './read-validated-ledger-rpc'
 import type { LedgerReader } from './scan-validated-ledgers'
 
 function errorMessage(error: unknown): string {
