@@ -1,0 +1,164 @@
+name: R4C2c Devnet historical witness
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/qualify-devnet-historical-witness.ts'
+      - 'src/collector/history-segments/**'
+      - 'src/collector/incremental/**'
+      - 'src/shared/portable-collector-*.ts'
+      - '.github/workflows/r4c2c-devnet-historical-witness.yml'
+      - 'scripts/check-actions-workflow-allowlist.sh'
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: r4c2c-devnet-historical-witness
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Bundle exact historical witness runner
+        shell: bash
+        env:
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p devnet-historical-witness-evidence
+          bun build scripts/qualify-devnet-historical-witness.ts \
+            --target=node \
+            --format=esm \
+            --outfile=/tmp/qualify-devnet-historical-witness.mjs
+          test -s /tmp/qualify-devnet-historical-witness.mjs
+          BUNDLE_PATH=/tmp/qualify-devnet-historical-witness.mjs HEAD_SHA="$HEAD_SHA" node --input-type=module <<'NODE'
+          import { createHash } from 'node:crypto'
+          import { readFileSync, writeFileSync } from 'node:fs'
+
+          const bundlePath = process.env.BUNDLE_PATH
+          const headSha = process.env.HEAD_SHA
+          const bundle = readFileSync(bundlePath, 'utf8')
+          if (/(?:from\s*|import\s*\()\s*['"]\.{1,2}\//u.test(bundle)) {
+            throw new Error('historical witness bundle retains a relative import')
+          }
+          if (bundle.includes('cloudflare:')) {
+            throw new Error('historical witness bundle contains a Cloudflare runtime import')
+          }
+          writeFileSync(
+            'devnet-historical-witness-evidence/bundle.json',
+            `${JSON.stringify({
+              schemaVersion: 1,
+              source: 'scripts/qualify-devnet-historical-witness.ts',
+              headSha,
+              bytes: Buffer.byteLength(bundle),
+              sha256: createHash('sha256').update(bundle).digest('hex'),
+              relativeImports: 0,
+              cloudflareImports: 0,
+            }, null, 2)}\n`,
+          )
+          NODE
+
+      - name: Discover immutable Devnet Lending witnesses
+        run: node /tmp/qualify-devnet-historical-witness.mjs
+
+      - name: Upload sanitized historical witness evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r4c2c-devnet-historical-witness
+          path: devnet-historical-witness-evidence
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Publish sanitized run locator
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_STATUS: ${{ job.status }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          HEAD_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE' > /tmp/historical-witness-comment.md
+          import { existsSync, readFileSync } from 'node:fs'
+
+          const runStatus = process.env.RUN_STATUS ?? 'unknown'
+          const runId = process.env.RUN_ID ?? 'unknown'
+          const runUrl = process.env.RUN_URL ?? ''
+          const headSha = process.env.HEAD_SHA ?? 'unknown'
+          const evidencePath = 'devnet-historical-witness-evidence/historical-witness.json'
+          const failurePath = 'devnet-historical-witness-evidence/failed-historical-witness.json'
+          const bundlePath = 'devnet-historical-witness-evidence/bundle.json'
+          const lines = [
+            '## R4C2c Devnet historical witness discovery',
+            '',
+            `- run: [${runId}](${runUrl})`,
+            `- commit: \`${headSha}\``,
+            `- job status: \`${runStatus}\``,
+            '- transaction submission: `none`',
+            '- database mutation: `none`',
+          ]
+          if (existsSync(bundlePath)) {
+            const bundle = JSON.parse(readFileSync(bundlePath, 'utf8'))
+            lines.push(
+              `- bundle bytes: \`${String(bundle.bytes ?? 'unknown')}\``,
+              `- bundle sha256: \`${String(bundle.sha256 ?? 'unknown')}\``,
+              `- unresolved relative imports: \`${String(bundle.relativeImports ?? 'unknown')}\``,
+              `- Cloudflare runtime imports: \`${String(bundle.cloudflareImports ?? 'unknown')}\``,
+            )
+          }
+          if (existsSync(evidencePath)) {
+            const evidence = JSON.parse(readFileSync(evidencePath, 'utf8'))
+            const result = evidence.result ?? {}
+            const counts = result.semanticCounts ?? {}
+            lines.push(
+              '- witness evidence: `produced`',
+              `- requested ledgers: \`${String(evidence.inputs?.requestedLedgerCount ?? 'unknown')}\``,
+              `- readable ledgers: \`${String(result.readableLedgerCount ?? 'unknown')}\``,
+              `- Lending witness ledgers: \`${String(result.lendingWitnessLedgerCount ?? 'unknown')}\``,
+              `- protocol-event: \`${String(counts['protocol-event'] ?? 'unknown')}\``,
+              `- object-change: \`${String(counts['object-change'] ?? 'unknown')}\``,
+              `- loan-lifecycle: \`${String(counts['loan-lifecycle'] ?? 'unknown')}\``,
+              `- archived-object: \`${String(counts['archived-object'] ?? 'unknown')}\``,
+              `- balance-history: \`${String(counts['balance-history'] ?? 'unknown')}\``,
+              `- current-projection: \`${String(counts['current-projection'] ?? 'unknown')}\``,
+              `- missing non-ledger classes: \`${JSON.stringify(result.missingNonLedgerClasses ?? [])}\``,
+              `- complete six-class witness: \`${String(result.completeSixClassWitness ?? false)}\``,
+            )
+          } else if (existsSync(failurePath)) {
+            const failure = JSON.parse(readFileSync(failurePath, 'utf8'))
+            lines.push(
+              '- witness evidence: `failed`',
+              `- reason: \`${String(failure.reason ?? 'unknown').slice(0, 500)}\``,
+            )
+          } else {
+            lines.push('- witness evidence: `not reached`')
+          }
+          console.log(`${lines.join('\n')}\n`)
+          NODE
+          gh issue comment 1118 --repo "$GITHUB_REPOSITORY" --body-file /tmp/historical-witness-comment.md
