@@ -24,6 +24,7 @@ const bundles = [
   ['multi-chunk reader bundle', 'multichunk-reader-bundle.json'],
   ['complete-state transfer bundle', 'complete-state-transfer-bundle.json'],
   ['restore continuation bundle', 'restore-continuation-bundle.json'],
+  ['remote fault qualification bundle', 'remote-fault-qualification-bundle.json'],
 ]
 for (const [label, name] of bundles) {
   const value = read(name)
@@ -158,6 +159,23 @@ appendVerification({
     `- restored phase sequence: \`${JSON.stringify((value.phaseSequence ?? []).map((entry) => `${entry.phase}:${entry.status}`))}\``,
     `- duplicate phase replay count: \`${String(value.duplicatePhaseReplayCount ?? 'unknown')}\``,
     `- post-restore continuation proved: \`${String(value.checks?.postRestoreContinuationProved ?? 'unknown')}\``,
+  ],
+})
+
+appendVerification({
+  successFile: 'verified-remote-fault-qualification.json',
+  failureFile: 'failed-remote-fault-qualification-verification.json',
+  label: 'remote fault qualification verifier',
+  successLines: (value) => [
+    `- remote fault verified at: \`${String(value.verifiedAt ?? 'unknown')}\``,
+    `- remote fault profile: \`${String(value.profileId ?? 'unknown')}\``,
+    `- remote fault statuses: \`${JSON.stringify(value.messageStatusCounts ?? {})}\``,
+    `- remote fault events: \`${JSON.stringify(value.eventTypes ?? [])}\``,
+    `- interruption rollback proved: \`${String(value.checks?.interruptionRollbackProved ?? 'unknown')}\``,
+    `- retry and backoff proved: \`${String(value.checks?.retryBackoffProved ?? 'unknown')}\``,
+    `- stale lease reclaim proved: \`${String(value.checks?.staleLeaseReclaimProved ?? 'unknown')}\``,
+    `- terminal fail-closed halt proved: \`${String(value.checks?.terminalFailClosedHaltProved ?? 'unknown')}\``,
+    `- active profile isolated: \`${String(value.checks?.activeProfileIsolated ?? 'unknown')}\``,
   ],
 })
 

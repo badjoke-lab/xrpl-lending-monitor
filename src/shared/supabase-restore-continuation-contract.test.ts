@@ -126,7 +126,7 @@ describe('Supabase isolated post-restore continuation contract', () => {
 
   it('deploys the eighth function through the existing single guarded workflow', () => {
     expect(config).toContain('[functions.xrpl-restore-continuation]')
-    expect(config.match(/verify_jwt = false/g)).toHaveLength(8)
+    expect(config.match(/verify_jwt = false/g)).toHaveLength(9)
     for (const required of [
       "'supabase/functions/xrpl-restore-continuation/index.ts'",
       'restore-continuation-bundle.json',
