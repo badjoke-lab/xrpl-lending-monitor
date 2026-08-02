@@ -16,6 +16,8 @@ const PROFILE_ID = 'supabase-devnet-historical-witness'
 const EPOCH_ID = 'supabase-r4c2c-historical-witness-v1'
 const BASE_IDENTITY = 'historical-witness-2776760-2980845-3127240'
 const PURPOSE = 'r4c2c-historical-witness-qualification'
+const PURPOSE_HEADER = 'x-xrpl-reader-purpose'
+const VERIFY_TOKEN_HEADER = 'x-xrpl-reader-token'
 const DEFAULT_ENDPOINT = 'https://s.devnet.rippletest.net:51234/'
 const REQUEST_TIMEOUT_MILLISECONDS = 15_000
 
@@ -73,12 +75,6 @@ function serviceKey(): string {
     if (parsed.default) return parsed.default
   }
   return env('SUPABASE_SERVICE_ROLE_KEY')
-}
-
-function authorized(request: Request, key: string): boolean {
-  const authorization = request.headers.get('authorization')
-  const bearer = authorization?.startsWith('Bearer ') ? authorization.slice(7) : null
-  return bearer === key || request.headers.get('apikey') === key
 }
 
 function isRecord(value: unknown): value is Json {
@@ -284,8 +280,12 @@ async function execute(): Promise<Json> {
 Deno.serve(async (request) => {
   try {
     if (request.method !== 'POST') return response({ error: 'method_not_allowed' }, 405)
-    const key = serviceKey()
-    if (!authorized(request, key)) return response({ error: 'unauthorized' }, 401)
+    if (request.headers.get(PURPOSE_HEADER) !== PURPOSE) {
+      return response({ error: 'invalid_purpose' }, 403)
+    }
+    if (request.headers.get(VERIFY_TOKEN_HEADER) !== env('XRPL_READER_VERIFY_TOKEN')) {
+      return response({ error: 'unauthorized' }, 401)
+    }
     return response(await execute())
   } catch (error) {
     return response(
