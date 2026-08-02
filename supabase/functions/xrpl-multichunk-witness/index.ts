@@ -15,6 +15,7 @@ import { buildPortableCollectorWorkId } from '../../../src/shared/portable-colle
 import { canonicalPortableJson } from '../../../src/shared/portable-collector-reference-store.ts'
 
 const PROFILE_ID = 'supabase-devnet-multichunk-witness'
+const ACTIVE_PROFILE_ID = 'supabase-devnet'
 const EPOCH_ID = 'supabase-r4c2c-v1'
 const BASE_IDENTITY = 'multichunk-witness-2776760'
 const PURPOSE = 'r4c2c-multichunk-witness-qualification'
@@ -55,6 +56,16 @@ type PayloadChunkRow = {
   encoded_digest: string | null
   byte_count: number
   record_count: number
+}
+type ActiveWatermark = {
+  profileId: string
+  network: string
+  epochId: string
+  baseIdentity: string
+  ledgerIndex: number
+  ledgerHash: string
+  workId: string
+  updatedAt: string
 }
 
 function response(body: unknown, status = 200): Response {
@@ -110,6 +121,12 @@ function requireInteger(value: unknown, name: string): number {
     throw new Error(`${name} must be a non-negative safe integer`)
   }
   return parsed
+}
+
+function requireHash(value: unknown, name: string): string {
+  const result = requireString(value, name).toUpperCase()
+  if (!/^[A-F0-9]{64}$/u.test(result)) throw new Error(`${name} must be a canonical hash`)
+  return result
 }
 
 function bytesToHex(bytes: Uint8Array): string {
@@ -266,14 +283,68 @@ async function readPayloadChunk(
   return rows[0]!
 }
 
-async function activeWatermark(supabaseUrl: string, key: string): Promise<Json | null> {
+async function activeWatermark(supabaseUrl: string, key: string): Promise<ActiveWatermark> {
   const rows = await getRows<Json>(
     supabaseUrl,
     key,
     'xrpl_phase_watermarks?profile_id=eq.supabase-devnet&select=profile_id,network,epoch_id,base_identity,ledger_index,ledger_hash,work_id,updated_at&limit=2',
   )
-  if (rows.length > 1) throw new Error('Active watermark lookup returned multiple rows')
-  return rows[0] ?? null
+  if (rows.length !== 1) throw new Error(`Active watermark lookup returned ${rows.length} rows`)
+  const row = rows[0]!
+  const result: ActiveWatermark = {
+    profileId: requireString(row.profile_id, 'active profile_id'),
+    network: requireString(row.network, 'active network'),
+    epochId: requireString(row.epoch_id, 'active epoch_id'),
+    baseIdentity: requireString(row.base_identity, 'active base_identity'),
+    ledgerIndex: requireInteger(row.ledger_index, 'active ledger_index'),
+    ledgerHash: requireHash(row.ledger_hash, 'active ledger_hash'),
+    workId: requireString(row.work_id, 'active work_id'),
+    updatedAt: requireString(row.updated_at, 'active updated_at'),
+  }
+  if (
+    result.profileId !== ACTIVE_PROFILE_ID
+    || result.network !== 'devnet'
+    || result.epochId !== EPOCH_ID
+  ) {
+    throw new Error('Active watermark source identity is invalid')
+  }
+  return result
+}
+
+function verifyActiveWatermarkIsolation(
+  before: ActiveWatermark,
+  after: ActiveWatermark,
+  isolatedWorkId: string,
+): Json {
+  if (
+    before.profileId !== after.profileId
+    || before.network !== after.network
+    || before.epochId !== after.epochId
+    || before.baseIdentity !== after.baseIdentity
+  ) {
+    throw new Error('Multi-chunk witness changed the active Supabase source identity')
+  }
+  if (before.workId === isolatedWorkId || after.workId === isolatedWorkId) {
+    throw new Error('Multi-chunk witness work leaked into the active Supabase watermark')
+  }
+  if (after.ledgerIndex < before.ledgerIndex) {
+    throw new Error('Active Supabase watermark regressed during multi-chunk verification')
+  }
+  if (
+    after.ledgerIndex === before.ledgerIndex
+    && (after.ledgerHash !== before.ledgerHash || after.workId !== before.workId)
+  ) {
+    throw new Error('Active Supabase watermark changed identity without advancing')
+  }
+  return {
+    profileId: after.profileId,
+    network: after.network,
+    epochId: after.epochId,
+    baseIdentity: after.baseIdentity,
+    ledgerAdvance: after.ledgerIndex - before.ledgerIndex,
+    isolatedWorkExcluded: true,
+    nonRegressing: true,
+  }
 }
 
 async function execute(): Promise<Json> {
@@ -497,9 +568,7 @@ async function execute(): Promise<Json> {
   }
 
   const activeAfter = await activeWatermark(supabaseUrl, key)
-  if (canonicalPortableJson(activeBefore) !== canonicalPortableJson(activeAfter)) {
-    throw new Error('Multi-chunk witness changed the active Supabase watermark')
-  }
+  const activeIsolation = verifyActiveWatermarkIsolation(activeBefore, activeAfter, workId)
 
   return {
     schemaVersion: 1,
@@ -518,8 +587,10 @@ async function execute(): Promise<Json> {
     referenceRowCount: referenceRows.length,
     semanticCounts,
     watermark: watermarks[0],
-    activeWatermarkUnchanged: true,
-    activeWatermark: activeAfter,
+    activeWatermarkIsolated: true,
+    activeWatermarkIsolation: activeIsolation,
+    activeWatermarkBefore: activeBefore,
+    activeWatermarkAfter: activeAfter,
   }
 }
 
