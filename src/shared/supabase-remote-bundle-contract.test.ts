@@ -15,7 +15,7 @@ const rpcReader = read('src/collector/incremental/read-validated-ledger-rpc.ts')
 const edgeFunction = read('supabase/functions/xrpl-collector-tick/index.ts')
 
 describe('Supabase remote prebundle contract', () => {
-  it('bundles all eight exact checked-out Edge entries before API deployment', () => {
+  it('bundles all nine exact checked-out Edge entries before API deployment', () => {
     for (const required of [
       'Bundle exact Devnet executors and qualification readers',
       'bundle_function() {',
@@ -49,6 +49,9 @@ describe('Supabase remote prebundle contract', () => {
       "'supabase/functions/xrpl-restore-continuation/index.ts'",
       "'/tmp/xrpl-restore-continuation-index.ts'",
       '"$evidence_dir/restore-continuation-bundle.json"',
+      "'supabase/functions/xrpl-remote-fault-qualification/index.ts'",
+      "'/tmp/xrpl-remote-fault-qualification-index.ts'",
+      '"$evidence_dir/remote-fault-qualification-bundle.json"',
       "const unresolvedRelativeImport = /(?:from\\s*|import\\s*\\()\\s*['\"]\\.{1,2}\\//u",
       "bundle.includes('cloudflare:')",
       "bundle.includes('Deno.serve')",
@@ -71,12 +74,16 @@ describe('Supabase remote prebundle contract', () => {
       'supabase functions deploy xrpl-complete-state-transfer',
       'Deploy isolated post-restore continuation bundle',
       'supabase functions deploy xrpl-restore-continuation',
+      'Deploy isolated remote fault qualification bundle',
+      'supabase functions deploy xrpl-remote-fault-qualification',
       'Verify isolated standard-phase multi-chunk execution and reader',
       'node scripts/verify-supabase-multichunk-witness.mjs',
       'Verify isolated complete-state export and typed restore',
       'node scripts/verify-supabase-complete-state-transfer.mjs',
       'Verify isolated post-restore continuation',
       'node scripts/verify-supabase-restore-continuation.mjs',
+      'Verify isolated remote fault qualification',
+      'node scripts/verify-supabase-remote-fault-qualification.mjs',
       '--use-api',
       '--no-verify-jwt',
     ]) {
@@ -94,12 +101,15 @@ describe('Supabase remote prebundle contract', () => {
       "['multi-chunk reader bundle', 'multichunk-reader-bundle.json']",
       "['complete-state transfer bundle', 'complete-state-transfer-bundle.json']",
       "['restore continuation bundle', 'restore-continuation-bundle.json']",
+      "['remote fault qualification bundle', 'remote-fault-qualification-bundle.json']",
       "successFile: 'verified-multichunk-witness.json'",
       "failureFile: 'failed-multichunk-witness-verification.json'",
       "successFile: 'verified-complete-state-transfer.json'",
       "failureFile: 'failed-complete-state-transfer-verification.json'",
       "successFile: 'verified-restore-continuation.json'",
       "failureFile: 'failed-restore-continuation-verification.json'",
+      "successFile: 'verified-remote-fault-qualification.json'",
+      "failureFile: 'failed-remote-fault-qualification-verification.json'",
       '`- ${label} bytes: \\`${String(value.bytes ?? \'unknown\')}\\``',
       '`- ${label} sha256: \\`${String(value.sha256 ?? \'unknown\')}\\``',
       '`- ${label} relative imports: \\`${String(value.relativeImports ?? \'unknown\')}\\``',
@@ -141,6 +151,7 @@ describe('Supabase remote prebundle contract', () => {
       "- 'scripts/verify-supabase-multichunk-witness.mjs'",
       "- 'scripts/verify-supabase-complete-state-transfer.mjs'",
       "- 'scripts/verify-supabase-restore-continuation.mjs'",
+      "- 'scripts/verify-supabase-remote-fault-qualification.mjs'",
       "- 'scripts/publish-supabase-run-locator.mjs'",
     ]) {
       expect(workflow).toContain(required)
