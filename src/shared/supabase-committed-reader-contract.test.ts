@@ -13,6 +13,7 @@ describe('R4C2c Supabase committed reader contract', () => {
   )
   const reader = read('supabase/functions/xrpl-committed-reader/index.ts')
   const verifier = read('scripts/verify-supabase-committed-reader.mjs')
+  const publisher = read('scripts/publish-supabase-run-locator.mjs')
   const workflow = read('.github/workflows/supabase-remote-probe.yml')
   const config = read('supabase/config.toml')
 
@@ -162,11 +163,17 @@ describe('R4C2c Supabase committed reader contract', () => {
       'supabase secrets set XRPL_READER_VERIFY_TOKEN',
       'supabase functions deploy xrpl-committed-reader',
       'node scripts/verify-supabase-committed-reader.mjs',
-      'committed reader verifier: `success`',
       'gh issue comment 1109',
       'cancel-in-progress: false',
     ]) {
       expect(workflow).toContain(required)
+    }
+    for (const required of [
+      "label: 'committed reader verifier'",
+      "successFile: 'verified-reader.json'",
+      "failureFile: 'failed-reader-verification.json'",
+    ]) {
+      expect(publisher).toContain(required)
     }
     expect(config).toContain('[functions.xrpl-committed-reader]')
     expect(config).toContain('verify_jwt = false')
