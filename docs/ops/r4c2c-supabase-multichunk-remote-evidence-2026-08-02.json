@@ -1,0 +1,225 @@
+{
+  "schemaVersion": 1,
+  "evidenceType": "r4c2c_supabase_standard_phase_multichunk_remote_verification",
+  "verifiedAt": "2026-08-02T12:08:01.113Z",
+  "workflowRunId": 30747137075,
+  "workflowCommit": "3f1d8b43e0100edba61f3016cd67d3f162d48be0",
+  "artifact": {
+    "id": 8833246709,
+    "name": "supabase-remote-probe-evidence",
+    "bytes": 11824,
+    "digest": "sha256:f60bac39d64172cbbd243810ded37b7fb80872a224dbac753f1536b11514ca5e"
+  },
+  "bundles": {
+    "multichunkExecutor": {
+      "source": "supabase/functions/xrpl-multichunk-witness/index.ts",
+      "bytes": 47746,
+      "sha256": "89a210f5e7de7550c256d7b6589640810c0951143852707f2482ce2276e9e9de",
+      "relativeImports": 0,
+      "cloudflareImports": 0,
+      "denoServeEntrypoint": true
+    },
+    "multichunkReader": {
+      "source": "supabase/functions/xrpl-multichunk-witness-reader/index.ts",
+      "bytes": 18636,
+      "sha256": "094df2fac70c76e66b487dffc5b8b3124f23004d4667acf1341c7cbdfbce7156",
+      "relativeImports": 0,
+      "cloudflareImports": 0,
+      "denoServeEntrypoint": true
+    }
+  },
+  "durableSource": {
+    "historicalSetId": "r4c2c-devnet-historical-witness-v1",
+    "historicalSetDigest": "bac80ec90ba841b683ee9e4b154cf385ffd972ce636f9797cb8f6cff1cdd209a",
+    "sourceLedgerIndex": 2776760,
+    "sourceLedgerHash": "83CD41036ADD7F9D8FA247F04BF5156B6826D95C4E6A346B9A5499BE90C43A9D",
+    "sourceParentHash": "E7E4E253C314D5EBD39E8C063415A99299E48FB23A0E613F1FE5CA534B0C0628",
+    "sourceRowCount": 116,
+    "externalHistoricalRpcRequired": false
+  },
+  "source": {
+    "sourceId": "supabase-r4c2c-multichunk-witness",
+    "profileId": "supabase-devnet-multichunk-witness",
+    "network": "devnet",
+    "epochId": "supabase-r4c2c-v1",
+    "baseIdentity": "multichunk-witness-2776760",
+    "workId": "collector-work-v1:devnet:supabase-r4c2c-v1:multichunk-witness-2776760:2776760:E7E4E253C314D5EBD39E8C063415A99299E48FB23A0E613F1FE5CA534B0C0628"
+  },
+  "fence": {
+    "schemaVersion": 1,
+    "network": "devnet",
+    "epochId": "supabase-r4c2c-v1",
+    "baseIdentity": "multichunk-witness-2776760",
+    "ledgerIndex": 2776760,
+    "ledgerHash": "83CD41036ADD7F9D8FA247F04BF5156B6826D95C4E6A346B9A5499BE90C43A9D",
+    "workId": "collector-work-v1:devnet:supabase-r4c2c-v1:multichunk-witness-2776760:2776760:E7E4E253C314D5EBD39E8C063415A99299E48FB23A0E613F1FE5CA534B0C0628"
+  },
+  "phaseSequence": [
+    {
+      "phase": "scan",
+      "attemptCount": 1,
+      "duplicate": false,
+      "totalRecords": 116,
+      "payloadChunks": 3
+    },
+    {
+      "phase": "commit",
+      "chunkIndex": 0,
+      "attemptCount": 1,
+      "duplicate": false,
+      "rowCount": 40
+    },
+    {
+      "phase": "commit",
+      "chunkIndex": 1,
+      "attemptCount": 1,
+      "duplicate": false,
+      "rowCount": 40
+    },
+    {
+      "phase": "commit",
+      "chunkIndex": 2,
+      "attemptCount": 1,
+      "duplicate": false,
+      "rowCount": 36
+    },
+    {
+      "phase": "finalize",
+      "attemptCount": 1,
+      "duplicate": false,
+      "ledgerIndex": 2776760
+    }
+  ],
+  "payloadChunks": [
+    {
+      "chunkIndex": 0,
+      "recordCount": 40,
+      "byteCount": 35103,
+      "payloadDigest": "287018a700ee063aefd365e3c8b50da578bca634bfe0488e5220c1efec973a62",
+      "encodedDigest": "a6ea9649f573cfc51767852f5b8f70b9283a0035e162ed231656dba861bbf662"
+    },
+    {
+      "chunkIndex": 1,
+      "recordCount": 40,
+      "byteCount": 39923,
+      "payloadDigest": "0f0f7879c8b735eebbbc2010cc8243d3b212f1e5dd6965f1fabcc8c6cdb84a6b",
+      "encodedDigest": "8d915d1aa9c09b09326ef117545bfba297a34bdc8fcb89e808e8524babc1e3c1"
+    },
+    {
+      "chunkIndex": 2,
+      "recordCount": 36,
+      "byteCount": 42149,
+      "payloadDigest": "4efffab41d60289237c474838665e76915cd51288ed3caec66088fc9dd08e934",
+      "encodedDigest": "2bc6cf9c684182f54c62ca43b9d37e598577ae4033a45d426827ecb9cc9b86ff"
+    }
+  ],
+  "commitChunks": [
+    {
+      "chunkIndex": 0,
+      "status": "completed",
+      "operationCount": 40,
+      "rowMutationCount": 40,
+      "chunkDigest": "287018a700ee063aefd365e3c8b50da578bca634bfe0488e5220c1efec973a62"
+    },
+    {
+      "chunkIndex": 1,
+      "status": "completed",
+      "operationCount": 40,
+      "rowMutationCount": 40,
+      "chunkDigest": "0f0f7879c8b735eebbbc2010cc8243d3b212f1e5dd6965f1fabcc8c6cdb84a6b"
+    },
+    {
+      "chunkIndex": 2,
+      "status": "completed",
+      "operationCount": 36,
+      "rowMutationCount": 36,
+      "chunkDigest": "4efffab41d60289237c474838665e76915cd51288ed3caec66088fc9dd08e934"
+    }
+  ],
+  "semanticCounts": {
+    "validated-ledger": 1,
+    "protocol-event": 8,
+    "object-change": 94,
+    "loan-lifecycle": 1,
+    "archived-object": 0,
+    "balance-history": 2,
+    "current-projection": 10
+  },
+  "reader": {
+    "rowCount": 116,
+    "pageSizes": [40, 40, 36],
+    "uniqueRows": 116,
+    "exact": {
+      "semanticClass": "loan-lifecycle",
+      "canonicalKey": "lifecycle:7E1926826398D1AFB71B385CE2D40E0E0D80FCF11074AD90524CCB06D067BFF2:C3011CC8854440863E80DB1853EE06461E49BEB3A6C1BD680A96642AB3C6A1FC:created",
+      "sourceLedgerIndex": 2776760
+    },
+    "checks": {
+      "standardPhaseTables": true,
+      "threePayloadChunks": true,
+      "threeCommitChunks": true,
+      "exactCommitOrder": true,
+      "immutableFenceContinuation": true,
+      "deterministicOrdering": true,
+      "cursorDigestTamperRejected": true,
+      "cursorQueryOrderMismatchRejected": true,
+      "cursorSourceMismatchRejected": true,
+      "staleFenceRejected": true,
+      "missingTokenRejected": true,
+      "wrongPurposeRejected": true,
+      "boundedLimit": 100
+    }
+  },
+  "activeIsolation": {
+    "profileId": "supabase-devnet",
+    "network": "devnet",
+    "epochId": "supabase-r4c2c-v1",
+    "baseIdentity": "seven-class-base-4132417-C9A7A89077EA7F54EBC296EE95E6AE45601088DDA5CFC5538A435C4A21E9CE77",
+    "beforeLedgerIndex": 4132531,
+    "afterLedgerIndex": 4132531,
+    "ledgerHash": "DEC3F9DA7D10322A63DA4FD864779C198344F20AD8F7D5F19527A30781F7E7BF",
+    "workId": "collector-work-v1:devnet:supabase-r4c2c-v1:seven-class-base-4132417-C9A7A89077EA7F54EBC296EE95E6AE45601088DDA5CFC5538A435C4A21E9CE77:4132531:CD7122C3F2B9881291EF635B543276C685E82D987618353BD7035B32A9103EBC",
+    "ledgerAdvance": 0,
+    "isolatedWorkExcluded": true,
+    "nonRegressing": true,
+    "publicReaderChanged": false
+  },
+  "activeRegression": {
+    "verifiedAt": "2026-08-02T12:07:22.142Z",
+    "readerVerifiedAt": "2026-08-02T12:07:26.495Z",
+    "completedTicks": 914,
+    "consecutiveFailures": 0,
+    "watermarkLedgerIndex": 4132531,
+    "collectorVerifierAttempt": 1,
+    "readerVerifierAttempt": 1
+  },
+  "decision": {
+    "classification": "remote_verified_conditional_candidate",
+    "selection": "not_selected",
+    "closedItems": [
+      "standard portable multi-chunk phase execution in an isolated remote profile",
+      "three ordered payload and commit chunks",
+      "single-work three-page immutable-fence reader continuation",
+      "payload, commit, row-count, semantic-count, and exact lookup parity",
+      "active watermark isolation"
+    ],
+    "remainingItems": [
+      "complete-state export",
+      "empty-target restore and canonical parity",
+      "post-restore continuation",
+      "remote interruption rollback",
+      "remote retry and backoff",
+      "stale-lease reclaim",
+      "duplicate phase replay",
+      "terminal injection and fail-closed halt",
+      "throughput qualification",
+      "sustained Free-plan resource qualification",
+      "remaining scripted operations",
+      "profile selection",
+      "public reader cutover",
+      "R5 recovery",
+      "Mainnet",
+      "stabilization and soak"
+    ]
+  }
+}
