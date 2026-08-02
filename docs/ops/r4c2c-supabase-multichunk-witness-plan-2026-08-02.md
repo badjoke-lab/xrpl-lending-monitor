@@ -6,7 +6,7 @@ Status: implementation unit for true multi-chunk phase execution and committed-r
 
 The isolated historical-witness profile proved atomic persistence and committed reads for all seven semantic classes, but it used a direct qualification loader rather than the standard `scan -> commit -> finalize` phase chain.
 
-This unit proves that a real Devnet Lending ledger producing more than one normalized payload chunk can pass through the standard phase tables and standard portable completion RPCs without changing the active `supabase-devnet` stream.
+This unit proves that a real Devnet Lending ledger producing more than one normalized payload chunk can pass through the standard phase tables and standard portable completion RPCs without being able to claim, replace, regress, or contaminate the active `supabase-devnet` stream.
 
 ## Fixed witness
 
@@ -94,14 +94,22 @@ This unit must not:
 - claim an active `supabase-devnet` phase message;
 - change the active stream epoch or base identity;
 - insert a work under the active profile;
-- advance or replace the active watermark;
+- replace or regress the active watermark;
+- place the isolated work ID into the active watermark;
 - change the public reader;
 - submit an XRPL transaction;
 - enable Mainnet;
 - select a profile;
 - begin R5 recovery, stabilization, or soak.
 
-The executor records the active watermark before and after the isolated work and fails if canonical equality changes.
+The executor records the active watermark before and after the isolated work. Because the active `pg_cron` collector may legitimately commit another ledger during verification, exact equality is not required. The executor instead requires:
+
+- the same active profile, network, epoch, and base identity before and after;
+- the active ledger never to move backward;
+- an unchanged hash and work ID when the active ledger index does not advance;
+- neither active watermark work ID to equal the isolated work ID.
+
+This distinguishes permitted active collector progress from forbidden isolated-profile contamination.
 
 ## Deployment
 
@@ -127,7 +135,7 @@ Merging implementation does not close the unit. Completion requires a successful
 - commit mutation counts `40 / 40 / 36`;
 - committed row count `116`;
 - reader page sizes `40 / 40 / 36` under one work fence;
-- active watermark unchanged;
+- active watermark identity preserved, non-regressing, and free of the isolated work ID;
 - all required fail-closed checks.
 
 After that evidence is retained, R4C2c still requires complete-state export/restore, post-restore continuation, and remote interruption, retry, stale-lease, duplicate-phase, and terminal-injection qualification.
