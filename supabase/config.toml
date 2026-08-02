@@ -26,3 +26,6 @@ verify_jwt = false
 
 [functions.xrpl-remote-fault-qualification]
 verify_jwt = false
+
+[functions.xrpl-throughput-resource-baseline]
+verify_jwt = false
