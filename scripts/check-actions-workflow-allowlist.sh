@@ -167,17 +167,24 @@ for required in (
     "supabase/functions/xrpl-committed-reader/index.ts",
     "supabase/functions/xrpl-historical-witness/index.ts",
     "supabase/functions/xrpl-historical-witness-reader/index.ts",
+    "supabase/functions/xrpl-multichunk-witness/index.ts",
+    "supabase/functions/xrpl-multichunk-witness-reader/index.ts",
     "historical-loader-bundle.json",
     "historical-reader-bundle.json",
+    "multichunk-executor-bundle.json",
+    "multichunk-reader-bundle.json",
     "supabase functions deploy xrpl-collector-tick",
     "supabase functions deploy xrpl-committed-reader",
     "supabase functions deploy xrpl-historical-witness",
     "supabase functions deploy xrpl-historical-witness-reader",
+    "supabase functions deploy xrpl-multichunk-witness",
+    "supabase functions deploy xrpl-multichunk-witness-reader",
     "--use-api",
     "--no-verify-jwt",
     "node scripts/verify-supabase-remote-probe.mjs",
     "node scripts/verify-supabase-committed-reader.mjs",
     "node scripts/verify-supabase-historical-witness.mjs",
+    "node scripts/verify-supabase-multichunk-witness.mjs",
     "retention-days: 7",
     "Publish sanitized run locator",
     "if: always()",
@@ -188,7 +195,10 @@ for required in (
     "failed-reader-verification.json",
     "verified-historical-witness.json",
     "failed-historical-witness-verification.json",
+    "verified-multichunk-witness.json",
+    "failed-multichunk-witness-verification.json",
     "historical witness verifier: `success`",
+    "multi-chunk witness verifier: `success`",
 ):
     if required not in supabase:
         raise SystemExit(f"Supabase remote workflow is missing a guarded deployment requirement: {required}")
@@ -217,4 +227,4 @@ if scheduled:
     raise SystemExit(f"no scheduled workflow is allowed during active R4 qualification: {scheduled}")
 PY
 
-echo "Actions workflow allowlist passed: CI, guarded legacy recovery workflows, one read-only production probe, one read-only R4C2c witness discovery, and one guarded Supabase deployment verifier covering the active and isolated historical qualification profiles; no scheduled workflows."
+echo "Actions workflow allowlist passed: CI, guarded legacy recovery workflows, one read-only production probe, one read-only R4C2c witness discovery, and one guarded Supabase deployment verifier covering the active, isolated historical, and isolated standard-phase multi-chunk qualification profiles; no scheduled workflows."

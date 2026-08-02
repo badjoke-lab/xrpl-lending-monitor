@@ -25,7 +25,7 @@ const edgeFunction = readFileSync(
 )
 
 describe('Supabase remote prebundle contract', () => {
-  it('bundles all four exact checked-out Edge entries before API deployment', () => {
+  it('bundles all six exact checked-out Edge entries before API deployment', () => {
     for (const required of [
       'Bundle exact Devnet executors and qualification readers',
       'bundle_function() {',
@@ -47,6 +47,12 @@ describe('Supabase remote prebundle contract', () => {
       "'supabase/functions/xrpl-historical-witness-reader/index.ts'",
       "'/tmp/xrpl-historical-witness-reader-index.ts'",
       '"$evidence_dir/historical-reader-bundle.json"',
+      "'supabase/functions/xrpl-multichunk-witness/index.ts'",
+      "'/tmp/xrpl-multichunk-witness-index.ts'",
+      '"$evidence_dir/multichunk-executor-bundle.json"',
+      "'supabase/functions/xrpl-multichunk-witness-reader/index.ts'",
+      "'/tmp/xrpl-multichunk-witness-reader-index.ts'",
+      '"$evidence_dir/multichunk-reader-bundle.json"',
       "const unresolvedRelativeImport = /(?:from\\s*|import\\s*\\()\\s*['\"]\\.{1,2}\\//u",
       "bundle.includes('cloudflare:')",
       "bundle.includes('Deno.serve')",
@@ -61,6 +67,12 @@ describe('Supabase remote prebundle contract', () => {
       'supabase functions deploy xrpl-historical-witness',
       'Deploy isolated historical witness reader bundle',
       'supabase functions deploy xrpl-historical-witness-reader',
+      'Deploy isolated standard-phase multi-chunk executor bundle',
+      'supabase functions deploy xrpl-multichunk-witness',
+      'Deploy isolated standard-phase multi-chunk reader bundle',
+      'supabase functions deploy xrpl-multichunk-witness-reader',
+      'Verify isolated standard-phase multi-chunk execution and reader',
+      'node scripts/verify-supabase-multichunk-witness.mjs',
       '--use-api',
       '--no-verify-jwt',
     ]) {
@@ -74,8 +86,12 @@ describe('Supabase remote prebundle contract', () => {
       "'supabase-remote-probe-evidence/reader-bundle.json'",
       "'supabase-remote-probe-evidence/historical-loader-bundle.json'",
       "'supabase-remote-probe-evidence/historical-reader-bundle.json'",
+      "'supabase-remote-probe-evidence/multichunk-executor-bundle.json'",
+      "'supabase-remote-probe-evidence/multichunk-reader-bundle.json'",
+      "'supabase-remote-probe-evidence/verified-multichunk-witness.json'",
+      "'supabase-remote-probe-evidence/failed-multichunk-witness-verification.json'",
       "createHash('sha256').update(bundle).digest('hex')",
-      "function appendBundle(label, path)",
+      'function appendBundle(label, path)',
       "`- ${label} bytes: \\`${String(bundle?.bytes ?? 'unknown')}\\``",
       "`- ${label} sha256: \\`${String(bundle?.sha256 ?? 'unknown')}\\``",
       "`- ${label} relative imports: \\`${String(bundle?.relativeImports ?? 'unknown')}\\``",
@@ -84,6 +100,8 @@ describe('Supabase remote prebundle contract', () => {
       "appendBundle('committed reader bundle', readerBundlePath)",
       "appendBundle('historical loader bundle', historicalLoaderBundlePath)",
       "appendBundle('historical reader bundle', historicalReaderBundlePath)",
+      "appendBundle('multi-chunk executor bundle', multichunkExecutorBundlePath)",
+      "appendBundle('multi-chunk reader bundle', multichunkReaderBundlePath)",
       'retention-days: 7',
     ]) {
       expect(workflow).toContain(required)
@@ -116,6 +134,7 @@ describe('Supabase remote prebundle contract', () => {
       "- 'src/shared/portable-collector-*.ts'",
       "- 'scripts/verify-supabase-committed-reader.mjs'",
       "- 'scripts/verify-supabase-historical-witness.mjs'",
+      "- 'scripts/verify-supabase-multichunk-witness.mjs'",
     ]) {
       expect(workflow).toContain(required)
     }

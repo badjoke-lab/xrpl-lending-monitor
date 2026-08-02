@@ -13,6 +13,7 @@ on:
       - 'scripts/verify-supabase-remote-probe.mjs'
       - 'scripts/verify-supabase-committed-reader.mjs'
       - 'scripts/verify-supabase-historical-witness.mjs'
+      - 'scripts/verify-supabase-multichunk-witness.mjs'
       - '.github/workflows/supabase-remote-probe.yml'
 
 permissions:
@@ -125,6 +126,16 @@ jobs:
             '/tmp/xrpl-historical-witness-reader-index.ts' \
             "$evidence_dir/historical-reader-bundle.json"
 
+          bundle_function \
+            'supabase/functions/xrpl-multichunk-witness/index.ts' \
+            '/tmp/xrpl-multichunk-witness-index.ts' \
+            "$evidence_dir/multichunk-executor-bundle.json"
+
+          bundle_function \
+            'supabase/functions/xrpl-multichunk-witness-reader/index.ts' \
+            '/tmp/xrpl-multichunk-witness-reader-index.ts' \
+            "$evidence_dir/multichunk-reader-bundle.json"
+
       - name: Link exact Supabase project
         run: supabase link --project-ref "$SUPABASE_PROJECT_ID" --password "$SUPABASE_DB_PASSWORD"
 
@@ -168,6 +179,20 @@ jobs:
           --use-api
           --no-verify-jwt
 
+      - name: Deploy isolated standard-phase multi-chunk executor bundle
+        run: >-
+          supabase functions deploy xrpl-multichunk-witness
+          --project-ref "$SUPABASE_PROJECT_ID"
+          --use-api
+          --no-verify-jwt
+
+      - name: Deploy isolated standard-phase multi-chunk reader bundle
+        run: >-
+          supabase functions deploy xrpl-multichunk-witness-reader
+          --project-ref "$SUPABASE_PROJECT_ID"
+          --use-api
+          --no-verify-jwt
+
       - name: Verify repeated remote portable phase execution
         run: node scripts/verify-supabase-remote-probe.mjs
 
@@ -176,6 +201,9 @@ jobs:
 
       - name: Verify isolated historical witness persistence and reader
         run: node scripts/verify-supabase-historical-witness.mjs
+
+      - name: Verify isolated standard-phase multi-chunk execution and reader
+        run: node scripts/verify-supabase-multichunk-witness.mjs
 
       - name: Upload sanitized remote evidence
         if: always()
@@ -208,12 +236,16 @@ jobs:
           const readerBundlePath = 'supabase-remote-probe-evidence/reader-bundle.json'
           const historicalLoaderBundlePath = 'supabase-remote-probe-evidence/historical-loader-bundle.json'
           const historicalReaderBundlePath = 'supabase-remote-probe-evidence/historical-reader-bundle.json'
+          const multichunkExecutorBundlePath = 'supabase-remote-probe-evidence/multichunk-executor-bundle.json'
+          const multichunkReaderBundlePath = 'supabase-remote-probe-evidence/multichunk-reader-bundle.json'
           const verifiedPath = 'supabase-remote-probe-evidence/verified-health.json'
           const failedPath = 'supabase-remote-probe-evidence/failed-verification.json'
           const verifiedReaderPath = 'supabase-remote-probe-evidence/verified-reader.json'
           const failedReaderPath = 'supabase-remote-probe-evidence/failed-reader-verification.json'
           const verifiedHistoricalPath = 'supabase-remote-probe-evidence/verified-historical-witness.json'
           const failedHistoricalPath = 'supabase-remote-probe-evidence/failed-historical-witness-verification.json'
+          const verifiedMultichunkPath = 'supabase-remote-probe-evidence/verified-multichunk-witness.json'
+          const failedMultichunkPath = 'supabase-remote-probe-evidence/failed-multichunk-witness-verification.json'
 
           const lines = [
             '## Supabase deployment verification',
@@ -238,6 +270,8 @@ jobs:
           appendBundle('committed reader bundle', readerBundlePath)
           appendBundle('historical loader bundle', historicalLoaderBundlePath)
           appendBundle('historical reader bundle', historicalReaderBundlePath)
+          appendBundle('multi-chunk executor bundle', multichunkExecutorBundlePath)
+          appendBundle('multi-chunk reader bundle', multichunkReaderBundlePath)
 
           if (existsSync(verifiedPath)) {
             const evidence = JSON.parse(readFileSync(verifiedPath, 'utf8'))
@@ -305,6 +339,29 @@ jobs:
             )
           } else {
             lines.push('- historical witness verifier: `not reached or no sanitized evidence produced`')
+          }
+
+          if (existsSync(verifiedMultichunkPath)) {
+            const evidence = JSON.parse(readFileSync(verifiedMultichunkPath, 'utf8'))
+            lines.push(
+              '- multi-chunk witness verifier: `success`',
+              `- multi-chunk verified at: \`${String(evidence?.verifiedAt ?? 'unknown')}\``,
+              `- multi-chunk work: \`${String(evidence?.workId ?? 'unknown')}\``,
+              `- multi-chunk payload rows: \`${JSON.stringify((evidence?.payloadChunks ?? []).map((chunk) => chunk.record_count))}\``,
+              `- multi-chunk commit rows: \`${JSON.stringify((evidence?.commitChunks ?? []).map((chunk) => chunk.row_mutation_count))}\``,
+              `- multi-chunk reader pages: \`${JSON.stringify(evidence?.fullPagination?.pageSizes ?? [])}\``,
+              `- multi-chunk reader rows: \`${String(evidence?.fullPagination?.rowCount ?? 'unknown')}\``,
+              `- active watermark isolated: \`${String(evidence?.checks?.activeWatermarkIsolated ?? 'unknown')}\``,
+            )
+          } else if (existsSync(failedMultichunkPath)) {
+            const evidence = JSON.parse(readFileSync(failedMultichunkPath, 'utf8'))
+            lines.push(
+              '- multi-chunk witness verifier: `failed`',
+              `- multi-chunk failed at: \`${String(evidence?.failedAt ?? 'unknown')}\``,
+              `- multi-chunk reason: \`${String(evidence?.reason ?? 'unknown').slice(0, 500)}\``,
+            )
+          } else {
+            lines.push('- multi-chunk witness verifier: `not reached or no sanitized evidence produced`')
           }
 
           console.log(`${lines.join('\n')}\n`)
