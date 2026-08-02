@@ -20,3 +20,6 @@ verify_jwt = false
 
 [functions.xrpl-complete-state-transfer]
 verify_jwt = false
+
+[functions.xrpl-restore-continuation]
+verify_jwt = false
