@@ -139,19 +139,11 @@ for required in (
     "SUPABASE_PROJECT_ID",
     "SUPABASE_DB_PASSWORD",
     "supabase link --project-ref",
-    "Rotate one-run committed reader verifier token",
-    "::add-mask::",
-    "supabase secrets set XRPL_READER_VERIFY_TOKEN",
     "supabase db push --linked --yes",
     "supabase functions deploy xrpl-collector-tick",
-    "supabase functions deploy xrpl-committed-reader",
     "--use-api",
     "--no-verify-jwt",
     "node scripts/verify-supabase-remote-probe.mjs",
-    "node scripts/verify-supabase-committed-reader.mjs",
-    "reader-bundle.json",
-    "verified-reader.json",
-    "failed-reader-verification.json",
     "retention-days: 7",
     "Publish sanitized run locator",
     "if: always()",
@@ -172,8 +164,6 @@ for forbidden in (
         raise SystemExit(f"Supabase remote workflow contains forbidden capability: {forbidden.strip()}")
 if supabase.count("issues: write") != 1 or supabase.count("gh issue comment 1109") != 1:
     raise SystemExit("Supabase remote issue-write capability must remain bound to one permission and Issue #1109")
-if supabase.count("supabase secrets set XRPL_READER_VERIFY_TOKEN") != 1:
-    raise SystemExit("Supabase committed-reader verifier token must be rotated exactly once per deployment run")
 
 scheduled = []
 for path in root.glob("*.y*ml"):
@@ -186,4 +176,4 @@ if scheduled != [qualification_v5]:
     raise SystemExit(f"only the fixed qualification v5 workflow may be scheduled: {scheduled}")
 PY
 
-echo "Actions workflow allowlist passed: CI, guarded legacy recovery workflows, one read-only runner, one fixed-window qualification exception, and one guarded Supabase collector/committed-reader deployment verifier with a masked one-run token and bounded Issue #1109 reporting."
+echo "Actions workflow allowlist passed: CI, guarded legacy recovery workflows, one read-only runner, one fixed-window qualification exception, and one guarded Supabase deployment verifier with bounded Issue #1109 reporting."
