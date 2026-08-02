@@ -202,7 +202,7 @@ describe('R4C2c isolated Supabase historical witness profile', () => {
     expect(config).toContain('[functions.xrpl-historical-witness-reader]')
     expect(config).toContain('[functions.xrpl-multichunk-witness]')
     expect(config).toContain('[functions.xrpl-multichunk-witness-reader]')
-    expect(config.match(/verify_jwt = false/g)).toHaveLength(6)
+    expect(config.match(/verify_jwt = false/g)).toHaveLength(7)
     expect(workflow.match(/gh issue comment 1109/g)).toHaveLength(1)
     expect(workflow.match(/supabase secrets set XRPL_READER_VERIFY_TOKEN/g)).toHaveLength(1)
   })
