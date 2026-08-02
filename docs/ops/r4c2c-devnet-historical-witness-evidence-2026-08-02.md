@@ -100,7 +100,7 @@ This run did not persist the historical witness set into Supabase and did not qu
 - exact class-count parity after persistence;
 - canonical-key parity after persistence;
 - non-empty relationship queries;
-- cursor pagination across the 234 normalized records;
+- cursor pagination across the 237 normalized records;
 - isolated historical stream/watermark fencing;
 - complete-state export or restore;
 - interruption, retry, stale-lease, duplicate, or terminal behavior.

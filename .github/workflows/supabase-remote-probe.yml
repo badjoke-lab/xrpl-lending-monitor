@@ -12,6 +12,7 @@ on:
       - 'src/shared/portable-collector-*.ts'
       - 'scripts/verify-supabase-remote-probe.mjs'
       - 'scripts/verify-supabase-committed-reader.mjs'
+      - 'scripts/verify-supabase-historical-witness.mjs'
       - '.github/workflows/supabase-remote-probe.yml'
 
 permissions:
@@ -25,7 +26,7 @@ concurrency:
 jobs:
   deploy-and-verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 18
+    timeout-minutes: 30
     env:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
@@ -49,7 +50,7 @@ jobs:
         with:
           version: latest
 
-      - name: Bundle exact Devnet phase executor and committed reader
+      - name: Bundle exact Devnet executors and qualification readers
         shell: bash
         env:
           HEAD_SHA: ${{ github.sha }}
@@ -114,6 +115,16 @@ jobs:
             '/tmp/xrpl-committed-reader-index.ts' \
             "$evidence_dir/reader-bundle.json"
 
+          bundle_function \
+            'supabase/functions/xrpl-historical-witness/index.ts' \
+            '/tmp/xrpl-historical-witness-index.ts' \
+            "$evidence_dir/historical-loader-bundle.json"
+
+          bundle_function \
+            'supabase/functions/xrpl-historical-witness-reader/index.ts' \
+            '/tmp/xrpl-historical-witness-reader-index.ts' \
+            "$evidence_dir/historical-reader-bundle.json"
+
       - name: Link exact Supabase project
         run: supabase link --project-ref "$SUPABASE_PROJECT_ID" --password "$SUPABASE_DB_PASSWORD"
 
@@ -143,11 +154,28 @@ jobs:
           --use-api
           --no-verify-jwt
 
+      - name: Deploy isolated historical witness loader bundle
+        run: >-
+          supabase functions deploy xrpl-historical-witness
+          --project-ref "$SUPABASE_PROJECT_ID"
+          --use-api
+          --no-verify-jwt
+
+      - name: Deploy isolated historical witness reader bundle
+        run: >-
+          supabase functions deploy xrpl-historical-witness-reader
+          --project-ref "$SUPABASE_PROJECT_ID"
+          --use-api
+          --no-verify-jwt
+
       - name: Verify repeated remote portable phase execution
         run: node scripts/verify-supabase-remote-probe.mjs
 
       - name: Verify remote immutable committed reader
         run: node scripts/verify-supabase-committed-reader.mjs
+
+      - name: Verify isolated historical witness persistence and reader
+        run: node scripts/verify-supabase-historical-witness.mjs
 
       - name: Upload sanitized remote evidence
         if: always()
@@ -178,10 +206,14 @@ jobs:
           const headSha = process.env.HEAD_SHA ?? 'unknown'
           const bundlePath = 'supabase-remote-probe-evidence/bundle.json'
           const readerBundlePath = 'supabase-remote-probe-evidence/reader-bundle.json'
+          const historicalLoaderBundlePath = 'supabase-remote-probe-evidence/historical-loader-bundle.json'
+          const historicalReaderBundlePath = 'supabase-remote-probe-evidence/historical-reader-bundle.json'
           const verifiedPath = 'supabase-remote-probe-evidence/verified-health.json'
           const failedPath = 'supabase-remote-probe-evidence/failed-verification.json'
           const verifiedReaderPath = 'supabase-remote-probe-evidence/verified-reader.json'
           const failedReaderPath = 'supabase-remote-probe-evidence/failed-reader-verification.json'
+          const verifiedHistoricalPath = 'supabase-remote-probe-evidence/verified-historical-witness.json'
+          const failedHistoricalPath = 'supabase-remote-probe-evidence/failed-historical-witness-verification.json'
 
           const lines = [
             '## Supabase deployment verification',
@@ -191,25 +223,21 @@ jobs:
             `- job status: \`${runStatus}\``,
           ]
 
-          if (existsSync(bundlePath)) {
-            const bundle = JSON.parse(readFileSync(bundlePath, 'utf8'))
+          function appendBundle(label, path) {
+            if (!existsSync(path)) return
+            const bundle = JSON.parse(readFileSync(path, 'utf8'))
             lines.push(
-              `- bundle bytes: \`${String(bundle?.bytes ?? 'unknown')}\``,
-              `- bundle sha256: \`${String(bundle?.sha256 ?? 'unknown')}\``,
-              `- unresolved relative imports: \`${String(bundle?.relativeImports ?? 'unknown')}\``,
-              `- Cloudflare runtime imports: \`${String(bundle?.cloudflareImports ?? 'unknown')}\``,
+              `- ${label} bytes: \`${String(bundle?.bytes ?? 'unknown')}\``,
+              `- ${label} sha256: \`${String(bundle?.sha256 ?? 'unknown')}\``,
+              `- ${label} relative imports: \`${String(bundle?.relativeImports ?? 'unknown')}\``,
+              `- ${label} Cloudflare imports: \`${String(bundle?.cloudflareImports ?? 'unknown')}\``,
             )
           }
 
-          if (existsSync(readerBundlePath)) {
-            const bundle = JSON.parse(readFileSync(readerBundlePath, 'utf8'))
-            lines.push(
-              `- reader bundle bytes: \`${String(bundle?.bytes ?? 'unknown')}\``,
-              `- reader bundle sha256: \`${String(bundle?.sha256 ?? 'unknown')}\``,
-              `- reader unresolved relative imports: \`${String(bundle?.relativeImports ?? 'unknown')}\``,
-              `- reader Cloudflare runtime imports: \`${String(bundle?.cloudflareImports ?? 'unknown')}\``,
-            )
-          }
+          appendBundle('collector bundle', bundlePath)
+          appendBundle('committed reader bundle', readerBundlePath)
+          appendBundle('historical loader bundle', historicalLoaderBundlePath)
+          appendBundle('historical reader bundle', historicalReaderBundlePath)
 
           if (existsSync(verifiedPath)) {
             const evidence = JSON.parse(readFileSync(verifiedPath, 'utf8'))
@@ -255,6 +283,28 @@ jobs:
             )
           } else {
             lines.push('- committed reader verifier: `not reached or no sanitized evidence produced`')
+          }
+
+          if (existsSync(verifiedHistoricalPath)) {
+            const evidence = JSON.parse(readFileSync(verifiedHistoricalPath, 'utf8'))
+            lines.push(
+              '- historical witness verifier: `success`',
+              `- historical verified at: \`${String(evidence?.verifiedAt ?? 'unknown')}\``,
+              `- historical records: \`${String(evidence?.fullPagination?.rowCount ?? 'unknown')}\``,
+              `- historical page sizes: \`${JSON.stringify(evidence?.fullPagination?.pageSizes ?? [])}\``,
+              `- historical class counts: \`${JSON.stringify(evidence?.classCounts ?? {})}\``,
+              `- historical relationship rows: \`${String(evidence?.relationship?.rowCount ?? 'unknown')}\``,
+              `- historical fence ledger: \`${String(evidence?.fence?.ledgerIndex ?? 'unknown')}\``,
+            )
+          } else if (existsSync(failedHistoricalPath)) {
+            const evidence = JSON.parse(readFileSync(failedHistoricalPath, 'utf8'))
+            lines.push(
+              '- historical witness verifier: `failed`',
+              `- historical failed at: \`${String(evidence?.failedAt ?? 'unknown')}\``,
+              `- historical reason: \`${String(evidence?.reason ?? 'unknown').slice(0, 500)}\``,
+            )
+          } else {
+            lines.push('- historical witness verifier: `not reached or no sanitized evidence produced`')
           }
 
           console.log(`${lines.join('\n')}\n`)

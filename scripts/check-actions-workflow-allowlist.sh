@@ -163,12 +163,21 @@ for required in (
     "supabase db push --linked --yes",
     "Rotate one-run committed reader verifier token",
     "supabase secrets set XRPL_READER_VERIFY_TOKEN",
+    "supabase/functions/xrpl-collector-tick/index.ts",
+    "supabase/functions/xrpl-committed-reader/index.ts",
+    "supabase/functions/xrpl-historical-witness/index.ts",
+    "supabase/functions/xrpl-historical-witness-reader/index.ts",
+    "historical-loader-bundle.json",
+    "historical-reader-bundle.json",
     "supabase functions deploy xrpl-collector-tick",
     "supabase functions deploy xrpl-committed-reader",
+    "supabase functions deploy xrpl-historical-witness",
+    "supabase functions deploy xrpl-historical-witness-reader",
     "--use-api",
     "--no-verify-jwt",
     "node scripts/verify-supabase-remote-probe.mjs",
     "node scripts/verify-supabase-committed-reader.mjs",
+    "node scripts/verify-supabase-historical-witness.mjs",
     "retention-days: 7",
     "Publish sanitized run locator",
     "if: always()",
@@ -177,6 +186,9 @@ for required in (
     "failed-verification.json",
     "verified-reader.json",
     "failed-reader-verification.json",
+    "verified-historical-witness.json",
+    "failed-historical-witness-verification.json",
+    "historical witness verifier: `success`",
 ):
     if required not in supabase:
         raise SystemExit(f"Supabase remote workflow is missing a guarded deployment requirement: {required}")
@@ -191,6 +203,8 @@ for forbidden in (
         raise SystemExit(f"Supabase remote workflow contains forbidden capability: {forbidden.strip()}")
 if supabase.count("issues: write") != 1 or supabase.count("gh issue comment 1109") != 1:
     raise SystemExit("Supabase remote issue-write capability must remain bound to one permission and Issue #1109")
+if supabase.count("supabase secrets set XRPL_READER_VERIFY_TOKEN") != 1:
+    raise SystemExit("Supabase reader token rotation must remain exactly once per workflow run")
 
 scheduled = []
 for path in root.glob("*.y*ml"):
@@ -203,4 +217,4 @@ if scheduled:
     raise SystemExit(f"no scheduled workflow is allowed during active R4 qualification: {scheduled}")
 PY
 
-echo "Actions workflow allowlist passed: CI, guarded legacy recovery workflows, one read-only production probe, one read-only R4C2c historical witness, and one guarded Supabase deployment verifier; no scheduled workflows."
+echo "Actions workflow allowlist passed: CI, guarded legacy recovery workflows, one read-only production probe, one read-only R4C2c witness discovery, and one guarded Supabase deployment verifier covering the active and isolated historical qualification profiles; no scheduled workflows."
