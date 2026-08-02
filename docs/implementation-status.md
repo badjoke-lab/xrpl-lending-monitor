@@ -1,6 +1,6 @@
 # Implementation status
 
-Last updated: `2026-08-02`.
+Last updated: `2026-08-03`.
 
 ## Current phase
 
@@ -31,9 +31,11 @@ The separate Supabase Free Devnet qualification surfaces now have retained remot
 - exact-expiry stale-lease reclaim;
 - terminal integrity halt with no successor;
 - fail-closed cursor, source, fence, credential, and purpose rejection;
-- active-profile isolation for every isolated qualification unit.
+- active-profile isolation for every isolated qualification unit;
+- fixed 60-minute, 6-hour, and 24-hour committed-throughput baselines including zero-production minutes;
+- end-to-end work latency, phase attempts, database/table bytes, row counts, payload sizes, scheduler-message sizes, and connection usage.
 
-R4C2c is complete for the planned Supabase remote behavioral qualification. Throughput, sustained Free-plan resources, final operator-independence reconciliation, final no-card/no-overage reconciliation, and the R4B/R4E decision remain incomplete. The Supabase profile remains an R4 conditional candidate and is not selected for public or production cutover.
+R4C2c is complete for the planned Supabase remote behavioral qualification. The first R4C2d baseline is also complete, but it **failed G7** and does not close G8: steady p95 was only `1` committed ledger/minute against a required value above `21`, catch-up mode was not measured, and Edge CPU, memory, invocation, bandwidth, billing, and automatic-overage evidence remain unavailable. Supabase therefore remains an R4 conditional candidate and is not selected for public or production cutover.
 
 ## Controlling documents
 
@@ -54,6 +56,7 @@ R4C2c is complete for the planned Supabase remote behavioral qualification. Thro
 - Complete-state transfer evidence: [`ops/r4c2c-supabase-complete-state-transfer-remote-evidence-2026-08-02.md`](ops/r4c2c-supabase-complete-state-transfer-remote-evidence-2026-08-02.md)
 - Post-restore continuation evidence: [`ops/r4c2c-supabase-restore-continuation-remote-evidence-2026-08-02.md`](ops/r4c2c-supabase-restore-continuation-remote-evidence-2026-08-02.md)
 - Remote fault evidence: [`ops/r4c2c-supabase-remote-fault-evidence-2026-08-02.md`](ops/r4c2c-supabase-remote-fault-evidence-2026-08-02.md)
+- R4C2d throughput/resource baseline: [`ops/r4c2d-supabase-throughput-resource-baseline-evidence-2026-08-03.md`](ops/r4c2d-supabase-throughput-resource-baseline-evidence-2026-08-03.md)
 - Runtime invariants: [`history-runtime-contract.md`](history-runtime-contract.md)
 - Resource gates: [`resource-envelope.md`](resource-envelope.md)
 
@@ -94,7 +97,8 @@ The halted Cloudflare deployment is rollback context and historical evidence onl
 - Isolated standard-phase multi-chunk implementation and durable replay: PRs #1124–#1127.
 - Exact remote complete-state transfer: PRs #1128–#1131.
 - Isolated post-restore continuation and retained evidence: PRs #1132–#1134.
-- Isolated remote fault qualification: PR #1135.
+- Isolated remote fault qualification: PRs #1135–#1136.
+- R4C2d throughput/resource baseline and runtime-source correction: PRs #1137–#1138.
 
 ## R3 completion
 
@@ -178,17 +182,36 @@ This closes the planned R4C2c remote behavioral evidence for G3, G4, G5, and G6.
 
 ### R4C2d — Throughput and Free-plan resource qualification
 
-Status: **next active Supabase qualification stage**.
+Status: **active; first retained baseline completed and G7/G8 remain unqualified**.
 
-Required retained evidence:
+Run `30754437078`, attempt `2`, measured the active read-only profile at `2026-08-02T15:32:53.253Z`:
 
-- steady p95 above `21` committed ledgers/minute;
-- catch-up above `30` committed ledgers/minute;
-- complete phase throughput, not scan-only speed;
-- CPU, wall time, requests, queries, writes, rows, bytes, memory, bandwidth, connection, and concurrency measurements;
-- hot-store growth and stop thresholds;
-- fail-closed behavior before Free-plan or provider ceilings;
-- no-charge and no-automatic-overage evidence.
+| Window | Committed ledgers | Average/min | p95/min | Max/min | Work p95 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 60 minutes | 19 | 0.316667 | 1 | 1 | 120,899.35 ms |
+| 360 minutes | 119 | 0.330556 | 1 | 1 | 120,580.95 ms |
+| 1,440 minutes | 208 | 0.144444 | 1 | 1 | 120,463.4 ms |
+
+The steady gate requires p95 above `21` committed ledgers/minute. Observed p95 was `1`; G7 therefore failed. Catch-up mode was not measured and remains failed closed.
+
+Measured resource snapshot:
+
+- database: `24,128,659` bytes;
+- payload p95/max: `990 / 990` bytes against a `512,000`-byte configured ceiling;
+- scheduler payload p95/max: `570 / 570` bytes against a `16,000`-byte configured ceiling;
+- connections: `9 / 60`, usage ratio `0.15`;
+- runtime consecutive failures: `0`;
+- active watermark unchanged by the verifier at ledger `4,132,600`.
+
+G8 remains incomplete because this unit did not measure Edge CPU, memory, invocation count, bandwidth, billing/overage, sustained storage growth, or pre-ceiling halt behavior.
+
+Required next work:
+
+1. build an isolated full-phase catch-up harness rather than reusing the normal two-minute cadence;
+2. prove complete committed throughput above `30/min` without active-profile mutation;
+3. add retained CPU, memory, invocation, bandwidth, quota, billing, and storage-growth evidence;
+4. prove fail-closed thresholds before provider ceilings;
+5. revise R4B only after the new measurements exist.
 
 ### R4C2e and R4E — Re-evaluation and selection decision
 
@@ -217,6 +240,7 @@ Pass fixed 24-hour and seven-day evidence windows before reopening formal Devnet
 
 - Do not describe any isolated qualification surface as a public-reader or production cutover.
 - Do not describe R4C2c completion as Supabase selection or R4 completion.
+- Do not describe the first R4C2d baseline as G7 or G8 qualification.
 - Do not describe the retired Cloudflare collector as operating.
 - Do not restart the retired fixed-32-ledger runtime.
 - Do not select a profile before all R4 hard gates pass.
