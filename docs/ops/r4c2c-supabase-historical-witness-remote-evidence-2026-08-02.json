@@ -1,0 +1,228 @@
+{
+  "schemaVersion": 1,
+  "evidenceType": "r4c2c_supabase_historical_witness_remote_verification",
+  "verifiedAt": "2026-08-02T09:48:19.019Z",
+  "workflowRunId": 30742455945,
+  "workflowCommit": "11c0c472aedb7cc58248d9b83f429aa3f26cdf8f",
+  "artifact": {
+    "id": 8831750466,
+    "name": "supabase-remote-probe-evidence",
+    "bytes": 8857,
+    "digest": "sha256:374588770f45b433ee6303ce4070e2d6600b4b676023eda5effb4df565ea2a63"
+  },
+  "bundles": {
+    "collector": {
+      "source": "supabase/functions/xrpl-collector-tick/index.ts",
+      "bytes": 103351,
+      "sha256": "e7e4b58f5a841c3f5dd85cc024235f8f33b0db8a49d4956c00b056a4385139f8",
+      "relativeImports": 0,
+      "cloudflareImports": 0,
+      "denoServeEntrypoint": true
+    },
+    "committedReader": {
+      "source": "supabase/functions/xrpl-committed-reader/index.ts",
+      "bytes": 17636,
+      "sha256": "cd58239dc91cfe61828216e7de3e0e711984b6d2c62295dad45bf083e7f04d03",
+      "relativeImports": 0,
+      "cloudflareImports": 0,
+      "denoServeEntrypoint": true
+    },
+    "historicalLoader": {
+      "source": "supabase/functions/xrpl-historical-witness/index.ts",
+      "bytes": 83636,
+      "sha256": "a75045dff21c2a34fd9604d9a3958b9a4da819de9ce585417d77904d5239b09f",
+      "relativeImports": 0,
+      "cloudflareImports": 0,
+      "denoServeEntrypoint": true
+    },
+    "historicalReader": {
+      "source": "supabase/functions/xrpl-historical-witness-reader/index.ts",
+      "bytes": 18923,
+      "sha256": "027454f6299e96b6ded2cd23e6b2dbda9b9c9dee7de00925ddac732a2db20dbd",
+      "relativeImports": 0,
+      "cloudflareImports": 0,
+      "denoServeEntrypoint": true
+    }
+  },
+  "deployment": {
+    "status": "success",
+    "oneRunVerifierTokenRotated": true,
+    "oneRunVerifierTokenRetained": false,
+    "migrationApplied": true,
+    "collectorDeployed": true,
+    "committedReaderDeployed": true,
+    "historicalLoaderDeployed": true,
+    "historicalReaderDeployed": true,
+    "activeCollectorVerifierPassed": true,
+    "activeReaderVerifierPassed": true,
+    "historicalVerifierPassed": true
+  },
+  "historicalSource": {
+    "sourceId": "supabase-r4c2c-historical-witness",
+    "purpose": "r4c2c-historical-witness-remote-verification",
+    "profileId": "supabase-devnet-historical-witness",
+    "network": "devnet",
+    "epochId": "supabase-r4c2c-historical-witness-v1",
+    "baseIdentity": "historical-witness-2776760-2980845-3127240",
+    "setId": "r4c2c-devnet-historical-witness-v1",
+    "workId": "historical-witness-work-v1:2776760:2980845:3127240"
+  },
+  "loader": {
+    "recordCount": 237,
+    "semanticCounts": {
+      "validated-ledger": 3,
+      "protocol-event": 13,
+      "object-change": 197,
+      "loan-lifecycle": 3,
+      "archived-object": 1,
+      "balance-history": 2,
+      "current-projection": 18
+    },
+    "recordsDigest": "sha256:bac80ec90ba841b683ee9e4b154cf385ffd972ce636f9797cb8f6cff1cdd209a",
+    "firstCommitDuplicate": false,
+    "secondCommitDuplicate": true,
+    "ledgerIndexes": [
+      2776760,
+      2980845,
+      3127240
+    ]
+  },
+  "historicalFence": {
+    "schemaVersion": 1,
+    "network": "devnet",
+    "epochId": "supabase-r4c2c-historical-witness-v1",
+    "baseIdentity": "historical-witness-2776760-2980845-3127240",
+    "ledgerIndex": 3127240,
+    "ledgerHash": "6CDB77504546BE14D226CFFDFC61082EC73BF95191E5326536254903D87692B3",
+    "workId": "historical-witness-work-v1:2776760:2980845:3127240"
+  },
+  "reader": {
+    "fullPagination": {
+      "rowCount": 237,
+      "pageSizes": [
+        100,
+        100,
+        37
+      ],
+      "uniqueRows": 237
+    },
+    "classCounts": {
+      "validated-ledger": 3,
+      "protocol-event": 13,
+      "object-change": 197,
+      "loan-lifecycle": 3,
+      "archived-object": 1,
+      "balance-history": 2,
+      "current-projection": 18
+    },
+    "exactResults": [
+      {
+        "semanticClass": "validated-ledger",
+        "canonicalKey": "ledger:2776760",
+        "sourceLedgerIndex": 2776760
+      },
+      {
+        "semanticClass": "protocol-event",
+        "canonicalKey": "event:29D0DC88D581400AFCF68F4B6F911503FC4AAFB8D466632E8EEFB4C8C157A14E",
+        "sourceLedgerIndex": 2776760
+      },
+      {
+        "semanticClass": "object-change",
+        "canonicalKey": "change:29D0DC88D581400AFCF68F4B6F911503FC4AAFB8D466632E8EEFB4C8C157A14E:1:Account",
+        "sourceLedgerIndex": 2776760
+      },
+      {
+        "semanticClass": "loan-lifecycle",
+        "canonicalKey": "lifecycle:7E1926826398D1AFB71B385CE2D40E0E0D80FCF11074AD90524CCB06D067BFF2:C3011CC8854440863E80DB1853EE06461E49BEB3A6C1BD680A96642AB3C6A1FC:created",
+        "sourceLedgerIndex": 2776760
+      },
+      {
+        "semanticClass": "archived-object",
+        "canonicalKey": "archive:6A92B8369E0094FFBE1C7872858C30FE7F8C94B7FCAF297DD9DCB64E1C88FA82:Loan:FBD9559FBC50D3274AAD6495454E83E0FDB97DCE497D0423C1666641B2288718",
+        "sourceLedgerIndex": 2980845
+      },
+      {
+        "semanticClass": "balance-history",
+        "canonicalKey": "balance:3A82A8A88F490BE5AFD0F72BBDC405B7D32BBF209C7E05B9A43516594E9A8D66:LoanBroker:3E4430C184C58ABE6D6B1C8C5CEAB85BCAE4DFC682A00C7639494A1FB0CB9F8B:cover_available",
+        "sourceLedgerIndex": 2776760
+      },
+      {
+        "semanticClass": "current-projection",
+        "canonicalKey": "projection:loan:C3011CC8854440863E80DB1853EE06461E49BEB3A6C1BD680A96642AB3C6A1FC",
+        "sourceLedgerIndex": 2776760
+      }
+    ],
+    "relationship": {
+      "relationshipId": "loan:FBD9559FBC50D3274AAD6495454E83E0FDB97DCE497D0423C1666641B2288718",
+      "rowCount": 16,
+      "semanticClasses": [
+        "archived-object",
+        "current-projection",
+        "loan-lifecycle",
+        "object-change"
+      ]
+    },
+    "checks": {
+      "deterministicOrdering": true,
+      "exactLookupEveryClass": true,
+      "semanticCountParity": true,
+      "relationshipQueryNonEmpty": true,
+      "cursorDigestTamperRejected": true,
+      "cursorQueryOrderMismatchRejected": true,
+      "cursorSourceMismatchRejected": true,
+      "staleFenceRejected": true,
+      "missingTokenRejected": true,
+      "wrongPurposeRejected": true,
+      "boundedLimit": 100
+    }
+  },
+  "activeRegression": {
+    "verifiedAt": "2026-08-02T09:47:56.573Z",
+    "activeReaderVerifiedAt": "2026-08-02T09:48:02.246Z",
+    "profileId": "supabase-devnet",
+    "epochId": "supabase-r4c2c-v1",
+    "completedTicks": 774,
+    "consecutiveFailures": 0,
+    "lastError": null,
+    "recentCronRunsCompleted": 5,
+    "watermarkLedgerIndex": 4132485,
+    "watermarkLedgerHash": "5C3C23C7A175CC3948B21C9B02794F0897DA2540988334B3ABBA3ED2120F9E64",
+    "watermarkWorkId": "collector-work-v1:devnet:supabase-r4c2c-v1:seven-class-base-4132417-C9A7A89077EA7F54EBC296EE95E6AE45601088DDA5CFC5538A435C4A21E9CE77:4132485:35E46F77D9DBF41F8B2BD97C2D72985805588D39947535D2B9E4D6FF6A5DB24B",
+    "latestSuccessorPhase": "scan",
+    "latestSuccessorStatus": "pending",
+    "latestSuccessorAttemptCount": 0,
+    "historicalProfileSeparate": true,
+    "publicReaderChanged": false
+  },
+  "decision": {
+    "classification": "remote_verified_conditional_candidate",
+    "selection": "not_selected",
+    "readerGateStatus": "isolated non-empty seven-class and relationship committed-reader evidence remotely verified",
+    "closedItems": [
+      "non-empty remote reader evidence for all seven semantic classes in the isolated historical qualification profile",
+      "exact lookup evidence for every semantic class",
+      "non-empty cross-class Loan relationship query",
+      "three-page immutable-fence pagination",
+      "exact duplicate loader convergence",
+      "cursor, source, fence, credential, and purpose fail-closed behavior"
+    ],
+    "scopeLimitations": [
+      "isolated historical witness profile only",
+      "no true multi-chunk active collector work",
+      "no true multi-chunk active committed-reader continuation",
+      "no complete-state export or empty-target restore parity",
+      "no post-restore continuation",
+      "no remote interruption rollback",
+      "no remote retry or backoff qualification",
+      "no stale-lease reclaim qualification",
+      "no duplicate phase replay qualification",
+      "no terminal-injection qualification",
+      "no throughput qualification",
+      "no sustained resource envelope",
+      "no public reader cutover",
+      "no Mainnet",
+      "no R5 recovery",
+      "no stabilization or soak"
+    ]
+  }
+}
