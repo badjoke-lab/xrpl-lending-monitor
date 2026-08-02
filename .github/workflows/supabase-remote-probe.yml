@@ -117,6 +117,15 @@ jobs:
       - name: Link exact Supabase project
         run: supabase link --project-ref "$SUPABASE_PROJECT_ID" --password "$SUPABASE_DB_PASSWORD"
 
+      - name: Rotate one-run committed reader verifier token
+        shell: bash
+        run: |
+          set -euo pipefail
+          verifier_token="$(openssl rand -hex 32)"
+          echo "::add-mask::${verifier_token}"
+          supabase secrets set XRPL_READER_VERIFY_TOKEN="${verifier_token}" --project-ref "$SUPABASE_PROJECT_ID"
+          echo "XRPL_READER_VERIFY_TOKEN=${verifier_token}" >> "$GITHUB_ENV"
+
       - name: Apply pending migrations
         run: supabase db push --linked --yes
 
