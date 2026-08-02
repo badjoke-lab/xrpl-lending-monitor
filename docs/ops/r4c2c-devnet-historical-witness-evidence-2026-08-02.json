@@ -1,0 +1,154 @@
+{
+  "schemaVersion": 1,
+  "purpose": "r4c2c-read-only-historical-witness-evidence",
+  "run": {
+    "workflowRunId": 30741004656,
+    "commit": "9139af3b4d677d5d70fcbae92052de892746ecfe",
+    "artifactId": 8831279628,
+    "artifactDigest": "sha256:f0bbc12cf5b37fb87d03e7a2f865dd6b1647d2a0243ad6545ec2d1da693dffc2"
+  },
+  "bundle": {
+    "schemaVersion": 1,
+    "source": "scripts/qualify-devnet-historical-witness.ts",
+    "headSha": "9139af3b4d677d5d70fcbae92052de892746ecfe",
+    "bytes": 82340,
+    "sha256": "df3007b6acecc5d7e32247f0dcaf19ec284c69391b56f195189910ea1d3b7e09",
+    "relativeImports": 0,
+    "cloudflareImports": 0
+  },
+  "generatedAt": "2026-08-02T09:03:58.826Z",
+  "mutation": "none",
+  "result": {
+    "readableLedgerCount": 90,
+    "failedLedgerCount": 43,
+    "lendingWitnessLedgerCount": 3,
+    "semanticCounts": {
+      "validated-ledger": 3,
+      "protocol-event": 13,
+      "object-change": 197,
+      "loan-lifecycle": 3,
+      "archived-object": 1,
+      "balance-history": 2,
+      "current-projection": 18
+    },
+    "missingNonLedgerClasses": [],
+    "completeSixClassWitness": true
+  },
+  "witnesses": [
+    {
+      "ledgerIndex": 2776760,
+      "ledgerHash": "83CD41036ADD7F9D8FA247F04BF5156B6826D95C4E6A346B9A5499BE90C43A9D",
+      "parentHash": "E7E4E253C314D5EBD39E8C063415A99299E48FB23A0E613F1FE5CA534B0C0628",
+      "closeTime": 834570002,
+      "lendingTransactions": [
+        {"hash":"3A82A8A88F490BE5AFD0F72BBDC405B7D32BBF209C7E05B9A43516594E9A8D66","transactionType":"LoanBrokerCoverClawback","result":"tesSUCCESS","transactionIndex":3},
+        {"hash":"75FB355EB5AC8B4AF8ABE9981739A55FFF8C167EDD97BA0CB75E6683C3990DB2","transactionType":"VaultSet","result":"tesSUCCESS","transactionIndex":11},
+        {"hash":"80A13038AEBD8D2AC764800FF4443D71537031B64C5CCB3799C3586762EF599E","transactionType":"LoanBrokerSet","result":"tesSUCCESS","transactionIndex":17},
+        {"hash":"29D0DC88D581400AFCF68F4B6F911503FC4AAFB8D466632E8EEFB4C8C157A14E","transactionType":"VaultDeposit","result":"tesSUCCESS","transactionIndex":26},
+        {"hash":"BD8DEB601D79165FB1D2B92A584C3F9713CB1DB8DDEF94C42D591E551F9B10CD","transactionType":"LoanBrokerSet","result":"tesSUCCESS","transactionIndex":27},
+        {"hash":"C74B7A432178EB06913480289F4ACBAC833800F9642FCE5833D9D9385458F979","transactionType":"VaultCreate","result":"tesSUCCESS","transactionIndex":29},
+        {"hash":"7E1926826398D1AFB71B385CE2D40E0E0D80FCF11074AD90524CCB06D067BFF2","transactionType":"LoanSet","result":"tesSUCCESS","transactionIndex":31},
+        {"hash":"FB4B6F4887A5CBB11A6B6761C449EAFC27E82B5F690D4D07E1E38CCEF2FF73B0","transactionType":"VaultDeposit","result":"tesSUCCESS","transactionIndex":33}
+      ],
+      "semanticCounts": {"validated-ledger":1,"protocol-event":8,"object-change":94,"loan-lifecycle":1,"archived-object":0,"balance-history":2,"current-projection":10},
+      "canonicalKeySetDigests": {
+        "validated-ledger":"sha256:f5f76e3fb3c1581c6ef4cf806ea90e08e5ac4779b90d5f6eb6429db7b152fb14",
+        "protocol-event":"sha256:1f9b17562aba5256e1c23f4fe32f14601adc44059d82d43e8add9c1f994ef38d",
+        "object-change":"sha256:a7b12c2c355fc7b19218705713ce41baa7ebd0f1c32eb73c06e512266d80fa2e",
+        "loan-lifecycle":"sha256:6d46ae7bd25822f4bc15ed3cc01692da5c3c6ab6cb8db1dbe3aac84522392e33",
+        "archived-object":"sha256:01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "balance-history":"sha256:d82f7409205cccaa4b68e0464a4fd8bc6df8d1787f5782a2f117ef2c1b3b0b5d",
+        "current-projection":"sha256:593deb50726e61cfb34a4ffb332afc63b8058fffcf4aabfead5a5dd4bff599c1"
+      },
+      "canonicalKeyExamples": {
+        "validated-ledger":"ledger:2776760",
+        "protocol-event":"event:29D0DC88D581400AFCF68F4B6F911503FC4AAFB8D466632E8EEFB4C8C157A14E",
+        "object-change":"change:29D0DC88D581400AFCF68F4B6F911503FC4AAFB8D466632E8EEFB4C8C157A14E:1:Account",
+        "loan-lifecycle":"lifecycle:7E1926826398D1AFB71B385CE2D40E0E0D80FCF11074AD90524CCB06D067BFF2:C3011CC8854440863E80DB1853EE06461E49BEB3A6C1BD680A96642AB3C6A1FC:created",
+        "archived-object":null,
+        "balance-history":"balance:3A82A8A88F490BE5AFD0F72BBDC405B7D32BBF209C7E05B9A43516594E9A8D66:LoanBroker:3E4430C184C58ABE6D6B1C8C5CEAB85BCAE4DFC682A00C7639494A1FB0CB9F8B:cover_available",
+        "current-projection":"projection:loan:C3011CC8854440863E80DB1853EE06461E49BEB3A6C1BD680A96642AB3C6A1FC"
+      },
+      "relationshipExamples": [
+        "loan:C3011CC8854440863E80DB1853EE06461E49BEB3A6C1BD680A96642AB3C6A1FC",
+        "broker:358F615EF0E75FB95E1BAF82859CF87E146AEE810C6656EC857E8235010ACCCB",
+        "vault:05146D196AEAFF269EBCB2EEEA0AF269FD03E4210263821357FAFD65EED9A892",
+        "borrower:rM3NAoBwz1hNSK8H88ZmAf3dVGZQipQsrS",
+        "asset:XRP"
+      ]
+    },
+    {
+      "ledgerIndex": 2980845,
+      "ledgerHash": "5BA95992F3E649752BBA5550EEEF79DEB535881E10FF7C1D4F9EF953340B0C40",
+      "parentHash": "F193C199E54799140F552EF7F6D16FEFED39CF3F06799F25A34BE7D9791A9A81",
+      "closeTime": 835222411,
+      "lendingTransactions": [
+        {"hash":"F140E7111C2CEC29D46092B9435B44AC1C42183666E616464E3B063F61DB2C49","transactionType":"VaultDeposit","result":"tesSUCCESS","transactionIndex":2},
+        {"hash":"6A92B8369E0094FFBE1C7872858C30FE7F8C94B7FCAF297DD9DCB64E1C88FA82","transactionType":"LoanDelete","result":"tesSUCCESS","transactionIndex":4},
+        {"hash":"5C1EF5B44A6497E704A73808AA397DD3B64EB4EE28E7E1E2923F41A2B3104811","transactionType":"VaultCreate","result":"tesSUCCESS","transactionIndex":6}
+      ],
+      "semanticCounts": {"validated-ledger":1,"protocol-event":3,"object-change":63,"loan-lifecycle":1,"archived-object":1,"balance-history":0,"current-projection":4},
+      "canonicalKeySetDigests": {
+        "validated-ledger":"sha256:93f624155b7917069f03babe20ea817befb75bc7e38e977248ed34e34353b239",
+        "protocol-event":"sha256:215ddbbe9cf2a5d1b9ce6ed0e74602f60c2d518daf1d5c37cfb5f3317ecfd69d",
+        "object-change":"sha256:1a899ac2e0eec75623c795018fb8519456cc36fb3aea0daabcb6b0b2aae854cb",
+        "loan-lifecycle":"sha256:bd36e8c77d86e026c3541bca5ac49141d7d22b7b73ab6a685cb5064bb6dfe27d",
+        "archived-object":"sha256:dfbfe97b4a91b1553696004bc2b95ca46296193bd4aabf883111d97026ec112e",
+        "balance-history":"sha256:01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "current-projection":"sha256:d1728481135c7b95a1e7b0cdc3b26aec0a5afeae32256a0ef790137303142ef9"
+      },
+      "canonicalKeyExamples": {
+        "validated-ledger":"ledger:2980845",
+        "protocol-event":"event:5C1EF5B44A6497E704A73808AA397DD3B64EB4EE28E7E1E2923F41A2B3104811",
+        "object-change":"change:5C1EF5B44A6497E704A73808AA397DD3B64EB4EE28E7E1E2923F41A2B3104811:2:Owner",
+        "loan-lifecycle":"lifecycle:6A92B8369E0094FFBE1C7872858C30FE7F8C94B7FCAF297DD9DCB64E1C88FA82:FBD9559FBC50D3274AAD6495454E83E0FDB97DCE497D0423C1666641B2288718:deleted",
+        "archived-object":"archive:6A92B8369E0094FFBE1C7872858C30FE7F8C94B7FCAF297DD9DCB64E1C88FA82:Loan:FBD9559FBC50D3274AAD6495454E83E0FDB97DCE497D0423C1666641B2288718",
+        "balance-history":null,
+        "current-projection":"projection:loan:FBD9559FBC50D3274AAD6495454E83E0FDB97DCE497D0423C1666641B2288718"
+      },
+      "relationshipExamples": [
+        "loan:FBD9559FBC50D3274AAD6495454E83E0FDB97DCE497D0423C1666641B2288718",
+        "broker:0000018A4E54F377D5B1FFD573CB3000A8F135FA068A16BA68BC998349FBEF72",
+        "vault:452316791E36F2C82F4E5B90A5FD992C9EE98889C3881525A1FF40C91F28F525",
+        "borrower:rNhb9NBQZHSa1JJ95WoXgYCCR8hVuAhghU",
+        "asset:MPT:002D7BE6FD49AF9EFB223CF1C7D8D366581A30504521F91B"
+      ]
+    },
+    {
+      "ledgerIndex": 3127240,
+      "ledgerHash": "6CDB77504546BE14D226CFFDFC61082EC73BF95191E5326536254903D87692B3",
+      "parentHash": "072DEDC596274E711A246F93F7919100A16473D549AEA2C3CE4B7D2233BF903E",
+      "closeTime": 835695092,
+      "lendingTransactions": [
+        {"hash":"AFD2701B067D576DAE0EB38A894ED01C72D20590EF6D3C2537B175A8DA4D1DDF","transactionType":"LoanSet","result":"tesSUCCESS","transactionIndex":7},
+        {"hash":"C33F4C7038788D62069CBAF1BA374F2756C24D57E334CF04922823052D530FE6","transactionType":"LoanBrokerSet","result":"tesSUCCESS","transactionIndex":21}
+      ],
+      "semanticCounts": {"validated-ledger":1,"protocol-event":2,"object-change":40,"loan-lifecycle":1,"archived-object":0,"balance-history":0,"current-projection":4},
+      "canonicalKeySetDigests": {
+        "validated-ledger":"sha256:8a35c8a30f45630474070c76144fe9e8439464060a550990af87334d38ce9141",
+        "protocol-event":"sha256:666a22d4e61c2674f287a7f2fbc03a328b9c9b05b4d29c5a3dfbcb0c86b8d166",
+        "object-change":"sha256:e82470675ae7233c55e2e2b027042c9840c8bc7c600b17dcf159ae13559d828a",
+        "loan-lifecycle":"sha256:d63fd7f226ba4a32c887c6d9e05c70cfcb58a8707c1734b4be8d52b73b592507",
+        "archived-object":"sha256:01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "balance-history":"sha256:01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        "current-projection":"sha256:8e51198f1894f7b5e5276c390d766f08adcc9b7d2d15c632e347262b6a291fef"
+      },
+      "canonicalKeyExamples": {
+        "validated-ledger":"ledger:3127240",
+        "protocol-event":"event:AFD2701B067D576DAE0EB38A894ED01C72D20590EF6D3C2537B175A8DA4D1DDF",
+        "object-change":"change:AFD2701B067D576DAE0EB38A894ED01C72D20590EF6D3C2537B175A8DA4D1DDF:0:LoanSequence",
+        "loan-lifecycle":"lifecycle:AFD2701B067D576DAE0EB38A894ED01C72D20590EF6D3C2537B175A8DA4D1DDF:E10BADFD8F1672375BCAA3020902970E85EE5086C7991D02E9C013B963C3391C:created",
+        "archived-object":null,
+        "balance-history":null,
+        "current-projection":"projection:loan:E10BADFD8F1672375BCAA3020902970E85EE5086C7991D02E9C013B963C3391C"
+      },
+      "relationshipExamples": [
+        "loan:E10BADFD8F1672375BCAA3020902970E85EE5086C7991D02E9C013B963C3391C",
+        "broker:0000295ABA635951F694916AD39A79DC947690A7DDE0A3C787AE772A30F034B5",
+        "vault:2F7451E3462999D36EDF73E2F5AB4D837895148D6BE3EE21B7CDC6A012EAA471",
+        "borrower:rHrsmcjshyQA6oLRGDNcj52p7TnwVxZ2nk",
+        "asset:XRP"
+      ]
+    }
+  ]
+}
