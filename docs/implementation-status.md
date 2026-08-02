@@ -33,9 +33,19 @@ The separate Supabase Free Devnet qualification surfaces now have retained remot
 - fail-closed cursor, source, fence, credential, and purpose rejection;
 - active-profile isolation for every isolated qualification unit;
 - fixed 60-minute, 6-hour, and 24-hour committed-throughput baselines including zero-production minutes;
-- end-to-end work latency, phase attempts, database/table bytes, row counts, payload sizes, scheduler-message sizes, and connection usage.
+- end-to-end work latency, phase attempts, database/table bytes, row counts, payload sizes, scheduler-message sizes, and connection usage;
+- five isolated full-phase catch-up trials using 64 real committed Devnet works per trial;
+- exact `193` messages, `192` completed phases, one pending scan, and `192` successors per catch-up trial;
+- committed-row count/digest and target-watermark parity across all five catch-up trials.
 
-R4C2c is complete for the planned Supabase remote behavioral qualification. The first R4C2d baseline is also complete, but it **failed G7** and does not close G8: steady p95 was only `1` committed ledger/minute against a required value above `21`, catch-up mode was not measured, and Edge CPU, memory, invocation, bandwidth, billing, and automatic-overage evidence remain unavailable. Supabase therefore remains an R4 conditional candidate and is not selected for public or production cutover.
+R4C2c is complete for the planned Supabase remote behavioral qualification. R4C2d now has both normal-cadence and isolated catch-up measurements:
+
+- normal steady p95: `1` committed ledger/minute against a required value above `21` — **failed**;
+- isolated catch-up p95: `14,178.400673920027` committed ledgers/minute against a required value above `30` — **passed**;
+- G7 overall: **failed**, because both steady and catch-up components must pass;
+- G8: **incomplete**, because Edge CPU, memory, invocation, bandwidth, billing/overage, sustained growth, and pre-ceiling halt evidence remain missing.
+
+Supabase therefore remains an R4 conditional candidate and is not selected for public or production cutover.
 
 ## Controlling documents
 
@@ -57,6 +67,7 @@ R4C2c is complete for the planned Supabase remote behavioral qualification. The 
 - Post-restore continuation evidence: [`ops/r4c2c-supabase-restore-continuation-remote-evidence-2026-08-02.md`](ops/r4c2c-supabase-restore-continuation-remote-evidence-2026-08-02.md)
 - Remote fault evidence: [`ops/r4c2c-supabase-remote-fault-evidence-2026-08-02.md`](ops/r4c2c-supabase-remote-fault-evidence-2026-08-02.md)
 - R4C2d throughput/resource baseline: [`ops/r4c2d-supabase-throughput-resource-baseline-evidence-2026-08-03.md`](ops/r4c2d-supabase-throughput-resource-baseline-evidence-2026-08-03.md)
+- R4C2d isolated catch-up throughput: [`ops/r4c2d-supabase-isolated-catchup-throughput-evidence-2026-08-03.md`](ops/r4c2d-supabase-isolated-catchup-throughput-evidence-2026-08-03.md)
 - Runtime invariants: [`history-runtime-contract.md`](history-runtime-contract.md)
 - Resource gates: [`resource-envelope.md`](resource-envelope.md)
 
@@ -98,7 +109,8 @@ The halted Cloudflare deployment is rollback context and historical evidence onl
 - Exact remote complete-state transfer: PRs #1128–#1131.
 - Isolated post-restore continuation and retained evidence: PRs #1132–#1134.
 - Isolated remote fault qualification: PRs #1135–#1136.
-- R4C2d throughput/resource baseline and runtime-source correction: PRs #1137–#1138.
+- R4C2d throughput/resource baseline and runtime-source correction: PRs #1137–#1139.
+- Isolated full-phase catch-up throughput measurement: PR #1140.
 
 ## R3 completion
 
@@ -130,61 +142,17 @@ Run `30726776731` proved durable scan, commit, finalize, watermark, and successo
 
 Status: **complete for the planned remote behavioral qualification; conditional profile remains unselected**.
 
-#### Active executor and committed reader
-
-The qualification profile remains `supabase-devnet` under epoch `supabase-r4c2c-v1`. Retained runs prove repeated standard phase execution, committed-only visibility, immutable read fences, deterministic order, exact and range queries, source-bound cursors, stale-fence rejection, and credential rejection.
-
-#### Seven-class historical and relationship proof
-
-The isolated historical profile retains `237` canonical rows from three real Devnet ledgers with page sizes `100 / 100 / 37`, exact lookup for every class, semantic-count parity, and a `16`-row Loan relationship spanning object change, lifecycle, archive, and current projection.
-
-#### Standard multi-chunk proof
-
-Run `30747137075` proved one real `116`-row work with exact sequence:
-
-1. `scan`;
-2. `commit:0` — `40` rows;
-3. `commit:1` — `40` rows;
-4. `commit:2` — `36` rows;
-5. `finalize`.
-
-Payload, commit, mutation, and reader pages all retained exact `40 / 40 / 36` parity under one immutable work fence. The active watermark remained isolated.
-
-#### Complete-state transfer
-
-Run `30750389833` proved exact export and typed empty-target restore of collection, scheduler, publication, and maintenance state:
-
-- canonical bytes: `300,890`;
-- canonical digest: `fb9b7dda66802f18c18200b2991ff6293cd5b11b3dd04a91d5089524ea93dda2`;
-- exact 13 table-class counts;
-- five completed and one pending scheduler message;
-- canonical text and digest parity;
-- duplicate restore convergence;
-- digest-tamper rejection;
-- active-profile isolation.
-
-#### Post-restore continuation
-
-Run `30751813536` restored ledger `4,132,573`, executed `scan -> commit -> finalize`, committed ledger `4,132,574`, and reserved the next scan. Full-row count and digest matched the durable source work. Scan, commit, and finalize duplicate completion replays all converged. The active watermark remained isolated.
-
-#### Remote fault qualification
-
-Run `30752742177` proved:
-
-- transaction-abort rollback of mutation, completion, and successor reservation;
-- exact `30`-second retry/backoff with pre-due rejection and attempt-2 completion;
-- exact-expiry stale-lease reclaim with previous-owner evidence and attempt-2 completion;
-- terminal integrity halt with message `error`, stream `halted`, no successor, pending halt probe, and duplicate terminal convergence;
-- missing-token and wrong-purpose rejection;
-- active watermark unchanged at ledger `4,132,584` during the isolated verifier.
+Retained evidence proves the active executor and committed reader, all-seven-class historical and relationship reads, one real `116`-row multi-chunk work with exact `40 / 40 / 36` parity, exact complete-state export/restore, post-restore continuation, transactional rollback, retry/backoff, stale lease reclaim, terminal halt, duplicate convergence, and active-profile isolation.
 
 This closes the planned R4C2c remote behavioral evidence for G3, G4, G5, and G6. Final gate status remains subject to the R4B evaluator; this statement is not a profile-selection decision.
 
 ### R4C2d — Throughput and Free-plan resource qualification
 
-Status: **active; first retained baseline completed and G7/G8 remain unqualified**.
+Status: **active; catch-up component passed, steady component failed, G7/G8 remain unqualified**.
 
-Run `30754437078`, attempt `2`, measured the active read-only profile at `2026-08-02T15:32:53.253Z`:
+#### Normal-cadence baseline
+
+Run `30754437078`, attempt `2`, measured the active read-only profile:
 
 | Window | Committed ledgers | Average/min | p95/min | Max/min | Work p95 |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -192,7 +160,7 @@ Run `30754437078`, attempt `2`, measured the active read-only profile at `2026-0
 | 360 minutes | 119 | 0.330556 | 1 | 1 | 120,580.95 ms |
 | 1,440 minutes | 208 | 0.144444 | 1 | 1 | 120,463.4 ms |
 
-The steady gate requires p95 above `21` committed ledgers/minute. Observed p95 was `1`; G7 therefore failed. Catch-up mode was not measured and remains failed closed.
+The steady gate requires p95 above `21` committed ledgers/minute. Observed p95 was `1`; the steady component failed.
 
 Measured resource snapshot:
 
@@ -203,15 +171,42 @@ Measured resource snapshot:
 - runtime consecutive failures: `0`;
 - active watermark unchanged by the verifier at ledger `4,132,600`.
 
-G8 remains incomplete because this unit did not measure Edge CPU, memory, invocation count, bandwidth, billing/overage, sustained storage growth, or pre-ceiling halt behavior.
+#### Isolated catch-up throughput
 
-Required next work:
+Run `30755497115` completed five independent trials. Each trial copied the latest 64 contiguous real committed Devnet works into `xrpl_catchup_v1` and executed all scan, commit, finalize, successor, row-copy, and watermark operations.
 
-1. build an isolated full-phase catch-up harness rather than reusing the normal two-minute cadence;
-2. prove complete committed throughput above `30/min` without active-profile mutation;
-3. add retained CPU, memory, invocation, bandwidth, quota, billing, and storage-growth evidence;
+| Metric | Result |
+| --- | ---: |
+| Minimum | 12,563.651 ledgers/min |
+| p50 | 13,975.163 ledgers/min |
+| p95 | 14,178.401 ledgers/min |
+| Maximum | 14,225.868 ledgers/min |
+| DB elapsed p50 / p95 | 78.556 / 93.996 ms |
+| Edge wall p50 / p95 | 274.773 / 300.000 ms |
+
+Every trial retained:
+
+- `64` committed works;
+- `193` messages;
+- `192` completed messages at attempt `1`;
+- one pending next scan;
+- `192` successor reservations;
+- `64 / 64` source/target committed rows;
+- exact row digest parity;
+- exact target-watermark parity;
+- unchanged active source watermark at ledger `4,132,608`.
+
+The catch-up component passed its required value above `30/min`. It does not close G7 because the steady component remains failed.
+
+#### Remaining R4C2d work
+
+1. redesign the steady executor so one normal tick can safely advance multiple phases or works without weakening transactional, lease, duplicate, cursor, or fail-closed guarantees;
+2. remeasure fixed steady p95 windows above `21/min`;
+3. add retained Edge CPU, memory, invocation, bandwidth, quota, billing, automatic-overage, and sustained storage-growth evidence;
 4. prove fail-closed thresholds before provider ceilings;
-5. revise R4B only after the new measurements exist.
+5. revise R4B only after steady G7 and G8 evidence exist.
+
+G8 remains incomplete because no current unit measures all provider resource and no-charge surfaces.
 
 ### R4C2e and R4E — Re-evaluation and selection decision
 
@@ -240,7 +235,7 @@ Pass fixed 24-hour and seven-day evidence windows before reopening formal Devnet
 
 - Do not describe any isolated qualification surface as a public-reader or production cutover.
 - Do not describe R4C2c completion as Supabase selection or R4 completion.
-- Do not describe the first R4C2d baseline as G7 or G8 qualification.
+- Do not describe the catch-up component pass as full G7 qualification.
 - Do not describe the retired Cloudflare collector as operating.
 - Do not restart the retired fixed-32-ledger runtime.
 - Do not select a profile before all R4 hard gates pass.
