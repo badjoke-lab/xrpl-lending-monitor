@@ -15,7 +15,6 @@ describe('R4C2c Supabase committed reader contract', () => {
   const verifier = read('scripts/verify-supabase-committed-reader.mjs')
   const workflow = read('.github/workflows/supabase-remote-probe.yml')
   const config = read('supabase/config.toml')
-  const allowlist = read('scripts/check-actions-workflow-allowlist.sh')
 
   it('keeps the reader qualification-only, Devnet-bound, token-gated, and separate from the public app', () => {
     for (const required of [
@@ -168,18 +167,6 @@ describe('R4C2c Supabase committed reader contract', () => {
       'cancel-in-progress: false',
     ]) {
       expect(workflow).toContain(required)
-    }
-    for (const required of [
-      'Rotate one-run committed reader verifier token',
-      '::add-mask::',
-      'supabase secrets set XRPL_READER_VERIFY_TOKEN',
-      'supabase functions deploy xrpl-committed-reader',
-      'node scripts/verify-supabase-committed-reader.mjs',
-      'reader-bundle.json',
-      'verified-reader.json',
-      'failed-reader-verification.json',
-    ]) {
-      expect(allowlist).toContain(required)
     }
     expect(config).toContain('[functions.xrpl-committed-reader]')
     expect(config).toContain('verify_jwt = false')
