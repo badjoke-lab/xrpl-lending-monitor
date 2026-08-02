@@ -190,6 +190,36 @@ async function expectError(body, expectedStatus, expectedCode, customHeaders = h
   return true
 }
 
+function verifyActiveIsolation(execution) {
+  const before = execution.activeWatermarkBefore
+  const after = execution.activeWatermarkAfter
+  if (
+    execution.activeWatermarkIsolated !== true
+    || execution.activeWatermarkIsolation?.isolatedWorkExcluded !== true
+    || execution.activeWatermarkIsolation?.nonRegressing !== true
+    || before?.profileId !== 'supabase-devnet'
+    || after?.profileId !== 'supabase-devnet'
+    || before?.network !== 'devnet'
+    || after?.network !== 'devnet'
+    || before?.epochId !== 'supabase-r4c2c-v1'
+    || after?.epochId !== 'supabase-r4c2c-v1'
+    || before?.baseIdentity !== after?.baseIdentity
+    || !Number.isSafeInteger(before?.ledgerIndex)
+    || !Number.isSafeInteger(after?.ledgerIndex)
+    || after.ledgerIndex < before.ledgerIndex
+    || before.workId === execution.workId
+    || after.workId === execution.workId
+  ) {
+    throw new Error('multi-chunk executor did not preserve active watermark isolation')
+  }
+  if (
+    after.ledgerIndex === before.ledgerIndex
+    && (after.ledgerHash !== before.ledgerHash || after.workId !== before.workId)
+  ) {
+    throw new Error('active watermark changed identity without advancing')
+  }
+}
+
 function verifyExecutor(execution) {
   if (
     execution.profileId !== 'supabase-devnet-multichunk-witness'
@@ -199,10 +229,10 @@ function verifyExecutor(execution) {
     || execution.work?.expected_payload_chunks !== 3
     || execution.work?.expected_commit_chunks !== 3
     || execution.referenceRowCount !== 116
-    || execution.activeWatermarkUnchanged !== true
   ) {
     throw new Error('multi-chunk executor did not retain the exact committed witness')
   }
+  verifyActiveIsolation(execution)
   const payloadCounts = execution.payloadChunks?.map((chunk) => chunk.record_count)
   const commitCounts = execution.commitChunks?.map((chunk) => chunk.row_mutation_count)
   if (
@@ -404,10 +434,12 @@ async function verify() {
       staleFenceRejected,
       missingTokenRejected: true,
       wrongPurposeRejected: true,
-      activeWatermarkUnchanged: execution.activeWatermarkUnchanged,
+      activeWatermarkIsolated: execution.activeWatermarkIsolated,
       boundedLimit: 100,
     },
-    activeWatermark: execution.activeWatermark,
+    activeWatermarkIsolation: execution.activeWatermarkIsolation,
+    activeWatermarkBefore: execution.activeWatermarkBefore,
+    activeWatermarkAfter: execution.activeWatermarkAfter,
   }
   await writeFile(
     `${evidenceDirectory}/verified-multichunk-witness.json`,
