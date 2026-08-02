@@ -261,11 +261,14 @@ jobs:
           # The publisher reads and labels these sanitized outcomes:
           # supabase-remote-probe-evidence/verified-health.json
           # supabase-remote-probe-evidence/failed-verification.json
+          # verified-reader.json / failed-reader-verification.json
           # verified-historical-witness.json / failed-historical-witness-verification.json
+          # verified-multichunk-witness.json / failed-multichunk-witness-verification.json
           # verified-complete-state-transfer.json / failed-complete-state-transfer-verification.json
           # verified-restore-continuation.json / failed-restore-continuation-verification.json
           # phase watermark ledger / consecutive failures
           # historical witness verifier: `success`
+          # multi-chunk witness verifier: `success`
           # complete-state transfer verifier: `success`
           # restore continuation verifier: `success`
           node scripts/publish-supabase-run-locator.mjs > /tmp/supabase-run-comment.md
