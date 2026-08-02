@@ -1,0 +1,132 @@
+{
+  "schemaVersion": 1,
+  "evidenceType": "r4c2c_supabase_committed_reader_remote_verification",
+  "verifiedAt": "2026-08-02T07:17:17.397Z",
+  "workflowRunId": 30737493360,
+  "workflowCommit": "5b3a1843743c3cada0061ea51f00d5612651490a",
+  "artifact": {
+    "id": 8830107824,
+    "name": "supabase-remote-probe-evidence",
+    "bytes": 6704,
+    "digest": "sha256:7180041f65a341bc6b7d7f462af782c506b03d212fb872399b3ac542ebcd5ddf"
+  },
+  "collectorBundle": {
+    "source": "supabase/functions/xrpl-collector-tick/index.ts",
+    "bytes": 103351,
+    "sha256": "e7e4b58f5a841c3f5dd85cc024235f8f33b0db8a49d4956c00b056a4385139f8",
+    "relativeImports": 0,
+    "cloudflareImports": 0,
+    "denoServeEntrypoint": true
+  },
+  "readerBundle": {
+    "source": "supabase/functions/xrpl-committed-reader/index.ts",
+    "bytes": 17636,
+    "sha256": "cd58239dc91cfe61828216e7de3e0e711984b6d2c62295dad45bf083e7f04d03",
+    "relativeImports": 0,
+    "cloudflareImports": 0,
+    "denoServeEntrypoint": true
+  },
+  "deployment": {
+    "status": "success",
+    "readerVerifierAttempt": 1,
+    "collectorVerifierAttempt": 1,
+    "oneRunVerifierTokenRotated": true,
+    "oneRunVerifierTokenRetained": false,
+    "migrationApplied": true,
+    "collectorDeployed": true,
+    "readerDeployed": true
+  },
+  "source": {
+    "sourceId": "supabase-r4c2c-qualification",
+    "mode": "portable",
+    "purpose": "r4-qualification-only",
+    "profileId": "supabase-devnet",
+    "network": "devnet",
+    "epochId": "supabase-r4c2c-v1"
+  },
+  "fence": {
+    "schemaVersion": 1,
+    "baseIdentity": "seven-class-base-4132417-C9A7A89077EA7F54EBC296EE95E6AE45601088DDA5CFC5538A435C4A21E9CE77",
+    "ledgerIndex": 4132435,
+    "ledgerHash": "CB19F0E00E3314DA18D4C17AFFEDF1C7F120D46FAC6634DDCFC81A259011CBB6",
+    "workId": "collector-work-v1:devnet:supabase-r4c2c-v1:seven-class-base-4132417-C9A7A89077EA7F54EBC296EE95E6AE45601088DDA5CFC5538A435C4A21E9CE77:4132435:6029F4EEB9DAE4535A8DF02FA19D5DC5EEF8E0F96366ED67CF6F32D6ADFE5977"
+  },
+  "readerRows": {
+    "first": {
+      "workId": "collector-work-v1:devnet:supabase-r4c2c-v1:seven-class-base-4132417-C9A7A89077EA7F54EBC296EE95E6AE45601088DDA5CFC5538A435C4A21E9CE77:4132418:C9A7A89077EA7F54EBC296EE95E6AE45601088DDA5CFC5538A435C4A21E9CE77",
+      "semanticClass": "validated-ledger",
+      "canonicalKey": "ledger:4132418",
+      "sourceLedgerIndex": 4132418,
+      "sourceLedgerHash": "F19EAD766B2B052513A08A0131F40B41E77C6DA273CE9C775ECC380E2FB02072"
+    },
+    "second": {
+      "workId": "collector-work-v1:devnet:supabase-r4c2c-v1:seven-class-base-4132417-C9A7A89077EA7F54EBC296EE95E6AE45601088DDA5CFC5538A435C4A21E9CE77:4132419:F19EAD766B2B052513A08A0131F40B41E77C6DA273CE9C775ECC380E2FB02072",
+      "semanticClass": "validated-ledger",
+      "canonicalKey": "ledger:4132419",
+      "sourceLedgerIndex": 4132419,
+      "sourceLedgerHash": "F30F1A922A3EF374D1E99F76CCF6285C046EF8E3A39A101B5359CE97B3C723FC"
+    }
+  },
+  "checks": {
+    "immutableFenceContinuation": true,
+    "deterministicOrdering": true,
+    "exactLookupParity": true,
+    "ledgerRangeParity": true,
+    "cursorDigestTamperRejected": true,
+    "cursorQueryOrderMismatchRejected": true,
+    "cursorSourceMismatchRejected": true,
+    "staleFenceRejected": true,
+    "boundedLimit": 100,
+    "rejectionStatuses": {
+      "tamper": 400,
+      "queryMismatch": 400,
+      "sourceMismatch": 400,
+      "staleFence": 409
+    }
+  },
+  "collectorAtFence": {
+    "completedTicks": 624,
+    "consecutiveFailures": 0,
+    "lastError": null,
+    "recentCronRunsCompleted": 5,
+    "watermarkLedgerIndex": 4132435,
+    "watermarkLedgerHash": "CB19F0E00E3314DA18D4C17AFFEDF1C7F120D46FAC6634DDCFC81A259011CBB6",
+    "latestSuccessorPhase": "scan",
+    "latestSuccessorStatus": "pending",
+    "latestSuccessorAttemptCount": 0,
+    "semanticCounts": {
+      "validated-ledger": 1,
+      "protocol-event": 0,
+      "object-change": 0,
+      "loan-lifecycle": 0,
+      "archived-object": 0,
+      "balance-history": 0,
+      "current-projection": 0
+    }
+  },
+  "decision": {
+    "classification": "remote_verified_conditional_candidate",
+    "selection": "not_selected",
+    "readerGateStatus": "validated-ledger committed-reader fence and cursor behavior remotely verified",
+    "scopeLimitations": [
+      "non-empty remote reader evidence exists only for validated-ledger",
+      "no non-empty remote protocol-event reader evidence",
+      "no non-empty remote object-change reader evidence",
+      "no non-empty remote loan-lifecycle reader evidence",
+      "no non-empty remote archived-object reader evidence",
+      "no non-empty remote balance-history reader evidence",
+      "no non-empty remote current-projection reader evidence",
+      "no non-empty relationship reader evidence",
+      "no true multi-chunk remote reader evidence",
+      "no complete-state export or empty-target restore parity",
+      "no post-restore continuation",
+      "no remote interruption, retry, stale-lease, duplicate, or terminal-injection qualification",
+      "no throughput qualification",
+      "no sustained resource envelope",
+      "no public reader cutover",
+      "no Mainnet",
+      "no R5 recovery",
+      "no stabilization or soak"
+    ]
+  }
+}

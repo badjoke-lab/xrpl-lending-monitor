@@ -8,7 +8,7 @@ XRPL Lending Monitor is **not formally released**.
 
 The retired Cloudflare fixed-32-ledger recovery remains halted after a content-dependent Worker subrequest failure. Worker Cron remains empty, Mainnet remains disabled, the public read surface remains legacy-authoritative, and no stabilization qualification or soak is active.
 
-The separate Supabase Free Devnet profile now has a deployed seven-class executor and a remotely verified schema-3 `scan -> commit -> finalize -> next scan` phase chain. The retained remote work had one `validated-ledger` row and zero rows in the other six semantic classes, so non-empty six-class evidence, reader/transfer parity, and remote fault qualification remain incomplete. PR #1116 adds the qualification-only committed-reader implementation, but it remains unverified until the exact main-branch bundle passes the remote reader verifier and retained evidence is merged. The profile remains an R4 conditional candidate and is not a public-reader or production cutover.
+The separate Supabase Free Devnet profile now has a deployed seven-class executor, a remotely verified schema-3 `scan -> commit -> finalize -> next scan` phase chain, and a remotely verified qualification-only committed reader for retained `validated-ledger` data. The reader proved immutable-fence pagination, exact/range parity, deterministic ordering, and fail-closed tampered, cross-query/order, cross-source, and stale cursor behavior. Non-empty remote reader evidence for the other six semantic classes, transfer parity, and remote fault qualification remain incomplete. The profile remains an R4 conditional candidate and is not a public-reader or production cutover.
 
 ## Controlling documents
 
@@ -21,8 +21,10 @@ The separate Supabase Free Devnet profile now has a deployed seven-class executo
 - R4C2b remote phase evidence: [`ops/r4c2b-supabase-remote-phase-chain-evidence-2026-08-02.md`](ops/r4c2b-supabase-remote-phase-chain-evidence-2026-08-02.md)
 - R4C2b machine-readable evidence: [`ops/r4c2b-supabase-remote-phase-chain-evidence-2026-08-02.json`](ops/r4c2b-supabase-remote-phase-chain-evidence-2026-08-02.json)
 - R4C2c remote deployment evidence: [`ops/r4c2c-supabase-seven-class-remote-evidence-2026-08-02.md`](ops/r4c2c-supabase-seven-class-remote-evidence-2026-08-02.md)
-- R4C2c machine-readable evidence: [`ops/r4c2c-supabase-seven-class-remote-evidence-2026-08-02.json`](ops/r4c2c-supabase-seven-class-remote-evidence-2026-08-02.json)
+- R4C2c machine-readable deployment evidence: [`ops/r4c2c-supabase-seven-class-remote-evidence-2026-08-02.json`](ops/r4c2c-supabase-seven-class-remote-evidence-2026-08-02.json)
 - R4C2c committed-reader implementation unit: [`ops/r4c2c-supabase-committed-reader-plan-2026-08-02.md`](ops/r4c2c-supabase-committed-reader-plan-2026-08-02.md)
+- R4C2c committed-reader remote evidence: [`ops/r4c2c-supabase-committed-reader-evidence-2026-08-02.md`](ops/r4c2c-supabase-committed-reader-evidence-2026-08-02.md)
+- R4C2c committed-reader machine-readable evidence: [`ops/r4c2c-supabase-committed-reader-evidence-2026-08-02.json`](ops/r4c2c-supabase-committed-reader-evidence-2026-08-02.json)
 - Completed R3 plan: [`ops/r3-adapter-reader-integration-plan-2026-08-01.md`](ops/r3-adapter-reader-integration-plan-2026-08-01.md)
 - Runtime invariants: [`history-runtime-contract.md`](history-runtime-contract.md)
 - Resource gates: [`resource-envelope.md`](resource-envelope.md)
@@ -60,6 +62,7 @@ The halted Cloudflare deployment is rollback context and historical evidence onl
 - R4C2c seven-class remote executor implementation: PR #1112, merge `9bd01c94f891f72f7e04c54ebb106f55fa475d37`.
 - Supabase prebundle and Cloudflare-transport separation: PRs #1113 and #1114, final merge `fa275a6372cd8d9ee3a486b5e65b530ffc421eb1`.
 - R4C2c remote deployment evidence reconciliation: PR #1115, merge `805f0fca31e763abd3f65555019e5e8d2317124b`.
+- R4C2c qualification-only committed reader: PR #1116, merge `5b3a1843743c3cada0061ea51f00d5612651490a`.
 
 ## R3 completion
 
@@ -121,38 +124,47 @@ This closes the initial remote portions of G3 and G4 for one validated-ledger wo
 
 ### R4C2c — Seven-class remote collector and reader/transfer parity
 
-Status: **remote executor deployed and schema-3 verifier passed; committed-reader implementation pending remote proof; remaining R4C2c evidence active**.
+Status: **remote executor and validated-ledger committed reader verified; remaining six-class, transfer, and fault evidence active**.
 
-Run `30735822415` succeeded on main commit `fa275a6372cd8d9ee3a486b5e65b530ffc421eb1` after the Supabase dependency graph was separated from the Cloudflare RPC transport.
+Run `30735822415` on main commit `fa275a6372cd8d9ee3a486b5e65b530ffc421eb1` proved deployment of the seven-class executor. It retained one `validated-ledger` row and zero rows in the other six semantic classes.
 
-Retained deployment evidence:
+Run `30737493360` on main commit `5b3a1843743c3cada0061ea51f00d5612651490a` deployed the qualification-only committed reader and passed both remote verifiers on attempt `1`.
 
-- bundle bytes: `103,351`;
-- bundle SHA-256: `e7e4b58f5a841c3f5dd85cc024235f8f33b0db8a49d4956c00b056a4385139f8`;
+Retained committed-reader evidence:
+
+- reader bundle bytes: `17,636`;
+- reader bundle SHA-256: `cd58239dc91cfe61828216e7de3e0e711984b6d2c62295dad45bf083e7f04d03`;
 - unresolved relative imports: `0`;
 - Cloudflare runtime imports: `0`;
-- verifier schema: `3`;
-- phase epoch: `supabase-r4c2c-v1`;
-- immutable base ledger: `4,132,417`;
-- committed watermark ledger: `4,132,418`;
-- committed watermark hash: `F19EAD766B2B052513A08A0131F40B41E77C6DA273CE9C775ECC380E2FB02072`;
-- completed ticks: `573`;
-- consecutive failures at the evidence fence: `0`;
+- one-run verifier token: rotated and masked, value not retained;
+- fence ledger: `4,132,435`;
+- fence hash: `CB19F0E00E3314DA18D4C17AFFEDF1C7F120D46FAC6634DDCFC81A259011CBB6`;
+- fence work: `collector-work-v1:devnet:supabase-r4c2c-v1:seven-class-base-4132417-C9A7A89077EA7F54EBC296EE95E6AE45601088DDA5CFC5538A435C4A21E9CE77:4132435:6029F4EEB9DAE4535A8DF02FA19D5DC5EEF8E0F96366ED67CF6F32D6ADFE5977`;
+- collector completed ticks: `624`;
+- consecutive failures: `0`;
 - last error: `null`;
 - latest successor: `scan / pending / attempt 0`.
 
-The deployed executor and verifier use all seven semantic classes and passed ordered commit, committed-only visibility, semantic-count parity, and successor-continuation checks. The retained Devnet work contained no Lending transaction, so actual committed counts were one `validated-ledger` row and zero rows for protocol events, object changes, loan lifecycle, archived objects, balance history, and current projections.
+The reader remotely proved under one immutable fence:
 
-Two retained Cron runs immediately before the successful R4C2c runs failed with `base_mismatch: scan message scope is not R4C2b Devnet`. The activation recovery subsequently reached the new epoch and the verifier passed, but the transition must not be described as failure-free. The retained scan completed at attempt `241`; commit and finalize completed at attempt `1`.
+- two-page committed `validated-ledger` continuation;
+- deterministic ordering;
+- exact lookup parity;
+- ledger-range parity;
+- digest-tamper rejection;
+- query/order mismatch rejection;
+- cross-source rejection;
+- stale-fence rejection;
+- bounded maximum page limit `100`.
 
-PR #1116 implements a separate qualification-only Supabase committed reader with an atomic stream/watermark/work fence, committed-only exact/semantic/range/relationship reads, deterministic ordering, bounded pagination, and source/query/order/fence-bound SHA-256 cursors. It does not switch the application reader. No part of that reader may be credited under G5 until the exact main-branch bundle passes its remote verifier and the resulting evidence is retained.
+The reader fence and collector watermark matched exactly by ledger, hash, and work ID. This closes retained G5 fence/cursor evidence for `validated-ledger` only. It does not prove non-empty committed-reader behavior for the other six semantic classes or relationships.
 
 Remaining R4C2c work:
 
-1. capture non-empty real Devnet evidence for the other six semantic classes;
-2. prove class-complete identities and relationships remotely;
-3. prove true multi-chunk remote continuation;
-4. pass and retain remote committed-reader fence, pagination, exact/range parity, tamper, query/order, source, and stale-fence evidence;
+1. capture non-empty real Devnet evidence for protocol events, object changes, loan lifecycle, archived objects, balance history, and current projections;
+2. prove non-empty reader behavior and class-complete identities/relationships for those six classes;
+3. prove non-empty relationship queries;
+4. prove true multi-chunk remote continuation and reader behavior;
 5. implement exact collection, scheduler, publication, and maintenance export;
 6. prove empty-target restore with canonical parity and post-restore continuation;
 7. add remote interruption, retry, stale-lease, duplicate, and terminal-injection evidence.
@@ -181,7 +193,7 @@ Pass fixed 24-hour and seven-day evidence windows before reopening formal Devnet
 ## Operating restrictions
 
 - Do not describe the R4C2c deployment as complete seven-class qualification while six classes have only zero-count remote evidence.
-- Do not describe the committed-reader implementation as remotely verified before a successful main-branch verifier artifact is retained.
+- Do not describe the committed reader as class-complete; retained remote reader proof covers `validated-ledger` only.
 - Do not describe the retired Cloudflare collector as operating.
 - Do not restart the retired fixed-32-ledger runtime.
 - Do not select a profile before all R4 hard gates pass.
