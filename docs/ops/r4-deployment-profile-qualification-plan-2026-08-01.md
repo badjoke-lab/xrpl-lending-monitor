@@ -1,14 +1,16 @@
 # R4 deployment-profile qualification plan — 2026-08-01
 
-Status: controlling R4 contract. R0–R3, R4A, and R4B are complete on `main`. R4C1 implementation and validation passed in PR #1104 and are pending merge.
+Status: controlling R4 contract, updated `2026-08-02` after verified Supabase Free remote probe evidence.
 
-R4 is local and read-only. It selects no provider, creates no hosted resource, changes no billing state, deploys no collector, mutates no production data, changes no Queue or Cron, and keeps Mainnet disabled.
+R0–R3, R4A, R4B, and R4C1 are complete on `main`. R4C2 has verified remote deployment and one-minute Devnet probe execution, but the Supabase profile is not yet fully qualified or selected.
 
 Supporting artifacts:
 
 - initial matrix: [`r4-initial-profile-matrix-2026-08-01.json`](r4-initial-profile-matrix-2026-08-01.json)
-- R4B evidence: [`r4b-profile-qualification-evaluator-evidence-2026-08-01.md`](r4b-profile-qualification-evaluator-evidence-2026-08-01.md)
+- R4B evaluator evidence: [`r4b-profile-qualification-evaluator-evidence-2026-08-01.md`](r4b-profile-qualification-evaluator-evidence-2026-08-01.md)
 - R4C1 local SQLite evidence: [`r4c1-local-sqlite-service-evidence-2026-08-01.md`](r4c1-local-sqlite-service-evidence-2026-08-01.md)
+- R4C2 Supabase evidence: [`r4c2-supabase-remote-probe-evidence-2026-08-02.md`](r4c2-supabase-remote-probe-evidence-2026-08-02.md)
+- R4C2 machine-readable evidence: [`r4c2-supabase-remote-probe-evidence-2026-08-02.json`](r4c2-supabase-remote-probe-evidence-2026-08-02.json)
 
 ## Decision rule
 
@@ -16,14 +18,14 @@ No weighted score can override a hard gate.
 
 A profile is rejected or remains conditional when it requires or cannot disprove:
 
-- a payment method or credit-card verification;
+- a payment method or card verification;
 - a mandatory paid subscription;
 - automatic paid overage;
-- an unreliable external scheduler as the normal collection clock;
-- partial or non-transactional cursor advancement;
+- an unreliable external scheduler as the normal collector clock;
+- partial or non-transactional state advancement;
 - incomplete export or restore;
-- routine interactive dashboard or terminal operation;
-- production mutation before R5.
+- routine dashboard or terminal operation;
+- public or production mutation before an explicit R5 gate.
 
 R4 may conclude `no_profile_qualified`.
 
@@ -31,17 +33,17 @@ R4 may conclude `no_profile_qualified`.
 
 ### G1 — No mandatory payment or card
 
-The complete normal profile must require no paid plan, payment method, card verification, prepaid credit, or billing profile capable of creating new debt.
+The complete normal profile must require no paid plan, payment method, card verification, prepaid credit, or billing path capable of creating new debt.
 
 ### G2 — No automatic paid overage
 
-Quota exhaustion must fail closed without a charge. A paid plan with a configurable cap does not satisfy this project’s cardless zero-charge requirement.
+Quota exhaustion must fail closed without a charge.
 
 ### G3 — Durable internal scheduler
 
-Normal collection requires one-minute-or-finer continuation with exact message identity, availability, leases, stale reclaim, retries, atomic successor reservation, duplicate convergence, and terminal halt.
+Normal collection requires one-minute-or-finer continuation with exact identity, availability, leases, stale reclaim, retries, duplicate convergence, successor reservation, and terminal halt.
 
-GitHub Actions cannot own the normal collection clock.
+GitHub Actions may deploy and verify but cannot own the normal collector clock.
 
 ### G4 — Transactional phase completion
 
@@ -49,7 +51,7 @@ Phase mutation, current-message completion, and successor reservation must share
 
 ### G5 — Committed-only reads
 
-Uncommitted rows must never become public or shadow-authoritative. The profile must preserve atomic finalization, read fences, source-bound cursors, and integrity fail-closed behavior.
+Uncommitted rows must never become public or shadow-authoritative. The profile must preserve finalization, read fences, source-bound cursors, and integrity fail-closed behavior.
 
 ### G6 — Exact complete-state transfer
 
@@ -68,175 +70,160 @@ The profile must stop before request, query, write, CPU, memory, size, storage, 
 
 ### G9 — Operator independence
 
-Deploy, rollback, checkpoint, export, restore, evidence, halt, and credential-rotation paths must be scriptable and must not require routine dashboard or terminal operation.
+Deploy, rollback, checkpoint, export, restore, evidence, halt, and credential rotation must be scriptable without routine dashboard or terminal operation.
 
 ### G10 — Production boundary
 
-R4 cannot restart the retired collector, create a production scheduler, mutate production, switch the public reader, enable Mainnet, or start catch-up, stabilization, qualification slots, or soak.
+R4 cannot restart the retired Cloudflare collector, switch the public reader, enable Mainnet, start catch-up, start stabilization slots, or start soak.
 
-## Initial profile classification
+## Current candidate classification
 
-### Conditional candidates
+### Supabase Free Postgres plus pg_cron and Edge Functions
 
-- **Cardless self-hosted SQLite service** — closest to the proven reference semantics; R4C1 now proves local file-backed process and scheduler recovery, but throughput, full resource envelopes, and actual always-on operations remain unresolved.
-- **Supabase Free Postgres plus pg_cron/Edge Functions** — cardless creation, exact atomic scheduler ownership, complete-state transfer, provider pausing, storage stop thresholds, WebSocket support, and throughput remain unproven.
-- **Turso Free storage plus cardless self-hosted executor** — storage is cardless and quotas fail closed, but scheduler/executor, cross-service atomicity, network interruption, archive behavior, and complete-state transfer remain unproven.
+Current status: **remotely verified conditional candidate; not selected**.
 
-### Blocked
+Verified by workflow run `30709474048` on main commit `ca5c029311a3a50404eedb4ea3f7a0e5c2735c30`:
 
-- **Existing Cloudflare Workers/D1/Queues profile** — blocked until account access and zero-additional-charge operation are proved. No payment method, plan, billing mutation, or remote deployment is permitted. Separate CPU, subrequest, D1, Queue, transaction, and complete-state blockers remain.
+- cardless project creation completed;
+- GitHub production integration completed;
+- Vault secrets registered;
+- migration applied remotely;
+- Edge Function deployed remotely;
+- one-minute `pg_cron` schedule executed repeatedly;
+- short-lived transactional lease completed and released;
+- Devnet ledger observation completed repeatedly;
+- sanitized evidence uploaded without secret disclosure.
 
-### Rejected
+Retained state at `2026-08-01T17:03:16.005Z`:
 
-- **GitHub Actions-only collector** — scheduled workflows cannot satisfy the normal durable internal clock and catch-up guarantees.
-- **Deno Deploy Free managed runtime** — unrestricted Free use requires credit-card verification and the current beta has no uptime guarantee.
+- tick count: `10`;
+- recent Cron runs: `5/5 completed`;
+- consecutive failures: `0`;
+- latest Devnet ledger: `4,123,382`;
+- last error: `null`.
 
-No profile is selected.
+This closes the initial uncertainty around project creation, remote deployment, one-minute scheduling, and unattended redeployment. It does not close the complete R4 profile gates.
 
-## Machine-readable evaluator
+Remaining Supabase blockers:
 
-R4B is complete on `main` in PR #1103, merge `683c3b65fc31a2c8ffde289b1c607b94890219de`.
+- G3: prove the full portable scheduler identity, retry, stale reclaim, and successor chain remotely;
+- G4: prove atomic scan/commit/finalize phase completion remotely;
+- G5: prove committed-only reader semantics and cursor fences remotely;
+- G6: prove exact complete-state export and empty-target restore remotely;
+- G7: measure sustained steady and catch-up throughput;
+- G8: measure Free-plan resource headroom and fail-closed thresholds;
+- G9: prove scripted rollback, export, restore, halt, and credential rotation without dashboard use.
 
-The evaluator provides:
+G1, G2, and G10 remain subject to retained evidence and later R4B re-evaluation; the current remote probe alone does not authorize a final pass or selection.
 
-- exact profile ID, revision, label, and component identity;
-- canonical SHA-256 profile identity digest;
-- exactly one profile-bound evidence record for each of `G1`–`G10`;
-- deterministic rejected, conditional, or qualified classification;
-- permanent `selection: not_selected` before R4E;
-- scoring prohibition while any gate fails or remains unresolved;
-- exact ten-dimension scorecards only after every gate passes;
-- canonical decision artifacts and decision digests.
+### Cardless self-hosted SQLite service
 
-Final R4B CI run `30703646271` passed the complete ordinary CI suite.
+Current status: **conditional candidate; not selected**.
 
-## Qualification scorecard
+R4C1 proves local crash/reopen persistence, scheduler-state survival, exact-expiry process-lease reclaim, backoff, graceful stop, and terminal halt. G7, G8, and actual always-on G9 evidence remain unresolved.
 
-Only a profile passing every hard gate can receive scores from `0` to `5` for:
+### Turso Free plus cardless executor
 
-- cost-safety headroom;
-- scheduler durability;
-- transaction fidelity;
-- resource headroom;
-- complete-state portability;
-- observability and evidence quality;
-- deployment and rollback automation;
-- operator independence;
-- public-read integration safety;
-- long-term maintenance burden.
+Current status: **conditional candidate; not selected**.
 
-Scoring does not select a profile. Selection belongs to R4E.
+Transaction, interruption, complete-state transfer, scheduler/executor ownership, and quota behavior remain unproven.
 
-## R4C1 — Local service-managed SQLite harness
+### Existing Cloudflare Workers/D1/Queues profile
 
-Status: **implementation and validation passed in PR #1104; merge pending**.
+Current status: **blocked**.
 
-### Delivered
+No payment method, billing mutation, remote deployment, or restart is permitted. Existing account and resource-limit blockers remain.
 
-Migration `10008` and the local supervisor reference implementation prove:
+### Rejected profiles
 
-- idempotent initialization;
-- process generations;
-- file-backed SQLite WAL and `synchronous = FULL` persistence;
-- fresh process-lease theft rejection;
-- exact-expiry stale process-lease reclaim after database close/reopen;
-- scheduler state persistence across process restart;
-- process lease and scheduler message lease separation;
-- heartbeat persistence;
-- retryable failure with explicit restart time;
-- early restart rejection;
-- graceful stop;
-- terminal halt with no automatic restart;
-- canonical event evidence.
+- GitHub Actions-only collector: scheduled workflows cannot satisfy the normal durable internal clock and catch-up guarantees.
+- Deno Deploy Free managed runtime: card verification and uptime constraints violate the current project gates.
 
-The local process lease is intentionally host-local and is not transferred through the portable cross-host complete-state envelope.
+## R4B evaluator
 
-### R4B result
+The evaluator binds exactly one evidence record for each G1–G10 gate to a canonical profile identity and revision. It forbids scoring while any gate fails or remains unresolved and keeps selection at `not_selected` before R4E.
 
-The machine-readable R4C1 decision is:
+The next Supabase evaluator revision must use the retained remote artifact and must not upgrade unresolved complete-collector gates based on the probe alone.
 
-- `conditional_candidate`;
-- `not_selected`;
-- ineligible for scoring;
-- 7 gates passed;
-- 0 gates failed;
-- G7, G8, and G9 unresolved.
+## R4C2 schedule
 
-Local crash and scheduler recovery prove neither the throughput gate nor an always-on production host.
+### R4C2a — Remote probe bootstrap
 
-### Validation
+Status: **complete**.
 
-Implementation and evidence head `0b9cf6b7f42aee4ac1fb93758d8c5cbfedff0f1a` passed CI run `30704517323`: workflow guard, lint, shell and canonical-base checks, type-check, production runner checks, complete unit suite, clean migrations through `10008`, build, and browser smoke.
+Delivered:
 
-## R4C2 — Local Postgres transaction and scheduler semantics
+- Supabase migration and schema;
+- Vault-backed Cron authentication;
+- one-minute `pg_cron` invocation;
+- Devnet ledger Edge Function;
+- short-lived transactional lease RPCs;
+- sanitized health endpoint;
+- unattended GitHub deploy and verification workflow;
+- retained remote evidence.
 
-Status: **next after PR #1104 merges**.
+### R4C2b — Remote portable scheduler and phase chain
 
-R4C2 must prove locally, without a hosted Supabase project or credential:
+Status: **next**.
 
-- serializable or equivalent phase ownership;
-- atomic work mutation, message completion, and successor reservation;
-- deterministic message identity and availability;
+Required evidence:
+
+- durable exact message identity;
+- pending, leased, completed, retry, and terminal states;
 - fresh-lease rejection and stale reclaim;
-- retry and duplicate convergence;
-- committed-only reads;
-- publication and maintenance separation;
-- complete-state export and empty-target restore;
-- interruption rollback.
+- atomic work mutation, message completion, and successor reservation;
+- duplicate convergence;
+- interruption rollback;
+- scan → commit → finalize → next scan continuation.
 
-Postgres availability on CI or the local harness is an implementation detail, not provider qualification.
+### R4C2c — Remote reader and complete-state parity
+
+Required evidence:
+
+- committed-only visibility;
+- immutable read fences;
+- source/query/order-bound cursors;
+- all seven semantic classes;
+- exact collection, scheduler, publication, and maintenance export;
+- empty-target restore with canonical parity;
+- post-restore continuation.
+
+### R4C2d — Throughput and resource qualification
+
+Required evidence:
+
+- steady p95 above `21` committed ledgers/minute;
+- catch-up above `30` committed ledgers/minute;
+- CPU, memory, database, Function invocation, bandwidth, and connection measurements;
+- explicit fail-closed stop thresholds before Free-plan ceilings;
+- retained no-charge evidence.
+
+### R4C2e — R4B and R4E decision
+
+Produce either:
+
+- a fully gate-passing Supabase decision eligible for scoring and R4E selection; or
+- a conditional/rejected decision with exact remaining blockers.
+
+No schedule pressure can promote a conditional candidate.
 
 ## Later R4 stages
 
-### R4C3 — Local libSQL/Turso-compatible harness
+- R4C3: local or isolated libSQL/Turso-compatible harness if still necessary after Supabase results.
+- R4C4: local Cloudflare resource model only; existing remote Cloudflare profile remains blocked.
+- R4D: longer read-only or isolated shadow measurement after cost-safety gates remain proved.
+- R4E: select one fully qualified profile or record `no_profile_qualified`.
 
-Test transaction, interruption, complete-state, and quota-model behavior without cloud credentials.
+## Production boundary
 
-### R4C4 — Local Cloudflare resource model
+The Supabase remote probe is not the retired production collector and is not the full portable collector.
 
-Model Workers, D1, and Queue ceilings without deployment or account mutation. The existing Cloudflare profile remains blocked regardless of a theoretical resource pass until zero-additional-charge operation is proved.
+R4 still forbids:
 
-### R4D — Read-only shadow measurement
-
-A profile reaches R4D only after G1 and G2 are proved. Required evidence includes exact plan and limits, no card/payment requirement, no automatic overage, isolated read-only probes, measured latency and resource usage, and no production or public-reader mutation.
-
-### R4E — Selection or no-qualified-profile decision
-
-R4E produces exactly one of:
-
-- `qualified_profile_selected` with complete evidence and an explicit R5 proposal; or
-- `no_profile_qualified` with failed gates and next engineering actions.
-
-A conditional candidate cannot be promoted by schedule pressure.
-
-## Official evidence snapshot
-
-Accessed `2026-08-01`:
-
-- Cloudflare Workers limits: <https://developers.cloudflare.com/workers/platform/limits/>
-- Cloudflare D1 limits: <https://developers.cloudflare.com/d1/platform/limits/>
-- Cloudflare Queues limits: <https://developers.cloudflare.com/queues/platform/limits/>
-- GitHub Actions scheduled workflows: <https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule>
-- Deno Deploy billing verification: <https://docs.deno.com/deploy/changelog/>
-- Deno Deploy beta limits: <https://docs.deno.com/deploy/pricing_and_limits/>
-- Supabase cost controls: <https://supabase.com/docs/guides/platform/cost-control>
-- Supabase Free project pausing: <https://supabase.com/docs/guides/platform/free-project-pausing>
-- Supabase Edge Function limits: <https://supabase.com/docs/guides/functions/limits>
-- Turso pricing: <https://turso.tech/pricing>
-- Turso quota behavior: <https://docs.turso.tech/help/usage-and-billing>
-- Turso inactive Free database behavior: <https://docs.turso.tech/cli/group/unarchive>
-
-Provider documentation is qualification input, not operating proof. It must be captured again before any later shadow measurement.
-
-## R4C1 exit
-
-R4C1 passes only when:
-
-- file-backed supervisor and scheduler state survive process reopen;
-- fresh and stale leases behave exactly;
-- retry, backoff, graceful stop, and terminal halt fail closed;
-- the R4B decision remains conditional and unscored;
-- no always-on host or production claim is made;
-- no provider SDK, credential, payment, hosted resource, or remote mutation is introduced;
-- production remains fail-closed;
-- ordinary CI passes.
+- public-reader cutover;
+- Mainnet enablement;
+- recovery declaration;
+- lag-zero declaration;
+- qualification slots;
+- 24-hour or seven-day soak;
+- removal of legacy rollback evidence.
