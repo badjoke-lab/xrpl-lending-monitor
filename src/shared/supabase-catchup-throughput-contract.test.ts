@@ -130,10 +130,10 @@ describe('Supabase R4C2d isolated catch-up throughput contract', () => {
     expect(publisher).toContain('failed-catchup-throughput-verification.json')
   })
 
-  it('deploys the eleventh function through the existing single guarded workflow', () => {
+  it('keeps the eleventh function in the expanded single guarded workflow', () => {
     expect(config).toContain('[functions.xrpl-catchup-throughput]')
     expect(config.match(/verify_jwt = false/g)).toHaveLength(9)
-    expect(config.match(/verify_jwt=false/g)).toHaveLength(2)
+    expect(config.match(/verify_jwt=false/g)).toHaveLength(4)
     for (const required of [
       "'supabase/functions/xrpl-catchup-throughput/index.ts'",
       'catchup-throughput-bundle.json',
