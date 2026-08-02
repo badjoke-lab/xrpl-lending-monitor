@@ -20,8 +20,16 @@ describe('R4C2 Supabase remote portable collector contract', () => {
   const sevenClassMigration = read(
     'supabase/migrations/20260802104000_xrpl_remote_seven_class_payload.sql',
   )
+  const activationGuard = read(
+    'supabase/migrations/20260802104100_xrpl_remote_seven_class_activation_guard.sql',
+  )
+  const guardedClaim = read(
+    'supabase/migrations/20260802104200_xrpl_guarded_phase_claim.sql',
+  )
   const edgeFunction = read('supabase/functions/xrpl-collector-tick/index.ts')
-  const normalization = read('src/shared/portable-collector-xrpl-normalization.ts')
+  const normalization = read(
+    'src/collector/history-segments/portable-xrpl-normalization.ts',
+  )
   const verifier = read('scripts/verify-supabase-remote-probe.mjs')
   const workflow = read('.github/workflows/supabase-remote-probe.yml')
   const config = read('supabase/config.toml')
@@ -118,7 +126,7 @@ describe('R4C2 Supabase remote portable collector contract', () => {
 
   it('reuses the existing XRPL and portable normalization stack for all seven classes', () => {
     for (const required of [
-      "from '../collector/history-segments/build-segment-records'",
+      "from './build-segment-records'",
       'buildHistorySegmentRecords',
       'buildNormalizedCollectorPayload',
       'buildNormalizedPayloadChunks',
@@ -187,6 +195,24 @@ describe('R4C2 Supabase remote portable collector contract', () => {
     expect(scanSql).not.toContain('insert into public.xrpl_phase_reference_rows')
     expect(commitSql).toContain('insert into public.xrpl_phase_reference_rows')
     expect(commitSql).toContain('v_payload_record')
+  })
+
+  it('limits activation-race recovery to the uncommitted R4C2c boundary', () => {
+    for (const required of [
+      'create or replace function public.xrpl_ensure_remote_seven_class_epoch',
+      "v_stream.epoch_id <> 'supabase-r4c2c-v1'",
+      'v_committed_count <> 0',
+      "v_stream.last_error_classification not in ('base_mismatch', 'epoch_mismatch')",
+      "coalesce(v_stream.last_error_message, '') not like '%R4C2b%'",
+      "status = 'pending'",
+      "status = 'active'",
+      "'reason', 'terminal_halt'",
+    ]) {
+      expect(activationGuard).toContain(required)
+    }
+    expect(guardedClaim).toContain('public.xrpl_ensure_remote_seven_class_epoch(p_now)')
+    expect(guardedClaim).toContain("'reason', coalesce(v_epoch->>'reason'")
+    expect(guardedClaim).toContain('for update skip locked')
   })
 
   it('executes one durable phase per Cron tick through the R4C2c RPCs', () => {
