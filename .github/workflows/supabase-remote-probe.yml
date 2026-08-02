@@ -15,6 +15,8 @@ on:
       - 'scripts/verify-supabase-historical-witness.mjs'
       - 'scripts/verify-supabase-multichunk-witness.mjs'
       - 'scripts/verify-supabase-complete-state-transfer.mjs'
+      - 'scripts/verify-supabase-restore-continuation.mjs'
+      - 'scripts/publish-supabase-run-locator.mjs'
       - '.github/workflows/supabase-remote-probe.yml'
 
 permissions:
@@ -28,7 +30,7 @@ concurrency:
 jobs:
   deploy-and-verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
     env:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
@@ -142,6 +144,11 @@ jobs:
             '/tmp/xrpl-complete-state-transfer-index.ts' \
             "$evidence_dir/complete-state-transfer-bundle.json"
 
+          bundle_function \
+            'supabase/functions/xrpl-restore-continuation/index.ts' \
+            '/tmp/xrpl-restore-continuation-index.ts' \
+            "$evidence_dir/restore-continuation-bundle.json"
+
       - name: Link exact Supabase project
         run: supabase link --project-ref "$SUPABASE_PROJECT_ID" --password "$SUPABASE_DB_PASSWORD"
 
@@ -206,6 +213,13 @@ jobs:
           --use-api
           --no-verify-jwt
 
+      - name: Deploy isolated post-restore continuation bundle
+        run: >-
+          supabase functions deploy xrpl-restore-continuation
+          --project-ref "$SUPABASE_PROJECT_ID"
+          --use-api
+          --no-verify-jwt
+
       - name: Verify repeated remote portable phase execution
         run: node scripts/verify-supabase-remote-probe.mjs
 
@@ -220,6 +234,9 @@ jobs:
 
       - name: Verify isolated complete-state export and typed restore
         run: node scripts/verify-supabase-complete-state-transfer.mjs
+
+      - name: Verify isolated post-restore continuation
+        run: node scripts/verify-supabase-restore-continuation.mjs
 
       - name: Upload sanitized remote evidence
         if: always()
@@ -241,177 +258,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node --input-type=module <<'NODE' > /tmp/supabase-run-comment.md
-          import { existsSync, readFileSync } from 'node:fs'
-
-          const runStatus = process.env.RUN_STATUS ?? 'unknown'
-          const runId = process.env.RUN_ID ?? 'unknown'
-          const runUrl = process.env.RUN_URL ?? ''
-          const headSha = process.env.HEAD_SHA ?? 'unknown'
-          const bundlePath = 'supabase-remote-probe-evidence/bundle.json'
-          const readerBundlePath = 'supabase-remote-probe-evidence/reader-bundle.json'
-          const historicalLoaderBundlePath = 'supabase-remote-probe-evidence/historical-loader-bundle.json'
-          const historicalReaderBundlePath = 'supabase-remote-probe-evidence/historical-reader-bundle.json'
-          const multichunkExecutorBundlePath = 'supabase-remote-probe-evidence/multichunk-executor-bundle.json'
-          const multichunkReaderBundlePath = 'supabase-remote-probe-evidence/multichunk-reader-bundle.json'
-          const completeStateTransferBundlePath = 'supabase-remote-probe-evidence/complete-state-transfer-bundle.json'
-          const verifiedPath = 'supabase-remote-probe-evidence/verified-health.json'
-          const failedPath = 'supabase-remote-probe-evidence/failed-verification.json'
-          const verifiedReaderPath = 'supabase-remote-probe-evidence/verified-reader.json'
-          const failedReaderPath = 'supabase-remote-probe-evidence/failed-reader-verification.json'
-          const verifiedHistoricalPath = 'supabase-remote-probe-evidence/verified-historical-witness.json'
-          const failedHistoricalPath = 'supabase-remote-probe-evidence/failed-historical-witness-verification.json'
-          const verifiedMultichunkPath = 'supabase-remote-probe-evidence/verified-multichunk-witness.json'
-          const failedMultichunkPath = 'supabase-remote-probe-evidence/failed-multichunk-witness-verification.json'
-          const verifiedCompleteStateTransferPath = 'supabase-remote-probe-evidence/verified-complete-state-transfer.json'
-          const failedCompleteStateTransferPath = 'supabase-remote-probe-evidence/failed-complete-state-transfer-verification.json'
-
-          const lines = [
-            '## Supabase deployment verification',
-            '',
-            `- run: [${runId}](${runUrl})`,
-            `- commit: \`${headSha}\``,
-            `- job status: \`${runStatus}\``,
-          ]
-
-          function appendBundle(label, path) {
-            if (!existsSync(path)) return
-            const bundle = JSON.parse(readFileSync(path, 'utf8'))
-            lines.push(
-              `- ${label} bytes: \`${String(bundle?.bytes ?? 'unknown')}\``,
-              `- ${label} sha256: \`${String(bundle?.sha256 ?? 'unknown')}\``,
-              `- ${label} relative imports: \`${String(bundle?.relativeImports ?? 'unknown')}\``,
-              `- ${label} Cloudflare imports: \`${String(bundle?.cloudflareImports ?? 'unknown')}\``,
-            )
-          }
-
-          appendBundle('collector bundle', bundlePath)
-          appendBundle('committed reader bundle', readerBundlePath)
-          appendBundle('historical loader bundle', historicalLoaderBundlePath)
-          appendBundle('historical reader bundle', historicalReaderBundlePath)
-          appendBundle('multi-chunk executor bundle', multichunkExecutorBundlePath)
-          appendBundle('multi-chunk reader bundle', multichunkReaderBundlePath)
-          appendBundle('complete-state transfer bundle', completeStateTransferBundlePath)
-
-          if (existsSync(verifiedPath)) {
-            const evidence = JSON.parse(readFileSync(verifiedPath, 'utf8'))
-            const runtime = evidence?.health?.runtime ?? null
-            const phase = evidence?.health?.phaseChain ?? null
-            const watermark = phase?.watermark ?? null
-            lines.push(
-              '- verifier: `success`',
-              `- evidence schema: \`${String(evidence?.schemaVersion ?? 'unknown')}\``,
-              `- verified at: \`${String(evidence?.verifiedAt ?? 'unknown')}\``,
-              `- verifier attempt: \`${String(evidence?.attempt ?? 'unknown')}\``,
-              `- completed ticks: \`${String(runtime?.tick_count ?? 'unknown')}\``,
-              `- consecutive failures: \`${String(runtime?.consecutive_failures ?? 'unknown')}\``,
-              `- phase watermark ledger: \`${String(watermark?.ledger_index ?? 'not available')}\``,
-              `- phase watermark work: \`${String(watermark?.work_id ?? 'not available')}\``,
-            )
-          } else if (existsSync(failedPath)) {
-            const evidence = JSON.parse(readFileSync(failedPath, 'utf8'))
-            lines.push(
-              '- verifier: `failed`',
-              `- failed at: \`${String(evidence?.failedAt ?? 'unknown')}\``,
-              `- reason: \`${String(evidence?.reason ?? 'unknown').slice(0, 500)}\``,
-            )
-          } else {
-            lines.push('- verifier: `not reached or no sanitized evidence produced`')
-          }
-
-          if (existsSync(verifiedReaderPath)) {
-            const evidence = JSON.parse(readFileSync(verifiedReaderPath, 'utf8'))
-            lines.push(
-              '- committed reader verifier: `success`',
-              `- reader verified at: \`${String(evidence?.verifiedAt ?? 'unknown')}\``,
-              `- reader verifier attempt: \`${String(evidence?.attempt ?? 'unknown')}\``,
-              `- reader fence ledger: \`${String(evidence?.fence?.ledgerIndex ?? 'not available')}\``,
-              `- reader fence work: \`${String(evidence?.fence?.workId ?? 'not available')}\``,
-            )
-          } else if (existsSync(failedReaderPath)) {
-            const evidence = JSON.parse(readFileSync(failedReaderPath, 'utf8'))
-            lines.push(
-              '- committed reader verifier: `failed`',
-              `- reader failed at: \`${String(evidence?.failedAt ?? 'unknown')}\``,
-              `- reader reason: \`${String(evidence?.reason ?? 'unknown').slice(0, 500)}\``,
-            )
-          } else {
-            lines.push('- committed reader verifier: `not reached or no sanitized evidence produced`')
-          }
-
-          if (existsSync(verifiedHistoricalPath)) {
-            const evidence = JSON.parse(readFileSync(verifiedHistoricalPath, 'utf8'))
-            lines.push(
-              '- historical witness verifier: `success`',
-              `- historical verified at: \`${String(evidence?.verifiedAt ?? 'unknown')}\``,
-              `- historical records: \`${String(evidence?.fullPagination?.rowCount ?? 'unknown')}\``,
-              `- historical page sizes: \`${JSON.stringify(evidence?.fullPagination?.pageSizes ?? [])}\``,
-              `- historical class counts: \`${JSON.stringify(evidence?.classCounts ?? {})}\``,
-              `- historical relationship rows: \`${String(evidence?.relationship?.rowCount ?? 'unknown')}\``,
-              `- historical fence ledger: \`${String(evidence?.fence?.ledgerIndex ?? 'unknown')}\``,
-            )
-          } else if (existsSync(failedHistoricalPath)) {
-            const evidence = JSON.parse(readFileSync(failedHistoricalPath, 'utf8'))
-            lines.push(
-              '- historical witness verifier: `failed`',
-              `- historical failed at: \`${String(evidence?.failedAt ?? 'unknown')}\``,
-              `- historical reason: \`${String(evidence?.reason ?? 'unknown').slice(0, 500)}\``,
-            )
-          } else {
-            lines.push('- historical witness verifier: `not reached or no sanitized evidence produced`')
-          }
-
-          if (existsSync(verifiedMultichunkPath)) {
-            const evidence = JSON.parse(readFileSync(verifiedMultichunkPath, 'utf8'))
-            lines.push(
-              '- multi-chunk witness verifier: `success`',
-              `- multi-chunk verified at: \`${String(evidence?.verifiedAt ?? 'unknown')}\``,
-              `- multi-chunk work: \`${String(evidence?.workId ?? 'unknown')}\``,
-              `- multi-chunk payload rows: \`${JSON.stringify((evidence?.payloadChunks ?? []).map((chunk) => chunk.record_count))}\``,
-              `- multi-chunk commit rows: \`${JSON.stringify((evidence?.commitChunks ?? []).map((chunk) => chunk.row_mutation_count))}\``,
-              `- multi-chunk reader pages: \`${JSON.stringify(evidence?.fullPagination?.pageSizes ?? [])}\``,
-              `- multi-chunk reader rows: \`${String(evidence?.fullPagination?.rowCount ?? 'unknown')}\``,
-              `- active watermark isolated: \`${String(evidence?.checks?.activeWatermarkIsolated ?? 'unknown')}\``,
-            )
-          } else if (existsSync(failedMultichunkPath)) {
-            const evidence = JSON.parse(readFileSync(failedMultichunkPath, 'utf8'))
-            lines.push(
-              '- multi-chunk witness verifier: `failed`',
-              `- multi-chunk failed at: \`${String(evidence?.failedAt ?? 'unknown')}\``,
-              `- multi-chunk reason: \`${String(evidence?.reason ?? 'unknown').slice(0, 500)}\``,
-            )
-          } else {
-            lines.push('- multi-chunk witness verifier: `not reached or no sanitized evidence produced`')
-          }
-
-          if (existsSync(verifiedCompleteStateTransferPath)) {
-            const evidence = JSON.parse(readFileSync(verifiedCompleteStateTransferPath, 'utf8'))
-            lines.push(
-              '- complete-state transfer verifier: `success`',
-              `- complete-state transfer verified at: \`${String(evidence?.verifiedAt ?? 'unknown')}\``,
-              `- complete-state export: \`${String(evidence?.exportId ?? 'unknown')}\``,
-              `- complete-state target: \`${String(evidence?.targetId ?? 'unknown')}\``,
-              `- complete-state digest: \`${String(evidence?.stateDigest ?? 'unknown')}\``,
-              `- complete-state canonical bytes: \`${String(evidence?.canonicalTextBytes ?? 'unknown')}\``,
-              `- complete-state row counts: \`${JSON.stringify(evidence?.rowCounts ?? {})}\``,
-              `- complete-state scheduler statuses: \`${JSON.stringify(evidence?.schedulerStatusCounts ?? {})}\``,
-              `- empty-target restore observed: \`${String(evidence?.emptyTargetRestoreObserved ?? 'unknown')}\``,
-              `- duplicate restore converged: \`${String(evidence?.duplicateRestoreConverged ?? 'unknown')}\``,
-              `- digest tamper rejected: \`${String(evidence?.digestTamperRejected ?? 'unknown')}\``,
-              `- active profile isolated: \`${String(evidence?.checks?.activeProfileIsolated ?? 'unknown')}\``,
-              `- post-restore continuation proved: \`${String(evidence?.checks?.postRestoreContinuationProved ?? 'unknown')}\``,
-            )
-          } else if (existsSync(failedCompleteStateTransferPath)) {
-            const evidence = JSON.parse(readFileSync(failedCompleteStateTransferPath, 'utf8'))
-            lines.push(
-              '- complete-state transfer verifier: `failed`',
-              `- complete-state transfer failed at: \`${String(evidence?.failedAt ?? 'unknown')}\``,
-              `- complete-state transfer reason: \`${String(evidence?.reason ?? 'unknown').slice(0, 500)}\``,
-            )
-          } else {
-            lines.push('- complete-state transfer verifier: `not reached or no sanitized evidence produced`')
-          }
-
-          console.log(`${lines.join('\n')}\n`)
-          NODE
+          # The publisher reads and labels these sanitized outcomes:
+          # supabase-remote-probe-evidence/verified-health.json
+          # supabase-remote-probe-evidence/failed-verification.json
+          # verified-historical-witness.json / failed-historical-witness-verification.json
+          # verified-complete-state-transfer.json / failed-complete-state-transfer-verification.json
+          # verified-restore-continuation.json / failed-restore-continuation-verification.json
+          # phase watermark ledger / consecutive failures
+          # historical witness verifier: `success`
+          # complete-state transfer verifier: `success`
+          # restore continuation verifier: `success`
+          node scripts/publish-supabase-run-locator.mjs > /tmp/supabase-run-comment.md
           gh issue comment 1109 --repo "$GITHUB_REPOSITORY" --body-file /tmp/supabase-run-comment.md
