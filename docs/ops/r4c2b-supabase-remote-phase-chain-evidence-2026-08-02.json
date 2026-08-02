@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "evidenceType": "r4c2b_supabase_remote_phase_chain",
+  "verifiedAt": "2026-08-02T01:17:22.860Z",
+  "workflowRunId": 30726776731,
+  "workflowCommit": "c6446d8c5f336665e1f873c34c30556ec0c907bd",
+  "artifact": {
+    "id": 8826618235,
+    "digest": "sha256:526f594c2ef16a6abe9c7b442c7a43952c19f9f8dee7149a72c12ed5f6de107c",
+    "name": "supabase-remote-probe-evidence"
+  },
+  "profile": {
+    "profileId": "supabase-devnet",
+    "network": "devnet",
+    "phaseEpochId": "supabase-r4c2b-v1",
+    "baseIdentity": "probe-base-4132391-568EB96802AF699D0F1E469CE95662AAA3727E043ED84D46F3487BAD2FBD42A5",
+    "immutableBaseLedgerIndex": 4132391,
+    "immutableBaseLedgerHash": "568EB96802AF699D0F1E469CE95662AAA3727E043ED84D46F3487BAD2FBD42A5"
+  },
+  "runtime": {
+    "tickCount": 504,
+    "consecutiveFailures": 0,
+    "lastError": null,
+    "lastValidatedLedgerIndex": 4132619,
+    "lastValidatedLedgerHash": "AF80B4626FEEE030A343290B4C0BD0CED6BDC1A7DE8EB1197A53B3858898942C"
+  },
+  "phaseChain": {
+    "watermarkLedgerIndex": 4132395,
+    "watermarkLedgerHash": "63B0C8EDE770DCA9591E9147CA036821AC5197B8AC2403A394D8C1AA8F9D9454",
+    "watermarkWorkId": "collector-work-v1:devnet:supabase-r4c2b-v1:probe-base-4132391-568EB96802AF699D0F1E469CE95662AAA3727E043ED84D46F3487BAD2FBD42A5:4132395:D7FC0DB59278EA99C4D88AC319487BB570D4C23C8DBD2AF277268EAE4DB0B583",
+    "retainedCommittedWorks": 4,
+    "retainedCommittedRows": 4,
+    "latestSuccessorStatus": "pending",
+    "latestSuccessorPhase": "scan",
+    "terminalMessageCount": 0,
+    "leaseAttemptCounts": [1]
+  },
+  "requirements": {
+    "minimumCompletedTicks": 2,
+    "minimumSuccessfulCronRuns": 2,
+    "network": "devnet",
+    "profileId": "supabase-devnet",
+    "phaseEpochId": "supabase-r4c2b-v1",
+    "requiredPhases": ["scan", "commit", "finalize"],
+    "committedOnlyVisibility": true,
+    "successorContinuation": true,
+    "consecutiveFailures": 0
+  },
+  "decision": {
+    "classification": "remote_verified_conditional_candidate",
+    "selection": "not_selected",
+    "scopeLimitations": [
+      "validated-ledger semantic class only",
+      "no committed reader cursor parity",
+      "no complete-state export/restore on Supabase",
+      "no throughput qualification",
+      "no sustained resource envelope",
+      "no public reader cutover",
+      "no Mainnet",
+      "no R5 recovery",
+      "no soak"
+    ]
+  }
+}
