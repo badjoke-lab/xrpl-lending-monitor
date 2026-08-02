@@ -24,7 +24,7 @@ The unit covers:
 ## Architecture
 
 ```text
-qualification request
+qualified workflow request with one-run token
   -> xrpl-committed-reader Edge Function
   -> service-role-only xrpl_read_committed_page RPC
   -> active supabase-r4c2c-v1 stream
@@ -33,6 +33,23 @@ qualification request
 ```
 
 The Edge Function is a qualification surface only. It is not linked from the application and is not a portable-primary or public-reader cutover.
+
+## Qualification access boundary
+
+The reader function has JWT verification disabled only because the existing Supabase API deployment path uses exact bundled Edge Functions with an explicit qualification guard. It is not left open behind a static public marker.
+
+For every main-branch deployment verification run, the guarded workflow:
+
+1. generates a fresh 32-byte random token with `openssl rand -hex 32`;
+2. registers the token with GitHub Actions masking before any remote command;
+3. replaces the Supabase `XRPL_READER_VERIFY_TOKEN` project secret;
+4. passes the same token to the verifier through `GITHUB_ENV`;
+5. sends it only in the `x-xrpl-reader-token` request header;
+6. never writes it to an artifact, Issue comment, repository file, or sanitized evidence record.
+
+The Edge Function also requires the fixed `x-xrpl-reader-purpose: r4c2c-qualification` header. Both the rotated token and purpose must match before the service-role RPC is reachable.
+
+A later run invalidates the previous run token. The token is a bounded qualification credential, not a public API key or application credential.
 
 ## Transaction and visibility boundary
 
@@ -89,17 +106,18 @@ The guarded main-branch Supabase workflow must prove all of the following from t
 
 1. zero unresolved relative imports;
 2. zero Cloudflare runtime imports;
-3. qualification-purpose header enforcement;
-4. valid Devnet R4C2c fence;
-5. two-page committed `validated-ledger` continuation under one immutable fence;
-6. deterministic ordering;
-7. exact lookup parity;
-8. ledger-range parity;
-9. digest-tamper rejection;
-10. query/order mismatch rejection;
-11. cross-source rejection using a correctly re-digested cursor;
-12. stale-fence rejection using a correctly re-digested cursor;
-13. bounded evidence artifact and Issue #1109 locator.
+3. masked one-run verifier-token rotation;
+4. qualification-purpose and token enforcement;
+5. valid Devnet R4C2c fence;
+6. two-page committed `validated-ledger` continuation under one immutable fence;
+7. deterministic ordering;
+8. exact lookup parity;
+9. ledger-range parity;
+10. digest-tamper rejection;
+11. query/order mismatch rejection;
+12. cross-source rejection using a correctly re-digested cursor;
+13. stale-fence rejection using a correctly re-digested cursor;
+14. bounded evidence artifact and Issue #1109 locator without the token value.
 
 A remote failure leaves the unit incomplete. Local tests or deployment success without the remote reader verifier do not satisfy G5.
 
