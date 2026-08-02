@@ -351,7 +351,7 @@ jobs:
               `- multi-chunk commit rows: \`${JSON.stringify((evidence?.commitChunks ?? []).map((chunk) => chunk.row_mutation_count))}\``,
               `- multi-chunk reader pages: \`${JSON.stringify(evidence?.fullPagination?.pageSizes ?? [])}\``,
               `- multi-chunk reader rows: \`${String(evidence?.fullPagination?.rowCount ?? 'unknown')}\``,
-              `- active watermark unchanged: \`${String(evidence?.checks?.activeWatermarkUnchanged ?? 'unknown')}\``,
+              `- active watermark isolated: \`${String(evidence?.checks?.activeWatermarkIsolated ?? 'unknown')}\``,
             )
           } else if (existsSync(failedMultichunkPath)) {
             const evidence = JSON.parse(readFileSync(failedMultichunkPath, 'utf8'))
