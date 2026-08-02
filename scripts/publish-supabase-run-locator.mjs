@@ -25,6 +25,7 @@ const bundles = [
   ['complete-state transfer bundle', 'complete-state-transfer-bundle.json'],
   ['restore continuation bundle', 'restore-continuation-bundle.json'],
   ['remote fault qualification bundle', 'remote-fault-qualification-bundle.json'],
+  ['throughput resource baseline bundle', 'throughput-resource-baseline-bundle.json'],
 ]
 for (const [label, name] of bundles) {
   const value = read(name)
@@ -177,6 +178,30 @@ appendVerification({
     `- terminal fail-closed halt proved: \`${String(value.checks?.terminalFailClosedHaltProved ?? 'unknown')}\``,
     `- active profile isolated: \`${String(value.checks?.activeProfileIsolated ?? 'unknown')}\``,
   ],
+})
+
+appendVerification({
+  successFile: 'verified-throughput-resource-baseline.json',
+  failureFile: 'failed-throughput-resource-baseline-verification.json',
+  label: 'throughput resource baseline verifier',
+  successLines: (value) => {
+    const hour = value.measurements?.find((entry) => entry.windowMinutes === 60) ?? {}
+    const sixHours = value.measurements?.find((entry) => entry.windowMinutes === 360) ?? {}
+    const day = value.measurements?.find((entry) => entry.windowMinutes === 1440) ?? {}
+    return [
+      `- throughput baseline verified at: \`${String(value.verifiedAt ?? 'unknown')}\``,
+      `- throughput baseline observed at: \`${String(value.observedAt ?? 'unknown')}\``,
+      `- 60m average/p95/max ledgers per minute: \`${String(hour.throughput?.averageLedgersPerMinute ?? 'unknown')} / ${String(hour.throughput?.p95LedgersPerMinute ?? 'unknown')} / ${String(hour.throughput?.maxLedgersPerMinute ?? 'unknown')}\``,
+      `- 6h average/p95/max ledgers per minute: \`${String(sixHours.throughput?.averageLedgersPerMinute ?? 'unknown')} / ${String(sixHours.throughput?.p95LedgersPerMinute ?? 'unknown')} / ${String(sixHours.throughput?.maxLedgersPerMinute ?? 'unknown')}\``,
+      `- 24h average/p95/max ledgers per minute: \`${String(day.throughput?.averageLedgersPerMinute ?? 'unknown')} / ${String(day.throughput?.p95LedgersPerMinute ?? 'unknown')} / ${String(day.throughput?.maxLedgersPerMinute ?? 'unknown')}\``,
+      `- database bytes: \`${String(day.storage?.databaseBytes ?? 'unknown')}\``,
+      `- payload max bytes: \`${String(day.payload?.maxBytes ?? 'unknown')}\``,
+      `- scheduler payload max bytes: \`${String(day.scheduler?.maxPayloadBytes ?? 'unknown')}\``,
+      `- G7 qualified: \`${String(value.baselineDecision?.g7Qualified ?? 'unknown')}\``,
+      `- G8 qualified: \`${String(value.baselineDecision?.g8Qualified ?? 'unknown')}\``,
+      `- active profile isolated: \`${String(value.checks?.activeProfileNonRegressing ?? 'unknown')}\``,
+    ]
+  },
 })
 
 process.stdout.write(`${lines.join('\n')}\n`)
