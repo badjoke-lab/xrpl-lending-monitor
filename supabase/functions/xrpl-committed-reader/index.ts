@@ -4,6 +4,7 @@ const PROFILE_ID = 'supabase-devnet'
 const SOURCE_ID = 'supabase-r4c2c-qualification'
 const EPOCH_ID = 'supabase-r4c2c-v1'
 const PURPOSE = 'r4c2c-qualification'
+const VERIFY_TOKEN_HEADER = 'x-xrpl-reader-token'
 const CURSOR_PREFIX = 'pcr1'
 const MAX_CURSOR_BYTES = 16_000
 const MAX_LIMIT = 100
@@ -199,6 +200,7 @@ Deno.serve(async (request) => {
   if (request.method !== 'POST') return response({ ok: false, code: 'method_not_allowed' }, 405)
   if (request.headers.get('x-xrpl-reader-purpose') !== PURPOSE) return response({ ok: false, code: 'qualification_guard' }, 403)
   try {
+    if (request.headers.get(VERIFY_TOKEN_HEADER) !== env('XRPL_READER_VERIFY_TOKEN')) return response({ ok: false, code: 'qualification_guard' }, 403)
     const body = object(await request.json(), 'invalid_query', 'request')
     return response({ ok: true, profileId: PROFILE_ID, ...await execute(body, env('SUPABASE_URL'), secretKey()) })
   } catch (error) {
