@@ -23,3 +23,6 @@ verify_jwt = false
 
 [functions.xrpl-restore-continuation]
 verify_jwt = false
+
+[functions.xrpl-remote-fault-qualification]
+verify_jwt = false
