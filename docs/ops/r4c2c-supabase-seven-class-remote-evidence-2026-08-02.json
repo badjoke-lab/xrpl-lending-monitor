@@ -1,0 +1,104 @@
+{
+  "schemaVersion": 1,
+  "evidenceType": "r4c2c_supabase_seven_class_remote_deployment",
+  "verifiedAt": "2026-08-02T06:26:09.963Z",
+  "workflowRunId": 30735822415,
+  "workflowCommit": "fa275a6372cd8d9ee3a486b5e65b530ffc421eb1",
+  "artifact": {
+    "id": 8829549604,
+    "digest": "sha256:4f5b7bc6baed555e8d8857bd2cdf328486fbe85d35f06b55cb0fdd9277341296",
+    "name": "supabase-remote-probe-evidence"
+  },
+  "bundle": {
+    "source": "supabase/functions/xrpl-collector-tick/index.ts",
+    "bytes": 103351,
+    "sha256": "e7e4b58f5a841c3f5dd85cc024235f8f33b0db8a49d4956c00b056a4385139f8",
+    "relativeImports": 0,
+    "cloudflareImports": 0,
+    "denoServeEntrypoint": true
+  },
+  "profile": {
+    "profileId": "supabase-devnet",
+    "network": "devnet",
+    "phaseEpochId": "supabase-r4c2c-v1",
+    "baseIdentity": "seven-class-base-4132417-C9A7A89077EA7F54EBC296EE95E6AE45601088DDA5CFC5538A435C4A21E9CE77",
+    "immutableBaseLedgerIndex": 4132417,
+    "immutableBaseLedgerHash": "C9A7A89077EA7F54EBC296EE95E6AE45601088DDA5CFC5538A435C4A21E9CE77",
+    "streamStatus": "active"
+  },
+  "runtime": {
+    "tickCount": 573,
+    "consecutiveFailures": 0,
+    "lastError": null,
+    "lastValidatedLedgerIndex": 4138592,
+    "lastValidatedLedgerHash": "5764D8667D346CAA5CBC16001FD695DC374C36EE1A4C879C5EAA5C9242D0B07F",
+    "recentCompletedRuns": 3,
+    "recentFailedRuns": 2,
+    "recentFailureMessages": [
+      "base_mismatch: scan message scope is not R4C2b Devnet",
+      "base_mismatch: scan message scope is not R4C2b Devnet"
+    ]
+  },
+  "phaseChain": {
+    "watermarkLedgerIndex": 4132418,
+    "watermarkLedgerHash": "F19EAD766B2B052513A08A0131F40B41E77C6DA273CE9C775ECC380E2FB02072",
+    "watermarkWorkId": "collector-work-v1:devnet:supabase-r4c2c-v1:seven-class-base-4132417-C9A7A89077EA7F54EBC296EE95E6AE45601088DDA5CFC5538A435C4A21E9CE77:4132418:C9A7A89077EA7F54EBC296EE95E6AE45601088DDA5CFC5538A435C4A21E9CE77",
+    "latestWorkStatus": "committed",
+    "payloadDigest": "ec90ebc68b8f96a8c95edca434215db96c2dc2cd6e5a3e35cae0a00dc12e721a",
+    "expectedPayloadChunks": 1,
+    "expectedCommitChunks": 1,
+    "scanAttemptCount": 241,
+    "commitAttemptCount": 1,
+    "finalizeAttemptCount": 1,
+    "latestSuccessorStatus": "pending",
+    "latestSuccessorPhase": "scan",
+    "latestSuccessorAttemptCount": 0
+  },
+  "semanticCounts": {
+    "validated-ledger": 1,
+    "protocol-event": 0,
+    "object-change": 0,
+    "loan-lifecycle": 0,
+    "archived-object": 0,
+    "balance-history": 0,
+    "current-projection": 0
+  },
+  "committedRow": {
+    "semanticClass": "validated-ledger",
+    "canonicalKey": "ledger:4132418",
+    "sourceLedgerIndex": 4132418,
+    "sourceLedgerHash": "F19EAD766B2B052513A08A0131F40B41E77C6DA273CE9C775ECC380E2FB02072",
+    "isTombstone": false
+  },
+  "requirements": {
+    "orderedMultiChunkCommits": true,
+    "sevenClassEnvelope": true,
+    "committedOnlyVisibility": true,
+    "semanticCountParity": true,
+    "successorContinuation": true,
+    "consecutiveFailures": 0
+  },
+  "decision": {
+    "classification": "remote_verified_conditional_candidate",
+    "selection": "not_selected",
+    "r4c2cStatus": "remote executor deployed and verifier passed; reader, transfer, fault-injection, and non-empty six-class evidence remain incomplete",
+    "scopeLimitations": [
+      "remote non-zero evidence exists only for validated-ledger",
+      "no non-empty remote protocol-event evidence",
+      "no non-empty remote object-change evidence",
+      "no non-empty remote loan-lifecycle evidence",
+      "no non-empty remote archived-object evidence",
+      "no non-empty remote balance-history evidence",
+      "no non-empty remote current-projection evidence",
+      "no immutable Supabase reader cursor parity",
+      "no complete-state export and empty-target restore parity",
+      "no remote interruption, stale-lease, duplicate, or terminal-injection qualification",
+      "no throughput qualification",
+      "no sustained resource envelope",
+      "no public reader cutover",
+      "no Mainnet",
+      "no R5 recovery",
+      "no soak"
+    ]
+  }
+}
