@@ -1,8 +1,8 @@
 # R4 deployment-profile qualification plan — 2026-08-01
 
-Status: controlling R4 contract, updated `2026-08-02` after verified Supabase remote durable phase-chain evidence.
+Status: controlling R4 contract, updated `2026-08-02` after verified Supabase R4C2c seven-class executor deployment.
 
-R0–R3, R4A, R4B, R4C1, R4C2a, and R4C2b are complete on `main` or pending evidence-only merge. The Supabase profile is remotely verified but remains conditional and unselected.
+R0–R3, R4A, R4B, R4C1, R4C2a, and R4C2b are complete on `main`. The R4C2c remote executor is deployed and its schema-3 verifier passed, but non-empty remote evidence for six semantic classes, reader/transfer parity, and remote fault qualification remain active. The Supabase profile remains conditional and unselected.
 
 Supporting artifacts:
 
@@ -12,6 +12,8 @@ Supporting artifacts:
 - R4C2a Supabase probe evidence: [`r4c2-supabase-remote-probe-evidence-2026-08-02.md`](r4c2-supabase-remote-probe-evidence-2026-08-02.md)
 - R4C2b phase-chain evidence: [`r4c2b-supabase-remote-phase-chain-evidence-2026-08-02.md`](r4c2b-supabase-remote-phase-chain-evidence-2026-08-02.md)
 - R4C2b machine-readable evidence: [`r4c2b-supabase-remote-phase-chain-evidence-2026-08-02.json`](r4c2b-supabase-remote-phase-chain-evidence-2026-08-02.json)
+- R4C2c remote deployment evidence: [`r4c2c-supabase-seven-class-remote-evidence-2026-08-02.md`](r4c2c-supabase-seven-class-remote-evidence-2026-08-02.md)
+- R4C2c machine-readable evidence: [`r4c2c-supabase-seven-class-remote-evidence-2026-08-02.json`](r4c2c-supabase-seven-class-remote-evidence-2026-08-02.json)
 
 ## Decision rule
 
@@ -127,11 +129,50 @@ Retained phase evidence:
 
 This closes the normal-success-path portions of G3 and G4 for one validated-ledger work item per scan. It also supplies committed-only evidence for one class under G5. It does not complete those gates for the full collector.
 
+#### R4C2c remote deployment proof
+
+Workflow run `30735822415` on main commit `fa275a6372cd8d9ee3a486b5e65b530ffc421eb1` proved that the exact seven-class executor dependency graph can be bundled and deployed without Cloudflare runtime leakage.
+
+Retained bundle evidence:
+
+- bytes: `103,351`;
+- SHA-256: `e7e4b58f5a841c3f5dd85cc024235f8f33b0db8a49d4956c00b056a4385139f8`;
+- unresolved relative imports: `0`;
+- Cloudflare runtime imports: `0`;
+- `Deno.serve` entrypoint: present.
+
+Retained phase evidence:
+
+- verifier schema: `3`;
+- phase epoch: `supabase-r4c2c-v1`;
+- immutable base ledger: `4,132,417`;
+- immutable base hash: `C9A7A89077EA7F54EBC296EE95E6AE45601088DDA5CFC5538A435C4A21E9CE77`;
+- committed watermark ledger: `4,132,418`;
+- committed watermark hash: `F19EAD766B2B052513A08A0131F40B41E77C6DA273CE9C775ECC380E2FB02072`;
+- completed ticks: `573`;
+- consecutive failures at the evidence fence: `0`;
+- last error: `null`;
+- latest successor: `scan / pending / attempt 0`.
+
+The deployed executor and verifier bind all seven semantic classes and passed ordered commit, committed-only visibility, semantic-count parity, and successor-continuation checks. The retained ledger had no Lending transaction, so committed counts were:
+
+- validated-ledger: `1`;
+- protocol-event: `0`;
+- object-change: `0`;
+- loan-lifecycle: `0`;
+- archived-object: `0`;
+- balance-history: `0`;
+- current-projection: `0`.
+
+This proves the seven-class envelope and zero-count parity, not non-empty persistence or identity/relationship preservation for six classes.
+
+Two immediately earlier Cron runs failed during activation with `base_mismatch: scan message scope is not R4C2b Devnet`. The narrow recovery reached the new epoch and the verifier later passed. The retained scan completed at attempt `241`; commit and finalize each completed at attempt `1`. These facts remain transition evidence and do not satisfy clean retry, stale reclaim, interruption, duplicate, or terminal-injection qualification.
+
 Remaining Supabase blockers:
 
 - G3: remote injected stale-lease reclaim, retry, duplicate replay, and terminal-halt evidence across the full collector;
-- G4: remote interruption rollback and atomicity evidence for all semantic classes and multi-chunk work;
-- G5: immutable read fences and source/query/order-bound cursors for all seven classes;
+- G4: remote interruption rollback and atomicity evidence for all semantic classes and true multi-chunk work;
+- G5: non-empty committed-only evidence for six classes plus immutable read fences and source/query/order-bound cursors;
 - G6: exact complete-state export and empty-target restore of collection, scheduler, publication, and maintenance state;
 - G7: sustained steady and catch-up throughput above the fixed thresholds;
 - G8: measured Free-plan resource headroom and fail-closed stop thresholds;
@@ -166,7 +207,7 @@ No payment method, billing mutation, remote deployment, or restart is permitted.
 
 The evaluator binds exactly one evidence record for each G1–G10 gate to a canonical profile identity and revision. It forbids scoring while any gate fails or remains unresolved and keeps selection at `not_selected` before R4E.
 
-The next Supabase evaluator revision must incorporate both R4C2a and R4C2b artifacts without promoting unresolved full-collector gates.
+The next Supabase evaluator revision must incorporate R4C2a, R4C2b, and R4C2c artifacts without promoting unresolved full-collector gates.
 
 ## R4C2 schedule
 
@@ -192,14 +233,25 @@ Delivered and remotely verified:
 
 ### R4C2c — Seven-class remote collector and reader/transfer parity
 
-Status: **next**.
+Status: **active; remote executor deployed and verifier passed, remaining evidence incomplete**.
 
-Required evidence:
+Delivered and remotely verified:
 
-- all seven semantic classes generated from real Devnet ledger data;
+- shared seven-class normalization and deterministic candidate identity;
+- complete seven-class count envelope;
+- deterministic payload construction and commit ordering;
+- remote deployment of the exact portable executor bundle;
+- zero unresolved relative imports;
+- zero Cloudflare runtime imports;
+- ordered scan, commit, finalize, watermark, and successor execution;
+- committed-only visibility and semantic-count parity for the retained work;
+- explicit R4C2b epoch supersession.
+
+Required remaining evidence:
+
+- non-empty real Devnet data for protocol events, object changes, loan lifecycle, archived objects, balance history, and current projections;
 - class-complete identity and relationship preservation;
-- deterministic chunking and multi-chunk phase continuation;
-- committed-only visibility for all classes;
+- true multi-chunk phase continuation;
 - immutable read fences;
 - source/query/order-bound cursors;
 - exact collection, scheduler, publication, and maintenance export;
@@ -208,6 +260,8 @@ Required evidence:
 - remote retry, stale reclaim, duplicate, interruption, and terminal injection evidence.
 
 ### R4C2d — Throughput and resource qualification
+
+Status: **blocked on R4C2c completion**.
 
 Required evidence:
 
@@ -235,7 +289,7 @@ No schedule pressure can promote a conditional candidate.
 
 ## Production boundary
 
-The Supabase phase chain is not the retired production collector and is not yet the full portable collector.
+The Supabase R4C2c executor is not the retired production collector and is not yet a fully qualified seven-class profile. The public reader remains legacy-authoritative.
 
 R4 still forbids:
 
