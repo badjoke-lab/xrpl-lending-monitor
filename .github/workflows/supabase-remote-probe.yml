@@ -14,6 +14,7 @@ on:
       - 'scripts/verify-supabase-committed-reader.mjs'
       - 'scripts/verify-supabase-historical-witness.mjs'
       - 'scripts/verify-supabase-multichunk-witness.mjs'
+      - 'scripts/verify-supabase-complete-state-transfer.mjs'
       - '.github/workflows/supabase-remote-probe.yml'
 
 permissions:
@@ -136,6 +137,11 @@ jobs:
             '/tmp/xrpl-multichunk-witness-reader-index.ts' \
             "$evidence_dir/multichunk-reader-bundle.json"
 
+          bundle_function \
+            'supabase/functions/xrpl-complete-state-transfer/index.ts' \
+            '/tmp/xrpl-complete-state-transfer-index.ts' \
+            "$evidence_dir/complete-state-transfer-bundle.json"
+
       - name: Link exact Supabase project
         run: supabase link --project-ref "$SUPABASE_PROJECT_ID" --password "$SUPABASE_DB_PASSWORD"
 
@@ -193,6 +199,13 @@ jobs:
           --use-api
           --no-verify-jwt
 
+      - name: Deploy isolated complete-state transfer bundle
+        run: >-
+          supabase functions deploy xrpl-complete-state-transfer
+          --project-ref "$SUPABASE_PROJECT_ID"
+          --use-api
+          --no-verify-jwt
+
       - name: Verify repeated remote portable phase execution
         run: node scripts/verify-supabase-remote-probe.mjs
 
@@ -204,6 +217,9 @@ jobs:
 
       - name: Verify isolated standard-phase multi-chunk execution and reader
         run: node scripts/verify-supabase-multichunk-witness.mjs
+
+      - name: Verify isolated complete-state export and typed restore
+        run: node scripts/verify-supabase-complete-state-transfer.mjs
 
       - name: Upload sanitized remote evidence
         if: always()
@@ -238,6 +254,7 @@ jobs:
           const historicalReaderBundlePath = 'supabase-remote-probe-evidence/historical-reader-bundle.json'
           const multichunkExecutorBundlePath = 'supabase-remote-probe-evidence/multichunk-executor-bundle.json'
           const multichunkReaderBundlePath = 'supabase-remote-probe-evidence/multichunk-reader-bundle.json'
+          const completeStateTransferBundlePath = 'supabase-remote-probe-evidence/complete-state-transfer-bundle.json'
           const verifiedPath = 'supabase-remote-probe-evidence/verified-health.json'
           const failedPath = 'supabase-remote-probe-evidence/failed-verification.json'
           const verifiedReaderPath = 'supabase-remote-probe-evidence/verified-reader.json'
@@ -246,6 +263,8 @@ jobs:
           const failedHistoricalPath = 'supabase-remote-probe-evidence/failed-historical-witness-verification.json'
           const verifiedMultichunkPath = 'supabase-remote-probe-evidence/verified-multichunk-witness.json'
           const failedMultichunkPath = 'supabase-remote-probe-evidence/failed-multichunk-witness-verification.json'
+          const verifiedCompleteStateTransferPath = 'supabase-remote-probe-evidence/verified-complete-state-transfer.json'
+          const failedCompleteStateTransferPath = 'supabase-remote-probe-evidence/failed-complete-state-transfer-verification.json'
 
           const lines = [
             '## Supabase deployment verification',
@@ -272,6 +291,7 @@ jobs:
           appendBundle('historical reader bundle', historicalReaderBundlePath)
           appendBundle('multi-chunk executor bundle', multichunkExecutorBundlePath)
           appendBundle('multi-chunk reader bundle', multichunkReaderBundlePath)
+          appendBundle('complete-state transfer bundle', completeStateTransferBundlePath)
 
           if (existsSync(verifiedPath)) {
             const evidence = JSON.parse(readFileSync(verifiedPath, 'utf8'))
@@ -362,6 +382,34 @@ jobs:
             )
           } else {
             lines.push('- multi-chunk witness verifier: `not reached or no sanitized evidence produced`')
+          }
+
+          if (existsSync(verifiedCompleteStateTransferPath)) {
+            const evidence = JSON.parse(readFileSync(verifiedCompleteStateTransferPath, 'utf8'))
+            lines.push(
+              '- complete-state transfer verifier: `success`',
+              `- complete-state transfer verified at: \`${String(evidence?.verifiedAt ?? 'unknown')}\``,
+              `- complete-state export: \`${String(evidence?.exportId ?? 'unknown')}\``,
+              `- complete-state target: \`${String(evidence?.targetId ?? 'unknown')}\``,
+              `- complete-state digest: \`${String(evidence?.stateDigest ?? 'unknown')}\``,
+              `- complete-state canonical bytes: \`${String(evidence?.canonicalTextBytes ?? 'unknown')}\``,
+              `- complete-state row counts: \`${JSON.stringify(evidence?.rowCounts ?? {})}\``,
+              `- complete-state scheduler statuses: \`${JSON.stringify(evidence?.schedulerStatusCounts ?? {})}\``,
+              `- empty-target restore observed: \`${String(evidence?.emptyTargetRestoreObserved ?? 'unknown')}\``,
+              `- duplicate restore converged: \`${String(evidence?.duplicateRestoreConverged ?? 'unknown')}\``,
+              `- digest tamper rejected: \`${String(evidence?.digestTamperRejected ?? 'unknown')}\``,
+              `- active profile isolated: \`${String(evidence?.checks?.activeProfileIsolated ?? 'unknown')}\``,
+              `- post-restore continuation proved: \`${String(evidence?.checks?.postRestoreContinuationProved ?? 'unknown')}\``,
+            )
+          } else if (existsSync(failedCompleteStateTransferPath)) {
+            const evidence = JSON.parse(readFileSync(failedCompleteStateTransferPath, 'utf8'))
+            lines.push(
+              '- complete-state transfer verifier: `failed`',
+              `- complete-state transfer failed at: \`${String(evidence?.failedAt ?? 'unknown')}\``,
+              `- complete-state transfer reason: \`${String(evidence?.reason ?? 'unknown').slice(0, 500)}\``,
+            )
+          } else {
+            lines.push('- complete-state transfer verifier: `not reached or no sanitized evidence produced`')
           }
 
           console.log(`${lines.join('\n')}\n`)
