@@ -16,6 +16,7 @@ on:
       - 'scripts/verify-supabase-multichunk-witness.mjs'
       - 'scripts/verify-supabase-complete-state-transfer.mjs'
       - 'scripts/verify-supabase-restore-continuation.mjs'
+      - 'scripts/verify-supabase-remote-fault-qualification.mjs'
       - 'scripts/publish-supabase-run-locator.mjs'
       - '.github/workflows/supabase-remote-probe.yml'
 
@@ -149,6 +150,11 @@ jobs:
             '/tmp/xrpl-restore-continuation-index.ts' \
             "$evidence_dir/restore-continuation-bundle.json"
 
+          bundle_function \
+            'supabase/functions/xrpl-remote-fault-qualification/index.ts' \
+            '/tmp/xrpl-remote-fault-qualification-index.ts' \
+            "$evidence_dir/remote-fault-qualification-bundle.json"
+
       - name: Link exact Supabase project
         run: supabase link --project-ref "$SUPABASE_PROJECT_ID" --password "$SUPABASE_DB_PASSWORD"
 
@@ -220,6 +226,13 @@ jobs:
           --use-api
           --no-verify-jwt
 
+      - name: Deploy isolated remote fault qualification bundle
+        run: >-
+          supabase functions deploy xrpl-remote-fault-qualification
+          --project-ref "$SUPABASE_PROJECT_ID"
+          --use-api
+          --no-verify-jwt
+
       - name: Verify repeated remote portable phase execution
         run: node scripts/verify-supabase-remote-probe.mjs
 
@@ -237,6 +250,9 @@ jobs:
 
       - name: Verify isolated post-restore continuation
         run: node scripts/verify-supabase-restore-continuation.mjs
+
+      - name: Verify isolated remote fault qualification
+        run: node scripts/verify-supabase-remote-fault-qualification.mjs
 
       - name: Upload sanitized remote evidence
         if: always()
@@ -266,10 +282,12 @@ jobs:
           # verified-multichunk-witness.json / failed-multichunk-witness-verification.json
           # verified-complete-state-transfer.json / failed-complete-state-transfer-verification.json
           # verified-restore-continuation.json / failed-restore-continuation-verification.json
+          # verified-remote-fault-qualification.json / failed-remote-fault-qualification-verification.json
           # phase watermark ledger / consecutive failures
           # historical witness verifier: `success`
           # multi-chunk witness verifier: `success`
           # complete-state transfer verifier: `success`
           # restore continuation verifier: `success`
+          # remote fault qualification verifier: `success`
           node scripts/publish-supabase-run-locator.mjs > /tmp/supabase-run-comment.md
           gh issue comment 1109 --repo "$GITHUB_REPOSITORY" --body-file /tmp/supabase-run-comment.md
