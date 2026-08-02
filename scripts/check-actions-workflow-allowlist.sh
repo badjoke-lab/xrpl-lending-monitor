@@ -141,9 +141,14 @@ for required in (
     "supabase link --project-ref",
     "supabase db push --linked --yes",
     "supabase functions deploy xrpl-collector-tick",
+    "supabase functions deploy xrpl-committed-reader",
     "--use-api",
     "--no-verify-jwt",
     "node scripts/verify-supabase-remote-probe.mjs",
+    "node scripts/verify-supabase-committed-reader.mjs",
+    "reader-bundle.json",
+    "verified-reader.json",
+    "failed-reader-verification.json",
     "retention-days: 7",
     "Publish sanitized run locator",
     "if: always()",
@@ -176,4 +181,4 @@ if scheduled != [qualification_v5]:
     raise SystemExit(f"only the fixed qualification v5 workflow may be scheduled: {scheduled}")
 PY
 
-echo "Actions workflow allowlist passed: CI, guarded legacy recovery workflows, one read-only runner, one fixed-window qualification exception, and one guarded Supabase deployment verifier with bounded Issue #1109 reporting."
+echo "Actions workflow allowlist passed: CI, guarded legacy recovery workflows, one read-only runner, one fixed-window qualification exception, and one guarded Supabase collector/committed-reader deployment verifier with bounded Issue #1109 reporting."
