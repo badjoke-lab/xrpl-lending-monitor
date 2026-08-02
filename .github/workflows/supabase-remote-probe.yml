@@ -18,6 +18,7 @@ on:
       - 'scripts/verify-supabase-restore-continuation.mjs'
       - 'scripts/verify-supabase-remote-fault-qualification.mjs'
       - 'scripts/verify-supabase-throughput-resource-baseline.mjs'
+      - 'scripts/verify-supabase-catchup-throughput.mjs'
       - 'scripts/publish-supabase-run-locator.mjs'
       - '.github/workflows/supabase-remote-probe.yml'
 
@@ -161,6 +162,11 @@ jobs:
             '/tmp/xrpl-throughput-resource-baseline-index.ts' \
             "$evidence_dir/throughput-resource-baseline-bundle.json"
 
+          bundle_function \
+            'supabase/functions/xrpl-catchup-throughput/index.ts' \
+            '/tmp/xrpl-catchup-throughput-index.ts' \
+            "$evidence_dir/catchup-throughput-bundle.json"
+
       - name: Link exact Supabase project
         run: supabase link --project-ref "$SUPABASE_PROJECT_ID" --password "$SUPABASE_DB_PASSWORD"
 
@@ -246,6 +252,13 @@ jobs:
           --use-api
           --no-verify-jwt
 
+      - name: Deploy isolated catch-up throughput bundle
+        run: >-
+          supabase functions deploy xrpl-catchup-throughput
+          --project-ref "$SUPABASE_PROJECT_ID"
+          --use-api
+          --no-verify-jwt
+
       - name: Verify repeated remote portable phase execution
         run: node scripts/verify-supabase-remote-probe.mjs
 
@@ -269,6 +282,9 @@ jobs:
 
       - name: Verify throughput and resource baseline
         run: node scripts/verify-supabase-throughput-resource-baseline.mjs
+
+      - name: Verify isolated catch-up throughput
+        run: node scripts/verify-supabase-catchup-throughput.mjs
 
       - name: Upload sanitized remote evidence
         if: always()
@@ -300,6 +316,7 @@ jobs:
           # verified-restore-continuation.json / failed-restore-continuation-verification.json
           # verified-remote-fault-qualification.json / failed-remote-fault-qualification-verification.json
           # verified-throughput-resource-baseline.json / failed-throughput-resource-baseline-verification.json
+          # verified-catchup-throughput.json / failed-catchup-throughput-verification.json
           # phase watermark ledger / consecutive failures
           # historical witness verifier: `success`
           # multi-chunk witness verifier: `success`
@@ -307,5 +324,6 @@ jobs:
           # restore continuation verifier: `success`
           # remote fault qualification verifier: `success`
           # throughput resource baseline verifier: `success`
+          # catch-up throughput verifier: `success`
           node scripts/publish-supabase-run-locator.mjs > /tmp/supabase-run-comment.md
           gh issue comment 1109 --repo "$GITHUB_REPOSITORY" --body-file /tmp/supabase-run-comment.md
