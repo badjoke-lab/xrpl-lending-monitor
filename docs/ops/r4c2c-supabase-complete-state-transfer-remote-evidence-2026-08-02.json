@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 1,
+  "purpose": "r4c2c-complete-state-transfer-remote-verification",
+  "runId": 30750389833,
+  "commit": "e200cab40e373d082791c010a5b9e8bc9f989835",
+  "artifactId": 8834256849,
+  "artifactDigest": "sha256:ad809b7834ef9ee5f204f92186260e83f65537e29d4835d95f78751346eaac3f",
+  "verifiedAt": "2026-08-02T13:40:33.276Z",
+  "exportId": "r4c2c-multichunk-complete-state-v1",
+  "targetId": "supabase-devnet-transfer-restore-v1",
+  "typedRestoreNamespace": "xrpl_restore_v1",
+  "stateDigest": "fb9b7dda66802f18c18200b2991ff6293cd5b11b3dd04a91d5089524ea93dda2",
+  "canonicalTextBytes": 300890,
+  "rowCounts": {
+    "work": 1,
+    "streams": 1,
+    "messages": 6,
+    "successors": 5,
+    "watermarks": 1,
+    "commitChunks": 3,
+    "payloadChunks": 3,
+    "referenceRows": 116,
+    "publicationWork": 1,
+    "maintenancePlans": 1,
+    "maintenanceMutations": 2,
+    "publicationCandidates": 1,
+    "publicationWatermarks": 1
+  },
+  "schedulerStatusCounts": {
+    "completed": 5,
+    "pending": 1
+  },
+  "firstRestoreDuplicate": false,
+  "emptyTargetRestoreObserved": true,
+  "duplicateRestoreConverged": true,
+  "digestTamperRejected": true,
+  "credentialChecks": {
+    "missingTokenRejected": true,
+    "wrongPurposeRejected": true
+  },
+  "activeIsolation": {
+    "ledgerAdvance": 0,
+    "nonRegressing": true,
+    "sourceIdentityPreserved": true
+  },
+  "activeWatermarkBefore": {
+    "profileId": "supabase-devnet",
+    "network": "devnet",
+    "epochId": "supabase-r4c2c-v1",
+    "baseIdentity": "seven-class-base-4132417-C9A7A89077EA7F54EBC296EE95E6AE45601088DDA5CFC5538A435C4A21E9CE77",
+    "ledgerIndex": 4132562,
+    "ledgerHash": "B53EB71938E6A696798E324B4896C49F28849DD2EF22B0F7E4B664C9B686AE68",
+    "workId": "collector-work-v1:devnet:supabase-r4c2c-v1:seven-class-base-4132417-C9A7A89077EA7F54EBC296EE95E6AE45601088DDA5CFC5538A435C4A21E9CE77:4132562:4C7A1A1E367DEFB798A1755172F9F94848884AFB2E2628C2502EF0CB48387254"
+  },
+  "activeWatermarkAfter": {
+    "profileId": "supabase-devnet",
+    "network": "devnet",
+    "epochId": "supabase-r4c2c-v1",
+    "baseIdentity": "seven-class-base-4132417-C9A7A89077EA7F54EBC296EE95E6AE45601088DDA5CFC5538A435C4A21E9CE77",
+    "ledgerIndex": 4132562,
+    "ledgerHash": "B53EB71938E6A696798E324B4896C49F28849DD2EF22B0F7E4B664C9B686AE68",
+    "workId": "collector-work-v1:devnet:supabase-r4c2c-v1:seven-class-base-4132417-C9A7A89077EA7F54EBC296EE95E6AE45601088DDA5CFC5538A435C4A21E9CE77:4132562:4C7A1A1E367DEFB798A1755172F9F94848884AFB2E2628C2502EF0CB48387254"
+  },
+  "checks": {
+    "collectionStateIncluded": true,
+    "schedulerStateIncluded": true,
+    "publicationStateIncluded": true,
+    "maintenanceStateIncluded": true,
+    "emptyTargetRestoreObserved": true,
+    "canonicalTextParity": true,
+    "digestParity": true,
+    "duplicateRestoreConverged": true,
+    "digestTamperRejected": true,
+    "activeProfileIsolated": true,
+    "postRestoreContinuationProved": false
+  }
+}
