@@ -26,6 +26,7 @@ const bundles = [
   ['restore continuation bundle', 'restore-continuation-bundle.json'],
   ['remote fault qualification bundle', 'remote-fault-qualification-bundle.json'],
   ['throughput resource baseline bundle', 'throughput-resource-baseline-bundle.json'],
+  ['catch-up throughput bundle', 'catchup-throughput-bundle.json'],
 ]
 for (const [label, name] of bundles) {
   const value = read(name)
@@ -63,12 +64,7 @@ if (health) {
   lines.push('- verifier: `not reached or no sanitized evidence produced`')
 }
 
-function appendVerification({
-  successFile,
-  failureFile,
-  label,
-  successLines,
-}) {
+function appendVerification({ successFile, failureFile, label, successLines }) {
   const success = read(successFile)
   const failure = read(failureFile)
   if (success) {
@@ -202,6 +198,22 @@ appendVerification({
       `- active profile isolated: \`${String(value.checks?.activeProfileNonRegressing ?? 'unknown')}\``,
     ]
   },
+})
+
+appendVerification({
+  successFile: 'verified-catchup-throughput.json',
+  failureFile: 'failed-catchup-throughput-verification.json',
+  label: 'catch-up throughput verifier',
+  successLines: (value) => [
+    `- catch-up verified at: \`${String(value.verifiedAt ?? 'unknown')}\``,
+    `- catch-up trial count: \`${String(value.trialCount ?? 'unknown')}\``,
+    `- catch-up source works per trial: \`${String(value.sourceCount ?? 'unknown')}\``,
+    `- catch-up min/p50/p95/max ledgers per minute: \`${String(value.summary?.minimumCommittedLedgersPerMinute ?? 'unknown')} / ${String(value.summary?.p50CommittedLedgersPerMinute ?? 'unknown')} / ${String(value.summary?.p95CommittedLedgersPerMinute ?? 'unknown')} / ${String(value.summary?.maximumCommittedLedgersPerMinute ?? 'unknown')}\``,
+    `- catch-up observed pass: \`${String(value.summary?.catchUpObservedPass ?? 'unknown')}\``,
+    `- steady observed pass: \`${String(value.summary?.steadyObservedPass ?? 'unknown')}\``,
+    `- G7 qualified: \`${String(value.summary?.g7Qualified ?? 'unknown')}\``,
+    `- active profile isolated: \`${String(value.checks?.activeProfileNonRegressing ?? 'unknown')}\``,
+  ],
 })
 
 process.stdout.write(`${lines.join('\n')}\n`)
