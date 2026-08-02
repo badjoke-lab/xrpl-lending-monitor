@@ -1,8 +1,8 @@
 # R4 deployment-profile qualification plan — 2026-08-01
 
-Status: controlling R4 contract, updated `2026-08-02` after verified Supabase R4C2c seven-class executor and `validated-ledger` committed-reader evidence.
+Status: controlling R4 contract, updated `2026-08-02` after verified Supabase R4C2c isolated historical-witness persistence and all-seven-class committed-reader evidence.
 
-R0–R3, R4A, R4B, R4C1, R4C2a, and R4C2b are complete on `main`. The R4C2c remote executor and qualification-only committed reader are deployed. The reader passed immutable-fence and cursor verification for retained `validated-ledger` rows. Non-empty remote evidence for six semantic classes, transfer parity, and remote fault qualification remain active. The Supabase profile remains conditional and unselected.
+R0–R3, R4A, R4B, R4C1, R4C2a, and R4C2b are complete on `main`. The R4C2c remote executor and qualification-only committed reader are deployed. The active reader passed immutable-fence and cursor verification for retained `validated-ledger` rows. A separate isolated historical-witness profile then atomically retained `237` real Devnet rows, passed three-page committed reads across all seven semantic classes, exact lookup for every class, a non-empty cross-class Loan relationship query, exact duplicate convergence, and fail-closed source, cursor, fence, credential, and purpose checks. True multi-chunk active work, complete-state transfer, remote fault qualification, throughput, and resource qualification remain active. The Supabase profile remains conditional and unselected.
 
 Supporting artifacts:
 
@@ -17,6 +17,11 @@ Supporting artifacts:
 - R4C2c committed-reader implementation: [`r4c2c-supabase-committed-reader-plan-2026-08-02.md`](r4c2c-supabase-committed-reader-plan-2026-08-02.md)
 - R4C2c committed-reader remote evidence: [`r4c2c-supabase-committed-reader-evidence-2026-08-02.md`](r4c2c-supabase-committed-reader-evidence-2026-08-02.md)
 - R4C2c committed-reader machine-readable evidence: [`r4c2c-supabase-committed-reader-evidence-2026-08-02.json`](r4c2c-supabase-committed-reader-evidence-2026-08-02.json)
+- R4C2c historical witness discovery: [`r4c2c-devnet-historical-witness-evidence-2026-08-02.md`](r4c2c-devnet-historical-witness-evidence-2026-08-02.md)
+- R4C2c historical witness machine-readable discovery: [`r4c2c-devnet-historical-witness-evidence-2026-08-02.json`](r4c2c-devnet-historical-witness-evidence-2026-08-02.json)
+- R4C2c isolated historical profile plan: [`r4c2c-supabase-historical-witness-profile-plan-2026-08-02.md`](r4c2c-supabase-historical-witness-profile-plan-2026-08-02.md)
+- R4C2c isolated historical remote evidence: [`r4c2c-supabase-historical-witness-remote-evidence-2026-08-02.md`](r4c2c-supabase-historical-witness-remote-evidence-2026-08-02.md)
+- R4C2c isolated historical machine-readable evidence: [`r4c2c-supabase-historical-witness-remote-evidence-2026-08-02.json`](r4c2c-supabase-historical-witness-remote-evidence-2026-08-02.json)
 
 ## Decision rule
 
@@ -197,13 +202,62 @@ The reader passed:
 
 The collector verifier retained the same ledger, hash, and work ID. At that fence the collector had `624` completed ticks, zero consecutive failures, no last error, five recent completed Cron runs, and a pending next scan at attempt `0`.
 
-This closes retained G5 immutable-fence and source/query/order-bound cursor evidence for `validated-ledger` only. It does not close G5 for the six other semantic classes, non-empty relationship queries, or class-complete public-reader parity.
+This closes retained active-stream G5 immutable-fence and source/query/order-bound cursor evidence for `validated-ledger`. It did not by itself close non-empty reader behavior for the other six classes or relationship queries.
+
+#### R4C2c isolated historical-witness proof
+
+Workflow run `30742455945` on main commit `11c0c472aedb7cc58248d9b83f429aa3f26cdf8f` deployed the exact isolated historical loader and reader and passed the active collector, active reader, and isolated historical verifier.
+
+Retained isolated profile identity:
+
+- profile: `supabase-devnet-historical-witness`;
+- source: `supabase-r4c2c-historical-witness`;
+- purpose: `r4c2c-historical-witness-remote-verification`;
+- epoch: `supabase-r4c2c-historical-witness-v1`;
+- base identity: `historical-witness-2776760-2980845-3127240`;
+- set ID: `r4c2c-devnet-historical-witness-v1`;
+- work ID: `historical-witness-work-v1:2776760:2980845:3127240`;
+- fence ledger: `3,127,240`;
+- fence hash: `6CDB77504546BE14D226CFFDFC61082EC73BF95191E5326536254903D87692B3`.
+
+Atomic loader evidence:
+
+- real Devnet ledgers: `2,776,760`, `2,980,845`, and `3,127,240`;
+- canonical rows: `237`;
+- records digest: `sha256:bac80ec90ba841b683ee9e4b154cf385ffd972ce636f9797cb8f6cff1cdd209a`;
+- first exact commit: `duplicate: false`;
+- second exact commit: `duplicate: true`.
+
+Committed reader evidence:
+
+- page sizes: `100 / 100 / 37`;
+- unique rows: `237`;
+- `validated-ledger`: `3`;
+- `protocol-event`: `13`;
+- `object-change`: `197`;
+- `loan-lifecycle`: `3`;
+- `archived-object`: `1`;
+- `balance-history`: `2`;
+- `current-projection`: `18`;
+- exact lookup: passed for every class;
+- relationship ID: `loan:FBD9559FBC50D3274AAD6495454E83E0FDB97DCE497D0423C1666641B2288718`;
+- relationship rows: `16` across object changes, lifecycle, archive, and current projection;
+- digest-tamper rejection: passed;
+- query/order mismatch rejection: passed;
+- cross-source rejection: passed;
+- stale-fence rejection: passed;
+- missing-token rejection: passed;
+- wrong-purpose rejection: passed.
+
+The same run reverified the active collector and reader at active watermark ledger `4,132,485`, with `774` completed ticks, zero consecutive failures, no last error, five completed recent Cron runs, and a pending next scan at attempt `0`. The isolated historical profile did not advance or replace the active watermark and did not alter the public reader.
+
+This closes retained non-empty seven-class exact/read/count parity and non-empty relationship-query evidence for the isolated qualification profile. It does not prove that the active collector has produced a true multi-chunk all-class work item, nor does it close transfer or remote fault qualification.
 
 Remaining Supabase blockers:
 
-- G3: remote injected stale-lease reclaim, retry, duplicate replay, and terminal-halt evidence across the full collector;
-- G4: remote interruption rollback and atomicity evidence for all semantic classes and true multi-chunk work;
-- G5: non-empty committed-reader evidence for six classes, non-empty relationship queries, and class-complete identity/relationship preservation;
+- G3: remote injected stale-lease reclaim, retry, duplicate phase replay, and terminal-halt evidence across the full collector;
+- G4: remote interruption rollback and atomicity evidence for true multi-chunk active work;
+- G5: true multi-chunk active committed-reader continuation and proof that the active normal-work path preserves the already-verified class identities and relationships;
 - G6: exact complete-state export and empty-target restore of collection, scheduler, publication, and maintenance state;
 - G7: sustained steady and catch-up throughput above the fixed thresholds;
 - G8: measured Free-plan resource headroom and fail-closed stop thresholds;
@@ -238,7 +292,7 @@ No payment method, billing mutation, remote deployment, or restart is permitted.
 
 The evaluator binds exactly one evidence record for each G1–G10 gate to a canonical profile identity and revision. It forbids scoring while any gate fails or remains unresolved and keeps selection at `not_selected` before R4E.
 
-The next Supabase evaluator revision must incorporate R4C2a, R4C2b, and both R4C2c evidence sets without promoting unresolved full-collector gates.
+The next Supabase evaluator revision must incorporate R4C2a, R4C2b, and all retained R4C2c executor, active-reader, historical discovery, and isolated historical persistence/reader evidence without promoting unresolved full-collector gates.
 
 ## R4C2 schedule
 
@@ -264,7 +318,7 @@ Delivered and remotely verified:
 
 ### R4C2c — Seven-class remote collector and reader/transfer parity
 
-Status: **active; executor and validated-ledger reader verified, remaining six-class, transfer, and fault evidence incomplete**.
+Status: **active; non-empty seven-class and relationship reader evidence complete in the isolated qualification profile; multi-chunk active work, transfer, and remote fault evidence incomplete**.
 
 Delivered and remotely verified:
 
@@ -275,26 +329,35 @@ Delivered and remotely verified:
 - zero unresolved relative imports;
 - zero Cloudflare runtime imports;
 - ordered scan, commit, finalize, watermark, and successor execution;
-- committed-only visibility and semantic-count parity for retained work;
+- committed-only visibility and semantic-count parity for retained active work;
 - explicit R4C2b epoch supersession;
 - qualification-only service-role committed reader;
 - rotated and masked one-run reader verification credential;
-- exact stream/watermark/work fence;
+- exact active stream/watermark/work fence;
 - deterministic committed `validated-ledger` pagination;
 - exact and ledger-range parity;
-- source/query/order/fence-bound cursor rejection.
+- source/query/order/fence-bound cursor rejection;
+- read-only discovery of three real Devnet Lending witness ledgers;
+- isolated atomic persistence of `237` canonical rows;
+- exact duplicate loader convergence;
+- non-empty committed reads for all seven semantic classes;
+- exact lookup and count parity for every class;
+- deterministic three-page continuation `100 / 100 / 37`;
+- non-empty `16`-row Loan relationship query across four semantic classes;
+- missing-token and wrong-purpose fail-closed rejection;
+- isolation from the active stream and public reader.
 
 Required remaining evidence:
 
-- non-empty real Devnet data for protocol events, object changes, loan lifecycle, archived objects, balance history, and current projections;
-- non-empty remote reader evidence for those classes;
-- non-empty relationship-query evidence;
-- class-complete identity and relationship preservation;
-- true multi-chunk phase and reader continuation;
+- true multi-chunk active phase and committed-reader continuation;
 - exact collection, scheduler, publication, and maintenance export;
 - empty-target restore with canonical parity;
 - post-restore continuation;
-- remote retry, stale reclaim, duplicate, interruption, and terminal injection evidence.
+- remote retry and backoff;
+- stale-lease reclaim;
+- duplicate phase replay;
+- interruption rollback;
+- terminal injection and fail-closed halt.
 
 ### R4C2d — Throughput and resource qualification
 
@@ -326,7 +389,7 @@ No schedule pressure can promote a conditional candidate.
 
 ## Production boundary
 
-The Supabase R4C2c executor and reader are isolated qualification surfaces, not the retired production collector or public reader. The public reader remains legacy-authoritative.
+The Supabase R4C2c active executor and reader and the isolated historical loader and reader are qualification surfaces, not the retired production collector or public reader. The public reader remains legacy-authoritative.
 
 R4 still forbids:
 
