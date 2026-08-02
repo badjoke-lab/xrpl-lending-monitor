@@ -17,3 +17,6 @@ verify_jwt = false
 
 [functions.xrpl-multichunk-witness-reader]
 verify_jwt = false
+
+[functions.xrpl-complete-state-transfer]
+verify_jwt = false
