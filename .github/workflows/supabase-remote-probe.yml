@@ -7,6 +7,9 @@ on:
       - main
     paths:
       - 'supabase/**'
+      - 'src/collector/history-segments/**'
+      - 'src/collector/incremental/**'
+      - 'src/shared/portable-collector-*.ts'
       - 'scripts/verify-supabase-remote-probe.mjs'
       - '.github/workflows/supabase-remote-probe.yml'
 
@@ -45,13 +48,61 @@ jobs:
         with:
           version: latest
 
+      - name: Bundle exact Devnet phase executor
+        shell: bash
+        env:
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          source_path='supabase/functions/xrpl-collector-tick/index.ts'
+          bundle_path='/tmp/xrpl-collector-tick-index.ts'
+          evidence_dir='supabase-remote-probe-evidence'
+          mkdir -p "$evidence_dir"
+
+          bun build "$source_path" \
+            --target=browser \
+            --format=esm \
+            --outfile="$bundle_path"
+
+          test -s "$bundle_path"
+          BUNDLE_PATH="$bundle_path" HEAD_SHA="$HEAD_SHA" node --input-type=module <<'NODE'
+          import { createHash } from 'node:crypto'
+          import { readFileSync, writeFileSync } from 'node:fs'
+
+          const path = process.env.BUNDLE_PATH
+          const headSha = process.env.HEAD_SHA
+          const bundle = readFileSync(path, 'utf8')
+          const unresolvedRelativeImport = /(?:from\s*|import\s*\()\s*['"]\.{1,2}\//u
+          if (unresolvedRelativeImport.test(bundle)) {
+            throw new Error('generated Supabase bundle retains a relative import')
+          }
+          if (!bundle.includes('Deno.serve')) {
+            throw new Error('generated Supabase bundle does not contain the Edge entrypoint')
+          }
+          const evidence = {
+            schemaVersion: 1,
+            source: 'supabase/functions/xrpl-collector-tick/index.ts',
+            headSha,
+            bytes: Buffer.byteLength(bundle),
+            sha256: createHash('sha256').update(bundle).digest('hex'),
+            relativeImports: 0,
+            denoServeEntrypoint: true,
+          }
+          writeFileSync(
+            'supabase-remote-probe-evidence/bundle.json',
+            `${JSON.stringify(evidence, null, 2)}\n`,
+          )
+          NODE
+
+          cp "$bundle_path" "$source_path"
+
       - name: Link exact Supabase project
         run: supabase link --project-ref "$SUPABASE_PROJECT_ID" --password "$SUPABASE_DB_PASSWORD"
 
       - name: Apply pending migrations
         run: supabase db push --linked --yes
 
-      - name: Deploy exact Devnet phase executor
+      - name: Deploy exact Devnet phase executor bundle
         run: >-
           supabase functions deploy xrpl-collector-tick
           --project-ref "$SUPABASE_PROJECT_ID"
@@ -88,6 +139,7 @@ jobs:
           const runId = process.env.RUN_ID ?? 'unknown'
           const runUrl = process.env.RUN_URL ?? ''
           const headSha = process.env.HEAD_SHA ?? 'unknown'
+          const bundlePath = 'supabase-remote-probe-evidence/bundle.json'
           const verifiedPath = 'supabase-remote-probe-evidence/verified-health.json'
           const failedPath = 'supabase-remote-probe-evidence/failed-verification.json'
 
@@ -98,6 +150,15 @@ jobs:
             `- commit: \`${headSha}\``,
             `- job status: \`${runStatus}\``,
           ]
+
+          if (existsSync(bundlePath)) {
+            const bundle = JSON.parse(readFileSync(bundlePath, 'utf8'))
+            lines.push(
+              `- bundle bytes: \`${String(bundle?.bytes ?? 'unknown')}\``,
+              `- bundle sha256: \`${String(bundle?.sha256 ?? 'unknown')}\``,
+              `- unresolved relative imports: \`${String(bundle?.relativeImports ?? 'unknown')}\``,
+            )
+          }
 
           if (existsSync(verifiedPath)) {
             const evidence = JSON.parse(readFileSync(verifiedPath, 'utf8'))
