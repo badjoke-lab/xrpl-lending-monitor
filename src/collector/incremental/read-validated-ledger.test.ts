@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { readValidatedLedger } from './read-validated-ledger'
+import { readValidatedLedger } from './read-validated-ledger-rpc'
 
 function fetcherWith(result: Record<string, unknown>) {
   return async () =>
