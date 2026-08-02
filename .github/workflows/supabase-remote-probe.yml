@@ -12,6 +12,7 @@ on:
 
 permissions:
   contents: read
+  issues: write
 
 concurrency:
   group: supabase-remote-probe-deploy
@@ -68,3 +69,62 @@ jobs:
           path: supabase-remote-probe-evidence
           if-no-files-found: warn
           retention-days: 7
+
+      - name: Publish sanitized run locator
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_STATUS: ${{ job.status }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          HEAD_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE' > /tmp/supabase-run-comment.md
+          import { existsSync, readFileSync } from 'node:fs'
+
+          const runStatus = process.env.RUN_STATUS ?? 'unknown'
+          const runId = process.env.RUN_ID ?? 'unknown'
+          const runUrl = process.env.RUN_URL ?? ''
+          const headSha = process.env.HEAD_SHA ?? 'unknown'
+          const verifiedPath = 'supabase-remote-probe-evidence/verified-health.json'
+          const failedPath = 'supabase-remote-probe-evidence/failed-verification.json'
+
+          const lines = [
+            '## Supabase deployment verification',
+            '',
+            `- run: [${runId}](${runUrl})`,
+            `- commit: \`${headSha}\``,
+            `- job status: \`${runStatus}\``,
+          ]
+
+          if (existsSync(verifiedPath)) {
+            const evidence = JSON.parse(readFileSync(verifiedPath, 'utf8'))
+            const runtime = evidence?.health?.runtime ?? null
+            const phase = evidence?.health?.phaseChain ?? null
+            const watermark = phase?.watermark ?? null
+            lines.push(
+              '- verifier: `success`',
+              `- evidence schema: \`${String(evidence?.schemaVersion ?? 'unknown')}\``,
+              `- verified at: \`${String(evidence?.verifiedAt ?? 'unknown')}\``,
+              `- verifier attempt: \`${String(evidence?.attempt ?? 'unknown')}\``,
+              `- completed ticks: \`${String(runtime?.tick_count ?? 'unknown')}\``,
+              `- consecutive failures: \`${String(runtime?.consecutive_failures ?? 'unknown')}\``,
+              `- phase watermark ledger: \`${String(watermark?.ledger_index ?? 'not available')}\``,
+              `- phase watermark work: \`${String(watermark?.work_id ?? 'not available')}\``,
+            )
+          } else if (existsSync(failedPath)) {
+            const evidence = JSON.parse(readFileSync(failedPath, 'utf8'))
+            lines.push(
+              '- verifier: `failed`',
+              `- failed at: \`${String(evidence?.failedAt ?? 'unknown')}\``,
+              `- reason: \`${String(evidence?.reason ?? 'unknown').slice(0, 500)}\``,
+            )
+          } else {
+            lines.push('- verifier: `not reached or no sanitized evidence produced`')
+          }
+
+          console.log(`${lines.join('\n')}\n`)
+          NODE
+          gh issue comment 1109 --repo "$GITHUB_REPOSITORY" --body-file /tmp/supabase-run-comment.md

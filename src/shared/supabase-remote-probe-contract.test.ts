@@ -19,6 +19,7 @@ describe('R4C2 Supabase remote probe and phase-chain contract', () => {
   )
   const edgeFunction = read('supabase/functions/xrpl-collector-tick/index.ts')
   const verifier = read('scripts/verify-supabase-remote-probe.mjs')
+  const workflow = read('.github/workflows/supabase-remote-probe.yml')
   const config = read('supabase/config.toml')
   const setup = read('docs/ops/supabase-one-time-setup-2026-08-02.md')
 
@@ -150,6 +151,22 @@ describe('R4C2 Supabase remote probe and phase-chain contract', () => {
     ]) {
       expect(verifier).toContain(required)
     }
+  })
+
+  it('publishes only a sanitized workflow run locator to the retained issue ledger', () => {
+    for (const required of [
+      'issues: write',
+      'Publish sanitized run locator',
+      'supabase-remote-probe-evidence/verified-health.json',
+      'supabase-remote-probe-evidence/failed-verification.json',
+      'gh issue comment 1109',
+      'phase watermark ledger',
+      'consecutive failures',
+    ]) {
+      expect(workflow).toContain(required)
+    }
+    expect(workflow).not.toContain('echo "$SUPABASE_ACCESS_TOKEN"')
+    expect(workflow).not.toContain('echo "$SUPABASE_DB_PASSWORD"')
   })
 
   it('documents the one-time cardless handoff and automated deployment boundary', () => {
