@@ -68,7 +68,7 @@ describe('Supabase isolated standard-phase multi-chunk witness contract', () => 
       "phase: 'scan'",
       "phase: 'commit'",
       "phase: 'finalize'",
-      'activeWatermarkUnchanged: true',
+      'activeWatermarkIsolated: true',
       'new TextEncoder().encode(stored.payload_json).byteLength',
     ]) {
       expect(executor).toContain(required)
@@ -123,14 +123,17 @@ describe('Supabase isolated standard-phase multi-chunk witness contract', () => 
       'cursorQueryOrderMismatchRejected',
       'cursorSourceMismatchRejected',
       'staleFenceRejected',
-      'activeWatermarkUnchanged',
+      'activeWatermarkIsolated',
+      'activeWatermarkBefore',
+      'activeWatermarkAfter',
       'verified-multichunk-witness.json',
       'failed-multichunk-witness-verification.json',
     ]) {
       expect(verifier).toContain(required)
     }
-    expect(verifier).not.toContain('verifierToken,')
-    expect(verifier).not.toContain('XRPL_READER_VERIFY_TOKEN:')
+    expect(verifier).toContain("'x-xrpl-reader-token': verifierToken")
+    expect(verifier).not.toContain('verifierToken: verifierToken')
+    expect(verifier).not.toContain('XRPL_READER_VERIFY_TOKEN: verifierToken')
   })
 
   it('uses the existing single guarded deployment workflow and one rotated token', () => {
