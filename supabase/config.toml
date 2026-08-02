@@ -32,3 +32,9 @@ verify_jwt=false
 
 [functions.xrpl-catchup-throughput]
 verify_jwt=false
+
+[functions.xrpl-steady-batch-tick]
+verify_jwt=false
+
+[functions.xrpl-steady-throughput-qualification]
+verify_jwt=false
