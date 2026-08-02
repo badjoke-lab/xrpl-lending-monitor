@@ -25,14 +25,22 @@ const edgeFunction = readFileSync(
 )
 
 describe('Supabase remote prebundle contract', () => {
-  it('bundles the exact checked-out Edge entry before API deployment', () => {
+  it('bundles both exact checked-out Edge entries before API deployment', () => {
     for (const required of [
-      'Bundle exact Devnet phase executor',
-      "source_path='supabase/functions/xrpl-collector-tick/index.ts'",
+      'Bundle exact Devnet phase executor and committed reader',
+      'bundle_function() {',
+      'local source_path="$1"',
+      'local bundle_path="$2"',
+      'local evidence_path="$3"',
       'bun build "$source_path"',
       '--target=browser',
       '--format=esm',
-      "bundle_path='/tmp/xrpl-collector-tick-index.ts'",
+      "'supabase/functions/xrpl-collector-tick/index.ts'",
+      "'/tmp/xrpl-collector-tick-index.ts'",
+      '"$evidence_dir/bundle.json"',
+      "'supabase/functions/xrpl-committed-reader/index.ts'",
+      "'/tmp/xrpl-committed-reader-index.ts'",
+      '"$evidence_dir/reader-bundle.json"',
       "const unresolvedRelativeImport = /(?:from\\s*|import\\s*\\()\\s*['\"]\\.{1,2}\\//u",
       "bundle.includes('cloudflare:')",
       "bundle.includes('Deno.serve')",
@@ -41,6 +49,8 @@ describe('Supabase remote prebundle contract', () => {
       'cp "$bundle_path" "$source_path"',
       'Deploy exact Devnet phase executor bundle',
       'supabase functions deploy xrpl-collector-tick',
+      'Deploy qualification-only committed reader bundle',
+      'supabase functions deploy xrpl-committed-reader',
       '--use-api',
       '--no-verify-jwt',
     ]) {
@@ -48,12 +58,15 @@ describe('Supabase remote prebundle contract', () => {
     }
   })
 
-  it('retains sanitized bundle evidence without exposing Supabase secrets', () => {
+  it('retains sanitized bundle evidence without exposing Supabase secrets or the verifier token', () => {
     for (const required of [
       "'supabase-remote-probe-evidence/bundle.json'",
+      "'supabase-remote-probe-evidence/reader-bundle.json'",
       "createHash('sha256').update(bundle).digest('hex')",
       'bundle bytes:',
       'bundle sha256:',
+      'reader bundle bytes:',
+      'reader bundle sha256:',
       'unresolved relative imports:',
       'Cloudflare runtime imports:',
       'retention-days: 7',
@@ -63,6 +76,7 @@ describe('Supabase remote prebundle contract', () => {
     expect(workflow).not.toContain('echo "$SUPABASE_ACCESS_TOKEN"')
     expect(workflow).not.toContain('echo "$SUPABASE_DB_PASSWORD"')
     expect(workflow).not.toContain('echo "$SUPABASE_PROJECT_ID"')
+    expect(workflow).not.toContain('echo "$XRPL_READER_VERIFY_TOKEN"')
   })
 
   it('keeps the Edge parser surface independent from the Cloudflare RPC transport', () => {
@@ -79,12 +93,13 @@ describe('Supabase remote prebundle contract', () => {
     expect(rpcReader).toContain('export async function readValidatedLedger')
   })
 
-  it('redeploys when any bundled collector dependency changes', () => {
+  it('redeploys when any bundled collector or reader dependency changes', () => {
     for (const required of [
       "- 'supabase/**'",
       "- 'src/collector/history-segments/**'",
       "- 'src/collector/incremental/**'",
       "- 'src/shared/portable-collector-*.ts'",
+      "- 'scripts/verify-supabase-committed-reader.mjs'",
     ]) {
       expect(workflow).toContain(required)
     }

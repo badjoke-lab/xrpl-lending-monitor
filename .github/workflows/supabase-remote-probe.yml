@@ -11,6 +11,7 @@ on:
       - 'src/collector/incremental/**'
       - 'src/shared/portable-collector-*.ts'
       - 'scripts/verify-supabase-remote-probe.mjs'
+      - 'scripts/verify-supabase-committed-reader.mjs'
       - '.github/workflows/supabase-remote-probe.yml'
 
 permissions:
@@ -48,43 +49,48 @@ jobs:
         with:
           version: latest
 
-      - name: Bundle exact Devnet phase executor
+      - name: Bundle exact Devnet phase executor and committed reader
         shell: bash
         env:
           HEAD_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          source_path='supabase/functions/xrpl-collector-tick/index.ts'
-          bundle_path='/tmp/xrpl-collector-tick-index.ts'
           evidence_dir='supabase-remote-probe-evidence'
           mkdir -p "$evidence_dir"
 
-          bun build "$source_path" \
-            --target=browser \
-            --format=esm \
-            --outfile="$bundle_path"
+          bundle_function() {
+            local source_path="$1"
+            local bundle_path="$2"
+            local evidence_path="$3"
 
-          test -s "$bundle_path"
-          BUNDLE_PATH="$bundle_path" HEAD_SHA="$HEAD_SHA" node --input-type=module <<'NODE'
+            bun build "$source_path" \
+              --target=browser \
+              --format=esm \
+              --outfile="$bundle_path"
+
+            test -s "$bundle_path"
+            SOURCE_PATH="$source_path" BUNDLE_PATH="$bundle_path" EVIDENCE_PATH="$evidence_path" HEAD_SHA="$HEAD_SHA" node --input-type=module <<'NODE'
           import { createHash } from 'node:crypto'
           import { readFileSync, writeFileSync } from 'node:fs'
 
-          const path = process.env.BUNDLE_PATH
+          const sourcePath = process.env.SOURCE_PATH
+          const bundlePath = process.env.BUNDLE_PATH
+          const evidencePath = process.env.EVIDENCE_PATH
           const headSha = process.env.HEAD_SHA
-          const bundle = readFileSync(path, 'utf8')
+          const bundle = readFileSync(bundlePath, 'utf8')
           const unresolvedRelativeImport = /(?:from\s*|import\s*\()\s*['"]\.{1,2}\//u
           if (unresolvedRelativeImport.test(bundle)) {
-            throw new Error('generated Supabase bundle retains a relative import')
+            throw new Error(`generated Supabase bundle retains a relative import: ${sourcePath}`)
           }
           if (bundle.includes('cloudflare:')) {
-            throw new Error('generated Supabase bundle contains a Cloudflare runtime import')
+            throw new Error(`generated Supabase bundle contains a Cloudflare runtime import: ${sourcePath}`)
           }
           if (!bundle.includes('Deno.serve')) {
-            throw new Error('generated Supabase bundle does not contain the Edge entrypoint')
+            throw new Error(`generated Supabase bundle does not contain the Edge entrypoint: ${sourcePath}`)
           }
           const evidence = {
             schemaVersion: 1,
-            source: 'supabase/functions/xrpl-collector-tick/index.ts',
+            source: sourcePath,
             headSha,
             bytes: Buffer.byteLength(bundle),
             sha256: createHash('sha256').update(bundle).digest('hex'),
@@ -92,16 +98,33 @@ jobs:
             cloudflareImports: 0,
             denoServeEntrypoint: true,
           }
-          writeFileSync(
-            'supabase-remote-probe-evidence/bundle.json',
-            `${JSON.stringify(evidence, null, 2)}\n`,
-          )
+          writeFileSync(evidencePath, `${JSON.stringify(evidence, null, 2)}\n`)
           NODE
 
-          cp "$bundle_path" "$source_path"
+            cp "$bundle_path" "$source_path"
+          }
+
+          bundle_function \
+            'supabase/functions/xrpl-collector-tick/index.ts' \
+            '/tmp/xrpl-collector-tick-index.ts' \
+            "$evidence_dir/bundle.json"
+
+          bundle_function \
+            'supabase/functions/xrpl-committed-reader/index.ts' \
+            '/tmp/xrpl-committed-reader-index.ts' \
+            "$evidence_dir/reader-bundle.json"
 
       - name: Link exact Supabase project
         run: supabase link --project-ref "$SUPABASE_PROJECT_ID" --password "$SUPABASE_DB_PASSWORD"
+
+      - name: Rotate one-run committed reader verifier token
+        shell: bash
+        run: |
+          set -euo pipefail
+          verifier_token="$(openssl rand -hex 32)"
+          echo "::add-mask::${verifier_token}"
+          supabase secrets set XRPL_READER_VERIFY_TOKEN="${verifier_token}" --project-ref "$SUPABASE_PROJECT_ID"
+          echo "XRPL_READER_VERIFY_TOKEN=${verifier_token}" >> "$GITHUB_ENV"
 
       - name: Apply pending migrations
         run: supabase db push --linked --yes
@@ -113,8 +136,18 @@ jobs:
           --use-api
           --no-verify-jwt
 
+      - name: Deploy qualification-only committed reader bundle
+        run: >-
+          supabase functions deploy xrpl-committed-reader
+          --project-ref "$SUPABASE_PROJECT_ID"
+          --use-api
+          --no-verify-jwt
+
       - name: Verify repeated remote portable phase execution
         run: node scripts/verify-supabase-remote-probe.mjs
+
+      - name: Verify remote immutable committed reader
+        run: node scripts/verify-supabase-committed-reader.mjs
 
       - name: Upload sanitized remote evidence
         if: always()
@@ -144,8 +177,11 @@ jobs:
           const runUrl = process.env.RUN_URL ?? ''
           const headSha = process.env.HEAD_SHA ?? 'unknown'
           const bundlePath = 'supabase-remote-probe-evidence/bundle.json'
+          const readerBundlePath = 'supabase-remote-probe-evidence/reader-bundle.json'
           const verifiedPath = 'supabase-remote-probe-evidence/verified-health.json'
           const failedPath = 'supabase-remote-probe-evidence/failed-verification.json'
+          const verifiedReaderPath = 'supabase-remote-probe-evidence/verified-reader.json'
+          const failedReaderPath = 'supabase-remote-probe-evidence/failed-reader-verification.json'
 
           const lines = [
             '## Supabase deployment verification',
@@ -162,6 +198,16 @@ jobs:
               `- bundle sha256: \`${String(bundle?.sha256 ?? 'unknown')}\``,
               `- unresolved relative imports: \`${String(bundle?.relativeImports ?? 'unknown')}\``,
               `- Cloudflare runtime imports: \`${String(bundle?.cloudflareImports ?? 'unknown')}\``,
+            )
+          }
+
+          if (existsSync(readerBundlePath)) {
+            const bundle = JSON.parse(readFileSync(readerBundlePath, 'utf8'))
+            lines.push(
+              `- reader bundle bytes: \`${String(bundle?.bytes ?? 'unknown')}\``,
+              `- reader bundle sha256: \`${String(bundle?.sha256 ?? 'unknown')}\``,
+              `- reader unresolved relative imports: \`${String(bundle?.relativeImports ?? 'unknown')}\``,
+              `- reader Cloudflare runtime imports: \`${String(bundle?.cloudflareImports ?? 'unknown')}\``,
             )
           }
 
@@ -189,6 +235,26 @@ jobs:
             )
           } else {
             lines.push('- verifier: `not reached or no sanitized evidence produced`')
+          }
+
+          if (existsSync(verifiedReaderPath)) {
+            const evidence = JSON.parse(readFileSync(verifiedReaderPath, 'utf8'))
+            lines.push(
+              '- committed reader verifier: `success`',
+              `- reader verified at: \`${String(evidence?.verifiedAt ?? 'unknown')}\``,
+              `- reader verifier attempt: \`${String(evidence?.attempt ?? 'unknown')}\``,
+              `- reader fence ledger: \`${String(evidence?.fence?.ledgerIndex ?? 'not available')}\``,
+              `- reader fence work: \`${String(evidence?.fence?.workId ?? 'not available')}\``,
+            )
+          } else if (existsSync(failedReaderPath)) {
+            const evidence = JSON.parse(readFileSync(failedReaderPath, 'utf8'))
+            lines.push(
+              '- committed reader verifier: `failed`',
+              `- reader failed at: \`${String(evidence?.failedAt ?? 'unknown')}\``,
+              `- reader reason: \`${String(evidence?.reason ?? 'unknown').slice(0, 500)}\``,
+            )
+          } else {
+            lines.push('- committed reader verifier: `not reached or no sanitized evidence produced`')
           }
 
           console.log(`${lines.join('\n')}\n`)

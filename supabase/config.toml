@@ -2,3 +2,6 @@ project_id = "xrpl-lending-monitor"
 
 [functions.xrpl-collector-tick]
 verify_jwt = false
+
+[functions.xrpl-committed-reader]
+verify_jwt = false
