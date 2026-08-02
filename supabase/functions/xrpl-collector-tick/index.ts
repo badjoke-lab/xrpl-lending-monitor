@@ -14,7 +14,7 @@ import { canonicalPortableJson } from '../../../src/shared/portable-collector-re
 import {
   buildPortableXrplNormalizedWork,
   portableReferenceRowsFromChunk,
-} from '../../../src/shared/portable-collector-xrpl-normalization.ts'
+} from '../../../src/collector/history-segments/portable-xrpl-normalization.ts'
 
 const DEFAULT_XRPL_DEVNET_RPC_URL = 'https://s.devnet.rippletest.net:51234/'
 const PROFILE_ID = 'supabase-devnet'
