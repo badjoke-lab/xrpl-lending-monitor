@@ -1,0 +1,107 @@
+{
+  "schemaVersion": 1,
+  "purpose": "r4c2c-restore-continuation-remote-verification",
+  "runId": 30751813536,
+  "commit": "5346b831bfb5c7f205167d465c763d8a8d4489dc",
+  "artifactId": 8834687183,
+  "artifactDigest": "sha256:32e89f576426e5f78bd224766b9ce0dfe052a0cf6a04ddef6b617e815efbda2a",
+  "verifiedAt": "2026-08-02T14:19:33.101Z",
+  "fixtureId": "r4c2c-post-restore-continuation-v1",
+  "sourceProfileId": "supabase-devnet-restore-continuation-source",
+  "activeProfileId": "supabase-devnet",
+  "targetId": "supabase-devnet-restore-continuation-v1",
+  "sourceStateDigest": "8e807adcd9a49ad47236d3dbaeb67cde74bc795ec2ea3019891090d4ec429991",
+  "sourceRowCounts": {
+    "work": 1,
+    "streams": 1,
+    "messages": 1,
+    "successors": 0,
+    "watermarks": 1,
+    "commitChunks": 1,
+    "payloadChunks": 1,
+    "referenceRows": 1
+  },
+  "anchor": {
+    "workId": "collector-work-v1:devnet:supabase-r4c2c-v1:seven-class-base-4132417-C9A7A89077EA7F54EBC296EE95E6AE45601088DDA5CFC5538A435C4A21E9CE77:4132573:B030EE053266FCC41DDD86F87C7CF46F967302AABCD25C9D827BB68A0734A268",
+    "ledgerIndex": 4132573,
+    "ledgerHash": "8471870B8E722DC683EC69EC3CCD006E2CEC2669CE8AEF1ACC54A8ED1E35F241"
+  },
+  "continuation": {
+    "workId": "collector-work-v1:devnet:supabase-r4c2c-v1:seven-class-base-4132417-C9A7A89077EA7F54EBC296EE95E6AE45601088DDA5CFC5538A435C4A21E9CE77:4132574:8471870B8E722DC683EC69EC3CCD006E2CEC2669CE8AEF1ACC54A8ED1E35F241",
+    "ledgerIndex": 4132574,
+    "ledgerHash": "7FF0E703A282BA7DFFC2AB2D20E56753C891CBE46FFF842F2BA8568AB27CCFD3",
+    "rowCount": 1,
+    "rowsDigest": "7609d7198d2019c205433f5c45cc7fa44d83d5c394f955e554437a02f15ae5a1"
+  },
+  "phaseSequence": [
+    {
+      "phase": "scan",
+      "status": "completed",
+      "attemptCount": 1
+    },
+    {
+      "phase": "commit",
+      "status": "completed",
+      "attemptCount": 1
+    },
+    {
+      "phase": "finalize",
+      "status": "completed",
+      "attemptCount": 1
+    },
+    {
+      "phase": "scan",
+      "status": "pending",
+      "attemptCount": 0
+    }
+  ],
+  "messageStatusCounts": {
+    "completed": 3,
+    "pending": 1
+  },
+  "rowCounts": {
+    "work": 2,
+    "streams": 1,
+    "messages": 4,
+    "successors": 3,
+    "watermarks": 1,
+    "commitChunks": 2,
+    "payloadChunks": 2,
+    "referenceRows": 2
+  },
+  "targetStateDigest": "09ea04f458959c0203628d3c12891a7aebbf31cf553f45e805e782231007fb3e",
+  "duplicatePhaseReplayCount": 3,
+  "activeWatermarkBefore": {
+    "profileId": "supabase-devnet",
+    "network": "devnet",
+    "epochId": "supabase-r4c2c-v1",
+    "baseIdentity": "seven-class-base-4132417-C9A7A89077EA7F54EBC296EE95E6AE45601088DDA5CFC5538A435C4A21E9CE77",
+    "ledgerIndex": 4132575,
+    "ledgerHash": "5C64B9101D26ACBDD96069DBB605CADAAF6B3224DF6CA57D65D7FEC373FC7E17",
+    "workId": "collector-work-v1:devnet:supabase-r4c2c-v1:seven-class-base-4132417-C9A7A89077EA7F54EBC296EE95E6AE45601088DDA5CFC5538A435C4A21E9CE77:4132575:7FF0E703A282BA7DFFC2AB2D20E56753C891CBE46FFF842F2BA8568AB27CCFD3"
+  },
+  "activeWatermarkAfter": {
+    "profileId": "supabase-devnet",
+    "network": "devnet",
+    "epochId": "supabase-r4c2c-v1",
+    "baseIdentity": "seven-class-base-4132417-C9A7A89077EA7F54EBC296EE95E6AE45601088DDA5CFC5538A435C4A21E9CE77",
+    "ledgerIndex": 4132575,
+    "ledgerHash": "5C64B9101D26ACBDD96069DBB605CADAAF6B3224DF6CA57D65D7FEC373FC7E17",
+    "workId": "collector-work-v1:devnet:supabase-r4c2c-v1:seven-class-base-4132417-C9A7A89077EA7F54EBC296EE95E6AE45601088DDA5CFC5538A435C4A21E9CE77:4132575:7FF0E703A282BA7DFFC2AB2D20E56753C891CBE46FFF842F2BA8568AB27CCFD3"
+  },
+  "credentialChecks": {
+    "missingTokenRejected": true,
+    "wrongPurposeRejected": true
+  },
+  "checks": {
+    "emptyTargetRestoreParity": true,
+    "pendingScanRestored": true,
+    "standardPhaseContinuation": true,
+    "watermarkAdvancedExactlyOne": true,
+    "committedRowParity": true,
+    "explicitSourceRebinding": true,
+    "duplicatePhaseReplayConverged": true,
+    "activeProfileIsolated": true,
+    "postRestoreContinuationProved": true
+  }
+}
