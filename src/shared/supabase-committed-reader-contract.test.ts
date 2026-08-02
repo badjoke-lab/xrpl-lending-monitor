@@ -17,14 +17,17 @@ describe('R4C2c Supabase committed reader contract', () => {
   const config = read('supabase/config.toml')
   const allowlist = read('scripts/check-actions-workflow-allowlist.sh')
 
-  it('keeps the reader qualification-only, Devnet-bound, and separate from the public app', () => {
+  it('keeps the reader qualification-only, Devnet-bound, token-gated, and separate from the public app', () => {
     for (const required of [
       "const PROFILE_ID = 'supabase-devnet'",
       "const SOURCE_ID = 'supabase-r4c2c-qualification'",
       "const EPOCH_ID = 'supabase-r4c2c-v1'",
       "const PURPOSE = 'r4c2c-qualification'",
+      "const VERIFY_TOKEN_HEADER = 'x-xrpl-reader-token'",
       "purpose: 'r4-qualification-only'",
       "request.headers.get('x-xrpl-reader-purpose')",
+      'request.headers.get(VERIFY_TOKEN_HEADER)',
+      "env('XRPL_READER_VERIFY_TOKEN')",
       "request.method !== 'POST'",
       "'cache-control': 'no-store'",
       "env('SUPABASE_URL')",
@@ -130,10 +133,12 @@ describe('R4C2c Supabase committed reader contract', () => {
     }
   })
 
-  it('remotely verifies continuation and all cursor rejection boundaries', () => {
+  it('remotely verifies continuation and all cursor rejection boundaries through the masked token', () => {
     for (const required of [
       "functions/v1/xrpl-committed-reader",
+      "process.env.XRPL_READER_VERIFY_TOKEN",
       "'x-xrpl-reader-purpose': 'r4c2c-qualification'",
+      "'x-xrpl-reader-token': verifierToken",
       'reader has fewer than two committed validated-ledger rows',
       'cursor continuation changed the immutable fence',
       'exact lookup does not match the paginated row',
@@ -153,6 +158,9 @@ describe('R4C2c Supabase committed reader contract', () => {
     for (const required of [
       "supabase/functions/xrpl-committed-reader/index.ts",
       'reader-bundle.json',
+      'Rotate one-run committed reader verifier token',
+      '::add-mask::',
+      'supabase secrets set XRPL_READER_VERIFY_TOKEN',
       'supabase functions deploy xrpl-committed-reader',
       'node scripts/verify-supabase-committed-reader.mjs',
       'committed reader verifier: `success`',
@@ -162,6 +170,9 @@ describe('R4C2c Supabase committed reader contract', () => {
       expect(workflow).toContain(required)
     }
     for (const required of [
+      'Rotate one-run committed reader verifier token',
+      '::add-mask::',
+      'supabase secrets set XRPL_READER_VERIFY_TOKEN',
       'supabase functions deploy xrpl-committed-reader',
       'node scripts/verify-supabase-committed-reader.mjs',
       'reader-bundle.json',
@@ -173,5 +184,6 @@ describe('R4C2c Supabase committed reader contract', () => {
     expect(config).toContain('[functions.xrpl-committed-reader]')
     expect(config).toContain('verify_jwt = false')
     expect(workflow.match(/gh issue comment 1109/g)).toHaveLength(1)
+    expect(workflow.match(/supabase secrets set XRPL_READER_VERIFY_TOKEN/g)).toHaveLength(1)
   })
 })
