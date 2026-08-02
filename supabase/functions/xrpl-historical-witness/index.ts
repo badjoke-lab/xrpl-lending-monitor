@@ -12,6 +12,7 @@ import {
 import { canonicalPortableJson } from '../../../src/shared/portable-collector-reference-store'
 
 const SET_ID = 'r4c2c-devnet-historical-witness-v1'
+const WORK_ID = 'historical-witness-work-v1:2776760:2980845:3127240'
 const PROFILE_ID = 'supabase-devnet-historical-witness'
 const EPOCH_ID = 'supabase-r4c2c-historical-witness-v1'
 const BASE_IDENTITY = 'historical-witness-2776760-2980845-3127240'
@@ -20,6 +21,7 @@ const PURPOSE_HEADER = 'x-xrpl-reader-purpose'
 const VERIFY_TOKEN_HEADER = 'x-xrpl-reader-token'
 const DEFAULT_ENDPOINT = 'https://s.devnet.rippletest.net:51234/'
 const REQUEST_TIMEOUT_MILLISECONDS = 15_000
+const EXPECTED_RECORDS_DIGEST = 'bac80ec90ba841b683ee9e4b154cf385ffd972ce636f9797cb8f6cff1cdd209a'
 
 const LEDGERS = [
   {
@@ -51,6 +53,26 @@ const EXPECTED_COUNTS = {
 
 type Json = Record<string, unknown>
 type SemanticClass = keyof typeof EXPECTED_COUNTS
+type CommittedSetRow = {
+  set_id: string
+  schema_version: number
+  profile_id: string
+  network: string
+  epoch_id: string
+  base_identity: string
+  fence_ledger_index: number
+  fence_ledger_hash: string
+  work_id: string
+  source_run_id: number
+  records_digest: string
+  semantic_counts: Json
+  record_count: number
+  status: string
+  committed_at: string | null
+}
+type CommittedClassRow = {
+  semantic_class: SemanticClass
+}
 
 function response(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -77,6 +99,14 @@ function serviceKey(): string {
   return env('SUPABASE_SERVICE_ROLE_KEY')
 }
 
+function adminHeaders(key: string): HeadersInit {
+  return {
+    apikey: key,
+    authorization: `Bearer ${key}`,
+    'content-type': 'application/json',
+  }
+}
+
 function isRecord(value: unknown): value is Json {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
@@ -90,6 +120,103 @@ async function sha256(value: string): Promise<string> {
   const input = new ArrayBuffer(bytes.byteLength)
   new Uint8Array(input).set(bytes)
   return bytesToHex(new Uint8Array(await crypto.subtle.digest('SHA-256', input)))
+}
+
+async function getRows<T>(supabaseUrl: string, key: string, path: string): Promise<T[]> {
+  const result = await fetch(`${supabaseUrl}/rest/v1/${path}`, {
+    headers: adminHeaders(key),
+    signal: AbortSignal.timeout(15_000),
+  })
+  const text = await result.text()
+  if (!result.ok) {
+    throw new Error(`Historical witness storage read failed (${result.status}): ${text.slice(0, 500)}`)
+  }
+  return JSON.parse(text) as T[]
+}
+
+function countCommittedClasses(rows: readonly CommittedClassRow[]): Record<SemanticClass, number> {
+  const counts: Record<SemanticClass, number> = {
+    'validated-ledger': 0,
+    'protocol-event': 0,
+    'object-change': 0,
+    'loan-lifecycle': 0,
+    'archived-object': 0,
+    'balance-history': 0,
+    'current-projection': 0,
+  }
+  for (const row of rows) {
+    if (!(row.semantic_class in counts)) {
+      throw new Error(`Committed historical witness contains an unknown class: ${String(row.semantic_class)}`)
+    }
+    counts[row.semantic_class] += 1
+  }
+  return counts
+}
+
+async function readCommittedWitness(supabaseUrl: string, key: string): Promise<Json | null> {
+  const sets = await getRows<CommittedSetRow>(
+    supabaseUrl,
+    key,
+    `xrpl_historical_witness_sets?set_id=eq.${encodeURIComponent(SET_ID)}&select=set_id,schema_version,profile_id,network,epoch_id,base_identity,fence_ledger_index,fence_ledger_hash,work_id,source_run_id,records_digest,semantic_counts,record_count,status,committed_at&limit=2`,
+  )
+  if (sets.length === 0) return null
+  if (sets.length !== 1) throw new Error(`Historical witness set lookup returned ${sets.length} rows`)
+  const set = sets[0]!
+  if (
+    set.set_id !== SET_ID
+    || set.schema_version !== 1
+    || set.profile_id !== PROFILE_ID
+    || set.network !== 'devnet'
+    || set.epoch_id !== EPOCH_ID
+    || set.base_identity !== BASE_IDENTITY
+    || set.fence_ledger_index !== 3_127_240
+    || set.fence_ledger_hash !== LEDGERS[2].ledgerHash
+    || set.work_id !== WORK_ID
+    || set.source_run_id !== 30_741_004_656
+    || set.records_digest !== EXPECTED_RECORDS_DIGEST
+    || set.record_count !== 237
+    || set.status !== 'committed'
+    || typeof set.committed_at !== 'string'
+    || canonicalPortableJson(set.semantic_counts) !== canonicalPortableJson(EXPECTED_COUNTS)
+  ) {
+    throw new Error('Committed historical witness set identity or digest is invalid')
+  }
+
+  const persistedRows = await getRows<CommittedClassRow>(
+    supabaseUrl,
+    key,
+    `xrpl_historical_witness_rows?set_id=eq.${encodeURIComponent(SET_ID)}&select=semantic_class&limit=300`,
+  )
+  if (persistedRows.length !== 237) {
+    throw new Error(`Committed historical witness contains ${persistedRows.length} rows, expected 237`)
+  }
+  const semanticCounts = countCommittedClasses(persistedRows)
+  if (canonicalPortableJson(semanticCounts) !== canonicalPortableJson(EXPECTED_COUNTS)) {
+    throw new Error(`Committed historical witness semantic counts changed: ${canonicalPortableJson(semanticCounts)}`)
+  }
+
+  return {
+    schemaVersion: 1,
+    purpose: PURPOSE,
+    profileId: PROFILE_ID,
+    epochId: EPOCH_ID,
+    baseIdentity: BASE_IDENTITY,
+    setId: SET_ID,
+    sourceLedgers: LEDGERS.map(({ ledgerIndex, ledgerHash }) => ({ ledgerIndex, ledgerHash })),
+    recordCount: 237,
+    semanticCounts,
+    recordsDigest: `sha256:${EXPECTED_RECORDS_DIGEST}`,
+    source: 'existing-committed-set',
+    commit: {
+      committed: true,
+      duplicate: true,
+      setId: SET_ID,
+      workId: WORK_ID,
+      recordCount: 237,
+      recordsDigest: EXPECTED_RECORDS_DIGEST,
+      committedAt: set.committed_at,
+    },
+  }
 }
 
 async function readLedger(
@@ -217,11 +344,7 @@ async function commitWitness(
 ): Promise<Json> {
   const result = await fetch(`${supabaseUrl}/rest/v1/rpc/xrpl_commit_historical_witness`, {
     method: 'POST',
-    headers: {
-      apikey: key,
-      authorization: `Bearer ${key}`,
-      'content-type': 'application/json',
-    },
+    headers: adminHeaders(key),
     body: JSON.stringify({
       p_set_id: SET_ID,
       p_records_json: recordsJson,
@@ -240,6 +363,11 @@ async function commitWitness(
 }
 
 async function execute(): Promise<Json> {
+  const supabaseUrl = env('SUPABASE_URL')
+  const key = serviceKey()
+  const committed = await readCommittedWitness(supabaseUrl, key)
+  if (committed !== null) return committed
+
   const endpoint = Deno.env.get('XRPL_DEVNET_RPC_URL')?.trim() || DEFAULT_ENDPOINT
   const ledgers = await Promise.all(LEDGERS.map((expected) => readLedger(endpoint, expected)))
   const rows: PortablePersistedReferenceRowV1[] = []
@@ -261,7 +389,10 @@ async function execute(): Promise<Json> {
   const semanticCounts = verifyRows(rows)
   const recordsJson = canonicalPortableJson(rows)
   const recordsDigest = await sha256(recordsJson)
-  const commit = await commitWitness(env('SUPABASE_URL'), serviceKey(), recordsJson, recordsDigest)
+  if (recordsDigest !== EXPECTED_RECORDS_DIGEST) {
+    throw new Error(`Historical witness records digest changed: ${recordsDigest}`)
+  }
+  const commit = await commitWitness(supabaseUrl, key, recordsJson, recordsDigest)
   return {
     schemaVersion: 1,
     purpose: PURPOSE,
@@ -273,6 +404,7 @@ async function execute(): Promise<Json> {
     recordCount: rows.length,
     semanticCounts,
     recordsDigest: `sha256:${recordsDigest}`,
+    source: 'devnet-reconstruction',
     commit,
   }
 }
