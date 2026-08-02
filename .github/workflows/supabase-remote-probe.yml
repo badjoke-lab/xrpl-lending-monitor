@@ -17,6 +17,7 @@ on:
       - 'scripts/verify-supabase-complete-state-transfer.mjs'
       - 'scripts/verify-supabase-restore-continuation.mjs'
       - 'scripts/verify-supabase-remote-fault-qualification.mjs'
+      - 'scripts/verify-supabase-throughput-resource-baseline.mjs'
       - 'scripts/publish-supabase-run-locator.mjs'
       - '.github/workflows/supabase-remote-probe.yml'
 
@@ -155,6 +156,11 @@ jobs:
             '/tmp/xrpl-remote-fault-qualification-index.ts' \
             "$evidence_dir/remote-fault-qualification-bundle.json"
 
+          bundle_function \
+            'supabase/functions/xrpl-throughput-resource-baseline/index.ts' \
+            '/tmp/xrpl-throughput-resource-baseline-index.ts' \
+            "$evidence_dir/throughput-resource-baseline-bundle.json"
+
       - name: Link exact Supabase project
         run: supabase link --project-ref "$SUPABASE_PROJECT_ID" --password "$SUPABASE_DB_PASSWORD"
 
@@ -233,6 +239,13 @@ jobs:
           --use-api
           --no-verify-jwt
 
+      - name: Deploy throughput and resource baseline bundle
+        run: >-
+          supabase functions deploy xrpl-throughput-resource-baseline
+          --project-ref "$SUPABASE_PROJECT_ID"
+          --use-api
+          --no-verify-jwt
+
       - name: Verify repeated remote portable phase execution
         run: node scripts/verify-supabase-remote-probe.mjs
 
@@ -253,6 +266,9 @@ jobs:
 
       - name: Verify isolated remote fault qualification
         run: node scripts/verify-supabase-remote-fault-qualification.mjs
+
+      - name: Verify throughput and resource baseline
+        run: node scripts/verify-supabase-throughput-resource-baseline.mjs
 
       - name: Upload sanitized remote evidence
         if: always()
@@ -283,11 +299,13 @@ jobs:
           # verified-complete-state-transfer.json / failed-complete-state-transfer-verification.json
           # verified-restore-continuation.json / failed-restore-continuation-verification.json
           # verified-remote-fault-qualification.json / failed-remote-fault-qualification-verification.json
+          # verified-throughput-resource-baseline.json / failed-throughput-resource-baseline-verification.json
           # phase watermark ledger / consecutive failures
           # historical witness verifier: `success`
           # multi-chunk witness verifier: `success`
           # complete-state transfer verifier: `success`
           # restore continuation verifier: `success`
           # remote fault qualification verifier: `success`
+          # throughput resource baseline verifier: `success`
           node scripts/publish-supabase-run-locator.mjs > /tmp/supabase-run-comment.md
           gh issue comment 1109 --repo "$GITHUB_REPOSITORY" --body-file /tmp/supabase-run-comment.md
