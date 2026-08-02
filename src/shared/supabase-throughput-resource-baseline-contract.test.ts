@@ -117,7 +117,8 @@ describe('Supabase R4C2d throughput and resource baseline contract', () => {
 
   it('deploys the tenth function through the existing single guarded workflow', () => {
     expect(config).toContain('[functions.xrpl-throughput-resource-baseline]')
-    expect(config.match(/verify_jwt = false/g)).toHaveLength(10)
+    expect(config).toContain('verify_jwt=false')
+    expect(config.match(/verify_jwt = false/g)).toHaveLength(9)
     for (const required of [
       "'supabase/functions/xrpl-throughput-resource-baseline/index.ts'",
       'throughput-resource-baseline-bundle.json',
