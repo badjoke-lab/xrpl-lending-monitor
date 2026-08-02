@@ -1,0 +1,173 @@
+{
+  "schemaVersion": 1,
+  "purpose": "r4c2d-supabase-throughput-resource-baseline-evidence",
+  "profileId": "supabase-devnet",
+  "epochId": "supabase-r4c2c-v1",
+  "network": "devnet",
+  "run": {
+    "workflowRunId": 30754437078,
+    "attempt": 2,
+    "commit": "69f8c2b0e8b1604211bd4c5270b8af14f8ec755d",
+    "artifactId": 8835523407,
+    "artifactDigest": "sha256:0d344035acc876125dc360534971877411d087db43d3b8d752d7b75e32cbf912",
+    "verifiedAt": "2026-08-02T15:32:54.541Z",
+    "observedAt": "2026-08-02T15:32:53.253Z"
+  },
+  "throughputWindows": [
+    {
+      "windowMinutes": 60,
+      "committedLedgers": 19,
+      "productiveMinutes": 19,
+      "zeroMinutes": 41,
+      "averageLedgersPerMinute": 0.316667,
+      "p50LedgersPerMinute": 0,
+      "p95LedgersPerMinute": 1,
+      "maxLedgersPerMinute": 1,
+      "workLatencyP50Milliseconds": 120089.5,
+      "workLatencyP95Milliseconds": 120899.35,
+      "workLatencyMaxMilliseconds": 120906
+    },
+    {
+      "windowMinutes": 360,
+      "committedLedgers": 119,
+      "productiveMinutes": 119,
+      "zeroMinutes": 241,
+      "averageLedgersPerMinute": 0.330556,
+      "p50LedgersPerMinute": 0,
+      "p95LedgersPerMinute": 1,
+      "maxLedgersPerMinute": 1,
+      "workLatencyP50Milliseconds": 119994,
+      "workLatencyP95Milliseconds": 120580.95,
+      "workLatencyMaxMilliseconds": 121197
+    },
+    {
+      "windowMinutes": 1440,
+      "committedLedgers": 208,
+      "productiveMinutes": 208,
+      "zeroMinutes": 1232,
+      "averageLedgersPerMinute": 0.144444,
+      "p50LedgersPerMinute": 0,
+      "p95LedgersPerMinute": 1,
+      "maxLedgersPerMinute": 1,
+      "workLatencyP50Milliseconds": 119990,
+      "workLatencyP95Milliseconds": 120463.4,
+      "workLatencyMaxMilliseconds": 121197
+    }
+  ],
+  "phaseAttempts24h": {
+    "scan": {
+      "messages": 211,
+      "completed": 209,
+      "error": 1,
+      "retry": 0,
+      "p50Attempts": 1,
+      "p95Attempts": 1,
+      "maxAttempts": 241
+    },
+    "commit": {
+      "messages": 209,
+      "completed": 209,
+      "error": 0,
+      "retry": 0,
+      "p50Attempts": 1,
+      "p95Attempts": 1,
+      "maxAttempts": 1
+    },
+    "finalize": {
+      "messages": 209,
+      "completed": 209,
+      "error": 0,
+      "retry": 0,
+      "p50Attempts": 1,
+      "p95Attempts": 1,
+      "maxAttempts": 1
+    }
+  },
+  "resourceSnapshot": {
+    "databaseBytes": 24128659,
+    "tableBytes": {
+      "phaseWork": 1081344,
+      "phaseMessages": 2375680,
+      "phaseSuccessors": 917504,
+      "payloadChunks": 499712,
+      "referenceRows": 499712,
+      "commitChunks": 188416,
+      "phaseStreams": 32768,
+      "watermarks": 32768
+    },
+    "rowCounts": {
+      "phaseWork": 209,
+      "phaseMessages": 629,
+      "phaseSuccessors": 627,
+      "payloadChunks": 209,
+      "referenceRows": 209,
+      "commitChunks": 209,
+      "phaseStreams": 1,
+      "watermarks": 1
+    },
+    "payloadBytes": {
+      "sampleCount": 209,
+      "p50": 990,
+      "p95": 990,
+      "max": 990,
+      "configuredCeiling": 512000,
+      "insideConfiguredCeiling": true
+    },
+    "schedulerPayloadBytes": {
+      "sampleCount": 629,
+      "p50": 519,
+      "p95": 570,
+      "max": 570,
+      "configuredCeiling": 16000,
+      "insideConfiguredCeiling": true
+    },
+    "connections": {
+      "active": 1,
+      "idle": 7,
+      "total": 9,
+      "maxConnectionsSetting": 60,
+      "usageRatio": 0.15
+    },
+    "runtime": {
+      "tickCount": 1119,
+      "consecutiveFailures": 0,
+      "lastError": null
+    }
+  },
+  "measurementCoverage": {
+    "committedThroughput": true,
+    "workLatency": true,
+    "phaseAttempts": true,
+    "databaseStorage": true,
+    "tableStorage": true,
+    "rowCounts": true,
+    "payloadBytes": true,
+    "schedulerPayloadBytes": true,
+    "databaseConnections": true,
+    "edgeCpu": false,
+    "edgeMemory": false,
+    "edgeInvocationCount": false,
+    "bandwidth": false,
+    "billingAndOverage": false
+  },
+  "activeIsolation": {
+    "beforeLedgerIndex": 4132600,
+    "afterLedgerIndex": 4132600,
+    "ledgerAdvance": 0,
+    "nonRegressing": true,
+    "sourceIdentityPreserved": true
+  },
+  "decision": {
+    "steadyP95Threshold": 21,
+    "observedSteadyP95": 1,
+    "steadyObservedPass": false,
+    "catchUpThreshold": 30,
+    "catchUpModeMeasured": false,
+    "catchUpPass": false,
+    "g7Qualified": false,
+    "g7Reason": "steady p95 is 1 ledger/minute and catch-up mode has not been measured",
+    "g8Qualified": false,
+    "g8Reason": "Edge CPU, memory, invocation count, bandwidth, billing, and overage coverage remain incomplete",
+    "profileSelected": false
+  }
+}
