@@ -19,6 +19,7 @@ on:
       - 'scripts/verify-supabase-remote-fault-qualification.mjs'
       - 'scripts/verify-supabase-throughput-resource-baseline.mjs'
       - 'scripts/verify-supabase-catchup-throughput.mjs'
+      - 'scripts/verify-supabase-steady-throughput.mjs'
       - 'scripts/publish-supabase-run-locator.mjs'
       - '.github/workflows/supabase-remote-probe.yml'
 
@@ -112,60 +113,19 @@ jobs:
             cp "$bundle_path" "$source_path"
           }
 
-          bundle_function \
-            'supabase/functions/xrpl-collector-tick/index.ts' \
-            '/tmp/xrpl-collector-tick-index.ts' \
-            "$evidence_dir/bundle.json"
-
-          bundle_function \
-            'supabase/functions/xrpl-committed-reader/index.ts' \
-            '/tmp/xrpl-committed-reader-index.ts' \
-            "$evidence_dir/reader-bundle.json"
-
-          bundle_function \
-            'supabase/functions/xrpl-historical-witness/index.ts' \
-            '/tmp/xrpl-historical-witness-index.ts' \
-            "$evidence_dir/historical-loader-bundle.json"
-
-          bundle_function \
-            'supabase/functions/xrpl-historical-witness-reader/index.ts' \
-            '/tmp/xrpl-historical-witness-reader-index.ts' \
-            "$evidence_dir/historical-reader-bundle.json"
-
-          bundle_function \
-            'supabase/functions/xrpl-multichunk-witness/index.ts' \
-            '/tmp/xrpl-multichunk-witness-index.ts' \
-            "$evidence_dir/multichunk-executor-bundle.json"
-
-          bundle_function \
-            'supabase/functions/xrpl-multichunk-witness-reader/index.ts' \
-            '/tmp/xrpl-multichunk-witness-reader-index.ts' \
-            "$evidence_dir/multichunk-reader-bundle.json"
-
-          bundle_function \
-            'supabase/functions/xrpl-complete-state-transfer/index.ts' \
-            '/tmp/xrpl-complete-state-transfer-index.ts' \
-            "$evidence_dir/complete-state-transfer-bundle.json"
-
-          bundle_function \
-            'supabase/functions/xrpl-restore-continuation/index.ts' \
-            '/tmp/xrpl-restore-continuation-index.ts' \
-            "$evidence_dir/restore-continuation-bundle.json"
-
-          bundle_function \
-            'supabase/functions/xrpl-remote-fault-qualification/index.ts' \
-            '/tmp/xrpl-remote-fault-qualification-index.ts' \
-            "$evidence_dir/remote-fault-qualification-bundle.json"
-
-          bundle_function \
-            'supabase/functions/xrpl-throughput-resource-baseline/index.ts' \
-            '/tmp/xrpl-throughput-resource-baseline-index.ts' \
-            "$evidence_dir/throughput-resource-baseline-bundle.json"
-
-          bundle_function \
-            'supabase/functions/xrpl-catchup-throughput/index.ts' \
-            '/tmp/xrpl-catchup-throughput-index.ts' \
-            "$evidence_dir/catchup-throughput-bundle.json"
+          bundle_function 'supabase/functions/xrpl-collector-tick/index.ts' '/tmp/xrpl-collector-tick-index.ts' "$evidence_dir/bundle.json"
+          bundle_function 'supabase/functions/xrpl-committed-reader/index.ts' '/tmp/xrpl-committed-reader-index.ts' "$evidence_dir/reader-bundle.json"
+          bundle_function 'supabase/functions/xrpl-historical-witness/index.ts' '/tmp/xrpl-historical-witness-index.ts' "$evidence_dir/historical-loader-bundle.json"
+          bundle_function 'supabase/functions/xrpl-historical-witness-reader/index.ts' '/tmp/xrpl-historical-witness-reader-index.ts' "$evidence_dir/historical-reader-bundle.json"
+          bundle_function 'supabase/functions/xrpl-multichunk-witness/index.ts' '/tmp/xrpl-multichunk-witness-index.ts' "$evidence_dir/multichunk-executor-bundle.json"
+          bundle_function 'supabase/functions/xrpl-multichunk-witness-reader/index.ts' '/tmp/xrpl-multichunk-witness-reader-index.ts' "$evidence_dir/multichunk-reader-bundle.json"
+          bundle_function 'supabase/functions/xrpl-complete-state-transfer/index.ts' '/tmp/xrpl-complete-state-transfer-index.ts' "$evidence_dir/complete-state-transfer-bundle.json"
+          bundle_function 'supabase/functions/xrpl-restore-continuation/index.ts' '/tmp/xrpl-restore-continuation-index.ts' "$evidence_dir/restore-continuation-bundle.json"
+          bundle_function 'supabase/functions/xrpl-remote-fault-qualification/index.ts' '/tmp/xrpl-remote-fault-qualification-index.ts' "$evidence_dir/remote-fault-qualification-bundle.json"
+          bundle_function 'supabase/functions/xrpl-throughput-resource-baseline/index.ts' '/tmp/xrpl-throughput-resource-baseline-index.ts' "$evidence_dir/throughput-resource-baseline-bundle.json"
+          bundle_function 'supabase/functions/xrpl-catchup-throughput/index.ts' '/tmp/xrpl-catchup-throughput-index.ts' "$evidence_dir/catchup-throughput-bundle.json"
+          bundle_function 'supabase/functions/xrpl-steady-batch-tick/index.ts' '/tmp/xrpl-steady-batch-tick-index.ts' "$evidence_dir/steady-batch-tick-bundle.json"
+          bundle_function 'supabase/functions/xrpl-steady-throughput-qualification/index.ts' '/tmp/xrpl-steady-throughput-qualification-index.ts' "$evidence_dir/steady-throughput-qualification-bundle.json"
 
       - name: Link exact Supabase project
         run: supabase link --project-ref "$SUPABASE_PROJECT_ID" --password "$SUPABASE_DB_PASSWORD"
@@ -183,108 +143,52 @@ jobs:
         run: supabase db push --linked --yes
 
       - name: Deploy exact Devnet phase executor bundle
-        run: >-
-          supabase functions deploy xrpl-collector-tick
-          --project-ref "$SUPABASE_PROJECT_ID"
-          --use-api
-          --no-verify-jwt
-
+        run: supabase functions deploy xrpl-collector-tick --project-ref "$SUPABASE_PROJECT_ID" --use-api --no-verify-jwt
       - name: Deploy qualification-only committed reader bundle
-        run: >-
-          supabase functions deploy xrpl-committed-reader
-          --project-ref "$SUPABASE_PROJECT_ID"
-          --use-api
-          --no-verify-jwt
-
+        run: supabase functions deploy xrpl-committed-reader --project-ref "$SUPABASE_PROJECT_ID" --use-api --no-verify-jwt
       - name: Deploy isolated historical witness loader bundle
-        run: >-
-          supabase functions deploy xrpl-historical-witness
-          --project-ref "$SUPABASE_PROJECT_ID"
-          --use-api
-          --no-verify-jwt
-
+        run: supabase functions deploy xrpl-historical-witness --project-ref "$SUPABASE_PROJECT_ID" --use-api --no-verify-jwt
       - name: Deploy isolated historical witness reader bundle
-        run: >-
-          supabase functions deploy xrpl-historical-witness-reader
-          --project-ref "$SUPABASE_PROJECT_ID"
-          --use-api
-          --no-verify-jwt
-
+        run: supabase functions deploy xrpl-historical-witness-reader --project-ref "$SUPABASE_PROJECT_ID" --use-api --no-verify-jwt
       - name: Deploy isolated standard-phase multi-chunk executor bundle
-        run: >-
-          supabase functions deploy xrpl-multichunk-witness
-          --project-ref "$SUPABASE_PROJECT_ID"
-          --use-api
-          --no-verify-jwt
-
+        run: supabase functions deploy xrpl-multichunk-witness --project-ref "$SUPABASE_PROJECT_ID" --use-api --no-verify-jwt
       - name: Deploy isolated standard-phase multi-chunk reader bundle
-        run: >-
-          supabase functions deploy xrpl-multichunk-witness-reader
-          --project-ref "$SUPABASE_PROJECT_ID"
-          --use-api
-          --no-verify-jwt
-
+        run: supabase functions deploy xrpl-multichunk-witness-reader --project-ref "$SUPABASE_PROJECT_ID" --use-api --no-verify-jwt
       - name: Deploy isolated complete-state transfer bundle
-        run: >-
-          supabase functions deploy xrpl-complete-state-transfer
-          --project-ref "$SUPABASE_PROJECT_ID"
-          --use-api
-          --no-verify-jwt
-
+        run: supabase functions deploy xrpl-complete-state-transfer --project-ref "$SUPABASE_PROJECT_ID" --use-api --no-verify-jwt
       - name: Deploy isolated post-restore continuation bundle
-        run: >-
-          supabase functions deploy xrpl-restore-continuation
-          --project-ref "$SUPABASE_PROJECT_ID"
-          --use-api
-          --no-verify-jwt
-
+        run: supabase functions deploy xrpl-restore-continuation --project-ref "$SUPABASE_PROJECT_ID" --use-api --no-verify-jwt
       - name: Deploy isolated remote fault qualification bundle
-        run: >-
-          supabase functions deploy xrpl-remote-fault-qualification
-          --project-ref "$SUPABASE_PROJECT_ID"
-          --use-api
-          --no-verify-jwt
-
+        run: supabase functions deploy xrpl-remote-fault-qualification --project-ref "$SUPABASE_PROJECT_ID" --use-api --no-verify-jwt
       - name: Deploy throughput and resource baseline bundle
-        run: >-
-          supabase functions deploy xrpl-throughput-resource-baseline
-          --project-ref "$SUPABASE_PROJECT_ID"
-          --use-api
-          --no-verify-jwt
-
+        run: supabase functions deploy xrpl-throughput-resource-baseline --project-ref "$SUPABASE_PROJECT_ID" --use-api --no-verify-jwt
       - name: Deploy isolated catch-up throughput bundle
-        run: >-
-          supabase functions deploy xrpl-catchup-throughput
-          --project-ref "$SUPABASE_PROJECT_ID"
-          --use-api
-          --no-verify-jwt
+        run: supabase functions deploy xrpl-catchup-throughput --project-ref "$SUPABASE_PROJECT_ID" --use-api --no-verify-jwt
+      - name: Deploy network steady batch tick bundle
+        run: supabase functions deploy xrpl-steady-batch-tick --project-ref "$SUPABASE_PROJECT_ID" --use-api --no-verify-jwt
+      - name: Deploy network steady qualification bundle
+        run: supabase functions deploy xrpl-steady-throughput-qualification --project-ref "$SUPABASE_PROJECT_ID" --use-api --no-verify-jwt
 
       - name: Verify repeated remote portable phase execution
         run: node scripts/verify-supabase-remote-probe.mjs
-
       - name: Verify remote immutable committed reader
         run: node scripts/verify-supabase-committed-reader.mjs
-
       - name: Verify isolated historical witness persistence and reader
         run: node scripts/verify-supabase-historical-witness.mjs
-
       - name: Verify isolated standard-phase multi-chunk execution and reader
         run: node scripts/verify-supabase-multichunk-witness.mjs
-
       - name: Verify isolated complete-state export and typed restore
         run: node scripts/verify-supabase-complete-state-transfer.mjs
-
       - name: Verify isolated post-restore continuation
         run: node scripts/verify-supabase-restore-continuation.mjs
-
       - name: Verify isolated remote fault qualification
         run: node scripts/verify-supabase-remote-fault-qualification.mjs
-
       - name: Verify throughput and resource baseline
         run: node scripts/verify-supabase-throughput-resource-baseline.mjs
-
       - name: Verify isolated catch-up throughput
         run: node scripts/verify-supabase-catchup-throughput.mjs
+      - name: Verify network steady throughput
+        run: node scripts/verify-supabase-steady-throughput.mjs
 
       - name: Upload sanitized remote evidence
         if: always()
@@ -306,9 +210,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # The publisher reads and labels these sanitized outcomes:
-          # supabase-remote-probe-evidence/verified-health.json
-          # supabase-remote-probe-evidence/failed-verification.json
+          # verified-health.json / failed-verification.json
           # verified-reader.json / failed-reader-verification.json
           # verified-historical-witness.json / failed-historical-witness-verification.json
           # verified-multichunk-witness.json / failed-multichunk-witness-verification.json
@@ -317,7 +219,7 @@ jobs:
           # verified-remote-fault-qualification.json / failed-remote-fault-qualification-verification.json
           # verified-throughput-resource-baseline.json / failed-throughput-resource-baseline-verification.json
           # verified-catchup-throughput.json / failed-catchup-throughput-verification.json
-          # phase watermark ledger / consecutive failures
+          # verified-steady-throughput.json / failed-steady-throughput-verification.json
           # historical witness verifier: `success`
           # multi-chunk witness verifier: `success`
           # complete-state transfer verifier: `success`
@@ -325,5 +227,6 @@ jobs:
           # remote fault qualification verifier: `success`
           # throughput resource baseline verifier: `success`
           # catch-up throughput verifier: `success`
+          # steady throughput verifier: `success`
           node scripts/publish-supabase-run-locator.mjs > /tmp/supabase-run-comment.md
           gh issue comment 1109 --repo "$GITHUB_REPOSITORY" --body-file /tmp/supabase-run-comment.md
