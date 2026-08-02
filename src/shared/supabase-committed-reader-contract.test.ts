@@ -160,6 +160,14 @@ describe('R4C2c Supabase committed reader contract', () => {
       'cancel-in-progress: false',
     ]) {
       expect(workflow).toContain(required)
+    }
+    for (const required of [
+      'supabase functions deploy xrpl-committed-reader',
+      'node scripts/verify-supabase-committed-reader.mjs',
+      'reader-bundle.json',
+      'verified-reader.json',
+      'failed-reader-verification.json',
+    ]) {
       expect(allowlist).toContain(required)
     }
     expect(config).toContain('[functions.xrpl-committed-reader]')
