@@ -3,29 +3,19 @@ import { resolve } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-const workflow = readFileSync(
-  resolve(process.cwd(), '.github/workflows/supabase-remote-probe.yml'),
-  'utf8',
-)
-const parserSurface = readFileSync(
-  resolve(process.cwd(), 'src/collector/incremental/read-validated-ledger.ts'),
-  'utf8',
-)
-const parser = readFileSync(
-  resolve(process.cwd(), 'src/collector/incremental/validated-ledger-parser.ts'),
-  'utf8',
-)
-const rpcReader = readFileSync(
-  resolve(process.cwd(), 'src/collector/incremental/read-validated-ledger-rpc.ts'),
-  'utf8',
-)
-const edgeFunction = readFileSync(
-  resolve(process.cwd(), 'supabase/functions/xrpl-collector-tick/index.ts'),
-  'utf8',
-)
+function read(path: string): string {
+  return readFileSync(resolve(process.cwd(), path), 'utf8')
+}
+
+const workflow = read('.github/workflows/supabase-remote-probe.yml')
+const publisher = read('scripts/publish-supabase-run-locator.mjs')
+const parserSurface = read('src/collector/incremental/read-validated-ledger.ts')
+const parser = read('src/collector/incremental/validated-ledger-parser.ts')
+const rpcReader = read('src/collector/incremental/read-validated-ledger-rpc.ts')
+const edgeFunction = read('supabase/functions/xrpl-collector-tick/index.ts')
 
 describe('Supabase remote prebundle contract', () => {
-  it('bundles all six exact checked-out Edge entries before API deployment', () => {
+  it('bundles all eight exact checked-out Edge entries before API deployment', () => {
     for (const required of [
       'Bundle exact Devnet executors and qualification readers',
       'bundle_function() {',
@@ -53,6 +43,12 @@ describe('Supabase remote prebundle contract', () => {
       "'supabase/functions/xrpl-multichunk-witness-reader/index.ts'",
       "'/tmp/xrpl-multichunk-witness-reader-index.ts'",
       '"$evidence_dir/multichunk-reader-bundle.json"',
+      "'supabase/functions/xrpl-complete-state-transfer/index.ts'",
+      "'/tmp/xrpl-complete-state-transfer-index.ts'",
+      '"$evidence_dir/complete-state-transfer-bundle.json"',
+      "'supabase/functions/xrpl-restore-continuation/index.ts'",
+      "'/tmp/xrpl-restore-continuation-index.ts'",
+      '"$evidence_dir/restore-continuation-bundle.json"',
       "const unresolvedRelativeImport = /(?:from\\s*|import\\s*\\()\\s*['\"]\\.{1,2}\\//u",
       "bundle.includes('cloudflare:')",
       "bundle.includes('Deno.serve')",
@@ -71,8 +67,16 @@ describe('Supabase remote prebundle contract', () => {
       'supabase functions deploy xrpl-multichunk-witness',
       'Deploy isolated standard-phase multi-chunk reader bundle',
       'supabase functions deploy xrpl-multichunk-witness-reader',
+      'Deploy isolated complete-state transfer bundle',
+      'supabase functions deploy xrpl-complete-state-transfer',
+      'Deploy isolated post-restore continuation bundle',
+      'supabase functions deploy xrpl-restore-continuation',
       'Verify isolated standard-phase multi-chunk execution and reader',
       'node scripts/verify-supabase-multichunk-witness.mjs',
+      'Verify isolated complete-state export and typed restore',
+      'node scripts/verify-supabase-complete-state-transfer.mjs',
+      'Verify isolated post-restore continuation',
+      'node scripts/verify-supabase-restore-continuation.mjs',
       '--use-api',
       '--no-verify-jwt',
     ]) {
@@ -80,36 +84,36 @@ describe('Supabase remote prebundle contract', () => {
     }
   })
 
-  it('retains sanitized bundle evidence without exposing Supabase secrets or the verifier token', () => {
+  it('retains sanitized bundle evidence through the extracted locator publisher', () => {
     for (const required of [
-      "'supabase-remote-probe-evidence/bundle.json'",
-      "'supabase-remote-probe-evidence/reader-bundle.json'",
-      "'supabase-remote-probe-evidence/historical-loader-bundle.json'",
-      "'supabase-remote-probe-evidence/historical-reader-bundle.json'",
-      "'supabase-remote-probe-evidence/multichunk-executor-bundle.json'",
-      "'supabase-remote-probe-evidence/multichunk-reader-bundle.json'",
-      "'supabase-remote-probe-evidence/verified-multichunk-witness.json'",
-      "'supabase-remote-probe-evidence/failed-multichunk-witness-verification.json'",
-      "createHash('sha256').update(bundle).digest('hex')",
-      'function appendBundle(label, path)',
-      "`- ${label} bytes: \\`${String(bundle?.bytes ?? 'unknown')}\\``",
-      "`- ${label} sha256: \\`${String(bundle?.sha256 ?? 'unknown')}\\``",
-      "`- ${label} relative imports: \\`${String(bundle?.relativeImports ?? 'unknown')}\\``",
-      "`- ${label} Cloudflare imports: \\`${String(bundle?.cloudflareImports ?? 'unknown')}\\``",
-      "appendBundle('collector bundle', bundlePath)",
-      "appendBundle('committed reader bundle', readerBundlePath)",
-      "appendBundle('historical loader bundle', historicalLoaderBundlePath)",
-      "appendBundle('historical reader bundle', historicalReaderBundlePath)",
-      "appendBundle('multi-chunk executor bundle', multichunkExecutorBundlePath)",
-      "appendBundle('multi-chunk reader bundle', multichunkReaderBundlePath)",
-      'retention-days: 7',
+      "['collector bundle', 'bundle.json']",
+      "['committed reader bundle', 'reader-bundle.json']",
+      "['historical loader bundle', 'historical-loader-bundle.json']",
+      "['historical reader bundle', 'historical-reader-bundle.json']",
+      "['multi-chunk executor bundle', 'multichunk-executor-bundle.json']",
+      "['multi-chunk reader bundle', 'multichunk-reader-bundle.json']",
+      "['complete-state transfer bundle', 'complete-state-transfer-bundle.json']",
+      "['restore continuation bundle', 'restore-continuation-bundle.json']",
+      "successFile: 'verified-multichunk-witness.json'",
+      "failureFile: 'failed-multichunk-witness-verification.json'",
+      "successFile: 'verified-complete-state-transfer.json'",
+      "failureFile: 'failed-complete-state-transfer-verification.json'",
+      "successFile: 'verified-restore-continuation.json'",
+      "failureFile: 'failed-restore-continuation-verification.json'",
+      '`- ${label} bytes: \\`${String(value.bytes ?? \'unknown\')}\\``',
+      '`- ${label} sha256: \\`${String(value.sha256 ?? \'unknown\')}\\``',
+      '`- ${label} relative imports: \\`${String(value.relativeImports ?? \'unknown\')}\\``',
+      '`- ${label} Cloudflare imports: \\`${String(value.cloudflareImports ?? \'unknown\')}\\``',
     ]) {
-      expect(workflow).toContain(required)
+      expect(publisher).toContain(required)
     }
-    expect(workflow).not.toContain('echo "$SUPABASE_ACCESS_TOKEN"')
-    expect(workflow).not.toContain('echo "$SUPABASE_DB_PASSWORD"')
-    expect(workflow).not.toContain('echo "$SUPABASE_PROJECT_ID"')
-    expect(workflow).not.toContain('echo "$XRPL_READER_VERIFY_TOKEN"')
+    expect(workflow).toContain("createHash('sha256').update(bundle).digest('hex')")
+    expect(workflow).toContain('retention-days: 7')
+    const combined = `${workflow}\n${publisher}`
+    expect(combined).not.toContain('echo "$SUPABASE_ACCESS_TOKEN"')
+    expect(combined).not.toContain('echo "$SUPABASE_DB_PASSWORD"')
+    expect(combined).not.toContain('echo "$SUPABASE_PROJECT_ID"')
+    expect(combined).not.toContain('echo "$XRPL_READER_VERIFY_TOKEN"')
   })
 
   it('keeps the Edge parser surface independent from the Cloudflare RPC transport', () => {
@@ -135,6 +139,9 @@ describe('Supabase remote prebundle contract', () => {
       "- 'scripts/verify-supabase-committed-reader.mjs'",
       "- 'scripts/verify-supabase-historical-witness.mjs'",
       "- 'scripts/verify-supabase-multichunk-witness.mjs'",
+      "- 'scripts/verify-supabase-complete-state-transfer.mjs'",
+      "- 'scripts/verify-supabase-restore-continuation.mjs'",
+      "- 'scripts/publish-supabase-run-locator.mjs'",
     ]) {
       expect(workflow).toContain(required)
     }
