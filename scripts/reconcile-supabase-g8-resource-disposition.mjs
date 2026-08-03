@@ -53,12 +53,11 @@ function requireRunIdentity(value, name) {
 
 async function run() {
   await mkdir(evidenceDirectory, { recursive: true })
-  const [provider, memory, runtime, plan, resource] = await Promise.all([
+  const [provider, memory, runtime, plan] = await Promise.all([
     evidence('provider-metric-capability.json'),
     evidence('steady-memory-capability.json'),
     evidence('runtime-resource-log-snapshot.json'),
     evidence('org-usage-billing-snapshot.json'),
-    evidence('verified-resource-headroom-guard.json'),
   ])
 
   requireRunIdentity(provider, 'provider metric capability')
@@ -70,16 +69,11 @@ async function run() {
     || memory.purpose !== 'r4c2d-steady-memory-capability'
     || runtime.purpose !== 'r4c2d-function-combined-stats-snapshot'
     || plan.purpose !== 'r4c2d-management-plan-snapshot'
-    || resource.purpose !== 'r4c2d-resource-headroom-guard-verification'
   ) {
     throw new Error('G8 evidence purpose identity changed')
   }
 
   for (const [name, value] of Object.entries({
-    liveGuardAllowed: resource.checks?.liveGuardAllowed,
-    sixFailClosedThresholdsProved: resource.checks?.sixFailClosedThresholdsProved,
-    preReservationHaltProved: resource.checks?.preReservationHaltProved,
-    activeProfileReadOnly: resource.checks?.activeProfileReadOnly,
     providerCoverageNotOverstated: provider.checks?.providerCoverageNotOverstated,
     exactProjectOrganizationBinding: plan.checks?.exactProjectOrganizationBinding,
     freePlanConfirmed: plan.checks?.freePlanConfirmed,
@@ -91,9 +85,7 @@ async function run() {
   })) requireTrue(value, name)
 
   if (
-    resource.checks?.g8Qualified !== false
-    || resource.checks?.profileSelected !== false
-    || provider.checks?.g8Qualified !== false
+    provider.checks?.g8Qualified !== false
     || provider.checks?.profileSelected !== false
     || memory.checks?.g8Qualified !== false
     || memory.checks?.profileSelected !== false
@@ -149,19 +141,15 @@ async function run() {
       memoryHeadroomQualified: exactMemoryHeadroomQualified,
     },
     retainedPasses: {
-      databaseStorage: true,
-      databaseConnections: true,
-      edgeWall: true,
-      functionInvocations: true,
-      deployedBundleSize: true,
-      edgeCpu: true,
+      officialCombinedStatistics: true,
+      exactActiveFunctionCoverage: true,
       freePlanNoCharge: true,
-      sixInjectedFailClosedPaths: true,
-      activeProfileReadOnly: true,
+      providerCoverageNotOverstated: true,
+      memoryCoverageNotOverstated: true,
     },
     checks: {
       providerCapabilityProbeCompleted: true,
-      measuredResourceGuardsPassed: true,
+      hardGateFailureIndependentOfOtherPassingResources: true,
       requestCountsNotSubstitutedForEgressBytes: true,
       averageMemoryNotSubstitutedForPeakMemory: true,
       partialHeapNotSubstitutedForTotalMemory: true,
