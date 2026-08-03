@@ -6,37 +6,55 @@ Last updated: `2026-08-03`.
 
 XRPL Lending Monitor is **not formally released**.
 
-The controlling engineering phase is `R4C2d`: Supabase Free Devnet resource qualification.
+Supabase profile revision 2 completed R4 qualification and was **rejected**. The controlling engineering phase is now `R4C3`: qualify a Supabase revision-3 resource boundary based on conservative application-owned accounting and fail-closed pre-reservation limits.
 
 The retired Cloudflare fixed-32-ledger recovery remains halted. Worker Cron remains empty, Mainnet remains disabled, the legacy public reader remains authoritative, and no R5 recovery, stabilization qualification, or soak is active.
 
-The Supabase Free Devnet profile remains **conditional and unselected** because G8 is unresolved.
+No deployment profile is selected.
 
-## Current gate result
+## Revision-2 final gate result
 
 | Gate | Result | Controlling interpretation |
 | --- | --- | --- |
 | G1 no mandatory payment/card | **pass** | Exact organization is Free and requires no paid billing path |
-| G2 no automatic paid overage | **pass** | Free-plan quota exhaustion produces notification, grace, and service restriction rather than paid overage |
-| G3 durable scheduler and fault behavior | **pass** | Remote one-minute ownership, leases, retry, reclaim, duplicate convergence, successor reservation, and halt passed |
+| G2 no automatic paid overage | **pass** | Free-plan quota exhaustion produces restriction rather than paid overage |
+| G3 durable scheduler and fault behavior | **pass** | One-minute ownership, leases, retry, reclaim, duplicate convergence, successor reservation, and halt passed |
 | G4 transactional completion and rollback | **pass** | Atomic completion, interruption rollback, and replay convergence passed |
 | G5 committed-only reads and source-bound fences | **pass** | Remote committed-reader qualification passed |
 | G6 export, restore, duplicate convergence, and continuation | **pass** | Complete-state and post-restore qualification passed |
 | G7 sustained throughput | **pass** | Steady p95 `24/min` and catch-up p95 `14,178.400673920027/min` passed |
-| G8 resource fail-closed | **unresolved** | Exact peak memory and provider egress remain unavailable |
-| G9 operator independence | **pass** | Run `30789994825` bound all scripted operations to profile revision 2 |
-| G10 production boundary | **pass** | Mainnet, public reader, recovery, stabilization, and soak remain unchanged |
-| profile selected | `false` | No profile selection has occurred |
+| G8 resource fail-closed | **fail** | Required exact peak-memory, provider egress, total-memory counter, and memory-headroom evidence is unavailable |
+| G9 operator independence | **pass** | Run `30789994825` bound scripted operations to revision 2 |
+| G10 production boundary | **pass** | Mainnet, public reader, recovery, stabilization, and soak remained unchanged |
+| profile selected | `false` | Revision 2 was rejected and no replacement is qualified |
 
-The current R4B result is:
+Remote run `30800402654`, commit `db82291a7df3e8d4dfa458891e0a714f7d8d346b`, produced the final G8 disposition:
 
-- classification: `conditional_candidate`;
+- G8 status: `fail`;
+- disposition: `reject_profile`;
+- failure reasons:
+  - `provider_exact_peak_memory_unavailable`;
+  - `provider_egress_bytes_unavailable`;
+  - `runtime_total_memory_counter_unavailable`;
+  - `memory_headroom_not_qualified`.
+
+The final revision-2 R4B result is:
+
+- classification: `rejected`;
 - selection: `not_selected`;
 - eligible for scoring: `false`;
 - passed gates: `9`;
-- failed gates: `0`;
-- unresolved gates: `G8`;
-- decision digest: `e142f849d59d822da8e5fec5bea8f8dec600950e880b6e597b1971dfcd610b36`.
+- failed gates: `1`;
+- unresolved gates: `0`;
+- failed gate: `G8`;
+- decision digest: `d1577a896e3f4e512a362586ae30990aceb5142f0783feb529626fa6f035e111`.
+
+R4E records:
+
+- outcome: `no_profile_qualified`;
+- selected profile: `null`;
+- R5 authorized: `false`;
+- outcome digest: `c04d75c38c103b9549351ca92a8dab113e754e7e2ed720b93a17f58ff138bacb`.
 
 ## Controlling evidence
 
@@ -59,14 +77,15 @@ The current R4B result is:
 - post-restore continuation: [`ops/r4c2c-supabase-restore-continuation-remote-evidence-2026-08-02.md`](ops/r4c2c-supabase-restore-continuation-remote-evidence-2026-08-02.md)
 - remote fault qualification: [`ops/r4c2c-supabase-remote-fault-evidence-2026-08-02.md`](ops/r4c2c-supabase-remote-fault-evidence-2026-08-02.md)
 
-### R4C2d evidence
+### R4C2d and R4E evidence
 
 - normal-cadence/resource baseline: [`ops/r4c2d-supabase-throughput-resource-baseline-evidence-2026-08-03.md`](ops/r4c2d-supabase-throughput-resource-baseline-evidence-2026-08-03.md)
 - isolated catch-up throughput: [`ops/r4c2d-supabase-isolated-catchup-throughput-evidence-2026-08-03.md`](ops/r4c2d-supabase-isolated-catchup-throughput-evidence-2026-08-03.md)
 - network-inclusive steady throughput: [`ops/r4c2d-supabase-network-steady-throughput-evidence-2026-08-03.md`](ops/r4c2d-supabase-network-steady-throughput-evidence-2026-08-03.md)
-- resource, no-charge, and operator evidence: [`ops/r4c2d-supabase-resource-headroom-evidence-2026-08-03.md`](ops/r4c2d-supabase-resource-headroom-evidence-2026-08-03.md)
+- resource, no-charge, operator, and final disposition evidence: [`ops/r4c2d-supabase-resource-headroom-evidence-2026-08-03.md`](ops/r4c2d-supabase-resource-headroom-evidence-2026-08-03.md)
 - machine-readable gate state: [`ops/r4c2d-resource-gate-status-2026-08-03.json`](ops/r4c2d-resource-gate-status-2026-08-03.json)
-- current R4B decision: [`ops/r4c2d-supabase-r4b-decision-2026-08-03.json`](ops/r4c2d-supabase-r4b-decision-2026-08-03.json)
+- rejected revision-2 R4B decision: [`ops/r4c2d-supabase-r4b-decision-2026-08-03.json`](ops/r4c2d-supabase-r4b-decision-2026-08-03.json)
+- R4E outcome: [`ops/r4e-deployment-profile-outcome-2026-08-03.json`](ops/r4e-deployment-profile-outcome-2026-08-03.json)
 - runtime invariants: [`history-runtime-contract.md`](history-runtime-contract.md)
 - resource envelope: [`resource-envelope.md`](resource-envelope.md)
 
@@ -96,77 +115,29 @@ Run `30755497115` proved catch-up p95 `14,178.400673920027/min`, above the requi
 
 Run `30784402995` proved six consecutive network-inclusive minute buckets at `[24, 24, 24, 24, 24, 24]`, with exact 144-ledger target advance, attempt `1`, and active-source identity preservation. Steady p95 passed the required value above `21/min`.
 
-**G7 is qualified.**
+G7 remains qualified for the measured design.
 
-## G1 and G2 cost safety
+## G8 failure boundary
 
-Run `30785807617` proved exact project identity, exact project-to-organization binding, and organization plan `free` through PAT-compatible Management API reads.
+Measured database, connection, wall-time, invocation, bundle, CPU, and cost-safety values were below their retained thresholds. Those passing components did not close the two unavailable resource surfaces.
 
-Official Free-plan policy makes quota exhaustion a notification, grace, and service-restriction event rather than paid overage.
+Six steady ticks retained `36` lifecycle memory samples. Zero RSS does not mean zero total-memory usage, and partial heap or external counters cannot substitute for RSS. The provider probe also exposed no PAT-compatible egress-byte field. A generic project process-memory metric is not function-scoped peak Edge memory.
 
-Therefore G1 and G2 pass. This does not prove provider egress and does not close G8.
+Revision 2 therefore fails G8 and is rejected.
 
-## G8 measured resource state
+## Current next stage — R4C3
 
-Run `30779476979` proved pre-reservation fail-closed behavior for database storage, database connections, Edge wall time, stale external snapshot, projected invocations, and bundle size.
+Revision 3 must not relabel missing provider counters as measured evidence. It must instead define a different profile identity whose hard boundary is explicitly application-owned and conservative.
 
-Run `30784402995` measured:
+Required R4C3 work:
 
-- active functions: `14`;
-- one-day invocations: `3,717`;
-- projected 31-day invocations: `115,227`;
-- maximum CPU: `341 ms`;
-- maximum observed average-memory bucket: `10.76615047454834 MB`;
-- database size: `81,939,603` bytes;
-- database connections: `10`;
-- maximum Edge wall time: `5,202.7498 ms`;
-- largest exact deployed bundle: `103,351` bytes;
-- live guard allowed: `true`;
-- live failures: `[]`.
-
-### Memory boundary
-
-Six steady ticks retained 36 lifecycle samples. RSS was zero for every sample while some heap or external counters were nonzero.
-
-This means total-memory measurement is unavailable. It does not mean zero memory usage or 200 MiB headroom. Partial counters cannot substitute for RSS.
-
-- memory measurement available: `false`;
-- memory high-water qualified: `false`;
-- memory headroom: unavailable;
-- memory fail-closed headroom proved: `false`.
-
-### Egress boundary
-
-No retained PAT-compatible provider egress counter exists. Request counts, payload estimates, or Dashboard-only values are not accepted as provider egress evidence.
-
-G8 therefore remains unresolved.
-
-## G9 operator-independence qualification
-
-PRs `#1157` and `#1158` added the exact revision-2 operator verifier and Issue publisher.
-
-Remote run `30789994825`, commit `535bda53ad44ed1cfc0969ccf72c889e9254d124`, proved:
-
-- exact profile revision and identity digest binding;
-- scripted checkout, Supabase CLI setup, project link, migrations, and all function deployments;
-- scripted one-run credential generation, masking, rotation, and project scoping;
-- scripted checkpoint, export, restore, post-restore continuation, rollback, terminal halt, artifact upload, and Issue publication;
-- repeatable restore through first empty-target restore or exact duplicate convergence;
-- no routine Dashboard or interactive terminal requirement;
-- active profile read-only behavior.
-
-**G9 is qualified.** G8 remains false and the profile remains unselected.
-
-## Next stage
-
-Continue only the remaining R4 work:
-
-1. obtain usable maximum-memory evidence or formally accept a clearly labelled non-provider alternative bound;
-2. obtain provider egress evidence or formally fail G8 because the counter is unavailable;
-3. regenerate R4B with G8 pass or fail;
-4. produce the R4E outcome: `qualified_profile_selected` or `no_profile_qualified`.
-
-R5 must not begin before that explicit decision.
+1. define revision-3 identity and exact resource-accounting contract;
+2. account for every XRPL response byte, emitted payload byte, database request, function invocation, and bounded in-memory object before mutation;
+3. use fixed upper bounds and pre-reservation halts where runtime counters are unavailable;
+4. prove threshold injection leaves no work, watermark, publication, or successor mutation;
+5. rerun G1–G10 against revision 3;
+6. select the profile only after every gate passes;
+7. begin R5 only after explicit selection.
 
 ## Retired production checkpoint
 
@@ -186,12 +157,13 @@ Controlling checkpoint: Issue `#1079`.
 
 ## Operating restrictions
 
-- Do not describe G7 or G9 qualification as G8 qualification or profile selection.
+- Do not describe passing G7 or G9 as G8 qualification.
 - Do not interpret zero RSS as zero total-memory usage or headroom.
 - Do not substitute partial heap/external counters for RSS.
-- Do not substitute Free-plan identity or request counts for provider egress evidence.
+- Do not substitute generic project memory metrics for function-scoped peak memory.
+- Do not substitute Free-plan identity, request counts, or projections for provider egress evidence.
 - Do not restart the retired fixed-32-ledger runtime.
-- Do not select or score a profile before every hard gate is resolved.
+- Do not select or score a profile before every hard gate passes.
 - Do not add a payment method, paid plan, or debt-capable overage profile.
 - Do not use GitHub Actions as the normal collection clock.
 - Do not start R5 recovery, stabilization, or soak early.

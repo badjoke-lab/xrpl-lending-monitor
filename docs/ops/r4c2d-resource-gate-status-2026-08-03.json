@@ -4,13 +4,20 @@
   "phase": "R4C2d",
   "profileId": "supabase-devnet",
   "network": "devnet",
-  "controllingMainCommit": "535bda53ad44ed1cfc0969ccf72c889e9254d124",
+  "controllingMainCommit": "db82291a7df3e8d4dfa458891e0a714f7d8d346b",
   "gates": {
     "G7": {
       "status": "qualified",
       "steady": {
         "workflowRunId": 30784402995,
-        "committedLedgersPerMinute": [24, 24, 24, 24, 24, 24],
+        "committedLedgersPerMinute": [
+          24,
+          24,
+          24,
+          24,
+          24,
+          24
+        ],
         "p95CommittedLedgersPerMinute": 24,
         "thresholdExclusive": 21,
         "passed": true
@@ -23,9 +30,21 @@
       }
     },
     "G8": {
-      "status": "incomplete",
+      "status": "failed",
       "qualified": false,
       "profileSelected": false,
+      "disposition": {
+        "workflowRunId": 30800402654,
+        "sourceCommit": "db82291a7df3e8d4dfa458891e0a714f7d8d346b",
+        "result": "reject_profile",
+        "failureReasons": [
+          "provider_exact_peak_memory_unavailable",
+          "provider_egress_bytes_unavailable",
+          "runtime_total_memory_counter_unavailable",
+          "memory_headroom_not_qualified"
+        ],
+        "evidencePublishedToIssue": 1109
+      },
       "resources": {
         "databaseStorage": {
           "coverage": "measured",
@@ -170,12 +189,18 @@
       "interpretation": "nonzero partial heap or external counters can substitute for an all-zero RSS counter",
       "valid": false,
       "replacement": "positive RSS is required for total-memory qualification; partial counters are non-qualifying"
+    },
+    {
+      "workflowRunId": 30792758520,
+      "interpretation": "generic project process_virtual_memory_max_bytes is exact peak Edge Function memory",
+      "valid": false,
+      "replacement": "only function-scoped memory fields may qualify Edge memory; generic project process metrics are non-qualifying"
     }
   ],
   "remaining": [
-    "usable exact maximum-memory evidence or a formally accepted non-provider alternative bound",
-    "provider egress evidence or a formal unavailable-counter disposition",
-    "final G8, R4B, and R4E reconciliation"
+    "retain the rejected revision-2 R4B and R4E outcome",
+    "define and qualify a revision-3 profile with formally accepted conservative application-owned memory and egress bounds",
+    "keep R5 prohibited until one profile passes every hard gate and is explicitly selected"
   ],
   "restrictions": {
     "publicReaderCutover": false,

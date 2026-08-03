@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "evaluatedAt": "2026-08-03T09:20:21.000Z",
+  "phase": "R4E",
+  "outcome": "no_profile_qualified",
+  "selectedProfile": null,
+  "controllingDecision": {
+    "profileId": "supabase_free_postgres_pgcron_edge",
+    "profileRevision": 2,
+    "profileIdentityDigest": "c42edf0a1708fd2b7ea9f2e72dab32b87c1d66b260752efe38fec321253d3998",
+    "decisionDigest": "d1577a896e3f4e512a362586ae30990aceb5142f0783feb529626fa6f035e111",
+    "classification": "rejected",
+    "failedGates": [
+      "G8"
+    ],
+    "remoteDisposition": {
+      "workflowRunId": 30800402654,
+      "sourceCommit": "db82291a7df3e8d4dfa458891e0a714f7d8d346b",
+      "result": "reject_profile",
+      "failureReasons": [
+        "provider_exact_peak_memory_unavailable",
+        "provider_egress_bytes_unavailable",
+        "runtime_total_memory_counter_unavailable",
+        "memory_headroom_not_qualified"
+      ]
+    }
+  },
+  "otherProfiles": {
+    "cardlessSelfHostedSqlite": "conditional_unselected",
+    "tursoFreeCardlessExecutor": "conditional_unselected",
+    "cloudflareWorkersD1Queues": "blocked"
+  },
+  "nextPhase": {
+    "phase": "R4C3",
+    "objective": "Qualify Supabase revision 3 with formally accepted conservative application-owned memory and egress accounting that halts before provider ceilings without claiming unavailable provider counters.",
+    "r5Authorized": false
+  },
+  "restrictions": {
+    "publicReaderCutover": false,
+    "r5Recovery": false,
+    "mainnet": false,
+    "stabilization": false,
+    "soak": false
+  },
+  "outcomeDigest": "c04d75c38c103b9549351ca92a8dab113e754e7e2ed720b93a17f58ff138bacb"
+}
