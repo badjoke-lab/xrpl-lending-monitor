@@ -9,7 +9,10 @@ This document records retained evidence for the conditional Supabase Free Devnet
 Controlling result:
 
 - G7 throughput: `qualified`;
-- G8 resource and no-charge qualification: `incomplete`;
+- G1 no mandatory payment/card: `pass`;
+- G2 no automatic paid overage: `pass`;
+- G8 resource qualification: `incomplete`;
+- G9 operator independence: `unresolved`;
 - profile selected: `false`;
 - G8 qualified: `false`.
 
@@ -77,9 +80,9 @@ The same run retained:
 
 The provider statistics expose maximum CPU and average memory. Average memory is not accepted as exact maximum-memory evidence.
 
-## Free plan identity
+## Free plan and no-charge behavior
 
-PR `#1151` originally called Studio-internal `/platform` usage and subscription endpoints. Remote run `30785068166` proved that those endpoints reject the configured personal access token with `JWT could not be decoded`. No usage or billing claim from that failed attempt is retained.
+PR `#1151` originally called Studio-internal `/platform` usage and subscription endpoints. Remote run `30785068166` proved that those endpoints reject the configured personal access token with `JWT could not be decoded`. No usage conclusion from that failed attempt is retained.
 
 PR `#1152` replaced those calls with PAT-compatible public Management API reads:
 
@@ -94,16 +97,29 @@ Remote run `30785807617` proved:
 - organization plan: `free`;
 - Free plan confirmed: `true`.
 
-The retained evidence deliberately keeps these fields false:
+Supabase's official billing documentation states that:
 
-- organization usage coverage;
-- uncached egress coverage;
-- cached egress coverage;
-- usage-billing flag coverage;
-- automatic-overage API coverage;
-- billing and overage qualification.
+- Spend Cap configuration is a Pro-plan feature;
+- the Free plan is not charged for over-usage;
+- exceeding a Free quota leads to notification, a grace period, and eventual service restriction rather than paid overage;
+- Free egress and Edge Function invocation tables contain quota values but no over-usage price.
 
-Free-plan identity and the provider's Free no-charge policy are not substituted for unavailable project usage or automatic-overage counters.
+Therefore the retained R4 decision treats:
+
+- G1 no mandatory payment/card: `pass`;
+- G2 no automatic paid overage: `pass`;
+- usage-billing flag: not required for the Free plan;
+- automatic paid overage possible: `false` by exact plan identity plus official policy;
+- billing/no-charge qualification: `pass`.
+
+This policy result does not prove provider egress consumption. Egress remains a separate G8 resource requirement.
+
+Official policy references:
+
+- `https://supabase.com/docs/guides/platform/cost-control`;
+- `https://supabase.com/docs/guides/platform/billing-faq`;
+- `https://supabase.com/docs/guides/platform/manage-your-usage/egress`;
+- `https://supabase.com/docs/guides/platform/manage-your-usage/edge-function-invocations`.
 
 ## Memory capability correction
 
@@ -145,20 +161,31 @@ PR `#1154` makes that correction executable:
 | Deployed bundle size | measured | Exact same-commit bundle identity below 4,000,000 bytes |
 | Edge CPU | measured | Official maximum-CPU statistics below the runtime hard limit |
 | Edge memory maximum | unavailable | Average memory exists; in-process maximum counters returned all zero and are rejected |
-| Provider egress | unavailable | No retained PAT-compatible project usage counter |
-| Usage-billing flag | unavailable | Studio JWT-only endpoint is not usable from the verifier |
-| Automatic-overage API state | unavailable | Not exposed through the retained PAT-compatible evidence path |
+| Provider egress | unavailable | No retained PAT-compatible provider usage counter |
 | Free plan identity | measured | Exact project-to-organization binding reports `free` |
-| Billing/no-charge qualification | incomplete | Free identity is not enough to replace missing usage and overage evidence |
+| No automatic paid overage | policy-proved | Free-plan over-quota behavior is restriction, not paid overage |
+| Billing/no-charge qualification | passed | Exact Free plan identity plus official provider policy |
+| Operator independence | unresolved | Complete retained rollback and unattended operation evidence is not yet bound to profile revision 2 |
 
-## Remaining G8 work
+## Current R4B decision
 
-G8 cannot pass until the remaining requirements are either proved or the profile is rejected through the formal R4 decision:
+The machine-readable revision-2 decision is [`r4c2d-supabase-r4b-decision-2026-08-03.json`](r4c2d-supabase-r4b-decision-2026-08-03.json).
 
-1. usable maximum-memory evidence or a formally accepted alternative bound that is not described as a provider counter;
-2. retained provider egress evidence or a formal determination that the required counter is unavailable;
-3. retained billing and automatic-overage evidence or a formal determination that the Free profile cannot satisfy the hard gate;
-4. final reconciliation of all resource ceilings, project halt thresholds, and unavailable provider surfaces;
-5. an explicit R4B/R4E outcome: selected qualified profile or `no_profile_qualified`.
+- classification: `conditional_candidate`;
+- selection: `not_selected`;
+- passed gates: `8`;
+- failed gates: `0`;
+- unresolved gates: `G8`, `G9`;
+- scoring allowed: `false`.
+
+## Remaining work
+
+The Supabase profile cannot become a qualified candidate until:
+
+1. usable maximum-memory evidence is retained, or a formally accepted alternative bound is proved without describing it as a provider counter;
+2. provider egress evidence is retained, or the R4 contract records that the unavailable counter makes G8 fail;
+3. complete rollback and unattended operator-independence evidence closes G9;
+4. the R4B decision is regenerated with no unresolved gates;
+5. R4E explicitly selects the qualified profile or records `no_profile_qualified`.
 
 R5 must not begin before that decision.
