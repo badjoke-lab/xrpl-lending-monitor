@@ -12,6 +12,7 @@ as $$
 declare
   v_run xrpl_r5_v1.recovery_runs%rowtype;
   v_claim jsonb;
+  v_projected_invocations bigint;
 begin
   if p_run_id !~ '^r5-recovery-[a-z0-9][a-z0-9-]{7,79}$'
     or p_owner is null or length(p_owner) < 8 or length(p_owner) > 200
@@ -94,7 +95,19 @@ begin
     );
   end if;
 
+  v_projected_invocations := (v_claim->>'projectedInvocations31d')::bigint;
+  if v_projected_invocations <= 0 then
+    raise exception 'r5_recovery_prepared_head_invocation_context_invalid';
+  end if;
+
   return v_claim || jsonb_build_object(
+    'network', v_run.network,
+    'epochId', v_run.epoch_id,
+    'baseIdentity', v_run.base_identity,
+    'currentWatermarkLedgerIndex', v_run.current_watermark_ledger_index,
+    'currentWatermarkLedgerHash', v_run.current_watermark_ledger_hash,
+    'currentWatermarkWorkId', v_run.current_watermark_work_id,
+    'priorInvocations31d', v_projected_invocations - 1,
     'retainedPreparedHeadUsed', true,
     'retainedValidatedHeadLedgerIndex',
       v_run.initial_validated_head_ledger_index,
