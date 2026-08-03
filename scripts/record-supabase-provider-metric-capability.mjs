@@ -251,3 +251,5 @@ try {
   )
   throw error
 }
+
+await import('./reconcile-supabase-g8-resource-disposition.mjs')
