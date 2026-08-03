@@ -9,6 +9,7 @@ function read(path: string): string {
 
 const verifier = read('scripts/verify-supabase-operator-independence.mjs')
 const resourceVerifier = read('scripts/verify-supabase-resource-headroom-guard.mjs')
+const operatorPublisher = read('scripts/publish-supabase-operator-run-locator.mjs')
 const workflow = read('.github/workflows/supabase-remote-probe.yml')
 
 describe('Supabase G9 operator-independence contract', () => {
@@ -64,7 +65,7 @@ describe('Supabase G9 operator-independence contract', () => {
     ]) expect(verifier).toContain(required)
   })
 
-  it('requires remote checkpoint, export, restore, and continuation evidence', () => {
+  it('accepts only a first empty restore or exact duplicate convergence', () => {
     for (const required of [
       'verified-complete-state-transfer.json',
       'verified-restore-continuation.json',
@@ -76,7 +77,13 @@ describe('Supabase G9 operator-independence contract', () => {
       'digestParity',
       'duplicateRestoreConverged',
       'digestTamperRejected',
-      'emptyTargetRestoreObserved',
+      'const emptyTargetRestoreObserved = completeState.emptyTargetRestoreObserved === true',
+      'const exactDuplicateRestoreObserved =',
+      'completeState.firstRestoreDuplicate === true',
+      'completeState.duplicateRestoreConverged === true',
+      'if (!emptyTargetRestoreObserved && !exactDuplicateRestoreObserved)',
+      "restorePath: emptyTargetRestoreObserved ? 'empty_target' : 'exact_duplicate_convergence'",
+      'repeatableRestoreConvergenceProved: true',
       'postRestoreContinuationProved',
       'watermarkAdvancedExactlyOne',
       'checkpointScriptedAndRemotelyProved: true',
@@ -112,6 +119,19 @@ describe('Supabase G9 operator-independence contract', () => {
       'issueCommentExactlyOnce:',
       'evidenceScripted: true',
     ]) expect(verifier).toContain(required)
+  })
+
+  it('publishes sanitized G9 success and failure boundaries', () => {
+    for (const required of [
+      'verified-operator-independence.json',
+      'failed-operator-independence.json',
+      'R4C2d G9 operator independence',
+      'operator-independence verifier: `success`',
+      'operator-independence verifier: `failed`',
+      'G9 qualified',
+      'G8 qualified',
+      'profile selected',
+    ]) expect(operatorPublisher).toContain(required)
   })
 
   it('runs after the resource evidence and is uploaded by the existing workflow', () => {
