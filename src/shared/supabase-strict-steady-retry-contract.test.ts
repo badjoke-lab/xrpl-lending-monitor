@@ -15,6 +15,7 @@ describe('Supabase strict steady qualification retry', () => {
     for (const required of [
       "const cadenceRetryReason = 'steady completed ticks are not six consecutive minute buckets'",
       'const transientReadStatuses = [429, 500, 502, 503, 504, 520, 522, 524]',
+      "const transientTimeoutReason = 'The operation was aborted due to timeout'",
       '`steady session read failed (${status}):`',
       '`steady session preparation failed (${status}):`',
       'if (first.code === 0) process.exit(0)',
@@ -23,12 +24,14 @@ describe('Supabase strict steady qualification retry', () => {
       'const second = await runVerifier(2)',
       'maximumAttempts: 2',
       'retryLimitedToExactCadenceGapOrTransientProviderFailure: true',
+      'exactRequestTimeoutRetryReason: transientTimeoutReason',
       'strictSixConsecutiveMinutesStillRequired: true',
       'noThresholdRelaxation: true',
     ]) expect(retry).toContain(required)
 
     expect(retry).not.toContain('runVerifier(3)')
     expect(retry).not.toContain('400, 401, 403, 404')
+    expect(retry).not.toContain("'fetch failed'")
   })
 
   it('preserves the first retryable failure and leaves the second result authoritative', () => {
