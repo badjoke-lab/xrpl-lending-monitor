@@ -49,7 +49,7 @@ describe('Supabase revision-3 attempt lifecycle contract', () => {
       'v_prior_invocations := greatest(v_provider_invocations, v_attempt_count * 2)',
       'v_projected_invocations := greatest(v_provider_invocations, (v_attempt_count + 1) * 2)',
       'v_projected_invocations >= v_invocation_halt',
-      "then 'revision3_attempt_monthly_invocation_halt'",
+      "else 'revision3_attempt_monthly_invocation_halt'",
       "'twoFunctionInvocationsReserved', true",
       "greatest(v_provider_invocations, (v_attempt_count + 1) * 2 - 1)",
     ]) expect(migration).toContain(required)
