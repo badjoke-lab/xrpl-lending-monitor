@@ -95,15 +95,21 @@ Deno.serve(async (request) => {
     }
 
     if (action === 'read') {
-      const session = await rpc<JsonObject>('xrpl_read_network_steady_session', {
-        p_session_id: sessionId,
-      })
+      const [session, memory] = await Promise.all([
+        rpc<JsonObject>('xrpl_read_network_steady_session', {
+          p_session_id: sessionId,
+        }),
+        rpc<JsonObject>('xrpl_read_network_steady_memory', {
+          p_session_id: sessionId,
+        }),
+      ])
       return json({
         schemaVersion: 1,
         purpose: PURPOSE,
         action,
         sessionId,
         session,
+        memory,
         checkedAt: new Date().toISOString(),
       })
     }
