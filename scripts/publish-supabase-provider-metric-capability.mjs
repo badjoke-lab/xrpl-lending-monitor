@@ -16,6 +16,8 @@ function read(name) {
 
 const success = read('provider-metric-capability.json')
 const failure = read('failed-provider-metric-capability.json')
+const disposition = read('g8-resource-disposition.json')
+const dispositionFailure = read('failed-g8-resource-disposition.json')
 const lines = [
   '',
   '## R4C2d provider metric capability',
@@ -60,6 +62,35 @@ if (success) {
   )
 } else {
   lines.push('- provider metric capability probe: `not reached or no sanitized evidence produced`')
+}
+
+lines.push('', '## R4C2d G8 final resource disposition', '')
+if (disposition) {
+  lines.push(
+    '- G8 disposition verifier: `success`',
+    `- G8 status: \`${String(disposition.status ?? 'unknown')}\``,
+    `- disposition: \`${String(disposition.disposition ?? 'unknown')}\``,
+    `- failure reasons: \`${JSON.stringify(disposition.failureReasons ?? [])}\``,
+    `- evidence digest: \`${String(disposition.evidenceDigest ?? 'unknown')}\``,
+    `- request counts substituted for egress: \`${String(!(disposition.checks?.requestCountsNotSubstitutedForEgressBytes ?? false))}\``,
+    `- average memory substituted for peak memory: \`${String(!(disposition.checks?.averageMemoryNotSubstitutedForPeakMemory ?? false))}\``,
+    `- partial heap substituted for total memory: \`${String(!(disposition.checks?.partialHeapNotSubstitutedForTotalMemory ?? false))}\``,
+    `- zero RSS substituted for zero usage: \`${String(!(disposition.checks?.zeroRssNotSubstitutedForZeroUsage ?? false))}\``,
+    `- unavailable hard-gate evidence causes failure: \`${String(disposition.checks?.unavailableHardGateEvidenceCausesFailure ?? 'unknown')}\``,
+    `- profile rejected when G8 fails: \`${String(disposition.checks?.profileRejectedWhenG8Fails ?? 'unknown')}\``,
+    `- G8 qualified: \`${String(disposition.checks?.g8Qualified ?? 'unknown')}\``,
+    `- profile selected: \`${String(disposition.checks?.profileSelected ?? 'unknown')}\``,
+  )
+} else if (dispositionFailure) {
+  lines.push(
+    '- G8 disposition verifier: `failed`',
+    `- failed at: \`${String(dispositionFailure.failedAt ?? 'unknown')}\``,
+    `- reason: \`${String(dispositionFailure.reason ?? 'unknown').slice(0, 1_000)}\``,
+    `- G8 qualified: \`${String(dispositionFailure.checks?.g8Qualified ?? false)}\``,
+    `- profile selected: \`${String(dispositionFailure.checks?.profileSelected ?? false)}\``,
+  )
+} else {
+  lines.push('- G8 disposition verifier: `not reached or no sanitized evidence produced`')
 }
 
 process.stdout.write(`${lines.join('\n')}\n`)
