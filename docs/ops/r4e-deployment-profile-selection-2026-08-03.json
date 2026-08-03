@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "selectedAt": "2026-08-03T13:34:13.723Z",
+  "phase": "R4E",
+  "outcome": "profile_selected",
+  "selectedProfile": {
+    "profileId": "supabase_free_postgres_pgcron_edge",
+    "profileRevision": 3,
+    "profileIdentityDigest": "3a5c4ff2c43a48d3e5b7ceded60027173d215d6f083fb33c22375758520bbe67",
+    "decisionDigest": "2f7b96366a7cf30077b8bfdd8dffd1fffd8d3625719f0e69bac49a14836f4d35",
+    "classification": "qualified_candidate"
+  },
+  "selectionBasis": {
+    "onlyQualifiedCandidate": true,
+    "gateSummary": {
+      "passed": 10,
+      "failed": 0,
+      "unresolved": 0
+    },
+    "eligibleForScoring": true,
+    "scoreSummary": null,
+    "controllingRemoteEvidence": {
+      "workflowRunId": 30817518929,
+      "sourceCommit": "01fc146dcd261d2e919c614130ee19566ca854ae",
+      "artifactId": 8857796228,
+      "artifactDigest": "sha256:5ad18831e32c0dd3b87e7135909a38302b21a01274b112545ea15e259270813c",
+      "verifiedAt": "2026-08-03T13:34:13.723Z"
+    },
+    "otherProfiles": {
+      "cardlessSelfHostedSqlite": "conditional_unselected",
+      "tursoFreeCardlessExecutor": "conditional_unselected",
+      "cloudflareWorkersD1Queues": "blocked"
+    }
+  },
+  "nextPhase": {
+    "phase": "R5",
+    "objective": "Recover the selected Supabase revision-3 profile from the retained checkpoint, close Devnet lag to zero, and qualify stabilization without changing the public reader or enabling Mainnet.",
+    "r5Authorized": true
+  },
+  "restrictions": {
+    "publicReaderCutover": false,
+    "mainnet": false,
+    "stabilization": false,
+    "soak": false,
+    "retiredCloudflareCollectorRestart": false
+  },
+  "selectionDigest": "13a313d9d0679c7c512b59f9931d733dcb3217ec8e1cc6e74a36125a0354b667"
+}
