@@ -24,6 +24,7 @@ on:
       - 'scripts/verify-supabase-resource-headroom-guard.mjs'
       - 'scripts/verify-supabase-r5-active-checkpoint.mjs'
       - 'scripts/verify-supabase-r5-recovery-prepare.mjs'
+      - 'scripts/verify-supabase-r5-first-recovery-batch.mjs'
       - 'scripts/record-supabase-external-resource-snapshot.mjs'
       - 'scripts/record-supabase-provider-metric-capability.mjs'
       - 'scripts/reconcile-supabase-g8-resource-disposition.mjs'
@@ -33,6 +34,7 @@ on:
       - 'scripts/publish-supabase-resource-run-locator.mjs'
       - 'scripts/publish-supabase-r5-active-checkpoint-run-locator.mjs'
       - 'scripts/publish-supabase-r5-recovery-prepare-run-locator.mjs'
+      - 'scripts/publish-supabase-r5-first-recovery-batch-run-locator.mjs'
       - '.github/workflows/supabase-remote-probe.yml'
 
 permissions:
@@ -139,18 +141,26 @@ jobs:
           bundle_function 'supabase/functions/xrpl-steady-batch-tick/index.ts' '/tmp/xrpl-steady-batch-tick-index.ts' "$evidence_dir/steady-batch-tick-bundle.json"
           bundle_function 'supabase/functions/xrpl-steady-throughput-qualification/index.ts' '/tmp/xrpl-steady-throughput-qualification-index.ts' "$evidence_dir/steady-throughput-qualification-bundle.json"
           bundle_function 'supabase/functions/xrpl-resource-headroom-guard/index.ts' '/tmp/xrpl-resource-headroom-guard-index.ts' "$evidence_dir/resource-headroom-guard-bundle.json"
+          bundle_function 'supabase/functions/xrpl-r5-recovery-batch/index.ts' '/tmp/xrpl-r5-recovery-batch-index.ts' "$evidence_dir/r5-recovery-batch-bundle.json"
+          bundle_function 'supabase/functions/xrpl-r5-recovery-batch-trigger/index.ts' '/tmp/xrpl-r5-recovery-batch-trigger-index.ts' "$evidence_dir/r5-recovery-batch-trigger-bundle.json"
 
       - name: Link exact Supabase project
         run: supabase link --project-ref "$SUPABASE_PROJECT_ID" --password "$SUPABASE_DB_PASSWORD"
 
-      - name: Rotate one-run committed reader verifier token
+      - name: Rotate one-run verification tokens
         shell: bash
         run: |
           set -euo pipefail
-          verifier_token="$(openssl rand -hex 32)"
-          echo "::add-mask::${verifier_token}"
-          supabase secrets set XRPL_READER_VERIFY_TOKEN="${verifier_token}" --project-ref "$SUPABASE_PROJECT_ID"
-          echo "XRPL_READER_VERIFY_TOKEN=${verifier_token}" >> "$GITHUB_ENV"
+          reader_token="$(openssl rand -hex 32)"
+          recovery_token="$(openssl rand -hex 32)"
+          echo "::add-mask::${reader_token}"
+          echo "::add-mask::${recovery_token}"
+          supabase secrets set \
+            XRPL_READER_VERIFY_TOKEN="${reader_token}" \
+            XRPL_R5_RECOVERY_VERIFY_TOKEN="${recovery_token}" \
+            --project-ref "$SUPABASE_PROJECT_ID"
+          echo "XRPL_READER_VERIFY_TOKEN=${reader_token}" >> "$GITHUB_ENV"
+          echo "XRPL_R5_RECOVERY_VERIFY_TOKEN=${recovery_token}" >> "$GITHUB_ENV"
 
       - name: Apply pending migrations
         run: supabase db push --linked --yes
@@ -183,6 +193,10 @@ jobs:
         run: supabase functions deploy xrpl-steady-throughput-qualification --project-ref "$SUPABASE_PROJECT_ID" --use-api --no-verify-jwt
       - name: Deploy resource headroom guard bundle
         run: supabase functions deploy xrpl-resource-headroom-guard --project-ref "$SUPABASE_PROJECT_ID" --use-api --no-verify-jwt
+      - name: Deploy bounded R5 active recovery executor bundle
+        run: supabase functions deploy xrpl-r5-recovery-batch --project-ref "$SUPABASE_PROJECT_ID" --use-api --no-verify-jwt
+      - name: Deploy one-run R5 active recovery trigger bundle
+        run: supabase functions deploy xrpl-r5-recovery-batch-trigger --project-ref "$SUPABASE_PROJECT_ID" --use-api --no-verify-jwt
 
       - name: Verify repeated remote portable phase execution
         run: node scripts/verify-supabase-remote-probe.mjs
@@ -210,6 +224,8 @@ jobs:
         run: node scripts/verify-supabase-r5-active-checkpoint.mjs
       - name: Prepare exact R5 active recovery
         run: node scripts/verify-supabase-r5-recovery-prepare.mjs
+      - name: Execute and verify exactly one first R5 recovery batch
+        run: node scripts/verify-supabase-r5-first-recovery-batch.mjs
 
       - name: Upload sanitized remote evidence
         if: always()
@@ -245,6 +261,7 @@ jobs:
           # verified-resource-headroom-guard.json / failed-resource-headroom-guard-verification.json
           # verified-r5-active-checkpoint.json / failed-r5-active-checkpoint-verification.json
           # verified-r5-recovery-prepare.json / failed-r5-recovery-prepare-verification.json
+          # verified-r5-first-recovery-batch.json / failed-r5-first-recovery-batch-verification.json
           # phase watermark ledger / consecutive failures
           # historical witness verifier: `success`
           # multi-chunk witness verifier: `success`
@@ -262,6 +279,7 @@ jobs:
 
           node scripts/publish-supabase-r5-active-checkpoint-run-locator.mjs > /tmp/r5-comment.md
           node scripts/publish-supabase-r5-recovery-prepare-run-locator.mjs >> /tmp/r5-comment.md
+          node scripts/publish-supabase-r5-first-recovery-batch-run-locator.mjs >> /tmp/r5-comment.md
           if [ -s /tmp/r5-comment.md ]; then
             gh issue comment 1175 --repo "$GITHUB_REPOSITORY" --body-file /tmp/r5-comment.md
           fi
