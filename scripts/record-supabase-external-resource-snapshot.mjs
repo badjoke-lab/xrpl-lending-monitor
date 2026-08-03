@@ -7,26 +7,14 @@ const verifierToken = process.env.XRPL_READER_VERIFY_TOKEN ?? ''
 const runIdText = process.env.GITHUB_RUN_ID ?? ''
 const sourceCommit = (process.env.GITHUB_SHA ?? '').toLowerCase()
 
-if (!/^[a-z]{20}$/u.test(projectRef)) {
-  throw new Error('SUPABASE_PROJECT_ID must be an exact 20-character project ref')
-}
-if (accessToken.length < 20) {
-  throw new Error('SUPABASE_ACCESS_TOKEN is unavailable')
-}
-if (!/^[a-f0-9]{64}$/u.test(verifierToken)) {
-  throw new Error('XRPL_READER_VERIFY_TOKEN must be an exact 64-character hex token')
-}
-if (!/^[1-9][0-9]*$/u.test(runIdText)) {
-  throw new Error('GITHUB_RUN_ID must be a positive integer')
-}
-if (!/^[a-f0-9]{40}$/u.test(sourceCommit)) {
-  throw new Error('GITHUB_SHA must be an exact lowercase commit SHA')
-}
+if (!/^[a-z]{20}$/u.test(projectRef)) throw new Error('SUPABASE_PROJECT_ID must be an exact 20-character project ref')
+if (accessToken.length < 20) throw new Error('SUPABASE_ACCESS_TOKEN is unavailable')
+if (!/^[a-f0-9]{64}$/u.test(verifierToken)) throw new Error('XRPL_READER_VERIFY_TOKEN must be an exact 64-character hex token')
+if (!/^[1-9][0-9]*$/u.test(runIdText)) throw new Error('GITHUB_RUN_ID must be a positive integer')
+if (!/^[a-f0-9]{40}$/u.test(sourceCommit)) throw new Error('GITHUB_SHA must be an exact lowercase commit SHA')
 
 const sourceRunId = Number(runIdText)
-if (!Number.isSafeInteger(sourceRunId)) {
-  throw new Error('GITHUB_RUN_ID exceeds the safe integer range')
-}
+if (!Number.isSafeInteger(sourceRunId)) throw new Error('GITHUB_RUN_ID exceeds the safe integer range')
 
 const evidenceDirectory = 'supabase-remote-probe-evidence'
 const purpose = 'r4c2d-resource-headroom-guard'
@@ -36,9 +24,7 @@ const managementBase = `https://api.supabase.com/v1/projects/${projectRef}`
 function canonical(value) {
   if (Array.isArray(value)) return value.map(canonical)
   if (typeof value === 'object' && value !== null) {
-    return Object.fromEntries(
-      Object.keys(value).sort().map((key) => [key, canonical(value[key])]),
-    )
+    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonical(value[key])]))
   }
   return value
 }
@@ -64,25 +50,14 @@ function integer(value, name) {
 
 async function managementRequest(path, searchParams) {
   const url = new URL(`${managementBase}${path}`)
-  if (searchParams) {
-    for (const [key, value] of Object.entries(searchParams)) {
-      url.searchParams.set(key, value)
-    }
-  }
+  for (const [key, value] of Object.entries(searchParams ?? {})) url.searchParams.set(key, value)
   const response = await fetch(url, {
-    headers: {
-      authorization: `Bearer ${accessToken}`,
-      accept: 'application/json',
-    },
+    headers: { authorization: `Bearer ${accessToken}`, accept: 'application/json' },
     signal: AbortSignal.timeout(60_000),
   })
   const text = await response.text()
   let parsed
-  try {
-    parsed = JSON.parse(text)
-  } catch {
-    parsed = { raw: text.slice(0, 2_000) }
-  }
+  try { parsed = JSON.parse(text) } catch { parsed = { raw: text.slice(0, 2_000) } }
   if (!response.ok) {
     throw new Error(`Supabase Management API ${path} failed (${response.status}): ${JSON.stringify(parsed).slice(0, 2_000)}`)
   }
@@ -102,11 +77,7 @@ async function edgeRequest(body) {
   })
   const text = await response.text()
   let parsed
-  try {
-    parsed = JSON.parse(text)
-  } catch {
-    parsed = { raw: text.slice(0, 2_000) }
-  }
+  try { parsed = JSON.parse(text) } catch { parsed = { raw: text.slice(0, 2_000) } }
   if (!response.ok) {
     throw new Error(`resource snapshot Edge record failed (${response.status}): ${JSON.stringify(parsed).slice(0, 2_000)}`)
   }
@@ -122,7 +93,6 @@ function extractFunctions(raw) {
         ? raw.data
         : null
   if (!values) throw new Error('Management API function list has an unsupported shape')
-
   const active = values
     .map((value, index) => object(value, `function[${index}]`))
     .filter((value) => String(value.status ?? '').toUpperCase() === 'ACTIVE')
@@ -133,7 +103,6 @@ function extractFunctions(raw) {
       ezbrSha256: typeof value.ezbr_sha256 === 'string' ? value.ezbr_sha256 : null,
     }))
     .sort((left, right) => left.slug.localeCompare(right.slug))
-
   if (active.length === 0 || active.some((value) => !/^[a-z0-9][a-z0-9-]*$/u.test(value.slug))) {
     throw new Error('Management API returned no valid active functions')
   }
@@ -156,21 +125,10 @@ async function readBundleEvidence() {
     const bytes = integer(value.bytes, `${file}.bytes`)
     const sha256 = String(value.sha256 ?? '').toLowerCase()
     const headSha = String(value.headSha ?? '').toLowerCase()
-    if (
-      bytes < 1
-      || !/^[a-f0-9]{64}$/u.test(sha256)
-      || headSha !== sourceCommit
-    ) {
+    if (bytes < 1 || !/^[a-f0-9]{64}$/u.test(sha256) || headSha !== sourceCommit) {
       throw new Error(`${file} has invalid or foreign bundle evidence`)
     }
-    bundles.push({
-      file,
-      slug: match[1],
-      source,
-      bytes,
-      sha256,
-      headSha,
-    })
+    bundles.push({ file, slug: match[1], source, bytes, sha256, headSha })
   }
   bundles.sort((left, right) => left.slug.localeCompare(right.slug))
   if (bundles.length === 0 || new Set(bundles.map((value) => value.slug)).size !== bundles.length) {
@@ -192,13 +150,8 @@ function extractInvocationCount(raw) {
     throw new Error('Management API logs query did not return exactly one aggregate row')
   }
   const row = object(rows[0], 'logs aggregate row')
-  const count = integer(
-    row.invocation_count ?? row.invocationCount ?? row.count,
-    'invocation_count',
-  )
-  if (count < 1) {
-    throw new Error('Management API logs query returned zero function invocations')
-  }
+  const count = integer(row.invocation_count ?? row.invocationCount ?? row.count, 'invocation_count')
+  if (count < 1) throw new Error('Management API logs query returned zero function invocations')
   return count
 }
 
@@ -213,7 +166,7 @@ async function run() {
     managementRequest('/functions'),
     readBundleEvidence(),
     managementRequest('/analytics/endpoints/logs.all', {
-      sql: `SELECT count(*) AS invocation_count\nFROM edge_logs\nCROSS JOIN UNNEST(metadata) AS metadata\nWHERE path LIKE '%/functions/v1/%'`,
+      sql: `SELECT count() AS invocation_count\nFROM logs\nWHERE source_name = 'function_edge_logs'`,
       iso_timestamp_start: windowStart,
       iso_timestamp_end: observedAt,
     }),
@@ -222,9 +175,7 @@ async function run() {
   const functions = extractFunctions(rawFunctions)
   const invocationCount24h = extractInvocationCount(rawLogs)
   const projectedInvocations31d = invocationCount24h * 31
-  if (!Number.isSafeInteger(projectedInvocations31d)) {
-    throw new Error('projected invocation count exceeds the safe integer range')
-  }
+  if (!Number.isSafeInteger(projectedInvocations31d)) throw new Error('projected invocation count exceeds the safe integer range')
 
   const functionSlugs = functions.map((value) => value.slug)
   const bundleSlugs = bundles.map((value) => value.slug)
@@ -232,9 +183,7 @@ async function run() {
     throw new Error(`deployed function/bundle identity mismatch: deployed=${JSON.stringify(functionSlugs)} bundles=${JSON.stringify(bundleSlugs)}`)
   }
 
-  const largestBundle = bundles.reduce((largest, current) => (
-    current.bytes > largest.bytes ? current : largest
-  ))
+  const largestBundle = bundles.reduce((largest, current) => current.bytes > largest.bytes ? current : largest)
   const snapshotCore = {
     schemaVersion: 1,
     snapshotId: `r4c2d-resource-${runIdText}`,
@@ -254,7 +203,6 @@ async function run() {
     bundles,
   }
   const evidenceDigest = digest(snapshotCore)
-
   const record = await edgeRequest({
     action: 'record',
     snapshot: {
@@ -274,7 +222,6 @@ async function run() {
   const result = object(record.result, 'recorded resource snapshot')
   const measurements = object(result.measurements, 'recorded resource measurements')
   const coverage = object(result.coverage, 'recorded resource coverage')
-
   if (
     measurements.externalSnapshotFresh !== true
     || integer(measurements.invocationCount24h, 'recorded invocationCount24h') !== invocationCount24h
@@ -291,13 +238,11 @@ async function run() {
   const evidence = {
     ...snapshotCore,
     evidenceDigest,
-    managementResponses: {
-      functionsListed: functions.length,
-      invocationAggregateRows: 1,
-    },
+    managementResponses: { functionsListed: functions.length, invocationAggregateRows: 1 },
     recorded: result,
     checks: {
       managementApiAvailable: true,
+      clickHouseFunctionLogQuery: true,
       exactSourceCommitBundleCoverage: true,
       exactDeployedFunctionCoverage: true,
       exactBundleEvidenceCoverage: true,
@@ -310,10 +255,7 @@ async function run() {
       g8Qualified: false,
     },
   }
-  await writeFile(
-    `${evidenceDirectory}/resource-external-snapshot.json`,
-    `${JSON.stringify(evidence, null, 2)}\n`,
-  )
+  await writeFile(`${evidenceDirectory}/resource-external-snapshot.json`, `${JSON.stringify(evidence, null, 2)}\n`)
   console.log(JSON.stringify(evidence))
 }
 
@@ -329,9 +271,6 @@ try {
     sourceCommit,
     reason: error instanceof Error ? error.message.slice(0, 4_000) : String(error).slice(0, 4_000),
   }
-  await writeFile(
-    `${evidenceDirectory}/failed-resource-external-snapshot.json`,
-    `${JSON.stringify(failure, null, 2)}\n`,
-  )
+  await writeFile(`${evidenceDirectory}/failed-resource-external-snapshot.json`, `${JSON.stringify(failure, null, 2)}\n`)
   throw error
 }
