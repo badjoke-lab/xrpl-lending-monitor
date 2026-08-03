@@ -17,7 +17,7 @@ describe('Supabase organization usage and billing evidence contract', () => {
       "const platformBase = 'https://api.supabase.com/platform'",
       "platformRequest('/projects'",
       "headers: { Version: '2' }",
-      "candidate.ref === projectRef",
+      "object(candidate, 'project').ref === projectRef",
       "platformRequest('/organizations')",
       "integer(project.organization_id, 'project.organization_id')",
       'exact project organization match count changed',
