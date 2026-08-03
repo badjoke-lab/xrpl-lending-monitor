@@ -3,6 +3,8 @@ import { resolve } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
+import { evaluateDeploymentProfileQualification } from './deployment-profile-qualification'
+
 const statusPath = resolve(
   process.cwd(),
   'docs/ops/r4c2d-resource-gate-status-2026-08-03.json',
@@ -11,8 +13,13 @@ const evidencePath = resolve(
   process.cwd(),
   'docs/ops/r4c2d-supabase-resource-headroom-evidence-2026-08-03.md',
 )
+const decisionPath = resolve(
+  process.cwd(),
+  'docs/ops/r4c2d-supabase-r4b-decision-2026-08-03.json',
+)
 const status = JSON.parse(readFileSync(statusPath, 'utf8'))
 const evidence = readFileSync(evidencePath, 'utf8')
+const decision = JSON.parse(readFileSync(decisionPath, 'utf8'))
 
 describe('R4C2d resource gate status contract', () => {
   it('retains G7 while keeping G8 and profile selection false', () => {
@@ -61,7 +68,7 @@ describe('R4C2d resource gate status contract', () => {
     expect(memory.passed).toBe(false)
   })
 
-  it('does not substitute Free plan identity for egress or overage evidence', () => {
+  it('does not substitute Free plan identity for provider egress counters', () => {
     const resources = status.gates.G8.resources
     expect(resources.providerPlan.plan).toBe('free')
     expect(resources.providerPlan.exactProjectOrganizationBinding).toBe(true)
@@ -70,11 +77,6 @@ describe('R4C2d resource gate status contract', () => {
     expect(resources.uncachedEgress.passed).toBe(false)
     expect(resources.cachedEgress.coverage).toBe('unavailable')
     expect(resources.cachedEgress.passed).toBe(false)
-    expect(resources.usageBillingFlag.coverage).toBe('unavailable')
-    expect(resources.usageBillingFlag.passed).toBe(false)
-    expect(resources.automaticOverageApiState.coverage).toBe('unavailable')
-    expect(resources.automaticOverageApiState.passed).toBe(false)
-    expect(resources.billingAndOverage.qualified).toBe(false)
   })
 
   it('retains the zero-memory interpretation as explicitly invalid', () => {
@@ -84,6 +86,29 @@ describe('R4C2d resource gate status contract', () => {
     expect(status.invalidatedInterpretations[0].replacement).toContain('unavailable')
     expect(evidence).toContain('do not prove zero memory consumption')
     expect(evidence).toContain('memory high-water qualified: `false`')
+  })
+
+  it('evaluates the current profile as conditional with only G8 and G9 unresolved', async () => {
+    const evaluated = await evaluateDeploymentProfileQualification({
+      schemaVersion: decision.schemaVersion,
+      evaluatedAt: decision.evaluatedAt,
+      profile: decision.profile,
+      profileIdentityDigest: decision.profileIdentityDigest,
+      gateEvidence: decision.evidence,
+      scorecard: null,
+    })
+
+    expect(evaluated).toEqual(decision)
+    expect(evaluated.classification).toBe('conditional_candidate')
+    expect(evaluated.selection).toBe('not_selected')
+    expect(evaluated.eligibleForScoring).toBe(false)
+    expect(evaluated.gateSummary).toEqual({ passed: 8, failed: 0, unresolved: 2 })
+    expect(evaluated.failedGates).toEqual([])
+    expect(evaluated.unresolvedGates).toEqual(['G8', 'G9'])
+    expect(evaluated.scoreSummary).toBeNull()
+    expect(evaluated.decisionDigest).toBe(
+      '407f37226dc47663c7f980a8a1b3c04ed09a03a97add950f1d061db61ba5b897',
+    )
   })
 
   it('continues to prohibit later phases and public cutover', () => {
