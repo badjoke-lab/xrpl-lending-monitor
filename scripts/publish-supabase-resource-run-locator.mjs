@@ -45,9 +45,8 @@ if (external) {
     `- external snapshot observed at: \`${String(external.observedAt ?? 'unknown')}\``,
     `- external snapshot digest: \`${String(external.evidenceDigest ?? 'unknown')}\``,
     `- Management API available: \`${String(external.checks?.managementApiAvailable ?? 'unknown')}\``,
-    `- logs query attempts: \`${String(external.logsQueryAttempts ?? 'unknown')}\``,
-    `- bounded transient logs retry: \`${String(external.checks?.boundedTransientLogRetry ?? 'unknown')}\``,
-    `- malformed logs query not retried: \`${String(external.checks?.malformedLogQueryNotRetried ?? 'unknown')}\``,
+    `- invocation source: \`${String(external.invocationSource ?? 'unknown')}\``,
+    `- Logs backend required: \`${String(!(external.checks?.logsBackendNotRequired ?? false))}\``,
     `- Edge invocations 24h: \`${String(external.invocationCount24h ?? 'unknown')}\``,
     `- projected Edge invocations 31d: \`${String(external.projectedInvocations31d ?? 'unknown')}\``,
     `- active function count: \`${String(external.functionCount ?? 'unknown')}\``,
@@ -67,28 +66,30 @@ if (external) {
 
 if (runtime) {
   lines.push(
-    '- runtime CPU and memory snapshot: `success`',
-    `- runtime snapshot observed at: \`${String(runtime.observedAt ?? 'unknown')}\``,
-    `- runtime query attempts: \`${String(runtime.queryAttempts ?? 'unknown')}\``,
-    `- parsed ShutdownEvent count: \`${String(runtime.parsedShutdownEvents ?? 'unknown')}\``,
-    `- rejected runtime rows: \`${String(runtime.rejectedRows ?? 'unknown')}\``,
-    `- shutdown reasons: \`${JSON.stringify(runtime.reasons ?? {})}\``,
-    `- CPU ms p50/p95/max: \`${String(runtime.cpuMilliseconds?.p50 ?? 'unknown')} / ${String(runtime.cpuMilliseconds?.p95 ?? 'unknown')} / ${String(runtime.cpuMilliseconds?.maximum ?? 'unknown')}\``,
-    `- total memory bytes p50/p95/max: \`${String(runtime.memoryTotalBytes?.p50 ?? 'unknown')} / ${String(runtime.memoryTotalBytes?.p95 ?? 'unknown')} / ${String(runtime.memoryTotalBytes?.maximum ?? 'unknown')}\``,
+    '- function combined-statistics snapshot: `success`',
+    `- combined statistics observed at: \`${String(runtime.observedAt ?? 'unknown')}\``,
+    `- combined statistics interval: \`${String(runtime.interval ?? 'unknown')}\``,
+    `- active functions covered: \`${String(runtime.functionCount ?? 'unknown')}\``,
+    `- metric rows: \`${String(runtime.metricRowCount ?? 'unknown')}\``,
+    `- classified invocations: \`${String(runtime.invocationCount24h ?? 'unknown')}\``,
+    `- total requests: \`${String(runtime.requestsCount24h ?? 'unknown')}\``,
+    `- max CPU ms p50/p95/max: \`${String(runtime.maxCpuMilliseconds?.p50 ?? 'unknown')} / ${String(runtime.maxCpuMilliseconds?.p95 ?? 'unknown')} / ${String(runtime.maxCpuMilliseconds?.maximum ?? 'unknown')}\``,
+    `- average memory MB p50/p95/max: \`${String(runtime.averageMemoryMegabytes?.p50 ?? 'unknown')} / ${String(runtime.averageMemoryMegabytes?.p95 ?? 'unknown')} / ${String(runtime.averageMemoryMegabytes?.maximum ?? 'unknown')}\``,
+    `- max execution ms p50/p95/max: \`${String(runtime.maxExecutionMilliseconds?.p50 ?? 'unknown')} / ${String(runtime.maxExecutionMilliseconds?.p95 ?? 'unknown')} / ${String(runtime.maxExecutionMilliseconds?.maximum ?? 'unknown')}\``,
     `- CPU below halt threshold: \`${String(runtime.checks?.cpuBelowHaltThreshold ?? 'unknown')}\``,
-    `- memory below halt threshold: \`${String(runtime.checks?.memoryBelowHaltThreshold ?? 'unknown')}\``,
-    `- terminal resource shutdowns absent: \`${String(runtime.checks?.noTerminalResourceShutdowns ?? 'unknown')}\``,
-    `- raw runtime messages retained: \`${String(!(runtime.checks?.noRawEventMessagesRetained ?? false))}\``,
-    `- execution IDs retained: \`${String(!(runtime.checks?.noExecutionIdsRetained ?? false))}\``,
+    `- average memory below halt threshold: \`${String(runtime.checks?.averageMemoryBelowHaltThreshold ?? 'unknown')}\``,
+    `- exact memory maximum covered: \`${String(runtime.checks?.exactMemoryMaximumCovered ?? 'unknown')}\``,
+    `- raw analytics rows retained: \`${String(runtime.checks?.rawAnalyticsRowsRetained ?? 'unknown')}\``,
+    `- function IDs retained: \`${String(runtime.checks?.functionIdsRetained ?? 'unknown')}\``,
   )
 } else if (runtimeFailure) {
   lines.push(
-    '- runtime CPU and memory snapshot: `failed`',
-    `- runtime snapshot failed at: \`${String(runtimeFailure.failedAt ?? 'unknown')}\``,
-    `- runtime snapshot reason: \`${String(runtimeFailure.reason ?? 'unknown')}\``,
+    '- function combined-statistics snapshot: `failed`',
+    `- combined statistics failed at: \`${String(runtimeFailure.failedAt ?? 'unknown')}\``,
+    `- combined statistics reason: \`${String(runtimeFailure.reason ?? 'unknown')}\``,
   )
 } else {
-  lines.push('- runtime CPU and memory snapshot: `not reached or no sanitized evidence produced`')
+  lines.push('- function combined-statistics snapshot: `not reached or no sanitized evidence produced`')
 }
 
 if (success) {
