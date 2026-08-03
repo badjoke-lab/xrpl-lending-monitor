@@ -13,7 +13,7 @@ alter table xrpl_steady_v1.ticks
   drop constraint if exists xrpl_steady_memory_sample_count_range;
 alter table xrpl_steady_v1.ticks
   add constraint xrpl_steady_memory_sample_count_range
-  check (memory_sample_count is null or memory_sample_count between 6 and 12);
+  check (memory_sample_count is null or memory_sample_count between 6 and 64);
 
 create or replace function public.xrpl_record_network_steady_memory(
   p_owner text,
@@ -69,7 +69,7 @@ begin
   if jsonb_typeof(p_memory_samples) <> 'array'
     or jsonb_array_length(p_memory_samples) <> p_memory_sample_count
     or p_memory_sample_count < 6
-    or p_memory_sample_count > 12 then
+    or p_memory_sample_count > 64 then
     raise exception 'steady memory sample shape changed';
   end if;
 
@@ -156,7 +156,7 @@ begin
   where session_id = p_session_id
     and status = 'completed'
     and memory_samples is not null
-    and memory_sample_count between 6 and 12
+    and memory_sample_count between 6 and 64
     and memory_high_water_bytes is not null;
 
   select coalesce(jsonb_agg(jsonb_build_object(
