@@ -155,8 +155,13 @@ async function readBundleEvidence() {
     if (!match) continue
     const bytes = integer(value.bytes, `${file}.bytes`)
     const sha256 = String(value.sha256 ?? '').toLowerCase()
-    if (bytes < 1 || !/^[a-f0-9]{64}$/u.test(sha256)) {
-      throw new Error(`${file} has invalid bundle evidence`)
+    const headSha = String(value.headSha ?? '').toLowerCase()
+    if (
+      bytes < 1
+      || !/^[a-f0-9]{64}$/u.test(sha256)
+      || headSha !== sourceCommit
+    ) {
+      throw new Error(`${file} has invalid or foreign bundle evidence`)
     }
     bundles.push({
       file,
@@ -164,6 +169,7 @@ async function readBundleEvidence() {
       source,
       bytes,
       sha256,
+      headSha,
     })
   }
   bundles.sort((left, right) => left.slug.localeCompare(right.slug))
@@ -186,10 +192,14 @@ function extractInvocationCount(raw) {
     throw new Error('Management API logs query did not return exactly one aggregate row')
   }
   const row = object(rows[0], 'logs aggregate row')
-  return integer(
+  const count = integer(
     row.invocation_count ?? row.invocationCount ?? row.count,
     'invocation_count',
   )
+  if (count < 1) {
+    throw new Error('Management API logs query returned zero function invocations')
+  }
+  return count
 }
 
 async function run() {
@@ -288,9 +298,11 @@ async function run() {
     recorded: result,
     checks: {
       managementApiAvailable: true,
+      exactSourceCommitBundleCoverage: true,
       exactDeployedFunctionCoverage: true,
       exactBundleEvidenceCoverage: true,
       invocationAggregateRecorded: true,
+      nonzeroInvocationEvidence: true,
       externalSnapshotFresh: true,
       functionInvocationCoverage: true,
       bundleSizeCoverage: true,
