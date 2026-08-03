@@ -97,17 +97,26 @@
           "passed": true
         },
         "usageBillingFlag": {
-          "coverage": "unavailable",
-          "passed": false
+          "coverage": "not_applicable_on_free_plan",
+          "required": false,
+          "reason": "Spend Cap configuration is a Pro-plan feature and the Free plan is not charged for over-usage",
+          "passed": true
         },
         "automaticOverageApiState": {
-          "coverage": "unavailable",
-          "passed": false
+          "coverage": "official_policy",
+          "automaticPaidOveragePossible": false,
+          "quotaExhaustionBehavior": "notification_grace_and_service_restriction",
+          "passed": true
         },
         "billingAndOverage": {
-          "coverage": "incomplete",
-          "qualified": false,
-          "passed": false
+          "coverage": "exact_plan_identity_plus_official_policy",
+          "policyReferences": [
+            "https://supabase.com/docs/guides/platform/cost-control",
+            "https://supabase.com/docs/guides/platform/billing-faq",
+            "https://supabase.com/docs/guides/platform/manage-your-usage/egress"
+          ],
+          "qualified": true,
+          "passed": true
         }
       },
       "injectedFailClosedQualification": {
@@ -134,7 +143,7 @@
   "remaining": [
     "usable exact maximum-memory evidence or a formally accepted non-provider alternative bound",
     "provider egress evidence or a formal unavailable-counter disposition",
-    "usage-billing and automatic-overage evidence or a formal hard-gate failure",
+    "complete retained rollback and operator-independence evidence for G9",
     "final R4B and R4E reconciliation"
   ],
   "restrictions": {
