@@ -1,8 +1,10 @@
 # R4 deployment-profile qualification plan — 2026-08-01
 
-Status: controlling R4 contract, updated `2026-08-03` after network-inclusive steady throughput qualification.
+Status: controlling R4 contract, updated `2026-08-03` after the final Supabase revision-2 G8 disposition and R4E outcome.
 
-R0–R3, R4A, R4B, R4C1, R4C2a, R4C2b, and the planned R4C2c remote behavioral qualification are complete on `main`. R4C2d has qualified G7 throughput for the measured Supabase design. G8 resource and no-charge qualification remains incomplete. Supabase remains conditional and unselected.
+R0–R3, R4A, R4B revision 2, R4C1, R4C2a–R4C2d, and R4E revision 2 are complete. Supabase revision 2 passed G1–G7, G9, and G10 but failed G8. It is rejected and unselected. R4E records `no_profile_qualified`.
+
+The next phase is `R4C3`: qualify a distinct Supabase revision-3 profile with conservative application-owned resource accounting. R5 remains prohibited.
 
 ## Decision rule
 
@@ -20,7 +22,7 @@ A profile remains conditional or is rejected when it requires or cannot disprove
 - unbounded provider-resource or billing exposure;
 - public or production mutation before an explicit R5 gate.
 
-R4 may conclude `no_profile_qualified`.
+Unavailable required evidence is not a pass. A profile with a failed hard gate is rejected. R4 may conclude `no_profile_qualified` and may define a new profile revision only when its identity and evidence boundary are explicit.
 
 ## Hard gates
 
@@ -46,7 +48,7 @@ Uncommitted rows must never become public or shadow-authoritative. Finalization,
 
 ### G6 — Exact complete-state transfer
 
-The profile must export and empty-target restore collection, scheduler, publication, and maintenance state with exact canonical parity before restore commit and must continue from the restored state.
+The profile must export and restore collection, scheduler, publication, and maintenance state with exact canonical parity before restore commit and must continue from the restored state.
 
 ### G7 — Throughput
 
@@ -59,6 +61,8 @@ Retained evidence must exceed:
 
 The profile must stop before request, query, write, CPU, memory, size, storage, bandwidth, connection, concurrency, invocation, or billing ceilings without exposing rows, advancing watermarks, or reserving an invalid successor.
 
+A profile may use provider counters, exact runtime counters, or a formally defined conservative application-owned accounting boundary. It must not describe unavailable provider counters as measured. Any alternative boundary must over-account every covered resource, be enforced before mutation, and pass remote threshold-injection tests.
+
 ### G9 — Operator independence
 
 Deploy, rollback, checkpoint, export, restore, evidence, halt, and credential rotation must be scriptable without routine dashboard or terminal operation.
@@ -67,159 +71,174 @@ Deploy, rollback, checkpoint, export, restore, evidence, halt, and credential ro
 
 R4 cannot restart the retired Cloudflare collector, switch the public reader, enable Mainnet, start recovery catch-up, start stabilization slots, or start soak.
 
-## Supabase candidate
+## Supabase revision 2 — final result
 
-Current status: **remote-verified conditional candidate; not selected**.
+Profile:
 
-### R4C2a–R4C2c
+- ID: `supabase_free_postgres_pgcron_edge`;
+- revision: `2`;
+- identity digest: `c42edf0a1708fd2b7ea9f2e72dab32b87c1d66b260752efe38fec321253d3998`.
 
-Retained evidence now covers:
+### Retained behavioral qualification
 
-- cardless project access and remote deployment;
+Revision 2 proved:
+
+- cardless Free project access and exact project-to-organization binding;
 - one-minute internal `pg_cron` ownership;
-- durable phase leases and successor state;
+- durable phase leases, retries, reclaim, successor state, and terminal halt;
 - active seven-class execution and committed-only reader behavior;
-- exact source-bound cursor and stale-fence rejection;
 - `237` real historical rows across all seven classes;
-- non-empty cross-class Loan relationship reads;
-- exact duplicate historical persistence;
-- one real `116`-row standard multi-chunk work with `40 / 40 / 36` payload, commit, mutation, and reader parity;
+- one real `116`-row multi-chunk work with `40 / 40 / 36` parity;
 - exact collection, scheduler, publication, and maintenance export;
-- typed empty-target restore with canonical text and SHA-256 parity;
+- typed restore with canonical text and SHA-256 parity;
 - duplicate restore convergence and digest-tamper rejection;
 - post-restore continuation;
 - transaction-abort rollback;
-- retry/backoff and exact-expiry stale-lease reclaim;
-- terminal integrity halt with no invalid successor;
-- duplicate phase and terminal replay convergence;
-- active-profile isolation.
+- active-profile isolation;
+- scripted deploy, credential rotation, checkpoint, restore, rollback, halt, and evidence publication.
 
-The planned R4C2c remote behavioral qualification is complete. This does not select the profile.
+### G7 throughput result
 
-### R4C2d G7 throughput
+The old one-phase-per-cron design failed at p95 `1/min` and was not promoted.
 
-#### Baseline that failed
+The revised measured design passed:
 
-Run `30754437078`, attempt `2`, measured the old one-phase-per-cron active cadence:
+- steady minute rates: `[24, 24, 24, 24, 24, 24]`;
+- steady p95: `24/min`, above `21/min`;
+- catch-up p95: `14,178.400673920027/min`, above `30/min`.
 
-- 60-minute p95: `1/min`;
-- six-hour p95: `1/min`;
-- 24-hour p95: `1/min`;
-- complete work p95: approximately `120.5 seconds`.
+G7: `pass`.
 
-That cadence failed and was not promoted.
+### G8 final disposition
 
-#### Catch-up component
+Remote run `30800402654`, commit `db82291a7df3e8d4dfa458891e0a714f7d8d346b`, produced:
 
-Run `30755497115` executed five isolated trials of 64 real committed works:
+- G8 status: `fail`;
+- disposition: `reject_profile`;
+- profile selected: `false`.
 
-- minimum: `12,563.651375831556/min`;
-- p50: `13,975.162925561042/min`;
-- p95: `14,178.400673920027/min`;
-- maximum: `14,225.868101463015/min`;
-- exact full-phase, successor, committed-row digest, and target-watermark parity;
-- active source read only.
+Failure reasons:
 
-The catch-up component passed `>30/min`.
+- `provider_exact_peak_memory_unavailable`;
+- `provider_egress_bytes_unavailable`;
+- `runtime_total_memory_counter_unavailable`;
+- `memory_headroom_not_qualified`.
 
-#### Network-inclusive steady component
+The following passing components remain retained but do not override G8:
 
-Run `30756935523` used internal Supabase `pg_cron` and a dedicated isolated target profile. Six consecutive minute buckets each:
+- database size `81,939,603` bytes below the 400,000,000-byte halt;
+- database connections `10` below the 45-connection halt;
+- Edge wall maximum `5,202.7498 ms` below the 45,000-ms halt;
+- projected 31-day invocations `115,227` below the 400,000 halt;
+- largest bundle `103,351` bytes below the 4,000,000-byte halt;
+- maximum CPU `341 ms` below the runtime hard limit;
+- exact Free-plan and no-paid-overage evidence;
+- six injected fail-closed resource paths.
 
-- fetched 24 exact expanded Devnet ledgers;
-- verified parent-hash continuity;
-- used the existing Lending parser and seven-class normalizer;
-- atomically committed scan, payload, row, commit, finalize, successor, and watermark state;
-- completed under the 50-second cron HTTP limit;
-- preserved the active source epoch and base identity.
+Memory and egress interpretations are fixed:
 
-Observed minute rates were `[24, 24, 24, 24, 24, 24]`.
+- zero RSS is not zero memory usage;
+- partial heap or external counters cannot substitute for total memory;
+- average memory cannot substitute for exact peak memory;
+- generic project process metrics cannot substitute for function-scoped Edge memory;
+- request counts and projections cannot substitute for provider egress bytes.
 
-- steady minimum/p50/p95/max: `24 / 24 / 24 / 24` ledgers/minute;
-- steady component: passed `>21/min`;
-- retained catch-up component: passed `>30/min`;
-- **G7: qualified**.
+### Final R4B and R4E
 
-Controlling evidence:
+R4B revision-2 decision:
 
-- [`r4c2d-supabase-throughput-resource-baseline-evidence-2026-08-03.md`](r4c2d-supabase-throughput-resource-baseline-evidence-2026-08-03.md)
-- [`r4c2d-supabase-isolated-catchup-throughput-evidence-2026-08-03.md`](r4c2d-supabase-isolated-catchup-throughput-evidence-2026-08-03.md)
-- [`r4c2d-supabase-network-steady-throughput-evidence-2026-08-03.md`](r4c2d-supabase-network-steady-throughput-evidence-2026-08-03.md)
+- classification: `rejected`;
+- passed / failed / unresolved: `9 / 1 / 0`;
+- failed gate: `G8`;
+- decision digest: `d1577a896e3f4e512a362586ae30990aceb5142f0783feb529626fa6f035e111`.
 
-### R4C2d G8 resource qualification
+R4E outcome:
 
-Status: **incomplete**.
-
-Existing retained measurements include:
-
-- database size and table sizes;
-- row counts;
-- payload and scheduler-message byte distributions;
-- database connection usage;
-- XRPL fetch time;
-- normalization time;
-- complete Edge wall time;
-- atomic database transaction time.
-
-Required remaining evidence:
-
-1. Edge CPU usage for single-phase, catch-up, and 24-ledger steady executions;
-2. Edge memory usage and bounded peak behavior;
-3. Function invocation counts and sustained quota use;
-4. bandwidth and egress;
-5. storage growth under the 24-ledger steady design;
-6. provider-visible quota counters;
-7. cardless/no-charge and automatic-overage behavior;
-8. explicit pre-ceiling thresholds;
-9. a remote fault test proving each threshold halts before mutation, watermark advancement, publication, or invalid successor reservation.
-
-G8 cannot be closed using theoretical projections alone.
+- outcome: `no_profile_qualified`;
+- selected profile: `null`;
+- R5 authorized: `false`;
+- outcome digest: `c04d75c38c103b9549351ca92a8dab113e754e7e2ed720b93a17f58ff138bacb`.
 
 ## Other candidates
 
 ### Cardless self-hosted SQLite service
 
-Status: **conditional and unselected**.
-
-Local persistence, process leases, retry/backoff, graceful stop, terminal halt, and complete-state behavior are proved. G7, G8, and always-on G9 evidence are not complete for this profile.
+Status: **conditional and unselected**. Local persistence and fault semantics are proved, but always-on hosting, G7, G8, and G9 remain incomplete.
 
 ### Turso Free plus cardless executor
 
-Status: **conditional and unselected**.
-
-Transaction, interruption, scheduler/executor ownership, transfer, throughput, quota, and no-charge behavior remain insufficiently proved.
+Status: **conditional and unselected**. Transaction, executor ownership, transfer, throughput, quota, and no-charge behavior remain insufficiently proved.
 
 ### Existing Cloudflare Workers/D1/Queues profile
 
-Status: **blocked**.
-
-The retired fixed-32 runtime remains halted. No payment method, billing mutation, remote restart, or production recovery is permitted.
+Status: **blocked**. The retired fixed-32 runtime remains halted. No payment method, billing mutation, remote restart, or production recovery is permitted.
 
 ### Rejected profiles
 
-- GitHub Actions-only collector: cannot satisfy the durable internal clock and catch-up guarantees.
-- Deno Deploy Free managed runtime: card and uptime constraints conflict with current gates.
+- GitHub Actions-only collector: fails durable internal-clock requirements.
+- Deno Deploy Free managed runtime: card and uptime constraints conflict with the gates.
+- Supabase Free Postgres plus pg_cron and Edge Functions revision 2: failed G8.
 
-## R4C2e and R4E
+## R4C3 — Supabase revision-3 alternative-bound qualification
 
-After G8 evidence exists:
+Revision 3 must be a new profile identity. It may reuse proven revision-2 behavioral components only when each retained artifact is explicitly rebound to the new identity or rerun.
 
-1. revise the machine-readable R4B evidence;
-2. bind exactly one current evidence record to every G1–G10 gate;
-3. produce either `qualified_profile_selected` or `no_profile_qualified`;
-4. retain the decision and exact remaining blockers;
-5. keep selection `not_selected` until every hard gate passes.
+### Required resource-accounting contract
+
+Before implementation, revision 3 must define machine-readable limits for:
+
+- maximum ledgers and XRPL requests per tick;
+- maximum XRPL response bytes per ledger and per tick;
+- maximum normalized records and canonical JSON bytes per ledger and per tick;
+- maximum in-memory ledgers, transactions, metadata nodes, candidates, payload chunks, and relationships;
+- maximum database statements, rows, payload bytes, and transaction wall time;
+- maximum function invocations per day and 31 days;
+- maximum application-attributed ingress and egress bytes per day and 31 days;
+- storage growth per committed ledger and retained-history horizon.
+
+Every bound must include an explicit safety margin and a provider hard ceiling or a stricter project ceiling.
+
+### Required enforcement
+
+The executor must:
+
+1. reject oversized XRPL responses while streaming or immediately after bounded read;
+2. reject any ledger or tick whose accounted bytes or object counts exceed a bound;
+3. halt before phase or successor mutation when projected monthly usage reaches a project ceiling;
+4. record exact accounted values and conservative upper bounds in the same commit identity;
+5. preserve committed-only reads and active-source isolation;
+6. never call an unavailable provider counter a measured value.
+
+### Required remote fault proof
+
+For every revision-3 threshold, injected qualification must prove:
+
+- zero committed works;
+- zero watermark advancement;
+- zero publication exposure;
+- zero invalid successor reservation;
+- released or terminally halted ownership as specified;
+- exact active-profile identity preservation;
+- repeatable evidence publication.
+
+### R4C3 exit
+
+R4C3 exits only when:
+
+- the revision-3 identity digest is fixed;
+- every G1–G10 evidence record is bound to revision 3;
+- the exact evaluator returns `qualified_candidate`;
+- a separate explicit selection record chooses revision 3;
+- R5 authorization changes from `false` to `true` only in that selection record.
 
 ## Production boundary
 
-R4 still forbids:
+Until R4C3 exits, the following remain forbidden:
 
 - public-reader cutover;
 - Mainnet enablement;
-- recovery declaration;
-- lag-zero declaration;
+- recovery or lag-zero declaration;
 - stabilization qualification;
 - 24-hour or seven-day soak;
+- restart of the retired Cloudflare collector;
 - removal of legacy rollback evidence.
-
-G7 qualification does not authorize R5. G8 and final R4B/R4E selection must complete first.
