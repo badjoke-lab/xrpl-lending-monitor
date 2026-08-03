@@ -7,12 +7,8 @@ function read(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
-const guardMigration = read(
-  'supabase/migrations/20260803040000_xrpl_resource_headroom_guard.sql',
-)
-const activationMigration = read(
-  'supabase/migrations/20260803040500_xrpl_resource_headroom_activation.sql',
-)
+const guardMigration = read('supabase/migrations/20260803040000_xrpl_resource_headroom_guard.sql')
+const activationMigration = read('supabase/migrations/20260803040500_xrpl_resource_headroom_activation.sql')
 const edge = read('supabase/functions/xrpl-resource-headroom-guard/index.ts')
 const recorder = read('scripts/record-supabase-external-resource-snapshot.mjs')
 const verifier = read('scripts/verify-supabase-resource-headroom-guard.mjs')
@@ -38,9 +34,7 @@ describe('Supabase R4C2d resource headroom guard contract', () => {
       "'edgeMemory', false",
       "'bandwidth', false",
       "'billingAndOverage', false",
-    ]) {
-      expect(guardMigration).toContain(required)
-    }
+    ]) expect(guardMigration).toContain(required)
   })
 
   it('halts before work reservation and preserves active state', () => {
@@ -61,15 +55,13 @@ describe('Supabase R4C2d resource headroom guard contract', () => {
       "'noSuccessorReserved', v_successor_count = 0",
       "'activeProfileNonRegressing'",
       "'activeSourceIdentityPreserved'",
-    ]) {
-      expect(guardMigration).toContain(required)
-    }
+    ]) expect(guardMigration).toContain(required)
   })
 
   it('keeps resource enforcement opt-in until live external coverage exists', () => {
     for (const required of [
       'resource_guard_enabled boolean not null default false',
-      'where status = \'running\' and resource_guard_enabled',
+      "where status = 'running' and resource_guard_enabled",
       'if not coalesce(v_enabled, false) then',
       "when new.resource_guard_enabled then '/functions/v1/xrpl-resource-headroom-guard'",
       "else '/functions/v1/xrpl-steady-batch-tick'",
@@ -77,9 +69,7 @@ describe('Supabase R4C2d resource headroom guard contract', () => {
       "raise exception 'resource guard blocks guarded session:%'",
       "true, 'passed', p_prepared_at",
       "'resourceGuardEnabled', true",
-    ]) {
-      expect(activationMigration).toContain(required)
-    }
+    ]) expect(activationMigration).toContain(required)
   })
 
   it('provides one service-authenticated cron guard and token-gated qualification surface', () => {
@@ -99,20 +89,17 @@ describe('Supabase R4C2d resource headroom guard contract', () => {
       "'xrpl_qualify_resource_guard_fail_closed'",
       "request.headers.get(VERIFY_TOKEN_HEADER) !== env('XRPL_READER_VERIFY_TOKEN')",
       "request.headers.get(PURPOSE_HEADER) !== PURPOSE",
-    ]) {
-      expect(edge).toContain(required)
-    }
+    ]) expect(edge).toContain(required)
   })
 
-  it('records exact Management API invocation and deployed-function evidence', () => {
+  it('records exact ClickHouse invocation and deployed-function evidence', () => {
     for (const required of [
       'https://api.supabase.com/v1/projects/${projectRef}',
       "managementRequest('/functions')",
       "managementRequest('/analytics/endpoints/logs.all'",
-      'SELECT count(*) AS invocation_count',
-      'FROM edge_logs',
-      'CROSS JOIN UNNEST(metadata) AS metadata',
-      "WHERE path LIKE '%/functions/v1/%'",
+      'SELECT count() AS invocation_count',
+      'FROM logs',
+      "WHERE source_name = 'function_edge_logs'",
       'iso_timestamp_start: windowStart',
       'iso_timestamp_end: observedAt',
       'projectedInvocations31d = invocationCount24h * 31',
@@ -120,12 +107,14 @@ describe('Supabase R4C2d resource headroom guard contract', () => {
       "action: 'record'",
       'resource-external-snapshot.json',
       'failed-resource-external-snapshot.json',
+      'clickHouseFunctionLogQuery: true',
       'functionInvocationCoverage: true',
       'bundleSizeCoverage: true',
       'g8Qualified: false',
-    ]) {
-      expect(recorder).toContain(required)
-    }
+    ]) expect(recorder).toContain(required)
+    expect(recorder).not.toContain('UNNEST(')
+    expect(recorder).not.toContain('FROM edge_logs')
+    expect(recorder).not.toContain("WHERE path LIKE '%/functions/v1/%'")
   })
 
   it('requires the fresh external snapshot before remote guard qualification', () => {
@@ -138,14 +127,12 @@ describe('Supabase R4C2d resource headroom guard contract', () => {
       'maxBundleBytes >= exactThresholds.bundleHaltBytes',
       'bundleCount !== functionCount',
       'invocationCount24h * 31 !== projectedInvocations31d',
-      "snapshot.allowed !== true",
+      'snapshot.allowed !== true',
       'externalSnapshotFresh: true',
       'functionInvocationCoverage: true',
       'bundleSizeCoverage: true',
       'liveGuardAllowed: true',
-    ]) {
-      expect(verifier).toContain(required)
-    }
+    ]) expect(verifier).toContain(required)
   })
 
   it('remotely proves all six exact halt paths without overstating G8', () => {
@@ -162,15 +149,13 @@ describe('Supabase R4C2d resource headroom guard contract', () => {
       'edgeWallHaltMilliseconds: 45000',
       'invocationHalt31d: 400000',
       'bundleHaltBytes: 4000000',
-      "checks.g8Qualified !== false",
+      'checks.g8Qualified !== false',
       'sixFailClosedThresholdsProved: true',
       'preReservationHaltProved: true',
       'liveProviderCoverageNotOverstated: true',
       'missingTokenRejected: true',
       'wrongPurposeRejected: true',
-    ]) {
-      expect(verifier).toContain(required)
-    }
+    ]) expect(verifier).toContain(required)
   })
 
   it('deploys through the existing single Supabase workflow', () => {
@@ -188,9 +173,7 @@ describe('Supabase R4C2d resource headroom guard contract', () => {
       'node scripts/publish-supabase-resource-run-locator.mjs',
       'gh issue comment 1109',
       'cancel-in-progress: false',
-    ]) {
-      expect(workflow).toContain(required)
-    }
+    ]) expect(workflow).toContain(required)
     expect(workflow.match(/supabase secrets set XRPL_READER_VERIFY_TOKEN/g)).toHaveLength(1)
     expect(workflow.match(/gh issue comment 1109/g)).toHaveLength(1)
   })
@@ -215,8 +198,6 @@ describe('Supabase R4C2d resource headroom guard contract', () => {
       'active profile read only',
       'G8 qualified',
       'profile selected',
-    ]) {
-      expect(publisher).toContain(required)
-    }
+    ]) expect(publisher).toContain(required)
   })
 })
