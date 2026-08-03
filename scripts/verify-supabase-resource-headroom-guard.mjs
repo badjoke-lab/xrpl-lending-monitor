@@ -1,6 +1,8 @@
 import { randomBytes } from 'node:crypto'
 import { mkdir, writeFile } from 'node:fs/promises'
 
+await import('./record-supabase-external-resource-snapshot.mjs')
+
 const projectRef = process.env.SUPABASE_PROJECT_ID ?? ''
 if (!/^[a-z]{20}$/.test(projectRef)) {
   throw new Error('SUPABASE_PROJECT_ID must be an exact 20-character project ref')
