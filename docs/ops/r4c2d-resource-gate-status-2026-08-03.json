@@ -76,8 +76,11 @@
           "averageMemoryMaximumMegabytes": 10.76615047454834,
           "exactMaximumAvailable": false,
           "inProcessSamples": 36,
-          "allInProcessCountersZero": true,
-          "zeroCountersAcceptedAsZeroUsage": false,
+          "allRssCountersZero": true,
+          "partialHeapCountersAvailable": true,
+          "totalMemoryCounterAvailable": false,
+          "partialCountersAcceptedAsTotalMemory": false,
+          "zeroRssAcceptedAsZeroUsage": false,
           "highWaterQualified": false,
           "passed": false
         },
@@ -135,9 +138,15 @@
   "invalidatedInterpretations": [
     {
       "workflowRunId": 30785890154,
-      "interpretation": "all-zero Deno.memoryUsage counters prove zero memory consumption or 200 MiB headroom",
+      "interpretation": "zero RSS high water proves zero memory consumption or 200 MiB headroom",
       "valid": false,
-      "replacement": "runtime memory counters unavailable; memory high-water unqualified"
+      "replacement": "RSS total-memory counter unavailable; memory high-water unqualified"
+    },
+    {
+      "workflowRunId": 30786950713,
+      "interpretation": "nonzero partial heap or external counters can substitute for an all-zero RSS counter",
+      "valid": false,
+      "replacement": "positive RSS is required for total-memory qualification; partial counters are non-qualifying"
     }
   ],
   "remaining": [
