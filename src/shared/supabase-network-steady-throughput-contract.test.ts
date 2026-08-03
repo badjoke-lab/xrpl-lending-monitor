@@ -183,7 +183,7 @@ describe('Supabase R4C2d network steady throughput contract', () => {
       'steady-throughput-qualification-bundle.json',
       'supabase functions deploy xrpl-steady-batch-tick',
       'supabase functions deploy xrpl-steady-throughput-qualification',
-      'node scripts/verify-supabase-steady-throughput.mjs',
+      'node scripts/verify-supabase-steady-throughput-with-retry.mjs',
       'verified-steady-throughput.json',
       'failed-steady-throughput-verification.json',
       'steady throughput verifier: `success`',

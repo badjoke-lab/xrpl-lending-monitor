@@ -20,6 +20,7 @@ on:
       - 'scripts/verify-supabase-throughput-resource-baseline.mjs'
       - 'scripts/verify-supabase-catchup-throughput.mjs'
       - 'scripts/verify-supabase-steady-throughput.mjs'
+      - 'scripts/verify-supabase-steady-throughput-with-retry.mjs'
       - 'scripts/verify-supabase-resource-headroom-guard.mjs'
       - 'scripts/record-supabase-external-resource-snapshot.mjs'
       - 'scripts/record-supabase-provider-metric-capability.mjs'
@@ -198,7 +199,7 @@ jobs:
       - name: Verify isolated catch-up throughput
         run: node scripts/verify-supabase-catchup-throughput.mjs
       - name: Verify network steady throughput
-        run: node scripts/verify-supabase-steady-throughput.mjs
+        run: node scripts/verify-supabase-steady-throughput-with-retry.mjs
       - name: Verify resource headroom fail-closed guards
         run: node scripts/verify-supabase-resource-headroom-guard.mjs
 
