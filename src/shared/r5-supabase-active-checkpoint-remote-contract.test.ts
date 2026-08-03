@@ -140,7 +140,7 @@ describe('R5 Supabase active checkpoint remote freeze contract', () => {
       'node scripts/verify-supabase-r5-active-checkpoint.mjs',
       'node scripts/publish-supabase-r5-active-checkpoint-run-locator.mjs',
       'gh issue comment 1175',
-      'if [ -s /tmp/r5-checkpoint-comment.md ]; then',
+      'if [ -s /tmp/r5-comment.md ]; then',
     ]) {
       expect(workflow).toContain(required)
     }
