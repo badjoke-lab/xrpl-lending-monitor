@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 
+// Changes to this final G8 reconciler must trigger the guarded Supabase remote verifier.
+
 const runIdText = process.env.GITHUB_RUN_ID ?? ''
 const sourceCommit = (process.env.GITHUB_SHA ?? '').toLowerCase()
 if (!/^[1-9][0-9]*$/u.test(runIdText)) throw new Error('GITHUB_RUN_ID must be a positive integer')
