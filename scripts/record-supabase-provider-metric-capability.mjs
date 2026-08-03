@@ -162,17 +162,28 @@ async function run() {
   const managementFields = endpoints
     .filter((entry) => entry.name !== 'organization.usage.daily')
     .flatMap((entry) => [...entry.fieldNames, ...entry.metricNames])
+  const functionScopedFields = endpoints
+    .filter((entry) => entry.name === 'functions.combined-stats')
+    .flatMap((entry) => [...entry.fieldNames, ...entry.metricNames])
+  const genericMetricsFields = endpoints
+    .filter((entry) => entry.name === 'metrics')
+    .flatMap((entry) => [...entry.fieldNames, ...entry.metricNames])
+
   const egressFields = matchingFields(
     managementFields,
     /(?:^|[._])(cached_)?egress(?:$|[._])|bandwidth|response_bytes|bytes_sent/iu,
   )
   const peakMemoryFields = matchingFields(
-    managementFields,
+    functionScopedFields,
     /(?:max|peak|high_water|rss)[a-z0-9_.-]*memory|memory[a-z0-9_.-]*(?:max|peak|high_water|rss)/iu,
   ).filter((name) => !/(?:avg|average)/iu.test(name))
   const averageMemoryFields = matchingFields(
-    managementFields,
+    functionScopedFields,
     /(?:avg|average)[a-z0-9_.-]*memory|memory[a-z0-9_.-]*(?:avg|average)/iu,
+  )
+  const genericProcessMemoryFields = matchingFields(
+    genericMetricsFields,
+    /process[a-z0-9_:.-]*memory|memory[a-z0-9_:.-]*process/iu,
   )
   const requestCountFields = matchingFields(
     managementFields,
@@ -181,7 +192,7 @@ async function run() {
 
   const organizationUsage = endpoints.find((entry) => entry.name === 'organization.usage.daily')
   const evidence = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     purpose: 'r4c2d-provider-metric-capability',
     sourceRunId,
     sourceCommit,
@@ -190,8 +201,9 @@ async function run() {
     endpoints,
     discoveredFields: {
       providerEgress: egressFields,
-      exactPeakMemory: peakMemoryFields,
-      averageMemory: averageMemoryFields,
+      exactPeakEdgeMemory: peakMemoryFields,
+      averageEdgeMemory: averageMemoryFields,
+      genericProjectProcessMemory: genericProcessMemoryFields,
       requestCounts: requestCountFields,
     },
     coverage: {
@@ -204,6 +216,7 @@ async function run() {
       dashboardOrgDailyUsageWithPat: organizationUsage?.ok === true,
       requestCountsAvailable: requestCountFields.length > 0,
       averageMemoryAvailable: averageMemoryFields.length > 0,
+      genericProjectProcessMemoryAvailable: genericProcessMemoryFields.length > 0,
       providerEgressBytesAvailable: egressFields.length > 0,
       exactPeakEdgeMemoryAvailable: peakMemoryFields.length > 0,
     },
@@ -214,9 +227,11 @@ async function run() {
       functionIdRetained: false,
       rawResponseValuesRetained: false,
       fieldNamesOnlyRetained: true,
+      functionScopedMemoryRequiredForEdgeQualification: true,
+      genericProcessMetricsNotAcceptedAsEdgeMemory: true,
       providerCoverageNotOverstated: true,
       providerEgressUnavailableWhenNoFieldExists: egressFields.length === 0,
-      exactPeakMemoryUnavailableWhenNoFieldExists: peakMemoryFields.length === 0,
+      exactPeakMemoryUnavailableWhenNoFunctionScopedFieldExists: peakMemoryFields.length === 0,
       g8Qualified: false,
       profileSelected: false,
     },
@@ -234,7 +249,7 @@ try {
 } catch (error) {
   await mkdir(evidenceDirectory, { recursive: true })
   const failure = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     purpose: 'r4c2d-provider-metric-capability',
     sourceRunId,
     sourceCommit,
