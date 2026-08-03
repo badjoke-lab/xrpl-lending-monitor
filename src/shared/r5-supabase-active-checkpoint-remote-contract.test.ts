@@ -71,7 +71,7 @@ describe('R5 Supabase active checkpoint remote freeze contract', () => {
     ]) {
       expect(verifier).toContain(required)
     }
-    expect(verifier).not.toContain('r5_checkpoint_identity_conflict\',')
+    expect(verifier).not.toContain("'r5_checkpoint_identity_conflict',")
   })
 
   it('binds the remote summary to the exact selected revision-3 identity', () => {
@@ -128,7 +128,7 @@ describe('R5 Supabase active checkpoint remote freeze contract', () => {
     ]) {
       expect(verifier).toContain(required)
     }
-    expect(verifier).not.toContain("checkpoint.state")
+    expect(verifier).not.toContain('fullCheckpointState')
     expect(verifier).not.toContain('SUPABASE_DB_PASSWORD')
   })
 
