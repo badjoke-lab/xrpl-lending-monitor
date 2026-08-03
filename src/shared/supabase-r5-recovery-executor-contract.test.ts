@@ -110,6 +110,6 @@ describe('R5 active recovery batch executor contract', () => {
       expect(executor).toContain(required)
     }
     expect(config).toContain('[functions.xrpl-r5-recovery-batch]')
-    expect(config).toContain('[functions.xrpl-r5-recovery-batch]\nverify_jwt = false')
+    expect(config).toContain('[functions.xrpl-r5-recovery-batch]\nverify_jwt =false')
   })
 })
