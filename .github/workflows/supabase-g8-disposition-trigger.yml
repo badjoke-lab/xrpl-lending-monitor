@@ -1,0 +1,24 @@
+name: Trigger Supabase G8 disposition verification
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'scripts/record-supabase-provider-metric-capability.mjs'
+      - 'scripts/reconcile-supabase-g8-resource-disposition.mjs'
+      - 'scripts/publish-supabase-provider-metric-capability.mjs'
+      - '.github/workflows/supabase-g8-disposition-trigger.yml'
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch-existing-verifier:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch existing Supabase verifier
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run supabase-remote-probe.yml --repo "$GITHUB_REPOSITORY" --ref main
