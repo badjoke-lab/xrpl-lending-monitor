@@ -58,7 +58,11 @@ async function request(url, { required = false } = {}) {
   const contentType = String(response.headers.get('content-type') ?? '').split(';')[0].trim()
   const text = await response.text()
   let parsed = null
-  try { parsed = JSON.parse(text) } catch {}
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    parsed = null
+  }
   if (required && !response.ok) {
     throw new Error(`required Supabase metric endpoint failed (${response.status})`)
   }
