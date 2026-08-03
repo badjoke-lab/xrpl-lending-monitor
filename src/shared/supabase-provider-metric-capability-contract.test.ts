@@ -46,6 +46,24 @@ describe('Supabase provider metric capability contract', () => {
     expect(probe).not.toContain('functionId,\n    endpoints')
   })
 
+  it('uses only function-scoped fields for Edge memory qualification', () => {
+    for (const required of [
+      "entry.name === 'functions.combined-stats'",
+      "entry.name === 'metrics'",
+      'const functionScopedFields = endpoints',
+      'const genericMetricsFields = endpoints',
+      'functionScopedFields,',
+      'genericMetricsFields,',
+      'exactPeakEdgeMemory: peakMemoryFields',
+      'averageEdgeMemory: averageMemoryFields',
+      'genericProjectProcessMemory: genericProcessMemoryFields',
+      'genericProjectProcessMemoryAvailable: genericProcessMemoryFields.length > 0',
+      'functionScopedMemoryRequiredForEdgeQualification: true',
+      'genericProcessMetricsNotAcceptedAsEdgeMemory: true',
+      'exactPeakMemoryUnavailableWhenNoFunctionScopedFieldExists: peakMemoryFields.length === 0',
+    ]) expect(probe).toContain(required)
+  })
+
   it('separates request counts and average memory from egress bytes and peak memory', () => {
     for (const required of [
       'requestCountsAvailable: requestCountFields.length > 0',
@@ -53,7 +71,6 @@ describe('Supabase provider metric capability contract', () => {
       'providerEgressBytesAvailable: egressFields.length > 0',
       'exactPeakEdgeMemoryAvailable: peakMemoryFields.length > 0',
       'providerEgressUnavailableWhenNoFieldExists: egressFields.length === 0',
-      'exactPeakMemoryUnavailableWhenNoFieldExists: peakMemoryFields.length === 0',
       'g8Qualified: false',
       'profileSelected: false',
     ]) expect(probe).toContain(required)
@@ -77,7 +94,7 @@ describe('Supabase provider metric capability contract', () => {
     )
   })
 
-  it('publishes success, failure, endpoint status, and unresolved G8 boundaries', () => {
+  it('publishes function-scoped, generic, failure, and unresolved boundaries', () => {
     expect(operatorPublisher).toContain(
       "await import('./publish-supabase-provider-metric-capability.mjs')",
     )
@@ -89,8 +106,13 @@ describe('Supabase provider metric capability contract', () => {
       'usage.api-requests-count status',
       'functions.combined-stats status',
       'organization usage daily with PAT status',
+      'function average memory available',
+      'generic project process memory available',
       'provider egress bytes available',
       'exact peak Edge memory available',
+      'discovered exact peak Edge memory fields',
+      'discovered generic project process memory fields',
+      'generic process metrics accepted as Edge memory',
       'raw response values retained',
       'provider coverage not overstated',
       'G8 qualified',
