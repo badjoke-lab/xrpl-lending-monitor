@@ -1,0 +1,65 @@
+import { readFileSync } from 'node:fs'
+
+const runStatus = process.env.RUN_STATUS ?? 'unknown'
+const runId = process.env.RUN_ID ?? 'unknown'
+const runUrl = process.env.RUN_URL ?? 'unknown'
+const headSha = process.env.HEAD_SHA ?? 'unknown'
+const directory = 'supabase-remote-probe-evidence'
+
+function read(name) {
+  try {
+    return JSON.parse(readFileSync(`${directory}/${name}`, 'utf8'))
+  } catch {
+    return null
+  }
+}
+
+const success = read('provider-metric-capability.json')
+const failure = read('failed-provider-metric-capability.json')
+const lines = [
+  '',
+  '## R4C2d provider metric capability',
+  '',
+  `- run: [${runId}](${runUrl})`,
+  `- commit: \`${headSha}\``,
+  `- job status: \`${runStatus}\``,
+]
+
+if (success) {
+  const status = Object.fromEntries(
+    (success.endpoints ?? []).map((entry) => [entry.name, entry.status]),
+  )
+  lines.push(
+    '- provider metric capability probe: `success`',
+    `- usage.api-counts status: \`${String(status['usage.api-counts'] ?? 'unknown')}\``,
+    `- usage.api-requests-count status: \`${String(status['usage.api-requests-count'] ?? 'unknown')}\``,
+    `- functions.combined-stats status: \`${String(status['functions.combined-stats'] ?? 'unknown')}\``,
+    `- metrics status: \`${String(status.metrics ?? 'unknown')}\``,
+    `- organization usage daily with PAT status: \`${String(status['organization.usage.daily'] ?? 'unknown')}\``,
+    `- request counts available: \`${String(success.coverage?.requestCountsAvailable ?? 'unknown')}\``,
+    `- average memory available: \`${String(success.coverage?.averageMemoryAvailable ?? 'unknown')}\``,
+    `- provider egress bytes available: \`${String(success.coverage?.providerEgressBytesAvailable ?? 'unknown')}\``,
+    `- exact peak Edge memory available: \`${String(success.coverage?.exactPeakEdgeMemoryAvailable ?? 'unknown')}\``,
+    `- discovered provider egress fields: \`${JSON.stringify(success.discoveredFields?.providerEgress ?? [])}\``,
+    `- discovered exact peak memory fields: \`${JSON.stringify(success.discoveredFields?.exactPeakMemory ?? [])}\``,
+    `- raw response values retained: \`${String(success.checks?.rawResponseValuesRetained ?? 'unknown')}\``,
+    `- organization slug retained: \`${String(success.checks?.organizationSlugRetained ?? 'unknown')}\``,
+    `- project ref retained: \`${String(success.checks?.projectRefRetained ?? 'unknown')}\``,
+    `- function ID retained: \`${String(success.checks?.functionIdRetained ?? 'unknown')}\``,
+    `- provider coverage not overstated: \`${String(success.checks?.providerCoverageNotOverstated ?? 'unknown')}\``,
+    `- G8 qualified: \`${String(success.checks?.g8Qualified ?? 'unknown')}\``,
+    `- profile selected: \`${String(success.checks?.profileSelected ?? 'unknown')}\``,
+  )
+} else if (failure) {
+  lines.push(
+    '- provider metric capability probe: `failed`',
+    `- failed at: \`${String(failure.failedAt ?? 'unknown')}\``,
+    `- reason: \`${String(failure.reason ?? 'unknown').slice(0, 1_000)}\``,
+    `- G8 qualified: \`${String(failure.checks?.g8Qualified ?? false)}\``,
+    `- profile selected: \`${String(failure.checks?.profileSelected ?? false)}\``,
+  )
+} else {
+  lines.push('- provider metric capability probe: `not reached or no sanitized evidence produced`')
+}
+
+process.stdout.write(`${lines.join('\n')}\n`)
