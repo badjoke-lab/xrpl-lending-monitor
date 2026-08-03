@@ -13,6 +13,8 @@ const baseMigration = read(
 const attemptMigration = read(
   'supabase/migrations/20260803100500_xrpl_revision3_accounting_attempts.sql',
 )
+const migrations = `${baseMigration}\n${attemptMigration}`
+const evaluator = read('src/shared/supabase-revision3-resource-accounting.ts')
 const executor = read('supabase/functions/xrpl-steady-batch-tick/index.ts')
 
 describe('Supabase revision-3 accounting persistence contract', () => {
@@ -74,7 +76,7 @@ describe('Supabase revision-3 accounting persistence contract', () => {
       "raise exception 'revision3_resource_accounting_precommit'",
       'before update on xrpl_steady_v1.ticks',
     ]) {
-      expect(attemptMigration).toContain(required)
+      expect(migrations).toContain(required)
     }
   })
 
@@ -134,8 +136,13 @@ describe('Supabase revision-3 accounting persistence contract', () => {
 
   it('never reclassifies unavailable provider counters as measured evidence', () => {
     for (const required of [
-      'unavailableProviderMemoryNotClaimed',
-      'unavailableProviderEgressNotClaimed',
+      'unavailableProviderMemoryNotClaimed: true',
+      'unavailableProviderEgressNotClaimed: true',
+    ]) {
+      expect(evaluator).toContain(required)
+    }
+    for (const required of [
+      'evaluateSupabaseRevision3ResourceAccounting',
       'SUPABASE_REVISION3_PROFILE_IDENTITY_DIGEST',
       "'xrpl_record_revision3_tick_accounting'",
       "'xrpl_read_revision3_accounting_context'",
