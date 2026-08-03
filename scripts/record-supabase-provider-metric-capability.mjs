@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, writeFile } from 'node:fs/promises'
 
 const projectRef = process.env.SUPABASE_PROJECT_ID ?? ''
 const accessToken = process.env.SUPABASE_ACCESS_TOKEN ?? ''
@@ -117,7 +117,7 @@ async function run() {
   if (project.ref !== projectRef) throw new Error('Management API project reference changed')
   const organizationSlug = String(project.organization_slug ?? '')
   if (!/^[a-zA-Z0-9_-]{1,200}$/u.test(organizationSlug)) {
-    throw new Error('Management API organization slug is unavailable')
+    throw new Error('Management API project organization slug is unavailable')
   }
 
   const functionsResponse = await request(`${managementProjectBase}/functions`, { required: true })
@@ -175,18 +175,6 @@ async function run() {
     /requests?_count|total_[a-z0-9_]*requests?/iu,
   )
 
-  const runtimeEvidence = object(
-    JSON.parse(await readFile(`${evidenceDirectory}/runtime-resource-log-snapshot.json`, 'utf8')),
-    'runtime resource evidence',
-  )
-  if (
-    runtimeEvidence.sourceRunId !== sourceRunId
-    || runtimeEvidence.sourceCommit !== sourceCommit
-    || runtimeEvidence.checks?.officialCombinedStatsEndpoint !== true
-  ) {
-    throw new Error('runtime resource evidence identity changed')
-  }
-
   const organizationUsage = endpoints.find((entry) => entry.name === 'organization.usage.daily')
   const evidence = {
     schemaVersion: 1,
@@ -211,13 +199,9 @@ async function run() {
       patMetricsEndpoint: endpoints[3].ok,
       dashboardOrgDailyUsageWithPat: organizationUsage?.ok === true,
       requestCountsAvailable: requestCountFields.length > 0,
-      averageMemoryAvailable:
-        averageMemoryFields.length > 0
-        || runtimeEvidence.checks?.averageMemoryBelowHaltThreshold === true,
+      averageMemoryAvailable: averageMemoryFields.length > 0,
       providerEgressBytesAvailable: egressFields.length > 0,
-      exactPeakEdgeMemoryAvailable:
-        peakMemoryFields.length > 0
-        && runtimeEvidence.checks?.exactMemoryMaximumCovered === true,
+      exactPeakEdgeMemoryAvailable: peakMemoryFields.length > 0,
     },
     checks: {
       onlyPatAndPublicProjectIdentityUsed: true,
@@ -228,9 +212,7 @@ async function run() {
       fieldNamesOnlyRetained: true,
       providerCoverageNotOverstated: true,
       providerEgressUnavailableWhenNoFieldExists: egressFields.length === 0,
-      exactPeakMemoryUnavailableWhenNoFieldExists:
-        peakMemoryFields.length === 0
-        || runtimeEvidence.checks?.exactMemoryMaximumCovered !== true,
+      exactPeakMemoryUnavailableWhenNoFieldExists: peakMemoryFields.length === 0,
       g8Qualified: false,
       profileSelected: false,
     },
