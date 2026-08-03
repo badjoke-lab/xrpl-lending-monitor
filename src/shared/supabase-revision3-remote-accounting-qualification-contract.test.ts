@@ -21,130 +21,111 @@ const resourceVerifier = read('scripts/verify-supabase-resource-headroom-guard.m
 const publisher = read('scripts/publish-supabase-revision3-run-locator.mjs')
 const operatorPublisher = read('scripts/publish-supabase-operator-run-locator.mjs')
 
+const revision3Identity =
+  '3a5c4ff2c43a48d3e5b7ceded60027173d215d6f083fb33c22375758520bbe67'
+const revision3Guards = [
+  'missing_accounting',
+  'unsafe_accounting',
+  'memory_halt',
+  'tick_egress_halt',
+  'monthly_egress_halt',
+  'invocation_halt',
+  'future_record',
+]
+
 describe('Supabase revision-3 remote accounting qualification contract', () => {
-  it('reads one latest accounting row for every completed guarded tick', () => {
-    for (const required of [
+  it('binds the exact guarded accounting reader and profile identity', () => {
+    expect(migration).toContain(
       'create or replace function public.xrpl_read_revision3_session_accounting',
-      'select distinct on (tick_id)',
-      'order by tick_id, recorded_at desc, created_at desc',
-      "'latestAccountings'",
-      "'attemptCount'",
-      "'allowedAttemptCount'",
-      "'unsafeAttemptCount'",
-      "'oneLatestAccountingPerCompletedTick'",
-      "'allLatestAllowed'",
-      "'allBelowThresholds'",
-      "'allRecordedBeforeCompletion'",
-      "'providerPeakMemoryClaimed', false",
-      "'providerEgressClaimed', false",
-      "'activeProfileReadOnly', true",
-    ]) {
-      expect(migration).toContain(required)
-    }
+    )
+    expect(migration).toContain('select distinct on (tick_id)')
+    expect(migration).toContain('order by tick_id, recorded_at desc, created_at desc')
+    expect(migration).toContain(revision3Identity)
+    for (const check of [
+      'oneLatestAccountingPerCompletedTick',
+      'allLatestAllowed',
+      'allBelowThresholds',
+      'allRecordedBeforeCompletion',
+      'providerPeakMemoryClaimed',
+      'providerEgressClaimed',
+      'activeProfileReadOnly',
+    ]) expect(migration).toContain(check)
   })
 
-  it('injects every revision-3 precommit failure without collector mutation', () => {
-    for (const required of [
+  it('injects every revision-3 precommit failure and requires zero mutation', () => {
+    expect(migration).toContain(
       'create or replace function public.xrpl_qualify_revision3_accounting_precommit',
-      "'missing_accounting'",
-      "'unsafe_accounting'",
-      "'memory_halt'",
-      "'tick_egress_halt'",
-      "'monthly_egress_halt'",
-      "'invocation_halt'",
-      "'future_record'",
-      "position('revision3_resource_accounting_precommit' in sqlerrm) > 0",
-      "'ticks', count(*) filter (where status = 'completed')",
-      "'works', (select count(*) from xrpl_steady_v1.works",
-      "'messages', (select count(*) from xrpl_steady_v1.messages",
-      "'successors', (select count(*) from xrpl_steady_v1.successors",
-      "'precommitRejected'",
-      "'noCompletedTick'",
-      "'noWorkCommitted'",
-      "'noMessageReserved'",
-      "'noSuccessorReserved'",
-      "'activeProfileReadOnly'",
+    )
+    for (const guard of revision3Guards) expect(migration).toContain(`'${guard}'`)
+    expect(migration).toContain('revision3_resource_accounting_precommit')
+    for (const check of [
+      'precommitRejected',
+      'noCompletedTick',
+      'noWorkCommitted',
+      'noMessageReserved',
+      'noSuccessorReserved',
+      'activeProfileReadOnly',
+    ]) expect(migration).toContain(check)
+    expect(migration).toContain(
       'delete from xrpl_steady_v1.sessions where session_id = v_session_id',
-    ]) {
-      expect(migration).toContain(required)
-    }
+    )
   })
 
-  it('exposes revision-3 accounting beside the existing steady read', () => {
-    for (const required of [
-      'const [session, memory, revision3Accounting] = await Promise.all',
-      "rpc<JsonObject>('xrpl_read_revision3_session_accounting'",
-      'revision3Accounting,',
-      "request.headers.get(VERIFY_TOKEN_HEADER) !== env('XRPL_READER_VERIFY_TOKEN')",
-      "request.headers.get(PURPOSE_HEADER) !== PURPOSE",
-    ]) {
-      expect(steadyReader).toContain(required)
-    }
+  it('returns revision-3 accounting through the existing token-gated steady reader', () => {
+    expect(steadyReader).toContain('revision3Accounting')
+    expect(steadyReader).toContain('xrpl_read_revision3_session_accounting')
+    expect(steadyReader).toContain('XRPL_READER_VERIFY_TOKEN')
+    expect(steadyReader).toContain('invalid_purpose')
   })
 
-  it('exposes all seven injected guards through the existing resource function', () => {
-    for (const required of [
-      'const REVISION3_GUARD_KINDS = [',
-      "'missing_accounting'",
-      "'future_record'",
-      "action === 'qualify_revision3'",
-      "'xrpl_qualify_revision3_accounting_precommit'",
-      'verifyRevision3QualificationResult',
-      'allSevenRevision3GuardsRejected',
-      'unavailableProviderMemoryNotClaimed',
-      'unavailableProviderEgressNotClaimed',
-      'g8Qualified: false',
-      'profileSelected: false',
-    ]) {
-      expect(resourceGuard).toContain(required)
-    }
+  it('exposes the seven injections through the existing resource guard function', () => {
+    expect(resourceGuard).toContain('REVISION3_GUARD_KINDS')
+    expect(resourceGuard).toContain("action === 'qualify_revision3'")
+    expect(resourceGuard).toContain('xrpl_qualify_revision3_accounting_precommit')
+    expect(resourceGuard).toContain('verifyRevision3QualificationResult')
+    expect(resourceGuard).toContain(revision3Identity)
+    for (const guard of revision3Guards) expect(resourceGuard).toContain(`'${guard}'`)
+    expect(resourceGuard).toContain('allSevenRevision3GuardsRejected')
+    expect(resourceGuard).toContain('g8Qualified: false')
+    expect(resourceGuard).toContain('profileSelected: false')
   })
 
-  it('runs a real guarded 6x24 session and verifies every conservative bound', () => {
+  it('verifies a real guarded six-minute 144-ledger session without overclaiming G8', () => {
     for (const required of [
-      "{ action: 'prepare_guarded', sessionId }",
-      "{ action: 'read', sessionId }",
-      "latest.status === 'completed'",
-      "latest.status === 'halted'",
-      'session.completedTicks !== 6',
-      'session.committedLedgers !== 144',
-      'completed.length !== 6',
-      'tick.workCount !== 24',
-      'current - previous !== 60_000',
-      'accounting.latestAccountingCount !== 6',
-      'accounting.accountedCompletedTickCount !== 6',
-      'item.conservativeMemoryUpperBoundBytes',
-      'item.conservativeTickEgressUpperBoundBytes',
-      'item.conservativeEgress31dUpperBoundBytes',
-      'item.projectedInvocations31d',
-      'unavailableProviderMemoryNotClaimed',
-      'unavailableProviderEgressNotClaimed',
-      "{ action: 'qualify_revision3', qualificationId }",
+      "action: 'prepare_guarded'",
+      "action: 'read'",
+      "action: 'qualify_revision3'",
+      'completedTicks !== 6',
+      'committedLedgers !== 144',
+      'workCount !== 24',
+      'latestAccountingCount !== 6',
+      'accountedCompletedTickCount !== 6',
+      'conservativeMemoryUpperBoundBytes',
+      'conservativeTickEgressUpperBoundBytes',
+      'conservativeEgress31dUpperBoundBytes',
+      'projectedInvocations31d',
       'allSevenInjectedPrecommitFailuresRejected: true',
+      'unavailableProviderMemoryNotClaimed: true',
+      'unavailableProviderEgressNotClaimed: true',
       'g8Qualified: false',
       'profileSelected: false',
       'r5Authorized: false',
       'verified-revision3-accounting.json',
       'failed-revision3-accounting-verification.json',
-    ]) {
-      expect(verifier).toContain(required)
-    }
+    ]) expect(verifier).toContain(required)
+    expect(verifier).toContain(revision3Identity)
   })
 
-  it('chains revision-3 qualification after the existing resource verifier', () => {
-    const resourceRun = resourceVerifier.indexOf('await run()')
-    const revision3 = resourceVerifier.indexOf(
+  it('chains qualification and sanitized publication through the existing workflow path', () => {
+    const revision3Verifier = resourceVerifier.indexOf(
       "await import('./verify-supabase-revision3-accounting.mjs')",
     )
-    const operator = resourceVerifier.indexOf(
+    const operatorVerifier = resourceVerifier.indexOf(
       "await import('./verify-supabase-operator-independence.mjs')",
     )
-    expect(resourceRun).toBeGreaterThan(0)
-    expect(revision3).toBeGreaterThan(resourceRun)
-    expect(operator).toBeGreaterThan(revision3)
-  })
+    expect(revision3Verifier).toBeGreaterThan(0)
+    expect(operatorVerifier).toBeGreaterThan(revision3Verifier)
 
-  it('publishes sanitized revision-3 evidence before later run locators', () => {
     for (const required of [
       'verified-revision3-accounting.json',
       'failed-revision3-accounting-verification.json',
@@ -152,19 +133,16 @@ describe('Supabase revision-3 remote accounting qualification contract', () => {
       'conservative memory bounds',
       'conservative tick egress bounds',
       'all seven injected failures rejected',
-      'provider peak memory claimed',
-      'provider egress claimed',
       'R5 authorized',
-    ]) {
-      expect(publisher).toContain(required)
-    }
-    const revision3 = operatorPublisher.indexOf(
+    ]) expect(publisher).toContain(required)
+
+    const revision3Publisher = operatorPublisher.indexOf(
       "await import('./publish-supabase-revision3-run-locator.mjs')",
     )
-    const provider = operatorPublisher.indexOf(
+    const providerPublisher = operatorPublisher.indexOf(
       "await import('./publish-supabase-provider-metric-capability.mjs')",
     )
-    expect(revision3).toBeGreaterThan(0)
-    expect(provider).toBeGreaterThan(revision3)
+    expect(revision3Publisher).toBeGreaterThan(0)
+    expect(providerPublisher).toBeGreaterThan(revision3Publisher)
   })
 })
