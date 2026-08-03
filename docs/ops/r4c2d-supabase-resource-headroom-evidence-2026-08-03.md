@@ -121,26 +121,24 @@ Official policy references:
 - `https://supabase.com/docs/guides/platform/manage-your-usage/egress`;
 - `https://supabase.com/docs/guides/platform/manage-your-usage/edge-function-invocations`.
 
-## Memory capability correction
+## Memory capability corrections
 
-PR `#1153` added six deterministic `Deno.memoryUsage()` samples to every real 24-ledger steady tick and retained six completed ticks in run `30785890154`.
+PR `#1153` added six deterministic `Deno.memoryUsage()` samples to every real 24-ledger steady tick.
 
-The workflow succeeded, but all `36` retained samples reported zero for:
+Run `30785890154` retained six completed ticks and `36` lifecycle samples. Its published RSS high water was zero for every tick. That result does not prove zero memory consumption and does not prove `200 MiB` of headroom. Issue `#1109` contains the first correction invalidating that interpretation.
 
-- RSS;
-- heap total;
-- heap used;
-- external memory.
+PR `#1154` added an executable capability reconciliation, but remote run `30786950713` exposed a second defect: partial heap or external counters were nonzero while RSS remained zero for every retained sample. The first reconciler treated any nonzero memory sub-counter as sufficient and incorrectly marked total-memory measurement available.
 
-Those values do not prove zero memory consumption and do not prove `200 MiB` of headroom. They show that usable in-process memory counters were not exposed by this Supabase Edge runtime.
+For the provider's total Edge memory ceiling, partial heap or external counters cannot substitute for an unavailable RSS or total-memory counter. Issue `#1109` therefore contains a second correction.
 
-Issue `#1109` contains an explicit correction invalidating the zero-headroom interpretation.
+PR `#1156` makes the controlling rule explicit:
 
-PR `#1154` makes that correction executable:
-
-- every retained memory counter is inspected;
-- all-zero counters are classified as unavailable;
-- minimum, p50, p95, maximum, and headroom become `null` or `unavailable`;
+- all six ticks and all lifecycle samples are still inspected;
+- RSS must be positive in at least one retained sample before total-memory qualification is possible;
+- nonzero heap or external counters are retained only as partial counters;
+- partial counters are never substituted for RSS;
+- zero RSS is never interpreted as zero total-memory usage;
+- minimum, p50, p95, maximum, and headroom remain `null` or `unavailable` when RSS is unavailable;
 - lifecycle sampling remains recorded;
 - memory measurement available: `false`;
 - memory high-water qualified: `false`;
@@ -160,7 +158,7 @@ PR `#1154` makes that correction executable:
 | Function invocations | measured | Official one-day statistics, projected to 31 days below 400,000 |
 | Deployed bundle size | measured | Exact same-commit bundle identity below 4,000,000 bytes |
 | Edge CPU | measured | Official maximum-CPU statistics below the runtime hard limit |
-| Edge memory maximum | unavailable | Average memory exists; in-process maximum counters returned all zero and are rejected |
+| Edge memory maximum | unavailable | RSS was zero across all retained samples; partial heap/external counters are non-qualifying |
 | Provider egress | unavailable | No retained PAT-compatible provider usage counter |
 | Free plan identity | measured | Exact project-to-organization binding reports `free` |
 | No automatic paid overage | policy-proved | Free-plan over-quota behavior is restriction, not paid overage |
