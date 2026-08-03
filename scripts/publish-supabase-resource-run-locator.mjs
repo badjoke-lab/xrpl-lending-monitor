@@ -95,30 +95,34 @@ if (runtime) {
 }
 
 if (orgUsage) {
+  const coverage = orgUsage.coverage ?? {}
   lines.push(
-    '- organization usage and billing snapshot: `success`',
-    `- organization usage observed at: \`${String(orgUsage.observedAt ?? 'unknown')}\``,
-    `- organization usage window: \`${String(orgUsage.windowStart ?? 'unknown')} .. ${String(orgUsage.windowEnd ?? 'unknown')}\``,
+    '- Management plan snapshot: `success`',
+    `- Management plan observed at: \`${String(orgUsage.observedAt ?? 'unknown')}\``,
     `- organization plan: \`${String(orgUsage.planId ?? 'unknown')}\``,
-    `- automatic overage enabled: \`${String(orgUsage.usageBillingEnabled ?? 'unknown')}\``,
-    `- uncached egress bytes 31d: \`${String(orgUsage.uncachedEgressBytes31d ?? 'unknown')}\``,
-    `- cached egress bytes 31d: \`${String(orgUsage.cachedEgressBytes31d ?? 'unknown')}\``,
-    `- function invocations 31d: \`${String(orgUsage.functionInvocations31d ?? 'unknown')}\``,
+    `- PAT-compatible Management API: \`${String(orgUsage.checks?.patCompatibleManagementApi ?? 'unknown')}\``,
+    `- exact project identity: \`${String(orgUsage.checks?.exactProjectIdentity ?? 'unknown')}\``,
+    `- exact project-organization binding: \`${String(orgUsage.checks?.exactProjectOrganizationBinding ?? 'unknown')}\``,
     `- Free plan confirmed: \`${String(orgUsage.checks?.freePlanConfirmed ?? 'unknown')}\``,
-    `- provider no-charge state confirmed: \`${String(orgUsage.checks?.providerNoChargeStateConfirmed ?? 'unknown')}\``,
-    `- uncached egress below halt threshold: \`${String(orgUsage.checks?.uncachedEgressBelowHaltThreshold ?? 'unknown')}\``,
-    `- cached egress below halt threshold: \`${String(orgUsage.checks?.cachedEgressBelowHaltThreshold ?? 'unknown')}\``,
+    `- Free no-charge policy applicable: \`${String(coverage.freePlanNoChargePolicyApplicable ?? 'unknown')}\``,
+    `- organization usage coverage: \`${String(coverage.organizationUsage ?? 'unknown')}\``,
+    `- uncached egress coverage: \`${String(coverage.uncachedEgress ?? 'unknown')}\``,
+    `- cached egress coverage: \`${String(coverage.cachedEgress ?? 'unknown')}\``,
+    `- usage billing flag coverage: \`${String(coverage.usageBillingFlag ?? 'unknown')}\``,
+    `- automatic overage API coverage: \`${String(coverage.automaticOverageApiState ?? 'unknown')}\``,
+    `- billing and overage qualified: \`${String(coverage.billingAndOverageQualified ?? 'unknown')}\``,
+    `- unsupported Studio JWT endpoints used: \`${String(!(orgUsage.checks?.unsupportedStudioJwtEndpointsNotUsed ?? false))}\``,
     `- organization slug retained: \`${String(orgUsage.checks?.organizationSlugRetained ?? 'unknown')}\``,
     `- billing identifiers retained: \`${String(orgUsage.checks?.billingIdentifiersRetained ?? 'unknown')}\``,
   )
 } else if (orgUsageFailure) {
   lines.push(
-    '- organization usage and billing snapshot: `failed`',
-    `- organization usage failed at: \`${String(orgUsageFailure.failedAt ?? 'unknown')}\``,
-    `- organization usage reason: \`${String(orgUsageFailure.reason ?? 'unknown')}\``,
+    '- Management plan snapshot: `failed`',
+    `- Management plan failed at: \`${String(orgUsageFailure.failedAt ?? 'unknown')}\``,
+    `- Management plan reason: \`${String(orgUsageFailure.reason ?? 'unknown')}\``,
   )
 } else {
-  lines.push('- organization usage and billing snapshot: `not reached or no sanitized evidence produced`')
+  lines.push('- Management plan snapshot: `not reached or no sanitized evidence produced`')
 }
 
 if (success) {
