@@ -22,8 +22,7 @@ const evidenceDirectory = 'supabase-remote-probe-evidence'
 const purpose = 'r4c2d-resource-headroom-guard'
 const functionEndpoint = `https://${projectRef}.supabase.co/functions/v1/xrpl-resource-headroom-guard`
 const managementBase = `https://api.supabase.com/v1/projects/${projectRef}`
-const retryableLogErrorPrefix = 'Backend error! Retry your query'
-const logQueryRetryDelaysMilliseconds = [0, 2_000, 5_000, 10_000]
+const runtimeEvidencePath = `${evidenceDirectory}/runtime-resource-log-snapshot.json`
 
 function canonical(value) {
   if (Array.isArray(value)) return value.map(canonical)
@@ -52,14 +51,8 @@ function integer(value, name) {
   return parsed
 }
 
-async function sleep(milliseconds) {
-  await new Promise((resolve) => setTimeout(resolve, milliseconds))
-}
-
-async function managementRequest(path, searchParams) {
-  const url = new URL(`${managementBase}${path}`)
-  for (const [key, value] of Object.entries(searchParams ?? {})) url.searchParams.set(key, value)
-  const response = await fetch(url, {
+async function managementRequest(path) {
+  const response = await fetch(`${managementBase}${path}`, {
     headers: { authorization: `Bearer ${accessToken}`, accept: 'application/json' },
     signal: AbortSignal.timeout(60_000),
   })
@@ -70,22 +63,6 @@ async function managementRequest(path, searchParams) {
     throw new Error(`Supabase Management API ${path} failed (${response.status}): ${JSON.stringify(parsed).slice(0, 2_000)}`)
   }
   return parsed
-}
-
-function isRetryableLogBackendError(raw) {
-  return typeof raw?.error === 'string' && raw.error.startsWith(retryableLogErrorPrefix)
-}
-
-async function queryInvocationLogsWithRetry(searchParams) {
-  let lastResponse
-  for (const [index, delayMilliseconds] of logQueryRetryDelaysMilliseconds.entries()) {
-    if (delayMilliseconds > 0) await sleep(delayMilliseconds)
-    lastResponse = await managementRequest('/analytics/endpoints/logs.all', searchParams)
-    if (!isRetryableLogBackendError(lastResponse)) {
-      return { raw: lastResponse, attempts: index + 1 }
-    }
-  }
-  return { raw: lastResponse, attempts: logQueryRetryDelaysMilliseconds.length }
 }
 
 async function edgeRequest(body) {
@@ -161,63 +138,76 @@ async function readBundleEvidence() {
   return bundles
 }
 
-function extractInvocationCount(raw) {
-  if (raw?.error) throw new Error(`Management API logs query returned error: ${String(raw.error)}`)
-  const rows = Array.isArray(raw?.result)
-    ? raw.result
-    : Array.isArray(raw?.data)
-      ? raw.data
-      : Array.isArray(raw)
-        ? raw
-        : null
-  if (!rows || rows.length !== 1) {
-    throw new Error('Management API logs query did not return exactly one aggregate row')
+async function readRuntimeEvidence() {
+  const value = object(JSON.parse(await readFile(runtimeEvidencePath, 'utf8')), 'runtime resource evidence')
+  if (
+    value.schemaVersion !== 2
+    || value.purpose !== 'r4c2d-function-combined-stats-snapshot'
+    || value.sourceRunId !== sourceRunId
+    || value.sourceCommit !== sourceCommit
+    || value.interval !== '1day'
+    || value.checks?.officialCombinedStatsEndpoint !== true
+    || value.checks?.exactActiveFunctionCoverage !== true
+  ) {
+    throw new Error('runtime resource evidence identity or coverage is invalid')
   }
-  const row = object(rows[0], 'logs aggregate row')
-  const count = integer(row.invocation_count ?? row.invocationCount ?? row.count, 'invocation_count')
-  if (count < 1) throw new Error('Management API logs query returned zero function invocations')
-  return count
+  const invocationCount24h = integer(value.invocationCount24h, 'runtime invocationCount24h')
+  const functions = Array.isArray(value.functions) ? value.functions : null
+  if (invocationCount24h < 1 || !functions) {
+    throw new Error('runtime resource evidence contains no invocation or function coverage')
+  }
+  const slugs = functions.map((entry, index) => {
+    const item = object(entry, `runtime function[${index}]`)
+    const slug = String(item.slug ?? '')
+    if (!/^[a-z0-9][a-z0-9-]*$/u.test(slug)) {
+      throw new Error(`runtime function[${index}] has an invalid slug`)
+    }
+    return slug
+  }).sort()
+  if (new Set(slugs).size !== slugs.length) {
+    throw new Error('runtime resource evidence contains duplicate function slugs')
+  }
+  return { value, invocationCount24h, slugs }
 }
 
 async function run() {
   await mkdir(evidenceDirectory, { recursive: true })
-  const observedAtDate = new Date(Math.floor(Date.now() / 60_000) * 60_000)
-  const windowStartDate = new Date(observedAtDate.getTime() - 24 * 60 * 60 * 1_000)
-  const observedAt = observedAtDate.toISOString()
-  const windowStart = windowStartDate.toISOString()
-  const logSearchParams = {
-    sql: `SELECT count() AS invocation_count\nFROM logs\nWHERE source_name = 'function_edge_logs'`,
-    iso_timestamp_start: windowStart,
-    iso_timestamp_end: observedAt,
-  }
-
-  const [rawFunctions, bundles, logsQuery] = await Promise.all([
+  const observedAt = new Date().toISOString()
+  const [rawFunctions, bundles, runtime] = await Promise.all([
     managementRequest('/functions'),
     readBundleEvidence(),
-    queryInvocationLogsWithRetry(logSearchParams),
+    readRuntimeEvidence(),
   ])
 
   const functions = extractFunctions(rawFunctions)
-  const invocationCount24h = extractInvocationCount(logsQuery.raw)
-  const projectedInvocations31d = invocationCount24h * 31
-  if (!Number.isSafeInteger(projectedInvocations31d)) throw new Error('projected invocation count exceeds the safe integer range')
-
   const functionSlugs = functions.map((value) => value.slug)
   const bundleSlugs = bundles.map((value) => value.slug)
-  if (JSON.stringify(functionSlugs) !== JSON.stringify(bundleSlugs)) {
-    throw new Error(`deployed function/bundle identity mismatch: deployed=${JSON.stringify(functionSlugs)} bundles=${JSON.stringify(bundleSlugs)}`)
+  if (
+    JSON.stringify(functionSlugs) !== JSON.stringify(bundleSlugs)
+    || JSON.stringify(functionSlugs) !== JSON.stringify(runtime.slugs)
+  ) {
+    throw new Error(
+      `deployed function/bundle/combined-stats identity mismatch: deployed=${JSON.stringify(functionSlugs)} bundles=${JSON.stringify(bundleSlugs)} stats=${JSON.stringify(runtime.slugs)}`,
+    )
   }
 
-  const largestBundle = bundles.reduce((largest, current) => current.bytes > largest.bytes ? current : largest)
+  const invocationCount24h = runtime.invocationCount24h
+  const projectedInvocations31d = invocationCount24h * 31
+  if (!Number.isSafeInteger(projectedInvocations31d)) {
+    throw new Error('projected invocation count exceeds the safe integer range')
+  }
+  const largestBundle = bundles.reduce((largest, current) => (
+    current.bytes > largest.bytes ? current : largest
+  ))
+
   const snapshotCore = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     snapshotId: `r4c2d-resource-${runIdText}`,
     sourceRunId,
     sourceCommit,
     observedAt,
-    logsWindowStart: windowStart,
-    logsWindowHours: 24,
-    logsQueryAttempts: logsQuery.attempts,
+    usageInterval: '1day',
+    invocationSource: 'functions.combined-stats',
     managementApiAvailable: true,
     invocationCount24h,
     projectedInvocations31d,
@@ -229,6 +219,7 @@ async function run() {
     bundles,
   }
   const evidenceDigest = digest(snapshotCore)
+
   const record = await edgeRequest({
     action: 'record',
     snapshot: {
@@ -248,6 +239,7 @@ async function run() {
   const result = object(record.result, 'recorded resource snapshot')
   const measurements = object(result.measurements, 'recorded resource measurements')
   const coverage = object(result.coverage, 'recorded resource coverage')
+
   if (
     measurements.externalSnapshotFresh !== true
     || integer(measurements.invocationCount24h, 'recorded invocationCount24h') !== invocationCount24h
@@ -264,20 +256,14 @@ async function run() {
   const evidence = {
     ...snapshotCore,
     evidenceDigest,
-    managementResponses: {
-      functionsListed: functions.length,
-      invocationAggregateRows: 1,
-      logsQueryAttempts: logsQuery.attempts,
-      logsQueryRetryDelayCeilingMilliseconds: 17_000,
-    },
     recorded: result,
     checks: {
       managementApiAvailable: true,
-      clickHouseFunctionLogQuery: true,
-      boundedTransientLogRetry: true,
-      malformedLogQueryNotRetried: true,
+      officialCombinedStatsInvocationSource: true,
+      logsBackendNotRequired: true,
       exactSourceCommitBundleCoverage: true,
       exactDeployedFunctionCoverage: true,
+      exactCombinedStatsFunctionCoverage: true,
       exactBundleEvidenceCoverage: true,
       invocationAggregateRecorded: true,
       nonzeroInvocationEvidence: true,
@@ -288,7 +274,10 @@ async function run() {
       g8Qualified: false,
     },
   }
-  await writeFile(`${evidenceDirectory}/resource-external-snapshot.json`, `${JSON.stringify(evidence, null, 2)}\n`)
+  await writeFile(
+    `${evidenceDirectory}/resource-external-snapshot.json`,
+    `${JSON.stringify(evidence, null, 2)}\n`,
+  )
   console.log(JSON.stringify(evidence))
 }
 
@@ -297,13 +286,16 @@ try {
 } catch (error) {
   await mkdir(evidenceDirectory, { recursive: true })
   const failure = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     purpose: 'r4c2d-external-resource-snapshot',
     failedAt: new Date().toISOString(),
     sourceRunId,
     sourceCommit,
     reason: error instanceof Error ? error.message.slice(0, 4_000) : String(error).slice(0, 4_000),
   }
-  await writeFile(`${evidenceDirectory}/failed-resource-external-snapshot.json`, `${JSON.stringify(failure, null, 2)}\n`)
+  await writeFile(
+    `${evidenceDirectory}/failed-resource-external-snapshot.json`,
+    `${JSON.stringify(failure, null, 2)}\n`,
+  )
   throw error
 }
