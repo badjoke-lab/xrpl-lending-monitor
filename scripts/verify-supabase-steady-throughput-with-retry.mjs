@@ -5,8 +5,10 @@ const evidenceDirectory = 'supabase-remote-probe-evidence'
 const verifierPath = 'scripts/verify-supabase-steady-throughput.mjs'
 const cadenceRetryReason = 'steady completed ticks are not six consecutive minute buckets'
 const transientReadStatuses = [429, 500, 502, 503, 504, 520, 522, 524]
+const transientTimeoutReason = 'The operation was aborted due to timeout'
 const retryableReasons = [
   cadenceRetryReason,
+  transientTimeoutReason,
   ...transientReadStatuses.map((status) => `steady session read failed (${status}):`),
   ...transientReadStatuses.map((status) => `steady session preparation failed (${status}):`),
 ]
@@ -80,7 +82,7 @@ const firstFailure = await preserveFirstFailure(first, firstRetryReason)
 process.stderr.write(
   firstRetryReason === cadenceRetryReason
     ? 'Strict steady qualification missed one minute bucket; running one fresh 6x24 session.\n'
-    : 'Strict steady qualification received one transient provider response; running one fresh 6x24 session.\n',
+    : 'Strict steady qualification received one transient provider response or exact request timeout; running one fresh 6x24 session.\n',
 )
 
 const second = await runVerifier(2)
@@ -113,6 +115,7 @@ await writeFile(
     checks: {
       retryLimitedToExactCadenceGapOrTransientProviderFailure: true,
       providerRetryStatuses: transientReadStatuses,
+      exactRequestTimeoutRetryReason: transientTimeoutReason,
       secondSessionFresh: true,
       strictSixConsecutiveMinutesStillRequired: true,
       noThresholdRelaxation: true,

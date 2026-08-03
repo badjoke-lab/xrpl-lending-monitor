@@ -9,18 +9,21 @@ const script = readFileSync(
 )
 
 describe('Supabase strict steady retry contract', () => {
-  it('retries only the exact cadence gap or bounded transient provider statuses', () => {
+  it('retries only the exact cadence gap, request timeout, or bounded provider statuses', () => {
     for (const required of [
       "const cadenceRetryReason = 'steady completed ticks are not six consecutive minute buckets'",
       'const transientReadStatuses = [429, 500, 502, 503, 504, 520, 522, 524]',
+      "const transientTimeoutReason = 'The operation was aborted due to timeout'",
       '`steady session read failed (${status}):`',
       '`steady session preparation failed (${status}):`',
       'retryableReasons.find((reason) => output.includes(reason)) ?? null',
       'if (firstRetryReason === null) process.exit(first.code)',
+      'exactRequestTimeoutRetryReason: transientTimeoutReason',
     ]) {
       expect(script).toContain(required)
     }
     expect(script).not.toContain('400, 401, 403, 404')
+    expect(script).not.toContain("'fetch failed'")
   })
 
   it('uses at most one fresh session retry and preserves the first failure', () => {
