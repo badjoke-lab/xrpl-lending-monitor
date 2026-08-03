@@ -156,10 +156,8 @@ jobs:
           recovery_token="$(openssl rand -hex 32)"
           echo "::add-mask::${reader_token}"
           echo "::add-mask::${recovery_token}"
-          supabase secrets set \
-            XRPL_READER_VERIFY_TOKEN="${reader_token}" \
-            XRPL_R5_RECOVERY_VERIFY_TOKEN="${recovery_token}" \
-            --project-ref "$SUPABASE_PROJECT_ID"
+          supabase secrets set XRPL_READER_VERIFY_TOKEN="${reader_token}" --project-ref "$SUPABASE_PROJECT_ID"
+          supabase secrets set XRPL_R5_RECOVERY_VERIFY_TOKEN="${recovery_token}" --project-ref "$SUPABASE_PROJECT_ID"
           echo "XRPL_READER_VERIFY_TOKEN=${reader_token}" >> "$GITHUB_ENV"
           echo "XRPL_R5_RECOVERY_VERIFY_TOKEN=${recovery_token}" >> "$GITHUB_ENV"
 
