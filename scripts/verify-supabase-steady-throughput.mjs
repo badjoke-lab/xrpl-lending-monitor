@@ -16,6 +16,16 @@ const evidenceDirectory = 'supabase-remote-probe-evidence'
 const sessionId = `r4c2d-steady-${Date.now().toString(36)}-${randomBytes(4).toString('hex')}`
 const steadyThreshold = 21
 const catchUpThreshold = 30
+const memoryHaltBytes = 209715200
+const memoryHardBytes = 268435456
+const requiredMemoryPhases = [
+  'request_start',
+  'after_claim',
+  'after_head',
+  'after_fetch',
+  'after_normalize',
+  'before_commit',
+]
 const catchUpEvidence = {
   workflowRunId: 30755497115,
   artifactId: 8835798472,
@@ -60,6 +70,14 @@ function numberValue(value, name) {
   const parsed = typeof value === 'string' ? Number(value) : value
   if (typeof parsed !== 'number' || !Number.isFinite(parsed)) {
     throw new Error(`${name} must be a finite number`)
+  }
+  return parsed
+}
+
+function nonNegativeInteger(value, name) {
+  const parsed = numberValue(value, name)
+  if (!Number.isSafeInteger(parsed) || parsed < 0) {
+    throw new Error(`${name} must be a non-negative safe integer`)
   }
   return parsed
 }
@@ -175,6 +193,106 @@ function verifySession(raw) {
   }
 }
 
+function verifyMemory(raw, completedTicks) {
+  const memory = object(raw, 'steady memory evidence')
+  const checks = object(memory.checks, 'steady memory checks')
+  if (
+    memory.schemaVersion !== 1
+    || memory.purpose !== 'r4c2d-steady-memory-guard'
+    || memory.sessionId !== sessionId
+    || memory.sessionStatus !== 'completed'
+    || memory.completedTicks !== 6
+    || memory.measuredCompletedTicks !== 6
+    || memory.memoryHaltBytes !== memoryHaltBytes
+    || memory.memoryHardBytes !== memoryHardBytes
+    || !Array.isArray(memory.ticks)
+  ) {
+    throw new Error('steady memory evidence identity or six-tick coverage changed')
+  }
+  for (const name of [
+    'allCompletedTicksMeasured',
+    'sixCompletedTicksMeasured',
+    'highWaterBelowHalt',
+    'haltBelowHard',
+  ]) {
+    if (checks[name] !== true) throw new Error(`steady memory check ${name} failed`)
+  }
+  if (checks.g8Qualified !== false || checks.profileSelected !== false) {
+    throw new Error('steady memory evidence overstated G8 or profile selection')
+  }
+
+  const completedIds = new Set(completedTicks.map((tick) => tick.tickId))
+  const measured = memory.ticks
+    .filter((tick) => tick.status === 'completed')
+    .sort((left, right) => left.tickSequence - right.tickSequence)
+  if (measured.length !== 6) throw new Error('steady memory evidence does not contain six completed ticks')
+
+  const tickHighWaterBytes = []
+  let totalSamples = 0
+  for (const [index, tick] of measured.entries()) {
+    if (
+      tick.tickSequence !== index + 1
+      || !completedIds.has(tick.tickId)
+      || !Array.isArray(tick.memorySamples)
+    ) {
+      throw new Error(`steady memory tick ${index + 1} identity changed`)
+    }
+    const sampleCount = nonNegativeInteger(tick.memorySampleCount, `memory tick ${index + 1} sample count`)
+    const recordedHighWater = nonNegativeInteger(
+      tick.memoryHighWaterBytes,
+      `memory tick ${index + 1} high water`,
+    )
+    if (sampleCount < 6 || sampleCount > 64 || tick.memorySamples.length !== sampleCount) {
+      throw new Error(`steady memory tick ${index + 1} sample count changed`)
+    }
+
+    const phases = new Set()
+    let calculatedHighWater = 0
+    for (const [sampleIndex, candidate] of tick.memorySamples.entries()) {
+      const sample = object(candidate, `memory tick ${index + 1} sample ${sampleIndex + 1}`)
+      if (typeof sample.phase !== 'string' || sample.phase.length === 0 || phases.has(sample.phase)) {
+        throw new Error(`steady memory tick ${index + 1} phase is invalid or duplicated`)
+      }
+      phases.add(sample.phase)
+      const rss = nonNegativeInteger(sample.rssBytes, `${sample.phase}.rssBytes`)
+      const heapTotal = nonNegativeInteger(sample.heapTotalBytes, `${sample.phase}.heapTotalBytes`)
+      const heapUsed = nonNegativeInteger(sample.heapUsedBytes, `${sample.phase}.heapUsedBytes`)
+      nonNegativeInteger(sample.externalBytes, `${sample.phase}.externalBytes`)
+      if (heapUsed > heapTotal) throw new Error(`steady memory ${sample.phase} heap parity failed`)
+      calculatedHighWater = Math.max(calculatedHighWater, rss)
+    }
+    for (const phase of requiredMemoryPhases) {
+      if (!phases.has(phase)) throw new Error(`steady memory tick ${index + 1} is missing ${phase}`)
+    }
+    if (calculatedHighWater !== recordedHighWater || recordedHighWater >= memoryHaltBytes) {
+      throw new Error(`steady memory tick ${index + 1} high-water parity or halt boundary failed`)
+    }
+    totalSamples += sampleCount
+    tickHighWaterBytes.push(recordedHighWater)
+  }
+
+  const sessionHighWater = Math.max(...tickHighWaterBytes)
+  if (sessionHighWater !== memory.memoryHighWaterBytes || sessionHighWater >= memoryHaltBytes) {
+    throw new Error('steady session memory high-water parity or halt boundary failed')
+  }
+
+  return {
+    memory,
+    tickHighWaterBytes,
+    totalSamples,
+    summary: {
+      minimumMemoryHighWaterBytes: Math.min(...tickHighWaterBytes),
+      p50MemoryHighWaterBytes: percentile(tickHighWaterBytes, 0.5),
+      p95MemoryHighWaterBytes: percentile(tickHighWaterBytes, 0.95),
+      maximumMemoryHighWaterBytes: sessionHighWater,
+      memoryHaltBytes,
+      memoryHardBytes,
+      memoryHeadroomBytes: memoryHaltBytes - sessionHighWater,
+      allSixTicksBelowHalt: tickHighWaterBytes.every((value) => value < memoryHaltBytes),
+    },
+  }
+}
+
 async function run() {
   await mkdir(evidenceDirectory, { recursive: true })
 
@@ -188,6 +306,7 @@ async function run() {
   const startedAt = Date.now()
   const deadline = startedAt + 9 * 60_000
   let latest = null
+  let latestMemory = null
   while (Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 10_000))
     const read = await requestRaw({ action: 'read', sessionId })
@@ -197,20 +316,25 @@ async function run() {
       )
     }
     latest = object(read.body?.session, 'steady session response')
+    latestMemory = object(read.body?.memory, 'steady memory response')
     if (latest.status === 'halted') {
       throw new Error(`steady session halted: ${String(latest.lastError ?? 'unknown')}`)
     }
     if (latest.status === 'completed') break
   }
-  if (latest === null || latest.status !== 'completed') {
+  if (latest === null || latestMemory === null || latest.status !== 'completed') {
     throw new Error('steady session did not complete within nine minutes')
   }
 
   const verified = verifySession(latest)
+  const verifiedMemory = verifyMemory(latestMemory, verified.completedTicks)
   if (verified.summary.steadyObservedPass !== true || verified.summary.g7Qualified !== true) {
     throw new Error(
       `steady G7 qualification failed: ${JSON.stringify(verified.summary)}`,
     )
+  }
+  if (verifiedMemory.summary.allSixTicksBelowHalt !== true) {
+    throw new Error('steady memory qualification crossed the fail-closed boundary')
   }
 
   const missingToken = await requestRaw(
@@ -237,7 +361,7 @@ async function run() {
   }
 
   const evidence = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     purpose: 'r4c2d-network-steady-throughput-verification',
     verifiedAt: new Date().toISOString(),
     sessionId,
@@ -246,8 +370,12 @@ async function run() {
     sourceProfileId: 'supabase-devnet',
     network: 'devnet',
     session: verified.session,
+    memory: verifiedMemory.memory,
     minuteRates: verified.minuteRates,
+    memoryHighWaterBytes: verifiedMemory.tickHighWaterBytes,
+    totalMemorySamples: verifiedMemory.totalSamples,
     summary: verified.summary,
+    memorySummary: verifiedMemory.summary,
     retainedCatchUpEvidence: catchUpEvidence,
     credentialChecks: {
       missingTokenRejected: true,
@@ -258,6 +386,11 @@ async function run() {
       twentyFourNetworkLedgersPerMinute: true,
       networkFetchAndNormalizationMeasured: true,
       fullPhaseAtomicBatchMeasured: true,
+      sixCompletedTicksMemoryMeasured: true,
+      requiredMemoryPhasesMeasured: true,
+      memoryHighWaterRecalculated: true,
+      memoryRecordedBeforeCommit: true,
+      memoryFailClosedBelowHardLimit: true,
       activeProfileReadOnly: true,
       steadyComponentPassed: true,
       catchUpComponentPassed: true,
@@ -278,7 +411,7 @@ try {
 } catch (error) {
   await mkdir(evidenceDirectory, { recursive: true })
   const failure = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     purpose: 'r4c2d-network-steady-throughput-verification',
     failedAt: new Date().toISOString(),
     sessionId,

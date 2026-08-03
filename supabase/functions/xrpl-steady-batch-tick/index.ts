@@ -15,8 +15,16 @@ const DEFAULT_XRPL_DEVNET_RPC_URL = 'https://s.devnet.rippletest.net:51234/'
 const BATCH_SIZE = 24
 const FETCH_CONCURRENCY = 6
 const LEASE_SECONDS = 55
+const MEMORY_HALT_BYTES = 200 * 1024 * 1024
 
 type JsonObject = Record<string, unknown>
+type MemorySample = {
+  phase: string
+  rssBytes: number
+  heapTotalBytes: number
+  heapUsedBytes: number
+  externalBytes: number
+}
 
 type TickClaim = {
   claimed: boolean
@@ -39,6 +47,43 @@ class TickError extends Error {
     super(message)
     this.name = 'TickError'
   }
+}
+
+function sampleMemory(phase: string): MemorySample {
+  const usage = Deno.memoryUsage()
+  const sample = {
+    phase,
+    rssBytes: usage.rss,
+    heapTotalBytes: usage.heapTotal,
+    heapUsedBytes: usage.heapUsed,
+    externalBytes: usage.external,
+  }
+  for (const [name, value] of Object.entries(sample)) {
+    if (name !== 'phase' && (!Number.isSafeInteger(value) || value < 0)) {
+      throw new TickError(`memory ${phase}.${name} is invalid`)
+    }
+  }
+  if (sample.heapUsedBytes > sample.heapTotalBytes) {
+    throw new TickError(`memory ${phase} heap usage exceeds heap total`)
+  }
+  return sample
+}
+
+function memoryHighWater(samples: readonly MemorySample[]): number {
+  if (samples.length < 6) throw new TickError('steady memory evidence is incomplete')
+  const phases = new Set(samples.map((sample) => sample.phase))
+  for (const required of [
+    'request_start',
+    'after_claim',
+    'after_head',
+    'after_fetch',
+    'after_normalize',
+    'before_commit',
+  ]) {
+    if (!phases.has(required)) throw new TickError(`steady memory phase ${required} is missing`)
+  }
+  if (phases.size !== samples.length) throw new TickError('steady memory phases are duplicated')
+  return Math.max(...samples.map((sample) => sample.rssBytes))
 }
 
 function env(name: string): string {
@@ -334,6 +379,7 @@ async function buildWork(options: {
 
 Deno.serve(async (request) => {
   const wallStarted = performance.now()
+  const memorySamples: MemorySample[] = [sampleMemory('request_start')]
   let supabaseUrl: string
   let secretKey: string
   try {
@@ -373,6 +419,7 @@ Deno.serve(async (request) => {
       return json({ ok: true, claimed: false, reason: rawClaim.reason ?? 'not_claimed' })
     }
     claim = validateClaim(rawClaim)
+    memorySamples.push(sampleMemory('after_claim'))
 
     const endpoint = Deno.env.get('XRPL_DEVNET_RPC_URL') ?? DEFAULT_XRPL_DEVNET_RPC_URL
     const head = await readValidatedHead(endpoint)
@@ -396,6 +443,7 @@ Deno.serve(async (request) => {
         requiredEndLedgerIndex: claim.endLedgerIndex,
       })
     }
+    memorySamples.push(sampleMemory('after_head'))
 
     const fetchStarted = performance.now()
     const indexes = Array.from(
@@ -408,6 +456,7 @@ Deno.serve(async (request) => {
       (ledgerIndex) => readExactLedger(endpoint, ledgerIndex),
     )
     const fetchMilliseconds = performance.now() - fetchStarted
+    memorySamples.push(sampleMemory('after_fetch'))
 
     let expectedParentHash = claim.expectedParentHash
     for (const [index, ledger] of ledgers.entries()) {
@@ -434,8 +483,28 @@ Deno.serve(async (request) => {
       expectedParentHash = ledger.ledgerHash
     }
     const normalizeMilliseconds = performance.now() - normalizeStarted
+    memorySamples.push(sampleMemory('after_normalize'))
     const worksJson = canonicalPortableJson(works)
     const worksDigest = await sha256Hex(worksJson)
+    memorySamples.push(sampleMemory('before_commit'))
+    const memoryHighWaterBytes = memoryHighWater(memorySamples)
+    if (memoryHighWaterBytes >= MEMORY_HALT_BYTES) {
+      throw new TickError(`steady memory halt threshold reached:${memoryHighWaterBytes}`)
+    }
+
+    const memoryRecord = await postRpc<JsonObject>(
+      supabaseUrl,
+      secretKey,
+      'xrpl_record_network_steady_memory',
+      {
+        p_owner: owner,
+        p_tick_id: claim.tickId,
+        p_recorded_at: new Date().toISOString(),
+        p_memory_samples: memorySamples,
+        p_memory_high_water_bytes: memoryHighWaterBytes,
+        p_memory_sample_count: memorySamples.length,
+      },
+    )
     const edgeWallMilliseconds = performance.now() - wallStarted
 
     const completion = await postRpc<JsonObject>(
@@ -466,6 +535,9 @@ Deno.serve(async (request) => {
       fetchMilliseconds,
       normalizeMilliseconds,
       edgeWallMilliseconds,
+      memoryHighWaterBytes,
+      memorySampleCount: memorySamples.length,
+      memoryRecord,
       worksDigest,
       completion,
     })
