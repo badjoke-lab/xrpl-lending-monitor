@@ -22,6 +22,7 @@ on:
       - 'scripts/verify-supabase-steady-throughput.mjs'
       - 'scripts/verify-supabase-steady-throughput-with-retry.mjs'
       - 'scripts/verify-supabase-resource-headroom-guard.mjs'
+      - 'scripts/verify-supabase-r5-active-checkpoint.mjs'
       - 'scripts/record-supabase-external-resource-snapshot.mjs'
       - 'scripts/record-supabase-provider-metric-capability.mjs'
       - 'scripts/reconcile-supabase-g8-resource-disposition.mjs'
@@ -29,6 +30,7 @@ on:
       - 'scripts/publish-supabase-run-locator.mjs'
       - 'scripts/publish-supabase-steady-run-locator.mjs'
       - 'scripts/publish-supabase-resource-run-locator.mjs'
+      - 'scripts/publish-supabase-r5-active-checkpoint-run-locator.mjs'
       - '.github/workflows/supabase-remote-probe.yml'
 
 permissions:
@@ -202,6 +204,8 @@ jobs:
         run: node scripts/verify-supabase-steady-throughput-with-retry.mjs
       - name: Verify resource headroom fail-closed guards
         run: node scripts/verify-supabase-resource-headroom-guard.mjs
+      - name: Freeze exact R5 active checkpoint
+        run: node scripts/verify-supabase-r5-active-checkpoint.mjs
 
       - name: Upload sanitized remote evidence
         if: always()
@@ -235,6 +239,7 @@ jobs:
           # verified-catchup-throughput.json / failed-catchup-throughput-verification.json
           # verified-steady-throughput.json / failed-steady-throughput-verification.json
           # verified-resource-headroom-guard.json / failed-resource-headroom-guard-verification.json
+          # verified-r5-active-checkpoint.json / failed-r5-active-checkpoint-verification.json
           # phase watermark ledger / consecutive failures
           # historical witness verifier: `success`
           # multi-chunk witness verifier: `success`
@@ -249,3 +254,8 @@ jobs:
           node scripts/publish-supabase-steady-run-locator.mjs >> /tmp/supabase-run-comment.md
           node scripts/publish-supabase-resource-run-locator.mjs >> /tmp/supabase-run-comment.md
           gh issue comment 1109 --repo "$GITHUB_REPOSITORY" --body-file /tmp/supabase-run-comment.md
+
+          node scripts/publish-supabase-r5-active-checkpoint-run-locator.mjs > /tmp/r5-checkpoint-comment.md
+          if [ -s /tmp/r5-checkpoint-comment.md ]; then
+            gh issue comment 1175 --repo "$GITHUB_REPOSITORY" --body-file /tmp/r5-checkpoint-comment.md
+          fi
