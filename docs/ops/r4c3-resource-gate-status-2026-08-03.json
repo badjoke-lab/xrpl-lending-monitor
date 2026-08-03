@@ -1,0 +1,184 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-03T13:34:13.723Z",
+  "phase": "R4C3",
+  "profileId": "supabase_free_postgres_pgcron_edge",
+  "profileRevision": 3,
+  "profileIdentityDigest": "3a5c4ff2c43a48d3e5b7ceded60027173d215d6f083fb33c22375758520bbe67",
+  "network": "devnet",
+  "controllingMainCommit": "84021cc95e8496d358cd5c670b33502f416f4bd6",
+  "qualificationEvidence": {
+    "workflowRunId": 30817518929,
+    "sourceCommit": "01fc146dcd261d2e919c614130ee19566ca854ae",
+    "artifactId": 8857796228,
+    "artifactDigest": "sha256:5ad18831e32c0dd3b87e7135909a38302b21a01274b112545ea15e259270813c",
+    "verifiedAt": "2026-08-03T13:34:13.723Z",
+    "issueNumber": 1109
+  },
+  "gates": {
+    "G7": {
+      "status": "qualified",
+      "steady": {
+        "sessionId": "r4c2d-steady-msd9dk9n-9ca26d3a",
+        "committedLedgersPerMinute": [24, 24, 24, 24, 24, 24],
+        "p95CommittedLedgersPerMinute": 24,
+        "thresholdExclusive": 21,
+        "sixConsecutiveMinuteBuckets": true,
+        "passed": true
+      },
+      "catchUp": {
+        "workflowRunId": 30817518929,
+        "p95CommittedLedgersPerMinute": 14178.400673920027,
+        "thresholdExclusive": 30,
+        "passed": true
+      }
+    },
+    "G8": {
+      "status": "qualified",
+      "qualified": true,
+      "profileSelected": false,
+      "boundary": "conservative_application_owned_accounting",
+      "session": {
+        "sessionId": "r4c3-accounting-msd9lrcr-da7f38e1",
+        "completedTicks": 6,
+        "committedLedgers": 144,
+        "minuteRates": [24, 24, 24, 24, 24, 24],
+        "accountingAttempts": 6,
+        "allowedAccountingAttempts": 6,
+        "unsafeAccountingAttempts": 0
+      },
+      "resources": {
+        "conservativeMemory": {
+          "coverage": "application_owned_upper_bound",
+          "maximumBytes": 209957992,
+          "haltBytes": 234881024,
+          "providerHardBytes": 268435456,
+          "passed": true
+        },
+        "perTickEgress": {
+          "coverage": "application_owned_upper_bound",
+          "maximumBytes": 3678244,
+          "haltBytes": 33554432,
+          "passed": true
+        },
+        "rolling31DayEgress": {
+          "coverage": "application_owned_upper_bound_plus_crash_reservations",
+          "maximumBytes": 271594864,
+          "haltBytes": 4294967296,
+          "providerHardBytes": 5368709120,
+          "passed": true
+        },
+        "rolling31DayInvocations": {
+          "coverage": "provider_count_plus_two_invocation_attempt_reserve",
+          "maximumProjected": 174438,
+          "halt": 400000,
+          "providerHard": 500000,
+          "passed": true
+        },
+        "databaseStorage": {
+          "coverage": "measured",
+          "valueBytes": 180309139,
+          "haltBytes": 400000000,
+          "hardBytes": 500000000,
+          "passed": true
+        },
+        "databaseConnections": {
+          "coverage": "measured",
+          "value": 10,
+          "halt": 45,
+          "hard": 60,
+          "passed": true
+        },
+        "edgeWall": {
+          "coverage": "measured",
+          "maximumMilliseconds": 5202.7498000000005,
+          "haltMilliseconds": 45000,
+          "hardMilliseconds": 150000,
+          "passed": true
+        },
+        "bundleSize": {
+          "coverage": "measured",
+          "maximumBytes": 108319,
+          "haltBytes": 4000000,
+          "hardBytes": 5000000,
+          "passed": true
+        },
+        "providerPeakMemory": {
+          "coverage": "unavailable_not_claimed",
+          "acceptedAsGateEvidence": false
+        },
+        "providerEgress": {
+          "coverage": "unavailable_not_claimed",
+          "acceptedAsGateEvidence": false
+        }
+      },
+      "injectedFailClosedQualification": {
+        "guardKinds": [
+          "missing_accounting",
+          "unsafe_accounting",
+          "memory_halt",
+          "tick_egress_halt",
+          "monthly_egress_halt",
+          "invocation_halt",
+          "future_record"
+        ],
+        "allRejectedBeforeCommit": true,
+        "noStateMutation": true,
+        "activeProfileReadOnly": true
+      },
+      "quotaStateTransfer": {
+        "rolling31dStateExported": true,
+        "typedRestoreCompleted": true,
+        "canonicalDigestParity": true,
+        "duplicateRestoreConverged": true,
+        "digestTamperRejected": true,
+        "effectiveEgressPreserved": true,
+        "reservedInvocationsPreserved": true,
+        "activeProfileReadOnly": true
+      }
+    },
+    "G9": {
+      "status": "qualified",
+      "workflowRunId": 30817518929,
+      "sourceCommit": "01fc146dcd261d2e919c614130ee19566ca854ae",
+      "profileRevision": 3,
+      "profileIdentityDigest": "3a5c4ff2c43a48d3e5b7ceded60027173d215d6f083fb33c22375758520bbe67",
+      "passed": true,
+      "profileSelected": false,
+      "checks": {
+        "deployScripted": true,
+        "rollbackScriptedAndRemotelyProved": true,
+        "checkpointScriptedAndRemotelyProved": true,
+        "exportScriptedAndRemotelyProved": true,
+        "restoreScriptedAndRemotelyProved": true,
+        "repeatableRestoreConvergenceProved": true,
+        "quotaStateTransferRemotelyProved": true,
+        "evidenceScripted": true,
+        "haltScriptedAndRemotelyProved": true,
+        "credentialRotationScripted": true,
+        "noRoutineDashboardOrTerminalOperation": true,
+        "exactProfileRevisionBound": true,
+        "activeProfileReadOnly": true
+      }
+    }
+  },
+  "previousRevision": {
+    "profileRevision": 2,
+    "status": "rejected",
+    "decisionDigest": "d1577a896e3f4e512a362586ae30990aceb5142f0783feb529626fa6f035e111",
+    "retainedForHistory": true
+  },
+  "remaining": [
+    "evaluate the exact revision-3 identity through the canonical R4B evaluator",
+    "write a separate explicit R4E selection record",
+    "begin R5 recovery without changing the public reader or enabling Mainnet"
+  ],
+  "restrictions": {
+    "publicReaderCutover": false,
+    "r5Recovery": false,
+    "mainnet": false,
+    "stabilization": false,
+    "soak": false
+  },
+  "statusDigest": "e5e80df41c242d92f75cea2fb15d1a64d96644999bf3babf8a7c38ca66ed160d"
+}
