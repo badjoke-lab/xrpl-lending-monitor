@@ -43,4 +43,4 @@ verify_jwt=false
 verify_jwt =false
 
 [functions.xrpl-r5-recovery-batch]
-verify_jwt = false
+verify_jwt =false
