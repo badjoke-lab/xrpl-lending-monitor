@@ -132,3 +132,4 @@ try {
 }
 
 await import('./reconcile-supabase-steady-memory-capability.mjs')
+await import('./record-supabase-provider-metric-capability.mjs')
