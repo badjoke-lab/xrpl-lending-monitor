@@ -1,4 +1,4 @@
-# R4C2d Supabase resource and no-charge evidence
+# R4C2d Supabase resource, no-charge, and operator evidence
 
 Date: `2026-08-03`
 
@@ -8,11 +8,11 @@ This document records retained evidence for the conditional Supabase Free Devnet
 
 Controlling result:
 
-- G7 throughput: `qualified`;
 - G1 no mandatory payment/card: `pass`;
 - G2 no automatic paid overage: `pass`;
+- G7 throughput: `qualified`;
 - G8 resource qualification: `incomplete`;
-- G9 operator independence: `unresolved`;
+- G9 operator independence: `pass`;
 - profile selected: `false`;
 - G8 qualified: `false`.
 
@@ -29,7 +29,7 @@ Remote run `30779476979` proved six exact injected halt paths:
 5. projected function invocations;
 6. deployed bundle size.
 
-For every injected failure, the qualification required:
+Every injected failure required:
 
 - halt before tick, work, message, or successor reservation;
 - no committed work;
@@ -38,7 +38,7 @@ For every injected failure, the qualification required:
 - active epoch and base identity preservation;
 - active profile read-only behavior.
 
-The guard thresholds are intentionally below the configured hard ceilings:
+The project halt thresholds remain below the configured hard ceilings:
 
 | Resource | Project halt | Hard ceiling |
 | --- | ---: | ---: |
@@ -123,17 +123,17 @@ Official policy references:
 
 ## Memory capability corrections
 
-PR `#1153` added six deterministic `Deno.memoryUsage()` samples to every real 24-ledger steady tick.
+PR `#1153` added deterministic `Deno.memoryUsage()` sampling to every real 24-ledger steady tick.
 
 Run `30785890154` retained six completed ticks and `36` lifecycle samples. Its published RSS high water was zero for every tick. That result does not prove zero memory consumption and does not prove `200 MiB` of headroom. Issue `#1109` contains the first correction invalidating that interpretation.
 
-PR `#1154` added an executable capability reconciliation, but remote run `30786950713` exposed a second defect: partial heap or external counters were nonzero while RSS remained zero for every retained sample. The first reconciler treated any nonzero memory sub-counter as sufficient and incorrectly marked total-memory measurement available.
+PR `#1154` added executable capability reconciliation, but remote run `30786950713` exposed a second defect: partial heap or external counters were nonzero while RSS remained zero for every retained sample. The first reconciler treated any nonzero memory sub-counter as sufficient and incorrectly marked total-memory measurement available.
 
-For the provider's total Edge memory ceiling, partial heap or external counters cannot substitute for an unavailable RSS or total-memory counter. Issue `#1109` therefore contains a second correction.
+For the provider's total Edge memory ceiling, partial heap or external counters cannot substitute for an unavailable RSS or total-memory counter. Issue `#1109` contains the second correction.
 
 PR `#1156` makes the controlling rule explicit:
 
-- all six ticks and all lifecycle samples are still inspected;
+- all six ticks and all lifecycle samples are inspected;
 - RSS must be positive in at least one retained sample before total-memory qualification is possible;
 - nonzero heap or external counters are retained only as partial counters;
 - partial counters are never substituted for RSS;
@@ -147,6 +147,31 @@ PR `#1156` makes the controlling rule explicit:
 - G7 qualified remains `true`;
 - G8 qualified remains `false`;
 - profile selected remains `false`.
+
+## G9 operator-independence qualification
+
+PRs `#1157` and `#1158` bind the existing remote qualification artifacts and the single deployment workflow to the exact Supabase profile revision.
+
+Remote run `30789994825`, commit `535bda53ad44ed1cfc0969ccf72c889e9254d124`, proved:
+
+- profile ID: `supabase_free_postgres_pgcron_edge`;
+- profile revision: `2`;
+- profile identity digest: `c42edf0a1708fd2b7ea9f2e72dab32b87c1d66b260752efe38fec321253d3998`;
+- deployment and migrations scripted: `true`;
+- one-run verifier-token generation, masking, rotation, and exact-project scoping: `true`;
+- checkpoint and canonical export scripted and remotely proved: `true`;
+- empty-target or exact duplicate restore convergence scripted and remotely proved: `true`;
+- post-restore continuation scripted and remotely proved: `true`;
+- transaction interruption rollback scripted and remotely proved: `true`;
+- terminal integrity halt with no invalid successor scripted and remotely proved: `true`;
+- sanitized artifact and Issue evidence publication scripted: `true`;
+- routine Dashboard or interactive terminal operation required: `false`;
+- active profile read only: `true`;
+- G9 qualified: `true`;
+- G8 qualified: `false`;
+- profile selected: `false`.
+
+The first G9 run `30788972607` failed because the qualification target had already been restored and the verifier required a first empty-target restore on every run. PR `#1158` corrected the rule: either a first empty-target restore or exact duplicate convergence with canonical and digest parity is valid. Any other restore state fails.
 
 ## Live coverage matrix
 
@@ -163,7 +188,7 @@ PR `#1156` makes the controlling rule explicit:
 | Free plan identity | measured | Exact project-to-organization binding reports `free` |
 | No automatic paid overage | policy-proved | Free-plan over-quota behavior is restriction, not paid overage |
 | Billing/no-charge qualification | passed | Exact Free plan identity plus official provider policy |
-| Operator independence | unresolved | Complete retained rollback and unattended operation evidence is not yet bound to profile revision 2 |
+| Operator independence | passed | Run `30789994825` bound all G9 operations to revision 2 without routine Dashboard or terminal use |
 
 ## Current R4B decision
 
@@ -171,19 +196,20 @@ The machine-readable revision-2 decision is [`r4c2d-supabase-r4b-decision-2026-0
 
 - classification: `conditional_candidate`;
 - selection: `not_selected`;
-- passed gates: `8`;
+- passed gates: `9`;
 - failed gates: `0`;
-- unresolved gates: `G8`, `G9`;
-- scoring allowed: `false`.
+- unresolved gates: `G8`;
+- scoring allowed: `false`;
+- decision digest: `e142f849d59d822da8e5fec5bea8f8dec600950e880b6e597b1971dfcd610b36`.
 
 ## Remaining work
 
 The Supabase profile cannot become a qualified candidate until:
 
 1. usable maximum-memory evidence is retained, or a formally accepted alternative bound is proved without describing it as a provider counter;
-2. provider egress evidence is retained, or the R4 contract records that the unavailable counter makes G8 fail;
-3. complete rollback and unattended operator-independence evidence closes G9;
-4. the R4B decision is regenerated with no unresolved gates;
-5. R4E explicitly selects the qualified profile or records `no_profile_qualified`.
+2. provider egress evidence is retained, or the R4 contract records that unavailable egress evidence makes G8 fail;
+3. G8 is resolved or formally failed;
+4. the R4B decision is regenerated with no unresolved gates or an explicit rejection;
+5. R4E explicitly selects a qualified profile or records `no_profile_qualified`.
 
 R5 must not begin before that decision.
