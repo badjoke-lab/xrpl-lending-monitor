@@ -1,0 +1,165 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-03",
+  "phase": "R4C2d",
+  "profileId": "supabase-devnet",
+  "network": "devnet",
+  "controllingMainCommit": "6a30fffd304ae209e6d69a14433c5cd400da73d5",
+  "gates": {
+    "G7": {
+      "status": "qualified",
+      "steady": {
+        "workflowRunId": 30784402995,
+        "committedLedgersPerMinute": [24, 24, 24, 24, 24, 24],
+        "p95CommittedLedgersPerMinute": 24,
+        "thresholdExclusive": 21,
+        "passed": true
+      },
+      "catchUp": {
+        "workflowRunId": 30755497115,
+        "p95CommittedLedgersPerMinute": 14178.400673920027,
+        "thresholdExclusive": 30,
+        "passed": true
+      }
+    },
+    "G8": {
+      "status": "incomplete",
+      "qualified": false,
+      "profileSelected": false,
+      "resources": {
+        "databaseStorage": {
+          "coverage": "measured",
+          "valueBytes": 81939603,
+          "haltBytes": 400000000,
+          "hardBytes": 500000000,
+          "passed": true
+        },
+        "databaseConnections": {
+          "coverage": "measured",
+          "value": 10,
+          "halt": 45,
+          "hard": 60,
+          "passed": true
+        },
+        "edgeWall": {
+          "coverage": "measured",
+          "maximumMilliseconds": 5202.7498,
+          "haltMilliseconds": 45000,
+          "hardMilliseconds": 150000,
+          "passed": true
+        },
+        "functionInvocations": {
+          "coverage": "measured",
+          "source": "functions.combined-stats",
+          "oneDay": 3717,
+          "projected31Days": 115227,
+          "halt31Days": 400000,
+          "hard31Days": 500000,
+          "passed": true
+        },
+        "bundleSize": {
+          "coverage": "measured",
+          "maximumBytes": 103351,
+          "haltBytes": 4000000,
+          "hardBytes": 5000000,
+          "passed": true
+        },
+        "edgeCpu": {
+          "coverage": "measured",
+          "source": "functions.combined-stats",
+          "maximumMilliseconds": 341,
+          "runtimeHardMilliseconds": 2000,
+          "passed": true
+        },
+        "edgeMemory": {
+          "coverage": "unavailable",
+          "averageMemoryMaximumMegabytes": 10.76615047454834,
+          "exactMaximumAvailable": false,
+          "inProcessSamples": 36,
+          "allRssCountersZero": true,
+          "partialHeapCountersAvailable": true,
+          "totalMemoryCounterAvailable": false,
+          "partialCountersAcceptedAsTotalMemory": false,
+          "zeroRssAcceptedAsZeroUsage": false,
+          "highWaterQualified": false,
+          "passed": false
+        },
+        "uncachedEgress": {
+          "coverage": "unavailable",
+          "passed": false
+        },
+        "cachedEgress": {
+          "coverage": "unavailable",
+          "passed": false
+        },
+        "providerPlan": {
+          "coverage": "measured",
+          "workflowRunId": 30785807617,
+          "plan": "free",
+          "exactProjectOrganizationBinding": true,
+          "passed": true
+        },
+        "usageBillingFlag": {
+          "coverage": "not_applicable_on_free_plan",
+          "required": false,
+          "reason": "Spend Cap configuration is a Pro-plan feature and the Free plan is not charged for over-usage",
+          "passed": true
+        },
+        "automaticOverageApiState": {
+          "coverage": "official_policy",
+          "automaticPaidOveragePossible": false,
+          "quotaExhaustionBehavior": "notification_grace_and_service_restriction",
+          "passed": true
+        },
+        "billingAndOverage": {
+          "coverage": "exact_plan_identity_plus_official_policy",
+          "policyReferences": [
+            "https://supabase.com/docs/guides/platform/cost-control",
+            "https://supabase.com/docs/guides/platform/billing-faq",
+            "https://supabase.com/docs/guides/platform/manage-your-usage/egress"
+          ],
+          "qualified": true,
+          "passed": true
+        }
+      },
+      "injectedFailClosedQualification": {
+        "workflowRunId": 30779476979,
+        "database": true,
+        "connections": true,
+        "edgeWall": true,
+        "externalSnapshot": true,
+        "invocations": true,
+        "bundle": true,
+        "preReservationHalt": true,
+        "activeProfileReadOnly": true
+      }
+    }
+  },
+  "invalidatedInterpretations": [
+    {
+      "workflowRunId": 30785890154,
+      "interpretation": "zero RSS high water proves zero memory consumption or 200 MiB headroom",
+      "valid": false,
+      "replacement": "RSS total-memory counter unavailable; memory high-water unqualified"
+    },
+    {
+      "workflowRunId": 30786950713,
+      "interpretation": "nonzero partial heap or external counters can substitute for an all-zero RSS counter",
+      "valid": false,
+      "replacement": "positive RSS is required for total-memory qualification; partial counters are non-qualifying"
+    }
+  ],
+  "remaining": [
+    "usable exact maximum-memory evidence or a formally accepted non-provider alternative bound",
+    "provider egress evidence or a formal unavailable-counter disposition",
+    "complete retained rollback and operator-independence evidence for G9",
+    "final R4B and R4E reconciliation"
+  ],
+  "restrictions": {
+    "publicReaderCutover": false,
+    "r5Recovery": false,
+    "mainnet": false,
+    "stabilization": false,
+    "soak": false
+  }
+}

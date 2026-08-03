@@ -1,0 +1,184 @@
+{
+  "schemaVersion": 1,
+  "evaluatedAt": "2026-08-03T05:30:00.000Z",
+  "profile": {
+    "schemaVersion": 1,
+    "profileId": "supabase_free_postgres_pgcron_edge",
+    "revision": 2,
+    "label": "Supabase Free Postgres plus pg_cron and Edge Functions",
+    "components": {
+      "storage": "Supabase Free Postgres committed seven-class state and history",
+      "scheduler": "Supabase pg_cron one-minute internal successor scheduling",
+      "execution": "Supabase Edge Functions plus security-definer transactional RPCs",
+      "publication": "separate immutable Git-backed publication",
+      "maintenance": "publication-gated bounded Supabase maintenance",
+      "completeStateTransfer": "canonical export, typed empty-target restore, and post-restore continuation"
+    }
+  },
+  "profileIdentityDigest": "c42edf0a1708fd2b7ea9f2e72dab32b87c1d66b260752efe38fec321253d3998",
+  "classification": "conditional_candidate",
+  "selection": "not_selected",
+  "eligibleForScoring": false,
+  "gateSummary": {
+    "passed": 8,
+    "failed": 0,
+    "unresolved": 2
+  },
+  "failedGates": [],
+  "unresolvedGates": [
+    "G8",
+    "G9"
+  ],
+  "evidence": [
+    {
+      "schemaVersion": 1,
+      "profileId": "supabase_free_postgres_pgcron_edge",
+      "profileRevision": 2,
+      "profileIdentityDigest": "c42edf0a1708fd2b7ea9f2e72dab32b87c1d66b260752efe38fec321253d3998",
+      "gateId": "G1",
+      "status": "pass",
+      "sourceType": "account_verification",
+      "summary": "Exact project organization is Free and requires no paid plan, payment method, card, prepaid credit, or debt-capable billing path.",
+      "observedAt": "2026-08-03T04:40:00.000Z",
+      "artifacts": [
+        "docs/ops/r4c2d-supabase-resource-headroom-evidence-2026-08-03.md",
+        "https://supabase.com/docs/guides/platform/billing-on-supabase"
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "profileId": "supabase_free_postgres_pgcron_edge",
+      "profileRevision": 2,
+      "profileIdentityDigest": "c42edf0a1708fd2b7ea9f2e72dab32b87c1d66b260752efe38fec321253d3998",
+      "gateId": "G2",
+      "status": "pass",
+      "sourceType": "official_documentation",
+      "summary": "Free-plan quota exhaustion causes notification, grace, and service restriction rather than paid overage.",
+      "observedAt": "2026-08-03T05:25:00.000Z",
+      "artifacts": [
+        "https://supabase.com/docs/guides/platform/cost-control",
+        "https://supabase.com/docs/guides/platform/billing-faq"
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "profileId": "supabase_free_postgres_pgcron_edge",
+      "profileRevision": 2,
+      "profileIdentityDigest": "c42edf0a1708fd2b7ea9f2e72dab32b87c1d66b260752efe38fec321253d3998",
+      "gateId": "G3",
+      "status": "pass",
+      "sourceType": "read_only_shadow",
+      "summary": "Remote pg_cron proved one-minute ownership, leases, retry, reclaim, duplicate convergence, successor reservation, and terminal halt.",
+      "observedAt": "2026-08-03T03:00:00.000Z",
+      "artifacts": [
+        "docs/ops/r4c2b-supabase-remote-phase-chain-evidence-2026-08-02.md",
+        "docs/ops/r4c2c-supabase-remote-fault-evidence-2026-08-02.md"
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "profileId": "supabase_free_postgres_pgcron_edge",
+      "profileRevision": 2,
+      "profileIdentityDigest": "c42edf0a1708fd2b7ea9f2e72dab32b87c1d66b260752efe38fec321253d3998",
+      "gateId": "G4",
+      "status": "pass",
+      "sourceType": "read_only_shadow",
+      "summary": "Remote qualification proved atomic mutation, message completion, successor reservation, rollback, and replay convergence.",
+      "observedAt": "2026-08-03T03:00:00.000Z",
+      "artifacts": [
+        "docs/ops/r4c2c-supabase-remote-fault-evidence-2026-08-02.md"
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "profileId": "supabase_free_postgres_pgcron_edge",
+      "profileRevision": 2,
+      "profileIdentityDigest": "c42edf0a1708fd2b7ea9f2e72dab32b87c1d66b260752efe38fec321253d3998",
+      "gateId": "G5",
+      "status": "pass",
+      "sourceType": "read_only_shadow",
+      "summary": "Committed-only reads, source-bound fences and cursors, stale rejection, and active-profile isolation passed.",
+      "observedAt": "2026-08-03T03:00:00.000Z",
+      "artifacts": [
+        "docs/ops/r4c2c-supabase-committed-reader-evidence-2026-08-02.md"
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "profileId": "supabase_free_postgres_pgcron_edge",
+      "profileRevision": 2,
+      "profileIdentityDigest": "c42edf0a1708fd2b7ea9f2e72dab32b87c1d66b260752efe38fec321253d3998",
+      "gateId": "G6",
+      "status": "pass",
+      "sourceType": "read_only_shadow",
+      "summary": "Complete state exported and restored with canonical parity, convergence, tamper rejection, and continuation.",
+      "observedAt": "2026-08-03T03:00:00.000Z",
+      "artifacts": [
+        "docs/ops/r4c2c-supabase-complete-state-transfer-remote-evidence-2026-08-02.md",
+        "docs/ops/r4c2c-supabase-restore-continuation-remote-evidence-2026-08-02.md"
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "profileId": "supabase_free_postgres_pgcron_edge",
+      "profileRevision": 2,
+      "profileIdentityDigest": "c42edf0a1708fd2b7ea9f2e72dab32b87c1d66b260752efe38fec321253d3998",
+      "gateId": "G7",
+      "status": "pass",
+      "sourceType": "read_only_shadow",
+      "summary": "Steady p95 was 24/min above 21 and catch-up p95 was 14178.400673920027/min above 30.",
+      "observedAt": "2026-08-03T04:00:00.000Z",
+      "artifacts": [
+        "docs/ops/r4c2d-supabase-network-steady-throughput-evidence-2026-08-03.md",
+        "docs/ops/r4c2d-supabase-isolated-catchup-throughput-evidence-2026-08-03.md"
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "profileId": "supabase_free_postgres_pgcron_edge",
+      "profileRevision": 2,
+      "profileIdentityDigest": "c42edf0a1708fd2b7ea9f2e72dab32b87c1d66b260752efe38fec321253d3998",
+      "gateId": "G8",
+      "status": "unresolved",
+      "sourceType": "read_only_shadow",
+      "summary": "Measured resource guards pass, but exact peak memory and provider egress remain unavailable and cannot be replaced by zero counters or projections.",
+      "observedAt": "2026-08-03T05:20:00.000Z",
+      "artifacts": [
+        "docs/ops/r4c2d-supabase-resource-headroom-evidence-2026-08-03.md",
+        "docs/ops/r4c2d-resource-gate-status-2026-08-03.json"
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "profileId": "supabase_free_postgres_pgcron_edge",
+      "profileRevision": 2,
+      "profileIdentityDigest": "c42edf0a1708fd2b7ea9f2e72dab32b87c1d66b260752efe38fec321253d3998",
+      "gateId": "G9",
+      "status": "unresolved",
+      "sourceType": "operator_constraint",
+      "summary": "Most operations are scripted, but complete retained rollback and unattended operator-independence evidence is not bound to revision 2.",
+      "observedAt": "2026-08-03T05:25:00.000Z",
+      "artifacts": [
+        ".github/workflows/supabase-remote-probe.yml",
+        "docs/ops/r4c2d-supabase-resource-headroom-evidence-2026-08-03.md"
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "profileId": "supabase_free_postgres_pgcron_edge",
+      "profileRevision": 2,
+      "profileIdentityDigest": "c42edf0a1708fd2b7ea9f2e72dab32b87c1d66b260752efe38fec321253d3998",
+      "gateId": "G10",
+      "status": "pass",
+      "sourceType": "operator_constraint",
+      "summary": "R4 kept the legacy reader, Mainnet disabled, retired collector halted, and started no recovery, stabilization, or soak.",
+      "observedAt": "2026-08-03T05:25:00.000Z",
+      "artifacts": [
+        "docs/implementation-status.md",
+        "https://github.com/badjoke-lab/xrpl-lending-monitor/issues/1079"
+      ]
+    }
+  ],
+  "scoreSummary": null,
+  "decisionDigest": "407f37226dc47663c7f980a8a1b3c04ed09a03a97add950f1d061db61ba5b897"
+}
