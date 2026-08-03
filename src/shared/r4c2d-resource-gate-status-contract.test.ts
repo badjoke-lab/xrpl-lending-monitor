@@ -57,13 +57,16 @@ describe('R4C2d resource gate status contract', () => {
     )
   })
 
-  it('rejects all-zero memory counters as unavailable', () => {
+  it('rejects zero RSS and partial counters as total-memory evidence', () => {
     const memory = status.gates.G8.resources.edgeMemory
     expect(memory.coverage).toBe('unavailable')
     expect(memory.exactMaximumAvailable).toBe(false)
     expect(memory.inProcessSamples).toBe(36)
-    expect(memory.allInProcessCountersZero).toBe(true)
-    expect(memory.zeroCountersAcceptedAsZeroUsage).toBe(false)
+    expect(memory.allRssCountersZero).toBe(true)
+    expect(memory.partialHeapCountersAvailable).toBe(true)
+    expect(memory.totalMemoryCounterAvailable).toBe(false)
+    expect(memory.partialCountersAcceptedAsTotalMemory).toBe(false)
+    expect(memory.zeroRssAcceptedAsZeroUsage).toBe(false)
     expect(memory.highWaterQualified).toBe(false)
     expect(memory.passed).toBe(false)
   })
@@ -79,12 +82,16 @@ describe('R4C2d resource gate status contract', () => {
     expect(resources.cachedEgress.passed).toBe(false)
   })
 
-  it('retains the zero-memory interpretation as explicitly invalid', () => {
-    expect(status.invalidatedInterpretations).toHaveLength(1)
+  it('retains both invalid memory interpretations explicitly', () => {
+    expect(status.invalidatedInterpretations).toHaveLength(2)
     expect(status.invalidatedInterpretations[0].workflowRunId).toBe(30785890154)
     expect(status.invalidatedInterpretations[0].valid).toBe(false)
-    expect(status.invalidatedInterpretations[0].replacement).toContain('unavailable')
-    expect(evidence).toContain('do not prove zero memory consumption')
+    expect(status.invalidatedInterpretations[0].replacement).toContain('RSS')
+    expect(status.invalidatedInterpretations[1].workflowRunId).toBe(30786950713)
+    expect(status.invalidatedInterpretations[1].valid).toBe(false)
+    expect(status.invalidatedInterpretations[1].replacement).toContain('partial counters')
+    expect(evidence).toContain('does not prove zero memory consumption')
+    expect(evidence).toContain('partial heap or external counters cannot substitute')
     expect(evidence).toContain('memory high-water qualified: `false`')
   })
 
