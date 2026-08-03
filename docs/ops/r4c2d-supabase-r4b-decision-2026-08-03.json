@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "evaluatedAt": "2026-08-03T05:30:00.000Z",
+  "evaluatedAt": "2026-08-03T06:30:00.000Z",
   "profile": {
     "schemaVersion": 1,
     "profileId": "supabase_free_postgres_pgcron_edge",
@@ -20,14 +20,13 @@
   "selection": "not_selected",
   "eligibleForScoring": false,
   "gateSummary": {
-    "passed": 8,
+    "passed": 9,
     "failed": 0,
-    "unresolved": 2
+    "unresolved": 1
   },
   "failedGates": [],
   "unresolvedGates": [
-    "G8",
-    "G9"
+    "G8"
   ],
   "evidence": [
     {
@@ -154,13 +153,15 @@
       "profileRevision": 2,
       "profileIdentityDigest": "c42edf0a1708fd2b7ea9f2e72dab32b87c1d66b260752efe38fec321253d3998",
       "gateId": "G9",
-      "status": "unresolved",
+      "status": "pass",
       "sourceType": "operator_constraint",
-      "summary": "Most operations are scripted, but complete retained rollback and unattended operator-independence evidence is not bound to revision 2.",
-      "observedAt": "2026-08-03T05:25:00.000Z",
+      "summary": "Run 30789994825 bound scripted deployment, credential rotation, checkpoint, export, repeatable restore convergence, rollback, terminal halt, and evidence publication to profile revision 2 without routine Dashboard or terminal operation.",
+      "observedAt": "2026-08-03T06:29:28.000Z",
       "artifacts": [
         ".github/workflows/supabase-remote-probe.yml",
-        "docs/ops/r4c2d-supabase-resource-headroom-evidence-2026-08-03.md"
+        "scripts/verify-supabase-operator-independence.mjs",
+        "https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/30789994825",
+        "https://github.com/badjoke-lab/xrpl-lending-monitor/issues/1109"
       ]
     },
     {
@@ -180,5 +181,5 @@
     }
   ],
   "scoreSummary": null,
-  "decisionDigest": "407f37226dc47663c7f980a8a1b3c04ed09a03a97add950f1d061db61ba5b897"
+  "decisionDigest": "e142f849d59d822da8e5fec5bea8f8dec600950e880b6e597b1971dfcd610b36"
 }
