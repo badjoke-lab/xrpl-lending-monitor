@@ -64,3 +64,4 @@ if (success) {
 }
 
 process.stdout.write(`${lines.join('\n')}\n`)
+await import('./publish-supabase-provider-metric-capability.mjs')
