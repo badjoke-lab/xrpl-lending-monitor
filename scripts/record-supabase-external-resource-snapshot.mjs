@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 
 await import('./record-supabase-runtime-resource-log-snapshot.mjs')
+await import('./record-supabase-provider-metric-capability.mjs')
 
 const projectRef = process.env.SUPABASE_PROJECT_ID ?? ''
 const accessToken = process.env.SUPABASE_ACCESS_TOKEN ?? ''
