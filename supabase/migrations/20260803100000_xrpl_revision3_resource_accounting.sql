@@ -10,35 +10,29 @@ create table if not exists xrpl_resource_guard_v2.tick_accounting (
     profile_identity_digest = '3a5c4ff2c43a48d3e5b7ceded60027173d215d6f083fb33c22375758520bbe67'
   ),
   accounting_digest text not null check (accounting_digest ~ '^[a-f0-9]{64}$'),
-  allowed boolean not null check (allowed),
-  ledger_count integer not null check (ledger_count between 1 and 24),
-  network_request_count integer not null check (network_request_count between 1 and 64),
-  database_request_count integer not null check (database_request_count between 1 and 16),
-  transaction_count integer not null check (transaction_count between 0 and 4096),
-  metadata_node_count integer not null check (metadata_node_count between 0 and 32768),
-  normalized_record_count integer not null check (normalized_record_count between 0 and 16384),
-  payload_chunk_count integer not null check (payload_chunk_count between 0 and 1024),
-  relationship_count integer not null check (relationship_count between 0 and 65536),
+  allowed boolean not null,
+  ledger_count integer not null check (ledger_count >= 0),
+  network_request_count integer not null check (network_request_count >= 0),
+  database_request_count integer not null check (database_request_count >= 0),
+  transaction_count integer not null check (transaction_count >= 0),
+  metadata_node_count integer not null check (metadata_node_count >= 0),
+  normalized_record_count integer not null check (normalized_record_count >= 0),
+  payload_chunk_count integer not null check (payload_chunk_count >= 0),
+  relationship_count integer not null check (relationship_count >= 0),
   exact_wire_bytes bigint not null check (exact_wire_bytes >= 0),
   serialized_live_bytes bigint not null check (serialized_live_bytes >= 0),
   object_overhead_bytes bigint not null check (object_overhead_bytes >= 0),
   dynamic_memory_upper_bound_bytes bigint not null check (dynamic_memory_upper_bound_bytes >= 0),
   conservative_memory_upper_bound_bytes bigint not null check (
     conservative_memory_upper_bound_bytes >= 0
-    and conservative_memory_upper_bound_bytes < 234881024
   ),
   conservative_tick_egress_upper_bound_bytes bigint not null check (
     conservative_tick_egress_upper_bound_bytes >= 0
-    and conservative_tick_egress_upper_bound_bytes < 33554432
   ),
   conservative_egress_31d_upper_bound_bytes bigint not null check (
     conservative_egress_31d_upper_bound_bytes >= 0
-    and conservative_egress_31d_upper_bound_bytes < 4294967296
   ),
-  projected_invocations_31d bigint not null check (
-    projected_invocations_31d >= 0
-    and projected_invocations_31d < 400000
-  ),
+  projected_invocations_31d bigint not null check (projected_invocations_31d >= 0),
   accounting jsonb not null,
   recorded_at timestamptz not null,
   created_at timestamptz not null default clock_timestamp(),
@@ -70,8 +64,7 @@ begin
   select coalesce(sum(conservative_tick_egress_upper_bound_bytes), 0)::bigint
     into v_prior_egress
   from xrpl_resource_guard_v2.tick_accounting
-  where allowed
-    and recorded_at >= p_observed_at - interval '31 days'
+  where recorded_at >= p_observed_at - interval '31 days'
     and recorded_at <= p_observed_at;
 
   select projected_invocations_31d, observed_at
@@ -103,6 +96,7 @@ begin
     'checks', jsonb_build_object(
       'providerEgressCounterClaimed', false,
       'applicationAccountingOnly', true,
+      'failedAttemptsIncludedInRollingEgress', true,
       'freshInvocationSnapshotRequired', true
     )
   );
@@ -129,6 +123,23 @@ declare
   v_thresholds jsonb;
   v_checks jsonb;
   v_failures jsonb;
+  v_allowed boolean;
+  v_ledger_count integer;
+  v_network_request_count integer;
+  v_database_request_count integer;
+  v_transaction_count integer;
+  v_metadata_node_count integer;
+  v_normalized_record_count integer;
+  v_payload_chunk_count integer;
+  v_relationship_count integer;
+  v_exact_wire_bytes bigint;
+  v_serialized_live_bytes bigint;
+  v_object_overhead_bytes bigint;
+  v_dynamic_memory_upper_bound_bytes bigint;
+  v_conservative_memory_upper_bound_bytes bigint;
+  v_conservative_tick_egress_upper_bound_bytes bigint;
+  v_conservative_egress_31d_upper_bound_bytes bigint;
+  v_projected_invocations_31d bigint;
 begin
   if p_owner is null or btrim(p_owner) = ''
     or p_tick_id is null or btrim(p_tick_id) = ''
@@ -166,14 +177,15 @@ begin
   v_failures := v_result->'failures';
   v_thresholds := v_result->'thresholds';
   v_checks := v_result->'checks';
+  v_allowed := (v_result->>'allowed')::boolean;
   if (v_result->>'schemaVersion')::integer <> 1
     or (v_result->>'profileRevision')::integer <> 3
-    or coalesce((v_result->>'allowed')::boolean, false) is not true
     or jsonb_typeof(v_failures) <> 'array'
-    or jsonb_array_length(v_failures) <> 0
     or jsonb_typeof(v_thresholds) <> 'object'
-    or jsonb_typeof(v_checks) <> 'object' then
-    raise exception 'revision-3 accounting result is not safe';
+    or jsonb_typeof(v_checks) <> 'object'
+    or (v_allowed and jsonb_array_length(v_failures) <> 0)
+    or (not v_allowed and jsonb_array_length(v_failures) = 0) then
+    raise exception 'revision-3 accounting result is inconsistent';
   end if;
 
   if coalesce((v_checks->>'unavailableProviderMemoryNotClaimed')::boolean, false) is not true
@@ -196,22 +208,60 @@ begin
     raise exception 'revision-3 accounting thresholds changed';
   end if;
 
-  if (v_input->>'ledgerCount')::integer not between 1 and 24
-    or (v_input->>'networkRequestCount')::integer not between 1 and 64
-    or (v_input->>'databaseRequestCount')::integer not between 1 and 16
-    or (v_input->>'transactionCount')::integer not between 0 and 4096
-    or (v_input->>'metadataNodeCount')::integer not between 0 and 32768
-    or (v_input->>'normalizedRecordCount')::integer not between 0 and 16384
-    or (v_input->>'payloadChunkCount')::integer not between 0 and 1024
-    or (v_input->>'relationshipCount')::integer not between 0 and 65536 then
-    raise exception 'revision-3 accounting object counts are unsafe';
+  v_ledger_count := (v_input->>'ledgerCount')::integer;
+  v_network_request_count := (v_input->>'networkRequestCount')::integer;
+  v_database_request_count := (v_input->>'databaseRequestCount')::integer;
+  v_transaction_count := (v_input->>'transactionCount')::integer;
+  v_metadata_node_count := (v_input->>'metadataNodeCount')::integer;
+  v_normalized_record_count := (v_input->>'normalizedRecordCount')::integer;
+  v_payload_chunk_count := (v_input->>'payloadChunkCount')::integer;
+  v_relationship_count := (v_input->>'relationshipCount')::integer;
+  v_exact_wire_bytes := (v_result->>'exactWireBytes')::bigint;
+  v_serialized_live_bytes := (v_result->>'serializedLiveBytes')::bigint;
+  v_object_overhead_bytes := (v_result->>'objectOverheadBytes')::bigint;
+  v_dynamic_memory_upper_bound_bytes := (v_result->>'dynamicMemoryUpperBoundBytes')::bigint;
+  v_conservative_memory_upper_bound_bytes :=
+    (v_result->>'conservativeMemoryUpperBoundBytes')::bigint;
+  v_conservative_tick_egress_upper_bound_bytes :=
+    (v_result->>'conservativeTickEgressUpperBoundBytes')::bigint;
+  v_conservative_egress_31d_upper_bound_bytes :=
+    (v_result->>'conservativeEgress31dUpperBoundBytes')::bigint;
+  v_projected_invocations_31d := (v_result->>'projectedInvocations31d')::bigint;
+
+  if v_ledger_count < 0
+    or v_network_request_count < 0
+    or v_database_request_count < 0
+    or v_transaction_count < 0
+    or v_metadata_node_count < 0
+    or v_normalized_record_count < 0
+    or v_payload_chunk_count < 0
+    or v_relationship_count < 0
+    or v_exact_wire_bytes < 0
+    or v_serialized_live_bytes < 0
+    or v_object_overhead_bytes < 0
+    or v_dynamic_memory_upper_bound_bytes < 0
+    or v_conservative_memory_upper_bound_bytes < 0
+    or v_conservative_tick_egress_upper_bound_bytes < 0
+    or v_conservative_egress_31d_upper_bound_bytes < 0
+    or v_projected_invocations_31d < 0 then
+    raise exception 'revision-3 accounting contains a negative value';
   end if;
 
-  if (v_result->>'conservativeMemoryUpperBoundBytes')::bigint >= 234881024
-    or (v_result->>'conservativeTickEgressUpperBoundBytes')::bigint >= 33554432
-    or (v_result->>'conservativeEgress31dUpperBoundBytes')::bigint >= 4294967296
-    or (v_result->>'projectedInvocations31d')::bigint >= 400000 then
-    raise exception 'revision-3 accounting crossed a halt threshold';
+  if v_allowed and (
+    v_ledger_count not between 1 and 24
+    or v_network_request_count not between 1 and 64
+    or v_database_request_count not between 1 and 16
+    or v_transaction_count not between 0 and 4096
+    or v_metadata_node_count not between 0 and 32768
+    or v_normalized_record_count not between 0 and 16384
+    or v_payload_chunk_count not between 0 and 1024
+    or v_relationship_count not between 0 and 65536
+    or v_conservative_memory_upper_bound_bytes >= 234881024
+    or v_conservative_tick_egress_upper_bound_bytes >= 33554432
+    or v_conservative_egress_31d_upper_bound_bytes >= 4294967296
+    or v_projected_invocations_31d >= 400000
+  ) then
+    raise exception 'revision-3 safe accounting crossed a halt threshold';
   end if;
 
   insert into xrpl_resource_guard_v2.tick_accounting (
@@ -229,23 +279,14 @@ begin
     v_tick.session_id, v_tick.tick_id,
     'supabase_free_postgres_pgcron_edge', 3,
     '3a5c4ff2c43a48d3e5b7ceded60027173d215d6f083fb33c22375758520bbe67',
-    p_accounting_digest, true,
-    (v_input->>'ledgerCount')::integer,
-    (v_input->>'networkRequestCount')::integer,
-    (v_input->>'databaseRequestCount')::integer,
-    (v_input->>'transactionCount')::integer,
-    (v_input->>'metadataNodeCount')::integer,
-    (v_input->>'normalizedRecordCount')::integer,
-    (v_input->>'payloadChunkCount')::integer,
-    (v_input->>'relationshipCount')::integer,
-    (v_result->>'exactWireBytes')::bigint,
-    (v_result->>'serializedLiveBytes')::bigint,
-    (v_result->>'objectOverheadBytes')::bigint,
-    (v_result->>'dynamicMemoryUpperBoundBytes')::bigint,
-    (v_result->>'conservativeMemoryUpperBoundBytes')::bigint,
-    (v_result->>'conservativeTickEgressUpperBoundBytes')::bigint,
-    (v_result->>'conservativeEgress31dUpperBoundBytes')::bigint,
-    (v_result->>'projectedInvocations31d')::bigint,
+    p_accounting_digest, v_allowed,
+    v_ledger_count, v_network_request_count, v_database_request_count,
+    v_transaction_count, v_metadata_node_count, v_normalized_record_count,
+    v_payload_chunk_count, v_relationship_count,
+    v_exact_wire_bytes, v_serialized_live_bytes, v_object_overhead_bytes,
+    v_dynamic_memory_upper_bound_bytes, v_conservative_memory_upper_bound_bytes,
+    v_conservative_tick_egress_upper_bound_bytes,
+    v_conservative_egress_31d_upper_bound_bytes, v_projected_invocations_31d,
     p_accounting, p_recorded_at
   ) on conflict (session_id, tick_id) do nothing;
 
@@ -253,7 +294,9 @@ begin
   from xrpl_resource_guard_v2.tick_accounting
   where session_id = v_tick.session_id and tick_id = v_tick.tick_id;
 
-  if not found or v_existing.accounting_digest <> p_accounting_digest then
+  if not found
+    or v_existing.accounting_digest <> p_accounting_digest
+    or v_existing.allowed is distinct from v_allowed then
     raise exception 'revision-3 accounting replay conflicts with retained evidence';
   end if;
 
@@ -278,25 +321,37 @@ set search_path = public, xrpl_steady_v1, xrpl_resource_guard_v2, pg_temp
 as $$
 declare
   v_accounting xrpl_resource_guard_v2.tick_accounting%rowtype;
+  v_enabled boolean;
 begin
-  if new.status = 'completed' and old.status is distinct from 'completed' then
-    select * into v_accounting
-    from xrpl_resource_guard_v2.tick_accounting
-    where session_id = new.session_id and tick_id = new.tick_id;
-
-    if not found
-      or not v_accounting.allowed
-      or v_accounting.profile_revision <> 3
-      or v_accounting.profile_identity_digest
-        <> '3a5c4ff2c43a48d3e5b7ceded60027173d215d6f083fb33c22375758520bbe67'
-      or v_accounting.recorded_at > coalesce(new.completed_at, clock_timestamp())
-      or v_accounting.conservative_memory_upper_bound_bytes >= 234881024
-      or v_accounting.conservative_tick_egress_upper_bound_bytes >= 33554432
-      or v_accounting.conservative_egress_31d_upper_bound_bytes >= 4294967296
-      or v_accounting.projected_invocations_31d >= 400000 then
-      raise exception 'revision3_resource_accounting_precommit';
-    end if;
+  if new.status <> 'completed' or old.status is not distinct from 'completed' then
+    return new;
   end if;
+
+  select resource_guard_enabled into v_enabled
+  from xrpl_steady_v1.sessions
+  where session_id = new.session_id;
+
+  if not coalesce(v_enabled, false) then
+    return new;
+  end if;
+
+  select * into v_accounting
+  from xrpl_resource_guard_v2.tick_accounting
+  where session_id = new.session_id and tick_id = new.tick_id;
+
+  if not found
+    or not v_accounting.allowed
+    or v_accounting.profile_revision <> 3
+    or v_accounting.profile_identity_digest
+      <> '3a5c4ff2c43a48d3e5b7ceded60027173d215d6f083fb33c22375758520bbe67'
+    or v_accounting.recorded_at > coalesce(new.completed_at, clock_timestamp())
+    or v_accounting.conservative_memory_upper_bound_bytes >= 234881024
+    or v_accounting.conservative_tick_egress_upper_bound_bytes >= 33554432
+    or v_accounting.conservative_egress_31d_upper_bound_bytes >= 4294967296
+    or v_accounting.projected_invocations_31d >= 400000 then
+    raise exception 'revision3_resource_accounting_precommit';
+  end if;
+
   return new;
 end;
 $$;
@@ -344,6 +399,7 @@ as $$
         'conservativeTickEgressUpperBoundBytes', conservative_tick_egress_upper_bound_bytes,
         'conservativeEgress31dUpperBoundBytes', conservative_egress_31d_upper_bound_bytes,
         'projectedInvocations31d', projected_invocations_31d,
+        'accounting', accounting,
         'recordedAt', recorded_at
       )
       from xrpl_resource_guard_v2.tick_accounting
