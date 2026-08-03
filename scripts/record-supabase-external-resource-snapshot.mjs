@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto'
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 
+await import('./record-supabase-runtime-resource-log-snapshot.mjs')
+
 const projectRef = process.env.SUPABASE_PROJECT_ID ?? ''
 const accessToken = process.env.SUPABASE_ACCESS_TOKEN ?? ''
 const verifierToken = process.env.XRPL_READER_VERIFY_TOKEN ?? ''
@@ -305,5 +307,3 @@ try {
   await writeFile(`${evidenceDirectory}/failed-resource-external-snapshot.json`, `${JSON.stringify(failure, null, 2)}\n`)
   throw error
 }
-
-await import('./record-supabase-runtime-resource-log-snapshot.mjs')
