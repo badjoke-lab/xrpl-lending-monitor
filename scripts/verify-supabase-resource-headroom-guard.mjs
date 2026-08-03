@@ -305,4 +305,5 @@ try {
   throw error
 }
 
+await import('./verify-supabase-revision3-accounting.mjs')
 await import('./verify-supabase-operator-independence.mjs')
