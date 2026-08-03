@@ -94,8 +94,10 @@ describe('Supabase function combined statistics evidence contract', () => {
     for (const required of [
       'runtime-resource-log-snapshot.json',
       'failed-runtime-resource-log-snapshot.json',
-      'runtime CPU and memory snapshot',
-      'CPU ms p50/p95/max',
+      'function combined-statistics snapshot',
+      'max CPU ms p50/p95/max',
+      'average memory MB p50/p95/max',
+      'exact memory maximum covered',
     ]) expect(publisher).toContain(required)
   })
 })
