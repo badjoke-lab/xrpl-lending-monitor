@@ -1,6 +1,8 @@
 import { randomBytes } from 'node:crypto'
 import { mkdir, writeFile } from 'node:fs/promises'
 
+await import('./record-supabase-external-resource-snapshot.mjs')
+
 const projectRef = process.env.SUPABASE_PROJECT_ID ?? ''
 if (!/^[a-z]{20}$/.test(projectRef)) {
   throw new Error('SUPABASE_PROJECT_ID must be an exact 20-character project ref')
@@ -63,6 +65,12 @@ function numberValue(value, name) {
   return parsed
 }
 
+function integerValue(value, name) {
+  const parsed = numberValue(value, name)
+  if (!Number.isSafeInteger(parsed)) throw new Error(`${name} must be a safe integer`)
+  return parsed
+}
+
 function verifySnapshot(raw) {
   const snapshot = object(raw, 'resource snapshot')
   const thresholds = object(snapshot.thresholds, 'resource thresholds')
@@ -87,18 +95,54 @@ function verifySnapshot(raw) {
     }
   }
 
-  for (const key of ['databaseStorage', 'databaseConnections', 'edgeWall']) {
+  for (const key of [
+    'databaseStorage',
+    'databaseConnections',
+    'edgeWall',
+    'functionInvocations',
+    'bundleSize',
+  ]) {
     if (coverage[key] !== true) throw new Error(`resource coverage ${key} is missing`)
   }
   for (const key of ['edgeCpu', 'edgeMemory', 'bandwidth', 'billingAndOverage']) {
     if (coverage[key] !== false) throw new Error(`resource coverage ${key} was overstated`)
   }
 
-  numberValue(measurements.databaseBytes, 'measurements.databaseBytes')
-  numberValue(measurements.connectionCount, 'measurements.connectionCount')
-  numberValue(measurements.maxEdgeWallMilliseconds24h, 'measurements.maxEdgeWallMilliseconds24h')
-  if (typeof snapshot.allowed !== 'boolean' || !Array.isArray(snapshot.failures)) {
-    throw new Error('resource snapshot decision shape is invalid')
+  const databaseBytes = integerValue(measurements.databaseBytes, 'measurements.databaseBytes')
+  const connectionCount = integerValue(measurements.connectionCount, 'measurements.connectionCount')
+  const maxEdgeWallMilliseconds = numberValue(
+    measurements.maxEdgeWallMilliseconds24h,
+    'measurements.maxEdgeWallMilliseconds24h',
+  )
+  const invocationCount24h = integerValue(
+    measurements.invocationCount24h,
+    'measurements.invocationCount24h',
+  )
+  const projectedInvocations31d = integerValue(
+    measurements.projectedInvocations31d,
+    'measurements.projectedInvocations31d',
+  )
+  const functionCount = integerValue(measurements.functionCount, 'measurements.functionCount')
+  const maxBundleBytes = integerValue(measurements.maxBundleBytes, 'measurements.maxBundleBytes')
+  const bundleCount = integerValue(measurements.bundleCount, 'measurements.bundleCount')
+
+  if (
+    measurements.externalSnapshotFresh !== true
+    || databaseBytes >= exactThresholds.databaseHaltBytes
+    || connectionCount >= exactThresholds.connectionHalt
+    || maxEdgeWallMilliseconds >= exactThresholds.edgeWallHaltMilliseconds
+    || projectedInvocations31d >= exactThresholds.invocationHalt31d
+    || maxBundleBytes >= exactThresholds.bundleHaltBytes
+    || functionCount < 1
+    || bundleCount !== functionCount
+    || invocationCount24h * 31 !== projectedInvocations31d
+    || typeof measurements.maxBundleName !== 'string'
+    || measurements.maxBundleName.length === 0
+  ) {
+    throw new Error('live external resource snapshot is incomplete or above a halt threshold')
+  }
+  if (snapshot.allowed !== true || !Array.isArray(snapshot.failures) || snapshot.failures.length !== 0) {
+    throw new Error('live resource snapshot is not currently allowed')
   }
   return { snapshot, thresholds, coverage, measurements }
 }
@@ -223,6 +267,10 @@ async function run() {
       wrongPurposeRejected: true,
     },
     checks: {
+      externalSnapshotFresh: true,
+      functionInvocationCoverage: true,
+      bundleSizeCoverage: true,
+      liveGuardAllowed: true,
       sixFailClosedThresholdsProved: true,
       preReservationHaltProved: true,
       activeProfileReadOnly: true,
