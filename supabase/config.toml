@@ -41,3 +41,6 @@ verify_jwt=false
 
 [functions.xrpl-resource-headroom-guard]
 verify_jwt =false
+
+[functions.xrpl-r5-recovery-batch]
+verify_jwt =false
