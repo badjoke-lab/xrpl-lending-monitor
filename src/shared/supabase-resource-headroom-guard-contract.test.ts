@@ -14,6 +14,7 @@ const activationMigration = read(
   'supabase/migrations/20260803040500_xrpl_resource_headroom_activation.sql',
 )
 const edge = read('supabase/functions/xrpl-resource-headroom-guard/index.ts')
+const recorder = read('scripts/record-supabase-external-resource-snapshot.mjs')
 const verifier = read('scripts/verify-supabase-resource-headroom-guard.mjs')
 const publisher = read('scripts/publish-supabase-resource-run-locator.mjs')
 const workflow = read('.github/workflows/supabase-remote-probe.yml')
@@ -103,6 +104,50 @@ describe('Supabase R4C2d resource headroom guard contract', () => {
     }
   })
 
+  it('records exact Management API invocation and deployed-function evidence', () => {
+    for (const required of [
+      'https://api.supabase.com/v1/projects/${projectRef}',
+      "managementRequest('/functions')",
+      "managementRequest('/analytics/endpoints/logs.all'",
+      'SELECT count(*) AS invocation_count',
+      'FROM edge_logs',
+      'CROSS JOIN UNNEST(metadata) AS metadata',
+      "WHERE path LIKE '%/functions/v1/%'",
+      'iso_timestamp_start: windowStart',
+      'iso_timestamp_end: observedAt',
+      'projectedInvocations31d = invocationCount24h * 31',
+      'deployed function/bundle identity mismatch',
+      "action: 'record'",
+      'resource-external-snapshot.json',
+      'failed-resource-external-snapshot.json',
+      'functionInvocationCoverage: true',
+      'bundleSizeCoverage: true',
+      'g8Qualified: false',
+    ]) {
+      expect(recorder).toContain(required)
+    }
+  })
+
+  it('requires the fresh external snapshot before remote guard qualification', () => {
+    for (const required of [
+      "await import('./record-supabase-external-resource-snapshot.mjs')",
+      "'functionInvocations'",
+      "'bundleSize'",
+      'measurements.externalSnapshotFresh !== true',
+      'projectedInvocations31d >= exactThresholds.invocationHalt31d',
+      'maxBundleBytes >= exactThresholds.bundleHaltBytes',
+      'bundleCount !== functionCount',
+      'invocationCount24h * 31 !== projectedInvocations31d',
+      "snapshot.allowed !== true",
+      'externalSnapshotFresh: true',
+      'functionInvocationCoverage: true',
+      'bundleSizeCoverage: true',
+      'liveGuardAllowed: true',
+    ]) {
+      expect(verifier).toContain(required)
+    }
+  })
+
   it('remotely proves all six exact halt paths without overstating G8', () => {
     for (const required of [
       "const purpose = 'r4c2d-resource-headroom-guard'",
@@ -150,11 +195,21 @@ describe('Supabase R4C2d resource headroom guard contract', () => {
     expect(workflow.match(/gh issue comment 1109/g)).toHaveLength(1)
   })
 
-  it('publishes only sanitized resource evidence', () => {
+  it('publishes only sanitized external and guard evidence', () => {
     for (const required of [
+      'resource-external-snapshot.json',
+      'failed-resource-external-snapshot.json',
+      'external resource snapshot',
+      'Management API available',
+      'Edge invocations 24h',
+      'projected Edge invocations 31d',
+      'maximum bundle bytes',
       'verified-resource-headroom-guard.json',
       'failed-resource-headroom-guard-verification.json',
       'resource headroom guard verifier',
+      'external snapshot fresh',
+      'function invocation coverage',
+      'bundle size coverage',
       'six fail-closed thresholds proved',
       'pre-reservation halt proved',
       'active profile read only',
