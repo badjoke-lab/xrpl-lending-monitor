@@ -117,6 +117,27 @@ describe('Supabase R4C2d resource headroom guard contract', () => {
     expect(recorder).not.toContain("WHERE path LIKE '%/functions/v1/%'")
   })
 
+  it('retries only the documented transient logs backend error within 17 seconds', () => {
+    for (const required of [
+      "const retryableLogErrorPrefix = 'Backend error! Retry your query'",
+      'const logQueryRetryDelaysMilliseconds = [0, 2_000, 5_000, 10_000]',
+      'function isRetryableLogBackendError(raw)',
+      "typeof raw?.error === 'string' && raw.error.startsWith(retryableLogErrorPrefix)",
+      'async function queryInvocationLogsWithRetry(searchParams)',
+      'for (const [index, delayMilliseconds] of logQueryRetryDelaysMilliseconds.entries())',
+      'if (!isRetryableLogBackendError(lastResponse))',
+      'attempts: index + 1',
+      'attempts: logQueryRetryDelaysMilliseconds.length',
+      'logsQueryAttempts: logsQuery.attempts',
+      'logsQueryRetryDelayCeilingMilliseconds: 17_000',
+      'boundedTransientLogRetry: true',
+      'malformedLogQueryNotRetried: true',
+    ]) expect(recorder).toContain(required)
+    expect(recorder.match(/managementRequest\('\/analytics\/endpoints\/logs\.all'/g)).toHaveLength(1)
+    expect(recorder).not.toContain('if (raw?.error) await sleep')
+    expect(recorder).not.toContain('if (!response.ok) await sleep')
+  })
+
   it('requires the fresh external snapshot before remote guard qualification', () => {
     for (const required of [
       "await import('./record-supabase-external-resource-snapshot.mjs')",
@@ -186,6 +207,7 @@ describe('Supabase R4C2d resource headroom guard contract', () => {
       'Management API available',
       'Edge invocations 24h',
       'projected Edge invocations 31d',
+      'logs query attempts',
       'maximum bundle bytes',
       'verified-resource-headroom-guard.json',
       'failed-resource-headroom-guard-verification.json',

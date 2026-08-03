@@ -20,6 +20,8 @@ const evidenceDirectory = 'supabase-remote-probe-evidence'
 const purpose = 'r4c2d-resource-headroom-guard'
 const functionEndpoint = `https://${projectRef}.supabase.co/functions/v1/xrpl-resource-headroom-guard`
 const managementBase = `https://api.supabase.com/v1/projects/${projectRef}`
+const retryableLogErrorPrefix = 'Backend error! Retry your query'
+const logQueryRetryDelaysMilliseconds = [0, 2_000, 5_000, 10_000]
 
 function canonical(value) {
   if (Array.isArray(value)) return value.map(canonical)
@@ -48,6 +50,10 @@ function integer(value, name) {
   return parsed
 }
 
+async function sleep(milliseconds) {
+  await new Promise((resolve) => setTimeout(resolve, milliseconds))
+}
+
 async function managementRequest(path, searchParams) {
   const url = new URL(`${managementBase}${path}`)
   for (const [key, value] of Object.entries(searchParams ?? {})) url.searchParams.set(key, value)
@@ -62,6 +68,22 @@ async function managementRequest(path, searchParams) {
     throw new Error(`Supabase Management API ${path} failed (${response.status}): ${JSON.stringify(parsed).slice(0, 2_000)}`)
   }
   return parsed
+}
+
+function isRetryableLogBackendError(raw) {
+  return typeof raw?.error === 'string' && raw.error.startsWith(retryableLogErrorPrefix)
+}
+
+async function queryInvocationLogsWithRetry(searchParams) {
+  let lastResponse
+  for (const [index, delayMilliseconds] of logQueryRetryDelaysMilliseconds.entries()) {
+    if (delayMilliseconds > 0) await sleep(delayMilliseconds)
+    lastResponse = await managementRequest('/analytics/endpoints/logs.all', searchParams)
+    if (!isRetryableLogBackendError(lastResponse)) {
+      return { raw: lastResponse, attempts: index + 1 }
+    }
+  }
+  return { raw: lastResponse, attempts: logQueryRetryDelaysMilliseconds.length }
 }
 
 async function edgeRequest(body) {
@@ -161,19 +183,20 @@ async function run() {
   const windowStartDate = new Date(observedAtDate.getTime() - 24 * 60 * 60 * 1_000)
   const observedAt = observedAtDate.toISOString()
   const windowStart = windowStartDate.toISOString()
+  const logSearchParams = {
+    sql: `SELECT count() AS invocation_count\nFROM logs\nWHERE source_name = 'function_edge_logs'`,
+    iso_timestamp_start: windowStart,
+    iso_timestamp_end: observedAt,
+  }
 
-  const [rawFunctions, bundles, rawLogs] = await Promise.all([
+  const [rawFunctions, bundles, logsQuery] = await Promise.all([
     managementRequest('/functions'),
     readBundleEvidence(),
-    managementRequest('/analytics/endpoints/logs.all', {
-      sql: `SELECT count() AS invocation_count\nFROM logs\nWHERE source_name = 'function_edge_logs'`,
-      iso_timestamp_start: windowStart,
-      iso_timestamp_end: observedAt,
-    }),
+    queryInvocationLogsWithRetry(logSearchParams),
   ])
 
   const functions = extractFunctions(rawFunctions)
-  const invocationCount24h = extractInvocationCount(rawLogs)
+  const invocationCount24h = extractInvocationCount(logsQuery.raw)
   const projectedInvocations31d = invocationCount24h * 31
   if (!Number.isSafeInteger(projectedInvocations31d)) throw new Error('projected invocation count exceeds the safe integer range')
 
@@ -192,6 +215,7 @@ async function run() {
     observedAt,
     logsWindowStart: windowStart,
     logsWindowHours: 24,
+    logsQueryAttempts: logsQuery.attempts,
     managementApiAvailable: true,
     invocationCount24h,
     projectedInvocations31d,
@@ -238,11 +262,18 @@ async function run() {
   const evidence = {
     ...snapshotCore,
     evidenceDigest,
-    managementResponses: { functionsListed: functions.length, invocationAggregateRows: 1 },
+    managementResponses: {
+      functionsListed: functions.length,
+      invocationAggregateRows: 1,
+      logsQueryAttempts: logsQuery.attempts,
+      logsQueryRetryDelayCeilingMilliseconds: 17_000,
+    },
     recorded: result,
     checks: {
       managementApiAvailable: true,
       clickHouseFunctionLogQuery: true,
+      boundedTransientLogRetry: true,
+      malformedLogQueryNotRetried: true,
       exactSourceCommitBundleCoverage: true,
       exactDeployedFunctionCoverage: true,
       exactBundleEvidenceCoverage: true,
