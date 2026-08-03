@@ -21,7 +21,8 @@ The collector core is provider-neutral. Provider limits and unavailable counters
 - configured project guards must halt before provider hard limits or billable overage;
 - complete state must remain exportable into the SQLite reference format;
 - a missing provider counter remains missing and may not be replaced by a theoretical projection;
-- zero-valued runtime counters are accepted only when the runtime proves that zero is a meaningful measurement.
+- zero-valued runtime counters are accepted only when the runtime proves that zero is a meaningful measurement;
+- partial heap or external-memory counters may not substitute for an unavailable total-memory counter.
 
 ## Reference implementations
 
@@ -223,17 +224,20 @@ Every injected failure required zero tick, work, message, and successor reservat
 
 The provider statistics expose average memory but not exact maximum memory.
 
-Six real steady ticks retained 36 deterministic `Deno.memoryUsage()` lifecycle samples. Every RSS, heap-total, heap-used, and external-memory counter was zero.
+Six real steady ticks retained 36 deterministic `Deno.memoryUsage()` lifecycle samples. RSS remained zero in every retained sample. Some partial heap or external counters were nonzero, but they do not represent total process memory and cannot be compared with the provider's total Edge memory ceiling.
 
-That result is classified as **counter unavailable**, not zero consumption.
+That result is classified as **total-memory counter unavailable**, not zero consumption.
 
 Consequences:
 
 - exact maximum memory available: `false`;
+- positive RSS counter available: `false`;
+- partial heap counters available: `true`;
+- partial counters accepted as total memory: `false`;
 - memory high-water qualified: `false`;
 - memory headroom: unavailable;
 - 200 MiB fail-closed headroom proved: `false`;
-- average-memory statistics may not be substituted for exact maximum-memory evidence.
+- average-memory statistics and partial heap/external counters may not be substituted for exact maximum-memory evidence.
 
 ### Egress boundary
 
@@ -360,7 +364,8 @@ A failed headroom gate is successful guardrail behavior. No browser or visual-au
 - preserve canonical normalized data before optional raw payloads;
 - stop browser and screenshot probes before traversal when measured headroom does not pass;
 - stop before any configured paid overage or provider hard limit;
-- reject all-zero resource counters as unavailable unless zero is independently meaningful;
+- reject zero RSS as unavailable total-memory evidence;
+- never substitute partial heap or external counters for RSS;
 - keep unavailable provider surfaces visible in the final gate decision.
 
 ## Runtime selection rule
