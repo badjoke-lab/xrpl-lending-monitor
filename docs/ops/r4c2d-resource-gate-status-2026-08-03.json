@@ -4,7 +4,7 @@
   "phase": "R4C2d",
   "profileId": "supabase-devnet",
   "network": "devnet",
-  "controllingMainCommit": "6a30fffd304ae209e6d69a14433c5cd400da73d5",
+  "controllingMainCommit": "535bda53ad44ed1cfc0969ccf72c889e9254d124",
   "gates": {
     "G7": {
       "status": "qualified",
@@ -133,6 +133,29 @@
         "preReservationHalt": true,
         "activeProfileReadOnly": true
       }
+    },
+    "G9": {
+      "status": "qualified",
+      "workflowRunId": 30789994825,
+      "sourceCommit": "535bda53ad44ed1cfc0969ccf72c889e9254d124",
+      "profileRevision": 2,
+      "profileIdentityDigest": "c42edf0a1708fd2b7ea9f2e72dab32b87c1d66b260752efe38fec321253d3998",
+      "passed": true,
+      "profileSelected": false,
+      "checks": {
+        "deployScripted": true,
+        "rollbackScriptedAndRemotelyProved": true,
+        "checkpointScriptedAndRemotelyProved": true,
+        "exportScriptedAndRemotelyProved": true,
+        "restoreScriptedAndRemotelyProved": true,
+        "repeatableRestoreConvergenceProved": true,
+        "evidenceScripted": true,
+        "haltScriptedAndRemotelyProved": true,
+        "credentialRotationScripted": true,
+        "noRoutineDashboardOrTerminalOperation": true,
+        "exactProfileRevisionBound": true,
+        "activeProfileReadOnly": true
+      }
     }
   },
   "invalidatedInterpretations": [
@@ -152,8 +175,7 @@
   "remaining": [
     "usable exact maximum-memory evidence or a formally accepted non-provider alternative bound",
     "provider egress evidence or a formal unavailable-counter disposition",
-    "complete retained rollback and operator-independence evidence for G9",
-    "final R4B and R4E reconciliation"
+    "final G8, R4B, and R4E reconciliation"
   ],
   "restrictions": {
     "publicReaderCutover": false,

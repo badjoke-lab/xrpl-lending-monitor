@@ -22,7 +22,7 @@ const evidence = readFileSync(evidencePath, 'utf8')
 const decision = JSON.parse(readFileSync(decisionPath, 'utf8'))
 
 describe('R4C2d resource gate status contract', () => {
-  it('retains G7 while keeping G8 and profile selection false', () => {
+  it('retains G7 and G9 while keeping G8 and profile selection false', () => {
     expect(status.schemaVersion).toBe(1)
     expect(status.phase).toBe('R4C2d')
     expect(status.profileId).toBe('supabase-devnet')
@@ -33,6 +33,11 @@ describe('R4C2d resource gate status contract', () => {
     expect(status.gates.G8.status).toBe('incomplete')
     expect(status.gates.G8.qualified).toBe(false)
     expect(status.gates.G8.profileSelected).toBe(false)
+    expect(status.gates.G9.status).toBe('qualified')
+    expect(status.gates.G9.workflowRunId).toBe(30789994825)
+    expect(status.gates.G9.profileRevision).toBe(2)
+    expect(status.gates.G9.passed).toBe(true)
+    expect(status.gates.G9.profileSelected).toBe(false)
   })
 
   it('keeps measured resource values below their project halt thresholds', () => {
@@ -95,7 +100,28 @@ describe('R4C2d resource gate status contract', () => {
     expect(evidence).toContain('memory high-water qualified: `false`')
   })
 
-  it('evaluates the current profile as conditional with only G8 and G9 unresolved', async () => {
+  it('retains the complete revision-2 operator-independence proof', () => {
+    const operator = status.gates.G9
+    expect(operator.profileIdentityDigest).toBe(
+      'c42edf0a1708fd2b7ea9f2e72dab32b87c1d66b260752efe38fec321253d3998',
+    )
+    expect(operator.checks).toEqual({
+      deployScripted: true,
+      rollbackScriptedAndRemotelyProved: true,
+      checkpointScriptedAndRemotelyProved: true,
+      exportScriptedAndRemotelyProved: true,
+      restoreScriptedAndRemotelyProved: true,
+      repeatableRestoreConvergenceProved: true,
+      evidenceScripted: true,
+      haltScriptedAndRemotelyProved: true,
+      credentialRotationScripted: true,
+      noRoutineDashboardOrTerminalOperation: true,
+      exactProfileRevisionBound: true,
+      activeProfileReadOnly: true,
+    })
+  })
+
+  it('evaluates the current profile as conditional with only G8 unresolved', async () => {
     const evaluated = await evaluateDeploymentProfileQualification({
       schemaVersion: decision.schemaVersion,
       evaluatedAt: decision.evaluatedAt,
@@ -109,12 +135,13 @@ describe('R4C2d resource gate status contract', () => {
     expect(evaluated.classification).toBe('conditional_candidate')
     expect(evaluated.selection).toBe('not_selected')
     expect(evaluated.eligibleForScoring).toBe(false)
-    expect(evaluated.gateSummary).toEqual({ passed: 8, failed: 0, unresolved: 2 })
+    expect(evaluated.gateSummary).toEqual({ passed: 9, failed: 0, unresolved: 1 })
     expect(evaluated.failedGates).toEqual([])
-    expect(evaluated.unresolvedGates).toEqual(['G8', 'G9'])
+    expect(evaluated.unresolvedGates).toEqual(['G8'])
+    expect(evaluated.evidence.find((entry) => entry.gateId === 'G9')?.status).toBe('pass')
     expect(evaluated.scoreSummary).toBeNull()
     expect(evaluated.decisionDigest).toBe(
-      '407f37226dc47663c7f980a8a1b3c04ed09a03a97add950f1d061db61ba5b897',
+      'e142f849d59d822da8e5fec5bea8f8dec600950e880b6e597b1971dfcd610b36',
     )
   })
 
