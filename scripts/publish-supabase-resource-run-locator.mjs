@@ -18,6 +18,8 @@ const success = read('verified-resource-headroom-guard.json')
 const failure = read('failed-resource-headroom-guard-verification.json')
 const external = read('resource-external-snapshot.json')
 const externalFailure = read('failed-resource-external-snapshot.json')
+const runtime = read('runtime-resource-log-snapshot.json')
+const runtimeFailure = read('failed-runtime-resource-log-snapshot.json')
 const bundle = read('resource-headroom-guard-bundle.json')
 const lines = [
   '',
@@ -61,6 +63,32 @@ if (external) {
   )
 } else {
   lines.push('- external resource snapshot: `not reached or no sanitized evidence produced`')
+}
+
+if (runtime) {
+  lines.push(
+    '- runtime CPU and memory snapshot: `success`',
+    `- runtime snapshot observed at: \`${String(runtime.observedAt ?? 'unknown')}\``,
+    `- runtime query attempts: \`${String(runtime.queryAttempts ?? 'unknown')}\``,
+    `- parsed ShutdownEvent count: \`${String(runtime.parsedShutdownEvents ?? 'unknown')}\``,
+    `- rejected runtime rows: \`${String(runtime.rejectedRows ?? 'unknown')}\``,
+    `- shutdown reasons: \`${JSON.stringify(runtime.reasons ?? {})}\``,
+    `- CPU ms p50/p95/max: \`${String(runtime.cpuMilliseconds?.p50 ?? 'unknown')} / ${String(runtime.cpuMilliseconds?.p95 ?? 'unknown')} / ${String(runtime.cpuMilliseconds?.maximum ?? 'unknown')}\``,
+    `- total memory bytes p50/p95/max: \`${String(runtime.memoryTotalBytes?.p50 ?? 'unknown')} / ${String(runtime.memoryTotalBytes?.p95 ?? 'unknown')} / ${String(runtime.memoryTotalBytes?.maximum ?? 'unknown')}\``,
+    `- CPU below halt threshold: \`${String(runtime.checks?.cpuBelowHaltThreshold ?? 'unknown')}\``,
+    `- memory below halt threshold: \`${String(runtime.checks?.memoryBelowHaltThreshold ?? 'unknown')}\``,
+    `- terminal resource shutdowns absent: \`${String(runtime.checks?.noTerminalResourceShutdowns ?? 'unknown')}\``,
+    `- raw runtime messages retained: \`${String(!(runtime.checks?.noRawEventMessagesRetained ?? false))}\``,
+    `- execution IDs retained: \`${String(!(runtime.checks?.noExecutionIdsRetained ?? false))}\``,
+  )
+} else if (runtimeFailure) {
+  lines.push(
+    '- runtime CPU and memory snapshot: `failed`',
+    `- runtime snapshot failed at: \`${String(runtimeFailure.failedAt ?? 'unknown')}\``,
+    `- runtime snapshot reason: \`${String(runtimeFailure.reason ?? 'unknown')}\``,
+  )
+} else {
+  lines.push('- runtime CPU and memory snapshot: `not reached or no sanitized evidence produced`')
 }
 
 if (success) {
