@@ -20,6 +20,8 @@ const external = read('resource-external-snapshot.json')
 const externalFailure = read('failed-resource-external-snapshot.json')
 const runtime = read('runtime-resource-log-snapshot.json')
 const runtimeFailure = read('failed-runtime-resource-log-snapshot.json')
+const orgUsage = read('org-usage-billing-snapshot.json')
+const orgUsageFailure = read('failed-org-usage-billing-snapshot.json')
 const bundle = read('resource-headroom-guard-bundle.json')
 const lines = [
   '',
@@ -90,6 +92,33 @@ if (runtime) {
   )
 } else {
   lines.push('- function combined-statistics snapshot: `not reached or no sanitized evidence produced`')
+}
+
+if (orgUsage) {
+  lines.push(
+    '- organization usage and billing snapshot: `success`',
+    `- organization usage observed at: \`${String(orgUsage.observedAt ?? 'unknown')}\``,
+    `- organization usage window: \`${String(orgUsage.windowStart ?? 'unknown')} .. ${String(orgUsage.windowEnd ?? 'unknown')}\``,
+    `- organization plan: \`${String(orgUsage.planId ?? 'unknown')}\``,
+    `- automatic overage enabled: \`${String(orgUsage.usageBillingEnabled ?? 'unknown')}\``,
+    `- uncached egress bytes 31d: \`${String(orgUsage.uncachedEgressBytes31d ?? 'unknown')}\``,
+    `- cached egress bytes 31d: \`${String(orgUsage.cachedEgressBytes31d ?? 'unknown')}\``,
+    `- function invocations 31d: \`${String(orgUsage.functionInvocations31d ?? 'unknown')}\``,
+    `- Free plan confirmed: \`${String(orgUsage.checks?.freePlanConfirmed ?? 'unknown')}\``,
+    `- provider no-charge state confirmed: \`${String(orgUsage.checks?.providerNoChargeStateConfirmed ?? 'unknown')}\``,
+    `- uncached egress below halt threshold: \`${String(orgUsage.checks?.uncachedEgressBelowHaltThreshold ?? 'unknown')}\``,
+    `- cached egress below halt threshold: \`${String(orgUsage.checks?.cachedEgressBelowHaltThreshold ?? 'unknown')}\``,
+    `- organization slug retained: \`${String(orgUsage.checks?.organizationSlugRetained ?? 'unknown')}\``,
+    `- billing identifiers retained: \`${String(orgUsage.checks?.billingIdentifiersRetained ?? 'unknown')}\``,
+  )
+} else if (orgUsageFailure) {
+  lines.push(
+    '- organization usage and billing snapshot: `failed`',
+    `- organization usage failed at: \`${String(orgUsageFailure.failedAt ?? 'unknown')}\``,
+    `- organization usage reason: \`${String(orgUsageFailure.reason ?? 'unknown')}\``,
+  )
+} else {
+  lines.push('- organization usage and billing snapshot: `not reached or no sanitized evidence produced`')
 }
 
 if (success) {

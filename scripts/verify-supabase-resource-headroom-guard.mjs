@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import { mkdir, writeFile } from 'node:fs/promises'
 
+await import('./record-supabase-org-usage-billing-snapshot.mjs')
 await import('./record-supabase-external-resource-snapshot.mjs')
 
 const projectRef = process.env.SUPABASE_PROJECT_ID ?? ''
