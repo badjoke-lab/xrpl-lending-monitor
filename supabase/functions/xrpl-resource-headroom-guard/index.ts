@@ -9,9 +9,19 @@ const GUARD_KINDS = [
   'invocations',
   'bundle',
 ] as const
+const REVISION3_GUARD_KINDS = [
+  'missing_accounting',
+  'unsafe_accounting',
+  'memory_halt',
+  'tick_egress_halt',
+  'monthly_egress_halt',
+  'invocation_halt',
+  'future_record',
+] as const
 
 type JsonObject = Record<string, unknown>
 type GuardKind = (typeof GUARD_KINDS)[number]
+type Revision3GuardKind = (typeof REVISION3_GUARD_KINDS)[number]
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -167,6 +177,35 @@ function verifyQualificationResult(value: JsonObject, guardKind: GuardKind): voi
   }
 }
 
+function verifyRevision3QualificationResult(
+  value: JsonObject,
+  guardKind: Revision3GuardKind,
+): void {
+  if (value.guardKind !== guardKind || value.rejected !== true) {
+    throw new Error(`revision-3 qualification ${guardKind} did not reject completion`)
+  }
+  const counts = object(value.guardedCounts, `${guardKind} guardedCounts`)
+  for (const key of ['ticks', 'works', 'messages', 'successors']) {
+    if (requiredInteger(counts[key], `${guardKind}.${key}`) !== 0) {
+      throw new Error(`revision-3 qualification ${guardKind} mutated guarded state`)
+    }
+  }
+  const checks = object(value.checks, `${guardKind} checks`)
+  for (const key of [
+    'precommitRejected',
+    'noCompletedTick',
+    'noWorkCommitted',
+    'noMessageReserved',
+    'noSuccessorReserved',
+    'activeProfileReadOnly',
+    'exactRevision3Identity',
+  ]) {
+    if (checks[key] !== true) {
+      throw new Error(`revision-3 qualification ${guardKind}.${key} failed`)
+    }
+  }
+}
+
 async function handleQualification(body: JsonObject): Promise<Response> {
   const action = requiredString(body.action, 'action')
   const observedAt = new Date().toISOString()
@@ -260,6 +299,49 @@ async function handleQualification(body: JsonObject): Promise<Response> {
         noGuardedStateReserved: true,
         activeProfileReadOnly: true,
         exactThresholdInjection: true,
+        profileSelected: false,
+        g8Qualified: false,
+      },
+    })
+  }
+
+  if (action === 'qualify_revision3') {
+    const qualificationId = requiredString(body.qualificationId, 'qualificationId').toLowerCase()
+    if (!/^[a-z0-9][a-z0-9-]{7,39}$/u.test(qualificationId)) {
+      return json({ error: 'invalid_qualification_id' }, 400)
+    }
+
+    const results: JsonObject[] = []
+    for (const guardKind of REVISION3_GUARD_KINDS) {
+      const result = await rpc<JsonObject>('xrpl_qualify_revision3_accounting_precommit', {
+        p_qualification_id: `${qualificationId}-${guardKind.replaceAll('_', '-')}`,
+        p_guard_kind: guardKind,
+        p_observed_at: observedAt,
+      })
+      verifyRevision3QualificationResult(result, guardKind)
+      results.push(result)
+    }
+
+    return json({
+      schemaVersion: 1,
+      purpose: PURPOSE,
+      action,
+      observedAt,
+      qualificationId,
+      profileId: 'supabase_free_postgres_pgcron_edge',
+      profileRevision: 3,
+      profileIdentityDigest:
+        '3a5c4ff2c43a48d3e5b7ceded60027173d215d6f083fb33c22375758520bbe67',
+      guardKinds: REVISION3_GUARD_KINDS,
+      results,
+      checks: {
+        allSevenRevision3GuardsRejected:
+          results.length === REVISION3_GUARD_KINDS.length,
+        noGuardedStateMutation: true,
+        activeProfileReadOnly: true,
+        exactRevision3Identity: true,
+        unavailableProviderMemoryNotClaimed: true,
+        unavailableProviderEgressNotClaimed: true,
         profileSelected: false,
         g8Qualified: false,
       },
