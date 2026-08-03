@@ -114,16 +114,20 @@ describe('Supabase steady Edge memory guard contract', () => {
     ]) expect(verifier).toContain(required)
   })
 
-  it('publishes only aggregate headroom and per-tick high water', () => {
+  it('publishes unavailable memory counters without fake headroom', () => {
     for (const required of [
-      'steady memory measured ticks',
-      'steady memory samples',
-      'steady memory high water per tick',
+      'steady memory lifecycle samples recorded',
+      'steady memory runtime counters available',
+      'steady memory counter reason',
+      'all runtime memory counters zero',
+      'zero counters interpreted as zero usage',
+      'steady memory high water qualified',
       'steady memory min/p50/p95/max bytes',
       'steady memory halt/hard bytes',
       'steady memory headroom bytes',
-      'all six ticks below memory halt',
+      "'unavailable'",
       'memory recorded before commit',
+      'memory coverage not overstated',
       'memory fail-closed below hard limit',
     ]) expect(publisher).toContain(required)
   })

@@ -130,3 +130,5 @@ try {
   )
   throw error
 }
+
+await import('./reconcile-supabase-steady-memory-capability.mjs')
