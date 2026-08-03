@@ -95,11 +95,14 @@ Deno.serve(async (request) => {
     }
 
     if (action === 'read') {
-      const [session, memory] = await Promise.all([
+      const [session, memory, revision3Accounting] = await Promise.all([
         rpc<JsonObject>('xrpl_read_network_steady_session', {
           p_session_id: sessionId,
         }),
         rpc<JsonObject>('xrpl_read_network_steady_memory', {
+          p_session_id: sessionId,
+        }),
+        rpc<JsonObject>('xrpl_read_revision3_session_accounting', {
           p_session_id: sessionId,
         }),
       ])
@@ -110,6 +113,7 @@ Deno.serve(async (request) => {
         sessionId,
         session,
         memory,
+        revision3Accounting,
         checkedAt: new Date().toISOString(),
       })
     }
