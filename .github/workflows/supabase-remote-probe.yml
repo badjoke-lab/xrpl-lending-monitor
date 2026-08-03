@@ -24,6 +24,7 @@ on:
       - 'scripts/verify-supabase-resource-headroom-guard.mjs'
       - 'scripts/verify-supabase-r5-active-checkpoint.mjs'
       - 'scripts/verify-supabase-r5-recovery-prepare.mjs'
+      - 'scripts/verify-supabase-r5-recovery-ready.mjs'
       - 'scripts/verify-supabase-r5-first-recovery-batch.mjs'
       - 'scripts/record-supabase-external-resource-snapshot.mjs'
       - 'scripts/record-supabase-provider-metric-capability.mjs'
@@ -147,7 +148,7 @@ jobs:
       - name: Link exact Supabase project
         run: supabase link --project-ref "$SUPABASE_PROJECT_ID" --password "$SUPABASE_DB_PASSWORD"
 
-      - name: Rotate one-run verification tokens
+      - name: Rotate one-run committed reader verifier token
         shell: bash
         run: |
           set -euo pipefail
@@ -222,8 +223,8 @@ jobs:
         run: node scripts/verify-supabase-resource-headroom-guard.mjs
       - name: Freeze exact R5 active checkpoint
         run: node scripts/verify-supabase-r5-active-checkpoint.mjs
-      - name: Prepare exact R5 active recovery
-        run: node scripts/verify-supabase-r5-recovery-prepare.mjs
+      - name: Prepare or verify exact R5 active recovery
+        run: node scripts/verify-supabase-r5-recovery-ready.mjs
       - name: Execute and verify exactly one first R5 recovery batch
         run: node scripts/verify-supabase-r5-first-recovery-batch.mjs
 
