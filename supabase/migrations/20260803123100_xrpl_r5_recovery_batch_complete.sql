@@ -37,6 +37,7 @@ declare
   v_counts jsonb;
   v_payload jsonb;
   v_rows jsonb;
+  v_payload_record jsonb;
   v_ordinal integer;
   v_chunk_index integer;
   v_chunk_count integer;
@@ -74,7 +75,6 @@ declare
   v_relationship_ids jsonb;
   v_value_json text;
   v_is_tombstone boolean;
-  v_created_at timestamptz;
   v_rows_digest text;
   v_database_started timestamptz := clock_timestamp();
   v_database_milliseconds numeric;
@@ -379,10 +379,12 @@ begin
     end;
     if jsonb_typeof(v_plan) <> 'object'
       or jsonb_typeof(v_counts) <> 'object'
-      or v_plan->>'workId' <> v_work_id
+      or (v_plan->>'schemaVersion')::integer <> 1
+      or v_plan->>'network' <> v_run.network
+      or v_plan->>'epochId' <> v_run.epoch_id
+      or v_plan->>'baseIdentity' <> v_run.base_identity
       or (v_plan->>'previousLedgerIndex')::bigint <> v_previous_index
-      or (v_plan->>'startLedgerIndex')::bigint <> v_start_index
-      or (v_plan->>'endLedgerIndex')::bigint <> v_end_index
+      or (v_plan->>'plannedEndLedgerIndex')::bigint <> v_end_index
       or upper(v_plan->>'expectedParentHash') <> v_expected_parent
       or coalesce((v_counts->>'validatedLedgers')::integer, -1) <> 1 then
       raise exception 'r5_recovery_batch_work_plan_invalid_at_%', v_ordinal;
@@ -430,9 +432,9 @@ begin
         or v_reference_rows_digest !~ '^[a-f0-9]{64}$'
         or encode(digest(convert_to(v_chunk_payload_json, 'UTF8'), 'sha256'), 'hex')
           <> v_encoded_digest
-        or octet_length(v_chunk_payload_json)
+        or octet_length(convert_to(v_chunk_payload_json, 'UTF8'))
           <> (v_chunk.value->>'byteCount')::integer
-        or octet_length(v_chunk_payload_json) > 512000
+        or octet_length(convert_to(v_chunk_payload_json, 'UTF8')) > 512000
         or encode(digest(convert_to(v_reference_rows_json, 'UTF8'), 'sha256'), 'hex')
           <> v_reference_rows_digest then
         raise exception 'r5_recovery_batch_chunk_invalid_at_%_%',
@@ -467,7 +469,8 @@ begin
       ) values (
         v_work_id, v_chunk_index, 'normalized-payload-chunk-json-v1',
         v_chunk_payload_json, v_chunk_digest, v_encoded_digest,
-        octet_length(v_chunk_payload_json), v_record_count, p_completed_at
+        octet_length(convert_to(v_chunk_payload_json, 'UTF8')),
+        v_record_count, p_completed_at
       );
 
       for v_row in select value from jsonb_array_elements(v_rows)
@@ -488,7 +491,6 @@ begin
           else v_row.value->>'valueJson'
         end;
         v_is_tombstone := (v_row.value->>'isTombstone')::boolean;
-        v_created_at := (v_row.value->>'createdAt')::timestamptz;
 
         if v_semantic_class not in (
           'validated-ledger', 'protocol-event', 'object-change',
@@ -498,8 +500,7 @@ begin
           or v_canonical_key is null or length(v_canonical_key) = 0
           or v_source_ledger_index <> v_start_index
           or v_source_ledger_hash <> v_final_hash
-          or jsonb_typeof(v_relationship_ids) <> 'array'
-          or v_created_at is null then
+          or jsonb_typeof(v_relationship_ids) <> 'array' then
           raise exception 'r5_recovery_batch_row_identity_invalid_at_%',
             v_ordinal;
         end if;
@@ -533,6 +534,32 @@ begin
           perform v_value_json::jsonb;
         end if;
 
+        select payload_record into v_payload_record
+        from jsonb_array_elements(v_payload->'records') payload_record
+        where payload_record->>'semanticClass' = v_semantic_class
+          and payload_record->>'canonicalKey' = v_canonical_key
+        limit 1;
+        if not found
+          or (v_payload_record->>'sourceLedgerIndex')::bigint
+            <> v_source_ledger_index
+          or upper(v_payload_record->>'sourceLedgerHash')
+            <> v_source_ledger_hash
+          or coalesce(nullif(upper(
+            v_payload_record->>'sourceTransactionHash'
+          ), ''), '') <> coalesce(v_source_transaction_hash, '')
+          or coalesce(nullif(v_payload_record->>'objectId', ''), '')
+            <> coalesce(v_object_id, '')
+          or v_payload_record->'relationshipIds' <> v_relationship_ids
+          or (v_payload_record->>'isTombstone')::boolean
+            <> v_is_tombstone
+          or (v_value_json is null
+            and v_payload_record->'value' <> 'null'::jsonb)
+          or (v_value_json is not null
+            and v_payload_record->'value' <> v_value_json::jsonb) then
+          raise exception 'r5_recovery_batch_row_payload_mismatch_at_%',
+            v_ordinal;
+        end if;
+
         insert into public.xrpl_phase_reference_rows (
           work_id, semantic_class, canonical_key, source_ledger_index,
           source_ledger_hash, source_transaction_hash, object_id,
@@ -541,7 +568,7 @@ begin
           v_work_id, v_semantic_class, v_canonical_key,
           v_source_ledger_index, v_source_ledger_hash,
           v_source_transaction_hash, v_object_id, v_relationship_ids,
-          v_value_json, v_is_tombstone, v_created_at
+          v_value_json, v_is_tombstone, p_completed_at
         );
 
         v_work_row_count := v_work_row_count + 1;
