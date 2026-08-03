@@ -87,7 +87,7 @@ describe('Supabase R4C2d resource headroom guard contract', () => {
       "body.source === 'pg_cron'",
       "request.headers.get('apikey') !== key",
       "'xrpl_guard_network_steady_session'",
-      "'/functions/v1/xrpl-steady-batch-tick'",
+      '/functions/v1/xrpl-steady-batch-tick',
       "action === 'read'",
       "'xrpl_read_resource_guard_snapshot'",
       "action === 'record'",
