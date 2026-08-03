@@ -9,6 +9,7 @@ function read(path: string): string {
 
 const verifier = read('scripts/verify-supabase-operator-independence.mjs')
 const resourceVerifier = read('scripts/verify-supabase-resource-headroom-guard.mjs')
+const resourcePublisher = read('scripts/publish-supabase-resource-run-locator.mjs')
 const operatorPublisher = read('scripts/publish-supabase-operator-run-locator.mjs')
 const workflow = read('.github/workflows/supabase-remote-probe.yml')
 
@@ -122,6 +123,9 @@ describe('Supabase G9 operator-independence contract', () => {
   })
 
   it('publishes sanitized G9 success and failure boundaries', () => {
+    expect(resourcePublisher).toContain(
+      "await import('./publish-supabase-operator-run-locator.mjs')",
+    )
     for (const required of [
       'verified-operator-independence.json',
       'failed-operator-independence.json',
