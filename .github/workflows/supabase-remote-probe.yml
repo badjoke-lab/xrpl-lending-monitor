@@ -21,6 +21,7 @@ on:
       - 'scripts/verify-supabase-catchup-throughput.mjs'
       - 'scripts/verify-supabase-steady-throughput.mjs'
       - 'scripts/verify-supabase-resource-headroom-guard.mjs'
+      - 'scripts/record-supabase-external-resource-snapshot.mjs'
       - 'scripts/publish-supabase-run-locator.mjs'
       - 'scripts/publish-supabase-steady-run-locator.mjs'
       - 'scripts/publish-supabase-resource-run-locator.mjs'
