@@ -20,8 +20,10 @@ on:
       - 'scripts/verify-supabase-throughput-resource-baseline.mjs'
       - 'scripts/verify-supabase-catchup-throughput.mjs'
       - 'scripts/verify-supabase-steady-throughput.mjs'
+      - 'scripts/verify-supabase-resource-headroom-guard.mjs'
       - 'scripts/publish-supabase-run-locator.mjs'
       - 'scripts/publish-supabase-steady-run-locator.mjs'
+      - 'scripts/publish-supabase-resource-run-locator.mjs'
       - '.github/workflows/supabase-remote-probe.yml'
 
 permissions:
@@ -127,6 +129,7 @@ jobs:
           bundle_function 'supabase/functions/xrpl-catchup-throughput/index.ts' '/tmp/xrpl-catchup-throughput-index.ts' "$evidence_dir/catchup-throughput-bundle.json"
           bundle_function 'supabase/functions/xrpl-steady-batch-tick/index.ts' '/tmp/xrpl-steady-batch-tick-index.ts' "$evidence_dir/steady-batch-tick-bundle.json"
           bundle_function 'supabase/functions/xrpl-steady-throughput-qualification/index.ts' '/tmp/xrpl-steady-throughput-qualification-index.ts' "$evidence_dir/steady-throughput-qualification-bundle.json"
+          bundle_function 'supabase/functions/xrpl-resource-headroom-guard/index.ts' '/tmp/xrpl-resource-headroom-guard-index.ts' "$evidence_dir/resource-headroom-guard-bundle.json"
 
       - name: Link exact Supabase project
         run: supabase link --project-ref "$SUPABASE_PROJECT_ID" --password "$SUPABASE_DB_PASSWORD"
@@ -169,6 +172,8 @@ jobs:
         run: supabase functions deploy xrpl-steady-batch-tick --project-ref "$SUPABASE_PROJECT_ID" --use-api --no-verify-jwt
       - name: Deploy network steady qualification bundle
         run: supabase functions deploy xrpl-steady-throughput-qualification --project-ref "$SUPABASE_PROJECT_ID" --use-api --no-verify-jwt
+      - name: Deploy resource headroom guard bundle
+        run: supabase functions deploy xrpl-resource-headroom-guard --project-ref "$SUPABASE_PROJECT_ID" --use-api --no-verify-jwt
 
       - name: Verify repeated remote portable phase execution
         run: node scripts/verify-supabase-remote-probe.mjs
@@ -190,6 +195,8 @@ jobs:
         run: node scripts/verify-supabase-catchup-throughput.mjs
       - name: Verify network steady throughput
         run: node scripts/verify-supabase-steady-throughput.mjs
+      - name: Verify resource headroom fail-closed guards
+        run: node scripts/verify-supabase-resource-headroom-guard.mjs
 
       - name: Upload sanitized remote evidence
         if: always()
@@ -222,6 +229,7 @@ jobs:
           # verified-throughput-resource-baseline.json / failed-throughput-resource-baseline-verification.json
           # verified-catchup-throughput.json / failed-catchup-throughput-verification.json
           # verified-steady-throughput.json / failed-steady-throughput-verification.json
+          # verified-resource-headroom-guard.json / failed-resource-headroom-guard-verification.json
           # phase watermark ledger / consecutive failures
           # historical witness verifier: `success`
           # multi-chunk witness verifier: `success`
@@ -231,6 +239,8 @@ jobs:
           # throughput resource baseline verifier: `success`
           # catch-up throughput verifier: `success`
           # steady throughput verifier: `success`
+          # resource headroom guard verifier: `success`
           node scripts/publish-supabase-run-locator.mjs > /tmp/supabase-run-comment.md
           node scripts/publish-supabase-steady-run-locator.mjs >> /tmp/supabase-run-comment.md
+          node scripts/publish-supabase-resource-run-locator.mjs >> /tmp/supabase-run-comment.md
           gh issue comment 1109 --repo "$GITHUB_REPOSITORY" --body-file /tmp/supabase-run-comment.md
