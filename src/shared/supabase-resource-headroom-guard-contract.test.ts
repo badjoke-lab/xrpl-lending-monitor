@@ -11,6 +11,7 @@ const guardMigration = read('supabase/migrations/20260803040000_xrpl_resource_he
 const activationMigration = read('supabase/migrations/20260803040500_xrpl_resource_headroom_activation.sql')
 const edge = read('supabase/functions/xrpl-resource-headroom-guard/index.ts')
 const recorder = read('scripts/record-supabase-external-resource-snapshot.mjs')
+const runtime = read('scripts/record-supabase-runtime-resource-log-snapshot.mjs')
 const verifier = read('scripts/verify-supabase-resource-headroom-guard.mjs')
 const publisher = read('scripts/publish-supabase-resource-run-locator.mjs')
 const workflow = read('.github/workflows/supabase-remote-probe.yml')
@@ -92,50 +93,43 @@ describe('Supabase R4C2d resource headroom guard contract', () => {
     ]) expect(edge).toContain(required)
   })
 
-  it('records exact ClickHouse invocation and deployed-function evidence', () => {
+  it('records exact combined-statistics invocation and deployed-function evidence', () => {
     for (const required of [
-      'https://api.supabase.com/v1/projects/${projectRef}',
-      "managementRequest('/functions')",
-      "managementRequest('/analytics/endpoints/logs.all'",
-      'SELECT count() AS invocation_count',
-      'FROM logs',
-      "WHERE source_name = 'function_edge_logs'",
-      'iso_timestamp_start: windowStart',
-      'iso_timestamp_end: observedAt',
+      "await import('./record-supabase-runtime-resource-log-snapshot.mjs')",
+      'runtime-resource-log-snapshot.json',
+      "value.purpose !== 'r4c2d-function-combined-stats-snapshot'",
+      "value.interval !== '1day'",
+      'value.checks?.officialCombinedStatsEndpoint !== true',
+      'const invocationCount24h = runtime.invocationCount24h',
+      "invocationSource: 'functions.combined-stats'",
       'projectedInvocations31d = invocationCount24h * 31',
-      'deployed function/bundle identity mismatch',
+      'deployed function/bundle/combined-stats identity mismatch',
       "action: 'record'",
       'resource-external-snapshot.json',
       'failed-resource-external-snapshot.json',
-      'clickHouseFunctionLogQuery: true',
+      'officialCombinedStatsInvocationSource: true',
+      'logsBackendNotRequired: true',
       'functionInvocationCoverage: true',
       'bundleSizeCoverage: true',
       'g8Qualified: false',
     ]) expect(recorder).toContain(required)
-    expect(recorder).not.toContain('UNNEST(')
-    expect(recorder).not.toContain('FROM edge_logs')
-    expect(recorder).not.toContain("WHERE path LIKE '%/functions/v1/%'")
+    expect(recorder).not.toContain('/analytics/endpoints/logs.all')
+    expect(recorder).not.toContain('Backend error! Retry your query')
   })
 
-  it('retries only the documented transient logs backend error within 17 seconds', () => {
+  it('requires all active functions and official one-day metrics before recording invocation coverage', () => {
     for (const required of [
-      "const retryableLogErrorPrefix = 'Backend error! Retry your query'",
-      'const logQueryRetryDelaysMilliseconds = [0, 2_000, 5_000, 10_000]',
-      'function isRetryableLogBackendError(raw)',
-      "typeof raw?.error === 'string' && raw.error.startsWith(retryableLogErrorPrefix)",
-      'async function queryInvocationLogsWithRetry(searchParams)',
-      'for (const [index, delayMilliseconds] of logQueryRetryDelaysMilliseconds.entries())',
-      'if (!isRetryableLogBackendError(lastResponse))',
-      'attempts: index + 1',
-      'attempts: logQueryRetryDelaysMilliseconds.length',
-      'logsQueryAttempts: logsQuery.attempts',
-      'logsQueryRetryDelayCeilingMilliseconds: 17_000',
-      'boundedTransientLogRetry: true',
-      'malformedLogQueryNotRetried: true',
-    ]) expect(recorder).toContain(required)
-    expect(recorder.match(/managementRequest\('\/analytics\/endpoints\/logs\.all'/g)).toHaveLength(1)
-    expect(recorder).not.toContain('if (raw?.error) await sleep')
-    expect(recorder).not.toContain('if (!response.ok) await sleep')
+      "managementRequest('/functions')",
+      "managementRequest('/analytics/endpoints/functions.combined-stats'",
+      "const interval = '1day'",
+      'function_id: fn.id',
+      'exactActiveFunctionCoverage: functionStats.length === functions.length',
+      'invocationCount24h',
+      'requestsCount24h',
+      'officialCombinedStatsEndpoint: true',
+      'rawAnalyticsRowsRetained: false',
+      'functionIdsRetained: false',
+    ]) expect(runtime).toContain(required)
   })
 
   it('requires the fresh external snapshot before remote guard qualification', () => {
@@ -183,6 +177,7 @@ describe('Supabase R4C2d resource headroom guard contract', () => {
     expect(config).toContain('[functions.xrpl-resource-headroom-guard]')
     for (const required of [
       "'scripts/verify-supabase-resource-headroom-guard.mjs'",
+      "'scripts/record-supabase-external-resource-snapshot.mjs'",
       "'scripts/publish-supabase-resource-run-locator.mjs'",
       "'supabase/functions/xrpl-resource-headroom-guard/index.ts'",
       'resource-headroom-guard-bundle.json',
@@ -207,7 +202,6 @@ describe('Supabase R4C2d resource headroom guard contract', () => {
       'Management API available',
       'Edge invocations 24h',
       'projected Edge invocations 31d',
-      'logs query attempts',
       'maximum bundle bytes',
       'verified-resource-headroom-guard.json',
       'failed-resource-headroom-guard-verification.json',
