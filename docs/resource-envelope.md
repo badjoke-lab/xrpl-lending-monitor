@@ -247,7 +247,7 @@ Consequences:
 
 An application-level conservative byte bound may be retained as a separate engineering signal, but it must not be described as provider egress usage.
 
-### Plan, billing, and automatic overage
+### Plan and no-charge boundary
 
 The PAT-compatible Management API proves:
 
@@ -255,17 +255,33 @@ The PAT-compatible Management API proves:
 - exact project-to-organization binding;
 - organization plan `free`.
 
-It does not expose the Studio usage-billing flag or automatic-overage state to the verifier.
+Official provider policy establishes:
+
+- Spend Cap configuration is a paid-plan feature;
+- Free-plan over-usage is not charged;
+- quota exhaustion produces notification, grace period, and service restriction;
+- Free egress and Edge Function invocation quotas have no over-usage price.
 
 Consequences:
 
-- Free plan identity: measured;
-- Free no-charge policy applicability: recorded;
-- usage-billing flag coverage: `false`;
-- automatic-overage API coverage: `false`;
-- billing and overage qualification: `false`.
+- G1 no mandatory payment/card: `pass`;
+- G2 no automatic paid overage: `pass`;
+- usage-billing flag: not applicable to the Free-plan no-charge decision;
+- automatic paid overage possible: `false`;
+- billing and no-charge qualification: `pass`.
 
-Free-plan identity is not a replacement for missing billing-state evidence.
+This policy result does not provide provider egress consumption and does not close G8.
+
+## Current R4B decision
+
+The controlling revision-2 decision is [`ops/r4c2d-supabase-r4b-decision-2026-08-03.json`](ops/r4c2d-supabase-r4b-decision-2026-08-03.json).
+
+- classification: `conditional_candidate`;
+- selection: `not_selected`;
+- eligible for scoring: `false`;
+- passed gates: `8`;
+- failed gates: `0`;
+- unresolved gates: `G8`, `G9`.
 
 ## Storage and database reads
 
@@ -320,7 +336,7 @@ A failed headroom gate is successful guardrail behavior. No browser or visual-au
 
 - usable exact maximum-memory evidence or a formally accepted alternative bound;
 - provider egress evidence or a formal unavailable-counter disposition;
-- usage-billing and automatic-overage evidence or a formal hard-gate failure;
+- complete retained rollback and unattended operator-independence evidence;
 - hot-store growth per day and per 1,000 protocol events;
 - index write amplification;
 - scheduler operations and retries per day;
