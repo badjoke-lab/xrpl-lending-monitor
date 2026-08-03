@@ -3,7 +3,13 @@ import { spawn } from 'node:child_process'
 
 const evidenceDirectory = 'supabase-remote-probe-evidence'
 const verifierPath = 'scripts/verify-supabase-steady-throughput.mjs'
-const retryableReason = 'steady completed ticks are not six consecutive minute buckets'
+const cadenceRetryReason = 'steady completed ticks are not six consecutive minute buckets'
+const transientReadStatuses = [429, 500, 502, 503, 504, 520, 522, 524]
+const retryableReasons = [
+  cadenceRetryReason,
+  ...transientReadStatuses.map((status) => `steady session read failed (${status}):`),
+  ...transientReadStatuses.map((status) => `steady session preparation failed (${status}):`),
+]
 
 async function runVerifier(attempt) {
   return await new Promise((resolve, reject) => {
@@ -29,10 +35,16 @@ async function runVerifier(attempt) {
   })
 }
 
-async function preserveFirstFailure(first) {
+function retryReason(output) {
+  return retryableReasons.find((reason) => output.includes(reason)) ?? null
+}
+
+async function preserveFirstFailure(first, reason) {
   await mkdir(evidenceDirectory, { recursive: true })
   const source = `${evidenceDirectory}/failed-steady-throughput-verification.json`
-  const target = `${evidenceDirectory}/retryable-steady-cadence-gap-attempt-1.json`
+  const target = reason === cadenceRetryReason
+    ? `${evidenceDirectory}/retryable-steady-cadence-gap-attempt-1.json`
+    : `${evidenceDirectory}/retryable-steady-provider-failure-attempt-1.json`
   try {
     await copyFile(source, target)
   } catch (error) {
@@ -43,7 +55,7 @@ async function preserveFirstFailure(first) {
         schemaVersion: 1,
         purpose: 'r4c2d-strict-steady-retry',
         attempt: 1,
-        retryReason: retryableReason,
+        retryReason: reason,
         verifierOutputRetained: false,
       }, null, 2)}\n`,
     )
@@ -54,17 +66,21 @@ async function preserveFirstFailure(first) {
     attempt: first.attempt,
     exitCode: first.code,
     signal: first.signal,
-    retryReason: retryableReason,
+    retryReason: reason,
+    retryClass: reason === cadenceRetryReason ? 'cadence_gap' : 'transient_provider_failure',
   }
 }
 
 const first = await runVerifier(1)
 if (first.code === 0) process.exit(0)
-if (!first.output.includes(retryableReason)) process.exit(first.code)
+const firstRetryReason = retryReason(first.output)
+if (firstRetryReason === null) process.exit(first.code)
 
-const firstFailure = await preserveFirstFailure(first)
+const firstFailure = await preserveFirstFailure(first, firstRetryReason)
 process.stderr.write(
-  `Strict steady qualification missed one minute bucket; running one fresh 6x24 session.\n`,
+  firstRetryReason === cadenceRetryReason
+    ? 'Strict steady qualification missed one minute bucket; running one fresh 6x24 session.\n'
+    : 'Strict steady qualification received one transient provider response; running one fresh 6x24 session.\n',
 )
 
 const second = await runVerifier(2)
@@ -95,7 +111,8 @@ await writeFile(
       strictConsecutiveQualificationPassed: second.code === 0,
     },
     checks: {
-      retryLimitedToExactCadenceGap: true,
+      retryLimitedToExactCadenceGapOrTransientProviderFailure: true,
+      providerRetryStatuses: transientReadStatuses,
       secondSessionFresh: true,
       strictSixConsecutiveMinutesStillRequired: true,
       noThresholdRelaxation: true,

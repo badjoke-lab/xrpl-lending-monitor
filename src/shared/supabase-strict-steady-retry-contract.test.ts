@@ -11,22 +11,31 @@ const retry = read('scripts/verify-supabase-steady-throughput-with-retry.mjs')
 const workflow = read('.github/workflows/supabase-remote-probe.yml')
 
 describe('Supabase strict steady qualification retry', () => {
-  it('retries only the exact missing-minute cadence failure', () => {
+  it('retries only the exact cadence gap or bounded transient provider failures', () => {
     for (const required of [
-      "const retryableReason = 'steady completed ticks are not six consecutive minute buckets'",
+      "const cadenceRetryReason = 'steady completed ticks are not six consecutive minute buckets'",
+      'const transientReadStatuses = [429, 500, 502, 503, 504, 520, 522, 524]',
+      '`steady session read failed (${status}):`',
+      '`steady session preparation failed (${status}):`',
       'if (first.code === 0) process.exit(0)',
-      'if (!first.output.includes(retryableReason)) process.exit(first.code)',
+      'const firstRetryReason = retryReason(first.output)',
+      'if (firstRetryReason === null) process.exit(first.code)',
       'const second = await runVerifier(2)',
       'maximumAttempts: 2',
-      'retryLimitedToExactCadenceGap: true',
+      'retryLimitedToExactCadenceGapOrTransientProviderFailure: true',
       'strictSixConsecutiveMinutesStillRequired: true',
       'noThresholdRelaxation: true',
     ]) expect(retry).toContain(required)
+
+    expect(retry).not.toContain('runVerifier(3)')
+    expect(retry).not.toContain('400, 401, 403, 404')
   })
 
-  it('preserves the first cadence failure and leaves the second result authoritative', () => {
+  it('preserves the first retryable failure and leaves the second result authoritative', () => {
     for (const required of [
       'retryable-steady-cadence-gap-attempt-1.json',
+      'retryable-steady-provider-failure-attempt-1.json',
+      "retryClass: reason === cadenceRetryReason ? 'cadence_gap' : 'transient_provider_failure'",
       "await rm(source, { force: true })",
       'verified-steady-throughput.json',
       'steady-throughput-strict-retry-summary.json',
