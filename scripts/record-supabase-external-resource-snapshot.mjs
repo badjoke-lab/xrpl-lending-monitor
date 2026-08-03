@@ -305,3 +305,5 @@ try {
   await writeFile(`${evidenceDirectory}/failed-resource-external-snapshot.json`, `${JSON.stringify(failure, null, 2)}\n`)
   throw error
 }
+
+await import('./record-supabase-runtime-resource-log-snapshot.mjs')
