@@ -87,13 +87,18 @@ describe('Supabase R4C2d network steady throughput contract', () => {
     expect(workflow).not.toContain('  schedule:')
   })
 
-  it('fetches and normalizes 24 real exact Devnet ledgers before one DB commit', () => {
+  it('fetches and normalizes 24 bounded real Devnet ledgers before one DB commit', () => {
     for (const required of [
       "const DEFAULT_XRPL_DEVNET_RPC_URL = 'https://s.devnet.rippletest.net:51234/'",
       'const BATCH_SIZE = 24',
-      'const FETCH_CONCURRENCY = 6',
-      "xrplRpc(endpoint, 'server_info'",
-      "xrplRpc(endpoint, 'ledger'",
+      'const FETCH_CONCURRENCY = 2',
+      'const MAX_SERVER_INFO_RESPONSE_BYTES = 256 * 1024',
+      'const MAX_LEDGER_RESPONSE_BYTES = 1024 * 1024',
+      'boundedResponseText',
+      'readValidatedHead(endpoint, meter)',
+      'readExactLedger(endpoint, ledgerIndex, meter)',
+      "'server_info'",
+      "'ledger'",
       'transactions: true',
       'expand: true',
       'parseValidatedLedgerResult',
