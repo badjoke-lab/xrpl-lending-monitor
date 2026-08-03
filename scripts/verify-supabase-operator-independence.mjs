@@ -122,7 +122,18 @@ async function run() {
     'digestTamperRejected',
     'activeProfileIsolated',
   ]) requireTrue(completeState.checks?.[key], `completeState.${key}`)
-  requireTrue(completeState.emptyTargetRestoreObserved, 'completeState.emptyTargetRestoreObserved')
+
+  const emptyTargetRestoreObserved = completeState.emptyTargetRestoreObserved === true
+  const exactDuplicateRestoreObserved =
+    completeState.firstRestoreDuplicate === true
+    && completeState.duplicateRestoreConverged === true
+    && completeState.checks?.duplicateRestoreConverged === true
+    && completeState.checks?.canonicalTextParity === true
+    && completeState.checks?.digestParity === true
+  if (!emptyTargetRestoreObserved && !exactDuplicateRestoreObserved) {
+    throw new Error('complete-state restore was neither an empty-target restore nor an exact duplicate convergence')
+  }
+
   requireTrue(completeState.activeIsolation?.nonRegressing, 'completeState.activeNonRegressing')
   requireTrue(
     completeState.activeIsolation?.sourceIdentityPreserved,
@@ -199,6 +210,9 @@ async function run() {
     canonicalTextBytes: completeState.canonicalTextBytes,
     rowCounts: completeState.rowCounts,
     schedulerStatusCounts: completeState.schedulerStatusCounts,
+    restorePath: emptyTargetRestoreObserved ? 'empty_target' : 'exact_duplicate_convergence',
+    emptyTargetRestoreObserved,
+    exactDuplicateRestoreObserved,
   }
   const rollback = {
     transactionRollbackProved: remoteFault.checks.interruptionRollbackProved,
@@ -242,6 +256,7 @@ async function run() {
       checkpointScriptedAndRemotelyProved: true,
       exportScriptedAndRemotelyProved: true,
       restoreScriptedAndRemotelyProved: true,
+      repeatableRestoreConvergenceProved: true,
       evidenceScripted: true,
       haltScriptedAndRemotelyProved: true,
       credentialRotationScripted: true,
