@@ -6,7 +6,7 @@ Last updated: `2026-08-03`.
 
 XRPL Lending Monitor is **not formally released**.
 
-The controlling engineering phase is `R4C2d`: Supabase Free Devnet throughput, resource, and no-charge qualification.
+The controlling engineering phase is `R4C2d`: Supabase Free Devnet throughput and resource qualification.
 
 The retired Cloudflare fixed-32-ledger recovery remains halted. Worker Cron remains empty, Mainnet remains disabled, the legacy public reader remains authoritative, and no R5 recovery, stabilization qualification, or soak is active.
 
@@ -16,14 +16,19 @@ The Supabase Free Devnet profile remains **conditional and unselected**.
 
 | Gate | Result | Controlling interpretation |
 | --- | --- | --- |
-| G3 durable scheduler and fault behavior | proved | Remote isolated qualification passed |
-| G4 transactional completion and rollback | proved | Remote rollback and exact completion passed |
-| G5 committed-only reads and source-bound fences | proved | Remote committed-reader qualification passed |
-| G6 export, restore, duplicate convergence, and continuation | proved | Complete-state and post-restore qualification passed |
-| G7 sustained throughput | **qualified** | Steady and catch-up components both passed |
-| G8 resource and no-charge | **incomplete** | Several counters are measured; memory, egress, and billing evidence remain incomplete |
-| G1, G2, G9, G10 | pending reconciliation | Must be resolved by final R4B/R4E decision |
+| G1 no mandatory payment/card | **pass** | Exact organization is Free and requires no paid billing path |
+| G2 no automatic paid overage | **pass** | Official Free-plan policy uses notification, grace, and service restriction instead of paid overage |
+| G3 durable scheduler and fault behavior | **pass** | Remote isolated qualification passed |
+| G4 transactional completion and rollback | **pass** | Remote rollback and exact completion passed |
+| G5 committed-only reads and source-bound fences | **pass** | Remote committed-reader qualification passed |
+| G6 export, restore, duplicate convergence, and continuation | **pass** | Complete-state and post-restore qualification passed |
+| G7 sustained throughput | **pass** | Steady and catch-up components both passed |
+| G8 resource fail-closed | **unresolved** | Exact peak memory and provider egress remain unavailable |
+| G9 operator independence | **unresolved** | Complete retained rollback and unattended-operation evidence is not bound to revision 2 |
+| G10 production boundary | **pass** | Mainnet, public reader, recovery, stabilization, and soak remain unchanged |
 | profile selected | `false` | No profile selection has occurred |
+
+The current R4B result is `conditional_candidate`, `not_selected`, with 8 passed gates and unresolved gates `G8` and `G9`.
 
 R4C2c behavioral qualification is complete. That result is not R4 completion and is not a production-cutover decision.
 
@@ -48,13 +53,14 @@ R4C2c behavioral qualification is complete. That result is not R4 completion and
 - post-restore continuation: [`ops/r4c2c-supabase-restore-continuation-remote-evidence-2026-08-02.md`](ops/r4c2c-supabase-restore-continuation-remote-evidence-2026-08-02.md)
 - remote fault qualification: [`ops/r4c2c-supabase-remote-fault-evidence-2026-08-02.md`](ops/r4c2c-supabase-remote-fault-evidence-2026-08-02.md)
 
-### R4C2d throughput and resource evidence
+### R4C2d throughput, resource, and decision evidence
 
 - normal-cadence/resource baseline: [`ops/r4c2d-supabase-throughput-resource-baseline-evidence-2026-08-03.md`](ops/r4c2d-supabase-throughput-resource-baseline-evidence-2026-08-03.md)
 - isolated catch-up throughput: [`ops/r4c2d-supabase-isolated-catchup-throughput-evidence-2026-08-03.md`](ops/r4c2d-supabase-isolated-catchup-throughput-evidence-2026-08-03.md)
 - network-inclusive steady throughput: [`ops/r4c2d-supabase-network-steady-throughput-evidence-2026-08-03.md`](ops/r4c2d-supabase-network-steady-throughput-evidence-2026-08-03.md)
 - resource and no-charge evidence: [`ops/r4c2d-supabase-resource-headroom-evidence-2026-08-03.md`](ops/r4c2d-supabase-resource-headroom-evidence-2026-08-03.md)
 - machine-readable resource gate state: [`ops/r4c2d-resource-gate-status-2026-08-03.json`](ops/r4c2d-resource-gate-status-2026-08-03.json)
+- current R4B decision: [`ops/r4c2d-supabase-r4b-decision-2026-08-03.json`](ops/r4c2d-supabase-r4b-decision-2026-08-03.json)
 - runtime invariants: [`history-runtime-contract.md`](history-runtime-contract.md)
 - resource gates: [`resource-envelope.md`](resource-envelope.md)
 
@@ -121,6 +127,24 @@ The controlling successful resource run `30784402995` retained the same fixed co
 
 Steady p95 passed the required value above `21/min`. Combined with the catch-up pass, **G7 is qualified**.
 
+## G1 and G2 cost safety
+
+PR `#1152` restricted account evidence to PAT-compatible public Management API reads. Run `30785807617` proved:
+
+- exact project identity;
+- exact project-to-organization binding;
+- organization plan `free`.
+
+Supabase's official policy states that Free-plan quota exhaustion is handled through notification, grace period, and service restriction rather than paid overage. Spend Cap configuration belongs to paid plans and is not required to make the Free plan no-charge.
+
+Therefore:
+
+- G1 no mandatory payment/card: `pass`;
+- G2 no automatic paid overage: `pass`;
+- billing/no-charge qualification: `pass`.
+
+This does not prove provider egress consumption and does not close G8.
+
 ## G8 measured resource state
 
 ### Fail-closed guard behavior
@@ -168,19 +192,6 @@ Run `30784402995` measured:
 
 These measured counters are below their current project halt thresholds.
 
-### Free plan identity
-
-The first organization usage attempt used Studio-internal `/platform` endpoints and failed remote authentication with `JWT could not be decoded`. No usage or billing conclusion is retained from that failed path.
-
-PR `#1152` restricted evidence to PAT-compatible public Management API reads. Run `30785807617` proved:
-
-- exact project identity;
-- exact project-to-organization binding;
-- organization plan `free`;
-- Free plan confirmed.
-
-Free-plan identity is not substituted for missing egress, usage-billing, or automatic-overage counters.
-
 ### Memory correction
 
 PR `#1153` executed deterministic lifecycle sampling during six real steady ticks. Run `30785890154` retained `36` samples, but RSS, heap total, heap used, and external memory were zero for every sample.
@@ -202,27 +213,51 @@ PR `#1154` makes the correction enforceable:
 - G8 remains false;
 - profile selection remains false.
 
-## G8 unresolved requirements
+### G8 unresolved requirements
 
-The following requirements remain unresolved and block G8:
+Only these resource blockers remain for G8:
 
 1. usable exact maximum-memory evidence, or a formally accepted alternative bound that is not described as a provider counter;
-2. provider egress evidence, or a formal unavailable-counter disposition under the R4 contract;
-3. usage-billing and automatic-overage evidence, or a formal hard-gate failure;
-4. complete billing/no-charge qualification;
-5. final reconciliation of every resource ceiling and fail-closed threshold.
+2. provider egress evidence, or a formal R4 determination that unavailable egress counters make the profile fail G8;
+3. final reconciliation of every measured ceiling and unavailable provider surface.
 
-No theoretical projection or all-zero runtime counter may be substituted for retained evidence.
+No theoretical projection, request count, payload-size estimate, average-memory value, or all-zero runtime counter may be substituted for retained provider evidence.
+
+## G9 unresolved requirement
+
+Deployment, migrations, verifier-token rotation, qualification, export, restore, and evidence publication are scripted.
+
+G9 remains unresolved because complete retained evidence for:
+
+- rollback of the exact profile revision;
+- unattended recovery from deployment failure;
+- operator-independent checkpoint and rollback execution;
+- exact post-rollback source and state parity
+
+has not yet been bound to revision 2.
+
+## Current R4B decision
+
+The current machine-readable decision has:
+
+- profile revision: `2`;
+- identity digest: `c42edf0a1708fd2b7ea9f2e72dab32b87c1d66b260752efe38fec321253d3998`;
+- classification: `conditional_candidate`;
+- selection: `not_selected`;
+- eligible for scoring: `false`;
+- passed gates: `8`;
+- failed gates: `0`;
+- unresolved gates: `G8`, `G9`;
+- decision digest: `407f37226dc47663c7f980a8a1b3c04ed09a03a97add950f1d061db61ba5b897`.
 
 ## Next stage
 
-Continue R4C2d only far enough to resolve the remaining G8 evidence or formally fail the profile.
+Continue only the remaining R4 qualification work:
 
-After that:
-
-1. revise the machine-readable R4B decision;
-2. evaluate G1, G2, G9, and G10;
-3. produce the R4E outcome: a fully qualified selected profile or `no_profile_qualified`.
+1. resolve or formally fail G8 memory and egress;
+2. execute and retain G9 rollback/operator-independence qualification;
+3. regenerate R4B with no unresolved gates or an explicit failure;
+4. produce the R4E outcome: a fully qualified selected profile or `no_profile_qualified`.
 
 R5 must not begin before that explicit decision.
 
@@ -250,10 +285,10 @@ The halted Cloudflare deployment remains rollback context and historical evidenc
 - Do not describe G7 qualification as G8 qualification or Supabase selection.
 - Do not describe R4C2c completion as R4 completion.
 - Do not interpret all-zero memory counters as zero usage or headroom.
-- Do not substitute Free-plan identity for egress or automatic-overage evidence.
+- Do not substitute Free-plan identity for provider egress evidence.
 - Do not restart the retired fixed-32-ledger runtime.
-- Do not select a profile before all R4 hard gates pass.
-- Do not add a payment method, paid plan, or automatic-overage profile.
+- Do not select or score a profile before all R4 hard gates pass.
+- Do not add a payment method, paid plan, or debt-capable overage profile.
 - Do not use GitHub Actions as the normal collection clock.
 - Do not start R5 recovery, stabilization, or soak early.
 - Do not enable Mainnet.
