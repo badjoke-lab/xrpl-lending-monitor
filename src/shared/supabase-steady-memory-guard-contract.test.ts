@@ -82,13 +82,15 @@ describe('Supabase steady Edge memory guard contract', () => {
     ]) expect(tick + migration).toContain(required)
   })
 
-  it('exposes memory with the same token-gated qualification read', () => {
+  it('exposes memory and revision-3 accounting with the same token-gated qualification read', () => {
     for (const required of [
       "rpc<JsonObject>('xrpl_read_network_steady_session'",
       "rpc<JsonObject>('xrpl_read_network_steady_memory'",
-      'const [session, memory] = await Promise.all([',
+      "rpc<JsonObject>('xrpl_read_revision3_session_accounting'",
+      'const [session, memory, revision3Accounting] = await Promise.all([',
       'session,',
       'memory,',
+      'revision3Accounting,',
     ]) expect(qualification).toContain(required)
   })
 
