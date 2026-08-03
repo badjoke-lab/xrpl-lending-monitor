@@ -24,22 +24,37 @@ describe('Supabase steady memory capability reconciliation', () => {
     ]) expect(reconciler).toContain(required)
   })
 
-  it('treats all-zero runtime counters as unavailable rather than zero usage', () => {
+  it('requires a positive RSS counter for total-memory qualification', () => {
+    for (const required of [
+      'const allRssCountersZero = samples.every((sample) => sample.rssBytes === 0)',
+      'const allHeapTotalCountersZero = samples.every((sample) => sample.heapTotalBytes === 0)',
+      'const partialHeapCountersAvailable = !allHeapTotalCountersZero',
+      'const usableTotalMemoryCounter = !allRssCountersZero',
+      'rssCounterRequiredForTotalMemoryQualification: true',
+      'runtimeMemoryMeasurementAvailable: usableTotalMemoryCounter',
+      'partialHeapCountersNotSubstitutedForRss: true',
+      'zeroRssNotInterpretedAsZeroUsage: true',
+      'memoryHeadroomQualified: usableTotalMemoryCounter',
+      'memoryCoverageNotOverstated: true',
+    ]) expect(reconciler).toContain(required)
+  })
+
+  it('retains all-zero detection without accepting partial heap counters as RSS', () => {
     for (const required of [
       'const allRuntimeCountersZero = samples.every',
       'sample.rssBytes === 0',
       'sample.heapTotalBytes === 0',
       'sample.heapUsedBytes === 0',
       'sample.externalBytes === 0',
-      'const usableRuntimeCounters = !allRuntimeCountersZero',
-      'zeroCountersNotInterpretedAsZeroUsage: true',
-      'runtimeMemoryMeasurementAvailable: usableRuntimeCounters',
-      'memoryHeadroomQualified: usableRuntimeCounters',
-      'memoryCoverageNotOverstated: true',
+      'allRuntimeCountersZero,',
+      'allRssCountersZero,',
+      'allHeapTotalCountersZero,',
+      'partialHeapCountersAvailable,',
+      'usableTotalMemoryCounter,',
     ]) expect(reconciler).toContain(required)
   })
 
-  it('removes fake high-water and headroom values when counters are unavailable', () => {
+  it('removes fake high-water and headroom values when RSS is unavailable', () => {
     for (const required of [
       'minimumMemoryHighWaterBytes: null',
       'p50MemoryHighWaterBytes: null',
@@ -48,26 +63,29 @@ describe('Supabase steady memory capability reconciliation', () => {
       'memoryHeadroomBytes: null',
       'allSixTicksBelowHalt: null',
       'memoryHeadroomQualified: false',
-      'sixCompletedTicksMemoryMeasured: usableRuntimeCounters',
-      'requiredMemoryPhasesMeasured: usableRuntimeCounters',
-      'memoryHighWaterRecalculated: usableRuntimeCounters',
-      'memoryFailClosedBelowHardLimit: usableRuntimeCounters',
-      'memoryQualified: usableRuntimeCounters',
+      'sixCompletedTicksMemoryMeasured: usableTotalMemoryCounter',
+      'requiredMemoryPhasesMeasured: usableTotalMemoryCounter',
+      'memoryHighWaterRecalculated: usableTotalMemoryCounter',
+      'memoryFailClosedBelowHardLimit: usableTotalMemoryCounter',
+      'memoryQualified: usableTotalMemoryCounter',
       'g8Qualified: false',
       'profileSelected: false',
     ]) expect(reconciler).toContain(required)
   })
 
-  it('runs before the final resource evidence is published', () => {
+  it('runs before final publication and exposes the RSS capability boundary', () => {
     expect(planRecorder).toContain(
       "await import('./reconcile-supabase-steady-memory-capability.mjs')",
     )
     for (const required of [
       'steady-memory-capability.json',
       'failed-steady-memory-capability.json',
-      'steady memory runtime counters available',
-      'all runtime memory counters zero',
-      'zero counters interpreted as zero usage',
+      'steady total-memory RSS counter available',
+      'steady partial heap counters available',
+      'all RSS counters zero',
+      'all heap-total counters zero',
+      'partial heap counters substituted for RSS',
+      'zero RSS interpreted as zero usage',
       'steady memory high water qualified',
       "'unavailable'",
       'memory coverage not overstated',

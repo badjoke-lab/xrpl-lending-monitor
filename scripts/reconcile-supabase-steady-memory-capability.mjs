@@ -57,28 +57,38 @@ async function run() {
     && sample.heapUsedBytes === 0
     && sample.externalBytes === 0
   )
-  const usableRuntimeCounters = !allRuntimeCountersZero
-  const reason = usableRuntimeCounters
+  const allRssCountersZero = samples.every((sample) => sample.rssBytes === 0)
+  const allHeapTotalCountersZero = samples.every((sample) => sample.heapTotalBytes === 0)
+  const partialHeapCountersAvailable = !allHeapTotalCountersZero
+  const usableTotalMemoryCounter = !allRssCountersZero
+  const reason = usableTotalMemoryCounter
     ? null
-    : 'Deno.memoryUsage returned zero for RSS, heap total, heap used, and external memory at every retained sample'
+    : 'Deno.memoryUsage returned zero RSS for every retained sample; nonzero heap or external counters cannot prove total Edge memory high water'
 
   const capability = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     purpose: 'r4c2d-steady-memory-capability',
     reconciledAt: new Date().toISOString(),
     sourceSessionId: evidence.sessionId,
     completedTicks: completedTicks.length,
     sampleCount: samples.length,
     allRuntimeCountersZero,
-    usableRuntimeCounters,
+    allRssCountersZero,
+    allHeapTotalCountersZero,
+    partialHeapCountersAvailable,
+    usableTotalMemoryCounter,
+    usableRuntimeCounters: usableTotalMemoryCounter,
     reason,
     checks: {
       sixTicksInspected: completedTicks.length === 6,
       samplesInspected: samples.length >= 36,
       lifecycleSamplingExecuted: true,
-      runtimeMemoryMeasurementAvailable: usableRuntimeCounters,
+      rssCounterRequiredForTotalMemoryQualification: true,
+      runtimeMemoryMeasurementAvailable: usableTotalMemoryCounter,
+      partialHeapCountersNotSubstitutedForRss: true,
+      zeroRssNotInterpretedAsZeroUsage: true,
       zeroCountersNotInterpretedAsZeroUsage: true,
-      memoryHeadroomQualified: usableRuntimeCounters,
+      memoryHeadroomQualified: usableTotalMemoryCounter,
       memoryCoverageNotOverstated: true,
       g8Qualified: false,
       profileSelected: false,
@@ -86,7 +96,7 @@ async function run() {
   }
 
   evidence.memoryCapability = capability
-  evidence.memorySummary = usableRuntimeCounters
+  evidence.memorySummary = usableTotalMemoryCounter
     ? {
         ...evidence.memorySummary,
         runtimeMemoryMeasurementAvailable: true,
@@ -108,15 +118,16 @@ async function run() {
   evidence.checks = {
     ...evidence.checks,
     sixCompletedTicksMemorySamplesRecorded: true,
-    sixCompletedTicksMemoryMeasured: usableRuntimeCounters,
+    sixCompletedTicksMemoryMeasured: usableTotalMemoryCounter,
     requiredMemoryPhasesSampled: true,
-    requiredMemoryPhasesMeasured: usableRuntimeCounters,
-    memoryHighWaterRecalculated: usableRuntimeCounters,
+    requiredMemoryPhasesMeasured: usableTotalMemoryCounter,
+    memoryHighWaterRecalculated: usableTotalMemoryCounter,
     memoryRecordedBeforeCommit: true,
-    memoryFailClosedBelowHardLimit: usableRuntimeCounters,
-    memoryMeasurementAvailable: usableRuntimeCounters,
+    memoryFailClosedBelowHardLimit: usableTotalMemoryCounter,
+    memoryMeasurementAvailable: usableTotalMemoryCounter,
+    partialHeapCountersNotSubstitutedForRss: true,
     memoryCoverageNotOverstated: true,
-    memoryQualified: usableRuntimeCounters,
+    memoryQualified: usableTotalMemoryCounter,
     g8Qualified: false,
     profileSelected: false,
   }
@@ -131,7 +142,7 @@ try {
 } catch (error) {
   await mkdir(evidenceDirectory, { recursive: true })
   const failure = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     purpose: 'r4c2d-steady-memory-capability',
     failedAt: new Date().toISOString(),
     reason: error instanceof Error ? error.message.slice(0, 2_000) : String(error).slice(0, 2_000),

@@ -114,13 +114,17 @@ describe('Supabase steady Edge memory guard contract', () => {
     ]) expect(verifier).toContain(required)
   })
 
-  it('publishes unavailable memory counters without fake headroom', () => {
+  it('publishes zero-RSS memory as unavailable without fake headroom', () => {
     for (const required of [
       'steady memory lifecycle samples recorded',
-      'steady memory runtime counters available',
-      'steady memory counter reason',
+      'steady total-memory RSS counter available',
+      'steady partial heap counters available',
+      'all RSS counters zero',
+      'all heap-total counters zero',
       'all runtime memory counters zero',
-      'zero counters interpreted as zero usage',
+      'partial heap counters substituted for RSS',
+      'zero RSS interpreted as zero usage',
+      'steady memory counter reason',
       'steady memory high water qualified',
       'steady memory min/p50/p95/max bytes',
       'steady memory halt/hard bytes',
