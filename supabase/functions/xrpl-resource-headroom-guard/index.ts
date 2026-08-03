@@ -101,6 +101,54 @@ async function rpc<T>(functionName: string, body: JsonObject): Promise<T> {
   return JSON.parse(text) as T
 }
 
+async function finalizeAttempt(options: {
+  sessionId: string
+  attemptId: string
+  status: 'succeeded' | 'failed' | 'deferred'
+  tickId: string | null
+  finalizedEgressUpperBoundBytes: number | null
+  accountingDigest: string | null
+  errorMessage: string | null
+}): Promise<JsonObject> {
+  return await rpc<JsonObject>('xrpl_finalize_revision3_attempt', {
+    p_session_id: options.sessionId,
+    p_attempt_id: options.attemptId,
+    p_status: options.status,
+    p_tick_id: options.tickId,
+    p_finalized_egress_upper_bound_bytes: options.finalizedEgressUpperBoundBytes,
+    p_accounting_digest: options.accountingDigest,
+    p_error_message: options.errorMessage,
+    p_finalized_at: new Date().toISOString(),
+  })
+}
+
+function successfulAccounting(value: unknown): {
+  tickId: string
+  accountingDigest: string
+  egressUpperBoundBytes: number
+} | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
+  const downstream = value as JsonObject
+  if (downstream.ok !== true || downstream.claimed !== true || downstream.deferred === true) {
+    return null
+  }
+  const revision3 = object(downstream.revision3Accounting, 'revision3Accounting')
+  const accounting = object(revision3.accounting, 'revision3 accounting')
+  const result = object(accounting.result, 'revision3 accounting result')
+  const record = object(revision3.record, 'revision3 accounting record')
+  if (record.allowed !== true || result.allowed !== true) {
+    throw new Error('successful guarded tick lacks one safe revision-3 accounting result')
+  }
+  return {
+    tickId: requiredString(downstream.tickId, 'downstream tickId'),
+    accountingDigest: requiredHex(revision3.digest, 64, 'revision3 accounting digest'),
+    egressUpperBoundBytes: requiredInteger(
+      result.conservativeTickEgressUpperBoundBytes,
+      'revision3 conservative tick egress upper bound',
+    ),
+  }
+}
+
 async function handleCron(body: JsonObject, request: Request): Promise<Response> {
   const key = serviceKey()
   if (request.headers.get('apikey') !== key) {
@@ -127,24 +175,106 @@ async function handleCron(body: JsonObject, request: Request): Promise<Response>
     }, 409)
   }
 
-  const downstream = await fetch(`${env('SUPABASE_URL')}/functions/v1/xrpl-steady-batch-tick`, {
-    method: 'POST',
-    headers: headers(key),
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(55_000),
-  })
-  const text = await downstream.text()
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(text)
-  } catch {
-    parsed = { raw: text.slice(0, 1_500) }
+  const guarded = guard.guardEnabled === true
+  const sessionId = guarded ? requiredString(guard.sessionId, 'guard sessionId') : null
+  const attemptId = guarded && sessionId !== null
+    ? `r4c3:${sessionId}:${Math.floor(scheduledAt.getTime() / 60_000)}`
+    : null
+  let attempt: JsonObject | null = null
+
+  if (guarded && sessionId !== null && attemptId !== null) {
+    attempt = await rpc<JsonObject>('xrpl_begin_revision3_attempt', {
+      p_session_id: sessionId,
+      p_attempt_id: attemptId,
+      p_scheduled_at: scheduledAt.toISOString(),
+      p_started_at: new Date().toISOString(),
+    })
+    if (attempt.allowed !== true) {
+      return json({
+        ok: false,
+        halted: true,
+        error: 'revision3_attempt_reservation_halt',
+        guard,
+        attempt,
+      }, 409)
+    }
   }
-  return json({
-    guarded: true,
-    guard,
-    downstream: parsed,
-  }, downstream.status)
+
+  try {
+    const downstream = await fetch(`${env('SUPABASE_URL')}/functions/v1/xrpl-steady-batch-tick`, {
+      method: 'POST',
+      headers: headers(key),
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(55_000),
+    })
+    const text = await downstream.text()
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(text)
+    } catch {
+      parsed = { raw: text.slice(0, 1_500) }
+    }
+
+    let attemptFinalization: JsonObject | null = null
+    if (guarded && sessionId !== null && attemptId !== null) {
+      const safe = downstream.ok ? successfulAccounting(parsed) : null
+      if (safe !== null) {
+        attemptFinalization = await finalizeAttempt({
+          sessionId,
+          attemptId,
+          status: 'succeeded',
+          tickId: safe.tickId,
+          finalizedEgressUpperBoundBytes: safe.egressUpperBoundBytes,
+          accountingDigest: safe.accountingDigest,
+          errorMessage: null,
+        })
+      } else {
+        const parsedObject = typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+          ? parsed as JsonObject
+          : null
+        const deferred = downstream.ok
+          && (parsedObject?.deferred === true || parsedObject?.claimed === false)
+        attemptFinalization = await finalizeAttempt({
+          sessionId,
+          attemptId,
+          status: deferred ? 'deferred' : 'failed',
+          tickId: null,
+          finalizedEgressUpperBoundBytes: null,
+          accountingDigest: null,
+          errorMessage: String(parsedObject?.error ?? `downstream_status_${downstream.status}`),
+        })
+      }
+    }
+
+    return json({
+      guarded: true,
+      guard,
+      attempt,
+      attemptFinalization,
+      downstream: parsed,
+    }, downstream.status)
+  } catch (error) {
+    let attemptFinalization: JsonObject | null = null
+    if (guarded && sessionId !== null && attemptId !== null) {
+      attemptFinalization = await finalizeAttempt({
+        sessionId,
+        attemptId,
+        status: 'failed',
+        tickId: null,
+        finalizedEgressUpperBoundBytes: null,
+        accountingDigest: null,
+        errorMessage: error instanceof Error ? error.message : String(error),
+      })
+    }
+    return json({
+      ok: false,
+      guarded: true,
+      guard,
+      attempt,
+      attemptFinalization,
+      error: error instanceof Error ? error.message.slice(0, 2_000) : String(error).slice(0, 2_000),
+    }, 500)
+  }
 }
 
 function verifyQualificationResult(value: JsonObject, guardKind: GuardKind): void {
