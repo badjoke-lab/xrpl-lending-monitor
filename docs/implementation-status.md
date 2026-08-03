@@ -84,38 +84,11 @@ R4C2c is complete for the planned remote behavioral qualification. Retained evid
 
 ## G7 throughput qualification
 
-### Rejected legacy cadence
+The rejected old one-phase-per-cron cadence retained p95 `1/min` and was not promoted.
 
-Run `30754437078`, attempt `2`, measured the old one-phase-per-cron cadence.
+Run `30755497115` proved catch-up p95 `14,178.400673920027/min`, above the required `30/min`, with exact committed-row, digest, watermark, and active-source parity.
 
-| Window | Average/min | p95/min | Complete work p95 |
-| --- | ---: | ---: | ---: |
-| 60 minutes | 0.316667 | 1 | 120,899.35 ms |
-| 360 minutes | 0.330556 | 1 | 120,580.95 ms |
-| 1,440 minutes | 0.144444 | 1 | 120,463.4 ms |
-
-That cadence failed the steady threshold and was not promoted.
-
-### Catch-up component
-
-Run `30755497115` completed five trials of 64 real committed Devnet works.
-
-- total works: `320`;
-- completed phases: `960`;
-- minimum: `12,563.651375831556/min`;
-- p50: `13,975.162925561042/min`;
-- p95: `14,178.400673920027/min`;
-- maximum: `14,225.868101463015/min`;
-- required threshold: `>30/min`;
-- all completed phases used attempt `1`;
-- committed-row count/digest and target-watermark parity passed;
-- active source remained read only.
-
-### Network-inclusive steady component
-
-The retained six-minute design fetches, parses, normalizes, and atomically commits 24 exact Devnet ledgers per internal minute bucket through the Lending parser and seven-class normalizer.
-
-The controlling successful resource run `30784402995` retained the same fixed contract:
+Run `30784402995` proved the network-inclusive steady component:
 
 - six consecutive completed minute buckets;
 - minute rates: `[24, 24, 24, 24, 24, 24]`;
@@ -149,30 +122,9 @@ This does not prove provider egress consumption and does not close G8.
 
 ### Fail-closed guard behavior
 
-PR `#1145` and remote run `30779476979` proved six exact injected halt paths:
-
-1. database storage;
-2. database connections;
-3. Edge wall time;
-4. stale or missing external snapshot;
-5. projected function invocations;
-6. deployed bundle size.
-
-Each injected failure halted before tick, work, message, or successor reservation and preserved active source identity.
-
-Project halt thresholds remain below hard ceilings:
-
-| Resource | Halt | Hard ceiling |
-| --- | ---: | ---: |
-| Database size | 400,000,000 bytes | 500,000,000 bytes |
-| Database connections | 45 | 60 |
-| Edge wall time | 45,000 ms | 150,000 ms |
-| Projected 31-day function invocations | 400,000 | 500,000 |
-| Largest deployed bundle | 4,000,000 bytes | 5,000,000 bytes |
+PR `#1145` and remote run `30779476979` proved exact injected pre-reservation halts for database storage, database connections, Edge wall time, stale external snapshot, projected invocations, and bundle size. Each failure preserved active source identity and reserved no tick, work, message, or successor.
 
 ### Official function statistics
-
-PR `#1150` moved invocation and runtime statistics to the official `functions.combined-stats` Management endpoint used by Supabase Studio.
 
 Run `30784402995` measured:
 
@@ -192,19 +144,18 @@ Run `30784402995` measured:
 
 These measured counters are below their current project halt thresholds.
 
-### Memory correction
+### Memory capability corrections
 
-PR `#1153` executed deterministic lifecycle sampling during six real steady ticks. Run `30785890154` retained `36` samples, but RSS, heap total, heap used, and external memory were zero for every sample.
+PR `#1153` executed deterministic lifecycle sampling during six real steady ticks. Run `30785890154` retained `36` samples and published RSS high water `0` for every tick. That did **not** prove zero memory consumption or `200 MiB` of headroom. Issue `#1109` contains the first correction.
 
-Those values do **not** prove zero memory consumption or `200 MiB` of headroom. They mean that usable `Deno.memoryUsage()` counters were unavailable in the Supabase Edge runtime.
+PR `#1154` added capability reconciliation, but remote run `30786950713` exposed a second defect: partial heap or external counters were nonzero while RSS remained zero. The first reconciler incorrectly allowed those partial counters to qualify total memory.
 
-Issue `#1109` contains an explicit correction invalidating the zero-headroom interpretation.
+PR `#1156` corrects the controlling rule:
 
-PR `#1154` makes the correction enforceable:
-
-- all-zero counters are classified as unavailable;
-- memory min/p50/p95/max and headroom are not published as zero;
-- lifecycle sampling remains recorded;
+- total-memory qualification requires at least one positive RSS sample;
+- partial heap or external counters are retained but never substitute for RSS;
+- zero RSS is not interpreted as zero total-memory usage;
+- memory min/p50/p95/max and headroom remain unavailable;
 - memory measurement available: `false`;
 - memory high-water qualified: `false`;
 - memory fail-closed headroom proved: `false`;
@@ -221,7 +172,7 @@ Only these resource blockers remain for G8:
 2. provider egress evidence, or a formal R4 determination that unavailable egress counters make the profile fail G8;
 3. final reconciliation of every measured ceiling and unavailable provider surface.
 
-No theoretical projection, request count, payload-size estimate, average-memory value, or all-zero runtime counter may be substituted for retained provider evidence.
+No theoretical projection, request count, payload-size estimate, average-memory value, zero RSS value, or partial heap counter may be substituted for retained provider evidence.
 
 ## G9 unresolved requirement
 
@@ -284,7 +235,8 @@ The halted Cloudflare deployment remains rollback context and historical evidenc
 - Do not describe any isolated qualification surface as a public reader or production cutover.
 - Do not describe G7 qualification as G8 qualification or Supabase selection.
 - Do not describe R4C2c completion as R4 completion.
-- Do not interpret all-zero memory counters as zero usage or headroom.
+- Do not interpret zero RSS as zero total-memory usage or headroom.
+- Do not substitute partial heap or external counters for RSS.
 - Do not substitute Free-plan identity for provider egress evidence.
 - Do not restart the retired fixed-32-ledger runtime.
 - Do not select or score a profile before all R4 hard gates pass.
