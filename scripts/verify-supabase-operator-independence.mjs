@@ -11,8 +11,8 @@ if (!Number.isSafeInteger(sourceRunId)) throw new Error('GITHUB_RUN_ID exceeds t
 const evidenceDirectory = 'supabase-remote-probe-evidence'
 const workflowPath = '.github/workflows/supabase-remote-probe.yml'
 const profileId = 'supabase_free_postgres_pgcron_edge'
-const profileRevision = 2
-const profileIdentityDigest = 'c42edf0a1708fd2b7ea9f2e72dab32b87c1d66b260752efe38fec321253d3998'
+const profileRevision = 3
+const profileIdentityDigest = '3a5c4ff2c43a48d3e5b7ceded60027173d215d6f083fb33c22375758520bbe67'
 
 function object(value, name) {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -52,12 +52,14 @@ async function readEvidence(name) {
 
 async function run() {
   await mkdir(evidenceDirectory, { recursive: true })
-  const [workflow, completeState, continuation, remoteFault] = await Promise.all([
-    readFile(workflowPath, 'utf8'),
-    readEvidence('verified-complete-state-transfer.json'),
-    readEvidence('verified-restore-continuation.json'),
-    readEvidence('verified-remote-fault-qualification.json'),
-  ])
+  const [workflow, completeState, continuation, remoteFault, revision3Accounting] =
+    await Promise.all([
+      readFile(workflowPath, 'utf8'),
+      readEvidence('verified-complete-state-transfer.json'),
+      readEvidence('verified-restore-continuation.json'),
+      readEvidence('verified-remote-fault-qualification.json'),
+      readEvidence('verified-revision3-accounting.json'),
+    ])
 
   const expectedFunctionDeployments = [
     'xrpl-collector-tick',
@@ -133,7 +135,6 @@ async function run() {
   if (!emptyTargetRestoreObserved && !exactDuplicateRestoreObserved) {
     throw new Error('complete-state restore was neither an empty-target restore nor an exact duplicate convergence')
   }
-
   requireTrue(completeState.activeIsolation?.nonRegressing, 'completeState.activeNonRegressing')
   requireTrue(
     completeState.activeIsolation?.sourceIdentityPreserved,
@@ -193,6 +194,34 @@ async function run() {
     'remoteFault.activeSourceIdentityPreserved',
   )
 
+  if (
+    revision3Accounting.purpose !== 'r4c3-supabase-revision3-accounting-verification'
+    || revision3Accounting.sourceRunId !== sourceRunId
+    || revision3Accounting.sourceCommit !== sourceCommit
+    || revision3Accounting.profileId !== profileId
+    || revision3Accounting.profileRevision !== profileRevision
+    || revision3Accounting.profileIdentityDigest !== profileIdentityDigest
+    || revision3Accounting.completedTicks !== 6
+    || revision3Accounting.committedLedgers !== 144
+    || revision3Accounting.unsafeAccountingAttempts !== 0
+  ) {
+    throw new Error('revision-3 accounting operator evidence identity changed')
+  }
+  for (const key of [
+    'guardedSixMinuteSessionCompleted',
+    'exact144LedgerAdvance',
+    'oneSafeLatestAccountingPerCompletedTick',
+    'accountingRecordedBeforeCompletion',
+    'allConservativeBoundsBelowProjectHalts',
+    'allSevenInjectedPrecommitFailuresRejected',
+    'noInjectedStateMutation',
+    'activeProfileReadOnly',
+    'missingTokenRejected',
+    'wrongPurposeRejected',
+    'unavailableProviderMemoryNotClaimed',
+    'unavailableProviderEgressNotClaimed',
+  ]) requireTrue(revision3Accounting.checks?.[key], `revision3Accounting.${key}`)
+
   const evidencePublicationChecks = {
     alwaysUploadEvidence: workflow.includes('- name: Upload sanitized remote evidence\n        if: always()'),
     alwaysPublishLocator: workflow.includes('- name: Publish sanitized run locator\n        if: always()'),
@@ -228,10 +257,20 @@ async function run() {
     terminalHaltProved: remoteFault.checks.terminalFailClosedHaltProved,
     invalidSuccessorsReserved: remoteFault.successors.length,
   }
+  const revision3 = {
+    sessionId: revision3Accounting.sessionId,
+    qualificationId: revision3Accounting.qualificationId,
+    completedTicks: revision3Accounting.completedTicks,
+    committedLedgers: revision3Accounting.committedLedgers,
+    accountingAttempts: revision3Accounting.accountingAttempts,
+    allowedAccountingAttempts: revision3Accounting.allowedAccountingAttempts,
+    unsafeAccountingAttempts: revision3Accounting.unsafeAccountingAttempts,
+    injectedGuardKinds: revision3Accounting.injectedGuardKinds,
+  }
 
   const evidenceCore = {
     schemaVersion: 1,
-    purpose: 'r4c2d-supabase-operator-independence',
+    purpose: 'r4c3-supabase-operator-independence',
     sourceRunId,
     sourceCommit,
     profileId,
@@ -244,6 +283,7 @@ async function run() {
     checkpoint,
     rollback,
     halt,
+    revision3,
     evidencePublicationChecks,
     activeIsolation: {
       completeState: completeState.activeIsolation,
@@ -261,6 +301,7 @@ async function run() {
       haltScriptedAndRemotelyProved: true,
       credentialRotationScripted: true,
       noRoutineDashboardOrTerminalOperation: true,
+      revision3AccountingRemotelyProved: true,
       exactProfileRevisionBound: true,
       activeProfileReadOnly: true,
       g9Qualified: true,
@@ -283,7 +324,7 @@ try {
   await mkdir(evidenceDirectory, { recursive: true })
   const failure = {
     schemaVersion: 1,
-    purpose: 'r4c2d-supabase-operator-independence',
+    purpose: 'r4c3-supabase-operator-independence',
     sourceRunId,
     sourceCommit,
     profileId,
