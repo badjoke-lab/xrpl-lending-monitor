@@ -57,7 +57,7 @@ async function request(url, { required = false } = {}) {
   })
   const contentType = String(response.headers.get('content-type') ?? '').split(';')[0].trim()
   const text = await response.text()
-  let parsed = null
+  let parsed
   try {
     parsed = JSON.parse(text)
   } catch {
