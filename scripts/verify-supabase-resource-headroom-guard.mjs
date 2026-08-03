@@ -304,3 +304,5 @@ try {
   )
   throw error
 }
+
+await import('./verify-supabase-operator-independence.mjs')
