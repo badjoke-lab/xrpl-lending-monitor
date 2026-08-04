@@ -1,4 +1,4 @@
-R5_ONE_SHOT_PUSH_MARKER_V3
+R5_ONE_SHOT_PUSH_MARKER_V4
 batch_limit=8
 wall_seconds=900
-nonce=push-20260804-8x900-retry-3a6f1d2c
+nonce=push-20260804-8x900-preflight-a84e62c1
