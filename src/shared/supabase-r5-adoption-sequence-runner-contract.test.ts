@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
@@ -7,6 +8,10 @@ function read(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
+const runnerPath = resolve(
+  process.cwd(),
+  'scripts/run-supabase-r5-recovery-burst-adoption-aware.mjs',
+)
 const runner = read(
   'scripts/run-supabase-r5-recovery-burst-adoption-aware.mjs',
 )
@@ -69,6 +74,44 @@ describe('R5 adoption-aware source correction runner', () => {
     expect(runner).toContain(
       'expectedRetainedOldCount = occurrenceCountOf(newText, oldText)',
     )
+  })
+
+  it('binds executor evidence fields to the unique success-evidence context', () => {
+    expect(runner).toContain(
+      `    requestedBatchLimit: batchLimit,
+    wallSeconds,
+    elapsedMilliseconds: Date.now() - startedAtMilliseconds,`,
+    )
+    expect(runner).toContain(
+      `    requestedBatchLimit: batchLimit,
+    requestedExecutorBatchLimit: batchLimit,
+    executedRecoveryBatches: executedBatchCount,
+    materializedBatchRows: batches.length,
+    wallSeconds,
+    elapsedMilliseconds: Date.now() - startedAtMilliseconds,`,
+    )
+  })
+
+  it('preflights the complete generated controller without production access', () => {
+    expect(() =>
+      execFileSync(process.execPath, [runnerPath], {
+        cwd: process.cwd(),
+        env: {
+          ...process.env,
+          R5_RECOVERY_ADAPTER_VALIDATE_ONLY: '1',
+        },
+        stdio: 'pipe',
+      }),
+    ).not.toThrow()
+
+    for (const required of [
+      "process.env.R5_RECOVERY_ADAPTER_VALIDATE_ONLY === '1'",
+      "spawnSync(process.execPath, ['--check', generatedPath]",
+      'syntaxCheck.error || syntaxCheck.status !== 0',
+      'R5 generated controller syntax validation failed',
+    ]) {
+      expect(runner).toContain(required)
+    }
   })
 
   it('charges the finite run limit only to newly executed recovery batches', () => {

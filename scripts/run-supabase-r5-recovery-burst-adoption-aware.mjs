@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process'
 import { readFile, rm, writeFile } from 'node:fs/promises'
 import { pathToFileURL } from 'node:url'
 
@@ -175,12 +176,14 @@ replaceExactlyOnce(
 replaceExactlyOnce(
   'R5 executor and materialized batch evidence',
   `    requestedBatchLimit: batchLimit,
-    wallSeconds,`,
+    wallSeconds,
+    elapsedMilliseconds: Date.now() - startedAtMilliseconds,`,
   `    requestedBatchLimit: batchLimit,
     requestedExecutorBatchLimit: batchLimit,
     executedRecoveryBatches: executedBatchCount,
     materializedBatchRows: batches.length,
-    wallSeconds,`,
+    wallSeconds,
+    elapsedMilliseconds: Date.now() - startedAtMilliseconds,`,
 )
 
 replaceExactlyOnce(
@@ -194,7 +197,18 @@ replaceExactlyOnce(
 
 await writeFile(generatedPath, generated, { encoding: 'utf8', mode: 0o600 })
 try {
-  await import(pathToFileURL(generatedPath).href)
+  if (process.env.R5_RECOVERY_ADAPTER_VALIDATE_ONLY === '1') {
+    const syntaxCheck = spawnSync(process.execPath, ['--check', generatedPath], {
+      encoding: 'utf8',
+    })
+    if (syntaxCheck.error || syntaxCheck.status !== 0) {
+      throw new Error(
+        `R5 generated controller syntax validation failed: ${syntaxCheck.error?.message ?? syntaxCheck.stderr.trim()}`,
+      )
+    }
+  } else {
+    await import(pathToFileURL(generatedPath).href)
+  }
 } finally {
   await rm(generatedPath, { force: true })
 }
