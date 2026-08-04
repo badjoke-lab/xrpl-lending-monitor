@@ -31,6 +31,16 @@ if (existsSync(successPath)) {
     (sum, batch) => sum + Number(batch?.ledgerCount ?? 0),
     0,
   )
+  const materializedBatchRows = Number(
+    evidence.materializedBatchRows ?? batches.length,
+  )
+  const executedRecoveryBatches = Number(
+    evidence.executedRecoveryBatches
+      ?? batches.filter((batch) => batch?.origin === 'r5_executor').length,
+  )
+  const adoptionMaterializedRows = batches.filter(
+    (batch) => batch?.origin === 'adopted_active_descendant',
+  ).length
 
   process.stdout.write(`## R5 bounded active recovery burst
 
@@ -39,6 +49,10 @@ if (existsSync(successPath)) {
 - burst verifier: ${code('success')}
 - recovery run ID: ${code(evidence.recoveryRunId)}
 - requested batch limit: ${code(evidence.requestedBatchLimit)}
+- requested executor batch limit: ${code(evidence.requestedExecutorBatchLimit)}
+- executed recovery batches: ${code(executedRecoveryBatches)}
+- materialized batch rows: ${code(materializedBatchRows)}
+- adoption materialized rows: ${code(adoptionMaterializedRows)}
 - wall-clock bound seconds: ${code(evidence.wallSeconds)}
 - elapsed milliseconds: ${code(evidence.elapsedMilliseconds)}
 - stop reason: ${code(evidence.stopReason)}
@@ -65,6 +79,7 @@ if (existsSync(successPath)) {
 - in-flight work count: ${code(boundary.inflightWorkCount)}
 - exact batch advance: ${code(checks.exactBatchAdvance)}
 - exact ledger advance: ${code(checks.exactLedgerAdvance)}
+- adoption rows excluded from executor budget: ${code(checks.adoptionRowsExcludedFromExecutorBudget)}
 - active recovery started: ${code(checks.activeRecoveryStarted)}
 - lag zero: ${code(checks.lagZero)}
 - public reader unchanged: ${code(checks.publicReaderUnchanged)}
