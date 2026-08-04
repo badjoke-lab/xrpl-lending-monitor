@@ -54,7 +54,7 @@ supabase_remote = "supabase-remote-probe.yml"
 policies = {
     "deploy-queue-minute-cadence-fix.yml": ["pull_request", "push"],
     historical_witness: ["workflow_dispatch", "push"],
-    r5_burst: ["workflow_dispatch"],
+    r5_burst: ["workflow_dispatch", "issue_comment"],
     "read-only-production-qualification.yml": ["pull_request", "workflow_dispatch", "issue_comment"],
     "rolling-checkpoint-candidate.yml": ["workflow_dispatch", "issue_comment"],
     "rolling-checkpoint-live-cutover.yml": ["workflow_dispatch"],
@@ -135,8 +135,15 @@ for required in (
     "issues: write",
     "cancel-in-progress: false",
     "RUN_R5_BOUNDED_BURST",
+    "github.event_name == 'workflow_dispatch'",
+    "github.event_name == 'issue_comment'",
+    "github.event.issue.number == 1175",
+    "github.actor == 'badjoke-lab'",
+    "github.event.comment.body == '/r5-recovery burst 8 900 nonce-e3378018'",
     "R5_RECOVERY_BURST_BATCH_LIMIT",
     "R5_RECOVERY_BURST_WALL_SECONDS",
+    "test \"$R5_RECOVERY_BURST_BATCH_LIMIT\" -eq 8",
+    "test \"$R5_RECOVERY_BURST_WALL_SECONDS\" -eq 900",
     "timeout-minutes: 40",
     "supabase secrets set XRPL_R5_RECOVERY_VERIFY_TOKEN",
     "node scripts/verify-supabase-r5-recovery-burst.mjs",
@@ -266,4 +273,4 @@ if scheduled:
     raise SystemExit(f"no scheduled workflow is allowed during active R5 recovery: {scheduled}")
 PY
 
-echo "Actions workflow allowlist passed: CI, guarded legacy recovery workflows, one read-only production probe, one read-only R4C2c witness discovery, one guarded Supabase deployment verifier, and one manual finite R5 recovery burst; no scheduled workflows."
+echo "Actions workflow allowlist passed: CI, guarded legacy recovery workflows, one read-only production probe, one read-only R4C2c witness discovery, one guarded Supabase deployment verifier, and one finite R5 recovery burst with exact owner-command activation; no scheduled workflows."
