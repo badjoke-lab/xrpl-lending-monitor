@@ -18,7 +18,7 @@ const publisher = read(
 const marker = read('ops/r5/run-once-20260804-8x900-observable-v2.marker')
 const markerDigest = createHash('sha256').update(marker).digest('hex')
 
-describe('R5 pending scan read-only diagnostic contract', () => {
+describe('R5 burst final parity read-only diagnostic contract', () => {
   it('binds one exact main push path to the diagnostic job only', () => {
     for (const required of [
       '  push:',
@@ -38,35 +38,41 @@ describe('R5 pending scan read-only diagnostic contract', () => {
 
     const executeCondition = workflow.slice(
       workflow.indexOf('  execute-bounded-burst:'),
-      workflow.indexOf('    runs-on: ubuntu-latest', workflow.indexOf('  execute-bounded-burst:')),
+      workflow.indexOf(
+        '    runs-on: ubuntu-latest',
+        workflow.indexOf('  execute-bounded-burst:'),
+      ),
     )
     expect(executeCondition).not.toContain("github.event_name == 'push'")
   })
 
-  it('pins the diagnostic marker bytes and digest exactly', () => {
+  it('pins the failed burst diagnostic marker bytes and digest exactly', () => {
     expect(marker).toBe(
-      'R5_PENDING_SCAN_DIAGNOSTIC_V6\nmode=read_only\nrun_id=r5-recovery-selected-revision3-entry\nbatch_id=r5-batch-v1-r5-recovery-selected-revision3-entry-00000087\nnonce=diagnostic-20260804-9e4c7a31\n',
+      'R5_BURST_PARITY_DIAGNOSTIC_V7\nmode=read_only\nrun_id=r5-recovery-selected-revision3-entry\nfailed_burst_run_id=30925522885\nnonce=diagnostic-20260805-0d7b5e91\n',
     )
     expect(markerDigest).toBe(
-      '16654aae5dfe31c0d3c2cb44d279f6af92b1076a90c2388803c05a118f4c4c27',
+      'bf47940252a652535df1f6876904e0ba32302dc1906bfd3b3caf57827fc9591e',
     )
     expect(workflow).toContain(markerDigest)
+    expect(adapter).toContain(markerDigest)
   })
 
   it('uses only a read-only Management API query and sanitized evidence', () => {
     for (const required of [
       'read_only: true',
-      "purpose: 'r5-pending-scan-read-only-diagnostic'",
+      "purpose: 'r5-burst-final-parity-read-only-diagnostic'",
+      'const failedBurstRunId = 30925522885',
+      'completedBatches: 99',
+      'committedLedgers: 2062',
+      'watermarkLedgerIndex: 4135369',
       'public.xrpl_read_r5_active_recovery($1::text)',
       'public.xrpl_read_r5_active_recovery_batch($1::text, $2::text)',
+      'xrpl_r5_v1.recovery_batches',
+      'xrpl_r5_v1.recovery_adoptions',
       "where profile_id = 'supabase-devnet'",
       "status = 'pending'",
       "payload->>'expectedPreviousLedgerIndex'",
       "payload->>'expectedPreviousLedgerHash'",
-      "payload->>'epochId'",
-      "payload->>'baseIdentity'",
-      'pg_get_functiondef(signature)',
-      'v_pending_scan.attempt_count <> 0',
       "const evidenceDirectory = 'supabase-r5-pending-scan-diagnostic'",
       'const evidencePath = `${evidenceDirectory}/diagnostic.json`',
       'const markdownPath = `${evidenceDirectory}/diagnostic.md`',
@@ -77,6 +83,7 @@ describe('R5 pending scan read-only diagnostic contract', () => {
     for (const forbidden of [
       'insert into',
       'update public.',
+      'update xrpl_r5_v1.',
       'delete from',
       'supabase secrets set',
       'functions/v1/xrpl-r5-recovery-batch-trigger',
@@ -86,8 +93,16 @@ describe('R5 pending scan read-only diagnostic contract', () => {
     }
   })
 
-  it('reports every pending-scan completion predicate separately', () => {
+  it('reports every final parity predicate separately', () => {
     for (const required of [
+      'recoveryAdvancedFromFailedBurst',
+      'recoveryCounterAndWatermarkAdvanceMatch',
+      'postFailureBatchCountMatchesRecoveryAdvance',
+      'postFailureLedgerCountMatchesRecoveryAdvance',
+      'postFailureBatchesAllCompleted',
+      'postFailureBatchesContiguous',
+      'batchSummaryMatchesRecovery',
+      'noHaltedOrLeasedRecoveryBatches',
       'physicalAndRecoveryWatermarkMatch',
       'exactlyOnePendingMessage',
       'noLeasedOrRetryMessages',
@@ -98,9 +113,7 @@ describe('R5 pending scan read-only diagnostic contract', () => {
       'pendingEpochMatches',
       'pendingBaseIdentityMatches',
       'streamIdentityMatches',
-      'completionAttemptCountGuardRemoved',
-      'completionPendingScanGuardPresent',
-      'mismatched completion checks:',
+      'mismatched parity checks:',
     ]) {
       expect(diagnostic).toContain(required)
     }
@@ -142,7 +155,7 @@ describe('R5 pending scan read-only diagnostic contract', () => {
     }
   })
 
-  it('retains explicit executor/adoption accounting for later burst runs', () => {
+  it('retains explicit executor and adoption accounting for later burst runs', () => {
     for (const required of [
       'requested executor batch limit:',
       'executed recovery batches:',
