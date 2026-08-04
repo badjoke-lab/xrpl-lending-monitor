@@ -55,7 +55,7 @@ describe('R5 pending scan read-only diagnostic contract', () => {
 
   it('uses only a read-only Management API query and sanitized evidence', () => {
     for (const required of [
-      "read_only: true",
+      'read_only: true',
       "purpose: 'r5-pending-scan-read-only-diagnostic'",
       'public.xrpl_read_r5_active_recovery($1::text)',
       'public.xrpl_read_r5_active_recovery_batch($1::text, $2::text)',
@@ -65,10 +65,11 @@ describe('R5 pending scan read-only diagnostic contract', () => {
       "payload->>'expectedPreviousLedgerHash'",
       "payload->>'epochId'",
       "payload->>'baseIdentity'",
-      "pg_get_functiondef(signature)",
-      "v_pending_scan.attempt_count <> 0",
-      'supabase-r5-pending-scan-diagnostic/diagnostic.json',
-      'supabase-r5-pending-scan-diagnostic/diagnostic.md',
+      'pg_get_functiondef(signature)',
+      'v_pending_scan.attempt_count <> 0',
+      "const evidenceDirectory = 'supabase-r5-pending-scan-diagnostic'",
+      'const evidencePath = `${evidenceDirectory}/diagnostic.json`',
+      'const markdownPath = `${evidenceDirectory}/diagnostic.md`',
     ]) {
       expect(diagnostic).toContain(required)
     }
