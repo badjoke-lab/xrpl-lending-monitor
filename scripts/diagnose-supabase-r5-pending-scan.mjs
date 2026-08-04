@@ -19,6 +19,16 @@ if (!/^[a-f0-9]{40}$/.test(sourceCommit)) {
 const recoveryRunId = 'r5-recovery-selected-revision3-entry'
 const failedBatchId =
   'r5-batch-v1-r5-recovery-selected-revision3-entry-00000087'
+const failedBurstRunId = 30925522885
+const failedBurstBefore = {
+  completedBatches: 99,
+  committedLedgers: 2062,
+  watermarkLedgerIndex: 4135369,
+  watermarkLedgerHash:
+    'F52B2BC40D3F433A7B525DE3F56E05FE62E7EB6DDB1C39690A1AA95FFA31ED0B',
+  watermarkWorkId:
+    'collector-work-v1:devnet:supabase-r4c2c-v1:seven-class-base-4132417-C9A7A89077EA7F54EBC296EE95E6AE45601088DDA5CFC5538A435C4A21E9CE77:4135369:A88F8D479B7E920CE073681550D090860147C9683B0BE6341E59FE2881042AF6',
+}
 const managementEndpoint =
   `https://api.supabase.com/v1/projects/${projectRef}/database/query`
 const evidenceDirectory = 'supabase-r5-pending-scan-diagnostic'
@@ -110,6 +120,92 @@ with pending_messages as (
   from public.xrpl_phase_work
   where profile_id = 'supabase-devnet'
     and status in ('planned', 'staged', 'committing', 'finalizing')
+), batch_counts as (
+  select
+    count(*)::integer as total_count,
+    count(*) filter (where status = 'completed')::integer as completed_count,
+    count(*) filter (where status = 'halted')::integer as halted_count,
+    count(*) filter (where status = 'leased')::integer as leased_count,
+    max(batch_sequence)::bigint as maximum_sequence,
+    coalesce(sum(ledger_count) filter (where status = 'completed'), 0)::bigint
+      as completed_ledger_count
+  from xrpl_r5_v1.recovery_batches
+  where run_id = $1::text
+), post_failure_batches_ordered as (
+  select
+    batch_id,
+    batch_sequence,
+    status::text as status,
+    origin,
+    start_ledger_index,
+    end_ledger_index,
+    ledger_count,
+    attempt_count,
+    expected_parent_hash,
+    final_ledger_hash,
+    final_work_id,
+    error_message,
+    lag(end_ledger_index) over (order by batch_sequence) as prior_end_ledger_index
+  from xrpl_r5_v1.recovery_batches
+  where run_id = $1::text
+    and batch_sequence > $3::bigint
+), post_failure_batch_summary as (
+  select
+    count(*)::integer as row_count,
+    count(*) filter (where status = 'completed')::integer as completed_count,
+    count(*) filter (where status = 'halted')::integer as halted_count,
+    count(*) filter (where origin = 'r5_executor')::integer as executor_count,
+    count(*) filter (where origin = 'adopted_active_descendant')::integer
+      as adoption_count,
+    coalesce(sum(ledger_count), 0)::bigint as ledger_count,
+    min(batch_sequence)::bigint as minimum_sequence,
+    max(batch_sequence)::bigint as maximum_sequence,
+    coalesce(bool_and(
+      case
+        when batch_sequence = $3::bigint + 1 then
+          start_ledger_index = $4::bigint + 1
+        else
+          start_ledger_index = prior_end_ledger_index + 1
+      end
+      and end_ledger_index = start_ledger_index + ledger_count - 1
+    ), true) as contiguous
+  from post_failure_batches_ordered
+), post_failure_batches as (
+  select coalesce(jsonb_agg(jsonb_build_object(
+    'batchId', batch_id,
+    'batchSequence', batch_sequence,
+    'status', status,
+    'origin', origin,
+    'startLedgerIndex', start_ledger_index,
+    'endLedgerIndex', end_ledger_index,
+    'ledgerCount', ledger_count,
+    'attemptCount', attempt_count,
+    'expectedParentHash', expected_parent_hash,
+    'finalLedgerHash', final_ledger_hash,
+    'finalWorkId', final_work_id,
+    'errorMessage', error_message
+  ) order by batch_sequence), '[]'::jsonb) as rows
+  from post_failure_batches_ordered
+), adoption_counts as (
+  select
+    count(*)::integer as total_count,
+    max(adoption_sequence)::bigint as maximum_sequence,
+    coalesce(sum(ledger_count), 0)::bigint as adopted_ledger_count
+  from xrpl_r5_v1.recovery_adoptions
+  where run_id = $1::text
+), post_failure_adoptions as (
+  select coalesce(jsonb_agg(jsonb_build_object(
+    'adoptionSequence', adoption_sequence,
+    'startLedgerIndex', start_ledger_index,
+    'endLedgerIndex', end_ledger_index,
+    'ledgerCount', ledger_count,
+    'firstBatchSequence', first_batch_sequence,
+    'adoptedBatchCount', adopted_batch_count,
+    'adoptedAt', adopted_at
+  ) order by adoption_sequence), '[]'::jsonb) as rows
+  from xrpl_r5_v1.recovery_adoptions
+  where run_id = $1::text
+    and first_batch_sequence > $3::bigint
 ), completion_function as (
   select to_regprocedure(
     'public.xrpl_complete_r5_active_recovery_batch(text,text,text,timestamp with time zone,text,text,text,text,bigint,numeric,numeric,numeric)'
@@ -134,10 +230,11 @@ with pending_messages as (
   from completion_function
 )
 select jsonb_build_object(
-  'schemaVersion', 1,
-  'purpose', 'r5-pending-scan-read-only-diagnostic',
+  'schemaVersion', 2,
+  'purpose', 'r5-burst-final-parity-read-only-diagnostic',
   'recoveryRunId', $1::text,
   'failedBatchId', $2::text,
+  'failedBurstRunId', $5::bigint,
   'recovery', public.xrpl_read_r5_active_recovery($1::text),
   'failedBatch', public.xrpl_read_r5_active_recovery_batch($1::text, $2::text),
   'watermark', (
@@ -189,6 +286,41 @@ select jsonb_build_object(
     ) order by message_id)
     from pending_messages
   ), '[]'::jsonb),
+  'batchSummary', (
+    select jsonb_build_object(
+      'totalCount', total_count,
+      'completedCount', completed_count,
+      'haltedCount', halted_count,
+      'leasedCount', leased_count,
+      'maximumSequence', maximum_sequence,
+      'completedLedgerCount', completed_ledger_count
+    )
+    from batch_counts
+  ),
+  'postFailureBatchSummary', (
+    select jsonb_build_object(
+      'rowCount', row_count,
+      'completedCount', completed_count,
+      'haltedCount', halted_count,
+      'executorCount', executor_count,
+      'adoptionCount', adoption_count,
+      'ledgerCount', ledger_count,
+      'minimumSequence', minimum_sequence,
+      'maximumSequence', maximum_sequence,
+      'contiguous', contiguous
+    )
+    from post_failure_batch_summary
+  ),
+  'postFailureBatches', (select rows from post_failure_batches),
+  'adoptionSummary', (
+    select jsonb_build_object(
+      'totalCount', total_count,
+      'maximumSequence', maximum_sequence,
+      'adoptedLedgerCount', adopted_ledger_count
+    )
+    from adoption_counts
+  ),
+  'postFailureAdoptions', (select rows from post_failure_adoptions),
   'completionFunction', (
     select jsonb_build_object(
       'found', found,
@@ -200,18 +332,36 @@ select jsonb_build_object(
 ) as diagnostic
 `
 
-const rows = await managementQuery(query, [recoveryRunId, failedBatchId])
+const rows = await managementQuery(query, [
+  recoveryRunId,
+  failedBatchId,
+  failedBurstBefore.completedBatches,
+  failedBurstBefore.watermarkLedgerIndex,
+  failedBurstRunId,
+])
 if (rows.length !== 1) throw new Error(`diagnostic query returned ${rows.length} rows`)
 const raw = object(rows[0]?.diagnostic, 'diagnostic')
 const recovery = object(raw.recovery, 'diagnostic.recovery')
 const watermark = object(raw.watermark, 'diagnostic.watermark')
 const scheduler = object(raw.scheduler, 'diagnostic.scheduler')
 const stream = object(raw.stream, 'diagnostic.stream')
+const batchSummary = object(raw.batchSummary, 'diagnostic.batchSummary')
+const postFailureBatchSummary = object(
+  raw.postFailureBatchSummary,
+  'diagnostic.postFailureBatchSummary',
+)
+const adoptionSummary = object(raw.adoptionSummary, 'diagnostic.adoptionSummary')
 const completionFunction = object(
   raw.completionFunction,
   'diagnostic.completionFunction',
 )
 const pendingMessages = Array.isArray(raw.pendingMessages) ? raw.pendingMessages : []
+const postFailureBatches = Array.isArray(raw.postFailureBatches)
+  ? raw.postFailureBatches
+  : []
+const postFailureAdoptions = Array.isArray(raw.postFailureAdoptions)
+  ? raw.postFailureAdoptions
+  : []
 const pending = pendingMessages.length === 1
   ? object(pendingMessages[0], 'diagnostic.pendingMessage')
   : null
@@ -220,14 +370,49 @@ const currentWatermark = object(
   'diagnostic.recovery.currentWatermark',
 )
 
+const completedBatchAdvance =
+  Number(recovery.completedBatches) - failedBurstBefore.completedBatches
+const committedLedgerAdvance =
+  Number(recovery.committedLedgers) - failedBurstBefore.committedLedgers
+const watermarkLedgerAdvance =
+  Number(currentWatermark.ledgerIndex) - failedBurstBefore.watermarkLedgerIndex
+
 const checks = {
   readOnly: true,
   exactRecoveryRun: recovery.runId === recoveryRunId,
+  failedBurstBeforeSnapshotBound:
+    failedBurstBefore.watermarkLedgerHash
+      === 'F52B2BC40D3F433A7B525DE3F56E05FE62E7EB6DDB1C39690A1AA95FFA31ED0B'
+    && failedBurstBefore.watermarkWorkId.endsWith(
+      ':4135369:A88F8D479B7E920CE073681550D090860147C9683B0BE6341E59FE2881042AF6',
+    ),
+  recoveryAdvancedFromFailedBurst:
+    completedBatchAdvance > 0
+      && committedLedgerAdvance > 0
+      && watermarkLedgerAdvance > 0,
+  recoveryCounterAndWatermarkAdvanceMatch:
+    committedLedgerAdvance === watermarkLedgerAdvance,
+  postFailureBatchCountMatchesRecoveryAdvance:
+    Number(postFailureBatchSummary.rowCount) === completedBatchAdvance,
+  postFailureLedgerCountMatchesRecoveryAdvance:
+    Number(postFailureBatchSummary.ledgerCount) === committedLedgerAdvance,
+  postFailureBatchesAllCompleted:
+    Number(postFailureBatchSummary.completedCount)
+      === Number(postFailureBatchSummary.rowCount)
+      && Number(postFailureBatchSummary.haltedCount) === 0,
+  postFailureBatchesContiguous: postFailureBatchSummary.contiguous === true,
+  batchSummaryMatchesRecovery:
+    Number(batchSummary.completedCount) === Number(recovery.completedBatches)
+      && Number(batchSummary.completedLedgerCount) === Number(recovery.committedLedgers)
+      && Number(batchSummary.maximumSequence) === Number(recovery.completedBatches),
+  noHaltedOrLeasedRecoveryBatches:
+    Number(batchSummary.haltedCount) === 0
+      && Number(batchSummary.leasedCount) === 0,
   physicalAndRecoveryWatermarkMatch:
     Number(watermark.ledgerIndex) === Number(currentWatermark.ledgerIndex)
-    && String(watermark.ledgerHash).toUpperCase()
-      === String(currentWatermark.ledgerHash).toUpperCase()
-    && watermark.workId === currentWatermark.workId,
+      && String(watermark.ledgerHash).toUpperCase()
+        === String(currentWatermark.ledgerHash).toUpperCase()
+      && watermark.workId === currentWatermark.workId,
   exactlyOnePendingMessage:
     Number(scheduler.pendingCount) === 1 && pendingMessages.length === 1,
   noLeasedOrRetryMessages:
@@ -261,13 +446,19 @@ const checks = {
 }
 
 const evidence = {
-  schemaVersion: 1,
-  purpose: 'r5-pending-scan-read-only-diagnostic',
+  schemaVersion: 2,
+  purpose: 'r5-burst-final-parity-read-only-diagnostic',
   verifiedAt: new Date().toISOString(),
   sourceRunId,
   sourceCommit,
   recoveryRunId,
-  failedBatchId,
+  failedBurstRunId,
+  failedBurstBefore,
+  computedAdvance: {
+    completedBatchAdvance,
+    committedLedgerAdvance,
+    watermarkLedgerAdvance,
+  },
   recovery,
   failedBatch: raw.failedBatch,
   watermark,
@@ -275,6 +466,11 @@ const evidence = {
   scheduler,
   inflightWorkCount: Number(raw.inflightWorkCount),
   pendingMessages,
+  batchSummary,
+  postFailureBatchSummary,
+  postFailureBatches,
+  adoptionSummary,
+  postFailureAdoptions,
   completionFunction,
   checks,
 }
@@ -284,36 +480,50 @@ await writeFile(evidencePath, `${JSON.stringify(evidence, null, 2)}\n`, 'utf8')
 
 const mismatchNames = Object.entries(checks)
   .filter(([name, value]) =>
-    !['readOnly', 'publicReaderUnchanged', 'mainnetDisabled', 'stabilizationAuthorized', 'soakAuthorized'].includes(name)
-    && value !== true,
+    ![
+      'readOnly',
+      'publicReaderUnchanged',
+      'mainnetDisabled',
+      'stabilizationAuthorized',
+      'soakAuthorized',
+    ].includes(name) && value !== true,
   )
   .map(([name]) => name)
 
-const markdown = `## R5 pending scan read-only diagnostic
+const markdown = `## R5 burst final parity read-only diagnostic
 
 - run: ${code(sourceRunId)}
 - commit: ${code(sourceCommit)}
+- failed burst run: ${code(failedBurstRunId)}
 - recovery run ID: ${code(recoveryRunId)}
-- failed batch ID: ${code(failedBatchId)}
 - recovery status: ${code(recovery.status)}
-- completed batches: ${code(recovery.completedBatches)}
-- committed ledgers: ${code(recovery.committedLedgers)}
-- recovery watermark: ${code(currentWatermark.ledgerIndex)} / ${code(currentWatermark.ledgerHash)}
-- physical watermark: ${code(watermark.ledgerIndex)} / ${code(watermark.ledgerHash)}
-- failed batch status: ${code(raw.failedBatch?.status)}
+- failed burst before completed batches: ${code(failedBurstBefore.completedBatches)}
+- failed burst before committed ledgers: ${code(failedBurstBefore.committedLedgers)}
+- failed burst before watermark: ${code(failedBurstBefore.watermarkLedgerIndex)} / ${code(failedBurstBefore.watermarkLedgerHash)}
+- completed batches now: ${code(recovery.completedBatches)}
+- committed ledgers now: ${code(recovery.committedLedgers)}
+- recovery watermark now: ${code(currentWatermark.ledgerIndex)} / ${code(currentWatermark.ledgerHash)}
+- physical watermark now: ${code(watermark.ledgerIndex)} / ${code(watermark.ledgerHash)}
+- completed batch advance: ${code(completedBatchAdvance)}
+- committed ledger advance: ${code(committedLedgerAdvance)}
+- watermark ledger advance: ${code(watermarkLedgerAdvance)}
+- post-failure batch rows: ${code(postFailureBatchSummary.rowCount)}
+- post-failure completed rows: ${code(postFailureBatchSummary.completedCount)}
+- post-failure halted rows: ${code(postFailureBatchSummary.haltedCount)}
+- post-failure executor rows: ${code(postFailureBatchSummary.executorCount)}
+- post-failure adoption rows: ${code(postFailureBatchSummary.adoptionCount)}
+- post-failure batch ledger total: ${code(postFailureBatchSummary.ledgerCount)}
+- post-failure batch range contiguous: ${code(postFailureBatchSummary.contiguous)}
+- total adoption rows: ${code(adoptionSummary.totalCount)}
+- maximum adoption sequence: ${code(adoptionSummary.maximumSequence)}
+- post-failure adoption rows: ${code(postFailureAdoptions.length)}
 - pending message count: ${code(scheduler.pendingCount)}
 - leased message count: ${code(scheduler.leasedCount)}
 - retry message count: ${code(scheduler.retryCount)}
 - in-flight work count: ${code(raw.inflightWorkCount)}
 - pending phase: ${code(pending?.phase)}
-- pending attempt count: ${code(pending?.attemptCount)}
 - pending expected previous ledger: ${code(pending?.expectedPreviousLedgerIndex)}
-- pending expected previous hash: ${code(pending?.expectedPreviousLedgerHash)}
-- pending epoch: ${code(pending?.epochId)}
-- pending base identity: ${code(pending?.baseIdentity)}
-- completion attempt-count guard present: ${code(completionFunction.attemptCountGuardPresent)}
-- completion pending-scan guard present: ${code(completionFunction.pendingScanGuardPresent)}
-- mismatched completion checks: ${code(mismatchNames.length === 0 ? 'none' : mismatchNames.join(','))}
+- mismatched parity checks: ${code(mismatchNames.length === 0 ? 'none' : mismatchNames.join(','))}
 - read-only: ${code(true)}
 - public reader unchanged: ${code(checks.publicReaderUnchanged)}
 - Mainnet disabled: ${code(checks.mainnetDisabled)}
