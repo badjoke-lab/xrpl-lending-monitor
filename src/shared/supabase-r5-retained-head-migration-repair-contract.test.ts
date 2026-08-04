@@ -7,24 +7,24 @@ function read(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
-const repairPath =
-  'supabase/migrations/20260803123150_xrpl_r5_recovery_retained_head_claim_repair.sql'
 const canonicalPath =
   'supabase/migrations/20260803123200_xrpl_r5_recovery_retained_head_claim.sql'
-const repair = read(repairPath)
+const repairPath =
+  'supabase/migrations/20260803123300_xrpl_r5_recovery_retained_head_claim_forward_repair.sql'
 const canonical = read(canonicalPath)
+const repair = read(repairPath)
 
-describe('R5 retained-head claim migration repair', () => {
-  it('runs immediately before the canonical retained-head migration', () => {
-    const repairTimestamp = Number(repairPath.match(/migrations\/(\d{14})_/u)?.[1])
+describe('R5 retained-head claim forward migration repair', () => {
+  it('runs strictly after the remote-recorded canonical migration', () => {
     const canonicalTimestamp = Number(canonicalPath.match(/migrations\/(\d{14})_/u)?.[1])
-    expect(Number.isSafeInteger(repairTimestamp)).toBe(true)
+    const repairTimestamp = Number(repairPath.match(/migrations\/(\d{14})_/u)?.[1])
     expect(Number.isSafeInteger(canonicalTimestamp)).toBe(true)
-    expect(repairTimestamp).toBeLessThan(canonicalTimestamp)
-    expect(canonicalTimestamp - repairTimestamp).toBe(50)
+    expect(Number.isSafeInteger(repairTimestamp)).toBe(true)
+    expect(repairTimestamp).toBeGreaterThan(canonicalTimestamp)
+    expect(repairTimestamp - canonicalTimestamp).toBe(100)
   })
 
-  it('drops only the orphanable exact function signature', () => {
+  it('drops only the exact orphaned signature without destructive propagation', () => {
     expect(repair).toContain(
       'drop function if exists public.xrpl_claim_r5_active_recovery_batch_from_prepared_head(',
     )
@@ -35,11 +35,20 @@ describe('R5 retained-head claim migration repair', () => {
     expect(repair).not.toContain('cascade')
     expect(repair).not.toContain('drop table')
     expect(repair).not.toContain('delete from')
+    expect(repair).not.toContain('truncate ')
   })
 
-  it('lets the canonical migration restore implementation and grants', () => {
-    for (const required of [
+  it('recreates the exact canonical implementation and grants', () => {
+    const canonicalStart = canonical.indexOf(
       'create or replace function public.xrpl_claim_r5_active_recovery_batch_from_prepared_head(',
+    )
+    const repairStart = repair.indexOf(
+      'create or replace function public.xrpl_claim_r5_active_recovery_batch_from_prepared_head(',
+    )
+    expect(canonicalStart).toBeGreaterThanOrEqual(0)
+    expect(repairStart).toBeGreaterThanOrEqual(0)
+    expect(repair.slice(repairStart)).toBe(canonical.slice(canonicalStart))
+    for (const required of [
       'security definer',
       'reservationBeforeAnyNetworkRead',
       'freshHeadMustCoverReservedEndBeforeFetch',
@@ -47,7 +56,7 @@ describe('R5 retained-head claim migration repair', () => {
       'grant execute on function public.xrpl_claim_r5_active_recovery_batch_from_prepared_head(',
       "rolname = 'supabase_admin'",
     ]) {
-      expect(canonical).toContain(required)
+      expect(repair).toContain(required)
     }
   })
 })
