@@ -28,26 +28,31 @@ def replace_once(name: str, old: str, new: str) -> None:
 
 
 replace_once(
-    "R5 one-shot trigger policy",
+    "R5 observable one-shot trigger policy",
     '    r5_burst: ["workflow_dispatch", "issue_comment"],',
     '    r5_burst: ["workflow_dispatch", "issue_comment", "push"],',
 )
 
 replace_once(
-    "R5 one-shot required marker contract",
+    "R5 observable one-shot required marker contract",
     '''    "github.event.comment.body == '/r5-recovery burst 8 900 nonce-e3378018'",
     "R5_RECOVERY_BURST_BATCH_LIMIT",''',
     '''    "github.event.comment.body == '/r5-recovery burst 8 900 nonce-e3378018'",
     "github.event_name == 'push'",
     "github.ref == 'refs/heads/main'",
-    "ops/r5/run-once-20260804-8x900.marker",
-    "de23cd3f4b06e05d6ffbe212719ca604cbaa23ca285b9d4709d5ad259ecc97fa",
-    'test "$GITHUB_ACTOR" = badjoke-lab',
+    "ops/r5/run-once-20260804-8x900-observable-v2.marker",
+    "c608d66b43676193fd0c4410d97e6dacb0741ec2e4589c8e67412c5238cb4b37",
+    "author_login=",
+    "gh api",
+    "--jq '.author.login'",
+    'test "$author_login" = badjoke-lab',
+    "Publish bounded R5 burst start locator",
+    "mutation started: `false`",
     "R5_RECOVERY_BURST_BATCH_LIMIT",''',
 )
 
 replace_once(
-    "R5 one-shot push exception",
+    "R5 observable one-shot push exception",
     '''for forbidden in (
     "  schedule:",
     "  push:",
@@ -75,6 +80,14 @@ replace_once(
 ):
     if forbidden in burst:
         raise SystemExit(f"R5 bounded burst workflow contains forbidden capability: {forbidden.strip()}")''',
+)
+
+replace_once(
+    "R5 observable start and final locator count",
+    '''if burst.count("issues: write") != 1 or burst.count("gh issue comment 1175") != 1:
+    raise SystemExit("R5 bounded burst issue-write capability must remain bound to one permission and Issue #1175")''',
+    '''if burst.count("issues: write") != 1 or burst.count("gh issue comment 1175") != 2:
+    raise SystemExit("R5 bounded burst issue-write capability must remain bound to one permission and exactly two Issue #1175 locators")''',
 )
 
 generated_path.write_text(text)

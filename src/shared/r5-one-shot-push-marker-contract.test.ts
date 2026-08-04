@@ -11,20 +11,21 @@ function read(path: string): string {
 const workflow = read('.github/workflows/r5-bounded-recovery-burst.yml')
 const ci = read('.github/workflows/ci.yml')
 const adapter = read('scripts/check-actions-workflow-allowlist-r5-one-shot.sh')
-const marker = read('ops/r5/run-once-20260804-8x900.marker')
+const marker = read('ops/r5/run-once-20260804-8x900-observable-v2.marker')
 const markerDigest = createHash('sha256').update(marker).digest('hex')
 
-describe('R5 one-shot push marker contract', () => {
+describe('R5 observable one-shot push marker contract', () => {
   it('binds one exact main push path to the existing finite workflow', () => {
     for (const required of [
       '  push:',
       '    branches: [main]',
-      '      - ops/r5/run-once-20260804-8x900.marker',
+      '      - ops/r5/run-once-20260804-8x900-observable-v2.marker',
       "github.event_name == 'push'",
       "github.ref == 'refs/heads/main'",
-      "github.actor == 'badjoke-lab'",
       'test "$GITHUB_REF" = refs/heads/main',
-      'test "$GITHUB_ACTOR" = badjoke-lab',
+      'gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}"',
+      "--jq '.author.login'",
+      'test "$author_login" = badjoke-lab',
       'test "$R5_RECOVERY_BURST_BATCH_LIMIT" -eq 8',
       'test "$R5_RECOVERY_BURST_WALL_SECONDS" -eq 900',
     ]) {
@@ -32,20 +33,50 @@ describe('R5 one-shot push marker contract', () => {
     }
   })
 
-  it('pins the marker bytes and digest exactly', () => {
+  it('pins the observable marker bytes and digest exactly', () => {
     expect(marker).toBe(
-      'R5_ONE_SHOT_PUSH_MARKER_V1\nbatch_limit=8\nwall_seconds=900\nnonce=push-20260804-8x900-9b7e4c2a\n',
+      'R5_ONE_SHOT_PUSH_MARKER_V2\nbatch_limit=8\nwall_seconds=900\nnonce=push-20260804-8x900-observable-7c91d5e4\n',
     )
     expect(markerDigest).toBe(
-      'de23cd3f4b06e05d6ffbe212719ca604cbaa23ca285b9d4709d5ad259ecc97fa',
+      'c608d66b43676193fd0c4410d97e6dacb0741ec2e4589c8e67412c5238cb4b37',
     )
     expect(workflow).toContain(markerDigest)
+  })
+
+  it('publishes a sanitized start locator before token rotation and mutation', () => {
+    const startIndex = workflow.indexOf(
+      '- name: Publish bounded R5 burst start locator',
+    )
+    const tokenIndex = workflow.indexOf(
+      '- name: Rotate one-run R5 recovery verifier token',
+    )
+    const executeIndex = workflow.indexOf(
+      '- name: Execute and verify one finite R5 recovery burst',
+    )
+
+    expect(startIndex).toBeGreaterThan(-1)
+    expect(tokenIndex).toBeGreaterThan(startIndex)
+    expect(executeIndex).toBeGreaterThan(tokenIndex)
+
+    for (const required of [
+      'gh issue comment 1175',
+      'R5 bounded active recovery burst start',
+      'mutation started: `false`',
+      'public reader unchanged: `true`',
+      'Mainnet disabled: `true`',
+      'stabilization authorized: `false`',
+      'soak authorized: `false`',
+    ]) {
+      expect(workflow).toContain(required)
+    }
+    expect(workflow.match(/gh issue comment 1175/g)).toHaveLength(2)
   })
 
   it('retains the original owner-only issue command and shared concurrency', () => {
     for (const required of [
       "github.event_name == 'issue_comment'",
       'github.event.issue.number == 1175',
+      "github.actor == 'badjoke-lab'",
       "github.event.comment.body == '/r5-recovery burst 8 900 nonce-e3378018'",
       'group: r5-bounded-recovery-burst',
       'cancel-in-progress: false',
@@ -65,8 +96,10 @@ describe('R5 one-shot push marker contract', () => {
       'old in updated',
       'new not in updated',
       'r5_burst: ["workflow_dispatch", "issue_comment", "push"]',
-      'R5 one-shot required marker contract',
-      'R5 one-shot push exception',
+      'R5 observable one-shot required marker contract',
+      'R5 observable one-shot push exception',
+      'R5 observable start and final locator count',
+      'burst.count("gh issue comment 1175") != 2',
       'bash "$generated_script" "$@"',
     ]) {
       expect(adapter).toContain(required)
