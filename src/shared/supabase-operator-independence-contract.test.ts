@@ -13,6 +13,25 @@ const resourcePublisher = read('scripts/publish-supabase-resource-run-locator.mj
 const operatorPublisher = read('scripts/publish-supabase-operator-run-locator.mjs')
 const workflow = read('.github/workflows/supabase-remote-probe.yml')
 
+const exactFunctionDeployments = [
+  'xrpl-collector-tick',
+  'xrpl-committed-reader',
+  'xrpl-historical-witness',
+  'xrpl-historical-witness-reader',
+  'xrpl-multichunk-witness',
+  'xrpl-multichunk-witness-reader',
+  'xrpl-complete-state-transfer',
+  'xrpl-restore-continuation',
+  'xrpl-remote-fault-qualification',
+  'xrpl-throughput-resource-baseline',
+  'xrpl-catchup-throughput',
+  'xrpl-steady-batch-tick',
+  'xrpl-steady-throughput-qualification',
+  'xrpl-resource-headroom-guard',
+  'xrpl-r5-recovery-batch',
+  'xrpl-r5-recovery-batch-trigger',
+] as const
+
 describe('Supabase G9 operator-independence contract', () => {
   it('binds the exact revision-3 profile and remote accounting evidence', () => {
     for (const required of [
@@ -33,23 +52,13 @@ describe('Supabase G9 operator-independence contract', () => {
     ]) expect(verifier).toContain(required)
   })
 
-  it('requires the exact scripted deployment set and migration application', () => {
-    for (const slug of [
-      'xrpl-collector-tick',
-      'xrpl-committed-reader',
-      'xrpl-historical-witness',
-      'xrpl-historical-witness-reader',
-      'xrpl-multichunk-witness',
-      'xrpl-multichunk-witness-reader',
-      'xrpl-complete-state-transfer',
-      'xrpl-restore-continuation',
-      'xrpl-remote-fault-qualification',
-      'xrpl-throughput-resource-baseline',
-      'xrpl-catchup-throughput',
-      'xrpl-steady-batch-tick',
-      'xrpl-steady-throughput-qualification',
-      'xrpl-resource-headroom-guard',
-    ]) expect(verifier).toContain(`'${slug}'`)
+  it('requires exactly the sixteen scripted deployments and migration application', () => {
+    expect(exactFunctionDeployments).toHaveLength(16)
+    for (const slug of exactFunctionDeployments) {
+      expect(verifier).toContain(`'${slug}'`)
+      expect(workflow.match(new RegExp(`supabase functions deploy ${slug} `, 'gu'))).toHaveLength(1)
+    }
+    expect(workflow.match(/supabase functions deploy /gu)).toHaveLength(16)
 
     for (const required of [
       'uses: actions/checkout@v4',
@@ -60,17 +69,29 @@ describe('Supabase G9 operator-independence contract', () => {
       'noRoutineDashboardStep:',
     ]) expect(verifier).toContain(required)
     expect(verifier).toContain('workflow function deployment count changed')
+    expect(verifier).not.toContain('startsWith')
+    expect(verifier).not.toContain('includes(\'xrpl-r5-\')')
   })
 
-  it('requires scripted credential rotation exactly once', () => {
+  it('requires both one-run tokens to be generated, masked, exported, and rotated exactly once', () => {
     for (const required of [
-      'openssl rand -hex 32',
-      'echo "::add-mask::${verifier_token}"',
-      'supabase secrets set XRPL_READER_VERIFY_TOKEN',
-      'tokenRotatedExactlyOnce:',
+      'exactlyTwoTokensGenerated:',
+      'readerTokenMasked:',
+      'recoveryTokenMasked:',
+      'readerTokenRotatedExactlyOnce:',
+      'recoveryTokenRotatedExactlyOnce:',
+      'readerTokenExportedExactlyOnce:',
+      'recoveryTokenExportedExactlyOnce:',
       'tokenScopedToExactProject:',
+      'echo "::add-mask::${reader_token}"',
+      'echo "::add-mask::${recovery_token}"',
+      'supabase secrets set XRPL_READER_VERIFY_TOKEN',
+      'supabase secrets set XRPL_R5_RECOVERY_VERIFY_TOKEN',
       'credentialRotationScripted: true',
     ]) expect(verifier).toContain(required)
+    expect(workflow.match(/openssl rand -hex 32/gu)).toHaveLength(2)
+    expect(workflow.match(/supabase secrets set XRPL_READER_VERIFY_TOKEN/gu)).toHaveLength(1)
+    expect(workflow.match(/supabase secrets set XRPL_R5_RECOVERY_VERIFY_TOKEN/gu)).toHaveLength(1)
   })
 
   it('accepts only a first empty restore or exact duplicate convergence', () => {

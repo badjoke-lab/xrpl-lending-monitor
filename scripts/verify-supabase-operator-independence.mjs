@@ -76,6 +76,8 @@ async function run() {
     'xrpl-steady-batch-tick',
     'xrpl-steady-throughput-qualification',
     'xrpl-resource-headroom-guard',
+    'xrpl-r5-recovery-batch',
+    'xrpl-r5-recovery-batch-trigger',
   ]
   for (const slug of expectedFunctionDeployments) {
     if (!workflow.includes(`supabase functions deploy ${slug} `)) {
@@ -97,11 +99,20 @@ async function run() {
   for (const [key, value] of Object.entries(deploymentChecks)) requireTrue(value, `deployment.${key}`)
 
   const credentialChecks = {
-    tokenGeneratedInWorkflow: workflow.includes('openssl rand -hex 32'),
-    tokenMasked: workflow.includes('echo "::add-mask::${verifier_token}"'),
-    tokenRotatedExactlyOnce:
+    exactlyTwoTokensGenerated:
+      count(workflow, /openssl rand -hex 32/gu) === 2,
+    readerTokenMasked: workflow.includes('echo "::add-mask::${reader_token}"'),
+    recoveryTokenMasked: workflow.includes('echo "::add-mask::${recovery_token}"'),
+    readerTokenRotatedExactlyOnce:
       count(workflow, /supabase secrets set XRPL_READER_VERIFY_TOKEN/gu) === 1,
-    tokenScopedToExactProject: workflow.includes('--project-ref "$SUPABASE_PROJECT_ID"'),
+    recoveryTokenRotatedExactlyOnce:
+      count(workflow, /supabase secrets set XRPL_R5_RECOVERY_VERIFY_TOKEN/gu) === 1,
+    readerTokenExportedExactlyOnce:
+      count(workflow, /echo "XRPL_READER_VERIFY_TOKEN=\$\{reader_token\}"/gu) === 1,
+    recoveryTokenExportedExactlyOnce:
+      count(workflow, /echo "XRPL_R5_RECOVERY_VERIFY_TOKEN=\$\{recovery_token\}"/gu) === 1,
+    tokenScopedToExactProject:
+      count(workflow, /supabase secrets set XRPL_(?:READER|R5_RECOVERY)_VERIFY_TOKEN=.*--project-ref "\$SUPABASE_PROJECT_ID"/gu) === 2,
   }
   for (const [key, value] of Object.entries(credentialChecks)) requireTrue(value, `credential.${key}`)
 
