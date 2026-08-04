@@ -64,7 +64,7 @@ begin
     bool_and(row_value ? 'valueJson' and not (row_value ? 'value')),
     bool_and(row_value ? 'value' and not (row_value ? 'valueJson'))
   into v_reference_shape, v_payload_shape
-  from jsonb_array_elements(v_input_rows) as row_value;
+  from jsonb_array_elements(v_input_rows) as input_row(row_value);
 
   if coalesce(v_reference_shape, false) then
     return public.xrpl_complete_portable_commit_phase_strict(
