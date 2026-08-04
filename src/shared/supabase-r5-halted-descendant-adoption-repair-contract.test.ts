@@ -22,7 +22,7 @@ describe('R5 halted descendant adoption repair contract', () => {
       'v_run.committed_ledgers <> 1805',
       'v_run.current_watermark_ledger_index <> 4135112',
       'v_watermark.ledger_index <> 4135151',
-      "'r5_recovery_batch_completion_pending_scan_invalid'",
+      'r5_recovery_batch_completion_pending_scan_invalid',
     ]) {
       expect(migration).toContain(required)
     }
