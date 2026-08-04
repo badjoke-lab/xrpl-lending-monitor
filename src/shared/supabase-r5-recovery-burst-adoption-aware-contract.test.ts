@@ -7,66 +7,84 @@ function read(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
-const wrapper = read(
+const controller = read(
   'scripts/verify-supabase-r5-recovery-burst-adoption-aware.mjs',
 )
 const workflow = read('.github/workflows/r5-bounded-recovery-burst.yml')
 
 describe('R5 adoption-aware bounded recovery burst contract', () => {
-  it('keeps the original bounded verifier as the ordinary execution path', () => {
+  it('retains the exact finite command, batch and wall-clock bounds', () => {
     for (const required of [
-      "const legacyVerifier = 'scripts/verify-supabase-r5-recovery-burst.mjs'",
-      'runLegacyVerifier(requestedBatchLimit, requestedWallSeconds)',
-      'if (first.code === 0) return',
-      'R5_RECOVERY_BURST_BATCH_LIMIT: String(batchLimit)',
-      'R5_RECOVERY_BURST_WALL_SECONDS: String(wallSeconds)',
+      "boundedIntegerEnvironment('R5_RECOVERY_BURST_BATCH_LIMIT', 8, 1, 64)",
+      "boundedIntegerEnvironment('R5_RECOVERY_BURST_WALL_SECONDS', 900, 60, 1800)",
+      'maximumAttemptsPerTrigger = 3',
+      'retryDelayMilliseconds = 60_000',
+      'advancedBatches > remainingLimit',
+      'batches.length > batchLimit',
     ]) {
-      expect(wrapper).toContain(required)
+      expect(controller).toContain(required)
     }
   })
 
-  it('opens the bridge only for the exact observed non-atomic adoption symptom', () => {
+  it('verifies every trigger from before state through final state', () => {
     for (const required of [
-      "const nonAtomicMessage = 'R5 recovery changed non-atomically while awaiting batch'",
-      'if (!firstOutput.includes(nonAtomicMessage))',
-      'legacy R5 burst verifier failed outside the adoption bridge',
-      'afterAdoptions.adoptionCount !== beforeAdoptions.adoptionCount + 1',
-      'R5 non-atomic observation did not add exactly one adoption record',
+      'const before = await readRecovery()',
+      'const beforeAdoptions = await readAdoptions()',
+      'lastTrigger = await invokeTrigger()',
+      'const after = await readRecovery()',
+      'const afterAdoptions = await readAdoptions()',
+      'await verifyCycle(',
+      'cycles.push({',
+      'everyTriggerAdvanceVerified',
     ]) {
-      expect(wrapper).toContain(required)
+      expect(controller).toContain(required)
     }
   })
 
-  it('binds adoption records to exact canonical batch and hash continuity', () => {
+  it('permits multiple completed batches only with one exact adoption record', () => {
     for (const required of [
-      "'r5-active-descendant-adoption-summary'",
+      '![0, 1].includes(addedAdoptions)',
+      'afterAdoptions.adoptionCount - beforeAdoptions.adoptionCount',
+      'afterAdoptions.adoptedLedgerCount',
+      'beforeAdoptions.adoptedLedgerCount + adoption.ledgerCount',
       'adoption.firstBatchSequence !== before.completedBatches + 1',
       'adoption.startLedgerIndex !== before.currentWatermark.ledgerIndex + 1',
       'adoption.expectedParentHash !== before.currentWatermark.ledgerHash',
+      '![0, 1].includes(executorBatchCount)',
+      'advanced multiple batches without one adoption record',
+    ]) {
+      expect(controller).toContain(required)
+    }
+  })
+
+  it('binds every new batch into one contiguous hash-linked range', () => {
+    for (const required of [
       'batch.startLedgerIndex !== expectedLedgerIndex',
       'batch.expectedParentHash !== expectedParentHash',
+      'expectedLedgerIndex = batch.endLedgerIndex + 1',
+      'expectedParentHash = batch.finalLedgerHash',
       "origin: adopted ? 'adopted_active_descendant' : 'r5_executor'",
       'adopted && batch.finalizedEgressUpperBoundBytes !== 0',
       'after.lastAccountingDigest !== lastBatch?.accountingDigest',
     ]) {
-      expect(wrapper).toContain(required)
+      expect(controller).toContain(required)
     }
   })
 
-  it('allows only adoption batches plus at most one executor batch per trigger', () => {
+  it('requires adoption batch rows to match the adoption summary exactly', () => {
     for (const required of [
-      'const executorBatchCount = advancedBatches - adoption.adoptedBatchCount',
-      '![0, 1].includes(executorBatchCount)',
-      'advancedBatches > requestedBatchLimit',
-      'R5 adoption bridge exceeded the finite per-trigger batch bound',
-      'const remainingBatchLimit = requestedBatchLimit - bridge.advancedBatches',
-      'bridge.batches.length + continuationBatches.length <= requestedBatchLimit',
+      'adoptedBatchCount !== Math.ceil(ledgerCount / 24)',
+      'const adoptedBatches = batches.slice(0, adoptedBatchCount)',
+      'adoptedLedgers !== adoption.ledgerCount',
+      'lastAdoptedBatch?.endLedgerIndex !== adoption.endLedgerIndex',
+      'lastAdoptedBatch?.finalLedgerHash !== adoption.finalLedgerHash',
+      'lastAdoptedBatch?.finalWorkId !== adoption.finalWorkId',
     ]) {
-      expect(wrapper).toContain(required)
+      expect(controller).toContain(required)
     }
   })
 
-  it('retains exact final active boundary and closed release gates', () => {
+  it('retains final active-boundary and release-closure checks', () => {
     for (const required of [
       "requiredInteger(boundary.pendingCount, 'boundary.pendingCount') !== 1",
       "requiredInteger(boundary.leasedCount, 'boundary.leasedCount') !== 0",
@@ -77,11 +95,11 @@ describe('R5 adoption-aware bounded recovery burst contract', () => {
       'stabilizationAuthorized: false',
       'soakAuthorized: false',
     ]) {
-      expect(wrapper).toContain(required)
+      expect(controller).toContain(required)
     }
   })
 
-  it('runs the adoption-aware verifier from the owner-gated finite workflow', () => {
+  it('runs only from the existing owner-gated finite workflow', () => {
     expect(workflow).toContain(
       'node scripts/verify-supabase-r5-recovery-burst-adoption-aware.mjs',
     )
