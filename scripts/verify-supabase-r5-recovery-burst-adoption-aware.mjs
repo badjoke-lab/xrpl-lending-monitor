@@ -1,5 +1,4 @@
-import { spawn } from 'node:child_process'
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, writeFile } from 'node:fs/promises'
 
 const projectRef = process.env.SUPABASE_PROJECT_ID ?? ''
 if (!/^[a-z]{20}$/.test(projectRef)) {
@@ -21,18 +20,9 @@ function boundedIntegerEnvironment(name, fallback, minimum, maximum) {
   return value
 }
 
-const requestedBatchLimit = boundedIntegerEnvironment(
-  'R5_RECOVERY_BURST_BATCH_LIMIT',
-  8,
-  1,
-  64,
-)
-const requestedWallSeconds = boundedIntegerEnvironment(
-  'R5_RECOVERY_BURST_WALL_SECONDS',
-  900,
-  60,
-  1800,
-)
+const batchLimit = boundedIntegerEnvironment('R5_RECOVERY_BURST_BATCH_LIMIT', 8, 1, 64)
+const wallSeconds = boundedIntegerEnvironment('R5_RECOVERY_BURST_WALL_SECONDS', 900, 60, 1800)
+const purpose = 'r5-first-active-recovery-batch'
 const recoveryRunId = 'r5-recovery-selected-revision3-entry'
 const profileId = 'supabase_free_postgres_pgcron_edge'
 const profileRevision = 3
@@ -40,20 +30,28 @@ const profileIdentityDigest =
   '3a5c4ff2c43a48d3e5b7ceded60027173d215d6f083fb33c22375758520bbe67'
 const selectionDigest =
   '13a313d9d0679c7c512b59f9931d733dcb3217ec8e1cc6e74a36125a0354b667'
+const triggerEndpoint =
+  `https://${projectRef}.supabase.co/functions/v1/xrpl-r5-recovery-batch-trigger`
 const managementEndpoint =
   `https://api.supabase.com/v1/projects/${projectRef}/database/query`
 const xrplEndpoint = 'https://s.devnet.rippletest.net:51234/'
 const evidenceDirectory = 'supabase-r5-recovery-burst-evidence'
-const legacyVerifier = 'scripts/verify-supabase-r5-recovery-burst.mjs'
-const nonAtomicMessage = 'R5 recovery changed non-atomically while awaiting batch'
-const maximumCapturedBytes = 2 * 1024 * 1024
+const maximumAttemptsPerTrigger = 3
+const retryDelayMilliseconds = 60_000
 const transientStatuses = new Set([429, 500, 502, 503, 504, 520, 522, 524])
+const terminalStopReasons = new Set([
+  'recovery_already_caught_up',
+  'caught_up_at_claim_boundary',
+  'fresh_head_refresh_required',
+])
+const retryableDeclineReasons = new Set(['batch_lease_active', 'not_claimed'])
 
-class RemoteError extends Error {
-  constructor(message, { transient = false } = {}) {
+class TriggerError extends Error {
+  constructor(message, { transient = false, response = null } = {}) {
     super(message)
-    this.name = 'RemoteError'
+    this.name = 'TriggerError'
     this.transient = transient
+    this.response = response
   }
 }
 
@@ -135,7 +133,7 @@ async function managementQuery({ query, parameters }) {
       signal: AbortSignal.timeout(30_000),
     })
   } catch (error) {
-    throw new RemoteError(
+    throw new TriggerError(
       `Supabase Management query transport failed: ${error instanceof Error ? error.message : String(error)}`,
       { transient: true },
     )
@@ -143,9 +141,9 @@ async function managementQuery({ query, parameters }) {
   const text = await response.text()
   const body = parseJson(text)
   if (!response.ok) {
-    throw new RemoteError(
+    throw new TriggerError(
       `Supabase Management query failed (${response.status}): ${JSON.stringify(body).slice(0, 2_000)}`,
-      { transient: transientStatuses.has(response.status) },
+      { transient: transientStatuses.has(response.status), response: body },
     )
   }
   return rowsFromResponse(body)
@@ -340,6 +338,59 @@ function normalizeCompletedBatch(raw, sequence) {
   }
 }
 
+function normalizeAdoption(raw, expectedSequence) {
+  const adoption = object(raw, `R5 adoption ${expectedSequence}`)
+  const adoptionSequence = requiredInteger(
+    adoption.adoptionSequence,
+    'adoption.adoptionSequence',
+  )
+  if (adoptionSequence !== expectedSequence) {
+    throw new Error('R5 adoption sequence changed')
+  }
+  const startLedgerIndex = requiredInteger(
+    adoption.startLedgerIndex,
+    'adoption.startLedgerIndex',
+  )
+  const endLedgerIndex = requiredInteger(adoption.endLedgerIndex, 'adoption.endLedgerIndex')
+  const ledgerCount = requiredInteger(adoption.ledgerCount, 'adoption.ledgerCount')
+  const workCount = requiredInteger(adoption.workCount, 'adoption.workCount')
+  const firstBatchSequence = requiredInteger(
+    adoption.firstBatchSequence,
+    'adoption.firstBatchSequence',
+  )
+  const adoptedBatchCount = requiredInteger(
+    adoption.adoptedBatchCount,
+    'adoption.adoptedBatchCount',
+  )
+  if (
+    ledgerCount < 1
+    || workCount !== ledgerCount
+    || endLedgerIndex !== startLedgerIndex + ledgerCount - 1
+    || adoptedBatchCount !== Math.ceil(ledgerCount / 24)
+  ) {
+    throw new Error('R5 adoption range arithmetic changed')
+  }
+  return {
+    adoptionSequence,
+    startLedgerIndex,
+    endLedgerIndex,
+    ledgerCount,
+    expectedParentHash: requiredHash(
+      adoption.expectedParentHash,
+      'adoption.expectedParentHash',
+      true,
+    ),
+    finalLedgerHash: requiredHash(adoption.finalLedgerHash, 'adoption.finalLedgerHash', true),
+    finalWorkId: requiredString(adoption.finalWorkId, 'adoption.finalWorkId'),
+    workCount,
+    worksDigest: requiredHash(adoption.worksDigest, 'adoption.worksDigest'),
+    rowsDigest: requiredHash(adoption.rowsDigest, 'adoption.rowsDigest'),
+    firstBatchSequence,
+    adoptedBatchCount,
+    adoptedAt: requiredString(adoption.adoptedAt, 'adoption.adoptedAt'),
+  }
+}
+
 async function readActiveBoundary() {
   return valueFromRows(
     await managementQuery({
@@ -403,132 +454,103 @@ async function readValidatedHead() {
   }
 }
 
-function appendCaptured(chunks, chunk, state) {
-  const buffer = Buffer.from(chunk)
-  const remaining = maximumCapturedBytes - state.bytes
-  if (remaining > 0) {
-    chunks.push(buffer.subarray(0, remaining))
-    state.bytes += Math.min(buffer.length, remaining)
-  }
-}
-
-async function runLegacyVerifier(batchLimit, wallSeconds) {
-  return await new Promise((resolve, reject) => {
-    const stdoutChunks = []
-    const stderrChunks = []
-    const stdoutState = { bytes: 0 }
-    const stderrState = { bytes: 0 }
-    const child = spawn(process.execPath, [legacyVerifier], {
-      env: {
-        ...process.env,
-        R5_RECOVERY_BURST_BATCH_LIMIT: String(batchLimit),
-        R5_RECOVERY_BURST_WALL_SECONDS: String(wallSeconds),
+async function invokeTrigger() {
+  let response
+  try {
+    response = await fetch(triggerEndpoint, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-xrpl-r5-purpose': purpose,
+        'x-xrpl-r5-token': verifierToken,
       },
-      stdio: ['ignore', 'pipe', 'pipe'],
+      body: JSON.stringify({ source: 'github_actions', run_id: recoveryRunId }),
+      signal: AbortSignal.timeout(90_000),
     })
-    child.stdout.on('data', (chunk) => {
-      process.stdout.write(chunk)
-      appendCaptured(stdoutChunks, chunk, stdoutState)
-    })
-    child.stderr.on('data', (chunk) => {
-      process.stderr.write(chunk)
-      appendCaptured(stderrChunks, chunk, stderrState)
-    })
-    child.once('error', reject)
-    child.once('close', (code, signal) => {
-      resolve({
-        code: code ?? 1,
-        signal,
-        stdout: Buffer.concat(stdoutChunks).toString('utf8'),
-        stderr: Buffer.concat(stderrChunks).toString('utf8'),
+  } catch (error) {
+    throw new TriggerError(
+      `R5 trigger transport failed: ${error instanceof Error ? error.message : String(error)}`,
+      { transient: true },
+    )
+  }
+  const text = await response.text()
+  const body = parseJson(text)
+  const trigger = body && typeof body === 'object' ? body.trigger : null
+  if (trigger && typeof trigger === 'object') {
+    if (
+      trigger.combinedProxyBytesWithinFixedReserve !== true
+      || trigger.twoInvocationReservationUsed !== true
+      || trigger.serviceKeyNotReturned !== true
+      || requiredInteger(trigger.fixedFunctionResponseReserveBytes, 'fixed response reserve')
+        !== 131072
+      || requiredInteger(trigger.combinedProxyBytes, 'combined proxy bytes') >= 131072
+    ) {
+      throw new TriggerError('R5 trigger proxy accounting boundary changed', {
+        response: body,
       })
-    })
-  })
+    }
+  }
+  if (!response.ok) {
+    const executor = body && typeof body === 'object' ? body.executor : null
+    const transient = transientStatuses.has(response.status)
+      && (executor?.transient === true || response.status !== 500)
+    throw new TriggerError(
+      `R5 trigger failed (${response.status}): ${JSON.stringify(body).slice(0, 2_000)}`,
+      { transient, response: body },
+    )
+  }
+  return object(body, 'R5 trigger response')
 }
 
-function normalizeAdoption(raw, expectedSequence) {
-  const adoption = object(raw, `R5 adoption ${expectedSequence}`)
-  const adoptionSequence = requiredInteger(
-    adoption.adoptionSequence,
-    'adoption.adoptionSequence',
-  )
-  if (adoptionSequence !== expectedSequence) {
-    throw new Error('R5 adoption sequence changed')
-  }
-  const startLedgerIndex = requiredInteger(
-    adoption.startLedgerIndex,
-    'adoption.startLedgerIndex',
-  )
-  const endLedgerIndex = requiredInteger(adoption.endLedgerIndex, 'adoption.endLedgerIndex')
-  const ledgerCount = requiredInteger(adoption.ledgerCount, 'adoption.ledgerCount')
-  const workCount = requiredInteger(adoption.workCount, 'adoption.workCount')
-  const firstBatchSequence = requiredInteger(
-    adoption.firstBatchSequence,
-    'adoption.firstBatchSequence',
-  )
-  const adoptedBatchCount = requiredInteger(
-    adoption.adoptedBatchCount,
-    'adoption.adoptedBatchCount',
-  )
-  if (
-    ledgerCount < 1
-    || workCount !== ledgerCount
-    || endLedgerIndex !== startLedgerIndex + ledgerCount - 1
-    || adoptedBatchCount !== Math.ceil(ledgerCount / 24)
-  ) {
-    throw new Error('R5 adoption range arithmetic changed')
-  }
-  return {
-    adoptionSequence,
-    startLedgerIndex,
-    endLedgerIndex,
-    ledgerCount,
-    expectedParentHash: requiredHash(
-      adoption.expectedParentHash,
-      'adoption.expectedParentHash',
-      true,
-    ),
-    finalLedgerHash: requiredHash(adoption.finalLedgerHash, 'adoption.finalLedgerHash', true),
-    finalWorkId: requiredString(adoption.finalWorkId, 'adoption.finalWorkId'),
-    workCount,
-    worksDigest: requiredHash(adoption.worksDigest, 'adoption.worksDigest'),
-    rowsDigest: requiredHash(adoption.rowsDigest, 'adoption.rowsDigest'),
-    firstBatchSequence,
-    adoptedBatchCount,
-    adoptedAt: requiredString(adoption.adoptedAt, 'adoption.adoptedAt'),
-  }
-}
-
-async function verifyAdoptionBridge(before, beforeAdoptions, after, afterAdoptions) {
-  if (afterAdoptions.adoptionCount !== beforeAdoptions.adoptionCount + 1) {
-    throw new Error('R5 non-atomic observation did not add exactly one adoption record')
-  }
-  const adoption = normalizeAdoption(
-    afterAdoptions.adoptions.at(-1),
-    afterAdoptions.adoptionCount,
-  )
-  if (
-    afterAdoptions.adoptedLedgerCount
-      !== beforeAdoptions.adoptedLedgerCount + adoption.ledgerCount
-    || afterAdoptions.adoptedBatchCount
-      !== beforeAdoptions.adoptedBatchCount + adoption.adoptedBatchCount
-    || adoption.firstBatchSequence !== before.completedBatches + 1
-    || adoption.startLedgerIndex !== before.currentWatermark.ledgerIndex + 1
-    || adoption.expectedParentHash !== before.currentWatermark.ledgerHash
-  ) {
-    throw new Error('R5 adoption summary did not extend the exact prior recovery boundary')
-  }
-
+async function verifyCycle(before, beforeAdoptions, after, afterAdoptions, remainingLimit) {
   const advancedBatches = after.completedBatches - before.completedBatches
-  const executorBatchCount = advancedBatches - adoption.adoptedBatchCount
+  const advancedLedgers = after.committedLedgers - before.committedLedgers
+  const addedAdoptions = afterAdoptions.adoptionCount - beforeAdoptions.adoptionCount
   if (
-    adoption.adoptedBatchCount < 1
-    || adoption.adoptedBatchCount > requestedBatchLimit
-    || ![0, 1].includes(executorBatchCount)
-    || advancedBatches < 1
-    || advancedBatches > requestedBatchLimit
+    advancedBatches < 0
+    || advancedLedgers < 0
+    || advancedBatches > remainingLimit
+    || ![0, 1].includes(addedAdoptions)
   ) {
-    throw new Error('R5 adoption bridge exceeded the finite per-trigger batch bound')
+    throw new Error('R5 trigger exceeded the finite cycle advance boundary')
+  }
+  if (advancedBatches === 0) {
+    if (
+      advancedLedgers !== 0
+      || addedAdoptions !== 0
+      || after.currentWatermark.ledgerIndex !== before.currentWatermark.ledgerIndex
+      || after.currentWatermark.ledgerHash !== before.currentWatermark.ledgerHash
+      || after.currentWatermark.workId !== before.currentWatermark.workId
+    ) {
+      throw new Error('R5 trigger changed recovery without a completed batch')
+    }
+    return { batches: [], adoptions: [], advancedBatches: 0, advancedLedgers: 0 }
+  }
+
+  let adoption = null
+  let adoptedBatchCount = 0
+  if (addedAdoptions === 1) {
+    adoption = normalizeAdoption(
+      afterAdoptions.adoptions.at(-1),
+      afterAdoptions.adoptionCount,
+    )
+    adoptedBatchCount = adoption.adoptedBatchCount
+    const executorBatchCount = advancedBatches - adoptedBatchCount
+    if (
+      afterAdoptions.adoptedLedgerCount
+        !== beforeAdoptions.adoptedLedgerCount + adoption.ledgerCount
+      || afterAdoptions.adoptedBatchCount
+        !== beforeAdoptions.adoptedBatchCount + adoptedBatchCount
+      || adoption.firstBatchSequence !== before.completedBatches + 1
+      || adoption.startLedgerIndex !== before.currentWatermark.ledgerIndex + 1
+      || adoption.expectedParentHash !== before.currentWatermark.ledgerHash
+      || adoptedBatchCount < 1
+      || ![0, 1].includes(executorBatchCount)
+    ) {
+      throw new Error('R5 adoption did not bind to the exact prior recovery boundary')
+    }
+  } else if (advancedBatches !== 1) {
+    throw new Error('R5 trigger advanced multiple batches without one adoption record')
   }
 
   const batches = []
@@ -545,55 +567,211 @@ async function verifyAdoptionBridge(before, beforeAdoptions, after, afterAdoptio
       batch.startLedgerIndex !== expectedLedgerIndex
       || batch.expectedParentHash !== expectedParentHash
     ) {
-      throw new Error(`R5 adoption bridge batch ${sequence} is not hash-contiguous`)
+      throw new Error(`R5 cycle batch ${sequence} is not hash-contiguous`)
     }
-    const adopted = sequence < adoption.firstBatchSequence + adoption.adoptedBatchCount
+    const adopted = adoption !== null
+      && sequence < adoption.firstBatchSequence + adoptedBatchCount
     if (adopted && batch.finalizedEgressUpperBoundBytes !== 0) {
       throw new Error(`R5 adopted batch ${sequence} added recovery egress`)
     }
     batches.push({
       ...batch,
       origin: adopted ? 'adopted_active_descendant' : 'r5_executor',
-      verifierAttempt: 1,
-      transientRetries: 0,
     })
     summedLedgers += batch.ledgerCount
     expectedLedgerIndex = batch.endLedgerIndex + 1
     expectedParentHash = batch.finalLedgerHash
   }
 
-  const adoptedBatches = batches.slice(0, adoption.adoptedBatchCount)
-  const adoptedLedgers = adoptedBatches.reduce((sum, batch) => sum + batch.ledgerCount, 0)
-  const lastAdoptedBatch = adoptedBatches.at(-1)
   const lastBatch = batches.at(-1)
   if (
-    adoptedLedgers !== adoption.ledgerCount
-    || lastAdoptedBatch?.endLedgerIndex !== adoption.endLedgerIndex
-    || lastAdoptedBatch?.finalLedgerHash !== adoption.finalLedgerHash
-    || lastAdoptedBatch?.finalWorkId !== adoption.finalWorkId
-    || after.committedLedgers !== before.committedLedgers + summedLedgers
+    summedLedgers !== advancedLedgers
     || after.currentWatermark.ledgerIndex !== lastBatch?.endLedgerIndex
     || after.currentWatermark.ledgerHash !== lastBatch?.finalLedgerHash
     || after.currentWatermark.workId !== lastBatch?.finalWorkId
     || after.lastAccountingDigest !== lastBatch?.accountingDigest
   ) {
-    throw new Error('R5 adoption bridge final recovery parity failed')
+    throw new Error('R5 trigger batch chain did not match final recovery state')
   }
-
-  return { adoption, batches, advancedBatches, summedLedgers }
+  if (adoption !== null) {
+    const adoptedBatches = batches.slice(0, adoptedBatchCount)
+    const adoptedLedgers = adoptedBatches.reduce((sum, batch) => sum + batch.ledgerCount, 0)
+    const lastAdoptedBatch = adoptedBatches.at(-1)
+    if (
+      adoptedLedgers !== adoption.ledgerCount
+      || lastAdoptedBatch?.endLedgerIndex !== adoption.endLedgerIndex
+      || lastAdoptedBatch?.finalLedgerHash !== adoption.finalLedgerHash
+      || lastAdoptedBatch?.finalWorkId !== adoption.finalWorkId
+    ) {
+      throw new Error('R5 adopted batch records did not match the adoption summary')
+    }
+  }
+  return {
+    batches,
+    adoptions: adoption === null ? [] : [adoption],
+    advancedBatches,
+    advancedLedgers,
+  }
 }
 
-async function readJson(path) {
-  return JSON.parse(await readFile(path, 'utf8'))
+async function executeOneCycle(before, beforeAdoptions, remainingLimit, deadlineMilliseconds) {
+  let transientRetries = 0
+  let lastTrigger = null
+  for (let attempt = 1; attempt <= maximumAttemptsPerTrigger; attempt += 1) {
+    if (Date.now() >= deadlineMilliseconds) {
+      return {
+        stopped: true,
+        reason: 'wall_clock_limit',
+        transientRetries,
+        lastTrigger,
+        cycle: null,
+        after: before,
+        afterAdoptions: beforeAdoptions,
+      }
+    }
+
+    try {
+      lastTrigger = await invokeTrigger()
+    } catch (error) {
+      if (!(error instanceof TriggerError) || error.transient !== true) throw error
+      transientRetries += 1
+      lastTrigger = error.response
+    }
+
+    const after = await readRecovery()
+    const afterAdoptions = await readAdoptions()
+    const cycle = await verifyCycle(
+      before,
+      beforeAdoptions,
+      after,
+      afterAdoptions,
+      remainingLimit,
+    )
+    if (cycle.advancedBatches > 0) {
+      return {
+        stopped: false,
+        reason: null,
+        transientRetries,
+        lastTrigger,
+        cycle,
+        after,
+        afterAdoptions,
+        verifierAttempt: attempt,
+      }
+    }
+
+    const executor = lastTrigger && typeof lastTrigger === 'object'
+      ? object(lastTrigger.executor, 'R5 executor response')
+      : null
+    if (executor?.ok === true && executor.claimed === false) {
+      const reason = requiredString(executor.reason, 'executor reason')
+      if (terminalStopReasons.has(reason)) {
+        return {
+          stopped: true,
+          reason,
+          transientRetries,
+          lastTrigger,
+          cycle,
+          after,
+          afterAdoptions,
+        }
+      }
+      if (!retryableDeclineReasons.has(reason)) {
+        throw new Error(`R5 executor declined the finite cycle: ${reason}`)
+      }
+    }
+
+    if (attempt === maximumAttemptsPerTrigger) {
+      throw new Error('R5 trigger made no progress within bounded retries')
+    }
+    if (Date.now() + retryDelayMilliseconds >= deadlineMilliseconds) {
+      return {
+        stopped: true,
+        reason: 'wall_clock_limit',
+        transientRetries,
+        lastTrigger,
+        cycle,
+        after,
+        afterAdoptions,
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, retryDelayMilliseconds))
+  }
+  throw new Error('R5 trigger retry loop exhausted')
 }
 
-async function directFinalEvidence(before, bridge, startedAtMilliseconds) {
+async function run() {
+  await mkdir(evidenceDirectory, { recursive: true })
+  const startedAtMilliseconds = Date.now()
+  const deadlineMilliseconds = startedAtMilliseconds + wallSeconds * 1_000
+  const before = await readRecovery()
+  if (before.completedBatches < 1 || before.committedLedgers < 1) {
+    throw new Error('R5 first recovery batch must be verified before burst execution')
+  }
+  let current = before
+  let currentAdoptions = await readAdoptions()
+  const batches = []
+  const adoptions = []
+  const cycles = []
+  let stopReason = null
+  let transientRetries = 0
+
+  while (batches.length < batchLimit) {
+    if (current.status === 'caught_up') {
+      stopReason = 'recovery_already_caught_up'
+      break
+    }
+    if (Date.now() >= deadlineMilliseconds) {
+      stopReason = 'wall_clock_limit'
+      break
+    }
+    const remainingLimit = batchLimit - batches.length
+    const result = await executeOneCycle(
+      current,
+      currentAdoptions,
+      remainingLimit,
+      deadlineMilliseconds,
+    )
+    transientRetries += result.transientRetries
+    if (result.stopped) {
+      stopReason = result.reason
+      current = result.after
+      currentAdoptions = result.afterAdoptions
+      break
+    }
+    const cycleBatches = result.cycle.batches.map((batch) => ({
+      ...batch,
+      verifierAttempt: result.verifierAttempt,
+      transientRetries: result.transientRetries,
+    }))
+    batches.push(...cycleBatches)
+    adoptions.push(...result.cycle.adoptions)
+    cycles.push({
+      verifierAttempt: result.verifierAttempt,
+      transientRetries: result.transientRetries,
+      advancedBatches: result.cycle.advancedBatches,
+      advancedLedgers: result.cycle.advancedLedgers,
+      batchSequences: cycleBatches.map((batch) => batch.batchSequence),
+      adoptionSequences: result.cycle.adoptions.map((adoption) => adoption.adoptionSequence),
+    })
+    current = result.after
+    currentAdoptions = result.afterAdoptions
+  }
+  if (stopReason === null) stopReason = 'batch_limit'
+
   const after = await readRecovery()
+  const finalAdoptions = await readAdoptions()
   const boundary = object(await readActiveBoundary(), 'R5 active boundary')
   const boundaryWatermark = watermark(boundary.watermark, 'R5 active boundary watermark')
   const currentValidatedHead = await readValidatedHead()
+  const advancedBatches = after.completedBatches - before.completedBatches
+  const advancedLedgers = after.committedLedgers - before.committedLedgers
+  const summedLedgers = batches.reduce((sum, batch) => sum + batch.ledgerCount, 0)
   if (
-    boundaryWatermark.ledgerIndex !== after.currentWatermark.ledgerIndex
+    advancedBatches !== batches.length
+    || advancedLedgers !== summedLedgers
+    || after.currentWatermark.ledgerIndex !== before.currentWatermark.ledgerIndex + advancedLedgers
+    || boundaryWatermark.ledgerIndex !== after.currentWatermark.ledgerIndex
     || boundaryWatermark.ledgerHash !== after.currentWatermark.ledgerHash
     || boundaryWatermark.workId !== after.currentWatermark.workId
     || requiredInteger(boundary.pendingCount, 'boundary.pendingCount') !== 1
@@ -601,30 +779,43 @@ async function directFinalEvidence(before, bridge, startedAtMilliseconds) {
     || requiredInteger(boundary.retryCount, 'boundary.retryCount') !== 0
     || requiredInteger(boundary.inflightWorkCount, 'boundary.inflightWorkCount') !== 0
     || currentValidatedHead.ledgerIndex < after.currentWatermark.ledgerIndex
+    || batches.length > batchLimit
+    || Date.now() > deadlineMilliseconds + 30_000
+    || finalAdoptions.adoptionCount - currentAdoptions.adoptionCount !== 0
   ) {
-    throw new Error('R5 adoption-only burst final boundary failed')
+    throw new Error('R5 adoption-aware recovery burst final parity failed')
   }
-  return {
-    schemaVersion: 1,
+  if (batches.length === 0 && ![
+    'recovery_already_caught_up',
+    'caught_up_at_claim_boundary',
+    'fresh_head_refresh_required',
+    'wall_clock_limit',
+  ].includes(stopReason)) {
+    throw new Error(`R5 recovery burst made no progress: ${stopReason}`)
+  }
+
+  const evidence = {
+    schemaVersion: 2,
     purpose: 'r5-supabase-active-recovery-burst-verification',
     verifiedAt: new Date().toISOString(),
     sourceRunId: Number(process.env.GITHUB_RUN_ID ?? 0) || null,
     sourceCommit: process.env.GITHUB_SHA ?? null,
     issueNumber: 1175,
     recoveryRunId,
-    requestedBatchLimit,
-    wallSeconds: requestedWallSeconds,
+    requestedBatchLimit: batchLimit,
+    wallSeconds,
     elapsedMilliseconds: Date.now() - startedAtMilliseconds,
-    stopReason: 'batch_limit',
-    transientRetries: 0,
+    stopReason,
+    transientRetries,
     before: {
       status: before.status,
       completedBatches: before.completedBatches,
       committedLedgers: before.committedLedgers,
       currentWatermark: before.currentWatermark,
     },
-    batches: bridge.batches,
-    adoptionBridge: bridge.adoption,
+    cycles,
+    adoptions,
+    batches,
     after: {
       status: after.status,
       completedBatches: after.completedBatches,
@@ -635,22 +826,28 @@ async function directFinalEvidence(before, bridge, startedAtMilliseconds) {
     },
     activeBoundary: {
       watermark: boundaryWatermark,
-      pendingCount: 1,
-      leasedCount: 0,
-      retryCount: 0,
-      inflightWorkCount: 0,
+      pendingCount: requiredInteger(boundary.pendingCount, 'boundary.pendingCount'),
+      leasedCount: requiredInteger(boundary.leasedCount, 'boundary.leasedCount'),
+      retryCount: requiredInteger(boundary.retryCount, 'boundary.retryCount'),
+      inflightWorkCount: requiredInteger(boundary.inflightWorkCount, 'boundary.inflightWorkCount'),
     },
     checks: {
       firstBatchPreviouslyVerified: before.completedBatches >= 1,
-      boundedBatchLimit: requestedBatchLimit <= 64,
-      boundedWallClock: requestedWallSeconds <= 1800,
-      adoptionBridgeVerified: true,
-      exactBatchAdvance: bridge.advancedBatches === bridge.batches.length,
-      exactLedgerAdvance: bridge.summedLedgers
-        === after.committedLedgers - before.committedLedgers,
-      onePendingScanAfterBurst: true,
-      noLeasedOrRetryMessagesAfterBurst: true,
-      noInflightWorkAfterBurst: true,
+      boundedBatchLimit: batchLimit <= 64 && batches.length <= batchLimit,
+      boundedWallClock: wallSeconds <= 1800,
+      everyTriggerAdvanceVerified: cycles.every((cycle) => cycle.advancedBatches >= 1),
+      adoptionRecordsBoundToExactCycles:
+        adoptions.length === cycles.reduce(
+          (sum, cycle) => sum + cycle.adoptionSequences.length,
+          0,
+        ),
+      exactBatchAdvance: advancedBatches === batches.length,
+      exactLedgerAdvance: advancedLedgers === summedLedgers,
+      onePendingScanAfterBurst: requiredInteger(boundary.pendingCount, 'boundary.pendingCount') === 1,
+      noLeasedOrRetryMessagesAfterBurst:
+        requiredInteger(boundary.leasedCount, 'boundary.leasedCount') === 0
+        && requiredInteger(boundary.retryCount, 'boundary.retryCount') === 0,
+      noInflightWorkAfterBurst: requiredInteger(boundary.inflightWorkCount, 'boundary.inflightWorkCount') === 0,
       activeRecoveryStarted: after.status === 'running',
       lagZero: after.status === 'caught_up',
       publicReaderUnchanged: true,
@@ -659,135 +856,11 @@ async function directFinalEvidence(before, bridge, startedAtMilliseconds) {
       soakAuthorized: false,
     },
   }
-}
-
-async function run() {
-  await mkdir(evidenceDirectory, { recursive: true })
-  const startedAtMilliseconds = Date.now()
-  const before = await readRecovery()
-  const beforeAdoptions = await readAdoptions()
-  const first = await runLegacyVerifier(requestedBatchLimit, requestedWallSeconds)
-  if (first.code === 0) return
-
-  const firstOutput = `${first.stdout}\n${first.stderr}`
-  if (!firstOutput.includes(nonAtomicMessage)) {
-    throw new Error(
-      `legacy R5 burst verifier failed outside the adoption bridge: code=${first.code} signal=${first.signal ?? 'none'}`,
-    )
-  }
-
-  const afterBridge = await readRecovery()
-  const afterAdoptions = await readAdoptions()
-  const bridge = await verifyAdoptionBridge(
-    before,
-    beforeAdoptions,
-    afterBridge,
-    afterAdoptions,
-  )
-  await writeFile(
-    `${evidenceDirectory}/verified-r5-adoption-bridge.json`,
-    `${JSON.stringify({
-      schemaVersion: 1,
-      purpose: 'r5-burst-adoption-bridge-verification',
-      verifiedAt: new Date().toISOString(),
-      sourceRunId: Number(process.env.GITHUB_RUN_ID ?? 0) || null,
-      sourceCommit: process.env.GITHUB_SHA ?? null,
-      recoveryRunId,
-      before,
-      adoption: bridge.adoption,
-      batches: bridge.batches,
-      after: afterBridge,
-      checks: {
-        exactlyOneAdoptionRecordAdded: true,
-        canonicalBatchSequenceRetained: true,
-        hashLinkedRangeProved: true,
-        adoptionEgressZero: true,
-        atMostOneExecutorBatchFollowedAdoption: true,
-        publicReaderUnchanged: true,
-        mainnetDisabled: true,
-        stabilizationAuthorized: false,
-        soakAuthorized: false,
-      },
-    }, null, 2)}\n`,
-  )
-  await rm(
-    `${evidenceDirectory}/failed-r5-recovery-burst-verification.json`,
-    { force: true },
-  )
-
-  const remainingBatchLimit = requestedBatchLimit - bridge.advancedBatches
-  let combinedEvidence
-  if (remainingBatchLimit === 0) {
-    combinedEvidence = await directFinalEvidence(before, bridge, startedAtMilliseconds)
-  } else {
-    const elapsedSeconds = Math.ceil((Date.now() - startedAtMilliseconds) / 1_000)
-    const remainingWallSeconds = requestedWallSeconds - elapsedSeconds
-    if (remainingWallSeconds < 60) {
-      throw new Error('R5 adoption bridge exhausted the bounded wall clock')
-    }
-    const second = await runLegacyVerifier(remainingBatchLimit, remainingWallSeconds)
-    if (second.code !== 0) {
-      throw new Error(
-        `R5 burst continuation after verified adoption failed: code=${second.code} signal=${second.signal ?? 'none'}`,
-      )
-    }
-    const continuation = object(
-      await readJson(`${evidenceDirectory}/verified-r5-recovery-burst.json`),
-      'R5 continuation evidence',
-    )
-    const continuationBefore = object(continuation.before, 'continuation.before')
-    const continuationAfter = object(continuation.after, 'continuation.after')
-    const continuationBatches = array(continuation.batches, 'continuation.batches')
-    if (
-      continuationBefore.completedBatches !== afterBridge.completedBatches
-      || continuationBefore.committedLedgers !== afterBridge.committedLedgers
-      || continuationBatches.length > remainingBatchLimit
-      || continuationAfter.completedBatches - before.completedBatches
-        !== bridge.batches.length + continuationBatches.length
-    ) {
-      throw new Error('R5 continuation evidence did not begin at the verified adoption boundary')
-    }
-    combinedEvidence = {
-      ...continuation,
-      verifiedAt: new Date().toISOString(),
-      requestedBatchLimit,
-      wallSeconds: requestedWallSeconds,
-      elapsedMilliseconds: Date.now() - startedAtMilliseconds,
-      before: {
-        status: before.status,
-        completedBatches: before.completedBatches,
-        committedLedgers: before.committedLedgers,
-        currentWatermark: before.currentWatermark,
-      },
-      batches: [...bridge.batches, ...continuationBatches],
-      adoptionBridge: bridge.adoption,
-      checks: {
-        ...object(continuation.checks, 'continuation.checks'),
-        adoptionBridgeVerified: true,
-        boundedBatchLimit:
-          bridge.batches.length + continuationBatches.length <= requestedBatchLimit,
-        boundedWallClock: Date.now() - startedAtMilliseconds
-          <= requestedWallSeconds * 1_000 + 30_000,
-        exactBatchAdvance:
-          continuationAfter.completedBatches - before.completedBatches
-          === bridge.batches.length + continuationBatches.length,
-        publicReaderUnchanged: true,
-        mainnetDisabled: true,
-        stabilizationAuthorized: false,
-        soakAuthorized: false,
-      },
-    }
-  }
-
-  await rm(
-    `${evidenceDirectory}/failed-r5-recovery-burst-verification.json`,
-    { force: true },
-  )
   await writeFile(
     `${evidenceDirectory}/verified-r5-recovery-burst.json`,
-    `${JSON.stringify(combinedEvidence, null, 2)}\n`,
+    `${JSON.stringify(evidence, null, 2)}\n`,
   )
-  process.stdout.write(`${JSON.stringify(combinedEvidence, null, 2)}\n`)
+  process.stdout.write(`${JSON.stringify(evidence, null, 2)}\n`)
 }
 
 try {
@@ -795,19 +868,19 @@ try {
 } catch (error) {
   await mkdir(evidenceDirectory, { recursive: true })
   const failure = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     purpose: 'r5-supabase-active-recovery-burst-verification',
     verifiedAt: new Date().toISOString(),
     sourceRunId: Number(process.env.GITHUB_RUN_ID ?? 0) || null,
     sourceCommit: process.env.GITHUB_SHA ?? null,
     issueNumber: 1175,
     recoveryRunId,
-    requestedBatchLimit,
-    wallSeconds: requestedWallSeconds,
+    requestedBatchLimit: batchLimit,
+    wallSeconds,
     error: error instanceof Error ? error.message.slice(0, 2_000) : String(error).slice(0, 2_000),
     checks: {
       burstCompleted: false,
-      adoptionBridgeFailClosed: true,
+      everyTriggerAdvanceFailClosed: true,
       publicReaderUnchanged: true,
       mainnetDisabled: true,
       stabilizationAuthorized: false,
