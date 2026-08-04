@@ -44,3 +44,6 @@ verify_jwt =false
 
 [functions.xrpl-r5-recovery-batch]
 verify_jwt =false
+
+[functions.xrpl-r5-recovery-batch-trigger]
+verify_jwt =false

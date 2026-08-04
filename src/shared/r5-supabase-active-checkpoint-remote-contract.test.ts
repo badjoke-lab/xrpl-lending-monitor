@@ -24,7 +24,7 @@ const selection = JSON.parse(
 }
 
 describe('R5 Supabase active checkpoint remote freeze contract', () => {
-  it('uses the official parameterized Management API without adding an Edge function', () => {
+  it('uses the official parameterized Management API without adding a checkpoint Edge function', () => {
     for (const required of [
       'https://api.supabase.com/v1/projects/${projectRef}/database/query',
       "authorization: `Bearer ${accessToken}`",
@@ -37,8 +37,10 @@ describe('R5 Supabase active checkpoint remote freeze contract', () => {
     ]) {
       expect(verifier).toContain(required)
     }
-    expect(workflow).not.toContain('supabase functions deploy xrpl-r5')
-    expect(workflow).not.toContain("bundle_function 'supabase/functions/xrpl-r5")
+    expect(workflow).not.toContain('supabase functions deploy xrpl-r5-active-checkpoint')
+    expect(workflow).not.toContain(
+      "bundle_function 'supabase/functions/xrpl-r5-active-checkpoint",
+    )
   })
 
   it('freezes one deterministic checkpoint and rereads existing state on later runs', () => {

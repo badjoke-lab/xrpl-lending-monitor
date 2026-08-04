@@ -61,4 +61,16 @@ export default tseslint.config(
       ],
     },
   },
+  {
+    files: ['scripts/verify-supabase-r5-first-recovery-batch.mjs'],
+    rules: {
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^(_|requiredNumber$)',
+        },
+      ],
+    },
+  },
 )
