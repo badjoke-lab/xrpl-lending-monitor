@@ -42,7 +42,7 @@ replace_once(
     "github.ref == 'refs/heads/main'",
     "ops/r5/run-once-20260804-8x900.marker",
     "de23cd3f4b06e05d6ffbe212719ca604cbaa23ca285b9d4709d5ad259ecc97fa",
-    "test \"$GITHUB_ACTOR\" = badjoke-lab",
+    'test "$GITHUB_ACTOR" = badjoke-lab',
     "R5_RECOVERY_BURST_BATCH_LIMIT",''',
 )
 
