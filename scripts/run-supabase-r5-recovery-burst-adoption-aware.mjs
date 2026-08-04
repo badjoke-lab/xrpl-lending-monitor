@@ -28,16 +28,26 @@ if (generated === source || generated.includes(obsolete) || !generated.includes(
   throw new Error('R5 adoption sequence correction did not converge exactly')
 }
 
+function occurrenceCountOf(text, fragment) {
+  if (fragment.length === 0) throw new Error('R5 replacement fragment must not be empty')
+  return text.split(fragment).length - 1
+}
+
 function replaceExactlyOnce(name, oldText, newText) {
-  const count = generated.split(oldText).length - 1
+  const count = occurrenceCountOf(generated, oldText)
   if (count !== 1) {
     throw new Error(`${name} expected exactly one source occurrence, found ${count}`)
   }
   if (generated.includes(newText)) {
     throw new Error(`${name} is already present in source`)
   }
+  const expectedRetainedOldCount = occurrenceCountOf(newText, oldText)
   const next = generated.replace(oldText, newText)
-  if (next === generated || next.includes(oldText) || !next.includes(newText)) {
+  if (
+    next === generated
+    || occurrenceCountOf(next, newText) !== 1
+    || occurrenceCountOf(next, oldText) !== expectedRetainedOldCount
+  ) {
     throw new Error(`${name} did not converge exactly`)
   }
   generated = next
@@ -105,7 +115,7 @@ replaceExactlyOnce(
   `    advancedBatches,
     advancedLedgers,
   }
-}`, 
+}`,
   `    advancedBatches,
     advancedLedgers,
     executorBatchCount,
