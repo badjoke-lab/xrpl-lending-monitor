@@ -11,6 +11,9 @@ function read(path: string): string {
 const workflow = read('.github/workflows/r5-bounded-recovery-burst.yml')
 const ci = read('.github/workflows/ci.yml')
 const adapter = read('scripts/check-actions-workflow-allowlist-r5-one-shot.sh')
+const publisher = read(
+  'scripts/publish-supabase-r5-recovery-burst-run-locator.mjs',
+)
 const marker = read('ops/r5/run-once-20260804-8x900-observable-v2.marker')
 const markerDigest = createHash('sha256').update(marker).digest('hex')
 
@@ -26,19 +29,21 @@ describe('R5 observable one-shot push marker contract', () => {
       'gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}"',
       "--jq '.author.login'",
       'test "$author_login" = badjoke-lab',
-      'test "$R5_RECOVERY_BURST_BATCH_LIMIT" -eq 8',
-      'test "$R5_RECOVERY_BURST_WALL_SECONDS" -eq 900',
+      "github.event_name == 'push' && '64'",
+      "github.event_name == 'push' && '1800'",
+      'test "$R5_RECOVERY_BURST_BATCH_LIMIT" -eq 64',
+      'test "$R5_RECOVERY_BURST_WALL_SECONDS" -eq 1800',
     ]) {
       expect(workflow).toContain(required)
     }
   })
 
-  it('pins the observable preflight marker bytes and digest exactly', () => {
+  it('pins the finite scale marker bytes and digest exactly', () => {
     expect(marker).toBe(
-      'R5_ONE_SHOT_PUSH_MARKER_V4\nbatch_limit=8\nwall_seconds=900\nnonce=push-20260804-8x900-preflight-a84e62c1\n',
+      'R5_ONE_SHOT_PUSH_MARKER_V5\nbatch_limit=64\nwall_seconds=1800\nnonce=push-20260804-64x1800-scale-51d9c7b2\n',
     )
     expect(markerDigest).toBe(
-      'bc15dcc0f8dc4fac8984d739533a3f8897befc93b617aace17d2b5a9c282502a',
+      'd5c1f9a2c75e43438308d3972f22a7665e075857906310e4d892554b7dc353f0',
     )
     expect(workflow).toContain(markerDigest)
   })
@@ -72,12 +77,14 @@ describe('R5 observable one-shot push marker contract', () => {
     expect(workflow.match(/gh issue comment 1175/g)).toHaveLength(2)
   })
 
-  it('retains the original owner-only issue command and shared concurrency', () => {
+  it('retains the original owner-only 8 by 900 issue command', () => {
     for (const required of [
       "github.event_name == 'issue_comment'",
       'github.event.issue.number == 1175',
       "github.actor == 'badjoke-lab'",
       "github.event.comment.body == '/r5-recovery burst 8 900 nonce-e3378018'",
+      "github.event_name == 'issue_comment' && '8'",
+      "github.event_name == 'issue_comment' && '900'",
       'group: r5-bounded-recovery-burst',
       'cancel-in-progress: false',
       'timeout-minutes: 40',
@@ -103,6 +110,18 @@ describe('R5 observable one-shot push marker contract', () => {
       'bash "$generated_script" "$@"',
     ]) {
       expect(adapter).toContain(required)
+    }
+  })
+
+  it('publishes executor and materialized-row accounting separately', () => {
+    for (const required of [
+      'requested executor batch limit:',
+      'executed recovery batches:',
+      'materialized batch rows:',
+      'adoption materialized rows:',
+      'adoption rows excluded from executor budget:',
+    ]) {
+      expect(publisher).toContain(required)
     }
   })
 
