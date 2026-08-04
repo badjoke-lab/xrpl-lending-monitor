@@ -73,4 +73,12 @@ export default tseslint.config(
       ],
     },
   },
+  {
+    files: ['scripts/verify-supabase-r5-recovery-burst-adoption-aware.mjs'],
+    rules: {
+      // The stopped-cycle assignment preserves the exact final adoption snapshot
+      // consumed by the final parity check after the loop exits.
+      'no-useless-assignment': 'off',
+    },
+  },
 )
