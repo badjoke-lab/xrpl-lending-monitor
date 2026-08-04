@@ -63,12 +63,11 @@ function requiredInteger(value, name) {
   return parsed
 }
 
-function requiredNumber(value, name) {
-  const parsed = typeof value === 'string' ? Number(value) : value
-  if (typeof parsed !== 'number' || !Number.isFinite(parsed) || parsed < 0) {
-    throw new Error(`${name} must be a non-negative finite number`)
-  }
-  return parsed
+function requiredBoolean(value, name) {
+  if (typeof value === 'boolean') return value
+  if (value === 'true') return true
+  if (value === 'false') return false
+  throw new Error(`${name} must be a boolean`)
 }
 
 function requiredHash(value, name, uppercase = false) {
@@ -76,6 +75,21 @@ function requiredHash(value, name, uppercase = false) {
   const expression = uppercase ? /^[A-F0-9]{64}$/ : /^[a-f0-9]{64}$/
   if (!expression.test(text)) throw new Error(`${name} is not canonical hex`)
   return text
+}
+
+function optionalInteger(value, name) {
+  if (value === null || value === undefined) return null
+  return requiredInteger(value, name)
+}
+
+function optionalHash(value, name, uppercase = false) {
+  if (value === null || value === undefined) return null
+  return requiredHash(value, name, uppercase)
+}
+
+function optionalString(value, name) {
+  if (value === null || value === undefined) return null
+  return requiredString(value, name)
 }
 
 function parseJson(text) {
@@ -109,21 +123,30 @@ function valueFromRows(rows, field, name) {
   return object(value, name)
 }
 
-async function managementQuery({ query, parameters, readOnly }) {
-  const response = await fetch(managementEndpoint, {
-    method: 'POST',
-    headers: {
-      authorization: `Bearer ${accessToken}`,
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({ query, parameters, read_only: readOnly }),
-    signal: AbortSignal.timeout(30_000),
-  })
+async function managementQuery({ query, parameters, readOnly = true }) {
+  let response
+  try {
+    response = await fetch(managementEndpoint, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ query, parameters, read_only: readOnly }),
+      signal: AbortSignal.timeout(30_000),
+    })
+  } catch (error) {
+    throw new TriggerError(
+      `Supabase Management query transport failed: ${error instanceof Error ? error.message : String(error)}`,
+      { transient: true },
+    )
+  }
   const text = await response.text()
   const body = parseJson(text)
   if (!response.ok) {
-    throw new Error(
+    throw new TriggerError(
       `Supabase Management query failed (${response.status}): ${JSON.stringify(body).slice(0, 2_000)}`,
+      { status: response.status, transient: transientStatuses.has(response.status), response: body },
     )
   }
   return rowsFromResponse(body)
@@ -134,7 +157,6 @@ async function readRecovery() {
     await managementQuery({
       query: 'select public.xrpl_read_r5_active_recovery($1::text) as recovery',
       parameters: [recoveryRunId],
-      readOnly: true,
     }),
     'recovery',
     'R5 recovery read',
@@ -147,15 +169,64 @@ async function readBatch() {
       query:
         'select public.xrpl_read_r5_active_recovery_batch($1::text, $2::text) as batch',
       parameters: [recoveryRunId, firstBatchId],
-      readOnly: true,
     }),
     'batch',
     'R5 recovery batch read',
   )
 }
 
-async function readActiveBoundary(startLedgerIndex, endLedgerIndex) {
+async function readActiveBoundary(
+  startLedgerIndex,
+  endLedgerIndex,
+  recoveryWatermark,
+) {
   const query = `
+    with physical as (
+      select ledger_index, ledger_hash, work_id, network, epoch_id, base_identity
+      from public.xrpl_phase_watermarks
+      where profile_id = 'supabase-devnet'
+    ), descendant_chain as (
+      select
+        row_number() over (order by work.start_ledger_index, work.work_id)::bigint as ordinal,
+        work.*,
+        lag(work.scanned_end_ledger_index) over (
+          order by work.start_ledger_index, work.work_id
+        ) as prior_end_ledger_index,
+        lag(work.final_ledger_hash) over (
+          order by work.start_ledger_index, work.work_id
+        ) as prior_final_ledger_hash
+      from public.xrpl_phase_work work
+      cross join physical
+      where work.profile_id = 'supabase-devnet'
+        and work.status = 'committed'
+        and work.start_ledger_index > $3::bigint
+        and work.scanned_end_ledger_index <= physical.ledger_index
+    ), descendant_summary as (
+      select
+        count(*)::bigint as work_count,
+        coalesce(bool_and(
+          start_ledger_index = previous_ledger_index + 1
+          and scanned_end_ledger_index = start_ledger_index
+        ), true) as single_ledger_chain,
+        coalesce(bool_and(
+          case when ordinal = 1 then
+            previous_ledger_index = $3::bigint
+            and expected_parent_hash = $4::text
+          else
+            previous_ledger_index = prior_end_ledger_index
+            and start_ledger_index = prior_end_ledger_index + 1
+            and expected_parent_hash = prior_final_ledger_hash
+          end
+        ), true) as hash_linked_chain,
+        min(previous_ledger_index) filter (where ordinal = 1) as first_previous_ledger_index,
+        min(expected_parent_hash) filter (where ordinal = 1) as first_expected_parent_hash,
+        max(scanned_end_ledger_index) as last_ledger_index,
+        (array_agg(final_ledger_hash order by start_ledger_index desc, work_id desc))[1]
+          as last_ledger_hash,
+        (array_agg(work_id order by start_ledger_index desc, work_id desc))[1]
+          as last_work_id
+      from descendant_chain
+    )
     select jsonb_build_object(
       'watermark', (
         select jsonb_build_object(
@@ -165,9 +236,7 @@ async function readActiveBoundary(startLedgerIndex, endLedgerIndex) {
           'network', network,
           'epochId', epoch_id,
           'baseIdentity', base_identity
-        )
-        from public.xrpl_phase_watermarks
-        where profile_id = 'supabase-devnet'
+        ) from physical
       ),
       'pendingCount', (
         select count(*) from public.xrpl_phase_messages
@@ -198,14 +267,30 @@ async function readActiveBoundary(startLedgerIndex, endLedgerIndex) {
         join public.xrpl_phase_work work on work.work_id = rows.work_id
         where work.profile_id = 'supabase-devnet'
           and work.start_ledger_index between $1::bigint and $2::bigint
+      ),
+      'recoveryDescendant', (
+        select jsonb_build_object(
+          'workCount', work_count,
+          'singleLedgerChain', single_ledger_chain,
+          'hashLinkedChain', hash_linked_chain,
+          'firstPreviousLedgerIndex', first_previous_ledger_index,
+          'firstExpectedParentHash', first_expected_parent_hash,
+          'lastLedgerIndex', last_ledger_index,
+          'lastLedgerHash', last_ledger_hash,
+          'lastWorkId', last_work_id
+        ) from descendant_summary
       )
     ) as boundary
   `
   return valueFromRows(
     await managementQuery({
       query,
-      parameters: [startLedgerIndex, endLedgerIndex],
-      readOnly: true,
+      parameters: [
+        startLedgerIndex,
+        endLedgerIndex,
+        recoveryWatermark.ledgerIndex,
+        recoveryWatermark.ledgerHash,
+      ],
     }),
     'boundary',
     'R5 active boundary read',
@@ -280,14 +365,30 @@ function verifyRecovery(raw, name) {
   if (checks.stabilizationAuthorized !== false || checks.soakAuthorized !== false) {
     throw new Error(`${name} overstated stabilization or soak authorization`)
   }
+
+  const startWatermark = watermark(recovery.startWatermark, `${name}.startWatermark`)
+  const currentWatermark = watermark(recovery.currentWatermark, `${name}.currentWatermark`)
+  const completedBatches = requiredInteger(recovery.completedBatches, `${name}.completedBatches`)
+  const committedLedgers = requiredInteger(recovery.committedLedgers, `${name}.committedLedgers`)
+  if (
+    committedLedgers !== currentWatermark.ledgerIndex - startWatermark.ledgerIndex
+    || completedBatches * 24 < committedLedgers
+    || (completedBatches === 0) !== (committedLedgers === 0)
+  ) {
+    throw new Error(`${name} batch or ledger arithmetic changed`)
+  }
+  if (checks.activeRecoveryStarted !== (recovery.status === 'running')) {
+    throw new Error(`${name}.activeRecoveryStarted changed`)
+  }
+
   return {
     raw: recovery,
     checks,
     status: recovery.status,
-    startWatermark: watermark(recovery.startWatermark, `${name}.startWatermark`),
-    currentWatermark: watermark(recovery.currentWatermark, `${name}.currentWatermark`),
-    completedBatches: requiredInteger(recovery.completedBatches, `${name}.completedBatches`),
-    committedLedgers: requiredInteger(recovery.committedLedgers, `${name}.committedLedgers`),
+    startWatermark,
+    currentWatermark,
+    completedBatches,
+    committedLedgers,
     initialLagLedgers: requiredInteger(recovery.initialLagLedgers, `${name}.initialLagLedgers`),
     lastAccountingDigest: recovery.lastAccountingDigest,
     startedAt: recovery.startedAt,
@@ -388,7 +489,6 @@ async function invokeTrigger() {
     ) {
       throw new TriggerError('R5 trigger proxy accounting boundary changed', {
         status: response.status,
-        transient: false,
         response: body,
       })
     }
@@ -437,7 +537,6 @@ async function ensureFirstBatch(before) {
         const reason = requiredString(executor.reason, 'executor reason')
         if (!['batch_lease_active', 'not_claimed'].includes(reason)) {
           throw new TriggerError(`R5 executor declined first batch: ${reason}`, {
-            transient: false,
             response: trigger,
           })
         }
@@ -466,6 +565,63 @@ async function ensureFirstBatch(before) {
   throw new Error('first R5 recovery batch retry loop exhausted')
 }
 
+function verifyRecoveryDescendant(raw, recoveryWatermark, physicalWatermark) {
+  const descendant = object(raw, 'activeBoundary.recoveryDescendant')
+  const workCount = requiredInteger(descendant.workCount, 'descendant.workCount')
+  const expectedCount = physicalWatermark.ledgerIndex - recoveryWatermark.ledgerIndex
+  if (expectedCount < 0 || workCount !== expectedCount) {
+    throw new Error('physical active boundary is behind or incompletely linked to R5 recovery')
+  }
+  if (
+    requiredBoolean(descendant.singleLedgerChain, 'descendant.singleLedgerChain') !== true
+    || requiredBoolean(descendant.hashLinkedChain, 'descendant.hashLinkedChain') !== true
+  ) {
+    throw new Error('physical active descendant chain is not one-ledger hash-linked')
+  }
+
+  const proof = {
+    workCount,
+    singleLedgerChain: true,
+    hashLinkedChain: true,
+    firstPreviousLedgerIndex: optionalInteger(
+      descendant.firstPreviousLedgerIndex,
+      'descendant.firstPreviousLedgerIndex',
+    ),
+    firstExpectedParentHash: optionalHash(
+      descendant.firstExpectedParentHash,
+      'descendant.firstExpectedParentHash',
+      true,
+    ),
+    lastLedgerIndex: optionalInteger(descendant.lastLedgerIndex, 'descendant.lastLedgerIndex'),
+    lastLedgerHash: optionalHash(descendant.lastLedgerHash, 'descendant.lastLedgerHash', true),
+    lastWorkId: optionalString(descendant.lastWorkId, 'descendant.lastWorkId'),
+  }
+
+  if (workCount === 0) {
+    if (
+      physicalWatermark.ledgerIndex !== recoveryWatermark.ledgerIndex
+      || physicalWatermark.ledgerHash !== recoveryWatermark.ledgerHash
+      || physicalWatermark.workId !== recoveryWatermark.workId
+      || proof.firstPreviousLedgerIndex !== null
+      || proof.firstExpectedParentHash !== null
+      || proof.lastLedgerIndex !== null
+      || proof.lastLedgerHash !== null
+      || proof.lastWorkId !== null
+    ) {
+      throw new Error('equal physical and R5 boundaries changed identity')
+    }
+  } else if (
+    proof.firstPreviousLedgerIndex !== recoveryWatermark.ledgerIndex
+    || proof.firstExpectedParentHash !== recoveryWatermark.ledgerHash
+    || proof.lastLedgerIndex !== physicalWatermark.ledgerIndex
+    || proof.lastLedgerHash !== physicalWatermark.ledgerHash
+    || proof.lastWorkId !== physicalWatermark.workId
+  ) {
+    throw new Error('physical active descendant endpoints do not match R5 and active boundaries')
+  }
+  return proof
+}
+
 async function run() {
   await mkdir(evidenceDirectory, { recursive: true })
   const before = verifyRecovery(await readRecovery(), 'recoveryBefore')
@@ -473,26 +629,28 @@ async function run() {
   const after = verifyRecovery(await readRecovery(), 'recoveryAfter')
   const batch = verifyCompletedFirstBatch(ensured.batch, after.startWatermark)
   const boundary = object(
-    await readActiveBoundary(batch.startLedgerIndex, batch.endLedgerIndex),
+    await readActiveBoundary(
+      batch.startLedgerIndex,
+      batch.endLedgerIndex,
+      after.currentWatermark,
+    ),
     'active boundary',
   )
   const boundaryWatermark = watermark(boundary.watermark, 'activeBoundary.watermark')
+  const recoveryDescendant = verifyRecoveryDescendant(
+    boundary.recoveryDescendant,
+    after.currentWatermark,
+    boundaryWatermark,
+  )
   const currentValidatedHead = await readValidatedHead()
+  const exactFirstBatchOnly = after.completedBatches === 1
 
   if (
     after.completedBatches < 1
     || after.committedLedgers < 24
     || after.currentWatermark.ledgerIndex < batch.endLedgerIndex
-    || after.currentWatermark.ledgerHash
-      !== (after.currentWatermark.ledgerIndex === batch.endLedgerIndex
-        ? batch.finalLedgerHash
-        : after.currentWatermark.ledgerHash)
-    || after.lastAccountingDigest !== batch.accountingDigest
     || after.startedAt === null
     || after.checks.activeRecoveryStarted !== (after.status === 'running')
-    || boundaryWatermark.ledgerIndex !== after.currentWatermark.ledgerIndex
-    || boundaryWatermark.ledgerHash !== after.currentWatermark.ledgerHash
-    || boundaryWatermark.workId !== after.currentWatermark.workId
     || requiredInteger(boundary.pendingCount, 'boundary.pendingCount') !== 1
     || requiredInteger(boundary.leasedCount, 'boundary.leasedCount') !== 0
     || requiredInteger(boundary.retryCount, 'boundary.retryCount') !== 0
@@ -505,23 +663,23 @@ async function run() {
       boundary.firstBatchReferenceRowCount,
       'boundary.firstBatchReferenceRowCount',
     ) < 24
-    || currentValidatedHead.ledgerIndex < after.currentWatermark.ledgerIndex
+    || currentValidatedHead.ledgerIndex < boundaryWatermark.ledgerIndex
   ) {
     throw new Error('first R5 recovery batch active-state parity failed')
   }
 
-  const exactFirstBatchOnly = after.completedBatches === 1
   if (exactFirstBatchOnly && (
     after.currentWatermark.ledgerIndex !== batch.endLedgerIndex
     || after.currentWatermark.ledgerHash !== batch.finalLedgerHash
     || after.currentWatermark.workId !== batch.finalWorkId
     || after.committedLedgers !== 24
+    || after.lastAccountingDigest !== batch.accountingDigest
   )) {
     throw new Error('first R5 recovery batch exact watermark advance failed')
   }
 
   const evidence = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     purpose: 'r5-supabase-first-active-recovery-batch-verification',
     verifiedAt: new Date().toISOString(),
     sourceRunId: Number(process.env.GITHUB_RUN_ID ?? 0) || null,
@@ -562,19 +720,18 @@ async function run() {
       completedBatches: after.completedBatches,
       committedLedgers: after.committedLedgers,
       currentWatermark: after.currentWatermark,
+      physicalActiveWatermark: boundaryWatermark,
+      unadoptedPhysicalDescendantLedgers: recoveryDescendant.workCount,
       currentValidatedHead,
-      currentObservedLag:
-        currentValidatedHead.ledgerIndex - after.currentWatermark.ledgerIndex,
+      currentObservedLag: currentValidatedHead.ledgerIndex - after.currentWatermark.ledgerIndex,
+      physicalObservedLag: currentValidatedHead.ledgerIndex - boundaryWatermark.ledgerIndex,
     },
     activeBoundary: {
       watermark: boundaryWatermark,
       pendingCount: requiredInteger(boundary.pendingCount, 'boundary.pendingCount'),
       leasedCount: requiredInteger(boundary.leasedCount, 'boundary.leasedCount'),
       retryCount: requiredInteger(boundary.retryCount, 'boundary.retryCount'),
-      inflightWorkCount: requiredInteger(
-        boundary.inflightWorkCount,
-        'boundary.inflightWorkCount',
-      ),
+      inflightWorkCount: requiredInteger(boundary.inflightWorkCount, 'boundary.inflightWorkCount'),
       firstBatchCommittedWorkCount: requiredInteger(
         boundary.firstBatchCommittedWorkCount,
         'boundary.firstBatchCommittedWorkCount',
@@ -583,8 +740,8 @@ async function run() {
         boundary.firstBatchReferenceRowCount,
         'boundary.firstBatchReferenceRowCount',
       ),
+      recoveryDescendant,
     },
-    trigger: ensured.lastTrigger,
     checks: {
       firstBatchCompleted: true,
       exactlyTwentyFourLedgersCommitted: batch.ledgerCount === 24,
@@ -592,18 +749,20 @@ async function run() {
         batch.startLedgerIndex === after.startWatermark.ledgerIndex + 1,
       hashLinkedToPreparedWatermark:
         batch.expectedParentHash === after.startWatermark.ledgerHash,
-      activeWatermarkAdvancedAtLeastThroughFirstBatch:
-        after.currentWatermark.ledgerIndex >= batch.endLedgerIndex,
-      exactFirstBatchOnly,
-      exactTwentyFourLedgerAdvanceWhenFirstBatchOnly:
-        !exactFirstBatchOnly
-        || after.currentWatermark.ledgerIndex
-          === after.startWatermark.ledgerIndex + 24,
       reservationShrunkOnlyAfterSuccess:
-        batch.finalizedEgressUpperBoundBytes
-          < batch.reservedEgressUpperBoundBytes,
+        batch.finalizedEgressUpperBoundBytes < batch.reservedEgressUpperBoundBytes,
       revision3AccountingBound:
-        after.lastAccountingDigest === batch.accountingDigest,
+        exactFirstBatchOnly
+          ? after.lastAccountingDigest === batch.accountingDigest
+          : after.completedBatches > 1,
+      currentRecoveryArithmeticExact:
+        after.committedLedgers
+          === after.currentWatermark.ledgerIndex - after.startWatermark.ledgerIndex,
+      physicalActiveAtOrAheadOfRecovery:
+        boundaryWatermark.ledgerIndex >= after.currentWatermark.ledgerIndex,
+      physicalDescendantChainProved:
+        recoveryDescendant.workCount
+          === boundaryWatermark.ledgerIndex - after.currentWatermark.ledgerIndex,
       onePendingScanAfterCommit:
         requiredInteger(boundary.pendingCount, 'boundary.pendingCount') === 1,
       noLeasedOrRetryMessagesAfterCommit:
@@ -631,7 +790,7 @@ try {
 } catch (error) {
   await mkdir(evidenceDirectory, { recursive: true })
   const failure = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     purpose: 'r5-supabase-first-active-recovery-batch-verification',
     verifiedAt: new Date().toISOString(),
     sourceRunId: Number(process.env.GITHUB_RUN_ID ?? 0) || null,
