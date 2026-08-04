@@ -74,14 +74,8 @@ set search_path = public, xrpl_r5_v1, extensions, pg_temp
 as $$
 declare
   v_run xrpl_r5_v1.recovery_runs%rowtype;
-  v_runtime public.xrpl_collector_runtime%rowtype;
-  v_stream public.xrpl_phase_streams%rowtype;
   v_watermark public.xrpl_phase_watermarks%rowtype;
-  v_pending_scan public.xrpl_phase_messages%rowtype;
-  v_pending_count integer;
-  v_leased_count integer;
-  v_retry_count integer;
-  v_inflight_work_count integer;
+  v_boundary jsonb;
   v_completed_batch_count bigint;
   v_leased_batch_count bigint;
   v_halted_batch_count bigint;
@@ -103,6 +97,7 @@ declare
   v_cursor_start bigint;
   v_cursor_end bigint;
   v_chunk_count integer;
+  v_chunk_work_count bigint;
   v_chunk_expected_parent_hash text;
   v_chunk_final_hash text;
   v_chunk_final_work_id text;
@@ -111,8 +106,6 @@ declare
   v_chunk_accounting_digest text;
   v_batch_sequence bigint;
   v_batch_id text;
-  v_observed_head_index bigint;
-  v_observed_head_hash text;
 begin
   if p_run_id !~ '^r5-recovery-[a-z0-9][a-z0-9-]{7,79}$'
     or p_adopted_at is null then
@@ -120,13 +113,6 @@ begin
   end if;
 
   perform pg_advisory_xact_lock(hashtextextended('xrpl-r5-active-recovery', 0));
-
-  lock table public.xrpl_collector_runtime in share mode;
-  lock table public.xrpl_phase_streams in share mode;
-  lock table public.xrpl_phase_messages in share mode;
-  lock table public.xrpl_phase_work in share mode;
-  lock table public.xrpl_phase_watermarks in share mode;
-  lock table xrpl_r5_v1.recovery_batches in share row exclusive mode;
 
   select * into v_run
   from xrpl_r5_v1.recovery_runs
@@ -154,75 +140,39 @@ begin
     raise exception 'r5_recovery_adoption_run_invalid';
   end if;
 
-  select * into v_runtime
-  from public.xrpl_collector_runtime
-  where profile_id = 'supabase-devnet';
-  if not found
-    or v_runtime.network <> 'devnet'
-    or v_runtime.status <> 'stopped'
-    or v_runtime.lease_owner is not null
-    or v_runtime.lease_expires_at is not null
-    or v_runtime.last_error is not null
-    or v_runtime.consecutive_failures <> 0 then
-    raise exception 'r5_recovery_adoption_collector_not_quiescent';
-  end if;
+  v_boundary := public.xrpl_drain_r5_checkpoint_boundary(
+    'r5-adopt-active-descendants',
+    p_adopted_at
+  );
 
-  select * into v_stream
-  from public.xrpl_phase_streams
-  where profile_id = 'supabase-devnet';
-  if not found
-    or v_stream.status <> 'active'
-    or v_stream.network <> v_run.network
-    or v_stream.epoch_id <> v_run.epoch_id
-    or v_stream.base_identity <> v_run.base_identity
-    or v_stream.last_error_classification is not null
-    or v_stream.last_error_message is not null then
-    raise exception 'r5_recovery_adoption_stream_invalid';
+  if coalesce((v_boundary->>'drained')::boolean, false) is not true
+    or (v_boundary->>'drainedStepCount')::integer <> 0
+    or coalesce((v_boundary->'checks'->>'collectorQuiescent')::boolean, false) is not true
+    or coalesce((v_boundary->'checks'->>'activeStreamHealthy')::boolean, false) is not true
+    or coalesce((v_boundary->'checks'->>'noScanExecuted')::boolean, false) is not true
+    or coalesce((v_boundary->'checks'->>'onePendingScan')::boolean, false) is not true
+    or coalesce((v_boundary->'checks'->>'pendingScanBoundToWatermark')::boolean, false) is not true
+    or coalesce((v_boundary->'checks'->>'noInflightWork')::boolean, false) is not true
+    or v_boundary->>'sourceProfileId' <> 'supabase-devnet'
+    or v_boundary->>'network' <> v_run.network
+    or v_boundary->>'epochId' <> v_run.epoch_id
+    or v_boundary->>'baseIdentity' <> v_run.base_identity then
+    raise exception 'r5_recovery_adoption_boundary_invalid';
   end if;
 
   select * into v_watermark
   from public.xrpl_phase_watermarks
   where profile_id = 'supabase-devnet';
+
   if not found
     or v_watermark.network <> v_run.network
     or v_watermark.epoch_id <> v_run.epoch_id
     or v_watermark.base_identity <> v_run.base_identity
-    or v_watermark.ledger_index < v_run.current_watermark_ledger_index then
+    or v_watermark.ledger_index < v_run.current_watermark_ledger_index
+    or (v_boundary->'watermarkAfter'->>'ledgerIndex')::bigint <> v_watermark.ledger_index
+    or upper(v_boundary->'watermarkAfter'->>'ledgerHash') <> v_watermark.ledger_hash
+    or v_boundary->'watermarkAfter'->>'workId' <> v_watermark.work_id then
     raise exception 'r5_recovery_adoption_watermark_invalid';
-  end if;
-
-  select
-    count(*) filter (where status = 'pending')::integer,
-    count(*) filter (where status = 'leased')::integer,
-    count(*) filter (where status = 'retry')::integer
-  into v_pending_count, v_leased_count, v_retry_count
-  from public.xrpl_phase_messages
-  where profile_id = 'supabase-devnet';
-  if v_pending_count <> 1 or v_leased_count <> 0 or v_retry_count <> 0 then
-    raise exception 'r5_recovery_adoption_scheduler_not_quiescent';
-  end if;
-
-  select * into v_pending_scan
-  from public.xrpl_phase_messages
-  where profile_id = 'supabase-devnet' and status = 'pending';
-  if not found
-    or v_pending_scan.phase <> 'scan'
-    or v_pending_scan.attempt_count <> 0
-    or (v_pending_scan.payload->>'expectedPreviousLedgerIndex')::bigint
-      <> v_watermark.ledger_index
-    or upper(v_pending_scan.payload->>'expectedPreviousLedgerHash')
-      <> v_watermark.ledger_hash
-    or v_pending_scan.payload->>'epochId' <> v_run.epoch_id
-    or v_pending_scan.payload->>'baseIdentity' <> v_run.base_identity then
-    raise exception 'r5_recovery_adoption_pending_scan_invalid';
-  end if;
-
-  select count(*)::integer into v_inflight_work_count
-  from public.xrpl_phase_work
-  where profile_id = 'supabase-devnet'
-    and status in ('planned', 'staged', 'committing', 'finalizing');
-  if v_inflight_work_count <> 0 then
-    raise exception 'r5_recovery_adoption_inflight_work_present';
   end if;
 
   select
@@ -257,6 +207,7 @@ begin
       'currentWatermarkLedgerIndex', v_run.current_watermark_ledger_index,
       'adoptedBatches', v_run.adopted_batches,
       'adoptedLedgers', v_run.adopted_ledgers,
+      'pendingScanAttemptCountPreserved', true,
       'publicReaderUnchanged', true,
       'mainnetDisabled', true,
       'stabilizationAuthorized', false,
@@ -303,7 +254,7 @@ begin
     max(chain.scanned_end_ledger_index),
     (array_agg(chain.final_ledger_hash order by chain.start_ledger_index desc, chain.work_id desc))[1],
     (array_agg(chain.work_id order by chain.start_ledger_index desc, chain.work_id desc))[1],
-    encode(digest(convert_to(coalesce(jsonb_agg(jsonb_build_object(
+    encode(extensions.digest(convert_to(coalesce(jsonb_agg(jsonb_build_object(
       'workId', chain.work_id,
       'previousLedgerIndex', chain.previous_ledger_index,
       'startLedgerIndex', chain.start_ledger_index,
@@ -336,7 +287,7 @@ begin
     raise exception 'r5_recovery_adoption_descendant_chain_invalid';
   end if;
 
-  select encode(digest(convert_to(coalesce(jsonb_agg(jsonb_build_object(
+  select encode(extensions.digest(convert_to(coalesce(jsonb_agg(jsonb_build_object(
     'workId', rows.work_id,
     'semanticClass', rows.semantic_class,
     'canonicalKey', rows.canonical_key,
@@ -359,16 +310,6 @@ begin
   v_adoption_sequence := v_run.adopted_batches + 1;
   v_first_batch_sequence := v_run.completed_batches + 1;
   v_adopted_batch_count := (v_delta + 23) / 24;
-  v_observed_head_index := greatest(
-    v_run.initial_validated_head_ledger_index,
-    v_watermark.ledger_index
-  );
-  v_observed_head_hash := case
-    when v_run.initial_validated_head_ledger_index >= v_watermark.ledger_index
-      then v_run.initial_validated_head_ledger_hash
-    else v_watermark.ledger_hash
-  end;
-
   v_cursor_start := v_run.current_watermark_ledger_index + 1;
   v_batch_sequence := v_first_batch_sequence;
 
@@ -377,10 +318,11 @@ begin
     v_chunk_count := (v_cursor_end - v_cursor_start + 1)::integer;
 
     select
+      count(*)::bigint,
       (array_agg(work.expected_parent_hash order by work.start_ledger_index, work.work_id))[1],
       (array_agg(work.final_ledger_hash order by work.start_ledger_index desc, work.work_id desc))[1],
       (array_agg(work.work_id order by work.start_ledger_index desc, work.work_id desc))[1],
-      encode(digest(convert_to(coalesce(jsonb_agg(jsonb_build_object(
+      encode(extensions.digest(convert_to(coalesce(jsonb_agg(jsonb_build_object(
         'workId', work.work_id,
         'previousLedgerIndex', work.previous_ledger_index,
         'startLedgerIndex', work.start_ledger_index,
@@ -391,6 +333,7 @@ begin
         'committedAt', work.committed_at
       ) order by work.start_ledger_index, work.work_id), '[]'::jsonb)::text, 'UTF8'), 'sha256'), 'hex')
     into
+      v_chunk_work_count,
       v_chunk_expected_parent_hash,
       v_chunk_final_hash,
       v_chunk_final_work_id,
@@ -400,7 +343,7 @@ begin
       and work.status = 'committed'
       and work.start_ledger_index between v_cursor_start and v_cursor_end;
 
-    select encode(digest(convert_to(coalesce(jsonb_agg(jsonb_build_object(
+    select encode(extensions.digest(convert_to(coalesce(jsonb_agg(jsonb_build_object(
       'workId', rows.work_id,
       'semanticClass', rows.semantic_class,
       'canonicalKey', rows.canonical_key,
@@ -419,7 +362,8 @@ begin
     where work.profile_id = 'supabase-devnet'
       and work.start_ledger_index between v_cursor_start and v_cursor_end;
 
-    if v_chunk_expected_parent_hash is null
+    if v_chunk_work_count <> v_chunk_count
+      or v_chunk_expected_parent_hash is null
       or v_chunk_final_hash is null
       or v_chunk_final_work_id is null
       or v_chunk_works_digest !~ '^[a-f0-9]{64}$'
@@ -427,7 +371,7 @@ begin
       raise exception 'r5_recovery_adoption_chunk_digest_invalid';
     end if;
 
-    v_chunk_accounting_digest := encode(digest(convert_to(jsonb_build_object(
+    v_chunk_accounting_digest := encode(extensions.digest(convert_to(jsonb_build_object(
       'schemaVersion', 1,
       'purpose', 'r5-adopted-active-descendant-batch',
       'runId', v_run.run_id,
@@ -463,7 +407,13 @@ begin
       'adopted_active_descendant',
       null, null, 1,
       v_cursor_start, v_cursor_end, v_chunk_count,
-      v_chunk_expected_parent_hash, v_observed_head_index, v_observed_head_hash,
+      v_chunk_expected_parent_hash,
+      greatest(v_run.initial_validated_head_ledger_index, v_cursor_end),
+      case
+        when v_run.initial_validated_head_ledger_index >= v_cursor_end
+          then v_run.initial_validated_head_ledger_hash
+        else v_chunk_final_hash
+      end,
       'supabase_free_postgres_pgcron_edge', 3,
       '3a5c4ff2c43a48d3e5b7ceded60027173d215d6f083fb33c22375758520bbe67',
       '13a313d9d0679c7c512b59f9931d733dcb3217ec8e1cc6e74a36125a0354b667',
@@ -533,6 +483,7 @@ begin
     'currentWatermarkLedgerIndex', v_run.current_watermark_ledger_index,
     'currentWatermarkLedgerHash', v_run.current_watermark_ledger_hash,
     'currentWatermarkWorkId', v_run.current_watermark_work_id,
+    'pendingScanAttemptCountPreserved', true,
     'standardRevision3AccountingAlreadyRetained', true,
     'additionalRecoveryEgressUpperBoundBytes', 0,
     'publicReaderUnchanged', true,
@@ -591,7 +542,7 @@ set search_path = public, xrpl_r5_v1, pg_temp
 as $$
 declare
   v_run xrpl_r5_v1.recovery_runs%rowtype;
-  v_rebind jsonb;
+  v_reconcile jsonb;
   v_claim jsonb;
   v_projected_invocations bigint;
 begin
@@ -628,11 +579,7 @@ begin
       'claimed', false,
       'reason', 'recovery_already_caught_up',
       'runId', v_run.run_id,
-      'watermarkLedgerIndex', v_run.current_watermark_ledger_index,
-      'prebatchRebind', jsonb_build_object(
-        'rebound', false,
-        'reason', 'terminal_recovery_state'
-      )
+      'watermarkLedgerIndex', v_run.current_watermark_ledger_index
     );
   end if;
   if v_run.status = 'halted' then
@@ -640,11 +587,7 @@ begin
       'claimed', false,
       'reason', 'recovery_halted',
       'runId', v_run.run_id,
-      'error', v_run.last_error,
-      'prebatchRebind', jsonb_build_object(
-        'rebound', false,
-        'reason', 'terminal_recovery_state'
-      )
+      'error', v_run.last_error
     );
   end if;
   if v_run.status not in ('prepared', 'running') then
@@ -652,12 +595,12 @@ begin
   end if;
 
   if v_run.status = 'prepared' then
-    v_rebind := public.xrpl_rebind_r5_prebatch_recovery_to_active_boundary(
+    v_reconcile := public.xrpl_rebind_r5_prebatch_recovery_to_active_boundary(
       p_run_id,
       p_now
     );
   else
-    v_rebind := public.xrpl_adopt_r5_committed_active_descendants(
+    v_reconcile := public.xrpl_adopt_r5_committed_active_descendants(
       p_run_id,
       p_now
     );
@@ -688,7 +631,7 @@ begin
       'mainnetDisabled', true,
       'stabilizationNotStarted', true,
       'soakNotStarted', true,
-      'prebatchRebind', v_rebind
+      'prebatchReconcile', v_reconcile
     );
   end if;
 
@@ -705,7 +648,7 @@ begin
     return v_claim || jsonb_build_object(
       'retainedPreparedHeadUsed', true,
       'networkReadOccurredBeforeReservation', false,
-      'prebatchRebind', v_rebind
+      'prebatchReconcile', v_reconcile
     );
   end if;
 
@@ -729,7 +672,7 @@ begin
       v_run.initial_validated_head_ledger_hash,
     'reservationBeforeAnyNetworkRead', true,
     'freshHeadMustCoverReservedEndBeforeFetch', true,
-    'prebatchRebind', v_rebind
+    'prebatchReconcile', v_reconcile
   );
 end;
 $$;
@@ -767,7 +710,7 @@ $$;
 
 -- The exact production R5 run may already have a small committed active descendant
 -- range from the interval before the ownership guard became effective. Adopt only
--- that fully proved range; local and fresh databases have no matching run and skip.
+-- that fully proved range; fresh/local databases have no matching run and skip.
 do $$
 begin
   if exists (

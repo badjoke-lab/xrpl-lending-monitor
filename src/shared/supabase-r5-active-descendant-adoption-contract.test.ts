@@ -47,20 +47,26 @@ describe('R5 committed active descendant adoption contract', () => {
     }
   })
 
-  it('accepts only one quiescent pending scan and zero in-flight work', () => {
+  it('reuses the qualified pending-scan boundary without resetting retry history', () => {
     for (const required of [
-      "v_runtime.status <> 'stopped'",
-      "v_stream.status <> 'active'",
-      'v_pending_count <> 1',
-      'v_leased_count <> 0',
-      'v_retry_count <> 0',
-      "v_pending_scan.phase <> 'scan'",
-      'v_pending_scan.attempt_count <> 0',
-      "status in ('planned', 'staged', 'committing', 'finalizing')",
-      'v_inflight_work_count <> 0',
+      'public.xrpl_drain_r5_checkpoint_boundary(',
+      "'r5-adopt-active-descendants'",
+      "v_boundary->>'drainedStepCount'",
+      "v_boundary->'checks'->>'collectorQuiescent'",
+      "v_boundary->'checks'->>'activeStreamHealthy'",
+      "v_boundary->'checks'->>'noScanExecuted'",
+      "v_boundary->'checks'->>'onePendingScan'",
+      "v_boundary->'checks'->>'pendingScanBoundToWatermark'",
+      "v_boundary->'checks'->>'noInflightWork'",
+      "v_boundary->>'network' <> v_run.network",
+      "v_boundary->>'epochId' <> v_run.epoch_id",
+      "v_boundary->>'baseIdentity' <> v_run.base_identity",
+      "'pendingScanAttemptCountPreserved', true",
     ]) {
       expect(migration).toContain(required)
     }
+    expect(migration).not.toContain('v_pending_scan.attempt_count <> 0')
+    expect(migration).not.toContain('update public.xrpl_phase_messages')
   })
 
   it('proves a complete one-ledger hash-linked chain before adoption', () => {
@@ -86,6 +92,7 @@ describe('R5 committed active descendant adoption contract', () => {
       'v_adopted_batch_count := (v_delta + 23) / 24',
       'v_cursor_end := least(v_cursor_start + 23, v_watermark.ledger_index)',
       'v_chunk_count := (v_cursor_end - v_cursor_start + 1)::integer',
+      'v_chunk_work_count <> v_chunk_count',
       "'r5-batch-v1-'",
       "lpad(v_batch_sequence::text, 8, '0')",
       '134217728, 0, 0, 134217728, 0, 2',
@@ -110,7 +117,6 @@ describe('R5 committed active descendant adoption contract', () => {
       'committed_ledgers = committed_ledgers + v_delta',
       'adopted_batches = adopted_batches + v_adopted_batch_count',
       'adopted_ledgers = adopted_ledgers + v_delta',
-      'v_run.committed_ledgers',
       'v_run.current_watermark_ledger_index - v_run.start_watermark_ledger_index',
       'v_run.completed_batches * 24 < v_run.committed_ledgers',
       'r5_recovery_adoption_final_arithmetic_invalid',
@@ -121,7 +127,7 @@ describe('R5 committed active descendant adoption contract', () => {
 
   it('reconciles running recovery before the next guarded claim', () => {
     const adoptionCall = migration.lastIndexOf(
-      'v_rebind := public.xrpl_adopt_r5_committed_active_descendants(',
+      'v_reconcile := public.xrpl_adopt_r5_committed_active_descendants(',
     )
     const claimCall = migration.indexOf(
       'v_claim := public.xrpl_claim_r5_active_recovery_batch(',
