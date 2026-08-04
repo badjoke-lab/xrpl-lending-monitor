@@ -7,20 +7,45 @@ function read(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
+const tombstonePath =
+  'supabase/migrations/20260803123150_xrpl_r5_recovery_retained_head_claim_repair.sql'
 const canonicalPath =
   'supabase/migrations/20260803123200_xrpl_r5_recovery_retained_head_claim.sql'
 const repairPath =
   'supabase/migrations/20260803123300_xrpl_r5_recovery_retained_head_claim_forward_repair.sql'
+const tombstone = read(tombstonePath)
 const canonical = read(canonicalPath)
 const repair = read(repairPath)
 
-describe('R5 retained-head claim forward migration repair', () => {
-  it('runs strictly after the remote-recorded canonical migration', () => {
+describe('R5 retained-head claim migration-history repair', () => {
+  it('retains the exact remote-recorded version as a no-op tombstone', () => {
+    expect(tombstonePath).toContain('20260803123150')
+    expect(tombstone).toContain('Migration-history tombstone')
+    expect(tombstone).toContain('forward-only functional repair is migration 20260803123300')
+    expect(tombstone).toContain('null;')
+    for (const forbidden of [
+      'create ',
+      'drop ',
+      'alter ',
+      'grant ',
+      'revoke ',
+      'insert ',
+      'update ',
+      'delete ',
+      'truncate ',
+    ]) {
+      expect(tombstone.toLowerCase()).not.toContain(forbidden)
+    }
+  })
+
+  it('orders tombstone, canonical record, and forward repair exactly', () => {
+    const tombstoneTimestamp = Number(tombstonePath.match(/migrations\/(\d{14})_/u)?.[1])
     const canonicalTimestamp = Number(canonicalPath.match(/migrations\/(\d{14})_/u)?.[1])
     const repairTimestamp = Number(repairPath.match(/migrations\/(\d{14})_/u)?.[1])
+    expect(Number.isSafeInteger(tombstoneTimestamp)).toBe(true)
     expect(Number.isSafeInteger(canonicalTimestamp)).toBe(true)
     expect(Number.isSafeInteger(repairTimestamp)).toBe(true)
-    expect(repairTimestamp).toBeGreaterThan(canonicalTimestamp)
+    expect(canonicalTimestamp - tombstoneTimestamp).toBe(50)
     expect(repairTimestamp - canonicalTimestamp).toBe(100)
   })
 
