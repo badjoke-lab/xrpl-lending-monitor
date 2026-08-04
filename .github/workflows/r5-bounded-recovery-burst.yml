@@ -17,6 +17,8 @@ on:
         description: Type RUN_R5_BOUNDED_BURST to authorize this finite Devnet recovery run
         required: true
         type: string
+  issue_comment:
+    types: [created]
 
 permissions:
   contents: read
@@ -28,7 +30,7 @@ concurrency:
 
 jobs:
   reject-invalid-request:
-    if: ${{ inputs.confirm != 'RUN_R5_BOUNDED_BURST' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.confirm != 'RUN_R5_BOUNDED_BURST' }}
     runs-on: ubuntu-latest
     steps:
       - name: Refuse an ambiguous recovery request
@@ -37,14 +39,23 @@ jobs:
           exit 1
 
   execute-bounded-burst:
-    if: ${{ inputs.confirm == 'RUN_R5_BOUNDED_BURST' }}
+    if: >-
+      ${{
+        (github.event_name == 'workflow_dispatch' && inputs.confirm == 'RUN_R5_BOUNDED_BURST')
+        || (
+          github.event_name == 'issue_comment'
+          && github.event.issue.number == 1175
+          && github.actor == 'badjoke-lab'
+          && github.event.comment.body == '/r5-recovery burst 8 900 nonce-e3378018'
+        )
+      }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
     env:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
-      R5_RECOVERY_BURST_BATCH_LIMIT: ${{ inputs.batch_limit }}
-      R5_RECOVERY_BURST_WALL_SECONDS: ${{ inputs.wall_seconds }}
+      R5_RECOVERY_BURST_BATCH_LIMIT: ${{ github.event_name == 'issue_comment' && '8' || inputs.batch_limit }}
+      R5_RECOVERY_BURST_WALL_SECONDS: ${{ github.event_name == 'issue_comment' && '900' || inputs.wall_seconds }}
 
     steps:
       - name: Check out repository
@@ -62,6 +73,10 @@ jobs:
           test "$R5_RECOVERY_BURST_BATCH_LIMIT" -le 64
           test "$R5_RECOVERY_BURST_WALL_SECONDS" -ge 60
           test "$R5_RECOVERY_BURST_WALL_SECONDS" -le 1800
+          if [ "$GITHUB_EVENT_NAME" = issue_comment ]; then
+            test "$R5_RECOVERY_BURST_BATCH_LIMIT" -eq 8
+            test "$R5_RECOVERY_BURST_WALL_SECONDS" -eq 900
+          fi
 
       - name: Set up Supabase CLI
         uses: supabase/setup-cli@3c2f5e2ae34c34e428e8e206e2c4d21fa2d20fbf
