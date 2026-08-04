@@ -1,0 +1,104 @@
+name: R5 Bounded Recovery Burst
+
+on:
+  workflow_dispatch:
+    inputs:
+      batch_limit:
+        description: Maximum sequential recovery batches for this run
+        required: true
+        default: 8
+        type: number
+      wall_seconds:
+        description: Hard wall-clock bound in seconds
+        required: true
+        default: 900
+        type: number
+      confirm:
+        description: Type RUN_R5_BOUNDED_BURST to authorize this finite Devnet recovery run
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: r5-bounded-recovery-burst
+  cancel-in-progress: false
+
+jobs:
+  reject-invalid-request:
+    if: ${{ inputs.confirm != 'RUN_R5_BOUNDED_BURST' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse an ambiguous recovery request
+        run: |
+          echo 'Type RUN_R5_BOUNDED_BURST to authorize one finite R5 Devnet recovery burst.'
+          exit 1
+
+  execute-bounded-burst:
+    if: ${{ inputs.confirm == 'RUN_R5_BOUNDED_BURST' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+      R5_RECOVERY_BURST_BATCH_LIMIT: ${{ inputs.batch_limit }}
+      R5_RECOVERY_BURST_WALL_SECONDS: ${{ inputs.wall_seconds }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Verify exact bounded request and secret bindings
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SUPABASE_ACCESS_TOKEN"
+          [[ "$SUPABASE_PROJECT_ID" =~ ^[a-z]{20}$ ]]
+          [[ "$R5_RECOVERY_BURST_BATCH_LIMIT" =~ ^[0-9]+$ ]]
+          [[ "$R5_RECOVERY_BURST_WALL_SECONDS" =~ ^[0-9]+$ ]]
+          test "$R5_RECOVERY_BURST_BATCH_LIMIT" -ge 1
+          test "$R5_RECOVERY_BURST_BATCH_LIMIT" -le 64
+          test "$R5_RECOVERY_BURST_WALL_SECONDS" -ge 60
+          test "$R5_RECOVERY_BURST_WALL_SECONDS" -le 1800
+
+      - name: Set up Supabase CLI
+        uses: supabase/setup-cli@3c2f5e2ae34c34e428e8e206e2c4d21fa2d20fbf
+        with:
+          version: latest
+
+      - name: Rotate one-run R5 recovery verifier token
+        shell: bash
+        run: |
+          set -euo pipefail
+          recovery_token="$(openssl rand -hex 32)"
+          echo "::add-mask::${recovery_token}"
+          supabase secrets set XRPL_R5_RECOVERY_VERIFY_TOKEN="${recovery_token}" \
+            --project-ref "$SUPABASE_PROJECT_ID"
+          echo "XRPL_R5_RECOVERY_VERIFY_TOKEN=${recovery_token}" >> "$GITHUB_ENV"
+
+      - name: Execute and verify one finite R5 recovery burst
+        run: node scripts/verify-supabase-r5-recovery-burst.mjs
+
+      - name: Upload sanitized burst evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: supabase-r5-recovery-burst-evidence
+          path: supabase-r5-recovery-burst-evidence
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish sanitized R5 burst locator
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/publish-supabase-r5-recovery-burst-run-locator.mjs \
+            > /tmp/r5-burst-comment.md
+          test -s /tmp/r5-burst-comment.md
+          gh issue comment 1175 --repo "$GITHUB_REPOSITORY" \
+            --body-file /tmp/r5-burst-comment.md

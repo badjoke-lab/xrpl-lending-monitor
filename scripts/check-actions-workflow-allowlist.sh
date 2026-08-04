@@ -19,6 +19,7 @@ expected=(
   ci.yml
   deploy-queue-minute-cadence-fix.yml
   r4c2c-devnet-historical-witness.yml
+  r5-bounded-recovery-burst.yml
   read-only-production-qualification.yml
   rolling-checkpoint-candidate.yml
   rolling-checkpoint-live-cutover.yml
@@ -28,7 +29,7 @@ expected=(
 printf '%s\n' "${expected[@]}" > "$evidence/expected-workflows.txt"
 
 if [[ "${#actual[@]}" -ne "${#expected[@]}" ]]; then
-  echo "GitHub Actions workflow count must remain exactly eight while the guarded R4 qualification workflows are active." >&2
+  echo "GitHub Actions workflow count must remain exactly nine while the guarded R5 recovery workflows are active." >&2
   exit 1
 fi
 
@@ -48,10 +49,12 @@ import sys
 root = Path(sys.argv[1])
 evidence = Path(sys.argv[2])
 historical_witness = "r4c2c-devnet-historical-witness.yml"
+r5_burst = "r5-bounded-recovery-burst.yml"
 supabase_remote = "supabase-remote-probe.yml"
 policies = {
     "deploy-queue-minute-cadence-fix.yml": ["pull_request", "push"],
     historical_witness: ["workflow_dispatch", "push"],
+    r5_burst: ["workflow_dispatch"],
     "read-only-production-qualification.yml": ["pull_request", "workflow_dispatch", "issue_comment"],
     "rolling-checkpoint-candidate.yml": ["workflow_dispatch", "issue_comment"],
     "rolling-checkpoint-live-cutover.yml": ["workflow_dispatch"],
@@ -125,6 +128,42 @@ for forbidden in (
         raise SystemExit(f"historical witness workflow contains forbidden capability: {forbidden.strip()}")
 if witness.count("issues: write") != 1 or witness.count("gh issue comment 1118") != 1:
     raise SystemExit("historical witness issue-write capability must remain bound to one permission and Issue #1118")
+
+burst = (root / r5_burst).read_text()
+for required in (
+    "contents: read",
+    "issues: write",
+    "cancel-in-progress: false",
+    "RUN_R5_BOUNDED_BURST",
+    "R5_RECOVERY_BURST_BATCH_LIMIT",
+    "R5_RECOVERY_BURST_WALL_SECONDS",
+    "timeout-minutes: 40",
+    "supabase secrets set XRPL_R5_RECOVERY_VERIFY_TOKEN",
+    "node scripts/verify-supabase-r5-recovery-burst.mjs",
+    "node scripts/publish-supabase-r5-recovery-burst-run-locator.mjs",
+    "retention-days: 14",
+    "gh issue comment 1175",
+):
+    if required not in burst:
+        raise SystemExit(f"R5 bounded burst workflow is missing a guarded recovery requirement: {required}")
+for forbidden in (
+    "  schedule:",
+    "  push:",
+    "pull_request_target",
+    "contents: write",
+    "SUPABASE_DB_PASSWORD",
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "supabase db",
+    "supabase functions deploy",
+    "wrangler deploy",
+    "MAINNET_ENABLED: 'true'",
+):
+    if forbidden in burst:
+        raise SystemExit(f"R5 bounded burst workflow contains forbidden capability: {forbidden.strip()}")
+if burst.count("issues: write") != 1 or burst.count("gh issue comment 1175") != 1:
+    raise SystemExit("R5 bounded burst issue-write capability must remain bound to one permission and Issue #1175")
+if burst.count("supabase secrets set XRPL_R5_RECOVERY_VERIFY_TOKEN") != 1:
+    raise SystemExit("R5 bounded burst token rotation must remain exactly once per workflow run")
 
 candidate = (root / "rolling-checkpoint-candidate.yml").read_text()
 for required in (
@@ -224,7 +263,7 @@ scheduled.sort()
 (evidence / "workflow-triggers.json").write_text(json.dumps(parsed, indent=2) + "\n")
 (evidence / "scheduled-workflows.json").write_text(json.dumps(scheduled, indent=2) + "\n")
 if scheduled:
-    raise SystemExit(f"no scheduled workflow is allowed during active R4 qualification: {scheduled}")
+    raise SystemExit(f"no scheduled workflow is allowed during active R5 recovery: {scheduled}")
 PY
 
-echo "Actions workflow allowlist passed: CI, guarded legacy recovery workflows, one read-only production probe, one read-only R4C2c witness discovery, and one guarded Supabase deployment verifier covering the active, isolated historical, and isolated standard-phase multi-chunk qualification profiles; no scheduled workflows."
+echo "Actions workflow allowlist passed: CI, guarded legacy recovery workflows, one read-only production probe, one read-only R4C2c witness discovery, one guarded Supabase deployment verifier, and one manual finite R5 recovery burst; no scheduled workflows."
