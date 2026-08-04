@@ -42,7 +42,7 @@ replace_once(
     "github.ref == 'refs/heads/main'",
     "diagnose-pending-scan",
     "ops/r5/run-once-20260804-8x900-observable-v2.marker",
-    "16654aae5dfe31c0d3c2cb44d279f6af92b1076a90c2388803c05a118f4c4c27",
+    "bf47940252a652535df1f6876904e0ba32302dc1906bfd3b3caf57827fc9591e",
     "author_login=",
     "gh api",
     "--jq '.author.login'",
