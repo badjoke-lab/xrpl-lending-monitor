@@ -156,10 +156,15 @@ describe('R5 committed active descendant adoption contract', () => {
       'delete from',
       'truncate ',
       'drop table',
-      'cascade',
+      'drop function',
+      'drop schema',
+      'drop type',
+      'drop owned',
+      ' cascade;',
       "mainnetEnabled', true",
     ]) {
       expect(migration.toLowerCase()).not.toContain(forbidden.toLowerCase())
     }
+    expect(migration.toLowerCase()).toContain('on delete cascade')
   })
 })
