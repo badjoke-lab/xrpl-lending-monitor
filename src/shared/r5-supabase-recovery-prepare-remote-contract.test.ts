@@ -24,7 +24,7 @@ const selection = JSON.parse(
 }
 
 describe('R5 Supabase remote recovery preparation contract', () => {
-  it('uses parameterized Management API queries without a new Edge function', () => {
+  it('uses parameterized Management API queries without a preparation Edge function', () => {
     for (const required of [
       'https://api.supabase.com/v1/projects/${projectRef}/database/query',
       "authorization: `Bearer ${accessToken}`",
@@ -39,8 +39,10 @@ describe('R5 Supabase remote recovery preparation contract', () => {
     ]) {
       expect(verifier).toContain(required)
     }
-    expect(workflow).not.toContain('supabase functions deploy xrpl-r5')
-    expect(workflow).not.toContain("bundle_function 'supabase/functions/xrpl-r5")
+    expect(workflow).not.toContain('supabase functions deploy xrpl-r5-recovery-prepare')
+    expect(workflow).not.toContain(
+      "bundle_function 'supabase/functions/xrpl-r5-recovery-prepare",
+    )
   })
 
   it('requires the frozen checkpoint and exact selected identity', () => {
@@ -148,14 +150,15 @@ describe('R5 Supabase remote recovery preparation contract', () => {
     expect(verifier).not.toContain('fullCheckpointState')
   })
 
-  it('runs immediately after checkpoint freeze and publishes one combined R5 comment', () => {
+  it('runs immediately after checkpoint freeze through the reentrant readiness wrapper', () => {
     for (const required of [
       "'scripts/verify-supabase-r5-recovery-prepare.mjs'",
+      "'scripts/verify-supabase-r5-recovery-ready.mjs'",
       "'scripts/publish-supabase-r5-recovery-prepare-run-locator.mjs'",
       'Freeze exact R5 active checkpoint',
-      'Prepare exact R5 active recovery',
+      'Prepare or verify exact R5 active recovery',
       'node scripts/verify-supabase-r5-active-checkpoint.mjs',
-      'node scripts/verify-supabase-r5-recovery-prepare.mjs',
+      'node scripts/verify-supabase-r5-recovery-ready.mjs',
       'node scripts/publish-supabase-r5-active-checkpoint-run-locator.mjs > /tmp/r5-comment.md',
       'node scripts/publish-supabase-r5-recovery-prepare-run-locator.mjs >> /tmp/r5-comment.md',
       'gh issue comment 1175',
@@ -164,7 +167,7 @@ describe('R5 Supabase remote recovery preparation contract', () => {
     }
     expect(
       workflow.indexOf('node scripts/verify-supabase-r5-active-checkpoint.mjs'),
-    ).toBeLessThan(workflow.indexOf('node scripts/verify-supabase-r5-recovery-prepare.mjs'))
+    ).toBeLessThan(workflow.indexOf('node scripts/verify-supabase-r5-recovery-ready.mjs'))
     expect(workflow.match(/gh issue comment 1175/g)).toHaveLength(1)
   })
 
