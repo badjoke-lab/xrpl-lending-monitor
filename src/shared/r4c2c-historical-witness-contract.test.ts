@@ -79,11 +79,12 @@ describe('R4C2c Devnet historical witness contract', () => {
     }
   })
 
-  it('replaces the expired scheduled qualification without increasing workflow count', () => {
+  it('remains unscheduled while the allowlist adds only the bounded R5 recovery workflow', () => {
     for (const required of [
       'r4c2c-devnet-historical-witness.yml',
-      'GitHub Actions workflow count must remain exactly eight',
-      'no scheduled workflow is allowed during active R4 qualification',
+      'r5-bounded-recovery-burst.yml',
+      'GitHub Actions workflow count must remain exactly nine',
+      'no scheduled workflow is allowed during active R5 recovery',
     ]) {
       expect(allowlist).toContain(required)
     }
