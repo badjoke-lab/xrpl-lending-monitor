@@ -100,6 +100,10 @@ jobs:
           echo "XRPL_R5_RECOVERY_VERIFY_TOKEN=${recovery_token}" >> "$GITHUB_ENV"
 
       - name: Execute and verify one finite R5 recovery burst
+        # The sequence-correction runner executes the reviewed controller source:
+        # node scripts/verify-supabase-r5-recovery-burst-adoption-aware.mjs
+        # Its retained ordinary predecessor remains:
+        # node scripts/verify-supabase-r5-recovery-burst.mjs
         run: node scripts/run-supabase-r5-recovery-burst-adoption-aware.mjs
 
       - name: Upload sanitized burst evidence
