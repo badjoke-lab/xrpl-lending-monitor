@@ -16,7 +16,7 @@ const adoption = read(
 
 describe('R5 pre-adoption boundary drain contract', () => {
   it('runs immediately before the existing adoption migration', () => {
-    expect('20260803123750').toBeLessThan('20260803123800')
+    expect(20_260_803_123_750).toBeLessThan(20_260_803_123_800)
     expect(drain).toContain("run_id = 'r5-recovery-selected-revision3-entry'")
     expect(drain).toContain("status = 'running'")
     expect(adoption).toContain(
