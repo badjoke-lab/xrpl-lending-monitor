@@ -54,9 +54,9 @@ describe('R5 first recovery batch evidence workflow', () => {
     for (const required of [
       "const recoveryRunId = 'r5-recovery-selected-revision3-entry'",
       "'r5-batch-v1-r5-recovery-selected-revision3-entry-00000001'",
-      'if (existingBatch.found !== false && existingBatch.status === \'completed\')',
+      "if (existingBatch.found !== false && existingBatch.status === 'completed')",
       'executedNow: before.completedBatches === 0',
-      "'xrpl-r5-recovery-batch-trigger'",
+      'functions/v1/xrpl-r5-recovery-batch-trigger',
       "'batch_lease_active'",
       'maximumAttempts = 3',
       'retryDelayMilliseconds = 60_000',
@@ -78,7 +78,7 @@ describe('R5 first recovery batch evidence workflow', () => {
       'onePendingScanAfterCommit',
       'noLeasedOrRetryMessagesAfterCommit',
       'noInflightWorkAfterCommit',
-      'lagZero: after.status === \'caught_up\'',
+      "lagZero: after.status === 'caught_up'",
       'stabilizationAuthorized: false',
       'soakAuthorized: false',
     ]) {
