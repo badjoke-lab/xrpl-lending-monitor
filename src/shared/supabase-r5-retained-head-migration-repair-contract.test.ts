@@ -16,9 +16,12 @@ const canonical = read(canonicalPath)
 
 describe('R5 retained-head claim migration repair', () => {
   it('runs immediately before the canonical retained-head migration', () => {
-    expect(repairPath).toBeLessThan(canonicalPath)
-    expect(repairPath).toContain('20260803123150')
-    expect(canonicalPath).toContain('20260803123200')
+    const repairTimestamp = Number(repairPath.match(/migrations\/(\d{14})_/u)?.[1])
+    const canonicalTimestamp = Number(canonicalPath.match(/migrations\/(\d{14})_/u)?.[1])
+    expect(Number.isSafeInteger(repairTimestamp)).toBe(true)
+    expect(Number.isSafeInteger(canonicalTimestamp)).toBe(true)
+    expect(repairTimestamp).toBeLessThan(canonicalTimestamp)
+    expect(canonicalTimestamp - repairTimestamp).toBe(50)
   })
 
   it('drops only the orphanable exact function signature', () => {
