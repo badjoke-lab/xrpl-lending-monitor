@@ -40,13 +40,25 @@ describe('R5 adoption qualified boundary drain contract', () => {
     for (const required of [
       "(v_boundary->>''drainedStepCount'')::integer < 0",
       "(v_boundary->>''drainedStepCount'')::integer > 256",
-      "onlyExistingCommitOrFinalizeDrained",
-      "position('(v_boundary ->> ''drainedStepCount''::text)::integer < 0' in v_definition) = 0",
-      "position('(v_boundary ->> ''drainedStepCount''::text)::integer > 256' in v_definition) = 0",
+      'onlyExistingCommitOrFinalizeDrained',
+      "v_definition ~ E'drainedStepCount[^\\\\n]*<>[[:space:]]*0'",
+      "v_definition !~ E'drainedStepCount[^\\\\n]*<[[:space:]]*0'",
+      "v_definition !~ E'drainedStepCount[^\\\\n]*>[[:space:]]*256'",
       'r5_adoption_qualified_drain_replacement_invalid',
     ]) {
       expect(migration).toContain(required)
     }
+  })
+
+  it('verifies the rewritten function semantically rather than by pretty-print spacing', () => {
+    expect(migration).not.toContain(
+      "position('(v_boundary ->> ''drainedStepCount''::text)::integer < 0'",
+    )
+    expect(migration).not.toContain(
+      "position('(v_boundary ->> ''drainedStepCount''::text)::integer > 256'",
+    )
+    expect(migration).toContain("[^\\\\n]*<[[:space:]]*0")
+    expect(migration).toContain("[^\\\\n]*>[[:space:]]*256")
   })
 
   it('retains the canonical no-scan quiescent boundary checks', () => {
