@@ -33,12 +33,12 @@ describe('R5 observable one-shot push marker contract', () => {
     }
   })
 
-  it('pins the observable retry marker bytes and digest exactly', () => {
+  it('pins the observable preflight marker bytes and digest exactly', () => {
     expect(marker).toBe(
-      'R5_ONE_SHOT_PUSH_MARKER_V3\nbatch_limit=8\nwall_seconds=900\nnonce=push-20260804-8x900-retry-3a6f1d2c\n',
+      'R5_ONE_SHOT_PUSH_MARKER_V4\nbatch_limit=8\nwall_seconds=900\nnonce=push-20260804-8x900-preflight-a84e62c1\n',
     )
     expect(markerDigest).toBe(
-      '74a73c795d49de8650b592789e66faac1596950e2103f3ac355a90af28fe0414',
+      'bc15dcc0f8dc4fac8984d739533a3f8897befc93b617aace17d2b5a9c282502a',
     )
     expect(workflow).toContain(markerDigest)
   })
