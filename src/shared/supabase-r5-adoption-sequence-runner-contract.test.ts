@@ -30,12 +30,15 @@ describe('R5 adoption-aware source correction runner', () => {
 
   it('requires every executor-budget correction exactly once', () => {
     for (const required of [
+      'function occurrenceCountOf(text, fragment)',
+      "throw new Error('R5 replacement fragment must not be empty')",
       'function replaceExactlyOnce(name, oldText, newText)',
-      'generated.split(oldText).length - 1',
+      'occurrenceCountOf(generated, oldText)',
       'count !== 1',
       'generated.includes(newText)',
-      'next.includes(oldText)',
-      '!next.includes(newText)',
+      'expectedRetainedOldCount = occurrenceCountOf(newText, oldText)',
+      'occurrenceCountOf(next, newText) !== 1',
+      'occurrenceCountOf(next, oldText) !== expectedRetainedOldCount',
       "'R5 executor-only cycle boundary'",
       "'R5 executor batch counter declaration'",
       "'R5 executor batch counter assignment'",
@@ -52,6 +55,20 @@ describe('R5 adoption-aware source correction runner', () => {
     ]) {
       expect(runner).toContain(required)
     }
+  })
+
+  it('accepts an exact replacement that intentionally retains its matched prefix', () => {
+    const oldGuard = `      || adoptedBatchCount < 1
+      || ![0, 1].includes(executorBatchCount)`
+    const newGuard = `${oldGuard}
+      || executorBatchCount > remainingLimit`
+
+    expect(newGuard).toContain(oldGuard)
+    expect(runner).toContain(oldGuard)
+    expect(runner).toContain(newGuard)
+    expect(runner).toContain(
+      'expectedRetainedOldCount = occurrenceCountOf(newText, oldText)',
+    )
   })
 
   it('charges the finite run limit only to newly executed recovery batches', () => {
