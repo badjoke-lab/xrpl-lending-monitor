@@ -64,13 +64,13 @@ jobs:
       SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
       R5_RECOVERY_BURST_BATCH_LIMIT: >-
         ${{
-          github.event_name == 'push' && '8'
+          github.event_name == 'push' && '64'
           || github.event_name == 'issue_comment' && '8'
           || inputs.batch_limit
         }}
       R5_RECOVERY_BURST_WALL_SECONDS: >-
         ${{
-          github.event_name == 'push' && '900'
+          github.event_name == 'push' && '1800'
           || github.event_name == 'issue_comment' && '900'
           || inputs.wall_seconds
         }}
@@ -101,14 +101,14 @@ jobs:
             marker='ops/r5/run-once-20260804-8x900-observable-v2.marker'
             test -f "$marker"
             marker_sha="$(sha256sum "$marker" | cut -d' ' -f1)"
-            test "$marker_sha" = bc15dcc0f8dc4fac8984d739533a3f8897befc93b617aace17d2b5a9c282502a
+            test "$marker_sha" = d5c1f9a2c75e43438308d3972f22a7665e075857906310e4d892554b7dc353f0
             author_login="$(
               gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}" \
                 --jq '.author.login'
             )"
             test "$author_login" = badjoke-lab
-            test "$R5_RECOVERY_BURST_BATCH_LIMIT" -eq 8
-            test "$R5_RECOVERY_BURST_WALL_SECONDS" -eq 900
+            test "$R5_RECOVERY_BURST_BATCH_LIMIT" -eq 64
+            test "$R5_RECOVERY_BURST_WALL_SECONDS" -eq 1800
           fi
 
       - name: Publish bounded R5 burst start locator
