@@ -11,73 +11,102 @@ function read(path: string): string {
 const workflow = read('.github/workflows/r5-bounded-recovery-burst.yml')
 const ci = read('.github/workflows/ci.yml')
 const adapter = read('scripts/check-actions-workflow-allowlist-r5-one-shot.sh')
+const diagnostic = read('scripts/diagnose-supabase-r5-pending-scan.mjs')
 const publisher = read(
   'scripts/publish-supabase-r5-recovery-burst-run-locator.mjs',
 )
 const marker = read('ops/r5/run-once-20260804-8x900-observable-v2.marker')
 const markerDigest = createHash('sha256').update(marker).digest('hex')
 
-describe('R5 observable one-shot push marker contract', () => {
-  it('binds one exact main push path to the existing finite workflow', () => {
+describe('R5 pending scan read-only diagnostic contract', () => {
+  it('binds one exact main push path to the diagnostic job only', () => {
     for (const required of [
       '  push:',
       '    branches: [main]',
       '      - ops/r5/run-once-20260804-8x900-observable-v2.marker',
-      "github.event_name == 'push'",
-      "github.ref == 'refs/heads/main'",
+      'diagnose-pending-scan:',
+      "github.event_name == 'push' && github.ref == 'refs/heads/main'",
+      'Verify exact read-only diagnostic marker',
       'test "$GITHUB_REF" = refs/heads/main',
       'gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}"',
       "--jq '.author.login'",
       'test "$author_login" = badjoke-lab',
-      "github.event_name == 'push' && '64'",
-      "github.event_name == 'push' && '1800'",
-      'test "$R5_RECOVERY_BURST_BATCH_LIMIT" -eq 64',
-      'test "$R5_RECOVERY_BURST_WALL_SECONDS" -eq 1800',
+      'node scripts/diagnose-supabase-r5-pending-scan.mjs',
     ]) {
       expect(workflow).toContain(required)
     }
+
+    const executeCondition = workflow.slice(
+      workflow.indexOf('  execute-bounded-burst:'),
+      workflow.indexOf('    runs-on: ubuntu-latest', workflow.indexOf('  execute-bounded-burst:')),
+    )
+    expect(executeCondition).not.toContain("github.event_name == 'push'")
   })
 
-  it('pins the finite scale marker bytes and digest exactly', () => {
+  it('pins the diagnostic marker bytes and digest exactly', () => {
     expect(marker).toBe(
-      'R5_ONE_SHOT_PUSH_MARKER_V5\nbatch_limit=64\nwall_seconds=1800\nnonce=push-20260804-64x1800-scale-51d9c7b2\n',
+      'R5_PENDING_SCAN_DIAGNOSTIC_V6\nmode=read_only\nrun_id=r5-recovery-selected-revision3-entry\nbatch_id=r5-batch-v1-r5-recovery-selected-revision3-entry-00000087\nnonce=diagnostic-20260804-9e4c7a31\n',
     )
     expect(markerDigest).toBe(
-      'd5c1f9a2c75e43438308d3972f22a7665e075857906310e4d892554b7dc353f0',
+      '16654aae5dfe31c0d3c2cb44d279f6af92b1076a90c2388803c05a118f4c4c27',
     )
     expect(workflow).toContain(markerDigest)
   })
 
-  it('publishes a sanitized start locator before token rotation and mutation', () => {
-    const startIndex = workflow.indexOf(
-      '- name: Publish bounded R5 burst start locator',
-    )
-    const tokenIndex = workflow.indexOf(
-      '- name: Rotate one-run R5 recovery verifier token',
-    )
-    const executeIndex = workflow.indexOf(
-      '- name: Execute and verify one finite R5 recovery burst',
-    )
-
-    expect(startIndex).toBeGreaterThan(-1)
-    expect(tokenIndex).toBeGreaterThan(startIndex)
-    expect(executeIndex).toBeGreaterThan(tokenIndex)
-
+  it('uses only a read-only Management API query and sanitized evidence', () => {
     for (const required of [
-      'gh issue comment 1175',
-      'R5 bounded active recovery burst start',
-      'mutation started: `false`',
-      'public reader unchanged: `true`',
-      'Mainnet disabled: `true`',
-      'stabilization authorized: `false`',
-      'soak authorized: `false`',
+      'read_only: true',
+      "purpose: 'r5-pending-scan-read-only-diagnostic'",
+      'public.xrpl_read_r5_active_recovery($1::text)',
+      'public.xrpl_read_r5_active_recovery_batch($1::text, $2::text)',
+      "where profile_id = 'supabase-devnet'",
+      "status = 'pending'",
+      "payload->>'expectedPreviousLedgerIndex'",
+      "payload->>'expectedPreviousLedgerHash'",
+      "payload->>'epochId'",
+      "payload->>'baseIdentity'",
+      'pg_get_functiondef(signature)',
+      'v_pending_scan.attempt_count <> 0',
+      "const evidenceDirectory = 'supabase-r5-pending-scan-diagnostic'",
+      'const evidencePath = `${evidenceDirectory}/diagnostic.json`',
+      'const markdownPath = `${evidenceDirectory}/diagnostic.md`',
     ]) {
-      expect(workflow).toContain(required)
+      expect(diagnostic).toContain(required)
     }
-    expect(workflow.match(/gh issue comment 1175/g)).toHaveLength(2)
+
+    for (const forbidden of [
+      'insert into',
+      'update public.',
+      'delete from',
+      'supabase secrets set',
+      'functions/v1/xrpl-r5-recovery-batch-trigger',
+      'SUPABASE_SERVICE_ROLE_KEY',
+    ]) {
+      expect(diagnostic.toLowerCase()).not.toContain(forbidden.toLowerCase())
+    }
   })
 
-  it('retains the original owner-only 8 by 900 issue command', () => {
+  it('reports every pending-scan completion predicate separately', () => {
+    for (const required of [
+      'physicalAndRecoveryWatermarkMatch',
+      'exactlyOnePendingMessage',
+      'noLeasedOrRetryMessages',
+      'noInflightWork',
+      'pendingPhaseIsScan',
+      'pendingIndexMatchesWatermark',
+      'pendingHashMatchesWatermark',
+      'pendingEpochMatches',
+      'pendingBaseIdentityMatches',
+      'streamIdentityMatches',
+      'completionAttemptCountGuardRemoved',
+      'completionPendingScanGuardPresent',
+      'mismatched completion checks:',
+    ]) {
+      expect(diagnostic).toContain(required)
+    }
+  })
+
+  it('retains the original owner-only 8 by 900 mutation command', () => {
     for (const required of [
       "github.event_name == 'issue_comment'",
       'github.event.issue.number == 1175',
@@ -94,7 +123,7 @@ describe('R5 observable one-shot push marker contract', () => {
     }
   })
 
-  it('adapts the workflow policy only through exact one-occurrence replacements', () => {
+  it('adapts the canonical workflow policy only by exact replacements', () => {
     for (const required of [
       "source_script='scripts/check-actions-workflow-allowlist.sh'",
       'def replace_once(name: str, old: str, new: str) -> None:',
@@ -103,9 +132,9 @@ describe('R5 observable one-shot push marker contract', () => {
       'old in updated',
       'new not in updated',
       'r5_burst: ["workflow_dispatch", "issue_comment", "push"]',
-      'R5 observable one-shot required marker contract',
-      'R5 observable one-shot push exception',
-      'R5 observable start and final locator count',
+      'R5 read-only diagnostic marker contract',
+      'R5 read-only diagnostic push exception',
+      'R5 diagnostic and burst locator count',
       'burst.count("gh issue comment 1175") != 2',
       'bash "$generated_script" "$@"',
     ]) {
@@ -113,7 +142,7 @@ describe('R5 observable one-shot push marker contract', () => {
     }
   })
 
-  it('publishes executor and materialized-row accounting separately', () => {
+  it('retains explicit executor/adoption accounting for later burst runs', () => {
     for (const required of [
       'requested executor batch limit:',
       'executed recovery batches:',

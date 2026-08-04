@@ -28,33 +28,32 @@ def replace_once(name: str, old: str, new: str) -> None:
 
 
 replace_once(
-    "R5 observable one-shot trigger policy",
+    "R5 read-only diagnostic trigger policy",
     '    r5_burst: ["workflow_dispatch", "issue_comment"],',
     '    r5_burst: ["workflow_dispatch", "issue_comment", "push"],',
 )
 
 replace_once(
-    "R5 observable one-shot required marker contract",
+    "R5 read-only diagnostic marker contract",
     '''    "github.event.comment.body == '/r5-recovery burst 8 900 nonce-e3378018'",
     "R5_RECOVERY_BURST_BATCH_LIMIT",''',
     '''    "github.event.comment.body == '/r5-recovery burst 8 900 nonce-e3378018'",
     "github.event_name == 'push'",
     "github.ref == 'refs/heads/main'",
+    "diagnose-pending-scan",
     "ops/r5/run-once-20260804-8x900-observable-v2.marker",
-    "d5c1f9a2c75e43438308d3972f22a7665e075857906310e4d892554b7dc353f0",
+    "16654aae5dfe31c0d3c2cb44d279f6af92b1076a90c2388803c05a118f4c4c27",
     "author_login=",
     "gh api",
     "--jq '.author.login'",
     'test "$author_login" = badjoke-lab',
-    'test "$R5_RECOVERY_BURST_BATCH_LIMIT" -eq 64',
-    'test "$R5_RECOVERY_BURST_WALL_SECONDS" -eq 1800',
-    "Publish bounded R5 burst start locator",
-    "mutation started: `false`",
+    "node scripts/diagnose-supabase-r5-pending-scan.mjs",
+    "supabase-r5-pending-scan-diagnostic",
     "R5_RECOVERY_BURST_BATCH_LIMIT",''',
 )
 
 replace_once(
-    "R5 observable one-shot push exception",
+    "R5 read-only diagnostic push exception",
     '''for forbidden in (
     "  schedule:",
     "  push:",
@@ -85,11 +84,11 @@ replace_once(
 )
 
 replace_once(
-    "R5 observable start and final locator count",
+    "R5 diagnostic and burst locator count",
     '''if burst.count("issues: write") != 1 or burst.count("gh issue comment 1175") != 1:
     raise SystemExit("R5 bounded burst issue-write capability must remain bound to one permission and Issue #1175")''',
     '''if burst.count("issues: write") != 1 or burst.count("gh issue comment 1175") != 2:
-    raise SystemExit("R5 bounded burst issue-write capability must remain bound to one permission and exactly two Issue #1175 locators")''',
+    raise SystemExit("R5 workflow issue-write capability must remain bound to one permission, one bounded-burst locator, and one read-only diagnostic locator")''',
 )
 
 generated_path.write_text(text)

@@ -52,10 +52,6 @@ jobs:
           && github.actor == 'badjoke-lab'
           && github.event.comment.body == '/r5-recovery burst 8 900 nonce-e3378018'
         )
-        || (
-          github.event_name == 'push'
-          && github.ref == 'refs/heads/main'
-        )
       }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
@@ -63,25 +59,15 @@ jobs:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
       R5_RECOVERY_BURST_BATCH_LIMIT: >-
-        ${{
-          github.event_name == 'push' && '64'
-          || github.event_name == 'issue_comment' && '8'
-          || inputs.batch_limit
-        }}
+        ${{ github.event_name == 'issue_comment' && '8' || inputs.batch_limit }}
       R5_RECOVERY_BURST_WALL_SECONDS: >-
-        ${{
-          github.event_name == 'push' && '1800'
-          || github.event_name == 'issue_comment' && '900'
-          || inputs.wall_seconds
-        }}
+        ${{ github.event_name == 'issue_comment' && '900' || inputs.wall_seconds }}
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
       - name: Verify exact bounded request and secret bindings
-        env:
-          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
@@ -96,46 +82,7 @@ jobs:
           if [ "$GITHUB_EVENT_NAME" = issue_comment ]; then
             test "$R5_RECOVERY_BURST_BATCH_LIMIT" -eq 8
             test "$R5_RECOVERY_BURST_WALL_SECONDS" -eq 900
-          elif [ "$GITHUB_EVENT_NAME" = push ]; then
-            test "$GITHUB_REF" = refs/heads/main
-            marker='ops/r5/run-once-20260804-8x900-observable-v2.marker'
-            test -f "$marker"
-            marker_sha="$(sha256sum "$marker" | cut -d' ' -f1)"
-            test "$marker_sha" = d5c1f9a2c75e43438308d3972f22a7665e075857906310e4d892554b7dc353f0
-            author_login="$(
-              gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}" \
-                --jq '.author.login'
-            )"
-            test "$author_login" = badjoke-lab
-            test "$R5_RECOVERY_BURST_BATCH_LIMIT" -eq 64
-            test "$R5_RECOVERY_BURST_WALL_SECONDS" -eq 1800
           fi
-
-      - name: Publish bounded R5 burst start locator
-        if: ${{ github.event_name == 'push' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          {
-            echo '## R5 bounded active recovery burst start'
-            echo
-            printf -- '- run: `%s`\n' "$GITHUB_RUN_ID"
-            printf -- '- commit: `%s`\n' "$GITHUB_SHA"
-            printf -- '- actor: `%s`\n' "$GITHUB_ACTOR"
-            printf -- '- trigger: `%s`\n' "$GITHUB_EVENT_NAME"
-            printf -- '- marker: `%s`\n' 'ops/r5/run-once-20260804-8x900-observable-v2.marker'
-            printf -- '- requested executor batches: `%s`\n' "$R5_RECOVERY_BURST_BATCH_LIMIT"
-            printf -- '- wall-clock bound seconds: `%s`\n' "$R5_RECOVERY_BURST_WALL_SECONDS"
-            echo '- mutation started: `false`'
-            echo '- public reader unchanged: `true`'
-            echo '- Mainnet disabled: `true`'
-            echo '- stabilization authorized: `false`'
-            echo '- soak authorized: `false`'
-          } > /tmp/r5-burst-start.md
-          gh issue comment 1175 --repo "$GITHUB_REPOSITORY" \
-            --body-file /tmp/r5-burst-start.md
 
       - name: Set up Supabase CLI
         uses: supabase/setup-cli@3c2f5e2ae34c34e428e8e206e2c4d21fa2d20fbf
@@ -180,3 +127,57 @@ jobs:
           test -s /tmp/r5-burst-comment.md
           gh issue comment 1175 --repo "$GITHUB_REPOSITORY" \
             --body-file /tmp/r5-burst-comment.md
+
+  diagnose-pending-scan:
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Verify exact read-only diagnostic marker
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SUPABASE_ACCESS_TOKEN"
+          [[ "$SUPABASE_PROJECT_ID" =~ ^[a-z]{20}$ ]]
+          test "$GITHUB_REF" = refs/heads/main
+          marker='ops/r5/run-once-20260804-8x900-observable-v2.marker'
+          test -f "$marker"
+          marker_sha="$(sha256sum "$marker" | cut -d' ' -f1)"
+          test "$marker_sha" = 16654aae5dfe31c0d3c2cb44d279f6af92b1076a90c2388803c05a118f4c4c27
+          author_login="$(
+            gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}" \
+              --jq '.author.login'
+          )"
+          test "$author_login" = badjoke-lab
+
+      - name: Read and verify the R5 pending scan boundary
+        run: node scripts/diagnose-supabase-r5-pending-scan.mjs
+
+      - name: Upload sanitized pending scan diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: supabase-r5-pending-scan-diagnostic
+          path: supabase-r5-pending-scan-diagnostic
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish sanitized pending scan diagnostic
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s supabase-r5-pending-scan-diagnostic/diagnostic.md
+          gh issue comment 1175 --repo "$GITHUB_REPOSITORY" \
+            --body-file supabase-r5-pending-scan-diagnostic/diagnostic.md

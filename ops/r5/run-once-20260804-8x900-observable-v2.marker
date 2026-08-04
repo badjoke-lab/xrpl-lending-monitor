@@ -1,4 +1,5 @@
-R5_ONE_SHOT_PUSH_MARKER_V5
-batch_limit=64
-wall_seconds=1800
-nonce=push-20260804-64x1800-scale-51d9c7b2
+R5_PENDING_SCAN_DIAGNOSTIC_V6
+mode=read_only
+run_id=r5-recovery-selected-revision3-entry
+batch_id=r5-batch-v1-r5-recovery-selected-revision3-entry-00000087
+nonce=diagnostic-20260804-9e4c7a31
