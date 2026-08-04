@@ -37,7 +37,8 @@ describe('R5 halted descendant boundary repair contract', () => {
       'failure_reservation_retained is true',
       "status = 'completed'",
       "origin = 'adopted_active_descendant'",
-      'finalized_egress_upper_bound_bytes = reserved_egress_upper_bound_bytes',
+      'finalized_egress_upper_bound_bytes',
+      '= reserved_egress_upper_bound_bytes',
       'finalized_egress_upper_bound_bytes = 134217728',
     ]) {
       expect(preparation).toContain(required)
