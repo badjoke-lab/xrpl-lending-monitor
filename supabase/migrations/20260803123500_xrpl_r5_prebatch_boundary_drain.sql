@@ -15,6 +15,7 @@ as $$
 declare
   v_drain jsonb;
   v_rebind jsonb;
+  v_drained_step_count integer;
 begin
   if p_run_id !~ '^r5-recovery-[a-z0-9][a-z0-9-]{7,79}$'
     or p_now is null then
@@ -28,12 +29,11 @@ begin
     p_now
   );
 
+  v_drained_step_count := (v_drain->>'drainedStepCount')::integer;
   if coalesce((v_drain->>'drained')::boolean, false) is not true
-    or coalesce((v_drain->>'noScanExecuted')::boolean, false) is true then
-    null;
-  end if;
-
-  if coalesce((v_drain->'checks'->>'collectorQuiescent')::boolean, false) is not true
+    or v_drained_step_count < 0
+    or v_drained_step_count > 256
+    or coalesce((v_drain->'checks'->>'collectorQuiescent')::boolean, false) is not true
     or coalesce((v_drain->'checks'->>'activeStreamHealthy')::boolean, false) is not true
     or coalesce((v_drain->'checks'->>'onlyExistingCommitOrFinalizeDrained')::boolean, false) is not true
     or coalesce((v_drain->'checks'->>'noScanExecuted')::boolean, false) is not true
@@ -46,7 +46,7 @@ begin
 
   v_rebind := public.xrpl_rebind_r5_prebatch_recovery_to_active_boundary_strict(
     p_run_id,
-    p_now + interval '5 minutes'
+    p_now + make_interval(secs => v_drained_step_count + 1)
   );
 
   return v_rebind || jsonb_build_object(
