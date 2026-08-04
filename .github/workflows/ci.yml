@@ -18,7 +18,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Enforce minimal Actions workflow surface
-        run: bash scripts/check-actions-workflow-allowlist.sh
+        run: bash scripts/check-actions-workflow-allowlist-r5-one-shot.sh
 
       - name: Upload Actions workflow policy evidence
         if: always()
@@ -54,6 +54,7 @@ jobs:
           bash -n scripts/run-live-checkpoint-cutover.sh
           bash -n scripts/verify-live-checkpoint-cutover.sh
           bash -n scripts/check-canonical-production-base.sh
+          bash -n scripts/check-actions-workflow-allowlist-r5-one-shot.sh
 
       - name: Validate canonical production base identity
         env:
