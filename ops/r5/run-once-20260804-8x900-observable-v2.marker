@@ -1,5 +1,5 @@
-R5_PENDING_SCAN_DIAGNOSTIC_V6
+R5_BURST_PARITY_DIAGNOSTIC_V7
 mode=read_only
 run_id=r5-recovery-selected-revision3-entry
-batch_id=r5-batch-v1-r5-recovery-selected-revision3-entry-00000087
-nonce=diagnostic-20260804-9e4c7a31
+failed_burst_run_id=30925522885
+nonce=diagnostic-20260805-0d7b5e91
