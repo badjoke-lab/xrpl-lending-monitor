@@ -33,9 +33,9 @@ begin
   execute v_updated;
 
   v_definition := pg_get_functiondef(v_function);
-  if position('(v_boundary ->> ''drainedStepCount''::text)::integer <> 0' in v_definition) <> 0
-    or position('(v_boundary ->> ''drainedStepCount''::text)::integer < 0' in v_definition) = 0
-    or position('(v_boundary ->> ''drainedStepCount''::text)::integer > 256' in v_definition) = 0
+  if v_definition ~ E'drainedStepCount[^\\n]*<>[[:space:]]*0'
+    or v_definition !~ E'drainedStepCount[^\\n]*<[[:space:]]*0'
+    or v_definition !~ E'drainedStepCount[^\\n]*>[[:space:]]*256'
     or position('onlyExistingCommitOrFinalizeDrained' in v_definition) = 0
     or position('noScanExecuted' in v_definition) = 0
     or position('pendingScanBoundToWatermark' in v_definition) = 0
