@@ -41,7 +41,7 @@ replace_once(
     "github.event_name == 'push'",
     "github.ref == 'refs/heads/main'",
     "ops/r5/run-once-20260804-8x900-observable-v2.marker",
-    "c608d66b43676193fd0c4410d97e6dacb0741ec2e4589c8e67412c5238cb4b37",
+    "74a73c795d49de8650b592789e66faac1596950e2103f3ac355a90af28fe0414",
     "author_login=",
     "gh api",
     "--jq '.author.login'",

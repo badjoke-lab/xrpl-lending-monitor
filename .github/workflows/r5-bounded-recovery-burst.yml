@@ -101,7 +101,7 @@ jobs:
             marker='ops/r5/run-once-20260804-8x900-observable-v2.marker'
             test -f "$marker"
             marker_sha="$(sha256sum "$marker" | cut -d' ' -f1)"
-            test "$marker_sha" = c608d66b43676193fd0c4410d97e6dacb0741ec2e4589c8e67412c5238cb4b37
+            test "$marker_sha" = 74a73c795d49de8650b592789e66faac1596950e2103f3ac355a90af28fe0414
             author_login="$(
               gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}" \
                 --jq '.author.login'
