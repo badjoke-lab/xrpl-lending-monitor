@@ -29,7 +29,7 @@ describe('R5 adoption-aware bounded recovery burst contract', () => {
   it('verifies every trigger from before state through final state', () => {
     for (const required of [
       'const before = await readRecovery()',
-      'const beforeAdoptions = await readAdoptions()',
+      'let currentAdoptions = await readAdoptions()',
       'lastTrigger = await invokeTrigger()',
       'const after = await readRecovery()',
       'const afterAdoptions = await readAdoptions()',
