@@ -26,6 +26,7 @@ on:
       - 'scripts/verify-supabase-r5-recovery-prepare.mjs'
       - 'scripts/verify-supabase-r5-recovery-ready.mjs'
       - 'scripts/verify-supabase-r5-first-recovery-batch.mjs'
+      - 'scripts/detect-supabase-r5-recovery-ownership.mjs'
       - 'scripts/record-supabase-external-resource-snapshot.mjs'
       - 'scripts/record-supabase-provider-metric-capability.mjs'
       - 'scripts/reconcile-supabase-g8-resource-disposition.mjs'
@@ -197,7 +198,11 @@ jobs:
       - name: Deploy one-run R5 active recovery trigger bundle
         run: supabase functions deploy xrpl-r5-recovery-batch-trigger --project-ref "$SUPABASE_PROJECT_ID" --use-api --no-verify-jwt
 
+      - name: Detect R5 active recovery ownership
+        id: r5_recovery_ownership
+        run: node scripts/detect-supabase-r5-recovery-ownership.mjs
       - name: Verify repeated remote portable phase execution
+        if: steps.r5_recovery_ownership.outputs.active_recovery_owned != 'true'
         run: node scripts/verify-supabase-remote-probe.mjs
       - name: Verify remote immutable committed reader
         run: node scripts/verify-supabase-committed-reader.mjs
