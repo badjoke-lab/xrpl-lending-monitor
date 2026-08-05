@@ -166,6 +166,166 @@ replaceExactlyOnce(
 )
 
 replaceExactlyOnce(
+  'R5 final boundary trigger helper',
+  `  return object(body, 'R5 trigger response')
+}
+
+async function verifyCycle(before, beforeAdoptions, after, afterAdoptions, remainingLimit) {`,
+  `  return object(body, 'R5 trigger response')
+}
+
+async function invokeFinalizationTrigger() {
+  const sourceRunId = Number(process.env.GITHUB_RUN_ID ?? '')
+  if (!Number.isSafeInteger(sourceRunId) || sourceRunId < 1) {
+    throw new Error('GITHUB_RUN_ID must be a positive integer for R5 finalization')
+  }
+
+  let response
+  try {
+    response = await fetch(triggerEndpoint, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-xrpl-r5-purpose': purpose,
+        'x-xrpl-r5-token': verifierToken,
+      },
+      body: JSON.stringify({
+        source: 'github_actions',
+        run_id: recoveryRunId,
+        mode: 'finalize_boundary',
+        source_run_id: sourceRunId,
+      }),
+      signal: AbortSignal.timeout(90_000),
+    })
+  } catch (error) {
+    throw new TriggerError(
+      \`R5 finalization trigger transport failed: \${error instanceof Error ? error.message : String(error)}\`,
+      { transient: false },
+    )
+  }
+
+  const text = await response.text()
+  const body = parseJson(text)
+  const trigger = body && typeof body === 'object' ? body.trigger : null
+  if (
+    !trigger
+    || typeof trigger !== 'object'
+    || body.operationMode !== 'finalize_boundary'
+    || trigger.combinedProxyBytesWithinFixedReserve !== true
+    || trigger.twoInvocationReservationUsed !== true
+    || trigger.serviceKeyNotReturned !== true
+    || trigger.noLedgerScanInFinalizationMode !== true
+    || requiredInteger(trigger.fixedFunctionResponseReserveBytes, 'finalization fixed response reserve')
+      !== 131072
+    || requiredInteger(trigger.combinedProxyBytes, 'finalization combined proxy bytes') >= 131072
+  ) {
+    throw new TriggerError('R5 finalization trigger proxy boundary changed', {
+      response: body,
+    })
+  }
+  if (!response.ok) {
+    throw new TriggerError(
+      \`R5 finalization trigger failed (\${response.status}): \${JSON.stringify(body).slice(0, 2_000)}\`,
+      { transient: false, response: body },
+    )
+  }
+
+  const finalization = object(body.finalization, 'R5 finalization response')
+  if (
+    finalization.finalized !== true
+    || finalization.runId !== recoveryRunId
+    || requiredInteger(finalization.sourceRunId, 'finalization.sourceRunId') !== sourceRunId
+    || requiredInteger(
+      finalization.currentWatermarkLedgerIndex,
+      'finalization.currentWatermarkLedgerIndex',
+    ) < 1
+    || !/^[A-F0-9]{64}$/.test(
+      requiredString(
+        finalization.currentWatermarkLedgerHash,
+        'finalization.currentWatermarkLedgerHash',
+      ),
+    )
+    || requiredString(
+      finalization.currentWatermarkWorkId,
+      'finalization.currentWatermarkWorkId',
+    ).length < 1
+    || requiredInteger(finalization.drainedStepCount, 'finalization.drainedStepCount') > 256
+    || finalization.noScanExecuted !== true
+    || finalization.publicReaderUnchanged !== true
+    || finalization.mainnetDisabled !== true
+    || finalization.stabilizationAuthorized !== false
+    || finalization.soakAuthorized !== false
+  ) {
+    throw new Error('R5 finalization response parity failed')
+  }
+  return finalization
+}
+
+async function verifyCycle(before, beforeAdoptions, after, afterAdoptions, remainingLimit) {`,
+)
+
+replaceExactlyOnce(
+  'R5 final boundary execution',
+  `  if (stopReason === null) stopReason = 'batch_limit'
+
+  const after = await readRecovery()`,
+  `  if (stopReason === null) stopReason = 'batch_limit'
+
+  let finalization = null
+  if (current.status === 'running') {
+    finalization = await invokeFinalizationTrigger()
+    const finalizedRecovery = await readRecovery()
+    const finalizedAdoptions = await readAdoptions()
+    const finalizationCycle = await verifyCycle(
+      current,
+      currentAdoptions,
+      finalizedRecovery,
+      finalizedAdoptions,
+      0,
+    )
+    if (finalizationCycle.executorBatchCount !== 0) {
+      throw new Error('R5 final boundary executed a recovery batch')
+    }
+    if (finalizationCycle.advancedBatches > 0) {
+      const finalizationBatches = finalizationCycle.batches.map((batch) => ({
+        ...batch,
+        verifierAttempt: null,
+        transientRetries: 0,
+      }))
+      batches.push(...finalizationBatches)
+      adoptions.push(...finalizationCycle.adoptions)
+      cycles.push({
+        kind: 'final_boundary',
+        verifierAttempt: null,
+        transientRetries: 0,
+        advancedBatches: finalizationCycle.advancedBatches,
+        advancedLedgers: finalizationCycle.advancedLedgers,
+        executorBatchCount: 0,
+        batchSequences: finalizationBatches.map((batch) => batch.batchSequence),
+        adoptionSequences:
+          finalizationCycle.adoptions.map((adoption) => adoption.adoptionSequence),
+      })
+    }
+    if (
+      requiredInteger(
+        finalization.currentWatermarkLedgerIndex,
+        'finalization.currentWatermarkLedgerIndex',
+      ) !== finalizedRecovery.currentWatermark.ledgerIndex
+      || finalization.currentWatermarkLedgerHash
+        !== finalizedRecovery.currentWatermark.ledgerHash
+      || finalization.currentWatermarkWorkId
+        !== finalizedRecovery.currentWatermark.workId
+    ) {
+      throw new Error('R5 final boundary did not match recovery state')
+    }
+    current = finalizedRecovery
+    currentAdoptions = finalizedAdoptions
+  }
+
+  const after = await readRecovery()`,
+)
+
+replaceExactlyOnce(
   'R5 final executor budget guard',
   `    || batches.length > batchLimit
     || Date.now() > deadlineMilliseconds + 30_000`,
@@ -187,12 +347,25 @@ replaceExactlyOnce(
 )
 
 replaceExactlyOnce(
+  'R5 finalization evidence',
+  `    transientRetries,
+    before: {`,
+  `    transientRetries,
+    finalization,
+    before: {`,
+)
+
+replaceExactlyOnce(
   'R5 bounded executor evidence check',
   `      boundedBatchLimit: batchLimit <= 64 && batches.length <= batchLimit,`,
   `      boundedBatchLimit: batchLimit <= 64 && executedBatchCount <= batchLimit,
       adoptionRowsExcludedFromExecutorBudget:
         batches.length - executedBatchCount
-        === batches.filter((batch) => batch.origin === 'adopted_active_descendant').length,`,
+        === batches.filter((batch) => batch.origin === 'adopted_active_descendant').length,
+      finalBoundaryCompleted:
+        after.status === 'caught_up' || finalization?.finalized === true,
+      finalBoundaryExecutedNoScan:
+        after.status === 'caught_up' || finalization?.noScanExecuted === true,`,
 )
 
 await writeFile(generatedPath, generated, { encoding: 'utf8', mode: 0o600 })
