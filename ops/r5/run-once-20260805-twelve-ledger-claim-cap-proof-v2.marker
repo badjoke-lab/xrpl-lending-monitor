@@ -1,0 +1,8 @@
+R5_TWELVE_LEDGER_CLAIM_CAP_PROOF_V2
+mode=finite_devnet_recovery
+source_main_commit=cfa3b22686c0ab9bfab6a74d8987ea41b7f66607
+source_failed_run_id=31013623911
+source_verified_run_id=31012179441
+batch_limit=8
+wall_seconds=900
+nonce=twelve-ledger-claim-cap-proof-v2-20260805-2312-jst
