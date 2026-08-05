@@ -106,9 +106,9 @@ jobs:
             marker='ops/r5/run-once-20260805-twelve-ledger-claim-cap-proof.marker'
             test -f "$marker"
             marker_sha="$(sha256sum "$marker" | cut -d' ' -f1)"
-            test "$marker_sha" = 17e79165228f751c9cf5da3e33d6e64de7be0d316782a289771c40a1c1a97a07
+            test "$marker_sha" = 15d9b234d8583e3e1cef2913b3754e6c3c9b8770ba3590b5d25147bbff6d221d
             parent_sha="$(git rev-parse "${GITHUB_SHA}^")"
-            test "$parent_sha" = 328395146157988d438295a6777d235d34ea9726
+            test "$parent_sha" = 62f5183d7058711f97660a6e8b19bcb156ec8a6d
             marker_change="$(git diff-tree --no-commit-id --name-status -r "${GITHUB_SHA}^" "$GITHUB_SHA" -- "$marker")"
             test "$marker_change" = $'M\tops/r5/run-once-20260805-twelve-ledger-claim-cap-proof.marker'
             author_login="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}" --jq '.author.login')"
