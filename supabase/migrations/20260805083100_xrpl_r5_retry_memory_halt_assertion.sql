@@ -58,7 +58,40 @@ begin
       <> v_batch.projected_conservative_egress_31d_bytes
     or v_retry.projected_invocations_31d
       <> v_batch.projected_invocations_31d then
-    raise exception 'r5_memory_retry_post_migration_state_invalid';
+    raise exception 'r5_memory_retry_post_migration_state_invalid'
+      using detail = jsonb_build_object(
+        'runStatus', v_run.status,
+        'completedBatches', v_run.completed_batches,
+        'committedLedgers', v_run.committed_ledgers,
+        'runWatermarkLedgerIndex', v_run.current_watermark_ledger_index,
+        'runLastError', v_run.last_error,
+        'runCompleted', v_run.completed_at is not null,
+        'batchFound', v_batch.run_id is not null,
+        'batchStatus', v_batch.status,
+        'batchSequence', v_batch.batch_sequence,
+        'batchStartLedgerIndex', v_batch.start_ledger_index,
+        'batchEndLedgerIndex', v_batch.end_ledger_index,
+        'batchLedgerCount', v_batch.ledger_count,
+        'batchParentMatchesRun',
+          v_batch.expected_parent_hash = v_run.current_watermark_ledger_hash,
+        'batchError', v_batch.error_message,
+        'batchCompletedAtPresent', v_batch.completed_at is not null,
+        'batchLeaseOwnerPresent', v_batch.lease_owner is not null,
+        'batchLeaseExpiryPresent', v_batch.lease_expires_at is not null,
+        'batchReservedEgress', v_batch.reserved_egress_upper_bound_bytes,
+        'batchProjectedEgress31d',
+          v_batch.projected_conservative_egress_31d_bytes,
+        'batchProjectedInvocations31d', v_batch.projected_invocations_31d,
+        'retryFound', v_retry.run_id is not null,
+        'retrySourceRunId', v_retry.source_failed_burst_run_id,
+        'retrySourceCommit', v_retry.source_commit,
+        'retryReason', v_retry.reason,
+        'retryPriorLedgerCount', v_retry.prior_ledger_count,
+        'retryLedgerCount', v_retry.retry_ledger_count,
+        'retryProjectedEgress31d',
+          v_retry.projected_conservative_egress_31d_bytes,
+        'retryProjectedInvocations31d', v_retry.projected_invocations_31d
+      )::text;
   end if;
 end;
 $$;
