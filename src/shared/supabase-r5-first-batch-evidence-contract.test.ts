@@ -10,7 +10,9 @@ function read(path: string): string {
 const trigger = read(
   'supabase/functions/xrpl-r5-recovery-batch-trigger/index.ts',
 )
-const verifier = read('scripts/verify-supabase-r5-first-recovery-batch.mjs')
+const verifier = read(
+  'scripts/verify-supabase-r5-first-recovery-batch-strict.mjs',
+)
 const ready = read('scripts/verify-supabase-r5-recovery-ready.mjs')
 const publisher = read(
   'scripts/publish-supabase-r5-first-recovery-batch-run-locator.mjs',
