@@ -57,15 +57,25 @@ describe('R5 atomic running preclaim boundary', () => {
     )
   })
 
-  it('keeps prepared-state rebind and the twelve-ledger base claim intact', () => {
+  it('leaves the prepared branch outside the running-branch replacement and retains the twelve-ledger cap', () => {
     for (const required of [
-      "if v_run.status = 'prepared' then",
-      'public.xrpl_rebind_r5_prebatch_recovery_to_active_boundary(',
+      "v_old_branch constant text := E'  else\\n",
+      "v_new_branch constant text := E'  else\\n",
+      'replace(v_definition, v_old_declaration, v_new_declaration)',
+      'v_old_branch,',
+      'v_new_branch',
       'v_count := least(12::bigint, p_validated_head_ledger_index - v_watermark.ledger_index)::integer;',
       'twelve_ledger_claim_cap_retained',
     ]) {
       expect(migration).toContain(required)
     }
+
+    expect(migration).not.toContain(
+      "v_old_branch constant text := E'  if v_run.status = ''prepared'' then",
+    )
+    expect(migration).not.toContain(
+      "v_new_branch constant text := E'  if v_run.status = ''prepared'' then",
+    )
   })
 
   it('retains fixed safety and authorization boundaries', () => {
