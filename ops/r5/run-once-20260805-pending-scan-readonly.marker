@@ -1,8 +1,11 @@
-R5_HEALTH_CHANGE_DIAGNOSTIC_V1
+R5_EGRESS_HALT_BREAKDOWN_DIAGNOSTIC_V1
 mode=read_only
-source_main_commit=08ee22ddd1dd1685d59329174264c57e7a0fd8d0
+source_main_commit=45cbfa09399a7d6d5c5d348ab9f3c6d6ee24fc9b
 source_successful_burst_run_id=31030705329
 source_failed_burst_run_id=31030990054
+source_health_diagnostic_run_id=31032129918
 recovery_run_id=r5-recovery-selected-revision3-entry
-error=R5 recovery identity or health changed
-nonce=r5-health-change-readonly-20260806-0242-jst
+halt_error=r5_recovery_monthly_egress_halt
+egress_halt_bytes=4294967296
+reservation_bytes=134217728
+nonce=r5-egress-halt-breakdown-20260806-0300-jst
