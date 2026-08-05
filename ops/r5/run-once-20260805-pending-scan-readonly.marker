@@ -1,11 +1,13 @@
-R5_EGRESS_HALT_BREAKDOWN_DIAGNOSTIC_V1
+R5_EGRESS_HALT_BREAKDOWN_DIAGNOSTIC_V2
 mode=read_only
-source_main_commit=45cbfa09399a7d6d5c5d348ab9f3c6d6ee24fc9b
+source_main_commit=55911f23638fcbf24c157ed2a39235b42d3cef2b
 source_successful_burst_run_id=31030705329
 source_failed_burst_run_id=31030990054
 source_health_diagnostic_run_id=31032129918
+source_failed_egress_diagnostic_run_id=31033390052
 recovery_run_id=r5-recovery-selected-revision3-entry
 halt_error=r5_recovery_monthly_egress_halt
 egress_halt_bytes=4294967296
 reservation_bytes=134217728
-nonce=r5-egress-halt-breakdown-20260806-0300-jst
+attempt_formula=succeeded_finalized_else_reserved
+nonce=r5-egress-halt-breakdown-v2-20260806-0320-jst

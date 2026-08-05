@@ -26,12 +26,12 @@ def replace_once(name: str, old: str, new: str) -> None:
     text = updated
 
 replace_once(
-    "R5 egress halt diagnostic trigger policy",
+    "R5 egress halt V2 diagnostic trigger policy",
     '    r5_burst: ["workflow_dispatch", "issue_comment"],',
     '    r5_burst: ["workflow_dispatch", "issue_comment", "push"],',
 )
 replace_once(
-    "R5 egress halt diagnostic and owner burst contract",
+    "R5 egress halt V2 diagnostic and owner burst contract",
     '''    "github.event.comment.body == '/r5-recovery burst 8 900 nonce-e3378018'",
     "R5_RECOVERY_BURST_BATCH_LIMIT",''',
     '''    "github.event.comment.body == '/r5-recovery burst 8 900 nonce-e3378018'",
@@ -40,16 +40,16 @@ replace_once(
     "github.ref == 'refs/heads/main'",
     "diagnose-r5-egress-halt",
     "ops/r5/run-once-20260805-pending-scan-readonly.marker",
-    "91ad7af532a7cb66d214b30a3d9a3d2faa48e49b46a9d1b96c6808e2400c2c7f",
-    "45cbfa09399a7d6d5c5d348ab9f3c6d6ee24fc9b",
+    "6d2b17c6bd72b1edd2976f149d030dc52f9de59de495a7e8f59726fa61368c4f",
+    "55911f23638fcbf24c157ed2a39235b42d3cef2b",
     "fetch-depth: 2",
     "git diff-tree --no-commit-id --name-status",
-    "node scripts/diagnose-supabase-r5-egress-halt.mjs",
+    "node scripts/diagnose-supabase-r5-egress-halt-v2.mjs",
     "supabase-r5-egress-halt-diagnostic",
     "R5_RECOVERY_BURST_BATCH_LIMIT",''',
 )
 replace_once(
-    "R5 read-only egress diagnostic push exception",
+    "R5 read-only egress V2 diagnostic push exception",
     '''for forbidden in (
     "  schedule:",
     "  push:",
