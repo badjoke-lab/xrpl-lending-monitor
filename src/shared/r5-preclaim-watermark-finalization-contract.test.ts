@@ -7,104 +7,118 @@ function read(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
-const source = read('scripts/run-supabase-r5-recovery-burst-contention-aware.mjs')
+const wrapper = read('scripts/run-supabase-r5-recovery-burst-contention-aware.mjs')
+const adoptionRunner = read(
+  'scripts/run-supabase-r5-recovery-burst-adoption-aware.mjs',
+)
 const matcher = read('scripts/r5-preclaim-watermark-drift-match.mjs')
 
-describe('R5 preclaim watermark-drift finalization', () => {
-  it('matches only the exact response-side uncommitted claim drift', () => {
+describe('R5 generated-controller preclaim finalization', () => {
+  it('matches only the exact non-transient TriggerError from production', () => {
     for (const required of [
-      "const exactWatermarkDrift = 'r5_recovery_batch_watermark_drift'",
-      'response?.status === 500',
+      "const r5PreclaimExactWatermarkDrift = 'r5_recovery_batch_watermark_drift'",
+      "error?.name === 'TriggerError'",
+      'error?.transient === false',
+      "error.message.startsWith('R5 trigger failed (500): ')",
       'body?.schemaVersion === 1',
       "body?.operationMode === 'execute_batch'",
       'executor?.ok === false',
       'executor?.transient === false',
-      "executor?.runId === recoveryRunId",
       'executor?.batchId === null',
       'executor?.activeMutationCommitted === false',
-      'executor.error.includes(exactWatermarkDrift)',
+      'executor.error.includes(r5PreclaimExactWatermarkDrift)',
     ]) {
       expect(matcher).toContain(required)
     }
-    expect(source).toContain('url.includes(triggerPath)')
-    expect(source).toContain(
-      'isExactUncommittedWatermarkDrift(response, responseBody)',
-    )
-    expect(source).not.toContain('requestBody?.run_id')
-    expect(source).not.toContain('parseObjectBody')
   })
 
-  it('runs the correction at most once in one controller process', () => {
-    expect(source).toContain('let preclaimFinalizationUsed = false')
-    expect(source).toContain('!preclaimFinalizationUsed')
-    expect(source).toContain('preclaimFinalizationUsed = true')
-    expect(source.match(/preclaimFinalizationUsed = true/g)).toHaveLength(1)
-  })
-
-  it('uses the existing finalization mode without a ledger scan', () => {
+  it('embeds the pure matcher into the generated verifier exactly once', () => {
     for (const required of [
-      "source: 'github_actions'",
-      'run_id: recoveryRunId',
-      "mode: 'finalize_boundary'",
-      'source_run_id: exactPositiveRunId()',
-      'signal: AbortSignal.timeout(90_000)',
-      "finalizationBody?.operationMode !== 'finalize_boundary'",
-      'finalization?.finalized !== true',
-      'finalization?.runId !== recoveryRunId',
-      'finalization?.noScanExecuted !== true',
-      'trigger?.noLedgerScanInFinalizationMode !== true',
+      "const matcherSourcePath = 'scripts/r5-preclaim-watermark-drift-match.mjs'",
+      "const matcherExport = 'export function isExactUncommittedWatermarkDriftFailure(error) {'",
+      "matcherSource.includes('import ')",
+      'matcherSource.match(/export /g)?.length !== 1',
+      'embeddedMatcher.includes(\'export \')',
+      'R5 generated preclaim matcher installation',
+      'replaceExactlyOnce(',
+      'let preclaimFinalizationUsed = false',
     ]) {
-      expect(source).toContain(required)
+      expect(wrapper).toContain(required)
     }
   })
 
-  it('keeps reader, network, and release boundaries fail closed', () => {
-    for (const required of [
-      'finalization?.publicReaderUnchanged !== true',
-      'finalization?.mainnetDisabled !== true',
-      'finalization?.stabilizationAuthorized !== false',
-      'finalization?.soakAuthorized !== false',
-      'trigger?.combinedProxyBytesWithinFixedReserve !== true',
-      'trigger?.twoInvocationReservationUsed !== true',
-      'trigger?.serviceKeyNotReturned !== true',
-      "throw new Error(\n      `R5 preclaim finalization failed closed:",
-    ]) {
-      expect(source).toContain(required)
-    }
-  })
+  it('catches the generated TriggerError, finalizes, and retries one unchanged claim', () => {
+    const matchIndex = wrapper.indexOf(
+      '&& isExactUncommittedWatermarkDriftFailure(error)',
+    )
+    const finalizeIndex = wrapper.indexOf(
+      'const preclaimFinalization = await invokeFinalizationTrigger()',
+    )
+    const retryIndex = wrapper.indexOf('lastTrigger = await invokeTrigger()', finalizeIndex)
 
-  it('finalizes before retrying the unchanged original claim exactly once', () => {
-    const finalizeIndex = source.indexOf(
-      'await finalizeBoundaryBeforeClaim(input, init)',
-    )
-    const retryIndex = source.indexOf(
-      'const retriedResponse = await originalFetch(input, init)',
-    )
-    expect(finalizeIndex).toBeGreaterThan(-1)
+    expect(matchIndex).toBeGreaterThan(-1)
+    expect(finalizeIndex).toBeGreaterThan(matchIndex)
     expect(retryIndex).toBeGreaterThan(finalizeIndex)
-    expect(source.match(/const retriedResponse = await originalFetch\(input, init\)/g))
+    expect(wrapper).toContain('!preclaimFinalizationUsed')
+    expect(wrapper).toContain('preclaimFinalizationUsed = true')
+    expect(wrapper.match(/preclaimFinalizationUsed = true/g)).toHaveLength(1)
+    expect(wrapper.match(/const preclaimFinalization = await invokeFinalizationTrigger\(\)/g))
       .toHaveLength(1)
-    expect(source).toContain(
-      'return rewriteR5CollectorContentionResponse(url, retriedResponse)',
-    )
   })
 
-  it('emits sanitized proof and restores global fetch', () => {
+  it('uses the existing exact no-scan finalization implementation', () => {
+    for (const required of [
+      'async function invokeFinalizationTrigger()',
+      "mode: 'finalize_boundary'",
+      'source_run_id: sourceRunId',
+      'signal: AbortSignal.timeout(90_000)',
+      "body.operationMode !== 'finalize_boundary'",
+      'trigger.noLedgerScanInFinalizationMode !== true',
+      'finalization.finalized !== true',
+      'finalization.noScanExecuted !== true',
+      'finalization.publicReaderUnchanged !== true',
+      'finalization.mainnetDisabled !== true',
+      'finalization.stabilizationAuthorized !== false',
+      'finalization.soakAuthorized !== false',
+    ]) {
+      expect(adoptionRunner).toContain(required)
+    }
+  })
+
+  it('emits sanitized proof from inside the generated verifier', () => {
     for (const required of [
       "event: 'r5_preclaim_watermark_drift_finalized'",
-      'currentWatermarkLedgerIndex: finalization.currentWatermarkLedgerIndex',
-      'drainedStepCount: finalization.drainedStepCount',
+      'sourceRunId: preclaimFinalization.sourceRunId',
+      'preclaimFinalization.currentWatermarkLedgerIndex',
+      'drainedStepCount: preclaimFinalization.drainedStepCount',
       'noScanExecuted: true',
       'publicReaderUnchanged: true',
       'mainnetDisabled: true',
       'stabilizationAuthorized: false',
       'soakAuthorized: false',
-      "await import('./run-supabase-r5-recovery-burst-adoption-aware.mjs')",
-      'globalThis.fetch = originalFetch',
     ]) {
-      expect(source).toContain(required)
+      expect(wrapper).toContain(required)
     }
-    expect(source).not.toContain('SUPABASE_SERVICE_ROLE_KEY')
-    expect(source).not.toContain('MAINNET_ENABLED')
+  })
+
+  it('removes the ineffective outer fetch hook', () => {
+    expect(wrapper).not.toContain('globalThis.fetch')
+    expect(wrapper).not.toContain('rewriteR5CollectorContentionResponse')
+    expect(wrapper).not.toContain('originalFetch')
+    expect(wrapper).toContain('R5 generated-controller patch expected one write boundary')
+    expect(wrapper).toContain('await import(pathToFileURL(generatedRunnerPath).href)')
+    expect(wrapper).toContain('await rm(generatedRunnerPath, { force: true })')
+  })
+
+  it('retains generated-controller syntax validation', () => {
+    expect(adoptionRunner).toContain("process.env.R5_RECOVERY_ADAPTER_VALIDATE_ONLY === '1'")
+    expect(adoptionRunner).toContain("spawnSync(process.execPath, ['--check', generatedPath]")
+  })
+
+  it('does not expose service credentials or enable Mainnet', () => {
+    expect(wrapper).not.toContain('SUPABASE_SERVICE_ROLE_KEY')
+    expect(wrapper).not.toContain('MAINNET_ENABLED')
+    expect(matcher).not.toContain('SUPABASE_SERVICE_ROLE_KEY')
+    expect(matcher).not.toContain('MAINNET_ENABLED')
   })
 })
