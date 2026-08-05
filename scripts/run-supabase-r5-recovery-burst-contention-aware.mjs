@@ -30,7 +30,10 @@ if (
 }
 
 const embeddedCollectorContentionMatcher = [
-  "const r5CollectorContentionError = 'r5_checkpoint_drain_collector_not_quiescent'",
+  'const r5CollectorContentionErrors = new Set([',
+  "  'r5_checkpoint_drain_collector_not_quiescent',",
+  "  'r5_recovery_batch_collector_not_quiescent',",
+  '])',
   '',
   'function isExactUncommittedCollectorContentionFailure(error) {',
   '  const body = error?.response',
@@ -46,7 +49,9 @@ const embeddedCollectorContentionMatcher = [
   '    && executor?.batchId === null',
   '    && executor?.transient === false',
   "    && typeof executor?.error === 'string'",
-  '    && executor.error.includes(r5CollectorContentionError)',
+  '    && [...r5CollectorContentionErrors].some((exactError) =>',
+  '      executor.error.includes(exactError),',
+  '    )',
   '}',
 ].join('\n')
 
