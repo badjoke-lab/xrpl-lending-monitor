@@ -31,7 +31,7 @@ replace_once(
     '    r5_burst: ["workflow_dispatch", "issue_comment", "push"],',
 )
 replace_once(
-    "R5 pending-scan diagnostic and owner burst contract",
+    "R5 pending-scan V2 diagnostic and owner burst contract",
     '''    "github.event.comment.body == '/r5-recovery burst 8 900 nonce-e3378018'",
     "R5_RECOVERY_BURST_BATCH_LIMIT",''',
     '''    "github.event.comment.body == '/r5-recovery burst 8 900 nonce-e3378018'",
@@ -40,8 +40,8 @@ replace_once(
     "github.ref == 'refs/heads/main'",
     "diagnose-pending-scan",
     "ops/r5/run-once-20260805-pending-scan-readonly.marker",
-    "aa5d748007c9db9754ec6422e044b564bf86a87edd12624d72b92a4a6e64dfce",
-    "cecd28485c8db64780aed844704690cf3278ed92",
+    "e8efad1e1c34360ca2ac93a20a23d2750b0d860a3da0eb3833e8f009df71016c",
+    "6d183fd933ebd3c24be4e60e39ef6d1e9f113238",
     "fetch-depth: 2",
     "git diff-tree --no-commit-id --name-status",
     "node scripts/diagnose-supabase-r5-pending-scan.mjs",
