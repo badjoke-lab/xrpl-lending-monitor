@@ -84,11 +84,25 @@ describe('R5 collector contention bounded retry contract', () => {
     expect(await retained.json()).toEqual(body)
   })
 
-  it('retains the existing three-attempt sixty-second bounded retry', () => {
+  it('retains the existing three-attempt sixty-second bounded retry in the generated controller', () => {
     expect(controller).toContain('const maximumAttemptsPerTrigger = 3')
     expect(controller).toContain('const retryDelayMilliseconds = 60_000')
-    expect(wrapper).toContain('rewriteR5CollectorContentionResponse')
-    expect(wrapper).toContain("await import('./run-supabase-r5-recovery-burst-adoption-aware.mjs')")
+    for (const required of [
+      "const r5CollectorContentionError = 'r5_checkpoint_drain_collector_not_quiescent'",
+      'function isExactUncommittedCollectorContentionFailure(error) {',
+      "error.message.startsWith('R5 trigger failed (500): ')",
+      'executor?.activeMutationCommitted === false',
+      'executor?.batchId === null',
+      'executor?.transient === false',
+      'executor.error.includes(r5CollectorContentionError)',
+      '&& isExactUncommittedCollectorContentionFailure(error)',
+      'transientRetries += 1',
+      'lastTrigger = error.response',
+      "const sourcePath = 'scripts/run-supabase-r5-recovery-burst-adoption-aware.mjs'",
+      'await import(pathToFileURL(generatedRunnerPath).href)',
+    ]) {
+      expect(wrapper).toContain(required)
+    }
     expect(workflow).toContain(
       'run: node scripts/run-supabase-r5-recovery-burst-contention-aware.mjs',
     )
