@@ -1,0 +1,121 @@
+{
+  "schemaVersion": 1,
+  "purpose": "r5-retained-steady-memory-samples",
+  "sourceWorkflowRunId": 30975277983,
+  "sourceCommit": "d7e6eb86eb0e660dffd3ad5e54d2fd995ba8a54c",
+  "sourceArtifactId": 8918144753,
+  "sourceArtifactDigest": "sha256:c0f519dc4a1fe5dfff3f0ae79641cc84fd54e99fb2f0b2d073f20639e1dda2ac",
+  "sourceSteadyEvidenceSha256": "fb78d4600a955a9f208cc8418786437eec367c709f7cd5b7476e43b0abeaae7c",
+  "memoryCanonicalSha256": "e8c359e23189c37c4f74aa3e66a83913a26977dca6b91896804cd1c48c992f40",
+  "memory": {
+    "ticks": [
+      {
+        "status": "completed",
+        "tickId": "steady:v1:r4c2d-steady-msflb8fo-5ebc5adc:tick:1",
+        "tickSequence": 1,
+        "memorySamples": [
+          {"phase":"request_start","rssBytes":0,"externalBytes":3095347,"heapUsedBytes":8094480,"heapTotalBytes":9891840},
+          {"phase":"after_claim","rssBytes":0,"externalBytes":3227322,"heapUsedBytes":8256872,"heapTotalBytes":9891840},
+          {"phase":"after_head","rssBytes":0,"externalBytes":3491714,"heapUsedBytes":8396208,"heapTotalBytes":9891840},
+          {"phase":"after_fetch","rssBytes":0,"externalBytes":6186676,"heapUsedBytes":11395200,"heapTotalBytes":13807616},
+          {"phase":"after_normalize","rssBytes":0,"externalBytes":4904651,"heapUsedBytes":12091504,"heapTotalBytes":14856192},
+          {"phase":"before_commit","rssBytes":0,"externalBytes":5121688,"heapUsedBytes":12366064,"heapTotalBytes":14856192}
+        ],
+        "memorySampleCount": 6,
+        "memoryHighWaterBytes": 0
+      },
+      {
+        "status": "completed",
+        "tickId": "steady:v1:r4c2d-steady-msflb8fo-5ebc5adc:tick:2",
+        "tickSequence": 2,
+        "memorySamples": [
+          {"phase":"request_start","rssBytes":0,"externalBytes":3095347,"heapUsedBytes":8094568,"heapTotalBytes":9891840},
+          {"phase":"after_claim","rssBytes":0,"externalBytes":3227322,"heapUsedBytes":8256960,"heapTotalBytes":9891840},
+          {"phase":"after_head","rssBytes":0,"externalBytes":3491715,"heapUsedBytes":8404392,"heapTotalBytes":9891840},
+          {"phase":"after_fetch","rssBytes":0,"externalBytes":4370632,"heapUsedBytes":13112856,"heapTotalBytes":17494016},
+          {"phase":"after_normalize","rssBytes":0,"externalBytes":4208100,"heapUsedBytes":14074232,"heapTotalBytes":17494016},
+          {"phase":"before_commit","rssBytes":0,"externalBytes":4425143,"heapUsedBytes":13404320,"heapTotalBytes":17494016}
+        ],
+        "memorySampleCount": 6,
+        "memoryHighWaterBytes": 0
+      },
+      {
+        "status": "completed",
+        "tickId": "steady:v1:r4c2d-steady-msflb8fo-5ebc5adc:tick:3",
+        "tickSequence": 3,
+        "memorySamples": [
+          {"phase":"request_start","rssBytes":0,"externalBytes":3095347,"heapUsedBytes":8094040,"heapTotalBytes":9891840},
+          {"phase":"after_claim","rssBytes":0,"externalBytes":3227322,"heapUsedBytes":8255888,"heapTotalBytes":9891840},
+          {"phase":"after_head","rssBytes":0,"externalBytes":3491712,"heapUsedBytes":8394944,"heapTotalBytes":9891840},
+          {"phase":"after_fetch","rssBytes":0,"externalBytes":5929464,"heapUsedBytes":9774344,"heapTotalBytes":11988992},
+          {"phase":"after_normalize","rssBytes":0,"externalBytes":4904651,"heapUsedBytes":9949416,"heapTotalBytes":12513280},
+          {"phase":"before_commit","rssBytes":0,"externalBytes":5121598,"heapUsedBytes":10223960,"heapTotalBytes":12513280}
+        ],
+        "memorySampleCount": 6,
+        "memoryHighWaterBytes": 0
+      },
+      {
+        "status": "completed",
+        "tickId": "steady:v1:r4c2d-steady-msflb8fo-5ebc5adc:tick:4",
+        "tickSequence": 4,
+        "memorySamples": [
+          {"phase":"request_start","rssBytes":0,"externalBytes":3095347,"heapUsedBytes":8094040,"heapTotalBytes":9891840},
+          {"phase":"after_claim","rssBytes":0,"externalBytes":3227322,"heapUsedBytes":8248200,"heapTotalBytes":9891840},
+          {"phase":"after_head","rssBytes":0,"externalBytes":3491714,"heapUsedBytes":8394400,"heapTotalBytes":9891840},
+          {"phase":"after_fetch","rssBytes":0,"externalBytes":5664650,"heapUsedBytes":10178472,"heapTotalBytes":12775424},
+          {"phase":"after_normalize","rssBytes":0,"externalBytes":4909234,"heapUsedBytes":10490488,"heapTotalBytes":13037568},
+          {"phase":"before_commit","rssBytes":0,"externalBytes":5126271,"heapUsedBytes":10706632,"heapTotalBytes":13037568}
+        ],
+        "memorySampleCount": 6,
+        "memoryHighWaterBytes": 0
+      },
+      {
+        "status": "completed",
+        "tickId": "steady:v1:r4c2d-steady-msflb8fo-5ebc5adc:tick:5",
+        "tickSequence": 5,
+        "memorySamples": [
+          {"phase":"request_start","rssBytes":0,"externalBytes":3095347,"heapUsedBytes":8094040,"heapTotalBytes":9891840},
+          {"phase":"after_claim","rssBytes":0,"externalBytes":3227322,"heapUsedBytes":8744776,"heapTotalBytes":9891840},
+          {"phase":"after_head","rssBytes":0,"externalBytes":3491714,"heapUsedBytes":8395488,"heapTotalBytes":9891840},
+          {"phase":"after_fetch","rssBytes":0,"externalBytes":5917086,"heapUsedBytes":9820512,"heapTotalBytes":12251136},
+          {"phase":"after_normalize","rssBytes":0,"externalBytes":4907279,"heapUsedBytes":10023584,"heapTotalBytes":12513280},
+          {"phase":"before_commit","rssBytes":0,"externalBytes":5124220,"heapUsedBytes":10298104,"heapTotalBytes":12513280}
+        ],
+        "memorySampleCount": 6,
+        "memoryHighWaterBytes": 0
+      },
+      {
+        "status": "completed",
+        "tickId": "steady:v1:r4c2d-steady-msflb8fo-5ebc5adc:tick:6",
+        "tickSequence": 6,
+        "memorySamples": [
+          {"phase":"request_start","rssBytes":0,"externalBytes":3095347,"heapUsedBytes":8093192,"heapTotalBytes":9891840},
+          {"phase":"after_claim","rssBytes":0,"externalBytes":3227322,"heapUsedBytes":8248640,"heapTotalBytes":9891840},
+          {"phase":"after_head","rssBytes":0,"externalBytes":3491712,"heapUsedBytes":8395384,"heapTotalBytes":9891840},
+          {"phase":"after_fetch","rssBytes":0,"externalBytes":5818264,"heapUsedBytes":9468600,"heapTotalBytes":11988992},
+          {"phase":"after_normalize","rssBytes":0,"externalBytes":4890595,"heapUsedBytes":9609224,"heapTotalBytes":12513280},
+          {"phase":"before_commit","rssBytes":0,"externalBytes":5107494,"heapUsedBytes":9918312,"heapTotalBytes":12513280}
+        ],
+        "memorySampleCount": 6,
+        "memoryHighWaterBytes": 0
+      }
+    ],
+    "checks": {
+      "g8Qualified": false,
+      "haltBelowHard": true,
+      "profileSelected": false,
+      "highWaterBelowHalt": true,
+      "allCompletedTicksMeasured": true,
+      "sixCompletedTicksMeasured": true
+    },
+    "purpose": "r4c2d-steady-memory-guard",
+    "sessionId": "r4c2d-steady-msflb8fo-5ebc5adc",
+    "schemaVersion": 1,
+    "sessionStatus": "completed",
+    "completedTicks": 6,
+    "memoryHaltBytes": 209715200,
+    "memoryHardBytes": 268435456,
+    "memoryHighWaterBytes": 0,
+    "measuredCompletedTicks": 6
+  }
+}
