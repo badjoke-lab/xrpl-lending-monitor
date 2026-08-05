@@ -83,6 +83,8 @@ describe('R5 burst final boundary contract', () => {
 
   it('finalizes and materializes adoption rows before final parity', () => {
     for (const required of [
+      "'R5 zero-progress executor count result'",
+      'executorBatchCount: 0,',
       "'R5 final boundary trigger helper'",
       "mode: 'finalize_boundary'",
       'source_run_id: sourceRunId',

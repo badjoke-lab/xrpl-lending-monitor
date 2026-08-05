@@ -70,6 +70,18 @@ replaceExactlyOnce(
 )
 
 replaceExactlyOnce(
+  'R5 zero-progress executor count result',
+  `    return { batches: [], adoptions: [], advancedBatches: 0, advancedLedgers: 0 }`,
+  `    return {
+      batches: [],
+      adoptions: [],
+      advancedBatches: 0,
+      advancedLedgers: 0,
+      executorBatchCount: 0,
+    }`,
+)
+
+replaceExactlyOnce(
   'R5 executor batch counter declaration',
   `  let adoption = null
   let adoptedBatchCount = 0
