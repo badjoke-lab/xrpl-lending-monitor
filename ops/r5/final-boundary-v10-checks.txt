@@ -1,5 +1,0 @@
-migration=20260804161000_xrpl_r5_finalize_burst_boundary.sql
-trigger_mode=finalize_boundary
-controller=run-supabase-r5-recovery-burst-adoption-aware.mjs
-observed_gap_ledgers=4
-failed_run=30925522885
