@@ -136,6 +136,21 @@ describe('R5 burst final parity read-only diagnostic contract', () => {
     }
   })
 
+  it('adds one exact owner-only 64 by 1800 catch-up command', () => {
+    for (const required of [
+      "github.event.comment.body == '/r5-recovery burst 64 1800 nonce-cd7eb564'",
+      "github.event.comment.body == '/r5-recovery burst 64 1800 nonce-cd7eb564' && '64'",
+      "github.event.comment.body == '/r5-recovery burst 64 1800 nonce-cd7eb564' && '1800'",
+      'test "$R5_RECOVERY_BURST_BATCH_LIMIT" -le 64',
+      'test "$R5_RECOVERY_BURST_WALL_SECONDS" -le 1800',
+      'test "$R5_RECOVERY_BURST_BATCH_LIMIT" -eq 64',
+      'test "$R5_RECOVERY_BURST_WALL_SECONDS" -eq 1800',
+    ]) {
+      expect(workflow).toContain(required)
+    }
+    expect(workflow.match(/nonce-cd7eb564/g)).toHaveLength(3)
+  })
+
   it('adapts the canonical workflow policy only by exact replacements', () => {
     for (const required of [
       "source_script='scripts/check-actions-workflow-allowlist.sh'",
@@ -145,7 +160,8 @@ describe('R5 burst final parity read-only diagnostic contract', () => {
       'old in updated',
       'new not in updated',
       'r5_burst: ["workflow_dispatch", "issue_comment", "push"]',
-      'R5 read-only diagnostic marker contract',
+      'R5 read-only diagnostic and owner burst marker contract',
+      "github.event.comment.body == '/r5-recovery burst 64 1800 nonce-cd7eb564'",
       'R5 read-only diagnostic push exception',
       'R5 diagnostic and burst locator count',
       'burst.count("gh issue comment 1175") != 2',
