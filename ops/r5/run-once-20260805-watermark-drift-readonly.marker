@@ -1,0 +1,7 @@
+R5_WATERMARK_DRIFT_DIAGNOSTIC_V1
+mode=read_only
+source_main_commit=1926c4c57f447761b6634fbf3900250a1eca0765
+source_failed_burst_run_id=31014360049
+recovery_run_id=r5-recovery-selected-revision3-entry
+expected_recovery_watermark_ledger=4138491
+nonce=r5-watermark-drift-readonly-20260805-2320-jst
