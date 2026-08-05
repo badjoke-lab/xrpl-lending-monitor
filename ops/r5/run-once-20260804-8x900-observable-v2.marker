@@ -1,6 +1,7 @@
-R5_DATABASE_SIZE_DIAGNOSTIC_V1
+R5_DATABASE_SIZE_DIAGNOSTIC_V2
 mode=read_only
-source_run_id=30975277983
+source_run_id=30976693948
 database_halt_bytes=400000000
-observed_database_bytes=416763027
-nonce=database-size-20260805-4d9c7a21
+observed_database_bytes=417082515
+scope=all_non_temporary_schemas
+nonce=database-size-all-schema-20260805-8b31c6d2
