@@ -54,17 +54,17 @@ begin
     or v_archive.retained_trial_count <> 5
     or v_archive.reclaimed_schema <> 'xrpl_catchup_v1'
     or v_archive.physical_bytes_before <= 17000000
-    or v_archive.evidence->>'sourceCatchUpEvidenceSha256' <> v_source_catchup_evidence_sha256
-    or v_archive.evidence->>'sourceSteadyEvidenceSha256' <> v_source_steady_evidence_sha256
-    or v_archive.evidence->>'recoveryRunId' <> 'r5-recovery-selected-revision3-entry'
-    or v_archive.evidence->>'profileId' <> 'supabase_free_postgres_pgcron_edge'
-    or (v_archive.evidence->>'profileRevision')::integer <> 3
-    or v_archive.evidence->>'profileIdentityDigest'
-      <> '3a5c4ff2c43a48d3e5b7ceded60027173d215d6f083fb33c22375758520bbe67'
-    or v_archive.evidence->>'selectionDigest'
-      <> '13a313d9d0679c7c512b59f9931d733dcb3217ec8e1cc6e74a36125a0354b667'
-    or jsonb_typeof(v_archive.evidence->'retainedTrials') <> 'array'
-    or jsonb_array_length(v_archive.evidence->'retainedTrials') <> 5
+    or (v_archive.evidence->>'sourceCatchUpEvidenceSha256') is distinct from v_source_catchup_evidence_sha256
+    or (v_archive.evidence->>'sourceSteadyEvidenceSha256') is distinct from v_source_steady_evidence_sha256
+    or (v_archive.evidence->>'recoveryRunId') is distinct from 'r5-recovery-selected-revision3-entry'
+    or (v_archive.evidence->>'profileId') is distinct from 'supabase_free_postgres_pgcron_edge'
+    or (v_archive.evidence->>'profileRevision')::integer is distinct from 3
+    or (v_archive.evidence->>'profileIdentityDigest') is distinct from
+      '3a5c4ff2c43a48d3e5b7ceded60027173d215d6f083fb33c22375758520bbe67'
+    or (v_archive.evidence->>'selectionDigest') is distinct from
+      '13a313d9d0679c7c512b59f9931d733dcb3217ec8e1cc6e74a36125a0354b667'
+    or jsonb_typeof(v_archive.evidence->'retainedTrials') is distinct from 'array'
+    or jsonb_array_length(v_archive.evidence->'retainedTrials') is distinct from 5
     or (v_archive.evidence#>>'{boundaries,publicReaderUnchanged}')::boolean is not true
     or (v_archive.evidence#>>'{boundaries,mainnetDisabled}')::boolean is not true
     or (v_archive.evidence#>>'{boundaries,stabilizationAuthorized}')::boolean is not false
@@ -77,7 +77,7 @@ begin
   end if;
 
   v_recomputed_digest := public.xrpl_transfer_json_digest(v_archive.evidence);
-  if v_recomputed_digest <> v_archive.evidence_digest then
+  if v_recomputed_digest is distinct from v_archive.evidence_digest then
     raise exception 'r5_catchup_reclaim_seal_digest_mismatch';
   end if;
 
