@@ -22,7 +22,7 @@ describe('R5 memory-retry watermark-drift descendant adoption', () => {
       'v_run.current_watermark_ledger_index <> 4138467',
       "'2AFA2CE9FA58878B6E13285945B97270544FED472F50D6D08BB05EA6036A6A3B'",
       "'collector-work-v1:devnet:supabase-r4c2c-v1:seven-class-base-4132417-C9A7A89077EA7F54EBC296EE95E6AE45601088DDA5CFC5538A435C4A21E9CE77:4138467:14A18F40E0FA2E0DB48DAA307949BE755493352509A3E40C4DF160DDF2301EEF'",
-      "'r5_recovery_batch_completion_watermark_drift'",
+      'r5_recovery_batch_completion_watermark_drift',
       'v_batch.batch_sequence <> 245',
       'v_batch.start_ledger_index <> 4138468',
       'v_batch.end_ledger_index <> 4138479',
