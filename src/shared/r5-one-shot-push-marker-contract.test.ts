@@ -11,33 +11,33 @@ function read(path: string): string {
 const workflow = read('.github/workflows/r5-bounded-recovery-burst.yml')
 const ci = read('.github/workflows/ci.yml')
 const adapter = read('scripts/check-actions-workflow-allowlist-r5-one-shot.sh')
-const diagnostic = read('scripts/diagnose-supabase-r5-health-change.mjs')
+const diagnostic = read('scripts/diagnose-supabase-r5-egress-halt.mjs')
 const markerPath = 'ops/r5/run-once-20260805-pending-scan-readonly.marker'
 const marker = read(markerPath)
 const markerDigest = createHash('sha256').update(marker).digest('hex')
-const sourceMain = '08ee22ddd1dd1685d59329174264c57e7a0fd8d0'
+const sourceMain = '45cbfa09399a7d6d5c5d348ab9f3c6d6ee24fc9b'
 const expectedDigest =
-  'bac45f8f4f8c3c9ddef903c154c01ccce223535235f061190b2ee17fb29177c8'
+  '91ad7af532a7cb66d214b30a3d9a3d2faa48e49b46a9d1b96c6808e2400c2c7f'
 
-describe('R5 health-change read-only diagnostic trigger', () => {
-  it('pins the successful and failed bounded bursts', () => {
+describe('R5 egress halt read-only breakdown trigger', () => {
+  it('pins the exact halt evidence and fixed thresholds', () => {
     expect(marker).toBe(
-      'R5_HEALTH_CHANGE_DIAGNOSTIC_V1\nmode=read_only\nsource_main_commit=08ee22ddd1dd1685d59329174264c57e7a0fd8d0\nsource_successful_burst_run_id=31030705329\nsource_failed_burst_run_id=31030990054\nrecovery_run_id=r5-recovery-selected-revision3-entry\nerror=R5 recovery identity or health changed\nnonce=r5-health-change-readonly-20260806-0242-jst\n',
+      'R5_EGRESS_HALT_BREAKDOWN_DIAGNOSTIC_V1\nmode=read_only\nsource_main_commit=45cbfa09399a7d6d5c5d348ab9f3c6d6ee24fc9b\nsource_successful_burst_run_id=31030705329\nsource_failed_burst_run_id=31030990054\nsource_health_diagnostic_run_id=31032129918\nrecovery_run_id=r5-recovery-selected-revision3-entry\nhalt_error=r5_recovery_monthly_egress_halt\negress_halt_bytes=4294967296\nreservation_bytes=134217728\nnonce=r5-egress-halt-breakdown-20260806-0300-jst\n',
     )
     expect(markerDigest).toBe(expectedDigest)
     expect(workflow).toContain(expectedDigest)
     expect(adapter).toContain(expectedDigest)
   })
 
-  it('binds push only to the read-only health diagnostic', () => {
+  it('binds push only to the read-only egress diagnostic', () => {
     for (const required of [
       '  push:',
       '    branches: [main]',
       `      - ${markerPath}`,
-      'diagnose-r5-health-change:',
+      'diagnose-r5-egress-halt:',
       "github.event_name == 'push' && github.ref == 'refs/heads/main'",
-      'node scripts/diagnose-supabase-r5-health-change.mjs',
-      'supabase-r5-health-change-diagnostic',
+      'node scripts/diagnose-supabase-r5-egress-halt.mjs',
+      'supabase-r5-egress-halt-diagnostic',
     ]) {
       expect(workflow).toContain(required)
     }
@@ -65,29 +65,23 @@ describe('R5 health-change read-only diagnostic trigger', () => {
     }
   })
 
-  it('compares every verifier identity and health condition read only', () => {
+  it('recomputes the exact 31-day conservative formula and rolloff read only', () => {
     for (const required of [
       'read_only: true',
-      '31030990054',
-      "purpose: 'r5-supabase-active-recovery-summary'",
-      "profileId: 'supabase_free_postgres_pgcron_edge'",
-      'profileRevision: 3',
-      "sourceProfileId: 'supabase-devnet'",
-      "network: 'devnet'",
-      "epochId: 'supabase-r4c2c-v1'",
-      'batchSize: 24',
-      'lastError: null',
-      'exactRevision3Identity',
-      'checkpointDescendantChainProved',
-      'lagArithmeticExact',
-      'stabilizationAuthorized',
-      'soakAuthorized',
-      'activeBatches',
-      'recentBatches',
-      'noncommittedWork',
-      'nonterminalMessages',
-      'mismatches',
-      'recent batch errors:',
+      'const haltBytes = 4_294_967_296',
+      'const reservationBytes = 134_217_728',
+      'attempt_effective_egress(',
+      'xrpl_resource_guard_v2.tick_accounting',
+      'xrpl_r5_v1.recovery_batches',
+      'Math.max(attemptBytes, legacyBytes)',
+      'const priorBytes = steadyBytes + recoveryBytes',
+      'const projectedBytes = priorBytes + reservationBytes',
+      'claimAllowed: projectedBytes < haltBytes',
+      'firstSafeAssumingNoNewContributions',
+      'failedOrDeferredAttemptCount',
+      'noncompletedRecoveryCount',
+      'strictClaimCondition',
+      'r5_recovery_monthly_egress_halt',
     ]) {
       expect(diagnostic).toContain(required)
     }
@@ -100,12 +94,14 @@ describe('R5 health-change read-only diagnostic trigger', () => {
       'vacuum ',
       'supabase secrets set',
       'SUPABASE_SERVICE_ROLE_KEY',
+      '4_294_967_297',
+      '134_217_727',
     ]) {
       expect(diagnostic.toLowerCase()).not.toContain(forbidden.toLowerCase())
     }
   })
 
-  it('retains only dispatch and owner issue mutation paths', () => {
+  it('retains only dispatch and exact owner issue mutation paths', () => {
     for (const required of [
       'workflow_dispatch:',
       'issue_comment:',
@@ -122,9 +118,9 @@ describe('R5 health-change read-only diagnostic trigger', () => {
 
   it('adapts the canonical allowlist by exact replacements', () => {
     for (const required of [
-      'R5 health-change diagnostic trigger policy',
-      'R5 health-change diagnostic and owner burst contract',
-      'R5 read-only health diagnostic push exception',
+      'R5 egress halt diagnostic trigger policy',
+      'R5 egress halt diagnostic and owner burst contract',
+      'R5 read-only egress diagnostic push exception',
       'R5 diagnostic and burst locator count',
       'r5_burst: ["workflow_dispatch", "issue_comment", "push"]',
       'burst.count("gh issue comment 1175") != 2',
