@@ -1,5 +1,8 @@
 const triggerPath = '/functions/v1/xrpl-r5-recovery-batch-trigger'
-const exactError = 'r5_checkpoint_drain_collector_not_quiescent'
+const exactErrors = new Set([
+  'r5_checkpoint_drain_collector_not_quiescent',
+  'r5_recovery_batch_collector_not_quiescent',
+])
 
 export function isRetryableR5CollectorContention(status, body) {
   if (status !== 500 || typeof body !== 'object' || body === null || Array.isArray(body)) {
@@ -16,7 +19,7 @@ export function isRetryableR5CollectorContention(status, body) {
     && executor.batchId === null
     && executor.transient === false
     && typeof executor.error === 'string'
-    && executor.error.includes(exactError)
+    && [...exactErrors].some((exactError) => executor.error.includes(exactError))
 }
 
 export async function rewriteR5CollectorContentionResponse(url, response) {
