@@ -1,5 +1,6 @@
 import { copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { spawn } from 'node:child_process'
+import { verifyRetainedR5Qualifications } from './verify-supabase-retained-r5-qualification-evidence.mjs'
 
 const evidenceDirectory = 'supabase-remote-probe-evidence'
 const verifierPath = 'scripts/verify-supabase-steady-throughput.mjs'
@@ -71,6 +72,17 @@ async function preserveFirstFailure(first, reason) {
     retryReason: reason,
     retryClass: reason === cadenceRetryReason ? 'cadence_gap' : 'transient_provider_failure',
   }
+}
+
+const retained = await verifyRetainedR5Qualifications()
+if (retained !== null) {
+  await mkdir(evidenceDirectory, { recursive: true })
+  await writeFile(
+    `${evidenceDirectory}/verified-steady-throughput.json`,
+    `${JSON.stringify(retained.steady, null, 2)}\n`,
+  )
+  process.stdout.write(`${JSON.stringify(retained.steady)}\n`)
+  process.exit(0)
 }
 
 const first = await runVerifier(1)
