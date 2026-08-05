@@ -16,7 +16,13 @@ const workflow = read('.github/workflows/r5-bounded-recovery-burst.yml')
 const wrapper = read('scripts/run-supabase-r5-recovery-burst-contention-aware.mjs')
 const controller = read('scripts/verify-supabase-r5-recovery-burst-adoption-aware.mjs')
 
-function exactBody(overrides: Record<string, unknown> = {}) {
+const checkpointContention = 'r5_checkpoint_drain_collector_not_quiescent'
+const recoveryContention = 'r5_recovery_batch_collector_not_quiescent'
+
+function exactBody(
+  exactError = checkpointContention,
+  overrides: Record<string, unknown> = {},
+) {
   return {
     schemaVersion: 1,
     purpose: 'r5-first-active-recovery-batch',
@@ -27,7 +33,7 @@ function exactBody(overrides: Record<string, unknown> = {}) {
       runId: 'r5-recovery-selected-revision3-entry',
       batchId: null,
       error:
-        'xrpl_claim_r5_active_recovery_batch_from_prepared_head failed: r5_checkpoint_drain_collector_not_quiescent',
+        `xrpl_claim_r5_active_recovery_batch_from_prepared_head failed: ${exactError}`,
       activeMutationCommitted: false,
     },
     trigger: {
@@ -40,42 +46,57 @@ function exactBody(overrides: Record<string, unknown> = {}) {
 }
 
 describe('R5 collector contention bounded retry contract', () => {
-  it('classifies only the exact no-mutation collector contention response', () => {
-    expect(isRetryableR5CollectorContention(500, exactBody())).toBe(true)
+  it.each([checkpointContention, recoveryContention])(
+    'classifies the exact no-mutation collector contention %s',
+    (exactError) => {
+      expect(isRetryableR5CollectorContention(500, exactBody(exactError))).toBe(
+        true,
+      )
+    },
+  )
 
+  it('rejects changed mutation, response, and error boundaries', () => {
     for (const body of [
-      exactBody({ operationMode: 'finalize_boundary' }),
-      exactBody({ executor: { ...exactBody().executor, batchId: 'r5-batch' } }),
-      exactBody({ executor: { ...exactBody().executor, activeMutationCommitted: true } }),
-      exactBody({ executor: { ...exactBody().executor, transient: true } }),
-      exactBody({ executor: { ...exactBody().executor, error: 'other_error' } }),
+      exactBody(checkpointContention, { operationMode: 'finalize_boundary' }),
+      exactBody(checkpointContention, {
+        executor: { ...exactBody().executor, batchId: 'r5-batch' },
+      }),
+      exactBody(checkpointContention, {
+        executor: { ...exactBody().executor, activeMutationCommitted: true },
+      }),
+      exactBody(checkpointContention, {
+        executor: { ...exactBody().executor, transient: true },
+      }),
+      exactBody('other_error'),
     ]) {
       expect(isRetryableR5CollectorContention(500, body)).toBe(false)
     }
     expect(isRetryableR5CollectorContention(503, exactBody())).toBe(false)
   })
 
-  it('rewrites only the trigger response and preserves the 500 status', async () => {
-    const response = new Response(JSON.stringify(exactBody()), {
-      status: 500,
-      headers: { 'content-type': 'application/json' },
-    })
-    const rewritten = await rewriteR5CollectorContentionResponse(
-      'https://example.supabase.co/functions/v1/xrpl-r5-recovery-batch-trigger',
-      response,
-    )
-    const body = await rewritten.json()
-    expect(rewritten.status).toBe(500)
-    expect(body.executor.transient).toBe(true)
-    expect(body.executor.activeMutationCommitted).toBe(false)
-    expect(body.executor.batchId).toBeNull()
-    expect(body.retryClassification).toBe('collector_contention_without_mutation')
+  it('rewrites both exact trigger responses and preserves the 500 status', async () => {
+    for (const exactError of [checkpointContention, recoveryContention]) {
+      const response = new Response(JSON.stringify(exactBody(exactError)), {
+        status: 500,
+        headers: { 'content-type': 'application/json' },
+      })
+      const rewritten = await rewriteR5CollectorContentionResponse(
+        'https://example.supabase.co/functions/v1/xrpl-r5-recovery-batch-trigger',
+        response,
+      )
+      const body = await rewritten.json()
+      expect(rewritten.status).toBe(500)
+      expect(body.executor.transient).toBe(true)
+      expect(body.executor.activeMutationCommitted).toBe(false)
+      expect(body.executor.batchId).toBeNull()
+      expect(body.retryClassification).toBe(
+        'collector_contention_without_mutation',
+      )
+    }
   })
 
   it('does not rewrite unrelated trigger failures', async () => {
-    const body = exactBody({
-      executor: { ...exactBody().executor, error: 'revision3_resource_halt' },
-    })
+    const body = exactBody('revision3_resource_halt')
     const response = new Response(JSON.stringify(body), { status: 500 })
     const retained = await rewriteR5CollectorContentionResponse(
       'https://example.supabase.co/functions/v1/xrpl-r5-recovery-batch-trigger',
@@ -88,13 +109,16 @@ describe('R5 collector contention bounded retry contract', () => {
     expect(controller).toContain('const maximumAttemptsPerTrigger = 3')
     expect(controller).toContain('const retryDelayMilliseconds = 60_000')
     for (const required of [
-      "const r5CollectorContentionError = 'r5_checkpoint_drain_collector_not_quiescent'",
+      'const r5CollectorContentionErrors = new Set([',
+      "'r5_checkpoint_drain_collector_not_quiescent'",
+      "'r5_recovery_batch_collector_not_quiescent'",
       'function isExactUncommittedCollectorContentionFailure(error) {',
       "error.message.startsWith('R5 trigger failed (500): ')",
       'executor?.activeMutationCommitted === false',
       'executor?.batchId === null',
       'executor?.transient === false',
-      'executor.error.includes(r5CollectorContentionError)',
+      '[...r5CollectorContentionErrors].some((exactError) =>',
+      'executor.error.includes(exactError)',
       '&& isExactUncommittedCollectorContentionFailure(error)',
       'transientRetries += 1',
       'lastTrigger = error.response',

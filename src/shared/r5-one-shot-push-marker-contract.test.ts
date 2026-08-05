@@ -19,14 +19,14 @@ const markerPath =
 const marker = read(markerPath)
 const markerDigest = createHash('sha256').update(marker).digest('hex')
 
-const sourceMain = 'c353e4d26901c5da84d51d97beb0fc5986ee8b7c'
+const sourceMain = 'd983aeb2aa2411514e75927ebd9f350ad7b622bd'
 const expectedDigest =
-  'a55737c05bdb141fbbd616cf5aa93d4dc1f21ac3e9c265637ba2d3a98e45515d'
+  '7eb5a68f63427d5a50e3673f3fc60a3155a2b554f0873540ea0a9a2532d0be1c'
 
-describe('R5 V6 twelve-ledger one-shot proof trigger', () => {
-  it('pins V6 to the verified initial-gap repair and all prior failures', () => {
+describe('R5 V7 twelve-ledger one-shot proof trigger', () => {
+  it('pins V7 to finalization success and both exact collector contention errors', () => {
     expect(marker).toBe(
-      'R5_TWELVE_LEDGER_CLAIM_CAP_PROOF_V6\nmode=finite_bounded_recovery\nsource_commit=c353e4d26901c5da84d51d97beb0fc5986ee8b7c\nsource_verification_run_id=31012179441\nsource_initial_gap_verification_run_id=31019054351\nprior_skipped_run_id=31013623911\nprior_watermark_drift_run_id=31014360049\nprior_preclaim_match_miss_run_id=31015285563\nprior_outer_hook_miss_run_id=31016519593\nprior_initial_gap_failure_run_id=31018077125\npreclaim_finalization=required\nfinalization_initial_gap_bound=256\nfinalization_post_drain_advance_bound=24\nmatch_boundary=generated_controller_trigger_error\nbatch_limit=8\nwall_seconds=900\nexpected_claim_cap=12\nnonce=twelve-ledger-claim-cap-proof-20260805-v6-4bd728e1\n',
+      'R5_TWELVE_LEDGER_CLAIM_CAP_PROOF_V7\nmode=finite_bounded_recovery\nsource_commit=d983aeb2aa2411514e75927ebd9f350ad7b622bd\nsource_verification_run_id=31012179441\nsource_initial_gap_verification_run_id=31019054351\nprior_skipped_run_id=31013623911\nprior_watermark_drift_run_id=31014360049\nprior_preclaim_match_miss_run_id=31015285563\nprior_outer_hook_miss_run_id=31016519593\nprior_initial_gap_failure_run_id=31018077125\nprior_finalization_success_contention_run_id=31020370895\npreclaim_finalization=required\nfinalization_initial_gap_bound=256\nfinalization_post_drain_advance_bound=24\ncollector_contention_retry_attempts=3\ncollector_contention_retry_delay_seconds=60\ncollector_contention_errors=r5_checkpoint_drain_collector_not_quiescent,r5_recovery_batch_collector_not_quiescent\nmatch_boundary=generated_controller_trigger_error\nbatch_limit=8\nwall_seconds=900\nexpected_claim_cap=12\nnonce=twelve-ledger-claim-cap-proof-20260805-v7-8c42e6a1\n',
     )
     expect(markerDigest).toBe(expectedDigest)
     expect(workflow).toContain(markerDigest)
@@ -135,8 +135,8 @@ describe('R5 V6 twelve-ledger one-shot proof trigger', () => {
       'old in updated',
       'new not in updated',
       'r5_burst: ["workflow_dispatch", "issue_comment", "push"]',
-      'R5 V6 proof marker and owner burst contract',
-      'R5 V6 finite-proof push exception',
+      'R5 V7 proof marker and owner burst contract',
+      'R5 V7 finite-proof push exception',
       'git diff-tree --no-commit-id --name-status',
       'bash "$generated_script" "$@"',
     ]) {
