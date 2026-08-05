@@ -1,8 +1,10 @@
-R5_PENDING_SCAN_DIAGNOSTIC_V1
+R5_PENDING_SCAN_DIAGNOSTIC_V2
 mode=read_only
-source_main_commit=cecd28485c8db64780aed844704690cf3278ed92
+source_main_commit=6d183fd933ebd3c24be4e60e39ef6d1e9f113238
 source_failed_burst_run_id=31021223140
+source_failed_diagnostic_run_id=31022568428
 recovery_run_id=r5-recovery-selected-revision3-entry
-expected_recovery_watermark_ledger=4138631
+minimum_recovery_watermark_ledger=4138631
+maximum_recovery_watermark_advance=256
 error=r5_recovery_batch_pending_scan_invalid
-nonce=r5-pending-scan-readonly-20260805-2348-jst
+nonce=r5-pending-scan-readonly-v2-20260806-0147-jst

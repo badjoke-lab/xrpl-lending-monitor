@@ -16,14 +16,14 @@ const markerPath = 'ops/r5/run-once-20260805-pending-scan-readonly.marker'
 const marker = read(markerPath)
 const markerDigest = createHash('sha256').update(marker).digest('hex')
 
-const sourceMain = 'cecd28485c8db64780aed844704690cf3278ed92'
+const sourceMain = '6d183fd933ebd3c24be4e60e39ef6d1e9f113238'
 const expectedDigest =
-  'aa5d748007c9db9754ec6422e044b564bf86a87edd12624d72b92a4a6e64dfce'
+  'e8efad1e1c34360ca2ac93a20a23d2750b0d860a3da0eb3833e8f009df71016c'
 
-describe('R5 pending-scan read-only diagnostic trigger', () => {
-  it('pins the exact failed run, watermark, error, and marker digest', () => {
+describe('R5 pending-scan read-only diagnostic V2 trigger', () => {
+  it('pins the failed burst, failed diagnostic, bounded watermark, and marker', () => {
     expect(marker).toBe(
-      'R5_PENDING_SCAN_DIAGNOSTIC_V1\nmode=read_only\nsource_main_commit=cecd28485c8db64780aed844704690cf3278ed92\nsource_failed_burst_run_id=31021223140\nrecovery_run_id=r5-recovery-selected-revision3-entry\nexpected_recovery_watermark_ledger=4138631\nerror=r5_recovery_batch_pending_scan_invalid\nnonce=r5-pending-scan-readonly-20260805-2348-jst\n',
+      'R5_PENDING_SCAN_DIAGNOSTIC_V2\nmode=read_only\nsource_main_commit=6d183fd933ebd3c24be4e60e39ef6d1e9f113238\nsource_failed_burst_run_id=31021223140\nsource_failed_diagnostic_run_id=31022568428\nrecovery_run_id=r5-recovery-selected-revision3-entry\nminimum_recovery_watermark_ledger=4138631\nmaximum_recovery_watermark_advance=256\nerror=r5_recovery_batch_pending_scan_invalid\nnonce=r5-pending-scan-readonly-v2-20260806-0147-jst\n',
     )
     expect(markerDigest).toBe(expectedDigest)
     expect(workflow).toContain(expectedDigest)
@@ -52,7 +52,7 @@ describe('R5 pending-scan read-only diagnostic trigger', () => {
     expect(executeCondition).not.toContain("github.event_name == 'push'")
   })
 
-  it('verifies the exact marker, parent, added path, and repository author', () => {
+  it('verifies the exact marker, parent, modified path, and author', () => {
     for (const required of [
       'fetch-depth: 2',
       `marker='${markerPath}'`,
@@ -60,30 +60,39 @@ describe('R5 pending-scan read-only diagnostic trigger', () => {
       'parent_sha="$(git rev-parse "${GITHUB_SHA}^")"',
       `test "$parent_sha" = ${sourceMain}`,
       'git diff-tree --no-commit-id --name-status',
-      "test \"$marker_change\" = $'A\\tops/r5/run-once-20260805-pending-scan-readonly.marker'",
+      "test \"$marker_change\" = $'M\\tops/r5/run-once-20260805-pending-scan-readonly.marker'",
       'test "$author_login" = badjoke-lab',
     ]) {
       expect(workflow).toContain(required)
     }
   })
 
-  it('uses only read-only Management API queries and sanitized output', () => {
+  it('retains state and function evidence before fail-closed checks', () => {
     for (const required of [
       'read_only: true',
       "const exactError = 'r5_recovery_batch_pending_scan_invalid'",
+      'const minimumWatermark = 4_138_631',
+      'const maximumWatermarkAdvance = 256',
+      'recoveryWatermarkAtLeastMinimum',
+      'recoveryWatermarkWithinDiagnosticBound',
       'pg_get_functiondef(p.oid)',
       'public.xrpl_phase_work',
       'public.xrpl_phase_messages',
       'xrpl_r5_v1.recovery_batches',
       'noncommittedWork',
       'nonterminalMessages',
-      'exactErrorLocatedOnce',
       'definitionSha256',
+      'checkFailures',
+      'retainedEvidence = true',
       'Exact function excerpt',
       'supabase-r5-pending-scan-diagnostic',
     ]) {
       expect(diagnostic).toContain(required)
     }
+
+    expect(diagnostic.indexOf('retainedEvidence = true')).toBeLessThan(
+      diagnostic.indexOf('if (checkFailures.length > 0)'),
+    )
 
     for (const forbidden of [
       'insert into',
@@ -117,7 +126,7 @@ describe('R5 pending-scan read-only diagnostic trigger', () => {
   it('adapts the canonical allowlist by exact replacements', () => {
     for (const required of [
       'R5 pending-scan diagnostic trigger policy',
-      'R5 pending-scan diagnostic and owner burst contract',
+      'R5 pending-scan V2 diagnostic and owner burst contract',
       'R5 read-only diagnostic push exception',
       'R5 diagnostic and burst locator count',
       'r5_burst: ["workflow_dispatch", "issue_comment", "push"]',
@@ -131,7 +140,7 @@ describe('R5 pending-scan read-only diagnostic trigger', () => {
     )
   })
 
-  it('does not add scheduled, broad-write, database-credential, or deployment capability', () => {
+  it('does not add scheduling, broad write, credentials, or deployment', () => {
     for (const forbidden of [
       '  schedule:',
       'pull_request_target',

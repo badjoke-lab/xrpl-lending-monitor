@@ -161,11 +161,11 @@ jobs:
           marker='ops/r5/run-once-20260805-pending-scan-readonly.marker'
           test -f "$marker"
           marker_sha="$(sha256sum "$marker" | cut -d' ' -f1)"
-          test "$marker_sha" = aa5d748007c9db9754ec6422e044b564bf86a87edd12624d72b92a4a6e64dfce
+          test "$marker_sha" = e8efad1e1c34360ca2ac93a20a23d2750b0d860a3da0eb3833e8f009df71016c
           parent_sha="$(git rev-parse "${GITHUB_SHA}^")"
-          test "$parent_sha" = cecd28485c8db64780aed844704690cf3278ed92
+          test "$parent_sha" = 6d183fd933ebd3c24be4e60e39ef6d1e9f113238
           marker_change="$(git diff-tree --no-commit-id --name-status -r "${GITHUB_SHA}^" "$GITHUB_SHA" -- "$marker")"
-          test "$marker_change" = $'A\tops/r5/run-once-20260805-pending-scan-readonly.marker'
+          test "$marker_change" = $'M\tops/r5/run-once-20260805-pending-scan-readonly.marker'
           author_login="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}" --jq '.author.login')"
           test "$author_login" = badjoke-lab
 
