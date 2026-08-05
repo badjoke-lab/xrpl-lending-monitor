@@ -19,13 +19,13 @@ const markerPath =
 const marker = read(markerPath)
 const markerDigest = createHash('sha256').update(marker).digest('hex')
 
-describe('R5 corrected twelve-ledger one-shot proof trigger', () => {
-  it('pins the V2 marker to the skipped V1 run and verified claim-cap state', () => {
+describe('R5 V3 twelve-ledger one-shot proof trigger', () => {
+  it('pins V3 to both prior failed proof runs and preclaim finalization', () => {
     expect(marker).toBe(
-      'R5_TWELVE_LEDGER_CLAIM_CAP_PROOF_V2\nmode=finite_bounded_recovery\nsource_commit=cfa3b22686c0ab9bfab6a74d8987ea41b7f66607\nsource_verification_run_id=31012179441\nprior_skipped_run_id=31013623911\nbatch_limit=8\nwall_seconds=900\nexpected_claim_cap=12\nnonce=twelve-ledger-claim-cap-proof-20260805-94d8c2ef\n',
+      'R5_TWELVE_LEDGER_CLAIM_CAP_PROOF_V3\nmode=finite_bounded_recovery\nsource_commit=1926c4c57f447761b6634fbf3900250a1eca0765\nsource_verification_run_id=31012179441\nprior_skipped_run_id=31013623911\nprior_watermark_drift_run_id=31014360049\npreclaim_finalization=required\nbatch_limit=8\nwall_seconds=900\nexpected_claim_cap=12\nnonce=twelve-ledger-claim-cap-proof-20260805-c41e7b6a\n',
     )
     expect(markerDigest).toBe(
-      '43396703cd3e87aa011b4afe900ee100b17868117b9b65c7f425465fff177e88',
+      '649957ed217fd98bd45d23721eeadb9c28b76a5d4c3d48d9d4614327135f1acb',
     )
     expect(workflow).toContain(markerDigest)
     expect(adapter).toContain(markerDigest)
@@ -41,7 +41,7 @@ describe('R5 corrected twelve-ledger one-shot proof trigger', () => {
     expect(workflow).not.toContain('diagnose-database-size:')
   })
 
-  it('moves the mutation boundary to exact runner-side git verification', () => {
+  it('keeps the mutation boundary in exact runner-side git verification', () => {
     const verifyStart = workflow.indexOf(
       '      - name: Verify exact bounded request and secret bindings',
     )
@@ -58,7 +58,7 @@ describe('R5 corrected twelve-ledger one-shot proof trigger', () => {
       `marker='${markerPath}'`,
       `test "$marker_sha" = ${markerDigest}`,
       'parent_sha="$(git rev-parse "${GITHUB_SHA}^")"',
-      'test "$parent_sha" = cfa3b22686c0ab9bfab6a74d8987ea41b7f66607',
+      'test "$parent_sha" = 1926c4c57f447761b6634fbf3900250a1eca0765',
       'git diff-tree --no-commit-id --name-status',
       "test \"$marker_change\" = $'M\\tops/r5/run-once-20260805-twelve-ledger-claim-cap-proof.marker'",
       'author_login="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}"',
@@ -133,8 +133,8 @@ describe('R5 corrected twelve-ledger one-shot proof trigger', () => {
       'old in updated',
       'new not in updated',
       'r5_burst: ["workflow_dispatch", "issue_comment", "push"]',
-      'R5 corrected proof marker and owner burst contract',
-      'R5 corrected finite-proof push exception',
+      'R5 V3 proof marker and owner burst contract',
+      'R5 V3 finite-proof push exception',
       'git diff-tree --no-commit-id --name-status',
       'bash "$generated_script" "$@"',
     ]) {
