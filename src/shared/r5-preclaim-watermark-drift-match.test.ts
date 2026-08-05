@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { isExactUncommittedWatermarkDrift } from '../../scripts/r5-preclaim-watermark-drift-match.mjs'
+import { isExactUncommittedWatermarkDriftFailure } from '../../scripts/r5-preclaim-watermark-drift-match.mjs'
 
 const actualFailedRunResponse = {
   schemaVersion: 1,
@@ -20,85 +20,81 @@ const actualFailedRunResponse = {
   },
 }
 
-describe('R5 exact uncommitted watermark drift matcher', () => {
-  it('matches the exact production response from run 31015285563', () => {
+function failure(response = actualFailedRunResponse, status = 500) {
+  return {
+    name: 'TriggerError',
+    message: `R5 trigger failed (${status}): ${JSON.stringify(response)}`,
+    transient: false,
+    response,
+  }
+}
+
+describe('R5 exact uncommitted watermark drift failure matcher', () => {
+  it('matches the exact production TriggerError from run 31016519593', () => {
     expect(
-      isExactUncommittedWatermarkDrift(
-        new Response(JSON.stringify(actualFailedRunResponse), { status: 500 }),
-        actualFailedRunResponse,
+      isExactUncommittedWatermarkDriftFailure(
+        failure(actualFailedRunResponse, 500),
       ),
     ).toBe(true)
   })
 
   it.each([
-    ['status', 409, actualFailedRunResponse],
+    ['status', failure(actualFailedRunResponse, 409)],
+    [
+      'error name',
+      { ...failure(), name: 'Error' },
+    ],
+    [
+      'transient boundary',
+      { ...failure(), transient: true },
+    ],
     [
       'schema version',
-      500,
-      { ...actualFailedRunResponse, schemaVersion: 2 },
+      failure({ ...actualFailedRunResponse, schemaVersion: 2 }),
     ],
     [
       'purpose',
-      500,
-      { ...actualFailedRunResponse, purpose: 'other-purpose' },
+      failure({ ...actualFailedRunResponse, purpose: 'other-purpose' }),
     ],
     [
       'operation mode',
-      500,
-      { ...actualFailedRunResponse, operationMode: 'finalize_boundary' },
+      failure({ ...actualFailedRunResponse, operationMode: 'finalize_boundary' }),
     ],
     [
       'run id',
-      500,
-      {
+      failure({
         ...actualFailedRunResponse,
         executor: { ...actualFailedRunResponse.executor, runId: 'other-run' },
-      },
+      }),
     ],
     [
       'batch id',
-      500,
-      {
+      failure({
         ...actualFailedRunResponse,
         executor: { ...actualFailedRunResponse.executor, batchId: 'batch-1' },
-      },
+      }),
     ],
     [
       'committed mutation',
-      500,
-      {
+      failure({
         ...actualFailedRunResponse,
         executor: {
           ...actualFailedRunResponse.executor,
           activeMutationCommitted: true,
         },
-      },
-    ],
-    [
-      'transient error',
-      500,
-      {
-        ...actualFailedRunResponse,
-        executor: { ...actualFailedRunResponse.executor, transient: true },
-      },
+      }),
     ],
     [
       'different error',
-      500,
-      {
+      failure({
         ...actualFailedRunResponse,
         executor: {
           ...actualFailedRunResponse.executor,
           error: 'some_other_error',
         },
-      },
+      }),
     ],
-  ])('rejects a changed %s boundary', (_name, status, body) => {
-    expect(
-      isExactUncommittedWatermarkDrift(
-        new Response(JSON.stringify(body), { status }),
-        body,
-      ),
-    ).toBe(false)
+  ])('rejects a changed %s boundary', (_name, changedFailure) => {
+    expect(isExactUncommittedWatermarkDriftFailure(changedFailure)).toBe(false)
   })
 })
