@@ -108,12 +108,9 @@ jobs:
           echo "XRPL_R5_RECOVERY_VERIFY_TOKEN=${recovery_token}" >> "$GITHUB_ENV"
 
       - name: Execute and verify one finite R5 recovery burst
-        # The contention wrapper retains the reviewed adapter:
-        # node scripts/run-supabase-r5-recovery-burst-adoption-aware.mjs
-        # The sequence-correction runner executes the reviewed controller source:
-        # node scripts/verify-supabase-r5-recovery-burst-adoption-aware.mjs
-        # Its retained ordinary predecessor remains:
         # node scripts/verify-supabase-r5-recovery-burst.mjs
+        # node scripts/verify-supabase-r5-recovery-burst-adoption-aware.mjs
+        # node scripts/run-supabase-r5-recovery-burst-adoption-aware.mjs
         run: node scripts/run-supabase-r5-recovery-burst-contention-aware.mjs
 
       - name: Upload sanitized burst evidence
@@ -136,7 +133,7 @@ jobs:
           test -s /tmp/r5-burst-comment.md
           gh issue comment 1175 --repo "$GITHUB_REPOSITORY" --body-file /tmp/r5-burst-comment.md
 
-  diagnose-pending-scan:
+  diagnose-r5-health-change:
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -149,7 +146,7 @@ jobs:
         with:
           fetch-depth: 2
 
-      - name: Verify exact read-only pending-scan diagnostic marker
+      - name: Verify exact read-only R5 health-change marker
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -161,32 +158,32 @@ jobs:
           marker='ops/r5/run-once-20260805-pending-scan-readonly.marker'
           test -f "$marker"
           marker_sha="$(sha256sum "$marker" | cut -d' ' -f1)"
-          test "$marker_sha" = e8efad1e1c34360ca2ac93a20a23d2750b0d860a3da0eb3833e8f009df71016c
+          test "$marker_sha" = bac45f8f4f8c3c9ddef903c154c01ccce223535235f061190b2ee17fb29177c8
           parent_sha="$(git rev-parse "${GITHUB_SHA}^")"
-          test "$parent_sha" = 6d183fd933ebd3c24be4e60e39ef6d1e9f113238
+          test "$parent_sha" = 08ee22ddd1dd1685d59329174264c57e7a0fd8d0
           marker_change="$(git diff-tree --no-commit-id --name-status -r "${GITHUB_SHA}^" "$GITHUB_SHA" -- "$marker")"
           test "$marker_change" = $'M\tops/r5/run-once-20260805-pending-scan-readonly.marker'
           author_login="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}" --jq '.author.login')"
           test "$author_login" = badjoke-lab
 
-      - name: Read pending-scan function and state boundaries
-        run: node scripts/diagnose-supabase-r5-pending-scan.mjs
+      - name: Read exact R5 identity and health fields
+        run: node scripts/diagnose-supabase-r5-health-change.mjs
 
-      - name: Upload sanitized pending-scan diagnostic
+      - name: Upload sanitized R5 health-change diagnostic
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: supabase-r5-pending-scan-diagnostic
-          path: supabase-r5-pending-scan-diagnostic
+          name: supabase-r5-health-change-diagnostic
+          path: supabase-r5-health-change-diagnostic
           if-no-files-found: error
           retention-days: 14
 
-      - name: Publish sanitized pending-scan diagnostic
+      - name: Publish sanitized R5 health-change diagnostic
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          test -s supabase-r5-pending-scan-diagnostic/diagnostic.md
-          gh issue comment 1175 --repo "$GITHUB_REPOSITORY" --body-file supabase-r5-pending-scan-diagnostic/diagnostic.md
+          test -s supabase-r5-health-change-diagnostic/diagnostic.md
+          gh issue comment 1175 --repo "$GITHUB_REPOSITORY" --body-file supabase-r5-health-change-diagnostic/diagnostic.md

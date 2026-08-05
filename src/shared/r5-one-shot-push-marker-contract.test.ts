@@ -11,37 +11,36 @@ function read(path: string): string {
 const workflow = read('.github/workflows/r5-bounded-recovery-burst.yml')
 const ci = read('.github/workflows/ci.yml')
 const adapter = read('scripts/check-actions-workflow-allowlist-r5-one-shot.sh')
-const diagnostic = read('scripts/diagnose-supabase-r5-pending-scan.mjs')
+const diagnostic = read('scripts/diagnose-supabase-r5-health-change.mjs')
 const markerPath = 'ops/r5/run-once-20260805-pending-scan-readonly.marker'
 const marker = read(markerPath)
 const markerDigest = createHash('sha256').update(marker).digest('hex')
-
-const sourceMain = '6d183fd933ebd3c24be4e60e39ef6d1e9f113238'
+const sourceMain = '08ee22ddd1dd1685d59329174264c57e7a0fd8d0'
 const expectedDigest =
-  'e8efad1e1c34360ca2ac93a20a23d2750b0d860a3da0eb3833e8f009df71016c'
+  'bac45f8f4f8c3c9ddef903c154c01ccce223535235f061190b2ee17fb29177c8'
 
-describe('R5 pending-scan read-only diagnostic V2 trigger', () => {
-  it('pins the failed burst, failed diagnostic, bounded watermark, and marker', () => {
+describe('R5 health-change read-only diagnostic trigger', () => {
+  it('pins the successful and failed bounded bursts', () => {
     expect(marker).toBe(
-      'R5_PENDING_SCAN_DIAGNOSTIC_V2\nmode=read_only\nsource_main_commit=6d183fd933ebd3c24be4e60e39ef6d1e9f113238\nsource_failed_burst_run_id=31021223140\nsource_failed_diagnostic_run_id=31022568428\nrecovery_run_id=r5-recovery-selected-revision3-entry\nminimum_recovery_watermark_ledger=4138631\nmaximum_recovery_watermark_advance=256\nerror=r5_recovery_batch_pending_scan_invalid\nnonce=r5-pending-scan-readonly-v2-20260806-0147-jst\n',
+      'R5_HEALTH_CHANGE_DIAGNOSTIC_V1\nmode=read_only\nsource_main_commit=08ee22ddd1dd1685d59329174264c57e7a0fd8d0\nsource_successful_burst_run_id=31030705329\nsource_failed_burst_run_id=31030990054\nrecovery_run_id=r5-recovery-selected-revision3-entry\nerror=R5 recovery identity or health changed\nnonce=r5-health-change-readonly-20260806-0242-jst\n',
     )
     expect(markerDigest).toBe(expectedDigest)
     expect(workflow).toContain(expectedDigest)
     expect(adapter).toContain(expectedDigest)
   })
 
-  it('binds push only to the exact read-only diagnostic path', () => {
+  it('binds push only to the read-only health diagnostic', () => {
     for (const required of [
       '  push:',
       '    branches: [main]',
       `      - ${markerPath}`,
-      'diagnose-pending-scan:',
+      'diagnose-r5-health-change:',
       "github.event_name == 'push' && github.ref == 'refs/heads/main'",
-      'node scripts/diagnose-supabase-r5-pending-scan.mjs',
+      'node scripts/diagnose-supabase-r5-health-change.mjs',
+      'supabase-r5-health-change-diagnostic',
     ]) {
       expect(workflow).toContain(required)
     }
-
     const executeCondition = workflow.slice(
       workflow.indexOf('  execute-bounded-burst:'),
       workflow.indexOf(
@@ -57,7 +56,6 @@ describe('R5 pending-scan read-only diagnostic V2 trigger', () => {
       'fetch-depth: 2',
       `marker='${markerPath}'`,
       `test "$marker_sha" = ${expectedDigest}`,
-      'parent_sha="$(git rev-parse "${GITHUB_SHA}^")"',
       `test "$parent_sha" = ${sourceMain}`,
       'git diff-tree --no-commit-id --name-status',
       "test \"$marker_change\" = $'M\\tops/r5/run-once-20260805-pending-scan-readonly.marker'",
@@ -67,33 +65,32 @@ describe('R5 pending-scan read-only diagnostic V2 trigger', () => {
     }
   })
 
-  it('retains state and function evidence before fail-closed checks', () => {
+  it('compares every verifier identity and health condition read only', () => {
     for (const required of [
       'read_only: true',
-      "const exactError = 'r5_recovery_batch_pending_scan_invalid'",
-      'const minimumWatermark = 4_138_631',
-      'const maximumWatermarkAdvance = 256',
-      'recoveryWatermarkAtLeastMinimum',
-      'recoveryWatermarkWithinDiagnosticBound',
-      'pg_get_functiondef(p.oid)',
-      'public.xrpl_phase_work',
-      'public.xrpl_phase_messages',
-      'xrpl_r5_v1.recovery_batches',
+      '31030990054',
+      "purpose: 'r5-supabase-active-recovery-summary'",
+      "profileId: 'supabase_free_postgres_pgcron_edge'",
+      'profileRevision: 3',
+      "sourceProfileId: 'supabase-devnet'",
+      "network: 'devnet'",
+      "epochId: 'supabase-r4c2c-v1'",
+      'batchSize: 24',
+      'lastError: null',
+      'exactRevision3Identity',
+      'checkpointDescendantChainProved',
+      'lagArithmeticExact',
+      'stabilizationAuthorized',
+      'soakAuthorized',
+      'activeBatches',
+      'recentBatches',
       'noncommittedWork',
       'nonterminalMessages',
-      'definitionSha256',
-      'checkFailures',
-      'retainedEvidence = true',
-      'Exact function excerpt',
-      'supabase-r5-pending-scan-diagnostic',
+      'mismatches',
+      'recent batch errors:',
     ]) {
       expect(diagnostic).toContain(required)
     }
-
-    expect(diagnostic.indexOf('retainedEvidence = true')).toBeLessThan(
-      diagnostic.indexOf('if (checkFailures.length > 0)'),
-    )
-
     for (const forbidden of [
       'insert into',
       'update public.',
@@ -125,9 +122,9 @@ describe('R5 pending-scan read-only diagnostic V2 trigger', () => {
 
   it('adapts the canonical allowlist by exact replacements', () => {
     for (const required of [
-      'R5 pending-scan diagnostic trigger policy',
-      'R5 pending-scan V2 diagnostic and owner burst contract',
-      'R5 read-only diagnostic push exception',
+      'R5 health-change diagnostic trigger policy',
+      'R5 health-change diagnostic and owner burst contract',
+      'R5 read-only health diagnostic push exception',
       'R5 diagnostic and burst locator count',
       'r5_burst: ["workflow_dispatch", "issue_comment", "push"]',
       'burst.count("gh issue comment 1175") != 2',

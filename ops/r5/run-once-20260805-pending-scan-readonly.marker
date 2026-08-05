@@ -1,10 +1,8 @@
-R5_PENDING_SCAN_DIAGNOSTIC_V2
+R5_HEALTH_CHANGE_DIAGNOSTIC_V1
 mode=read_only
-source_main_commit=6d183fd933ebd3c24be4e60e39ef6d1e9f113238
-source_failed_burst_run_id=31021223140
-source_failed_diagnostic_run_id=31022568428
+source_main_commit=08ee22ddd1dd1685d59329174264c57e7a0fd8d0
+source_successful_burst_run_id=31030705329
+source_failed_burst_run_id=31030990054
 recovery_run_id=r5-recovery-selected-revision3-entry
-minimum_recovery_watermark_ledger=4138631
-maximum_recovery_watermark_advance=256
-error=r5_recovery_batch_pending_scan_invalid
-nonce=r5-pending-scan-readonly-v2-20260806-0147-jst
+error=R5 recovery identity or health changed
+nonce=r5-health-change-readonly-20260806-0242-jst
