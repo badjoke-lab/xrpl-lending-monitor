@@ -45,6 +45,13 @@ function object(value: unknown, name: string): JsonObject {
   return value as JsonObject
 }
 
+function requiredPositiveInteger(value: unknown, name: string): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1) {
+    throw new Error(`${name} must be a positive safe integer`)
+  }
+  return value
+}
+
 async function boundedResponseText(
   response: Response,
   maximumBytes: number,
@@ -52,7 +59,7 @@ async function boundedResponseText(
   if (!response.body) {
     const text = await response.text()
     if (byteLength(text) > maximumBytes) {
-      throw new Error('R5 executor response exceeds byte limit')
+      throw new Error('R5 downstream response exceeds byte limit')
     }
     return text
   }
@@ -66,8 +73,8 @@ async function boundedResponseText(
       if (done) break
       total += value.byteLength
       if (total > maximumBytes) {
-        await reader.cancel('R5 executor response exceeds byte limit')
-        throw new Error(`R5 executor response exceeds byte limit:${total}`)
+        await reader.cancel('R5 downstream response exceeds byte limit')
+        throw new Error(`R5 downstream response exceeds byte limit:${total}`)
       }
       text += decoder.decode(value, { stream: true })
     }
@@ -95,44 +102,66 @@ Deno.serve(async (request) => {
     if ((body.run_id ?? RECOVERY_RUN_ID) !== RECOVERY_RUN_ID) {
       return json({ error: 'invalid_run_id' }, 400)
     }
-
-    const executorBody = JSON.stringify({
-      source: 'github_actions',
-      run_id: RECOVERY_RUN_ID,
-    })
-    const requestBytes = byteLength(executorBody)
-    if (requestBytes > MAX_REQUEST_BYTES) {
-      throw new Error(`R5 executor request exceeds byte limit:${requestBytes}`)
+    const mode = body.mode ?? 'execute_batch'
+    if (mode !== 'execute_batch' && mode !== 'finalize_boundary') {
+      return json({ error: 'invalid_mode' }, 400)
     }
 
     const key = secretKey()
-    const response = await fetch(
-      `${env('SUPABASE_URL')}/functions/v1/xrpl-r5-recovery-batch`,
-      {
-        method: 'POST',
-        headers: {
-          apikey: key,
-          authorization: `Bearer ${key}`,
-          'content-type': 'application/json',
-        },
-        body: executorBody,
-        signal: AbortSignal.timeout(70_000),
+    let downstreamUrl: string
+    let downstreamBody: string
+    let resultField: 'executor' | 'finalization'
+    if (mode === 'finalize_boundary') {
+      const sourceRunId = requiredPositiveInteger(body.source_run_id, 'source_run_id')
+      downstreamUrl =
+        `${env('SUPABASE_URL')}/rest/v1/rpc/xrpl_finalize_r5_recovery_burst_boundary`
+      downstreamBody = JSON.stringify({
+        p_run_id: RECOVERY_RUN_ID,
+        p_source_run_id: sourceRunId,
+        p_owner: `r5-burst-finalize-${sourceRunId}`,
+        p_finalized_at: new Date().toISOString(),
+      })
+      resultField = 'finalization'
+    } else {
+      downstreamUrl =
+        `${env('SUPABASE_URL')}/functions/v1/xrpl-r5-recovery-batch`
+      downstreamBody = JSON.stringify({
+        source: 'github_actions',
+        run_id: RECOVERY_RUN_ID,
+      })
+      resultField = 'executor'
+    }
+
+    const requestBytes = byteLength(downstreamBody)
+    if (requestBytes > MAX_REQUEST_BYTES) {
+      throw new Error(`R5 downstream request exceeds byte limit:${requestBytes}`)
+    }
+
+    const response = await fetch(downstreamUrl, {
+      method: 'POST',
+      headers: {
+        apikey: key,
+        authorization: `Bearer ${key}`,
+        'content-type': 'application/json',
       },
-    )
+      body: downstreamBody,
+      signal: AbortSignal.timeout(70_000),
+    })
     const text = await boundedResponseText(response, MAX_EXECUTOR_RESPONSE_BYTES)
     const responseBytes = byteLength(text)
-    let executor: unknown
+    let result: unknown
     try {
-      executor = JSON.parse(text)
+      result = JSON.parse(text)
     } catch {
-      executor = { raw: text.slice(0, 2_000) }
+      result = { raw: text.slice(0, 2_000) }
     }
 
     return json(
       {
         schemaVersion: 1,
         purpose: PURPOSE,
-        executor,
+        operationMode: mode,
+        [resultField]: result,
         trigger: {
           requestBytes,
           responseBytes,
@@ -146,6 +175,7 @@ Deno.serve(async (request) => {
               < FIXED_FUNCTION_RESPONSE_RESERVE_BYTES,
           twoInvocationReservationUsed: true,
           serviceKeyNotReturned: true,
+          noLedgerScanInFinalizationMode: mode === 'finalize_boundary',
         },
       },
       response.status,
