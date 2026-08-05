@@ -26,6 +26,7 @@ const retainedFinalBound =
 describe('R5 finalization initial-gap bounded repair', () => {
   it('patches only the initial pre-drain bound from 24 to 256', () => {
     expect(source).toContain(oldInitialBound)
+    expect(source).not.toContain(newInitialBound)
     expect(source).toContain(retainedDrainBound)
     expect(source).toContain(retainedFinalBound)
 
