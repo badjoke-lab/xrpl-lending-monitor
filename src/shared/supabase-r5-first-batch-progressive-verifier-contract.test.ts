@@ -7,7 +7,9 @@ function read(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
-const verifier = read('scripts/verify-supabase-r5-first-recovery-batch.mjs')
+const verifier = read(
+  'scripts/verify-supabase-r5-first-recovery-batch-strict.mjs',
+)
 
 describe('R5 first-batch progressive verifier contract', () => {
   it('keeps batch one immutable while allowing later recovery progress', () => {
