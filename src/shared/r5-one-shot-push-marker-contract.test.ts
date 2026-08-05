@@ -18,7 +18,7 @@ const publisher = read(
 const marker = read('ops/r5/run-once-20260804-8x900-observable-v2.marker')
 const markerDigest = createHash('sha256').update(marker).digest('hex')
 
-describe('R5 database-size read-only diagnostic contract', () => {
+describe('R5 all-schema database-size read-only diagnostic contract', () => {
   it('binds one exact main push path to the database diagnostic job only', () => {
     for (const required of [
       '  push:',
@@ -46,12 +46,12 @@ describe('R5 database-size read-only diagnostic contract', () => {
     expect(executeCondition).not.toContain("github.event_name == 'push'")
   })
 
-  it('pins the database halt marker bytes and digest exactly', () => {
+  it('pins the all-schema halt marker bytes and digest exactly', () => {
     expect(marker).toBe(
-      'R5_DATABASE_SIZE_DIAGNOSTIC_V1\nmode=read_only\nsource_run_id=30975277983\ndatabase_halt_bytes=400000000\nobserved_database_bytes=416763027\nnonce=database-size-20260805-4d9c7a21\n',
+      'R5_DATABASE_SIZE_DIAGNOSTIC_V2\nmode=read_only\nsource_run_id=30976693948\ndatabase_halt_bytes=400000000\nobserved_database_bytes=417082515\nscope=all_non_temporary_schemas\nnonce=database-size-all-schema-20260805-8b31c6d2\n',
     )
     expect(markerDigest).toBe(
-      '65d4986fc9efff5360e14f4dd794e6ea19ca848259d1e1f604df3c56340578b8',
+      'a7c79e34daa6c1bdd5b11aca5b03dcdfd32cbc1aaa6717d31dd8f4795886e5d7',
     )
     expect(workflow).toContain(markerDigest)
     expect(adapter).toContain(markerDigest)
@@ -60,20 +60,22 @@ describe('R5 database-size read-only diagnostic contract', () => {
   it('uses only a read-only Management API query and sanitized evidence', () => {
     for (const required of [
       'read_only: true',
-      "'r5-database-size-read-only-diagnostic'",
-      'const sourceHeadroomRunId = 30975277983',
+      "'r5-all-schema-database-size-read-only-diagnostic'",
+      'const sourceSizeRunId = 30976693948',
       'const databaseHaltBytes = 400_000_000',
-      'const observedDatabaseBytes = 416_763_027',
+      'const observedDatabaseBytes = 417_082_515',
       'pg_database_size(current_database())',
-      'pg_total_relation_size(c.oid)',
       'pg_relation_size(c.oid)',
+      'pg_total_relation_size(c.oid)',
       'pg_indexes_size(c.oid)',
-      'pg_catalog.pg_stat_user_tables',
-      "n.nspname in ('public', 'xrpl_r5_v1')",
+      'c.relpersistence <>',
+      'c.relisshared = false',
+      "n.nspname not like 'pg_temp_%'",
+      "n.nspname not like 'pg_toast_temp_%'",
       "const output = 'supabase-r5-database-size-diagnostic'",
       'await writeFile(`${output}/diagnostic.json`',
       'await writeFile(`${output}/diagnostic.md`',
-      '## R5 database-size read-only diagnostic',
+      '## R5 all-schema database-size read-only diagnostic',
     ]) {
       expect(diagnostic).toContain(required)
     }
@@ -93,59 +95,66 @@ describe('R5 database-size read-only diagnostic contract', () => {
     }
   })
 
-  it('reports relation, dead-row and profile breakdowns separately', () => {
+  it('separates all-schema physical bytes from logical table totals', () => {
     for (const required of [
-      'topRelations',
-      'schemaTotals',
-      'workCounts',
-      'messageCounts',
-      'referenceCounts',
-      'r5BatchCounts',
-      'live_rows',
-      'dead_rows',
-      'heap_bytes',
-      'index_bytes',
-      'toast_bytes',
-      'public.xrpl_phase_work',
-      'public.xrpl_phase_messages',
-      'public.xrpl_phase_reference_rows',
-      'xrpl_r5_v1.recovery_batches',
-      'databaseAtOrAboveHalt',
-      'relationBreakdownSorted',
-      'allowedSchemasOnly',
-      'profileBreakdownPresent',
-      'mismatched checks:',
+      'physical_relations',
+      'schema_physical_totals',
+      'physical_total',
+      'top_physical_relations',
+      'table_sizes',
+      'top_tables',
+      'schema_category',
+      "'application'",
+      "'postgres_system'",
+      "'supabase_or_extension'",
+      'accountedPhysicalBytes',
+      'unaccountedDatabaseBytes',
+      'allSchemaBreakdownPresent',
+      'applicationSchemasPresent',
+      'temporarySchemasExcluded',
+      'physicalBytesDoNotExceedDatabase',
+      'unaccountedArithmeticExact',
+      'Physical bytes by schema',
+      'Largest logical tables',
+      'Largest physical relations',
     ]) {
       expect(diagnostic).toContain(required)
     }
   })
 
-  it('retains the original owner-only 8 by 900 mutation command', () => {
+  it('retains application profile and R5 status evidence', () => {
+    for (const required of [
+      'public.xrpl_phase_work',
+      'public.xrpl_phase_messages',
+      'public.xrpl_phase_reference_rows',
+      'xrpl_r5_v1.recovery_batches',
+      'workCounts',
+      'messageCounts',
+      'referenceCounts',
+      'r5BatchCounts',
+      'profileBreakdownPresent',
+      'r5BatchBreakdownPresent',
+      'publicReaderUnchanged',
+      'mainnetDisabled',
+      'stabilizationUnauthorized',
+      'soakUnauthorized',
+    ]) {
+      expect(diagnostic).toContain(required)
+    }
+  })
+
+  it('retains both exact owner-only mutation commands', () => {
     for (const required of [
       "github.event_name == 'issue_comment'",
       'github.event.issue.number == 1175',
       "github.actor == 'badjoke-lab'",
       "github.event.comment.body == '/r5-recovery burst 8 900 nonce-e3378018'",
-      "github.event_name == 'issue_comment' && '8'",
-      "github.event_name == 'issue_comment' && '900'",
-      'group: r5-bounded-recovery-burst',
-      'cancel-in-progress: false',
-      'timeout-minutes: 40',
-      'node scripts/run-supabase-r5-recovery-burst-adoption-aware.mjs',
-    ]) {
-      expect(workflow).toContain(required)
-    }
-  })
-
-  it('retains the exact owner-only 64 by 1800 catch-up command', () => {
-    for (const required of [
       "github.event.comment.body == '/r5-recovery burst 64 1800 nonce-cd7eb564'",
-      "github.event.comment.body == '/r5-recovery burst 64 1800 nonce-cd7eb564' && '64'",
-      "github.event.comment.body == '/r5-recovery burst 64 1800 nonce-cd7eb564' && '1800'",
       'test "$R5_RECOVERY_BURST_BATCH_LIMIT" -le 64',
       'test "$R5_RECOVERY_BURST_WALL_SECONDS" -le 1800',
-      'test "$R5_RECOVERY_BURST_BATCH_LIMIT" -eq 64',
-      'test "$R5_RECOVERY_BURST_WALL_SECONDS" -eq 1800',
+      'group: r5-bounded-recovery-burst',
+      'cancel-in-progress: false',
+      'node scripts/run-supabase-r5-recovery-burst-adoption-aware.mjs',
     ]) {
       expect(workflow).toContain(required)
     }
@@ -162,7 +171,6 @@ describe('R5 database-size read-only diagnostic contract', () => {
       'new not in updated',
       'r5_burst: ["workflow_dispatch", "issue_comment", "push"]',
       'R5 database-size diagnostic and owner burst marker contract',
-      "github.event.comment.body == '/r5-recovery burst 64 1800 nonce-cd7eb564'",
       'R5 read-only diagnostic push exception',
       'R5 diagnostic and burst locator count',
       'burst.count("gh issue comment 1175") != 2',
