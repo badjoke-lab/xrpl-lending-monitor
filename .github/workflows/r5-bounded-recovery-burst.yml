@@ -23,6 +23,7 @@ on:
     branches: [main]
     paths:
       - ops/r5/run-once-20260804-8x900-observable-v2.marker
+      - ops/r5/run-once-20260805-twelve-ledger-claim-cap-proof.marker
 
 permissions:
   contents: read
@@ -55,6 +56,14 @@ jobs:
             || github.event.comment.body == '/r5-recovery burst 64 1800 nonce-cd7eb564'
           )
         )
+        || (
+          github.event_name == 'push'
+          && github.ref == 'refs/heads/main'
+          && (
+            contains(github.event.head_commit.added, 'ops/r5/run-once-20260805-twelve-ledger-claim-cap-proof.marker')
+            || contains(github.event.head_commit.modified, 'ops/r5/run-once-20260805-twelve-ledger-claim-cap-proof.marker')
+          )
+        )
       }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
@@ -62,15 +71,17 @@ jobs:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
       R5_RECOVERY_BURST_BATCH_LIMIT: >-
-        ${{ github.event_name == 'issue_comment' && github.event.comment.body == '/r5-recovery burst 64 1800 nonce-cd7eb564' && '64' || github.event_name == 'issue_comment' && '8' || inputs.batch_limit }}
+        ${{ github.event_name == 'push' && '8' || github.event_name == 'issue_comment' && github.event.comment.body == '/r5-recovery burst 64 1800 nonce-cd7eb564' && '64' || github.event_name == 'issue_comment' && '8' || inputs.batch_limit }}
       R5_RECOVERY_BURST_WALL_SECONDS: >-
-        ${{ github.event_name == 'issue_comment' && github.event.comment.body == '/r5-recovery burst 64 1800 nonce-cd7eb564' && '1800' || github.event_name == 'issue_comment' && '900' || inputs.wall_seconds }}
+        ${{ github.event_name == 'push' && '900' || github.event_name == 'issue_comment' && github.event.comment.body == '/r5-recovery burst 64 1800 nonce-cd7eb564' && '1800' || github.event_name == 'issue_comment' && '900' || inputs.wall_seconds }}
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
       - name: Verify exact bounded request and secret bindings
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
@@ -90,6 +101,18 @@ jobs:
               test "$R5_RECOVERY_BURST_BATCH_LIMIT" -eq 64
               test "$R5_RECOVERY_BURST_WALL_SECONDS" -eq 1800
             fi
+          fi
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+            test "$GITHUB_REF" = refs/heads/main
+            test "$R5_RECOVERY_BURST_BATCH_LIMIT" -eq 8
+            test "$R5_RECOVERY_BURST_WALL_SECONDS" -eq 900
+            marker='ops/r5/run-once-20260805-twelve-ledger-claim-cap-proof.marker'
+            test -f "$marker"
+            marker_sha="$(sha256sum "$marker" | cut -d' ' -f1)"
+            test "$marker_sha" = ed3acdcfdbaf52f1f50a67762fc744659e6e2d74c2197e10f26693cb40b7efd3
+            test "$(git rev-parse "${GITHUB_SHA}^")" = dc9f3fc36e5bf71f4462542fdfa03f135f0a61c6
+            author_login="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}" --jq '.author.login')"
+            test "$author_login" = badjoke-lab
           fi
 
       - name: Set up Supabase CLI
