@@ -3,30 +3,35 @@ import { resolve } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-const source = readFileSync(
-  resolve(
-    process.cwd(),
-    'scripts/run-supabase-r5-recovery-burst-contention-aware.mjs',
-  ),
-  'utf8',
-)
+function read(path: string): string {
+  return readFileSync(resolve(process.cwd(), path), 'utf8')
+}
+
+const source = read('scripts/run-supabase-r5-recovery-burst-contention-aware.mjs')
+const matcher = read('scripts/r5-preclaim-watermark-drift-match.mjs')
 
 describe('R5 preclaim watermark-drift finalization', () => {
-  it('matches only the exact uncommitted claim drift', () => {
+  it('matches only the exact response-side uncommitted claim drift', () => {
     for (const required of [
       "const exactWatermarkDrift = 'r5_recovery_batch_watermark_drift'",
-      'response.status === 500',
-      "requestBody?.run_id === recoveryRunId",
-      "requestBody?.mode !== 'finalize_boundary'",
+      'response?.status === 500',
+      'body?.schemaVersion === 1',
       "body?.operationMode === 'execute_batch'",
       'executor?.ok === false',
       'executor?.transient === false',
+      "executor?.runId === recoveryRunId",
       'executor?.batchId === null',
       'executor?.activeMutationCommitted === false',
       'executor.error.includes(exactWatermarkDrift)',
     ]) {
-      expect(source).toContain(required)
+      expect(matcher).toContain(required)
     }
+    expect(source).toContain('url.includes(triggerPath)')
+    expect(source).toContain(
+      'isExactUncommittedWatermarkDrift(response, responseBody)',
+    )
+    expect(source).not.toContain('requestBody?.run_id')
+    expect(source).not.toContain('parseObjectBody')
   })
 
   it('runs the correction at most once in one controller process', () => {

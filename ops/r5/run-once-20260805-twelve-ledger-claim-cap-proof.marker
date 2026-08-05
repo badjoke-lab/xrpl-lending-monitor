@@ -1,11 +1,13 @@
-R5_TWELVE_LEDGER_CLAIM_CAP_PROOF_V3
+R5_TWELVE_LEDGER_CLAIM_CAP_PROOF_V4
 mode=finite_bounded_recovery
-source_commit=1926c4c57f447761b6634fbf3900250a1eca0765
+source_commit=328395146157988d438295a6777d235d34ea9726
 source_verification_run_id=31012179441
 prior_skipped_run_id=31013623911
 prior_watermark_drift_run_id=31014360049
+prior_preclaim_match_miss_run_id=31015285563
 preclaim_finalization=required
+match_boundary=response_only_exact_uncommitted_drift
 batch_limit=8
 wall_seconds=900
 expected_claim_cap=12
-nonce=twelve-ledger-claim-cap-proof-20260805-c41e7b6a
+nonce=twelve-ledger-claim-cap-proof-20260805-v4-a81f7c3d
