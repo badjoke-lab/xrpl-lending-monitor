@@ -132,11 +132,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node scripts/publish-supabase-r5-recovery-burst-run-locator.mjs \
-            > /tmp/r5-burst-comment.md
+          node scripts/publish-supabase-r5-recovery-burst-run-locator.mjs > /tmp/r5-burst-comment.md
           test -s /tmp/r5-burst-comment.md
-          gh issue comment 1175 --repo "$GITHUB_REPOSITORY" \
-            --body-file /tmp/r5-burst-comment.md
+          gh issue comment 1175 --repo "$GITHUB_REPOSITORY" --body-file /tmp/r5-burst-comment.md
 
   diagnose-pending-scan:
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
@@ -145,11 +143,9 @@ jobs:
     env:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
-
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
-
       - name: Verify exact read-only diagnostic marker
         env:
           GH_TOKEN: ${{ github.token }}
@@ -162,16 +158,11 @@ jobs:
           marker='ops/r5/run-once-20260804-8x900-observable-v2.marker'
           test -f "$marker"
           marker_sha="$(sha256sum "$marker" | cut -d' ' -f1)"
-          test "$marker_sha" = bf47940252a652535df1f6876904e0ba32302dc1906bfd3b3caf57827fc9591e
-          author_login="$(
-            gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}" \
-              --jq '.author.login'
-          )"
+          test "$marker_sha" = f75fc25c9f6b1e255f773115cbd447cae7ced88a7afc401b22b898d7110eef08
+          author_login="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}" --jq '.author.login')"
           test "$author_login" = badjoke-lab
-
-      - name: Read and verify the R5 pending scan boundary
+      - name: Read and verify the R5 memory halt boundary
         run: node scripts/diagnose-supabase-r5-pending-scan.mjs
-
       - name: Upload sanitized pending scan diagnostic
         if: always()
         uses: actions/upload-artifact@v4
@@ -180,7 +171,6 @@ jobs:
           path: supabase-r5-pending-scan-diagnostic
           if-no-files-found: error
           retention-days: 14
-
       - name: Publish sanitized pending scan diagnostic
         if: always()
         env:
@@ -189,5 +179,4 @@ jobs:
         run: |
           set -euo pipefail
           test -s supabase-r5-pending-scan-diagnostic/diagnostic.md
-          gh issue comment 1175 --repo "$GITHUB_REPOSITORY" \
-            --body-file supabase-r5-pending-scan-diagnostic/diagnostic.md
+          gh issue comment 1175 --repo "$GITHUB_REPOSITORY" --body-file supabase-r5-pending-scan-diagnostic/diagnostic.md
