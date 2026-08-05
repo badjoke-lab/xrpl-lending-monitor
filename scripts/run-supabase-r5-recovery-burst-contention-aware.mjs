@@ -29,6 +29,27 @@ if (
   throw new Error('R5 generated preclaim matcher embedding did not converge')
 }
 
+const embeddedCollectorContentionMatcher = [
+  "const r5CollectorContentionError = 'r5_checkpoint_drain_collector_not_quiescent'",
+  '',
+  'function isExactUncommittedCollectorContentionFailure(error) {',
+  '  const body = error?.response',
+  '  const executor = body?.executor',
+  "  return error?.name === 'TriggerError'",
+  '    && error?.transient === false',
+  "    && typeof error?.message === 'string'",
+  "    && error.message.startsWith('R5 trigger failed (500): ')",
+  '    && body?.schemaVersion === 1',
+  "    && body?.purpose === 'r5-first-active-recovery-batch'",
+  "    && body?.operationMode === 'execute_batch'",
+  '    && executor?.activeMutationCommitted === false',
+  '    && executor?.batchId === null',
+  '    && executor?.transient === false',
+  "    && typeof executor?.error === 'string'",
+  '    && executor.error.includes(r5CollectorContentionError)',
+  '}',
+].join('\n')
+
 replaceExactlyOnce(
   'R5 generated preclaim matcher installation',
   [
@@ -40,6 +61,8 @@ replaceExactlyOnce(
     "const retryableDeclineReasons = new Set(['batch_lease_active', 'not_claimed'])",
     '',
     embeddedMatcher.trimEnd(),
+    '',
+    embeddedCollectorContentionMatcher,
     '',
     'let preclaimFinalizationUsed = false',
     '',
@@ -82,6 +105,12 @@ replaceExactlyOnce(
     '          soakAuthorized: false,',
     '        }))',
     '        lastTrigger = await invokeTrigger()',
+    '      } else if (',
+    '        error instanceof TriggerError',
+    '        && isExactUncommittedCollectorContentionFailure(error)',
+    '      ) {',
+    '        transientRetries += 1',
+    '        lastTrigger = error.response',
     '      } else {',
     '        if (!(error instanceof TriggerError) || error.transient !== true) throw error',
     '        transientRetries += 1',
