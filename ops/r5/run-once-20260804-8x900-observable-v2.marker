@@ -1,6 +1,6 @@
-R5_MEMORY_HALT_DIAGNOSTIC_V8
+R5_DATABASE_SIZE_DIAGNOSTIC_V1
 mode=read_only
-run_id=r5-recovery-selected-revision3-entry
-failed_burst_run_id=30966882019
-failed_batch_id=r5-batch-v1-r5-recovery-selected-revision3-entry-00000238
-nonce=diagnostic-20260805-6f3a2c91
+source_run_id=30975277983
+database_halt_bytes=400000000
+observed_database_bytes=416763027
+nonce=database-size-20260805-4d9c7a21
