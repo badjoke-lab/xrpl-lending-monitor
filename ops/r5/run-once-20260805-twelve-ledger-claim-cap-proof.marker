@@ -1,8 +1,9 @@
-R5_TWELVE_LEDGER_CLAIM_CAP_PROOF_V1
+R5_TWELVE_LEDGER_CLAIM_CAP_PROOF_V2
 mode=finite_bounded_recovery
-source_commit=dc9f3fc36e5bf71f4462542fdfa03f135f0a61c6
+source_commit=cfa3b22686c0ab9bfab6a74d8987ea41b7f66607
 source_verification_run_id=31012179441
+prior_skipped_run_id=31013623911
 batch_limit=8
 wall_seconds=900
 expected_claim_cap=12
-nonce=twelve-ledger-claim-cap-proof-20260805-6db3f1a2
+nonce=twelve-ledger-claim-cap-proof-20260805-94d8c2ef
