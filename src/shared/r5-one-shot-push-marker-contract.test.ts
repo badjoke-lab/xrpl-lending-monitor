@@ -19,14 +19,14 @@ const markerPath =
 const marker = read(markerPath)
 const markerDigest = createHash('sha256').update(marker).digest('hex')
 
-const sourceMain = '62f5183d7058711f97660a6e8b19bcb156ec8a6d'
+const sourceMain = 'c353e4d26901c5da84d51d97beb0fc5986ee8b7c'
 const expectedDigest =
-  '15d9b234d8583e3e1cef2913b3754e6c3c9b8770ba3590b5d25147bbff6d221d'
+  'a55737c05bdb141fbbd616cf5aa93d4dc1f21ac3e9c265637ba2d3a98e45515d'
 
-describe('R5 V5 twelve-ledger one-shot proof trigger', () => {
-  it('pins V5 to all prior failures and generated-controller matching', () => {
+describe('R5 V6 twelve-ledger one-shot proof trigger', () => {
+  it('pins V6 to the verified initial-gap repair and all prior failures', () => {
     expect(marker).toBe(
-      'R5_TWELVE_LEDGER_CLAIM_CAP_PROOF_V5\nmode=finite_bounded_recovery\nsource_commit=62f5183d7058711f97660a6e8b19bcb156ec8a6d\nsource_verification_run_id=31012179441\nprior_skipped_run_id=31013623911\nprior_watermark_drift_run_id=31014360049\nprior_preclaim_match_miss_run_id=31015285563\nprior_outer_hook_miss_run_id=31016519593\npreclaim_finalization=required\nmatch_boundary=generated_controller_trigger_error\nbatch_limit=8\nwall_seconds=900\nexpected_claim_cap=12\nnonce=twelve-ledger-claim-cap-proof-20260805-v5-6e1d2f9c\n',
+      'R5_TWELVE_LEDGER_CLAIM_CAP_PROOF_V6\nmode=finite_bounded_recovery\nsource_commit=c353e4d26901c5da84d51d97beb0fc5986ee8b7c\nsource_verification_run_id=31012179441\nsource_initial_gap_verification_run_id=31019054351\nprior_skipped_run_id=31013623911\nprior_watermark_drift_run_id=31014360049\nprior_preclaim_match_miss_run_id=31015285563\nprior_outer_hook_miss_run_id=31016519593\nprior_initial_gap_failure_run_id=31018077125\npreclaim_finalization=required\nfinalization_initial_gap_bound=256\nfinalization_post_drain_advance_bound=24\nmatch_boundary=generated_controller_trigger_error\nbatch_limit=8\nwall_seconds=900\nexpected_claim_cap=12\nnonce=twelve-ledger-claim-cap-proof-20260805-v6-4bd728e1\n',
     )
     expect(markerDigest).toBe(expectedDigest)
     expect(workflow).toContain(markerDigest)
@@ -135,8 +135,8 @@ describe('R5 V5 twelve-ledger one-shot proof trigger', () => {
       'old in updated',
       'new not in updated',
       'r5_burst: ["workflow_dispatch", "issue_comment", "push"]',
-      'R5 V5 proof marker and owner burst contract',
-      'R5 V5 finite-proof push exception',
+      'R5 V6 proof marker and owner burst contract',
+      'R5 V6 finite-proof push exception',
       'git diff-tree --no-commit-id --name-status',
       'bash "$generated_script" "$@"',
     ]) {
