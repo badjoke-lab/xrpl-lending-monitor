@@ -148,7 +148,7 @@ describe('R5 burst final parity read-only diagnostic contract', () => {
     ]) {
       expect(workflow).toContain(required)
     }
-    expect(workflow.match(/nonce-cd7eb564/g)).toHaveLength(4)
+    expect(workflow.match(/nonce-cd7eb564/g)).toHaveLength(3)
   })
 
   it('adapts the canonical workflow policy only by exact replacements', () => {
