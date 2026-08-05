@@ -133,7 +133,7 @@ jobs:
           test -s /tmp/r5-burst-comment.md
           gh issue comment 1175 --repo "$GITHUB_REPOSITORY" --body-file /tmp/r5-burst-comment.md
 
-  diagnose-r5-health-change:
+  diagnose-r5-egress-halt:
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -146,7 +146,7 @@ jobs:
         with:
           fetch-depth: 2
 
-      - name: Verify exact read-only R5 health-change marker
+      - name: Verify exact read-only R5 egress halt marker
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -158,32 +158,32 @@ jobs:
           marker='ops/r5/run-once-20260805-pending-scan-readonly.marker'
           test -f "$marker"
           marker_sha="$(sha256sum "$marker" | cut -d' ' -f1)"
-          test "$marker_sha" = bac45f8f4f8c3c9ddef903c154c01ccce223535235f061190b2ee17fb29177c8
+          test "$marker_sha" = 91ad7af532a7cb66d214b30a3d9a3d2faa48e49b46a9d1b96c6808e2400c2c7f
           parent_sha="$(git rev-parse "${GITHUB_SHA}^")"
-          test "$parent_sha" = 08ee22ddd1dd1685d59329174264c57e7a0fd8d0
+          test "$parent_sha" = 45cbfa09399a7d6d5c5d348ab9f3c6d6ee24fc9b
           marker_change="$(git diff-tree --no-commit-id --name-status -r "${GITHUB_SHA}^" "$GITHUB_SHA" -- "$marker")"
           test "$marker_change" = $'M\tops/r5/run-once-20260805-pending-scan-readonly.marker'
           author_login="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}" --jq '.author.login')"
           test "$author_login" = badjoke-lab
 
-      - name: Read exact R5 identity and health fields
-        run: node scripts/diagnose-supabase-r5-health-change.mjs
+      - name: Read exact 31-day R5 egress contributions and rolloff
+        run: node scripts/diagnose-supabase-r5-egress-halt.mjs
 
-      - name: Upload sanitized R5 health-change diagnostic
+      - name: Upload sanitized R5 egress halt diagnostic
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: supabase-r5-health-change-diagnostic
-          path: supabase-r5-health-change-diagnostic
+          name: supabase-r5-egress-halt-diagnostic
+          path: supabase-r5-egress-halt-diagnostic
           if-no-files-found: error
           retention-days: 14
 
-      - name: Publish sanitized R5 health-change diagnostic
+      - name: Publish sanitized R5 egress halt diagnostic
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          test -s supabase-r5-health-change-diagnostic/diagnostic.md
-          gh issue comment 1175 --repo "$GITHUB_REPOSITORY" --body-file supabase-r5-health-change-diagnostic/diagnostic.md
+          test -s supabase-r5-egress-halt-diagnostic/diagnostic.md
+          gh issue comment 1175 --repo "$GITHUB_REPOSITORY" --body-file supabase-r5-egress-halt-diagnostic/diagnostic.md
