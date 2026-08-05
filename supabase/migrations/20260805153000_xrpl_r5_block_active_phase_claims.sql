@@ -83,14 +83,52 @@ declare
   v_recovery_watermark bigint;
   v_physical_watermark bigint;
   v_delta bigint;
-  v_declaration_old constant text :=
-    E'  v_previous_expiry timestamptz;\nbegin';
-  v_declaration_new constant text :=
-    E'  v_previous_expiry timestamptz;\n  v_r5 xrpl_r5_v1.recovery_runs%rowtype;\nbegin';
-  v_guard_old constant text :=
-    E"  if p_lease_seconds < 10 or p_lease_seconds > 55 then\n    raise exception 'invalid phase lease duration';\n  end if;\n\n  v_epoch := public.xrpl_ensure_remote_seven_class_epoch(p_now);";
-  v_guard_new constant text :=
-    E"  if p_lease_seconds < 10 or p_lease_seconds > 55 then\n    raise exception 'invalid phase lease duration';\n  end if;\n\n  select * into v_r5\n  from xrpl_r5_v1.recovery_runs\n  where run_id = 'r5-recovery-selected-revision3-entry';\n\n  if found then\n    if v_r5.profile_id <> 'supabase_free_postgres_pgcron_edge'\n      or v_r5.profile_revision <> 3\n      or v_r5.profile_identity_digest\n        <> '3a5c4ff2c43a48d3e5b7ceded60027173d215d6f083fb33c22375758520bbe67'\n      or v_r5.selection_digest\n        <> '13a313d9d0679c7c512b59f9931d733dcb3217ec8e1cc6e74a36125a0354b667'\n      or v_r5.source_profile_id <> 'supabase-devnet'\n      or v_r5.network <> 'devnet'\n      or v_r5.epoch_id <> 'supabase-r4c2c-v1'\n      or v_r5.status not in ('prepared', 'running', 'caught_up', 'halted') then\n      raise exception 'r5_active_recovery_phase_claim_identity_invalid';\n    end if;\n\n    return jsonb_build_object(\n      'claimed', false,\n      'reason', 'r5_active_recovery_owned',\n      'r5RunId', v_r5.run_id,\n      'r5Status', v_r5.status,\n      'r5WatermarkLedgerIndex', v_r5.current_watermark_ledger_index,\n      'publicReaderUnchanged', true,\n      'mainnetDisabled', true,\n      'stabilizationAuthorized', false,\n      'soakAuthorized', false\n    );\n  end if;\n\n  v_epoch := public.xrpl_ensure_remote_seven_class_epoch(p_now);";
+  v_declaration_old constant text := $declaration_old$  v_previous_expiry timestamptz;
+begin$declaration_old$;
+  v_declaration_new constant text := $declaration_new$  v_previous_expiry timestamptz;
+  v_r5 xrpl_r5_v1.recovery_runs%rowtype;
+begin$declaration_new$;
+  v_guard_old constant text := $guard_old$  if p_lease_seconds < 10 or p_lease_seconds > 55 then
+    raise exception 'invalid phase lease duration';
+  end if;
+
+  v_epoch := public.xrpl_ensure_remote_seven_class_epoch(p_now);$guard_old$;
+  v_guard_new constant text := $guard_new$  if p_lease_seconds < 10 or p_lease_seconds > 55 then
+    raise exception 'invalid phase lease duration';
+  end if;
+
+  select * into v_r5
+  from xrpl_r5_v1.recovery_runs
+  where run_id = 'r5-recovery-selected-revision3-entry';
+
+  if found then
+    if v_r5.profile_id <> 'supabase_free_postgres_pgcron_edge'
+      or v_r5.profile_revision <> 3
+      or v_r5.profile_identity_digest
+        <> '3a5c4ff2c43a48d3e5b7ceded60027173d215d6f083fb33c22375758520bbe67'
+      or v_r5.selection_digest
+        <> '13a313d9d0679c7c512b59f9931d733dcb3217ec8e1cc6e74a36125a0354b667'
+      or v_r5.source_profile_id <> 'supabase-devnet'
+      or v_r5.network <> 'devnet'
+      or v_r5.epoch_id <> 'supabase-r4c2c-v1'
+      or v_r5.status not in ('prepared', 'running', 'caught_up', 'halted') then
+      raise exception 'r5_active_recovery_phase_claim_identity_invalid';
+    end if;
+
+    return jsonb_build_object(
+      'claimed', false,
+      'reason', 'r5_active_recovery_owned',
+      'r5RunId', v_r5.run_id,
+      'r5Status', v_r5.status,
+      'r5WatermarkLedgerIndex', v_r5.current_watermark_ledger_index,
+      'publicReaderUnchanged', true,
+      'mainnetDisabled', true,
+      'stabilizationAuthorized', false,
+      'soakAuthorized', false
+    );
+  end if;
+
+  v_epoch := public.xrpl_ensure_remote_seven_class_epoch(p_now);$guard_new$;
 begin
   if v_signature is null then
     raise exception 'r5_active_phase_claim_guard_function_missing';
@@ -116,7 +154,7 @@ begin
       or v_run.source_profile_id <> 'supabase-devnet'
       or v_run.network <> 'devnet'
       or v_run.epoch_id <> 'supabase-r4c2c-v1'
-      or v_run.status not in ('prepared', 'running', 'caught_up', 'halted')
+      or v_run.status <> 'running'
       or v_run.last_error is not null then
       raise exception 'r5_active_phase_claim_guard_recovery_invalid';
     end if;
@@ -287,7 +325,7 @@ begin
   if not found
     or position('r5_active_recovery_owned' in v_definition) = 0
     or position('r5_active_recovery_phase_claim_identity_invalid' in v_definition) = 0
-    or position("v_r5.status not in ('prepared', 'running', 'caught_up', 'halted')" in v_definition) = 0
+    or position($status_guard$v_r5.status not in ('prepared', 'running', 'caught_up', 'halted')$status_guard$ in v_definition) = 0
     or v_policy.source_first_drift_run_id <> 31014360049
     or v_policy.source_second_drift_run_id <> 31015285563
     or v_policy.public_reader_unchanged is not true
