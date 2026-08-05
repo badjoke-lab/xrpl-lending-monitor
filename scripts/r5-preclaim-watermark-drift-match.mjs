@@ -1,24 +1,22 @@
-const recoveryRunId = 'r5-recovery-selected-revision3-entry'
-const purpose = 'r5-first-active-recovery-batch'
-const exactWatermarkDrift = 'r5_recovery_batch_watermark_drift'
+const r5PreclaimRecoveryRunId = 'r5-recovery-selected-revision3-entry'
+const r5PreclaimPurpose = 'r5-first-active-recovery-batch'
+const r5PreclaimExactWatermarkDrift = 'r5_recovery_batch_watermark_drift'
 
-export function isExactUncommittedWatermarkDrift(response, body) {
+export function isExactUncommittedWatermarkDriftFailure(error) {
+  const body = error?.response
   const executor = body?.executor
-  return response?.status === 500
+  return error?.name === 'TriggerError'
+    && error?.transient === false
+    && typeof error?.message === 'string'
+    && error.message.startsWith('R5 trigger failed (500): ')
     && body?.schemaVersion === 1
-    && body?.purpose === purpose
+    && body?.purpose === r5PreclaimPurpose
     && body?.operationMode === 'execute_batch'
     && executor?.ok === false
     && executor?.transient === false
-    && executor?.runId === recoveryRunId
+    && executor?.runId === r5PreclaimRecoveryRunId
     && executor?.batchId === null
     && executor?.activeMutationCommitted === false
     && typeof executor?.error === 'string'
-    && executor.error.includes(exactWatermarkDrift)
+    && executor.error.includes(r5PreclaimExactWatermarkDrift)
 }
-
-export const r5PreclaimWatermarkDriftBoundary = Object.freeze({
-  recoveryRunId,
-  purpose,
-  exactWatermarkDrift,
-})
