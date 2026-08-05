@@ -1,8 +1,20 @@
+import { createHash } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 
 const evidenceDirectory = 'supabase-remote-probe-evidence'
 const steadyPath = `${evidenceDirectory}/verified-steady-throughput.json`
 const capabilityPath = `${evidenceDirectory}/steady-memory-capability.json`
+const retainedMemoryFixturePath = new URL(
+  './fixtures/r5-retained-steady-memory-samples.json',
+  import.meta.url,
+)
+const retainedSessionId = 'r4c2d-steady-msflb8fo-5ebc5adc'
+const sourceWorkflowRunId = 30975277983
+const sourceCommit = 'd7e6eb86eb0e660dffd3ad5e54d2fd995ba8a54c'
+const sourceArtifactId = 8918144753
+const sourceArtifactDigest = 'sha256:c0f519dc4a1fe5dfff3f0ae79641cc84fd54e99fb2f0b2d073f20639e1dda2ac'
+const sourceSteadyEvidenceSha256 = 'fb78d4600a955a9f208cc8418786437eec367c709f7cd5b7476e43b0abeaae7c'
+const memoryCanonicalSha256 = 'e8c359e23189c37c4f74aa3e66a83913a26977dca6b91896804cd1c48c992f40'
 
 function object(value, name) {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -19,9 +31,77 @@ function nonNegativeInteger(value, name) {
   return parsed
 }
 
+function canonicalDigest(value) {
+  return createHash('sha256').update(JSON.stringify(value)).digest('hex')
+}
+
+async function restoreRetainedMemory(evidence) {
+  if (Array.isArray(evidence.memory?.ticks)) return false
+
+  const retainedSource = object(evidence.retainedSource, 'retained steady source')
+  if (
+    evidence.retainedDuringR5Recovery !== true
+    || evidence.sessionId !== retainedSessionId
+    || retainedSource.purpose !== 'r5-retained-qualification-evidence-verification'
+    || retainedSource.sourceWorkflowRunId !== sourceWorkflowRunId
+    || retainedSource.sourceCommit !== sourceCommit
+    || retainedSource.sourceArtifactId !== sourceArtifactId
+    || retainedSource.sourceArtifactDigest !== sourceArtifactDigest
+    || retainedSource.sourceSteadyEvidenceSha256 !== sourceSteadyEvidenceSha256
+    || retainedSource.retainedSteadySessionId !== retainedSessionId
+    || retainedSource.checks?.exactSourceArtifactPinned !== true
+    || retainedSource.checks?.steadyEvidenceRetained !== true
+    || retainedSource.checks?.noFreshQualificationExecuted !== true
+  ) {
+    throw new Error('retained steady memory source identity is invalid')
+  }
+
+  const fixture = object(
+    JSON.parse(await readFile(retainedMemoryFixturePath, 'utf8')),
+    'retained steady memory fixture',
+  )
+  const memory = object(fixture.memory, 'retained steady memory')
+  if (
+    fixture.schemaVersion !== 1
+    || fixture.purpose !== 'r5-retained-steady-memory-samples'
+    || fixture.sourceWorkflowRunId !== sourceWorkflowRunId
+    || fixture.sourceCommit !== sourceCommit
+    || fixture.sourceArtifactId !== sourceArtifactId
+    || fixture.sourceArtifactDigest !== sourceArtifactDigest
+    || fixture.sourceSteadyEvidenceSha256 !== sourceSteadyEvidenceSha256
+    || fixture.memoryCanonicalSha256 !== memoryCanonicalSha256
+    || canonicalDigest(memory) !== memoryCanonicalSha256
+    || memory.schemaVersion !== 1
+    || memory.purpose !== 'r4c2d-steady-memory-guard'
+    || memory.sessionId !== retainedSessionId
+    || memory.sessionStatus !== 'completed'
+    || memory.completedTicks !== 6
+    || memory.measuredCompletedTicks !== 6
+    || !Array.isArray(memory.ticks)
+    || memory.ticks.length !== 6
+  ) {
+    throw new Error('retained steady memory fixture identity or digest is invalid')
+  }
+
+  evidence.memory = memory
+  evidence.retainedMemorySamples = {
+    schemaVersion: 1,
+    sourceWorkflowRunId,
+    sourceCommit,
+    sourceArtifactId,
+    sourceArtifactDigest,
+    sourceSteadyEvidenceSha256,
+    memoryCanonicalSha256,
+    restoredFromPinnedFixture: true,
+    noFreshQualificationExecuted: true,
+  }
+  return true
+}
+
 async function run() {
   await mkdir(evidenceDirectory, { recursive: true })
   const evidence = object(JSON.parse(await readFile(steadyPath, 'utf8')), 'steady evidence')
+  const retainedMemoryRestored = await restoreRetainedMemory(evidence)
   if (
     evidence.purpose !== 'r4c2d-network-steady-throughput-verification'
     || evidence.checks?.g7Qualified !== true
@@ -79,6 +159,8 @@ async function run() {
     usableTotalMemoryCounter,
     usableRuntimeCounters: usableTotalMemoryCounter,
     reason,
+    retainedMemoryRestored,
+    retainedMemoryCanonicalSha256: retainedMemoryRestored ? memoryCanonicalSha256 : null,
     checks: {
       sixTicksInspected: completedTicks.length === 6,
       samplesInspected: samples.length >= 36,
@@ -90,6 +172,8 @@ async function run() {
       zeroCountersNotInterpretedAsZeroUsage: true,
       memoryHeadroomQualified: usableTotalMemoryCounter,
       memoryCoverageNotOverstated: true,
+      retainedMemorySourcePinned: !retainedMemoryRestored || canonicalDigest(evidence.memory) === memoryCanonicalSha256,
+      noFreshQualificationExecuted: !retainedMemoryRestored || evidence.retainedSource?.checks?.noFreshQualificationExecuted === true,
       g8Qualified: false,
       profileSelected: false,
     },
@@ -128,6 +212,7 @@ async function run() {
     partialHeapCountersNotSubstitutedForRss: true,
     memoryCoverageNotOverstated: true,
     memoryQualified: usableTotalMemoryCounter,
+    retainedMemorySourcePinned: !retainedMemoryRestored || canonicalDigest(evidence.memory) === memoryCanonicalSha256,
     g8Qualified: false,
     profileSelected: false,
   }
