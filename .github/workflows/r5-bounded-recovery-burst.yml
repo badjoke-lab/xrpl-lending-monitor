@@ -146,7 +146,7 @@ jobs:
         with:
           fetch-depth: 2
 
-      - name: Verify exact read-only R5 egress halt marker
+      - name: Verify exact read-only R5 egress halt marker V2
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -158,16 +158,16 @@ jobs:
           marker='ops/r5/run-once-20260805-pending-scan-readonly.marker'
           test -f "$marker"
           marker_sha="$(sha256sum "$marker" | cut -d' ' -f1)"
-          test "$marker_sha" = 91ad7af532a7cb66d214b30a3d9a3d2faa48e49b46a9d1b96c6808e2400c2c7f
+          test "$marker_sha" = 6d2b17c6bd72b1edd2976f149d030dc52f9de59de495a7e8f59726fa61368c4f
           parent_sha="$(git rev-parse "${GITHUB_SHA}^")"
-          test "$parent_sha" = 45cbfa09399a7d6d5c5d348ab9f3c6d6ee24fc9b
+          test "$parent_sha" = 55911f23638fcbf24c157ed2a39235b42d3cef2b
           marker_change="$(git diff-tree --no-commit-id --name-status -r "${GITHUB_SHA}^" "$GITHUB_SHA" -- "$marker")"
           test "$marker_change" = $'M\tops/r5/run-once-20260805-pending-scan-readonly.marker'
           author_login="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}" --jq '.author.login')"
           test "$author_login" = badjoke-lab
 
-      - name: Read exact 31-day R5 egress contributions and rolloff
-        run: node scripts/diagnose-supabase-r5-egress-halt.mjs
+      - name: Read exact 31-day R5 egress contributions and rolloff V2
+        run: node scripts/diagnose-supabase-r5-egress-halt-v2.mjs
 
       - name: Upload sanitized R5 egress halt diagnostic
         if: always()
