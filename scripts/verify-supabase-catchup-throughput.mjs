@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { mkdir, writeFile } from 'node:fs/promises'
+import { verifyRetainedR5Qualifications } from './verify-supabase-retained-r5-qualification-evidence.mjs'
 
 const projectRef = process.env.SUPABASE_PROJECT_ID ?? ''
 if (!/^[a-z]{20}$/.test(projectRef)) {
@@ -153,6 +154,16 @@ function verify(result) {
 
 async function run() {
   await mkdir(evidenceDirectory, { recursive: true })
+  const retained = await verifyRetainedR5Qualifications()
+  if (retained !== null) {
+    await writeFile(
+      `${evidenceDirectory}/verified-catchup-throughput.json`,
+      `${JSON.stringify(retained.catchUp, null, 2)}\n`,
+    )
+    console.log(JSON.stringify(retained.catchUp))
+    return
+  }
+
   const response = await requestRaw()
   if (!response.ok) {
     throw new Error(
