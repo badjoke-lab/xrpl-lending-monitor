@@ -136,7 +136,7 @@ jobs:
           test -s /tmp/r5-burst-comment.md
           gh issue comment 1175 --repo "$GITHUB_REPOSITORY" --body-file /tmp/r5-burst-comment.md
 
-  diagnose-pending-scan:
+  diagnose-database-size:
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -146,7 +146,7 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
-      - name: Verify exact read-only diagnostic marker
+      - name: Verify exact read-only database-size diagnostic marker
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -158,25 +158,25 @@ jobs:
           marker='ops/r5/run-once-20260804-8x900-observable-v2.marker'
           test -f "$marker"
           marker_sha="$(sha256sum "$marker" | cut -d' ' -f1)"
-          test "$marker_sha" = f75fc25c9f6b1e255f773115cbd447cae7ced88a7afc401b22b898d7110eef08
+          test "$marker_sha" = 65d4986fc9efff5360e14f4dd794e6ea19ca848259d1e1f604df3c56340578b8
           author_login="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}" --jq '.author.login')"
           test "$author_login" = badjoke-lab
-      - name: Read and verify the R5 memory halt boundary
-        run: node scripts/diagnose-supabase-r5-pending-scan.mjs
-      - name: Upload sanitized pending scan diagnostic
+      - name: Read database relation and profile size boundaries
+        run: node scripts/diagnose-supabase-r5-database-size.mjs
+      - name: Upload sanitized database-size diagnostic
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: supabase-r5-pending-scan-diagnostic
-          path: supabase-r5-pending-scan-diagnostic
+          name: supabase-r5-database-size-diagnostic
+          path: supabase-r5-database-size-diagnostic
           if-no-files-found: error
           retention-days: 14
-      - name: Publish sanitized pending scan diagnostic
+      - name: Publish sanitized database-size diagnostic
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          test -s supabase-r5-pending-scan-diagnostic/diagnostic.md
-          gh issue comment 1175 --repo "$GITHUB_REPOSITORY" --body-file supabase-r5-pending-scan-diagnostic/diagnostic.md
+          test -s supabase-r5-database-size-diagnostic/diagnostic.md
+          gh issue comment 1175 --repo "$GITHUB_REPOSITORY" --body-file supabase-r5-database-size-diagnostic/diagnostic.md
