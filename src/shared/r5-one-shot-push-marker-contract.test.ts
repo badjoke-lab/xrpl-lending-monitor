@@ -18,7 +18,7 @@ const publisher = read(
 const marker = read('ops/r5/run-once-20260804-8x900-observable-v2.marker')
 const markerDigest = createHash('sha256').update(marker).digest('hex')
 
-describe('R5 burst final parity read-only diagnostic contract', () => {
+describe('R5 memory-halt read-only diagnostic contract', () => {
   it('binds one exact main push path to the diagnostic job only', () => {
     for (const required of [
       '  push:',
@@ -46,12 +46,12 @@ describe('R5 burst final parity read-only diagnostic contract', () => {
     expect(executeCondition).not.toContain("github.event_name == 'push'")
   })
 
-  it('pins the failed burst diagnostic marker bytes and digest exactly', () => {
+  it('pins the failed batch memory-halt marker bytes and digest exactly', () => {
     expect(marker).toBe(
-      'R5_BURST_PARITY_DIAGNOSTIC_V7\nmode=read_only\nrun_id=r5-recovery-selected-revision3-entry\nfailed_burst_run_id=30925522885\nnonce=diagnostic-20260805-0d7b5e91\n',
+      'R5_MEMORY_HALT_DIAGNOSTIC_V8\nmode=read_only\nrun_id=r5-recovery-selected-revision3-entry\nfailed_burst_run_id=30966882019\nfailed_batch_id=r5-batch-v1-r5-recovery-selected-revision3-entry-00000238\nnonce=diagnostic-20260805-6f3a2c91\n',
     )
     expect(markerDigest).toBe(
-      'bf47940252a652535df1f6876904e0ba32302dc1906bfd3b3caf57827fc9591e',
+      'f75fc25c9f6b1e255f773115cbd447cae7ced88a7afc401b22b898d7110eef08',
     )
     expect(workflow).toContain(markerDigest)
     expect(adapter).toContain(markerDigest)
@@ -60,22 +60,17 @@ describe('R5 burst final parity read-only diagnostic contract', () => {
   it('uses only a read-only Management API query and sanitized evidence', () => {
     for (const required of [
       'read_only: true',
-      "purpose: 'r5-burst-final-parity-read-only-diagnostic'",
-      'const failedBurstRunId = 30925522885',
-      'completedBatches: 99',
-      'committedLedgers: 2062',
-      'watermarkLedgerIndex: 4135369',
+      "'purpose','r5-memory-halt-read-only-diagnostic'",
+      'const failedBurstRunId = 30966882019',
+      "const failedBatchId = 'r5-batch-v1-r5-recovery-selected-revision3-entry-00000238'",
       'public.xrpl_read_r5_active_recovery($1::text)',
-      'public.xrpl_read_r5_active_recovery_batch($1::text, $2::text)',
+      'public.xrpl_read_r5_active_recovery_batch($1::text,$2::text)',
       'xrpl_r5_v1.recovery_batches',
-      'xrpl_r5_v1.recovery_adoptions',
-      "where profile_id = 'supabase-devnet'",
-      "status = 'pending'",
-      "payload->>'expectedPreviousLedgerIndex'",
-      "payload->>'expectedPreviousLedgerHash'",
-      "const evidenceDirectory = 'supabase-r5-pending-scan-diagnostic'",
-      'const evidencePath = `${evidenceDirectory}/diagnostic.json`',
-      'const markdownPath = `${evidenceDirectory}/diagnostic.md`',
+      "where profile_id='supabase-devnet'",
+      "const output = 'supabase-r5-pending-scan-diagnostic'",
+      'await writeFile(`${output}/diagnostic.json`',
+      'await writeFile(`${output}/diagnostic.md`',
+      '## R5 memory halt read-only diagnostic',
     ]) {
       expect(diagnostic).toContain(required)
     }
@@ -93,27 +88,23 @@ describe('R5 burst final parity read-only diagnostic contract', () => {
     }
   })
 
-  it('reports every final parity predicate separately', () => {
+  it('reports every memory-halt boundary predicate separately', () => {
     for (const required of [
-      'recoveryAdvancedFromFailedBurst',
-      'recoveryCounterAndWatermarkAdvanceMatch',
-      'postFailureBatchCountMatchesRecoveryAdvance',
-      'postFailureLedgerCountMatchesRecoveryAdvance',
-      'postFailureBatchesAllCompleted',
-      'postFailureBatchesContiguous',
-      'batchSummaryMatchesRecovery',
-      'noHaltedOrLeasedRecoveryBatches',
-      'physicalAndRecoveryWatermarkMatch',
-      'exactlyOnePendingMessage',
+      'readOnly',
+      'exactRun',
+      'exactBatch',
+      'memoryHaltRecorded',
+      'noBatchCommit',
+      'noCommittedWorksInFailedRange',
+      'recoveryAndPhysicalParity',
+      'oneHaltedBatch',
+      'noLeasedRecoveryBatch',
       'noLeasedOrRetryMessages',
-      'noInflightWork',
-      'pendingPhaseIsScan',
-      'pendingIndexMatchesWatermark',
-      'pendingHashMatchesWatermark',
-      'pendingEpochMatches',
-      'pendingBaseIdentityMatches',
-      'streamIdentityMatches',
-      'mismatched parity checks:',
+      'publicReaderUnchanged',
+      'mainnetDisabled',
+      'stabilizationUnauthorized',
+      'soakUnauthorized',
+      'mismatched checks:',
     ]) {
       expect(diagnostic).toContain(required)
     }
@@ -160,7 +151,7 @@ describe('R5 burst final parity read-only diagnostic contract', () => {
       'old in updated',
       'new not in updated',
       'r5_burst: ["workflow_dispatch", "issue_comment", "push"]',
-      'R5 read-only diagnostic and owner burst marker contract',
+      'R5 memory-halt diagnostic and owner burst marker contract',
       "github.event.comment.body == '/r5-recovery burst 64 1800 nonce-cd7eb564'",
       'R5 read-only diagnostic push exception',
       'R5 diagnostic and burst locator count',
