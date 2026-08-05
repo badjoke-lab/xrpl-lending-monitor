@@ -10,9 +10,9 @@ if (!Number.isSafeInteger(sourceRunId) || sourceRunId < 1) throw new Error('inva
 if (!/^[a-f0-9]{40}$/.test(sourceCommit)) throw new Error('invalid commit')
 
 const recoveryRunId = 'r5-recovery-selected-revision3-entry'
-const sourceHeadroomRunId = 30975277983
+const sourceSizeRunId = 30976693948
 const databaseHaltBytes = 400_000_000
-const observedDatabaseBytes = 416_763_027
+const observedDatabaseBytes = 417_082_515
 const endpoint = `https://api.supabase.com/v1/projects/${projectRef}/database/query`
 const output = 'supabase-r5-database-size-diagnostic'
 
@@ -66,7 +66,41 @@ async function query(sql, parameters) {
 }
 
 const sql = `
-with relation_sizes as (
+with physical_relations as (
+  select
+    n.nspname as schema_name,
+    c.relname as relation_name,
+    c.relkind::text as relation_kind,
+    pg_relation_size(c.oid)::bigint as physical_bytes,
+    case
+      when n.nspname in ('public', 'xrpl_r5_v1') then 'application'
+      when n.nspname = 'information_schema' or n.nspname like 'pg_%' then 'postgres_system'
+      else 'supabase_or_extension'
+    end as schema_category
+  from pg_catalog.pg_class c
+  join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+  where c.relkind in ('r', 'i', 'm', 't', 'S')
+    and c.relpersistence <> 't'
+    and c.relisshared = false
+    and n.nspname not like 'pg_temp_%'
+    and n.nspname not like 'pg_toast_temp_%'
+), schema_physical_totals as (
+  select
+    schema_name,
+    schema_category,
+    sum(physical_bytes)::bigint as physical_bytes,
+    count(*)::bigint as physical_relation_count
+  from physical_relations
+  group by schema_name, schema_category
+), physical_total as (
+  select coalesce(sum(physical_bytes), 0)::bigint as physical_bytes
+  from physical_relations
+), top_physical_relations as (
+  select *
+  from physical_relations
+  order by physical_bytes desc, schema_name, relation_name
+  limit 50
+), table_sizes as (
   select
     n.nspname as schema_name,
     c.relname as relation_name,
@@ -83,9 +117,12 @@ with relation_sizes as (
     greatest(c.reltuples, 0)::bigint as estimated_rows
   from pg_catalog.pg_class c
   join pg_catalog.pg_namespace n on n.oid = c.relnamespace
-  where n.nspname in ('public', 'xrpl_r5_v1')
-    and c.relkind in ('r', 'm', 'p')
-), relation_stats as (
+  where c.relkind in ('r', 'm', 'p')
+    and c.relpersistence <> 't'
+    and c.relisshared = false
+    and n.nspname not like 'pg_temp_%'
+    and n.nspname not like 'pg_toast%'
+), table_stats as (
   select
     schemaname as schema_name,
     relname as relation_name,
@@ -96,8 +133,7 @@ with relation_sizes as (
     last_analyze,
     last_autoanalyze
   from pg_catalog.pg_stat_user_tables
-  where schemaname in ('public', 'xrpl_r5_v1')
-), enriched_relations as (
+), top_tables as (
   select
     sizes.*,
     stats.live_rows,
@@ -106,26 +142,12 @@ with relation_sizes as (
     stats.last_autovacuum,
     stats.last_analyze,
     stats.last_autoanalyze
-  from relation_sizes sizes
-  left join relation_stats stats
+  from table_sizes sizes
+  left join table_stats stats
     on stats.schema_name = sizes.schema_name
    and stats.relation_name = sizes.relation_name
-), top_relations as (
-  select *
-  from enriched_relations
-  order by total_bytes desc, schema_name, relation_name
-  limit 40
-), schema_totals as (
-  select
-    schema_name,
-    sum(total_bytes)::bigint as total_bytes,
-    sum(heap_bytes)::bigint as heap_bytes,
-    sum(index_bytes)::bigint as index_bytes,
-    sum(toast_bytes)::bigint as toast_bytes,
-    sum(coalesce(live_rows, estimated_rows, 0))::bigint as estimated_live_rows,
-    sum(coalesce(dead_rows, 0))::bigint as dead_rows
-  from enriched_relations
-  group by schema_name
+  order by sizes.total_bytes desc, sizes.schema_name, sizes.relation_name
+  limit 50
 ), work_counts as (
   select profile_id, status, count(*)::bigint as row_count
   from public.xrpl_phase_work
@@ -152,18 +174,29 @@ with relation_sizes as (
   group by status
 )
 select jsonb_build_object(
-  'purpose', 'r5-database-size-read-only-diagnostic',
-  'sourceHeadroomRunId', $2::bigint,
+  'purpose', 'r5-all-schema-database-size-read-only-diagnostic',
+  'sourceSizeRunId', $2::bigint,
   'databaseHaltBytes', $3::bigint,
   'previousObservedDatabaseBytes', $4::bigint,
   'databaseBytes', pg_database_size(current_database())::bigint,
-  'topRelations', coalesce((
-    select jsonb_agg(to_jsonb(r) order by r.total_bytes desc, r.schema_name, r.relation_name)
-    from top_relations r
+  'accountedPhysicalBytes', (select physical_bytes from physical_total),
+  'unaccountedDatabaseBytes',
+    greatest(
+      pg_database_size(current_database())::bigint
+      - (select physical_bytes from physical_total),
+      0
+    )::bigint,
+  'schemaPhysicalTotals', coalesce((
+    select jsonb_agg(to_jsonb(s) order by s.physical_bytes desc, s.schema_name)
+    from schema_physical_totals s
   ), '[]'::jsonb),
-  'schemaTotals', coalesce((
-    select jsonb_agg(to_jsonb(s) order by s.total_bytes desc, s.schema_name)
-    from schema_totals s
+  'topPhysicalRelations', coalesce((
+    select jsonb_agg(to_jsonb(r) order by r.physical_bytes desc, r.schema_name, r.relation_name)
+    from top_physical_relations r
+  ), '[]'::jsonb),
+  'topTables', coalesce((
+    select jsonb_agg(to_jsonb(t) order by t.total_bytes desc, t.schema_name, t.relation_name)
+    from top_tables t
   ), '[]'::jsonb),
   'workCounts', coalesce((
     select jsonb_agg(to_jsonb(w) order by w.profile_id, w.status)
@@ -187,37 +220,48 @@ select jsonb_build_object(
 
 const result = await query(sql, [
   recoveryRunId,
-  sourceHeadroomRunId,
+  sourceSizeRunId,
   databaseHaltBytes,
   observedDatabaseBytes,
 ])
 if (result.length !== 1) throw new Error(`unexpected rows:${result.length}`)
 const diagnostic = object(result[0].diagnostic, 'diagnostic')
 const recovery = object(diagnostic.recoverySummary, 'recovery')
-const topRelations = array(diagnostic.topRelations, 'top relations')
-const schemaTotals = array(diagnostic.schemaTotals, 'schema totals')
+const schemaTotals = array(diagnostic.schemaPhysicalTotals, 'schema physical totals')
+const topPhysicalRelations = array(diagnostic.topPhysicalRelations, 'top physical relations')
+const topTables = array(diagnostic.topTables, 'top tables')
 const workCounts = array(diagnostic.workCounts, 'work counts')
 const messageCounts = array(diagnostic.messageCounts, 'message counts')
 const referenceCounts = array(diagnostic.referenceCounts, 'reference counts')
 const r5BatchCounts = array(diagnostic.r5BatchCounts, 'R5 batch counts')
 const databaseBytes = integer(diagnostic.databaseBytes, 'database bytes')
-const sorted = topRelations.every((relation, index) => (
-  index === 0
-  || integer(topRelations[index - 1].total_bytes, 'prior relation bytes')
-    >= integer(relation.total_bytes, 'relation bytes')
-))
+const accountedPhysicalBytes = integer(
+  diagnostic.accountedPhysicalBytes,
+  'accounted physical bytes',
+)
+const unaccountedDatabaseBytes = integer(
+  diagnostic.unaccountedDatabaseBytes,
+  'unaccounted database bytes',
+)
 const checks = {
   readOnly: true,
-  exactSourceRun: Number(diagnostic.sourceHeadroomRunId) === sourceHeadroomRunId,
+  exactSourceRun: Number(diagnostic.sourceSizeRunId) === sourceSizeRunId,
   exactHaltBoundary: Number(diagnostic.databaseHaltBytes) === databaseHaltBytes,
-  priorGuardEvidenceBound:
+  priorDiagnosticEvidenceBound:
     Number(diagnostic.previousObservedDatabaseBytes) === observedDatabaseBytes,
   databaseAtOrAboveHalt: databaseBytes >= databaseHaltBytes,
-  relationBreakdownPresent: topRelations.length > 0 && schemaTotals.length > 0,
-  relationBreakdownSorted: sorted,
-  allowedSchemasOnly: topRelations.every((relation) => (
-    relation.schema_name === 'public' || relation.schema_name === 'xrpl_r5_v1'
+  allSchemaBreakdownPresent: schemaTotals.length > 2,
+  applicationSchemasPresent:
+    schemaTotals.some((entry) => entry.schema_name === 'public')
+    && schemaTotals.some((entry) => entry.schema_name === 'xrpl_r5_v1'),
+  temporarySchemasExcluded: schemaTotals.every((entry) => (
+    !String(entry.schema_name).startsWith('pg_temp_')
+    && !String(entry.schema_name).startsWith('pg_toast_temp_')
   )),
+  physicalBytesDoNotExceedDatabase: accountedPhysicalBytes <= databaseBytes,
+  unaccountedArithmeticExact:
+    unaccountedDatabaseBytes === databaseBytes - accountedPhysicalBytes,
+  tableBreakdownPresent: topTables.length > 0 && topPhysicalRelations.length > 0,
   profileBreakdownPresent:
     workCounts.length > 0 && messageCounts.length > 0 && referenceCounts.length > 0,
   r5BatchBreakdownPresent: r5BatchCounts.length > 0,
@@ -238,31 +282,29 @@ const evidence = {
 await mkdir(output, { recursive: true })
 await writeFile(`${output}/diagnostic.json`, `${JSON.stringify(evidence, null, 2)}\n`)
 
-const relationLines = topRelations.slice(0, 20).map((relation) => (
-  `| ${cell(relation.schema_name)} | ${cell(relation.relation_name)} | ${cell(relation.total_bytes)} | ${cell(relation.heap_bytes)} | ${cell(relation.index_bytes)} | ${cell(relation.toast_bytes)} | ${cell(relation.live_rows ?? relation.estimated_rows)} | ${cell(relation.dead_rows)} |`
+const schemaLines = schemaTotals.slice(0, 30).map((entry) => (
+  `| ${cell(entry.schema_name)} | ${cell(entry.schema_category)} | ${cell(entry.physical_bytes)} | ${cell(entry.physical_relation_count)} |`
 ))
-const schemaLines = schemaTotals.map((schema) => (
-  `| ${cell(schema.schema_name)} | ${cell(schema.total_bytes)} | ${cell(schema.heap_bytes)} | ${cell(schema.index_bytes)} | ${cell(schema.toast_bytes)} | ${cell(schema.dead_rows)} |`
+const tableLines = topTables.slice(0, 30).map((entry) => (
+  `| ${cell(entry.schema_name)} | ${cell(entry.relation_name)} | ${cell(entry.total_bytes)} | ${cell(entry.heap_bytes)} | ${cell(entry.index_bytes)} | ${cell(entry.toast_bytes)} | ${cell(entry.live_rows ?? entry.estimated_rows)} | ${cell(entry.dead_rows)} |`
 ))
-const workLines = workCounts.map((entry) => (
-  `| ${cell(entry.profile_id)} | ${cell(entry.status)} | ${cell(entry.row_count)} |`
+const physicalLines = topPhysicalRelations.slice(0, 30).map((entry) => (
+  `| ${cell(entry.schema_name)} | ${cell(entry.relation_name)} | ${cell(entry.relation_kind)} | ${cell(entry.physical_bytes)} |`
 ))
-const messageLines = messageCounts.map((entry) => (
-  `| ${cell(entry.profile_id)} | ${cell(entry.status)} | ${cell(entry.row_count)} |`
-))
-const referenceLines = referenceCounts.map((entry) => (
-  `| ${cell(entry.profile_id)} | ${cell(entry.work_status)} | ${cell(entry.row_count)} | ${cell(entry.work_count)} |`
-))
-const mismatchNames = Object.entries(checks).filter(([, value]) => value !== true).map(([name]) => name)
-const markdown = `## R5 database-size read-only diagnostic
+const mismatchNames = Object.entries(checks)
+  .filter(([, value]) => value !== true)
+  .map(([name]) => name)
+const markdown = `## R5 all-schema database-size read-only diagnostic
 
 - run: ${code(sourceRunId)}
 - commit: ${code(sourceCommit)}
-- source headroom run: ${code(sourceHeadroomRunId)}
+- source size run: ${code(sourceSizeRunId)}
 - database bytes: ${code(databaseBytes)}
 - database halt bytes: ${code(databaseHaltBytes)}
 - bytes over halt: ${code(Math.max(databaseBytes - databaseHaltBytes, 0))}
-- previous guard evidence bytes: ${code(observedDatabaseBytes)}
+- accounted physical relation bytes: ${code(accountedPhysicalBytes)}
+- unaccounted database bytes: ${code(unaccountedDatabaseBytes)}
+- previous diagnostic bytes: ${code(observedDatabaseBytes)}
 - recovery status: ${code(recovery.status)}
 - completed batches: ${code(recovery.completedBatches)}
 - committed ledgers: ${code(recovery.committedLedgers)}
@@ -273,39 +315,27 @@ const markdown = `## R5 database-size read-only diagnostic
 - stabilization authorized: ${code(false)}
 - soak authorized: ${code(false)}
 
-### Schema totals
+### Physical bytes by schema
 
-| Schema | Total bytes | Heap bytes | Index bytes | TOAST bytes | Dead rows |
-|---|---:|---:|---:|---:|---:|
+| Schema | Category | Physical bytes | Relations |
+|---|---|---:|---:|
 ${schemaLines.join('\n')}
 
-### Largest relations
+### Largest logical tables
 
 | Schema | Relation | Total bytes | Heap bytes | Index bytes | TOAST bytes | Live/estimated rows | Dead rows |
 |---|---|---:|---:|---:|---:|---:|---:|
-${relationLines.join('\n')}
+${tableLines.join('\n')}
 
-### Phase work by profile and status
+### Largest physical relations
 
-| Profile | Status | Rows |
-|---|---|---:|
-${workLines.join('\n')}
-
-### Phase messages by profile and status
-
-| Profile | Status | Rows |
-|---|---|---:|
-${messageLines.join('\n')}
-
-### Reference rows by work profile and status
-
-| Profile | Work status | Reference rows | Works |
-|---|---|---:|---:|
-${referenceLines.join('\n')}
+| Schema | Relation | Kind | Physical bytes |
+|---|---|---|---:|
+${physicalLines.join('\n')}
 `
 await writeFile(`${output}/diagnostic.md`, markdown)
 process.stdout.write(markdown)
 
 if (mismatchNames.length > 0) {
-  throw new Error(`database-size diagnostic checks failed: ${mismatchNames.join(',')}`)
+  throw new Error(`all-schema database-size diagnostic checks failed: ${mismatchNames.join(',')}`)
 }

@@ -158,7 +158,7 @@ jobs:
           marker='ops/r5/run-once-20260804-8x900-observable-v2.marker'
           test -f "$marker"
           marker_sha="$(sha256sum "$marker" | cut -d' ' -f1)"
-          test "$marker_sha" = 65d4986fc9efff5360e14f4dd794e6ea19ca848259d1e1f604df3c56340578b8
+          test "$marker_sha" = a7c79e34daa6c1bdd5b11aca5b03dcdfd32cbc1aaa6717d31dd8f4795886e5d7
           author_login="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}" --jq '.author.login')"
           test "$author_login" = badjoke-lab
       - name: Read database relation and profile size boundaries
