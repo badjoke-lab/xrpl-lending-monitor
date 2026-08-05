@@ -59,11 +59,11 @@ declare
   v_watermark public.xrpl_phase_watermarks%rowtype;
   v_observed_gap bigint;
   v_old constant text :=
-    'or v_watermark_before.ledger_index\n      > v_run_before.current_watermark_ledger_index + 24 then';
+    E'or v_watermark_before.ledger_index\n      > v_run_before.current_watermark_ledger_index + 24 then';
   v_new constant text :=
-    'or v_watermark_before.ledger_index\n      > v_run_before.current_watermark_ledger_index + 256 then';
+    E'or v_watermark_before.ledger_index\n      > v_run_before.current_watermark_ledger_index + 256 then';
   v_retained_drain_bound constant text :=
-    'or (v_boundary->''watermarkAfter''->>''ledgerIndex'')::bigint\n      > v_watermark_before.ledger_index + 24 then';
+    E'or (v_boundary->''watermarkAfter''->>''ledgerIndex'')::bigint\n      > v_watermark_before.ledger_index + 24 then';
   v_retained_final_bound constant text :=
     'or v_watermark_after.ledger_index > v_watermark_before.ledger_index + 24';
 begin
@@ -214,9 +214,9 @@ declare
   v_definition text;
   v_policy xrpl_r5_v1.finalization_initial_gap_policy_changes%rowtype;
   v_new constant text :=
-    'or v_watermark_before.ledger_index\n      > v_run_before.current_watermark_ledger_index + 256 then';
+    E'or v_watermark_before.ledger_index\n      > v_run_before.current_watermark_ledger_index + 256 then';
   v_retained_drain_bound constant text :=
-    'or (v_boundary->''watermarkAfter''->>''ledgerIndex'')::bigint\n      > v_watermark_before.ledger_index + 24 then';
+    E'or (v_boundary->''watermarkAfter''->>''ledgerIndex'')::bigint\n      > v_watermark_before.ledger_index + 24 then';
   v_retained_final_bound constant text :=
     'or v_watermark_after.ledger_index > v_watermark_before.ledger_index + 24';
 begin
