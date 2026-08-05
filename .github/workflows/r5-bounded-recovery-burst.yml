@@ -84,6 +84,7 @@ jobs:
           test "$R5_RECOVERY_BURST_WALL_SECONDS" -le 1800
           if [ "$GITHUB_EVENT_NAME" = issue_comment ]; then
             if [ "$R5_RECOVERY_BURST_BATCH_LIMIT" -eq 8 ]; then
+              test "$R5_RECOVERY_BURST_BATCH_LIMIT" -eq 8
               test "$R5_RECOVERY_BURST_WALL_SECONDS" -eq 900
             else
               test "$R5_RECOVERY_BURST_BATCH_LIMIT" -eq 64
