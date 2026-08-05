@@ -1,0 +1,8 @@
+R5_PENDING_SCAN_DIAGNOSTIC_V1
+mode=read_only
+source_main_commit=cecd28485c8db64780aed844704690cf3278ed92
+source_failed_burst_run_id=31021223140
+recovery_run_id=r5-recovery-selected-revision3-entry
+expected_recovery_watermark_ledger=4138631
+error=r5_recovery_batch_pending_scan_invalid
+nonce=r5-pending-scan-readonly-20260805-2348-jst

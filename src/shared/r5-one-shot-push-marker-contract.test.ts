@@ -11,85 +11,95 @@ function read(path: string): string {
 const workflow = read('.github/workflows/r5-bounded-recovery-burst.yml')
 const ci = read('.github/workflows/ci.yml')
 const adapter = read('scripts/check-actions-workflow-allowlist-r5-one-shot.sh')
-const publisher = read(
-  'scripts/publish-supabase-r5-recovery-burst-run-locator.mjs',
-)
-const markerPath =
-  'ops/r5/run-once-20260805-twelve-ledger-claim-cap-proof.marker'
+const diagnostic = read('scripts/diagnose-supabase-r5-pending-scan.mjs')
+const markerPath = 'ops/r5/run-once-20260805-pending-scan-readonly.marker'
 const marker = read(markerPath)
 const markerDigest = createHash('sha256').update(marker).digest('hex')
 
-const sourceMain = 'd983aeb2aa2411514e75927ebd9f350ad7b622bd'
+const sourceMain = 'cecd28485c8db64780aed844704690cf3278ed92'
 const expectedDigest =
-  '7eb5a68f63427d5a50e3673f3fc60a3155a2b554f0873540ea0a9a2532d0be1c'
+  'aa5d748007c9db9754ec6422e044b564bf86a87edd12624d72b92a4a6e64dfce'
 
-describe('R5 V7 twelve-ledger one-shot proof trigger', () => {
-  it('pins V7 to finalization success and both exact collector contention errors', () => {
+describe('R5 pending-scan read-only diagnostic trigger', () => {
+  it('pins the exact failed run, watermark, error, and marker digest', () => {
     expect(marker).toBe(
-      'R5_TWELVE_LEDGER_CLAIM_CAP_PROOF_V7\nmode=finite_bounded_recovery\nsource_commit=d983aeb2aa2411514e75927ebd9f350ad7b622bd\nsource_verification_run_id=31012179441\nsource_initial_gap_verification_run_id=31019054351\nprior_skipped_run_id=31013623911\nprior_watermark_drift_run_id=31014360049\nprior_preclaim_match_miss_run_id=31015285563\nprior_outer_hook_miss_run_id=31016519593\nprior_initial_gap_failure_run_id=31018077125\nprior_finalization_success_contention_run_id=31020370895\npreclaim_finalization=required\nfinalization_initial_gap_bound=256\nfinalization_post_drain_advance_bound=24\ncollector_contention_retry_attempts=3\ncollector_contention_retry_delay_seconds=60\ncollector_contention_errors=r5_checkpoint_drain_collector_not_quiescent,r5_recovery_batch_collector_not_quiescent\nmatch_boundary=generated_controller_trigger_error\nbatch_limit=8\nwall_seconds=900\nexpected_claim_cap=12\nnonce=twelve-ledger-claim-cap-proof-20260805-v7-8c42e6a1\n',
+      'R5_PENDING_SCAN_DIAGNOSTIC_V1\nmode=read_only\nsource_main_commit=cecd28485c8db64780aed844704690cf3278ed92\nsource_failed_burst_run_id=31021223140\nrecovery_run_id=r5-recovery-selected-revision3-entry\nexpected_recovery_watermark_ledger=4138631\nerror=r5_recovery_batch_pending_scan_invalid\nnonce=r5-pending-scan-readonly-20260805-2348-jst\n',
     )
     expect(markerDigest).toBe(expectedDigest)
-    expect(workflow).toContain(markerDigest)
-    expect(adapter).toContain(markerDigest)
+    expect(workflow).toContain(expectedDigest)
+    expect(adapter).toContain(expectedDigest)
   })
 
-  it('uses the workflow path filter only to start the proof workflow', () => {
-    expect(workflow).toContain('  push:')
-    expect(workflow).toContain('    branches: [main]')
-    expect(workflow).toContain(`      - ${markerPath}`)
-    expect(workflow).not.toContain(
-      'ops/r5/run-once-20260804-8x900-observable-v2.marker',
+  it('binds push only to the exact read-only diagnostic path', () => {
+    for (const required of [
+      '  push:',
+      '    branches: [main]',
+      `      - ${markerPath}`,
+      'diagnose-pending-scan:',
+      "github.event_name == 'push' && github.ref == 'refs/heads/main'",
+      'node scripts/diagnose-supabase-r5-pending-scan.mjs',
+    ]) {
+      expect(workflow).toContain(required)
+    }
+
+    const executeCondition = workflow.slice(
+      workflow.indexOf('  execute-bounded-burst:'),
+      workflow.indexOf(
+        '    runs-on: ubuntu-latest',
+        workflow.indexOf('  execute-bounded-burst:'),
+      ),
     )
-    expect(workflow).not.toContain('diagnose-database-size:')
+    expect(executeCondition).not.toContain("github.event_name == 'push'")
   })
 
-  it('keeps the mutation boundary in exact runner-side git verification', () => {
-    const verifyStart = workflow.indexOf(
-      '      - name: Verify exact bounded request and secret bindings',
-    )
-    const rotationStart = workflow.indexOf(
-      '      - name: Rotate one-run R5 recovery verifier token',
-    )
-    const verification = workflow.slice(verifyStart, rotationStart)
-
+  it('verifies the exact marker, parent, added path, and repository author', () => {
     for (const required of [
       'fetch-depth: 2',
-      'test "$GITHUB_REF" = refs/heads/main',
-      'test "$R5_RECOVERY_BURST_BATCH_LIMIT" -eq 8',
-      'test "$R5_RECOVERY_BURST_WALL_SECONDS" -eq 900',
       `marker='${markerPath}'`,
-      `test "$marker_sha" = ${markerDigest}`,
+      `test "$marker_sha" = ${expectedDigest}`,
       'parent_sha="$(git rev-parse "${GITHUB_SHA}^")"',
       `test "$parent_sha" = ${sourceMain}`,
       'git diff-tree --no-commit-id --name-status',
-      "test \"$marker_change\" = $'M\\tops/r5/run-once-20260805-twelve-ledger-claim-cap-proof.marker'",
-      'author_login="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}"',
+      "test \"$marker_change\" = $'A\\tops/r5/run-once-20260805-pending-scan-readonly.marker'",
       'test "$author_login" = badjoke-lab',
     ]) {
       expect(workflow).toContain(required)
     }
-
-    expect(verifyStart).toBeGreaterThan(-1)
-    expect(rotationStart).toBeGreaterThan(verifyStart)
-    expect(verification).not.toContain('supabase secrets set')
-    expect(verification).not.toContain(
-      'node scripts/run-supabase-r5-recovery-burst-contention-aware.mjs',
-    )
   })
 
-  it('forces the one-shot push to exactly eight batches and 900 seconds', () => {
+  it('uses only read-only Management API queries and sanitized output', () => {
     for (const required of [
-      "github.event_name == 'push' && '8'",
-      "github.event_name == 'push' && '900'",
-      'test "$R5_RECOVERY_BURST_BATCH_LIMIT" -le 64',
-      'test "$R5_RECOVERY_BURST_WALL_SECONDS" -le 1800',
-      'timeout-minutes: 40',
+      'read_only: true',
+      "const exactError = 'r5_recovery_batch_pending_scan_invalid'",
+      'pg_get_functiondef(p.oid)',
+      'public.xrpl_phase_work',
+      'public.xrpl_phase_messages',
+      'xrpl_r5_v1.recovery_batches',
+      'noncommittedWork',
+      'nonterminalMessages',
+      'exactErrorLocatedOnce',
+      'definitionSha256',
+      'Exact function excerpt',
+      'supabase-r5-pending-scan-diagnostic',
     ]) {
-      expect(workflow).toContain(required)
+      expect(diagnostic).toContain(required)
+    }
+
+    for (const forbidden of [
+      'insert into',
+      'update public.',
+      'update xrpl_r5_v1.',
+      'delete from',
+      'truncate ',
+      'vacuum ',
+      'supabase secrets set',
+      'SUPABASE_SERVICE_ROLE_KEY',
+    ]) {
+      expect(diagnostic.toLowerCase()).not.toContain(forbidden.toLowerCase())
     }
   })
 
-  it('retains workflow dispatch and both exact owner-only issue commands', () => {
+  it('retains only dispatch and owner issue mutation paths', () => {
     for (const required of [
       'workflow_dispatch:',
       'issue_comment:',
@@ -97,47 +107,21 @@ describe('R5 V7 twelve-ledger one-shot proof trigger', () => {
       "github.actor == 'badjoke-lab'",
       "github.event.comment.body == '/r5-recovery burst 8 900 nonce-e3378018'",
       "github.event.comment.body == '/r5-recovery burst 64 1800 nonce-cd7eb564'",
-      'group: r5-bounded-recovery-burst',
-      'cancel-in-progress: false',
-    ]) {
-      expect(workflow).toContain(required)
-    }
-  })
-
-  it('keeps execution and sanitized evidence bounded', () => {
-    for (const required of [
       'supabase secrets set XRPL_R5_RECOVERY_VERIFY_TOKEN',
       'node scripts/run-supabase-r5-recovery-burst-contention-aware.mjs',
-      'name: supabase-r5-recovery-burst-evidence',
-      'retention-days: 14',
-      'node scripts/publish-supabase-r5-recovery-burst-run-locator.mjs',
-      'gh issue comment 1175',
     ]) {
       expect(workflow).toContain(required)
     }
-    for (const required of [
-      'requested executor batch limit:',
-      'executed recovery batches:',
-      'materialized batch rows:',
-      'adoption materialized rows:',
-      'adoption rows excluded from executor budget:',
-    ]) {
-      expect(publisher).toContain(required)
-    }
   })
 
-  it('adapts the canonical workflow policy by exact replacements only', () => {
+  it('adapts the canonical allowlist by exact replacements', () => {
     for (const required of [
-      "source_script='scripts/check-actions-workflow-allowlist.sh'",
-      'def replace_once(name: str, old: str, new: str) -> None:',
-      'count != 1',
-      'new in text',
-      'old in updated',
-      'new not in updated',
+      'R5 pending-scan diagnostic trigger policy',
+      'R5 pending-scan diagnostic and owner burst contract',
+      'R5 read-only diagnostic push exception',
+      'R5 diagnostic and burst locator count',
       'r5_burst: ["workflow_dispatch", "issue_comment", "push"]',
-      'R5 V7 proof marker and owner burst contract',
-      'R5 V7 finite-proof push exception',
-      'git diff-tree --no-commit-id --name-status',
+      'burst.count("gh issue comment 1175") != 2',
       'bash "$generated_script" "$@"',
     ]) {
       expect(adapter).toContain(required)
@@ -145,12 +129,9 @@ describe('R5 V7 twelve-ledger one-shot proof trigger', () => {
     expect(ci).toContain(
       'run: bash scripts/check-actions-workflow-allowlist-r5-one-shot.sh',
     )
-    expect(ci).toContain(
-      'bash -n scripts/check-actions-workflow-allowlist-r5-one-shot.sh',
-    )
   })
 
-  it('does not add scheduling, broad write, database credentials, or deployment', () => {
+  it('does not add scheduled, broad-write, database-credential, or deployment capability', () => {
     for (const forbidden of [
       '  schedule:',
       'pull_request_target',

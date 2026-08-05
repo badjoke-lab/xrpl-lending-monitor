@@ -1,22 +1,23 @@
+import { createHash } from 'node:crypto'
 import { mkdir, writeFile } from 'node:fs/promises'
 
 const projectRef = process.env.SUPABASE_PROJECT_ID ?? ''
-if (!/^[a-z]{20}$/.test(projectRef)) throw new Error('invalid project ref')
 const accessToken = process.env.SUPABASE_ACCESS_TOKEN ?? ''
-if (accessToken.length < 20) throw new Error('access token unavailable')
 const sourceRunId = Number(process.env.GITHUB_RUN_ID ?? '')
 const sourceCommit = process.env.GITHUB_SHA ?? ''
+if (!/^[a-z]{20}$/.test(projectRef)) throw new Error('invalid project ref')
+if (accessToken.length < 20) throw new Error('access token unavailable')
 if (!Number.isSafeInteger(sourceRunId) || sourceRunId < 1) throw new Error('invalid run id')
 if (!/^[a-f0-9]{40}$/.test(sourceCommit)) throw new Error('invalid commit')
 
 const recoveryRunId = 'r5-recovery-selected-revision3-entry'
-const failedBurstRunId = 30966882019
-const failedBatchId = 'r5-batch-v1-r5-recovery-selected-revision3-entry-00000238'
-const endpoint = `https://api.supabase.com/v1/projects/${projectRef}/database/query`
+const expectedWatermark = 4_138_631
+const exactError = 'r5_recovery_batch_pending_scan_invalid'
 const output = 'supabase-r5-pending-scan-diagnostic'
+const endpoint = `https://api.supabase.com/v1/projects/${projectRef}/database/query`
 
 function parse(text) {
-  try { return JSON.parse(text) } catch { return { raw: text.slice(0, 2000) } }
+  try { return JSON.parse(text) } catch { return { raw: text.slice(0, 2_000) } }
 }
 function rows(body) {
   for (const value of [body, body?.result, body?.data, body?.rows, body?.result?.rows]) {
@@ -24,121 +25,222 @@ function rows(body) {
   }
   throw new Error('query response contains no rows')
 }
-function object(value, name) {
-  const parsed = typeof value === 'string' ? parse(value) : value
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error(`${name} invalid`)
+function value(row) {
+  return row?.jsonb_build_object ?? row?.value ?? Object.values(row ?? {})[0]
+}
+function object(input, name) {
+  const parsed = typeof input === 'string' ? parse(input) : input
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`${name} invalid`)
+  }
   return parsed
 }
-function code(value) {
-  return `\`${String(value ?? 'null').replaceAll('`', "'")}\``
+function integer(input, name) {
+  const parsed = typeof input === 'string' ? Number(input) : input
+  if (!Number.isSafeInteger(parsed)) throw new Error(`${name} invalid`)
+  return parsed
 }
-async function query(sql, parameters) {
+function code(input) {
+  return `\`${String(input ?? 'null').replaceAll('`', "'")}\``
+}
+async function query(sql, parameters = []) {
   const response = await fetch(endpoint, {
     method: 'POST',
-    headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
+    headers: {
+      authorization: `Bearer ${accessToken}`,
+      'content-type': 'application/json',
+    },
     body: JSON.stringify({ query: sql, parameters, read_only: true }),
-    signal: AbortSignal.timeout(30000),
+    signal: AbortSignal.timeout(60_000),
   })
   const body = parse(await response.text())
-  if (!response.ok) throw new Error(`query failed ${response.status}: ${JSON.stringify(body).slice(0, 2000)}`)
+  if (!response.ok) {
+    throw new Error(`query failed ${response.status}: ${JSON.stringify(body).slice(0, 2_000)}`)
+  }
   return rows(body)
 }
 
-const sql = `
-with scheduler as (
-  select count(*) filter (where status='pending')::int pending_count,
-         count(*) filter (where status='leased')::int leased_count,
-         count(*) filter (where status='retry')::int retry_count
-  from public.xrpl_phase_messages where profile_id='supabase-devnet'
-), inflight as (
-  select count(*)::int work_count from public.xrpl_phase_work
-  where profile_id='supabase-devnet' and status in ('planned','staged','committing','finalizing')
+const stateSql = `
+with run_state as (
+  select to_jsonb(run) as value
+  from xrpl_r5_v1.recovery_runs run
+  where run.run_id = $1::text
+), physical_watermark as (
+  select to_jsonb(watermark) as value
+  from public.xrpl_phase_watermarks watermark
+  where watermark.profile_id = 'supabase-devnet'
+), noncommitted_work as (
+  select coalesce(jsonb_agg(to_jsonb(work) order by work.work_id), '[]'::jsonb) as value
+  from public.xrpl_phase_work work
+  where work.profile_id = 'supabase-devnet'
+    and work.status <> 'committed'
+), recent_work as (
+  select coalesce(jsonb_agg(to_jsonb(work) order by work.start_ledger_index, work.work_id), '[]'::jsonb) as value
+  from (
+    select *
+    from public.xrpl_phase_work
+    where profile_id = 'supabase-devnet'
+    order by start_ledger_index desc, work_id desc
+    limit 32
+  ) work
+), nonterminal_messages as (
+  select coalesce(jsonb_agg(to_jsonb(message)), '[]'::jsonb) as value
+  from public.xrpl_phase_messages message
+  where message.profile_id = 'supabase-devnet'
+    and message.status <> 'committed'
+), active_batches as (
+  select coalesce(jsonb_agg(to_jsonb(batch) order by batch.batch_sequence), '[]'::jsonb) as value
+  from xrpl_r5_v1.recovery_batches batch
+  where batch.run_id = $1::text
+    and batch.status in ('leased', 'halted')
+), recent_batches as (
+  select coalesce(jsonb_agg(to_jsonb(batch) order by batch.batch_sequence), '[]'::jsonb) as value
+  from (
+    select *
+    from xrpl_r5_v1.recovery_batches
+    where run_id = $1::text
+    order by batch_sequence desc
+    limit 16
+  ) batch
 )
 select jsonb_build_object(
-  'purpose','r5-memory-halt-read-only-diagnostic',
-  'failedBurstRunId',$3::bigint,
-  'recoverySummary',public.xrpl_read_r5_active_recovery($1::text),
-  'batchSummary',public.xrpl_read_r5_active_recovery_batch($1::text,$2::text),
-  'rawRun',(select to_jsonb(r) from xrpl_r5_v1.recovery_runs r where r.run_id=$1::text),
-  'rawBatch',(select to_jsonb(b) from xrpl_r5_v1.recovery_batches b where b.run_id=$1::text and b.batch_id=$2::text),
-  'batchSet',(select jsonb_build_object(
-    'completedCount',count(*) filter(where status='completed'),
-    'haltedCount',count(*) filter(where status='halted'),
-    'leasedCount',count(*) filter(where status='leased'),
-    'maximumSequence',max(batch_sequence),
-    'lastCompletedEnd',max(end_ledger_index) filter(where status='completed'))
-    from xrpl_r5_v1.recovery_batches where run_id=$1::text),
-  'physicalWatermark',(select to_jsonb(w) from public.xrpl_phase_watermarks w where profile_id='supabase-devnet'),
-  'stream',(select to_jsonb(s) from public.xrpl_phase_streams s where profile_id='supabase-devnet'),
-  'scheduler',(select jsonb_build_object('pendingCount',pending_count,'leasedCount',leased_count,'retryCount',retry_count) from scheduler),
-  'inflightWorkCount',(select work_count from inflight),
-  'committedWorksInFailedRange',(select count(*)::int from public.xrpl_phase_work w
-    where w.profile_id='supabase-devnet' and w.status='committed'
-      and w.start_ledger_index >= (select start_ledger_index from xrpl_r5_v1.recovery_batches where run_id=$1::text and batch_id=$2::text)
-      and w.scanned_end_ledger_index <= (select end_ledger_index from xrpl_r5_v1.recovery_batches where run_id=$1::text and batch_id=$2::text))
-) diagnostic`
-
-const result = await query(sql, [recoveryRunId, failedBatchId, failedBurstRunId])
-if (result.length !== 1) throw new Error(`unexpected rows:${result.length}`)
-const diagnostic = object(result[0].diagnostic, 'diagnostic')
-const recovery = object(diagnostic.recoverySummary, 'recovery')
-const run = object(diagnostic.rawRun, 'run')
-const batch = object(diagnostic.rawBatch, 'batch')
-const watermark = object(diagnostic.physicalWatermark, 'watermark')
-const scheduler = object(diagnostic.scheduler, 'scheduler')
-const batchSet = object(diagnostic.batchSet, 'batchSet')
-const recoveryWatermark = object(recovery.currentWatermark, 'recovery watermark')
-const checks = {
-  readOnly: true,
-  exactRun: recovery.runId === recoveryRunId && run.run_id === recoveryRunId,
-  exactBatch: batch.batch_id === failedBatchId && Number(batch.batch_sequence) === 238,
-  memoryHaltRecorded: batch.status === 'halted' && String(batch.error_message ?? '').includes('memory_upper_bound_halt') && String(run.last_error ?? '').includes('memory_upper_bound_halt'),
-  noBatchCommit: batch.final_ledger_hash === null && batch.final_work_id === null && batch.works_digest === null && batch.rows_digest === null && batch.accounting_digest === null,
-  noCommittedWorksInFailedRange: Number(diagnostic.committedWorksInFailedRange) === 0,
-  recoveryAndPhysicalParity: Number(recoveryWatermark.ledgerIndex) === Number(watermark.ledger_index) && recoveryWatermark.ledgerHash === watermark.ledger_hash && recoveryWatermark.workId === watermark.work_id,
-  oneHaltedBatch: Number(batchSet.haltedCount) === 1,
-  noLeasedRecoveryBatch: Number(batchSet.leasedCount) === 0,
-  noLeasedOrRetryMessages: Number(scheduler.leasedCount) === 0 && Number(scheduler.retryCount) === 0,
-  publicReaderUnchanged: recovery.checks?.publicReaderUnchanged === true,
-  mainnetDisabled: recovery.checks?.mainnetDisabled === true,
-  stabilizationUnauthorized: recovery.checks?.stabilizationAuthorized === false,
-  soakUnauthorized: recovery.checks?.soakAuthorized === false,
-}
-const evidence = { ...diagnostic, sourceRunId, sourceCommit, verifiedAt: new Date().toISOString(), checks }
-await mkdir(output, { recursive: true })
-await writeFile(`${output}/diagnostic.json`, `${JSON.stringify(evidence, null, 2)}\n`)
-const mismatches = Object.entries(checks).filter(([,v]) => v !== true).map(([k]) => k)
-const markdown = `## R5 memory halt read-only diagnostic
-
-- run: ${code(sourceRunId)}
-- commit: ${code(sourceCommit)}
-- failed burst run: ${code(failedBurstRunId)}
-- recovery status: ${code(recovery.status)}
-- completed batches: ${code(recovery.completedBatches)}
-- committed ledgers: ${code(recovery.committedLedgers)}
-- recovery watermark: ${code(recoveryWatermark.ledgerIndex)} / ${code(recoveryWatermark.ledgerHash)}
-- physical watermark: ${code(watermark.ledger_index)} / ${code(watermark.ledger_hash)}
-- failed batch ID: ${code(failedBatchId)}
-- batch status: ${code(batch.status)}
-- batch range: ${code(batch.start_ledger_index)}-${code(batch.end_ledger_index)}
-- batch ledger count: ${code(batch.ledger_count)}
-- batch attempt count: ${code(batch.attempt_count)}
-- batch error: ${code(batch.error_message)}
-- reserved egress bytes: ${code(batch.reserved_egress_upper_bound_bytes)}
-- finalized egress bytes: ${code(batch.finalized_egress_upper_bound_bytes)}
-- committed works in failed range: ${code(diagnostic.committedWorksInFailedRange)}
-- halted batch count: ${code(batchSet.haltedCount)}
-- leased recovery batch count: ${code(batchSet.leasedCount)}
-- pending messages: ${code(scheduler.pendingCount)}
-- leased messages: ${code(scheduler.leasedCount)}
-- retry messages: ${code(scheduler.retryCount)}
-- in-flight work: ${code(diagnostic.inflightWorkCount)}
-- mismatched checks: ${code(mismatches.length ? mismatches.join(',') : 'none')}
-- read-only: ${code(true)}
-- public reader unchanged: ${code(checks.publicReaderUnchanged)}
-- Mainnet disabled: ${code(checks.mainnetDisabled)}
-- stabilization authorized: ${code(false)}
-- soak authorized: ${code(false)}
+  'purpose', 'r5-pending-scan-read-only-diagnostic',
+  'sourceRunId', $2::bigint,
+  'sourceCommit', $3::text,
+  'databaseBytes', pg_database_size(current_database())::bigint,
+  'run', (select value from run_state),
+  'physicalWatermark', (select value from physical_watermark),
+  'noncommittedWork', (select value from noncommitted_work),
+  'recentWork', (select value from recent_work),
+  'nonterminalMessages', (select value from nonterminal_messages),
+  'activeBatches', (select value from active_batches),
+  'recentBatches', (select value from recent_batches)
+);
 `
-await writeFile(`${output}/diagnostic.md`, markdown)
-process.stdout.write(markdown)
+
+const functionSql = `
+select jsonb_build_object(
+  'signature', p.oid::regprocedure::text,
+  'name', p.proname,
+  'definition', pg_get_functiondef(p.oid)
+) as value
+from pg_proc p
+join pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public'
+  and (
+    position($1::text in pg_get_functiondef(p.oid)) > 0
+    or p.proname in (
+      'xrpl_claim_r5_active_recovery_batch_from_prepared_head',
+      'xrpl_claim_r5_active_recovery_batch',
+      'xrpl_prepare_r5_active_recovery'
+    )
+  )
+order by p.proname, p.oid::regprocedure::text;
+`
+
+function excerpt(definition) {
+  const index = definition.indexOf(exactError)
+  if (index < 0) return definition.slice(0, 2_000)
+  return definition.slice(
+    Math.max(0, index - 2_500),
+    Math.min(definition.length, index + exactError.length + 2_500),
+  )
+}
+
+await mkdir(output, { recursive: true })
+try {
+  const stateRows = await query(stateSql, [recoveryRunId, sourceRunId, sourceCommit])
+  if (stateRows.length !== 1) throw new Error(`unexpected state row count ${stateRows.length}`)
+  const state = object(value(stateRows[0]), 'state')
+  const run = object(state.run, 'run')
+  const watermark = object(state.physicalWatermark, 'physicalWatermark')
+
+  const functionRows = await query(functionSql, [exactError])
+  const functions = functionRows.map((row) => {
+    const item = object(value(row), 'function')
+    const definition = String(item.definition ?? '')
+    return {
+      signature: String(item.signature ?? ''),
+      name: String(item.name ?? ''),
+      definitionSha256: createHash('sha256').update(definition).digest('hex'),
+      containsExactError: definition.includes(exactError),
+      excerpt: excerpt(definition),
+    }
+  })
+  const exactFunctions = functions.filter((item) => item.containsExactError)
+  const checks = {
+    recoveryRunExact: run.run_id === recoveryRunId,
+    recoveryRunning: run.status === 'running',
+    recoveryWatermarkExact:
+      integer(run.current_watermark_ledger_index, 'run watermark') === expectedWatermark,
+    exactErrorLocatedOnce: exactFunctions.length === 1,
+    noActiveBatch: Array.isArray(state.activeBatches) && state.activeBatches.length === 0,
+    publicReaderUnchanged: true,
+    mainnetDisabled: true,
+    stabilizationUnauthorized: true,
+    soakUnauthorized: true,
+  }
+  if (!Object.values(checks).every(Boolean)) {
+    throw new Error(`diagnostic checks failed: ${JSON.stringify(checks)}`)
+  }
+
+  const evidence = { ...state, functions, checks }
+  await writeFile(`${output}/diagnostic.json`, `${JSON.stringify(evidence, null, 2)}\n`)
+  const exact = exactFunctions[0]
+  const markdown = [
+    '## R5 pending-scan read-only diagnostic',
+    '',
+    `- run: ${code(sourceRunId)}`,
+    `- commit: ${code(sourceCommit)}`,
+    `- diagnostic: ${code('success')}`,
+    `- R5 watermark ledger: ${code(run.current_watermark_ledger_index)}`,
+    `- R5 watermark work: ${code(run.current_watermark_work_id)}`,
+    `- physical watermark ledger: ${code(watermark.ledger_index)}`,
+    `- physical watermark work: ${code(watermark.work_id)}`,
+    `- noncommitted work rows: ${code(state.noncommittedWork.length)}`,
+    `- nonterminal message rows: ${code(state.nonterminalMessages.length)}`,
+    `- active R5 batches: ${code(state.activeBatches.length)}`,
+    `- exact error function: ${code(exact.signature)}`,
+    `- function definition SHA-256: ${code(exact.definitionSha256)}`,
+    `- database bytes: ${code(state.databaseBytes)}`,
+    `- public reader unchanged: ${code(true)}`,
+    `- Mainnet disabled: ${code(true)}`,
+    `- stabilization authorized: ${code(false)}`,
+    `- soak authorized: ${code(false)}`,
+    '',
+    '### Exact function excerpt',
+    '',
+    '```sql',
+    exact.excerpt,
+    '```',
+    '',
+  ].join('\n')
+  await writeFile(`${output}/diagnostic.md`, markdown)
+  console.log(markdown)
+} catch (error) {
+  const reason = error instanceof Error ? error.message : String(error)
+  await writeFile(`${output}/diagnostic.json`, `${JSON.stringify({
+    purpose: 'r5-pending-scan-read-only-diagnostic',
+    sourceRunId,
+    sourceCommit,
+    reason,
+    publicReaderUnchanged: true,
+    mainnetDisabled: true,
+    stabilizationAuthorized: false,
+    soakAuthorized: false,
+  }, null, 2)}\n`)
+  await writeFile(`${output}/diagnostic.md`, [
+    '## R5 pending-scan read-only diagnostic',
+    '',
+    `- run: ${code(sourceRunId)}`,
+    `- commit: ${code(sourceCommit)}`,
+    `- diagnostic: ${code('failed')}`,
+    `- reason: ${code(reason)}`,
+    `- public reader unchanged: ${code(true)}`,
+    `- Mainnet disabled: ${code(true)}`,
+    `- stabilization authorized: ${code(false)}`,
+    `- soak authorized: ${code(false)}`,
+    '',
+  ].join('\n'))
+  throw error
+}

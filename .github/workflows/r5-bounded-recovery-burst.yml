@@ -22,7 +22,7 @@ on:
   push:
     branches: [main]
     paths:
-      - ops/r5/run-once-20260805-twelve-ledger-claim-cap-proof.marker
+      - ops/r5/run-once-20260805-pending-scan-readonly.marker
 
 permissions:
   contents: read
@@ -55,10 +55,6 @@ jobs:
             || github.event.comment.body == '/r5-recovery burst 64 1800 nonce-cd7eb564'
           )
         )
-        || (
-          github.event_name == 'push'
-          && github.ref == 'refs/heads/main'
-        )
       }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
@@ -66,19 +62,15 @@ jobs:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
       R5_RECOVERY_BURST_BATCH_LIMIT: >-
-        ${{ github.event_name == 'push' && '8' || github.event_name == 'issue_comment' && github.event.comment.body == '/r5-recovery burst 64 1800 nonce-cd7eb564' && '64' || github.event_name == 'issue_comment' && '8' || inputs.batch_limit }}
+        ${{ github.event_name == 'issue_comment' && github.event.comment.body == '/r5-recovery burst 64 1800 nonce-cd7eb564' && '64' || github.event_name == 'issue_comment' && '8' || inputs.batch_limit }}
       R5_RECOVERY_BURST_WALL_SECONDS: >-
-        ${{ github.event_name == 'push' && '900' || github.event_name == 'issue_comment' && github.event.comment.body == '/r5-recovery burst 64 1800 nonce-cd7eb564' && '1800' || github.event_name == 'issue_comment' && '900' || inputs.wall_seconds }}
+        ${{ github.event_name == 'issue_comment' && github.event.comment.body == '/r5-recovery burst 64 1800 nonce-cd7eb564' && '1800' || github.event_name == 'issue_comment' && '900' || inputs.wall_seconds }}
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 2
 
       - name: Verify exact bounded request and secret bindings
-        env:
-          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
@@ -98,21 +90,6 @@ jobs:
               test "$R5_RECOVERY_BURST_BATCH_LIMIT" -eq 64
               test "$R5_RECOVERY_BURST_WALL_SECONDS" -eq 1800
             fi
-          fi
-          if [ "$GITHUB_EVENT_NAME" = push ]; then
-            test "$GITHUB_REF" = refs/heads/main
-            test "$R5_RECOVERY_BURST_BATCH_LIMIT" -eq 8
-            test "$R5_RECOVERY_BURST_WALL_SECONDS" -eq 900
-            marker='ops/r5/run-once-20260805-twelve-ledger-claim-cap-proof.marker'
-            test -f "$marker"
-            marker_sha="$(sha256sum "$marker" | cut -d' ' -f1)"
-            test "$marker_sha" = 7eb5a68f63427d5a50e3673f3fc60a3155a2b554f0873540ea0a9a2532d0be1c
-            parent_sha="$(git rev-parse "${GITHUB_SHA}^")"
-            test "$parent_sha" = d983aeb2aa2411514e75927ebd9f350ad7b622bd
-            marker_change="$(git diff-tree --no-commit-id --name-status -r "${GITHUB_SHA}^" "$GITHUB_SHA" -- "$marker")"
-            test "$marker_change" = $'M\tops/r5/run-once-20260805-twelve-ledger-claim-cap-proof.marker'
-            author_login="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}" --jq '.author.login')"
-            test "$author_login" = badjoke-lab
           fi
 
       - name: Set up Supabase CLI
@@ -158,3 +135,58 @@ jobs:
           node scripts/publish-supabase-r5-recovery-burst-run-locator.mjs > /tmp/r5-burst-comment.md
           test -s /tmp/r5-burst-comment.md
           gh issue comment 1175 --repo "$GITHUB_REPOSITORY" --body-file /tmp/r5-burst-comment.md
+
+  diagnose-pending-scan:
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Verify exact read-only pending-scan diagnostic marker
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SUPABASE_ACCESS_TOKEN"
+          [[ "$SUPABASE_PROJECT_ID" =~ ^[a-z]{20}$ ]]
+          test "$GITHUB_REF" = refs/heads/main
+          marker='ops/r5/run-once-20260805-pending-scan-readonly.marker'
+          test -f "$marker"
+          marker_sha="$(sha256sum "$marker" | cut -d' ' -f1)"
+          test "$marker_sha" = aa5d748007c9db9754ec6422e044b564bf86a87edd12624d72b92a4a6e64dfce
+          parent_sha="$(git rev-parse "${GITHUB_SHA}^")"
+          test "$parent_sha" = cecd28485c8db64780aed844704690cf3278ed92
+          marker_change="$(git diff-tree --no-commit-id --name-status -r "${GITHUB_SHA}^" "$GITHUB_SHA" -- "$marker")"
+          test "$marker_change" = $'A\tops/r5/run-once-20260805-pending-scan-readonly.marker'
+          author_login="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}" --jq '.author.login')"
+          test "$author_login" = badjoke-lab
+
+      - name: Read pending-scan function and state boundaries
+        run: node scripts/diagnose-supabase-r5-pending-scan.mjs
+
+      - name: Upload sanitized pending-scan diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: supabase-r5-pending-scan-diagnostic
+          path: supabase-r5-pending-scan-diagnostic
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish sanitized pending-scan diagnostic
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s supabase-r5-pending-scan-diagnostic/diagnostic.md
+          gh issue comment 1175 --repo "$GITHUB_REPOSITORY" --body-file supabase-r5-pending-scan-diagnostic/diagnostic.md
