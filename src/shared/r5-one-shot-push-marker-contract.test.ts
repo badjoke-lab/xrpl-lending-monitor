@@ -17,9 +17,15 @@ const publisher = read(
 )
 const marker = read('ops/r5/run-once-20260804-8x900-observable-v2.marker')
 const markerDigest = createHash('sha256').update(marker).digest('hex')
+const proofMarkerPath =
+  'ops/r5/run-once-20260805-twelve-ledger-claim-cap-proof.marker'
+const proofMarker = read(proofMarkerPath)
+const proofMarkerDigest = createHash('sha256')
+  .update(proofMarker)
+  .digest('hex')
 
-describe('R5 all-schema database-size read-only diagnostic contract', () => {
-  it('binds one exact main push path to the database diagnostic job only', () => {
+describe('R5 bounded one-shot push contracts', () => {
+  it('keeps the read-only database diagnostic push path exact', () => {
     for (const required of [
       '  push:',
       '    branches: [main]',
@@ -35,7 +41,9 @@ describe('R5 all-schema database-size read-only diagnostic contract', () => {
     ]) {
       expect(workflow).toContain(required)
     }
+  })
 
+  it('allows mutation on push only for the exact twelve-ledger proof marker', () => {
     const executeCondition = workflow.slice(
       workflow.indexOf('  execute-bounded-burst:'),
       workflow.indexOf(
@@ -43,7 +51,18 @@ describe('R5 all-schema database-size read-only diagnostic contract', () => {
         workflow.indexOf('  execute-bounded-burst:'),
       ),
     )
-    expect(executeCondition).not.toContain("github.event_name == 'push'")
+
+    for (const required of [
+      "github.event_name == 'push'",
+      "github.ref == 'refs/heads/main'",
+      `contains(github.event.head_commit.added, '${proofMarkerPath}')`,
+      `contains(github.event.head_commit.modified, '${proofMarkerPath}')`,
+    ]) {
+      expect(executeCondition).toContain(required)
+    }
+    expect(executeCondition).not.toContain(
+      'contains(github.event.head_commit.removed',
+    )
   })
 
   it('pins the all-schema halt marker bytes and digest exactly', () => {
@@ -55,6 +74,36 @@ describe('R5 all-schema database-size read-only diagnostic contract', () => {
     )
     expect(workflow).toContain(markerDigest)
     expect(adapter).toContain(markerDigest)
+  })
+
+  it('pins the twelve-ledger proof marker to the verified source state', () => {
+    expect(proofMarker).toBe(
+      'R5_TWELVE_LEDGER_CLAIM_CAP_PROOF_V1\nmode=finite_bounded_recovery\nsource_commit=dc9f3fc36e5bf71f4462542fdfa03f135f0a61c6\nsource_verification_run_id=31012179441\nbatch_limit=8\nwall_seconds=900\nexpected_claim_cap=12\nnonce=twelve-ledger-claim-cap-proof-20260805-6db3f1a2\n',
+    )
+    expect(proofMarkerDigest).toBe(
+      'ed3acdcfdbaf52f1f50a67762fc744659e6e2d74c2197e10f26693cb40b7efd3',
+    )
+
+    for (const required of [
+      proofMarkerPath,
+      proofMarkerDigest,
+      'test "$R5_RECOVERY_BURST_BATCH_LIMIT" -eq 8',
+      'test "$R5_RECOVERY_BURST_WALL_SECONDS" -eq 900',
+      'test "$(git rev-parse "${GITHUB_SHA}^")" = dc9f3fc36e5bf71f4462542fdfa03f135f0a61c6',
+      "author_login=\"$(gh api \"repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}\" --jq '.author.login')\"",
+      'test "$author_login" = badjoke-lab',
+    ]) {
+      expect(workflow).toContain(required)
+    }
+
+    for (const required of [
+      proofMarkerPath,
+      proofMarkerDigest,
+      'dc9f3fc36e5bf71f4462542fdfa03f135f0a61c6',
+      'author_login=',
+    ]) {
+      expect(adapter).toContain(required)
+    }
   })
 
   it('uses only a read-only Management API query and sanitized evidence', () => {
@@ -143,7 +192,7 @@ describe('R5 all-schema database-size read-only diagnostic contract', () => {
     }
   })
 
-  it('retains both exact owner-only mutation commands', () => {
+  it('retains both exact owner-only comment commands', () => {
     for (const required of [
       "github.event_name == 'issue_comment'",
       'github.event.issue.number == 1175',
@@ -170,8 +219,8 @@ describe('R5 all-schema database-size read-only diagnostic contract', () => {
       'old in updated',
       'new not in updated',
       'r5_burst: ["workflow_dispatch", "issue_comment", "push"]',
-      'R5 database-size diagnostic and owner burst marker contract',
-      'R5 read-only diagnostic push exception',
+      'R5 database-size diagnostic, proof marker, and owner burst contract',
+      'R5 bounded one-shot push exception',
       'R5 diagnostic and burst locator count',
       'burst.count("gh issue comment 1175") != 2',
       'bash "$generated_script" "$@"',
