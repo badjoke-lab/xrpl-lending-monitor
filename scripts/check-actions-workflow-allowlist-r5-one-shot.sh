@@ -31,13 +31,18 @@ replace_once(
     '    r5_burst: ["workflow_dispatch", "issue_comment", "push"],',
 )
 replace_once(
-    "R5 database-size diagnostic and owner burst marker contract",
+    "R5 database-size diagnostic, proof marker, and owner burst contract",
     '''    "github.event.comment.body == '/r5-recovery burst 8 900 nonce-e3378018'",
     "R5_RECOVERY_BURST_BATCH_LIMIT",''',
     '''    "github.event.comment.body == '/r5-recovery burst 8 900 nonce-e3378018'",
     "github.event.comment.body == '/r5-recovery burst 64 1800 nonce-cd7eb564'",
     "github.event_name == 'push'",
     "github.ref == 'refs/heads/main'",
+    "contains(github.event.head_commit.added",
+    "contains(github.event.head_commit.modified",
+    "ops/r5/run-once-20260805-twelve-ledger-claim-cap-proof.marker",
+    "ed3acdcfdbaf52f1f50a67762fc744659e6e2d74c2197e10f26693cb40b7efd3",
+    "dc9f3fc36e5bf71f4462542fdfa03f135f0a61c6",
     "diagnose-database-size",
     "ops/r5/run-once-20260804-8x900-observable-v2.marker",
     "a7c79e34daa6c1bdd5b11aca5b03dcdfd32cbc1aaa6717d31dd8f4795886e5d7",
@@ -50,7 +55,7 @@ replace_once(
     "R5_RECOVERY_BURST_BATCH_LIMIT",''',
 )
 replace_once(
-    "R5 read-only diagnostic push exception",
+    "R5 bounded one-shot push exception",
     '''for forbidden in (
     "  schedule:",
     "  push:",
