@@ -34,10 +34,11 @@ replace_once(
 )
 
 replace_once(
-    "R5 read-only diagnostic marker contract",
+    "R5 read-only diagnostic and owner burst marker contract",
     '''    "github.event.comment.body == '/r5-recovery burst 8 900 nonce-e3378018'",
     "R5_RECOVERY_BURST_BATCH_LIMIT",''',
     '''    "github.event.comment.body == '/r5-recovery burst 8 900 nonce-e3378018'",
+    "github.event.comment.body == '/r5-recovery burst 64 1800 nonce-cd7eb564'",
     "github.event_name == 'push'",
     "github.ref == 'refs/heads/main'",
     "diagnose-pending-scan",
