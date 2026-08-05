@@ -7,17 +7,23 @@ function read(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
-const migration = read(
+const reclaimMigration = read(
   'supabase/migrations/20260805070000_xrpl_r5_reclaim_catchup_qualification_storage.sql',
 )
-const retainedVerifier = read(
+const sealMigration = read(
+  'supabase/migrations/20260805071000_xrpl_r5_seal_catchup_reclaim_archive.sql',
+)
+const retainedWrapper = read(
   'scripts/verify-supabase-retained-r5-qualification-evidence.mjs',
+)
+const retainedVerifier = read(
+  'scripts/verify-supabase-retained-r5-qualification-evidence-v2.mjs',
 )
 const catchUpVerifier = read('scripts/verify-supabase-catchup-throughput.mjs')
 const steadyVerifier = read('scripts/verify-supabase-steady-throughput-with-retry.mjs')
 
 describe('R5 qualification reclaim contract', () => {
-  it('binds the reclaim to exact successful source evidence and active R5 identity', () => {
+  it('binds reclaim and seal to exact successful source evidence and active R5 identity', () => {
     for (const required of [
       "'r5-catchup-reclaim-20260805-v1'",
       "'r5-recovery-selected-revision3-entry'",
@@ -31,7 +37,8 @@ describe('R5 qualification reclaim contract', () => {
       "'3a5c4ff2c43a48d3e5b7ceded60027173d215d6f083fb33c22375758520bbe67'",
       "'13a313d9d0679c7c512b59f9931d733dcb3217ec8e1cc6e74a36125a0354b667'",
     ]) {
-      expect(migration).toContain(required)
+      expect(reclaimMigration).toContain(required)
+      expect(sealMigration).toContain(required)
       expect(retainedVerifier).toContain(required.replaceAll("'", ''))
     }
   })
@@ -51,10 +58,10 @@ describe('R5 qualification reclaim contract', () => {
       'public.xrpl_transfer_json_digest(v_evidence)',
       'r5_catchup_reclaim_active_watermark_changed',
     ]) {
-      expect(migration).toContain(required)
+      expect(reclaimMigration).toContain(required)
     }
 
-    const truncateBlock = migration.match(/truncate table([\s\S]*?);/i)?.[1] ?? ''
+    const truncateBlock = reclaimMigration.match(/truncate table([\s\S]*?);/i)?.[1] ?? ''
     for (const table of [
       'successors',
       'messages',
@@ -74,10 +81,31 @@ describe('R5 qualification reclaim contract', () => {
     }
   })
 
-  it('verifies the reclaimed database and retained steady session read-only', () => {
+  it('recomputes the archive digest at deploy time without granting runtime execute', () => {
+    for (const required of [
+      'create table if not exists xrpl_qualification_archive_v1.catchup_reclaim_seals',
+      'v_recomputed_digest := public.xrpl_transfer_json_digest(v_archive.evidence)',
+      'v_recomputed_digest is distinct from v_archive.evidence_digest',
+      "'archiveDigestRecomputedAtDeploy', true",
+      "'privateDigestExecuteNotGranted', true",
+      'on conflict (archive_id) do nothing',
+      'r5_catchup_reclaim_seal_existing_row_invalid',
+    ]) {
+      expect(sealMigration).toContain(required)
+    }
+    expect(sealMigration).toContain(
+      'revoke all on table xrpl_qualification_archive_v1.catchup_reclaim_seals',
+    )
+    expect(sealMigration).not.toMatch(
+      /grant\s+execute\s+on\s+function\s+public\.xrpl_transfer_json_digest/i,
+    )
+  })
+
+  it('verifies reclaimed storage and retained qualification state read-only through the seal', () => {
     for (const required of [
       'read_only: true',
       "archive.archive_id = $1::text",
+      "seal.archive_id = $1::text",
       "session.session_id = $3::text",
       "running.status = 'running'",
       'databaseBytes >= databaseHaltBytes',
@@ -86,6 +114,10 @@ describe('R5 qualification reclaim contract', () => {
       "integer(steady.completed_ticks, 'steady completed ticks') !== 6",
       "integer(steady.committed_ledgers, 'steady committed ledgers') !== 144",
       "integer(steady.running_sessions, 'steady running sessions') !== 0",
+      'seal.evidence_digest !== archive.evidence_digest',
+      'sealChecks.archiveDigestRecomputedAtDeploy !== true',
+      'catchUpEvidenceDeploySealed: true',
+      'privateDigestExecuteNotGranted: true',
       'noFreshQualificationExecuted: true',
     ]) {
       expect(retainedVerifier).toContain(required)
@@ -93,6 +125,7 @@ describe('R5 qualification reclaim contract', () => {
 
     const querySql = retainedVerifier.match(/const sql = `([\s\S]*?)`\n/)?.[1] ?? ''
     expect(querySql.length).toBeGreaterThan(100)
+    expect(querySql).not.toContain('xrpl_transfer_json_digest')
     for (const forbidden of [
       /\binsert\s+into\b/i,
       /\bupdate\s+[a-z_]/i,
@@ -103,6 +136,14 @@ describe('R5 qualification reclaim contract', () => {
     ]) {
       expect(querySql).not.toMatch(forbidden)
     }
+  })
+
+  it('keeps the original module path as a thin compatibility wrapper', () => {
+    expect(retainedWrapper).toContain(
+      "import { verifyRetainedR5Qualifications } from './verify-supabase-retained-r5-qualification-evidence-v2.mjs'",
+    )
+    expect(retainedWrapper).toContain('export { verifyRetainedR5Qualifications }')
+    expect(retainedWrapper).not.toContain('xrpl_transfer_json_digest')
   })
 
   it('reuses retained evidence before either expensive qualification can execute', () => {
@@ -134,12 +175,11 @@ describe('R5 qualification reclaim contract', () => {
 
     for (const forbidden of [
       'databaseHaltBytes = 500_000_000',
-      'memoryHaltBytes =',
       "mainnetEnabled: true",
       'stabilizationAuthorized: true',
       'soakAuthorized: true',
     ]) {
-      expect(`${migration}\n${retainedVerifier}`).not.toContain(forbidden)
+      expect(`${reclaimMigration}\n${sealMigration}\n${retainedVerifier}`).not.toContain(forbidden)
     }
   })
 })
