@@ -1,0 +1,7 @@
+R5_FINAL_BOUNDARY_V10
+source_failed_run=30925522885
+mode=bounded_commit_finalize_only
+public_reader=unchanged
+mainnet=disabled
+stabilization=unauthorized
+soak=unauthorized
