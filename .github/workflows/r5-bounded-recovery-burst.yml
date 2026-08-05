@@ -22,8 +22,7 @@ on:
   push:
     branches: [main]
     paths:
-      - ops/r5/run-once-20260804-8x900-observable-v2.marker
-      - ops/r5/run-once-20260805-twelve-ledger-claim-cap-proof.marker
+      - ops/r5/run-once-20260805-twelve-ledger-claim-cap-proof-v2.marker
 
 permissions:
   contents: read
@@ -59,10 +58,7 @@ jobs:
         || (
           github.event_name == 'push'
           && github.ref == 'refs/heads/main'
-          && (
-            contains(github.event.head_commit.added, 'ops/r5/run-once-20260805-twelve-ledger-claim-cap-proof.marker')
-            || contains(github.event.head_commit.modified, 'ops/r5/run-once-20260805-twelve-ledger-claim-cap-proof.marker')
-          )
+          && github.event.before == 'cfa3b22686c0ab9bfab6a74d8987ea41b7f66607'
         )
       }}
     runs-on: ubuntu-latest
@@ -106,11 +102,12 @@ jobs:
             test "$GITHUB_REF" = refs/heads/main
             test "$R5_RECOVERY_BURST_BATCH_LIMIT" -eq 8
             test "$R5_RECOVERY_BURST_WALL_SECONDS" -eq 900
-            marker='ops/r5/run-once-20260805-twelve-ledger-claim-cap-proof.marker'
+            marker='ops/r5/run-once-20260805-twelve-ledger-claim-cap-proof-v2.marker'
             test -f "$marker"
             marker_sha="$(sha256sum "$marker" | cut -d' ' -f1)"
-            test "$marker_sha" = ed3acdcfdbaf52f1f50a67762fc744659e6e2d74c2197e10f26693cb40b7efd3
-            test "$(git rev-parse "${GITHUB_SHA}^")" = dc9f3fc36e5bf71f4462542fdfa03f135f0a61c6
+            test "$marker_sha" = a06dd69f09694b7553c87676fb05f79dd316f75b78dd66f9029a371ae252947a
+            parent_sha="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}" --jq '.parents[0].sha')"
+            test "$parent_sha" = cfa3b22686c0ab9bfab6a74d8987ea41b7f66607
             author_login="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}" --jq '.author.login')"
             test "$author_login" = badjoke-lab
           fi
@@ -158,48 +155,3 @@ jobs:
           node scripts/publish-supabase-r5-recovery-burst-run-locator.mjs > /tmp/r5-burst-comment.md
           test -s /tmp/r5-burst-comment.md
           gh issue comment 1175 --repo "$GITHUB_REPOSITORY" --body-file /tmp/r5-burst-comment.md
-
-  diagnose-database-size:
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    env:
-      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-      SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-      - name: Verify exact read-only database-size diagnostic marker
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -n "$SUPABASE_ACCESS_TOKEN"
-          [[ "$SUPABASE_PROJECT_ID" =~ ^[a-z]{20}$ ]]
-          test "$GITHUB_REF" = refs/heads/main
-          marker='ops/r5/run-once-20260804-8x900-observable-v2.marker'
-          test -f "$marker"
-          marker_sha="$(sha256sum "$marker" | cut -d' ' -f1)"
-          test "$marker_sha" = a7c79e34daa6c1bdd5b11aca5b03dcdfd32cbc1aaa6717d31dd8f4795886e5d7
-          author_login="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}" --jq '.author.login')"
-          test "$author_login" = badjoke-lab
-      - name: Read database relation and profile size boundaries
-        run: node scripts/diagnose-supabase-r5-database-size.mjs
-      - name: Upload sanitized database-size diagnostic
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: supabase-r5-database-size-diagnostic
-          path: supabase-r5-database-size-diagnostic
-          if-no-files-found: error
-          retention-days: 14
-      - name: Publish sanitized database-size diagnostic
-        if: always()
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -s supabase-r5-database-size-diagnostic/diagnostic.md
-          gh issue comment 1175 --repo "$GITHUB_REPOSITORY" --body-file supabase-r5-database-size-diagnostic/diagnostic.md
