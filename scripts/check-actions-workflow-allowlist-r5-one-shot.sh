@@ -26,32 +26,30 @@ def replace_once(name: str, old: str, new: str) -> None:
     text = updated
 
 replace_once(
-    "R5 finite proof trigger policy",
+    "R5 pending-scan diagnostic trigger policy",
     '    r5_burst: ["workflow_dispatch", "issue_comment"],',
     '    r5_burst: ["workflow_dispatch", "issue_comment", "push"],',
 )
 replace_once(
-    "R5 V7 proof marker and owner burst contract",
+    "R5 pending-scan diagnostic and owner burst contract",
     '''    "github.event.comment.body == '/r5-recovery burst 8 900 nonce-e3378018'",
     "R5_RECOVERY_BURST_BATCH_LIMIT",''',
     '''    "github.event.comment.body == '/r5-recovery burst 8 900 nonce-e3378018'",
     "github.event.comment.body == '/r5-recovery burst 64 1800 nonce-cd7eb564'",
     "github.event_name == 'push'",
     "github.ref == 'refs/heads/main'",
-    "ops/r5/run-once-20260805-twelve-ledger-claim-cap-proof.marker",
-    "7eb5a68f63427d5a50e3673f3fc60a3155a2b554f0873540ea0a9a2532d0be1c",
-    "d983aeb2aa2411514e75927ebd9f350ad7b622bd",
+    "diagnose-pending-scan",
+    "ops/r5/run-once-20260805-pending-scan-readonly.marker",
+    "aa5d748007c9db9754ec6422e044b564bf86a87edd12624d72b92a4a6e64dfce",
+    "cecd28485c8db64780aed844704690cf3278ed92",
     "fetch-depth: 2",
     "git diff-tree --no-commit-id --name-status",
-    "marker_change=",
-    "author_login=",
-    "gh api",
-    "--jq '.author.login'",
-    'test "$author_login" = badjoke-lab',
+    "node scripts/diagnose-supabase-r5-pending-scan.mjs",
+    "supabase-r5-pending-scan-diagnostic",
     "R5_RECOVERY_BURST_BATCH_LIMIT",''',
 )
 replace_once(
-    "R5 V7 finite-proof push exception",
+    "R5 read-only diagnostic push exception",
     '''for forbidden in (
     "  schedule:",
     "  push:",
@@ -79,6 +77,13 @@ replace_once(
 ):
     if forbidden in burst:
         raise SystemExit(f"R5 bounded burst workflow contains forbidden capability: {forbidden.strip()}")''',
+)
+replace_once(
+    "R5 diagnostic and burst locator count",
+    '''if burst.count("issues: write") != 1 or burst.count("gh issue comment 1175") != 1:
+    raise SystemExit("R5 bounded burst issue-write capability must remain bound to one permission and Issue #1175")''',
+    '''if burst.count("issues: write") != 1 or burst.count("gh issue comment 1175") != 2:
+    raise SystemExit("R5 workflow issue-write capability must remain bound to one permission, one burst locator, and one read-only diagnostic locator")''',
 )
 
 generated_path.write_text(text)
