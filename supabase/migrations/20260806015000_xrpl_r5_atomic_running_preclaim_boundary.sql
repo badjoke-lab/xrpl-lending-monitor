@@ -12,8 +12,15 @@ create table if not exists xrpl_r5_v1.atomic_running_preclaim_policy_changes (
   source_diagnostic_run_id bigint not null check (
     source_diagnostic_run_id = 31027674759
   ),
+  source_failed_migration_run_id bigint not null check (
+    source_failed_migration_run_id = 31029262492
+  ),
   source_commit text not null check (
     source_commit = '08e8a35656e9870bfa7aee6eb9dad3d1668b7ad2'
+  ),
+  source_production_definition_sha256 text not null check (
+    source_production_definition_sha256 =
+      '4bc44edfecfa5575f11c6821662c74a464237a3f554bc7516e684cc5eb1a7311'
   ),
   minimum_observed_recovery_watermark bigint not null check (
     minimum_observed_recovery_watermark = 4138667
@@ -35,6 +42,9 @@ create table if not exists xrpl_r5_v1.atomic_running_preclaim_policy_changes (
   ),
   patched_definition_sha256 text not null check (
     patched_definition_sha256 ~ '^[a-f0-9]{64}$'
+  ),
+  stable_claim_anchor_insertion boolean not null check (
+    stable_claim_anchor_insertion
   ),
   atomic_drain_adoption_before_claim boolean not null check (
     atomic_drain_adoption_before_claim
@@ -73,8 +83,8 @@ declare
   v_patched_sha256 text;
   v_old_declaration_count integer;
   v_new_declaration_count integer;
-  v_old_branch_count integer;
-  v_new_branch_count integer;
+  v_claim_anchor_count integer;
+  v_atomic_marker_count integer;
   v_active_batch_count bigint;
   v_run xrpl_r5_v1.recovery_runs%rowtype;
   v_watermark public.xrpl_phase_watermarks%rowtype;
@@ -85,8 +95,10 @@ declare
     E'  v_rebind jsonb;\n  v_claim jsonb;';
   v_new_declaration constant text :=
     E'  v_rebind jsonb;\n  v_preclaim_adoption jsonb;\n  v_claim jsonb;';
-  v_old_branch constant text := E'  else\n    if v_run.completed_batches < 1\n      or v_run.committed_ledgers < 1\n      or v_run.last_accounting_digest is null\n      or v_run.last_error is not null\n      or v_run.started_at is null\n      or v_run.completed_at is not null then\n      raise exception ''r5_recovery_running_progress_invalid'';\n    end if;\n\n    v_rebind := jsonb_build_object(\n      ''rebound'', false,\n      ''reason'', ''recovery_progress_present'',\n      ''runId'', v_run.run_id,\n      ''completedBatches'', v_run.completed_batches,\n      ''committedLedgers'', v_run.committed_ledgers,\n      ''watermarkLedgerIndex'', v_run.current_watermark_ledger_index,\n      ''watermarkLedgerHash'', v_run.current_watermark_ledger_hash,\n      ''watermarkWorkId'', v_run.current_watermark_work_id,\n      ''prebatchRebindSkippedAfterProgress'', true\n    );\n  end if;';
-  v_new_branch constant text := E'  else\n    if v_run.completed_batches < 1\n      or v_run.committed_ledgers < 1\n      or v_run.last_accounting_digest is null\n      or v_run.last_error is not null\n      or v_run.started_at is null\n      or v_run.completed_at is not null then\n      raise exception ''r5_recovery_running_progress_invalid'';\n    end if;\n\n    v_preclaim_adoption := public.xrpl_adopt_r5_committed_active_descendants(\n      p_run_id,\n      p_now\n    );\n\n    if coalesce((v_preclaim_adoption->>''adopted'')::boolean, false) is not true\n      and v_preclaim_adoption->>''reason'' <> ''active_boundary_already_equal'' then\n      raise exception ''r5_recovery_atomic_preclaim_adoption_invalid'';\n    end if;\n\n    select * into v_run\n    from xrpl_r5_v1.recovery_runs\n    where run_id = p_run_id\n    for update;\n\n    if not found\n      or v_run.status <> ''running''\n      or v_run.completed_batches < 1\n      or v_run.committed_ledgers < 1\n      or v_run.last_accounting_digest is null\n      or v_run.last_error is not null\n      or v_run.started_at is null\n      or v_run.completed_at is not null then\n      raise exception ''r5_recovery_atomic_preclaim_run_invalid'';\n    end if;\n\n    v_rebind := jsonb_build_object(\n      ''rebound'', false,\n      ''reason'', ''atomic_running_preclaim_boundary'',\n      ''runId'', v_run.run_id,\n      ''completedBatches'', v_run.completed_batches,\n      ''committedLedgers'', v_run.committed_ledgers,\n      ''watermarkLedgerIndex'', v_run.current_watermark_ledger_index,\n      ''watermarkLedgerHash'', v_run.current_watermark_ledger_hash,\n      ''watermarkWorkId'', v_run.current_watermark_work_id,\n      ''preclaimAdoption'', v_preclaim_adoption,\n      ''atomicBoundaryHeldThroughClaim'', true,\n      ''pendingScanLockHeldThroughClaim'', true,\n      ''noScanExecutedBeforeClaim'', true\n    );\n  end if;';
+  v_claim_anchor constant text :=
+    E'  v_claim := public.xrpl_claim_r5_active_recovery_batch(\n';
+  v_atomic_marker constant text := 'atomicBoundaryHeldThroughClaim';
+  v_atomic_block constant text := E'  if v_run.status = ''running'' then\n    v_preclaim_adoption := public.xrpl_adopt_r5_committed_active_descendants(\n      p_run_id,\n      p_now\n    );\n\n    if coalesce((v_preclaim_adoption->>''adopted'')::boolean, false) is not true\n      and v_preclaim_adoption->>''reason'' <> ''active_boundary_already_equal'' then\n      raise exception ''r5_recovery_atomic_preclaim_adoption_invalid'';\n    end if;\n\n    select * into v_run\n    from xrpl_r5_v1.recovery_runs\n    where run_id = p_run_id\n    for update;\n\n    if not found\n      or v_run.status <> ''running''\n      or v_run.completed_batches < 1\n      or v_run.committed_ledgers < 1\n      or v_run.last_accounting_digest is null\n      or v_run.last_error is not null\n      or v_run.started_at is null\n      or v_run.completed_at is not null then\n      raise exception ''r5_recovery_atomic_preclaim_run_invalid'';\n    end if;\n\n    v_rebind := jsonb_build_object(\n      ''rebound'', false,\n      ''reason'', ''atomic_running_preclaim_boundary'',\n      ''runId'', v_run.run_id,\n      ''completedBatches'', v_run.completed_batches,\n      ''committedLedgers'', v_run.committed_ledgers,\n      ''watermarkLedgerIndex'', v_run.current_watermark_ledger_index,\n      ''watermarkLedgerHash'', v_run.current_watermark_ledger_hash,\n      ''watermarkWorkId'', v_run.current_watermark_work_id,\n      ''preclaimAdoption'', v_preclaim_adoption,\n      ''atomicBoundaryHeldThroughClaim'', true,\n      ''pendingScanLockHeldThroughClaim'', true,\n      ''noScanExecutedBeforeClaim'', true\n    );\n  end if;\n\n';
 begin
   if v_signature is null or v_base_claim_signature is null then
     raise exception 'r5_atomic_preclaim_function_missing';
@@ -159,6 +171,17 @@ begin
   select pg_get_functiondef(v_base_claim_signature)
   into v_base_claim_definition;
 
+  v_prior_sha256 := encode(
+    extensions.digest(convert_to(v_definition, 'UTF8'), 'sha256'),
+    'hex'
+  );
+
+  if v_observed_recovery_watermark is not null
+    and v_prior_sha256 <>
+      '4bc44edfecfa5575f11c6821662c74a464237a3f554bc7516e684cc5eb1a7311' then
+    raise exception 'r5_atomic_preclaim_production_definition_digest_drift';
+  end if;
+
   v_old_declaration_count := (
     length(v_definition)
       - length(replace(v_definition, v_old_declaration, ''))
@@ -167,21 +190,19 @@ begin
     length(v_definition)
       - length(replace(v_definition, v_new_declaration, ''))
   ) / length(v_new_declaration);
-  v_old_branch_count := (
-    length(v_definition) - length(replace(v_definition, v_old_branch, ''))
-  ) / length(v_old_branch);
-  v_new_branch_count := (
-    length(v_definition) - length(replace(v_definition, v_new_branch, ''))
-  ) / length(v_new_branch);
+  v_claim_anchor_count := (
+    length(v_definition)
+      - length(replace(v_definition, v_claim_anchor, ''))
+  ) / length(v_claim_anchor);
+  v_atomic_marker_count := (
+    length(v_definition)
+      - length(replace(v_definition, v_atomic_marker, ''))
+  ) / length(v_atomic_marker);
 
   if v_old_declaration_count <> 1
     or v_new_declaration_count <> 0
-    or v_old_branch_count <> 1
-    or v_new_branch_count <> 0
-    or position(
-      'v_claim := public.xrpl_claim_r5_active_recovery_batch('
-      in v_definition
-    ) = 0
+    or v_claim_anchor_count <> 1
+    or v_atomic_marker_count <> 0
     or position(
       'v_count := least(12::bigint, p_validated_head_ledger_index - v_watermark.ledger_index)::integer;'
       in v_base_claim_definition
@@ -189,27 +210,23 @@ begin
     raise exception 'r5_atomic_preclaim_source_definition_drift';
   end if;
 
-  v_prior_sha256 := encode(
-    extensions.digest(convert_to(v_definition, 'UTF8'), 'sha256'),
-    'hex'
-  );
   v_patched_definition := replace(
     replace(v_definition, v_old_declaration, v_new_declaration),
-    v_old_branch,
-    v_new_branch
+    v_claim_anchor,
+    v_atomic_block || v_claim_anchor
   );
 
   if position(v_old_declaration in v_patched_definition) <> 0
-    or position(v_old_branch in v_patched_definition) <> 0
     or position(v_new_declaration in v_patched_definition) = 0
-    or position(v_new_branch in v_patched_definition) = 0
+    or position(v_atomic_marker in v_patched_definition) = 0
     or position(
       'v_preclaim_adoption := public.xrpl_adopt_r5_committed_active_descendants('
       in v_patched_definition
-    ) > position(
-      'v_claim := public.xrpl_claim_r5_active_recovery_batch('
+    ) = 0
+    or position(
+      'v_preclaim_adoption := public.xrpl_adopt_r5_committed_active_descendants('
       in v_patched_definition
-    ) then
+    ) > position(v_claim_anchor in v_patched_definition) then
     raise exception 'r5_atomic_preclaim_patch_order_invalid';
   end if;
 
@@ -224,26 +241,23 @@ begin
     length(v_patched_definition)
       - length(replace(v_patched_definition, v_new_declaration, ''))
   ) / length(v_new_declaration);
-  v_old_branch_count := (
+  v_claim_anchor_count := (
     length(v_patched_definition)
-      - length(replace(v_patched_definition, v_old_branch, ''))
-  ) / length(v_old_branch);
-  v_new_branch_count := (
+      - length(replace(v_patched_definition, v_claim_anchor, ''))
+  ) / length(v_claim_anchor);
+  v_atomic_marker_count := (
     length(v_patched_definition)
-      - length(replace(v_patched_definition, v_new_branch, ''))
-  ) / length(v_new_branch);
+      - length(replace(v_patched_definition, v_atomic_marker, ''))
+  ) / length(v_atomic_marker);
 
   if v_old_declaration_count <> 0
     or v_new_declaration_count <> 1
-    or v_old_branch_count <> 0
-    or v_new_branch_count <> 1
+    or v_claim_anchor_count <> 1
+    or v_atomic_marker_count <> 1
     or position(
       'v_preclaim_adoption := public.xrpl_adopt_r5_committed_active_descendants('
       in v_patched_definition
-    ) > position(
-      'v_claim := public.xrpl_claim_r5_active_recovery_batch('
-      in v_patched_definition
-    )
+    ) > position(v_claim_anchor in v_patched_definition)
     or position('pendingScanLockHeldThroughClaim' in v_patched_definition) = 0
     or position('noScanExecutedBeforeClaim' in v_patched_definition) = 0 then
     raise exception 'r5_atomic_preclaim_patch_verification_failed';
@@ -259,13 +273,16 @@ begin
     source_recovery_run_id,
     source_failed_burst_run_id,
     source_diagnostic_run_id,
+    source_failed_migration_run_id,
     source_commit,
+    source_production_definition_sha256,
     minimum_observed_recovery_watermark,
     observed_recovery_watermark,
     observed_physical_watermark,
     observed_physical_gap,
     prior_definition_sha256,
     patched_definition_sha256,
+    stable_claim_anchor_insertion,
     atomic_drain_adoption_before_claim,
     pending_scan_lock_held_through_claim,
     twelve_ledger_claim_cap_retained,
@@ -280,13 +297,16 @@ begin
     'r5-recovery-selected-revision3-entry',
     31021223140,
     31027674759,
+    31029262492,
     '08e8a35656e9870bfa7aee6eb9dad3d1668b7ad2',
+    '4bc44edfecfa5575f11c6821662c74a464237a3f554bc7516e684cc5eb1a7311',
     4138667,
     v_observed_recovery_watermark,
     v_observed_physical_watermark,
     v_observed_physical_gap,
     v_prior_sha256,
     v_patched_sha256,
+    true,
     true,
     true,
     true,
@@ -354,12 +374,14 @@ begin
     or v_adoption_position = 0
     or v_claim_position = 0
     or v_adoption_position >= v_claim_position
+    or position('atomicBoundaryHeldThroughClaim' in v_definition) = 0
     or position('pendingScanLockHeldThroughClaim' in v_definition) = 0
     or position('noScanExecutedBeforeClaim' in v_definition) = 0
     or position(
       'v_count := least(12::bigint, p_validated_head_ledger_index - v_watermark.ledger_index)::integer;'
       in v_base_claim_definition
     ) = 0
+    or v_policy.stable_claim_anchor_insertion is not true
     or v_policy.atomic_drain_adoption_before_claim is not true
     or v_policy.pending_scan_lock_held_through_claim is not true
     or v_policy.twelve_ledger_claim_cap_retained is not true
