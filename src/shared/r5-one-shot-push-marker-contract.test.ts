@@ -17,9 +17,9 @@ const publisher = read(
 )
 const marker = read('ops/r5/run-once-20260804-8x900-observable-v2.marker')
 const markerDigest = createHash('sha256').update(marker).digest('hex')
-const proofMarker = read(
-  'ops/r5/run-once-20260805-twelve-ledger-claim-cap-proof.marker',
-)
+const proofMarkerPath =
+  'ops/r5/run-once-20260805-twelve-ledger-claim-cap-proof.marker'
+const proofMarker = read(proofMarkerPath)
 const proofMarkerDigest = createHash('sha256')
   .update(proofMarker)
   .digest('hex')
@@ -55,13 +55,13 @@ describe('R5 bounded one-shot push contracts', () => {
     for (const required of [
       "github.event_name == 'push'",
       "github.ref == 'refs/heads/main'",
-      "contains(github.event.head_commit.added, 'ops/r5/run-once-20260805-twelve-ledger-claim-cap-proof.marker')",
-      "contains(github.event.head_commit.modified, 'ops/r5/run-once-20260805-twelve-ledger-claim-cap-proof.marker')",
+      `contains(github.event.head_commit.added, '${proofMarkerPath}')`,
+      `contains(github.event.head_commit.modified, '${proofMarkerPath}')`,
     ]) {
       expect(executeCondition).toContain(required)
     }
     expect(executeCondition).not.toContain(
-      "contains(github.event.head_commit.removed",
+      'contains(github.event.head_commit.removed',
     )
   })
 
@@ -83,7 +83,9 @@ describe('R5 bounded one-shot push contracts', () => {
     expect(proofMarkerDigest).toBe(
       'ed3acdcfdbaf52f1f50a67762fc744659e6e2d74c2197e10f26693cb40b7efd3',
     )
+
     for (const required of [
+      proofMarkerPath,
       proofMarkerDigest,
       'test "$R5_RECOVERY_BURST_BATCH_LIMIT" -eq 8',
       'test "$R5_RECOVERY_BURST_WALL_SECONDS" -eq 900',
@@ -92,7 +94,15 @@ describe('R5 bounded one-shot push contracts', () => {
       'test "$author_login" = badjoke-lab',
     ]) {
       expect(workflow).toContain(required)
-      expect(adapter).toContain(required.includes('author_login=') ? 'author_login=' : required)
+    }
+
+    for (const required of [
+      proofMarkerPath,
+      proofMarkerDigest,
+      'dc9f3fc36e5bf71f4462542fdfa03f135f0a61c6',
+      'author_login=',
+    ]) {
+      expect(adapter).toContain(required)
     }
   })
 
