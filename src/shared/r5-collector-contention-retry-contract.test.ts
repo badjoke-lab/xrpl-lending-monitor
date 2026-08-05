@@ -14,7 +14,7 @@ function read(path: string): string {
 
 const workflow = read('.github/workflows/r5-bounded-recovery-burst.yml')
 const wrapper = read('scripts/run-supabase-r5-recovery-burst-contention-aware.mjs')
-const adapter = read('scripts/run-supabase-r5-recovery-burst-adoption-aware.mjs')
+const controller = read('scripts/verify-supabase-r5-recovery-burst-adoption-aware.mjs')
 
 function exactBody(overrides: Record<string, unknown> = {}) {
   return {
@@ -85,8 +85,8 @@ describe('R5 collector contention bounded retry contract', () => {
   })
 
   it('retains the existing three-attempt sixty-second bounded retry', () => {
-    expect(adapter).toContain('const maximumAttemptsPerTrigger = 3')
-    expect(adapter).toContain('const retryDelayMilliseconds = 60_000')
+    expect(controller).toContain('const maximumAttemptsPerTrigger = 3')
+    expect(controller).toContain('const retryDelayMilliseconds = 60_000')
     expect(wrapper).toContain('rewriteR5CollectorContentionResponse')
     expect(wrapper).toContain("await import('./run-supabase-r5-recovery-burst-adoption-aware.mjs')")
     expect(workflow).toContain(
