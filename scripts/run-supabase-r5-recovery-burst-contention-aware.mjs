@@ -1,22 +1,13 @@
 import { rewriteR5CollectorContentionResponse } from './r5-collector-contention-retry.mjs'
+import {
+  isExactUncommittedWatermarkDrift,
+  r5PreclaimWatermarkDriftBoundary,
+} from './r5-preclaim-watermark-drift-match.mjs'
 
-const recoveryRunId = 'r5-recovery-selected-revision3-entry'
-const purpose = 'r5-first-active-recovery-batch'
-const exactWatermarkDrift = 'r5_recovery_batch_watermark_drift'
+const { recoveryRunId, purpose } = r5PreclaimWatermarkDriftBoundary
+const triggerPath = '/functions/v1/xrpl-r5-recovery-batch-trigger'
 const originalFetch = globalThis.fetch.bind(globalThis)
 let preclaimFinalizationUsed = false
-
-function parseObjectBody(body) {
-  if (typeof body !== 'string') return null
-  try {
-    const parsed = JSON.parse(body)
-    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
-      ? parsed
-      : null
-  } catch {
-    return null
-  }
-}
 
 async function parseResponseObject(response) {
   try {
@@ -27,22 +18,6 @@ async function parseResponseObject(response) {
   } catch {
     return null
   }
-}
-
-function isExactUncommittedWatermarkDrift(response, body, requestBody) {
-  const executor = body?.executor
-  return response.status === 500
-    && requestBody?.run_id === recoveryRunId
-    && requestBody?.mode !== 'finalize_boundary'
-    && body?.purpose === purpose
-    && body?.operationMode === 'execute_batch'
-    && executor?.ok === false
-    && executor?.transient === false
-    && executor?.runId === recoveryRunId
-    && executor?.batchId === null
-    && executor?.activeMutationCommitted === false
-    && typeof executor?.error === 'string'
-    && executor.error.includes(exactWatermarkDrift)
 }
 
 function exactPositiveRunId() {
@@ -111,13 +86,12 @@ globalThis.fetch = async (input, init) => {
     : input instanceof URL
       ? input.href
       : input.url
-  const requestBody = parseObjectBody(init?.body)
   const responseBody = await parseResponseObject(response)
 
   if (
     !preclaimFinalizationUsed
-    && url.includes('/functions/v1/xrpl-r5-recovery-batch-trigger')
-    && isExactUncommittedWatermarkDrift(response, responseBody, requestBody)
+    && url.includes(triggerPath)
+    && isExactUncommittedWatermarkDrift(response, responseBody)
   ) {
     preclaimFinalizationUsed = true
     await finalizeBoundaryBeforeClaim(input, init)
