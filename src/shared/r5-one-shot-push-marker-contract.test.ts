@@ -11,27 +11,27 @@ function read(path: string): string {
 const workflow = read('.github/workflows/r5-bounded-recovery-burst.yml')
 const ci = read('.github/workflows/ci.yml')
 const adapter = read('scripts/check-actions-workflow-allowlist-r5-one-shot.sh')
-const diagnostic = read('scripts/diagnose-supabase-r5-pending-scan.mjs')
+const diagnostic = read('scripts/diagnose-supabase-r5-database-size.mjs')
 const publisher = read(
   'scripts/publish-supabase-r5-recovery-burst-run-locator.mjs',
 )
 const marker = read('ops/r5/run-once-20260804-8x900-observable-v2.marker')
 const markerDigest = createHash('sha256').update(marker).digest('hex')
 
-describe('R5 memory-halt read-only diagnostic contract', () => {
-  it('binds one exact main push path to the diagnostic job only', () => {
+describe('R5 database-size read-only diagnostic contract', () => {
+  it('binds one exact main push path to the database diagnostic job only', () => {
     for (const required of [
       '  push:',
       '    branches: [main]',
       '      - ops/r5/run-once-20260804-8x900-observable-v2.marker',
-      'diagnose-pending-scan:',
+      'diagnose-database-size:',
       "github.event_name == 'push' && github.ref == 'refs/heads/main'",
-      'Verify exact read-only diagnostic marker',
+      'Verify exact read-only database-size diagnostic marker',
       'test "$GITHUB_REF" = refs/heads/main',
       'gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}"',
       "--jq '.author.login'",
       'test "$author_login" = badjoke-lab',
-      'node scripts/diagnose-supabase-r5-pending-scan.mjs',
+      'node scripts/diagnose-supabase-r5-database-size.mjs',
     ]) {
       expect(workflow).toContain(required)
     }
@@ -46,12 +46,12 @@ describe('R5 memory-halt read-only diagnostic contract', () => {
     expect(executeCondition).not.toContain("github.event_name == 'push'")
   })
 
-  it('pins the failed batch memory-halt marker bytes and digest exactly', () => {
+  it('pins the database halt marker bytes and digest exactly', () => {
     expect(marker).toBe(
-      'R5_MEMORY_HALT_DIAGNOSTIC_V8\nmode=read_only\nrun_id=r5-recovery-selected-revision3-entry\nfailed_burst_run_id=30966882019\nfailed_batch_id=r5-batch-v1-r5-recovery-selected-revision3-entry-00000238\nnonce=diagnostic-20260805-6f3a2c91\n',
+      'R5_DATABASE_SIZE_DIAGNOSTIC_V1\nmode=read_only\nsource_run_id=30975277983\ndatabase_halt_bytes=400000000\nobserved_database_bytes=416763027\nnonce=database-size-20260805-4d9c7a21\n',
     )
     expect(markerDigest).toBe(
-      'f75fc25c9f6b1e255f773115cbd447cae7ced88a7afc401b22b898d7110eef08',
+      '65d4986fc9efff5360e14f4dd794e6ea19ca848259d1e1f604df3c56340578b8',
     )
     expect(workflow).toContain(markerDigest)
     expect(adapter).toContain(markerDigest)
@@ -60,17 +60,20 @@ describe('R5 memory-halt read-only diagnostic contract', () => {
   it('uses only a read-only Management API query and sanitized evidence', () => {
     for (const required of [
       'read_only: true',
-      "'purpose','r5-memory-halt-read-only-diagnostic'",
-      'const failedBurstRunId = 30966882019',
-      "const failedBatchId = 'r5-batch-v1-r5-recovery-selected-revision3-entry-00000238'",
-      'public.xrpl_read_r5_active_recovery($1::text)',
-      'public.xrpl_read_r5_active_recovery_batch($1::text,$2::text)',
-      'xrpl_r5_v1.recovery_batches',
-      "where profile_id='supabase-devnet'",
-      "const output = 'supabase-r5-pending-scan-diagnostic'",
+      "'r5-database-size-read-only-diagnostic'",
+      'const sourceHeadroomRunId = 30975277983',
+      'const databaseHaltBytes = 400_000_000',
+      'const observedDatabaseBytes = 416_763_027',
+      'pg_database_size(current_database())',
+      'pg_total_relation_size(c.oid)',
+      'pg_relation_size(c.oid)',
+      'pg_indexes_size(c.oid)',
+      'pg_catalog.pg_stat_user_tables',
+      "n.nspname in ('public', 'xrpl_r5_v1')",
+      "const output = 'supabase-r5-database-size-diagnostic'",
       'await writeFile(`${output}/diagnostic.json`',
       'await writeFile(`${output}/diagnostic.md`',
-      '## R5 memory halt read-only diagnostic',
+      '## R5 database-size read-only diagnostic',
     ]) {
       expect(diagnostic).toContain(required)
     }
@@ -80,6 +83,8 @@ describe('R5 memory-halt read-only diagnostic contract', () => {
       'update public.',
       'update xrpl_r5_v1.',
       'delete from',
+      'truncate ',
+      'vacuum ',
       'supabase secrets set',
       'functions/v1/xrpl-r5-recovery-batch-trigger',
       'SUPABASE_SERVICE_ROLE_KEY',
@@ -88,22 +93,27 @@ describe('R5 memory-halt read-only diagnostic contract', () => {
     }
   })
 
-  it('reports every memory-halt boundary predicate separately', () => {
+  it('reports relation, dead-row and profile breakdowns separately', () => {
     for (const required of [
-      'readOnly',
-      'exactRun',
-      'exactBatch',
-      'memoryHaltRecorded',
-      'noBatchCommit',
-      'noCommittedWorksInFailedRange',
-      'recoveryAndPhysicalParity',
-      'oneHaltedBatch',
-      'noLeasedRecoveryBatch',
-      'noLeasedOrRetryMessages',
-      'publicReaderUnchanged',
-      'mainnetDisabled',
-      'stabilizationUnauthorized',
-      'soakUnauthorized',
+      'topRelations',
+      'schemaTotals',
+      'workCounts',
+      'messageCounts',
+      'referenceCounts',
+      'r5BatchCounts',
+      'live_rows',
+      'dead_rows',
+      'heap_bytes',
+      'index_bytes',
+      'toast_bytes',
+      'public.xrpl_phase_work',
+      'public.xrpl_phase_messages',
+      'public.xrpl_phase_reference_rows',
+      'xrpl_r5_v1.recovery_batches',
+      'databaseAtOrAboveHalt',
+      'relationBreakdownSorted',
+      'allowedSchemasOnly',
+      'profileBreakdownPresent',
       'mismatched checks:',
     ]) {
       expect(diagnostic).toContain(required)
@@ -127,7 +137,7 @@ describe('R5 memory-halt read-only diagnostic contract', () => {
     }
   })
 
-  it('adds one exact owner-only 64 by 1800 catch-up command', () => {
+  it('retains the exact owner-only 64 by 1800 catch-up command', () => {
     for (const required of [
       "github.event.comment.body == '/r5-recovery burst 64 1800 nonce-cd7eb564'",
       "github.event.comment.body == '/r5-recovery burst 64 1800 nonce-cd7eb564' && '64'",
@@ -151,7 +161,7 @@ describe('R5 memory-halt read-only diagnostic contract', () => {
       'old in updated',
       'new not in updated',
       'r5_burst: ["workflow_dispatch", "issue_comment", "push"]',
-      'R5 memory-halt diagnostic and owner burst marker contract',
+      'R5 database-size diagnostic and owner burst marker contract',
       "github.event.comment.body == '/r5-recovery burst 64 1800 nonce-cd7eb564'",
       'R5 read-only diagnostic push exception',
       'R5 diagnostic and burst locator count',

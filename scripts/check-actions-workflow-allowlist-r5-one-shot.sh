@@ -31,22 +31,22 @@ replace_once(
     '    r5_burst: ["workflow_dispatch", "issue_comment", "push"],',
 )
 replace_once(
-    "R5 memory-halt diagnostic and owner burst marker contract",
+    "R5 database-size diagnostic and owner burst marker contract",
     '''    "github.event.comment.body == '/r5-recovery burst 8 900 nonce-e3378018'",
     "R5_RECOVERY_BURST_BATCH_LIMIT",''',
     '''    "github.event.comment.body == '/r5-recovery burst 8 900 nonce-e3378018'",
     "github.event.comment.body == '/r5-recovery burst 64 1800 nonce-cd7eb564'",
     "github.event_name == 'push'",
     "github.ref == 'refs/heads/main'",
-    "diagnose-pending-scan",
+    "diagnose-database-size",
     "ops/r5/run-once-20260804-8x900-observable-v2.marker",
-    "f75fc25c9f6b1e255f773115cbd447cae7ced88a7afc401b22b898d7110eef08",
+    "65d4986fc9efff5360e14f4dd794e6ea19ca848259d1e1f604df3c56340578b8",
     "author_login=",
     "gh api",
     "--jq '.author.login'",
     'test "$author_login" = badjoke-lab',
-    "node scripts/diagnose-supabase-r5-pending-scan.mjs",
-    "supabase-r5-pending-scan-diagnostic",
+    "node scripts/diagnose-supabase-r5-database-size.mjs",
+    "supabase-r5-database-size-diagnostic",
     "R5_RECOVERY_BURST_BATCH_LIMIT",''',
 )
 replace_once(
