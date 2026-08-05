@@ -29,13 +29,7 @@ function parse(text) {
 }
 
 function rows(body) {
-  for (const candidate of [
-    body,
-    body?.result,
-    body?.data,
-    body?.rows,
-    body?.result?.rows,
-  ]) {
+  for (const candidate of [body, body?.result, body?.data, body?.rows, body?.result?.rows]) {
     if (Array.isArray(candidate)) return candidate
   }
   throw new Error('query response contains no rows')
@@ -85,82 +79,64 @@ async function query(sql, parameters) {
   })
   const body = parse(await response.text())
   if (!response.ok) {
-    throw new Error(
-      `query failed ${response.status}: ${JSON.stringify(body).slice(0, 2_000)}`,
-    )
+    throw new Error(`query failed ${response.status}: ${JSON.stringify(body).slice(0, 2_000)}`)
   }
   return rows(body)
 }
 
 const sql = `
-with observed as (
-  select clock_timestamp() as value
-), attempts as (
+with observed as (select clock_timestamp() as value),
+attempts as (
   select coalesce(jsonb_agg(jsonb_build_object(
-    'sessionId', attempt.session_id,
-    'attemptId', attempt.attempt_id,
-    'status', attempt.status,
-    'startedAt', attempt.started_at,
-    'finalizedAt', attempt.finalized_at,
-    'reservedBytes', attempt.reserved_egress_upper_bound_bytes,
-    'finalizedBytes', attempt.finalized_egress_upper_bound_bytes,
+    'status', a.status,
+    'startedAt', a.started_at,
+    'finalizedAt', a.finalized_at,
+    'reservedBytes', a.reserved_egress_upper_bound_bytes,
+    'finalizedBytes', a.finalized_egress_upper_bound_bytes,
     'effectiveBytes', xrpl_resource_guard_v2.attempt_effective_egress(
-      attempt.status,
-      attempt.reserved_egress_upper_bound_bytes,
-      coalesce(
-        attempt.finalized_egress_upper_bound_bytes,
-        attempt.reserved_egress_upper_bound_bytes
-      )
+      a.status,
+      a.reserved_egress_upper_bound_bytes,
+      coalesce(a.finalized_egress_upper_bound_bytes, a.reserved_egress_upper_bound_bytes)
     ),
-    'tickId', attempt.tick_id,
-    'errorMessage', attempt.error_message,
-    'sessionStatus', session.status,
-    'sessionResourceGuardStatus', session.resource_guard_status
-  ) order by attempt.started_at, attempt.session_id, attempt.attempt_id), '[]'::jsonb) as value
+    'sessionStatus', s.status,
+    'sessionResourceGuardStatus', s.resource_guard_status,
+    'errorMessage', a.error_message
+  ) order by a.started_at), '[]'::jsonb) value
   from observed
-  join xrpl_resource_guard_v2.attempts attempt
-    on attempt.started_at >= observed.value - interval '31 days'
-   and attempt.started_at <= observed.value
-  left join xrpl_steady_v1.sessions session
-    on session.session_id = attempt.session_id
-), legacy as (
+  join xrpl_resource_guard_v2.attempts a
+    on a.started_at >= observed.value - interval '31 days'
+   and a.started_at <= observed.value
+  left join xrpl_steady_v1.sessions s on s.session_id = a.session_id
+),
+legacy as (
   select coalesce(jsonb_agg(jsonb_build_object(
-    'sessionId', accounting.session_id,
-    'tickId', accounting.tick_id,
-    'recordedAt', accounting.recorded_at,
-    'effectiveBytes', accounting.conservative_tick_egress_upper_bound_bytes,
-    'allowed', accounting.allowed
-  ) order by accounting.recorded_at, accounting.session_id, accounting.tick_id), '[]'::jsonb) as value
+    'recordedAt', t.recorded_at,
+    'effectiveBytes', t.conservative_tick_egress_upper_bound_bytes,
+    'allowed', t.allowed
+  ) order by t.recorded_at), '[]'::jsonb) value
   from observed
-  join xrpl_resource_guard_v2.tick_accounting accounting
-    on accounting.recorded_at >= observed.value - interval '31 days'
-   and accounting.recorded_at <= observed.value
-), recovery as (
+  join xrpl_resource_guard_v2.tick_accounting t
+    on t.recorded_at >= observed.value - interval '31 days'
+   and t.recorded_at <= observed.value
+),
+recovery as (
   select coalesce(jsonb_agg(jsonb_build_object(
-    'batchId', batch.batch_id,
-    'batchSequence', batch.batch_sequence,
-    'status', batch.status,
-    'claimedAt', batch.claimed_at,
-    'completedAt', batch.completed_at,
-    'reservedBytes', batch.reserved_egress_upper_bound_bytes,
-    'finalizedBytes', batch.finalized_egress_upper_bound_bytes,
-    'effectiveBytes', case
-      when batch.status = 'completed'
-        then batch.finalized_egress_upper_bound_bytes
-      else batch.reserved_egress_upper_bound_bytes
-    end,
-    'errorMessage', batch.error_message
-  ) order by batch.claimed_at, batch.batch_sequence), '[]'::jsonb) as value
+    'batchSequence', b.batch_sequence,
+    'status', b.status,
+    'claimedAt', b.claimed_at,
+    'completedAt', b.completed_at,
+    'reservedBytes', b.reserved_egress_upper_bound_bytes,
+    'finalizedBytes', b.finalized_egress_upper_bound_bytes,
+    'effectiveBytes', case when b.status = 'completed'
+      then b.finalized_egress_upper_bound_bytes
+      else b.reserved_egress_upper_bound_bytes end,
+    'errorMessage', b.error_message
+  ) order by b.claimed_at, b.batch_sequence), '[]'::jsonb) value
   from observed
-  join xrpl_r5_v1.recovery_batches batch
-    on batch.run_id = $1::text
-   and batch.claimed_at >= observed.value - interval '31 days'
-   and batch.claimed_at <= observed.value
-), provider as (
-  select to_jsonb(snapshot) as value
-  from xrpl_resource_guard_v1.external_snapshots snapshot
-  order by snapshot.observed_at desc, snapshot.snapshot_id desc
-  limit 1
+  join xrpl_r5_v1.recovery_batches b
+    on b.run_id = $1::text
+   and b.claimed_at >= observed.value - interval '31 days'
+   and b.claimed_at <= observed.value
 )
 select jsonb_build_object(
   'purpose', 'r5-egress-halt-breakdown-read-only-v1',
@@ -168,63 +144,50 @@ select jsonb_build_object(
   'failedBurstRunId', $2::bigint,
   'healthDiagnosticRunId', $3::bigint,
   'reader', public.xrpl_read_r5_active_recovery($1::text),
-  'rawRun', (
-    select to_jsonb(run)
-    from xrpl_r5_v1.recovery_runs run
-    where run.run_id = $1::text
-  ),
+  'rawRun', (select to_jsonb(r) from xrpl_r5_v1.recovery_runs r where r.run_id = $1::text),
   'attempts', (select value from attempts),
   'legacyTicks', (select value from legacy),
   'recoveryBatches', (select value from recovery),
-  'latestProviderSnapshot', (select value from provider),
   'databaseBytes', pg_database_size(current_database())::bigint
-) as diagnostic;
+) diagnostic;
 `
 
-const result = await query(sql, [
+const queryRows = await query(sql, [
   recoveryRunId,
   failedBurstRunId,
   healthDiagnosticRunId,
 ])
-if (result.length !== 1) throw new Error(`unexpected row count ${result.length}`)
-const diagnostic = object(result[0].diagnostic, 'diagnostic')
+if (queryRows.length !== 1) throw new Error(`unexpected row count ${queryRows.length}`)
+const diagnostic = object(queryRows[0].diagnostic, 'diagnostic')
 const reader = object(diagnostic.reader, 'reader')
 const rawRun = object(diagnostic.rawRun, 'rawRun')
-const attempts = list(diagnostic.attempts, 'attempts')
-const legacyTicks = list(diagnostic.legacyTicks, 'legacyTicks')
-const recoveryBatches = list(diagnostic.recoveryBatches, 'recoveryBatches')
 const observedAtMilliseconds = instant(diagnostic.observedAt, 'observedAt')
 
 function contribution(row, source, timeField) {
-  const effectiveBytes = integer(row.effectiveBytes, `${source}.effectiveBytes`)
   const startedAtMilliseconds = instant(row[timeField], `${source}.${timeField}`)
   return {
     ...row,
     source,
-    effectiveBytes,
+    effectiveBytes: integer(row.effectiveBytes, `${source}.effectiveBytes`),
     startedAtMilliseconds,
     expiresAtMilliseconds: startedAtMilliseconds + windowMilliseconds,
   }
 }
 
-const attemptContributions = attempts.map((row) =>
+const attemptContributions = list(diagnostic.attempts, 'attempts').map((row) =>
   contribution(row, 'attempt', 'startedAt'),
 )
-const legacyContributions = legacyTicks.map((row) =>
+const legacyContributions = list(diagnostic.legacyTicks, 'legacyTicks').map((row) =>
   contribution(row, 'legacy', 'recordedAt'),
 )
-const recoveryContributions = recoveryBatches.map((row) =>
+const recoveryContributions = list(diagnostic.recoveryBatches, 'recoveryBatches').map((row) =>
   contribution(row, 'recovery', 'claimedAt'),
 )
 
 function sumActive(contributions, evaluatedAtMilliseconds) {
   const lower = evaluatedAtMilliseconds - windowMilliseconds
   return contributions
-    .filter(
-      (row) =>
-        row.startedAtMilliseconds >= lower &&
-        row.startedAtMilliseconds <= evaluatedAtMilliseconds,
-    )
+    .filter((row) => row.startedAtMilliseconds >= lower && row.startedAtMilliseconds <= evaluatedAtMilliseconds)
     .reduce((total, row) => total + row.effectiveBytes, 0)
 }
 
@@ -232,10 +195,7 @@ function totalsAt(evaluatedAtMilliseconds) {
   const attemptBytes = sumActive(attemptContributions, evaluatedAtMilliseconds)
   const legacyBytes = sumActive(legacyContributions, evaluatedAtMilliseconds)
   const steadyBytes = Math.max(attemptBytes, legacyBytes)
-  const recoveryBytes = sumActive(
-    recoveryContributions,
-    evaluatedAtMilliseconds,
-  )
+  const recoveryBytes = sumActive(recoveryContributions, evaluatedAtMilliseconds)
   const priorBytes = steadyBytes + recoveryBytes
   const projectedBytes = priorBytes + reservationBytes
   return {
@@ -252,72 +212,47 @@ function totalsAt(evaluatedAtMilliseconds) {
   }
 }
 
-function group(rows, field) {
+function group(contributions, field) {
   const grouped = new Map()
-  for (const row of rows) {
+  for (const row of contributions) {
     const key = String(row[field] ?? 'null')
-    const current = grouped.get(key) ?? {
-      value: key,
-      count: 0,
-      effectiveBytes: 0,
-      reservedBytes: 0,
-      finalizedBytes: 0,
-      earliestAt: null,
-      latestAt: null,
-    }
-    const at = row.startedAtMilliseconds
+    const current = grouped.get(key) ?? { value: key, count: 0, effectiveBytes: 0 }
     current.count += 1
     current.effectiveBytes += row.effectiveBytes
-    current.reservedBytes += Number(row.reservedBytes ?? 0)
-    current.finalizedBytes += Number(row.finalizedBytes ?? 0)
-    current.earliestAt =
-      current.earliestAt === null ? at : Math.min(current.earliestAt, at)
-    current.latestAt =
-      current.latestAt === null ? at : Math.max(current.latestAt, at)
     grouped.set(key, current)
   }
-  return [...grouped.values()]
-    .sort((left, right) => left.value.localeCompare(right.value))
-    .map((entry) => ({
-      ...entry,
-      earliestAt:
-        entry.earliestAt === null
-          ? null
-          : new Date(entry.earliestAt).toISOString(),
-      latestAt:
-        entry.latestAt === null ? null : new Date(entry.latestAt).toISOString(),
-    }))
+  return [...grouped.values()].sort((left, right) => left.value.localeCompare(right.value))
+}
+
+function serializeContribution(row) {
+  const serialized = { ...row }
+  delete serialized.startedAtMilliseconds
+  delete serialized.expiresAtMilliseconds
+  return {
+    ...serialized,
+    expiresAt: new Date(row.expiresAtMilliseconds).toISOString(),
+  }
 }
 
 const current = totalsAt(observedAtMilliseconds)
-const expirationCandidates = [
+const releaseSchedule = [...new Set([
   ...attemptContributions,
   ...legacyContributions,
   ...recoveryContributions,
-]
-  .map((row) => row.expiresAtMilliseconds + 1_000)
+].map((row) => row.expiresAtMilliseconds + 1_000))]
   .filter((value) => value > observedAtMilliseconds)
-const uniqueCandidates = [...new Set(expirationCandidates)].sort(
-  (left, right) => left - right,
-)
-const releaseSchedule = uniqueCandidates.map((candidate) => totalsAt(candidate))
+  .sort((left, right) => left - right)
+  .map((candidate) => totalsAt(candidate))
 const firstSafe = releaseSchedule.find((entry) => entry.claimAllowed) ?? null
-const fullReservationAttempts = attemptContributions.filter(
-  (row) => row.status !== 'succeeded',
-)
-const openAttempts = fullReservationAttempts.filter((row) => row.status === 'open')
-const failedOrDeferredAttempts = fullReservationAttempts.filter((row) =>
+const openAttempts = attemptContributions.filter((row) => row.status === 'open')
+const failedOrDeferredAttempts = attemptContributions.filter((row) =>
   ['failed', 'deferred'].includes(row.status),
 )
-const noncompletedRecovery = recoveryContributions.filter(
-  (row) => row.status !== 'completed',
-)
-
+const noncompletedRecovery = recoveryContributions.filter((row) => row.status !== 'completed')
 const checks = object(reader.checks, 'reader.checks')
 const diagnosticChecks = {
   readOnly: true,
-  exactRecoveryRun:
-    reader.runId === recoveryRunId && rawRun.run_id === recoveryRunId,
+  exactRecoveryRun: reader.runId === recoveryRunId && rawRun.run_id === recoveryRunId,
   exactHalt:
     reader.status === 'halted' &&
     reader.lastError === 'r5_recovery_monthly_egress_halt' &&
@@ -344,7 +279,6 @@ const evidence = {
   reader,
   rawRun,
   databaseBytes: integer(diagnostic.databaseBytes, 'databaseBytes'),
-  latestProviderSnapshot: diagnostic.latestProviderSnapshot ?? null,
   thresholds: {
     haltBytes,
     reservationBytes,
@@ -356,10 +290,7 @@ const evidence = {
   recoveryStatusGroups: group(recoveryContributions, 'status'),
   legacySummary: {
     count: legacyContributions.length,
-    effectiveBytes: legacyContributions.reduce(
-      (total, row) => total + row.effectiveBytes,
-      0,
-    ),
+    effectiveBytes: legacyContributions.reduce((total, row) => total + row.effectiveBytes, 0),
   },
   fullReservationClassification: {
     openAttemptCount: openAttempts.length,
@@ -378,29 +309,16 @@ const evidence = {
   releaseSchedule: releaseSchedule.slice(0, 256),
   releaseCandidateCount: releaseSchedule.length,
   contributions: {
-    attempts: attemptContributions.map(({ startedAtMilliseconds, expiresAtMilliseconds, ...row }) => ({
-      ...row,
-      expiresAt: new Date(expiresAtMilliseconds).toISOString(),
-    })),
-    legacyTicks: legacyContributions.map(({ startedAtMilliseconds, expiresAtMilliseconds, ...row }) => ({
-      ...row,
-      expiresAt: new Date(expiresAtMilliseconds).toISOString(),
-    })),
-    recoveryBatches: recoveryContributions.map(({ startedAtMilliseconds, expiresAtMilliseconds, ...row }) => ({
-      ...row,
-      expiresAt: new Date(expiresAtMilliseconds).toISOString(),
-    })),
+    attempts: attemptContributions.map(serializeContribution),
+    legacyTicks: legacyContributions.map(serializeContribution),
+    recoveryBatches: recoveryContributions.map(serializeContribution),
   },
   diagnosticChecks,
   failedChecks,
 }
 
 await mkdir(output, { recursive: true })
-await writeFile(
-  `${output}/diagnostic.json`,
-  `${JSON.stringify(evidence, null, 2)}\n`,
-)
-
+await writeFile(`${output}/diagnostic.json`, `${JSON.stringify(evidence, null, 2)}\n`)
 const attemptGroupsText = evidence.attemptStatusGroups
   .map((entry) => `${entry.value}:${entry.count}/${entry.effectiveBytes}`)
   .join(',')
