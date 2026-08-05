@@ -31,7 +31,7 @@ replace_once(
     '    r5_burst: ["workflow_dispatch", "issue_comment", "push"],',
 )
 replace_once(
-    "R5 corrected proof marker and owner burst contract",
+    "R5 V3 proof marker and owner burst contract",
     '''    "github.event.comment.body == '/r5-recovery burst 8 900 nonce-e3378018'",
     "R5_RECOVERY_BURST_BATCH_LIMIT",''',
     '''    "github.event.comment.body == '/r5-recovery burst 8 900 nonce-e3378018'",
@@ -39,8 +39,8 @@ replace_once(
     "github.event_name == 'push'",
     "github.ref == 'refs/heads/main'",
     "ops/r5/run-once-20260805-twelve-ledger-claim-cap-proof.marker",
-    "43396703cd3e87aa011b4afe900ee100b17868117b9b65c7f425465fff177e88",
-    "cfa3b22686c0ab9bfab6a74d8987ea41b7f66607",
+    "649957ed217fd98bd45d23721eeadb9c28b76a5d4c3d48d9d4614327135f1acb",
+    "1926c4c57f447761b6634fbf3900250a1eca0765",
     "fetch-depth: 2",
     "git diff-tree --no-commit-id --name-status",
     "marker_change=",
@@ -51,7 +51,7 @@ replace_once(
     "R5_RECOVERY_BURST_BATCH_LIMIT",''',
 )
 replace_once(
-    "R5 corrected finite-proof push exception",
+    "R5 V3 finite-proof push exception",
     '''for forbidden in (
     "  schedule:",
     "  push:",
