@@ -59,7 +59,7 @@ describe('R5 atomic running preclaim boundary', () => {
 
   it('keeps prepared-state rebind and the twelve-ledger base claim intact', () => {
     for (const required of [
-      'if v_run.status = ''prepared'' then',
+      "if v_run.status = 'prepared' then",
       'public.xrpl_rebind_r5_prebatch_recovery_to_active_boundary(',
       'v_count := least(12::bigint, p_validated_head_ledger_index - v_watermark.ledger_index)::integer;',
       'twelve_ledger_claim_cap_retained',
@@ -96,10 +96,10 @@ describe('R5 atomic running preclaim boundary', () => {
 
   it('does not execute a scan or the repaired claim during migration', () => {
     expect(migration).not.toContain(
-      "perform public.xrpl_claim_r5_active_recovery_batch_from_prepared_head(",
+      'perform public.xrpl_claim_r5_active_recovery_batch_from_prepared_head(',
     )
     expect(migration).not.toContain(
-      "select public.xrpl_claim_r5_active_recovery_batch_from_prepared_head(",
+      'select public.xrpl_claim_r5_active_recovery_batch_from_prepared_head(',
     )
     expect(migration).not.toContain('xrplRpc')
     expect(migration).not.toContain('ledger_entry')
