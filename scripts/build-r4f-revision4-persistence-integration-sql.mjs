@@ -36,9 +36,6 @@ if (!/^[a-f0-9]{40}$/.test(requestBody.p_source_commit)) {
   throw new Error('source commit invalid')
 }
 
-const conflict = JSON.parse(accountingJson)
-conflict.disposition = 'shadow_retry'
-const conflictingAccountingJson = JSON.stringify(conflict, Object.keys(conflict).sort())
 // Reuse the canonical serializer's output order by replacing the one fixed scalar in-place.
 const exactConflictingAccountingJson = accountingJson.replace(
   '"disposition":"shadow_completed"',
