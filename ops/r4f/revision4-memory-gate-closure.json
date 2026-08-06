@@ -1,0 +1,116 @@
+{
+  "schemaVersion": 1,
+  "gateId": "G4",
+  "status": "pass",
+  "recordedAt": "2026-08-06T15:26:32.000Z",
+  "profile": {
+    "profileId": "supabase_free_postgres_pgcron_edge",
+    "revision": 4,
+    "profileIdentityDigest": "39e8b620a20bb08fbe8306fe753d4d445c5191bcafddbf67721e0c17d5b6bcd5",
+    "selection": "not_selected",
+    "recoveryMutationAuthorized": false
+  },
+  "authorization": {
+    "issueNumber": 1261,
+    "commentId": 5401115525,
+    "actor": "badjoke-lab",
+    "scope": "r4f_g4_memory_replay"
+  },
+  "source": {
+    "commit": "5a25d091919dc2d90116ca9cc4e92335031be9f2",
+    "ledgerRange": {
+      "start": 4138468,
+      "end": 4138491,
+      "count": 24
+    },
+    "manifestSha256": "9a2edbae7f0e07151c4d762b995963bdd3c0db9098f94d50a94587c4002a5d4a"
+  },
+  "workflow": {
+    "runId": 31086304493,
+    "event": "push",
+    "headBranch": "main",
+    "headSha": "5a25d091919dc2d90116ca9cc4e92335031be9f2",
+    "conclusion": "success",
+    "jobs": [
+      {
+        "name": "quality",
+        "conclusion": "success"
+      },
+      {
+        "name": "r4f-g4-memory-replay",
+        "conclusion": "success"
+      }
+    ]
+  },
+  "artifact": {
+    "name": "r4f-g4-memory-replay-evidence",
+    "id": 8961530550,
+    "sizeBytes": 160152,
+    "sha256": "e0b4157b70faea269c61f643b78882dffb30a9168632c77e5ec6972673009ed7",
+    "createdAt": "2026-08-06T08:47:12.000Z",
+    "expiresAt": "2026-08-20T08:47:12.000Z",
+    "expiredAtClosure": false,
+    "officialArchiveMatchesReviewedCopy": true
+  },
+  "evidence": {
+    "evidenceId": "r4f-g4-memory-replay-5a25d091919d",
+    "evidenceClass": "bounded_offline_replay",
+    "capturedAt": "2026-08-06T08:47:09.250Z",
+    "proofReady": true,
+    "blockingReasons": [],
+    "memoryMetric": "process_rss_bytes",
+    "memoryHaltBytes": 234881024,
+    "claimCapLedgers": 12,
+    "maximumPeakMemoryBytes": 77430784,
+    "minimumHeadroomBytes": 157450240,
+    "harnessSha256": "9644dfd0ab1a214dd37f588b6006d56d1ea77f4d33529c96fd5d2ea532f5e4d8",
+    "environmentSha256": "080b608cafa906fabbe544c00bcf538d9590b2704a6ff567b94337a248e81029",
+    "replayOutputSha256": "dab06e053672cd691ba1c15e7c56cbb62f0776476c435dc2c0c52e2cb8454de5",
+    "samples": [
+      {
+        "sampleId": "exact-12-ledger-halt-shape",
+        "shape": "exact_12_ledger_halt_shape",
+        "ledgersClaimed": 12,
+        "retainedLedgerCount": 12,
+        "processedLedgerCount": 12,
+        "baselineMemoryBytes": 61845504,
+        "peakMemoryBytes": 77430784,
+        "peakAboveBaselineBytes": 15585280,
+        "headroomBytes": 157450240,
+        "completedWithoutMemoryHalt": true,
+        "claimCapOverrideUsed": false
+      },
+      {
+        "sampleId": "heavier-24-retained-12-processed",
+        "shape": "heavier_retained_sample",
+        "ledgersClaimed": 12,
+        "retainedLedgerCount": 24,
+        "processedLedgerCount": 12,
+        "baselineMemoryBytes": 59494400,
+        "peakMemoryBytes": 75296768,
+        "peakAboveBaselineBytes": 15802368,
+        "headroomBytes": 159584256,
+        "completedWithoutMemoryHalt": true,
+        "claimCapOverrideUsed": false
+      }
+    ]
+  },
+  "safety": {
+    "productionCredentialsUsed": false,
+    "productionMutationPerformed": false,
+    "recoveryMutationCommitted": false,
+    "transactionSubmissionPerformed": false,
+    "networkAccessDuringReplay": false,
+    "publicReaderUnchanged": true,
+    "mainnetDisabled": true,
+    "stabilizationAuthorized": false,
+    "soakAuthorized": false
+  },
+  "remainingQualification": {
+    "g3Status": "unresolved",
+    "g5ThroughG10Status": "unresolved",
+    "oldestUnresolvedGate": "G3",
+    "revision4Selection": "not_selected",
+    "r5RecoveryMutationAuthorized": false
+  }
+}
