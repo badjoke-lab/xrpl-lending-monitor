@@ -1,0 +1,11 @@
+R4F_G4_BOUNDED_MEMORY_REPLAY_V1
+mode=read_only_public_devnet_capture_then_offline_replay
+issue=1261
+authorization_comment=5401115525
+source_start_ledger=4138468
+source_end_ledger=4138491
+claim_cap_ledgers=12
+memory_halt_bytes=234881024
+production_credentials=none
+production_mutation=none
+mainnet=disabled
