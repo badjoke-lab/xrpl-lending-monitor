@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "evidenceClass": "synthetic_test_only",
+  "profileId": "supabase_free_postgres_pgcron_edge",
+  "profileRevision": 4,
+  "profileIdentityDigest": "39e8b620a20bb08fbe8306fe753d4d445c5191bcafddbf67721e0c17d5b6bcd5",
+  "evidenceId": "r4f-g4-memory-synthetic-001",
+  "capturedAt": "2026-08-06T08:00:00.000Z",
+  "authorization": {
+    "issueNumber": 1261,
+    "commentId": null,
+    "actor": "badjoke-lab",
+    "scope": "r4f_g4_memory_replay"
+  },
+  "policy": {
+    "memoryMetric": "process_rss_bytes",
+    "memoryHaltBytes": 234881024,
+    "claimCapLedgers": 12
+  },
+  "samples": [
+    {
+      "sampleId": "synthetic-exact-12-ledger-shape",
+      "shape": "exact_12_ledger_halt_shape",
+      "backgroundRecovery": true,
+      "ledgersClaimed": 12,
+      "retainedLedgerCount": 12,
+      "baselineMemoryBytes": 100000000,
+      "peakMemoryBytes": 180000000,
+      "completedWithoutMemoryHalt": true,
+      "claimCapOverrideUsed": false,
+      "traceSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "diagnosticsSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    {
+      "sampleId": "synthetic-heavier-retained-shape",
+      "shape": "heavier_retained_sample",
+      "backgroundRecovery": true,
+      "ledgersClaimed": 12,
+      "retainedLedgerCount": 24,
+      "baselineMemoryBytes": 105000000,
+      "peakMemoryBytes": 200000000,
+      "completedWithoutMemoryHalt": true,
+      "claimCapOverrideUsed": false,
+      "traceSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "diagnosticsSha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    }
+  ],
+  "artifacts": {
+    "harnessSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "environmentSha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "outputSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+    "sourceCommit": "9a0327264cbf8c7eeefae8dcc689acefe457b44c"
+  },
+  "safety": {
+    "productionCredentialsUsed": false,
+    "productionMutationPerformed": false,
+    "recoveryMutationCommitted": false,
+    "publicReaderUnchanged": true,
+    "mainnetDisabled": true,
+    "stabilizationAuthorized": false,
+    "soakAuthorized": false
+  }
+}
