@@ -55,6 +55,7 @@ jobs:
           bash -n scripts/verify-live-checkpoint-cutover.sh
           bash -n scripts/check-canonical-production-base.sh
           bash -n scripts/check-actions-workflow-allowlist-r5-one-shot.sh
+          bash -n scripts/test-r4f-revision4-directional-persistence-postgres.sh
 
       - name: Validate canonical production base identity
         env:
@@ -72,6 +73,9 @@ jobs:
 
       - name: Unit tests
         run: pnpm test
+
+      - name: Verify revision-4 PostgreSQL persistence locally
+        run: bash scripts/test-r4f-revision4-directional-persistence-postgres.sh
 
       - name: Apply D1 migrations locally
         run: pnpm db:migrate:local
