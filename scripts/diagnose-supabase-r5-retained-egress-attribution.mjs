@@ -26,13 +26,7 @@ function parse(text) {
 }
 
 function rows(body) {
-  for (const candidate of [
-    body,
-    body?.result,
-    body?.data,
-    body?.rows,
-    body?.result?.rows,
-  ]) {
+  for (const candidate of [body, body?.result, body?.data, body?.rows, body?.result?.rows]) {
     if (Array.isArray(candidate)) return candidate
   }
   throw new Error('query response contains no rows')
@@ -62,10 +56,6 @@ function integer(value, name) {
 
 function nullableInteger(value, name) {
   return value === null || value === undefined ? null : integer(value, name)
-}
-
-function ratio(value) {
-  return value === null ? null : Number(value.toFixed(6))
 }
 
 function code(value) {
@@ -98,11 +88,10 @@ with observed as (
   select coalesce(jsonb_agg(jsonb_build_object(
     'status', a.status,
     'effectiveBytes', case
-      when a.status = 'succeeded'
-        then coalesce(
-          a.finalized_egress_upper_bound_bytes,
-          a.reserved_egress_upper_bound_bytes
-        )
+      when a.status = 'succeeded' then coalesce(
+        a.finalized_egress_upper_bound_bytes,
+        a.reserved_egress_upper_bound_bytes
+      )
       else a.reserved_egress_upper_bound_bytes
     end
   ) order by a.started_at, a.session_id, a.attempt_id), '[]'::jsonb) as value
@@ -131,8 +120,7 @@ with observed as (
     'reservedBytes', b.reserved_egress_upper_bound_bytes,
     'finalizedBytes', b.finalized_egress_upper_bound_bytes,
     'effectiveBytes', case
-      when b.status = 'completed'
-        then b.finalized_egress_upper_bound_bytes
+      when b.status = 'completed' then b.finalized_egress_upper_bound_bytes
       else b.reserved_egress_upper_bound_bytes
     end,
     'retainedPayloadBytes', (
@@ -164,12 +152,10 @@ with observed as (
         and w.start_ledger_index between b.start_ledger_index and b.end_ledger_index
     ),
     'retainedInspectedTransactionCount', (
-      select coalesce(sum(
-        case
-          when r.value_json is null then 0
-          else (r.value_json::jsonb->>'inspectedTransactions')::bigint
-        end
-      ), 0)::bigint
+      select coalesce(sum(case
+        when r.value_json is null then 0
+        else (r.value_json::jsonb->>'inspectedTransactions')::bigint
+      end), 0)::bigint
       from public.xrpl_phase_work w
       join public.xrpl_phase_reference_rows r on r.work_id = w.work_id
       where w.profile_id = 'supabase-devnet'
@@ -221,53 +207,46 @@ try {
   )
   const steadyBytes = Math.max(attemptBytes, legacyBytes)
 
-  const attributionInputs = recoveryBatches.map((row, index) => ({
-    batchId: String(row.batchId ?? ''),
-    status: String(row.status ?? ''),
-    ledgerCount: integer(row.ledgerCount, `recovery.${index}.ledgerCount`),
-    reservedBytes: integer(row.reservedBytes, `recovery.${index}.reservedBytes`),
-    finalizedBytes: nullableInteger(
-      row.finalizedBytes,
-      `recovery.${index}.finalizedBytes`,
-    ),
-    effectiveBytes: integer(row.effectiveBytes, `recovery.${index}.effectiveBytes`),
-  }))
   const recoveryAttribution = summarizeR5RecoveryEgressAttribution(
-    attributionInputs,
+    recoveryBatches.map((row, index) => ({
+      batchId: String(row.batchId ?? ''),
+      status: String(row.status ?? ''),
+      ledgerCount: integer(row.ledgerCount, `recovery.${index}.ledgerCount`),
+      reservedBytes: integer(row.reservedBytes, `recovery.${index}.reservedBytes`),
+      finalizedBytes: nullableInteger(
+        row.finalizedBytes,
+        `recovery.${index}.finalizedBytes`,
+      ),
+      effectiveBytes: integer(row.effectiveBytes, `recovery.${index}.effectiveBytes`),
+    })),
   )
   const recoveryBytes = recoveryAttribution.effectiveBytes
   const priorBytes = steadyBytes + recoveryBytes
 
   const retainedStats = recoveryBatches.reduce(
-    (totals, row, index) => ({
-      payloadBytes:
-        totals.payloadBytes +
-        integer(row.retainedPayloadBytes, `recovery.${index}.retainedPayloadBytes`),
-      payloadChunkCount:
-        totals.payloadChunkCount +
-        integer(
-          row.retainedPayloadChunkCount,
-          `recovery.${index}.retainedPayloadChunkCount`,
-        ),
-      normalizedRecordCount:
-        totals.normalizedRecordCount +
-        integer(
-          row.retainedNormalizedRecordCount,
-          `recovery.${index}.retainedNormalizedRecordCount`,
-        ),
-      relationshipCount:
-        totals.relationshipCount +
-        integer(
-          row.retainedRelationshipCount,
-          `recovery.${index}.retainedRelationshipCount`,
-        ),
-      inspectedTransactionCount:
-        totals.inspectedTransactionCount +
-        integer(
-          row.retainedInspectedTransactionCount,
-          `recovery.${index}.retainedInspectedTransactionCount`,
-        ),
-    }),
+    (totals, row, index) => {
+      totals.payloadBytes += integer(
+        row.retainedPayloadBytes,
+        `recovery.${index}.retainedPayloadBytes`,
+      )
+      totals.payloadChunkCount += integer(
+        row.retainedPayloadChunkCount,
+        `recovery.${index}.retainedPayloadChunkCount`,
+      )
+      totals.normalizedRecordCount += integer(
+        row.retainedNormalizedRecordCount,
+        `recovery.${index}.retainedNormalizedRecordCount`,
+      )
+      totals.relationshipCount += integer(
+        row.retainedRelationshipCount,
+        `recovery.${index}.retainedRelationshipCount`,
+      )
+      totals.inspectedTransactionCount += integer(
+        row.retainedInspectedTransactionCount,
+        `recovery.${index}.retainedInspectedTransactionCount`,
+      )
+      return totals
+    },
     {
       payloadBytes: 0,
       payloadChunkCount: 0,
@@ -288,8 +267,7 @@ try {
     cleanHaltedBoundary:
       reader.status === 'halted' &&
       reader.lastError === 'r5_recovery_monthly_egress_halt' &&
-      integer(reader.activeBatchCount, 'reader.activeBatchCount') === 0 &&
-      integer(reader.noncommittedWorkCount, 'reader.noncommittedWorkCount') === 0,
+      recoveryAttribution.fullReservationBatchCount === 0,
     recoveryAttributionReconciles: recoveryAttribution.reconciled,
     completedBatchCountReconciles:
       completedBatchCount === integer(reader.completedBatches, 'reader.completedBatches'),
@@ -317,16 +295,17 @@ try {
       selectedSteadyBytes: steadyBytes,
       recoveryBytes,
       priorConservativeBytes: priorBytes,
-      selectedSteadySource:
-        attemptBytes >= legacyBytes ? 'attempts' : 'legacy_ticks',
-      legacyShadowedBytes:
-        attemptBytes >= legacyBytes ? legacyBytes : attemptBytes,
+      selectedSteadySource: attemptBytes >= legacyBytes ? 'attempts' : 'legacy_ticks',
+      legacyShadowedBytes: attemptBytes >= legacyBytes ? legacyBytes : attemptBytes,
     },
     recoveryAttribution: {
       ...recoveryAttribution,
-      deterministicFloorShareOfExecutorBytes: ratio(
-        recoveryAttribution.deterministicFloorShareOfExecutorBytes,
-      ),
+      deterministicFloorShareOfExecutorBytes:
+        recoveryAttribution.deterministicFloorShareOfExecutorBytes === null
+          ? null
+          : Number(
+            recoveryAttribution.deterministicFloorShareOfExecutorBytes.toFixed(6),
+          ),
     },
     retainedStats,
     unavailableExactInputs: [
@@ -361,11 +340,12 @@ try {
     `${JSON.stringify(evidence, null, 2)}\n`,
   )
 
-  const floorPercent = recoveryAttribution.deterministicFloorShareOfExecutorBytes === null
-    ? 'n/a'
-    : `${(
-      recoveryAttribution.deterministicFloorShareOfExecutorBytes * 100
-    ).toFixed(2)}%`
+  const floorPercent =
+    recoveryAttribution.deterministicFloorShareOfExecutorBytes === null
+      ? 'n/a'
+      : `${(
+        recoveryAttribution.deterministicFloorShareOfExecutorBytes * 100
+      ).toFixed(2)}%`
   const markdown = [
     '## R5 retained egress attribution — read-only',
     '',
@@ -407,17 +387,21 @@ try {
     const reason = error instanceof Error ? error.message : String(error)
     await writeFile(
       `${output}/attribution.json`,
-      `${JSON.stringify({
-        purpose: 'r5-retained-egress-attribution-read-only-v1',
-        sourceRunId,
-        sourceCommit,
-        reason,
-        readOnly: true,
-        publicReaderUnchanged: true,
-        mainnetDisabled: true,
-        stabilizationAuthorized: false,
-        soakAuthorized: false,
-      }, null, 2)}\n`,
+      `${JSON.stringify(
+        {
+          purpose: 'r5-retained-egress-attribution-read-only-v1',
+          sourceRunId,
+          sourceCommit,
+          reason,
+          readOnly: true,
+          publicReaderUnchanged: true,
+          mainnetDisabled: true,
+          stabilizationAuthorized: false,
+          soakAuthorized: false,
+        },
+        null,
+        2,
+      )}\n`,
     )
     await writeFile(
       `${output}/attribution.md`,
