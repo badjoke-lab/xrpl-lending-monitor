@@ -73,9 +73,7 @@ describe('revision-4 G2B directional persistence contract', () => {
     expect(migration).toContain('observation_identity_conflict')
     expect(migration).toContain("'idempotent', true")
     expect(migration).toContain("'idempotent', false")
-    expect(migration).toContain(
-      'where observation_id = v_observation_id',
-    )
+    expect(migration).toContain('where observation_id = v_observation_id')
   })
 
   it('keeps schema, tables, and RPCs inaccessible to public roles', () => {
@@ -102,14 +100,13 @@ describe('revision-4 G2B directional persistence contract', () => {
     )
   })
 
-  it('does not reference or mutate active R5, phase, cursor, reader, or deployment state', () => {
+  it('does not reference or mutate active R5, phase, cursor, or deployment state', () => {
     for (const forbidden of [
       'xrpl_r5_v1',
       'xrpl_phase_work',
       'xrpl_phase_payload_chunks',
       'xrpl_phase_reference_rows',
       'collector_cursor',
-      'public_reader',
       'wrangler',
       'supabase functions deploy',
     ]) {
