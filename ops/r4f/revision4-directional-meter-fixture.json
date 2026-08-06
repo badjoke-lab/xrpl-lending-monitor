@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "observationId": "r4f.g2.fixture.0001",
+  "attemptId": "r4f.g2.attempt.0001",
+  "observedAt": "2026-08-06T04:00:00.000Z",
+  "disposition": "shadow_completed",
+  "observations": [
+    {
+      "schemaVersion": 1,
+      "sequence": 0,
+      "operationId": "invoker.edge.request.0001",
+      "boundaryId": "invoker_to_edge_request",
+      "bodyBytes": 64,
+      "framingReserveBytes": 256
+    },
+    {
+      "schemaVersion": 1,
+      "sequence": 1,
+      "operationId": "edge.xrpl.request.server-info.0001",
+      "boundaryId": "edge_to_xrpl_request",
+      "bodyBytes": 58,
+      "framingReserveBytes": 512
+    },
+    {
+      "schemaVersion": 1,
+      "sequence": 2,
+      "operationId": "xrpl.edge.response.server-info.0001",
+      "boundaryId": "xrpl_to_edge_response",
+      "bodyBytes": 8192,
+      "framingReserveBytes": 1024
+    },
+    {
+      "schemaVersion": 1,
+      "sequence": 3,
+      "operationId": "edge.database.request.claim.0001",
+      "boundaryId": "edge_to_database_request",
+      "bodyBytes": 384,
+      "framingReserveBytes": 512
+    },
+    {
+      "schemaVersion": 1,
+      "sequence": 4,
+      "operationId": "database.edge.response.claim.0001",
+      "boundaryId": "database_to_edge_response",
+      "bodyBytes": 2048,
+      "framingReserveBytes": 1024
+    },
+    {
+      "schemaVersion": 1,
+      "sequence": 5,
+      "operationId": "edge.edge.request.worker.0001",
+      "boundaryId": "edge_to_edge_request",
+      "bodyBytes": 256,
+      "framingReserveBytes": 512
+    },
+    {
+      "schemaVersion": 1,
+      "sequence": 6,
+      "operationId": "edge.edge.response.worker.0001",
+      "boundaryId": "edge_to_edge_response",
+      "bodyBytes": 1024,
+      "framingReserveBytes": 1024
+    },
+    {
+      "schemaVersion": 1,
+      "sequence": 7,
+      "operationId": "edge.invoker.response.0001",
+      "boundaryId": "edge_to_invoker_response",
+      "bodyBytes": 512,
+      "framingReserveBytes": 512
+    }
+  ],
+  "memorySupplemental": {
+    "canonicalJsonBytes": 4096,
+    "payloadBytes": 8192,
+    "normalizedObjectOverheadBytes": 16384,
+    "allocatorReserveBytes": 32768
+  },
+  "unexplainedDirectionalDeltaReserveBytes": 4096,
+  "recoveryMutationCommitted": false,
+  "publicReaderUnchanged": true,
+  "mainnetDisabled": true,
+  "stabilizationAuthorized": false,
+  "soakAuthorized": false
+}
