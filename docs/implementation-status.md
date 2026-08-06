@@ -1,171 +1,190 @@
 # Implementation status
 
-Last updated: `2026-08-03`.
+Last updated: `2026-08-06`.
 
 ## Current phase
 
 XRPL Lending Monitor is **not formally released**.
 
-Supabase profile revision 2 completed R4 qualification and was **rejected**. The controlling engineering phase is now `R4C3`: qualify a Supabase revision-3 resource boundary based on conservative application-owned accounting and fail-closed pre-reservation limits.
+The controlling engineering phase is R5 recovery under the selected Supabase revision-3 profile. The recovery is currently **safely halted** by the application-owned rolling 31-day egress guard. The immediate unit is `R5C1`: reconcile status and resource documents, then prove whether the current recovery shape can converge under the unchanged free-tier guard.
 
-The retired Cloudflare fixed-32-ledger recovery remains halted. Worker Cron remains empty, Mainnet remains disabled, the legacy public reader remains authoritative, and no R5 recovery, stabilization qualification, or soak is active.
+The controlling issue is `#1175`, **R5 Supabase revision-3 recovery to Devnet lag zero**.
 
-No deployment profile is selected.
+Public-reader cutover, Mainnet, stabilization, soak, and restart of the retired Cloudflare collector remain prohibited.
 
-## Revision-2 final gate result
+## Roadmap position
 
-| Gate | Result | Controlling interpretation |
-| --- | --- | --- |
-| G1 no mandatory payment/card | **pass** | Exact organization is Free and requires no paid billing path |
-| G2 no automatic paid overage | **pass** | Free-plan quota exhaustion produces restriction rather than paid overage |
-| G3 durable scheduler and fault behavior | **pass** | One-minute ownership, leases, retry, reclaim, duplicate convergence, successor reservation, and halt passed |
-| G4 transactional completion and rollback | **pass** | Atomic completion, interruption rollback, and replay convergence passed |
-| G5 committed-only reads and source-bound fences | **pass** | Remote committed-reader qualification passed |
-| G6 export, restore, duplicate convergence, and continuation | **pass** | Complete-state and post-restore qualification passed |
-| G7 sustained throughput | **pass** | Steady p95 `24/min` and catch-up p95 `14,178.400673920027/min` passed |
-| G8 resource fail-closed | **fail** | Required exact peak-memory, provider egress, total-memory counter, and memory-headroom evidence is unavailable |
-| G9 operator independence | **pass** | Run `30789994825` bound scripted operations to revision 2 |
-| G10 production boundary | **pass** | Mainnet, public reader, recovery, stabilization, and soak remained unchanged |
-| profile selected | `false` | Revision 2 was rejected and no replacement is qualified |
+```text
+M0 foundation                         complete
+M1 current-state collector            implemented; runtime replacement/recovery active
+M2 event history and lifecycle        complete through Checkpoint B
+M3 public API                         complete through exports/feeds; final live cross-audit gated
+M4 baseline UI                        complete through Checkpoint C
+M5 differentiated audit UI            API cross-audit passed; final browser evidence gated
+R4 deployment-profile qualification   revision 3 selected
+R5 Devnet recovery                    ACTIVE — halted on rolling egress guard
+R5 stabilization                      not authorized
+M6 hardening / Explorer v1            gated by R5 and stabilization
+multi-day Devnet soak                 not authorized
+formal Devnet release                 not authorized
+O1 -> O2 -> O3 Observatory path       post-release
+```
 
-Remote run `30800402654`, commit `db82291a7df3e8d4dfa458891e0a714f7d8d346b`, produced the final G8 disposition:
+## Selected profile
 
-- G8 status: `fail`;
-- disposition: `reject_profile`;
-- failure reasons:
-  - `provider_exact_peak_memory_unavailable`;
-  - `provider_egress_bytes_unavailable`;
-  - `runtime_total_memory_counter_unavailable`;
-  - `memory_headroom_not_qualified`.
+R4E selected the exact profile:
 
-The final revision-2 R4B result is:
+- profile: `supabase_free_postgres_pgcron_edge`;
+- revision: `3`;
+- profile identity digest: `3a5c4ff2c43a48d3e5b7ceded60027173d215d6f083fb33c22375758520bbe67`;
+- R4E selection digest: `13a313d9d0679c7c512b59f9931d733dcb3217ec8e1cc6e74a36125a0354b667`;
+- selection commit: `198eae836f5c6814cbc6009c95740becf41bdda3`;
+- controlling qualification run: `30817518929`.
 
-- classification: `rejected`;
-- selection: `not_selected`;
-- eligible for scoring: `false`;
-- passed gates: `9`;
-- failed gates: `1`;
-- unresolved gates: `0`;
-- failed gate: `G8`;
-- decision digest: `d1577a896e3f4e512a362586ae30990aceb5142f0783feb529626fa6f035e111`.
+Revision 3 uses conservative application-owned accounting and fail-closed pre-reservation where provider counters are unavailable. Missing provider counters are not relabeled as measured values.
 
-R4E records:
+## R5 checkpoint and recovery identity
 
-- outcome: `no_profile_qualified`;
-- selected profile: `null`;
-- R5 authorized: `false`;
-- outcome digest: `c04d75c38c103b9549351ca92a8dab113e754e7e2ed720b93a17f58ff138bacb`.
+The retained active checkpoint and recovery are bound to:
+
+- checkpoint ID: `r5-checkpoint-selected-revision3-entry`;
+- recovery run ID: `r5-recovery-selected-revision3-entry`;
+- network: `devnet`;
+- epoch: `supabase-r4c2c-v1`;
+- checkpoint watermark: `4,133,101`;
+- checkpoint state digest: `8c7ea9e12ae88e98ae54bdeb6b15314d43a993d154b235e5b42be415166a9f35`.
+
+The recovery preserves the standard `scan -> commit -> finalize -> successor` contract and committed-only visibility.
+
+## Latest retained R5 state
+
+Read-only diagnostic run `31032129918` observed:
+
+| Field | Value |
+| --- | ---: |
+| Recovery status | `halted` |
+| Last error | `r5_recovery_monthly_egress_halt` |
+| Completed batches | `297` |
+| Committed ledgers | `5,811` |
+| Recovery watermark | `4,139,118` |
+| Physical watermark | `4,139,122` |
+| Active batches | `0` |
+| Noncommitted work | `0` |
+| Nonterminal messages | `20,195` |
+| Recent batch errors | none |
+| Database bytes | `276,958,355` |
+
+The status change from `running` to `halted` and the corresponding last error are the only retained health mismatches. No active batch or partially committed work remains.
+
+## Monthly egress halt
+
+Read-only diagnostic run `31034105841` retained:
+
+| Value | Bytes |
+| --- | ---: |
+| Attempt conservative bytes | 1,286,596,364 |
+| R5 recovery conservative bytes | 2,880,972,004 |
+| Prior conservative bytes | 4,167,568,368 |
+| One new reservation | 134,217,728 |
+| Projected conservative bytes | 4,301,786,096 |
+| Fixed halt | 4,294,967,296 |
+| Headroom after reservation | -6,818,800 |
+
+The next claim was correctly rejected before mutation.
+
+The calculated first release time, assuming no new contributions, is `2026-09-03T10:46:04.042Z`. This is only the first time one new 128 MiB reservation would fit. It is not an R5 completion date and does not authorize automatic restart.
+
+These values are conservative application accounting, not exact provider-reported egress.
+
+## Convergence blocker
+
+The completed sample used `2,880,972,004` conservative bytes for `5,811` committed ledgers, or approximately `495,779` bytes per ledger on average.
+
+The last retained live lag observation before the halt was `93,539` ledgers. Applying the observed average as a planning signal produces approximately `43.19 GiB`, or `10.80` times the fixed 4 GiB rolling halt.
+
+This is not a formal worst-case forecast: ledger contents vary and the Devnet head continues to move. It is sufficient to reject the assumption that one rolling-window release automatically makes the existing recovery convergent.
+
+Revision 3 remains selected and correctly fail-closed. The unresolved gate is now whether the current recovery execution shape can close a moving backlog under the unchanged resource boundary.
+
+## Current unit — R5C1
+
+The controlling plan is [`ops/r5-egress-convergence-replan-2026-08-06.md`](ops/r5-egress-convergence-replan-2026-08-06.md).
+
+R5C1 requires:
+
+1. align this status document, `resource-envelope.md`, the replan, and Issue `#1175`;
+2. preserve the clean halted boundary;
+3. prohibit automatic restart at the first release time;
+4. keep all fixed resource and release boundaries unchanged.
+
+## Next units
+
+### R5C2 — Read-only byte attribution
+
+Reconcile retained conservative bytes by XRPL response, scan, transaction/metadata payload, emitted phase payload, failed-attempt reservation, database contribution where included, and fixed slack. Use retained artifacts first and create no recovery mutation for measurement.
+
+### R5C3 — Candidate evaluation
+
+Evaluate duplicate source-read removal, reuse of already proved committed data, payload reduction with exact reconstruction, explicit verified rebase, and whether any changed execution contract requires profile revision 4.
+
+### R5C4 — Selection decision
+
+Continue revision 3 only if a conservative upper bound proves moving-head convergence with unchanged or stricter guards. Otherwise define revision 4 and rerun G1-G10 before production recovery resumes.
+
+### R5C5 — One bounded proof burst
+
+After explicit selection, run one bounded proof unit and reconcile watermark, head, lag slope, conservative bytes, state-machine transition, rolling headroom, continuity, and committed-only visibility before authorizing continued recovery.
+
+## R5 exit condition
+
+R5 completes only after:
+
+- Devnet lag reaches zero;
+- no skipped or duplicated ledger is proved;
+- parent-hash continuity is proved;
+- committed-only visibility is proved;
+- retry, rollback, lease, interruption, and duplicate replay converge;
+- quota accounting reconciles;
+- no active or noncommitted recovery work remains;
+- a terminal read-only recovery record is retained;
+- a separate stabilization decision is prepared.
+
+## Post-R5 order
+
+After R5 exit:
+
+1. separately authorize and run stabilization qualification;
+2. complete M5-5 real-data browser regression and representative production behavior smoke;
+3. complete early M6 integrity/reset and resource guardrails;
+4. implement bounded Explorer v1;
+5. run final visual, accessibility, performance, security, and cross-browser audits;
+6. finalize canonical host, sitemap, metadata, analytics, and operations documentation;
+7. verify backup, restore, rollback, and continuation on the selected production shape;
+8. run real multi-day Devnet soak;
+9. perform final Devnet release verification;
+10. only after stable release and soak, begin Observatory O1, then O2, then O3.
 
 ## Controlling evidence
 
-### Qualification contract and earlier phases
-
-- R4 qualification contract: [`ops/r4-deployment-profile-qualification-plan-2026-08-01.md`](ops/r4-deployment-profile-qualification-plan-2026-08-01.md)
-- R4 initial matrix: [`ops/r4-initial-profile-matrix-2026-08-01.json`](ops/r4-initial-profile-matrix-2026-08-01.json)
-- R4B evaluator evidence: [`ops/r4b-profile-qualification-evaluator-evidence-2026-08-01.md`](ops/r4b-profile-qualification-evaluator-evidence-2026-08-01.md)
-- R4C1 local SQLite evidence: [`ops/r4c1-local-sqlite-service-evidence-2026-08-01.md`](ops/r4c1-local-sqlite-service-evidence-2026-08-01.md)
-- R4C2a remote probe: [`ops/r4c2-supabase-remote-probe-evidence-2026-08-02.md`](ops/r4c2-supabase-remote-probe-evidence-2026-08-02.md)
-- R4C2b durable phase chain: [`ops/r4c2b-supabase-remote-phase-chain-evidence-2026-08-02.md`](ops/r4c2b-supabase-remote-phase-chain-evidence-2026-08-02.md)
-
-### R4C2c behavioral evidence
-
-- seven-class executor: [`ops/r4c2c-supabase-seven-class-remote-evidence-2026-08-02.md`](ops/r4c2c-supabase-seven-class-remote-evidence-2026-08-02.md)
-- committed reader: [`ops/r4c2c-supabase-committed-reader-evidence-2026-08-02.md`](ops/r4c2c-supabase-committed-reader-evidence-2026-08-02.md)
-- historical witness: [`ops/r4c2c-supabase-historical-witness-remote-evidence-2026-08-02.md`](ops/r4c2c-supabase-historical-witness-remote-evidence-2026-08-02.md)
-- standard multi-chunk evidence: [`ops/r4c2c-supabase-multichunk-remote-evidence-2026-08-02.md`](ops/r4c2c-supabase-multichunk-remote-evidence-2026-08-02.md)
-- complete-state transfer: [`ops/r4c2c-supabase-complete-state-transfer-remote-evidence-2026-08-02.md`](ops/r4c2c-supabase-complete-state-transfer-remote-evidence-2026-08-02.md)
-- post-restore continuation: [`ops/r4c2c-supabase-restore-continuation-remote-evidence-2026-08-02.md`](ops/r4c2c-supabase-restore-continuation-remote-evidence-2026-08-02.md)
-- remote fault qualification: [`ops/r4c2c-supabase-remote-fault-evidence-2026-08-02.md`](ops/r4c2c-supabase-remote-fault-evidence-2026-08-02.md)
-
-### R4C2d and R4E evidence
-
-- normal-cadence/resource baseline: [`ops/r4c2d-supabase-throughput-resource-baseline-evidence-2026-08-03.md`](ops/r4c2d-supabase-throughput-resource-baseline-evidence-2026-08-03.md)
-- isolated catch-up throughput: [`ops/r4c2d-supabase-isolated-catchup-throughput-evidence-2026-08-03.md`](ops/r4c2d-supabase-isolated-catchup-throughput-evidence-2026-08-03.md)
-- network-inclusive steady throughput: [`ops/r4c2d-supabase-network-steady-throughput-evidence-2026-08-03.md`](ops/r4c2d-supabase-network-steady-throughput-evidence-2026-08-03.md)
-- resource, no-charge, operator, and final disposition evidence: [`ops/r4c2d-supabase-resource-headroom-evidence-2026-08-03.md`](ops/r4c2d-supabase-resource-headroom-evidence-2026-08-03.md)
-- machine-readable gate state: [`ops/r4c2d-resource-gate-status-2026-08-03.json`](ops/r4c2d-resource-gate-status-2026-08-03.json)
-- rejected revision-2 R4B decision: [`ops/r4c2d-supabase-r4b-decision-2026-08-03.json`](ops/r4c2d-supabase-r4b-decision-2026-08-03.json)
-- R4E outcome: [`ops/r4e-deployment-profile-outcome-2026-08-03.json`](ops/r4e-deployment-profile-outcome-2026-08-03.json)
-- runtime invariants: [`history-runtime-contract.md`](history-runtime-contract.md)
-- resource envelope: [`resource-envelope.md`](resource-envelope.md)
-
-## Completed behavioral qualification
-
-R4C2c retained:
-
-- active seven-class execution and committed-reader semantics;
-- `237` real historical Devnet rows across all seven semantic classes;
-- historical pages `100 / 100 / 37` and `16` non-empty cross-class Loan relationship rows;
-- one real `116`-row multi-chunk work with payload, commit, mutation, and reader parity `40 / 40 / 36`;
-- exact collection, scheduler, publication, and maintenance export;
-- typed restore with canonical text and SHA-256 parity;
-- duplicate restore convergence and digest-tamper rejection;
-- post-restore `scan -> commit -> finalize -> next scan` continuation;
-- transaction interruption rollback;
-- retry/backoff and stale-lease reclaim;
-- terminal integrity halt with no invalid successor;
-- duplicate phase and terminal replay convergence;
-- active-profile isolation.
-
-## G7 throughput qualification
-
-The old one-phase-per-cron cadence retained p95 `1/min` and was rejected.
-
-Run `30755497115` proved catch-up p95 `14,178.400673920027/min`, above the required `30/min`.
-
-Run `30784402995` proved six consecutive network-inclusive minute buckets at `[24, 24, 24, 24, 24, 24]`, with exact 144-ledger target advance, attempt `1`, and active-source identity preservation. Steady p95 passed the required value above `21/min`.
-
-G7 remains qualified for the measured design.
-
-## G8 failure boundary
-
-Measured database, connection, wall-time, invocation, bundle, CPU, and cost-safety values were below their retained thresholds. Those passing components did not close the two unavailable resource surfaces.
-
-Six steady ticks retained `36` lifecycle memory samples. Zero RSS does not mean zero total-memory usage, and partial heap or external counters cannot substitute for RSS. The provider probe also exposed no PAT-compatible egress-byte field. A generic project process-memory metric is not function-scoped peak Edge memory.
-
-Revision 2 therefore fails G8 and is rejected.
-
-## Current next stage — R4C3
-
-Revision 3 must not relabel missing provider counters as measured evidence. It must instead define a different profile identity whose hard boundary is explicitly application-owned and conservative.
-
-Required R4C3 work:
-
-1. define revision-3 identity and exact resource-accounting contract;
-2. account for every XRPL response byte, emitted payload byte, database request, function invocation, and bounded in-memory object before mutation;
-3. use fixed upper bounds and pre-reservation halts where runtime counters are unavailable;
-4. prove threshold injection leaves no work, watermark, publication, or successor mutation;
-5. rerun G1–G10 against revision 3;
-6. select the profile only after every gate passes;
-7. begin R5 only after explicit selection.
-
-## Retired production checkpoint
-
-Controlling checkpoint: Issue `#1079`.
-
-- network: `devnet`;
-- Mainnet enabled: `false`;
-- Worker Cron: empty;
-- last completed slot: `2026-08-01T03:52:00Z`;
-- failed slot: `2026-08-01T03:53:00Z`;
-- failure: `Too many subrequests by single Worker invocation`;
-- last processed ledger: `4,051,454`;
-- latest observed ledger at halt: `4,108,194`;
-- terminal lag: `56,740`;
-- successor chain: halted;
-- soak: not started.
+- R5 issue: GitHub Issue `#1175`;
+- checkpoint and preparation run: `30831843111`;
+- latest health-change diagnostic: `31032129918`;
+- latest monthly egress breakdown: `31034105841`;
+- latest source commit: `e1af37a9e7660c7125359b40786d90b493c8f8c5`;
+- replan: [`ops/r5-egress-convergence-replan-2026-08-06.md`](ops/r5-egress-convergence-replan-2026-08-06.md);
+- runtime invariants: [`history-runtime-contract.md`](history-runtime-contract.md);
+- resource boundary: [`resource-envelope.md`](resource-envelope.md).
 
 ## Operating restrictions
 
-- Do not describe passing G7 or G9 as G8 qualification.
-- Do not interpret zero RSS as zero total-memory usage or headroom.
-- Do not substitute partial heap/external counters for RSS.
-- Do not substitute generic project memory metrics for function-scoped peak memory.
-- Do not substitute Free-plan identity, request counts, or projections for provider egress evidence.
-- Do not restart the retired fixed-32-ledger runtime.
-- Do not select or score a profile before every hard gate passes.
-- Do not add a payment method, paid plan, or debt-capable overage profile.
+- Do not automatically restart R5 when rolling headroom first becomes positive.
+- Do not reduce the fixed 4 GiB rolling halt or 128 MiB reservation without a source-backed tighter bound and a new qualification decision.
+- Do not describe conservative application accounting as exact provider egress.
+- Do not skip ledgers, break parent-hash continuity, or replace historical recovery with latest-state-only collection.
+- Do not rebase without fixed-ledger, manifest, relationship, identity, and continuation evidence.
+- Do not restart the retired Cloudflare collector.
 - Do not use GitHub Actions as the normal collection clock.
-- Do not start R5 recovery, stabilization, or soak early.
-- Do not enable Mainnet or switch the public reader.
-- Do not skip a failed ledger, advance state after partial persistence, or silently fall back after an integrity failure.
+- Do not switch the public reader.
+- Do not enable Mainnet.
+- Do not start stabilization or soak before separate authorization.
+- Do not advance state after partial persistence or silently fall back after an integrity failure.
