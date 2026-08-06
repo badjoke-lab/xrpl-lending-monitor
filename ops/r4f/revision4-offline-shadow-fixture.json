@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "observationId": "r4f.g2c.offline.0001",
+  "attemptId": "r4f.g2c.attempt.0001",
+  "observedAt": "2026-08-06T04:20:00.000Z",
+  "sourceRunId": 1,
+  "sourceCommit": "200ed9417cad30d1e6248748516b247643a29d7a",
+  "network": "devnet",
+  "epochId": "r4f-g2c-offline-v1",
+  "baseIdentity": "r4f-g2c-offline-base-v1",
+  "workId": "r4f-g2c-offline-work-0001",
+  "previousLedgerIndex": 4139118,
+  "expectedParentHash": "HASH4139118",
+  "unexplainedDirectionalDeltaReserveBytes": 65536,
+  "normalizedObjectOverheadPerRecordBytes": 512,
+  "allocatorReserveBytes": 8388608,
+  "bodies": {
+    "invokerRequest": "{\"mode\":\"offline-shadow\",\"confirm\":\"R4F_G2C_NO_MUTATION\"}",
+    "edgeToEdgeRequest": "{\"mode\":\"offline-shadow-worker\",\"range\":\"4139119..4139120\"}",
+    "edgeToEdgeResponse": "{\"accepted\":true,\"recoveryMutationCommitted\":false}",
+    "serverInfoRequest": "{\"method\":\"server_info\",\"params\":[{}]}",
+    "serverInfoResponse": "{\"result\":{\"info\":{\"validated_ledger\":{\"seq\":4139120}}}}",
+    "databaseResponse": "{\"schemaVersion\":1,\"idempotent\":false,\"recoveryMutationCommitted\":false}",
+    "invokerResponse": "{\"ok\":true,\"mode\":\"offline-shadow\",\"recoveryMutationCommitted\":false}"
+  },
+  "framingReserveBytes": {
+    "invokerRequest": 512,
+    "edgeToEdgeRequest": 512,
+    "edgeToEdgeResponse": 1024,
+    "xrplRequest": 512,
+    "xrplResponse": 1024,
+    "databaseRequest": 2048,
+    "databaseResponse": 2048,
+    "invokerResponse": 1024
+  },
+  "ledgers": [
+    {
+      "requestBody": "{\"method\":\"ledger\",\"params\":[{\"ledger_index\":4139119,\"transactions\":true,\"expand\":true}]}",
+      "responseBody": "{\"result\":{\"validated\":true,\"ledger_index\":4139119,\"ledger_hash\":\"HASH4139119\",\"ledger\":{\"ledger_index\":4139119,\"ledger_hash\":\"HASH4139119\",\"parent_hash\":\"HASH4139118\",\"close_time\":835000001,\"transactions\":[]}}}"
+    },
+    {
+      "requestBody": "{\"method\":\"ledger\",\"params\":[{\"ledger_index\":4139120,\"transactions\":true,\"expand\":true}]}",
+      "responseBody": "{\"result\":{\"validated\":true,\"ledger_index\":4139120,\"ledger_hash\":\"HASH4139120\",\"ledger\":{\"ledger_index\":4139120,\"ledger_hash\":\"HASH4139120\",\"parent_hash\":\"HASH4139119\",\"close_time\":835000002,\"transactions\":[]}}}"
+    }
+  ]
+}
