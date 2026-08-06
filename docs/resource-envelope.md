@@ -6,7 +6,7 @@ Last updated: `2026-08-06`.
 
 This document defines the measurable runtime, storage, scheduler, network, query, no-charge, and operator envelope for XRPL Lending Monitor.
 
-The collector core remains provider-neutral. Provider limits, unavailable counters, conservative application accounting, and profile-specific stop thresholds are deployment-profile facts rather than permanent product architecture.
+The collector core remains provider-neutral. Provider limits, unavailable counters, directional accounting, conservative reserves, and profile-specific stop thresholds are deployment-profile facts rather than permanent product architecture.
 
 ## Operating principles
 
@@ -20,9 +20,9 @@ The collector core remains provider-neutral. Provider limits, unavailable counte
 - the selected profile has no mandatory paid runtime dependency or automatic paid overage;
 - project guards halt before provider hard limits or billable exposure;
 - complete state remains exportable and restorable;
-- a missing provider counter remains missing and is not relabeled as measured evidence;
+- missing provider counters remain missing and are not relabeled as measured evidence;
 - partial heap or external-memory counters do not substitute for unavailable total-memory evidence;
-- conservative application-owned accounting may be used as an explicit profile contract when the provider surface is unavailable;
+- billable egress and memory/transport may use different byte-direction contracts, but neither may omit a safety-relevant byte;
 - profile deployment, rollback, checkpoint, export, restore, evidence, halt, and credential rotation remain scriptable.
 
 ## Current architecture
@@ -53,7 +53,7 @@ Reference commit guards remain:
 
 ## Selected deployment profile
 
-R4E selected:
+R4E selected the currently deployed identity:
 
 - profile: `supabase_free_postgres_pgcron_edge`;
 - revision: `3`;
@@ -61,56 +61,53 @@ R4E selected:
 - R4E selection digest: `13a313d9d0679c7c512b59f9931d733dcb3217ec8e1cc6e74a36125a0354b667`;
 - network: `devnet`.
 
-Revision 3 replaced the rejected revision-2 treatment of unavailable provider memory and egress counters with a new, explicit profile identity using conservative application-owned accounting and fail-closed pre-reservation.
+Revision 3 remains the identity of the clean halted R5 state. It correctly applies fail-closed pre-reservation and does not claim unavailable provider counters. Its recovery egress formula is now rejected as a convergence path, not as a safety mechanism.
 
-Selection means the profile's G1-G10 qualification passed under that exact contract. It does not mean every possible recovery workload is guaranteed to converge inside the rolling resource window.
+## Fixed selected guardrails
 
-## Fixed revision-3 guardrails
-
-The selected contract retains, at minimum:
+The following boundaries remain in force during R4F qualification:
 
 | Resource | Project halt or reservation | Provider or runtime boundary |
 | --- | ---: | ---: |
 | Project memory | 224 MiB | 256 MiB provider hard boundary |
-| Rolling application egress, 31 days | 4 GiB | profile stop boundary |
-| One recovery reservation | 128 MiB | deducted before mutation |
+| Rolling application egress, 31 days | 4 GiB | 5 GiB Free-plan boundary |
+| Revision-3 recovery reservation | 128 MiB | deducted before mutation |
 | Project invocations, 31 days | 400,000 | 500,000 Free-plan boundary |
 | Database size | 400,000,000 bytes | 500,000,000 bytes |
 | Database connections | 45 | 60 |
 | Edge wall time | 45,000 ms | 150,000 ms |
 | Deployed bundle | 4,000,000 bytes | 5,000,000 bytes |
+| Memory-qualified ledgers per claim | 12 | 24 remains unqualified |
 
-A claim is denied before mutation when its reservation would cross a fixed project halt.
+No R4F work changes the selected runtime until G10 explicitly selects a new identity.
 
 ## Throughput qualification
 
-The retained R4 throughput results remain:
+The retained R4 execution results remain:
 
 - steady minute rates: `[24, 24, 24, 24, 24, 24]`;
 - steady p95: `24/min`;
 - isolated catch-up p95: `14,178.400673920027/min`.
 
-These results prove the measured execution design can exceed the required steady rate of 21 ledgers/minute and catch-up rate of 30 ledgers/minute when resource headroom is available. They do not by themselves prove rolling-window convergence for the full R5 backlog.
+These results prove execution throughput when resource headroom is available. They do not prove rolling egress convergence.
 
-## Current R5 resource state
+## Current R5 state
 
-Issue `#1175` is the controlling R5 recovery issue.
+Issue `#1175` controls the halted R5 recovery.
 
 Read-only diagnostic run `31032129918` observed:
 
-- recovery status: `halted`;
-- last error: `r5_recovery_monthly_egress_halt`;
+- status/error: `halted / r5_recovery_monthly_egress_halt`;
 - completed batches: `297`;
 - committed ledgers: `5,811`;
-- recovery watermark: `4,139,118`;
-- physical watermark: `4,139,122`;
+- recovery/physical watermarks: `4,139,118 / 4,139,122`;
 - active batches: `0`;
 - noncommitted work: `0`;
 - database bytes: `276,958,355`.
 
-The halted state is clean: no active batch, no noncommitted work, and no recent batch error remains.
+The boundary is clean: no active batch, partial commit, or recent batch error remains.
 
-## Current rolling egress calculation
+## Revision-3 rolling calculation
 
 Read-only diagnostic run `31034105841` retained:
 
@@ -118,7 +115,7 @@ Read-only diagnostic run `31034105841` retained:
 | --- | ---: |
 | Attempt conservative bytes | 1,286,596,364 |
 | Legacy tick conservative bytes | 577,242,176 |
-| Steady conservative bytes | 1,286,596,364 |
+| Selected steady conservative bytes | 1,286,596,364 |
 | R5 recovery conservative bytes | 2,880,972,004 |
 | Prior conservative bytes | 4,167,568,368 |
 | One new reservation | 134,217,728 |
@@ -128,35 +125,100 @@ Read-only diagnostic run `31034105841` retained:
 
 The next claim was correctly denied before mutation.
 
-The calculated first release time, assuming no new contributions, is `2026-09-03T10:46:04.042Z`, with projected bytes returning to `4,167,568,368`. This is a reservation-eligibility estimate only. It does not authorize an automatic recovery restart.
+`2026-09-03T10:46:04.042Z` is a one-reservation eligibility estimate under revision-3 accounting only. It does not authorize a restart.
 
-These numbers are conservative application accounting and are not exact provider-reported egress usage.
+## R5C2 attribution
 
-## R5 convergence interpretation
+Read-only run `31068546022` retained:
 
-The retained R5 sample used `2,880,972,004` conservative bytes for `5,811` committed ledgers, averaging approximately `495,779` conservative bytes per ledger.
+| Class | Value |
+| --- | ---: |
+| Executor batches | 231 |
+| Adopted zero-egress batches | 66 |
+| Executor ledgers | 5,076 |
+| Adopted ledgers | 735 |
+| Recovery conservative bytes | 2,880,972,004 |
+| Deterministic conservative floor | 2,302,894,080 |
+| Variable conservative bytes | 578,077,924 |
+| Retained normalized payload bytes | 5,753,011 |
 
-The last retained live lag observation before the halt was `93,539` ledgers. Applying the sample average only as a planning signal gives approximately `43.19 GiB`, or `10.80` times the fixed 4 GiB rolling halt.
+The attribution reconciles exactly. Three repaired completed batches retained a full 128 MiB failure reservation; no noncompleted batch remains.
 
-This is not a worst-case upper bound and must not be presented as a completion forecast. It establishes that one rolling-window release is not sufficient evidence that the existing recovery shape will converge while the Devnet head continues to advance.
+The retained schema does not preserve exact per-direction network bytes or the original accounting JSON. Those missing surfaces drive revision-4 G2 instrumentation requirements.
 
-The current resource gate therefore has two separate conclusions:
+## Revision-3 convergence rejection
 
-1. **Safety:** revision 3 passed by halting before mutation.
-2. **Convergence:** the current R5 workload shape is not yet proved capable of closing the moving backlog under the unchanged rolling boundary.
+Excluding repair-only rows, normal completed work averages approximately `494,083` conservative bytes per ledger. The fixed 4 GiB rolling halt permits approximately `0.195` ledger/minute at that cost.
 
-## Active replan
+The memory-qualified future 12-ledger shape averages approximately `882,493` conservative bytes per ledger and permits approximately `0.109` ledger/minute.
 
-The controlling plan is [`ops/r5-egress-convergence-replan-2026-08-06.md`](ops/r5-egress-convergence-replan-2026-08-06.md).
+The required steady rate is `21` ledgers/minute. A 31-day window therefore requires `937,440` ledgers and an average complete billable-direction upper bound of no more than approximately `4,582` bytes per ledger before intervention headroom.
 
-The next evidence order is:
+Even deleting the entire deterministic floor while retaining the observed normal variable remainder permits only approximately `2.35` ledgers/minute.
 
-1. reconcile status and resource documents;
-2. attribute retained conservative bytes by source and phase without creating recovery mutation;
-3. evaluate duplicate-read removal, committed-data reuse, exact payload reduction, explicit verified rebase, and revision-4 necessity;
-4. choose revision 3 continuation only with a conservative moving-head convergence proof;
-5. otherwise define revision 4 and rerun G1-G10;
-6. after explicit selection, run one bounded proof burst before continued recovery.
+Consequences:
+
+- anomaly removal is insufficient;
+- reservation tuning is insufficient;
+- 24-ledger restoration is memory-unqualified and insufficient;
+- invocation splitting is insufficient;
+- a one-time rebase without steady convergence is insufficient;
+- revision-3 continuation is rejected.
+
+The controlling evaluation is [`ops/r5-egress-candidate-evaluation-2026-08-06.md`](ops/r5-egress-candidate-evaluation-2026-08-06.md).
+
+## Revision-4 candidate contract
+
+Issue `#1261` controls R4F qualification.
+
+Candidate identity:
+
+- profile: `supabase_free_postgres_pgcron_edge`;
+- revision: `4`;
+- identity digest: `39e8b620a20bb08fbe8306fe753d4d445c5191bcafddbf67721e0c17d5b6bcd5`;
+- selection: `not_selected`;
+- recovery mutation authorized: `false`.
+
+Revision 4 keeps two independent upper bounds.
+
+### Rolling billable-egress upper bound
+
+Include:
+
+- documented outbound data sent from Supabase to connected clients;
+- external outbound requests conservatively until G3 reconciliation;
+- unresolved internal database and function-to-function classes conservatively until G3;
+- source-backed framing and unexplained-delta reserves.
+
+Exclude inbound external responses from this rolling sum. Do not use a blanket multiplier over all network directions.
+
+### Memory and transport upper bound
+
+Include every relevant direction and representation:
+
+- inbound and outbound body bytes;
+- database and function-to-function bytes;
+- canonical JSON and payload serialization;
+- ledger, transaction, metadata, normalized-record, payload-chunk, and relationship overhead;
+- failed, retried, repaired, and adopted state;
+- framing, allocator, and unexplained-delta reserves.
+
+Inbound XRPL responses remain fully counted here even though they are excluded from rolling billable egress.
+
+The machine-readable and human-readable G1 contract is documented in [`ops/r4f-revision4-directional-egress-contract-2026-08-06.md`](ops/r4f-revision4-directional-egress-contract-2026-08-06.md).
+
+## R4F qualification order
+
+1. G1 contract lock;
+2. G2 directional instrumentation and retained accounting JSON;
+3. G3 isolated provider reconciliation and unexplained-delta reserve;
+4. G4 memory requalification;
+5. G5 steady convergence at or above 21 ledgers/minute;
+6. G6 moving-head catch-up convergence;
+7. G7 failure, retry, repair, and adoption accounting;
+8. G8 export, restore, continuation, rollback, and operator independence;
+9. G9 one separately authorized bounded proof unit;
+10. G10 selection or rejection.
 
 ## Automatic guardrails
 
@@ -169,7 +231,7 @@ The next evidence order is:
 - keep unavailable provider surfaces explicit;
 - preserve scripted rollback, halt, credential rotation, export, restore, and evidence publication;
 - do not lower a fixed guard to make a workload pass;
-- do not automatically restart when rolling headroom first becomes positive.
+- do not restart when rolling headroom first becomes positive.
 
 ## Storage and publication rules
 
@@ -187,17 +249,20 @@ The next evidence order is:
 
 A profile may be selected only after production-shaped evidence demonstrates safety margin for cadence, CPU, memory, network, scheduler operations, storage, query volume, export, restore, reconciliation, catch-up, no-charge operation, and operator independence.
 
-A selected profile must be revised and requalified when a materially changed accounting or execution contract changes its identity or hard-boundary proof.
+A changed accounting or execution contract creates a new identity and must pass the complete qualification sequence.
 
-R5 recovery may continue under revision 3 only after the active replan proves a conservative end-to-end path that closes backlog faster than new Devnet backlog is created while preserving the unchanged guards and integrity contract.
+Revision 4 may be selected only after G1-G10 prove both no-charge safety and moving-head convergence under unchanged or stricter fixed guards.
 
 ## Operating restrictions
 
-- Do not treat exact throughput as proof of rolling-window convergence.
-- Do not describe conservative application accounting as provider-reported egress.
-- Do not reduce the fixed 4 GiB rolling halt or 128 MiB reservation without a source-backed tighter bound and a new decision.
+- Do not restart R5 under revision 3.
+- Do not run a revision-3 proof burst.
+- Do not treat execution throughput as rolling-window convergence.
+- Do not describe application accounting as exact provider egress.
+- Do not reduce the 4 GiB rolling halt, 224 MiB memory halt, invocation limits, or 12-ledger cap to make a candidate pass.
+- Do not exclude inbound bytes from memory or transport accounting.
 - Do not create production recovery work solely to measure resource use.
 - Do not split the same total bytes across more runs and call that a reduction.
 - Do not skip ledgers or replace continuity with latest-state-only collection.
 - Do not rebase without a fixed validated ledger, complete manifest, relationship, identity, and continuation proof.
-- Do not switch the public reader, enable Mainnet, start stabilization, or start soak during R5 replan.
+- Do not switch the public reader, enable Mainnet, start stabilization, or start soak during R4F qualification.
