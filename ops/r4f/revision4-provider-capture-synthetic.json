@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "evidenceClass": "synthetic_test_only",
+  "profileId": "supabase_free_postgres_pgcron_edge",
+  "profileRevision": 4,
+  "profileIdentityDigest": "39e8b620a20bb08fbe8306fe753d4d445c5191bcafddbf67721e0c17d5b6bcd5",
+  "captureState": "synthetic_test",
+  "captureId": "r4f-g3-capture-synthetic-001",
+  "authorization": {
+    "issueNumber": 1261,
+    "commentId": null,
+    "actor": "badjoke-lab",
+    "scope": "r4f_g3_dashboard_capture"
+  },
+  "projectIdentityDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "billingPeriodStart": "2026-08-01T00:00:00.000Z",
+  "billingPeriodEnd": "2026-09-01T00:00:00.000Z",
+  "before": {
+    "displayedValue": "1.000",
+    "unit": "MB",
+    "decimalPlaces": 3,
+    "roundingRule": "nearest_half_up",
+    "capturedAt": "2026-08-06T06:00:00.000Z",
+    "sourceArtifact": "synthetic-before.json"
+  },
+  "after": {
+    "displayedValue": "1.015",
+    "unit": "MB",
+    "decimalPlaces": 3,
+    "roundingRule": "nearest_half_up",
+    "capturedAt": "2026-08-06T06:05:00.000Z",
+    "sourceArtifact": "synthetic-after.json"
+  },
+  "application": {
+    "rollingBillableEgressUpperBoundBytes": 12474,
+    "retainedUnexplainedDeltaReserveBytes": 3525,
+    "accountingDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "sourceCommit": "cccccccccccccccccccccccccccccccccccccccc",
+    "sourceRunId": 1
+  },
+  "concurrentTraffic": {
+    "excluded": true,
+    "evidenceArtifacts": ["synthetic-traffic-window.json"]
+  },
+  "providerCapabilities": {
+    "managementApiEgressBytesAvailable": false,
+    "dashboardPatAuthorized": false,
+    "dashboardExactByteExportAvailable": false,
+    "logsResponseBytesAvailable": false
+  },
+  "safety": {
+    "providerMutationPerformed": false,
+    "productionMigrationPerformed": false,
+    "recoveryMutationCommitted": false,
+    "publicReaderUnchanged": true,
+    "mainnetDisabled": true,
+    "stabilizationAuthorized": false,
+    "soakAuthorized": false
+  }
+}
