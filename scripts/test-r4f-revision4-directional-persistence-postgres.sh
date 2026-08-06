@@ -5,6 +5,7 @@ container_name="xrpl-r4f-postgres-${GITHUB_RUN_ID:-local}-$$"
 image="postgres:15-alpine"
 output_directory="${R4F_G2D_OUTPUT:-r4f-revision4-postgres-integration-evidence}"
 shadow_directory="${output_directory}/offline-shadow"
+shadow_build_directory='.r4f-revision4-offline-shadow-build'
 
 cleanup() {
   docker rm -f "$container_name" >/dev/null 2>&1 || true
@@ -12,11 +13,14 @@ cleanup() {
 trap cleanup EXIT
 
 unset SUPABASE_ACCESS_TOKEN SUPABASE_PROJECT_ID SUPABASE_SERVICE_ROLE_KEY SUPABASE_DB_PASSWORD || true
-rm -rf "$output_directory"
+rm -rf "$output_directory" "$shadow_build_directory"
 mkdir -p "$shadow_directory"
 
+pnpm exec vite build --config vite.r4f-revision4-offline-shadow.config.ts \
+  > "${output_directory}/offline-shadow-build.log"
+
 R4F_G2C_OUTPUT="$shadow_directory" \
-  node scripts/build-r4f-revision4-offline-shadow.mjs \
+  node "${shadow_build_directory}/build-r4f-revision4-offline-shadow.mjs" \
   > "${output_directory}/offline-shadow.log"
 
 R4F_G2D_EVIDENCE="${shadow_directory}/evidence.json" \
