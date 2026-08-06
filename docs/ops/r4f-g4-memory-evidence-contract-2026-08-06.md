@@ -2,7 +2,9 @@
 
 Date: 2026-08-06
 Issue: #1261
-Status: evidence contract and offline verifier prepared; G4 remains unresolved
+Status: contract satisfied by the retained authorized bounded replay; G4 formally closed as pass on 2026-08-07
+
+The closure is recorded in [`r4f-g4-memory-gate-closure-2026-08-07.md`](r4f-g4-memory-gate-closure-2026-08-07.md) and [`../../ops/r4f/revision4-memory-gate-closure.json`](../../ops/r4f/revision4-memory-gate-closure.json). The historical sections below describe the verifier-preparation change before the authorized replay ran.
 
 ## Purpose
 
@@ -36,7 +38,7 @@ bash scripts/test-r4f-revision4-memory-evidence-verifier.sh
 
 The harness bundles the verifier, saves a synthetic result, verifies the locked guard and cap, then runs proof-required mode. Synthetic evidence must exit with code `2`.
 
-A future authorized replay should invoke the bundled CLI with a separately captured JSON input:
+An authorized replay invokes the bundled CLI with a separately captured JSON input:
 
 ```bash
 node .tmp/r4f-revision4-memory-evidence-verifier.mjs \
@@ -45,6 +47,10 @@ node .tmp/r4f-revision4-memory-evidence-verifier.mjs \
   --require-proof-ready
 ```
 
-## Current conclusion
+## Closure conclusion
 
-No real revision-4 memory replay was performed by this change. No historical peak values were inferred. G4 remains unresolved until an authorized bounded replay supplies both required shapes and the verifier returns `proofReady: true`.
+Actions run `31086304493` executed the authorized bounded offline replay at source commit `5a25d091919dc2d90116ca9cc4e92335031be9f2`. Artifact `8961530550` retained both required shapes and verified with `proofReady: true` and no blocking reasons.
+
+The maximum measured RSS was `77430784` bytes, leaving a minimum `157450240` bytes of headroom below the unchanged `234881024`-byte halt. The claim cap remained `12` ledgers and no override or memory-halt recurrence occurred.
+
+G4 is therefore `pass`. This closure does not satisfy G3 or G5-G10, select revision 4, authorize R5 recovery mutation, or change the public reader, Mainnet, stabilization, or soak state.
