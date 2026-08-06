@@ -1,0 +1,147 @@
+{
+  "schemaVersion": 1,
+  "evaluatedAt": "2026-08-06T03:36:35.000Z",
+  "profile": {
+    "schemaVersion": 1,
+    "profileId": "supabase_free_postgres_pgcron_edge",
+    "revision": 4,
+    "label": "Supabase Free Postgres plus pg_cron and Edge Functions with directional billable-egress and independent memory/transport accounting",
+    "components": {
+      "storage": "Supabase Free Postgres committed seven-class state and history",
+      "scheduler": "Supabase pg_cron one-minute internal successor scheduling",
+      "execution": "Supabase Edge Functions plus security-definer transactional RPCs with directional billable-egress and independent memory/transport accounting",
+      "publication": "separate immutable Git-backed publication",
+      "maintenance": "publication-gated bounded Supabase maintenance",
+      "completeStateTransfer": "canonical export, typed empty-target restore, and post-restore continuation"
+    }
+  },
+  "profileIdentityDigest": "39e8b620a20bb08fbe8306fe753d4d445c5191bcafddbf67721e0c17d5b6bcd5",
+  "gateEvidence": [
+    {
+      "schemaVersion": 1,
+      "profileId": "supabase_free_postgres_pgcron_edge",
+      "profileRevision": 4,
+      "profileIdentityDigest": "39e8b620a20bb08fbe8306fe753d4d445c5191bcafddbf67721e0c17d5b6bcd5",
+      "gateId": "G1",
+      "status": "pass",
+      "sourceType": "official_documentation",
+      "summary": "Directional billable-egress and independent memory/transport contracts are locked with unchanged fixed guards, a new identity, no selection, and no recovery authorization.",
+      "observedAt": "2026-08-06T03:36:35.000Z",
+      "artifacts": [
+        "docs/ops/r4f-revision4-directional-egress-contract-2026-08-06.md",
+        "src/shared/supabase-revision4-directional-egress-contract.ts",
+        "https://supabase.com/docs/guides/platform/manage-your-usage/egress",
+        "https://supabase.com/docs/guides/troubleshooting/all-about-supabase-egress-a_Sg_e"
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "profileId": "supabase_free_postgres_pgcron_edge",
+      "profileRevision": 4,
+      "profileIdentityDigest": "39e8b620a20bb08fbe8306fe753d4d445c5191bcafddbf67721e0c17d5b6bcd5",
+      "gateId": "G2",
+      "status": "unresolved",
+      "sourceType": "local_conformance",
+      "summary": "Directional byte instrumentation and retained canonical accounting JSON are not yet implemented.",
+      "observedAt": "2026-08-06T03:36:35.000Z",
+      "artifacts": ["https://github.com/badjoke-lab/xrpl-lending-monitor/issues/1261"]
+    },
+    {
+      "schemaVersion": 1,
+      "profileId": "supabase_free_postgres_pgcron_edge",
+      "profileRevision": 4,
+      "profileIdentityDigest": "39e8b620a20bb08fbe8306fe753d4d445c5191bcafddbf67721e0c17d5b6bcd5",
+      "gateId": "G3",
+      "status": "unresolved",
+      "sourceType": "account_verification",
+      "summary": "Provider reconciliation and an unexplained-delta reserve are not yet proved.",
+      "observedAt": "2026-08-06T03:36:35.000Z",
+      "artifacts": ["https://github.com/badjoke-lab/xrpl-lending-monitor/issues/1261"]
+    },
+    {
+      "schemaVersion": 1,
+      "profileId": "supabase_free_postgres_pgcron_edge",
+      "profileRevision": 4,
+      "profileIdentityDigest": "39e8b620a20bb08fbe8306fe753d4d445c5191bcafddbf67721e0c17d5b6bcd5",
+      "gateId": "G4",
+      "status": "unresolved",
+      "sourceType": "local_conformance",
+      "summary": "The new accounting identity has not replayed memory-halt and heavy retained samples.",
+      "observedAt": "2026-08-06T03:36:35.000Z",
+      "artifacts": ["https://github.com/badjoke-lab/xrpl-lending-monitor/issues/1261"]
+    },
+    {
+      "schemaVersion": 1,
+      "profileId": "supabase_free_postgres_pgcron_edge",
+      "profileRevision": 4,
+      "profileIdentityDigest": "39e8b620a20bb08fbe8306fe753d4d445c5191bcafddbf67721e0c17d5b6bcd5",
+      "gateId": "G5",
+      "status": "unresolved",
+      "sourceType": "local_conformance",
+      "summary": "Steady convergence at or above 21 ledgers per minute is not yet proved.",
+      "observedAt": "2026-08-06T03:36:35.000Z",
+      "artifacts": ["docs/ops/r5-egress-candidate-evaluation-2026-08-06.md"]
+    },
+    {
+      "schemaVersion": 1,
+      "profileId": "supabase_free_postgres_pgcron_edge",
+      "profileRevision": 4,
+      "profileIdentityDigest": "39e8b620a20bb08fbe8306fe753d4d445c5191bcafddbf67721e0c17d5b6bcd5",
+      "gateId": "G6",
+      "status": "unresolved",
+      "sourceType": "read_only_shadow",
+      "summary": "Moving-head catch-up convergence is not yet proved.",
+      "observedAt": "2026-08-06T03:36:35.000Z",
+      "artifacts": ["https://github.com/badjoke-lab/xrpl-lending-monitor/issues/1261"]
+    },
+    {
+      "schemaVersion": 1,
+      "profileId": "supabase_free_postgres_pgcron_edge",
+      "profileRevision": 4,
+      "profileIdentityDigest": "39e8b620a20bb08fbe8306fe753d4d445c5191bcafddbf67721e0c17d5b6bcd5",
+      "gateId": "G7",
+      "status": "unresolved",
+      "sourceType": "local_conformance",
+      "summary": "Failure, retry, repair, and adoption directional accounting are not yet proved.",
+      "observedAt": "2026-08-06T03:36:35.000Z",
+      "artifacts": ["https://github.com/badjoke-lab/xrpl-lending-monitor/issues/1261"]
+    },
+    {
+      "schemaVersion": 1,
+      "profileId": "supabase_free_postgres_pgcron_edge",
+      "profileRevision": 4,
+      "profileIdentityDigest": "39e8b620a20bb08fbe8306fe753d4d445c5191bcafddbf67721e0c17d5b6bcd5",
+      "gateId": "G8",
+      "status": "unresolved",
+      "sourceType": "operator_constraint",
+      "summary": "Export, restore, continuation, rollback, and operator independence are not yet requalified for revision 4.",
+      "observedAt": "2026-08-06T03:36:35.000Z",
+      "artifacts": ["https://github.com/badjoke-lab/xrpl-lending-monitor/issues/1261"]
+    },
+    {
+      "schemaVersion": 1,
+      "profileId": "supabase_free_postgres_pgcron_edge",
+      "profileRevision": 4,
+      "profileIdentityDigest": "39e8b620a20bb08fbe8306fe753d4d445c5191bcafddbf67721e0c17d5b6bcd5",
+      "gateId": "G9",
+      "status": "unresolved",
+      "sourceType": "read_only_shadow",
+      "summary": "No bounded proof unit is authorized before G1 through G8 pass.",
+      "observedAt": "2026-08-06T03:36:35.000Z",
+      "artifacts": ["https://github.com/badjoke-lab/xrpl-lending-monitor/issues/1261"]
+    },
+    {
+      "schemaVersion": 1,
+      "profileId": "supabase_free_postgres_pgcron_edge",
+      "profileRevision": 4,
+      "profileIdentityDigest": "39e8b620a20bb08fbe8306fe753d4d445c5191bcafddbf67721e0c17d5b6bcd5",
+      "gateId": "G10",
+      "status": "unresolved",
+      "sourceType": "operator_constraint",
+      "summary": "Revision 4 remains not selected until every prior hard gate passes.",
+      "observedAt": "2026-08-06T03:36:35.000Z",
+      "artifacts": ["https://github.com/badjoke-lab/xrpl-lending-monitor/issues/1261"]
+    }
+  ],
+  "scorecard": null
+}
