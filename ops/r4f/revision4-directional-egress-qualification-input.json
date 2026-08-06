@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "evaluatedAt": "2026-08-06T08:00:00.000Z",
+  "evaluatedAt": "2026-08-06T15:26:32.000Z",
   "profile": {
     "schemaVersion": 1,
     "profileId": "supabase_free_postgres_pgcron_edge",
@@ -83,16 +83,18 @@
       "profileRevision": 4,
       "profileIdentityDigest": "39e8b620a20bb08fbe8306fe753d4d445c5191bcafddbf67721e0c17d5b6bcd5",
       "gateId": "G4",
-      "status": "unresolved",
-      "sourceType": "local_conformance",
-      "summary": "The fixed 224 MiB memory halt, 12-ledger claim cap, exact halt-shape replay, heavier retained replay, strict headroom, and cap-override rejection are encoded in a fail-closed offline verifier. No authorized real revision-4 replay has been performed, so G4 remains unresolved.",
-      "observedAt": "2026-08-06T08:00:00.000Z",
+      "status": "pass",
+      "sourceType": "read_only_shadow",
+      "summary": "One authorized bounded offline replay passed the unchanged 224 MiB RSS halt and 12-ledger cap for the exact 12-ledger shape and a heavier 24-retained/12-processed shape. The fail-closed verifier returned proofReady true with no blockers; revision 4 remains unselected and authorizes no recovery mutation.",
+      "observedAt": "2026-08-06T08:47:13.000Z",
       "artifacts": [
         "docs/ops/r4f-g4-memory-evidence-contract-2026-08-06.md",
-        "src/shared/supabase-revision4-memory-evidence.ts",
-        "scripts/verify-r4f-revision4-memory-evidence.ts",
-        "ops/r4f/revision4-memory-evidence-synthetic.json",
-        "https://github.com/badjoke-lab/xrpl-lending-monitor/issues/1261"
+        "docs/ops/r4f-g4-memory-gate-closure-2026-08-07.md",
+        "ops/r4f/revision4-memory-gate-closure.json",
+        "https://github.com/badjoke-lab/xrpl-lending-monitor/pull/1270",
+        "https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/31086304493",
+        "https://api.github.com/repos/badjoke-lab/xrpl-lending-monitor/actions/artifacts/8961530550",
+        "https://github.com/badjoke-lab/xrpl-lending-monitor/issues/1261#issuecomment-5202436569"
       ]
     },
     {
@@ -105,7 +107,9 @@
       "sourceType": "local_conformance",
       "summary": "Steady convergence at or above 21 ledgers per minute is not yet proved.",
       "observedAt": "2026-08-06T03:36:35.000Z",
-      "artifacts": ["docs/ops/r5-egress-candidate-evaluation-2026-08-06.md"]
+      "artifacts": [
+        "docs/ops/r5-egress-candidate-evaluation-2026-08-06.md"
+      ]
     },
     {
       "schemaVersion": 1,
@@ -117,7 +121,9 @@
       "sourceType": "read_only_shadow",
       "summary": "Moving-head catch-up convergence is not yet proved.",
       "observedAt": "2026-08-06T03:36:35.000Z",
-      "artifacts": ["https://github.com/badjoke-lab/xrpl-lending-monitor/issues/1261"]
+      "artifacts": [
+        "https://github.com/badjoke-lab/xrpl-lending-monitor/issues/1261"
+      ]
     },
     {
       "schemaVersion": 1,
@@ -129,7 +135,9 @@
       "sourceType": "local_conformance",
       "summary": "Failure, retry, repair, and adoption directional accounting are not yet proved.",
       "observedAt": "2026-08-06T03:36:35.000Z",
-      "artifacts": ["https://github.com/badjoke-lab/xrpl-lending-monitor/issues/1261"]
+      "artifacts": [
+        "https://github.com/badjoke-lab/xrpl-lending-monitor/issues/1261"
+      ]
     },
     {
       "schemaVersion": 1,
@@ -141,7 +149,9 @@
       "sourceType": "operator_constraint",
       "summary": "Export, restore, continuation, rollback, and operator independence are not yet requalified for revision 4.",
       "observedAt": "2026-08-06T03:36:35.000Z",
-      "artifacts": ["https://github.com/badjoke-lab/xrpl-lending-monitor/issues/1261"]
+      "artifacts": [
+        "https://github.com/badjoke-lab/xrpl-lending-monitor/issues/1261"
+      ]
     },
     {
       "schemaVersion": 1,
@@ -153,7 +163,9 @@
       "sourceType": "read_only_shadow",
       "summary": "No bounded proof unit is authorized before G1 through G8 pass.",
       "observedAt": "2026-08-06T03:36:35.000Z",
-      "artifacts": ["https://github.com/badjoke-lab/xrpl-lending-monitor/issues/1261"]
+      "artifacts": [
+        "https://github.com/badjoke-lab/xrpl-lending-monitor/issues/1261"
+      ]
     },
     {
       "schemaVersion": 1,
@@ -165,7 +177,9 @@
       "sourceType": "operator_constraint",
       "summary": "Revision 4 remains not selected until every prior hard gate passes.",
       "observedAt": "2026-08-06T03:36:35.000Z",
-      "artifacts": ["https://github.com/badjoke-lab/xrpl-lending-monitor/issues/1261"]
+      "artifacts": [
+        "https://github.com/badjoke-lab/xrpl-lending-monitor/issues/1261"
+      ]
     }
   ],
   "scorecard": null
