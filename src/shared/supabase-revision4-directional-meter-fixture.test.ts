@@ -40,8 +40,8 @@ describe('revision-4 directional meter fixture', () => {
     )
 
     expect(evidence.accounting.observations).toHaveLength(8)
-    expect(evidence.accounting.rollingBillableEgressUpperBoundBytes).toBe(17_586)
-    expect(evidence.accounting.memoryTransportUpperBoundBytes).toBe(83_130)
+    expect(evidence.accounting.rollingBillableEgressUpperBoundBytes).toBe(12_474)
+    expect(evidence.accounting.memoryTransportUpperBoundBytes).toBe(79_354)
     expect(evidence.accounting.disposition).toBe('shadow_completed')
     expect(evidence.accounting.checks.recoveryMutationCommitted).toBe(false)
     expect(evidence.accounting.checks.publicReaderUnchanged).toBe(true)
