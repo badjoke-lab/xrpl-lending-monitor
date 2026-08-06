@@ -25,7 +25,7 @@ function readQualificationInput(): DeploymentProfileQualificationInputV1 {
 }
 
 describe('Supabase revision-4 qualification input', () => {
-  it('records only G1 as passed and keeps the candidate unselected', async () => {
+  it('records G1 and G2 as passed while keeping the candidate unselected', async () => {
     const input = readQualificationInput()
     const decision = await evaluateDeploymentProfileQualification(input)
 
@@ -38,13 +38,12 @@ describe('Supabase revision-4 qualification input', () => {
     expect(decision.selection).toBe('not_selected')
     expect(decision.eligibleForScoring).toBe(false)
     expect(decision.gateSummary).toEqual({
-      passed: 1,
+      passed: 2,
       failed: 0,
-      unresolved: 9,
+      unresolved: 8,
     })
     expect(decision.failedGates).toEqual([])
     expect(decision.unresolvedGates).toEqual([
-      'G2',
       'G3',
       'G4',
       'G5',
@@ -74,12 +73,32 @@ describe('Supabase revision-4 qualification input', () => {
     )
   })
 
+  it('binds G2 to local meter, persistence, shadow, and PostgreSQL evidence', () => {
+    const input = readQualificationInput()
+    const g2 = input.gateEvidence.find((evidence) => evidence.gateId === 'G2')
+
+    expect(g2).toMatchObject({
+      status: 'pass',
+      sourceType: 'local_conformance',
+      profileRevision: 4,
+      profileIdentityDigest: SUPABASE_REVISION4_PROFILE_IDENTITY_DIGEST,
+    })
+    expect(g2?.artifacts).toContain(
+      'docs/ops/r4f-g2-postgres-readback-2026-08-06.md',
+    )
+    expect(g2?.artifacts).toContain(
+      'https://github.com/badjoke-lab/xrpl-lending-monitor/pull/1266',
+    )
+  })
+
   it('does not allow scoring or proof execution while any gate is unresolved', () => {
     const input = readQualificationInput()
-    expect(input.gateEvidence.filter((evidence) => evidence.status === 'pass')).toHaveLength(1)
+    expect(
+      input.gateEvidence.filter((evidence) => evidence.status === 'pass'),
+    ).toHaveLength(2)
     expect(
       input.gateEvidence.filter((evidence) => evidence.status === 'unresolved'),
-    ).toHaveLength(9)
+    ).toHaveLength(8)
     expect(input.scorecard).toBeNull()
   })
 })

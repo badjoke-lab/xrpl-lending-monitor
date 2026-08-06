@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "evaluatedAt": "2026-08-06T03:36:35.000Z",
+  "evaluatedAt": "2026-08-06T07:00:00.000Z",
   "profile": {
     "schemaVersion": 1,
     "profileId": "supabase_free_postgres_pgcron_edge",
@@ -40,11 +40,20 @@
       "profileRevision": 4,
       "profileIdentityDigest": "39e8b620a20bb08fbe8306fe753d4d445c5191bcafddbf67721e0c17d5b6bcd5",
       "gateId": "G2",
-      "status": "unresolved",
+      "status": "pass",
       "sourceType": "local_conformance",
-      "summary": "Directional byte instrumentation and retained canonical accounting JSON are not yet implemented.",
-      "observedAt": "2026-08-06T03:36:35.000Z",
-      "artifacts": ["https://github.com/badjoke-lab/xrpl-lending-monitor/issues/1261"]
+      "summary": "All eight directional boundaries, canonical accounting JSON and digest, candidate-only persistence, deterministic source-shaped offline shadow, and writer/readback behavior are proved locally, including execution against isolated PostgreSQL 15.",
+      "observedAt": "2026-08-06T06:49:00.000Z",
+      "artifacts": [
+        "docs/ops/r4f-g2-directional-meter-2026-08-06.md",
+        "docs/ops/r4f-g2-directional-persistence-2026-08-06.md",
+        "docs/ops/r4f-g2-offline-shadow-2026-08-06.md",
+        "docs/ops/r4f-g2-postgres-readback-2026-08-06.md",
+        "https://github.com/badjoke-lab/xrpl-lending-monitor/pull/1263",
+        "https://github.com/badjoke-lab/xrpl-lending-monitor/pull/1264",
+        "https://github.com/badjoke-lab/xrpl-lending-monitor/pull/1265",
+        "https://github.com/badjoke-lab/xrpl-lending-monitor/pull/1266"
+      ]
     },
     {
       "schemaVersion": 1,
@@ -54,9 +63,14 @@
       "gateId": "G3",
       "status": "unresolved",
       "sourceType": "account_verification",
-      "summary": "Provider reconciliation and an unexplained-delta reserve are not yet proved.",
-      "observedAt": "2026-08-06T03:36:35.000Z",
-      "artifacts": ["https://github.com/badjoke-lab/xrpl-lending-monitor/issues/1261"]
+      "summary": "The provider reconciliation interval and unexplained-delta reserve arithmetic are defined, but no separately authorized bounded provider capture has been performed. Synthetic planning input cannot satisfy G3.",
+      "observedAt": "2026-08-06T07:00:00.000Z",
+      "artifacts": [
+        "docs/ops/r4f-g3-provider-reconciliation-plan-2026-08-06.md",
+        "src/shared/supabase-revision4-provider-reconciliation.ts",
+        "ops/r4f/revision4-provider-reconciliation-fixture.json",
+        "https://github.com/badjoke-lab/xrpl-lending-monitor/issues/1261"
+      ]
     },
     {
       "schemaVersion": 1,

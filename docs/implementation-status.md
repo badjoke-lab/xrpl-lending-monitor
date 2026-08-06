@@ -8,7 +8,7 @@ XRPL Lending Monitor is **not formally released**.
 
 The selected Supabase revision-3 R5 recovery remains safely halted on the application-owned rolling 31-day egress guard. R5C1 status reconciliation, R5C2 retained byte attribution, R5C3 candidate evaluation, and the R5C4 architecture decision are complete.
 
-Revision-3 recovery continuation is rejected as a convergence path. The immediate engineering phase is **R4F revision-4 qualification**, controlled by Issue `#1261`. G1 locks a directional billable-egress contract with independent memory/transport accounting. Revision 4 is a candidate only: it is not selected and authorizes no R5 mutation.
+Revision-3 recovery continuation is rejected as a convergence path. The immediate engineering phase is **R4F revision-4 qualification**, controlled by Issue `#1261`. G1 locked the directional billable-egress contract, and G2 completed directional metering, canonical evidence retention, deterministic offline shadow generation, and isolated PostgreSQL writer/readback verification. G3 provider reconciliation is active. Revision 4 remains a candidate only: it is not selected and authorizes no R5 mutation.
 
 Issue `#1175` remains the controlling halted R5 recovery record.
 
@@ -29,7 +29,7 @@ R5C1 status reconciliation            complete
 R5C2 retained byte attribution        complete
 R5C3 candidate evaluation             complete
 R5C4 architecture decision            revision 3 continuation rejected
-R4F revision-4 qualification          ACTIVE — G1 directional contract
+R4F revision-4 qualification          ACTIVE — G3 provider reconciliation
 R5 proof unit / continuation          not authorized
 R5 stabilization                      not authorized
 M6 hardening / Explorer v1            gated by R5 and stabilization
@@ -159,12 +159,25 @@ G1 separates:
 
 Inbound XRPL responses are excluded from the rolling billable-egress sum but remain fully included in memory and transport safety. The 4 GiB rolling halt, 224 MiB memory halt, invocation limits, and 12-ledger memory-qualified cap remain unchanged.
 
-The G1 contract is [`ops/r4f-revision4-directional-egress-contract-2026-08-06.md`](ops/r4f-revision4-directional-egress-contract-2026-08-06.md).
+The G1 contract is [`docs/ops/r4f-revision4-directional-egress-contract-2026-08-06.md`](docs/ops/r4f-revision4-directional-egress-contract-2026-08-06.md).
+
+## R4F G2 completion
+
+G2 completed the local instrumentation and retention boundary:
+
+- all eight G1 byte directions have typed observations and source-backed framing reserves;
+- canonical accounting JSON and SHA-256 digest are deterministic;
+- the persistence request resolves its self-referential request-byte field to a stable fixed point;
+- candidate evidence is isolated under `xrpl_r4f_v1` with service-role-only writer and reader RPCs;
+- the production validated-ledger parser and portable normalizer generate a deterministic two-ledger offline shadow;
+- the candidate migration, writer, exact idempotent replay, reader, conflicting-identity rejection, role isolation, and export passed against disposable PostgreSQL 15;
+- no Supabase provider connection, production migration, R5 mutation, reader change, Mainnet, stabilization, or soak occurred.
+
+The passing PostgreSQL CI run is `31079355564`, merged through PR `#1266` as commit `0f032f3599ca11df6c8269a1a25eb9aa9f52ae37`.
 
 ## R4F remaining gates
 
-- G2: retain exact directional body bytes, framing reserves, accounting JSON, digest, and disposition;
-- G3: isolated provider reconciliation and unexplained-delta reserve;
+- G3: complete one separately authorized bounded provider capture, reconcile provider display intervals, and retain a conservative unexplained-delta reserve;
 - G4: memory requalification with inbound XRPL bytes still fully counted;
 - G5: prove steady convergence at or above 21 ledgers/minute;
 - G6: prove catch-up convergence against a moving Devnet head;
@@ -213,9 +226,14 @@ After R5 exit:
 - monthly halt breakdown: `31034105841`;
 - retained attribution: `31068546022`;
 - attribution artifact: `8954754584`;
-- replan: [`ops/r5-egress-convergence-replan-2026-08-06.md`](ops/r5-egress-convergence-replan-2026-08-06.md);
-- candidate decision: [`ops/r5-egress-candidate-evaluation-2026-08-06.md`](ops/r5-egress-candidate-evaluation-2026-08-06.md);
-- revision-4 G1 contract: [`ops/r4f-revision4-directional-egress-contract-2026-08-06.md`](ops/r4f-revision4-directional-egress-contract-2026-08-06.md);
+- replan: [`docs/ops/r5-egress-convergence-replan-2026-08-06.md`](docs/ops/r5-egress-convergence-replan-2026-08-06.md);
+- candidate decision: [`docs/ops/r5-egress-candidate-evaluation-2026-08-06.md`](docs/ops/r5-egress-candidate-evaluation-2026-08-06.md);
+- revision-4 G1 contract: [`docs/ops/r4f-revision4-directional-egress-contract-2026-08-06.md`](docs/ops/r4f-revision4-directional-egress-contract-2026-08-06.md);
+- revision-4 G2 meter: [`docs/ops/r4f-g2-directional-meter-2026-08-06.md`](docs/ops/r4f-g2-directional-meter-2026-08-06.md);
+- revision-4 G2 persistence: [`docs/ops/r4f-g2-directional-persistence-2026-08-06.md`](docs/ops/r4f-g2-directional-persistence-2026-08-06.md);
+- revision-4 G2 offline shadow: [`docs/ops/r4f-g2-offline-shadow-2026-08-06.md`](docs/ops/r4f-g2-offline-shadow-2026-08-06.md);
+- revision-4 G2 PostgreSQL readback: [`docs/ops/r4f-g2-postgres-readback-2026-08-06.md`](docs/ops/r4f-g2-postgres-readback-2026-08-06.md);
+- revision-4 G3 plan: [`docs/ops/r4f-g3-provider-reconciliation-plan-2026-08-06.md`](docs/ops/r4f-g3-provider-reconciliation-plan-2026-08-06.md);
 - runtime invariants: [`history-runtime-contract.md`](history-runtime-contract.md);
 - resource boundary: [`resource-envelope.md`](resource-envelope.md).
 
