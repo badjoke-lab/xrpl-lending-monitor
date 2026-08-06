@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "evaluatedAt": "2026-08-06T07:00:00.000Z",
+  "evaluatedAt": "2026-08-06T08:00:00.000Z",
   "profile": {
     "schemaVersion": 1,
     "profileId": "supabase_free_postgres_pgcron_edge",
@@ -63,12 +63,17 @@
       "gateId": "G3",
       "status": "unresolved",
       "sourceType": "account_verification",
-      "summary": "The provider reconciliation interval and unexplained-delta reserve arithmetic are defined, but no separately authorized bounded provider capture has been performed. Synthetic planning input cannot satisfy G3.",
-      "observedAt": "2026-08-06T07:00:00.000Z",
+      "summary": "The provider reconciliation interval, unexplained-delta reserve arithmetic, bounded capture contract, and offline verifier are defined, but no separately authorized provider Dashboard capture has been performed. Synthetic input cannot satisfy G3.",
+      "observedAt": "2026-08-06T07:45:00.000Z",
       "artifacts": [
         "docs/ops/r4f-g3-provider-reconciliation-plan-2026-08-06.md",
         "src/shared/supabase-revision4-provider-reconciliation.ts",
+        "src/shared/supabase-revision4-provider-capture.ts",
+        "scripts/verify-r4f-revision4-provider-capture.ts",
         "ops/r4f/revision4-provider-reconciliation-fixture.json",
+        "ops/r4f/revision4-provider-capture-synthetic.json",
+        "https://github.com/badjoke-lab/xrpl-lending-monitor/pull/1267",
+        "https://github.com/badjoke-lab/xrpl-lending-monitor/pull/1268",
         "https://github.com/badjoke-lab/xrpl-lending-monitor/issues/1261"
       ]
     },
@@ -80,9 +85,15 @@
       "gateId": "G4",
       "status": "unresolved",
       "sourceType": "local_conformance",
-      "summary": "The new accounting identity has not replayed memory-halt and heavy retained samples.",
-      "observedAt": "2026-08-06T03:36:35.000Z",
-      "artifacts": ["https://github.com/badjoke-lab/xrpl-lending-monitor/issues/1261"]
+      "summary": "The fixed 224 MiB memory halt, 12-ledger claim cap, exact halt-shape replay, heavier retained replay, strict headroom, and cap-override rejection are encoded in a fail-closed offline verifier. No authorized real revision-4 replay has been performed, so G4 remains unresolved.",
+      "observedAt": "2026-08-06T08:00:00.000Z",
+      "artifacts": [
+        "docs/ops/r4f-g4-memory-evidence-contract-2026-08-06.md",
+        "src/shared/supabase-revision4-memory-evidence.ts",
+        "scripts/verify-r4f-revision4-memory-evidence.ts",
+        "ops/r4f/revision4-memory-evidence-synthetic.json",
+        "https://github.com/badjoke-lab/xrpl-lending-monitor/issues/1261"
+      ]
     },
     {
       "schemaVersion": 1,
