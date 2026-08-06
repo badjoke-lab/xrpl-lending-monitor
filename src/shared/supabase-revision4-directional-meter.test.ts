@@ -200,13 +200,13 @@ describe('Supabase revision-4 directional meter', () => {
     await expect(
       buildSupabaseRevision4DirectionalAccountingEvidence({
         ...input,
-        recoveryMutationCommitted: true as false,
+        recoveryMutationCommitted: true as unknown as false,
       }),
     ).rejects.toThrow('must not commit recovery mutation')
     await expect(
       buildSupabaseRevision4DirectionalAccountingEvidence({
         ...input,
-        mainnetDisabled: false as true,
+        mainnetDisabled: false as unknown as true,
       }),
     ).rejects.toThrow('G2 safety boundary changed')
   })
