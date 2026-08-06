@@ -9,30 +9,28 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   quality:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      MAINNET_ENABLED: 'false'
+      VITE_MAINNET_ENABLED: 'false'
+      VITE_NETWORK: devnet
+      VITE_XRPL_RPC_URL: wss://s.devnet.rippletest.net:51233
+
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Enforce minimal Actions workflow surface
-        run: bash scripts/check-actions-workflow-allowlist-r5-one-shot.sh
-
-      - name: Upload Actions workflow policy evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: actions-workflow-policy-evidence
-          path: actions-workflow-policy-evidence
-          if-no-files-found: warn
-          retention-days: 7
-
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 11.9.0
+          version: 10.26.2
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -46,41 +44,44 @@ jobs:
       - name: Lint
         run: pnpm lint
 
-      - name: Validate D1 headroom gate shell syntax
-        run: bash -n scripts/check-d1-headroom.sh
-
       - name: Validate live cutover shell syntax
         run: |
-          bash -n scripts/run-live-checkpoint-cutover.sh
-          bash -n scripts/verify-live-checkpoint-cutover.sh
-          bash -n scripts/check-canonical-production-base.sh
-          bash -n scripts/check-actions-workflow-allowlist-r5-one-shot.sh
+          bash -n scripts/publish-m1-immutable-base.sh
+          bash -n scripts/build-m1-production-runtime-vars.sh
+          bash -n scripts/test-r4f-revision4-directional-persistence-postgres.sh
 
-      - name: Validate canonical production base identity
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: bash scripts/check-canonical-production-base.sh
+      - name: Verify canonical production runtime identity fixture
+        run: |
+          node scripts/build-m1-production-runtime-vars.mjs \
+            --smoke-json src/test/fixtures/m1-gate-production-ready.json \
+            --out-json /tmp/m1-production-runtime-vars.json \
+            --out-env /tmp/m1-production-runtime-vars.env
+          diff -u src/test/fixtures/m1-production-runtime-vars.json /tmp/m1-production-runtime-vars.json
+          diff -u src/test/fixtures/m1-production-runtime-vars.env /tmp/m1-production-runtime-vars.env
 
       - name: Type-check
         run: pnpm typecheck
 
-      - name: Bundle production fast-lane runner
-        run: pnpm exec vite build --config vite.fast-lane-production.config.ts
+      - name: Verify fast-lane bundle and runtime config
+        run: pnpm verify:fast-lane
 
-      - name: Validate production fast-lane configuration
-        run: node .fast-lane-production-build/run-fast-lane-production.mjs --validate-config
-
-      - name: Unit tests
+      - name: Run unit tests
         run: pnpm test
+
+      - name: Verify revision-4 PostgreSQL persistence locally
+        run: bash scripts/test-r4f-revision4-directional-persistence-postgres.sh
 
       - name: Apply D1 migrations locally
         run: pnpm db:migrate:local
 
-      - name: Build application
+      - name: Build production bundle
         run: pnpm build
 
-      - name: Install Chromium
+      - name: Install Chromium for browser smoke tests
         run: pnpm exec playwright install --with-deps chromium
 
-      - name: Browser smoke test
-        run: pnpm test:e2e
+      - name: Run built-app browser smoke tests
+        run: pnpm test:browser
+
+      - name: Enforce workflow policy
+        run: bash scripts/check-actions-workflow-allowlist.sh
