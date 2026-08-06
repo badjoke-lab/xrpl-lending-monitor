@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "purpose": "r4f-g3a-provider-reconciliation-planning-fixture",
+  "evidenceClass": "synthetic_planning_only",
+  "profileId": "supabase_free_postgres_pgcron_edge",
+  "profileRevision": 4,
+  "profileIdentityDigest": "39e8b620a20bb08fbe8306fe753d4d445c5191bcafddbf67721e0c17d5b6bcd5",
+  "captureKind": "synthetic_planning",
+  "applicationRollingBillableEgressUpperBoundBytes": 12474,
+  "retainedUnexplainedDeltaReserveBytes": 2048,
+  "providerBefore": {
+    "lowerBoundBytes": 1000000,
+    "upperBoundBytes": 1000999
+  },
+  "providerAfter": {
+    "lowerBoundBytes": 1015000,
+    "upperBoundBytes": 1015999
+  },
+  "projectFilterApplied": true,
+  "sameProjectIdentity": true,
+  "sameBillingPeriod": true,
+  "concurrentProviderTrafficExcluded": true,
+  "experimentAuthorized": false,
+  "providerCapabilities": {
+    "managementApiEgressBytesAvailable": false,
+    "dashboardPatAuthorized": false,
+    "dashboardExactByteExportAvailable": false,
+    "logsResponseBytesAvailable": false
+  },
+  "safety": {
+    "providerMutationPerformed": false,
+    "productionMigrationPerformed": false,
+    "recoveryMutationCommitted": false,
+    "publicReaderUnchanged": true,
+    "mainnetDisabled": true,
+    "stabilizationAuthorized": false,
+    "soakAuthorized": false
+  },
+  "expected": {
+    "providerDeltaInterval": {
+      "lowerBoundBytes": 14001,
+      "upperBoundBytes": 15999
+    },
+    "providerDeltaIntervalWidthBytes": 1998,
+    "newlyRequiredUnexplainedDeltaReserveBytes": 3525,
+    "selectedUnexplainedDeltaReserveBytes": 3525,
+    "applicationCoveredUpperBoundBytes": 15999,
+    "exactAutomatedProviderReconciliationAvailable": false,
+    "intervalReconciliationReady": false,
+    "intervalUpperBoundCovered": true,
+    "g3Qualified": false,
+    "profileSelected": false,
+    "r5Authorized": false
+  }
+}
