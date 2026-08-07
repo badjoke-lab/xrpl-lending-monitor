@@ -30,8 +30,9 @@ describe('revision-4 G2D PostgreSQL integration contract', () => {
     for (const required of [
       'wait_for_final_postgres',
       'PostgreSQL init process complete; ready for start up.',
+      'container_logs="$(docker logs "$container_name" 2>&1 || true)"',
       'pg_isready -U postgres -d postgres',
-      "psql -Atqc 'select 1' -U postgres -d postgres",
+      "psql -U postgres -d postgres -Atqc 'select 1'",
       'PostgreSQL final server did not become query-ready',
     ]) {
       expect(harness).toContain(required)
