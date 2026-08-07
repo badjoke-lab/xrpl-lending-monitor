@@ -2,7 +2,7 @@
 
 Date: 2026-08-07
 Issue: #1261
-Status: fail-closed verifier prepared; G5 remains unresolved
+Status: fail-closed verifier prepared and hardened; G5 remains unresolved
 
 ## Purpose
 
@@ -39,11 +39,11 @@ Until G3 supplies real provider evidence and an intervention reserve is explicit
 
 Every minute must retain:
 
-- exact UTC minute identity;
+- exact UTC minute identity aligned to the UTC minute boundary;
 - contiguous start and end ledger indexes;
 - committed ledger count equal to the inclusive range;
 - at least 21 committed ledgers;
-- invocation count;
+- invocation count sufficient to cover all committed ledgers under the retained maximum claim size and the fixed 12-ledger cap;
 - revision-4 application billable-egress upper bound;
 - directional accounting digests;
 - maximum process RSS;
@@ -52,7 +52,7 @@ Every minute must retain:
 - parent-hash continuity result;
 - zero skipped and duplicate ledgers.
 
-The minute sequence must be exactly 60 seconds apart and ledger ranges must continue from the prior end plus one. Average throughput cannot hide a sub-threshold minute.
+The minute sequence must be exactly 60 seconds apart, every bucket must begin on an exact UTC minute boundary, and ledger ranges must continue from the prior end plus one. Average throughput cannot hide a sub-threshold minute. Invocation evidence cannot claim fewer executions than are physically required to cover the committed ledger count under the retained claim maximum.
 
 ## Projection
 
@@ -77,7 +77,9 @@ G5 is not proof-ready when any of the following is present:
 - G3 unresolved;
 - absent provider-capture or intervention-reserve evidence;
 - fewer than six consecutive minutes;
+- a retained bucket that is not aligned to an exact UTC minute boundary;
 - any minute below 21 committed ledgers;
+- an invocation count too small to cover the committed ledger count under the retained maximum claim size and fixed claim cap;
 - a gap, duplicate, skipped ledger, or uncommitted minute;
 - a changed 4 GiB, 400,000 invocation, 224 MiB, or 12-ledger guard;
 - projected egress or invocation use at or above the halt;
@@ -103,6 +105,8 @@ node .tmp/r4f-revision4-steady-convergence-verifier.mjs \
   --require-proof-ready
 ```
 
+The proof-required CLI routes through the hardened verifier, which applies the base G5 contract plus UTC-bucket alignment and invocation-coverage invariants.
+
 ## Current conclusion
 
-The verifier and synthetic contract fixture are prepared. No qualifying steady replay has been performed. G3 remains unresolved, G5 remains unresolved, revision 4 remains `not_selected`, and R5 recovery mutation remains unauthorized.
+The verifier, hardening layer, and synthetic contract fixture are prepared. No qualifying steady replay has been performed. G3 remains unresolved, G5 remains unresolved, revision 4 remains `not_selected`, and R5 recovery mutation remains unauthorized.
