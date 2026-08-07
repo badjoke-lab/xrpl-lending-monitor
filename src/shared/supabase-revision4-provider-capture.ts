@@ -28,6 +28,7 @@ export interface SupabaseRevision4ProviderDisplayReading {
   roundingRule: SupabaseRevision4ProviderDisplayRoundingRule
   capturedAt: string
   sourceArtifact: string
+  sourceArtifactDigest: string
 }
 
 export interface SupabaseRevision4ProviderCaptureInput {
@@ -42,8 +43,19 @@ export interface SupabaseRevision4ProviderCaptureInput {
     commentId: number | null
     actor: 'badjoke-lab'
     scope: 'r4f_g3_dashboard_capture'
+    sourceCommit: string
+    evidenceArtifact: string
+    evidenceDigest: string
   }
   projectIdentityDigest: string
+  providerSurface: {
+    source: 'organization_usage_page'
+    metric: 'total_egress'
+    projectFilterApplied: boolean
+    selectedProjectIdentityDigest: string
+    billingPeriodFilterApplied: boolean
+    cachedEgressIncluded: true
+  }
   billingPeriodStart: string
   billingPeriodEnd: string
   before: SupabaseRevision4ProviderDisplayReading
@@ -58,6 +70,7 @@ export interface SupabaseRevision4ProviderCaptureInput {
   concurrentTraffic: {
     excluded: boolean
     evidenceArtifacts: string[]
+    evidenceArtifactDigests: string[]
   }
   providerCapabilities: {
     managementApiEgressBytesAvailable: boolean
@@ -84,6 +97,8 @@ export interface SupabaseRevision4ProviderCaptureEvidence {
   captureState: SupabaseRevision4ProviderCaptureInput['captureState']
   captureId: string
   projectIdentityDigest: string
+  providerSurface: SupabaseRevision4ProviderCaptureInput['providerSurface']
+  providerSurfaceVerified: boolean
   billingPeriodStart: string
   billingPeriodEnd: string
   before: SupabaseRevision4ProviderDisplayReading & {
@@ -121,6 +136,10 @@ const SHA256_PATTERN = /^[a-f0-9]{64}$/
 const COMMIT_PATTERN = /^[a-f0-9]{40}$/
 const CANONICAL_UTC_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/
 const MAX_SAFE_BIGINT = BigInt(Number.MAX_SAFE_INTEGER)
+const SECRET_KEY_PATTERN =
+  /(?:password|private[_-]?key|service[_-]?role|access[_-]?token|refresh[_-]?token|api[_-]?key|session[_-]?cookie|authorization[_-]?bearer)/iu
+const SECRET_VALUE_PATTERN =
+  /(?:sbp_[A-Za-z0-9_-]{12,}|sb_secret_[A-Za-z0-9_-]{12,}|postgres(?:ql)?:\/\/[^\s]+|Bearer\s+[A-Za-z0-9._-]{12,})/u
 
 function safeInteger(value: number, name: string, minimum = 0): number {
   if (!Number.isSafeInteger(value) || value < minimum) {
@@ -147,6 +166,32 @@ function nonEmptyArtifacts(values: readonly string[], name: string): void {
   ) {
     throw new Error(`${name} must contain at least one non-empty artifact`)
   }
+}
+
+function validDigest(value: string): boolean {
+  return SHA256_PATTERN.test(value) && value !== '0'.repeat(64)
+}
+
+function artifactDigests(
+  values: readonly string[],
+  expectedCount: number,
+  name: string,
+): void {
+  if (values.length !== expectedCount || values.some((value) => !validDigest(value))) {
+    throw new Error(`${name} must contain one non-placeholder SHA-256 per artifact`)
+  }
+}
+
+function containsSecret(value: unknown, key = ''): boolean {
+  if (SECRET_KEY_PATTERN.test(key)) return true
+  if (typeof value === 'string') return SECRET_VALUE_PATTERN.test(value)
+  if (Array.isArray(value)) return value.some((item) => containsSecret(item))
+  if (value !== null && typeof value === 'object') {
+    return Object.entries(value).some(([entryKey, entryValue]) =>
+      containsSecret(entryValue, entryKey),
+    )
+  }
+  return false
 }
 
 function ceilDiv(numerator: bigint, denominator: bigint): bigint {
@@ -237,16 +282,16 @@ export function buildSupabaseRevision4ProviderCaptureEvidence(
   input: SupabaseRevision4ProviderCaptureInput,
 ): SupabaseRevision4ProviderCaptureEvidence {
   assertIdentity(input)
+  if (containsSecret(input)) {
+    throw new Error('provider capture input contains secret material')
+  }
   if (!CAPTURE_ID_PATTERN.test(input.captureId)) {
     throw new Error('captureId is invalid')
   }
-  if (
-    !SHA256_PATTERN.test(input.projectIdentityDigest) ||
-    input.projectIdentityDigest === '0'.repeat(64)
-  ) {
+  if (!validDigest(input.projectIdentityDigest)) {
     throw new Error('projectIdentityDigest is invalid')
   }
-  if (!SHA256_PATTERN.test(input.application.accountingDigest)) {
+  if (!validDigest(input.application.accountingDigest)) {
     throw new Error('application accounting digest is invalid')
   }
   if (!COMMIT_PATTERN.test(input.application.sourceCommit)) {
@@ -279,9 +324,24 @@ export function buildSupabaseRevision4ProviderCaptureEvidence(
   }
   nonEmptyArtifacts([input.before.sourceArtifact], 'before source artifact')
   nonEmptyArtifacts([input.after.sourceArtifact], 'after source artifact')
+  if (!validDigest(input.before.sourceArtifactDigest)) {
+    throw new Error('before source artifact digest is invalid')
+  }
+  if (!validDigest(input.after.sourceArtifactDigest)) {
+    throw new Error('after source artifact digest is invalid')
+  }
   nonEmptyArtifacts(
     input.concurrentTraffic.evidenceArtifacts,
     'concurrent traffic evidence artifacts',
+  )
+  artifactDigests(
+    input.concurrentTraffic.evidenceArtifactDigests,
+    input.concurrentTraffic.evidenceArtifacts.length,
+    'concurrent traffic evidence artifact digests',
+  )
+  nonEmptyArtifacts(
+    [input.authorization.evidenceArtifact],
+    'authorization evidence artifact',
   )
 
   const beforeInterval = providerDisplayReadingToByteInterval(input.before)
@@ -292,7 +352,19 @@ export function buildSupabaseRevision4ProviderCaptureEvidence(
     Number.isSafeInteger(input.authorization.commentId) &&
     Number(input.authorization.commentId) > 0 &&
     input.authorization.actor === 'badjoke-lab' &&
-    input.authorization.scope === 'r4f_g3_dashboard_capture'
+    input.authorization.scope === 'r4f_g3_dashboard_capture' &&
+    input.authorization.sourceCommit === input.application.sourceCommit &&
+    COMMIT_PATTERN.test(input.authorization.sourceCommit) &&
+    validDigest(input.authorization.evidenceDigest)
+
+  const providerSurfaceVerified =
+    input.providerSurface.source === 'organization_usage_page' &&
+    input.providerSurface.metric === 'total_egress' &&
+    input.providerSurface.projectFilterApplied === true &&
+    input.providerSurface.selectedProjectIdentityDigest ===
+      input.projectIdentityDigest &&
+    input.providerSurface.billingPeriodFilterApplied === true &&
+    input.providerSurface.cachedEgressIncluded === true
 
   const reconciliation = reconcileSupabaseRevision4ProviderInterval({
     schemaVersion: 1,
@@ -309,11 +381,13 @@ export function buildSupabaseRevision4ProviderCaptureEvidence(
       input.application.retainedUnexplainedDeltaReserveBytes,
     providerBefore: beforeInterval,
     providerAfter: afterInterval,
-    projectFilterApplied: true,
-    sameProjectIdentity: true,
-    sameBillingPeriod: true,
+    projectFilterApplied: input.providerSurface.projectFilterApplied,
+    sameProjectIdentity:
+      input.providerSurface.selectedProjectIdentityDigest ===
+      input.projectIdentityDigest,
+    sameBillingPeriod: input.providerSurface.billingPeriodFilterApplied,
     concurrentProviderTrafficExcluded: input.concurrentTraffic.excluded,
-    experimentAuthorized: authorizationVerified,
+    experimentAuthorized: authorizationVerified && providerSurfaceVerified,
     providerCapabilities: input.providerCapabilities,
     safety: input.safety,
   })
@@ -326,6 +400,8 @@ export function buildSupabaseRevision4ProviderCaptureEvidence(
     captureState: input.captureState,
     captureId: input.captureId,
     projectIdentityDigest: input.projectIdentityDigest,
+    providerSurface: input.providerSurface,
+    providerSurfaceVerified,
     billingPeriodStart: input.billingPeriodStart,
     billingPeriodEnd: input.billingPeriodEnd,
     before: { ...input.before, ...beforeInterval },
@@ -337,7 +413,8 @@ export function buildSupabaseRevision4ProviderCaptureEvidence(
     sameProjectIdentity: true,
     sameBillingPeriod: true,
     reconciliation,
-    g3Qualified: authorizationVerified && reconciliation.g3Qualified,
+    g3Qualified:
+      authorizationVerified && providerSurfaceVerified && reconciliation.g3Qualified,
     profileSelected: false,
     r5Authorized: false,
   }
