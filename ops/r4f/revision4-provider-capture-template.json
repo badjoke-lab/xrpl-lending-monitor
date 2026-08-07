@@ -9,12 +9,30 @@
   "requiredAuthorization": {
     "separateIssueComment": true,
     "owner": "badjoke-lab",
-    "exactScopeRequired": true
+    "exactScopeRequired": true,
+    "exactSourceCommitRequired": true,
+    "sanitizedAuthorizationArtifactDigestRequired": true
+  },
+  "requiredProviderSurface": {
+    "source": "organization_usage_page",
+    "metric": "total_egress",
+    "projectFilterApplied": true,
+    "billingPeriodFilterApplied": true,
+    "cachedEgressIncluded": true
   },
   "requiredCaptureFields": [
     "captureId",
     "authorization.commentId",
+    "authorization.sourceCommit",
+    "authorization.evidenceArtifact",
+    "authorization.evidenceDigest",
     "projectIdentityDigest",
+    "providerSurface.source",
+    "providerSurface.metric",
+    "providerSurface.projectFilterApplied",
+    "providerSurface.selectedProjectIdentityDigest",
+    "providerSurface.billingPeriodFilterApplied",
+    "providerSurface.cachedEgressIncluded",
     "billingPeriodStart",
     "billingPeriodEnd",
     "before.displayedValue",
@@ -23,12 +41,14 @@
     "before.roundingRule",
     "before.capturedAt",
     "before.sourceArtifact",
+    "before.sourceArtifactDigest",
     "after.displayedValue",
     "after.unit",
     "after.decimalPlaces",
     "after.roundingRule",
     "after.capturedAt",
     "after.sourceArtifact",
+    "after.sourceArtifactDigest",
     "application.rollingBillableEgressUpperBoundBytes",
     "application.retainedUnexplainedDeltaReserveBytes",
     "application.accountingDigest",
@@ -36,6 +56,7 @@
     "application.sourceRunId",
     "concurrentTraffic.excluded",
     "concurrentTraffic.evidenceArtifacts",
+    "concurrentTraffic.evidenceArtifactDigests",
     "providerCapabilities",
     "safety"
   ],
@@ -46,6 +67,7 @@
     "SUPABASE_SERVICE_ROLE_KEY",
     "SUPABASE_DB_PASSWORD",
     "project reference in clear text",
+    "PostgreSQL connection string",
     "Dashboard session cookie",
     "authorization bearer token"
   ],
