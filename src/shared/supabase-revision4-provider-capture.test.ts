@@ -20,8 +20,19 @@ function baseInput(): SupabaseRevision4ProviderCaptureInput {
       commentId: null,
       actor: 'badjoke-lab',
       scope: 'r4f_g3_dashboard_capture',
+      sourceCommit: 'c'.repeat(40),
+      evidenceArtifact: 'synthetic-authorization.json',
+      evidenceDigest: 'd'.repeat(64),
     },
     projectIdentityDigest: 'a'.repeat(64),
+    providerSurface: {
+      source: 'organization_usage_page',
+      metric: 'total_egress',
+      projectFilterApplied: true,
+      selectedProjectIdentityDigest: 'a'.repeat(64),
+      billingPeriodFilterApplied: true,
+      cachedEgressIncluded: true,
+    },
     billingPeriodStart: '2026-08-01T00:00:00.000Z',
     billingPeriodEnd: '2026-09-01T00:00:00.000Z',
     before: {
@@ -31,6 +42,7 @@ function baseInput(): SupabaseRevision4ProviderCaptureInput {
       roundingRule: 'exact',
       capturedAt: '2026-08-06T06:00:00.000Z',
       sourceArtifact: 'synthetic-before.json',
+      sourceArtifactDigest: '1'.repeat(64),
     },
     after: {
       displayedValue: '1015000',
@@ -39,6 +51,7 @@ function baseInput(): SupabaseRevision4ProviderCaptureInput {
       roundingRule: 'exact',
       capturedAt: '2026-08-06T06:05:00.000Z',
       sourceArtifact: 'synthetic-after.json',
+      sourceArtifactDigest: '2'.repeat(64),
     },
     application: {
       rollingBillableEgressUpperBoundBytes: 12_474,
@@ -50,6 +63,7 @@ function baseInput(): SupabaseRevision4ProviderCaptureInput {
     concurrentTraffic: {
       excluded: true,
       evidenceArtifacts: ['synthetic-traffic-window.json'],
+      evidenceArtifactDigests: ['3'.repeat(64)],
     },
     providerCapabilities: {
       managementApiEgressBytesAvailable: false,
@@ -79,6 +93,7 @@ describe('Supabase revision-4 bounded provider capture contract', () => {
         roundingRule: 'exact',
         capturedAt: '2026-08-06T06:00:00.000Z',
         sourceArtifact: 'exact.json',
+        sourceArtifactDigest: 'a'.repeat(64),
       }),
     ).toEqual({ lowerBoundBytes: 1234, upperBoundBytes: 1234 })
   })
@@ -92,6 +107,7 @@ describe('Supabase revision-4 bounded provider capture contract', () => {
         roundingRule: 'nearest_half_up',
         capturedAt: '2026-08-06T06:00:00.000Z',
         sourceArtifact: 'rounded.json',
+        sourceArtifactDigest: 'a'.repeat(64),
       }),
     ).toEqual({
       lowerBoundBytes: 1_495_000,
@@ -108,6 +124,7 @@ describe('Supabase revision-4 bounded provider capture contract', () => {
         roundingRule: 'truncate_down',
         capturedAt: '2026-08-06T06:00:00.000Z',
         sourceArtifact: 'truncated.json',
+        sourceArtifactDigest: 'a'.repeat(64),
       }),
     ).toEqual({
       lowerBoundBytes: 2_097_152,
@@ -119,6 +136,7 @@ describe('Supabase revision-4 bounded provider capture contract', () => {
     const evidence = buildSupabaseRevision4ProviderCaptureEvidence(baseInput())
 
     expect(evidence.authorizationVerified).toBe(false)
+    expect(evidence.providerSurfaceVerified).toBe(true)
     expect(evidence.reconciliation.providerDeltaInterval).toEqual({
       lowerBoundBytes: 15_000,
       upperBoundBytes: 15_000,
@@ -129,7 +147,7 @@ describe('Supabase revision-4 bounded provider capture contract', () => {
     expect(evidence.r5Authorized).toBe(false)
   })
 
-  it('accepts only a separately authorized, isolated Dashboard capture', () => {
+  it('accepts only a separately authorized capture on the project-filtered Total Egress surface', () => {
     const input = baseInput()
     const evidence = buildSupabaseRevision4ProviderCaptureEvidence({
       ...input,
@@ -138,6 +156,7 @@ describe('Supabase revision-4 bounded provider capture contract', () => {
     })
 
     expect(evidence.authorizationVerified).toBe(true)
+    expect(evidence.providerSurfaceVerified).toBe(true)
     expect(evidence.reconciliation.intervalReconciliationReady).toBe(true)
     expect(evidence.reconciliation.intervalUpperBoundCovered).toBe(true)
     expect(evidence.g3Qualified).toBe(true)
@@ -145,24 +164,81 @@ describe('Supabase revision-4 bounded provider capture contract', () => {
     expect(evidence.r5Authorized).toBe(false)
   })
 
-  it('fails closed without authorization or concurrent-traffic exclusion', () => {
+  it('rejects an authorization that is not bound to the application source commit', () => {
     const input = baseInput()
-    const missingAuthorization = buildSupabaseRevision4ProviderCaptureEvidence({
+    const evidence = buildSupabaseRevision4ProviderCaptureEvidence({
       ...input,
       captureState: 'authorized_dashboard_capture',
+      authorization: {
+        ...input.authorization,
+        commentId: 123456,
+        sourceCommit: 'e'.repeat(40),
+      },
     })
-    expect(missingAuthorization.g3Qualified).toBe(false)
 
+    expect(evidence.authorizationVerified).toBe(false)
+    expect(evidence.g3Qualified).toBe(false)
+  })
+
+  it('rejects an arbitrary Dashboard metric or missing project filter', () => {
+    const input = baseInput()
+    const wrongProject = buildSupabaseRevision4ProviderCaptureEvidence({
+      ...input,
+      captureState: 'authorized_dashboard_capture',
+      authorization: { ...input.authorization, commentId: 123456 },
+      providerSurface: {
+        ...input.providerSurface,
+        projectFilterApplied: false,
+      },
+    })
+    expect(wrongProject.providerSurfaceVerified).toBe(false)
+    expect(wrongProject.g3Qualified).toBe(false)
+
+    const wrongIdentity = buildSupabaseRevision4ProviderCaptureEvidence({
+      ...input,
+      captureState: 'authorized_dashboard_capture',
+      authorization: { ...input.authorization, commentId: 123456 },
+      providerSurface: {
+        ...input.providerSurface,
+        selectedProjectIdentityDigest: 'f'.repeat(64),
+      },
+    })
+    expect(wrongIdentity.providerSurfaceVerified).toBe(false)
+    expect(wrongIdentity.g3Qualified).toBe(false)
+  })
+
+  it('fails closed without concurrent-traffic exclusion', () => {
+    const input = baseInput()
     const concurrentTraffic = buildSupabaseRevision4ProviderCaptureEvidence({
       ...input,
       captureState: 'authorized_dashboard_capture',
       authorization: { ...input.authorization, commentId: 123456 },
       concurrentTraffic: {
+        ...input.concurrentTraffic,
         excluded: false,
-        evidenceArtifacts: ['synthetic-concurrent-traffic.json'],
       },
     })
     expect(concurrentTraffic.g3Qualified).toBe(false)
+  })
+
+  it('rejects missing artifact digests and secret-bearing capture input', () => {
+    const input = baseInput()
+    expect(() =>
+      buildSupabaseRevision4ProviderCaptureEvidence({
+        ...input,
+        before: { ...input.before, sourceArtifactDigest: '0'.repeat(64) },
+      }),
+    ).toThrow('before source artifact digest is invalid')
+
+    expect(() =>
+      buildSupabaseRevision4ProviderCaptureEvidence({
+        ...input,
+        authorization: {
+          ...input.authorization,
+          evidenceArtifact: 'Bearer abcdefghijklmnopqrstuvwxyz',
+        },
+      }),
+    ).toThrow('provider capture input contains secret material')
   })
 
   it('rejects malformed display precision and non-integral exact displays', () => {
@@ -174,6 +250,7 @@ describe('Supabase revision-4 bounded provider capture contract', () => {
         roundingRule: 'nearest_half_up',
         capturedAt: '2026-08-06T06:00:00.000Z',
         sourceArtifact: 'invalid.json',
+        sourceArtifactDigest: 'a'.repeat(64),
       }),
     ).toThrow('displayedValue does not match decimalPlaces')
 
@@ -185,6 +262,7 @@ describe('Supabase revision-4 bounded provider capture contract', () => {
         roundingRule: 'exact',
         capturedAt: '2026-08-06T06:00:00.000Z',
         sourceArtifact: 'invalid.json',
+        sourceArtifactDigest: 'a'.repeat(64),
       }),
     ).toThrow('exact display value does not resolve to whole bytes')
   })
