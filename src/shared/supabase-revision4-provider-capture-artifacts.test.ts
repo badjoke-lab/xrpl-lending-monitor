@@ -22,12 +22,13 @@ describe('Supabase revision-4 provider capture artifacts', () => {
     const evidence = buildSupabaseRevision4ProviderCaptureEvidence(input)
     expect(evidence.captureState).toBe('synthetic_test')
     expect(evidence.authorizationVerified).toBe(false)
+    expect(evidence.providerSurfaceVerified).toBe(true)
     expect(evidence.g3Qualified).toBe(false)
     expect(evidence.profileSelected).toBe(false)
     expect(evidence.r5Authorized).toBe(false)
   })
 
-  it('keeps the operator template unexecuted and free of provider secrets', () => {
+  it('keeps the operator template unexecuted, surface-bound, and free of provider secrets', () => {
     const path = resolve(
       process.cwd(),
       'ops/r4f/revision4-provider-capture-template.json',
@@ -39,15 +40,32 @@ describe('Supabase revision-4 provider capture artifacts', () => {
       templateState: 'unexecuted',
       qualificationIssue: 1261,
       authorizationScope: 'r4f_g3_dashboard_capture',
+      requiredProviderSurface: {
+        source: 'organization_usage_page',
+        metric: 'total_egress',
+        projectFilterApplied: true,
+        billingPeriodFilterApplied: true,
+        cachedEgressIncluded: true,
+      },
       executionAuthorized: false,
       providerRequestAuthorized: false,
       providerMutationAuthorized: false,
       r5Authorized: false,
       profileSelected: false,
     })
-    expect(template.requiredCaptureFields).toContain('authorization.commentId')
-    expect(template.requiredCaptureFields).toContain('projectIdentityDigest')
-    expect(template.requiredCaptureFields).toContain('concurrentTraffic.evidenceArtifacts')
+    for (const field of [
+      'authorization.commentId',
+      'authorization.sourceCommit',
+      'authorization.evidenceDigest',
+      'projectIdentityDigest',
+      'providerSurface.selectedProjectIdentityDigest',
+      'before.sourceArtifactDigest',
+      'after.sourceArtifactDigest',
+      'concurrentTraffic.evidenceArtifacts',
+      'concurrentTraffic.evidenceArtifactDigests',
+    ]) {
+      expect(template.requiredCaptureFields).toContain(field)
+    }
 
     for (const forbiddenValue of [
       'eyJ',
