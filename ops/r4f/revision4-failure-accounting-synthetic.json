@@ -1,0 +1,218 @@
+{
+  "schemaVersion": 1,
+  "evidenceClass": "synthetic_test_only",
+  "profileId": "supabase_free_postgres_pgcron_edge",
+  "profileRevision": 4,
+  "profileIdentityDigest": "39e8b620a20bb08fbe8306fe753d4d445c5191bcafddbf67721e0c17d5b6bcd5",
+  "evidenceId": "r4f-g7-synthetic-v1",
+  "capturedAt": "2026-08-08T00:00:00.000Z",
+  "sourceCommit": "3f2ed6a6c83dc7f387aadde161cd10eaf9090fd3",
+  "prerequisites": {
+    "g3ProviderReconciliationPassed": false,
+    "g4MemoryRequalificationPassed": true,
+    "g5SteadyConvergencePassed": false,
+    "g6CatchupConvergencePassed": false,
+    "providerCaptureDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "g4MemoryEvidenceDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "g5SteadyEvidenceDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "g6CatchupEvidenceDigest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+  },
+  "policy": {
+    "rollingEgressHaltBytes": 4294967296,
+    "invocationHalt": 400000,
+    "memoryHaltBytes": 234881024,
+    "claimCapLedgers": 12
+  },
+  "scenarios": [
+    {
+      "scenarioId": "g7-failed-retry",
+      "kind": "failed_retry",
+      "pathEvidenceDigest": "1111111111111111111111111111111111111111111111111111111111111111",
+      "attempts": [
+        {
+          "attemptId": "g7-failed-retry-a1",
+          "role": "failed",
+          "disposition": "shadow_failed",
+          "accountingDigest": "0111111111111111111111111111111111111111111111111111111111111111",
+          "measuredBillableEgressUpperBoundBytes": 1000,
+          "failureReservationUpperBoundBytes": 2000,
+          "retainedBillableEgressUpperBoundBytes": 2000,
+          "invocationCount": 1,
+          "maximumPeakMemoryBytes": 80000000,
+          "maximumClaimLedgers": 12
+        },
+        {
+          "attemptId": "g7-failed-retry-a2",
+          "role": "retry_success",
+          "disposition": "shadow_retry",
+          "accountingDigest": "0222222222222222222222222222222222222222222222222222222222222222",
+          "measuredBillableEgressUpperBoundBytes": 1200,
+          "failureReservationUpperBoundBytes": 0,
+          "retainedBillableEgressUpperBoundBytes": 1200,
+          "invocationCount": 1,
+          "maximumPeakMemoryBytes": 81000000,
+          "maximumClaimLedgers": 12
+        }
+      ],
+      "retainedHistoricalBillableEgressUpperBoundBytes": 3200,
+      "ordinarySuccessfulBillableEgressUpperBoundBytes": 1200,
+      "failurePathRetainedBillableEgressUpperBoundBytes": 2000,
+      "repairOnlyRetainedBillableEgressUpperBoundBytes": 0,
+      "adoptionOperationBillableEgressUpperBoundBytes": 0
+    },
+    {
+      "scenarioId": "g7-rollback-retry",
+      "kind": "rollback_retry",
+      "pathEvidenceDigest": "2222222222222222222222222222222222222222222222222222222222222222",
+      "attempts": [
+        {
+          "attemptId": "g7-rollback-retry-a1",
+          "role": "rolled_back",
+          "disposition": "shadow_failed",
+          "accountingDigest": "0333333333333333333333333333333333333333333333333333333333333333",
+          "measuredBillableEgressUpperBoundBytes": 900,
+          "failureReservationUpperBoundBytes": 1500,
+          "retainedBillableEgressUpperBoundBytes": 1500,
+          "invocationCount": 1,
+          "maximumPeakMemoryBytes": 82000000,
+          "maximumClaimLedgers": 12
+        },
+        {
+          "attemptId": "g7-rollback-retry-a2",
+          "role": "retry_success",
+          "disposition": "shadow_retry",
+          "accountingDigest": "0444444444444444444444444444444444444444444444444444444444444444",
+          "measuredBillableEgressUpperBoundBytes": 1100,
+          "failureReservationUpperBoundBytes": 0,
+          "retainedBillableEgressUpperBoundBytes": 1100,
+          "invocationCount": 1,
+          "maximumPeakMemoryBytes": 83000000,
+          "maximumClaimLedgers": 12
+        }
+      ],
+      "retainedHistoricalBillableEgressUpperBoundBytes": 2600,
+      "ordinarySuccessfulBillableEgressUpperBoundBytes": 1100,
+      "failurePathRetainedBillableEgressUpperBoundBytes": 1500,
+      "repairOnlyRetainedBillableEgressUpperBoundBytes": 0,
+      "adoptionOperationBillableEgressUpperBoundBytes": 0
+    },
+    {
+      "scenarioId": "g7-lease-reclaim",
+      "kind": "lease_reclaim_retry",
+      "pathEvidenceDigest": "3333333333333333333333333333333333333333333333333333333333333333",
+      "attempts": [
+        {
+          "attemptId": "g7-lease-reclaim-a1",
+          "role": "reclaimed_source",
+          "disposition": "shadow_failed",
+          "accountingDigest": "0555555555555555555555555555555555555555555555555555555555555555",
+          "measuredBillableEgressUpperBoundBytes": 800,
+          "failureReservationUpperBoundBytes": 1600,
+          "retainedBillableEgressUpperBoundBytes": 1600,
+          "invocationCount": 1,
+          "maximumPeakMemoryBytes": 84000000,
+          "maximumClaimLedgers": 12
+        },
+        {
+          "attemptId": "g7-lease-reclaim-a2",
+          "role": "reclaim_success",
+          "disposition": "shadow_retry",
+          "accountingDigest": "0666666666666666666666666666666666666666666666666666666666666666",
+          "measuredBillableEgressUpperBoundBytes": 1300,
+          "failureReservationUpperBoundBytes": 0,
+          "retainedBillableEgressUpperBoundBytes": 1300,
+          "invocationCount": 1,
+          "maximumPeakMemoryBytes": 85000000,
+          "maximumClaimLedgers": 12
+        }
+      ],
+      "retainedHistoricalBillableEgressUpperBoundBytes": 2900,
+      "ordinarySuccessfulBillableEgressUpperBoundBytes": 1300,
+      "failurePathRetainedBillableEgressUpperBoundBytes": 1600,
+      "repairOnlyRetainedBillableEgressUpperBoundBytes": 0,
+      "adoptionOperationBillableEgressUpperBoundBytes": 0
+    },
+    {
+      "scenarioId": "g7-adopted-descendant",
+      "kind": "adopted_descendant",
+      "pathEvidenceDigest": "4444444444444444444444444444444444444444444444444444444444444444",
+      "attempts": [
+        {
+          "attemptId": "g7-adopted-source-a1",
+          "role": "source_committed",
+          "disposition": "shadow_completed",
+          "accountingDigest": "0777777777777777777777777777777777777777777777777777777777777777",
+          "measuredBillableEgressUpperBoundBytes": 1400,
+          "failureReservationUpperBoundBytes": 0,
+          "retainedBillableEgressUpperBoundBytes": 1400,
+          "invocationCount": 1,
+          "maximumPeakMemoryBytes": 86000000,
+          "maximumClaimLedgers": 12
+        },
+        {
+          "attemptId": "g7-adoption-a2",
+          "role": "adoption",
+          "disposition": "shadow_adopted",
+          "accountingDigest": "0888888888888888888888888888888888888888888888888888888888888888",
+          "measuredBillableEgressUpperBoundBytes": 200,
+          "failureReservationUpperBoundBytes": 0,
+          "retainedBillableEgressUpperBoundBytes": 200,
+          "invocationCount": 1,
+          "maximumPeakMemoryBytes": 87000000,
+          "maximumClaimLedgers": 12
+        }
+      ],
+      "retainedHistoricalBillableEgressUpperBoundBytes": 1600,
+      "ordinarySuccessfulBillableEgressUpperBoundBytes": 1400,
+      "failurePathRetainedBillableEgressUpperBoundBytes": 0,
+      "repairOnlyRetainedBillableEgressUpperBoundBytes": 0,
+      "adoptionOperationBillableEgressUpperBoundBytes": 200
+    },
+    {
+      "scenarioId": "g7-repair-separation",
+      "kind": "repair_separation",
+      "pathEvidenceDigest": "5555555555555555555555555555555555555555555555555555555555555555",
+      "attempts": [
+        {
+          "attemptId": "g7-ordinary-success-a1",
+          "role": "ordinary_success",
+          "disposition": "shadow_completed",
+          "accountingDigest": "0999999999999999999999999999999999999999999999999999999999999999",
+          "measuredBillableEgressUpperBoundBytes": 1500,
+          "failureReservationUpperBoundBytes": 0,
+          "retainedBillableEgressUpperBoundBytes": 1500,
+          "invocationCount": 1,
+          "maximumPeakMemoryBytes": 88000000,
+          "maximumClaimLedgers": 12
+        },
+        {
+          "attemptId": "g7-repair-only-a2",
+          "role": "repair_only",
+          "disposition": "shadow_repair",
+          "accountingDigest": "0aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "measuredBillableEgressUpperBoundBytes": 100,
+          "failureReservationUpperBoundBytes": 2000,
+          "retainedBillableEgressUpperBoundBytes": 2000,
+          "invocationCount": 1,
+          "maximumPeakMemoryBytes": 89000000,
+          "maximumClaimLedgers": 12
+        }
+      ],
+      "retainedHistoricalBillableEgressUpperBoundBytes": 3500,
+      "ordinarySuccessfulBillableEgressUpperBoundBytes": 1500,
+      "failurePathRetainedBillableEgressUpperBoundBytes": 0,
+      "repairOnlyRetainedBillableEgressUpperBoundBytes": 2000,
+      "adoptionOperationBillableEgressUpperBoundBytes": 0
+    }
+  ],
+  "safety": {
+    "productionCredentialsUsed": false,
+    "productionMutationPerformed": false,
+    "recoveryMutationCommitted": false,
+    "transactionSubmissionPerformed": false,
+    "publicReaderUnchanged": true,
+    "mainnetDisabled": true,
+    "stabilizationAuthorized": false,
+    "soakAuthorized": false
+  }
+}
