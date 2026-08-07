@@ -1,0 +1,28 @@
+name: Supabase Remote Probe Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      authorization:
+        description: 'Legacy remote probe is halted during R4F. No value currently authorizes execution.'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supabase-remote-probe-deploy
+  cancel-in-progress: false
+
+jobs:
+  halted:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enforce R4F halt
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'Legacy Supabase remote probe is halted while R4F revision-4 qualification is active.' >&2
+          echo 'R5 recovery, migration, deployment, and remote mutation are not authorized by this workflow.' >&2
+          exit 1
