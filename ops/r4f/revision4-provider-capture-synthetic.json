@@ -10,9 +10,20 @@
     "issueNumber": 1261,
     "commentId": null,
     "actor": "badjoke-lab",
-    "scope": "r4f_g3_dashboard_capture"
+    "scope": "r4f_g3_dashboard_capture",
+    "sourceCommit": "cccccccccccccccccccccccccccccccccccccccc",
+    "evidenceArtifact": "synthetic-authorization.json",
+    "evidenceDigest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
   },
   "projectIdentityDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "providerSurface": {
+    "source": "organization_usage_page",
+    "metric": "total_egress",
+    "projectFilterApplied": true,
+    "selectedProjectIdentityDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "billingPeriodFilterApplied": true,
+    "cachedEgressIncluded": true
+  },
   "billingPeriodStart": "2026-08-01T00:00:00.000Z",
   "billingPeriodEnd": "2026-09-01T00:00:00.000Z",
   "before": {
@@ -21,7 +32,8 @@
     "decimalPlaces": 3,
     "roundingRule": "nearest_half_up",
     "capturedAt": "2026-08-06T06:00:00.000Z",
-    "sourceArtifact": "synthetic-before.json"
+    "sourceArtifact": "synthetic-before.json",
+    "sourceArtifactDigest": "1111111111111111111111111111111111111111111111111111111111111111"
   },
   "after": {
     "displayedValue": "1.015",
@@ -29,7 +41,8 @@
     "decimalPlaces": 3,
     "roundingRule": "nearest_half_up",
     "capturedAt": "2026-08-06T06:05:00.000Z",
-    "sourceArtifact": "synthetic-after.json"
+    "sourceArtifact": "synthetic-after.json",
+    "sourceArtifactDigest": "2222222222222222222222222222222222222222222222222222222222222222"
   },
   "application": {
     "rollingBillableEgressUpperBoundBytes": 12474,
@@ -40,7 +53,8 @@
   },
   "concurrentTraffic": {
     "excluded": true,
-    "evidenceArtifacts": ["synthetic-traffic-window.json"]
+    "evidenceArtifacts": ["synthetic-traffic-window.json"],
+    "evidenceArtifactDigests": ["3333333333333333333333333333333333333333333333333333333333333333"]
   },
   "providerCapabilities": {
     "managementApiEgressBytesAvailable": false,
