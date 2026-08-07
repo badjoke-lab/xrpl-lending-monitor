@@ -7,14 +7,15 @@ function read(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
+const helper = read('src/shared/supabase-revision4-g3-readonly-probe.ts')
 const edge = read('supabase/functions/xrpl-r4f-g3-directional-probe/index.ts')
 const config = read('supabase/config.toml')
 const remoteWorkflow = read('.github/workflows/supabase-remote-probe.yml')
 
 describe('Supabase revision-4 G3 read-only directional probe contract', () => {
   it('is Devnet-only, token-guarded, and reads one explicit validated ledger', () => {
+    expect(helper).toContain("'r4f-g3-directional-readonly-probe'")
     for (const required of [
-      "'r4f-g3-directional-readonly-probe'",
       "'x-xrpl-reader-purpose'",
       "'x-xrpl-reader-token'",
       "env('R4F_G3_PROBE_VERIFY_TOKEN')",
@@ -40,6 +41,9 @@ describe('Supabase revision-4 G3 read-only directional probe contract', () => {
     ]) {
       expect(edge).toContain(required)
     }
+    expect(helper).toContain('SupabaseRevision4DirectionalMeter')
+    expect(helper).toContain("boundaryId: 'xrpl_to_edge_response'")
+    expect(helper).toContain("boundaryId: 'edge_to_invoker_response'")
     expect(edge).not.toContain('xrplResponseBody,\n    status: 200')
   })
 
