@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "evidenceClass": "synthetic_test_only",
+  "profileId": "supabase_free_postgres_pgcron_edge",
+  "profileRevision": 4,
+  "profileIdentityDigest": "39e8b620a20bb08fbe8306fe753d4d445c5191bcafddbf67721e0c17d5b6bcd5",
+  "evidenceId": "r4f-g5-synthetic-contract-fixture",
+  "capturedAt": "2026-08-07T05:10:00.000Z",
+  "sourceCommit": "8df6210b50834957ebab753ccf874e5bc908a440",
+  "prerequisites": {
+    "g3ProviderReconciliationPassed": false,
+    "providerCaptureDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+    "selectedUnexplainedDeltaReserveBytesPerMinute": 0,
+    "interventionReserveApproved": false,
+    "interventionReserveBytes": 1,
+    "interventionReserveRationaleDigest": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "policy": {
+    "rollingEgressHaltBytes": 4294967296,
+    "rollingWindowMinutes": 44640,
+    "requiredLedgersPerMinute": 21,
+    "invocationHalt": 400000,
+    "memoryHaltBytes": 234881024,
+    "claimCapLedgers": 12,
+    "minimumConsecutiveMinutes": 6
+  },
+  "minutes": [
+    {
+      "minuteStart": "2026-08-07T05:00:00.000Z",
+      "startLedgerIndex": 4200000,
+      "endLedgerIndex": 4200020,
+      "committedLedgers": 21,
+      "invocationCount": 4,
+      "applicationBillableEgressUpperBoundBytes": 50000,
+      "maximumPeakMemoryBytes": 80000000,
+      "maximumClaimLedgers": 12,
+      "accountingDigests": [
+        "1111111111111111111111111111111111111111111111111111111111111111"
+      ],
+      "committed": true,
+      "parentHashContinuityVerified": true,
+      "duplicateLedgerCount": 0,
+      "skippedLedgerCount": 0
+    }
+  ],
+  "safety": {
+    "productionCredentialsUsed": false,
+    "productionMutationPerformed": false,
+    "recoveryMutationCommitted": false,
+    "transactionSubmissionPerformed": false,
+    "publicReaderUnchanged": true,
+    "mainnetDisabled": true,
+    "stabilizationAuthorized": false,
+    "soakAuthorized": false
+  }
+}

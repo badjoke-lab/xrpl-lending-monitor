@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "evaluatedAt": "2026-08-06T15:26:32.000Z",
+  "evaluatedAt": "2026-08-06T20:10:00.000Z",
   "profile": {
     "schemaVersion": 1,
     "profileId": "supabase_free_postgres_pgcron_edge",
@@ -108,10 +108,15 @@
       "gateId": "G5",
       "status": "unresolved",
       "sourceType": "local_conformance",
-      "summary": "Steady convergence at or above 21 ledgers per minute is not yet proved.",
-      "observedAt": "2026-08-06T03:36:35.000Z",
+      "summary": "A fail-closed steady-convergence verifier, offline CLI, and non-qualifying synthetic fixture are prepared. No provider-reconciled bounded steady replay has been performed, G3 remains unresolved, and G5 is not passed.",
+      "observedAt": "2026-08-06T20:10:00.000Z",
       "artifacts": [
-        "docs/ops/r5-egress-candidate-evaluation-2026-08-06.md"
+        "docs/ops/r5-egress-candidate-evaluation-2026-08-06.md",
+        "docs/ops/r4f-g5-steady-convergence-contract-2026-08-07.md",
+        "src/shared/supabase-revision4-steady-convergence.ts",
+        "scripts/verify-r4f-revision4-steady-convergence.ts",
+        "scripts/test-r4f-revision4-steady-convergence-verifier.sh",
+        "ops/r4f/revision4-steady-convergence-synthetic.json"
       ]
     },
     {
