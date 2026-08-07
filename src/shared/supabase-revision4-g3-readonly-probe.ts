@@ -150,6 +150,10 @@ export async function buildSupabaseRevision4G3ReadonlyProbeResponse(
   if (xrplResponseBytes > SUPABASE_REVISION4_G3_PROBE_MAX_XRPL_RESPONSE_BYTES) {
     throw new Error('xrplResponseBody exceeds the bounded G3 probe limit')
   }
+  const actualXrplResponseDigest = await sha256HexBytes(raw.xrplResponseBody)
+  if (actualXrplResponseDigest !== xrplResponseDigest) {
+    throw new Error('xrplResponseDigest does not match the retained XRPL response body')
+  }
 
   const meter = new SupabaseRevision4DirectionalMeter()
   meter.recordUtf8({
