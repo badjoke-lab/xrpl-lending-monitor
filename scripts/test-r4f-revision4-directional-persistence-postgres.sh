@@ -14,10 +14,11 @@ trap cleanup EXIT
 
 wait_for_final_postgres() {
   local init_complete=0
+  local container_logs=''
 
   for _ in $(seq 1 60); do
-    if docker logs "$container_name" 2>&1 \
-      | grep -q 'PostgreSQL init process complete; ready for start up.'; then
+    container_logs="$(docker logs "$container_name" 2>&1 || true)"
+    if grep -q 'PostgreSQL init process complete; ready for start up.' <<< "$container_logs"; then
       init_complete=1
       break
     fi
@@ -26,13 +27,13 @@ wait_for_final_postgres() {
 
   if [[ "$init_complete" -ne 1 ]]; then
     echo 'PostgreSQL container did not finish its init process' >&2
-    docker logs "$container_name" >&2 || true
+    printf '%s\n' "$container_logs" >&2
     return 1
   fi
 
   for _ in $(seq 1 60); do
     if docker exec "$container_name" pg_isready -U postgres -d postgres >/dev/null 2>&1 \
-      && [[ "$(docker exec "$container_name" psql -Atqc 'select 1' -U postgres -d postgres 2>/dev/null || true)" == '1' ]]; then
+      && [[ "$(docker exec "$container_name" psql -U postgres -d postgres -Atqc 'select 1' 2>/dev/null || true)" == '1' ]]; then
       docker exec "$container_name" pg_isready -U postgres -d postgres
       return 0
     fi
