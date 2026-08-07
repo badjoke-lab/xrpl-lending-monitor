@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "evidenceClass": "synthetic_test_only",
+  "profileId": "supabase_free_postgres_pgcron_edge",
+  "profileRevision": 4,
+  "profileIdentityDigest": "39e8b620a20bb08fbe8306fe753d4d445c5191bcafddbf67721e0c17d5b6bcd5",
+  "evidenceId": "r4f-g10-synthetic-v1",
+  "evaluatedAt": "2026-08-08T00:00:00.000Z",
+  "sourceCommit": "b2ee9a84db7400c2a70444dc011ca2d940804a97",
+  "gateEvidence": [
+    {"gateId":"G1","status":"pass","evidenceDigest":"1111111111111111111111111111111111111111111111111111111111111111"},
+    {"gateId":"G2","status":"pass","evidenceDigest":"2222222222222222222222222222222222222222222222222222222222222222"},
+    {"gateId":"G3","status":"unresolved","evidenceDigest":"3333333333333333333333333333333333333333333333333333333333333333"},
+    {"gateId":"G4","status":"pass","evidenceDigest":"4444444444444444444444444444444444444444444444444444444444444444"},
+    {"gateId":"G5","status":"unresolved","evidenceDigest":"5555555555555555555555555555555555555555555555555555555555555555"},
+    {"gateId":"G6","status":"unresolved","evidenceDigest":"6666666666666666666666666666666666666666666666666666666666666666"},
+    {"gateId":"G7","status":"unresolved","evidenceDigest":"7777777777777777777777777777777777777777777777777777777777777777"},
+    {"gateId":"G8","status":"unresolved","evidenceDigest":"8888888888888888888888888888888888888888888888888888888888888888"},
+    {"gateId":"G9","status":"unresolved","evidenceDigest":"9999999999999999999999999999999999999999999999999999999999999999"}
+  ],
+  "convergence": {
+    "steadyConvergenceProved": false,
+    "catchupConvergenceProved": false,
+    "boundedProofUnitPassed": false,
+    "g5EvidenceDigest": "5555555555555555555555555555555555555555555555555555555555555555",
+    "g6EvidenceDigest": "6666666666666666666666666666666666666666666666666666666666666666",
+    "g9EvidenceDigest": "9999999999999999999999999999999999999999999999999999999999999999"
+  },
+  "policy": {
+    "rollingEgressHaltBytes": 4294967296,
+    "invocationHalt": 400000,
+    "memoryHaltBytes": 234881024,
+    "claimCapLedgers": 12
+  },
+  "decision": {
+    "outcome": "not_selected",
+    "decisionRationaleDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "rejectedGateIds": [],
+    "nextStep": "continue_r4f_qualification",
+    "r5RecoveryMutationAuthorized": false
+  },
+  "safety": {
+    "publicReaderUnchanged": true,
+    "mainnetDisabled": true,
+    "stabilizationAuthorized": false,
+    "soakAuthorized": false,
+    "retiredCloudflareCollectorRestarted": false,
+    "transactionSubmissionPerformed": false
+  }
+}
