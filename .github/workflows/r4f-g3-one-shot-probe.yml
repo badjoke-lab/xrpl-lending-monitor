@@ -1,0 +1,327 @@
+name: R4F G3 One-Shot Probe
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: r4f-g3-one-shot-probe
+  cancel-in-progress: false
+
+env:
+  QUALIFICATION_ISSUE: '1261'
+  PROFILE_ID: supabase_free_postgres_pgcron_edge
+  PROFILE_REVISION: '4'
+  PROFILE_IDENTITY_DIGEST: 39e8b620a20bb08fbe8306fe753d4d445c5191bcafddbf67721e0c17d5b6bcd5
+  PURPOSE: r4f-g3-directional-readonly-probe
+  DEVNET_RPC: https://s.devnet.rippletest.net:51234/
+
+jobs:
+  prepare:
+    if: >-
+      github.event.issue.number == 1261 &&
+      github.event.comment.user.login == 'badjoke-lab' &&
+      github.event.comment.body == '/r4f-g3-prepare'
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out exact main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Verify preparation inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SUPABASE_PROJECT_ID"
+          [[ "$SUPABASE_PROJECT_ID" =~ ^[a-z]{20}$ ]]
+
+      - name: Resolve one exact validated Devnet ledger
+        id: resolve
+        shell: bash
+        run: |
+          set -euo pipefail
+          request='{"method":"ledger","params":[{"ledger_index":"validated","transactions":false,"expand":false,"api_version":1}]}'
+          curl --fail-with-body --silent --show-error \
+            --connect-timeout 10 --max-time 30 \
+            -H 'content-type: application/json' \
+            --data "$request" \
+            "$DEVNET_RPC" > /tmp/devnet-ledger.json
+
+          node --input-type=module <<'NODE' >> "$GITHUB_OUTPUT"
+          import { readFileSync } from 'node:fs'
+          const payload = JSON.parse(readFileSync('/tmp/devnet-ledger.json', 'utf8'))
+          const result = payload?.result
+          if (!result || result.validated !== true) throw new Error('Devnet validated ledger unavailable')
+          const raw = result.ledger_index ?? result.ledger?.ledger_index
+          const ledger = Number(raw)
+          if (!Number.isSafeInteger(ledger) || ledger <= 0) throw new Error('Devnet ledger index invalid')
+          console.log(`ledger=${ledger}`)
+          NODE
+
+      - name: Build sanitized authorization proposal
+        id: proposal
+        env:
+          LEDGER_INDEX: ${{ steps.resolve.outputs.ledger }}
+          PREPARE_RUN_ID: ${{ github.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          head_sha="$(git rev-parse HEAD)"
+          project_digest="$(printf '%s' "$SUPABASE_PROJECT_ID" | sha256sum | awk '{print $1}')"
+          printf 'head_sha=%s\n' "$head_sha" >> "$GITHUB_OUTPUT"
+          printf 'project_digest=%s\n' "$project_digest" >> "$GITHUB_OUTPUT"
+
+          cat > /tmp/proposal.md <<EOF
+          ## R4F G3 one-shot authorization proposal
+
+          Preparation run: \`${PREPARE_RUN_ID}\`
+          Source commit: \`${head_sha}\`
+          Revision-4 profile digest: \`${PROFILE_IDENTITY_DIGEST}\`
+          Project identity digest: \`${project_digest}\`
+          Exact Devnet ledger: \`${LEDGER_INDEX}\`
+
+          Before authorizing, retain the project-filtered Supabase Usage → **Total Egress** reading for the same billing period. Do not post the project reference, credentials, cookies, or tokens.
+
+          Exact authorization command:
+
+          \`/r4f-g3-authorize commit=${head_sha} ledger=${LEDGER_INDEX} project=${project_digest} prepare_run=${PREPARE_RUN_ID}\`
+
+          This authorizes only: temporary deployment of \`xrpl-r4f-g3-directional-probe\`, one read-only request for the exact Devnet ledger above, sanitized evidence upload, then function/secret cleanup. It does not authorize DB access, migration, R5 mutation, public-reader change, Mainnet, stabilization, or soak.
+          EOF
+
+          gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/proposal.md
+
+  execute:
+    if: >-
+      github.event.issue.number == 1261 &&
+      github.event.comment.user.login == 'badjoke-lab' &&
+      startsWith(github.event.comment.body, '/r4f-g3-authorize ')
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+      GH_TOKEN: ${{ github.token }}
+      AUTHORIZATION_COMMENT_ID: ${{ github.event.comment.id }}
+      AUTHORIZATION_BODY: ${{ github.event.comment.body }}
+    steps:
+      - name: Check out current main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Parse and verify exact owner authorization
+        id: auth
+        shell: bash
+        run: |
+          set -euo pipefail
+          regex='^/r4f-g3-authorize commit=([a-f0-9]{40}) ledger=([0-9]+) project=([a-f0-9]{64}) prepare_run=([0-9]+)$'
+          if [[ ! "$AUTHORIZATION_BODY" =~ $regex ]]; then
+            echo 'authorization command shape mismatch' >&2
+            exit 1
+          fi
+          commit="${BASH_REMATCH[1]}"
+          ledger="${BASH_REMATCH[2]}"
+          project_digest="${BASH_REMATCH[3]}"
+          prepare_run="${BASH_REMATCH[4]}"
+
+          [[ "$ledger" =~ ^[0-9]+$ ]]
+          test "$ledger" -gt 0
+          test -n "$SUPABASE_ACCESS_TOKEN"
+          test -n "$SUPABASE_PROJECT_ID"
+          [[ "$SUPABASE_PROJECT_ID" =~ ^[a-z]{20}$ ]]
+
+          current_main="$(git rev-parse HEAD)"
+          test "$commit" = "$current_main"
+          actual_project_digest="$(printf '%s' "$SUPABASE_PROJECT_ID" | sha256sum | awk '{print $1}')"
+          test "$project_digest" = "$actual_project_digest"
+
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${prepare_run}" > /tmp/prepare-run.json
+          PREPARE_RUN="$prepare_run" COMMIT="$commit" node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs'
+          const run = JSON.parse(readFileSync('/tmp/prepare-run.json', 'utf8'))
+          if (run.name !== 'R4F G3 One-Shot Probe') throw new Error('prepare run workflow mismatch')
+          if (run.event !== 'issue_comment') throw new Error('prepare run event mismatch')
+          if (run.conclusion !== 'success') throw new Error('prepare run is not successful')
+          if (String(run.id) !== process.env.PREPARE_RUN) throw new Error('prepare run id mismatch')
+          NODE
+
+          printf 'commit=%s\n' "$commit" >> "$GITHUB_OUTPUT"
+          printf 'ledger=%s\n' "$ledger" >> "$GITHUB_OUTPUT"
+          printf 'project_digest=%s\n' "$project_digest" >> "$GITHUB_OUTPUT"
+          printf 'prepare_run=%s\n' "$prepare_run" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Supabase CLI
+        uses: supabase/setup-cli@3c2f5e2ae34c34e428e8e206e2c4d21fa2d20fbf
+        with:
+          version: latest
+
+      - name: Bundle exact G3 probe source
+        id: bundle
+        env:
+          HEAD_SHA: ${{ steps.auth.outputs.commit }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p r4f-g3-one-shot-evidence
+          source_path='supabase/functions/xrpl-r4f-g3-directional-probe/index.ts'
+          bundle_path='/tmp/xrpl-r4f-g3-directional-probe-index.ts'
+          bun build "$source_path" --target=browser --format=esm --outfile="$bundle_path"
+          test -s "$bundle_path"
+          if grep -Eq "(?:from[[:space:]]*|import[[:space:]]*\()[[:space:]]*['\"]\.{1,2}/" "$bundle_path"; then
+            echo 'generated G3 bundle retains a relative import' >&2
+            exit 1
+          fi
+          if grep -q 'cloudflare:' "$bundle_path"; then
+            echo 'generated G3 bundle contains a Cloudflare runtime import' >&2
+            exit 1
+          fi
+          grep -q 'Deno.serve' "$bundle_path"
+          cp "$bundle_path" "$source_path"
+          bundle_digest="$(sha256sum "$bundle_path" | awk '{print $1}')"
+          bundle_bytes="$(wc -c < "$bundle_path" | tr -d ' ')"
+          printf 'bundle_digest=%s\n' "$bundle_digest" >> "$GITHUB_OUTPUT"
+          printf 'bundle_bytes=%s\n' "$bundle_bytes" >> "$GITHUB_OUTPUT"
+
+      - name: Create one-run probe secrets
+        id: secrets
+        env:
+          SOURCE_COMMIT: ${{ steps.auth.outputs.commit }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          probe_token="$(openssl rand -hex 32)"
+          echo "::add-mask::${probe_token}"
+          supabase secrets set \
+            R4F_G3_PROBE_VERIFY_TOKEN="${probe_token}" \
+            R4F_G3_PROBE_SOURCE_COMMIT="${SOURCE_COMMIT}" \
+            --project-ref "$SUPABASE_PROJECT_ID"
+          printf 'R4F_G3_PROBE_VERIFY_TOKEN=%s\n' "$probe_token" >> "$GITHUB_ENV"
+
+      - name: Deploy only the bounded G3 probe
+        id: deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          supabase functions deploy xrpl-r4f-g3-directional-probe \
+            --project-ref "$SUPABASE_PROJECT_ID" \
+            --use-api \
+            --no-verify-jwt
+
+      - name: Invoke exactly one authorized Devnet ledger read
+        id: invoke
+        env:
+          LEDGER_INDEX: ${{ steps.auth.outputs.ledger }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence_dir='r4f-g3-one-shot-evidence'
+          observation_id="r4f.g3.live.${GITHUB_RUN_ID}"
+          attempt_id="r4f.g3.live.attempt.${GITHUB_RUN_ID}"
+          body="$(printf '{\"ledgerIndex\":%s,\"observationId\":\"%s\",\"attemptId\":\"%s\",\"sourceRunId\":%s}' "$LEDGER_INDEX" "$observation_id" "$attempt_id" "$GITHUB_RUN_ID")"
+
+          curl --fail-with-body --silent --show-error \
+            --connect-timeout 10 --max-time 60 \
+            -H 'content-type: application/json' \
+            -H "x-xrpl-reader-purpose: ${PURPOSE}" \
+            -H "x-xrpl-reader-token: ${R4F_G3_PROBE_VERIFY_TOKEN}" \
+            --data "$body" \
+            "https://${SUPABASE_PROJECT_ID}.supabase.co/functions/v1/xrpl-r4f-g3-directional-probe" \
+            > "$evidence_dir/probe-response.json"
+
+          LEDGER_INDEX="$LEDGER_INDEX" SOURCE_COMMIT='${{ steps.auth.outputs.commit }}' node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs'
+          import { createHash } from 'node:crypto'
+          const text = readFileSync('r4f-g3-one-shot-evidence/probe-response.json', 'utf8')
+          const value = JSON.parse(text)
+          if (value.schemaVersion !== 1) throw new Error('probe schema mismatch')
+          if (value.purpose !== 'r4f-g3-directional-readonly-probe') throw new Error('probe purpose mismatch')
+          if (value.profileRevision !== 4) throw new Error('probe revision mismatch')
+          if (value.profileIdentityDigest !== '39e8b620a20bb08fbe8306fe753d4d445c5191bcafddbf67721e0c17d5b6bcd5') throw new Error('probe identity mismatch')
+          if (value.network !== 'devnet') throw new Error('probe network mismatch')
+          if (value.ledgerIndex !== Number(process.env.LEDGER_INDEX)) throw new Error('probe ledger mismatch')
+          if (value.sourceCommit !== process.env.SOURCE_COMMIT) throw new Error('probe commit mismatch')
+          if (value.checks?.databaseRequestIssued !== false) throw new Error('probe database boundary changed')
+          if (value.checks?.recoveryMutationCommitted !== false) throw new Error('probe recovery boundary changed')
+          if (value.checks?.mainnetDisabled !== true) throw new Error('probe mainnet boundary changed')
+          const accounting = value.accountingEvidence?.accounting
+          if (!accounting || accounting.checks?.blanketAllDirectionMultiplierUsed !== false) throw new Error('probe accounting contract mismatch')
+          const summary = {
+            schemaVersion: 1,
+            qualificationIssue: 1261,
+            runId: Number(process.env.GITHUB_RUN_ID),
+            authorizationCommentId: Number(process.env.AUTHORIZATION_COMMENT_ID),
+            sourceCommit: value.sourceCommit,
+            ledgerIndex: value.ledgerIndex,
+            projectIdentityDigest: process.env.PROJECT_IDENTITY_DIGEST,
+            profileIdentityDigest: value.profileIdentityDigest,
+            xrplResponseBytes: value.xrplResponseBytes,
+            xrplResponseDigest: value.xrplResponseDigest,
+            accountingDigest: value.accountingEvidence.accountingDigest,
+            rollingBillableEgressUpperBoundBytes: accounting.rollingBillableEgressUpperBoundBytes,
+            memoryTransportUpperBoundBytes: accounting.memoryTransportUpperBoundBytes,
+            probeResponseSha256: createHash('sha256').update(text).digest('hex'),
+            safety: value.checks,
+          }
+          writeFileSync('r4f-g3-one-shot-evidence/summary.json', `${JSON.stringify(summary, null, 2)}\n`)
+          NODE
+        env:
+          PROJECT_IDENTITY_DIGEST: ${{ steps.auth.outputs.project_digest }}
+
+      - name: Remove one-shot function and secrets
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          supabase functions delete xrpl-r4f-g3-directional-probe --project-ref "$SUPABASE_PROJECT_ID"
+          function_cleanup=$?
+          supabase secrets unset R4F_G3_PROBE_VERIFY_TOKEN R4F_G3_PROBE_SOURCE_COMMIT --project-ref "$SUPABASE_PROJECT_ID"
+          secret_cleanup=$?
+          if [ "$function_cleanup" -ne 0 ] || [ "$secret_cleanup" -ne 0 ]; then
+            echo 'one-shot cleanup did not fully complete' >&2
+            exit 1
+          fi
+
+      - name: Upload sanitized G3 probe evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r4f-g3-one-shot-evidence
+          path: r4f-g3-one-shot-evidence
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Publish sanitized execution locator
+        if: always()
+        env:
+          RUN_STATUS: ${{ job.status }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/g3-run.md <<EOF
+          ## R4F G3 one-shot probe run
+
+          Run: ${RUN_URL}
+          Status: \`${RUN_STATUS}\`
+          Authorization comment: \`${AUTHORIZATION_COMMENT_ID}\`
+          Source commit: \`${{ steps.auth.outputs.commit }}\`
+          Devnet ledger: \`${{ steps.auth.outputs.ledger }}\`
+          Project identity digest: \`${{ steps.auth.outputs.project_digest }}\`
+
+          The run is limited to temporary G3 probe deployment, one read-only Devnet ledger request, sanitized evidence retention, and cleanup. No DB migration or R5 recovery step exists in this workflow.
+
+          After a successful run, retain the project-filtered Supabase Usage → **Total Egress** after-reading from the same billing period for final G3 reconciliation.
+          EOF
+          gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/g3-run.md
