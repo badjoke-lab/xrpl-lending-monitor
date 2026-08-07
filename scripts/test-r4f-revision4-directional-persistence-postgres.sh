@@ -12,6 +12,39 @@ cleanup() {
 }
 trap cleanup EXIT
 
+wait_for_final_postgres() {
+  local init_complete=0
+  local container_logs=''
+
+  for _ in $(seq 1 60); do
+    container_logs="$(docker logs "$container_name" 2>&1 || true)"
+    if grep -q 'PostgreSQL init process complete; ready for start up.' <<< "$container_logs"; then
+      init_complete=1
+      break
+    fi
+    sleep 1
+  done
+
+  if [[ "$init_complete" -ne 1 ]]; then
+    echo 'PostgreSQL container did not finish its init process' >&2
+    printf '%s\n' "$container_logs" >&2
+    return 1
+  fi
+
+  for _ in $(seq 1 60); do
+    if docker exec "$container_name" pg_isready -U postgres -d postgres >/dev/null 2>&1 \
+      && [[ "$(docker exec "$container_name" psql -U postgres -d postgres -Atqc 'select 1' 2>/dev/null || true)" == '1' ]]; then
+      docker exec "$container_name" pg_isready -U postgres -d postgres
+      return 0
+    fi
+    sleep 1
+  done
+
+  echo 'PostgreSQL final server did not become query-ready' >&2
+  docker logs "$container_name" >&2 || true
+  return 1
+}
+
 unset SUPABASE_ACCESS_TOKEN SUPABASE_PROJECT_ID SUPABASE_SERVICE_ROLE_KEY SUPABASE_DB_PASSWORD || true
 rm -rf "$output_directory" "$shadow_build_directory"
 mkdir -p "$shadow_directory"
@@ -35,13 +68,7 @@ docker run --detach --rm \
   "$image" \
   > "${output_directory}/container-id.txt"
 
-for _ in $(seq 1 60); do
-  if docker exec "$container_name" pg_isready -U postgres -d postgres >/dev/null 2>&1; then
-    break
-  fi
-  sleep 1
-done
-docker exec "$container_name" pg_isready -U postgres -d postgres
+wait_for_final_postgres
 
 docker exec -i "$container_name" psql -v ON_ERROR_STOP=1 -U postgres -d postgres \
   > "${output_directory}/bootstrap.log" <<'SQL'

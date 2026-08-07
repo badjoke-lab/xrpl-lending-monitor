@@ -26,6 +26,19 @@ describe('revision-4 G2D PostgreSQL integration contract', () => {
     )
   })
 
+  it('waits past the temporary init server before treating PostgreSQL as ready', () => {
+    for (const required of [
+      'wait_for_final_postgres',
+      'PostgreSQL init process complete; ready for start up.',
+      'container_logs="$(docker logs "$container_name" 2>&1 || true)"',
+      'pg_isready -U postgres -d postgres',
+      "psql -U postgres -d postgres -Atqc 'select 1'",
+      'PostgreSQL final server did not become query-ready',
+    ]) {
+      expect(harness).toContain(required)
+    }
+  })
+
   it('uses a disposable local PostgreSQL container and no provider credential', () => {
     for (const required of [
       'postgres:15-alpine',
