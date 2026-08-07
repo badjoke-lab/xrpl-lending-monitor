@@ -235,8 +235,7 @@ export function verifySupabaseRevision4SelectionDecision(
     ['G9', input.convergence.boundedProofUnitPassed, 'bounded_proof_unit'],
   ] as const
   for (const [gateId, proved, label] of convergenceBindings) {
-    const status = statuses.get(gateId)
-    if ((status === 'pass') !== proved) {
+    if ((statuses.get(gateId) === 'pass') !== proved) {
       addReason(blockingReasons, `${label}_status_inconsistent`)
       convergenceEvidenceConsistent = false
     }
@@ -251,18 +250,36 @@ export function verifySupabaseRevision4SelectionDecision(
     && input.convergence.catchupConvergenceProved
     && input.convergence.boundedProofUnitPassed
     && convergenceEvidenceConsistent
-
   const rejectionRequired = failedGateIds.length > 0 && unresolvedGateIds.length === 0
   const qualificationStillOpen = unresolvedGateIds.length > 0
-  let outcomeConsistent = false
-  let decisionReady = false
+
+  const selectedOutcomeConsistent =
+    selectionEligible
+    && input.decision.rejectedGateIds.length === 0
+    && input.decision.nextStep === 'r5_owner_authorization_required'
+  const rejectedOutcomeConsistent =
+    rejectionRequired
+    && sameGateSet(input.decision.rejectedGateIds, failedGateIds)
+    && input.decision.nextStep === 'return_to_architecture_selection'
+  const notSelectedOutcomeConsistent =
+    qualificationStillOpen
+    && input.decision.rejectedGateIds.length === 0
+    && input.decision.nextStep === 'continue_r4f_qualification'
+
+  const outcomeConsistent =
+    input.decision.outcome === 'selected'
+      ? selectedOutcomeConsistent
+      : input.decision.outcome === 'rejected'
+        ? rejectedOutcomeConsistent
+        : notSelectedOutcomeConsistent
+  const decisionReady =
+    input.decision.outcome === 'selected'
+      ? selectedOutcomeConsistent
+      : input.decision.outcome === 'rejected'
+        ? rejectedOutcomeConsistent
+        : false
 
   if (input.decision.outcome === 'selected') {
-    outcomeConsistent =
-      selectionEligible
-      && input.decision.rejectedGateIds.length === 0
-      && input.decision.nextStep === 'r5_owner_authorization_required'
-    decisionReady = outcomeConsistent
     if (!selectionEligible) addReason(blockingReasons, 'selection_without_all_hard_gates')
     if (input.decision.rejectedGateIds.length !== 0) {
       addReason(blockingReasons, 'selected_decision_has_rejected_gates')
@@ -271,11 +288,6 @@ export function verifySupabaseRevision4SelectionDecision(
       addReason(blockingReasons, 'selected_decision_next_step_invalid')
     }
   } else if (input.decision.outcome === 'rejected') {
-    outcomeConsistent =
-      rejectionRequired
-      && sameGateSet(input.decision.rejectedGateIds, failedGateIds)
-      && input.decision.nextStep === 'return_to_architecture_selection'
-    decisionReady = outcomeConsistent
     if (!rejectionRequired) addReason(blockingReasons, 'rejection_without_terminal_failed_gate')
     if (!sameGateSet(input.decision.rejectedGateIds, failedGateIds)) {
       addReason(blockingReasons, 'rejected_gate_set_mismatch')
@@ -284,10 +296,6 @@ export function verifySupabaseRevision4SelectionDecision(
       addReason(blockingReasons, 'rejected_decision_next_step_invalid')
     }
   } else {
-    outcomeConsistent =
-      qualificationStillOpen
-      && input.decision.rejectedGateIds.length === 0
-      && input.decision.nextStep === 'continue_r4f_qualification'
     if (!qualificationStillOpen) {
       addReason(blockingReasons, 'not_selected_without_unresolved_gate')
     }
@@ -326,9 +334,8 @@ export function verifySupabaseRevision4SelectionDecision(
     && !input.safety.retiredCloudflareCollectorRestarted
     && !input.safety.transactionSubmissionPerformed
     && !input.decision.r5RecoveryMutationAuthorized
-
   const r5RequiresSeparateOwnerAuthorization =
-    input.decision.r5RecoveryMutationAuthorized === false
+    !input.decision.r5RecoveryMutationAuthorized
     && (input.decision.outcome !== 'selected'
       || input.decision.nextStep === 'r5_owner_authorization_required')
 
