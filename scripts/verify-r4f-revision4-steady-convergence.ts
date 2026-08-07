@@ -4,7 +4,7 @@ import { resolve } from 'node:path'
 import {
   type SupabaseRevision4SteadyConvergenceInput,
   verifySupabaseRevision4SteadyConvergence,
-} from '../src/shared/supabase-revision4-steady-convergence'
+} from '../src/shared/supabase-revision4-steady-convergence-hardening'
 
 interface Arguments {
   inputPath: string | null
