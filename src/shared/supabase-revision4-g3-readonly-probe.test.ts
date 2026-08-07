@@ -82,13 +82,20 @@ describe('Supabase revision-4 G3 read-only directional probe', () => {
     expect(response.accountingEvidence.accounting.unexplainedDirectionalDeltaReserveBytes).toBe(0)
   })
 
-  it('rejects an unbound source commit and placeholder XRPL response digest', async () => {
+  it('rejects placeholder, mismatched, and unbound source evidence', async () => {
     const input = probeInput()
     input.xrplResponseDigest = '0'.repeat(64)
 
     await expect(
       buildSupabaseRevision4G3ReadonlyProbeResponse(input),
     ).rejects.toThrow('xrplResponseDigest must be a non-placeholder SHA-256')
+
+    input.xrplResponseDigest = 'f'.repeat(64)
+    await expect(
+      buildSupabaseRevision4G3ReadonlyProbeResponse(input),
+    ).rejects.toThrow(
+      'xrplResponseDigest does not match the retained XRPL response body',
+    )
 
     input.xrplResponseDigest = await sha256HexBytes(input.xrplResponseBody)
     input.sourceCommit = 'not-a-commit'
