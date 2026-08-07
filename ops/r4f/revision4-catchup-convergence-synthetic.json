@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "evidenceClass": "synthetic_test_only",
+  "profileId": "supabase_free_postgres_pgcron_edge",
+  "profileRevision": 4,
+  "profileIdentityDigest": "39e8b620a20bb08fbe8306fe753d4d445c5191bcafddbf67721e0c17d5b6bcd5",
+  "evidenceId": "synthetic-r4f-g6-catchup",
+  "capturedAt": "2026-08-07T07:00:00.000Z",
+  "sourceCommit": "0000000000000000000000000000000000000000",
+  "prerequisites": {
+    "g3ProviderReconciliationPassed": false,
+    "g5SteadyConvergencePassed": false,
+    "providerCaptureDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+    "g5SteadyEvidenceDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+    "selectedUnexplainedDeltaReserveBytesPerMinute": 0,
+    "interventionReserveApproved": false,
+    "interventionReserveBytes": 0,
+    "interventionReserveRationaleDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+    "g5SteadyBillableEgressUpperBoundBytesPerMinute": 0,
+    "g5SteadyInvocationsPerMinute": 0
+  },
+  "policy": {
+    "rollingEgressHaltBytes": 4294967296,
+    "rollingWindowMinutes": 44640,
+    "steadyRequiredLedgersPerMinute": 21,
+    "catchupMinimumLedgersPerMinute": 30,
+    "invocationHalt": 400000,
+    "memoryHaltBytes": 234881024,
+    "claimCapLedgers": 12,
+    "minimumConsecutiveMinutes": 6
+  },
+  "minutes": [
+    {
+      "minuteStart": "2026-08-07T07:00:00.000Z",
+      "sourceHeadStartLedgerIndex": 4200100,
+      "sourceHeadEndLedgerIndex": 4200121,
+      "committedWatermarkStartLedgerIndex": 4200090,
+      "committedWatermarkEndLedgerIndex": 4200120,
+      "committedLedgers": 30,
+      "invocationCount": 3,
+      "applicationBillableEgressUpperBoundBytes": 0,
+      "maximumPeakMemoryBytes": 80000000,
+      "maximumClaimLedgers": 12,
+      "accountingDigests": [
+        "0000000000000000000000000000000000000000000000000000000000000000"
+      ],
+      "committed": true,
+      "parentHashContinuityVerified": true,
+      "duplicateLedgerCount": 0,
+      "skippedLedgerCount": 0
+    }
+  ],
+  "safety": {
+    "productionCredentialsUsed": false,
+    "productionMutationPerformed": false,
+    "recoveryMutationCommitted": false,
+    "transactionSubmissionPerformed": false,
+    "publicReaderUnchanged": true,
+    "mainnetDisabled": true,
+    "stabilizationAuthorized": false,
+    "soakAuthorized": false
+  }
+}
