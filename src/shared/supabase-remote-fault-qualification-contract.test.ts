@@ -16,7 +16,9 @@ const leaseMigration = read(
 const edge = read('supabase/functions/xrpl-remote-fault-qualification/index.ts')
 const verifier = read('scripts/verify-supabase-remote-fault-qualification.mjs')
 const publisher = read('scripts/publish-supabase-run-locator.mjs')
-const workflow = read('.github/workflows/supabase-remote-probe.yml')
+const workflow = read(
+  'ops/retired/supabase-remote-probe-r4c-r5-workflow.snapshot.yml',
+)
 const config = read('supabase/config.toml')
 
 describe('Supabase isolated remote fault qualification contract', () => {
@@ -165,7 +167,7 @@ describe('Supabase isolated remote fault qualification contract', () => {
     expect(publisher).toContain('failed-remote-fault-qualification-verification.json')
   })
 
-  it('deploys the ninth function through the existing single guarded workflow', () => {
+  it('retains the ninth function in the historical single guarded workflow contract', () => {
     expect(config).toContain('[functions.xrpl-remote-fault-qualification]')
     expect(config.match(/verify_jwt = false/g)).toHaveLength(9)
     for (const required of [
