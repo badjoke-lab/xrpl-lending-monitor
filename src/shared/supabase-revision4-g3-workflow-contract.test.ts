@@ -45,15 +45,17 @@ describe('R4F G3 workflow safety boundary', () => {
     expect(g3).toContain('supabase secrets unset R4F_G3_PROBE_VERIFY_TOKEN R4F_G3_PROBE_SOURCE_COMMIT')
   })
 
-  it('binds execution to exact commit, project digest, prepare run, and ledger', () => {
+  it('binds execution to exact commit, project digest, prepare run, and ledger proposal', () => {
     for (const required of [
       'test "$commit" = "$(git rev-parse HEAD)"',
       'test "$project_digest" = "$actual_project_digest"',
-      "if (run.conclusion !== 'success')",
-      "if (run.head_sha !== process.env.COMMIT)",
       'ledger=([0-9]+)',
       'project=([a-f0-9]{64})',
       'prepare_run=([0-9]+)',
+      'AUTHORIZATION_CREATED_AT: ${{ github.event.comment.created_at }}',
+      'gh api --paginate',
+      'scripts/verify-r4f-g3-prepare-proposal.mjs',
+      '--authorization-created-at "$AUTHORIZATION_CREATED_AT"',
     ]) {
       expect(g3).toContain(required)
     }
