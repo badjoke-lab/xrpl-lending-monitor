@@ -1,0 +1,78 @@
+name: R4F G3 Isolated Window
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: r4f-g3-isolated-window
+  cancel-in-progress: false
+
+env:
+  QUALIFICATION_ISSUE: '1261'
+
+jobs:
+  prepare:
+    if: >-
+      github.event.issue.number == 1261 &&
+      github.event.comment.user.login == 'badjoke-lab' &&
+      github.event.comment.body == '/r4f-g3-isolation-prepare'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out exact main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Inspect exact collector scheduler read-only
+        id: scheduler
+        run: node scripts/prepare-r4f-g3-isolated-window.mjs
+
+      - name: Upload sanitized scheduler preparation evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: r4f-g3-isolated-window-prepare-evidence
+          path: r4f-g3-isolated-window-prepare-evidence/scheduler-prepare.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish sanitized isolation preparation locator
+        env:
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          JOB_ID: ${{ steps.scheduler.outputs.job_id }}
+          JOB_NAME: ${{ steps.scheduler.outputs.job_name }}
+          SCHEDULE: ${{ steps.scheduler.outputs.schedule }}
+          COMMAND_DIGEST: ${{ steps.scheduler.outputs.command_digest }}
+          PROJECT_DIGEST: ${{ steps.scheduler.outputs.project_digest }}
+          RUNTIME_STATUS: ${{ steps.scheduler.outputs.runtime_status }}
+          RUNTIME_TICK_COUNT: ${{ steps.scheduler.outputs.runtime_tick_count }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/isolation-prepare.md <<EOF
+          ## R4F G3 isolated-window scheduler preparation
+
+          Run: ${RUN_URL}
+          Source commit: \`${GITHUB_SHA}\`
+          Project identity digest: \`${PROJECT_DIGEST}\`
+          Collector cron job: \`${JOB_NAME}\`
+          Cron job id: \`${JOB_ID}\`
+          Schedule: \`${SCHEDULE}\`
+          Scheduler command digest: \`${COMMAND_DIGEST}\`
+          Collector runtime status: \`${RUNTIME_STATUS}\`
+          Collector tick count: \`${RUNTIME_TICK_COUNT}\`
+
+          This preparation is read-only. It does not unschedule or reschedule the collector, deploy a function, change a secret, mutate R5 state, enable Mainnet, or authorize stabilization/soak.
+          EOF
+          gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/isolation-prepare.md
