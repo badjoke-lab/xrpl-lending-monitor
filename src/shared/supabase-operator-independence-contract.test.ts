@@ -11,7 +11,9 @@ const verifier = read('scripts/verify-supabase-operator-independence.mjs')
 const resourceVerifier = read('scripts/verify-supabase-resource-headroom-guard.mjs')
 const resourcePublisher = read('scripts/publish-supabase-resource-run-locator.mjs')
 const operatorPublisher = read('scripts/publish-supabase-operator-run-locator.mjs')
-const workflow = read('.github/workflows/supabase-remote-probe.yml')
+const workflow = read(
+  'ops/retired/supabase-remote-probe-r4c-r5-workflow.snapshot.yml',
+)
 
 const exactFunctionDeployments = [
   'xrpl-collector-tick',
@@ -52,7 +54,7 @@ describe('Supabase G9 operator-independence contract', () => {
     ]) expect(verifier).toContain(required)
   })
 
-  it('requires exactly the sixteen scripted deployments and migration application', () => {
+  it('retains exactly the sixteen scripted deployments and migration application in the historical contract', () => {
     expect(exactFunctionDeployments).toHaveLength(16)
     for (const slug of exactFunctionDeployments) {
       expect(verifier).toContain(`'${slug}'`)
@@ -135,7 +137,7 @@ describe('Supabase G9 operator-independence contract', () => {
     ]) expect(verifier).toContain(required)
   })
 
-  it('requires automatic artifact and issue evidence publication', () => {
+  it('retains automatic artifact and issue evidence publication in the historical contract', () => {
     for (const required of [
       'Upload sanitized remote evidence',
       'Publish sanitized run locator',
@@ -166,7 +168,7 @@ describe('Supabase G9 operator-independence contract', () => {
     ]) expect(operatorPublisher).toContain(required)
   })
 
-  it('runs after revision-3 resource evidence and is uploaded by the existing workflow', () => {
+  it('runs after revision-3 resource evidence and is retained by the historical workflow contract', () => {
     expect(resourceVerifier).toContain(
       "await import('./verify-supabase-revision3-accounting.mjs')",
     )
@@ -177,6 +179,7 @@ describe('Supabase G9 operator-independence contract', () => {
       resourceVerifier.indexOf('verify-supabase-operator-independence.mjs'),
     )
     expect(workflow).toContain('path: supabase-remote-probe-evidence')
+    expect(workflow).toContain('RETIRED / NON-EXECUTABLE CONTRACT SNAPSHOT')
     expect(verifier).toContain('verified-operator-independence.json')
     expect(verifier).toContain('failed-operator-independence.json')
   })
