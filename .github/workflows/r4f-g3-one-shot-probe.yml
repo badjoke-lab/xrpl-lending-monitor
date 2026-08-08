@@ -98,6 +98,7 @@ jobs:
       SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
       GH_TOKEN: ${{ github.token }}
       AUTHORIZATION_COMMENT_ID: ${{ github.event.comment.id }}
+      AUTHORIZATION_CREATED_AT: ${{ github.event.comment.created_at }}
       AUTHORIZATION_BODY: ${{ github.event.comment.body }}
     steps:
       - name: Check out current main
@@ -128,15 +129,17 @@ jobs:
           test "$project_digest" = "$actual_project_digest"
 
           gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${prepare_run}" > /tmp/prepare-run.json
-          PREPARE_RUN="$prepare_run" COMMIT="$commit" node --input-type=module <<'NODE'
-          import { readFileSync } from 'node:fs'
-          const run = JSON.parse(readFileSync('/tmp/prepare-run.json', 'utf8'))
-          if (run.name !== 'R4F G3 One-Shot Probe') throw new Error('prepare run workflow mismatch')
-          if (run.event !== 'issue_comment') throw new Error('prepare run event mismatch')
-          if (run.conclusion !== 'success') throw new Error('prepare run is not successful')
-          if (String(run.id) !== process.env.PREPARE_RUN) throw new Error('prepare run id mismatch')
-          if (run.head_sha !== process.env.COMMIT) throw new Error('prepare run commit mismatch')
-          NODE
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${QUALIFICATION_ISSUE}/comments?per_page=100" \
+            | jq -s 'add' > /tmp/issue-comments.json
+
+          node scripts/verify-r4f-g3-prepare-proposal.mjs \
+            --comments /tmp/issue-comments.json \
+            --run /tmp/prepare-run.json \
+            --prepare-run "$prepare_run" \
+            --commit "$commit" \
+            --ledger "$ledger" \
+            --project-digest "$project_digest" \
+            --authorization-created-at "$AUTHORIZATION_CREATED_AT"
 
           printf 'commit=%s\nledger=%s\nproject_digest=%s\nprepare_run=%s\n' "$commit" "$ledger" "$project_digest" "$prepare_run" >> "$GITHUB_OUTPUT"
 
