@@ -17,7 +17,9 @@ const tick = read('supabase/functions/xrpl-steady-batch-tick/index.ts')
 const control = read('supabase/functions/xrpl-steady-throughput-qualification/index.ts')
 const verifier = read('scripts/verify-supabase-steady-throughput.mjs')
 const publisher = read('scripts/publish-supabase-steady-run-locator.mjs')
-const workflow = read('.github/workflows/supabase-remote-probe.yml')
+const workflow = read(
+  'ops/retired/supabase-remote-probe-r4c-r5-workflow.snapshot.yml',
+)
 const config = read('supabase/config.toml')
 
 describe('Supabase R4C2d network steady throughput contract', () => {
@@ -171,7 +173,7 @@ describe('Supabase R4C2d network steady throughput contract', () => {
     }
   })
 
-  it('deploys functions 12 and 13 through the existing single guarded workflow', () => {
+  it('retains functions 12 and 13 in the historical guarded workflow contract', () => {
     expect(config).toContain('[functions.xrpl-steady-batch-tick]')
     expect(config).toContain('[functions.xrpl-steady-throughput-qualification]')
     expect(config.match(/verify_jwt = false/g)).toHaveLength(9)
