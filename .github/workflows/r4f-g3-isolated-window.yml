@@ -50,6 +50,7 @@ jobs:
       - name: Publish exact isolated-window pause proposal
         env:
           RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SOURCE_COMMIT: ${{ steps.scheduler.outputs.source_commit }}
           JOB_ID: ${{ steps.scheduler.outputs.job_id }}
           JOB_NAME: ${{ steps.scheduler.outputs.job_name }}
           SCHEDULE: ${{ steps.scheduler.outputs.schedule }}
@@ -60,12 +61,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          [[ "$SOURCE_COMMIT" =~ ^[a-f0-9]{40}$ ]]
           cat > /tmp/isolation-prepare.md <<EOF
           ## R4F G3 isolated-window pause authorization proposal
 
           Preparation run: \`${GITHUB_RUN_ID}\`
           Run: ${RUN_URL}
-          Source commit: \`${GITHUB_SHA}\`
+          Source commit: \`${SOURCE_COMMIT}\`
           Project identity digest: \`${PROJECT_DIGEST}\`
           Collector cron job: \`${JOB_NAME}\`
           Cron job id: \`${JOB_ID}\`
@@ -79,7 +81,7 @@ jobs:
 
           Exact pause authorization command:
 
-          \`/r4f-g3-isolation-pause commit=${GITHUB_SHA} project=${PROJECT_DIGEST} job=${JOB_ID} command=${COMMAND_DIGEST} prepare_run=${GITHUB_RUN_ID}\`
+          \`/r4f-g3-isolation-pause commit=${SOURCE_COMMIT} project=${PROJECT_DIGEST} job=${JOB_ID} command=${COMMAND_DIGEST} prepare_run=${GITHUB_RUN_ID}\`
 
           This preparation itself is read-only. The pause command authorizes only temporary unscheduling of the exact one-minute collector cron plus the bounded restore watchdog. It does not authorize schema/data migration, R5 mutation, public-reader change, Mainnet, stabilization, or soak.
           EOF
@@ -161,13 +163,14 @@ jobs:
             --output-directory r4f-g3-isolated-window-evidence
 
           node --input-type=module <<'NODE'
-          import { readFileSync } from 'node:fs'
+          import { appendFileSync, readFileSync } from 'node:fs'
           const value = JSON.parse(readFileSync('r4f-g3-isolated-window-evidence/pause.json', 'utf8'))
           if (value.purpose !== 'r4f-g3-isolated-window-pause') throw new Error('pause evidence purpose mismatch')
           if (value.checks?.automaticRestoreWatchdogInstalledFirst !== true) throw new Error('restore watchdog ordering not verified')
           if (value.checks?.collectorSchedulerPaused !== true) throw new Error('collector scheduler pause not verified')
           if (value.checks?.quietIntervalSeconds !== 65) throw new Error('quiet interval mismatch')
           const output = process.env.GITHUB_OUTPUT
+          if (!output) throw new Error('GITHUB_OUTPUT is unavailable')
           const lines = [
             `paused_at=${value.pausedAt}`,
             `quiet_ready_at=${value.quietReadyAt}`,
@@ -175,7 +178,7 @@ jobs:
             `watchdog_job_id=${value.scheduler.watchdogJobId}`,
             `tick_count=${value.collectorRuntime.tickCount}`,
           ]
-          require('node:fs').appendFileSync(output, `${lines.join('\n')}\n`)
+          appendFileSync(output, `${lines.join('\n')}\n`)
           NODE
 
       - name: Upload sanitized pause evidence
