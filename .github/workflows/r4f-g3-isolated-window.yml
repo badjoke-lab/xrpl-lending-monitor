@@ -47,7 +47,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Publish sanitized isolation preparation locator
+      - name: Publish exact isolated-window pause proposal
         env:
           RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
           JOB_ID: ${{ steps.scheduler.outputs.job_id }}
@@ -61,8 +61,9 @@ jobs:
         run: |
           set -euo pipefail
           cat > /tmp/isolation-prepare.md <<EOF
-          ## R4F G3 isolated-window scheduler preparation
+          ## R4F G3 isolated-window pause authorization proposal
 
+          Preparation run: \`${GITHUB_RUN_ID}\`
           Run: ${RUN_URL}
           Source commit: \`${GITHUB_SHA}\`
           Project identity digest: \`${PROJECT_DIGEST}\`
@@ -73,6 +74,244 @@ jobs:
           Collector runtime status: \`${RUNTIME_STATUS}\`
           Collector tick count: \`${RUNTIME_TICK_COUNT}\`
 
-          This preparation is read-only. It does not unschedule or reschedule the collector, deploy a function, change a secret, mutate R5 state, enable Mainnet, or authorize stabilization/soak.
+          A database-local watchdog is installed before the collector is paused.
+          The pause is bounded to at most 15 minutes. On runner failure, the watchdog restores the exact collector command by digest. On normal completion, an explicit resume restores it sooner.
+
+          Exact pause authorization command:
+
+          \`/r4f-g3-isolation-pause commit=${GITHUB_SHA} project=${PROJECT_DIGEST} job=${JOB_ID} command=${COMMAND_DIGEST} prepare_run=${GITHUB_RUN_ID}\`
+
+          This preparation itself is read-only. The pause command authorizes only temporary unscheduling of the exact one-minute collector cron plus the bounded restore watchdog. It does not authorize schema/data migration, R5 mutation, public-reader change, Mainnet, stabilization, or soak.
           EOF
           gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/isolation-prepare.md
+
+  pause:
+    if: >-
+      github.event.issue.number == 1261 &&
+      github.event.comment.user.login == 'badjoke-lab' &&
+      startsWith(github.event.comment.body, '/r4f-g3-isolation-pause ')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+      GH_TOKEN: ${{ github.token }}
+      AUTHORIZATION_BODY: ${{ github.event.comment.body }}
+      AUTHORIZATION_CREATED_AT: ${{ github.event.comment.created_at }}
+      AUTHORIZATION_COMMENT_ID: ${{ github.event.comment.id }}
+    steps:
+      - name: Check out current main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Parse and verify exact pause authorization
+        id: auth
+        shell: bash
+        run: |
+          set -euo pipefail
+          regex='^/r4f-g3-isolation-pause commit=([a-f0-9]{40}) project=([a-f0-9]{64}) job=([0-9]+) command=([a-f0-9]{64}) prepare_run=([0-9]+)$'
+          [[ "$AUTHORIZATION_BODY" =~ $regex ]] || { echo 'pause authorization command shape mismatch' >&2; exit 1; }
+          commit="${BASH_REMATCH[1]}"
+          project_digest="${BASH_REMATCH[2]}"
+          job_id="${BASH_REMATCH[3]}"
+          command_digest="${BASH_REMATCH[4]}"
+          prepare_run="${BASH_REMATCH[5]}"
+
+          test "$job_id" -gt 0
+          test "$prepare_run" -gt 0
+          test "$commit" = "$(git rev-parse HEAD)"
+          [[ "$SUPABASE_PROJECT_ID" =~ ^[a-z]{20}$ ]]
+          actual_project_digest="$(printf '%s' "$SUPABASE_PROJECT_ID" | sha256sum | awk '{print $1}')"
+          test "$project_digest" = "$actual_project_digest"
+
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${prepare_run}" > /tmp/isolation-prepare-run.json
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${QUALIFICATION_ISSUE}/comments?per_page=100" \
+            | jq -s 'add' > /tmp/issue-comments.json
+
+          node scripts/verify-r4f-g3-isolation-prepare-proposal.mjs \
+            --comments /tmp/issue-comments.json \
+            --run /tmp/isolation-prepare-run.json \
+            --prepare-run "$prepare_run" \
+            --commit "$commit" \
+            --project-digest "$project_digest" \
+            --job-id "$job_id" \
+            --command-digest "$command_digest" \
+            --authorization-created-at "$AUTHORIZATION_CREATED_AT"
+
+          printf 'commit=%s\nproject_digest=%s\njob_id=%s\ncommand_digest=%s\nprepare_run=%s\n' \
+            "$commit" "$project_digest" "$job_id" "$command_digest" "$prepare_run" >> "$GITHUB_OUTPUT"
+
+      - name: Pause only the exact collector scheduler with automatic restore watchdog
+        id: pause
+        env:
+          PROJECT_DIGEST: ${{ steps.auth.outputs.project_digest }}
+          JOB_ID: ${{ steps.auth.outputs.job_id }}
+          COMMAND_DIGEST: ${{ steps.auth.outputs.command_digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/manage-r4f-g3-isolated-window.mjs \
+            --mode pause \
+            --expected-job-id "$JOB_ID" \
+            --expected-command-digest "$COMMAND_DIGEST" \
+            --expected-project-digest "$PROJECT_DIGEST" \
+            --output-directory r4f-g3-isolated-window-evidence
+
+          node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs'
+          const value = JSON.parse(readFileSync('r4f-g3-isolated-window-evidence/pause.json', 'utf8'))
+          if (value.purpose !== 'r4f-g3-isolated-window-pause') throw new Error('pause evidence purpose mismatch')
+          if (value.checks?.automaticRestoreWatchdogInstalledFirst !== true) throw new Error('restore watchdog ordering not verified')
+          if (value.checks?.collectorSchedulerPaused !== true) throw new Error('collector scheduler pause not verified')
+          if (value.checks?.quietIntervalSeconds !== 65) throw new Error('quiet interval mismatch')
+          const output = process.env.GITHUB_OUTPUT
+          const lines = [
+            `paused_at=${value.pausedAt}`,
+            `quiet_ready_at=${value.quietReadyAt}`,
+            `restore_deadline=${value.automaticRestoreDeadline}`,
+            `watchdog_job_id=${value.scheduler.watchdogJobId}`,
+            `tick_count=${value.collectorRuntime.tickCount}`,
+          ]
+          require('node:fs').appendFileSync(output, `${lines.join('\n')}\n`)
+          NODE
+
+      - name: Upload sanitized pause evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r4f-g3-isolated-window-pause-evidence
+          path: r4f-g3-isolated-window-evidence
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Publish isolated-window ready locator
+        if: success()
+        env:
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          PROJECT_DIGEST: ${{ steps.auth.outputs.project_digest }}
+          JOB_ID: ${{ steps.auth.outputs.job_id }}
+          COMMAND_DIGEST: ${{ steps.auth.outputs.command_digest }}
+          QUIET_READY_AT: ${{ steps.pause.outputs.quiet_ready_at }}
+          RESTORE_DEADLINE: ${{ steps.pause.outputs.restore_deadline }}
+          TICK_COUNT: ${{ steps.pause.outputs.tick_count }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/isolation-ready.md <<EOF
+          ## R4F G3 isolated window ready
+
+          Pause run: ${RUN_URL}
+          Authorization comment: \`${AUTHORIZATION_COMMENT_ID}\`
+          Project identity digest: \`${PROJECT_DIGEST}\`
+          Prior collector cron job id: \`${JOB_ID}\`
+          Scheduler command digest: \`${COMMAND_DIGEST}\`
+          Quiet-ready at: \`${QUIET_READY_AT}\`
+          Collector tick count at quiet-ready: \`${TICK_COUNT}\`
+          Automatic restore deadline: \`${RESTORE_DEADLINE}\`
+
+          The one-minute collector scheduler is absent and the collector has been quiet for at least 65 seconds. Capture the project-filtered Supabase Usage → Egress BEFORE reading now. Do not wait past the automatic restore deadline.
+
+          Recovery-only resume command after the bounded experiment:
+
+          \`/r4f-g3-isolation-resume project=${PROJECT_DIGEST} job=${JOB_ID} command=${COMMAND_DIGEST} pause_run=${GITHUB_RUN_ID}\`
+          EOF
+          gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/isolation-ready.md
+
+  resume:
+    if: >-
+      github.event.issue.number == 1261 &&
+      github.event.comment.user.login == 'badjoke-lab' &&
+      startsWith(github.event.comment.body, '/r4f-g3-isolation-resume ')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+      GH_TOKEN: ${{ github.token }}
+      RESUME_BODY: ${{ github.event.comment.body }}
+    steps:
+      - name: Check out current main for recovery code
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Parse and verify recovery-only resume request
+        id: resume_auth
+        shell: bash
+        run: |
+          set -euo pipefail
+          regex='^/r4f-g3-isolation-resume project=([a-f0-9]{64}) job=([0-9]+) command=([a-f0-9]{64}) pause_run=([0-9]+)$'
+          [[ "$RESUME_BODY" =~ $regex ]] || { echo 'resume command shape mismatch' >&2; exit 1; }
+          project_digest="${BASH_REMATCH[1]}"
+          job_id="${BASH_REMATCH[2]}"
+          command_digest="${BASH_REMATCH[3]}"
+          pause_run="${BASH_REMATCH[4]}"
+          test "$job_id" -gt 0
+          test "$pause_run" -gt 0
+          [[ "$SUPABASE_PROJECT_ID" =~ ^[a-z]{20}$ ]]
+          actual_project_digest="$(printf '%s' "$SUPABASE_PROJECT_ID" | sha256sum | awk '{print $1}')"
+          test "$project_digest" = "$actual_project_digest"
+
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${pause_run}" > /tmp/pause-run.json
+          PAUSE_RUN="$pause_run" node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs'
+          const run = JSON.parse(readFileSync('/tmp/pause-run.json', 'utf8'))
+          if (run.name !== 'R4F G3 Isolated Window') throw new Error('pause run workflow mismatch')
+          if (run.event !== 'issue_comment') throw new Error('pause run event mismatch')
+          if (run.conclusion !== 'success') throw new Error('pause run was not successful')
+          if (String(run.id) !== process.env.PAUSE_RUN) throw new Error('pause run id mismatch')
+          NODE
+
+          printf 'project_digest=%s\njob_id=%s\ncommand_digest=%s\npause_run=%s\n' \
+            "$project_digest" "$job_id" "$command_digest" "$pause_run" >> "$GITHUB_OUTPUT"
+
+      - name: Restore exact collector scheduler and remove isolation watchdog
+        env:
+          PROJECT_DIGEST: ${{ steps.resume_auth.outputs.project_digest }}
+          JOB_ID: ${{ steps.resume_auth.outputs.job_id }}
+          COMMAND_DIGEST: ${{ steps.resume_auth.outputs.command_digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/manage-r4f-g3-isolated-window.mjs \
+            --mode resume \
+            --expected-job-id "$JOB_ID" \
+            --expected-command-digest "$COMMAND_DIGEST" \
+            --expected-project-digest "$PROJECT_DIGEST" \
+            --output-directory r4f-g3-isolated-window-evidence
+
+      - name: Upload sanitized resume evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r4f-g3-isolated-window-resume-evidence
+          path: r4f-g3-isolated-window-evidence
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Publish scheduler restoration locator
+        if: success()
+        env:
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          PAUSE_RUN: ${{ steps.resume_auth.outputs.pause_run }}
+          PROJECT_DIGEST: ${{ steps.resume_auth.outputs.project_digest }}
+          COMMAND_DIGEST: ${{ steps.resume_auth.outputs.command_digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/isolation-resume.md <<EOF
+          ## R4F G3 isolated window restored
+
+          Resume run: ${RUN_URL}
+          Pause run: \`${PAUSE_RUN}\`
+          Project identity digest: \`${PROJECT_DIGEST}\`
+          Scheduler command digest: \`${COMMAND_DIGEST}\`
+
+          The exact collector scheduler has been restored and G3 isolation watchdogs have been removed. This resume path does not mutate R5 state, change the public reader, enable Mainnet, or authorize stabilization/soak.
+          EOF
+          gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/isolation-resume.md
