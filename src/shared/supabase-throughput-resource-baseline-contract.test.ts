@@ -13,7 +13,9 @@ const migration = read(
 const edge = read('supabase/functions/xrpl-throughput-resource-baseline/index.ts')
 const verifier = read('scripts/verify-supabase-throughput-resource-baseline.mjs')
 const publisher = read('scripts/publish-supabase-run-locator.mjs')
-const workflow = read('.github/workflows/supabase-remote-probe.yml')
+const workflow = read(
+  'ops/retired/supabase-remote-probe-r4c-r5-workflow.snapshot.yml',
+)
 const config = read('supabase/config.toml')
 
 describe('Supabase R4C2d throughput and resource baseline contract', () => {
@@ -115,7 +117,7 @@ describe('Supabase R4C2d throughput and resource baseline contract', () => {
     expect(publisher).toContain('failed-throughput-resource-baseline-verification.json')
   })
 
-  it('deploys the tenth function through the existing single guarded workflow', () => {
+  it('retains the tenth function in the historical single guarded workflow contract', () => {
     expect(config).toContain('[functions.xrpl-throughput-resource-baseline]')
     expect(config).toContain('verify_jwt=false')
     expect(config.match(/verify_jwt = false/g)).toHaveLength(9)
