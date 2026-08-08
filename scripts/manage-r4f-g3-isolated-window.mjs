@@ -55,6 +55,8 @@ function rowsFromResponse(body) {
 }
 
 async function managementQuery(query, parameters = [], readOnly = true) {
+  const payload = { query, parameters }
+  if (readOnly) payload.read_only = true
   const response = await fetch(endpoint, {
     method: 'POST',
     headers: {
@@ -62,7 +64,7 @@ async function managementQuery(query, parameters = [], readOnly = true) {
       'content-type': 'application/json',
       accept: 'application/json',
     },
-    body: JSON.stringify({ query, parameters, read_only: readOnly }),
+    body: JSON.stringify(payload),
     signal: AbortSignal.timeout(30_000),
   })
   const text = await response.text()
@@ -160,7 +162,20 @@ async function waitUntilRuntimeStopped(maxMilliseconds = 70_000) {
 
 function buildWatchdogCommand({ watchdogName, deadline, collectorCommand }) {
   const encoded = Buffer.from(collectorCommand, 'utf8').toString('base64')
-  return `do $r4fg3watchdog$\nbegin\n  if clock_timestamp() >= '${deadline}'::timestamptz then\n    if not exists (select 1 from cron.job where jobname = '${collectorJobName}') then\n      perform cron.schedule(\n        '${collectorJobName}',\n        '${collectorSchedule}',\n        convert_from(decode('${encoded}', 'base64'), 'UTF8')\n      );\n    end if;\n    perform cron.unschedule('${watchdogName}');\n  end if;\nend\n$r4fg3watchdog$;`
+  return `do $r4fg3watchdog$
+begin
+  if clock_timestamp() >= '${deadline}'::timestamptz then
+    if not exists (select 1 from cron.job where jobname = '${collectorJobName}') then
+      perform cron.schedule(
+        '${collectorJobName}',
+        '${collectorSchedule}',
+        convert_from(decode('${encoded}', 'base64'), 'UTF8')
+      );
+    end if;
+    perform cron.unschedule('${watchdogName}');
+  end if;
+end
+$r4fg3watchdog$;`
 }
 
 async function scheduleJob(name, schedule, command) {
@@ -325,7 +340,6 @@ async function resume() {
   const collectorJobs = await readCollectorJobs()
   const watchdogs = await readWatchdogs()
   let restoredFromWatchdog = false
-  let collectorCommand = null
 
   if (collectorJobs.length === 1) {
     validateCollectorCommand(String(collectorJobs[0].command ?? ''))
@@ -337,8 +351,7 @@ async function resume() {
     const decodedCommands = watchdogs.map((watchdog) => decodeCollectorCommandFromWatchdog(watchdog.command))
     const digests = new Set(decodedCommands.map(commandDigest))
     if (digests.size !== 1 || !digests.has(expectedCommandDigest)) throw new Error('watchdog collector command digests disagree')
-    collectorCommand = decodedCommands[0]
-    await scheduleJob(collectorJobName, collectorSchedule, collectorCommand)
+    await scheduleJob(collectorJobName, collectorSchedule, decodedCommands[0])
     await verifyCollectorRestored()
     restoredFromWatchdog = true
   } else {
