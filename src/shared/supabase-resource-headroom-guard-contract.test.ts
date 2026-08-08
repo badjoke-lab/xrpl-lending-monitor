@@ -14,7 +14,9 @@ const recorder = read('scripts/record-supabase-external-resource-snapshot.mjs')
 const runtime = read('scripts/record-supabase-runtime-resource-log-snapshot.mjs')
 const verifier = read('scripts/verify-supabase-resource-headroom-guard.mjs')
 const publisher = read('scripts/publish-supabase-resource-run-locator.mjs')
-const workflow = read('.github/workflows/supabase-remote-probe.yml')
+const workflow = read(
+  'ops/retired/supabase-remote-probe-r4c-r5-workflow.snapshot.yml',
+)
 const config = read('supabase/config.toml')
 
 describe('Supabase R4C2d resource headroom guard contract', () => {
@@ -173,7 +175,7 @@ describe('Supabase R4C2d resource headroom guard contract', () => {
     ]) expect(verifier).toContain(required)
   })
 
-  it('deploys through the existing single Supabase workflow', () => {
+  it('retains the existing single Supabase workflow contract outside executable Actions', () => {
     expect(config).toContain('[functions.xrpl-resource-headroom-guard]')
     for (const required of [
       "'scripts/verify-supabase-resource-headroom-guard.mjs'",
