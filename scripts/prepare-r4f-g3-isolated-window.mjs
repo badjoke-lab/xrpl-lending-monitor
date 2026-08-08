@@ -1,16 +1,17 @@
+import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdir, writeFile } from 'node:fs/promises'
 
 const projectRef = process.env.SUPABASE_PROJECT_ID ?? ''
 const accessToken = process.env.SUPABASE_ACCESS_TOKEN ?? ''
 const outputPath = process.env.GITHUB_OUTPUT ?? ''
-const sourceCommit = (process.env.GITHUB_SHA ?? '').toLowerCase()
+const sourceCommit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim().toLowerCase()
 const sourceRunId = Number(process.env.GITHUB_RUN_ID ?? 0)
 
 if (!/^[a-z]{20}$/u.test(projectRef)) throw new Error('SUPABASE_PROJECT_ID must be an exact project ref')
 if (accessToken.length < 20) throw new Error('SUPABASE_ACCESS_TOKEN is unavailable')
 if (!outputPath) throw new Error('GITHUB_OUTPUT is unavailable')
-if (!/^[a-f0-9]{40}$/u.test(sourceCommit)) throw new Error('GITHUB_SHA must be an exact commit SHA')
+if (!/^[a-f0-9]{40}$/u.test(sourceCommit)) throw new Error('checked-out main HEAD must be an exact commit SHA')
 if (!Number.isSafeInteger(sourceRunId) || sourceRunId <= 0) throw new Error('GITHUB_RUN_ID must be a positive safe integer')
 
 const endpoint = `https://api.supabase.com/v1/projects/${projectRef}/database/query`
@@ -144,6 +145,7 @@ const evidence = {
     oneMinuteCadence: true,
     vaultReferencesOnly: true,
     collectorFunctionPathPinned: true,
+    checkedOutMainHeadRetained: true,
     projectRefRetained: false,
     credentialsRetained: false,
     readOnlyManagementQuery: true,
@@ -157,6 +159,7 @@ await writeFile(`${evidenceDirectory}/scheduler-prepare.json`, `${JSON.stringify
 await writeFile(
   outputPath,
   [
+    `source_commit=${sourceCommit}`,
     `job_id=${jobId}`,
     `job_name=${jobName}`,
     `schedule=${schedule}`,
@@ -169,6 +172,7 @@ await writeFile(
   { flag: 'a' },
 )
 process.stdout.write(`${JSON.stringify({
+  sourceCommit,
   jobId,
   jobName,
   schedule,

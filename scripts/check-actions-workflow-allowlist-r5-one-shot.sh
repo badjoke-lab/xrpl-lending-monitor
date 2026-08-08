@@ -157,7 +157,7 @@ for forbidden in (
     "MAINNET_ENABLED: 'true'",
 ):
     if forbidden in g3_isolated:
-        raise SystemExit(f"R4F G3 isolation preparation contains forbidden capability: {forbidden.strip()}")
+        raise SystemExit(f"R4F G3 isolation workflow contains forbidden direct capability: {forbidden.strip()}")
 if g3_isolated.count("issues: write") != 1:
     raise SystemExit("R4F G3 isolation issue-write capability must remain exactly one permission")
 '''
@@ -165,7 +165,7 @@ text = text[:supabase_start] + replacement + text[scheduled_start:]
 replace_once(
     "R4F G3 policy summary",
     "Actions workflow allowlist passed: CI, guarded legacy recovery workflows, one read-only production probe, one read-only R4C2c witness discovery, one guarded Supabase deployment verifier, and one finite R5 recovery burst with exact owner-command activation; no scheduled workflows.",
-    "Actions workflow allowlist passed: CI, guarded legacy recovery workflows, one read-only production probe, one read-only R4C2c witness discovery, one fail-closed halted legacy Supabase workflow, one read-only R4F G3 isolation preparation workflow, one isolated R4F G3 probe workflow, and one finite R5 recovery burst; no scheduled workflows.",
+    "Actions workflow allowlist passed: CI, guarded legacy recovery workflows, one read-only production probe, one read-only R4C2c witness discovery, one fail-closed halted legacy Supabase workflow, one bounded R4F G3 isolation-control workflow, one isolated R4F G3 probe workflow, and one finite R5 recovery burst; no scheduled workflows.",
 )
 
 # Existing R5 one-shot diagnostic policy exceptions.
@@ -234,3 +234,4 @@ generated_path.write_text(text)
 PY
 chmod 700 "$generated_script"
 bash "$generated_script" "$@"
+node scripts/check-r4f-g3-isolation-control-policy.mjs
