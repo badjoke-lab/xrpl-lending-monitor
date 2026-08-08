@@ -27,46 +27,26 @@ def replace_once(name: str, old: str, new: str) -> None:
     text = updated
 
 
-# R4F changes are applied first so the current workflow surface is explicit
+# R4F changes are applied first so the current eleven-workflow surface is explicit
 # before the retained R5 one-shot diagnostic exceptions are layered on top.
 replace_once(
-    "R4F G3 workflow allowlist entry",
+    "R4F G3 workflow allowlist entries",
     "  r4c2c-devnet-historical-witness.yml\n  r5-bounded-recovery-burst.yml",
-    "  r4c2c-devnet-historical-witness.yml\n  r4f-g3-one-shot-probe.yml\n  r5-bounded-recovery-burst.yml",
-)
-replace_once(
-    "R4F G3 isolation workflow allowlist entry",
-    "  r4f-g3-one-shot-probe.yml\n  r5-bounded-recovery-burst.yml",
-    "  r4f-g3-isolated-window.yml\n  r4f-g3-one-shot-probe.yml\n  r5-bounded-recovery-burst.yml",
+    "  r4c2c-devnet-historical-witness.yml\n  r4f-g3-isolated-window.yml\n  r4f-g3-one-shot-probe.yml\n  r5-bounded-recovery-burst.yml",
 )
 replace_once(
     "R4F G3 workflow count",
     "GitHub Actions workflow count must remain exactly nine while the guarded R5 recovery workflows are active.",
-    "GitHub Actions workflow count must remain exactly ten while R4F qualification and the guarded R5 workflows are active.",
-)
-replace_once(
-    "R4F G3 isolation workflow count",
-    "GitHub Actions workflow count must remain exactly ten while R4F qualification and the guarded R5 workflows are active.",
     "GitHub Actions workflow count must remain exactly eleven while R4F qualification and the guarded R5 workflows are active.",
 )
 replace_once(
-    "R4F G3 workflow policy symbol",
+    "R4F G3 workflow policy symbols",
     'historical_witness = "r4c2c-devnet-historical-witness.yml"\nr5_burst = "r5-bounded-recovery-burst.yml"\nsupabase_remote = "supabase-remote-probe.yml"',
-    'historical_witness = "r4c2c-devnet-historical-witness.yml"\ng3_probe = "r4f-g3-one-shot-probe.yml"\nr5_burst = "r5-bounded-recovery-burst.yml"\nsupabase_remote = "supabase-remote-probe.yml"',
-)
-replace_once(
-    "R4F G3 isolation workflow policy symbol",
-    'historical_witness = "r4c2c-devnet-historical-witness.yml"\ng3_probe = "r4f-g3-one-shot-probe.yml"\nr5_burst = "r5-bounded-recovery-burst.yml"',
-    'historical_witness = "r4c2c-devnet-historical-witness.yml"\ng3_isolation = "r4f-g3-isolated-window.yml"\ng3_probe = "r4f-g3-one-shot-probe.yml"\nr5_burst = "r5-bounded-recovery-burst.yml"',
+    'historical_witness = "r4c2c-devnet-historical-witness.yml"\ng3_isolation = "r4f-g3-isolated-window.yml"\ng3_probe = "r4f-g3-one-shot-probe.yml"\nr5_burst = "r5-bounded-recovery-burst.yml"\nsupabase_remote = "supabase-remote-probe.yml"',
 )
 replace_once(
     "R4F G3 trigger policy",
     '    historical_witness: ["workflow_dispatch", "push"],\n    r5_burst: ["workflow_dispatch", "issue_comment"],',
-    '    historical_witness: ["workflow_dispatch", "push"],\n    g3_probe: ["issue_comment"],\n    r5_burst: ["workflow_dispatch", "issue_comment"],',
-)
-replace_once(
-    "R4F G3 isolation trigger policy",
-    '    historical_witness: ["workflow_dispatch", "push"],\n    g3_probe: ["issue_comment"],\n    r5_burst: ["workflow_dispatch", "issue_comment"],',
     '    historical_witness: ["workflow_dispatch", "push"],\n    g3_isolation: ["issue_comment"],\n    g3_probe: ["issue_comment"],\n    r5_burst: ["workflow_dispatch", "issue_comment"],',
 )
 replace_once(
@@ -185,11 +165,6 @@ text = text[:supabase_start] + replacement + text[scheduled_start:]
 replace_once(
     "R4F G3 policy summary",
     "Actions workflow allowlist passed: CI, guarded legacy recovery workflows, one read-only production probe, one read-only R4C2c witness discovery, one guarded Supabase deployment verifier, and one finite R5 recovery burst with exact owner-command activation; no scheduled workflows.",
-    "Actions workflow allowlist passed: CI, guarded legacy recovery workflows, one read-only production probe, one read-only R4C2c witness discovery, one fail-closed halted legacy Supabase workflow, one isolated R4F G3 owner-comment workflow, and one finite R5 recovery burst; no scheduled workflows.",
-)
-replace_once(
-    "R4F G3 isolation policy summary",
-    "Actions workflow allowlist passed: CI, guarded legacy recovery workflows, one read-only production probe, one read-only R4C2c witness discovery, one fail-closed halted legacy Supabase workflow, one isolated R4F G3 owner-comment workflow, and one finite R5 recovery burst; no scheduled workflows.",
     "Actions workflow allowlist passed: CI, guarded legacy recovery workflows, one read-only production probe, one read-only R4C2c witness discovery, one fail-closed halted legacy Supabase workflow, one read-only R4F G3 isolation preparation workflow, one isolated R4F G3 probe workflow, and one finite R5 recovery burst; no scheduled workflows.",
 )
 
