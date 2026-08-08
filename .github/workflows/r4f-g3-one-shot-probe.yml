@@ -287,3 +287,98 @@ jobs:
           This workflow contains no DB migration or R5 recovery step. After a successful run, retain the project-filtered Supabase Usage → **Total Egress** after-reading from the same billing period for final G3 reconciliation.
           EOF
           gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/g3-run.md
+
+  capture_logs:
+    if: >-
+      github.event.issue.number == 1261 &&
+      github.event.comment.user.login == 'badjoke-lab' &&
+      github.event.comment.body == '/r4f-g3-capture-logs run=31262884558 start=2026-08-08T14:42:06Z end=2026-08-08T15:02:00Z'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+      GH_TOKEN: ${{ github.token }}
+      TARGET_G3_RUN: '31262884558'
+      TARGET_SOURCE_COMMIT: c1d0281b7ecdde77b69733b488104b4a7b8ba1ce
+      TARGET_PROJECT_IDENTITY_DIGEST: 81378864f4d6650a60a2c09a95629a18780d49fc23836e0f6a024b70f13f88a8
+      CAPTURE_START: '2026-08-08T14:42:06Z'
+      CAPTURE_END: '2026-08-08T15:02:00Z'
+    steps:
+      - name: Check out current main read-only
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify exact completed G3 run and project identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SUPABASE_ACCESS_TOKEN"
+          [[ "$SUPABASE_PROJECT_ID" =~ ^[a-z]{20}$ ]]
+          project_digest="$(printf '%s' "$SUPABASE_PROJECT_ID" | sha256sum | awk '{print $1}')"
+          test "$project_digest" = "$TARGET_PROJECT_IDENTITY_DIGEST"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${TARGET_G3_RUN}" > /tmp/target-run.json
+          node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs'
+          const run = JSON.parse(readFileSync('/tmp/target-run.json', 'utf8'))
+          if (String(run.id) !== process.env.TARGET_G3_RUN) throw new Error('target G3 run id mismatch')
+          if (run.name !== 'R4F G3 One-Shot Probe') throw new Error('target G3 workflow mismatch')
+          if (run.event !== 'issue_comment') throw new Error('target G3 event mismatch')
+          if (run.conclusion !== 'success') throw new Error('target G3 run is not successful')
+          if (run.head_sha !== process.env.TARGET_SOURCE_COMMIT) throw new Error('target G3 source commit mismatch')
+          const start = Date.parse(process.env.CAPTURE_START)
+          const end = Date.parse(process.env.CAPTURE_END)
+          const runStart = Date.parse(run.run_started_at ?? run.created_at)
+          const runEnd = Date.parse(run.updated_at)
+          if (![start, end, runStart, runEnd].every(Number.isFinite)) throw new Error('G3 traffic window timestamps are invalid')
+          if (!(start <= runStart && runEnd <= end)) throw new Error('G3 run is outside captured provider interval')
+          NODE
+
+      - name: Capture bounded read-only Supabase traffic logs
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/capture-r4f-g3-concurrent-traffic-logs.mjs \
+            --target-run "$TARGET_G3_RUN" \
+            --start "$CAPTURE_START" \
+            --end "$CAPTURE_END" \
+            --output r4f-g3-concurrent-traffic-evidence/log-window.json
+
+      - name: Reject retained credentials or project ref
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence='r4f-g3-concurrent-traffic-evidence/log-window.json'
+          test -s "$evidence"
+          ! grep -Fq "$SUPABASE_PROJECT_ID" "$evidence"
+          ! grep -Eq 'sbp_[A-Za-z0-9_-]{12,}|Bearer [A-Za-z0-9._-]{12,}|postgres(ql)?://' "$evidence"
+
+      - name: Upload sanitized concurrent traffic evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: r4f-g3-concurrent-traffic-evidence
+          path: r4f-g3-concurrent-traffic-evidence/log-window.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish read-only log capture locator
+        env:
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/g3-log-capture.md <<EOF
+          ## R4F G3 concurrent-traffic log capture
+
+          Run: ${RUN_URL}
+          Target one-shot run: \`${TARGET_G3_RUN}\`
+          Captured provider interval: \`${CAPTURE_START}\` → \`${CAPTURE_END}\`
+          Source commit under test: \`${TARGET_SOURCE_COMMIT}\`
+          Project identity digest: \`${TARGET_PROJECT_IDENTITY_DIGEST}\`
+
+          This is a read-only Supabase Management API log query. It does not deploy a function, change secrets, access the database, authorize R5, enable Mainnet, or authorize stabilization/soak.
+          EOF
+          gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/g3-log-capture.md
