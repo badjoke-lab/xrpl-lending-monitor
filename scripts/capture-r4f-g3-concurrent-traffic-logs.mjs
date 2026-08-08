@@ -72,8 +72,8 @@ function string(value) {
 const sourceCountsSql = `
 SELECT source, count() AS event_count
 FROM logs
-WHERE timestamp >= toDateTime('${start.replace('Z', '')}')
-  AND timestamp <= toDateTime('${end.replace('Z', '')}')
+WHERE timestamp >= parseDateTimeBestEffort('${start}')
+  AND timestamp <= parseDateTimeBestEffort('${end}')
 GROUP BY source
 ORDER BY source
 LIMIT 100
@@ -88,8 +88,8 @@ SELECT
   log_attributes['request.path'] AS path,
   toInt32OrZero(log_attributes['response.status_code']) AS status
 FROM logs
-WHERE timestamp >= toDateTime('${start.replace('Z', '')}')
-  AND timestamp <= toDateTime('${end.replace('Z', '')}')
+WHERE timestamp >= parseDateTimeBestEffort('${start}')
+  AND timestamp <= parseDateTimeBestEffort('${end}')
   AND source IN ('function_edge_logs', 'edge_logs', 'storage_logs', 'auth_logs', 'realtime_logs')
 ORDER BY timestamp ASC
 LIMIT 1000
