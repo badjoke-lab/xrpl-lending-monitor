@@ -332,7 +332,8 @@ async function pause() {
       }
     }
     const original = error instanceof Error ? error.message : String(error)
-    throw new Error(restoreErrors.length > 0 ? `${original}; immediate restore errors:${restoreErrors.join(';')}` : original)
+    const message = restoreErrors.length > 0 ? `${original}; immediate restore errors:${restoreErrors.join(';')}` : original
+    throw new Error(message, { cause: error })
   }
 }
 
