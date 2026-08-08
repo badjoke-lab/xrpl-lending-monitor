@@ -4,7 +4,10 @@ import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 const workflow = readFileSync(
-  resolve(process.cwd(), '.github/workflows/supabase-remote-probe.yml'),
+  resolve(
+    process.cwd(),
+    'ops/retired/supabase-remote-probe-r4c-r5-workflow.snapshot.yml',
+  ),
   'utf8',
 )
 
