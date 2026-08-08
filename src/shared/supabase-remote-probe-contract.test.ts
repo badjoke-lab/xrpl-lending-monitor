@@ -31,19 +31,25 @@ describe('R4C2 Supabase remote portable collector contract', () => {
     'src/collector/history-segments/portable-xrpl-normalization.ts',
   )
   const verifier = read('scripts/verify-supabase-remote-probe.mjs')
-  const workflow = read('.github/workflows/supabase-remote-probe.yml')
+  const workflow = read(
+    'ops/retired/supabase-remote-probe-r4c-r5-workflow.snapshot.yml',
+  )
   const config = read('supabase/config.toml')
   const setup = read('docs/ops/supabase-one-time-setup-2026-08-02.md')
 
   it('keeps the remote runtime Devnet-only and fail-closed', () => {
-    expect(edgeFunction).toContain('https://s.devnet.rippletest.net:51234/')
-    expect(edgeFunction).toContain("const PHASE_EPOCH_ID = 'supabase-r4c2c-v1'")
-    expect(edgeFunction).toContain("request.headers.get('apikey') !== secretKey")
-    expect(edgeFunction).toContain("request.method === 'GET'")
-    expect(edgeFunction).toContain("request.method !== 'POST'")
-    expect(edgeFunction).toContain('AbortSignal.timeout(8_000)')
-    expect(edgeFunction).toContain("message.network !== 'devnet'")
-    expect(edgeFunction).toContain('message.epochId !== PHASE_EPOCH_ID')
+    for (const required of [
+      'https://s.devnet.rippletest.net:51234/',
+      "const PHASE_EPOCH_ID = 'supabase-r4c2c-v1'",
+      "request.headers.get('apikey') !== secretKey",
+      "request.method === 'GET'",
+      "request.method !== 'POST'",
+      'AbortSignal.timeout(8_000)',
+      "message.network !== 'devnet'",
+      'message.epochId !== PHASE_EPOCH_ID',
+    ]) {
+      expect(edgeFunction).toContain(required)
+    }
     expect(edgeFunction).not.toContain('xrplcluster.com')
     expect(edgeFunction).not.toContain('MAINNET')
   })
@@ -255,7 +261,7 @@ describe('R4C2 Supabase remote portable collector contract', () => {
     }
   })
 
-  it('publishes only a sanitized workflow run locator to the retained issue ledger', () => {
+  it('retains the sanitized historical workflow locator contract outside executable Actions', () => {
     for (const required of [
       'issues: write',
       'Publish sanitized run locator',
@@ -267,6 +273,7 @@ describe('R4C2 Supabase remote portable collector contract', () => {
     ]) {
       expect(workflow).toContain(required)
     }
+    expect(workflow).toContain('RETIRED / NON-EXECUTABLE CONTRACT SNAPSHOT')
     expect(workflow).not.toContain('echo "$SUPABASE_ACCESS_TOKEN"')
     expect(workflow).not.toContain('echo "$SUPABASE_DB_PASSWORD"')
   })
