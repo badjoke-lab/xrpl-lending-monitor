@@ -11,7 +11,10 @@ function json(path: string): Record<string, unknown> {
 const fixture = json('scripts/fixtures/r5-retained-steady-memory-samples.json')
 const deployEvidence = json('supabase/evidence/r5-retained-steady-memory-source.json')
 const workflow = readFileSync(
-  resolve(process.cwd(), '.github/workflows/supabase-remote-probe.yml'),
+  resolve(
+    process.cwd(),
+    'ops/retired/supabase-remote-probe-r4c-r5-workflow.snapshot.yml',
+  ),
   'utf8',
 )
 
@@ -47,8 +50,9 @@ describe('retained steady memory production trigger contract', () => {
     })
   })
 
-  it('uses an existing production-probe path instead of adding another workflow', () => {
+  it('retains the historical production-probe trigger contract outside executable Actions', () => {
     expect(workflow).toContain("- 'supabase/**'")
+    expect(workflow).toContain('RETIRED / NON-EXECUTABLE CONTRACT SNAPSHOT')
     expect(deployEvidence.remoteProbeTrigger).toBe('supabase/**')
   })
 })
