@@ -83,7 +83,7 @@ jobs:
 
           \`/r4f-g3-isolation-pause commit=${SOURCE_COMMIT} project=${PROJECT_DIGEST} job=${JOB_ID} command=${COMMAND_DIGEST} prepare_run=${GITHUB_RUN_ID}\`
 
-          This preparation itself is read-only. The pause command authorizes only temporary unscheduling of the exact one-minute collector cron plus the bounded restore watchdog. It does not authorize schema/data migration, R5 mutation, public-reader change, Mainnet, stabilization, or soak.
+          This preparation is read-only. The pause command authorizes only temporary unscheduling of the exact one-minute collector cron plus the bounded restore watchdog. It does not authorize schema/data migration, R5 mutation, public-reader change, Mainnet, stabilization, or soak.
           EOF
           gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/isolation-prepare.md
 
