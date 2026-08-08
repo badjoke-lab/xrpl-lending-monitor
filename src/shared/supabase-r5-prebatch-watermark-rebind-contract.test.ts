@@ -11,7 +11,9 @@ const migration = read(
   'supabase/migrations/20260803123400_xrpl_r5_prebatch_watermark_rebind.sql',
 )
 const detector = read('scripts/detect-supabase-r5-recovery-ownership.mjs')
-const workflow = read('.github/workflows/supabase-remote-probe.yml')
+const workflow = read(
+  'ops/retired/supabase-remote-probe-r4c-r5-workflow.snapshot.yml',
+)
 
 describe('R5 prebatch watermark rebind contract', () => {
   it('allows rebind only before any recovery progress', () => {
@@ -180,7 +182,7 @@ describe('R5 active-stream ownership detection', () => {
     }
   })
 
-  it('runs before and conditionally blocks only the mutating active probe', () => {
+  it('retains the historical ordering where ownership detection blocks only the mutating active probe', () => {
     const detection = workflow.indexOf('Detect R5 active recovery ownership')
     const activeProbe = workflow.indexOf('Verify repeated remote portable phase execution')
     const committedReader = workflow.indexOf('Verify remote immutable committed reader')
@@ -193,6 +195,7 @@ describe('R5 active-stream ownership detection', () => {
     )
     expect(workflow).toContain('node scripts/detect-supabase-r5-recovery-ownership.mjs')
     expect(workflow).toContain('node scripts/verify-supabase-committed-reader.mjs')
+    expect(workflow).toContain('RETIRED / NON-EXECUTABLE CONTRACT SNAPSHOT')
     expect(workflow).not.toContain(
       "if: steps.r5_recovery_ownership.outputs.active_recovery_owned != 'true'\n        run: node scripts/verify-supabase-committed-reader.mjs",
     )

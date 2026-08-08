@@ -8,7 +8,9 @@ function read(path: string): string {
 }
 
 const retry = read('scripts/verify-supabase-steady-throughput-with-retry.mjs')
-const workflow = read('.github/workflows/supabase-remote-probe.yml')
+const workflow = read(
+  'ops/retired/supabase-remote-probe-r4c-r5-workflow.snapshot.yml',
+)
 
 describe('Supabase strict steady qualification retry', () => {
   it('retries only the exact cadence gap or bounded transient provider failures', () => {
@@ -47,7 +49,7 @@ describe('Supabase strict steady qualification retry', () => {
     ]) expect(retry).toContain(required)
   })
 
-  it('runs through the existing single Supabase workflow', () => {
+  it('retains the historical single Supabase workflow contract outside executable Actions', () => {
     expect(workflow).toContain(
       "'scripts/verify-supabase-steady-throughput-with-retry.mjs'",
     )
@@ -59,5 +61,6 @@ describe('Supabase strict steady qualification retry', () => {
     )
     expect(workflow).toContain('timeout-minutes: 35')
     expect(workflow).toContain('cancel-in-progress: false')
+    expect(workflow).toContain('RETIRED / NON-EXECUTABLE CONTRACT SNAPSHOT')
   })
 })

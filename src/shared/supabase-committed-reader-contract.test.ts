@@ -14,7 +14,9 @@ describe('R4C2c Supabase committed reader contract', () => {
   const reader = read('supabase/functions/xrpl-committed-reader/index.ts')
   const verifier = read('scripts/verify-supabase-committed-reader.mjs')
   const publisher = read('scripts/publish-supabase-run-locator.mjs')
-  const workflow = read('.github/workflows/supabase-remote-probe.yml')
+  const workflow = read(
+    'ops/retired/supabase-remote-probe-r4c-r5-workflow.snapshot.yml',
+  )
   const config = read('supabase/config.toml')
 
   it('keeps the reader qualification-only, Devnet-bound, token-gated, and separate from the public app', () => {
@@ -154,7 +156,7 @@ describe('R4C2c Supabase committed reader contract', () => {
     }
   })
 
-  it('deploys both exact bundles through the one guarded Supabase workflow', () => {
+  it('retains both exact bundles in the historical guarded Supabase workflow contract', () => {
     for (const required of [
       "supabase/functions/xrpl-committed-reader/index.ts",
       'reader-bundle.json',

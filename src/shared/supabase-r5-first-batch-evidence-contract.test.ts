@@ -17,7 +17,9 @@ const ready = read('scripts/verify-supabase-r5-recovery-ready.mjs')
 const publisher = read(
   'scripts/publish-supabase-r5-first-recovery-batch-run-locator.mjs',
 )
-const workflow = read('.github/workflows/supabase-remote-probe.yml')
+const workflow = read(
+  'ops/retired/supabase-remote-probe-r4c-r5-workflow.snapshot.yml',
+)
 const config = read('supabase/config.toml')
 
 describe('R5 first recovery batch evidence workflow', () => {
@@ -104,7 +106,7 @@ describe('R5 first recovery batch evidence workflow', () => {
     }
   })
 
-  it('bundles, deploys, invokes, preserves, and publishes the evidence', () => {
+  it('retains historical bundle, deployment, invocation, and publication choreography', () => {
     for (const required of [
       "bundle_function 'supabase/functions/xrpl-r5-recovery-batch/index.ts'",
       "bundle_function 'supabase/functions/xrpl-r5-recovery-batch-trigger/index.ts'",
@@ -117,6 +119,7 @@ describe('R5 first recovery batch evidence workflow', () => {
     ]) {
       expect(workflow).toContain(required)
     }
+    expect(workflow).toContain('RETIRED / NON-EXECUTABLE CONTRACT SNAPSHOT')
     expect(config).toContain('[functions.xrpl-r5-recovery-batch]')
     expect(config).toContain('[functions.xrpl-r5-recovery-batch-trigger]')
   })

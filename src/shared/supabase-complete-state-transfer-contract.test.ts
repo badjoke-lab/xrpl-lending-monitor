@@ -19,7 +19,10 @@ const verifier = readFileSync(
   'utf8',
 )
 const workflow = readFileSync(
-  resolve(process.cwd(), '.github/workflows/supabase-remote-probe.yml'),
+  resolve(
+    process.cwd(),
+    'ops/retired/supabase-remote-probe-r4c-r5-workflow.snapshot.yml',
+  ),
   'utf8',
 )
 const config = readFileSync(resolve(process.cwd(), 'supabase/config.toml'), 'utf8')
@@ -127,7 +130,7 @@ describe('Supabase isolated complete-state transfer contract', () => {
     expect(verifier).not.toContain('verifierToken: verifierToken')
   })
 
-  it('uses the existing guarded workflow and one rotated verifier token', () => {
+  it('uses the retained historical guarded workflow contract and one rotated verifier token', () => {
     for (const required of [
       '[functions.xrpl-complete-state-transfer]',
       'verify_jwt = false',

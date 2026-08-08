@@ -11,7 +11,9 @@ const verifier = read('scripts/verify-supabase-r5-recovery-prepare.mjs')
 const publisher = read(
   'scripts/publish-supabase-r5-recovery-prepare-run-locator.mjs',
 )
-const workflow = read('.github/workflows/supabase-remote-probe.yml')
+const workflow = read(
+  'ops/retired/supabase-remote-probe-r4c-r5-workflow.snapshot.yml',
+)
 const selection = JSON.parse(
   read('docs/ops/r4e-deployment-profile-selection-2026-08-03.json'),
 ) as {
@@ -150,7 +152,7 @@ describe('R5 Supabase remote recovery preparation contract', () => {
     expect(verifier).not.toContain('fullCheckpointState')
   })
 
-  it('runs immediately after checkpoint freeze through the reentrant readiness wrapper', () => {
+  it('retains the historical checkpoint/readiness ordering and R5 tracker publication', () => {
     for (const required of [
       "'scripts/verify-supabase-r5-recovery-prepare.mjs'",
       "'scripts/verify-supabase-r5-recovery-ready.mjs'",
@@ -165,6 +167,7 @@ describe('R5 Supabase remote recovery preparation contract', () => {
     ]) {
       expect(workflow).toContain(required)
     }
+    expect(workflow).toContain('RETIRED / NON-EXECUTABLE CONTRACT SNAPSHOT')
     expect(
       workflow.indexOf('node scripts/verify-supabase-r5-active-checkpoint.mjs'),
     ).toBeLessThan(workflow.indexOf('node scripts/verify-supabase-r5-recovery-ready.mjs'))

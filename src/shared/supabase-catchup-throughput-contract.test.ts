@@ -13,7 +13,9 @@ const migration = read(
 const edge = read('supabase/functions/xrpl-catchup-throughput/index.ts')
 const verifier = read('scripts/verify-supabase-catchup-throughput.mjs')
 const publisher = read('scripts/publish-supabase-run-locator.mjs')
-const workflow = read('.github/workflows/supabase-remote-probe.yml')
+const workflow = read(
+  'ops/retired/supabase-remote-probe-r4c-r5-workflow.snapshot.yml',
+)
 const config = read('supabase/config.toml')
 
 describe('Supabase R4C2d isolated catch-up throughput contract', () => {

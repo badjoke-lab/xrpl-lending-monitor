@@ -11,7 +11,9 @@ const verifier = read('scripts/verify-supabase-r5-active-checkpoint.mjs')
 const publisher = read(
   'scripts/publish-supabase-r5-active-checkpoint-run-locator.mjs',
 )
-const workflow = read('.github/workflows/supabase-remote-probe.yml')
+const workflow = read(
+  'ops/retired/supabase-remote-probe-r4c-r5-workflow.snapshot.yml',
+)
 const selection = JSON.parse(
   read('docs/ops/r4e-deployment-profile-selection-2026-08-03.json'),
 ) as {
@@ -134,7 +136,7 @@ describe('R5 Supabase active checkpoint remote freeze contract', () => {
     expect(verifier).not.toContain('SUPABASE_DB_PASSWORD')
   })
 
-  it('runs from the existing guarded workflow and publishes only to the R5 tracker', () => {
+  it('retains the guarded historical workflow contract and R5 tracker publication', () => {
     for (const required of [
       "'scripts/verify-supabase-r5-active-checkpoint.mjs'",
       "'scripts/publish-supabase-r5-active-checkpoint-run-locator.mjs'",
@@ -146,6 +148,7 @@ describe('R5 Supabase active checkpoint remote freeze contract', () => {
     ]) {
       expect(workflow).toContain(required)
     }
+    expect(workflow).toContain('RETIRED / NON-EXECUTABLE CONTRACT SNAPSHOT')
     expect(workflow.match(/gh issue comment 1109/g)).toHaveLength(1)
     expect(workflow.match(/gh issue comment 1175/g)).toHaveLength(1)
   })

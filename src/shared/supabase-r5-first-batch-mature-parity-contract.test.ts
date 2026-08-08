@@ -11,7 +11,9 @@ const wrapper = read('scripts/verify-supabase-r5-first-recovery-batch.mjs')
 const strict = read(
   'scripts/verify-supabase-r5-first-recovery-batch-strict.mjs',
 )
-const workflow = read('.github/workflows/supabase-remote-probe.yml')
+const workflow = read(
+  'ops/retired/supabase-remote-probe-r4c-r5-workflow.snapshot.yml',
+)
 
 const originalQueueGuard = `    || after.startedAt === null
     || after.checks.activeRecoveryStarted !== (after.status === 'running')
@@ -51,13 +53,14 @@ describe('R5 mature recovery first-batch verifier adapter', () => {
     expect(wrapper).toContain('did not converge exactly')
   })
 
-  it('continues to run through the established workflow path', () => {
+  it('retains the established historical workflow path as a non-executable contract snapshot', () => {
     expect(workflow).toContain(
       'run: node scripts/verify-supabase-r5-first-recovery-batch.mjs',
     )
     expect(workflow).toContain(
       "- 'scripts/verify-supabase-r5-first-recovery-batch.mjs'",
     )
+    expect(workflow).toContain('RETIRED / NON-EXECUTABLE CONTRACT SNAPSHOT')
   })
 
   it('does not add mutation, deployment, Mainnet, stabilization or soak authority', () => {
