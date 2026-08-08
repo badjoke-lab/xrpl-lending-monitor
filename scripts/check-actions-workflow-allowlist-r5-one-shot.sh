@@ -27,27 +27,27 @@ def replace_once(name: str, old: str, new: str) -> None:
     text = updated
 
 
-# R4F changes are applied first so the current ten-workflow surface is explicit
+# R4F changes are applied first so the current eleven-workflow surface is explicit
 # before the retained R5 one-shot diagnostic exceptions are layered on top.
 replace_once(
-    "R4F G3 workflow allowlist entry",
+    "R4F G3 workflow allowlist entries",
     "  r4c2c-devnet-historical-witness.yml\n  r5-bounded-recovery-burst.yml",
-    "  r4c2c-devnet-historical-witness.yml\n  r4f-g3-one-shot-probe.yml\n  r5-bounded-recovery-burst.yml",
+    "  r4c2c-devnet-historical-witness.yml\n  r4f-g3-isolated-window.yml\n  r4f-g3-one-shot-probe.yml\n  r5-bounded-recovery-burst.yml",
 )
 replace_once(
     "R4F G3 workflow count",
     "GitHub Actions workflow count must remain exactly nine while the guarded R5 recovery workflows are active.",
-    "GitHub Actions workflow count must remain exactly ten while R4F qualification and the guarded R5 workflows are active.",
+    "GitHub Actions workflow count must remain exactly eleven while R4F qualification and the guarded R5 workflows are active.",
 )
 replace_once(
-    "R4F G3 workflow policy symbol",
+    "R4F G3 workflow policy symbols",
     'historical_witness = "r4c2c-devnet-historical-witness.yml"\nr5_burst = "r5-bounded-recovery-burst.yml"\nsupabase_remote = "supabase-remote-probe.yml"',
-    'historical_witness = "r4c2c-devnet-historical-witness.yml"\ng3_probe = "r4f-g3-one-shot-probe.yml"\nr5_burst = "r5-bounded-recovery-burst.yml"\nsupabase_remote = "supabase-remote-probe.yml"',
+    'historical_witness = "r4c2c-devnet-historical-witness.yml"\ng3_isolation = "r4f-g3-isolated-window.yml"\ng3_probe = "r4f-g3-one-shot-probe.yml"\nr5_burst = "r5-bounded-recovery-burst.yml"\nsupabase_remote = "supabase-remote-probe.yml"',
 )
 replace_once(
     "R4F G3 trigger policy",
     '    historical_witness: ["workflow_dispatch", "push"],\n    r5_burst: ["workflow_dispatch", "issue_comment"],',
-    '    historical_witness: ["workflow_dispatch", "push"],\n    g3_probe: ["issue_comment"],\n    r5_burst: ["workflow_dispatch", "issue_comment"],',
+    '    historical_witness: ["workflow_dispatch", "push"],\n    g3_isolation: ["issue_comment"],\n    g3_probe: ["issue_comment"],\n    r5_burst: ["workflow_dispatch", "issue_comment"],',
 )
 replace_once(
     "halt legacy Supabase automatic trigger policy",
@@ -119,12 +119,53 @@ for forbidden in (
         raise SystemExit(f"R4F G3 workflow contains forbidden capability: {forbidden.strip()}")
 if g3.count("issues: write") != 1:
     raise SystemExit("R4F G3 issue-write capability must remain exactly one permission")
+
+g3_isolated = (root / g3_isolation).read_text()
+for required in (
+    "contents: read",
+    "issues: write",
+    "cancel-in-progress: false",
+    "github.event.issue.number == 1261",
+    "github.event.comment.user.login == 'badjoke-lab'",
+    "github.event.comment.body == '/r4f-g3-isolation-prepare'",
+    "SUPABASE_ACCESS_TOKEN",
+    "SUPABASE_PROJECT_ID",
+    "node scripts/prepare-r4f-g3-isolated-window.mjs",
+    "r4f-g3-isolated-window-prepare-evidence",
+    "retention-days: 14",
+    "This preparation is read-only.",
+    "gh issue comment",
+):
+    if required not in g3_isolated:
+        raise SystemExit(f"R4F G3 isolation workflow is missing read-only preparation boundary: {required}")
+for forbidden in (
+    "  push:",
+    "  schedule:",
+    "pull_request_target",
+    "contents: write",
+    "SUPABASE_DB_PASSWORD",
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "supabase link",
+    "supabase db",
+    "supabase functions deploy",
+    "supabase functions delete",
+    "supabase secrets set",
+    "supabase secrets unset",
+    "cron.unschedule",
+    "cron.schedule",
+    "xrpl-r5-recovery-batch",
+    "MAINNET_ENABLED: 'true'",
+):
+    if forbidden in g3_isolated:
+        raise SystemExit(f"R4F G3 isolation preparation contains forbidden capability: {forbidden.strip()}")
+if g3_isolated.count("issues: write") != 1:
+    raise SystemExit("R4F G3 isolation issue-write capability must remain exactly one permission")
 '''
 text = text[:supabase_start] + replacement + text[scheduled_start:]
 replace_once(
     "R4F G3 policy summary",
     "Actions workflow allowlist passed: CI, guarded legacy recovery workflows, one read-only production probe, one read-only R4C2c witness discovery, one guarded Supabase deployment verifier, and one finite R5 recovery burst with exact owner-command activation; no scheduled workflows.",
-    "Actions workflow allowlist passed: CI, guarded legacy recovery workflows, one read-only production probe, one read-only R4C2c witness discovery, one fail-closed halted legacy Supabase workflow, one isolated R4F G3 owner-comment workflow, and one finite R5 recovery burst; no scheduled workflows.",
+    "Actions workflow allowlist passed: CI, guarded legacy recovery workflows, one read-only production probe, one read-only R4C2c witness discovery, one fail-closed halted legacy Supabase workflow, one read-only R4F G3 isolation preparation workflow, one isolated R4F G3 probe workflow, and one finite R5 recovery burst; no scheduled workflows.",
 )
 
 # Existing R5 one-shot diagnostic policy exceptions.
