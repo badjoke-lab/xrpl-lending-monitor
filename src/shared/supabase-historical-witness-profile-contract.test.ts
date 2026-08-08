@@ -14,7 +14,9 @@ describe('R4C2c isolated Supabase historical witness profile', () => {
   const loader = read('supabase/functions/xrpl-historical-witness/index.ts')
   const reader = read('supabase/functions/xrpl-historical-witness-reader/index.ts')
   const verifier = read('scripts/verify-supabase-historical-witness.mjs')
-  const workflow = read('.github/workflows/supabase-remote-probe.yml')
+  const workflow = read(
+    'ops/retired/supabase-remote-probe-r4c-r5-workflow.snapshot.yml',
+  )
   const config = read('supabase/config.toml')
 
   it('isolates the non-contiguous witness set from the active Supabase stream', () => {
@@ -181,7 +183,7 @@ describe('R4C2c isolated Supabase historical witness profile', () => {
     }
   })
 
-  it('deploys both isolated functions through the one guarded Supabase workflow', () => {
+  it('retains both isolated functions in the historical guarded Supabase workflow contract', () => {
     for (const required of [
       "'supabase/functions/xrpl-historical-witness/index.ts'",
       "'supabase/functions/xrpl-historical-witness-reader/index.ts'",
