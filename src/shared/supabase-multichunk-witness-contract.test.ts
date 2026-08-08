@@ -26,7 +26,10 @@ const verifier = readFileSync(
   'utf8',
 )
 const workflow = readFileSync(
-  resolve(process.cwd(), '.github/workflows/supabase-remote-probe.yml'),
+  resolve(
+    process.cwd(),
+    'ops/retired/supabase-remote-probe-r4c-r5-workflow.snapshot.yml',
+  ),
   'utf8',
 )
 const config = readFileSync(resolve(process.cwd(), 'supabase/config.toml'), 'utf8')
@@ -159,7 +162,7 @@ describe('Supabase isolated standard-phase multi-chunk witness contract', () => 
     expect(verifier).not.toContain('XRPL_READER_VERIFY_TOKEN: verifierToken')
   })
 
-  it('uses the existing single guarded deployment workflow and one rotated token', () => {
+  it('retains the historical single guarded deployment workflow and one rotated token', () => {
     for (const required of [
       '[functions.xrpl-multichunk-witness]',
       '[functions.xrpl-multichunk-witness-reader]',
