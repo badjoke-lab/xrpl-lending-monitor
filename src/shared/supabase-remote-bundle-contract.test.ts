@@ -7,7 +7,9 @@ function read(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
-const workflow = read('.github/workflows/supabase-remote-probe.yml')
+const workflow = read(
+  'ops/retired/supabase-remote-probe-r4c-r5-workflow.snapshot.yml',
+)
 const publisher = read('scripts/publish-supabase-run-locator.mjs')
 const parserSurface = read('src/collector/incremental/read-validated-ledger.ts')
 const parser = read('src/collector/incremental/validated-ledger-parser.ts')
@@ -140,7 +142,7 @@ describe('Supabase remote prebundle contract', () => {
     expect(rpcReader).toContain('export async function readValidatedLedger')
   })
 
-  it('redeploys when any bundled collector, reader, or verifier dependency changes', () => {
+  it('retains the historical redeploy dependency surface outside executable Actions', () => {
     for (const required of [
       "- 'supabase/**'",
       "- 'src/collector/history-segments/**'",
@@ -156,5 +158,6 @@ describe('Supabase remote prebundle contract', () => {
     ]) {
       expect(workflow).toContain(required)
     }
+    expect(workflow).toContain('RETIRED / NON-EXECUTABLE CONTRACT SNAPSHOT')
   })
 })
