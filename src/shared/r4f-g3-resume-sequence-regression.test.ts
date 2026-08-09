@@ -90,6 +90,77 @@ function runVerifier(locatorCreatedAt: string, resumeCreatedAt = '2026-08-09T15:
   )
 }
 
+function runAfterVerifier(afterCapturedAt = '2026-08-09T16:43:14.000Z') {
+  const dir = mkdtempSync(join(tmpdir(), 'r4f-g3-after-regression-'))
+  dirs.push(dir)
+  const commentsPath = join(dir, 'comments.json')
+  const oneShotPath = join(dir, 'one-shot.json')
+  const resumePath = join(dir, 'resume.json')
+
+  const currentPauseRun = 31322480413
+  const currentOneShotRun = 31322760094
+  const currentResumeRun = 31322794804
+  const currentBefore = 5232434512
+  const currentAfter = 5232614780
+  const currentDashboardAuth = 5232398886
+
+  const comments = [
+    {
+      id: currentBefore,
+      created_at: '2026-08-09T16:02:06Z',
+      user: { login: 'badjoke-lab' },
+      body: `/r4f-g3-before dashboard_auth=${currentDashboardAuth} pause_run=${currentPauseRun} project=${PROJECT} captured_at=2026-08-09T16:00:38.320Z invocations=19528 artifact=2f474013b2c590c965dd137da7cf9d3b03ac2e301ca71f6b0211bf551f745106`,
+    },
+    {
+      id: 5232443276,
+      created_at: '2026-08-09T16:04:04Z',
+      user: { login: 'github-actions[bot]' },
+      body: `## R4F G3 isolated window restored before Usage refresh\n\nResume run: https://github.com/badjoke-lab/xrpl-lending-monitor/actions/runs/${currentResumeRun}\nPause run: \`${currentPauseRun}\`\nOne-shot run: \`${currentOneShotRun}\`\nBEFORE capture comment: \`${currentBefore}\`\nProject identity digest: \`${PROJECT}\``,
+    },
+    {
+      id: currentAfter,
+      created_at: '2026-08-09T16:45:16Z',
+      user: { login: 'badjoke-lab' },
+      body: `/r4f-g3-after run=${currentOneShotRun} pause_run=${currentPauseRun} resume_run=${currentResumeRun} before_comment=${currentBefore} project=${PROJECT} captured_at=${afterCapturedAt} invocations=19570 artifact=cee627395fe4f82b0c40670460f730cfec2041ae8843670f1b54801310ee745e`,
+    },
+  ]
+  const oneShotRun = {
+    id: currentOneShotRun,
+    name: 'R4F G3 One-Shot Probe',
+    event: 'issue_comment',
+    conclusion: 'success',
+    run_started_at: '2026-08-09T16:03:08Z',
+    updated_at: '2026-08-09T16:03:28Z',
+  }
+  const resumeRun = {
+    id: currentResumeRun,
+    name: 'R4F G3 Isolated Window',
+    event: 'issue_comment',
+    conclusion: 'success',
+    run_started_at: '2026-08-09T16:03:53Z',
+    updated_at: '2026-08-09T16:04:07Z',
+  }
+
+  writeFileSync(commentsPath, JSON.stringify(comments))
+  writeFileSync(oneShotPath, JSON.stringify(oneShotRun))
+  writeFileSync(resumePath, JSON.stringify(resumeRun))
+
+  return execFileSync(
+    process.execPath,
+    [
+      'scripts/verify-r4f-g3-after-sequence.mjs',
+      '--comments', commentsPath,
+      '--one-shot-run', oneShotPath,
+      '--resume-run', resumePath,
+      '--pause-run-id', String(currentPauseRun),
+      '--before-comment-id', String(currentBefore),
+      '--after-comment-id', String(currentAfter),
+      '--project-digest', PROJECT,
+    ],
+    { cwd: process.cwd(), encoding: 'utf8' },
+  )
+}
+
 describe('R4F G3 resume sequence regression', () => {
   it('accepts the real incident ordering where the success locator precedes Actions updated_at cleanup', () => {
     const output = JSON.parse(runVerifier('2026-08-09T15:12:27Z'))
@@ -101,5 +172,18 @@ describe('R4F G3 resume sequence regression', () => {
 
   it('still rejects a resume command that predates the success locator', () => {
     expect(() => runVerifier('2026-08-09T15:12:27Z', '2026-08-09T15:12:20Z')).toThrow()
+  })
+
+  it('accepts the fresh AFTER when the successful restore locator precedes mutable Actions updated_at cleanup', () => {
+    const output = JSON.parse(runAfterVerifier())
+    expect(output.invocationDelta).toBe(42)
+    expect(output.usageFresh).toBe(true)
+    expect(output.resumeSuccessLocatorAt).toBe('2026-08-09T16:04:04Z')
+    expect(output.resumeWorkflowUpdatedAt).toBe('2026-08-09T16:04:07Z')
+    expect(output.resumePrecedesAfter).toBe(true)
+  })
+
+  it('still rejects an AFTER capture that predates the successful restore locator', () => {
+    expect(() => runAfterVerifier('2026-08-09T16:04:03.000Z')).toThrow()
   })
 })
