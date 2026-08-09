@@ -11,6 +11,8 @@ function read(path: string): string {
 const workflow = read('.github/workflows/r5-bounded-recovery-burst.yml')
 const ci = read('.github/workflows/ci.yml')
 const adapter = read('scripts/check-actions-workflow-allowlist-r5-one-shot.sh')
+const generator = read('scripts/generate-actions-policy-r4f-g3-dual.py')
+const policyImplementation = `${adapter}\n${generator}`
 const diagnostic = read('scripts/diagnose-supabase-r5-egress-halt-v2.mjs')
 const markerPath = 'ops/r5/run-once-20260805-pending-scan-readonly.marker'
 const marker = read(markerPath)
@@ -26,7 +28,7 @@ describe('R5 egress halt read-only breakdown V2 trigger', () => {
     )
     expect(markerDigest).toBe(expectedDigest)
     expect(workflow).toContain(expectedDigest)
-    expect(adapter).toContain(expectedDigest)
+    expect(policyImplementation).toContain(expectedDigest)
   })
 
   it('binds push only to the read-only V2 diagnostic', () => {
@@ -123,6 +125,9 @@ describe('R5 egress halt read-only breakdown V2 trigger', () => {
   })
 
   it('adapts the canonical allowlist by exact replacements', () => {
+    expect(adapter).toContain(
+      'python scripts/generate-actions-policy-r4f-g3-dual.py "$source_script" "$generated_script"',
+    )
     for (const required of [
       'R5 egress halt V2 diagnostic trigger policy',
       'R5 egress halt V2 diagnostic and owner burst contract',
@@ -132,7 +137,7 @@ describe('R5 egress halt read-only breakdown V2 trigger', () => {
       'burst.count("gh issue comment 1175") != 2',
       'bash "$generated_script" "$@"',
     ]) {
-      expect(adapter).toContain(required)
+      expect(policyImplementation).toContain(required)
     }
     expect(ci).toContain(
       'run: bash scripts/check-actions-workflow-allowlist-r5-one-shot.sh',
