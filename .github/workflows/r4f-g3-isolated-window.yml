@@ -47,7 +47,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Publish exact isolated-window pause proposal
+      - name: Publish dashboard-capture authorization proposal
         env:
           RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
           SOURCE_COMMIT: ${{ steps.scheduler.outputs.source_commit }}
@@ -63,7 +63,7 @@ jobs:
           set -euo pipefail
           [[ "$SOURCE_COMMIT" =~ ^[a-f0-9]{40}$ ]]
           cat > /tmp/isolation-prepare.md <<EOF
-          ## R4F G3 isolated-window pause authorization proposal
+          ## R4F G3 isolated-window dashboard capture authorization proposal
 
           Preparation run: \`${GITHUB_RUN_ID}\`
           Run: ${RUN_URL}
@@ -75,17 +75,100 @@ jobs:
           Scheduler command digest: \`${COMMAND_DIGEST}\`
           Collector runtime status: \`${RUNTIME_STATUS}\`
           Collector tick count: \`${RUNTIME_TICK_COUNT}\`
+          Dashboard capture scope: \`r4f_g3_dashboard_capture\`
 
           A database-local watchdog is installed before the collector is paused.
           The pause is bounded to at most 15 minutes. On runner failure, the watchdog restores the exact collector command by digest. On normal completion, an explicit resume restores it sooner.
 
-          Exact pause authorization command:
+          Dashboard capture authorization must be retained before any pause or BEFORE reading. Exact authorization command:
 
-          \`/r4f-g3-isolation-pause commit=${SOURCE_COMMIT} project=${PROJECT_DIGEST} job=${JOB_ID} command=${COMMAND_DIGEST} prepare_run=${GITHUB_RUN_ID}\`
+          \`/r4f-g3-dashboard-authorize scope=r4f_g3_dashboard_capture commit=${SOURCE_COMMIT} project=${PROJECT_DIGEST} job=${JOB_ID} command=${COMMAND_DIGEST} prepare_run=${GITHUB_RUN_ID}\`
 
-          This preparation is read-only. The pause command authorizes only temporary unscheduling of the exact one-minute collector cron plus the bounded restore watchdog. It does not authorize schema/data migration, R5 mutation, public-reader change, Mainnet, stabilization, or soak.
+          This preparation is read-only. Dashboard authorization permits only the bounded project-filtered Usage capture sequence. It does not itself pause the collector and does not authorize schema/data migration, R5 mutation, public-reader change, Mainnet, stabilization, or soak.
           EOF
           gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/isolation-prepare.md
+
+  dashboard_authorize:
+    if: >-
+      github.event.issue.number == 1261 &&
+      github.event.comment.user.login == 'badjoke-lab' &&
+      startsWith(github.event.comment.body, '/r4f-g3-dashboard-authorize ')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+      GH_TOKEN: ${{ github.token }}
+      AUTHORIZATION_BODY: ${{ github.event.comment.body }}
+      AUTHORIZATION_CREATED_AT: ${{ github.event.comment.created_at }}
+      AUTHORIZATION_COMMENT_ID: ${{ github.event.comment.id }}
+    steps:
+      - name: Check out current main read-only
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify exact dashboard capture authorization
+        id: auth
+        shell: bash
+        run: |
+          set -euo pipefail
+          regex='^/r4f-g3-dashboard-authorize scope=r4f_g3_dashboard_capture commit=([a-f0-9]{40}) project=([a-f0-9]{64}) job=([0-9]+) command=([a-f0-9]{64}) prepare_run=([0-9]+)$'
+          [[ "$AUTHORIZATION_BODY" =~ $regex ]] || { echo 'dashboard authorization command shape mismatch' >&2; exit 1; }
+          commit="${BASH_REMATCH[1]}"
+          project_digest="${BASH_REMATCH[2]}"
+          job_id="${BASH_REMATCH[3]}"
+          command_digest="${BASH_REMATCH[4]}"
+          prepare_run="${BASH_REMATCH[5]}"
+          test "$job_id" -gt 0
+          test "$prepare_run" -gt 0
+          test "$commit" = "$(git rev-parse HEAD)"
+          [[ "$SUPABASE_PROJECT_ID" =~ ^[a-z]{20}$ ]]
+          actual_project_digest="$(printf '%s' "$SUPABASE_PROJECT_ID" | sha256sum | awk '{print $1}')"
+          test "$project_digest" = "$actual_project_digest"
+
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${prepare_run}" > /tmp/isolation-prepare-run.json
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${QUALIFICATION_ISSUE}/comments?per_page=100" \
+            | jq -s 'add' > /tmp/issue-comments.json
+
+          node scripts/verify-r4f-g3-isolation-prepare-proposal.mjs \
+            --comments /tmp/issue-comments.json \
+            --run /tmp/isolation-prepare-run.json \
+            --prepare-run "$prepare_run" \
+            --commit "$commit" \
+            --project-digest "$project_digest" \
+            --job-id "$job_id" \
+            --command-digest "$command_digest" \
+            --authorization-created-at "$AUTHORIZATION_CREATED_AT"
+
+          printf 'commit=%s\nproject_digest=%s\njob_id=%s\ncommand_digest=%s\nprepare_run=%s\n' \
+            "$commit" "$project_digest" "$job_id" "$command_digest" "$prepare_run" >> "$GITHUB_OUTPUT"
+
+      - name: Publish exact pause authorization command
+        env:
+          COMMIT: ${{ steps.auth.outputs.commit }}
+          PROJECT_DIGEST: ${{ steps.auth.outputs.project_digest }}
+          JOB_ID: ${{ steps.auth.outputs.job_id }}
+          COMMAND_DIGEST: ${{ steps.auth.outputs.command_digest }}
+          PREPARE_RUN: ${{ steps.auth.outputs.prepare_run }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/dashboard-authorized.md <<EOF
+          ## R4F G3 Dashboard capture pre-authorization retained
+
+          Authorization comment: \`${AUTHORIZATION_COMMENT_ID}\`
+          Scope: \`r4f_g3_dashboard_capture\`
+          Source commit: \`${COMMIT}\`
+          Project identity digest: \`${PROJECT_DIGEST}\`
+          Isolation preparation run: \`${PREPARE_RUN}\`
+
+          This authorization precedes any scheduler pause and does not mutate provider state. Exact pause authorization command:
+
+          \`/r4f-g3-isolation-pause commit=${COMMIT} project=${PROJECT_DIGEST} job=${JOB_ID} command=${COMMAND_DIGEST} prepare_run=${PREPARE_RUN} dashboard_auth=${AUTHORIZATION_COMMENT_ID}\`
+          EOF
+          gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/dashboard-authorized.md
 
   pause:
     if: >-
@@ -114,16 +197,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          regex='^/r4f-g3-isolation-pause commit=([a-f0-9]{40}) project=([a-f0-9]{64}) job=([0-9]+) command=([a-f0-9]{64}) prepare_run=([0-9]+)$'
+          regex='^/r4f-g3-isolation-pause commit=([a-f0-9]{40}) project=([a-f0-9]{64}) job=([0-9]+) command=([a-f0-9]{64}) prepare_run=([0-9]+) dashboard_auth=([0-9]+)$'
           [[ "$AUTHORIZATION_BODY" =~ $regex ]] || { echo 'pause authorization command shape mismatch' >&2; exit 1; }
           commit="${BASH_REMATCH[1]}"
           project_digest="${BASH_REMATCH[2]}"
           job_id="${BASH_REMATCH[3]}"
           command_digest="${BASH_REMATCH[4]}"
           prepare_run="${BASH_REMATCH[5]}"
+          dashboard_auth="${BASH_REMATCH[6]}"
 
           test "$job_id" -gt 0
           test "$prepare_run" -gt 0
+          test "$dashboard_auth" -gt 0
           test "$commit" = "$(git rev-parse HEAD)"
           [[ "$SUPABASE_PROJECT_ID" =~ ^[a-z]{20}$ ]]
           actual_project_digest="$(printf '%s' "$SUPABASE_PROJECT_ID" | sha256sum | awk '{print $1}')"
@@ -133,6 +218,23 @@ jobs:
           gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${QUALIFICATION_ISSUE}/comments?per_page=100" \
             | jq -s 'add' > /tmp/issue-comments.json
 
+          DASHBOARD_AUTH="$dashboard_auth" COMMIT="$commit" PROJECT_DIGEST="$project_digest" JOB_ID="$job_id" COMMAND_DIGEST="$command_digest" PREPARE_RUN="$prepare_run" PAUSE_AUTH_CREATED_AT="$AUTHORIZATION_CREATED_AT" node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs'
+          const comments = JSON.parse(readFileSync('/tmp/issue-comments.json', 'utf8'))
+          const id = Number(process.env.DASHBOARD_AUTH)
+          const comment = comments.find((item) => Number(item?.id) === id)
+          if (!comment || comment?.user?.login !== 'badjoke-lab') throw new Error('dashboard authorization comment not found')
+          const expected = `/r4f-g3-dashboard-authorize scope=r4f_g3_dashboard_capture commit=${process.env.COMMIT} project=${process.env.PROJECT_DIGEST} job=${process.env.JOB_ID} command=${process.env.COMMAND_DIGEST} prepare_run=${process.env.PREPARE_RUN}`
+          if (comment.body !== expected) throw new Error('dashboard authorization tuple mismatch')
+          const dashboardAt = Date.parse(String(comment.created_at ?? ''))
+          const pauseAt = Date.parse(String(process.env.PAUSE_AUTH_CREATED_AT ?? ''))
+          if (!Number.isFinite(dashboardAt) || !Number.isFinite(pauseAt) || !(dashboardAt < pauseAt)) {
+            throw new Error('dashboard authorization must precede pause authorization')
+          }
+          writeFileSync('/tmp/dashboard-auth-created-at.txt', String(comment.created_at))
+          NODE
+
+          dashboard_created_at="$(cat /tmp/dashboard-auth-created-at.txt)"
           node scripts/verify-r4f-g3-isolation-prepare-proposal.mjs \
             --comments /tmp/issue-comments.json \
             --run /tmp/isolation-prepare-run.json \
@@ -141,10 +243,10 @@ jobs:
             --project-digest "$project_digest" \
             --job-id "$job_id" \
             --command-digest "$command_digest" \
-            --authorization-created-at "$AUTHORIZATION_CREATED_AT"
+            --authorization-created-at "$dashboard_created_at"
 
-          printf 'commit=%s\nproject_digest=%s\njob_id=%s\ncommand_digest=%s\nprepare_run=%s\n' \
-            "$commit" "$project_digest" "$job_id" "$command_digest" "$prepare_run" >> "$GITHUB_OUTPUT"
+          printf 'commit=%s\nproject_digest=%s\njob_id=%s\ncommand_digest=%s\nprepare_run=%s\ndashboard_auth=%s\n' \
+            "$commit" "$project_digest" "$job_id" "$command_digest" "$prepare_run" "$dashboard_auth" >> "$GITHUB_OUTPUT"
 
       - name: Pause only the exact collector scheduler with automatic restore watchdog
         id: pause
@@ -197,6 +299,7 @@ jobs:
           PROJECT_DIGEST: ${{ steps.auth.outputs.project_digest }}
           JOB_ID: ${{ steps.auth.outputs.job_id }}
           COMMAND_DIGEST: ${{ steps.auth.outputs.command_digest }}
+          DASHBOARD_AUTH: ${{ steps.auth.outputs.dashboard_auth }}
           QUIET_READY_AT: ${{ steps.pause.outputs.quiet_ready_at }}
           RESTORE_DEADLINE: ${{ steps.pause.outputs.restore_deadline }}
           TICK_COUNT: ${{ steps.pause.outputs.tick_count }}
@@ -207,7 +310,8 @@ jobs:
           ## R4F G3 isolated window ready
 
           Pause run: ${RUN_URL}
-          Authorization comment: \`${AUTHORIZATION_COMMENT_ID}\`
+          Pause authorization comment: \`${AUTHORIZATION_COMMENT_ID}\`
+          Dashboard authorization comment: \`${DASHBOARD_AUTH}\`
           Project identity digest: \`${PROJECT_DIGEST}\`
           Prior collector cron job id: \`${JOB_ID}\`
           Scheduler command digest: \`${COMMAND_DIGEST}\`
@@ -215,11 +319,15 @@ jobs:
           Collector tick count at quiet-ready: \`${TICK_COUNT}\`
           Automatic restore deadline: \`${RESTORE_DEADLINE}\`
 
-          The one-minute collector scheduler is absent and the collector has been quiet for at least 65 seconds. Capture the project-filtered Supabase Usage → Egress BEFORE reading now. Do not wait past the automatic restore deadline.
+          The one-minute collector scheduler is absent and the collector has been quiet for at least 65 seconds. Capture the project-filtered Supabase Usage → Total Egress BEFORE reading now. Retain its source artifact SHA-256 and Edge Function Invocations count.
 
-          Recovery-only resume command after the bounded experiment:
+          Record the retained BEFORE reading with this exact shape, then request a one-shot prepare using the resulting comment id:
 
-          \`/r4f-g3-isolation-resume project=${PROJECT_DIGEST} job=${JOB_ID} command=${COMMAND_DIGEST} pause_run=${GITHUB_RUN_ID}\`
+          \`/r4f-g3-before dashboard_auth=${DASHBOARD_AUTH} pause_run=${GITHUB_RUN_ID} project=${PROJECT_DIGEST} captured_at=<UTC> invocations=<EDGE_FUNCTION_INVOCATIONS> artifact=<SHA256>\`
+
+          \`/r4f-g3-prepare dashboard_auth=${DASHBOARD_AUTH} pause_run=${GITHUB_RUN_ID} before_comment=<BEFORE_COMMENT_ID> project=${PROJECT_DIGEST}\`
+
+          Do not execute the one-shot before the BEFORE marker is retained. Do not wait past the automatic restore deadline.
           EOF
           gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/isolation-ready.md
 
@@ -235,6 +343,7 @@ jobs:
       SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
       GH_TOKEN: ${{ github.token }}
       RESUME_BODY: ${{ github.event.comment.body }}
+      RESUME_CREATED_AT: ${{ github.event.comment.created_at }}
     steps:
       - name: Check out current main for recovery code
         uses: actions/checkout@v4
@@ -243,24 +352,34 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Parse and verify recovery-only resume request
+      - name: Parse and verify AFTER-before-resume sequence
         id: resume_auth
         shell: bash
         run: |
           set -euo pipefail
-          regex='^/r4f-g3-isolation-resume project=([a-f0-9]{64}) job=([0-9]+) command=([a-f0-9]{64}) pause_run=([0-9]+)$'
+          regex='^/r4f-g3-isolation-resume project=([a-f0-9]{64}) job=([0-9]+) command=([a-f0-9]{64}) pause_run=([0-9]+) one_shot_run=([0-9]+) before_comment=([0-9]+) after_comment=([0-9]+)$'
           [[ "$RESUME_BODY" =~ $regex ]] || { echo 'resume command shape mismatch' >&2; exit 1; }
           project_digest="${BASH_REMATCH[1]}"
           job_id="${BASH_REMATCH[2]}"
           command_digest="${BASH_REMATCH[3]}"
           pause_run="${BASH_REMATCH[4]}"
+          one_shot_run="${BASH_REMATCH[5]}"
+          before_comment="${BASH_REMATCH[6]}"
+          after_comment="${BASH_REMATCH[7]}"
           test "$job_id" -gt 0
           test "$pause_run" -gt 0
+          test "$one_shot_run" -gt 0
+          test "$before_comment" -gt 0
+          test "$after_comment" -gt 0
           [[ "$SUPABASE_PROJECT_ID" =~ ^[a-z]{20}$ ]]
           actual_project_digest="$(printf '%s' "$SUPABASE_PROJECT_ID" | sha256sum | awk '{print $1}')"
           test "$project_digest" = "$actual_project_digest"
 
           gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${pause_run}" > /tmp/pause-run.json
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${one_shot_run}" > /tmp/one-shot-run.json
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${QUALIFICATION_ISSUE}/comments?per_page=100" \
+            | jq -s 'add' > /tmp/issue-comments.json
+
           PAUSE_RUN="$pause_run" node --input-type=module <<'NODE'
           import { readFileSync } from 'node:fs'
           const run = JSON.parse(readFileSync('/tmp/pause-run.json', 'utf8'))
@@ -270,8 +389,20 @@ jobs:
           if (String(run.id) !== process.env.PAUSE_RUN) throw new Error('pause run id mismatch')
           NODE
 
-          printf 'project_digest=%s\njob_id=%s\ncommand_digest=%s\npause_run=%s\n' \
-            "$project_digest" "$job_id" "$command_digest" "$pause_run" >> "$GITHUB_OUTPUT"
+          node scripts/verify-r4f-g3-after-sequence.mjs \
+            --comments /tmp/issue-comments.json \
+            --one-shot-run /tmp/one-shot-run.json \
+            --pause-run-id "$pause_run" \
+            --before-comment-id "$before_comment" \
+            --after-comment-id "$after_comment" \
+            --project-digest "$project_digest" \
+            --resume-created-at "$RESUME_CREATED_AT" > /tmp/after-sequence.json
+
+          capture_start="$(jq -r '.beforeCapturedAt' /tmp/after-sequence.json)"
+          capture_end="$(jq -r '.afterCapturedAt' /tmp/after-sequence.json)"
+          invocation_delta="$(jq -r '.invocationDelta' /tmp/after-sequence.json)"
+          printf 'project_digest=%s\njob_id=%s\ncommand_digest=%s\npause_run=%s\none_shot_run=%s\nbefore_comment=%s\nafter_comment=%s\ncapture_start=%s\ncapture_end=%s\ninvocation_delta=%s\n' \
+            "$project_digest" "$job_id" "$command_digest" "$pause_run" "$one_shot_run" "$before_comment" "$after_comment" "$capture_start" "$capture_end" "$invocation_delta" >> "$GITHUB_OUTPUT"
 
       - name: Restore exact collector scheduler and remove isolation watchdog
         env:
@@ -297,13 +428,17 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Publish scheduler restoration locator
+      - name: Publish scheduler restoration and generic log command
         if: success()
         env:
           RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
           PAUSE_RUN: ${{ steps.resume_auth.outputs.pause_run }}
+          ONE_SHOT_RUN: ${{ steps.resume_auth.outputs.one_shot_run }}
           PROJECT_DIGEST: ${{ steps.resume_auth.outputs.project_digest }}
           COMMAND_DIGEST: ${{ steps.resume_auth.outputs.command_digest }}
+          CAPTURE_START: ${{ steps.resume_auth.outputs.capture_start }}
+          CAPTURE_END: ${{ steps.resume_auth.outputs.capture_end }}
+          INVOCATION_DELTA: ${{ steps.resume_auth.outputs.invocation_delta }}
         shell: bash
         run: |
           set -euo pipefail
@@ -312,9 +447,15 @@ jobs:
 
           Resume run: ${RUN_URL}
           Pause run: \`${PAUSE_RUN}\`
+          One-shot run: \`${ONE_SHOT_RUN}\`
           Project identity digest: \`${PROJECT_DIGEST}\`
           Scheduler command digest: \`${COMMAND_DIGEST}\`
+          Verified Usage invocation delta: \`${INVOCATION_DELTA}\`
 
           The exact collector scheduler has been restored and G3 isolation watchdogs have been removed. This resume path does not mutate R5 state, change the public reader, enable Mainnet, or authorize stabilization/soak.
+
+          Only after this successful resume, authorize the bounded read-only provider log capture with:
+
+          \`/r4f-g3-capture-logs run=${ONE_SHOT_RUN} resume_run=${GITHUB_RUN_ID} start=${CAPTURE_START} end=${CAPTURE_END}\`
           EOF
           gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/isolation-resume.md
