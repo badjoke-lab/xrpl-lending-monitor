@@ -41,7 +41,7 @@ The source executor now uses the revision-4 directional contract before atomic c
 - projected egress must remain below 4 GiB / 31 days;
 - memory/transport must remain below the 224 MiB project halt.
 
-The existing deployed trigger source still carries the revision-3 run identity, so it cannot successfully invoke the repository-only revision-4 executor path. Trigger conversion follows the dedicated revision-4 DB RPC migration and remains code-only until a separate live authorization.
+The currently deployed trigger source still carries the revision-3 run identity, so it cannot successfully invoke the repository-only revision-4 executor path. Trigger conversion follows the dedicated revision-4 DB RPC migration and remains code-only until a separate live authorization.
 
 ## Database boundary still to complete
 
@@ -52,6 +52,8 @@ The executor calls dedicated revision-4 RPC names:
 - `xrpl_fail_r5_revision4_recovery_batch`.
 
 Those RPCs must be added as a repository migration and validated by empty-database replay before this PR is ready to merge. Existing revision-3 control records remain historical and must not be relabeled as revision 4.
+
+The preceding executor CI failure was caused by obsolete tests that still asserted that the executor must remain revision 3. Those assertions were updated to the new code-only, selection-gated revision-4 boundary; no production safety gate was relaxed.
 
 ## Live boundary
 
