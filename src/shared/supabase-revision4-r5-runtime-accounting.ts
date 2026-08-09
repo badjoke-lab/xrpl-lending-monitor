@@ -1,12 +1,18 @@
+import { canonicalPortableJson } from './portable-collector-reference-store'
 import {
-  buildSupabaseRevision4DirectionalAccountingEvidence,
   SupabaseRevision4DirectionalMeter,
   utf8ByteLength,
-  type SupabaseRevision4DirectionalAccountingEvidence,
+  type SupabaseRevision4MeterObservation,
 } from './supabase-revision4-directional-meter'
-import { SUPABASE_REVISION4_FIXED_GUARDS } from './supabase-revision4-directional-egress-contract'
+import {
+  summarizeSupabaseRevision4DirectionalBytes,
+  SUPABASE_REVISION4_FIXED_GUARDS,
+  SUPABASE_REVISION4_PROFILE,
+  SUPABASE_REVISION4_PROFILE_IDENTITY_DIGEST,
+} from './supabase-revision4-directional-egress-contract'
 
 const MINUTES_PER_31_DAYS = 31 * 24 * 60
+const TEXT_ENCODER = new TextEncoder()
 
 export const SUPABASE_REVISION4_R5_RUNTIME_LIMITS = {
   selectedMaximumLedgersPerClaim: 12,
@@ -48,6 +54,46 @@ export interface SupabaseRevision4R5RuntimeWireInput {
   unexplainedDirectionalDeltaReserveBytes: number
 }
 
+export interface SupabaseRevision4R5RuntimeAccounting {
+  schemaVersion: 1
+  profileId: typeof SUPABASE_REVISION4_PROFILE.profileId
+  profileRevision: typeof SUPABASE_REVISION4_PROFILE.revision
+  profileIdentityDigest: typeof SUPABASE_REVISION4_PROFILE_IDENTITY_DIGEST
+  observationId: string
+  attemptId: string
+  observedAt: string
+  disposition: 'runtime_precommit_completed'
+  observations: SupabaseRevision4MeterObservation[]
+  directionalSummary: ReturnType<typeof summarizeSupabaseRevision4DirectionalBytes>
+  memorySupplemental: {
+    canonicalJsonBytes: number
+    payloadBytes: number
+    normalizedObjectOverheadBytes: number
+    allocatorReserveBytes: number
+  }
+  unexplainedDirectionalDeltaReserveBytes: number
+  rollingBillableEgressUpperBoundBytes: number
+  memoryTransportUpperBoundBytes: number
+  checks: {
+    exactProfileIdentityBound: true
+    everyObservationDirectionBoundByContract: true
+    inboundBytesRemainInMemoryTransport: true
+    blanketAllDirectionMultiplierUsed: false
+    accountingPreparedBeforeAtomicCompletion: true
+    accountingMustCommitAtomicallyWithWork: true
+    publicReaderUnchanged: true
+    mainnetDisabled: true
+    stabilizationAuthorized: false
+    soakAuthorized: false
+  }
+}
+
+export interface SupabaseRevision4R5RuntimeAccountingEvidence {
+  accounting: SupabaseRevision4R5RuntimeAccounting
+  accountingJson: string
+  accountingDigest: string
+}
+
 export interface SupabaseRevision4R5CompletionFixedPointInput
   extends Omit<
     SupabaseRevision4R5RuntimeWireInput,
@@ -58,7 +104,7 @@ export interface SupabaseRevision4R5CompletionFixedPointInput
 }
 
 export interface SupabaseRevision4R5CompletionFixedPointResult {
-  accountingEvidence: SupabaseRevision4DirectionalAccountingEvidence
+  accountingEvidence: SupabaseRevision4R5RuntimeAccountingEvidence
   completionRequestBody: string
   completionRequestBytes: number
   fixedPointIterations: number
@@ -81,6 +127,10 @@ function safeAdd(left: number, right: number, name: string): number {
   return value
 }
 
+function safeAddMany(values: readonly number[], name: string): number {
+  return values.reduce((sum, value, index) => safeAdd(sum, value, `${name}[${index}]`), 0)
+}
+
 function safeMultiply(left: number, right: number, name: string): number {
   nonNegativeInteger(left, `${name}.left`)
   nonNegativeInteger(right, `${name}.right`)
@@ -89,6 +139,32 @@ function safeMultiply(left: number, right: number, name: string): number {
     throw new Error(`${name} exceeds the safe integer range`)
   }
   return value
+}
+
+function exactIdentifier(value: string, name: string): string {
+  const normalized = value.trim()
+  if (!/^[a-z0-9][a-z0-9._:-]{2,159}$/u.test(normalized)) {
+    throw new Error(`${name} must be a stable non-secret identifier`)
+  }
+  return normalized
+}
+
+function exactObservedAt(value: string): string {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/u.test(value)) {
+    throw new Error('observedAt must be a canonical UTC timestamp')
+  }
+  if (!Number.isFinite(Date.parse(value))) throw new Error('observedAt must be valid')
+  return value
+}
+
+async function sha256Hex(value: string): Promise<string> {
+  const bytes = TEXT_ENCODER.encode(value)
+  const buffer = new ArrayBuffer(bytes.byteLength)
+  new Uint8Array(buffer).set(bytes)
+  const digest = await crypto.subtle.digest('SHA-256', buffer)
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('')
 }
 
 export function evaluateSupabaseRevision4R5Cadence(): {
@@ -140,7 +216,7 @@ export function evaluateSupabaseRevision4R5Cadence(): {
 
 export async function buildSupabaseRevision4R5RuntimeAccounting(
   input: SupabaseRevision4R5RuntimeWireInput,
-): Promise<SupabaseRevision4DirectionalAccountingEvidence> {
+): Promise<SupabaseRevision4R5RuntimeAccountingEvidence> {
   const meter = new SupabaseRevision4DirectionalMeter()
   meter.recordBytes({
     operationId: 'r5.invoker.edge.requests',
@@ -203,32 +279,65 @@ export async function buildSupabaseRevision4R5RuntimeAccounting(
     ),
   })
 
-  return buildSupabaseRevision4DirectionalAccountingEvidence({
-    schemaVersion: 1,
-    observationId: input.observationId,
-    attemptId: input.attemptId,
-    observedAt: input.observedAt,
-    disposition: 'shadow_completed',
-    observations: meter.snapshot(),
-    memorySupplemental: {
-      canonicalJsonBytes: nonNegativeInteger(input.canonicalJsonBytes, 'canonicalJsonBytes'),
-      payloadBytes: nonNegativeInteger(input.payloadBytes, 'payloadBytes'),
-      normalizedObjectOverheadBytes: nonNegativeInteger(
-        input.normalizedObjectOverheadBytes,
-        'normalizedObjectOverheadBytes',
-      ),
-      allocatorReserveBytes: nonNegativeInteger(input.allocatorReserveBytes, 'allocatorReserveBytes'),
-    },
-    unexplainedDirectionalDeltaReserveBytes: nonNegativeInteger(
-      input.unexplainedDirectionalDeltaReserveBytes,
-      'unexplainedDirectionalDeltaReserveBytes',
+  const observations = meter.snapshot()
+  const directionalSummary = summarizeSupabaseRevision4DirectionalBytes(observations)
+  const memorySupplemental = {
+    canonicalJsonBytes: nonNegativeInteger(input.canonicalJsonBytes, 'canonicalJsonBytes'),
+    payloadBytes: nonNegativeInteger(input.payloadBytes, 'payloadBytes'),
+    normalizedObjectOverheadBytes: nonNegativeInteger(
+      input.normalizedObjectOverheadBytes,
+      'normalizedObjectOverheadBytes',
     ),
-    recoveryMutationCommitted: false,
-    publicReaderUnchanged: true,
-    mainnetDisabled: true,
-    stabilizationAuthorized: false,
-    soakAuthorized: false,
-  })
+    allocatorReserveBytes: nonNegativeInteger(input.allocatorReserveBytes, 'allocatorReserveBytes'),
+  }
+  const unexplainedDirectionalDeltaReserveBytes = nonNegativeInteger(
+    input.unexplainedDirectionalDeltaReserveBytes,
+    'unexplainedDirectionalDeltaReserveBytes',
+  )
+  const accounting: SupabaseRevision4R5RuntimeAccounting = {
+    schemaVersion: 1,
+    profileId: SUPABASE_REVISION4_PROFILE.profileId,
+    profileRevision: SUPABASE_REVISION4_PROFILE.revision,
+    profileIdentityDigest: SUPABASE_REVISION4_PROFILE_IDENTITY_DIGEST,
+    observationId: exactIdentifier(input.observationId, 'observationId'),
+    attemptId: exactIdentifier(input.attemptId, 'attemptId'),
+    observedAt: exactObservedAt(input.observedAt),
+    disposition: 'runtime_precommit_completed',
+    observations,
+    directionalSummary,
+    memorySupplemental,
+    unexplainedDirectionalDeltaReserveBytes,
+    rollingBillableEgressUpperBoundBytes: safeAdd(
+      directionalSummary.rollingBillableEgressUpperBoundBytes,
+      unexplainedDirectionalDeltaReserveBytes,
+      'rollingBillableEgressUpperBoundBytes',
+    ),
+    memoryTransportUpperBoundBytes: safeAddMany([
+      directionalSummary.memoryTransportBytes,
+      memorySupplemental.canonicalJsonBytes,
+      memorySupplemental.payloadBytes,
+      memorySupplemental.normalizedObjectOverheadBytes,
+      memorySupplemental.allocatorReserveBytes,
+    ], 'memoryTransportUpperBoundBytes'),
+    checks: {
+      exactProfileIdentityBound: true,
+      everyObservationDirectionBoundByContract: true,
+      inboundBytesRemainInMemoryTransport: true,
+      blanketAllDirectionMultiplierUsed: false,
+      accountingPreparedBeforeAtomicCompletion: true,
+      accountingMustCommitAtomicallyWithWork: true,
+      publicReaderUnchanged: true,
+      mainnetDisabled: true,
+      stabilizationAuthorized: false,
+      soakAuthorized: false,
+    },
+  }
+  const accountingJson = canonicalPortableJson(accounting)
+  return {
+    accounting,
+    accountingJson,
+    accountingDigest: await sha256Hex(accountingJson),
+  }
 }
 
 export async function resolveSupabaseRevision4R5CompletionFixedPoint(
