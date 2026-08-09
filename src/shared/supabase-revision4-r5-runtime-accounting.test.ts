@@ -3,7 +3,9 @@ import { describe, expect, it } from 'vitest'
 import {
   buildSupabaseRevision4R5RuntimeAccounting,
   evaluateSupabaseRevision4R5Cadence,
+  resolveSupabaseRevision4R5CompletionFixedPoint,
 } from './supabase-revision4-r5-runtime-accounting'
+import { utf8ByteLength } from './supabase-revision4-directional-meter'
 
 describe('revision-4 R5 runtime accounting', () => {
   it('keeps the 12-ledger claim cap while proving 24/min steady and 36/min catch-up capacity', () => {
@@ -81,5 +83,48 @@ describe('revision-4 R5 runtime accounting', () => {
     )
     expect(callerResponse?.rollingBillableEgressBytes).toBe(1_280)
     expect(callerResponse?.rollingBillableEgressBytes).toBeLessThan(128 * 1024)
+  })
+
+  it('resolves the exact completion-request byte self-reference instead of billing the 2 MiB transport cap', async () => {
+    const result = await resolveSupabaseRevision4R5CompletionFixedPoint({
+      observationId: 'r5.rev4.runtime.0003',
+      attemptId: 'r5.rev4.runtime.attempt.0003',
+      observedAt: '2026-08-09T12:02:00.000Z',
+      invokerRequestBytes: 64,
+      invokerRequestCount: 1,
+      xrplRequestBytes: 617,
+      xrplRequestCount: 2,
+      xrplResponseBytes: 17_672,
+      xrplResponseCount: 2,
+      databaseRequestBytesBeforeCompletion: 900,
+      databaseRequestCountBeforeCompletion: 2,
+      databaseResponseBytes: 700,
+      databaseResponseCount: 2,
+      invokerResponseBytes: 256,
+      invokerResponseCount: 1,
+      canonicalJsonBytes: 2_000,
+      payloadBytes: 1_000,
+      normalizedObjectOverheadBytes: 512,
+      allocatorReserveBytes: 8_388_608,
+      unexplainedDirectionalDeltaReserveBytes: 0,
+    }, ({ accountingJson, accountingDigest, finalizedEgressUpperBoundBytes }) => ({
+      p_run_id: 'r5-rev4-candidate',
+      p_accounting_json: accountingJson,
+      p_accounting_digest: accountingDigest,
+      p_finalized_egress_upper_bound_bytes: finalizedEgressUpperBoundBytes,
+    }))
+
+    expect(result.fixedPointIterations).toBeGreaterThan(1)
+    expect(result.fixedPointIterations).toBeLessThanOrEqual(32)
+    expect(result.completionRequestBytes).toBe(utf8ByteLength(result.completionRequestBody))
+    expect(result.completionRequestBytes).toBeLessThan(2 * 1024 * 1024)
+
+    const databaseRequest =
+      result.accountingEvidence.accounting.directionalSummary.byBoundary.find(
+        (row) => row.boundaryId === 'edge_to_database_request',
+      )
+    expect(databaseRequest?.rollingBillableEgressBytes).toBe(
+      900 + result.completionRequestBytes + 3 * 2_048,
+    )
   })
 })
