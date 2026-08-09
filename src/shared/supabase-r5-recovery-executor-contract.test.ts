@@ -61,7 +61,7 @@ describe('R5 active recovery batch executor contract', () => {
 
   it('evaluates revision-4 directional accounting before atomic completion', () => {
     const accounting = executor.indexOf(
-      'resolveSupabaseRevision4R5CompletionFixedPoint',
+      'const resolved = await resolveSupabaseRevision4R5CompletionFixedPoint',
     )
     const completion = executor.indexOf("'xrpl_complete_r5_revision4_recovery_batch'")
     expect(accounting).toBeGreaterThan(-1)
@@ -71,8 +71,8 @@ describe('R5 active recovery batch executor contract', () => {
       'COMPLETION_REQUEST_MAX_BYTES = 2 * 1024 * 1024',
       'COMPLETION_RESPONSE_ACCOUNTING_RESERVE_BYTES = 4 * 1024',
       'databaseRequestBytesBeforeCompletion: meter.databaseRequestBytes',
-      'priorConservativeEgress31dBytes',
-      'projectedInvocations31d >= SUPABASE_REVISION4_FIXED_GUARDS.projectInvocationHalt31d',
+      'claim.priorConservativeEgress31dBytes',
+      'claim.projectedInvocations31d >= SUPABASE_REVISION4_FIXED_GUARDS.projectInvocationHalt31d',
       'resolved.completionRequestBytes > COMPLETION_REQUEST_MAX_BYTES',
       'p_finalized_egress_upper_bound_bytes: finalizedEgressUpperBoundBytes',
       'accounting.rollingBillableEgressUpperBoundBytes',
