@@ -29,12 +29,15 @@ describe('revision-4 G2 meter isolation', () => {
     expect(activeR5Executor).not.toContain("const SELECTION_DIGEST = '")
   })
 
-  it('does not silently turn the existing trigger into a live rev4 cutover', () => {
+  it('keeps the currently deployed trigger boundary fail-closed while rev4 DB wiring is repository-only', () => {
     expect(activeR5Trigger).not.toContain(
       'SUPABASE_REVISION4_PROFILE_IDENTITY_DIGEST',
     )
     expect(activeR5Trigger).toContain(
       "const RECOVERY_RUN_ID = 'r5-recovery-selected-revision3-entry'",
+    )
+    expect(activeR5Executor).toContain(
+      "const RECOVERY_RUN_ID = 'r5-recovery-selected-revision4-entry'",
     )
   })
 })
