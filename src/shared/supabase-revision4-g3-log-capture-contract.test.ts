@@ -21,8 +21,8 @@ describe('R4F G3 read-only concurrent traffic log capture', () => {
       'verify-r4f-g3-after-sequence.mjs',
       '--resume-run /tmp/resume-run.json',
       '--after-comment-id "$after_comment"',
-      'capture_start="$(jq -r ".beforeCapturedAt"',
-      'capture_end="$(jq -r ".afterCapturedAt"',
+      "capture_start=\"$(jq -r '.beforeCapturedAt' /tmp/after-sequence.json)\"",
+      "capture_end=\"$(jq -r '.afterCapturedAt' /tmp/after-sequence.json)\"",
       "if (!(afterAt < authorizationAt)) throw new Error('log capture authorization must follow verified AFTER marker')",
       "source_commit=\"$(jq -r '.head_sha' /tmp/target-run.json)\"",
     ]) {
