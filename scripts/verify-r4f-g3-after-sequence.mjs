@@ -114,11 +114,11 @@ const beforeCommentAt = Date.parse(String(beforeComment.created_at ?? ''))
 const runStartAt = Date.parse(String(oneShotRun.run_started_at ?? oneShotRun.created_at ?? ''))
 const runEndAt = Date.parse(String(oneShotRun.updated_at ?? ''))
 const resumeStartAt = Date.parse(String(resumeRun.run_started_at ?? resumeRun.created_at ?? ''))
-const resumeEndAt = Date.parse(String(resumeRun.updated_at ?? ''))
+const resumeUpdatedAt = Date.parse(String(resumeRun.updated_at ?? ''))
 const resumeLocatorAt = Date.parse(String(resumeLocator.created_at ?? ''))
 const afterAt = Date.parse(afterCapturedAt)
 const afterCommentAt = Date.parse(String(afterComment.created_at ?? ''))
-if (![beforeAt, beforeCommentAt, runStartAt, runEndAt, resumeStartAt, resumeEndAt, resumeLocatorAt, afterAt, afterCommentAt].every(Number.isFinite)) {
+if (![beforeAt, beforeCommentAt, runStartAt, runEndAt, resumeStartAt, resumeUpdatedAt, resumeLocatorAt, afterAt, afterCommentAt].every(Number.isFinite)) {
   throw new Error('G3 AFTER sequence contains an invalid timestamp')
 }
 if (!(beforeAt <= beforeCommentAt && beforeCommentAt < runStartAt)) {
@@ -127,7 +127,10 @@ if (!(beforeAt <= beforeCommentAt && beforeCommentAt < runStartAt)) {
 if (!(runStartAt <= runEndAt && runEndAt <= resumeStartAt)) {
   throw new Error('collector resume must follow the completed one-shot run')
 }
-if (!(resumeStartAt <= resumeEndAt && resumeEndAt <= resumeLocatorAt && resumeLocatorAt <= afterAt)) {
+// The restore locator is emitted only after the scheduler restore and watchdog cleanup steps
+// succeed. GitHub Actions may then update workflow_run.updated_at during post-job cleanup,
+// so mutable workflow metadata must not be required to precede that locator.
+if (!(resumeStartAt <= resumeLocatorAt && resumeLocatorAt <= afterAt)) {
   throw new Error('AFTER capture must follow successful collector resume')
 }
 if (!(afterAt <= afterCommentAt)) {
@@ -151,5 +154,7 @@ process.stdout.write(`${JSON.stringify({
   afterArtifactDigest,
   usageFresh: true,
   oneShotPrecedesResume: true,
+  resumeSuccessLocatorAt: String(resumeLocator.created_at),
+  resumeWorkflowUpdatedAt: String(resumeRun.updated_at),
   resumePrecedesAfter: true,
 })}\n`)
