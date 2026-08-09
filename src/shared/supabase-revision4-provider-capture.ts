@@ -44,6 +44,7 @@ export interface SupabaseRevision4ProviderCaptureInput {
     actor: 'badjoke-lab'
     scope: 'r4f_g3_dashboard_capture'
     sourceCommit: string
+    createdAt: string
     evidenceArtifact: string
     evidenceDigest: string
   }
@@ -60,6 +61,10 @@ export interface SupabaseRevision4ProviderCaptureInput {
   billingPeriodEnd: string
   before: SupabaseRevision4ProviderDisplayReading
   after: SupabaseRevision4ProviderDisplayReading
+  providerUsageFreshness: {
+    beforeEdgeFunctionInvocations: number
+    afterEdgeFunctionInvocations: number
+  }
   application: {
     rollingBillableEgressUpperBoundBytes: number
     retainedUnexplainedDeltaReserveBytes: number
@@ -109,9 +114,14 @@ export interface SupabaseRevision4ProviderCaptureEvidence {
     lowerBoundBytes: number
     upperBoundBytes: number
   }
+  providerUsageFreshness: SupabaseRevision4ProviderCaptureInput['providerUsageFreshness'] & {
+    invocationDelta: number
+    verified: boolean
+  }
   application: SupabaseRevision4ProviderCaptureInput['application']
   concurrentTraffic: SupabaseRevision4ProviderCaptureInput['concurrentTraffic']
   authorizationVerified: boolean
+  authorizationPrecedesBefore: true
   displayIntervalsVerified: true
   sameProjectIdentity: true
   sameBillingPeriod: true
@@ -306,13 +316,28 @@ export function buildSupabaseRevision4ProviderCaptureEvidence(
     input.application.retainedUnexplainedDeltaReserveBytes,
     'application retained unexplained delta reserve',
   )
+  const beforeInvocations = safeInteger(
+    input.providerUsageFreshness.beforeEdgeFunctionInvocations,
+    'provider usage BEFORE edge function invocations',
+  )
+  const afterInvocations = safeInteger(
+    input.providerUsageFreshness.afterEdgeFunctionInvocations,
+    'provider usage AFTER edge function invocations',
+  )
 
   const periodStart = canonicalUtc(input.billingPeriodStart, 'billingPeriodStart')
   const periodEnd = canonicalUtc(input.billingPeriodEnd, 'billingPeriodEnd')
+  const authorizationCreatedAt = canonicalUtc(
+    input.authorization.createdAt,
+    'authorization.createdAt',
+  )
   const beforeCapturedAt = canonicalUtc(input.before.capturedAt, 'before.capturedAt')
   const afterCapturedAt = canonicalUtc(input.after.capturedAt, 'after.capturedAt')
   if (periodStart >= periodEnd) {
     throw new Error('billing period must have positive duration')
+  }
+  if (authorizationCreatedAt >= beforeCapturedAt) {
+    throw new Error('dashboard capture authorization must precede BEFORE capture')
   }
   if (
     beforeCapturedAt < periodStart ||
@@ -366,6 +391,9 @@ export function buildSupabaseRevision4ProviderCaptureEvidence(
     input.providerSurface.billingPeriodFilterApplied === true &&
     input.providerSurface.cachedEgressIncluded === true
 
+  const invocationDelta = afterInvocations - beforeInvocations
+  const providerUsageFresh = invocationDelta >= 1
+
   const reconciliation = reconcileSupabaseRevision4ProviderInterval({
     schemaVersion: 1,
     profileId: input.profileId,
@@ -406,15 +434,24 @@ export function buildSupabaseRevision4ProviderCaptureEvidence(
     billingPeriodEnd: input.billingPeriodEnd,
     before: { ...input.before, ...beforeInterval },
     after: { ...input.after, ...afterInterval },
+    providerUsageFreshness: {
+      ...input.providerUsageFreshness,
+      invocationDelta,
+      verified: providerUsageFresh,
+    },
     application: input.application,
     concurrentTraffic: input.concurrentTraffic,
     authorizationVerified,
+    authorizationPrecedesBefore: true,
     displayIntervalsVerified: true,
     sameProjectIdentity: true,
     sameBillingPeriod: true,
     reconciliation,
     g3Qualified:
-      authorizationVerified && providerSurfaceVerified && reconciliation.g3Qualified,
+      authorizationVerified &&
+      providerSurfaceVerified &&
+      providerUsageFresh &&
+      reconciliation.g3Qualified,
     profileSelected: false,
     r5Authorized: false,
   }
