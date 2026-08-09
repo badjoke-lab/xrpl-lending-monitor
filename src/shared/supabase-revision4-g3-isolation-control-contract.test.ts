@@ -20,14 +20,14 @@ const prepareRun = 12345
 const jobId = 1
 const prepareCreatedAt = '2026-08-09T00:00:00Z'
 const authorizationCreatedAt = '2026-08-09T00:02:00Z'
-const exactPauseCommand = `/r4f-g3-isolation-pause commit=${commit} project=${projectDigest} job=${jobId} command=${commandDigest} prepare_run=${prepareRun}`
+const exactDashboardCommand = `/r4f-g3-dashboard-authorize scope=r4f_g3_dashboard_capture commit=${commit} project=${projectDigest} job=${jobId} command=${commandDigest} prepare_run=${prepareRun}`
 
 function proposalBody(overrides: { jobId?: number; commandDigest?: string; exactCommand?: string } = {}): string {
   const proposalJobId = overrides.jobId ?? jobId
   const proposalCommandDigest = overrides.commandDigest ?? commandDigest
-  const exactCommand = overrides.exactCommand ?? exactPauseCommand
+  const exactCommand = overrides.exactCommand ?? exactDashboardCommand
   return [
-    '## R4F G3 isolated-window pause authorization proposal',
+    '## R4F G3 isolated-window dashboard capture authorization proposal',
     '',
     `Preparation run: \`${prepareRun}\``,
     `Source commit: \`${commit}\``,
@@ -36,6 +36,7 @@ function proposalBody(overrides: { jobId?: number; commandDigest?: string; exact
     `Cron job id: \`${proposalJobId}\``,
     'Schedule: `* * * * *`',
     `Scheduler command digest: \`${proposalCommandDigest}\``,
+    'Dashboard capture scope: `r4f_g3_dashboard_capture`',
     '',
     'A database-local watchdog is installed before the collector is paused.',
     'The pause is bounded to at most 15 minutes.',
@@ -76,7 +77,7 @@ function runProposalVerifier(body: string) {
 }
 
 describe('R4F G3 bounded isolation control', () => {
-  it('binds pause to one exact owner proposal on Issue 1261', () => {
+  it('binds isolation preparation to the exact dashboard-capture scope before pause', () => {
     const result = runProposalVerifier(proposalBody())
     expect(result.status).toBe(0)
     expect(JSON.parse(result.stdout)).toMatchObject({
@@ -87,6 +88,7 @@ describe('R4F G3 bounded isolation control', () => {
       cronJobId: jobId,
       commandDigest,
       exactCommandVerified: true,
+      dashboardCaptureScopeVerified: true,
       watchdogBeforePauseVerified: true,
       fifteenMinuteMaximumVerified: true,
     })
@@ -94,16 +96,19 @@ describe('R4F G3 bounded isolation control', () => {
     for (const required of [
       "github.event.issue.number == 1261",
       "github.event.comment.user.login == 'badjoke-lab'",
+      "startsWith(github.event.comment.body, '/r4f-g3-dashboard-authorize ')",
+      "scope=r4f_g3_dashboard_capture",
       "startsWith(github.event.comment.body, '/r4f-g3-isolation-pause ')",
-      "regex='^/r4f-g3-isolation-pause commit=",
+      "dashboard_auth=([0-9]+)",
       'verify-r4f-g3-isolation-prepare-proposal.mjs',
+      'dashboard authorization must precede pause authorization',
       'test "$commit" = "$(git rev-parse HEAD)"',
     ]) {
       expect(workflow).toContain(required)
     }
   })
 
-  it('rejects changed job identity or command digest in the proposal', () => {
+  it('rejects changed job identity or command digest in the dashboard proposal', () => {
     const wrongJob = runProposalVerifier(proposalBody({ jobId: 2 }))
     expect(wrongJob.status).not.toBe(0)
     expect(wrongJob.stderr).toContain('expected exactly one matching isolation prepare proposal')
@@ -138,7 +143,7 @@ describe('R4F G3 bounded isolation control', () => {
     const watchdogCleanup = manager.indexOf('await removeWatchdogs()', catchStart)
     expect(immediateRestore).toBeGreaterThan(catchStart)
     expect(watchdogCleanup).toBeGreaterThan(immediateRestore)
-    expect(manager).toContain("decodeCollectorCommandFromWatchdog")
+    expect(manager).toContain('decodeCollectorCommandFromWatchdog')
     expect(manager).toContain("if (digests.size !== 1 || !digests.has(expectedCommandDigest))")
     expect(manager).toContain('restoredFromEncodedWatchdogCommand: restoredFromWatchdog')
   })
@@ -164,13 +169,16 @@ describe('R4F G3 bounded isolation control', () => {
     expect(manager).toContain('soakAuthorized: false')
   })
 
-  it('makes resume recovery-only and independent of current-main equality', () => {
+  it('makes resume recovery-only but refuses to resume before fresh AFTER evidence', () => {
     const resumeJob = workflow.slice(workflow.indexOf('\n  resume:'))
     expect(resumeJob).toContain("startsWith(github.event.comment.body, '/r4f-g3-isolation-resume ')")
-    expect(resumeJob).toContain("regex='^/r4f-g3-isolation-resume project=")
+    expect(resumeJob).toContain("one_shot_run=([0-9]+)")
+    expect(resumeJob).toContain("before_comment=([0-9]+)")
+    expect(resumeJob).toContain("after_comment=([0-9]+)")
+    expect(resumeJob).toContain('verify-r4f-g3-after-sequence.mjs')
     expect(resumeJob).toContain('--mode resume')
     expect(resumeJob).not.toContain('test "$commit" = "$(git rev-parse HEAD)"')
-    expect(resumeJob).toContain("if (run.conclusion !== 'success')")
-    expect(resumeJob).toContain('The exact collector scheduler has been restored')
+    expect(resumeJob).toContain('Verified Usage invocation delta')
+    expect(resumeJob).toContain('/r4f-g3-capture-logs run=${ONE_SHOT_RUN} resume_run=${GITHUB_RUN_ID}')
   })
 })
