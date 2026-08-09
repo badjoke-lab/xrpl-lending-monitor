@@ -11,6 +11,9 @@ const prepareRun = argument('--prepare-run')
 const commit = argument('--commit')
 const ledgerText = argument('--ledger')
 const projectDigest = argument('--project-digest')
+const dashboardAuthText = argument('--dashboard-auth-comment-id')
+const pauseRunText = argument('--pause-run-id')
+const beforeCommentText = argument('--before-comment-id')
 const authorizationCreatedAt = argument('--authorization-created-at')
 
 if (
@@ -20,10 +23,13 @@ if (
   !/^[a-f0-9]{40}$/u.test(commit ?? '') ||
   !/^[1-9][0-9]*$/u.test(ledgerText ?? '') ||
   !/^[a-f0-9]{64}$/u.test(projectDigest ?? '') ||
+  !/^[1-9][0-9]*$/u.test(dashboardAuthText ?? '') ||
+  !/^[1-9][0-9]*$/u.test(pauseRunText ?? '') ||
+  !/^[1-9][0-9]*$/u.test(beforeCommentText ?? '') ||
   !authorizationCreatedAt
 ) {
   throw new Error(
-    'usage: verify-r4f-g3-prepare-proposal --comments <json> --run <json> --prepare-run <id> --commit <sha> --ledger <index> --project-digest <sha256> --authorization-created-at <iso>',
+    'usage: verify-r4f-g3-prepare-proposal --comments <json> --run <json> --prepare-run <id> --commit <sha> --ledger <index> --project-digest <sha256> --dashboard-auth-comment-id <id> --pause-run-id <id> --before-comment-id <id> --authorization-created-at <iso>',
   )
 }
 
@@ -33,8 +39,11 @@ if (!Array.isArray(comments)) throw new Error('issue comments payload must be an
 
 const runId = Number(prepareRun)
 const ledger = Number(ledgerText)
-if (!Number.isSafeInteger(runId) || !Number.isSafeInteger(ledger)) {
-  throw new Error('prepare run or ledger exceeds safe integer range')
+const dashboardAuth = Number(dashboardAuthText)
+const pauseRun = Number(pauseRunText)
+const beforeComment = Number(beforeCommentText)
+if (![runId, ledger, dashboardAuth, pauseRun, beforeComment].every(Number.isSafeInteger)) {
+  throw new Error('prepare run, ledger, or sequence identifier exceeds safe integer range')
 }
 
 if (run.name !== 'R4F G3 One-Shot Probe') throw new Error('prepare run workflow mismatch')
@@ -52,15 +61,18 @@ if (runCreatedAt > authorizationAt) {
   throw new Error('authorization predates prepare run')
 }
 
-const exactCommand = `/r4f-g3-authorize commit=${commit} ledger=${ledger} project=${projectDigest} prepare_run=${runId}`
+const exactCommand = `/r4f-g3-authorize commit=${commit} ledger=${ledger} project=${projectDigest} prepare_run=${runId} dashboard_auth=${dashboardAuth} pause_run=${pauseRun} before_comment=${beforeComment}`
 const requiredFragments = [
   '## R4F G3 one-shot authorization proposal',
   `Preparation run: \`${runId}\``,
   `Source commit: \`${commit}\``,
   `Project identity digest: \`${projectDigest}\``,
   `Exact Devnet ledger: \`${ledger}\``,
+  `Dashboard authorization comment: \`${dashboardAuth}\``,
+  `Isolation pause run: \`${pauseRun}\``,
+  `BEFORE capture comment: \`${beforeComment}\``,
   `\`${exactCommand}\``,
-  'Before authorizing, retain the project-filtered Supabase Usage → **Total Egress** reading for the same billing period.',
+  'The dashboard capture authorization and isolated BEFORE marker were verified before this prepare run.',
 ]
 
 const matches = comments.filter((comment) => {
@@ -89,7 +101,10 @@ process.stdout.write(
     sourceCommit: commit,
     ledger,
     projectIdentityDigest: projectDigest,
+    dashboardAuthorizationCommentId: dashboardAuth,
+    pauseRun,
+    beforeCommentId: beforeComment,
     exactCommandVerified: true,
-    beforeCaptureInstructionVerified: true,
+    preauthorizedBeforeSequenceVerified: true,
   })}\n`,
 )
