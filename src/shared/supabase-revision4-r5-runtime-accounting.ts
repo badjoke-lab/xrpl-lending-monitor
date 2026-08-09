@@ -3,6 +3,9 @@ import {
   SupabaseRevision4DirectionalMeter,
   type SupabaseRevision4DirectionalAccountingEvidence,
 } from './supabase-revision4-directional-meter'
+import { SUPABASE_REVISION4_FIXED_GUARDS } from './supabase-revision4-directional-egress-contract'
+
+const MINUTES_PER_31_DAYS = 31 * 24 * 60
 
 export const SUPABASE_REVISION4_R5_RUNTIME_LIMITS = {
   selectedMaximumLedgersPerClaim: 12,
@@ -26,11 +29,17 @@ export interface SupabaseRevision4R5RuntimeWireInput {
   attemptId: string
   observedAt: string
   invokerRequestBytes: number
+  invokerRequestCount: number
   xrplRequestBytes: number
+  xrplRequestCount: number
   xrplResponseBytes: number
+  xrplResponseCount: number
   databaseRequestBytes: number
+  databaseRequestCount: number
   databaseResponseBytes: number
+  databaseResponseCount: number
   invokerResponseBytes: number
+  invokerResponseCount: number
   canonicalJsonBytes: number
   payloadBytes: number
   normalizedObjectOverheadBytes: number
@@ -45,11 +54,26 @@ function nonNegativeInteger(value: number, name: string): number {
   return value
 }
 
+function safeMultiply(left: number, right: number, name: string): number {
+  nonNegativeInteger(left, `${name}.left`)
+  nonNegativeInteger(right, `${name}.right`)
+  const value = left * right
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`${name} exceeds the safe integer range`)
+  }
+  return value
+}
+
 export function evaluateSupabaseRevision4R5Cadence(): {
   steadyLedgersPerMinute: number
   catchupLedgersPerMinute: number
+  steadyInvocations31d: number
+  catchupInvocations31d: number
   steadyQualified: boolean
   catchupQualified: boolean
+  steadyInvocationGuardQualified: boolean
+  catchupInvocationGuardQualified: boolean
+  maximumAverageBillableEgressBytesPerLedgerAtRequiredSteadyDemand: number
 } {
   const steadyLedgersPerMinute =
     SUPABASE_REVISION4_R5_RUNTIME_LIMITS.selectedMaximumLedgersPerClaim
@@ -57,15 +81,33 @@ export function evaluateSupabaseRevision4R5Cadence(): {
   const catchupLedgersPerMinute =
     SUPABASE_REVISION4_R5_RUNTIME_LIMITS.selectedMaximumLedgersPerClaim
     * SUPABASE_REVISION4_R5_RUNTIME_LIMITS.catchupClaimsPerMinute
+  const steadyInvocations31d =
+    MINUTES_PER_31_DAYS * SUPABASE_REVISION4_R5_RUNTIME_LIMITS.steadyClaimsPerMinute
+  const catchupInvocations31d =
+    MINUTES_PER_31_DAYS * SUPABASE_REVISION4_R5_RUNTIME_LIMITS.catchupClaimsPerMinute
+  const requiredSteadyLedgers31d =
+    MINUTES_PER_31_DAYS * SUPABASE_REVISION4_R5_RUNTIME_LIMITS.requiredSteadyLedgersPerMinute
+
   return {
     steadyLedgersPerMinute,
     catchupLedgersPerMinute,
+    steadyInvocations31d,
+    catchupInvocations31d,
     steadyQualified:
       steadyLedgersPerMinute
       > SUPABASE_REVISION4_R5_RUNTIME_LIMITS.requiredSteadyLedgersPerMinute,
     catchupQualified:
       catchupLedgersPerMinute
       > SUPABASE_REVISION4_R5_RUNTIME_LIMITS.requiredCatchupLedgersPerMinute,
+    steadyInvocationGuardQualified:
+      steadyInvocations31d < SUPABASE_REVISION4_FIXED_GUARDS.projectInvocationHalt31d,
+    catchupInvocationGuardQualified:
+      catchupInvocations31d < SUPABASE_REVISION4_FIXED_GUARDS.projectInvocationHalt31d,
+    maximumAverageBillableEgressBytesPerLedgerAtRequiredSteadyDemand:
+      Math.floor(
+        SUPABASE_REVISION4_FIXED_GUARDS.projectEgressHalt31dBytes
+        / requiredSteadyLedgers31d,
+      ),
   }
 }
 
@@ -74,40 +116,64 @@ export async function buildSupabaseRevision4R5RuntimeAccounting(
 ): Promise<SupabaseRevision4DirectionalAccountingEvidence> {
   const meter = new SupabaseRevision4DirectionalMeter()
   meter.recordBytes({
-    operationId: 'r5.invoker.edge.request',
+    operationId: 'r5.invoker.edge.requests',
     boundaryId: 'invoker_to_edge_request',
     bodyBytes: nonNegativeInteger(input.invokerRequestBytes, 'invokerRequestBytes'),
-    framingReserveBytes: SUPABASE_REVISION4_R5_FRAMING_RESERVES.invokerRequestBytes,
+    framingReserveBytes: safeMultiply(
+      nonNegativeInteger(input.invokerRequestCount, 'invokerRequestCount'),
+      SUPABASE_REVISION4_R5_FRAMING_RESERVES.invokerRequestBytes,
+      'invokerRequestFramingReserveBytes',
+    ),
   })
   meter.recordBytes({
     operationId: 'r5.edge.xrpl.requests',
     boundaryId: 'edge_to_xrpl_request',
     bodyBytes: nonNegativeInteger(input.xrplRequestBytes, 'xrplRequestBytes'),
-    framingReserveBytes: SUPABASE_REVISION4_R5_FRAMING_RESERVES.edgeToXrplRequestBytes,
+    framingReserveBytes: safeMultiply(
+      nonNegativeInteger(input.xrplRequestCount, 'xrplRequestCount'),
+      SUPABASE_REVISION4_R5_FRAMING_RESERVES.edgeToXrplRequestBytes,
+      'xrplRequestFramingReserveBytes',
+    ),
   })
   meter.recordBytes({
     operationId: 'r5.xrpl.edge.responses',
     boundaryId: 'xrpl_to_edge_response',
     bodyBytes: nonNegativeInteger(input.xrplResponseBytes, 'xrplResponseBytes'),
-    framingReserveBytes: SUPABASE_REVISION4_R5_FRAMING_RESERVES.xrplToEdgeResponseBytes,
+    framingReserveBytes: safeMultiply(
+      nonNegativeInteger(input.xrplResponseCount, 'xrplResponseCount'),
+      SUPABASE_REVISION4_R5_FRAMING_RESERVES.xrplToEdgeResponseBytes,
+      'xrplResponseFramingReserveBytes',
+    ),
   })
   meter.recordBytes({
     operationId: 'r5.edge.database.requests',
     boundaryId: 'edge_to_database_request',
     bodyBytes: nonNegativeInteger(input.databaseRequestBytes, 'databaseRequestBytes'),
-    framingReserveBytes: SUPABASE_REVISION4_R5_FRAMING_RESERVES.edgeToDatabaseRequestBytes,
+    framingReserveBytes: safeMultiply(
+      nonNegativeInteger(input.databaseRequestCount, 'databaseRequestCount'),
+      SUPABASE_REVISION4_R5_FRAMING_RESERVES.edgeToDatabaseRequestBytes,
+      'databaseRequestFramingReserveBytes',
+    ),
   })
   meter.recordBytes({
     operationId: 'r5.database.edge.responses',
     boundaryId: 'database_to_edge_response',
     bodyBytes: nonNegativeInteger(input.databaseResponseBytes, 'databaseResponseBytes'),
-    framingReserveBytes: SUPABASE_REVISION4_R5_FRAMING_RESERVES.databaseToEdgeResponseBytes,
+    framingReserveBytes: safeMultiply(
+      nonNegativeInteger(input.databaseResponseCount, 'databaseResponseCount'),
+      SUPABASE_REVISION4_R5_FRAMING_RESERVES.databaseToEdgeResponseBytes,
+      'databaseResponseFramingReserveBytes',
+    ),
   })
   meter.recordBytes({
-    operationId: 'r5.edge.invoker.response',
+    operationId: 'r5.edge.invoker.responses',
     boundaryId: 'edge_to_invoker_response',
     bodyBytes: nonNegativeInteger(input.invokerResponseBytes, 'invokerResponseBytes'),
-    framingReserveBytes: SUPABASE_REVISION4_R5_FRAMING_RESERVES.edgeToInvokerResponseBytes,
+    framingReserveBytes: safeMultiply(
+      nonNegativeInteger(input.invokerResponseCount, 'invokerResponseCount'),
+      SUPABASE_REVISION4_R5_FRAMING_RESERVES.edgeToInvokerResponseBytes,
+      'invokerResponseFramingReserveBytes',
+    ),
   })
 
   return buildSupabaseRevision4DirectionalAccountingEvidence({
@@ -120,10 +186,16 @@ export async function buildSupabaseRevision4R5RuntimeAccounting(
     memorySupplemental: {
       canonicalJsonBytes: nonNegativeInteger(input.canonicalJsonBytes, 'canonicalJsonBytes'),
       payloadBytes: nonNegativeInteger(input.payloadBytes, 'payloadBytes'),
-      normalizedObjectOverheadBytes: nonNegativeInteger(input.normalizedObjectOverheadBytes, 'normalizedObjectOverheadBytes'),
+      normalizedObjectOverheadBytes: nonNegativeInteger(
+        input.normalizedObjectOverheadBytes,
+        'normalizedObjectOverheadBytes',
+      ),
       allocatorReserveBytes: nonNegativeInteger(input.allocatorReserveBytes, 'allocatorReserveBytes'),
     },
-    unexplainedDirectionalDeltaReserveBytes: nonNegativeInteger(input.unexplainedDirectionalDeltaReserveBytes, 'unexplainedDirectionalDeltaReserveBytes'),
+    unexplainedDirectionalDeltaReserveBytes: nonNegativeInteger(
+      input.unexplainedDirectionalDeltaReserveBytes,
+      'unexplainedDirectionalDeltaReserveBytes',
+    ),
     recoveryMutationCommitted: false,
     publicReaderUnchanged: true,
     mainnetDisabled: true,
