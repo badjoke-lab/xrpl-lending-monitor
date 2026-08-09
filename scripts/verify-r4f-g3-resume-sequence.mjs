@@ -124,19 +124,24 @@ const beforeAt = Date.parse(beforeCapturedAt)
 const beforeCommentAt = Date.parse(String(beforeComment.created_at ?? ''))
 const authorizationAt = Date.parse(String(authorizationComment.created_at ?? ''))
 const runStartAt = Date.parse(String(oneShotRun.run_started_at ?? oneShotRun.created_at ?? ''))
-const runEndAt = Date.parse(String(oneShotRun.updated_at ?? ''))
+const runUpdatedAt = Date.parse(String(oneShotRun.updated_at ?? ''))
 const locatorAt = Date.parse(String(locatorComment.created_at ?? ''))
 const resumeAt = Date.parse(resumeCreatedAt)
-if (![beforeAt, beforeCommentAt, authorizationAt, runStartAt, runEndAt, locatorAt, resumeAt].every(Number.isFinite)) {
+if (![beforeAt, beforeCommentAt, authorizationAt, runStartAt, runUpdatedAt, locatorAt, resumeAt].every(Number.isFinite)) {
   throw new Error('G3 resume sequence contains an invalid timestamp')
 }
 if (!(beforeAt <= beforeCommentAt && beforeCommentAt < authorizationAt)) {
   throw new Error('one-shot authorization must follow the retained BEFORE capture')
 }
-if (!(authorizationAt <= runStartAt && runStartAt <= runEndAt)) {
+if (!(authorizationAt <= runStartAt)) {
   throw new Error('successful one-shot run must follow its exact authorization')
 }
-if (!(runEndAt <= locatorAt && locatorAt < resumeAt)) {
+// GitHub Actions may publish the success locator before post-job cleanup finishes, and
+// workflow_run.updated_at can therefore be later than the locator. The locator is the
+// workflow-authored success boundary used by the resume command; require it to follow
+// the authorized run start and precede the owner resume command instead of comparing it
+// to mutable workflow metadata.
+if (!(runStartAt <= locatorAt && locatorAt < resumeAt)) {
   throw new Error('collector resume must follow the successful one-shot locator')
 }
 
@@ -151,7 +156,8 @@ process.stdout.write(`${JSON.stringify({
   oneShotRun: oneShotRunId,
   oneShotAuthorizationCommentId: authorizationCommentId,
   beforeCapturedAt,
-  oneShotCompletedAt: String(oneShotRun.updated_at),
+  oneShotWorkflowUpdatedAt: String(oneShotRun.updated_at),
+  oneShotSuccessLocatorAt: String(locatorComment.created_at),
   oneShotSucceededBeforeResume: true,
   immediateRestoreAuthorized: true,
 })}\n`)
