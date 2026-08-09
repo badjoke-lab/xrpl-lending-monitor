@@ -28,6 +28,10 @@ process.stdout.write(
     captureId: evidence.captureId,
     captureState: evidence.captureState,
     authorizationVerified: evidence.authorizationVerified,
+    authorizationPrecedesBefore: evidence.authorizationPrecedesBefore,
+    providerSurfaceVerified: evidence.providerSurfaceVerified,
+    providerUsageFresh: evidence.providerUsageFreshness.verified,
+    providerUsageInvocationDelta: evidence.providerUsageFreshness.invocationDelta,
     providerDeltaInterval: evidence.reconciliation.providerDeltaInterval,
     selectedUnexplainedDeltaReserveBytes:
       evidence.reconciliation.selectedUnexplainedDeltaReserveBytes,
