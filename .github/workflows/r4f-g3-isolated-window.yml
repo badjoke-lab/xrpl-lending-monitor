@@ -352,12 +352,12 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Parse and verify AFTER-before-resume sequence
+      - name: Parse and verify successful one-shot before immediate resume
         id: resume_auth
         shell: bash
         run: |
           set -euo pipefail
-          regex='^/r4f-g3-isolation-resume project=([a-f0-9]{64}) job=([0-9]+) command=([a-f0-9]{64}) pause_run=([0-9]+) one_shot_run=([0-9]+) before_comment=([0-9]+) after_comment=([0-9]+)$'
+          regex='^/r4f-g3-isolation-resume project=([a-f0-9]{64}) job=([0-9]+) command=([a-f0-9]{64}) pause_run=([0-9]+) one_shot_run=([0-9]+) before_comment=([0-9]+)$'
           [[ "$RESUME_BODY" =~ $regex ]] || { echo 'resume command shape mismatch' >&2; exit 1; }
           project_digest="${BASH_REMATCH[1]}"
           job_id="${BASH_REMATCH[2]}"
@@ -365,12 +365,10 @@ jobs:
           pause_run="${BASH_REMATCH[4]}"
           one_shot_run="${BASH_REMATCH[5]}"
           before_comment="${BASH_REMATCH[6]}"
-          after_comment="${BASH_REMATCH[7]}"
           test "$job_id" -gt 0
           test "$pause_run" -gt 0
           test "$one_shot_run" -gt 0
           test "$before_comment" -gt 0
-          test "$after_comment" -gt 0
           [[ "$SUPABASE_PROJECT_ID" =~ ^[a-z]{20}$ ]]
           actual_project_digest="$(printf '%s' "$SUPABASE_PROJECT_ID" | sha256sum | awk '{print $1}')"
           test "$project_digest" = "$actual_project_digest"
@@ -380,29 +378,20 @@ jobs:
           gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${QUALIFICATION_ISSUE}/comments?per_page=100" \
             | jq -s 'add' > /tmp/issue-comments.json
 
-          PAUSE_RUN="$pause_run" node --input-type=module <<'NODE'
-          import { readFileSync } from 'node:fs'
-          const run = JSON.parse(readFileSync('/tmp/pause-run.json', 'utf8'))
-          if (run.name !== 'R4F G3 Isolated Window') throw new Error('pause run workflow mismatch')
-          if (run.event !== 'issue_comment') throw new Error('pause run event mismatch')
-          if (run.conclusion !== 'success') throw new Error('pause run was not successful')
-          if (String(run.id) !== process.env.PAUSE_RUN) throw new Error('pause run id mismatch')
-          NODE
-
-          node scripts/verify-r4f-g3-after-sequence.mjs \
+          node scripts/verify-r4f-g3-resume-sequence.mjs \
             --comments /tmp/issue-comments.json \
+            --pause-run /tmp/pause-run.json \
             --one-shot-run /tmp/one-shot-run.json \
             --pause-run-id "$pause_run" \
             --before-comment-id "$before_comment" \
-            --after-comment-id "$after_comment" \
             --project-digest "$project_digest" \
-            --resume-created-at "$RESUME_CREATED_AT" > /tmp/after-sequence.json
+            --job-id "$job_id" \
+            --command-digest "$command_digest" \
+            --resume-created-at "$RESUME_CREATED_AT" > /tmp/resume-sequence.json
 
-          capture_start="$(jq -r '.beforeCapturedAt' /tmp/after-sequence.json)"
-          capture_end="$(jq -r '.afterCapturedAt' /tmp/after-sequence.json)"
-          invocation_delta="$(jq -r '.invocationDelta' /tmp/after-sequence.json)"
-          printf 'project_digest=%s\njob_id=%s\ncommand_digest=%s\npause_run=%s\none_shot_run=%s\nbefore_comment=%s\nafter_comment=%s\ncapture_start=%s\ncapture_end=%s\ninvocation_delta=%s\n' \
-            "$project_digest" "$job_id" "$command_digest" "$pause_run" "$one_shot_run" "$before_comment" "$after_comment" "$capture_start" "$capture_end" "$invocation_delta" >> "$GITHUB_OUTPUT"
+          before_captured_at="$(jq -r '.beforeCapturedAt' /tmp/resume-sequence.json)"
+          printf 'project_digest=%s\njob_id=%s\ncommand_digest=%s\npause_run=%s\none_shot_run=%s\nbefore_comment=%s\nbefore_captured_at=%s\n' \
+            "$project_digest" "$job_id" "$command_digest" "$pause_run" "$one_shot_run" "$before_comment" "$before_captured_at" >> "$GITHUB_OUTPUT"
 
       - name: Restore exact collector scheduler and remove isolation watchdog
         env:
@@ -428,34 +417,34 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Publish scheduler restoration and generic log command
+      - name: Publish restoration and post-resume AFTER marker shape
         if: success()
         env:
           RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
           PAUSE_RUN: ${{ steps.resume_auth.outputs.pause_run }}
           ONE_SHOT_RUN: ${{ steps.resume_auth.outputs.one_shot_run }}
+          BEFORE_COMMENT: ${{ steps.resume_auth.outputs.before_comment }}
           PROJECT_DIGEST: ${{ steps.resume_auth.outputs.project_digest }}
           COMMAND_DIGEST: ${{ steps.resume_auth.outputs.command_digest }}
-          CAPTURE_START: ${{ steps.resume_auth.outputs.capture_start }}
-          CAPTURE_END: ${{ steps.resume_auth.outputs.capture_end }}
-          INVOCATION_DELTA: ${{ steps.resume_auth.outputs.invocation_delta }}
         shell: bash
         run: |
           set -euo pipefail
           cat > /tmp/isolation-resume.md <<EOF
-          ## R4F G3 isolated window restored
+          ## R4F G3 isolated window restored before Usage refresh
 
           Resume run: ${RUN_URL}
           Pause run: \`${PAUSE_RUN}\`
           One-shot run: \`${ONE_SHOT_RUN}\`
+          BEFORE capture comment: \`${BEFORE_COMMENT}\`
           Project identity digest: \`${PROJECT_DIGEST}\`
           Scheduler command digest: \`${COMMAND_DIGEST}\`
-          Verified Usage invocation delta: \`${INVOCATION_DELTA}\`
 
-          The exact collector scheduler has been restored and G3 isolation watchdogs have been removed. This resume path does not mutate R5 state, change the public reader, enable Mainnet, or authorize stabilization/soak.
+          The exact collector scheduler has been restored and G3 isolation watchdogs have been removed immediately after the successful sequence-bound one-shot. Supabase Usage freshness did not gate restoration. This resume path does not mutate R5 state, change the public reader, enable Mainnet, or authorize stabilization/soak.
 
-          Only after this successful resume, authorize the bounded read-only provider log capture with:
+          Now wait for a fresh project-filtered Supabase Usage → Total Egress reading. G3 qualification still requires AFTER Edge Function Invocations to exceed the retained BEFORE count by at least one.
 
-          \`/r4f-g3-capture-logs run=${ONE_SHOT_RUN} resume_run=${GITHUB_RUN_ID} start=${CAPTURE_START} end=${CAPTURE_END}\`
+          Record the fresh AFTER reading with this exact shape:
+
+          \`/r4f-g3-after run=${ONE_SHOT_RUN} pause_run=${PAUSE_RUN} resume_run=${GITHUB_RUN_ID} before_comment=${BEFORE_COMMENT} project=${PROJECT_DIGEST} captured_at=<UTC> invocations=<EDGE_FUNCTION_INVOCATIONS> artifact=<SHA256>\`
           EOF
           gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/isolation-resume.md
