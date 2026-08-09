@@ -43,6 +43,12 @@ The source executor now uses the revision-4 directional contract before atomic c
 
 The currently deployed trigger source still carries the revision-3 run identity, so it cannot successfully invoke the repository-only revision-4 executor path. Trigger conversion follows the dedicated revision-4 DB RPC migration and remains code-only until a separate live authorization.
 
+## Verification
+
+The first executor-wiring CI failure was caused by obsolete tests that explicitly required the executor to remain revision 3. Those assertions were updated to the new code-only, selection-gated revision-4 boundary. The underlying reserve-before-read, continuity, terminal-failure and service-key safeguards remain required.
+
+Executor-wiring head `5cf29acd718110ad5f87dfa98f42a1681dbddbfa` passed CI run `31318651953`. The full quality job passed lint, typecheck, unit tests, revision-4 PostgreSQL persistence verification, provider verifier, D1 migration replay, build, and Chromium smoke.
+
 ## Database boundary still to complete
 
 The executor calls dedicated revision-4 RPC names:
@@ -52,8 +58,6 @@ The executor calls dedicated revision-4 RPC names:
 - `xrpl_fail_r5_revision4_recovery_batch`.
 
 Those RPCs must be added as a repository migration and validated by empty-database replay before this PR is ready to merge. Existing revision-3 control records remain historical and must not be relabeled as revision 4.
-
-The first executor-wiring CI failure was caused by obsolete tests that explicitly required the executor to remain revision 3. Those assertions were updated to the new code-only, selection-gated revision-4 boundary. The underlying reserve-before-read, continuity, terminal-failure and service-key safeguards remain required.
 
 ## Live boundary
 
