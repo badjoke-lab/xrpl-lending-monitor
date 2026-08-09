@@ -49,7 +49,7 @@ The first executor-wiring CI failure was caused by obsolete tests that explicitl
 
 Executor-wiring head `5cf29acd718110ad5f87dfa98f42a1681dbddbfa` passed CI run `31318651953`. The full quality job passed lint, typecheck, unit tests, revision-4 PostgreSQL persistence verification, provider verifier, D1 migration replay, build, and Chromium smoke.
 
-## Database boundary still to complete
+## Current code blocker
 
 The executor calls dedicated revision-4 RPC names:
 
@@ -57,7 +57,7 @@ The executor calls dedicated revision-4 RPC names:
 - `xrpl_complete_r5_revision4_recovery_batch`;
 - `xrpl_fail_r5_revision4_recovery_batch`.
 
-Those RPCs must be added as a repository migration and validated by empty-database replay before this PR is ready to merge. Existing revision-3 control records remain historical and must not be relabeled as revision 4.
+The next code change is the database implementation of those RPCs while preserving revision-3 control records as historical data. This is an implementation dependency, not another provider qualification test.
 
 ## Live boundary
 
