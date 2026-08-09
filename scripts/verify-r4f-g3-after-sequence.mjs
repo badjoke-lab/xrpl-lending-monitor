@@ -67,6 +67,20 @@ const beforeMatch = beforeComment.body.match(beforeRegex)
 if (!beforeMatch) throw new Error('BEFORE capture command shape mismatch')
 const [, dashboardAuthCommentIdText, beforeCapturedAt, beforeInvocationsText, beforeArtifactDigest] = beforeMatch
 
+const resumeLocatorMatches = comments.filter((comment) => {
+  if (comment?.user?.login !== 'github-actions[bot]' || typeof comment?.body !== 'string') return false
+  return comment.body.includes('## R4F G3 isolated window restored before Usage refresh') &&
+    comment.body.includes(`/actions/runs/${resumeRunId}`) &&
+    comment.body.includes(`Pause run: \`${pauseRunId}\``) &&
+    comment.body.includes(`One-shot run: \`${oneShotRunId}\``) &&
+    comment.body.includes(`BEFORE capture comment: \`${beforeCommentId}\``) &&
+    comment.body.includes(`Project identity digest: \`${projectDigest}\``)
+})
+if (resumeLocatorMatches.length !== 1) {
+  throw new Error(`expected exactly one successful immediate-restore locator, found ${resumeLocatorMatches.length}`)
+}
+const resumeLocator = resumeLocatorMatches[0]
+
 const afterComment = comments.find((comment) => Number(comment?.id) === afterCommentId)
 if (!afterComment || afterComment?.user?.login !== 'badjoke-lab' || typeof afterComment.body !== 'string') {
   throw new Error('AFTER capture comment is missing or not owner-authored')
@@ -101,9 +115,10 @@ const runStartAt = Date.parse(String(oneShotRun.run_started_at ?? oneShotRun.cre
 const runEndAt = Date.parse(String(oneShotRun.updated_at ?? ''))
 const resumeStartAt = Date.parse(String(resumeRun.run_started_at ?? resumeRun.created_at ?? ''))
 const resumeEndAt = Date.parse(String(resumeRun.updated_at ?? ''))
+const resumeLocatorAt = Date.parse(String(resumeLocator.created_at ?? ''))
 const afterAt = Date.parse(afterCapturedAt)
 const afterCommentAt = Date.parse(String(afterComment.created_at ?? ''))
-if (![beforeAt, beforeCommentAt, runStartAt, runEndAt, resumeStartAt, resumeEndAt, afterAt, afterCommentAt].every(Number.isFinite)) {
+if (![beforeAt, beforeCommentAt, runStartAt, runEndAt, resumeStartAt, resumeEndAt, resumeLocatorAt, afterAt, afterCommentAt].every(Number.isFinite)) {
   throw new Error('G3 AFTER sequence contains an invalid timestamp')
 }
 if (!(beforeAt <= beforeCommentAt && beforeCommentAt < runStartAt)) {
@@ -112,7 +127,7 @@ if (!(beforeAt <= beforeCommentAt && beforeCommentAt < runStartAt)) {
 if (!(runStartAt <= runEndAt && runEndAt <= resumeStartAt)) {
   throw new Error('collector resume must follow the completed one-shot run')
 }
-if (!(resumeStartAt <= resumeEndAt && resumeEndAt <= afterAt)) {
+if (!(resumeStartAt <= resumeEndAt && resumeEndAt <= resumeLocatorAt && resumeLocatorAt <= afterAt)) {
   throw new Error('AFTER capture must follow successful collector resume')
 }
 if (!(afterAt <= afterCommentAt)) {
