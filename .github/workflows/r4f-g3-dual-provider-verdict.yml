@@ -36,178 +36,23 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Parse exact formal G3 finalize command
-        id: command
-        shell: bash
-        run: |
-          set -euo pipefail
-          regex='^/r4f-g3-finalize run=([0-9]+) resume_run=([0-9]+) pause_run=([0-9]+) before_comment=([0-9]+) after_comment=([0-9]+) dashboard_auth=([0-9]+) log_run=([0-9]+) project=([a-f0-9]{64}) billing_start=([^ ]+) billing_end=([^ ]+) before_egress=([0-9]+([.][0-9]+)?) after_egress=([0-9]+([.][0-9]+)?) unit=(bytes|kB|MB|GB|KiB|MiB|GiB) decimals=([0-9]+) rounding=(exact|nearest_half_up|truncate_down)$'
-          [[ "$FINALIZE_BODY" =~ $regex ]] || { echo 'formal G3 finalize command shape mismatch' >&2; exit 1; }
-          one_shot_run="${BASH_REMATCH[1]}"
-          resume_run="${BASH_REMATCH[2]}"
-          pause_run="${BASH_REMATCH[3]}"
-          before_comment="${BASH_REMATCH[4]}"
-          after_comment="${BASH_REMATCH[5]}"
-          dashboard_auth="${BASH_REMATCH[6]}"
-          log_run="${BASH_REMATCH[7]}"
-          project_digest="${BASH_REMATCH[8]}"
-          billing_start="${BASH_REMATCH[9]}"
-          billing_end="${BASH_REMATCH[10]}"
-          before_egress="${BASH_REMATCH[11]}"
-          after_egress="${BASH_REMATCH[13]}"
-          unit="${BASH_REMATCH[15]}"
-          decimals="${BASH_REMATCH[16]}"
-          rounding="${BASH_REMATCH[17]}"
-          for value in "$one_shot_run" "$resume_run" "$pause_run" "$before_comment" "$after_comment" "$dashboard_auth" "$log_run"; do
-            test "$value" -gt 0
-          done
-          test "$project_digest" = "$PROJECT_IDENTITY_DIGEST"
-          test "$decimals" -le 9
-          printf 'one_shot_run=%s\nresume_run=%s\npause_run=%s\nbefore_comment=%s\nafter_comment=%s\ndashboard_auth=%s\nlog_run=%s\nproject_digest=%s\nbilling_start=%s\nbilling_end=%s\nbefore_egress=%s\nafter_egress=%s\nunit=%s\ndecimals=%s\nrounding=%s\n' \
-            "$one_shot_run" "$resume_run" "$pause_run" "$before_comment" "$after_comment" "$dashboard_auth" "$log_run" "$project_digest" "$billing_start" "$billing_end" "$before_egress" "$after_egress" "$unit" "$decimals" "$rounding" >> "$GITHUB_OUTPUT"
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
 
-      - name: Fetch exact sequence metadata and retained issue comments
-        env:
-          ONE_SHOT_RUN: ${{ steps.command.outputs.one_shot_run }}
-          RESUME_RUN: ${{ steps.command.outputs.resume_run }}
-          LOG_RUN: ${{ steps.command.outputs.log_run }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${ONE_SHOT_RUN}" > /tmp/one-shot-run.json
-          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RESUME_RUN}" > /tmp/resume-run.json
-          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${LOG_RUN}" > /tmp/log-run.json
-          gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${QUALIFICATION_ISSUE}/comments?per_page=100" | jq -s 'add' > /tmp/issue-comments.json
-          test "$(jq -r '.name' /tmp/log-run.json)" = 'R4F G3 One-Shot Probe'
-          test "$(jq -r '.event' /tmp/log-run.json)" = 'issue_comment'
-          test "$(jq -r '.conclusion' /tmp/log-run.json)" = 'success'
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
 
-      - name: Reverify exact post-resume Usage sequence
-        env:
-          ONE_SHOT_RUN: ${{ steps.command.outputs.one_shot_run }}
-          RESUME_RUN: ${{ steps.command.outputs.resume_run }}
-          PAUSE_RUN: ${{ steps.command.outputs.pause_run }}
-          BEFORE_COMMENT: ${{ steps.command.outputs.before_comment }}
-          AFTER_COMMENT: ${{ steps.command.outputs.after_comment }}
-          DASHBOARD_AUTH: ${{ steps.command.outputs.dashboard_auth }}
-          PROJECT_DIGEST: ${{ steps.command.outputs.project_digest }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          node scripts/verify-r4f-g3-after-sequence.mjs \
-            --comments /tmp/issue-comments.json \
-            --one-shot-run /tmp/one-shot-run.json \
-            --resume-run /tmp/resume-run.json \
-            --pause-run-id "$PAUSE_RUN" \
-            --before-comment-id "$BEFORE_COMMENT" \
-            --after-comment-id "$AFTER_COMMENT" \
-            --project-digest "$PROJECT_DIGEST" > /tmp/after-sequence.json
-          test "$(jq -r '.oneShotRun' /tmp/after-sequence.json)" = "$ONE_SHOT_RUN"
-          test "$(jq -r '.resumeRun' /tmp/after-sequence.json)" = "$RESUME_RUN"
-          test "$(jq -r '.dashboardAuthorizationCommentId' /tmp/after-sequence.json)" = "$DASHBOARD_AUTH"
-          test "$(jq -r '.usageFresh' /tmp/after-sequence.json)" = 'true'
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
 
-      - name: Download exact one-shot and concurrent-traffic artifacts
-        env:
-          ONE_SHOT_RUN: ${{ steps.command.outputs.one_shot_run }}
-          LOG_RUN: ${{ steps.command.outputs.log_run }}
+      - name: Run formal production plus independent G3 verdict
         shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p /tmp/one-shot-artifact /tmp/log-artifact
-          gh run download "$ONE_SHOT_RUN" --repo "$GITHUB_REPOSITORY" --name r4f-g3-one-shot-evidence --dir /tmp/one-shot-artifact
-          gh run download "$LOG_RUN" --repo "$GITHUB_REPOSITORY" --name r4f-g3-concurrent-traffic-evidence --dir /tmp/log-artifact
-          test -s /tmp/one-shot-artifact/summary.json
-          test -s /tmp/log-artifact/log-window.json
-
-      - name: Assemble one immutable raw provider-capture input
-        env:
-          BILLING_START: ${{ steps.command.outputs.billing_start }}
-          BILLING_END: ${{ steps.command.outputs.billing_end }}
-          BEFORE_EGRESS: ${{ steps.command.outputs.before_egress }}
-          AFTER_EGRESS: ${{ steps.command.outputs.after_egress }}
-          DISPLAY_UNIT: ${{ steps.command.outputs.unit }}
-          DECIMALS: ${{ steps.command.outputs.decimals }}
-          ROUNDING: ${{ steps.command.outputs.rounding }}
-          DASHBOARD_AUTH: ${{ steps.command.outputs.dashboard_auth }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p r4f-g3-formal-verdict
-          node scripts/assemble-r4f-g3-provider-capture.mjs \
-            --after-sequence /tmp/after-sequence.json \
-            --comments /tmp/issue-comments.json \
-            --one-shot-summary /tmp/one-shot-artifact/summary.json \
-            --log-window /tmp/log-artifact/log-window.json \
-            --billing-start "$BILLING_START" \
-            --billing-end "$BILLING_END" \
-            --before-egress "$BEFORE_EGRESS" \
-            --after-egress "$AFTER_EGRESS" \
-            --unit "$DISPLAY_UNIT" \
-            --decimals "$DECIMALS" \
-            --rounding "$ROUNDING" \
-            --retained-reserve 0 \
-            --output r4f-g3-formal-verdict/raw-capture.json
-          cp /tmp/after-sequence.json r4f-g3-formal-verdict/after-sequence.json
-          cp /tmp/one-shot-artifact/summary.json r4f-g3-formal-verdict/one-shot-summary.json
-          cp /tmp/log-artifact/log-window.json r4f-g3-formal-verdict/log-window.json
-          jq -r --argjson id "$DASHBOARD_AUTH" '.[] | select(.id == $id) | .body' /tmp/issue-comments.json > r4f-g3-formal-verdict/dashboard-authorization.txt
-          test -s r4f-g3-formal-verdict/dashboard-authorization.txt
-
-      - name: Build production provider verifier
-        shell: bash
-        run: pnpm exec vite build --config vite.r4f-revision4-provider-capture-verifier.config.ts
-
-      - name: Run production provider verdict
-        shell: bash
-        run: |
-          set -euo pipefail
-          node .r4f-revision4-provider-capture-verifier-build/verify-r4f-revision4-provider-capture.mjs \
-            --input r4f-g3-formal-verdict/raw-capture.json \
-            --output r4f-g3-formal-verdict/production-verdict.json
-
-      - name: Run implementation-independent provider verdict
-        shell: bash
-        run: |
-          set -euo pipefail
-          node scripts/verify-r4f-g3-provider-capture-independent.mjs \
-            --input r4f-g3-formal-verdict/raw-capture.json \
-            --output r4f-g3-formal-verdict/independent-verdict.json
-
-      - name: Compare both verdicts fail closed
-        shell: bash
-        run: |
-          set -euo pipefail
-          node scripts/compare-r4f-g3-provider-verdicts.mjs \
-            --production r4f-g3-formal-verdict/production-verdict.json \
-            --independent r4f-g3-formal-verdict/independent-verdict.json \
-            --output r4f-g3-formal-verdict/dual-verdict.json
-
-      - name: Write sanitized formal summary
-        shell: bash
-        run: |
-          set -euo pipefail
-          node --input-type=module <<'NODE'
-          import { readFileSync, writeFileSync } from 'node:fs'
-          const production = JSON.parse(readFileSync('r4f-g3-formal-verdict/production-verdict.json', 'utf8'))
-          const independent = JSON.parse(readFileSync('r4f-g3-formal-verdict/independent-verdict.json', 'utf8'))
-          const dual = JSON.parse(readFileSync('r4f-g3-formal-verdict/dual-verdict.json', 'utf8'))
-          const summary = {
-            schemaVersion: 1,
-            gate: 'R4F-G3',
-            productionQualified: production.g3Qualified === true,
-            independentQualified: independent.auditQualified === true,
-            dualAgreement: dual.agreement === true,
-            dualQualified: dual.dualQualified === true,
-            providerDeltaInterval: production.reconciliation?.providerDeltaInterval ?? null,
-            selectedUnexplainedDeltaReserveBytes: production.reconciliation?.selectedUnexplainedDeltaReserveBytes ?? null,
-            profileSelected: false,
-            r5Authorized: false,
-            publicReaderUnchanged: true,
-            mainnetDisabled: true,
-          }
-          writeFileSync('r4f-g3-formal-verdict/summary.json', `${JSON.stringify(summary, null, 2)}\n`)
-          NODE
+        run: bash scripts/run-r4f-g3-dual-provider-verdict.sh
 
       - name: Upload complete formal dual-verdict evidence
         if: always()
@@ -217,58 +62,3 @@ jobs:
           path: r4f-g3-formal-verdict
           if-no-files-found: warn
           retention-days: 14
-
-      - name: Publish formal G3 dual-verdict result
-        if: always()
-        env:
-          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          ONE_SHOT_RUN: ${{ steps.command.outputs.one_shot_run }}
-          LOG_RUN: ${{ steps.command.outputs.log_run }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          if test -s r4f-g3-formal-verdict/summary.json; then
-            production="$(jq -r '.productionQualified' r4f-g3-formal-verdict/summary.json)"
-            independent="$(jq -r '.independentQualified' r4f-g3-formal-verdict/summary.json)"
-            agreement="$(jq -r '.dualAgreement' r4f-g3-formal-verdict/summary.json)"
-            qualified="$(jq -r '.dualQualified' r4f-g3-formal-verdict/summary.json)"
-            interval="$(jq -c '.providerDeltaInterval' r4f-g3-formal-verdict/summary.json)"
-            reserve="$(jq -r '.selectedUnexplainedDeltaReserveBytes' r4f-g3-formal-verdict/summary.json)"
-          else
-            production='unavailable'
-            independent='unavailable'
-            agreement='false'
-            qualified='false'
-            interval='unavailable'
-            reserve='unavailable'
-          fi
-          cat > /tmp/g3-formal-result.md <<EOF
-          ## R4F G3 formal dual provider verdict
-
-          Run: ${RUN_URL}
-          Target one-shot run: \`${ONE_SHOT_RUN}\`
-          Concurrent-traffic capture run: \`${LOG_RUN}\`
-          Production verifier qualified: \`${production}\`
-          Independent verifier qualified: \`${independent}\`
-          Dual-verdict agreement: \`${agreement}\`
-          **G3 dual-qualified: \`${qualified}\`**
-          Provider delta interval: \`${interval}\`
-          Selected unexplained-delta reserve bytes: \`${reserve}\`
-          Profile selected: \`false\`
-          R5 authorized: \`false\`
-          Public reader unchanged: \`true\`
-          Mainnet disabled: \`true\`
-
-          G3 is eligible to be marked passed only when this run completes successfully with both verifiers independently qualified and the comparator in exact agreement.
-          EOF
-          gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/g3-formal-result.md
-
-      - name: Require exact dual qualification
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -s r4f-g3-formal-verdict/dual-verdict.json
-          test "$(jq -r '.agreement' r4f-g3-formal-verdict/dual-verdict.json)" = 'true'
-          test "$(jq -r '.productionQualified' r4f-g3-formal-verdict/dual-verdict.json)" = 'true'
-          test "$(jq -r '.independentQualified' r4f-g3-formal-verdict/dual-verdict.json)" = 'true'
-          test "$(jq -r '.dualQualified' r4f-g3-formal-verdict/dual-verdict.json)" = 'true'
