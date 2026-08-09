@@ -19,27 +19,25 @@ const activeR5Trigger = readFileSync(
 )
 
 describe('revision-4 G2 meter isolation', () => {
-  it('does not wire the unselected candidate into the active revision-3 executor', () => {
-    expect(activeR5Executor).not.toContain(
-      'supabase-revision4-directional-meter',
+  it('allows code-only R5 rev4 wiring without treating the G2 shadow meter as live authorization', () => {
+    expect(activeR5Executor).toContain('supabase-revision4-r5-runtime-accounting')
+    expect(activeR5Executor).toContain('SUPABASE_REVISION4_PROFILE_IDENTITY_DIGEST')
+    expect(activeR5Executor).toContain("env('XRPL_R5_REVISION4_SELECTION_DIGEST')")
+    expect(activeR5Executor).toContain(
+      "env('XRPL_R5_REVISION4_UNEXPLAINED_EGRESS_RESERVE_BYTES')",
     )
-    expect(activeR5Executor).not.toContain(
-      'SUPABASE_REVISION4_PROFILE_IDENTITY_DIGEST',
-    )
+    expect(activeR5Executor).not.toContain("const SELECTION_DIGEST = '")
+  })
+
+  it('keeps the currently deployed trigger boundary fail-closed while rev4 DB wiring is repository-only', () => {
     expect(activeR5Trigger).not.toContain(
       'SUPABASE_REVISION4_PROFILE_IDENTITY_DIGEST',
     )
-  })
-
-  it('keeps the active executor bound to revision 3', () => {
-    expect(activeR5Executor).toContain(
-      'evaluateSupabaseRevision3ResourceAccounting',
-    )
-    expect(activeR5Executor).toContain(
-      'SUPABASE_REVISION3_PROFILE_IDENTITY_DIGEST',
-    )
-    expect(activeR5Executor).toContain(
+    expect(activeR5Trigger).toContain(
       "const RECOVERY_RUN_ID = 'r5-recovery-selected-revision3-entry'",
+    )
+    expect(activeR5Executor).toContain(
+      "const RECOVERY_RUN_ID = 'r5-recovery-selected-revision4-entry'",
     )
   })
 })

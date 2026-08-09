@@ -11,25 +11,26 @@ import {
 import { buildPortableCollectorWorkId } from '../../../src/shared/portable-collector-planner.ts'
 import { canonicalPortableJson } from '../../../src/shared/portable-collector-reference-store.ts'
 import {
-  evaluateSupabaseRevision3ResourceAccounting,
-  SUPABASE_REVISION3_PROFILE,
-  SUPABASE_REVISION3_PROFILE_IDENTITY_DIGEST,
-  type SupabaseRevision3ResourceAccountingInput,
-} from '../../../src/shared/supabase-revision3-resource-accounting.ts'
+  resolveSupabaseRevision4R5CompletionFixedPoint,
+  SUPABASE_REVISION4_R5_RUNTIME_LIMITS,
+} from '../../../src/shared/supabase-revision4-r5-runtime-accounting.ts'
+import {
+  SUPABASE_REVISION4_FIXED_GUARDS,
+  SUPABASE_REVISION4_PROFILE,
+  SUPABASE_REVISION4_PROFILE_IDENTITY_DIGEST,
+} from '../../../src/shared/supabase-revision4-directional-egress-contract.ts'
 
 const DEFAULT_XRPL_DEVNET_RPC_URL = 'https://s.devnet.rippletest.net:51234/'
-const RECOVERY_RUN_ID = 'r5-recovery-selected-revision3-entry'
-const SELECTION_DIGEST = '13a313d9d0679c7c512b59f9931d733dcb3217ec8e1cc6e74a36125a0354b667'
-const MAX_BATCH_SIZE = 24
+const RECOVERY_RUN_ID = 'r5-recovery-selected-revision4-entry'
 const FETCH_CONCURRENCY = 2
 const LEASE_SECONDS = 55
 const MEMORY_HALT_BYTES = 200 * 1024 * 1024
 const MAX_SERVER_INFO_RESPONSE_BYTES = 256 * 1024
 const MAX_LEDGER_RESPONSE_BYTES = 1024 * 1024
 const MAX_DATABASE_RESPONSE_BYTES = 64 * 1024
-const COMPLETION_REQUEST_RESERVE_BYTES = 2 * 1024 * 1024
-const FAILURE_REQUEST_RESERVE_BYTES = 16 * 1024
-const FUNCTION_RESPONSE_RESERVE_BYTES = 128 * 1024
+const COMPLETION_REQUEST_MAX_BYTES = 2 * 1024 * 1024
+const COMPLETION_RESPONSE_ACCOUNTING_RESERVE_BYTES = 4 * 1024
+const FAILURE_RESPONSE_MAX_BYTES = 16 * 1024
 const TEXT_ENCODER = new TextEncoder()
 
 type JsonObject = Record<string, unknown>
@@ -43,9 +44,11 @@ type MemorySample = {
 type AccountingMeter = {
   networkRequestCount: number
   networkRequestBytes: number
+  networkResponseCount: number
   networkResponseBytes: number
   databaseRequestCount: number
   databaseRequestBytes: number
+  databaseResponseCount: number
   databaseResponseBytes: number
 }
 type RecoveryClaim = {
@@ -64,6 +67,7 @@ type RecoveryClaim = {
   profileRevision?: number
   profileIdentityDigest?: string
   selectionDigest?: string
+  reservedEgressUpperBoundBytes?: number
   priorConservativeEgress31dBytes?: number
   projectedInvocations31d?: number
   priorInvocations31d?: number
@@ -82,19 +86,17 @@ type ValidatedRecoveryClaim = {
   network: 'devnet'
   epochId: 'supabase-r4c2c-v1'
   baseIdentity: string
-  profileRevision: 3
+  profileRevision: 4
   profileIdentityDigest: string
   selectionDigest: string
+  reservedEgressUpperBoundBytes: number
   priorConservativeEgress31dBytes: number
   projectedInvocations31d: number
   priorInvocations31d: number
 }
 type BuiltWork = {
   work: JsonObject
-  normalizedRecordCount: number
-  payloadChunkCount: number
   payloadBytes: number
-  relationshipCount: number
 }
 
 class RecoveryError extends Error {
@@ -156,9 +158,11 @@ function emptyMeter(): AccountingMeter {
   return {
     networkRequestCount: 0,
     networkRequestBytes: 0,
+    networkResponseCount: 0,
     networkResponseBytes: 0,
     databaseRequestCount: 0,
     databaseRequestBytes: 0,
+    databaseResponseCount: 0,
     databaseResponseBytes: 0,
   }
 }
@@ -172,6 +176,17 @@ function addMeterValue(meter: AccountingMeter, key: keyof AccountingMeter, value
     throw new RecoveryError(`${key} exceeds safe range`, true)
   }
   meter[key] = next
+}
+
+function safeAdd(left: number, right: number, name: string): number {
+  if (!Number.isSafeInteger(left) || left < 0 || !Number.isSafeInteger(right) || right < 0) {
+    throw new RecoveryError(`${name} inputs are invalid`, true)
+  }
+  const value = left + right
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new RecoveryError(`${name} exceeds safe range`, true)
+  }
+  return value
 }
 
 async function boundedResponseText(
@@ -215,6 +230,26 @@ async function boundedResponseText(
 function env(name: string): string {
   const value = Deno.env.get(name)
   if (!value) throw new RecoveryError(`Missing ${name}`, true)
+  return value
+}
+
+function selectionDigest(): string {
+  const value = env('XRPL_R5_REVISION4_SELECTION_DIGEST')
+  if (!/^[a-f0-9]{64}$/u.test(value)) {
+    throw new RecoveryError('XRPL_R5_REVISION4_SELECTION_DIGEST is invalid', true)
+  }
+  return value
+}
+
+function unexplainedDirectionalReserveBytes(): number {
+  const raw = env('XRPL_R5_REVISION4_UNEXPLAINED_EGRESS_RESERVE_BYTES')
+  const value = Number(raw)
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new RecoveryError(
+      'XRPL_R5_REVISION4_UNEXPLAINED_EGRESS_RESERVE_BYTES is invalid',
+      true,
+    )
+  }
   return value
 }
 
@@ -301,15 +336,14 @@ function transientThrown(error: unknown): boolean {
     || error instanceof TypeError
 }
 
-async function postRpc<T>(
+async function postRpcText<T>(
   supabaseUrl: string,
   secretKey: string,
   functionName: string,
-  body: JsonObject,
+  bodyText: string,
   meter?: AccountingMeter,
   maximumResponseBytes = MAX_DATABASE_RESPONSE_BYTES,
 ): Promise<T> {
-  const bodyText = JSON.stringify(body)
   if (meter) {
     addMeterValue(meter, 'databaseRequestCount', 1)
     addMeterValue(meter, 'databaseRequestBytes', byteLength(bodyText))
@@ -329,7 +363,10 @@ async function postRpc<T>(
     )
   }
   const text = await boundedResponseText(response, maximumResponseBytes, functionName)
-  if (meter) addMeterValue(meter, 'databaseResponseBytes', byteLength(text))
+  if (meter) {
+    addMeterValue(meter, 'databaseResponseCount', 1)
+    addMeterValue(meter, 'databaseResponseBytes', byteLength(text))
+  }
   if (!response.ok) {
     throw new RecoveryError(
       `${functionName} failed (${response.status}): ${text.slice(0, 1_000)}`,
@@ -341,6 +378,24 @@ async function postRpc<T>(
   } catch {
     throw new RecoveryError(`${functionName} returned invalid JSON`, true)
   }
+}
+
+async function postRpc<T>(
+  supabaseUrl: string,
+  secretKey: string,
+  functionName: string,
+  body: JsonObject,
+  meter?: AccountingMeter,
+  maximumResponseBytes = MAX_DATABASE_RESPONSE_BYTES,
+): Promise<T> {
+  return postRpcText<T>(
+    supabaseUrl,
+    secretKey,
+    functionName,
+    JSON.stringify(body),
+    meter,
+    maximumResponseBytes,
+  )
 }
 
 async function xrplRpc(
@@ -368,6 +423,7 @@ async function xrplRpc(
     )
   }
   const text = await boundedResponseText(response, maximumResponseBytes, `XRPL ${method}`)
+  addMeterValue(meter, 'networkResponseCount', 1)
   addMeterValue(meter, 'networkResponseBytes', byteLength(text))
   if (!response.ok) {
     throw new RecoveryError(`XRPL ${method} failed (${response.status})`, false)
@@ -486,7 +542,7 @@ async function mapLimit<T, R>(
   return results
 }
 
-function validateClaim(raw: RecoveryClaim): ValidatedRecoveryClaim {
+function validateClaim(raw: RecoveryClaim, expectedSelectionDigest: string): ValidatedRecoveryClaim {
   if (!raw.claimed) throw new RecoveryError('R5 recovery batch was not claimed', true)
   const claim: ValidatedRecoveryClaim = {
     claimed: true,
@@ -500,12 +556,13 @@ function validateClaim(raw: RecoveryClaim): ValidatedRecoveryClaim {
     network: requiredString(raw.network, 'network') as 'devnet',
     epochId: requiredString(raw.epochId, 'epochId') as 'supabase-r4c2c-v1',
     baseIdentity: requiredString(raw.baseIdentity, 'baseIdentity'),
-    profileRevision: requiredInteger(raw.profileRevision, 'profileRevision') as 3,
-    profileIdentityDigest: requiredString(
-      raw.profileIdentityDigest,
-      'profileIdentityDigest',
-    ),
+    profileRevision: requiredInteger(raw.profileRevision, 'profileRevision') as 4,
+    profileIdentityDigest: requiredString(raw.profileIdentityDigest, 'profileIdentityDigest'),
     selectionDigest: requiredString(raw.selectionDigest, 'selectionDigest'),
+    reservedEgressUpperBoundBytes: requiredInteger(
+      raw.reservedEgressUpperBoundBytes,
+      'reservedEgressUpperBoundBytes',
+    ),
     priorConservativeEgress31dBytes: requiredInteger(
       raw.priorConservativeEgress31dBytes,
       'priorConservativeEgress31dBytes',
@@ -523,17 +580,20 @@ function validateClaim(raw: RecoveryClaim): ValidatedRecoveryClaim {
     )
     || claim.network !== 'devnet'
     || claim.epochId !== 'supabase-r4c2c-v1'
-    || claim.profileRevision !== SUPABASE_REVISION3_PROFILE.revision
-    || claim.profileIdentityDigest !== SUPABASE_REVISION3_PROFILE_IDENTITY_DIGEST
-    || claim.selectionDigest !== SELECTION_DIGEST
+    || claim.profileRevision !== SUPABASE_REVISION4_PROFILE.revision
+    || claim.profileIdentityDigest !== SUPABASE_REVISION4_PROFILE_IDENTITY_DIGEST
+    || claim.selectionDigest !== expectedSelectionDigest
     || claim.ledgerCount < 1
-    || claim.ledgerCount > MAX_BATCH_SIZE
+    || claim.ledgerCount > SUPABASE_REVISION4_R5_RUNTIME_LIMITS.selectedMaximumLedgersPerClaim
     || claim.endLedgerIndex !== claim.startLedgerIndex + claim.ledgerCount - 1
     || claim.projectedInvocations31d !== claim.priorInvocations31d + 1
+    || claim.projectedInvocations31d >= SUPABASE_REVISION4_FIXED_GUARDS.projectInvocationHalt31d
+    || claim.reservedEgressUpperBoundBytes <= 0
+    || claim.reservedEgressUpperBoundBytes >= 32 * 1024 * 1024
     || raw.reservationBeforeAnyNetworkRead !== true
     || raw.freshHeadMustCoverReservedEndBeforeFetch !== true
   ) {
-    throw new RecoveryError('R5 recovery claim identity changed', true)
+    throw new RecoveryError('R5 revision-4 recovery claim identity changed', true)
   }
   return claim
 }
@@ -561,15 +621,11 @@ async function buildWork(options: {
     previousLedgerIndex: options.previousLedgerIndex,
     expectedParentHash: options.expectedParentHash,
   })
-  let normalizedRecordCount = 0
   let payloadBytes = 0
-  let relationshipCount = 0
   const chunks = await Promise.all(
     normalized.chunks.map(async (built) => {
       const referenceRows = portableReferenceRowsFromChunk(built.chunk)
-      normalizedRecordCount += built.chunk.records.length
       payloadBytes += byteLength(built.encodedJson)
-      for (const row of referenceRows) relationshipCount += row.relationshipIds.length
       const referenceRowsJson = canonicalPortableJson(referenceRows)
       return {
         chunkIndex: built.chunk.chunkIndex,
@@ -605,22 +661,8 @@ async function buildWork(options: {
       payloadDigest: stripSha256Prefix(normalized.payload.digest, 'payloadDigest'),
       chunks,
     },
-    normalizedRecordCount,
-    payloadChunkCount: chunks.length,
     payloadBytes,
-    relationshipCount,
   }
-}
-
-function metadataNodeCount(ledgers: readonly ValidatedLedgerRead[]): number {
-  let count = 0
-  for (const ledger of ledgers) {
-    for (const transaction of ledger.transactions) {
-      const affectedNodes = transaction.metadata.AffectedNodes
-      if (Array.isArray(affectedNodes)) count += affectedNodes.length
-    }
-  }
-  return count
 }
 
 Deno.serve(async (request) => {
@@ -629,9 +671,13 @@ Deno.serve(async (request) => {
   const meter = emptyMeter()
   let supabaseUrl: string
   let secretKey: string
+  let expectedSelectionDigest: string
+  let unexplainedReserveBytes: number
   try {
     supabaseUrl = env('SUPABASE_URL')
     secretKey = getSecretKey()
+    expectedSelectionDigest = selectionDigest()
+    unexplainedReserveBytes = unexplainedDirectionalReserveBytes()
   } catch (error) {
     return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 500)
   }
@@ -644,7 +690,15 @@ Deno.serve(async (request) => {
   let claim: ValidatedRecoveryClaim | null = null
   const owner = `r5-recovery-${crypto.randomUUID()}`
   try {
-    const body = object(await request.json(), 'request body')
+    const requestText = await request.text()
+    const invokerRequestBytes = byteLength(requestText)
+    let bodyValue: unknown
+    try {
+      bodyValue = JSON.parse(requestText)
+    } catch {
+      throw new RecoveryError('request body must be valid JSON', true)
+    }
+    const body = object(bodyValue, 'request body')
     if (body.source !== 'github_actions') {
       return json({ ok: false, error: 'invalid_source' }, 403)
     }
@@ -655,7 +709,7 @@ Deno.serve(async (request) => {
     const rawClaim = await postRpc<RecoveryClaim>(
       supabaseUrl,
       secretKey,
-      'xrpl_claim_r5_active_recovery_batch_from_prepared_head',
+      'xrpl_claim_r5_revision4_recovery_batch_from_prepared_head',
       {
         p_run_id: RECOVERY_RUN_ID,
         p_owner: owner,
@@ -670,9 +724,10 @@ Deno.serve(async (request) => {
         claimed: false,
         reason: rawClaim.reason ?? 'not_claimed',
         runId: rawClaim.runId ?? RECOVERY_RUN_ID,
+        profileRevision: 4,
       })
     }
-    claim = validateClaim(rawClaim)
+    claim = validateClaim(rawClaim, expectedSelectionDigest)
     memorySamples.push(sampleMemory('after_claim'))
 
     const endpoint = Deno.env.get('XRPL_DEVNET_RPC_URL') ?? DEFAULT_XRPL_DEVNET_RPC_URL
@@ -739,97 +794,133 @@ Deno.serve(async (request) => {
       throw new RecoveryError(`R5 memory halt threshold reached:${memoryHighWaterBytes}`, true)
     }
 
-    const input: SupabaseRevision3ResourceAccountingInput = {
-      ledgerCount: ledgers.length,
-      networkRequestCount: meter.networkRequestCount,
-      networkRequestBytes: meter.networkRequestBytes,
-      networkResponseBytes: meter.networkResponseBytes,
-      databaseRequestCount: meter.databaseRequestCount + 2,
-      databaseRequestBytes:
-        meter.databaseRequestBytes
-        + COMPLETION_REQUEST_RESERVE_BYTES
-        + FAILURE_REQUEST_RESERVE_BYTES,
-      databaseResponseBytes: meter.databaseResponseBytes + 2 * MAX_DATABASE_RESPONSE_BYTES,
-      functionResponseBytes: FUNCTION_RESPONSE_RESERVE_BYTES,
-      transactionCount: ledgers.reduce((sum, ledger) => sum + ledger.transactions.length, 0),
-      metadataNodeCount: metadataNodeCount(ledgers),
-      normalizedRecordCount: builtWorks.reduce(
-        (sum, built) => sum + built.normalizedRecordCount,
-        0,
-      ),
-      payloadChunkCount: builtWorks.reduce(
-        (sum, built) => sum + built.payloadChunkCount,
-        0,
-      ),
-      relationshipCount: builtWorks.reduce(
-        (sum, built) => sum + built.relationshipCount,
-        0,
-      ),
-      canonicalJsonBytes: byteLength(worksJson),
-      payloadBytes: builtWorks.reduce((sum, built) => sum + built.payloadBytes, 0),
-      priorConservativeEgress31dBytes: claim.priorConservativeEgress31dBytes,
-      priorInvocations31d: claim.priorInvocations31d,
-    }
-    const accountingResult = evaluateSupabaseRevision3ResourceAccounting(input)
-    const accounting = {
-      schemaVersion: 1,
-      profileId: SUPABASE_REVISION3_PROFILE.profileId,
-      profileRevision: SUPABASE_REVISION3_PROFILE.revision,
-      profileIdentityDigest: SUPABASE_REVISION3_PROFILE_IDENTITY_DIGEST,
-      runId: claim.runId,
-      batchId: claim.batchId,
-      input,
-      result: accountingResult,
-      checks: {
-        exactBatchIdentityBound: true,
-        exactProfileIdentityBound: true,
-        accountingValidatedInsideAtomicCompletion: true,
-        completionRequestReserveApplied: true,
-        reservationBeforeAnyNetworkRead: true,
-      },
-    }
-    const accountingJson = canonicalPortableJson(accounting)
-    const accountingDigest = await sha256Hex(accountingJson)
-    if (!accountingResult.allowed) {
-      throw new RecoveryError(
-        `revision3_resource_halt:${accountingResult.failures.join(',')}`,
-        true,
-      )
-    }
-    if (accountingResult.projectedInvocations31d !== claim.projectedInvocations31d) {
-      throw new RecoveryError('R5 invocation accounting parity failed', true)
-    }
-
+    const completedAt = new Date().toISOString()
     const edgeWallMilliseconds = performance.now() - wallStarted
-    const completionBody = {
-      p_run_id: claim.runId,
-      p_batch_id: claim.batchId,
-      p_owner: owner,
-      p_completed_at: new Date().toISOString(),
-      p_works_json: worksJson,
-      p_works_digest: worksDigest,
-      p_accounting_json: accountingJson,
-      p_accounting_digest: accountingDigest,
-      p_finalized_egress_upper_bound_bytes:
-        accountingResult.conservativeTickEgressUpperBoundBytes,
-      p_fetch_milliseconds: fetchMilliseconds,
-      p_normalize_milliseconds: normalizeMilliseconds,
-      p_edge_wall_milliseconds: edgeWallMilliseconds,
-    }
-    const completionBodyBytes = byteLength(JSON.stringify(completionBody))
-    if (completionBodyBytes > COMPLETION_REQUEST_RESERVE_BYTES) {
-      throw new RecoveryError(
-        `R5 completion request exceeds reserved bytes:${completionBodyBytes}`,
-        true,
+    const payloadBytes = builtWorks.reduce((sum, built) => sum + built.payloadBytes, 0)
+    const canonicalJsonBytes = byteLength(worksJson)
+    const databaseResponseBytesBeforeCompletion = safeAdd(
+      meter.databaseResponseBytes,
+      COMPLETION_RESPONSE_ACCOUNTING_RESERVE_BYTES,
+      'database response bytes including compact completion reserve',
+    )
+    const databaseResponseCountIncludingCompletion = safeAdd(
+      meter.databaseResponseCount,
+      1,
+      'database response count including completion',
+    )
+
+    let invokerResponseBytes = 0
+    let fixedPoint: Awaited<ReturnType<typeof resolveSupabaseRevision4R5CompletionFixedPoint>> | null = null
+    let successBody: JsonObject | null = null
+    for (let responseIteration = 1; responseIteration <= 32; responseIteration += 1) {
+      const resolved = await resolveSupabaseRevision4R5CompletionFixedPoint({
+        observationId: `r5.rev4.${claim.batchId}`,
+        attemptId: `r5.rev4.${claim.batchId}.attempt.${claim.batchSequence}`,
+        observedAt: completedAt,
+        invokerRequestBytes,
+        invokerRequestCount: 1,
+        xrplRequestBytes: meter.networkRequestBytes,
+        xrplRequestCount: meter.networkRequestCount,
+        xrplResponseBytes: meter.networkResponseBytes,
+        xrplResponseCount: meter.networkResponseCount,
+        databaseRequestBytesBeforeCompletion: meter.databaseRequestBytes,
+        databaseRequestCountBeforeCompletion: meter.databaseRequestCount,
+        databaseResponseBytes: databaseResponseBytesBeforeCompletion,
+        databaseResponseCount: databaseResponseCountIncludingCompletion,
+        invokerResponseBytes,
+        invokerResponseCount: 1,
+        canonicalJsonBytes,
+        payloadBytes,
+        normalizedObjectOverheadBytes: canonicalJsonBytes,
+        allocatorReserveBytes: memoryHighWaterBytes,
+        unexplainedDirectionalDeltaReserveBytes: unexplainedReserveBytes,
+      }, ({ accountingJson, accountingDigest, finalizedEgressUpperBoundBytes }) => ({
+        p_run_id: claim!.runId,
+        p_batch_id: claim!.batchId,
+        p_owner: owner,
+        p_completed_at: completedAt,
+        p_works_json: worksJson,
+        p_works_digest: worksDigest,
+        p_accounting_json: accountingJson,
+        p_accounting_digest: accountingDigest,
+        p_finalized_egress_upper_bound_bytes: finalizedEgressUpperBoundBytes,
+        p_fetch_milliseconds: fetchMilliseconds,
+        p_normalize_milliseconds: normalizeMilliseconds,
+        p_edge_wall_milliseconds: edgeWallMilliseconds,
+      }))
+
+      const accounting = resolved.accountingEvidence.accounting
+      const projectedEgress31dBytes = safeAdd(
+        claim.priorConservativeEgress31dBytes,
+        accounting.rollingBillableEgressUpperBoundBytes,
+        'projected revision-4 R5 egress 31d',
       )
+      if (
+        accounting.memoryTransportUpperBoundBytes
+          >= SUPABASE_REVISION4_FIXED_GUARDS.projectMemoryHaltBytes
+        || accounting.rollingBillableEgressUpperBoundBytes
+          >= claim.reservedEgressUpperBoundBytes
+        || projectedEgress31dBytes
+          >= SUPABASE_REVISION4_FIXED_GUARDS.projectEgressHalt31dBytes
+      ) {
+        throw new RecoveryError('revision4_resource_halt', true)
+      }
+      if (resolved.completionRequestBytes > COMPLETION_REQUEST_MAX_BYTES) {
+        throw new RecoveryError(
+          `R5 revision-4 completion request exceeds transport cap:${resolved.completionRequestBytes}`,
+          true,
+        )
+      }
+
+      const candidateSuccessBody: JsonObject = {
+        ok: true,
+        claimed: true,
+        runId: claim.runId,
+        batchId: claim.batchId,
+        batchSequence: claim.batchSequence,
+        startLedgerIndex: claim.startLedgerIndex,
+        endLedgerIndex: claim.endLedgerIndex,
+        ledgerCount: claim.ledgerCount,
+        validatedHead: head,
+        fetchMilliseconds,
+        normalizeMilliseconds,
+        edgeWallMilliseconds,
+        memoryHighWaterBytes,
+        memorySampleCount: memorySamples.length,
+        worksDigest,
+        accountingDigest: resolved.accountingEvidence.accountingDigest,
+        accountingProfileRevision: 4,
+        finalizedEgressUpperBoundBytes: accounting.rollingBillableEgressUpperBoundBytes,
+        projectedConservativeEgress31dBytes: projectedEgress31dBytes,
+        projectedInvocations31d: claim.projectedInvocations31d,
+        completionAcknowledged: true,
+        activeMutationCommitted: true,
+        boundaries: {
+          publicReaderUnchanged: true,
+          mainnetDisabled: true,
+          stabilizationNotStarted: true,
+          soakNotStarted: true,
+        },
+      }
+      const nextInvokerResponseBytes = byteLength(JSON.stringify(candidateSuccessBody))
+      if (nextInvokerResponseBytes === invokerResponseBytes) {
+        fixedPoint = resolved
+        successBody = candidateSuccessBody
+        break
+      }
+      invokerResponseBytes = nextInvokerResponseBytes
+    }
+    if (!fixedPoint || !successBody) {
+      throw new RecoveryError('revision-4 R5 success-response byte fixed point did not converge', true)
     }
 
-    const completion = await postRpc<JsonObject>(
+    const completion = await postRpcText<JsonObject>(
       supabaseUrl,
       secretKey,
-      'xrpl_complete_r5_active_recovery_batch',
-      completionBody,
-      meter,
+      'xrpl_complete_r5_revision4_recovery_batch',
+      fixedPoint.completionRequestBody,
+      undefined,
+      COMPLETION_RESPONSE_ACCOUNTING_RESERVE_BYTES,
     )
     if (
       completion.completed !== true
@@ -839,38 +930,12 @@ Deno.serve(async (request) => {
       || completion.endLedgerIndex !== claim.endLedgerIndex
       || completion.ledgerCount !== claim.ledgerCount
       || completion.worksDigest !== worksDigest
-      || completion.accountingDigest !== accountingDigest
+      || completion.accountingDigest !== fixedPoint.accountingEvidence.accountingDigest
     ) {
-      throw new RecoveryError('R5 completion response parity failed', true)
+      throw new RecoveryError('R5 revision-4 completion response parity failed', true)
     }
 
-    return json({
-      ok: true,
-      claimed: true,
-      runId: claim.runId,
-      batchId: claim.batchId,
-      batchSequence: claim.batchSequence,
-      startLedgerIndex: claim.startLedgerIndex,
-      endLedgerIndex: claim.endLedgerIndex,
-      ledgerCount: claim.ledgerCount,
-      validatedHead: head,
-      fetchMilliseconds,
-      normalizeMilliseconds,
-      edgeWallMilliseconds,
-      memoryHighWaterBytes,
-      memorySampleCount: memorySamples.length,
-      worksDigest,
-      accountingDigest,
-      finalizedEgressUpperBoundBytes:
-        accountingResult.conservativeTickEgressUpperBoundBytes,
-      completion,
-      boundaries: {
-        publicReaderUnchanged: true,
-        mainnetDisabled: true,
-        stabilizationNotStarted: true,
-        soakNotStarted: true,
-      },
-    })
+    return json(successBody)
   } catch (error) {
     const recoveryError = error instanceof RecoveryError
       ? error
@@ -880,7 +945,7 @@ Deno.serve(async (request) => {
         await postRpc<JsonObject>(
           supabaseUrl,
           secretKey,
-          'xrpl_fail_r5_active_recovery_batch',
+          'xrpl_fail_r5_revision4_recovery_batch',
           {
             p_run_id: claim.runId,
             p_batch_id: claim.batchId,
@@ -888,7 +953,8 @@ Deno.serve(async (request) => {
             p_error_message: recoveryError.message,
             p_failed_at: new Date().toISOString(),
           },
-          meter,
+          undefined,
+          FAILURE_RESPONSE_MAX_BYTES,
         )
       } catch {
         // The original fail-closed error remains authoritative.
@@ -900,6 +966,7 @@ Deno.serve(async (request) => {
         transient: !recoveryError.terminal,
         runId: claim?.runId ?? RECOVERY_RUN_ID,
         batchId: claim?.batchId ?? null,
+        profileRevision: 4,
         error: recoveryError.message.slice(0, 2_000),
         activeMutationCommitted: false,
       },

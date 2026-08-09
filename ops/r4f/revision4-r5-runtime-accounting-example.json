@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "purpose": "non-qualifying runtime accounting example",
+  "ledgerCount": 1,
+  "wire": {
+    "invokerRequestBytes": 64,
+    "invokerRequestCount": 1,
+    "xrplRequestBytes": 617,
+    "xrplRequestCount": 2,
+    "xrplResponseBytes": 17672,
+    "xrplResponseCount": 2,
+    "databaseRequestBytes": 900,
+    "databaseRequestCount": 2,
+    "databaseResponseBytes": 700,
+    "databaseResponseCount": 2,
+    "invokerResponseBytes": 256,
+    "invokerResponseCount": 1
+  },
+  "memory": {
+    "canonicalJsonBytes": 2000,
+    "payloadBytes": 1000,
+    "normalizedObjectOverheadBytes": 512,
+    "allocatorReserveBytes": 8388608
+  },
+  "unexplainedDirectionalDeltaReserveBytes": 0,
+  "qualification": false,
+  "notes": "This fixture demonstrates directionality only. It is not G3 provider evidence and cannot select revision 4 or authorize R5."
+}
