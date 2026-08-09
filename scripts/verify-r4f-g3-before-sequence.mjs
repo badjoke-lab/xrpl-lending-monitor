@@ -104,6 +104,8 @@ process.stdout.write(`${JSON.stringify({
   sourceCommit: commit,
   projectIdentityDigest: projectDigest,
   isolationPrepareRun: Number(isolationPrepareRun),
+  schedulerJobId: Number(jobId),
+  schedulerCommandDigest: commandDigest,
   dashboardAuthorizationCommentId: dashboardAuthCommentId,
   pauseAuthorizationCommentId: Number(pauseAuthorizationComment.id),
   pauseRun: pauseRunId,
