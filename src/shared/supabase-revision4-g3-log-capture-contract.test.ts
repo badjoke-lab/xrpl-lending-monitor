@@ -22,7 +22,7 @@ describe('R4F G3 read-only concurrent traffic log capture', () => {
       "if (resume.conclusion !== 'success')",
       "if (!(start <= runStart && runEnd <= end))",
       "if (!(runEnd < resumeStart && resumeEnd <= authorizationAt))",
-      'source_commit="$(jq -r \' .head_sha\' /tmp/target-run.json)"'.replace("' .", "'."),
+      "source_commit=\"$(jq -r '.head_sha' /tmp/target-run.json)\"",
     ]) {
       expect(captureJob).toContain(required)
     }
