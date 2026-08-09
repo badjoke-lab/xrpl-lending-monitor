@@ -4,6 +4,7 @@ const workflow = await readFile('.github/workflows/r4f-g3-isolated-window.yml', 
 const manager = await readFile('scripts/manage-r4f-g3-isolated-window.mjs', 'utf8')
 const verifier = await readFile('scripts/verify-r4f-g3-isolation-prepare-proposal.mjs', 'utf8')
 const beforeVerifier = await readFile('scripts/verify-r4f-g3-before-sequence.mjs', 'utf8')
+const resumeVerifier = await readFile('scripts/verify-r4f-g3-resume-sequence.mjs', 'utf8')
 const afterVerifier = await readFile('scripts/verify-r4f-g3-after-sequence.mjs', 'utf8')
 
 for (const required of [
@@ -17,10 +18,9 @@ for (const required of [
   "dashboard_auth=([0-9]+)",
   "one_shot_run=([0-9]+)",
   "before_comment=([0-9]+)",
-  "after_comment=([0-9]+)",
   'node scripts/prepare-r4f-g3-isolated-window.mjs',
   'node scripts/verify-r4f-g3-isolation-prepare-proposal.mjs',
-  'node scripts/verify-r4f-g3-after-sequence.mjs',
+  'node scripts/verify-r4f-g3-resume-sequence.mjs',
   'node scripts/manage-r4f-g3-isolated-window.mjs \\\n            --mode pause',
   'node scripts/manage-r4f-g3-isolated-window.mjs \\\n            --mode resume',
   'A database-local watchdog is installed before the collector is paused.',
@@ -28,7 +28,9 @@ for (const required of [
   'Dashboard capture scope:',
   'r4f-g3-isolated-window-pause-evidence',
   'r4f-g3-isolated-window-resume-evidence',
-  'Verified Usage invocation delta',
+  'restored before Usage refresh',
+  '/r4f-g3-after run=${ONE_SHOT_RUN}',
+  'resume_run=${GITHUB_RUN_ID}',
 ]) {
   if (!workflow.includes(required)) throw new Error(`G3 isolation workflow missing bounded control:${required}`)
 }
@@ -50,6 +52,7 @@ for (const forbidden of [
   'cron.unschedule(',
   'xrpl-r5-recovery-batch',
   "MAINNET_ENABLED: 'true'",
+  'Verified Usage invocation delta',
 ]) {
   if (workflow.includes(forbidden)) throw new Error(`G3 isolation workflow contains forbidden direct capability:${forbidden.trim()}`)
 }
@@ -123,11 +126,23 @@ for (const required of [
 }
 
 for (const required of [
+  'one-shot run is not successful',
+  'one-shot authorization is not bound to the isolated BEFORE sequence',
+  'collector resume must follow the successful one-shot locator',
+  'oneShotSucceededBeforeResume: true',
+  'immediateRestoreAuthorized: true',
+]) {
+  if (!resumeVerifier.includes(required)) throw new Error(`G3 resume sequence verifier missing binding:${required}`)
+}
+
+for (const required of [
   'Supabase Usage is not fresh: AFTER invocations must increase by at least one',
-  'AFTER capture must follow the completed one-shot run',
-  'resume must follow the retained AFTER capture',
+  'collector resume must follow the completed one-shot run',
+  'AFTER capture must follow successful collector resume',
+  'expected exactly one successful immediate-restore locator',
   'usageFresh: true',
-  'afterPrecedesResume: true',
+  'oneShotPrecedesResume: true',
+  'resumePrecedesAfter: true',
 ]) {
   if (!afterVerifier.includes(required)) throw new Error(`G3 AFTER sequence verifier missing binding:${required}`)
 }
