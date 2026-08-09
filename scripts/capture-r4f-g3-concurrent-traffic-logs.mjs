@@ -13,9 +13,9 @@ const output = argument('--output')
 const projectRef = process.env.SUPABASE_PROJECT_ID ?? ''
 const accessToken = process.env.SUPABASE_ACCESS_TOKEN ?? ''
 
-const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/u
+const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/u
 if (!/^[1-9][0-9]*$/u.test(targetRunText ?? '')) throw new Error('target run must be a positive integer')
-if (!start || !ISO.test(start) || !end || !ISO.test(end)) throw new Error('start/end must be canonical UTC seconds')
+if (!start || !ISO.test(start) || !end || !ISO.test(end)) throw new Error('start/end must be canonical UTC')
 if (!output) throw new Error('output path is required')
 if (!/^[a-z]{20}$/u.test(projectRef)) throw new Error('SUPABASE_PROJECT_ID must be an exact project ref')
 if (accessToken.length < 20) throw new Error('SUPABASE_ACCESS_TOKEN is unavailable')
