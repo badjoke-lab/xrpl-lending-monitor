@@ -53,7 +53,7 @@ The executor calls dedicated revision-4 RPC names:
 
 Those RPCs must be added as a repository migration and validated by empty-database replay before this PR is ready to merge. Existing revision-3 control records remain historical and must not be relabeled as revision 4.
 
-The preceding executor CI failure was caused by obsolete tests that still asserted that the executor must remain revision 3. Those assertions were updated to the new code-only, selection-gated revision-4 boundary; no production safety gate was relaxed.
+The first executor-wiring CI failure was caused by obsolete tests that explicitly required the executor to remain revision 3. Those assertions were updated to the new code-only, selection-gated revision-4 boundary. The underlying reserve-before-read, continuity, terminal-failure and service-key safeguards remain required.
 
 ## Live boundary
 
