@@ -7,11 +7,11 @@ function argument(name) {
 
 const commentsPath = argument('--comments')
 const oneShotRunPath = argument('--one-shot-run')
+const resumeRunPath = argument('--resume-run')
 const pauseRunIdText = argument('--pause-run-id')
 const beforeCommentIdText = argument('--before-comment-id')
 const afterCommentIdText = argument('--after-comment-id')
 const projectDigest = argument('--project-digest')
-const resumeCreatedAt = argument('--resume-created-at')
 
 const POSITIVE_INTEGER = /^[1-9][0-9]*$/u
 const SHA256 = /^[a-f0-9]{64}$/u
@@ -20,20 +20,20 @@ const CANONICAL_UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/u
 if (
   !commentsPath ||
   !oneShotRunPath ||
+  !resumeRunPath ||
   !POSITIVE_INTEGER.test(pauseRunIdText ?? '') ||
   !POSITIVE_INTEGER.test(beforeCommentIdText ?? '') ||
   !POSITIVE_INTEGER.test(afterCommentIdText ?? '') ||
-  !SHA256.test(projectDigest ?? '') ||
-  !resumeCreatedAt ||
-  !CANONICAL_UTC.test(resumeCreatedAt)
+  !SHA256.test(projectDigest ?? '')
 ) {
   throw new Error(
-    'usage: verify-r4f-g3-after-sequence --comments <json> --one-shot-run <json> --pause-run-id <id> --before-comment-id <id> --after-comment-id <id> --project-digest <sha256> --resume-created-at <iso>',
+    'usage: verify-r4f-g3-after-sequence --comments <json> --one-shot-run <json> --resume-run <json> --pause-run-id <id> --before-comment-id <id> --after-comment-id <id> --project-digest <sha256>',
   )
 }
 
 const comments = JSON.parse(await readFile(commentsPath, 'utf8'))
 const oneShotRun = JSON.parse(await readFile(oneShotRunPath, 'utf8'))
+const resumeRun = JSON.parse(await readFile(resumeRunPath, 'utf8'))
 if (!Array.isArray(comments)) throw new Error('issue comments payload must be an array')
 
 const pauseRunId = Number(pauseRunIdText)
@@ -49,6 +49,12 @@ if (oneShotRun.conclusion !== 'success') throw new Error('one-shot run is not su
 const oneShotRunId = Number(oneShotRun.id)
 if (!Number.isSafeInteger(oneShotRunId) || oneShotRunId <= 0) throw new Error('one-shot run id is invalid')
 
+if (resumeRun.name !== 'R4F G3 Isolated Window') throw new Error('resume run workflow mismatch')
+if (resumeRun.event !== 'issue_comment') throw new Error('resume run event mismatch')
+if (resumeRun.conclusion !== 'success') throw new Error('resume run is not successful')
+const resumeRunId = Number(resumeRun.id)
+if (!Number.isSafeInteger(resumeRunId) || resumeRunId <= 0) throw new Error('resume run id is invalid')
+
 const beforeComment = comments.find((comment) => Number(comment?.id) === beforeCommentId)
 if (!beforeComment || beforeComment?.user?.login !== 'badjoke-lab' || typeof beforeComment.body !== 'string') {
   throw new Error('BEFORE capture comment is missing or not owner-authored')
@@ -61,12 +67,26 @@ const beforeMatch = beforeComment.body.match(beforeRegex)
 if (!beforeMatch) throw new Error('BEFORE capture command shape mismatch')
 const [, dashboardAuthCommentIdText, beforeCapturedAt, beforeInvocationsText, beforeArtifactDigest] = beforeMatch
 
+const resumeLocatorMatches = comments.filter((comment) => {
+  if (comment?.user?.login !== 'github-actions[bot]' || typeof comment?.body !== 'string') return false
+  return comment.body.includes('## R4F G3 isolated window restored before Usage refresh') &&
+    comment.body.includes(`/actions/runs/${resumeRunId}`) &&
+    comment.body.includes(`Pause run: \`${pauseRunId}\``) &&
+    comment.body.includes(`One-shot run: \`${oneShotRunId}\``) &&
+    comment.body.includes(`BEFORE capture comment: \`${beforeCommentId}\``) &&
+    comment.body.includes(`Project identity digest: \`${projectDigest}\``)
+})
+if (resumeLocatorMatches.length !== 1) {
+  throw new Error(`expected exactly one successful immediate-restore locator, found ${resumeLocatorMatches.length}`)
+}
+const resumeLocator = resumeLocatorMatches[0]
+
 const afterComment = comments.find((comment) => Number(comment?.id) === afterCommentId)
 if (!afterComment || afterComment?.user?.login !== 'badjoke-lab' || typeof afterComment.body !== 'string') {
   throw new Error('AFTER capture comment is missing or not owner-authored')
 }
 const afterRegex = new RegExp(
-  `^/r4f-g3-after run=${oneShotRunId} pause_run=${pauseRunId} before_comment=${beforeCommentId} project=${projectDigest} captured_at=([^ ]+) invocations=([0-9]+) artifact=([a-f0-9]{64})$`,
+  `^/r4f-g3-after run=${oneShotRunId} pause_run=${pauseRunId} resume_run=${resumeRunId} before_comment=${beforeCommentId} project=${projectDigest} captured_at=([^ ]+) invocations=([0-9]+) artifact=([a-f0-9]{64})$`,
   'u',
 )
 const afterMatch = afterComment.body.match(afterRegex)
@@ -93,25 +113,31 @@ const beforeAt = Date.parse(beforeCapturedAt)
 const beforeCommentAt = Date.parse(String(beforeComment.created_at ?? ''))
 const runStartAt = Date.parse(String(oneShotRun.run_started_at ?? oneShotRun.created_at ?? ''))
 const runEndAt = Date.parse(String(oneShotRun.updated_at ?? ''))
+const resumeStartAt = Date.parse(String(resumeRun.run_started_at ?? resumeRun.created_at ?? ''))
+const resumeEndAt = Date.parse(String(resumeRun.updated_at ?? ''))
+const resumeLocatorAt = Date.parse(String(resumeLocator.created_at ?? ''))
 const afterAt = Date.parse(afterCapturedAt)
 const afterCommentAt = Date.parse(String(afterComment.created_at ?? ''))
-const resumeAt = Date.parse(resumeCreatedAt)
-if (![beforeAt, beforeCommentAt, runStartAt, runEndAt, afterAt, afterCommentAt, resumeAt].every(Number.isFinite)) {
+if (![beforeAt, beforeCommentAt, runStartAt, runEndAt, resumeStartAt, resumeEndAt, resumeLocatorAt, afterAt, afterCommentAt].every(Number.isFinite)) {
   throw new Error('G3 AFTER sequence contains an invalid timestamp')
 }
 if (!(beforeAt <= beforeCommentAt && beforeCommentAt < runStartAt)) {
   throw new Error('one-shot run must follow the retained BEFORE capture')
 }
-if (!(runStartAt <= runEndAt && runEndAt <= afterAt)) {
-  throw new Error('AFTER capture must follow the completed one-shot run')
+if (!(runStartAt <= runEndAt && runEndAt <= resumeStartAt)) {
+  throw new Error('collector resume must follow the completed one-shot run')
 }
-if (!(afterAt <= afterCommentAt && afterCommentAt < resumeAt)) {
-  throw new Error('resume must follow the retained AFTER capture')
+if (!(resumeStartAt <= resumeEndAt && resumeEndAt <= resumeLocatorAt && resumeLocatorAt <= afterAt)) {
+  throw new Error('AFTER capture must follow successful collector resume')
+}
+if (!(afterAt <= afterCommentAt)) {
+  throw new Error('AFTER capture marker predates its captured_at value')
 }
 
 process.stdout.write(`${JSON.stringify({
   oneShotRun: oneShotRunId,
   pauseRun: pauseRunId,
+  resumeRun: resumeRunId,
   dashboardAuthorizationCommentId: Number(dashboardAuthCommentIdText),
   beforeCommentId,
   afterCommentId,
@@ -124,6 +150,6 @@ process.stdout.write(`${JSON.stringify({
   beforeArtifactDigest,
   afterArtifactDigest,
   usageFresh: true,
-  oneShotPrecedesAfter: true,
-  afterPrecedesResume: true,
+  oneShotPrecedesResume: true,
+  resumePrecedesAfter: true,
 })}\n`)

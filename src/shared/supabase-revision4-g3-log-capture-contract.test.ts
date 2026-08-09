@@ -12,16 +12,18 @@ const script = read('scripts/capture-r4f-g3-concurrent-traffic-logs.mjs')
 const captureJob = workflow.slice(workflow.indexOf('\n  capture_logs:'))
 
 describe('R4F G3 read-only concurrent traffic log capture', () => {
-  it('is generic but bound to one completed one-shot, successful resume, and provider capture interval', () => {
+  it('is generic but bound to one completed one-shot, successful resume, and fresh AFTER marker', () => {
     for (const required of [
       'github.event.issue.number == 1261',
       "github.event.comment.user.login == 'badjoke-lab'",
       "startsWith(github.event.comment.body, '/r4f-g3-capture-logs ')",
-      "regex='^/r4f-g3-capture-logs run=([0-9]+) resume_run=([0-9]+) start=([^ ]+) end=([^ ]+)$'",
-      "if (target.conclusion !== 'success')",
-      "if (resume.conclusion !== 'success')",
-      "if (!(start <= runStart && runEnd <= end))",
-      "if (!(runEnd < resumeStart && resumeEnd <= authorizationAt))",
+      "regex='^/r4f-g3-capture-logs run=([0-9]+) resume_run=([0-9]+) pause_run=([0-9]+) before_comment=([0-9]+) after_comment=([0-9]+) project=([a-f0-9]{64})$'",
+      'verify-r4f-g3-after-sequence.mjs',
+      '--resume-run /tmp/resume-run.json',
+      '--after-comment-id "$after_comment"',
+      "capture_start=\"$(jq -r '.beforeCapturedAt' /tmp/after-sequence.json)\"",
+      "capture_end=\"$(jq -r '.afterCapturedAt' /tmp/after-sequence.json)\"",
+      "if (!(afterAt < authorizationAt)) throw new Error('log capture authorization must follow verified AFTER marker')",
       "source_commit=\"$(jq -r '.head_sha' /tmp/target-run.json)\"",
     ]) {
       expect(captureJob).toContain(required)
@@ -58,6 +60,7 @@ describe('R4F G3 read-only concurrent traffic log capture', () => {
     expect(script).toContain("source IN ('function_edge_logs', 'edge_logs', 'storage_logs', 'auth_logs', 'realtime_logs')")
     expect(script).toContain("parseDateTimeBestEffort('${start}')")
     expect(script).toContain('if (endMs - startMs > 60 * 60 * 1000)')
+    expect(captureJob).toContain("if (end - start > 60 * 60 * 1000) throw new Error('provider interval exceeds one hour')")
   })
 
   it('sanitizes the project ref and retains only hashed request ids', () => {

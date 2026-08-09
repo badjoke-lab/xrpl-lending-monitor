@@ -70,11 +70,17 @@ describe('R4F G3 workflow safety boundary', () => {
     }
   })
 
-  it('requires an AFTER marker before resume and emits only a post-resume log command', () => {
-    expect(g3).toContain('/r4f-g3-after run=${GITHUB_RUN_ID}')
+  it('emits immediate resume first, then validates a fresh AFTER before provider log capture', () => {
+    expect(g3).toContain('immediate resume command')
     expect(g3).toContain('/r4f-g3-isolation-resume project=${PROJECT_DIGEST}')
-    expect(g3).toContain('after_comment=<AFTER_COMMENT_ID>')
-    expect(g3).toContain("startsWith(github.event.comment.body, '/r4f-g3-capture-logs ')")
+    expect(g3).toContain('one_shot_run=${GITHUB_RUN_ID} before_comment=${BEFORE_COMMENT}')
+    expect(g3).not.toContain('after_comment=<AFTER_COMMENT_ID>')
+    expect(g3).toContain('\n  after_validate:')
+    expect(g3).toContain("startsWith(github.event.comment.body, '/r4f-g3-after ')")
     expect(g3).toContain('resume_run=([0-9]+)')
+    expect(g3).toContain('verify-r4f-g3-after-sequence.mjs')
+    expect(g3).toContain('/r4f-g3-capture-logs run=${ONE_SHOT_RUN} resume_run=${RESUME_RUN} pause_run=${PAUSE_RUN}')
+    expect(g3).toContain('after_comment=${AFTER_COMMENT}')
+    expect(g3).toContain("startsWith(github.event.comment.body, '/r4f-g3-capture-logs ')")
   })
 })
