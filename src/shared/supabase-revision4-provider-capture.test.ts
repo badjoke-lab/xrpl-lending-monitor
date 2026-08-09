@@ -21,6 +21,7 @@ function baseInput(): SupabaseRevision4ProviderCaptureInput {
       actor: 'badjoke-lab',
       scope: 'r4f_g3_dashboard_capture',
       sourceCommit: 'c'.repeat(40),
+      createdAt: '2026-08-06T05:55:00.000Z',
       evidenceArtifact: 'synthetic-authorization.json',
       evidenceDigest: 'd'.repeat(64),
     },
@@ -52,6 +53,10 @@ function baseInput(): SupabaseRevision4ProviderCaptureInput {
       capturedAt: '2026-08-06T06:05:00.000Z',
       sourceArtifact: 'synthetic-after.json',
       sourceArtifactDigest: '2'.repeat(64),
+    },
+    providerUsageFreshness: {
+      beforeEdgeFunctionInvocations: 100,
+      afterEdgeFunctionInvocations: 101,
     },
     application: {
       rollingBillableEgressUpperBoundBytes: 12_474,
@@ -136,7 +141,8 @@ describe('Supabase revision-4 bounded provider capture contract', () => {
     const evidence = buildSupabaseRevision4ProviderCaptureEvidence(baseInput())
 
     expect(evidence.authorizationVerified).toBe(false)
-    expect(evidence.providerSurfaceVerified).toBe(true)
+    expect(evidence.authorizationPrecedesBefore).toBe(true)
+    expect(evidence.providerUsageFreshness.verified).toBe(true)
     expect(evidence.reconciliation.providerDeltaInterval).toEqual({
       lowerBoundBytes: 15_000,
       upperBoundBytes: 15_000,
@@ -147,7 +153,7 @@ describe('Supabase revision-4 bounded provider capture contract', () => {
     expect(evidence.r5Authorized).toBe(false)
   })
 
-  it('accepts only a separately authorized capture on the project-filtered Total Egress surface', () => {
+  it('accepts only a separately pre-authorized capture on the project-filtered fresh Total Egress surface', () => {
     const input = baseInput()
     const evidence = buildSupabaseRevision4ProviderCaptureEvidence({
       ...input,
@@ -156,12 +162,62 @@ describe('Supabase revision-4 bounded provider capture contract', () => {
     })
 
     expect(evidence.authorizationVerified).toBe(true)
+    expect(evidence.authorizationPrecedesBefore).toBe(true)
     expect(evidence.providerSurfaceVerified).toBe(true)
+    expect(evidence.providerUsageFreshness).toMatchObject({
+      invocationDelta: 1,
+      verified: true,
+    })
     expect(evidence.reconciliation.intervalReconciliationReady).toBe(true)
     expect(evidence.reconciliation.intervalUpperBoundCovered).toBe(true)
     expect(evidence.g3Qualified).toBe(true)
     expect(evidence.profileSelected).toBe(false)
     expect(evidence.r5Authorized).toBe(false)
+  })
+
+  it('rejects dashboard authorization created at or after the BEFORE capture', () => {
+    const input = baseInput()
+    expect(() =>
+      buildSupabaseRevision4ProviderCaptureEvidence({
+        ...input,
+        captureState: 'authorized_dashboard_capture',
+        authorization: {
+          ...input.authorization,
+          commentId: 123456,
+          createdAt: input.before.capturedAt,
+        },
+      }),
+    ).toThrow('dashboard capture authorization must precede BEFORE capture')
+
+    expect(() =>
+      buildSupabaseRevision4ProviderCaptureEvidence({
+        ...input,
+        captureState: 'authorized_dashboard_capture',
+        authorization: {
+          ...input.authorization,
+          commentId: 123456,
+          createdAt: '2026-08-06T06:01:00.000Z',
+        },
+      }),
+    ).toThrow('dashboard capture authorization must precede BEFORE capture')
+  })
+
+  it('fails closed when the Usage view has not refreshed after the one-shot invocation', () => {
+    const input = baseInput()
+    const evidence = buildSupabaseRevision4ProviderCaptureEvidence({
+      ...input,
+      captureState: 'authorized_dashboard_capture',
+      authorization: { ...input.authorization, commentId: 123456 },
+      providerUsageFreshness: {
+        beforeEdgeFunctionInvocations: 18_167,
+        afterEdgeFunctionInvocations: 18_167,
+      },
+    })
+    expect(evidence.providerUsageFreshness).toMatchObject({
+      invocationDelta: 0,
+      verified: false,
+    })
+    expect(evidence.g3Qualified).toBe(false)
   })
 
   it('rejects an authorization that is not bound to the application source commit', () => {
