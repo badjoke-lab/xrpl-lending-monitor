@@ -344,7 +344,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Publish sanitized execution locator and AFTER marker shape
+      - name: Publish sanitized execution locator and immediate resume command
         if: always()
         env:
           RUN_STATUS: ${{ job.status }}
@@ -369,19 +369,110 @@ jobs:
           Pause run: \`${PAUSE_RUN}\`
           BEFORE capture comment: \`${BEFORE_COMMENT}\`
 
-          This workflow contains no DB migration or R5 recovery step. After a successful run, capture a fresh project-filtered Supabase Usage → Total Egress AFTER reading and retain its source artifact SHA-256 plus Edge Function Invocations count.
+          This workflow contains no DB migration or R5 recovery step. If Status is \`success\`, restore the exact collector scheduler immediately. Do not wait for Supabase Usage to refresh.
 
-          Record the AFTER reading with this exact shape:
+          Exact immediate-resume command:
 
-          \`/r4f-g3-after run=${GITHUB_RUN_ID} pause_run=${PAUSE_RUN} before_comment=${BEFORE_COMMENT} project=${PROJECT_DIGEST} captured_at=<UTC> invocations=<EDGE_FUNCTION_INVOCATIONS> artifact=<SHA256>\`
+          \`/r4f-g3-isolation-resume project=${PROJECT_DIGEST} job=${JOB_ID} command=${COMMAND_DIGEST} pause_run=${PAUSE_RUN} one_shot_run=${GITHUB_RUN_ID} before_comment=${BEFORE_COMMENT}\`
 
-          After that marker exists, resume only with:
-
-          \`/r4f-g3-isolation-resume project=${PROJECT_DIGEST} job=${JOB_ID} command=${COMMAND_DIGEST} pause_run=${PAUSE_RUN} one_shot_run=${GITHUB_RUN_ID} before_comment=${BEFORE_COMMENT} after_comment=<AFTER_COMMENT_ID>\`
-
-          Resume verification will reject stale Usage evidence unless AFTER Edge Function Invocations increased by at least one.
+          Fresh project-filtered Supabase Usage AFTER evidence is captured only after the successful resume. Freshness remains mandatory for G3 qualification.
           EOF
           gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/g3-run.md
+
+  after_validate:
+    if: >-
+      github.event.issue.number == 1261 &&
+      github.event.comment.user.login == 'badjoke-lab' &&
+      startsWith(github.event.comment.body, '/r4f-g3-after ')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+      GH_TOKEN: ${{ github.token }}
+      AFTER_BODY: ${{ github.event.comment.body }}
+      AFTER_COMMENT_ID: ${{ github.event.comment.id }}
+    steps:
+      - name: Check out current main read-only
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify post-resume fresh Usage evidence
+        id: after
+        shell: bash
+        run: |
+          set -euo pipefail
+          regex='^/r4f-g3-after run=([0-9]+) pause_run=([0-9]+) resume_run=([0-9]+) before_comment=([0-9]+) project=([a-f0-9]{64}) captured_at=([^ ]+) invocations=([0-9]+) artifact=([a-f0-9]{64})$'
+          [[ "$AFTER_BODY" =~ $regex ]] || { echo 'AFTER command shape mismatch' >&2; exit 1; }
+          one_shot_run="${BASH_REMATCH[1]}"
+          pause_run="${BASH_REMATCH[2]}"
+          resume_run="${BASH_REMATCH[3]}"
+          before_comment="${BASH_REMATCH[4]}"
+          project_digest="${BASH_REMATCH[5]}"
+          test "$one_shot_run" -gt 0
+          test "$pause_run" -gt 0
+          test "$resume_run" -gt 0
+          test "$before_comment" -gt 0
+          [[ "$SUPABASE_PROJECT_ID" =~ ^[a-z]{20}$ ]]
+          actual_project_digest="$(printf '%s' "$SUPABASE_PROJECT_ID" | sha256sum | awk '{print $1}')"
+          test "$project_digest" = "$actual_project_digest"
+
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${one_shot_run}" > /tmp/one-shot-run.json
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${resume_run}" > /tmp/resume-run.json
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${QUALIFICATION_ISSUE}/comments?per_page=100" \
+            | jq -s 'add' > /tmp/issue-comments.json
+
+          node scripts/verify-r4f-g3-after-sequence.mjs \
+            --comments /tmp/issue-comments.json \
+            --one-shot-run /tmp/one-shot-run.json \
+            --resume-run /tmp/resume-run.json \
+            --pause-run-id "$pause_run" \
+            --before-comment-id "$before_comment" \
+            --after-comment-id "$AFTER_COMMENT_ID" \
+            --project-digest "$project_digest" > /tmp/after-sequence.json
+
+          capture_start="$(jq -r '.beforeCapturedAt' /tmp/after-sequence.json)"
+          capture_end="$(jq -r '.afterCapturedAt' /tmp/after-sequence.json)"
+          invocation_delta="$(jq -r '.invocationDelta' /tmp/after-sequence.json)"
+          CAPTURE_START="$capture_start" CAPTURE_END="$capture_end" node --input-type=module <<'NODE'
+          const start = Date.parse(process.env.CAPTURE_START ?? '')
+          const end = Date.parse(process.env.CAPTURE_END ?? '')
+          if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) throw new Error('provider interval is invalid')
+          if (end - start > 60 * 60 * 1000) throw new Error('provider interval exceeds one hour')
+          NODE
+
+          printf 'one_shot_run=%s\npause_run=%s\nresume_run=%s\nbefore_comment=%s\nafter_comment=%s\nproject_digest=%s\ncapture_start=%s\ncapture_end=%s\ninvocation_delta=%s\n' \
+            "$one_shot_run" "$pause_run" "$resume_run" "$before_comment" "$AFTER_COMMENT_ID" "$project_digest" "$capture_start" "$capture_end" "$invocation_delta" >> "$GITHUB_OUTPUT"
+
+      - name: Publish fresh AFTER validation and exact log-capture command
+        env:
+          ONE_SHOT_RUN: ${{ steps.after.outputs.one_shot_run }}
+          PAUSE_RUN: ${{ steps.after.outputs.pause_run }}
+          RESUME_RUN: ${{ steps.after.outputs.resume_run }}
+          BEFORE_COMMENT: ${{ steps.after.outputs.before_comment }}
+          AFTER_COMMENT: ${{ steps.after.outputs.after_comment }}
+          PROJECT_DIGEST: ${{ steps.after.outputs.project_digest }}
+          INVOCATION_DELTA: ${{ steps.after.outputs.invocation_delta }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/g3-after.md <<EOF
+          ## R4F G3 fresh AFTER verified after collector restoration
+
+          One-shot run: \`${ONE_SHOT_RUN}\`
+          Resume run: \`${RESUME_RUN}\`
+          BEFORE capture comment: \`${BEFORE_COMMENT}\`
+          AFTER capture comment: \`${AFTER_COMMENT}\`
+          Project identity digest: \`${PROJECT_DIGEST}\`
+          Verified Usage invocation delta: \`${INVOCATION_DELTA}\`
+
+          Supabase Usage freshness is now verified after the collector was already restored. This does not by itself qualify G3. Capture bounded concurrent provider logs next with:
+
+          \`/r4f-g3-capture-logs run=${ONE_SHOT_RUN} resume_run=${RESUME_RUN} pause_run=${PAUSE_RUN} before_comment=${BEFORE_COMMENT} after_comment=${AFTER_COMMENT} project=${PROJECT_DIGEST}\`
+          EOF
+          gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/g3-after.md
 
   capture_logs:
     if: >-
@@ -404,55 +495,64 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Parse and verify completed G3 run, resume, and provider interval
+      - name: Parse and verify fresh AFTER, completed G3 run, resume, and provider interval
         id: target
         shell: bash
         run: |
           set -euo pipefail
-          regex='^/r4f-g3-capture-logs run=([0-9]+) resume_run=([0-9]+) start=([^ ]+) end=([^ ]+)$'
+          regex='^/r4f-g3-capture-logs run=([0-9]+) resume_run=([0-9]+) pause_run=([0-9]+) before_comment=([0-9]+) after_comment=([0-9]+) project=([a-f0-9]{64})$'
           [[ "$CAPTURE_BODY" =~ $regex ]] || { echo 'log capture command shape mismatch' >&2; exit 1; }
           target_run="${BASH_REMATCH[1]}"
           resume_run="${BASH_REMATCH[2]}"
-          capture_start="${BASH_REMATCH[3]}"
-          capture_end="${BASH_REMATCH[4]}"
+          pause_run="${BASH_REMATCH[3]}"
+          before_comment="${BASH_REMATCH[4]}"
+          after_comment="${BASH_REMATCH[5]}"
+          project_digest="${BASH_REMATCH[6]}"
           test "$target_run" -gt 0
           test "$resume_run" -gt 0
+          test "$pause_run" -gt 0
+          test "$before_comment" -gt 0
+          test "$after_comment" -gt 0
           test -n "$SUPABASE_ACCESS_TOKEN"
           [[ "$SUPABASE_PROJECT_ID" =~ ^[a-z]{20}$ ]]
-          project_digest="$(printf '%s' "$SUPABASE_PROJECT_ID" | sha256sum | awk '{print $1}')"
+          actual_project_digest="$(printf '%s' "$SUPABASE_PROJECT_ID" | sha256sum | awk '{print $1}')"
+          test "$project_digest" = "$actual_project_digest"
 
           gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${target_run}" > /tmp/target-run.json
           gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${resume_run}" > /tmp/resume-run.json
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${QUALIFICATION_ISSUE}/comments?per_page=100" \
+            | jq -s 'add' > /tmp/issue-comments.json
 
-          TARGET_RUN="$target_run" RESUME_RUN="$resume_run" CAPTURE_START="$capture_start" CAPTURE_END="$capture_end" CAPTURE_AUTH_CREATED_AT="$CAPTURE_AUTH_CREATED_AT" node --input-type=module <<'NODE'
+          node scripts/verify-r4f-g3-after-sequence.mjs \
+            --comments /tmp/issue-comments.json \
+            --one-shot-run /tmp/target-run.json \
+            --resume-run /tmp/resume-run.json \
+            --pause-run-id "$pause_run" \
+            --before-comment-id "$before_comment" \
+            --after-comment-id "$after_comment" \
+            --project-digest "$project_digest" > /tmp/after-sequence.json
+
+          capture_start="$(jq -r '.beforeCapturedAt' /tmp/after-sequence.json)"
+          capture_end="$(jq -r '.afterCapturedAt' /tmp/after-sequence.json)"
+          invocation_delta="$(jq -r '.invocationDelta' /tmp/after-sequence.json)"
+
+          AFTER_COMMENT="$after_comment" CAPTURE_AUTH_CREATED_AT="$CAPTURE_AUTH_CREATED_AT" CAPTURE_START="$capture_start" CAPTURE_END="$capture_end" node --input-type=module <<'NODE'
           import { readFileSync } from 'node:fs'
-          const target = JSON.parse(readFileSync('/tmp/target-run.json', 'utf8'))
-          const resume = JSON.parse(readFileSync('/tmp/resume-run.json', 'utf8'))
-          if (String(target.id) !== process.env.TARGET_RUN) throw new Error('target G3 run id mismatch')
-          if (target.name !== 'R4F G3 One-Shot Probe') throw new Error('target G3 workflow mismatch')
-          if (target.event !== 'issue_comment') throw new Error('target G3 event mismatch')
-          if (target.conclusion !== 'success') throw new Error('target G3 run is not successful')
-          if (String(resume.id) !== process.env.RESUME_RUN) throw new Error('resume run id mismatch')
-          if (resume.name !== 'R4F G3 Isolated Window') throw new Error('resume workflow mismatch')
-          if (resume.event !== 'issue_comment') throw new Error('resume event mismatch')
-          if (resume.conclusion !== 'success') throw new Error('resume run is not successful')
-          const start = Date.parse(process.env.CAPTURE_START)
-          const end = Date.parse(process.env.CAPTURE_END)
-          const runStart = Date.parse(target.run_started_at ?? target.created_at)
-          const runEnd = Date.parse(target.updated_at)
-          const resumeStart = Date.parse(resume.run_started_at ?? resume.created_at)
-          const resumeEnd = Date.parse(resume.updated_at)
-          const authorizationAt = Date.parse(process.env.CAPTURE_AUTH_CREATED_AT)
-          if (![start, end, runStart, runEnd, resumeStart, resumeEnd, authorizationAt].every(Number.isFinite)) throw new Error('G3 log sequence timestamps are invalid')
-          if (!(start <= runStart && runEnd <= end)) throw new Error('G3 run is outside captured provider interval')
-          if (!(runEnd < resumeStart && resumeEnd <= authorizationAt)) throw new Error('log capture must follow successful collector resume')
+          const comments = JSON.parse(readFileSync('/tmp/issue-comments.json', 'utf8'))
+          const after = comments.find((item) => Number(item?.id) === Number(process.env.AFTER_COMMENT))
+          const afterAt = Date.parse(String(after?.created_at ?? ''))
+          const authorizationAt = Date.parse(process.env.CAPTURE_AUTH_CREATED_AT ?? '')
+          const start = Date.parse(process.env.CAPTURE_START ?? '')
+          const end = Date.parse(process.env.CAPTURE_END ?? '')
+          if (![afterAt, authorizationAt, start, end].every(Number.isFinite)) throw new Error('G3 log sequence timestamps are invalid')
+          if (!(afterAt < authorizationAt)) throw new Error('log capture authorization must follow verified AFTER marker')
           if (end - start > 60 * 60 * 1000) throw new Error('provider interval exceeds one hour')
           NODE
 
           source_commit="$(jq -r '.head_sha' /tmp/target-run.json)"
           [[ "$source_commit" =~ ^[a-f0-9]{40}$ ]]
-          printf 'target_run=%s\nresume_run=%s\ncapture_start=%s\ncapture_end=%s\nproject_digest=%s\nsource_commit=%s\n' \
-            "$target_run" "$resume_run" "$capture_start" "$capture_end" "$project_digest" "$source_commit" >> "$GITHUB_OUTPUT"
+          printf 'target_run=%s\nresume_run=%s\nafter_comment=%s\ncapture_start=%s\ncapture_end=%s\ninvocation_delta=%s\nproject_digest=%s\nsource_commit=%s\n' \
+            "$target_run" "$resume_run" "$after_comment" "$capture_start" "$capture_end" "$invocation_delta" "$project_digest" "$source_commit" >> "$GITHUB_OUTPUT"
 
       - name: Capture bounded read-only Supabase traffic logs
         env:
@@ -490,8 +590,10 @@ jobs:
           RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
           TARGET_G3_RUN: ${{ steps.target.outputs.target_run }}
           RESUME_RUN: ${{ steps.target.outputs.resume_run }}
+          AFTER_COMMENT: ${{ steps.target.outputs.after_comment }}
           CAPTURE_START: ${{ steps.target.outputs.capture_start }}
           CAPTURE_END: ${{ steps.target.outputs.capture_end }}
+          INVOCATION_DELTA: ${{ steps.target.outputs.invocation_delta }}
           TARGET_SOURCE_COMMIT: ${{ steps.target.outputs.source_commit }}
           TARGET_PROJECT_IDENTITY_DIGEST: ${{ steps.target.outputs.project_digest }}
         shell: bash
@@ -503,10 +605,12 @@ jobs:
           Run: ${RUN_URL}
           Target one-shot run: \`${TARGET_G3_RUN}\`
           Resume run: \`${RESUME_RUN}\`
+          Fresh AFTER comment: \`${AFTER_COMMENT}\`
+          Verified Usage invocation delta: \`${INVOCATION_DELTA}\`
           Captured provider interval: \`${CAPTURE_START}\` → \`${CAPTURE_END}\`
           Source commit under test: \`${TARGET_SOURCE_COMMIT}\`
           Project identity digest: \`${TARGET_PROJECT_IDENTITY_DIGEST}\`
 
-          This is a read-only Supabase Management API log query performed only after collector restoration. It does not deploy a function, change secrets, access the database, authorize R5, enable Mainnet, or authorize stabilization/soak. Bind this artifact and its SHA-256 into the provider capture evidence before running the final G3 verifier.
+          This is a read-only Supabase Management API log query performed after collector restoration and fresh Usage validation. It does not deploy a function, change secrets, access the database, authorize R5, enable Mainnet, or authorize stabilization/soak. Bind this artifact and its SHA-256 into the provider capture evidence before running the final G3 verifier.
           EOF
           gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/g3-log-capture.md
