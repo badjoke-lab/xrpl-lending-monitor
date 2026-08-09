@@ -15,11 +15,11 @@ This branch converts the R5 recovery executor away from revision-3 blanket all-d
 - existing egress halt: 4 GiB / 31 days;
 - maximum integer average billable egress at the required 21 ledgers/minute: 4,581 bytes/ledger.
 
-The existing retained network-inclusive throughput proof already demonstrated 24 ledgers/minute steady operation and catch-up above the required 30 ledgers/minute. This branch does not repeat that proof.
+The retained network-inclusive throughput proof already demonstrated 24 ledgers/minute steady operation and catch-up above the required 30 ledgers/minute. This branch does not repeat that proof.
 
 ## Directional accounting
 
-The executor now uses the revision-4 directional contract before atomic completion:
+The source executor now uses the revision-4 directional contract before atomic completion:
 
 - XRPL -> Edge response bytes remain in memory/transport but are excluded from rolling billable egress;
 - Edge -> XRPL, Edge -> database, database -> Edge and Edge -> invoker bytes are metered explicitly under the current conservative contract;
@@ -27,13 +27,13 @@ The executor now uses the revision-4 directional contract before atomic completi
 - the old revision-3 128 KiB function-response reservation is not charged as transmitted egress;
 - the 2 MiB completion value remains only a hard transport cap, not a billable-egress assumption;
 - accounting JSON and the completion request are solved to an exact byte fixed point before the commit RPC;
-- the caller success response is also byte-stabilized before the accounting record is finalized.
+- the caller success response is byte-stabilized before accounting finalization.
 
-## Executor gate
+## Fail-closed activation boundary
 
-`supabase/functions/xrpl-r5-recovery-batch/index.ts` is wired to revision 4 in source. It is fail-closed and cannot become a live revision-4 recovery path merely by merging code:
+`supabase/functions/xrpl-r5-recovery-batch/index.ts` is wired to revision 4 in repository source but cannot activate merely by merging code:
 
-- `XRPL_R5_REVISION4_SELECTION_DIGEST` is mandatory and must be a concrete 64-hex selection digest;
+- `XRPL_R5_REVISION4_SELECTION_DIGEST` is mandatory and no value is invented in this branch;
 - `XRPL_R5_REVISION4_UNEXPLAINED_EGRESS_RESERVE_BYTES` is mandatory;
 - the claim must carry revision 4 and the locked profile digest;
 - claim size is capped at 12;
@@ -41,11 +41,11 @@ The executor now uses the revision-4 directional contract before atomic completi
 - projected egress must remain below 4 GiB / 31 days;
 - memory/transport must remain below the 224 MiB project halt.
 
-No selection digest is invented in this branch and no provider state is changed.
+The existing deployed trigger source still carries the revision-3 run identity, so it cannot successfully invoke the repository-only revision-4 executor path. Trigger conversion follows the dedicated revision-4 DB RPC migration and remains code-only until a separate live authorization.
 
 ## Database boundary still to complete
 
-The source executor calls dedicated revision-4 RPC names:
+The executor calls dedicated revision-4 RPC names:
 
 - `xrpl_claim_r5_revision4_recovery_batch_from_prepared_head`;
 - `xrpl_complete_r5_revision4_recovery_batch`;
