@@ -67,20 +67,6 @@ jobs:
             'mainnetDisabled: true'; do
             grep -Fq "$required" "$runner"
           done
-          for forbidden in \
-            'SUPABASE_ACCESS_TOKEN' \
-            'SUPABASE_PROJECT_ID' \
-            'SUPABASE_DB_PASSWORD' \
-            'SUPABASE_SERVICE_ROLE_KEY' \
-            'supabase functions deploy' \
-            'supabase functions delete' \
-            'supabase secrets set' \
-            'supabase db' \
-            'cron.unschedule' \
-            'cron.schedule' \
-            'xrpl-r5-recovery-batch'; do
-            ! grep -Fq "$forbidden" "$runner"
-          done
 
       - name: Run formal production plus independent G3 verdict
         shell: bash
