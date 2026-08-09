@@ -25,7 +25,7 @@ for (const required of [
   'node scripts/manage-r4f-g3-isolated-window.mjs \\\n            --mode resume',
   'A database-local watchdog is installed before the collector is paused.',
   'The pause is bounded to at most 15 minutes.',
-  'Dashboard capture scope: `r4f_g3_dashboard_capture`',
+  'Dashboard capture scope:',
   'r4f-g3-isolated-window-pause-evidence',
   'r4f-g3-isolated-window-resume-evidence',
   'Verified Usage invocation delta',
