@@ -11,6 +11,7 @@
     "owner": "badjoke-lab",
     "exactScopeRequired": true,
     "exactSourceCommitRequired": true,
+    "createdBeforeBeforeCaptureRequired": true,
     "sanitizedAuthorizationArtifactDigestRequired": true
   },
   "requiredProviderSurface": {
@@ -18,12 +19,14 @@
     "metric": "total_egress",
     "projectFilterApplied": true,
     "billingPeriodFilterApplied": true,
-    "cachedEgressIncluded": true
+    "cachedEgressIncluded": true,
+    "freshnessProof": "after_edge_function_invocations_at_least_before_plus_one"
   },
   "requiredCaptureFields": [
     "captureId",
     "authorization.commentId",
     "authorization.sourceCommit",
+    "authorization.createdAt",
     "authorization.evidenceArtifact",
     "authorization.evidenceDigest",
     "projectIdentityDigest",
@@ -49,6 +52,8 @@
     "after.capturedAt",
     "after.sourceArtifact",
     "after.sourceArtifactDigest",
+    "providerUsageFreshness.beforeEdgeFunctionInvocations",
+    "providerUsageFreshness.afterEdgeFunctionInvocations",
     "application.rollingBillableEgressUpperBoundBytes",
     "application.retainedUnexplainedDeltaReserveBytes",
     "application.accountingDigest",

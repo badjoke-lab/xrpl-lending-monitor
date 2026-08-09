@@ -23,11 +23,13 @@ jobs:
     if: >-
       github.event.issue.number == 1261 &&
       github.event.comment.user.login == 'badjoke-lab' &&
-      github.event.comment.body == '/r4f-g3-prepare'
+      startsWith(github.event.comment.body, '/r4f-g3-prepare ')
     runs-on: ubuntu-latest
     env:
       SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
       GH_TOKEN: ${{ github.token }}
+      PREPARE_BODY: ${{ github.event.comment.body }}
+      PREPARE_CREATED_AT: ${{ github.event.comment.created_at }}
     steps:
       - name: Check out exact main
         uses: actions/checkout@v4
@@ -35,14 +37,59 @@ jobs:
           ref: main
           persist-credentials: false
 
-      - name: Resolve exact authorization proposal
-        id: proposal
+      - name: Verify dashboard authorization, pause, and retained BEFORE ordering
+        id: sequence
         shell: bash
         run: |
           set -euo pipefail
-          test -n "$SUPABASE_PROJECT_ID"
+          regex='^/r4f-g3-prepare dashboard_auth=([0-9]+) pause_run=([0-9]+) before_comment=([0-9]+) project=([a-f0-9]{64})$'
+          [[ "$PREPARE_BODY" =~ $regex ]] || { echo 'prepare command shape mismatch' >&2; exit 1; }
+          dashboard_auth="${BASH_REMATCH[1]}"
+          pause_run="${BASH_REMATCH[2]}"
+          before_comment="${BASH_REMATCH[3]}"
+          project_digest="${BASH_REMATCH[4]}"
+          test "$dashboard_auth" -gt 0
+          test "$pause_run" -gt 0
+          test "$before_comment" -gt 0
           [[ "$SUPABASE_PROJECT_ID" =~ ^[a-z]{20}$ ]]
+          actual_project_digest="$(printf '%s' "$SUPABASE_PROJECT_ID" | sha256sum | awk '{print $1}')"
+          test "$project_digest" = "$actual_project_digest"
 
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${pause_run}" > /tmp/pause-run.json
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${QUALIFICATION_ISSUE}/comments?per_page=100" \
+            | jq -s 'add' > /tmp/issue-comments.json
+
+          node scripts/verify-r4f-g3-before-sequence.mjs \
+            --comments /tmp/issue-comments.json \
+            --pause-run /tmp/pause-run.json \
+            --dashboard-auth-comment-id "$dashboard_auth" \
+            --pause-run-id "$pause_run" \
+            --before-comment-id "$before_comment" \
+            --project-digest "$project_digest" \
+            --prepare-created-at "$PREPARE_CREATED_AT" > /tmp/before-sequence.json
+
+          source_commit="$(jq -r '.sourceCommit' /tmp/before-sequence.json)"
+          job_id="$(jq -r '.schedulerJobId' /tmp/before-sequence.json)"
+          command_digest="$(jq -r '.schedulerCommandDigest' /tmp/before-sequence.json)"
+          before_captured_at="$(jq -r '.beforeCapturedAt' /tmp/before-sequence.json)"
+          before_invocations="$(jq -r '.beforeInvocations' /tmp/before-sequence.json)"
+          before_artifact_digest="$(jq -r '.beforeArtifactDigest' /tmp/before-sequence.json)"
+          test "$source_commit" = "$(git rev-parse HEAD)"
+
+          printf 'dashboard_auth=%s\npause_run=%s\nbefore_comment=%s\nproject_digest=%s\nsource_commit=%s\njob_id=%s\ncommand_digest=%s\nbefore_captured_at=%s\nbefore_invocations=%s\nbefore_artifact_digest=%s\n' \
+            "$dashboard_auth" "$pause_run" "$before_comment" "$project_digest" "$source_commit" "$job_id" "$command_digest" "$before_captured_at" "$before_invocations" "$before_artifact_digest" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve exact authorization proposal
+        id: proposal
+        env:
+          DASHBOARD_AUTH: ${{ steps.sequence.outputs.dashboard_auth }}
+          PAUSE_RUN: ${{ steps.sequence.outputs.pause_run }}
+          BEFORE_COMMENT: ${{ steps.sequence.outputs.before_comment }}
+          PROJECT_DIGEST: ${{ steps.sequence.outputs.project_digest }}
+          SOURCE_COMMIT: ${{ steps.sequence.outputs.source_commit }}
+        shell: bash
+        run: |
+          set -euo pipefail
           request='{"method":"ledger","params":[{"ledger_index":"validated","transactions":false,"expand":false,"api_version":1}]}'
           curl --fail-with-body --silent --show-error \
             --connect-timeout 10 --max-time 30 \
@@ -63,8 +110,8 @@ jobs:
           )"
 
           head_sha="$(git rev-parse HEAD)"
-          project_digest="$(printf '%s' "$SUPABASE_PROJECT_ID" | sha256sum | awk '{print $1}')"
-          printf 'head_sha=%s\nledger=%s\nproject_digest=%s\n' "$head_sha" "$ledger" "$project_digest" >> "$GITHUB_OUTPUT"
+          test "$head_sha" = "$SOURCE_COMMIT"
+          printf 'head_sha=%s\nledger=%s\nproject_digest=%s\n' "$head_sha" "$ledger" "$PROJECT_DIGEST" >> "$GITHUB_OUTPUT"
 
           cat > /tmp/proposal.md <<EOF
           ## R4F G3 one-shot authorization proposal
@@ -72,14 +119,17 @@ jobs:
           Preparation run: \`${GITHUB_RUN_ID}\`
           Source commit: \`${head_sha}\`
           Revision-4 profile digest: \`${PROFILE_IDENTITY_DIGEST}\`
-          Project identity digest: \`${project_digest}\`
+          Project identity digest: \`${PROJECT_DIGEST}\`
           Exact Devnet ledger: \`${ledger}\`
+          Dashboard authorization comment: \`${DASHBOARD_AUTH}\`
+          Isolation pause run: \`${PAUSE_RUN}\`
+          BEFORE capture comment: \`${BEFORE_COMMENT}\`
 
-          Before authorizing, retain the project-filtered Supabase Usage → **Total Egress** reading for the same billing period. Do not post the project reference, credentials, cookies, or tokens.
+          The dashboard capture authorization and isolated BEFORE marker were verified before this prepare run.
 
           Exact authorization command:
 
-          \`/r4f-g3-authorize commit=${head_sha} ledger=${ledger} project=${project_digest} prepare_run=${GITHUB_RUN_ID}\`
+          \`/r4f-g3-authorize commit=${head_sha} ledger=${ledger} project=${PROJECT_DIGEST} prepare_run=${GITHUB_RUN_ID} dashboard_auth=${DASHBOARD_AUTH} pause_run=${PAUSE_RUN} before_comment=${BEFORE_COMMENT}\`
 
           This authorizes only a temporary G3 probe deployment, one read-only request for the exact Devnet ledger above, sanitized evidence upload, and cleanup. It does not authorize DB access, migration, R5 mutation, public-reader change, Mainnet, stabilization, or soak.
           EOF
@@ -108,19 +158,26 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Parse and verify exact owner authorization
+      - name: Parse and verify exact owner authorization and retained BEFORE sequence
         id: auth
         shell: bash
         run: |
           set -euo pipefail
-          regex='^/r4f-g3-authorize commit=([a-f0-9]{40}) ledger=([0-9]+) project=([a-f0-9]{64}) prepare_run=([0-9]+)$'
+          regex='^/r4f-g3-authorize commit=([a-f0-9]{40}) ledger=([0-9]+) project=([a-f0-9]{64}) prepare_run=([0-9]+) dashboard_auth=([0-9]+) pause_run=([0-9]+) before_comment=([0-9]+)$'
           [[ "$AUTHORIZATION_BODY" =~ $regex ]] || { echo 'authorization command shape mismatch' >&2; exit 1; }
           commit="${BASH_REMATCH[1]}"
           ledger="${BASH_REMATCH[2]}"
           project_digest="${BASH_REMATCH[3]}"
           prepare_run="${BASH_REMATCH[4]}"
+          dashboard_auth="${BASH_REMATCH[5]}"
+          pause_run="${BASH_REMATCH[6]}"
+          before_comment="${BASH_REMATCH[7]}"
 
           test "$ledger" -gt 0
+          test "$prepare_run" -gt 0
+          test "$dashboard_auth" -gt 0
+          test "$pause_run" -gt 0
+          test "$before_comment" -gt 0
           test -n "$SUPABASE_ACCESS_TOKEN"
           test -n "$SUPABASE_PROJECT_ID"
           [[ "$SUPABASE_PROJECT_ID" =~ ^[a-z]{20}$ ]]
@@ -129,8 +186,19 @@ jobs:
           test "$project_digest" = "$actual_project_digest"
 
           gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${prepare_run}" > /tmp/prepare-run.json
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${pause_run}" > /tmp/pause-run.json
           gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${QUALIFICATION_ISSUE}/comments?per_page=100" \
             | jq -s 'add' > /tmp/issue-comments.json
+
+          prepare_created_at="$(jq -r '.created_at' /tmp/prepare-run.json)"
+          node scripts/verify-r4f-g3-before-sequence.mjs \
+            --comments /tmp/issue-comments.json \
+            --pause-run /tmp/pause-run.json \
+            --dashboard-auth-comment-id "$dashboard_auth" \
+            --pause-run-id "$pause_run" \
+            --before-comment-id "$before_comment" \
+            --project-digest "$project_digest" \
+            --prepare-created-at "$prepare_created_at" > /tmp/before-sequence.json
 
           node scripts/verify-r4f-g3-prepare-proposal.mjs \
             --comments /tmp/issue-comments.json \
@@ -139,9 +207,19 @@ jobs:
             --commit "$commit" \
             --ledger "$ledger" \
             --project-digest "$project_digest" \
+            --dashboard-auth-comment-id "$dashboard_auth" \
+            --pause-run-id "$pause_run" \
+            --before-comment-id "$before_comment" \
             --authorization-created-at "$AUTHORIZATION_CREATED_AT"
 
-          printf 'commit=%s\nledger=%s\nproject_digest=%s\nprepare_run=%s\n' "$commit" "$ledger" "$project_digest" "$prepare_run" >> "$GITHUB_OUTPUT"
+          job_id="$(jq -r '.schedulerJobId' /tmp/before-sequence.json)"
+          command_digest="$(jq -r '.schedulerCommandDigest' /tmp/before-sequence.json)"
+          before_captured_at="$(jq -r '.beforeCapturedAt' /tmp/before-sequence.json)"
+          before_invocations="$(jq -r '.beforeInvocations' /tmp/before-sequence.json)"
+          before_artifact_digest="$(jq -r '.beforeArtifactDigest' /tmp/before-sequence.json)"
+
+          printf 'commit=%s\nledger=%s\nproject_digest=%s\nprepare_run=%s\ndashboard_auth=%s\npause_run=%s\nbefore_comment=%s\njob_id=%s\ncommand_digest=%s\nbefore_captured_at=%s\nbefore_invocations=%s\nbefore_artifact_digest=%s\n' \
+            "$commit" "$ledger" "$project_digest" "$prepare_run" "$dashboard_auth" "$pause_run" "$before_comment" "$job_id" "$command_digest" "$before_captured_at" "$before_invocations" "$before_artifact_digest" >> "$GITHUB_OUTPUT"
 
       - name: Set up Supabase CLI
         uses: supabase/setup-cli@3c2f5e2ae34c34e428e8e206e2c4d21fa2d20fbf
@@ -266,11 +344,16 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Publish sanitized execution locator
+      - name: Publish sanitized execution locator and AFTER marker shape
         if: always()
         env:
           RUN_STATUS: ${{ job.status }}
           RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          PAUSE_RUN: ${{ steps.auth.outputs.pause_run }}
+          BEFORE_COMMENT: ${{ steps.auth.outputs.before_comment }}
+          PROJECT_DIGEST: ${{ steps.auth.outputs.project_digest }}
+          JOB_ID: ${{ steps.auth.outputs.job_id }}
+          COMMAND_DIGEST: ${{ steps.auth.outputs.command_digest }}
         shell: bash
         run: |
           set -euo pipefail
@@ -282,9 +365,21 @@ jobs:
           Authorization comment: \`${AUTHORIZATION_COMMENT_ID}\`
           Source commit: \`${{ steps.auth.outputs.commit }}\`
           Devnet ledger: \`${{ steps.auth.outputs.ledger }}\`
-          Project identity digest: \`${{ steps.auth.outputs.project_digest }}\`
+          Project identity digest: \`${PROJECT_DIGEST}\`
+          Pause run: \`${PAUSE_RUN}\`
+          BEFORE capture comment: \`${BEFORE_COMMENT}\`
 
-          This workflow contains no DB migration or R5 recovery step. After a successful run, retain the project-filtered Supabase Usage → **Total Egress** after-reading from the same billing period for final G3 reconciliation.
+          This workflow contains no DB migration or R5 recovery step. After a successful run, capture a fresh project-filtered Supabase Usage → Total Egress AFTER reading and retain its source artifact SHA-256 plus Edge Function Invocations count.
+
+          Record the AFTER reading with this exact shape:
+
+          \`/r4f-g3-after run=${GITHUB_RUN_ID} pause_run=${PAUSE_RUN} before_comment=${BEFORE_COMMENT} project=${PROJECT_DIGEST} captured_at=<UTC> invocations=<EDGE_FUNCTION_INVOCATIONS> artifact=<SHA256>\`
+
+          After that marker exists, resume only with:
+
+          \`/r4f-g3-isolation-resume project=${PROJECT_DIGEST} job=${JOB_ID} command=${COMMAND_DIGEST} pause_run=${PAUSE_RUN} one_shot_run=${GITHUB_RUN_ID} before_comment=${BEFORE_COMMENT} after_comment=<AFTER_COMMENT_ID>\`
+
+          Resume verification will reject stale Usage evidence unless AFTER Edge Function Invocations increased by at least one.
           EOF
           gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/g3-run.md
 
@@ -292,18 +387,15 @@ jobs:
     if: >-
       github.event.issue.number == 1261 &&
       github.event.comment.user.login == 'badjoke-lab' &&
-      github.event.comment.body == '/r4f-g3-capture-logs run=31262884558 start=2026-08-08T14:42:06Z end=2026-08-08T15:02:00Z'
+      startsWith(github.event.comment.body, '/r4f-g3-capture-logs ')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
       GH_TOKEN: ${{ github.token }}
-      TARGET_G3_RUN: '31262884558'
-      TARGET_SOURCE_COMMIT: c1d0281b7ecdde77b69733b488104b4a7b8ba1ce
-      TARGET_PROJECT_IDENTITY_DIGEST: 81378864f4d6650a60a2c09a95629a18780d49fc23836e0f6a024b70f13f88a8
-      CAPTURE_START: '2026-08-08T14:42:06Z'
-      CAPTURE_END: '2026-08-08T15:02:00Z'
+      CAPTURE_BODY: ${{ github.event.comment.body }}
+      CAPTURE_AUTH_CREATED_AT: ${{ github.event.comment.created_at }}
     steps:
       - name: Check out current main read-only
         uses: actions/checkout@v4
@@ -312,32 +404,61 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Verify exact completed G3 run and project identity
+      - name: Parse and verify completed G3 run, resume, and provider interval
+        id: target
         shell: bash
         run: |
           set -euo pipefail
+          regex='^/r4f-g3-capture-logs run=([0-9]+) resume_run=([0-9]+) start=([^ ]+) end=([^ ]+)$'
+          [[ "$CAPTURE_BODY" =~ $regex ]] || { echo 'log capture command shape mismatch' >&2; exit 1; }
+          target_run="${BASH_REMATCH[1]}"
+          resume_run="${BASH_REMATCH[2]}"
+          capture_start="${BASH_REMATCH[3]}"
+          capture_end="${BASH_REMATCH[4]}"
+          test "$target_run" -gt 0
+          test "$resume_run" -gt 0
           test -n "$SUPABASE_ACCESS_TOKEN"
           [[ "$SUPABASE_PROJECT_ID" =~ ^[a-z]{20}$ ]]
           project_digest="$(printf '%s' "$SUPABASE_PROJECT_ID" | sha256sum | awk '{print $1}')"
-          test "$project_digest" = "$TARGET_PROJECT_IDENTITY_DIGEST"
-          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${TARGET_G3_RUN}" > /tmp/target-run.json
-          node --input-type=module <<'NODE'
+
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${target_run}" > /tmp/target-run.json
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${resume_run}" > /tmp/resume-run.json
+
+          TARGET_RUN="$target_run" RESUME_RUN="$resume_run" CAPTURE_START="$capture_start" CAPTURE_END="$capture_end" CAPTURE_AUTH_CREATED_AT="$CAPTURE_AUTH_CREATED_AT" node --input-type=module <<'NODE'
           import { readFileSync } from 'node:fs'
-          const run = JSON.parse(readFileSync('/tmp/target-run.json', 'utf8'))
-          if (String(run.id) !== process.env.TARGET_G3_RUN) throw new Error('target G3 run id mismatch')
-          if (run.name !== 'R4F G3 One-Shot Probe') throw new Error('target G3 workflow mismatch')
-          if (run.event !== 'issue_comment') throw new Error('target G3 event mismatch')
-          if (run.conclusion !== 'success') throw new Error('target G3 run is not successful')
-          if (run.head_sha !== process.env.TARGET_SOURCE_COMMIT) throw new Error('target G3 source commit mismatch')
+          const target = JSON.parse(readFileSync('/tmp/target-run.json', 'utf8'))
+          const resume = JSON.parse(readFileSync('/tmp/resume-run.json', 'utf8'))
+          if (String(target.id) !== process.env.TARGET_RUN) throw new Error('target G3 run id mismatch')
+          if (target.name !== 'R4F G3 One-Shot Probe') throw new Error('target G3 workflow mismatch')
+          if (target.event !== 'issue_comment') throw new Error('target G3 event mismatch')
+          if (target.conclusion !== 'success') throw new Error('target G3 run is not successful')
+          if (String(resume.id) !== process.env.RESUME_RUN) throw new Error('resume run id mismatch')
+          if (resume.name !== 'R4F G3 Isolated Window') throw new Error('resume workflow mismatch')
+          if (resume.event !== 'issue_comment') throw new Error('resume event mismatch')
+          if (resume.conclusion !== 'success') throw new Error('resume run is not successful')
           const start = Date.parse(process.env.CAPTURE_START)
           const end = Date.parse(process.env.CAPTURE_END)
-          const runStart = Date.parse(run.run_started_at ?? run.created_at)
-          const runEnd = Date.parse(run.updated_at)
-          if (![start, end, runStart, runEnd].every(Number.isFinite)) throw new Error('G3 traffic window timestamps are invalid')
+          const runStart = Date.parse(target.run_started_at ?? target.created_at)
+          const runEnd = Date.parse(target.updated_at)
+          const resumeStart = Date.parse(resume.run_started_at ?? resume.created_at)
+          const resumeEnd = Date.parse(resume.updated_at)
+          const authorizationAt = Date.parse(process.env.CAPTURE_AUTH_CREATED_AT)
+          if (![start, end, runStart, runEnd, resumeStart, resumeEnd, authorizationAt].every(Number.isFinite)) throw new Error('G3 log sequence timestamps are invalid')
           if (!(start <= runStart && runEnd <= end)) throw new Error('G3 run is outside captured provider interval')
+          if (!(runEnd < resumeStart && resumeEnd <= authorizationAt)) throw new Error('log capture must follow successful collector resume')
+          if (end - start > 60 * 60 * 1000) throw new Error('provider interval exceeds one hour')
           NODE
 
+          source_commit="$(jq -r '.head_sha' /tmp/target-run.json)"
+          [[ "$source_commit" =~ ^[a-f0-9]{40}$ ]]
+          printf 'target_run=%s\nresume_run=%s\ncapture_start=%s\ncapture_end=%s\nproject_digest=%s\nsource_commit=%s\n' \
+            "$target_run" "$resume_run" "$capture_start" "$capture_end" "$project_digest" "$source_commit" >> "$GITHUB_OUTPUT"
+
       - name: Capture bounded read-only Supabase traffic logs
+        env:
+          TARGET_G3_RUN: ${{ steps.target.outputs.target_run }}
+          CAPTURE_START: ${{ steps.target.outputs.capture_start }}
+          CAPTURE_END: ${{ steps.target.outputs.capture_end }}
         shell: bash
         run: |
           set -euo pipefail
@@ -367,6 +488,12 @@ jobs:
       - name: Publish read-only log capture locator
         env:
           RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          TARGET_G3_RUN: ${{ steps.target.outputs.target_run }}
+          RESUME_RUN: ${{ steps.target.outputs.resume_run }}
+          CAPTURE_START: ${{ steps.target.outputs.capture_start }}
+          CAPTURE_END: ${{ steps.target.outputs.capture_end }}
+          TARGET_SOURCE_COMMIT: ${{ steps.target.outputs.source_commit }}
+          TARGET_PROJECT_IDENTITY_DIGEST: ${{ steps.target.outputs.project_digest }}
         shell: bash
         run: |
           set -euo pipefail
@@ -375,10 +502,11 @@ jobs:
 
           Run: ${RUN_URL}
           Target one-shot run: \`${TARGET_G3_RUN}\`
+          Resume run: \`${RESUME_RUN}\`
           Captured provider interval: \`${CAPTURE_START}\` → \`${CAPTURE_END}\`
           Source commit under test: \`${TARGET_SOURCE_COMMIT}\`
           Project identity digest: \`${TARGET_PROJECT_IDENTITY_DIGEST}\`
 
-          This is a read-only Supabase Management API log query. It does not deploy a function, change secrets, access the database, authorize R5, enable Mainnet, or authorize stabilization/soak.
+          This is a read-only Supabase Management API log query performed only after collector restoration. It does not deploy a function, change secrets, access the database, authorize R5, enable Mainnet, or authorize stabilization/soak. Bind this artifact and its SHA-256 into the provider capture evidence before running the final G3 verifier.
           EOF
           gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/g3-log-capture.md

@@ -12,21 +12,24 @@ const script = read('scripts/capture-r4f-g3-concurrent-traffic-logs.mjs')
 const captureJob = workflow.slice(workflow.indexOf('\n  capture_logs:'))
 
 describe('R4F G3 read-only concurrent traffic log capture', () => {
-  it('is bound to the exact completed one-shot and provider capture interval', () => {
+  it('is generic but bound to one completed one-shot, successful resume, and provider capture interval', () => {
     for (const required of [
-      "github.event.issue.number == 1261",
+      'github.event.issue.number == 1261',
       "github.event.comment.user.login == 'badjoke-lab'",
-      "github.event.comment.body == '/r4f-g3-capture-logs run=31262884558 start=2026-08-08T14:42:06Z end=2026-08-08T15:02:00Z'",
-      "TARGET_G3_RUN: '31262884558'",
-      'TARGET_SOURCE_COMMIT: c1d0281b7ecdde77b69733b488104b4a7b8ba1ce',
-      'TARGET_PROJECT_IDENTITY_DIGEST: 81378864f4d6650a60a2c09a95629a18780d49fc23836e0f6a024b70f13f88a8',
-      "CAPTURE_START: '2026-08-08T14:42:06Z'",
-      "CAPTURE_END: '2026-08-08T15:02:00Z'",
-      "if (run.conclusion !== 'success')",
+      "startsWith(github.event.comment.body, '/r4f-g3-capture-logs ')",
+      "regex='^/r4f-g3-capture-logs run=([0-9]+) resume_run=([0-9]+) start=([^ ]+) end=([^ ]+)$'",
+      "if (target.conclusion !== 'success')",
+      "if (resume.conclusion !== 'success')",
       "if (!(start <= runStart && runEnd <= end))",
+      "if (!(runEnd < resumeStart && resumeEnd <= authorizationAt))",
+      "source_commit=\"$(jq -r '.head_sha' /tmp/target-run.json)\"",
     ]) {
       expect(captureJob).toContain(required)
     }
+    expect(captureJob).not.toContain('31262884558')
+    expect(captureJob).not.toContain('c1d0281b7ecdde77b69733b488104b4a7b8ba1ce')
+    expect(captureJob).not.toContain("CAPTURE_START: '2026-")
+    expect(captureJob).not.toContain("CAPTURE_END: '2026-")
   })
 
   it('has no Supabase mutation, database, R5, or Mainnet capability', () => {
@@ -51,10 +54,10 @@ describe('R4F G3 read-only concurrent traffic log capture', () => {
   it('uses the current ClickHouse logs endpoint and a one-hour hard maximum', () => {
     expect(script).toContain('/analytics/endpoints/logs`')
     expect(script).not.toContain('/analytics/endpoints/logs.all')
-    expect(script).toContain("FROM logs")
+    expect(script).toContain('FROM logs')
     expect(script).toContain("source IN ('function_edge_logs', 'edge_logs', 'storage_logs', 'auth_logs', 'realtime_logs')")
     expect(script).toContain("parseDateTimeBestEffort('${start}')")
-    expect(script).toContain("if (endMs - startMs > 60 * 60 * 1000)")
+    expect(script).toContain('if (endMs - startMs > 60 * 60 * 1000)')
   })
 
   it('sanitizes the project ref and retains only hashed request ids', () => {

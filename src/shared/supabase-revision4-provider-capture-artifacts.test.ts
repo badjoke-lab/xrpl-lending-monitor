@@ -22,13 +22,15 @@ describe('Supabase revision-4 provider capture artifacts', () => {
     const evidence = buildSupabaseRevision4ProviderCaptureEvidence(input)
     expect(evidence.captureState).toBe('synthetic_test')
     expect(evidence.authorizationVerified).toBe(false)
+    expect(evidence.authorizationPrecedesBefore).toBe(true)
+    expect(evidence.providerUsageFreshness.verified).toBe(true)
     expect(evidence.providerSurfaceVerified).toBe(true)
     expect(evidence.g3Qualified).toBe(false)
     expect(evidence.profileSelected).toBe(false)
     expect(evidence.r5Authorized).toBe(false)
   })
 
-  it('keeps the operator template unexecuted, surface-bound, and free of provider secrets', () => {
+  it('keeps the operator template unexecuted, surface-bound, freshness-bound, and free of provider secrets', () => {
     const path = resolve(
       process.cwd(),
       'ops/r4f/revision4-provider-capture-template.json',
@@ -40,12 +42,22 @@ describe('Supabase revision-4 provider capture artifacts', () => {
       templateState: 'unexecuted',
       qualificationIssue: 1261,
       authorizationScope: 'r4f_g3_dashboard_capture',
+      requiredAuthorization: {
+        separateIssueComment: true,
+        owner: 'badjoke-lab',
+        exactScopeRequired: true,
+        exactSourceCommitRequired: true,
+        createdBeforeBeforeCaptureRequired: true,
+        sanitizedAuthorizationArtifactDigestRequired: true,
+      },
       requiredProviderSurface: {
         source: 'organization_usage_page',
         metric: 'total_egress',
         projectFilterApplied: true,
         billingPeriodFilterApplied: true,
         cachedEgressIncluded: true,
+        freshnessProof:
+          'after_edge_function_invocations_at_least_before_plus_one',
       },
       executionAuthorized: false,
       providerRequestAuthorized: false,
@@ -56,11 +68,14 @@ describe('Supabase revision-4 provider capture artifacts', () => {
     for (const field of [
       'authorization.commentId',
       'authorization.sourceCommit',
+      'authorization.createdAt',
       'authorization.evidenceDigest',
       'projectIdentityDigest',
       'providerSurface.selectedProjectIdentityDigest',
       'before.sourceArtifactDigest',
       'after.sourceArtifactDigest',
+      'providerUsageFreshness.beforeEdgeFunctionInvocations',
+      'providerUsageFreshness.afterEdgeFunctionInvocations',
       'concurrentTraffic.evidenceArtifacts',
       'concurrentTraffic.evidenceArtifactDigests',
     ]) {

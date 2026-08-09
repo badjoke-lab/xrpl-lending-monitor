@@ -48,13 +48,13 @@ if (run.head_sha !== commit) throw new Error('isolation prepare source commit mi
 const runCreatedAt = Date.parse(String(run.created_at ?? ''))
 const authorizationAt = Date.parse(authorizationCreatedAt)
 if (!Number.isFinite(runCreatedAt) || !Number.isFinite(authorizationAt)) {
-  throw new Error('isolation prepare or authorization timestamp is invalid')
+  throw new Error('isolation prepare or dashboard authorization timestamp is invalid')
 }
-if (runCreatedAt > authorizationAt) throw new Error('pause authorization predates isolation prepare run')
+if (runCreatedAt > authorizationAt) throw new Error('dashboard authorization predates isolation prepare run')
 
-const exactCommand = `/r4f-g3-isolation-pause commit=${commit} project=${projectDigest} job=${jobId} command=${commandDigest} prepare_run=${prepareRun}`
+const exactCommand = `/r4f-g3-dashboard-authorize scope=r4f_g3_dashboard_capture commit=${commit} project=${projectDigest} job=${jobId} command=${commandDigest} prepare_run=${prepareRun}`
 const requiredFragments = [
-  '## R4F G3 isolated-window pause authorization proposal',
+  '## R4F G3 isolated-window dashboard capture authorization proposal',
   `Preparation run: \`${prepareRun}\``,
   `Source commit: \`${commit}\``,
   `Project identity digest: \`${projectDigest}\``,
@@ -62,6 +62,7 @@ const requiredFragments = [
   `Cron job id: \`${jobId}\``,
   'Schedule: `* * * * *`',
   `Scheduler command digest: \`${commandDigest}\``,
+  'Dashboard capture scope: `r4f_g3_dashboard_capture`',
   'A database-local watchdog is installed before the collector is paused.',
   'The pause is bounded to at most 15 minutes.',
   `\`${exactCommand}\``,
@@ -79,10 +80,10 @@ if (matches.length !== 1) {
 const proposalCreatedAt = Date.parse(String(matches[0].created_at ?? ''))
 if (!Number.isFinite(proposalCreatedAt)) throw new Error('isolation proposal timestamp is invalid')
 if (proposalCreatedAt < runCreatedAt || proposalCreatedAt > authorizationAt) {
-  throw new Error('isolation proposal is outside prepare-to-authorization ordering')
+  throw new Error('isolation proposal is outside prepare-to-dashboard-authorization ordering')
 }
 const occurrences = matches[0].body.split(exactCommand).length - 1
-if (occurrences !== 1) throw new Error('exact pause authorization command must appear once')
+if (occurrences !== 1) throw new Error('exact dashboard authorization command must appear once')
 
 process.stdout.write(`${JSON.stringify({
   prepareRun,
@@ -92,6 +93,7 @@ process.stdout.write(`${JSON.stringify({
   cronJobId: jobId,
   commandDigest,
   exactCommandVerified: true,
+  dashboardCaptureScopeVerified: true,
   watchdogBeforePauseVerified: true,
   fifteenMinuteMaximumVerified: true,
 })}\n`)
