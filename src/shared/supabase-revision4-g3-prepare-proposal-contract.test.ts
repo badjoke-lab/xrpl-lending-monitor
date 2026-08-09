@@ -10,9 +10,12 @@ const commit = '1'.repeat(40)
 const projectDigest = '2'.repeat(64)
 const prepareRun = 12345
 const ledger = 67890
+const dashboardAuth = 70001
+const pauseRun = 70002
+const beforeComment = 70003
 const createdAt = '2026-08-08T12:00:00Z'
 const authorizedAt = '2026-08-08T12:05:00Z'
-const exactCommand = `/r4f-g3-authorize commit=${commit} ledger=${ledger} project=${projectDigest} prepare_run=${prepareRun}`
+const exactCommand = `/r4f-g3-authorize commit=${commit} ledger=${ledger} project=${projectDigest} prepare_run=${prepareRun} dashboard_auth=${dashboardAuth} pause_run=${pauseRun} before_comment=${beforeComment}`
 
 function proposalBody(overrides: { ledger?: number; command?: string } = {}): string {
   const proposalLedger = overrides.ledger ?? ledger
@@ -24,8 +27,11 @@ function proposalBody(overrides: { ledger?: number; command?: string } = {}): st
     `Source commit: \`${commit}\``,
     `Project identity digest: \`${projectDigest}\``,
     `Exact Devnet ledger: \`${proposalLedger}\``,
+    `Dashboard authorization comment: \`${dashboardAuth}\``,
+    `Isolation pause run: \`${pauseRun}\``,
+    `BEFORE capture comment: \`${beforeComment}\``,
     '',
-    'Before authorizing, retain the project-filtered Supabase Usage → **Total Egress** reading for the same billing period.',
+    'The dashboard capture authorization and isolated BEFORE marker were verified before this prepare run.',
     '',
     `\`${command}\``,
   ].join('\n')
@@ -74,6 +80,12 @@ function runVerifier(body: string, runOverrides: Record<string, unknown> = {}) {
       String(ledger),
       '--project-digest',
       projectDigest,
+      '--dashboard-auth-comment-id',
+      String(dashboardAuth),
+      '--pause-run-id',
+      String(pauseRun),
+      '--before-comment-id',
+      String(beforeComment),
       '--authorization-created-at',
       authorizedAt,
     ],
@@ -82,7 +94,7 @@ function runVerifier(body: string, runOverrides: Record<string, unknown> = {}) {
 }
 
 describe('R4F G3 exact prepare proposal binding', () => {
-  it('accepts the exact bot proposal generated for the authorized tuple', () => {
+  it('accepts the exact bot proposal generated for the preauthorized isolated tuple', () => {
     const result = runVerifier(proposalBody())
     expect(result.status).toBe(0)
     expect(JSON.parse(result.stdout)).toMatchObject({
@@ -91,8 +103,11 @@ describe('R4F G3 exact prepare proposal binding', () => {
       sourceCommit: commit,
       ledger,
       projectIdentityDigest: projectDigest,
+      dashboardAuthorizationCommentId: dashboardAuth,
+      pauseRun,
+      beforeCommentId: beforeComment,
       exactCommandVerified: true,
-      beforeCaptureInstructionVerified: true,
+      preauthorizedBeforeSequenceVerified: true,
     })
   })
 
@@ -134,6 +149,9 @@ describe('R4F G3 exact prepare proposal binding', () => {
         '--commit', commit,
         '--ledger', String(ledger),
         '--project-digest', projectDigest,
+        '--dashboard-auth-comment-id', String(dashboardAuth),
+        '--pause-run-id', String(pauseRun),
+        '--before-comment-id', String(beforeComment),
         '--authorization-created-at', '2026-08-08T11:59:59Z',
       ],
       { encoding: 'utf8' },
