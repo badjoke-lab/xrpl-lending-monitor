@@ -12,14 +12,14 @@ const config = readFileSync(resolve(process.cwd(), 'supabase/config.toml'), 'utf
 describe('R5 active recovery batch executor contract', () => {
   it('claims and reserves before the first XRPL network read', () => {
     const claim = executor.indexOf(
-      "'xrpl_claim_r5_active_recovery_batch_from_prepared_head'",
+      "'xrpl_claim_r5_revision4_recovery_batch_from_prepared_head'",
     )
     const head = executor.indexOf('const head = await readValidatedHead')
     expect(claim).toBeGreaterThan(-1)
     expect(head).toBeGreaterThan(claim)
 
     for (const required of [
-      "const RECOVERY_RUN_ID = 'r5-recovery-selected-revision3-entry'",
+      "const RECOVERY_RUN_ID = 'r5-recovery-selected-revision4-entry'",
       'reservationBeforeAnyNetworkRead !== true',
       'freshHeadMustCoverReservedEndBeforeFetch !== true',
       'validated head ${head.index} is below reserved end ${claim.endLedgerIndex}',
@@ -28,16 +28,16 @@ describe('R5 active recovery batch executor contract', () => {
     }
   })
 
-  it('binds one variable 1-24 ledger batch to the selected profile', () => {
+  it('binds one variable 1-12 ledger batch to the revision-4 profile and explicit selection', () => {
     for (const required of [
       'claim.ledgerCount < 1',
-      'claim.ledgerCount > MAX_BATCH_SIZE',
+      'claim.ledgerCount > SUPABASE_REVISION4_R5_RUNTIME_LIMITS.selectedMaximumLedgersPerClaim',
       'claim.endLedgerIndex !== claim.startLedgerIndex + claim.ledgerCount - 1',
       "claim.network !== 'devnet'",
       "claim.epochId !== 'supabase-r4c2c-v1'",
-      'claim.profileRevision !== SUPABASE_REVISION3_PROFILE.revision',
-      'claim.profileIdentityDigest !== SUPABASE_REVISION3_PROFILE_IDENTITY_DIGEST',
-      'claim.selectionDigest !== SELECTION_DIGEST',
+      'claim.profileRevision !== SUPABASE_REVISION4_PROFILE.revision',
+      'claim.profileIdentityDigest !== SUPABASE_REVISION4_PROFILE_IDENTITY_DIGEST',
+      'claim.selectionDigest !== expectedSelectionDigest',
       '{ length: claim.ledgerCount }',
       'FETCH_CONCURRENCY',
     ]) {
@@ -59,27 +59,28 @@ describe('R5 active recovery batch executor contract', () => {
     }
   })
 
-  it('evaluates revision-3 accounting before atomic completion', () => {
+  it('evaluates revision-4 directional accounting before atomic completion', () => {
     const accounting = executor.indexOf(
-      'evaluateSupabaseRevision3ResourceAccounting(input)',
+      'resolveSupabaseRevision4R5CompletionFixedPoint',
     )
-    const completion = executor.indexOf("'xrpl_complete_r5_active_recovery_batch'")
+    const completion = executor.indexOf("'xrpl_complete_r5_revision4_recovery_batch'")
     expect(accounting).toBeGreaterThan(-1)
     expect(completion).toBeGreaterThan(accounting)
 
     for (const required of [
-      'const COMPLETION_REQUEST_RESERVE_BYTES = 2 * 1024 * 1024',
-      'databaseRequestBytes:',
-      '+ COMPLETION_REQUEST_RESERVE_BYTES',
-      'priorConservativeEgress31dBytes: claim.priorConservativeEgress31dBytes',
-      'priorInvocations31d: claim.priorInvocations31d',
-      'accountingResult.projectedInvocations31d !== claim.projectedInvocations31d',
-      'completionBodyBytes > COMPLETION_REQUEST_RESERVE_BYTES',
-      'p_finalized_egress_upper_bound_bytes:',
-      'accountingResult.conservativeTickEgressUpperBoundBytes',
+      'COMPLETION_REQUEST_MAX_BYTES = 2 * 1024 * 1024',
+      'COMPLETION_RESPONSE_ACCOUNTING_RESERVE_BYTES = 4 * 1024',
+      'databaseRequestBytesBeforeCompletion: meter.databaseRequestBytes',
+      'priorConservativeEgress31dBytes',
+      'projectedInvocations31d >= SUPABASE_REVISION4_FIXED_GUARDS.projectInvocationHalt31d',
+      'resolved.completionRequestBytes > COMPLETION_REQUEST_MAX_BYTES',
+      'p_finalized_egress_upper_bound_bytes: finalizedEgressUpperBoundBytes',
+      'accounting.rollingBillableEgressUpperBoundBytes',
+      'projectedEgress31dBytes',
     ]) {
       expect(executor).toContain(required)
     }
+    expect(executor).not.toContain('evaluateSupabaseRevision3ResourceAccounting')
   })
 
   it('leaves transient failures reclaimable and halts only terminal failures', () => {
@@ -89,7 +90,7 @@ describe('R5 active recovery batch executor contract', () => {
       'throw new RecoveryError(',
       'false,',
       'if (claim !== null && recoveryError.terminal)',
-      "'xrpl_fail_r5_active_recovery_batch'",
+      "'xrpl_fail_r5_revision4_recovery_batch'",
       'transient: !recoveryError.terminal',
       'activeMutationCommitted: false',
     ]) {
@@ -106,6 +107,8 @@ describe('R5 active recovery batch executor contract', () => {
       "mainnetDisabled: true",
       "stabilizationNotStarted: true",
       "soakNotStarted: true",
+      "env('XRPL_R5_REVISION4_SELECTION_DIGEST')",
+      "env('XRPL_R5_REVISION4_UNEXPLAINED_EGRESS_RESERVE_BYTES')",
     ]) {
       expect(executor).toContain(required)
     }
