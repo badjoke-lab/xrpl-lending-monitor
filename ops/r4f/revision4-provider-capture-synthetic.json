@@ -12,6 +12,7 @@
     "actor": "badjoke-lab",
     "scope": "r4f_g3_dashboard_capture",
     "sourceCommit": "cccccccccccccccccccccccccccccccccccccccc",
+    "createdAt": "2026-08-06T05:55:00.000Z",
     "evidenceArtifact": "synthetic-authorization.json",
     "evidenceDigest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
   },
@@ -43,6 +44,10 @@
     "capturedAt": "2026-08-06T06:05:00.000Z",
     "sourceArtifact": "synthetic-after.json",
     "sourceArtifactDigest": "2222222222222222222222222222222222222222222222222222222222222222"
+  },
+  "providerUsageFreshness": {
+    "beforeEdgeFunctionInvocations": 100,
+    "afterEdgeFunctionInvocations": 101
   },
   "application": {
     "rollingBillableEgressUpperBoundBytes": 12474,
