@@ -1,6 +1,7 @@
 import {
   buildSupabaseRevision4DirectionalAccountingEvidence,
   SupabaseRevision4DirectionalMeter,
+  utf8ByteLength,
   type SupabaseRevision4DirectionalAccountingEvidence,
 } from './supabase-revision4-directional-meter'
 import { SUPABASE_REVISION4_FIXED_GUARDS } from './supabase-revision4-directional-egress-contract'
@@ -47,9 +48,35 @@ export interface SupabaseRevision4R5RuntimeWireInput {
   unexplainedDirectionalDeltaReserveBytes: number
 }
 
+export interface SupabaseRevision4R5CompletionFixedPointInput
+  extends Omit<
+    SupabaseRevision4R5RuntimeWireInput,
+    'databaseRequestBytes' | 'databaseRequestCount'
+  > {
+  databaseRequestBytesBeforeCompletion: number
+  databaseRequestCountBeforeCompletion: number
+}
+
+export interface SupabaseRevision4R5CompletionFixedPointResult {
+  accountingEvidence: SupabaseRevision4DirectionalAccountingEvidence
+  completionRequestBody: string
+  completionRequestBytes: number
+  fixedPointIterations: number
+}
+
 function nonNegativeInteger(value: number, name: string): number {
   if (!Number.isSafeInteger(value) || value < 0) {
     throw new Error(`${name} must be a non-negative safe integer`)
+  }
+  return value
+}
+
+function safeAdd(left: number, right: number, name: string): number {
+  nonNegativeInteger(left, `${name}.left`)
+  nonNegativeInteger(right, `${name}.right`)
+  const value = left + right
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`${name} exceeds the safe integer range`)
   }
   return value
 }
@@ -202,4 +229,58 @@ export async function buildSupabaseRevision4R5RuntimeAccounting(
     stabilizationAuthorized: false,
     soakAuthorized: false,
   })
+}
+
+export async function resolveSupabaseRevision4R5CompletionFixedPoint(
+  input: SupabaseRevision4R5CompletionFixedPointInput,
+  buildCompletionBody: (accounting: {
+    accountingJson: string
+    accountingDigest: string
+    finalizedEgressUpperBoundBytes: number
+  }) => Record<string, unknown>,
+): Promise<SupabaseRevision4R5CompletionFixedPointResult> {
+  const databaseRequestBytesBeforeCompletion = nonNegativeInteger(
+    input.databaseRequestBytesBeforeCompletion,
+    'databaseRequestBytesBeforeCompletion',
+  )
+  const databaseRequestCountBeforeCompletion = nonNegativeInteger(
+    input.databaseRequestCountBeforeCompletion,
+    'databaseRequestCountBeforeCompletion',
+  )
+  let completionRequestBytes = 0
+
+  for (let fixedPointIterations = 1; fixedPointIterations <= 32; fixedPointIterations += 1) {
+    const accountingEvidence = await buildSupabaseRevision4R5RuntimeAccounting({
+      ...input,
+      databaseRequestBytes: safeAdd(
+        databaseRequestBytesBeforeCompletion,
+        completionRequestBytes,
+        'databaseRequestBytesIncludingCompletion',
+      ),
+      databaseRequestCount: safeAdd(
+        databaseRequestCountBeforeCompletion,
+        1,
+        'databaseRequestCountIncludingCompletion',
+      ),
+    })
+    const completionRequestBody = JSON.stringify(buildCompletionBody({
+      accountingJson: accountingEvidence.accountingJson,
+      accountingDigest: accountingEvidence.accountingDigest,
+      finalizedEgressUpperBoundBytes:
+        accountingEvidence.accounting.rollingBillableEgressUpperBoundBytes,
+    }))
+    const nextCompletionRequestBytes = utf8ByteLength(completionRequestBody)
+
+    if (nextCompletionRequestBytes === completionRequestBytes) {
+      return {
+        accountingEvidence,
+        completionRequestBody,
+        completionRequestBytes,
+        fixedPointIterations,
+      }
+    }
+    completionRequestBytes = nextCompletionRequestBytes
+  }
+
+  throw new Error('revision-4 R5 completion request byte fixed point did not converge')
 }
