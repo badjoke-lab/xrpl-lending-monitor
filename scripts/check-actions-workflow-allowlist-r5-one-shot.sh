@@ -9,5 +9,6 @@ python scripts/generate-actions-policy-r4f-g3-dual.py "$source_script" "$generat
 python scripts/normalize-actions-policy-r4f-g3-dual.py "$generated_script"
 chmod 700 "$generated_script"
 bash "$generated_script" "$@"
+bash -n scripts/run-r4f-g3-dual-provider-verdict.sh
 node scripts/check-r4f-g3-isolation-control-policy.mjs
 node scripts/check-r4f-g3-dual-runner-policy.mjs
