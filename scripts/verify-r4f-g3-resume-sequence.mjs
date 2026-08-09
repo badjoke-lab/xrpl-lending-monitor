@@ -145,7 +145,7 @@ process.stdout.write(`${JSON.stringify({
   projectIdentityDigest: projectDigest,
   schedulerJobId: jobId,
   schedulerCommandDigest: commandDigest,
-  dashboardAuthorizationCommentId,
+  dashboardAuthorizationCommentId: dashboardAuthCommentId,
   pauseRun: pauseRunId,
   beforeCommentId,
   oneShotRun: oneShotRunId,
