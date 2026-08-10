@@ -47,6 +47,12 @@ function exactInteger(value, name) {
   return value
 }
 
+function positiveInteger(value, name) {
+  const integer = exactInteger(value, name)
+  if (integer < 1) fail(`${name} must be positive`)
+  return integer
+}
+
 function exactBoolean(value, name) {
   if (value !== true && value !== false) fail(`${name} must be boolean`)
   return value
@@ -67,6 +73,12 @@ function exactObservedAt(value) {
   }
   if (!Number.isFinite(Date.parse(observedAt))) fail('accounting.observedAt must be valid')
   return observedAt
+}
+
+function exactSourceCommit(value) {
+  const sourceCommit = exactString(value, 'sourceCommit').toLowerCase()
+  if (!/^[a-f0-9]{40}$/u.test(sourceCommit)) fail('sourceCommit must be a 40-character commit SHA')
+  return sourceCommit
 }
 
 function sortCanonical(value) {
@@ -273,13 +285,17 @@ export function qualifyRevision4AccountingEvidence(input) {
   const remainingBillableEgressBytes = maximumBillableEgressBytes - rollingBillableEgressUpperBoundBytes
   const pass = rollingBillableEgressUpperBoundBytes <= maximumBillableEgressBytes
 
-  if (
-    input.finalizedEgressUpperBoundBytes !== undefined
-    && exactInteger(input.finalizedEgressUpperBoundBytes, 'finalizedEgressUpperBoundBytes')
-      !== rollingBillableEgressUpperBoundBytes
-  ) {
+  const finalizedEgressUpperBoundBytes = exactInteger(
+    input.finalizedEgressUpperBoundBytes,
+    'finalizedEgressUpperBoundBytes',
+  )
+  if (finalizedEgressUpperBoundBytes !== rollingBillableEgressUpperBoundBytes) {
     fail('finalizedEgressUpperBoundBytes does not match accounting rolling upper bound')
   }
+
+  const workflowRunId = positiveInteger(input.workflowRunId, 'workflowRunId')
+  const workflowRunAttempt = positiveInteger(input.workflowRunAttempt, 'workflowRunAttempt')
+  const sourceCommit = exactSourceCommit(input.sourceCommit)
 
   const resultWithoutDigest = {
     schemaVersion: 1,
@@ -295,6 +311,7 @@ export function qualifyRevision4AccountingEvidence(input) {
     profileIdentityDigest: PROFILE_IDENTITY_DIGEST,
     accountingDigest,
     calculatedAccountingDigest,
+    finalizedEgressUpperBoundBytes,
     rollingBillableEgressUpperBoundBytes,
     maximumBillableEgressBytesPerLedger: MAXIMUM_BILLABLE_EGRESS_BYTES_PER_LEDGER,
     maximumBillableEgressBytes,
@@ -307,9 +324,9 @@ export function qualifyRevision4AccountingEvidence(input) {
     observations,
     checks: accounting.checks,
     source: {
-      workflowRunId: input.workflowRunId ?? null,
-      workflowRunAttempt: input.workflowRunAttempt ?? null,
-      sourceCommit: input.sourceCommit ?? null,
+      workflowRunId,
+      workflowRunAttempt,
+      sourceCommit,
     },
   }
 
