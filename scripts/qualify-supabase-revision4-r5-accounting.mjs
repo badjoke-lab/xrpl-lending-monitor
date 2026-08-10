@@ -5,6 +5,7 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
+export const PROFILE_ID = 'supabase_free_postgres_pgcron_edge'
 export const PROFILE_REVISION = 4
 export const PROFILE_IDENTITY_DIGEST =
   '39e8b620a20bb08fbe8306fe753d4d445c5191bcafddbf67721e0c17d5b6bcd5'
@@ -12,6 +13,25 @@ export const REQUIRED_LEDGER_COUNT = 12
 export const MAXIMUM_BILLABLE_EGRESS_BYTES_PER_LEDGER = 4_581
 export const MAXIMUM_BILLABLE_EGRESS_BYTES =
   REQUIRED_LEDGER_COUNT * MAXIMUM_BILLABLE_EGRESS_BYTES_PER_LEDGER
+
+const SUPPORTED_BOUNDARIES = new Set([
+  'invoker_to_edge_request',
+  'edge_to_invoker_response',
+  'edge_to_xrpl_request',
+  'xrpl_to_edge_response',
+  'edge_to_database_request',
+  'database_to_edge_response',
+  'edge_to_edge_request',
+  'edge_to_edge_response',
+])
+const BILLABLE_BOUNDARIES = new Set([
+  'edge_to_invoker_response',
+  'edge_to_xrpl_request',
+  'edge_to_database_request',
+  'database_to_edge_response',
+  'edge_to_edge_request',
+  'edge_to_edge_response',
+])
 
 function fail(message) {
   throw new Error(`revision4 accounting qualification: ${message}`)
@@ -30,6 +50,23 @@ function exactInteger(value, name) {
 function exactBoolean(value, name) {
   if (value !== true && value !== false) fail(`${name} must be boolean`)
   return value
+}
+
+function safeAdd(left, right, name) {
+  exactInteger(left, `${name}.left`)
+  exactInteger(right, `${name}.right`)
+  const value = left + right
+  if (!Number.isSafeInteger(value) || value < 0) fail(`${name} exceeds the safe integer range`)
+  return value
+}
+
+function exactObservedAt(value) {
+  const observedAt = exactString(value, 'accounting.observedAt')
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/u.test(observedAt)) {
+    fail('accounting.observedAt must be canonical UTC')
+  }
+  if (!Number.isFinite(Date.parse(observedAt))) fail('accounting.observedAt must be valid')
+  return observedAt
 }
 
 function sortCanonical(value) {
@@ -90,15 +127,25 @@ function verifyChecks(checks) {
   }
 }
 
-function summarizeObservations(observations) {
+function validateObservations(observations) {
   if (!Array.isArray(observations) || observations.length === 0) fail('accounting.observations missing')
+  const operationIds = new Set()
   return observations.map((observation, index) => {
     if (!observation || typeof observation !== 'object' || Array.isArray(observation)) {
       fail(`accounting.observations[${index}] invalid`)
     }
+    if (observation.schemaVersion !== 1) fail(`observations[${index}].schemaVersion must be 1`)
+    if (observation.sequence !== index) fail('observation sequence must be contiguous from zero')
+    const operationId = exactString(observation.operationId, `observations[${index}].operationId`)
+    if (operationIds.has(operationId)) fail(`operationId is duplicated: ${operationId}`)
+    operationIds.add(operationId)
+    const boundaryId = exactString(observation.boundaryId, `observations[${index}].boundaryId`)
+    if (!SUPPORTED_BOUNDARIES.has(boundaryId)) fail(`observations[${index}].boundaryId is unsupported`)
     return {
-      operationId: exactString(observation.operationId, `observations[${index}].operationId`),
-      boundaryId: exactString(observation.boundaryId, `observations[${index}].boundaryId`),
+      schemaVersion: 1,
+      sequence: index,
+      operationId,
+      boundaryId,
       bodyBytes: exactInteger(observation.bodyBytes, `observations[${index}].bodyBytes`),
       framingReserveBytes: exactInteger(
         observation.framingReserveBytes,
@@ -106,6 +153,53 @@ function summarizeObservations(observations) {
       ),
     }
   })
+}
+
+function recomputeDirectionalSummary(observations) {
+  let rollingBillableEgressUpperBoundBytes = 0
+  let memoryTransportBytes = 0
+  const byBoundary = observations.map((observation) => {
+    const totalBytes = safeAdd(
+      observation.bodyBytes,
+      observation.framingReserveBytes,
+      `boundary.${observation.boundaryId}.totalBytes`,
+    )
+    const rollingBillableEgressBytes = BILLABLE_BOUNDARIES.has(observation.boundaryId)
+      ? totalBytes
+      : 0
+    rollingBillableEgressUpperBoundBytes = safeAdd(
+      rollingBillableEgressUpperBoundBytes,
+      rollingBillableEgressBytes,
+      'directionalSummary.rollingBillableEgressUpperBoundBytes',
+    )
+    memoryTransportBytes = safeAdd(
+      memoryTransportBytes,
+      totalBytes,
+      'directionalSummary.memoryTransportBytes',
+    )
+    return {
+      boundaryId: observation.boundaryId,
+      totalBytes,
+      rollingBillableEgressBytes,
+      memoryTransportBytes: totalBytes,
+    }
+  })
+  return { rollingBillableEgressUpperBoundBytes, memoryTransportBytes, byBoundary }
+}
+
+function verifyMemorySupplemental(memorySupplemental) {
+  if (!memorySupplemental || typeof memorySupplemental !== 'object' || Array.isArray(memorySupplemental)) {
+    fail('accounting.memorySupplemental missing')
+  }
+  return {
+    canonicalJsonBytes: exactInteger(memorySupplemental.canonicalJsonBytes, 'memorySupplemental.canonicalJsonBytes'),
+    payloadBytes: exactInteger(memorySupplemental.payloadBytes, 'memorySupplemental.payloadBytes'),
+    normalizedObjectOverheadBytes: exactInteger(
+      memorySupplemental.normalizedObjectOverheadBytes,
+      'memorySupplemental.normalizedObjectOverheadBytes',
+    ),
+    allocatorReserveBytes: exactInteger(memorySupplemental.allocatorReserveBytes, 'memorySupplemental.allocatorReserveBytes'),
+  }
 }
 
 export function qualifyRevision4AccountingEvidence(input) {
@@ -126,6 +220,7 @@ export function qualifyRevision4AccountingEvidence(input) {
   if (calculatedAccountingDigest !== accountingDigest) fail('accountingDigest does not match accountingJson bytes')
 
   if (accounting.schemaVersion !== 1) fail('accounting.schemaVersion must be 1')
+  if (accounting.profileId !== PROFILE_ID) fail('accounting.profileId mismatch')
   if (accounting.profileRevision !== PROFILE_REVISION) fail(`accounting.profileRevision must be ${PROFILE_REVISION}`)
   if (accounting.profileIdentityDigest !== PROFILE_IDENTITY_DIGEST) fail('accounting profileIdentityDigest mismatch')
   if (accounting.disposition !== 'runtime_precommit_completed') {
@@ -133,16 +228,49 @@ export function qualifyRevision4AccountingEvidence(input) {
   }
   verifyChecks(accounting.checks)
 
+  const observations = validateObservations(accounting.observations)
+  const recomputedDirectionalSummary = recomputeDirectionalSummary(observations)
+  if (canonicalJson(accounting.directionalSummary) !== canonicalJson(recomputedDirectionalSummary)) {
+    fail('accounting.directionalSummary does not match observations')
+  }
+
+  const unexplainedDirectionalDeltaReserveBytes = exactInteger(
+    accounting.unexplainedDirectionalDeltaReserveBytes,
+    'accounting.unexplainedDirectionalDeltaReserveBytes',
+  )
+  const recomputedRollingBillableEgressUpperBoundBytes = safeAdd(
+    recomputedDirectionalSummary.rollingBillableEgressUpperBoundBytes,
+    unexplainedDirectionalDeltaReserveBytes,
+    'accounting.rollingBillableEgressUpperBoundBytes',
+  )
   const rollingBillableEgressUpperBoundBytes = exactInteger(
     accounting.rollingBillableEgressUpperBoundBytes,
     'accounting.rollingBillableEgressUpperBoundBytes',
   )
-  const perLedgerBillableEgressUpperBoundBytes =
-    rollingBillableEgressUpperBoundBytes / ledgerCount
-  const maximumBillableEgressBytes =
-    ledgerCount * MAXIMUM_BILLABLE_EGRESS_BYTES_PER_LEDGER
-  const remainingBillableEgressBytes =
-    maximumBillableEgressBytes - rollingBillableEgressUpperBoundBytes
+  if (rollingBillableEgressUpperBoundBytes !== recomputedRollingBillableEgressUpperBoundBytes) {
+    fail('accounting rolling upper bound does not match observations plus unexplained reserve')
+  }
+
+  const memorySupplemental = verifyMemorySupplemental(accounting.memorySupplemental)
+  const recomputedMemoryTransportUpperBoundBytes = [
+    memorySupplemental.canonicalJsonBytes,
+    memorySupplemental.payloadBytes,
+    memorySupplemental.normalizedObjectOverheadBytes,
+    memorySupplemental.allocatorReserveBytes,
+  ].reduce(
+    (total, value) => safeAdd(total, value, 'accounting.memoryTransportUpperBoundBytes'),
+    recomputedDirectionalSummary.memoryTransportBytes,
+  )
+  if (
+    exactInteger(accounting.memoryTransportUpperBoundBytes, 'accounting.memoryTransportUpperBoundBytes')
+    !== recomputedMemoryTransportUpperBoundBytes
+  ) {
+    fail('accounting memory transport upper bound does not match observations plus supplements')
+  }
+
+  const perLedgerBillableEgressUpperBoundBytes = rollingBillableEgressUpperBoundBytes / ledgerCount
+  const maximumBillableEgressBytes = ledgerCount * MAXIMUM_BILLABLE_EGRESS_BYTES_PER_LEDGER
+  const remainingBillableEgressBytes = maximumBillableEgressBytes - rollingBillableEgressUpperBoundBytes
   const pass = rollingBillableEgressUpperBoundBytes <= maximumBillableEgressBytes
 
   if (
@@ -158,10 +286,11 @@ export function qualifyRevision4AccountingEvidence(input) {
     qualification: 'supabase-revision4-r5-12-ledger-billable-egress',
     observationId: exactString(accounting.observationId, 'accounting.observationId'),
     attemptId: exactString(accounting.attemptId, 'accounting.attemptId'),
-    observedAt: exactString(accounting.observedAt, 'accounting.observedAt'),
+    observedAt: exactObservedAt(accounting.observedAt),
     sessionId: exactString(input.sessionId, 'sessionId'),
     tickId: exactString(input.tickId, 'tickId'),
     ledgerCount,
+    profileId: PROFILE_ID,
     profileRevision: PROFILE_REVISION,
     profileIdentityDigest: PROFILE_IDENTITY_DIGEST,
     accountingDigest,
@@ -173,12 +302,9 @@ export function qualifyRevision4AccountingEvidence(input) {
     remainingBillableEgressBytes,
     usageFraction: rollingBillableEgressUpperBoundBytes / maximumBillableEgressBytes,
     pass,
-    directionalSummary: accounting.directionalSummary,
-    unexplainedDirectionalDeltaReserveBytes: exactInteger(
-      accounting.unexplainedDirectionalDeltaReserveBytes,
-      'accounting.unexplainedDirectionalDeltaReserveBytes',
-    ),
-    observations: summarizeObservations(accounting.observations),
+    directionalSummary: recomputedDirectionalSummary,
+    unexplainedDirectionalDeltaReserveBytes,
+    observations,
     checks: accounting.checks,
     source: {
       workflowRunId: input.workflowRunId ?? null,
