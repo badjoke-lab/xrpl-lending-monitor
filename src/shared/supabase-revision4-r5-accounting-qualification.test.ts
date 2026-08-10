@@ -5,31 +5,45 @@ import { describe, expect, it } from 'vitest'
 import {
   MAXIMUM_BILLABLE_EGRESS_BYTES,
   MAXIMUM_BILLABLE_EGRESS_BYTES_PER_LEDGER,
+  PROFILE_ID,
   PROFILE_IDENTITY_DIGEST,
   qualifyRevision4AccountingEvidence,
 } from '../../scripts/qualify-supabase-revision4-r5-accounting.mjs'
 
 function accountingFixture(rollingBillableEgressUpperBoundBytes: number) {
+  const observations = [
+    {
+      schemaVersion: 1,
+      sequence: 0,
+      operationId: 'r5.edge.xrpl.requests',
+      boundaryId: 'edge_to_xrpl_request',
+      bodyBytes: rollingBillableEgressUpperBoundBytes,
+      framingReserveBytes: 0,
+    },
+  ]
+  const directionalSummary = {
+    rollingBillableEgressUpperBoundBytes,
+    memoryTransportBytes: rollingBillableEgressUpperBoundBytes,
+    byBoundary: [
+      {
+        boundaryId: 'edge_to_xrpl_request',
+        totalBytes: rollingBillableEgressUpperBoundBytes,
+        rollingBillableEgressBytes: rollingBillableEgressUpperBoundBytes,
+        memoryTransportBytes: rollingBillableEgressUpperBoundBytes,
+      },
+    ],
+  }
   const accounting = {
     schemaVersion: 1,
-    profileId: 'supabase_free_postgres_pgcron_edge',
+    profileId: PROFILE_ID,
     profileRevision: 4,
     profileIdentityDigest: PROFILE_IDENTITY_DIGEST,
     observationId: 'r4f-rev4-test-observation',
     attemptId: 'r4f-rev4-test-attempt',
     observedAt: '2026-08-10T12:00:00.000Z',
     disposition: 'runtime_precommit_completed',
-    observations: [
-      {
-        operationId: 'r5.edge.xrpl.requests',
-        boundaryId: 'edge_to_xrpl_request',
-        bodyBytes: 1_000,
-        framingReserveBytes: 6_656,
-      },
-    ],
-    directionalSummary: {
-      rollingBillableEgressUpperBoundBytes,
-    },
+    observations,
+    directionalSummary,
     memorySupplemental: {
       canonicalJsonBytes: 1,
       payloadBytes: 1,
@@ -38,7 +52,7 @@ function accountingFixture(rollingBillableEgressUpperBoundBytes: number) {
     },
     unexplainedDirectionalDeltaReserveBytes: 0,
     rollingBillableEgressUpperBoundBytes,
-    memoryTransportUpperBoundBytes: 4,
+    memoryTransportUpperBoundBytes: rollingBillableEgressUpperBoundBytes + 4,
     checks: {
       exactProfileIdentityBound: true,
       everyObservationDirectionBoundByContract: true,
@@ -70,11 +84,23 @@ function accountingFixture(rollingBillableEgressUpperBoundBytes: number) {
   }
 }
 
+function rewriteAccounting(
+  fixture: ReturnType<typeof accountingFixture>,
+  mutate: (accounting: Record<string, any>) => void,
+) {
+  const accounting = JSON.parse(fixture.accountingJson)
+  mutate(accounting)
+  fixture.accountingJson = JSON.stringify(accounting)
+  fixture.accountingDigest = createHash('sha256').update(fixture.accountingJson, 'utf8').digest('hex')
+  return fixture
+}
+
 describe('revision-4 exact 12-ledger accounting qualifier', () => {
   it('passes exactly at 4,581 bytes per ledger and emits a deterministic digest', () => {
     const first = qualifyRevision4AccountingEvidence(accountingFixture(MAXIMUM_BILLABLE_EGRESS_BYTES))
     const second = qualifyRevision4AccountingEvidence(accountingFixture(MAXIMUM_BILLABLE_EGRESS_BYTES))
 
+    expect(PROFILE_ID).toBe('supabase_free_postgres_pgcron_edge')
     expect(MAXIMUM_BILLABLE_EGRESS_BYTES_PER_LEDGER).toBe(4_581)
     expect(MAXIMUM_BILLABLE_EGRESS_BYTES).toBe(54_972)
     expect(first.pass).toBe(true)
@@ -114,13 +140,14 @@ describe('revision-4 exact 12-ledger accounting qualifier', () => {
     digestMismatch.accountingJson = `${digestMismatch.accountingJson} `
     expect(() => qualifyRevision4AccountingEvidence(digestMismatch)).toThrow(/accountingDigest does not match/u)
 
-    const accountingProfileMismatch = accountingFixture(54_000)
-    const accounting = JSON.parse(accountingProfileMismatch.accountingJson)
-    accounting.profileIdentityDigest = '0'.repeat(64)
-    accountingProfileMismatch.accountingJson = JSON.stringify(accounting)
-    accountingProfileMismatch.accountingDigest = createHash('sha256')
-      .update(accountingProfileMismatch.accountingJson, 'utf8')
-      .digest('hex')
+    const profileIdMismatch = rewriteAccounting(accountingFixture(54_000), (accounting) => {
+      accounting.profileId = 'unexpected-profile'
+    })
+    expect(() => qualifyRevision4AccountingEvidence(profileIdMismatch)).toThrow(/accounting.profileId mismatch/u)
+
+    const accountingProfileMismatch = rewriteAccounting(accountingFixture(54_000), (accounting) => {
+      accounting.profileIdentityDigest = '0'.repeat(64)
+    })
     expect(() => qualifyRevision4AccountingEvidence(accountingProfileMismatch)).toThrow(
       /accounting profileIdentityDigest mismatch/u,
     )
@@ -129,5 +156,45 @@ describe('revision-4 exact 12-ledger accounting qualifier', () => {
       ...accountingFixture(54_000),
       finalizedEgressUpperBoundBytes: 53_999,
     })).toThrow(/finalizedEgressUpperBoundBytes does not match/u)
+  })
+
+  it('recomputes directional and memory totals from observations instead of trusting persisted summaries', () => {
+    const summaryMismatch = rewriteAccounting(accountingFixture(54_000), (accounting) => {
+      accounting.directionalSummary.rollingBillableEgressUpperBoundBytes = 53_999
+    })
+    expect(() => qualifyRevision4AccountingEvidence(summaryMismatch)).toThrow(
+      /directionalSummary does not match observations/u,
+    )
+
+    const rollingMismatch = rewriteAccounting(accountingFixture(54_000), (accounting) => {
+      accounting.rollingBillableEgressUpperBoundBytes = 53_999
+    })
+    expect(() => qualifyRevision4AccountingEvidence(rollingMismatch)).toThrow(
+      /rolling upper bound does not match observations plus unexplained reserve/u,
+    )
+
+    const memoryMismatch = rewriteAccounting(accountingFixture(54_000), (accounting) => {
+      accounting.memoryTransportUpperBoundBytes -= 1
+    })
+    expect(() => qualifyRevision4AccountingEvidence(memoryMismatch)).toThrow(
+      /memory transport upper bound does not match observations plus supplements/u,
+    )
+  })
+
+  it('rejects observation schema drift, unsupported boundaries, duplicate operations, and noncanonical timestamps', () => {
+    const unsupportedBoundary = rewriteAccounting(accountingFixture(54_000), (accounting) => {
+      accounting.observations[0].boundaryId = 'unknown_boundary'
+    })
+    expect(() => qualifyRevision4AccountingEvidence(unsupportedBoundary)).toThrow(/boundaryId is unsupported/u)
+
+    const sequenceDrift = rewriteAccounting(accountingFixture(54_000), (accounting) => {
+      accounting.observations[0].sequence = 1
+    })
+    expect(() => qualifyRevision4AccountingEvidence(sequenceDrift)).toThrow(/sequence must be contiguous/u)
+
+    const badTimestamp = rewriteAccounting(accountingFixture(54_000), (accounting) => {
+      accounting.observedAt = '2026-08-10 12:00:00'
+    })
+    expect(() => qualifyRevision4AccountingEvidence(badTimestamp)).toThrow(/observedAt must be canonical UTC/u)
   })
 })
