@@ -1,9 +1,12 @@
+import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
 import {
+  SUPABASE_REVISION4_G3_PROVIDER_SURFACE_DECISION_COMMENT_ID,
+  SUPABASE_REVISION4_G3_PROVIDER_SURFACE_DECISION_DIGEST,
   type SupabaseRevision4G9Input,
   verifySupabaseRevision4BoundedProofUnit,
 } from './supabase-revision4-bounded-proof-unit'
@@ -27,6 +30,19 @@ function proofShape(): SupabaseRevision4G9Input {
   return input
 }
 
+function providerSurfaceUnqualifiableProofShape(): SupabaseRevision4G9Input {
+  const input = proofShape()
+  input.prerequisites.g3Passed = false
+  input.prerequisites.g3DispositionEvidence = {
+    disposition: 'provider_surface_unqualifiable',
+    issueNumber: 1261,
+    decisionCommentId: SUPABASE_REVISION4_G3_PROVIDER_SURFACE_DECISION_COMMENT_ID,
+    decidedBy: 'badjoke-lab',
+    decisionDigest: SUPABASE_REVISION4_G3_PROVIDER_SURFACE_DECISION_DIGEST,
+  }
+  return input
+}
+
 describe('Supabase revision-4 G9 bounded proof unit', () => {
   it('keeps the retained fixture unqualified and unexecuted without owner authorization', () => {
     const result = verifySupabaseRevision4BoundedProofUnit(fixture())
@@ -38,16 +54,72 @@ describe('Supabase revision-4 G9 bounded proof unit', () => {
     expect(result.blockingReasons).toContain('proof_unit_execution_not_completed')
   })
 
+  it('binds the provider-surface disposition digest to the retained exact owner-comment body', () => {
+    const body = readFileSync(
+      resolve(process.cwd(), 'ops/r4f/g3-provider-surface-decision-5235290732.md'),
+    )
+    const digest = createHash('sha256').update(body).digest('hex')
+    expect(digest).toBe(SUPABASE_REVISION4_G3_PROVIDER_SURFACE_DECISION_DIGEST)
+  })
+
   it('accepts exactly one owner-authorized bounded unit after all eight gates pass', () => {
     const result = verifySupabaseRevision4BoundedProofUnit(proofShape())
     expect(result.proofReady).toBe(true)
     expect(result.blockingReasons).toEqual([])
     expect(result.machineSummary.allEightPrerequisitesPassed).toBe(true)
+    expect(result.machineSummary.allRequiredPrerequisitesSatisfied).toBe(true)
+    expect(result.machineSummary.g3ProviderSurfaceUnqualifiableAccepted).toBe(false)
     expect(result.machineSummary.authorizationValid).toBe(true)
     expect(result.machineSummary.proofUnitBounded).toBe(true)
     expect(result.machineSummary.executionMatchesAuthorization).toBe(true)
     expect(result.machineSummary.executionWithinBudgets).toBe(true)
     expect(result.machineSummary.oneShotConsumptionProved).toBe(true)
+  })
+
+  it('accepts the exact Issue #1261 provider-surface-unqualifiable disposition without reporting G3 passed', () => {
+    const result = verifySupabaseRevision4BoundedProofUnit(providerSurfaceUnqualifiableProofShape())
+    expect(result.proofReady).toBe(true)
+    expect(result.blockingReasons).toEqual([])
+    expect(result.machineSummary.allEightPrerequisitesPassed).toBe(false)
+    expect(result.machineSummary.allRequiredPrerequisitesSatisfied).toBe(true)
+    expect(result.machineSummary.g3ProviderSurfaceUnqualifiableAccepted).toBe(true)
+  })
+
+  it('rejects a provider-surface disposition with the wrong decision comment, owner, or digest', () => {
+    const input = providerSurfaceUnqualifiableProofShape()
+    input.prerequisites.g3DispositionEvidence = {
+      disposition: 'provider_surface_unqualifiable',
+      issueNumber: 1261,
+      decisionCommentId: SUPABASE_REVISION4_G3_PROVIDER_SURFACE_DECISION_COMMENT_ID + 1,
+      decidedBy: 'someone-else',
+      decisionDigest: '1'.repeat(64),
+    }
+
+    const result = verifySupabaseRevision4BoundedProofUnit(input)
+    expect(result.proofReady).toBe(false)
+    expect(result.blockingReasons).toContain('g3_provider_surface_disposition_invalid')
+    expect(result.blockingReasons).toContain('g3_not_passed')
+    expect(result.machineSummary.allRequiredPrerequisitesSatisfied).toBe(false)
+    expect(result.machineSummary.g3ProviderSurfaceUnqualifiableAccepted).toBe(false)
+  })
+
+  it('rejects a missing provider-surface disposition when G3 is not passed', () => {
+    const input = proofShape()
+    input.prerequisites.g3Passed = false
+
+    const result = verifySupabaseRevision4BoundedProofUnit(input)
+    expect(result.proofReady).toBe(false)
+    expect(result.blockingReasons).toContain('g3_not_passed')
+    expect(result.machineSummary.allRequiredPrerequisitesSatisfied).toBe(false)
+  })
+
+  it('rejects ambiguous evidence that claims G3 passed and provider-surface-unqualifiable together', () => {
+    const input = providerSurfaceUnqualifiableProofShape()
+    input.prerequisites.g3Passed = true
+
+    const result = verifySupabaseRevision4BoundedProofUnit(input)
+    expect(result.proofReady).toBe(false)
+    expect(result.blockingReasons).toContain('g3_pass_conflicts_with_provider_surface_disposition')
   })
 
   it('rejects authorization from another issue, owner, commit, or revision identity', () => {

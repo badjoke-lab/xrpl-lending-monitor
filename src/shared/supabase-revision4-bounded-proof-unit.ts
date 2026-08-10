@@ -8,10 +8,21 @@ export const SUPABASE_REVISION4_G9_EVIDENCE_SCHEMA_VERSION = 1 as const
 export const SUPABASE_REVISION4_G9_RESULT_SCHEMA_VERSION = 1 as const
 export const SUPABASE_REVISION4_G9_ISSUE_NUMBER = 1261 as const
 export const SUPABASE_REVISION4_G9_OWNER_LOGIN = 'badjoke-lab' as const
+export const SUPABASE_REVISION4_G3_PROVIDER_SURFACE_DECISION_COMMENT_ID = 5235290732 as const
+export const SUPABASE_REVISION4_G3_PROVIDER_SURFACE_DECISION_DIGEST =
+  '3555fdf430271fa6611b473380499aa153610e96253f7fbf22b10885a5040ab5' as const
 
 export type SupabaseRevision4G9EvidenceClass =
   | 'synthetic_test_only'
   | 'bounded_proof_unit_execution'
+
+export interface SupabaseRevision4G3ProviderSurfaceDecisionEvidence {
+  disposition: 'provider_surface_unqualifiable'
+  issueNumber: number
+  decisionCommentId: number
+  decidedBy: string
+  decisionDigest: string
+}
 
 export interface SupabaseRevision4G9Input {
   schemaVersion: typeof SUPABASE_REVISION4_G9_EVIDENCE_SCHEMA_VERSION
@@ -39,6 +50,7 @@ export interface SupabaseRevision4G9Input {
     g6Digest: string
     g7Digest: string
     g8Digest: string
+    g3DispositionEvidence?: SupabaseRevision4G3ProviderSurfaceDecisionEvidence
   }
   policy: {
     rollingEgressHaltBytes: number
@@ -105,6 +117,8 @@ export interface SupabaseRevision4G9Result {
   blockingReasons: string[]
   machineSummary: {
     allEightPrerequisitesPassed: boolean
+    allRequiredPrerequisitesSatisfied: boolean
+    g3ProviderSurfaceUnqualifiableAccepted: boolean
     authorizationValid: boolean
     authorizationBoundToExactRevision4Source: boolean
     authorizationWindowValid: boolean
@@ -138,6 +152,17 @@ function canonicalTimestamp(value: string): boolean {
   return ISO_TIMESTAMP_PATTERN.test(value) && Number.isFinite(Date.parse(value))
 }
 
+function validProviderSurfaceDecision(
+  evidence: SupabaseRevision4G3ProviderSurfaceDecisionEvidence | undefined,
+): boolean {
+  return evidence !== undefined
+    && evidence.disposition === 'provider_surface_unqualifiable'
+    && evidence.issueNumber === SUPABASE_REVISION4_G9_ISSUE_NUMBER
+    && evidence.decisionCommentId === SUPABASE_REVISION4_G3_PROVIDER_SURFACE_DECISION_COMMENT_ID
+    && evidence.decidedBy === SUPABASE_REVISION4_G9_OWNER_LOGIN
+    && evidence.decisionDigest === SUPABASE_REVISION4_G3_PROVIDER_SURFACE_DECISION_DIGEST
+}
+
 export function verifySupabaseRevision4BoundedProofUnit(
   input: SupabaseRevision4G9Input,
 ): SupabaseRevision4G9Result {
@@ -168,26 +193,66 @@ export function verifySupabaseRevision4BoundedProofUnit(
     addReason(blockingReasons, 'source_commit_invalid')
   }
 
+  const prerequisites = input.prerequisites
   const prerequisiteStates = [
-    input.prerequisites.g1Passed,
-    input.prerequisites.g2Passed,
-    input.prerequisites.g3Passed,
-    input.prerequisites.g4Passed,
-    input.prerequisites.g5Passed,
-    input.prerequisites.g6Passed,
-    input.prerequisites.g7Passed,
-    input.prerequisites.g8Passed,
+    prerequisites.g1Passed,
+    prerequisites.g2Passed,
+    prerequisites.g3Passed,
+    prerequisites.g4Passed,
+    prerequisites.g5Passed,
+    prerequisites.g6Passed,
+    prerequisites.g7Passed,
+    prerequisites.g8Passed,
   ]
-  prerequisiteStates.forEach((passed, index) => {
-    if (!passed) addReason(blockingReasons, `g${index + 1}_not_passed`)
+  const allEightPrerequisitesPassed = prerequisiteStates.every((passed) => passed === true)
+
+  const g3ProviderSurfaceUnqualifiableAccepted =
+    prerequisites.g3Passed === false
+    && validProviderSurfaceDecision(prerequisites.g3DispositionEvidence)
+
+  if (prerequisites.g3Passed && prerequisites.g3DispositionEvidence !== undefined) {
+    addReason(blockingReasons, 'g3_pass_conflicts_with_provider_surface_disposition')
+  }
+  if (
+    prerequisites.g3Passed === false
+    && prerequisites.g3DispositionEvidence !== undefined
+    && !g3ProviderSurfaceUnqualifiableAccepted
+  ) {
+    addReason(blockingReasons, 'g3_provider_surface_disposition_invalid')
+  }
+
+  const strictPrerequisites = [
+    { gate: 1, passed: prerequisites.g1Passed },
+    { gate: 2, passed: prerequisites.g2Passed },
+    { gate: 4, passed: prerequisites.g4Passed },
+    { gate: 5, passed: prerequisites.g5Passed },
+    { gate: 6, passed: prerequisites.g6Passed },
+    { gate: 7, passed: prerequisites.g7Passed },
+    { gate: 8, passed: prerequisites.g8Passed },
+  ]
+  strictPrerequisites.forEach(({ gate, passed }) => {
+    if (!passed) addReason(blockingReasons, `g${gate}_not_passed`)
   })
+
+  const g3PrerequisiteSatisfied = prerequisites.g3Passed || g3ProviderSurfaceUnqualifiableAccepted
+  if (!g3PrerequisiteSatisfied) addReason(blockingReasons, 'g3_not_passed')
+
   for (let gate = 1; gate <= 8; gate += 1) {
-    const digest = input.prerequisites[`g${gate}Digest` as keyof typeof input.prerequisites]
+    const digest = prerequisites[`g${gate}Digest` as keyof typeof prerequisites]
     if (typeof digest !== 'string' || !SHA256_PATTERN.test(digest)) {
       addReason(blockingReasons, `g${gate}_digest_invalid`)
     }
   }
-  const allEightPrerequisitesPassed = prerequisiteStates.every((passed) => passed === true)
+
+  const allRequiredPrerequisitesSatisfied =
+    prerequisites.g1Passed
+    && prerequisites.g2Passed
+    && g3PrerequisiteSatisfied
+    && prerequisites.g4Passed
+    && prerequisites.g5Passed
+    && prerequisites.g6Passed
+    && prerequisites.g7Passed
+    && prerequisites.g8Passed
 
   const expectedPolicy = {
     rollingEgressHaltBytes: SUPABASE_REVISION4_FIXED_GUARDS.projectEgressHalt31dBytes,
@@ -336,6 +401,8 @@ export function verifySupabaseRevision4BoundedProofUnit(
     blockingReasons,
     machineSummary: {
       allEightPrerequisitesPassed,
+      allRequiredPrerequisitesSatisfied,
+      g3ProviderSurfaceUnqualifiableAccepted,
       authorizationValid,
       authorizationBoundToExactRevision4Source,
       authorizationWindowValid,
