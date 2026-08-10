@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
@@ -51,6 +52,14 @@ describe('Supabase revision-4 G9 bounded proof unit', () => {
     expect(result.blockingReasons).toContain('g8_not_passed')
     expect(result.blockingReasons).toContain('owner_authorization_missing')
     expect(result.blockingReasons).toContain('proof_unit_execution_not_completed')
+  })
+
+  it('binds the provider-surface disposition digest to the retained exact owner-comment body', () => {
+    const body = readFileSync(
+      resolve(process.cwd(), 'ops/r4f/g3-provider-surface-decision-5235290732.md'),
+    )
+    const digest = createHash('sha256').update(body).digest('hex')
+    expect(digest).toBe(SUPABASE_REVISION4_G3_PROVIDER_SURFACE_DECISION_DIGEST)
   })
 
   it('accepts exactly one owner-authorized bounded unit after all eight gates pass', () => {
