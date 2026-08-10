@@ -158,6 +158,23 @@ describe('revision-4 exact 12-ledger accounting qualifier', () => {
     })).toThrow(/finalizedEgressUpperBoundBytes does not match/u)
   })
 
+  it('requires finalized totals and immutable workflow provenance', () => {
+    expect(() => qualifyRevision4AccountingEvidence({
+      ...accountingFixture(54_000),
+      finalizedEgressUpperBoundBytes: undefined,
+    })).toThrow(/finalizedEgressUpperBoundBytes must be a non-negative safe integer/u)
+
+    expect(() => qualifyRevision4AccountingEvidence({
+      ...accountingFixture(54_000),
+      workflowRunId: 0,
+    })).toThrow(/workflowRunId must be positive/u)
+
+    expect(() => qualifyRevision4AccountingEvidence({
+      ...accountingFixture(54_000),
+      sourceCommit: 'not-a-commit',
+    })).toThrow(/sourceCommit must be a 40-character commit SHA/u)
+  })
+
   it('recomputes directional and memory totals from observations instead of trusting persisted summaries', () => {
     const summaryMismatch = rewriteAccounting(accountingFixture(54_000), (accounting) => {
       accounting.directionalSummary.rollingBillableEgressUpperBoundBytes = 53_999
@@ -181,7 +198,7 @@ describe('revision-4 exact 12-ledger accounting qualifier', () => {
     )
   })
 
-  it('rejects observation schema drift, unsupported boundaries, duplicate operations, and noncanonical timestamps', () => {
+  it('rejects observation schema drift, unsupported boundaries, and noncanonical timestamps', () => {
     const unsupportedBoundary = rewriteAccounting(accountingFixture(54_000), (accounting) => {
       accounting.observations[0].boundaryId = 'unknown_boundary'
     })
