@@ -1,0 +1,178 @@
+name: R4F DB Size Read-Only Snapshot
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+    paths:
+      - '.github/workflows/r4f-db-size-readonly-snapshot.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: r4f-db-size-readonly-snapshot-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      startsWith(github.head_ref, 'agent/r4f-db-size-readonly')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+      SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - name: Verify read-only execution contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SUPABASE_ACCESS_TOKEN"
+          [[ "$SUPABASE_PROJECT_ID" =~ ^[a-z]{20}$ ]]
+          [[ "$SOURCE_HEAD_SHA" =~ ^[a-f0-9]{40}$ ]]
+
+      - name: Query relation, index, and tuple sizes read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          sql="$(cat <<'SQL'
+          with relation_stats as (
+            select
+              st.schemaname,
+              st.relname as relation_name,
+              pg_total_relation_size(c.oid)::bigint as total_bytes,
+              pg_relation_size(c.oid)::bigint as heap_bytes,
+              pg_indexes_size(c.oid)::bigint as index_bytes,
+              greatest(
+                pg_total_relation_size(c.oid)
+                  - pg_relation_size(c.oid)
+                  - pg_indexes_size(c.oid),
+                0
+              )::bigint as toast_and_other_bytes,
+              st.n_live_tup::bigint as n_live_tup,
+              st.n_dead_tup::bigint as n_dead_tup,
+              st.seq_scan::bigint as seq_scan,
+              st.idx_scan::bigint as idx_scan
+            from pg_stat_user_tables st
+            join pg_namespace n
+              on n.nspname = st.schemaname
+            join pg_class c
+              on c.relnamespace = n.oid
+             and c.relname = st.relname
+          ),
+          schema_stats as (
+            select
+              schemaname,
+              sum(total_bytes)::bigint as total_bytes,
+              sum(heap_bytes)::bigint as heap_bytes,
+              sum(index_bytes)::bigint as index_bytes,
+              sum(toast_and_other_bytes)::bigint as toast_and_other_bytes,
+              sum(n_live_tup)::bigint as n_live_tup,
+              sum(n_dead_tup)::bigint as n_dead_tup
+            from relation_stats
+            group by schemaname
+          ),
+          index_stats as (
+            select
+              sui.schemaname,
+              sui.relname as table_name,
+              sui.indexrelname as index_name,
+              pg_relation_size(sui.indexrelid)::bigint as index_bytes,
+              sui.idx_scan::bigint as idx_scan
+            from pg_stat_user_indexes sui
+          ),
+          top_indexes as (
+            select *
+            from index_stats
+            order by index_bytes desc, schemaname, index_name
+            limit 200
+          )
+          select jsonb_build_object(
+            'captured_at', clock_timestamp(),
+            'database_bytes', pg_database_size(current_database())::bigint,
+            'user_relation_total_bytes', coalesce((select sum(total_bytes) from relation_stats), 0)::bigint,
+            'user_heap_total_bytes', coalesce((select sum(heap_bytes) from relation_stats), 0)::bigint,
+            'user_index_total_bytes', coalesce((select sum(index_bytes) from relation_stats), 0)::bigint,
+            'user_toast_and_other_total_bytes', coalesce((select sum(toast_and_other_bytes) from relation_stats), 0)::bigint,
+            'relations', coalesce((
+              select jsonb_agg(to_jsonb(r) order by r.total_bytes desc, r.schemaname, r.relation_name)
+              from relation_stats r
+            ), '[]'::jsonb),
+            'schemas', coalesce((
+              select jsonb_agg(to_jsonb(s) order by s.total_bytes desc, s.schemaname)
+              from schema_stats s
+            ), '[]'::jsonb),
+            'indexes', coalesce((
+              select jsonb_agg(to_jsonb(i) order by i.index_bytes desc, i.schemaname, i.index_name)
+              from top_indexes i
+            ), '[]'::jsonb)
+          ) as snapshot;
+          SQL
+          )"
+
+          if printf '%s' "$sql" | grep -Eiq '\b(insert|update|delete|truncate|alter|drop|create|grant|revoke|call|do|vacuum|reindex|cluster|refresh)\b'; then
+            echo 'read-only SQL contract rejected a mutation keyword' >&2
+            exit 1
+          fi
+
+          jq -n --arg query "$sql" '{query:$query,parameters:[],read_only:true}' > /tmp/query.json
+          curl --fail-with-body --silent --show-error \
+            --connect-timeout 10 --max-time 60 \
+            -H "authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+            -H 'content-type: application/json' \
+            -H 'accept: application/json' \
+            --data-binary @/tmp/query.json \
+            "https://api.supabase.com/v1/projects/${SUPABASE_PROJECT_ID}/database/query" \
+            > /tmp/query-response.json
+
+          jq -e '
+            (if type == "array" then .
+             elif (.result | type?) == "array" then .result
+             elif (.data | type?) == "array" then .data
+             elif (.rows | type?) == "array" then .rows
+             elif (.result.rows | type?) == "array" then .result.rows
+             elif (.data.rows | type?) == "array" then .data.rows
+             else error("Management API query response does not contain rows") end)
+            | if length == 1 and .[0].snapshot != null
+              then .[0].snapshot
+              else error("expected exactly one snapshot row")
+              end
+          ' /tmp/query-response.json > /tmp/snapshot-core.json
+
+          jq -e '
+            (.database_bytes | type == "number") and (.database_bytes > 0) and
+            (.relations | type == "array") and
+            (.schemas | type == "array") and
+            (.indexes | type == "array")
+          ' /tmp/snapshot-core.json >/dev/null
+
+          jq \
+            --arg source_head_sha "$SOURCE_HEAD_SHA" \
+            --argjson workflow_run_id "$GITHUB_RUN_ID" \
+            '. + {
+              source_head_sha: $source_head_sha,
+              workflow_run_id: $workflow_run_id,
+              checks: {
+                management_api_read_only_flag: true,
+                fixed_select_only_sql: true,
+                database_mutation_performed: false,
+                provider_mutation_performed: false,
+                deployment_performed: false,
+                collector_pause_performed: false,
+                r5_mutation_performed: false,
+                mainnet_disabled: true
+              }
+            }' /tmp/snapshot-core.json > db-size-readonly-snapshot.json
+
+          cat db-size-readonly-snapshot.json
+
+      - name: Upload sanitized size snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: r4f-db-size-readonly-snapshot
+          path: db-size-readonly-snapshot.json
+          if-no-files-found: error
+          retention-days: 2
