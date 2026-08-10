@@ -55,31 +55,24 @@ create or replace function xrpl_r5_v1.revision4_billable_egress_budget_bytes(
   p_ledger_count integer
 )
 returns bigint
-language plpgsql
+language sql
 immutable
 strict
 set search_path = pg_temp
 as $$
-begin
-  if p_ledger_count < 1 or p_ledger_count > 12 then
-    raise exception 'r5_revision4_egress_budget_ledger_count_out_of_range';
-  end if;
-  return p_ledger_count::bigint * 4581;
-end;
+  select p_ledger_count::bigint * 4581
 $$;
 
 create or replace function xrpl_r5_v1.revision4_egress_exclusive_reservation_bytes(
   p_ledger_count integer
 )
 returns bigint
-language plpgsql
+language sql
 immutable
 strict
 set search_path = xrpl_r5_v1, pg_temp
 as $$
-begin
-  return xrpl_r5_v1.revision4_billable_egress_budget_bytes(p_ledger_count) + 1;
-end;
+  select xrpl_r5_v1.revision4_billable_egress_budget_bytes(p_ledger_count) + 1
 $$;
 
 revoke all on function xrpl_r5_v1.revision4_billable_egress_budget_bytes(integer)
@@ -177,8 +170,8 @@ begin
   if position(v_old_declaration in v_patched_definition) <> 0
     or position(v_new_declaration in v_patched_definition) = 0
     or position(
-      'v_reserved := xrpl_r5_v1.revision4_egress_exclusive_reservation_bytes(v_count);',
-      v_patched_definition
+      'v_reserved := xrpl_r5_v1.revision4_egress_exclusive_reservation_bytes(v_count);'
+      in v_patched_definition
     ) = 0
     or position(v_late_count_block in v_patched_definition) <> 0
     or position(v_late_count_replacement in v_patched_definition) = 0
@@ -196,8 +189,11 @@ alter table xrpl_r5_v1.recovery_batches
 alter table xrpl_r5_v1.recovery_batches
   add constraint xrpl_r5_revision4_future_egress_budget_check check (
     profile_revision <> 4
-    or reserved_egress_upper_bound_bytes =
-      xrpl_r5_v1.revision4_egress_exclusive_reservation_bytes(ledger_count)
+    or (
+      ledger_count between 1 and 12
+      and reserved_egress_upper_bound_bytes =
+        xrpl_r5_v1.revision4_egress_exclusive_reservation_bytes(ledger_count)
+    )
   ) not valid;
 
 insert into xrpl_r5_v1.revision4_egress_budget_policy (
@@ -245,7 +241,9 @@ declare
   );
   v_definition text;
   v_policy xrpl_r5_v1.revision4_egress_budget_policy%rowtype;
+  v_policy_found boolean := false;
   v_constraint_validated boolean;
+  v_constraint_found boolean := false;
 begin
   if xrpl_r5_v1.revision4_billable_egress_budget_bytes(1) <> 4581
     or xrpl_r5_v1.revision4_billable_egress_budget_bytes(12) <> 54972
@@ -255,15 +253,20 @@ begin
   end if;
 
   select pg_get_functiondef(v_signature) into v_definition;
+
   select * into v_policy
   from xrpl_r5_v1.revision4_egress_budget_policy
   where policy_id = 'r5-revision4-egress-4581-v1';
+  v_policy_found := found;
+
   select convalidated into v_constraint_validated
   from pg_constraint
   where conrelid = 'xrpl_r5_v1.recovery_batches'::regclass
     and conname = 'xrpl_r5_revision4_future_egress_budget_check';
+  v_constraint_found := found;
 
-  if not found
+  if not v_policy_found
+    or not v_constraint_found
     or v_policy.maximum_ledgers_per_claim <> 12
     or v_policy.maximum_billable_egress_bytes_per_ledger <> 4581
     or v_policy.maximum_claim_billable_egress_bytes <> 54972
@@ -275,12 +278,12 @@ begin
     or position('v_reserved constant bigint := 16777216;' in v_definition) <> 0
     or position('v_reserved bigint := 0;' in v_definition) = 0
     or position(
-      'v_reserved := xrpl_r5_v1.revision4_egress_exclusive_reservation_bytes(v_count);',
-      v_definition
+      'v_reserved := xrpl_r5_v1.revision4_egress_exclusive_reservation_bytes(v_count);'
+      in v_definition
     ) = 0
     or position(
-      'v_reserved := xrpl_r5_v1.revision4_egress_exclusive_reservation_bytes(v_count);' || E'\n\n  if v_prior_egress + v_reserved >= v_egress_halt',
-      v_definition
+      'v_reserved := xrpl_r5_v1.revision4_egress_exclusive_reservation_bytes(v_count);' || E'\n\n  if v_prior_egress + v_reserved >= v_egress_halt'
+      in v_definition
     ) = 0
     or v_constraint_validated is distinct from false then
     raise exception 'r5_revision4_egress_gate_post_state_invalid';
