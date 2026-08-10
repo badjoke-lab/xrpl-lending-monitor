@@ -86,7 +86,7 @@ function accountingFixture(rollingBillableEgressUpperBoundBytes: number) {
 
 function rewriteAccounting(
   fixture: ReturnType<typeof accountingFixture>,
-  mutate: (accounting: Record<string, any>) => void,
+  mutate: (accounting: ReturnType<typeof JSON.parse>) => void,
 ) {
   const accounting = JSON.parse(fixture.accountingJson)
   mutate(accounting)
