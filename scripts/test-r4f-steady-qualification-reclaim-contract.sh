@@ -35,30 +35,50 @@ grep -Fq "approved_by text not null check (approved_by = 'badjoke-lab')" "$guard
 grep -Fq "used_at is not null" "$guard"
 grep -Fq "set used_at = clock_timestamp()" "$guard"
 
-# The repair retains revision-3 accounting evidence and its parent identity rows.
-# Cross-schema references to retained sessions/ticks are allowed, but none of the
-# six tables actually truncated may participate in a cross-schema FK.
+# The repair retains the formal session/tick identity rows and exact production
+# cross-schema dependants. None of the six truncated tables may participate in
+# a cross-schema FK, and the complete retained FK set must be exactly the two
+# relations observed by production diagnostic run 31499605533.
 for relation in commit_chunks messages payload_chunks reference_rows sessions successors ticks works; do
   grep -Fq "'$relation'" "$fix" || grep -Fq "xrpl_steady_v1.${relation}" "$fix"
 done
 grep -Fq "r4f_steady_reclaim_unexpected_isolated_table_set" "$fix"
 grep -Fq "v_target_cross_schema_fk_count" "$fix"
 grep -Fq "r4f_steady_reclaim_target_cross_schema_fk_present" "$fix"
-grep -Fq "v_expected_accounting_fk_count" "$fix"
-grep -Fq "r4f_steady_reclaim_accounting_fk_unexpected" "$fix"
-grep -Fq "child_ns.nspname = 'xrpl_resource_guard_v2'" "$fix"
-grep -Fq "child.relname = 'tick_accounting'" "$fix"
-grep -Fq "parent_ns.nspname = 'xrpl_steady_v1'" "$fix"
-grep -Fq "parent.relname = 'ticks'" "$fix"
+grep -Fq "v_cross_schema_fks" "$fix"
+grep -Fq "r4f_steady_reclaim_retained_cross_schema_fk_drift" "$fix"
+grep -Fq "attempts_session_id_fkey" "$fix"
+grep -Fq "xrpl_resource_guard_v2.attempts" "$fix"
+grep -Fq "xrpl_steady_v1.sessions" "$fix"
+grep -Fq "tick_accounting_session_id_tick_id_fkey" "$fix"
 grep -Fq "xrpl_resource_guard_v2.tick_accounting" "$fix"
-grep -Fq "r4f_steady_reclaim_retained_accounting_evidence_unexpected" "$fix"
-grep -Fq "v_retained_accounting_count <> 6" "$fix"
-grep -Fq "v_retained_accounting_join_count <> 6" "$fix"
-grep -Fq "'committedLedgers', end_ledger_index - start_ledger_index + 1" "$fix"
-if grep -Eq "'committedLedgers',[[:space:]]*committed_ledgers" "$fix"; then
-  echo 'steady tick diagnostic references nonexistent ticks.committed_ledgers' >&2
-  exit 1
-fi
+grep -Fq "xrpl_steady_v1.ticks" "$fix"
+
+grep -Fq "v_formal_session_count" "$fix"
+grep -Fq "r4f_steady_reclaim_formal_session_identity_unexpected" "$fix"
+grep -Fq "status = 'completed'" "$fix"
+grep -Fq "target_ticks = 6" "$fix"
+grep -Fq "batch_size = 24" "$fix"
+grep -Fq "completed_ticks = 6" "$fix"
+grep -Fq "committed_ledgers = 144" "$fix"
+grep -Fq "v_formal_tick_count" "$fix"
+grep -Fq "r4f_steady_reclaim_formal_tick_identity_unexpected" "$fix"
+grep -Fq "tick_sequence between 1 and 6" "$fix"
+grep -Fq "end_ledger_index - start_ledger_index + 1 = 24" "$fix"
+grep -Fq "work_count = 24" "$fix"
+grep -Fq "completed_at is not null" "$fix"
+grep -Fq "error_message is null" "$fix"
+
+for forbidden_assumption in \
+  'v_retained_accounting_count' \
+  'v_retained_accounting_join_count' \
+  'r4f_steady_reclaim_retained_accounting_evidence_unexpected'; do
+  if grep -Fq "$forbidden_assumption" "$fix"; then
+    echo "obsolete formal-session accounting assumption remains: $forbidden_assumption" >&2
+    exit 1
+  fi
+done
+
 grep -Fq "pg_catalog.pg_get_functiondef" "$fix"
 grep -Fq "r4f_steady_reclaim_source_definition_drift" "$fix"
 grep -Fq "r4f_steady_reclaim_partial_patch_verification_failed" "$fix"
@@ -86,8 +106,8 @@ if 'xrpl_resource_guard_v2' in new_block:
 if 'cascade' in new_block.lower():
     raise SystemExit('partial reclaim new TRUNCATE requests cascade')
 
-# The FK safety query must explicitly name every destructive target and must not
-# use sessions/ticks as part of the zero-cross-schema-FK target set.
+# The zero-FK safety query must explicitly name every destructive target and
+# must not treat retained sessions/ticks as destructive targets.
 fk_start = text.index('into v_target_cross_schema_fk_count')
 fk_end = text.index('if v_target_cross_schema_fk_count <> 0', fk_start)
 fk_block = text[fk_start:fk_end]
@@ -97,6 +117,20 @@ for relation in ('payload_chunks', 'reference_rows', 'commit_chunks', 'messages'
 for retained in ("'sessions'", "'ticks'"):
     if retained in fk_block:
         raise SystemExit(f'target FK zero-boundary incorrectly includes retained identity {retained}')
+
+# The complete retained cross-schema FK set is exact, ordered, and limited to
+# parents that are retained by the partial reclaim.
+required = [
+    "'constraint', 'attempts_session_id_fkey'",
+    "'child', 'xrpl_resource_guard_v2.attempts'",
+    "'parent', 'xrpl_steady_v1.sessions'",
+    "'constraint', 'tick_accounting_session_id_tick_id_fkey'",
+    "'child', 'xrpl_resource_guard_v2.tick_accounting'",
+    "'parent', 'xrpl_steady_v1.ticks'",
+]
+for marker in required:
+    if marker not in text:
+        raise SystemExit(f'retained cross-schema FK boundary is missing {marker}')
 PY
 
 if grep -Eq '(^|[^a-z_])(delete[[:space:]]+from|drop[[:space:]]+schema|drop[[:space:]]+table)' "$fix"; then
