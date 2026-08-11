@@ -20,6 +20,9 @@ create table if not exists xrpl_qualification_archive_v1.steady_reclaims (
   source_commit text not null check (source_commit ~ '^[a-f0-9]{40}$'),
   source_artifact_id bigint not null check (source_artifact_id > 0),
   source_artifact_digest text not null check (source_artifact_digest ~ '^sha256:[a-f0-9]{64}$'),
+  source_steady_batch_bundle_sha256 text not null check (source_steady_batch_bundle_sha256 ~ '^[a-f0-9]{64}$'),
+  source_steady_qualification_bundle_sha256 text not null check (source_steady_qualification_bundle_sha256 ~ '^[a-f0-9]{64}$'),
+  source_steady_verified_at timestamptz not null,
   retained_session_id text not null,
   retained_tick_count integer not null check (retained_tick_count = 6),
   reclaimed_schema text not null check (reclaimed_schema = 'xrpl_steady_v1'),
@@ -45,6 +48,13 @@ declare
   v_session xrpl_steady_v1.sessions%rowtype;
   v_watermark public.xrpl_phase_watermarks%rowtype;
   v_bytes bigint;
+  v_source_workflow_run_id constant bigint := 30992583324;
+  v_source_commit constant text := '52ebc396f7c5217ae06e595aabe2053440f1076a';
+  v_source_artifact_id constant bigint := 8924984813;
+  v_source_artifact_digest constant text := 'sha256:76f4580d83c053dadfe8a707c7bf53b53d99d361fd12c12adefe76061a9dafa3';
+  v_source_steady_batch_bundle_sha256 constant text := 'd5be00fddec73f24bfec5d939bc3a65278ad5fb7765d1764ba10b289350e543a';
+  v_source_steady_qualification_bundle_sha256 constant text := '70b391931d8f9637e07b79fef75cfd4ce804dd859edfce294b5b67c4a04aac9a';
+  v_source_steady_verified_at constant timestamptz := '2026-08-05T04:37:08.161Z'::timestamptz;
 begin
   select * into v_session from xrpl_steady_v1.sessions where session_id = 'r4c2d-steady-msflb8fo-5ebc5adc';
   select * into v_watermark from public.xrpl_phase_watermarks where profile_id = 'supabase-devnet';
@@ -55,10 +65,17 @@ begin
     'schemaVersion', 1,
     'schema', 'xrpl_steady_v1',
     'retainedSessionId', 'r4c2d-steady-msflb8fo-5ebc5adc',
-    'sourceWorkflowRunId', 30975277983,
-    'sourceCommit', 'd7e6eb86eb0e660dffd3ad5e54d2fd995ba8a54c',
-    'sourceArtifactId', 8924984813,
-    'sourceArtifactDigest', 'sha256:76f4580d83c053dadfe8a707c7bf53b53d99d361fd12c12adefe76061a9dafa3',
+    'sourceWorkflowRunId', v_source_workflow_run_id,
+    'sourceCommit', v_source_commit,
+    'sourceArtifactId', v_source_artifact_id,
+    'sourceArtifactDigest', v_source_artifact_digest,
+    'sourceSteadyBatchBundleSha256', v_source_steady_batch_bundle_sha256,
+    'sourceSteadyQualificationBundleSha256', v_source_steady_qualification_bundle_sha256,
+    'sourceSteadyVerifiedAt', v_source_steady_verified_at,
+    'sourceProfileId', 'supabase-devnet',
+    'targetProfileId', 'supabase-devnet-steady-qualification',
+    'network', 'devnet',
+    'epochId', 'supabase-r4c2c-v1',
     'physicalBytes', v_bytes,
     'sessionFound', v_session is not null,
     'sessionStatus', case when v_session is null then null else v_session.status end,
@@ -96,6 +113,13 @@ declare
   v_final_evidence jsonb;
   v_digest text;
   v_archive_id constant text := 'r5-steady-reclaim-20260811-v1';
+  v_source_workflow_run_id constant bigint := 30992583324;
+  v_source_commit constant text := '52ebc396f7c5217ae06e595aabe2053440f1076a';
+  v_source_artifact_id constant bigint := 8924984813;
+  v_source_artifact_digest constant text := 'sha256:76f4580d83c053dadfe8a707c7bf53b53d99d361fd12c12adefe76061a9dafa3';
+  v_source_steady_batch_bundle_sha256 constant text := 'd5be00fddec73f24bfec5d939bc3a65278ad5fb7765d1764ba10b289350e543a';
+  v_source_steady_qualification_bundle_sha256 constant text := '70b391931d8f9637e07b79fef75cfd4ce804dd859edfce294b5b67c4a04aac9a';
+  v_source_steady_verified_at constant timestamptz := '2026-08-05T04:37:08.161Z'::timestamptz;
   v_rows_after bigint;
 begin
   perform pg_advisory_xact_lock(hashtextextended('xrpl-r4f-steady-qualification-reclaim', 0));
@@ -138,14 +162,17 @@ begin
     'issueNumber', 1261,
     'decisionCommentId', v_auth.decision_comment_id,
     'authorizationDigest', v_auth.authorization_digest,
-    'sourceWorkflowRunId', 30975277983,
-    'sourceCommit', 'd7e6eb86eb0e660dffd3ad5e54d2fd995ba8a54c',
-    'sourceArtifactId', 8924984813,
-    'sourceArtifactDigest', 'sha256:76f4580d83c053dadfe8a707c7bf53b53d99d361fd12c12adefe76061a9dafa3',
-    'sourceSteadyEvidenceSha256', 'fb78d4600a955a9f208cc8418786437eec367c709f7cd5b7476e43b0abeaae7c',
-    'profileId', 'supabase_free_postgres_pgcron_edge',
-    'profileRevision', 2,
-    'profileIdentityDigest', 'c42edf0a1708fd2b7ea9f2e72dab32b87c1d66b260752efe38fec321253d3998',
+    'sourceWorkflowRunId', v_source_workflow_run_id,
+    'sourceCommit', v_source_commit,
+    'sourceArtifactId', v_source_artifact_id,
+    'sourceArtifactDigest', v_source_artifact_digest,
+    'sourceSteadyBatchBundleSha256', v_source_steady_batch_bundle_sha256,
+    'sourceSteadyQualificationBundleSha256', v_source_steady_qualification_bundle_sha256,
+    'sourceSteadyVerifiedAt', v_source_steady_verified_at,
+    'sourceProfileId', 'supabase-devnet',
+    'targetProfileId', 'supabase-devnet-steady-qualification',
+    'network', 'devnet',
+    'epochId', 'supabase-r4c2c-v1',
     'retainedSessionId', v_session.session_id,
     'retainedTickCount', 6,
     'retainedCommittedLedgers', 144,
@@ -156,12 +183,13 @@ begin
   );
   insert into xrpl_qualification_archive_v1.steady_reclaims (
     archive_id, authorization_id, source_workflow_run_id, source_commit, source_artifact_id, source_artifact_digest,
+    source_steady_batch_bundle_sha256, source_steady_qualification_bundle_sha256, source_steady_verified_at,
     retained_session_id, retained_tick_count, reclaimed_schema, physical_bytes_before, physical_bytes_after,
     table_counts_before, active_watermark_before, active_watermark_after, evidence, evidence_digest, reclaimed_at
   ) values (
-    v_archive_id, p_authorization_id, 30975277983, 'd7e6eb86eb0e660dffd3ad5e54d2fd995ba8a54c', 8924984813,
-    'sha256:76f4580d83c053dadfe8a707c7bf53b53d99d361fd12c12adefe76061a9dafa3', v_session.session_id, 6,
-    'xrpl_steady_v1', v_before, 0, v_counts, v_active_before, '{}'::jsonb, v_evidence,
+    v_archive_id, p_authorization_id, v_source_workflow_run_id, v_source_commit, v_source_artifact_id, v_source_artifact_digest,
+    v_source_steady_batch_bundle_sha256, v_source_steady_qualification_bundle_sha256, v_source_steady_verified_at,
+    v_session.session_id, 6, 'xrpl_steady_v1', v_before, 0, v_counts, v_active_before, '{}'::jsonb, v_evidence,
     public.xrpl_transfer_json_digest(v_evidence), clock_timestamp()
   );
   truncate table xrpl_steady_v1.payload_chunks, xrpl_steady_v1.reference_rows, xrpl_steady_v1.commit_chunks,
