@@ -72,15 +72,32 @@ if grep -Eq '^  (push|schedule|pull_request_target):' "$workflow"; then
   exit 1
 fi
 
-# Only the exact guarded migration can be applied, or recognized as already
-# applied while the exact three repository-only revision-4 migrations remain
-# deferred. It is previewed before the destructive mutation.
+# The reclaim guard migration is already applied. This runner must not retain
+# any migration-application capability. It may only verify exact remote history
+# read-only, isolate the three deferred revision-4 files in the ephemeral
+# checkout, and prove a clean scoped dry run.
 grep -Fq "MIGRATION_VERSION: '20260811012000'" "$workflow"
-grep -Fq 'expected_deferred=(20260809151000 20260810123000 20260810133000)' "$workflow"
+grep -Fq "supabase_migrations.schema_migrations" "$workflow"
+grep -Fq "read_only:true" "$workflow"
+grep -Fq "Unexpected remote migration history for bounded reclaim" "$workflow"
+grep -Fq "expected_tail='20260809151000 20260810123000 20260810133000 20260811012000'" "$workflow"
 grep -Fq 'supabase db push --linked --dry-run' "$workflow"
-grep -Fq 'supabase db push --linked --yes' "$workflow"
-grep -Fq 'Unexpected pending migration set' "$workflow"
-grep -Fq 'Guarded reclaim migration is already applied; exact deferred revision-4 migrations remain unapplied.' "$workflow"
+grep -Fq 'Scoped migration dry run is not clean after exact deferred isolation.' "$workflow"
+if grep -Fq 'supabase db push --linked --yes' "$workflow"; then
+  echo 'reclaim runner must not apply migrations after guard migration is recorded' >&2
+  exit 1
+fi
+if grep -Fq 'supabase migration repair' "$workflow"; then
+  echo 'reclaim runner must never rewrite migration history' >&2
+  exit 1
+fi
+for version in 20260809151000 20260810123000 20260810133000 20260811012000; do
+  grep -Fq "$version" "$workflow"
+done
+grep -Fq '623703ab8b8440ca774995592f490d0944ab97f7' "$workflow"
+grep -Fq '96d8d478174866355ee798500e3eff83634a442d' "$workflow"
+grep -Fq '2a986ba2872aead52119563fc43d8d49c1211949' "$workflow"
+
 grep -Fq 'xrpl_preview_steady_qualification_reclaim' "$workflow"
 grep -Fq 'xrpl_execute_steady_qualification_reclaim' "$workflow"
 grep -Fq 'api-keys?reveal=true' "$workflow"
@@ -110,8 +127,6 @@ python - "$workflow" <<'PY'
 from pathlib import Path
 import sys
 text = Path(sys.argv[1]).read_text()
-# Both preview and execute construct headers with apikey always and Bearer only
-# inside the legacy-key branch. There must not be an unconditional Bearer line.
 legacy_guard = 'if [ "$SUPABASE_RECLAIM_KEY_KIND" = legacy ]; then'
 bearer = 'Authorization: Bearer ${SUPABASE_RECLAIM_SERVICE_ROLE_KEY}'
 if text.count(legacy_guard) != 2 or text.count(bearer) != 2:
@@ -137,14 +152,15 @@ for forbidden in \
   fi
 done
 
-# Static execution order: dry-run -> possible migration -> preview -> auth row -> exactly one RPC -> post-measure.
+# Static execution order: remote history -> scoped dry-run -> preview -> auth row
+# -> exactly one destructive RPC -> post-measure.
 python - "$workflow" <<'PY'
 from pathlib import Path
 import sys
 text = Path(sys.argv[1]).read_text()
 needles = [
+    'supabase_migrations.schema_migrations',
     'supabase db push --linked --dry-run',
-    'supabase db push --linked --yes',
     'rest/v1/rpc/xrpl_preview_steady_qualification_reclaim',
     'authorization-insert.json',
     'rest/v1/rpc/xrpl_execute_steady_qualification_reclaim',
@@ -155,6 +171,8 @@ if pos != sorted(pos) or len(set(pos)) != len(pos):
     raise SystemExit(f'bounded reclaim execution order changed: {list(zip(needles, pos))}')
 if text.count('rest/v1/rpc/xrpl_execute_steady_qualification_reclaim') != 1:
     raise SystemExit('destructive reclaim RPC must have exactly one invocation locator')
+if text.count('supabase db push --linked --dry-run') != 1:
+    raise SystemExit('scoped migration dry-run must have exactly one invocation')
 PY
 
 echo 'steady qualification reclaim contract: PASS'
