@@ -14,8 +14,9 @@ concurrency:
 
 env:
   QUALIFICATION_ISSUE: '1261'
-  MIGRATION_VERSION: '20260811012000'
-  MIGRATION_PATH: supabase/migrations/20260811012000_xrpl_r5_steady_qualification_reclaim_guard.sql
+  RECLAIM_GUARD_VERSION: '20260811012000'
+  MIGRATION_VERSION: '20260811061000'
+  MIGRATION_PATH: supabase/migrations/20260811061000_xrpl_r5_steady_reclaim_tick_accounting_fix.sql
   FORMAL_STEADY_RUN: '30992583324'
   FORMAL_STEADY_COMMIT: 52ebc396f7c5217ae06e595aabe2053440f1076a
   FORMAL_STEADY_ARTIFACT: '8924984813'
@@ -63,8 +64,8 @@ jobs:
 
           Preparation run: \`${GITHUB_RUN_ID}\`
           Source commit: \`${head_sha}\`
-          Migration: \`${MIGRATION_VERSION}\`
-          Migration SHA-256: \`${migration_sha}\`
+          Repair migration: \`${MIGRATION_VERSION}\`
+          Repair migration SHA-256: \`${migration_sha}\`
           Project identity digest: \`${project_digest}\`
           Authorization expires: \`${expires}\`
 
@@ -74,7 +75,7 @@ jobs:
 
           \`${command}\`
 
-          This authorization is limited to verifying that the guarded reclaim migration is already recorded as applied while the three exact repository-only revision-4 migrations remain unapplied and unmarked; read-only preview/measurement; insertion of one expiring one-time authorization row; and one elevated service invocation of \`xrpl_execute_steady_qualification_reclaim\`. The workflow cannot apply migrations. Reclaim scope is only \`xrpl_steady_v1\`. It does not authorize R5 live execution, revision-4 selection or deployment, Mainnet, public-reader mutation, G3 rerun, stabilization, or soak.
+          This authorization is limited to verifying that the original reclaim guard \`${RECLAIM_GUARD_VERSION}\` is applied, keeping the three exact repository-only revision-4 migrations unapplied/unmarked, applying at most the single exact repair migration \`${MIGRATION_VERSION}\` if it is not yet applied, read-only preview/measurement, insertion of one expiring one-time authorization row, and one elevated service invocation of \`xrpl_execute_steady_qualification_reclaim\`. The repair migration fail-closes unless \`xrpl_steady_v1\` has exactly nine expected base tables, no cross-schema foreign keys, and exactly the internal \`tick_accounting -> ticks\` dependency. It does not use TRUNCATE CASCADE. Reclaim scope is only \`xrpl_steady_v1\`. It does not authorize R5 live execution, revision-4 selection/deployment, Mainnet, public-reader mutation, G3 rerun, stabilization, or soak.
           EOF
           gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/reclaim-proposal.md
 
@@ -159,13 +160,14 @@ jobs:
           set -euo pipefail
           supabase link --project-ref "$SUPABASE_PROJECT_ID" --password "$SUPABASE_DB_PASSWORD"
 
-      - name: Verify exact remote migration history and clean scoped dry run
+      - name: Verify remote migration history and scope the exact repair migration
+        id: migration
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p r4f-steady-reclaim-evidence
 
-          expected_tail='20260809151000 20260810123000 20260810133000 20260811012000'
+          expected_tail='20260809151000 20260810123000 20260810133000 20260811012000 20260811061000'
           mapfile -t local_tail < <(
             find supabase/migrations -maxdepth 1 -type f -name '20*.sql' -printf '%f\n' \
               | sed -nE 's/^([0-9]{14})_.*/\1/p' \
@@ -174,7 +176,7 @@ jobs:
           )
           test "${local_tail[*]:-}" = "$expected_tail"
 
-          history_query="select version::text as version from supabase_migrations.schema_migrations where version::text in ('20260809151000','20260810123000','20260810133000','20260811012000') order by version::text;"
+          history_query="select version::text as version from supabase_migrations.schema_migrations where version::text in ('20260809151000','20260810123000','20260810133000','20260811012000','20260811061000') order by version::text;"
           jq -n --arg query "$history_query" '{query:$query,parameters:[],read_only:true}' > /tmp/migration-history-query.json
           curl --fail-with-body --silent --show-error \
             -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
@@ -184,8 +186,13 @@ jobs:
             > r4f-steady-reclaim-evidence/migration-history.json
 
           mapfile -t remote_versions < <(jq -r '.. | objects | .version? // empty | tostring' r4f-steady-reclaim-evidence/migration-history.json | grep -E '^20[0-9]{12}$' | LC_ALL=C sort -u)
-          if [ "${remote_versions[*]:-}" != '20260811012000' ]; then
-            printf 'Unexpected remote migration history for bounded reclaim: %s\n' "${remote_versions[*]:-none}" >&2
+          remote_joined="${remote_versions[*]:-}"
+          if [ "$remote_joined" = '20260811012000' ]; then
+            echo 'apply=true' >> "$GITHUB_OUTPUT"
+          elif [ "$remote_joined" = '20260811012000 20260811061000' ]; then
+            echo 'apply=false' >> "$GITHUB_OUTPUT"
+          else
+            printf 'Unexpected remote migration history for bounded reclaim repair: %s\n' "${remote_joined:-none}" >&2
             exit 1
           fi
 
@@ -203,11 +210,43 @@ jobs:
           done
 
           supabase db push --linked --dry-run > r4f-steady-reclaim-evidence/migration-scoped-dry-run.txt 2>&1
-          if grep -qE '20[0-9]{12}' r4f-steady-reclaim-evidence/migration-scoped-dry-run.txt; then
-            echo 'Scoped migration dry run is not clean after exact deferred isolation.' >&2
-            cat r4f-steady-reclaim-evidence/migration-scoped-dry-run.txt >&2
+          mapfile -t scoped_versions < <(grep -oE '20[0-9]{12}' r4f-steady-reclaim-evidence/migration-scoped-dry-run.txt | LC_ALL=C sort -u || true)
+          if [ "${{ steps.migration.outputs.apply }}" = 'unused' ]; then
+            :
+          fi
+          if [ "$remote_joined" = '20260811012000' ]; then
+            test "${scoped_versions[*]:-}" = "$MIGRATION_VERSION"
+          else
+            test "${#scoped_versions[@]}" -eq 0
+          fi
+
+      - name: Apply exactly the isolated reclaim repair migration
+        if: steps.migration.outputs.apply == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          supabase db push --linked --yes 2>&1 | tee r4f-steady-reclaim-evidence/migration-apply.txt
+          supabase db push --linked --dry-run > r4f-steady-reclaim-evidence/migration-post-dry-run.txt 2>&1
+          if grep -qE '20[0-9]{12}' r4f-steady-reclaim-evidence/migration-post-dry-run.txt; then
+            echo 'repair migration remains pending after exact scoped db push' >&2
+            cat r4f-steady-reclaim-evidence/migration-post-dry-run.txt >&2
             exit 1
           fi
+
+      - name: Verify repair migration is recorded after scoped application
+        shell: bash
+        run: |
+          set -euo pipefail
+          history_query="select version::text as version from supabase_migrations.schema_migrations where version::text in ('20260809151000','20260810123000','20260810133000','20260811012000','20260811061000') order by version::text;"
+          jq -n --arg query "$history_query" '{query:$query,parameters:[],read_only:true}' > /tmp/migration-history-after-query.json
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+            -H 'content-type: application/json' \
+            --data @/tmp/migration-history-after-query.json \
+            "https://api.supabase.com/v1/projects/${SUPABASE_PROJECT_ID}/database/query" \
+            > r4f-steady-reclaim-evidence/migration-history-after.json
+          mapfile -t remote_versions < <(jq -r '.. | objects | .version? // empty | tostring' r4f-steady-reclaim-evidence/migration-history-after.json | grep -E '^20[0-9]{12}$' | LC_ALL=C sort -u)
+          test "${remote_versions[*]:-}" = '20260811012000 20260811061000'
 
       - name: Resolve one elevated database API key without persisting it
         id: service_role
@@ -237,6 +276,7 @@ jobs:
           echo "::add-mask::${elevated_key}"
           printf 'SUPABASE_RECLAIM_SERVICE_ROLE_KEY=%s\nSUPABASE_RECLAIM_KEY_KIND=%s\n' "$elevated_key" "$elevated_kind" >> "$GITHUB_ENV"
           rm -f /tmp/project-api-keys.json
+
       - name: Capture read-only database size before reclaim
         shell: bash
         run: |
