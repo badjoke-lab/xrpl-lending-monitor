@@ -2,14 +2,14 @@
 --
 -- Production run 31466232756 failed closed because
 -- xrpl_resource_guard_v2.tick_accounting references xrpl_steady_v1.ticks.
--- The original eight-table TRUNCATE therefore could not commit. The retained
+-- The original eight-table deletion therefore could not commit. The retained
 -- revision-3 accounting evidence is explicitly outside the reclaim scope and
 -- the original reclaim evidence already declares revision3AccountingUntouched.
 --
 -- This repair keeps the formal session row, six completed tick rows, and the
 -- cross-schema accounting evidence intact. It reclaims only the six data-heavy
--- child tables inside xrpl_steady_v1. It never uses TRUNCATE CASCADE and never
--- mutates xrpl_resource_guard_v2.
+-- child tables inside xrpl_steady_v1. It does not request cascading truncation
+-- and never mutates xrpl_resource_guard_v2.
 
 do $repair$
 declare
