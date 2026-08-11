@@ -74,7 +74,7 @@ jobs:
 
           \`${command}\`
 
-          This authorization is limited to applying the single guarded reclaim migration if and only if it is the only pending migration, read-only preview/measurement, insertion of one expiring one-time authorization row, and one service-role invocation of \`xrpl_execute_steady_qualification_reclaim\`. Reclaim scope is only \`xrpl_steady_v1\`. It does not authorize R5 live execution, revision-4 selection, Mainnet, public-reader mutation, G3 rerun, stabilization, or soak.
+          This authorization is limited to applying the single guarded reclaim migration if and only if the pending migration set is either that migration alone or the three exact deferred repository-only revision-4 migrations plus that migration, read-only preview/measurement, insertion of one expiring one-time authorization row, and one service-role invocation of \`xrpl_execute_steady_qualification_reclaim\`. Reclaim scope is only \`xrpl_steady_v1\`. The deferred revision-4 migrations are never applied or marked applied by this workflow. It does not authorize R5 live execution, revision-4 selection, Mainnet, public-reader mutation, G3 rerun, stabilization, or soak.
           EOF
           gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/reclaim-proposal.md
 
@@ -159,7 +159,7 @@ jobs:
           set -euo pipefail
           supabase link --project-ref "$SUPABASE_PROJECT_ID" --password "$SUPABASE_DB_PASSWORD"
 
-      - name: Fail closed unless only the guarded reclaim migration is pending
+      - name: Fail closed and scope db push to the guarded reclaim migration
         id: migration
         shell: bash
         run: |
@@ -167,11 +167,42 @@ jobs:
           mkdir -p r4f-steady-reclaim-evidence
           supabase db push --linked --dry-run > r4f-steady-reclaim-evidence/migration-dry-run.txt 2>&1
           mapfile -t versions < <(grep -oE '20[0-9]{12}' r4f-steady-reclaim-evidence/migration-dry-run.txt | LC_ALL=C sort -u || true)
+
+          expected_target=(20260811012000)
+          expected_with_deferred=(20260809151000 20260810123000 20260810133000 20260811012000)
+          joined="${versions[*]:-}"
+          target_joined="${expected_target[*]}"
+          deferred_joined="${expected_with_deferred[*]}"
+
           if [ "${#versions[@]}" -eq 0 ]; then
             echo 'apply=false' >> "$GITHUB_OUTPUT"
+            echo 'deferred=false' >> "$GITHUB_OUTPUT"
             echo 'No pending migration reported; continuing only to exact RPC preview verification.'
-          elif [ "${#versions[@]}" -eq 1 ] && [ "${versions[0]}" = "$MIGRATION_VERSION" ]; then
+          elif [ "$joined" = "$target_joined" ]; then
             echo 'apply=true' >> "$GITHUB_OUTPUT"
+            echo 'deferred=false' >> "$GITHUB_OUTPUT"
+          elif [ "$joined" = "$deferred_joined" ]; then
+            deferred_dir='/tmp/r4f-deferred-revision4-migrations'
+            mkdir -p "$deferred_dir"
+            declare -A expected_blobs=(
+              [supabase/migrations/20260809151000_xrpl_r5_revision4_runtime_rpcs.sql]=623703ab8b8440ca774995592f490d0944ab97f7
+              [supabase/migrations/20260810123000_xrpl_r5_revision4_per_ledger_egress_gate.sql]=96d8d478174866355ee798500e3eff83634a442d
+              [supabase/migrations/20260810133000_xrpl_r5_revision4_accounting_qualification_evidence.sql]=2a986ba2872aead52119563fc43d8d49c1211949
+            )
+            for path in "${!expected_blobs[@]}"; do
+              test -f "$path"
+              test "$(git hash-object "$path")" = "${expected_blobs[$path]}"
+              mv "$path" "$deferred_dir/"
+            done
+
+            supabase db push --linked --dry-run > r4f-steady-reclaim-evidence/migration-scoped-dry-run.txt 2>&1
+            mapfile -t scoped_versions < <(grep -oE '20[0-9]{12}' r4f-steady-reclaim-evidence/migration-scoped-dry-run.txt | LC_ALL=C sort -u || true)
+            if [ "${scoped_versions[*]:-}" != "$target_joined" ]; then
+              printf 'Scoped pending migration set is not the guarded reclaim target: %s\n' "${scoped_versions[*]:-none}" >&2
+              exit 1
+            fi
+            echo 'apply=true' >> "$GITHUB_OUTPUT"
+            echo 'deferred=true' >> "$GITHUB_OUTPUT"
           else
             printf 'Unexpected pending migration set: %s\n' "${versions[*]:-none}" >&2
             exit 1
@@ -185,7 +216,7 @@ jobs:
           supabase db push --linked --yes 2>&1 | tee r4f-steady-reclaim-evidence/migration-apply.txt
           supabase db push --linked --dry-run > r4f-steady-reclaim-evidence/migration-post-dry-run.txt 2>&1
           if grep -qE '20[0-9]{12}' r4f-steady-reclaim-evidence/migration-post-dry-run.txt; then
-            echo 'migration remains pending after guarded db push' >&2
+            echo 'guarded reclaim migration remains pending after scoped db push' >&2
             cat r4f-steady-reclaim-evidence/migration-post-dry-run.txt >&2
             exit 1
           fi
