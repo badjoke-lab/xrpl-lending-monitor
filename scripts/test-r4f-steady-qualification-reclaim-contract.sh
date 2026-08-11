@@ -35,21 +35,30 @@ grep -Fq "approved_by text not null check (approved_by = 'badjoke-lab')" "$guard
 grep -Fq "used_at is not null" "$guard"
 grep -Fq "set used_at = clock_timestamp()" "$guard"
 
-# The follow-up repair must prove the isolated schema boundary at migration
-# time. It may patch only the existing function and must never use CASCADE.
-for relation in commit_chunks messages payload_chunks reference_rows sessions successors tick_accounting ticks works; do
+# The repair must retain the cross-schema revision-3 accounting evidence and its
+# parent identity rows while reclaiming only the six large child tables inside
+# xrpl_steady_v1. It may never use CASCADE or mutate xrpl_resource_guard_v2.
+for relation in commit_chunks messages payload_chunks reference_rows sessions successors ticks works; do
   grep -Fq "'$relation'" "$fix" || grep -Fq "xrpl_steady_v1.${relation}" "$fix"
 done
 grep -Fq "r4f_steady_reclaim_unexpected_isolated_table_set" "$fix"
-grep -Fq "r4f_steady_reclaim_cross_schema_fk_present" "$fix"
-grep -Fq "r4f_steady_reclaim_tick_accounting_fk_unexpected" "$fix"
+grep -Fq "r4f_steady_reclaim_cross_schema_fk_boundary_unexpected" "$fix"
+grep -Fq "child_ns.nspname = 'xrpl_resource_guard_v2'" "$fix"
 grep -Fq "child.relname = 'tick_accounting'" "$fix"
+grep -Fq "parent_ns.nspname = 'xrpl_steady_v1'" "$fix"
 grep -Fq "parent.relname = 'ticks'" "$fix"
-grep -Fq "xrpl_steady_v1.tick_accounting, xrpl_steady_v1.ticks" "$fix"
-grep -Fq "'tickAccounting'" "$fix"
+grep -Fq "xrpl_resource_guard_v2.tick_accounting" "$fix"
+grep -Fq "r4f_steady_reclaim_retained_accounting_evidence_unexpected" "$fix"
+grep -Fq "v_retained_accounting_count <> 6" "$fix"
+grep -Fq "v_retained_accounting_join_count <> 6" "$fix"
 grep -Fq "pg_catalog.pg_get_functiondef" "$fix"
 grep -Fq "r4f_steady_reclaim_source_definition_drift" "$fix"
-grep -Fq "r4f_steady_reclaim_tick_accounting_patch_verification_failed" "$fix"
+grep -Fq "r4f_steady_reclaim_partial_patch_verification_failed" "$fix"
+grep -Fq "xrpl_steady_v1.messages, xrpl_steady_v1.successors, xrpl_steady_v1.works;" "$fix"
+if grep -Fq "xrpl_steady_v1.works, xrpl_steady_v1.ticks" "$fix"; then
+  echo 'partial reclaim repair still truncates retained tick identity rows' >&2
+  exit 1
+fi
 if grep -Eqi 'truncate[^;]*cascade|truncate[[:space:]]+table[^;]*cascade' "$fix"; then
   echo 'TRUNCATE CASCADE is forbidden in steady reclaim repair' >&2
   exit 1
@@ -58,15 +67,21 @@ if grep -Eq '(^|[^a-z_])(delete[[:space:]]+from|drop[[:space:]]+schema|drop[[:sp
   echo 'unexpected destructive SQL in steady reclaim repair' >&2
   exit 1
 fi
+if grep -Eq '(truncate|delete[[:space:]]+from|update|insert[[:space:]]+into)[[:space:]]+xrpl_resource_guard_v2' "$fix"; then
+  echo 'revision-3 accounting schema mutation is forbidden in steady reclaim repair' >&2
+  exit 1
+fi
 
 # Canonical/public watermark and evidence digest guarantees stay in the original
-# function and therefore must remain present in the guard source being patched.
+# function. The original evidence also explicitly says revision3AccountingUntouched.
 grep -Fq "v_wm_before" "$guard"
 grep -Fq "v_wm_after" "$guard"
 grep -Fq "r4f_steady_reclaim_active_watermark_changed" "$guard"
 grep -Fq "v_final_evidence := v_evidence ||" "$guard"
 grep -Fq "v_digest := public.xrpl_transfer_json_digest(v_final_evidence)" "$guard"
 grep -Fq "r4f_steady_reclaim_archive_digest_mismatch" "$guard"
+grep -Fq "'revision3AccountingUntouched', true" "$guard"
+grep -Fq "'reclaimScope', 'xrpl_steady_v1_only'" "$guard"
 
 # Public execution is denied; service_role grant is retained after repair.
 grep -Fq "revoke all on function public.xrpl_preview_steady_qualification_reclaim() from public, anon, authenticated" "$guard"
