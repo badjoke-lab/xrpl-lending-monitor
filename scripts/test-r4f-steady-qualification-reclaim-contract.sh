@@ -54,11 +54,32 @@ grep -Fq "v_retained_accounting_join_count <> 6" "$fix"
 grep -Fq "pg_catalog.pg_get_functiondef" "$fix"
 grep -Fq "r4f_steady_reclaim_source_definition_drift" "$fix"
 grep -Fq "r4f_steady_reclaim_partial_patch_verification_failed" "$fix"
-grep -Fq "xrpl_steady_v1.messages, xrpl_steady_v1.successors, xrpl_steady_v1.works;" "$fix"
-if grep -Fq "xrpl_steady_v1.works, xrpl_steady_v1.ticks" "$fix"; then
-  echo 'partial reclaim repair still truncates retained tick identity rows' >&2
-  exit 1
-fi
+
+# The old eight-table source string is intentionally retained as the exact
+# patch target. Inspect only v_new_truncate when asserting that ticks/sessions
+# are retained by the repaired function.
+python - "$fix" <<'PY'
+from pathlib import Path
+import sys
+text = Path(sys.argv[1]).read_text()
+old_start = text.index('v_old_truncate constant text :=')
+new_start = text.index('v_new_truncate constant text :=', old_start)
+rows_start = text.index('v_old_rows_after constant text :=', new_start)
+old_block = text[old_start:new_start]
+new_block = text[new_start:rows_start]
+for relation in ('payload_chunks', 'reference_rows', 'commit_chunks', 'messages', 'successors', 'works'):
+    marker = f'xrpl_steady_v1.{relation}'
+    if marker not in new_block:
+        raise SystemExit(f'partial reclaim new TRUNCATE is missing {marker}')
+for retained in ('xrpl_steady_v1.ticks', 'xrpl_steady_v1.sessions'):
+    if retained in new_block:
+        raise SystemExit(f'partial reclaim new TRUNCATE includes retained identity table {retained}')
+    if retained not in old_block:
+        raise SystemExit(f'exact old TRUNCATE patch target lost {retained}')
+if 'xrpl_resource_guard_v2' in new_block:
+    raise SystemExit('partial reclaim new TRUNCATE escaped xrpl_steady_v1')
+PY
+
 if grep -Eqi 'truncate[^;]*cascade|truncate[[:space:]]+table[^;]*cascade' "$fix"; then
   echo 'TRUNCATE CASCADE is forbidden in steady reclaim repair' >&2
   exit 1
