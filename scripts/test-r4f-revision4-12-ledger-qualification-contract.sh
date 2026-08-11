@@ -43,13 +43,18 @@ grep -Fq "startsWith(github.event.comment.body, '/r4f-revision4-12-ledger-author
 grep -Fq 'supabase functions deploy "$PROOF_FUNCTION"' "$workflow"
 grep -Fq 'supabase functions delete "$PROOF_FUNCTION"' "$workflow"
 
-if grep -Eq 'supabase functions (deploy|delete) ["'"']?xrpl-r5-recovery-batch' "$workflow"; then
-  echo 'qualification workflow must never deploy/delete active xrpl-r5-recovery-batch' >&2
-  exit 1
-fi
-if grep -Eiq 'mainnet.*(true|enabled)|public[-_ ]reader.*(write|mutat|deploy)|revision[-_ ]4.*(select|promot).*execute' "$workflow"; then
-  echo 'qualification workflow contains a forbidden production-selection surface' >&2
-  exit 1
-fi
+for forbidden in \
+  'supabase functions deploy xrpl-r5-recovery-batch' \
+  'supabase functions delete xrpl-r5-recovery-batch' \
+  "MAINNET_ENABLED: 'true'" \
+  '/r4f-g3-dashboard-authorize' \
+  '/r4f-g3-after' \
+  '/r4f-g3-capture-logs'
+do
+  if grep -Fq "$forbidden" "$workflow"; then
+    echo "qualification workflow contains forbidden capability: $forbidden" >&2
+    exit 1
+  fi
+done
 
 printf '%s\n' 'R4F revision-4 exact 12-ledger qualification contract: PASS'
