@@ -72,11 +72,15 @@ if grep -Eq '^  (push|schedule|pull_request_target):' "$workflow"; then
   exit 1
 fi
 
-# Only the exact guarded migration can be applied, and it is previewed before mutation.
+# Only the exact guarded migration can be applied, or recognized as already
+# applied while the exact three repository-only revision-4 migrations remain
+# deferred. It is previewed before the destructive mutation.
 grep -Fq "MIGRATION_VERSION: '20260811012000'" "$workflow"
+grep -Fq 'expected_deferred=(20260809151000 20260810123000 20260810133000)' "$workflow"
 grep -Fq 'supabase db push --linked --dry-run' "$workflow"
 grep -Fq 'supabase db push --linked --yes' "$workflow"
 grep -Fq 'Unexpected pending migration set' "$workflow"
+grep -Fq 'Guarded reclaim migration is already applied; exact deferred revision-4 migrations remain unapplied.' "$workflow"
 grep -Fq 'xrpl_preview_steady_qualification_reclaim' "$workflow"
 grep -Fq 'xrpl_execute_steady_qualification_reclaim' "$workflow"
 grep -Fq 'api-keys?reveal=true' "$workflow"
@@ -85,13 +89,39 @@ grep -Fq 'authorization-insert.json' "$workflow"
 grep -Fq 'database-before.json' "$workflow"
 grep -Fq 'database-after.json' "$workflow"
 
-# The service-role credential is resolved only at runtime and is never a repository secret binding.
+# The elevated credential is resolved only at runtime and is never a static
+# repository secret binding. Prefer an exact legacy service_role key; otherwise
+# permit exactly one current Supabase secret key. Secret keys must not be sent
+# as Bearer tokens.
 if grep -Fq 'SUPABASE_SERVICE_ROLE_KEY' "$workflow"; then
   echo 'static service-role secret binding is forbidden for reclaim runner' >&2
   exit 1
 fi
-grep -Fq '::add-mask::${service_role_key}' "$workflow"
+grep -Fq 'legacy_count=' "$workflow"
+grep -Fq 'secret_count=' "$workflow"
+grep -Fq '.type == "secret"' "$workflow"
+grep -Fq '::add-mask::${elevated_key}' "$workflow"
+grep -Fq 'SUPABASE_RECLAIM_KEY_KIND=%s' "$workflow"
+grep -Fq 'if [ "$SUPABASE_RECLAIM_KEY_KIND" = legacy ]; then' "$workflow"
+grep -Fq 'Authorization: Bearer ${SUPABASE_RECLAIM_SERVICE_ROLE_KEY}' "$workflow"
 grep -Fq 'rm -f /tmp/project-api-keys.json' "$workflow"
+
+python - "$workflow" <<'PY'
+from pathlib import Path
+import sys
+text = Path(sys.argv[1]).read_text()
+# Both preview and execute construct headers with apikey always and Bearer only
+# inside the legacy-key branch. There must not be an unconditional Bearer line.
+legacy_guard = 'if [ "$SUPABASE_RECLAIM_KEY_KIND" = legacy ]; then'
+bearer = 'Authorization: Bearer ${SUPABASE_RECLAIM_SERVICE_ROLE_KEY}'
+if text.count(legacy_guard) != 2 or text.count(bearer) != 2:
+    raise SystemExit('elevated key header branching changed')
+for marker in ['Verify exact retained session with read-only preview', 'Execute exactly one bounded steady qualification reclaim']:
+    start = text.index(marker)
+    segment = text[start:start + 2500]
+    if segment.index(legacy_guard) > segment.index(bearer):
+        raise SystemExit(f'Bearer header escaped legacy-only guard in {marker}')
+PY
 
 # Keep dangerous adjacent capabilities out of this one-shot runner.
 for forbidden in \
