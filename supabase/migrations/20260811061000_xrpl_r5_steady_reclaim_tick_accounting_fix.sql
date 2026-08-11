@@ -157,7 +157,7 @@ begin
     select coalesce(jsonb_agg(jsonb_build_object(
       'tickId', tick_id,
       'status', status,
-      'committedLedgers', committed_ledgers
+      'committedLedgers', end_ledger_index - start_ledger_index + 1
     ) order by tick_id), '[]'::jsonb)
     into v_formal_ticks
     from xrpl_steady_v1.ticks
