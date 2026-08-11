@@ -2,7 +2,9 @@
 set -euo pipefail
 
 file='supabase/migrations/20260811012000_xrpl_r5_steady_qualification_reclaim_guard.sql'
+workflow='.github/workflows/supabase-remote-probe.yml'
 test -f "$file"
+test -f "$workflow"
 
 # Exact retained qualification boundary. These values are all from the same
 # formal artifact chain: workflow 30992583324 -> commit 52ebc396... ->
@@ -59,5 +61,70 @@ grep -Fq "revoke all on function public.xrpl_preview_steady_qualification_reclai
 grep -Fq "revoke all on function public.xrpl_execute_steady_qualification_reclaim(text) from public, anon, authenticated" "$file"
 grep -Fq "grant execute on function public.xrpl_preview_steady_qualification_reclaim() to service_role" "$file"
 grep -Fq "grant execute on function public.xrpl_execute_steady_qualification_reclaim(text) to service_role" "$file"
+
+# The production runner is owner-comment-only and has no automatic trigger.
+grep -Fq "github.event.issue.number == 1261" "$workflow"
+grep -Fq "github.event.comment.user.login == 'badjoke-lab'" "$workflow"
+grep -Fq "github.event.comment.body == '/r4f-steady-reclaim-prepare'" "$workflow"
+grep -Fq "startsWith(github.event.comment.body, '/r4f-steady-reclaim-authorize ')" "$workflow"
+if grep -Eq '^  (push|schedule|pull_request_target):' "$workflow"; then
+  echo 'bounded reclaim runner gained an automatic or unsafe trigger' >&2
+  exit 1
+fi
+
+# Only the exact guarded migration can be applied, and it is previewed before mutation.
+grep -Fq "MIGRATION_VERSION: '20260811012000'" "$workflow"
+grep -Fq 'supabase db push --linked --dry-run' "$workflow"
+grep -Fq 'supabase db push --linked --yes' "$workflow"
+grep -Fq 'Unexpected pending migration set' "$workflow"
+grep -Fq 'xrpl_preview_steady_qualification_reclaim' "$workflow"
+grep -Fq 'xrpl_execute_steady_qualification_reclaim' "$workflow"
+grep -Fq 'api-keys?reveal=true' "$workflow"
+grep -Fq 'database/query' "$workflow"
+grep -Fq 'authorization-insert.json' "$workflow"
+grep -Fq 'database-before.json' "$workflow"
+grep -Fq 'database-after.json' "$workflow"
+
+# The service-role credential is resolved only at runtime and is never a repository secret binding.
+if grep -Fq 'SUPABASE_SERVICE_ROLE_KEY' "$workflow"; then
+  echo 'static service-role secret binding is forbidden for reclaim runner' >&2
+  exit 1
+fi
+grep -Fq '::add-mask::${service_role_key}' "$workflow"
+grep -Fq 'rm -f /tmp/project-api-keys.json' "$workflow"
+
+# Keep dangerous adjacent capabilities out of this one-shot runner.
+for forbidden in \
+  'supabase functions deploy' \
+  'supabase functions delete' \
+  'wrangler deploy' \
+  'xrpl-r5-recovery-batch' \
+  "MAINNET_ENABLED: 'true'" \
+  '/r4f-g3-'; do
+  if grep -Fq "$forbidden" "$workflow"; then
+    echo "unexpected adjacent capability in reclaim runner: $forbidden" >&2
+    exit 1
+  fi
+done
+
+# Static execution order: dry-run -> possible migration -> preview -> auth row -> exactly one RPC -> post-measure.
+python - "$workflow" <<'PY'
+from pathlib import Path
+import sys
+text = Path(sys.argv[1]).read_text()
+needles = [
+    'supabase db push --linked --dry-run',
+    'supabase db push --linked --yes',
+    'rest/v1/rpc/xrpl_preview_steady_qualification_reclaim',
+    'authorization-insert.json',
+    'rest/v1/rpc/xrpl_execute_steady_qualification_reclaim',
+    'database-after.json',
+]
+pos = [text.index(x) for x in needles]
+if pos != sorted(pos) or len(set(pos)) != len(pos):
+    raise SystemExit(f'bounded reclaim execution order changed: {list(zip(needles, pos))}')
+if text.count('rest/v1/rpc/xrpl_execute_steady_qualification_reclaim') != 1:
+    raise SystemExit('destructive reclaim RPC must have exactly one invocation locator')
+PY
 
 echo 'steady qualification reclaim contract: PASS'
