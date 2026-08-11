@@ -1,28 +1,380 @@
-name: Supabase Remote Probe Deploy
+name: R4F Steady Qualification Reclaim
 
 on:
-  workflow_dispatch:
-    inputs:
-      authorization:
-        description: 'Legacy remote probe is halted during R4F. No value currently authorizes execution.'
-        required: true
-        type: string
+  issue_comment:
+    types: [created]
 
 permissions:
   contents: read
+  issues: write
 
 concurrency:
-  group: supabase-remote-probe-deploy
+  group: r4f-steady-qualification-reclaim
   cancel-in-progress: false
 
+env:
+  QUALIFICATION_ISSUE: '1261'
+  MIGRATION_VERSION: '20260811012000'
+  MIGRATION_PATH: supabase/migrations/20260811012000_xrpl_r5_steady_qualification_reclaim_guard.sql
+  FORMAL_STEADY_RUN: '30992583324'
+  FORMAL_STEADY_COMMIT: 52ebc396f7c5217ae06e595aabe2053440f1076a
+  FORMAL_STEADY_ARTIFACT: '8924984813'
+  FORMAL_STEADY_ARTIFACT_DIGEST: sha256:76f4580d83c053dadfe8a707c7bf53b53d99d361fd12c12adefe76061a9dafa3
+  FORMAL_STEADY_BATCH_SHA256: d5be00fddec73f24bfec5d939bc3a65278ad5fb7765d1764ba10b289350e543a
+  FORMAL_STEADY_QUALIFICATION_SHA256: 70b391931d8f9637e07b79fef75cfd4ce804dd859edfce294b5b67c4a04aac9a
+
 jobs:
-  halted:
+  prepare:
+    if: >-
+      github.event.issue.number == 1261 &&
+      github.event.comment.user.login == 'badjoke-lab' &&
+      github.event.comment.body == '/r4f-steady-reclaim-prepare'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+      GH_TOKEN: ${{ github.token }}
     steps:
-      - name: Enforce R4F halt
+      - name: Check out exact current main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify reclaim source and publish exact authorization proposal
         shell: bash
         run: |
           set -euo pipefail
-          echo 'Legacy Supabase remote probe is halted while R4F revision-4 qualification is active.' >&2
-          echo 'R5 recovery, migration, deployment, and remote mutation are not authorized by this workflow.' >&2
-          exit 1
+          test -n "$SUPABASE_PROJECT_ID"
+          [[ "$SUPABASE_PROJECT_ID" =~ ^[a-z]{20}$ ]]
+          test -f "$MIGRATION_PATH"
+          bash scripts/test-r4f-steady-qualification-reclaim-contract.sh
+
+          head_sha="$(git rev-parse HEAD)"
+          migration_sha="$(sha256sum "$MIGRATION_PATH" | awk '{print $1}')"
+          project_digest="$(printf '%s' "$SUPABASE_PROJECT_ID" | sha256sum | awk '{print $1}')"
+          expires="$(date -u -d '+15 minutes' '+%Y-%m-%dT%H:%M:%SZ')"
+          nonce="$(openssl rand -hex 8)"
+          command="/r4f-steady-reclaim-authorize commit=${head_sha} migration=${migration_sha} project=${project_digest} prepare_run=${GITHUB_RUN_ID} expires=${expires} nonce=${nonce}"
+
+          cat > /tmp/reclaim-proposal.md <<EOF
+          ## R4F isolated steady qualification reclaim authorization proposal
+
+          Preparation run: \`${GITHUB_RUN_ID}\`
+          Source commit: \`${head_sha}\`
+          Migration: \`${MIGRATION_VERSION}\`
+          Migration SHA-256: \`${migration_sha}\`
+          Project identity digest: \`${project_digest}\`
+          Authorization expires: \`${expires}\`
+
+          Formal top-level steady PASS remains workflow \`${FORMAL_STEADY_RUN}\`, commit \`${FORMAL_STEADY_COMMIT}\`, artifact \`${FORMAL_STEADY_ARTIFACT}\`.
+
+          Exact authorization command:
+
+          \`${command}\`
+
+          This authorization is limited to applying the single guarded reclaim migration if and only if it is the only pending migration, read-only preview/measurement, insertion of one expiring one-time authorization row, and one service-role invocation of \`xrpl_execute_steady_qualification_reclaim\`. Reclaim scope is only \`xrpl_steady_v1\`. It does not authorize R5 live execution, revision-4 selection, Mainnet, public-reader mutation, G3 rerun, stabilization, or soak.
+          EOF
+          gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/reclaim-proposal.md
+
+  execute:
+    if: >-
+      github.event.issue.number == 1261 &&
+      github.event.comment.user.login == 'badjoke-lab' &&
+      startsWith(github.event.comment.body, '/r4f-steady-reclaim-authorize ')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      GH_TOKEN: ${{ github.token }}
+      AUTHORIZATION_COMMENT_ID: ${{ github.event.comment.id }}
+      AUTHORIZATION_CREATED_AT: ${{ github.event.comment.created_at }}
+      AUTHORIZATION_BODY: ${{ github.event.comment.body }}
+    steps:
+      - name: Check out exact current main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify exact owner authorization and proposal ordering
+        id: auth
+        shell: bash
+        run: |
+          set -euo pipefail
+          regex='^/r4f-steady-reclaim-authorize commit=([a-f0-9]{40}) migration=([a-f0-9]{64}) project=([a-f0-9]{64}) prepare_run=([0-9]+) expires=([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z) nonce=([a-f0-9]{16})$'
+          [[ "$AUTHORIZATION_BODY" =~ $regex ]] || { echo 'reclaim authorization command shape mismatch' >&2; exit 1; }
+          source_commit="${BASH_REMATCH[1]}"
+          migration_sha="${BASH_REMATCH[2]}"
+          project_digest="${BASH_REMATCH[3]}"
+          prepare_run="${BASH_REMATCH[4]}"
+          expires="${BASH_REMATCH[5]}"
+          nonce="${BASH_REMATCH[6]}"
+
+          test -n "$SUPABASE_ACCESS_TOKEN"
+          test -n "$SUPABASE_PROJECT_ID"
+          test -n "$SUPABASE_DB_PASSWORD"
+          [[ "$SUPABASE_PROJECT_ID" =~ ^[a-z]{20}$ ]]
+          test "$source_commit" = "$(git rev-parse HEAD)"
+          test "$migration_sha" = "$(sha256sum "$MIGRATION_PATH" | awk '{print $1}')"
+          actual_project_digest="$(printf '%s' "$SUPABASE_PROJECT_ID" | sha256sum | awk '{print $1}')"
+          test "$project_digest" = "$actual_project_digest"
+          bash scripts/test-r4f-steady-qualification-reclaim-contract.sh
+
+          auth_epoch="$(date -u -d "$AUTHORIZATION_CREATED_AT" +%s)"
+          expiry_epoch="$(date -u -d "$expires" +%s)"
+          now_epoch="$(date -u +%s)"
+          test "$expiry_epoch" -gt "$auth_epoch"
+          test $((expiry_epoch - auth_epoch)) -le 1200
+          test "$now_epoch" -le "$expiry_epoch"
+
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${prepare_run}" > /tmp/prepare-run.json
+          test "$(jq -r '.event' /tmp/prepare-run.json)" = issue_comment
+          test "$(jq -r '.conclusion' /tmp/prepare-run.json)" = success
+          test "$(jq -r '.head_sha' /tmp/prepare-run.json)" = "$source_commit"
+          test "$(jq -r '.actor.login' /tmp/prepare-run.json)" = badjoke-lab
+
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${QUALIFICATION_ISSUE}/comments?per_page=100" \
+            | jq -s 'add' > /tmp/issue-comments.json
+          proposal_count="$(jq --arg command "$AUTHORIZATION_BODY" --arg created "$AUTHORIZATION_CREATED_AT" '[.[] | select(.user.login == "github-actions[bot]" and (.body | contains($command)) and .created_at < $created)] | length' /tmp/issue-comments.json)"
+          test "$proposal_count" -eq 1
+
+          authorization_digest="$(printf '%s' "$AUTHORIZATION_BODY" | sha256sum | awk '{print $1}')"
+          authorization_id="r4f-steady-reclaim-${AUTHORIZATION_COMMENT_ID}"
+          printf 'source_commit=%s\nmigration_sha=%s\nproject_digest=%s\nprepare_run=%s\nexpires=%s\nnonce=%s\nauthorization_digest=%s\nauthorization_id=%s\n' \
+            "$source_commit" "$migration_sha" "$project_digest" "$prepare_run" "$expires" "$nonce" "$authorization_digest" "$authorization_id" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Supabase CLI
+        uses: supabase/setup-cli@3c2f5e2ae34c34e428e8e206e2c4d21fa2d20fbf
+        with:
+          version: latest
+
+      - name: Link exact Supabase project
+        shell: bash
+        run: |
+          set -euo pipefail
+          supabase link --project-ref "$SUPABASE_PROJECT_ID" --password "$SUPABASE_DB_PASSWORD"
+
+      - name: Fail closed unless only the guarded reclaim migration is pending
+        id: migration
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p r4f-steady-reclaim-evidence
+          supabase db push --linked --dry-run > r4f-steady-reclaim-evidence/migration-dry-run.txt 2>&1
+          mapfile -t versions < <(grep -oE '20[0-9]{12}' r4f-steady-reclaim-evidence/migration-dry-run.txt | LC_ALL=C sort -u || true)
+          if [ "${#versions[@]}" -eq 0 ]; then
+            echo 'apply=false' >> "$GITHUB_OUTPUT"
+            echo 'No pending migration reported; continuing only to exact RPC preview verification.'
+          elif [ "${#versions[@]}" -eq 1 ] && [ "${versions[0]}" = "$MIGRATION_VERSION" ]; then
+            echo 'apply=true' >> "$GITHUB_OUTPUT"
+          else
+            printf 'Unexpected pending migration set: %s\n' "${versions[*]:-none}" >&2
+            exit 1
+          fi
+
+      - name: Apply exactly the guarded reclaim migration
+        if: steps.migration.outputs.apply == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          supabase db push --linked --yes 2>&1 | tee r4f-steady-reclaim-evidence/migration-apply.txt
+          supabase db push --linked --dry-run > r4f-steady-reclaim-evidence/migration-post-dry-run.txt 2>&1
+          if grep -qE '20[0-9]{12}' r4f-steady-reclaim-evidence/migration-post-dry-run.txt; then
+            echo 'migration remains pending after guarded db push' >&2
+            cat r4f-steady-reclaim-evidence/migration-post-dry-run.txt >&2
+            exit 1
+          fi
+
+      - name: Resolve one service-role key without persisting it
+        id: service_role
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+            "https://api.supabase.com/v1/projects/${SUPABASE_PROJECT_ID}/api-keys?reveal=true" > /tmp/project-api-keys.json
+          match_count="$(jq '[.[] | select(.name == "service_role" or ((.secret_jwt_template.role // "") == "service_role"))] | length' /tmp/project-api-keys.json)"
+          test "$match_count" -eq 1
+          service_role_key="$(jq -r '[.[] | select(.name == "service_role" or ((.secret_jwt_template.role // "") == "service_role"))][0].api_key' /tmp/project-api-keys.json)"
+          test -n "$service_role_key"
+          test "$service_role_key" != null
+          echo "::add-mask::${service_role_key}"
+          printf 'SUPABASE_RECLAIM_SERVICE_ROLE_KEY=%s\n' "$service_role_key" >> "$GITHUB_ENV"
+          rm -f /tmp/project-api-keys.json
+
+      - name: Capture read-only database size before reclaim
+        shell: bash
+        run: |
+          set -euo pipefail
+          query="select pg_database_size(current_database())::bigint as database_bytes;"
+          jq -n --arg query "$query" '{query:$query,parameters:[],read_only:true}' > /tmp/db-size-query.json
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+            -H 'content-type: application/json' \
+            --data @/tmp/db-size-query.json \
+            "https://api.supabase.com/v1/projects/${SUPABASE_PROJECT_ID}/database/query" \
+            > r4f-steady-reclaim-evidence/database-before.json
+
+      - name: Verify exact retained session with read-only preview
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error \
+            -H 'content-type: application/json' \
+            -H "apikey: ${SUPABASE_RECLAIM_SERVICE_ROLE_KEY}" \
+            -H "Authorization: Bearer ${SUPABASE_RECLAIM_SERVICE_ROLE_KEY}" \
+            --data '{}' \
+            "https://${SUPABASE_PROJECT_ID}.supabase.co/rest/v1/rpc/xrpl_preview_steady_qualification_reclaim" \
+            > r4f-steady-reclaim-evidence/preview.json
+
+          jq -e \
+            --arg sourceCommit "$FORMAL_STEADY_COMMIT" \
+            --arg artifactDigest "$FORMAL_STEADY_ARTIFACT_DIGEST" \
+            --arg batchDigest "$FORMAL_STEADY_BATCH_SHA256" \
+            --arg qualificationDigest "$FORMAL_STEADY_QUALIFICATION_SHA256" \
+            --argjson sourceRun "$FORMAL_STEADY_RUN" \
+            --argjson artifactId "$FORMAL_STEADY_ARTIFACT" \
+            '.mutationPerformed == false and .sessionFound == true and .sessionStatus == "completed" and .completedTicks == 6 and .committedLedgers == 144 and .physicalBytes >= 80000000 and .sourceWorkflowRunId == $sourceRun and .sourceCommit == $sourceCommit and .sourceArtifactId == $artifactId and .sourceArtifactDigest == $artifactDigest and .sourceSteadyBatchBundleSha256 == $batchDigest and .sourceSteadyQualificationBundleSha256 == $qualificationDigest and .sourceProfileId == "supabase-devnet" and .targetProfileId == "supabase-devnet-steady-qualification" and .network == "devnet" and .epochId == "supabase-r4c2c-v1" and (.activeWatermark != null)' \
+            r4f-steady-reclaim-evidence/preview.json > /dev/null
+
+      - name: Retain one expiring authorization row
+        env:
+          AUTHORIZATION_ID: ${{ steps.auth.outputs.authorization_id }}
+          AUTHORIZATION_DIGEST: ${{ steps.auth.outputs.authorization_digest }}
+          AUTHORIZATION_EXPIRES: ${{ steps.auth.outputs.expires }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          query="insert into xrpl_qualification_archive_v1.steady_reclaim_authorizations (authorization_id, schema_version, issue_number, decision_comment_id, approved_by, authorization_digest, expires_at, used_at) values ('${AUTHORIZATION_ID}', 1, 1261, ${AUTHORIZATION_COMMENT_ID}, 'badjoke-lab', '${AUTHORIZATION_DIGEST}', '${AUTHORIZATION_EXPIRES}'::timestamptz, null) returning authorization_id;"
+          jq -n --arg query "$query" '{query:$query,parameters:[],read_only:false}' > /tmp/authorization-query.json
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+            -H 'content-type: application/json' \
+            --data @/tmp/authorization-query.json \
+            "https://api.supabase.com/v1/projects/${SUPABASE_PROJECT_ID}/database/query" \
+            > r4f-steady-reclaim-evidence/authorization-insert.json
+
+      - name: Execute exactly one bounded steady qualification reclaim
+        env:
+          AUTHORIZATION_ID: ${{ steps.auth.outputs.authorization_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -n --arg id "$AUTHORIZATION_ID" '{p_authorization_id:$id}' > /tmp/reclaim-body.json
+          curl --fail-with-body --silent --show-error \
+            -H 'content-type: application/json' \
+            -H "apikey: ${SUPABASE_RECLAIM_SERVICE_ROLE_KEY}" \
+            -H "Authorization: Bearer ${SUPABASE_RECLAIM_SERVICE_ROLE_KEY}" \
+            --data @/tmp/reclaim-body.json \
+            "https://${SUPABASE_PROJECT_ID}.supabase.co/rest/v1/rpc/xrpl_execute_steady_qualification_reclaim" \
+            > r4f-steady-reclaim-evidence/reclaim-result.json
+
+          jq -e '.reclaimed == true and .activeWatermarkUnchanged == true and .canonicalHistoryUntouched == true and .authorizationConsumed == true and .physicalBytesBefore >= 80000000 and .physicalBytesAfter >= 0' \
+            r4f-steady-reclaim-evidence/reclaim-result.json > /dev/null
+
+      - name: Capture post-reclaim database size and authorization state
+        if: always()
+        env:
+          AUTHORIZATION_ID: ${{ steps.auth.outputs.authorization_id }}
+        shell: bash
+        run: |
+          set +e
+          query="select pg_database_size(current_database())::bigint as database_bytes;"
+          jq -n --arg query "$query" '{query:$query,parameters:[],read_only:true}' > /tmp/db-size-query.json
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+            -H 'content-type: application/json' \
+            --data @/tmp/db-size-query.json \
+            "https://api.supabase.com/v1/projects/${SUPABASE_PROJECT_ID}/database/query" \
+            > r4f-steady-reclaim-evidence/database-after.json
+
+          status_query="select authorization_id, used_at from xrpl_qualification_archive_v1.steady_reclaim_authorizations where authorization_id = '${AUTHORIZATION_ID}';"
+          jq -n --arg query "$status_query" '{query:$query,parameters:[],read_only:true}' > /tmp/status-query.json
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+            -H 'content-type: application/json' \
+            --data @/tmp/status-query.json \
+            "https://api.supabase.com/v1/projects/${SUPABASE_PROJECT_ID}/database/query" \
+            > r4f-steady-reclaim-evidence/authorization-after.json
+          exit 0
+
+      - name: Upload sanitized reclaim evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r4f-steady-qualification-reclaim-evidence
+          path: r4f-steady-reclaim-evidence
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Publish sanitized reclaim result
+        if: always()
+        env:
+          RUN_STATUS: ${{ job.status }}
+          SOURCE_COMMIT: ${{ steps.auth.outputs.source_commit }}
+          AUTHORIZATION_ID: ${{ steps.auth.outputs.authorization_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          extract_database_bytes() {
+            local file="$1"
+            if [ ! -s "$file" ]; then printf 'unavailable'; return; fi
+            node --input-type=module - "$file" <<'NODE'
+          import { readFileSync } from 'node:fs'
+          const path = process.argv[2]
+          const value = JSON.parse(readFileSync(path, 'utf8'))
+          const find = (v) => {
+            if (Array.isArray(v)) for (const x of v) { const r = find(x); if (r !== undefined) return r }
+            else if (v && typeof v === 'object') {
+              if (Object.prototype.hasOwnProperty.call(v, 'database_bytes')) return v.database_bytes
+              for (const x of Object.values(v)) { const r = find(x); if (r !== undefined) return r }
+            }
+          }
+          const result = find(value)
+          process.stdout.write(result === undefined ? 'unavailable' : String(result))
+          NODE
+          }
+
+          before_db="$(extract_database_bytes r4f-steady-reclaim-evidence/database-before.json)"
+          after_db="$(extract_database_bytes r4f-steady-reclaim-evidence/database-after.json)"
+          reclaimed=false
+          physical_before=unavailable
+          physical_after=unavailable
+          watermark_unchanged=false
+          canonical_untouched=false
+          authorization_consumed=false
+          if [ -s r4f-steady-reclaim-evidence/reclaim-result.json ]; then
+            reclaimed="$(jq -r '.reclaimed // false' r4f-steady-reclaim-evidence/reclaim-result.json)"
+            physical_before="$(jq -r '.physicalBytesBefore // "unavailable"' r4f-steady-reclaim-evidence/reclaim-result.json)"
+            physical_after="$(jq -r '.physicalBytesAfter // "unavailable"' r4f-steady-reclaim-evidence/reclaim-result.json)"
+            watermark_unchanged="$(jq -r '.activeWatermarkUnchanged // false' r4f-steady-reclaim-evidence/reclaim-result.json)"
+            canonical_untouched="$(jq -r '.canonicalHistoryUntouched // false' r4f-steady-reclaim-evidence/reclaim-result.json)"
+            authorization_consumed="$(jq -r '.authorizationConsumed // false' r4f-steady-reclaim-evidence/reclaim-result.json)"
+          fi
+
+          cat > /tmp/reclaim-result.md <<EOF
+          ## R4F bounded steady qualification reclaim
+
+          - workflow run: \`${GITHUB_RUN_ID}\`
+          - workflow status: \`${RUN_STATUS}\`
+          - authorization comment: \`${AUTHORIZATION_COMMENT_ID}\`
+          - authorization id: \`${AUTHORIZATION_ID:-unavailable}\`
+          - source commit: \`${SOURCE_COMMIT:-unavailable}\`
+          - reclaimed: \`${reclaimed}\`
+          - isolated schema bytes before: \`${physical_before}\`
+          - isolated schema bytes after: \`${physical_after}\`
+          - database bytes before: \`${before_db}\`
+          - database bytes after: \`${after_db}\`
+          - active public watermark unchanged: \`${watermark_unchanged}\`
+          - canonical history untouched: \`${canonical_untouched}\`
+          - authorization consumed: \`${authorization_consumed}\`
+          - R5 live execution: \`not authorized / not executed\`
+          - revision-4 selection: \`not authorized / not executed\`
+          - Mainnet/public reader/G3/stabilization/soak: \`unchanged\`
+          EOF
+          gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/reclaim-result.md

@@ -57,6 +57,7 @@ jobs:
           bash -n scripts/check-actions-workflow-allowlist-r5-one-shot.sh
           bash -n scripts/test-r4f-revision4-directional-persistence-postgres.sh
           bash -n scripts/test-r4f-revision4-provider-capture-verifier.sh
+          bash -n scripts/test-r4f-steady-qualification-reclaim-contract.sh
 
       - name: Validate canonical production base identity
         env:
@@ -80,6 +81,9 @@ jobs:
 
       - name: Verify revision-4 provider capture verifier locally
         run: bash scripts/test-r4f-revision4-provider-capture-verifier.sh
+
+      - name: Verify steady qualification reclaim contract
+        run: bash scripts/test-r4f-steady-qualification-reclaim-contract.sh
 
       - name: Apply D1 migrations locally
         run: pnpm db:migrate:local

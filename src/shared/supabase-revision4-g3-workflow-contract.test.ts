@@ -7,16 +7,28 @@ function read(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
-const legacy = read('.github/workflows/supabase-remote-probe.yml')
+const reclaim = read('.github/workflows/supabase-remote-probe.yml')
 const g3 = read('.github/workflows/r4f-g3-one-shot-probe.yml')
 
 describe('R4F G3 workflow safety boundary', () => {
-  it('removes automatic push execution from the legacy mutation-capable remote probe', () => {
-    expect(legacy).toContain('workflow_dispatch:')
-    expect(legacy).not.toContain('\n  push:')
-    expect(legacy).toContain('Legacy Supabase remote probe is halted')
-    expect(legacy).not.toContain('supabase db push')
-    expect(legacy).not.toContain('xrpl-r5-recovery-batch')
+  it('keeps the former remote probe restricted to the separately authorized steady reclaim path', () => {
+    expect(reclaim).toContain('name: R4F Steady Qualification Reclaim')
+    expect(reclaim).toContain('issue_comment:')
+    expect(reclaim).not.toContain('\n  push:')
+    expect(reclaim).not.toContain('\n  schedule:')
+    expect(reclaim).not.toContain('workflow_dispatch:')
+    expect(reclaim).toContain('github.event.issue.number == 1261')
+    expect(reclaim).toContain("github.event.comment.user.login == 'badjoke-lab'")
+    expect(reclaim).toContain("github.event.comment.body == '/r4f-steady-reclaim-prepare'")
+    expect(reclaim).toContain("startsWith(github.event.comment.body, '/r4f-steady-reclaim-authorize ')")
+    expect(reclaim).toContain("MIGRATION_VERSION: '20260811012000'")
+    expect(reclaim).toContain('supabase db push --linked --dry-run')
+    expect(reclaim).toContain('supabase db push --linked --yes')
+    expect(reclaim).toContain('rest/v1/rpc/xrpl_preview_steady_qualification_reclaim')
+    expect(reclaim).toContain('rest/v1/rpc/xrpl_execute_steady_qualification_reclaim')
+    expect(reclaim).not.toContain('supabase functions deploy')
+    expect(reclaim).not.toContain('xrpl-r5-recovery-batch')
+    expect(reclaim).not.toContain('/r4f-g3-')
   })
 
   it('allows G3 preparation and execution only from exact owner comments on Issue 1261', () => {
