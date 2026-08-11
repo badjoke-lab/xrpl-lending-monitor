@@ -74,7 +74,7 @@ jobs:
 
           \`${command}\`
 
-          This authorization is limited to applying the single guarded reclaim migration if and only if the pending migration set is either that migration alone or the three exact deferred repository-only revision-4 migrations plus that migration, read-only preview/measurement, insertion of one expiring one-time authorization row, and one service-role invocation of \`xrpl_execute_steady_qualification_reclaim\`. Reclaim scope is only \`xrpl_steady_v1\`. The deferred revision-4 migrations are never applied or marked applied by this workflow. It does not authorize R5 live execution, revision-4 selection, Mainnet, public-reader mutation, G3 rerun, stabilization, or soak.
+          This authorization is limited to the guarded reclaim migration being the only target migration, including the already-applied target state, while the three exact deferred repository-only revision-4 migrations remain unapplied and unmarked; read-only preview/measurement; insertion of one expiring one-time authorization row; and one elevated service invocation of \`xrpl_execute_steady_qualification_reclaim\`. Reclaim scope is only \`xrpl_steady_v1\`. It does not authorize R5 live execution, revision-4 selection, Mainnet, public-reader mutation, G3 rerun, stabilization, or soak.
           EOF
           gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/reclaim-proposal.md
 
@@ -169,19 +169,14 @@ jobs:
           mapfile -t versions < <(grep -oE '20[0-9]{12}' r4f-steady-reclaim-evidence/migration-dry-run.txt | LC_ALL=C sort -u || true)
 
           expected_target=(20260811012000)
+          expected_deferred=(20260809151000 20260810123000 20260810133000)
           expected_with_deferred=(20260809151000 20260810123000 20260810133000 20260811012000)
           joined="${versions[*]:-}"
           target_joined="${expected_target[*]}"
-          deferred_joined="${expected_with_deferred[*]}"
+          deferred_only_joined="${expected_deferred[*]}"
+          with_target_joined="${expected_with_deferred[*]}"
 
-          if [ "${#versions[@]}" -eq 0 ]; then
-            echo 'apply=false' >> "$GITHUB_OUTPUT"
-            echo 'deferred=false' >> "$GITHUB_OUTPUT"
-            echo 'No pending migration reported; continuing only to exact RPC preview verification.'
-          elif [ "$joined" = "$target_joined" ]; then
-            echo 'apply=true' >> "$GITHUB_OUTPUT"
-            echo 'deferred=false' >> "$GITHUB_OUTPUT"
-          elif [ "$joined" = "$deferred_joined" ]; then
+          defer_exact_revision4_migrations() {
             deferred_dir='/tmp/r4f-deferred-revision4-migrations'
             mkdir -p "$deferred_dir"
             declare -A expected_blobs=(
@@ -194,15 +189,33 @@ jobs:
               test "$(git hash-object "$path")" = "${expected_blobs[$path]}"
               mv "$path" "$deferred_dir/"
             done
+          }
 
+          if [ "${#versions[@]}" -eq 0 ]; then
+            echo 'apply=false' >> "$GITHUB_OUTPUT"
+            echo 'deferred=false' >> "$GITHUB_OUTPUT"
+            echo 'No pending migration reported; target is already applied and there are no deferred migrations.'
+          elif [ "$joined" = "$target_joined" ]; then
+            echo 'apply=true' >> "$GITHUB_OUTPUT"
+            echo 'deferred=false' >> "$GITHUB_OUTPUT"
+          elif [ "$joined" = "$with_target_joined" ]; then
+            defer_exact_revision4_migrations
             supabase db push --linked --dry-run > r4f-steady-reclaim-evidence/migration-scoped-dry-run.txt 2>&1
             mapfile -t scoped_versions < <(grep -oE '20[0-9]{12}' r4f-steady-reclaim-evidence/migration-scoped-dry-run.txt | LC_ALL=C sort -u || true)
-            if [ "${scoped_versions[*]:-}" != "$target_joined" ]; then
-              printf 'Scoped pending migration set is not the guarded reclaim target: %s\n' "${scoped_versions[*]:-none}" >&2
-              exit 1
-            fi
+            test "${scoped_versions[*]:-}" = "$target_joined"
             echo 'apply=true' >> "$GITHUB_OUTPUT"
             echo 'deferred=true' >> "$GITHUB_OUTPUT"
+          elif [ "$joined" = "$deferred_only_joined" ]; then
+            defer_exact_revision4_migrations
+            supabase db push --linked --dry-run > r4f-steady-reclaim-evidence/migration-scoped-dry-run.txt 2>&1
+            mapfile -t scoped_versions < <(grep -oE '20[0-9]{12}' r4f-steady-reclaim-evidence/migration-scoped-dry-run.txt | LC_ALL=C sort -u || true)
+            if [ "${#scoped_versions[@]}" -ne 0 ]; then
+              printf 'Guarded reclaim target is not cleanly applied: %s\n' "${scoped_versions[*]:-none}" >&2
+              exit 1
+            fi
+            echo 'apply=false' >> "$GITHUB_OUTPUT"
+            echo 'deferred=true' >> "$GITHUB_OUTPUT"
+            echo 'Guarded reclaim migration is already applied; exact deferred revision-4 migrations remain unapplied.'
           else
             printf 'Unexpected pending migration set: %s\n' "${versions[*]:-none}" >&2
             exit 1
@@ -221,7 +234,7 @@ jobs:
             exit 1
           fi
 
-      - name: Resolve one service-role key without persisting it
+      - name: Resolve one elevated database API key without persisting it
         id: service_role
         shell: bash
         run: |
@@ -229,13 +242,25 @@ jobs:
           curl --fail-with-body --silent --show-error \
             -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
             "https://api.supabase.com/v1/projects/${SUPABASE_PROJECT_ID}/api-keys?reveal=true" > /tmp/project-api-keys.json
-          match_count="$(jq '[.[] | select(.name == "service_role" or ((.secret_jwt_template.role // "") == "service_role"))] | length' /tmp/project-api-keys.json)"
-          test "$match_count" -eq 1
-          service_role_key="$(jq -r '[.[] | select(.name == "service_role" or ((.secret_jwt_template.role // "") == "service_role"))][0].api_key' /tmp/project-api-keys.json)"
-          test -n "$service_role_key"
-          test "$service_role_key" != null
-          echo "::add-mask::${service_role_key}"
-          printf 'SUPABASE_RECLAIM_SERVICE_ROLE_KEY=%s\n' "$service_role_key" >> "$GITHUB_ENV"
+
+          legacy_count="$(jq '[.[] | select(.type == "legacy" and (.name == "service_role" or ((.secret_jwt_template.role // "") == "service_role")))] | length' /tmp/project-api-keys.json)"
+          secret_count="$(jq '[.[] | select(.type == "secret")] | length' /tmp/project-api-keys.json)"
+
+          if [ "$legacy_count" -eq 1 ]; then
+            elevated_key="$(jq -r '[.[] | select(.type == "legacy" and (.name == "service_role" or ((.secret_jwt_template.role // "") == "service_role")))][0].api_key // empty' /tmp/project-api-keys.json)"
+            elevated_kind=legacy
+          elif [ "$legacy_count" -eq 0 ] && [ "$secret_count" -eq 1 ]; then
+            elevated_key="$(jq -r '[.[] | select(.type == "secret")][0].api_key // empty' /tmp/project-api-keys.json)"
+            elevated_kind=secret
+          else
+            echo 'Unable to select exactly one elevated Supabase API key.' >&2
+            jq '[.[] | {id, type, name, prefix, hasApiKey: ((.api_key // "") | length > 0)}]' /tmp/project-api-keys.json >&2
+            exit 1
+          fi
+
+          test -n "$elevated_key"
+          echo "::add-mask::${elevated_key}"
+          printf 'SUPABASE_RECLAIM_SERVICE_ROLE_KEY=%s\nSUPABASE_RECLAIM_KEY_KIND=%s\n' "$elevated_key" "$elevated_kind" >> "$GITHUB_ENV"
           rm -f /tmp/project-api-keys.json
 
       - name: Capture read-only database size before reclaim
@@ -255,10 +280,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          rpc_headers=(-H 'content-type: application/json' -H "apikey: ${SUPABASE_RECLAIM_SERVICE_ROLE_KEY}")
+          if [ "$SUPABASE_RECLAIM_KEY_KIND" = legacy ]; then
+            rpc_headers+=(-H "Authorization: Bearer ${SUPABASE_RECLAIM_SERVICE_ROLE_KEY}")
+          fi
           curl --fail-with-body --silent --show-error \
-            -H 'content-type: application/json' \
-            -H "apikey: ${SUPABASE_RECLAIM_SERVICE_ROLE_KEY}" \
-            -H "Authorization: Bearer ${SUPABASE_RECLAIM_SERVICE_ROLE_KEY}" \
+            "${rpc_headers[@]}" \
             --data '{}' \
             "https://${SUPABASE_PROJECT_ID}.supabase.co/rest/v1/rpc/xrpl_preview_steady_qualification_reclaim" \
             > r4f-steady-reclaim-evidence/preview.json
@@ -297,10 +324,12 @@ jobs:
         run: |
           set -euo pipefail
           jq -n --arg id "$AUTHORIZATION_ID" '{p_authorization_id:$id}' > /tmp/reclaim-body.json
+          rpc_headers=(-H 'content-type: application/json' -H "apikey: ${SUPABASE_RECLAIM_SERVICE_ROLE_KEY}")
+          if [ "$SUPABASE_RECLAIM_KEY_KIND" = legacy ]; then
+            rpc_headers+=(-H "Authorization: Bearer ${SUPABASE_RECLAIM_SERVICE_ROLE_KEY}")
+          fi
           curl --fail-with-body --silent --show-error \
-            -H 'content-type: application/json' \
-            -H "apikey: ${SUPABASE_RECLAIM_SERVICE_ROLE_KEY}" \
-            -H "Authorization: Bearer ${SUPABASE_RECLAIM_SERVICE_ROLE_KEY}" \
+            "${rpc_headers[@]}" \
             --data @/tmp/reclaim-body.json \
             "https://${SUPABASE_PROJECT_ID}.supabase.co/rest/v1/rpc/xrpl_execute_steady_qualification_reclaim" \
             > r4f-steady-reclaim-evidence/reclaim-result.json
