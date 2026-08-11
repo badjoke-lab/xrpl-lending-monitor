@@ -35,14 +35,17 @@ grep -Fq "approved_by text not null check (approved_by = 'badjoke-lab')" "$guard
 grep -Fq "used_at is not null" "$guard"
 grep -Fq "set used_at = clock_timestamp()" "$guard"
 
-# The repair must retain the cross-schema revision-3 accounting evidence and its
-# parent identity rows while reclaiming only the six large child tables inside
-# xrpl_steady_v1. It may never use CASCADE or mutate xrpl_resource_guard_v2.
+# The repair retains revision-3 accounting evidence and its parent identity rows.
+# Cross-schema references to retained sessions/ticks are allowed, but none of the
+# six tables actually truncated may participate in a cross-schema FK.
 for relation in commit_chunks messages payload_chunks reference_rows sessions successors ticks works; do
   grep -Fq "'$relation'" "$fix" || grep -Fq "xrpl_steady_v1.${relation}" "$fix"
 done
 grep -Fq "r4f_steady_reclaim_unexpected_isolated_table_set" "$fix"
-grep -Fq "r4f_steady_reclaim_cross_schema_fk_boundary_unexpected" "$fix"
+grep -Fq "v_target_cross_schema_fk_count" "$fix"
+grep -Fq "r4f_steady_reclaim_target_cross_schema_fk_present" "$fix"
+grep -Fq "v_expected_accounting_fk_count" "$fix"
+grep -Fq "r4f_steady_reclaim_accounting_fk_unexpected" "$fix"
 grep -Fq "child_ns.nspname = 'xrpl_resource_guard_v2'" "$fix"
 grep -Fq "child.relname = 'tick_accounting'" "$fix"
 grep -Fq "parent_ns.nspname = 'xrpl_steady_v1'" "$fix"
@@ -55,9 +58,6 @@ grep -Fq "pg_catalog.pg_get_functiondef" "$fix"
 grep -Fq "r4f_steady_reclaim_source_definition_drift" "$fix"
 grep -Fq "r4f_steady_reclaim_partial_patch_verification_failed" "$fix"
 
-# The old eight-table source string is intentionally retained as the exact
-# patch target. Inspect only v_new_truncate when asserting that ticks/sessions
-# are retained by the repaired function.
 python - "$fix" <<'PY'
 from pathlib import Path
 import sys
@@ -78,12 +78,22 @@ for retained in ('xrpl_steady_v1.ticks', 'xrpl_steady_v1.sessions'):
         raise SystemExit(f'exact old TRUNCATE patch target lost {retained}')
 if 'xrpl_resource_guard_v2' in new_block:
     raise SystemExit('partial reclaim new TRUNCATE escaped xrpl_steady_v1')
+if 'cascade' in new_block.lower():
+    raise SystemExit('partial reclaim new TRUNCATE requests cascade')
+
+# The FK safety query must explicitly name every destructive target and must not
+# use sessions/ticks as part of the zero-cross-schema-FK target set.
+fk_start = text.index('into v_target_cross_schema_fk_count')
+fk_end = text.index('if v_target_cross_schema_fk_count <> 0', fk_start)
+fk_block = text[fk_start:fk_end]
+for relation in ('payload_chunks', 'reference_rows', 'commit_chunks', 'messages', 'successors', 'works'):
+    if f"'{relation}'" not in fk_block:
+        raise SystemExit(f'target FK boundary is missing {relation}')
+for retained in ("'sessions'", "'ticks'"):
+    if retained in fk_block:
+        raise SystemExit(f'target FK zero-boundary incorrectly includes retained identity {retained}')
 PY
 
-if grep -Eqi 'truncate[^;]*cascade|truncate[[:space:]]+table[^;]*cascade' "$fix"; then
-  echo 'TRUNCATE CASCADE is forbidden in steady reclaim repair' >&2
-  exit 1
-fi
 if grep -Eq '(^|[^a-z_])(delete[[:space:]]+from|drop[[:space:]]+schema|drop[[:space:]]+table)' "$fix"; then
   echo 'unexpected destructive SQL in steady reclaim repair' >&2
   exit 1
