@@ -14,6 +14,10 @@
 -- Cross-schema foreign keys that involve retained identity tables do not make
 -- the six-table reclaim unsafe. The required boundary is narrower and exact:
 -- none of the six tables being truncated may participate in a cross-schema FK.
+--
+-- If the retained accounting identity does not match the formal steady session,
+-- fail before function mutation and emit a bounded diagnostic describing only
+-- relation names, counts, session ids, and formal tick ids/statuses.
 
 do $repair$
 declare
@@ -22,6 +26,10 @@ declare
   v_expected_accounting_fk_count bigint;
   v_retained_accounting_count bigint;
   v_retained_accounting_join_count bigint;
+  v_accounting_total bigint;
+  v_accounting_sessions jsonb;
+  v_formal_ticks jsonb;
+  v_cross_schema_fks jsonb;
   v_signature regprocedure := to_regprocedure(
     'public.xrpl_execute_steady_qualification_reclaim(text)'
   );
@@ -132,9 +140,54 @@ begin
     and t.status = 'completed';
 
   if v_retained_accounting_count <> 6 or v_retained_accounting_join_count <> 6 then
-    raise exception 'r4f_steady_reclaim_retained_accounting_evidence_unexpected:%/%',
+    select count(*)::bigint
+    into v_accounting_total
+    from xrpl_resource_guard_v2.tick_accounting;
+
+    select coalesce(jsonb_agg(to_jsonb(grouped) order by grouped.accounting_count desc, grouped.session_id), '[]'::jsonb)
+    into v_accounting_sessions
+    from (
+      select session_id, count(*)::bigint as accounting_count
+      from xrpl_resource_guard_v2.tick_accounting
+      group by session_id
+      order by count(*) desc, session_id
+      limit 20
+    ) grouped;
+
+    select coalesce(jsonb_agg(jsonb_build_object(
+      'tickId', tick_id,
+      'status', status,
+      'committedLedgers', committed_ledgers
+    ) order by tick_id), '[]'::jsonb)
+    into v_formal_ticks
+    from xrpl_steady_v1.ticks
+    where session_id = 'r4c2d-steady-msflb8fo-5ebc5adc';
+
+    select coalesce(jsonb_agg(jsonb_build_object(
+      'constraint', fk.conname,
+      'child', child_ns.nspname || '.' || child.relname,
+      'parent', parent_ns.nspname || '.' || parent.relname
+    ) order by child_ns.nspname, child.relname, fk.conname), '[]'::jsonb)
+    into v_cross_schema_fks
+    from pg_catalog.pg_constraint fk
+    join pg_catalog.pg_class child on child.oid = fk.conrelid
+    join pg_catalog.pg_namespace child_ns on child_ns.oid = child.relnamespace
+    join pg_catalog.pg_class parent on parent.oid = fk.confrelid
+    join pg_catalog.pg_namespace parent_ns on parent_ns.oid = parent.relnamespace
+    where fk.contype = 'f'
+      and child_ns.nspname is distinct from parent_ns.nspname
+      and (
+        child_ns.nspname = 'xrpl_steady_v1'
+        or parent_ns.nspname = 'xrpl_steady_v1'
+      );
+
+    raise exception 'r4f_steady_reclaim_retained_accounting_evidence_unexpected:%/% total=% sessions=% formalTicks=% crossSchemaFks=%',
       v_retained_accounting_count,
-      v_retained_accounting_join_count;
+      v_retained_accounting_join_count,
+      v_accounting_total,
+      v_accounting_sessions,
+      v_formal_ticks,
+      v_cross_schema_fks;
   end if;
 
   if v_signature is null then
