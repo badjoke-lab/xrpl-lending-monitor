@@ -10,12 +10,16 @@
 -- cross-schema accounting evidence intact. It reclaims only the six data-heavy
 -- child tables inside xrpl_steady_v1. It does not request cascading truncation
 -- and never mutates xrpl_resource_guard_v2.
+--
+-- Cross-schema foreign keys that involve retained identity tables do not make
+-- the six-table reclaim unsafe. The required boundary is narrower and exact:
+-- none of the six tables being truncated may participate in a cross-schema FK.
 
 do $repair$
 declare
   v_tables text[];
-  v_cross_schema_fk_count bigint;
-  v_expected_cross_schema_fk_count bigint;
+  v_target_cross_schema_fk_count bigint;
+  v_expected_accounting_fk_count bigint;
   v_retained_accounting_count bigint;
   v_retained_accounting_join_count bigint;
   v_signature regprocedure := to_regprocedure(
@@ -66,21 +70,38 @@ begin
   end if;
 
   select count(*)::bigint
-  into v_cross_schema_fk_count
+  into v_target_cross_schema_fk_count
   from pg_catalog.pg_constraint fk
   join pg_catalog.pg_class child on child.oid = fk.conrelid
   join pg_catalog.pg_namespace child_ns on child_ns.oid = child.relnamespace
   join pg_catalog.pg_class parent on parent.oid = fk.confrelid
   join pg_catalog.pg_namespace parent_ns on parent_ns.oid = parent.relnamespace
   where fk.contype = 'f'
+    and child_ns.nspname is distinct from parent_ns.nspname
     and (
-      child_ns.nspname = 'xrpl_steady_v1'
-      or parent_ns.nspname = 'xrpl_steady_v1'
-    )
-    and child_ns.nspname is distinct from parent_ns.nspname;
+      (
+        child_ns.nspname = 'xrpl_steady_v1'
+        and child.relname = any(array[
+          'payload_chunks', 'reference_rows', 'commit_chunks',
+          'messages', 'successors', 'works'
+        ]::text[])
+      )
+      or (
+        parent_ns.nspname = 'xrpl_steady_v1'
+        and parent.relname = any(array[
+          'payload_chunks', 'reference_rows', 'commit_chunks',
+          'messages', 'successors', 'works'
+        ]::text[])
+      )
+    );
+
+  if v_target_cross_schema_fk_count <> 0 then
+    raise exception 'r4f_steady_reclaim_target_cross_schema_fk_present:%',
+      v_target_cross_schema_fk_count;
+  end if;
 
   select count(*)::bigint
-  into v_expected_cross_schema_fk_count
+  into v_expected_accounting_fk_count
   from pg_catalog.pg_constraint fk
   join pg_catalog.pg_class child on child.oid = fk.conrelid
   join pg_catalog.pg_namespace child_ns on child_ns.oid = child.relnamespace
@@ -92,10 +113,9 @@ begin
     and parent_ns.nspname = 'xrpl_steady_v1'
     and parent.relname = 'ticks';
 
-  if v_cross_schema_fk_count <> 1 or v_expected_cross_schema_fk_count <> 1 then
-    raise exception 'r4f_steady_reclaim_cross_schema_fk_boundary_unexpected:%/%',
-      v_cross_schema_fk_count,
-      v_expected_cross_schema_fk_count;
+  if v_expected_accounting_fk_count <> 1 then
+    raise exception 'r4f_steady_reclaim_accounting_fk_unexpected:%',
+      v_expected_accounting_fk_count;
   end if;
 
   select count(*)::bigint
