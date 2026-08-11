@@ -4,11 +4,29 @@ set -euo pipefail
 file='supabase/migrations/20260811012000_xrpl_r5_steady_qualification_reclaim_guard.sql'
 test -f "$file"
 
-# Exact retained qualification boundary.
+# Exact retained qualification boundary. These values are all from the same
+# formal artifact chain: workflow 30992583324 -> commit 52ebc396... ->
+# artifact 8924984813.
 grep -Fq "r4c2d-steady-msflb8fo-5ebc5adc" "$file"
-grep -Fq "30975277983" "$file"
+grep -Fq "30992583324" "$file"
+grep -Fq "52ebc396f7c5217ae06e595aabe2053440f1076a" "$file"
 grep -Fq "8924984813" "$file"
-grep -Fq "fb78d4600a955a9f208cc8418786437eec367c709f7cd5b7476e43b0abeaae7c" "$file"
+grep -Fq "sha256:76f4580d83c053dadfe8a707c7bf53b53d99d361fd12c12adefe76061a9dafa3" "$file"
+grep -Fq "d5be00fddec73f24bfec5d939bc3a65278ad5fb7765d1764ba10b289350e543a" "$file"
+grep -Fq "70b391931d8f9637e07b79fef75cfd4ce804dd859edfce294b5b67c4a04aac9a" "$file"
+grep -Fq "2026-08-05T04:37:08.161Z" "$file"
+
+# Do not regress to the older retained-source lineage as the top-level reclaim
+# provenance. Those values were the source of the mixed-chain bug in PR #1300.
+for stale in \
+  "30975277983" \
+  "d7e6eb86eb0e660dffd3ad5e54d2fd995ba8a54c" \
+  "fb78d4600a955a9f208cc8418786437eec367c709f7cd5b7476e43b0abeaae7c"; do
+  if grep -Fq "$stale" "$file"; then
+    echo "stale mixed provenance remains in reclaim migration: $stale" >&2
+    exit 1
+  fi
+done
 
 # Explicit owner authorization is mandatory and single-use.
 grep -Fq "issue_number integer not null check (issue_number = 1261)" "$file"
