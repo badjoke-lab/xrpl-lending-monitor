@@ -73,8 +73,8 @@ for forbidden in (
         raise SystemExit(f"bounded steady reclaim workflow contains forbidden capability: {forbidden.strip()}")
 if supabase.count("issues: write") != 1:
     raise SystemExit("bounded steady reclaim issue-write capability must remain exactly one permission")
-if supabase.count("xrpl_execute_steady_qualification_reclaim") != 1:
-    raise SystemExit("bounded steady reclaim workflow must contain exactly one destructive RPC locator")
+if supabase.count("rest/v1/rpc/xrpl_execute_steady_qualification_reclaim") != 1:
+    raise SystemExit("bounded steady reclaim workflow must contain exactly one destructive RPC invocation locator")
 '''
 text = text[:supabase_start] + replacement + text[g3_start:]
 
