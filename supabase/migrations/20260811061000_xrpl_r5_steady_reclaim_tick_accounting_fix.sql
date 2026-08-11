@@ -2,34 +2,30 @@
 --
 -- Production run 31466232756 failed closed because
 -- xrpl_resource_guard_v2.tick_accounting references xrpl_steady_v1.ticks.
--- The original eight-table deletion therefore could not commit. The retained
--- revision-3 accounting evidence is explicitly outside the reclaim scope and
--- the original reclaim evidence already declares revision3AccountingUntouched.
+-- The original eight-table deletion therefore could not commit.
 --
--- This repair keeps the formal session row, six completed tick rows, and the
--- cross-schema accounting evidence intact. It reclaims only the six data-heavy
--- child tables inside xrpl_steady_v1. It does not request cascading truncation
--- and never mutates xrpl_resource_guard_v2.
+-- Production diagnostic run 31499605533 established the actual retained
+-- cross-schema boundary. The formal R4C2D steady qualification session has no
+-- revision-3 tick_accounting rows; those rows belong to later r4c3-accounting
+-- sessions. The exact retained cross-schema dependencies are attempts ->
+-- sessions and tick_accounting -> ticks. Both parent identity tables are kept.
 --
--- Cross-schema foreign keys that involve retained identity tables do not make
--- the six-table reclaim unsafe. The required boundary is narrower and exact:
--- none of the six tables being truncated may participate in a cross-schema FK.
+-- This repair keeps the formal session row and its six completed tick rows.
+-- It reclaims only the six data-heavy child tables inside xrpl_steady_v1.
+-- It does not request cascading truncation and never mutates
+-- xrpl_resource_guard_v2.
 --
--- If the retained accounting identity does not match the formal steady session,
--- fail before function mutation and emit a bounded diagnostic describing only
--- relation names, counts, session ids, and formal tick ids/statuses.
+-- Fail closed before function mutation unless the formal qualification identity,
+-- destructive-table FK boundary, and complete retained cross-schema FK set match
+-- the production evidence exactly.
 
 do $repair$
 declare
   v_tables text[];
   v_target_cross_schema_fk_count bigint;
-  v_expected_accounting_fk_count bigint;
-  v_retained_accounting_count bigint;
-  v_retained_accounting_join_count bigint;
-  v_accounting_total bigint;
-  v_accounting_sessions jsonb;
-  v_formal_ticks jsonb;
   v_cross_schema_fks jsonb;
+  v_formal_session_count bigint;
+  v_formal_tick_count bigint;
   v_signature regprocedure := to_regprocedure(
     'public.xrpl_execute_steady_qualification_reclaim(text)'
   );
@@ -108,86 +104,69 @@ begin
       v_target_cross_schema_fk_count;
   end if;
 
-  select count(*)::bigint
-  into v_expected_accounting_fk_count
+  select coalesce(jsonb_agg(jsonb_build_object(
+    'constraint', fk.conname,
+    'child', child_ns.nspname || '.' || child.relname,
+    'parent', parent_ns.nspname || '.' || parent.relname
+  ) order by child_ns.nspname, child.relname, fk.conname), '[]'::jsonb)
+  into v_cross_schema_fks
   from pg_catalog.pg_constraint fk
   join pg_catalog.pg_class child on child.oid = fk.conrelid
   join pg_catalog.pg_namespace child_ns on child_ns.oid = child.relnamespace
   join pg_catalog.pg_class parent on parent.oid = fk.confrelid
   join pg_catalog.pg_namespace parent_ns on parent_ns.oid = parent.relnamespace
   where fk.contype = 'f'
-    and child_ns.nspname = 'xrpl_resource_guard_v2'
-    and child.relname = 'tick_accounting'
-    and parent_ns.nspname = 'xrpl_steady_v1'
-    and parent.relname = 'ticks';
+    and child_ns.nspname is distinct from parent_ns.nspname
+    and (
+      child_ns.nspname = 'xrpl_steady_v1'
+      or parent_ns.nspname = 'xrpl_steady_v1'
+    );
 
-  if v_expected_accounting_fk_count <> 1 then
-    raise exception 'r4f_steady_reclaim_accounting_fk_unexpected:%',
-      v_expected_accounting_fk_count;
+  if v_cross_schema_fks is distinct from jsonb_build_array(
+    jsonb_build_object(
+      'constraint', 'attempts_session_id_fkey',
+      'child', 'xrpl_resource_guard_v2.attempts',
+      'parent', 'xrpl_steady_v1.sessions'
+    ),
+    jsonb_build_object(
+      'constraint', 'tick_accounting_session_id_tick_id_fkey',
+      'child', 'xrpl_resource_guard_v2.tick_accounting',
+      'parent', 'xrpl_steady_v1.ticks'
+    )
+  ) then
+    raise exception 'r4f_steady_reclaim_retained_cross_schema_fk_drift:%',
+      v_cross_schema_fks;
   end if;
 
   select count(*)::bigint
-  into v_retained_accounting_count
-  from xrpl_resource_guard_v2.tick_accounting
-  where session_id = 'r4c2d-steady-msflb8fo-5ebc5adc';
+  into v_formal_session_count
+  from xrpl_steady_v1.sessions
+  where session_id = 'r4c2d-steady-msflb8fo-5ebc5adc'
+    and status = 'completed'
+    and target_ticks = 6
+    and batch_size = 24
+    and completed_ticks = 6
+    and committed_ledgers = 144;
+
+  if v_formal_session_count <> 1 then
+    raise exception 'r4f_steady_reclaim_formal_session_identity_unexpected:%',
+      v_formal_session_count;
+  end if;
 
   select count(*)::bigint
-  into v_retained_accounting_join_count
-  from xrpl_resource_guard_v2.tick_accounting a
-  join xrpl_steady_v1.ticks t
-    on t.session_id = a.session_id and t.tick_id = a.tick_id
-  where a.session_id = 'r4c2d-steady-msflb8fo-5ebc5adc'
-    and t.status = 'completed';
+  into v_formal_tick_count
+  from xrpl_steady_v1.ticks
+  where session_id = 'r4c2d-steady-msflb8fo-5ebc5adc'
+    and status = 'completed'
+    and tick_sequence between 1 and 6
+    and end_ledger_index - start_ledger_index + 1 = 24
+    and work_count = 24
+    and completed_at is not null
+    and error_message is null;
 
-  if v_retained_accounting_count <> 6 or v_retained_accounting_join_count <> 6 then
-    select count(*)::bigint
-    into v_accounting_total
-    from xrpl_resource_guard_v2.tick_accounting;
-
-    select coalesce(jsonb_agg(to_jsonb(grouped) order by grouped.accounting_count desc, grouped.session_id), '[]'::jsonb)
-    into v_accounting_sessions
-    from (
-      select session_id, count(*)::bigint as accounting_count
-      from xrpl_resource_guard_v2.tick_accounting
-      group by session_id
-      order by count(*) desc, session_id
-      limit 20
-    ) grouped;
-
-    select coalesce(jsonb_agg(jsonb_build_object(
-      'tickId', tick_id,
-      'status', status,
-      'committedLedgers', end_ledger_index - start_ledger_index + 1
-    ) order by tick_id), '[]'::jsonb)
-    into v_formal_ticks
-    from xrpl_steady_v1.ticks
-    where session_id = 'r4c2d-steady-msflb8fo-5ebc5adc';
-
-    select coalesce(jsonb_agg(jsonb_build_object(
-      'constraint', fk.conname,
-      'child', child_ns.nspname || '.' || child.relname,
-      'parent', parent_ns.nspname || '.' || parent.relname
-    ) order by child_ns.nspname, child.relname, fk.conname), '[]'::jsonb)
-    into v_cross_schema_fks
-    from pg_catalog.pg_constraint fk
-    join pg_catalog.pg_class child on child.oid = fk.conrelid
-    join pg_catalog.pg_namespace child_ns on child_ns.oid = child.relnamespace
-    join pg_catalog.pg_class parent on parent.oid = fk.confrelid
-    join pg_catalog.pg_namespace parent_ns on parent_ns.oid = parent.relnamespace
-    where fk.contype = 'f'
-      and child_ns.nspname is distinct from parent_ns.nspname
-      and (
-        child_ns.nspname = 'xrpl_steady_v1'
-        or parent_ns.nspname = 'xrpl_steady_v1'
-      );
-
-    raise exception 'r4f_steady_reclaim_retained_accounting_evidence_unexpected:%/% total=% sessions=% formalTicks=% crossSchemaFks=%',
-      v_retained_accounting_count,
-      v_retained_accounting_join_count,
-      v_accounting_total,
-      v_accounting_sessions,
-      v_formal_ticks,
-      v_cross_schema_fks;
+  if v_formal_tick_count <> 6 then
+    raise exception 'r4f_steady_reclaim_formal_tick_identity_unexpected:%',
+      v_formal_tick_count;
   end if;
 
   if v_signature is null then
