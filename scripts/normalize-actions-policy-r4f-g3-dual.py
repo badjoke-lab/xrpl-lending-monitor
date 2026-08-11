@@ -43,13 +43,16 @@ for required in (
     "SUPABASE_PROJECT_ID",
     "SUPABASE_DB_PASSWORD",
     "supabase link --project-ref",
+    "RECLAIM_GUARD_VERSION: '20260811012000'",
+    "MIGRATION_VERSION: '20260811061000'",
+    "MIGRATION_PATH: supabase/migrations/20260811061000_xrpl_r5_steady_reclaim_tick_accounting_fix.sql",
     "supabase_migrations.schema_migrations",
     "read_only:true",
-    "expected_tail='20260809151000 20260810123000 20260810133000 20260811012000'",
-    "Unexpected remote migration history for bounded reclaim",
+    "expected_tail='20260809151000 20260810123000 20260810133000 20260811012000 20260811061000'",
+    "Unexpected remote migration history for bounded reclaim repair",
     "supabase db push --linked --dry-run",
-    "Scoped migration dry run is not clean after exact deferred isolation.",
-    "20260811012000",
+    "supabase db push --linked --yes",
+    "repair migration remains pending after exact scoped db push",
     "api-keys?reveal=true",
     "database/query",
     "xrpl_preview_steady_qualification_reclaim",
@@ -66,7 +69,6 @@ for forbidden in (
     "  schedule:",
     "pull_request_target",
     "contents: write",
-    "supabase db push --linked --yes",
     "supabase migration repair",
     "supabase functions deploy",
     "supabase functions delete",
@@ -79,6 +81,8 @@ for forbidden in (
         raise SystemExit(f"bounded steady reclaim workflow contains forbidden capability: {forbidden.strip()}")
 if supabase.count("issues: write") != 1:
     raise SystemExit("bounded steady reclaim issue-write capability must remain exactly one permission")
+if supabase.count("supabase db push --linked --yes") != 1:
+    raise SystemExit("bounded steady reclaim repair must have exactly one migration-apply invocation")
 if supabase.count("rest/v1/rpc/xrpl_execute_steady_qualification_reclaim") != 1:
     raise SystemExit("bounded steady reclaim workflow must contain exactly one destructive RPC invocation locator")
 '''
