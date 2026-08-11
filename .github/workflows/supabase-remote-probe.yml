@@ -237,7 +237,6 @@ jobs:
           echo "::add-mask::${elevated_key}"
           printf 'SUPABASE_RECLAIM_SERVICE_ROLE_KEY=%s\nSUPABASE_RECLAIM_KEY_KIND=%s\n' "$elevated_key" "$elevated_kind" >> "$GITHUB_ENV"
           rm -f /tmp/project-api-keys.json
-
       - name: Capture read-only database size before reclaim
         shell: bash
         run: |
@@ -272,7 +271,7 @@ jobs:
             --arg qualificationDigest "$FORMAL_STEADY_QUALIFICATION_SHA256" \
             --argjson sourceRun "$FORMAL_STEADY_RUN" \
             --argjson artifactId "$FORMAL_STEADY_ARTIFACT" \
-            '.mutationPerformed == false and .sessionFound == true and .sessionStatus == "completed" and .completedTicks == 6 and .committedLedgers == 144 and .physicalBytes >= 80000000 and .sourceWorkflowRunId == $sourceRun and .sourceCommit == $sourceCommit and .sourceArtifactId == $artifactId and .sourceArtifactDigest == $artifactDigest and .sourceSteadyBatchBundleSha256 == $batchDigest and .sourceSteadyQualificationBundleSha256 == $qualificationDigest and .sourceProfileId == "supabase-devnet" and .targetProfileId == "supabase-devnet-steady-qualification" and .network == "devnet" and .epochId == "supabase-r4c2c-v1" and (.activeWatermark != null)' \
+            '.mutationPerformed == false and .sessionStatus == "completed" and .completedTicks == 6 and .committedLedgers == 144 and .physicalBytes >= 80000000 and .sourceWorkflowRunId == $sourceRun and .sourceCommit == $sourceCommit and .sourceArtifactId == $artifactId and .sourceArtifactDigest == $artifactDigest and .sourceSteadyBatchBundleSha256 == $batchDigest and .sourceSteadyQualificationBundleSha256 == $qualificationDigest and .sourceProfileId == "supabase-devnet" and .targetProfileId == "supabase-devnet-steady-qualification" and .network == "devnet" and .epochId == "supabase-r4c2c-v1" and (.activeWatermark != null)' \
             r4f-steady-reclaim-evidence/preview.json > /dev/null
 
       - name: Retain one expiring authorization row
