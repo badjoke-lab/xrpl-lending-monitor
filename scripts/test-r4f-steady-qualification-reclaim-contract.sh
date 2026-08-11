@@ -54,6 +54,11 @@ grep -Fq "xrpl_resource_guard_v2.tick_accounting" "$fix"
 grep -Fq "r4f_steady_reclaim_retained_accounting_evidence_unexpected" "$fix"
 grep -Fq "v_retained_accounting_count <> 6" "$fix"
 grep -Fq "v_retained_accounting_join_count <> 6" "$fix"
+grep -Fq "'committedLedgers', end_ledger_index - start_ledger_index + 1" "$fix"
+if grep -Eq "'committedLedgers',[[:space:]]*committed_ledgers" "$fix"; then
+  echo 'steady tick diagnostic references nonexistent ticks.committed_ledgers' >&2
+  exit 1
+fi
 grep -Fq "pg_catalog.pg_get_functiondef" "$fix"
 grep -Fq "r4f_steady_reclaim_source_definition_drift" "$fix"
 grep -Fq "r4f_steady_reclaim_partial_patch_verification_failed" "$fix"
