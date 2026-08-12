@@ -6,7 +6,7 @@ on:
       - agent/r4f-repin-bun-after-supabase-cli
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   patch:
@@ -19,6 +19,7 @@ jobs:
         with:
           ref: agent/r4f-repin-bun-after-supabase-cli
           fetch-depth: 1
+          persist-credentials: false
 
       - name: Apply exact tool-order fix and self-remove
         shell: bash
@@ -80,19 +81,20 @@ jobs:
           Path('.github/workflows/temporary-r4f-bun-repin-patch.yml').unlink()
           PY
 
-          sed -n '320,350p' .github/workflows/r4f-revision4-12-ledger-qualification.yml
           bash scripts/test-r4f-revision4-12-ledger-qualification-contract.sh
           git diff --check
+          git diff -- .github/workflows/r4f-revision4-12-ledger-qualification.yml \
+                       scripts/test-r4f-revision4-12-ledger-qualification-contract.sh \
+            > /tmp/r4f-bun-repin.patch
+          test -s /tmp/r4f-bun-repin.patch
 
-      - name: Commit exact fix to patch branch
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add .github/workflows/r4f-revision4-12-ledger-qualification.yml \
-                  scripts/test-r4f-revision4-12-ledger-qualification-contract.sh \
-                  .github/workflows/temporary-r4f-bun-repin-patch.yml
-          git diff --cached --check
-          git commit -m 'Repin Bun after Supabase CLI setup'
-          git push origin HEAD:agent/r4f-repin-bun-after-supabase-cli
+      - name: Upload verified modified files
+        uses: actions/upload-artifact@v4
+        with:
+          name: r4f-bun-repin-verified-files
+          path: |
+            .github/workflows/r4f-revision4-12-ledger-qualification.yml
+            scripts/test-r4f-revision4-12-ledger-qualification-contract.sh
+            /tmp/r4f-bun-repin.patch
+          if-no-files-found: error
+          retention-days: 1
