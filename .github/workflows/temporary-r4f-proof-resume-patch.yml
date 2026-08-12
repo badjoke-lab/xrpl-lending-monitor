@@ -31,6 +31,20 @@ jobs:
           set -euo pipefail
           python3 -m py_compile scripts/temporary-r4f-proof-resume-patch.py
           python3 scripts/temporary-r4f-proof-resume-patch.py
+          python3 <<'PY'
+          from pathlib import Path
+          path = Path('scripts/test-r4f-revision4-12-ledger-qualification-contract.sh')
+          text = path.read_text()
+          text = text.replace(
+              "grep -Fq 'Qualification state: `${QUALIFICATION_STATE_MODE}`' \"$workflow\"",
+              "grep -Fq 'Qualification state: \\`${QUALIFICATION_STATE_MODE}\\`' \"$workflow\"",
+          )
+          text = text.replace(
+              "grep -Fq 'Qualification state digest: `${QUALIFICATION_STATE_DIGEST}`' \"$workflow\"",
+              "grep -Fq 'Qualification state digest: \\`${QUALIFICATION_STATE_DIGEST}\\`' \"$workflow\"",
+          )
+          path.write_text(text)
+          PY
           node --check scripts/inspect-r4f-revision4-qualification-state.mjs
           bun scripts/build-r4f-revision4-proof-bundle.ts \
             supabase/functions/xrpl-r4f-revision4-proof-batch/index.ts \
