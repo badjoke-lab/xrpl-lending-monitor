@@ -60,6 +60,12 @@ function integer(value, name) {
   return parsed
 }
 
+function nonNegativeInteger(value, name) {
+  const parsed = Number(value)
+  if (!Number.isSafeInteger(parsed) || parsed < 0) throw new Error(`${name} must be a non-negative safe integer`)
+  return parsed
+}
+
 function sha256(text) {
   return createHash('sha256').update(text).digest('hex')
 }
@@ -229,6 +235,35 @@ const runtimeSourceSetSha256 = sha256(canonicalSourceSet)
 const prepareSource = runtimeSources.find((source) => source.key === 'prepare')
 if (!prepareSource) throw new Error('R5 prepare source is missing from runtime source set')
 
+const partialStateRows = await readOnlyQuery(
+  `select jsonb_build_object(
+     'prepareRev4Exists', to_regprocedure('public.xrpl_prepare_r5_revision4_active_recovery(text,text,text,bigint,text,timestamp with time zone)') is not null,
+     'rebindStrictRev4Exists', to_regprocedure('public.xrpl_rebind_r5_revision4_prebatch_recovery_to_active_boundary_strict(text,timestamp with time zone)') is not null,
+     'rebindRev4Exists', to_regprocedure('public.xrpl_rebind_r5_revision4_prebatch_recovery_to_active_boundary(text,timestamp with time zone)') is not null,
+     'claimRev4Exists', to_regprocedure('public.xrpl_claim_r5_revision4_recovery_batch(text,text,bigint,text,timestamp with time zone,integer)') is not null,
+     'progressiveClaimRev4Exists', to_regprocedure('public.xrpl_claim_r5_revision4_recovery_batch_from_prepared_head(text,text,timestamp with time zone,integer)') is not null,
+     'completionRev4Exists', to_regprocedure('public.xrpl_complete_r5_revision4_recovery_batch(text,text,text,timestamp with time zone,text,text,text,text,bigint,numeric,numeric,numeric)') is not null,
+     'checkpointRows', (select count(*) from xrpl_r5_v1.active_checkpoints where profile_revision = 4),
+     'runRows', (select count(*) from xrpl_r5_v1.recovery_runs where profile_revision = 4),
+     'batchRows', (select count(*) from xrpl_r5_v1.recovery_batches where profile_revision = 4)
+   ) as state`,
+)
+if (partialStateRows.length !== 1 || !partialStateRows[0]?.state || typeof partialStateRows[0].state !== 'object') {
+  throw new Error('revision-4 partial-state preflight response is invalid')
+}
+const rawPartialState = partialStateRows[0].state
+const revision4PartialState = {
+  prepareRev4Exists: rawPartialState.prepareRev4Exists === true,
+  rebindStrictRev4Exists: rawPartialState.rebindStrictRev4Exists === true,
+  rebindRev4Exists: rawPartialState.rebindRev4Exists === true,
+  claimRev4Exists: rawPartialState.claimRev4Exists === true,
+  progressiveClaimRev4Exists: rawPartialState.progressiveClaimRev4Exists === true,
+  completionRev4Exists: rawPartialState.completionRev4Exists === true,
+  checkpointRows: nonNegativeInteger(rawPartialState.checkpointRows, 'revision-4 checkpoint row count'),
+  runRows: nonNegativeInteger(rawPartialState.runRows, 'revision-4 run row count'),
+  batchRows: nonNegativeInteger(rawPartialState.batchRows, 'revision-4 batch row count'),
+}
+
 await mkdir(evidenceDirectory, { recursive: true })
 for (const source of runtimeSources) {
   await writeFile(
@@ -237,7 +272,7 @@ for (const source of runtimeSources) {
   )
 }
 const evidence = {
-  schemaVersion: 4,
+  schemaVersion: 5,
   purpose: 'r4f-g3-isolated-window-scheduler-prepare',
   sourceRunId,
   sourceCommit,
@@ -267,6 +302,7 @@ const evidence = {
     consecutiveFailures: Number(runtime.consecutive_failures),
     updatedAt: runtime.updated_at ?? null,
   },
+  revision4PartialState,
   r5PrepareSource: {
     sha256: prepareSource.sha256,
     anchors: prepareSource.anchors,
@@ -328,6 +364,7 @@ process.stdout.write(`${JSON.stringify({
   projectIdentityDigest,
   runtimeStatus: runtime.status,
   runtimeTickCount: Number(runtime.tick_count),
+  revision4PartialState,
   r5PrepareSourceDefinitionSha256: prepareSource.sha256,
   r5RuntimeSourceSetSha256: runtimeSourceSetSha256,
   runtimeSources: runtimeSources.map(({ key, signature, sha256: sourceSha }) => ({ key, signature, sha256: sourceSha })),
