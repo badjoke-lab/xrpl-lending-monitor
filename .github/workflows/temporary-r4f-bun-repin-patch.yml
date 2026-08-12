@@ -39,19 +39,19 @@ jobs:
           next_index = lines.index(next_marker)
           if not (bun_index < supabase_index < next_index):
               raise SystemExit('unexpected pre-fix tool ordering')
-          replacement = """      - name: Set up Supabase CLI
-                uses: supabase/setup-cli@3c2f5e2ae34c34e428e8e206e2c4d21fa2d20fbf
-                with:
-                  version: latest
-
-              - name: Set up pinned Bun for proof prebundle
-                uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
-                with:
-                  bun-version: 1.3.14
-
-          """
-          replacement = replacement.replace('              ', '      ').replace('                ', '        ').replace('                  ', '          ')
-          lines[bun_index:next_index] = replacement.splitlines(keepends=True)
+          replacement = [
+              '      - name: Set up Supabase CLI\n',
+              '        uses: supabase/setup-cli@3c2f5e2ae34c34e428e8e206e2c4d21fa2d20fbf\n',
+              '        with:\n',
+              '          version: latest\n',
+              '\n',
+              '      - name: Set up pinned Bun for proof prebundle\n',
+              '        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6\n',
+              '        with:\n',
+              '          bun-version: 1.3.14\n',
+              '\n',
+          ]
+          lines[bun_index:next_index] = replacement
           workflow_path.write_text(''.join(lines))
 
           contract_path = Path('scripts/test-r4f-revision4-12-ledger-qualification-contract.sh')
@@ -80,6 +80,7 @@ jobs:
           Path('.github/workflows/temporary-r4f-bun-repin-patch.yml').unlink()
           PY
 
+          sed -n '320,350p' .github/workflows/r4f-revision4-12-ledger-qualification.yml
           bash scripts/test-r4f-revision4-12-ledger-qualification-contract.sh
           git diff --check
 
