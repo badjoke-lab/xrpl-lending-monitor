@@ -82,8 +82,21 @@ grep -Fq "test \"\$(git hash-object \"\$RUNTIME_PATH\")\" = '350238cec920446faa0
 grep -Fq "expires=\"\$(date -u -d '+2 hours' '+%Y-%m-%dT%H:%M:%SZ')\"" "$workflow"
 grep -Fq 'prepare_source=${PREPARE_SOURCE_SHA}' "$workflow"
 grep -Fq 'prepare_source=([a-f0-9]{64})' "$workflow"
+grep -Fq 'migration_state=applied_clean prepare_run=${GITHUB_RUN_ID}' "$workflow"
+grep -Fq 'migration_state=applied_clean prepare_run=([0-9]+)' "$workflow"
+grep -Fq 'Migration state: `applied_clean`' "$workflow"
 grep -Fq 'Revision-3 runtime source-set SHA-256' "$workflow"
+grep -Fq 'checkpointRev4Exists' "$workflow"
 grep -Fq 'rebindStrictRev4Exists' "$workflow"
+grep -Fq 'egressPolicyRows' "$workflow"
+grep -Fq 'runIdRows' "$workflow"
+grep -Fq 'evidenceRows' "$workflow"
+grep -Fq "20260809151000 20260810123000 20260810133000 20260811012000 20260811061000" "$workflow"
+grep -Fq "policy_id='r5-revision4-egress-4581-v1'" "$workflow"
+grep -Fq 'maximum_ledgers_per_claim=12' "$workflow"
+grep -Fq 'maximum_billable_egress_bytes_per_ledger=4581' "$workflow"
+grep -Fq 'maximum_claim_billable_egress_bytes=54972' "$workflow"
+grep -Fq 'maximum_claim_exclusive_reservation_bytes=54973' "$workflow"
 grep -Fq 'r4f-g3-isolated-window-prepare-evidence' "$workflow"
 grep -Fq 'test $((expires_epoch - auth_epoch)) -le 7200' "$workflow"
 grep -Fq 'test "$ACTUAL_PREPARE_SOURCE" = "$EXPECTED_PREPARE_SOURCE"' "$workflow"
@@ -91,6 +104,9 @@ grep -Fq 'supabase functions deploy "$PROOF_FUNCTION"' "$workflow"
 grep -Fq 'supabase functions delete "$PROOF_FUNCTION"' "$workflow"
 
 for forbidden in \
+  'supabase db push' \
+  'SUPABASE_DB_PASSWORD' \
+  'supabase link' \
   'supabase functions deploy xrpl-r5-recovery-batch' \
   'supabase functions delete xrpl-r5-recovery-batch' \
   "MAINNET_ENABLED: 'true'" \
