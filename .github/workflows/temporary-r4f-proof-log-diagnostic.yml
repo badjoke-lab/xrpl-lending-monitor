@@ -17,7 +17,7 @@ jobs:
       SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
       SOURCE_COMMIT: '18dd9151f779ecaffee7e7580f1c972eef29ba3e'
     steps:
-      - name: Plan compact qualification checkpoint without executing
+      - name: Validate compact checkpoint read-side and target schema read-only
         shell: bash
         run: |
           set -euo pipefail
@@ -42,28 +42,74 @@ jobs:
             sql=sql.replaceAll(key,value)
           }
           if(/__[A-Z0-9_]+__/u.test(sql)) throw new Error('unresolved token')
-          const explain=`EXPLAIN (VERBOSE, COSTS OFF) ${sql}`
+          const marker=',\ninserted as ('
+          const markerIndex=sql.indexOf(marker)
+          if(markerIndex<0) throw new Error('inserted CTE marker missing')
+          const readSide=sql.slice(0,markerIndex)+`\nselect\n  state_digest,\n  watermark_ledger_index,\n  watermark_ledger_hash,\n  watermark_work_id,\n  row_counts,\n  section_digests\nfrom checkpoint_payload;`
           const endpoint=`https://api.supabase.com/v1/projects/${project}/database/query`
-          const response=await fetch(endpoint,{
-            method:'POST',
-            headers:{authorization:`Bearer ${token}`,'content-type':'application/json',accept:'application/json'},
-            body:JSON.stringify({query:explain,read_only:true}),
-            signal:AbortSignal.timeout(60_000),
-          })
-          const text=await response.text()
-          if(!response.ok) throw new Error(`read-only EXPLAIN failed:${response.status}:${text.slice(0,1500)}`)
-          const parsed=JSON.parse(text)
-          const rows=Array.isArray(parsed)?parsed:Array.isArray(parsed?.result)?parsed.result:[]
+          async function query(queryText){
+            const response=await fetch(endpoint,{
+              method:'POST',
+              headers:{authorization:`Bearer ${token}`,'content-type':'application/json',accept:'application/json'},
+              body:JSON.stringify({query:queryText,read_only:true}),
+              signal:AbortSignal.timeout(60_000),
+            })
+            const text=await response.text()
+            if(!response.ok) throw new Error(`read-only query failed:${response.status}:${text.slice(0,2000)}`)
+            const parsed=JSON.parse(text)
+            return Array.isArray(parsed)?parsed:Array.isArray(parsed?.result)?parsed.result:[]
+          }
+          const planRows=await query(`EXPLAIN (VERBOSE, COSTS OFF) ${readSide}`)
+          const schemaSql=`
+          with columns as (
+            select column_name,data_type,udt_name,is_nullable,ordinal_position
+            from information_schema.columns
+            where table_schema='xrpl_r5_v1' and table_name='active_checkpoints'
+          ), constraints as (
+            select c.conname,c.contype,array_agg(a.attname order by u.ordinality) as columns
+            from pg_constraint c
+            join pg_class t on t.oid=c.conrelid
+            join pg_namespace n on n.oid=t.relnamespace
+            join unnest(c.conkey) with ordinality as u(attnum,ordinality) on true
+            join pg_attribute a on a.attrelid=t.oid and a.attnum=u.attnum
+            where n.nspname='xrpl_r5_v1' and t.relname='active_checkpoints'
+            group by c.conname,c.contype
+          )
+          select jsonb_build_object(
+            'columns',(select jsonb_agg(to_jsonb(columns) order by ordinal_position) from columns),
+            'constraints',(select jsonb_agg(to_jsonb(constraints) order by conname) from constraints)
+          ) as value;
+          `.trim()
+          const schemaRows=await query(schemaSql)
+          const schemaValue=schemaRows?.[0]?.value??schemaRows?.[0]?.VALUE??null
+          if(!schemaValue) throw new Error('target schema evidence unavailable')
+          const expectedColumns=[
+            'checkpoint_id','profile_id','profile_revision','profile_identity_digest','selection_digest',
+            'source_profile_id','network','epoch_id','base_identity','watermark_ledger_index',
+            'watermark_ledger_hash','watermark_work_id','observed_at','state_digest','row_counts',
+            'section_digests','state'
+          ]
+          const actualColumns=new Set((schemaValue.columns??[]).map(c=>c.column_name))
+          const missing=expectedColumns.filter(name=>!actualColumns.has(name))
+          if(missing.length) throw new Error(`active_checkpoints missing columns:${missing.join(',')}`)
+          const conflictConstraint=(schemaValue.constraints??[]).find(c=>
+            (c.contype==='p'||c.contype==='u') && Array.isArray(c.columns) && c.columns.length===1 && c.columns[0]==='checkpoint_id'
+          )
+          if(!conflictConstraint) throw new Error('checkpoint_id unique/primary constraint unavailable')
           const output={
-            schemaVersion:1,
-            purpose:'r4f-compact-checkpoint-production-schema-plan-readonly',
+            schemaVersion:2,
+            purpose:'r4f-compact-checkpoint-production-schema-validation-readonly',
             sourceCommit,
             readOnlyManagementApi:true,
             explainOnly:true,
             analyze:false,
             productionMutationPerformed:false,
-            planRowCount:rows.length,
-            planned:true,
+            readSidePlanned:true,
+            planRowCount:planRows.length,
+            expectedInsertColumnsPresent:true,
+            checkpointIdConflictConstraint:true,
+            checkpointIdConstraintName:String(conflictConstraint.conname??''),
+            checkpointIdConstraintType:String(conflictConstraint.contype??''),
           }
           writeFileSync('r4f-proof-log-diagnostic.json',JSON.stringify(output,null,2)+'\n')
           console.log(JSON.stringify(output,null,2))
