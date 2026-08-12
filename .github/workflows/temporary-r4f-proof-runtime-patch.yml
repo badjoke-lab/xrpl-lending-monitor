@@ -12,20 +12,28 @@ jobs:
   patch:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TARGET_BRANCH: agent/r4f-proof-edge-runtime-config
+      TARGET_PATH: supabase/functions/xrpl-r5-recovery-batch/index.ts
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: agent/r4f-proof-edge-runtime-config
-          fetch-depth: 0
-      - name: Patch qualification-only runtime override
+      - name: Patch qualification-only runtime override through Contents API
         shell: bash
         run: |
           set -euo pipefail
-          python - <<'PY'
+          gh api "repos/${GITHUB_REPOSITORY}/contents/${TARGET_PATH}?ref=${TARGET_BRANCH}" > /tmp/file.json
+          jq -r '.content' /tmp/file.json | tr -d '\n' | base64 -d > /tmp/index.ts
+          sha="$(jq -r '.sha' /tmp/file.json)"
+          TARGET=/tmp/index.ts python - <<'PY'
+          import os
           from pathlib import Path
 
-          path = Path('supabase/functions/xrpl-r5-recovery-batch/index.ts')
+          path = Path(os.environ['TARGET'])
           text = path.read_text()
+          marker = '__XRPL_R5_REVISION4_PROOF_RUNTIME_CONFIG__'
+          if marker in text:
+              print('runtime override already present; no content change required')
+              raise SystemExit(0)
           old = '''function selectionDigest(): string {
             const value = env('XRPL_R5_REVISION4_SELECTION_DIGEST')
             if (!/^[a-f0-9]{64}$/u.test(value)) {
@@ -108,14 +116,27 @@ jobs:
             return value
           }
           '''
-          if text.count(old) != 1:
-              raise SystemExit(f'expected exact runtime block once, found {text.count(old)}')
+          count = text.count(old)
+          if count != 1:
+              raise SystemExit(f'expected exact runtime block once, found {count}')
           path.write_text(text.replace(old, new))
           PY
-          git diff --check
-          grep -Fq '__XRPL_R5_REVISION4_PROOF_RUNTIME_CONFIG__' supabase/functions/xrpl-r5-recovery-batch/index.ts
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add supabase/functions/xrpl-r5-recovery-batch/index.ts
-          git commit -m 'Support qualification-only proof runtime config'
-          git push origin HEAD:agent/r4f-proof-edge-runtime-config
+          if ! grep -Fq '__XRPL_R5_REVISION4_PROOF_RUNTIME_CONFIG__' /tmp/index.ts; then
+            echo 'runtime override missing after patch' >&2
+            exit 1
+          fi
+          current="$(gh api "repos/${GITHUB_REPOSITORY}/contents/${TARGET_PATH}?ref=${TARGET_BRANCH}" --jq '.content' | tr -d '\n' | base64 -d)"
+          proposed="$(cat /tmp/index.ts)"
+          if [ "$current" = "$proposed" ]; then
+            echo 'target already patched'
+            exit 0
+          fi
+          base64 -w0 /tmp/index.ts > /tmp/content.b64
+          jq -n \
+            --arg message 'Support qualification-only proof runtime config' \
+            --arg content "$(cat /tmp/content.b64)" \
+            --arg sha "$sha" \
+            --arg branch "$TARGET_BRANCH" \
+            '{message:$message,content:$content,sha:$sha,branch:$branch}' > /tmp/put.json
+          gh api -X PUT "repos/${GITHUB_REPOSITORY}/contents/${TARGET_PATH}" --input /tmp/put.json > /tmp/put-result.json
+          jq -e '.commit.sha | test("^[a-f0-9]{40}$")' /tmp/put-result.json > /dev/null
