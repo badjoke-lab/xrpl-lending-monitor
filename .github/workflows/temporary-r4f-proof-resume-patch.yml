@@ -42,7 +42,7 @@ jobs:
             echo 'verified proof bundle mutates Deno.env' >&2
             exit 1
           fi
-          bash scripts/test-r4f-revision4-12-ledger-qualification-contract.sh
+          bash -x scripts/test-r4f-revision4-12-ledger-qualification-contract.sh
           git diff --check
           test "$(git diff --name-only | wc -l)" -eq 2
           test "$(git diff --name-only | sed -n '1p')" = '.github/workflows/r4f-revision4-12-ledger-qualification.yml'
