@@ -47,10 +47,29 @@ describe('R4F G3 isolated-window preparation safety', () => {
       "schedule !== '* * * * *'",
       "'/functions/v1/xrpl-collector-tick'",
       "'source', 'pg_cron'",
-      "createHash('sha256').update(command).digest('hex')",
+      'function sha256(text)',
+      "createHash('sha256').update(text).digest('hex')",
+      'const commandDigest = sha256(command)',
       'commandRetained: false',
       'projectRefRetained: false',
       'credentialsRetained: false',
+    ]) {
+      expect(script).toContain(required)
+    }
+  })
+
+  it('binds every dynamic revision-3 runtime clone source into one retained source-set digest', () => {
+    for (const required of [
+      'public.xrpl_prepare_r5_active_recovery(text,text,text,bigint,text,timestamp with time zone)',
+      'public.xrpl_rebind_r5_prebatch_recovery_to_active_boundary_strict(text,timestamp with time zone)',
+      'public.xrpl_rebind_r5_prebatch_recovery_to_active_boundary(text,timestamp with time zone)',
+      'public.xrpl_claim_r5_active_recovery_batch(text,text,bigint,text,timestamp with time zone,integer)',
+      'public.xrpl_claim_r5_active_recovery_batch_from_prepared_head(text,text,timestamp with time zone,integer)',
+      'public.xrpl_complete_r5_active_recovery_batch(text,text,text,timestamp with time zone,text,text,text,text,bigint,numeric,numeric,numeric)',
+      'const runtimeSourceSetSha256 = sha256(canonicalSourceSet)',
+      'r5_prepare_source_sha256=${runtimeSourceSetSha256}',
+      'r5_runtime_source_set_sha256=${runtimeSourceSetSha256}',
+      'allDynamicCloneSourcesBound: true',
     ]) {
       expect(script).toContain(required)
     }

@@ -286,15 +286,22 @@ begin
 end;
 $clone_prepare$;
 
--- Revision-4 prepared-state rebind keeps the current proven descendant-chain
--- logic but binds it to revision 4 and the run's selected digest.
+-- The current revision-3 rebind is deliberately split in two layers: a
+-- boundary-drain wrapper and a strict descendant-chain implementation. Clone
+-- them separately so revision 4 retains the proven drain-before-rebind safety
+-- boundary without mistaking the wrapper for the strict profile-bound body.
 do $clone_rebind$
 declare
-  v_signature regprocedure := to_regprocedure(
+  v_strict_signature regprocedure := to_regprocedure(
+    'public.xrpl_rebind_r5_prebatch_recovery_to_active_boundary_strict(text,timestamp with time zone)'
+  );
+  v_wrapper_signature regprocedure := to_regprocedure(
     'public.xrpl_rebind_r5_prebatch_recovery_to_active_boundary(text,timestamp with time zone)'
   );
-  v_definition text;
-  v_clone text;
+  v_strict_definition text;
+  v_wrapper_definition text;
+  v_strict_clone text;
+  v_wrapper_clone text;
   v_old_selection constant text :=
     '13a313d9d0679c7c512b59f9931d733dcb3217ec8e1cc6e74a36125a0354b667';
   v_old_digest constant text :=
@@ -302,37 +309,67 @@ declare
   v_new_digest constant text :=
     '39e8b620a20bb08fbe8306fe753d4d445c5191bcafddbf67721e0c17d5b6bcd5';
 begin
-  if v_signature is null then
+  if v_strict_signature is null or v_wrapper_signature is null then
     raise exception 'r5_revision4_rebind_source_missing';
   end if;
-  select pg_get_functiondef(v_signature) into v_definition;
-  if position('public.xrpl_rebind_r5_prebatch_recovery_to_active_boundary(' in v_definition) = 0
-    or position('v_run.profile_revision <> 3' in v_definition) = 0
-    or strpos(v_definition, v_old_selection) = 0 then
-    raise exception 'r5_revision4_rebind_source_drift';
+  select pg_get_functiondef(v_strict_signature) into v_strict_definition;
+  select pg_get_functiondef(v_wrapper_signature) into v_wrapper_definition;
+
+  if position('public.xrpl_rebind_r5_prebatch_recovery_to_active_boundary_strict(' in v_strict_definition) = 0
+    or position('v_run.profile_revision <> 3' in v_strict_definition) = 0
+    or strpos(v_strict_definition, v_old_digest) = 0
+    or strpos(v_strict_definition, v_old_selection) = 0 then
+    raise exception 'r5_revision4_rebind_strict_source_drift';
   end if;
 
-  v_clone := replace(
-    v_definition,
-    'public.xrpl_rebind_r5_prebatch_recovery_to_active_boundary(',
-    'public.xrpl_rebind_r5_revision4_prebatch_recovery_to_active_boundary('
+  v_strict_clone := replace(
+    v_strict_definition,
+    'public.xrpl_rebind_r5_prebatch_recovery_to_active_boundary_strict(',
+    'public.xrpl_rebind_r5_revision4_prebatch_recovery_to_active_boundary_strict('
   );
-  v_clone := replace(v_clone, 'v_run.profile_revision <> 3', 'v_run.profile_revision <> 4');
-  v_clone := replace(v_clone, v_old_digest, v_new_digest);
-  v_clone := replace(v_clone, quote_literal(v_old_selection), 'v_run.selection_digest');
-  v_clone := regexp_replace(
-    v_clone,
+  v_strict_clone := replace(v_strict_clone, 'v_run.profile_revision <> 3', 'v_run.profile_revision <> 4');
+  v_strict_clone := replace(v_strict_clone, v_old_digest, v_new_digest);
+  v_strict_clone := replace(v_strict_clone, quote_literal(v_old_selection), 'v_run.selection_digest');
+  v_strict_clone := regexp_replace(
+    v_strict_clone,
     'or[[:space:]]+v_run\.selection_digest[[:space:]]*<>[[:space:]]*v_run\.selection_digest',
     'or v_run.selection_digest !~ ''^[a-f0-9]{64}$'''
   );
 
-  if position('public.xrpl_rebind_r5_revision4_prebatch_recovery_to_active_boundary(' in v_clone) = 0
-    or position('v_run.profile_revision <> 4' in v_clone) = 0
-    or position('v_run.selection_digest !~ ''^[a-f0-9]{64}$''' in v_clone) = 0
-    or strpos(v_clone, v_old_selection) <> 0 then
-    raise exception 'r5_revision4_rebind_clone_invalid';
+  if position('public.xrpl_rebind_r5_revision4_prebatch_recovery_to_active_boundary_strict(' in v_strict_clone) = 0
+    or position('v_run.profile_revision <> 4' in v_strict_clone) = 0
+    or position('v_run.selection_digest !~ ''^[a-f0-9]{64}$''' in v_strict_clone) = 0
+    or strpos(v_strict_clone, v_old_selection) <> 0 then
+    raise exception 'r5_revision4_rebind_strict_clone_invalid';
   end if;
-  execute v_clone;
+  execute v_strict_clone;
+
+  if position('public.xrpl_rebind_r5_prebatch_recovery_to_active_boundary(' in v_wrapper_definition) = 0
+    or position('public.xrpl_drain_r5_checkpoint_boundary(' in v_wrapper_definition) = 0
+    or position('public.xrpl_rebind_r5_prebatch_recovery_to_active_boundary_strict(' in v_wrapper_definition) = 0
+    or position('boundaryDrainBeforeRebind' in v_wrapper_definition) = 0 then
+    raise exception 'r5_revision4_rebind_wrapper_source_drift';
+  end if;
+
+  v_wrapper_clone := replace(
+    v_wrapper_definition,
+    'public.xrpl_rebind_r5_prebatch_recovery_to_active_boundary(',
+    'public.xrpl_rebind_r5_revision4_prebatch_recovery_to_active_boundary('
+  );
+  v_wrapper_clone := replace(
+    v_wrapper_clone,
+    'public.xrpl_rebind_r5_prebatch_recovery_to_active_boundary_strict(',
+    'public.xrpl_rebind_r5_revision4_prebatch_recovery_to_active_boundary_strict('
+  );
+
+  if position('public.xrpl_rebind_r5_revision4_prebatch_recovery_to_active_boundary(' in v_wrapper_clone) = 0
+    or position('public.xrpl_rebind_r5_revision4_prebatch_recovery_to_active_boundary_strict(' in v_wrapper_clone) = 0
+    or position('public.xrpl_drain_r5_checkpoint_boundary(' in v_wrapper_clone) = 0
+    or position('boundaryDrainBeforeRebind' in v_wrapper_clone) = 0
+    or position('public.xrpl_rebind_r5_prebatch_recovery_to_active_boundary_strict(' in v_wrapper_clone) <> 0 then
+    raise exception 'r5_revision4_rebind_wrapper_clone_invalid';
+  end if;
+  execute v_wrapper_clone;
 end;
 $clone_rebind$;
 
@@ -718,6 +755,9 @@ revoke all on function public.xrpl_create_r5_revision4_active_checkpoint(
 revoke all on function public.xrpl_prepare_r5_revision4_active_recovery(
   text, text, text, bigint, text, timestamptz
 ) from public, anon, authenticated;
+revoke all on function public.xrpl_rebind_r5_revision4_prebatch_recovery_to_active_boundary_strict(
+  text, timestamptz
+) from public, anon, authenticated, service_role;
 revoke all on function public.xrpl_rebind_r5_revision4_prebatch_recovery_to_active_boundary(
   text, timestamptz
 ) from public, anon, authenticated;
@@ -769,6 +809,7 @@ begin
   if exists (select 1 from pg_roles where rolname = 'supabase_admin') then
     execute 'grant execute on function public.xrpl_create_r5_revision4_active_checkpoint(text,text,timestamptz) to supabase_admin';
     execute 'grant execute on function public.xrpl_prepare_r5_revision4_active_recovery(text,text,text,bigint,text,timestamptz) to supabase_admin';
+    execute 'revoke all on function public.xrpl_rebind_r5_revision4_prebatch_recovery_to_active_boundary_strict(text,timestamptz) from supabase_admin';
     execute 'grant execute on function public.xrpl_rebind_r5_revision4_prebatch_recovery_to_active_boundary(text,timestamptz) to supabase_admin';
     execute 'grant execute on function public.xrpl_adopt_r5_revision4_committed_active_descendants(text,timestamptz) to supabase_admin';
     execute 'grant execute on function public.xrpl_claim_r5_revision4_recovery_batch(text,text,bigint,text,timestamptz,integer) to supabase_admin';
@@ -785,9 +826,17 @@ do $assertions$
 declare
   v_completion text;
   v_claim text;
+  v_rebind text;
+  v_rebind_strict text;
   v_revision4_rows bigint;
 begin
   if to_regprocedure(
+      'public.xrpl_rebind_r5_revision4_prebatch_recovery_to_active_boundary_strict(text,timestamp with time zone)'
+    ) is null
+    or to_regprocedure(
+      'public.xrpl_rebind_r5_revision4_prebatch_recovery_to_active_boundary(text,timestamp with time zone)'
+    ) is null
+    or to_regprocedure(
       'public.xrpl_claim_r5_revision4_recovery_batch_from_prepared_head(text,text,timestamp with time zone,integer)'
     ) is null
     or to_regprocedure(
@@ -805,11 +854,21 @@ begin
   select pg_get_functiondef(to_regprocedure(
     'public.xrpl_complete_r5_revision4_recovery_batch(text,text,text,timestamp with time zone,text,text,text,text,bigint,numeric,numeric,numeric)'
   )) into v_completion;
+  select pg_get_functiondef(to_regprocedure(
+    'public.xrpl_rebind_r5_revision4_prebatch_recovery_to_active_boundary(text,timestamp with time zone)'
+  )) into v_rebind;
+  select pg_get_functiondef(to_regprocedure(
+    'public.xrpl_rebind_r5_revision4_prebatch_recovery_to_active_boundary_strict(text,timestamp with time zone)'
+  )) into v_rebind_strict;
 
   if position('v_reserved constant bigint := 16777216' in v_claim) = 0
     or position('v_count := least(12::bigint' in v_claim) = 0
     or position('runtime_precommit_completed' in v_completion) = 0
-    or position('r5_revision4_recovery_batch_accounting_invalid' in v_completion) = 0 then
+    or position('r5_revision4_recovery_batch_accounting_invalid' in v_completion) = 0
+    or position('public.xrpl_drain_r5_checkpoint_boundary(' in v_rebind) = 0
+    or position('public.xrpl_rebind_r5_revision4_prebatch_recovery_to_active_boundary_strict(' in v_rebind) = 0
+    or position('v_run.profile_revision <> 4' in v_rebind_strict) = 0
+    or position('v_run.selection_digest !~ ''^[a-f0-9]{64}$''' in v_rebind_strict) = 0 then
     raise exception 'r5_revision4_runtime_definition_invalid';
   end if;
 

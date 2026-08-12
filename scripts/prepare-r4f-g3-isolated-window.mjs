@@ -60,7 +60,11 @@ function integer(value, name) {
   return parsed
 }
 
-const projectIdentityDigest = createHash('sha256').update(projectRef).digest('hex')
+function sha256(text) {
+  return createHash('sha256').update(text).digest('hex')
+}
+
+const projectIdentityDigest = sha256(projectRef)
 const jobs = await readOnlyQuery(
   `select jobid, jobname, schedule, command, active, database, username
    from cron.job
@@ -89,7 +93,7 @@ for (const required of [
 if (/https:\/\/[a-z]{20}\.supabase\.co|sbp_[A-Za-z0-9_-]{12,}|sb_secret_[A-Za-z0-9_-]{12,}/u.test(command)) {
   throw new Error('collector cron command unexpectedly contains retained credential or project endpoint material')
 }
-const commandDigest = createHash('sha256').update(command).digest('hex')
+const commandDigest = sha256(command)
 
 const runtimes = await readOnlyQuery(
   `select profile_id, network, status, lease_owner is not null as lease_active,
@@ -108,41 +112,132 @@ if (!['stopped', 'running', 'halted'].includes(String(runtime.status))) {
   throw new Error('collector runtime status is invalid')
 }
 
-const prepareChecks = await readOnlyQuery(
-  `with source as (
-     select pg_get_functiondef(
-       to_regprocedure('public.xrpl_prepare_r5_active_recovery(text,text,text,bigint,text,timestamp with time zone)')
-     ) as definition
+const sourceSpecs = [
+  {
+    key: 'prepare',
+    file: 'r5-active-recovery-prepare.sql',
+    signature: 'public.xrpl_prepare_r5_active_recovery(text,text,text,bigint,text,timestamp with time zone)',
+    anchors: [
+      'public.xrpl_prepare_r5_active_recovery(',
+      'v_checkpoint.profile_revision <> 3',
+      '3a5c4ff2c43a48d3e5b7ceded60027173d215d6f083fb33c22375758520bbe67',
+      '13a313d9d0679c7c512b59f9931d733dcb3217ec8e1cc6e74a36125a0354b667',
+    ],
+  },
+  {
+    key: 'rebindStrict',
+    file: 'r5-active-recovery-rebind-strict.sql',
+    signature: 'public.xrpl_rebind_r5_prebatch_recovery_to_active_boundary_strict(text,timestamp with time zone)',
+    anchors: [
+      'public.xrpl_rebind_r5_prebatch_recovery_to_active_boundary_strict(',
+      'v_run.profile_revision <> 3',
+      '3a5c4ff2c43a48d3e5b7ceded60027173d215d6f083fb33c22375758520bbe67',
+      '13a313d9d0679c7c512b59f9931d733dcb3217ec8e1cc6e74a36125a0354b667',
+    ],
+  },
+  {
+    key: 'rebindWrapper',
+    file: 'r5-active-recovery-rebind-wrapper.sql',
+    signature: 'public.xrpl_rebind_r5_prebatch_recovery_to_active_boundary(text,timestamp with time zone)',
+    anchors: [
+      'public.xrpl_rebind_r5_prebatch_recovery_to_active_boundary(',
+      'public.xrpl_drain_r5_checkpoint_boundary(',
+      'public.xrpl_rebind_r5_prebatch_recovery_to_active_boundary_strict(',
+      'boundaryDrainBeforeRebind',
+    ],
+  },
+  {
+    key: 'claim',
+    file: 'r5-active-recovery-claim.sql',
+    signature: 'public.xrpl_claim_r5_active_recovery_batch(text,text,bigint,text,timestamp with time zone,integer)',
+    anchors: [
+      'public.xrpl_claim_r5_active_recovery_batch(',
+      'v_run.profile_revision <> 3',
+      'v_reserved constant bigint := 134217728',
+      'v_count := least(12::bigint',
+    ],
+  },
+  {
+    key: 'progressiveClaim',
+    file: 'r5-active-recovery-progressive-claim.sql',
+    signature: 'public.xrpl_claim_r5_active_recovery_batch_from_prepared_head(text,text,timestamp with time zone,integer)',
+    anchors: [
+      'public.xrpl_claim_r5_active_recovery_batch_from_prepared_head(',
+      'public.xrpl_rebind_r5_prebatch_recovery_to_active_boundary(',
+      'public.xrpl_claim_r5_active_recovery_batch(',
+      'atomicBoundaryHeldThroughClaim',
+    ],
+  },
+  {
+    key: 'completion',
+    file: 'r5-active-recovery-completion.sql',
+    signature: 'public.xrpl_complete_r5_active_recovery_batch(text,text,text,timestamp with time zone,text,text,text,text,bigint,numeric,numeric,numeric)',
+    anchors: [
+      'public.xrpl_complete_r5_active_recovery_batch(',
+      "v_accounting_input := v_accounting->'input';",
+      'normalizedRecordCount',
+      'r5_recovery_batch_accounting_checks_invalid',
+    ],
+  },
+]
+
+const sourceValues = sourceSpecs
+  .map((source) => `('${source.key}', '${source.signature.replaceAll("'", "''")}')`)
+  .join(',\n       ')
+const sourceRows = await readOnlyQuery(
+  `with requested(source_key, signature) as (
+     values ${sourceValues}
    )
-   select
-     definition,
-     position('public.xrpl_prepare_r5_active_recovery(' in definition) > 0 as function_name,
-     position('v_checkpoint.profile_revision <> 3' in definition) > 0 as revision3_profile,
-     position('3a5c4ff2c43a48d3e5b7ceded60027173d215d6f083fb33c22375758520bbe67' in definition) > 0 as revision3_identity_digest,
-     position('13a313d9d0679c7c512b59f9931d733dcb3217ec8e1cc6e74a36125a0354b667' in definition) > 0 as revision3_selection_digest
-   from source`,
+   select source_key, signature,
+          pg_get_functiondef(to_regprocedure(signature)) as definition
+   from requested
+   order by source_key`,
 )
-if (prepareChecks.length !== 1) throw new Error(`expected one R5 prepare source row, found ${prepareChecks.length}`)
-const prepareCheck = prepareChecks[0]
-const prepareDefinition = String(prepareCheck.definition ?? '')
-if (!prepareDefinition.includes('xrpl_prepare_r5_active_recovery')) {
-  throw new Error('R5 active recovery prepare function definition is unavailable')
-}
-const prepareSourceSha256 = createHash('sha256').update(prepareDefinition).digest('hex')
-const prepareSourceAnchors = {
-  functionName: prepareCheck.function_name === true,
-  revision3Profile: prepareCheck.revision3_profile === true,
-  revision3IdentityDigest: prepareCheck.revision3_identity_digest === true,
-  revision3SelectionDigest: prepareCheck.revision3_selection_digest === true,
-}
-if (!Object.values(prepareSourceAnchors).every(Boolean)) {
-  throw new Error(`R5 active recovery prepare source fails exact migration anchors:${JSON.stringify(prepareSourceAnchors)}`)
+if (sourceRows.length !== sourceSpecs.length) {
+  throw new Error(`expected ${sourceSpecs.length} R5 runtime source rows, found ${sourceRows.length}`)
 }
 
+const rowsByKey = new Map(sourceRows.map((row) => [String(row.source_key ?? ''), row]))
+const runtimeSources = []
+for (const source of sourceSpecs) {
+  const row = rowsByKey.get(source.key)
+  if (!row || String(row.signature ?? '') !== source.signature) {
+    throw new Error(`R5 runtime source identity mismatch:${source.key}`)
+  }
+  const definition = String(row.definition ?? '')
+  if (!definition) throw new Error(`R5 runtime source definition unavailable:${source.key}`)
+  const anchors = Object.fromEntries(source.anchors.map((anchor) => [anchor, definition.includes(anchor)]))
+  if (!Object.values(anchors).every(Boolean)) {
+    throw new Error(`R5 runtime source fails exact migration anchors:${source.key}:${JSON.stringify(anchors)}`)
+  }
+  runtimeSources.push({
+    key: source.key,
+    signature: source.signature,
+    file: source.file,
+    sha256: sha256(definition),
+    anchors,
+    definition,
+  })
+}
+
+const canonicalSourceSet = JSON.stringify(runtimeSources.map(({ key, signature, sha256: sourceSha }) => ({
+  key,
+  signature,
+  sha256: sourceSha,
+})))
+const runtimeSourceSetSha256 = sha256(canonicalSourceSet)
+const prepareSource = runtimeSources.find((source) => source.key === 'prepare')
+if (!prepareSource) throw new Error('R5 prepare source is missing from runtime source set')
+
 await mkdir(evidenceDirectory, { recursive: true })
-await writeFile(`${evidenceDirectory}/r5-active-recovery-prepare.sql`, prepareDefinition.endsWith('\n') ? prepareDefinition : `${prepareDefinition}\n`)
+for (const source of runtimeSources) {
+  await writeFile(
+    `${evidenceDirectory}/${source.file}`,
+    source.definition.endsWith('\n') ? source.definition : `${source.definition}\n`,
+  )
+}
 const evidence = {
-  schemaVersion: 3,
+  schemaVersion: 4,
   purpose: 'r4f-g3-isolated-window-scheduler-prepare',
   sourceRunId,
   sourceCommit,
@@ -173,11 +268,22 @@ const evidence = {
     updatedAt: runtime.updated_at ?? null,
   },
   r5PrepareSource: {
-    sha256: prepareSourceSha256,
-    anchors: prepareSourceAnchors,
-    exactPostgresPositionChecks: true,
-    definition: prepareDefinition,
+    sha256: prepareSource.sha256,
+    anchors: prepareSource.anchors,
     sourceRetainedInArtifact: true,
+  },
+  r5RuntimeSourceSet: {
+    sha256: runtimeSourceSetSha256,
+    canonicalSourceSet,
+    sources: runtimeSources.map(({ key, signature, file, sha256: sourceSha, anchors }) => ({
+      key,
+      signature,
+      file,
+      sha256: sourceSha,
+      anchors,
+      sourceRetainedInArtifact: true,
+    })),
+    allDynamicCloneSourcesBound: true,
   },
   checks: {
     exactNamedCollectorCron: true,
@@ -206,8 +312,9 @@ await writeFile(
     `project_digest=${projectIdentityDigest}`,
     `runtime_status=${runtime.status}`,
     `runtime_tick_count=${Number(runtime.tick_count)}`,
-    `r5_prepare_source_sha256=${prepareSourceSha256}`,
-    `r5_prepare_source_anchors=${JSON.stringify(prepareSourceAnchors)}`,
+    `r5_prepare_source_definition_sha256=${prepareSource.sha256}`,
+    `r5_prepare_source_sha256=${runtimeSourceSetSha256}`,
+    `r5_runtime_source_set_sha256=${runtimeSourceSetSha256}`,
     '',
   ].join('\n'),
   { flag: 'a' },
@@ -221,6 +328,7 @@ process.stdout.write(`${JSON.stringify({
   projectIdentityDigest,
   runtimeStatus: runtime.status,
   runtimeTickCount: Number(runtime.tick_count),
-  r5PrepareSourceSha256: prepareSourceSha256,
-  r5PrepareSourceAnchors: prepareSourceAnchors,
+  r5PrepareSourceDefinitionSha256: prepareSource.sha256,
+  r5RuntimeSourceSetSha256: runtimeSourceSetSha256,
+  runtimeSources: runtimeSources.map(({ key, signature, sha256: sourceSha }) => ({ key, signature, sha256: sourceSha })),
 })}\n`)
