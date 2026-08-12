@@ -108,9 +108,28 @@ if (!['stopped', 'running', 'halted'].includes(String(runtime.status))) {
   throw new Error('collector runtime status is invalid')
 }
 
+const prepareSources = await readOnlyQuery(
+  `select pg_get_functiondef(
+      to_regprocedure('public.xrpl_prepare_r5_active_recovery(text,text,text,bigint,text,timestamp with time zone)')
+    ) as definition`,
+)
+if (prepareSources.length !== 1) throw new Error(`expected one R5 prepare source row, found ${prepareSources.length}`)
+const prepareDefinition = String(prepareSources[0].definition ?? '')
+if (!prepareDefinition.includes('xrpl_prepare_r5_active_recovery')) {
+  throw new Error('R5 active recovery prepare function definition is unavailable')
+}
+const prepareSourceSha256 = createHash('sha256').update(prepareDefinition).digest('hex')
+const prepareSourceAnchors = {
+  functionName: prepareDefinition.includes('public.xrpl_prepare_r5_active_recovery('),
+  revision3Profile: prepareDefinition.includes('v_checkpoint.profile_revision <> 3'),
+  revision3IdentityDigest: prepareDefinition.includes('3a5c4ff2c43a48d3e5b7ceded60027173d215d6f083fb33c22375758520bbe67'),
+  revision3SelectionDigest: prepareDefinition.includes('13a313d9d0679c7c512b59f9931d733dcb3217ec8e1cc6e74a36125a0354b667'),
+}
+
 await mkdir(evidenceDirectory, { recursive: true })
+await writeFile(`${evidenceDirectory}/r5-active-recovery-prepare.sql`, prepareDefinition.endsWith('\n') ? prepareDefinition : `${prepareDefinition}\n`)
 const evidence = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   purpose: 'r4f-g3-isolated-window-scheduler-prepare',
   sourceRunId,
   sourceCommit,
@@ -140,6 +159,11 @@ const evidence = {
     consecutiveFailures: Number(runtime.consecutive_failures),
     updatedAt: runtime.updated_at ?? null,
   },
+  r5PrepareSource: {
+    sha256: prepareSourceSha256,
+    anchors: prepareSourceAnchors,
+    sourceRetainedInArtifact: true,
+  },
   checks: {
     exactNamedCollectorCron: true,
     oneMinuteCadence: true,
@@ -167,6 +191,8 @@ await writeFile(
     `project_digest=${projectIdentityDigest}`,
     `runtime_status=${runtime.status}`,
     `runtime_tick_count=${Number(runtime.tick_count)}`,
+    `r5_prepare_source_sha256=${prepareSourceSha256}`,
+    `r5_prepare_source_anchors=${JSON.stringify(prepareSourceAnchors)}`,
     '',
   ].join('\n'),
   { flag: 'a' },
@@ -180,4 +206,6 @@ process.stdout.write(`${JSON.stringify({
   projectIdentityDigest,
   runtimeStatus: runtime.status,
   runtimeTickCount: Number(runtime.tick_count),
+  r5PrepareSourceSha256: prepareSourceSha256,
+  r5PrepareSourceAnchors: prepareSourceAnchors,
 })}\n`)
