@@ -15,63 +15,67 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       TARGET_BRANCH: agent/r4f-proof-edge-runtime-config
+      TARGET_PATH: supabase/functions/xrpl-r5-recovery-batch/index.ts
     steps:
-      - name: Apply exact prepared-resume integration edits through Contents API
+      - name: Bind proof-only request source through Contents API
         shell: bash
         run: |
           set -euo pipefail
-          patch_file() {
-            local path="$1" old="$2" new="$3" expected="$4" message="$5"
-            gh api "repos/${GITHUB_REPOSITORY}/contents/${path}?ref=${TARGET_BRANCH}" > /tmp/file.json
-            local sha
-            sha="$(jq -r '.sha' /tmp/file.json)"
-            jq -r '.content' /tmp/file.json | tr -d '\n' | base64 -d > /tmp/file.txt
-            OLD="$old" NEW="$new" EXPECTED="$expected" TARGET=/tmp/file.txt python - <<'PY'
+          gh api "repos/${GITHUB_REPOSITORY}/contents/${TARGET_PATH}?ref=${TARGET_BRANCH}" > /tmp/file.json
+          sha="$(jq -r '.sha' /tmp/file.json)"
+          jq -r '.content' /tmp/file.json | tr -d '\n' | base64 -d > /tmp/index.ts
+          TARGET=/tmp/index.ts python - <<'PY'
           import os
           from pathlib import Path
           path = Path(os.environ['TARGET'])
           text = path.read_text()
-          old = os.environ['OLD']
-          new = os.environ['NEW']
-          expected = int(os.environ['EXPECTED'])
-          count = text.count(old)
-          if count == 0 and new and text.count(new) == expected:
-              print('already patched')
+          if "requestSource: 'github_actions_prepared_resume'" in text and "body.source !== requestSource()" in text:
+              print('proof-only request source already patched')
               raise SystemExit(0)
-          if count != expected:
-              raise SystemExit(f'exact replacement count mismatch: expected {expected}, found {count}')
-          path.write_text(text.replace(old, new))
+
+          replacements = [
+              (
+                  "type Revision4QualificationRuntimeOverride = {\n  selectionDigest: string\n  unexplainedEgressReserveBytes: number\n}",
+                  "type Revision4QualificationRuntimeOverride = {\n  selectionDigest: string\n  unexplainedEgressReserveBytes: number\n  requestSource: 'github_actions_prepared_resume'\n}",
+              ),
+              (
+                  "Object.keys(candidate).sort().join(',') !== 'selectionDigest,unexplainedEgressReserveBytes'",
+                  "Object.keys(candidate).sort().join(',') !== 'requestSource,selectionDigest,unexplainedEgressReserveBytes'",
+              ),
+              (
+                  "  return {\n    selectionDigest: candidate.selectionDigest,\n    unexplainedEgressReserveBytes: candidate.unexplainedEgressReserveBytes,\n  }",
+                  "  if (candidate.requestSource !== 'github_actions_prepared_resume') {\n    throw new RecoveryError('revision-4 qualification request source override is invalid', true)\n  }\n  return {\n    selectionDigest: candidate.selectionDigest,\n    unexplainedEgressReserveBytes: candidate.unexplainedEgressReserveBytes,\n    requestSource: candidate.requestSource,\n  }",
+              ),
+              (
+                  "function selectionDigest(): string {",
+                  "function requestSource(): string {\n  return qualificationRuntimeOverride()?.requestSource ?? 'github_actions'\n}\n\nfunction selectionDigest(): string {",
+              ),
+              (
+                  "if (body.source !== 'github_actions') {",
+                  "if (body.source !== requestSource()) {",
+              ),
+          ]
+          for old, new in replacements:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'exact executor replacement count mismatch for {old!r}: {count}')
+              text = text.replace(old, new)
+          path.write_text(text)
           PY
-            local current proposed
-            current="$(gh api "repos/${GITHUB_REPOSITORY}/contents/${path}?ref=${TARGET_BRANCH}" --jq '.content' | tr -d '\n' | base64 -d)"
-            proposed="$(cat /tmp/file.txt)"
-            if [ "$current" = "$proposed" ]; then
-              echo "$path already patched"
-              return
-            fi
-            base64 -w0 /tmp/file.txt > /tmp/content.b64
-            jq -n --arg message "$message" --arg content "$(cat /tmp/content.b64)" --arg sha "$sha" --arg branch "$TARGET_BRANCH" '{message:$message,content:$content,sha:$sha,branch:$branch}' > /tmp/put.json
-            gh api -X PUT "repos/${GITHUB_REPOSITORY}/contents/${path}" --input /tmp/put.json > /tmp/put-result.json
-            jq -e '.commit.sha | test("^[a-f0-9]{40}$")' /tmp/put-result.json > /dev/null
-          }
-
-          patch_file \
-            '.github/workflows/r4f-revision4-12-ledger-resume.yml' \
-            'github_actions_prepared_resume' \
-            'github_actions' \
-            '1' \
-            'Use proven proof request source for prepared resume'
-
-          patch_file \
-            'scripts/test-r4f-revision4-12-ledger-resume-contract.sh' \
-            "  'xrpl_create_r5_revision4_active_checkpoint(' \\\\n" \
-            '' \
-            '1' \
-            'Allow read-only checkpoint function existence probe'
-
-          patch_file \
-            '.github/workflows/ci.yml' \
-            'scripts/check-actions-workflow-allowlist-r5-one-shot.sh' \
-            'scripts/check-actions-workflow-allowlist-r5-resume.sh' \
-            '2' \
-            'Run prepared-resume Actions policy in CI'
+          grep -Fq "requestSource: 'github_actions_prepared_resume'" /tmp/index.ts
+          grep -Fq 'body.source !== requestSource()' /tmp/index.ts
+          current="$(gh api "repos/${GITHUB_REPOSITORY}/contents/${TARGET_PATH}?ref=${TARGET_BRANCH}" --jq '.content' | tr -d '\n' | base64 -d)"
+          proposed="$(cat /tmp/index.ts)"
+          if [ "$current" = "$proposed" ]; then
+            echo 'target already patched'
+            exit 0
+          fi
+          base64 -w0 /tmp/index.ts > /tmp/content.b64
+          jq -n \
+            --arg message 'Bind qualification-only proof request source' \
+            --arg content "$(cat /tmp/content.b64)" \
+            --arg sha "$sha" \
+            --arg branch "$TARGET_BRANCH" \
+            '{message:$message,content:$content,sha:$sha,branch:$branch}' > /tmp/put.json
+          gh api -X PUT "repos/${GITHUB_REPOSITORY}/contents/${TARGET_PATH}" --input /tmp/put.json > /tmp/put-result.json
+          jq -e '.commit.sha | test("^[a-f0-9]{40}$")' /tmp/put-result.json > /dev/null
