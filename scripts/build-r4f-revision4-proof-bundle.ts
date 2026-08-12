@@ -1,6 +1,18 @@
 import { writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
+type QualificationOnLoadResult = {
+  contents: string
+  loader: 'ts'
+}
+
+type QualificationBuild = {
+  onLoad(
+    options: { filter: RegExp },
+    callback: (args: { path: string }) => Promise<QualificationOnLoadResult>,
+  ): void
+}
+
 function replaceExactlyOnce(source: string, before: string, after: string, label: string): string {
   const first = source.indexOf(before)
   if (first < 0 || source.indexOf(before, first + before.length) >= 0) {
@@ -18,7 +30,7 @@ const output = resolve(outputArg)
 
 const qualificationTransform = {
   name: 'r4f-revision4-qualification-runtime-override',
-  setup(build: { onLoad: Function }) {
+  setup(build: QualificationBuild) {
     build.onLoad(
       { filter: /xrpl-r5-recovery-batch\/index\.ts$/u },
       async ({ path }: { path: string }) => {
