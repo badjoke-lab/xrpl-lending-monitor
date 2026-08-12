@@ -470,39 +470,39 @@ jobs:
           [[ "$head_hash" =~ ^[A-F0-9]{64}$ ]]
 
           test "$AUTHORIZED_CHECKPOINT_SHA" = "$(sha256sum "$CHECKPOINT_SQL_PATH" | awk '{print $1}')"
-CHECKPOINT_ID="$checkpoint_id" OBSERVED_AT="$observed_at" node --input-type=module <<'NODE'
-import { readFileSync, writeFileSync } from 'node:fs'
-const checkpointId = process.env.CHECKPOINT_ID ?? ''
-const selectionDigest = process.env.SELECTION_DIGEST ?? ''
-const observedAt = process.env.OBSERVED_AT ?? ''
-if (!/^r5-checkpoint-revision4-proof-[0-9]+$/u.test(checkpointId)) throw new Error('invalid compact checkpoint id')
-if (!/^[a-f0-9]{64}$/u.test(selectionDigest)) throw new Error('invalid compact checkpoint selection digest')
-if (!/^20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.000Z$/u.test(observedAt)) throw new Error('invalid compact checkpoint observedAt')
-let query = readFileSync(process.env.CHECKPOINT_SQL_PATH, 'utf8')
-const replacements = new Map([
-  ['__CHECKPOINT_ID__', checkpointId],
-  ['__SELECTION_DIGEST__', selectionDigest],
-  ['__OBSERVED_AT__', observedAt],
-])
-for (const [token, value] of replacements) {
-  if (!query.includes(token)) throw new Error(`compact checkpoint template is missing ${token}`)
-  query = query.replaceAll(token, value)
-}
-if (/__[A-Z0-9_]+__/u.test(query)) throw new Error('unresolved compact checkpoint template token')
-writeFileSync('/tmp/checkpoint-query.sql', query)
-NODE
-checkpoint_query="$(cat /tmp/checkpoint-query.sql)"
-jq -n --arg query "$checkpoint_query" '{query:$query,parameters:[],read_only:false}' > /tmp/checkpoint-query.json
-curl --fail-with-body --silent --show-error \
-  -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
-  -H 'content-type: application/json' \
-  --data @/tmp/checkpoint-query.json \
-  "https://api.supabase.com/v1/projects/${SUPABASE_PROJECT_ID}/database/query" > /tmp/checkpoint-response.json
-checkpoint="$(jq -c '.. | objects | .value? // empty' /tmp/checkpoint-response.json | head -n1)"
-test -n "$checkpoint"
-jq -e --arg selection "$SELECTION_DIGEST" '.checkpointKind == "revision4-qualification-boundary" and .profileRevision == 4 and .selectionDigest == $selection and .qualificationBoundaryOnly == true and .fullRecoveryStateCaptured == false and .publicReaderUnchanged == true and .mainnetDisabled == true and .stateBytes > 0' <<<"$checkpoint" > /dev/null
-state_digest="$(jq -r '.stateDigest // empty' <<<"$checkpoint")"
-watermark_index="$(jq -r '.watermarkLedgerIndex // empty' <<<"$checkpoint")"
+          CHECKPOINT_ID="$checkpoint_id" OBSERVED_AT="$observed_at" node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs'
+          const checkpointId = process.env.CHECKPOINT_ID ?? ''
+          const selectionDigest = process.env.SELECTION_DIGEST ?? ''
+          const observedAt = process.env.OBSERVED_AT ?? ''
+          if (!/^r5-checkpoint-revision4-proof-[0-9]+$/u.test(checkpointId)) throw new Error('invalid compact checkpoint id')
+          if (!/^[a-f0-9]{64}$/u.test(selectionDigest)) throw new Error('invalid compact checkpoint selection digest')
+          if (!/^20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.000Z$/u.test(observedAt)) throw new Error('invalid compact checkpoint observedAt')
+          let query = readFileSync(process.env.CHECKPOINT_SQL_PATH, 'utf8')
+          const replacements = new Map([
+            ['__CHECKPOINT_ID__', checkpointId],
+            ['__SELECTION_DIGEST__', selectionDigest],
+            ['__OBSERVED_AT__', observedAt],
+          ])
+          for (const [token, value] of replacements) {
+            if (!query.includes(token)) throw new Error(`compact checkpoint template is missing ${token}`)
+            query = query.replaceAll(token, value)
+          }
+          if (/__[A-Z0-9_]+__/u.test(query)) throw new Error('unresolved compact checkpoint template token')
+          writeFileSync('/tmp/checkpoint-query.sql', query)
+          NODE
+          checkpoint_query="$(cat /tmp/checkpoint-query.sql)"
+          jq -n --arg query "$checkpoint_query" '{query:$query,parameters:[],read_only:false}' > /tmp/checkpoint-query.json
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+            -H 'content-type: application/json' \
+            --data @/tmp/checkpoint-query.json \
+            "https://api.supabase.com/v1/projects/${SUPABASE_PROJECT_ID}/database/query" > /tmp/checkpoint-response.json
+          checkpoint="$(jq -c '.. | objects | .value? // empty' /tmp/checkpoint-response.json | head -n1)"
+          test -n "$checkpoint"
+          jq -e --arg selection "$SELECTION_DIGEST" '.checkpointKind == "revision4-qualification-boundary" and .profileRevision == 4 and .selectionDigest == $selection and .qualificationBoundaryOnly == true and .fullRecoveryStateCaptured == false and .publicReaderUnchanged == true and .mainnetDisabled == true and .stateBytes > 0' <<<"$checkpoint" > /dev/null
+          state_digest="$(jq -r '.stateDigest // empty' <<<"$checkpoint")"
+          watermark_index="$(jq -r '.watermarkLedgerIndex // empty' <<<"$checkpoint")"
           [[ "$state_digest" =~ ^[a-f0-9]{64}$ ]]
           [[ "$watermark_index" =~ ^[1-9][0-9]*$ ]]
           test $((head_index - watermark_index)) -ge "$MAX_LEDGER_COUNT"
