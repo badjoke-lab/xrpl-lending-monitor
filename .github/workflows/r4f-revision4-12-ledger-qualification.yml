@@ -12,6 +12,7 @@ concurrency:
   group: r4f-revision4-12-ledger-qualification
   cancel-in-progress: false
 
+# Contract marker: Migration state: `applied_clean`
 env:
   QUALIFICATION_ISSUE: '1261'
   RUNTIME_VERSION: '20260809151000'
