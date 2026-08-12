@@ -16,53 +16,29 @@ jobs:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
     steps:
-      - name: Read exact prepared-run state and progressive claim definition
+      - name: Read progressive claim function identities only
         shell: bash
         run: |
           set -euo pipefail
           cat > /tmp/diagnostic.sql <<'SQL'
-          select jsonb_build_object(
-            'run', (
-              select jsonb_build_object(
-                'runId',r.run_id,
-                'status',r.status,
-                'profileRevision',r.profile_revision,
-                'profileIdentityDigest',r.profile_identity_digest,
-                'selectionDigest',r.selection_digest,
-                'checkpointId',r.checkpoint_id,
-                'committedLedgerCount',r.committed_ledger_count,
-                'adoptedLedgerCount',r.adopted_ledger_count,
-                'completedBatchCount',r.completed_batch_count,
-                'lastError',r.last_error
-              )
-              from xrpl_r5_v1.recovery_runs r
-              where r.run_id='r5-recovery-selected-revision4-entry'
-            ),
-            'batchCount',(
-              select count(*) from xrpl_r5_v1.recovery_batches
-              where run_id='r5-recovery-selected-revision4-entry'
-            ),
-            'claimFunctions',(
-              select coalesce(jsonb_agg(jsonb_build_object(
-                'name',p.proname,
-                'args',pg_get_function_identity_arguments(p.oid),
-                'definition',pg_get_functiondef(p.oid)
-              ) order by p.oid),'[]'::jsonb)
-              from pg_proc p
-              join pg_namespace n on n.oid=p.pronamespace
-              where n.nspname='public'
-                and p.proname in (
-                  'xrpl_claim_r5_recovery_batch_progressive',
-                  'xrpl_claim_r5_recovery_batch'
-                )
-            )
-          ) as diagnostic;
+          select coalesce(jsonb_agg(jsonb_build_object(
+            'schema',n.nspname,
+            'name',p.proname,
+            'args',pg_get_function_identity_arguments(p.oid),
+            'result',pg_get_function_result(p.oid)
+          ) order by n.nspname,p.proname,p.oid),'[]'::jsonb) as claim_functions
+          from pg_proc p
+          join pg_namespace n on n.oid=p.pronamespace
+          where p.proname ilike '%r5%recovery%batch%'
+             or p.proname ilike '%recovery%batch%';
           SQL
           query="$(cat /tmp/diagnostic.sql)"
           jq -n --arg query "$query" '{query:$query,parameters:[],read_only:true}' > /tmp/query.json
-          curl --fail-with-body --silent --show-error \
+          status="$(curl --silent --show-error -o /tmp/result.json -w '%{http_code}' \
             -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
             -H 'content-type: application/json' \
             --data @/tmp/query.json \
-            "https://api.supabase.com/v1/projects/${SUPABASE_PROJECT_ID}/database/query" > /tmp/result.json
-          jq -c '.. | objects | .diagnostic? // empty' /tmp/result.json | head -n1
+            "https://api.supabase.com/v1/projects/${SUPABASE_PROJECT_ID}/database/query")"
+          echo "http_status=$status"
+          cat /tmp/result.json
+          test "$status" = '200'
