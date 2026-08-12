@@ -1,0 +1,73 @@
+name: Temporary R4F Drain Precondition Diagnostic
+
+on:
+  push:
+    branches:
+      - agent/r4f-compact-checkpoint-log-diagnostic
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+    steps:
+      - name: Read active-checkpoint wrapper and drain preconditions only
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/diagnostic.sql <<'SQL'
+          with pending as (
+            select * from public.xrpl_phase_messages
+            where profile_id='supabase-devnet' and status='pending'
+          ), target_work as (
+            select w.* from public.xrpl_phase_work w
+            join pending p on w.work_id=p.payload->>'workId'
+          ), target_chunk as (
+            select c.* from public.xrpl_phase_payload_chunks c
+            join target_work w on w.work_id=c.work_id
+            join pending p on c.chunk_index=(p.payload->>'chunkIndex')::integer
+          ), watermark as (
+            select * from public.xrpl_phase_watermarks where profile_id='supabase-devnet'
+          )
+          select jsonb_build_object(
+            'wrapperDefinition', (
+              select pg_get_functiondef(p.oid)
+              from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+              where n.nspname='public' and p.proname='xrpl_create_r5_active_checkpoint'
+              order by p.oid desc limit 1
+            ),
+            'pending', (select jsonb_build_object(
+              'messageId',message_id,'phase',phase,'status',status,
+              'workId',payload->>'workId','chunkIndex',payload->>'chunkIndex'
+            ) from pending limit 1),
+            'work', (select jsonb_build_object(
+              'workId',work_id,'status',status,
+              'previousLedgerIndex',previous_ledger_index,
+              'expectedParentHash',expected_parent_hash,
+              'scannedEndLedgerIndex',scanned_end_ledger_index,
+              'finalLedgerHash',final_ledger_hash
+            ) from target_work limit 1),
+            'chunk', (select jsonb_build_object(
+              'workId',work_id,'chunkIndex',chunk_index,'encoding',encoding,
+              'recordCount',record_count,
+              'recordsArray',jsonb_typeof((payload_json::jsonb)->'records')='array',
+              'recordsLength',jsonb_array_length((payload_json::jsonb)->'records')
+            ) from target_chunk limit 1),
+            'watermark', (select jsonb_build_object(
+              'ledgerIndex',ledger_index,'ledgerHash',ledger_hash,'workId',work_id
+            ) from watermark limit 1)
+          ) as diagnostic;
+          SQL
+          query="$(cat /tmp/diagnostic.sql)"
+          jq -n --arg query "$query" '{query:$query,parameters:[],read_only:true}' > /tmp/query.json
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+            -H 'content-type: application/json' \
+            --data @/tmp/query.json \
+            "https://api.supabase.com/v1/projects/${SUPABASE_PROJECT_ID}/database/query" > /tmp/result.json
+          jq -r '.. | objects | .diagnostic? // empty' /tmp/result.json
