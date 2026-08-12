@@ -11,95 +11,50 @@ permissions:
 jobs:
   diagnose:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
-    env:
-      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-      SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
-      SOURCE_COMMIT: '18dd9151f779ecaffee7e7580f1c972eef29ba3e'
+    timeout-minutes: 8
     steps:
-      - name: Validate active checkpoint target schema read-only
+      - name: Check out failing PR head
+        uses: actions/checkout@v4
+        with:
+          ref: 04786b1f9fd4c90fd3fa817929dcf015bd4d589f
+          fetch-depth: 1
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Reproduce PostgreSQL integration with trace
+        id: reproduce
         shell: bash
         run: |
-          set -euo pipefail
-          test -n "$SUPABASE_ACCESS_TOKEN"
-          [[ "$SUPABASE_PROJECT_ID" =~ ^[a-z]{20}$ ]]
-          node --input-type=module <<'NODE'
-          import { writeFileSync } from 'node:fs'
-          const token=process.env.SUPABASE_ACCESS_TOKEN??''
-          const project=process.env.SUPABASE_PROJECT_ID??''
-          const sourceCommit=process.env.SOURCE_COMMIT??''
-          const endpoint=`https://api.supabase.com/v1/projects/${project}/database/query`
-          const schemaSql=`
-          with columns as (
-            select column_name,data_type,udt_name,is_nullable,ordinal_position
-            from information_schema.columns
-            where table_schema='xrpl_r5_v1' and table_name='active_checkpoints'
-          ), constraints as (
-            select c.conname,c.contype,array_agg(a.attname order by u.ordinality) as columns
-            from pg_constraint c
-            join pg_class t on t.oid=c.conrelid
-            join pg_namespace n on n.oid=t.relnamespace
-            join unnest(c.conkey) with ordinality as u(attnum,ordinality) on true
-            join pg_attribute a on a.attrelid=t.oid and a.attnum=u.attnum
-            where n.nspname='xrpl_r5_v1' and t.relname='active_checkpoints'
-            group by c.conname,c.contype
-          )
-          select jsonb_build_object(
-            'columns',(select jsonb_agg(to_jsonb(columns) order by ordinal_position) from columns),
-            'constraints',(select jsonb_agg(to_jsonb(constraints) order by conname) from constraints)
-          ) as value;
-          `.trim()
-          const response=await fetch(endpoint,{
-            method:'POST',
-            headers:{authorization:`Bearer ${token}`,'content-type':'application/json',accept:'application/json'},
-            body:JSON.stringify({query:schemaSql,read_only:true}),
-            signal:AbortSignal.timeout(60_000),
-          })
-          const text=await response.text()
-          if(!response.ok) throw new Error(`read-only schema query failed:${response.status}:${text.slice(0,2000)}`)
-          const parsed=JSON.parse(text)
-          const rows=Array.isArray(parsed)?parsed:Array.isArray(parsed?.result)?parsed.result:[]
-          const schemaValue=rows?.[0]?.value??rows?.[0]?.VALUE??null
-          if(!schemaValue) throw new Error('target schema evidence unavailable')
-          const expectedTypes=new Map([
-            ['checkpoint_id','text'],['profile_id','text'],['profile_revision','integer'],
-            ['profile_identity_digest','text'],['selection_digest','text'],['source_profile_id','text'],
-            ['network','text'],['epoch_id','text'],['base_identity','text'],['watermark_ledger_index','bigint'],
-            ['watermark_ledger_hash','text'],['watermark_work_id','text'],['observed_at','timestamp with time zone'],
-            ['state_digest','text'],['row_counts','jsonb'],['section_digests','jsonb'],['state','jsonb'],
-          ])
-          const byName=new Map((schemaValue.columns??[]).map(c=>[c.column_name,c]))
-          const missing=[...expectedTypes.keys()].filter(name=>!byName.has(name))
-          if(missing.length) throw new Error(`active_checkpoints missing columns:${missing.join(',')}`)
-          const typeMismatches=[]
-          for(const [name,type] of expectedTypes){
-            if(String(byName.get(name)?.data_type)!==type) typeMismatches.push(`${name}:${byName.get(name)?.data_type}`)
-          }
-          if(typeMismatches.length) throw new Error(`active_checkpoints type mismatch:${typeMismatches.join(',')}`)
-          const conflictConstraint=(schemaValue.constraints??[]).find(c=>
-            (c.contype==='p'||c.contype==='u') && Array.isArray(c.columns) && c.columns.length===1 && c.columns[0]==='checkpoint_id'
-          )
-          if(!conflictConstraint) throw new Error('checkpoint_id unique/primary constraint unavailable')
-          const output={
-            schemaVersion:3,
-            purpose:'r4f-compact-checkpoint-target-schema-validation-readonly',
-            sourceCommit,
-            readOnlyManagementApi:true,
-            productionMutationPerformed:false,
-            expectedInsertColumnsPresent:true,
-            expectedInsertColumnTypesMatch:true,
-            checkpointIdConflictConstraint:true,
-            checkpointIdConstraintName:String(conflictConstraint.conname??''),
-            checkpointIdConstraintType:String(conflictConstraint.contype??''),
-          }
-          writeFileSync('r4f-proof-log-diagnostic.json',JSON.stringify(output,null,2)+'\n')
-          console.log(JSON.stringify(output,null,2))
-          NODE
+          set +e
+          bash -x scripts/test-r4f-revision4-directional-persistence-postgres.sh > /tmp/r4f-postgres-debug.log 2>&1
+          status=$?
+          set -e
+          printf 'status=%s\n' "$status" >> "$GITHUB_OUTPUT"
+          tail -n 160 /tmp/r4f-postgres-debug.log
+          cp /tmp/r4f-postgres-debug.log r4f-proof-log-diagnostic.txt
 
-      - name: Upload sanitized diagnostic
+      - name: Upload diagnostic trace
         uses: actions/upload-artifact@v4
         with:
           name: r4f-proof-log-diagnostic
-          path: r4f-proof-log-diagnostic.json
+          path: r4f-proof-log-diagnostic.txt
           if-no-files-found: error
           retention-days: 7
+
+      - name: Assert reproduction result recorded
+        run: |
+          echo "reproduced_status=${{ steps.reproduce.outputs.status }}"
+          test -n "${{ steps.reproduce.outputs.status }}"
