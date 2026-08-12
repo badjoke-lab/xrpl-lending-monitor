@@ -5,100 +5,18 @@ container_name="${R4F_POSTGRES_CONTAINER:?R4F_POSTGRES_CONTAINER is required}"
 checkpoint_sql='scripts/r4f-revision4-qualification-compact-checkpoint.sql'
 test -f "$checkpoint_sql"
 
-hash='AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
 selection='99a1f97fc17ed6023bc3075bffe963a260e99a4ed0e2d831b068826c7797222f'
 checkpoint_id='r5-checkpoint-revision4-proof-99999999999'
 observed_at='2026-08-12T14:00:00.000Z'
 
-# Build a minimal schema fixture that matches the production columns/types consumed
-# by the qualification-only checkpoint. The real target-table schema/type/PK shape
-# is independently verified read-only against production before promotion.
+# The compact checkpoint must trust the canonical drain function's validated return
+# value rather than re-reading phase tables in the same SQL statement. This fixture
+# therefore models the real production condition observed before the failed proof:
+# the active R5 phase machine is still at commit/finalize when the checkpoint starts,
+# while the canonical drain returns a bounded scan-boundary proof after consuming only
+# those existing commit/finalize phases.
 docker exec -i "$container_name" psql -v ON_ERROR_STOP=1 -U postgres -d postgres <<'SQL'
-create schema if not exists xrpl_resource_guard_v2;
 create schema if not exists xrpl_r5_v1;
-
-create table public.xrpl_collector_runtime (
-  profile_id text primary key,
-  network text not null,
-  status text not null,
-  lease_owner text,
-  lease_expires_at timestamptz,
-  last_error text,
-  consecutive_failures integer not null default 0
-);
-
-create table public.xrpl_phase_streams (
-  profile_id text primary key,
-  network text not null,
-  epoch_id text not null,
-  base_identity text not null,
-  status text not null,
-  last_error_classification text,
-  last_error_message text
-);
-
-create table public.xrpl_phase_watermarks (
-  profile_id text primary key,
-  network text not null,
-  epoch_id text not null,
-  base_identity text not null,
-  ledger_index bigint not null,
-  ledger_hash text not null,
-  work_id text not null
-);
-
-create table public.xrpl_phase_messages (
-  message_id text primary key,
-  profile_id text not null,
-  status text not null,
-  phase text not null,
-  payload jsonb not null default '{}'::jsonb,
-  result jsonb not null default '{}'::jsonb
-);
-
-create table public.xrpl_phase_successors (
-  current_message_id text not null,
-  successor_message_id text not null,
-  primary key (current_message_id, successor_message_id)
-);
-
-create table public.xrpl_phase_work (
-  work_id text primary key,
-  profile_id text not null,
-  network text not null,
-  epoch_id text not null,
-  base_identity text not null,
-  status text not null,
-  scanned_end_ledger_index bigint,
-  final_ledger_hash text,
-  committed_at timestamptz
-);
-
-create table public.xrpl_phase_payload_chunks (
-  work_id text not null,
-  chunk_id text not null,
-  primary key (work_id, chunk_id)
-);
-
-create table public.xrpl_phase_reference_rows (
-  work_id text not null,
-  row_id text not null,
-  primary key (work_id, row_id)
-);
-
-create table public.xrpl_phase_commit_chunks (
-  work_id text not null,
-  chunk_id text not null,
-  primary key (work_id, chunk_id)
-);
-
-create table xrpl_resource_guard_v2.attempts (
-  attempt_id text primary key
-);
-
-create table xrpl_resource_guard_v2.tick_accounting (
-  tick_id text primary key
-);
 
 create table xrpl_r5_v1.active_checkpoints (
   checkpoint_id text primary key,
@@ -120,6 +38,38 @@ create table xrpl_r5_v1.active_checkpoints (
   state jsonb not null
 );
 
+create table public.r4f_compact_checkpoint_fixture (
+  singleton boolean primary key default true check (singleton),
+  pending_phase text not null,
+  work_status text not null,
+  watermark_ledger_index bigint not null,
+  watermark_ledger_hash text not null,
+  target_ledger_index bigint not null,
+  target_ledger_hash text not null
+);
+
+insert into public.r4f_compact_checkpoint_fixture (
+  pending_phase,
+  work_status,
+  watermark_ledger_index,
+  watermark_ledger_hash,
+  target_ledger_index,
+  target_ledger_hash
+) values (
+  'commit',
+  'staged',
+  98,
+  repeat('B', 64),
+  100,
+  repeat('A', 64)
+);
+
+create table public.r4f_compact_checkpoint_drain_calls (
+  call_id bigserial primary key,
+  owner text not null,
+  observed_at timestamptz not null
+);
+
 create or replace function public.xrpl_transfer_json_digest(p_value jsonb)
 returns text
 language sql
@@ -130,87 +80,93 @@ as $$
 $$;
 
 create or replace function public.xrpl_drain_r5_checkpoint_boundary(
-  p_session_id text,
+  p_owner text,
   p_observed_at timestamptz
 )
 returns jsonb
-language sql
+language plpgsql
 as $$
-  select jsonb_build_object(
+declare
+  fixture public.r4f_compact_checkpoint_fixture%rowtype;
+begin
+  select * into strict fixture
+  from public.r4f_compact_checkpoint_fixture
+  where singleton is true;
+
+  if fixture.pending_phase not in ('commit', 'finalize')
+    or fixture.work_status not in ('staged', 'committing', 'finalizing') then
+    raise exception 'fixture_not_at_drainable_transition';
+  end if;
+
+  insert into public.r4f_compact_checkpoint_drain_calls (owner, observed_at)
+  values (p_owner, p_observed_at);
+
+  return jsonb_build_object(
     'schemaVersion', 1,
     'purpose', 'r5-checkpoint-boundary-drain',
     'drained', true,
-    'sessionId', p_session_id,
-    'observedAt', p_observed_at,
+    'profileId', 'supabase_free_postgres_pgcron_edge',
+    'profileRevision', 3,
+    'profileIdentityDigest',
+      '3a5c4ff2c43a48d3e5b7ceded60027173d215d6f083fb33c22375758520bbe67',
+    'sourceProfileId', 'supabase-devnet',
+    'network', 'devnet',
+    'epochId', 'supabase-r4c2c-v1',
+    'baseIdentity', 'base-identity',
+    'drainedStepCount', 2,
+    'drainedPhases', jsonb_build_array(
+      jsonb_build_object(
+        'sequence', 1,
+        'phase', 'commit',
+        'messageId', 'commit-99',
+        'workId', 'work-99',
+        'chunkIndex', 0,
+        'successorMessageId', 'finalize-99'
+      ),
+      jsonb_build_object(
+        'sequence', 2,
+        'phase', 'finalize',
+        'messageId', 'finalize-99',
+        'workId', 'work-99',
+        'chunkIndex', null,
+        'successorMessageId', 'scan-101'
+      )
+    ),
+    'watermarkBefore', jsonb_build_object(
+      'ledgerIndex', fixture.watermark_ledger_index,
+      'ledgerHash', fixture.watermark_ledger_hash,
+      'workId', 'work-98'
+    ),
+    'watermarkAfter', jsonb_build_object(
+      'ledgerIndex', fixture.target_ledger_index,
+      'ledgerHash', fixture.target_ledger_hash,
+      'workId', 'work-100'
+    ),
+    'pendingScan', jsonb_build_object(
+      'messageId', 'scan-101',
+      'scanSequence', 101,
+      'expectedPreviousLedgerIndex', fixture.target_ledger_index,
+      'expectedPreviousLedgerHash', fixture.target_ledger_hash,
+      'availableAt', p_observed_at + interval '2 seconds'
+    ),
     'checks', jsonb_build_object(
       'collectorQuiescent', true,
       'activeStreamHealthy', true,
+      'onlyExistingCommitOrFinalizeDrained', true,
       'noScanExecuted', true,
       'onePendingScan', true,
       'pendingScanBoundToWatermark', true,
       'noInflightWork', true,
-      'watermarkIdentityPreserved', true
-    ),
-    'watermarkAfter', jsonb_build_object(
-      'ledgerIndex', 100,
-      'ledgerHash', repeat('A', 64),
-      'workId', 'work-100'
-    ),
-    'pendingScan', jsonb_build_object('messageId', 'scan-101')
-  )
-$$;
-
-insert into public.xrpl_collector_runtime (
-  profile_id, network, status, lease_owner, lease_expires_at, last_error, consecutive_failures
-) values ('supabase-devnet', 'devnet', 'stopped', null, null, null, 0);
-
-insert into public.xrpl_phase_streams (
-  profile_id, network, epoch_id, base_identity, status, last_error_classification, last_error_message
-) values ('supabase-devnet', 'devnet', 'supabase-r4c2c-v1', 'base-identity', 'active', null, null);
-
-insert into public.xrpl_phase_watermarks (
-  profile_id, network, epoch_id, base_identity, ledger_index, ledger_hash, work_id
-) values ('supabase-devnet', 'devnet', 'supabase-r4c2c-v1', 'base-identity', 100, repeat('A', 64), 'work-100');
-
-insert into public.xrpl_phase_messages (message_id, profile_id, status, phase, payload, result)
-values
-  (
-    'finalize-100', 'supabase-devnet', 'completed', 'finalize', '{}'::jsonb,
-    jsonb_build_object(
-      'status', 'committed',
-      'workId', 'work-100',
-      'ledgerIndex', 100,
-      'ledgerHash', repeat('A', 64)
+      'watermarkIdentityPreserved', true,
+      'publicReaderUnchanged', true,
+      'mainnetDisabled', true,
+      'activeRecoveryStarted', false,
+      'stabilizationAuthorized', false,
+      'soakAuthorized', false
     )
-  ),
-  (
-    'scan-101', 'supabase-devnet', 'pending', 'scan',
-    jsonb_build_object(
-      'expectedPreviousLedgerIndex', 100,
-      'expectedPreviousLedgerHash', repeat('A', 64),
-      'network', 'devnet',
-      'epochId', 'supabase-r4c2c-v1',
-      'baseIdentity', 'base-identity'
-    ),
-    '{}'::jsonb
   );
-
-insert into public.xrpl_phase_successors (current_message_id, successor_message_id)
-values ('finalize-100', 'scan-101');
-
-insert into public.xrpl_phase_work (
-  work_id, profile_id, network, epoch_id, base_identity, status,
-  scanned_end_ledger_index, final_ledger_hash, committed_at
-) values (
-  'work-100', 'supabase-devnet', 'devnet', 'supabase-r4c2c-v1', 'base-identity',
-  'committed', 100, repeat('A', 64), '2026-08-12T13:59:00Z'::timestamptz
-);
-
-insert into public.xrpl_phase_payload_chunks values ('work-100', 'payload-1');
-insert into public.xrpl_phase_reference_rows values ('work-100', 'reference-1');
-insert into public.xrpl_phase_commit_chunks values ('work-100', 'commit-1');
-insert into xrpl_resource_guard_v2.attempts values ('attempt-1');
-insert into xrpl_resource_guard_v2.tick_accounting values ('tick-1');
+end;
+$$;
 SQL
 
 CHECKPOINT_ID="$checkpoint_id" \
@@ -232,7 +188,7 @@ for token, value in replacements.items():
     if token not in query:
         raise SystemExit(f'missing compact-checkpoint token: {token}')
     query = query.replace(token, value)
-if '__' in query and any(token in query for token in replacements):
+if any(token in query for token in replacements):
     raise SystemExit('compact-checkpoint token remained after rendering')
 Path('/tmp/r4f-compact-checkpoint.sql').write_text(query)
 PY
@@ -241,8 +197,10 @@ docker exec -i "$container_name" psql -v ON_ERROR_STOP=1 -U postgres -d postgres
   < /tmp/r4f-compact-checkpoint.sql \
   > /tmp/r4f-compact-checkpoint-result.txt
 
-# psql's aligned output may include a header; query the retained row directly for
-# unambiguous assertions after the compact statement succeeds.
+# The first execution must consume exactly one canonical drain proof and retain one
+# qualification-only checkpoint whose state digest and drain-boundary facts agree.
+test "$(docker exec "$container_name" psql -U postgres -d postgres -Atqc 'select count(*) from public.r4f_compact_checkpoint_drain_calls')" = '1'
+
 docker exec "$container_name" psql -U postgres -d postgres -Atqc \
   "select jsonb_build_object(
     'count', count(*),
@@ -252,8 +210,20 @@ docker exec "$container_name" psql -U postgres -d postgres -Atqc \
     'purpose', min(state->>'purpose'),
     'qualificationBoundaryOnly', bool_and(coalesce((state#>>'{checks,qualificationBoundaryOnly}')::boolean,false)),
     'fullRecoveryStateCaptured', bool_and(coalesce((state#>>'{checks,fullRecoveryStateCaptured}')::boolean,true)),
-    'messages', min((row_counts->>'messages')::integer),
-    'referenceRows', min((row_counts->>'referenceRows')::integer)
+    'pendingScanBoundToWatermark', bool_and(coalesce((state#>>'{checks,pendingScanBoundToWatermark}')::boolean,false)),
+    'noInflightWork', bool_and(coalesce((state#>>'{checks,noInflightWork}')::boolean,false)),
+    'drainedStepCount', min((row_counts->>'drainedStepCount')::integer),
+    'drainedPhaseCount', min(jsonb_array_length(state#>'{boundaryDrain,drainedPhases}')),
+    'pendingMessages', min((row_counts->>'pendingMessages')::integer),
+    'leasedMessages', min((row_counts->>'leasedMessages')::integer),
+    'retryMessages', min((row_counts->>'retryMessages')::integer),
+    'inflightWork', min((row_counts->>'inflightWork')::integer),
+    'watermarkLedgerIndex', min(watermark_ledger_index),
+    'pendingExpectedLedgerIndex', min((state#>>'{boundaryDrain,pendingScan,expectedPreviousLedgerIndex}')::bigint),
+    'watermarkHashMatchesPending', bool_and(
+      upper(state#>>'{boundaryDrain,watermarkAfter,ledgerHash}') =
+      upper(state#>>'{boundaryDrain,pendingScan,expectedPreviousLedgerHash}')
+    )
   ) from xrpl_r5_v1.active_checkpoints where checkpoint_id='${checkpoint_id}';" \
   > /tmp/r4f-compact-checkpoint-assert.json
 
@@ -265,15 +235,27 @@ jq -e --arg selection "$selection" '
   .purpose == "r5-revision4-qualification-boundary-checkpoint" and
   .qualificationBoundaryOnly == true and
   .fullRecoveryStateCaptured == false and
-  .messages == 2 and
-  .referenceRows == 1
+  .pendingScanBoundToWatermark == true and
+  .noInflightWork == true and
+  .drainedStepCount == 2 and
+  .drainedPhaseCount == 2 and
+  .pendingMessages == 1 and
+  .leasedMessages == 0 and
+  .retryMessages == 0 and
+  .inflightWork == 0 and
+  .watermarkLedgerIndex == 100 and
+  .pendingExpectedLedgerIndex == 100 and
+  .watermarkHashMatchesPending == true
 ' /tmp/r4f-compact-checkpoint-assert.json > /dev/null
 
-# Exact replay must converge to the same single row.
+# Exact replay must converge to the existing row WITHOUT invoking the drain again.
+# This matters because replaying a drain against a later phase-machine state would
+# create a new mutation surface rather than prove idempotency.
 docker exec -i "$container_name" psql -v ON_ERROR_STOP=1 -U postgres -d postgres \
   < /tmp/r4f-compact-checkpoint.sql \
   > /tmp/r4f-compact-checkpoint-replay.txt
 
 test "$(docker exec "$container_name" psql -U postgres -d postgres -Atqc "select count(*) from xrpl_r5_v1.active_checkpoints where checkpoint_id='${checkpoint_id}'")" = '1'
+test "$(docker exec "$container_name" psql -U postgres -d postgres -Atqc 'select count(*) from public.r4f_compact_checkpoint_drain_calls')" = '1'
 
 printf '%s\n' 'R4F revision-4 compact qualification checkpoint PostgreSQL integration: PASS'
