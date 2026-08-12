@@ -6,10 +6,23 @@
 // The provider surface was formally declared unqualifiable, so this retained
 // observation measures the application-side directional contract with no
 // fabricated provider-delta uplift.
-Deno.env.set(
-  'XRPL_R5_REVISION4_SELECTION_DIGEST',
-  '99a1f97fc17ed6023bc3075bffe963a260e99a4ed0e2d831b068826c7797222f',
-)
-Deno.env.set('XRPL_R5_REVISION4_UNEXPLAINED_EGRESS_RESERVE_BYTES', '0')
+const proofRuntimeConfigKey = '__XRPL_R5_REVISION4_PROOF_RUNTIME_CONFIG__' as const
+const proofRuntimeGlobal = globalThis as typeof globalThis & {
+  [proofRuntimeConfigKey]?: unknown
+}
+
+if (proofRuntimeGlobal[proofRuntimeConfigKey] !== undefined) {
+  throw new Error('revision-4 proof runtime config already exists')
+}
+
+Object.defineProperty(proofRuntimeGlobal, proofRuntimeConfigKey, {
+  value: Object.freeze({
+    selectionDigest: '99a1f97fc17ed6023bc3075bffe963a260e99a4ed0e2d831b068826c7797222f',
+    unexplainedEgressReserveBytes: 0,
+  }),
+  configurable: false,
+  enumerable: false,
+  writable: false,
+})
 
 await import('../xrpl-r5-recovery-batch/index.ts')
