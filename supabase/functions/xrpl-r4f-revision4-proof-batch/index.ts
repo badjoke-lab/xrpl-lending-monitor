@@ -19,6 +19,7 @@ Object.defineProperty(proofRuntimeGlobal, proofRuntimeConfigKey, {
   value: Object.freeze({
     selectionDigest: '99a1f97fc17ed6023bc3075bffe963a260e99a4ed0e2d831b068826c7797222f',
     unexplainedEgressReserveBytes: 0,
+    requestSource: 'github_actions_prepared_resume',
   }),
   configurable: false,
   enumerable: false,
