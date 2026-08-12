@@ -60,8 +60,13 @@ grep -Fq 'r5_prepare_source_sha256=${runtimeSourceSetSha256}' "$prepare"
 grep -Fq 'allDynamicCloneSourcesBound: true' "$prepare"
 
 grep -Fq "await import('../xrpl-r5-recovery-batch/index.ts')" "$wrapper"
+grep -Fq '__XRPL_R5_REVISION4_PROOF_RUNTIME_CONFIG__' "$wrapper"
 grep -Fq "99a1f97fc17ed6023bc3075bffe963a260e99a4ed0e2d831b068826c7797222f" "$wrapper"
-grep -Fq "XRPL_R5_REVISION4_UNEXPLAINED_EGRESS_RESERVE_BYTES', '0'" "$wrapper"
+grep -Fq 'unexplainedEgressReserveBytes: 0' "$wrapper"
+if grep -Fq 'Deno.env.set(' "$wrapper" || grep -Fq 'Deno.env.delete(' "$wrapper"; then
+  echo 'qualification proof wrapper must not mutate Edge environment variables' >&2
+  exit 1
+fi
 
 grep -Fq "const DEFAULT_XRPL_DEVNET_RPC_URL = 'https://s.devnet.rippletest.net:51234/'" "$executor"
 grep -Fq "const RECOVERY_RUN_ID = 'r5-recovery-selected-revision4-entry'" "$executor"

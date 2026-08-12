@@ -1,0 +1,65 @@
+name: Temporary R4F Proof Source Compatibility
+
+on:
+  push:
+    branches:
+      - agent/r4f-proof-edge-runtime-config
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TARGET_BRANCH: agent/r4f-proof-edge-runtime-config
+      TARGET_PATH: supabase/functions/xrpl-r5-recovery-batch/index.ts
+    steps:
+      - name: Allow active source plus proof-only source only under override
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/${GITHUB_REPOSITORY}/contents/${TARGET_PATH}?ref=${TARGET_BRANCH}" > /tmp/file.json
+          sha="$(jq -r '.sha' /tmp/file.json)"
+          jq -r '.content' /tmp/file.json | tr -d '\n' | base64 -d > /tmp/index.ts
+          TARGET=/tmp/index.ts python - <<'PY'
+          import os
+          from pathlib import Path
+          path = Path(os.environ['TARGET'])
+          text = path.read_text()
+          if 'function requestSourceAllowed(source: unknown): boolean' in text and '!requestSourceAllowed(body.source)' in text:
+              print('proof source compatibility already patched')
+              raise SystemExit(0)
+          old = """function requestSource(): string {
+  return qualificationRuntimeOverride()?.requestSource ?? 'github_actions'
+}
+"""
+          new = """function requestSourceAllowed(source: unknown): boolean {
+  if (source === 'github_actions') return true
+  return qualificationRuntimeOverride()?.requestSource === source
+}
+"""
+          if text.count(old) != 1:
+              raise SystemExit(f'requestSource helper replacement count mismatch: {text.count(old)}')
+          text = text.replace(old, new)
+          old_check = 'if (body.source !== requestSource()) {'
+          new_check = 'if (!requestSourceAllowed(body.source)) {'
+          if text.count(old_check) != 1:
+              raise SystemExit(f'request source check replacement count mismatch: {text.count(old_check)}')
+          path.write_text(text.replace(old_check, new_check))
+          PY
+          grep -Fq 'function requestSourceAllowed(source: unknown): boolean' /tmp/index.ts
+          grep -Fq "if (source === 'github_actions') return true" /tmp/index.ts
+          grep -Fq 'qualificationRuntimeOverride()?.requestSource === source' /tmp/index.ts
+          grep -Fq '!requestSourceAllowed(body.source)' /tmp/index.ts
+          current="$(gh api "repos/${GITHUB_REPOSITORY}/contents/${TARGET_PATH}?ref=${TARGET_BRANCH}" --jq '.content' | tr -d '\n' | base64 -d)"
+          proposed="$(cat /tmp/index.ts)"
+          if [ "$current" = "$proposed" ]; then
+            exit 0
+          fi
+          base64 -w0 /tmp/index.ts > /tmp/content.b64
+          jq -n --arg message 'Allow proof-only resume request source safely' --arg content "$(cat /tmp/content.b64)" --arg sha "$sha" --arg branch "$TARGET_BRANCH" '{message:$message,content:$content,sha:$sha,branch:$branch}' > /tmp/put.json
+          gh api -X PUT "repos/${GITHUB_REPOSITORY}/contents/${TARGET_PATH}" --input /tmp/put.json > /tmp/put-result.json
+          jq -e '.commit.sha | test("^[a-f0-9]{40}$")' /tmp/put-result.json > /dev/null

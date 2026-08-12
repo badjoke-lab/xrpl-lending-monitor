@@ -233,7 +233,56 @@ function env(name: string): string {
   return value
 }
 
+type Revision4QualificationRuntimeOverride = {
+  selectionDigest: string
+  unexplainedEgressReserveBytes: number
+  requestSource: 'github_actions_prepared_resume'
+}
+
+function qualificationRuntimeOverride(): Revision4QualificationRuntimeOverride | null {
+  const value = (
+    globalThis as typeof globalThis & {
+      __XRPL_R5_REVISION4_PROOF_RUNTIME_CONFIG__?: unknown
+    }
+  ).__XRPL_R5_REVISION4_PROOF_RUNTIME_CONFIG__
+  if (value === undefined) return null
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new RecoveryError('revision-4 qualification runtime override is invalid', true)
+  }
+  const candidate = value as Record<string, unknown>
+  if (Object.keys(candidate).sort().join(',') !== 'requestSource,selectionDigest,unexplainedEgressReserveBytes') {
+    throw new RecoveryError('revision-4 qualification runtime override shape is invalid', true)
+  }
+  if (
+    typeof candidate.selectionDigest !== 'string'
+    || !/^[a-f0-9]{64}$/u.test(candidate.selectionDigest)
+  ) {
+    throw new RecoveryError('revision-4 qualification selection override is invalid', true)
+  }
+  if (
+    typeof candidate.unexplainedEgressReserveBytes !== 'number'
+    || !Number.isSafeInteger(candidate.unexplainedEgressReserveBytes)
+    || candidate.unexplainedEgressReserveBytes < 0
+  ) {
+    throw new RecoveryError('revision-4 qualification reserve override is invalid', true)
+  }
+  if (candidate.requestSource !== 'github_actions_prepared_resume') {
+    throw new RecoveryError('revision-4 qualification request source override is invalid', true)
+  }
+  return {
+    selectionDigest: candidate.selectionDigest,
+    unexplainedEgressReserveBytes: candidate.unexplainedEgressReserveBytes,
+    requestSource: candidate.requestSource,
+  }
+}
+
+function requestSource(): string {
+  return qualificationRuntimeOverride()?.requestSource ?? 'github_actions'
+}
+
 function selectionDigest(): string {
+  const override = qualificationRuntimeOverride()
+  if (override) return override.selectionDigest
   const value = env('XRPL_R5_REVISION4_SELECTION_DIGEST')
   if (!/^[a-f0-9]{64}$/u.test(value)) {
     throw new RecoveryError('XRPL_R5_REVISION4_SELECTION_DIGEST is invalid', true)
@@ -242,6 +291,8 @@ function selectionDigest(): string {
 }
 
 function unexplainedDirectionalReserveBytes(): number {
+  const override = qualificationRuntimeOverride()
+  if (override) return override.unexplainedEgressReserveBytes
   const raw = env('XRPL_R5_REVISION4_UNEXPLAINED_EGRESS_RESERVE_BYTES')
   const value = Number(raw)
   if (!Number.isSafeInteger(value) || value < 0) {
@@ -699,7 +750,7 @@ Deno.serve(async (request) => {
       throw new RecoveryError('request body must be valid JSON', true)
     }
     const body = object(bodyValue, 'request body')
-    if (body.source !== 'github_actions') {
+    if (body.source !== requestSource()) {
       return json({ ok: false, error: 'invalid_source' }, 403)
     }
     if ((body.run_id ?? RECOVERY_RUN_ID) !== RECOVERY_RUN_ID) {
