@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   patch:
@@ -75,7 +75,7 @@ jobs:
             echo 'verified proof bundle mutates Deno.env' >&2
             exit 1
           fi
-          bash -x scripts/test-r4f-revision4-12-ledger-qualification-contract.sh
+          bash scripts/test-r4f-revision4-12-ledger-qualification-contract.sh
           git diff --check
           test "$(git diff --name-only | wc -l)" -eq 2
           test "$(git diff --name-only | sed -n '1p')" = '.github/workflows/r4f-revision4-12-ledger-qualification.yml'
@@ -86,7 +86,80 @@ jobs:
           cp /tmp/xrpl-r4f-revision4-proof-batch.ts /tmp/r4f-proof-resume-verified/proof-bundle.ts
           git diff --binary > /tmp/r4f-proof-resume-verified/changes.patch
 
+      - name: Create unreferenced clean five-file commit object
+        id: clean_commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_MAIN: 9cfcf71eb46e6641185b6e079d4b73379f9681e7
+        shell: bash
+        run: |
+          set -euo pipefail
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}"
+          headers=(-H "Authorization: Bearer ${GH_TOKEN}" -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28')
+          main_sha="$(curl --fail-with-body --silent --show-error "${headers[@]}" "${api}/git/ref/heads/main" | jq -r '.object.sha')"
+          test "$main_sha" = "$EXPECTED_MAIN"
+          main_tree="$(curl --fail-with-body --silent --show-error "${headers[@]}" "${api}/git/commits/${main_sha}" | jq -r '.tree.sha')"
+          [[ "$main_tree" =~ ^[a-f0-9]{40}$ ]]
+
+          create_blob() {
+            local path="$1"
+            jq -Rs '{content: ., encoding: "utf-8"}' < "$path" \
+              | curl --fail-with-body --silent --show-error "${headers[@]}" \
+                  -X POST "${api}/git/blobs" --data-binary @- \
+              | jq -r '.sha'
+          }
+          file_mode() {
+            local path="$1"
+            local mode
+            mode="$(git ls-tree HEAD "$path" | awk '{print $1}')"
+            test -n "$mode"
+            printf '%s' "$mode"
+          }
+
+          workflow_path='.github/workflows/r4f-revision4-12-ledger-qualification.yml'
+          wrapper_path='supabase/functions/xrpl-r4f-revision4-proof-batch/index.ts'
+          builder_path='scripts/build-r4f-revision4-proof-bundle.ts'
+          inspector_path='scripts/inspect-r4f-revision4-qualification-state.mjs'
+          contract_path='scripts/test-r4f-revision4-12-ledger-qualification-contract.sh'
+
+          workflow_blob="$(create_blob "$workflow_path")"
+          wrapper_blob="$(create_blob "$wrapper_path")"
+          builder_blob="$(create_blob "$builder_path")"
+          inspector_blob="$(create_blob "$inspector_path")"
+          contract_blob="$(create_blob "$contract_path")"
+          for sha in "$workflow_blob" "$wrapper_blob" "$builder_blob" "$inspector_blob" "$contract_blob"; do
+            [[ "$sha" =~ ^[a-f0-9]{40}$ ]]
+          done
+
+          jq -n \
+            --arg base "$main_tree" \
+            --arg wp "$workflow_path" --arg wm "$(file_mode "$workflow_path")" --arg ws "$workflow_blob" \
+            --arg rp "$wrapper_path" --arg rm "$(file_mode "$wrapper_path")" --arg rs "$wrapper_blob" \
+            --arg bp "$builder_path" --arg bm "$(file_mode "$builder_path")" --arg bs "$builder_blob" \
+            --arg ip "$inspector_path" --arg im "$(file_mode "$inspector_path")" --arg is "$inspector_blob" \
+            --arg cp "$contract_path" --arg cm "$(file_mode "$contract_path")" --arg cs "$contract_blob" \
+            '{base_tree:$base,tree:[
+              {path:$wp,mode:$wm,type:"blob",sha:$ws},
+              {path:$rp,mode:$rm,type:"blob",sha:$rs},
+              {path:$bp,mode:$bm,type:"blob",sha:$bs},
+              {path:$ip,mode:$im,type:"blob",sha:$is},
+              {path:$cp,mode:$cm,type:"blob",sha:$cs}
+            ]}' > /tmp/clean-tree-request.json
+          clean_tree="$(curl --fail-with-body --silent --show-error "${headers[@]}" -X POST "${api}/git/trees" --data-binary @/tmp/clean-tree-request.json | jq -r '.sha')"
+          [[ "$clean_tree" =~ ^[a-f0-9]{40}$ ]]
+
+          jq -n --arg message 'Resume prepared revision4 proof without Edge env mutation' --arg tree "$clean_tree" --arg parent "$main_sha" \
+            '{message:$message,tree:$tree,parents:[$parent]}' > /tmp/clean-commit-request.json
+          clean_commit="$(curl --fail-with-body --silent --show-error "${headers[@]}" -X POST "${api}/git/commits" --data-binary @/tmp/clean-commit-request.json | jq -r '.sha')"
+          [[ "$clean_commit" =~ ^[a-f0-9]{40}$ ]]
+          jq -n --arg main "$main_sha" --arg tree "$clean_tree" --arg commit "$clean_commit" \
+            '{main:$main,tree:$tree,commit:$commit,changedFiles:5,refUpdated:false}' \
+            > /tmp/r4f-proof-resume-verified/clean-commit.json
+          printf 'clean_commit=%s\n' "$clean_commit" >> "$GITHUB_OUTPUT"
+          echo "clean unreferenced commit: $clean_commit"
+
       - name: Upload verified files
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: r4f-proof-resume-verified-files
