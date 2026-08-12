@@ -57,8 +57,22 @@ for required in (
     "MAX_LEDGER_COUNT: '12'",
     "MAX_PER_LEDGER_BYTES: '4581'",
     "MAX_TOTAL_BYTES: '54972'",
-    "supabase db push --linked --include-all --dry-run",
-    "supabase db push --linked --include-all --yes",
+    "migration_state=applied_clean",
+    "checkpointRev4Exists",
+    "prepareRev4Exists",
+    "rebindStrictRev4Exists",
+    "rebindRev4Exists",
+    "claimRev4Exists",
+    "progressiveClaimRev4Exists",
+    "completionRev4Exists",
+    "egressPolicyRows",
+    "runIdRows",
+    "evidenceRows",
+    "20260809151000 20260810123000 20260810133000 20260811012000 20260811061000",
+    "maximum_ledgers_per_claim=12",
+    "maximum_billable_egress_bytes_per_ledger=4581",
+    "maximum_claim_billable_egress_bytes=54972",
+    "maximum_claim_exclusive_reservation_bytes=54973",
     "supabase functions deploy \"$PROOF_FUNCTION\"",
     "supabase functions delete \"$PROOF_FUNCTION\"",
     "--no-verify-jwt",
@@ -81,6 +95,9 @@ for forbidden in (
     "  schedule:",
     "pull_request_target",
     "contents: write",
+    "supabase db push",
+    "SUPABASE_DB_PASSWORD",
+    "supabase link",
     "MAINNET_ENABLED: 'true'",
     "wrangler deploy",
     "supabase functions deploy xrpl-r5-recovery-batch",
@@ -99,6 +116,10 @@ if rev4_proof.count('supabase functions delete "$PROOF_FUNCTION"') != 1:
     raise SystemExit("revision-4 12-ledger workflow must delete exactly one temporary proof function")
 if rev4_proof.count("--mode pause") != 1 or rev4_proof.count("--mode resume") != 1:
     raise SystemExit("revision-4 12-ledger workflow must contain exactly one bounded pause and one restore")
+if rev4_proof.count("migration_state=applied_clean") < 2:
+    raise SystemExit("revision-4 12-ledger workflow must bind applied-clean state into proposal and authorization parser")
+if rev4_proof.count("read_only:true") < 4:
+    raise SystemExit("revision-4 12-ledger workflow must revalidate applied-clean state read-only in prepare and execute")
 
 rev4_probe = (root / r4f_rev4_probe).read_text()
 for required in (
