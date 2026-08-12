@@ -60,7 +60,8 @@ jobs:
         id: scheduler
         run: node scripts/prepare-r4f-g3-isolated-window.mjs
 
-      - name: Verify exact applied-clean revision-4 state read-only
+      - name: Verify exact applied-clean or prepared-resume revision-4 state read-only
+        id: qualification_state
         shell: bash
         run: |
           set -euo pipefail
@@ -76,17 +77,9 @@ jobs:
           mapfile -t remote_versions < <(jq -r '.. | objects | .version? // empty | tostring' r4f-revision4-12-ledger-prepare-evidence/migration-history.json | grep -E '^20[0-9]{12}$' | LC_ALL=C sort -u)
           test "${remote_versions[*]:-}" = '20260809151000 20260810123000 20260810133000 20260811012000 20260811061000'
 
-          preflight_query="select jsonb_build_object('checkpointRev4Exists',to_regprocedure('public.xrpl_create_r5_revision4_active_checkpoint(text,text,timestamp with time zone)') is not null,'prepareRev4Exists',to_regprocedure('public.xrpl_prepare_r5_revision4_active_recovery(text,text,text,bigint,text,timestamp with time zone)') is not null,'rebindStrictRev4Exists',to_regprocedure('public.xrpl_rebind_r5_revision4_prebatch_recovery_to_active_boundary_strict(text,timestamp with time zone)') is not null,'rebindRev4Exists',to_regprocedure('public.xrpl_rebind_r5_revision4_prebatch_recovery_to_active_boundary(text,timestamp with time zone)') is not null,'claimRev4Exists',to_regprocedure('public.xrpl_claim_r5_revision4_recovery_batch(text,text,bigint,text,timestamp with time zone,integer)') is not null,'progressiveClaimRev4Exists',to_regprocedure('public.xrpl_claim_r5_revision4_recovery_batch_from_prepared_head(text,text,timestamp with time zone,integer)') is not null,'completionRev4Exists',to_regprocedure('public.xrpl_complete_r5_revision4_recovery_batch(text,text,text,timestamp with time zone,text,text,text,text,bigint,numeric,numeric,numeric)') is not null,'checkpointRows',(select count(*) from xrpl_r5_v1.active_checkpoints where profile_revision=4),'runRows',(select count(*) from xrpl_r5_v1.recovery_runs where profile_revision=4),'batchRows',(select count(*) from xrpl_r5_v1.recovery_batches where profile_revision=4),'runIdRows',(select count(*) from xrpl_r5_v1.recovery_runs where run_id='r5-recovery-selected-revision4-entry'),'evidenceRows',(select count(*) from xrpl_r5_v1.revision4_accounting_qualification_evidence where qualification_key='r4f-revision4-r5-12-ledger-accounting-v1'),'egressPolicyRows',(select count(*) from xrpl_r5_v1.revision4_egress_budget_policy where policy_id='r5-revision4-egress-4581-v1' and profile_revision=4 and maximum_ledgers_per_claim=12 and maximum_billable_egress_bytes_per_ledger=4581 and maximum_claim_billable_egress_bytes=54972 and maximum_claim_exclusive_reservation_bytes=54973 and public_reader_unchanged=true and mainnet_disabled=true and stabilization_authorized=false and soak_authorized=false)) as state;"
-          jq -n --arg query "$preflight_query" '{query:$query,parameters:[],read_only:true}' > /tmp/rev4-applied-clean-query.json
-          curl --fail-with-body --silent --show-error \
-            -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
-            -H 'content-type: application/json' \
-            --data @/tmp/rev4-applied-clean-query.json \
-            "https://api.supabase.com/v1/projects/${SUPABASE_PROJECT_ID}/database/query" \
-            > r4f-revision4-12-ledger-prepare-evidence/applied-clean-state.json
-          state="$(jq -c '.. | objects | .state? // empty' r4f-revision4-12-ledger-prepare-evidence/applied-clean-state.json | head -n1)"
-          test -n "$state"
-          jq -e '.checkpointRev4Exists == true and .prepareRev4Exists == true and .rebindStrictRev4Exists == true and .rebindRev4Exists == true and .claimRev4Exists == true and .progressiveClaimRev4Exists == true and .completionRev4Exists == true and .checkpointRows == 0 and .runRows == 0 and .batchRows == 0 and .runIdRows == 0 and .evidenceRows == 0 and .egressPolicyRows == 1' <<<"$state" > /dev/null
+          node scripts/inspect-r4f-revision4-qualification-state.mjs \
+            --output r4f-revision4-12-ledger-prepare-evidence/qualification-state.json
+
 
       - name: Bind exact source content and create expiring proposal
         id: proposal
@@ -96,6 +89,8 @@ jobs:
           JOB_ID: ${{ steps.scheduler.outputs.job_id }}
           COMMAND_DIGEST: ${{ steps.scheduler.outputs.command_digest }}
           PREPARE_SOURCE_SHA: ${{ steps.scheduler.outputs.r5_prepare_source_sha256 }}
+          QUALIFICATION_STATE_MODE: ${{ steps.qualification_state.outputs.state_mode }}
+          QUALIFICATION_STATE_DIGEST: ${{ steps.qualification_state.outputs.state_digest }}
         shell: bash
         run: |
           set -euo pipefail
@@ -111,7 +106,9 @@ jobs:
           checkpoint_sha="$(sha256sum "$CHECKPOINT_SQL_PATH" | awk '{print $1}')"
           expires="$(date -u -d '+2 hours' '+%Y-%m-%dT%H:%M:%SZ')"
           nonce="$(openssl rand -hex 8)"
-          auth_command="/r4f-revision4-12-ledger-authorize commit=${SOURCE_COMMIT} runtime=${runtime_sha} egress=${egress_sha} evidence=${evidence_sha} function=${function_sha} checkpoint=${checkpoint_sha} prepare_source=${PREPARE_SOURCE_SHA} project=${PROJECT_DIGEST} job=${JOB_ID} command=${COMMAND_DIGEST} migration_state=applied_clean prepare_run=${GITHUB_RUN_ID} expires=${expires} nonce=${nonce}"
+          [[ "$QUALIFICATION_STATE_MODE" =~ ^(clean|prepared_resume)$ ]]
+          [[ "$QUALIFICATION_STATE_DIGEST" =~ ^[a-f0-9]{64}$ ]]
+          auth_command="/r4f-revision4-12-ledger-authorize commit=${SOURCE_COMMIT} runtime=${runtime_sha} egress=${egress_sha} evidence=${evidence_sha} function=${function_sha} checkpoint=${checkpoint_sha} prepare_source=${PREPARE_SOURCE_SHA} project=${PROJECT_DIGEST} job=${JOB_ID} command=${COMMAND_DIGEST} migration_state=applied_clean state=${QUALIFICATION_STATE_MODE} state_digest=${QUALIFICATION_STATE_DIGEST} prepare_run=${GITHUB_RUN_ID} expires=${expires} nonce=${nonce}"
           printf 'runtime_sha=%s\negress_sha=%s\nevidence_sha=%s\nfunction_sha=%s\ncheckpoint_sha=%s\nprepare_source_sha=%s\nexpires=%s\nnonce=%s\nauth_command=%s\n' \
             "$runtime_sha" "$egress_sha" "$evidence_sha" "$function_sha" "$checkpoint_sha" "$PREPARE_SOURCE_SHA" "$expires" "$nonce" "$auth_command" >> "$GITHUB_OUTPUT"
 
@@ -138,6 +135,8 @@ jobs:
           EVIDENCE_SHA: ${{ steps.proposal.outputs.evidence_sha }}
           FUNCTION_SHA: ${{ steps.proposal.outputs.function_sha }}
           CHECKPOINT_SHA: ${{ steps.proposal.outputs.checkpoint_sha }}
+          QUALIFICATION_STATE_MODE: ${{ steps.qualification_state.outputs.state_mode }}
+          QUALIFICATION_STATE_DIGEST: ${{ steps.qualification_state.outputs.state_digest }}
           EXPIRES: ${{ steps.proposal.outputs.expires }}
           AUTH_COMMAND: ${{ steps.proposal.outputs.auth_command }}
         shell: bash
@@ -159,6 +158,8 @@ jobs:
           Temporary proof-function wrapper SHA-256: \`${FUNCTION_SHA}\`
           Qualification compact-checkpoint SQL SHA-256: \`${CHECKPOINT_SHA}\`
           Migration state: \`applied_clean\`
+          Qualification state: \`${QUALIFICATION_STATE_MODE}\`
+          Qualification state digest: \`${QUALIFICATION_STATE_DIGEST}\`
           Authorization expires: \`${EXPIRES}\`
 
           Exact bounded mutation authorized by the command below:
@@ -166,7 +167,7 @@ jobs:
           1. revalidate the three already-applied revision-4 migrations and exact applied-clean database state; do not apply, roll back, delete, or rewrite any migration;
           2. deploy only temporary function \`${PROOF_FUNCTION}\`; the active \`${ACTIVE_FUNCTION}\` deployment is not replaced or deleted;
           3. install the proven database watchdog, pause only the exact Devnet collector cron, and require the 65-second quiet boundary;
-          4. create one qualification-only compact revision-4 boundary checkpoint/run and invoke the temporary proof function exactly once; the compact checkpoint does not claim a complete recovery snapshot;
+          4. with the exact authorized qualification state, either create one qualification-only compact revision-4 boundary checkpoint/run when \`clean\`, or reuse only the exact digest-bound prebatch checkpoint/prepared run when \`prepared_resume\`; do not delete or recreate prepared residue; then invoke the temporary proof function exactly once;
           5. require exactly \`${MAX_LEDGER_COUNT}\` committed Devnet ledgers and application directional accounting \`<= ${MAX_TOTAL_BYTES} B\` total / \`<= ${MAX_PER_LEDGER_BYTES} B/ledger\`;
           6. restore the exact collector command and remove the watchdog even on runner failure, then delete the temporary proof function;
           7. retain and capture the bounded accounting qualification evidence.
@@ -211,7 +212,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          regex='^/r4f-revision4-12-ledger-authorize commit=([a-f0-9]{40}) runtime=([a-f0-9]{64}) egress=([a-f0-9]{64}) evidence=([a-f0-9]{64}) function=([a-f0-9]{64}) checkpoint=([a-f0-9]{64}) prepare_source=([a-f0-9]{64}) project=([a-f0-9]{64}) job=([0-9]+) command=([a-f0-9]{64}) migration_state=applied_clean prepare_run=([0-9]+) expires=([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z) nonce=([a-f0-9]{16})$'
+          regex='^/r4f-revision4-12-ledger-authorize commit=([a-f0-9]{40}) runtime=([a-f0-9]{64}) egress=([a-f0-9]{64}) evidence=([a-f0-9]{64}) function=([a-f0-9]{64}) checkpoint=([a-f0-9]{64}) prepare_source=([a-f0-9]{64}) project=([a-f0-9]{64}) job=([0-9]+) command=([a-f0-9]{64}) migration_state=applied_clean state=(clean|prepared_resume) state_digest=([a-f0-9]{64}) prepare_run=([0-9]+) expires=([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z) nonce=([a-f0-9]{16})$'
           [[ "$AUTHORIZATION_BODY" =~ $regex ]] || { echo 'authorization command shape mismatch' >&2; exit 1; }
           commit="${BASH_REMATCH[1]}"
           runtime_sha="${BASH_REMATCH[2]}"
@@ -223,9 +224,11 @@ jobs:
           project_digest="${BASH_REMATCH[8]}"
           job_id="${BASH_REMATCH[9]}"
           command_digest="${BASH_REMATCH[10]}"
-          prepare_run="${BASH_REMATCH[11]}"
-          expires="${BASH_REMATCH[12]}"
-          nonce="${BASH_REMATCH[13]}"
+          state_mode="${BASH_REMATCH[11]}"
+          state_digest="${BASH_REMATCH[12]}"
+          prepare_run="${BASH_REMATCH[13]}"
+          expires="${BASH_REMATCH[14]}"
+          nonce="${BASH_REMATCH[15]}"
           test "$commit" = "$(git rev-parse HEAD)"
           test "$runtime_sha" = "$(sha256sum "$RUNTIME_PATH" | awk '{print $1}')"
           test "$egress_sha" = "$(sha256sum "$EGRESS_PATH" | awk '{print $1}')"
@@ -246,6 +249,7 @@ jobs:
           test $((expires_epoch - auth_epoch)) -le 7200
           printf 'commit=%s\nruntime_sha=%s\negress_sha=%s\nevidence_sha=%s\nfunction_sha=%s\ncheckpoint_sha=%s\nprepare_source_sha=%s\nproject_digest=%s\njob_id=%s\ncommand_digest=%s\nprepare_run=%s\nexpires=%s\nnonce=%s\n' \
             "$commit" "$runtime_sha" "$egress_sha" "$evidence_sha" "$function_sha" "$checkpoint_sha" "$prepare_source_sha" "$project_digest" "$job_id" "$command_digest" "$prepare_run" "$expires" "$nonce" >> "$GITHUB_OUTPUT"
+          printf 'state_mode=%s\nstate_digest=%s\n' "$state_mode" "$state_digest" >> "$GITHUB_OUTPUT"
 
       - name: Verify successful fresh preparation and unique prior proposal
         env:
@@ -302,7 +306,11 @@ jobs:
           test "$ACTUAL_PREPARE_SOURCE" = "$EXPECTED_PREPARE_SOURCE"
           test "$SCHEDULER_SOURCE_COMMIT" = "$AUTH_SOURCE_COMMIT"
 
-      - name: Reverify exact applied-clean revision-4 state read-only
+      - name: Reverify exact authorized qualification state read-only
+        id: qualification_state_before
+        env:
+          AUTHORIZED_STATE_MODE: ${{ steps.auth.outputs.state_mode }}
+          AUTHORIZED_STATE_DIGEST: ${{ steps.auth.outputs.state_digest }}
         shell: bash
         run: |
           set -euo pipefail
@@ -318,17 +326,11 @@ jobs:
           mapfile -t remote_versions < <(jq -r '.. | objects | .version? // empty | tostring' r4f-revision4-12-ledger-evidence/migration-history-before.json | grep -E '^20[0-9]{12}$' | LC_ALL=C sort -u)
           test "${remote_versions[*]:-}" = '20260809151000 20260810123000 20260810133000 20260811012000 20260811061000'
 
-          query="select jsonb_build_object('checkpointRev4Exists',to_regprocedure('public.xrpl_create_r5_revision4_active_checkpoint(text,text,timestamp with time zone)') is not null,'prepareRev4Exists',to_regprocedure('public.xrpl_prepare_r5_revision4_active_recovery(text,text,text,bigint,text,timestamp with time zone)') is not null,'rebindStrictRev4Exists',to_regprocedure('public.xrpl_rebind_r5_revision4_prebatch_recovery_to_active_boundary_strict(text,timestamp with time zone)') is not null,'rebindRev4Exists',to_regprocedure('public.xrpl_rebind_r5_revision4_prebatch_recovery_to_active_boundary(text,timestamp with time zone)') is not null,'claimRev4Exists',to_regprocedure('public.xrpl_claim_r5_revision4_recovery_batch(text,text,bigint,text,timestamp with time zone,integer)') is not null,'progressiveClaimRev4Exists',to_regprocedure('public.xrpl_claim_r5_revision4_recovery_batch_from_prepared_head(text,text,timestamp with time zone,integer)') is not null,'completionRev4Exists',to_regprocedure('public.xrpl_complete_r5_revision4_recovery_batch(text,text,text,timestamp with time zone,text,text,text,text,bigint,numeric,numeric,numeric)') is not null,'checkpointRows',(select count(*) from xrpl_r5_v1.active_checkpoints where profile_revision=4),'runRows',(select count(*) from xrpl_r5_v1.recovery_runs where profile_revision=4),'batchRows',(select count(*) from xrpl_r5_v1.recovery_batches where profile_revision=4),'runIdRows',(select count(*) from xrpl_r5_v1.recovery_runs where run_id='r5-recovery-selected-revision4-entry'),'evidenceRows',(select count(*) from xrpl_r5_v1.revision4_accounting_qualification_evidence where qualification_key='r4f-revision4-r5-12-ledger-accounting-v1'),'egressPolicyRows',(select count(*) from xrpl_r5_v1.revision4_egress_budget_policy where policy_id='r5-revision4-egress-4581-v1' and profile_revision=4 and maximum_ledgers_per_claim=12 and maximum_billable_egress_bytes_per_ledger=4581 and maximum_claim_billable_egress_bytes=54972 and maximum_claim_exclusive_reservation_bytes=54973 and public_reader_unchanged=true and mainnet_disabled=true and stabilization_authorized=false and soak_authorized=false)) as state;"
-          jq -n --arg query "$query" '{query:$query,parameters:[],read_only:true}' > /tmp/rev4-applied-clean-execute-query.json
-          curl --fail-with-body --silent --show-error \
-            -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
-            -H 'content-type: application/json' \
-            --data @/tmp/rev4-applied-clean-execute-query.json \
-            "https://api.supabase.com/v1/projects/${SUPABASE_PROJECT_ID}/database/query" \
-            > r4f-revision4-12-ledger-evidence/applied-clean-state-before.json
-          state="$(jq -c '.. | objects | .state? // empty' r4f-revision4-12-ledger-evidence/applied-clean-state-before.json | head -n1)"
-          test -n "$state"
-          jq -e '.checkpointRev4Exists == true and .prepareRev4Exists == true and .rebindStrictRev4Exists == true and .rebindRev4Exists == true and .claimRev4Exists == true and .progressiveClaimRev4Exists == true and .completionRev4Exists == true and .checkpointRows == 0 and .runRows == 0 and .batchRows == 0 and .runIdRows == 0 and .evidenceRows == 0 and .egressPolicyRows == 1' <<<"$state" > /dev/null
+          node scripts/inspect-r4f-revision4-qualification-state.mjs \
+            --output r4f-revision4-12-ledger-evidence/qualification-state-before.json
+          test "$(jq -r '.mode' r4f-revision4-12-ledger-evidence/qualification-state-before.json)" = "$AUTHORIZED_STATE_MODE"
+          test "$(jq -r '.digest' r4f-revision4-12-ledger-evidence/qualification-state-before.json)" = "$AUTHORIZED_STATE_DIGEST"
+
 
       - name: Set up Supabase CLI
         uses: supabase/setup-cli@3c2f5e2ae34c34e428e8e206e2c4d21fa2d20fbf
@@ -378,10 +380,8 @@ jobs:
           bundle_evidence='r4f-revision4-12-ledger-evidence/proof-function-bundle.json'
           bun_version="$(bun --version)"
           test "$bun_version" = '1.3.14'
-          bun build "$PROOF_FUNCTION_PATH" \
-            --target=browser \
-            --format=esm \
-            --outfile="$bundle_path"
+          bun scripts/build-r4f-revision4-proof-bundle.ts \
+            "$PROOF_FUNCTION_PATH" "$bundle_path"
           test -s "$bundle_path"
           SOURCE_PATH="$PROOF_FUNCTION_PATH" BUNDLE_PATH="$bundle_path" EVIDENCE_PATH="$bundle_evidence" SOURCE_COMMIT="$SOURCE_COMMIT" AUTHORIZED_FUNCTION_SHA="$AUTHORIZED_FUNCTION_SHA" BUN_VERSION="$bun_version" node --input-type=module <<'NODE'
           import { createHash } from 'node:crypto'
@@ -406,6 +406,13 @@ jobs:
           if (bundle.includes('cloudflare:')) {
             throw new Error('generated proof bundle contains a Cloudflare runtime import')
           }
+          const denoEnvMutation = /\bDeno\.env\.(?:set|delete)\s*\(/u
+          if (denoEnvMutation.test(source) || denoEnvMutation.test(bundle)) {
+            throw new Error('qualification proof may not mutate Deno.env')
+          }
+          if (!bundle.includes('__XRPL_R5_REVISION4_QUALIFICATION_OVERRIDE__')) {
+            throw new Error('generated proof bundle is missing the qualification override')
+          }
           if (!bundle.includes('Deno.serve')) {
             throw new Error('generated proof bundle does not contain the Edge entrypoint')
           }
@@ -419,6 +426,8 @@ jobs:
             sha256: createHash('sha256').update(bundle).digest('hex'),
             relativeImports: 0,
             cloudflareImports: 0,
+            denoEnvMutations: 0,
+            qualificationOverrideBound: true,
             denoServeEntrypoint: true,
           }
           writeFileSync(evidencePath, `${JSON.stringify(evidence, null, 2)}\n`)
@@ -455,68 +464,85 @@ jobs:
         id: execute_proof
         env:
           AUTHORIZED_CHECKPOINT_SHA: ${{ steps.auth.outputs.checkpoint_sha }}
+          AUTHORIZED_STATE_MODE: ${{ steps.auth.outputs.state_mode }}
+          AUTHORIZED_STATE_DIGEST: ${{ steps.auth.outputs.state_digest }}
+          AUTHORIZED_CHECKPOINT_ID: ${{ steps.qualification_state_before.outputs.checkpoint_id }}
         shell: bash
         run: |
           set -euo pipefail
-          checkpoint_id="r5-checkpoint-revision4-proof-${GITHUB_RUN_ID}"
-          observed_at="$(date -u '+%Y-%m-%dT%H:%M:%S.000Z')"
-          curl --fail-with-body --silent --show-error \
-            -H 'content-type: application/json' \
-            --data '{"method":"server_info","params":[{}]}' \
-            'https://s.devnet.rippletest.net:51234/' > /tmp/devnet-head.json
-          head_index="$(jq -r '.result.info.validated_ledger.seq // empty' /tmp/devnet-head.json)"
-          head_hash="$(jq -r '.result.info.validated_ledger.hash // empty' /tmp/devnet-head.json | tr '[:lower:]' '[:upper:]')"
-          [[ "$head_index" =~ ^[1-9][0-9]*$ ]]
-          [[ "$head_hash" =~ ^[A-F0-9]{64}$ ]]
+          node scripts/inspect-r4f-revision4-qualification-state.mjs \
+            --output r4f-revision4-12-ledger-evidence/qualification-state-before-proof.json
+          test "$(jq -r '.mode' r4f-revision4-12-ledger-evidence/qualification-state-before-proof.json)" = "$AUTHORIZED_STATE_MODE"
+          test "$(jq -r '.digest' r4f-revision4-12-ledger-evidence/qualification-state-before-proof.json)" = "$AUTHORIZED_STATE_DIGEST"
 
-          test "$AUTHORIZED_CHECKPOINT_SHA" = "$(sha256sum "$CHECKPOINT_SQL_PATH" | awk '{print $1}')"
-          CHECKPOINT_ID="$checkpoint_id" OBSERVED_AT="$observed_at" node --input-type=module <<'NODE'
-          import { readFileSync, writeFileSync } from 'node:fs'
-          const checkpointId = process.env.CHECKPOINT_ID ?? ''
-          const selectionDigest = process.env.SELECTION_DIGEST ?? ''
-          const observedAt = process.env.OBSERVED_AT ?? ''
-          if (!/^r5-checkpoint-revision4-proof-[0-9]+$/u.test(checkpointId)) throw new Error('invalid compact checkpoint id')
-          if (!/^[a-f0-9]{64}$/u.test(selectionDigest)) throw new Error('invalid compact checkpoint selection digest')
-          if (!/^20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.000Z$/u.test(observedAt)) throw new Error('invalid compact checkpoint observedAt')
-          let query = readFileSync(process.env.CHECKPOINT_SQL_PATH, 'utf8')
-          const replacements = new Map([
-            ['__CHECKPOINT_ID__', checkpointId],
-            ['__SELECTION_DIGEST__', selectionDigest],
-            ['__OBSERVED_AT__', observedAt],
-          ])
-          for (const [token, value] of replacements) {
-            if (!query.includes(token)) throw new Error(`compact checkpoint template is missing ${token}`)
-            query = query.replaceAll(token, value)
-          }
-          if (/__[A-Z0-9_]+__/u.test(query)) throw new Error('unresolved compact checkpoint template token')
-          writeFileSync('/tmp/checkpoint-query.sql', query)
-          NODE
-          checkpoint_query="$(cat /tmp/checkpoint-query.sql)"
-          jq -n --arg query "$checkpoint_query" '{query:$query,parameters:[],read_only:false}' > /tmp/checkpoint-query.json
-          curl --fail-with-body --silent --show-error \
-            -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
-            -H 'content-type: application/json' \
-            --data @/tmp/checkpoint-query.json \
-            "https://api.supabase.com/v1/projects/${SUPABASE_PROJECT_ID}/database/query" > /tmp/checkpoint-response.json
-          checkpoint="$(jq -c '.. | objects | .value? // empty' /tmp/checkpoint-response.json | head -n1)"
-          test -n "$checkpoint"
-          jq -e --arg selection "$SELECTION_DIGEST" '.checkpointKind == "revision4-qualification-boundary" and .profileRevision == 4 and .selectionDigest == $selection and .qualificationBoundaryOnly == true and .fullRecoveryStateCaptured == false and .publicReaderUnchanged == true and .mainnetDisabled == true and .stateBytes > 0' <<<"$checkpoint" > /dev/null
-          state_digest="$(jq -r '.stateDigest // empty' <<<"$checkpoint")"
-          watermark_index="$(jq -r '.watermarkLedgerIndex // empty' <<<"$checkpoint")"
-          [[ "$state_digest" =~ ^[a-f0-9]{64}$ ]]
-          [[ "$watermark_index" =~ ^[1-9][0-9]*$ ]]
-          test $((head_index - watermark_index)) -ge "$MAX_LEDGER_COUNT"
+          if [ "$AUTHORIZED_STATE_MODE" = clean ]; then
+            checkpoint_id="r5-checkpoint-revision4-proof-${GITHUB_RUN_ID}"
+            observed_at="$(date -u '+%Y-%m-%dT%H:%M:%S.000Z')"
+            curl --fail-with-body --silent --show-error \
+              -H 'content-type: application/json' \
+              --data '{"method":"server_info","params":[{}]}' \
+              'https://s.devnet.rippletest.net:51234/' > /tmp/devnet-head.json
+            head_index="$(jq -r '.result.info.validated_ledger.seq // empty' /tmp/devnet-head.json)"
+            head_hash="$(jq -r '.result.info.validated_ledger.hash // empty' /tmp/devnet-head.json | tr '[:lower:]' '[:upper:]')"
+            [[ "$head_index" =~ ^[1-9][0-9]*$ ]]
+            [[ "$head_hash" =~ ^[A-F0-9]{64}$ ]]
 
-          prepared_at="$(date -u '+%Y-%m-%dT%H:%M:%S.000Z')"
-          prepare_query="select public.xrpl_prepare_r5_revision4_active_recovery('${RECOVERY_RUN_ID}','${checkpoint_id}','${state_digest}',${head_index}::bigint,'${head_hash}','${prepared_at}'::timestamptz) as value;"
-          jq -n --arg query "$prepare_query" '{query:$query,parameters:[],read_only:false}' > /tmp/recovery-prepare-query.json
-          curl --fail-with-body --silent --show-error \
-            -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
-            -H 'content-type: application/json' \
-            --data @/tmp/recovery-prepare-query.json \
-            "https://api.supabase.com/v1/projects/${SUPABASE_PROJECT_ID}/database/query" > /tmp/recovery-prepare-response.json
-          prepare_value="$(jq -c '.. | objects | .value? // empty' /tmp/recovery-prepare-response.json | head -n1)"
-          test -n "$prepare_value"
+            test "$AUTHORIZED_CHECKPOINT_SHA" = "$(sha256sum "$CHECKPOINT_SQL_PATH" | awk '{print $1}')"
+            CHECKPOINT_ID="$checkpoint_id" OBSERVED_AT="$observed_at" node --input-type=module <<'NODE'
+            import { readFileSync, writeFileSync } from 'node:fs'
+            const checkpointId = process.env.CHECKPOINT_ID ?? ''
+            const selectionDigest = process.env.SELECTION_DIGEST ?? ''
+            const observedAt = process.env.OBSERVED_AT ?? ''
+            if (!/^r5-checkpoint-revision4-proof-[0-9]+$/u.test(checkpointId)) throw new Error('invalid compact checkpoint id')
+            if (!/^[a-f0-9]{64}$/u.test(selectionDigest)) throw new Error('invalid compact checkpoint selection digest')
+            if (!/^20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.000Z$/u.test(observedAt)) throw new Error('invalid compact checkpoint observedAt')
+            let query = readFileSync(process.env.CHECKPOINT_SQL_PATH, 'utf8')
+            const replacements = new Map([
+              ['__CHECKPOINT_ID__', checkpointId],
+              ['__SELECTION_DIGEST__', selectionDigest],
+              ['__OBSERVED_AT__', observedAt],
+            ])
+            for (const [token, value] of replacements) {
+              if (!query.includes(token)) throw new Error(`compact checkpoint template is missing ${token}`)
+              query = query.replaceAll(token, value)
+            }
+            if (/__[A-Z0-9_]+__/u.test(query)) throw new Error('unresolved compact checkpoint template token')
+            writeFileSync('/tmp/checkpoint-query.sql', query)
+            NODE
+            checkpoint_query="$(cat /tmp/checkpoint-query.sql)"
+            jq -n --arg query "$checkpoint_query" '{query:$query,parameters:[],read_only:false}' > /tmp/checkpoint-query.json
+            curl --fail-with-body --silent --show-error \
+              -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+              -H 'content-type: application/json' \
+              --data @/tmp/checkpoint-query.json \
+              "https://api.supabase.com/v1/projects/${SUPABASE_PROJECT_ID}/database/query" > /tmp/checkpoint-response.json
+            checkpoint="$(jq -c '.. | objects | .value? // empty' /tmp/checkpoint-response.json | head -n1)"
+            test -n "$checkpoint"
+            jq -e --arg selection "$SELECTION_DIGEST" '.checkpointKind == "revision4-qualification-boundary" and .profileRevision == 4 and .selectionDigest == $selection and .qualificationBoundaryOnly == true and .fullRecoveryStateCaptured == false and .publicReaderUnchanged == true and .mainnetDisabled == true and .stateBytes > 0' <<<"$checkpoint" > /dev/null
+            state_digest="$(jq -r '.stateDigest // empty' <<<"$checkpoint")"
+            watermark_index="$(jq -r '.watermarkLedgerIndex // empty' <<<"$checkpoint")"
+            [[ "$state_digest" =~ ^[a-f0-9]{64}$ ]]
+            [[ "$watermark_index" =~ ^[1-9][0-9]*$ ]]
+            test $((head_index - watermark_index)) -ge "$MAX_LEDGER_COUNT"
+
+            prepared_at="$(date -u '+%Y-%m-%dT%H:%M:%S.000Z')"
+            prepare_query="select public.xrpl_prepare_r5_revision4_active_recovery('${RECOVERY_RUN_ID}','${checkpoint_id}','${state_digest}',${head_index}::bigint,'${head_hash}','${prepared_at}'::timestamptz) as value;"
+            jq -n --arg query "$prepare_query" '{query:$query,parameters:[],read_only:false}' > /tmp/recovery-prepare-query.json
+            curl --fail-with-body --silent --show-error \
+              -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+              -H 'content-type: application/json' \
+              --data @/tmp/recovery-prepare-query.json \
+              "https://api.supabase.com/v1/projects/${SUPABASE_PROJECT_ID}/database/query" > /tmp/recovery-prepare-response.json
+            prepare_value="$(jq -c '.. | objects | .value? // empty' /tmp/recovery-prepare-response.json | head -n1)"
+            test -n "$prepare_value"
+          elif [ "$AUTHORIZED_STATE_MODE" = prepared_resume ]; then
+            checkpoint_id="$AUTHORIZED_CHECKPOINT_ID"
+            [[ "$checkpoint_id" =~ ^r5-checkpoint-revision4-proof-[0-9]+$ ]]
+            test "$checkpoint_id" = "$(jq -r '.checkpointId' r4f-revision4-12-ledger-evidence/qualification-state-before-proof.json)"
+          else
+            echo "unsupported authorized qualification state: $AUTHORIZED_STATE_MODE" >&2
+            exit 1
+          fi
 
           proof_headers=(-H 'content-type: application/json' -H "apikey: ${SUPABASE_R4F_PROOF_KEY}")
           if [ "$SUPABASE_R4F_PROOF_KEY_KIND" = legacy ]; then

@@ -9,11 +9,13 @@ executor='supabase/functions/xrpl-r5-recovery-batch/index.ts'
 qualifier='scripts/qualify-supabase-revision4-r5-accounting.mjs'
 capture='scripts/capture-supabase-revision4-r5-accounting-qualification.mjs'
 prepare='scripts/prepare-r4f-g3-isolated-window.mjs'
+qualification_state='scripts/inspect-r4f-revision4-qualification-state.mjs'
+proof_builder='scripts/build-r4f-revision4-proof-bundle.ts'
 workflow='.github/workflows/r4f-revision4-12-ledger-qualification.yml'
 checkpoint_sql='scripts/r4f-revision4-qualification-compact-checkpoint.sql'
 compact_checkpoint_contract='scripts/test-r4f-revision4-qualification-compact-checkpoint.sh'
 
-for path in "$runtime" "$egress" "$evidence" "$wrapper" "$executor" "$qualifier" "$capture" "$prepare" "$workflow" "$checkpoint_sql" "$compact_checkpoint_contract"; do
+for path in "$runtime" "$egress" "$evidence" "$wrapper" "$executor" "$qualifier" "$capture" "$prepare" "$qualification_state" "$proof_builder" "$workflow" "$checkpoint_sql" "$compact_checkpoint_contract"; do
   test -f "$path" || { echo "missing contract file: $path" >&2; exit 1; }
 done
 
@@ -61,12 +63,32 @@ grep -Fq 'allDynamicCloneSourcesBound: true' "$prepare"
 
 grep -Fq "await import('../xrpl-r5-recovery-batch/index.ts')" "$wrapper"
 grep -Fq "99a1f97fc17ed6023bc3075bffe963a260e99a4ed0e2d831b068826c7797222f" "$wrapper"
-grep -Fq "XRPL_R5_REVISION4_UNEXPLAINED_EGRESS_RESERVE_BYTES', '0'" "$wrapper"
+grep -Fq "unexplainedDirectionalReserveBytes: '0'" "$wrapper"
+grep -Fq '__XRPL_R5_REVISION4_QUALIFICATION_OVERRIDE__' "$wrapper"
+if grep -Eq '\bDeno\.env\.(set|delete)[[:space:]]*\(' "$wrapper"; then
+  echo 'qualification wrapper mutates Deno.env' >&2
+  exit 1
+fi
 
 grep -Fq "const DEFAULT_XRPL_DEVNET_RPC_URL = 'https://s.devnet.rippletest.net:51234/'" "$executor"
 grep -Fq "const RECOVERY_RUN_ID = 'r5-recovery-selected-revision4-entry'" "$executor"
 grep -Fq 'xrpl_claim_r5_revision4_recovery_batch_from_prepared_head' "$executor"
 grep -Fq 'xrpl_complete_r5_revision4_recovery_batch' "$executor"
+
+grep -Fq "const RUN_ID = 'r5-recovery-selected-revision4-entry'" "$qualification_state"
+grep -Fq "mode = 'clean'" "$qualification_state"
+grep -Fq "mode = 'prepared_resume'" "$qualification_state"
+grep -Fq 'state.batchRows === 0' "$qualification_state"
+grep -Fq "resume.runStatus === 'prepared'" "$qualification_state"
+grep -Fq 'resume.runCompletedBatches === 0' "$qualification_state"
+grep -Fq 'resume.runCommittedLedgers === 0' "$qualification_state"
+grep -Fq 'resume.runLastAccountingDigest === null' "$qualification_state"
+grep -Fq 'resume.runStartedAt === null' "$qualification_state"
+grep -Fq 'resume.runCompletedAt === null' "$qualification_state"
+grep -Fq 'resume.checkpointStateDigest === resume.checkpointStateDigestRecomputed' "$qualification_state"
+grep -Fq 'r4f-revision4-qualification-runtime-override' "$proof_builder"
+grep -Fq "?? env('XRPL_R5_REVISION4_SELECTION_DIGEST')" "$proof_builder"
+grep -Fq "?? env('XRPL_R5_REVISION4_UNEXPLAINED_EGRESS_RESERVE_BYTES')" "$proof_builder"
 
 grep -Fq "const QUALIFICATION_KEY = 'r4f-revision4-r5-12-ledger-accounting-v1'" "$capture"
 grep -Fq "const RUN_ID = 'r5-recovery-selected-revision4-entry'" "$capture"
@@ -88,37 +110,49 @@ grep -Fq 'checkpoint=${checkpoint_sha}' "$workflow"
 grep -Fq 'checkpoint=([a-f0-9]{64})' "$workflow"
 grep -Fq 'prepare_source=${PREPARE_SOURCE_SHA}' "$workflow"
 grep -Fq 'prepare_source=([a-f0-9]{64})' "$workflow"
-grep -Fq 'migration_state=applied_clean prepare_run=${GITHUB_RUN_ID}' "$workflow"
-grep -Fq 'migration_state=applied_clean prepare_run=([0-9]+)' "$workflow"
+grep -Fq 'migration_state=applied_clean state=${QUALIFICATION_STATE_MODE} state_digest=${QUALIFICATION_STATE_DIGEST} prepare_run=${GITHUB_RUN_ID}' "$workflow"
+grep -Fq 'migration_state=applied_clean state=(clean|prepared_resume) state_digest=([a-f0-9]{64}) prepare_run=([0-9]+)' "$workflow"
 grep -Fq 'Migration state: `applied_clean`' "$workflow"
+grep -Fq 'Qualification state: \`${QUALIFICATION_STATE_MODE}\`' "$workflow"
+grep -Fq 'Qualification state digest: \`${QUALIFICATION_STATE_DIGEST}\`' "$workflow"
 grep -Fq 'Revision-3 runtime source-set SHA-256' "$workflow"
 grep -Fq 'Qualification compact-checkpoint SQL SHA-256' "$workflow"
-grep -Fq 'checkpointRev4Exists' "$workflow"
-grep -Fq 'rebindStrictRev4Exists' "$workflow"
-grep -Fq 'egressPolicyRows' "$workflow"
-grep -Fq 'runIdRows' "$workflow"
-grep -Fq 'evidenceRows' "$workflow"
+grep -Fq 'checkpointRev4Exists' "$qualification_state"
+grep -Fq 'rebindStrictRev4Exists' "$qualification_state"
+grep -Fq 'egressPolicyRows' "$qualification_state"
+grep -Fq 'runIdRows' "$qualification_state"
+grep -Fq 'evidenceRows' "$qualification_state"
 grep -Fq "20260809151000 20260810123000 20260810133000 20260811012000 20260811061000" "$workflow"
-grep -Fq "policy_id='r5-revision4-egress-4581-v1'" "$workflow"
-grep -Fq 'maximum_ledgers_per_claim=12' "$workflow"
-grep -Fq 'maximum_billable_egress_bytes_per_ledger=4581' "$workflow"
-grep -Fq 'maximum_claim_billable_egress_bytes=54972' "$workflow"
-grep -Fq 'maximum_claim_exclusive_reservation_bytes=54973' "$workflow"
+grep -Fq "policy_id = 'r5-revision4-egress-4581-v1'" "$qualification_state"
+grep -Fq 'maximum_ledgers_per_claim = 12' "$qualification_state"
+grep -Fq 'maximum_billable_egress_bytes_per_ledger = 4581' "$qualification_state"
+grep -Fq 'maximum_claim_billable_egress_bytes = 54972' "$qualification_state"
+grep -Fq 'maximum_claim_exclusive_reservation_bytes = 54973' "$qualification_state"
 grep -Fq 'r4f-g3-isolated-window-prepare-evidence' "$workflow"
 grep -Fq 'test $((expires_epoch - auth_epoch)) -le 7200' "$workflow"
 grep -Fq 'test "$ACTUAL_PREPARE_SOURCE" = "$EXPECTED_PREPARE_SOURCE"' "$workflow"
 grep -Fq 'oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6' "$workflow"
 grep -Fq 'bun-version: 1.3.14' "$workflow"
 grep -Fq "test \"\$bun_version\" = '1.3.14'" "$workflow"
-grep -Fq 'bun build "$PROOF_FUNCTION_PATH"' "$workflow"
-grep -Fq -- '--target=browser' "$workflow"
-grep -Fq -- '--format=esm' "$workflow"
+grep -Fq 'bun scripts/build-r4f-revision4-proof-bundle.ts' "$workflow"
+grep -Fq "target: 'browser'" "$proof_builder"
+grep -Fq "format: 'esm'" "$proof_builder"
 grep -Fq 'proof-function-bundle.json' "$workflow"
 grep -Fq 'generated proof bundle retains a relative import' "$workflow"
 grep -Fq "bundle.includes('cloudflare:')" "$workflow"
+grep -Fq 'qualification proof may not mutate Deno.env' "$workflow"
+grep -Fq "bundle.includes('__XRPL_R5_REVISION4_QUALIFICATION_OVERRIDE__')" "$workflow"
 grep -Fq "bundle.includes('Deno.serve')" "$workflow"
 grep -Fq 'sourceSha256 !== authorizedFunctionSha' "$workflow"
 grep -Fq 'AUTHORIZED_CHECKPOINT_SHA' "$workflow"
+grep -Fq 'AUTHORIZED_STATE_MODE' "$workflow"
+grep -Fq 'AUTHORIZED_STATE_DIGEST' "$workflow"
+grep -Fq 'AUTHORIZED_CHECKPOINT_ID' "$workflow"
+grep -Fq 'qualification-state-before-proof.json' "$workflow"
+grep -Fq 'if [ "$AUTHORIZED_STATE_MODE" = clean ]; then' "$workflow"
+grep -Fq 'elif [ "$AUTHORIZED_STATE_MODE" = prepared_resume ]; then' "$workflow"
+grep -Fq 'checkpoint_id="$AUTHORIZED_CHECKPOINT_ID"' "$workflow"
+grep -Fq 'do not delete or recreate prepared residue' "$workflow"
 grep -Fq 'invalid compact checkpoint id' "$workflow"
 grep -Fq 'unresolved compact checkpoint template token' "$workflow"
 grep -Fq '.checkpointKind == "revision4-qualification-boundary"' "$workflow"
