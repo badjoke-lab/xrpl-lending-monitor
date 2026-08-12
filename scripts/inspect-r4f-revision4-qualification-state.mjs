@@ -106,7 +106,7 @@ select jsonb_build_object(
     select jsonb_build_object(
       'checkpointId', c.checkpoint_id,
       'checkpointStateDigest', c.state_digest,
-      'checkpointStateDigestRecomputed', public.xrpl_transfer_json_digest(c.state),
+      'checkpointStateDigestRecomputed', encode(extensions.digest(convert_to(c.state::text, 'UTF8'), 'sha256'), 'hex'),
       'checkpointProfileId', c.profile_id,
       'checkpointProfileRevision', c.profile_revision,
       'checkpointProfileIdentityDigest', c.profile_identity_digest,
