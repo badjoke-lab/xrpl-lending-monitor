@@ -241,9 +241,6 @@ docker exec -i "$container_name" psql -v ON_ERROR_STOP=1 -U postgres -d postgres
   < /tmp/r4f-compact-checkpoint.sql \
   > /tmp/r4f-compact-checkpoint-result.txt
 
-result_json="$(sed -n '/^{/,$p' /tmp/r4f-compact-checkpoint-result.txt | tr -d '\n' | sed 's/^ *//;s/ *$//')"
-test -n "$result_json"
-
 # psql's aligned output may include a header; query the retained row directly for
 # unambiguous assertions after the compact statement succeeds.
 docker exec "$container_name" psql -U postgres -d postgres -Atqc \
