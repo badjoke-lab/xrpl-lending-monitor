@@ -73,6 +73,8 @@ for required in (
     "maximum_billable_egress_bytes_per_ledger=4581",
     "maximum_claim_billable_egress_bytes=54972",
     "maximum_claim_exclusive_reservation_bytes=54973",
+    "oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6",
+    "bun-version: 1.3.14",
     "supabase functions deploy \"$PROOF_FUNCTION\"",
     "supabase functions delete \"$PROOF_FUNCTION\"",
     "--no-verify-jwt",
@@ -110,6 +112,10 @@ for forbidden in (
         raise SystemExit(f"revision-4 12-ledger workflow contains forbidden capability: {forbidden.strip()}")
 if rev4_proof.count("issues: write") != 1:
     raise SystemExit("revision-4 12-ledger workflow must have exactly one issue-write permission")
+if rev4_proof.count("oven-sh/setup-bun@") != 1:
+    raise SystemExit("revision-4 12-ledger workflow must use exactly one pinned Bun setup action")
+if rev4_proof.count("bun-version: 1.3.14") != 1:
+    raise SystemExit("revision-4 12-ledger workflow must pin exactly Bun 1.3.14")
 if rev4_proof.count('supabase functions deploy "$PROOF_FUNCTION"') != 1:
     raise SystemExit("revision-4 12-ledger workflow must deploy exactly one temporary proof function")
 if rev4_proof.count('supabase functions delete "$PROOF_FUNCTION"') != 1:
@@ -120,6 +126,17 @@ if rev4_proof.count("migration_state=applied_clean") < 2:
     raise SystemExit("revision-4 12-ledger workflow must bind applied-clean state into proposal and authorization parser")
 if rev4_proof.count("read_only:true") < 4:
     raise SystemExit("revision-4 12-ledger workflow must revalidate applied-clean state read-only in prepare and execute")
+
+ci_workflow = (root / "ci.yml").read_text()
+if ci_workflow.count("oven-sh/setup-bun@") != 1:
+    raise SystemExit("CI quality workflow must use exactly one pinned Bun setup action")
+for required in (
+    "oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6",
+    "bun-version: 1.3.14",
+    "- name: Unit tests",
+):
+    if required not in ci_workflow:
+        raise SystemExit(f"CI workflow is missing revision-4 proof bundle requirement: {required}")
 
 rev4_probe = (root / r4f_rev4_probe).read_text()
 for required in (
