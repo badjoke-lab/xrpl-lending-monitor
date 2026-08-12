@@ -1,0 +1,82 @@
+name: Temporary R4F Boundary Definition Diagnostic
+
+on:
+  push:
+    branches:
+      - agent/r4f-compact-checkpoint-log-diagnostic
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+    steps:
+      - name: Read boundary function definitions and halted phase facts
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SUPABASE_PROJECT_ID" =~ ^[a-z]{20}$ ]]
+          cat > /tmp/diagnostic.sql <<'SQL'
+          select jsonb_build_object(
+            'functions', (
+              select coalesce(jsonb_agg(jsonb_build_object(
+                'name', p.proname,
+                'args', pg_get_function_identity_arguments(p.oid),
+                'definition', pg_get_functiondef(p.oid)
+              ) order by p.proname), '[]'::jsonb)
+              from pg_proc p
+              join pg_namespace n on n.oid=p.pronamespace
+              where n.nspname='public'
+                and p.proname in (
+                  'xrpl_drain_r5_checkpoint_boundary',
+                  'xrpl_create_r5_active_checkpoint_strict',
+                  'xrpl_create_r5_revision4_active_checkpoint'
+                )
+            ),
+            'nonterminalMessages', (
+              select coalesce(jsonb_agg(jsonb_build_object(
+                'messageId',m.message_id,
+                'status',m.status,
+                'phase',m.phase,
+                'expectedPreviousLedgerIndex',m.payload->>'expectedPreviousLedgerIndex',
+                'expectedPreviousLedgerHash',m.payload->>'expectedPreviousLedgerHash',
+                'network',m.payload->>'network',
+                'epochId',m.payload->>'epochId',
+                'baseIdentity',m.payload->>'baseIdentity',
+                'resultStatus',m.result->>'status',
+                'resultWorkId',m.result->>'workId',
+                'resultLedgerIndex',m.result->>'ledgerIndex',
+                'resultLedgerHash',m.result->>'ledgerHash'
+              ) order by m.message_id), '[]'::jsonb)
+              from public.xrpl_phase_messages m
+              where m.profile_id='supabase-devnet'
+                and m.status in ('pending','leased','retry','error')
+            ),
+            'nonterminalWork', (
+              select coalesce(jsonb_agg(jsonb_build_object(
+                'workId',w.work_id,
+                'status',w.status,
+                'scannedEndLedgerIndex',w.scanned_end_ledger_index,
+                'finalLedgerHash',w.final_ledger_hash,
+                'committedAt',w.committed_at
+              ) order by w.work_id), '[]'::jsonb)
+              from public.xrpl_phase_work w
+              where w.profile_id='supabase-devnet'
+                and w.status in ('planned','staged','committing','finalizing','error')
+            )
+          ) as diagnostic;
+          SQL
+          query="$(cat /tmp/diagnostic.sql)"
+          jq -n --arg query "$query" '{query:$query,parameters:[],read_only:true}' > /tmp/query.json
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+            -H 'content-type: application/json' \
+            --data @/tmp/query.json \
+            "https://api.supabase.com/v1/projects/${SUPABASE_PROJECT_ID}/database/query" \
+            > /tmp/result.json
+          jq -r '.. | objects | .diagnostic? // empty' /tmp/result.json
