@@ -54,7 +54,7 @@ jobs:
       - name: Verify repository qualification contract
         run: bash scripts/test-r4f-revision4-12-ledger-qualification-contract.sh
 
-      - name: Inspect exact collector scheduler read-only
+      - name: Inspect exact collector scheduler and runtime source set read-only
         id: scheduler
         run: node scripts/prepare-r4f-g3-isolated-window.mjs
 
@@ -74,7 +74,7 @@ jobs:
           mapfile -t remote_versions < <(jq -r '.. | objects | .version? // empty | tostring' r4f-revision4-12-ledger-prepare-evidence/migration-history.json | grep -E '^20[0-9]{12}$' | LC_ALL=C sort -u)
           test "${remote_versions[*]:-}" = '20260811012000 20260811061000'
 
-          preflight_query="select jsonb_build_object('prepareRev4Exists',to_regprocedure('public.xrpl_prepare_r5_revision4_active_recovery(text,text,text,bigint,text,timestamp with time zone)') is not null,'claimRev4Exists',to_regprocedure('public.xrpl_claim_r5_revision4_recovery_batch(text,text,bigint,text,timestamp with time zone,integer)') is not null,'progressiveClaimRev4Exists',to_regprocedure('public.xrpl_claim_r5_revision4_recovery_batch_from_prepared_head(text,text,timestamp with time zone,integer)') is not null,'completionRev4Exists',to_regprocedure('public.xrpl_complete_r5_revision4_recovery_batch(text,text,text,timestamp with time zone,text,text,text,text,bigint,numeric,numeric,numeric)') is not null,'checkpointRows',(select count(*) from xrpl_r5_v1.active_checkpoints where profile_revision=4),'runRows',(select count(*) from xrpl_r5_v1.recovery_runs where profile_revision=4),'batchRows',(select count(*) from xrpl_r5_v1.recovery_batches where profile_revision=4)) as state;"
+          preflight_query="select jsonb_build_object('prepareRev4Exists',to_regprocedure('public.xrpl_prepare_r5_revision4_active_recovery(text,text,text,bigint,text,timestamp with time zone)') is not null,'rebindStrictRev4Exists',to_regprocedure('public.xrpl_rebind_r5_revision4_prebatch_recovery_to_active_boundary_strict(text,timestamp with time zone)') is not null,'rebindRev4Exists',to_regprocedure('public.xrpl_rebind_r5_revision4_prebatch_recovery_to_active_boundary(text,timestamp with time zone)') is not null,'claimRev4Exists',to_regprocedure('public.xrpl_claim_r5_revision4_recovery_batch(text,text,bigint,text,timestamp with time zone,integer)') is not null,'progressiveClaimRev4Exists',to_regprocedure('public.xrpl_claim_r5_revision4_recovery_batch_from_prepared_head(text,text,timestamp with time zone,integer)') is not null,'completionRev4Exists',to_regprocedure('public.xrpl_complete_r5_revision4_recovery_batch(text,text,text,timestamp with time zone,text,text,text,text,bigint,numeric,numeric,numeric)') is not null,'checkpointRows',(select count(*) from xrpl_r5_v1.active_checkpoints where profile_revision=4),'runRows',(select count(*) from xrpl_r5_v1.recovery_runs where profile_revision=4),'batchRows',(select count(*) from xrpl_r5_v1.recovery_batches where profile_revision=4)) as state;"
           jq -n --arg query "$preflight_query" '{query:$query,parameters:[],read_only:true}' > /tmp/rev4-partial-state-query.json
           curl --fail-with-body --silent --show-error \
             -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
@@ -84,7 +84,7 @@ jobs:
             > r4f-revision4-12-ledger-prepare-evidence/partial-state.json
           state="$(jq -c '.. | objects | .state? // empty' r4f-revision4-12-ledger-prepare-evidence/partial-state.json | head -n1)"
           test -n "$state"
-          jq -e '.prepareRev4Exists == false and .claimRev4Exists == false and .progressiveClaimRev4Exists == false and .completionRev4Exists == false and .checkpointRows == 0 and .runRows == 0 and .batchRows == 0' <<<"$state" > /dev/null
+          jq -e '.prepareRev4Exists == false and .rebindStrictRev4Exists == false and .rebindRev4Exists == false and .claimRev4Exists == false and .progressiveClaimRev4Exists == false and .completionRev4Exists == false and .checkpointRows == 0 and .runRows == 0 and .batchRows == 0' <<<"$state" > /dev/null
 
       - name: Bind exact source content and create expiring proposal
         id: proposal
@@ -98,7 +98,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$SOURCE_COMMIT" = "$(git rev-parse HEAD)"
-          test "$(git hash-object "$RUNTIME_PATH")" = 'e8717abffc733f4f0a079a3ea667d2a20b44da31'
+          test "$(git hash-object "$RUNTIME_PATH")" = '350238cec920446faa036cbf225b35683bcd4b54'
           test "$(git hash-object "$EGRESS_PATH")" = '96d8d478174866355ee798500e3eff83634a442d'
           test "$(git hash-object "$EVIDENCE_PATH")" = '2a986ba2872aead52119563fc43d8d49c1211949'
           [[ "$PREPARE_SOURCE_SHA" =~ ^[a-f0-9]{64}$ ]]
@@ -118,8 +118,7 @@ jobs:
           name: r4f-revision4-12-ledger-prepare-evidence
           path: |
             r4f-revision4-12-ledger-prepare-evidence
-            r4f-g3-isolated-window-prepare-evidence/scheduler-prepare.json
-            r4f-g3-isolated-window-prepare-evidence/r5-active-recovery-prepare.sql
+            r4f-g3-isolated-window-prepare-evidence
           if-no-files-found: error
           retention-days: 14
 
@@ -149,7 +148,7 @@ jobs:
           Project identity digest: \`${PROJECT_DIGEST}\`
           Collector cron job id: \`${JOB_ID}\`
           Collector command digest: \`${COMMAND_DIGEST}\`
-          Revision-3 prepare source SHA-256: \`${PREPARE_SOURCE_SHA}\`
+          Revision-3 runtime source-set SHA-256: \`${PREPARE_SOURCE_SHA}\`
           Runtime migration SHA-256: \`${RUNTIME_SHA}\`
           Per-ledger egress gate SHA-256: \`${EGRESS_SHA}\`
           Accounting-evidence migration SHA-256: \`${EVIDENCE_SHA}\`
@@ -272,7 +271,7 @@ jobs:
           if (exactOwnerCommands.length !== 1) throw new Error(`authorization command must be unique, found ${exactOwnerCommands.length}`)
           NODE
 
-      - name: Reverify exact collector scheduler read-only
+      - name: Reverify exact collector scheduler and runtime source set read-only
         id: scheduler
         run: node scripts/prepare-r4f-g3-isolated-window.mjs
 
