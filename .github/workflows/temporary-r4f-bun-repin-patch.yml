@@ -6,7 +6,7 @@ on:
       - agent/r4f-repin-bun-after-supabase-cli
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   patch:
@@ -21,7 +21,7 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Apply exact tool-order fix and self-remove
+      - name: Build and verify exact tool-order fix
         shell: bash
         run: |
           set -euo pipefail
@@ -40,7 +40,7 @@ jobs:
           next_index = lines.index(next_marker)
           if not (bun_index < supabase_index < next_index):
               raise SystemExit('unexpected pre-fix tool ordering')
-          replacement = [
+          lines[bun_index:next_index] = [
               '      - name: Set up Supabase CLI\n',
               '        uses: supabase/setup-cli@3c2f5e2ae34c34e428e8e206e2c4d21fa2d20fbf\n',
               '        with:\n',
@@ -52,7 +52,6 @@ jobs:
               '          bun-version: 1.3.14\n',
               '\n',
           ]
-          lines[bun_index:next_index] = replacement
           workflow_path.write_text(''.join(lines))
 
           contract_path = Path('scripts/test-r4f-revision4-12-ledger-qualification-contract.sh')
@@ -77,24 +76,56 @@ jobs:
           if contract.count(anchor) != 1:
               raise SystemExit(f'expected exactly one contract insertion anchor, found {contract.count(anchor)}')
           contract_path.write_text(contract.replace(anchor, insertion, 1))
-
-          Path('.github/workflows/temporary-r4f-bun-repin-patch.yml').unlink()
           PY
 
           bash scripts/test-r4f-revision4-12-ledger-qualification-contract.sh
           git diff --check
-          git diff -- .github/workflows/r4f-revision4-12-ledger-qualification.yml \
-                       scripts/test-r4f-revision4-12-ledger-qualification-contract.sh \
-            > /tmp/r4f-bun-repin.patch
-          test -s /tmp/r4f-bun-repin.patch
+          test "$(git hash-object .github/workflows/r4f-revision4-12-ledger-qualification.yml)" = '8bcf65dadd7e7d114b2929603bd7ea8bb15cf0e8'
+          test "$(git hash-object scripts/test-r4f-revision4-12-ledger-qualification-contract.sh)" = 'dc40dc0a023639b52540b09f538fe21fa60aa869'
 
-      - name: Upload verified modified files
+      - name: Create detached verified Git commit object
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          workflow='.github/workflows/r4f-revision4-12-ledger-qualification.yml'
+          contract='scripts/test-r4f-revision4-12-ledger-qualification-contract.sh'
+          helper='.github/workflows/temporary-r4f-bun-repin-patch.yml'
+
+          encode() { base64 -w0 "$1"; }
+          workflow_blob="$(jq -n --arg content "$(encode "$workflow")" '{content:$content,encoding:"base64"}' | gh api --method POST "repos/${GITHUB_REPOSITORY}/git/blobs" --input - --jq .sha)"
+          contract_blob="$(jq -n --arg content "$(encode "$contract")" '{content:$content,encoding:"base64"}' | gh api --method POST "repos/${GITHUB_REPOSITORY}/git/blobs" --input - --jq .sha)"
+          test "$workflow_blob" = '8bcf65dadd7e7d114b2929603bd7ea8bb15cf0e8'
+          test "$contract_blob" = 'dc40dc0a023639b52540b09f538fe21fa60aa869'
+
+          base_tree="$(git rev-parse HEAD^{tree})"
+          jq -n \
+            --arg base_tree "$base_tree" \
+            --arg workflow_blob "$workflow_blob" \
+            --arg contract_blob "$contract_blob" \
+            --arg workflow "$workflow" \
+            --arg contract "$contract" \
+            --arg helper "$helper" \
+            '{base_tree:$base_tree,tree:[
+              {path:$workflow,mode:"100644",type:"blob",sha:$workflow_blob},
+              {path:$contract,mode:"100755",type:"blob",sha:$contract_blob},
+              {path:$helper,mode:"100644",type:"blob",sha:null}
+            ]}' > /tmp/tree.json
+          tree_sha="$(gh api --method POST "repos/${GITHUB_REPOSITORY}/git/trees" --input /tmp/tree.json --jq .sha)"
+
+          jq -n --arg message 'Repin Bun after Supabase CLI setup' --arg tree "$tree_sha" --arg parent "$GITHUB_SHA" \
+            '{message:$message,tree:$tree,parents:[$parent]}' > /tmp/commit.json
+          commit_sha="$(gh api --method POST "repos/${GITHUB_REPOSITORY}/git/commits" --input /tmp/commit.json --jq .sha)"
+          printf '%s\n' "$commit_sha" > /tmp/verified-commit-sha.txt
+          printf 'workflow_blob=%s\ncontract_blob=%s\ntree=%s\ncommit=%s\n' "$workflow_blob" "$contract_blob" "$tree_sha" "$commit_sha" > /tmp/verified-git-objects.txt
+
+      - name: Upload detached commit identity
         uses: actions/upload-artifact@v4
         with:
-          name: r4f-bun-repin-verified-files
+          name: r4f-bun-repin-detached-commit
           path: |
-            .github/workflows/r4f-revision4-12-ledger-qualification.yml
-            scripts/test-r4f-revision4-12-ledger-qualification-contract.sh
-            /tmp/r4f-bun-repin.patch
+            /tmp/verified-commit-sha.txt
+            /tmp/verified-git-objects.txt
           if-no-files-found: error
           retention-days: 1
