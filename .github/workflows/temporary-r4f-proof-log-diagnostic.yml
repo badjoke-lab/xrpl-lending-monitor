@@ -16,7 +16,7 @@ jobs:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
     steps:
-      - name: Map checkpoint state consumers read-only
+      - name: Read checkpoint state consumer definitions
         shell: bash
         run: |
           set -euo pipefail
@@ -24,41 +24,28 @@ jobs:
           [[ "$SUPABASE_PROJECT_ID" =~ ^[a-z]{20}$ ]]
           node --input-type=module <<'NODE'
           import { writeFile } from 'node:fs/promises'
-          const token = process.env.SUPABASE_ACCESS_TOKEN ?? ''
-          const project = process.env.SUPABASE_PROJECT_ID ?? ''
-          const endpoint = `https://api.supabase.com/v1/projects/${project}/database/query`
-          const sql = `
-          select n.nspname as schema_name,
-                 p.proname as function_name,
-                 p.oid::regprocedure::text as signature,
-                 case when p.prosrc ilike '%active_checkpoints%' then true else false end as references_checkpoint_table,
-                 case when p.prosrc ilike '%v_checkpoint.state%' or p.prosrc ilike '%checkpoint.state%' then true else false end as references_checkpoint_state,
-                 case when p.prosrc ilike '%state_digest%' then true else false end as references_state_digest
-          from pg_proc p
-          join pg_namespace n on n.oid=p.pronamespace
-          where n.nspname in ('public','xrpl_r5_v1')
-            and (
-              p.prosrc ilike '%active_checkpoints%'
-              or p.prosrc ilike '%checkpoint.state%'
-              or p.prosrc ilike '%checkpoint_state_digest%'
-            )
-          order by n.nspname,p.proname,p.oid;
-          `.trim()
-          const response = await fetch(endpoint, {
-            method:'POST',
-            headers:{authorization:`Bearer ${token}`,'content-type':'application/json',accept:'application/json'},
-            body:JSON.stringify({query:sql,read_only:true}),
-            signal:AbortSignal.timeout(60_000),
-          })
+          const token=process.env.SUPABASE_ACCESS_TOKEN??''
+          const project=process.env.SUPABASE_PROJECT_ID??''
+          const endpoint=`https://api.supabase.com/v1/projects/${project}/database/query`
+          const names=[
+            'xrpl_prepare_r5_active_recovery',
+            'xrpl_prepare_r5_revision4_active_recovery',
+            'xrpl_rebind_r5_prebatch_recovery_to_active_boundary_strict',
+            'xrpl_rebind_r5_revision4_prebatch_recovery_to_active_boundary_s',
+            'xrpl_read_r5_active_checkpoint'
+          ]
+          const quoted=names.map(n=>`'${n}'`).join(',')
+          const sql=`select p.oid::regprocedure::text as signature, pg_get_functiondef(p.oid) as definition from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname in (${quoted}) order by p.proname,p.oid`
+          const response=await fetch(endpoint,{method:'POST',headers:{authorization:`Bearer ${token}`,'content-type':'application/json',accept:'application/json'},body:JSON.stringify({query:sql,read_only:true}),signal:AbortSignal.timeout(60_000)})
           const text=await response.text()
           if(!response.ok) throw new Error(`database query failed:${response.status}:${text.slice(0,1000)}`)
           const parsed=JSON.parse(text)
           const rows=Array.isArray(parsed)?parsed:Array.isArray(parsed?.result)?parsed.result:[]
-          const evidence={schemaVersion:1,purpose:'checkpoint-state-consumer-map-readonly',readOnly:true,productionMutationPerformed:false,rows}
+          const evidence={schemaVersion:1,purpose:'checkpoint-state-consumer-definitions-readonly',readOnly:true,productionMutationPerformed:false,rows}
           const output=`${JSON.stringify(evidence,null,2)}\n`
           if(output.includes(project)||output.includes(token)) throw new Error('sanitization failed')
           await writeFile('r4f-proof-log-diagnostic.json',output)
-          console.log(output)
+          console.log(JSON.stringify({signatures:rows.map(r=>r.signature),definitionBytes:rows.map(r=>[r.signature,Buffer.byteLength(String(r.definition??''),'utf8')])},null,2))
           NODE
 
       - name: Upload sanitized diagnostic
