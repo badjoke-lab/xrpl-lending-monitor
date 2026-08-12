@@ -16,23 +16,23 @@ jobs:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
     steps:
-      - name: Read bounded Postgres logs and revision-4 residue only
+      - name: Read bounded function logs and revision-4 residue only
         shell: bash
         run: |
           set -euo pipefail
           [[ "$SUPABASE_PROJECT_ID" =~ ^[a-z]{20}$ ]]
 
-          sql="select timestamp, severity_text, event_message from logs where source = 'postgres_logs' order by timestamp asc limit 200"
+          sql="select timestamp, source, severity_text, event_message, log_attributes from logs where source in ('function_edge_logs','function_logs') order by timestamp asc limit 300"
           curl --fail-with-body --silent --show-error --get \
             -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
             --data-urlencode 'iso_timestamp_start=2026-08-12T16:24:40Z' \
             --data-urlencode 'iso_timestamp_end=2026-08-12T16:24:55Z' \
             --data-urlencode "sql=${sql}" \
             "https://api.supabase.com/v1/projects/${SUPABASE_PROJECT_ID}/analytics/endpoints/logs" \
-            > /tmp/postgres-logs.json
-          jq -e '.error == null or .error == ""' /tmp/postgres-logs.json > /dev/null
-          echo '--- postgres logs ---'
-          jq -c '.result[]? | {timestamp, severity_text, event_message}' /tmp/postgres-logs.json
+            > /tmp/function-logs.json
+          jq -e '.error == null or .error == ""' /tmp/function-logs.json > /dev/null
+          echo '--- function logs ---'
+          jq -c '.result[]? | {timestamp, source, severity_text, event_message, log_attributes}' /tmp/function-logs.json
 
           cat > /tmp/state.sql <<'SQL'
           select jsonb_build_object(
