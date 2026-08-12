@@ -43,6 +43,25 @@ jobs:
               "grep -Fq 'Qualification state digest: `${QUALIFICATION_STATE_DIGEST}`' \"$workflow\"",
               "grep -Fq 'Qualification state digest: \\`${QUALIFICATION_STATE_DIGEST}\\`' \"$workflow\"",
           )
+          for token in ('checkpointRev4Exists', 'rebindStrictRev4Exists', 'egressPolicyRows', 'runIdRows', 'evidenceRows'):
+              text = text.replace(
+                  f"grep -Fq '{token}' \"$workflow\"",
+                  f"grep -Fq '{token}' \"$qualification_state\"",
+              )
+          text = text.replace(
+              "grep -Fq \"policy_id='r5-revision4-egress-4581-v1'\" \"$workflow\"",
+              "grep -Fq \"policy_id = 'r5-revision4-egress-4581-v1'\" \"$qualification_state\"",
+          )
+          for field, value in (
+              ('maximum_ledgers_per_claim', '12'),
+              ('maximum_billable_egress_bytes_per_ledger', '4581'),
+              ('maximum_claim_billable_egress_bytes', '54972'),
+              ('maximum_claim_exclusive_reservation_bytes', '54973'),
+          ):
+              text = text.replace(
+                  f"grep -Fq '{field}={value}' \"$workflow\"",
+                  f"grep -Fq '{field} = {value}' \"$qualification_state\"",
+              )
           path.write_text(text)
           PY
           node --check scripts/inspect-r4f-revision4-qualification-state.mjs
