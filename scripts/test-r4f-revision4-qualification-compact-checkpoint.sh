@@ -9,27 +9,36 @@ for required in \
   '__SELECTION_DIGEST__' \
   '__OBSERVED_AT__' \
   "hashtextextended('xrpl-r5-active-checkpoint', 0)" \
+  'existing_checkpoint as materialized' \
+  'where not exists (select 1 from existing_checkpoint)' \
   'public.xrpl_drain_r5_checkpoint_boundary(' \
-  "r.status = 'stopped'" \
-  'r.lease_owner is null' \
-  'r.lease_expires_at is null' \
-  'r.last_error is null' \
-  'r.consecutive_failures = 0' \
-  "s.status = 'active'" \
-  "m.status = 'pending'" \
-  "m.phase = 'scan'" \
-  "predecessor.phase = 'finalize'" \
-  "predecessor.status = 'completed'" \
-  "predecessor.result->>'status' = 'committed'" \
-  "work.status = 'committed'" \
-  'work.scanned_end_ledger_index = w.ledger_index' \
-  'work.final_ledger_hash = w.ledger_hash' \
-  'work.committed_at is not null' \
-  "status in ('planned', 'staged', 'committing', 'finalizing')" \
-  'mc.pending_messages = 1' \
-  'mc.leased_messages = 0' \
-  'mc.retry_messages = 0' \
-  'wc.inflight_work = 0' \
+  "d.value->>'purpose' = 'r5-checkpoint-boundary-drain'" \
+  "d.value->>'profileId' = 'supabase_free_postgres_pgcron_edge'" \
+  "(d.value->>'profileRevision')::integer = 3" \
+  "d.value->>'sourceProfileId' = 'supabase-devnet'" \
+  "d.value->>'network' = 'devnet'" \
+  "d.value->>'epochId' = 'supabase-r4c2c-v1'" \
+  "jsonb_typeof(d.value->'drainedPhases') = 'array'" \
+  "drained_phase->>'phase' not in ('commit', 'finalize')" \
+  "'{checks,collectorQuiescent}'" \
+  "'{checks,activeStreamHealthy}'" \
+  "'{checks,onlyExistingCommitOrFinalizeDrained}'" \
+  "'{checks,noScanExecuted}'" \
+  "'{checks,onePendingScan}'" \
+  "'{checks,pendingScanBoundToWatermark}'" \
+  "'{checks,noInflightWork}'" \
+  "'{checks,watermarkIdentityPreserved}'" \
+  "'{checks,publicReaderUnchanged}'" \
+  "'{checks,mainnetDisabled}'" \
+  "'{checks,activeRecoveryStarted}'" \
+  "'{checks,stabilizationAuthorized}'" \
+  "'{checks,soakAuthorized}'" \
+  "'{watermarkAfter,ledgerIndex}'" \
+  "'{watermarkAfter,ledgerHash}'" \
+  "'{watermarkAfter,workId}'" \
+  "'{pendingScan,messageId}'" \
+  "'{pendingScan,expectedPreviousLedgerIndex}'" \
+  "'{pendingScan,expectedPreviousLedgerHash}'" \
   "'r5-revision4-qualification-boundary-checkpoint'" \
   "'qualificationBoundaryOnly', true" \
   "'fullRecoveryStateCaptured', false" \
@@ -52,6 +61,17 @@ for forbidden in \
   'array_agg' \
   'xrpl_create_r5_active_checkpoint(' \
   'xrpl_create_r5_revision4_active_checkpoint(' \
+  'public.xrpl_collector_runtime' \
+  'public.xrpl_phase_streams' \
+  'public.xrpl_phase_watermarks' \
+  'public.xrpl_phase_messages' \
+  'public.xrpl_phase_successors' \
+  'public.xrpl_phase_work' \
+  'public.xrpl_phase_payload_chunks' \
+  'public.xrpl_phase_reference_rows' \
+  'public.xrpl_phase_commit_chunks' \
+  'xrpl_resource_guard_v2.attempts' \
+  'xrpl_resource_guard_v2.tick_accounting' \
   'create function' \
   'create or replace function' \
   'alter table' \
@@ -73,23 +93,7 @@ done
 test "$(grep -Foc 'insert into xrpl_r5_v1.active_checkpoints' "$sql")" -eq 1
 test "$(grep -Foc 'public.xrpl_drain_r5_checkpoint_boundary(' "$sql")" -eq 1
 
-for table in \
-  public.xrpl_collector_runtime \
-  public.xrpl_phase_streams \
-  public.xrpl_phase_watermarks \
-  public.xrpl_phase_messages \
-  public.xrpl_phase_successors \
-  public.xrpl_phase_work \
-  public.xrpl_phase_payload_chunks \
-  public.xrpl_phase_reference_rows \
-  public.xrpl_phase_commit_chunks \
-  xrpl_resource_guard_v2.attempts \
-  xrpl_resource_guard_v2.tick_accounting
-do
-  grep -Fq "$table" "$sql" || {
-    echo "compact checkpoint SQL dropped source-state coverage: $table" >&2
-    exit 1
-  }
-done
+grep -Fq 'The trusted checkpoint-boundary drain is the authoritative proof' "$sql"
+grep -Fq 'Do not re-read phase tables in the same SQL statement' "$sql"
 
 printf '%s\n' 'R4F revision-4 compact qualification checkpoint contract: PASS'

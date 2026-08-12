@@ -1,11 +1,13 @@
 -- Qualification-only compact checkpoint for the exact revision-4 12-ledger proof.
 --
--- This statement deliberately does NOT materialize the historical messages/work/
--- chunk/reference-row sets. It preserves the strict active-boundary invariants
--- needed by the existing recovery prepare/rebind path, stores exact source row
--- counts, and commits only the bounded rows that prove the quiescent watermark
--- boundary. The resulting checkpoint is explicitly marked qualification-only and
--- must never be treated as a complete recovery snapshot.
+-- The trusted checkpoint-boundary drain is the authoritative proof of the
+-- post-drain scan boundary. Do not re-read phase tables in the same SQL statement
+-- after invoking the drain: the canonical active-checkpoint wrapper sequences the
+-- drain and the strict snapshot as separate PL/pgSQL commands, while one SQL
+-- statement has statement-snapshot semantics that are not equivalent to that
+-- procedural boundary. This compact qualification checkpoint therefore binds
+-- directly to the validated drain result and never claims a complete recovery
+-- snapshot.
 --
 -- Render-time placeholders (validated before substitution by the workflow):
 --   __CHECKPOINT_ID__      ^r5-checkpoint-revision4-proof-[0-9]+$
@@ -17,6 +19,12 @@ active_checkpoint_lock as materialized (
   select pg_advisory_xact_lock(
     hashtextextended('xrpl-r5-active-checkpoint', 0)
   ) as locked
+),
+existing_checkpoint as materialized (
+  select existing.*
+  from xrpl_r5_v1.active_checkpoints existing
+  cross join active_checkpoint_lock checkpoint_lock
+  where existing.checkpoint_id = '__CHECKPOINT_ID__'
 ),
 boundary_drain as materialized (
   select public.xrpl_drain_r5_checkpoint_boundary(
@@ -34,197 +42,98 @@ boundary_drain as materialized (
     '__OBSERVED_AT__'::timestamptz
   ) as value
   from active_checkpoint_lock
-),
-runtime as materialized (
-  select r.*
-  from public.xrpl_collector_runtime r
-  cross join boundary_drain d
-  where r.profile_id = 'supabase-devnet'
-    and r.network = 'devnet'
-    and r.status = 'stopped'
-    and r.lease_owner is null
-    and r.lease_expires_at is null
-    and r.last_error is null
-    and r.consecutive_failures = 0
-),
-stream as materialized (
-  select s.*
-  from public.xrpl_phase_streams s
-  cross join boundary_drain d
-  where s.profile_id = 'supabase-devnet'
-    and s.network = 'devnet'
-    and s.epoch_id = 'supabase-r4c2c-v1'
-    and s.status = 'active'
-    and s.last_error_classification is null
-    and s.last_error_message is null
-),
-watermark as materialized (
-  select w.*
-  from public.xrpl_phase_watermarks w
-  join stream s
-    on s.profile_id = w.profile_id
-   and s.network = w.network
-   and s.epoch_id = w.epoch_id
-   and s.base_identity = w.base_identity
-  where w.profile_id = 'supabase-devnet'
-),
-pending_scan as materialized (
-  select m.*
-  from public.xrpl_phase_messages m
-  join stream s on s.profile_id = m.profile_id
-  join watermark w on w.profile_id = m.profile_id
-  where m.profile_id = 'supabase-devnet'
-    and m.status = 'pending'
-    and m.phase = 'scan'
-    and (m.payload->>'expectedPreviousLedgerIndex')::bigint = w.ledger_index
-    and upper(m.payload->>'expectedPreviousLedgerHash') = w.ledger_hash
-    and m.payload->>'network' = s.network
-    and m.payload->>'epochId' = s.epoch_id
-    and m.payload->>'baseIdentity' = s.base_identity
-),
-predecessor_finalize as materialized (
-  select predecessor.*
-  from pending_scan pending
-  join public.xrpl_phase_successors successor
-    on successor.successor_message_id = pending.message_id
-  join public.xrpl_phase_messages predecessor
-    on predecessor.message_id = successor.current_message_id
-  join watermark w on true
-  where predecessor.profile_id = 'supabase-devnet'
-    and predecessor.phase = 'finalize'
-    and predecessor.status = 'completed'
-    and predecessor.result->>'status' = 'committed'
-    and predecessor.result->>'workId' = w.work_id
-    and (predecessor.result->>'ledgerIndex')::bigint = w.ledger_index
-    and upper(predecessor.result->>'ledgerHash') = w.ledger_hash
-),
-watermark_work as materialized (
-  select work.*
-  from public.xrpl_phase_work work
-  join stream s
-    on s.profile_id = work.profile_id
-   and s.network = work.network
-   and s.epoch_id = work.epoch_id
-   and s.base_identity = work.base_identity
-  join watermark w on w.work_id = work.work_id
-  where work.profile_id = 'supabase-devnet'
-    and work.status = 'committed'
-    and work.scanned_end_ledger_index = w.ledger_index
-    and work.final_ledger_hash = w.ledger_hash
-    and work.committed_at is not null
-),
-message_counts as materialized (
-  select
-    count(*)::integer as messages,
-    count(*) filter (where status = 'pending')::integer as pending_messages,
-    count(*) filter (where status = 'leased')::integer as leased_messages,
-    count(*) filter (where status = 'retry')::integer as retry_messages,
-    count(*) filter (where status = 'error')::integer as error_messages
-  from public.xrpl_phase_messages
-  where profile_id = 'supabase-devnet'
-),
-work_counts as materialized (
-  select
-    count(*)::integer as work,
-    count(*) filter (
-      where status in ('planned', 'staged', 'committing', 'finalizing')
-    )::integer as inflight_work,
-    count(*) filter (where status = 'error')::integer as error_work
-  from public.xrpl_phase_work
-  where profile_id = 'supabase-devnet'
-),
-successor_counts as materialized (
-  select count(*)::integer as successors
-  from public.xrpl_phase_successors successors
-  join public.xrpl_phase_messages messages
-    on messages.message_id = successors.current_message_id
-  where messages.profile_id = 'supabase-devnet'
-),
-payload_chunk_counts as materialized (
-  select count(*)::integer as payload_chunks
-  from public.xrpl_phase_payload_chunks chunks
-  join public.xrpl_phase_work work on work.work_id = chunks.work_id
-  where work.profile_id = 'supabase-devnet'
-),
-reference_row_counts as materialized (
-  select count(*)::integer as reference_rows
-  from public.xrpl_phase_reference_rows reference_rows
-  join public.xrpl_phase_work work on work.work_id = reference_rows.work_id
-  where work.profile_id = 'supabase-devnet'
-),
-commit_chunk_counts as materialized (
-  select count(*)::integer as commit_chunks
-  from public.xrpl_phase_commit_chunks chunks
-  join public.xrpl_phase_work work on work.work_id = chunks.work_id
-  where work.profile_id = 'supabase-devnet'
-),
-resource_counts as materialized (
-  select
-    (select count(*)::integer from xrpl_resource_guard_v2.attempts)
-      as resource_attempts,
-    (select count(*)::integer from xrpl_resource_guard_v2.tick_accounting)
-      as resource_tick_accounting
+  where not exists (select 1 from existing_checkpoint)
 ),
 qualified_boundary as materialized (
   select
-    to_jsonb(r) as runtime_json,
-    to_jsonb(s) as stream_json,
-    to_jsonb(w) as watermark_json,
-    to_jsonb(pending) as pending_scan_json,
-    to_jsonb(predecessor) as predecessor_finalize_json,
-    to_jsonb(work) as watermark_work_json,
     d.value as boundary_drain_json,
-    w.ledger_index as watermark_ledger_index,
-    w.ledger_hash as watermark_ledger_hash,
-    w.work_id as watermark_work_id,
-    s.network,
-    s.epoch_id,
-    s.base_identity,
-    mc.messages,
-    mc.pending_messages,
-    mc.leased_messages,
-    mc.retry_messages,
-    mc.error_messages,
-    wc.work,
-    wc.inflight_work,
-    wc.error_work,
-    sc.successors,
-    pc.payload_chunks,
-    rc.reference_rows,
-    cc.commit_chunks,
-    resource.resource_attempts,
-    resource.resource_tick_accounting
+    (d.value->>'drainedStepCount')::integer as drained_step_count,
+    (d.value #>> '{watermarkBefore,ledgerIndex}')::bigint
+      as watermark_before_ledger_index,
+    upper(d.value #>> '{watermarkBefore,ledgerHash}')
+      as watermark_before_ledger_hash,
+    d.value #>> '{watermarkBefore,workId}' as watermark_before_work_id,
+    (d.value #>> '{watermarkAfter,ledgerIndex}')::bigint
+      as watermark_ledger_index,
+    upper(d.value #>> '{watermarkAfter,ledgerHash}') as watermark_ledger_hash,
+    d.value #>> '{watermarkAfter,workId}' as watermark_work_id,
+    d.value->>'network' as network,
+    d.value->>'epochId' as epoch_id,
+    d.value->>'baseIdentity' as base_identity
   from boundary_drain d
-  cross join runtime r
-  cross join stream s
-  cross join watermark w
-  cross join pending_scan pending
-  cross join predecessor_finalize predecessor
-  cross join watermark_work work
-  cross join message_counts mc
-  cross join work_counts wc
-  cross join successor_counts sc
-  cross join payload_chunk_counts pc
-  cross join reference_row_counts rc
-  cross join commit_chunk_counts cc
-  cross join resource_counts resource
   where coalesce((d.value->>'drained')::boolean, false) is true
     and d.value->>'purpose' = 'r5-checkpoint-boundary-drain'
-    and coalesce((d.value #>> '{checks,collectorQuiescent}')::boolean, false) is true
-    and coalesce((d.value #>> '{checks,activeStreamHealthy}')::boolean, false) is true
-    and coalesce((d.value #>> '{checks,noScanExecuted}')::boolean, false) is true
-    and coalesce((d.value #>> '{checks,onePendingScan}')::boolean, false) is true
-    and coalesce((d.value #>> '{checks,pendingScanBoundToWatermark}')::boolean, false) is true
-    and coalesce((d.value #>> '{checks,noInflightWork}')::boolean, false) is true
-    and coalesce((d.value #>> '{checks,watermarkIdentityPreserved}')::boolean, false) is true
-    and (d.value #>> '{watermarkAfter,ledgerIndex}')::bigint = w.ledger_index
-    and upper(d.value #>> '{watermarkAfter,ledgerHash}') = w.ledger_hash
-    and d.value #>> '{watermarkAfter,workId}' = w.work_id
-    and d.value #>> '{pendingScan,messageId}' = pending.message_id
-    and mc.pending_messages = 1
-    and mc.leased_messages = 0
-    and mc.retry_messages = 0
-    and wc.inflight_work = 0
+    and d.value->>'profileId' = 'supabase_free_postgres_pgcron_edge'
+    and (d.value->>'profileRevision')::integer = 3
+    and d.value->>'profileIdentityDigest' =
+      '3a5c4ff2c43a48d3e5b7ceded60027173d215d6f083fb33c22375758520bbe67'
+    and d.value->>'sourceProfileId' = 'supabase-devnet'
+    and d.value->>'network' = 'devnet'
+    and d.value->>'epochId' = 'supabase-r4c2c-v1'
+    and coalesce(d.value->>'baseIdentity', '') <> ''
+    and (d.value->>'drainedStepCount')::integer between 0 and 256
+    and jsonb_typeof(d.value->'drainedPhases') = 'array'
+    and (d.value->>'drainedStepCount')::integer =
+      jsonb_array_length(d.value->'drainedPhases')
+    and not exists (
+      select 1
+      from jsonb_array_elements(
+        case
+          when jsonb_typeof(d.value->'drainedPhases') = 'array'
+            then d.value->'drainedPhases'
+          else '[]'::jsonb
+        end
+      ) drained_phase
+      where drained_phase->>'phase' not in ('commit', 'finalize')
+    )
+    and coalesce(
+      (d.value #>> '{checks,collectorQuiescent}')::boolean,
+      false
+    ) is true
+    and coalesce(
+      (d.value #>> '{checks,activeStreamHealthy}')::boolean,
+      false
+    ) is true
+    and coalesce(
+      (d.value #>> '{checks,onlyExistingCommitOrFinalizeDrained}')::boolean,
+      false
+    ) is true
+    and coalesce((d.value #>> '{checks,noScanExecuted}')::boolean, false)
+      is true
+    and coalesce((d.value #>> '{checks,onePendingScan}')::boolean, false)
+      is true
+    and coalesce(
+      (d.value #>> '{checks,pendingScanBoundToWatermark}')::boolean,
+      false
+    ) is true
+    and coalesce((d.value #>> '{checks,noInflightWork}')::boolean, false)
+      is true
+    and coalesce(
+      (d.value #>> '{checks,watermarkIdentityPreserved}')::boolean,
+      false
+    ) is true
+    and coalesce((d.value #>> '{checks,publicReaderUnchanged}')::boolean, false)
+      is true
+    and coalesce((d.value #>> '{checks,mainnetDisabled}')::boolean, false)
+      is true
+    and coalesce((d.value #>> '{checks,activeRecoveryStarted}')::boolean, true)
+      is false
+    and coalesce((d.value #>> '{checks,stabilizationAuthorized}')::boolean, true)
+      is false
+    and coalesce((d.value #>> '{checks,soakAuthorized}')::boolean, true)
+      is false
+    and (d.value #>> '{watermarkBefore,ledgerIndex}')::bigint > 0
+    and upper(d.value #>> '{watermarkBefore,ledgerHash}') ~ '^[A-F0-9]{64}$'
+    and coalesce(d.value #>> '{watermarkBefore,workId}', '') <> ''
+    and (d.value #>> '{watermarkAfter,ledgerIndex}')::bigint >=
+      (d.value #>> '{watermarkBefore,ledgerIndex}')::bigint
+    and upper(d.value #>> '{watermarkAfter,ledgerHash}') ~ '^[A-F0-9]{64}$'
+    and coalesce(d.value #>> '{watermarkAfter,workId}', '') <> ''
+    and coalesce(d.value #>> '{pendingScan,messageId}', '') <> ''
+    and (d.value #>> '{pendingScan,expectedPreviousLedgerIndex}')::bigint =
+      (d.value #>> '{watermarkAfter,ledgerIndex}')::bigint
+    and upper(d.value #>> '{pendingScan,expectedPreviousLedgerHash}') =
+      upper(d.value #>> '{watermarkAfter,ledgerHash}')
 ),
 checkpoint_material as materialized (
   select
@@ -233,35 +142,23 @@ checkpoint_material as materialized (
       'runtime', 1,
       'streams', 1,
       'watermarks', 1,
-      'messages', q.messages,
-      'pendingMessages', q.pending_messages,
-      'leasedMessages', q.leased_messages,
-      'retryMessages', q.retry_messages,
-      'errorMessages', q.error_messages,
-      'successors', q.successors,
-      'work', q.work,
-      'inflightWork', q.inflight_work,
-      'errorWork', q.error_work,
-      'payloadChunks', q.payload_chunks,
-      'referenceRows', q.reference_rows,
-      'commitChunks', q.commit_chunks,
-      'resourceAttempts', q.resource_attempts,
-      'resourceTickAccounting', q.resource_tick_accounting
+      'pendingMessages', 1,
+      'leasedMessages', 0,
+      'retryMessages', 0,
+      'inflightWork', 0,
+      'drainedStepCount', q.drained_step_count,
+      'qualificationBoundaryOnly', true
     ) as row_counts,
     jsonb_build_object(
-      'runtime', public.xrpl_transfer_json_digest(q.runtime_json),
-      'stream', public.xrpl_transfer_json_digest(q.stream_json),
-      'watermark', public.xrpl_transfer_json_digest(q.watermark_json),
-      'pendingScan', public.xrpl_transfer_json_digest(q.pending_scan_json),
-      'predecessorFinalize',
-        public.xrpl_transfer_json_digest(q.predecessor_finalize_json),
-      'watermarkWork', public.xrpl_transfer_json_digest(q.watermark_work_json),
       'boundaryDrain', public.xrpl_transfer_json_digest(q.boundary_drain_json),
-      'resourceCounts', public.xrpl_transfer_json_digest(
-        jsonb_build_object(
-          'attempts', q.resource_attempts,
-          'tickAccounting', q.resource_tick_accounting
-        )
+      'watermarkAfter', public.xrpl_transfer_json_digest(
+        q.boundary_drain_json->'watermarkAfter'
+      ),
+      'pendingScan', public.xrpl_transfer_json_digest(
+        q.boundary_drain_json->'pendingScan'
+      ),
+      'drainedPhases', public.xrpl_transfer_json_digest(
+        q.boundary_drain_json->'drainedPhases'
       )
     ) as section_digests
   from qualified_boundary q
@@ -281,12 +178,11 @@ checkpoint_state as materialized (
       ),
       'observedAt', '__OBSERVED_AT__'::timestamptz,
       'activeBoundary', jsonb_build_object(
-        'runtime', m.runtime_json,
-        'stream', m.stream_json,
-        'watermark', m.watermark_json,
-        'pendingScan', m.pending_scan_json,
-        'predecessorFinalize', m.predecessor_finalize_json,
-        'watermarkWork', m.watermark_work_json
+        'network', m.network,
+        'epochId', m.epoch_id,
+        'baseIdentity', m.base_identity,
+        'watermark', m.boundary_drain_json->'watermarkAfter',
+        'pendingScan', m.boundary_drain_json->'pendingScan'
       ),
       'boundaryDrain', m.boundary_drain_json,
       'rowCounts', m.row_counts,
@@ -296,9 +192,8 @@ checkpoint_state as materialized (
         'activeStreamHealthy', true,
         'onePendingSuccessorScan', true,
         'pendingScanBoundToWatermark', true,
-        'completedFinalizeBoundToWatermark', true,
-        'watermarkWorkCommitted', true,
         'noInflightWork', true,
+        'noScanExecutedDuringDrain', true,
         'exactRevision4Identity', true,
         'qualificationBoundaryOnly', true,
         'fullRecoveryStateCaptured', false,
@@ -365,15 +260,13 @@ selected_checkpoint as materialized (
   from inserted i
   union all
   select existing.*, true as duplicate
-  from xrpl_r5_v1.active_checkpoints existing
-  where existing.checkpoint_id = '__CHECKPOINT_ID__'
-    and not exists (select 1 from inserted)
+  from existing_checkpoint existing
+  where not exists (select 1 from inserted)
 ),
 validated_checkpoint as materialized (
-  select selected.*, payload.state as expected_state,
-         payload.state_digest as expected_state_digest
+  select selected.*
   from selected_checkpoint selected
-  cross join checkpoint_payload payload
+  left join checkpoint_payload payload on selected.duplicate is false
   where selected.profile_id = 'supabase_free_postgres_pgcron_edge'
     and selected.profile_revision = 4
     and selected.profile_identity_digest =
@@ -382,8 +275,7 @@ validated_checkpoint as materialized (
     and selected.source_profile_id = 'supabase-devnet'
     and selected.network = 'devnet'
     and selected.epoch_id = 'supabase-r4c2c-v1'
-    and selected.state = payload.state
-    and selected.state_digest = payload.state_digest
+    and selected.observed_at = '__OBSERVED_AT__'::timestamptz
     and public.xrpl_transfer_json_digest(selected.state) = selected.state_digest
     and selected.state->>'purpose' =
       'r5-revision4-qualification-boundary-checkpoint'
@@ -400,6 +292,32 @@ validated_checkpoint as materialized (
       (selected.state #>> '{checks,fullRecoveryStateCaptured}')::boolean,
       true
     ) is false
+    and coalesce(
+      (selected.state #>> '{checks,pendingScanBoundToWatermark}')::boolean,
+      false
+    ) is true
+    and coalesce(
+      (selected.state #>> '{checks,noInflightWork}')::boolean,
+      false
+    ) is true
+    and coalesce(
+      (selected.state #>> '{checks,publicReaderUnchanged}')::boolean,
+      false
+    ) is true
+    and coalesce(
+      (selected.state #>> '{checks,mainnetDisabled}')::boolean,
+      false
+    ) is true
+    and (
+      selected.duplicate is true
+      or (
+        payload.state is not null
+        and selected.state = payload.state
+        and selected.state_digest = payload.state_digest
+        and selected.row_counts = payload.row_counts
+        and selected.section_digests = payload.section_digests
+      )
+    )
 )
 select jsonb_build_object(
   'created', true,
