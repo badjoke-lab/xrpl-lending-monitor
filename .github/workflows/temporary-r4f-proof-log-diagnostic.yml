@@ -15,36 +15,58 @@ jobs:
     env:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+      SOURCE_COMMIT: '18dd9151f779ecaffee7e7580f1c972eef29ba3e'
     steps:
-      - name: Inspect migration history shape read-only
+      - name: Plan compact qualification checkpoint without executing
         shell: bash
         run: |
           set -euo pipefail
           test -n "$SUPABASE_ACCESS_TOKEN"
           [[ "$SUPABASE_PROJECT_ID" =~ ^[a-z]{20}$ ]]
+          curl --fail-with-body --silent --show-error \
+            "https://raw.githubusercontent.com/badjoke-lab/xrpl-lending-monitor/${SOURCE_COMMIT}/scripts/r4f-revision4-qualification-compact-checkpoint.sql" \
+            > /tmp/checkpoint.sql
           node --input-type=module <<'NODE'
-          import { writeFile } from 'node:fs/promises'
+          import { readFileSync, writeFileSync } from 'node:fs'
           const token=process.env.SUPABASE_ACCESS_TOKEN??''
           const project=process.env.SUPABASE_PROJECT_ID??''
+          const sourceCommit=process.env.SOURCE_COMMIT??''
+          let sql=readFileSync('/tmp/checkpoint.sql','utf8')
+          const replacements=new Map([
+            ['__CHECKPOINT_ID__','r5-checkpoint-revision4-proof-99999999999'],
+            ['__SELECTION_DIGEST__','99a1f97fc17ed6023bc3075bffe963a260e99a4ed0e2d831b068826c7797222f'],
+            ['__OBSERVED_AT__','2026-08-12T14:00:00.000Z'],
+          ])
+          for(const [key,value] of replacements){
+            if(!sql.includes(key)) throw new Error(`missing token ${key}`)
+            sql=sql.replaceAll(key,value)
+          }
+          if(/__[A-Z0-9_]+__/u.test(sql)) throw new Error('unresolved token')
+          const explain=`EXPLAIN (VERBOSE, COSTS OFF) ${sql}`
           const endpoint=`https://api.supabase.com/v1/projects/${project}/database/query`
-          const sql=`
-          select column_name,data_type,is_nullable
-          from information_schema.columns
-          where table_schema='supabase_migrations' and table_name='schema_migrations'
-          order by ordinal_position;
-          select version,name,cardinality(statements) as statement_count
-          from supabase_migrations.schema_migrations
-          where version in ('20260809151000','20260810123000','20260810133000','20260811012000','20260811061000')
-          order by version;
-          `.trim()
-          const response=await fetch(endpoint,{method:'POST',headers:{authorization:`Bearer ${token}`,'content-type':'application/json',accept:'application/json'},body:JSON.stringify({query:sql,read_only:true}),signal:AbortSignal.timeout(60_000)})
+          const response=await fetch(endpoint,{
+            method:'POST',
+            headers:{authorization:`Bearer ${token}`,'content-type':'application/json',accept:'application/json'},
+            body:JSON.stringify({query:explain,read_only:true}),
+            signal:AbortSignal.timeout(60_000),
+          })
           const text=await response.text()
-          if(!response.ok) throw new Error(`database query failed:${response.status}:${text.slice(0,1000)}`)
+          if(!response.ok) throw new Error(`read-only EXPLAIN failed:${response.status}:${text.slice(0,1500)}`)
           const parsed=JSON.parse(text)
-          const output=`${JSON.stringify({schemaVersion:1,purpose:'migration-history-shape-readonly',readOnly:true,productionMutationPerformed:false,response:parsed},null,2)}\n`
-          if(output.includes(project)||output.includes(token)) throw new Error('sanitization failed')
-          await writeFile('r4f-proof-log-diagnostic.json',output)
-          console.log(output)
+          const rows=Array.isArray(parsed)?parsed:Array.isArray(parsed?.result)?parsed.result:[]
+          const output={
+            schemaVersion:1,
+            purpose:'r4f-compact-checkpoint-production-schema-plan-readonly',
+            sourceCommit,
+            readOnlyManagementApi:true,
+            explainOnly:true,
+            analyze:false,
+            productionMutationPerformed:false,
+            planRowCount:rows.length,
+            planned:true,
+          }
+          writeFileSync('r4f-proof-log-diagnostic.json',JSON.stringify(output,null,2)+'\n')
+          console.log(JSON.stringify(output,null,2))
           NODE
 
       - name: Upload sanitized diagnostic
