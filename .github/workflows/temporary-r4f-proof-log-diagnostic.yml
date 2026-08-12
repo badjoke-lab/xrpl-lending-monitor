@@ -18,7 +18,7 @@ jobs:
       CAPTURE_START: '2026-08-12T12:50:00Z'
       CAPTURE_END: '2026-08-12T12:54:30Z'
     steps:
-      - name: Query sanitized function Edge events read-only
+      - name: Query sanitized generic Edge events read-only
         shell: bash
         run: |
           set -euo pipefail
@@ -46,10 +46,8 @@ jobs:
             }
             return Array.isArray(parsed?.result) ? parsed.result : []
           }
-          const sourceSql = `SELECT source, count() AS event_count FROM logs WHERE timestamp >= parseDateTimeBestEffort('${start}') AND timestamp <= parseDateTimeBestEffort('${end}') GROUP BY source ORDER BY source LIMIT 100`
-          const edgeSql = `SELECT timestamp,event_message,severity_text,toJSONString(log_attributes) AS attributes_json FROM logs WHERE timestamp >= parseDateTimeBestEffort('${start}') AND timestamp <= parseDateTimeBestEffort('${end}') AND source='function_edge_logs' ORDER BY timestamp ASC LIMIT 100`
-          const runtimeSql = `SELECT timestamp,event_message,severity_text,toJSONString(log_attributes) AS attributes_json FROM logs WHERE timestamp >= parseDateTimeBestEffort('${start}') AND timestamp <= parseDateTimeBestEffort('${end}') AND source='function_logs' ORDER BY timestamp ASC LIMIT 100`
-          const [sourceCounts, edgeRows, runtimeRows] = await Promise.all([query(sourceSql), query(edgeSql), query(runtimeSql)])
+          const edgeSql = `SELECT timestamp,event_message,severity_text,toJSONString(log_attributes) AS attributes_json FROM logs WHERE timestamp >= parseDateTimeBestEffort('${start}') AND timestamp <= parseDateTimeBestEffort('${end}') AND source='edge_logs' ORDER BY timestamp ASC LIMIT 100`
+          const rows = await query(edgeSql)
           function attrs(row) { try { return JSON.parse(String(row.attributes_json ?? '{}')) } catch { return {} } }
           function sanitize(value) {
             return String(value ?? '')
@@ -59,7 +57,7 @@ jobs:
               .replace(/sbp_[A-Za-z0-9_-]{12,}/gu, 'sbp_[redacted]')
               .replace(/postgres(?:ql)?:\/\/[^\s"']+/giu, 'postgres://[redacted]')
           }
-          const useful = /(status|method|path|execution|function|deployment|version|region|duration|time|reason|event|origin|request|response)/iu
+          const useful = /(status|method|path|execution|function|deployment|version|region|duration|time|reason|event|origin|request|response|route|error)/iu
           function safeRow(row) {
             const a = attrs(row)
             return {
@@ -68,20 +66,18 @@ jobs:
               severity: sanitize(row.severity_text),
               attributeKeys: Object.keys(a).sort().map(sanitize),
               attributes: Object.fromEntries(Object.entries(a)
-                .filter(([key]) => useful.test(key) && !/(header|authorization|apikey|body|query)/iu.test(key))
+                .filter(([key]) => useful.test(key) && !/(header|authorization|apikey|body|query|cookie|ip$)/iu.test(key))
                 .map(([key,value]) => [sanitize(key), sanitize(value)])),
             }
           }
           const evidence = {
-            schemaVersion: 3,
-            purpose: 'r4f-revision4-proof-log-readonly-diagnostic',
+            schemaVersion: 4,
+            purpose: 'r4f-revision4-proof-generic-edge-readonly-diagnostic',
             targetRun: 31598361794,
             interval: { start, end },
             readOnlyManagementApi: true,
             productionMutationPerformed: false,
-            sourceCounts: sourceCounts.map((row) => ({ source: sanitize(row.source), eventCount: Number(row.event_count ?? 0) })),
-            functionEdgeRows: edgeRows.map(safeRow),
-            functionRuntimeRows: runtimeRows.map(safeRow),
+            genericEdgeRows: rows.map(safeRow),
           }
           const output = `${JSON.stringify(evidence, null, 2)}\n`
           if (output.includes(project) || output.includes(token)) throw new Error('sanitization failed')
