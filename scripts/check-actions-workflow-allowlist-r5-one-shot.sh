@@ -8,6 +8,7 @@ trap 'rm -f "$generated_script"' EXIT
 python scripts/generate-actions-policy-r4f-g3-dual.py "$source_script" "$generated_script"
 python scripts/normalize-actions-policy-r4f-g3-dual.py "$generated_script"
 python scripts/extend-actions-policy-r4f-revision4-proof.py "$generated_script"
+python scripts/normalize-actions-policy-r4f-revision4-resume.py "$generated_script"
 python scripts/extend-actions-policy-r4f-revision4-cleanup.py "$generated_script"
 chmod 700 "$generated_script"
 bash "$generated_script" "$@"
