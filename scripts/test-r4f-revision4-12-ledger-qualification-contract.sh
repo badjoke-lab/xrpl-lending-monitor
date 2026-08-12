@@ -48,6 +48,12 @@ grep -Fq "MAX_PER_LEDGER_BYTES: '4581'" "$workflow"
 grep -Fq "MAX_TOTAL_BYTES: '54972'" "$workflow"
 grep -Fq "github.event.comment.body == '/r4f-revision4-12-ledger-prepare'" "$workflow"
 grep -Fq "startsWith(github.event.comment.body, '/r4f-revision4-12-ledger-authorize ')" "$workflow"
+grep -Fq "test \"\$(git hash-object \"\$RUNTIME_PATH\")\" = '066142b0db19e8b2435836de16e1ae09e95aabb2'" "$workflow"
+grep -Fq "expires=\"\$(date -u -d '+2 hours' '+%Y-%m-%dT%H:%M:%SZ')\"" "$workflow"
+grep -Fq 'prepare_source=${PREPARE_SOURCE_SHA}' "$workflow"
+grep -Fq 'prepare_source=([a-f0-9]{64})' "$workflow"
+grep -Fq 'test $((expires_epoch - auth_epoch)) -le 7200' "$workflow"
+grep -Fq 'test "$ACTUAL_PREPARE_SOURCE" = "$EXPECTED_PREPARE_SOURCE"' "$workflow"
 grep -Fq 'supabase functions deploy "$PROOF_FUNCTION"' "$workflow"
 grep -Fq 'supabase functions delete "$PROOF_FUNCTION"' "$workflow"
 
@@ -57,7 +63,8 @@ for forbidden in \
   "MAINNET_ENABLED: 'true'" \
   '/r4f-g3-dashboard-authorize' \
   '/r4f-g3-after' \
-  '/r4f-g3-capture-logs'
+  '/r4f-g3-capture-logs' \
+  "date -u -d '+15 minutes'"
 do
   if grep -Fq "$forbidden" "$workflow"; then
     echo "qualification workflow contains forbidden capability: $forbidden" >&2
