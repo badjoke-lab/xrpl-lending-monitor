@@ -12,41 +12,43 @@ jobs:
   diagnose:
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    env:
-      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-      SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
     steps:
-      - name: Inspect only API key kinds read-only
+      - name: Reproduce exact Devnet server_info request read-only
         shell: bash
         run: |
           set -euo pipefail
-          test -n "$SUPABASE_ACCESS_TOKEN"
-          [[ "$SUPABASE_PROJECT_ID" =~ ^[a-z]{20}$ ]]
-          curl --fail-with-body --silent --show-error \
-            -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
-            "https://api.supabase.com/v1/projects/${SUPABASE_PROJECT_ID}/api-keys?reveal=true" > /tmp/project-api-keys.json
-          jq '[.[] | {type, name, role: (.secret_jwt_template.role // null), prefix: (.prefix // null), hasApiKey: ((.api_key // "") | length > 0)}]' /tmp/project-api-keys.json \
-            > /tmp/key-metadata.json
-          legacy_service_role_count="$(jq '[.[] | select(.type == "legacy" and (.name == "service_role" or .role == "service_role"))] | length' /tmp/key-metadata.json)"
-          secret_count="$(jq '[.[] | select(.type == "secret")] | length' /tmp/key-metadata.json)"
-          publishable_count="$(jq '[.[] | select(.type == "publishable")] | length' /tmp/key-metadata.json)"
-          legacy_anon_count="$(jq '[.[] | select(.type == "legacy" and (.name == "anon" or .role == "anon"))] | length' /tmp/key-metadata.json)"
-          selected_kind=invalid
-          if [ "$legacy_service_role_count" -eq 1 ]; then
-            selected_kind=legacy
-          elif [ "$legacy_service_role_count" -eq 0 ] && [ "$secret_count" -eq 1 ]; then
-            selected_kind=secret
-          fi
+          started="$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')"
+          set +e
+          http_meta="$(curl --silent --show-error --max-time 30 \
+            -o /tmp/devnet-head.json \
+            -w '%{http_code} %{time_total} %{remote_ip}\n' \
+            -H 'content-type: application/json' \
+            --data '{"method":"server_info","params":[{}]}' \
+            'https://s.devnet.rippletest.net:51234/')"
+          curl_status=$?
+          set -e
+          finished="$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')"
+          http_code="$(awk '{print $1}' <<<"$http_meta")"
+          time_total="$(awk '{print $2}' <<<"$http_meta")"
+          remote_ip="$(awk '{print $3}' <<<"$http_meta")"
+          response_bytes="$(wc -c < /tmp/devnet-head.json 2>/dev/null || printf '0')"
+          result_status="$(jq -r '.result.status // .status // empty' /tmp/devnet-head.json 2>/dev/null || true)"
+          ledger_seq="$(jq -r '.result.info.validated_ledger.seq // empty' /tmp/devnet-head.json 2>/dev/null || true)"
+          error_code="$(jq -r '.error // .result.error // empty' /tmp/devnet-head.json 2>/dev/null || true)"
           jq -n \
-            --argjson legacyServiceRoleCount "$legacy_service_role_count" \
-            --argjson secretCount "$secret_count" \
-            --argjson publishableCount "$publishable_count" \
-            --argjson legacyAnonCount "$legacy_anon_count" \
-            --arg selectedKind "$selected_kind" \
-            '{schemaVersion:1,purpose:"r4f-proof-api-key-kind-readonly-diagnostic",readOnlyManagementApi:true,productionMutationPerformed:false,legacyServiceRoleCount:$legacyServiceRoleCount,secretCount:$secretCount,publishableCount:$publishableCount,legacyAnonCount:$legacyAnonCount,qualificationResolverWouldSelect:$selectedKind}' \
+            --arg started "$started" \
+            --arg finished "$finished" \
+            --argjson curlStatus "$curl_status" \
+            --arg httpCode "$http_code" \
+            --arg timeTotal "$time_total" \
+            --arg remoteIp "$remote_ip" \
+            --argjson responseBytes "$response_bytes" \
+            --arg resultStatus "$result_status" \
+            --arg ledgerSeq "$ledger_seq" \
+            --arg errorCode "$error_code" \
+            '{schemaVersion:1,purpose:"r4f-devnet-server-info-readonly-diagnostic",readOnly:true,productionMutationPerformed:false,started:$started,finished:$finished,curlStatus:$curlStatus,httpCode:$httpCode,timeTotalSeconds:$timeTotal,remoteIp:$remoteIp,responseBytes:$responseBytes,resultStatus:$resultStatus,validatedLedgerSeq:$ledgerSeq,errorCode:$errorCode}' \
             > r4f-proof-log-diagnostic.json
           cat r4f-proof-log-diagnostic.json
-          rm -f /tmp/project-api-keys.json /tmp/key-metadata.json
 
       - name: Upload sanitized diagnostic
         uses: actions/upload-artifact@v4
