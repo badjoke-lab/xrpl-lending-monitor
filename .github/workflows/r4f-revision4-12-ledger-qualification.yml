@@ -354,12 +354,76 @@ jobs:
           printf 'SUPABASE_R4F_PROOF_KEY=%s\nSUPABASE_R4F_PROOF_KEY_KIND=%s\n' "$elevated_key" "$elevated_kind" >> "$GITHUB_ENV"
           rm -f /tmp/project-api-keys.json
 
-      - name: Deploy only isolated temporary revision-4 proof function
+      - name: Bundle and deploy only isolated temporary revision-4 proof function
         id: deploy
+        env:
+          SOURCE_COMMIT: ${{ steps.auth.outputs.commit }}
+          AUTHORIZED_FUNCTION_SHA: ${{ steps.auth.outputs.function_sha }}
         run: |
           set -euo pipefail
           test "$PROOF_FUNCTION" != "$ACTIVE_FUNCTION"
-          supabase functions deploy "$PROOF_FUNCTION" --project-ref "$SUPABASE_PROJECT_ID" --no-verify-jwt
+          mkdir -p r4f-revision4-12-ledger-evidence
+          bundle_path="/tmp/${PROOF_FUNCTION}-index.ts"
+          bundle_evidence='r4f-revision4-12-ledger-evidence/proof-function-bundle.json'
+          bun_version="$(bun --version)"
+          test -n "$bun_version"
+          bun build "$PROOF_FUNCTION_PATH" \
+            --target=browser \
+            --format=esm \
+            --outfile="$bundle_path"
+          test -s "$bundle_path"
+          SOURCE_PATH="$PROOF_FUNCTION_PATH" BUNDLE_PATH="$bundle_path" EVIDENCE_PATH="$bundle_evidence" SOURCE_COMMIT="$SOURCE_COMMIT" AUTHORIZED_FUNCTION_SHA="$AUTHORIZED_FUNCTION_SHA" BUN_VERSION="$bun_version" node --input-type=module <<'NODE'
+          import { createHash } from 'node:crypto'
+          import { readFileSync, writeFileSync } from 'node:fs'
+
+          const sourcePath = process.env.SOURCE_PATH
+          const bundlePath = process.env.BUNDLE_PATH
+          const evidencePath = process.env.EVIDENCE_PATH
+          const sourceCommit = process.env.SOURCE_COMMIT
+          const authorizedFunctionSha = process.env.AUTHORIZED_FUNCTION_SHA
+          const bunVersion = process.env.BUN_VERSION
+          const source = readFileSync(sourcePath, 'utf8')
+          const bundle = readFileSync(bundlePath, 'utf8')
+          const sourceSha256 = createHash('sha256').update(source).digest('hex')
+          if (sourceSha256 !== authorizedFunctionSha) {
+            throw new Error('proof wrapper source drifted before bundling')
+          }
+          const unresolvedRelativeImport = /(?:from\s*|import\s*\()\s*['"]\.{1,2}\//u
+          if (unresolvedRelativeImport.test(bundle)) {
+            throw new Error('generated proof bundle retains a relative import')
+          }
+          if (bundle.includes('cloudflare:')) {
+            throw new Error('generated proof bundle contains a Cloudflare runtime import')
+          }
+          if (!bundle.includes('Deno.serve')) {
+            throw new Error('generated proof bundle does not contain the Edge entrypoint')
+          }
+          const evidence = {
+            schemaVersion: 1,
+            source: sourcePath,
+            sourceCommit,
+            sourceSha256,
+            bunVersion,
+            bytes: Buffer.byteLength(bundle),
+            sha256: createHash('sha256').update(bundle).digest('hex'),
+            relativeImports: 0,
+            cloudflareImports: 0,
+            denoServeEntrypoint: true,
+          }
+          writeFileSync(evidencePath, `${JSON.stringify(evidence, null, 2)}\n`)
+          NODE
+          cp "$bundle_path" "$PROOF_FUNCTION_PATH"
+          restore_proof_source() {
+            git checkout -- "$PROOF_FUNCTION_PATH"
+          }
+          trap restore_proof_source EXIT
+          mapfile -t changed_paths < <(git diff --name-only)
+          test "${#changed_paths[@]}" -eq 1
+          test "${changed_paths[0]}" = "$PROOF_FUNCTION_PATH"
+          supabase functions deploy "$PROOF_FUNCTION" --project-ref "$SUPABASE_PROJECT_ID" --use-api --no-verify-jwt
+          restore_proof_source
+          trap - EXIT
+          test "$AUTHORIZED_FUNCTION_SHA" = "$(sha256sum "$PROOF_FUNCTION_PATH" | awk '{print $1}')"
 
       - name: Pause exact collector with automatic restore watchdog
         id: pause
