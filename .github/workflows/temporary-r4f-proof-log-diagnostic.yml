@@ -12,38 +12,45 @@ jobs:
   diagnose:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-      - name: Audit R5 checkpoint consumers in repository
+      - name: Inspect migration history shape read-only
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p diagnostic
-          grep -R -n -E \
-            --exclude-dir=.git \
-            --exclude-dir=node_modules \
-            '(xrpl_read_r5_active_checkpoint|xrpl_create_r5_active_checkpoint|xrpl_create_r5_revision4_active_checkpoint|xrpl_r5_v1\.active_checkpoints|checkpoint_state_digest|stateDigest)' \
-            . > diagnostic/checkpoint-consumers.txt || true
-          python - <<'PY'
-          import json, pathlib, re
-          lines=pathlib.Path('diagnostic/checkpoint-consumers.txt').read_text().splitlines()
-          rows=[]
-          for line in lines:
-              m=re.match(r'^([^:]+):(\d+):(.*)$', line)
-              if not m: continue
-              path,lineno,text=m.groups()
-              rows.append({'path':path.removeprefix('./'),'line':int(lineno),'text':text.strip()[:500]})
-          paths=sorted({r['path'] for r in rows})
-          evidence={'schemaVersion':1,'purpose':'r5-checkpoint-repository-consumer-audit','productionMutationPerformed':False,'matchCount':len(rows),'paths':paths,'matches':rows}
-          pathlib.Path('diagnostic/r4f-proof-log-diagnostic.json').write_text(json.dumps(evidence,indent=2)+'\n')
-          print(json.dumps({'matchCount':len(rows),'paths':paths},indent=2))
-          PY
-      - name: Upload repository consumer audit
+          test -n "$SUPABASE_ACCESS_TOKEN"
+          [[ "$SUPABASE_PROJECT_ID" =~ ^[a-z]{20}$ ]]
+          node --input-type=module <<'NODE'
+          import { writeFile } from 'node:fs/promises'
+          const token=process.env.SUPABASE_ACCESS_TOKEN??''
+          const project=process.env.SUPABASE_PROJECT_ID??''
+          const endpoint=`https://api.supabase.com/v1/projects/${project}/database/query`
+          const sql=`
+          select column_name,data_type,is_nullable
+          from information_schema.columns
+          where table_schema='supabase_migrations' and table_name='schema_migrations'
+          order by ordinal_position;
+          select version,name,cardinality(statements) as statement_count
+          from supabase_migrations.schema_migrations
+          where version in ('20260809151000','20260810123000','20260810133000','20260811012000','20260811061000')
+          order by version;
+          `.trim()
+          const response=await fetch(endpoint,{method:'POST',headers:{authorization:`Bearer ${token}`,'content-type':'application/json',accept:'application/json'},body:JSON.stringify({query:sql,read_only:true}),signal:AbortSignal.timeout(60_000)})
+          const text=await response.text()
+          if(!response.ok) throw new Error(`database query failed:${response.status}:${text.slice(0,1000)}`)
+          const parsed=JSON.parse(text)
+          const output=`${JSON.stringify({schemaVersion:1,purpose:'migration-history-shape-readonly',readOnly:true,productionMutationPerformed:false,response:parsed},null,2)}\n`
+          if(output.includes(project)||output.includes(token)) throw new Error('sanitization failed')
+          await writeFile('r4f-proof-log-diagnostic.json',output)
+          console.log(output)
+          NODE
+
+      - name: Upload sanitized diagnostic
         uses: actions/upload-artifact@v4
         with:
           name: r4f-proof-log-diagnostic
-          path: diagnostic/r4f-proof-log-diagnostic.json
+          path: r4f-proof-log-diagnostic.json
           if-no-files-found: error
           retention-days: 7
