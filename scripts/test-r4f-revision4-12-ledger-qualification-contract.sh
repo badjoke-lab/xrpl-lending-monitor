@@ -114,6 +114,15 @@ grep -Fq 'sourceSha256 !== authorizedFunctionSha' "$workflow"
 grep -Fq 'supabase functions deploy "$PROOF_FUNCTION" --project-ref "$SUPABASE_PROJECT_ID" --use-api --no-verify-jwt' "$workflow"
 grep -Fq 'supabase functions delete "$PROOF_FUNCTION"' "$workflow"
 
+test "$(grep -Fxc '      - name: Set up Supabase CLI' "$workflow")" -eq 1
+test "$(grep -Fxc '      - name: Set up pinned Bun for proof prebundle' "$workflow")" -eq 1
+test "$(grep -Fxc '      - name: Bundle and deploy only isolated temporary revision-4 proof function' "$workflow")" -eq 1
+supabase_setup_line="$(grep -n -F '      - name: Set up Supabase CLI' "$workflow" | cut -d: -f1)"
+bun_setup_line="$(grep -n -F '      - name: Set up pinned Bun for proof prebundle' "$workflow" | cut -d: -f1)"
+deploy_line="$(grep -n -F '      - name: Bundle and deploy only isolated temporary revision-4 proof function' "$workflow" | cut -d: -f1)"
+test "$supabase_setup_line" -lt "$bun_setup_line"
+test "$bun_setup_line" -lt "$deploy_line"
+
 for forbidden in \
   'supabase db push' \
   'SUPABASE_DB_PASSWORD' \
