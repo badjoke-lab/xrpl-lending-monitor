@@ -8,6 +8,7 @@ trap 'rm -f "$generated_script"' EXIT
 python scripts/generate-actions-policy-r4f-g3-dual.py "$source_script" "$generated_script"
 python scripts/normalize-actions-policy-r4f-g3-dual.py "$generated_script"
 python scripts/extend-actions-policy-r4f-revision4-proof.py "$generated_script"
+python scripts/extend-actions-policy-r4f-revision4-cleanup.py "$generated_script"
 chmod 700 "$generated_script"
 bash "$generated_script" "$@"
 bash -n scripts/run-r4f-g3-dual-provider-verdict.sh
@@ -15,3 +16,5 @@ node scripts/check-r4f-g3-isolation-control-policy.mjs
 node scripts/check-r4f-g3-dual-runner-policy.mjs
 bash -n scripts/test-r4f-revision4-12-ledger-qualification-contract.sh
 bash scripts/test-r4f-revision4-12-ledger-qualification-contract.sh
+bash -n scripts/test-r4f-revision4-residue-cleanup-contract.sh
+bash scripts/test-r4f-revision4-residue-cleanup-contract.sh
