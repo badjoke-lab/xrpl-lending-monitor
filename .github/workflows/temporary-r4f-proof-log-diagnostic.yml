@@ -17,9 +17,8 @@ jobs:
       SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
       CAPTURE_START: '2026-08-12T12:50:00Z'
       CAPTURE_END: '2026-08-12T12:54:30Z'
-      TARGET_SLUG: 'xrpl-r4f-revision4-proof-batch'
     steps:
-      - name: Query exact read-only Edge log interval
+      - name: Query sanitized function Edge events read-only
         shell: bash
         run: |
           set -euo pipefail
@@ -27,16 +26,11 @@ jobs:
           [[ "$SUPABASE_PROJECT_ID" =~ ^[a-z]{20}$ ]]
           node --input-type=module <<'NODE'
           import { writeFile } from 'node:fs/promises'
-
           const token = process.env.SUPABASE_ACCESS_TOKEN ?? ''
           const project = process.env.SUPABASE_PROJECT_ID ?? ''
           const start = process.env.CAPTURE_START ?? ''
           const end = process.env.CAPTURE_END ?? ''
-          const targetSlug = process.env.TARGET_SLUG ?? ''
-          if (!token || !/^[a-z]{20}$/u.test(project)) throw new Error('Supabase credentials unavailable')
-          if (!start || !end || !targetSlug) throw new Error('diagnostic bounds unavailable')
           const endpoint = `https://api.supabase.com/v1/projects/${project}/analytics/endpoints/logs`
-
           async function query(sql) {
             const url = new URL(endpoint)
             url.searchParams.set('sql', sql)
@@ -46,89 +40,18 @@ jobs:
               headers: { authorization: `Bearer ${token}`, accept: 'application/json' },
               signal: AbortSignal.timeout(60_000),
             })
-            const text = await response.text()
-            const parsed = JSON.parse(text)
-            if (!response.ok) throw new Error(`logs query failed ${response.status}: ${JSON.stringify(parsed).slice(0, 500)}`)
-            if (typeof parsed?.error === 'string' && parsed.error) throw new Error(parsed.error)
-            return Array.isArray(parsed?.result) ? parsed.result : Array.isArray(parsed) ? parsed : []
-          }
-
-          const sourceCountSql = `
-          SELECT source, count() AS event_count
-          FROM logs
-          WHERE timestamp >= parseDateTimeBestEffort('${start}')
-            AND timestamp <= parseDateTimeBestEffort('${end}')
-          GROUP BY source
-          ORDER BY source
-          LIMIT 100
-          `.trim()
-
-          const edgeSql = `
-          SELECT
-            timestamp,
-            id,
-            source,
-            event_message,
-            severity_text,
-            log_attributes['request.method'] AS method,
-            log_attributes['request.path'] AS path,
-            toInt32OrZero(log_attributes['response.status_code']) AS status,
-            log_attributes['response.origin_time'] AS origin_time,
-            toJSONString(log_attributes) AS attributes_json
-          FROM logs
-          WHERE timestamp >= parseDateTimeBestEffort('${start}')
-            AND timestamp <= parseDateTimeBestEffort('${end}')
-            AND source = 'function_edge_logs'
-          ORDER BY timestamp ASC
-          LIMIT 1000
-          `.trim()
-
-          const runtimeSql = `
-          SELECT
-            timestamp,
-            id,
-            source,
-            event_message,
-            severity_text,
-            toJSONString(log_attributes) AS attributes_json
-          FROM logs
-          WHERE timestamp >= parseDateTimeBestEffort('${start}')
-            AND timestamp <= parseDateTimeBestEffort('${end}')
-            AND source = 'function_logs'
-          ORDER BY timestamp ASC
-          LIMIT 1000
-          `.trim()
-
-          const [sourceCounts, allEdgeRows, runtimeRows] = await Promise.all([
-            query(sourceCountSql), query(edgeSql), query(runtimeSql),
-          ])
-
-          function parseAttrs(row) {
-            try { return JSON.parse(String(row.attributes_json ?? '{}')) } catch { return {} }
-          }
-          const edgeRows = allEdgeRows.filter((row) =>
-            String(row.path ?? '').includes(targetSlug) || String(row.event_message ?? '').includes(targetSlug),
-          )
-          const targetIds = new Set()
-          for (const row of edgeRows) {
-            const attrs = parseAttrs(row)
-            for (const [key, value] of Object.entries(attrs)) {
-              if (/(execution|function|deployment|version)/iu.test(key) && typeof value === 'string' && value.length >= 6) {
-                targetIds.add(value)
-              }
+            const parsed = JSON.parse(await response.text())
+            if (!response.ok || (typeof parsed?.error === 'string' && parsed.error)) {
+              throw new Error(`logs query failed:${response.status}:${String(parsed?.error ?? '')}`)
             }
+            return Array.isArray(parsed?.result) ? parsed.result : []
           }
-
-          const interestingKey = /(execution|function|deployment|version|region|event|shutdown|reason|status|duration|time)/iu
-          const fallbackMessage = /(wall.?clock|cpu|shutdown|earlydrop|boot|timeout|limit|error|cancel|worker)/iu
-          const filteredRuntime = runtimeRows.filter((row) => {
-            const attrs = parseAttrs(row)
-            const values = Object.values(attrs).map((value) => String(value))
-            if ([...targetIds].some((id) => values.includes(id) || String(row.event_message ?? '').includes(id))) return true
-            return fallbackMessage.test(String(row.event_message ?? ''))
-          })
-
-          function sanitizeString(value) {
+          const sourceSql = `SELECT source, count() AS event_count FROM logs WHERE timestamp >= parseDateTimeBestEffort('${start}') AND timestamp <= parseDateTimeBestEffort('${end}') GROUP BY source ORDER BY source LIMIT 100`
+          const edgeSql = `SELECT timestamp,event_message,severity_text,toJSONString(log_attributes) AS attributes_json FROM logs WHERE timestamp >= parseDateTimeBestEffort('${start}') AND timestamp <= parseDateTimeBestEffort('${end}') AND source='function_edge_logs' ORDER BY timestamp ASC LIMIT 100`
+          const runtimeSql = `SELECT timestamp,event_message,severity_text,toJSONString(log_attributes) AS attributes_json FROM logs WHERE timestamp >= parseDateTimeBestEffort('${start}') AND timestamp <= parseDateTimeBestEffort('${end}') AND source='function_logs' ORDER BY timestamp ASC LIMIT 100`
+          const [sourceCounts, edgeRows, runtimeRows] = await Promise.all([query(sourceSql), query(edgeSql), query(runtimeSql)])
+          function attrs(row) { try { return JSON.parse(String(row.attributes_json ?? '{}')) } catch { return {} } }
+          function sanitize(value) {
             return String(value ?? '')
               .replaceAll(project, '[project]')
               .replaceAll(token, '[access-token]')
@@ -136,54 +59,35 @@ jobs:
               .replace(/sbp_[A-Za-z0-9_-]{12,}/gu, 'sbp_[redacted]')
               .replace(/postgres(?:ql)?:\/\/[^\s"']+/giu, 'postgres://[redacted]')
           }
-          function selectedAttrs(row) {
-            const attrs = parseAttrs(row)
-            return Object.fromEntries(Object.entries(attrs)
-              .filter(([key]) => interestingKey.test(key))
-              .map(([key, value]) => [sanitizeString(key), sanitizeString(value)]))
-          }
-          const pathSummary = new Map()
-          for (const row of allEdgeRows) {
-            const key = `${sanitizeString(row.path)}|${Number(row.status ?? 0)}`
-            pathSummary.set(key, (pathSummary.get(key) ?? 0) + 1)
+          const useful = /(status|method|path|execution|function|deployment|version|region|duration|time|reason|event|origin|request|response)/iu
+          function safeRow(row) {
+            const a = attrs(row)
+            return {
+              timestamp: sanitize(row.timestamp),
+              eventMessage: sanitize(row.event_message),
+              severity: sanitize(row.severity_text),
+              attributeKeys: Object.keys(a).sort().map(sanitize),
+              attributes: Object.fromEntries(Object.entries(a)
+                .filter(([key]) => useful.test(key) && !/(header|authorization|apikey|body|query)/iu.test(key))
+                .map(([key,value]) => [sanitize(key), sanitize(value)])),
+            }
           }
           const evidence = {
-            schemaVersion: 2,
+            schemaVersion: 3,
             purpose: 'r4f-revision4-proof-log-readonly-diagnostic',
             targetRun: 31598361794,
             interval: { start, end },
-            targetSlug,
             readOnlyManagementApi: true,
             productionMutationPerformed: false,
-            sourceCounts: sourceCounts.map((row) => ({
-              source: sanitizeString(row.source), eventCount: Number(row.event_count ?? 0),
-            })),
-            functionEdgePathSummary: [...pathSummary.entries()].map(([key, count]) => ({ key, count })),
-            edgeRows: edgeRows.map((row) => ({
-              timestamp: sanitizeString(row.timestamp),
-              eventMessage: sanitizeString(row.event_message),
-              severity: sanitizeString(row.severity_text),
-              method: sanitizeString(row.method),
-              path: sanitizeString(row.path),
-              status: Number(row.status ?? 0),
-              originTime: sanitizeString(row.origin_time),
-              attributes: selectedAttrs(row),
-            })),
-            targetIdentifiers: [...targetIds].map(sanitizeString),
-            runtimeRows: filteredRuntime.map((row) => ({
-              timestamp: sanitizeString(row.timestamp),
-              eventMessage: sanitizeString(row.event_message),
-              severity: sanitizeString(row.severity_text),
-              attributes: selectedAttrs(row),
-            })),
+            sourceCounts: sourceCounts.map((row) => ({ source: sanitize(row.source), eventCount: Number(row.event_count ?? 0) })),
+            functionEdgeRows: edgeRows.map(safeRow),
+            functionRuntimeRows: runtimeRows.map(safeRow),
           }
           const output = `${JSON.stringify(evidence, null, 2)}\n`
           if (output.includes(project) || output.includes(token)) throw new Error('sanitization failed')
-          if (/Bearer\s+[A-Za-z0-9._-]{12,}|sbp_[A-Za-z0-9_-]{12,}|postgres(?:ql)?:\/\//u.test(output)) {
-            throw new Error('credential-shaped material retained')
-          }
+          if (/Bearer\s+[A-Za-z0-9._-]{12,}|sbp_[A-Za-z0-9_-]{12,}|postgres(?:ql)?:\/\//u.test(output)) throw new Error('credential-shaped material retained')
           await writeFile('r4f-proof-log-diagnostic.json', output)
-          console.log(JSON.stringify(evidence, null, 2))
+          console.log(output)
           NODE
 
       - name: Upload sanitized diagnostic
