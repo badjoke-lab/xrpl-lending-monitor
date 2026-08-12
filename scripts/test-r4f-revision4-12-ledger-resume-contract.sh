@@ -72,6 +72,7 @@ for required in \
   'progressive claim must rebind the prepared run to the current active boundary before reservation' \
   'Reverify bound prepared residue after pause read-only' \
   'Resume exact prepared run with one 12-ledger proof invocation' \
+  'source:"github_actions"' \
   'bun-version: 1.3.14' \
   'generated proof bundle contains unsupported Edge environment mutation' \
   '__XRPL_R5_REVISION4_PROOF_RUNTIME_CONFIG__' \
@@ -102,7 +103,7 @@ for forbidden in \
   'delete from xrpl_r5_v1.recovery_runs' \
   'delete from xrpl_r5_v1.active_checkpoints' \
   'truncate ' \
-  'xrpl_create_r5_revision4_active_checkpoint(' \
+  "select public.xrpl_create_r5_revision4_active_checkpoint('" \
   "select public.xrpl_prepare_r5_revision4_active_recovery('"
 do
   if grep -Fiq "$forbidden" "$workflow"; then
