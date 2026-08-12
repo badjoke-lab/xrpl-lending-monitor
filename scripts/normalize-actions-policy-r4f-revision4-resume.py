@@ -43,6 +43,11 @@ replace_once(
     "20260809151000 20260810123000 20260810133000 20260811012000 20260811061000",
 ''',
 )
+replace_once(
+    'revision4 compact-checkpoint function moved to inspector',
+    '    "xrpl_create_r5_revision4_active_checkpoint",\n',
+    '',
+)
 
 marker = '''for forbidden in (
     "  push:",
@@ -58,6 +63,7 @@ for required in (
     "claimRev4Exists",
     "progressiveClaimRev4Exists",
     "completionRev4Exists",
+    "xrpl_create_r5_revision4_active_checkpoint",
     "egressPolicyRows",
     "runIdRows",
     "evidenceRows",
