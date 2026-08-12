@@ -1,0 +1,75 @@
+name: R4F Revision4 Partial-State Probe
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: r4f-revision4-partial-state-probe
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    if: >-
+      github.event.issue.number == 1261 &&
+      github.event.comment.user.login == 'badjoke-lab' &&
+      github.event.comment.body == '/r4f-revision4-partial-state-probe'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Read sanitized revision-4 partial state
+        id: state
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SUPABASE_PROJECT_ID" =~ ^[a-z]{20}$ ]]
+          query="select jsonb_build_object('prepareRev4Exists',to_regprocedure('public.xrpl_prepare_r5_revision4_active_recovery(text,text,text,bigint,text,timestamp with time zone)') is not null,'rebindStrictRev4Exists',to_regprocedure('public.xrpl_rebind_r5_revision4_prebatch_recovery_to_active_boundary_strict(text,timestamp with time zone)') is not null,'rebindRev4Exists',to_regprocedure('public.xrpl_rebind_r5_revision4_prebatch_recovery_to_active_boundary(text,timestamp with time zone)') is not null,'claimRev4Exists',to_regprocedure('public.xrpl_claim_r5_revision4_recovery_batch(text,text,bigint,text,timestamp with time zone,integer)') is not null,'progressiveClaimRev4Exists',to_regprocedure('public.xrpl_claim_r5_revision4_recovery_batch_from_prepared_head(text,text,timestamp with time zone,integer)') is not null,'completionRev4Exists',to_regprocedure('public.xrpl_complete_r5_revision4_recovery_batch(text,text,text,timestamp with time zone,text,text,text,text,bigint,numeric,numeric,numeric)') is not null,'checkpointRows',(select count(*) from xrpl_r5_v1.active_checkpoints where profile_revision=4),'runRows',(select count(*) from xrpl_r5_v1.recovery_runs where profile_revision=4),'batchRows',(select count(*) from xrpl_r5_v1.recovery_batches where profile_revision=4)) as state;"
+          jq -n --arg query "$query" '{query:$query,parameters:[],read_only:true}' > /tmp/query.json
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+            -H 'content-type: application/json' \
+            --data @/tmp/query.json \
+            "https://api.supabase.com/v1/projects/${SUPABASE_PROJECT_ID}/database/query" \
+            > /tmp/result.json
+          state="$(jq -c '.. | objects | .state? // empty' /tmp/result.json | head -n1)"
+          test -n "$state"
+          jq -e '
+            (.prepareRev4Exists | type == "boolean") and
+            (.rebindStrictRev4Exists | type == "boolean") and
+            (.rebindRev4Exists | type == "boolean") and
+            (.claimRev4Exists | type == "boolean") and
+            (.progressiveClaimRev4Exists | type == "boolean") and
+            (.completionRev4Exists | type == "boolean") and
+            (.checkpointRows | type == "number") and (.checkpointRows >= 0) and
+            (.runRows | type == "number") and (.runRows >= 0) and
+            (.batchRows | type == "number") and (.batchRows >= 0)
+          ' <<<"$state" > /dev/null
+          printf 'state=%s\n' "$state" >> "$GITHUB_OUTPUT"
+
+      - name: Publish sanitized read-only result
+        env:
+          STATE: ${{ steps.state.outputs.state }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          body="$(jq -nr --arg state "$STATE" --arg run "${GITHUB_RUN_ID}" '
+            "## R4F revision-4 partial-state read-only probe\n\nRun: `" + $run + "`\n\nSanitized production state:\n\n```json\n" + ($state | fromjson | tojson) + "\n```\n\nNo migration, collector pause, function deployment, revision-4 state write, Mainnet/public-reader mutation, stabilization, or soak action was performed."
+          ')"
+          jq -n --arg body "$body" '{body:$body}' > /tmp/comment.json
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            -H 'content-type: application/json' \
+            --data @/tmp/comment.json \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/1261/comments" \
+            > /dev/null
