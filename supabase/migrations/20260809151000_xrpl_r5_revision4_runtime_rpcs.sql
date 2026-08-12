@@ -262,20 +262,22 @@ begin
   );
   v_clone := replace(v_clone, 'v_checkpoint.profile_revision <> 3', 'v_checkpoint.profile_revision <> 4');
   v_clone := replace(v_clone, v_old_digest, v_new_digest);
-  v_clone := replace(
+  v_clone := replace(v_clone, quote_literal(v_old_selection), 'v_checkpoint.selection_digest');
+  v_clone := regexp_replace(
     v_clone,
-    E'or v_checkpoint.selection_digest\n      <> ''' || v_old_selection || '''',
-    E'or v_checkpoint.selection_digest !~ ''^[a-f0-9]{64}$'''
+    'or[[:space:]]+v_checkpoint\.selection_digest[[:space:]]*<>[[:space:]]*v_checkpoint\.selection_digest',
+    'or v_checkpoint.selection_digest !~ ''^[a-f0-9]{64}$'''
   );
-  v_clone := replace(
+  v_clone := regexp_replace(
     v_clone,
-    E'''supabase_free_postgres_pgcron_edge'', 3,\n    ''' || v_new_digest || ''',\n    ''' || v_old_selection || ''',',
-    E'''supabase_free_postgres_pgcron_edge'', 4,\n    ''' || v_new_digest || ''',\n    v_checkpoint.selection_digest,'
+    '''supabase_free_postgres_pgcron_edge'',[[:space:]]*3,',
+    '''supabase_free_postgres_pgcron_edge'', 4,'
   );
 
   if position('public.xrpl_prepare_r5_revision4_active_recovery(' in v_clone) = 0
     or position('v_checkpoint.profile_revision <> 4' in v_clone) = 0
     or strpos(v_clone, v_old_selection) <> 0
+    or position('v_checkpoint.selection_digest !~ ''^[a-f0-9]{64}$''' in v_clone) = 0
     or position(E'''supabase_free_postgres_pgcron_edge'', 4,' in v_clone) = 0 then
     raise exception 'r5_revision4_prepare_clone_invalid';
   end if;
@@ -317,14 +319,16 @@ begin
   );
   v_clone := replace(v_clone, 'v_run.profile_revision <> 3', 'v_run.profile_revision <> 4');
   v_clone := replace(v_clone, v_old_digest, v_new_digest);
-  v_clone := replace(
+  v_clone := replace(v_clone, quote_literal(v_old_selection), 'v_run.selection_digest');
+  v_clone := regexp_replace(
     v_clone,
-    E'or v_run.selection_digest\n      <> ''' || v_old_selection || '''',
-    E'or v_run.selection_digest !~ ''^[a-f0-9]{64}$'''
+    'or[[:space:]]+v_run\.selection_digest[[:space:]]*<>[[:space:]]*v_run\.selection_digest',
+    'or v_run.selection_digest !~ ''^[a-f0-9]{64}$'''
   );
 
   if position('public.xrpl_rebind_r5_revision4_prebatch_recovery_to_active_boundary(' in v_clone) = 0
     or position('v_run.profile_revision <> 4' in v_clone) = 0
+    or position('v_run.selection_digest !~ ''^[a-f0-9]{64}$''' in v_clone) = 0
     or strpos(v_clone, v_old_selection) <> 0 then
     raise exception 'r5_revision4_rebind_clone_invalid';
   end if;
@@ -434,20 +438,22 @@ begin
   v_clone := replace(v_clone, 'v_run.profile_revision <> 3', 'v_run.profile_revision <> 4');
   v_clone := replace(v_clone, 'v_reserved constant bigint := 134217728', 'v_reserved constant bigint := 16777216');
   v_clone := replace(v_clone, v_old_digest, v_new_digest);
-  v_clone := replace(
+  v_clone := replace(v_clone, quote_literal(v_old_selection), 'v_run.selection_digest');
+  v_clone := regexp_replace(
     v_clone,
-    E'or v_run.selection_digest\n      <> ''' || v_old_selection || '''',
-    E'or v_run.selection_digest !~ ''^[a-f0-9]{64}$'''
+    'or[[:space:]]+v_run\.selection_digest[[:space:]]*<>[[:space:]]*v_run\.selection_digest',
+    'or v_run.selection_digest !~ ''^[a-f0-9]{64}$'''
   );
-  v_clone := replace(
+  v_clone := regexp_replace(
     v_clone,
-    E'''supabase_free_postgres_pgcron_edge'', 3,\n    ''' || v_new_digest || ''',\n    ''' || v_old_selection || ''',',
-    E'''supabase_free_postgres_pgcron_edge'', 4,\n    ''' || v_new_digest || ''',\n    v_run.selection_digest,'
+    '''supabase_free_postgres_pgcron_edge'',[[:space:]]*3,',
+    '''supabase_free_postgres_pgcron_edge'', 4,'
   );
 
   if position('public.xrpl_claim_r5_revision4_recovery_batch(' in v_clone) = 0
     or position('v_run.profile_revision <> 4' in v_clone) = 0
     or position('v_reserved constant bigint := 16777216' in v_clone) = 0
+    or position('v_run.selection_digest !~ ''^[a-f0-9]{64}$''' in v_clone) = 0
     or strpos(v_clone, v_old_selection) <> 0
     or position(E'''supabase_free_postgres_pgcron_edge'', 4,' in v_clone) = 0 then
     raise exception 'r5_revision4_claim_clone_invalid';
@@ -492,10 +498,11 @@ begin
   );
   v_clone := replace(v_clone, 'v_run.profile_revision <> 3', 'v_run.profile_revision <> 4');
   v_clone := replace(v_clone, v_old_digest, v_new_digest);
-  v_clone := replace(
+  v_clone := replace(v_clone, quote_literal(v_old_selection), 'v_run.selection_digest');
+  v_clone := regexp_replace(
     v_clone,
-    E'or v_run.selection_digest\n      <> ''' || v_old_selection || '''',
-    E'or v_run.selection_digest !~ ''^[a-f0-9]{64}$'''
+    'or[[:space:]]+v_run\.selection_digest[[:space:]]*<>[[:space:]]*v_run\.selection_digest',
+    'or v_run.selection_digest !~ ''^[a-f0-9]{64}$'''
   );
   v_clone := replace(
     v_clone,
@@ -517,6 +524,7 @@ begin
     or position('v_run.profile_revision <> 4' in v_clone) = 0
     or position('public.xrpl_claim_r5_revision4_recovery_batch(' in v_clone) = 0
     or position('public.xrpl_adopt_r5_revision4_committed_active_descendants(' in v_clone) = 0
+    or position('v_run.selection_digest !~ ''^[a-f0-9]{64}$''' in v_clone) = 0
     or strpos(v_clone, v_old_selection) <> 0 then
     raise exception 'r5_revision4_progressive_claim_clone_invalid';
   end if;
