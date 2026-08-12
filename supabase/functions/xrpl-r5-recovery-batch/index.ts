@@ -236,6 +236,7 @@ function env(name: string): string {
 type Revision4QualificationRuntimeOverride = {
   selectionDigest: string
   unexplainedEgressReserveBytes: number
+  requestSource: 'github_actions_prepared_resume'
 }
 
 function qualificationRuntimeOverride(): Revision4QualificationRuntimeOverride | null {
@@ -249,7 +250,7 @@ function qualificationRuntimeOverride(): Revision4QualificationRuntimeOverride |
     throw new RecoveryError('revision-4 qualification runtime override is invalid', true)
   }
   const candidate = value as Record<string, unknown>
-  if (Object.keys(candidate).sort().join(',') !== 'selectionDigest,unexplainedEgressReserveBytes') {
+  if (Object.keys(candidate).sort().join(',') !== 'requestSource,selectionDigest,unexplainedEgressReserveBytes') {
     throw new RecoveryError('revision-4 qualification runtime override shape is invalid', true)
   }
   if (
@@ -265,10 +266,18 @@ function qualificationRuntimeOverride(): Revision4QualificationRuntimeOverride |
   ) {
     throw new RecoveryError('revision-4 qualification reserve override is invalid', true)
   }
+  if (candidate.requestSource !== 'github_actions_prepared_resume') {
+    throw new RecoveryError('revision-4 qualification request source override is invalid', true)
+  }
   return {
     selectionDigest: candidate.selectionDigest,
     unexplainedEgressReserveBytes: candidate.unexplainedEgressReserveBytes,
+    requestSource: candidate.requestSource,
   }
+}
+
+function requestSource(): string {
+  return qualificationRuntimeOverride()?.requestSource ?? 'github_actions'
 }
 
 function selectionDigest(): string {
@@ -741,7 +750,7 @@ Deno.serve(async (request) => {
       throw new RecoveryError('request body must be valid JSON', true)
     }
     const body = object(bodyValue, 'request body')
-    if (body.source !== 'github_actions') {
+    if (body.source !== requestSource()) {
       return json({ ok: false, error: 'invalid_source' }, 403)
     }
     if ((body.run_id ?? RECOVERY_RUN_ID) !== RECOVERY_RUN_ID) {
