@@ -25,21 +25,34 @@ jobs:
       SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
       GH_TOKEN: ${{ github.token }}
     steps:
-      - name: Read sanitized revision-4 partial state
+      - name: Read sanitized revision-4 migration and partial state
         id: state
         shell: bash
         run: |
           set -euo pipefail
           [[ "$SUPABASE_PROJECT_ID" =~ ^[a-z]{20}$ ]]
-          query="select jsonb_build_object('prepareRev4Exists',to_regprocedure('public.xrpl_prepare_r5_revision4_active_recovery(text,text,text,bigint,text,timestamp with time zone)') is not null,'rebindStrictRev4Exists',to_regprocedure('public.xrpl_rebind_r5_revision4_prebatch_recovery_to_active_boundary_strict(text,timestamp with time zone)') is not null,'rebindRev4Exists',to_regprocedure('public.xrpl_rebind_r5_revision4_prebatch_recovery_to_active_boundary(text,timestamp with time zone)') is not null,'claimRev4Exists',to_regprocedure('public.xrpl_claim_r5_revision4_recovery_batch(text,text,bigint,text,timestamp with time zone,integer)') is not null,'progressiveClaimRev4Exists',to_regprocedure('public.xrpl_claim_r5_revision4_recovery_batch_from_prepared_head(text,text,timestamp with time zone,integer)') is not null,'completionRev4Exists',to_regprocedure('public.xrpl_complete_r5_revision4_recovery_batch(text,text,text,timestamp with time zone,text,text,text,text,bigint,numeric,numeric,numeric)') is not null,'checkpointRows',(select count(*) from xrpl_r5_v1.active_checkpoints where profile_revision=4),'runRows',(select count(*) from xrpl_r5_v1.recovery_runs where profile_revision=4),'batchRows',(select count(*) from xrpl_r5_v1.recovery_batches where profile_revision=4)) as state;"
-          jq -n --arg query "$query" '{query:$query,parameters:[],read_only:true}' > /tmp/query.json
+
+          history_query="select version::text as version from supabase_migrations.schema_migrations where version::text in ('20260809151000','20260810123000','20260810133000','20260811012000','20260811061000') order by version::text;"
+          jq -n --arg query "$history_query" '{query:$query,parameters:[],read_only:true}' > /tmp/history-query.json
           curl --fail-with-body --silent --show-error \
             -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
             -H 'content-type: application/json' \
-            --data @/tmp/query.json \
+            --data @/tmp/history-query.json \
             "https://api.supabase.com/v1/projects/${SUPABASE_PROJECT_ID}/database/query" \
-            > /tmp/result.json
-          state="$(jq -c '.. | objects | .state? // empty' /tmp/result.json | head -n1)"
+            > /tmp/history-result.json
+          mapfile -t remote_versions < <(jq -r '.. | objects | .version? // empty | tostring' /tmp/history-result.json | grep -E '^20[0-9]{12}$' | LC_ALL=C sort -u || true)
+          migration_versions="$(jq -cn --args '$ARGS.positional' "${remote_versions[@]}")"
+          jq -e 'all(.[]; . == "20260809151000" or . == "20260810123000" or . == "20260810133000" or . == "20260811012000" or . == "20260811061000")' <<<"$migration_versions" > /dev/null
+
+          query="select jsonb_build_object('prepareRev4Exists',to_regprocedure('public.xrpl_prepare_r5_revision4_active_recovery(text,text,text,bigint,text,timestamp with time zone)') is not null,'rebindStrictRev4Exists',to_regprocedure('public.xrpl_rebind_r5_revision4_prebatch_recovery_to_active_boundary_strict(text,timestamp with time zone)') is not null,'rebindRev4Exists',to_regprocedure('public.xrpl_rebind_r5_revision4_prebatch_recovery_to_active_boundary(text,timestamp with time zone)') is not null,'claimRev4Exists',to_regprocedure('public.xrpl_claim_r5_revision4_recovery_batch(text,text,bigint,text,timestamp with time zone,integer)') is not null,'progressiveClaimRev4Exists',to_regprocedure('public.xrpl_claim_r5_revision4_recovery_batch_from_prepared_head(text,text,timestamp with time zone,integer)') is not null,'completionRev4Exists',to_regprocedure('public.xrpl_complete_r5_revision4_recovery_batch(text,text,text,timestamp with time zone,text,text,text,text,bigint,numeric,numeric,numeric)') is not null,'checkpointRows',(select count(*) from xrpl_r5_v1.active_checkpoints where profile_revision=4),'runRows',(select count(*) from xrpl_r5_v1.recovery_runs where profile_revision=4),'batchRows',(select count(*) from xrpl_r5_v1.recovery_batches where profile_revision=4)) as state;"
+          jq -n --arg query "$query" '{query:$query,parameters:[],read_only:true}' > /tmp/state-query.json
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+            -H 'content-type: application/json' \
+            --data @/tmp/state-query.json \
+            "https://api.supabase.com/v1/projects/${SUPABASE_PROJECT_ID}/database/query" \
+            > /tmp/state-result.json
+          state="$(jq -c '.. | objects | .state? // empty' /tmp/state-result.json | head -n1)"
           test -n "$state"
           jq -e '
             (.prepareRev4Exists | type == "boolean") and
@@ -52,16 +65,18 @@ jobs:
             (.runRows | type == "number") and (.runRows >= 0) and
             (.batchRows | type == "number") and (.batchRows >= 0)
           ' <<<"$state" > /dev/null
-          printf 'state=%s\n' "$state" >> "$GITHUB_OUTPUT"
+
+          sanitized="$(jq -cn --argjson migrations "$migration_versions" --argjson partial "$state" '{migrationVersions:$migrations,partialState:$partial}')"
+          printf 'sanitized=%s\n' "$sanitized" >> "$GITHUB_OUTPUT"
 
       - name: Publish sanitized read-only result
         env:
-          STATE: ${{ steps.state.outputs.state }}
+          SANITIZED: ${{ steps.state.outputs.sanitized }}
         shell: bash
         run: |
           set -euo pipefail
-          body="$(jq -nr --arg state "$STATE" --arg run "${GITHUB_RUN_ID}" '
-            "## R4F revision-4 partial-state read-only probe\n\nRun: `" + $run + "`\n\nSanitized production state:\n\n```json\n" + ($state | fromjson | tojson) + "\n```\n\nNo migration, collector pause, function deployment, revision-4 state write, Mainnet/public-reader mutation, stabilization, or soak action was performed."
+          body="$(jq -nr --arg state "$SANITIZED" --arg run "${GITHUB_RUN_ID}" '
+            "## R4F revision-4 migration/partial-state read-only probe\n\nRun: `" + $run + "`\n\nSanitized production state:\n\n```json\n" + ($state | fromjson | tojson) + "\n```\n\nNo migration, collector pause, function deployment, revision-4 state write, Mainnet/public-reader mutation, stabilization, or soak action was performed."
           ')"
           jq -n --arg body "$body" '{body:$body}' > /tmp/comment.json
           curl --fail-with-body --silent --show-error \
