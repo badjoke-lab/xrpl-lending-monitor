@@ -14,13 +14,22 @@ for path in "$runtime" "$egress" "$evidence" "$wrapper" "$executor" "$qualifier"
   test -f "$path" || { echo "missing contract file: $path" >&2; exit 1; }
 done
 
-test "$(git hash-object "$runtime")" = '066142b0db19e8b2435836de16e1ae09e95aabb2'
+test "$(git hash-object "$runtime")" = 'e8717abffc733f4f0a079a3ea667d2a20b44da31'
 test "$(git hash-object "$egress")" = '96d8d478174866355ee798500e3eff83634a442d'
 test "$(git hash-object "$evidence")" = '2a986ba2872aead52119563fc43d8d49c1211949'
 
 grep -Fq 'strpos(v_definition, v_old_digest) = 0' "$runtime"
 grep -Fq 'strpos(v_definition, v_old_selection) = 0' "$runtime"
+grep -Fq "replace(v_clone, quote_literal(v_old_selection), 'v_checkpoint.selection_digest')" "$runtime"
+grep -Fq "replace(v_clone, quote_literal(v_old_selection), 'v_run.selection_digest')" "$runtime"
+grep -Fq "'or[[:space:]]+v_checkpoint\\.selection_digest[[:space:]]*<>[[:space:]]*v_checkpoint\\.selection_digest'" "$runtime"
+grep -Fq "'or[[:space:]]+v_run\\.selection_digest[[:space:]]*<>[[:space:]]*v_run\\.selection_digest'" "$runtime"
+grep -Fq "'''supabase_free_postgres_pgcron_edge'',[[:space:]]*3,'" "$runtime"
 grep -Fq 'strpos(v_clone, v_old_selection) <> 0' "$runtime"
+if grep -Eq "E'or v_(checkpoint|run)\.selection_digest\\\\n" "$runtime"; then
+  echo 'revision-4 runtime still contains newline-sensitive selection clone transforms' >&2
+  exit 1
+fi
 if grep -Eq 'position\(v_old_(digest|selection) in ' "$runtime"; then
   echo 'revision-4 runtime still contains variable position(...) source guards' >&2
   exit 1
@@ -48,7 +57,7 @@ grep -Fq "MAX_PER_LEDGER_BYTES: '4581'" "$workflow"
 grep -Fq "MAX_TOTAL_BYTES: '54972'" "$workflow"
 grep -Fq "github.event.comment.body == '/r4f-revision4-12-ledger-prepare'" "$workflow"
 grep -Fq "startsWith(github.event.comment.body, '/r4f-revision4-12-ledger-authorize ')" "$workflow"
-grep -Fq "test \"\$(git hash-object \"\$RUNTIME_PATH\")\" = '066142b0db19e8b2435836de16e1ae09e95aabb2'" "$workflow"
+grep -Fq "test \"\$(git hash-object \"\$RUNTIME_PATH\")\" = 'e8717abffc733f4f0a079a3ea667d2a20b44da31'" "$workflow"
 grep -Fq "expires=\"\$(date -u -d '+2 hours' '+%Y-%m-%dT%H:%M:%SZ')\"" "$workflow"
 grep -Fq 'prepare_source=${PREPARE_SOURCE_SHA}' "$workflow"
 grep -Fq 'prepare_source=([a-f0-9]{64})' "$workflow"

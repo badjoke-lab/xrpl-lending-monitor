@@ -74,6 +74,18 @@ jobs:
           mapfile -t remote_versions < <(jq -r '.. | objects | .version? // empty | tostring' r4f-revision4-12-ledger-prepare-evidence/migration-history.json | grep -E '^20[0-9]{12}$' | LC_ALL=C sort -u)
           test "${remote_versions[*]:-}" = '20260811012000 20260811061000'
 
+          preflight_query="select jsonb_build_object('prepareRev4Exists',to_regprocedure('public.xrpl_prepare_r5_revision4_active_recovery(text,text,text,bigint,text,timestamp with time zone)') is not null,'claimRev4Exists',to_regprocedure('public.xrpl_claim_r5_revision4_recovery_batch(text,text,bigint,text,timestamp with time zone,integer)') is not null,'progressiveClaimRev4Exists',to_regprocedure('public.xrpl_claim_r5_revision4_recovery_batch_from_prepared_head(text,text,timestamp with time zone,integer)') is not null,'completionRev4Exists',to_regprocedure('public.xrpl_complete_r5_revision4_recovery_batch(text,text,text,timestamp with time zone,text,text,text,text,bigint,numeric,numeric,numeric)') is not null,'checkpointRows',(select count(*) from xrpl_r5_v1.active_checkpoints where profile_revision=4),'runRows',(select count(*) from xrpl_r5_v1.recovery_runs where profile_revision=4),'batchRows',(select count(*) from xrpl_r5_v1.recovery_batches where profile_revision=4)) as state;"
+          jq -n --arg query "$preflight_query" '{query:$query,parameters:[],read_only:true}' > /tmp/rev4-partial-state-query.json
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+            -H 'content-type: application/json' \
+            --data @/tmp/rev4-partial-state-query.json \
+            "https://api.supabase.com/v1/projects/${SUPABASE_PROJECT_ID}/database/query" \
+            > r4f-revision4-12-ledger-prepare-evidence/partial-state.json
+          state="$(jq -c '.. | objects | .state? // empty' r4f-revision4-12-ledger-prepare-evidence/partial-state.json | head -n1)"
+          test -n "$state"
+          jq -e '.prepareRev4Exists == false and .claimRev4Exists == false and .progressiveClaimRev4Exists == false and .completionRev4Exists == false and .checkpointRows == 0 and .runRows == 0 and .batchRows == 0' <<<"$state" > /dev/null
+
       - name: Bind exact source content and create expiring proposal
         id: proposal
         env:
@@ -86,7 +98,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$SOURCE_COMMIT" = "$(git rev-parse HEAD)"
-          test "$(git hash-object "$RUNTIME_PATH")" = '066142b0db19e8b2435836de16e1ae09e95aabb2'
+          test "$(git hash-object "$RUNTIME_PATH")" = 'e8717abffc733f4f0a079a3ea667d2a20b44da31'
           test "$(git hash-object "$EGRESS_PATH")" = '96d8d478174866355ee798500e3eff83634a442d'
           test "$(git hash-object "$EVIDENCE_PATH")" = '2a986ba2872aead52119563fc43d8d49c1211949'
           [[ "$PREPARE_SOURCE_SHA" =~ ^[a-f0-9]{64}$ ]]
