@@ -31,3 +31,86 @@ jobs:
             > /tmp/postgres-logs.json
           jq -e '.error == null or .error == ""' /tmp/postgres-logs.json > /dev/null
           jq -c '.result[]? | {timestamp, severity_text, event_message}' /tmp/postgres-logs.json
+
+      - name: Read current compact-boundary facts only
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/boundary-facts.sql <<'SQL'
+          with
+          stream as (
+            select * from public.xrpl_phase_streams
+            where profile_id='supabase-devnet'
+              and network='devnet'
+              and epoch_id='supabase-r4c2c-v1'
+              and status='active'
+              and last_error_classification is null
+              and last_error_message is null
+          ),
+          watermark as (
+            select w.* from public.xrpl_phase_watermarks w
+            join stream s on s.profile_id=w.profile_id and s.network=w.network and s.epoch_id=w.epoch_id and s.base_identity=w.base_identity
+            where w.profile_id='supabase-devnet'
+          ),
+          pending_scan as (
+            select m.* from public.xrpl_phase_messages m
+            join stream s on s.profile_id=m.profile_id
+            join watermark w on w.profile_id=m.profile_id
+            where m.profile_id='supabase-devnet'
+              and m.status='pending' and m.phase='scan'
+              and (m.payload->>'expectedPreviousLedgerIndex')::bigint=w.ledger_index
+              and upper(m.payload->>'expectedPreviousLedgerHash')=w.ledger_hash
+              and m.payload->>'network'=s.network
+              and m.payload->>'epochId'=s.epoch_id
+              and m.payload->>'baseIdentity'=s.base_identity
+          ),
+          predecessor_finalize as (
+            select predecessor.* from pending_scan pending
+            join public.xrpl_phase_successors successor on successor.successor_message_id=pending.message_id
+            join public.xrpl_phase_messages predecessor on predecessor.message_id=successor.current_message_id
+            join watermark w on true
+            where predecessor.profile_id='supabase-devnet'
+              and predecessor.phase='finalize'
+              and predecessor.status='completed'
+              and predecessor.result->>'status'='committed'
+              and predecessor.result->>'workId'=w.work_id
+              and (predecessor.result->>'ledgerIndex')::bigint=w.ledger_index
+              and upper(predecessor.result->>'ledgerHash')=w.ledger_hash
+          ),
+          watermark_work as (
+            select work.* from public.xrpl_phase_work work
+            join stream s on s.profile_id=work.profile_id and s.network=work.network and s.epoch_id=work.epoch_id and s.base_identity=work.base_identity
+            join watermark w on w.work_id=work.work_id
+            where work.profile_id='supabase-devnet'
+              and work.status='committed'
+              and work.scanned_end_ledger_index=w.ledger_index
+              and work.final_ledger_hash=w.ledger_hash
+              and work.committed_at is not null
+          )
+          select jsonb_build_object(
+            'runtimeExactRows',(select count(*) from public.xrpl_collector_runtime r where r.profile_id='supabase-devnet' and r.network='devnet' and r.status='stopped' and r.lease_owner is null and r.lease_expires_at is null and r.last_error is null and r.consecutive_failures=0),
+            'streamRows',(select count(*) from stream),
+            'watermarkRows',(select count(*) from watermark),
+            'pendingScanRows',(select count(*) from pending_scan),
+            'predecessorFinalizeRows',(select count(*) from predecessor_finalize),
+            'watermarkWorkRows',(select count(*) from watermark_work),
+            'pendingMessages',(select count(*) from public.xrpl_phase_messages where profile_id='supabase-devnet' and status='pending'),
+            'leasedMessages',(select count(*) from public.xrpl_phase_messages where profile_id='supabase-devnet' and status='leased'),
+            'retryMessages',(select count(*) from public.xrpl_phase_messages where profile_id='supabase-devnet' and status='retry'),
+            'errorMessages',(select count(*) from public.xrpl_phase_messages where profile_id='supabase-devnet' and status='error'),
+            'inflightWork',(select count(*) from public.xrpl_phase_work where profile_id='supabase-devnet' and status in ('planned','staged','committing','finalizing')),
+            'errorWork',(select count(*) from public.xrpl_phase_work where profile_id='supabase-devnet' and status='error'),
+            'watermarkLedgerIndex',(select ledger_index from watermark limit 1),
+            'watermarkWorkId',(select work_id from watermark limit 1),
+            'pendingScanMessageId',(select message_id from pending_scan limit 1)
+          ) as facts;
+          SQL
+          query="$(cat /tmp/boundary-facts.sql)"
+          jq -n --arg query "$query" '{query:$query,parameters:[],read_only:true}' > /tmp/boundary-query.json
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+            -H 'content-type: application/json' \
+            --data @/tmp/boundary-query.json \
+            "https://api.supabase.com/v1/projects/${SUPABASE_PROJECT_ID}/database/query" \
+            > /tmp/boundary-result.json
+          jq -c '.. | objects | .facts? // empty' /tmp/boundary-result.json | head -n1
