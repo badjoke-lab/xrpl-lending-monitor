@@ -1,0 +1,58 @@
+name: Temporary R4F Workflow Indent Fix
+
+on:
+  push:
+    branches:
+      - agent/r4f-workflow-indent-fix
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out fix branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/r4f-workflow-indent-fix
+          fetch-depth: 1
+
+      - name: Repair exact malformed run block
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('.github/workflows/r4f-revision4-12-ledger-qualification.yml')
+          lines = path.read_text().splitlines(keepends=True)
+          starts = [i for i, line in enumerate(lines) if line.startswith('CHECKPOINT_ID="$checkpoint_id" OBSERVED_AT="$observed_at" node --input-type=module')]
+          ends = [i for i, line in enumerate(lines) if line.startswith('watermark_index="$(jq -r ')]
+          if len(starts) != 1 or len(ends) != 1 or ends[0] < starts[0]:
+              raise SystemExit(f'unexpected malformed block anchors: starts={starts} ends={ends}')
+          start, end = starts[0], ends[0]
+          for i in range(start, end + 1):
+              if lines[i].startswith('          '):
+                  raise SystemExit(f'line {i+1} unexpectedly already indented')
+              lines[i] = '          ' + lines[i]
+          path.write_text(''.join(lines))
+          PY
+          git diff --check
+          ruby -e "require 'yaml'; YAML.load_file('.github/workflows/r4f-revision4-12-ledger-qualification.yml'); puts 'YAML parse: PASS'"
+          bash scripts/test-r4f-revision4-12-ledger-qualification-contract.sh
+          if grep -nE '^(CHECKPOINT_ID|import \{|const checkpointId|checkpoint_query=|watermark_index=)' .github/workflows/r4f-revision4-12-ledger-qualification.yml; then
+            echo 'malformed unindented lines remain' >&2
+            exit 1
+          fi
+
+      - name: Commit only final workflow fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/temporary-r4f-workflow-indent-fix.yml
+          git config user.name badjoke-lab
+          git config user.email badjoke.lab@gmail.com
+          git add .github/workflows/r4f-revision4-12-ledger-qualification.yml
+          git commit -m 'Fix revision-4 qualification workflow indentation'
+          git push origin HEAD:refs/heads/agent/r4f-workflow-indent-fix
