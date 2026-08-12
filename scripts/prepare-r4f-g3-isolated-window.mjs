@@ -108,28 +108,41 @@ if (!['stopped', 'running', 'halted'].includes(String(runtime.status))) {
   throw new Error('collector runtime status is invalid')
 }
 
-const prepareSources = await readOnlyQuery(
-  `select pg_get_functiondef(
-      to_regprocedure('public.xrpl_prepare_r5_active_recovery(text,text,text,bigint,text,timestamp with time zone)')
-    ) as definition`,
+const prepareChecks = await readOnlyQuery(
+  `with source as (
+     select pg_get_functiondef(
+       to_regprocedure('public.xrpl_prepare_r5_active_recovery(text,text,text,bigint,text,timestamp with time zone)')
+     ) as definition
+   )
+   select
+     definition,
+     position('public.xrpl_prepare_r5_active_recovery(' in definition) > 0 as function_name,
+     position('v_checkpoint.profile_revision <> 3' in definition) > 0 as revision3_profile,
+     position('3a5c4ff2c43a48d3e5b7ceded60027173d215d6f083fb33c22375758520bbe67' in definition) > 0 as revision3_identity_digest,
+     position('13a313d9d0679c7c512b59f9931d733dcb3217ec8e1cc6e74a36125a0354b667' in definition) > 0 as revision3_selection_digest
+   from source`,
 )
-if (prepareSources.length !== 1) throw new Error(`expected one R5 prepare source row, found ${prepareSources.length}`)
-const prepareDefinition = String(prepareSources[0].definition ?? '')
+if (prepareChecks.length !== 1) throw new Error(`expected one R5 prepare source row, found ${prepareChecks.length}`)
+const prepareCheck = prepareChecks[0]
+const prepareDefinition = String(prepareCheck.definition ?? '')
 if (!prepareDefinition.includes('xrpl_prepare_r5_active_recovery')) {
   throw new Error('R5 active recovery prepare function definition is unavailable')
 }
 const prepareSourceSha256 = createHash('sha256').update(prepareDefinition).digest('hex')
 const prepareSourceAnchors = {
-  functionName: prepareDefinition.includes('public.xrpl_prepare_r5_active_recovery('),
-  revision3Profile: prepareDefinition.includes('v_checkpoint.profile_revision <> 3'),
-  revision3IdentityDigest: prepareDefinition.includes('3a5c4ff2c43a48d3e5b7ceded60027173d215d6f083fb33c22375758520bbe67'),
-  revision3SelectionDigest: prepareDefinition.includes('13a313d9d0679c7c512b59f9931d733dcb3217ec8e1cc6e74a36125a0354b667'),
+  functionName: prepareCheck.function_name === true,
+  revision3Profile: prepareCheck.revision3_profile === true,
+  revision3IdentityDigest: prepareCheck.revision3_identity_digest === true,
+  revision3SelectionDigest: prepareCheck.revision3_selection_digest === true,
+}
+if (!Object.values(prepareSourceAnchors).every(Boolean)) {
+  throw new Error(`R5 active recovery prepare source fails exact migration anchors:${JSON.stringify(prepareSourceAnchors)}`)
 }
 
 await mkdir(evidenceDirectory, { recursive: true })
 await writeFile(`${evidenceDirectory}/r5-active-recovery-prepare.sql`, prepareDefinition.endsWith('\n') ? prepareDefinition : `${prepareDefinition}\n`)
 const evidence = {
-  schemaVersion: 2,
+  schemaVersion: 3,
   purpose: 'r4f-g3-isolated-window-scheduler-prepare',
   sourceRunId,
   sourceCommit,
@@ -162,6 +175,8 @@ const evidence = {
   r5PrepareSource: {
     sha256: prepareSourceSha256,
     anchors: prepareSourceAnchors,
+    exactPostgresPositionChecks: true,
+    definition: prepareDefinition,
     sourceRetainedInArtifact: true,
   },
   checks: {
