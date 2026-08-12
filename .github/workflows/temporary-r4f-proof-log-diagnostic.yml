@@ -16,7 +16,7 @@ jobs:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
     steps:
-      - name: Measure checkpoint source tables read-only
+      - name: Map checkpoint state consumers read-only
         shell: bash
         run: |
           set -euo pipefail
@@ -28,55 +28,36 @@ jobs:
           const project = process.env.SUPABASE_PROJECT_ID ?? ''
           const endpoint = `https://api.supabase.com/v1/projects/${project}/database/query`
           const sql = `
-          with metrics as (
-            select 'phase_messages' as section,
-                   (select count(*) from public.xrpl_phase_messages where profile_id='supabase-devnet')::bigint as row_count,
-                   pg_total_relation_size('public.xrpl_phase_messages'::regclass)::bigint as relation_bytes
-            union all
-            select 'phase_successors',
-                   (select count(*) from public.xrpl_phase_successors s join public.xrpl_phase_messages m on m.message_id=s.current_message_id where m.profile_id='supabase-devnet')::bigint,
-                   pg_total_relation_size('public.xrpl_phase_successors'::regclass)::bigint
-            union all
-            select 'phase_work',
-                   (select count(*) from public.xrpl_phase_work where profile_id='supabase-devnet')::bigint,
-                   pg_total_relation_size('public.xrpl_phase_work'::regclass)::bigint
-            union all
-            select 'payload_chunks',
-                   (select count(*) from public.xrpl_phase_payload_chunks c join public.xrpl_phase_work w on w.work_id=c.work_id where w.profile_id='supabase-devnet')::bigint,
-                   pg_total_relation_size('public.xrpl_phase_payload_chunks'::regclass)::bigint
-            union all
-            select 'reference_rows',
-                   (select count(*) from public.xrpl_phase_reference_rows r join public.xrpl_phase_work w on w.work_id=r.work_id where w.profile_id='supabase-devnet')::bigint,
-                   pg_total_relation_size('public.xrpl_phase_reference_rows'::regclass)::bigint
-            union all
-            select 'commit_chunks',
-                   (select count(*) from public.xrpl_phase_commit_chunks c join public.xrpl_phase_work w on w.work_id=c.work_id where w.profile_id='supabase-devnet')::bigint,
-                   pg_total_relation_size('public.xrpl_phase_commit_chunks'::regclass)::bigint
-            union all
-            select 'resource_attempts', count(*)::bigint,
-                   pg_total_relation_size('xrpl_resource_guard_v2.attempts'::regclass)::bigint
-              from xrpl_resource_guard_v2.attempts
-            union all
-            select 'resource_tick_accounting', count(*)::bigint,
-                   pg_total_relation_size('xrpl_resource_guard_v2.tick_accounting'::regclass)::bigint
-              from xrpl_resource_guard_v2.tick_accounting
-          )
-          select * from metrics order by section;
+          select n.nspname as schema_name,
+                 p.proname as function_name,
+                 p.oid::regprocedure::text as signature,
+                 case when p.prosrc ilike '%active_checkpoints%' then true else false end as references_checkpoint_table,
+                 case when p.prosrc ilike '%v_checkpoint.state%' or p.prosrc ilike '%checkpoint.state%' then true else false end as references_checkpoint_state,
+                 case when p.prosrc ilike '%state_digest%' then true else false end as references_state_digest
+          from pg_proc p
+          join pg_namespace n on n.oid=p.pronamespace
+          where n.nspname in ('public','xrpl_r5_v1')
+            and (
+              p.prosrc ilike '%active_checkpoints%'
+              or p.prosrc ilike '%checkpoint.state%'
+              or p.prosrc ilike '%checkpoint_state_digest%'
+            )
+          order by n.nspname,p.proname,p.oid;
           `.trim()
           const response = await fetch(endpoint, {
-            method: 'POST',
-            headers: {authorization:`Bearer ${token}`,'content-type':'application/json',accept:'application/json'},
-            body: JSON.stringify({query: sql, read_only: true}),
-            signal: AbortSignal.timeout(90_000),
+            method:'POST',
+            headers:{authorization:`Bearer ${token}`,'content-type':'application/json',accept:'application/json'},
+            body:JSON.stringify({query:sql,read_only:true}),
+            signal:AbortSignal.timeout(60_000),
           })
-          const text = await response.text()
-          if (!response.ok) throw new Error(`database query failed:${response.status}:${text.slice(0,1000)}`)
-          const parsed = JSON.parse(text)
-          const rows = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.result) ? parsed.result : []
-          const evidence = {schemaVersion:1,purpose:'checkpoint-source-size-readonly',readOnly:true,productionMutationPerformed:false,rows}
-          const output = `${JSON.stringify(evidence,null,2)}\n`
-          if (output.includes(project) || output.includes(token)) throw new Error('sanitization failed')
-          await writeFile('r4f-proof-log-diagnostic.json', output)
+          const text=await response.text()
+          if(!response.ok) throw new Error(`database query failed:${response.status}:${text.slice(0,1000)}`)
+          const parsed=JSON.parse(text)
+          const rows=Array.isArray(parsed)?parsed:Array.isArray(parsed?.result)?parsed.result:[]
+          const evidence={schemaVersion:1,purpose:'checkpoint-state-consumer-map-readonly',readOnly:true,productionMutationPerformed:false,rows}
+          const output=`${JSON.stringify(evidence,null,2)}\n`
+          if(output.includes(project)||output.includes(token)) throw new Error('sanitization failed')
+          await writeFile('r4f-proof-log-diagnostic.json',output)
           console.log(output)
           NODE
 
