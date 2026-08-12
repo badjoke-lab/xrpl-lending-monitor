@@ -12,43 +12,62 @@ jobs:
   diagnose:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+      CAPTURE_START: '2026-08-12T12:51:40Z'
+      CAPTURE_END: '2026-08-12T12:53:50Z'
     steps:
-      - name: Reproduce exact Devnet server_info request read-only
+      - name: Query qualification PostgreSQL logs read-only
         shell: bash
         run: |
           set -euo pipefail
-          started="$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')"
-          set +e
-          http_meta="$(curl --silent --show-error --max-time 30 \
-            -o /tmp/devnet-head.json \
-            -w '%{http_code} %{time_total} %{remote_ip}\n' \
-            -H 'content-type: application/json' \
-            --data '{"method":"server_info","params":[{}]}' \
-            'https://s.devnet.rippletest.net:51234/')"
-          curl_status=$?
-          set -e
-          finished="$(date -u '+%Y-%m-%dT%H:%M:%S.%3NZ')"
-          http_code="$(awk '{print $1}' <<<"$http_meta")"
-          time_total="$(awk '{print $2}' <<<"$http_meta")"
-          remote_ip="$(awk '{print $3}' <<<"$http_meta")"
-          response_bytes="$(wc -c < /tmp/devnet-head.json 2>/dev/null || printf '0')"
-          result_status="$(jq -r '.result.status // .status // empty' /tmp/devnet-head.json 2>/dev/null || true)"
-          ledger_seq="$(jq -r '.result.info.validated_ledger.seq // empty' /tmp/devnet-head.json 2>/dev/null || true)"
-          error_code="$(jq -r '.error // .result.error // empty' /tmp/devnet-head.json 2>/dev/null || true)"
-          jq -n \
-            --arg started "$started" \
-            --arg finished "$finished" \
-            --argjson curlStatus "$curl_status" \
-            --arg httpCode "$http_code" \
-            --arg timeTotal "$time_total" \
-            --arg remoteIp "$remote_ip" \
-            --argjson responseBytes "$response_bytes" \
-            --arg resultStatus "$result_status" \
-            --arg ledgerSeq "$ledger_seq" \
-            --arg errorCode "$error_code" \
-            '{schemaVersion:1,purpose:"r4f-devnet-server-info-readonly-diagnostic",readOnly:true,productionMutationPerformed:false,started:$started,finished:$finished,curlStatus:$curlStatus,httpCode:$httpCode,timeTotalSeconds:$timeTotal,remoteIp:$remoteIp,responseBytes:$responseBytes,resultStatus:$resultStatus,validatedLedgerSeq:$ledgerSeq,errorCode:$errorCode}' \
-            > r4f-proof-log-diagnostic.json
-          cat r4f-proof-log-diagnostic.json
+          test -n "$SUPABASE_ACCESS_TOKEN"
+          [[ "$SUPABASE_PROJECT_ID" =~ ^[a-z]{20}$ ]]
+          node --input-type=module <<'NODE'
+          import { writeFile } from 'node:fs/promises'
+          const token = process.env.SUPABASE_ACCESS_TOKEN ?? ''
+          const project = process.env.SUPABASE_PROJECT_ID ?? ''
+          const start = process.env.CAPTURE_START ?? ''
+          const end = process.env.CAPTURE_END ?? ''
+          const endpoint = `https://api.supabase.com/v1/projects/${project}/analytics/endpoints/logs`
+          const sql = `SELECT timestamp,event_message,severity_text,toJSONString(log_attributes) AS attributes_json FROM logs WHERE timestamp >= parseDateTimeBestEffort('${start}') AND timestamp <= parseDateTimeBestEffort('${end}') AND source='postgres_logs' ORDER BY timestamp ASC LIMIT 200`
+          const url = new URL(endpoint)
+          url.searchParams.set('sql', sql)
+          url.searchParams.set('iso_timestamp_start', start)
+          url.searchParams.set('iso_timestamp_end', end)
+          const response = await fetch(url, {headers:{authorization:`Bearer ${token}`,accept:'application/json'},signal:AbortSignal.timeout(60_000)})
+          const parsed = JSON.parse(await response.text())
+          if (!response.ok || (typeof parsed?.error === 'string' && parsed.error)) throw new Error(`logs query failed:${response.status}:${String(parsed?.error ?? '')}`)
+          const rows = Array.isArray(parsed?.result) ? parsed.result : []
+          function attrs(row) { try { return JSON.parse(String(row.attributes_json ?? '{}')) } catch { return {} } }
+          function sanitize(value) {
+            return String(value ?? '')
+              .replaceAll(project, '[project]')
+              .replaceAll(token, '[access-token]')
+              .replace(/Bearer\s+[A-Za-z0-9._-]{12,}/giu, 'Bearer [redacted]')
+              .replace(/sbp_[A-Za-z0-9_-]{12,}/gu, 'sbp_[redacted]')
+              .replace(/postgres(?:ql)?:\/\/[^\s"']+/giu, 'postgres://[redacted]')
+          }
+          const useful = /(error|fatal|panic|statement|duration|command|query|sql|function|detail|hint|context|message|user|role|application|connection|session)/iu
+          function safeRow(row) {
+            const a = attrs(row)
+            return {
+              timestamp: sanitize(row.timestamp),
+              eventMessage: sanitize(row.event_message),
+              severity: sanitize(row.severity_text),
+              attributes: Object.fromEntries(Object.entries(a)
+                .filter(([key]) => useful.test(key) && !/(password|secret|token|authorization|apikey)/iu.test(key))
+                .map(([key,value]) => [sanitize(key), sanitize(value)])),
+            }
+          }
+          const evidence = {schemaVersion:1,purpose:'r4f-qualification-postgres-readonly-diagnostic',targetRun:31598361794,interval:{start,end},readOnlyManagementApi:true,productionMutationPerformed:false,rows:rows.map(safeRow)}
+          const output = `${JSON.stringify(evidence,null,2)}\n`
+          if (output.includes(project) || output.includes(token)) throw new Error('sanitization failed')
+          if (/Bearer\s+[A-Za-z0-9._-]{12,}|sbp_[A-Za-z0-9_-]{12,}|postgres(?:ql)?:\/\//u.test(output)) throw new Error('credential-shaped material retained')
+          await writeFile('r4f-proof-log-diagnostic.json', output)
+          console.log(output)
+          NODE
 
       - name: Upload sanitized diagnostic
         uses: actions/upload-artifact@v4
