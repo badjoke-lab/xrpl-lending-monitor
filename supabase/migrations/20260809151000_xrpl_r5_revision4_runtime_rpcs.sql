@@ -237,7 +237,7 @@ declare
   v_definition text;
   v_clone text;
   v_old_selection constant text :=
-    '13a313d9d0679c512b59f9931d733dcb3217ec8e1cc6e74a36125a0354b667';
+    '13a313d9d0679c7c512b59f9931d733dcb3217ec8e1cc6e74a36125a0354b667';
   v_old_digest constant text :=
     '3a5c4ff2c43a48d3e5b7ceded60027173d215d6f083fb33c22375758520bbe67';
   v_new_digest constant text :=
@@ -250,8 +250,8 @@ begin
 
   if position('public.xrpl_prepare_r5_active_recovery(' in v_definition) = 0
     or position('v_checkpoint.profile_revision <> 3' in v_definition) = 0
-    or position(v_old_digest in v_definition) = 0
-    or position(v_old_selection in v_definition) = 0 then
+    or strpos(v_definition, v_old_digest) = 0
+    or strpos(v_definition, v_old_selection) = 0 then
     raise exception 'r5_revision4_prepare_source_drift';
   end if;
 
@@ -275,7 +275,7 @@ begin
 
   if position('public.xrpl_prepare_r5_revision4_active_recovery(' in v_clone) = 0
     or position('v_checkpoint.profile_revision <> 4' in v_clone) = 0
-    or position(v_old_selection in v_clone) <> 0
+    or strpos(v_clone, v_old_selection) <> 0
     or position(E'''supabase_free_postgres_pgcron_edge'', 4,' in v_clone) = 0 then
     raise exception 'r5_revision4_prepare_clone_invalid';
   end if;
@@ -294,7 +294,7 @@ declare
   v_definition text;
   v_clone text;
   v_old_selection constant text :=
-    '13a313d9d0679c512b59f9931d733dcb3217ec8e1cc6e74a36125a0354b667';
+    '13a313d9d0679c7c512b59f9931d733dcb3217ec8e1cc6e74a36125a0354b667';
   v_old_digest constant text :=
     '3a5c4ff2c43a48d3e5b7ceded60027173d215d6f083fb33c22375758520bbe67';
   v_new_digest constant text :=
@@ -306,7 +306,7 @@ begin
   select pg_get_functiondef(v_signature) into v_definition;
   if position('public.xrpl_rebind_r5_prebatch_recovery_to_active_boundary(' in v_definition) = 0
     or position('v_run.profile_revision <> 3' in v_definition) = 0
-    or position(v_old_selection in v_definition) = 0 then
+    or strpos(v_definition, v_old_selection) = 0 then
     raise exception 'r5_revision4_rebind_source_drift';
   end if;
 
@@ -325,7 +325,7 @@ begin
 
   if position('public.xrpl_rebind_r5_revision4_prebatch_recovery_to_active_boundary(' in v_clone) = 0
     or position('v_run.profile_revision <> 4' in v_clone) = 0
-    or position(v_old_selection in v_clone) <> 0 then
+    or strpos(v_clone, v_old_selection) <> 0 then
     raise exception 'r5_revision4_rebind_clone_invalid';
   end if;
   execute v_clone;
@@ -448,7 +448,7 @@ begin
   if position('public.xrpl_claim_r5_revision4_recovery_batch(' in v_clone) = 0
     or position('v_run.profile_revision <> 4' in v_clone) = 0
     or position('v_reserved constant bigint := 16777216' in v_clone) = 0
-    or position(v_old_selection in v_clone) <> 0
+    or strpos(v_clone, v_old_selection) <> 0
     or position(E'''supabase_free_postgres_pgcron_edge'', 4,' in v_clone) = 0 then
     raise exception 'r5_revision4_claim_clone_invalid';
   end if;
@@ -517,7 +517,7 @@ begin
     or position('v_run.profile_revision <> 4' in v_clone) = 0
     or position('public.xrpl_claim_r5_revision4_recovery_batch(' in v_clone) = 0
     or position('public.xrpl_adopt_r5_revision4_committed_active_descendants(' in v_clone) = 0
-    or position(v_old_selection in v_clone) <> 0 then
+    or strpos(v_clone, v_old_selection) <> 0 then
     raise exception 'r5_revision4_progressive_claim_clone_invalid';
   end if;
 
