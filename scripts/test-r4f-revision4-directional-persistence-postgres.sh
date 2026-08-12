@@ -110,6 +110,9 @@ test -s "${output_directory}/candidate-evidence-export.sql"
 grep -q 'directional_accounting_evidence' "${output_directory}/candidate-evidence-export.sql"
 grep -q 'directional_accounting_observations' "${output_directory}/candidate-evidence-export.sql"
 
+R4F_POSTGRES_CONTAINER="$container_name" \
+  bash scripts/test-r4f-revision4-qualification-compact-checkpoint-postgres.sh
+
 cat > "${output_directory}/summary.md" <<'EOF'
 ## R4F revision-4 G2D PostgreSQL integration
 
@@ -121,6 +124,8 @@ cat > "${output_directory}/summary.md" <<'EOF'
 - exact idempotent replay: `true`
 - conflicting observation identity rejected: `true`
 - reader reconciliation: `true`
+- compact qualification checkpoint SQL executed locally: `true`
+- compact checkpoint exact replay converged: `true`
 - public-role privilege leak: `false`
 - deterministic candidate export retained: `true`
 - recovery mutation committed: `false`

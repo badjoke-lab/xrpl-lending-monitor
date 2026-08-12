@@ -10,14 +10,17 @@ qualifier='scripts/qualify-supabase-revision4-r5-accounting.mjs'
 capture='scripts/capture-supabase-revision4-r5-accounting-qualification.mjs'
 prepare='scripts/prepare-r4f-g3-isolated-window.mjs'
 workflow='.github/workflows/r4f-revision4-12-ledger-qualification.yml'
+checkpoint_sql='scripts/r4f-revision4-qualification-compact-checkpoint.sql'
+compact_checkpoint_contract='scripts/test-r4f-revision4-qualification-compact-checkpoint.sh'
 
-for path in "$runtime" "$egress" "$evidence" "$wrapper" "$executor" "$qualifier" "$capture" "$prepare" "$workflow"; do
+for path in "$runtime" "$egress" "$evidence" "$wrapper" "$executor" "$qualifier" "$capture" "$prepare" "$workflow" "$checkpoint_sql" "$compact_checkpoint_contract"; do
   test -f "$path" || { echo "missing contract file: $path" >&2; exit 1; }
 done
 
 test "$(git hash-object "$runtime")" = '350238cec920446faa036cbf225b35683bcd4b54'
 test "$(git hash-object "$egress")" = '96d8d478174866355ee798500e3eff83634a442d'
 test "$(git hash-object "$evidence")" = '2a986ba2872aead52119563fc43d8d49c1211949'
+bash "$compact_checkpoint_contract"
 
 grep -Fq 'strpos(v_definition, v_old_digest) = 0' "$runtime"
 grep -Fq 'strpos(v_definition, v_old_selection) = 0' "$runtime"
@@ -73,6 +76,7 @@ grep -Fq 'REQUIRED_LEDGER_COUNT = 12' "$qualifier"
 
 grep -Fq "PROOF_FUNCTION: 'xrpl-r4f-revision4-proof-batch'" "$workflow"
 grep -Fq "ACTIVE_FUNCTION: 'xrpl-r5-recovery-batch'" "$workflow"
+grep -Fq "CHECKPOINT_SQL_PATH: 'scripts/r4f-revision4-qualification-compact-checkpoint.sql'" "$workflow"
 grep -Fq "MAX_LEDGER_COUNT: '12'" "$workflow"
 grep -Fq "MAX_PER_LEDGER_BYTES: '4581'" "$workflow"
 grep -Fq "MAX_TOTAL_BYTES: '54972'" "$workflow"
@@ -80,12 +84,15 @@ grep -Fq "github.event.comment.body == '/r4f-revision4-12-ledger-prepare'" "$wor
 grep -Fq "startsWith(github.event.comment.body, '/r4f-revision4-12-ledger-authorize ')" "$workflow"
 grep -Fq "test \"\$(git hash-object \"\$RUNTIME_PATH\")\" = '350238cec920446faa036cbf225b35683bcd4b54'" "$workflow"
 grep -Fq "expires=\"\$(date -u -d '+2 hours' '+%Y-%m-%dT%H:%M:%SZ')\"" "$workflow"
+grep -Fq 'checkpoint=${checkpoint_sha}' "$workflow"
+grep -Fq 'checkpoint=([a-f0-9]{64})' "$workflow"
 grep -Fq 'prepare_source=${PREPARE_SOURCE_SHA}' "$workflow"
 grep -Fq 'prepare_source=([a-f0-9]{64})' "$workflow"
 grep -Fq 'migration_state=applied_clean prepare_run=${GITHUB_RUN_ID}' "$workflow"
 grep -Fq 'migration_state=applied_clean prepare_run=([0-9]+)' "$workflow"
 grep -Fq 'Migration state: `applied_clean`' "$workflow"
 grep -Fq 'Revision-3 runtime source-set SHA-256' "$workflow"
+grep -Fq 'Qualification compact-checkpoint SQL SHA-256' "$workflow"
 grep -Fq 'checkpointRev4Exists' "$workflow"
 grep -Fq 'rebindStrictRev4Exists' "$workflow"
 grep -Fq 'egressPolicyRows' "$workflow"
@@ -111,8 +118,19 @@ grep -Fq 'generated proof bundle retains a relative import' "$workflow"
 grep -Fq "bundle.includes('cloudflare:')" "$workflow"
 grep -Fq "bundle.includes('Deno.serve')" "$workflow"
 grep -Fq 'sourceSha256 !== authorizedFunctionSha' "$workflow"
+grep -Fq 'AUTHORIZED_CHECKPOINT_SHA' "$workflow"
+grep -Fq 'invalid compact checkpoint id' "$workflow"
+grep -Fq 'unresolved compact checkpoint template token' "$workflow"
+grep -Fq '.checkpointKind == "revision4-qualification-boundary"' "$workflow"
+grep -Fq '.qualificationBoundaryOnly == true' "$workflow"
+grep -Fq '.fullRecoveryStateCaptured == false' "$workflow"
 grep -Fq 'supabase functions deploy "$PROOF_FUNCTION" --project-ref "$SUPABASE_PROJECT_ID" --use-api --no-verify-jwt' "$workflow"
 grep -Fq 'supabase functions delete "$PROOF_FUNCTION"' "$workflow"
+
+if grep -Fq "checkpoint_query=\"select public.xrpl_create_r5_revision4_active_checkpoint" "$workflow"; then
+  echo 'qualification workflow still invokes the unbounded full-state checkpoint path' >&2
+  exit 1
+fi
 
 test "$(grep -Fxc '      - name: Set up Supabase CLI' "$workflow")" -eq 1
 test "$(grep -Fxc '      - name: Set up pinned Bun for proof prebundle' "$workflow")" -eq 1
