@@ -17,49 +17,18 @@ jobs:
       SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
       SOURCE_COMMIT: '18dd9151f779ecaffee7e7580f1c972eef29ba3e'
     steps:
-      - name: Validate compact checkpoint read-side and target schema read-only
+      - name: Validate active checkpoint target schema read-only
         shell: bash
         run: |
           set -euo pipefail
           test -n "$SUPABASE_ACCESS_TOKEN"
           [[ "$SUPABASE_PROJECT_ID" =~ ^[a-z]{20}$ ]]
-          curl --fail-with-body --silent --show-error \
-            "https://raw.githubusercontent.com/badjoke-lab/xrpl-lending-monitor/${SOURCE_COMMIT}/scripts/r4f-revision4-qualification-compact-checkpoint.sql" \
-            > /tmp/checkpoint.sql
           node --input-type=module <<'NODE'
-          import { readFileSync, writeFileSync } from 'node:fs'
+          import { writeFileSync } from 'node:fs'
           const token=process.env.SUPABASE_ACCESS_TOKEN??''
           const project=process.env.SUPABASE_PROJECT_ID??''
           const sourceCommit=process.env.SOURCE_COMMIT??''
-          let sql=readFileSync('/tmp/checkpoint.sql','utf8')
-          const replacements=new Map([
-            ['__CHECKPOINT_ID__','r5-checkpoint-revision4-proof-99999999999'],
-            ['__SELECTION_DIGEST__','99a1f97fc17ed6023bc3075bffe963a260e99a4ed0e2d831b068826c7797222f'],
-            ['__OBSERVED_AT__','2026-08-12T14:00:00.000Z'],
-          ])
-          for(const [key,value] of replacements){
-            if(!sql.includes(key)) throw new Error(`missing token ${key}`)
-            sql=sql.replaceAll(key,value)
-          }
-          if(/__[A-Z0-9_]+__/u.test(sql)) throw new Error('unresolved token')
-          const marker=',\ninserted as ('
-          const markerIndex=sql.indexOf(marker)
-          if(markerIndex<0) throw new Error('inserted CTE marker missing')
-          const readSide=sql.slice(0,markerIndex)+`\nselect\n  state_digest,\n  watermark_ledger_index,\n  watermark_ledger_hash,\n  watermark_work_id,\n  row_counts,\n  section_digests\nfrom checkpoint_payload;`
           const endpoint=`https://api.supabase.com/v1/projects/${project}/database/query`
-          async function query(queryText){
-            const response=await fetch(endpoint,{
-              method:'POST',
-              headers:{authorization:`Bearer ${token}`,'content-type':'application/json',accept:'application/json'},
-              body:JSON.stringify({query:queryText,read_only:true}),
-              signal:AbortSignal.timeout(60_000),
-            })
-            const text=await response.text()
-            if(!response.ok) throw new Error(`read-only query failed:${response.status}:${text.slice(0,2000)}`)
-            const parsed=JSON.parse(text)
-            return Array.isArray(parsed)?parsed:Array.isArray(parsed?.result)?parsed.result:[]
-          }
-          const planRows=await query(`EXPLAIN (VERBOSE, COSTS OFF) ${readSide}`)
           const schemaSql=`
           with columns as (
             select column_name,data_type,udt_name,is_nullable,ordinal_position
@@ -80,33 +49,45 @@ jobs:
             'constraints',(select jsonb_agg(to_jsonb(constraints) order by conname) from constraints)
           ) as value;
           `.trim()
-          const schemaRows=await query(schemaSql)
-          const schemaValue=schemaRows?.[0]?.value??schemaRows?.[0]?.VALUE??null
+          const response=await fetch(endpoint,{
+            method:'POST',
+            headers:{authorization:`Bearer ${token}`,'content-type':'application/json',accept:'application/json'},
+            body:JSON.stringify({query:schemaSql,read_only:true}),
+            signal:AbortSignal.timeout(60_000),
+          })
+          const text=await response.text()
+          if(!response.ok) throw new Error(`read-only schema query failed:${response.status}:${text.slice(0,2000)}`)
+          const parsed=JSON.parse(text)
+          const rows=Array.isArray(parsed)?parsed:Array.isArray(parsed?.result)?parsed.result:[]
+          const schemaValue=rows?.[0]?.value??rows?.[0]?.VALUE??null
           if(!schemaValue) throw new Error('target schema evidence unavailable')
-          const expectedColumns=[
-            'checkpoint_id','profile_id','profile_revision','profile_identity_digest','selection_digest',
-            'source_profile_id','network','epoch_id','base_identity','watermark_ledger_index',
-            'watermark_ledger_hash','watermark_work_id','observed_at','state_digest','row_counts',
-            'section_digests','state'
-          ]
-          const actualColumns=new Set((schemaValue.columns??[]).map(c=>c.column_name))
-          const missing=expectedColumns.filter(name=>!actualColumns.has(name))
+          const expectedTypes=new Map([
+            ['checkpoint_id','text'],['profile_id','text'],['profile_revision','integer'],
+            ['profile_identity_digest','text'],['selection_digest','text'],['source_profile_id','text'],
+            ['network','text'],['epoch_id','text'],['base_identity','text'],['watermark_ledger_index','bigint'],
+            ['watermark_ledger_hash','text'],['watermark_work_id','text'],['observed_at','timestamp with time zone'],
+            ['state_digest','text'],['row_counts','jsonb'],['section_digests','jsonb'],['state','jsonb'],
+          ])
+          const byName=new Map((schemaValue.columns??[]).map(c=>[c.column_name,c]))
+          const missing=[...expectedTypes.keys()].filter(name=>!byName.has(name))
           if(missing.length) throw new Error(`active_checkpoints missing columns:${missing.join(',')}`)
+          const typeMismatches=[]
+          for(const [name,type] of expectedTypes){
+            if(String(byName.get(name)?.data_type)!==type) typeMismatches.push(`${name}:${byName.get(name)?.data_type}`)
+          }
+          if(typeMismatches.length) throw new Error(`active_checkpoints type mismatch:${typeMismatches.join(',')}`)
           const conflictConstraint=(schemaValue.constraints??[]).find(c=>
             (c.contype==='p'||c.contype==='u') && Array.isArray(c.columns) && c.columns.length===1 && c.columns[0]==='checkpoint_id'
           )
           if(!conflictConstraint) throw new Error('checkpoint_id unique/primary constraint unavailable')
           const output={
-            schemaVersion:2,
-            purpose:'r4f-compact-checkpoint-production-schema-validation-readonly',
+            schemaVersion:3,
+            purpose:'r4f-compact-checkpoint-target-schema-validation-readonly',
             sourceCommit,
             readOnlyManagementApi:true,
-            explainOnly:true,
-            analyze:false,
             productionMutationPerformed:false,
-            readSidePlanned:true,
-            planRowCount:planRows.length,
             expectedInsertColumnsPresent:true,
+            expectedInsertColumnTypesMatch:true,
             checkpointIdConflictConstraint:true,
             checkpointIdConstraintName:String(conflictConstraint.conname??''),
             checkpointIdConstraintType:String(conflictConstraint.contype??''),
