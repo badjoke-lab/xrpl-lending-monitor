@@ -20,6 +20,7 @@ for required in \
   '__XRPL_R5_REVISION4_PROOF_RUNTIME_CONFIG__' \
   'selectionDigest:' \
   'unexplainedEgressReserveBytes: 0' \
+  "requestSource: 'github_actions_prepared_resume'" \
   "await import('../xrpl-r5-recovery-batch/index.ts')"
 do
   grep -Fq "$required" "$wrapper" || { echo "proof wrapper missing resume runtime requirement: $required" >&2; exit 1; }
@@ -32,6 +33,10 @@ fi
 for required in \
   '__XRPL_R5_REVISION4_PROOF_RUNTIME_CONFIG__' \
   'function qualificationRuntimeOverride()' \
+  "requestSource: 'github_actions_prepared_resume'" \
+  'function requestSource(): string' \
+  "qualificationRuntimeOverride()?.requestSource ?? 'github_actions'" \
+  'body.source !== requestSource()' \
   "env('XRPL_R5_REVISION4_SELECTION_DIGEST')" \
   "env('XRPL_R5_REVISION4_UNEXPLAINED_EGRESS_RESERVE_BYTES')" \
   'xrpl_claim_r5_revision4_recovery_batch_from_prepared_head' \
@@ -72,7 +77,7 @@ for required in \
   'progressive claim must rebind the prepared run to the current active boundary before reservation' \
   'Reverify bound prepared residue after pause read-only' \
   'Resume exact prepared run with one 12-ledger proof invocation' \
-  'source:"github_actions"' \
+  'source:"github_actions_prepared_resume"' \
   'bun-version: 1.3.14' \
   'generated proof bundle contains unsupported Edge environment mutation' \
   '__XRPL_R5_REVISION4_PROOF_RUNTIME_CONFIG__' \
