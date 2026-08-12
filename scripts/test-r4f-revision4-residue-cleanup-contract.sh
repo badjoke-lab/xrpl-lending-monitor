@@ -44,7 +44,7 @@ do
   grep -Fq "$required" "$script"
 done
 
-test "$(grep -c '^    .drop function public\.xrpl_.*revision4.*;$' "$script")" -eq 6
+test "$(grep -c \"^    'drop function public\\.xrpl_.*revision4.*;',$\" "$script")" -eq 6
 
 for required in \
   "github.event.comment.body == '/r4f-revision4-residue-cleanup-prepare'" \
