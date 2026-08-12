@@ -1,0 +1,86 @@
+name: Temporary R4F Prebatch Residue Diagnostic
+
+on:
+  push:
+    branches:
+      - agent/r4f-compact-500-diagnostic
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+    steps:
+      - name: Read exact qualification prebatch residue and reclaim surface
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/diagnostic.sql <<'SQL'
+          with target_run as (
+            select * from xrpl_r5_v1.recovery_runs
+            where run_id='r5-recovery-selected-revision4-entry'
+          ), target_checkpoint as (
+            select c.* from xrpl_r5_v1.active_checkpoints c
+            join target_run r on r.checkpoint_id=c.checkpoint_id
+          )
+          select jsonb_build_object(
+            'run', (select to_jsonb(r) from target_run r),
+            'checkpoint', (select jsonb_build_object(
+              'checkpointId',c.checkpoint_id,
+              'profileRevision',c.profile_revision,
+              'profileIdentityDigest',c.profile_identity_digest,
+              'selectionDigest',c.selection_digest,
+              'sourceProfileId',c.source_profile_id,
+              'network',c.network,
+              'epochId',c.epoch_id,
+              'watermarkLedgerIndex',c.watermark_ledger_index,
+              'watermarkLedgerHash',c.watermark_ledger_hash,
+              'watermarkWorkId',c.watermark_work_id,
+              'observedAt',c.observed_at,
+              'stateDigest',c.state_digest,
+              'purpose',c.state->>'purpose',
+              'checks',c.state->'checks'
+            ) from target_checkpoint c),
+            'batchCount',(select count(*) from xrpl_r5_v1.recovery_batches b join target_run r on r.run_id=b.run_id),
+            'evidenceCount',(select count(*) from xrpl_r5_v1.revision4_accounting_qualification_evidence where qualification_key='r4f-revision4-r5-12-ledger-accounting-v1'),
+            'referencingConstraints',(
+              select coalesce(jsonb_agg(jsonb_build_object(
+                'constraint',con.conname,
+                'sourceTable',src.relname,
+                'targetTable',tgt.relname,
+                'definition',pg_get_constraintdef(con.oid)
+              ) order by src.relname,con.conname),'[]'::jsonb)
+              from pg_constraint con
+              join pg_class src on src.oid=con.conrelid
+              join pg_class tgt on tgt.oid=con.confrelid
+              join pg_namespace ns on ns.oid=src.relnamespace
+              where con.contype='f'
+                and (con.confrelid='xrpl_r5_v1.recovery_runs'::regclass
+                  or con.confrelid='xrpl_r5_v1.active_checkpoints'::regclass)
+            ),
+            'candidateReclaimFunctions',(
+              select coalesce(jsonb_agg(jsonb_build_object(
+                'name',p.proname,
+                'args',pg_get_function_identity_arguments(p.oid)
+              ) order by p.proname),'[]'::jsonb)
+              from pg_proc p
+              join pg_namespace n on n.oid=p.pronamespace
+              where n.nspname='public'
+                and (p.proname ilike '%recovery%' or p.proname ilike '%checkpoint%')
+                and (p.proname ilike '%abort%' or p.proname ilike '%cancel%' or p.proname ilike '%delete%' or p.proname ilike '%cleanup%' or p.proname ilike '%reclaim%' or p.proname ilike '%reset%')
+            )
+          ) as diagnostic;
+          SQL
+          query="$(cat /tmp/diagnostic.sql)"
+          jq -n --arg query "$query" '{query:$query,parameters:[],read_only:true}' > /tmp/query.json
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+            -H 'content-type: application/json' \
+            --data @/tmp/query.json \
+            "https://api.supabase.com/v1/projects/${SUPABASE_PROJECT_ID}/database/query" > /tmp/result.json
+          jq -c '.. | objects | .diagnostic? // empty' /tmp/result.json | head -n1
