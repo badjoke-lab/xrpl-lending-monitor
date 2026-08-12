@@ -1,5 +1,5 @@
-export { parseValidatedLedgerResult } from './validated-ledger-parser.ts'
+export { parseValidatedLedgerResult } from './validated-ledger-parser'
 export type {
   ValidatedLedgerRead,
   ValidatedLedgerTransaction,
-} from './validated-ledger-parser.ts'
+} from './validated-ledger-parser'
