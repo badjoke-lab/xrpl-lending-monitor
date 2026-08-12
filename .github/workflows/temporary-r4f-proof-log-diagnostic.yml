@@ -15,9 +15,9 @@ jobs:
     env:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
-      CAPTURE_START: '2026-08-12T12:51:40Z'
-      CAPTURE_END: '2026-08-12T12:53:55Z'
-      TARGET_PATH: '/functions/v1/xrpl-r4f-revision4-proof-batch'
+      CAPTURE_START: '2026-08-12T12:50:00Z'
+      CAPTURE_END: '2026-08-12T12:54:30Z'
+      TARGET_SLUG: 'xrpl-r4f-revision4-proof-batch'
     steps:
       - name: Query exact read-only Edge log interval
         shell: bash
@@ -32,9 +32,9 @@ jobs:
           const project = process.env.SUPABASE_PROJECT_ID ?? ''
           const start = process.env.CAPTURE_START ?? ''
           const end = process.env.CAPTURE_END ?? ''
-          const targetPath = process.env.TARGET_PATH ?? ''
+          const targetSlug = process.env.TARGET_SLUG ?? ''
           if (!token || !/^[a-z]{20}$/u.test(project)) throw new Error('Supabase credentials unavailable')
-          if (!start || !end || !targetPath) throw new Error('diagnostic bounds unavailable')
+          if (!start || !end || !targetSlug) throw new Error('diagnostic bounds unavailable')
           const endpoint = `https://api.supabase.com/v1/projects/${project}/analytics/endpoints/logs`
 
           async function query(sql) {
@@ -53,6 +53,16 @@ jobs:
             return Array.isArray(parsed?.result) ? parsed.result : Array.isArray(parsed) ? parsed : []
           }
 
+          const sourceCountSql = `
+          SELECT source, count() AS event_count
+          FROM logs
+          WHERE timestamp >= parseDateTimeBestEffort('${start}')
+            AND timestamp <= parseDateTimeBestEffort('${end}')
+          GROUP BY source
+          ORDER BY source
+          LIMIT 100
+          `.trim()
+
           const edgeSql = `
           SELECT
             timestamp,
@@ -69,9 +79,8 @@ jobs:
           WHERE timestamp >= parseDateTimeBestEffort('${start}')
             AND timestamp <= parseDateTimeBestEffort('${end}')
             AND source = 'function_edge_logs'
-            AND log_attributes['request.path'] LIKE '%${targetPath}'
           ORDER BY timestamp ASC
-          LIMIT 50
+          LIMIT 1000
           `.trim()
 
           const runtimeSql = `
@@ -90,11 +99,16 @@ jobs:
           LIMIT 1000
           `.trim()
 
-          const [edgeRows, runtimeRows] = await Promise.all([query(edgeSql), query(runtimeSql)])
+          const [sourceCounts, allEdgeRows, runtimeRows] = await Promise.all([
+            query(sourceCountSql), query(edgeSql), query(runtimeSql),
+          ])
 
           function parseAttrs(row) {
             try { return JSON.parse(String(row.attributes_json ?? '{}')) } catch { return {} }
           }
+          const edgeRows = allEdgeRows.filter((row) =>
+            String(row.path ?? '').includes(targetSlug) || String(row.event_message ?? '').includes(targetSlug),
+          )
           const targetIds = new Set()
           for (const row of edgeRows) {
             const attrs = parseAttrs(row)
@@ -128,14 +142,23 @@ jobs:
               .filter(([key]) => interestingKey.test(key))
               .map(([key, value]) => [sanitizeString(key), sanitizeString(value)]))
           }
+          const pathSummary = new Map()
+          for (const row of allEdgeRows) {
+            const key = `${sanitizeString(row.path)}|${Number(row.status ?? 0)}`
+            pathSummary.set(key, (pathSummary.get(key) ?? 0) + 1)
+          }
           const evidence = {
-            schemaVersion: 1,
+            schemaVersion: 2,
             purpose: 'r4f-revision4-proof-log-readonly-diagnostic',
             targetRun: 31598361794,
             interval: { start, end },
-            targetPath,
+            targetSlug,
             readOnlyManagementApi: true,
             productionMutationPerformed: false,
+            sourceCounts: sourceCounts.map((row) => ({
+              source: sanitizeString(row.source), eventCount: Number(row.event_count ?? 0),
+            })),
+            functionEdgePathSummary: [...pathSummary.entries()].map(([key, count]) => ({ key, count })),
             edgeRows: edgeRows.map((row) => ({
               timestamp: sanitizeString(row.timestamp),
               eventMessage: sanitizeString(row.event_message),
@@ -160,11 +183,7 @@ jobs:
             throw new Error('credential-shaped material retained')
           }
           await writeFile('r4f-proof-log-diagnostic.json', output)
-          console.log(JSON.stringify({
-            edgeRows: evidence.edgeRows,
-            targetIdentifiers: evidence.targetIdentifiers,
-            runtimeRows: evidence.runtimeRows,
-          }, null, 2))
+          console.log(JSON.stringify(evidence, null, 2))
           NODE
 
       - name: Upload sanitized diagnostic
