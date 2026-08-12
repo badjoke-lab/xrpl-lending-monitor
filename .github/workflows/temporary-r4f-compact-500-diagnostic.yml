@@ -1,0 +1,57 @@
+name: Temporary R4F Compact 500 Diagnostic
+
+on:
+  push:
+    branches:
+      - agent/r4f-compact-500-diagnostic
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+    steps:
+      - name: Read bounded Postgres logs and revision-4 residue only
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SUPABASE_PROJECT_ID" =~ ^[a-z]{20}$ ]]
+
+          sql="select timestamp, severity_text, event_message from logs where source = 'postgres_logs' order by timestamp asc limit 200"
+          curl --fail-with-body --silent --show-error --get \
+            -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+            --data-urlencode 'iso_timestamp_start=2026-08-12T16:24:40Z' \
+            --data-urlencode 'iso_timestamp_end=2026-08-12T16:24:55Z' \
+            --data-urlencode "sql=${sql}" \
+            "https://api.supabase.com/v1/projects/${SUPABASE_PROJECT_ID}/analytics/endpoints/logs" \
+            > /tmp/postgres-logs.json
+          jq -e '.error == null or .error == ""' /tmp/postgres-logs.json > /dev/null
+          echo '--- postgres logs ---'
+          jq -c '.result[]? | {timestamp, severity_text, event_message}' /tmp/postgres-logs.json
+
+          cat > /tmp/state.sql <<'SQL'
+          select jsonb_build_object(
+            'checkpointRows',(select count(*) from xrpl_r5_v1.active_checkpoints where profile_revision=4),
+            'runRows',(select count(*) from xrpl_r5_v1.recovery_runs where profile_revision=4),
+            'batchRows',(select count(*) from xrpl_r5_v1.recovery_batches where profile_revision=4),
+            'runIdRows',(select count(*) from xrpl_r5_v1.recovery_runs where run_id='r5-recovery-selected-revision4-entry'),
+            'evidenceRows',(select count(*) from xrpl_r5_v1.revision4_accounting_qualification_evidence where qualification_key='r4f-revision4-r5-12-ledger-accounting-v1'),
+            'collectorRuntime',(select jsonb_build_object('status',status,'leaseOwner',lease_owner,'leaseExpiresAt',lease_expires_at,'lastError',last_error,'consecutiveFailures',consecutive_failures,'lastValidatedLedgerIndex',last_validated_ledger_index,'tickCount',tick_count) from public.xrpl_collector_runtime where profile_id='supabase-devnet'),
+            'schedulerJobs',(select coalesce(jsonb_agg(jsonb_build_object('jobid',jobid,'jobname',jobname,'schedule',schedule,'active',active) order by jobid),'[]'::jsonb) from cron.job where jobname in ('xrpl-lending-monitor-minute') or jobname like 'xrpl-g3-isolation-watchdog-%')
+          ) as state;
+          SQL
+          query="$(cat /tmp/state.sql)"
+          jq -n --arg query "$query" '{query:$query,parameters:[],read_only:true}' > /tmp/state-query.json
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+            -H 'content-type: application/json' \
+            --data @/tmp/state-query.json \
+            "https://api.supabase.com/v1/projects/${SUPABASE_PROJECT_ID}/database/query" \
+            > /tmp/state.json
+          echo '--- current state ---'
+          jq -c '.. | objects | .state? // empty' /tmp/state.json | head -n1
