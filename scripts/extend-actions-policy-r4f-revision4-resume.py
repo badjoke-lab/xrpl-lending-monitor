@@ -18,8 +18,8 @@ def replace_once(name: str, old: str, new: str) -> None:
 
 replace_once(
     'revision4 resume workflow allowlist entry',
-    '  r4f-revision4-partial-state-probe.yml\n  r4f-revision4-residue-cleanup.yml\n  r5-bounded-recovery-burst.yml',
-    '  r4f-revision4-partial-state-probe.yml\n  r4f-revision4-residue-cleanup.yml\n  r4f-revision4-12-ledger-resume.yml\n  r5-bounded-recovery-burst.yml',
+    '  r4f-revision4-12-ledger-qualification.yml\n  r4f-revision4-partial-state-probe.yml\n  r4f-revision4-residue-cleanup.yml',
+    '  r4f-revision4-12-ledger-qualification.yml\n  r4f-revision4-12-ledger-resume.yml\n  r4f-revision4-partial-state-probe.yml\n  r4f-revision4-residue-cleanup.yml',
 )
 replace_once(
     'revision4 resume workflow count',
