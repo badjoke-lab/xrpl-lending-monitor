@@ -21,9 +21,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p diagnostic
-          rg -n --hidden \
-            --glob '!node_modules/**' \
-            --glob '!.git/**' \
+          grep -R -n -E \
+            --exclude-dir=.git \
+            --exclude-dir=node_modules \
             '(xrpl_read_r5_active_checkpoint|xrpl_create_r5_active_checkpoint|xrpl_create_r5_revision4_active_checkpoint|xrpl_r5_v1\.active_checkpoints|checkpoint_state_digest|stateDigest)' \
             . > diagnostic/checkpoint-consumers.txt || true
           python - <<'PY'
@@ -36,14 +36,7 @@ jobs:
               path,lineno,text=m.groups()
               rows.append({'path':path.removeprefix('./'),'line':int(lineno),'text':text.strip()[:500]})
           paths=sorted({r['path'] for r in rows})
-          evidence={
-            'schemaVersion':1,
-            'purpose':'r5-checkpoint-repository-consumer-audit',
-            'productionMutationPerformed':False,
-            'matchCount':len(rows),
-            'paths':paths,
-            'matches':rows,
-          }
+          evidence={'schemaVersion':1,'purpose':'r5-checkpoint-repository-consumer-audit','productionMutationPerformed':False,'matchCount':len(rows),'paths':paths,'matches':rows}
           pathlib.Path('diagnostic/r4f-proof-log-diagnostic.json').write_text(json.dumps(evidence,indent=2)+'\n')
           print(json.dumps({'matchCount':len(rows),'paths':paths},indent=2))
           PY
