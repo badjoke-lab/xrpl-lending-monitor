@@ -19,6 +19,18 @@ export const SUPABASE_REVISION4_PROFILE = {
 export const SUPABASE_REVISION4_PROFILE_IDENTITY_DIGEST =
   '39e8b620a20bb08fbe8306fe753d4d445c5191bcafddbf67721e0c17d5b6bcd5'
 
+export const SUPABASE_REVISION4_G3_SOURCE_BACKED_BILLING_AMENDMENT = {
+  schemaVersion: 1,
+  qualificationIssue: 1261,
+  authorityDate: '2026-08-13',
+  providerMeasurementResult: 'provider_surface_unqualifiable',
+  sourceBackedClassification:
+    'same-project Edge Function to Database/PostgREST/Supavisor traffic remains internal to the Supabase platform and is excluded from rolling billable egress while remaining fully counted by memory and transport guards',
+  inferenceBoundary:
+    'Supabase does not explicitly document this exact Edge-to-PostgREST path; the classification follows the current connected-client/platform-exit egress definition and the documented internal Database-to-Realtime non-egress example',
+  unchangedGuards: true,
+} as const
+
 const MIB = 1024 * 1024
 const GIB = 1024 * MIB
 
@@ -49,6 +61,7 @@ export type SupabaseRevision4PlatformDirection =
 
 export type SupabaseRevision4RollingEgressTreatment =
   | 'exclude_inbound'
+  | 'exclude_provider_internal_source_backed'
   | 'include_documented_outbound'
   | 'include_conservative_until_g3'
 
@@ -60,7 +73,10 @@ export interface SupabaseRevision4ByteBoundaryContract {
   rollingEgressTreatment: SupabaseRevision4RollingEgressTreatment
   countsTowardMemoryTransport: true
   countsTowardRollingBillableEgressUpperBound: boolean
-  qualificationState: 'locked_g1' | 'requires_g3_reconciliation'
+  qualificationState:
+    | 'locked_g1'
+    | 'requires_g3_reconciliation'
+    | 'resolved_source_backed_after_g3_unqualifiable'
   rationale: string
 }
 
@@ -121,24 +137,24 @@ export const SUPABASE_REVISION4_BYTE_BOUNDARIES: Record<
     source: 'Supabase Edge Function',
     destination: 'Supabase Database, PostgREST, or Supavisor',
     platformDirection: 'internal_or_unresolved',
-    rollingEgressTreatment: 'include_conservative_until_g3',
+    rollingEgressTreatment: 'exclude_provider_internal_source_backed',
     countsTowardMemoryTransport: true,
-    countsTowardRollingBillableEgressUpperBound: true,
-    qualificationState: 'requires_g3_reconciliation',
+    countsTowardRollingBillableEgressUpperBound: false,
+    qualificationState: 'resolved_source_backed_after_g3_unqualifiable',
     rationale:
-      'The request remains within the selected provider architecture, but its billing treatment must be reconciled rather than assumed free.',
+      'G3 could not isolate provider billing counters. Under the current Supabase connected-client/platform-exit egress definition, this same-project provider-internal request is excluded from rolling billable egress; its full bytes remain in memory and transport accounting.',
   },
   database_to_edge_response: {
     id: 'database_to_edge_response',
     source: 'Supabase Database, PostgREST, or Supavisor',
     destination: 'Supabase Edge Function',
     platformDirection: 'internal_or_unresolved',
-    rollingEgressTreatment: 'include_conservative_until_g3',
+    rollingEgressTreatment: 'exclude_provider_internal_source_backed',
     countsTowardMemoryTransport: true,
-    countsTowardRollingBillableEgressUpperBound: true,
-    qualificationState: 'requires_g3_reconciliation',
+    countsTowardRollingBillableEgressUpperBound: false,
+    qualificationState: 'resolved_source_backed_after_g3_unqualifiable',
     rationale:
-      'Supabase documents database data sent to clients as egress, but the exact treatment of an Edge Function inside the same project requires G3 reconciliation.',
+      'G3 could not isolate provider billing counters. Under the current Supabase connected-client/platform-exit egress definition, this same-project provider-internal response is excluded from rolling billable egress; its full bytes remain in memory and transport accounting.',
   },
   edge_to_edge_request: {
     id: 'edge_to_edge_request',
