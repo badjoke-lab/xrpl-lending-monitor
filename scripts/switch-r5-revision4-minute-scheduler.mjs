@@ -198,7 +198,6 @@ const oldCommand = decodeOldCommand(watchdogs[0].command)
 const newCommand = buildNewCommand(oldCommand)
 const newCommandDigest = sha256(newCommand)
 let newJobId = null
-let switched = false
 
 try {
   newJobId = await schedule(newCommand)
@@ -209,7 +208,6 @@ try {
   }
   if ((await readWatchdogs()).length !== 0) throw new Error('watchdog remained after successful switch')
   await verifyNewJob(newJobId, newCommandDigest)
-  switched = true
 } catch (error) {
   const recoveryErrors = []
   if (newJobId !== null) {
@@ -235,7 +233,10 @@ try {
     recoveryErrors.push(watchdogError instanceof Error ? watchdogError.message : String(watchdogError))
   }
   const original = error instanceof Error ? error.message : String(error)
-  throw new Error(recoveryErrors.length > 0 ? `${original}; restore errors:${recoveryErrors.join(';')}` : original)
+  throw new Error(
+    recoveryErrors.length > 0 ? `${original}; restore errors:${recoveryErrors.join(';')}` : original,
+    { cause: error },
+  )
 }
 
 const verified = await verifyNewJob(newJobId, newCommandDigest)
@@ -245,7 +246,7 @@ const evidence = {
   sourceRunId,
   sourceCommit,
   projectIdentityDigest,
-  switched,
+  switched: true,
   schedule: collectorSchedule,
   jobName: collectorJobName,
   oldCommandDigest: expectedCommandDigest,
