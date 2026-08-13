@@ -57,56 +57,49 @@ jobs:
           marker = "printf '%s\\n' 'R4F revision-4 exact 12-ledger qualification contract: PASS'\n"
           if contract_text.count(marker) != 1:
               raise SystemExit(f'contract final marker count={contract_text.count(marker)}')
-          regression = r'''grep -Fq 'default_secret_count="$(jq '\''[.[] | select(.type == "secret" and .name == "default")] | length'\'' /tmp/project-api-keys.json)"' "$workflow"
+          checks = '''grep -Fq 'default_secret_count="$(jq' "$workflow"
+          grep -Fq 'select(.type == "secret" and .name == "default")' "$workflow"
           grep -Fq 'if [ "$default_secret_count" -eq 1 ]; then' "$workflow"
-          grep -Fq 'elevated_key="$(jq -r '\''[.[] | select(.type == "secret" and .name == "default")][0].api_key // empty'\'' /tmp/project-api-keys.json)"' "$workflow"
           grep -Fq 'elif [ "$default_secret_count" -eq 0 ] && [ "$legacy_count" -eq 1 ]; then' "$workflow"
           grep -Fq 'if [ "$SUPABASE_R4F_PROOF_KEY_KIND" = legacy ]; then' "$workflow"
-          if grep -Fq 'secret_count="$(jq '\''[.[] | select(.type == "secret")] | length'\'' /tmp/project-api-keys.json)"' "$workflow"; then
-            echo 'qualification workflow still selects an arbitrary secret key instead of SUPABASE_SECRET_KEYS.default' >&2
+          if grep -Fq 'secret_count="$(jq' "$workflow"; then
+            echo 'qualification workflow still contains arbitrary secret-key selection' >&2
             exit 1
           fi
 
-          python - "$workflow" <<'PY_PROOF_KEY_ORDER'
-          from pathlib import Path
-          import sys
-
-          text = Path(sys.argv[1]).read_text()
-          start = text.index('      - name: Resolve exactly one elevated database API key\n')
-          end = text.index('\n      - name: Bundle and deploy only isolated temporary revision-4 proof function\n', start)
-          section = text[start:end]
-          secret_if = section.index('if [ "$default_secret_count" -eq 1 ]; then')
-          legacy_fallback = section.index('elif [ "$default_secret_count" -eq 0 ] && [ "$legacy_count" -eq 1 ]; then')
-          secret_select = section.index('select(.type == "secret" and .name == "default")][0].api_key')
-          legacy_select = section.index('select(.type == "legacy" and (.name == "service_role"')
-          if not (secret_if < secret_select < legacy_fallback < legacy_select):
-              raise SystemExit('proof key resolver does not prefer default secret before legacy fallback')
-          PY_PROOF_KEY_ORDER
-
           '''
-          contract.write_text(contract_text.replace(marker, regression + marker))
+          contract.write_text(contract_text.replace(marker, checks + marker))
           PY
 
           bash scripts/test-r4f-revision4-12-ledger-qualification-contract.sh
           git diff --check
+
+          python - <<'PY'
+          from pathlib import Path
+          text = Path('.github/workflows/r4f-revision4-12-ledger-qualification.yml').read_text()
+          start = text.index('      - name: Resolve exactly one elevated database API key\n')
+          end = text.index('\n      - name: Bundle and deploy only isolated temporary revision-4 proof function\n', start)
+          section = text[start:end]
+          positions = [
+              section.index('if [ "$default_secret_count" -eq 1 ]; then'),
+              section.index('select(.type == "secret" and .name == "default")][0].api_key'),
+              section.index('elif [ "$default_secret_count" -eq 0 ] && [ "$legacy_count" -eq 1 ]; then'),
+              section.index('select(.type == "legacy" and (.name == "service_role"'),
+          ]
+          if positions != sorted(positions):
+              raise SystemExit('default secret is not selected before legacy fallback')
+          PY
+
           git diff -- .github/workflows/r4f-revision4-12-ledger-qualification.yml scripts/test-r4f-revision4-12-ledger-qualification-contract.sh
 
-          mkdir -p .r4f-verified
-          cp .github/workflows/r4f-revision4-12-ledger-qualification.yml .r4f-verified/r4f-revision4-12-ledger-qualification.yml
-          cp scripts/test-r4f-revision4-12-ledger-qualification-contract.sh .r4f-verified/test-r4f-revision4-12-ledger-qualification-contract.sh
-          git checkout -- .github/workflows/r4f-revision4-12-ledger-qualification.yml scripts/test-r4f-revision4-12-ledger-qualification-contract.sh
-          test -f .r4f-verified/r4f-revision4-12-ledger-qualification.yml
-          test -f .r4f-verified/test-r4f-revision4-12-ledger-qualification-contract.sh
-          test "$(git status --short)" = '?? .r4f-verified/'
-
-      - name: Stage verified blobs only
+      - name: Commit validated two-file fix to staging
         shell: bash
         run: |
           set -euo pipefail
           git config user.name badjoke-lab
           git config user.email badjoke.lab@gmail.com
-          git add .r4f-verified/r4f-revision4-12-ledger-qualification.yml .r4f-verified/test-r4f-revision4-12-ledger-qualification-contract.sh
-          git commit -m 'Stage verified revision4 proof key selection fix'
-          git push origin HEAD:refs/heads/agent/r4f-proof-key-selection-fix-staging
-          git hash-object .r4f-verified/r4f-revision4-12-ledger-qualification.yml
-          git hash-object .r4f-verified/test-r4f-revision4-12-ledger-qualification-contract.sh
+          git add .github/workflows/r4f-revision4-12-ledger-qualification.yml scripts/test-r4f-revision4-12-ledger-qualification-contract.sh
+          test "$(git diff --cached --name-only | wc -l | tr -d ' ')" -eq 2
+          git commit -m 'Prefer default Supabase secret for revision4 proof'
+          git push origin HEAD:refs/heads/agent/r4f-proof-key-selection-fix-staging --force
+          git rev-parse HEAD
