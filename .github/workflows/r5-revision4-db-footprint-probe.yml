@@ -18,7 +18,7 @@ jobs:
       github.event.issue.number == 1261 &&
       github.event.comment.user.login == 'badjoke-lab' &&
       (github.event.comment.body == '/r5-revision4-db-footprint-probe' ||
-       github.event.comment.body == '/r5-revision4-cron-log-preflight')
+       github.event.comment.body == 'R5 database footprint read-only preflight')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
