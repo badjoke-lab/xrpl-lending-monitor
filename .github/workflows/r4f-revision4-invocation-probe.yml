@@ -1,0 +1,255 @@
+name: R4F Revision4 Invocation Probe
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: r4f-revision4-invocation-probe
+  cancel-in-progress: false
+
+env:
+  QUALIFICATION_ISSUE: '1261'
+  INVOCATION_HALT_31D: '400000'
+  SNAPSHOT_MAX_AGE_SECONDS: '90000'
+
+jobs:
+  probe:
+    if: >-
+      github.event.issue.number == 1261 &&
+      github.event.comment.user.login == 'badjoke-lab' &&
+      github.event.comment.body == '/r4f-revision4-invocation-probe'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out exact current main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Capture current official function invocation statistics read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SUPABASE_PROJECT_ID" =~ ^[a-z]{20}$ ]]
+          test -n "$SUPABASE_ACCESS_TOKEN"
+          test -f scripts/record-supabase-runtime-resource-log-snapshot.mjs
+          rm -rf supabase-remote-probe-evidence r4f-revision4-invocation-probe
+          mkdir -p r4f-revision4-invocation-probe
+          node scripts/record-supabase-runtime-resource-log-snapshot.mjs
+          cp supabase-remote-probe-evidence/runtime-resource-log-snapshot.json \
+            r4f-revision4-invocation-probe/current-provider-invocations.json
+
+      - name: Read retained invocation snapshot and internal attempt counts
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/invocation-state.sql <<'SQL'
+          with latest as (
+            select projected_invocations_31d::bigint as projected_invocations_31d,
+                   observed_at
+            from xrpl_resource_guard_v1.external_snapshots
+            order by observed_at desc, snapshot_id desc
+            limit 1
+          ), counts as (
+            select
+              (select count(*)::bigint
+               from xrpl_resource_guard_v2.attempts
+               where started_at >= now() - interval '31 days'
+                 and started_at <= now()) as steady_attempt_count_31d,
+              (select count(*)::bigint
+               from xrpl_r5_v1.recovery_batches
+               where claimed_at >= now() - interval '31 days'
+                 and claimed_at <= now()) as recovery_attempt_count_31d
+          )
+          select jsonb_build_object(
+            'snapshotPresent', latest.observed_at is not null,
+            'snapshotProjectedInvocations31d', latest.projected_invocations_31d,
+            'snapshotObservedAt', latest.observed_at,
+            'snapshotAgeSeconds', case
+              when latest.observed_at is null then null
+              else floor(extract(epoch from (now() - latest.observed_at)))::bigint
+            end,
+            'steadyAttemptCount31d', counts.steady_attempt_count_31d,
+            'recoveryAttemptCount31d', counts.recovery_attempt_count_31d,
+            'internalProjectedInvocations31d',
+              (counts.steady_attempt_count_31d + counts.recovery_attempt_count_31d + 1) * 2
+          ) as state
+          from counts
+          left join latest on true;
+          SQL
+          query="$(cat /tmp/invocation-state.sql)"
+          jq -n --arg query "$query" '{query:$query,parameters:[],read_only:true}' > /tmp/invocation-state-query.json
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+            -H 'content-type: application/json' \
+            --data @/tmp/invocation-state-query.json \
+            "https://api.supabase.com/v1/projects/${SUPABASE_PROJECT_ID}/database/query" \
+            > r4f-revision4-invocation-probe/retained-invocation-state.json
+
+      - name: Evaluate current invocation halt cause
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs'
+
+          const runtime = JSON.parse(readFileSync(
+            'r4f-revision4-invocation-probe/current-provider-invocations.json',
+            'utf8',
+          ))
+          const db = JSON.parse(readFileSync(
+            'r4f-revision4-invocation-probe/retained-invocation-state.json',
+            'utf8',
+          ))
+          const findState = (value) => {
+            if (Array.isArray(value)) {
+              for (const entry of value) {
+                const found = findState(entry)
+                if (found !== undefined) return found
+              }
+              return undefined
+            }
+            if (value && typeof value === 'object') {
+              if (Object.prototype.hasOwnProperty.call(value, 'state')) return value.state
+              for (const entry of Object.values(value)) {
+                const found = findState(entry)
+                if (found !== undefined) return found
+              }
+            }
+            return undefined
+          }
+          const state = findState(db)
+          if (!state || typeof state !== 'object' || Array.isArray(state)) {
+            throw new Error('read-only database query returned no invocation state')
+          }
+          const integer = (value, name) => {
+            const parsed = Number(value)
+            if (!Number.isSafeInteger(parsed) || parsed < 0) throw new Error(`${name} is invalid`)
+            return parsed
+          }
+          const halt = integer(process.env.INVOCATION_HALT_31D, 'INVOCATION_HALT_31D')
+          const maxAge = integer(process.env.SNAPSHOT_MAX_AGE_SECONDS, 'SNAPSHOT_MAX_AGE_SECONDS')
+          const invocationCount24h = integer(runtime.invocationCount24h, 'runtime.invocationCount24h')
+          const currentProjectedInvocations31d = invocationCount24h * 31
+          if (!Number.isSafeInteger(currentProjectedInvocations31d)) {
+            throw new Error('current projected invocation count exceeds safe integer range')
+          }
+          const snapshotPresent = state.snapshotPresent === true
+          const snapshotAgeSeconds = snapshotPresent
+            ? integer(state.snapshotAgeSeconds, 'snapshotAgeSeconds')
+            : null
+          const snapshotProjectedInvocations31d = snapshotPresent
+            ? integer(state.snapshotProjectedInvocations31d, 'snapshotProjectedInvocations31d')
+            : null
+          const internalProjectedInvocations31d = integer(
+            state.internalProjectedInvocations31d,
+            'internalProjectedInvocations31d',
+          )
+          const snapshotFresh = snapshotPresent && snapshotAgeSeconds <= maxAge
+          const claimProviderInvocations31d = snapshotFresh
+            ? snapshotProjectedInvocations31d
+            : halt
+          const claimProjectedInvocations31d = Math.max(
+            claimProviderInvocations31d,
+            internalProjectedInvocations31d,
+          )
+          const verdict = {
+            schemaVersion: 1,
+            purpose: 'r4f-revision4-current-invocation-read-only-probe',
+            sourceRunId: Number(process.env.GITHUB_RUN_ID),
+            sourceCommit: process.env.GITHUB_SHA,
+            measuredAt: new Date().toISOString(),
+            providerSource: 'functions.combined-stats',
+            activeFunctionCount: integer(runtime.functionCount, 'runtime.functionCount'),
+            invocationCount24h,
+            currentProjectedInvocations31d,
+            invocationHalt31d: halt,
+            snapshotMaxAgeSeconds: maxAge,
+            snapshotPresent,
+            snapshotObservedAt: state.snapshotObservedAt ?? null,
+            snapshotAgeSeconds,
+            snapshotProjectedInvocations31d,
+            snapshotFresh,
+            steadyAttemptCount31d: integer(state.steadyAttemptCount31d, 'steadyAttemptCount31d'),
+            recoveryAttemptCount31d: integer(state.recoveryAttemptCount31d, 'recoveryAttemptCount31d'),
+            internalProjectedInvocations31d,
+            claimProviderInvocations31d,
+            claimProjectedInvocations31d,
+            currentProviderProjectionBelowHalt: currentProjectedInvocations31d < halt,
+            internalProjectionBelowHalt: internalProjectedInvocations31d < halt,
+            claimWouldHalt: claimProjectedInvocations31d >= halt,
+            staleSnapshotForcesHalt:
+              !snapshotFresh
+              && currentProjectedInvocations31d < halt
+              && internalProjectedInvocations31d < halt,
+            productionMutation: false,
+          }
+          writeFileSync(
+            'r4f-revision4-invocation-probe/verdict.json',
+            `${JSON.stringify(verdict, null, 2)}\n`,
+          )
+          console.log(JSON.stringify(verdict))
+          NODE
+
+      - name: Upload sanitized invocation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r4f-revision4-invocation-read-only-probe
+          path: r4f-revision4-invocation-probe
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Publish sanitized invocation verdict
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -s r4f-revision4-invocation-probe/verdict.json ]; then
+            cat > /tmp/invocation-probe.md <<EOF
+          ## R4F revision-4 invocation read-only probe — FAILED
+
+          - workflow run: \`${GITHUB_RUN_ID}\`
+          - source commit: \`${GITHUB_SHA}\`
+          - production mutation: \`none\`
+          - result: \`failed before sanitized verdict generation\`
+          EOF
+          else
+            v='r4f-revision4-invocation-probe/verdict.json'
+            cat > /tmp/invocation-probe.md <<EOF
+          ## R4F revision-4 invocation read-only probe
+
+          - workflow run: \`${GITHUB_RUN_ID}\`
+          - source commit: \`${GITHUB_SHA}\`
+          - provider source: \`$(jq -r '.providerSource' "$v")\`
+          - active functions: \`$(jq -r '.activeFunctionCount' "$v")\`
+          - current provider invocations 24h: \`$(jq -r '.invocationCount24h' "$v")\`
+          - current 24h x 31 projection: \`$(jq -r '.currentProjectedInvocations31d' "$v")\`
+          - fixed 31d halt: \`$(jq -r '.invocationHalt31d' "$v")\`
+          - latest retained snapshot observed at: \`$(jq -r '.snapshotObservedAt' "$v")\`
+          - latest retained snapshot age seconds: \`$(jq -r '.snapshotAgeSeconds' "$v")\`
+          - retained snapshot projection: \`$(jq -r '.snapshotProjectedInvocations31d' "$v")\`
+          - snapshot fresh within 25h: \`$(jq -r '.snapshotFresh' "$v")\`
+          - steady attempts 31d: \`$(jq -r '.steadyAttemptCount31d' "$v")\`
+          - recovery attempts 31d: \`$(jq -r '.recoveryAttemptCount31d' "$v")\`
+          - internal projected invocations: \`$(jq -r '.internalProjectedInvocations31d' "$v")\`
+          - claim provider value under current SQL: \`$(jq -r '.claimProviderInvocations31d' "$v")\`
+          - claim projected value under current SQL: \`$(jq -r '.claimProjectedInvocations31d' "$v")\`
+          - claim would halt: \`$(jq -r '.claimWouldHalt' "$v")\`
+          - stale snapshot forces halt while current projections are below halt: \`$(jq -r '.staleSnapshotForcesHalt' "$v")\`
+          - production mutation: \`none\`
+          - collector pause/deploy/Mainnet/public-reader/stabilization/soak: \`none\`
+          EOF
+          fi
+          gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/invocation-probe.md
