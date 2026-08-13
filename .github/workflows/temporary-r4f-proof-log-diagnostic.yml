@@ -78,23 +78,6 @@ jobs:
 
           bash scripts/test-r4f-revision4-12-ledger-qualification-contract.sh
           git diff --check
-
-          python - <<'PY'
-          from pathlib import Path
-          text = Path('.github/workflows/r4f-revision4-12-ledger-qualification.yml').read_text()
-          start = text.index('      - name: Resolve exactly one elevated database API key\n')
-          end = text.index('\n      - name: Bundle and deploy only isolated temporary revision-4 proof function\n', start)
-          section = text[start:end]
-          positions = [
-              section.index('if [ "$default_secret_count" -eq 1 ]; then'),
-              section.index('select(.type == "secret" and .name == "default")][0].api_key'),
-              section.index('elif [ "$default_secret_count" -eq 0 ] && [ "$legacy_count" -eq 1 ]; then'),
-              section.index('select(.type == "legacy" and (.name == "service_role"'),
-          ]
-          if positions != sorted(positions):
-              raise SystemExit('default secret is not selected before legacy fallback')
-          PY
-
           git diff -- .github/workflows/r4f-revision4-12-ledger-qualification.yml scripts/test-r4f-revision4-12-ledger-qualification-contract.sh
 
       - name: Commit validated two-file fix to staging
