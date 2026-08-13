@@ -13,40 +13,85 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Check out failing PR head
+      - name: Check out exact current main
         uses: actions/checkout@v4
         with:
-          ref: 04786b1f9fd4c90fd3fa817929dcf015bd4d589f
+          ref: 95565cf97d9d8486e63c6038a3fe002e7933a9c0
           fetch-depth: 1
 
-      - name: Remove broken aligned-output parser only
+      - name: Patch and validate candidate shell
         shell: bash
         run: |
           set -euo pipefail
           python - <<'PY'
           from pathlib import Path
-          path = Path('scripts/test-r4f-revision4-qualification-compact-checkpoint-postgres.sh')
-          text = path.read_text()
-          old = '''result_json="$(sed -n '/^{/,$p' /tmp/r4f-compact-checkpoint-result.txt | tr -d '\\n' | sed 's/^ *//;s/ *$//')"
-          test -n "$result_json"
+
+          workflow = Path('.github/workflows/r4f-revision4-12-ledger-qualification.yml')
+          text = workflow.read_text()
+          old = "            writeFileSync('/tmp/checkpoint-query.sql', query)\n            NODE\n            checkpoint_query=\"$(cat /tmp/checkpoint-query.sql)\""
+          new = "            writeFileSync('/tmp/checkpoint-query.sql', query)\n          NODE\n            checkpoint_query=\"$(cat /tmp/checkpoint-query.sql)\""
+          if text.count(old) != 1:
+              raise SystemExit(f'candidate heredoc defect count={text.count(old)}')
+          workflow.write_text(text.replace(old, new))
+
+          contract = Path('scripts/test-r4f-revision4-12-ledger-qualification-contract.sh')
+          contract_text = contract.read_text()
+          marker = "printf '%s\\n' 'R4F revision-4 exact 12-ledger qualification contract: PASS'\n"
+          if contract_text.count(marker) != 1:
+              raise SystemExit(f'contract final marker count={contract_text.count(marker)}')
+          regression = r'''python - "$workflow" <<'PY_CANDIDATE_SHELL'
+          from pathlib import Path
+          import subprocess
+          import sys
+          import tempfile
+
+          workflow_text = Path(sys.argv[1]).read_text()
+          start_marker = '      - name: Execute exactly one production-shaped 12-ledger candidate batch\n'
+          end_marker = '\n      - name: Restore exact collector immediately after candidate attempt\n'
+          if workflow_text.count(start_marker) != 1 or workflow_text.count(end_marker) != 1:
+              raise SystemExit('candidate step markers drifted')
+          section = workflow_text.split(start_marker, 1)[1].split(end_marker, 1)[0]
+          run_marker = '        run: |\n'
+          if section.count(run_marker) != 1:
+              raise SystemExit('candidate run block marker drifted')
+          shell_block = section.split(run_marker, 1)[1]
+          shell_lines = []
+          for line in shell_block.splitlines():
+              if line:
+                  if not line.startswith('          '):
+                      raise SystemExit(f'candidate shell line lost YAML indentation: {line!r}')
+                  shell_lines.append(line[10:])
+              else:
+                  shell_lines.append('')
+          with tempfile.NamedTemporaryFile('w', suffix='.sh', delete=False) as handle:
+              handle.write('\n'.join(shell_lines) + '\n')
+              shell_path = handle.name
+          subprocess.run(['bash', '-n', shell_path], check=True)
+          PY_CANDIDATE_SHELL
 
           '''
-          # The source lines are not indented. Normalize the literal accordingly.
-          old = old.replace('          ', '')
-          if text.count(old) != 1:
-              raise SystemExit(f'broken parser block count={text.count(old)}')
-          path.write_text(text.replace(old, ''))
+          regression = regression.replace('          ', '')
+          contract.write_text(contract_text.replace(marker, regression + marker))
           PY
-          git diff --check
-          git diff -- scripts/test-r4f-revision4-qualification-compact-checkpoint-postgres.sh
 
-      - name: Commit script-only fix
+          bash scripts/test-r4f-revision4-12-ledger-qualification-contract.sh
+          git diff --check
+          git diff -- .github/workflows/r4f-revision4-12-ledger-qualification.yml scripts/test-r4f-revision4-12-ledger-qualification-contract.sh
+
+          mkdir -p .r4f-verified
+          cp .github/workflows/r4f-revision4-12-ledger-qualification.yml .r4f-verified/r4f-revision4-12-ledger-qualification.yml
+          cp scripts/test-r4f-revision4-12-ledger-qualification-contract.sh .r4f-verified/test-r4f-revision4-12-ledger-qualification-contract.sh
+          git checkout -- .github/workflows/r4f-revision4-12-ledger-qualification.yml scripts/test-r4f-revision4-12-ledger-qualification-contract.sh
+          test "$(git status --short | wc -l | tr -d ' ')" -eq 2
+
+      - name: Stage verified blobs only
         shell: bash
         run: |
           set -euo pipefail
           git config user.name badjoke-lab
           git config user.email badjoke.lab@gmail.com
-          git add scripts/test-r4f-revision4-qualification-compact-checkpoint-postgres.sh
-          git commit -m 'Fix compact checkpoint integration assertion'
-          git push origin HEAD:refs/heads/agent/r4f-compact-test-parser-fix-staging
-          git rev-parse HEAD
+          git add .r4f-verified/r4f-revision4-12-ledger-qualification.yml .r4f-verified/test-r4f-revision4-12-ledger-qualification-contract.sh
+          git commit -m 'Stage verified revision4 candidate shell fix'
+          git push origin HEAD:refs/heads/agent/r4f-heredoc-fix-staging
+          git hash-object .r4f-verified/r4f-revision4-12-ledger-qualification.yml
+          git hash-object .r4f-verified/test-r4f-revision4-12-ledger-qualification-contract.sh
