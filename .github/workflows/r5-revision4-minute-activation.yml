@@ -14,8 +14,8 @@ concurrency:
 
 env:
   QUALIFICATION_ISSUE: '1261'
-  TARGET_MIGRATION_VERSION: '20260813060000'
-  TARGET_MIGRATION_PATH: supabase/migrations/20260813060000_xrpl_r5_revision4_continuous_head.sql
+  TARGET_MIGRATION_VERSION: '20260813072000'
+  TARGET_MIGRATION_PATH: supabase/migrations/20260813072000_xrpl_r5_revision4_continuous_head_rebind_fix.sql
   R5_FUNCTION: xrpl-r5-recovery-batch
   R5_FUNCTION_PATH: supabase/functions/xrpl-r5-recovery-batch/index.ts
   MINUTE_FUNCTION: xrpl-r5-minute-driver
@@ -62,7 +62,7 @@ jobs:
             r5-revision4-minute-activation-evidence/state-before.json
           test "${{ env.INVOCATION_HALT_31D }}" = '400000'
           jq -e \
-            '.resourceSnapshot.fresh == true and .resourceSnapshot.projectedInvocations31d < 400000 and .migration.targetApplied == false and .mainnetDisabled == true' \
+            '.resourceSnapshot.fresh == true and .resourceSnapshot.projectedInvocations31d < 400000 and .migration.targetApplied == false and .migration.currentMaxVersion == "20260813060000" and .mainnetDisabled == true' \
             r5-revision4-minute-activation-evidence/state-before.json >/dev/null
           test "${{ steps.scheduler.outputs.project_digest }}" = "$(jq -r '.projectIdentityDigest' r5-revision4-minute-activation-evidence/state-before.json)"
 
@@ -173,7 +173,7 @@ jobs:
           actual_project_digest="$(printf '%s' "$SUPABASE_PROJECT_ID" | sha256sum | awk '{print $1}')"
           test "${BASH_REMATCH[9]}" = "$actual_project_digest"
           test "${BASH_REMATCH[14]}" -lt "$INVOCATION_HALT_31D"
-          test "${BASH_REMATCH[18]}" = '20260811061000'
+          test "${BASH_REMATCH[18]}" = '20260813060000'
           expires_epoch="$(date -u -d "${BASH_REMATCH[20]}" +%s)"
           auth_epoch="$(date -u -d "$AUTHORIZATION_CREATED_AT" +%s)"
           now_epoch="$(date -u +%s)"
@@ -224,7 +224,7 @@ jobs:
           test "$(jq -r '.resourceSnapshot.projectedInvocations31d' r5-revision4-minute-activation-evidence/state-recheck.json)" = "$EXPECTED_PROJECTED"
           test "$(jq -r '.run.currentWatermarkLedgerIndex' r5-revision4-minute-activation-evidence/state-recheck.json)" = "$EXPECTED_RUN_WATERMARK"
           test "$(jq -r '.activeWatermark.ledgerIndex' r5-revision4-minute-activation-evidence/state-recheck.json)" -ge "$ACTIVE_FLOOR"
-          jq -e '.resourceSnapshot.fresh == true and .resourceSnapshot.projectedInvocations31d < 400000' r5-revision4-minute-activation-evidence/state-recheck.json >/dev/null
+          jq -e '.resourceSnapshot.fresh == true and .resourceSnapshot.projectedInvocations31d < 400000 and .migration.targetApplied == false and .migration.currentMaxVersion == "20260813060000"' r5-revision4-minute-activation-evidence/state-recheck.json >/dev/null
           # provider_snapshot_stale and r5_recovery_monthly_invocation_halt remain fail-closed states.
           # Production Management API mutations below are explicitly read_only:false; all state checks above are read_only:true.
 
@@ -253,7 +253,7 @@ jobs:
         run: |
           set -euo pipefail
           node scripts/inspect-r5-revision4-minute-state.mjs r5-revision4-minute-activation-evidence/state-paused.json
-          jq -e '.resourceSnapshot.fresh == true and .migration.targetApplied == false' r5-revision4-minute-activation-evidence/state-paused.json >/dev/null
+          jq -e '.resourceSnapshot.fresh == true and .migration.targetApplied == false and .migration.currentMaxVersion == "20260813060000"' r5-revision4-minute-activation-evidence/state-paused.json >/dev/null
 
       - name: Apply exactly one continuous-head migration
         env:
