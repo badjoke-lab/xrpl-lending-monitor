@@ -17,7 +17,8 @@ jobs:
     if: >-
       github.event.issue.number == 1261 &&
       github.event.comment.user.login == 'badjoke-lab' &&
-      github.event.comment.body == '/r5-revision4-db-footprint-probe'
+      (github.event.comment.body == '/r5-revision4-db-footprint-probe' ||
+       github.event.comment.body == '/r5-revision4-cron-log-preflight')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
@@ -63,6 +64,7 @@ jobs:
             group by schema_name
           ), cron_state as (
             select
+              'cron.job_run_details'::regclass::oid::bigint as relation_oid,
               count(*)::bigint as exact_rows,
               pg_total_relation_size('cron.job_run_details'::regclass)::bigint as total_bytes,
               pg_relation_size('cron.job_run_details'::regclass)::bigint as heap_bytes,
@@ -96,6 +98,7 @@ jobs:
             ), '[]'::jsonb),
             'cronJobRunDetails', (
               select jsonb_build_object(
+                'relationOid', relation_oid,
                 'exactRows', exact_rows,
                 'totalBytes', total_bytes,
                 'heapBytes', heap_bytes,
@@ -138,6 +141,7 @@ jobs:
             (.databaseBytes | type == "number") and
             (.schemas | type == "array") and
             (.topRelations | type == "array") and
+            (.cronJobRunDetails.relationOid | type == "number") and
             (.cronJobRunDetails.exactRows | type == "number") and
             (.cronJobRunDetails.totalBytes | type == "number") and
             (.cronJobRunDetails.foreignKeyConstraints | type == "number") and
@@ -162,6 +166,7 @@ jobs:
           headroom_bytes="$(jq -r '.databaseHeadroomBytes' "$f")"
           top_schemas="$(jq -r '[.schemas[:8][] | (.schema + "=" + (.totalBytes|tostring) + "B")] | join(", ")' "$f")"
           top_relations="$(jq -r '[.topRelations[:12][] | (.schema + "." + .relation + "=" + (.totalBytes|tostring) + "B")] | join("\n- ")' "$f")"
+          cron_oid="$(jq -r '.cronJobRunDetails.relationOid' "$f")"
           cron_exact_rows="$(jq -r '.cronJobRunDetails.exactRows' "$f")"
           cron_total_bytes="$(jq -r '.cronJobRunDetails.totalBytes' "$f")"
           cron_dead_rows="$(jq -r '.cronJobRunDetails.estimatedDeadRows' "$f")"
@@ -177,7 +182,7 @@ jobs:
           Headroom: \`${headroom_bytes}\`
           Top schemas: ${top_schemas}
 
-          Exact cron.job_run_details preflight: rows=\`${cron_exact_rows}\`, size=\`${cron_total_bytes} B\`, estimated dead rows=\`${cron_dead_rows}\`, FK constraints=\`${cron_fks}\`, user triggers=\`${cron_triggers}\`.
+          Exact cron.job_run_details preflight: oid=\`${cron_oid}\`, rows=\`${cron_exact_rows}\`, size=\`${cron_total_bytes} B\`, estimated dead rows=\`${cron_dead_rows}\`, FK constraints=\`${cron_fks}\`, user triggers=\`${cron_triggers}\`.
 
           Top relations:
           - ${top_relations}
