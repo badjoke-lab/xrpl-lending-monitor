@@ -27,8 +27,6 @@ const SUPPORTED_BOUNDARIES = new Set([
 const BILLABLE_BOUNDARIES = new Set([
   'edge_to_invoker_response',
   'edge_to_xrpl_request',
-  'edge_to_database_request',
-  'database_to_edge_response',
   'edge_to_edge_request',
   'edge_to_edge_response',
 ])
