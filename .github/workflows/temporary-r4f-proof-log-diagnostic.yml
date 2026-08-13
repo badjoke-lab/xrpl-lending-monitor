@@ -81,7 +81,9 @@ jobs:
           cp .github/workflows/r4f-revision4-12-ledger-qualification.yml .r4f-verified/r4f-revision4-12-ledger-qualification.yml
           cp scripts/test-r4f-revision4-12-ledger-qualification-contract.sh .r4f-verified/test-r4f-revision4-12-ledger-qualification-contract.sh
           git checkout -- .github/workflows/r4f-revision4-12-ledger-qualification.yml scripts/test-r4f-revision4-12-ledger-qualification-contract.sh
-          test "$(git status --short | wc -l | tr -d ' ')" -eq 2
+          test -f .r4f-verified/r4f-revision4-12-ledger-qualification.yml
+          test -f .r4f-verified/test-r4f-revision4-12-ledger-qualification-contract.sh
+          test "$(git status --short)" = '?? .r4f-verified/'
 
       - name: Stage verified blobs only
         shell: bash
