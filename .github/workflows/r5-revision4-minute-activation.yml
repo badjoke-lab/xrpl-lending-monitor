@@ -57,14 +57,22 @@ jobs:
         id: state
         run: |
           set -euo pipefail
-          # Management API inspection is read_only:true only.
           node scripts/inspect-r5-revision4-minute-state.mjs \
             r5-revision4-minute-activation-evidence/state-before.json
           test "${{ env.INVOCATION_HALT_31D }}" = '400000'
           jq -e \
-            '.resourceSnapshot.fresh == true and .resourceSnapshot.projectedInvocations31d < 400000 and .migration.targetApplied == false and .migration.currentMaxVersion == "20260813060000" and .mainnetDisabled == true' \
+            '.resourceSnapshot.fresh == true and .resourceSnapshot.projectedInvocations31d < 400000 and .migration.targetApplied == true and .migration.migrationState == "applied_verified" and .migration.currentMaxVersion == "20260813072000" and .mainnetDisabled == true' \
             r5-revision4-minute-activation-evidence/state-before.json >/dev/null
           test "${{ steps.scheduler.outputs.project_digest }}" = "$(jq -r '.projectIdentityDigest' r5-revision4-minute-activation-evidence/state-before.json)"
+
+      - name: Verify exact applied follow-up provenance read-only
+        run: |
+          set -euo pipefail
+          node scripts/verify-r5-revision4-minute-followup.mjs \
+            r5-revision4-minute-activation-evidence/followup-before.json
+          jq -e \
+            '.historyExact == true and .functionContractVerified == true and .resourceGuardUnchanged == true and .currentMaxMigrationVersion == "20260813072000" and .mainnetDisabled == true' \
+            r5-revision4-minute-activation-evidence/followup-before.json >/dev/null
 
       - name: Verify migration history shape read-only
         run: |
@@ -116,8 +124,9 @@ jobs:
           Projected invocations: \`${PROJECTED_31D} / 400000\` per 31d halt
           Retained R5 watermark: \`${RUN_WATERMARK}\`
           Current canonical watermark floor: \`${ACTIVE_WATERMARK}\` (drift \`${BOUNDARY_DRIFT}\` ledgers; any later drift must be descendant-chain reproved after pause)
+          Applied follow-up migration: \`${TARGET_MIGRATION_VERSION}\` (exact repository SHA marker and function contract verified read-only)
 
-          The authorized operation is bounded to one target migration \`${TARGET_MIGRATION_VERSION}\`, deployment of \`${R5_FUNCTION}\` and \`${MINUTE_FUNCTION}\`, one manual Devnet smoke, and replacement of the existing Supabase pg_cron endpoint while retaining the exact \`* * * * *\` schedule. Any failed smoke keeps/restores the old collector. Resource guards remain fail-closed.
+          The authorized operation performs no migration write. It is bounded to read-only re-verification of the already-applied follow-up, deployment of \`${R5_FUNCTION}\` and \`${MINUTE_FUNCTION}\`, one manual Devnet smoke, and replacement of the existing Supabase pg_cron endpoint while retaining the exact \`* * * * *\` schedule. Any failed smoke keeps/restores the old collector. Resource guards remain fail-closed.
 
           No Mainnet, stabilization, soak, or history reduction is authorized by this operation.
 
@@ -173,7 +182,7 @@ jobs:
           actual_project_digest="$(printf '%s' "$SUPABASE_PROJECT_ID" | sha256sum | awk '{print $1}')"
           test "${BASH_REMATCH[9]}" = "$actual_project_digest"
           test "${BASH_REMATCH[14]}" -lt "$INVOCATION_HALT_31D"
-          test "${BASH_REMATCH[18]}" = '20260813060000'
+          test "${BASH_REMATCH[18]}" = '20260813072000'
           expires_epoch="$(date -u -d "${BASH_REMATCH[20]}" +%s)"
           auth_epoch="$(date -u -d "$AUTHORIZATION_CREATED_AT" +%s)"
           now_epoch="$(date -u +%s)"
@@ -224,9 +233,11 @@ jobs:
           test "$(jq -r '.resourceSnapshot.projectedInvocations31d' r5-revision4-minute-activation-evidence/state-recheck.json)" = "$EXPECTED_PROJECTED"
           test "$(jq -r '.run.currentWatermarkLedgerIndex' r5-revision4-minute-activation-evidence/state-recheck.json)" = "$EXPECTED_RUN_WATERMARK"
           test "$(jq -r '.activeWatermark.ledgerIndex' r5-revision4-minute-activation-evidence/state-recheck.json)" -ge "$ACTIVE_FLOOR"
-          jq -e '.resourceSnapshot.fresh == true and .resourceSnapshot.projectedInvocations31d < 400000 and .migration.targetApplied == false and .migration.currentMaxVersion == "20260813060000"' r5-revision4-minute-activation-evidence/state-recheck.json >/dev/null
+          jq -e '.resourceSnapshot.fresh == true and .resourceSnapshot.projectedInvocations31d < 400000 and .migration.targetApplied == true and .migration.migrationState == "applied_verified" and .migration.currentMaxVersion == "20260813072000"' r5-revision4-minute-activation-evidence/state-recheck.json >/dev/null
+          node scripts/verify-r5-revision4-minute-followup.mjs r5-revision4-minute-activation-evidence/followup-recheck.json
+          jq -e '.historyExact == true and .functionContractVerified == true and .resourceGuardUnchanged == true and .currentMaxMigrationVersion == "20260813072000"' r5-revision4-minute-activation-evidence/followup-recheck.json >/dev/null
           # provider_snapshot_stale and r5_recovery_monthly_invocation_halt remain fail-closed states.
-          # Production Management API mutations below are explicitly read_only:false; all state checks above are read_only:true.
+          # All migration/provenance checks are read_only:true; this activation performs no migration write.
 
       - name: Set up Supabase CLI
         uses: supabase/setup-cli@3c2f5e2ae34c34e428e8e206e2c4d21fa2d20fbf
@@ -249,21 +260,13 @@ jobs:
             --output-directory r5-revision4-minute-activation-evidence/isolation \
             > r5-revision4-minute-activation-evidence/pause.json
 
-      - name: Reverify quiescent boundary before mutation
+      - name: Reverify quiescent boundary and applied follow-up read-only
         run: |
           set -euo pipefail
           node scripts/inspect-r5-revision4-minute-state.mjs r5-revision4-minute-activation-evidence/state-paused.json
-          jq -e '.resourceSnapshot.fresh == true and .migration.targetApplied == false and .migration.currentMaxVersion == "20260813060000"' r5-revision4-minute-activation-evidence/state-paused.json >/dev/null
-
-      - name: Apply exactly one continuous-head migration
-        env:
-          MIGRATION_SHA: ${{ steps.auth.outputs.migration_sha }}
-        run: |
-          set -euo pipefail
-          node scripts/apply-r5-revision4-minute-migration.mjs \
-            --migration "$TARGET_MIGRATION_PATH" \
-            --expected-sha "$MIGRATION_SHA" \
-            --output-directory r5-revision4-minute-activation-evidence
+          jq -e '.resourceSnapshot.fresh == true and .migration.targetApplied == true and .migration.migrationState == "applied_verified" and .migration.currentMaxVersion == "20260813072000"' r5-revision4-minute-activation-evidence/state-paused.json >/dev/null
+          node scripts/verify-r5-revision4-minute-followup.mjs r5-revision4-minute-activation-evidence/followup-paused.json
+          jq -e '.historyExact == true and .functionContractVerified == true and .resourceGuardUnchanged == true and .currentMaxMigrationVersion == "20260813072000"' r5-revision4-minute-activation-evidence/followup-paused.json >/dev/null
 
       - name: Deploy exact revision4 R5 executor
         run: |
@@ -419,7 +422,7 @@ jobs:
           Manual smoke watermark: \`${SMOKE_WATERMARK:-unavailable}\`
           Scheduler switched to \`xrpl-r5-minute-driver\`: \`${SWITCHED:-false}\`
 
-          PASS requires a real Devnet R5 history batch plus a later natural pg_cron invocation that advances the canonical watermark. On failure the workflow attempts to restore the old \`xrpl-collector-tick\` minute scheduler. Resource guards remain fail-closed.
+          PASS requires a real Devnet R5 history batch plus a later natural pg_cron invocation that advances the canonical watermark. On failure the workflow attempts to restore the old \`xrpl-collector-tick\` minute scheduler. Resource guards remain fail-closed. No migration write is performed by this activation.
 
           No Mainnet, stabilization, soak, or history reduction is authorized by this operation.
           EOF
