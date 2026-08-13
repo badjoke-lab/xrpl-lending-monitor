@@ -16,10 +16,10 @@ jobs:
       - name: Check out exact current main
         uses: actions/checkout@v4
         with:
-          ref: 95565cf97d9d8486e63c6038a3fe002e7933a9c0
+          ref: 2517bc28cc862979205ee4032d58d730d367265b
           fetch-depth: 1
 
-      - name: Patch and validate candidate shell
+      - name: Patch and validate proof key selection
         shell: bash
         run: |
           set -euo pipefail
@@ -28,10 +28,28 @@ jobs:
 
           workflow = Path('.github/workflows/r4f-revision4-12-ledger-qualification.yml')
           text = workflow.read_text()
-          old = "            writeFileSync('/tmp/checkpoint-query.sql', query)\n            NODE\n            checkpoint_query=\"$(cat /tmp/checkpoint-query.sql)\""
-          new = "            writeFileSync('/tmp/checkpoint-query.sql', query)\n          NODE\n            checkpoint_query=\"$(cat /tmp/checkpoint-query.sql)\""
+          old = '''          legacy_count="$(jq '[.[] | select(.type == "legacy" and (.name == "service_role" or ((.secret_jwt_template.role // "") == "service_role")))] | length' /tmp/project-api-keys.json)"
+          secret_count="$(jq '[.[] | select(.type == "secret")] | length' /tmp/project-api-keys.json)"
+          if [ "$legacy_count" -eq 1 ]; then
+            elevated_key="$(jq -r '[.[] | select(.type == "legacy" and (.name == "service_role" or ((.secret_jwt_template.role // "") == "service_role")))][0].api_key // empty' /tmp/project-api-keys.json)"
+            elevated_kind=legacy
+          elif [ "$legacy_count" -eq 0 ] && [ "$secret_count" -eq 1 ]; then
+            elevated_key="$(jq -r '[.[] | select(.type == "secret")][0].api_key // empty' /tmp/project-api-keys.json)"
+            elevated_kind=secret
+          else
+'''
+          new = '''          default_secret_count="$(jq '[.[] | select(.type == "secret" and .name == "default")] | length' /tmp/project-api-keys.json)"
+          legacy_count="$(jq '[.[] | select(.type == "legacy" and (.name == "service_role" or ((.secret_jwt_template.role // "") == "service_role")))] | length' /tmp/project-api-keys.json)"
+          if [ "$default_secret_count" -eq 1 ]; then
+            elevated_key="$(jq -r '[.[] | select(.type == "secret" and .name == "default")][0].api_key // empty' /tmp/project-api-keys.json)"
+            elevated_kind=secret
+          elif [ "$default_secret_count" -eq 0 ] && [ "$legacy_count" -eq 1 ]; then
+            elevated_key="$(jq -r '[.[] | select(.type == "legacy" and (.name == "service_role" or ((.secret_jwt_template.role // "") == "service_role")))][0].api_key // empty' /tmp/project-api-keys.json)"
+            elevated_kind=legacy
+          else
+'''
           if text.count(old) != 1:
-              raise SystemExit(f'candidate heredoc defect count={text.count(old)}')
+              raise SystemExit(f'proof key resolver block count={text.count(old)}')
           workflow.write_text(text.replace(old, new))
 
           contract = Path('scripts/test-r4f-revision4-12-ledger-qualification-contract.sh')
@@ -39,35 +57,31 @@ jobs:
           marker = "printf '%s\\n' 'R4F revision-4 exact 12-ledger qualification contract: PASS'\n"
           if contract_text.count(marker) != 1:
               raise SystemExit(f'contract final marker count={contract_text.count(marker)}')
-          regression = r'''python - "$workflow" <<'PY_CANDIDATE_SHELL'
-          from pathlib import Path
-          import subprocess
-          import sys
-          import tempfile
+          regression = r'''grep -Fq 'default_secret_count="$(jq '\''[.[] | select(.type == "secret" and .name == "default")] | length'\'' /tmp/project-api-keys.json)"' "$workflow"
+          grep -Fq 'if [ "$default_secret_count" -eq 1 ]; then' "$workflow"
+          grep -Fq 'elevated_key="$(jq -r '\''[.[] | select(.type == "secret" and .name == "default")][0].api_key // empty'\'' /tmp/project-api-keys.json)"' "$workflow"
+          grep -Fq 'elif [ "$default_secret_count" -eq 0 ] && [ "$legacy_count" -eq 1 ]; then' "$workflow"
+          grep -Fq 'if [ "$SUPABASE_R4F_PROOF_KEY_KIND" = legacy ]; then' "$workflow"
+          if grep -Fq 'secret_count="$(jq '\''[.[] | select(.type == "secret")] | length'\'' /tmp/project-api-keys.json)"' "$workflow"; then
+            echo 'qualification workflow still selects an arbitrary secret key instead of SUPABASE_SECRET_KEYS.default' >&2
+            exit 1
+          fi
 
-          workflow_text = Path(sys.argv[1]).read_text()
-          start_marker = '      - name: Execute exactly one production-shaped 12-ledger candidate batch\n'
-          end_marker = '\n      - name: Restore exact collector immediately after candidate attempt\n'
-          if workflow_text.count(start_marker) != 1 or workflow_text.count(end_marker) != 1:
-              raise SystemExit('candidate step markers drifted')
-          section = workflow_text.split(start_marker, 1)[1].split(end_marker, 1)[0]
-          run_marker = '        run: |\n'
-          if section.count(run_marker) != 1:
-              raise SystemExit('candidate run block marker drifted')
-          shell_block = section.split(run_marker, 1)[1]
-          shell_lines = []
-          for line in shell_block.splitlines():
-              if line:
-                  if not line.startswith('          '):
-                      raise SystemExit(f'candidate shell line lost YAML indentation: {line!r}')
-                  shell_lines.append(line[10:])
-              else:
-                  shell_lines.append('')
-          with tempfile.NamedTemporaryFile('w', suffix='.sh', delete=False) as handle:
-              handle.write('\n'.join(shell_lines) + '\n')
-              shell_path = handle.name
-          subprocess.run(['bash', '-n', shell_path], check=True)
-          PY_CANDIDATE_SHELL
+          python - "$workflow" <<'PY_PROOF_KEY_ORDER'
+          from pathlib import Path
+          import sys
+
+          text = Path(sys.argv[1]).read_text()
+          start = text.index('      - name: Resolve exactly one elevated database API key\n')
+          end = text.index('\n      - name: Bundle and deploy only isolated temporary revision-4 proof function\n', start)
+          section = text[start:end]
+          secret_if = section.index('if [ "$default_secret_count" -eq 1 ]; then')
+          legacy_fallback = section.index('elif [ "$default_secret_count" -eq 0 ] && [ "$legacy_count" -eq 1 ]; then')
+          secret_select = section.index('select(.type == "secret" and .name == "default")][0].api_key')
+          legacy_select = section.index('select(.type == "legacy" and (.name == "service_role"')
+          if not (secret_if < secret_select < legacy_fallback < legacy_select):
+              raise SystemExit('proof key resolver does not prefer default secret before legacy fallback')
+          PY_PROOF_KEY_ORDER
 
           '''
           contract.write_text(contract_text.replace(marker, regression + marker))
@@ -92,7 +106,7 @@ jobs:
           git config user.name badjoke-lab
           git config user.email badjoke.lab@gmail.com
           git add .r4f-verified/r4f-revision4-12-ledger-qualification.yml .r4f-verified/test-r4f-revision4-12-ledger-qualification-contract.sh
-          git commit -m 'Stage verified revision4 candidate shell fix'
-          git push origin HEAD:refs/heads/agent/r4f-heredoc-fix-staging
+          git commit -m 'Stage verified revision4 proof key selection fix'
+          git push origin HEAD:refs/heads/agent/r4f-proof-key-selection-fix-staging
           git hash-object .r4f-verified/r4f-revision4-12-ledger-qualification.yml
           git hash-object .r4f-verified/test-r4f-revision4-12-ledger-qualification-contract.sh
