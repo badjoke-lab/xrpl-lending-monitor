@@ -71,9 +71,204 @@ jobs:
               pg_indexes_size('cron.job_run_details'::regclass)::bigint as index_bytes,
               coalesce((select n_live_tup::bigint from pg_stat_user_tables where relid = 'cron.job_run_details'::regclass), 0) as estimated_live_rows,
               coalesce((select n_dead_tup::bigint from pg_stat_user_tables where relid = 'cron.job_run_details'::regclass), 0) as estimated_dead_rows,
-              (select count(*)::bigint from pg_constraint where conrelid = 'cron.job_run_details'::regclass or confrelid = 'cron.job_run_details'::regclass) as foreign_key_constraints,
+              (select count(*)::bigint from pg_constraint where conrelid = 'cron.job_run_details'::regclass or confrelid = 'cron.job_run_details'::regclass) as constraint_count,
+              (select count(*)::bigint from pg_constraint where contype = 'f' and (conrelid = 'cron.job_run_details'::regclass or confrelid = 'cron.job_run_details'::regclass)) as foreign_key_constraints,
+              coalesce((
+                select jsonb_agg(
+                  jsonb_build_object(
+                    'name', conname,
+                    'type', contype,
+                    'definedOnJobRunDetails', conrelid = 'cron.job_run_details'::regclass,
+                    'referencesJobRunDetails', confrelid = 'cron.job_run_details'::regclass
+                  ) order by conname
+                )
+                from pg_constraint
+                where conrelid = 'cron.job_run_details'::regclass
+                   or confrelid = 'cron.job_run_details'::regclass
+              ), '[]'::jsonb) as constraints,
               (select count(*)::bigint from pg_trigger where tgrelid = 'cron.job_run_details'::regclass and not tgisinternal) as user_triggers
             from cron.job_run_details
+          ), active_watermark as (
+            select w.*
+            from public.xrpl_phase_watermarks w
+            where w.profile_id = 'supabase-devnet'
+          ), current_work as (
+            select w.*
+            from public.xrpl_phase_work w
+            join active_watermark watermark on watermark.work_id = w.work_id
+            where w.profile_id = 'supabase-devnet'
+              and w.status = 'committed'
+              and w.committed_at is not null
+              and w.scanned_end_ledger_index = watermark.ledger_index
+              and w.final_ledger_hash = watermark.ledger_hash
+          ), predecessor_work as (
+            select predecessor.*
+            from current_work current
+            join public.xrpl_phase_work predecessor
+              on predecessor.profile_id = current.profile_id
+             and predecessor.status = 'committed'
+             and predecessor.committed_at is not null
+             and predecessor.scanned_end_ledger_index = current.previous_ledger_index
+             and predecessor.final_ledger_hash = current.expected_parent_hash
+            order by predecessor.committed_at desc, predecessor.work_id desc
+            limit 1
+          ), historical_committed_work as (
+            select w.*
+            from public.xrpl_phase_work w
+            where w.profile_id = 'supabase-devnet'
+              and w.status = 'committed'
+              and w.committed_at is not null
+              and w.work_id is distinct from (select work_id from current_work)
+              and w.work_id is distinct from (select work_id from predecessor_work)
+          ), phase_storage as (
+            select jsonb_build_object(
+              'activeWatermark', (
+                select jsonb_build_object(
+                  'ledgerIndex', ledger_index,
+                  'ledgerHash', ledger_hash,
+                  'workId', work_id
+                ) from active_watermark
+              ),
+              'currentWork', (
+                select jsonb_build_object(
+                  'workId', work_id,
+                  'previousLedgerIndex', previous_ledger_index,
+                  'startLedgerIndex', start_ledger_index,
+                  'scannedEndLedgerIndex', scanned_end_ledger_index,
+                  'expectedParentHash', expected_parent_hash,
+                  'finalLedgerHash', final_ledger_hash,
+                  'expectedPayloadChunks', expected_payload_chunks,
+                  'actualPayloadChunks', (select count(*)::bigint from public.xrpl_phase_payload_chunks p where p.work_id = current_work.work_id),
+                  'expectedCommitChunks', expected_commit_chunks,
+                  'actualCompletedCommitChunks', (select count(*)::bigint from public.xrpl_phase_commit_chunks c where c.work_id = current_work.work_id and c.status = 'completed'),
+                  'referenceRows', (select count(*)::bigint from public.xrpl_phase_reference_rows r where r.work_id = current_work.work_id)
+                ) from current_work
+              ),
+              'predecessorWork', (
+                select jsonb_build_object(
+                  'workId', work_id,
+                  'previousLedgerIndex', previous_ledger_index,
+                  'startLedgerIndex', start_ledger_index,
+                  'scannedEndLedgerIndex', scanned_end_ledger_index,
+                  'expectedParentHash', expected_parent_hash,
+                  'finalLedgerHash', final_ledger_hash,
+                  'expectedPayloadChunks', expected_payload_chunks,
+                  'actualPayloadChunks', (select count(*)::bigint from public.xrpl_phase_payload_chunks p where p.work_id = predecessor_work.work_id),
+                  'expectedCommitChunks', expected_commit_chunks,
+                  'actualCompletedCommitChunks', (select count(*)::bigint from public.xrpl_phase_commit_chunks c where c.work_id = predecessor_work.work_id and c.status = 'completed'),
+                  'referenceRows', (select count(*)::bigint from public.xrpl_phase_reference_rows r where r.work_id = predecessor_work.work_id)
+                ) from predecessor_work
+              ),
+              'workStatusCounts', (
+                select jsonb_build_object(
+                  'planned', count(*) filter (where status = 'planned'),
+                  'staged', count(*) filter (where status = 'staged'),
+                  'committing', count(*) filter (where status = 'committing'),
+                  'finalizing', count(*) filter (where status = 'finalizing'),
+                  'committed', count(*) filter (where status = 'committed'),
+                  'error', count(*) filter (where status = 'error')
+                )
+                from public.xrpl_phase_work
+                where profile_id = 'supabase-devnet'
+              ),
+              'messageStatusCounts', (
+                select jsonb_build_object(
+                  'pending', count(*) filter (where status = 'pending'),
+                  'leased', count(*) filter (where status = 'leased'),
+                  'retry', count(*) filter (where status = 'retry'),
+                  'completed', count(*) filter (where status = 'completed'),
+                  'error', count(*) filter (where status = 'error')
+                )
+                from public.xrpl_phase_messages
+                where profile_id = 'supabase-devnet'
+              ),
+              'canonicalReferenceRows', (
+                select jsonb_build_object(
+                  'exactRows', count(*)::bigint,
+                  'logicalRowBytes', coalesce(sum(pg_column_size(r)), 0)::bigint,
+                  'relationTotalBytes', pg_total_relation_size('public.xrpl_phase_reference_rows'::regclass)::bigint,
+                  'retentionClass', 'canonical_history_required'
+                )
+                from public.xrpl_phase_reference_rows r
+                join public.xrpl_phase_work w on w.work_id = r.work_id
+                where w.profile_id = 'supabase-devnet'
+                  and w.status = 'committed'
+                  and w.committed_at is not null
+              ),
+              'committedWorkRows', (
+                select jsonb_build_object(
+                  'exactRows', count(*)::bigint,
+                  'logicalRowBytes', coalesce(sum(pg_column_size(w)), 0)::bigint,
+                  'relationTotalBytes', pg_total_relation_size('public.xrpl_phase_work'::regclass)::bigint,
+                  'retentionClass', 'canonical_reader_join_required'
+                )
+                from public.xrpl_phase_work w
+                where w.profile_id = 'supabase-devnet'
+                  and w.status = 'committed'
+                  and w.committed_at is not null
+              ),
+              'olderCommittedPayloadEvidenceObserved', (
+                select jsonb_build_object(
+                  'candidateWorkRows', (select count(*)::bigint from historical_committed_work),
+                  'chunkRows', count(*)::bigint,
+                  'logicalRowBytes', coalesce(sum(pg_column_size(p)), 0)::bigint,
+                  'relationTotalBytes', pg_total_relation_size('public.xrpl_phase_payload_chunks'::regclass)::bigint,
+                  'oldestLedgerIndex', (select min(start_ledger_index) from historical_committed_work),
+                  'newestLedgerIndex', (select max(scanned_end_ledger_index) from historical_committed_work),
+                  'classification', 'measurement_only_not_reclaim_authority'
+                )
+                from public.xrpl_phase_payload_chunks p
+                join historical_committed_work w on w.work_id = p.work_id
+              ),
+              'olderCommittedCommitEvidenceObserved', (
+                select jsonb_build_object(
+                  'candidateWorkRows', (select count(*)::bigint from historical_committed_work),
+                  'chunkRows', count(*)::bigint,
+                  'logicalRowBytes', coalesce(sum(pg_column_size(c)), 0)::bigint,
+                  'relationTotalBytes', pg_total_relation_size('public.xrpl_phase_commit_chunks'::regclass)::bigint,
+                  'oldestLedgerIndex', (select min(start_ledger_index) from historical_committed_work),
+                  'newestLedgerIndex', (select max(scanned_end_ledger_index) from historical_committed_work),
+                  'classification', 'measurement_only_not_reclaim_authority'
+                )
+                from public.xrpl_phase_commit_chunks c
+                join historical_committed_work w on w.work_id = c.work_id
+                where c.status = 'completed'
+              ),
+              'olderCompletedSchedulerEvidenceObserved', (
+                select jsonb_build_object(
+                  'messageRows', count(*)::bigint,
+                  'logicalRowBytes', coalesce(sum(pg_column_size(m)), 0)::bigint,
+                  'relationTotalBytes', pg_total_relation_size('public.xrpl_phase_messages'::regclass)::bigint,
+                  'classification', 'measurement_only_replay_dependencies_unresolved'
+                )
+                from public.xrpl_phase_messages m
+                where m.profile_id = 'supabase-devnet'
+                  and m.status = 'completed'
+                  and m.completed_at < (select committed_at from predecessor_work)
+              ),
+              'olderSuccessorEvidenceObserved', (
+                select jsonb_build_object(
+                  'successorRows', count(*)::bigint,
+                  'logicalRowBytes', coalesce(sum(pg_column_size(s)), 0)::bigint,
+                  'relationTotalBytes', pg_total_relation_size('public.xrpl_phase_successors'::regclass)::bigint,
+                  'classification', 'measurement_only_replay_dependencies_unresolved'
+                )
+                from public.xrpl_phase_successors s
+                join public.xrpl_phase_messages m on m.message_id = s.current_message_id
+                where m.profile_id = 'supabase-devnet'
+                  and m.status = 'completed'
+                  and m.completed_at < (select committed_at from predecessor_work)
+              ),
+              'retentionBoundary', jsonb_build_object(
+                'canonicalReferenceRowsRetained', true,
+                'allCommittedWorkRetained', true,
+                'currentWorkRawEvidenceRetained', true,
+                'predecessorWorkRawEvidenceRetained', true,
+                'schedulerReplayDependenciesResolved', false,
+                'candidateOnly', true,
+                'noReclaimAuthorized', true
+              )
+            ) as value
           )
           select jsonb_build_object(
             'databaseBytes', pg_database_size(current_database())::bigint,
@@ -105,16 +300,20 @@ jobs:
                 'indexBytes', index_bytes,
                 'estimatedLiveRows', estimated_live_rows,
                 'estimatedDeadRows', estimated_dead_rows,
+                'constraintCount', constraint_count,
                 'foreignKeyConstraints', foreign_key_constraints,
+                'constraints', constraints,
                 'userTriggers', user_triggers
               ) from cron_state
             ),
+            'phaseStorage', (select value from phase_storage),
             'productionDatabaseReadOnly', true,
             'noDatabaseMutation', true,
             'noSchedulerMutation', true,
             'noDeployment', true,
             'noMigration', true,
             'noPublicReaderMutation', true,
+            'noReclaimAuthorized', true,
             'mainnetDisabled', true
           ) as footprint;
           SQL
@@ -137,6 +336,7 @@ jobs:
             .noDeployment == true and
             .noMigration == true and
             .noPublicReaderMutation == true and
+            .noReclaimAuthorized == true and
             .mainnetDisabled == true and
             (.databaseBytes | type == "number") and
             (.schemas | type == "array") and
@@ -144,8 +344,24 @@ jobs:
             (.cronJobRunDetails.relationOid | type == "number") and
             (.cronJobRunDetails.exactRows | type == "number") and
             (.cronJobRunDetails.totalBytes | type == "number") and
+            (.cronJobRunDetails.constraintCount | type == "number") and
             (.cronJobRunDetails.foreignKeyConstraints | type == "number") and
-            (.cronJobRunDetails.userTriggers | type == "number")
+            (.cronJobRunDetails.constraints | type == "array") and
+            (.cronJobRunDetails.userTriggers | type == "number") and
+            (.phaseStorage.activeWatermark.workId | type == "string") and
+            (.phaseStorage.currentWork.workId | type == "string") and
+            (.phaseStorage.predecessorWork.workId | type == "string") and
+            .phaseStorage.currentWork.expectedPayloadChunks == .phaseStorage.currentWork.actualPayloadChunks and
+            .phaseStorage.currentWork.expectedCommitChunks == .phaseStorage.currentWork.actualCompletedCommitChunks and
+            .phaseStorage.predecessorWork.expectedPayloadChunks == .phaseStorage.predecessorWork.actualPayloadChunks and
+            .phaseStorage.predecessorWork.expectedCommitChunks == .phaseStorage.predecessorWork.actualCompletedCommitChunks and
+            .phaseStorage.retentionBoundary.canonicalReferenceRowsRetained == true and
+            .phaseStorage.retentionBoundary.allCommittedWorkRetained == true and
+            .phaseStorage.retentionBoundary.currentWorkRawEvidenceRetained == true and
+            .phaseStorage.retentionBoundary.predecessorWorkRawEvidenceRetained == true and
+            .phaseStorage.retentionBoundary.schedulerReplayDependenciesResolved == false and
+            .phaseStorage.retentionBoundary.candidateOnly == true and
+            .phaseStorage.retentionBoundary.noReclaimAuthorized == true
           ' r5-revision4-db-footprint-probe/footprint.json > /dev/null
 
       - name: Upload sanitized footprint evidence
@@ -170,8 +386,23 @@ jobs:
           cron_exact_rows="$(jq -r '.cronJobRunDetails.exactRows' "$f")"
           cron_total_bytes="$(jq -r '.cronJobRunDetails.totalBytes' "$f")"
           cron_dead_rows="$(jq -r '.cronJobRunDetails.estimatedDeadRows' "$f")"
+          cron_constraint_count="$(jq -r '.cronJobRunDetails.constraintCount' "$f")"
           cron_fks="$(jq -r '.cronJobRunDetails.foreignKeyConstraints' "$f")"
+          cron_constraints="$(jq -c '.cronJobRunDetails.constraints' "$f")"
           cron_triggers="$(jq -r '.cronJobRunDetails.userTriggers' "$f")"
+          watermark="$(jq -r '.phaseStorage.activeWatermark.ledgerIndex' "$f")"
+          current_work="$(jq -r '.phaseStorage.currentWork.workId' "$f")"
+          predecessor_work="$(jq -r '.phaseStorage.predecessorWork.workId' "$f")"
+          reference_rows="$(jq -r '.phaseStorage.canonicalReferenceRows.exactRows' "$f")"
+          reference_bytes="$(jq -r '.phaseStorage.canonicalReferenceRows.logicalRowBytes' "$f")"
+          old_payload_rows="$(jq -r '.phaseStorage.olderCommittedPayloadEvidenceObserved.chunkRows' "$f")"
+          old_payload_bytes="$(jq -r '.phaseStorage.olderCommittedPayloadEvidenceObserved.logicalRowBytes' "$f")"
+          old_commit_rows="$(jq -r '.phaseStorage.olderCommittedCommitEvidenceObserved.chunkRows' "$f")"
+          old_commit_bytes="$(jq -r '.phaseStorage.olderCommittedCommitEvidenceObserved.logicalRowBytes' "$f")"
+          old_message_rows="$(jq -r '.phaseStorage.olderCompletedSchedulerEvidenceObserved.messageRows' "$f")"
+          old_message_bytes="$(jq -r '.phaseStorage.olderCompletedSchedulerEvidenceObserved.logicalRowBytes' "$f")"
+          old_successor_rows="$(jq -r '.phaseStorage.olderSuccessorEvidenceObserved.successorRows' "$f")"
+          old_successor_bytes="$(jq -r '.phaseStorage.olderSuccessorEvidenceObserved.logicalRowBytes' "$f")"
           cat > /tmp/body.md <<EOF
           ## R5 revision-4 database footprint read-only probe
 
@@ -182,11 +413,25 @@ jobs:
           Headroom: \`${headroom_bytes}\`
           Top schemas: ${top_schemas}
 
-          Exact cron.job_run_details preflight: oid=\`${cron_oid}\`, rows=\`${cron_exact_rows}\`, size=\`${cron_total_bytes} B\`, estimated dead rows=\`${cron_dead_rows}\`, FK constraints=\`${cron_fks}\`, user triggers=\`${cron_triggers}\`.
+          Exact cron.job_run_details preflight: oid=\`${cron_oid}\`, rows=\`${cron_exact_rows}\`, size=\`${cron_total_bytes} B\`, estimated dead rows=\`${cron_dead_rows}\`, constraints=\`${cron_constraint_count}\`, foreign keys=\`${cron_fks}\`, user triggers=\`${cron_triggers}\`.
+          Constraint details: \`${cron_constraints}\`.
+
+          Active phase watermark: \`${watermark}\`.
+          Current committed work retained: \`${current_work}\`.
+          Immediate predecessor work retained: \`${predecessor_work}\`.
+          Canonical reference rows retained: \`${reference_rows}\` rows / logical \`${reference_bytes} B\`.
+
+          Measurement-only older committed raw evidence, excluding the current and immediate predecessor works:
+          - payload chunks: \`${old_payload_rows}\` rows / logical \`${old_payload_bytes} B\`
+          - commit chunks: \`${old_commit_rows}\` rows / logical \`${old_commit_bytes} B\`
+          - completed scheduler messages older than predecessor: \`${old_message_rows}\` rows / logical \`${old_message_bytes} B\`
+          - successor edges older than predecessor: \`${old_successor_rows}\` rows / logical \`${old_successor_bytes} B\`
+
+          These values are measurement only. They are not physical-reclaim estimates and do not authorize deleting or compacting any row. Canonical reference rows and all committed work remain required by the current public reader; current and immediate predecessor raw evidence remain required by the current restore-continuation contract. Scheduler replay dependencies remain unresolved.
 
           Top relations:
           - ${top_relations}
 
-          Production database read only: \`true\`. No database mutation, scheduler mutation, deployment, migration, public-reader mutation, Mainnet, stabilization, or soak action was performed.
+          Production database read only: \`true\`. No database mutation, reclaim, scheduler mutation, deployment, migration, public-reader mutation, Mainnet, stabilization, or soak action was performed.
           EOF
           gh issue comment 1261 --repo "$GITHUB_REPOSITORY" --body-file /tmp/body.md
