@@ -1,0 +1,426 @@
+name: R5 revision4 one-minute activation
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: r5-revision4-minute-activation
+  cancel-in-progress: false
+
+env:
+  QUALIFICATION_ISSUE: '1261'
+  TARGET_MIGRATION_VERSION: '20260813060000'
+  TARGET_MIGRATION_PATH: supabase/migrations/20260813060000_xrpl_r5_revision4_continuous_head.sql
+  R5_FUNCTION: xrpl-r5-recovery-batch
+  R5_FUNCTION_PATH: supabase/functions/xrpl-r5-recovery-batch/index.ts
+  MINUTE_FUNCTION: xrpl-r5-minute-driver
+  MINUTE_FUNCTION_PATH: supabase/functions/xrpl-r5-minute-driver/index.ts
+  INVOCATION_HALT_31D: '400000'
+  SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+  SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  prepare:
+    if: >-
+      github.event.issue.number == 1261 &&
+      github.event.comment.user.login == 'badjoke-lab' &&
+      github.event.comment.body == '/r5-revision4-minute-prepare'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out exact current main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify exact old every-minute scheduler read-only
+        id: scheduler
+        run: |
+          set -euo pipefail
+          mkdir -p r5-revision4-minute-activation-evidence
+          node scripts/prepare-r4f-g3-isolated-window.mjs \
+            > r5-revision4-minute-activation-evidence/scheduler-before.json
+          jq -e \
+            '.jobName == "xrpl-lending-monitor-minute" and .schedule == "* * * * *" and .jobId > 0 and (.commandDigest | test("^[a-f0-9]{64}$")) and .runtimeStatus == "stopped"' \
+            r5-revision4-minute-activation-evidence/scheduler-before.json >/dev/null
+          jq -r '"job_id=\(.jobId)\ncommand_digest=\(.commandDigest)\nproject_digest=\(.projectIdentityDigest)"' \
+            r5-revision4-minute-activation-evidence/scheduler-before.json >> "$GITHUB_OUTPUT"
+
+      - name: Inspect exact revision4 activation state read-only
+        id: state
+        run: |
+          set -euo pipefail
+          # Management API inspection is read_only:true only.
+          node scripts/inspect-r5-revision4-minute-state.mjs \
+            r5-revision4-minute-activation-evidence/state-before.json
+          test "${{ env.INVOCATION_HALT_31D }}" = '400000'
+          jq -e \
+            '.resourceSnapshot.fresh == true and .resourceSnapshot.projectedInvocations31d < 400000 and .migration.targetApplied == false and .mainnetDisabled == true' \
+            r5-revision4-minute-activation-evidence/state-before.json >/dev/null
+          test "${{ steps.scheduler.outputs.project_digest }}" = "$(jq -r '.projectIdentityDigest' r5-revision4-minute-activation-evidence/state-before.json)"
+
+      - name: Verify migration history shape read-only
+        run: |
+          set -euo pipefail
+          query="select column_name,data_type,udt_name from information_schema.columns where table_schema='supabase_migrations' and table_name='schema_migrations' and column_name in ('version','statements','name') order by column_name;"
+          jq -n --arg query "$query" '{query:$query,parameters:[],read_only:true}' > /tmp/minute-schema-query.json
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+            -H 'content-type: application/json' \
+            --data @/tmp/minute-schema-query.json \
+            "https://api.supabase.com/v1/projects/${SUPABASE_PROJECT_ID}/database/query" \
+            > r5-revision4-minute-activation-evidence/migration-schema.json
+          test "$(jq '[.. | objects | select(.column_name? == "version" or .column_name? == "statements" or .column_name? == "name")] | unique_by(.column_name) | length' r5-revision4-minute-activation-evidence/migration-schema.json)" -eq 3
+
+      - name: Bind exact activation sources and propose authorization
+        env:
+          JOB_ID: ${{ steps.scheduler.outputs.job_id }}
+          COMMAND_DIGEST: ${{ steps.scheduler.outputs.command_digest }}
+          PROJECT_DIGEST: ${{ steps.scheduler.outputs.project_digest }}
+          ACTIVATION_MODE: ${{ steps.state.outputs.activation_mode }}
+          SNAPSHOT_ID: ${{ steps.state.outputs.snapshot_id }}
+          PROJECTED_31D: ${{ steps.state.outputs.projected_invocations_31d }}
+          RUN_WATERMARK: ${{ steps.state.outputs.run_watermark_ledger_index }}
+          ACTIVE_WATERMARK: ${{ steps.state.outputs.active_watermark_ledger_index }}
+          BOUNDARY_DRIFT: ${{ steps.state.outputs.boundary_drift_ledgers }}
+          MIGRATION_MAX: ${{ steps.state.outputs.migration_max }}
+        run: |
+          set -euo pipefail
+          source_commit="$(git rev-parse HEAD)"
+          migration_sha="$(sha256sum "$TARGET_MIGRATION_PATH" | awk '{print $1}')"
+          r5_sha="$(sha256sum "$R5_FUNCTION_PATH" | awk '{print $1}')"
+          driver_sha="$(sha256sum "$MINUTE_FUNCTION_PATH" | awk '{print $1}')"
+          switch_sha="$(sha256sum scripts/switch-r5-revision4-minute-scheduler.mjs | awk '{print $1}')"
+          rollback_sha="$(sha256sum scripts/rollback-r5-revision4-minute-scheduler.mjs | awk '{print $1}')"
+          inspector_sha="$(sha256sum scripts/inspect-r5-revision4-minute-state.mjs | awk '{print $1}')"
+          applier_sha="$(sha256sum scripts/apply-r5-revision4-minute-migration.mjs | awk '{print $1}')"
+          expires="$(date -u -d '+2 hours' '+%Y-%m-%dT%H:%M:%SZ')"
+          nonce="$(openssl rand -hex 8)"
+          command="/r5-revision4-minute-activate commit=${source_commit} migration=${migration_sha} r5=${r5_sha} driver=${driver_sha} switch=${switch_sha} rollback=${rollback_sha} inspector=${inspector_sha} applier=${applier_sha} project=${PROJECT_DIGEST} job=${JOB_ID} command=${COMMAND_DIGEST} mode=${ACTIVATION_MODE} snapshot=${SNAPSHOT_ID} projected=${PROJECTED_31D} run_watermark=${RUN_WATERMARK} active_floor=${ACTIVE_WATERMARK} drift=${BOUNDARY_DRIFT} migration_max=${MIGRATION_MAX} prepare_run=${GITHUB_RUN_ID} expires=${expires} nonce=${nonce}"
+          cat > /tmp/minute-proposal.md <<EOF
+          ## R5 revision-4 one-minute activation authorization proposal
+
+          Preparation run: \`${GITHUB_RUN_ID}\`
+          Source main commit: \`${source_commit}\`
+          Current scheduler: \`xrpl-lending-monitor-minute\` / \`* * * * *\`
+          Current endpoint: \`xrpl-collector-tick\`
+          Activation mode: \`${ACTIVATION_MODE}\`
+          Fresh provider snapshot: \`${SNAPSHOT_ID}\`
+          Projected invocations: \`${PROJECTED_31D} / 400000\` per 31d halt
+          Retained R5 watermark: \`${RUN_WATERMARK}\`
+          Current canonical watermark floor: \`${ACTIVE_WATERMARK}\` (drift \`${BOUNDARY_DRIFT}\` ledgers; any later drift must be descendant-chain reproved after pause)
+
+          The authorized operation is bounded to one target migration \`${TARGET_MIGRATION_VERSION}\`, deployment of \`${R5_FUNCTION}\` and \`${MINUTE_FUNCTION}\`, one manual Devnet smoke, and replacement of the existing Supabase pg_cron endpoint while retaining the exact \`* * * * *\` schedule. Any failed smoke keeps/restores the old collector. Resource guards remain fail-closed.
+
+          No Mainnet, stabilization, soak, or history reduction is authorized by this operation.
+
+          Exact authorization command:
+
+          \`${command}\`
+          EOF
+          gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/minute-proposal.md
+
+      - name: Upload read-only activation preparation evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: r5-revision4-minute-activation-prepare
+          path: r5-revision4-minute-activation-evidence
+          retention-days: 14
+
+  execute:
+    if: >-
+      github.event.issue.number == 1261 &&
+      github.event.comment.user.login == 'badjoke-lab' &&
+      startsWith(github.event.comment.body, '/r5-revision4-minute-activate ')
+    runs-on: ubuntu-24.04
+    env:
+      AUTHORIZATION_BODY: ${{ github.event.comment.body }}
+      AUTHORIZATION_CREATED_AT: ${{ github.event.comment.created_at }}
+      AUTHORIZATION_COMMENT_ID: ${{ github.event.comment.id }}
+    steps:
+      - name: Check out exact current main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Parse and bind exact owner authorization
+        id: auth
+        run: |
+          set -euo pipefail
+          regex='^/r5-revision4-minute-activate commit=([a-f0-9]{40}) migration=([a-f0-9]{64}) r5=([a-f0-9]{64}) driver=([a-f0-9]{64}) switch=([a-f0-9]{64}) rollback=([a-f0-9]{64}) inspector=([a-f0-9]{64}) applier=([a-f0-9]{64}) project=([a-f0-9]{64}) job=([0-9]+) command=([a-f0-9]{64}) mode=([a-z0-9_]+) snapshot=([A-Za-z0-9._:-]+) projected=([0-9]+) run_watermark=([0-9]+) active_floor=([0-9]+) drift=([0-9]+) migration_max=([0-9]+) prepare_run=([0-9]+) expires=([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z) nonce=([a-f0-9]{16})$'
+          [[ "$AUTHORIZATION_BODY" =~ $regex ]] || { echo 'minute activation authorization shape mismatch' >&2; exit 1; }
+          names=(commit migration_sha r5_sha driver_sha switch_sha rollback_sha inspector_sha applier_sha project_digest job_id command_digest activation_mode snapshot_id projected_31d run_watermark active_floor drift migration_max prepare_run expires nonce)
+          for index in "${!names[@]}"; do
+            printf '%s=%s\n' "${names[$index]}" "${BASH_REMATCH[$((index + 1))]}" >> "$GITHUB_OUTPUT"
+          done
+          test "${BASH_REMATCH[1]}" = "$(git rev-parse HEAD)"
+          test "${BASH_REMATCH[2]}" = "$(sha256sum "$TARGET_MIGRATION_PATH" | awk '{print $1}')"
+          test "${BASH_REMATCH[3]}" = "$(sha256sum "$R5_FUNCTION_PATH" | awk '{print $1}')"
+          test "${BASH_REMATCH[4]}" = "$(sha256sum "$MINUTE_FUNCTION_PATH" | awk '{print $1}')"
+          test "${BASH_REMATCH[5]}" = "$(sha256sum scripts/switch-r5-revision4-minute-scheduler.mjs | awk '{print $1}')"
+          test "${BASH_REMATCH[6]}" = "$(sha256sum scripts/rollback-r5-revision4-minute-scheduler.mjs | awk '{print $1}')"
+          test "${BASH_REMATCH[7]}" = "$(sha256sum scripts/inspect-r5-revision4-minute-state.mjs | awk '{print $1}')"
+          test "${BASH_REMATCH[8]}" = "$(sha256sum scripts/apply-r5-revision4-minute-migration.mjs | awk '{print $1}')"
+          actual_project_digest="$(printf '%s' "$SUPABASE_PROJECT_ID" | sha256sum | awk '{print $1}')"
+          test "${BASH_REMATCH[9]}" = "$actual_project_digest"
+          test "${BASH_REMATCH[14]}" -lt "$INVOCATION_HALT_31D"
+          test "${BASH_REMATCH[18]}" = '20260811061000'
+          expires_epoch="$(date -u -d "${BASH_REMATCH[20]}" +%s)"
+          auth_epoch="$(date -u -d "$AUTHORIZATION_CREATED_AT" +%s)"
+          now_epoch="$(date -u +%s)"
+          test "$auth_epoch" -lt "$expires_epoch"
+          test "$now_epoch" -le "$expires_epoch"
+          test $((expires_epoch - auth_epoch)) -le 7200
+
+      - name: Verify exact prior proposal and unique authorization
+        env:
+          PREPARE_RUN: ${{ steps.auth.outputs.prepare_run }}
+        run: |
+          set -euo pipefail
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${QUALIFICATION_ISSUE}/comments?per_page=100" | jq -s 'add' > /tmp/minute-comments.json
+          EXPECTED="$AUTHORIZATION_BODY" PREPARE="$PREPARE_RUN" AUTH_ID="$AUTHORIZATION_COMMENT_ID" node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs'
+          const comments = JSON.parse(readFileSync('/tmp/minute-comments.json', 'utf8'))
+          const expected = process.env.EXPECTED
+          const prepare = process.env.PREPARE
+          const authId = Number(process.env.AUTH_ID)
+          const proposals = comments.filter((comment) => comment?.user?.login === 'github-actions[bot]' && typeof comment?.body === 'string' && comment.body.includes(`Preparation run: \`${prepare}\``) && comment.body.includes(`\`${expected}\``))
+          if (proposals.length !== 1) throw new Error(`expected one exact minute activation proposal, found ${proposals.length}`)
+          const authorizations = comments.filter((comment) => comment?.user?.login === 'badjoke-lab' && comment?.body === expected)
+          if (authorizations.length !== 1 || Number(authorizations[0].id) !== authId) throw new Error('minute activation authorization is not unique')
+          NODE
+
+      - name: Reverify old scheduler and live activation state read-only
+        id: live
+        env:
+          EXPECTED_JOB: ${{ steps.auth.outputs.job_id }}
+          EXPECTED_COMMAND: ${{ steps.auth.outputs.command_digest }}
+          EXPECTED_PROJECT: ${{ steps.auth.outputs.project_digest }}
+          EXPECTED_MODE: ${{ steps.auth.outputs.activation_mode }}
+          EXPECTED_SNAPSHOT: ${{ steps.auth.outputs.snapshot_id }}
+          EXPECTED_PROJECTED: ${{ steps.auth.outputs.projected_31d }}
+          EXPECTED_RUN_WATERMARK: ${{ steps.auth.outputs.run_watermark }}
+          ACTIVE_FLOOR: ${{ steps.auth.outputs.active_floor }}
+        run: |
+          set -euo pipefail
+          mkdir -p r5-revision4-minute-activation-evidence
+          node scripts/prepare-r4f-g3-isolated-window.mjs > r5-revision4-minute-activation-evidence/scheduler-recheck.json
+          test "$(jq -r '.jobId' r5-revision4-minute-activation-evidence/scheduler-recheck.json)" = "$EXPECTED_JOB"
+          test "$(jq -r '.commandDigest' r5-revision4-minute-activation-evidence/scheduler-recheck.json)" = "$EXPECTED_COMMAND"
+          test "$(jq -r '.projectIdentityDigest' r5-revision4-minute-activation-evidence/scheduler-recheck.json)" = "$EXPECTED_PROJECT"
+          test "$(jq -r '.schedule' r5-revision4-minute-activation-evidence/scheduler-recheck.json)" = '* * * * *'
+          node scripts/inspect-r5-revision4-minute-state.mjs r5-revision4-minute-activation-evidence/state-recheck.json
+          test "$(jq -r '.activationMode' r5-revision4-minute-activation-evidence/state-recheck.json)" = "$EXPECTED_MODE"
+          test "$(jq -r '.resourceSnapshot.snapshotId' r5-revision4-minute-activation-evidence/state-recheck.json)" = "$EXPECTED_SNAPSHOT"
+          test "$(jq -r '.resourceSnapshot.projectedInvocations31d' r5-revision4-minute-activation-evidence/state-recheck.json)" = "$EXPECTED_PROJECTED"
+          test "$(jq -r '.run.currentWatermarkLedgerIndex' r5-revision4-minute-activation-evidence/state-recheck.json)" = "$EXPECTED_RUN_WATERMARK"
+          test "$(jq -r '.activeWatermark.ledgerIndex' r5-revision4-minute-activation-evidence/state-recheck.json)" -ge "$ACTIVE_FLOOR"
+          jq -e '.resourceSnapshot.fresh == true and .resourceSnapshot.projectedInvocations31d < 400000' r5-revision4-minute-activation-evidence/state-recheck.json >/dev/null
+          # provider_snapshot_stale and r5_recovery_monthly_invocation_halt remain fail-closed states.
+          # Production Management API mutations below are explicitly read_only:false; all state checks above are read_only:true.
+
+      - name: Set up Supabase CLI
+        uses: supabase/setup-cli@3c2f5e2ae34c34e428e8e206e2c4d21fa2d20fbf
+        with:
+          version: latest
+
+      - name: Pause exact old collector with automatic restore watchdog
+        id: pause
+        env:
+          JOB_ID: ${{ steps.auth.outputs.job_id }}
+          COMMAND_DIGEST: ${{ steps.auth.outputs.command_digest }}
+          PROJECT_DIGEST: ${{ steps.auth.outputs.project_digest }}
+        run: |
+          set -euo pipefail
+          node scripts/manage-r4f-g3-isolated-window.mjs \
+            --mode pause \
+            --expected-job-id "$JOB_ID" \
+            --expected-command-digest "$COMMAND_DIGEST" \
+            --expected-project-digest "$PROJECT_DIGEST" \
+            --output-directory r5-revision4-minute-activation-evidence/isolation \
+            > r5-revision4-minute-activation-evidence/pause.json
+
+      - name: Reverify quiescent boundary before mutation
+        run: |
+          set -euo pipefail
+          node scripts/inspect-r5-revision4-minute-state.mjs r5-revision4-minute-activation-evidence/state-paused.json
+          jq -e '.resourceSnapshot.fresh == true and .migration.targetApplied == false' r5-revision4-minute-activation-evidence/state-paused.json >/dev/null
+
+      - name: Apply exactly one continuous-head migration
+        env:
+          MIGRATION_SHA: ${{ steps.auth.outputs.migration_sha }}
+        run: |
+          set -euo pipefail
+          node scripts/apply-r5-revision4-minute-migration.mjs \
+            --migration "$TARGET_MIGRATION_PATH" \
+            --expected-sha "$MIGRATION_SHA" \
+            --output-directory r5-revision4-minute-activation-evidence
+
+      - name: Deploy exact revision4 R5 executor
+        run: |
+          set -euo pipefail
+          supabase functions deploy "$R5_FUNCTION" --project-ref "$SUPABASE_PROJECT_ID" --use-api --no-verify-jwt
+
+      - name: Deploy exact one-minute driver
+        run: |
+          set -euo pipefail
+          supabase functions deploy "$MINUTE_FUNCTION" --project-ref "$SUPABASE_PROJECT_ID" --use-api --no-verify-jwt
+
+      - name: Resolve exactly one elevated project API key
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+            "https://api.supabase.com/v1/projects/${SUPABASE_PROJECT_ID}/api-keys?reveal=true" > /tmp/minute-api-keys.json
+          default_secret_count="$(jq '[.[] | select(.type == "secret" and .name == "default")] | length' /tmp/minute-api-keys.json)"
+          legacy_count="$(jq '[.[] | select(.type == "legacy" and (.name == "service_role" or ((.secret_jwt_template.role // "") == "service_role")))] | length' /tmp/minute-api-keys.json)"
+          if [ "$default_secret_count" -eq 1 ]; then
+            elevated_key="$(jq -r '[.[] | select(.type == "secret" and .name == "default")][0].api_key // empty' /tmp/minute-api-keys.json)"
+            elevated_kind=secret
+          elif [ "$default_secret_count" -eq 0 ] && [ "$legacy_count" -eq 1 ]; then
+            elevated_key="$(jq -r '[.[] | select(.type == "legacy" and (.name == "service_role" or ((.secret_jwt_template.role // "") == "service_role")))][0].api_key // empty' /tmp/minute-api-keys.json)"
+            elevated_kind=legacy
+          else
+            echo 'Unable to select exactly one elevated Supabase API key.' >&2
+            exit 1
+          fi
+          test -n "$elevated_key"
+          echo "::add-mask::${elevated_key}"
+          printf 'SUPABASE_MINUTE_KEY=%s\nSUPABASE_MINUTE_KEY_KIND=%s\n' "$elevated_key" "$elevated_kind" >> "$GITHUB_ENV"
+          rm -f /tmp/minute-api-keys.json
+
+      - name: Run real Devnet history smoke through minute driver
+        id: smoke
+        run: |
+          set -euo pipefail
+          headers=(-H 'content-type: application/json' -H "apikey: ${SUPABASE_MINUTE_KEY}")
+          if [ "$SUPABASE_MINUTE_KEY_KIND" = legacy ]; then
+            headers+=(-H "Authorization: Bearer ${SUPABASE_MINUTE_KEY}")
+          fi
+          curl --fail-with-body --silent --show-error \
+            "${headers[@]}" \
+            --data '{"source":"manual_smoke"}' \
+            "https://${SUPABASE_PROJECT_ID}.supabase.co/functions/v1/${MINUTE_FUNCTION}" \
+            > r5-revision4-minute-activation-evidence/manual-smoke.json
+          jq -e \
+            '.ok == true and .runId == "r5-recovery-selected-revision4-entry" and .batchesCommitted >= 1 and .ledgersCommitted >= 1 and .batchLedgerCap == 12 and .steadyBatchTarget == 2 and .catchupBatchCap == 3 and .publicReaderMutationOnlyThroughR5AtomicCompletion == true and .mainnetDisabled == true and ([.batchResults[] | select(.claimed == true) | (.completionAcknowledged == true and .activeMutationCommitted == true)] | all)' \
+            r5-revision4-minute-activation-evidence/manual-smoke.json >/dev/null
+          echo "committed_ledgers=$(jq -r '.ledgersCommitted' r5-revision4-minute-activation-evidence/manual-smoke.json)" >> "$GITHUB_OUTPUT"
+          echo "watermark=$(jq -r '.finalWatermarkLedgerIndex' r5-revision4-minute-activation-evidence/manual-smoke.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Switch existing every-minute scheduler to minute driver
+        id: switch
+        env:
+          COMMAND_DIGEST: ${{ steps.auth.outputs.command_digest }}
+          PROJECT_DIGEST: ${{ steps.auth.outputs.project_digest }}
+        run: |
+          set -euo pipefail
+          node scripts/switch-r5-revision4-minute-scheduler.mjs \
+            --expected-command-digest "$COMMAND_DIGEST" \
+            --expected-project-digest "$PROJECT_DIGEST" \
+            --output-directory r5-revision4-minute-activation-evidence \
+            > r5-revision4-minute-activation-evidence/switch-output.txt
+          jq -e '.switched == true and .schedule == "* * * * *" and .newFunction == "xrpl-r5-minute-driver" and .active == true' \
+            r5-revision4-minute-activation-evidence/scheduler-switch.json >/dev/null
+          echo 'switched=true' >> "$GITHUB_OUTPUT"
+
+      - name: Verify natural every-minute continuation
+        env:
+          SMOKE_WATERMARK: ${{ steps.smoke.outputs.watermark }}
+        run: |
+          set -euo pipefail
+          query="select status,current_watermark_ledger_index,committed_ledgers,completed_batches,last_error,updated_at from xrpl_r5_v1.recovery_runs where run_id='r5-recovery-selected-revision4-entry';"
+          advanced=false
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            sleep 15
+            jq -n --arg query "$query" '{query:$query,parameters:[],read_only:true}' > /tmp/minute-natural-query.json
+            curl --fail-with-body --silent --show-error \
+              -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+              -H 'content-type: application/json' \
+              --data @/tmp/minute-natural-query.json \
+              "https://api.supabase.com/v1/projects/${SUPABASE_PROJECT_ID}/database/query" \
+              > /tmp/minute-natural-state.json
+            watermark="$(jq -r '.. | objects | .current_watermark_ledger_index? // empty' /tmp/minute-natural-state.json | head -n1)"
+            last_error="$(jq -r '.. | objects | .last_error? // empty' /tmp/minute-natural-state.json | head -n1)"
+            if [ -n "$last_error" ] && [ "$last_error" != null ]; then
+              echo "natural minute runtime reported error: $last_error" >&2
+              exit 1
+            fi
+            if [[ "$watermark" =~ ^[0-9]+$ ]] && [ "$watermark" -gt "$SMOKE_WATERMARK" ]; then
+              cp /tmp/minute-natural-state.json r5-revision4-minute-activation-evidence/natural-minute-state.json
+              advanced=true
+              break
+            fi
+          done
+          test "$advanced" = true
+
+      - name: Roll back scheduler on any activation failure
+        if: failure()
+        continue-on-error: true
+        env:
+          JOB_ID: ${{ steps.auth.outputs.job_id }}
+          COMMAND_DIGEST: ${{ steps.auth.outputs.command_digest }}
+          PROJECT_DIGEST: ${{ steps.auth.outputs.project_digest }}
+        run: |
+          set +e
+          mkdir -p r5-revision4-minute-activation-evidence
+          node scripts/rollback-r5-revision4-minute-scheduler.mjs \
+            > r5-revision4-minute-activation-evidence/rollback-output.json 2>&1
+          rollback_rc=$?
+          if [ "$rollback_rc" -ne 0 ]; then
+            node scripts/manage-r4f-g3-isolated-window.mjs \
+              --mode resume \
+              --expected-job-id "$JOB_ID" \
+              --expected-command-digest "$COMMAND_DIGEST" \
+              --expected-project-digest "$PROJECT_DIGEST" \
+              --output-directory r5-revision4-minute-activation-evidence/isolation \
+              > r5-revision4-minute-activation-evidence/resume-output.json 2>&1
+          fi
+          exit 0
+
+      - name: Upload minute activation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r5-revision4-minute-activation-evidence
+          path: r5-revision4-minute-activation-evidence
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Publish minute activation result
+        if: always()
+        env:
+          PREPARE_RUN: ${{ steps.auth.outputs.prepare_run }}
+          SOURCE_COMMIT: ${{ steps.auth.outputs.commit }}
+          SWITCHED: ${{ steps.switch.outputs.switched }}
+          SMOKE_LEDGERS: ${{ steps.smoke.outputs.committed_ledgers }}
+          SMOKE_WATERMARK: ${{ steps.smoke.outputs.watermark }}
+        run: |
+          set -euo pipefail
+          verdict=FAIL
+          if [ "${{ job.status }}" = success ]; then verdict=PASS; fi
+          cat > /tmp/minute-result.md <<EOF
+          ## R5 revision-4 one-minute activation — ${verdict}
+
+          Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+          Source commit: \`${SOURCE_COMMIT:-unavailable}\`
+          Preparation run: \`${PREPARE_RUN:-unavailable}\`
+          Existing Supabase schedule retained: \`* * * * *\`
+          Manual smoke committed ledgers: \`${SMOKE_LEDGERS:-unavailable}\`
+          Manual smoke watermark: \`${SMOKE_WATERMARK:-unavailable}\`
+          Scheduler switched to \`xrpl-r5-minute-driver\`: \`${SWITCHED:-false}\`
+
+          PASS requires a real Devnet R5 history batch plus a later natural pg_cron invocation that advances the canonical watermark. On failure the workflow attempts to restore the old \`xrpl-collector-tick\` minute scheduler. Resource guards remain fail-closed.
+
+          No Mainnet, stabilization, soak, or history reduction is authorized by this operation.
+          EOF
+          gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/minute-result.md
