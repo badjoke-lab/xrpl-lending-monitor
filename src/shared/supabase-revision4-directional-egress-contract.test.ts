@@ -6,6 +6,7 @@ import {
   SUPABASE_REVISION4_BYTE_BOUNDARIES,
   SUPABASE_REVISION4_FIXED_GUARDS,
   SUPABASE_REVISION4_G1_CONTRACT,
+  SUPABASE_REVISION4_G3_SOURCE_BACKED_BILLING_AMENDMENT,
   SUPABASE_REVISION4_PROFILE,
   SUPABASE_REVISION4_PROFILE_IDENTITY_DIGEST,
 } from './supabase-revision4-directional-egress-contract'
@@ -71,11 +72,31 @@ describe('Supabase revision-4 directional egress G1 contract', () => {
     expect(result.memoryTransportBytes).toBe(21_000)
   })
 
-  it('conservatively includes unresolved internal and outbound classes until G3', () => {
+  it('excludes same-project database traffic from rolling egress after the source-backed G3 amendment', () => {
+    expect(SUPABASE_REVISION4_G3_SOURCE_BACKED_BILLING_AMENDMENT).toMatchObject({
+      qualificationIssue: 1261,
+      providerMeasurementResult: 'provider_surface_unqualifiable',
+      unchangedGuards: true,
+    })
     for (const boundaryId of [
-      'edge_to_xrpl_request',
       'edge_to_database_request',
       'database_to_edge_response',
+    ] as const) {
+      const boundary = SUPABASE_REVISION4_BYTE_BOUNDARIES[boundaryId]
+      expect(boundary.rollingEgressTreatment).toBe(
+        'exclude_provider_internal_source_backed',
+      )
+      expect(boundary.countsTowardRollingBillableEgressUpperBound).toBe(false)
+      expect(boundary.countsTowardMemoryTransport).toBe(true)
+      expect(boundary.qualificationState).toBe(
+        'resolved_source_backed_after_g3_unqualifiable',
+      )
+    }
+  })
+
+  it('keeps unresolved external and function-to-function classes conservative', () => {
+    for (const boundaryId of [
+      'edge_to_xrpl_request',
       'edge_to_edge_request',
       'edge_to_edge_response',
     ] as const) {
