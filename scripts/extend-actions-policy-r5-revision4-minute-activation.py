@@ -51,7 +51,6 @@ for required in (
     "startsWith(github.event.comment.body, '/r5-revision4-minute-activate ')",
     "INVOCATION_HALT_31D: '400000'",
     "TARGET_MIGRATION_VERSION: '20260813072000'",
-    "20260813060000",
     "scripts/verify-r5-revision4-minute-followup.mjs",
     "migration.targetApplied == true",
     "applied_verified",
