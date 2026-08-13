@@ -7,8 +7,6 @@ const BATCH_LEDGER_CAP = 12
 const MAX_DRIVER_ELAPSED_BEFORE_EXTRA_BATCH_MS = 90_000
 const DOWNSTREAM_TIMEOUT_MS = 60_000
 
-type JsonObject = Record<string, unknown>
-
 type Head = {
   index: number
   hash: string
@@ -191,7 +189,7 @@ Deno.serve(async (request) => {
     return jsonResponse({ ok: false, error: 'unauthorized' }, 401)
   }
 
-  let body: { source?: unknown; scheduled_at?: unknown } = {}
+  let body: { source?: unknown; scheduled_at?: unknown }
   try {
     body = await request.json() as { source?: unknown; scheduled_at?: unknown }
   } catch {
