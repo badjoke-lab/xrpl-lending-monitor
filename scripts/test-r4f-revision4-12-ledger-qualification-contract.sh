@@ -193,4 +193,34 @@ do
   fi
 done
 
+python - "$workflow" <<'PY_CANDIDATE_SHELL'
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+
+workflow_text = Path(sys.argv[1]).read_text()
+start_marker = '      - name: Execute exactly one production-shaped 12-ledger candidate batch\n'
+end_marker = '\n      - name: Restore exact collector immediately after candidate attempt\n'
+if workflow_text.count(start_marker) != 1 or workflow_text.count(end_marker) != 1:
+    raise SystemExit('candidate step markers drifted')
+section = workflow_text.split(start_marker, 1)[1].split(end_marker, 1)[0]
+run_marker = '        run: |\n'
+if section.count(run_marker) != 1:
+    raise SystemExit('candidate run block marker drifted')
+shell_block = section.split(run_marker, 1)[1]
+shell_lines = []
+for line in shell_block.splitlines():
+    if line:
+        if not line.startswith('          '):
+            raise SystemExit(f'candidate shell line lost YAML indentation: {line!r}')
+        shell_lines.append(line[10:])
+    else:
+        shell_lines.append('')
+with tempfile.NamedTemporaryFile('w', suffix='.sh', delete=False) as handle:
+    handle.write('\n'.join(shell_lines) + '\n')
+    shell_path = handle.name
+subprocess.run(['bash', '-n', shell_path], check=True)
+PY_CANDIDATE_SHELL
+
 printf '%s\n' 'R4F revision-4 exact 12-ledger qualification contract: PASS'
