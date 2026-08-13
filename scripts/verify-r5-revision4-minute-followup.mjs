@@ -14,8 +14,8 @@ if (accessToken.length < 20) throw new Error('SUPABASE_ACCESS_TOKEN unavailable'
 
 const migration = await readFile(migrationPath, 'utf8')
 const migrationSha256 = createHash('sha256').update(migration).digest('hex')
-const expectedMarker = `exact-minute-activation-followup sha256:${migrationSha256}`
 const endpoint = `https://api.supabase.com/v1/projects/${projectRef}/database/query`
+const sha256 = (value) => createHash('sha256').update(value).digest('hex')
 
 function parseJson(text) {
   try { return JSON.parse(text) } catch { return { raw: text.slice(0, 2000) } }
@@ -51,18 +51,24 @@ const history = await query(
 if (history.length !== 1) throw new Error(`follow-up migration history expected once, found ${history.length}`)
 const row = history[0]
 if (row.version !== version || row.name !== migrationName) throw new Error('follow-up migration identity mismatch')
-const historyStatements = Array.isArray(row.statements) ? row.statements.map((value) => String(value)) : []
-const exactCustomMarker = historyStatements.length === 1 && historyStatements[0] === expectedMarker
-const historyShape = {
-  version: row.version,
-  name: row.name,
-  statementCount: historyStatements.length,
-  statementsSha256: createHash('sha256').update(JSON.stringify(historyStatements)).digest('hex'),
-  statementPrefixes: historyStatements.slice(0, 5).map((value) => value.slice(0, 160)),
-  expectedCustomMarker: expectedMarker,
-  exactCustomMarker,
+if (!Array.isArray(row.statements) || row.statements.length !== 4) {
+  throw new Error(`follow-up migration expected four Supabase statements, found ${Array.isArray(row.statements) ? row.statements.length : 'non-array'}`)
 }
-console.log(JSON.stringify({ purpose: 'minute-followup-history-shape', ...historyShape }))
+const historyStatements = row.statements.map((value) => String(value))
+const strippedStatements = historyStatements.map((value) => value.replace(/;\s*$/u, ''))
+const reconstructionCandidates = new Map()
+for (const statements of [historyStatements, strippedStatements]) {
+  for (const separator of [';\n\n', ';\n']) {
+    for (const ending of [';\n', ';']) {
+      const reconstructed = statements.join(separator) + ending
+      reconstructionCandidates.set(sha256(reconstructed), { separator, ending, stripped: statements === strippedStatements })
+    }
+  }
+}
+const exactReconstruction = reconstructionCandidates.get(migrationSha256) ?? null
+if (!exactReconstruction) {
+  throw new Error(`split Supabase migration history does not reconstruct repository source; migrationSha=${migrationSha256} candidateShas=${[...reconstructionCandidates.keys()].join(',')}`)
+}
 
 const maxRows = await query('select max(version::text) as max_version from supabase_migrations.schema_migrations')
 if (maxRows.length !== 1 || maxRows[0].max_version !== version) throw new Error('unexpected migration exists after minute follow-up')
@@ -94,16 +100,19 @@ if (fn.security_definer !== true || fn.anon_execute !== false || fn.authenticate
 }
 
 const evidence = {
-  schemaVersion: 2,
+  schemaVersion: 3,
   purpose: 'r5-revision4-minute-followup-provenance',
   version,
   migrationName,
   migrationPath,
   migrationSha256,
-  historyShape,
-  historyExact: exactCustomMarker,
+  historyStatementCount: historyStatements.length,
+  historyStatementsSha256: sha256(JSON.stringify(historyStatements)),
+  historyExact: true,
+  historyStorageShape: 'supabase_split_statements',
+  reconstruction: exactReconstruction,
   currentMaxMigrationVersion: version,
-  functionDefinitionSha256: createHash('sha256').update(definition).digest('hex'),
+  functionDefinitionSha256: sha256(definition),
   functionContractVerified: true,
   resourceGuardUnchanged: true,
   mainnetDisabled: true,
@@ -112,7 +121,3 @@ const evidence = {
 await mkdir(outputPath.split('/').slice(0, -1).join('/') || '.', { recursive: true })
 await writeFile(outputPath, `${JSON.stringify(evidence, null, 2)}\n`)
 console.log(JSON.stringify(evidence))
-
-if (!exactCustomMarker) {
-  throw new Error(`follow-up migration history uses a different writer shape; statementCount=${historyStatements.length} statementsSha256=${historyShape.statementsSha256}`)
-}
