@@ -7,8 +7,11 @@ const evidencePath =
 const outputPath =
   process.env.R4F_G2D_SQL ??
   'r4f-revision4-offline-shadow-evidence/postgres-integration.sql'
+const billingAmendmentPath =
+  'supabase/migrations/20260813142000_xrpl_revision4_source_backed_internal_db_egress.sql'
 
 const result = JSON.parse(await readFile(evidencePath, 'utf8'))
+const billingAmendmentSql = await readFile(billingAmendmentPath, 'utf8')
 const accountingJson = result?.accountingEvidence?.accountingJson
 const accountingDigest = result?.accountingEvidence?.accountingDigest
 const requestBody = JSON.parse(result?.persistenceRpcRequestBody ?? '{}')
@@ -65,7 +68,7 @@ const sourceCommitLiteral = dollarQuote(
   'r4f_commit',
 )
 
-const sql = `\\set ON_ERROR_STOP on
+const sql = `${billingAmendmentSql}\n\n\\set ON_ERROR_STOP on
 begin;
 
 do $r4f_test$
@@ -196,6 +199,7 @@ await writeFile(outputPath, sql)
 process.stdout.write(
   JSON.stringify({
     outputPath,
+    billingAmendmentPath,
     observationId,
     accountingDigest,
     conflictingDigest,
