@@ -18,8 +18,8 @@ def replace_once(name: str, old: str, new: str) -> None:
 
 replace_once(
     'revision4 invocation probe workflow allowlist entry',
-    '  r4f-revision4-residue-cleanup.yml\n  r5-bounded-recovery-burst.yml',
-    '  r4f-revision4-residue-cleanup.yml\n  r4f-revision4-invocation-probe.yml\n  r5-bounded-recovery-burst.yml',
+    '  r4f-revision4-12-ledger-qualification.yml\n  r4f-revision4-partial-state-probe.yml',
+    '  r4f-revision4-12-ledger-qualification.yml\n  r4f-revision4-invocation-probe.yml\n  r4f-revision4-partial-state-probe.yml',
 )
 replace_once(
     'revision4 invocation probe workflow count',
