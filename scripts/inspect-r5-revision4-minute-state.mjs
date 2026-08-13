@@ -6,8 +6,10 @@ const projectRef = process.env.SUPABASE_PROJECT_ID ?? ''
 const accessToken = process.env.SUPABASE_ACCESS_TOKEN ?? ''
 const invocationHalt31d = 400000
 const targetMigrationVersion = '20260813060000'
+const priorMigrationVersion = '20260811061000'
 const runId = 'r5-recovery-selected-revision4-entry'
 const profileDigest = '39e8b620a20bb08fbe8306fe753d4d445c5191bcafddbf67721e0c17d5b6bcd5'
+const continuousSignature = 'public.xrpl_refresh_r5_revision4_continuous_head(text,bigint,text,timestamp with time zone)'
 
 if (!/^[a-z]{20}$/u.test(projectRef)) throw new Error('SUPABASE_PROJECT_ID must be exact')
 if (accessToken.length < 20) throw new Error('SUPABASE_ACCESS_TOKEN unavailable')
@@ -155,16 +157,71 @@ if (
 }
 
 const migrationRows = await query(
-  `select version::text as version
+  `select version::text as version, name, statements
      from supabase_migrations.schema_migrations
     where version::text = $1::text`,
   [targetMigrationVersion],
 )
-if (migrationRows.length !== 0) throw new Error('target continuous-head migration is already applied before activation')
-
+if (migrationRows.length > 1) throw new Error('target continuous-head migration is duplicated')
+const targetApplied = migrationRows.length === 1
 const migrationMax = exactlyOne(await query(
   `select max(version::text) as max_version from supabase_migrations.schema_migrations`,
 ), 'migration max')
+const currentMaxMigrationVersion = String(migrationMax.max_version ?? '')
+if (targetApplied && currentMaxMigrationVersion !== targetMigrationVersion) {
+  throw new Error(`unexpected migration exists after target:${currentMaxMigrationVersion}`)
+}
+if (!targetApplied && currentMaxMigrationVersion !== priorMigrationVersion) {
+  throw new Error(`unexpected migration boundary before target:${currentMaxMigrationVersion}`)
+}
+
+let appliedContractVerified = false
+let appliedFunctionDefinitionDigest = null
+let appliedMigrationStatementsDigest = null
+let appliedContractChecks = null
+if (targetApplied) {
+  const contract = exactlyOne(await query(
+    `select p.prosecdef as security_definer,
+            pg_get_functiondef(p.oid) as function_definition,
+            has_function_privilege('anon', p.oid, 'EXECUTE') as anon_execute,
+            has_function_privilege('authenticated', p.oid, 'EXECUTE') as authenticated_execute,
+            has_function_privilege('service_role', p.oid, 'EXECUTE') as service_role_execute
+       from pg_proc p
+      where p.oid = to_regprocedure($1::text)`,
+    [continuousSignature],
+  ), 'applied continuous-head function')
+  const definition = String(contract.function_definition ?? '')
+  const requiredMarkers = [
+    'r5-recovery-selected-revision4-entry',
+    profileDigest,
+    'v_invocation_halt constant bigint := 400000',
+    'r5_recovery_monthly_invocation_halt',
+    'provider_snapshot_stale',
+    'monthly_invocation_halt',
+    'public.xrpl_rebind_r5_revision4_prebatch_recovery_to_active_boundary(',
+    'active_boundary_drift_requires_operator',
+    'invocation_halt_rearmed_and_active_boundary_rebound',
+    'claimResourceGuardsStillRequired',
+    'mainnetDisabled',
+  ]
+  const markers = Object.fromEntries(requiredMarkers.map((marker) => [marker, definition.includes(marker)]))
+  appliedContractChecks = {
+    securityDefiner: contract.security_definer === true,
+    anonExecuteRevoked: contract.anon_execute === false,
+    authenticatedExecuteRevoked: contract.authenticated_execute === false,
+    serviceRoleExecuteGranted: contract.service_role_execute === true,
+    markers,
+  }
+  appliedContractVerified = appliedContractChecks.securityDefiner
+    && appliedContractChecks.anonExecuteRevoked
+    && appliedContractChecks.authenticatedExecuteRevoked
+    && appliedContractChecks.serviceRoleExecuteGranted
+    && Object.values(markers).every(Boolean)
+  appliedFunctionDefinitionDigest = createHash('sha256').update(definition).digest('hex')
+  appliedMigrationStatementsDigest = createHash('sha256')
+    .update(JSON.stringify(migrationRows[0].statements ?? null))
+    .digest('hex')
+}
 
 const totalBatches = integer(batchCounts.total, 'batch total')
 const leasedBatches = integer(batchCounts.leased, 'leased batches')
@@ -204,6 +261,10 @@ if (run.status === 'halted' && run.last_error === 'r5_recovery_monthly_invocatio
   throw new Error(`unsupported R5 activation state:${String(run.status)}:${String(run.last_error)}`)
 }
 
+const migrationState = targetApplied
+  ? (appliedContractVerified ? 'applied_verified' : 'applied_unverified')
+  : 'pending'
+
 const stableBinding = {
   projectIdentityDigest,
   activationMode,
@@ -234,12 +295,15 @@ const stableBinding = {
   maxBundleName: snapshot.max_bundle_name,
   bundleCount,
   targetMigrationVersion,
-  currentMaxMigrationVersion: migrationMax.max_version,
+  migrationState,
+  currentMaxMigrationVersion,
+  appliedFunctionDefinitionDigest,
+  appliedMigrationStatementsDigest,
 }
 const stateDigest = createHash('sha256').update(JSON.stringify(stableBinding)).digest('hex')
 
 const evidence = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   purpose: 'r5-revision4-minute-activation-state',
   projectIdentityDigest,
   run: {
@@ -288,8 +352,13 @@ const evidence = {
   },
   migration: {
     targetVersion: targetMigrationVersion,
-    targetApplied: false,
-    currentMaxVersion: migrationMax.max_version,
+    targetApplied,
+    migrationState,
+    currentMaxVersion: currentMaxMigrationVersion,
+    appliedContractVerified,
+    appliedFunctionDefinitionDigest,
+    appliedMigrationStatementsDigest,
+    appliedContractChecks,
   },
   activationMode,
   stateDigest,
@@ -312,7 +381,9 @@ if (process.env.GITHUB_OUTPUT) {
     `run_watermark_ledger_index=${runWatermarkLedger}`,
     `active_watermark_ledger_index=${activeWatermarkLedger}`,
     `boundary_drift_ledgers=${boundaryDriftLedgers}`,
-    `migration_max=${migrationMax.max_version ?? ''}`,
+    `migration_max=${currentMaxMigrationVersion}`,
+    `migration_state=${migrationState}`,
+    `migration_function_digest=${appliedFunctionDefinitionDigest ?? 'none'}`,
   ]
   const { appendFile } = await import('node:fs/promises')
   await appendFile(process.env.GITHUB_OUTPUT, `${lines.join('\n')}\n`)
