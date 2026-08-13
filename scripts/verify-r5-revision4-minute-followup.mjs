@@ -51,9 +51,18 @@ const history = await query(
 if (history.length !== 1) throw new Error(`follow-up migration history expected once, found ${history.length}`)
 const row = history[0]
 if (row.version !== version || row.name !== migrationName) throw new Error('follow-up migration identity mismatch')
-if (!Array.isArray(row.statements) || row.statements.length !== 1 || row.statements[0] !== expectedMarker) {
-  throw new Error('follow-up migration source marker does not match repository SHA')
+const historyStatements = Array.isArray(row.statements) ? row.statements.map((value) => String(value)) : []
+const exactCustomMarker = historyStatements.length === 1 && historyStatements[0] === expectedMarker
+const historyShape = {
+  version: row.version,
+  name: row.name,
+  statementCount: historyStatements.length,
+  statementsSha256: createHash('sha256').update(JSON.stringify(historyStatements)).digest('hex'),
+  statementPrefixes: historyStatements.slice(0, 5).map((value) => value.slice(0, 160)),
+  expectedCustomMarker: expectedMarker,
+  exactCustomMarker,
 }
+console.log(JSON.stringify({ purpose: 'minute-followup-history-shape', ...historyShape }))
 
 const maxRows = await query('select max(version::text) as max_version from supabase_migrations.schema_migrations')
 if (maxRows.length !== 1 || maxRows[0].max_version !== version) throw new Error('unexpected migration exists after minute follow-up')
@@ -85,14 +94,14 @@ if (fn.security_definer !== true || fn.anon_execute !== false || fn.authenticate
 }
 
 const evidence = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   purpose: 'r5-revision4-minute-followup-provenance',
   version,
   migrationName,
   migrationPath,
   migrationSha256,
-  historyMarker: expectedMarker,
-  historyExact: true,
+  historyShape,
+  historyExact: exactCustomMarker,
   currentMaxMigrationVersion: version,
   functionDefinitionSha256: createHash('sha256').update(definition).digest('hex'),
   functionContractVerified: true,
@@ -103,3 +112,7 @@ const evidence = {
 await mkdir(outputPath.split('/').slice(0, -1).join('/') || '.', { recursive: true })
 await writeFile(outputPath, `${JSON.stringify(evidence, null, 2)}\n`)
 console.log(JSON.stringify(evidence))
+
+if (!exactCustomMarker) {
+  throw new Error(`follow-up migration history uses a different writer shape; statementCount=${historyStatements.length} statementsSha256=${historyShape.statementsSha256}`)
+}
