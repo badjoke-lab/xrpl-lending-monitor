@@ -64,7 +64,9 @@ try {
 } catch (error) {
   try {
     await query('select cron.schedule($1::text, $2::text, $3::text) as job_id', [name, schedule, command], false)
-  } catch {}
+  } catch (recoveryError) {
+    console.error(`rollback recovery could not restore the new minute job: ${recoveryError instanceof Error ? recoveryError.message : String(recoveryError)}`)
+  }
   throw error
 }
 
