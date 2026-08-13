@@ -508,7 +508,7 @@ jobs:
             }
             if (/__[A-Z0-9_]+__/u.test(query)) throw new Error('unresolved compact checkpoint template token')
             writeFileSync('/tmp/checkpoint-query.sql', query)
-            NODE
+          NODE
             checkpoint_query="$(cat /tmp/checkpoint-query.sql)"
             jq -n --arg query "$checkpoint_query" '{query:$query,parameters:[],read_only:false}' > /tmp/checkpoint-query.json
             curl --fail-with-body --silent --show-error \
