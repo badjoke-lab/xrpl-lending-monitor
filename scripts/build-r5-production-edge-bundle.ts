@@ -46,7 +46,7 @@ if (isRecoveryEntry) {
   if (transformed.includes(selectionEnvName) || transformed.includes(reserveEnvName)) {
     throw new Error('production R5 fixed configuration still depends on legacy environment names')
   }
-  temporaryEntry = resolve(dirname(entry), `.production-r5-entry-${process.pid}.ts`)
+  temporaryEntry = resolve(dirname(entry), '.production-r5-entry.ts')
   await writeFile(temporaryEntry, transformed)
   buildEntry = temporaryEntry
   fixedConfigBound = true
