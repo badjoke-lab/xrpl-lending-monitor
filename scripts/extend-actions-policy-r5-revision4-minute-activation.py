@@ -19,7 +19,7 @@ def replace_once(name: str, old: str, new: str) -> None:
 replace_once(
     'minute activation workflow allowlist entry',
     '  r4f-revision4-resource-snapshot-refresh.yml\n  r5-bounded-recovery-burst.yml',
-    '  r4f-revision4-resource-snapshot-refresh.yml\n  r5-revision4-minute-activation.yml\n  r5-bounded-recovery-burst.yml',
+    '  r4f-revision4-resource-snapshot-refresh.yml\n  r5-bounded-recovery-burst.yml\n  r5-revision4-minute-activation.yml',
 )
 replace_once(
     'minute activation workflow count',
