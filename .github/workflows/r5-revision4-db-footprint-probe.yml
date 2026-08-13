@@ -49,7 +49,8 @@ jobs:
               pg_total_relation_size(c.oid)::bigint as total_bytes,
               pg_relation_size(c.oid)::bigint as heap_bytes,
               pg_indexes_size(c.oid)::bigint as index_bytes,
-              coalesce(s.n_live_tup, 0)::bigint as estimated_live_rows
+              coalesce(s.n_live_tup, 0)::bigint as estimated_live_rows,
+              coalesce(s.n_dead_tup, 0)::bigint as estimated_dead_rows
             from pg_class c
             join pg_namespace n on n.oid = c.relnamespace
             left join pg_stat_user_tables s on s.relid = c.oid
@@ -60,6 +61,17 @@ jobs:
             select schema_name, sum(total_bytes)::bigint as total_bytes
             from relations
             group by schema_name
+          ), cron_state as (
+            select
+              count(*)::bigint as exact_rows,
+              pg_total_relation_size('cron.job_run_details'::regclass)::bigint as total_bytes,
+              pg_relation_size('cron.job_run_details'::regclass)::bigint as heap_bytes,
+              pg_indexes_size('cron.job_run_details'::regclass)::bigint as index_bytes,
+              coalesce((select n_live_tup::bigint from pg_stat_user_tables where relid = 'cron.job_run_details'::regclass), 0) as estimated_live_rows,
+              coalesce((select n_dead_tup::bigint from pg_stat_user_tables where relid = 'cron.job_run_details'::regclass), 0) as estimated_dead_rows,
+              (select count(*)::bigint from pg_constraint where conrelid = 'cron.job_run_details'::regclass or confrelid = 'cron.job_run_details'::regclass) as foreign_key_constraints,
+              (select count(*)::bigint from pg_trigger where tgrelid = 'cron.job_run_details'::regclass and not tgisinternal) as user_triggers
+            from cron.job_run_details
           )
           select jsonb_build_object(
             'databaseBytes', pg_database_size(current_database())::bigint,
@@ -77,10 +89,23 @@ jobs:
                 'totalBytes', total_bytes,
                 'heapBytes', heap_bytes,
                 'indexBytes', index_bytes,
-                'estimatedLiveRows', estimated_live_rows
+                'estimatedLiveRows', estimated_live_rows,
+                'estimatedDeadRows', estimated_dead_rows
               ) order by total_bytes desc)
               from (select * from relations order by total_bytes desc limit 40) ranked
             ), '[]'::jsonb),
+            'cronJobRunDetails', (
+              select jsonb_build_object(
+                'exactRows', exact_rows,
+                'totalBytes', total_bytes,
+                'heapBytes', heap_bytes,
+                'indexBytes', index_bytes,
+                'estimatedLiveRows', estimated_live_rows,
+                'estimatedDeadRows', estimated_dead_rows,
+                'foreignKeyConstraints', foreign_key_constraints,
+                'userTriggers', user_triggers
+              ) from cron_state
+            ),
             'productionDatabaseReadOnly', true,
             'noDatabaseMutation', true,
             'noSchedulerMutation', true,
@@ -112,7 +137,11 @@ jobs:
             .mainnetDisabled == true and
             (.databaseBytes | type == "number") and
             (.schemas | type == "array") and
-            (.topRelations | type == "array")
+            (.topRelations | type == "array") and
+            (.cronJobRunDetails.exactRows | type == "number") and
+            (.cronJobRunDetails.totalBytes | type == "number") and
+            (.cronJobRunDetails.foreignKeyConstraints | type == "number") and
+            (.cronJobRunDetails.userTriggers | type == "number")
           ' r5-revision4-db-footprint-probe/footprint.json > /dev/null
 
       - name: Upload sanitized footprint evidence
@@ -133,6 +162,11 @@ jobs:
           headroom_bytes="$(jq -r '.databaseHeadroomBytes' "$f")"
           top_schemas="$(jq -r '[.schemas[:8][] | (.schema + "=" + (.totalBytes|tostring) + "B")] | join(", ")' "$f")"
           top_relations="$(jq -r '[.topRelations[:12][] | (.schema + "." + .relation + "=" + (.totalBytes|tostring) + "B")] | join("\n- ")' "$f")"
+          cron_exact_rows="$(jq -r '.cronJobRunDetails.exactRows' "$f")"
+          cron_total_bytes="$(jq -r '.cronJobRunDetails.totalBytes' "$f")"
+          cron_dead_rows="$(jq -r '.cronJobRunDetails.estimatedDeadRows' "$f")"
+          cron_fks="$(jq -r '.cronJobRunDetails.foreignKeyConstraints' "$f")"
+          cron_triggers="$(jq -r '.cronJobRunDetails.userTriggers' "$f")"
           cat > /tmp/body.md <<EOF
           ## R5 revision-4 database footprint read-only probe
 
@@ -142,6 +176,8 @@ jobs:
           Internal halt: \`${halt_bytes}\`
           Headroom: \`${headroom_bytes}\`
           Top schemas: ${top_schemas}
+
+          Exact cron.job_run_details preflight: rows=\`${cron_exact_rows}\`, size=\`${cron_total_bytes} B\`, estimated dead rows=\`${cron_dead_rows}\`, FK constraints=\`${cron_fks}\`, user triggers=\`${cron_triggers}\`.
 
           Top relations:
           - ${top_relations}
