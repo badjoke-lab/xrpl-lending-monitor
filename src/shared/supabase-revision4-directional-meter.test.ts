@@ -129,7 +129,7 @@ describe('Supabase revision-4 directional meter', () => {
     expect(evidence.accounting.checks.mainnetDisabled).toBe(true)
   })
 
-  it('keeps framing reserves explicit per operation', async () => {
+  it('keeps framing reserves explicit per operation while same-project database traffic remains memory-only', async () => {
     const meter = new SupabaseRevision4DirectionalMeter()
     meter.recordBytes({
       operationId: 'edge.database.request',
@@ -166,7 +166,23 @@ describe('Supabase revision-4 directional meter', () => {
         framingReserveBytes: 200,
       },
     ])
-    expect(evidence.accounting.rollingBillableEgressUpperBoundBytes).toBe(3_800)
+    expect(evidence.accounting.rollingBillableEgressUpperBoundBytes).toBe(500)
+    expect(evidence.accounting.directionalSummary.memoryTransportBytes).toBe(3_300)
+    expect(evidence.accounting.memoryTransportUpperBoundBytes).toBe(13_300)
+    expect(evidence.accounting.directionalSummary.byBoundary).toEqual([
+      {
+        boundaryId: 'edge_to_database_request',
+        totalBytes: 1_100,
+        rollingBillableEgressBytes: 0,
+        memoryTransportBytes: 1_100,
+      },
+      {
+        boundaryId: 'database_to_edge_response',
+        totalBytes: 2_200,
+        rollingBillableEgressBytes: 0,
+        memoryTransportBytes: 2_200,
+      },
+    ])
   })
 
   it('rejects duplicate operation identifiers and noncontiguous retained sequences', async () => {

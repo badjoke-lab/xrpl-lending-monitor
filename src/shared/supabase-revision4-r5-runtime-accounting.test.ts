@@ -85,7 +85,7 @@ describe('revision-4 R5 runtime accounting', () => {
     expect(callerResponse?.rollingBillableEgressBytes).toBeLessThan(128 * 1024)
   })
 
-  it('resolves the exact completion-request byte self-reference instead of billing the 2 MiB transport cap', async () => {
+  it('resolves the exact completion-request byte self-reference while retaining same-project database bytes in memory only', async () => {
     const result = await resolveSupabaseRevision4R5CompletionFixedPoint({
       observationId: 'r5.rev4.runtime.0003',
       attemptId: 'r5.rev4.runtime.attempt.0003',
@@ -123,7 +123,8 @@ describe('revision-4 R5 runtime accounting', () => {
       result.accountingEvidence.accounting.directionalSummary.byBoundary.find(
         (row) => row.boundaryId === 'edge_to_database_request',
       )
-    expect(databaseRequest?.rollingBillableEgressBytes).toBe(
+    expect(databaseRequest?.rollingBillableEgressBytes).toBe(0)
+    expect(databaseRequest?.memoryTransportBytes).toBe(
       900 + result.completionRequestBytes + 3 * 2_048,
     )
   })
