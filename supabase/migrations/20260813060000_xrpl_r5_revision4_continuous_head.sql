@@ -1,8 +1,13 @@
 -- Revision-4 continuous minute operation boundary.
 --
--- This does not weaken any R5 claim resource guard. It only refreshes the
--- retained validated-head ceiling used by the already-guarded revision-4
--- claim path and permits a run that reached its prior ceiling to continue.
+-- This does not weaken any R5 claim resource guard. It refreshes the retained
+-- validated-head ceiling used by the already-guarded revision-4 claim path and
+-- permits a run that reached its prior ceiling to continue. Before the first
+-- minute activation, a zero-progress prepared/invocation-halted run may have
+-- fallen behind the still-running canonical collector. In that case the
+-- already-proven revision-4 descendant-chain rebind is executed while the
+-- collector is quiescent; no ledger is skipped and no history row is deleted.
+--
 -- A run halted by the old stale-snapshot invocation fail-close may be rearmed
 -- only after a fresh provider snapshot below the unchanged 400,000/31d halt
 -- is present. The next batch claim still re-evaluates egress and invocation
@@ -24,10 +29,13 @@ declare
   v_watermark public.xrpl_phase_watermarks%rowtype;
   v_runtime public.xrpl_collector_runtime%rowtype;
   v_leased_batches integer;
+  v_total_batches bigint;
   v_snapshot_projection bigint;
   v_snapshot_observed_at timestamptz;
   v_rearmed boolean := false;
   v_reopened boolean := false;
+  v_rebound boolean := false;
+  v_rebind jsonb := null;
   v_status text;
   v_invocation_halt constant bigint := 400000;
 begin
@@ -58,21 +66,6 @@ begin
     raise exception 'r5_revision4_continuous_head_run_invalid';
   end if;
 
-  select * into v_watermark
-  from public.xrpl_phase_watermarks
-  where profile_id = 'supabase-devnet'
-  for update;
-
-  if not found
-    or v_watermark.network <> v_run.network
-    or v_watermark.epoch_id <> v_run.epoch_id
-    or v_watermark.base_identity <> v_run.base_identity
-    or v_watermark.ledger_index <> v_run.current_watermark_ledger_index
-    or v_watermark.ledger_hash <> v_run.current_watermark_ledger_hash
-    or v_watermark.work_id <> v_run.current_watermark_work_id then
-    raise exception 'r5_revision4_continuous_head_watermark_drift';
-  end if;
-
   select * into v_runtime
   from public.xrpl_collector_runtime
   where profile_id = 'supabase-devnet';
@@ -87,22 +80,17 @@ begin
     raise exception 'r5_revision4_continuous_head_collector_not_quiescent';
   end if;
 
-  select count(*)::integer into v_leased_batches
+  select
+    count(*)::bigint,
+    count(*) filter (
+      where status = 'leased' and lease_expires_at > p_refreshed_at
+    )::integer
+  into v_total_batches, v_leased_batches
   from xrpl_r5_v1.recovery_batches
-  where run_id = p_run_id
-    and status = 'leased'
-    and lease_expires_at > p_refreshed_at;
+  where run_id = p_run_id;
 
   if v_leased_batches <> 0 then
     raise exception 'r5_revision4_continuous_head_batch_lease_active';
-  end if;
-
-  if p_validated_head_ledger_index < v_watermark.ledger_index then
-    raise exception 'r5_revision4_continuous_head_behind_watermark';
-  end if;
-  if p_validated_head_ledger_index = v_watermark.ledger_index
-    and p_validated_head_ledger_hash <> v_watermark.ledger_hash then
-    raise exception 'r5_revision4_continuous_head_hash_conflict';
   end if;
 
   if v_run.status = 'halted' then
@@ -111,9 +99,18 @@ begin
         'refreshed', false,
         'reason', 'non_invocation_halt_requires_operator',
         'runId', v_run.run_id,
-        'error', v_run.last_error,
-        'watermarkLedgerIndex', v_watermark.ledger_index,
-        'validatedHeadLedgerIndex', p_validated_head_ledger_index
+        'error', v_run.last_error
+      );
+    end if;
+
+    if v_total_batches <> 0
+      or v_run.completed_batches <> 0
+      or v_run.committed_ledgers <> 0
+      or v_run.last_accounting_digest is not null then
+      return jsonb_build_object(
+        'refreshed', false,
+        'reason', 'invocation_halt_contains_recovery_progress',
+        'runId', v_run.run_id
       );
     end if;
 
@@ -129,9 +126,7 @@ begin
       return jsonb_build_object(
         'refreshed', false,
         'reason', 'provider_snapshot_stale',
-        'runId', v_run.run_id,
-        'watermarkLedgerIndex', v_watermark.ledger_index,
-        'validatedHeadLedgerIndex', p_validated_head_ledger_index
+        'runId', v_run.run_id
       );
     end if;
 
@@ -140,39 +135,94 @@ begin
         'refreshed', false,
         'reason', 'monthly_invocation_halt',
         'runId', v_run.run_id,
-        'providerProjectedInvocations31d', v_snapshot_projection,
-        'watermarkLedgerIndex', v_watermark.ledger_index,
-        'validatedHeadLedgerIndex', p_validated_head_ledger_index
+        'providerProjectedInvocations31d', v_snapshot_projection
       );
     end if;
 
-    if v_run.completed_batches = 0
-      and v_run.committed_ledgers = 0
-      and v_run.last_accounting_digest is null then
-      v_status := 'prepared';
-      update xrpl_r5_v1.recovery_runs
-      set status = 'prepared',
-          started_at = null,
-          completed_at = null,
-          last_error = null,
-          initial_validated_head_ledger_index = p_validated_head_ledger_index,
-          initial_validated_head_ledger_hash = p_validated_head_ledger_hash,
-          updated_at = p_refreshed_at
-      where run_id = v_run.run_id;
-    else
-      v_status := 'running';
-      update xrpl_r5_v1.recovery_runs
-      set status = 'running',
-          started_at = coalesce(started_at, p_refreshed_at),
-          completed_at = null,
-          last_error = null,
-          initial_validated_head_ledger_index = p_validated_head_ledger_index,
-          initial_validated_head_ledger_hash = p_validated_head_ledger_hash,
-          updated_at = p_refreshed_at
-      where run_id = v_run.run_id;
-    end if;
+    update xrpl_r5_v1.recovery_runs
+    set status = 'prepared',
+        started_at = null,
+        completed_at = null,
+        last_error = null,
+        updated_at = p_refreshed_at
+    where run_id = v_run.run_id;
     v_rearmed := true;
-  elsif v_run.status = 'caught_up' then
+
+    select * into v_run
+    from xrpl_r5_v1.recovery_runs
+    where run_id = p_run_id
+    for update;
+  end if;
+
+  select * into v_watermark
+  from public.xrpl_phase_watermarks
+  where profile_id = 'supabase-devnet';
+
+  if not found
+    or v_watermark.network <> v_run.network
+    or v_watermark.epoch_id <> v_run.epoch_id
+    or v_watermark.base_identity <> v_run.base_identity then
+    raise exception 'r5_revision4_continuous_head_watermark_identity_invalid';
+  end if;
+
+  if v_watermark.ledger_index < v_run.current_watermark_ledger_index then
+    raise exception 'r5_revision4_continuous_head_watermark_regression';
+  end if;
+
+  if v_watermark.ledger_index = v_run.current_watermark_ledger_index then
+    if v_watermark.ledger_hash <> v_run.current_watermark_ledger_hash
+      or v_watermark.work_id <> v_run.current_watermark_work_id then
+      raise exception 'r5_revision4_continuous_head_same_ledger_identity_conflict';
+    end if;
+  else
+    if v_run.status <> 'prepared'
+      or v_total_batches <> 0
+      or v_run.completed_batches <> 0
+      or v_run.committed_ledgers <> 0
+      or v_run.last_accounting_digest is not null
+      or v_run.last_error is not null
+      or v_run.started_at is not null
+      or v_run.completed_at is not null then
+      return jsonb_build_object(
+        'refreshed', false,
+        'reason', 'active_boundary_drift_requires_operator',
+        'runId', v_run.run_id,
+        'retainedWatermarkLedgerIndex', v_run.current_watermark_ledger_index,
+        'activeWatermarkLedgerIndex', v_watermark.ledger_index
+      );
+    end if;
+
+    v_rebind := public.xrpl_rebind_r5_revision4_prebatch_recovery_to_active_boundary(
+      p_run_id,
+      p_refreshed_at
+    );
+    v_rebound := true;
+
+    select * into v_run
+    from xrpl_r5_v1.recovery_runs
+    where run_id = p_run_id
+    for update;
+    select * into v_watermark
+    from public.xrpl_phase_watermarks
+    where profile_id = 'supabase-devnet';
+
+    if not found
+      or v_run.current_watermark_ledger_index <> v_watermark.ledger_index
+      or v_run.current_watermark_ledger_hash <> v_watermark.ledger_hash
+      or v_run.current_watermark_work_id <> v_watermark.work_id then
+      raise exception 'r5_revision4_continuous_head_rebind_not_exact';
+    end if;
+  end if;
+
+  if p_validated_head_ledger_index < v_watermark.ledger_index then
+    raise exception 'r5_revision4_continuous_head_behind_watermark';
+  end if;
+  if p_validated_head_ledger_index = v_watermark.ledger_index
+    and p_validated_head_ledger_hash <> v_watermark.ledger_hash then
+    raise exception 'r5_revision4_continuous_head_hash_conflict';
+  end if;
+
+  if v_run.status = 'caught_up' then
     if p_validated_head_ledger_index = v_watermark.ledger_index then
       return jsonb_build_object(
         'refreshed', true,
@@ -182,35 +232,23 @@ begin
         'workAvailable', false,
         'watermarkLedgerIndex', v_watermark.ledger_index,
         'validatedHeadLedgerIndex', p_validated_head_ledger_index,
+        'prebatchRebound', v_rebound,
+        'prebatchRebind', v_rebind,
+        'claimResourceGuardsStillRequired', true,
         'publicReaderUnchanged', true,
         'mainnetDisabled', true
       );
     end if;
 
-    if v_run.completed_batches = 0
-      and v_run.committed_ledgers = 0
-      and v_run.last_accounting_digest is null then
-      v_status := 'prepared';
-      update xrpl_r5_v1.recovery_runs
-      set status = 'prepared',
-          started_at = null,
-          completed_at = null,
-          initial_validated_head_ledger_index = p_validated_head_ledger_index,
-          initial_validated_head_ledger_hash = p_validated_head_ledger_hash,
-          last_error = null,
-          updated_at = p_refreshed_at
-      where run_id = v_run.run_id;
-    else
-      v_status := 'running';
-      update xrpl_r5_v1.recovery_runs
-      set status = 'running',
-          completed_at = null,
-          initial_validated_head_ledger_index = p_validated_head_ledger_index,
-          initial_validated_head_ledger_hash = p_validated_head_ledger_hash,
-          last_error = null,
-          updated_at = p_refreshed_at
-      where run_id = v_run.run_id;
-    end if;
+    v_status := 'running';
+    update xrpl_r5_v1.recovery_runs
+    set status = 'running',
+        completed_at = null,
+        initial_validated_head_ledger_index = p_validated_head_ledger_index,
+        initial_validated_head_ledger_hash = p_validated_head_ledger_hash,
+        last_error = null,
+        updated_at = p_refreshed_at
+    where run_id = v_run.run_id;
     v_reopened := true;
   else
     v_status := v_run.status;
@@ -224,7 +262,9 @@ begin
   return jsonb_build_object(
     'refreshed', true,
     'reason', case
+      when v_rearmed and v_rebound then 'invocation_halt_rearmed_and_active_boundary_rebound'
       when v_rearmed then 'invocation_halt_rearmed_after_fresh_snapshot'
+      when v_rebound then 'active_boundary_rebound'
       when v_reopened then 'caught_up_run_reopened_for_new_head'
       else 'validated_head_refreshed'
     end,
@@ -237,6 +277,8 @@ begin
     'validatedHeadLedgerHash', p_validated_head_ledger_hash,
     'lagLedgers', p_validated_head_ledger_index - v_watermark.ledger_index,
     'rearmedAfterFreshInvocationSnapshot', v_rearmed,
+    'prebatchRebound', v_rebound,
+    'prebatchRebind', v_rebind,
     'reopenedAfterCaughtUp', v_reopened,
     'claimResourceGuardsStillRequired', true,
     'publicReaderUnchanged', true,
