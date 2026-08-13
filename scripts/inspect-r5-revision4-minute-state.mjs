@@ -88,11 +88,23 @@ if (
 const batchCounts = exactlyOne(await query(
   `select count(*)::bigint as total,
           count(*) filter (where status = 'leased')::bigint as leased,
-          count(*) filter (where status = 'committed')::bigint as committed
+          count(*) filter (where status = 'committed')::bigint as committed,
+          count(*) filter (where status = 'failed')::bigint as failed
      from xrpl_r5_v1.recovery_batches
     where run_id = $1::text`,
   [runId],
 ), 'R5 batch counts')
+
+const latestBatchRows = await query(
+  `select to_jsonb(b) as batch
+     from xrpl_r5_v1.recovery_batches b
+    where b.run_id = $1::text
+    order by b.batch_sequence desc, b.batch_id desc
+    limit 1`,
+  [runId],
+)
+if (latestBatchRows.length > 1) throw new Error('latest R5 batch query returned multiple rows')
+const latestBatch = latestBatchRows.length === 1 ? latestBatchRows[0].batch : null
 
 const watermark = exactlyOne(await query(
   `select profile_id, network, epoch_id, base_identity, ledger_index, ledger_hash, work_id, updated_at
@@ -182,11 +194,13 @@ const functionDefinitionDigest = createHash('sha256').update(definition).digest(
 const totalBatches = integer(batchCounts.total, 'batch total')
 const leasedBatches = integer(batchCounts.leased, 'leased batches')
 const committedBatches = integer(batchCounts.committed, 'committed batch rows')
+const failedBatches = integer(batchCounts.failed, 'failed batch rows')
 const runCompletedBatches = integer(run.completed_batches, 'run completed batches')
 const committedLedgers = integer(run.committed_ledgers, 'run committed ledgers')
 if (leasedBatches !== 0) throw new Error('R5 has an active leased batch')
 
 let activationMode
+let activationBlockedReason = null
 if (run.status === 'halted' && run.last_error === 'r5_recovery_monthly_invocation_halt') {
   if (totalBatches !== 0 || committedBatches !== 0 || runCompletedBatches !== 0 || committedLedgers !== 0 || run.last_accounting_digest !== null) {
     throw new Error('invocation-halted R5 run contains unexpected recovery progress')
@@ -201,17 +215,20 @@ if (run.status === 'halted' && run.last_error === 'r5_recovery_monthly_invocatio
   if (boundaryDriftLedgers !== 0) throw new Error('caught-up R5 run drifted under old collector')
   activationMode = 'caught_up_reopen'
 } else {
-  throw new Error(`unsupported R5 activation state:${String(run.status)}:${String(run.last_error)}`)
+  activationMode = 'blocked_failure_state'
+  activationBlockedReason = `unsupported R5 activation state:${String(run.status)}:${String(run.last_error)}`
 }
 
 const migrationState = targetApplied ? 'applied_verified' : 'pending'
 const stableBinding = {
-  projectIdentityDigest, activationMode, runId: run.run_id, runStatus: run.status,
-  runLastError: run.last_error, profileRevision: Number(run.profile_revision),
+  projectIdentityDigest, activationMode, activationBlockedReason,
+  runId: run.run_id, runStatus: run.status, runLastError: run.last_error,
+  profileRevision: Number(run.profile_revision),
   profileIdentityDigest: run.profile_identity_digest, selectionDigest: run.selection_digest,
   runWatermarkLedger, runWatermarkHash: run.current_watermark_ledger_hash,
   activeWatermarkLedger, activeWatermarkHash: watermark.ledger_hash, activeWatermarkWorkId: watermark.work_id,
-  boundaryDriftLedgers, totalBatches, completedBatches: runCompletedBatches, committedLedgers,
+  boundaryDriftLedgers, totalBatches, failedBatches,
+  completedBatches: runCompletedBatches, committedLedgers,
   snapshotId: snapshot.snapshot_id, snapshotObservedAt: snapshot.observed_at,
   snapshotSourceRunId: Number(snapshot.source_run_id), snapshotSourceCommit: snapshot.source_commit,
   invocationCount24h, projectedInvocations31d, invocationHalt31d, functionCount,
@@ -222,7 +239,7 @@ const stableBinding = {
 const stateDigest = createHash('sha256').update(JSON.stringify(stableBinding)).digest('hex')
 
 const evidence = {
-  schemaVersion: 3,
+  schemaVersion: 4,
   purpose: 'r5-revision4-minute-activation-state',
   projectIdentityDigest,
   run: {
@@ -234,7 +251,13 @@ const evidence = {
     currentWatermarkLedgerHash: run.current_watermark_ledger_hash,
     initialValidatedHeadLedgerIndex: Number(run.initial_validated_head_ledger_index), updatedAt: run.updated_at,
   },
-  batchCounts: { total: totalBatches, leased: leasedBatches, committed: committedBatches },
+  batchCounts: {
+    total: totalBatches,
+    leased: leasedBatches,
+    committed: committedBatches,
+    failed: failedBatches,
+  },
+  latestBatch,
   activeWatermark: { ledgerIndex: activeWatermarkLedger, ledgerHash: watermark.ledger_hash, workId: watermark.work_id, updatedAt: watermark.updated_at },
   boundaryDriftLedgers,
   boundaryRebindRequired: boundaryDriftLedgers > 0,
@@ -248,12 +271,21 @@ const evidence = {
     baseVersion: baseMigrationVersion, targetVersion: targetMigrationVersion, targetApplied,
     migrationState, currentMaxVersion: migrationMax, functionDefinitionDigest,
   },
-  activationMode, stateDigest, stableBinding, mainnetDisabled: true, checkedAt: new Date().toISOString(),
+  activationMode,
+  activationBlockedReason,
+  stateDigest,
+  stableBinding,
+  mainnetDisabled: true,
+  checkedAt: new Date().toISOString(),
 }
 
 await mkdir(outputPath.split('/').slice(0, -1).join('/') || '.', { recursive: true })
 await writeFile(outputPath, `${JSON.stringify(evidence, null, 2)}\n`)
 console.log(JSON.stringify(evidence))
+
+if (activationBlockedReason !== null) {
+  throw new Error(activationBlockedReason)
+}
 
 if (process.env.GITHUB_OUTPUT) {
   const lines = [
