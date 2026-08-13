@@ -28,26 +28,31 @@ jobs:
 
           workflow = Path('.github/workflows/r4f-revision4-12-ledger-qualification.yml')
           text = workflow.read_text()
-          old = '''          legacy_count="$(jq '[.[] | select(.type == "legacy" and (.name == "service_role" or ((.secret_jwt_template.role // "") == "service_role")))] | length' /tmp/project-api-keys.json)"
-          secret_count="$(jq '[.[] | select(.type == "secret")] | length' /tmp/project-api-keys.json)"
-          if [ "$legacy_count" -eq 1 ]; then
-            elevated_key="$(jq -r '[.[] | select(.type == "legacy" and (.name == "service_role" or ((.secret_jwt_template.role // "") == "service_role")))][0].api_key // empty' /tmp/project-api-keys.json)"
-            elevated_kind=legacy
-          elif [ "$legacy_count" -eq 0 ] && [ "$secret_count" -eq 1 ]; then
-            elevated_key="$(jq -r '[.[] | select(.type == "secret")][0].api_key // empty' /tmp/project-api-keys.json)"
-            elevated_kind=secret
-          else
-          '''
-          new = '''          default_secret_count="$(jq '[.[] | select(.type == "secret" and .name == "default")] | length' /tmp/project-api-keys.json)"
-          legacy_count="$(jq '[.[] | select(.type == "legacy" and (.name == "service_role" or ((.secret_jwt_template.role // "") == "service_role")))] | length' /tmp/project-api-keys.json)"
-          if [ "$default_secret_count" -eq 1 ]; then
-            elevated_key="$(jq -r '[.[] | select(.type == "secret" and .name == "default")][0].api_key // empty' /tmp/project-api-keys.json)"
-            elevated_kind=secret
-          elif [ "$default_secret_count" -eq 0 ] && [ "$legacy_count" -eq 1 ]; then
-            elevated_key="$(jq -r '[.[] | select(.type == "legacy" and (.name == "service_role" or ((.secret_jwt_template.role // "") == "service_role")))][0].api_key // empty' /tmp/project-api-keys.json)"
-            elevated_kind=legacy
-          else
-          '''
+          indent = '          '
+          old_lines = [
+              '''legacy_count="$(jq '[.[] | select(.type == "legacy" and (.name == "service_role" or ((.secret_jwt_template.role // "") == "service_role")))] | length' /tmp/project-api-keys.json)"''',
+              '''secret_count="$(jq '[.[] | select(.type == "secret")] | length' /tmp/project-api-keys.json)"''',
+              '''if [ "$legacy_count" -eq 1 ]; then''',
+              '''  elevated_key="$(jq -r '[.[] | select(.type == "legacy" and (.name == "service_role" or ((.secret_jwt_template.role // "") == "service_role")))][0].api_key // empty' /tmp/project-api-keys.json)"''',
+              '''  elevated_kind=legacy''',
+              '''elif [ "$legacy_count" -eq 0 ] && [ "$secret_count" -eq 1 ]; then''',
+              '''  elevated_key="$(jq -r '[.[] | select(.type == "secret")][0].api_key // empty' /tmp/project-api-keys.json)"''',
+              '''  elevated_kind=secret''',
+              '''else''',
+          ]
+          new_lines = [
+              '''default_secret_count="$(jq '[.[] | select(.type == "secret" and .name == "default")] | length' /tmp/project-api-keys.json)"''',
+              old_lines[0],
+              '''if [ "$default_secret_count" -eq 1 ]; then''',
+              '''  elevated_key="$(jq -r '[.[] | select(.type == "secret" and .name == "default")][0].api_key // empty' /tmp/project-api-keys.json)"''',
+              '''  elevated_kind=secret''',
+              '''elif [ "$default_secret_count" -eq 0 ] && [ "$legacy_count" -eq 1 ]; then''',
+              old_lines[3],
+              '''  elevated_kind=legacy''',
+              '''else''',
+          ]
+          old = '\n'.join(indent + line for line in old_lines) + '\n'
+          new = '\n'.join(indent + line for line in new_lines) + '\n'
           if text.count(old) != 1:
               raise SystemExit(f'proof key resolver block count={text.count(old)}')
           workflow.write_text(text.replace(old, new))
