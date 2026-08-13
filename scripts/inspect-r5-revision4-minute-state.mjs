@@ -103,11 +103,22 @@ if (
   watermark.network !== run.network
   || watermark.epoch_id !== run.epoch_id
   || watermark.base_identity !== run.base_identity
-  || integer(watermark.ledger_index, 'watermark ledger') !== integer(run.current_watermark_ledger_index, 'run watermark ledger')
-  || watermark.ledger_hash !== run.current_watermark_ledger_hash
-  || watermark.work_id !== run.current_watermark_work_id
 ) {
-  throw new Error('public watermark does not match retained R5 boundary')
+  throw new Error('public watermark identity does not match retained R5 run')
+}
+
+const runWatermarkLedger = integer(run.current_watermark_ledger_index, 'run watermark ledger')
+const activeWatermarkLedger = integer(watermark.ledger_index, 'active watermark ledger')
+if (activeWatermarkLedger < runWatermarkLedger) {
+  throw new Error('public watermark regressed behind retained R5 boundary')
+}
+const boundaryDriftLedgers = activeWatermarkLedger - runWatermarkLedger
+if (
+  boundaryDriftLedgers === 0
+  && (watermark.ledger_hash !== run.current_watermark_ledger_hash
+    || watermark.work_id !== run.current_watermark_work_id)
+) {
+  throw new Error('same-ledger public watermark identity conflicts with retained R5 boundary')
 }
 
 const snapshots = await query(
@@ -161,14 +172,50 @@ if (run.status === 'halted' && run.last_error === 'r5_recovery_monthly_invocatio
   }
   activationMode = 'halted_invocation_rearm'
 } else if (run.status === 'prepared') {
-  if (leasedBatches !== 0) throw new Error('prepared R5 run has leased batch')
+  if (
+    totalBatches !== 0
+    || runCompletedBatches !== 0
+    || committedLedgers !== 0
+    || run.last_accounting_digest !== null
+  ) {
+    throw new Error('prepared R5 run already contains recovery progress')
+  }
   activationMode = 'prepared_continue'
 } else if (run.status === 'caught_up') {
-  if (leasedBatches !== 0) throw new Error('caught-up R5 run has leased batch')
+  if (boundaryDriftLedgers !== 0) {
+    throw new Error('caught-up R5 run drifted under the old collector and needs separate provenance')
+  }
   activationMode = 'caught_up_reopen'
 } else {
   throw new Error(`unsupported R5 activation state:${String(run.status)}:${String(run.last_error)}`)
 }
+
+const stableBinding = {
+  projectIdentityDigest,
+  activationMode,
+  runId: run.run_id,
+  runStatus: run.status,
+  runLastError: run.last_error,
+  profileRevision: Number(run.profile_revision),
+  profileIdentityDigest: run.profile_identity_digest,
+  selectionDigest: run.selection_digest,
+  runWatermarkLedger,
+  runWatermarkHash: run.current_watermark_ledger_hash,
+  activeWatermarkLedger,
+  activeWatermarkHash: watermark.ledger_hash,
+  activeWatermarkWorkId: watermark.work_id,
+  boundaryDriftLedgers,
+  totalBatches,
+  completedBatches: runCompletedBatches,
+  committedLedgers,
+  snapshotId: snapshot.snapshot_id,
+  snapshotObservedAt: snapshot.observed_at,
+  projectedInvocations31d,
+  invocationHalt31d,
+  targetMigrationVersion,
+  currentMaxMigrationVersion: migrationMax.max_version,
+}
+const stateDigest = createHash('sha256').update(JSON.stringify(stableBinding)).digest('hex')
 
 const evidence = {
   schemaVersion: 1,
@@ -184,7 +231,7 @@ const evidence = {
     completedBatches: runCompletedBatches,
     committedLedgers,
     lastAccountingDigest: run.last_accounting_digest,
-    currentWatermarkLedgerIndex: Number(run.current_watermark_ledger_index),
+    currentWatermarkLedgerIndex: runWatermarkLedger,
     currentWatermarkLedgerHash: run.current_watermark_ledger_hash,
     initialValidatedHeadLedgerIndex: Number(run.initial_validated_head_ledger_index),
     updatedAt: run.updated_at,
@@ -194,12 +241,14 @@ const evidence = {
     leased: leasedBatches,
     committed: committedBatches,
   },
-  watermark: {
-    ledgerIndex: Number(watermark.ledger_index),
+  activeWatermark: {
+    ledgerIndex: activeWatermarkLedger,
     ledgerHash: watermark.ledger_hash,
     workId: watermark.work_id,
     updatedAt: watermark.updated_at,
   },
+  boundaryDriftLedgers,
+  boundaryRebindRequired: boundaryDriftLedgers > 0,
   resourceSnapshot: {
     snapshotId: snapshot.snapshot_id,
     observedAt: snapshot.observed_at,
@@ -215,6 +264,8 @@ const evidence = {
     currentMaxVersion: migrationMax.max_version,
   },
   activationMode,
+  stateDigest,
+  stableBinding,
   mainnetDisabled: true,
   checkedAt: new Date().toISOString(),
 }
@@ -226,11 +277,13 @@ console.log(JSON.stringify(evidence))
 if (process.env.GITHUB_OUTPUT) {
   const lines = [
     `activation_mode=${activationMode}`,
-    `state_digest=${createHash('sha256').update(JSON.stringify(evidence)).digest('hex')}`,
+    `state_digest=${stateDigest}`,
     `snapshot_id=${snapshot.snapshot_id}`,
     `snapshot_observed_at=${snapshot.observed_at}`,
     `projected_invocations_31d=${projectedInvocations31d}`,
-    `watermark_ledger_index=${watermark.ledger_index}`,
+    `run_watermark_ledger_index=${runWatermarkLedger}`,
+    `active_watermark_ledger_index=${activeWatermarkLedger}`,
+    `boundary_drift_ledgers=${boundaryDriftLedgers}`,
     `migration_max=${migrationMax.max_version ?? ''}`,
   ]
   const { appendFile } = await import('node:fs/promises')
