@@ -223,4 +223,14 @@ with tempfile.NamedTemporaryFile('w', suffix='.sh', delete=False) as handle:
 subprocess.run(['bash', '-n', shell_path], check=True)
 PY_CANDIDATE_SHELL
 
+grep -Fq 'default_secret_count="$(jq' "$workflow"
+grep -Fq 'select(.type == "secret" and .name == "default")' "$workflow"
+grep -Fq 'if [ "$default_secret_count" -eq 1 ]; then' "$workflow"
+grep -Fq 'elif [ "$default_secret_count" -eq 0 ] && [ "$legacy_count" -eq 1 ]; then' "$workflow"
+grep -Fq 'if [ "$SUPABASE_R4F_PROOF_KEY_KIND" = legacy ]; then' "$workflow"
+if grep -Eq '^[[:space:]]+secret_count=' "$workflow"; then
+  echo 'qualification workflow still contains arbitrary secret-key selection' >&2
+  exit 1
+fi
+
 printf '%s\n' 'R4F revision-4 exact 12-ledger qualification contract: PASS'
