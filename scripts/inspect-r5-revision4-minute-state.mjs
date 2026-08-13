@@ -122,8 +122,9 @@ if (
 }
 
 const snapshots = await query(
-  `select snapshot_id, observed_at, projected_invocations_31d, function_invocations,
-          coverage_function_invocations, coverage_bundle_size, source
+  `select snapshot_id, source_run_id, source_commit, observed_at,
+          management_api_available, invocation_count_24h, projected_invocations_31d,
+          function_count, max_bundle_bytes, max_bundle_name, bundle_count, evidence_digest
      from xrpl_resource_guard_v1.external_snapshots
     order by observed_at desc, snapshot_id desc
     limit 1`,
@@ -133,11 +134,24 @@ const observedAt = Date.parse(String(snapshot.observed_at ?? ''))
 if (!Number.isFinite(observedAt)) throw new Error('latest resource snapshot observed_at invalid')
 const ageMs = Date.now() - observedAt
 const projectedInvocations31d = integer(snapshot.projected_invocations_31d, 'projected invocations 31d')
+const invocationCount24h = integer(snapshot.invocation_count_24h, 'invocation count 24h')
+const functionCount = integer(snapshot.function_count, 'function count')
+const maxBundleBytes = integer(snapshot.max_bundle_bytes, 'max bundle bytes')
+const bundleCount = integer(snapshot.bundle_count, 'bundle count')
 const snapshotFresh = ageMs >= 0 && ageMs <= 25 * 60 * 60 * 1000
 if (!snapshotFresh) throw new Error('provider_snapshot_stale')
 if (projectedInvocations31d >= invocationHalt31d) throw new Error('monthly_invocation_halt')
-if (snapshot.coverage_function_invocations !== true || snapshot.coverage_bundle_size !== true) {
-  throw new Error('fresh resource snapshot lacks required coverage')
+if (
+  snapshot.management_api_available !== true
+  || functionCount < 1
+  || maxBundleBytes < 1
+  || bundleCount < 1
+  || typeof snapshot.max_bundle_name !== 'string'
+  || snapshot.max_bundle_name.length === 0
+  || typeof snapshot.evidence_digest !== 'string'
+  || !/^[a-f0-9]{64}$/u.test(snapshot.evidence_digest)
+) {
+  throw new Error('fresh resource snapshot lacks required exact management/bundle coverage')
 }
 
 const migrationRows = await query(
@@ -210,8 +224,15 @@ const stableBinding = {
   committedLedgers,
   snapshotId: snapshot.snapshot_id,
   snapshotObservedAt: snapshot.observed_at,
+  snapshotSourceRunId: Number(snapshot.source_run_id),
+  snapshotSourceCommit: snapshot.source_commit,
+  invocationCount24h,
   projectedInvocations31d,
   invocationHalt31d,
+  functionCount,
+  maxBundleBytes,
+  maxBundleName: snapshot.max_bundle_name,
+  bundleCount,
   targetMigrationVersion,
   currentMaxMigrationVersion: migrationMax.max_version,
 }
@@ -251,11 +272,18 @@ const evidence = {
   boundaryRebindRequired: boundaryDriftLedgers > 0,
   resourceSnapshot: {
     snapshotId: snapshot.snapshot_id,
+    sourceRunId: Number(snapshot.source_run_id),
+    sourceCommit: snapshot.source_commit,
     observedAt: snapshot.observed_at,
+    managementApiAvailable: snapshot.management_api_available,
+    invocationCount24h,
     projectedInvocations31d,
     invocationHalt31d,
-    functionInvocations: snapshot.function_invocations,
-    source: snapshot.source,
+    functionCount,
+    maxBundleBytes,
+    maxBundleName: snapshot.max_bundle_name,
+    bundleCount,
+    evidenceDigest: snapshot.evidence_digest,
     fresh: snapshotFresh,
   },
   migration: {
