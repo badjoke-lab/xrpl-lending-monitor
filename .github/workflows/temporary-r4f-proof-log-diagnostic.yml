@@ -70,7 +70,6 @@ jobs:
           PY_CANDIDATE_SHELL
 
           '''
-          regression = regression.replace('          ', '')
           contract.write_text(contract_text.replace(marker, regression + marker))
           PY
 
