@@ -17,7 +17,8 @@ jobs:
     if: >-
       github.event.issue.number == 1261 &&
       github.event.comment.user.login == 'badjoke-lab' &&
-      github.event.comment.body == '/r5-revision4-db-footprint-probe'
+      (github.event.comment.body == '/r5-revision4-db-footprint-probe' ||
+       github.event.comment.body == '/r5-revision4-cron-log-reclaim-prepare')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
@@ -63,6 +64,7 @@ jobs:
             group by schema_name
           ), cron_state as (
             select
+              'cron.job_run_details'::regclass::oid::bigint as relation_oid,
               count(*)::bigint as exact_rows,
               pg_total_relation_size('cron.job_run_details'::regclass)::bigint as total_bytes,
               pg_relation_size('cron.job_run_details'::regclass)::bigint as heap_bytes,
@@ -96,6 +98,7 @@ jobs:
             ), '[]'::jsonb),
             'cronJobRunDetails', (
               select jsonb_build_object(
+                'relationOid', relation_oid,
                 'exactRows', exact_rows,
                 'totalBytes', total_bytes,
                 'heapBytes', heap_bytes,
@@ -138,6 +141,7 @@ jobs:
             (.databaseBytes | type == "number") and
             (.schemas | type == "array") and
             (.topRelations | type == "array") and
+            (.cronJobRunDetails.relationOid | type == "number") and
             (.cronJobRunDetails.exactRows | type == "number") and
             (.cronJobRunDetails.totalBytes | type == "number") and
             (.cronJobRunDetails.foreignKeyConstraints | type == "number") and
@@ -185,3 +189,51 @@ jobs:
           Production database read only: \`true\`. No database mutation, scheduler mutation, deployment, migration, public-reader mutation, Mainnet, stabilization, or soak action was performed.
           EOF
           gh issue comment 1261 --repo "$GITHUB_REPOSITORY" --body-file /tmp/body.md
+
+      - name: Publish exact cron log reclaim authorization proposal
+        if: github.event.comment.body == '/r5-revision4-cron-log-reclaim-prepare'
+        shell: bash
+        run: |
+          set -euo pipefail
+          f='r5-revision4-db-footprint-probe/footprint.json'
+          source_commit="$(git rev-parse HEAD)"
+          test "$source_commit" = "$GITHUB_SHA"
+          project_digest="$(printf '%s' "$SUPABASE_PROJECT_ID" | sha256sum | awk '{print $1}')"
+          relation_oid="$(jq -r '.cronJobRunDetails.relationOid' "$f")"
+          prepared_bytes="$(jq -r '.cronJobRunDetails.totalBytes' "$f")"
+          prepared_rows="$(jq -r '.cronJobRunDetails.exactRows' "$f")"
+          database_bytes="$(jq -r '.databaseBytes' "$f")"
+          halt_bytes="$(jq -r '.databaseHaltBytes' "$f")"
+          cron_fks="$(jq -r '.cronJobRunDetails.foreignKeyConstraints' "$f")"
+          cron_triggers="$(jq -r '.cronJobRunDetails.userTriggers' "$f")"
+          test "$database_bytes" -gt "$halt_bytes"
+          test "$prepared_bytes" -ge 5000000
+          test "$cron_fks" -eq 0
+          test "$cron_triggers" -eq 0
+          expires="$(date -u -d '+15 minutes' '+%Y-%m-%dT%H:%M:%SZ')"
+          nonce="$(openssl rand -hex 8)"
+          command="/r5-revision4-cron-log-reclaim-authorize commit=${source_commit} project=${project_digest} relation_oid=${relation_oid} prepared_bytes=${prepared_bytes} prepared_rows=${prepared_rows} prepare_run=${GITHUB_RUN_ID} expires=${expires} nonce=${nonce}"
+          cat > /tmp/proposal.md <<EOF
+          ## R5 revision-4 cron log storage reclaim authorization proposal
+
+          Preparation run: \`${GITHUB_RUN_ID}\`
+          Source main commit: \`${source_commit}\`
+          Project identity digest: \`${project_digest}\`
+          Database bytes: \`${database_bytes}\` / unchanged halt \`${halt_bytes}\`
+          Exact target: \`cron.job_run_details\`
+          Relation OID: \`${relation_oid}\`
+          Target bytes: \`${prepared_bytes}\`
+          Target exact rows: \`${prepared_rows}\`
+          Foreign-key constraints: \`${cron_fks}\`
+          User triggers: \`${cron_triggers}\`
+          Authorization expires: \`${expires}\`
+
+          The proposed bounded mutation is limited to reclaiming storage held by \`cron.job_run_details\`, the pg_cron run-history log table. It must not modify \`cron.job\`, any \`public.xrpl_*\` history relation, R5 state, scheduler configuration, Edge Functions, migrations, public reader, Mainnet, stabilization, or soak. Before any mutation, a separate execute path must re-verify this exact target identity and fail closed if dependencies appear.
+
+          Exact authorization command reserved for the separately reviewed execute path:
+
+          \`${command}\`
+
+          This preparation is read-only and performed no production mutation.
+          EOF
+          gh issue comment 1261 --repo "$GITHUB_REPOSITORY" --body-file /tmp/proposal.md
