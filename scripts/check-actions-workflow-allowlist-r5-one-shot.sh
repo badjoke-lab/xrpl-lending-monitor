@@ -17,6 +17,7 @@ python scripts/extend-actions-policy-r5-revision4-db-footprint-probe.py "$genera
 python scripts/extend-actions-policy-r5-phase-message-ready-partial-index-apply.py "$generated_script"
 python scripts/extend-actions-policy-r5-retention-readonly-preflight.py "$generated_script"
 python scripts/extend-actions-policy-r5-cron-history-retention.py "$generated_script"
+python scripts/extend-actions-policy-r5-index-footprint-readonly-probe.py "$generated_script"
 chmod 700 "$generated_script"
 bash "$generated_script" "$@"
 bash -n scripts/check-supabase-production-autodeploy-boundary.sh
