@@ -22,6 +22,7 @@ python scripts/extend-actions-policy-r5-work-status-partial-index-apply.py "$gen
 chmod 700 "$generated_script"
 bash "$generated_script" "$@"
 node --check scripts/r5-index-footprint-readonly-probe.mjs
+node --check scripts/r5-secondary-index-readonly-audit.mjs
 node --check scripts/manage-r5-work-status-partial-index.mjs
 bash -n scripts/check-supabase-production-autodeploy-boundary.sh
 bash scripts/check-supabase-production-autodeploy-boundary.sh
@@ -44,6 +45,8 @@ R5_WORK_STATUS_INDEX_OUTPUT=actions-workflow-policy-evidence/r5-work-status-part
   bash scripts/test-r5-work-status-partial-index-postgres.sh
 bash -n scripts/test-r5-work-status-partial-index-apply-contract.sh
 bash scripts/test-r5-work-status-partial-index-apply-contract.sh
+bash -n scripts/test-r5-secondary-index-readonly-audit-contract.sh
+bash scripts/test-r5-secondary-index-readonly-audit-contract.sh
 bash -n scripts/run-r4f-g3-dual-provider-verdict.sh
 node scripts/check-r4f-g3-isolation-control-policy.mjs
 node scripts/check-r4f-g3-dual-runner-policy.mjs
