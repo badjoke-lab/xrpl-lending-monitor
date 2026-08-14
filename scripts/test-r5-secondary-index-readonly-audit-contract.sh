@@ -9,7 +9,7 @@ node --check "$manager"
 
 python - "$workflow" "$manager" <<'PY'
 from pathlib import Path
-import re,sys
+import sys
 workflow=Path(sys.argv[1]).read_text()
 manager=Path(sys.argv[2]).read_text()
 for required in (
@@ -24,6 +24,8 @@ for required in (
 for forbidden in ('  push:','  schedule:','workflow_dispatch','pull_request_target','contents: write','supabase db push','wrangler deploy'):
     if forbidden in workflow: raise SystemExit(f'workflow contains forbidden capability: {forbidden}')
 for required in (
+    "const MUTATION_CAPABILITY =",
+    "MUTATION_CAPABILITY.test(query)",
     "body:JSON.stringify({query:sql,read_only:true})",
     "noIndexMutationAuthorized",
     "noRowMutationAuthorized",
@@ -39,8 +41,9 @@ for required in (
     if required not in manager: raise SystemExit(f'manager missing: {required}')
 if 'read_only:false' in manager or 'read_only: false' in manager:
     raise SystemExit('secondary index audit contains writable Management API call')
-for pattern in (r'\bdelete\s+from\b',r'\btruncate\b',r'\bvacuum\b',r'\bdrop\s+index\b',r'\bcreate\s+index\b',r'\balter\s+index\b'):
-    if re.search(pattern,manager,re.I):
-        raise SystemExit(f'secondary audit source contains forbidden mutation capability: {pattern}')
+if manager.count('read_only:true') != 1:
+    raise SystemExit('secondary index audit Management API read-only contract drifted')
+if 'managementQuery(' in manager:
+    raise SystemExit('secondary index audit unexpectedly introduced a second Management API helper')
 print('R5 secondary index read-only audit contract: PASS')
 PY
