@@ -225,19 +225,6 @@ function parseIndexShape(index) {
   }
 }
 
-function assertIndexShape(index, expect) {
-  const parsed = parseIndexShape(index)
-  if (parsed.shape === 'missing') fail('ready index state missing')
-  if (!parsed.valid || !parsed.ready) fail('ready index is not valid and ready')
-  if (expect === 'full' && parsed.shape !== 'full') {
-    fail(`expected full ready index predicate, found: ${parsed.predicate}`)
-  }
-  if (expect === 'partial' && parsed.shape !== 'partial') {
-    fail(`unexpected partial ready index predicate: ${parsed.predicate}`)
-  }
-  return parsed
-}
-
 function expectedHistoryRecord(migrationSha) {
   return {
     version: VERSION,
