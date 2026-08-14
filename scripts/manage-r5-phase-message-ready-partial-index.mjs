@@ -136,12 +136,14 @@ function inspectionQuery() {
 select jsonb_build_object(
   'maxMigrationVersion', (select max(version::text) from supabase_migrations.schema_migrations),
   'targetMigrationRows', (select count(*) from supabase_migrations.schema_migrations where version::text = '${VERSION}'),
-  'targetMigrationRecord', coalesce((
-    select jsonb_build_object('version', version::text, 'statements', statements, 'name', name)
+  'targetMigrationRecords', coalesce((
+    select jsonb_agg(
+      jsonb_build_object('version', version::text, 'statements', statements, 'name', name)
+      order by name, statements::text
+    )
     from supabase_migrations.schema_migrations
     where version::text = '${VERSION}'
-    limit 1
-  ), 'null'::jsonb),
+  ), '[]'::jsonb),
   'historyColumns', coalesce((
     select jsonb_agg(jsonb_build_object(
       'columnName', column_name,
@@ -190,90 +192,180 @@ function historyColumnsValid(columns) {
     && byName.get('name')?.dataType === 'text'
 }
 
-function assertIndexShape(index, expect) {
-  if (!index || typeof index !== 'object' || Array.isArray(index)) fail('ready index state missing')
-  if (index.valid !== true || index.ready !== true) fail('ready index is not valid and ready')
+function parseIndexShape(index) {
+  if (!index || typeof index !== 'object' || Array.isArray(index)) {
+    return { shape: 'missing', definition: null, definitionSha256: null, predicate: null, valid: false, ready: false }
+  }
   const definition = String(index.definition ?? '')
-  if (!definition.includes('(profile_id, status, available_at, created_at, message_id)')) {
-    fail(`unexpected ready index definition: ${definition}`)
-  }
   const predicate = index.predicate == null ? null : String(index.predicate)
-  if (expect === 'full') {
-    if (predicate !== null) fail(`expected full ready index predicate, found: ${predicate}`)
-  } else {
-    if (
-      predicate == null
-      || !predicate.includes('pending')
-      || !predicate.includes('retry')
-      || !predicate.includes('leased')
-      || predicate.includes('completed')
-      || predicate.includes('error')
-    ) fail(`unexpected partial ready index predicate: ${predicate}`)
+  const columnsExpected = definition.includes('(profile_id, status, available_at, created_at, message_id)')
+  const validAndReady = index.valid === true && index.ready === true
+  let shape = 'drift'
+  if (columnsExpected && validAndReady && predicate === null) {
+    shape = 'full'
+  } else if (
+    columnsExpected
+    && validAndReady
+    && predicate != null
+    && predicate.includes('pending')
+    && predicate.includes('retry')
+    && predicate.includes('leased')
+    && !predicate.includes('completed')
+    && !predicate.includes('error')
+  ) {
+    shape = 'partial'
   }
-  return { definition, definitionSha256: sha256(definition), predicate }
+  return {
+    shape,
+    definition,
+    definitionSha256: sha256(definition),
+    predicate,
+    valid: index.valid === true,
+    ready: index.ready === true,
+  }
 }
 
-function assertInspection(raw, expect, sourceCommit, migrationSha) {
+function assertIndexShape(index, expect) {
+  const parsed = parseIndexShape(index)
+  if (parsed.shape === 'missing') fail('ready index state missing')
+  if (!parsed.valid || !parsed.ready) fail('ready index is not valid and ready')
+  if (expect === 'full' && parsed.shape !== 'full') {
+    fail(`expected full ready index predicate, found: ${parsed.predicate}`)
+  }
+  if (expect === 'partial' && parsed.shape !== 'partial') {
+    fail(`unexpected partial ready index predicate: ${parsed.predicate}`)
+  }
+  return parsed
+}
+
+function expectedHistoryRecord(migrationSha) {
+  return {
+    version: VERSION,
+    statements: [`exact-phase-ready-partial-index sha256:${migrationSha}`],
+    name: NAME,
+  }
+}
+
+function historyRecordMatches(record, migrationSha) {
+  const expected = expectedHistoryRecord(migrationSha)
+  return Boolean(
+    record
+    && record.version === expected.version
+    && record.name === expected.name
+    && Array.isArray(record.statements)
+    && record.statements.length === 1
+    && record.statements[0] === expected.statements[0]
+  )
+}
+
+function classifyAudit(raw, sourceCommit, migrationSha) {
   const state = normalizeJson(raw)
   if (!state || typeof state !== 'object' || Array.isArray(state)) fail('inspection state missing')
   if (!historyColumnsValid(normalizeJson(state.historyColumns))) fail('schema_migrations shape is not the expected version/statements/name contract')
-  if (state.temporaryIndexExists !== false) fail('temporary claimable ready index already exists')
 
-  const readyIndex = assertIndexShape(normalizeJson(state.readyIndex), expect)
   const targetRows = Number(state.targetMigrationRows)
-  const maxMigrationVersion = String(state.maxMigrationVersion ?? '')
+  const targetRecords = normalizeJson(state.targetMigrationRecords)
+  if (!Number.isInteger(targetRows) || targetRows < 0) fail('target migration row count invalid')
+  if (!Array.isArray(targetRecords) || targetRecords.length !== targetRows) fail('target migration records/count mismatch')
 
-  if (expect === 'full') {
-    if (targetRows !== 0) fail('target partial-index migration is already recorded')
-    if (maxMigrationVersion !== PREVIOUS_VERSION) fail(`unexpected production migration head before partial-index apply: ${maxMigrationVersion}`)
-  } else {
-    if (targetRows !== 1) fail(`target partial-index migration must be recorded exactly once, found ${targetRows}`)
-    if (maxMigrationVersion !== VERSION) fail(`unexpected production migration head after partial-index apply: ${maxMigrationVersion}`)
-    const record = normalizeJson(state.targetMigrationRecord)
-    const marker = `exact-phase-ready-partial-index sha256:${migrationSha}`
-    if (
-      !record
-      || record.version !== VERSION
-      || record.name !== NAME
-      || !Array.isArray(record.statements)
-      || record.statements.length !== 1
-      || record.statements[0] !== marker
-    ) fail('target migration history record mismatch')
+  const maxMigrationVersion = String(state.maxMigrationVersion ?? '')
+  const temporaryIndexExists = state.temporaryIndexExists === true
+  const readyIndex = parseIndexShape(normalizeJson(state.readyIndex))
+  const exactRecord = targetRows === 1 && historyRecordMatches(targetRecords[0], migrationSha)
+
+  let classification = 'inconsistent'
+  let reason = 'state does not match an authorized lifecycle state'
+
+  if (
+    !temporaryIndexExists
+    && readyIndex.shape === 'full'
+    && targetRows === 0
+    && maxMigrationVersion === PREVIOUS_VERSION
+  ) {
+    classification = 'unapplied_expected'
+    reason = 'full index and previous migration head are intact; authorization may be proposed'
+  } else if (
+    !temporaryIndexExists
+    && readyIndex.shape === 'partial'
+    && targetRows === 1
+    && maxMigrationVersion === VERSION
+    && exactRecord
+  ) {
+    classification = 'applied_consistent'
+    reason = 'partial index and exact target migration-history record are both present'
+  } else if (
+    !temporaryIndexExists
+    && readyIndex.shape === 'partial'
+    && targetRows === 0
+    && maxMigrationVersion === PREVIOUS_VERSION
+  ) {
+    classification = 'partial_unrecorded'
+    reason = 'partial index exists but target migration history is absent'
+  } else if (
+    !temporaryIndexExists
+    && readyIndex.shape === 'partial'
+    && targetRows === 1
+    && maxMigrationVersion === VERSION
+    && !exactRecord
+  ) {
+    classification = 'applied_record_mismatch'
+    reason = 'partial index and target migration version exist, but the target history record does not match the guarded exact record'
+  } else if (temporaryIndexExists) {
+    classification = 'temporary_index_present'
+    reason = 'temporary claimable index exists; state may reflect an interrupted or out-of-band migration'
+  } else if (readyIndex.shape === 'drift' || readyIndex.shape === 'missing') {
+    classification = 'index_shape_drift'
+    reason = `ready index shape is ${readyIndex.shape}`
+  } else if (targetRows > 1) {
+    classification = 'duplicate_migration_history'
+    reason = `target migration is recorded ${targetRows} times`
+  } else if (maxMigrationVersion !== PREVIOUS_VERSION && maxMigrationVersion !== VERSION) {
+    classification = 'migration_head_drift'
+    reason = `unexpected migration head ${maxMigrationVersion}`
   }
 
   const projectId = requireEnv('SUPABASE_PROJECT_ID', /^[a-z]{20}$/u)
+  const projectIdentityDigest = sha256(projectId)
   const authorizationState = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     purpose: 'r5-phase-message-ready-partial-index-authorization-state',
     sourceCommit,
-    projectIdentityDigest: sha256(projectId),
+    projectIdentityDigest,
     migrationVersion: VERSION,
     migrationSha256: migrationSha,
     maxMigrationVersion,
     targetMigrationRows: targetRows,
+    targetMigrationRecordSha256: targetRows === 1 ? sha256(JSON.stringify(targetRecords[0])) : null,
     readyIndexDefinitionSha256: readyIndex.definitionSha256,
     readyIndexPredicate: readyIndex.predicate,
-    temporaryIndexExists: false,
+    temporaryIndexExists,
+    classification,
   }
 
   return {
-    schemaVersion: 1,
-    purpose: 'r5-phase-message-ready-partial-index-production-state',
+    schemaVersion: 2,
+    purpose: 'r5-phase-message-ready-partial-index-production-audit',
     sourceCommit,
-    projectIdentityDigest: authorizationState.projectIdentityDigest,
-    expectedIndexShape: expect,
+    projectIdentityDigest,
     migrationVersion: VERSION,
     migrationName: NAME,
     migrationSha256: migrationSha,
+    classification,
+    classificationReason: reason,
+    authorizationEligible: classification === 'unapplied_expected',
+    alreadyAppliedVerified: classification === 'applied_consistent',
     maxMigrationVersion,
     targetMigrationRows: targetRows,
+    targetMigrationRecords: targetRecords,
+    exactTargetMigrationRecord: exactRecord,
     databaseBytes: Number(state.databaseBytes),
     messageRows: Number(state.messageRows),
     messageStatusCounts: normalizeJson(state.messageStatusCounts),
+    readyIndexShape: readyIndex.shape,
     readyIndexBytes: Number(normalizeJson(state.readyIndex)?.bytes),
     readyIndexDefinitionSha256: readyIndex.definitionSha256,
     readyIndexPredicate: readyIndex.predicate,
-    temporaryIndexExists: false,
+    temporaryIndexExists,
     authorizationState,
     authorizationStateSha256: sha256(JSON.stringify(authorizationState)),
     canonicalHistoryMutationAuthorized: false,
@@ -284,10 +376,40 @@ function assertInspection(raw, expect, sourceCommit, migrationSha) {
   }
 }
 
-async function inspectState({ expect, sourceCommit, migrationSha }) {
+function assertInspection(raw, expect, sourceCommit, migrationSha) {
+  const audit = classifyAudit(raw, sourceCommit, migrationSha)
+  if (audit.temporaryIndexExists) fail('temporary claimable ready index already exists')
+
+  if (expect === 'full') {
+    if (audit.classification !== 'unapplied_expected') {
+      fail(`expected unapplied full-index state, found ${audit.classification}: ${audit.classificationReason}`)
+    }
+  } else if (expect === 'partial') {
+    if (audit.classification !== 'applied_consistent') {
+      fail(`expected exact applied partial-index state, found ${audit.classification}: ${audit.classificationReason}`)
+    }
+  } else {
+    fail(`unsupported expected state: ${expect}`)
+  }
+
+  return {
+    ...audit,
+    purpose: 'r5-phase-message-ready-partial-index-production-state',
+    expectedIndexShape: expect,
+  }
+}
+
+async function rawInspection() {
   const rows = await managementQuery(inspectionQuery(), [], true)
-  const raw = findFirstKey(rows, 'state')
-  return assertInspection(raw, expect, sourceCommit, migrationSha)
+  return findFirstKey(rows, 'state')
+}
+
+async function auditState({ sourceCommit, migrationSha }) {
+  return classifyAudit(await rawInspection(), sourceCommit, migrationSha)
+}
+
+async function inspectState({ expect, sourceCommit, migrationSha }) {
+  return assertInspection(await rawInspection(), expect, sourceCommit, migrationSha)
 }
 
 async function writeJson(path, value) {
@@ -297,12 +419,25 @@ async function writeJson(path, value) {
   await writeFile(absolute, `${JSON.stringify(value, null, 2)}\n`)
 }
 
-async function inspect(options) {
-  const expect = options.expect
-  if (!['full', 'partial'].includes(expect)) fail('--expect must be full or partial')
+function validateCommonOptions(options) {
   const sourceCommit = options['source-commit']
   if (!/^[a-f0-9]{40}$/u.test(sourceCommit ?? '')) fail('invalid --source-commit')
   const expectedSha = options['expected-sha']
+  return { sourceCommit, expectedSha }
+}
+
+async function audit(options) {
+  const { sourceCommit, expectedSha } = validateCommonOptions(options)
+  const { actualSha } = await loadMigration(expectedSha)
+  const state = await auditState({ sourceCommit, migrationSha: actualSha })
+  await writeJson(options.output, state)
+  process.stdout.write(`${JSON.stringify(state)}\n`)
+}
+
+async function inspect(options) {
+  const expect = options.expect
+  if (!['full', 'partial'].includes(expect)) fail('--expect must be full or partial')
+  const { sourceCommit, expectedSha } = validateCommonOptions(options)
   const { actualSha } = await loadMigration(expectedSha)
   const state = await inspectState({ expect, sourceCommit, migrationSha: actualSha })
   await writeJson(options.output, state)
@@ -310,11 +445,9 @@ async function inspect(options) {
 }
 
 async function apply(options) {
-  const sourceCommit = options['source-commit']
-  if (!/^[a-f0-9]{40}$/u.test(sourceCommit ?? '')) fail('invalid --source-commit')
+  const { sourceCommit, expectedSha } = validateCommonOptions(options)
   const authorizedState = options['authorized-state']
   if (!/^[a-f0-9]{64}$/u.test(authorizedState ?? '')) fail('invalid --authorized-state')
-  const expectedSha = options['expected-sha']
   const { migration, actualSha } = await loadMigration(expectedSha)
 
   const before = await inspectState({ expect: 'full', sourceCommit, migrationSha: actualSha })
@@ -343,7 +476,7 @@ async function apply(options) {
   }
 
   const evidence = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     purpose: 'r5-phase-message-ready-partial-index-production-apply',
     sourceCommit,
     migrationVersion: VERSION,
@@ -359,6 +492,7 @@ async function apply(options) {
     messageRowsAfter: after.messageRows,
     messageRowCountDecreased: false,
     migrationRecordedExactlyOnce: true,
+    exactMigrationHistoryRecordVerified: true,
     canonicalHistoryMutationAuthorized: false,
     schedulerMutationAuthorized: false,
     deploymentAuthorized: false,
@@ -371,10 +505,12 @@ async function apply(options) {
 }
 
 const { command, options } = parseArgs(process.argv.slice(2))
-if (command === 'inspect') {
+if (command === 'audit') {
+  await audit(options)
+} else if (command === 'inspect') {
   await inspect(options)
 } else if (command === 'apply') {
   await apply(options)
 } else {
-  fail('command must be inspect or apply')
+  fail('command must be audit, inspect, or apply')
 }
