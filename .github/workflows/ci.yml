@@ -63,6 +63,7 @@ jobs:
           bash -n scripts/test-r4f-revision4-directional-persistence-postgres.sh
           bash -n scripts/test-r4f-revision4-provider-capture-verifier.sh
           bash -n scripts/test-r4f-steady-qualification-reclaim-contract.sh
+          bash -n scripts/test-r5-phase-message-ready-partial-index-postgres.sh
 
       - name: Validate canonical production base identity
         env:
@@ -89,6 +90,18 @@ jobs:
 
       - name: Verify steady qualification reclaim contract
         run: bash scripts/test-r4f-steady-qualification-reclaim-contract.sh
+
+      - name: Verify R5 phase message ready partial index locally
+        run: bash scripts/test-r5-phase-message-ready-partial-index-postgres.sh
+
+      - name: Upload R5 phase message ready partial-index evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r5-phase-message-ready-partial-index-evidence
+          path: r5-phase-message-ready-partial-index-evidence
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Apply D1 migrations locally
         run: pnpm db:migrate:local
