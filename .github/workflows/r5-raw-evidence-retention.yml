@@ -1,0 +1,243 @@
+name: R5 raw evidence retention
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: r5-raw-evidence-retention
+  cancel-in-progress: false
+
+env:
+  QUALIFICATION_ISSUE: '1261'
+  MANAGER_PATH: scripts/manage-r5-raw-evidence-retention.mjs
+  SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+  SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  prepare:
+    if: >-
+      github.event.issue.number == 1261 &&
+      github.event.comment.user.login == 'badjoke-lab' &&
+      github.event.comment.body == '/r5-raw-evidence-retention-prepare'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Check out exact current main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Inspect raw-evidence retention pre-state read-only
+        id: state
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p r5-raw-evidence-retention-evidence
+          source_commit="$(git rev-parse HEAD)"
+          manager_sha="$(sha256sum "$MANAGER_PATH" | awk '{print $1}')"
+          set +e
+          node "$MANAGER_PATH" prepare \
+            --source-commit "$source_commit" \
+            --output r5-raw-evidence-retention-evidence/prepare.json \
+            > r5-raw-evidence-retention-evidence/prepare.stdout.json \
+            2> r5-raw-evidence-retention-evidence/prepare.stderr.log
+          prepare_status=$?
+          set -e
+          if [[ "$prepare_status" -ne 0 ]]; then
+            cat r5-raw-evidence-retention-evidence/prepare.stderr.log >&2
+            exit "$prepare_status"
+          fi
+          cp r5-raw-evidence-retention-evidence/prepare.stdout.json /tmp/r5-raw-evidence-retention-prepare.json
+          test "$(jq -r '.mutationAuthorized' /tmp/r5-raw-evidence-retention-prepare.json)" = false
+          test "$(jq -r '.schedulerMutationAuthorized' /tmp/r5-raw-evidence-retention-prepare.json)" = false
+          test "$(jq -r '.vacuumAuthorized' /tmp/r5-raw-evidence-retention-prepare.json)" = false
+          printf 'source_commit=%s\nmanager_sha=%s\nstate_sha=%s\nproject_digest=%s\ncommand_sha=%s\nmutation_sha=%s\ndatabase_bytes=%s\npayload_bytes=%s\ncommit_bytes=%s\ncandidate_works=%s\ncandidate_payload=%s\ncandidate_commit=%s\ncandidate_payload_logical=%s\ncandidate_commit_logical=%s\nincomplete_old=%s\ncurrent_work=%s\npredecessor_work=%s\n' \
+            "$source_commit" "$manager_sha" \
+            "$(jq -r '.structuralStateSha256' /tmp/r5-raw-evidence-retention-prepare.json)" \
+            "$(jq -r '.structuralState.projectIdentityDigest' /tmp/r5-raw-evidence-retention-prepare.json)" \
+            "$(jq -r '.cleanup.commandSha256' /tmp/r5-raw-evidence-retention-prepare.json)" \
+            "$(jq -r '.cleanup.mutationSha256' /tmp/r5-raw-evidence-retention-prepare.json)" \
+            "$(jq -r '.databaseBytes' /tmp/r5-raw-evidence-retention-prepare.json)" \
+            "$(jq -r '.payloadRelationBytes' /tmp/r5-raw-evidence-retention-prepare.json)" \
+            "$(jq -r '.commitRelationBytes' /tmp/r5-raw-evidence-retention-prepare.json)" \
+            "$(jq -r '.completeCandidateWorkCount' /tmp/r5-raw-evidence-retention-prepare.json)" \
+            "$(jq -r '.candidatePayloadRows' /tmp/r5-raw-evidence-retention-prepare.json)" \
+            "$(jq -r '.candidateCommitRows' /tmp/r5-raw-evidence-retention-prepare.json)" \
+            "$(jq -r '.candidatePayloadLogicalBytes' /tmp/r5-raw-evidence-retention-prepare.json)" \
+            "$(jq -r '.candidateCommitLogicalBytes' /tmp/r5-raw-evidence-retention-prepare.json)" \
+            "$(jq -r '.incompleteOldWorkCount' /tmp/r5-raw-evidence-retention-prepare.json)" \
+            "$(jq -r '.currentWorkId' /tmp/r5-raw-evidence-retention-prepare.json)" \
+            "$(jq -r '.predecessorWorkId' /tmp/r5-raw-evidence-retention-prepare.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Publish expiring owner authorization proposal
+        env:
+          SOURCE_COMMIT: ${{ steps.state.outputs.source_commit }}
+          MANAGER_SHA: ${{ steps.state.outputs.manager_sha }}
+          STATE_SHA: ${{ steps.state.outputs.state_sha }}
+          PROJECT_DIGEST: ${{ steps.state.outputs.project_digest }}
+          COMMAND_SHA: ${{ steps.state.outputs.command_sha }}
+          MUTATION_SHA: ${{ steps.state.outputs.mutation_sha }}
+          DATABASE_BYTES: ${{ steps.state.outputs.database_bytes }}
+          PAYLOAD_BYTES: ${{ steps.state.outputs.payload_bytes }}
+          COMMIT_BYTES: ${{ steps.state.outputs.commit_bytes }}
+          CANDIDATE_WORKS: ${{ steps.state.outputs.candidate_works }}
+          CANDIDATE_PAYLOAD: ${{ steps.state.outputs.candidate_payload }}
+          CANDIDATE_COMMIT: ${{ steps.state.outputs.candidate_commit }}
+          CANDIDATE_PAYLOAD_LOGICAL: ${{ steps.state.outputs.candidate_payload_logical }}
+          CANDIDATE_COMMIT_LOGICAL: ${{ steps.state.outputs.candidate_commit_logical }}
+          INCOMPLETE_OLD: ${{ steps.state.outputs.incomplete_old }}
+          CURRENT_WORK: ${{ steps.state.outputs.current_work }}
+          PREDECESSOR_WORK: ${{ steps.state.outputs.predecessor_work }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          expires="$(date -u -d '+2 hours' '+%Y-%m-%dT%H:%M:%SZ')"
+          nonce="$(openssl rand -hex 8)"
+          command="/r5-raw-evidence-retention-authorize commit=${SOURCE_COMMIT} manager=${MANAGER_SHA} state=${STATE_SHA} project=${PROJECT_DIGEST} command=${COMMAND_SHA} mutation=${MUTATION_SHA} prepare_run=${GITHUB_RUN_ID} expires=${expires} nonce=${nonce}"
+          cat > /tmp/r5-raw-evidence-retention-proposal.md <<EOF2
+          ## R5 24h raw payload / commit retention authorization proposal
+
+          Preparation run: \`${GITHUB_RUN_ID}\`
+          Source main commit: \`${SOURCE_COMMIT}\`
+          Manager SHA-256: \`${MANAGER_SHA}\`
+          Authorized structural state SHA-256: \`${STATE_SHA}\`
+          Project identity digest: \`${PROJECT_DIGEST}\`
+          Scheduled cleanup command SHA-256: \`${COMMAND_SHA}\`
+          Exact initial mutation SHA-256: \`${MUTATION_SHA}\`
+          Database bytes: \`${DATABASE_BYTES}\`
+          Payload / commit relation bytes: \`${PAYLOAD_BYTES} / ${COMMIT_BYTES}\`
+          Complete >24h candidate works: \`${CANDIDATE_WORKS}\`
+          Candidate payload / commit rows: \`${CANDIDATE_PAYLOAD} / ${CANDIDATE_COMMIT}\`
+          Candidate logical bytes payload / commit: \`${CANDIDATE_PAYLOAD_LOGICAL} / ${CANDIDATE_COMMIT_LOGICAL}\`
+          Incomplete old works retained fail-closed: \`${INCOMPLETE_OLD}\`
+          Current / predecessor protected at prepare: \`${CURRENT_WORK} / ${PREDECESSOR_WORK}\`
+          Policy: only complete committed raw payload/commit chunks older than 24h are deleted; current and immediate predecessor are always recomputed and protected; incomplete old work remains; cleanup repeats every 6h at minute 47 UTC.
+          Authorization expires: \`${expires}\`
+
+          This authorizes exactly one initial transaction using the exact mutation SHA above and creation of exactly one named pg_cron job containing the same bounded cleanup command. The cleanup has two writable public targets only: \`xrpl_phase_payload_chunks\` and \`xrpl_phase_commit_chunks\`. It does not delete or update work rows, canonical reference rows, messages, successors, or watermarks.
+
+          This does not authorize VACUUM, TRUNCATE, schema DDL, deployment, public-reader mutation, Mainnet, stabilization, soak, R5 restart, or cron-history compaction.
+
+          Exact owner authorization command:
+
+          \`${command}\`
+          EOF2
+          gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/r5-raw-evidence-retention-proposal.md
+
+      - name: Upload sanitized preparation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r5-raw-evidence-retention-prepare-evidence
+          path: r5-raw-evidence-retention-evidence
+          if-no-files-found: warn
+          retention-days: 14
+
+  execute:
+    if: >-
+      github.event.issue.number == 1261 &&
+      github.event.comment.user.login == 'badjoke-lab' &&
+      startsWith(github.event.comment.body, '/r5-raw-evidence-retention-authorize ')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      AUTHORIZATION_BODY: ${{ github.event.comment.body }}
+      AUTHORIZATION_CREATED_AT: ${{ github.event.comment.created_at }}
+      AUTHORIZATION_COMMENT_ID: ${{ github.event.comment.id }}
+    steps:
+      - name: Check out exact current main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Parse exact owner authorization
+        id: auth
+        shell: bash
+        run: |
+          set -euo pipefail
+          regex='^/r5-raw-evidence-retention-authorize commit=([a-f0-9]{40}) manager=([a-f0-9]{64}) state=([a-f0-9]{64}) project=([a-f0-9]{64}) command=([a-f0-9]{64}) mutation=([a-f0-9]{64}) prepare_run=([0-9]+) expires=([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z) nonce=([a-f0-9]{16})$'
+          [[ "$AUTHORIZATION_BODY" =~ $regex ]] || { echo 'authorization shape mismatch' >&2; exit 1; }
+          commit="${BASH_REMATCH[1]}"; manager_sha="${BASH_REMATCH[2]}"; state_sha="${BASH_REMATCH[3]}"; project_digest="${BASH_REMATCH[4]}"; command_sha="${BASH_REMATCH[5]}"; mutation_sha="${BASH_REMATCH[6]}"; prepare_run="${BASH_REMATCH[7]}"; expires="${BASH_REMATCH[8]}"; nonce="${BASH_REMATCH[9]}"
+          test "$commit" = "$(git rev-parse HEAD)"
+          test "$manager_sha" = "$(sha256sum "$MANAGER_PATH" | awk '{print $1}')"
+          test "$project_digest" = "$(printf '%s' "$SUPABASE_PROJECT_ID" | sha256sum | awk '{print $1}')"
+          now_epoch="$(date -u +%s)"; expires_epoch="$(date -u -d "$expires" +%s)"; auth_epoch="$(date -u -d "$AUTHORIZATION_CREATED_AT" +%s)"
+          test "$auth_epoch" -lt "$expires_epoch"; test "$now_epoch" -le "$expires_epoch"; test $((expires_epoch-auth_epoch)) -le 7200
+          printf 'commit=%s\nmanager_sha=%s\nstate_sha=%s\nproject_digest=%s\ncommand_sha=%s\nmutation_sha=%s\nprepare_run=%s\nexpires=%s\nnonce=%s\n' "$commit" "$manager_sha" "$state_sha" "$project_digest" "$command_sha" "$mutation_sha" "$prepare_run" "$expires" "$nonce" >> "$GITHUB_OUTPUT"
+
+      - name: Verify exact prior proposal and unique owner authorization
+        env:
+          PREPARE_RUN: ${{ steps.auth.outputs.prepare_run }}
+          COMMIT: ${{ steps.auth.outputs.commit }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${PREPARE_RUN}" > /tmp/prepare-run.json
+          jq -e --arg commit "$COMMIT" '.event=="issue_comment" and .conclusion=="success" and .head_sha==$commit and .actor.login=="badjoke-lab"' /tmp/prepare-run.json >/dev/null
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${QUALIFICATION_ISSUE}/comments?per_page=100" | jq -s 'add' > /tmp/comments.json
+          EXPECTED="$AUTHORIZATION_BODY" PREPARE_RUN="$PREPARE_RUN" AUTH_ID="$AUTHORIZATION_COMMENT_ID" AUTH_CREATED_AT="$AUTHORIZATION_CREATED_AT" node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs'
+          const comments=JSON.parse(readFileSync('/tmp/comments.json','utf8')); const expected=process.env.EXPECTED; const run=process.env.PREPARE_RUN; const authAt=Date.parse(process.env.AUTH_CREATED_AT)
+          const proposals=comments.filter(c=>c?.user?.login==='github-actions[bot]'&&c?.body?.includes(`Preparation run: \`${run}\``)&&c?.body?.includes(`\`${expected}\``))
+          if(proposals.length!==1||!(Date.parse(proposals[0].created_at)<authAt)) throw new Error('exact prior proposal missing or late')
+          const owners=comments.filter(c=>c?.user?.login==='badjoke-lab'&&c?.body===expected)
+          if(owners.length!==1||Number(owners[0].id)!==Number(process.env.AUTH_ID)) throw new Error('owner authorization is not unique')
+          NODE
+
+      - name: Revalidate exact authorized state read-only
+        env:
+          COMMIT: ${{ steps.auth.outputs.commit }}
+          STATE_SHA: ${{ steps.auth.outputs.state_sha }}
+          COMMAND_SHA: ${{ steps.auth.outputs.command_sha }}
+          MUTATION_SHA: ${{ steps.auth.outputs.mutation_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p r5-raw-evidence-retention-evidence
+          node "$MANAGER_PATH" prepare --source-commit "$COMMIT" --output r5-raw-evidence-retention-evidence/pre-apply.json > /tmp/pre.json
+          test "$(jq -r '.structuralStateSha256' /tmp/pre.json)" = "$STATE_SHA"
+          test "$(jq -r '.cleanup.commandSha256' /tmp/pre.json)" = "$COMMAND_SHA"
+          test "$(jq -r '.cleanup.mutationSha256' /tmp/pre.json)" = "$MUTATION_SHA"
+
+      - name: Apply exact bounded raw-evidence retention
+        id: apply
+        env:
+          COMMIT: ${{ steps.auth.outputs.commit }}
+          STATE_SHA: ${{ steps.auth.outputs.state_sha }}
+          MUTATION_SHA: ${{ steps.auth.outputs.mutation_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node "$MANAGER_PATH" apply \
+            --source-commit "$COMMIT" \
+            --authorized-state "$STATE_SHA" \
+            --authorized-mutation "$MUTATION_SHA" \
+            --output r5-raw-evidence-retention-evidence/apply.json \
+            2>&1 | tee r5-raw-evidence-retention-evidence/apply.log
+
+      - name: Upload sanitized application evidence
+        if: always() && steps.auth.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: r5-raw-evidence-retention-apply-evidence
+          path: r5-raw-evidence-retention-evidence
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Publish bounded result
+        if: always() && steps.apply.outcome == 'success'
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -r '"## R5 24h raw payload / commit retention — PASS\n\n- candidate works: `\(.candidateWorkCount)`\n- payload / commit rows deleted: `\(.payloadDeleted) / \(.commitDeleted)`\n- DB bytes before/after: `\(.databaseBytesBefore) / \(.databaseBytesAfter)`\n- recurring pg_cron job installed: `\(.schedulerMutationPerformed)`\n- writable targets: `xrpl_phase_payload_chunks / xrpl_phase_commit_chunks only`\n- work/reference/message/successor mutation: `none`\n- VACUUM/TRUNCATE/schema DDL: `none`\n- deployment/Mainnet/stabilization/soak/R5 restart: `not authorized`"' r5-raw-evidence-retention-evidence/apply.json > /tmp/result.md
+          gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/result.md
