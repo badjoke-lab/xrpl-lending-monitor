@@ -16,6 +16,7 @@ python scripts/extend-actions-policy-r5-revision4-minute-activation.py "$generat
 python scripts/extend-actions-policy-r5-revision4-db-footprint-probe.py "$generated_script"
 python scripts/extend-actions-policy-r5-phase-message-ready-partial-index-apply.py "$generated_script"
 python scripts/extend-actions-policy-r5-retention-readonly-preflight.py "$generated_script"
+python scripts/extend-actions-policy-r5-cron-history-retention.py "$generated_script"
 chmod 700 "$generated_script"
 bash "$generated_script" "$@"
 bash -n scripts/check-supabase-production-autodeploy-boundary.sh
@@ -23,6 +24,8 @@ bash scripts/check-supabase-production-autodeploy-boundary.sh
 node scripts/test-r5-phase-ready-native-history-record.mjs
 bash -n scripts/test-r5-retention-readonly-preflight-contract.sh
 bash scripts/test-r5-retention-readonly-preflight-contract.sh
+bash -n scripts/test-r5-cron-history-retention-contract.sh
+bash scripts/test-r5-cron-history-retention-contract.sh
 bash -n scripts/run-r4f-g3-dual-provider-verdict.sh
 node scripts/check-r4f-g3-isolation-control-policy.mjs
 node scripts/check-r4f-g3-dual-runner-policy.mjs
