@@ -43,6 +43,9 @@ fi
 bash -n scripts/test-r5-work-status-partial-index-postgres.sh
 R5_WORK_STATUS_INDEX_OUTPUT=actions-workflow-policy-evidence/r5-work-status-partial-index \
   bash scripts/test-r5-work-status-partial-index-postgres.sh
+bash -n scripts/test-r5-committed-reader-partial-index-postgres.sh
+R5_COMMITTED_READER_OUTPUT=actions-workflow-policy-evidence/r5-committed-reader-partial-index \
+  bash scripts/test-r5-committed-reader-partial-index-postgres.sh
 bash -n scripts/test-r5-work-status-partial-index-apply-contract.sh
 bash scripts/test-r5-work-status-partial-index-apply-contract.sh
 bash -n scripts/test-r5-secondary-index-readonly-audit-contract.sh
