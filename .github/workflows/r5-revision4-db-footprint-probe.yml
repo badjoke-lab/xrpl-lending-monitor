@@ -88,6 +88,19 @@ jobs:
               ), '[]'::jsonb) as constraints,
               (select count(*)::bigint from pg_trigger where tgrelid = 'cron.job_run_details'::regclass and not tgisinternal) as user_triggers
             from cron.job_run_details
+          ), phase_message_indexes as (
+            select
+              ns.nspname as schema_name,
+              idx.relname as index_name,
+              pg_relation_size(i.indexrelid)::bigint as index_bytes,
+              i.indisprimary as primary_index,
+              i.indisunique as unique_index,
+              pg_get_indexdef(i.indexrelid) as definition,
+              pg_get_expr(i.indpred, i.indrelid) as predicate
+            from pg_index i
+            join pg_class idx on idx.oid = i.indexrelid
+            join pg_namespace ns on ns.oid = idx.relnamespace
+            where i.indrelid = 'public.xrpl_phase_messages'::regclass
           ), active_watermark as (
             select w.*
             from public.xrpl_phase_watermarks w
@@ -181,6 +194,43 @@ jobs:
                 )
                 from public.xrpl_phase_messages
                 where profile_id = 'supabase-devnet'
+              ),
+              'messageStatusCountsAllProfiles', (
+                select jsonb_build_object(
+                  'pending', count(*) filter (where status = 'pending'),
+                  'leased', count(*) filter (where status = 'leased'),
+                  'retry', count(*) filter (where status = 'retry'),
+                  'completed', count(*) filter (where status = 'completed'),
+                  'error', count(*) filter (where status = 'error'),
+                  'total', count(*)
+                )
+                from public.xrpl_phase_messages
+              ),
+              'messageIndexTotalBytes', (select coalesce(sum(index_bytes), 0)::bigint from phase_message_indexes),
+              'messageIndexes', coalesce((
+                select jsonb_agg(jsonb_build_object(
+                  'schema', schema_name,
+                  'indexName', index_name,
+                  'indexBytes', index_bytes,
+                  'primary', primary_index,
+                  'unique', unique_index,
+                  'definition', definition,
+                  'predicate', predicate
+                ) order by index_bytes desc, index_name)
+                from phase_message_indexes
+              ), '[]'::jsonb),
+              'messageReadyIndex', (
+                select jsonb_build_object(
+                  'schema', schema_name,
+                  'indexName', index_name,
+                  'indexBytes', index_bytes,
+                  'primary', primary_index,
+                  'unique', unique_index,
+                  'definition', definition,
+                  'predicate', predicate
+                )
+                from phase_message_indexes
+                where index_name = 'xrpl_phase_messages_ready_idx'
               ),
               'canonicalReferenceRows', (
                 select jsonb_build_object(
@@ -351,6 +401,12 @@ jobs:
             (.phaseStorage.activeWatermark.workId | type == "string") and
             (.phaseStorage.currentWork.workId | type == "string") and
             (.phaseStorage.predecessorWork.workId | type == "string") and
+            (.phaseStorage.messageStatusCountsAllProfiles.total | type == "number") and
+            (.phaseStorage.messageIndexTotalBytes | type == "number") and
+            (.phaseStorage.messageIndexes | type == "array") and
+            .phaseStorage.messageReadyIndex.indexName == "xrpl_phase_messages_ready_idx" and
+            (.phaseStorage.messageReadyIndex.indexBytes | type == "number") and
+            (.phaseStorage.messageReadyIndex.definition | type == "string") and
             .phaseStorage.currentWork.expectedPayloadChunks == .phaseStorage.currentWork.actualPayloadChunks and
             .phaseStorage.currentWork.expectedCommitChunks == .phaseStorage.currentWork.actualCompletedCommitChunks and
             .phaseStorage.predecessorWork.expectedPayloadChunks == .phaseStorage.predecessorWork.actualPayloadChunks and
@@ -395,6 +451,11 @@ jobs:
           predecessor_work="$(jq -r '.phaseStorage.predecessorWork.workId' "$f")"
           reference_rows="$(jq -r '.phaseStorage.canonicalReferenceRows.exactRows' "$f")"
           reference_bytes="$(jq -r '.phaseStorage.canonicalReferenceRows.logicalRowBytes' "$f")"
+          message_status_all="$(jq -c '.phaseStorage.messageStatusCountsAllProfiles' "$f")"
+          message_index_total_bytes="$(jq -r '.phaseStorage.messageIndexTotalBytes' "$f")"
+          message_ready_index_bytes="$(jq -r '.phaseStorage.messageReadyIndex.indexBytes' "$f")"
+          message_ready_index_predicate="$(jq -r '.phaseStorage.messageReadyIndex.predicate // "<none/full-index>"' "$f")"
+          message_indexes="$(jq -c '[.phaseStorage.messageIndexes[] | {name:.indexName,indexBytes:.indexBytes,predicate:.predicate}]' "$f")"
           old_payload_rows="$(jq -r '.phaseStorage.olderCommittedPayloadEvidenceObserved.chunkRows' "$f")"
           old_payload_bytes="$(jq -r '.phaseStorage.olderCommittedPayloadEvidenceObserved.logicalRowBytes' "$f")"
           old_commit_rows="$(jq -r '.phaseStorage.olderCommittedCommitEvidenceObserved.chunkRows' "$f")"
@@ -420,6 +481,12 @@ jobs:
           Current committed work retained: \`${current_work}\`.
           Immediate predecessor work retained: \`${predecessor_work}\`.
           Canonical reference rows retained: \`${reference_rows}\` rows / logical \`${reference_bytes} B\`.
+
+          Exact xrpl_phase_messages index footprint (read only):
+          - all-profile status counts: \`${message_status_all}\`
+          - all message indexes: \`${message_index_total_bytes} B\`
+          - current ready index: \`${message_ready_index_bytes} B\`, predicate=\`${message_ready_index_predicate}\`
+          - per-index bytes/predicates: \`${message_indexes}\`
 
           Measurement-only older committed raw evidence, excluding the current and immediate predecessor works:
           - payload chunks: \`${old_payload_rows}\` rows / logical \`${old_payload_bytes} B\`
