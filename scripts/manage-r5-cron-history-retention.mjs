@@ -6,11 +6,15 @@ import { dirname, resolve } from 'node:path'
 
 const JOB_NAME = 'xrpl-r5-cron-history-retention-v1'
 const JOB_SCHEDULE = '17 */6 * * *'
+const RUN_ID_SEQUENCE = 'cron.runid_seq'
 const SUCCESS_HOURS = 24
 const FAILURE_DAYS = 7
 const DELETE_SQL = `delete from cron.job_run_details where (status = 'succeeded' and end_time is not null and end_time < now() - interval '${SUCCESS_HOURS} hours') or (status is distinct from 'succeeded' and end_time is not null and end_time < now() - interval '${FAILURE_DAYS} days')`
 const ELIGIBLE_PREDICATE = `(status = 'succeeded' and end_time is not null and end_time < now() - interval '${SUCCESS_HOURS} hours') or (status is distinct from 'succeeded' and end_time is not null and end_time < now() - interval '${FAILURE_DAYS} days')`
 const KEEP_PREDICATE = `not (${ELIGIBLE_PREDICATE})`
+const EXPECTED_COLUMNS = Object.freeze([
+  'jobid', 'runid', 'job_pid', 'database', 'username', 'command', 'status', 'return_message', 'start_time', 'end_time',
+])
 
 function fail(message) { throw new Error(message) }
 function sha256(value) { return createHash('sha256').update(String(value), 'utf8').digest('hex') }
@@ -70,13 +74,14 @@ create temporary table r5_cron_compaction_meta on commit drop as
   select
     count(*)::bigint as retained_rows,
     coalesce(md5(string_agg(to_jsonb(r)::text, E'\\n' order by runid)), md5('')) as retained_digest,
-    (select pg_get_serial_sequence('cron.job_run_details','runid')) as sequence_name,
-    (select last_value from pg_sequences where schemaname='cron' and sequencename=split_part(pg_get_serial_sequence('cron.job_run_details','runid'),'.',2)) as sequence_last_value,
+    '${RUN_ID_SEQUENCE}'::text as sequence_name,
+    (select last_value from cron.runid_seq) as sequence_last_value,
     (select max(runid) from cron.job_run_details) as max_runid_before
   from r5_cron_retained r;
 truncate table cron.job_run_details continue identity;
-insert into cron.job_run_details overriding system value
-  select * from r5_cron_retained order by runid;
+insert into cron.job_run_details(jobid,runid,job_pid,database,username,command,status,return_message,start_time,end_time)
+  select jobid,runid,job_pid,database,username,command,status,return_message,start_time,end_time
+  from r5_cron_retained order by runid;
 do $$
 declare
   v_expected_rows bigint;
@@ -86,9 +91,10 @@ declare
   v_sequence_name text;
   v_sequence_before bigint;
   v_sequence_after bigint;
+  v_max_runid_before bigint;
 begin
-  select retained_rows,retained_digest,sequence_name,sequence_last_value
-    into v_expected_rows,v_expected_digest,v_sequence_name,v_sequence_before
+  select retained_rows,retained_digest,sequence_name,sequence_last_value,max_runid_before
+    into v_expected_rows,v_expected_digest,v_sequence_name,v_sequence_before,v_max_runid_before
   from r5_cron_compaction_meta;
   select count(*)::bigint,coalesce(md5(string_agg(to_jsonb(r)::text,E'\\n' order by runid)),md5(''))
     into v_actual_rows,v_actual_digest
@@ -99,14 +105,15 @@ begin
   if exists(select 1 from cron.job_run_details where ${ELIGIBLE_PREDICATE}) then
     raise exception 'cron physical compaction retained an expired row';
   end if;
-  if v_sequence_name is null then
-    raise exception 'cron runid sequence missing';
+  if v_sequence_name is distinct from '${RUN_ID_SEQUENCE}' then
+    raise exception 'cron runid sequence identity drifted';
   end if;
-  select last_value into v_sequence_after
-  from pg_sequences
-  where schemaname='cron' and sequencename=split_part(v_sequence_name,'.',2);
-  if v_sequence_after is distinct from v_sequence_before then
-    raise exception 'cron runid sequence moved during compaction';
+  select last_value into v_sequence_after from cron.runid_seq;
+  if v_sequence_after < v_sequence_before then
+    raise exception 'cron runid sequence moved backward during compaction';
+  end if;
+  if v_max_runid_before is not null and v_sequence_after < v_max_runid_before then
+    raise exception 'cron runid sequence fell behind pre-compaction max runid';
   end if;
 end $$;
 select cron.schedule('${escapedName}', '${escapedSchedule}', '${escapedCommand}');
@@ -117,10 +124,13 @@ for (const required of [
   "set local statement_timeout = '45s'",
   'lock table cron.job_run_details in access exclusive mode',
   'create temporary table r5_cron_retained on commit drop',
+  `'${RUN_ID_SEQUENCE}'::text as sequence_name`,
+  'select last_value from cron.runid_seq',
   'truncate table cron.job_run_details continue identity',
-  'insert into cron.job_run_details overriding system value',
+  'insert into cron.job_run_details(jobid,runid,job_pid,database,username,command,status,return_message,start_time,end_time)',
   'cron retained-row restoration mismatch',
-  'cron runid sequence moved during compaction',
+  'cron runid sequence moved backward during compaction',
+  'cron runid sequence fell behind pre-compaction max runid',
   `select cron.schedule('${escapedName}', '${escapedSchedule}', '${escapedCommand}')`,
 ]) if (!MUTATION_SQL.includes(required)) fail(`cron physical-compaction mutation missing contract: ${required}`)
 if ((MUTATION_SQL.match(/\btruncate\b/giu) ?? []).length !== 1) fail('cron physical-compaction mutation must contain exactly one TRUNCATE')
@@ -131,6 +141,7 @@ for (const forbidden of [
   /\bvacuum\b/iu,
   /\bdelete\s+from\s+public\./iu,
   /\bupdate\s+cron\.job\b/iu,
+  /\bsetval\s*\(/iu,
 ]) if (forbidden.test(MUTATION_SQL)) fail(`cron physical-compaction mutation contains forbidden capability: ${forbidden}`)
 
 function inspectionSql() {
@@ -149,8 +160,9 @@ function inspectionSql() {
     'constraints', coalesce((select jsonb_agg(jsonb_build_object('name',conname,'type',contype,'definition',pg_get_constraintdef(oid)) order by conname) from pg_constraint where conrelid='cron.job_run_details'::regclass),'[]'::jsonb),
     'foreignKeys', coalesce((select jsonb_agg(jsonb_build_object('name',conname,'source',conrelid::regclass::text,'target',confrelid::regclass::text,'definition',pg_get_constraintdef(oid)) order by conname) from pg_constraint where contype='f' and (conrelid='cron.job_run_details'::regclass or confrelid='cron.job_run_details'::regclass)),'[]'::jsonb),
     'nonInternalTriggers', coalesce((select jsonb_agg(jsonb_build_object('name',tgname,'definition',pg_get_triggerdef(oid)) order by tgname) from pg_trigger where tgrelid='cron.job_run_details'::regclass and not tgisinternal),'[]'::jsonb),
-    'runIdSequence', pg_get_serial_sequence('cron.job_run_details','runid'),
-    'runIdSequenceRecord', coalesce((select jsonb_build_object('schema',schemaname,'name',sequencename,'start',start_value,'min',min_value,'max',max_value,'increment',increment_by,'cycle',cycle,'cache',cache_size,'lastValue',last_value) from pg_sequences where schemaname='cron' and sequencename=split_part(pg_get_serial_sequence('cron.job_run_details','runid'),'.',2)),'null'::jsonb),
+    'pgCronExtension', coalesce((select jsonb_build_object('name',e.extname,'schema',n.nspname,'version',e.extversion) from pg_extension e join pg_namespace n on n.oid=e.extnamespace where e.extname='pg_cron'),'null'::jsonb),
+    'runIdSequence', case when to_regclass('${RUN_ID_SEQUENCE}') is not null and (select relkind from pg_class where oid=to_regclass('${RUN_ID_SEQUENCE}'))='S' then '${RUN_ID_SEQUENCE}' else null end,
+    'runIdSequenceRecord', coalesce((select jsonb_build_object('schema',schemaname,'name',sequencename,'start',start_value,'min',min_value,'max',max_value,'increment',increment_by,'cycle',cycle,'cache',cache_size,'lastValue',last_value) from pg_sequences where schemaname='cron' and sequencename='runid_seq'),'null'::jsonb),
     'jobRows', (select count(*) from cron.job where jobname='${JOB_NAME}'),
     'jobRecord', coalesce((select jsonb_build_object('jobid',jobid,'schedule',schedule,'command',command,'database',database,'username',username,'active',active) from cron.job where jobname='${JOB_NAME}' limit 1),'null'::jsonb),
     'exactRows', (select count(*) from cron.job_run_details),
@@ -165,11 +177,16 @@ function inspectionSql() {
     'stats', coalesce((select jsonb_build_object('live',n_live_tup,'dead',n_dead_tup,'lastAutovacuum',last_autovacuum,'autovacuumCount',autovacuum_count) from pg_stat_all_tables where relid='cron.job_run_details'::regclass),'{}'::jsonb)
   ) as state;`
 }
+function sequenceContract(record) {
+  if (!record || typeof record !== 'object') return null
+  const { lastValue: _lastValue, ...staticRecord } = record
+  return staticRecord
+}
 function structuralState(state, sourceCommit) {
   const projectId = requireEnv('SUPABASE_PROJECT_ID', /^[a-z]{20}$/u)
   const job = state.jobRecord
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     purpose: 'r5-cron-history-retention-authorization-state',
     sourceCommit,
     projectIdentityDigest: sha256(projectId),
@@ -186,14 +203,16 @@ function structuralState(state, sourceCommit) {
     constraintsSha256: sha256(JSON.stringify(state.constraints ?? [])),
     foreignKeysSha256: sha256(JSON.stringify(state.foreignKeys ?? [])),
     nonInternalTriggersSha256: sha256(JSON.stringify(state.nonInternalTriggers ?? [])),
+    pgCronExtensionSha256: sha256(JSON.stringify(state.pgCronExtension ?? null)),
     runIdSequence: state.runIdSequence,
+    runIdSequenceContractSha256: sha256(JSON.stringify(sequenceContract(state.runIdSequenceRecord))),
   }
 }
 async function inspect(sourceCommit) {
   const state = firstState(await managementQuery(inspectionSql(), true))
   const structural = structuralState(state, sourceCommit)
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     purpose: 'r5-cron-history-retention-state',
     sourceCommit,
     ...state,
@@ -230,10 +249,21 @@ function assertCompactionEligible(state) {
   if (state.tableKind !== 'r') fail(`cron history relation kind drifted: ${state.tableKind}`)
   if (!Array.isArray(state.foreignKeys) || state.foreignKeys.length !== 0) fail('cron history table has foreign-key dependencies; physical compaction is not eligible')
   if (!Array.isArray(state.nonInternalTriggers) || state.nonInternalTriggers.length !== 0) fail('cron history table has non-internal triggers; physical compaction is not eligible')
-  if (typeof state.runIdSequence !== 'string' || !state.runIdSequence.startsWith('cron.')) fail('cron runid sequence is missing or unexpected')
-  if (!state.runIdSequenceRecord || typeof state.runIdSequenceRecord !== 'object') fail('cron runid sequence metadata missing')
+  if (!state.pgCronExtension || state.pgCronExtension.name !== 'pg_cron') fail('pg_cron extension metadata missing')
+  if (state.runIdSequence !== RUN_ID_SEQUENCE) fail(`cron runid sequence is missing or unexpected: ${state.runIdSequence}`)
+  if (!state.runIdSequenceRecord || state.runIdSequenceRecord.schema !== 'cron' || state.runIdSequenceRecord.name !== 'runid_seq') fail('cron runid sequence metadata missing or drifted')
+  const columns = Array.isArray(state.tableDefinitionDigestSource) ? state.tableDefinitionDigestSource : []
+  const names = columns.map((column) => column.column)
+  if (JSON.stringify(names) !== JSON.stringify(EXPECTED_COLUMNS)) fail(`cron history column contract drifted: ${JSON.stringify(names)}`)
+  const runIdColumn = columns.find((column) => column.column === 'runid')
+  if (!runIdColumn || runIdColumn.type !== 'bigint' || runIdColumn.identity !== 'NO') fail('cron runid column is not the expected non-identity bigint')
   if (Number(state.exactRows) <= 0) fail('cron history is empty; physical compaction is not eligible')
   if (Number(state.candidateSucceededRows) + Number(state.candidateNonSucceededRows) <= 0) fail('cron history has no expired rows to compact')
+  const sequenceLastValue = Number(state.runIdSequenceRecord.lastValue)
+  const maxRunId = Number(state.maxRunId)
+  if (!Number.isSafeInteger(sequenceLastValue) || sequenceLastValue < 1) fail('cron runid sequence last value is invalid')
+  if (!Number.isSafeInteger(maxRunId) || maxRunId < 1) fail('cron history max runid is invalid')
+  if (sequenceLastValue < maxRunId) fail(`cron runid sequence is behind history max runid: ${sequenceLastValue} < ${maxRunId}`)
 }
 async function prepare(options) {
   const sourceCommit = validateSource(options)
@@ -260,10 +290,15 @@ async function apply(options) {
   if (Number(after.jobRows) !== 1 || after.jobRecord?.schedule !== JOB_SCHEDULE || after.jobRecord?.command !== DELETE_SQL || after.jobRecord?.active !== true) fail('cleanup job post-state mismatch')
   if (!(Number(after.tableBytes) < Number(before.tableBytes))) fail('cron physical compaction did not shrink the relation')
   if (!(Number(after.databaseBytes) < Number(before.databaseBytes))) fail('cron physical compaction did not reduce database bytes')
-  if (after.runIdSequence !== before.runIdSequence) fail('cron runid sequence identity drifted after compaction')
+  if (after.runIdSequence !== RUN_ID_SEQUENCE || after.runIdSequence !== before.runIdSequence) fail('cron runid sequence identity drifted after compaction')
+  const sequenceBefore = Number(before.runIdSequenceRecord?.lastValue)
+  const sequenceAfter = Number(after.runIdSequenceRecord?.lastValue)
+  const maxRunIdBefore = Number(before.maxRunId)
+  if (!Number.isSafeInteger(sequenceAfter) || sequenceAfter < sequenceBefore) fail('cron runid sequence moved backward after compaction')
+  if (sequenceAfter < maxRunIdBefore) fail('cron runid sequence fell behind pre-compaction max runid after compaction')
 
   const evidence = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     purpose: 'r5-cron-history-retention-apply',
     sourceCommit,
     authorizedStateSha256: authorizedState,
@@ -290,6 +325,9 @@ async function apply(options) {
     nullEndRowsBefore: Number(before.nullEndRows),
     nullEndRowsAfter: Number(after.nullEndRows),
     runIdSequence: after.runIdSequence,
+    runIdSequenceLastValueBefore: sequenceBefore,
+    runIdSequenceLastValueAfter: sequenceAfter,
+    maxRunIdBefore,
     physicalCompactionPerformed: true,
     vacuumPerformed: false,
     schedulerMutationPerformed: true,
