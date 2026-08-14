@@ -15,8 +15,8 @@ def replace_once(name, old, new):
 
 replace_once(
     'raw retention allowlist',
-    '  r5-revision4-resource-halt-diagnostic.yml\n  r5-work-status-partial-index-apply.yml\n  read-only-production-qualification.yml',
-    '  r5-revision4-resource-halt-diagnostic.yml\n  r5-raw-evidence-retention.yml\n  r5-work-status-partial-index-apply.yml\n  read-only-production-qualification.yml',
+    '  r5-phase-message-ready-partial-index-apply.yml\n  r5-retention-readonly-preflight.yml',
+    '  r5-phase-message-ready-partial-index-apply.yml\n  r5-raw-evidence-retention.yml\n  r5-retention-readonly-preflight.yml',
 )
 replace_once(
     'raw retention workflow count',
