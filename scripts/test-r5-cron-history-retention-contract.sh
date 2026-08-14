@@ -19,8 +19,12 @@ for required in (
     "startsWith(github.event.comment.body, '/r5-cron-history-retention-authorize ')",
     "persist-credentials: false",
     "Inspect retention and compaction pre-state read-only",
+    "prepare.stderr.log",
+    "if: always()",
     "Exact physical-compaction mutation SHA-256",
     "mutation=${MUTATION_SHA}",
+    "Run-ID sequence / last value / current max runid",
+    "The sequence is never reset with \\`setval\\`",
     "Revalidate authorized structural state read-only",
     "Apply exact bounded cron physical compaction",
     "--authorized-mutation \"$MUTATION_SHA\"",
@@ -46,6 +50,7 @@ if workflow.count("/r5-cron-history-retention-authorize") != 3:
 for required in (
     "const JOB_NAME = 'xrpl-r5-cron-history-retention-v1'",
     "const JOB_SCHEDULE = '17 */6 * * *'",
+    "const RUN_ID_SEQUENCE = 'cron.runid_seq'",
     "const SUCCESS_HOURS = 24",
     "const FAILURE_DAYS = 7",
     "status = 'succeeded'",
@@ -57,7 +62,13 @@ for required in (
     "authorized mutation SHA does not match exact cron physical-compaction transaction",
     "cron history table has foreign-key dependencies",
     "cron history table has non-internal triggers",
+    "pgCronExtension",
+    "pgCronExtensionSha256",
     "runIdSequence",
+    "runIdSequenceContractSha256",
+    "cron.runid_seq",
+    "cron runid sequence moved backward",
+    "cron runid sequence fell behind pre-compaction max runid",
     "tableDefinitionSha256",
     "constraintsSha256",
     "foreignKeysSha256",
@@ -70,6 +81,14 @@ for required in (
 ):
     if required not in manager:
         raise SystemExit(f"manager missing: {required}")
+for forbidden in (
+    "pg_get_serial_sequence('cron.job_run_details','runid')",
+    "pg_get_serial_sequence(\"cron.job_run_details\",\"runid\")",
+):
+    if forbidden in manager:
+        raise SystemExit(f"manager retains invalid serial/identity sequence assumption: {forbidden}")
+if re.search(r"\bsetval\s*\(",manager,re.I):
+    raise SystemExit("manager must never reset cron.runid_seq with setval")
 if manager.count("managementQuery(MUTATION_SQL, false)") != 1:
     raise SystemExit("manager must have exactly one writable Management API call")
 for line in manager.splitlines():
@@ -91,11 +110,14 @@ for required in (
     "lock table cron.job_run_details in access exclusive mode;",
     "create temporary table r5_cron_retained on commit drop",
     "select * from cron.job_run_details where ${KEEP_PREDICATE};",
+    "'${RUN_ID_SEQUENCE}'::text as sequence_name",
+    "select last_value from cron.runid_seq",
     "truncate table cron.job_run_details continue identity;",
-    "insert into cron.job_run_details overriding system value",
+    "insert into cron.job_run_details(jobid,runid,job_pid,database,username,command,status,return_message,start_time,end_time)",
     "cron retained-row restoration mismatch",
     "cron physical compaction retained an expired row",
-    "cron runid sequence moved during compaction",
+    "cron runid sequence moved backward during compaction",
+    "cron runid sequence fell behind pre-compaction max runid",
     "select cron.schedule('${escapedName}', '${escapedSchedule}', '${escapedCommand}');",
     "commit;",
 ):
@@ -112,6 +134,7 @@ for forbidden in (
     r"\bdelete\s+from\s+public\.",
     r"\bupdate\s+cron\.job\b",
     r"\btruncate\s+table\s+(?!cron\.job_run_details\b)",
+    r"\bsetval\s*\(",
 ):
     if re.search(forbidden,mutation,re.I):
         raise SystemExit(f"mutation SQL contains forbidden capability: {forbidden}")
