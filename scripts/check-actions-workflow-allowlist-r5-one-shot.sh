@@ -18,9 +18,11 @@ python scripts/extend-actions-policy-r5-phase-message-ready-partial-index-apply.
 python scripts/extend-actions-policy-r5-retention-readonly-preflight.py "$generated_script"
 python scripts/extend-actions-policy-r5-cron-history-retention.py "$generated_script"
 python scripts/extend-actions-policy-r5-index-footprint-readonly-probe.py "$generated_script"
+python scripts/extend-actions-policy-r5-work-status-partial-index-apply.py "$generated_script"
 chmod 700 "$generated_script"
 bash "$generated_script" "$@"
 node --check scripts/r5-index-footprint-readonly-probe.mjs
+node --check scripts/manage-r5-work-status-partial-index.mjs
 bash -n scripts/check-supabase-production-autodeploy-boundary.sh
 bash scripts/check-supabase-production-autodeploy-boundary.sh
 node scripts/test-r5-phase-ready-native-history-record.mjs
@@ -40,6 +42,8 @@ fi
 bash -n scripts/test-r5-work-status-partial-index-postgres.sh
 R5_WORK_STATUS_INDEX_OUTPUT=actions-workflow-policy-evidence/r5-work-status-partial-index \
   bash scripts/test-r5-work-status-partial-index-postgres.sh
+bash -n scripts/test-r5-work-status-partial-index-apply-contract.sh
+bash scripts/test-r5-work-status-partial-index-apply-contract.sh
 bash -n scripts/run-r4f-g3-dual-provider-verdict.sh
 node scripts/check-r4f-g3-isolation-control-policy.mjs
 node scripts/check-r4f-g3-dual-runner-policy.mjs
