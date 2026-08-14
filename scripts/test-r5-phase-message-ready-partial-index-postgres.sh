@@ -26,13 +26,15 @@ docker run --detach --rm \
   --env POSTGRES_DB=postgres \
   "$image" > "${output_directory}/container-id.txt"
 
+ready=0
 for _ in $(seq 1 60); do
-  if docker exec "$container_name" pg_isready -U postgres -d postgres >/dev/null 2>&1; then
+  if docker exec "$container_name" psql -U postgres -d postgres -Atqc 'select 1' >/dev/null 2>&1; then
+    ready=1
     break
   fi
   sleep 1
 done
-docker exec "$container_name" psql -U postgres -d postgres -Atqc 'select 1' >/dev/null
+[[ "$ready" == 1 ]]
 
 docker exec -i "$container_name" psql -v ON_ERROR_STOP=1 -U postgres -d postgres \
   > "${output_directory}/setup.log" <<'SQL'
