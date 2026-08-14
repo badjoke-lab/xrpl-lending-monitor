@@ -2,7 +2,7 @@
 -- completed/error rows from the claim-ready index.  The runtime claim query
 -- only considers pending, retry, and expired leased messages.
 --
--- This migration is index-only: it does not update or delete historical data.
+-- This migration is index-only and does not mutate historical data.
 
 do $$
 declare
