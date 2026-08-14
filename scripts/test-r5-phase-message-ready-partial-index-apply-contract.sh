@@ -66,10 +66,18 @@ if grep -Eiq '\b(truncate|vacuum)\b|\bdelete[[:space:]]+from\b|\bdrop[[:space:]]
   echo 'migration contains forbidden destructive row/schema operation' >&2
   exit 1
 fi
-if grep -Eiq '\bdelete[[:space:]]+from\b|\btruncate\b|\bvacuum\b' "$manager"; then
-  echo 'manager contains forbidden history-row mutation SQL' >&2
-  exit 1
-fi
+
+# The manager intentionally contains regex literals naming forbidden SQL so it can
+# reject such migration text at runtime. Verify that guard exists rather than
+# grepping the manager for those words and matching the guard itself.
+for guard in \
+  '/\\btruncate\\b/iu' \
+  '/\\bdelete\\s+from\\b/iu' \
+  '/\\bvacuum\\b/iu' \
+  '/\\bdrop\\s+table\\b/iu' \
+  '/\\bdrop\\s+schema\\b/iu'; do
+  grep -Fq -- "$guard" "$manager" || { echo "manager missing runtime forbidden-SQL guard: $guard" >&2; exit 1; }
+done
 
 prepare_count="$(grep -Fc "github.event.comment.body == '/r5-phase-ready-index-prepare'" "$workflow")"
 authorize_count="$(grep -Fc "startsWith(github.event.comment.body, '/r5-phase-ready-index-authorize ')" "$workflow")"
