@@ -19,7 +19,7 @@ jobs:
       github.event.comment.user.login == 'badjoke-lab' &&
       github.event.comment.body == '/r5-index-footprint-readonly-probe'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     env:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
@@ -41,6 +41,15 @@ jobs:
             --source-commit "$GITHUB_SHA" \
             --output-dir r5-index-footprint-readonly-probe
 
+      - name: Read secondary index consumers and planner only
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
+          node scripts/r5-secondary-index-readonly-audit.mjs \
+            --source-commit "$GITHUB_SHA" \
+            --output-dir r5-index-footprint-readonly-probe
+
       - name: Upload sanitized read-only index evidence
         uses: actions/upload-artifact@v4
         with:
@@ -58,6 +67,8 @@ jobs:
             echo '### R5 index footprint read-only probe'
             echo
             cat r5-index-footprint-readonly-probe/summary.md
+            echo
+            cat r5-index-footprint-readonly-probe/secondary-summary.md
             echo
             echo "Run: ${GITHUB_RUN_ID}"
             echo 'Safety: SELECT/read_only only. No index mutation, DELETE, VACUUM, scheduler mutation, deployment, Mainnet, stabilization, soak, or R5 restart is authorized.'
