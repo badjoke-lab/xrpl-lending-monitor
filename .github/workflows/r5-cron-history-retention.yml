@@ -43,17 +43,27 @@ jobs:
           mkdir -p r5-cron-history-retention-evidence
           source_commit="$(git rev-parse HEAD)"
           manager_sha="$(sha256sum "$MANAGER_PATH" | awk '{print $1}')"
+          set +e
           node "$MANAGER_PATH" prepare \
             --source-commit "$source_commit" \
             --output r5-cron-history-retention-evidence/prepare.json \
-            > /tmp/r5-cron-history-retention-prepare.json
+            > r5-cron-history-retention-evidence/prepare.stdout.json \
+            2> r5-cron-history-retention-evidence/prepare.stderr.log
+          prepare_status=$?
+          set -e
+          if [[ "$prepare_status" -ne 0 ]]; then
+            cat r5-cron-history-retention-evidence/prepare.stderr.log >&2
+            exit "$prepare_status"
+          fi
+          cp r5-cron-history-retention-evidence/prepare.stdout.json /tmp/r5-cron-history-retention-prepare.json
           test "$(jq -r '.jobRows' /tmp/r5-cron-history-retention-prepare.json)" = 0
           test "$(jq -r '.mutationAuthorized' /tmp/r5-cron-history-retention-prepare.json)" = false
           test "$(jq -r '.schedulerMutationAuthorized' /tmp/r5-cron-history-retention-prepare.json)" = false
           test "$(jq -r '.vacuumAuthorized' /tmp/r5-cron-history-retention-prepare.json)" = false
           test "$(jq -r '.foreignKeys | length' /tmp/r5-cron-history-retention-prepare.json)" = 0
           test "$(jq -r '.nonInternalTriggers | length' /tmp/r5-cron-history-retention-prepare.json)" = 0
-          printf 'source_commit=%s\nmanager_sha=%s\nstate_sha=%s\nproject_digest=%s\ncommand_sha=%s\nmutation_sha=%s\nrows=%s\ncandidate_success=%s\ncandidate_non_success=%s\ndatabase_bytes=%s\ntable_bytes=%s\nheap_bytes=%s\nrunid_sequence=%s\n' \
+          test "$(jq -r '.runIdSequence' /tmp/r5-cron-history-retention-prepare.json)" = cron.runid_seq
+          printf 'source_commit=%s\nmanager_sha=%s\nstate_sha=%s\nproject_digest=%s\ncommand_sha=%s\nmutation_sha=%s\nrows=%s\ncandidate_success=%s\ncandidate_non_success=%s\ndatabase_bytes=%s\ntable_bytes=%s\nheap_bytes=%s\nrunid_sequence=%s\nrunid_sequence_last=%s\nmax_runid=%s\n' \
             "$source_commit" "$manager_sha" \
             "$(jq -r '.structuralStateSha256' /tmp/r5-cron-history-retention-prepare.json)" \
             "$(jq -r '.structuralState.projectIdentityDigest' /tmp/r5-cron-history-retention-prepare.json)" \
@@ -65,7 +75,9 @@ jobs:
             "$(jq -r '.databaseBytes' /tmp/r5-cron-history-retention-prepare.json)" \
             "$(jq -r '.tableBytes' /tmp/r5-cron-history-retention-prepare.json)" \
             "$(jq -r '.heapBytes' /tmp/r5-cron-history-retention-prepare.json)" \
-            "$(jq -r '.runIdSequence' /tmp/r5-cron-history-retention-prepare.json)" >> "$GITHUB_OUTPUT"
+            "$(jq -r '.runIdSequence' /tmp/r5-cron-history-retention-prepare.json)" \
+            "$(jq -r '.runIdSequenceRecord.lastValue' /tmp/r5-cron-history-retention-prepare.json)" \
+            "$(jq -r '.maxRunId' /tmp/r5-cron-history-retention-prepare.json)" >> "$GITHUB_OUTPUT"
 
       - name: Publish expiring owner authorization proposal
         env:
@@ -82,6 +94,8 @@ jobs:
           TABLE_BYTES: ${{ steps.state.outputs.table_bytes }}
           HEAP_BYTES: ${{ steps.state.outputs.heap_bytes }}
           RUNID_SEQUENCE: ${{ steps.state.outputs.runid_sequence }}
+          RUNID_SEQUENCE_LAST: ${{ steps.state.outputs.runid_sequence_last }}
+          MAX_RUNID: ${{ steps.state.outputs.max_runid }}
         shell: bash
         run: |
           set -euo pipefail
@@ -101,11 +115,11 @@ jobs:
           Current cron history rows / relation / heap bytes: \`${ROWS} / ${TABLE_BYTES} / ${HEAP_BYTES}\`
           Initial candidates succeeded / non-succeeded: \`${CANDIDATE_SUCCESS} / ${CANDIDATE_NON_SUCCESS}\`
           Database bytes: \`${DATABASE_BYTES}\`
-          Run-ID sequence: \`${RUNID_SEQUENCE}\`
+          Run-ID sequence / last value / current max runid: \`${RUNID_SEQUENCE} / ${RUNID_SEQUENCE_LAST} / ${MAX_RUNID}\`
           Policy: succeeded logs >24h removed; non-succeeded terminal logs >7d removed; every row with null end_time retained; subsequent cleanup runs every 6h at minute 17 UTC.
           Authorization expires: \`${expires}\`
 
-          This authorizes one bounded initial physical compaction of \`cron.job_run_details\`: acquire an ACCESS EXCLUSIVE lock, copy only retained rows to a temporary table, \`TRUNCATE ... CONTINUE IDENTITY\` that table, restore the exact retained rows with their original run IDs, verify the retained-row digest and run-ID sequence inside the transaction, and create exactly one named pg_cron cleanup job using the scheduled DELETE policy above. Lock acquisition is limited to 5 seconds and statements to 45 seconds.
+          This authorizes one bounded initial physical compaction of \`cron.job_run_details\`: acquire an ACCESS EXCLUSIVE lock, copy only retained rows to a temporary table, \`TRUNCATE ... CONTINUE IDENTITY\` that table, restore the exact retained rows with their original run IDs, verify the retained-row digest, require \`cron.runid_seq\` never to move backward or fall behind the pre-compaction maximum run ID, and create exactly one named pg_cron cleanup job using the scheduled DELETE policy above. Lock acquisition is limited to 5 seconds and statements to 45 seconds. The sequence is never reset with \`setval\`.
 
           This does not authorize VACUUM, mutation of any public XRPL table, payload/commit deletion, any TRUNCATE other than \`cron.job_run_details\`, scheduler changes other than the exact cleanup job, deployment, public-reader mutation, Mainnet, stabilization, soak, or R5 restart.
 
@@ -116,11 +130,12 @@ jobs:
           gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/r5-cron-history-retention-proposal.md
 
       - name: Upload sanitized preparation evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: r5-cron-history-retention-prepare-evidence
           path: r5-cron-history-retention-evidence
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 14
 
   execute:
@@ -222,5 +237,5 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          jq -r '"## R5 cron physical compaction + bounded retention — PASS\n\n- rows before/after: `\(.rowsBefore) / \(.rowsAfter)`\n- initial expired candidates: `\(.candidateRowsBefore)`\n- database bytes before/after/reclaimed: `\(.databaseBytesBefore) / \(.databaseBytesAfter) / \(.databaseBytesReclaimed)`\n- database below 400,000,000 B after: `\(.databaseBelowHaltAfter)`\n- 400MB headroom after: `\(.databaseHeadroomBytesAfter)`\n- cron relation bytes before/after/reclaimed: `\(.tableBytesBefore) / \(.tableBytesAfter) / \(.tableBytesReclaimed)`\n- cron heap bytes before/after: `\(.heapBytesBefore) / \(.heapBytesAfter)`\n- cleanup job id/name/schedule: `\(.jobId) / \(.jobName) / \(.schedule)`\n- succeeded retention: `\(.successRetentionHours)h`\n- non-succeeded retention: `\(.nonSuccessRetentionDays)d`\n- physical compaction performed: `\(.physicalCompactionPerformed)`\n- VACUUM performed: `\(.vacuumPerformed)`\n- scheduler mutation performed: `\(.schedulerMutationPerformed)` (exact cleanup job only)\n- payload/commit deletion: `none`\n- public XRPL row mutation: `none`\n- deployment: `none`\n- Mainnet: `disabled`\n- stabilization/soak/R5 restart: `not authorized`"' r5-cron-history-retention-evidence/apply.json > /tmp/result.md
+          jq -r '"## R5 cron physical compaction + bounded retention — PASS\n\n- rows before/after: `\(.rowsBefore) / \(.rowsAfter)`\n- initial expired candidates: `\(.candidateRowsBefore)`\n- database bytes before/after/reclaimed: `\(.databaseBytesBefore) / \(.databaseBytesAfter) / \(.databaseBytesReclaimed)`\n- database below 400,000,000 B after: `\(.databaseBelowHaltAfter)`\n- 400MB headroom after: `\(.databaseHeadroomBytesAfter)`\n- cron relation bytes before/after/reclaimed: `\(.tableBytesBefore) / \(.tableBytesAfter) / \(.tableBytesReclaimed)`\n- cron heap bytes before/after: `\(.heapBytesBefore) / \(.heapBytesAfter)`\n- cleanup job id/name/schedule: `\(.jobId) / \(.jobName) / \(.schedule)`\n- succeeded retention: `\(.successRetentionHours)h`\n- non-succeeded retention: `\(.nonSuccessRetentionDays)d`\n- run-ID sequence: `\(.runIdSequence)`\n- run-ID sequence last value before/after: `\(.runIdSequenceLastValueBefore) / \(.runIdSequenceLastValueAfter)`\n- pre-compaction max run ID: `\(.maxRunIdBefore)`\n- physical compaction performed: `\(.physicalCompactionPerformed)`\n- VACUUM performed: `\(.vacuumPerformed)`\n- scheduler mutation performed: `\(.schedulerMutationPerformed)` (exact cleanup job only)\n- payload/commit deletion: `none`\n- public XRPL row mutation: `none`\n- deployment: `none`\n- Mainnet: `disabled`\n- stabilization/soak/R5 restart: `not authorized`"' r5-cron-history-retention-evidence/apply.json > /tmp/result.md
           gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/result.md
