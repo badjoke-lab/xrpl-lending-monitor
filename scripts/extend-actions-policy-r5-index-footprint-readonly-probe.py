@@ -40,7 +40,7 @@ marker = 'burst = (root / r5_burst).read_text()\n'
 if text.count(marker) != 1:
     raise SystemExit('index footprint insertion point is not unique')
 block = r'''index_footprint_probe = (root / r5_index_footprint_probe).read_text()
-index_footprint_manager = (root / "scripts/r5-index-footprint-readonly-probe.mjs").read_text()
+index_footprint_manager = (root.parent.parent / "scripts/r5-index-footprint-readonly-probe.mjs").read_text()
 for required in (
     "contents: read",
     "issues: write",
