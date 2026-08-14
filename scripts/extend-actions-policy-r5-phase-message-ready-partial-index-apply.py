@@ -18,8 +18,8 @@ def replace_once(name: str, old: str, new: str) -> None:
 
 replace_once(
     'phase ready-index workflow allowlist entry',
-    '  r5-revision4-db-footprint-probe.yml\n  r5-revision4-minute-activation.yml',
-    '  r5-revision4-db-footprint-probe.yml\n  r5-phase-message-ready-partial-index-apply.yml\n  r5-revision4-minute-activation.yml',
+    '  r5-bounded-recovery-burst.yml\n  r5-revision4-db-footprint-probe.yml',
+    '  r5-bounded-recovery-burst.yml\n  r5-phase-message-ready-partial-index-apply.yml\n  r5-revision4-db-footprint-probe.yml',
 )
 replace_once(
     'phase ready-index workflow count',
