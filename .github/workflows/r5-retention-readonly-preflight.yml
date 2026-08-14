@@ -34,7 +34,7 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Read retention candidates and post-retention gate only
+      - name: Read retention candidates and dependencies only
         id: probe
         shell: bash
         run: |
