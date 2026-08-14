@@ -286,7 +286,7 @@ jobs:
           retention-days: 14
 
       - name: Publish bounded application result
-        if: always() && steps.auth.outcome == 'success' && steps.provenance.outcome == 'success'
+        if: always() && steps.auth.outcome == 'success' && steps.pre.outcome == 'success'
         env:
           COMMIT: ${{ steps.auth.outputs.commit }}
           MIGRATION_SHA: ${{ steps.auth.outputs.migration_sha }}
