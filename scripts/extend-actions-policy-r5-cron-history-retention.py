@@ -22,6 +22,7 @@ marker = 'burst = (root / r5_burst).read_text()\n'
 if text.count(marker) != 1:
     raise SystemExit('cron retention insertion point is not unique')
 block = r'''cron_history_retention = (root / r5_cron_history_retention).read_text()
+cron_history_manager = (root.parent.parent / "scripts/manage-r5-cron-history-retention.mjs").read_text()
 for required in (
     "contents: read",
     "issues: write",
@@ -31,8 +32,11 @@ for required in (
     "startsWith(github.event.comment.body, '/r5-cron-history-retention-authorize ')",
     "scripts/manage-r5-cron-history-retention.mjs",
     "Inspect retention and compaction pre-state read-only",
+    "prepare.stderr.log",
+    "if: always()",
     "Exact physical-compaction mutation SHA-256",
     "mutation=${MUTATION_SHA}",
+    "Run-ID sequence / last value / current max runid",
     "Revalidate authorized structural state read-only",
     "Apply exact bounded cron physical compaction",
     "--authorized-mutation \"$MUTATION_SHA\"",
@@ -61,6 +65,24 @@ for forbidden in (
         raise SystemExit(f"cron history retention workflow contains forbidden capability: {forbidden.strip()}")
 if cron_history_retention.count("issues: write") != 1:
     raise SystemExit("cron history retention workflow must have exactly one issue-write permission")
+for required in (
+    "const RUN_ID_SEQUENCE = 'cron.runid_seq'",
+    "pgCronExtension",
+    "runIdSequenceContractSha256",
+    "cron runid sequence moved backward during compaction",
+    "cron runid sequence fell behind pre-compaction max runid",
+    "managementQuery(MUTATION_SQL, false)",
+):
+    if required not in cron_history_manager:
+        raise SystemExit(f"cron history retention manager missing run-ID safeguard: {required}")
+for forbidden in (
+    "pg_get_serial_sequence('cron.job_run_details','runid')",
+    'pg_get_serial_sequence("cron.job_run_details","runid")',
+):
+    if forbidden in cron_history_manager:
+        raise SystemExit(f"cron history retention manager retains invalid serial assumption: {forbidden}")
+if "setval(" in cron_history_manager.lower():
+    raise SystemExit("cron history retention manager must never reset cron.runid_seq with setval")
 
 '''
 text = text.replace(marker, block + marker)
