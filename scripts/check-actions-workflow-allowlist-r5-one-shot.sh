@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+mkdir -p actions-workflow-policy-evidence
+exec > >(tee actions-workflow-policy-evidence/r5-index-footprint-policy-trace.log) 2>&1
+set -x
+
 source_script='scripts/check-actions-workflow-allowlist.sh'
 generated_script="$(mktemp)"
 trap 'rm -f "$generated_script"' EXIT
