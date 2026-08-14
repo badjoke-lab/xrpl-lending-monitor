@@ -71,11 +71,11 @@ fi
 # reject such migration text at runtime. Verify that guard exists rather than
 # grepping the manager for those words and matching the guard itself.
 for guard in \
-  '/\\btruncate\\b/iu' \
-  '/\\bdelete\\s+from\\b/iu' \
-  '/\\bvacuum\\b/iu' \
-  '/\\bdrop\\s+table\\b/iu' \
-  '/\\bdrop\\s+schema\\b/iu'; do
+  '/\btruncate\b/iu' \
+  '/\bdelete\s+from\b/iu' \
+  '/\bvacuum\b/iu' \
+  '/\bdrop\s+table\b/iu' \
+  '/\bdrop\s+schema\b/iu'; do
   grep -Fq -- "$guard" "$manager" || { echo "manager missing runtime forbidden-SQL guard: $guard" >&2; exit 1; }
 done
 
