@@ -30,10 +30,16 @@ for required in (
     "github.event.comment.body == '/r5-cron-history-retention-prepare'",
     "startsWith(github.event.comment.body, '/r5-cron-history-retention-authorize ')",
     "scripts/manage-r5-cron-history-retention.mjs",
-    "Inspect retention pre-state read-only",
-    "Apply exact bounded cron retention",
+    "Inspect retention and compaction pre-state read-only",
+    "Exact physical-compaction mutation SHA-256",
+    "mutation=${MUTATION_SHA}",
+    "Revalidate authorized structural state read-only",
+    "Apply exact bounded cron physical compaction",
+    "--authorized-mutation \"$MUTATION_SHA\"",
+    "physical compaction performed",
     "VACUUM performed",
     "payload/commit deletion: `none`",
+    "public XRPL row mutation: `none`",
     "stabilization/soak/R5 restart: `not authorized`",
 ):
     if required not in cron_history_retention:
