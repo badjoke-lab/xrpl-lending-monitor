@@ -48,7 +48,7 @@ async function managementQuery(query, readOnly) {
   let body
   try { body = JSON.parse(text) } catch { body = { raw: text.slice(0, 2000) } }
   if (!response.ok) fail(`Supabase Management API query failed (${response.status}): ${JSON.stringify(body).slice(0, 2000)}`)
-  return rowsFromResponse(body)
+  return readOnly ? rowsFromResponse(body) : body
 }
 function firstJson(rows, key) {
   const raw = rows?.[0]?.[key] ?? rows?.[0]?.[key.toUpperCase()]
@@ -288,7 +288,7 @@ async function apply(sourceCommit, authorizedState, authorizedMutation) {
   const before = await inspect(sourceCommit)
   if (before.structuralStateSha256 !== authorizedState) fail('authorized structural state no longer matches production')
   if (before.cleanup.mutationSha256 !== authorizedMutation) fail('authorized mutation SHA does not match exact raw-evidence retention transaction')
-  const result = firstJson(await managementQuery(MUTATION_SQL, false), 'result')
+  await managementQuery(MUTATION_SQL, false)
   const afterState = firstJson(await managementQuery(inspectionSql(), true), 'state')
   assertProtectedIntegrity(afterState)
   if (Number(afterState.jobRows) !== 1) fail(`raw retention job creation mismatch: ${afterState.jobRows}`)
@@ -300,17 +300,18 @@ async function apply(sourceCommit, authorizedState, authorizedMutation) {
     sourceCommit,
     authorizedStateSha256: authorizedState,
     authorizedMutationSha256: authorizedMutation,
-    payloadDeleted: Number(result.payloadDeleted ?? 0),
-    commitDeleted: Number(result.commitDeleted ?? 0),
-    candidateWorkCount: Number(result.candidateWorkCount ?? 0),
-    candidateWorkDigest: result.candidateWorkDigest,
+    candidateWorkCountBefore: Number(before.completeCandidateWorkCount),
+    candidatePayloadRowsBefore: Number(before.candidatePayloadRows),
+    candidateCommitRowsBefore: Number(before.candidateCommitRows),
+    candidatePayloadLogicalBytesBefore: Number(before.candidatePayloadLogicalBytes),
+    candidateCommitLogicalBytesBefore: Number(before.candidateCommitLogicalBytes),
+    incompleteOldWorkCountBefore: Number(before.incompleteOldWorkCount),
     databaseBytesBefore: Number(before.databaseBytes),
     databaseBytesAfter: Number(afterState.databaseBytes),
     payloadRelationBytesBefore: Number(before.payloadRelationBytes),
     payloadRelationBytesAfter: Number(afterState.payloadRelationBytes),
     commitRelationBytesBefore: Number(before.commitRelationBytes),
     commitRelationBytesAfter: Number(afterState.commitRelationBytes),
-    incompleteOldWorkCountBefore: Number(before.incompleteOldWorkCount),
     schedulerMutationPerformed: true,
     rowMutationTargets: ['public.xrpl_phase_payload_chunks', 'public.xrpl_phase_commit_chunks'],
     workRowMutationPerformed: false,
