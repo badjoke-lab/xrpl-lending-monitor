@@ -53,12 +53,19 @@ print("static retention compatibility contract: pass")
 PY
 
 docker run --detach --rm --name "$container_name" --env POSTGRES_PASSWORD=postgres --env POSTGRES_DB=postgres "$image" > "${output_directory}/container-id.txt"
-ready=0
+stable_ready=0
 for _ in $(seq 1 60); do
-  if docker exec "$container_name" psql -U postgres -d postgres -Atqc 'select 1' >/dev/null 2>&1; then ready=1; break; fi
+  if docker exec "$container_name" psql -U postgres -d postgres -Atqc 'select 1' >/dev/null 2>&1; then
+    stable_ready=$((stable_ready + 1))
+    if [[ "$stable_ready" -ge 3 ]]; then
+      break
+    fi
+  else
+    stable_ready=0
+  fi
   sleep 1
 done
-[[ "$ready" == 1 ]]
+[[ "$stable_ready" -ge 3 ]]
 
 docker exec -i "$container_name" psql -v ON_ERROR_STOP=1 -U postgres -d postgres > "${output_directory}/postgres.log" <<'SQL'
 create table public.xrpl_phase_work (
