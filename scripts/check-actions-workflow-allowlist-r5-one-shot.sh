@@ -1,20 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-trace_tmp="$(mktemp)"
-exec > >(tee "$trace_tmp") 2>&1
-set -x
-
 source_script='scripts/check-actions-workflow-allowlist.sh'
 generated_script="$(mktemp)"
-cleanup() {
-  status=$?
-  mkdir -p actions-workflow-policy-evidence
-  cp "$trace_tmp" actions-workflow-policy-evidence/r5-index-footprint-policy-trace.log 2>/dev/null || true
-  rm -f "$generated_script" "$trace_tmp"
-  exit "$status"
-}
-trap cleanup EXIT
+trap 'rm -f "$generated_script"' EXIT
 
 python scripts/generate-actions-policy-r4f-g3-dual.py "$source_script" "$generated_script"
 python scripts/normalize-actions-policy-r4f-g3-dual.py "$generated_script"
