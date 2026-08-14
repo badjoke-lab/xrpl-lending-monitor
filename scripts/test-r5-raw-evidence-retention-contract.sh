@@ -87,6 +87,10 @@ if manager.count("managementQuery(MUTATION_SQL, false)") != 1:
 for line in manager.splitlines():
     if "managementQuery(" in line and ", false)" in line and "managementQuery(MUTATION_SQL, false)" not in line:
         raise SystemExit(f"unexpected additional writable Management API call: {line.strip()}")
+if "CLEANUP_SQL.match(/\\bdelete\\s+from\\b/giu)" not in manager:
+    raise SystemExit("runtime DELETE-count guard must inspect CLEANUP_SQL")
+if "MUTATION_SQL.match(/\\bdelete\\s+from\\b/giu)" in manager:
+    raise SystemExit("runtime DELETE-count guard must not inspect expanded MUTATION_SQL")
 
 cleanup_start=manager.find("const CLEANUP_SQL = String.raw`")
 if cleanup_start < 0:
