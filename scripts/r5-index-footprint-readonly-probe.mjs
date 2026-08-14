@@ -26,6 +26,8 @@ function parseArgs(args) {
   return out
 }
 
+const MUTATION_CAPABILITY = /\b(delete|update|insert|alter|drop|truncate|vacuum|create|grant|revoke|refresh|cluster|reindex)\b/iu
+
 const SQL = String.raw`
 with index_rows as (
   select
@@ -105,7 +107,7 @@ with index_rows as (
   )
 )
 select jsonb_build_object(
-  'schemaVersion', 1,
+  'schemaVersion', 2,
   'observedAt', clock_timestamp(),
   'databaseBytes', pg_database_size(current_database()),
   'databaseHaltBytes', 400000000,
@@ -126,8 +128,58 @@ select jsonb_build_object(
 )::text as state;
 `
 
-if (/\b(delete|update|insert|alter|drop|truncate|vacuum|create|grant|revoke|refresh|cluster|reindex)\b/iu.test(SQL)) {
-  fail('read-only index probe SQL contains forbidden mutation capability')
+const WORK_AUDIT_SQL = String.raw`
+with work_status_counts as (
+  select status, count(*)::bigint as rows
+  from public.xrpl_phase_work
+  where profile_id = 'supabase-devnet'
+  group by status
+), work_consumers as (
+  select
+    n.nspname as schema_name,
+    p.proname as function_name,
+    pg_get_function_identity_arguments(p.oid) as identity_arguments,
+    pg_get_functiondef(p.oid) as definition
+  from pg_proc p
+  join pg_namespace n on n.oid = p.pronamespace
+  where n.nspname in ('public','xrpl_r5_v1')
+    and p.prokind = 'f'
+    and p.prosrc ilike '%xrpl_phase_work%'
+    and p.prosrc ilike '%status%'
+), work_views as (
+  select
+    schemaname as schema_name,
+    viewname as view_name,
+    definition
+  from pg_views
+  where schemaname in ('public','xrpl_r5_v1')
+    and definition ilike '%xrpl_phase_work%'
+), statement_extension as (
+  select n.nspname as schema_name
+  from pg_extension e
+  join pg_namespace n on n.oid = e.extnamespace
+  where e.extname = 'pg_stat_statements'
+)
+select jsonb_build_object(
+  'workStatusCounts', coalesce((select jsonb_agg(to_jsonb(x) order by x.status) from work_status_counts x), '[]'::jsonb),
+  'workStatusConsumers', coalesce((select jsonb_agg(to_jsonb(x) order by x.schema_name, x.function_name, x.identity_arguments) from work_consumers x), '[]'::jsonb),
+  'workViews', coalesce((select jsonb_agg(to_jsonb(x) order by x.schema_name, x.view_name) from work_views x), '[]'::jsonb),
+  'pgStatStatementsSchema', (select schema_name from statement_extension limit 1)
+)::text as state;
+`
+
+const PLANNER_QUERIES = Object.freeze({
+  planned: "explain (format json, costs off) select work_id, status, updated_at from public.xrpl_phase_work where profile_id = 'supabase-devnet' and status = 'planned' order by updated_at, work_id limit 20",
+  staged: "explain (format json, costs off) select work_id, status, updated_at from public.xrpl_phase_work where profile_id = 'supabase-devnet' and status = 'staged' order by updated_at, work_id limit 20",
+  committing: "explain (format json, costs off) select work_id, status, updated_at from public.xrpl_phase_work where profile_id = 'supabase-devnet' and status = 'committing' order by updated_at, work_id limit 20",
+  finalizing: "explain (format json, costs off) select work_id, status, updated_at from public.xrpl_phase_work where profile_id = 'supabase-devnet' and status = 'finalizing' order by updated_at, work_id limit 20",
+  error: "explain (format json, costs off) select work_id, status, updated_at from public.xrpl_phase_work where profile_id = 'supabase-devnet' and status = 'error' order by updated_at, work_id limit 20",
+  committedReader: "explain (format json, costs off) select work_id, scanned_end_ledger_index from public.xrpl_phase_work where profile_id = 'supabase-devnet' and network = 'devnet' and epoch_id = (select epoch_id from public.xrpl_phase_streams where profile_id = 'supabase-devnet') and base_identity = (select base_identity from public.xrpl_phase_streams where profile_id = 'supabase-devnet') and status = 'committed' order by scanned_end_ledger_index desc, work_id desc limit 20",
+  committedCount: "explain (format json, costs off) select count(*) from public.xrpl_phase_work where profile_id = 'supabase-devnet' and status = 'committed'",
+})
+
+for (const [name, query] of Object.entries({ SQL, WORK_AUDIT_SQL, ...PLANNER_QUERIES })) {
+  if (MUTATION_CAPABILITY.test(query)) fail(`read-only index probe SQL contains forbidden mutation capability: ${name}`)
 }
 
 async function managementQuery(query) {
@@ -145,12 +197,20 @@ async function managementQuery(query) {
   return response.json()
 }
 
-function findState(rows) {
-  if (!Array.isArray(rows) || rows.length !== 1) fail('unexpected management query result')
+function findState(rows, label) {
+  if (!Array.isArray(rows) || rows.length !== 1) fail(`unexpected management query result: ${label}`)
   const raw = rows[0]?.state
   if (typeof raw === 'string') return JSON.parse(raw)
   if (raw && typeof raw === 'object' && !Array.isArray(raw)) return raw
-  fail('index footprint state missing')
+  fail(`${label} state missing`)
+}
+
+function firstColumn(rows, label) {
+  if (!Array.isArray(rows) || rows.length < 1) fail(`empty query result: ${label}`)
+  const row = rows[0]
+  const keys = Object.keys(row ?? {})
+  if (keys.length !== 1) fail(`unexpected query result shape: ${label}`)
+  return row[keys[0]]
 }
 
 const options = parseArgs(process.argv.slice(2))
@@ -158,7 +218,7 @@ const sourceCommit = options['source-commit']
 const outputDir = options['output-dir'] ?? 'r5-index-footprint-readonly-probe'
 if (!/^[a-f0-9]{40}$/u.test(sourceCommit ?? '')) fail('invalid --source-commit')
 
-const state = findState(await managementQuery(SQL))
+const state = findState(await managementQuery(SQL), 'index footprint')
 if (state.safetyBoundary?.probeReadOnly !== true ||
     state.safetyBoundary?.noIndexMutationAuthorized !== true ||
     state.safetyBoundary?.noDeleteAuthorized !== true ||
@@ -169,10 +229,28 @@ if (state.safetyBoundary?.probeReadOnly !== true ||
   fail('index footprint safety boundary missing')
 }
 
+const workAudit = findState(await managementQuery(WORK_AUDIT_SQL), 'work status audit')
+const plannerPlans = {}
+for (const [name, query] of Object.entries(PLANNER_QUERIES)) {
+  plannerPlans[name] = firstColumn(await managementQuery(query), `planner ${name}`)
+}
+
+let workStatements = []
+const statementSchema = workAudit.pgStatStatementsSchema
+if (statementSchema != null) {
+  if (!/^[a-z_][a-z0-9_]*$/u.test(statementSchema)) fail('invalid pg_stat_statements schema')
+  const statementsSql = `select query, calls::bigint as calls, rows::bigint as rows, mean_exec_time from ${statementSchema}.pg_stat_statements where query ilike '%xrpl_phase_work%' order by calls desc limit 100`
+  if (MUTATION_CAPABILITY.test(statementsSql)) fail('pg_stat_statements probe contains mutation capability')
+  workStatements = await managementQuery(statementsSql)
+}
+
 const evidence = {
   sourceCommit,
-  querySha256: createHash('sha256').update(SQL).digest('hex'),
+  querySha256: createHash('sha256').update([SQL, WORK_AUDIT_SQL, ...Object.values(PLANNER_QUERIES)].join('\n-- next --\n')).digest('hex'),
   state,
+  workAudit,
+  plannerPlans,
+  workStatements,
 }
 const serialized = `${JSON.stringify(evidence, null, 2)}\n`
 const evidenceSha256 = createHash('sha256').update(serialized).digest('hex')
@@ -192,7 +270,13 @@ const summary = [
   `- pg_stat_database stats reset: \`${state.statsReset ?? 'null'}\``,
   `- selected indexes measured: \`${state.selectedIndexes?.length ?? 0}\``,
   `- indexes >=1MiB measured: \`${state.largeIndexes?.length ?? 0}\``,
+  `- work-status functions inspected: \`${workAudit.workStatusConsumers?.length ?? 0}\``,
+  `- work-status views inspected: \`${workAudit.workViews?.length ?? 0}\``,
+  `- pg_stat_statements work queries: \`${workStatements.length}\``,
   '- production mutation: `false`',
+  '',
+  'Work status counts:',
+  ...(workAudit.workStatusCounts ?? []).map((x) => `- \`${x.status}\`: ${x.rows}`),
   '',
   'Largest non-primary/non-unique/non-constraint indexes:',
   ...nonConstraintLarge.map((x) => `- \`${x.schema_name}.${x.index_name}\`: ${x.index_bytes} B, idx_scan=${x.idx_scan}, table=${x.table_name}`),
