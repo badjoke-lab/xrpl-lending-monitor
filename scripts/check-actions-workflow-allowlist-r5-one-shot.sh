@@ -28,10 +28,11 @@ bash -n scripts/test-r5-cron-history-retention-contract.sh
 bash scripts/test-r5-cron-history-retention-contract.sh
 bash -n scripts/test-r5-payload-commit-retention-postgres.sh
 mkdir -p actions-workflow-policy-evidence/r5-payload-commit-retention
+trace_file='actions-workflow-policy-evidence/r5-payload-commit-retention-trace.log'
 if ! R5_RAW_RETENTION_OUTPUT=actions-workflow-policy-evidence/r5-payload-commit-retention \
   bash -x scripts/test-r5-payload-commit-retention-postgres.sh \
-  > actions-workflow-policy-evidence/r5-payload-commit-retention/trace.log 2>&1; then
-  cat actions-workflow-policy-evidence/r5-payload-commit-retention/trace.log >&2
+  > "$trace_file" 2>&1; then
+  cat "$trace_file" >&2
   exit 1
 fi
 bash -n scripts/run-r4f-g3-dual-provider-verdict.sh
