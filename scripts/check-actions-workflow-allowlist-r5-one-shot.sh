@@ -40,6 +40,9 @@ if ! R5_RAW_RETENTION_OUTPUT=actions-workflow-policy-evidence/r5-payload-commit-
   cat "$trace_file" >&2
   exit 1
 fi
+bash -n scripts/test-r5-raw-evidence-recurring-retention-postgres.sh
+R5_RAW_RECURRING_OUTPUT=actions-workflow-policy-evidence/r5-raw-recurring-retention \
+  bash scripts/test-r5-raw-evidence-recurring-retention-postgres.sh
 bash -n scripts/test-r5-work-status-partial-index-postgres.sh
 R5_WORK_STATUS_INDEX_OUTPUT=actions-workflow-policy-evidence/r5-work-status-partial-index \
   bash scripts/test-r5-work-status-partial-index-postgres.sh
