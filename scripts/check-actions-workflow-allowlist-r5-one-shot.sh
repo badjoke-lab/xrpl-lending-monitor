@@ -43,6 +43,9 @@ fi
 bash -n scripts/test-r5-work-status-partial-index-postgres.sh
 R5_WORK_STATUS_INDEX_OUTPUT=actions-workflow-policy-evidence/r5-work-status-partial-index \
   bash scripts/test-r5-work-status-partial-index-postgres.sh
+bash -n scripts/test-r5-cron-physical-compaction-postgres.sh
+R5_CRON_COMPACTION_OUTPUT=actions-workflow-policy-evidence/r5-cron-physical-compaction \
+  bash scripts/test-r5-cron-physical-compaction-postgres.sh
 bash -n scripts/test-r5-work-status-partial-index-apply-contract.sh
 bash scripts/test-r5-work-status-partial-index-apply-contract.sh
 bash -n scripts/test-r5-secondary-index-readonly-audit-contract.sh
