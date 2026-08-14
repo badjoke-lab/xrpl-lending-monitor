@@ -37,6 +37,9 @@ if ! R5_RAW_RETENTION_OUTPUT=actions-workflow-policy-evidence/r5-payload-commit-
   cat "$trace_file" >&2
   exit 1
 fi
+bash -n scripts/test-r5-work-status-partial-index-postgres.sh
+R5_WORK_STATUS_INDEX_OUTPUT=actions-workflow-policy-evidence/r5-work-status-partial-index \
+  bash scripts/test-r5-work-status-partial-index-postgres.sh
 bash -n scripts/run-r4f-g3-dual-provider-verdict.sh
 node scripts/check-r4f-g3-isolation-control-policy.mjs
 node scripts/check-r4f-g3-dual-runner-policy.mjs
