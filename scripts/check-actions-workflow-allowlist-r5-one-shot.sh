@@ -19,6 +19,7 @@ chmod 700 "$generated_script"
 bash "$generated_script" "$@"
 bash -n scripts/check-supabase-production-autodeploy-boundary.sh
 bash scripts/check-supabase-production-autodeploy-boundary.sh
+node scripts/test-r5-phase-ready-native-history-record.mjs
 bash -n scripts/run-r4f-g3-dual-provider-verdict.sh
 node scripts/check-r4f-g3-isolation-control-policy.mjs
 node scripts/check-r4f-g3-dual-runner-policy.mjs
