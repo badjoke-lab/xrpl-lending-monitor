@@ -157,16 +157,21 @@ for (const required of [
   "protected_integrity as materialized",
   "w.committed_at < now() - interval '24 hours'",
   "c.status='completed'",
-  "set local lock_timeout = '5s'",
-  "set local statement_timeout = '45s'",
-  `select cron.schedule('${escapedName}','${escapedSchedule}','${escapedCommand}')`,
-]) if (!MUTATION_SQL.includes(required)) fail(`raw retention mutation missing contract: ${required}`)
-if ((MUTATION_SQL.match(/\bdelete\s+from\b/giu) ?? []).length !== 2) fail('raw retention mutation must contain exactly two DELETE targets')
+]) if (!CLEANUP_SQL.includes(required)) fail(`raw retention cleanup missing contract: ${required}`)
+if ((CLEANUP_SQL.match(/\bdelete\s+from\b/giu) ?? []).length !== 2) fail('raw retention cleanup must contain exactly two DELETE targets')
 for (const forbidden of [
   /\bdelete\s+from\s+public\.(?!xrpl_phase_payload_chunks\b|xrpl_phase_commit_chunks\b)/iu,
   /\b(update|insert|truncate|alter|drop|vacuum)\b/iu,
   /\bmainnet\b/iu,
-]) if (forbidden.test(MUTATION_SQL)) fail(`raw retention mutation contains forbidden capability: ${forbidden}`)
+]) if (forbidden.test(CLEANUP_SQL)) fail(`raw retention cleanup contains forbidden capability: ${forbidden}`)
+for (const required of [
+  "set local lock_timeout = '5s'",
+  "set local statement_timeout = '45s'",
+  `select cron.schedule('${escapedName}','${escapedSchedule}','${escapedCommand}')`,
+]) if (!MUTATION_SQL.includes(required)) fail(`raw retention mutation wrapper missing contract: ${required}`)
+for (const forbidden of [/\b(truncate|alter|drop|vacuum)\b/iu, /\bmainnet\b/iu]) {
+  if (forbidden.test(MUTATION_SQL)) fail(`raw retention mutation contains forbidden capability: ${forbidden}`)
+}
 
 function inspectionSql() {
   return String.raw`with active_watermark as (
