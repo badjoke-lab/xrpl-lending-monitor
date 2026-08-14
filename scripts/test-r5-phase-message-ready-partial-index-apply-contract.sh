@@ -19,6 +19,11 @@ required_workflow=(
   "startsWith(github.event.comment.body, '/r5-phase-ready-index-authorize ')"
   "TARGET_MIGRATION_VERSION: '20260814130000'"
   "PREVIOUS_MIGRATION_VERSION: '20260813072000'"
+  'node "$MANAGER_PATH" audit'
+  "steps.state.outputs.classification == 'unapplied_expected'"
+  "steps.state.outputs.classification == 'applied_consistent'"
+  "steps.state.outputs.classification != 'unapplied_expected' && steps.state.outputs.classification != 'applied_consistent'"
+  'No authorization command was emitted.'
   "--expect full"
   "--authorized-state"
   "--expect partial"
@@ -37,13 +42,24 @@ required_manager=(
   "managementQuery(transaction, [], false)"
   "set local lock_timeout = '5s';"
   "set local statement_timeout = '45s';"
-  "target partial-index migration is already recorded"
+  "classification = 'unapplied_expected'"
+  "classification = 'applied_consistent'"
+  "classification = 'partial_unrecorded'"
+  "classification = 'applied_record_mismatch'"
+  "classification = 'temporary_index_present'"
+  "classification = 'index_shape_drift'"
+  "classification = 'duplicate_migration_history'"
+  "classification = 'migration_head_drift'"
+  "authorizationEligible: classification === 'unapplied_expected'"
+  "alreadyAppliedVerified: classification === 'applied_consistent'"
+  "expected unapplied full-index state"
   "authorized production index state drifted before mutation"
   "message row count decreased across index-only migration"
   "canonicalHistoryMutationAuthorized: false"
   "schedulerMutationAuthorized: false"
   "publicReaderMutationAuthorized: false"
   "mainnetDisabled: true"
+  "command === 'audit'"
 )
 for fragment in "${required_manager[@]}"; do
   grep -Fq -- "$fragment" "$manager" || { echo "manager missing contract fragment: $fragment" >&2; exit 1; }
@@ -67,9 +83,6 @@ if grep -Eiq '\b(truncate|vacuum)\b|\bdelete[[:space:]]+from\b|\bdrop[[:space:]]
   exit 1
 fi
 
-# The manager intentionally contains regex literals naming forbidden SQL so it can
-# reject such migration text at runtime. Verify that guard exists rather than
-# grepping the manager for those words and matching the guard itself.
 for guard in \
   '/\btruncate\b/iu' \
   '/\bdelete\s+from\b/iu' \
@@ -81,7 +94,9 @@ done
 
 prepare_count="$(grep -Fc "github.event.comment.body == '/r5-phase-ready-index-prepare'" "$workflow")"
 authorize_count="$(grep -Fc "startsWith(github.event.comment.body, '/r5-phase-ready-index-authorize ')" "$workflow")"
+proposal_gate_count="$(grep -Fc "if: steps.state.outputs.classification == 'unapplied_expected'" "$workflow")"
 test "$prepare_count" = 1
 test "$authorize_count" = 1
+test "$proposal_gate_count" = 1
 
 echo 'R5 phase message ready partial-index apply contract: PASS'

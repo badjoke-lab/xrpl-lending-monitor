@@ -39,7 +39,7 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Inspect exact production pre-state read-only
+      - name: Audit exact production pre-state read-only
         id: state
         shell: bash
         run: |
@@ -48,32 +48,40 @@ jobs:
           source_commit="$(git rev-parse HEAD)"
           migration_sha="$(sha256sum "$MIGRATION_PATH" | awk '{print $1}')"
           manager_sha="$(sha256sum "$MANAGER_PATH" | awk '{print $1}')"
-          # The manager inspect command uses the Supabase Management API with read_only:true.
-          node "$MANAGER_PATH" inspect \
-            --expect full \
+          # Audit always uses the Supabase Management API with read_only:true.
+          node "$MANAGER_PATH" audit \
             --source-commit "$source_commit" \
             --expected-sha "$migration_sha" \
-            --output r5-phase-message-ready-partial-index-apply-evidence/prepare-state.json \
-            > /tmp/r5-phase-ready-index-prepare.json
-          cat /tmp/r5-phase-ready-index-prepare.json
-          test "$(jq -r '.maxMigrationVersion' /tmp/r5-phase-ready-index-prepare.json)" = "$PREVIOUS_MIGRATION_VERSION"
-          test "$(jq -r '.targetMigrationRows' /tmp/r5-phase-ready-index-prepare.json)" = 0
-          test "$(jq -r '.temporaryIndexExists' /tmp/r5-phase-ready-index-prepare.json)" = false
-          test "$(jq -r '.canonicalHistoryMutationAuthorized' /tmp/r5-phase-ready-index-prepare.json)" = false
-          printf 'source_commit=%s\nmigration_sha=%s\nmanager_sha=%s\nstate_sha=%s\nindex_sha=%s\nproject_digest=%s\ndatabase_bytes=%s\nindex_bytes=%s\nmessage_rows=%s\n' \
+            --output r5-phase-message-ready-partial-index-apply-evidence/prepare-audit.json \
+            > /tmp/r5-phase-ready-index-audit.json
+          cat /tmp/r5-phase-ready-index-audit.json
+          test "$(jq -r '.canonicalHistoryMutationAuthorized' /tmp/r5-phase-ready-index-audit.json)" = false
+          test "$(jq -r '.schedulerMutationAuthorized' /tmp/r5-phase-ready-index-audit.json)" = false
+          test "$(jq -r '.deploymentAuthorized' /tmp/r5-phase-ready-index-audit.json)" = false
+          test "$(jq -r '.publicReaderMutationAuthorized' /tmp/r5-phase-ready-index-audit.json)" = false
+          test "$(jq -r '.mainnetDisabled' /tmp/r5-phase-ready-index-audit.json)" = true
+          printf 'source_commit=%s\nmigration_sha=%s\nmanager_sha=%s\nclassification=%s\nreason=%s\nstate_sha=%s\nindex_sha=%s\nproject_digest=%s\nmax_migration=%s\ntarget_rows=%s\ntarget_record_sha=%s\ntarget_record_name=%s\ntarget_statement_count=%s\ndatabase_bytes=%s\nindex_bytes=%s\nmessage_rows=%s\n' \
             "$source_commit" \
             "$migration_sha" \
             "$manager_sha" \
-            "$(jq -r '.authorizationStateSha256' /tmp/r5-phase-ready-index-prepare.json)" \
-            "$(jq -r '.readyIndexDefinitionSha256' /tmp/r5-phase-ready-index-prepare.json)" \
-            "$(jq -r '.projectIdentityDigest' /tmp/r5-phase-ready-index-prepare.json)" \
-            "$(jq -r '.databaseBytes' /tmp/r5-phase-ready-index-prepare.json)" \
-            "$(jq -r '.readyIndexBytes' /tmp/r5-phase-ready-index-prepare.json)" \
-            "$(jq -r '.messageRows' /tmp/r5-phase-ready-index-prepare.json)" \
+            "$(jq -r '.classification' /tmp/r5-phase-ready-index-audit.json)" \
+            "$(jq -r '.classificationReason' /tmp/r5-phase-ready-index-audit.json)" \
+            "$(jq -r '.authorizationStateSha256' /tmp/r5-phase-ready-index-audit.json)" \
+            "$(jq -r '.readyIndexDefinitionSha256 // "none"' /tmp/r5-phase-ready-index-audit.json)" \
+            "$(jq -r '.projectIdentityDigest' /tmp/r5-phase-ready-index-audit.json)" \
+            "$(jq -r '.maxMigrationVersion' /tmp/r5-phase-ready-index-audit.json)" \
+            "$(jq -r '.targetMigrationRows' /tmp/r5-phase-ready-index-audit.json)" \
+            "$(jq -c '.targetMigrationRecords' /tmp/r5-phase-ready-index-audit.json | sha256sum | awk '{print $1}')" \
+            "$(jq -r '.targetMigrationRecords[0].name // "none"' /tmp/r5-phase-ready-index-audit.json)" \
+            "$(jq -r '(.targetMigrationRecords[0].statements // []) | length' /tmp/r5-phase-ready-index-audit.json)" \
+            "$(jq -r '.databaseBytes' /tmp/r5-phase-ready-index-audit.json)" \
+            "$(jq -r '.readyIndexBytes' /tmp/r5-phase-ready-index-audit.json)" \
+            "$(jq -r '.messageRows' /tmp/r5-phase-ready-index-audit.json)" \
             >> "$GITHUB_OUTPUT"
 
-      - name: Bind exact state and publish expiring authorization proposal
+      - name: Bind exact unapplied state and publish expiring authorization proposal
         id: proposal
+        if: steps.state.outputs.classification == 'unapplied_expected'
         env:
           SOURCE_COMMIT: ${{ steps.state.outputs.source_commit }}
           MIGRATION_SHA: ${{ steps.state.outputs.migration_sha }}
@@ -91,11 +99,12 @@ jobs:
           nonce="$(openssl rand -hex 8)"
           command="/r5-phase-ready-index-authorize commit=${SOURCE_COMMIT} migration=${MIGRATION_SHA} manager=${MANAGER_SHA} state=${STATE_SHA} index=${INDEX_SHA} project=${PROJECT_DIGEST} prepare_run=${GITHUB_RUN_ID} expires=${expires} nonce=${nonce}"
           printf 'expires=%s\nnonce=%s\nauth_command=%s\n' "$expires" "$nonce" "$command" >> "$GITHUB_OUTPUT"
-          cat > /tmp/r5-phase-ready-index-proposal.md <<EOF
+          cat > /tmp/r5-phase-ready-index-proposal.md <<EOF2
           ## R5 phase-message ready-index replacement authorization proposal
 
           Preparation run: \`${GITHUB_RUN_ID}\`
           Source main commit: \`${SOURCE_COMMIT}\`
+          State classification: \`unapplied_expected\`
           Target migration: \`${TARGET_MIGRATION_VERSION}\`
           Migration SHA-256: \`${MIGRATION_SHA}\`
           Manager SHA-256: \`${MANAGER_SHA}\`
@@ -114,10 +123,100 @@ jobs:
           Exact authorization command:
 
           \`${command}\`
-          EOF
+          EOF2
           gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/r5-phase-ready-index-proposal.md
 
+      - name: Publish already-applied verification without authorization
+        if: steps.state.outputs.classification == 'applied_consistent'
+        env:
+          SOURCE_COMMIT: ${{ steps.state.outputs.source_commit }}
+          MIGRATION_SHA: ${{ steps.state.outputs.migration_sha }}
+          MANAGER_SHA: ${{ steps.state.outputs.manager_sha }}
+          STATE_SHA: ${{ steps.state.outputs.state_sha }}
+          INDEX_SHA: ${{ steps.state.outputs.index_sha }}
+          PROJECT_DIGEST: ${{ steps.state.outputs.project_digest }}
+          DATABASE_BYTES: ${{ steps.state.outputs.database_bytes }}
+          INDEX_BYTES: ${{ steps.state.outputs.index_bytes }}
+          MESSAGE_ROWS: ${{ steps.state.outputs.message_rows }}
+          TARGET_RECORD_SHA: ${{ steps.state.outputs.target_record_sha }}
+          TARGET_RECORD_NAME: ${{ steps.state.outputs.target_record_name }}
+          TARGET_STATEMENT_COUNT: ${{ steps.state.outputs.target_statement_count }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/r5-phase-ready-index-already-applied.md <<EOF2
+          ## R5 phase-message ready-index replacement — already applied and exact-record verified
+
+          Preparation run: \`${GITHUB_RUN_ID}\`
+          Source main commit: \`${SOURCE_COMMIT}\`
+          State classification: \`applied_consistent\`
+          Target migration: \`${TARGET_MIGRATION_VERSION}\`
+          Migration SHA-256: \`${MIGRATION_SHA}\`
+          Manager SHA-256: \`${MANAGER_SHA}\`
+          Audited state SHA-256: \`${STATE_SHA}\`
+          Partial ready-index definition SHA-256: \`${INDEX_SHA}\`
+          Project identity digest: \`${PROJECT_DIGEST}\`
+          Database bytes: \`${DATABASE_BYTES}\`
+          Ready-index bytes: \`${INDEX_BYTES}\`
+          Phase-message rows: \`${MESSAGE_ROWS}\`
+          Migration-history record set SHA-256: \`${TARGET_RECORD_SHA}\`
+          Migration-history name: \`${TARGET_RECORD_NAME}\`
+          Migration-history statement count: \`${TARGET_STATEMENT_COUNT}\`
+
+          Read-only audit found both the expected partial ready index and the exact guarded target migration-history record. No authorization command is emitted because no migration is needed.
+
+          Production mutation in this run: \`none\`. Scheduler mutation: \`none\`. Deployment: \`none\`. Public reader: \`unchanged\`. Mainnet: \`disabled\`. Stabilization/soak/R5 restart: \`not authorized\`.
+          EOF2
+          gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/r5-phase-ready-index-already-applied.md
+
+      - name: Publish fail-closed inconsistent state
+        if: steps.state.outputs.classification != 'unapplied_expected' && steps.state.outputs.classification != 'applied_consistent'
+        env:
+          SOURCE_COMMIT: ${{ steps.state.outputs.source_commit }}
+          MIGRATION_SHA: ${{ steps.state.outputs.migration_sha }}
+          MANAGER_SHA: ${{ steps.state.outputs.manager_sha }}
+          CLASSIFICATION: ${{ steps.state.outputs.classification }}
+          REASON: ${{ steps.state.outputs.reason }}
+          MAX_MIGRATION: ${{ steps.state.outputs.max_migration }}
+          TARGET_ROWS: ${{ steps.state.outputs.target_rows }}
+          TARGET_RECORD_SHA: ${{ steps.state.outputs.target_record_sha }}
+          TARGET_RECORD_NAME: ${{ steps.state.outputs.target_record_name }}
+          TARGET_STATEMENT_COUNT: ${{ steps.state.outputs.target_statement_count }}
+          INDEX_SHA: ${{ steps.state.outputs.index_sha }}
+          DATABASE_BYTES: ${{ steps.state.outputs.database_bytes }}
+          INDEX_BYTES: ${{ steps.state.outputs.index_bytes }}
+          MESSAGE_ROWS: ${{ steps.state.outputs.message_rows }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/r5-phase-ready-index-drift.md <<EOF2
+          ## R5 phase-message ready-index replacement — fail closed on state mismatch
+
+          Preparation run: \`${GITHUB_RUN_ID}\`
+          Source main commit: \`${SOURCE_COMMIT}\`
+          Classification: \`${CLASSIFICATION}\`
+          Reason: \`${REASON}\`
+          Expected migration: \`${TARGET_MIGRATION_VERSION}\`
+          Migration SHA-256: \`${MIGRATION_SHA}\`
+          Manager SHA-256: \`${MANAGER_SHA}\`
+          Observed max migration version: \`${MAX_MIGRATION}\`
+          Target migration rows: \`${TARGET_ROWS}\`
+          Migration-history record set SHA-256: \`${TARGET_RECORD_SHA}\`
+          Migration-history name: \`${TARGET_RECORD_NAME}\`
+          Migration-history statement count: \`${TARGET_STATEMENT_COUNT}\`
+          Ready-index definition SHA-256: \`${INDEX_SHA}\`
+          Database bytes: \`${DATABASE_BYTES}\`
+          Ready-index bytes: \`${INDEX_BYTES}\`
+          Phase-message rows: \`${MESSAGE_ROWS}\`
+
+          No authorization command was emitted. Production mutation: \`none\`. Scheduler mutation: \`none\`. Deployment: \`none\`. Public reader: \`unchanged\`. Mainnet: \`disabled\`. Stabilization/soak/R5 restart: \`not authorized\`.
+          EOF2
+          gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/r5-phase-ready-index-drift.md
+          echo "production ready-index state classified as ${CLASSIFICATION}; refusing to authorize mutation" >&2
+          exit 1
+
       - name: Upload sanitized preparation evidence
+        if: always() && steps.state.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: r5-phase-message-ready-partial-index-prepare-evidence
@@ -200,6 +299,7 @@ jobs:
             comment?.user?.login === 'github-actions[bot]'
             && typeof comment?.body === 'string'
             && comment.body.includes(`Preparation run: \`${prepareRun}\``)
+            && comment.body.includes('State classification: `unapplied_expected`')
             && comment.body.includes(`\`${expected}\``)
           )
           if (proposals.length !== 1) throw new Error(`expected one exact prior ready-index proposal, found ${proposals.length}`)
@@ -213,7 +313,7 @@ jobs:
           }
           NODE
 
-      - name: Revalidate exact authorized pre-state read-only
+      - name: Revalidate exact authorized unapplied state read-only
         id: pre
         env:
           COMMIT: ${{ steps.auth.outputs.commit }}
@@ -230,6 +330,7 @@ jobs:
             --expected-sha "$MIGRATION_SHA" \
             --output r5-phase-message-ready-partial-index-apply-evidence/pre-apply-state.json \
             > /tmp/r5-phase-ready-index-pre.json
+          test "$(jq -r '.classification' /tmp/r5-phase-ready-index-pre.json)" = unapplied_expected
           test "$(jq -r '.authorizationStateSha256' /tmp/r5-phase-ready-index-pre.json)" = "$AUTH_STATE"
           test "$(jq -r '.readyIndexDefinitionSha256' /tmp/r5-phase-ready-index-pre.json)" = "$AUTH_INDEX"
           printf 'database_bytes=%s\nindex_bytes=%s\nmessage_rows=%s\n' \
@@ -268,8 +369,10 @@ jobs:
             --expected-sha "$MIGRATION_SHA" \
             --output r5-phase-message-ready-partial-index-apply-evidence/post-apply-state.json \
             > /tmp/r5-phase-ready-index-post.json
+          test "$(jq -r '.classification' /tmp/r5-phase-ready-index-post.json)" = applied_consistent
           test "$(jq -r '.maxMigrationVersion' /tmp/r5-phase-ready-index-post.json)" = "$TARGET_MIGRATION_VERSION"
           test "$(jq -r '.targetMigrationRows' /tmp/r5-phase-ready-index-post.json)" = 1
+          test "$(jq -r '.exactTargetMigrationRecord' /tmp/r5-phase-ready-index-post.json)" = true
           test "$(jq -r '.temporaryIndexExists' /tmp/r5-phase-ready-index-post.json)" = false
           printf 'database_bytes=%s\nindex_bytes=%s\nmessage_rows=%s\n' \
             "$(jq -r '.databaseBytes' /tmp/r5-phase-ready-index-post.json)" \
@@ -307,7 +410,7 @@ jobs:
             verdict=PASS
             headroom=$((INTERNAL_DB_HALT - DB_AFTER))
           fi
-          cat > /tmp/r5-phase-ready-index-result.md <<EOF
+          cat > /tmp/r5-phase-ready-index-result.md <<EOF2
           ## R5 phase-message ready-index replacement — ${verdict}
 
           Run: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
@@ -327,5 +430,5 @@ jobs:
           Stabilization/soak/R5 restart: \`not authorized\`
 
           A PASS here means only that the exact index-only migration and exact migration-history record were applied and verified. It does not authorize or imply an R5 restart, stabilization, or soak even if database headroom is positive.
-          EOF
+          EOF2
           gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/r5-phase-ready-index-result.md
