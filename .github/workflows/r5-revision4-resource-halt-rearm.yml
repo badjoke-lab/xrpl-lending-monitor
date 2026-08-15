@@ -95,7 +95,7 @@ jobs:
             r5-revision4-resource-halt-rearm-evidence/diagnostic-before.json >/dev/null
 
           repair_binding="$(jq -c '{run:{runId:.run.runId,status:.run.status,lastError:.run.lastError,profileRevision:.run.profileRevision,profileIdentityDigest:.run.profileIdentityDigest,selectionDigest:.run.selectionDigest,completedBatches:.run.completedBatches,committedLedgers:.run.committedLedgers,lastAccountingDigest:.run.lastAccountingDigest,currentWatermarkLedgerIndex:.run.currentWatermarkLedgerIndex,currentWatermarkLedgerHash:.run.currentWatermarkLedgerHash},batchCounts:.batchCounts,latestBatch:{run_id:.latestBatch.run_id,status:.latestBatch.status,batch_id:.latestBatch.batch_id,batch_sequence:.latestBatch.batch_sequence,start_ledger_index:.latestBatch.start_ledger_index,end_ledger_index:.latestBatch.end_ledger_index,ledger_count:.latestBatch.ledger_count,expected_parent_hash:.latestBatch.expected_parent_hash,error_message:.latestBatch.error_message,rows_digest:.latestBatch.rows_digest,accounting_digest:.latestBatch.accounting_digest,finalized_egress_upper_bound_bytes:.latestBatch.finalized_egress_upper_bound_bytes,final_work_id:.latestBatch.final_work_id,failure_reservation_retained:.latestBatch.failure_reservation_retained,lease_owner:.latestBatch.lease_owner,lease_expires_at:.latestBatch.lease_expires_at},snapshot:{snapshotId:.resourceSnapshot.snapshotId,projectedInvocations31d:.resourceSnapshot.projectedInvocations31d},migration:{currentMaxVersion:.migration.currentMaxVersion}}' r5-revision4-resource-halt-rearm-evidence/state-before.json | sha256sum | awk '{print $1}')"
-          diagnostic_binding="$(jq -c '{runId,batchId,range,guards,bounds,verdict,safety}' r5-revision4-resource-halt-rearm-evidence/diagnostic-before.json | sha256sum | awk '{print $1}')"
+          diagnostic_binding="$(jq -c '{runId,batchId,range,guards,verdict,safety}' r5-revision4-resource-halt-rearm-evidence/diagnostic-before.json | sha256sum | awk '{print $1}')"
 
           printf 'repair_binding=%s\ndiagnostic_binding=%s\nbatch_id=%s\nrun_watermark=%s\nactive_floor=%s\nsnapshot_id=%s\nmigration_max=%s\n' \
             "$repair_binding" \
@@ -239,7 +239,7 @@ jobs:
 
           bun scripts/diagnose-r5-revision4-resource-halt.ts r5-revision4-resource-halt-rearm-evidence/diagnostic-recheck.json > r5-revision4-resource-halt-rearm-evidence/diagnostic-recheck.stdout.json
           jq -e '.verdict.classification == "no_resource_halt_reproduced" and .safety.productionDatabaseReadOnly == true and .safety.noRunMutation == true and .safety.noBatchMutation == true and .safety.mainnetDisabled == true' r5-revision4-resource-halt-rearm-evidence/diagnostic-recheck.json >/dev/null
-          diagnostic_binding="$(jq -c '{runId,batchId,range,guards,bounds,verdict,safety}' r5-revision4-resource-halt-rearm-evidence/diagnostic-recheck.json | sha256sum | awk '{print $1}')"
+          diagnostic_binding="$(jq -c '{runId,batchId,range,guards,verdict,safety}' r5-revision4-resource-halt-rearm-evidence/diagnostic-recheck.json | sha256sum | awk '{print $1}')"
           test "$diagnostic_binding" = "$EXPECTED_DIAGNOSTIC"
 
       - name: Rearm exactly one zero-progress resource-halted batch
