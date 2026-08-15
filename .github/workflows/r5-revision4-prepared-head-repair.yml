@@ -57,7 +57,7 @@ jobs:
           test "$(jq -r '.maxMigrationVersion' /tmp/r5-revision4-prepared-head-repair-audit.json)" = "$PREVIOUS_MIGRATION_VERSION"
           test "$(jq -r '.revision4MemoryRetryCalls' /tmp/r5-revision4-prepared-head-repair-audit.json)" = 1
           test "$(jq -r '.revision3MemoryRetryCalls' /tmp/r5-revision4-prepared-head-repair-audit.json)" = 1
-          test "$(jq -r '.run.status' /tmp/r5-revision4-prepared-head-repair-audit.json)" = prepared
+          jq -e '.run.status == "prepared" or .run.status == "running"' /tmp/r5-revision4-prepared-head-repair-audit.json >/dev/null
           test "$(jq -r '.activeBatchCount' /tmp/r5-revision4-prepared-head-repair-audit.json)" = 0
           test "$(jq -r '.scheduler | length' /tmp/r5-revision4-prepared-head-repair-audit.json)" = 1
           test "$(jq -r '.scheduler[0].schedule' /tmp/r5-revision4-prepared-head-repair-audit.json)" = '* * * * *'
@@ -65,14 +65,16 @@ jobs:
           test "$(jq -r '.schedulerMutationAuthorized' /tmp/r5-revision4-prepared-head-repair-audit.json)" = false
           test "$(jq -r '.deploymentAuthorized' /tmp/r5-revision4-prepared-head-repair-audit.json)" = false
           test "$(jq -r '.canonicalHistoryMutationAuthorized' /tmp/r5-revision4-prepared-head-repair-audit.json)" = false
-          printf 'source_commit=%s\nsql_sha=%s\nmanager_sha=%s\nstate_sha=%s\nproject_digest=%s\nrun_watermark=%s\nactive_floor=%s\ndatabase_bytes=%s\n' \
+          printf 'source_commit=%s\nsql_sha=%s\nmanager_sha=%s\nstate_sha=%s\nproject_digest=%s\nrun_status=%s\ncompleted_batches=%s\ncommitted_ledgers=%s\nrun_watermark=%s\nactive_floor=%s\ndatabase_bytes=%s\n' \
             "$source_commit" "$sql_sha" "$manager_sha" \
             "$(jq -r '.authorizationStateSha256' /tmp/r5-revision4-prepared-head-repair-audit.json)" \
             "$(jq -r '.projectIdentityDigest' /tmp/r5-revision4-prepared-head-repair-audit.json)" \
+            "$(jq -r '.run.status' /tmp/r5-revision4-prepared-head-repair-audit.json)" \
+            "$(jq -r '.run.completed_batches' /tmp/r5-revision4-prepared-head-repair-audit.json)" \
+            "$(jq -r '.run.committed_ledgers' /tmp/r5-revision4-prepared-head-repair-audit.json)" \
             "$(jq -r '.run.current_watermark_ledger_index' /tmp/r5-revision4-prepared-head-repair-audit.json)" \
             "$(jq -r '.canonicalWatermark.ledgerIndex' /tmp/r5-revision4-prepared-head-repair-audit.json)" \
-            "$(jq -r '.databaseBytes' /tmp/r5-revision4-prepared-head-repair-audit.json)" \
-            >> "$GITHUB_OUTPUT"
+            "$(jq -r '.databaseBytes' /tmp/r5-revision4-prepared-head-repair-audit.json)" >> "$GITHUB_OUTPUT"
 
       - name: Publish exact expiring owner authorization proposal
         env:
@@ -81,6 +83,9 @@ jobs:
           MANAGER_SHA: ${{ steps.state.outputs.manager_sha }}
           STATE_SHA: ${{ steps.state.outputs.state_sha }}
           PROJECT_DIGEST: ${{ steps.state.outputs.project_digest }}
+          RUN_STATUS: ${{ steps.state.outputs.run_status }}
+          COMPLETED_BATCHES: ${{ steps.state.outputs.completed_batches }}
+          COMMITTED_LEDGERS: ${{ steps.state.outputs.committed_ledgers }}
           RUN_WATERMARK: ${{ steps.state.outputs.run_watermark }}
           ACTIVE_FLOOR: ${{ steps.state.outputs.active_floor }}
           DATABASE_BYTES: ${{ steps.state.outputs.database_bytes }}
@@ -90,30 +95,29 @@ jobs:
           expires="$(date -u -d '+2 hours' '+%Y-%m-%dT%H:%M:%SZ')"
           nonce="$(openssl rand -hex 8)"
           command="/r5-revision4-prepared-head-repair commit=${SOURCE_COMMIT} sql=${SQL_SHA} manager=${MANAGER_SHA} state=${STATE_SHA} project=${PROJECT_DIGEST} prepare_run=${GITHUB_RUN_ID} expires=${expires} nonce=${nonce}"
-          cat > /tmp/r5-revision4-prepared-head-repair-proposal.md <<EOF2
+          cat > /tmp/proposal.md <<EOF2
           ## R5 revision-4 prepared-head memory-retry repair authorization proposal
 
           Preparation run: \`${GITHUB_RUN_ID}\`
           Source main commit: \`${SOURCE_COMMIT}\`
           Target migration-history version: \`${TARGET_MIGRATION_VERSION}\`
-          Staged SQL SHA-256: \`${SQL_SHA}\`
-          Manager SHA-256: \`${MANAGER_SHA}\`
-          Authorized production state SHA-256: \`${STATE_SHA}\`
-          Project identity digest: \`${PROJECT_DIGEST}\`
+          Authorized run status: \`${RUN_STATUS}\`
+          Retained completed batches / committed ledgers: \`${COMPLETED_BATCHES} / ${COMMITTED_LEDGERS}\`
           Retained revision-4 watermark: \`${RUN_WATERMARK}\`
           Current canonical watermark floor: \`${ACTIVE_FLOOR}\`
           Database bytes: \`${DATABASE_BYTES}\`
-          Authorization expires: \`${expires}\`
+          Authorized production state SHA-256: \`${STATE_SHA}\`
+          Mainnet: \`disabled\`
 
-          Read-only preparation proved the revision-4 run is zero-progress \`prepared\`, no active R5 batch exists, the old \`xrpl-collector-tick\` one-minute scheduler is restored, revision 4 contains exactly one erroneous revision-3 memory-retry call, revision 3 retains exactly one intended memory-retry call, and migration head is exactly \`${PREVIOUS_MIGRATION_VERSION}\`.
+          Read-only preparation proved there is no active R5 batch, the old \`xrpl-collector-tick\` one-minute scheduler is restored, revision 4 contains exactly one erroneous revision-3 memory-retry call, revision 3 retains exactly one intended memory-retry call, and the current R5 lifecycle state is repairable without deleting or rewriting committed R5 history.
 
-          The exact command below authorizes only one transaction that patches the revision-4 prepared-head function and inserts the exact migration-history record. It does not authorize scheduler mutation, Edge deployment, canonical-history mutation, public-reader mutation, Mainnet, stabilization, or soak.
+          The exact command below authorizes only one transaction that patches the revision-4 prepared-head function and inserts the exact migration-history record. Existing run progress and canonical history are preserved. No Mainnet, scheduler mutation, Edge deployment, public-reader mutation, stabilization, or soak is authorized.
 
           Exact authorization command:
 
           \`${command}\`
           EOF2
-          gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/r5-revision4-prepared-head-repair-proposal.md
+          gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/proposal.md
 
       - name: Upload sanitized preparation evidence
         uses: actions/upload-artifact@v4
@@ -150,9 +154,7 @@ jobs:
           regex='^/r5-revision4-prepared-head-repair commit=([a-f0-9]{40}) sql=([a-f0-9]{64}) manager=([a-f0-9]{64}) state=([a-f0-9]{64}) project=([a-f0-9]{64}) prepare_run=([0-9]+) expires=([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z) nonce=([a-f0-9]{16})$'
           [[ "$AUTHORIZATION_BODY" =~ $regex ]] || { echo 'prepared-head repair authorization shape mismatch' >&2; exit 1; }
           names=(commit sql_sha manager_sha state_sha project_digest prepare_run expires nonce)
-          for index in "${!names[@]}"; do
-            printf '%s=%s\n' "${names[$index]}" "${BASH_REMATCH[$((index + 1))]}" >> "$GITHUB_OUTPUT"
-          done
+          for index in "${!names[@]}"; do printf '%s=%s\n' "${names[$index]}" "${BASH_REMATCH[$((index + 1))]}" >> "$GITHUB_OUTPUT"; done
           test "${BASH_REMATCH[1]}" = "$(git rev-parse HEAD)"
           test "${BASH_REMATCH[2]}" = "$(sha256sum "$SQL_PATH" | awk '{print $1}')"
           test "${BASH_REMATCH[3]}" = "$(sha256sum "$MANAGER_PATH" | awk '{print $1}')"
@@ -170,14 +172,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${QUALIFICATION_ISSUE}/comments?per_page=100" | jq -s 'add' > /tmp/r5-prepared-head-repair-comments.json
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${QUALIFICATION_ISSUE}/comments?per_page=100" | jq -s 'add' > /tmp/comments.json
           EXPECTED="$AUTHORIZATION_BODY" PREPARE="$PREPARE_RUN" AUTH_ID="$AUTHORIZATION_COMMENT_ID" node --input-type=module <<'NODE'
           import { readFileSync } from 'node:fs'
-          const comments = JSON.parse(readFileSync('/tmp/r5-prepared-head-repair-comments.json', 'utf8'))
-          const proposals = comments.filter((comment) => comment?.user?.login === 'github-actions[bot]' && typeof comment?.body === 'string' && comment.body.includes(`Preparation run: \`${process.env.PREPARE}\``) && comment.body.includes(`\`${process.env.EXPECTED}\``))
-          if (proposals.length !== 1) throw new Error(`expected exactly one matching proposal, found ${proposals.length}`)
-          const auths = comments.filter((comment) => String(comment?.id) !== String(process.env.AUTH_ID) && comment?.user?.login === 'badjoke-lab' && comment?.body === process.env.EXPECTED)
-          if (auths.length !== 0) throw new Error(`authorization replay detected: ${auths.length} prior exact commands`)
+          const comments=JSON.parse(readFileSync('/tmp/comments.json','utf8'))
+          const proposals=comments.filter(c=>c?.user?.login==='github-actions[bot]'&&typeof c?.body==='string'&&c.body.includes(`Preparation run: \`${process.env.PREPARE}\``)&&c.body.includes(`\`${process.env.EXPECTED}\``))
+          if(proposals.length!==1) throw new Error(`expected exactly one matching proposal, found ${proposals.length}`)
+          const auths=comments.filter(c=>String(c?.id)!==String(process.env.AUTH_ID)&&c?.user?.login==='badjoke-lab'&&c?.body===process.env.EXPECTED)
+          if(auths.length!==0) throw new Error(`authorization replay detected: ${auths.length}`)
           NODE
 
       - name: Revalidate exact authorized production state read-only
@@ -189,13 +191,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p r5-revision4-prepared-head-repair-evidence
-          node "$MANAGER_PATH" audit \
-            --source-commit "$SOURCE_COMMIT" \
-            --expected-sha "$SQL_SHA" \
-            --output r5-revision4-prepared-head-repair-evidence/execute-prestate.json \
-            > /tmp/r5-prepared-head-repair-prestate.json
-          test "$(jq -r '.classification' /tmp/r5-prepared-head-repair-prestate.json)" = unapplied_expected
-          test "$(jq -r '.authorizationStateSha256' /tmp/r5-prepared-head-repair-prestate.json)" = "$STATE_SHA"
+          node "$MANAGER_PATH" audit --source-commit "$SOURCE_COMMIT" --expected-sha "$SQL_SHA" --output r5-revision4-prepared-head-repair-evidence/execute-prestate.json > /tmp/prestate.json
+          test "$(jq -r '.classification' /tmp/prestate.json)" = unapplied_expected
+          test "$(jq -r '.authorizationStateSha256' /tmp/prestate.json)" = "$STATE_SHA"
 
       - name: Apply exact bounded revision4 prepared-head repair
         shell: bash
@@ -205,18 +203,13 @@ jobs:
           STATE_SHA: ${{ steps.auth.outputs.state_sha }}
         run: |
           set -euo pipefail
-          node "$MANAGER_PATH" apply \
-            --source-commit "$SOURCE_COMMIT" \
-            --expected-sha "$SQL_SHA" \
-            --expected-state "$STATE_SHA" \
-            --output r5-revision4-prepared-head-repair-evidence/apply-result.json \
-            > /tmp/r5-prepared-head-repair-result.json
-          cat /tmp/r5-prepared-head-repair-result.json
-          test "$(jq -r '.after.classification' /tmp/r5-prepared-head-repair-result.json)" = applied_consistent
-          test "$(jq -r '.after.revision4MemoryRetryCalls' /tmp/r5-prepared-head-repair-result.json)" = 0
-          test "$(jq -r '.after.revision3MemoryRetryCalls' /tmp/r5-prepared-head-repair-result.json)" = 1
-          test "$(jq -r '.schedulerMutationPerformed' /tmp/r5-prepared-head-repair-result.json)" = false
-          test "$(jq -r '.canonicalHistoryMutationPerformed' /tmp/r5-prepared-head-repair-result.json)" = false
+          node "$MANAGER_PATH" apply --source-commit "$SOURCE_COMMIT" --expected-sha "$SQL_SHA" --expected-state "$STATE_SHA" --output r5-revision4-prepared-head-repair-evidence/apply-result.json > /tmp/result.json
+          cat /tmp/result.json
+          test "$(jq -r '.after.classification' /tmp/result.json)" = applied_consistent
+          test "$(jq -r '.after.revision4MemoryRetryCalls' /tmp/result.json)" = 0
+          test "$(jq -r '.after.revision3MemoryRetryCalls' /tmp/result.json)" = 1
+          test "$(jq -r '.schedulerMutationPerformed' /tmp/result.json)" = false
+          test "$(jq -r '.canonicalHistoryMutationPerformed' /tmp/result.json)" = false
 
       - name: Upload repair evidence
         if: always()
@@ -231,18 +224,14 @@ jobs:
         if: success()
         shell: bash
         run: |
-          set -euo pipefail
-          cat > /tmp/r5-revision4-prepared-head-repair-pass.md <<EOF2
+          cat > /tmp/pass.md <<EOF2
           ## R5 revision-4 prepared-head memory-retry repair — PASS
 
           Run: \`${GITHUB_RUN_ID}\`
           Source main commit: \`${{ steps.auth.outputs.commit }}\`
           Target migration-history version: \`${TARGET_MIGRATION_VERSION}\`
+          Mainnet: \`disabled\`
 
-          PASS means the revision-4 prepared-head wrapper no longer calls the revision-3-only memory-retry RPC, while the revision-3 memory-retry path remains intact. The exact migration-history record was written in the same bounded transaction.
-
-          Scheduler mutation: \`none\`. Edge deployment: \`none\`. Canonical history: \`unchanged\`. Public reader: \`unchanged\`. Mainnet: \`disabled\`. Stabilization/soak: \`not authorized\`.
-
-          Next gate: fresh \`/r5-revision4-minute-prepare\` against the repaired production function and new migration max.
+          Revision 4 no longer calls the revision-3 memory-retry RPC. Revision 3 remains unchanged. Existing R5 progress and canonical history were preserved. Scheduler mutation, Edge deployment, Mainnet, stabilization, and soak were not authorized.
           EOF2
-          gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/r5-revision4-prepared-head-repair-pass.md
+          gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/pass.md
