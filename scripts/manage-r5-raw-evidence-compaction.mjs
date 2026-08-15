@@ -169,7 +169,7 @@ if ((MUTATION_SQL.match(/\btruncate\s+table\b/giu) ?? []).length !== 1) fail('ra
 for (const forbidden of [
   /\bdelete\s+from\b/iu,
   /\bupdate\s+public\b/iu,
-  /\b(drop|alter|vacuum|reindex|cluster)\b/iu,
+  /(?:^|;)\s*(?:drop|alter|vacuum|reindex|cluster)\b/iu,
   /\bcascade\b/iu,
   /\bcron\./iu,
   /\bmainnet\b/iu,

@@ -32,12 +32,13 @@ describe('R5 raw evidence physical compaction contract', () => {
     expect(mutation.match(/\btruncate\s+table\b/giu)).toHaveLength(1)
     expect(mutation).not.toMatch(/\bdelete\s+from\b/iu)
     expect(mutation).not.toMatch(/\bupdate\s+public\b/iu)
-    expect(mutation).not.toMatch(/\b(drop|alter|vacuum|reindex|cluster)\b/iu)
+    expect(mutation).not.toMatch(/(?:^|;)\s*(?:drop|alter|vacuum|reindex|cluster)\b/iu)
     expect(mutation).not.toMatch(/\bcascade\b/iu)
     expect(mutation).not.toMatch(/\bcron\./iu)
     expect(mutation).not.toMatch(/\bxrpl_phase_work\b/iu)
     expect(mutation).not.toMatch(/\bxrpl_phase_watermarks\b/iu)
     expect(mutation).not.toMatch(/\bxrpl_phase_messages\b/iu)
+    expect(mutation).toContain('on commit drop')
   })
 
   test('prepare remains read-only and apply revalidates the exact authorized state and mutation', async () => {
