@@ -5,6 +5,11 @@ const outputPath = process.argv[2] ?? 'r5-revision4-minute-activation-evidence/f
 const projectRef = process.env.SUPABASE_PROJECT_ID ?? ''
 const accessToken = process.env.SUPABASE_ACCESS_TOKEN ?? ''
 const version = '20260813072000'
+const approvedCurrentMigrationVersions = new Set([
+  version,
+  '20260813142000',
+  '20260814130000',
+])
 const migrationName = 'xrpl_r5_revision4_continuous_head_rebind_fix'
 const migrationPath = `supabase/migrations/${version}_${migrationName}.sql`
 const signature = 'public.xrpl_refresh_r5_revision4_continuous_head(text,bigint,text,timestamp with time zone)'
@@ -71,7 +76,11 @@ if (!exactReconstruction) {
 }
 
 const maxRows = await query('select max(version::text) as max_version from supabase_migrations.schema_migrations')
-if (maxRows.length !== 1 || maxRows[0].max_version !== version) throw new Error('unexpected migration exists after minute follow-up')
+if (maxRows.length !== 1) throw new Error('migration max query returned unexpected rows')
+const currentMaxMigrationVersion = String(maxRows[0].max_version ?? '')
+if (!approvedCurrentMigrationVersions.has(currentMaxMigrationVersion)) {
+  throw new Error(`unreviewed migration exists after minute follow-up:${currentMaxMigrationVersion}`)
+}
 
 const functionRows = await query(
   `select p.prosecdef as security_definer,
@@ -100,7 +109,7 @@ if (fn.security_definer !== true || fn.anon_execute !== false || fn.authenticate
 }
 
 const evidence = {
-  schemaVersion: 3,
+  schemaVersion: 4,
   purpose: 'r5-revision4-minute-followup-provenance',
   version,
   migrationName,
@@ -111,7 +120,9 @@ const evidence = {
   historyExact: true,
   historyStorageShape: 'supabase_split_statements',
   reconstruction: exactReconstruction,
-  currentMaxMigrationVersion: version,
+  currentMaxMigrationVersion,
+  currentMaxVersionApproved: true,
+  approvedCurrentMigrationVersions: [...approvedCurrentMigrationVersions],
   functionDefinitionSha256: sha256(definition),
   functionContractVerified: true,
   resourceGuardUnchanged: true,
