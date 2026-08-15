@@ -27,13 +27,13 @@ replace_once(
 )
 replace_once(
     'resource halt rearm symbol',
-    'r5_rev4_resource_diagnostic = "r5-revision4-resource-halt-diagnostic.yml"\nr5_work_status_index_apply = "r5-work-status-partial-index-apply.yml"',
-    'r5_rev4_resource_diagnostic = "r5-revision4-resource-halt-diagnostic.yml"\nr5_rev4_resource_rearm = "r5-revision4-resource-halt-rearm.yml"\nr5_work_status_index_apply = "r5-work-status-partial-index-apply.yml"',
+    'r5_rev4_resource_diagnostic = "r5-revision4-resource-halt-diagnostic.yml"',
+    'r5_rev4_resource_diagnostic = "r5-revision4-resource-halt-diagnostic.yml"\nr5_rev4_resource_rearm = "r5-revision4-resource-halt-rearm.yml"',
 )
 replace_once(
     'resource halt rearm trigger',
-    '    r5_rev4_resource_diagnostic: ["issue_comment"],\n    r5_work_status_index_apply: ["issue_comment"],',
-    '    r5_rev4_resource_diagnostic: ["issue_comment"],\n    r5_rev4_resource_rearm: ["issue_comment"],\n    r5_work_status_index_apply: ["issue_comment"],',
+    '    r5_rev4_resource_diagnostic: ["issue_comment"],',
+    '    r5_rev4_resource_diagnostic: ["issue_comment"],\n    r5_rev4_resource_rearm: ["issue_comment"],',
 )
 
 marker = 'burst = (root / r5_burst).read_text()\n'
