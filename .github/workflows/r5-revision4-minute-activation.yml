@@ -84,11 +84,12 @@ jobs:
             r5-revision4-minute-activation-evidence/state-before.json
           node scripts/verify-r5-revision4-minute-followup.mjs \
             r5-revision4-minute-activation-evidence/followup-before.json
-          jq -e '.resourceSnapshot.fresh == true and .resourceSnapshot.projectedInvocations31d < 400000 and .migration.targetApplied == true and .migration.migrationState == "applied_verified" and .migration.currentMaxVersion == "20260813072000" and .mainnetDisabled == true' \
+          jq -e '.resourceSnapshot.fresh == true and .resourceSnapshot.projectedInvocations31d < 400000 and .migration.targetApplied == true and .migration.migrationState == "applied_verified" and .migration.currentMaxVersionApproved == true and .mainnetDisabled == true' \
             r5-revision4-minute-activation-evidence/state-before.json >/dev/null
-          jq -e '.historyExact == true and .functionContractVerified == true and .resourceGuardUnchanged == true and .currentMaxMigrationVersion == "20260813072000" and .mainnetDisabled == true' \
+          jq -e '.historyExact == true and .functionContractVerified == true and .resourceGuardUnchanged == true and .currentMaxVersionApproved == true and .mainnetDisabled == true' \
             r5-revision4-minute-activation-evidence/followup-before.json >/dev/null
           test "${{ steps.scheduler.outputs.project_digest }}" = "$(jq -r '.projectIdentityDigest' r5-revision4-minute-activation-evidence/state-before.json)"
+          test "$(jq -r '.migration.currentMaxVersion' r5-revision4-minute-activation-evidence/state-before.json)" = "$(jq -r '.currentMaxMigrationVersion' r5-revision4-minute-activation-evidence/followup-before.json)"
           printf 'activation_mode=%s\nsnapshot_id=%s\nprojected_31d=%s\nrun_watermark=%s\nactive_watermark=%s\ndrift=%s\nmigration_max=%s\n' \
             "$(jq -r '.activationMode' r5-revision4-minute-activation-evidence/state-before.json)" \
             "$(jq -r '.resourceSnapshot.snapshotId' r5-revision4-minute-activation-evidence/state-before.json)" \
@@ -134,9 +135,11 @@ jobs:
           projected_invocations_31d: \`${PROJECTED_31D} / 400000\`
           Retained R5 watermark: \`${RUN_WATERMARK}\`
           Current canonical watermark floor: \`${ACTIVE_WATERMARK}\` (drift \`${BOUNDARY_DRIFT}\`)
-          Applied migration: \`${MIGRATION_MAX}\`
+          Applied migration max: \`${MIGRATION_MAX}\`
           Production R5 prebundle SHA-256: \`${R5_BUNDLE_SHA}\`
           Minute driver prebundle SHA-256: \`${DRIVER_BUNDLE_SHA}\`
+
+          The required minute-activation migration \`${TARGET_MIGRATION_VERSION}\` is verified, and the observed migration max is restricted to the reviewed compatibility allowlist. The execute job must observe the exact same migration max before and after pausing the old collector.
 
           Both Edge bundles were generated with pinned Bun 1.3.14 before authorization and contain zero relative imports, zero \`cloudflare:\` imports, zero qualification override code, and a \`Deno.serve\` entrypoint. The execute job must reproduce the exact same bundle digests before pausing the old collector.
 
@@ -194,7 +197,10 @@ jobs:
           actual_project_digest="$(printf '%s' "$SUPABASE_PROJECT_ID" | sha256sum | awk '{print $1}')"
           test "${BASH_REMATCH[7]}" = "$actual_project_digest"
           test "${BASH_REMATCH[12]}" -lt "$INVOCATION_HALT_31D"
-          test "${BASH_REMATCH[16]}" = "$TARGET_MIGRATION_VERSION"
+          case "${BASH_REMATCH[16]}" in
+            20260813072000|20260813142000|20260814130000) ;;
+            *) echo "unreviewed minute activation migration max:${BASH_REMATCH[16]}" >&2; exit 1 ;;
+          esac
           expires_epoch="$(date -u -d "${BASH_REMATCH[18]}" +%s)"
           auth_epoch="$(date -u -d "$AUTHORIZATION_CREATED_AT" +%s)"
           now_epoch="$(date -u +%s)"
@@ -244,6 +250,7 @@ jobs:
           EXPECTED_PROJECTED: ${{ steps.auth.outputs.projected_31d }}
           EXPECTED_RUN_WATERMARK: ${{ steps.auth.outputs.run_watermark }}
           ACTIVE_FLOOR: ${{ steps.auth.outputs.active_floor }}
+          EXPECTED_MIGRATION_MAX: ${{ steps.auth.outputs.migration_max }}
         run: |
           set -euo pipefail
           node scripts/prepare-r4f-g3-isolated-window.mjs > r5-revision4-minute-activation-evidence/scheduler-recheck.json
@@ -260,8 +267,10 @@ jobs:
           test "$(jq -r '.resourceSnapshot.projectedInvocations31d' r5-revision4-minute-activation-evidence/state-recheck.json)" = "$EXPECTED_PROJECTED"
           test "$(jq -r '.run.currentWatermarkLedgerIndex' r5-revision4-minute-activation-evidence/state-recheck.json)" = "$EXPECTED_RUN_WATERMARK"
           test "$(jq -r '.activeWatermark.ledgerIndex' r5-revision4-minute-activation-evidence/state-recheck.json)" -ge "$ACTIVE_FLOOR"
-          jq -e '.resourceSnapshot.fresh == true and .resourceSnapshot.projectedInvocations31d < 400000 and .migration.targetApplied == true and .migration.migrationState == "applied_verified" and .migration.currentMaxVersion == "20260813072000"' r5-revision4-minute-activation-evidence/state-recheck.json >/dev/null
-          jq -e '.historyExact == true and .functionContractVerified == true and .resourceGuardUnchanged == true and .currentMaxMigrationVersion == "20260813072000"' r5-revision4-minute-activation-evidence/followup-recheck.json >/dev/null
+          test "$(jq -r '.migration.currentMaxVersion' r5-revision4-minute-activation-evidence/state-recheck.json)" = "$EXPECTED_MIGRATION_MAX"
+          test "$(jq -r '.currentMaxMigrationVersion' r5-revision4-minute-activation-evidence/followup-recheck.json)" = "$EXPECTED_MIGRATION_MAX"
+          jq -e '.resourceSnapshot.fresh == true and .resourceSnapshot.projectedInvocations31d < 400000 and .migration.targetApplied == true and .migration.migrationState == "applied_verified" and .migration.currentMaxVersionApproved == true' r5-revision4-minute-activation-evidence/state-recheck.json >/dev/null
+          jq -e '.historyExact == true and .functionContractVerified == true and .resourceGuardUnchanged == true and .currentMaxVersionApproved == true' r5-revision4-minute-activation-evidence/followup-recheck.json >/dev/null
 
       - name: Set up Supabase CLI
         uses: supabase/setup-cli@3c2f5e2ae34c34e428e8e206e2c4d21fa2d20fbf
@@ -285,12 +294,16 @@ jobs:
             > r5-revision4-minute-activation-evidence/pause.json
 
       - name: Reverify quiescent boundary read-only
+        env:
+          EXPECTED_MIGRATION_MAX: ${{ steps.auth.outputs.migration_max }}
         run: |
           set -euo pipefail
           node scripts/inspect-r5-revision4-minute-state.mjs r5-revision4-minute-activation-evidence/state-paused.json
           node scripts/verify-r5-revision4-minute-followup.mjs r5-revision4-minute-activation-evidence/followup-paused.json
-          jq -e '.resourceSnapshot.fresh == true and .migration.targetApplied == true and .migration.migrationState == "applied_verified" and .migration.currentMaxVersion == "20260813072000"' r5-revision4-minute-activation-evidence/state-paused.json >/dev/null
-          jq -e '.historyExact == true and .functionContractVerified == true and .resourceGuardUnchanged == true' r5-revision4-minute-activation-evidence/followup-paused.json >/dev/null
+          test "$(jq -r '.migration.currentMaxVersion' r5-revision4-minute-activation-evidence/state-paused.json)" = "$EXPECTED_MIGRATION_MAX"
+          test "$(jq -r '.currentMaxMigrationVersion' r5-revision4-minute-activation-evidence/followup-paused.json)" = "$EXPECTED_MIGRATION_MAX"
+          jq -e '.resourceSnapshot.fresh == true and .migration.targetApplied == true and .migration.migrationState == "applied_verified" and .migration.currentMaxVersionApproved == true' r5-revision4-minute-activation-evidence/state-paused.json >/dev/null
+          jq -e '.historyExact == true and .functionContractVerified == true and .resourceGuardUnchanged == true and .currentMaxVersionApproved == true' r5-revision4-minute-activation-evidence/followup-paused.json >/dev/null
 
       - name: Deploy exact prebundled revision4 R5 executor
         run: |
