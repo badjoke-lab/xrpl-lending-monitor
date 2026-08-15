@@ -7,6 +7,11 @@ const accessToken = process.env.SUPABASE_ACCESS_TOKEN ?? ''
 const invocationHalt31d = 400000
 const baseMigrationVersion = '20260813060000'
 const targetMigrationVersion = '20260813072000'
+const approvedCurrentMigrationVersions = new Set([
+  targetMigrationVersion,
+  '20260813142000',
+  '20260814130000',
+])
 const runId = 'r5-recovery-selected-revision4-entry'
 const profileDigest = '39e8b620a20bb08fbe8306fe753d4d445c5191bcafddbf67721e0c17d5b6bcd5'
 const continuousSignature = 'public.xrpl_refresh_r5_revision4_continuous_head(text,bigint,text,timestamp with time zone)'
@@ -157,7 +162,10 @@ const migrationMax = String(exactlyOne(await query(
   `select max(version::text) as max_version from supabase_migrations.schema_migrations`,
 ), 'migration max').max_version ?? '')
 if (!targetApplied && migrationMax !== baseMigrationVersion) throw new Error(`unexpected migration boundary before follow-up:${migrationMax}`)
-if (targetApplied && migrationMax !== targetMigrationVersion) throw new Error(`unexpected migration exists after follow-up:${migrationMax}`)
+if (targetApplied && !approvedCurrentMigrationVersions.has(migrationMax)) {
+  throw new Error(`unreviewed migration exists after minute follow-up:${migrationMax}`)
+}
+const currentMaxVersionApproved = targetApplied && approvedCurrentMigrationVersions.has(migrationMax)
 
 const contract = exactlyOne(await query(
   `select p.prosecdef as security_definer,
@@ -234,12 +242,13 @@ const stableBinding = {
   invocationCount24h, projectedInvocations31d, invocationHalt31d, functionCount,
   maxBundleBytes, maxBundleName: snapshot.max_bundle_name, bundleCount,
   baseMigrationVersion, targetMigrationVersion, migrationState, currentMaxMigrationVersion: migrationMax,
+  currentMaxVersionApproved,
   functionDefinitionDigest,
 }
 const stateDigest = createHash('sha256').update(JSON.stringify(stableBinding)).digest('hex')
 
 const evidence = {
-  schemaVersion: 4,
+  schemaVersion: 5,
   purpose: 'r5-revision4-minute-activation-state',
   projectIdentityDigest,
   run: {
@@ -269,7 +278,8 @@ const evidence = {
   },
   migration: {
     baseVersion: baseMigrationVersion, targetVersion: targetMigrationVersion, targetApplied,
-    migrationState, currentMaxVersion: migrationMax, functionDefinitionDigest,
+    migrationState, currentMaxVersion: migrationMax, currentMaxVersionApproved,
+    approvedCurrentVersions: [...approvedCurrentMigrationVersions], functionDefinitionDigest,
   },
   activationMode,
   activationBlockedReason,
