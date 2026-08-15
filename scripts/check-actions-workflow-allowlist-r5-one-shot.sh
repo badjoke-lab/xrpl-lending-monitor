@@ -20,12 +20,14 @@ python scripts/extend-actions-policy-r5-cron-history-retention.py "$generated_sc
 python scripts/extend-actions-policy-r5-index-footprint-readonly-probe.py "$generated_script"
 python scripts/extend-actions-policy-r5-work-status-partial-index-apply.py "$generated_script"
 python scripts/extend-actions-policy-r5-raw-evidence-retention.py "$generated_script"
+python scripts/extend-actions-policy-r5-raw-evidence-compaction.py "$generated_script"
 chmod 700 "$generated_script"
 bash "$generated_script" "$@"
 node --check scripts/r5-index-footprint-readonly-probe.mjs
 node --check scripts/r5-secondary-index-readonly-audit.mjs
 node --check scripts/manage-r5-work-status-partial-index.mjs
 node --check scripts/manage-r5-raw-evidence-retention.mjs
+node --check scripts/manage-r5-raw-evidence-compaction.mjs
 bash -n scripts/check-supabase-production-autodeploy-boundary.sh
 bash scripts/check-supabase-production-autodeploy-boundary.sh
 node scripts/test-r5-phase-ready-native-history-record.mjs
