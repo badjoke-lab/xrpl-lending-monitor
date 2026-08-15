@@ -57,7 +57,7 @@ for required in (
     "revision3MemoryRetryCalls",
     "schedulerMutationAuthorized",
     "canonicalHistoryMutationAuthorized",
-    "No Mainnet",
+    "Mainnet: \\`disabled\\`",
 ):
     if required not in prepared_head_repair:
         raise SystemExit(f"revision-4 prepared-head repair workflow missing fail-closed requirement: {required}")
