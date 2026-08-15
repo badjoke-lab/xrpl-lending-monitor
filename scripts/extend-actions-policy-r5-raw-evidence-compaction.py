@@ -52,7 +52,7 @@ for required in (
     "Inspect raw-evidence physical state read-only",
     "Publish expiring owner authorization proposal",
     "Parse exact owner authorization",
-    "Revalidate exact authorized state read-only",
+    "Revalidate exact authorized structural state read-only",
     "Apply exact bounded raw-evidence physical compaction",
 ):
     if required not in raw_evidence_compaction:
