@@ -40,7 +40,7 @@ marker = 'burst = (root / r5_burst).read_text()\n'
 if text.count(marker) != 1:
     raise SystemExit('prepared-head repair policy insertion point is not unique')
 block = r'''prepared_head_repair = (root / r5_rev4_prepared_head_repair).read_text()
-prepared_head_manager = (root / "../scripts/manage-r5-revision4-prepared-head-memory-retry-fix.mjs").read_text()
+prepared_head_manager = (root / "../../scripts/manage-r5-revision4-prepared-head-memory-retry-fix.mjs").read_text()
 for required in (
     "contents: read",
     "issues: write",
