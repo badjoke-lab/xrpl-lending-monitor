@@ -53,7 +53,7 @@ for required in (
     "Publish expiring owner authorization proposal",
     "Parse exact owner authorization",
     "Revalidate exact authorized state read-only",
-    "Apply exact row-preserving raw-evidence compaction",
+    "Apply exact bounded raw-evidence physical compaction",
 ):
     if required not in raw_evidence_compaction:
         raise SystemExit(f"raw-evidence compaction workflow missing requirement: {required}")
