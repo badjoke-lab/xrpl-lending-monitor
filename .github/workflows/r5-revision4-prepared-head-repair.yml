@@ -107,6 +107,7 @@ jobs:
           Current canonical watermark floor: \`${ACTIVE_FLOOR}\`
           Database bytes: \`${DATABASE_BYTES}\`
           Authorized production state SHA-256: \`${STATE_SHA}\`
+          Mainnet: \`disabled\`
 
           Read-only preparation proved there is no active R5 batch, the old \`xrpl-collector-tick\` one-minute scheduler is restored, revision 4 contains exactly one erroneous revision-3 memory-retry call, revision 3 retains exactly one intended memory-retry call, and the current R5 lifecycle state is repairable without deleting or rewriting committed R5 history.
 
@@ -229,6 +230,7 @@ jobs:
           Run: \`${GITHUB_RUN_ID}\`
           Source main commit: \`${{ steps.auth.outputs.commit }}\`
           Target migration-history version: \`${TARGET_MIGRATION_VERSION}\`
+          Mainnet: \`disabled\`
 
           Revision 4 no longer calls the revision-3 memory-retry RPC. Revision 3 remains unchanged. Existing R5 progress and canonical history were preserved. Scheduler mutation, Edge deployment, Mainnet, stabilization, and soak were not authorized.
           EOF2
