@@ -28,11 +28,14 @@ node --check scripts/r5-secondary-index-readonly-audit.mjs
 node --check scripts/manage-r5-work-status-partial-index.mjs
 node --check scripts/manage-r5-raw-evidence-retention.mjs
 node --check scripts/manage-r5-raw-evidence-compaction.mjs
+node --check scripts/r5-post-retention-readonly-gate.mjs
 bash -n scripts/check-supabase-production-autodeploy-boundary.sh
 bash scripts/check-supabase-production-autodeploy-boundary.sh
 node scripts/test-r5-phase-ready-native-history-record.mjs
 bash -n scripts/test-r5-retention-readonly-preflight-contract.sh
 bash scripts/test-r5-retention-readonly-preflight-contract.sh
+bash -n scripts/test-r5-post-retention-readonly-gate-contract.sh
+bash scripts/test-r5-post-retention-readonly-gate-contract.sh
 bash -n scripts/test-r5-cron-history-retention-contract.sh
 bash scripts/test-r5-cron-history-retention-contract.sh
 bash -n scripts/test-r5-payload-commit-retention-postgres.sh
