@@ -198,7 +198,7 @@ jobs:
           test "${BASH_REMATCH[7]}" = "$actual_project_digest"
           test "${BASH_REMATCH[12]}" -lt "$INVOCATION_HALT_31D"
           case "${BASH_REMATCH[16]}" in
-            20260813072000|20260813142000|20260814130000) ;;
+            20260813072000|20260813142000|20260814130000|20260815211500) ;;
             *) echo "unreviewed minute activation migration max:${BASH_REMATCH[16]}" >&2; exit 1 ;;
           esac
           expires_epoch="$(date -u -d "${BASH_REMATCH[18]}" +%s)"
