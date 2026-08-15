@@ -11,6 +11,7 @@ const approvedCurrentMigrationVersions = new Set([
   targetMigrationVersion,
   '20260813142000',
   '20260814130000',
+  '20260815211500',
 ])
 const runId = 'r5-recovery-selected-revision4-entry'
 const profileDigest = '39e8b620a20bb08fbe8306fe753d4d445c5191bcafddbf67721e0c17d5b6bcd5'
@@ -219,6 +220,11 @@ if (run.status === 'halted' && run.last_error === 'r5_recovery_monthly_invocatio
     throw new Error('prepared R5 run contains unexpected recovery progress')
   }
   activationMode = 'prepared_continue'
+} else if (run.status === 'running') {
+  if (run.last_error !== null || runCompletedBatches < 1 || committedLedgers < 1 || committedBatches < 1 || typeof run.last_accounting_digest !== 'string' || !/^[a-f0-9]{64}$/u.test(run.last_accounting_digest)) {
+    throw new Error('running R5 run does not have a clean committed continuation state')
+  }
+  activationMode = 'running_continue'
 } else if (run.status === 'caught_up') {
   if (boundaryDriftLedgers !== 0) throw new Error('caught-up R5 run drifted under old collector')
   activationMode = 'caught_up_reopen'
@@ -248,7 +254,7 @@ const stableBinding = {
 const stateDigest = createHash('sha256').update(JSON.stringify(stableBinding)).digest('hex')
 
 const evidence = {
-  schemaVersion: 5,
+  schemaVersion: 6,
   purpose: 'r5-revision4-minute-activation-state',
   projectIdentityDigest,
   run: {
