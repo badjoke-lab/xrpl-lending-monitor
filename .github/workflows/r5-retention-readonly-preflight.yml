@@ -54,10 +54,26 @@ jobs:
           test "$(jq -r '.retentionBoundary.noSchedulerMutationAuthorized' /tmp/r5-retention-readonly-preflight.json)" = true
           test "$(jq -r '.retentionBoundary.noDeploymentAuthorized' /tmp/r5-retention-readonly-preflight.json)" = true
           test "$(jq -r '.retentionBoundary.mainnetDisabled' /tmp/r5-retention-readonly-preflight.json)" = true
-          printf 'source_commit=%s\ndatabase_bytes=%s\nheadroom_bytes=%s\n' \
+
+          node scripts/r5-post-retention-readonly-gate.mjs \
+            --source-commit "$source_commit" \
+            --output r5-retention-readonly-preflight/post-retention-gate.json \
+            --summary r5-retention-readonly-preflight/post-retention-gate.md \
+            > /tmp/r5-post-retention-readonly-gate.json
+          test "$(jq -r '.boundary.readOnly' /tmp/r5-post-retention-readonly-gate.json)" = true
+          test "$(jq -r '.boundary.productionMutationAuthorized' /tmp/r5-post-retention-readonly-gate.json)" = false
+          test "$(jq -r '.boundary.deploymentAuthorized' /tmp/r5-post-retention-readonly-gate.json)" = false
+          test "$(jq -r '.boundary.mainnetDisabled' /tmp/r5-post-retention-readonly-gate.json)" = true
+          test "$(jq -r '.boundary.r5RestartAuthorized' /tmp/r5-post-retention-readonly-gate.json)" = false
+          jq -e '.verdict == "pass" or .verdict == "pending" or .verdict == "block"' /tmp/r5-post-retention-readonly-gate.json >/dev/null
+          printf '\n' >> r5-retention-readonly-preflight/summary.md
+          cat r5-retention-readonly-preflight/post-retention-gate.md >> r5-retention-readonly-preflight/summary.md
+
+          printf 'source_commit=%s\ndatabase_bytes=%s\nheadroom_bytes=%s\npost_retention_verdict=%s\n' \
             "$source_commit" \
             "$(jq -r '.databaseBytes' /tmp/r5-retention-readonly-preflight.json)" \
             "$(jq -r '.databaseHeadroomBytes' /tmp/r5-retention-readonly-preflight.json)" \
+            "$(jq -r '.verdict' /tmp/r5-post-retention-readonly-gate.json)" \
             >> "$GITHUB_OUTPUT"
 
       - name: Upload sanitized read-only evidence
