@@ -21,6 +21,7 @@ python scripts/extend-actions-policy-r5-index-footprint-readonly-probe.py "$gene
 python scripts/extend-actions-policy-r5-work-status-partial-index-apply.py "$generated_script"
 python scripts/extend-actions-policy-r5-raw-evidence-retention.py "$generated_script"
 python scripts/extend-actions-policy-r5-raw-evidence-compaction.py "$generated_script"
+python scripts/extend-actions-policy-r5-revision4-resource-halt-rearm.py "$generated_script"
 chmod 700 "$generated_script"
 bash "$generated_script" "$@"
 node --check scripts/r5-index-footprint-readonly-probe.mjs
