@@ -127,8 +127,34 @@ function classify(state, sqlSha, sourceCommit) {
   if (preCommon && String(state.maxMigrationVersion)===PREVIOUS_VERSION && targetRows===0 && Number(state.revision4MemoryRetryCalls)===1) { classification='unapplied_expected'; reason='revision-4 wrapper retains exactly one revision-3 memory-retry call in a quiescent repairable lifecycle state' }
   else if (preCommon && String(state.maxMigrationVersion)===VERSION && targetRows===1 && exactRecord && Number(state.revision4MemoryRetryCalls)===0) { classification='applied_consistent'; reason='revision-4 memory-retry call is absent and exact migration-history record is present while R5 progress is preserved' }
   const projectIdentityDigest=sha256(requireEnv('SUPABASE_PROJECT_ID',/^[a-z]{20}$/u))
-  const authorizationState={ schemaVersion:2,purpose:'r5-revision4-prepared-head-memory-retry-fix-authorization-state',sourceCommit,projectIdentityDigest,sqlSha256:sqlSha,classification,maxMigrationVersion:String(state.maxMigrationVersion??''),targetMigrationRows:targetRows,revision4MemoryRetryCalls:Number(state.revision4MemoryRetryCalls),revision3MemoryRetryCalls:Number(state.revision3MemoryRetryCalls),revision4DefinitionSha256:String(state.revision4DefinitionSha256??''),revision3DefinitionSha256:String(state.revision3DefinitionSha256??''),revision4Guards:state.revision4Guards,run:state.run,activeBatchCount:Number(state.activeBatchCount),scheduler:state.scheduler,canonicalWatermark:state.canonicalWatermark,databaseBytes:Number(state.databaseBytes),mainnetDisabled:true,schedulerMutationAuthorized:false,deploymentAuthorized:false,publicReaderMutationAuthorized:false,canonicalHistoryMutationAuthorized:false,stabilizationAuthorized:false,soakAuthorized:false }
-  return { ...authorizationState, classificationReason:reason, authorizationStateSha256:sha256(JSON.stringify(authorizationState)), targetMigrationRecords:records }
+  const authorizationState = {
+    schemaVersion: 2,
+    purpose: 'r5-revision4-prepared-head-memory-retry-fix-authorization-state',
+    sourceCommit,
+    projectIdentityDigest,
+    sqlSha256: sqlSha,
+    classification,
+    maxMigrationVersion: String(state.maxMigrationVersion ?? ''),
+    targetMigrationRows: targetRows,
+    revision4MemoryRetryCalls: Number(state.revision4MemoryRetryCalls),
+    revision3MemoryRetryCalls: Number(state.revision3MemoryRetryCalls),
+    revision4DefinitionSha256: String(state.revision4DefinitionSha256 ?? ''),
+    revision3DefinitionSha256: String(state.revision3DefinitionSha256 ?? ''),
+    revision4Guards: state.revision4Guards,
+    run: state.run,
+    activeBatchCount: Number(state.activeBatchCount),
+    scheduler: state.scheduler,
+    canonicalWatermark: state.canonicalWatermark,
+    databaseBytes: Number(state.databaseBytes),
+    mainnetDisabled: true,
+    schedulerMutationAuthorized: false,
+    deploymentAuthorized: false,
+    publicReaderMutationAuthorized: false,
+    canonicalHistoryMutationAuthorized: false,
+    stabilizationAuthorized: false,
+    soakAuthorized: false,
+  }
+  return { ...authorizationState, classificationReason: reason, authorizationStateSha256: sha256(JSON.stringify(authorizationState)), targetMigrationRecords: records }
 }
 async function audit(options) {
   const sourceCommit=options['source-commit']; const expectedSha=options['expected-sha']; const output=options.output
@@ -151,7 +177,24 @@ async function apply(options) {
   await managementQuery(statement,false)
   const after=classify(parseState(await managementQuery(inspectionQuery(),true)),actualSha,sourceCommit)
   if (after.classification !== 'applied_consistent') fail(`production post-state is ${after.classification}`)
-  const result={ schemaVersion:2,purpose:'r5-revision4-prepared-head-memory-retry-fix-apply',sourceCommit,sqlSha256:actualSha,authorizationStateSha256:expectedState,before,after,mutationPerformed:true,mutationScope:'revision4 prepared-head function definition plus exact migration-history record',schedulerMutationPerformed:false,deploymentPerformed:false,publicReaderMutationPerformed:false,canonicalHistoryMutationPerformed:false,mainnetDisabled:true,stabilizationAuthorized:false,soakAuthorized:false }
+  const result = {
+    schemaVersion: 2,
+    purpose: 'r5-revision4-prepared-head-memory-retry-fix-apply',
+    sourceCommit,
+    sqlSha256: actualSha,
+    authorizationStateSha256: expectedState,
+    before,
+    after,
+    mutationPerformed: true,
+    mutationScope: 'revision4 prepared-head function definition plus exact migration-history record',
+    schedulerMutationPerformed: false,
+    deploymentPerformed: false,
+    publicReaderMutationPerformed: false,
+    canonicalHistoryMutationPerformed: false,
+    mainnetDisabled: true,
+    stabilizationAuthorized: false,
+    soakAuthorized: false,
+  }
   if (output) { const path=resolve(output); await mkdir(dirname(path),{recursive:true}); await writeFile(path,`${JSON.stringify(result,null,2)}\n`,'utf8') }
   process.stdout.write(`${JSON.stringify(result)}\n`)
 }
