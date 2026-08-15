@@ -9,6 +9,7 @@ const approvedCurrentMigrationVersions = new Set([
   version,
   '20260813142000',
   '20260814130000',
+  '20260815211500',
 ])
 const migrationName = 'xrpl_r5_revision4_continuous_head_rebind_fix'
 const migrationPath = `supabase/migrations/${version}_${migrationName}.sql`
