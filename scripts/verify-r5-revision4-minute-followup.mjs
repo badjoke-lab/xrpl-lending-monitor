@@ -5,11 +5,14 @@ const outputPath = process.argv[2] ?? 'r5-revision4-minute-activation-evidence/f
 const projectRef = process.env.SUPABASE_PROJECT_ID ?? ''
 const accessToken = process.env.SUPABASE_ACCESS_TOKEN ?? ''
 const version = '20260813072000'
+const minuteRunBindingVersion = '20260816020000'
+const minuteRunId = 'r5-recovery-selected-revision4-minute-entry'
 const approvedCurrentMigrationVersions = new Set([
   version,
   '20260813142000',
   '20260814130000',
   '20260815211500',
+  minuteRunBindingVersion,
 ])
 const migrationName = 'xrpl_r5_revision4_continuous_head_rebind_fix'
 const migrationPath = `supabase/migrations/${version}_${migrationName}.sql`
@@ -105,12 +108,15 @@ for (const marker of [
 ]) {
   if (!definition.includes(marker)) throw new Error(`continuous-head applied marker missing:${marker}`)
 }
+if (currentMaxMigrationVersion === minuteRunBindingVersion && !definition.includes(minuteRunId)) {
+  throw new Error('continuous-head minute run binding missing after registered rollover migration')
+}
 if (fn.security_definer !== true || fn.anon_execute !== false || fn.authenticated_execute !== false || fn.service_role_execute !== true) {
   throw new Error('continuous-head applied ACL mismatch')
 }
 
 const evidence = {
-  schemaVersion: 4,
+  schemaVersion: 5,
   purpose: 'r5-revision4-minute-followup-provenance',
   version,
   migrationName,
@@ -123,6 +129,7 @@ const evidence = {
   reconstruction: exactReconstruction,
   currentMaxMigrationVersion,
   currentMaxVersionApproved: true,
+  minuteRunBindingRegistered: currentMaxMigrationVersion === minuteRunBindingVersion,
   approvedCurrentMigrationVersions: [...approvedCurrentMigrationVersions],
   functionDefinitionSha256: sha256(definition),
   functionContractVerified: true,

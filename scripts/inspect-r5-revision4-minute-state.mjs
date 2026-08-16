@@ -12,6 +12,7 @@ const approvedCurrentMigrationVersions = new Set([
   '20260813142000',
   '20260814130000',
   '20260815211500',
+  '20260816020000',
 ])
 const runId = 'r5-recovery-selected-revision4-entry'
 const profileDigest = '39e8b620a20bb08fbe8306fe753d4d445c5191bcafddbf67721e0c17d5b6bcd5'

@@ -16,6 +16,11 @@ env:
   QUALIFICATION_ISSUE: '1261'
   TARGET_MIGRATION_VERSION: '20260813072000'
   TARGET_MIGRATION_PATH: supabase/migrations/20260813072000_xrpl_r5_revision4_continuous_head_rebind_fix.sql
+  ROLLOVER_MIGRATION_VERSION: '20260816020000'
+  ROLLOVER_MIGRATION_PATH: ops/production-sql/20260816020000_xrpl_r5_revision4_minute_run_binding.sql
+  ROLLOVER_MANAGER: scripts/manage-r5-revision4-minute-rollover.mjs
+  ROLLOVER_SOURCE_TRANSFORMER: scripts/prepare-r5-minute-rollover-source.mjs
+  TARGET_RUN_ID: r5-recovery-selected-revision4-minute-entry
   R5_FUNCTION: xrpl-r5-recovery-batch
   R5_FUNCTION_PATH: supabase/functions/xrpl-r5-recovery-batch/index.ts
   MINUTE_FUNCTION: xrpl-r5-minute-driver
@@ -47,11 +52,17 @@ jobs:
         with:
           bun-version: 1.3.14
 
-      - name: Prebundle exact production R5 and minute driver before authorization
+      - name: Prebundle exact minute-run R5 and driver before authorization
         id: bundle
         run: |
           set -euo pipefail
           mkdir -p r5-revision4-minute-activation-evidence
+          restore_sources() { git checkout -- "$R5_FUNCTION_PATH" "$MINUTE_FUNCTION_PATH"; }
+          trap restore_sources EXIT
+          node "$ROLLOVER_SOURCE_TRANSFORMER" "$R5_FUNCTION_PATH" > r5-revision4-minute-activation-evidence/r5-source-transform.json
+          node "$ROLLOVER_SOURCE_TRANSFORMER" "$MINUTE_FUNCTION_PATH" > r5-revision4-minute-activation-evidence/minute-source-transform.json
+          jq -e --arg run "$TARGET_RUN_ID" '.replacementCount == 1 and .newRunId == $run and .mainnetDisabled == true' r5-revision4-minute-activation-evidence/r5-source-transform.json >/dev/null
+          jq -e --arg run "$TARGET_RUN_ID" '.replacementCount == 1 and .newRunId == $run and .mainnetDisabled == true' r5-revision4-minute-activation-evidence/minute-source-transform.json >/dev/null
           bun "$EDGE_BUNDLE_BUILDER" \
             "$R5_FUNCTION_PATH" /tmp/xrpl-r5-recovery-batch-index.ts \
             r5-revision4-minute-activation-evidence/r5-edge-bundle.json
@@ -60,6 +71,9 @@ jobs:
             r5-revision4-minute-activation-evidence/minute-edge-bundle.json
           jq -e '.relativeImports == 0 and .cloudflareImports == 0 and .qualificationOverrides == 0 and .denoServeEntrypoint == true and .bunVersion == "1.3.14"' r5-revision4-minute-activation-evidence/r5-edge-bundle.json >/dev/null
           jq -e '.relativeImports == 0 and .cloudflareImports == 0 and .qualificationOverrides == 0 and .denoServeEntrypoint == true and .bunVersion == "1.3.14"' r5-revision4-minute-activation-evidence/minute-edge-bundle.json >/dev/null
+          restore_sources
+          trap - EXIT
+          git diff --quiet -- "$R5_FUNCTION_PATH" "$MINUTE_FUNCTION_PATH"
           printf 'r5_bundle_sha=%s\ndriver_bundle_sha=%s\n' \
             "$(jq -r '.sha256' r5-revision4-minute-activation-evidence/r5-edge-bundle.json)" \
             "$(jq -r '.sha256' r5-revision4-minute-activation-evidence/minute-edge-bundle.json)" >> "$GITHUB_OUTPUT"
@@ -75,11 +89,10 @@ jobs:
           jq -r '"job_id=\(.jobId)\ncommand_digest=\(.commandDigest)\nproject_digest=\(.projectIdentityDigest)"' \
             r5-revision4-minute-activation-evidence/scheduler-before.json >> "$GITHUB_OUTPUT"
 
-      - name: Inspect exact revision4 activation state and applied follow-up read-only
+      - name: Inspect exact retained revision4 state read-only
         id: state
         run: |
           set -euo pipefail
-          # The inspector and provenance verifier use Management API read_only:true only.
           node scripts/inspect-r5-revision4-minute-state.mjs \
             r5-revision4-minute-activation-evidence/state-before.json
           node scripts/verify-r5-revision4-minute-followup.mjs \
@@ -90,6 +103,10 @@ jobs:
             r5-revision4-minute-activation-evidence/followup-before.json >/dev/null
           test "${{ steps.scheduler.outputs.project_digest }}" = "$(jq -r '.projectIdentityDigest' r5-revision4-minute-activation-evidence/state-before.json)"
           test "$(jq -r '.migration.currentMaxVersion' r5-revision4-minute-activation-evidence/state-before.json)" = "$(jq -r '.currentMaxMigrationVersion' r5-revision4-minute-activation-evidence/followup-before.json)"
+          test "$(jq -r '.run.status' r5-revision4-minute-activation-evidence/state-before.json)" = running
+          test "$(jq -r '.run.completedBatches' r5-revision4-minute-activation-evidence/state-before.json)" -ge 1
+          test "$(jq -r '.run.committedLedgers' r5-revision4-minute-activation-evidence/state-before.json)" -ge 1
+          test "$(jq -r '.boundaryDriftLedgers' r5-revision4-minute-activation-evidence/state-before.json)" -gt 0
           printf 'activation_mode=%s\nsnapshot_id=%s\nprojected_31d=%s\nrun_watermark=%s\nactive_watermark=%s\ndrift=%s\nmigration_max=%s\n' \
             "$(jq -r '.activationMode' r5-revision4-minute-activation-evidence/state-before.json)" \
             "$(jq -r '.resourceSnapshot.snapshotId' r5-revision4-minute-activation-evidence/state-before.json)" \
@@ -99,7 +116,7 @@ jobs:
             "$(jq -r '.boundaryDriftLedgers' r5-revision4-minute-activation-evidence/state-before.json)" \
             "$(jq -r '.migration.currentMaxVersion' r5-revision4-minute-activation-evidence/state-before.json)" >> "$GITHUB_OUTPUT"
 
-      - name: Bind exact source and prebundles and publish authorization proposal
+      - name: Bind exact rollover source and publish authorization proposal
         env:
           R5_BUNDLE_SHA: ${{ steps.bundle.outputs.r5_bundle_sha }}
           DRIVER_BUNDLE_SHA: ${{ steps.bundle.outputs.driver_bundle_sha }}
@@ -119,33 +136,40 @@ jobs:
           r5_source_sha="$(sha256sum "$R5_FUNCTION_PATH" | awk '{print $1}')"
           driver_source_sha="$(sha256sum "$MINUTE_FUNCTION_PATH" | awk '{print $1}')"
           builder_sha="$(sha256sum "$EDGE_BUNDLE_BUILDER" | awk '{print $1}')"
+          transformer_sha="$(sha256sum "$ROLLOVER_SOURCE_TRANSFORMER" | awk '{print $1}')"
+          rollover_manager_sha="$(sha256sum "$ROLLOVER_MANAGER" | awk '{print $1}')"
+          rollover_sql_sha="$(sha256sum "$ROLLOVER_MIGRATION_PATH" | awk '{print $1}')"
+          test "$MIGRATION_MAX" = '20260815211500'
           expires="$(date -u -d '+2 hours' '+%Y-%m-%dT%H:%M:%SZ')"
           nonce="$(openssl rand -hex 8)"
-          command="/r5-revision4-minute-activate commit=${source_commit} r5_source=${r5_source_sha} driver_source=${driver_source_sha} builder=${builder_sha} r5_bundle=${R5_BUNDLE_SHA} driver_bundle=${DRIVER_BUNDLE_SHA} project=${PROJECT_DIGEST} job=${JOB_ID} command=${COMMAND_DIGEST} mode=${ACTIVATION_MODE} snapshot=${SNAPSHOT_ID} projected=${PROJECTED_31D} run_watermark=${RUN_WATERMARK} active_floor=${ACTIVE_WATERMARK} drift=${BOUNDARY_DRIFT} migration_max=${MIGRATION_MAX} prepare_run=${GITHUB_RUN_ID} expires=${expires} nonce=${nonce}"
+          command="/r5-revision4-minute-activate commit=${source_commit} r5_source=${r5_source_sha} driver_source=${driver_source_sha} builder=${builder_sha} transformer=${transformer_sha} rollover_manager=${rollover_manager_sha} rollover_sql=${rollover_sql_sha} r5_bundle=${R5_BUNDLE_SHA} driver_bundle=${DRIVER_BUNDLE_SHA} project=${PROJECT_DIGEST} job=${JOB_ID} command=${COMMAND_DIGEST} mode=${ACTIVATION_MODE} snapshot=${SNAPSHOT_ID} projected=${PROJECTED_31D} run_watermark=${RUN_WATERMARK} active_floor=${ACTIVE_WATERMARK} drift=${BOUNDARY_DRIFT} migration_max=${MIGRATION_MAX} target_run=${TARGET_RUN_ID} prepare_run=${GITHUB_RUN_ID} expires=${expires} nonce=${nonce}"
           cat > /tmp/minute-proposal.md <<EOF
-          ## R5 revision-4 one-minute activation authorization proposal
+          ## R5 revision-4 one-minute rollover activation authorization proposal
 
           Preparation run: \`${GITHUB_RUN_ID}\`
           Source main commit: \`${source_commit}\`
           Existing schedule: \`* * * * *\`
           Current endpoint: \`xrpl-collector-tick\`
           Target endpoint: \`xrpl-r5-minute-driver\`
-          Activation mode: \`${ACTIVATION_MODE}\`
+          Retained qualification run: \`r5-recovery-selected-revision4-entry\`
+          New minute run: \`${TARGET_RUN_ID}\`
+          Existing activation mode: \`${ACTIVATION_MODE}\`
           Fresh provider snapshot: \`${SNAPSHOT_ID}\`
           projected_invocations_31d: \`${PROJECTED_31D} / 400000\`
-          Retained R5 watermark: \`${RUN_WATERMARK}\`
+          Retained qualification watermark: \`${RUN_WATERMARK}\`
           Current canonical watermark floor: \`${ACTIVE_WATERMARK}\` (drift \`${BOUNDARY_DRIFT}\`)
-          Applied migration max: \`${MIGRATION_MAX}\`
-          Production R5 prebundle SHA-256: \`${R5_BUNDLE_SHA}\`
+          Applied migration max before rollover: \`${MIGRATION_MAX}\`
+          Authorized rollover migration: \`${ROLLOVER_MIGRATION_VERSION}\` / SHA-256 \`${rollover_sql_sha}\`
+          Production R5 minute-run prebundle SHA-256: \`${R5_BUNDLE_SHA}\`
           Minute driver prebundle SHA-256: \`${DRIVER_BUNDLE_SHA}\`
 
-          The required minute-activation migration \`${TARGET_MIGRATION_VERSION}\` is verified, and the observed migration max is restricted to the reviewed compatibility allowlist. The execute job must observe the exact same migration max before and after pausing the old collector.
+          The execute job may, only after the old collector is quiescent, apply the exact rollover migration and prepare one new zero-progress revision-4 run at the then-current canonical boundary using the existing revision-4 checkpoint. The retained 12-ledger qualification run must remain byte-for-byte unchanged. No active descendant adoption into that retained run is authorized.
 
-          Both Edge bundles were generated with pinned Bun 1.3.14 before authorization and contain zero relative imports, zero \`cloudflare:\` imports, zero qualification override code, and a \`Deno.serve\` entrypoint. The execute job must reproduce the exact same bundle digests before pausing the old collector.
+          The source transformer changes exactly one fixed run-id literal in each prebundled Edge source. The execute job must reproduce the exact authorized bundle digests before the production pause.
 
           Resource guards remain fail-closed: \`provider_snapshot_stale\` and \`r5_recovery_monthly_invocation_halt\` are not bypassed.
-
-          No Mainnet, stabilization, soak, or history reduction is authorized by this operation.
+          No Mainnet, stabilization, soak, or history reduction is authorized.
+          No history deletion or public-reader rewrite is authorized.
 
           Exact authorization command:
 
@@ -167,7 +191,7 @@ jobs:
       github.event.comment.user.login == 'badjoke-lab' &&
       startsWith(github.event.comment.body, '/r5-revision4-minute-activate ')
     runs-on: ubuntu-24.04
-    timeout-minutes: 12
+    timeout-minutes: 15
     env:
       AUTHORIZATION_BODY: ${{ github.event.comment.body }}
       AUTHORIZATION_CREATED_AT: ${{ github.event.comment.created_at }}
@@ -184,9 +208,9 @@ jobs:
         id: auth
         run: |
           set -euo pipefail
-          regex='^/r5-revision4-minute-activate commit=([a-f0-9]{40}) r5_source=([a-f0-9]{64}) driver_source=([a-f0-9]{64}) builder=([a-f0-9]{64}) r5_bundle=([a-f0-9]{64}) driver_bundle=([a-f0-9]{64}) project=([a-f0-9]{64}) job=([0-9]+) command=([a-f0-9]{64}) mode=([a-z0-9_]+) snapshot=([A-Za-z0-9._:-]+) projected=([0-9]+) run_watermark=([0-9]+) active_floor=([0-9]+) drift=([0-9]+) migration_max=([0-9]+) prepare_run=([0-9]+) expires=([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z) nonce=([a-f0-9]{16})$'
-          [[ "$AUTHORIZATION_BODY" =~ $regex ]] || { echo 'minute activation authorization shape mismatch' >&2; exit 1; }
-          names=(commit r5_source_sha driver_source_sha builder_sha r5_bundle_sha driver_bundle_sha project_digest job_id command_digest activation_mode snapshot_id projected_31d run_watermark active_floor drift migration_max prepare_run expires nonce)
+          regex='^/r5-revision4-minute-activate commit=([a-f0-9]{40}) r5_source=([a-f0-9]{64}) driver_source=([a-f0-9]{64}) builder=([a-f0-9]{64}) transformer=([a-f0-9]{64}) rollover_manager=([a-f0-9]{64}) rollover_sql=([a-f0-9]{64}) r5_bundle=([a-f0-9]{64}) driver_bundle=([a-f0-9]{64}) project=([a-f0-9]{64}) job=([0-9]+) command=([a-f0-9]{64}) mode=([a-z0-9_]+) snapshot=([A-Za-z0-9._:-]+) projected=([0-9]+) run_watermark=([0-9]+) active_floor=([0-9]+) drift=([0-9]+) migration_max=([0-9]+) target_run=([a-z0-9-]+) prepare_run=([0-9]+) expires=([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z) nonce=([a-f0-9]{16})$'
+          [[ "$AUTHORIZATION_BODY" =~ $regex ]] || { echo 'minute rollover authorization shape mismatch' >&2; exit 1; }
+          names=(commit r5_source_sha driver_source_sha builder_sha transformer_sha rollover_manager_sha rollover_sql_sha r5_bundle_sha driver_bundle_sha project_digest job_id command_digest activation_mode snapshot_id projected_31d run_watermark active_floor drift migration_max target_run prepare_run expires nonce)
           for index in "${!names[@]}"; do
             printf '%s=%s\n' "${names[$index]}" "${BASH_REMATCH[$((index + 1))]}" >> "$GITHUB_OUTPUT"
           done
@@ -194,14 +218,16 @@ jobs:
           test "${BASH_REMATCH[2]}" = "$(sha256sum "$R5_FUNCTION_PATH" | awk '{print $1}')"
           test "${BASH_REMATCH[3]}" = "$(sha256sum "$MINUTE_FUNCTION_PATH" | awk '{print $1}')"
           test "${BASH_REMATCH[4]}" = "$(sha256sum "$EDGE_BUNDLE_BUILDER" | awk '{print $1}')"
+          test "${BASH_REMATCH[5]}" = "$(sha256sum "$ROLLOVER_SOURCE_TRANSFORMER" | awk '{print $1}')"
+          test "${BASH_REMATCH[6]}" = "$(sha256sum "$ROLLOVER_MANAGER" | awk '{print $1}')"
+          test "${BASH_REMATCH[7]}" = "$(sha256sum "$ROLLOVER_MIGRATION_PATH" | awk '{print $1}')"
           actual_project_digest="$(printf '%s' "$SUPABASE_PROJECT_ID" | sha256sum | awk '{print $1}')"
-          test "${BASH_REMATCH[7]}" = "$actual_project_digest"
-          test "${BASH_REMATCH[12]}" -lt "$INVOCATION_HALT_31D"
-          case "${BASH_REMATCH[16]}" in
-            20260813072000|20260813142000|20260814130000|20260815211500) ;;
-            *) echo "unreviewed minute activation migration max:${BASH_REMATCH[16]}" >&2; exit 1 ;;
-          esac
-          expires_epoch="$(date -u -d "${BASH_REMATCH[18]}" +%s)"
+          test "${BASH_REMATCH[10]}" = "$actual_project_digest"
+          test "${BASH_REMATCH[15]}" -lt "$INVOCATION_HALT_31D"
+          test "${BASH_REMATCH[19]}" = '20260815211500'
+          test "${BASH_REMATCH[20]}" = "$TARGET_RUN_ID"
+          test "${BASH_REMATCH[18]}" -gt 0
+          expires_epoch="$(date -u -d "${BASH_REMATCH[22]}" +%s)"
           auth_epoch="$(date -u -d "$AUTHORIZATION_CREATED_AT" +%s)"
           now_epoch="$(date -u +%s)"
           test "$auth_epoch" -lt "$expires_epoch"
@@ -218,9 +244,9 @@ jobs:
           import { readFileSync } from 'node:fs'
           const comments = JSON.parse(readFileSync('/tmp/minute-comments.json', 'utf8'))
           const proposals = comments.filter((comment) => comment?.user?.login === 'github-actions[bot]' && typeof comment?.body === 'string' && comment.body.includes(`Preparation run: \`${process.env.PREPARE}\``) && comment.body.includes(`\`${process.env.EXPECTED}\``))
-          if (proposals.length !== 1) throw new Error(`expected one exact minute activation proposal, found ${proposals.length}`)
+          if (proposals.length !== 1) throw new Error(`expected one exact minute rollover proposal, found ${proposals.length}`)
           const authorizations = comments.filter((comment) => comment?.user?.login === 'badjoke-lab' && comment?.body === process.env.EXPECTED)
-          if (authorizations.length !== 1 || Number(authorizations[0].id) !== Number(process.env.AUTH_ID)) throw new Error('minute activation authorization is not unique')
+          if (authorizations.length !== 1 || Number(authorizations[0].id) !== Number(process.env.AUTH_ID)) throw new Error('minute rollover authorization is not unique')
           NODE
 
       - name: Set up pinned Bun and reproduce exact authorized Edge bundles
@@ -228,19 +254,26 @@ jobs:
         with:
           bun-version: 1.3.14
 
-      - name: Reproduce exact authorized Edge bundles before production pause
+      - name: Reproduce exact authorized minute-run Edge bundles before production pause
         env:
           AUTH_R5_BUNDLE: ${{ steps.auth.outputs.r5_bundle_sha }}
           AUTH_DRIVER_BUNDLE: ${{ steps.auth.outputs.driver_bundle_sha }}
         run: |
           set -euo pipefail
           mkdir -p r5-revision4-minute-activation-evidence
+          restore_sources() { git checkout -- "$R5_FUNCTION_PATH" "$MINUTE_FUNCTION_PATH"; }
+          trap restore_sources EXIT
+          node "$ROLLOVER_SOURCE_TRANSFORMER" "$R5_FUNCTION_PATH" > r5-revision4-minute-activation-evidence/r5-source-transform-recheck.json
+          node "$ROLLOVER_SOURCE_TRANSFORMER" "$MINUTE_FUNCTION_PATH" > r5-revision4-minute-activation-evidence/minute-source-transform-recheck.json
           bun "$EDGE_BUNDLE_BUILDER" "$R5_FUNCTION_PATH" /tmp/xrpl-r5-recovery-batch-index.ts r5-revision4-minute-activation-evidence/r5-edge-bundle.json
           bun "$EDGE_BUNDLE_BUILDER" "$MINUTE_FUNCTION_PATH" /tmp/xrpl-r5-minute-driver-index.ts r5-revision4-minute-activation-evidence/minute-edge-bundle.json
           test "$(jq -r '.sha256' r5-revision4-minute-activation-evidence/r5-edge-bundle.json)" = "$AUTH_R5_BUNDLE"
           test "$(jq -r '.sha256' r5-revision4-minute-activation-evidence/minute-edge-bundle.json)" = "$AUTH_DRIVER_BUNDLE"
+          restore_sources
+          trap - EXIT
+          git diff --quiet -- "$R5_FUNCTION_PATH" "$MINUTE_FUNCTION_PATH"
 
-      - name: Reverify scheduler, live state, and applied migration read-only
+      - name: Reverify scheduler, retained run, and applied migration read-only
         env:
           EXPECTED_JOB: ${{ steps.auth.outputs.job_id }}
           EXPECTED_COMMAND: ${{ steps.auth.outputs.command_digest }}
@@ -258,8 +291,6 @@ jobs:
           test "$(jq -r '.commandDigest' r5-revision4-minute-activation-evidence/scheduler-recheck.json)" = "$EXPECTED_COMMAND"
           test "$(jq -r '.projectIdentityDigest' r5-revision4-minute-activation-evidence/scheduler-recheck.json)" = "$EXPECTED_PROJECT"
           test "$(jq -r '.schedule' r5-revision4-minute-activation-evidence/scheduler-recheck.json)" = '* * * * *'
-          # These production checks are read_only:true. provider_snapshot_stale,
-          # r5_recovery_monthly_invocation_halt, and projected_invocations_31d remain fail-closed.
           node scripts/inspect-r5-revision4-minute-state.mjs r5-revision4-minute-activation-evidence/state-recheck.json
           node scripts/verify-r5-revision4-minute-followup.mjs r5-revision4-minute-activation-evidence/followup-recheck.json
           test "$(jq -r '.activationMode' r5-revision4-minute-activation-evidence/state-recheck.json)" = "$EXPECTED_MODE"
@@ -293,7 +324,7 @@ jobs:
             --output-directory r5-revision4-minute-activation-evidence/isolation \
             > r5-revision4-minute-activation-evidence/pause.json
 
-      - name: Reverify quiescent boundary read-only
+      - name: Reverify quiescent retained boundary read-only
         env:
           EXPECTED_MIGRATION_MAX: ${{ steps.auth.outputs.migration_max }}
         run: |
@@ -305,7 +336,29 @@ jobs:
           jq -e '.resourceSnapshot.fresh == true and .migration.targetApplied == true and .migration.migrationState == "applied_verified" and .migration.currentMaxVersionApproved == true' r5-revision4-minute-activation-evidence/state-paused.json >/dev/null
           jq -e '.historyExact == true and .functionContractVerified == true and .resourceGuardUnchanged == true and .currentMaxVersionApproved == true' r5-revision4-minute-activation-evidence/followup-paused.json >/dev/null
 
-      - name: Deploy exact prebundled revision4 R5 executor
+      - name: Apply exact minute-run rollover at quiescent canonical boundary
+        id: rollover
+        env:
+          SOURCE_COMMIT: ${{ steps.auth.outputs.commit }}
+          ROLLOVER_SQL_SHA: ${{ steps.auth.outputs.rollover_sql_sha }}
+          SOURCE_WATERMARK: ${{ steps.auth.outputs.run_watermark }}
+          ACTIVE_FLOOR: ${{ steps.auth.outputs.active_floor }}
+        run: |
+          set -euo pipefail
+          node "$ROLLOVER_MANAGER" apply \
+            --source-commit "$SOURCE_COMMIT" \
+            --expected-sha "$ROLLOVER_SQL_SHA" \
+            --source-watermark "$SOURCE_WATERMARK" \
+            --active-floor "$ACTIVE_FLOOR" \
+            --output r5-revision4-minute-activation-evidence/rollover.json \
+            > r5-revision4-minute-activation-evidence/rollover-output.json
+          jq -e --arg run "$TARGET_RUN_ID" '.after.classification == "applied_consistent" and .after.targetRun.run_id == $run and .after.targetRun.completed_batches == 0 and .after.targetRun.committed_ledgers == 0 and .after.targetRun.last_error == null and .sourceRunPreservedExactly == true and .publicReaderMutationPerformed == false and .mainnetDisabled == true' r5-revision4-minute-activation-evidence/rollover.json >/dev/null
+          node scripts/verify-r5-revision4-minute-followup.mjs r5-revision4-minute-activation-evidence/followup-after-rollover.json
+          test "$(jq -r '.currentMaxMigrationVersion' r5-revision4-minute-activation-evidence/followup-after-rollover.json)" = "$ROLLOVER_MIGRATION_VERSION"
+          jq -e '.minuteRunBindingRegistered == true and .functionContractVerified == true and .resourceGuardUnchanged == true and .mainnetDisabled == true' r5-revision4-minute-activation-evidence/followup-after-rollover.json >/dev/null
+          echo "target_start=$(jq -r '.after.targetRun.start_watermark_ledger_index' r5-revision4-minute-activation-evidence/rollover.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy exact prebundled revision4 minute-run R5 executor
         run: |
           set -euo pipefail
           cp /tmp/xrpl-r5-recovery-batch-index.ts "$R5_FUNCTION_PATH"
@@ -367,7 +420,7 @@ jobs:
             --data '{"source":"manual_smoke"}' \
             "https://${SUPABASE_PROJECT_ID}.supabase.co/functions/v1/${MINUTE_FUNCTION}" \
             > r5-revision4-minute-activation-evidence/manual-smoke.json
-          jq -e '.ok == true and .runId == "r5-recovery-selected-revision4-entry" and .batchesCommitted >= 1 and .ledgersCommitted >= 1 and .batchLedgerCap == 12 and .steadyBatchTarget == 2 and .catchupBatchCap == 3 and .publicReaderMutationOnlyThroughR5AtomicCompletion == true and .mainnetDisabled == true and ([.batchResults[] | select(.claimed == true) | (.completionAcknowledged == true and .activeMutationCommitted == true)] | all)' \
+          jq -e --arg run "$TARGET_RUN_ID" '.ok == true and .runId == $run and .batchesCommitted >= 1 and .ledgersCommitted >= 1 and .batchLedgerCap == 12 and .steadyBatchTarget == 2 and .catchupBatchCap == 3 and .publicReaderMutationOnlyThroughR5AtomicCompletion == true and .mainnetDisabled == true and ([.batchResults[] | select(.claimed == true) | (.completionAcknowledged == true and .activeMutationCommitted == true)] | all)' \
             r5-revision4-minute-activation-evidence/manual-smoke.json >/dev/null
           echo "committed_ledgers=$(jq -r '.ledgersCommitted' r5-revision4-minute-activation-evidence/manual-smoke.json)" >> "$GITHUB_OUTPUT"
           echo "watermark=$(jq -r '.finalWatermarkLedgerIndex' r5-revision4-minute-activation-evidence/manual-smoke.json)" >> "$GITHUB_OUTPUT"
@@ -393,7 +446,7 @@ jobs:
           SMOKE_WATERMARK: ${{ steps.smoke.outputs.watermark }}
         run: |
           set -euo pipefail
-          query="select status,current_watermark_ledger_index,committed_ledgers,completed_batches,last_error,updated_at from xrpl_r5_v1.recovery_runs where run_id='r5-recovery-selected-revision4-entry';"
+          query="select status,current_watermark_ledger_index,committed_ledgers,completed_batches,last_error,updated_at from xrpl_r5_v1.recovery_runs where run_id='${TARGET_RUN_ID}';"
           advanced=false
           for attempt in 1 2 3 4 5 6 7 8 9 10; do
             sleep 15
@@ -458,23 +511,27 @@ jobs:
           SWITCHED: ${{ steps.switch.outputs.switched }}
           SMOKE_LEDGERS: ${{ steps.smoke.outputs.committed_ledgers }}
           SMOKE_WATERMARK: ${{ steps.smoke.outputs.watermark }}
+          TARGET_START: ${{ steps.rollover.outputs.target_start }}
         run: |
           set -euo pipefail
           verdict=FAIL
           if [ "${{ job.status }}" = success ]; then verdict=PASS; fi
           cat > /tmp/minute-result.md <<EOF
-          ## R5 revision-4 one-minute activation — ${verdict}
+          ## R5 revision-4 one-minute rollover activation — ${verdict}
 
           Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
           Source commit: \`${SOURCE_COMMIT:-unavailable}\`
           Preparation run: \`${PREPARE_RUN:-unavailable}\`
           Existing Supabase schedule retained: \`* * * * *\`
+          New minute run: \`${TARGET_RUN_ID}\`
+          New run canonical start: \`${TARGET_START:-unavailable}\`
           Manual smoke committed ledgers: \`${SMOKE_LEDGERS:-unavailable}\`
           Manual smoke watermark: \`${SMOKE_WATERMARK:-unavailable}\`
           Scheduler switched to \`xrpl-r5-minute-driver\`: \`${SWITCHED:-false}\`
 
-          PASS requires reproducible prebundles, a real Devnet R5 history batch, scheduler switch, and a later natural pg_cron invocation that advances the canonical watermark. Resource guards remain fail-closed. No migration write is performed by this activation.
+          PASS requires exact source transformation, an atomic quiescent rollover that preserves the prior 12-ledger qualification run, a real Devnet R5 history batch on the new run, scheduler switch, and a later natural pg_cron invocation that advances the canonical watermark. Resource guards remain fail-closed.
 
-          No Mainnet, stabilization, soak, or history reduction is authorized by this operation.
+          No Mainnet, stabilization, soak, or history reduction is authorized.
+          No history deletion or public-reader rewrite is authorized.
           EOF
           gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/minute-result.md
