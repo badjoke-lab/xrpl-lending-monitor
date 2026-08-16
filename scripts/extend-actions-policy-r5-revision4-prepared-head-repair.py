@@ -17,8 +17,8 @@ def replace_once(name, old, new):
 
 replace_once(
     'prepared-head repair allowlist',
-    '  r5-revision4-minute-activation.yml\n  r5-revision4-resource-halt-diagnostic.yml',
-    '  r5-revision4-minute-activation.yml\n  r5-revision4-prepared-head-repair.yml\n  r5-revision4-resource-halt-diagnostic.yml',
+    '  r5-revision4-minute-successor.yml\n  r5-revision4-resource-halt-diagnostic.yml',
+    '  r5-revision4-minute-successor.yml\n  r5-revision4-prepared-head-repair.yml\n  r5-revision4-resource-halt-diagnostic.yml',
 )
 replace_once(
     'prepared-head repair workflow count',
