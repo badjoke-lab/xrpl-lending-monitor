@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 const migration = readFileSync(
-  'supabase/migrations/20260816163000_xrpl_r5_revision4_database_halt_guard.sql',
+  'ops/production-sql/20260816163000_xrpl_r5_revision4_database_halt_guard.sql',
   'utf8',
 )
 
