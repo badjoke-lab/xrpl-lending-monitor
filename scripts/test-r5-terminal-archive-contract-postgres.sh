@@ -124,9 +124,9 @@ m1_result="$(docker exec "$container_name" psql -U postgres -d postgres -Atqc "s
 [[ "$(docker exec "$container_name" psql -U postgres -d postgres -Atqc "select count(*) from public.xrpl_phase_messages where message_id='m1'")" == 0 ]]
 [[ "$(docker exec "$container_name" psql -U postgres -d postgres -Atqc "select count(*) from public.xrpl_phase_successors where current_message_id='m1'")" == 0 ]]
 [[ "$(docker exec "$container_name" psql -U postgres -d postgres -Atqc "select count(*) from public.xrpl_phase_messages where message_id='m2' and status='pending'")" == 1 ]]
-[[ "$(docker exec "$container_name" psql -U postgres -d postgres -Atqc "select count(*) from xrpl_phase_archive_v1.terminal_messages where message_id='m1' and payload='{"k":1}'::jsonb and successor_message_id='m2' and result_digest ~ '^[a-f0-9]{64}$'")" == 1 ]]
+[[ "$(docker exec "$container_name" psql -U postgres -d postgres -Atqc "select count(*) from xrpl_phase_archive_v1.terminal_messages where message_id='m1' and payload=jsonb_build_object('k',1) and successor_message_id='m2' and result_digest ~ '^[a-f0-9]{64}$'")" == 1 ]]
 
-identity_json="$(docker exec "$container_name" psql -U postgres -d postgres -Atqc "select xrpl_phase_archive_v1.assert_message_identity('supabase-devnet','scan','m1','{"k":1}'::jsonb)::text")"
+identity_json="$(docker exec "$container_name" psql -U postgres -d postgres -Atqc "select xrpl_phase_archive_v1.assert_message_identity('supabase-devnet','scan','m1',jsonb_build_object('k',1))::text")"
 [[ "$(printf '%s' "$identity_json" | jq -r '.archived')" == true ]]
 [[ "$(printf '%s' "$identity_json" | jq -r '.successor_message_id')" == m2 ]]
 [[ "$(docker exec "$container_name" psql -U postgres -d postgres -Atqc "select xrpl_phase_archive_v1.assert_successor_identity('m1','m2')")" == t ]]
@@ -150,7 +150,7 @@ expect_failure() {
 }
 
 expect_failure payload_conflict \
-  "select xrpl_phase_archive_v1.assert_message_identity('supabase-devnet','scan','m1','{\"k\":999}'::jsonb)" \
+  "select xrpl_phase_archive_v1.assert_message_identity('supabase-devnet','scan','m1',jsonb_build_object('k',999))" \
   'phase message identity conflict: m1'
 expect_failure phase_conflict \
   "select xrpl_phase_archive_v1.duplicate_completion('m1','commit')" \
