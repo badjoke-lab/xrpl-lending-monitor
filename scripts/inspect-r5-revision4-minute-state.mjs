@@ -119,8 +119,11 @@ const definition = String(contract.function_definition ?? '')
 for (const marker of ['r5-recovery-selected-revision4-entry', profileDigest, 'v_invocation_halt constant bigint := 400000', 'r5_recovery_monthly_invocation_halt', 'provider_snapshot_stale', 'monthly_invocation_halt', 'claimResourceGuardsStillRequired', 'mainnetDisabled']) if (!definition.includes(marker)) throw new Error(`continuous-head common marker missing:${marker}`)
 if (contract.security_definer !== true || contract.anon_execute !== false || contract.authenticated_execute !== false || contract.service_role_execute !== true) throw new Error('continuous-head ACL/security contract mismatch')
 const rebindMarkers = ['public.xrpl_rebind_r5_revision4_prebatch_recovery_to_active_boundary(', 'active_boundary_drift_requires_operator', 'invocation_halt_rearmed_and_active_boundary_rebound']
-if (targetApplied) for (const marker of rebindMarkers) if (!definition.includes(marker)) throw new Error(`follow-up rebind marker missing:${marker}`)
-else {
+if (targetApplied) {
+  for (const marker of rebindMarkers) {
+    if (!definition.includes(marker)) throw new Error(`follow-up rebind marker missing:${marker}`)
+  }
+} else {
   if (!definition.includes('r5_revision4_continuous_head_watermark_drift')) throw new Error('base continuous-head marker missing')
   if (rebindMarkers.some((marker) => definition.includes(marker))) throw new Error('follow-up semantics present without registered follow-up migration')
 }
