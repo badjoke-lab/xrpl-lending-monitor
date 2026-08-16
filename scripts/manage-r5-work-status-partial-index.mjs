@@ -195,9 +195,6 @@ function structuralState(state, sourceCommit) {
     committedReaderDefinitionSha256: sha256(state.committedReaderIndex?.definition ?? 'missing'),
     tableContractSha256: sha256(JSON.stringify(state.tableContract)),
     temporaryIndexExists: state.temporaryIndexExists === true,
-    workRows: Number(state.workRows),
-    nonCommittedRows: Number(state.nonCommittedRows),
-    statusCounts: state.statusCounts ?? {},
   }
 }
 async function inspect(sourceCommit) {
