@@ -66,6 +66,9 @@ R5_WORK_STATUS_INDEX_OUTPUT=actions-workflow-policy-evidence/r5-work-status-part
 bash -n scripts/test-r5-terminal-transport-archive-postgres.sh
 R5_TERMINAL_ARCHIVE_OUTPUT=actions-workflow-policy-evidence/r5-terminal-transport-archive \
   bash scripts/test-r5-terminal-transport-archive-postgres.sh
+bash -n scripts/test-r5-terminal-archive-contract-postgres.sh
+R5_TERMINAL_ARCHIVE_CONTRACT_OUTPUT=actions-workflow-policy-evidence/r5-terminal-archive-contract \
+  bash scripts/test-r5-terminal-archive-contract-postgres.sh
 bash -n scripts/test-r5-cron-physical-compaction-postgres.sh
 R5_CRON_COMPACTION_OUTPUT=actions-workflow-policy-evidence/r5-cron-physical-compaction \
   bash scripts/test-r5-cron-physical-compaction-postgres.sh
