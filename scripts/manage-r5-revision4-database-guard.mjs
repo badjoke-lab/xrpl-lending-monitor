@@ -116,7 +116,7 @@ function inspectionSql() {
         'jobId', min(jobid),
         'schedule', min(schedule),
         'active', bool_and(active),
-        'commandSha256', encode(digest(min(command),'sha256'),'hex')
+        'commandSha256', encode(extensions.digest(min(command)::text,'sha256'),'hex')
       ) from cron.job where jobname='xrpl-lending-monitor-minute'
     ), 'null'::jsonb)
   ) as state;`
