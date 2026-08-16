@@ -63,6 +63,9 @@ bash scripts/test-r5-raw-evidence-retention-contract.sh
 bash -n scripts/test-r5-work-status-partial-index-postgres.sh
 R5_WORK_STATUS_INDEX_OUTPUT=actions-workflow-policy-evidence/r5-work-status-partial-index \
   bash scripts/test-r5-work-status-partial-index-postgres.sh
+bash -n scripts/test-r5-terminal-transport-archive-postgres.sh
+R5_TERMINAL_ARCHIVE_OUTPUT=actions-workflow-policy-evidence/r5-terminal-transport-archive \
+  bash scripts/test-r5-terminal-transport-archive-postgres.sh
 bash -n scripts/test-r5-cron-physical-compaction-postgres.sh
 R5_CRON_COMPACTION_OUTPUT=actions-workflow-policy-evidence/r5-cron-physical-compaction \
   bash scripts/test-r5-cron-physical-compaction-postgres.sh
