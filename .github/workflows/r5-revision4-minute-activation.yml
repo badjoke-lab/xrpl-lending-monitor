@@ -167,7 +167,9 @@ jobs:
 
           The source transformer changes exactly one fixed run-id literal in each prebundled Edge source. The execute job must reproduce the exact authorized bundle digests before the production pause.
 
-          Resource guards remain fail-closed: \`provider_snapshot_stale\` and \`r5_recovery_monthly_invocation_halt\` are not bypassed. No Mainnet, stabilization, soak, history deletion, or public-reader rewrite is authorized.
+          Resource guards remain fail-closed: \`provider_snapshot_stale\` and \`r5_recovery_monthly_invocation_halt\` are not bypassed.
+          No Mainnet, stabilization, soak, or history reduction is authorized.
+          No history deletion or public-reader rewrite is authorized.
 
           Exact authorization command:
 
@@ -529,6 +531,7 @@ jobs:
 
           PASS requires exact source transformation, an atomic quiescent rollover that preserves the prior 12-ledger qualification run, a real Devnet R5 history batch on the new run, scheduler switch, and a later natural pg_cron invocation that advances the canonical watermark. Resource guards remain fail-closed.
 
-          No Mainnet, stabilization, soak, history deletion, or public-reader rewrite is authorized by this operation.
+          No Mainnet, stabilization, soak, or history reduction is authorized.
+          No history deletion or public-reader rewrite is authorized.
           EOF
           gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/minute-result.md
