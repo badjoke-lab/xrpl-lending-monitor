@@ -7,7 +7,9 @@ const accessToken = process.env.SUPABASE_ACCESS_TOKEN ?? ''
 const version = '20260813072000'
 const minuteRunBindingVersion = '20260816020000'
 const completionCaptureGuardVersion = '20260816040000'
-const minuteRunId = 'r5-recovery-selected-revision4-minute-entry'
+const minuteSuccessorBindingVersion = '20260816050000'
+const failedMinuteRunId = 'r5-recovery-selected-revision4-minute-entry'
+const minuteSuccessorRunId = 'r5-recovery-selected-revision4-minute2-entry'
 const approvedCurrentMigrationVersions = new Set([
   version,
   '20260813142000',
@@ -15,8 +17,9 @@ const approvedCurrentMigrationVersions = new Set([
   '20260815211500',
   minuteRunBindingVersion,
   completionCaptureGuardVersion,
+  minuteSuccessorBindingVersion,
 ])
-const minuteBindingCurrentVersions = new Set([
+const originalMinuteBindingVersions = new Set([
   minuteRunBindingVersion,
   completionCaptureGuardVersion,
 ])
@@ -38,9 +41,7 @@ function parseJson(text) {
 function rows(body) {
   if (Array.isArray(body)) return body
   if (body && typeof body === 'object') {
-    for (const value of [body.result, body.data, body.rows, body.result?.rows, body.data?.rows]) {
-      if (Array.isArray(value)) return value
-    }
+    for (const value of [body.result, body.data, body.rows, body.result?.rows, body.data?.rows]) if (Array.isArray(value)) return value
   }
   throw new Error('Management API response contains no rows')
 }
@@ -58,17 +59,13 @@ async function query(sql, parameters = []) {
 }
 
 const history = await query(
-  `select version::text as version, statements, name
-     from supabase_migrations.schema_migrations
-    where version::text = $1::text`,
+  `select version::text as version, statements, name from supabase_migrations.schema_migrations where version::text = $1::text`,
   [version],
 )
 if (history.length !== 1) throw new Error(`follow-up migration history expected once, found ${history.length}`)
 const row = history[0]
 if (row.version !== version || row.name !== migrationName) throw new Error('follow-up migration identity mismatch')
-if (!Array.isArray(row.statements) || row.statements.length !== 4) {
-  throw new Error(`follow-up migration expected four Supabase statements, found ${Array.isArray(row.statements) ? row.statements.length : 'non-array'}`)
-}
+if (!Array.isArray(row.statements) || row.statements.length !== 4) throw new Error(`follow-up migration expected four Supabase statements, found ${Array.isArray(row.statements) ? row.statements.length : 'non-array'}`)
 const historyStatements = row.statements.map((value) => String(value))
 const strippedStatements = historyStatements.map((value) => value.replace(/;\s*$/u, ''))
 const reconstructionCandidates = new Map()
@@ -81,18 +78,12 @@ for (const statements of [historyStatements, strippedStatements]) {
   }
 }
 const exactReconstruction = reconstructionCandidates.get(migrationSha256) ?? null
-if (!exactReconstruction) {
-  throw new Error(`split Supabase migration history does not reconstruct repository source; migrationSha=${migrationSha256} candidateShas=${[...reconstructionCandidates.keys()].join(',')}`)
-}
+if (!exactReconstruction) throw new Error(`split Supabase migration history does not reconstruct repository source; migrationSha=${migrationSha256} candidateShas=${[...reconstructionCandidates.keys()].join(',')}`)
 
 const maxRows = await query('select max(version::text) as max_version from supabase_migrations.schema_migrations')
 if (maxRows.length !== 1) throw new Error('migration max query returned unexpected rows')
 const currentMaxMigrationVersion = String(maxRows[0].max_version ?? '')
-if (!approvedCurrentMigrationVersions.has(currentMaxMigrationVersion)) {
-  throw new Error(`unreviewed migration exists after minute follow-up:${currentMaxMigrationVersion}`)
-}
-const minuteRunBindingRegistered = minuteBindingCurrentVersions.has(currentMaxMigrationVersion)
-const completionCaptureGuardRegistered = currentMaxMigrationVersion === completionCaptureGuardVersion
+if (!approvedCurrentMigrationVersions.has(currentMaxMigrationVersion)) throw new Error(`unreviewed migration exists after minute follow-up:${currentMaxMigrationVersion}`)
 
 const functionRows = await query(
   `select p.prosecdef as security_definer,
@@ -113,18 +104,21 @@ for (const marker of [
   'v_invocation_halt constant bigint := 400000',
   'claimResourceGuardsStillRequired',
   'mainnetDisabled',
-]) {
-  if (!definition.includes(marker)) throw new Error(`continuous-head applied marker missing:${marker}`)
+]) if (!definition.includes(marker)) throw new Error(`continuous-head applied marker missing:${marker}`)
+
+const originalMinuteBindingRegistered = originalMinuteBindingVersions.has(currentMaxMigrationVersion)
+const minuteSuccessorBindingRegistered = currentMaxMigrationVersion === minuteSuccessorBindingVersion
+const minuteRunBindingRegistered = originalMinuteBindingRegistered || minuteSuccessorBindingRegistered
+const completionCaptureGuardRegistered = [completionCaptureGuardVersion, minuteSuccessorBindingVersion].includes(currentMaxMigrationVersion)
+if (originalMinuteBindingRegistered && !definition.includes(failedMinuteRunId)) throw new Error('continuous-head original minute run binding missing')
+if (minuteSuccessorBindingRegistered) {
+  if (!definition.includes(minuteSuccessorRunId)) throw new Error('continuous-head successor minute run binding missing')
+  if (definition.includes(failedMinuteRunId)) throw new Error('failed minute run remained admitted after successor binding')
 }
-if (minuteRunBindingRegistered && !definition.includes(minuteRunId)) {
-  throw new Error('continuous-head minute run binding missing after registered rollover migration')
-}
-if (fn.security_definer !== true || fn.anon_execute !== false || fn.authenticated_execute !== false || fn.service_role_execute !== true) {
-  throw new Error('continuous-head applied ACL mismatch')
-}
+if (fn.security_definer !== true || fn.anon_execute !== false || fn.authenticated_execute !== false || fn.service_role_execute !== true) throw new Error('continuous-head applied ACL mismatch')
 
 const evidence = {
-  schemaVersion: 6,
+  schemaVersion: 7,
   purpose: 'r5-revision4-minute-followup-provenance',
   version,
   migrationName,
@@ -138,7 +132,10 @@ const evidence = {
   currentMaxMigrationVersion,
   currentMaxVersionApproved: true,
   minuteRunBindingRegistered,
+  originalMinuteBindingRegistered,
+  minuteSuccessorBindingRegistered,
   completionCaptureGuardRegistered,
+  failedMinuteRunRemovedFromContinuousHeadAdmission: minuteSuccessorBindingRegistered,
   approvedCurrentMigrationVersions: [...approvedCurrentMigrationVersions],
   functionDefinitionSha256: sha256(definition),
   functionContractVerified: true,

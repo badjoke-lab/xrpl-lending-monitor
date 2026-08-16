@@ -33,6 +33,8 @@ node --check scripts/manage-r5-raw-evidence-retention.mjs
 node --check scripts/manage-r5-raw-evidence-compaction.mjs
 node --check scripts/manage-r5-revision4-prepared-head-memory-retry-fix.mjs
 node --check scripts/manage-r5-revision4-minute-completion-capture-guard.mjs
+node --check scripts/manage-r5-revision4-minute-successor.mjs
+node --check scripts/prepare-r5-minute-successor-source.mjs
 node --check scripts/inspect-r5-revision4-minute-failure-state.mjs
 node --check scripts/r5-post-retention-readonly-gate.mjs
 bash -n scripts/check-supabase-production-autodeploy-boundary.sh

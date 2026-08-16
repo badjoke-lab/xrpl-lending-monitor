@@ -17,8 +17,8 @@ def replace_once(name, old, new):
 
 replace_once(
     'minute completion repair allowlist',
-    '  r5-revision4-minute-activation.yml\n  r5-revision4-prepared-head-repair.yml',
-    '  r5-revision4-minute-activation.yml\n  r5-revision4-minute-completion-repair.yml\n  r5-revision4-prepared-head-repair.yml',
+    '  r5-revision4-db-footprint-probe.yml\n  r5-revision4-minute-successor.yml',
+    '  r5-revision4-db-footprint-probe.yml\n  r5-revision4-minute-completion-repair.yml\n  r5-revision4-minute-successor.yml',
 )
 replace_once(
     'minute completion repair workflow count',

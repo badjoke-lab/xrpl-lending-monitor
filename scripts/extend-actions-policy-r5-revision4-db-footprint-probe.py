@@ -18,8 +18,8 @@ def replace_once(name: str, old: str, new: str) -> None:
 
 replace_once(
     'database footprint workflow allowlist entry',
-    '  r5-bounded-recovery-burst.yml\n  r5-revision4-minute-activation.yml',
-    '  r5-bounded-recovery-burst.yml\n  r5-revision4-db-footprint-probe.yml\n  r5-revision4-minute-activation.yml',
+    '  r5-bounded-recovery-burst.yml\n  r5-revision4-minute-successor.yml',
+    '  r5-bounded-recovery-burst.yml\n  r5-revision4-db-footprint-probe.yml\n  r5-revision4-minute-successor.yml',
 )
 replace_once(
     'database footprint workflow count',
