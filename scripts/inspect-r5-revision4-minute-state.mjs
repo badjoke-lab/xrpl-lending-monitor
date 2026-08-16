@@ -221,7 +221,7 @@ if (run.status === 'halted' && run.last_error === 'r5_recovery_monthly_invocatio
   }
   activationMode = 'prepared_continue'
 } else if (run.status === 'running') {
-  if (run.last_error !== null || runCompletedBatches < 1 || committedLedgers < 1 || committedBatches < 1 || typeof run.last_accounting_digest !== 'string' || !/^[a-f0-9]{64}$/u.test(run.last_accounting_digest)) {
+  if (run.last_error !== null || failedBatches !== 0 || runCompletedBatches < 1 || committedLedgers < 1 || typeof run.last_accounting_digest !== 'string' || !/^[a-f0-9]{64}$/u.test(run.last_accounting_digest)) {
     throw new Error('running R5 run does not have a clean committed continuation state')
   }
   activationMode = 'running_continue'
