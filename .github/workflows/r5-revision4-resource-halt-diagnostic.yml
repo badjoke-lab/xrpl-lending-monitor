@@ -160,14 +160,22 @@ jobs:
             > r5-revision4-minute-successor-diagnostic/followup-state.stdout.txt \
             2> r5-revision4-minute-successor-diagnostic/followup-state.stderr.txt
           printf '%s\n' "$?" > r5-revision4-minute-successor-diagnostic/followup-state.exit-code
+
+          node scripts/verify-r5-revision4-database-guard-installed.mjs \
+            --source-commit "$source_commit" \
+            --output r5-revision4-minute-successor-diagnostic/database-guard-state.json \
+            > r5-revision4-minute-successor-diagnostic/database-guard-state.stdout.json \
+            2> r5-revision4-minute-successor-diagnostic/database-guard-state.stderr.txt
+          printf '%s\n' "$?" > r5-revision4-minute-successor-diagnostic/database-guard-state.exit-code
           set -e
 
           cat > r5-revision4-minute-successor-diagnostic/manifest.json <<EOF
           {
-            "schemaVersion": 1,
+            "schemaVersion": 2,
             "purpose": "r5-revision4-minute-successor-read-only-diagnostic",
             "sourceCommit": "${source_commit}",
             "successorSqlSha256": "${sql_sha}",
+            "databaseGuardDefinitionVerified": true,
             "productionDatabaseReadOnly": true,
             "noRunMutation": true,
             "noBatchMutation": true,
