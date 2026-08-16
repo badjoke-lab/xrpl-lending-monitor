@@ -17,7 +17,7 @@ env:
   TARGET_MIGRATION_VERSION: '20260813072000'
   TARGET_MIGRATION_PATH: supabase/migrations/20260813072000_xrpl_r5_revision4_continuous_head_rebind_fix.sql
   ROLLOVER_MIGRATION_VERSION: '20260816020000'
-  ROLLOVER_MIGRATION_PATH: supabase/migrations/20260816020000_xrpl_r5_revision4_minute_run_binding.sql
+  ROLLOVER_MIGRATION_PATH: ops/production-sql/20260816020000_xrpl_r5_revision4_minute_run_binding.sql
   ROLLOVER_MANAGER: scripts/manage-r5-revision4-minute-rollover.mjs
   ROLLOVER_SOURCE_TRANSFORMER: scripts/prepare-r5-minute-rollover-source.mjs
   TARGET_RUN_ID: r5-recovery-selected-revision4-minute-entry
