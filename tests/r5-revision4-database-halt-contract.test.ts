@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
@@ -44,4 +45,17 @@ describe('R5 revision-4 database halt guard', () => {
     expect(migration).not.toMatch(/truncate/i)
     expect(migration).not.toMatch(/vacuum/i)
   })
+
+  if (process.env.CI === 'true') {
+    it(
+      'applies the staged guard to a clone-shaped PostgreSQL claim and proves the boundary',
+      () => {
+        execFileSync('bash', ['scripts/test-r5-revision4-database-halt-postgres.sh'], {
+          stdio: 'inherit',
+          timeout: 120_000,
+        })
+      },
+      130_000,
+    )
+  }
 })
