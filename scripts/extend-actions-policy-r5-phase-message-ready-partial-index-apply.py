@@ -50,16 +50,14 @@ for required in (
     "github.event.comment.body == '/r5-phase-ready-index-prepare'",
     "startsWith(github.event.comment.body, '/r5-phase-ready-index-authorize ')",
     "TARGET_MIGRATION_VERSION: '20260814130000'",
-    "PREVIOUS_MIGRATION_VERSION: '20260813072000'",
-    "scripts/manage-r5-phase-message-ready-partial-index.mjs",
-    "node \"$MANAGER_PATH\" audit",
-    "steps.state.outputs.classification == 'unapplied_expected'",
-    "steps.state.outputs.classification == 'applied_consistent'",
-    "No authorization command was emitted.",
-    "read_only:true",
-    "--expect full",
-    "--expect partial",
+    "scripts/manage-r5-phase-message-ready-live-safe.mjs",
+    "node \"$MANAGER_PATH\" prepare",
+    "head=${MIGRATION_HEAD}",
     "--authorized-state",
+    "Authorization expires",
+    "Current production migration head",
+    "strictly behind the current production migration head",
+    "structural authorization digest",
     "lock timeout",
     "statement timeout",
     "Canonical history row mutation authorized: \\`false\\`",
@@ -82,13 +80,16 @@ for forbidden in (
     "cron.unschedule",
     "wrangler deploy",
     "MAINNET_ENABLED: 'true'",
+    "PREVIOUS_MIGRATION_VERSION",
 ):
     if forbidden in phase_ready_index:
         raise SystemExit(f"phase ready-index apply workflow contains forbidden capability: {forbidden.strip()}")
 if phase_ready_index.count("issues: write") != 1:
     raise SystemExit("phase ready-index apply workflow must have exactly one issue-write permission")
-if phase_ready_index.count("if: steps.state.outputs.classification == 'unapplied_expected'") != 1:
-    raise SystemExit("phase ready-index apply workflow must emit an authorization proposal only from one exact unapplied-state gate")
+if phase_ready_index.count("github.event.comment.body == '/r5-phase-ready-index-prepare'") != 1:
+    raise SystemExit("phase ready-index apply workflow must have one exact owner prepare gate")
+if phase_ready_index.count("startsWith(github.event.comment.body, '/r5-phase-ready-index-authorize ')") != 1:
+    raise SystemExit("phase ready-index apply workflow must have one exact owner authorize gate")
 
 '''
 text = text.replace(marker, block + marker)
@@ -96,7 +97,7 @@ text = text.replace(marker, block + marker)
 replace_once(
     'phase ready-index policy summary',
     'one read-only formal R4F G3 dual-verdict workflow, one authorization-gated revision-4 exact 12-ledger qualification workflow, one read-only revision-4 migration/partial-state probe, one authorization-gated revision-4 residue cleanup workflow, one read-only revision-4 current-invocation probe, one authorization-gated revision-4 external resource snapshot refresh workflow, one authorization-gated revision-4 one-minute runtime activation workflow, one read-only revision-4 resource-halt diagnostic workflow, one read-only revision-4 database-footprint probe, and one finite R5 recovery burst; no scheduled GitHub workflows.',
-    'one read-only formal R4F G3 dual-verdict workflow, one authorization-gated revision-4 exact 12-ledger qualification workflow, one read-only revision-4 migration/partial-state probe, one authorization-gated revision-4 residue cleanup workflow, one read-only revision-4 current-invocation probe, one authorization-gated revision-4 external resource snapshot refresh workflow, one authorization-gated revision-4 one-minute runtime activation workflow, one read-only revision-4 resource-halt diagnostic workflow, one read-only revision-4 database-footprint probe, one authorization-gated phase-message ready-index replacement workflow with read-only state classification, and one finite R5 recovery burst; no scheduled GitHub workflows.',
+    'one read-only formal R4F G3 dual-verdict workflow, one authorization-gated revision-4 exact 12-ledger qualification workflow, one read-only revision-4 migration/partial-state probe, one authorization-gated revision-4 residue cleanup workflow, one read-only revision-4 current-invocation probe, one authorization-gated revision-4 external resource snapshot refresh workflow, one authorization-gated revision-4 one-minute runtime activation workflow, one read-only revision-4 resource-halt diagnostic workflow, one read-only revision-4 database-footprint probe, one authorization-gated phase-message ready-index replacement workflow with exact live-head structural binding, and one finite R5 recovery burst; no scheduled GitHub workflows.',
 )
 
 path.write_text(text)
