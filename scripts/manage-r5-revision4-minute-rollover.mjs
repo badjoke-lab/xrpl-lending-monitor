@@ -231,20 +231,6 @@ function classify(state, sqlSha, sourceCommit, authorizedWatermark, activeFloor)
   const canonicalLedger = Number(state.canonicalWatermark?.ledgerIndex)
   const sourceOk = sourceRunValid(state.sourceRun, authorizedWatermark)
   const checkpointOk = checkpointValid(state.sourceCheckpoint, state.sourceRun)
-  const common = sourceOk
-    && checkpointOk
-    && Number(state.sourceActiveBatchCount) === 0
-    && runtimeQuiescent(state.runtime)
-    && Number(state.pendingCount) === 1
-    && Number(state.leasedMessageCount) === 0
-    && Number(state.retryMessageCount) === 0
-    && Number(state.inflightWorkCount) === 0
-    && Number.isSafeInteger(canonicalLedger)
-    && canonicalLedger >= activeFloor
-    && canonicalLedger > authorizedWatermark
-    && state.canonicalWatermark?.network === 'devnet'
-    && state.canonicalWatermark?.epochId === 'supabase-r4c2c-v1'
-    && state.canonicalWatermark?.baseIdentity === state.sourceRun?.base_identity
   const definition = String(state.continuousDefinition ?? '')
   const oldGuardPresent = definition.includes(`p_run_id <> '${SOURCE_RUN_ID}'`)
   const dualGuardPresent = definition.includes(SOURCE_RUN_ID) && definition.includes(TARGET_RUN_ID)
@@ -257,19 +243,59 @@ function classify(state, sqlSha, sourceCommit, authorizedWatermark, activeFloor)
   ].every((marker) => definition.includes(marker))
   const targetAbsent = state.targetRun == null && Number(state.targetBatchCount) === 0 && Number(state.targetActiveBatchCount) === 0
   const exactHistory = migrationRows === 1 && migrationRecordMatches(records[0], sqlSha)
+  const prechecks = {
+    sourceRunValid: sourceOk,
+    checkpointValid: checkpointOk,
+    sourceActiveBatchClear: Number(state.sourceActiveBatchCount) === 0,
+    collectorRuntimeQuiescent: runtimeQuiescent(state.runtime),
+    pendingMessageExactlyOne: Number(state.pendingCount) === 1,
+    leasedMessagesZero: Number(state.leasedMessageCount) === 0,
+    retryMessagesZero: Number(state.retryMessageCount) === 0,
+    inflightWorkZero: Number(state.inflightWorkCount) === 0,
+    canonicalLedgerSafeInteger: Number.isSafeInteger(canonicalLedger),
+    canonicalAtOrAboveAuthorizedFloor: Number.isSafeInteger(canonicalLedger) && canonicalLedger >= activeFloor,
+    canonicalAheadOfSourceRun: Number.isSafeInteger(canonicalLedger) && canonicalLedger > authorizedWatermark,
+    canonicalNetworkDevnet: state.canonicalWatermark?.network === 'devnet',
+    canonicalEpochExact: state.canonicalWatermark?.epochId === 'supabase-r4c2c-v1',
+    canonicalBaseIdentityExact: state.canonicalWatermark?.baseIdentity === state.sourceRun?.base_identity,
+    previousMigrationBoundaryExact: String(state.maxMigrationVersion) === PREVIOUS_VERSION,
+    rolloverMigrationAbsent: migrationRows === 0,
+    oldContinuousRunGuardPresent: oldGuardPresent,
+    continuousSafetyMarkersPresent: safetyMarkersPresent,
+    targetRunAbsent: targetAbsent,
+    rolloverMigrationBoundaryExact: String(state.maxMigrationVersion) === VERSION,
+    rolloverHistoryExact: exactHistory,
+    dualContinuousRunGuardPresent: dualGuardPresent,
+    targetRunValid: targetRunValid(state.targetRun, state.sourceRun, state.canonicalWatermark),
+  }
+  const common = prechecks.sourceRunValid
+    && prechecks.checkpointValid
+    && prechecks.sourceActiveBatchClear
+    && prechecks.collectorRuntimeQuiescent
+    && prechecks.pendingMessageExactlyOne
+    && prechecks.leasedMessagesZero
+    && prechecks.retryMessagesZero
+    && prechecks.inflightWorkZero
+    && prechecks.canonicalLedgerSafeInteger
+    && prechecks.canonicalAtOrAboveAuthorizedFloor
+    && prechecks.canonicalAheadOfSourceRun
+    && prechecks.canonicalNetworkDevnet
+    && prechecks.canonicalEpochExact
+    && prechecks.canonicalBaseIdentityExact
 
   let classification = 'inconsistent'
   let reason = 'state does not match a reviewed minute-run rollover lifecycle'
-  if (common && String(state.maxMigrationVersion) === PREVIOUS_VERSION && migrationRows === 0 && oldGuardPresent && safetyMarkersPresent && targetAbsent) {
+  if (common && prechecks.previousMigrationBoundaryExact && prechecks.rolloverMigrationAbsent && prechecks.oldContinuousRunGuardPresent && prechecks.continuousSafetyMarkersPresent && prechecks.targetRunAbsent) {
     classification = 'unapplied_expected'
     reason = 'old qualified run is preserved, target run is absent, collector is quiescent, and canonical has advanced beyond the retained run'
-  } else if (common && String(state.maxMigrationVersion) === VERSION && exactHistory && dualGuardPresent && safetyMarkersPresent && targetRunValid(state.targetRun, state.sourceRun, state.canonicalWatermark)) {
+  } else if (common && prechecks.rolloverMigrationBoundaryExact && prechecks.rolloverHistoryExact && prechecks.dualContinuousRunGuardPresent && prechecks.continuousSafetyMarkersPresent && prechecks.targetRunValid) {
     classification = 'applied_consistent'
     reason = 'dual run binding is registered and the zero-progress minute run starts exactly at the quiescent canonical boundary'
   }
 
+  const failedPrechecks = Object.entries(prechecks).filter(([, value]) => value !== true).map(([key]) => key)
   const stable = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     purpose: 'r5-revision4-minute-run-rollover-state',
     sourceCommit,
     projectIdentityDigest: sha256(requireEnv('SUPABASE_PROJECT_ID', /^[a-z]{20}$/u)),
@@ -279,6 +305,7 @@ function classify(state, sqlSha, sourceCommit, authorizedWatermark, activeFloor)
     targetMigrationRows: migrationRows,
     sourceRun: state.sourceRun,
     targetRun: state.targetRun,
+    sourceCheckpoint: state.sourceCheckpoint,
     sourceCheckpointDigest: String(state.sourceCheckpoint?.state_digest ?? ''),
     sourceActiveBatchCount: Number(state.sourceActiveBatchCount),
     targetBatchCount: Number(state.targetBatchCount),
@@ -292,6 +319,8 @@ function classify(state, sqlSha, sourceCommit, authorizedWatermark, activeFloor)
     authorizedSourceWatermark: authorizedWatermark,
     authorizedActiveFloor: activeFloor,
     databaseBytes: Number(state.databaseBytes),
+    prechecks,
+    failedPrechecks,
     mainnetDisabled: true,
     publicReaderMutationAuthorized: false,
     oldRunRewriteAuthorized: false,
@@ -349,12 +378,23 @@ async function apply(options) {
   const { sql, actualSha } = await loadSql(expectedSha)
   const before = classify(parseState(await managementQuery(inspectionQuery(), true)), actualSha, sourceCommit, authorizedWatermark, activeFloor)
   if (before.classification === 'applied_consistent') {
-    const replay = { schemaVersion: 1, purpose: 'r5-revision4-minute-run-rollover-apply', sourceCommit, replayed: true, mutationPerformed: false, before, after: before, mainnetDisabled: true }
+    const replay = { schemaVersion: 2, purpose: 'r5-revision4-minute-run-rollover-apply', sourceCommit, replayed: true, mutationPerformed: false, before, after: before, mainnetDisabled: true }
     await writeOutput(options.output, replay)
     process.stdout.write(`${JSON.stringify(replay)}\n`)
     return
   }
-  if (before.classification !== 'unapplied_expected') fail(`production rollover pre-state is ${before.classification}`)
+  if (before.classification !== 'unapplied_expected') {
+    const failure = {
+      schemaVersion: 2,
+      purpose: 'r5-revision4-minute-run-rollover-prestate-failure',
+      sourceCommit,
+      mutationPerformed: false,
+      before,
+      mainnetDisabled: true,
+    }
+    await writeOutput(options.output, failure)
+    fail(`production rollover pre-state is ${before.classification}; failedPrechecks=${before.failedPrechecks.join(',') || 'none'}`)
+  }
 
   const head = await readDevnetHead()
   if (head.index < Number(before.canonicalWatermark?.ledgerIndex)) fail('Devnet head behind canonical watermark')
@@ -363,12 +403,12 @@ async function apply(options) {
   await managementQuery(statement, false)
 
   const after = classify(parseState(await managementQuery(inspectionQuery(), true)), actualSha, sourceCommit, authorizedWatermark, activeFloor)
-  if (after.classification !== 'applied_consistent') fail(`production rollover post-state is ${after.classification}`)
+  if (after.classification !== 'applied_consistent') fail(`production rollover post-state is ${after.classification}; failedPrechecks=${after.failedPrechecks.join(',') || 'none'}`)
   if (!targetRunValid(after.targetRun, after.sourceRun, after.canonicalWatermark, head.index)) fail('target run did not bind the authorized fresh Devnet head')
   if (JSON.stringify(after.sourceRun) !== JSON.stringify(before.sourceRun)) fail('source qualification run changed during rollover')
 
   const result = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     purpose: 'r5-revision4-minute-run-rollover-apply',
     sourceCommit,
     replayed: false,
