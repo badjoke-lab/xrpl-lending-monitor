@@ -166,7 +166,11 @@ jobs:
             --output r5-revision4-minute-successor-diagnostic/database-guard-state.json \
             > r5-revision4-minute-successor-diagnostic/database-guard-state.stdout.json \
             2> r5-revision4-minute-successor-diagnostic/database-guard-state.stderr.txt
-          printf '%s\n' "$?" > r5-revision4-minute-successor-diagnostic/database-guard-state.exit-code
+          guard_exit="$?"
+          printf '%s\n' "$guard_exit" > r5-revision4-minute-successor-diagnostic/database-guard-state.exit-code
+          if [ "$guard_exit" -ne 0 ]; then
+            exit "$guard_exit"
+          fi
           set -e
 
           cat > r5-revision4-minute-successor-diagnostic/manifest.json <<EOF
