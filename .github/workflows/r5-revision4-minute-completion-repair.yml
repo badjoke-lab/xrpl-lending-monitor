@@ -1,0 +1,271 @@
+name: R5 revision4 minute completion capture repair
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: r5-revision4-minute-completion-repair
+  cancel-in-progress: false
+
+env:
+  QUALIFICATION_ISSUE: '1261'
+  REPAIR_VERSION: '20260816040000'
+  EXPECTED_PREVIOUS_MIGRATION: '20260816020000'
+  REPAIR_SQL: ops/production-sql/20260816040000_xrpl_r5_revision4_minute_completion_capture_guard.sql
+  REPAIR_MANAGER: scripts/manage-r5-revision4-minute-completion-capture-guard.mjs
+  FAILURE_INSPECTOR: scripts/inspect-r5-revision4-minute-failure-state.mjs
+  SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+  SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+  GH_TOKEN: ${{ github.token }}
+
+# This workflow does not pause or switch the production scheduler. The only
+# authorized production mutation is the exact SHA-bound completion-wrapper
+# capture predicate plus its migration-history marker. Formal qualification
+# evidence and its strict CHECK must remain unchanged.
+# No Mainnet, stabilization, soak, or history reduction is authorized.
+# No history deletion or public-reader rewrite is authorized.
+
+jobs:
+  prepare:
+    if: >-
+      github.event.issue.number == 1261 &&
+      github.event.comment.user.login == 'badjoke-lab' &&
+      github.event.comment.body == '/r5-revision4-minute-completion-repair-prepare'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Check out exact current main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Bind exact repair sources
+        id: bind
+        run: |
+          set -euo pipefail
+          mkdir -p r5-revision4-minute-completion-repair-evidence
+          source_commit="$(git rev-parse HEAD)"
+          manager_sha="$(sha256sum "$REPAIR_MANAGER" | awk '{print $1}')"
+          sql_sha="$(sha256sum "$REPAIR_SQL" | awk '{print $1}')"
+          inspector_sha="$(sha256sum "$FAILURE_INSPECTOR" | awk '{print $1}')"
+          project_digest="$(printf '%s' "$SUPABASE_PROJECT_ID" | sha256sum | awk '{print $1}')"
+          printf 'source_commit=%s\nmanager_sha=%s\nsql_sha=%s\ninspector_sha=%s\nproject_digest=%s\n' \
+            "$source_commit" "$manager_sha" "$sql_sha" "$inspector_sha" "$project_digest" >> "$GITHUB_OUTPUT"
+
+      - name: Audit exact completion wrapper and formal evidence read-only
+        env:
+          SOURCE_COMMIT: ${{ steps.bind.outputs.source_commit }}
+          SQL_SHA: ${{ steps.bind.outputs.sql_sha }}
+        run: |
+          set -euo pipefail
+          node "$REPAIR_MANAGER" audit \
+            --source-commit "$SOURCE_COMMIT" \
+            --expected-sha "$SQL_SHA" \
+            --output r5-revision4-minute-completion-repair-evidence/repair-prestate.json \
+            > r5-revision4-minute-completion-repair-evidence/repair-prestate-output.json
+          jq -e --arg max "$EXPECTED_PREVIOUS_MIGRATION" \
+            '.classification == "unapplied_expected" and .maxMigrationVersion == $max and .formalEvidence.run_id == "r5-recovery-selected-revision4-entry" and .prechecks.strictConstraintMinuteRunExcluded == true and .formalEvidenceMutationAuthorized == false and .qualificationConstraintMutationAuthorized == false and .publicReaderMutationAuthorized == false and .mainnetDisabled == true' \
+            r5-revision4-minute-completion-repair-evidence/repair-prestate.json >/dev/null
+
+      - name: Capture exact failed minute state read-only
+        run: |
+          set -euo pipefail
+          node "$FAILURE_INSPECTOR" r5-revision4-minute-completion-repair-evidence/minute-state-before.json
+          jq -e --arg max "$EXPECTED_PREVIOUS_MIGRATION" \
+            '.readOnly == true and .mainnetDisabled == true and .maxMigrationVersion == $max and .minuteRun.run_id == "r5-recovery-selected-revision4-minute-entry" and .formalEvidence.run_id == "r5-recovery-selected-revision4-entry"' \
+            r5-revision4-minute-completion-repair-evidence/minute-state-before.json >/dev/null
+
+      - name: Capture existing scheduler read-only
+        run: |
+          set -euo pipefail
+          node scripts/prepare-r4f-g3-isolated-window.mjs > r5-revision4-minute-completion-repair-evidence/scheduler-before.json
+          jq -e '.jobName == "xrpl-lending-monitor-minute" and .schedule == "* * * * *" and .jobId > 0 and (.commandDigest | test("^[a-f0-9]{64}$"))' \
+            r5-revision4-minute-completion-repair-evidence/scheduler-before.json >/dev/null
+
+      - name: Publish exact repair authorization proposal
+        env:
+          SOURCE_COMMIT: ${{ steps.bind.outputs.source_commit }}
+          MANAGER_SHA: ${{ steps.bind.outputs.manager_sha }}
+          SQL_SHA: ${{ steps.bind.outputs.sql_sha }}
+          INSPECTOR_SHA: ${{ steps.bind.outputs.inspector_sha }}
+          PROJECT_DIGEST: ${{ steps.bind.outputs.project_digest }}
+        run: |
+          set -euo pipefail
+          expires="$(date -u -d '+2 hours' '+%Y-%m-%dT%H:%M:%SZ')"
+          nonce="$(openssl rand -hex 8)"
+          command="/r5-revision4-minute-completion-repair-apply commit=${SOURCE_COMMIT} manager=${MANAGER_SHA} sql=${SQL_SHA} inspector=${INSPECTOR_SHA} project=${PROJECT_DIGEST} migration_max=${EXPECTED_PREVIOUS_MIGRATION} prepare_run=${GITHUB_RUN_ID} expires=${expires} nonce=${nonce}"
+          cat > /tmp/repair-proposal.md <<EOF
+          ## R5 revision-4 minute completion capture repair authorization proposal
+
+          Preparation run: \`${GITHUB_RUN_ID}\`
+          Source main commit: \`${SOURCE_COMMIT}\`
+          Current migration max: \`${EXPECTED_PREVIOUS_MIGRATION}\`
+          Repair migration: \`${REPAIR_VERSION}\`
+          Repair SQL SHA-256: \`${SQL_SHA}\`
+          Repair manager SHA-256: \`${MANAGER_SHA}\`
+          Failure-state inspector SHA-256: \`${INSPECTOR_SHA}\`
+
+          Scope: change only the revision-4 completion wrapper predicate so the formal 12-ledger qualification evidence capture remains eligible only for \`r5-recovery-selected-revision4-entry\`. The existing strict qualification CHECK and singleton evidence row must remain byte-for-byte unchanged. The minute run uses the existing atomic completion path without qualification-evidence capture.
+
+          This repair does **not** pause or switch the scheduler and does not invoke the minute driver. No Mainnet, stabilization, soak, history reduction, history deletion, public-reader rewrite, old-run rewrite, or qualification-evidence mutation is authorized.
+
+          Exact authorization command:
+
+          \`${command}\`
+          EOF
+          gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/repair-proposal.md
+
+      - name: Upload read-only repair preparation evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: r5-revision4-minute-completion-repair-prepare
+          path: r5-revision4-minute-completion-repair-evidence
+          if-no-files-found: error
+          retention-days: 14
+
+  execute:
+    if: >-
+      github.event.issue.number == 1261 &&
+      github.event.comment.user.login == 'badjoke-lab' &&
+      startsWith(github.event.comment.body, '/r5-revision4-minute-completion-repair-apply ')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      AUTHORIZATION_BODY: ${{ github.event.comment.body }}
+      AUTHORIZATION_CREATED_AT: ${{ github.event.comment.created_at }}
+    steps:
+      - name: Check out exact current main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Parse and bind exact owner authorization
+        id: auth
+        run: |
+          set -euo pipefail
+          regex='^/r5-revision4-minute-completion-repair-apply commit=([a-f0-9]{40}) manager=([a-f0-9]{64}) sql=([a-f0-9]{64}) inspector=([a-f0-9]{64}) project=([a-f0-9]{64}) migration_max=([0-9]{14}) prepare_run=([0-9]+) expires=([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z) nonce=([a-f0-9]{16})$'
+          [[ "$AUTHORIZATION_BODY" =~ $regex ]] || { echo 'completion repair authorization shape mismatch' >&2; exit 1; }
+          names=(commit manager_sha sql_sha inspector_sha project_digest migration_max prepare_run expires nonce)
+          for index in "${!names[@]}"; do printf '%s=%s\n' "${names[$index]}" "${BASH_REMATCH[$((index + 1))]}" >> "$GITHUB_OUTPUT"; done
+
+      - name: Verify exact authorization freshness uniqueness and sources
+        env:
+          AUTH_COMMIT: ${{ steps.auth.outputs.commit }}
+          AUTH_MANAGER_SHA: ${{ steps.auth.outputs.manager_sha }}
+          AUTH_SQL_SHA: ${{ steps.auth.outputs.sql_sha }}
+          AUTH_INSPECTOR_SHA: ${{ steps.auth.outputs.inspector_sha }}
+          AUTH_PROJECT: ${{ steps.auth.outputs.project_digest }}
+          AUTH_MIGRATION_MAX: ${{ steps.auth.outputs.migration_max }}
+          AUTH_PREPARE_RUN: ${{ steps.auth.outputs.prepare_run }}
+          AUTH_EXPIRES: ${{ steps.auth.outputs.expires }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$AUTH_COMMIT"
+          test "$(sha256sum "$REPAIR_MANAGER" | awk '{print $1}')" = "$AUTH_MANAGER_SHA"
+          test "$(sha256sum "$REPAIR_SQL" | awk '{print $1}')" = "$AUTH_SQL_SHA"
+          test "$(sha256sum "$FAILURE_INSPECTOR" | awk '{print $1}')" = "$AUTH_INSPECTOR_SHA"
+          test "$(printf '%s' "$SUPABASE_PROJECT_ID" | sha256sum | awk '{print $1}')" = "$AUTH_PROJECT"
+          test "$AUTH_MIGRATION_MAX" = "$EXPECTED_PREVIOUS_MIGRATION"
+          test "$AUTH_PREPARE_RUN" -gt 0
+          now_epoch="$(date -u +%s)"
+          expires_epoch="$(date -u -d "$AUTH_EXPIRES" +%s)"
+          created_epoch="$(date -u -d "$AUTHORIZATION_CREATED_AT" +%s)"
+          test "$now_epoch" -le "$expires_epoch"
+          test "$created_epoch" -le "$expires_epoch"
+          duplicate_count="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${QUALIFICATION_ISSUE}/comments?per_page=100" | jq -s --arg body "$AUTHORIZATION_BODY" '[.[][] | select(.user.login == "badjoke-lab" and .body == $body)] | length')"
+          test "$duplicate_count" -eq 1
+
+      - name: Reaudit exact production prestate read-only
+        env:
+          SOURCE_COMMIT: ${{ steps.auth.outputs.commit }}
+          SQL_SHA: ${{ steps.auth.outputs.sql_sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p r5-revision4-minute-completion-repair-evidence
+          node "$REPAIR_MANAGER" audit \
+            --source-commit "$SOURCE_COMMIT" \
+            --expected-sha "$SQL_SHA" \
+            --output r5-revision4-minute-completion-repair-evidence/repair-prestate.json \
+            > r5-revision4-minute-completion-repair-evidence/repair-prestate-output.json
+          jq -e --arg max "$EXPECTED_PREVIOUS_MIGRATION" \
+            '.classification == "unapplied_expected" and .maxMigrationVersion == $max and .formalEvidenceMutationAuthorized == false and .qualificationConstraintMutationAuthorized == false and .publicReaderMutationAuthorized == false and .mainnetDisabled == true' \
+            r5-revision4-minute-completion-repair-evidence/repair-prestate.json >/dev/null
+          node "$FAILURE_INSPECTOR" r5-revision4-minute-completion-repair-evidence/minute-state-before.json
+          node scripts/prepare-r4f-g3-isolated-window.mjs > r5-revision4-minute-completion-repair-evidence/scheduler-before.json
+
+      - name: Apply exact completion capture predicate repair
+        env:
+          SOURCE_COMMIT: ${{ steps.auth.outputs.commit }}
+          SQL_SHA: ${{ steps.auth.outputs.sql_sha }}
+        run: |
+          set -euo pipefail
+          node "$REPAIR_MANAGER" apply \
+            --source-commit "$SOURCE_COMMIT" \
+            --expected-sha "$SQL_SHA" \
+            --output r5-revision4-minute-completion-repair-evidence/repair-applied.json \
+            > r5-revision4-minute-completion-repair-evidence/repair-applied-output.json
+          jq -e --arg max "$REPAIR_VERSION" \
+            '.after.classification == "applied_consistent" and .after.maxMigrationVersion == $max and .formalEvidencePreservedExactly == true and .qualificationConstraintPreservedExactly == true and .formalRunPreservedExactly == true and .publicReaderMutationPerformed == false and .mainnetDisabled == true' \
+            r5-revision4-minute-completion-repair-evidence/repair-applied.json >/dev/null
+
+      - name: Verify repaired boundary and capture failed minute state read-only
+        run: |
+          set -euo pipefail
+          node scripts/verify-r5-revision4-minute-followup.mjs r5-revision4-minute-completion-repair-evidence/followup-after-repair.json
+          jq -e --arg max "$REPAIR_VERSION" \
+            '.currentMaxMigrationVersion == $max and .currentMaxVersionApproved == true and .minuteRunBindingRegistered == true and .completionCaptureGuardRegistered == true and .functionContractVerified == true and .resourceGuardUnchanged == true and .mainnetDisabled == true' \
+            r5-revision4-minute-completion-repair-evidence/followup-after-repair.json >/dev/null
+          node "$FAILURE_INSPECTOR" r5-revision4-minute-completion-repair-evidence/minute-state-after.json
+
+      - name: Prove scheduler unchanged
+        run: |
+          set -euo pipefail
+          node scripts/prepare-r4f-g3-isolated-window.mjs > r5-revision4-minute-completion-repair-evidence/scheduler-after.json
+          before_job="$(jq -r '.jobId' r5-revision4-minute-completion-repair-evidence/scheduler-before.json)"
+          after_job="$(jq -r '.jobId' r5-revision4-minute-completion-repair-evidence/scheduler-after.json)"
+          before_command="$(jq -r '.commandDigest' r5-revision4-minute-completion-repair-evidence/scheduler-before.json)"
+          after_command="$(jq -r '.commandDigest' r5-revision4-minute-completion-repair-evidence/scheduler-after.json)"
+          test "$before_job" = "$after_job"
+          test "$before_command" = "$after_command"
+          test "$(jq -r '.schedule' r5-revision4-minute-completion-repair-evidence/scheduler-after.json)" = '* * * * *'
+
+      - name: Publish repair completion record
+        run: |
+          set -euo pipefail
+          status="$(jq -r '.minuteRun.status' r5-revision4-minute-completion-repair-evidence/minute-state-after.json)"
+          last_error="$(jq -r '.minuteRun.last_error // "null"' r5-revision4-minute-completion-repair-evidence/minute-state-after.json)"
+          batch_count="$(jq -r '.minuteBatchCount' r5-revision4-minute-completion-repair-evidence/minute-state-after.json)"
+          failed_count="$(jq '[.minuteBatches[] | select(.status == "failed")] | length' r5-revision4-minute-completion-repair-evidence/minute-state-after.json)"
+          cat > /tmp/repair-complete.md <<EOF
+          R5 minute completion capture repair applied under exact authorization.
+
+          - migration: \`${REPAIR_VERSION}\`
+          - formal qualification evidence: preserved exactly
+          - strict qualification run CHECK: preserved exactly
+          - scheduler: unchanged
+          - minute run status after repair: \`${status}\`
+          - minute run last_error: \`${last_error}\`
+          - minute batch rows: \`${batch_count}\` (failed: \`${failed_count}\`)
+          - Mainnet/stabilization/soak: not authorized
+
+          Evidence: Actions run \`${GITHUB_RUN_ID}\`.
+          EOF
+          gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/repair-complete.md
+
+      - name: Upload exact repair evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r5-revision4-minute-completion-repair-evidence
+          path: r5-revision4-minute-completion-repair-evidence
+          if-no-files-found: warn
+          retention-days: 14
