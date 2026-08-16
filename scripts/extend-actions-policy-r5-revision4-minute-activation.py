@@ -72,7 +72,7 @@ for required in (
     "version: 2.114.0",
     "resourceSnapshot.fresh == true",
     "projectedInvocations31d < 400000",
-    "'* * * * *'",
+    "* * * * *",
     "No Mainnet, stabilization, soak, or history reduction is authorized.",
     "No history deletion or public-reader rewrite is authorized.",
 ):
