@@ -6,6 +6,7 @@ const projectRef = process.env.SUPABASE_PROJECT_ID ?? ''
 const accessToken = process.env.SUPABASE_ACCESS_TOKEN ?? ''
 const version = '20260813072000'
 const minuteRunBindingVersion = '20260816020000'
+const completionCaptureGuardVersion = '20260816040000'
 const minuteRunId = 'r5-recovery-selected-revision4-minute-entry'
 const approvedCurrentMigrationVersions = new Set([
   version,
@@ -13,6 +14,11 @@ const approvedCurrentMigrationVersions = new Set([
   '20260814130000',
   '20260815211500',
   minuteRunBindingVersion,
+  completionCaptureGuardVersion,
+])
+const minuteBindingCurrentVersions = new Set([
+  minuteRunBindingVersion,
+  completionCaptureGuardVersion,
 ])
 const migrationName = 'xrpl_r5_revision4_continuous_head_rebind_fix'
 const migrationPath = `supabase/migrations/${version}_${migrationName}.sql`
@@ -85,6 +91,8 @@ const currentMaxMigrationVersion = String(maxRows[0].max_version ?? '')
 if (!approvedCurrentMigrationVersions.has(currentMaxMigrationVersion)) {
   throw new Error(`unreviewed migration exists after minute follow-up:${currentMaxMigrationVersion}`)
 }
+const minuteRunBindingRegistered = minuteBindingCurrentVersions.has(currentMaxMigrationVersion)
+const completionCaptureGuardRegistered = currentMaxMigrationVersion === completionCaptureGuardVersion
 
 const functionRows = await query(
   `select p.prosecdef as security_definer,
@@ -108,7 +116,7 @@ for (const marker of [
 ]) {
   if (!definition.includes(marker)) throw new Error(`continuous-head applied marker missing:${marker}`)
 }
-if (currentMaxMigrationVersion === minuteRunBindingVersion && !definition.includes(minuteRunId)) {
+if (minuteRunBindingRegistered && !definition.includes(minuteRunId)) {
   throw new Error('continuous-head minute run binding missing after registered rollover migration')
 }
 if (fn.security_definer !== true || fn.anon_execute !== false || fn.authenticated_execute !== false || fn.service_role_execute !== true) {
@@ -116,7 +124,7 @@ if (fn.security_definer !== true || fn.anon_execute !== false || fn.authenticate
 }
 
 const evidence = {
-  schemaVersion: 5,
+  schemaVersion: 6,
   purpose: 'r5-revision4-minute-followup-provenance',
   version,
   migrationName,
@@ -129,7 +137,8 @@ const evidence = {
   reconstruction: exactReconstruction,
   currentMaxMigrationVersion,
   currentMaxVersionApproved: true,
-  minuteRunBindingRegistered: currentMaxMigrationVersion === minuteRunBindingVersion,
+  minuteRunBindingRegistered,
+  completionCaptureGuardRegistered,
   approvedCurrentMigrationVersions: [...approvedCurrentMigrationVersions],
   functionDefinitionSha256: sha256(definition),
   functionContractVerified: true,
