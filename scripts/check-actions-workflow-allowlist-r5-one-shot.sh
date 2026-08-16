@@ -72,6 +72,9 @@ R5_TERMINAL_ARCHIVE_CONTRACT_OUTPUT=actions-workflow-policy-evidence/r5-terminal
 bash -n scripts/test-r5-terminal-archive-window-postgres.sh
 R5_TERMINAL_ARCHIVE_WINDOW_OUTPUT=actions-workflow-policy-evidence/r5-terminal-archive-window \
   bash scripts/test-r5-terminal-archive-window-postgres.sh
+bash -n scripts/test-r5-revision4-archive-completion-patch-postgres.sh
+R5_ARCHIVE_COMPLETION_PATCH_OUTPUT=actions-workflow-policy-evidence/r5-archive-completion-patch \
+  bash scripts/test-r5-revision4-archive-completion-patch-postgres.sh
 bash -n scripts/test-r5-cron-physical-compaction-postgres.sh
 R5_CRON_COMPACTION_OUTPUT=actions-workflow-policy-evidence/r5-cron-physical-compaction \
   bash scripts/test-r5-cron-physical-compaction-postgres.sh
