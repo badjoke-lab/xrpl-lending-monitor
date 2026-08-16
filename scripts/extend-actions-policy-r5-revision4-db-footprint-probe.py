@@ -18,8 +18,8 @@ def replace_once(name: str, old: str, new: str) -> None:
 
 replace_once(
     'database footprint workflow allowlist entry',
-    '  r5-bounded-recovery-burst.yml\n  r5-revision4-minute-activation.yml',
-    '  r5-bounded-recovery-burst.yml\n  r5-revision4-db-footprint-probe.yml\n  r5-revision4-minute-activation.yml',
+    '  r5-bounded-recovery-burst.yml\n  r5-revision4-minute-successor.yml',
+    '  r5-bounded-recovery-burst.yml\n  r5-revision4-db-footprint-probe.yml\n  r5-revision4-minute-successor.yml',
 )
 replace_once(
     'database footprint workflow count',
@@ -85,8 +85,8 @@ text = text.replace(marker, block + marker)
 
 replace_once(
     'database footprint policy summary',
-    'one read-only formal R4F G3 dual-verdict workflow, one authorization-gated revision-4 exact 12-ledger qualification workflow, one read-only revision-4 migration/partial-state probe, one authorization-gated revision-4 residue cleanup workflow, one read-only revision-4 current-invocation probe, one authorization-gated revision-4 external resource snapshot refresh workflow, one authorization-gated revision-4 one-minute runtime activation workflow, one read-only revision-4 resource-halt diagnostic workflow, and one finite R5 recovery burst; no scheduled GitHub workflows.',
-    'one read-only formal R4F G3 dual-verdict workflow, one authorization-gated revision-4 exact 12-ledger qualification workflow, one read-only revision-4 migration/partial-state probe, one authorization-gated revision-4 residue cleanup workflow, one read-only revision-4 current-invocation probe, one authorization-gated revision-4 external resource snapshot refresh workflow, one authorization-gated revision-4 one-minute runtime activation workflow, one read-only revision-4 resource-halt diagnostic workflow, one read-only revision-4 database-footprint probe, and one finite R5 recovery burst; no scheduled GitHub workflows.',
+    'one read-only formal R4F G3 dual-verdict workflow, one authorization-gated revision-4 exact 12-ledger qualification workflow, one read-only revision-4 migration/partial-state probe, one authorization-gated revision-4 residue cleanup workflow, one read-only revision-4 current-invocation probe, one authorization-gated revision-4 external resource snapshot refresh workflow, one authorization-gated revision-4 one-minute successor runtime workflow, one read-only revision-4 resource-halt diagnostic workflow, and one finite R5 recovery burst; no scheduled GitHub workflows.',
+    'one read-only formal R4F G3 dual-verdict workflow, one authorization-gated revision-4 exact 12-ledger qualification workflow, one read-only revision-4 migration/partial-state probe, one authorization-gated revision-4 residue cleanup workflow, one read-only revision-4 current-invocation probe, one authorization-gated revision-4 external resource snapshot refresh workflow, one authorization-gated revision-4 one-minute successor runtime workflow, one read-only revision-4 resource-halt diagnostic workflow, one read-only revision-4 database-footprint probe, and one finite R5 recovery burst; no scheduled GitHub workflows.',
 )
 
 path.write_text(text)
