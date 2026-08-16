@@ -7,7 +7,7 @@ import { dirname, resolve } from 'node:path'
 const VERSION = '20260816020000'
 const NAME = 'xrpl_r5_revision4_minute_run_binding'
 const PREVIOUS_VERSION = '20260815211500'
-const SQL_PATH = `supabase/migrations/${VERSION}_${NAME}.sql`
+const SQL_PATH = `ops/production-sql/${VERSION}_${NAME}.sql`
 const SOURCE_RUN_ID = 'r5-recovery-selected-revision4-entry'
 const TARGET_RUN_ID = 'r5-recovery-selected-revision4-minute-entry'
 const PROFILE_DIGEST = '39e8b620a20bb08fbe8306fe753d4d445c5191bcafddbf67721e0c17d5b6bcd5'
@@ -359,8 +359,7 @@ async function apply(options) {
   const head = await readDevnetHead()
   if (head.index < Number(before.canonicalWatermark?.ledgerIndex)) fail('Devnet head behind canonical watermark')
   const marker = `exact-${NAME} sha256:${actualSha}`
-  const escapedSql = sql.replaceAll('$rollover$', '$rollover_tag$')
-  const statement = `begin;\nset local lock_timeout='5s';\nset local statement_timeout='120s';\n${escapedSql}\ninsert into supabase_migrations.schema_migrations(version,statements,name) values ('${VERSION}',array['${marker}']::text[],'${NAME}');\nselect public.xrpl_prepare_r5_revision4_active_recovery('${TARGET_RUN_ID}',r.checkpoint_id,r.checkpoint_state_digest,${head.index},'${head.hash}',statement_timestamp()) as prepared from xrpl_r5_v1.recovery_runs r where r.run_id='${SOURCE_RUN_ID}';\ncommit;`
+  const statement = `begin;\nset local lock_timeout='5s';\nset local statement_timeout='120s';\n${sql}\ninsert into supabase_migrations.schema_migrations(version,statements,name) values ('${VERSION}',array['${marker}']::text[],'${NAME}');\nselect public.xrpl_prepare_r5_revision4_active_recovery('${TARGET_RUN_ID}',r.checkpoint_id,r.checkpoint_state_digest,${head.index},'${head.hash}',statement_timestamp()) as prepared from xrpl_r5_v1.recovery_runs r where r.run_id='${SOURCE_RUN_ID}';\ncommit;`
   await managementQuery(statement, false)
 
   const after = classify(parseState(await managementQuery(inspectionQuery(), true)), actualSha, sourceCommit, authorizedWatermark, activeFloor)
