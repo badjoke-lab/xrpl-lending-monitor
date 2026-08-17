@@ -3,10 +3,17 @@ set -euo pipefail
 
 proof='scripts/test-r5-successor-constraint-index-reindex-postgres.sh'
 production_contract='scripts/test-r5-successor-constraint-index-physical-reindex-production-contract.sh'
-[[ -f "$proof" ]]
-[[ -f "$production_contract" ]]
+message_proof='scripts/test-r5-phase-message-pkey-reindex-postgres.sh'
+message_contract='scripts/test-r5-phase-message-pkey-reindex-contract.sh'
+message_production_contract='scripts/test-r5-phase-message-pkey-physical-reindex-production-contract.sh'
+for file in "$proof" "$production_contract" "$message_proof" "$message_contract" "$message_production_contract"; do
+  [[ -f "$file" ]] || { echo "successor/message index contract missing: $file" >&2; exit 1; }
+done
 bash -n "$proof"
 bash -n "$production_contract"
+bash -n "$message_proof"
+bash -n "$message_contract"
+bash -n "$message_production_contract"
 
 for required in \
   "image='postgres:15-alpine'" \
@@ -71,4 +78,8 @@ if '[[ "$after_heap_bytes" -eq "$before_heap_bytes" ]]' not in text:
 PY
 
 bash "$production_contract"
-echo 'R5 successor constraint-index reindex local + production contract PASS'
+bash "$message_contract"
+bash "$message_production_contract"
+R5_MESSAGE_PKEY_REINDEX_OUTPUT=actions-workflow-policy-evidence/r5-phase-message-pkey-reindex \
+  bash "$message_proof"
+echo 'R5 successor constraint-index + phase-message pkey reindex contracts PASS'
