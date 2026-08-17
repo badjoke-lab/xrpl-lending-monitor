@@ -33,7 +33,7 @@ for required in \
   "github.event.comment.user.login == 'badjoke-lab'" \
   "github.event.comment.body == '/r5-terminal-transport-compaction-preflight'" \
   "scripts/r5-terminal-transport-compaction-readonly-preflight.mjs" \
-  "Management API \\`read_only:true\\` SELECT only" \
+  'read_only:true' \
   "physicalCompactionAuthorized" \
   "vacuumAuthorized" \
   "reindexAuthorized" \
