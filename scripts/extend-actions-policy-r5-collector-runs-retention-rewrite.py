@@ -64,14 +64,20 @@ for required in (
     "const EXPECTED_SCHEDULER_COMMAND_SHA='98713e805eb43c0b527b04cb1e6bdb2b512408ceb04fb624a93602ac5aa38636'",
     "const MAX_DATABASE_BYTES_BEFORE=490_000_000",
     "read_only:readOnly",
+    "function mutationSql(expected)",
+    "assertDataStateForMutation(expected)",
+    "lock table public.xrpl_collector_runs in access exclusive mode",
+    "collector authorized data state drift under lock",
     "order by completed_at desc,id desc",
     "truncate table public.xrpl_collector_runs",
     "overriding system value",
     "collector retained identity mismatch after rewrite",
     "collector identity sequence drift after rewrite",
+    "transactionLockRevalidation:true",
     "authorized structural state mismatch",
     "authorized data state mismatch",
     "authorized plan mismatch",
+    "const exactMutation=mutationSql(before.dataState)",
     "post-rewrite structural state mismatch",
     "relation bytes were not reclaimed",
     "database bytes were not reclaimed",
@@ -79,12 +85,15 @@ for required in (
 ):
     if required not in collector_runs_retention_manager:
         raise SystemExit(f"collector retention manager missing guard: {required}")
+manager_lower = collector_runs_retention_manager.lower()
 for forbidden in (
     "restart identity", "truncate table public.xrpl_phase_", "delete from public.xrpl_phase_",
-    "cron.schedule", "cron.unschedule", "wrangler deploy", "MAINNET_ENABLED",
+    "cron.schedule", "cron.unschedule", "wrangler deploy", "mainnet_enabled",
 ):
-    if forbidden in collector_runs_retention_manager.lower():
+    if forbidden in manager_lower:
         raise SystemExit(f"collector retention manager contains forbidden capability: {forbidden}")
+if collector_runs_retention_manager.find("collector authorized data state drift under lock") > collector_runs_retention_manager.find("truncate table public.xrpl_collector_runs"):
+    raise SystemExit("collector retention manager must revalidate authorized data under lock before TRUNCATE")
 
 '''
 text=text.replace(marker,block+marker)
