@@ -2,8 +2,11 @@
 set -euo pipefail
 
 proof='scripts/test-r5-successor-constraint-index-reindex-postgres.sh'
+production_contract='scripts/test-r5-successor-constraint-index-physical-reindex-production-contract.sh'
 [[ -f "$proof" ]]
+[[ -f "$production_contract" ]]
 bash -n "$proof"
+bash -n "$production_contract"
 
 for required in \
   "image='postgres:15-alpine'" \
@@ -67,4 +70,5 @@ if '[[ "$after_heap_bytes" -eq "$before_heap_bytes" ]]' not in text:
     raise SystemExit('successor proof heap preservation assertion missing')
 PY
 
-echo 'R5 successor constraint-index reindex local proof contract PASS'
+bash "$production_contract"
+echo 'R5 successor constraint-index reindex local + production contract PASS'
