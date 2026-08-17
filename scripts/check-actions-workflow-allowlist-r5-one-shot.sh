@@ -116,3 +116,8 @@ bash -n scripts/test-r5-terminal-archive-phase-b-500-ramp-contract.sh
 bash scripts/test-r5-terminal-archive-phase-b-500-ramp-contract.sh
 bash -n scripts/test-r5-terminal-transport-compaction-preflight-contract.sh
 bash scripts/test-r5-terminal-transport-compaction-preflight-contract.sh
+bash -n scripts/test-r5-terminal-transport-dual-rewrite-contract.sh
+bash scripts/test-r5-terminal-transport-dual-rewrite-contract.sh
+bash -n scripts/test-r5-terminal-transport-dual-rewrite-postgres.sh
+R5_TERMINAL_DUAL_REWRITE_OUTPUT=actions-workflow-policy-evidence/r5-terminal-transport-dual-rewrite \
+  bash scripts/test-r5-terminal-transport-dual-rewrite-postgres.sh
