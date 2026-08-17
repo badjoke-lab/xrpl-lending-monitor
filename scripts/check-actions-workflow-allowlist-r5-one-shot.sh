@@ -101,3 +101,5 @@ bash -n scripts/test-r5-phase-message-ready-partial-index-apply-contract.sh
 bash scripts/test-r5-phase-message-ready-partial-index-apply-contract.sh
 bash -n scripts/test-r5-terminal-archive-phase-a-apply-contract.sh
 bash scripts/test-r5-terminal-archive-phase-a-apply-contract.sh
+bash -n scripts/test-r5-checkpoint-terminal-archive-fail-close-contract.sh
+bash scripts/test-r5-checkpoint-terminal-archive-fail-close-contract.sh
