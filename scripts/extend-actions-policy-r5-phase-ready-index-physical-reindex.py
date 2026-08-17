@@ -17,9 +17,14 @@ def replace_once(name: str, old: str, new: str) -> None:
 
 
 replace_once(
-    'ready and successor physical-reindex workflow allowlist entries',
+    'ready physical-reindex workflow allowlist entry',
     '  r5-phase-message-ready-partial-index-apply.yml\n  r5-raw-evidence-compaction.yml',
-    '  r5-phase-message-ready-partial-index-apply.yml\n  r5-phase-ready-index-physical-reindex.yml\n  r5-successor-constraint-index-physical-reindex.yml\n  r5-raw-evidence-compaction.yml',
+    '  r5-phase-message-ready-partial-index-apply.yml\n  r5-phase-ready-index-physical-reindex.yml\n  r5-raw-evidence-compaction.yml',
+)
+replace_once(
+    'successor physical-reindex workflow allowlist entry',
+    '  r5-revision4-resource-halt-rearm.yml\n  r5-terminal-archive-phase-a-apply.yml',
+    '  r5-revision4-resource-halt-rearm.yml\n  r5-successor-constraint-index-physical-reindex.yml\n  r5-terminal-archive-phase-a-apply.yml',
 )
 replace_once(
     'ready and successor physical-reindex workflow count',
