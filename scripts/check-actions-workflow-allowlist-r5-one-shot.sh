@@ -157,3 +157,8 @@ R5_READY_REINDEX_OUTPUT=actions-workflow-policy-evidence/r5-phase-ready-index-ph
   bash scripts/test-r5-phase-ready-index-physical-reindex-postgres.sh
 bash -n scripts/test-r5-phase-ready-index-physical-reindex-production-contract.sh
 bash scripts/test-r5-phase-ready-index-physical-reindex-production-contract.sh
+bash -n scripts/test-r5-successor-constraint-index-reindex-contract.sh
+bash scripts/test-r5-successor-constraint-index-reindex-contract.sh
+bash -n scripts/test-r5-successor-constraint-index-reindex-postgres.sh
+R5_SUCCESSOR_INDEX_REINDEX_OUTPUT=actions-workflow-policy-evidence/r5-successor-constraint-index-reindex \
+  bash scripts/test-r5-successor-constraint-index-reindex-postgres.sh
