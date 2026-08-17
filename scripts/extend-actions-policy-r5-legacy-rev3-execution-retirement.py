@@ -71,13 +71,20 @@ for required in (
     "target has executable caller",
     "unapplied_expected",
     "applied_consistent",
+):
+    if required not in legacy_retirement_manager:
+        raise SystemExit(f"legacy rev3 retirement manager missing guarded contract: {required}")
+manager_compact = legacy_retirement_manager.replace(" ", "")
+for required in (
     "transportRowMutationPerformed:false",
+    "canonicalHistoryRowMutationPerformed:false",
     "physicalCompactionPerformed:false",
+    "schedulerMutationPerformed:false",
     "mainnetDisabled:true",
     "r5RearmPerformed:false",
 ):
-    if required not in legacy_retirement_manager.replace(' ', '') if required.endswith(':false') or required.endswith(':true') else required not in legacy_retirement_manager:
-        raise SystemExit(f"legacy rev3 retirement manager missing guarded contract: {required}")
+    if required not in manager_compact:
+        raise SystemExit(f"legacy rev3 retirement manager missing bounded result: {required}")
 '''
 text = text.replace(marker, block + marker)
 path.write_text(text)
