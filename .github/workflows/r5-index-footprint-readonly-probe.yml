@@ -113,6 +113,15 @@ jobs:
             --source-commit "$GITHUB_SHA" \
             --output-dir r5-index-footprint-readonly-probe
 
+      - name: Verify Phase B throughput boundary read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
+          node scripts/r5-terminal-archive-phase-b-throughput-readonly-gate.mjs \
+            --source-commit "$GITHUB_SHA" \
+            --output-dir r5-index-footprint-readonly-probe
+
       - name: Upload sanitized read-only index evidence
         uses: actions/upload-artifact@v4
         with:
@@ -146,6 +155,8 @@ jobs:
             cat r5-index-footprint-readonly-probe/transport-target-source-summary.md
             echo
             cat r5-index-footprint-readonly-probe/terminal-archive-phase-b-preflight-summary.md
+            echo
+            cat r5-index-footprint-readonly-probe/terminal-archive-phase-b-throughput-gate-summary.md
             echo
             echo "Run: ${GITHUB_RUN_ID}"
             echo 'Safety: SELECT/read_only only. No index mutation, DELETE, VACUUM, scheduler mutation, deployment, Mainnet, stabilization, soak, or R5 restart is authorized.'
