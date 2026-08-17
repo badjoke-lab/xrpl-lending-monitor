@@ -1,4 +1,5 @@
 from pathlib import Path
+import subprocess
 import sys
 
 if len(sys.argv) != 2:
@@ -192,3 +193,4 @@ if successor_physical_reindex_manager.count("reindex index public.xrpl_phase_suc
 '''
 text = text.replace(marker, block + marker)
 path.write_text(text)
+subprocess.run([sys.executable, 'scripts/extend-actions-policy-r5-phase-message-pkey-physical-reindex.py', sys.argv[1]], check=True)
