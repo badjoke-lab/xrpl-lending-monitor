@@ -26,7 +26,6 @@ async function managementQuery(query,readOnly){
 }
 function firstJson(rows,key='state'){ const raw=rows?.[0]?.[key]??rows?.[0]?.[key.toUpperCase()]; if(raw==null) fail(`${key} row missing`); return typeof raw==='string'?JSON.parse(raw):raw }
 async function writeJson(path,value){ if(!path) return; const absolute=resolve(path); await mkdir(dirname(absolute),{recursive:true}); await writeFile(absolute,`${JSON.stringify(value,null,2)}\n`) }
-
 const rowDigest=(alias)=>`encode(extensions.digest(convert_to(coalesce(string_agg(encode(extensions.digest(convert_to(to_jsonb(${alias})::text,'UTF8'),'sha256'),'hex'),'' order by ${alias}.id),''),'UTF8'),'sha256'),'hex')`
 
 function inspectionSql(){ return String.raw`with ranked as (
@@ -115,41 +114,70 @@ function validateCommon(state){
 }
 function validateBefore(state){ validateCommon(state); if(Number(state.databaseBytes)>MAX_DATABASE_BYTES_BEFORE) fail('database is above collector rewrite pre-apply ceiling'); if(Number(state.exactRows)<=RETAIN_LATEST_ROWS) fail('collector history has no retention candidates'); if(Number(state.retainedRows)!==RETAIN_LATEST_ROWS) fail('collector retained row count mismatch'); if(Number(state.candidateRows)!==Number(state.exactRows)-RETAIN_LATEST_ROWS) fail('collector candidate count mismatch'); for(const key of ['retainedDigest','candidateDigest']) if(!/^[a-f0-9]{64}$/u.test(String(state[key]??''))) fail(`${key} missing`) }
 function validateAfter(state){ validateCommon(state); if(Number(state.exactRows)!==RETAIN_LATEST_ROWS||Number(state.retainedRows)!==RETAIN_LATEST_ROWS||Number(state.candidateRows)!==0) fail('collector post-rewrite row boundary mismatch'); if(!/^[a-f0-9]{64}$/u.test(String(state.retainedDigest??''))) fail('collector post-rewrite retained digest missing') }
-
-function structuralState(state,sourceCommit){ return {schemaVersion:1,purpose:'r5-collector-runs-retention-rewrite-structural-state',sourceCommit,projectIdentityDigest:sha256(env('SUPABASE_PROJECT_ID')),
-  maxMigrationVersion:state.maxMigrationVersion,relationOid:Number(state.relationOid),persistence:state.persistence,rlsEnabled:state.rlsEnabled,columns:state.columns,indexes:state.indexes,constraints:state.constraints,inboundForeignKeys:state.inboundForeignKeys,userTriggers:state.userTriggers,policies:state.policies,privileges:state.privileges,routineConsumers:state.routineConsumers,dependentViews:state.dependentViews,activeRun:state.activeRun,scheduler:state.scheduler} }
+function structuralState(state,sourceCommit){ return {schemaVersion:1,purpose:'r5-collector-runs-retention-rewrite-structural-state',sourceCommit,projectIdentityDigest:sha256(env('SUPABASE_PROJECT_ID')),maxMigrationVersion:state.maxMigrationVersion,relationOid:Number(state.relationOid),persistence:state.persistence,rlsEnabled:state.rlsEnabled,columns:state.columns,indexes:state.indexes,constraints:state.constraints,inboundForeignKeys:state.inboundForeignKeys,userTriggers:state.userTriggers,policies:state.policies,privileges:state.privileges,routineConsumers:state.routineConsumers,dependentViews:state.dependentViews,activeRun:state.activeRun,scheduler:state.scheduler} }
 function dataState(state){ return {schemaVersion:1,purpose:'r5-collector-runs-retention-rewrite-data-state',exactRows:Number(state.exactRows),relationBytes:Number(state.relationBytes),retainedRows:Number(state.retainedRows),candidateRows:Number(state.candidateRows),retainedDigest:state.retainedDigest,candidateDigest:state.candidateDigest,retainedMinId:Number(state.retainedMinId),retainedMaxId:Number(state.retainedMaxId),candidateMinId:Number(state.candidateMinId),candidateMaxId:Number(state.candidateMaxId),retainedLogicalBytes:Number(state.retainedLogicalBytes),candidateLogicalBytes:Number(state.candidateLogicalBytes),sequenceState:state.sequenceState} }
+function assertDataStateForMutation(data){
+  for(const key of ['exactRows','retainedRows','candidateRows','retainedMinId','retainedMaxId','candidateMinId','candidateMaxId']) if(!Number.isSafeInteger(Number(data[key]))||Number(data[key])<0) fail(`invalid mutation data ${key}`)
+  for(const key of ['retainedDigest','candidateDigest']) if(!/^[a-f0-9]{64}$/u.test(String(data[key]??''))) fail(`invalid mutation data ${key}`)
+  if(Number(data.retainedRows)!==RETAIN_LATEST_ROWS||Number(data.candidateRows)!==Number(data.exactRows)-RETAIN_LATEST_ROWS) fail('mutation data row partition mismatch')
+  if(!data.sequenceState||!Number.isSafeInteger(Number(data.sequenceState.lastValue))||Number(data.sequenceState.lastValue)<=0||data.sequenceState.isCalled!==true) fail('invalid mutation sequence state')
+}
 
-const MUTATION_SQL=String.raw`begin;
+function mutationSql(expected){
+  assertDataStateForMutation(expected)
+  return String.raw`begin;
 set local lock_timeout='5s';
 set local statement_timeout='45s';
 select pg_advisory_xact_lock(hashtextextended('xrpl-collector-runs-retention-rewrite',0));
 lock table public.xrpl_collector_runs in access exclusive mode;
+create temporary table r5_collector_authorized on commit drop as
+select
+  ${Number(expected.exactRows)}::bigint as exact_rows,
+  ${Number(expected.retainedRows)}::bigint as retained_rows,
+  ${Number(expected.candidateRows)}::bigint as candidate_rows,
+  '${expected.retainedDigest}'::text as retained_digest,
+  '${expected.candidateDigest}'::text as candidate_digest,
+  ${Number(expected.retainedMinId)}::bigint as retained_min_id,
+  ${Number(expected.retainedMaxId)}::bigint as retained_max_id,
+  ${Number(expected.candidateMinId)}::bigint as candidate_min_id,
+  ${Number(expected.candidateMaxId)}::bigint as candidate_max_id,
+  ${Number(expected.sequenceState.lastValue)}::bigint as sequence_last_value,
+  true::boolean as sequence_is_called;
+do $r5$
+declare
+  e record; actual_rows bigint; actual_retained_rows bigint; actual_candidate_rows bigint;
+  actual_retained_digest text; actual_candidate_digest text; actual_retained_min bigint; actual_retained_max bigint;
+  actual_candidate_min bigint; actual_candidate_max bigint; seq_last bigint; seq_called boolean;
+begin
+  select * into strict e from r5_collector_authorized;
+  with ranked as (select r.*,row_number() over(order by completed_at desc,id desc) as retention_rank from public.xrpl_collector_runs r),
+  retained as (select * from ranked where retention_rank<=${RETAIN_LATEST_ROWS}),
+  candidates as (select * from ranked where retention_rank>${RETAIN_LATEST_ROWS})
+  select (select count(*)::bigint from ranked),(select count(*)::bigint from retained),(select count(*)::bigint from candidates),
+    (select ${rowDigest('r')} from retained r),(select ${rowDigest('r')} from candidates r),
+    (select min(id)::bigint from retained),(select max(id)::bigint from retained),(select min(id)::bigint from candidates),(select max(id)::bigint from candidates)
+  into actual_rows,actual_retained_rows,actual_candidate_rows,actual_retained_digest,actual_candidate_digest,actual_retained_min,actual_retained_max,actual_candidate_min,actual_candidate_max;
+  select last_value,is_called into seq_last,seq_called from public.xrpl_collector_runs_id_seq;
+  if actual_rows<>e.exact_rows or actual_retained_rows<>e.retained_rows or actual_candidate_rows<>e.candidate_rows
+    or actual_retained_digest<>e.retained_digest or actual_candidate_digest<>e.candidate_digest
+    or actual_retained_min<>e.retained_min_id or actual_retained_max<>e.retained_max_id
+    or actual_candidate_min<>e.candidate_min_id or actual_candidate_max<>e.candidate_max_id
+    or seq_last<>e.sequence_last_value or seq_called is distinct from e.sequence_is_called then
+    raise exception 'collector authorized data state drift under lock';
+  end if;
+end $r5$;
 create temporary table r5_collector_retained on commit drop as
   select * from public.xrpl_collector_runs order by completed_at desc,id desc limit ${RETAIN_LATEST_ROWS};
 create temporary table r5_collector_expected on commit drop as
-select
-  (select count(*)::bigint from r5_collector_retained) as retained_rows,
+select (select count(*)::bigint from r5_collector_retained) as retained_rows,
   (select ${rowDigest('r')} from r5_collector_retained r) as retained_digest,
   (select min(id)::bigint from r5_collector_retained) as min_id,
   (select max(id)::bigint from r5_collector_retained) as max_id,
   (select last_value::bigint from public.xrpl_collector_runs_id_seq) as sequence_last_value,
   (select is_called from public.xrpl_collector_runs_id_seq) as sequence_is_called;
-do $r5$
-declare e record;
-begin
-  select * into strict e from r5_collector_expected;
-  if e.retained_rows<>${RETAIN_LATEST_ROWS} then raise exception 'collector retained row count mismatch before rewrite'; end if;
-  if e.sequence_is_called is not true then raise exception 'collector sequence is not called'; end if;
-end $r5$;
 truncate table public.xrpl_collector_runs;
-insert into public.xrpl_collector_runs(
-  id,profile_id,invocation_id,lease_owner,source,status,started_at,completed_at,
-  validated_ledger_index,validated_ledger_hash,error_message,created_at
-) overriding system value
-select id,profile_id,invocation_id,lease_owner,source,status,started_at,completed_at,
-  validated_ledger_index,validated_ledger_hash,error_message,created_at
-from r5_collector_retained order by id;
+insert into public.xrpl_collector_runs(id,profile_id,invocation_id,lease_owner,source,status,started_at,completed_at,validated_ledger_index,validated_ledger_hash,error_message,created_at) overriding system value
+select id,profile_id,invocation_id,lease_owner,source,status,started_at,completed_at,validated_ledger_index,validated_ledger_hash,error_message,created_at from r5_collector_retained order by id;
 do $r5$
 declare e record; actual_rows bigint; actual_digest text; actual_min bigint; actual_max bigint; seq_last bigint; seq_called boolean;
 begin
@@ -160,13 +188,20 @@ begin
   if seq_last<>e.sequence_last_value or seq_called is distinct from e.sequence_is_called then raise exception 'collector identity sequence drift after rewrite'; end if;
 end $r5$;
 commit;`
+}
 
-for(const required of ["set local lock_timeout='5s'","set local statement_timeout='45s'","lock table public.xrpl_collector_runs in access exclusive mode","limit 256","truncate table public.xrpl_collector_runs","overriding system value","collector retained identity mismatch after rewrite","collector identity sequence drift after rewrite"]) if(!MUTATION_SQL.includes(required)) fail(`collector mutation contract missing: ${required}`)
-if((MUTATION_SQL.match(/\btruncate\s+table\b/giu)??[]).length!==1) fail('collector mutation must contain exactly one TRUNCATE')
-for(const forbidden of [/\bdelete\s+from\b/iu,/\brestart\s+identity\b/iu,/\bcascade\b/iu,/\bvacuum\b/iu,/\breindex\b/iu,/\bcluster\b/iu,/\bcron\./iu,/\bmainnet\b/iu,/\bxrpl_phase_messages\b/iu,/\bxrpl_phase_successors\b/iu,/\bxrpl_phase_work\b/iu]) if(forbidden.test(MUTATION_SQL)) fail(`collector mutation contains forbidden capability: ${forbidden}`)
+const MUTATION_CONTRACT_SAMPLE=mutationSql({exactRows:21329,retainedRows:256,candidateRows:21073,retainedDigest:'a'.repeat(64),candidateDigest:'b'.repeat(64),retainedMinId:21074,retainedMaxId:21329,candidateMinId:1,candidateMaxId:21073,sequenceState:{lastValue:21329,isCalled:true}})
+for(const required of ["set local lock_timeout='5s'","set local statement_timeout='45s'","lock table public.xrpl_collector_runs in access exclusive mode","collector authorized data state drift under lock","limit 256","truncate table public.xrpl_collector_runs","overriding system value","collector retained identity mismatch after rewrite","collector identity sequence drift after rewrite"]) if(!MUTATION_CONTRACT_SAMPLE.includes(required)) fail(`collector mutation contract missing: ${required}`)
+if((MUTATION_CONTRACT_SAMPLE.match(/\btruncate\s+table\b/giu)??[]).length!==1) fail('collector mutation must contain exactly one TRUNCATE')
+for(const forbidden of [/\bdelete\s+from\b/iu,/\brestart\s+identity\b/iu,/\bcascade\b/iu,/\bvacuum\b/iu,/\breindex\b/iu,/\bcluster\b/iu,/\bcron\./iu,/\bmainnet\b/iu,/\bxrpl_phase_messages\b/iu,/\bxrpl_phase_successors\b/iu,/\bxrpl_phase_work\b/iu]) if(forbidden.test(MUTATION_CONTRACT_SAMPLE)) fail(`collector mutation contains forbidden capability: ${forbidden}`)
 
-async function inspect(sourceCommit,after=false){ const state=firstJson(await managementQuery(inspectionSql(),true)); after?validateAfter(state):validateBefore(state); const structural=structuralState(state,sourceCommit); const data=dataState(state); const structuralSha=sha256(JSON.stringify(structural)); const dataSha=sha256(JSON.stringify(data)); const mutationSha=sha256(MUTATION_SQL); const plan={schemaVersion:1,purpose:'r5-collector-runs-retention-rewrite-plan',sourceCommit,retainLatestRows:RETAIN_LATEST_ROWS,structuralStateSha256:structuralSha,dataStateSha256:dataSha,mutationSha256:mutationSha,maxDatabaseBytesBefore:MAX_DATABASE_BYTES_BEFORE}; return {...state,structuralState:structural,structuralStateSha256:structuralSha,dataState:data,dataStateSha256:dataSha,mutation:{sha256:mutationSha,retainLatestRows:RETAIN_LATEST_ROWS,lockTimeoutSeconds:5,statementTimeoutSeconds:45},plan,planSha256:sha256(JSON.stringify(plan)),retentionMutationAuthorized:false,physicalRewriteAuthorized:false,sequenceMutationAuthorized:false,schedulerMutationAuthorized:false,deploymentAuthorized:false,publicReaderMutationAuthorized:false,mainnetDisabled:true,r5RearmAuthorized:false} }
-
+async function inspect(sourceCommit,after=false){
+  const state=firstJson(await managementQuery(inspectionSql(),true)); after?validateAfter(state):validateBefore(state)
+  const structural=structuralState(state,sourceCommit),data=dataState(state),structuralSha=sha256(JSON.stringify(structural)),dataSha=sha256(JSON.stringify(data))
+  const exactMutation=mutationSql(data),mutationSha=sha256(exactMutation)
+  const plan={schemaVersion:2,purpose:'r5-collector-runs-retention-rewrite-plan',sourceCommit,retainLatestRows:RETAIN_LATEST_ROWS,structuralStateSha256:structuralSha,dataStateSha256:dataSha,mutationSha256:mutationSha,maxDatabaseBytesBefore:MAX_DATABASE_BYTES_BEFORE,transactionLockRevalidation:true}
+  return {...state,structuralState:structural,structuralStateSha256:structuralSha,dataState:data,dataStateSha256:dataSha,mutation:{sha256:mutationSha,retainLatestRows:RETAIN_LATEST_ROWS,lockTimeoutSeconds:5,statementTimeoutSeconds:45,transactionLockRevalidation:true},plan,planSha256:sha256(JSON.stringify(plan)),retentionMutationAuthorized:false,physicalRewriteAuthorized:false,sequenceMutationAuthorized:false,schedulerMutationAuthorized:false,deploymentAuthorized:false,publicReaderMutationAuthorized:false,mainnetDisabled:true,r5RearmAuthorized:false}
+}
 async function prepare(options){ const sourceCommit=validateSource(options); const result=await inspect(sourceCommit,false); await writeJson(options.output,result); console.log(JSON.stringify(result)) }
 async function apply(options){
   const sourceCommit=validateSource(options),authorizedState=options['authorized-state'],authorizedData=options['authorized-data'],authorizedPlan=options['authorized-plan'],authorizedMutation=options['authorized-mutation']
@@ -175,8 +210,9 @@ async function apply(options){
   if(before.structuralStateSha256!==authorizedState) fail('authorized structural state mismatch')
   if(before.dataStateSha256!==authorizedData) fail('authorized data state mismatch')
   if(before.planSha256!==authorizedPlan) fail('authorized plan mismatch')
-  if(before.mutation.sha256!==authorizedMutation) fail('authorized mutation mismatch')
-  await managementQuery(MUTATION_SQL,false)
+  const exactMutation=mutationSql(before.dataState)
+  if(sha256(exactMutation)!==authorizedMutation||before.mutation.sha256!==authorizedMutation) fail('authorized mutation mismatch')
+  await managementQuery(exactMutation,false)
   const after=await inspect(sourceCommit,true)
   if(after.structuralStateSha256!==before.structuralStateSha256) fail('post-rewrite structural state mismatch')
   if(Number(after.exactRows)!==RETAIN_LATEST_ROWS||after.retainedDigest!==before.retainedDigest||Number(after.retainedMinId)!==Number(before.retainedMinId)||Number(after.retainedMaxId)!==Number(before.retainedMaxId)) fail('post-rewrite retained row identity mismatch')
@@ -184,7 +220,7 @@ async function apply(options){
   if(JSON.stringify(after.sequenceState)!==JSON.stringify(before.sequenceState)) fail('post-rewrite sequence state mismatch')
   if(Number(after.relationBytes)>=Number(before.relationBytes)) fail('collector relation bytes were not reclaimed')
   if(Number(after.databaseBytes)>=Number(before.databaseBytes)) fail('database bytes were not reclaimed')
-  const result={schemaVersion:1,purpose:'r5-collector-runs-retention-rewrite-apply',sourceCommit,structuralStateSha256:authorizedState,dataStateSha256:authorizedData,planSha256:authorizedPlan,mutationSha256:authorizedMutation,rowsBefore:Number(before.exactRows),rowsAfter:Number(after.exactRows),retainedDigestBefore:before.retainedDigest,retainedDigestAfter:after.retainedDigest,retainedMinId:Number(after.retainedMinId),retainedMaxId:Number(after.retainedMaxId),sequenceBefore:before.sequenceState,sequenceAfter:after.sequenceState,relationBytesBefore:Number(before.relationBytes),relationBytesAfter:Number(after.relationBytes),relationBytesReclaimed:Number(before.relationBytes)-Number(after.relationBytes),databaseBytesBefore:Number(before.databaseBytes),databaseBytesAfter:Number(after.databaseBytes),databaseBytesReclaimed:Number(before.databaseBytes)-Number(after.databaseBytes),activeRunBefore:before.activeRun,activeRunAfter:after.activeRun,schedulerBefore:before.scheduler,schedulerAfter:after.scheduler,retentionMutationPerformed:true,physicalRewritePerformed:true,sequenceMutationPerformed:false,schedulerMutationPerformed:false,deploymentPerformed:false,publicReaderMutationPerformed:false,mainnetDisabled:true,r5RearmPerformed:false}
+  const result={schemaVersion:2,purpose:'r5-collector-runs-retention-rewrite-apply',sourceCommit,structuralStateSha256:authorizedState,dataStateSha256:authorizedData,planSha256:authorizedPlan,mutationSha256:authorizedMutation,transactionLockRevalidationPerformed:true,rowsBefore:Number(before.exactRows),rowsAfter:Number(after.exactRows),retainedDigestBefore:before.retainedDigest,retainedDigestAfter:after.retainedDigest,retainedMinId:Number(after.retainedMinId),retainedMaxId:Number(after.retainedMaxId),sequenceBefore:before.sequenceState,sequenceAfter:after.sequenceState,relationBytesBefore:Number(before.relationBytes),relationBytesAfter:Number(after.relationBytes),relationBytesReclaimed:Number(before.relationBytes)-Number(after.relationBytes),databaseBytesBefore:Number(before.databaseBytes),databaseBytesAfter:Number(after.databaseBytes),databaseBytesReclaimed:Number(before.databaseBytes)-Number(after.databaseBytes),activeRunBefore:before.activeRun,activeRunAfter:after.activeRun,schedulerBefore:before.scheduler,schedulerAfter:after.scheduler,retentionMutationPerformed:true,physicalRewritePerformed:true,sequenceMutationPerformed:false,schedulerMutationPerformed:false,deploymentPerformed:false,publicReaderMutationPerformed:false,mainnetDisabled:true,r5RearmPerformed:false}
   await writeJson(options.output,result); console.log(JSON.stringify(result))
 }
 
