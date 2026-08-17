@@ -13,8 +13,14 @@ python -m py_compile "$policy"
 for required in \
   "const MIN_ARCHIVE_ROWS = 1500" \
   "xrpl_phase_archive_v1.terminal_messages" \
-  "missing_work_id_rows" \
-  "payload_column_bytes" \
+  'as "nullPayloadRows"' \
+  'as "missingWorkIdRows"' \
+  'as "workIdRows"' \
+  'as "payloadColumnBytes"' \
+  'as "workIdMinBytes"' \
+  'as "workIdMaxBytes"' \
+  'as "workIdAvgBytes"' \
+  'as "orderedPayloadDigest"' \
   "archive_consumers" \
   "mentions_archived_payload" \
   "reads_payload_work_id" \
@@ -66,6 +72,9 @@ for pattern in (
 ):
     if re.search(pattern, sql, re.I):
         raise SystemExit(f'v2 preflight SQL contains mutation token: {pattern}')
+for key in ('nullPayloadRows','missingWorkIdRows','workIdRows','payloadColumnBytes','workIdMinBytes','workIdMaxBytes','workIdAvgBytes','orderedPayloadDigest'):
+    if f'as "{key}"' not in match.group(1):
+        raise SystemExit(f'v2 preflight JSON key casing not pinned: {key}')
 PY
 
 echo 'R5 terminal archive v2 production read-only preflight contract PASS'
