@@ -27,12 +27,33 @@ for required in \
   grep -Fq "$required" "$planner"
 done
 
-for forbidden in 'read_only:false' 'delete from' 'truncate' 'vacuum full' 'reindex index' 'drop index' 'alter table' 'create index' 'cron.schedule' 'cron.unschedule' 'wrangler deploy' 'supabase db push'; do
-  if grep -Fiq "$forbidden" "$planner"; then
-    echo "capacity planner contains forbidden mutation capability: $forbidden" >&2
-    exit 1
-  fi
-done
+python - "$planner" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+text = Path(sys.argv[1]).read_text()
+match = re.search(r"const SQL = String\.raw`(.*?)`;", text, re.S)
+if not match:
+    raise SystemExit('capacity planner SQL block missing')
+sql = match.group(1).lower()
+for pattern in (
+    r'\bdelete\s+from\b',
+    r'\btruncate\b',
+    r'\bvacuum\b',
+    r'\breindex\b',
+    r'\balter\s+table\b',
+    r'\bdrop\s+(?:table|index)\b',
+    r'\bcreate\s+(?:table|index)\b',
+    r'\bupdate\s+',
+    r'\binsert\s+into\b',
+):
+    if re.search(pattern, sql):
+        raise SystemExit(f'capacity planner SQL contains forbidden mutation capability: {pattern}')
+for forbidden in ('read_only:false', 'cron.schedule', 'cron.unschedule', 'wrangler deploy', 'supabase db push'):
+    if forbidden in text.lower():
+        raise SystemExit(f'capacity planner contains forbidden execution capability: {forbidden}')
+PY
 
 grep -Fq 'Plan terminal archive capacity read-only' "$workflow"
 grep -Fq 'r5-terminal-archive-capacity-readonly-planner.mjs' "$workflow"
