@@ -78,11 +78,11 @@ for forbidden in ('delete from public', 'truncate table', 'update public', 'inse
                   'vacuum ', 'cluster ', 'cron.schedule', 'cron.unschedule', 'wrangler deploy'):
     if forbidden in lower:
         raise SystemExit(f'ready-index reindex manager contains forbidden capability: {forbidden}')
-if manager.count('reindex index public.xrpl_phase_messages_ready_idx') != 1:
-    raise SystemExit('ready-index reindex manager must contain exactly one REINDEX statement')
+if manager.count('reindex index public.xrpl_phase_messages_ready_idx;') != 1:
+    raise SystemExit('ready-index reindex manager must contain exactly one executable REINDEX statement')
 lock_pos=manager.find('lock table public.xrpl_phase_messages in share mode')
 revalidate_pos=manager.find('ready index authorized data drift under lock')
-reindex_pos=manager.find('reindex index public.xrpl_phase_messages_ready_idx')
+reindex_pos=manager.find('reindex index public.xrpl_phase_messages_ready_idx;')
 if min(lock_pos,revalidate_pos,reindex_pos) < 0 or not (lock_pos < revalidate_pos < reindex_pos):
     raise SystemExit('ready-index reindex must lock and revalidate before REINDEX')
 if re.search(r'\breindex\s+(?:table|database|system)\b', manager, re.I):
