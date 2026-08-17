@@ -92,9 +92,9 @@ jobs:
           Current production migration head: \`${MIGRATION_HEAD}\`
           Authorization expires: \`${expires}\`
 
-          This proposal authorizes only revocation of PUBLIC / anon / authenticated / service_role EXECUTE privileges on the four obsolete revision-3 recovery entry points: checkpoint, prepare, claim, and complete. It does not drop the functions and does not mutate transport rows, canonical history, archive rows, physical storage, scheduler, deployment, public readers, Mainnet state, or R5 revision-4 state.
+          This proposal authorizes only revocation of PUBLIC / anon / authenticated / service_role EXECUTE privileges on the four obsolete revision-3 recovery entry points: prepare, direct claim, prepared-head claim wrapper, and complete. It does not drop the functions and does not mutate transport rows, canonical history, archive rows, physical storage, scheduler, deployment, public readers, Mainnet state, or R5 revision-4 state.
 
-          The multichunk witness function and throughput baseline reader remain executable and are source-hash guarded. The revision-4 successor must remain halted with \`r5_recovery_database_halt\`, no revision-3 prepared/running run or leased batch may exist, and no executable function caller may depend on a retired entry point.
+          The strict checkpoint, checkpoint wrapper, revision-4 checkpoint, multichunk witness, and throughput baseline functions remain executable and are source-hash guarded. The revision-4 successor must remain halted with \`r5_recovery_database_halt\`, no revision-3 prepared/running run or leased batch may exist, and no service-role executable caller outside the retirement set may depend on a retired entry point.
 
           Exact SQL: \`$(jq -r '.plan.file.path' "$file")\` — SHA-256 \`$(jq -r '.plan.file.sha256' "$file")\`
 
@@ -234,6 +234,6 @@ jobs:
           Run: \`${GITHUB_RUN_ID}\`
           Source commit: \`${{ steps.auth.outputs.commit }}\`
 
-          Scope was limited to EXECUTE privilege retirement for four obsolete revision-3 entry points. No transport row delete/backfill, canonical history mutation, physical compaction, scheduler/deployment/public-reader/Mainnet mutation, or R5 rearm was authorized.
+          Scope was limited to EXECUTE privilege retirement for four obsolete revision-3 recovery entry points: prepare, direct claim, prepared-head claim wrapper, and complete. The checkpoint path remains executable. No transport row delete/backfill, canonical history mutation, physical compaction, scheduler/deployment/public-reader/Mainnet mutation, or R5 rearm was authorized.
           EOF2
           gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/result.md
