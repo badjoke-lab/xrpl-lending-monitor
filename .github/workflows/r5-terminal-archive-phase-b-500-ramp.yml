@@ -1,0 +1,296 @@
+name: R5 terminal archive Phase B 500-row ramp
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: r5-terminal-archive-phase-b-tranche
+  cancel-in-progress: false
+
+env:
+  QUALIFICATION_ISSUE: '1261'
+  MANAGER_PATH: scripts/run-r5-terminal-archive-phase-b-500-ramp.mjs
+  SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+  SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  prepare:
+    if: >-
+      github.event.issue.number == 1261 &&
+      github.event.comment.user.login == 'badjoke-lab' &&
+      github.event.comment.body == '/r5-terminal-archive-phase-b-500-prepare'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Check out exact current main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prepare exact bounded 500-row Phase B tranche read-only
+        id: state
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p r5-terminal-archive-phase-b-500-evidence
+          source_commit="$(git rev-parse HEAD)"
+          manager_sha="$(sha256sum "$MANAGER_PATH" | awk '{print $1}')"
+          node "$MANAGER_PATH" prepare \
+            --source-commit "$source_commit" \
+            --output r5-terminal-archive-phase-b-500-evidence/prepare.json \
+            > r5-terminal-archive-phase-b-500-evidence/prepare.stdout.json
+          file=r5-terminal-archive-phase-b-500-evidence/prepare.json
+          test "$(jq -r '.productionDatabaseReadOnly' "$file")" = true
+          test "$(jq -r '.activeRun.status' "$file")" = halted
+          test "$(jq -r '.activeRun.lastError' "$file")" = r5_recovery_database_halt
+          test "$(jq -r '.mainnetDisabled' "$file")" = true
+          test "$(jq -r '.checkpointFreezeAuthorized' "$file")" = false
+          test "$(jq -r '.terminalTransportArchiveDeleteAuthorized' "$file")" = false
+          test "$(jq -r '.physicalCompactionAuthorized' "$file")" = false
+          test "$(jq -r '.vacuumAuthorized' "$file")" = false
+          test "$(jq -r '.reindexAuthorized' "$file")" = false
+          test "$(jq -r '.schedulerMutationAuthorized' "$file")" = false
+          test "$(jq -r '.deploymentAuthorized' "$file")" = false
+          test "$(jq -r '.publicReaderMutationAuthorized' "$file")" = false
+          test "$(jq -r '.r5RearmAuthorized' "$file")" = false
+          count="$(jq -r '.candidates | length' "$file")"
+          logical="$(jq -r '.selectedLogicalBytes' "$file")"
+          test "$count" -ge 1 && test "$count" -le 500
+          test "$logical" -ge 0 && test "$logical" -le 2000000
+          printf 'source_commit=%s\nmanager_sha=%s\nplan=%s\nstate=%s\ncandidates=%s\ncutoff=%s\nproject=%s\nhead=%s\ndatabase_bytes=%s\narchive_rows=%s\ncount=%s\nlogical=%s\ncheckpoint=%s\n' \
+            "$source_commit" "$manager_sha" \
+            "$(jq -r '.planDigestSha256' "$file")" \
+            "$(jq -r '.structuralStateSha256' "$file")" \
+            "$(jq -r '.candidateDigestSha256' "$file")" \
+            "$(jq -r '.cutoff' "$file")" \
+            "$(jq -r '.projectIdentityDigest' "$file")" \
+            "$(jq -r '.maxMigrationVersion' "$file")" \
+            "$(jq -r '.databaseBytes' "$file")" \
+            "$(jq -r '.archiveRows' "$file")" \
+            "$count" "$logical" \
+            "$(jq -r '.checkpoint.classification' "$file")" >> "$GITHUB_OUTPUT"
+
+      - name: Publish expiring exact 500-row Phase B authorization proposal
+        env:
+          SOURCE_COMMIT: ${{ steps.state.outputs.source_commit }}
+          MANAGER_SHA: ${{ steps.state.outputs.manager_sha }}
+          PLAN_SHA: ${{ steps.state.outputs.plan }}
+          STATE_SHA: ${{ steps.state.outputs.state }}
+          CANDIDATE_SHA: ${{ steps.state.outputs.candidates }}
+          CUTOFF: ${{ steps.state.outputs.cutoff }}
+          PROJECT_DIGEST: ${{ steps.state.outputs.project }}
+          MIGRATION_HEAD: ${{ steps.state.outputs.head }}
+          DATABASE_BYTES: ${{ steps.state.outputs.database_bytes }}
+          ARCHIVE_ROWS: ${{ steps.state.outputs.archive_rows }}
+          CANDIDATE_COUNT: ${{ steps.state.outputs.count }}
+          LOGICAL_BYTES: ${{ steps.state.outputs.logical }}
+          CHECKPOINT_STATE: ${{ steps.state.outputs.checkpoint }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          expires="$(date -u -d '+2 hours' '+%Y-%m-%dT%H:%M:%SZ')"
+          nonce="$(openssl rand -hex 8)"
+          command="/r5-terminal-archive-phase-b-500-authorize commit=${SOURCE_COMMIT} manager=${MANAGER_SHA} plan=${PLAN_SHA} state=${STATE_SHA} candidates=${CANDIDATE_SHA} cutoff=${CUTOFF} project=${PROJECT_DIGEST} head=${MIGRATION_HEAD} prepare_run=${GITHUB_RUN_ID} expires=${expires} nonce=${nonce}"
+          cat > /tmp/r5-terminal-archive-phase-b-500-proposal.md <<EOF2
+          ## R5 terminal archive Phase B 500-row ramp authorization proposal
+
+          Preparation run: \`${GITHUB_RUN_ID}\`
+          Source main commit: \`${SOURCE_COMMIT}\`
+          Ramp manager SHA-256: \`${MANAGER_SHA}\`
+          Plan digest: \`${PLAN_SHA}\`
+          Structural state SHA-256: \`${STATE_SHA}\`
+          Exact candidate tranche SHA-256: \`${CANDIDATE_SHA}\`
+          Fixed eligibility cutoff: \`${CUTOFF}\`
+          Project identity digest: \`${PROJECT_DIGEST}\`
+          Production migration head: \`${MIGRATION_HEAD}\`
+          Database bytes at preparation: \`${DATABASE_BYTES}\`
+          Archive rows at preparation: \`${ARCHIVE_ROWS}\`
+          Exact candidate count / bounded logical bytes: \`${CANDIDATE_COUNT} / ${LOGICAL_BYTES}\`
+          Checkpoint state: \`${CHECKPOINT_STATE}\`
+          Authorization expires: \`${expires}\`
+
+          This proposal authorizes **one 500-row ramp tranche only**. The exact candidate set is at most 500 completed primary-profile rows older than the fixed 24-hour cutoff and remains capped at 2,000,000 logical bytes. The wrapper pins the proven 250-row manager SHA-256 and changes only its row limit from 250 to 500 at runtime; all exact candidate/state guards, advisory locks, the 180-second database statement timeout, checkpoint fail-close, private archive semantics, and post-verification remain unchanged.
+
+          It does **not** authorize physical compaction, VACUUM, REINDEX, table rewrite, scheduler mutation, deployment, public-reader mutation, Mainnet, stabilization, soak, or R5 rearm.
+
+          Exact authorization command:
+
+          \`${command}\`
+          EOF2
+          gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/r5-terminal-archive-phase-b-500-proposal.md
+
+      - name: Upload sanitized 500-row Phase B preparation evidence
+        if: always() && steps.state.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: r5-terminal-archive-phase-b-500-prepare-evidence
+          path: r5-terminal-archive-phase-b-500-evidence
+          if-no-files-found: error
+          retention-days: 14
+
+  execute:
+    if: >-
+      github.event.issue.number == 1261 &&
+      github.event.comment.user.login == 'badjoke-lab' &&
+      startsWith(github.event.comment.body, '/r5-terminal-archive-phase-b-500-authorize ')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    env:
+      AUTHORIZATION_BODY: ${{ github.event.comment.body }}
+      AUTHORIZATION_CREATED_AT: ${{ github.event.comment.created_at }}
+      AUTHORIZATION_COMMENT_ID: ${{ github.event.comment.id }}
+    steps:
+      - name: Check out exact current main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Parse and bind exact owner 500-row Phase B authorization
+        id: auth
+        shell: bash
+        run: |
+          set -euo pipefail
+          regex='^/r5-terminal-archive-phase-b-500-authorize commit=([a-f0-9]{40}) manager=([a-f0-9]{64}) plan=([a-f0-9]{64}) state=([a-f0-9]{64}) candidates=([a-f0-9]{64}) cutoff=([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z) project=([a-f0-9]{64}) head=([0-9]{14}) prepare_run=([0-9]+) expires=([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z) nonce=([a-f0-9]{16})$'
+          [[ "$AUTHORIZATION_BODY" =~ $regex ]] || { echo '500-row Phase B authorization shape mismatch' >&2; exit 1; }
+          commit="${BASH_REMATCH[1]}"; manager="${BASH_REMATCH[2]}"; plan="${BASH_REMATCH[3]}"; state="${BASH_REMATCH[4]}"; candidates="${BASH_REMATCH[5]}"; cutoff="${BASH_REMATCH[6]}"; project="${BASH_REMATCH[7]}"; head="${BASH_REMATCH[8]}"; prepare_run="${BASH_REMATCH[9]}"; expires="${BASH_REMATCH[10]}"; nonce="${BASH_REMATCH[11]}"
+          test "$commit" = "$(git rev-parse HEAD)"
+          test "$manager" = "$(sha256sum "$MANAGER_PATH" | awk '{print $1}')"
+          [[ "$SUPABASE_PROJECT_ID" =~ ^[a-z]{20}$ ]]
+          current_project="$(PROJECT_ID="$SUPABASE_PROJECT_ID" node -e "const c=require('node:crypto');process.stdout.write(c.createHash('sha256').update(process.env.PROJECT_ID).digest('hex'))")"
+          test "$project" = "$current_project"
+          expires_epoch="$(date -u -d "$expires" +%s)"; auth_epoch="$(date -u -d "$AUTHORIZATION_CREATED_AT" +%s)"; now_epoch="$(date -u +%s)"
+          test "$auth_epoch" -lt "$expires_epoch"; test "$now_epoch" -le "$expires_epoch"; test $((expires_epoch - auth_epoch)) -le 7200
+          printf 'commit=%s\nmanager=%s\nplan=%s\nstate=%s\ncandidates=%s\ncutoff=%s\nproject=%s\nhead=%s\nprepare_run=%s\nexpires=%s\nnonce=%s\n' "$commit" "$manager" "$plan" "$state" "$candidates" "$cutoff" "$project" "$head" "$prepare_run" "$expires" "$nonce" >> "$GITHUB_OUTPUT"
+
+      - name: Verify exact prior 500-row proposal and unique owner authorization
+        env:
+          PREPARE_RUN: ${{ steps.auth.outputs.prepare_run }}
+          COMMIT: ${{ steps.auth.outputs.commit }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${PREPARE_RUN}" > /tmp/phase-b-500-prepare-run.json
+          jq -e --arg commit "$COMMIT" '.event == "issue_comment" and .conclusion == "success" and .head_sha == $commit and .actor.login == "badjoke-lab"' /tmp/phase-b-500-prepare-run.json >/dev/null
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${QUALIFICATION_ISSUE}/comments?per_page=100" | jq -s 'add' > /tmp/phase-b-500-comments.json
+          EXPECTED="$AUTHORIZATION_BODY" PREPARE_RUN="$PREPARE_RUN" AUTH_ID="$AUTHORIZATION_COMMENT_ID" AUTH_CREATED_AT="$AUTHORIZATION_CREATED_AT" node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs'
+          const comments=JSON.parse(readFileSync('/tmp/phase-b-500-comments.json','utf8'));const expected=process.env.EXPECTED;const run=process.env.PREPARE_RUN;const authAt=Date.parse(process.env.AUTH_CREATED_AT??'')
+          const proposals=comments.filter(c=>c?.user?.login==='github-actions[bot]'&&typeof c?.body==='string'&&c.body.includes(`Preparation run: \`${run}\``)&&c.body.includes(`\`${expected}\``))
+          if(proposals.length!==1)throw new Error(`expected one exact 500-row Phase B proposal, found ${proposals.length}`)
+          if(!(Date.parse(proposals[0].created_at??'')<authAt))throw new Error('500-row Phase B proposal must precede authorization')
+          const owner=comments.filter(c=>c?.user?.login==='badjoke-lab'&&c?.body===expected)
+          if(owner.length!==1||Number(owner[0].id)!==Number(process.env.AUTH_ID))throw new Error(`500-row Phase B authorization must be unique, found ${owner.length}`)
+          NODE
+
+      - name: Revalidate exact bounded 500-row Phase B tranche read-only
+        env:
+          COMMIT: ${{ steps.auth.outputs.commit }}
+          AUTH_PLAN: ${{ steps.auth.outputs.plan }}
+          AUTH_STATE: ${{ steps.auth.outputs.state }}
+          AUTH_CANDIDATES: ${{ steps.auth.outputs.candidates }}
+          CUTOFF: ${{ steps.auth.outputs.cutoff }}
+          AUTH_HEAD: ${{ steps.auth.outputs.head }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p r5-terminal-archive-phase-b-500-evidence
+          node "$MANAGER_PATH" prepare --source-commit "$COMMIT" --cutoff "$CUTOFF" --output r5-terminal-archive-phase-b-500-evidence/pre-apply.json > /tmp/phase-b-500-pre.json
+          test "$(jq -r '.planDigestSha256' /tmp/phase-b-500-pre.json)" = "$AUTH_PLAN"
+          test "$(jq -r '.structuralStateSha256' /tmp/phase-b-500-pre.json)" = "$AUTH_STATE"
+          test "$(jq -r '.candidateDigestSha256' /tmp/phase-b-500-pre.json)" = "$AUTH_CANDIDATES"
+          test "$(jq -r '.maxMigrationVersion' /tmp/phase-b-500-pre.json)" = "$AUTH_HEAD"
+          test "$(jq -r '.activeRun.status' /tmp/phase-b-500-pre.json)" = halted
+          test "$(jq -r '.activeRun.lastError' /tmp/phase-b-500-pre.json)" = r5_recovery_database_halt
+          count="$(jq -r '.candidates | length' /tmp/phase-b-500-pre.json)"
+          logical="$(jq -r '.selectedLogicalBytes' /tmp/phase-b-500-pre.json)"
+          test "$count" -ge 1 && test "$count" -le 500
+          test "$logical" -ge 0 && test "$logical" -le 2000000
+
+      - name: Apply only exact authorized bounded 500-row Phase B tranche
+        id: apply
+        env:
+          COMMIT: ${{ steps.auth.outputs.commit }}
+          AUTH_PLAN: ${{ steps.auth.outputs.plan }}
+          AUTH_STATE: ${{ steps.auth.outputs.state }}
+          AUTH_CANDIDATES: ${{ steps.auth.outputs.candidates }}
+          CUTOFF: ${{ steps.auth.outputs.cutoff }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node "$MANAGER_PATH" apply \
+            --source-commit "$COMMIT" \
+            --cutoff "$CUTOFF" \
+            --authorized-plan "$AUTH_PLAN" \
+            --authorized-state "$AUTH_STATE" \
+            --authorized-candidates "$AUTH_CANDIDATES" \
+            --output r5-terminal-archive-phase-b-500-evidence/apply.json \
+            2>&1 | tee r5-terminal-archive-phase-b-500-evidence/apply.log
+
+      - name: Verify bounded 500-row Phase B result
+        if: steps.apply.outcome == 'success'
+        shell: bash
+        run: |
+          set -euo pipefail
+          file=r5-terminal-archive-phase-b-500-evidence/apply.json
+          count="$(jq -r '.archivedCount' "$file")"
+          test "$count" -ge 1 && test "$count" -le 500
+          test "$(jq -r '.authorizedCandidateLogicalBytes' "$file")" -le 2000000
+          test "$(jq -r '.archivedVerification.archiveIdentityVerified' "$file")" = true
+          test "$(jq -r '.archivedVerification.liveMessages' "$file")" = 0
+          test "$(jq -r '.archivedVerification.liveMappings' "$file")" = 0
+          test "$(jq -r '.checkpointAfter.classification' "$file")" = frozen_exact
+          test "$(jq -r '.terminalTransportArchiveDeletePerformed' "$file")" = true
+          test "$(jq -r '.canonicalWorkReferenceHistoryMutationPerformed' "$file")" = false
+          test "$(jq -r '.physicalCompactionPerformed' "$file")" = false
+          test "$(jq -r '.vacuumPerformed' "$file")" = false
+          test "$(jq -r '.reindexPerformed' "$file")" = false
+          test "$(jq -r '.schedulerMutationPerformed' "$file")" = false
+          test "$(jq -r '.deploymentPerformed' "$file")" = false
+          test "$(jq -r '.publicReaderMutationPerformed' "$file")" = false
+          test "$(jq -r '.mainnetDisabled' "$file")" = true
+          test "$(jq -r '.stabilizationPerformed' "$file")" = false
+          test "$(jq -r '.soakPerformed' "$file")" = false
+          test "$(jq -r '.r5Rearmed' "$file")" = false
+
+      - name: Publish bounded 500-row Phase B result
+        if: steps.apply.outcome == 'success'
+        shell: bash
+        run: |
+          set -euo pipefail
+          file=r5-terminal-archive-phase-b-500-evidence/apply.json
+          cat > /tmp/phase-b-500-result.md <<EOF2
+          ## R5 terminal archive Phase B 500-row ramp — PASS
+
+          - archived/deleted live terminal transport rows: \`$(jq -r '.archivedCount' "$file")\`
+          - authorized logical bytes: \`$(jq -r '.authorizedCandidateLogicalBytes' "$file")\`
+          - archive rows before / after: \`$(jq -r '.archiveRowsBefore' "$file") / $(jq -r '.archiveRowsAfter' "$file")\`
+          - database bytes before / after: \`$(jq -r '.databaseBytesBefore' "$file") / $(jq -r '.databaseBytesAfter' "$file")\`
+          - checkpoint before / after: \`$(jq -r '.checkpointBefore.classification' "$file") / $(jq -r '.checkpointAfter.classification' "$file")\`
+          - canonical work/reference mutation: \`false\`
+          - physical compaction / VACUUM / REINDEX: \`false / false / false\`
+          - scheduler/deployment/public-reader/Mainnet mutation: \`false\`
+          - stabilization/soak/R5 rearm: \`false\`
+          - run: \`${GITHUB_RUN_ID}\`
+
+          This authorization is exhausted by this one ramp tranche. Further archive movement or physical-space reclamation requires a new prepare and exact owner authorization.
+          EOF2
+          gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/phase-b-500-result.md
+
+      - name: Upload bounded 500-row Phase B evidence
+        if: always() && steps.apply.outcome != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: r5-terminal-archive-phase-b-500-apply-evidence
+          path: r5-terminal-archive-phase-b-500-evidence
+          if-no-files-found: error
+          retention-days: 14
