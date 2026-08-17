@@ -16,6 +16,7 @@ const CHECKPOINT_SIGNATURE = 'public.xrpl_create_r5_active_checkpoint_strict(tex
 const CHECKPOINT_LEGACY_DEFINITION_SHA = 'bc135435e0d729526aff6940c96b3ef78530b4612586f82ef73a7b99e145da10'
 const CHECKPOINT_FROZEN_DEFINITION_SHA = 'e170166e6c73bf4e7a112ad3daf94873935d0b2b248abf55f7bb42059575c733'
 const CHECKPOINT_FAIL_CLOSE_MARKER = 'r5_checkpoint_terminal_archive_requires_archive_aware_checkpoint'
+const PG_IDENTITY_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/u
 
 function fail(message) { throw new Error(message) }
 function sha256(value) { return createHash('sha256').update(String(value), 'utf8').digest('hex') }
@@ -89,6 +90,12 @@ function normalizeCutoff(value) {
   const parsed = new Date(value)
   if (!Number.isFinite(parsed.getTime())) fail('invalid cutoff timestamp')
   return parsed.toISOString()
+}
+
+function normalizeIdentityTimestamp(value, fieldName) {
+  const exact = String(value ?? '')
+  if (!PG_IDENTITY_TIMESTAMP_PATTERN.test(exact)) fail(`invalid ${fieldName} identity timestamp`)
+  return exact
 }
 
 async function resolveCutoff(options) {
@@ -214,8 +221,8 @@ select jsonb_build_object(
       'profileId', profile_id,
       'phase', phase,
       'successorMessageId', successor_message_id,
-      'createdAt', created_at,
-      'completedAt', completed_at,
+      'createdAt', to_char(created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
+      'completedAt', to_char(completed_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
       'payloadSha256', encode(extensions.digest(convert_to(payload::text,'UTF8'),'sha256'),'hex'),
       'resultSha256', case when result is null then null else encode(extensions.digest(convert_to(result::text,'UTF8'),'sha256'),'hex') end
     ) order by root_rank, depth, message_id)
@@ -276,8 +283,8 @@ function normalizeCandidate(raw) {
     profileId: String(raw.profileId),
     phase: String(raw.phase),
     successorMessageId: String(raw.successorMessageId),
-    createdAt: new Date(raw.createdAt).toISOString(),
-    completedAt: new Date(raw.completedAt).toISOString(),
+    createdAt: normalizeIdentityTimestamp(raw.createdAt, 'createdAt'),
+    completedAt: normalizeIdentityTimestamp(raw.completedAt, 'completedAt'),
     payloadSha256: String(raw.payloadSha256),
     resultSha256: raw.resultSha256 == null ? null : String(raw.resultSha256),
   }
@@ -331,6 +338,7 @@ async function inspect(sourceCommit, plan, cutoff) {
   for (const candidate of candidates) {
     if (candidate.profileId !== PROFILE_ID) fail('candidate profile drifted')
     if (!['scan','commit','finalize'].includes(candidate.phase)) fail('candidate phase drifted')
+    if (!PG_IDENTITY_TIMESTAMP_PATTERN.test(candidate.createdAt) || !PG_IDENTITY_TIMESTAMP_PATTERN.test(candidate.completedAt)) fail('candidate identity timestamp invalid')
     if (!/^[a-f0-9]{64}$/u.test(candidate.payloadSha256) || (candidate.resultSha256 != null && !/^[a-f0-9]{64}$/u.test(candidate.resultSha256))) fail('candidate digest invalid')
   }
   const candidateDigestSha256 = sha256(JSON.stringify(candidates))
@@ -464,7 +472,7 @@ async function verifyArchived(candidates) {
       'profileId', profile_id,
       'phase', phase,
       'successorMessageId', successor_message_id,
-      'completedAt', completed_at,
+      'completedAt', to_char(completed_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
       'payloadSha256', encode(extensions.digest(convert_to(payload::text,'UTF8'),'sha256'),'hex'),
       'resultSha256', result_digest
     ) order by message_id) from xrpl_phase_archive_v1.terminal_messages where message_id in (${ids})), '[]'::jsonb)
@@ -473,7 +481,7 @@ async function verifyArchived(candidates) {
   const expected = candidates.map(({ createdAt, ...candidate }) => candidate).sort((a,b)=>a.messageId.localeCompare(b.messageId))
   const actual = (state.archive ?? []).map((raw)=>({
     messageId:String(raw.messageId), profileId:String(raw.profileId), phase:String(raw.phase),
-    successorMessageId:String(raw.successorMessageId), completedAt:new Date(raw.completedAt).toISOString(),
+    successorMessageId:String(raw.successorMessageId), completedAt:normalizeIdentityTimestamp(raw.completedAt, 'archived completedAt'),
     payloadSha256:String(raw.payloadSha256), resultSha256:raw.resultSha256==null?null:String(raw.resultSha256),
   })).sort((a,b)=>a.messageId.localeCompare(b.messageId))
   if (!same(actual, expected)) fail('archived candidate identities do not match exact authorized tranche')
