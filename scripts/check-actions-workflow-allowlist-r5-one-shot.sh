@@ -25,6 +25,7 @@ python scripts/extend-actions-policy-r5-revision4-resource-halt-rearm.py "$gener
 python scripts/extend-actions-policy-r5-revision4-prepared-head-repair.py "$generated_script"
 python scripts/extend-actions-policy-r5-revision4-minute-completion-repair.py "$generated_script"
 python scripts/extend-actions-policy-r5-terminal-archive-phase-a-apply.py "$generated_script"
+python scripts/extend-actions-policy-r5-legacy-rev3-execution-retirement.py "$generated_script"
 chmod 700 "$generated_script"
 bash "$generated_script" "$@"
 node --check scripts/r5-index-footprint-readonly-probe.mjs
@@ -39,6 +40,7 @@ node --check scripts/prepare-r5-minute-successor-source.mjs
 node --check scripts/inspect-r5-revision4-minute-failure-state.mjs
 node --check scripts/r5-post-retention-readonly-gate.mjs
 node --check scripts/manage-r5-terminal-archive-production-apply.mjs
+node --check scripts/manage-r5-legacy-rev3-execution-retirement.mjs
 bash -n scripts/check-supabase-production-autodeploy-boundary.sh
 bash scripts/check-supabase-production-autodeploy-boundary.sh
 node scripts/test-r5-phase-ready-native-history-record.mjs
@@ -84,6 +86,8 @@ bash scripts/test-r5-revision4-archive-prepare-compat-contract.sh
 bash -n scripts/test-r5-cron-physical-compaction-postgres.sh
 R5_CRON_COMPACTION_OUTPUT=actions-workflow-policy-evidence/r5-cron-physical-compaction \
   bash scripts/test-r5-cron-physical-compaction-postgres.sh
+bash -n scripts/test-r5-work-status-partial-index-apply-contract.sh
+bash scripts/test-r5-work-status-partial-index-apply-contract.sh
 bash -n scripts/test-r5-work-status-partial-index-apply-contract.sh
 bash scripts/test-r5-work-status-partial-index-apply-contract.sh
 bash -n scripts/test-r5-secondary-index-readonly-audit-contract.sh
