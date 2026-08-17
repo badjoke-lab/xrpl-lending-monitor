@@ -27,6 +27,7 @@ python scripts/extend-actions-policy-r5-revision4-minute-completion-repair.py "$
 python scripts/extend-actions-policy-r5-terminal-archive-phase-a-apply.py "$generated_script"
 python scripts/extend-actions-policy-r5-legacy-rev3-execution-retirement.py "$generated_script"
 python scripts/extend-actions-policy-r5-terminal-archive-phase-b-tranche.py "$generated_script"
+python scripts/extend-actions-policy-r5-terminal-archive-phase-b-500-ramp.py "$generated_script"
 chmod 700 "$generated_script"
 bash "$generated_script" "$@"
 node --check scripts/r5-index-footprint-readonly-probe.mjs
@@ -43,6 +44,7 @@ node --check scripts/r5-post-retention-readonly-gate.mjs
 node --check scripts/manage-r5-terminal-archive-production-apply.mjs
 node --check scripts/manage-r5-legacy-rev3-execution-retirement.mjs
 node --check scripts/manage-r5-terminal-archive-phase-b-tranche.mjs
+node --check scripts/run-r5-terminal-archive-phase-b-500-ramp.mjs
 node --check scripts/r5-terminal-archive-phase-b-throughput-readonly-gate.mjs
 bash -n scripts/check-supabase-production-autodeploy-boundary.sh
 bash scripts/check-supabase-production-autodeploy-boundary.sh
@@ -108,3 +110,5 @@ bash -n scripts/test-r5-checkpoint-terminal-archive-fail-close-contract.sh
 bash scripts/test-r5-checkpoint-terminal-archive-fail-close-contract.sh
 bash -n scripts/test-r5-terminal-archive-phase-b-tranche-contract.sh
 bash scripts/test-r5-terminal-archive-phase-b-tranche-contract.sh
+bash -n scripts/test-r5-terminal-archive-phase-b-500-ramp-contract.sh
+bash scripts/test-r5-terminal-archive-phase-b-500-ramp-contract.sh
