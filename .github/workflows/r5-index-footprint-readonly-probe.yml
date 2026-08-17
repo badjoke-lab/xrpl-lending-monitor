@@ -77,6 +77,15 @@ jobs:
             --source-commit "$GITHUB_SHA" \
             --output-dir r5-index-footprint-readonly-probe
 
+      - name: Read historical transport consumer sources only
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
+          node scripts/r5-historical-transport-consumer-source-readonly-audit.mjs \
+            --source-commit "$GITHUB_SHA" \
+            --output-dir r5-index-footprint-readonly-probe
+
       - name: Read exact target transport function sources only
         shell: bash
         run: |
@@ -120,6 +129,8 @@ jobs:
             cat r5-index-footprint-readonly-probe/transport-shape-summary.md
             echo
             cat r5-index-footprint-readonly-probe/transport-consumer-compat-summary.md
+            echo
+            cat r5-index-footprint-readonly-probe/historical-transport-consumer-source-summary.md
             echo
             cat r5-index-footprint-readonly-probe/transport-target-source-summary.md
             echo
