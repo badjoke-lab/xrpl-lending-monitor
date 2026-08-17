@@ -15,11 +15,16 @@ for required in \
   "const EXPECTED_MIGRATION_HEAD='20260816050000'" \
   "const MAX_DATABASE_BYTES_BEFORE=490_000_000" \
   "read_only:readOnly" \
+  "function mutationSql(expected)" \
+  "assertDataStateForMutation(expected)" \
+  "lock table public.xrpl_collector_runs in access exclusive mode" \
+  "collector authorized data state drift under lock" \
   "order by completed_at desc,id desc" \
   "truncate table public.xrpl_collector_runs" \
   "overriding system value" \
   "collector retained identity mismatch after rewrite" \
   "collector identity sequence drift after rewrite" \
+  "transactionLockRevalidation:true" \
   "authorized structural state mismatch" \
   "authorized data state mismatch" \
   "authorized plan mismatch" \
@@ -57,18 +62,31 @@ python - "$manager" <<'PY'
 from pathlib import Path
 import re, sys
 text=Path(sys.argv[1]).read_text()
-m=re.search(r"const MUTATION_SQL=String\.raw`(.*?)`\n\nfor\(const required",text,re.S)
-if not m:
-    raise SystemExit('collector production mutation SQL missing')
-sql=m.group(1)
-if len(re.findall(r'\btruncate\s+table\b',sql,re.I)) != 1:
+start=text.find('function mutationSql(expected)')
+end=text.find('const MUTATION_CONTRACT_SAMPLE=', start)
+if start < 0 or end < 0:
+    raise SystemExit('collector production mutation renderer missing')
+body=text[start:end]
+for required in (
+    "lock table public.xrpl_collector_runs in access exclusive mode",
+    "collector authorized data state drift under lock",
+    "truncate table public.xrpl_collector_runs",
+    "overriding system value",
+    "expected.retainedDigest",
+    "expected.candidateDigest",
+    "expected.sequenceState.lastValue",
+):
+    if required not in body:
+        raise SystemExit(f'collector production mutation renderer missing: {required}')
+if body.find('collector authorized data state drift under lock') > body.find('truncate table public.xrpl_collector_runs'):
+    raise SystemExit('authorized data revalidation must occur before TRUNCATE')
+if len(re.findall(r'\btruncate\s+table\b',body,re.I)) != 1:
     raise SystemExit('collector production mutation must contain exactly one TRUNCATE')
 for pattern in (r'\bdelete\s+from\b',r'\brestart\s+identity\b',r'\bcascade\b',r'\bvacuum\b',r'\breindex\b',r'\bcluster\b'):
-    if re.search(pattern,sql,re.I):
+    if re.search(pattern,body,re.I):
         raise SystemExit(f'collector production mutation contains forbidden token: {pattern}')
-for required in ('limit ${RETAIN_LATEST_ROWS}','overriding system value','sequence_last_value','sequence_is_called'):
-    if required not in sql:
-        raise SystemExit(f'collector production mutation missing identity guard: {required}')
+if "const exactMutation=mutationSql(before.dataState)" not in text or "sha256(exactMutation)!==authorizedMutation" not in text:
+    raise SystemExit('authorized dynamic mutation reconstruction missing')
 PY
 
 echo 'R5 collector run retention production rewrite contract PASS'
