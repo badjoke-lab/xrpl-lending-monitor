@@ -62,19 +62,19 @@ const SQL = String.raw`with archive_columns as (
 ), archive_stats as (
   select
     count(*)::bigint as rows,
-    count(*) filter (where payload is null)::bigint as null_payload_rows,
-    count(*) filter (where nullif(payload->>'workId','') is null)::bigint as missing_work_id_rows,
-    count(*) filter (where payload->>'workId' is not null)::bigint as work_id_rows,
-    count(*) filter (where phase='scan')::bigint as scan_rows,
-    count(*) filter (where phase='commit')::bigint as commit_rows,
-    count(*) filter (where phase='finalize')::bigint as finalize_rows,
-    coalesce(sum(pg_column_size(payload))::bigint,0) as payload_column_bytes,
-    coalesce(sum(octet_length(payload::text))::bigint,0) as payload_text_bytes,
-    coalesce(sum(octet_length(payload->>'workId'))::bigint,0) as work_id_text_bytes,
-    coalesce(min(octet_length(payload->>'workId')),0)::integer as work_id_min_bytes,
-    coalesce(max(octet_length(payload->>'workId')),0)::integer as work_id_max_bytes,
-    coalesce(avg(octet_length(payload->>'workId')),0)::numeric as work_id_avg_bytes,
-    encode(extensions.digest(convert_to(coalesce(string_agg(encode(extensions.digest(convert_to(payload::text,'UTF8'),'sha256'),'hex'),'' order by message_hash),''),'UTF8'),'sha256'),'hex') as ordered_payload_digest
+    count(*) filter (where payload is null)::bigint as "nullPayloadRows",
+    count(*) filter (where nullif(payload->>'workId','') is null)::bigint as "missingWorkIdRows",
+    count(*) filter (where payload->>'workId' is not null)::bigint as "workIdRows",
+    count(*) filter (where phase='scan')::bigint as "scanRows",
+    count(*) filter (where phase='commit')::bigint as "commitRows",
+    count(*) filter (where phase='finalize')::bigint as "finalizeRows",
+    coalesce(sum(pg_column_size(payload))::bigint,0) as "payloadColumnBytes",
+    coalesce(sum(octet_length(payload::text))::bigint,0) as "payloadTextBytes",
+    coalesce(sum(octet_length(payload->>'workId'))::bigint,0) as "workIdTextBytes",
+    coalesce(min(octet_length(payload->>'workId')),0)::integer as "workIdMinBytes",
+    coalesce(max(octet_length(payload->>'workId')),0)::integer as "workIdMaxBytes",
+    coalesce(avg(octet_length(payload->>'workId')),0)::numeric as "workIdAvgBytes",
+    encode(extensions.digest(convert_to(coalesce(string_agg(encode(extensions.digest(convert_to(payload::text,'UTF8'),'sha256'),'hex'),'' order by message_hash),''),'UTF8'),'sha256'),'hex') as "orderedPayloadDigest"
   from xrpl_phase_archive_v1.terminal_messages
 ), archive_consumers as (
   select
