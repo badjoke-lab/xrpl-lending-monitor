@@ -196,7 +196,9 @@ if((MUTATION_CONTRACT_SAMPLE.match(/\btruncate\s+table\b/giu)??[]).length!==1) f
 for(const forbidden of [/\bdelete\s+from\b/iu,/\brestart\s+identity\b/iu,/\bcascade\b/iu,/\bvacuum\b/iu,/\breindex\b/iu,/\bcluster\b/iu,/\bcron\./iu,/\bmainnet\b/iu,/\bxrpl_phase_messages\b/iu,/\bxrpl_phase_successors\b/iu,/\bxrpl_phase_work\b/iu]) if(forbidden.test(MUTATION_CONTRACT_SAMPLE)) fail(`collector mutation contains forbidden capability: ${forbidden}`)
 
 async function inspect(sourceCommit,after=false){
-  const state=firstJson(await managementQuery(inspectionSql(),true)); after?validateAfter(state):validateBefore(state)
+  const state=firstJson(await managementQuery(inspectionSql(),true))
+  if(after) validateAfter(state)
+  else validateBefore(state)
   const structural=structuralState(state,sourceCommit),data=dataState(state),structuralSha=sha256(JSON.stringify(structural)),dataSha=sha256(JSON.stringify(data))
   const exactMutation=mutationSql(data),mutationSha=sha256(exactMutation)
   const plan={schemaVersion:2,purpose:'r5-collector-runs-retention-rewrite-plan',sourceCommit,retainLatestRows:RETAIN_LATEST_ROWS,structuralStateSha256:structuralSha,dataStateSha256:dataSha,mutationSha256:mutationSha,maxDatabaseBytesBefore:MAX_DATABASE_BYTES_BEFORE,transactionLockRevalidation:true}
