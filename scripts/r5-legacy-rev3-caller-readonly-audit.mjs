@@ -16,7 +16,7 @@ const seedList = TARGETS.map((name)=>`'${name.replaceAll("'","''")}'`).join(',')
 const SQL=`with recursive closure as (
   select p.oid,n.nspname as schema_name,p.proname as function_name,
     pg_get_function_identity_arguments(p.oid) as identity_arguments,
-    p.prosrc,0 as depth,null::text as depends_on,array[p.oid]::oid[] as path
+    p.prosrc,0 as depth,null::text collate "C" as depends_on,array[p.oid]::oid[] as path
   from pg_proc p join pg_namespace n on n.oid=p.pronamespace
   where n.nspname in ('public','xrpl_r5_v1') and p.prokind='f' and p.proname in (${seedList})
   union all
