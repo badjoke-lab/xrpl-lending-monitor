@@ -121,3 +121,8 @@ bash scripts/test-r5-terminal-transport-dual-rewrite-contract.sh
 bash -n scripts/test-r5-terminal-transport-dual-rewrite-postgres.sh
 R5_TERMINAL_DUAL_REWRITE_OUTPUT=actions-workflow-policy-evidence/r5-terminal-transport-dual-rewrite \
   bash scripts/test-r5-terminal-transport-dual-rewrite-postgres.sh
+bash -n scripts/test-r5-terminal-archive-v2-compact-contract.sh
+bash scripts/test-r5-terminal-archive-v2-compact-contract.sh
+bash -n scripts/test-r5-terminal-archive-v2-compact-postgres.sh
+R5_TERMINAL_ARCHIVE_V2_OUTPUT=actions-workflow-policy-evidence/r5-terminal-archive-v2-compact \
+  bash scripts/test-r5-terminal-archive-v2-compact-postgres.sh
