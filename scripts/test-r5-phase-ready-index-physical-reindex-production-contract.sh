@@ -34,6 +34,7 @@ for required in \
   'const MAX_DATABASE_BYTES_BEFORE = 480_000_000' \
   'const MAX_INDEX_BYTES_BEFORE = 8_000_000' \
   'const MAX_READY_ROWS = 100' \
+  "'indexScans',coalesce((select idx_scan::bigint" \
   "set local lock_timeout='5s'" \
   "set local statement_timeout='45s'" \
   "lock table public.xrpl_phase_messages in share mode" \
@@ -87,6 +88,17 @@ if min(lock_pos,revalidate_pos,reindex_pos) < 0 or not (lock_pos < revalidate_po
     raise SystemExit('ready-index reindex must lock and revalidate before REINDEX')
 if re.search(r'(?im)^\s*reindex\s+(?:table|database|system)\b', manager):
     raise SystemExit('ready-index reindex manager broadens REINDEX scope')
+
+# idx_scan is intentionally observable for diagnostics, but it is a cumulative
+# PostgreSQL statistics counter and may change between prepare and execute.
+# It must never participate in an exact authorization digest.
+if "'indexScans',coalesce((select idx_scan::bigint" not in manager:
+    raise SystemExit('ready-index reindex manager no longer observes indexScans')
+data_state = re.search(r'function dataState\(state\) \{(.*?)\n\}', manager, re.S)
+if not data_state:
+    raise SystemExit('ready-index reindex dataState function missing')
+if 'indexScans' in data_state.group(1):
+    raise SystemExit('volatile indexScans must not participate in authorization data state')
 PY
 
 echo 'R5 phase ready-index physical reindex production contract PASS'
