@@ -24,7 +24,7 @@ for _ in $(seq 1 60); do
 done
 [[ "$stable_ready" -ge 3 ]]
 
-docker exec -i "$container_name" psql -v ON_ERROR_STOP=1 -U postgres -d postgres \
+docker exec -i "$container_name" psql -At -v ON_ERROR_STOP=1 -U postgres -d postgres \
   > "${output_directory}/proof.log" <<'SQL'
 create schema extensions;
 create extension pgcrypto with schema extensions;
