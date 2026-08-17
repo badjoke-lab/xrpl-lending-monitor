@@ -85,7 +85,7 @@ revalidate_pos=manager.find('ready index authorized data drift under lock')
 reindex_pos=manager.find('reindex index public.xrpl_phase_messages_ready_idx;')
 if min(lock_pos,revalidate_pos,reindex_pos) < 0 or not (lock_pos < revalidate_pos < reindex_pos):
     raise SystemExit('ready-index reindex must lock and revalidate before REINDEX')
-if re.search(r'\breindex\s+(?:table|database|system)\b', manager, re.I):
+if re.search(r'(?im)^\s*reindex\s+(?:table|database|system)\b', manager):
     raise SystemExit('ready-index reindex manager broadens REINDEX scope')
 PY
 
