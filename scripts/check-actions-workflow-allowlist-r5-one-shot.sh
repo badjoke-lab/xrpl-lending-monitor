@@ -143,3 +143,8 @@ R5_COLLECTOR_RETENTION_REWRITE_OUTPUT=actions-workflow-policy-evidence/r5-collec
   bash scripts/test-r5-collector-runs-retention-rewrite-postgres.sh
 bash -n scripts/test-r5-collector-runs-retention-rewrite-production-contract.sh
 bash scripts/test-r5-collector-runs-retention-rewrite-production-contract.sh
+bash -n scripts/test-r5-terminal-transport-sequential-rewrite-contract.sh
+bash scripts/test-r5-terminal-transport-sequential-rewrite-contract.sh
+bash -n scripts/test-r5-terminal-transport-sequential-rewrite-postgres.sh
+R5_TERMINAL_SEQUENTIAL_REWRITE_OUTPUT=actions-workflow-policy-evidence/r5-terminal-transport-sequential-rewrite \
+  bash scripts/test-r5-terminal-transport-sequential-rewrite-postgres.sh
