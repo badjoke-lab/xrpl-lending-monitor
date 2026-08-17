@@ -88,8 +88,6 @@ R5_CRON_COMPACTION_OUTPUT=actions-workflow-policy-evidence/r5-cron-physical-comp
   bash scripts/test-r5-cron-physical-compaction-postgres.sh
 bash -n scripts/test-r5-work-status-partial-index-apply-contract.sh
 bash scripts/test-r5-work-status-partial-index-apply-contract.sh
-bash -n scripts/test-r5-work-status-partial-index-apply-contract.sh
-bash scripts/test-r5-work-status-partial-index-apply-contract.sh
 bash -n scripts/test-r5-secondary-index-readonly-audit-contract.sh
 bash scripts/test-r5-secondary-index-readonly-audit-contract.sh
 bash -n scripts/run-r4f-g3-dual-provider-verdict.sh
