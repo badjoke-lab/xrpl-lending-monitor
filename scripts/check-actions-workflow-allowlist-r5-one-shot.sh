@@ -134,3 +134,8 @@ bash -n scripts/test-r5-terminal-archive-v2-preflight-contract.sh
 bash scripts/test-r5-terminal-archive-v2-preflight-contract.sh
 bash -n scripts/test-r5-collector-runs-retention-preflight-contract.sh
 bash scripts/test-r5-collector-runs-retention-preflight-contract.sh
+bash -n scripts/test-r5-collector-runs-retention-rewrite-contract.sh
+bash scripts/test-r5-collector-runs-retention-rewrite-contract.sh
+bash -n scripts/test-r5-collector-runs-retention-rewrite-postgres.sh
+R5_COLLECTOR_RETENTION_REWRITE_OUTPUT=actions-workflow-policy-evidence/r5-collector-runs-retention-rewrite \
+  bash scripts/test-r5-collector-runs-retention-rewrite-postgres.sh
