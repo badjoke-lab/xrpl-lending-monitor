@@ -68,12 +68,18 @@ const SQL = String.raw`with archive_columns as (
     count(*) filter (where phase='scan')::bigint as "scanRows",
     count(*) filter (where phase='commit')::bigint as "commitRows",
     count(*) filter (where phase='finalize')::bigint as "finalizeRows",
+    count(*) filter (where phase='scan' and nullif(payload->>'workId','') is null)::bigint as "missingWorkIdScanRows",
+    count(*) filter (where phase='commit' and nullif(payload->>'workId','') is null)::bigint as "missingWorkIdCommitRows",
+    count(*) filter (where phase='finalize' and nullif(payload->>'workId','') is null)::bigint as "missingWorkIdFinalizeRows",
+    count(*) filter (where phase='scan' and nullif(payload->>'workId','') is not null)::bigint as "workIdScanRows",
+    count(*) filter (where phase='commit' and nullif(payload->>'workId','') is not null)::bigint as "workIdCommitRows",
+    count(*) filter (where phase='finalize' and nullif(payload->>'workId','') is not null)::bigint as "workIdFinalizeRows",
     coalesce(sum(pg_column_size(payload))::bigint,0) as "payloadColumnBytes",
     coalesce(sum(octet_length(payload::text))::bigint,0) as "payloadTextBytes",
     coalesce(sum(octet_length(payload->>'workId'))::bigint,0) as "workIdTextBytes",
-    coalesce(min(octet_length(payload->>'workId')),0)::integer as "workIdMinBytes",
-    coalesce(max(octet_length(payload->>'workId')),0)::integer as "workIdMaxBytes",
-    coalesce(avg(octet_length(payload->>'workId')),0)::numeric as "workIdAvgBytes",
+    coalesce(min(octet_length(payload->>'workId')) filter (where nullif(payload->>'workId','') is not null),0)::integer as "workIdMinBytes",
+    coalesce(max(octet_length(payload->>'workId')) filter (where nullif(payload->>'workId','') is not null),0)::integer as "workIdMaxBytes",
+    coalesce(avg(octet_length(payload->>'workId')) filter (where nullif(payload->>'workId','') is not null),0)::numeric as "workIdAvgBytes",
     encode(extensions.digest(convert_to(coalesce(string_agg(encode(extensions.digest(convert_to(payload::text,'UTF8'),'sha256'),'hex'),'' order by message_hash),''),'UTF8'),'sha256'),'hex') as "orderedPayloadDigest"
   from xrpl_phase_archive_v1.terminal_messages
 ), archive_consumers as (
@@ -153,9 +159,13 @@ function validate(state) {
   const stats = state.archiveStats
   if (!stats || Number(stats.rows) < MIN_ARCHIVE_ROWS) fail(`expected at least ${MIN_ARCHIVE_ROWS} archive rows`)
   if (Number(stats.nullPayloadRows) !== 0) fail('archive contains null payload rows')
-  if (Number(stats.missingWorkIdRows) !== 0 || Number(stats.workIdRows) !== Number(stats.rows)) fail('not every archive payload has workId')
+  if (Number(stats.scanRows)+Number(stats.commitRows)+Number(stats.finalizeRows) !== Number(stats.rows)) fail('archive phase counts do not cover all rows')
+  if (Number(stats.missingWorkIdRows)+Number(stats.workIdRows) !== Number(stats.rows)) fail('archive workId coverage counts do not cover all rows')
+  if (Number(stats.missingWorkIdScanRows)+Number(stats.workIdScanRows) !== Number(stats.scanRows)) fail('scan workId coverage mismatch')
+  if (Number(stats.missingWorkIdCommitRows)+Number(stats.workIdCommitRows) !== Number(stats.commitRows)) fail('commit workId coverage mismatch')
+  if (Number(stats.missingWorkIdFinalizeRows)+Number(stats.workIdFinalizeRows) !== Number(stats.finalizeRows)) fail('finalize workId coverage mismatch')
   if (!Array.isArray(state.archiveColumns) || !state.archiveColumns.some((c)=>c.column_name==='payload' && c.data_type==='jsonb')) fail('current archive payload column missing')
-  if (state.archiveColumns.some((c)=>c.column_name==='payload_digest' || c.column_name==='work_id')) fail('archive v2 columns already present unexpectedly')
+  if (state.archiveColumns.some((c)=>c.column_name==='payload_digest' || c.column_name==='work_id' || c.column_name==='work_digest')) fail('archive v2 columns already present unexpectedly')
   if (state.archiveRlsEnabled !== true || state.archivePersistence !== 'p') fail('archive privacy/persistence boundary drifted')
   if (!state.activeRun || state.activeRun.runId !== ACTIVE_RUN_ID || state.activeRun.status !== 'halted' || state.activeRun.lastError !== 'r5_recovery_database_halt' || state.activeRun.network !== 'devnet' || Number(state.activeRun.profileRevision)!==4) fail('R5 database-halt boundary drifted')
   if (state.safety?.readOnly !== true || state.safety?.mainnetDisabled !== true) fail('read-only safety boundary missing')
@@ -177,6 +187,7 @@ const structural = {
   maxMigrationVersion: state.maxMigrationVersion,
   archiveRelationBytes: Number(state.archiveRelationBytes),
   archiveRows: Number(state.archiveStats.rows),
+  archiveStats: state.archiveStats,
   orderedPayloadDigest: state.archiveStats.orderedPayloadDigest,
   archiveColumns: state.archiveColumns,
   archiveIndexes: state.archiveIndexes,
