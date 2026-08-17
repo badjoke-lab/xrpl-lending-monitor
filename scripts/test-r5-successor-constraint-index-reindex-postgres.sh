@@ -53,7 +53,7 @@ analyze proof.successors;
 SQL
 
 row_digest_sql="select md5(string_agg(md5(to_jsonb(s)::text),'' order by current_message_id)) from proof.successors s"
-constraint_digest_sql="select md5(string_agg(conname||'|'||contype||'|'||pg_get_constraintdef(oid,true),'' order by conname)) from pg_constraint where conrelid='proof.successors'::regclass"
+constraint_digest_sql="select md5(string_agg(conname||'|'||contype::text||'|'||pg_get_constraintdef(oid,true),'' order by conname)) from pg_constraint where conrelid='proof.successors'::regclass"
 
 before_rows="$(docker exec "$container_name" psql -U postgres -d postgres -Atqc 'select count(*) from proof.successors')"
 before_digest="$(docker exec "$container_name" psql -U postgres -d postgres -Atqc "$row_digest_sql")"
