@@ -7,8 +7,8 @@ bash -n "$proof"
 
 for required in \
   "image='postgres:15-alpine'" \
-  "production database used: \\`false\\`" \
-  "production compaction authorized: \\`false\\`" \
+  'production database used:' \
+  'production compaction authorized:' \
   "create table proof.messages" \
   "create table proof.successors" \
   "current_message_id text primary key references proof.messages(message_id)" \
@@ -34,6 +34,9 @@ for required in \
   "peakBytesOverBaseline"; do
   grep -Fq "$required" "$proof" || { echo "dual-rewrite proof missing: $required" >&2; exit 1; }
 done
+
+grep -Fq -- '- production database used: \`false\`' "$proof"
+grep -Fq -- '- production compaction authorized: \`false\`' "$proof"
 
 # The local proof may exercise physical rewrite primitives, but it must not contain
 # any production/provider credentials, Management API mutation, scheduler mutation,
