@@ -29,6 +29,7 @@ python scripts/extend-actions-policy-r5-legacy-rev3-execution-retirement.py "$ge
 python scripts/extend-actions-policy-r5-terminal-archive-phase-b-tranche.py "$generated_script"
 python scripts/extend-actions-policy-r5-terminal-archive-phase-b-500-ramp.py "$generated_script"
 python scripts/extend-actions-policy-r5-terminal-transport-compaction-preflight.py "$generated_script"
+python scripts/extend-actions-policy-r5-terminal-archive-v2-preflight.py "$generated_script"
 chmod 700 "$generated_script"
 bash "$generated_script" "$@"
 node --check scripts/r5-index-footprint-readonly-probe.mjs
@@ -48,6 +49,7 @@ node --check scripts/manage-r5-terminal-archive-phase-b-tranche.mjs
 node --check scripts/run-r5-terminal-archive-phase-b-500-ramp.mjs
 node --check scripts/r5-terminal-archive-phase-b-throughput-readonly-gate.mjs
 node --check scripts/r5-terminal-transport-compaction-readonly-preflight.mjs
+node --check scripts/r5-terminal-archive-v2-readonly-preflight.mjs
 bash -n scripts/check-supabase-production-autodeploy-boundary.sh
 bash scripts/check-supabase-production-autodeploy-boundary.sh
 node scripts/test-r5-phase-ready-native-history-record.mjs
@@ -126,3 +128,5 @@ bash scripts/test-r5-terminal-archive-v2-compact-contract.sh
 bash -n scripts/test-r5-terminal-archive-v2-compact-postgres.sh
 R5_TERMINAL_ARCHIVE_V2_OUTPUT=actions-workflow-policy-evidence/r5-terminal-archive-v2-compact \
   bash scripts/test-r5-terminal-archive-v2-compact-postgres.sh
+bash -n scripts/test-r5-terminal-archive-v2-preflight-contract.sh
+bash scripts/test-r5-terminal-archive-v2-preflight-contract.sh
