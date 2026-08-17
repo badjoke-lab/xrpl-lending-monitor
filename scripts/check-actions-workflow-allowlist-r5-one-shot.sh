@@ -24,6 +24,7 @@ python scripts/extend-actions-policy-r5-raw-evidence-compaction.py "$generated_s
 python scripts/extend-actions-policy-r5-revision4-resource-halt-rearm.py "$generated_script"
 python scripts/extend-actions-policy-r5-revision4-prepared-head-repair.py "$generated_script"
 python scripts/extend-actions-policy-r5-revision4-minute-completion-repair.py "$generated_script"
+python scripts/extend-actions-policy-r5-terminal-archive-phase-a-apply.py "$generated_script"
 chmod 700 "$generated_script"
 bash "$generated_script" "$@"
 node --check scripts/r5-index-footprint-readonly-probe.mjs
@@ -37,6 +38,7 @@ node --check scripts/manage-r5-revision4-minute-successor.mjs
 node --check scripts/prepare-r5-minute-successor-source.mjs
 node --check scripts/inspect-r5-revision4-minute-failure-state.mjs
 node --check scripts/r5-post-retention-readonly-gate.mjs
+node --check scripts/manage-r5-terminal-archive-production-apply.mjs
 bash -n scripts/check-supabase-production-autodeploy-boundary.sh
 bash scripts/check-supabase-production-autodeploy-boundary.sh
 node scripts/test-r5-phase-ready-native-history-record.mjs
@@ -95,3 +97,5 @@ bash -n scripts/test-r4f-revision4-residue-cleanup-contract.sh
 bash scripts/test-r4f-revision4-residue-cleanup-contract.sh
 bash -n scripts/test-r5-phase-message-ready-partial-index-apply-contract.sh
 bash scripts/test-r5-phase-message-ready-partial-index-apply-contract.sh
+bash -n scripts/test-r5-terminal-archive-phase-a-apply-contract.sh
+bash scripts/test-r5-terminal-archive-phase-a-apply-contract.sh
