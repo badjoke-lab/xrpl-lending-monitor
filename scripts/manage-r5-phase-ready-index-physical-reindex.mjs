@@ -147,7 +147,6 @@ function dataState(state) {
     readyRows: Number(state.readyRows),
     statusCounts: state.statusCounts,
     indexBytes: Number(state.indexBytes),
-    indexScans: Number(state.indexScans),
   }
 }
 function mutationSql(expected) {
