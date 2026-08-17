@@ -86,6 +86,15 @@ jobs:
             --source-commit "$GITHUB_SHA" \
             --output-dir r5-index-footprint-readonly-probe
 
+      - name: Read legacy revision-3 executable callers only
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
+          node scripts/r5-legacy-rev3-caller-readonly-audit.mjs \
+            --source-commit "$GITHUB_SHA" \
+            --output-dir r5-index-footprint-readonly-probe
+
       - name: Read exact target transport function sources only
         shell: bash
         run: |
@@ -131,6 +140,8 @@ jobs:
             cat r5-index-footprint-readonly-probe/transport-consumer-compat-summary.md
             echo
             cat r5-index-footprint-readonly-probe/historical-transport-consumer-source-summary.md
+            echo
+            cat r5-index-footprint-readonly-probe/legacy-rev3-caller-summary.md
             echo
             cat r5-index-footprint-readonly-probe/transport-target-source-summary.md
             echo
