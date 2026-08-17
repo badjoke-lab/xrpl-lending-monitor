@@ -106,8 +106,8 @@ for forbidden in (
 ):
     if forbidden in manager_lower:
         raise SystemExit(f"ready physical-reindex manager contains forbidden capability: {forbidden}")
-if phase_ready_physical_reindex_manager.count("reindex index public.xrpl_phase_messages_ready_idx") != 2:
-    raise SystemExit("ready physical-reindex manager must contain one sampled and one generated exact REINDEX reference")
+if phase_ready_physical_reindex_manager.count("reindex index public.xrpl_phase_messages_ready_idx") != 1:
+    raise SystemExit("ready physical-reindex manager must contain exactly one generated exact REINDEX statement")
 if phase_ready_physical_reindex_manager.find("ready index authorized data drift under lock") > phase_ready_physical_reindex_manager.find("reindex index public.xrpl_phase_messages_ready_idx"):
     raise SystemExit("ready physical-reindex manager must revalidate authorized data under lock before REINDEX")
 
