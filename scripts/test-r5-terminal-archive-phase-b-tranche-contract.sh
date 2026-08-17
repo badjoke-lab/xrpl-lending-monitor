@@ -76,8 +76,8 @@ from pathlib import Path
 import sys
 text = Path(sys.argv[1]).read_text()
 checkpoint = text.index('-- BEGIN EXACT CHECKPOINT FREEZE FILE')
-guard = text.index('candidateGuardSql(candidates)')
-terminalize = text.index('terminalizeSql(candidates)')
+guard = text.index('candidateGuardSql(candidates)', checkpoint)
+terminalize = text.index('terminalizeSql(candidates)', guard)
 if not checkpoint < guard < terminalize:
     raise SystemExit('Phase B transaction ordering drifted')
 if "if (archiveRows > 0 && checkpoint.classification !== 'frozen_exact')" not in text:
