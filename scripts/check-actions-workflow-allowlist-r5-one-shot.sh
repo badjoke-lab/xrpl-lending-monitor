@@ -43,6 +43,7 @@ node --check scripts/r5-post-retention-readonly-gate.mjs
 node --check scripts/manage-r5-terminal-archive-production-apply.mjs
 node --check scripts/manage-r5-legacy-rev3-execution-retirement.mjs
 node --check scripts/manage-r5-terminal-archive-phase-b-tranche.mjs
+node --check scripts/r5-terminal-archive-phase-b-throughput-readonly-gate.mjs
 bash -n scripts/check-supabase-production-autodeploy-boundary.sh
 bash scripts/check-supabase-production-autodeploy-boundary.sh
 node scripts/test-r5-phase-ready-native-history-record.mjs
