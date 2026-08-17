@@ -10,7 +10,10 @@ for required in \
   'current_message_id text primary key references proof.messages(message_id)' \
   'successor_message_id text not null unique references proof.messages(message_id)' \
   'generate_series(1,65235)' \
+  "repeat('x',21)" \
   '[[ "$before_rows" -eq 50235 ]]' \
+  '[[ "$avg_current_bytes" == '\''227.000'\'' ]]' \
+  '[[ "$avg_successor_bytes" == '\''227.000'\'' ]]' \
   'create unique index successor_shadow_current_idx' \
   'create unique index successor_shadow_successor_idx' \
   'reindex index proof.successors_pkey' \
