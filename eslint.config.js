@@ -67,11 +67,11 @@ export default tseslint.config(
       '@typescript-eslint/no-unused-vars': [
         'error',
         {
-          argsIgnorePattern: '^_',
           // createdAt participates in tranche ordering/authorization but the compact
           // terminal archive intentionally does not persist it, so post-apply identity
-          // verification destructures it away before comparing archived rows.
-          varsIgnorePattern: '^(_|createdAt$)',
+          // verification destructures it away in a callback parameter.
+          argsIgnorePattern: '^(_|createdAt$)',
+          varsIgnorePattern: '^_',
         },
       ],
     },
