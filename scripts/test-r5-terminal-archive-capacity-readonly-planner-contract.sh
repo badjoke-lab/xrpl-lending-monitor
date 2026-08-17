@@ -33,10 +33,13 @@ import re
 import sys
 
 text = Path(sys.argv[1]).read_text()
-match = re.search(r"const SQL = String\.raw`(.*?)`;", text, re.S)
-if not match:
-    raise SystemExit('capacity planner SQL block missing')
-sql = match.group(1).lower()
+marker = 'const SQL = String.raw`'
+if marker not in text:
+    raise SystemExit('capacity planner SQL start marker missing')
+after = text.split(marker, 1)[1]
+if '`;' not in after:
+    raise SystemExit('capacity planner SQL end marker missing')
+sql = after.split('`;', 1)[0].lower()
 for pattern in (
     r'\bdelete\s+from\b',
     r'\btruncate\b',
