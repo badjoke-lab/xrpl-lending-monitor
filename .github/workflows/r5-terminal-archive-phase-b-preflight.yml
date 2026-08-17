@@ -1,0 +1,107 @@
+name: R5 terminal archive Phase B preflight
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: r5-terminal-archive-phase-b-preflight
+  cancel-in-progress: false
+
+env:
+  QUALIFICATION_ISSUE: '1261'
+  SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+  SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  preflight:
+    if: >-
+      github.event.issue.number == 1261 &&
+      github.event.comment.user.login == 'badjoke-lab' &&
+      github.event.comment.body == '/r5-terminal-archive-phase-b-preflight'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out exact current main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Inspect Phase B preconditions read-only
+        id: inspect
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p r5-terminal-archive-phase-b-preflight
+          source_commit="$(git rev-parse HEAD)"
+          node scripts/manage-r5-terminal-archive-phase-b-preflight.mjs \
+            --source-commit "$source_commit" \
+            --output r5-terminal-archive-phase-b-preflight/evidence.json \
+            > r5-terminal-archive-phase-b-preflight/evidence.stdout.json
+          file=r5-terminal-archive-phase-b-preflight/evidence.json
+          test "$(jq -r '.productionDatabaseReadOnly' "$file")" = true
+          test "$(jq -r '.gates.archiveInstalled' "$file")" = true
+          test "$(jq -r '.gates.activeR5DatabaseGuardHalted' "$file")" = true
+          test "$(jq -r '.gates.currentR5ArchiveCompatible' "$file")" = true
+          test "$(jq -r '.gates.candidateGraphSafe' "$file")" = true
+          test "$(jq -r '.gates.readyForLegacyRetirement' "$file")" = true
+          test "$(jq -r '.terminalTransportMutationAuthorized' "$file")" = false
+          test "$(jq -r '.physicalCompactionAuthorized' "$file")" = false
+          test "$(jq -r '.schedulerMutationAuthorized' "$file")" = false
+          test "$(jq -r '.publicReaderMutationAuthorized' "$file")" = false
+          test "$(jq -r '.r5RearmAuthorized' "$file")" = false
+          printf 'source_commit=%s\ndatabase_bytes=%s\ncandidates=%s\nroots=%s\nold_to_retained=%s\nretained_to_old=%s\nlegacy_count=%s\nready_data=%s\n' \
+            "$source_commit" \
+            "$(jq -r '.databaseBytes' "$file")" \
+            "$(jq -r '.candidates.messages' "$file")" \
+            "$(jq -r '.candidates.roots' "$file")" \
+            "$(jq -r '.candidates.eligibleToRetained' "$file")" \
+            "$(jq -r '.candidates.retainedToEligible' "$file")" \
+            "$(jq -r '.legacyExecutable | length' "$file")" \
+            "$(jq -r '.gates.readyForPhaseBDataMutation' "$file")" >> "$GITHUB_OUTPUT"
+
+      - name: Upload sanitized Phase B preflight evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: r5-terminal-archive-phase-b-preflight-${{ github.run_id }}
+          path: r5-terminal-archive-phase-b-preflight/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish sanitized Phase B preflight result
+        env:
+          SOURCE_COMMIT: ${{ steps.inspect.outputs.source_commit }}
+          DATABASE_BYTES: ${{ steps.inspect.outputs.database_bytes }}
+          CANDIDATES: ${{ steps.inspect.outputs.candidates }}
+          ROOTS: ${{ steps.inspect.outputs.roots }}
+          OLD_TO_RETAINED: ${{ steps.inspect.outputs.old_to_retained }}
+          RETAINED_TO_OLD: ${{ steps.inspect.outputs.retained_to_old }}
+          LEGACY_COUNT: ${{ steps.inspect.outputs.legacy_count }}
+          READY_DATA: ${{ steps.inspect.outputs.ready_data }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/r5-terminal-archive-phase-b-preflight.md <<EOF2
+          ## R5 terminal archive Phase B read-only preflight
+
+          - source main: \`${SOURCE_COMMIT}\`
+          - database bytes: \`${DATABASE_BYTES}\`
+          - completed transport candidates older than 24h: \`${CANDIDATES}\`
+          - candidate roots: \`${ROOTS}\`
+          - eligible current -> retained successor boundary edges: \`${OLD_TO_RETAINED}\`
+          - retained current -> eligible successor boundary edges: \`${RETAINED_TO_OLD}\`
+          - still-executable legacy transport consumers: \`${LEGACY_COUNT}\`
+          - ready for Phase B row mutation now: \`${READY_DATA}\`
+
+          Phase A archive/private-state and current revision-4 compatibility definitions are exact. The candidate graph is drainable only when retained->eligible edges remain zero. Any still-executable legacy transport consumers must be retired under a separate exact authorization before terminal row mutation.
+
+          Safety: read-only Management API only. No terminal transport mutation, legacy-consumer retirement, physical compaction/VACUUM, scheduler/deployment/public-reader mutation, Mainnet, stabilization/soak, or R5 rearm is authorized by this run.
+          EOF2
+          gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/r5-terminal-archive-phase-b-preflight.md
