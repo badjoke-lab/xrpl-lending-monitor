@@ -62,6 +62,21 @@ export default tseslint.config(
     },
   },
   {
+    files: ['scripts/manage-r5-terminal-archive-phase-b-tranche.mjs'],
+    rules: {
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        {
+          // createdAt participates in tranche ordering/authorization but the compact
+          // terminal archive intentionally does not persist it, so post-apply identity
+          // verification destructures it away in a callback parameter.
+          argsIgnorePattern: '^(_|createdAt$)',
+          varsIgnorePattern: '^_',
+        },
+      ],
+    },
+  },
+  {
     files: ['scripts/verify-supabase-r5-first-recovery-batch.mjs'],
     rules: {
       '@typescript-eslint/no-unused-vars': [
