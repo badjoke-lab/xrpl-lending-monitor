@@ -1,0 +1,114 @@
+name: R5 terminal archive v2 preflight
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: r5-terminal-archive-v2-preflight
+  cancel-in-progress: false
+
+env:
+  QUALIFICATION_ISSUE: '1261'
+  SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+  SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  probe:
+    if: >-
+      github.event.issue.number == 1261 &&
+      github.event.comment.user.login == 'badjoke-lab' &&
+      github.event.comment.body == '/r5-terminal-archive-v2-preflight'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Check out exact current main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Read compact archive v2 prerequisites only
+        id: probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p r5-terminal-archive-v2-preflight-evidence
+          source_commit="$(git rev-parse HEAD)"
+          script_sha="$(sha256sum scripts/r5-terminal-archive-v2-readonly-preflight.mjs | awk '{print $1}')"
+          node scripts/r5-terminal-archive-v2-readonly-preflight.mjs \
+            --source-commit "$source_commit" \
+            --output r5-terminal-archive-v2-preflight-evidence/preflight.json \
+            > /tmp/r5-terminal-archive-v2-preflight.json
+          test "$(jq -r '.safety.readOnly' /tmp/r5-terminal-archive-v2-preflight.json)" = true
+          test "$(jq -r '.safety.schemaMutationAuthorized' /tmp/r5-terminal-archive-v2-preflight.json)" = false
+          test "$(jq -r '.safety.archiveRewriteAuthorized' /tmp/r5-terminal-archive-v2-preflight.json)" = false
+          test "$(jq -r '.safety.phaseBMovementAuthorized' /tmp/r5-terminal-archive-v2-preflight.json)" = false
+          test "$(jq -r '.safety.physicalCompactionAuthorized' /tmp/r5-terminal-archive-v2-preflight.json)" = false
+          test "$(jq -r '.safety.schedulerMutationAuthorized' /tmp/r5-terminal-archive-v2-preflight.json)" = false
+          test "$(jq -r '.safety.deploymentAuthorized' /tmp/r5-terminal-archive-v2-preflight.json)" = false
+          test "$(jq -r '.safety.publicReaderMutationAuthorized' /tmp/r5-terminal-archive-v2-preflight.json)" = false
+          test "$(jq -r '.safety.mainnetDisabled' /tmp/r5-terminal-archive-v2-preflight.json)" = true
+          test "$(jq -r '.safety.r5RearmAuthorized' /tmp/r5-terminal-archive-v2-preflight.json)" = false
+          printf 'source_commit=%s\nscript_sha=%s\nstate_sha=%s\ndatabase_bytes=%s\narchive_rows=%s\narchive_bytes=%s\npayload_bytes=%s\nconsumer_count=%s\npayload_consumer_count=%s\nwork_id_consumer_count=%s\n' \
+            "$source_commit" "$script_sha" \
+            "$(jq -r '.structuralStateSha256' /tmp/r5-terminal-archive-v2-preflight.json)" \
+            "$(jq -r '.databaseBytes' /tmp/r5-terminal-archive-v2-preflight.json)" \
+            "$(jq -r '.archiveStats.rows' /tmp/r5-terminal-archive-v2-preflight.json)" \
+            "$(jq -r '.archiveRelationBytes' /tmp/r5-terminal-archive-v2-preflight.json)" \
+            "$(jq -r '.archiveStats.payloadColumnBytes' /tmp/r5-terminal-archive-v2-preflight.json)" \
+            "$(jq -r '.archiveConsumerCount' /tmp/r5-terminal-archive-v2-preflight.json)" \
+            "$(jq -r '.archivedPayloadConsumerCount' /tmp/r5-terminal-archive-v2-preflight.json)" \
+            "$(jq -r '.payloadWorkIdConsumerCount' /tmp/r5-terminal-archive-v2-preflight.json)" \
+            >> "$GITHUB_OUTPUT"
+
+      - name: Publish sanitized v2 preflight result
+        env:
+          SOURCE_COMMIT: ${{ steps.probe.outputs.source_commit }}
+          SCRIPT_SHA: ${{ steps.probe.outputs.script_sha }}
+          STATE_SHA: ${{ steps.probe.outputs.state_sha }}
+          DATABASE_BYTES: ${{ steps.probe.outputs.database_bytes }}
+          ARCHIVE_ROWS: ${{ steps.probe.outputs.archive_rows }}
+          ARCHIVE_BYTES: ${{ steps.probe.outputs.archive_bytes }}
+          PAYLOAD_BYTES: ${{ steps.probe.outputs.payload_bytes }}
+          CONSUMER_COUNT: ${{ steps.probe.outputs.consumer_count }}
+          PAYLOAD_CONSUMER_COUNT: ${{ steps.probe.outputs.payload_consumer_count }}
+          WORK_ID_CONSUMER_COUNT: ${{ steps.probe.outputs.work_id_consumer_count }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -r '.archiveConsumers[] | select(.mentions_archived_payload == true or .reads_payload_work_id == true) | "- `\(.schema_name).\(.function_name)(\(.identity_arguments))`: source `\(.source_sha256)`, archived-payload=`\(.mentions_archived_payload)`, payload-workId=`\(.reads_payload_work_id)`"' \
+            r5-terminal-archive-v2-preflight-evidence/preflight.json > /tmp/archive-payload-consumers.md
+          cat > /tmp/r5-terminal-archive-v2-preflight-result.md <<EOF2
+          ## R5 terminal archive v2 production preflight — READ ONLY
+
+          - source main: \`${SOURCE_COMMIT}\`
+          - preflight script SHA-256: \`${SCRIPT_SHA}\`
+          - structural state SHA-256: \`${STATE_SHA}\`
+          - database bytes: \`${DATABASE_BYTES}\`
+          - archive rows / relation bytes: \`${ARCHIVE_ROWS} / ${ARCHIVE_BYTES}\`
+          - archived payload column bytes: \`${PAYLOAD_BYTES}\`
+          - archive-aware functions / direct archived-payload consumers / payload-workId consumers: \`${CONSUMER_COUNT} / ${PAYLOAD_CONSUMER_COUNT} / ${WORK_ID_CONSUMER_COUNT}\`
+          - every archive row has payload workId: \`true\`
+          - schema/archive rewrite/Phase B/physical compaction/R5 rearm authorized: \`false / false / false / false / false\`
+
+          Direct archived-payload consumers:
+          EOF2
+          cat /tmp/archive-payload-consumers.md >> /tmp/r5-terminal-archive-v2-preflight-result.md
+          printf '\nThis is a read-only prerequisite audit only. No schema or row mutation, archive rewrite, further Phase B movement, physical compaction, scheduler/deployment/public-reader/Mainnet change, stabilization, soak, or R5 rearm is authorized.\n' >> /tmp/r5-terminal-archive-v2-preflight-result.md
+          gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/r5-terminal-archive-v2-preflight-result.md
+
+      - name: Upload sanitized v2 preflight evidence
+        if: always() && steps.probe.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: r5-terminal-archive-v2-preflight-evidence
+          path: r5-terminal-archive-v2-preflight-evidence
+          if-no-files-found: error
+          retention-days: 14
