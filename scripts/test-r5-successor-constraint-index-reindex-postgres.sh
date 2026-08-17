@@ -33,18 +33,20 @@ create table proof.successors(
 );
 
 insert into proof.messages(message_id)
-select 'phase:v1:devnet:supabase-r4c2c-v1:'||lpad(g::text,8,'0')||':'||repeat(md5(g::text),5)||':r4'
+select 'phase:v1:devnet:supabase-r4c2c-v1:'||lpad(g::text,8,'0')||':'||repeat(md5(g::text),5)||':r4'||repeat('x',21)
 from generate_series(1,65235) g;
 
 insert into proof.successors(current_message_id,successor_message_id,reserved_at)
 select
-  'phase:v1:devnet:supabase-r4c2c-v1:'||lpad(g::text,8,'0')||':'||repeat(md5(g::text),5)||':r4',
-  'phase:v1:devnet:supabase-r4c2c-v1:'||lpad((g+1)::text,8,'0')||':'||repeat(md5((g+1)::text),5)||':r4',
+  'phase:v1:devnet:supabase-r4c2c-v1:'||lpad(g::text,8,'0')||':'||repeat(md5(g::text),5)||':r4'||repeat('x',21),
+  'phase:v1:devnet:supabase-r4c2c-v1:'||lpad((g+1)::text,8,'0')||':'||repeat(md5((g+1)::text),5)||':r4'||repeat('x',21),
   '2026-08-15 00:00:00+00'::timestamptz+g*interval '1 second'
 from generate_series(1,65234) g;
 
 -- Model a live table of 50,235 rows with older deleted entries still occupying
 -- btree pages. The production read-only footprint has 50,235 live successor rows.
+-- Every synthetic key is 227 bytes, conservatively covering the observed
+-- production averages (~217 bytes) up to the observed production maximum.
 delete from proof.successors
 where current_message_id in (
   select current_message_id from proof.successors order by current_message_id limit 14999
@@ -68,6 +70,8 @@ avg_current_bytes="$(docker exec "$container_name" psql -U postgres -d postgres 
 avg_successor_bytes="$(docker exec "$container_name" psql -U postgres -d postgres -Atqc 'select round(avg(octet_length(successor_message_id))::numeric,3) from proof.successors')"
 
 [[ "$before_rows" -eq 50235 ]]
+[[ "$avg_current_bytes" == '227.000' ]]
+[[ "$avg_successor_bytes" == '227.000' ]]
 
 # Build compact shadow indexes while the bloated constraint indexes still exist.
 # Their relation sizes conservatively model the additional relation storage that
