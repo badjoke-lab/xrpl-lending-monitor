@@ -18,8 +18,8 @@ def replace_once(name: str, old: str, new: str) -> None:
 
 replace_once(
     'terminal archive Phase A allowlist entry',
-    '  r5-phase-message-ready-partial-index-apply.yml\n',
-    '  r5-phase-message-ready-partial-index-apply.yml\n  r5-terminal-archive-phase-a-apply.yml\n',
+    '  r5-revision4-resource-halt-rearm.yml\n  r5-work-status-partial-index-apply.yml\n',
+    '  r5-revision4-resource-halt-rearm.yml\n  r5-terminal-archive-phase-a-apply.yml\n  r5-work-status-partial-index-apply.yml\n',
 )
 replace_once(
     'terminal archive Phase A workflow count',
