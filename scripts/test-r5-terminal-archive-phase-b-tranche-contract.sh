@@ -5,13 +5,15 @@ workflow='.github/workflows/r5-terminal-archive-phase-b-tranche.yml'
 manager='scripts/manage-r5-terminal-archive-phase-b-tranche.mjs'
 extender='scripts/extend-actions-policy-r5-terminal-archive-phase-b-tranche.py'
 checkpoint='ops/production-sql/20260817110500_xrpl_r5_checkpoint_terminal_archive_fail_close.sql'
+microsecond_test='scripts/test-r5-phase-b-microsecond-identity-postgres.sh'
 
-for file in "$workflow" "$manager" "$extender" "$checkpoint"; do
+for file in "$workflow" "$manager" "$extender" "$checkpoint" "$microsecond_test"; do
   [[ -f "$file" ]] || { echo "missing $file" >&2; exit 1; }
 done
 
 node --check "$manager"
 python -m py_compile "$extender"
+bash -n "$microsecond_test"
 
 for required in \
   "github.event.comment.body == '/r5-terminal-archive-phase-b-prepare'" \
@@ -39,6 +41,12 @@ for required in \
   'const MINIMUM_AGE_HOURS = 24' \
   'const TRANCHE_LIMIT = 250' \
   'const TRANCHE_LOGICAL_BYTE_LIMIT = 2_000_000' \
+  'PG_IDENTITY_TIMESTAMP_PATTERN' \
+  "to_char(created_at at time zone 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"')" \
+  "to_char(completed_at at time zone 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"')" \
+  "normalizeIdentityTimestamp(raw.createdAt, 'createdAt')" \
+  "normalizeIdentityTimestamp(raw.completedAt, 'completedAt')" \
+  "normalizeIdentityTimestamp(raw.completedAt, 'archived completedAt')" \
   'candidateDigestSha256' \
   'structuralStateSha256' \
   'selectedLogicalBytes' \
@@ -60,6 +68,12 @@ for required in \
   'r5Rearmed: false'; do
   grep -Fq "$required" "$manager"
 done
+
+if grep -Fq 'createdAt: new Date(raw.createdAt).toISOString()' "$manager" || \
+   grep -Fq 'completedAt: new Date(raw.completedAt).toISOString()' "$manager"; then
+  echo 'Phase B manager still truncates PostgreSQL candidate identity timestamps through JavaScript Date' >&2
+  exit 1
+fi
 
 # The only direct row-deletion capability must remain encapsulated in the already-installed
 # private terminalizer. The Phase B manager itself must never emit raw DELETE/TRUNCATE/VACUUM/
@@ -87,5 +101,7 @@ if "internalEdgeCount !== eligibleCount - rootCount" not in text:
 if "retainedToOldEdges !== 0" not in text:
     raise SystemExit('Phase B retained-to-old edge gate missing')
 PY
+
+bash "$microsecond_test"
 
 echo 'R5 terminal archive Phase B bounded tranche contract PASS'
