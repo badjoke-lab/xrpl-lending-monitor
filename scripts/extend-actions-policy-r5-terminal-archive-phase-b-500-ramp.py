@@ -19,7 +19,7 @@ def replace_once(name: str, old: str, new: str) -> None:
 replace_once(
     'terminal archive Phase B 500-ramp allowlist entry',
     '  r5-terminal-archive-phase-b-tranche.yml\n  r5-work-status-partial-index-apply.yml\n',
-    '  r5-terminal-archive-phase-b-tranche.yml\n  r5-terminal-archive-phase-b-500-ramp.yml\n  r5-work-status-partial-index-apply.yml\n',
+    '  r5-terminal-archive-phase-b-500-ramp.yml\n  r5-terminal-archive-phase-b-tranche.yml\n  r5-work-status-partial-index-apply.yml\n',
 )
 replace_once(
     'terminal archive Phase B 500-ramp workflow count',
