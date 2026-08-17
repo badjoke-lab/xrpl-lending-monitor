@@ -136,10 +136,10 @@ analyze proof.successors;
 SQL
 
 schema_fingerprint_sql="select md5(string_agg(x,'' order by x)) from (\
-select 'rel|'||c.relname||'|'||c.relpersistence||'|'||c.relreplident||'|'||c.relrowsecurity||'|'||coalesce(c.relacl::text,'') as x from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='proof' and c.relname in ('messages','successors') \
-union all select 'col|'||table_name||'|'||ordinal_position||'|'||column_name||'|'||data_type||'|'||udt_name||'|'||is_nullable||'|'||coalesce(column_default,'')||'|'||is_identity||'|'||is_generated from information_schema.columns where table_schema='proof' and table_name in ('messages','successors') \
-union all select 'con|'||c.relname||'|'||con.conname||'|'||con.contype||'|'||con.convalidated||'|'||con.condeferrable||'|'||pg_get_constraintdef(con.oid,true) from pg_constraint con join pg_class c on c.oid=con.conrelid join pg_namespace n on n.oid=c.relnamespace where n.nspname='proof' and c.relname in ('messages','successors') \
-union all select 'idx|'||t.relname||'|'||i.relname||'|'||x.indisprimary||'|'||x.indisunique||'|'||x.indisvalid||'|'||x.indisready||'|'||x.indisclustered||'|'||pg_get_indexdef(i.oid) from pg_index x join pg_class i on i.oid=x.indexrelid join pg_class t on t.oid=x.indrelid join pg_namespace n on n.oid=t.relnamespace where n.nspname='proof' and t.relname in ('messages','successors')\
+select 'rel|'||c.relname||'|'||c.relpersistence::text||'|'||c.relreplident::text||'|'||c.relrowsecurity::text||'|'||coalesce(c.relacl::text,'') as x from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='proof' and c.relname in ('messages','successors') \
+union all select 'col|'||table_name||'|'||ordinal_position::text||'|'||column_name||'|'||data_type||'|'||udt_name||'|'||is_nullable||'|'||coalesce(column_default,'')||'|'||is_identity||'|'||is_generated from information_schema.columns where table_schema='proof' and table_name in ('messages','successors') \
+union all select 'con|'||c.relname||'|'||con.conname||'|'||con.contype::text||'|'||con.convalidated::text||'|'||con.condeferrable::text||'|'||pg_get_constraintdef(con.oid,true) from pg_constraint con join pg_class c on c.oid=con.conrelid join pg_namespace n on n.oid=c.relnamespace where n.nspname='proof' and c.relname in ('messages','successors') \
+union all select 'idx|'||t.relname||'|'||i.relname||'|'||x.indisprimary::text||'|'||x.indisunique::text||'|'||x.indisvalid::text||'|'||x.indisready::text||'|'||x.indisclustered::text||'|'||pg_get_indexdef(i.oid) from pg_index x join pg_class i on i.oid=x.indexrelid join pg_class t on t.oid=x.indrelid join pg_namespace n on n.oid=t.relnamespace where n.nspname='proof' and t.relname in ('messages','successors')\
 ) q"
 
 message_digest_sql="select md5(string_agg(md5(to_jsonb(m)::text),'' order by m.message_id)) from proof.messages m"
@@ -184,7 +184,7 @@ grep -q 'injected_dual_rewrite_failure' "${output_directory}/rollback.log"
 
 # Successful row-preserving physical rewrite. Temporary snapshots contain no indexes
 # or constraints, minimizing working-set storage before TRUNCATE releases live files.
-docker exec -i "$container_name" psql -v ON_ERROR_STOP=1 -U postgres -d postgres \
+docker exec -i "$container_name" psql -At -v ON_ERROR_STOP=1 -U postgres -d postgres \
   > "${output_directory}/rewrite.log" <<'SQL'
 begin;
 set local lock_timeout='5s';
