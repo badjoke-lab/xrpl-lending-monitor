@@ -41,6 +41,15 @@ jobs:
             --source-commit "$GITHUB_SHA" \
             --output-dir r5-index-footprint-readonly-probe
 
+      - name: Read reference index key shape only
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
+          node scripts/r5-reference-index-key-shape-readonly-probe.mjs \
+            --source-commit "$GITHUB_SHA" \
+            --output-dir r5-index-footprint-readonly-probe
+
       - name: Read secondary index consumers and planner only
         shell: bash
         run: |
@@ -140,6 +149,8 @@ jobs:
             echo
             cat r5-index-footprint-readonly-probe/summary.md
             echo
+            cat r5-index-footprint-readonly-probe/reference-index-key-shape-summary.md
+            echo
             cat r5-index-footprint-readonly-probe/secondary-summary.md
             echo
             cat r5-index-footprint-readonly-probe/transport-summary.md
@@ -159,6 +170,6 @@ jobs:
             cat r5-index-footprint-readonly-probe/terminal-archive-phase-b-throughput-gate-summary.md
             echo
             echo "Run: ${GITHUB_RUN_ID}"
-            echo 'Safety: SELECT/read_only only. No index mutation, DELETE, VACUUM, scheduler mutation, deployment, Mainnet, stabilization, soak, or R5 restart is authorized.'
+            echo 'Safety: SELECT/read_only only. No index mutation, row mutation, DELETE, VACUUM, scheduler mutation, deployment, Mainnet, stabilization, soak, or R5 restart is authorized.'
           } > /tmp/index-footprint-comment.md
           gh issue comment 1261 --repo "$GITHUB_REPOSITORY" --body-file /tmp/index-footprint-comment.md
