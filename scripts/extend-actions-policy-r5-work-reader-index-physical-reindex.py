@@ -1,4 +1,5 @@
 from pathlib import Path
+import subprocess
 import sys
 
 if len(sys.argv) != 2:
@@ -107,3 +108,4 @@ if work_reader_manager.count("reindex index public.xrpl_phase_work_committed_rea
 '''
 text=text.replace(marker,block+marker)
 path.write_text(text)
+subprocess.run([sys.executable,'scripts/extend-actions-policy-r5-reference-pkey-physical-reindex.py',sys.argv[1]],check=True)
