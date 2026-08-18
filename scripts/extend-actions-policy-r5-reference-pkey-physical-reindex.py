@@ -23,13 +23,13 @@ replace_once(
 )
 replace_once(
     'reference pkey workflow symbol',
-    'r5_retention_readonly_preflight = "r5-retention-readonly-preflight.yml"',
-    'r5_reference_pkey_physical_reindex = "r5-reference-pkey-physical-reindex.yml"\nr5_retention_readonly_preflight = "r5-retention-readonly-preflight.yml"',
+    'r5_retention_preflight = "r5-retention-readonly-preflight.yml"',
+    'r5_reference_pkey_physical_reindex = "r5-reference-pkey-physical-reindex.yml"\nr5_retention_preflight = "r5-retention-readonly-preflight.yml"',
 )
 replace_once(
     'reference pkey trigger policy',
-    '    r5_retention_readonly_preflight: ["issue_comment"],',
-    '    r5_reference_pkey_physical_reindex: ["issue_comment"],\n    r5_retention_readonly_preflight: ["issue_comment"],',
+    '    r5_retention_preflight: ["issue_comment"],',
+    '    r5_reference_pkey_physical_reindex: ["issue_comment"],\n    r5_retention_preflight: ["issue_comment"],',
 )
 marker='burst = (root / r5_burst).read_text()\n'
 if text.count(marker)!=1: raise SystemExit('reference pkey policy insertion point is not unique')
