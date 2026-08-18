@@ -15,9 +15,10 @@ for required in \
   'create unique index shadow_pkey' \
   'create unique index shadow_unique' \
   'create index shadow_reader' \
-  'reindex index proof.xrpl_phase_work_pkey' \
-  'reindex index proof.xrpl_phase_work_profile_id_start_ledger_index_expected_pare_key' \
-  'reindex index proof.xrpl_phase_work_committed_reader_idx' \
+  'reindex index proof.${target}' \
+  'reindex_one xrpl_phase_work_pkey injected_work_pkey_reindex_failure pkey' \
+  'reindex_one xrpl_phase_work_profile_id_start_ledger_index_expected_pare_key injected_work_unique_reindex_failure unique' \
+  'reindex_one xrpl_phase_work_committed_reader_idx injected_work_reader_reindex_failure reader' \
   'injected_work_pkey_reindex_failure' \
   'injected_work_unique_reindex_failure' \
   'injected_work_reader_reindex_failure' \
@@ -59,13 +60,15 @@ python - "$proof" <<'PY'
 from pathlib import Path
 import re,sys
 text=Path(sys.argv[1]).read_text()
-for target in (
-    'proof.xrpl_phase_work_pkey',
-    'proof.xrpl_phase_work_profile_id_start_ledger_index_expected_pare_key',
-    'proof.xrpl_phase_work_committed_reader_idx',
+if text.count('reindex index proof.${target};') != 2:
+    raise SystemExit('work proof must contain rollback and success target-specific REINDEX statements')
+for call in (
+    'reindex_one xrpl_phase_work_pkey injected_work_pkey_reindex_failure pkey',
+    'reindex_one xrpl_phase_work_profile_id_start_ledger_index_expected_pare_key injected_work_unique_reindex_failure unique',
+    'reindex_one xrpl_phase_work_committed_reader_idx injected_work_reader_reindex_failure reader',
 ):
-    if text.count(f'reindex index {target};') != 1:
-        raise SystemExit(f'work proof must contain exactly one successful REINDEX statement for {target}')
+    if text.count(call) != 1:
+        raise SystemExit(f'work proof target invocation missing or duplicated: {call}')
 if 'update proof.xrpl_phase_work set status=' not in text.lower():
     raise SystemExit('work proof must model status-transition bloat')
 if 'vacuum analyze proof.xrpl_phase_work;' not in text.lower():
