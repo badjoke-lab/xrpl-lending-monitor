@@ -8,7 +8,8 @@ message_contract='scripts/test-r5-phase-message-pkey-reindex-contract.sh'
 message_production_contract='scripts/test-r5-phase-message-pkey-physical-reindex-production-contract.sh'
 work_proof='scripts/test-r5-work-index-reindex-postgres.sh'
 work_contract='scripts/test-r5-work-index-reindex-contract.sh'
-for file in "$proof" "$production_contract" "$message_proof" "$message_contract" "$message_production_contract" "$work_proof" "$work_contract"; do
+work_production_contract='scripts/test-r5-work-reader-index-physical-reindex-production-contract.sh'
+for file in "$proof" "$production_contract" "$message_proof" "$message_contract" "$message_production_contract" "$work_proof" "$work_contract" "$work_production_contract"; do
   [[ -f "$file" ]] || { echo "successor/message/work index contract missing: $file" >&2; exit 1; }
 done
 bash -n "$proof"
@@ -18,6 +19,7 @@ bash -n "$message_contract"
 bash -n "$message_production_contract"
 bash -n "$work_proof"
 bash -n "$work_contract"
+bash -n "$work_production_contract"
 
 for required in \
   "image='postgres:15-alpine'" \
@@ -87,6 +89,7 @@ bash "$message_production_contract"
 R5_MESSAGE_PKEY_REINDEX_OUTPUT=actions-workflow-policy-evidence/r5-phase-message-pkey-reindex \
   bash "$message_proof"
 bash "$work_contract"
+bash "$work_production_contract"
 R5_WORK_INDEX_REINDEX_OUTPUT=actions-workflow-policy-evidence/r5-work-index-reindex \
   bash "$work_proof"
 echo 'R5 successor + phase-message + phase-work index reindex contracts PASS'
