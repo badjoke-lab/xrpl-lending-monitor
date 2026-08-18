@@ -23,13 +23,13 @@ replace_once(
 )
 replace_once(
     'work reader workflow symbol',
-    'r5_work_status_apply = "r5-work-status-partial-index-apply.yml"',
-    'r5_work_reader_index_physical_reindex = "r5-work-reader-index-physical-reindex.yml"\nr5_work_status_apply = "r5-work-status-partial-index-apply.yml"',
+    'r5_work_status_index_apply = "r5-work-status-partial-index-apply.yml"',
+    'r5_work_reader_index_physical_reindex = "r5-work-reader-index-physical-reindex.yml"\nr5_work_status_index_apply = "r5-work-status-partial-index-apply.yml"',
 )
 replace_once(
     'work reader workflow trigger policy',
-    '    r5_work_status_apply: ["issue_comment"],',
-    '    r5_work_reader_index_physical_reindex: ["issue_comment"],\n    r5_work_status_apply: ["issue_comment"],',
+    '    r5_work_status_index_apply: ["issue_comment"],',
+    '    r5_work_reader_index_physical_reindex: ["issue_comment"],\n    r5_work_status_index_apply: ["issue_comment"],',
 )
 marker='burst = (root / r5_burst).read_text()\n'
 if text.count(marker)!=1: raise SystemExit('work reader policy insertion point is not unique')
