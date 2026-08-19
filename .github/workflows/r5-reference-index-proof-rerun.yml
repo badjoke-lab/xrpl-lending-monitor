@@ -1,0 +1,31 @@
+name: R5 reference index proof rerun
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/r5-reference-index-proof-rerun.yml'
+      - 'scripts/test-r5-reference-index-reindex-postgres.sh'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reference-index-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Re-run production-isolated reference index proof
+        run: bash scripts/test-r5-reference-index-reindex-postgres.sh
+
+      - name: Upload reference index proof evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r5-reference-index-reindex-evidence
+          path: r5-reference-index-reindex-evidence
+          if-no-files-found: error
+          retention-days: 7
