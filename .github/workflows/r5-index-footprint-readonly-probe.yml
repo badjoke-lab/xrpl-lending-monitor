@@ -158,6 +158,15 @@ jobs:
             --source-commit "$GITHUB_SHA" \
             --output-dir r5-index-footprint-readonly-probe
 
+      - name: Read terminal archive growth only
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
+          node scripts/r5-terminal-archive-growth-readonly-audit.mjs \
+            --source-commit "$GITHUB_SHA" \
+            --output-dir r5-index-footprint-readonly-probe
+
       - name: Verify Phase B throughput boundary read-only
         shell: bash
         run: |
@@ -210,6 +219,8 @@ jobs:
             cat r5-index-footprint-readonly-probe/terminal-archive-phase-b-heap-tail-summary.md
             echo
             cat r5-index-footprint-readonly-probe/terminal-archive-phase-b-internal-reuse-summary.md
+            echo
+            cat r5-index-footprint-readonly-probe/terminal-archive-growth-summary.md
             echo
             cat r5-index-footprint-readonly-probe/terminal-archive-phase-b-throughput-gate-summary.md
             echo
