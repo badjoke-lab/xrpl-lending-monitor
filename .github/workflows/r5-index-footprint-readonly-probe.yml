@@ -26,12 +26,12 @@ jobs:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
       GH_TOKEN: ${{ github.token }}
-      SOURCE_COMMIT: 288bd611605ebc3243278cfcf63743ac59aa0757
+      SOURCE_COMMIT: 509b4f57113c7c57ca67f0c73e9ca498f76f8659
     steps:
       - name: Check out exact derivation audit source
         uses: actions/checkout@v4
         with:
-          ref: 288bd611605ebc3243278cfcf63743ac59aa0757
+          ref: 509b4f57113c7c57ca67f0c73e9ca498f76f8659
           fetch-depth: 1
           persist-credentials: false
 
