@@ -1,219 +1,95 @@
-name: R5 index footprint read-only probe
+name: R5 terminal archive derivation read-only fallback
 
 on:
-  issue_comment:
-    types: [created]
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [main]
 
 permissions:
   contents: read
   issues: write
 
 concurrency:
-  group: r5-index-footprint-readonly-probe
+  group: r5-terminal-archive-derivation-fallback
   cancel-in-progress: false
 
 jobs:
   probe:
     if: >-
-      github.event.issue.number == 1261 &&
-      github.event.comment.user.login == 'badjoke-lab' &&
-      github.event.comment.body == '/r5-index-footprint-readonly-probe'
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'agent/r5-internal-reuse-exact-source-fallback' &&
+      github.event.pull_request.user.login == 'badjoke-lab' &&
+      github.event.pull_request.base.ref == 'main'
     runs-on: ubuntu-latest
     timeout-minutes: 8
     env:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
       GH_TOKEN: ${{ github.token }}
+      SOURCE_COMMIT: e7820fffa064084303f811de323ec86f3b9a9944
     steps:
-      - name: Check out exact current main
+      - name: Check out exact derivation audit source
         uses: actions/checkout@v4
         with:
-          ref: main
+          ref: e7820fffa064084303f811de323ec86f3b9a9944
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Read production index footprint only
+      - name: Bind exact source identity
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
-          node scripts/r5-index-footprint-readonly-probe.mjs \
-            --source-commit "$GITHUB_SHA" \
-            --output-dir r5-index-footprint-readonly-probe
+          [[ "$(git rev-parse HEAD)" == "$SOURCE_COMMIT" ]]
+          [[ "$SOURCE_COMMIT" =~ ^[a-f0-9]{40}$ ]]
 
-      - name: Read revision-3 restore storage only
+      - name: Audit durable terminal membership derivation only
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
-          node scripts/r5-resource-restore-readonly-audit.mjs \
-            --source-commit "$GITHUB_SHA" \
-            --output-dir r5-index-footprint-readonly-probe
+          node scripts/r5-terminal-archive-derived-membership-readonly-audit.mjs \
+            --source-commit "$SOURCE_COMMIT" \
+            --output-dir r5-terminal-archive-derivation
 
-      - name: Preflight revision-3 restore reclaim read-only
+      - name: Audit durable completion-time derivation only
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
-          node scripts/r5-resource-restore-reclaim-readonly-preflight.mjs \
-            --source-commit "$GITHUB_SHA" \
-            --output-dir r5-index-footprint-readonly-probe
+          node scripts/r5-terminal-archive-derived-completion-time-readonly-audit.mjs \
+            --source-commit "$SOURCE_COMMIT" \
+            --output-dir r5-terminal-archive-derivation
 
-      - name: Read reference index key shape only
+      - name: Audit production archive consumers only
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
-          node scripts/r5-reference-index-key-shape-readonly-probe.mjs \
-            --source-commit "$GITHUB_SHA" \
-            --output-dir r5-index-footprint-readonly-probe
+          node scripts/r5-terminal-archive-consumer-readonly-audit.mjs \
+            --source-commit "$SOURCE_COMMIT" \
+            --output-dir r5-terminal-archive-derivation
 
-      - name: Read secondary index consumers and planner only
-        shell: bash
-        run: |
-          set -euo pipefail
-          [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
-          node scripts/r5-secondary-index-readonly-audit.mjs \
-            --source-commit "$GITHUB_SHA" \
-            --output-dir r5-index-footprint-readonly-probe
-
-      - name: Read terminal transport retention candidates only
-        shell: bash
-        run: |
-          set -euo pipefail
-          [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
-          node scripts/r5-transport-retention-readonly-audit.mjs \
-            --source-commit "$GITHUB_SHA" \
-            --output-dir r5-index-footprint-readonly-probe
-
-      - name: Read terminal transport compaction shape only
-        shell: bash
-        run: |
-          set -euo pipefail
-          [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
-          node scripts/r5-transport-compaction-shape-readonly-audit.mjs \
-            --source-commit "$GITHUB_SHA" \
-            --output-dir r5-index-footprint-readonly-probe
-
-      - name: Read transport consumer compatibility only
-        shell: bash
-        run: |
-          set -euo pipefail
-          [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
-          node scripts/r5-transport-consumer-compat-readonly-audit.mjs \
-            --source-commit "$GITHUB_SHA" \
-            --output-dir r5-index-footprint-readonly-probe
-
-      - name: Read historical transport consumer sources only
-        shell: bash
-        run: |
-          set -euo pipefail
-          [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
-          node scripts/r5-historical-transport-consumer-source-readonly-audit.mjs \
-            --source-commit "$GITHUB_SHA" \
-            --output-dir r5-index-footprint-readonly-probe
-
-      - name: Read legacy revision-3 executable callers only
-        shell: bash
-        run: |
-          set -euo pipefail
-          [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
-          node scripts/r5-legacy-rev3-caller-readonly-audit.mjs \
-            --source-commit "$GITHUB_SHA" \
-            --output-dir r5-index-footprint-readonly-probe
-
-      - name: Read exact target transport function sources only
-        shell: bash
-        run: |
-          set -euo pipefail
-          [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
-          node scripts/r5-transport-target-source-readonly-audit.mjs \
-            --source-commit "$GITHUB_SHA" \
-            --output-dir r5-index-footprint-readonly-probe
-
-      - name: Run terminal archive Phase B preflight read-only
-        shell: bash
-        run: |
-          set -euo pipefail
-          [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
-          node scripts/r5-terminal-archive-phase-b-readonly-preflight.mjs \
-            --source-commit "$GITHUB_SHA" \
-            --output-dir r5-index-footprint-readonly-probe
-
-      - name: Read terminal archive Phase B heap tail only
-        shell: bash
-        run: |
-          set -euo pipefail
-          [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
-          node scripts/r5-terminal-archive-phase-b-heap-tail-readonly-audit.mjs \
-            --source-commit "$GITHUB_SHA" \
-            --output-dir r5-index-footprint-readonly-probe
-
-      - name: Read terminal archive Phase B internal reuse only
-        shell: bash
-        run: |
-          set -euo pipefail
-          [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
-          node scripts/r5-terminal-archive-phase-b-internal-reuse-readonly-audit.mjs \
-            --source-commit "$GITHUB_SHA" \
-            --output-dir r5-index-footprint-readonly-probe
-
-      - name: Verify Phase B throughput boundary read-only
-        shell: bash
-        run: |
-          set -euo pipefail
-          [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
-          node scripts/r5-terminal-archive-phase-b-throughput-readonly-gate.mjs \
-            --source-commit "$GITHUB_SHA" \
-            --output-dir r5-index-footprint-readonly-probe
-
-      - name: Upload sanitized read-only index evidence
+      - name: Upload sanitized derivation evidence
         uses: actions/upload-artifact@v4
         with:
-          name: r5-index-footprint-readonly-probe-${{ github.run_id }}
-          path: r5-index-footprint-readonly-probe/
+          name: r5-terminal-archive-derivation-${{ github.run_id }}
+          path: r5-terminal-archive-derivation/
           if-no-files-found: error
           retention-days: 7
 
-      - name: Publish sanitized read-only index result
+      - name: Publish sanitized derivation result
         if: success()
         shell: bash
         run: |
           set -euo pipefail
           {
-            echo '### R5 index footprint read-only probe'
+            echo '### R5 terminal archive durable derivation read-only fallback'
             echo
-            cat r5-index-footprint-readonly-probe/summary.md
+            cat r5-terminal-archive-derivation/derived-membership-summary.md
             echo
-            cat r5-index-footprint-readonly-probe/resource-restore-summary.md
+            cat r5-terminal-archive-derivation/derived-completion-time-summary.md
             echo
-            cat r5-index-footprint-readonly-probe/resource-restore-reclaim-preflight-summary.md
-            echo
-            cat r5-index-footprint-readonly-probe/reference-index-key-shape-summary.md
-            echo
-            cat r5-index-footprint-readonly-probe/secondary-summary.md
-            echo
-            cat r5-index-footprint-readonly-probe/transport-summary.md
-            echo
-            cat r5-index-footprint-readonly-probe/transport-shape-summary.md
-            echo
-            cat r5-index-footprint-readonly-probe/transport-consumer-compat-summary.md
-            echo
-            cat r5-index-footprint-readonly-probe/historical-transport-consumer-source-summary.md
-            echo
-            cat r5-index-footprint-readonly-probe/legacy-rev3-caller-summary.md
-            echo
-            cat r5-index-footprint-readonly-probe/transport-target-source-summary.md
-            echo
-            cat r5-index-footprint-readonly-probe/terminal-archive-phase-b-preflight-summary.md
-            echo
-            cat r5-index-footprint-readonly-probe/terminal-archive-phase-b-heap-tail-summary.md
-            echo
-            cat r5-index-footprint-readonly-probe/terminal-archive-phase-b-internal-reuse-summary.md
-            echo
-            cat r5-index-footprint-readonly-probe/terminal-archive-phase-b-throughput-gate-summary.md
+            cat r5-terminal-archive-derivation/consumer-audit-summary.md
             echo
             echo "Run: ${GITHUB_RUN_ID}"
-            echo 'Safety: SELECT/read_only only. No index mutation, row mutation, DELETE, VACUUM, scheduler mutation, deployment, Mainnet, stabilization, soak, or R5 restart is authorized.'
-          } > /tmp/index-footprint-comment.md
-          gh issue comment 1261 --repo "$GITHUB_REPOSITORY" --body-file /tmp/index-footprint-comment.md
+            echo "Derivation audit source commit: ${SOURCE_COMMIT}"
+            echo 'Safety: SELECT/read_only only. No archive mutation/deletion, Phase B execution, restore reclaim, scheduler/deployment/public-reader change, R5 rearm, Mainnet, stabilization, or soak is authorized.'
+          } > /tmp/r5-terminal-archive-derivation-comment.md
+          gh issue comment 1261 --repo "$GITHUB_REPOSITORY" --body-file /tmp/r5-terminal-archive-derivation-comment.md
