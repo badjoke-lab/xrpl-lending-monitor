@@ -92,6 +92,7 @@ const SQL = String.raw`with params as (
   ) as state
   from message_blocks
   cross join params p
+  group by p.block_size
 ), successor_summary as (
   select jsonb_build_object(
     'heapBytes', pg_relation_size('public.xrpl_phase_successors'::regclass),
@@ -114,6 +115,7 @@ const SQL = String.raw`with params as (
   ) as state
   from successor_blocks
   cross join params p
+  group by p.block_size
 )
 select jsonb_build_object(
   'observedAt', p.observed_at,
