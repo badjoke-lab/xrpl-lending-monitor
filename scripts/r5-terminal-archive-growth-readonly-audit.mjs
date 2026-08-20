@@ -2,6 +2,21 @@ import { createHash } from 'node:crypto'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
+const COMPACT_V2_PROOF = Object.freeze({
+  sourcePr: 1420,
+  sourceHead: '24ae10ae9fc198fe116a540ec7bf6b08f27e6842',
+  sourceRun: 32041777387,
+  rows: 35000,
+  v1Bytes: 62701568,
+  v2Bytes: 29245440,
+  savedBytes: 33456128,
+  savedPercent: 53,
+  modeledRows1500: 1500,
+  modeledV1Bytes1500: 2744320,
+  modeledV2Bytes1500: 1310720,
+})
+const RESTORE_RECLAIM_CANDIDATE_BYTES = 6144000
+
 function fail(message) { throw new Error(message) }
 function need(name, pattern = null) { const v = process.env[name]; if (!v) fail(`missing ${name}`); if (pattern && !pattern.test(v)) fail(`invalid ${name}`); return v }
 function parse(argv) { const o = {}; for (let i = 0; i < argv.length; i += 2) { if (!argv[i]?.startsWith('--') || argv[i + 1] == null) fail('invalid arguments'); o[argv[i].slice(2)] = argv[i + 1] } return o }
@@ -103,8 +118,16 @@ const options = parse(process.argv.slice(2)); const sourceCommit = options['sour
 if (!/^[a-f0-9]{40}$/u.test(sourceCommit ?? '')) fail('invalid --source-commit')
 const outputDir = resolve(options['output-dir'] ?? 'r5-index-footprint-readonly-probe'); await mkdir(outputDir,{recursive:true})
 const state = await query()
+const primaryCandidateRows = Number(state.primary24hCandidateRows)
+const databaseHeadroomBytes = Number(state.databaseHeadroomBytes)
+if (!Number.isSafeInteger(primaryCandidateRows) || primaryCandidateRows < 0) fail('invalid primary candidate row count')
+if (!Number.isSafeInteger(databaseHeadroomBytes)) fail('invalid database headroom')
+const compactV2ModeledCandidateBytes = Math.ceil(primaryCandidateRows * COMPACT_V2_PROOF.v2Bytes / COMPACT_V2_PROOF.rows)
+const headroomWithRestoreReclaimCandidateBytes = databaseHeadroomBytes + RESTORE_RECLAIM_CANDIDATE_BYTES
+const compactV2CandidateFitsCurrentHeadroom = compactV2ModeledCandidateBytes <= databaseHeadroomBytes
+const compactV2CandidateFitsWithRestoreReclaimCandidate = compactV2ModeledCandidateBytes <= headroomWithRestoreReclaimCandidateBytes
 const evidence = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   purpose: 'r5-terminal-archive-growth-readonly-audit',
   sourceCommit,
   ...state,
@@ -112,6 +135,14 @@ const evidence = {
   formalPhaseBPreflightRequired: true,
   projectionClassification: 'primary_candidate_upper_bound_diagnostic',
   projectionCaveat: 'Observed physical bytes-per-row is a coarse current-footprint ratio including heap/index/TOAST allocation and is not a guaranteed marginal growth rate. The primary 24h candidate set is only the Phase B population basis; successor/root/revision/halt and other formal preflight gates are evaluated separately by the existing Phase B preflight. Existing bounded tranche deltas remain the stronger empirical mutation evidence.',
+  compactV2Proof: COMPACT_V2_PROOF,
+  compactV2ModeledCandidateBytes,
+  compactV2ProjectionClassification: 'local_postgresql15_production_shaped_model_diagnostic',
+  compactV2ProjectionCaveat: 'The compact-v2 projection scales the exact 35,000-row local PostgreSQL 15 proof from PR #1420. It is not a production marginal-growth guarantee and does not include an archive-v1-to-v2 migration transient peak. A false fit result is sufficient to reject compact-v2 backlog drain at the observed headroom; a true fit result would still require a separate provider-headroom migration gate.',
+  restoreReclaimCandidateBytes: RESTORE_RECLAIM_CANDIDATE_BYTES,
+  headroomWithRestoreReclaimCandidateBytes,
+  compactV2CandidateFitsCurrentHeadroom,
+  compactV2CandidateFitsWithRestoreReclaimCandidate,
   archiveMutationAuthorized: false,
   archiveCompactionAuthorized: false,
   phaseBMutationAuthorized: false,
@@ -134,9 +165,16 @@ const s=[
   `- primary candidate phase counts: \`${JSON.stringify(state.primary24hCandidatePhaseCounts)}\``,
   `- coarse added archive bytes at current physical ratio: \`${state.projectedAdditionalArchiveBytesAtObservedPhysicalRatio}\``,
   `- coarse projected database bytes at current physical ratio: \`${state.projectedDatabaseBytesAtObservedPhysicalRatio}\``,
+  `- compact-v2 proof PR / head / run: \`#${COMPACT_V2_PROOF.sourcePr} / ${COMPACT_V2_PROOF.sourceHead} / ${COMPACT_V2_PROOF.sourceRun}\``,
+  `- compact-v2 proof v1 / v2 / saved at 35,000 rows: \`${COMPACT_V2_PROOF.v1Bytes} / ${COMPACT_V2_PROOF.v2Bytes} / ${COMPACT_V2_PROOF.savedBytes} (${COMPACT_V2_PROOF.savedPercent}%)\``,
+  `- compact-v2 modeled bytes for current candidate rows: \`${compactV2ModeledCandidateBytes}\``,
+  `- compact-v2 candidate fits current headroom: \`${compactV2CandidateFitsCurrentHeadroom}\``,
+  `- restore reclaim candidate / modeled headroom after it: \`${RESTORE_RECLAIM_CANDIDATE_BYTES} / ${headroomWithRestoreReclaimCandidateBytes}\``,
+  `- compact-v2 candidate fits headroom after restore candidate: \`${compactV2CandidateFitsWithRestoreReclaimCandidate}\``,
   '',
   'The >24h completed set is the Phase B primary population basis only. Formal successor/root/revision/halt and other fail-close gates remain separately enforced by the existing Phase B preflight.',
-  'Projection is diagnostic only; it is not a mutation forecast guarantee. No archive/Phase B mutation, compaction, R5 rearm, scheduler change, deployment, or Mainnet action is authorized.',
+  'Compact-v2 scaling is diagnostic only. A false fit rejects backlog drain at the observed headroom; a true fit still does not authorize migration because transient provider headroom remains unproved.',
+  'No archive/Phase B mutation, compaction, R5 rearm, scheduler change, deployment, or Mainnet action is authorized.',
   '',`Evidence SHA-256: \`${digest}\``,
 ].join('\n')
 await writeFile(`${outputDir}/terminal-archive-growth-summary.md`,`${s}\n`); console.log(s)
