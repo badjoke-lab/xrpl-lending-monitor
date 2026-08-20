@@ -64,6 +64,7 @@ jobs:
           bash -n scripts/test-r4f-revision4-provider-capture-verifier.sh
           bash -n scripts/test-r4f-steady-qualification-reclaim-contract.sh
           bash -n scripts/test-r5-phase-message-ready-partial-index-postgres.sh
+          bash -n scripts/test-r5-terminal-archive-v3-normalized-postgres.sh
 
       - name: Validate canonical production base identity
         env:
@@ -100,6 +101,18 @@ jobs:
         with:
           name: r5-phase-message-ready-partial-index-evidence
           path: r5-phase-message-ready-partial-index-evidence
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Verify terminal archive v3 normalized proof locally
+        run: bash scripts/test-r5-terminal-archive-v3-normalized-postgres.sh
+
+      - name: Upload terminal archive v3 normalized proof evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r5-terminal-archive-v3-normalized-evidence
+          path: r5-terminal-archive-v3-normalized-evidence
           if-no-files-found: warn
           retention-days: 7
 
