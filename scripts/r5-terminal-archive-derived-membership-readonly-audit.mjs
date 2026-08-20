@@ -67,31 +67,29 @@ const SQL = String.raw`with archive as (
   select
     r.*,
     case r.phase
-      when 'scan' then public.xrpl_phase_scan_message_id(
-        r.payload->>'network', r.payload->>'epochId', r.payload->>'baseIdentity',
-        (r.payload->>'expectedPreviousLedgerIndex')::bigint,
-        r.payload->>'expectedPreviousLedgerHash',
-        (r.payload->>'scanSequence')::integer)
-      when 'commit' then public.xrpl_phase_commit_message_id(r.durable_work_id, r.archive_chunk_index)
-      when 'finalize' then public.xrpl_phase_finalize_message_id(r.durable_work_id)
+      when 'scan' then concat(
+        'scan:v1:',r.payload->>'network',':',r.payload->>'epochId',':',r.payload->>'baseIdentity',':',
+        ((r.payload->>'expectedPreviousLedgerIndex')::bigint)::text,':',upper(r.payload->>'expectedPreviousLedgerHash'),':',
+        ((r.payload->>'scanSequence')::integer)::text)
+      when 'commit' then concat('commit:v1:',replace(r.durable_work_id,':','%3A'),':',r.archive_chunk_index::text)
+      when 'finalize' then concat('finalize:v1:',replace(r.durable_work_id,':','%3A'))
     end as reconstructed_message_id,
     case r.phase
       when 'scan' then case
-        when r.durable_work_id is not null then public.xrpl_phase_commit_message_id(r.durable_work_id,0)
-        else public.xrpl_phase_scan_message_id(
-          r.payload->>'network', r.payload->>'epochId', r.payload->>'baseIdentity',
-          (r.payload->>'expectedPreviousLedgerIndex')::bigint,
-          r.payload->>'expectedPreviousLedgerHash',
-          (r.payload->>'scanSequence')::integer+1)
+        when r.durable_work_id is not null then concat('commit:v1:',replace(r.durable_work_id,':','%3A'),':0')
+        else concat(
+          'scan:v1:',r.payload->>'network',':',r.payload->>'epochId',':',r.payload->>'baseIdentity',':',
+          ((r.payload->>'expectedPreviousLedgerIndex')::bigint)::text,':',upper(r.payload->>'expectedPreviousLedgerHash'),':',
+          (((r.payload->>'scanSequence')::integer)+1)::text)
       end
       when 'commit' then case
         when r.archive_chunk_index+1 < r.expected_commit_chunks
-          then public.xrpl_phase_commit_message_id(r.durable_work_id,r.archive_chunk_index+1)
-        else public.xrpl_phase_finalize_message_id(r.durable_work_id)
+          then concat('commit:v1:',replace(r.durable_work_id,':','%3A'),':',(r.archive_chunk_index+1)::text)
+        else concat('finalize:v1:',replace(r.durable_work_id,':','%3A'))
       end
-      when 'finalize' then public.xrpl_phase_scan_message_id(
-        r.work_network,r.work_epoch_id,r.work_base_identity,
-        r.work_scanned_end_ledger_index,r.work_final_ledger_hash,0)
+      when 'finalize' then concat(
+        'scan:v1:',r.work_network,':',r.work_epoch_id,':',r.work_base_identity,':',
+        r.work_scanned_end_ledger_index::text,':',upper(r.work_final_ledger_hash),':0')
     end as reconstructed_successor_id,
     case r.phase
       when 'scan' then jsonb_build_object(
@@ -150,6 +148,9 @@ from checked;`
 if (!/^\s*with\b/iu.test(SQL) || /\b(insert|update|delete|truncate|vacuum|alter|drop|create|reindex|cluster|grant|revoke)\b/iu.test(SQL)) {
   fail('derived-membership audit must be SELECT/read_only only')
 }
+if (/public\.xrpl_phase_(scan|commit|finalize)_message_id\s*\(/u.test(SQL)) {
+  fail('derived-membership audit must not require EXECUTE on private phase identity helpers')
+}
 
 async function query() {
   const project = need('SUPABASE_PROJECT_ID', /^[a-z]{20}$/u)
@@ -179,6 +180,7 @@ const evidence = {
   sourceCommit,
   ...state,
   interpretation:'Tests whether archived transport membership, exact message identity, successor identity, and canonical phase payload shape are derivable from durable phase work/commit state plus the archived row being audited. Productive scan/commit/finalize rows that pass are candidates for a future compatibility path that parses incoming IDs/payloads and proves membership against durable work instead of retaining an append-only terminal row. Caught-up scans without durable work remain explicitly unproven.',
+  identityReconstructionImplementation:'inline canonical v1 formulas; no EXECUTE grant on phase identity helper functions required',
   resultDigestDerivabilityProven:false,
   completedAtDerivabilityProven:false,
   archiveMutationAuthorized:false,
