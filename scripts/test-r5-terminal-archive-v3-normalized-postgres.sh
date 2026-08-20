@@ -199,7 +199,15 @@ with rows as (
   select g,((g+2)/3)::integer as work_number,case when g%3=1 then 1 when g%3=2 then 2 else 3 end::smallint as phase
   from generate_series(1,35000) g
 ), shaped as (
-  select r.*,w.*,
+  select
+    r.g,
+    r.work_number,
+    r.phase,
+    w.stream_key,
+    w.start_ledger_index,
+    w.expected_parent_hash,
+    w.scanned_end_ledger_index,
+    w.final_ledger_hash,
     concat('collector-work-v1:devnet:supabase-r4c2c-v1:base:v1:devnet:',repeat('b',64),':',w.start_ledger_index::text,':',upper(encode(w.expected_parent_hash,'hex'))) as work_id
   from rows r join generated_work w using(work_number)
 ), ids as (
