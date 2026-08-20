@@ -50,6 +50,15 @@ jobs:
             --source-commit "$GITHUB_SHA" \
             --output-dir r5-index-footprint-readonly-probe
 
+      - name: Preflight revision-3 restore reclaim read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
+          node scripts/r5-resource-restore-reclaim-readonly-preflight.mjs \
+            --source-commit "$GITHUB_SHA" \
+            --output-dir r5-index-footprint-readonly-probe
+
       - name: Read reference index key shape only
         shell: bash
         run: |
@@ -168,6 +177,8 @@ jobs:
             cat r5-index-footprint-readonly-probe/summary.md
             echo
             cat r5-index-footprint-readonly-probe/resource-restore-summary.md
+            echo
+            cat r5-index-footprint-readonly-probe/resource-restore-reclaim-preflight-summary.md
             echo
             cat r5-index-footprint-readonly-probe/reference-index-key-shape-summary.md
             echo
