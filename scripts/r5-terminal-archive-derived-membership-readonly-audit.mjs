@@ -106,7 +106,10 @@ const SQL = String.raw`with archive as (
     end as reconstructed_payload,
     case r.phase
       when 'scan' then r.durable_work_id is not null and r.durable_work_status='committed'
-      when 'commit' then r.durable_work_status='committed' and r.durable_commit_chunk_status='completed'
+      when 'commit' then
+        r.durable_work_status='committed'
+        and r.archive_chunk_index >= 0
+        and r.archive_chunk_index < r.expected_commit_chunks
       when 'finalize' then r.durable_work_status='committed'
       else false
     end as durable_membership_proven
@@ -134,7 +137,19 @@ select jsonb_build_object(
   'messageIdMismatchRows',count(*) filter(where reconstructed_message_id is distinct from message_id),
   'successorIdMismatchRows',count(*) filter(where reconstructed_successor_id is distinct from successor_message_id),
   'payloadMismatchRows',count(*) filter(where reconstructed_payload is distinct from payload),
-  'commitRowsMissingCompletedChunk',count(*) filter(where phase='commit' and durable_commit_chunk_status is distinct from 'completed'),
+  'commitRowsWithCommittedWork',count(*) filter(where phase='commit' and durable_work_status='committed'),
+  'commitRowsProvenByCommittedWorkCertificate',count(*) filter(
+    where phase='commit'
+      and durable_work_status='committed'
+      and archive_chunk_index >= 0
+      and archive_chunk_index < expected_commit_chunks),
+  'commitRowsExpectedSingleChunk',count(*) filter(where phase='commit' and expected_commit_chunks=1),
+  'commitRowsExpectedMultiChunk',count(*) filter(where phase='commit' and expected_commit_chunks>1),
+  'commitRowsOutsideExpectedChunkRange',count(*) filter(
+    where phase='commit'
+      and (archive_chunk_index < 0 or archive_chunk_index >= expected_commit_chunks)),
+  'commitRowsWithRetainedCompletedChunk',count(*) filter(where phase='commit' and durable_commit_chunk_status='completed'),
+  'commitRowsMissingRetainedCompletedChunk',count(*) filter(where phase='commit' and durable_commit_chunk_status is distinct from 'completed'),
   'finalizeRowsMissingCommittedWork',count(*) filter(where phase='finalize' and durable_work_status is distinct from 'committed'),
   'scanRowsWithStreamIdentityMismatch',count(*) filter(where phase='scan' and (
     stream_network is distinct from payload->>'network'
@@ -179,7 +194,14 @@ const evidence = {
   purpose:'r5-terminal-archive-derived-membership-readonly-audit',
   sourceCommit,
   ...state,
-  interpretation:'Tests whether archived transport membership, exact message identity, successor identity, and canonical phase payload shape are derivable from durable phase work/commit state plus the archived row being audited. Productive scan/commit/finalize rows that pass are candidates for a future compatibility path that parses incoming IDs/payloads and proves membership against durable work instead of retaining an append-only terminal row. Caught-up scans without durable work remain explicitly unproven.',
+  interpretation:'Tests whether archived transport membership, exact message identity, successor identity, and canonical phase payload shape are derivable from durable phase work state plus the archived row being audited. For commit rows, committed work plus a canonical in-range chunk index is treated as the durable completion-membership certificate because supported finalize paths cannot mark the work committed until required commit evidence has completed. The certificate survives later commit-chunk retention cleanup. Caught-up scans without durable work remain explicitly unproven.',
+  commitMembershipCertificate:{
+    predicate:"xrpl_phase_work.status='committed' and 0 <= chunkIndex < expected_commit_chunks",
+    genericFinalizeInvariant:'single-chunk finalize requires completed commit chunk 0 before marking work committed',
+    portableFinalizeInvariant:'portable finalize requires completed commit chunk count to equal expected_commit_chunks before marking work committed',
+    archiveCompatibilityInvariant:'terminal archive compatibility patch prepends duplicate-completion handling and does not weaken either finalize evidence gate',
+    retainedCommitChunkRowRequired:false,
+  },
   identityReconstructionImplementation:'inline canonical v1 formulas; no EXECUTE grant on phase identity helper functions required',
   resultDigestDerivabilityProven:false,
   completedAtDerivabilityProven:false,
@@ -200,6 +222,10 @@ const summary=[
   `- phase counts: \`${JSON.stringify(state.phaseCounts)}\``,
   `- durable membership proven / unproven: \`${state.durableMembershipProvenRows} / ${state.durableMembershipUnprovenRows}\``,
   `- productive scans / caught-up scans without work: \`${state.productiveScanRows} / ${state.caughtUpScanRowsWithoutWork}\``,
+  `- commit membership by committed-work certificate: \`${state.commitRowsProvenByCommittedWorkCertificate}\``,
+  `- commit expected single / multi chunk: \`${state.commitRowsExpectedSingleChunk} / ${state.commitRowsExpectedMultiChunk}\``,
+  `- commit rows outside expected chunk range: \`${state.commitRowsOutsideExpectedChunkRange}\``,
+  `- retained completed commit-chunk rows / missing after retention: \`${state.commitRowsWithRetainedCompletedChunk} / ${state.commitRowsMissingRetainedCompletedChunk}\``,
   `- exact message / successor / payload reconstruction matches: \`${state.messageIdReconstructionMatchRows} / ${state.successorIdReconstructionMatchRows} / ${state.payloadReconstructionMatchRows}\``,
   `- fully reconstructable rows: \`${state.fullyReconstructableRows}\``,
   `- result-digest derivability proven: \`false\``,
