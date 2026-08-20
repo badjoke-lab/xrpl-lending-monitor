@@ -26,12 +26,12 @@ jobs:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
       GH_TOKEN: ${{ github.token }}
-      SOURCE_COMMIT: ee2cc5ce020566901186a2524321e7838412cd66
+      SOURCE_COMMIT: e378efcc981ceda46774efc8bed8dc29001c79fb
     steps:
-      - name: Check out exact sealed source
+      - name: Check out exact fixed audit source
         uses: actions/checkout@v4
         with:
-          ref: ee2cc5ce020566901186a2524321e7838412cd66
+          ref: e378efcc981ceda46774efc8bed8dc29001c79fb
           fetch-depth: 1
           persist-credentials: false
 
@@ -69,7 +69,8 @@ jobs:
             cat r5-exact-source-internal-reuse/terminal-archive-phase-b-internal-reuse-summary.md
             echo
             echo "Run: ${GITHUB_RUN_ID}"
-            echo "Sealed source commit: ${SOURCE_COMMIT}"
+            echo "Fixed audit source commit: ${SOURCE_COMMIT}"
+            echo 'Base main for this two-line SQL fix: ee2cc5ce020566901186a2524321e7838412cd66'
             echo 'Safety: SELECT/read_only only. This fallback does not authorize row/index mutation, DELETE, VACUUM, archive movement, scheduler/deployment/public-reader change, Mainnet, stabilization, soak, or R5 restart.'
           } > /tmp/r5-exact-source-internal-reuse-comment.md
           gh issue comment 1261 --repo "$GITHUB_REPOSITORY" --body-file /tmp/r5-exact-source-internal-reuse-comment.md
