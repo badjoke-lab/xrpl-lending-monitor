@@ -20,7 +20,7 @@ const SQL = String.raw`with params as (
     count(*) filter (where phase='finalize')::bigint as finalize_rows,
     count(*) filter (where payload ? 'workId')::bigint as payload_work_id_rows
   from xrpl_phase_archive_v1.terminal_messages t
-), candidate as (
+), primary_candidate as (
   select
     count(*)::bigint as rows,
     coalesce(sum(pg_column_size(m)), 0)::bigint as logical_tuple_bytes,
@@ -72,18 +72,17 @@ select jsonb_build_object(
   'archivePhysicalBytesPerRow', case when a.rows=0 then null else round(r.total_bytes::numeric/a.rows,2) end,
   'archivePhaseCounts', jsonb_build_object('scan',a.scan_rows,'commit',a.commit_rows,'finalize',a.finalize_rows),
   'archivePayloadWorkIdRows', a.payload_work_id_rows,
-  'archiveIndexes', i.items,
-  'eligibleRows', e.rows,
-  'eligibleLogicalTupleBytes', e.logical_tuple_bytes,
-  'eligiblePayloadBytes', e.payload_bytes,
-  'eligibleAvgPayloadBytes', round(e.avg_payload_bytes,2),
-  'eligibleMaxPayloadBytes', e.max_payload_bytes,
-  'eligiblePhaseCounts', jsonb_build_object('scan',e.scan_rows,'commit',e.commit_rows,'finalize',e.finalize_rows),
-  'eligiblePayloadWorkIdRows', e.payload_work_id_rows,
+  'primary24hCandidateRows', e.rows,
+  'primary24hCandidateLogicalTupleBytes', e.logical_tuple_bytes,
+  'primary24hCandidatePayloadBytes', e.payload_bytes,
+  'primary24hCandidateAvgPayloadBytes', round(e.avg_payload_bytes,2),
+  'primary24hCandidateMaxPayloadBytes', e.max_payload_bytes,
+  'primary24hCandidatePhaseCounts', jsonb_build_object('scan',e.scan_rows,'commit',e.commit_rows,'finalize',e.finalize_rows),
+  'primary24hCandidatePayloadWorkIdRows', e.payload_work_id_rows,
   'projectedAdditionalArchiveBytesAtObservedPhysicalRatio', case when a.rows=0 then null else ceil(e.rows::numeric*r.total_bytes::numeric/a.rows)::bigint end,
   'projectedDatabaseBytesAtObservedPhysicalRatio', case when a.rows=0 then null else pg_database_size(current_database())::bigint + ceil(e.rows::numeric*r.total_bytes::numeric/a.rows)::bigint end
 )::text as state
-from params p cross join archive a cross join candidate e cross join rel r cross join idx i;`
+from params p cross join archive a cross join primary_candidate e cross join rel r cross join idx i;`
 
 if (!/^\s*with\b/iu.test(SQL) || /\b(insert|update|delete|truncate|vacuum|alter|drop|create|reindex|cluster|grant|revoke)\b/iu.test(SQL)) fail('archive growth audit must be SELECT/read_only only')
 
@@ -109,7 +108,10 @@ const evidence = {
   purpose: 'r5-terminal-archive-growth-readonly-audit',
   sourceCommit,
   ...state,
-  projectionCaveat: 'Observed physical bytes-per-row is a coarse current-footprint ratio including heap/index/TOAST allocation and is not a guaranteed marginal growth rate. Existing bounded tranche deltas remain the stronger empirical mutation evidence.',
+  primaryCandidateDefinition: "profile_id='supabase-devnet' AND status='completed' AND completed_at < observed_at - interval '24 hours'",
+  formalPhaseBPreflightRequired: true,
+  projectionClassification: 'primary_candidate_upper_bound_diagnostic',
+  projectionCaveat: 'Observed physical bytes-per-row is a coarse current-footprint ratio including heap/index/TOAST allocation and is not a guaranteed marginal growth rate. The primary 24h candidate set is only the Phase B population basis; successor/root/revision/halt and other formal preflight gates are evaluated separately by the existing Phase B preflight. Existing bounded tranche deltas remain the stronger empirical mutation evidence.',
   archiveMutationAuthorized: false,
   archiveCompactionAuthorized: false,
   phaseBMutationAuthorized: false,
@@ -127,12 +129,13 @@ const s=[
   `- archive physical bytes per row: \`${state.archivePhysicalBytesPerRow}\``,
   `- archive payload total / avg / max bytes: \`${state.archivePayloadBytes} / ${state.archiveAvgPayloadBytes} / ${state.archiveMaxPayloadBytes}\``,
   `- archive phase counts: \`${JSON.stringify(state.archivePhaseCounts)}\``,
-  `- eligible historical messages: \`${state.eligibleRows}\``,
-  `- eligible payload total / avg / max bytes: \`${state.eligiblePayloadBytes} / ${state.eligibleAvgPayloadBytes} / ${state.eligibleMaxPayloadBytes}\``,
-  `- eligible phase counts: \`${JSON.stringify(state.eligiblePhaseCounts)}\``,
+  `- primary >24h candidate rows: \`${state.primary24hCandidateRows}\``,
+  `- primary candidate payload total / avg / max bytes: \`${state.primary24hCandidatePayloadBytes} / ${state.primary24hCandidateAvgPayloadBytes} / ${state.primary24hCandidateMaxPayloadBytes}\``,
+  `- primary candidate phase counts: \`${JSON.stringify(state.primary24hCandidatePhaseCounts)}\``,
   `- coarse added archive bytes at current physical ratio: \`${state.projectedAdditionalArchiveBytesAtObservedPhysicalRatio}\``,
   `- coarse projected database bytes at current physical ratio: \`${state.projectedDatabaseBytesAtObservedPhysicalRatio}\``,
   '',
+  'The >24h completed set is the Phase B primary population basis only. Formal successor/root/revision/halt and other fail-close gates remain separately enforced by the existing Phase B preflight.',
   'Projection is diagnostic only; it is not a mutation forecast guarantee. No archive/Phase B mutation, compaction, R5 rearm, scheduler change, deployment, or Mainnet action is authorized.',
   '',`Evidence SHA-256: \`${digest}\``,
 ].join('\n')
