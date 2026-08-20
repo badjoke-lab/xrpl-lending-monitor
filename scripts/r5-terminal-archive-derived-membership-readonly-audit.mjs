@@ -35,9 +35,12 @@ const SQL = String.raw`with archive as (
     w.epoch_id as work_epoch_id,
     w.base_identity as work_base_identity,
     w.previous_ledger_index as work_previous_ledger_index,
+    w.start_ledger_index as work_start_ledger_index,
     w.expected_parent_hash as work_expected_parent_hash,
     w.scanned_end_ledger_index as work_scanned_end_ledger_index,
     w.final_ledger_hash as work_final_ledger_hash,
+    w.payload_digest as work_payload_digest,
+    w.expected_payload_chunks,
     w.expected_commit_chunks,
     c.status as durable_commit_chunk_status,
     case when a.phase='commit' then (a.payload->>'chunkIndex')::integer else null end as archive_chunk_index
@@ -105,6 +108,27 @@ const SQL = String.raw`with archive as (
         'schemaVersion',1,'phase','finalize','messageId',r.message_id,'workId',r.durable_work_id)
     end as reconstructed_payload,
     case r.phase
+      when 'scan' then jsonb_build_object(
+        'status','staged',
+        'workId',r.durable_work_id,
+        'startLedgerIndex',r.work_start_ledger_index,
+        'endLedgerIndex',r.work_scanned_end_ledger_index,
+        'payloadDigest',r.work_payload_digest,
+        'payloadChunks',r.expected_payload_chunks,
+        'semanticCounts',jsonb_build_object('ledgers',1,'totalRecords',1))
+      when 'commit' then jsonb_build_object(
+        'status','committing',
+        'workId',r.durable_work_id,
+        'chunkIndex',r.archive_chunk_index,
+        'operationCount',1,
+        'rowMutationCount',1)
+      when 'finalize' then jsonb_build_object(
+        'status','committed',
+        'workId',r.durable_work_id,
+        'ledgerIndex',r.work_scanned_end_ledger_index,
+        'ledgerHash',r.work_final_ledger_hash)
+    end as reconstructed_generic_result,
+    case r.phase
       when 'scan' then r.durable_work_id is not null and r.durable_work_status='committed'
       when 'commit' then
         r.durable_work_status='committed'
@@ -114,6 +138,13 @@ const SQL = String.raw`with archive as (
       else false
     end as durable_membership_proven
   from resolved r
+), digested as (
+  select
+    c.*,
+    case when c.reconstructed_generic_result is null then null else encode(
+      extensions.digest(convert_to(c.reconstructed_generic_result::text,'UTF8'),'sha256'),
+      'hex') end as reconstructed_generic_result_digest
+  from checked c
 )
 select jsonb_build_object(
   'databaseBytes',pg_database_size(current_database()),
@@ -150,15 +181,23 @@ select jsonb_build_object(
       and (archive_chunk_index < 0 or archive_chunk_index >= expected_commit_chunks)),
   'commitRowsWithRetainedCompletedChunk',count(*) filter(where phase='commit' and durable_commit_chunk_status='completed'),
   'commitRowsMissingRetainedCompletedChunk',count(*) filter(where phase='commit' and durable_commit_chunk_status is distinct from 'completed'),
+  'genericResultDigestMatchRows',count(*) filter(where reconstructed_generic_result_digest=result_digest),
+  'genericResultDigestMismatchRows',count(*) filter(where reconstructed_generic_result_digest is distinct from result_digest),
+  'scanGenericResultDigestMatchRows',count(*) filter(where phase='scan' and reconstructed_generic_result_digest=result_digest),
+  'commitGenericResultDigestMatchRows',count(*) filter(where phase='commit' and reconstructed_generic_result_digest=result_digest),
+  'finalizeGenericResultDigestMatchRows',count(*) filter(where phase='finalize' and reconstructed_generic_result_digest=result_digest),
   'finalizeRowsMissingCommittedWork',count(*) filter(where phase='finalize' and durable_work_status is distinct from 'committed'),
   'scanRowsWithStreamIdentityMismatch',count(*) filter(where phase='scan' and (
     stream_network is distinct from payload->>'network'
     or stream_epoch_id is distinct from payload->>'epochId'
     or stream_base_identity is distinct from payload->>'baseIdentity')),
+  'scanRowsNetworkMismatch',count(*) filter(where phase='scan' and stream_network is distinct from payload->>'network'),
+  'scanRowsEpochMismatch',count(*) filter(where phase='scan' and stream_epoch_id is distinct from payload->>'epochId'),
+  'scanRowsBaseIdentityMismatch',count(*) filter(where phase='scan' and stream_base_identity is distinct from payload->>'baseIdentity'),
   'resultDigestRows',count(*) filter(where result_digest is not null),
   'completedAtRows',count(*) filter(where completed_at is not null)
 )::text as state
-from checked;`
+from digested;`
 
 if (!/^\s*with\b/iu.test(SQL) || /\b(insert|update|delete|truncate|vacuum|alter|drop|create|reindex|cluster|grant|revoke)\b/iu.test(SQL)) {
   fail('derived-membership audit must be SELECT/read_only only')
@@ -189,12 +228,13 @@ if (!/^[a-f0-9]{40}$/u.test(sourceCommit ?? '')) fail('invalid --source-commit')
 const outputDir = resolve(options['output-dir'] ?? 'r5-terminal-archive-derived-membership-readonly')
 await mkdir(outputDir,{recursive:true})
 const state = await query()
+const resultDigestDerivabilityProven = state.genericResultDigestMatchRows === state.resultDigestRows && state.genericResultDigestMismatchRows === 0
 const evidence = {
   schemaVersion:1,
   purpose:'r5-terminal-archive-derived-membership-readonly-audit',
   sourceCommit,
   ...state,
-  interpretation:'Tests whether archived transport membership, exact message identity, successor identity, and canonical phase payload shape are derivable from durable phase work state plus the archived row being audited. For commit rows, committed work plus a canonical in-range chunk index is treated as the durable completion-membership certificate because supported finalize paths cannot mark the work committed until required commit evidence has completed. The certificate survives later commit-chunk retention cleanup. Caught-up scans without durable work remain explicitly unproven.',
+  interpretation:'Tests whether archived transport membership, exact message identity, successor identity, canonical phase payload shape, and current generic-path result digests are derivable from durable phase work state plus the archived row being audited. For commit rows, committed work plus a canonical in-range chunk index is treated as the durable completion-membership certificate because supported finalize paths cannot mark the work committed until required commit evidence has completed. The certificate survives later commit-chunk retention cleanup. Caught-up scans without durable work remain explicitly unproven.',
   commitMembershipCertificate:{
     predicate:"xrpl_phase_work.status='committed' and 0 <= chunkIndex < expected_commit_chunks",
     genericFinalizeInvariant:'single-chunk finalize requires completed commit chunk 0 before marking work committed',
@@ -203,7 +243,8 @@ const evidence = {
     retainedCommitChunkRowRequired:false,
   },
   identityReconstructionImplementation:'inline canonical v1 formulas; no EXECUTE grant on phase identity helper functions required',
-  resultDigestDerivabilityProven:false,
+  resultDigestDerivabilityProven,
+  resultDigestReconstructionScope:'current archived generic single-chunk scan/commit/finalize result shapes; future portable multi-chunk result derivation remains a separate compatibility proof',
   completedAtDerivabilityProven:false,
   archiveMutationAuthorized:false,
   phaseBMutationAuthorized:false,
@@ -228,7 +269,10 @@ const summary=[
   `- retained completed commit-chunk rows / missing after retention: \`${state.commitRowsWithRetainedCompletedChunk} / ${state.commitRowsMissingRetainedCompletedChunk}\``,
   `- exact message / successor / payload reconstruction matches: \`${state.messageIdReconstructionMatchRows} / ${state.successorIdReconstructionMatchRows} / ${state.payloadReconstructionMatchRows}\``,
   `- fully reconstructable rows: \`${state.fullyReconstructableRows}\``,
-  `- result-digest derivability proven: \`false\``,
+  `- generic result-digest matches / mismatches: \`${state.genericResultDigestMatchRows} / ${state.genericResultDigestMismatchRows}\``,
+  `- generic result-digest scan / commit / finalize matches: \`${state.scanGenericResultDigestMatchRows} / ${state.commitGenericResultDigestMatchRows} / ${state.finalizeGenericResultDigestMatchRows}\``,
+  `- scan current-stream mismatch total / network / epoch / base: \`${state.scanRowsWithStreamIdentityMismatch} / ${state.scanRowsNetworkMismatch} / ${state.scanRowsEpochMismatch} / ${state.scanRowsBaseIdentityMismatch}\``,
+  `- result-digest derivability proven for current archive: \`${resultDigestDerivabilityProven}\``,
   `- completed-at derivability proven: \`false\``,
   '',
   'This is a SELECT/read_only diagnostic only. It does not authorize archive deletion, compaction, Phase B, R5 rearm, scheduler/deployment/public-reader changes, or Mainnet.',
