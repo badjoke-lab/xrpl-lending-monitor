@@ -18,6 +18,14 @@ const archiveContract = readFileSync(
   resolve(process.cwd(), 'ops/production-sql/20260816183000_xrpl_phase_terminal_archive_contract.sql'),
   'utf8',
 )
+const basePhaseSql = readFileSync(
+  resolve(process.cwd(), 'supabase/migrations/20260802095000_xrpl_remote_portable_phase_chain.sql'),
+  'utf8',
+)
+const portableScanSql = readFileSync(
+  resolve(process.cwd(), 'supabase/migrations/20260802104000_xrpl_remote_seven_class_payload.sql'),
+  'utf8',
+)
 const portableCommitAdapter = readFileSync(
   resolve(process.cwd(), 'supabase/migrations/20260803123600_xrpl_portable_retained_payload_reference_adapter.sql'),
   'utf8',
@@ -110,35 +118,57 @@ describe('terminal archive durable duplicate fallback proof', () => {
     expect(result?.derived).toBeNull()
   })
 
-  it('derives productive scan identity and arbitrary scan sequence from the input message ID', () => {
+  it('fails closed for every scan archive miss because durable work does not certify scanSequence', () => {
     const item = work()
 
-    for (const sequence of [0, 7, 123]) {
-      const messageId = scanMessageId(item, sequence)
-      const result = resolveDurableDuplicateCompletion({
-        messageId,
+    for (const sequence of [0, 1, 7, 123]) {
+      expect(resolveDurableDuplicateCompletion({
+        messageId: scanMessageId(item, sequence),
         phase: 'scan',
         works: [item],
-      })
-
-      expect(result).not.toBeNull()
-      expect(result?.messageId).toBe(messageId)
-      expect(result?.payload).toEqual({
-        schemaVersion: 1,
-        phase: 'scan',
-        messageId,
-        network: item.network,
-        epochId: item.epochId,
-        baseIdentity: item.baseIdentity,
-        expectedPreviousLedgerIndex: item.previousLedgerIndex,
-        expectedPreviousLedgerHash: item.expectedParentHash,
-        scanSequence: sequence,
-      })
-      expect(result?.successorMessageId).toBe(commitMessageId(item, 0))
-      expect(result?.completedAt).toBe(item.createdAt)
-      expect(result?.completedAtProven).toBe(true)
-      expect(result?.resultDigestProven).toBe(false)
+      })).toBeNull()
     }
+
+    expect(resolveArchiveFirstDuplicateCompletion({
+      archiveResult: null,
+      messageId: scanMessageId(item, 0),
+      phase: 'scan',
+      works: [item],
+    })).toBeNull()
+  })
+
+  it('pins the missing durable scan-sequence certificate in the current schema and completion path', () => {
+    const workTableStart = basePhaseSql.indexOf('create table if not exists public.xrpl_phase_work (')
+    const payloadTableStart = basePhaseSql.indexOf(
+      'create table if not exists public.xrpl_phase_payload_chunks (',
+    )
+    expect(workTableStart).toBeGreaterThan(-1)
+    expect(payloadTableStart).toBeGreaterThan(workTableStart)
+    const workTable = basePhaseSql.slice(workTableStart, payloadTableStart)
+    expect(workTable).toContain('plan_json text not null')
+    expect(workTable).not.toContain('scan_sequence')
+    expect(workTable).not.toContain('scanSequence')
+
+    const caughtUpStart = basePhaseSql.indexOf(
+      'create or replace function public.xrpl_complete_caught_up_scan(',
+    )
+    const legacyScanStart = basePhaseSql.indexOf(
+      'create or replace function public.xrpl_complete_scan_phase(',
+    )
+    expect(caughtUpStart).toBeGreaterThan(-1)
+    expect(legacyScanStart).toBeGreaterThan(caughtUpStart)
+    const caughtUpFunction = basePhaseSql.slice(caughtUpStart, legacyScanStart)
+    expect(caughtUpFunction).toContain("(v_message.payload->>'scanSequence')::integer + 1")
+    expect(caughtUpFunction).toContain("'successorScanSequence'")
+
+    const planStart = portableScanSql.indexOf('v_plan_json := jsonb_build_object(')
+    const planEnd = portableScanSql.indexOf('for v_chunk in', planStart)
+    expect(planStart).toBeGreaterThan(-1)
+    expect(planEnd).toBeGreaterThan(planStart)
+    const durablePlan = portableScanSql.slice(planStart, planEnd)
+    expect(durablePlan).toContain("'previousLedgerIndex', v_previous_index")
+    expect(durablePlan).toContain("'expectedParentHash', v_previous_hash")
+    expect(durablePlan).not.toContain('scanSequence')
   })
 
   it('derives every canonical commit chunk but refuses to invent historical completion time', () => {
@@ -196,33 +226,14 @@ describe('terminal archive durable duplicate fallback proof', () => {
     expect(result?.resultDigestProven).toBe(false)
   })
 
-  it('fails closed for caught-up scans and non-committed work', () => {
+  it('fails closed for non-committed, non-canonical, or ambiguous durable work', () => {
     const item = work()
-    const caughtUpLike = [
-      'scan',
-      'v1',
-      encodeURIComponent(item.network),
-      encodeURIComponent(item.epochId),
-      encodeURIComponent(item.baseIdentity),
-      String(item.scannedEndLedgerIndex),
-      encodeURIComponent(item.finalLedgerHash.toUpperCase()),
-      '9',
-    ].join(':')
-
-    expect(resolveDurableDuplicateCompletion({
-      messageId: caughtUpLike,
-      phase: 'scan',
-      works: [item],
-    })).toBeNull()
     expect(resolveDurableDuplicateCompletion({
       messageId: finalizeMessageId(item),
       phase: 'finalize',
       works: [{ ...item, status: 'committing' }],
     })).toBeNull()
-  })
 
-  it('fails closed on non-canonical or ambiguous durable identity', () => {
-    const item = work()
     expect(() => resolveDurableDuplicateCompletion({
       messageId: finalizeMessageId(item),
       phase: 'finalize',
