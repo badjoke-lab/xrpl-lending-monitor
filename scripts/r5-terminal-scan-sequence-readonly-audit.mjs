@@ -220,6 +220,15 @@ const SQL = String.raw`with transport as (
     coalesce((select count(*) from classified c where c.boundary=a.boundary and c.outcome='unknown'),0) as unknown_same_boundary_count,
     (select max(c.scan_sequence) from classified c where c.boundary=a.boundary) as max_completed_same_boundary_sequence
   from active_scans a
+), open_boundary_coverage as (
+  select
+    count(*) as open_boundary_count,
+    count(*) filter(where exists(select 1 from active_scans a where a.boundary=b.boundary)) as active_backed_open_boundary_count,
+    count(*) filter(where not exists(select 1 from active_scans a where a.boundary=b.boundary)) as orphan_open_boundary_count
+  from checked_boundaries b
+  where b.productive_count=0
+    and b.caught_up_count=b.row_count
+    and b.unknown_count=0
 ), sequence_histogram as (
   select coalesce(jsonb_object_agg(scan_sequence::text,row_count order by scan_sequence),'{}'::jsonb) as value
   from (
@@ -260,7 +269,9 @@ select jsonb_build_object(
   'validBoundaryChains',(select count(*) from checked_boundaries where contiguous_outcome_chain),
   'invalidBoundaryChains',(select count(*) from checked_boundaries where not contiguous_outcome_chain),
   'closedProductiveBoundaries',(select count(*) from checked_boundaries where productive_count=1),
-  'openCaughtUpOnlyBoundaries',(select count(*) from checked_boundaries where productive_count=0 and caught_up_count=row_count and unknown_count=0),
+  'openCaughtUpOnlyBoundaries',(select open_boundary_count from open_boundary_coverage),
+  'activeBackedOpenCaughtUpOnlyBoundaries',(select active_backed_open_boundary_count from open_boundary_coverage),
+  'orphanOpenCaughtUpOnlyBoundaries',(select orphan_open_boundary_count from open_boundary_coverage),
   'productiveMappingRows',(select row_count from productive_map_stats),
   'productiveMappingDistinctWorks',(select distinct_work_count from productive_map_stats),
   'productiveSourceSequenceMin',(select min_source_sequence from productive_map_stats),
@@ -327,6 +338,7 @@ const historicalSequenceMappingProven =
   && state.completedScanRows > 0
   && state.unknownScanRows === 0
   && state.invalidBoundaryChains === 0
+  && state.orphanOpenCaughtUpOnlyBoundaries === 0
   && state.productiveMappingRows === state.productiveMappingDistinctWorks
   && state.unmappedCommittedWorkCount === 0
 const activeSequenceCertificateProven =
@@ -342,6 +354,7 @@ const evidence = {
     productive:'stored successor resolves uniquely to commit chunk 0 whose work matches the exact scan boundary',
     caughtUp:'stored successor resolves uniquely to scan at the same boundary with scanSequence exactly +1',
     workPresenceAloneIsNotProductiveEvidence:true,
+    caughtUpOnlyBoundaryMustRemainBackedByActiveScan:true,
   },
   historicalSequenceMappingProven,
   activeSequenceCertificateProven,
@@ -374,7 +387,7 @@ const summary=[
   `- scan sequence min / max / nonzero rows: \`${state.scanSequenceMin} / ${state.scanSequenceMax} / ${state.scanSequenceNonzeroRows}\``,
   `- scan sequence histogram: \`${JSON.stringify(state.scanSequenceHistogram)}\``,
   `- boundary chains valid / invalid: \`${state.validBoundaryChains} / ${state.invalidBoundaryChains}\``,
-  `- closed productive / open caught-up-only boundaries: \`${state.closedProductiveBoundaries} / ${state.openCaughtUpOnlyBoundaries}\``,
+  `- closed productive / open caught-up-only / orphan open: \`${state.closedProductiveBoundaries} / ${state.openCaughtUpOnlyBoundaries} / ${state.orphanOpenCaughtUpOnlyBoundaries}\``,
   `- productive mappings / distinct works: \`${state.productiveMappingRows} / ${state.productiveMappingDistinctWorks}\``,
   `- productive source sequence min / max / nonzero: \`${state.productiveSourceSequenceMin} / ${state.productiveSourceSequenceMax} / ${state.productiveSourceSequenceNonzeroRows}\``,
   `- productive mapping SHA-256: \`${state.productiveMappingDigest}\``,
