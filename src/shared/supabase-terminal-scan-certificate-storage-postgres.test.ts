@@ -29,14 +29,12 @@ describe('bounded terminal scan-certificate PostgreSQL storage proof', () => {
       'alter column source_scan_sequence set not null',
       'alter column next_scan_sequence set not null',
       'for i in 1..5000 loop',
-      "vacuum public.xrpl_phase_streams_model",
+      'vacuum public.xrpl_phase_streams_model',
       'stream_after_cycle2_bytes',
-      "stream_after_cycle2_bytes + 0",
+      'stream_after_cycle1_bytes + 16384',
     ]) {
-      if (required === 'stream_after_cycle2_bytes + 0') continue
       expect(script).toContain(required)
     }
-    expect(script).toContain('stream_after_cycle1_bytes + 16384')
     expect(script).not.toMatch(/^\s*vacuum\s+full\b/imu)
   })
 
