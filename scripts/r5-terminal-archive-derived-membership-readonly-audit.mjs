@@ -19,13 +19,8 @@ function parse(argv) {
 }
 
 const SQL = String.raw`with archive as (
-  select
-    a.*,
-    s.network as stream_network,
-    s.epoch_id as stream_epoch_id,
-    s.base_identity as stream_base_identity
+  select a.*
   from xrpl_phase_archive_v1.terminal_messages a
-  left join public.xrpl_phase_streams s on s.profile_id=a.profile_id
 ), resolved as (
   select
     a.*,
@@ -149,6 +144,8 @@ const SQL = String.raw`with archive as (
 select jsonb_build_object(
   'databaseBytes',pg_database_size(current_database()),
   'archiveRows',count(*),
+  'archiveDistinctMessageHashes',count(distinct message_hash),
+  'archiveDistinctMessageIds',count(distinct message_id),
   'phaseCounts',jsonb_build_object(
     'scan',count(*) filter(where phase='scan'),
     'commit',count(*) filter(where phase='commit'),
@@ -187,13 +184,6 @@ select jsonb_build_object(
   'commitGenericResultDigestMatchRows',count(*) filter(where phase='commit' and reconstructed_generic_result_digest=result_digest),
   'finalizeGenericResultDigestMatchRows',count(*) filter(where phase='finalize' and reconstructed_generic_result_digest=result_digest),
   'finalizeRowsMissingCommittedWork',count(*) filter(where phase='finalize' and durable_work_status is distinct from 'committed'),
-  'scanRowsWithStreamIdentityMismatch',count(*) filter(where phase='scan' and (
-    stream_network is distinct from payload->>'network'
-    or stream_epoch_id is distinct from payload->>'epochId'
-    or stream_base_identity is distinct from payload->>'baseIdentity')),
-  'scanRowsNetworkMismatch',count(*) filter(where phase='scan' and stream_network is distinct from payload->>'network'),
-  'scanRowsEpochMismatch',count(*) filter(where phase='scan' and stream_epoch_id is distinct from payload->>'epochId'),
-  'scanRowsBaseIdentityMismatch',count(*) filter(where phase='scan' and stream_base_identity is distinct from payload->>'baseIdentity'),
   'resultDigestRows',count(*) filter(where result_digest is not null),
   'completedAtRows',count(*) filter(where completed_at is not null)
 )::text as state
@@ -204,6 +194,9 @@ if (!/^\s*with\b/iu.test(SQL) || /\b(insert|update|delete|truncate|vacuum|alter|
 }
 if (/public\.xrpl_phase_(scan|commit|finalize)_message_id\s*\(/u.test(SQL)) {
   fail('derived-membership audit must not require EXECUTE on private phase identity helpers')
+}
+if (/join\s+public\.xrpl_phase_streams\b/iu.test(SQL)) {
+  fail('derived-membership audit must not multiply archive rows through profile-only stream joins')
 }
 
 async function query() {
@@ -228,13 +221,15 @@ if (!/^[a-f0-9]{40}$/u.test(sourceCommit ?? '')) fail('invalid --source-commit')
 const outputDir = resolve(options['output-dir'] ?? 'r5-terminal-archive-derived-membership-readonly')
 await mkdir(outputDir,{recursive:true})
 const state = await query()
+const rowCardinalityStable = state.archiveRows === state.archiveDistinctMessageHashes && state.archiveRows === state.archiveDistinctMessageIds
 const resultDigestDerivabilityProven = state.genericResultDigestMatchRows === state.resultDigestRows && state.genericResultDigestMismatchRows === 0
 const evidence = {
   schemaVersion:1,
   purpose:'r5-terminal-archive-derived-membership-readonly-audit',
   sourceCommit,
   ...state,
-  interpretation:'Tests whether archived transport membership, exact message identity, successor identity, canonical phase payload shape, and current generic-path result digests are derivable from durable phase work state plus the archived row being audited. For commit rows, committed work plus a canonical in-range chunk index is treated as the durable completion-membership certificate because supported finalize paths cannot mark the work committed until required commit evidence has completed. The certificate survives later commit-chunk retention cleanup. Caught-up scans without durable work remain explicitly unproven.',
+  rowCardinalityStable,
+  interpretation:'Tests whether archived transport membership, exact message identity, successor identity, canonical phase payload shape, and current generic-path result digests are derivable from durable phase work state plus the archived row being audited. Archive rows are not joined to xrpl_phase_streams, preventing profile-level stream fan-out. Productive scan identity is instead proven by the exact network/epoch/base/previous-ledger/hash match against durable work. For commit rows, committed work plus a canonical in-range chunk index is the durable completion-membership certificate. Caught-up scans without durable work remain explicitly unproven.',
   commitMembershipCertificate:{
     predicate:"xrpl_phase_work.status='committed' and 0 <= chunkIndex < expected_commit_chunks",
     genericFinalizeInvariant:'single-chunk finalize requires completed commit chunk 0 before marking work committed',
@@ -242,7 +237,7 @@ const evidence = {
     archiveCompatibilityInvariant:'terminal archive compatibility patch prepends duplicate-completion handling and does not weaken either finalize evidence gate',
     retainedCommitChunkRowRequired:false,
   },
-  identityReconstructionImplementation:'inline canonical v1 formulas; no EXECUTE grant on phase identity helper functions required',
+  identityReconstructionImplementation:'inline canonical v1 formulas; no EXECUTE grant on private phase identity helpers and no profile-only stream join',
   resultDigestDerivabilityProven,
   resultDigestReconstructionScope:'current archived generic single-chunk scan/commit/finalize result shapes; future portable multi-chunk result derivation remains a separate compatibility proof',
   completedAtDerivabilityProven:false,
@@ -259,7 +254,8 @@ const summary=[
   '## Terminal archive durable-membership read-only audit','',
   `- source commit: \`${sourceCommit}\``,
   `- database bytes: \`${state.databaseBytes}\``,
-  `- archive rows: \`${state.archiveRows}\``,
+  `- archive rows / distinct hashes / distinct IDs: \`${state.archiveRows} / ${state.archiveDistinctMessageHashes} / ${state.archiveDistinctMessageIds}\``,
+  `- row cardinality stable: \`${rowCardinalityStable}\``,
   `- phase counts: \`${JSON.stringify(state.phaseCounts)}\``,
   `- durable membership proven / unproven: \`${state.durableMembershipProvenRows} / ${state.durableMembershipUnprovenRows}\``,
   `- productive scans / caught-up scans without work: \`${state.productiveScanRows} / ${state.caughtUpScanRowsWithoutWork}\``,
@@ -271,12 +267,10 @@ const summary=[
   `- fully reconstructable rows: \`${state.fullyReconstructableRows}\``,
   `- generic result-digest matches / mismatches: \`${state.genericResultDigestMatchRows} / ${state.genericResultDigestMismatchRows}\``,
   `- generic result-digest scan / commit / finalize matches: \`${state.scanGenericResultDigestMatchRows} / ${state.commitGenericResultDigestMatchRows} / ${state.finalizeGenericResultDigestMatchRows}\``,
-  `- scan current-stream mismatch total / network / epoch / base: \`${state.scanRowsWithStreamIdentityMismatch} / ${state.scanRowsNetworkMismatch} / ${state.scanRowsEpochMismatch} / ${state.scanRowsBaseIdentityMismatch}\``,
-  `- result-digest derivability proven for current archive: \`${resultDigestDerivabilityProven}\``,
-  `- completed-at derivability proven: \`false\``,
+  `- result-digest derivability proven for current generic archive rows: \`${resultDigestDerivabilityProven}\``,
   '',
-  'This is a SELECT/read_only diagnostic only. It does not authorize archive deletion, compaction, Phase B, R5 rearm, scheduler/deployment/public-reader changes, or Mainnet.',
-  `Evidence SHA-256: \`${digest}\``,
+  'Safety: SELECT/read_only only. No archive mutation/deletion, Phase B mutation, cleanup, physical rewrite, scheduler/deployment/public-reader change, R5 rearm, Mainnet, stabilization, or soak is authorized.',
+  `Evidence SHA-256: \`${digest}\``,'',
 ].join('\n')
-await writeFile(`${outputDir}/derived-membership-summary.md`,`${summary}\n`)
-console.log(summary)
+await writeFile(`${outputDir}/derived-membership-summary.md`,summary)
+console.log(JSON.stringify({ok:true,outputDir,evidenceSha256:digest,...state,rowCardinalityStable,resultDigestDerivabilityProven}))
