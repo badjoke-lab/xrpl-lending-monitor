@@ -32,6 +32,46 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
+      - name: Read terminal scan sequence classification only
+        id: scan_sequence
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
+          node scripts/r5-terminal-scan-sequence-readonly-audit.mjs \
+            --source-commit "$GITHUB_SHA" \
+            --output-dir r5-index-footprint-readonly-probe
+
+      - name: Publish terminal scan sequence diagnostic
+        if: always()
+        env:
+          SCAN_SEQUENCE_OUTCOME: ${{ steps.scan_sequence.outcome }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$SCAN_SEQUENCE_OUTCOME" == 'success' ]]; then
+            {
+              echo '### Terminal scan-sequence read-only audit'
+              echo
+              cat r5-index-footprint-readonly-probe/scan-sequence-summary.md
+              echo
+              echo "Run: ${GITHUB_RUN_ID}"
+              echo 'Safety: SELECT/read_only only. No schema/row/archive mutation, Phase B, cleanup, scheduler/deployment/public-reader change, R5 rearm, or Mainnet action is authorized.'
+            } > /tmp/scan-sequence-diagnostic.md
+          else
+            {
+              echo '### Terminal scan-sequence read-only audit FAILED'
+              echo
+              echo "Run: ${GITHUB_RUN_ID}"
+              echo "Step outcome: ${SCAN_SEQUENCE_OUTCOME}"
+              echo 'No production mapping is proven. Inspect this run before any certificate migration, archive stop/delete, or R5 rearm.'
+              echo 'Safety: the attempted audit uses the Supabase Management API with read_only=true and authorizes no mutation.'
+            } > /tmp/scan-sequence-diagnostic.md
+          fi
+          gh issue comment 1261 --repo "$GITHUB_REPOSITORY" --body-file /tmp/scan-sequence-diagnostic.md
+          [[ "$SCAN_SEQUENCE_OUTCOME" == 'success' ]]
+
       - name: Read production index footprint only
         shell: bash
         run: |
@@ -164,15 +204,6 @@ jobs:
           set -euo pipefail
           [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
           node scripts/r5-terminal-archive-derived-membership-readonly-audit.mjs \
-            --source-commit "$GITHUB_SHA" \
-            --output-dir r5-index-footprint-readonly-probe
-
-      - name: Read terminal scan sequence classification only
-        shell: bash
-        run: |
-          set -euo pipefail
-          [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
-          node scripts/r5-terminal-scan-sequence-readonly-audit.mjs \
             --source-commit "$GITHUB_SHA" \
             --output-dir r5-index-footprint-readonly-probe
 
