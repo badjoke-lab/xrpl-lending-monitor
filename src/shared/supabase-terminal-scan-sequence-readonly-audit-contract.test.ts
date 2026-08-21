@@ -26,6 +26,19 @@ describe('terminal scan sequence read-only audit contract', () => {
     expect(workflow).not.toContain('workflow_dispatch:')
   })
 
+  it('publishes the sequence result independently and still fails closed', () => {
+    expect(workflow).toContain('id: scan_sequence')
+    expect(workflow).toContain('continue-on-error: true')
+    expect(workflow).toContain('Publish terminal scan sequence diagnostic')
+    expect(workflow).toContain('SCAN_SEQUENCE_OUTCOME: ${{ steps.scan_sequence.outcome }}')
+    expect(workflow).toContain("echo '### Terminal scan-sequence read-only audit FAILED'")
+    expect(workflow).toContain('No production mapping is proven.')
+    expect(workflow).toContain("[[ \"$SCAN_SEQUENCE_OUTCOME\" == 'success' ]]")
+    expect(workflow.indexOf('Read terminal scan sequence classification only')).toBeLessThan(
+      workflow.indexOf('Read production index footprint only'),
+    )
+  })
+
   it('keeps the provider query explicitly SELECT/read_only only', () => {
     expect(audit).toContain("const SQL = String.raw`with transport as (")
     expect(audit).toContain('body: JSON.stringify({ query: SQL, read_only: true })')
@@ -64,11 +77,11 @@ describe('terminal scan sequence read-only audit contract', () => {
       'b.max_sequence+1<>b.row_count',
       'b.productive_sequence=b.max_sequence',
       "string_agg(work_id||':'||source_scan_sequence::text",
-      "unmappedCommittedWorkCount",
-      "activeScanSequences",
-      "activeSequenceConsistent",
-      "historicalSequenceMappingProven",
-      "activeSequenceCertificateProven",
+      'unmappedCommittedWorkCount',
+      'activeScanSequences',
+      'activeSequenceConsistent',
+      'historicalSequenceMappingProven',
+      'activeSequenceCertificateProven',
     ]) {
       expect(audit).toContain(required)
     }
@@ -76,7 +89,7 @@ describe('terminal scan sequence read-only audit contract', () => {
 
   it('does not fabricate unresolved historical fields', () => {
     expect(audit).toContain("completedAtDerivability:{caughtUp:false,commit:false}")
-    expect(audit).toContain("resultDigestDerivabilityClaimed:false")
-    expect(audit).toContain("appendOnlyScanCertificateRowsRequired:false")
+    expect(audit).toContain('resultDigestDerivabilityClaimed:false')
+    expect(audit).toContain('appendOnlyScanCertificateRowsRequired:false')
   })
 })
