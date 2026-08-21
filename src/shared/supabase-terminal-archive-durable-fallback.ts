@@ -21,7 +21,7 @@ export type DurablePhaseWork = {
 
 export type DurableDuplicateCompletion = {
   source: 'durable_work'
-  phase: DurableTerminalPhase
+  phase: 'commit' | 'finalize'
   messageId: string
   payload: Record<string, unknown>
   successorMessageId: string
@@ -112,29 +112,6 @@ function validateCommittedWork(work: DurablePhaseWork): void {
   }
 }
 
-function scanPrefix(work: DurablePhaseWork): string {
-  return [
-    'scan',
-    'v1',
-    encodedIdentityPart(work.network, 'network'),
-    encodedIdentityPart(work.epochId, 'epochId'),
-    encodedIdentityPart(work.baseIdentity, 'baseIdentity'),
-    String(work.previousLedgerIndex),
-    encodeURIComponent(canonicalHash(work.expectedParentHash, 'expectedParentHash')),
-    '',
-  ].join(':')
-}
-
-function parseProductiveScanSequence(messageId: string, work: DurablePhaseWork): number | null {
-  const prefix = scanPrefix(work)
-  if (!messageId.startsWith(prefix)) return null
-  const raw = messageId.slice(prefix.length)
-  if (!/^(0|[1-9][0-9]*)$/u.test(raw)) return null
-  const sequence = Number(raw)
-  if (!Number.isSafeInteger(sequence) || sequence < 0) return null
-  return sequence
-}
-
 function commitMessageId(work: DurablePhaseWork, chunkIndex: number): string {
   return `commit:v1:${escapedWorkId(work.workId)}:${chunkIndex}`
 }
@@ -157,7 +134,7 @@ function successorScanMessageId(work: DurablePhaseWork): string {
 }
 
 function buildDerived(
-  phase: DurableTerminalPhase,
+  phase: 'commit' | 'finalize',
   messageId: string,
   payload: Record<string, unknown>,
   successorMessageId: string,
@@ -188,35 +165,18 @@ export function resolveDurableDuplicateCompletion(options: {
   phase: DurableTerminalPhase
   works: readonly DurablePhaseWork[]
 }): DurableDuplicateCompletion | null {
+  // A work row proves that some productive scan completed at its boundary, but it
+  // does not retain the completed scanSequence. Reading a sequence back out of the
+  // caller-supplied message ID would validate syntax, not historical membership,
+  // and could accept a fabricated sequence. Until an independent durable sequence
+  // certificate is proven, every archive-miss scan must fail closed.
+  if (options.phase === 'scan') return null
+
   const matches: DurableDuplicateCompletion[] = []
 
   for (const work of options.works) {
     if (work.status !== 'committed') continue
     validateCommittedWork(work)
-
-    if (options.phase === 'scan') {
-      const scanSequence = parseProductiveScanSequence(options.messageId, work)
-      if (scanSequence === null) continue
-      matches.push(buildDerived(
-        'scan',
-        options.messageId,
-        {
-          schemaVersion: 1,
-          phase: 'scan',
-          messageId: options.messageId,
-          network: work.network,
-          epochId: work.epochId,
-          baseIdentity: work.baseIdentity,
-          expectedPreviousLedgerIndex: work.previousLedgerIndex,
-          expectedPreviousLedgerHash: canonicalHash(work.expectedParentHash, 'expectedParentHash'),
-          scanSequence,
-        },
-        commitMessageId(work, 0),
-        work.createdAt,
-        true,
-      ))
-      continue
-    }
 
     if (options.phase === 'commit') {
       for (let chunkIndex = 0; chunkIndex < work.expectedCommitChunks; chunkIndex += 1) {
