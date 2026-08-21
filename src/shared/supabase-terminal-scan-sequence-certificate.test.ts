@@ -3,6 +3,7 @@ import { resolve } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
+import { buildScanPhaseMessage } from './portable-collector-messages'
 import { buildPortableCollectorWorkId } from './portable-collector-planner'
 import type { DurablePhaseWork } from './supabase-terminal-archive-durable-fallback'
 import {
@@ -69,16 +70,14 @@ function work(
 }
 
 function scanId(source: ScanBoundaryIdentity, sequence: number): string {
-  return [
-    'scan',
-    'v1',
-    encodeURIComponent(source.network),
-    encodeURIComponent(source.epochId),
-    encodeURIComponent(source.baseIdentity),
-    String(source.previousLedgerIndex),
-    encodeURIComponent(source.previousLedgerHash.toUpperCase()),
-    String(sequence),
-  ].join(':')
+  return buildScanPhaseMessage({
+    network: source.network,
+    epochId: source.epochId,
+    baseIdentity: source.baseIdentity,
+    expectedPreviousLedgerIndex: source.previousLedgerIndex,
+    expectedPreviousLedgerHash: source.previousLedgerHash,
+    scanSequence: sequence,
+  }).messageId
 }
 
 describe('bounded terminal scan-sequence certificate proof', () => {
@@ -223,6 +222,30 @@ describe('bounded terminal scan-sequence certificate proof', () => {
       productiveCertificates: [productive, productive],
       activeCertificate: null,
     })).toThrow('identity is ambiguous')
+  })
+
+  it('uses canonical shared message builders for lookup and successor identity', () => {
+    const source = boundary({
+      epochId: 'epoch with spaces',
+      baseIdentity: 'base:value/with?reserved#characters',
+    })
+    let active = createActiveScanSequenceCertificate(source)
+    const canonicalZero = buildScanPhaseMessage({
+      network: source.network,
+      epochId: source.epochId,
+      baseIdentity: source.baseIdentity,
+      expectedPreviousLedgerIndex: source.previousLedgerIndex,
+      expectedPreviousLedgerHash: source.previousLedgerHash,
+      scanSequence: 0,
+    }).messageId
+
+    active = recordCaughtUpScanCompletion({ certificate: active, messageId: canonicalZero })
+    const duplicate = resolveCertifiedScanDuplicate({
+      messageId: canonicalZero,
+      productiveCertificates: [],
+      activeCertificate: active,
+    })
+    expect(duplicate?.successorMessageId).toBe(scanId(source, 1))
   })
 
   it('keeps the proposed certificate bounded instead of appending one row per scan', () => {
