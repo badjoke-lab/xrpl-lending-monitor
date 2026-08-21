@@ -1,3 +1,7 @@
+import {
+  buildCommitPhaseMessage,
+  buildScanPhaseMessage,
+} from './portable-collector-messages'
 import { buildPortableCollectorWorkId } from './portable-collector-planner'
 import type { DurablePhaseWork } from './supabase-terminal-archive-durable-fallback'
 
@@ -52,17 +56,17 @@ function canonicalHash(value: string, name: string): string {
   return hash
 }
 
-function encoded(value: string, name: string): string {
+function requiredIdentityPart(value: string, name: string): string {
   const normalized = value.trim()
   if (!normalized) throw new Error(`${name} is required`)
-  return encodeURIComponent(normalized)
+  return normalized
 }
 
 function validateBoundary(boundary: ScanBoundaryIdentity): void {
   if (!boundary.profileId.trim()) throw new Error('profileId is required')
-  encoded(boundary.network, 'network')
-  encoded(boundary.epochId, 'epochId')
-  encoded(boundary.baseIdentity, 'baseIdentity')
+  requiredIdentityPart(boundary.network, 'network')
+  requiredIdentityPart(boundary.epochId, 'epochId')
+  requiredIdentityPart(boundary.baseIdentity, 'baseIdentity')
   requireNonNegativeInteger(boundary.previousLedgerIndex, 'previousLedgerIndex')
   canonicalHash(boundary.previousLedgerHash, 'previousLedgerHash')
 }
@@ -70,21 +74,18 @@ function validateBoundary(boundary: ScanBoundaryIdentity): void {
 function scanMessageId(boundary: ScanBoundaryIdentity, sequence: number): string {
   validateBoundary(boundary)
   requireNonNegativeInteger(sequence, 'scanSequence')
-  return [
-    'scan',
-    'v1',
-    encoded(boundary.network, 'network'),
-    encoded(boundary.epochId, 'epochId'),
-    encoded(boundary.baseIdentity, 'baseIdentity'),
-    String(boundary.previousLedgerIndex),
-    encodeURIComponent(canonicalHash(boundary.previousLedgerHash, 'previousLedgerHash')),
-    String(sequence),
-  ].join(':')
+  return buildScanPhaseMessage({
+    network: boundary.network,
+    epochId: boundary.epochId,
+    baseIdentity: boundary.baseIdentity,
+    expectedPreviousLedgerIndex: boundary.previousLedgerIndex,
+    expectedPreviousLedgerHash: boundary.previousLedgerHash,
+    scanSequence: sequence,
+  }).messageId
 }
 
 function commitMessageId(workId: string, chunkIndex: number): string {
-  requireNonNegativeInteger(chunkIndex, 'chunkIndex')
-  return `commit:v1:${encodeURIComponent(workId)}:${chunkIndex}`
+  return buildCommitPhaseMessage({ workId, chunkIndex }).messageId
 }
 
 function boundaryFromWork(work: DurablePhaseWork): ScanBoundaryIdentity {
@@ -128,9 +129,11 @@ function validateProductiveCertificate(certificate: ProductiveScanSequenceCertif
 }
 
 function parseSequenceForBoundary(messageId: string, boundary: ScanBoundaryIdentity): number | null {
-  const prefix = scanMessageId(boundary, 0).slice(0, -1)
-  if (!messageId.startsWith(prefix)) return null
-  const raw = messageId.slice(prefix.length)
+  validateBoundary(boundary)
+  const marker = ':'
+  const split = messageId.lastIndexOf(marker)
+  if (split < 0 || split === messageId.length - 1) return null
+  const raw = messageId.slice(split + marker.length)
   if (!/^(0|[1-9][0-9]*)$/u.test(raw)) return null
   const sequence = Number(raw)
   if (!Number.isSafeInteger(sequence) || sequence < 0) return null
