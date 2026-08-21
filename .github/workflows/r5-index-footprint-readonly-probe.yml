@@ -158,6 +158,33 @@ jobs:
             --source-commit "$GITHUB_SHA" \
             --output-dir r5-index-footprint-readonly-probe
 
+      - name: Read terminal archive durable membership only
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
+          node scripts/r5-terminal-archive-derived-membership-readonly-audit.mjs \
+            --source-commit "$GITHUB_SHA" \
+            --output-dir r5-index-footprint-readonly-probe
+
+      - name: Read terminal archive durable completion time only
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
+          node scripts/r5-terminal-archive-derived-completion-time-readonly-audit.mjs \
+            --source-commit "$GITHUB_SHA" \
+            --output-dir r5-index-footprint-readonly-probe
+
+      - name: Read terminal archive consumer sources only
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
+          node scripts/r5-terminal-archive-consumer-readonly-audit.mjs \
+            --source-commit "$GITHUB_SHA" \
+            --output-dir r5-index-footprint-readonly-probe
+
       - name: Verify Phase B throughput boundary read-only
         shell: bash
         run: |
@@ -211,9 +238,15 @@ jobs:
             echo
             cat r5-index-footprint-readonly-probe/terminal-archive-phase-b-internal-reuse-summary.md
             echo
+            cat r5-index-footprint-readonly-probe/derived-membership-summary.md
+            echo
+            cat r5-index-footprint-readonly-probe/derived-completion-time-summary.md
+            echo
+            cat r5-index-footprint-readonly-probe/consumer-audit-summary.md
+            echo
             cat r5-index-footprint-readonly-probe/terminal-archive-phase-b-throughput-gate-summary.md
             echo
             echo "Run: ${GITHUB_RUN_ID}"
-            echo 'Safety: SELECT/read_only only. No index mutation, row mutation, DELETE, VACUUM, scheduler mutation, deployment, Mainnet, stabilization, soak, or R5 restart is authorized.'
+            echo 'Safety: SELECT/read_only only. No index mutation, row mutation, DELETE, VACUUM, archive mutation/deletion, scheduler mutation, deployment, Mainnet, stabilization, soak, or R5 restart is authorized.'
           } > /tmp/index-footprint-comment.md
           gh issue comment 1261 --repo "$GITHUB_REPOSITORY" --body-file /tmp/index-footprint-comment.md
