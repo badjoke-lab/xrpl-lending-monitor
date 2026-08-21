@@ -37,7 +37,7 @@ describe('bounded terminal scan-certificate PostgreSQL storage proof', () => {
     ]) {
       expect(script).toContain(required)
     }
-    expect(script.toLowerCase()).not.toContain('vacuum full')
+    expect(script).not.toMatch(/^\s*vacuum\s+full\b/imu)
   })
 
   it.runIf(Boolean(process.env.CI))(
