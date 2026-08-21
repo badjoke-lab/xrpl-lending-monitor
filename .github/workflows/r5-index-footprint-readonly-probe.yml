@@ -167,6 +167,15 @@ jobs:
             --source-commit "$GITHUB_SHA" \
             --output-dir r5-index-footprint-readonly-probe
 
+      - name: Read terminal scan sequence classification only
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
+          node scripts/r5-terminal-scan-sequence-readonly-audit.mjs \
+            --source-commit "$GITHUB_SHA" \
+            --output-dir r5-index-footprint-readonly-probe
+
       - name: Read terminal archive durable completion time only
         shell: bash
         run: |
@@ -239,6 +248,8 @@ jobs:
             cat r5-index-footprint-readonly-probe/terminal-archive-phase-b-internal-reuse-summary.md
             echo
             cat r5-index-footprint-readonly-probe/derived-membership-summary.md
+            echo
+            cat r5-index-footprint-readonly-probe/scan-sequence-summary.md
             echo
             cat r5-index-footprint-readonly-probe/derived-completion-time-summary.md
             echo
