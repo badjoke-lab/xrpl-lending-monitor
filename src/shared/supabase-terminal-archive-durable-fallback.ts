@@ -63,14 +63,20 @@ function canonicalHash(value: string, name: string): string {
   return upper
 }
 
+function encodedIdentityPart(value: string, name: string): string {
+  const normalized = value.trim()
+  if (!normalized) throw new Error(`${name} is required`)
+  return encodeURIComponent(normalized)
+}
+
 function canonicalWorkId(work: DurablePhaseWork): string {
   return [
     'collector-work-v1',
-    work.network,
-    work.epochId,
-    work.baseIdentity,
+    encodedIdentityPart(work.network, 'network'),
+    encodedIdentityPart(work.epochId, 'epochId'),
+    encodedIdentityPart(work.baseIdentity, 'baseIdentity'),
     String(work.startLedgerIndex),
-    canonicalHash(work.expectedParentHash, 'expectedParentHash'),
+    encodeURIComponent(canonicalHash(work.expectedParentHash, 'expectedParentHash')),
   ].join(':')
 }
 
@@ -110,11 +116,11 @@ function scanPrefix(work: DurablePhaseWork): string {
   return [
     'scan',
     'v1',
-    work.network,
-    work.epochId,
-    work.baseIdentity,
+    encodedIdentityPart(work.network, 'network'),
+    encodedIdentityPart(work.epochId, 'epochId'),
+    encodedIdentityPart(work.baseIdentity, 'baseIdentity'),
     String(work.previousLedgerIndex),
-    canonicalHash(work.expectedParentHash, 'expectedParentHash'),
+    encodeURIComponent(canonicalHash(work.expectedParentHash, 'expectedParentHash')),
     '',
   ].join(':')
 }
@@ -141,11 +147,11 @@ function successorScanMessageId(work: DurablePhaseWork): string {
   return [
     'scan',
     'v1',
-    work.network,
-    work.epochId,
-    work.baseIdentity,
+    encodedIdentityPart(work.network, 'network'),
+    encodedIdentityPart(work.epochId, 'epochId'),
+    encodedIdentityPart(work.baseIdentity, 'baseIdentity'),
     String(work.scannedEndLedgerIndex),
-    canonicalHash(work.finalLedgerHash, 'finalLedgerHash'),
+    encodeURIComponent(canonicalHash(work.finalLedgerHash, 'finalLedgerHash')),
     '0',
   ].join(':')
 }
@@ -153,7 +159,6 @@ function successorScanMessageId(work: DurablePhaseWork): string {
 function buildDerived(
   phase: DurableTerminalPhase,
   messageId: string,
-  work: DurablePhaseWork,
   payload: Record<string, unknown>,
   successorMessageId: string,
   completedAt: string | null,
@@ -192,11 +197,9 @@ export function resolveDurableDuplicateCompletion(options: {
     if (options.phase === 'scan') {
       const scanSequence = parseProductiveScanSequence(options.messageId, work)
       if (scanSequence === null) continue
-      const successor = commitMessageId(work, 0)
       matches.push(buildDerived(
         'scan',
         options.messageId,
-        work,
         {
           schemaVersion: 1,
           phase: 'scan',
@@ -208,7 +211,7 @@ export function resolveDurableDuplicateCompletion(options: {
           expectedPreviousLedgerHash: canonicalHash(work.expectedParentHash, 'expectedParentHash'),
           scanSequence,
         },
-        successor,
+        commitMessageId(work, 0),
         work.createdAt,
         true,
       ))
@@ -224,7 +227,6 @@ export function resolveDurableDuplicateCompletion(options: {
         matches.push(buildDerived(
           'commit',
           options.messageId,
-          work,
           {
             schemaVersion: 1,
             phase: 'commit',
@@ -244,7 +246,6 @@ export function resolveDurableDuplicateCompletion(options: {
       matches.push(buildDerived(
         'finalize',
         options.messageId,
-        work,
         {
           schemaVersion: 1,
           phase: 'finalize',
