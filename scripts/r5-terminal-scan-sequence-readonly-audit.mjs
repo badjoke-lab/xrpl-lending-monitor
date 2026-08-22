@@ -18,65 +18,71 @@ function parse(argv) {
   return out
 }
 
-const SQL = String.raw`with transport as (
+const SQL = String.raw`with archive_scans as (
   select
     'archive'::text as storage,
     a.message_id,
     a.profile_id,
-    a.phase,
     a.payload,
-    'completed'::text as status,
     a.successor_message_id,
     a.completed_at
   from xrpl_phase_archive_v1.terminal_messages a
   where a.profile_id='supabase-devnet'
-  union all
+    and a.phase='scan'
+), live_completed_scans as (
   select
     'live'::text as storage,
     m.message_id,
     m.profile_id,
-    m.phase,
     m.payload,
-    m.status,
     m.successor_message_id,
     m.completed_at
   from public.xrpl_phase_messages m
   where m.profile_id='supabase-devnet'
-), transport_id_counts as (
-  select message_id,count(*) as row_count
-  from transport
-  group by message_id
+    and m.phase='scan'
+    and m.status='completed'
+    and m.completed_at is not null
 ), completed_scans as (
   select
-    t.*,
+    s.*,
     case
-      when t.payload->>'scanSequence' ~ '^(0|[1-9][0-9]*)$'
-        then (t.payload->>'scanSequence')::bigint
+      when s.payload->>'scanSequence' ~ '^(0|[1-9][0-9]*)$'
+        then (s.payload->>'scanSequence')::bigint
       else null
     end as scan_sequence,
     jsonb_build_object(
-      'profileId',t.profile_id,
-      'network',t.payload->>'network',
-      'epochId',t.payload->>'epochId',
-      'baseIdentity',t.payload->>'baseIdentity',
-      'expectedPreviousLedgerIndex',t.payload->>'expectedPreviousLedgerIndex',
-      'expectedPreviousLedgerHash',upper(t.payload->>'expectedPreviousLedgerHash')
+      'profileId',s.profile_id,
+      'network',s.payload->>'network',
+      'epochId',s.payload->>'epochId',
+      'baseIdentity',s.payload->>'baseIdentity',
+      'expectedPreviousLedgerIndex',s.payload->>'expectedPreviousLedgerIndex',
+      'expectedPreviousLedgerHash',upper(s.payload->>'expectedPreviousLedgerHash')
     ) as boundary
-  from transport t
-  where t.phase='scan'
-    and t.status='completed'
-    and t.completed_at is not null
+  from (
+    select * from archive_scans
+    union all
+    select * from live_completed_scans
+  ) s
 ), scan_successors as (
   select
     s.*,
-    (select count(*) from transport x where x.message_id=s.successor_message_id) as successor_match_count,
-    succ.storage as successor_storage,
-    succ.phase as successor_phase,
-    succ.payload as successor_payload,
-    succ.status as successor_status,
+    ((archive_successor.message_hash is not null)::integer
+      + (live_successor.message_id is not null)::integer) as successor_match_count,
     case
-      when succ.payload->>'scanSequence' ~ '^(0|[1-9][0-9]*)$'
-        then (succ.payload->>'scanSequence')::bigint
+      when archive_successor.message_hash is not null then 'archive'
+      when live_successor.message_id is not null then 'live'
+      else null
+    end as successor_storage,
+    coalesce(archive_successor.phase,live_successor.phase) as successor_phase,
+    coalesce(archive_successor.payload,live_successor.payload) as successor_payload,
+    case
+      when archive_successor.message_hash is not null then 'completed'
+      else live_successor.status
+    end as successor_status,
+    case
+      when coalesce(archive_successor.payload,live_successor.payload)->>'scanSequence'
+        ~ '^(0|[1-9][0-9]*)$'
+        then (coalesce(archive_successor.payload,live_successor.payload)->>'scanSequence')::bigint
       else null
     end as successor_scan_sequence,
     w.work_id as successor_work_id,
@@ -87,18 +93,22 @@ const SQL = String.raw`with transport as (
     w.previous_ledger_index as successor_work_previous_ledger_index,
     w.expected_parent_hash as successor_work_expected_parent_hash
   from completed_scans s
-  left join lateral (
-    select x.*
-    from transport x
-    where x.message_id=s.successor_message_id
-    order by case x.storage when 'archive' then 1 else 2 end
-    limit 1
-  ) succ on true
+  left join xrpl_phase_archive_v1.terminal_messages archive_successor
+    on archive_successor.message_hash = extensions.digest(
+      convert_to(s.successor_message_id,'UTF8'),
+      'sha256'
+    )
+   and archive_successor.message_id=s.successor_message_id
+   and archive_successor.profile_id=s.profile_id
+  left join public.xrpl_phase_messages live_successor
+    on live_successor.message_id=s.successor_message_id
+   and live_successor.profile_id=s.profile_id
   left join public.xrpl_phase_work w
-    on succ.phase='commit'
-   and succ.payload->>'chunkIndex' ~ '^(0|[1-9][0-9]*)$'
-   and (succ.payload->>'chunkIndex')::integer=0
-   and w.work_id=succ.payload->>'workId'
+    on coalesce(archive_successor.phase,live_successor.phase)='commit'
+   and coalesce(archive_successor.payload,live_successor.payload)->>'chunkIndex'
+      ~ '^(0|[1-9][0-9]*)$'
+   and (coalesce(archive_successor.payload,live_successor.payload)->>'chunkIndex')::integer=0
+   and w.work_id=coalesce(archive_successor.payload,live_successor.payload)->>'workId'
 ), classified as (
   select
     r.*,
@@ -180,52 +190,64 @@ const SQL = String.raw`with transport as (
       'hex'
     ) end as mapping_digest
   from productive_map
-), committed_works as (
-  select w.work_id
-  from public.xrpl_phase_work w
-  where w.profile_id='supabase-devnet' and w.status='committed'
 ), committed_work_coverage as (
   select
     count(*) as committed_work_count,
     count(*) filter(where p.work_id is not null) as mapped_committed_work_count,
     count(*) filter(where p.work_id is null) as unmapped_committed_work_count
-  from committed_works w
+  from public.xrpl_phase_work w
   left join (select distinct work_id from productive_map) p using(work_id)
+  where w.profile_id='supabase-devnet'
+    and w.status='committed'
 ), active_scans as (
   select
-    t.*,
+    m.message_id,
+    m.profile_id,
+    m.payload,
     case
-      when t.payload->>'scanSequence' ~ '^(0|[1-9][0-9]*)$'
-        then (t.payload->>'scanSequence')::bigint
+      when m.payload->>'scanSequence' ~ '^(0|[1-9][0-9]*)$'
+        then (m.payload->>'scanSequence')::bigint
       else null
     end as scan_sequence,
     jsonb_build_object(
-      'profileId',t.profile_id,
-      'network',t.payload->>'network',
-      'epochId',t.payload->>'epochId',
-      'baseIdentity',t.payload->>'baseIdentity',
-      'expectedPreviousLedgerIndex',t.payload->>'expectedPreviousLedgerIndex',
-      'expectedPreviousLedgerHash',upper(t.payload->>'expectedPreviousLedgerHash')
+      'profileId',m.profile_id,
+      'network',m.payload->>'network',
+      'epochId',m.payload->>'epochId',
+      'baseIdentity',m.payload->>'baseIdentity',
+      'expectedPreviousLedgerIndex',m.payload->>'expectedPreviousLedgerIndex',
+      'expectedPreviousLedgerHash',upper(m.payload->>'expectedPreviousLedgerHash')
     ) as boundary
-  from transport t
-  where t.storage='live'
-    and t.phase='scan'
-    and t.status in ('pending','leased','retry')
+  from public.xrpl_phase_messages m
+  where m.profile_id='supabase-devnet'
+    and m.phase='scan'
+    and m.status in ('pending','leased','retry')
+), classified_boundary_rollup as (
+  select
+    boundary,
+    count(*) as completed_count,
+    count(*) filter(where outcome='caught_up') as caught_up_count,
+    count(*) filter(where outcome='productive') as productive_count,
+    count(*) filter(where outcome='unknown') as unknown_count,
+    max(scan_sequence) as max_completed_sequence
+  from classified
+  group by boundary
 ), active_checks as (
   select
     a.*,
-    coalesce((select count(*) from classified c where c.boundary=a.boundary),0) as completed_same_boundary_count,
-    coalesce((select count(*) from classified c where c.boundary=a.boundary and c.outcome='caught_up'),0) as caught_up_same_boundary_count,
-    coalesce((select count(*) from classified c where c.boundary=a.boundary and c.outcome='productive'),0) as productive_same_boundary_count,
-    coalesce((select count(*) from classified c where c.boundary=a.boundary and c.outcome='unknown'),0) as unknown_same_boundary_count,
-    (select max(c.scan_sequence) from classified c where c.boundary=a.boundary) as max_completed_same_boundary_sequence
+    coalesce(r.completed_count,0) as completed_same_boundary_count,
+    coalesce(r.caught_up_count,0) as caught_up_same_boundary_count,
+    coalesce(r.productive_count,0) as productive_same_boundary_count,
+    coalesce(r.unknown_count,0) as unknown_same_boundary_count,
+    r.max_completed_sequence as max_completed_same_boundary_sequence
   from active_scans a
+  left join classified_boundary_rollup r on r.boundary=a.boundary
 ), open_boundary_coverage as (
   select
     count(*) as open_boundary_count,
-    count(*) filter(where exists(select 1 from active_scans a where a.boundary=b.boundary)) as active_backed_open_boundary_count,
-    count(*) filter(where not exists(select 1 from active_scans a where a.boundary=b.boundary)) as orphan_open_boundary_count
+    count(*) filter(where a.boundary is not null) as active_backed_open_boundary_count,
+    count(*) filter(where a.boundary is null) as orphan_open_boundary_count
   from checked_boundaries b
+  left join (select distinct boundary from active_scans) a on a.boundary=b.boundary
   where b.productive_count=0
     and b.caught_up_count=b.row_count
     and b.unknown_count=0
@@ -249,11 +271,21 @@ const SQL = String.raw`with transport as (
     min(scan_sequence) as min_sequence,
     max(scan_sequence) as max_sequence
   from classified
+), transport_meta as (
+  select
+    (select count(*) from xrpl_phase_archive_v1.terminal_messages a where a.profile_id='supabase-devnet')
+      + (select count(*) from public.xrpl_phase_messages m where m.profile_id='supabase-devnet')
+      as transport_rows,
+    (select count(*)
+      from xrpl_phase_archive_v1.terminal_messages a
+      join public.xrpl_phase_messages m on m.message_id=a.message_id
+      where a.profile_id='supabase-devnet' and m.profile_id='supabase-devnet')
+      as duplicate_message_ids
 )
 select jsonb_build_object(
   'databaseBytes',pg_database_size(current_database()),
-  'transportRows',(select count(*) from transport),
-  'transportDuplicateMessageIds',(select count(*) from transport_id_counts where row_count<>1),
+  'transportRows',(select transport_rows from transport_meta),
+  'transportDuplicateMessageIds',(select duplicate_message_ids from transport_meta),
   'completedScanRows',(select count(*) from classified),
   'archiveScanRows',(select archive_scan_count from outcome_counts),
   'liveCompletedScanRows',(select live_completed_scan_count from outcome_counts),
@@ -308,6 +340,9 @@ if (/public\.xrpl_phase_(scan|commit|finalize)_message_id\s*\(/u.test(SQL)) {
 if (!SQL.includes("r.successor_phase='commit'") || !SQL.includes("r.successor_phase='scan'")) {
   fail('scan-sequence audit must classify both productive and caught-up successors')
 }
+if (SQL.includes('left join lateral') || SQL.includes('from transport')) {
+  fail('scan-sequence audit must not rescan a materialized transport union per completed scan')
+}
 
 async function query() {
   const project = need('SUPABASE_PROJECT_ID', /^[a-z]{20}$/u)
@@ -355,6 +390,7 @@ const evidence = {
     caughtUp:'stored successor resolves uniquely to scan at the same boundary with scanSequence exactly +1',
     workPresenceAloneIsNotProductiveEvidence:true,
     caughtUpOnlyBoundaryMustRemainBackedByActiveScan:true,
+    successorResolution:'archive message_hash primary key plus live message_id primary key; no per-scan transport rescan',
   },
   historicalSequenceMappingProven,
   activeSequenceCertificateProven,
@@ -397,6 +433,7 @@ const summary=[
   `- active sequence certificate proven: \`${activeSequenceCertificateProven}\``,
   '',
   'Classification is successor-based. A durable work match by itself is not treated as productive-scan evidence.',
+  'Successors are resolved through the archive message-hash primary key and live message-id primary key without rescanning a materialized transport union per scan.',
   'Safety: SELECT/read_only only. No schema/row/archive mutation, Phase B, cleanup, scheduler/deployment/public-reader change, R5 rearm, or Mainnet action is authorized.',
   `Evidence SHA-256: \`${digest}\``,'',
 ].join('\n')
