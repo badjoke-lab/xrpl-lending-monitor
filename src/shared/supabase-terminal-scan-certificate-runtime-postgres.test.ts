@@ -21,7 +21,7 @@ describe('terminal scan certificate runtime staging', () => {
     expect(staged).toContain('Merge does not apply this file')
     expect(staged).toContain('separate Issue #1261 prepare -> exact OWNER authorization')
     expect(staged).toMatch(/^begin;/u)
-    expect(staged.trimEnd()).toEndWith('commit;')
+    expect(staged.trimEnd().endsWith('commit;')).toBe(true)
     expect(staged).not.toContain('SUPABASE_ACCESS_TOKEN')
   })
 
