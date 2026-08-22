@@ -340,7 +340,7 @@ if (/public\.xrpl_phase_(scan|commit|finalize)_message_id\s*\(/u.test(SQL)) {
 if (!SQL.includes("r.successor_phase='commit'") || !SQL.includes("r.successor_phase='scan'")) {
   fail('scan-sequence audit must classify both productive and caught-up successors')
 }
-if (SQL.includes('left join lateral') || SQL.includes('from transport')) {
+if (/\bleft\s+join\s+lateral\b/iu.test(SQL) || /\bfrom\s+transport(?:\s|$)/iu.test(SQL)) {
   fail('scan-sequence audit must not rescan a materialized transport union per completed scan')
 }
 
