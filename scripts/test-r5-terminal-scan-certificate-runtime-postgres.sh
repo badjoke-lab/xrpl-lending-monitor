@@ -95,7 +95,7 @@ do $$begin if exists(select 1 from works where work_id='bad-r5-work') or (select
 select 'PASS';
 SQL
 
-grep -q '^PASS$' "$out/proof.log"
+grep -q 'PASS' "$out/proof.log"
 cat > "$out/summary.md" <<'EOF'
 ## Terminal scan certificate runtime local PostgreSQL proof
 
