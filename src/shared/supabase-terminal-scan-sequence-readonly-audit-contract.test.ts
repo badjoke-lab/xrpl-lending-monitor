@@ -40,26 +40,39 @@ describe('terminal scan sequence read-only audit contract', () => {
   })
 
   it('keeps the provider query explicitly SELECT/read_only only', () => {
-    expect(audit).toContain("const SQL = String.raw`with transport as (")
+    expect(audit).toContain("const SQL = String.raw`with archive_scans as (")
     expect(audit).toContain('body: JSON.stringify({ query: SQL, read_only: true })')
-    expect(audit).toContain("productionDatabaseReadOnly:true")
-    expect(audit).toContain("productionMutationAuthorized:false")
-    expect(audit).toContain("archiveMutationAuthorized:false")
-    expect(audit).toContain("phaseBMutationAuthorized:false")
-    expect(audit).toContain("r5RearmAuthorized:false")
-    expect(audit).toContain("mainnetAuthorized:false")
+    expect(audit).toContain('AbortSignal.timeout(60000)')
+    expect(audit).toContain('productionDatabaseReadOnly:true')
+    expect(audit).toContain('productionMutationAuthorized:false')
+    expect(audit).toContain('archiveMutationAuthorized:false')
+    expect(audit).toContain('phaseBMutationAuthorized:false')
+    expect(audit).toContain('r5RearmAuthorized:false')
+    expect(audit).toContain('mainnetAuthorized:false')
   })
 
-  it('classifies actual stored successor records instead of treating work presence as productive', () => {
-    expect(audit).toContain("from xrpl_phase_archive_v1.terminal_messages a")
-    expect(audit).toContain("from public.xrpl_phase_messages m")
-    expect(audit).toContain("where x.message_id=s.successor_message_id")
-    expect(audit).toContain("when r.successor_phase='commit'")
+  it('resolves actual stored successors through existing primary-key shapes without rescanning transport per scan', () => {
+    expect(audit).toContain('left join xrpl_phase_archive_v1.terminal_messages archive_successor')
+    expect(audit).toContain('archive_successor.message_hash = extensions.digest(')
+    expect(audit).toContain('convert_to(s.successor_message_id,\'UTF8\')')
+    expect(audit).toContain('left join public.xrpl_phase_messages live_successor')
+    expect(audit).toContain('live_successor.message_id=s.successor_message_id')
+    expect(audit).toContain("r.successor_phase='commit'")
     expect(audit).toContain("and r.successor_payload->>'chunkIndex'='0'")
-    expect(audit).toContain("when r.successor_phase='scan'")
-    expect(audit).toContain("and r.successor_scan_sequence=r.scan_sequence+1")
+    expect(audit).toContain("r.successor_phase='scan'")
+    expect(audit).toContain('r.successor_scan_sequence=r.scan_sequence+1')
     expect(audit).toContain('workPresenceAloneIsNotProductiveEvidence:true')
+    expect(audit).toContain('successorResolution:')
+    expect(audit).not.toContain('left join lateral')
+    expect(audit).not.toContain('from transport')
     expect(audit).not.toContain("when r.successor_work_id is not null then 'productive'")
+  })
+
+  it('checks cross-store duplicate message IDs without materializing one transport union', () => {
+    expect(audit).toContain('transport_meta as (')
+    expect(audit).toContain('join public.xrpl_phase_messages m on m.message_id=a.message_id')
+    expect(audit).toContain("a.profile_id='supabase-devnet' and m.profile_id='supabase-devnet'")
+    expect(audit).toContain("'transportDuplicateMessageIds',(select duplicate_message_ids from transport_meta)")
   })
 
   it('does not depend on private message-ID helper execution or historical encoding guesses', () => {
@@ -82,13 +95,15 @@ describe('terminal scan sequence read-only audit contract', () => {
       'activeSequenceConsistent',
       'historicalSequenceMappingProven',
       'activeSequenceCertificateProven',
+      'orphanOpenCaughtUpOnlyBoundaries',
+      'caughtUpOnlyBoundaryMustRemainBackedByActiveScan:true',
     ]) {
       expect(audit).toContain(required)
     }
   })
 
   it('does not fabricate unresolved historical fields', () => {
-    expect(audit).toContain("completedAtDerivability:{caughtUp:false,commit:false}")
+    expect(audit).toContain('completedAtDerivability:{caughtUp:false,commit:false}')
     expect(audit).toContain('resultDigestDerivabilityClaimed:false')
     expect(audit).toContain('appendOnlyScanCertificateRowsRequired:false')
   })
