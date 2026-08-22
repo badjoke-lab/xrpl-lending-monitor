@@ -66,7 +66,8 @@ describe('terminal scan sequence read-only audit contract', () => {
     expect(audit).toContain('workPresenceAloneIsNotProductiveEvidence:true')
     expect(audit).toContain('successorResolution:')
     expect(sql).not.toContain('left join lateral')
-    expect(sql).not.toContain('from transport')
+    expect(sql).not.toMatch(/\bfrom\s+transport(?:\s|$)/u)
+    expect(audit).toContain("/\\bfrom\\s+transport(?:\\s|$)/iu.test(SQL)")
     expect(sql).not.toContain("when r.successor_work_id is not null then 'productive'")
   })
 
