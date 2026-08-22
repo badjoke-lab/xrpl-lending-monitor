@@ -11,6 +11,7 @@ const workflow = readFileSync(
   resolve(process.cwd(), '.github/workflows/r5-index-footprint-readonly-probe.yml'),
   'utf8',
 )
+const sql = audit.match(/const SQL = String\.raw`([\s\S]*?)`\n\nif \(/u)?.[1] ?? ''
 
 describe('terminal scan sequence read-only audit contract', () => {
   it('uses only the existing owner-only Issue #1261 read-only workflow', () => {
@@ -41,6 +42,7 @@ describe('terminal scan sequence read-only audit contract', () => {
 
   it('keeps the provider query explicitly SELECT/read_only only', () => {
     expect(audit).toContain("const SQL = String.raw`with transport as (")
+    expect(sql).not.toBe('')
     expect(audit).toContain('body: JSON.stringify({ query: SQL, read_only: true })')
     expect(audit).toContain('productionDatabaseReadOnly:true')
     expect(audit).toContain('productionMutationAuthorized:false')
@@ -51,38 +53,38 @@ describe('terminal scan sequence read-only audit contract', () => {
   })
 
   it('classifies actual stored successor records instead of treating work presence as productive', () => {
-    expect(audit).toContain('from xrpl_phase_archive_v1.terminal_messages a')
-    expect(audit).toContain('from public.xrpl_phase_messages m')
-    expect(audit).toContain('left join transport_id_counts c')
-    expect(audit).toContain('on c.message_id=s.successor_message_id')
-    expect(audit).toContain('left join transport_first succ')
-    expect(audit).toContain('on succ.message_id=s.successor_message_id')
-    expect(audit).toContain("when r.successor_phase='commit'")
-    expect(audit).toContain("and r.successor_payload->>'chunkIndex'='0'")
-    expect(audit).toContain("when r.successor_phase='scan'")
-    expect(audit).toContain('and r.successor_scan_sequence=r.scan_sequence+1')
+    expect(sql).toContain('from xrpl_phase_archive_v1.terminal_messages a')
+    expect(sql).toContain('from public.xrpl_phase_messages m')
+    expect(sql).toContain('left join transport_id_counts c')
+    expect(sql).toContain('on c.message_id=s.successor_message_id')
+    expect(sql).toContain('left join transport_first succ')
+    expect(sql).toContain('on succ.message_id=s.successor_message_id')
+    expect(sql).toContain("when r.successor_phase='commit'")
+    expect(sql).toContain("and r.successor_payload->>'chunkIndex'='0'")
+    expect(sql).toContain("when r.successor_phase='scan'")
+    expect(sql).toContain('and r.successor_scan_sequence=r.scan_sequence+1')
     expect(audit).toContain('workPresenceAloneIsNotProductiveEvidence:true')
-    expect(audit).not.toContain("when r.successor_work_id is not null then 'productive'")
+    expect(sql).not.toContain("when r.successor_work_id is not null then 'productive'")
   })
 
   it('preaggregates successor and active-boundary lookups instead of rescanning per scan row', () => {
-    expect(audit).toContain('transport_first as (')
-    expect(audit).toContain('select distinct on (message_id)')
-    expect(audit).toContain('left join boundary_stats b')
-    expect(audit).toContain('active_boundaries as (')
+    expect(sql).toContain('transport_first as (')
+    expect(sql).toContain('select distinct on (message_id)')
+    expect(sql).toContain('left join boundary_stats b')
+    expect(sql).toContain('active_boundaries as (')
     expect(audit).toContain('perScanCorrelatedTransportRescan:false')
     expect(audit).toContain('scan-sequence audit must not use per-scan correlated transport rescans')
-    expect(audit).not.toContain('left join lateral')
-    expect(audit).not.toContain('select count(*) from transport x where x.message_id=s.successor_message_id')
+    expect(sql).not.toContain('left join lateral')
+    expect(sql).not.toContain('select count(*) from transport x where x.message_id=s.successor_message_id')
   })
 
   it('does not depend on private message-ID helper execution or historical encoding guesses', () => {
     expect(audit).toContain(
       'scan-sequence audit must classify stored successor records, not invoke message-ID helpers',
     )
-    expect(audit).not.toContain('public.xrpl_phase_scan_message_id(')
-    expect(audit).not.toContain('public.xrpl_phase_commit_message_id(')
-    expect(audit).not.toContain('public.xrpl_phase_finalize_message_id(')
+    expect(sql).not.toContain('public.xrpl_phase_scan_message_id(')
+    expect(sql).not.toContain('public.xrpl_phase_commit_message_id(')
+    expect(sql).not.toContain('public.xrpl_phase_finalize_message_id(')
   })
 
   it('proves sequence continuity, productive work mapping, and current active sequence separately', () => {
