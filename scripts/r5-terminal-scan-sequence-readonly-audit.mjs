@@ -46,6 +46,18 @@ const SQL = String.raw`with transport as (
   select message_id,count(*) as row_count
   from transport
   group by message_id
+), transport_first as (
+  select distinct on (message_id)
+    storage,
+    message_id,
+    profile_id,
+    phase,
+    payload,
+    status,
+    successor_message_id,
+    completed_at
+  from transport
+  order by message_id,case storage when 'archive' then 1 else 2 end
 ), completed_scans as (
   select
     t.*,
@@ -69,7 +81,7 @@ const SQL = String.raw`with transport as (
 ), scan_successors as (
   select
     s.*,
-    (select count(*) from transport x where x.message_id=s.successor_message_id) as successor_match_count,
+    coalesce(c.row_count,0) as successor_match_count,
     succ.storage as successor_storage,
     succ.phase as successor_phase,
     succ.payload as successor_payload,
@@ -87,13 +99,10 @@ const SQL = String.raw`with transport as (
     w.previous_ledger_index as successor_work_previous_ledger_index,
     w.expected_parent_hash as successor_work_expected_parent_hash
   from completed_scans s
-  left join lateral (
-    select x.*
-    from transport x
-    where x.message_id=s.successor_message_id
-    order by case x.storage when 'archive' then 1 else 2 end
-    limit 1
-  ) succ on true
+  left join transport_id_counts c
+    on c.message_id=s.successor_message_id
+  left join transport_first succ
+    on succ.message_id=s.successor_message_id
   left join public.xrpl_phase_work w
     on succ.phase='commit'
    and succ.payload->>'chunkIndex' ~ '^(0|[1-9][0-9]*)$'
@@ -214,18 +223,25 @@ const SQL = String.raw`with transport as (
 ), active_checks as (
   select
     a.*,
-    coalesce((select count(*) from classified c where c.boundary=a.boundary),0) as completed_same_boundary_count,
-    coalesce((select count(*) from classified c where c.boundary=a.boundary and c.outcome='caught_up'),0) as caught_up_same_boundary_count,
-    coalesce((select count(*) from classified c where c.boundary=a.boundary and c.outcome='productive'),0) as productive_same_boundary_count,
-    coalesce((select count(*) from classified c where c.boundary=a.boundary and c.outcome='unknown'),0) as unknown_same_boundary_count,
-    (select max(c.scan_sequence) from classified c where c.boundary=a.boundary) as max_completed_same_boundary_sequence
+    coalesce(b.row_count,0) as completed_same_boundary_count,
+    coalesce(b.caught_up_count,0) as caught_up_same_boundary_count,
+    coalesce(b.productive_count,0) as productive_same_boundary_count,
+    coalesce(b.unknown_count,0) as unknown_same_boundary_count,
+    b.max_sequence as max_completed_same_boundary_sequence
   from active_scans a
+  left join boundary_stats b
+    on b.boundary=a.boundary
+), active_boundaries as (
+  select distinct boundary
+  from active_scans
 ), open_boundary_coverage as (
   select
     count(*) as open_boundary_count,
-    count(*) filter(where exists(select 1 from active_scans a where a.boundary=b.boundary)) as active_backed_open_boundary_count,
-    count(*) filter(where not exists(select 1 from active_scans a where a.boundary=b.boundary)) as orphan_open_boundary_count
+    count(*) filter(where a.boundary is not null) as active_backed_open_boundary_count,
+    count(*) filter(where a.boundary is null) as orphan_open_boundary_count
   from checked_boundaries b
+  left join active_boundaries a
+    on a.boundary=b.boundary
   where b.productive_count=0
     and b.caught_up_count=b.row_count
     and b.unknown_count=0
@@ -308,6 +324,9 @@ if (/public\.xrpl_phase_(scan|commit|finalize)_message_id\s*\(/u.test(SQL)) {
 if (!SQL.includes("r.successor_phase='commit'") || !SQL.includes("r.successor_phase='scan'")) {
   fail('scan-sequence audit must classify both productive and caught-up successors')
 }
+if (/left join lateral|select count\(\*\) from transport x where x\.message_id=s\.successor_message_id/iu.test(SQL)) {
+  fail('scan-sequence audit must not use per-scan correlated transport rescans')
+}
 
 async function query() {
   const project = need('SUPABASE_PROJECT_ID', /^[a-z]{20}$/u)
@@ -356,6 +375,11 @@ const evidence = {
     workPresenceAloneIsNotProductiveEvidence:true,
     caughtUpOnlyBoundaryMustRemainBackedByActiveScan:true,
   },
+  queryShape:{
+    successorResolution:'preaggregated transport ID counts plus one deterministic representative row',
+    activeBoundaryResolution:'preaggregated boundary statistics join',
+    perScanCorrelatedTransportRescan:false,
+  },
   historicalSequenceMappingProven,
   activeSequenceCertificateProven,
   proposedCertificateShape:{
@@ -397,6 +421,7 @@ const summary=[
   `- active sequence certificate proven: \`${activeSequenceCertificateProven}\``,
   '',
   'Classification is successor-based. A durable work match by itself is not treated as productive-scan evidence.',
+  'The query resolves successor IDs and active-boundary history through preaggregated joins; it does not rescan the transport CTE once per completed scan.',
   'Safety: SELECT/read_only only. No schema/row/archive mutation, Phase B, cleanup, scheduler/deployment/public-reader change, R5 rearm, or Mainnet action is authorized.',
   `Evidence SHA-256: \`${digest}\``,'',
 ].join('\n')
