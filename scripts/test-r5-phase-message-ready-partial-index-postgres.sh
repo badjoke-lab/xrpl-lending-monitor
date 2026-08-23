@@ -173,7 +173,3 @@ EOF
 printf '%s\n' "$plan" > "${output_directory}/claim-plan.txt"
 printf '%s\n' "$predicate" > "${output_directory}/predicate.txt"
 cat "${output_directory}/summary.md"
-
-node scripts/r5-terminal-certificate-archive-atomic-bundle.mjs \
-  --source-commit ce4e50b65eb80df69ff7ebd3489d270e61785ff3 \
-  --output-dir "${output_directory}/terminal-certificate-archive-atomic"
