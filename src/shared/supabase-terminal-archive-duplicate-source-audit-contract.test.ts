@@ -11,9 +11,11 @@ const workflow = readFileSync(
   resolve(process.cwd(), '.github/workflows/r5-index-footprint-readonly-probe.yml'),
   'utf8',
 )
-const sqlMatch = script.match(/const SQL=`([\s\S]*?)`;\nif \(!\/\^\\s\*select/u)
-if (!sqlMatch) throw new Error('target source SQL template not found')
-const sqlTemplate = sqlMatch[1]
+const sqlStartMarker = 'const SQL=`'
+const sqlStart = script.indexOf(sqlStartMarker)
+const sqlEnd = script.indexOf('`;\nif (!/', sqlStart)
+if (sqlStart < 0 || sqlEnd < 0) throw new Error('target source SQL template not found')
+const sqlTemplate = script.slice(sqlStart + sqlStartMarker.length, sqlEnd)
 
 describe('archive duplicate completion source read-only audit', () => {
   it('targets the private archive function by schema, name, and identity arguments', () => {
