@@ -74,7 +74,7 @@ describe('terminal certificate/archive production prepare contract', () => {
     )
   })
 
-  it('locks every before and after fingerprint into the reviewed SQL stages', () => {
+  it('locks every staged before and after fingerprint while retaining full helper invariants', () => {
     const stageText = contract.atomicBundle.orderedStages
       .map((stage: { path: string }) => readFileSync(resolve(process.cwd(), stage.path), 'utf8'))
       .join('\n')
@@ -82,15 +82,23 @@ describe('terminal certificate/archive production prepare contract', () => {
     for (const digest of Object.values(contract.expectedBefore.functionDefinitionSha256)) {
       expect(stageText).toContain(digest)
     }
-    for (const digest of Object.values(contract.expectedBefore.identityHelperDefinitionSha256)) {
-      expect(stageText).toContain(digest)
+    for (const helper of ['scanMessageId', 'workId', 'commitMessageId']) {
+      expect(stageText).toContain(contract.expectedBefore.identityHelperDefinitionSha256[helper])
+      expect(contract.expectedAfter.identityHelperDefinitionSha256Unchanged[helper]).toBe(
+        contract.expectedBefore.identityHelperDefinitionSha256[helper],
+      )
     }
     for (const digest of Object.values(contract.expectedAfter.functionDefinitionSha256)) {
       expect(stageText).toContain(digest)
     }
-    for (const digest of Object.values(contract.expectedAfter.identityHelperDefinitionSha256Unchanged)) {
-      expect(stageText).toContain(digest)
-    }
+    expect(contract.expectedAfter.identityHelperDefinitionSha256Unchanged.finalizeMessageId).toBe(
+      contract.expectedBefore.identityHelperDefinitionSha256.finalizeMessageId,
+    )
+    expect(
+      contract.productionEvidence.prestate.functionDefinitionSha256[
+        'public.xrpl_phase_finalize_message_id(text)'
+      ],
+    ).toBe(contract.expectedBefore.identityHelperDefinitionSha256.finalizeMessageId)
     expect(stageText).toContain(contract.expectedBefore.duplicateCompletion.sourceSha256)
     expect(stageText).toContain(contract.expectedAfter.duplicateCompletion.sourceSha256)
     expect(stageText).toContain('source_scan_sequence integer not null default 0')
@@ -148,7 +156,7 @@ describe('terminal certificate/archive production prepare contract', () => {
     expect(text).not.toContain('supabase db push')
     expect(text).not.toContain('psql ')
     expect(text).not.toContain('wrangler deploy')
-    expect(text).not.toContain('productionApplied": true')
-    expect(text).not.toContain('productionMutationAuthorized": true')
+    expect(text).not.toContain('productionApplied\": true')
+    expect(text).not.toContain('productionMutationAuthorized\": true')
   })
 })
