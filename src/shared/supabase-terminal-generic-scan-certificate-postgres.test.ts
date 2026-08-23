@@ -27,7 +27,8 @@ describe('generic terminal scan certificate staging', () => {
     expect(staged).toContain('generic_scan_certificate_requires_terminal_certificate_columns')
   })
 
-  it('pins exact current and transformed generic definitions', () => {
+  it('pins exact current signatures and transformed generic definitions', () => {
+    expect(staged).toContain('public.xrpl_complete_scan_phase(text,text,timestamp with time zone,bigint,text,text,bigint,text,text,integer)')
     expect(staged).toContain('cd6b05ccd95eb29bfa046d29cfd01236371301865ceef7bb8db3fd2afadd6bff')
     expect(staged).toContain('907e4c741ba065ffcb2ddd0a7358f83737c737673ca1fa6d371710f96e5a62ff')
     expect(staged).toContain('d3051c3b654274f7e6fa222be829b42829c6695c39a09c697065093364a6ff35')
