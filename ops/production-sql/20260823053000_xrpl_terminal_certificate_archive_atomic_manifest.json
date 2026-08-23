@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "sourceCommit": "ce4e50b65eb80df69ff7ebd3489d270e61785ff3",
+  "orderedStages": [
+    {
+      "order": 1,
+      "path": "ops/production-sql/20260823013000_xrpl_terminal_scan_certificate_runtime.sql",
+      "sha256": "e145e70a88ec4990350367f23ec4d7bb0808a47081e1b2fbe613230a174c7ad4"
+    },
+    {
+      "order": 2,
+      "path": "ops/production-sql/20260823045000_xrpl_terminal_generic_scan_certificate_runtime.sql",
+      "sha256": "ce2c09f04d823dcf8afc94074380cfb331c66d8bc045c91260b1b6263bd65ab4"
+    },
+    {
+      "order": 3,
+      "path": "ops/production-sql/20260823051500_xrpl_terminal_archive_scan_durable_fallback.sql",
+      "sha256": "c2c2d56204a698c798ad687d92013ba329b3fdc421fdb98d46f84c08f68fb938"
+    }
+  ],
+  "bundleSha256": "cc83e46fe3c58b2c13549ff35a2df8d4d8ddcf1efac041bd321ce273809aa1db",
+  "transactionBoundaryCount": {
+    "begin": 1,
+    "commit": 1
+  },
+  "productionApplied": false,
+  "productionMutationAuthorized": false,
+  "r5RearmAuthorized": false,
+  "mainnetEnabled": false
+}
