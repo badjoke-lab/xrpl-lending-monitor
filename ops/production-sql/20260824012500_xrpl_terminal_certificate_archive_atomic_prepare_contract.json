@@ -1,0 +1,175 @@
+{
+  "schemaVersion": 1,
+  "purpose": "xrpl-terminal-certificate-archive-atomic-production-prepare",
+  "issueNumber": 1261,
+  "repository": "badjoke-lab/xrpl-lending-monitor",
+  "executionCommit": "86f95feadc4edaa640c1d466b8616d6ed1201952",
+  "atomicManifestPath": "ops/production-sql/20260823053000_xrpl_terminal_certificate_archive_atomic_manifest.json",
+  "atomicBundle": {
+    "sourceCommit": "ce4e50b65eb80df69ff7ebd3489d270e61785ff3",
+    "orderedStages": [
+      {
+        "order": 1,
+        "path": "ops/production-sql/20260823013000_xrpl_terminal_scan_certificate_runtime.sql",
+        "sha256": "e145e70a88ec4990350367f23ec4d7bb0808a47081e1b2fbe613230a174c7ad4"
+      },
+      {
+        "order": 2,
+        "path": "ops/production-sql/20260823045000_xrpl_terminal_generic_scan_certificate_runtime.sql",
+        "sha256": "ce2c09f04d823dcf8afc94074380cfb331c66d8bc045c91260b1b6263bd65ab4"
+      },
+      {
+        "order": 3,
+        "path": "ops/production-sql/20260823051500_xrpl_terminal_archive_scan_durable_fallback.sql",
+        "sha256": "c2c2d56204a698c798ad687d92013ba329b3fdc421fdb98d46f84c08f68fb938"
+      }
+    ],
+    "bundleSha256": "cc83e46fe3c58b2c13549ff35a2df8d4d8ddcf1efac041bd321ce273809aa1db",
+    "transactionBoundaryCount": {
+      "begin": 1,
+      "commit": 1
+    }
+  },
+  "productionEvidence": {
+    "readOnlyRunId": 32651882728,
+    "sourceCommit": "86f95feadc4edaa640c1d466b8616d6ed1201952",
+    "artifactId": 9496427520,
+    "artifactDigestSha256": "9398fd5a2814e5ad88d7ef5f461614520c6d8abb7e5fa1206ee85855ad9fa870",
+    "scanSequenceEvidenceSha256": "704559a3a0854850fd94066d9f5f0b994c364adcce120ec74d61f77d91ed56e5",
+    "transportTargetSourceEvidenceSha256": "3e457220707a1a9aac0c628030906babb48a1d8a4030e90f8cafd424a282bd44",
+    "indexEvidenceSha256": "9cb77406bc583d4c17b7eda707a3a82f3108cc7e97c43961b3e53ddcc52a0eb5",
+    "prestate": {
+      "schemaVersion": 1,
+      "sourceCommit": "86f95feadc4edaa640c1d466b8616d6ed1201952",
+      "readOnlyRunId": 32651882728,
+      "artifactDigestSha256": "9398fd5a2814e5ad88d7ef5f461614520c6d8abb7e5fa1206ee85855ad9fa870",
+      "databaseBytes": 395857043,
+      "transportRows": 51732,
+      "transportDuplicateMessageIds": 0,
+      "completedScanRows": 17063,
+      "productiveScanRows": 17063,
+      "caughtUpScanRows": 0,
+      "unknownScanRows": 0,
+      "scanSequenceMin": 0,
+      "scanSequenceMax": 0,
+      "scanSequenceNonzeroRows": 0,
+      "activeScanSequences": [0],
+      "productiveMappingDigest": "53a1c842b41c20efe5c24ab5b858be9a56a7a0b62f9f7029bd300bad00b90cd8",
+      "scanSequenceEvidenceSha256": "704559a3a0854850fd94066d9f5f0b994c364adcce120ec74d61f77d91ed56e5",
+      "transportTargetSourceEvidenceSha256": "3e457220707a1a9aac0c628030906babb48a1d8a4030e90f8cafd424a282bd44",
+      "indexEvidenceSha256": "9cb77406bc583d4c17b7eda707a3a82f3108cc7e97c43961b3e53ddcc52a0eb5",
+      "functionDefinitionSha256": {
+        "public.xrpl_complete_caught_up_scan(text,text,timestamptz)": "3d7f4c7d7ed7cbd91b54f268dad5bdead09ef4eba278085e3146f45c07ebc899",
+        "public.xrpl_complete_finalize_phase(text,text,timestamptz)": "d3051c3b654274f7e6fa222be829b42829c6695c39a09c697065093364a6ff35",
+        "public.xrpl_complete_portable_finalize_phase(text,text,timestamptz)": "8d761a2bf69ea4228f18f482ab620e294354644f60eea6e8101a4efd55766a0a",
+        "public.xrpl_complete_portable_scan_phase(text,text,timestamptz,bigint,text,text,text,text,text)": "6f65875ec781135434326c53ed159c61154dc7f24728e02a9f578778dfea717d",
+        "public.xrpl_complete_r5_revision4_recovery_batch_without_qualification(...)": "a7114afea201a32bd90c3f6ee08ae666e033e83bcc99384eb2a5b4a415f814b7",
+        "public.xrpl_complete_scan_phase(text,text,timestamptz,bigint,text,text,bigint,text,text,integer)": "cd6b05ccd95eb29bfa046d29cfd01236371301865ceef7bb8db3fd2afadd6bff",
+        "public.xrpl_phase_commit_message_id(text,integer)": "c3d965bd154c933a355c68097e4ca2f52c75a0a83b121ccd3d2eee366a3c3b79",
+        "public.xrpl_phase_finalize_message_id(text)": "0268efa4e2399fe23829d7cbe1fadf1645564f3a8189a8bcb2550fe102debb99",
+        "public.xrpl_phase_scan_message_id(text,text,text,bigint,text,integer)": "cd79dde7fc5fd160acecda28b0f1355245765cbd041cb70423b5b3119748a0a4",
+        "public.xrpl_phase_work_id(text,text,text,bigint,text)": "6650d4e5e70bceafc035fe467d1ae7b0e1c40e487ad9b92108aa1ebba02a0308",
+        "xrpl_phase_archive_v1.duplicate_completion(text,text)": "170c7ff6069ae9dd9a272a04dd839a2d575c9e9b4055b121149a13dda6467044"
+      }
+    },
+    "prestateSha256": "0ad9321af1f8dad62439745c1628f283a74cf2a0bdac0a3dc9a07fd2ea3072f2"
+  },
+  "expectedBefore": {
+    "applyPreflightRequirements": {
+      "columnsMustBeAbsent": [
+        "public.xrpl_phase_work.source_scan_sequence",
+        "public.xrpl_phase_streams.next_scan_sequence"
+      ],
+      "failurePolicy": "fail-closed-before-mutation"
+    },
+    "functionDefinitionSha256": {
+      "caughtUpScan": "3d7f4c7d7ed7cbd91b54f268dad5bdead09ef4eba278085e3146f45c07ebc899",
+      "portableScan": "6f65875ec781135434326c53ed159c61154dc7f24728e02a9f578778dfea717d",
+      "portableFinalize": "8d761a2bf69ea4228f18f482ab620e294354644f60eea6e8101a4efd55766a0a",
+      "r5Revision4Complete": "a7114afea201a32bd90c3f6ee08ae666e033e83bcc99384eb2a5b4a415f814b7",
+      "genericScan": "cd6b05ccd95eb29bfa046d29cfd01236371301865ceef7bb8db3fd2afadd6bff",
+      "genericFinalize": "d3051c3b654274f7e6fa222be829b42829c6695c39a09c697065093364a6ff35",
+      "duplicateCompletion": "170c7ff6069ae9dd9a272a04dd839a2d575c9e9b4055b121149a13dda6467044"
+    },
+    "duplicateCompletion": {
+      "sourceSha256": "aa5b972f1245fc46239164247a0203c67dac7be21a3f561009a930e50784a081",
+      "owner": "postgres",
+      "securityDefiner": true,
+      "serviceRoleDirectExecute": false,
+      "searchPath": "public, xrpl_phase_archive_v1, extensions, pg_temp"
+    },
+    "identityHelperDefinitionSha256": {
+      "scanMessageId": "cd79dde7fc5fd160acecda28b0f1355245765cbd041cb70423b5b3119748a0a4",
+      "workId": "6650d4e5e70bceafc035fe467d1ae7b0e1c40e487ad9b92108aa1ebba02a0308",
+      "commitMessageId": "c3d965bd154c933a355c68097e4ca2f52c75a0a83b121ccd3d2eee366a3c3b79",
+      "finalizeMessageId": "0268efa4e2399fe23829d7cbe1fadf1645564f3a8189a8bcb2550fe102debb99"
+    }
+  },
+  "expectedAfter": {
+    "columns": {
+      "public.xrpl_phase_work.source_scan_sequence": "integer not null default 0 check >= 0",
+      "public.xrpl_phase_streams.next_scan_sequence": "integer not null default 0 check >= 0"
+    },
+    "functionDefinitionSha256": {
+      "caughtUpScan": "0a37e55b8881847a61cf95f78746039fd6967571721aa50b5a0f1baff62fd1c6",
+      "portableScan": "5e9cb3bfea6126c1d436ffb15fee5e8aaf6f2da3e0f83bf048d9cbdcf35040b0",
+      "portableFinalize": "daf97c6858300a2ec4a00eb24f60b53936dc4aa56200accc16e098c64e8f37b7",
+      "r5Revision4Complete": "8c810628d2bf0be9aa25e8aab2a60a23912563e7524f177c35a4f261ca7c0eec",
+      "genericScan": "907e4c741ba065ffcb2ddd0a7358f83737c737673ca1fa6d371710f96e5a62ff",
+      "genericFinalize": "cfbc2dde88dc7026621193d2b970a1fdd35b7f9f7a248a7ef0035f1f87cae446"
+    },
+    "duplicateCompletion": {
+      "sourceSha256": "5ca60025c49a205de120c352ecef9d48ac18db566515b6595fe93909958098b4",
+      "owner": "postgres",
+      "securityDefiner": true,
+      "serviceRoleDirectExecute": false,
+      "searchPath": "public, xrpl_phase_archive_v1, extensions, pg_temp"
+    },
+    "identityHelperDefinitionSha256Unchanged": {
+      "scanMessageId": "cd79dde7fc5fd160acecda28b0f1355245765cbd041cb70423b5b3119748a0a4",
+      "workId": "6650d4e5e70bceafc035fe467d1ae7b0e1c40e487ad9b92108aa1ebba02a0308",
+      "commitMessageId": "c3d965bd154c933a355c68097e4ca2f52c75a0a83b121ccd3d2eee366a3c3b79",
+      "finalizeMessageId": "0268efa4e2399fe23829d7cbe1fadf1645564f3a8189a8bcb2550fe102debb99"
+    }
+  },
+  "authorizationProposal": {
+    "proposalOnly": true,
+    "projectIdentityDigest": "81378864f4d6650a60a2c09a95629a18780d49fc23836e0f6a024b70f13f88a8",
+    "prepareRun": 32651882728,
+    "expires": "2026-08-23T18:00:00Z",
+    "nonce": "dddd227e1dd8ed42",
+    "command": "/r5-terminal-certificate-archive-authorize commit=86f95feadc4edaa640c1d466b8616d6ed1201952 bundle=cc83e46fe3c58b2c13549ff35a2df8d4d8ddcf1efac041bd321ce273809aa1db state=0ad9321af1f8dad62439745c1628f283a74cf2a0bdac0a3dc9a07fd2ea3072f2 project=81378864f4d6650a60a2c09a95629a18780d49fc23836e0f6a024b70f13f88a8 prepare_run=32651882728 expires=2026-08-23T18:00:00Z nonce=dddd227e1dd8ed42"
+  },
+  "boundedApply": {
+    "authorizedOnlyAfterExactOwnerCommand": true,
+    "exactBundleOnly": true,
+    "singleTransaction": true,
+    "extraSqlAllowed": false,
+    "rollbackOnAnyPreflightOrHashFailure": true,
+    "schedulerMutationAllowed": false,
+    "deploymentAllowed": false,
+    "publicReaderMutationAllowed": false,
+    "archiveDeleteOrStopAllowed": false,
+    "r5RearmAllowed": false,
+    "mainnetAllowed": false
+  },
+  "independentReadOnlyVerify": {
+    "required": true,
+    "mustUseReadOnlyDatabaseAccess": true,
+    "verifyColumnShapes": true,
+    "verifyExpectedAfterFunctionFingerprints": true,
+    "verifyDuplicateCompletionSecurityBoundary": true,
+    "verifyIdentityHelpersUnchanged": true,
+    "verifyHistoricalWorkRowCountAndMappingDigestUnchanged": true,
+    "verifyTransportDuplicateMessageIdsRemainZero": true,
+    "verifyActiveScanSequenceRemainsZeroBeforeAnyR5Rearm": true,
+    "r5RearmIsSeparateAuthorization": true
+  },
+  "productionApplied": false,
+  "productionMutationAuthorized": false,
+  "schedulerMutationAuthorized": false,
+  "publicReaderMutationAuthorized": false,
+  "archiveDeletionAuthorized": false,
+  "r5RearmAuthorized": false,
+  "mainnetEnabled": false
+}
