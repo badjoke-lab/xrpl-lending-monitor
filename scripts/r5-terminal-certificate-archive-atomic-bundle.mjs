@@ -51,7 +51,7 @@ function stripOuterTransaction(sql, path) {
   if (/^begin;$/gmu.test(body) || /^commit;$/gmu.test(body)) {
     throw new Error(`${path}: unexpected standalone transaction boundary inside stage body`)
   }
-  return { normalized, body }
+  return body
 }
 
 function main() {
@@ -60,12 +60,11 @@ function main() {
 
   const stages = ORDERED_STAGES.map((path, index) => {
     const raw = readFileSync(resolve(process.cwd(), path), 'utf8')
-    const { normalized, body } = stripOuterTransaction(raw, path)
     return {
       order: index + 1,
       path,
-      sha256: sha256(normalized),
-      body,
+      sha256: sha256(raw),
+      body: stripOuterTransaction(raw, path),
     }
   })
 
@@ -77,7 +76,7 @@ function main() {
     ...stages.flatMap((stage) => [
       '',
       `-- atomic stage ${stage.order}: ${stage.path}`,
-      `-- source sha256: ${stage.sha256}`,
+      `-- exact source sha256: ${stage.sha256}`,
       stage.body.trimEnd(),
     ]),
     '',
