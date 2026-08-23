@@ -46,7 +46,7 @@ begin
     raise exception 'generic_scan_certificate_portable_finalize_dependency_drift:%',v_sha;
   end if;
 
-  v_signature := 'public.xrpl_complete_scan_phase(text,text,timestamp with time zone,bigint,text,text,text,text,integer,text,text)'::regprocedure;
+  v_signature := 'public.xrpl_complete_scan_phase(text,text,timestamp with time zone,bigint,text,text,bigint,text,text,integer)'::regprocedure;
   select pg_get_functiondef(v_signature) into v_definition;
   v_sha := encode(extensions.digest(convert_to(v_definition,'UTF8'),'sha256'),'hex');
   if v_sha <> 'cd6b05ccd95eb29bfa046d29cfd01236371301865ceef7bb8db3fd2afadd6bff' then
@@ -76,7 +76,7 @@ declare
   v_definition text;
   v_sha text;
 begin
-  v_signature := 'public.xrpl_complete_scan_phase(text,text,timestamp with time zone,bigint,text,text,text,text,integer,text,text)'::regprocedure;
+  v_signature := 'public.xrpl_complete_scan_phase(text,text,timestamp with time zone,bigint,text,text,bigint,text,text,integer)'::regprocedure;
   select pg_get_functiondef(v_signature) into v_definition;
   v_sha := encode(extensions.digest(convert_to(v_definition,'UTF8'),'sha256'),'hex');
   if v_sha <> 'cd6b05ccd95eb29bfa046d29cfd01236371301865ceef7bb8db3fd2afadd6bff' then
@@ -167,8 +167,8 @@ begin
     raise exception 'generic_scan_certificate_post_apply_drift:finalize:%',v_sha;
   end if;
 
-  if pg_get_userbyid((select proowner from pg_proc where oid='public.xrpl_complete_scan_phase(text,text,timestamp with time zone,bigint,text,text,text,text,integer,text,text)'::regprocedure)) <> 'postgres'
-    or not has_function_privilege('service_role','public.xrpl_complete_scan_phase(text,text,timestamp with time zone,bigint,text,text,text,text,integer,text,text)'::regprocedure,'EXECUTE')
+  if pg_get_userbyid((select proowner from pg_proc where oid='public.xrpl_complete_scan_phase(text,text,timestamp with time zone,bigint,text,text,bigint,text,text,integer)'::regprocedure)) <> 'postgres'
+    or not has_function_privilege('service_role','public.xrpl_complete_scan_phase(text,text,timestamp with time zone,bigint,text,text,bigint,text,text,integer)'::regprocedure,'EXECUTE')
     or pg_get_userbyid((select proowner from pg_proc where oid='public.xrpl_complete_finalize_phase(text,text,timestamp with time zone)'::regprocedure)) <> 'postgres'
     or not has_function_privilege('service_role','public.xrpl_complete_finalize_phase(text,text,timestamp with time zone)'::regprocedure,'EXECUTE') then
     raise exception 'generic_scan_certificate_post_apply_privilege_drift';
