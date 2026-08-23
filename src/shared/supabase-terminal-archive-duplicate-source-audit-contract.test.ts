@@ -16,11 +16,13 @@ if (!sqlMatch) throw new Error('target source SQL template not found')
 const sqlTemplate = sqlMatch[1]
 
 describe('archive duplicate completion source read-only audit', () => {
-  it('targets the private archive function by schema and exact function name', () => {
+  it('targets the private archive function by schema, name, and identity arguments', () => {
     expect(script).toContain("['archive_duplicate_fallback_required','xrpl_phase_archive_v1','duplicate_completion']")
     expect(script).toContain("row.schemaName==='xrpl_phase_archive_v1'")
     expect(script).toContain("row.functionName==='duplicate_completion'")
     expect(script).toContain('archive duplicate_completion overload count must be 1')
+    expect(script).toContain("duplicateTargets[0].identityArguments!=='p_message_id text, p_phase text'")
+    expect(script).toContain('archive duplicate_completion identity arguments drifted')
   })
 
   it('keeps the production query SELECT-only and Management API read-only', () => {
