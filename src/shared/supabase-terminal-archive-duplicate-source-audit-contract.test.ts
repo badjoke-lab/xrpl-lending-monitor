@@ -27,6 +27,21 @@ describe('archive duplicate completion source read-only audit', () => {
     expect(script).toContain('archive duplicate_completion identity arguments drifted')
   })
 
+  it('captures every production identity helper needed by durable archive fallback', () => {
+    for (const helper of [
+      'xrpl_phase_scan_message_id',
+      'xrpl_phase_work_id',
+      'xrpl_phase_commit_message_id',
+      'xrpl_phase_finalize_message_id',
+    ]) {
+      expect(script).toContain(`['archive_identity_helper_required','public','${helper}']`)
+    }
+    expect(script).toContain('IDENTITY_HELPER_SIGNATURES')
+    expect(script).toContain('archive identity helper overload count must be 1')
+    expect(script).toContain('archive identity helper arguments drifted')
+    expect(script).toContain("'Archive identity helper exact definition fingerprints:'")
+  })
+
   it('keeps the production query SELECT-only and Management API read-only', () => {
     expect(script).toContain("if (!/^\\s*select\\b/iu.test(SQL)) fail('target source audit must be SELECT only')")
     expect(script).toContain('body:JSON.stringify({query:sql,read_only:true})')
