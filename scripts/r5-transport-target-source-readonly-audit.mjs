@@ -31,6 +31,10 @@ const TARGETS = [
   ['archive_semantics_required','public','xrpl_complete_portable_commit_phase_strict'],
   ['archive_semantics_required','public','xrpl_complete_portable_finalize_phase'],
   ['archive_duplicate_fallback_required','xrpl_phase_archive_v1','duplicate_completion'],
+  ['archive_identity_helper_required','public','xrpl_phase_scan_message_id'],
+  ['archive_identity_helper_required','public','xrpl_phase_work_id'],
+  ['archive_identity_helper_required','public','xrpl_phase_commit_message_id'],
+  ['archive_identity_helper_required','public','xrpl_phase_finalize_message_id'],
   ['current_r5_compat_required','public','xrpl_claim_r5_revision4_recovery_batch'],
   ['current_r5_compat_required','public','xrpl_complete_r5_revision4_recovery_batch_without_qualification'],
   ['current_r5_compat_required','public','xrpl_prepare_r5_revision4_active_recovery'],
@@ -40,6 +44,12 @@ const TARGETS = [
   ['unresolved_blocker','public','xrpl_drain_r5_checkpoint_boundary'],
   ['unresolved_blocker','public','xrpl_ensure_remote_seven_class_epoch'],
 ]
+const IDENTITY_HELPER_SIGNATURES = new Map([
+  ['public.xrpl_phase_scan_message_id', 'p_network text, p_epoch_id text, p_base_identity text, p_previous_ledger_index bigint, p_previous_ledger_hash text, p_scan_sequence integer'],
+  ['public.xrpl_phase_work_id', 'p_network text, p_epoch_id text, p_base_identity text, p_previous_ledger_index bigint, p_expected_parent_hash text'],
+  ['public.xrpl_phase_commit_message_id', 'p_work_id text, p_chunk_index integer'],
+  ['public.xrpl_phase_finalize_message_id', 'p_work_id text'],
+])
 const targetNames=[...new Set(TARGETS.map(([, ,name])=>name))]
 const targetSchemas=[...new Set(TARGETS.map(([,schema])=>schema))]
 const quotedNames=targetNames.map((name)=>`'${name.replaceAll("'","''")}'`).join(',')
@@ -99,6 +109,13 @@ if (duplicateTargets.length!==1) fail(`archive duplicate_completion overload cou
 if (duplicateTargets[0].identityArguments!=='p_message_id text, p_phase text') {
   fail(`archive duplicate_completion identity arguments drifted: ${duplicateTargets[0].identityArguments}`)
 }
+for (const [key, expectedIdentityArguments] of IDENTITY_HELPER_SIGNATURES) {
+  const helperTargets=selectedRows.filter((row)=>targetKey(row.schemaName,row.functionName)===key)
+  if (helperTargets.length!==1) fail(`archive identity helper overload count must be 1 for ${key}, got ${helperTargets.length}`)
+  if (helperTargets[0].identityArguments!==expectedIdentityArguments) {
+    fail(`archive identity helper arguments drifted for ${key}: ${helperTargets[0].identityArguments}`)
+  }
+}
 const enriched=selectedRows.map((row)=>{
   const reason=TARGETS.find(([,schema,name])=>schema===row.schemaName && name===row.functionName)?.[0]??'unknown'
   return {
@@ -130,6 +147,7 @@ const summary=[
   `- target names / production definitions: \`${TARGETS.length} / ${enriched.length}\``,
   `- archive semantics definitions: \`${groups.archive_semantics_required?.length??0}\``,
   `- archive duplicate fallback definitions: \`${groups.archive_duplicate_fallback_required?.length??0}\``,
+  `- archive identity helper definitions: \`${groups.archive_identity_helper_required?.length??0}\``,
   `- current R5 definitions: \`${groups.current_r5_compat_required?.length??0}\``,
   `- unresolved blocker definitions: \`${groups.unresolved_blocker?.length??0}\``,
   `- service-role executable targets: \`${enriched.filter((row)=>row.serviceRoleExecute===true).length}\``,
@@ -138,6 +156,9 @@ const summary=[
   '',
   'Archive duplicate fallback exact definition fingerprint:',
   ...(groups.archive_duplicate_fallback_required??[]).map((row)=>`- \`${row.schemaName}.${row.functionName}(${row.identityArguments})\`: ${row.definitionSha256}`),
+  '',
+  'Archive identity helper exact definition fingerprints:',
+  ...(groups.archive_identity_helper_required??[]).map((row)=>`- \`${row.schemaName}.${row.functionName}(${row.identityArguments})\`: ${row.definitionSha256}`),
   '',
   'Current R5 exact definition fingerprints:',
   ...(groups.current_r5_compat_required??[]).map((row)=>`- \`${row.schemaName}.${row.functionName}(${row.identityArguments})\`: ${row.definitionSha256}`),
