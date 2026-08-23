@@ -13,7 +13,7 @@ const workflow = readFileSync(
 )
 const sqlStartMarker = 'const SQL=`'
 const sqlStart = script.indexOf(sqlStartMarker)
-const sqlEnd = script.indexOf('`;\nif (!/', sqlStart)
+const sqlEnd = script.indexOf('`\nif (!/', sqlStart)
 if (sqlStart < 0 || sqlEnd < 0) throw new Error('target source SQL template not found')
 const sqlTemplate = script.slice(sqlStart + sqlStartMarker.length, sqlEnd)
 
