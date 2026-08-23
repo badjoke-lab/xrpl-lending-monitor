@@ -96,6 +96,9 @@ const missing=TARGETS.filter(([,schema,name])=>!foundKeys.has(targetKey(schema,n
 if (missing.length) fail(`target production functions missing: ${missing.join(',')}`)
 const duplicateTargets=selectedRows.filter((row)=>row.schemaName==='xrpl_phase_archive_v1' && row.functionName==='duplicate_completion')
 if (duplicateTargets.length!==1) fail(`archive duplicate_completion overload count must be 1, got ${duplicateTargets.length}`)
+if (duplicateTargets[0].identityArguments!=='p_message_id text, p_phase text') {
+  fail(`archive duplicate_completion identity arguments drifted: ${duplicateTargets[0].identityArguments}`)
+}
 const enriched=selectedRows.map((row)=>{
   const reason=TARGETS.find(([,schema,name])=>schema===row.schemaName && name===row.functionName)?.[0]??'unknown'
   return {
