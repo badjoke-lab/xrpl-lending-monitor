@@ -21,26 +21,31 @@ function parseArgs(args) {
 }
 
 const TARGETS = [
-  ['archive_semantics_required','xrpl_phase_insert_message'],
-  ['archive_semantics_required','xrpl_phase_reserve_successor'],
-  ['archive_semantics_required','xrpl_complete_caught_up_scan'],
-  ['archive_semantics_required','xrpl_complete_scan_phase'],
-  ['archive_semantics_required','xrpl_complete_commit_phase'],
-  ['archive_semantics_required','xrpl_complete_finalize_phase'],
-  ['archive_semantics_required','xrpl_complete_portable_scan_phase'],
-  ['archive_semantics_required','xrpl_complete_portable_commit_phase_strict'],
-  ['archive_semantics_required','xrpl_complete_portable_finalize_phase'],
-  ['current_r5_compat_required','xrpl_claim_r5_revision4_recovery_batch'],
-  ['current_r5_compat_required','xrpl_complete_r5_revision4_recovery_batch_without_qualification'],
-  ['current_r5_compat_required','xrpl_prepare_r5_revision4_active_recovery'],
-  ['current_r5_compat_required','xrpl_rebind_r5_revision4_prebatch_recovery_to_active_boundary_s'],
-  ['unresolved_blocker','xrpl_claim_r5_active_recovery_batch'],
-  ['unresolved_blocker','xrpl_complete_r5_active_recovery_batch'],
-  ['unresolved_blocker','xrpl_drain_r5_checkpoint_boundary'],
-  ['unresolved_blocker','xrpl_ensure_remote_seven_class_epoch'],
+  ['archive_semantics_required','public','xrpl_phase_insert_message'],
+  ['archive_semantics_required','public','xrpl_phase_reserve_successor'],
+  ['archive_semantics_required','public','xrpl_complete_caught_up_scan'],
+  ['archive_semantics_required','public','xrpl_complete_scan_phase'],
+  ['archive_semantics_required','public','xrpl_complete_commit_phase'],
+  ['archive_semantics_required','public','xrpl_complete_finalize_phase'],
+  ['archive_semantics_required','public','xrpl_complete_portable_scan_phase'],
+  ['archive_semantics_required','public','xrpl_complete_portable_commit_phase_strict'],
+  ['archive_semantics_required','public','xrpl_complete_portable_finalize_phase'],
+  ['archive_duplicate_fallback_required','xrpl_phase_archive_v1','duplicate_completion'],
+  ['current_r5_compat_required','public','xrpl_claim_r5_revision4_recovery_batch'],
+  ['current_r5_compat_required','public','xrpl_complete_r5_revision4_recovery_batch_without_qualification'],
+  ['current_r5_compat_required','public','xrpl_prepare_r5_revision4_active_recovery'],
+  ['current_r5_compat_required','public','xrpl_rebind_r5_revision4_prebatch_recovery_to_active_boundary_s'],
+  ['unresolved_blocker','public','xrpl_claim_r5_active_recovery_batch'],
+  ['unresolved_blocker','public','xrpl_complete_r5_active_recovery_batch'],
+  ['unresolved_blocker','public','xrpl_drain_r5_checkpoint_boundary'],
+  ['unresolved_blocker','public','xrpl_ensure_remote_seven_class_epoch'],
 ]
-const targetNames=TARGETS.map(([,name])=>name)
+const targetNames=[...new Set(TARGETS.map(([, ,name])=>name))]
+const targetSchemas=[...new Set(TARGETS.map(([,schema])=>schema))]
 const quotedNames=targetNames.map((name)=>`'${name.replaceAll("'","''")}'`).join(',')
+const quotedSchemas=targetSchemas.map((schema)=>`'${schema.replaceAll("'","''")}'`).join(',')
+const targetKey=(schema,name)=>`${schema}.${name}`
+const expectedKeys=new Set(TARGETS.map(([,schema,name])=>targetKey(schema,name)))
 const SQL=`select jsonb_agg(jsonb_build_object(
   'schemaName',n.nspname,
   'functionName',p.proname,
@@ -49,10 +54,10 @@ const SQL=`select jsonb_agg(jsonb_build_object(
   'source',p.prosrc,
   'owner',pg_get_userbyid(p.proowner),
   'serviceRoleExecute',has_function_privilege('service_role',p.oid,'EXECUTE')
-) order by p.proname,pg_get_function_identity_arguments(p.oid))::text as state
+) order by n.nspname,p.proname,pg_get_function_identity_arguments(p.oid))::text as state
 from pg_proc p
 join pg_namespace n on n.oid=p.pronamespace
-where n.nspname in ('public','xrpl_r5_v1')
+where n.nspname in (${quotedSchemas})
   and p.prokind='f'
   and p.proname in (${quotedNames});`
 if (!/^\s*select\b/iu.test(SQL)) fail('target source audit must be SELECT only')
@@ -84,11 +89,15 @@ if (!/^[a-f0-9]{40}$/u.test(sourceCommit??'')) fail('invalid --source-commit')
 const raw=oneColumn(await query(SQL))
 const rows=typeof raw==='string'?JSON.parse(raw):raw
 if (!Array.isArray(rows)) fail('target source rows missing')
-const foundNames=new Set(rows.map((row)=>row.functionName))
-const missing=targetNames.filter((name)=>!foundNames.has(name))
+const selectedRows=rows.filter((row)=>expectedKeys.has(targetKey(row.schemaName,row.functionName)))
+const foundKeys=new Set(selectedRows.map((row)=>targetKey(row.schemaName,row.functionName)))
+const missing=TARGETS.filter(([,schema,name])=>!foundKeys.has(targetKey(schema,name)))
+  .map(([,schema,name])=>targetKey(schema,name))
 if (missing.length) fail(`target production functions missing: ${missing.join(',')}`)
-const enriched=rows.map((row)=>{
-  const reason=TARGETS.find(([,name])=>name===row.functionName)?.[0]??'unknown'
+const duplicateTargets=selectedRows.filter((row)=>row.schemaName==='xrpl_phase_archive_v1' && row.functionName==='duplicate_completion')
+if (duplicateTargets.length!==1) fail(`archive duplicate_completion overload count must be 1, got ${duplicateTargets.length}`)
+const enriched=selectedRows.map((row)=>{
+  const reason=TARGETS.find(([,schema,name])=>schema===row.schemaName && name===row.functionName)?.[0]??'unknown'
   return {
     ...row,
     reason,
@@ -101,7 +110,7 @@ const evidence={
   sourceCommit,
   productionDatabaseReadOnly:true,
   noProductionMutationAuthorized:true,
-  targetNameCount:targetNames.length,
+  targetNameCount:TARGETS.length,
   targetDefinitionCount:enriched.length,
   targets:enriched,
 }
@@ -115,19 +124,23 @@ const summary=[
   '## Phase transport target source read-only audit',
   '',
   `- source commit: \`${sourceCommit}\``,
-  `- target names / production definitions: \`${targetNames.length} / ${enriched.length}\``,
+  `- target names / production definitions: \`${TARGETS.length} / ${enriched.length}\``,
   `- archive semantics definitions: \`${groups.archive_semantics_required?.length??0}\``,
+  `- archive duplicate fallback definitions: \`${groups.archive_duplicate_fallback_required?.length??0}\``,
   `- current R5 definitions: \`${groups.current_r5_compat_required?.length??0}\``,
   `- unresolved blocker definitions: \`${groups.unresolved_blocker?.length??0}\``,
   `- service-role executable targets: \`${enriched.filter((row)=>row.serviceRoleExecute===true).length}\``,
   '- exact definitions stored in artifact: `true`',
   '- production mutation: `false`',
   '',
+  'Archive duplicate fallback exact definition fingerprint:',
+  ...(groups.archive_duplicate_fallback_required??[]).map((row)=>`- \`${row.schemaName}.${row.functionName}(${row.identityArguments})\`: ${row.definitionSha256}`),
+  '',
   'Current R5 exact definition fingerprints:',
-  ...(groups.current_r5_compat_required??[]).map((row)=>`- \`${row.functionName}(${row.identityArguments})\`: ${row.definitionSha256}`),
+  ...(groups.current_r5_compat_required??[]).map((row)=>`- \`${row.schemaName}.${row.functionName}(${row.identityArguments})\`: ${row.definitionSha256}`),
   '',
   'Unresolved blocker exact definition fingerprints:',
-  ...(groups.unresolved_blocker??[]).map((row)=>`- \`${row.functionName}(${row.identityArguments})\`: ${row.definitionSha256}`),
+  ...(groups.unresolved_blocker??[]).map((row)=>`- \`${row.schemaName}.${row.functionName}(${row.identityArguments})\`: ${row.definitionSha256}`),
   '',
   `Evidence SHA-256: \`${digest}\``,
 ].join('\n')
