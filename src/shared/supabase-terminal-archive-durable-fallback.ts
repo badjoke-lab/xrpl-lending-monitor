@@ -15,13 +15,14 @@ export type DurablePhaseWork = {
   payloadDigest: string
   expectedPayloadChunks: number
   expectedCommitChunks: number
+  sourceScanSequence: number
   createdAt: string
   committedAt: string | null
 }
 
 export type DurableDuplicateCompletion = {
   source: 'durable_work'
-  phase: 'commit' | 'finalize'
+  phase: DurableTerminalPhase
   messageId: string
   payload: Record<string, unknown>
   successorMessageId: string
@@ -48,6 +49,15 @@ export type ArchiveFirstDuplicateCompletion =
       completion: DurableDuplicateCompletion['completion']
       derived: DurableDuplicateCompletion
     }
+
+const DURABLE_SCAN_WORK_STATUSES = new Set([
+  'planned',
+  'staged',
+  'committing',
+  'finalizing',
+  'committed',
+  'error',
+])
 
 function requireSafeNonNegativeInteger(value: number, name: string): void {
   if (!Number.isSafeInteger(value) || value < 0) {
@@ -84,12 +94,13 @@ function escapedWorkId(workId: string): string {
   return workId.replaceAll(':', '%3A')
 }
 
-function validateCommittedWork(work: DurablePhaseWork): void {
+function validateDurableWork(work: DurablePhaseWork): void {
   requireSafeNonNegativeInteger(work.previousLedgerIndex, 'previousLedgerIndex')
   requireSafeNonNegativeInteger(work.startLedgerIndex, 'startLedgerIndex')
   requireSafeNonNegativeInteger(work.scannedEndLedgerIndex, 'scannedEndLedgerIndex')
   requireSafeNonNegativeInteger(work.expectedPayloadChunks, 'expectedPayloadChunks')
   requireSafeNonNegativeInteger(work.expectedCommitChunks, 'expectedCommitChunks')
+  requireSafeNonNegativeInteger(work.sourceScanSequence, 'sourceScanSequence')
   if (work.startLedgerIndex !== work.previousLedgerIndex + 1) {
     throw new Error(`durable work start boundary is invalid: ${work.workId}`)
   }
@@ -109,6 +120,33 @@ function validateCommittedWork(work: DurablePhaseWork): void {
   }
   if (work.status === 'committed' && work.committedAt === null) {
     throw new Error(`committed durable work has no committedAt: ${work.workId}`)
+  }
+}
+
+function scanMessageId(work: DurablePhaseWork): string {
+  return [
+    'scan',
+    'v1',
+    encodedIdentityPart(work.network, 'network'),
+    encodedIdentityPart(work.epochId, 'epochId'),
+    encodedIdentityPart(work.baseIdentity, 'baseIdentity'),
+    String(work.previousLedgerIndex),
+    encodeURIComponent(canonicalHash(work.expectedParentHash, 'expectedParentHash')),
+    String(work.sourceScanSequence),
+  ].join(':')
+}
+
+function scanPayload(work: DurablePhaseWork, messageId: string): Record<string, unknown> {
+  return {
+    schemaVersion: 1,
+    phase: 'scan',
+    messageId,
+    network: work.network,
+    epochId: work.epochId,
+    baseIdentity: work.baseIdentity,
+    expectedPreviousLedgerIndex: work.previousLedgerIndex,
+    expectedPreviousLedgerHash: canonicalHash(work.expectedParentHash, 'expectedParentHash'),
+    scanSequence: work.sourceScanSequence,
   }
 }
 
@@ -134,7 +172,7 @@ function successorScanMessageId(work: DurablePhaseWork): string {
 }
 
 function buildDerived(
-  phase: 'commit' | 'finalize',
+  phase: DurableTerminalPhase,
   messageId: string,
   payload: Record<string, unknown>,
   successorMessageId: string,
@@ -165,18 +203,27 @@ export function resolveDurableDuplicateCompletion(options: {
   phase: DurableTerminalPhase
   works: readonly DurablePhaseWork[]
 }): DurableDuplicateCompletion | null {
-  // A work row proves that some productive scan completed at its boundary, but it
-  // does not retain the completed scanSequence. Reading a sequence back out of the
-  // caller-supplied message ID would validate syntax, not historical membership,
-  // and could accept a fabricated sequence. Until an independent durable sequence
-  // certificate is proven, every archive-miss scan must fail closed.
-  if (options.phase === 'scan') return null
-
   const matches: DurableDuplicateCompletion[] = []
 
   for (const work of options.works) {
+    if (options.phase === 'scan') {
+      if (!DURABLE_SCAN_WORK_STATUSES.has(work.status)) continue
+      validateDurableWork(work)
+      const durableScanMessageId = scanMessageId(work)
+      if (options.messageId !== durableScanMessageId) continue
+      matches.push(buildDerived(
+        'scan',
+        options.messageId,
+        scanPayload(work, durableScanMessageId),
+        commitMessageId(work, 0),
+        work.createdAt,
+        true,
+      ))
+      continue
+    }
+
     if (work.status !== 'committed') continue
-    validateCommittedWork(work)
+    validateDurableWork(work)
 
     if (options.phase === 'commit') {
       for (let chunkIndex = 0; chunkIndex < work.expectedCommitChunks; chunkIndex += 1) {
