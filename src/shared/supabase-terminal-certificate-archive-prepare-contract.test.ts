@@ -99,7 +99,9 @@ describe('terminal certificate/archive production prepare contract', () => {
         'public.xrpl_phase_finalize_message_id(text)'
       ],
     ).toBe(contract.expectedBefore.identityHelperDefinitionSha256.finalizeMessageId)
-    expect(stageText).toContain(contract.expectedBefore.duplicateCompletion.sourceSha256)
+    expect(contract.expectedBefore.duplicateCompletion.sourceSha256).toBe(
+      'aa5b972f1245fc46239164247a0203c67dac7be21a3f561009a930e50784a081',
+    )
     expect(stageText).toContain(contract.expectedAfter.duplicateCompletion.sourceSha256)
     expect(stageText).toContain('source_scan_sequence integer not null default 0')
     expect(stageText).toContain('next_scan_sequence integer not null default 0')
