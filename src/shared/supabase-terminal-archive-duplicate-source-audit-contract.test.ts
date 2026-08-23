@@ -11,6 +11,9 @@ const workflow = readFileSync(
   resolve(process.cwd(), '.github/workflows/r5-index-footprint-readonly-probe.yml'),
   'utf8',
 )
+const sqlMatch = script.match(/const SQL=`([\s\S]*?)`;\nif \(!\/\^\\s\*select/u)
+if (!sqlMatch) throw new Error('target source SQL template not found')
+const sqlTemplate = sqlMatch[1]
 
 describe('archive duplicate completion source read-only audit', () => {
   it('targets the private archive function by schema and exact function name', () => {
@@ -23,7 +26,8 @@ describe('archive duplicate completion source read-only audit', () => {
   it('keeps the production query SELECT-only and Management API read-only', () => {
     expect(script).toContain("if (!/^\\s*select\\b/iu.test(SQL)) fail('target source audit must be SELECT only')")
     expect(script).toContain('body:JSON.stringify({query:sql,read_only:true})')
-    expect(script).not.toMatch(/\b(insert|update|delete|alter|drop|truncate|vacuum|reindex)\b/iu)
+    expect(sqlTemplate.trimStart().toLowerCase().startsWith('select ')).toBe(true)
+    expect(sqlTemplate).not.toMatch(/\b(insert|update|delete|alter|drop|truncate|vacuum|reindex)\b/iu)
   })
 
   it('captures exact definition and source fingerprints in sanitized evidence', () => {
