@@ -62,7 +62,7 @@ function databaseGuardFixture(overrides: Record<string, unknown> = {}) {
   }
 }
 
-function capacityQualificationFixture(databaseGuard: Record<string, any>) {
+function capacityQualificationFixture(databaseGuard: Record<string, unknown>) {
   return {
     schemaVersion: 1,
     purpose: 'r5-free-operation-capacity-readonly-qualification',
@@ -83,7 +83,7 @@ function capacityQualificationFixture(databaseGuard: Record<string, any>) {
 }
 
 function runAssessment(
-  databaseGuard: Record<string, any>,
+  databaseGuard: Record<string, unknown>,
   databaseGuardExit = 0,
   capacityQualification?: Record<string, unknown>,
 ) {
