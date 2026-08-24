@@ -1,0 +1,147 @@
+name: R5 terminal certificate archive bounded apply
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: r5-terminal-certificate-archive-bounded-apply
+  cancel-in-progress: false
+
+env:
+  QUALIFICATION_ISSUE: '1261'
+  STABLE_GUARD: ops/production-sql/20260824031500_xrpl_terminal_certificate_archive_stable_safety_guard.json
+  MANAGER: scripts/manage-r5-terminal-certificate-archive-bounded-apply.mjs
+  SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+  SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  execute:
+    if: >-
+      github.event.issue.number == 1261 &&
+      github.event.comment.user.login == 'badjoke-lab' &&
+      startsWith(github.event.comment.body, '/r5-terminal-certificate-archive-authorize ')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      AUTHORIZATION_BODY: ${{ github.event.comment.body }}
+      AUTHORIZATION_COMMENT_ID: ${{ github.event.comment.id }}
+    steps:
+      - name: Check out exact current main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Bind exact stable OWNER authorization
+        id: auth
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_commit="$(git rev-parse HEAD)"
+          expected="$(jq -r '.command' "$STABLE_GUARD")"
+          prepare_run="$(jq -r '.prepareRun' "$STABLE_GUARD")"
+          guard_id="$(jq -r '.guardId' "$STABLE_GUARD")"
+          bundle="$(jq -r '.bundleSha256' "$STABLE_GUARD")"
+          test "$AUTHORIZATION_BODY" = "$expected"
+          test "$(jq -r '.validity.wallClockExpiryRequired' "$STABLE_GUARD")" = false
+          test "$(jq -r '.validity.volatileMeasurementDriftInvalidatesAuthorization' "$STABLE_GUARD")" = false
+          test "$(jq -r '.productionMutationAuthorized' "$STABLE_GUARD")" = false
+          test "$(jq -r '.r5RearmAuthorized' "$STABLE_GUARD")" = false
+          test "$(jq -r '.mainnetEnabled' "$STABLE_GUARD")" = false
+          printf 'source_commit=%s\nprepare_run=%s\nguard_id=%s\nbundle=%s\n' \
+            "$source_commit" "$prepare_run" "$guard_id" "$bundle" >> "$GITHUB_OUTPUT"
+
+      - name: Verify successful prepare provenance and unique OWNER command
+        env:
+          PREPARE_RUN: ${{ steps.auth.outputs.prepare_run }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${PREPARE_RUN}" > /tmp/terminal-certificate-prepare-run.json
+          jq -e '.conclusion == "success" and .actor.login == "badjoke-lab"' \
+            /tmp/terminal-certificate-prepare-run.json >/dev/null
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${QUALIFICATION_ISSUE}/comments?per_page=100" \
+            | jq -s 'add' > /tmp/terminal-certificate-comments.json
+          EXPECTED="$AUTHORIZATION_BODY" AUTH_ID="$AUTHORIZATION_COMMENT_ID" node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs'
+          const comments = JSON.parse(readFileSync('/tmp/terminal-certificate-comments.json', 'utf8'))
+          const exact = comments.filter(
+            (comment) => comment?.user?.login === 'badjoke-lab' && comment?.body === process.env.EXPECTED,
+          )
+          if (exact.length !== 1 || Number(exact[0].id) !== Number(process.env.AUTH_ID)) {
+            throw new Error(`stable OWNER authorization must be unique, found ${exact.length}`)
+          }
+          NODE
+
+      - name: Revalidate stable safety guard read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p r5-terminal-certificate-archive-bounded-apply-evidence
+          node "$MANAGER" preflight \
+            --source-commit "${{ steps.auth.outputs.source_commit }}" \
+            --output r5-terminal-certificate-archive-bounded-apply-evidence/preflight.json
+          jq -e '.eligible == true and .productionDatabaseReadOnly == true and .productionMutationPerformed == false and .r5RearmAuthorized == false and .mainnetEnabled == false' \
+            r5-terminal-certificate-archive-bounded-apply-evidence/preflight.json >/dev/null
+
+      - name: Apply exact atomic bundle once
+        id: apply
+        shell: bash
+        run: |
+          set -euo pipefail
+          node "$MANAGER" apply \
+            --source-commit "${{ steps.auth.outputs.source_commit }}" \
+            --authorization "$AUTHORIZATION_BODY" \
+            --output r5-terminal-certificate-archive-bounded-apply-evidence/apply.json
+          jq -e '.exactOwnerAuthorizationMatched == true and .stableSafetyPreflightPassed == true and .singleTransactionBundle == true and .productionMutationPerformed == true and .r5RearmAuthorized == false and .mainnetEnabled == false' \
+            r5-terminal-certificate-archive-bounded-apply-evidence/apply.json >/dev/null
+
+      - name: Independent post-apply read-only verify
+        id: verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/r5-terminal-certificate-archive-readonly-verify.mjs \
+            --source-commit "${{ steps.auth.outputs.source_commit }}" \
+            --output-dir r5-terminal-certificate-archive-bounded-apply-evidence/verify
+          jq -e '.passed == true and .productionDatabaseReadOnly == true and .productionMutationAuthorized == false and .r5RearmAuthorized == false and .mainnetEnabled == false' \
+            r5-terminal-certificate-archive-bounded-apply-evidence/verify/terminal-certificate-archive-readonly-verify-evidence.json >/dev/null
+
+      - name: Upload bounded apply evidence
+        if: always() && steps.auth.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: r5-terminal-certificate-archive-bounded-apply-${{ github.run_id }}
+          path: r5-terminal-certificate-archive-bounded-apply-evidence
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Publish bounded apply result
+        if: always() && steps.auth.outcome == 'success'
+        env:
+          SOURCE_COMMIT: ${{ steps.auth.outputs.source_commit }}
+          GUARD_ID: ${{ steps.auth.outputs.guard_id }}
+          BUNDLE: ${{ steps.auth.outputs.bundle }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          verdict=FAIL
+          if [ "${{ job.status }}" = success ]; then verdict=PASS; fi
+          cat > /tmp/terminal-certificate-bounded-result.md <<EOF
+          ## Terminal certificate/archive bounded apply — ${verdict}
+
+          Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+          Source main: \`${SOURCE_COMMIT}\`
+          Stable guard: \`${GUARD_ID}\`
+          Atomic bundle: \`${BUNDLE}\`
+
+          PASS means the exact stable safety guard passed immediately before mutation, the reviewed atomic bundle was submitted as one transaction, and the independent post-apply database check passed read-only. This operation does not authorize scheduler/deployment/public-reader changes, archive deletion/stop, R5 rearm/restart, or Mainnet.
+          EOF
+          gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/terminal-certificate-bounded-result.md
