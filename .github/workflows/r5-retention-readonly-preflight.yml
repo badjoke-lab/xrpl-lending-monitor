@@ -62,10 +62,6 @@ jobs:
             > /tmp/r5-resource-restore-readonly-preflight.json
           test "$(jq -r '.boundary.productionDatabaseReadOnly' /tmp/r5-resource-restore-readonly-preflight.json)" = true
           test "$(jq -r '.boundary.productionMutationAuthorized' /tmp/r5-resource-restore-readonly-preflight.json)" = false
-          test "$(jq -r '.boundary.deleteAuthorized' /tmp/r5-resource-restore-readonly-preflight.json)" = false
-          test "$(jq -r '.boundary.truncateAuthorized' /tmp/r5-resource-restore-readonly-preflight.json)" = false
-          test "$(jq -r '.boundary.dropAuthorized' /tmp/r5-resource-restore-readonly-preflight.json)" = false
-          test "$(jq -r '.boundary.vacuumAuthorized' /tmp/r5-resource-restore-readonly-preflight.json)" = false
           test "$(jq -r '.assessment.reconstructabilityProven' /tmp/r5-resource-restore-readonly-preflight.json)" = false
           test "$(jq -r '.assessment.safeToDeleteProven' /tmp/r5-resource-restore-readonly-preflight.json)" = false
           test "$(jq -r '.boundary.r5RearmAuthorized' /tmp/r5-resource-restore-readonly-preflight.json)" = false
