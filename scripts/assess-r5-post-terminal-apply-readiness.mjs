@@ -6,6 +6,7 @@ import { dirname, resolve } from 'node:path'
 const STABLE_GUARD_PATH = 'ops/production-sql/20260824031500_xrpl_terminal_certificate_archive_stable_safety_guard.json'
 const ACTIVE_RUN_ID = 'r5-recovery-selected-revision4-minute2-entry'
 const DATABASE_HALT_BYTES = 400_000_000
+const CAPACITY_QUALIFICATION_PURPOSE = 'r5-free-operation-capacity-readonly-qualification'
 
 function fail(message) { throw new Error(message) }
 function parseArgs(argv) {
@@ -49,6 +50,7 @@ const terminalVerify = await readJson(options['terminal-verify'])
 const databaseGuardExitCode = Number(options['database-guard-exit'] ?? '0')
 if (!Number.isSafeInteger(databaseGuardExitCode) || databaseGuardExitCode < 0) fail('invalid --database-guard-exit')
 const databaseGuard = await readJson(options['database-guard'], false)
+const capacityQualification = await readJson(options['capacity-qualification'], false)
 
 const blockers = []
 addBlocker(blockers, terminalVerify?.passed === true, 'terminal_certificate_verify_failed', 'independent terminal certificate/archive verification did not pass')
@@ -84,14 +86,43 @@ if (databaseGuard) {
   blockers.push({ code: 'database_guard_evidence_missing', detail: 'database guard verifier produced no readable evidence' })
 }
 
+// Positive headroom alone is deliberately insufficient. The retained operating conclusion on
+// Issue #1261 requires an independently proven, integrity-preserving reclaim/retention path and
+// a fresh growth/capacity qualification before any R5 rearm can even become an OWNER candidate.
+if (!capacityQualification) {
+  blockers.push({
+    code: 'capacity_qualification_missing',
+    detail: 'no independently reviewed post-reclaim growth/capacity qualification was supplied; positive 400MB headroom alone is not sufficient for R5 rearm candidacy',
+  })
+} else {
+  addBlocker(blockers, capacityQualification.purpose === CAPACITY_QUALIFICATION_PURPOSE, 'capacity_qualification_purpose_mismatch', `capacity qualification purpose is ${String(capacityQualification.purpose)}`)
+  addBlocker(blockers, capacityQualification.sourceCommit === sourceCommit, 'capacity_qualification_source_commit_mismatch', 'capacity qualification source commit differs from current main')
+  addBlocker(blockers, capacityQualification.productionDatabaseReadOnly === true, 'capacity_qualification_not_read_only', 'capacity qualification was not marked read-only')
+  addBlocker(blockers, capacityQualification.currentSpecificationIntact === true, 'capacity_qualification_spec_weakened', 'capacity qualification does not prove the current product specification remained intact')
+  addBlocker(blockers, capacityQualification.integrityPreservingReclaimOrRetentionProven === true, 'capacity_reclaim_not_proven', 'bounded integrity-preserving reclaim/retention proof is absent')
+  addBlocker(blockers, capacityQualification.postReclaimCapacityRemeasured === true, 'post_reclaim_capacity_not_remeasured', 'post-reclaim production capacity was not independently remeasured')
+  addBlocker(blockers, capacityQualification.growthRemeasured === true, 'post_reclaim_growth_not_remeasured', 'post-reclaim database growth was not independently remeasured')
+  addBlocker(blockers, capacityQualification.sustainedFreeOperationCapacityProblemClosed === true, 'free_operation_capacity_problem_open', 'capacity qualification does not close the sustained free-operation database-capacity problem')
+  addBlocker(blockers, capacityQualification.safeForR5Rearm === true, 'capacity_qualification_rearm_not_safe', 'capacity qualification does not conclude R5 rearm is safe')
+  addBlocker(blockers, capacityQualification.r5RearmAuthorized === false, 'capacity_qualification_authorization_boundary_drift', 'capacity qualification unexpectedly authorizes rearm')
+  addBlocker(blockers, capacityQualification.mainnetEnabled === false, 'capacity_qualification_mainnet_boundary_drift', 'capacity qualification unexpectedly enables Mainnet')
+  if (databaseGuard) {
+    addBlocker(blockers, Number(capacityQualification.databaseHaltBytes) === DATABASE_HALT_BYTES, 'capacity_qualification_halt_boundary_mismatch', `capacity qualification halt boundary is ${String(capacityQualification.databaseHaltBytes)}`)
+    addBlocker(blockers, Number(capacityQualification.databaseBytes) === Number(databaseGuard.databaseBytes), 'capacity_qualification_database_state_stale', `capacity qualification database bytes ${String(capacityQualification.databaseBytes)} differ from current read-only database guard observation ${String(databaseGuard.databaseBytes)}`)
+    addBlocker(blockers, Number(capacityQualification.databaseHeadroomBytes) === Number(databaseGuard.databaseHeadroomBytes), 'capacity_qualification_headroom_state_stale', `capacity qualification headroom ${String(capacityQualification.databaseHeadroomBytes)} differs from current read-only database guard observation ${String(databaseGuard.databaseHeadroomBytes)}`)
+  }
+}
+
 const uniqueBlockers = [...new Map(blockers.map((entry) => [entry.code, entry])).values()]
 const evidence = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   purpose: 'r5-post-terminal-apply-readonly-rearm-readiness',
   sourceCommit,
   stableGuardId: stableGuard.guardId,
   reviewedExecutionCommit: stableGuard.executionCommit,
   reviewedAtomicBundleSha256: stableGuard.bundleSha256,
+  capacityQualificationRequired: true,
+  capacityQualificationPurpose: CAPACITY_QUALIFICATION_PURPOSE,
   candidateForSeparateRearmAuthorization: uniqueBlockers.length === 0,
   blockerCount: uniqueBlockers.length,
   blockers: uniqueBlockers,
@@ -101,6 +132,8 @@ const evidence = {
     databaseBytes: databaseGuard?.databaseBytes ?? null,
     databaseHaltBytes: DATABASE_HALT_BYTES,
     databaseHeadroomBytes: databaseGuard?.databaseHeadroomBytes ?? null,
+    capacityQualificationSupplied: Boolean(capacityQualification),
+    capacityQualificationSafeForR5Rearm: capacityQualification?.safeForR5Rearm ?? null,
     activeRunId: databaseGuard?.run?.runId ?? null,
     activeRunStatus: databaseGuard?.run?.status ?? null,
     activeRunLastError: databaseGuard?.run?.lastError ?? null,
