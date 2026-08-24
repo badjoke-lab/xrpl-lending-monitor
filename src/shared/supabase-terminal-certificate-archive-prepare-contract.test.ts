@@ -49,13 +49,34 @@ describe('terminal certificate/archive production prepare contract', () => {
     }
   })
 
-  it('binds fresh read-only production evidence to a deterministic prestate digest', () => {
-    expect(contract.productionEvidence.readOnlyRunId).toBe(32651882728)
-    expect(contract.productionEvidence.sourceCommit).toBe(contract.executionCommit)
-    expect(contract.productionEvidence.artifactDigestSha256).toMatch(/^[a-f0-9]{64}$/u)
-    expect(contract.productionEvidence.prestate.sourceCommit).toBe(contract.executionCommit)
-    expect(contract.productionEvidence.prestate.readOnlyRunId).toBe(32651882728)
+  it('binds fresh current-main read-only production evidence to a deterministic prestate digest', () => {
+    expect(contract.productionEvidence.readOnlyRunId).toBe(32677209901)
+    expect(contract.productionEvidence.sourceCommit).toBe(
+      'ff4d98149ca29d7b03aca960776fba06d5766fc1',
+    )
+    expect(contract.productionEvidence.sourceCommit).not.toBe(contract.executionCommit)
+    expect(contract.productionEvidence.artifactId).toBe(9503059510)
+    expect(contract.productionEvidence.artifactDigestSha256).toBe(
+      '4b8d4a2d3f504ca61ee258318bdbb61be421602d3dd06fc35daeae3d6bc9ee08',
+    )
+    expect(contract.productionEvidence.scanSequenceEvidenceSha256).toBe(
+      '78df54d7dce718e5f8e64de0fec6fdc674cbd6a33f33c06c6e9f6180f86eb66c',
+    )
+    expect(contract.productionEvidence.transportTargetSourceEvidenceSha256).toBe(
+      '20d46469cd03e96f719d47f7d523ab98386849572e6a8bd408461a10f63a88a4',
+    )
+    expect(contract.productionEvidence.indexEvidenceSha256).toBe(
+      '7d8212caeb8d2967e39db761f2ce0ebaa1ef75cb8563de74ab92440b278b59c4',
+    )
+    expect(contract.productionEvidence.prestate.sourceCommit).toBe(
+      contract.productionEvidence.sourceCommit,
+    )
+    expect(contract.productionEvidence.prestate.readOnlyRunId).toBe(32677209901)
+    expect(contract.productionEvidence.prestate.artifactDigestSha256).toBe(
+      contract.productionEvidence.artifactDigestSha256,
+    )
     expect(contract.productionEvidence.prestate.databaseBytes).toBe(395857043)
+    expect(contract.productionEvidence.prestate.transportRows).toBe(51732)
     expect(contract.productionEvidence.prestate.transportDuplicateMessageIds).toBe(0)
     expect(contract.productionEvidence.prestate.completedScanRows).toBe(17063)
     expect(contract.productionEvidence.prestate.productiveScanRows).toBe(17063)
@@ -70,7 +91,7 @@ describe('terminal certificate/archive production prepare contract', () => {
       contract.productionEvidence.prestateSha256,
     )
     expect(contract.productionEvidence.prestateSha256).toBe(
-      '0ad9321af1f8dad62439745c1628f283a74cf2a0bdac0a3dc9a07fd2ea3072f2',
+      '88985e1f77738ddf3283121028879a96213ee0137c491e4eb06ecc712d5c9fe9',
     )
   })
 
@@ -107,7 +128,7 @@ describe('terminal certificate/archive production prepare contract', () => {
     expect(stageText).toContain('next_scan_sequence integer not null default 0')
   })
 
-  it('makes the owner authorization proposal exact, one-time and non-self-authorizing', () => {
+  it('makes the refreshed owner authorization proposal exact, one-time and non-self-authorizing', () => {
     const proposal = contract.authorizationProposal
     const command = proposal.command as string
     expect(proposal.proposalOnly).toBe(true)
@@ -122,7 +143,8 @@ describe('terminal certificate/archive production prepare contract', () => {
     )
     expect(proposal.prepareRun).toBe(contract.productionEvidence.readOnlyRunId)
     expect(proposal.projectIdentityDigest).toMatch(/^[a-f0-9]{64}$/u)
-    expect(proposal.nonce).toMatch(/^[a-f0-9]{16}$/u)
+    expect(proposal.expires).toBe('2026-08-24T02:00:00Z')
+    expect(proposal.nonce).toBe('f96f6bfd2f84c3ae')
     expect(Number.isNaN(Date.parse(proposal.expires))).toBe(false)
     expect(contract.productionMutationAuthorized).toBe(false)
   })
