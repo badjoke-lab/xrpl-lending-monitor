@@ -18,8 +18,8 @@ def replace_once(name: str, old: str, new: str) -> None:
 
 replace_once(
     'terminal certificate bounded apply workflow allowlist entry',
-    '  r5-terminal-archive-phase-a-apply.yml',
-    '  r5-terminal-archive-phase-a-apply.yml\n  r5-terminal-certificate-archive-bounded-apply.yml',
+    '  r5-terminal-transport-compaction-preflight.yml',
+    '  r5-terminal-certificate-archive-bounded-apply.yml\n  r5-terminal-transport-compaction-preflight.yml',
 )
 replace_once(
     'terminal certificate bounded apply workflow count',
