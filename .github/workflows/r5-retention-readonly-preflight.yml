@@ -55,6 +55,22 @@ jobs:
           test "$(jq -r '.retentionBoundary.noDeploymentAuthorized' /tmp/r5-retention-readonly-preflight.json)" = true
           test "$(jq -r '.retentionBoundary.mainnetDisabled' /tmp/r5-retention-readonly-preflight.json)" = true
 
+          node scripts/r5-resource-restore-readonly-preflight.mjs \
+            --source-commit "$source_commit" \
+            --output r5-retention-readonly-preflight/resource-restore-evidence.json \
+            --summary r5-retention-readonly-preflight/resource-restore-summary.md \
+            > /tmp/r5-resource-restore-readonly-preflight.json
+          test "$(jq -r '.boundary.productionDatabaseReadOnly' /tmp/r5-resource-restore-readonly-preflight.json)" = true
+          test "$(jq -r '.boundary.productionMutationAuthorized' /tmp/r5-resource-restore-readonly-preflight.json)" = false
+          test "$(jq -r '.boundary.deleteAuthorized' /tmp/r5-resource-restore-readonly-preflight.json)" = false
+          test "$(jq -r '.boundary.truncateAuthorized' /tmp/r5-resource-restore-readonly-preflight.json)" = false
+          test "$(jq -r '.boundary.dropAuthorized' /tmp/r5-resource-restore-readonly-preflight.json)" = false
+          test "$(jq -r '.boundary.vacuumAuthorized' /tmp/r5-resource-restore-readonly-preflight.json)" = false
+          test "$(jq -r '.assessment.reconstructabilityProven' /tmp/r5-resource-restore-readonly-preflight.json)" = false
+          test "$(jq -r '.assessment.safeToDeleteProven' /tmp/r5-resource-restore-readonly-preflight.json)" = false
+          test "$(jq -r '.boundary.r5RearmAuthorized' /tmp/r5-resource-restore-readonly-preflight.json)" = false
+          test "$(jq -r '.boundary.mainnetEnabled' /tmp/r5-resource-restore-readonly-preflight.json)" = false
+
           node scripts/r5-post-retention-readonly-gate.mjs \
             --source-commit "$source_commit" \
             --output r5-retention-readonly-preflight/post-retention-gate.json \
@@ -67,12 +83,16 @@ jobs:
           test "$(jq -r '.boundary.r5RestartAuthorized' /tmp/r5-post-retention-readonly-gate.json)" = false
           jq -e '.verdict == "pass" or .verdict == "pending" or .verdict == "block"' /tmp/r5-post-retention-readonly-gate.json >/dev/null
           printf '\n' >> r5-retention-readonly-preflight/summary.md
+          cat r5-retention-readonly-preflight/resource-restore-summary.md >> r5-retention-readonly-preflight/summary.md
+          printf '\n' >> r5-retention-readonly-preflight/summary.md
           cat r5-retention-readonly-preflight/post-retention-gate.md >> r5-retention-readonly-preflight/summary.md
 
-          printf 'source_commit=%s\ndatabase_bytes=%s\nheadroom_bytes=%s\npost_retention_verdict=%s\n' \
+          printf 'source_commit=%s\ndatabase_bytes=%s\nheadroom_bytes=%s\nrestore_present=%s\nrestore_bytes=%s\npost_retention_verdict=%s\n' \
             "$source_commit" \
             "$(jq -r '.databaseBytes' /tmp/r5-retention-readonly-preflight.json)" \
             "$(jq -r '.databaseHeadroomBytes' /tmp/r5-retention-readonly-preflight.json)" \
+            "$(jq -r '.relationPresent' /tmp/r5-resource-restore-readonly-preflight.json)" \
+            "$(jq -r '.catalog.totalRelationBytes // 0' /tmp/r5-resource-restore-readonly-preflight.json)" \
             "$(jq -r '.verdict' /tmp/r5-post-retention-readonly-gate.json)" \
             >> "$GITHUB_OUTPUT"
 
