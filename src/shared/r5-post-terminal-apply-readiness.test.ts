@@ -37,9 +37,9 @@ function databaseGuardFixture(overrides: Record<string, unknown> = {}) {
     schemaVersion: 1,
     purpose: 'r5-revision4-database-guard-post-apply-readonly-verification',
     sourceCommit,
-    databaseBytes: 395_000_000,
+    databaseBytes: 350_000_000,
     databaseHaltBytes: 400_000_000,
-    databaseHeadroomBytes: 5_000_000,
+    databaseHeadroomBytes: 50_000_000,
     guardInstalled: true,
     run: {
       runId: 'r5-recovery-selected-revision4-minute2-entry',
@@ -62,36 +62,82 @@ function databaseGuardFixture(overrides: Record<string, unknown> = {}) {
   }
 }
 
-function runAssessment(databaseGuard: Record<string, unknown>, databaseGuardExit = 0) {
+function capacityQualificationFixture(databaseGuard: Record<string, any>) {
+  return {
+    schemaVersion: 1,
+    purpose: 'r5-free-operation-capacity-readonly-qualification',
+    sourceCommit,
+    productionDatabaseReadOnly: true,
+    currentSpecificationIntact: true,
+    integrityPreservingReclaimOrRetentionProven: true,
+    postReclaimCapacityRemeasured: true,
+    growthRemeasured: true,
+    sustainedFreeOperationCapacityProblemClosed: true,
+    safeForR5Rearm: true,
+    databaseBytes: databaseGuard.databaseBytes,
+    databaseHaltBytes: 400_000_000,
+    databaseHeadroomBytes: databaseGuard.databaseHeadroomBytes,
+    r5RearmAuthorized: false,
+    mainnetEnabled: false,
+  }
+}
+
+function runAssessment(
+  databaseGuard: Record<string, any>,
+  databaseGuardExit = 0,
+  capacityQualification?: Record<string, unknown>,
+) {
   const dir = mkdtempSync(join(tmpdir(), 'r5-post-terminal-readiness-'))
   const terminalPath = join(dir, 'terminal.json')
   const databaseGuardPath = join(dir, 'database-guard.json')
+  const capacityPath = join(dir, 'capacity.json')
   const outputPath = join(dir, 'readiness.json')
   writeFileSync(terminalPath, JSON.stringify(terminalFixture()))
   writeFileSync(databaseGuardPath, JSON.stringify(databaseGuard))
-  execFileSync(
-    process.execPath,
-    [
-      script,
-      '--source-commit',
-      sourceCommit,
-      '--terminal-verify',
-      terminalPath,
-      '--database-guard',
-      databaseGuardPath,
-      '--database-guard-exit',
-      String(databaseGuardExit),
-      '--output',
-      outputPath,
-    ],
-    { cwd: process.cwd(), stdio: 'pipe' },
-  )
+  const args = [
+    script,
+    '--source-commit',
+    sourceCommit,
+    '--terminal-verify',
+    terminalPath,
+    '--database-guard',
+    databaseGuardPath,
+    '--database-guard-exit',
+    String(databaseGuardExit),
+    '--output',
+    outputPath,
+  ]
+  if (capacityQualification) {
+    writeFileSync(capacityPath, JSON.stringify(capacityQualification))
+    args.push('--capacity-qualification', capacityPath)
+  }
+  execFileSync(process.execPath, args, { cwd: process.cwd(), stdio: 'pipe' })
   return JSON.parse(readFileSync(outputPath, 'utf8'))
 }
 
 describe('R5 post-terminal apply rearm readiness', () => {
-  it('marks a clean read-only state only as a candidate for separate rearm authorization', () => {
-    const evidence = runAssessment(databaseGuardFixture())
+  it('refuses rearm candidacy on positive headroom alone', () => {
+    const databaseGuard = databaseGuardFixture({
+      databaseBytes: 395_824_275,
+      databaseHeadroomBytes: 4_175_725,
+    })
+    const evidence = runAssessment(databaseGuard)
+    const codes = evidence.blockers.map((entry: { code: string }) => entry.code)
+    expect(evidence.candidateForSeparateRearmAuthorization).toBe(false)
+    expect(evidence.capacityQualificationRequired).toBe(true)
+    expect(codes).toContain('capacity_qualification_missing')
+    expect(evidence.r5RearmAuthorized).toBe(false)
+    expect(evidence.r5RestartPerformed).toBe(false)
+    expect(evidence.mainnetEnabled).toBe(false)
+  })
+
+  it('permits candidacy only with a current explicit post-reclaim growth/capacity proof', () => {
+    const databaseGuard = databaseGuardFixture()
+    const evidence = runAssessment(
+      databaseGuard,
+      0,
+      capacityQualificationFixture(databaseGuard),
+    )
     expect(evidence.candidateForSeparateRearmAuthorization).toBe(true)
     expect(evidence.blockerCount).toBe(0)
     expect(evidence.productionDatabaseReadOnly).toBe(true)
@@ -104,10 +150,30 @@ describe('R5 post-terminal apply rearm readiness', () => {
     expect(evidence.reviewedAtomicBundleSha256).toBe(guard.bundleSha256)
   })
 
-  it('fails readiness closed without converting the assessment into an authorization', () => {
+  it('rejects stale or unsafe capacity evidence even if the database guard has positive headroom', () => {
+    const databaseGuard = databaseGuardFixture()
+    const qualification = capacityQualificationFixture(databaseGuard)
+    qualification.databaseBytes = 349_000_000
+    qualification.databaseHeadroomBytes = 51_000_000
+    qualification.sustainedFreeOperationCapacityProblemClosed = false
+    qualification.safeForR5Rearm = false
+    const evidence = runAssessment(databaseGuard, 0, qualification)
+    const codes = evidence.blockers.map((entry: { code: string }) => entry.code)
+    expect(evidence.candidateForSeparateRearmAuthorization).toBe(false)
+    expect(codes).toContain('free_operation_capacity_problem_open')
+    expect(codes).toContain('capacity_qualification_rearm_not_safe')
+    expect(codes).toContain('capacity_qualification_database_state_stale')
+    expect(codes).toContain('capacity_qualification_headroom_state_stale')
+    expect(evidence.r5RearmAuthorized).toBe(false)
+    expect(evidence.mainnetEnabled).toBe(false)
+  })
+
+  it('fails readiness closed on database-guard failure without converting the assessment into an authorization', () => {
+    const databaseGuard = databaseGuardFixture({ databaseBytes: 401_000_000, databaseHeadroomBytes: -1_000_000 })
     const evidence = runAssessment(
-      databaseGuardFixture({ databaseBytes: 401_000_000, databaseHeadroomBytes: -1_000_000 }),
+      databaseGuard,
       1,
+      capacityQualificationFixture(databaseGuard),
     )
     const codes = evidence.blockers.map((entry: { code: string }) => entry.code)
     expect(evidence.candidateForSeparateRearmAuthorization).toBe(false)
