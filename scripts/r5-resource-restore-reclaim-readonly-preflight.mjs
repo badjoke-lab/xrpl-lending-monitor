@@ -118,6 +118,41 @@ with restore_tables as (
     count(*)::bigint as total,
     count(*) filter (where status = 'completed')::bigint as completed,
     count(*) filter (where status <> 'completed')::bigint as not_completed,
+    count(*) filter (where status = 'completed' and resource_guard_enabled)::bigint
+      as completed_guarded,
+    count(*) filter (where status = 'completed' and not resource_guard_enabled)::bigint
+      as completed_unguarded,
+    count(*) filter (where status <> 'completed' and resource_guard_enabled)::bigint
+      as not_completed_guarded,
+    count(*) filter (where status <> 'completed' and not resource_guard_enabled)::bigint
+      as not_completed_unguarded,
+    count(*) filter (
+      where status = 'completed'
+        and resource_guard_enabled
+        and exists (
+          select 1
+          from xrpl_resource_guard_v2.transfer_qualifications q
+          where q.session_id = s.session_id
+        )
+    )::bigint as completed_guarded_with_transfer_qualification,
+    count(*) filter (
+      where status = 'completed'
+        and resource_guard_enabled
+        and not exists (
+          select 1
+          from xrpl_resource_guard_v2.transfer_qualifications q
+          where q.session_id = s.session_id
+        )
+    )::bigint as completed_guarded_without_transfer_qualification,
+    count(*) filter (
+      where status = 'completed'
+        and not resource_guard_enabled
+        and not exists (
+          select 1
+          from xrpl_resource_guard_v2.transfer_qualifications q
+          where q.session_id = s.session_id
+        )
+    )::bigint as completed_unguarded_without_transfer_qualification,
     count(*) filter (
       where status = 'completed'
         and not exists (
@@ -127,6 +162,23 @@ with restore_tables as (
         )
     )::bigint as completed_without_transfer_qualification
   from xrpl_steady_v1.sessions s
+), transfer_qualification_coverage as (
+  select
+    count(*)::bigint as total,
+    count(*) filter (where s.session_id is null)::bigint as without_session,
+    count(*) filter (where s.session_id is not null and s.status = 'completed')::bigint
+      as completed_session,
+    count(*) filter (
+      where s.session_id is not null
+        and s.status = 'completed'
+        and s.resource_guard_enabled
+    )::bigint as completed_guarded_session,
+    count(*) filter (
+      where s.session_id is not null
+        and (s.status <> 'completed' or not s.resource_guard_enabled)
+    )::bigint as outside_completed_guarded_session
+  from xrpl_resource_guard_v2.transfer_qualifications q
+  left join xrpl_steady_v1.sessions s on s.session_id = q.session_id
 ), guard_attempts as (
   select
     count(*)::bigint as total,
@@ -142,7 +194,7 @@ with restore_tables as (
      or definition ilike '%xrpl_restore_revision3_accounting_state%'
 )
 select jsonb_build_object(
-  'schemaVersion', 1,
+  'schemaVersion', 2,
   'observedAt', clock_timestamp(),
   'databaseBytes', pg_database_size(current_database())::bigint,
   'databaseHeadroomBytes', 400000000::bigint - pg_database_size(current_database())::bigint,
@@ -159,7 +211,21 @@ select jsonb_build_object(
   'views', coalesce((select jsonb_agg(to_jsonb(x) order by x.schema_name, x.view_name) from views x), '[]'::jsonb),
   'revision4RuntimeConsumerCount', (select count(*)::bigint from direct_consumers where revision4_runtime_schema),
   'revision3Sessions', (select to_jsonb(x) from rev3_sessions x),
+  'transferQualificationCoverage', (select to_jsonb(x) from transfer_qualification_coverage x),
   'guardAttempts', (select to_jsonb(x) from guard_attempts x),
+  'reclaimEvidence', jsonb_build_object(
+    'allRestoreTargetsDurablyQualified',
+      (select count(*) from target_state where not durable_match) = 0,
+    'allCompletedGuardedSessionsQualified',
+      (select completed_guarded_without_transfer_qualification from rev3_sessions) = 0,
+    'allTransferQualificationsBelongToCompletedGuardedSessions',
+      (select outside_completed_guarded_session from transfer_qualification_coverage) = 0
+      and (select without_session from transfer_qualification_coverage) = 0,
+    'noRevision4RuntimeConsumers', (select count(*) from direct_consumers where revision4_runtime_schema) = 0,
+    'noOpenGuardAttempts', (select open from guard_attempts) = 0,
+    'futureRevision3QualificationDemandProvenClosed', false,
+    'restoreSchemaRemovalProvenSafe', false
+  ),
   'safetyBoundary', jsonb_build_object(
     'probeReadOnly', true,
     'measurementOnly', true,
@@ -229,6 +295,12 @@ for (const key of [
 ]) {
   if (safety[key] !== false) fail(`restore reclaim preflight unexpectedly authorizes: ${key}`)
 }
+if (state.reclaimEvidence?.futureRevision3QualificationDemandProvenClosed !== false) {
+  fail('restore reclaim preflight must not infer future revision-3 qualification closure')
+}
+if (state.reclaimEvidence?.restoreSchemaRemovalProvenSafe !== false) {
+  fail('restore reclaim preflight must not infer safe restore-schema removal')
+}
 
 const evidence = {
   sourceCommit,
@@ -260,14 +332,24 @@ const summary = [
   `- targets not durably matching: \`${state.targets?.notDurablyQualifiedMatching ?? 0}\``,
   `- revision-4 runtime consumers: \`${state.revision4RuntimeConsumerCount ?? 0}\``,
   `- restore direct consumers / direct callers / trigger bindings / views: \`${state.directConsumers?.length ?? 0} / ${state.directCallers?.length ?? 0} / ${state.triggerBindings?.length ?? 0} / ${state.views?.length ?? 0}\``,
-  `- revision-3 sessions total / completed / not completed / completed without transfer qualification: \`${state.revision3Sessions?.total ?? 0} / ${state.revision3Sessions?.completed ?? 0} / ${state.revision3Sessions?.not_completed ?? 0} / ${state.revision3Sessions?.completed_without_transfer_qualification ?? 0}\``,
+  `- revision-3 sessions total / completed / not completed: \`${state.revision3Sessions?.total ?? 0} / ${state.revision3Sessions?.completed ?? 0} / ${state.revision3Sessions?.not_completed ?? 0}\``,
+  `- completed guarded / unguarded: \`${state.revision3Sessions?.completed_guarded ?? 0} / ${state.revision3Sessions?.completed_unguarded ?? 0}\``,
+  `- completed guarded with / without transfer qualification: \`${state.revision3Sessions?.completed_guarded_with_transfer_qualification ?? 0} / ${state.revision3Sessions?.completed_guarded_without_transfer_qualification ?? 0}\``,
+  `- completed unguarded without transfer qualification: \`${state.revision3Sessions?.completed_unguarded_without_transfer_qualification ?? 0}\``,
+  `- not-completed guarded / unguarded: \`${state.revision3Sessions?.not_completed_guarded ?? 0} / ${state.revision3Sessions?.not_completed_unguarded ?? 0}\``,
+  `- transfer qualifications total / completed guarded / outside completed guarded / without session: \`${state.transferQualificationCoverage?.total ?? 0} / ${state.transferQualificationCoverage?.completed_guarded_session ?? 0} / ${state.transferQualificationCoverage?.outside_completed_guarded_session ?? 0} / ${state.transferQualificationCoverage?.without_session ?? 0}\``,
   `- resource-guard attempts total / open / succeeded / failed / deferred: \`${state.guardAttempts?.total ?? 0} / ${state.guardAttempts?.open ?? 0} / ${state.guardAttempts?.succeeded ?? 0} / ${state.guardAttempts?.failed ?? 0} / ${state.guardAttempts?.deferred ?? 0}\``,
+  `- all restore targets durably qualified: \`${state.reclaimEvidence?.allRestoreTargetsDurablyQualified ?? false}\``,
+  `- all completed guarded sessions qualified: \`${state.reclaimEvidence?.allCompletedGuardedSessionsQualified ?? false}\``,
+  `- all transfer qualifications belong to completed guarded sessions: \`${state.reclaimEvidence?.allTransferQualificationsBelongToCompletedGuardedSessions ?? false}\``,
+  `- future revision-3 qualification demand proven closed: \`${state.reclaimEvidence?.futureRevision3QualificationDemandProvenClosed ?? false}\``,
+  `- restore schema removal proven safe: \`${state.reclaimEvidence?.restoreSchemaRemovalProvenSafe ?? false}\``,
   '',
   ...consumerLines,
   ...callerLines,
   ...triggerLines,
   '',
-  'Measurement only. This preflight does not authorize function retirement, restore-table/schema removal, VACUUM, R5 rearm, scheduler changes, deployment, or Mainnet.',
+  'Measurement only. Guarded-session qualification coverage can remove an ambiguity in the reclaim analysis, but it does not prove that future revision-3 qualification demand is closed and it does not authorize function retirement, restore-table/schema removal, physical compaction, R5 rearm, scheduler changes, deployment, or Mainnet.',
   '',
   `Evidence SHA-256: \`${evidenceSha256}\``,
 ].join('\n')
