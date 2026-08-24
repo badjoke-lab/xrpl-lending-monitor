@@ -114,6 +114,30 @@ jobs:
           jq -e '.passed == true and .productionDatabaseReadOnly == true and .productionMutationAuthorized == false and .r5RearmAuthorized == false and .mainnetEnabled == false' \
             r5-terminal-certificate-archive-bounded-apply-evidence/verify/terminal-certificate-archive-readonly-verify-evidence.json >/dev/null
 
+      - name: Assess separate R5 rearm readiness read-only
+        id: readiness
+        shell: bash
+        run: |
+          set -euo pipefail
+          database_guard_output='r5-terminal-certificate-archive-bounded-apply-evidence/database-guard-readonly.json'
+          set +e
+          node scripts/verify-r5-revision4-database-guard-installed.mjs \
+            --source-commit "${{ steps.auth.outputs.source_commit }}" \
+            --output "$database_guard_output" \
+            > r5-terminal-certificate-archive-bounded-apply-evidence/database-guard-readonly.stdout.json \
+            2> r5-terminal-certificate-archive-bounded-apply-evidence/database-guard-readonly.stderr.txt
+          database_guard_exit="$?"
+          set -e
+          node scripts/assess-r5-post-terminal-apply-readiness.mjs \
+            --source-commit "${{ steps.auth.outputs.source_commit }}" \
+            --terminal-verify r5-terminal-certificate-archive-bounded-apply-evidence/verify/terminal-certificate-archive-readonly-verify-evidence.json \
+            --database-guard "$database_guard_output" \
+            --database-guard-exit "$database_guard_exit" \
+            --output r5-terminal-certificate-archive-bounded-apply-evidence/rearm-readiness.json
+          jq -e '.productionDatabaseReadOnly == true and .productionMutationAuthorized == false and .schedulerMutationAuthorized == false and .deploymentAuthorized == false and .publicReaderMutationAuthorized == false and .archiveDeleteOrStopAuthorized == false and .r5RearmAuthorized == false and .r5RestartPerformed == false and .mainnetEnabled == false' \
+            r5-terminal-certificate-archive-bounded-apply-evidence/rearm-readiness.json >/dev/null
+          printf 'candidate=%s\n' "$(jq -r '.candidateForSeparateRearmAuthorization' r5-terminal-certificate-archive-bounded-apply-evidence/rearm-readiness.json)" >> "$GITHUB_OUTPUT"
+
       - name: Upload bounded apply evidence
         if: always() && steps.auth.outcome == 'success'
         uses: actions/upload-artifact@v4
@@ -134,6 +158,12 @@ jobs:
           set -euo pipefail
           verdict=FAIL
           if [ "${{ job.status }}" = success ]; then verdict=PASS; fi
+          readiness_candidate=unavailable
+          readiness_blockers='[]'
+          if [ -s r5-terminal-certificate-archive-bounded-apply-evidence/rearm-readiness.json ]; then
+            readiness_candidate="$(jq -r '.candidateForSeparateRearmAuthorization' r5-terminal-certificate-archive-bounded-apply-evidence/rearm-readiness.json)"
+            readiness_blockers="$(jq -c '.blockers' r5-terminal-certificate-archive-bounded-apply-evidence/rearm-readiness.json)"
+          fi
           cat > /tmp/terminal-certificate-bounded-result.md <<EOF
           ## Terminal certificate/archive bounded apply — ${verdict}
 
@@ -141,7 +171,9 @@ jobs:
           Source main: \`${SOURCE_COMMIT}\`
           Stable guard: \`${GUARD_ID}\`
           Atomic bundle: \`${BUNDLE}\`
+          Separate R5 rearm authorization candidate: \`${readiness_candidate}\`
+          Rearm-readiness blockers: \`${readiness_blockers}\`
 
-          PASS means the exact stable safety guard passed immediately before mutation, the reviewed atomic bundle was submitted as one transaction, and the independent post-apply database check passed read-only. This operation does not authorize scheduler/deployment/public-reader changes, archive deletion/stop, R5 rearm/restart, or Mainnet.
+          PASS means the exact stable safety guard passed immediately before mutation, the reviewed atomic bundle was submitted as one transaction, and the independent post-apply database check passed read-only. The readiness assessment is read-only and can only mark the halted revision-4 run as a candidate for a separate future rearm authorization; it never authorizes or performs rearm/restart. This operation does not authorize scheduler/deployment/public-reader changes, archive deletion/stop, R5 rearm/restart, or Mainnet.
           EOF
           gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/terminal-certificate-bounded-result.md
