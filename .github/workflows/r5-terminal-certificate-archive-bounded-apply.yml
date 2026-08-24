@@ -112,7 +112,7 @@ jobs:
             --source-commit "${{ steps.auth.outputs.source_commit }}" \
             --output-dir r5-terminal-certificate-archive-bounded-apply-evidence/verify
           jq -e '.passed == true and .productionDatabaseReadOnly == true and .productionMutationAuthorized == false and .r5RearmAuthorized == false and .mainnetEnabled == false' \
-            r5-terminal-certificate-archive-bounded-apply-evidence/verify/verify.json >/dev/null
+            r5-terminal-certificate-archive-bounded-apply-evidence/verify/terminal-certificate-archive-readonly-verify-evidence.json >/dev/null
 
       - name: Upload bounded apply evidence
         if: always() && steps.auth.outcome == 'success'
