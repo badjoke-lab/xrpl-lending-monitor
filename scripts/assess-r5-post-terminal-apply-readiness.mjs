@@ -1,0 +1,127 @@
+#!/usr/bin/env node
+
+import { readFile, writeFile, mkdir } from 'node:fs/promises'
+import { dirname, resolve } from 'node:path'
+
+const STABLE_GUARD_PATH = 'ops/production-sql/20260824031500_xrpl_terminal_certificate_archive_stable_safety_guard.json'
+const ACTIVE_RUN_ID = 'r5-recovery-selected-revision4-minute2-entry'
+const DATABASE_HALT_BYTES = 400_000_000
+
+function fail(message) { throw new Error(message) }
+function parseArgs(argv) {
+  const options = {}
+  for (let index = 0; index < argv.length; index += 2) {
+    const token = argv[index]
+    const value = argv[index + 1]
+    if (!token?.startsWith('--') || value == null || value.startsWith('--')) fail(`invalid argument near ${token ?? '<end>'}`)
+    options[token.slice(2)] = value
+  }
+  return options
+}
+async function readJson(path, required = true) {
+  if (!path) {
+    if (required) fail('required JSON path missing')
+    return null
+  }
+  try {
+    return JSON.parse(await readFile(resolve(path), 'utf8'))
+  } catch (error) {
+    if (required) throw error
+    return null
+  }
+}
+async function writeJson(path, value) {
+  const absolute = resolve(path)
+  await mkdir(dirname(absolute), { recursive: true })
+  await writeFile(absolute, `${JSON.stringify(value, null, 2)}\n`)
+}
+function addBlocker(blockers, condition, code, detail) {
+  if (!condition) blockers.push({ code, detail })
+}
+
+const options = parseArgs(process.argv.slice(2))
+const sourceCommit = options['source-commit']
+if (!/^[a-f0-9]{40}$/u.test(sourceCommit ?? '')) fail('invalid --source-commit')
+if (!options.output) fail('--output is required')
+
+const stableGuard = await readJson(STABLE_GUARD_PATH)
+const terminalVerify = await readJson(options['terminal-verify'])
+const databaseGuardExitCode = Number(options['database-guard-exit'] ?? '0')
+if (!Number.isSafeInteger(databaseGuardExitCode) || databaseGuardExitCode < 0) fail('invalid --database-guard-exit')
+const databaseGuard = await readJson(options['database-guard'], false)
+
+const blockers = []
+addBlocker(blockers, terminalVerify?.passed === true, 'terminal_certificate_verify_failed', 'independent terminal certificate/archive verification did not pass')
+addBlocker(blockers, terminalVerify?.productionDatabaseReadOnly === true, 'terminal_verify_not_read_only', 'terminal verification was not marked read-only')
+addBlocker(blockers, terminalVerify?.sourceCommit === sourceCommit, 'terminal_verify_source_commit_mismatch', 'terminal verification source commit differs from current main')
+addBlocker(blockers, terminalVerify?.executionCommit === stableGuard.executionCommit, 'terminal_execution_commit_mismatch', 'terminal verification execution commit differs from reviewed stable guard')
+addBlocker(blockers, terminalVerify?.atomicBundleSha256 === stableGuard.bundleSha256, 'terminal_bundle_mismatch', 'terminal verification bundle differs from reviewed stable guard')
+addBlocker(blockers, terminalVerify?.r5RearmAuthorized === false, 'terminal_verify_rearm_boundary_drift', 'terminal verification unexpectedly authorizes rearm')
+addBlocker(blockers, terminalVerify?.mainnetEnabled === false, 'terminal_verify_mainnet_boundary_drift', 'terminal verification unexpectedly enables Mainnet')
+
+addBlocker(blockers, databaseGuardExitCode === 0, 'database_guard_verify_failed', `database guard verifier exit code ${databaseGuardExitCode}`)
+if (databaseGuard) {
+  addBlocker(blockers, databaseGuard.sourceCommit === sourceCommit, 'database_guard_source_commit_mismatch', 'database guard verification source commit differs from current main')
+  addBlocker(blockers, databaseGuard.guardInstalled === true, 'database_guard_not_installed', 'database claim guard is not verified installed')
+  addBlocker(blockers, databaseGuard.productionDatabaseReadOnly === true, 'database_guard_verify_not_read_only', 'database guard verification was not marked read-only')
+  addBlocker(blockers, databaseGuard.naturalDatabaseHaltObserved === true, 'database_halt_not_observed', 'expected natural database halt was not verified')
+  addBlocker(blockers, databaseGuard.manualClaimInvoked === false, 'manual_claim_detected', 'database guard verification indicates a manual claim')
+  addBlocker(blockers, databaseGuard.run?.runId === ACTIVE_RUN_ID, 'active_run_identity_mismatch', 'active revision-4 minute successor identity differs')
+  addBlocker(blockers, databaseGuard.run?.status === 'halted', 'active_run_not_halted', `active run status is ${String(databaseGuard.run?.status)}`)
+  addBlocker(blockers, databaseGuard.run?.lastError === 'r5_recovery_database_halt', 'active_run_halt_reason_mismatch', `active run last error is ${String(databaseGuard.run?.lastError)}`)
+  addBlocker(blockers, Number(databaseGuard.batchCounts?.leased ?? -1) === 0, 'active_lease_present', `leased batch count is ${String(databaseGuard.batchCounts?.leased)}`)
+  addBlocker(blockers, Number(databaseGuard.scheduler?.count ?? -1) === 1, 'minute_scheduler_count_mismatch', `minute scheduler count is ${String(databaseGuard.scheduler?.count)}`)
+  addBlocker(blockers, databaseGuard.scheduler?.schedule === '* * * * *', 'minute_scheduler_schedule_mismatch', `minute scheduler schedule is ${String(databaseGuard.scheduler?.schedule)}`)
+  addBlocker(blockers, databaseGuard.scheduler?.active === true, 'minute_scheduler_inactive', 'minute scheduler is not active')
+  addBlocker(blockers, Number(databaseGuard.databaseBytes) < DATABASE_HALT_BYTES, 'database_headroom_not_positive', `database bytes ${String(databaseGuard.databaseBytes)} are not below ${DATABASE_HALT_BYTES}`)
+  addBlocker(blockers, Number(databaseGuard.databaseHeadroomBytes) > 0, 'database_headroom_not_positive', `database headroom is ${String(databaseGuard.databaseHeadroomBytes)}`)
+  addBlocker(blockers, databaseGuard.schedulerMutationPerformed === false, 'scheduler_mutation_boundary_drift', 'readiness evidence indicates scheduler mutation')
+  addBlocker(blockers, databaseGuard.deploymentPerformed === false, 'deployment_boundary_drift', 'readiness evidence indicates deployment')
+  addBlocker(blockers, databaseGuard.publicReaderMutationPerformed === false, 'public_reader_boundary_drift', 'readiness evidence indicates public-reader mutation')
+  addBlocker(blockers, databaseGuard.rearmAuthorized === false, 'rearm_boundary_drift', 'database guard evidence unexpectedly authorizes rearm')
+  addBlocker(blockers, databaseGuard.mainnetDisabled === true, 'mainnet_boundary_drift', 'database guard evidence does not keep Mainnet disabled')
+} else {
+  blockers.push({ code: 'database_guard_evidence_missing', detail: 'database guard verifier produced no readable evidence' })
+}
+
+const uniqueBlockers = [...new Map(blockers.map((entry) => [entry.code, entry])).values()]
+const evidence = {
+  schemaVersion: 1,
+  purpose: 'r5-post-terminal-apply-readonly-rearm-readiness',
+  sourceCommit,
+  stableGuardId: stableGuard.guardId,
+  reviewedExecutionCommit: stableGuard.executionCommit,
+  reviewedAtomicBundleSha256: stableGuard.bundleSha256,
+  candidateForSeparateRearmAuthorization: uniqueBlockers.length === 0,
+  blockerCount: uniqueBlockers.length,
+  blockers: uniqueBlockers,
+  observed: {
+    terminalVerificationPassed: terminalVerify?.passed === true,
+    databaseGuardVerifierExitCode: databaseGuardExitCode,
+    databaseBytes: databaseGuard?.databaseBytes ?? null,
+    databaseHaltBytes: DATABASE_HALT_BYTES,
+    databaseHeadroomBytes: databaseGuard?.databaseHeadroomBytes ?? null,
+    activeRunId: databaseGuard?.run?.runId ?? null,
+    activeRunStatus: databaseGuard?.run?.status ?? null,
+    activeRunLastError: databaseGuard?.run?.lastError ?? null,
+    leasedBatchCount: databaseGuard?.batchCounts?.leased ?? null,
+    minuteSchedulerCount: databaseGuard?.scheduler?.count ?? null,
+    minuteSchedulerSchedule: databaseGuard?.scheduler?.schedule ?? null,
+    minuteSchedulerActive: databaseGuard?.scheduler?.active ?? null,
+  },
+  productionDatabaseReadOnly: true,
+  productionMutationAuthorized: false,
+  schedulerMutationAuthorized: false,
+  deploymentAuthorized: false,
+  publicReaderMutationAuthorized: false,
+  archiveDeleteOrStopAuthorized: false,
+  r5RearmAuthorized: false,
+  r5RestartPerformed: false,
+  mainnetEnabled: false,
+  stabilizationAuthorized: false,
+  soakAuthorized: false,
+  checkedAt: new Date().toISOString(),
+}
+
+await writeJson(options.output, evidence)
+process.stdout.write(`${JSON.stringify(evidence)}\n`)
