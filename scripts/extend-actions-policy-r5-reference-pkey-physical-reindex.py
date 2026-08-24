@@ -1,4 +1,5 @@
 from pathlib import Path
+import subprocess
 import sys
 
 if len(sys.argv) != 2:
@@ -109,3 +110,8 @@ if "reindex index public.xrpl_phase_reference_lookup_idx" in lower:
 '''
 text=text.replace(marker,block+marker)
 path.write_text(text)
+subprocess.run([
+    sys.executable,
+    'scripts/extend-actions-policy-r5-terminal-certificate-archive-bounded-apply.py',
+    sys.argv[1],
+],check=True)
