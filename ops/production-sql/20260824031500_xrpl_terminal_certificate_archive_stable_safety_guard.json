@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "purpose": "xrpl-terminal-certificate-archive-stable-safety-owner-authorization",
+  "issueNumber": 1261,
+  "repository": "badjoke-lab/xrpl-lending-monitor",
+  "supersedes": "ops/production-sql/20260824030000_xrpl_terminal_certificate_archive_state_bound_authorization_contract.json",
+  "executionCommit": "86f95feadc4edaa640c1d466b8616d6ed1201952",
+  "bundleSha256": "cc83e46fe3c58b2c13549ff35a2df8d4d8ddcf1efac041bd321ce273809aa1db",
+  "projectIdentityDigest": "81378864f4d6650a60a2c09a95629a18780d49fc23836e0f6a024b70f13f88a8",
+  "prepareRun": 32677209901,
+  "nonce": "f96f6bfd2f84c3ae",
+  "guardId": "terminal-certificate-archive-stable-v1",
+  "stableSafetyGuard": {
+    "columnsMustBeAbsent": [
+      "public.xrpl_phase_work.source_scan_sequence",
+      "public.xrpl_phase_streams.next_scan_sequence"
+    ],
+    "functionDefinitionSha256": {
+      "caughtUpScan": "3d7f4c7d7ed7cbd91b54f268dad5bdead09ef4eba278085e3146f45c07ebc899",
+      "portableScan": "6f65875ec781135434326c53ed159c61154dc7f24728e02a9f578778dfea717d",
+      "portableFinalize": "8d761a2bf69ea4228f18f482ab620e294354644f60eea6e8101a4efd55766a0a",
+      "r5Revision4Complete": "a7114afea201a32bd90c3f6ee08ae666e033e83bcc99384eb2a5b4a415f814b7",
+      "genericScan": "cd6b05ccd95eb29bfa046d29cfd01236371301865ceef7bb8db3fd2afadd6bff",
+      "genericFinalize": "d3051c3b654274f7e6fa222be829b42829c6695c39a09c697065093364a6ff35",
+      "duplicateCompletion": "170c7ff6069ae9dd9a272a04dd839a2d575c9e9b4055b121149a13dda6467044"
+    },
+    "duplicateCompletion": {
+      "sourceSha256": "aa5b972f1245fc46239164247a0203c67dac7be21a3f561009a930e50784a081",
+      "owner": "postgres",
+      "securityDefiner": true,
+      "serviceRoleDirectExecute": false,
+      "searchPath": "public, xrpl_phase_archive_v1, extensions, pg_temp"
+    },
+    "identityHelperDefinitionSha256": {
+      "scanMessageId": "cd79dde7fc5fd160acecda28b0f1355245765cbd041cb70423b5b3119748a0a4",
+      "workId": "6650d4e5e70bceafc035fe467d1ae7b0e1c40e487ad9b92108aa1ebba02a0308",
+      "commitMessageId": "c3d965bd154c933a355c68097e4ca2f52c75a0a83b121ccd3d2eee366a3c3b79",
+      "finalizeMessageId": "0268efa4e2399fe23829d7cbe1fadf1645564f3a8189a8bcb2550fe102debb99"
+    },
+    "transportDuplicateMessageIdsMustRemain": 0,
+    "historicalNonzeroSourceScanSequencesMustRemain": 0,
+    "activeScanSequencesMustRemain": [0],
+    "productiveMappingDigestMustRemain": "53a1c842b41c20efe5c24ab5b858be9a56a7a0b62f9f7029bd300bad00b90cd8"
+  },
+  "volatileEvidenceExcludedFromAuthorizationValidity": [
+    "databaseBytes",
+    "transportRows",
+    "completedScanRows",
+    "productiveScanRows",
+    "caughtUpScanRows",
+    "unknownScanRows"
+  ],
+  "validity": {
+    "mode": "stable-safety-state-bound-no-wall-clock-expiry",
+    "wallClockExpiryRequired": false,
+    "volatileMeasurementDriftInvalidatesAuthorization": false,
+    "stableSafetyMismatchFailsClosedBeforeMutation": true,
+    "exactBundleMustMatch": true,
+    "singleSuccessfulApplyOnly": true,
+    "revocable": true
+  },
+  "command": "/r5-terminal-certificate-archive-authorize commit=86f95feadc4edaa640c1d466b8616d6ed1201952 bundle=cc83e46fe3c58b2c13549ff35a2df8d4d8ddcf1efac041bd321ce273809aa1db guard=terminal-certificate-archive-stable-v1 project=81378864f4d6650a60a2c09a95629a18780d49fc23836e0f6a024b70f13f88a8 prepare_run=32677209901 nonce=f96f6bfd2f84c3ae",
+  "boundedApply": {
+    "authorizedOnlyAfterExactOwnerCommand": true,
+    "exactBundleOnly": true,
+    "singleTransaction": true,
+    "extraSqlAllowed": false,
+    "rollbackOnAnyPreflightOrHashFailure": true,
+    "schedulerMutationAllowed": false,
+    "deploymentAllowed": false,
+    "publicReaderMutationAllowed": false,
+    "archiveDeleteOrStopAllowed": false,
+    "r5RearmAllowed": false,
+    "mainnetAllowed": false
+  },
+  "independentReadOnlyVerifyRequired": true,
+  "productionApplied": false,
+  "productionMutationAuthorized": false,
+  "r5RearmAuthorized": false,
+  "mainnetEnabled": false
+}
