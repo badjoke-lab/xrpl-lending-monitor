@@ -8,6 +8,16 @@ const audit = readFileSync(
   'utf8',
 )
 
+const existingAggregateAudit = readFileSync(
+  resolve(process.cwd(), 'scripts/r5-legacy-rev3-caller-readonly-audit.mjs'),
+  'utf8',
+)
+
+const existingAggregateWorkflow = readFileSync(
+  resolve(process.cwd(), '.github/workflows/r5-index-footprint-readonly-probe.yml'),
+  'utf8',
+)
+
 const steadyEdge = readFileSync(
   resolve(process.cwd(), 'supabase/functions/xrpl-steady-batch-tick/index.ts'),
   'utf8',
@@ -85,5 +95,13 @@ describe('revision-3 runtime future-demand read-only audit', () => {
     expect(audit).toContain('body: JSON.stringify({ query, read_only: true })')
     expect(audit).toContain('MUTATION_CAPABILITY')
     expect(audit).toContain('measurementOnly: true')
+  })
+
+  it('runs through the existing fixed-count aggregate read-only workflow', () => {
+    expect(existingAggregateWorkflow).toContain('node scripts/r5-legacy-rev3-caller-readonly-audit.mjs')
+    expect(existingAggregateWorkflow).toContain('cat r5-index-footprint-readonly-probe/legacy-rev3-caller-summary.md')
+    expect(existingAggregateAudit).toContain("await import('./r5-revision3-future-demand-readonly-audit.mjs')")
+    expect(existingAggregateAudit).toContain('revision3-future-demand-summary.md')
+    expect(existingAggregateAudit).toContain('appendFile')
   })
 })
