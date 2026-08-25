@@ -1,3 +1,6 @@
+drop trigger xrpl_revision3_transfer_after_attempt_finalization
+  on xrpl_resource_guard_v2.attempts;
+
 revoke all privileges on function public.xrpl_prepare_network_steady_session(text,timestamp with time zone)
   from public, anon, authenticated, service_role;
 revoke all privileges on function public.xrpl_claim_network_steady_tick(text,timestamp with time zone,timestamp with time zone,integer)
