@@ -237,3 +237,223 @@ jobs:
           Scope was limited to EXECUTE privilege retirement for four obsolete revision-3 recovery entry points: prepare, direct claim, prepared-head claim wrapper, and complete. The checkpoint path remains executable. No transport row delete/backfill, canonical history mutation, physical compaction, scheduler/deployment/public-reader/Mainnet mutation, or R5 rearm was authorized.
           EOF2
           gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/result.md
+
+  steady_prepare:
+    if: >-
+      github.event.issue.number == 1261 &&
+      github.event.comment.user.login == 'badjoke-lab' &&
+      github.event.comment.body == '/r5-steady-rev3-execution-retirement-prepare'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      STEADY_MANAGER_PATH: scripts/manage-r5-steady-rev3-execution-retirement.mjs
+    steps:
+      - name: Check out exact current main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prepare exact steady rev3 retirement state read-only
+        id: state
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p r5-steady-rev3-retirement-evidence
+          source_commit="$(git rev-parse HEAD)"
+          manager_sha="$(sha256sum "$STEADY_MANAGER_PATH" | awk '{print $1}')"
+          node "$STEADY_MANAGER_PATH" prepare \
+            --source-commit "$source_commit" \
+            --output r5-steady-rev3-retirement-evidence/prepare.json \
+            > r5-steady-rev3-retirement-evidence/prepare.stdout.json
+          file=r5-steady-rev3-retirement-evidence/prepare.json
+          test "$(jq -r '.classification' "$file")" = unapplied_expected
+          test "$(jq -r '.activeLegacyCronJobs' "$file")" = 0
+          test "$(jq -r '.runningGuardedSessions' "$file")" = 0
+          test "$(jq -r '.leasedTicks' "$file")" = 0
+          test "$(jq -r '.liveLeasedTicks' "$file")" = 0
+          test "$(jq -r '.openAttempts' "$file")" = 0
+          test "$(jq -r '.transferTriggerBindings' "$file")" = 0
+          test "$(jq -r '.productionDatabaseReadOnly' "$file")" = true
+          test "$(jq -r '.permissionMutationAuthorized' "$file")" = false
+          test "$(jq -r '.rowMutationAuthorized' "$file")" = false
+          test "$(jq -r '.restoreSchemaMutationAuthorized' "$file")" = false
+          test "$(jq -r '.physicalCompactionAuthorized' "$file")" = false
+          test "$(jq -r '.schedulerMutationAuthorized' "$file")" = false
+          test "$(jq -r '.r5RearmAuthorized' "$file")" = false
+          printf 'source_commit=%s\nmanager_sha=%s\nplan=%s\nstate=%s\nproject=%s\nhead=%s\n' \
+            "$source_commit" "$manager_sha" \
+            "$(jq -r '.planDigestSha256' "$file")" \
+            "$(jq -r '.structuralStateSha256' "$file")" \
+            "$(jq -r '.projectIdentityDigest' "$file")" \
+            "$(jq -r '.maxMigrationVersion' "$file")" >> "$GITHUB_OUTPUT"
+
+      - name: Publish state-bound steady retirement authorization proposal
+        env:
+          SOURCE_COMMIT: ${{ steps.state.outputs.source_commit }}
+          MANAGER_SHA: ${{ steps.state.outputs.manager_sha }}
+          PLAN_SHA: ${{ steps.state.outputs.plan }}
+          STATE_SHA: ${{ steps.state.outputs.state }}
+          PROJECT_DIGEST: ${{ steps.state.outputs.project }}
+          MIGRATION_HEAD: ${{ steps.state.outputs.head }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          nonce="$(openssl rand -hex 8)"
+          command="/r5-steady-rev3-execution-retirement-authorize commit=${SOURCE_COMMIT} manager=${MANAGER_SHA} plan=${PLAN_SHA} state=${STATE_SHA} project=${PROJECT_DIGEST} head=${MIGRATION_HEAD} prepare_run=${GITHUB_RUN_ID} nonce=${nonce}"
+          file=r5-steady-rev3-retirement-evidence/prepare.json
+          cat > /tmp/r5-steady-retirement-proposal.md <<EOF2
+          ## R5 steady revision-3 execution retirement authorization proposal
+
+          Preparation run: \`${GITHUB_RUN_ID}\`
+          Source main commit: \`${SOURCE_COMMIT}\`
+          Manager SHA-256: \`${MANAGER_SHA}\`
+          Exact plan digest: \`${PLAN_SHA}\`
+          Authorized structural state SHA-256: \`${STATE_SHA}\`
+          Project identity digest: \`${PROJECT_DIGEST}\`
+          Current production migration head: \`${MIGRATION_HEAD}\`
+
+          This is state-bound and one-shot; it has no wall-clock expiry. Any source, manager, plan, structural-state, project, or migration-head drift fails closed.
+
+          Scope is EXECUTE privilege retirement only for six obsolete steady revision-3 generation entry points plus two unbound transfer trigger functions. No function is dropped. No session/tick/attempt/accounting/qualification/restore row is changed. The restore schema is retained. Scheduler, physical storage, deployment, R5 rearm, public readers, and Mainnet are untouched.
+
+          Current gates: active legacy cron \`$(jq -r '.activeLegacyCronJobs' "$file")\`; running guarded sessions \`$(jq -r '.runningGuardedSessions' "$file")\`; leased/live-leased ticks \`$(jq -r '.leasedTicks' "$file") / $(jq -r '.liveLeasedTicks' "$file")\`; open attempts \`$(jq -r '.openAttempts' "$file")\`; transfer trigger bindings \`$(jq -r '.transferTriggerBindings' "$file")\`.
+
+          Exact SQL: \`$(jq -r '.plan.file.path' "$file")\` — SHA-256 \`$(jq -r '.plan.file.sha256' "$file")\`
+
+          Exact authorization command:
+
+          \`${command}\`
+          EOF2
+          gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/r5-steady-retirement-proposal.md
+
+      - name: Upload steady retirement preparation evidence
+        if: always() && steps.state.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: r5-steady-rev3-retirement-prepare-evidence
+          path: r5-steady-rev3-retirement-evidence
+          if-no-files-found: error
+          retention-days: 14
+
+  steady_execute:
+    if: >-
+      github.event.issue.number == 1261 &&
+      github.event.comment.user.login == 'badjoke-lab' &&
+      startsWith(github.event.comment.body, '/r5-steady-rev3-execution-retirement-authorize ')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      STEADY_MANAGER_PATH: scripts/manage-r5-steady-rev3-execution-retirement.mjs
+      AUTHORIZATION_BODY: ${{ github.event.comment.body }}
+      AUTHORIZATION_COMMENT_ID: ${{ github.event.comment.id }}
+    steps:
+      - name: Check out exact current main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Parse and bind exact state-bound steady retirement authorization
+        id: auth
+        shell: bash
+        run: |
+          set -euo pipefail
+          regex='^/r5-steady-rev3-execution-retirement-authorize commit=([a-f0-9]{40}) manager=([a-f0-9]{64}) plan=([a-f0-9]{64}) state=([a-f0-9]{64}) project=([a-f0-9]{64}) head=([0-9]{14}) prepare_run=([0-9]+) nonce=([a-f0-9]{16})$'
+          [[ "$AUTHORIZATION_BODY" =~ $regex ]] || { echo 'steady rev3 retirement authorization shape mismatch' >&2; exit 1; }
+          commit="${BASH_REMATCH[1]}"; manager="${BASH_REMATCH[2]}"; plan="${BASH_REMATCH[3]}"; state="${BASH_REMATCH[4]}"; project="${BASH_REMATCH[5]}"; head="${BASH_REMATCH[6]}"; prepare_run="${BASH_REMATCH[7]}"; nonce="${BASH_REMATCH[8]}"
+          test "$commit" = "$(git rev-parse HEAD)"
+          test "$manager" = "$(sha256sum "$STEADY_MANAGER_PATH" | awk '{print $1}')"
+          [[ "$SUPABASE_PROJECT_ID" =~ ^[a-z]{20}$ ]]
+          current_project="$(PROJECT_ID="$SUPABASE_PROJECT_ID" node -e "const c=require('node:crypto');process.stdout.write(c.createHash('sha256').update(process.env.PROJECT_ID).digest('hex'))")"
+          test "$project" = "$current_project"
+          printf 'commit=%s\nplan=%s\nstate=%s\nhead=%s\nprepare_run=%s\n' "$commit" "$plan" "$state" "$head" "$prepare_run" >> "$GITHUB_OUTPUT"
+
+      - name: Verify exact prior proposal and unique owner authorization
+        env:
+          PREPARE_RUN: ${{ steps.auth.outputs.prepare_run }}
+          COMMIT: ${{ steps.auth.outputs.commit }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${PREPARE_RUN}" > /tmp/prepare-run.json
+          jq -e --arg commit "$COMMIT" '.event == "issue_comment" and .conclusion == "success" and .head_sha == $commit and .actor.login == "badjoke-lab"' /tmp/prepare-run.json >/dev/null
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${QUALIFICATION_ISSUE}/comments?per_page=100" | jq -s 'add' > /tmp/comments.json
+          EXPECTED="$AUTHORIZATION_BODY" PREPARE_RUN="$PREPARE_RUN" AUTH_ID="$AUTHORIZATION_COMMENT_ID" node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs'
+          const comments=JSON.parse(readFileSync('/tmp/comments.json','utf8'));const expected=process.env.EXPECTED;const run=process.env.PREPARE_RUN;
+          const proposals=comments.filter(c=>c?.user?.login==='github-actions[bot]'&&typeof c?.body==='string'&&c.body.includes(`Preparation run: \`${run}\``)&&c.body.includes(`\`${expected}\``));
+          if(proposals.length!==1)throw new Error(`expected one exact steady retirement proposal, found ${proposals.length}`);
+          const owner=comments.filter(c=>c?.user?.login==='badjoke-lab'&&c?.body===expected);if(owner.length!==1||Number(owner[0].id)!==Number(process.env.AUTH_ID))throw new Error(`steady retirement authorization must be unique, found ${owner.length}`);
+          NODE
+
+      - name: Revalidate exact steady retirement state read-only
+        env:
+          COMMIT: ${{ steps.auth.outputs.commit }}
+          AUTH_PLAN: ${{ steps.auth.outputs.plan }}
+          AUTH_STATE: ${{ steps.auth.outputs.state }}
+          AUTH_HEAD: ${{ steps.auth.outputs.head }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p r5-steady-rev3-retirement-evidence
+          node "$STEADY_MANAGER_PATH" prepare --source-commit "$COMMIT" --output r5-steady-rev3-retirement-evidence/pre-apply.json > /tmp/steady-pre.json
+          test "$(jq -r '.classification' /tmp/steady-pre.json)" = unapplied_expected
+          test "$(jq -r '.planDigestSha256' /tmp/steady-pre.json)" = "$AUTH_PLAN"
+          test "$(jq -r '.structuralStateSha256' /tmp/steady-pre.json)" = "$AUTH_STATE"
+          test "$(jq -r '.maxMigrationVersion' /tmp/steady-pre.json)" = "$AUTH_HEAD"
+
+      - name: Apply only exact authorized steady rev3 execution retirement
+        id: steady_apply
+        env:
+          COMMIT: ${{ steps.auth.outputs.commit }}
+          AUTH_PLAN: ${{ steps.auth.outputs.plan }}
+          AUTH_STATE: ${{ steps.auth.outputs.state }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node "$STEADY_MANAGER_PATH" apply --source-commit "$COMMIT" --authorized-plan "$AUTH_PLAN" --authorized-state "$AUTH_STATE" --output r5-steady-rev3-retirement-evidence/apply.json 2>&1 | tee r5-steady-rev3-retirement-evidence/apply.log
+
+      - name: Verify bounded steady retirement result
+        if: steps.steady_apply.outcome == 'success'
+        shell: bash
+        run: |
+          set -euo pipefail
+          file=r5-steady-rev3-retirement-evidence/apply.json
+          test "$(jq -r '.classificationAfter' "$file")" = applied_consistent
+          test "$(jq -r '.permissionMutationPerformed' "$file")" = true
+          test "$(jq -r '.rowMutationPerformed' "$file")" = false
+          test "$(jq -r '.restoreSchemaMutationPerformed' "$file")" = false
+          test "$(jq -r '.physicalCompactionPerformed' "$file")" = false
+          test "$(jq -r '.schedulerMutationPerformed' "$file")" = false
+          test "$(jq -r '.deploymentPerformed' "$file")" = false
+          test "$(jq -r '.r5RearmPerformed' "$file")" = false
+          test "$(jq -r '.mainnetDisabled' "$file")" = true
+          jq -e '.targetsAfter | to_entries | all(.value.serviceRoleExecute == false and .value.authenticatedExecute == false and .value.anonExecute == false)' "$file" >/dev/null
+
+      - name: Upload steady retirement application evidence
+        if: always() && steps.auth.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: r5-steady-rev3-retirement-apply-evidence
+          path: r5-steady-rev3-retirement-evidence
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Publish steady retirement result
+        if: always() && steps.auth.outcome == 'success'
+        shell: bash
+        run: |
+          set -euo pipefail
+          verdict=FAIL; if [ "${{ job.status }}" = success ]; then verdict=PASS; fi
+          cat > /tmp/steady-result.md <<EOF2
+          ## R5 steady revision-3 execution retirement — ${verdict}
+
+          Run: \`${GITHUB_RUN_ID}\`
+          Source commit: \`${{ steps.auth.outputs.commit }}\`
+
+          Scope was limited to EXECUTE privilege retirement for six obsolete steady revision-3 generation entry points plus two unbound transfer trigger functions. No function/schema/row/index was dropped; restore rows and transfer evidence were retained. No scheduler, deployment, public-reader, Mainnet, physical-compaction, or R5 rearm mutation was authorized.
+          EOF2
+          gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/steady-result.md
