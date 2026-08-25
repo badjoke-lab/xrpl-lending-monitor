@@ -274,9 +274,12 @@ jobs:
           test "$(jq -r '.leasedTicks' "$file")" = 0
           test "$(jq -r '.liveLeasedTicks' "$file")" = 0
           test "$(jq -r '.openAttempts' "$file")" = 0
-          test "$(jq -r '.transferTriggerBindings' "$file")" = 0
+          test "$(jq -r '.transferTriggerBindingCount' "$file")" = 1
+          jq -e '.transferTriggerBindings | length == 1 and .[0].triggerName == "xrpl_revision3_transfer_after_attempt_finalization" and .[0].tableSchema == "xrpl_resource_guard_v2" and .[0].tableName == "attempts" and .[0].functionSchema == "xrpl_resource_guard_v2" and .[0].functionName == "qualify_transfer_after_attempt_finalization"' "$file" >/dev/null
           test "$(jq -r '.productionDatabaseReadOnly' "$file")" = true
           test "$(jq -r '.permissionMutationAuthorized' "$file")" = false
+          test "$(jq -r '.exactTriggerDropAuthorized' "$file")" = false
+          test "$(jq -r '.schemaMutationAuthorized' "$file")" = false
           test "$(jq -r '.rowMutationAuthorized' "$file")" = false
           test "$(jq -r '.restoreSchemaMutationAuthorized' "$file")" = false
           test "$(jq -r '.physicalCompactionAuthorized' "$file")" = false
@@ -316,9 +319,9 @@ jobs:
 
           This is state-bound and one-shot; it has no wall-clock expiry. Any source, manager, plan, structural-state, project, or migration-head drift fails closed.
 
-          Scope is EXECUTE privilege retirement only for six obsolete steady revision-3 generation entry points plus two unbound transfer trigger functions. No function is dropped. No session/tick/attempt/accounting/qualification/restore row is changed. The restore schema is retained. Scheduler, physical storage, deployment, R5 rearm, public readers, and Mainnet are untouched.
+          Scope is one exact schema mutation plus permission retirement: drop only trigger \`xrpl_revision3_transfer_after_attempt_finalization\` from \`xrpl_resource_guard_v2.attempts\`, then revoke EXECUTE on six obsolete steady revision-3 generation entry points plus two transfer trigger functions. No function/table/schema/index is dropped. No session/tick/attempt/accounting/qualification/restore row is changed. The restore schema is retained. Scheduler, physical storage, deployment, R5 rearm, public readers, and Mainnet are untouched.
 
-          Current gates: active legacy cron \`$(jq -r '.activeLegacyCronJobs' "$file")\`; running guarded sessions \`$(jq -r '.runningGuardedSessions' "$file")\`; leased/live-leased ticks \`$(jq -r '.leasedTicks' "$file") / $(jq -r '.liveLeasedTicks' "$file")\`; open attempts \`$(jq -r '.openAttempts' "$file")\`; transfer trigger bindings \`$(jq -r '.transferTriggerBindings' "$file")\`.
+          Current gates: active legacy cron \`$(jq -r '.activeLegacyCronJobs' "$file")\`; running guarded sessions \`$(jq -r '.runningGuardedSessions' "$file")\`; leased/live-leased ticks \`$(jq -r '.leasedTicks' "$file") / $(jq -r '.liveLeasedTicks' "$file")\`; open attempts \`$(jq -r '.openAttempts' "$file")\`; exact transfer trigger bindings \`$(jq -r '.transferTriggerBindingCount' "$file")\`.
 
           Exact SQL: \`$(jq -r '.plan.file.path' "$file")\` — SHA-256 \`$(jq -r '.plan.file.sha256' "$file")\`
 
@@ -404,6 +407,7 @@ jobs:
           test "$(jq -r '.planDigestSha256' /tmp/steady-pre.json)" = "$AUTH_PLAN"
           test "$(jq -r '.structuralStateSha256' /tmp/steady-pre.json)" = "$AUTH_STATE"
           test "$(jq -r '.maxMigrationVersion' /tmp/steady-pre.json)" = "$AUTH_HEAD"
+          test "$(jq -r '.transferTriggerBindingCount' /tmp/steady-pre.json)" = 1
 
       - name: Apply only exact authorized steady rev3 execution retirement
         id: steady_apply
@@ -424,6 +428,8 @@ jobs:
           file=r5-steady-rev3-retirement-evidence/apply.json
           test "$(jq -r '.classificationAfter' "$file")" = applied_consistent
           test "$(jq -r '.permissionMutationPerformed' "$file")" = true
+          test "$(jq -r '.exactTriggerDropPerformed' "$file")" = true
+          test "$(jq -r '.schemaMutationPerformed' "$file")" = true
           test "$(jq -r '.rowMutationPerformed' "$file")" = false
           test "$(jq -r '.restoreSchemaMutationPerformed' "$file")" = false
           test "$(jq -r '.physicalCompactionPerformed' "$file")" = false
@@ -431,6 +437,7 @@ jobs:
           test "$(jq -r '.deploymentPerformed' "$file")" = false
           test "$(jq -r '.r5RearmPerformed' "$file")" = false
           test "$(jq -r '.mainnetDisabled' "$file")" = true
+          test "$(jq -r '.transferTriggerBindingsAfter | length' "$file")" = 0
           jq -e '.targetsAfter | to_entries | all(.value.serviceRoleExecute == false and .value.authenticatedExecute == false and .value.anonExecute == false)' "$file" >/dev/null
 
       - name: Upload steady retirement application evidence
@@ -454,6 +461,6 @@ jobs:
           Run: \`${GITHUB_RUN_ID}\`
           Source commit: \`${{ steps.auth.outputs.commit }}\`
 
-          Scope was limited to EXECUTE privilege retirement for six obsolete steady revision-3 generation entry points plus two unbound transfer trigger functions. No function/schema/row/index was dropped; restore rows and transfer evidence were retained. No scheduler, deployment, public-reader, Mainnet, physical-compaction, or R5 rearm mutation was authorized.
+          Scope was limited to dropping the exact obsolete \`xrpl_revision3_transfer_after_attempt_finalization\` trigger and retiring EXECUTE privileges for six steady revision-3 generation entry points plus two transfer trigger functions. No function/table/schema/index or historical row was dropped; restore rows and transfer evidence were retained. No scheduler, deployment, public-reader, Mainnet, physical-compaction, or R5 rearm mutation was authorized.
           EOF2
           gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/steady-result.md
