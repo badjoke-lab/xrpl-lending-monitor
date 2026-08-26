@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 
 function fail(message) {
   throw new Error(message)
@@ -194,7 +194,7 @@ with restore_tables as (
      or definition ilike '%xrpl_restore_revision3_accounting_state%'
 )
 select jsonb_build_object(
-  'schemaVersion', 2,
+  'schemaVersion', 3,
   'observedAt', clock_timestamp(),
   'databaseBytes', pg_database_size(current_database())::bigint,
   'databaseHeadroomBytes', 400000000::bigint - pg_database_size(current_database())::bigint,
@@ -222,9 +222,7 @@ select jsonb_build_object(
       (select outside_completed_guarded_session from transfer_qualification_coverage) = 0
       and (select without_session from transfer_qualification_coverage) = 0,
     'noRevision4RuntimeConsumers', (select count(*) from direct_consumers where revision4_runtime_schema) = 0,
-    'noOpenGuardAttempts', (select open from guard_attempts) = 0,
-    'futureRevision3QualificationDemandProvenClosed', false,
-    'restoreSchemaRemovalProvenSafe', false
+    'noOpenGuardAttempts', (select open from guard_attempts) = 0
   ),
   'safetyBoundary', jsonb_build_object(
     'probeReadOnly', true,
@@ -269,6 +267,30 @@ function findState(rows) {
   fail('restore reclaim preflight state missing')
 }
 
+function requireFutureDemandEvidence(evidence, sourceCommit) {
+  if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) {
+    fail('future-demand evidence missing')
+  }
+  if (evidence.sourceCommit !== sourceCommit) fail('future-demand evidence source commit mismatch')
+  const safety = evidence.safety ?? {}
+  for (const key of ['productionDatabaseReadOnly', 'measurementOnly', 'mainnetDisabled']) {
+    if (safety[key] !== true) fail(`future-demand safety boundary missing: ${key}`)
+  }
+  for (const key of [
+    'permissionMutationAuthorized',
+    'schedulerMutationAuthorized',
+    'functionRetirementAuthorized',
+    'restoreReclaimAuthorized',
+    'schemaMutationAuthorized',
+    'physicalCompactionAuthorized',
+    'deploymentAuthorized',
+    'r5RearmAuthorized',
+  ]) {
+    if (safety[key] !== false) fail(`future-demand evidence unexpectedly authorizes: ${key}`)
+  }
+  return evidence
+}
+
 const options = parseArgs(process.argv.slice(2))
 const sourceCommit = options['source-commit']
 const outputDir = options['output-dir'] ?? 'r5-index-footprint-readonly-probe'
@@ -276,11 +298,7 @@ if (!/^[a-f0-9]{40}$/u.test(sourceCommit ?? '')) fail('invalid --source-commit')
 
 const state = findState(await managementQuery(SQL))
 const safety = state.safetyBoundary ?? {}
-for (const key of [
-  'probeReadOnly',
-  'measurementOnly',
-  'mainnetDisabled',
-]) {
+for (const key of ['probeReadOnly', 'measurementOnly', 'mainnetDisabled']) {
   if (safety[key] !== true) fail(`restore reclaim preflight safety boundary missing: ${key}`)
 }
 for (const key of [
@@ -295,11 +313,62 @@ for (const key of [
 ]) {
   if (safety[key] !== false) fail(`restore reclaim preflight unexpectedly authorizes: ${key}`)
 }
-if (state.reclaimEvidence?.futureRevision3QualificationDemandProvenClosed !== false) {
-  fail('restore reclaim preflight must not infer future revision-3 qualification closure')
+
+await mkdir(outputDir, { recursive: true })
+await import('./r5-revision3-future-demand-readonly-audit.mjs')
+const futureDemandEnvelope = JSON.parse(
+  await readFile(`${outputDir}/revision3-future-demand-evidence.json`, 'utf8'),
+)
+const futureDemand = requireFutureDemandEvidence(futureDemandEnvelope, sourceCommit)
+
+const directConsumers = Array.isArray(state.directConsumers) ? state.directConsumers : []
+const directCallers = Array.isArray(state.directCallers) ? state.directCallers : []
+const triggerBindings = Array.isArray(state.triggerBindings) ? state.triggerBindings : []
+const views = Array.isArray(state.views) ? state.views : []
+const noServiceRoleExecutableRestoreConsumers = directConsumers.every(
+  (row) => row.service_role_execute === false,
+)
+const noServiceRoleExecutableRestoreCallers = directCallers.every(
+  (row) => row.service_role_execute === false,
+)
+const noRestoreTriggerBindings = triggerBindings.length === 0
+const noRestoreViews = views.length === 0
+const futureRevision3QualificationDemandProvenClosed =
+  futureDemand.runtimeFutureRevision3DemandProvenClosed === true
+
+const restoreSchemaRemovalProvenSafe =
+  state.reclaimEvidence?.allRestoreTargetsDurablyQualified === true
+  && state.reclaimEvidence?.allTransferQualificationsBelongToCompletedGuardedSessions === true
+  && state.reclaimEvidence?.noRevision4RuntimeConsumers === true
+  && state.reclaimEvidence?.noOpenGuardAttempts === true
+  && futureRevision3QualificationDemandProvenClosed
+  && noServiceRoleExecutableRestoreConsumers
+  && noServiceRoleExecutableRestoreCallers
+  && noRestoreTriggerBindings
+  && noRestoreViews
+
+state.reclaimEvidence = {
+  ...(state.reclaimEvidence ?? {}),
+  futureRevision3QualificationDemandProvenClosed,
+  noServiceRoleExecutableRestoreConsumers,
+  noServiceRoleExecutableRestoreCallers,
+  noRestoreTriggerBindings,
+  noRestoreViews,
+  restoreSchemaRemovalProvenSafe,
 }
-if (state.reclaimEvidence?.restoreSchemaRemovalProvenSafe !== false) {
-  fail('restore reclaim preflight must not infer safe restore-schema removal')
+state.futureDemandEvidence = {
+  schemaVersion: futureDemand.schemaVersion,
+  querySha256: futureDemand.querySha256,
+  runtimeFutureRevision3DemandProvenClosed:
+    futureDemand.runtimeFutureRevision3DemandProvenClosed === true,
+  serviceRoleExecutableTargetCount: futureDemand.serviceRoleExecutableTargetCount,
+  serviceRoleExecutableCallerCount: futureDemand.serviceRoleExecutableCallerCount,
+  activeLegacyCronJobCount: futureDemand.activeLegacyCronJobCount,
+  transferTriggerBindingCount: Array.isArray(futureDemand.transferTriggerBindings)
+    ? futureDemand.transferTriggerBindings.length
+    : null,
+  liveLeasedTicks: Number(futureDemand.tickState?.live_leased ?? 0),
+  openAttempts: Number(futureDemand.attemptState?.open ?? 0),
 }
 
 const evidence = {
@@ -309,17 +378,16 @@ const evidence = {
 }
 const serialized = `${JSON.stringify(evidence, null, 2)}\n`
 const evidenceSha256 = createHash('sha256').update(serialized).digest('hex')
-await mkdir(outputDir, { recursive: true })
 await writeFile(`${outputDir}/resource-restore-reclaim-preflight.json`, serialized)
 await writeFile(`${outputDir}/resource-restore-reclaim-preflight.sha256`, `${evidenceSha256}\n`)
 
-const consumerLines = (state.directConsumers ?? []).map(
+const consumerLines = directConsumers.map(
   (x) => `- consumer: \`${x.schema_name}.${x.function_name}(${x.identity_arguments})\`, service_role_execute=${x.service_role_execute}, revision4_runtime=${x.revision4_runtime_schema}`,
 )
-const callerLines = (state.directCallers ?? []).map(
+const callerLines = directCallers.map(
   (x) => `- caller: \`${x.schema_name}.${x.function_name}(${x.identity_arguments})\`, service_role_execute=${x.service_role_execute}, calls_qualify=${x.calls_qualify}, calls_restore=${x.calls_restore}, calls_builder=${x.calls_restore_builder}`,
 )
-const triggerLines = (state.triggerBindings ?? []).map(
+const triggerLines = triggerBindings.map(
   (x) => `- trigger: \`${x.table_schema}.${x.table_name}.${x.trigger_name}\` -> \`${x.function_schema}.${x.function_name}(${x.identity_arguments})\`` ,
 )
 const summary = [
@@ -331,7 +399,7 @@ const summary = [
   `- targets durable matching / total: \`${state.targets?.durablyQualifiedMatching ?? 0} / ${state.targets?.total ?? 0}\``,
   `- targets not durably matching: \`${state.targets?.notDurablyQualifiedMatching ?? 0}\``,
   `- revision-4 runtime consumers: \`${state.revision4RuntimeConsumerCount ?? 0}\``,
-  `- restore direct consumers / direct callers / trigger bindings / views: \`${state.directConsumers?.length ?? 0} / ${state.directCallers?.length ?? 0} / ${state.triggerBindings?.length ?? 0} / ${state.views?.length ?? 0}\``,
+  `- restore direct consumers / direct callers / trigger bindings / views: \`${directConsumers.length} / ${directCallers.length} / ${triggerBindings.length} / ${views.length}\``,
   `- revision-3 sessions total / completed / not completed: \`${state.revision3Sessions?.total ?? 0} / ${state.revision3Sessions?.completed ?? 0} / ${state.revision3Sessions?.not_completed ?? 0}\``,
   `- completed guarded / unguarded: \`${state.revision3Sessions?.completed_guarded ?? 0} / ${state.revision3Sessions?.completed_unguarded ?? 0}\``,
   `- completed guarded with / without transfer qualification: \`${state.revision3Sessions?.completed_guarded_with_transfer_qualification ?? 0} / ${state.revision3Sessions?.completed_guarded_without_transfer_qualification ?? 0}\``,
@@ -340,16 +408,18 @@ const summary = [
   `- transfer qualifications total / completed guarded / outside completed guarded / without session: \`${state.transferQualificationCoverage?.total ?? 0} / ${state.transferQualificationCoverage?.completed_guarded_session ?? 0} / ${state.transferQualificationCoverage?.outside_completed_guarded_session ?? 0} / ${state.transferQualificationCoverage?.without_session ?? 0}\``,
   `- resource-guard attempts total / open / succeeded / failed / deferred: \`${state.guardAttempts?.total ?? 0} / ${state.guardAttempts?.open ?? 0} / ${state.guardAttempts?.succeeded ?? 0} / ${state.guardAttempts?.failed ?? 0} / ${state.guardAttempts?.deferred ?? 0}\``,
   `- all restore targets durably qualified: \`${state.reclaimEvidence?.allRestoreTargetsDurablyQualified ?? false}\``,
-  `- all completed guarded sessions qualified: \`${state.reclaimEvidence?.allCompletedGuardedSessionsQualified ?? false}\``,
+  `- all completed guarded sessions qualified (historical diagnostic): \`${state.reclaimEvidence?.allCompletedGuardedSessionsQualified ?? false}\``,
   `- all transfer qualifications belong to completed guarded sessions: \`${state.reclaimEvidence?.allTransferQualificationsBelongToCompletedGuardedSessions ?? false}\``,
-  `- future revision-3 qualification demand proven closed: \`${state.reclaimEvidence?.futureRevision3QualificationDemandProvenClosed ?? false}\``,
-  `- restore schema removal proven safe: \`${state.reclaimEvidence?.restoreSchemaRemovalProvenSafe ?? false}\``,
+  `- no service-role executable restore consumers / callers: \`${noServiceRoleExecutableRestoreConsumers} / ${noServiceRoleExecutableRestoreCallers}\``,
+  `- no restore trigger bindings / views: \`${noRestoreTriggerBindings} / ${noRestoreViews}\``,
+  `- future revision-3 qualification demand proven closed: \`${futureRevision3QualificationDemandProvenClosed}\``,
+  `- restore schema removal proven safe: \`${restoreSchemaRemovalProvenSafe}\``,
   '',
   ...consumerLines,
   ...callerLines,
   ...triggerLines,
   '',
-  'Measurement only. Guarded-session qualification coverage can remove an ambiguity in the reclaim analysis, but it does not prove that future revision-3 qualification demand is closed and it does not authorize function retirement, restore-table/schema removal, physical compaction, R5 rearm, scheduler changes, deployment, or Mainnet.',
+  'Measurement only. The removal verdict is derived fail-closed from durable target parity, transfer-qualification ownership, revision-4 isolation, open-attempt absence, independent revision-3 future-demand closure, executable restore-consumer/caller absence, and zero restore trigger/view bindings. Historical completed guarded sessions without a transfer qualification remain visible as a diagnostic; they are not a removal blocker once every retained restore target is durably matched and future revision-3 qualification demand is independently proven closed. This verdict authorizes no function retirement, restore-table/schema removal, physical compaction, R5 rearm, scheduler change, deployment, or Mainnet action.',
   '',
   `Evidence SHA-256: \`${evidenceSha256}\``,
 ].join('\n')
