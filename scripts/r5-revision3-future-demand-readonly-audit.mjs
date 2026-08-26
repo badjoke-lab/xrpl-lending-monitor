@@ -146,7 +146,13 @@ const SQL = `with recursive target_names(function_name) as (
   join pg_proc p on p.oid = t.tgfoid
   join pg_namespace pns on pns.oid = p.pronamespace
   where not t.tgisinternal
-    and p.proname = 'xrpl_transfer_revision3_after_attempt_finalization'
+    and (
+      t.tgname = 'xrpl_revision3_transfer_after_attempt_finalization'
+      or (
+        pns.nspname = 'xrpl_resource_guard_v2'
+        and p.proname in ('qualify_transfer_after_attempt_finalization', 'qualify_transfer_on_completion')
+      )
+    )
 )
 select jsonb_build_object(
   'databaseBytes', pg_database_size(current_database()),
@@ -258,11 +264,12 @@ const runtimeFutureDemandProvenClosed =
   activeLegacyCronJobs.length === 0
   && executableTargets.length === 0
   && executableCallers.length === 0
+  && transferTriggerBindings.length === 0
   && liveLeasedTicks === 0
   && openAttempts === 0
 
 const evidence = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   purpose: 'r5-revision3-future-demand-readonly-audit',
   sourceCommit,
   querySha256: sha256(SQL),
@@ -340,7 +347,7 @@ const summary = [
   ...cronLines,
   ...triggerLines,
   '',
-  'This is a runtime reachability measurement only. A false closure verdict identifies the remaining rev3 execution surface; a true verdict proves closure only for the measured service-role/pg_cron runtime boundary. It does not itself authorize permission retirement, scheduler changes, restore reclaim/removal, physical compaction, deployment, R5 rearm, or Mainnet.',
+  'This is a runtime reachability measurement only. A false closure verdict identifies the remaining rev3 execution surface; a true verdict proves closure only for the measured service-role/trigger/pg_cron runtime boundary. It does not itself authorize permission retirement, scheduler changes, restore reclaim/removal, physical compaction, deployment, R5 rearm, or Mainnet.',
   '',
   `Evidence SHA-256: \`${evidenceSha256}\``,
 ].join('\n')

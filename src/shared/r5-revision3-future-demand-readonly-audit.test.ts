@@ -64,11 +64,18 @@ describe('revision-3 runtime future-demand read-only audit', () => {
     expect(audit).toContain('activeLegacyCronJobs.length === 0')
   })
 
-  it('requires both direct and recursive service-role execution closure', () => {
+  it('measures the actual transfer trigger binding by trigger and function identity', () => {
+    expect(audit).toContain("t.tgname = 'xrpl_revision3_transfer_after_attempt_finalization'")
+    expect(audit).toContain("p.proname in ('qualify_transfer_after_attempt_finalization', 'qualify_transfer_on_completion')")
+    expect(audit).toContain('transferTriggerBindings.length === 0')
+  })
+
+  it('requires direct, recursive, and trigger runtime closure', () => {
     expect(audit).toContain("has_function_privilege('service_role', p.oid, 'EXECUTE')")
     expect(audit).toContain("has_function_privilege('service_role', caller.oid, 'EXECUTE')")
     expect(audit).toContain('executableTargets.length === 0')
     expect(audit).toContain('executableCallers.length === 0')
+    expect(audit).toContain('transferTriggerBindings.length === 0')
     expect(audit).toContain('outermostExecutableCallers')
   })
 
