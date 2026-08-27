@@ -76,7 +76,7 @@ describe('revision-3 restore schema retirement read-only preflight', () => {
     expect(workflow).toContain("github.event.comment.body == '/r5-index-footprint-readonly-probe'")
     expect(workflow).toContain('Inventory revision-3 restore schema retirement only')
     expect(workflow).toContain('r5-revision3-restore-schema-retirement-readonly-preflight.mjs')
-    expect(workflow).toContain('restore-schema-retirement-summary.md')
+    expect(workflow).toContain('restore-schema-retirement/summary.md')
     expect(workflow).not.toMatch(/\n\s*execute:\s*\n/u)
     expect(workflow).not.toContain('-authorize ')
     expect(workflow).not.toContain('read_only: false')
