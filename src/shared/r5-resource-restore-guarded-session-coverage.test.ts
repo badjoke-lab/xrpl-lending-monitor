@@ -31,14 +31,49 @@ describe('revision-3 restore reclaim guarded-session coverage', () => {
     expect(preflight).toContain("'allTransferQualificationsBelongToCompletedGuardedSessions'")
   })
 
-  it('keeps future-demand closure and restore-schema removal fail-closed', () => {
-    expect(preflight).toContain("'futureRevision3QualificationDemandProvenClosed', false")
-    expect(preflight).toContain("'restoreSchemaRemovalProvenSafe', false")
-    expect(preflight).toContain("state.reclaimEvidence?.futureRevision3QualificationDemandProvenClosed !== false")
-    expect(preflight).toContain("state.reclaimEvidence?.restoreSchemaRemovalProvenSafe !== false")
+  it('derives future-demand closure from the independent runtime audit instead of a fixed false', () => {
+    expect(preflight).not.toContain("'futureRevision3QualificationDemandProvenClosed', false")
+    expect(preflight).toContain("await import('./r5-revision3-future-demand-readonly-audit.mjs')")
+    expect(preflight).toContain('requireFutureDemandEvidence')
+    expect(preflight).toContain('futureDemand.runtimeFutureRevision3DemandProvenClosed === true')
+    expect(preflight).toContain('future-demand evidence source commit mismatch')
+  })
+
+  it('derives restore-schema removal safety from measured fail-closed gates', () => {
+    expect(preflight).not.toContain("'restoreSchemaRemovalProvenSafe', false")
+    expect(preflight).toContain('const restoreSchemaRemovalProvenSafe =')
+    const verdictStart = preflight.indexOf('const restoreSchemaRemovalProvenSafe =')
+    const verdictEnd = preflight.indexOf('\n\nstate.reclaimEvidence =', verdictStart)
+    expect(verdictStart).toBeGreaterThanOrEqual(0)
+    expect(verdictEnd).toBeGreaterThan(verdictStart)
+    const verdict = preflight.slice(verdictStart, verdictEnd)
+
+    for (const gate of [
+      'allRestoreTargetsDurablyQualified',
+      'allTransferQualificationsBelongToCompletedGuardedSessions',
+      'noRevision4RuntimeConsumers',
+      'noOpenGuardAttempts',
+      'futureRevision3QualificationDemandProvenClosed',
+      'noServiceRoleExecutableRestoreConsumers',
+      'noServiceRoleExecutableRestoreCallers',
+      'noRestoreTriggerBindings',
+      'noRestoreViews',
+    ]) {
+      expect(verdict).toContain(gate)
+    }
+
+    expect(verdict).not.toContain('allCompletedGuardedSessionsQualified')
+    expect(preflight).toContain('all completed guarded sessions qualified (historical diagnostic)')
+  })
+
+  it('keeps every mutation unauthorized even when the measured removal verdict is true', () => {
     expect(preflight).toContain("'restoreReclaimAuthorized', false")
     expect(preflight).toContain("'functionRetirementAuthorized', false")
+    expect(preflight).toContain("'rowMutationAuthorized', false")
     expect(preflight).toContain("'schemaMutationAuthorized', false")
+    expect(preflight).toContain("'vacuumAuthorized', false")
+    expect(preflight).toContain("'schedulerMutationAuthorized', false")
+    expect(preflight).toContain("'deploymentAuthorized', false")
     expect(preflight).toContain("'r5RestartAuthorized', false")
   })
 
