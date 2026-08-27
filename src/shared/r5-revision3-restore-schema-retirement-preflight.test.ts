@@ -8,7 +8,7 @@ const probe = readFileSync(
   'utf8',
 )
 const workflow = readFileSync(
-  resolve(process.cwd(), '.github/workflows/r5-revision3-restore-schema-retirement-preflight.yml'),
+  resolve(process.cwd(), '.github/workflows/r5-index-footprint-readonly-probe.yml'),
   'utf8',
 )
 
@@ -71,10 +71,12 @@ describe('revision-3 restore schema retirement read-only preflight', () => {
     expect(probe).toContain("if ((state.referencingViews ?? []).length !== 0)")
   })
 
-  it('runs only for the exact owner preflight command and contains no execute job', () => {
+  it('reuses the existing exact-owner read-only workflow and adds no execute surface', () => {
     expect(workflow).toContain("github.event.comment.user.login == 'badjoke-lab'")
-    expect(workflow).toContain("github.event.comment.body == '/r5-revision3-restore-schema-retirement-preflight'")
-    expect(workflow).toContain('Inventory exact restore retirement state read-only')
+    expect(workflow).toContain("github.event.comment.body == '/r5-index-footprint-readonly-probe'")
+    expect(workflow).toContain('Inventory revision-3 restore schema retirement only')
+    expect(workflow).toContain('r5-revision3-restore-schema-retirement-readonly-preflight.mjs')
+    expect(workflow).toContain('restore-schema-retirement-summary.md')
     expect(workflow).not.toMatch(/\n\s*execute:\s*\n/u)
     expect(workflow).not.toContain('-authorize ')
     expect(workflow).not.toContain('read_only: false')
