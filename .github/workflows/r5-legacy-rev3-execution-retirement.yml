@@ -464,3 +464,290 @@ jobs:
           Scope was limited to dropping the exact obsolete \`xrpl_revision3_transfer_after_attempt_finalization\` trigger and retiring EXECUTE privileges for six steady revision-3 generation entry points plus two transfer trigger functions. No function/table/schema/index or historical row was dropped; restore rows and transfer evidence were retained. No scheduler, deployment, public-reader, Mainnet, physical-compaction, or R5 rearm mutation was authorized.
           EOF2
           gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/steady-result.md
+
+  restore_reclaim_prepare:
+    if: >-
+      github.event.issue.number == 1261 &&
+      github.event.comment.user.login == 'badjoke-lab' &&
+      github.event.comment.body == '/r5-revision3-restore-data-reclaim-prepare'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      RECLAIM_MANAGER_PATH: scripts/manage-r5-revision3-restore-data-reclaim.mjs
+      RECLAIM_DIR: r5-revision3-restore-data-reclaim-evidence
+    steps:
+      - name: Check out exact current main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Reprove restore removal boundary read-only
+        id: state
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RECLAIM_DIR"
+          source_commit="$(git rev-parse HEAD)"
+          manager_sha="$(sha256sum "$RECLAIM_MANAGER_PATH" | awk '{print $1}')"
+          node scripts/r5-resource-restore-reclaim-readonly-preflight.mjs \
+            --source-commit "$source_commit" \
+            --output-dir "$RECLAIM_DIR" \
+            > "$RECLAIM_DIR/preflight.stdout.md"
+          preflight="$RECLAIM_DIR/resource-restore-reclaim-preflight.json"
+          test "$(jq -r '.state.reclaimEvidence.restoreSchemaRemovalProvenSafe' "$preflight")" = true
+          test "$(jq -r '.state.reclaimEvidence.futureRevision3QualificationDemandProvenClosed' "$preflight")" = true
+          node "$RECLAIM_MANAGER_PATH" prepare \
+            --source-commit "$source_commit" \
+            --preflight-evidence "$preflight" \
+            --output "$RECLAIM_DIR/prepare.json" \
+            > "$RECLAIM_DIR/prepare.stdout.json"
+          file="$RECLAIM_DIR/prepare.json"
+          test "$(jq -r '.classification' "$file")" = unapplied_expected
+          jq -e '.restoreRows.targets > 0 and .restoreRows.attemptRows > 0 and .restoreRows.accountingRows > 0' "$file" >/dev/null
+          test "$(jq -r '.productionDatabaseReadOnly' "$file")" = true
+          test "$(jq -r '.restoreDataReclaimAuthorized' "$file")" = false
+          test "$(jq -r '.truncateAuthorized' "$file")" = false
+          test "$(jq -r '.restoreSchemaDropAuthorized' "$file")" = false
+          test "$(jq -r '.functionDropAuthorized' "$file")" = false
+          test "$(jq -r '.cascadeAuthorized' "$file")" = false
+          test "$(jq -r '.vacuumAuthorized' "$file")" = false
+          test "$(jq -r '.schedulerMutationAuthorized' "$file")" = false
+          test "$(jq -r '.deploymentAuthorized' "$file")" = false
+          test "$(jq -r '.r5RearmAuthorized' "$file")" = false
+          test "$(jq -r '.mainnetDisabled' "$file")" = true
+          printf 'source_commit=%s\nmanager_sha=%s\nplan=%s\nstate=%s\npreflight=%s\nproject=%s\nhead=%s\n' \
+            "$source_commit" "$manager_sha" \
+            "$(jq -r '.planDigestSha256' "$file")" \
+            "$(jq -r '.structuralStateSha256' "$file")" \
+            "$(jq -r '.preflightStateSha256' "$file")" \
+            "$(jq -r '.projectIdentityDigest' "$file")" \
+            "$(jq -r '.maxMigrationVersion' "$file")" >> "$GITHUB_OUTPUT"
+
+      - name: Publish state-bound restore data reclaim authorization proposal
+        env:
+          SOURCE_COMMIT: ${{ steps.state.outputs.source_commit }}
+          MANAGER_SHA: ${{ steps.state.outputs.manager_sha }}
+          PLAN_SHA: ${{ steps.state.outputs.plan }}
+          STATE_SHA: ${{ steps.state.outputs.state }}
+          PREFLIGHT_SHA: ${{ steps.state.outputs.preflight }}
+          PROJECT_DIGEST: ${{ steps.state.outputs.project }}
+          MIGRATION_HEAD: ${{ steps.state.outputs.head }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          nonce="$(openssl rand -hex 8)"
+          command="/r5-revision3-restore-data-reclaim-authorize commit=${SOURCE_COMMIT} manager=${MANAGER_SHA} plan=${PLAN_SHA} state=${STATE_SHA} preflight=${PREFLIGHT_SHA} project=${PROJECT_DIGEST} head=${MIGRATION_HEAD} prepare_run=${GITHUB_RUN_ID} nonce=${nonce}"
+          file="$RECLAIM_DIR/prepare.json"
+          cat > /tmp/r5-restore-reclaim-proposal.md <<EOF2
+          ## R5 revision-3 restore data reclaim authorization proposal
+
+          Preparation run: \`${GITHUB_RUN_ID}\`
+          Source main commit: \`${SOURCE_COMMIT}\`
+          Manager SHA-256: \`${MANAGER_SHA}\`
+          Exact plan digest: \`${PLAN_SHA}\`
+          Authorized structural state SHA-256: \`${STATE_SHA}\`
+          Authorized semantic preflight state SHA-256: \`${PREFLIGHT_SHA}\`
+          Project identity digest: \`${PROJECT_DIGEST}\`
+          Current production migration head: \`${MIGRATION_HEAD}\`
+          Restore-table bytes measured: \`$(jq -r '.restoreTableBytes' "$file")\`
+          Restore rows targets / attempts / accounting: \`$(jq -r '.restoreRows.targets' "$file") / $(jq -r '.restoreRows.attemptRows' "$file") / $(jq -r '.restoreRows.accountingRows' "$file")\`
+
+          This is state-bound and one-shot; it has no wall-clock expiry. Any source, manager, exact plan, semantic preflight state, structural production state, project, or migration-head drift fails closed.
+
+          Scope is one exact transaction that TRUNCATEs only \`xrpl_resource_restore_v1.attempt_rows\`, \`xrpl_resource_restore_v1.accounting_rows\`, and \`xrpl_resource_restore_v1.targets\` together. The restore schema and every function remain present. CASCADE, RESTART IDENTITY, DELETE, DROP, VACUUM, scheduler/deployment/public-reader mutation, R5 rearm, and Mainnet are not authorized. Durable \`xrpl_resource_guard_v2.transfer_qualifications\` remain untouched.
+
+          Exact SQL: \`$(jq -r '.plan.file.path' "$file")\` — SHA-256 \`$(jq -r '.plan.file.sha256' "$file")\`
+
+          Exact authorization command:
+
+          \`${command}\`
+          EOF2
+          gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/r5-restore-reclaim-proposal.md
+
+      - name: Upload restore reclaim preparation evidence
+        if: always() && steps.state.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: r5-revision3-restore-data-reclaim-prepare-evidence
+          path: r5-revision3-restore-data-reclaim-evidence
+          if-no-files-found: error
+          retention-days: 14
+
+  restore_reclaim_execute:
+    if: >-
+      github.event.issue.number == 1261 &&
+      github.event.comment.user.login == 'badjoke-lab' &&
+      startsWith(github.event.comment.body, '/r5-revision3-restore-data-reclaim-authorize ')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      RECLAIM_MANAGER_PATH: scripts/manage-r5-revision3-restore-data-reclaim.mjs
+      RECLAIM_DIR: r5-revision3-restore-data-reclaim-evidence
+      AUTHORIZATION_BODY: ${{ github.event.comment.body }}
+      AUTHORIZATION_CREATED_AT: ${{ github.event.comment.created_at }}
+      AUTHORIZATION_COMMENT_ID: ${{ github.event.comment.id }}
+    steps:
+      - name: Check out exact current main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Parse and bind exact state-bound restore data reclaim authorization
+        id: auth
+        shell: bash
+        run: |
+          set -euo pipefail
+          regex='^/r5-revision3-restore-data-reclaim-authorize commit=([a-f0-9]{40}) manager=([a-f0-9]{64}) plan=([a-f0-9]{64}) state=([a-f0-9]{64}) preflight=([a-f0-9]{64}) project=([a-f0-9]{64}) head=([0-9]{14}) prepare_run=([0-9]+) nonce=([a-f0-9]{16})$'
+          [[ "$AUTHORIZATION_BODY" =~ $regex ]] || { echo 'restore data reclaim authorization shape mismatch' >&2; exit 1; }
+          commit="${BASH_REMATCH[1]}"; manager="${BASH_REMATCH[2]}"; plan="${BASH_REMATCH[3]}"; state="${BASH_REMATCH[4]}"; preflight="${BASH_REMATCH[5]}"; project="${BASH_REMATCH[6]}"; head="${BASH_REMATCH[7]}"; prepare_run="${BASH_REMATCH[8]}"; nonce="${BASH_REMATCH[9]}"
+          test "$commit" = "$(git rev-parse HEAD)"
+          test "$manager" = "$(sha256sum "$RECLAIM_MANAGER_PATH" | awk '{print $1}')"
+          [[ "$SUPABASE_PROJECT_ID" =~ ^[a-z]{20}$ ]]
+          current_project="$(PROJECT_ID="$SUPABASE_PROJECT_ID" node -e "const c=require('node:crypto');process.stdout.write(c.createHash('sha256').update(process.env.PROJECT_ID).digest('hex'))")"
+          test "$project" = "$current_project"
+          printf 'commit=%s\nplan=%s\nstate=%s\npreflight=%s\nhead=%s\nprepare_run=%s\n' "$commit" "$plan" "$state" "$preflight" "$head" "$prepare_run" >> "$GITHUB_OUTPUT"
+
+      - name: Verify exact prior proposal and unique owner authorization
+        env:
+          PREPARE_RUN: ${{ steps.auth.outputs.prepare_run }}
+          COMMIT: ${{ steps.auth.outputs.commit }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${PREPARE_RUN}" > /tmp/prepare-run.json
+          jq -e --arg commit "$COMMIT" '.event == "issue_comment" and .conclusion == "success" and .head_sha == $commit and .actor.login == "badjoke-lab"' /tmp/prepare-run.json >/dev/null
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${QUALIFICATION_ISSUE}/comments?per_page=100" | jq -s 'add' > /tmp/comments.json
+          EXPECTED="$AUTHORIZATION_BODY" PREPARE_RUN="$PREPARE_RUN" AUTH_ID="$AUTHORIZATION_COMMENT_ID" AUTH_CREATED_AT="$AUTHORIZATION_CREATED_AT" node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs'
+          const comments=JSON.parse(readFileSync('/tmp/comments.json','utf8'));const expected=process.env.EXPECTED;const run=process.env.PREPARE_RUN;const authAt=Date.parse(process.env.AUTH_CREATED_AT??'');
+          const proposals=comments.filter(c=>c?.user?.login==='github-actions[bot]'&&typeof c?.body==='string'&&c.body.includes(`Preparation run: \`${run}\``)&&c.body.includes(`\`${expected}\``));
+          if(proposals.length!==1)throw new Error(`expected one exact restore reclaim proposal, found ${proposals.length}`);
+          if(!(Date.parse(proposals[0].created_at??'')<authAt))throw new Error('restore reclaim proposal must precede authorization');
+          const owner=comments.filter(c=>c?.user?.login==='badjoke-lab'&&c?.body===expected);if(owner.length!==1||Number(owner[0].id)!==Number(process.env.AUTH_ID))throw new Error(`restore reclaim authorization must be unique, found ${owner.length}`);
+          NODE
+
+      - name: Reprove and bind exact restore reclaim state read-only
+        env:
+          COMMIT: ${{ steps.auth.outputs.commit }}
+          AUTH_PLAN: ${{ steps.auth.outputs.plan }}
+          AUTH_STATE: ${{ steps.auth.outputs.state }}
+          AUTH_PREFLIGHT: ${{ steps.auth.outputs.preflight }}
+          AUTH_HEAD: ${{ steps.auth.outputs.head }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RECLAIM_DIR"
+          node scripts/r5-resource-restore-reclaim-readonly-preflight.mjs \
+            --source-commit "$COMMIT" \
+            --output-dir "$RECLAIM_DIR" \
+            > "$RECLAIM_DIR/pre-apply-preflight.stdout.md"
+          preflight="$RECLAIM_DIR/resource-restore-reclaim-preflight.json"
+          test "$(jq -r '.state.reclaimEvidence.restoreSchemaRemovalProvenSafe' "$preflight")" = true
+          node "$RECLAIM_MANAGER_PATH" prepare \
+            --source-commit "$COMMIT" \
+            --preflight-evidence "$preflight" \
+            --output "$RECLAIM_DIR/pre-apply.json" \
+            > "$RECLAIM_DIR/pre-apply.stdout.json"
+          file="$RECLAIM_DIR/pre-apply.json"
+          test "$(jq -r '.classification' "$file")" = unapplied_expected
+          test "$(jq -r '.planDigestSha256' "$file")" = "$AUTH_PLAN"
+          test "$(jq -r '.structuralStateSha256' "$file")" = "$AUTH_STATE"
+          test "$(jq -r '.preflightStateSha256' "$file")" = "$AUTH_PREFLIGHT"
+          test "$(jq -r '.maxMigrationVersion' "$file")" = "$AUTH_HEAD"
+
+      - name: Apply only exact authorized restore data reclaim
+        id: reclaim_apply
+        env:
+          COMMIT: ${{ steps.auth.outputs.commit }}
+          AUTH_PLAN: ${{ steps.auth.outputs.plan }}
+          AUTH_STATE: ${{ steps.auth.outputs.state }}
+          AUTH_PREFLIGHT: ${{ steps.auth.outputs.preflight }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          preflight="$RECLAIM_DIR/resource-restore-reclaim-preflight.json"
+          node "$RECLAIM_MANAGER_PATH" apply \
+            --source-commit "$COMMIT" \
+            --preflight-evidence "$preflight" \
+            --authorized-plan "$AUTH_PLAN" \
+            --authorized-state "$AUTH_STATE" \
+            --authorized-preflight "$AUTH_PREFLIGHT" \
+            --output "$RECLAIM_DIR/apply.json" \
+            2>&1 | tee "$RECLAIM_DIR/apply.log"
+
+      - name: Verify bounded restore data reclaim result
+        if: steps.reclaim_apply.outcome == 'success'
+        shell: bash
+        run: |
+          set -euo pipefail
+          file="$RECLAIM_DIR/apply.json"
+          test "$(jq -r '.classificationAfter' "$file")" = applied_consistent
+          test "$(jq -r '.restoreDataReclaimPerformed' "$file")" = true
+          test "$(jq -r '.truncatePerformed' "$file")" = true
+          test "$(jq -r '.restoreRowsRemoved' "$file")" = true
+          jq -e '.restoreRowsAfter.targets == 0 and .restoreRowsAfter.attemptRows == 0 and .restoreRowsAfter.accountingRows == 0' "$file" >/dev/null
+          jq -e '.transferQualificationsBefore == .transferQualificationsAfter' "$file" >/dev/null
+          jq -e '.protectedCountsBefore == .protectedCountsAfter' "$file" >/dev/null
+          test "$(jq -r '.schemaObjectMutationPerformed' "$file")" = false
+          test "$(jq -r '.restoreSchemaDropPerformed' "$file")" = false
+          test "$(jq -r '.functionDropPerformed' "$file")" = false
+          test "$(jq -r '.cascadePerformed' "$file")" = false
+          test "$(jq -r '.vacuumPerformed' "$file")" = false
+          test "$(jq -r '.schedulerMutationPerformed' "$file")" = false
+          test "$(jq -r '.deploymentPerformed' "$file")" = false
+          test "$(jq -r '.r5RearmPerformed' "$file")" = false
+          test "$(jq -r '.mainnetDisabled' "$file")" = true
+          test "$(jq -r '.postVerificationReadOnly' "$file")" = true
+
+      - name: Independently audit restore storage after reclaim read-only
+        if: steps.reclaim_apply.outcome == 'success'
+        env:
+          COMMIT: ${{ steps.auth.outputs.commit }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/r5-resource-restore-readonly-audit.mjs \
+            --source-commit "$COMMIT" \
+            --output-dir "$RECLAIM_DIR/post-readonly" \
+            > "$RECLAIM_DIR/post-readonly.stdout.md"
+          file="$RECLAIM_DIR/post-readonly/resource-restore-evidence.json"
+          jq -e '.state.exactRows.targets == 0 and .state.exactRows.attemptRows == 0 and .state.exactRows.accountingRows == 0' "$file" >/dev/null
+          test "$(jq -r '.state.revision4RuntimeConsumerCount' "$file")" = 0
+          test "$(jq -r '.state.safetyBoundary.probeReadOnly' "$file")" = true
+          test "$(jq -r '.state.safetyBoundary.mainnetDisabled' "$file")" = true
+
+      - name: Upload restore reclaim application evidence
+        if: always() && steps.auth.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: r5-revision3-restore-data-reclaim-apply-evidence
+          path: r5-revision3-restore-data-reclaim-evidence
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Publish restore reclaim result
+        if: always() && steps.auth.outcome == 'success'
+        shell: bash
+        run: |
+          set -euo pipefail
+          verdict=FAIL; if [ "${{ job.status }}" = success ]; then verdict=PASS; fi
+          reclaimed=unknown; restore_reclaimed=unknown
+          if [ -f "$RECLAIM_DIR/apply.json" ]; then
+            reclaimed="$(jq -r '.databaseBytesReclaimed' "$RECLAIM_DIR/apply.json")"
+            restore_reclaimed="$(jq -r '.restoreTableBytesReclaimed' "$RECLAIM_DIR/apply.json")"
+          fi
+          cat > /tmp/restore-reclaim-result.md <<EOF2
+          ## R5 revision-3 restore data reclaim — ${verdict}
+
+          Run: \`${GITHUB_RUN_ID}\`
+          Source commit: \`${{ steps.auth.outputs.commit }}\`
+          Database bytes reclaimed: \`${reclaimed}\`
+          Restore-table bytes reclaimed: \`${restore_reclaimed}\`
+
+          Scope was limited to one exact non-CASCADE TRUNCATE of the three retired \`xrpl_resource_restore_v1\` data tables. The restore schema and functions remain present; durable transfer qualifications and protected runtime rows remain unchanged. No DROP, DELETE, VACUUM, scheduler/deployment/public-reader/Mainnet mutation, or R5 rearm was authorized.
+          EOF2
+          gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/restore-reclaim-result.md
