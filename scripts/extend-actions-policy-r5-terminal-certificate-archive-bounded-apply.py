@@ -1,4 +1,5 @@
 from pathlib import Path
+import subprocess
 import sys
 
 if len(sys.argv) != 2:
@@ -124,3 +125,4 @@ if terminal_certificate_bounded_manager.find("authorization !== result.guard.com
 '''
 text = text.replace(marker, block + marker)
 path.write_text(text)
+subprocess.run([sys.executable, 'scripts/extend-actions-policy-r5-revision3-restore-schema-retirement.py', sys.argv[1]], check=True)
