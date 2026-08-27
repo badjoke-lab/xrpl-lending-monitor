@@ -18,8 +18,8 @@ def replace_once(name: str, old: str, new: str) -> None:
 
 replace_once(
     'restore schema retirement workflow allowlist entry',
-    '  r5-legacy-rev3-execution-retirement.yml\n',
-    '  r5-legacy-rev3-execution-retirement.yml\n  r5-revision3-restore-schema-retirement.yml\n',
+    '  r5-retention-readonly-preflight.yml\n  r5-revision4-db-footprint-probe.yml\n',
+    '  r5-retention-readonly-preflight.yml\n  r5-revision3-restore-schema-retirement.yml\n  r5-revision4-db-footprint-probe.yml\n',
 )
 replace_once(
     'restore schema retirement workflow count',
