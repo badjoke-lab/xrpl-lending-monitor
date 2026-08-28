@@ -114,7 +114,7 @@ function capacityQualificationFixture(databaseGuard: Record<string, unknown>) {
 function runAssessment(
   databaseGuard: Record<string, unknown>,
   databaseGuardExit = 0,
-  capacityQualification?: Record<string, any>,
+  capacityQualification?: Record<string, unknown>,
 ) {
   const dir = mkdtempSync(join(tmpdir(), 'r5-post-terminal-readiness-'))
   const terminalPath = join(dir, 'terminal.json')
