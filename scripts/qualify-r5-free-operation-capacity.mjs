@@ -116,32 +116,32 @@ function stateSql() {
   ), relation_metrics as (
     select 'xrpl_phase_work'::text as name, 'persistent'::text as retention_class,
            count(*)::bigint as exact_rows, pg_total_relation_size('public.xrpl_phase_work'::regclass)::bigint as total_bytes,
-           coalesce(sum(pg_column_size(t)),0)::bigint as logical_bytes,
-           coalesce(max(pg_column_size(t)),0)::bigint as max_logical_row_bytes
+           coalesce(sum(pg_column_size(to_jsonb(t))),0)::bigint as logical_bytes,
+           coalesce(max(pg_column_size(to_jsonb(t))),0)::bigint as max_logical_row_bytes
       from public.xrpl_phase_work t
     union all
     select 'xrpl_phase_payload_chunks','raw_24h',count(*)::bigint,pg_total_relation_size('public.xrpl_phase_payload_chunks'::regclass)::bigint,
-           coalesce(sum(pg_column_size(t)),0)::bigint,coalesce(max(pg_column_size(t)),0)::bigint
+           coalesce(sum(pg_column_size(to_jsonb(t))),0)::bigint,coalesce(max(pg_column_size(to_jsonb(t))),0)::bigint
       from public.xrpl_phase_payload_chunks t
     union all
     select 'xrpl_phase_commit_chunks','raw_24h',count(*)::bigint,pg_total_relation_size('public.xrpl_phase_commit_chunks'::regclass)::bigint,
-           coalesce(sum(pg_column_size(t)),0)::bigint,coalesce(max(pg_column_size(t)),0)::bigint
+           coalesce(sum(pg_column_size(to_jsonb(t))),0)::bigint,coalesce(max(pg_column_size(to_jsonb(t))),0)::bigint
       from public.xrpl_phase_commit_chunks t
     union all
     select 'xrpl_phase_reference_rows','persistent',count(*)::bigint,pg_total_relation_size('public.xrpl_phase_reference_rows'::regclass)::bigint,
-           coalesce(sum(pg_column_size(t)),0)::bigint,coalesce(max(pg_column_size(t)),0)::bigint
+           coalesce(sum(pg_column_size(to_jsonb(t))),0)::bigint,coalesce(max(pg_column_size(to_jsonb(t))),0)::bigint
       from public.xrpl_phase_reference_rows t
     union all
     select 'xrpl_phase_messages','persistent',count(*)::bigint,pg_total_relation_size('public.xrpl_phase_messages'::regclass)::bigint,
-           coalesce(sum(pg_column_size(t)),0)::bigint,coalesce(max(pg_column_size(t)),0)::bigint
+           coalesce(sum(pg_column_size(to_jsonb(t))),0)::bigint,coalesce(max(pg_column_size(to_jsonb(t))),0)::bigint
       from public.xrpl_phase_messages t
     union all
     select 'xrpl_phase_successors','persistent',count(*)::bigint,pg_total_relation_size('public.xrpl_phase_successors'::regclass)::bigint,
-           coalesce(sum(pg_column_size(t)),0)::bigint,coalesce(max(pg_column_size(t)),0)::bigint
+           coalesce(sum(pg_column_size(to_jsonb(t))),0)::bigint,coalesce(max(pg_column_size(to_jsonb(t))),0)::bigint
       from public.xrpl_phase_successors t
     union all
     select 'recovery_batches','persistent',count(*)::bigint,pg_total_relation_size('xrpl_r5_v1.recovery_batches'::regclass)::bigint,
-           coalesce(sum(pg_column_size(t)),0)::bigint,coalesce(max(pg_column_size(t)),0)::bigint
+           coalesce(sum(pg_column_size(to_jsonb(t))),0)::bigint,coalesce(max(pg_column_size(to_jsonb(t))),0)::bigint
       from xrpl_r5_v1.recovery_batches t
   ), active_watermark as (
     select * from public.xrpl_phase_watermarks where profile_id='supabase-devnet'
@@ -338,6 +338,7 @@ const evidence = {
   growthRemeasured: sampleLedgerCount === RETAINED_SAMPLE_LEDGERS,
   growthModel: {
     method: 'retention_aware_generated_rows_times_persistent_physical_amplification',
+    logicalByteMeasure: 'pg_column_size(to_jsonb(row))',
     sampleLedgerCount,
     requiredSampleLedgerCount: RETAINED_SAMPLE_LEDGERS,
     generatedRawRowsReconstructedFromWorkExpectations: true,
