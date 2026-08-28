@@ -216,9 +216,8 @@ function afterSql() {
 }
 function lockCapabilitySql() {
   return `set local lock_timeout='5s';
-set local role supabase_admin;
-lock table cron.job, supabase_migrations.schema_migrations in share mode;
-select jsonb_build_object('lockRole',current_user,'schedulerMigrationShareLock',true)::text as state;`
+lock table cron.job, supabase_migrations.schema_migrations in access share mode;
+select jsonb_build_object('extensionOwnedAccessShareLock',true)::text as state;`
 }
 async function inspectBefore() { return stateRow(await managementQuery(beforeSql(), true)) }
 async function inspectAfter() { return stateRow(await managementQuery(afterSql(), true)) }
@@ -298,7 +297,7 @@ async function prepare(sourceCommit, options) {
   const state = await inspectBefore()
   validateBefore(state)
   const lockCapability = await inspectLockCapability()
-  if (lockCapability.lockRole !== 'supabase_admin' || lockCapability.schedulerMigrationShareLock !== true) fail('extension-owned share-lock capability unavailable')
+  if (lockCapability.extensionOwnedAccessShareLock !== true) fail('extension-owned ACCESS SHARE lock capability unavailable')
   const evidence = {
     schemaVersion: 1,
     purpose: 'r5-revision3-restore-schema-retirement-prepare',
@@ -319,8 +318,9 @@ async function prepare(sourceCommit, options) {
     maxMigrationVersion: state.maxMigrationVersion,
     schedulerSha256: sha(JSON.stringify(state.scheduler)),
     protectedDigests: state.protectedDigests,
-    extensionOwnedShareLockRole: lockCapability.lockRole,
-    extensionOwnedShareLockVerified: true,
+    extensionOwnedAccessShareLockVerified: true,
+    schedulerMigrationGuardStrategy: 'access_share_plus_transaction_pre_post_exact_recheck',
+    extensionOwnedPrivilegeMutationPerformed: false,
     productionDatabaseReadOnly: true,
     functionDropAuthorized: false,
     tableDropAuthorized: false,
@@ -337,21 +337,26 @@ async function prepare(sourceCommit, options) {
   return evidence
 }
 
-function lockedGuardSql() {
+function controlStateGuardSql(expectedScheduler, phase) {
+  const tag = phase === 'before' ? 'pre_guard' : 'post_guard'
+  const point = phase === 'before' ? 'before DROP' : 'after DROP'
+  const expectedSchedulerJson = lit(JSON.stringify(expectedScheduler))
+  return `do $${tag}$ begin
+  if (select max(version::text) from supabase_migrations.schema_migrations) <> '${EXPECTED_MIGRATION_HEAD}' then raise exception 'migration head changed ${point}'; end if;
+  if ${schedulerJsonSql()} <> ${expectedSchedulerJson}::jsonb then raise exception 'minute scheduler inventory changed ${point}'; end if;
+end $${tag}$;`
+}
+function lockedGuardSql(expectedScheduler) {
   return `lock table xrpl_resource_restore_v1.accounting_rows, xrpl_resource_restore_v1.attempt_rows, xrpl_resource_restore_v1.targets in access exclusive mode;
 lock table xrpl_steady_v1.sessions, xrpl_steady_v1.ticks, xrpl_resource_guard_v2.attempts, xrpl_resource_guard_v2.tick_accounting, xrpl_resource_guard_v2.transfer_qualifications in share mode;
-set local role supabase_admin;
-lock table cron.job, supabase_migrations.schema_migrations in share mode;
-reset role;
+lock table cron.job, supabase_migrations.schema_migrations in access share mode;
 do $guard$ begin
   if (select count(*) from xrpl_resource_restore_v1.targets) <> 0 or (select count(*) from xrpl_resource_restore_v1.attempt_rows) <> 0 or (select count(*) from xrpl_resource_restore_v1.accounting_rows) <> 0 then raise exception 'restore rows changed under lock'; end if;
   if (select count(*) from xrpl_steady_v1.sessions where resource_guard_enabled and status='running') <> 0 then raise exception 'guarded session became running under lock'; end if;
   if (select count(*) from xrpl_steady_v1.ticks where status='leased') <> 0 then raise exception 'legacy tick became leased under lock'; end if;
   if (select count(*) from xrpl_resource_guard_v2.attempts where status='open') <> 0 then raise exception 'resource guard attempt became open under lock'; end if;
-  if (select count(*) from cron.job where active and (jobname='xrpl-lending-monitor-steady-qualification-minute' or command::text ilike '%xrpl-steady-batch-tick%')) <> 0 then raise exception 'legacy cron became active under lock'; end if;
-  if (select max(version::text) from supabase_migrations.schema_migrations) <> '${EXPECTED_MIGRATION_HEAD}' then raise exception 'migration head changed under lock'; end if;
-  if (select count(*) from cron.job where active and jobname='xrpl-lending-monitor-minute' and schedule='* * * * *' and encode(extensions.digest(command::text,'sha256'),'hex')='${EXPECTED_SCHEDULER_COMMAND_SHA}') <> 1 then raise exception 'minute scheduler changed under lock'; end if;
-end $guard$;`
+end $guard$;
+${controlStateGuardSql(expectedScheduler, 'before')}`
 }
 async function apply(sourceCommit, options) {
   const authorizedPlan = options['authorized-plan']
@@ -361,7 +366,9 @@ async function apply(sourceCommit, options) {
   if (before.planDigestSha256 !== authorizedPlan) fail('authorized restore schema retirement plan drifted')
   if (before.structuralStateSha256 !== authorizedState) fail('authorized restore schema retirement state drifted')
   const planned = await loadPlan(sourceCommit)
-  const bundle = `begin; set local lock_timeout='5s'; set local statement_timeout='30s';\n${lockedGuardSql()}\n${planned.sql}\ncommit;`
+  const expectedScheduler = (await inspectBefore()).scheduler
+  if (sha(JSON.stringify(expectedScheduler)) !== before.schedulerSha256) fail('scheduler changed between authorization revalidation and transaction assembly')
+  const bundle = `begin; set local lock_timeout='5s'; set local statement_timeout='30s';\n${lockedGuardSql(expectedScheduler)}\n${planned.sql}\n${controlStateGuardSql(expectedScheduler, 'after')}\ncommit;`
   await managementQuery(bundle, false)
   const after = await inspectAfter()
   validateAfter(after)
@@ -384,6 +391,9 @@ async function apply(sourceCommit, options) {
     maxMigrationVersionAfter: after.maxMigrationVersion,
     schedulerSha256Before: before.schedulerSha256,
     schedulerSha256After: sha(JSON.stringify(after.scheduler)),
+    extensionOwnedAccessShareLockVerified: before.extensionOwnedAccessShareLockVerified,
+    schedulerMigrationTransactionRevalidated: true,
+    extensionOwnedPrivilegeMutationPerformed: false,
     functionDropPerformed: true,
     exactFunctionDropCount: 5,
     tableDropPerformed: true,
