@@ -274,6 +274,10 @@ const requiredReserveDatabaseBytes = projectedIncrementalDatabaseBytes * RESERVE
 const projectedDatabaseBytesOneClaim = databaseBytes + projectedIncrementalDatabaseBytes
 const projectedDatabaseBytesReserve = databaseBytes + requiredReserveDatabaseBytes
 const maxProjectedPhysicalBytesPerRow = Math.max(...Object.values(projectedPhysicalBytes))
+const effectiveProjectedPhysicalBytesPerRow = Math.max(1, Math.ceil(projectedIncrementalDatabaseBytes / projectedIncrementalRows))
+const conservativeRemainingCapacityRows = databaseHeadroomBytes > 0
+  ? Math.floor(databaseHeadroomBytes / effectiveProjectedPhysicalBytesPerRow)
+  : 0
 
 const rawRetention = state.rawRetention ?? {}
 const rawRetentionExactContract = Number(rawRetention.jobCount) === 1
@@ -351,6 +355,8 @@ const evidence = {
     physicalAmplificationFactor,
     maxPersistentPhysicalBytesPerRow,
     maxProjectedPhysicalBytesPerRow,
+    maxObservedPhysicalBytesPerRow: maxProjectedPhysicalBytesPerRow,
+    effectiveProjectedPhysicalBytesPerRow,
     projectedIncrementalDatabaseBytes,
     requiredReserveDatabaseBytes,
     relationMetrics,
@@ -368,6 +374,7 @@ const evidence = {
   databaseBytes,
   databaseHaltBytes: DATABASE_HALT_BYTES,
   databaseHeadroomBytes,
+  conservativeRemainingCapacityRows,
   projectedDatabaseBytesOneClaim,
   projectedDatabaseBytesReserve,
   databaseCapacitySafe,
