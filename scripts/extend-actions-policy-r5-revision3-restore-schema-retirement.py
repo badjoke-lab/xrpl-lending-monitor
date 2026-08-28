@@ -86,7 +86,14 @@ for required in (
     "EXPECTED_DEPENDENCIES",
     "lock table xrpl_resource_restore_v1.accounting_rows, xrpl_resource_restore_v1.attempt_rows, xrpl_resource_restore_v1.targets in access exclusive mode",
     "xrpl_resource_guard_v2.tick_accounting, xrpl_resource_guard_v2.transfer_qualifications in share mode",
-    "lock table cron.job, supabase_migrations.schema_migrations in share mode",
+    "lock table cron.job, supabase_migrations.schema_migrations in access share mode",
+    "extensionOwnedAccessShareLockVerified: true",
+    "schedulerMigrationGuardStrategy: 'access_share_plus_transaction_pre_post_exact_recheck'",
+    "function controlStateGuardSql(expectedScheduler, phase)",
+    "controlStateGuardSql(expectedScheduler, 'before')",
+    "controlStateGuardSql(expectedScheduler, 'after')",
+    "schedulerMigrationTransactionRevalidated: true",
+    "extensionOwnedPrivilegeMutationPerformed: false",
     "managementQuery(bundle, false)",
     "functionDropPerformed: true",
     "exactFunctionDropCount: 5",
@@ -103,6 +110,12 @@ for required in (
 ):
     if required not in restore_schema_retirement_manager:
         raise SystemExit(f"restore schema retirement manager missing fail-closed guard: {required}")
+for forbidden in (
+    "set local role supabase_admin",
+    "lock table cron.job, supabase_migrations.schema_migrations in share mode",
+):
+    if forbidden in restore_schema_retirement_manager:
+        raise SystemExit(f"restore schema retirement manager contains forbidden extension-owner capability: {forbidden}")
 if restore_schema_retirement_manager.count("managementQuery(bundle, false)") != 1:
     raise SystemExit("restore schema retirement manager must expose exactly one production mutation request")
 
