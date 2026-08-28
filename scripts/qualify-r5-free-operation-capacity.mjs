@@ -13,8 +13,13 @@ const PROJECT_INVOCATION_HALT_31D = 400_000
 const SELECTED_MAX_LEDGERS_PER_CLAIM = 12
 const RETAINED_SAMPLE_LEDGERS = 14
 const RESERVE_WINDOWS = 14
-const MIN_PHYSICAL_ROW_BYTES = 512
+const OBSERVED_ROW_COUNT_SAFETY_MULTIPLIER = 2
 const TRANSPORT_AND_R5_OVERHEAD_ROWS_PER_LEDGER = 4
+const MIN_PHYSICAL_ROW_BYTES = 512
+const RAW_JOB_NAME = 'xrpl-r5-raw-evidence-retention-v1'
+const RAW_JOB_SCHEDULE = '47 */6 * * *'
+const RAW_JOB_COMMAND_SHA256 = 'a7029e464b56f7652b7690b6a8f5b90331d5dfbb0812e3a0ab2788987c64ec98'
+const RAW_CADENCE_LAG_BUDGET_WORK = 120
 
 const REVIEWED_RESOURCE_BASELINE = {
   runId: 31882543711,
@@ -92,7 +97,9 @@ async function writeJson(path, value) {
 
 function stateSql() {
   return `with recent_work as (
-    select work_id, row_number() over (order by committed_at desc, work_id desc) as ordinal
+    select work_id,
+           greatest(coalesce(expected_payload_chunks,0),0)::bigint as expected_payload_chunks,
+           greatest(coalesce(expected_commit_chunks,0),0)::bigint as expected_commit_chunks
       from public.xrpl_phase_work
      where profile_id='supabase-devnet' and status='committed' and committed_at is not null
      order by committed_at desc, work_id desc
@@ -100,20 +107,69 @@ function stateSql() {
   ), per_work as (
     select r.work_id,
            1::bigint as work_rows,
-           (select count(*) from public.xrpl_phase_payload_chunks p where p.work_id=r.work_id)::bigint as payload_rows,
-           (select count(*) from public.xrpl_phase_commit_chunks c where c.work_id=r.work_id)::bigint as commit_rows,
+           r.expected_payload_chunks as generated_payload_rows,
+           r.expected_commit_chunks as generated_commit_rows,
+           (select count(*) from public.xrpl_phase_payload_chunks p where p.work_id=r.work_id)::bigint as retained_payload_rows,
+           (select count(*) from public.xrpl_phase_commit_chunks c where c.work_id=r.work_id)::bigint as retained_commit_rows,
            (select count(*) from public.xrpl_phase_reference_rows x where x.work_id=r.work_id)::bigint as reference_rows
       from recent_work r
   ), relation_metrics as (
-    select * from (values
-      ('xrpl_phase_work'::text, (select count(*)::bigint from public.xrpl_phase_work), pg_total_relation_size('public.xrpl_phase_work'::regclass)::bigint),
-      ('xrpl_phase_payload_chunks', (select count(*)::bigint from public.xrpl_phase_payload_chunks), pg_total_relation_size('public.xrpl_phase_payload_chunks'::regclass)::bigint),
-      ('xrpl_phase_commit_chunks', (select count(*)::bigint from public.xrpl_phase_commit_chunks), pg_total_relation_size('public.xrpl_phase_commit_chunks'::regclass)::bigint),
-      ('xrpl_phase_reference_rows', (select count(*)::bigint from public.xrpl_phase_reference_rows), pg_total_relation_size('public.xrpl_phase_reference_rows'::regclass)::bigint),
-      ('xrpl_phase_messages', (select count(*)::bigint from public.xrpl_phase_messages), pg_total_relation_size('public.xrpl_phase_messages'::regclass)::bigint),
-      ('xrpl_phase_successors', (select count(*)::bigint from public.xrpl_phase_successors), pg_total_relation_size('public.xrpl_phase_successors'::regclass)::bigint),
-      ('recovery_batches', (select count(*)::bigint from xrpl_r5_v1.recovery_batches), pg_total_relation_size('xrpl_r5_v1.recovery_batches'::regclass)::bigint)
-    ) as m(name, exact_rows, total_bytes)
+    select 'xrpl_phase_work'::text as name, 'persistent'::text as retention_class,
+           count(*)::bigint as exact_rows, pg_total_relation_size('public.xrpl_phase_work'::regclass)::bigint as total_bytes,
+           coalesce(sum(pg_column_size(t)),0)::bigint as logical_bytes,
+           coalesce(max(pg_column_size(t)),0)::bigint as max_logical_row_bytes
+      from public.xrpl_phase_work t
+    union all
+    select 'xrpl_phase_payload_chunks','raw_24h',count(*)::bigint,pg_total_relation_size('public.xrpl_phase_payload_chunks'::regclass)::bigint,
+           coalesce(sum(pg_column_size(t)),0)::bigint,coalesce(max(pg_column_size(t)),0)::bigint
+      from public.xrpl_phase_payload_chunks t
+    union all
+    select 'xrpl_phase_commit_chunks','raw_24h',count(*)::bigint,pg_total_relation_size('public.xrpl_phase_commit_chunks'::regclass)::bigint,
+           coalesce(sum(pg_column_size(t)),0)::bigint,coalesce(max(pg_column_size(t)),0)::bigint
+      from public.xrpl_phase_commit_chunks t
+    union all
+    select 'xrpl_phase_reference_rows','persistent',count(*)::bigint,pg_total_relation_size('public.xrpl_phase_reference_rows'::regclass)::bigint,
+           coalesce(sum(pg_column_size(t)),0)::bigint,coalesce(max(pg_column_size(t)),0)::bigint
+      from public.xrpl_phase_reference_rows t
+    union all
+    select 'xrpl_phase_messages','persistent',count(*)::bigint,pg_total_relation_size('public.xrpl_phase_messages'::regclass)::bigint,
+           coalesce(sum(pg_column_size(t)),0)::bigint,coalesce(max(pg_column_size(t)),0)::bigint
+      from public.xrpl_phase_messages t
+    union all
+    select 'xrpl_phase_successors','persistent',count(*)::bigint,pg_total_relation_size('public.xrpl_phase_successors'::regclass)::bigint,
+           coalesce(sum(pg_column_size(t)),0)::bigint,coalesce(max(pg_column_size(t)),0)::bigint
+      from public.xrpl_phase_successors t
+    union all
+    select 'recovery_batches','persistent',count(*)::bigint,pg_total_relation_size('xrpl_r5_v1.recovery_batches'::regclass)::bigint,
+           coalesce(sum(pg_column_size(t)),0)::bigint,coalesce(max(pg_column_size(t)),0)::bigint
+      from xrpl_r5_v1.recovery_batches t
+  ), active_watermark as (
+    select * from public.xrpl_phase_watermarks where profile_id='supabase-devnet'
+  ), current_work as (
+    select w.* from public.xrpl_phase_work w join active_watermark wm on wm.work_id=w.work_id
+     where w.profile_id='supabase-devnet' and w.status='committed' and w.committed_at is not null
+       and w.scanned_end_ledger_index=wm.ledger_index and w.final_ledger_hash=wm.ledger_hash
+  ), predecessor_work as (
+    select p.* from current_work c join public.xrpl_phase_work p
+      on p.profile_id=c.profile_id and p.status='committed' and p.committed_at is not null
+     and p.scanned_end_ledger_index=c.previous_ledger_index and p.final_ledger_hash=c.expected_parent_hash
+     order by p.committed_at desc,p.work_id desc limit 1
+  ), protected_work as (
+    select work_id from current_work union select work_id from predecessor_work
+  ), old_complete_work as (
+    select w.work_id from public.xrpl_phase_work w
+     where w.profile_id='supabase-devnet' and w.status='committed' and w.committed_at is not null
+       and w.committed_at < now()-interval '24 hours'
+       and not exists(select 1 from protected_work p where p.work_id=w.work_id)
+       and (select count(*) from public.xrpl_phase_payload_chunks p where p.work_id=w.work_id)=w.expected_payload_chunks
+       and (select count(*) from public.xrpl_phase_commit_chunks c where c.work_id=w.work_id)=w.expected_commit_chunks
+       and (select count(*) from public.xrpl_phase_commit_chunks c where c.work_id=w.work_id and c.status='completed')=w.expected_commit_chunks
+  ), raw_job as (
+    select count(*)::bigint as rows,
+           min(schedule)::text as schedule,
+           coalesce(bool_and(active),false) as active,
+           coalesce(encode(extensions.digest(min(command)::text,'sha256'),'hex'),'') as command_sha256
+      from cron.job where jobname='${RAW_JOB_NAME}'
   )
   select jsonb_build_object(
     'databaseBytes', pg_database_size(current_database())::bigint,
@@ -123,12 +179,27 @@ function stateSql() {
     'archiveRows', (select count(*)::bigint from xrpl_phase_archive_v1.terminal_messages),
     'sampleLedgerCount', (select count(*)::bigint from recent_work),
     'samplePerLedgerRows', coalesce((select jsonb_agg(jsonb_build_object(
-       'workId',work_id,'workRows',work_rows,'payloadRows',payload_rows,'commitRows',commit_rows,'referenceRows',reference_rows,
-       'directRows',work_rows+payload_rows+commit_rows+reference_rows
+       'workId',work_id,'workRows',work_rows,
+       'generatedPayloadRows',generated_payload_rows,'generatedCommitRows',generated_commit_rows,
+       'retainedPayloadRows',retained_payload_rows,'retainedCommitRows',retained_commit_rows,
+       'referenceRows',reference_rows,
+       'generatedDirectRows',work_rows+generated_payload_rows+generated_commit_rows+reference_rows
     ) order by work_id) from per_work), '[]'::jsonb),
-    'maxDirectRowsPerLedger', coalesce((select max(work_rows+payload_rows+commit_rows+reference_rows)::bigint from per_work),0),
-    'relationMetrics', (select jsonb_agg(jsonb_build_object('name',name,'exactRows',exact_rows,'totalBytes',total_bytes) order by name) from relation_metrics),
-    'maxObservedPhysicalBytesPerRow', coalesce((select max(ceil(total_bytes::numeric/greatest(exact_rows,1)))::bigint from relation_metrics),0),
+    'maxWorkRowsPerLedger', coalesce((select max(work_rows)::bigint from per_work),0),
+    'maxGeneratedPayloadRowsPerLedger', coalesce((select max(generated_payload_rows)::bigint from per_work),0),
+    'maxGeneratedCommitRowsPerLedger', coalesce((select max(generated_commit_rows)::bigint from per_work),0),
+    'maxReferenceRowsPerLedger', coalesce((select max(reference_rows)::bigint from per_work),0),
+    'maxGeneratedDirectRowsPerLedger', coalesce((select max(work_rows+generated_payload_rows+generated_commit_rows+reference_rows)::bigint from per_work),0),
+    'relationMetrics', (select jsonb_agg(jsonb_build_object(
+       'name',name,'retentionClass',retention_class,'exactRows',exact_rows,'totalBytes',total_bytes,
+       'logicalBytes',logical_bytes,'maxLogicalRowBytes',max_logical_row_bytes
+    ) order by name) from relation_metrics),
+    'persistentPhysicalAmplificationFactor', coalesce((select ceil(sum(total_bytes)::numeric/greatest(sum(logical_bytes),1))::bigint from relation_metrics where retention_class='persistent'),0),
+    'maxPersistentPhysicalBytesPerRow', coalesce((select max(ceil(total_bytes::numeric/greatest(exact_rows,1)))::bigint from relation_metrics where retention_class='persistent'),0),
+    'rawRetention', (select jsonb_build_object(
+       'jobCount',rows,'schedule',schedule,'active',active,'commandSha256',command_sha256,
+       'oldCompleteWorkCount',(select count(*)::bigint from old_complete_work)
+    ) from raw_job),
     'run', coalesce((select jsonb_build_object(
        'runId',run_id,'status',status,'lastError',last_error,'profileRevision',profile_revision,
        'profileIdentityDigest',profile_identity_digest,'network',network,'epochId',epoch_id,
@@ -156,15 +227,60 @@ const state = firstState(await managementQuery(stateSql()))
 const databaseBytes = number(state.databaseBytes, 'databaseBytes')
 const databaseHeadroomBytes = DATABASE_HALT_BYTES - databaseBytes
 const sampleLedgerCount = number(state.sampleLedgerCount, 'sampleLedgerCount')
-const maxDirectRowsPerLedger = number(state.maxDirectRowsPerLedger, 'maxDirectRowsPerLedger')
-const observedPhysicalBytesPerRow = Math.max(number(state.maxObservedPhysicalBytesPerRow, 'maxObservedPhysicalBytesPerRow'), MIN_PHYSICAL_ROW_BYTES)
-const projectedRowsPerLedger = Math.max(1, Math.ceil(maxDirectRowsPerLedger * 2) + TRANSPORT_AND_R5_OVERHEAD_ROWS_PER_LEDGER)
+const physicalAmplificationFactor = number(state.persistentPhysicalAmplificationFactor, 'persistentPhysicalAmplificationFactor')
+const maxPersistentPhysicalBytesPerRow = Math.max(number(state.maxPersistentPhysicalBytesPerRow, 'maxPersistentPhysicalBytesPerRow'), MIN_PHYSICAL_ROW_BYTES)
+const relationMetrics = Array.isArray(state.relationMetrics) ? state.relationMetrics : []
+function metric(name) {
+  const found = relationMetrics.find((entry) => entry?.name === name)
+  if (!found) fail(`missing relation metric: ${name}`)
+  return found
+}
+function projectedPhysicalRowBytes(name) {
+  const maxLogical = number(metric(name).maxLogicalRowBytes, `${name}.maxLogicalRowBytes`)
+  if (maxLogical <= 0) fail(`${name} has no logical-row sample`)
+  return Math.max(MIN_PHYSICAL_ROW_BYTES, Math.ceil(maxLogical * physicalAmplificationFactor))
+}
+
+const observedRows = {
+  work: number(state.maxWorkRowsPerLedger, 'maxWorkRowsPerLedger'),
+  payload: number(state.maxGeneratedPayloadRowsPerLedger, 'maxGeneratedPayloadRowsPerLedger'),
+  commit: number(state.maxGeneratedCommitRowsPerLedger, 'maxGeneratedCommitRowsPerLedger'),
+  reference: number(state.maxReferenceRowsPerLedger, 'maxReferenceRowsPerLedger'),
+}
+const maxGeneratedDirectRowsPerLedger = number(state.maxGeneratedDirectRowsPerLedger, 'maxGeneratedDirectRowsPerLedger')
+const projectedRows = {
+  work: Math.max(1, observedRows.work) * OBSERVED_ROW_COUNT_SAFETY_MULTIPLIER,
+  payload: Math.max(1, observedRows.payload) * OBSERVED_ROW_COUNT_SAFETY_MULTIPLIER,
+  commit: Math.max(1, observedRows.commit) * OBSERVED_ROW_COUNT_SAFETY_MULTIPLIER,
+  reference: Math.max(1, observedRows.reference) * OBSERVED_ROW_COUNT_SAFETY_MULTIPLIER,
+  genericOverhead: TRANSPORT_AND_R5_OVERHEAD_ROWS_PER_LEDGER,
+}
+const projectedPhysicalBytes = {
+  work: projectedPhysicalRowBytes('xrpl_phase_work'),
+  payload: projectedPhysicalRowBytes('xrpl_phase_payload_chunks'),
+  commit: projectedPhysicalRowBytes('xrpl_phase_commit_chunks'),
+  reference: projectedPhysicalRowBytes('xrpl_phase_reference_rows'),
+  genericOverhead: maxPersistentPhysicalBytesPerRow,
+}
+const projectedRowsPerLedger = Object.values(projectedRows).reduce((sum, value) => sum + value, 0)
+const projectedDatabaseBytesPerLedger = Object.entries(projectedRows).reduce(
+  (sum, [key, rows]) => sum + (rows * projectedPhysicalBytes[key]),
+  0,
+)
 const projectedIncrementalRows = projectedRowsPerLedger * SELECTED_MAX_LEDGERS_PER_CLAIM
-const conservativeRemainingCapacityRows = databaseHeadroomBytes > 0 ? Math.floor(databaseHeadroomBytes / observedPhysicalBytesPerRow) : 0
 const requiredReserveRows = projectedIncrementalRows * RESERVE_WINDOWS
-const projectedIncrementalDatabaseBytes = projectedIncrementalRows * observedPhysicalBytesPerRow
+const projectedIncrementalDatabaseBytes = projectedDatabaseBytesPerLedger * SELECTED_MAX_LEDGERS_PER_CLAIM
+const requiredReserveDatabaseBytes = projectedIncrementalDatabaseBytes * RESERVE_WINDOWS
 const projectedDatabaseBytesOneClaim = databaseBytes + projectedIncrementalDatabaseBytes
-const projectedDatabaseBytesReserve = databaseBytes + (projectedIncrementalDatabaseBytes * RESERVE_WINDOWS)
+const projectedDatabaseBytesReserve = databaseBytes + requiredReserveDatabaseBytes
+const maxProjectedPhysicalBytesPerRow = Math.max(...Object.values(projectedPhysicalBytes))
+
+const rawRetention = state.rawRetention ?? {}
+const rawRetentionExactContract = Number(rawRetention.jobCount) === 1
+  && rawRetention.schedule === RAW_JOB_SCHEDULE
+  && rawRetention.active === true
+  && rawRetention.commandSha256 === RAW_JOB_COMMAND_SHA256
+const rawRetentionLagWithinCadence = number(rawRetention.oldCompleteWorkCount, 'rawRetention.oldCompleteWorkCount') <= RAW_CADENCE_LAG_BUDGET_WORK
 
 const priorEgress31dBytes = PROJECT_EGRESS_HALT_31D_BYTES - REVIEWED_RESOURCE_BASELINE.projectEgressHeadroomBeforeBatch
 const projectedEgress31dBytes = priorEgress31dBytes + REVIEWED_RESOURCE_BASELINE.egressUpperBytes
@@ -184,10 +300,14 @@ const currentSpecificationIntact = state.run?.runId === ACTIVE_RUN_ID
 const integrityPreservingReclaimOrRetentionProven = state.restoreSchemaExists === false
   && state.archiveTableExists === true
   && state.archiveRlsEnabled === true
+  && rawRetentionExactContract
+  && rawRetentionLagWithinCadence
 
 const databaseCapacitySafe = sampleLedgerCount === RETAINED_SAMPLE_LEDGERS
-  && projectedIncrementalRows > 0
-  && conservativeRemainingCapacityRows > requiredReserveRows
+  && physicalAmplificationFactor >= 1
+  && maxGeneratedDirectRowsPerLedger > 0
+  && projectedIncrementalDatabaseBytes > 0
+  && requiredReserveDatabaseBytes < databaseHeadroomBytes
   && projectedDatabaseBytesReserve < DATABASE_HALT_BYTES
 const egressCapacitySafe = reviewedResourceAccountingUnchanged
   && projectedEgress31dBytes < PROJECT_EGRESS_HALT_31D_BYTES
@@ -204,7 +324,7 @@ const safeForR5Rearm = currentSpecificationIntact
 
 const projectId = requireEnv('SUPABASE_PROJECT_ID', /^[a-z]{20}$/u)
 const evidence = {
-  schemaVersion: 2,
+  schemaVersion: 3,
   purpose: 'r5-free-operation-capacity-readonly-qualification',
   sourceCommit,
   projectIdentityDigest: sha256(projectId),
@@ -213,24 +333,41 @@ const evidence = {
   postReclaimCapacityRemeasured: true,
   growthRemeasured: sampleLedgerCount === RETAINED_SAMPLE_LEDGERS,
   growthModel: {
-    method: 'last_14_committed_ledgers_max_direct_rows_x2_plus_transport_overhead_physical_row_upper_bound',
+    method: 'retention_aware_generated_rows_times_persistent_physical_amplification',
     sampleLedgerCount,
     requiredSampleLedgerCount: RETAINED_SAMPLE_LEDGERS,
-    maxDirectRowsPerLedger,
+    generatedRawRowsReconstructedFromWorkExpectations: true,
+    observedRowsPerLedger: observedRows,
+    maxDirectRowsPerLedger: maxGeneratedDirectRowsPerLedger,
+    rowCountSafetyMultiplier: OBSERVED_ROW_COUNT_SAFETY_MULTIPLIER,
+    projectedComponentRowsPerLedger: projectedRows,
+    projectedComponentPhysicalBytesPerRow: projectedPhysicalBytes,
     projectedRowsPerLedger,
+    projectedDatabaseBytesPerLedger,
     selectedMaximumLedgersPerClaim: SELECTED_MAX_LEDGERS_PER_CLAIM,
     projectedIncrementalRows,
     reserveWindows: RESERVE_WINDOWS,
     requiredReserveRows,
-    maxObservedPhysicalBytesPerRow: observedPhysicalBytesPerRow,
+    physicalAmplificationFactor,
+    maxPersistentPhysicalBytesPerRow,
+    maxProjectedPhysicalBytesPerRow,
     projectedIncrementalDatabaseBytes,
-    relationMetrics: state.relationMetrics,
+    requiredReserveDatabaseBytes,
+    relationMetrics,
     samplePerLedgerRows: state.samplePerLedgerRows,
+  },
+  rawRetention: {
+    jobName: RAW_JOB_NAME,
+    expectedSchedule: RAW_JOB_SCHEDULE,
+    expectedCommandSha256: RAW_JOB_COMMAND_SHA256,
+    exactContractPresent: rawRetentionExactContract,
+    oldCompleteWorkCount: number(rawRetention.oldCompleteWorkCount, 'rawRetention.oldCompleteWorkCount'),
+    cadenceLagBudgetWork: RAW_CADENCE_LAG_BUDGET_WORK,
+    lagWithinCadence: rawRetentionLagWithinCadence,
   },
   databaseBytes,
   databaseHaltBytes: DATABASE_HALT_BYTES,
   databaseHeadroomBytes,
-  conservativeRemainingCapacityRows,
   projectedDatabaseBytesOneClaim,
   projectedDatabaseBytesReserve,
   databaseCapacitySafe,
