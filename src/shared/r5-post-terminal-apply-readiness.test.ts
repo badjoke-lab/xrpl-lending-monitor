@@ -63,20 +63,49 @@ function databaseGuardFixture(overrides: Record<string, unknown> = {}) {
 }
 
 function capacityQualificationFixture(databaseGuard: Record<string, unknown>) {
+  const projectedIncrementalRows = 120
+  const reserveWindows = 14
+  const requiredReserveRows = projectedIncrementalRows * reserveWindows
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     purpose: 'r5-free-operation-capacity-readonly-qualification',
     sourceCommit,
     productionDatabaseReadOnly: true,
+    bsrReadExecuted: true,
+    rowMutationPerformed: false,
+    schedulerMutationPerformed: false,
+    deploymentPerformed: false,
+    publicReaderMutationPerformed: false,
+    migrationMutationPerformed: false,
+    r5RearmPerformed: false,
     currentSpecificationIntact: true,
     integrityPreservingReclaimOrRetentionProven: true,
     postReclaimCapacityRemeasured: true,
     growthRemeasured: true,
-    sustainedFreeOperationCapacityProblemClosed: true,
-    safeForR5Rearm: true,
+    growthModel: {
+      projectedIncrementalRows,
+      reserveWindows,
+      requiredReserveRows,
+    },
     databaseBytes: databaseGuard.databaseBytes,
     databaseHaltBytes: 400_000_000,
     databaseHeadroomBytes: databaseGuard.databaseHeadroomBytes,
+    conservativeRemainingCapacityRows: 10_000,
+    projectedDatabaseBytesReserve: 380_000_000,
+    databaseCapacitySafe: true,
+    resourceBounds: {
+      projectedEgress31dBytes: 100_000_000,
+      projectEgressHalt31dBytes: 4 * 1024 * 1024 * 1024,
+      egressCapacitySafe: true,
+      memoryUpperBytes: 200_000_000,
+      projectMemoryHaltBytes: 224 * 1024 * 1024,
+      memoryCapacitySafe: true,
+      projectedInvocations31d: 44_640,
+      projectInvocationHalt31d: 400_000,
+      invocationCapacitySafe: true,
+    },
+    sustainedFreeOperationCapacityProblemClosed: true,
+    safeForR5Rearm: true,
     r5RearmAuthorized: false,
     mainnetEnabled: false,
   }
@@ -85,7 +114,7 @@ function capacityQualificationFixture(databaseGuard: Record<string, unknown>) {
 function runAssessment(
   databaseGuard: Record<string, unknown>,
   databaseGuardExit = 0,
-  capacityQualification?: Record<string, unknown>,
+  capacityQualification?: Record<string, any>,
 ) {
   const dir = mkdtempSync(join(tmpdir(), 'r5-post-terminal-readiness-'))
   const terminalPath = join(dir, 'terminal.json')
@@ -131,13 +160,9 @@ describe('R5 post-terminal apply rearm readiness', () => {
     expect(evidence.mainnetEnabled).toBe(false)
   })
 
-  it('permits candidacy only with a current explicit post-reclaim growth/capacity proof', () => {
+  it('permits candidacy only with a current numeric post-reclaim growth/capacity proof', () => {
     const databaseGuard = databaseGuardFixture()
-    const evidence = runAssessment(
-      databaseGuard,
-      0,
-      capacityQualificationFixture(databaseGuard),
-    )
+    const evidence = runAssessment(databaseGuard, 0, capacityQualificationFixture(databaseGuard))
     expect(evidence.candidateForSeparateRearmAuthorization).toBe(true)
     expect(evidence.blockerCount).toBe(0)
     expect(evidence.productionDatabaseReadOnly).toBe(true)
@@ -150,18 +175,35 @@ describe('R5 post-terminal apply rearm readiness', () => {
     expect(evidence.reviewedAtomicBundleSha256).toBe(guard.bundleSha256)
   })
 
+  it('rejects a forged safe boolean when numeric reserve rows are insufficient', () => {
+    const databaseGuard = databaseGuardFixture()
+    const qualification = capacityQualificationFixture(databaseGuard)
+    qualification.conservativeRemainingCapacityRows = 100
+    qualification.databaseCapacitySafe = true
+    qualification.sustainedFreeOperationCapacityProblemClosed = true
+    qualification.safeForR5Rearm = true
+    const evidence = runAssessment(databaseGuard, 0, qualification)
+    const codes = evidence.blockers.map((entry: { code: string }) => entry.code)
+    expect(evidence.candidateForSeparateRearmAuthorization).toBe(false)
+    expect(codes).toContain('capacity_remaining_rows_insufficient')
+    expect(codes).toContain('free_operation_capacity_boolean_mismatch')
+    expect(codes).toContain('capacity_qualification_rearm_boolean_mismatch')
+  })
+
   it('rejects stale or unsafe capacity evidence even if the database guard has positive headroom', () => {
     const databaseGuard = databaseGuardFixture()
     const qualification = capacityQualificationFixture(databaseGuard)
     qualification.databaseBytes = 349_000_000
     qualification.databaseHeadroomBytes = 51_000_000
+    qualification.projectedDatabaseBytesReserve = 401_000_000
+    qualification.databaseCapacitySafe = false
     qualification.sustainedFreeOperationCapacityProblemClosed = false
     qualification.safeForR5Rearm = false
     const evidence = runAssessment(databaseGuard, 0, qualification)
     const codes = evidence.blockers.map((entry: { code: string }) => entry.code)
     expect(evidence.candidateForSeparateRearmAuthorization).toBe(false)
     expect(codes).toContain('free_operation_capacity_problem_open')
-    expect(codes).toContain('capacity_qualification_rearm_not_safe')
+    expect(codes).toContain('capacity_projected_database_reserve_unsafe')
     expect(codes).toContain('capacity_qualification_database_state_stale')
     expect(codes).toContain('capacity_qualification_headroom_state_stale')
     expect(evidence.r5RearmAuthorized).toBe(false)
@@ -170,11 +212,7 @@ describe('R5 post-terminal apply rearm readiness', () => {
 
   it('fails readiness closed on database-guard failure without converting the assessment into an authorization', () => {
     const databaseGuard = databaseGuardFixture({ databaseBytes: 401_000_000, databaseHeadroomBytes: -1_000_000 })
-    const evidence = runAssessment(
-      databaseGuard,
-      1,
-      capacityQualificationFixture(databaseGuard),
-    )
+    const evidence = runAssessment(databaseGuard, 1, capacityQualificationFixture(databaseGuard))
     const codes = evidence.blockers.map((entry: { code: string }) => entry.code)
     expect(evidence.candidateForSeparateRearmAuthorization).toBe(false)
     expect(codes).toContain('database_guard_verify_failed')
