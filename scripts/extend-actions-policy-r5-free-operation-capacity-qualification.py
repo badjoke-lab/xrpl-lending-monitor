@@ -87,15 +87,28 @@ for required in (
     "const SELECTED_MAX_LEDGERS_PER_CLAIM = 12",
     "const RETAINED_SAMPLE_LEDGERS = 14",
     "const RESERVE_WINDOWS = 14",
+    "const OBSERVED_ROW_COUNT_SAFETY_MULTIPLIER = 2",
+    "const RAW_JOB_NAME = 'xrpl-r5-raw-evidence-retention-v1'",
+    "const RAW_JOB_SCHEDULE = '47 */6 * * *'",
+    "const RAW_JOB_COMMAND_SHA256 = 'a7029e464b56f7652b7690b6a8f5b90331d5dfbb0812e3a0ab2788987c64ec98'",
     "runId: 31882543711",
     "evidenceDigest: '46d2b25203b291dfa26030b31d1742bde883fda96763ea61ac88db6a449f31c9'",
     "runtimeAccountingBlobSha1: '3e20670008ee9438797eef8e79ff40fcd4fb23d7'",
     "directionalContractBlobSha1: 'b9bc8222ccf7383ba9f29766d4e061eb3ca66e96'",
     "read_only: true",
+    "expected_payload_chunks",
+    "expected_commit_chunks",
+    "persistentPhysicalAmplificationFactor",
+    "generatedRawRowsReconstructedFromWorkExpectations: true",
+    "method: 'retention_aware_generated_rows_times_persistent_physical_amplification'",
     "state.restoreSchemaExists === false",
     "state.archiveTableExists === true",
     "state.archiveRlsEnabled === true",
+    "rawRetentionExactContract",
+    "rawRetentionLagWithinCadence",
     "projectedIncrementalRows * RESERVE_WINDOWS",
+    "projectedIncrementalDatabaseBytes * RESERVE_WINDOWS",
+    "requiredReserveDatabaseBytes < databaseHeadroomBytes",
     "projectedDatabaseBytesReserve < DATABASE_HALT_BYTES",
     "projectedEgress31dBytes < PROJECT_EGRESS_HALT_31D_BYTES",
     "REVIEWED_RESOURCE_BASELINE.memoryUpperBytes < PROJECT_MEMORY_HALT_BYTES",
@@ -119,9 +132,10 @@ for forbidden in (
     "read_only: false", "delete from ", "truncate ", "update public.", "insert into ",
     "alter table ", "drop table ", "drop schema ", "reindex ", "vacuum ",
     "cron.schedule", "cron.unschedule", "wrangler deploy",
+    "last_14_committed_ledgers_max_direct_rows_x2_plus_transport_overhead_physical_row_upper_bound",
 ):
     if forbidden in qualifier_lower:
-        raise SystemExit(f"free-operation capacity qualifier contains forbidden mutation capability: {forbidden}")
+        raise SystemExit(f"free-operation capacity qualifier contains forbidden mutation capability or obsolete model: {forbidden}")
 
 '''
 text = text.replace(marker, block + marker)
