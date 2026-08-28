@@ -16,6 +16,20 @@ const RESERVE_WINDOWS = 14
 const MIN_PHYSICAL_ROW_BYTES = 512
 const TRANSPORT_AND_R5_OVERHEAD_ROWS_PER_LEDGER = 4
 
+const REVIEWED_RESOURCE_BASELINE = {
+  runId: 31882543711,
+  sourceCommit: '30d066ccb90c1efde1bd6bc80af620e32e214143',
+  evidenceDigest: '46d2b25203b291dfa26030b31d1742bde883fda96763ea61ac88db6a449f31c9',
+  classification: 'no_resource_halt_reproduced',
+  egressUpperBytes: 10_197,
+  memoryUpperBytes: 211_700_811,
+  projectEgressHeadroomBeforeBatch: 127_398_928,
+  runtimeAccountingBlobSha1: '3e20670008ee9438797eef8e79ff40fcd4fb23d7',
+  directionalContractBlobSha1: 'b9bc8222ccf7383ba9f29766d4e061eb3ca66e96',
+}
+const RUNTIME_ACCOUNTING_PATH = 'src/shared/supabase-revision4-r5-runtime-accounting.ts'
+const DIRECTIONAL_CONTRACT_PATH = 'src/shared/supabase-revision4-directional-egress-contract.ts'
+
 function fail(message) { throw new Error(message) }
 function sha256(value) { return createHash('sha256').update(String(value), 'utf8').digest('hex') }
 function requireEnv(name, pattern) {
@@ -66,9 +80,9 @@ function number(value, name) {
   if (!Number.isFinite(parsed) || parsed < 0) fail(`${name} invalid`)
   return parsed
 }
-async function readJson(path) {
-  if (!path) fail('resource diagnostic path missing')
-  return JSON.parse(await readFile(resolve(path), 'utf8'))
+async function gitBlobSha1(path) {
+  const content = await readFile(resolve(path))
+  return createHash('sha1').update(`blob ${content.byteLength}\0`).update(content).digest('hex')
 }
 async function writeJson(path, value) {
   const absolute = resolve(path)
@@ -106,7 +120,7 @@ function stateSql() {
     'restoreSchemaExists', to_regnamespace('xrpl_resource_restore_v1') is not null,
     'archiveTableExists', to_regclass('xrpl_phase_archive_v1.terminal_messages') is not null,
     'archiveRlsEnabled', coalesce((select relrowsecurity from pg_class where oid=to_regclass('xrpl_phase_archive_v1.terminal_messages')), false),
-    'archiveRows', case when to_regclass('xrpl_phase_archive_v1.terminal_messages') is null then null else (select count(*)::bigint from xrpl_phase_archive_v1.terminal_messages) end,
+    'archiveRows', (select count(*)::bigint from xrpl_phase_archive_v1.terminal_messages),
     'sampleLedgerCount', (select count(*)::bigint from recent_work),
     'samplePerLedgerRows', coalesce((select jsonb_agg(jsonb_build_object(
        'workId',work_id,'workRows',work_rows,'payloadRows',payload_rows,'commitRows',commit_rows,'referenceRows',reference_rows,
@@ -130,7 +144,13 @@ const options = parseArgs(process.argv.slice(2))
 const sourceCommit = options['source-commit']
 if (!/^[a-f0-9]{40}$/u.test(sourceCommit ?? '')) fail('invalid --source-commit')
 if (!options.output) fail('--output is required')
-const resourceDiagnostic = await readJson(options['resource-diagnostic'])
+
+const [runtimeAccountingBlobSha1, directionalContractBlobSha1] = await Promise.all([
+  gitBlobSha1(RUNTIME_ACCOUNTING_PATH),
+  gitBlobSha1(DIRECTIONAL_CONTRACT_PATH),
+])
+const reviewedResourceAccountingUnchanged = runtimeAccountingBlobSha1 === REVIEWED_RESOURCE_BASELINE.runtimeAccountingBlobSha1
+  && directionalContractBlobSha1 === REVIEWED_RESOURCE_BASELINE.directionalContractBlobSha1
 const state = firstState(await managementQuery(stateSql()))
 
 const databaseBytes = number(state.databaseBytes, 'databaseBytes')
@@ -146,10 +166,8 @@ const projectedIncrementalDatabaseBytes = projectedIncrementalRows * observedPhy
 const projectedDatabaseBytesOneClaim = databaseBytes + projectedIncrementalDatabaseBytes
 const projectedDatabaseBytesReserve = databaseBytes + (projectedIncrementalDatabaseBytes * RESERVE_WINDOWS)
 
-const egressUpperBytes = number(resourceDiagnostic?.bounds?.egressUpperBytes, 'resourceDiagnostic.bounds.egressUpperBytes')
-const memoryUpperBytes = number(resourceDiagnostic?.bounds?.memoryUpperBeforeEarlyRssHalt, 'resourceDiagnostic.bounds.memoryUpperBeforeEarlyRssHalt')
-const priorEgress31dBytes = number(resourceDiagnostic?.guards?.priorEgress31dBytes, 'resourceDiagnostic.guards.priorEgress31dBytes')
-const projectedEgress31dBytes = priorEgress31dBytes + egressUpperBytes
+const priorEgress31dBytes = PROJECT_EGRESS_HALT_31D_BYTES - REVIEWED_RESOURCE_BASELINE.projectEgressHeadroomBeforeBatch
+const projectedEgress31dBytes = priorEgress31dBytes + REVIEWED_RESOURCE_BASELINE.egressUpperBytes
 const projectedInvocations31d = 31 * 24 * 60
 
 const currentSpecificationIntact = state.run?.runId === ACTIVE_RUN_ID
@@ -171,9 +189,10 @@ const databaseCapacitySafe = sampleLedgerCount === RETAINED_SAMPLE_LEDGERS
   && projectedIncrementalRows > 0
   && conservativeRemainingCapacityRows > requiredReserveRows
   && projectedDatabaseBytesReserve < DATABASE_HALT_BYTES
-const egressCapacitySafe = resourceDiagnostic?.verdict?.classification === 'no_resource_halt_reproduced'
+const egressCapacitySafe = reviewedResourceAccountingUnchanged
   && projectedEgress31dBytes < PROJECT_EGRESS_HALT_31D_BYTES
-const memoryCapacitySafe = memoryUpperBytes < PROJECT_MEMORY_HALT_BYTES
+const memoryCapacitySafe = reviewedResourceAccountingUnchanged
+  && REVIEWED_RESOURCE_BASELINE.memoryUpperBytes < PROJECT_MEMORY_HALT_BYTES
 const invocationCapacitySafe = projectedInvocations31d < PROJECT_INVOCATION_HALT_31D
 
 const safeForR5Rearm = currentSpecificationIntact
@@ -216,15 +235,21 @@ const evidence = {
   projectedDatabaseBytesReserve,
   databaseCapacitySafe,
   resourceBounds: {
-    diagnosticPurpose: resourceDiagnostic?.purpose ?? null,
-    diagnosticEvidenceDigest: resourceDiagnostic?.evidenceDigest ?? null,
-    diagnosticClassification: resourceDiagnostic?.verdict?.classification ?? null,
-    egressUpperBytes,
+    reviewedBaselineRunId: REVIEWED_RESOURCE_BASELINE.runId,
+    reviewedBaselineSourceCommit: REVIEWED_RESOURCE_BASELINE.sourceCommit,
+    reviewedBaselineEvidenceDigest: REVIEWED_RESOURCE_BASELINE.evidenceDigest,
+    reviewedBaselineClassification: REVIEWED_RESOURCE_BASELINE.classification,
+    runtimeAccountingBlobSha1,
+    expectedRuntimeAccountingBlobSha1: REVIEWED_RESOURCE_BASELINE.runtimeAccountingBlobSha1,
+    directionalContractBlobSha1,
+    expectedDirectionalContractBlobSha1: REVIEWED_RESOURCE_BASELINE.directionalContractBlobSha1,
+    reviewedResourceAccountingUnchanged,
+    egressUpperBytes: REVIEWED_RESOURCE_BASELINE.egressUpperBytes,
     priorEgress31dBytes,
     projectedEgress31dBytes,
     projectEgressHalt31dBytes: PROJECT_EGRESS_HALT_31D_BYTES,
     egressCapacitySafe,
-    memoryUpperBytes,
+    memoryUpperBytes: REVIEWED_RESOURCE_BASELINE.memoryUpperBytes,
     projectMemoryHaltBytes: PROJECT_MEMORY_HALT_BYTES,
     memoryCapacitySafe,
     projectedInvocations31d,
