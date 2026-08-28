@@ -214,8 +214,15 @@ function afterSql() {
     'scheduler',${schedulerJsonSql()}
   )::text as state;`
 }
+function lockCapabilitySql() {
+  return `set local lock_timeout='5s';
+set local role supabase_admin;
+lock table cron.job, supabase_migrations.schema_migrations in share mode;
+select jsonb_build_object('lockRole',current_user,'schedulerMigrationShareLock',true)::text as state;`
+}
 async function inspectBefore() { return stateRow(await managementQuery(beforeSql(), true)) }
 async function inspectAfter() { return stateRow(await managementQuery(afterSql(), true)) }
+async function inspectLockCapability() { return stateRow(await managementQuery(lockCapabilitySql(), true)) }
 
 function schedulerValid(state) {
   const active = (state.scheduler ?? []).filter((x) => x.active)
@@ -290,6 +297,8 @@ async function prepare(sourceCommit, options) {
   const planned = await loadPlan(sourceCommit)
   const state = await inspectBefore()
   validateBefore(state)
+  const lockCapability = await inspectLockCapability()
+  if (lockCapability.lockRole !== 'supabase_admin' || lockCapability.schedulerMigrationShareLock !== true) fail('extension-owned share-lock capability unavailable')
   const evidence = {
     schemaVersion: 1,
     purpose: 'r5-revision3-restore-schema-retirement-prepare',
@@ -310,6 +319,8 @@ async function prepare(sourceCommit, options) {
     maxMigrationVersion: state.maxMigrationVersion,
     schedulerSha256: sha(JSON.stringify(state.scheduler)),
     protectedDigests: state.protectedDigests,
+    extensionOwnedShareLockRole: lockCapability.lockRole,
+    extensionOwnedShareLockVerified: true,
     productionDatabaseReadOnly: true,
     functionDropAuthorized: false,
     tableDropAuthorized: false,
@@ -329,7 +340,9 @@ async function prepare(sourceCommit, options) {
 function lockedGuardSql() {
   return `lock table xrpl_resource_restore_v1.accounting_rows, xrpl_resource_restore_v1.attempt_rows, xrpl_resource_restore_v1.targets in access exclusive mode;
 lock table xrpl_steady_v1.sessions, xrpl_steady_v1.ticks, xrpl_resource_guard_v2.attempts, xrpl_resource_guard_v2.tick_accounting, xrpl_resource_guard_v2.transfer_qualifications in share mode;
+set local role supabase_admin;
 lock table cron.job, supabase_migrations.schema_migrations in share mode;
+reset role;
 do $guard$ begin
   if (select count(*) from xrpl_resource_restore_v1.targets) <> 0 or (select count(*) from xrpl_resource_restore_v1.attempt_rows) <> 0 or (select count(*) from xrpl_resource_restore_v1.accounting_rows) <> 0 then raise exception 'restore rows changed under lock'; end if;
   if (select count(*) from xrpl_steady_v1.sessions where resource_guard_enabled and status='running') <> 0 then raise exception 'guarded session became running under lock'; end if;
