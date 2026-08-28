@@ -1,4 +1,5 @@
 from pathlib import Path
+import subprocess
 import sys
 
 if len(sys.argv) != 2:
@@ -138,3 +139,4 @@ for forbidden in ('cascade', 'if exists', 'delete', 'truncate', 'update', 'inser
 '''
 text = text.replace(marker, block + marker)
 path.write_text(text)
+subprocess.run([sys.executable, 'scripts/extend-actions-policy-r5-free-operation-capacity-qualification.py', sys.argv[1]], check=True)
