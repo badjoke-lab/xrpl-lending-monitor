@@ -84,7 +84,7 @@ describe('revision-3 restore schema retirement', () => {
     expect(manager).toContain("if ((state.referencingViews ?? []).length !== 0) fail('retirement target still has referencing view')")
   })
 
-  it('requires zero restore/runtime state and locks every protected boundary before DROP', () => {
+  it('locks protected data and sandwiches exact extension-owned control state around DROP', () => {
     expect(manager).toContain("fail('revision-3 restore rows are not empty')")
     expect(manager).toContain("if (Number(state.activeLegacyCronJobs) !== 0)")
     expect(manager).toContain("if (Number(state.runningGuardedSessions) !== 0)")
@@ -96,14 +96,19 @@ describe('revision-3 restore schema retirement', () => {
     expect(manager).toContain(
       'xrpl_resource_guard_v2.attempts, xrpl_resource_guard_v2.tick_accounting, xrpl_resource_guard_v2.transfer_qualifications in share mode',
     )
-    expect(manager).toContain('set local role supabase_admin;')
-    expect(manager).toContain('lock table cron.job, supabase_migrations.schema_migrations in share mode')
-    expect(manager).toContain('reset role;')
-    expect(manager).toContain("const lockCapability = await inspectLockCapability()")
-    expect(manager).toContain("fail('extension-owned share-lock capability unavailable')")
-    expect(manager).toContain('extensionOwnedShareLockVerified: true')
-    expect(manager).toContain("raise exception 'migration head changed under lock'")
-    expect(manager).toContain("raise exception 'minute scheduler changed under lock'")
+    expect(manager).toContain('lock table cron.job, supabase_migrations.schema_migrations in access share mode')
+    expect(manager).not.toContain('set local role supabase_admin;')
+    expect(manager).not.toContain('lock table cron.job, supabase_migrations.schema_migrations in share mode')
+    expect(manager).toContain('const lockCapability = await inspectLockCapability()')
+    expect(manager).toContain("fail('extension-owned ACCESS SHARE lock capability unavailable')")
+    expect(manager).toContain('extensionOwnedAccessShareLockVerified: true')
+    expect(manager).toContain("schedulerMigrationGuardStrategy: 'access_share_plus_transaction_pre_post_exact_recheck'")
+    expect(manager).toContain('function controlStateGuardSql(expectedScheduler, phase)')
+    expect(manager).toContain("controlStateGuardSql(expectedScheduler, 'before')")
+    expect(manager).toContain("controlStateGuardSql(expectedScheduler, 'after')")
+    expect(manager).toContain("raise exception 'migration head changed ${point}'")
+    expect(manager).toContain("raise exception 'minute scheduler inventory changed ${point}'")
+    expect(manager).toContain('extensionOwnedPrivilegeMutationPerformed: false')
   })
 
   it('has exactly one production write request and independent read-only post verification', () => {
@@ -116,6 +121,7 @@ describe('revision-3 restore schema retirement', () => {
     expect(manager).toContain("if (before.schedulerSha256 !== sha(JSON.stringify(after.scheduler)))")
     expect(manager).toContain("if (!same(applied.protectedDigestsBefore, state.protectedDigests))")
     for (const expected of [
+      'schedulerMigrationTransactionRevalidated: true',
       'functionDropPerformed: true',
       'exactFunctionDropCount: 5',
       'tableDropPerformed: true',
