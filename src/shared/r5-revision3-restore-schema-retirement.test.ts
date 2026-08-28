@@ -96,7 +96,12 @@ describe('revision-3 restore schema retirement', () => {
     expect(manager).toContain(
       'xrpl_resource_guard_v2.attempts, xrpl_resource_guard_v2.tick_accounting, xrpl_resource_guard_v2.transfer_qualifications in share mode',
     )
+    expect(manager).toContain('set local role supabase_admin;')
     expect(manager).toContain('lock table cron.job, supabase_migrations.schema_migrations in share mode')
+    expect(manager).toContain('reset role;')
+    expect(manager).toContain("const lockCapability = await inspectLockCapability()")
+    expect(manager).toContain("fail('extension-owned share-lock capability unavailable')")
+    expect(manager).toContain('extensionOwnedShareLockVerified: true')
     expect(manager).toContain("raise exception 'migration head changed under lock'")
     expect(manager).toContain("raise exception 'minute scheduler changed under lock'")
   })
@@ -105,6 +110,7 @@ describe('revision-3 restore schema retirement', () => {
     expect(manager.match(/managementQuery\(bundle, false\)/gu) ?? []).toHaveLength(1)
     expect(manager).toContain('async function inspectBefore() { return stateRow(await managementQuery(beforeSql(), true)) }')
     expect(manager).toContain('async function inspectAfter() { return stateRow(await managementQuery(afterSql(), true)) }')
+    expect(manager).toContain('async function inspectLockCapability() { return stateRow(await managementQuery(lockCapabilitySql(), true)) }')
     expect(manager).toContain("if (!same(before.protectedDigests, after.protectedDigests))")
     expect(manager).toContain("if (before.maxMigrationVersion !== after.maxMigrationVersion)")
     expect(manager).toContain("if (before.schedulerSha256 !== sha(JSON.stringify(after.scheduler)))")
