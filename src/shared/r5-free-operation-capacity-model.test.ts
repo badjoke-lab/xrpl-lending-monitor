@@ -7,6 +7,18 @@ const qualifier = readFileSync(
   resolve(process.cwd(), 'scripts/qualify-r5-free-operation-capacity.mjs'),
   'utf8',
 )
+const portablePayload = readFileSync(
+  resolve(process.cwd(), 'src/shared/portable-collector-payload.ts'),
+  'utf8',
+)
+const portableNormalization = readFileSync(
+  resolve(process.cwd(), 'src/collector/history-segments/portable-xrpl-normalization.ts'),
+  'utf8',
+)
+const r5RecoveryBatch = readFileSync(
+  resolve(process.cwd(), 'supabase/functions/xrpl-r5-recovery-batch/index.ts'),
+  'utf8',
+)
 
 describe('R5 free-operation capacity growth model', () => {
   it('reconstructs generated raw rows even after raw retention prunes old chunks', () => {
@@ -22,6 +34,18 @@ describe('R5 free-operation capacity growth model', () => {
     expect(qualifier).toContain('persistentPhysicalAmplificationFactor')
     expect(qualifier).toContain("where retention_class='persistent'")
     expect(qualifier).not.toContain('last_14_committed_ledgers_max_direct_rows_x2_plus_transport_overhead_physical_row_upper_bound')
+  })
+
+  it('binds payload-row projection to the writer hard chunk guard instead of the current observed maximum', () => {
+    expect(portablePayload).toContain('export const NORMALIZED_PAYLOAD_CHUNK_MAX_BYTES = 512_000')
+    expect(portablePayload).toContain('one normalized record exceeds the ${maxEncodedBytes}-byte chunk guard')
+    expect(portablePayload).toContain('normalized chunk ${chunkIndex} exceeds the ${maxEncodedBytes}-byte chunk guard')
+    expect(portableNormalization).toContain('chunks: await buildNormalizedPayloadChunks(payload),')
+    expect(r5RecoveryBatch).toContain('buildPortableXrplNormalizedWork({')
+    expect(qualifier).toContain('const EXPECTED_NORMALIZED_PAYLOAD_CHUNK_MAX_BYTES = 512_000')
+    expect(qualifier).toContain("projectedPhysicalRowBytes('xrpl_phase_payload_chunks', normalizedPayloadChunkMaxBytes)")
+    expect(qualifier).toContain('payloadChunkHardGuardBoundToR5Writer')
+    expect(qualifier).toContain('normalizedPayloadChunkMaxBytes')
   })
 
   it('counts the full reserve horizon and requires the exact active raw-retention contract without authorizing mutation', () => {
