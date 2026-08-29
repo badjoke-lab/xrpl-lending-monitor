@@ -18,6 +18,7 @@ OUT.mkdir(parents=True, exist_ok=True)
 
 EXPECTED_ERROR_FRAGMENT = "too many subrequests by single worker invocation"
 EXPECTED_MAX_LEDGERS = "32"
+QUEUE_LEASE_SECONDS = 15 * 60
 
 if not ACCOUNT_ID or not TOKEN:
     raise SystemExit("Cloudflare read credentials are required")
@@ -114,6 +115,10 @@ slot_counts = d1_query(
     "queue-slot-counts.json",
     "SELECT status,COUNT(*) AS row_count FROM fast_lane_queue_slots GROUP BY status ORDER BY status",
 )
+processing_summary = one(d1_query(
+    "processing-slot-summary.json",
+    f"SELECT COALESCE(SUM(CASE WHEN status='processing' AND next_scheduled_time IS NULL AND unixepoch(updated_at) > unixepoch('now')-{QUEUE_LEASE_SECONDS} THEN 1 ELSE 0 END),0) AS live_unstaged, COALESCE(SUM(CASE WHEN status='processing' AND next_scheduled_time IS NULL AND unixepoch(updated_at) <= unixepoch('now')-{QUEUE_LEASE_SECONDS} THEN 1 ELSE 0 END),0) AS stale_reclaimable, COALESCE(SUM(CASE WHEN status='processing' AND next_scheduled_time IS NOT NULL THEN 1 ELSE 0 END),0) AS staged_successor FROM fast_lane_queue_slots",
+))
 latest_slots = d1_query(
     "latest-slots.json",
     "SELECT scheduled_time,status,started_at,completed_at,next_scheduled_time,error_message,updated_at FROM fast_lane_queue_slots ORDER BY updated_at DESC LIMIT 8",
@@ -144,8 +149,10 @@ latest_deployment = deployment_list[0] if deployment_list else {}
 versions = latest_deployment.get("versions") or []
 
 status_counts = {str(row.get("status")): int(row.get("row_count", 0)) for row in slot_counts}
-processing_slots = status_counts.get("processing", 0)
 pending_slots = status_counts.get("pending", 0)
+live_unstaged = int(processing_summary.get("live_unstaged", -1))
+stale_reclaimable = int(processing_summary.get("stale_reclaimable", -1))
+staged_successor = int(processing_summary.get("staged_successor", -1))
 
 base_aligned = (
     base.get("base_epoch_id") == overlay.get("epoch_id")
@@ -165,7 +172,8 @@ checks = {
     "singleDeploymentVersion": len(versions) == 1 and versions[0].get("percentage") == 100,
     "baseBindingAligned": base_aligned,
     "fastCursorAtOrAfterBase": fast_at_or_after_base,
-    "noProcessingQueueSlot": processing_slots == 0,
+    "noLiveUnstagedProcessingSlot": live_unstaged == 0,
+    "noStagedSuccessorSlot": staged_successor == 0,
     "noPendingQueueSlot": pending_slots == 0,
     "staleOverlayZero": int(stale.get("row_count", -1)) == 0,
     "foldableCompactZero": int(foldable.get("row_count", -1)) == 0,
@@ -191,6 +199,12 @@ result = {
         "baseBinding": base,
         "latestMetric": latest_metric,
         "queueSlotCounts": status_counts,
+        "processingSlots": {
+            "liveUnstaged": live_unstaged,
+            "staleReclaimable": stale_reclaimable,
+            "stagedSuccessor": staged_successor,
+            "leaseSeconds": QUEUE_LEASE_SECONDS,
+        },
         "latestSlots": latest_slots,
         "compact": compact,
         "foldableCompactRows": int(foldable.get("row_count", -1)),
@@ -212,7 +226,9 @@ print(json.dumps({
     "failures": result["failures"],
     "fastLedger": fast.get("last_processed_ledger"),
     "compactRows": compact.get("row_count"),
-    "processingSlots": processing_slots,
+    "liveProcessingSlots": live_unstaged,
+    "staleReclaimableProcessingSlots": stale_reclaimable,
+    "stagedSuccessorSlots": staged_successor,
     "pendingSlots": pending_slots,
 }, sort_keys=True))
 
