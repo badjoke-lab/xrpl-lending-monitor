@@ -25,7 +25,7 @@ describe('R5 free-operation capacity growth model', () => {
     expect(qualifier).toContain('expected_payload_chunks')
     expect(qualifier).toContain('expected_commit_chunks')
     expect(qualifier).toContain('generatedRawRowsReconstructedFromWorkExpectations: true')
-    expect(qualifier).toContain("method: 'retention_aware_generated_rows_times_persistent_physical_amplification'")
+    expect(qualifier).toContain("method: 'retention_aware_aggregate_completion_cap_times_physical_amplification_plus_structural_row_reserve'")
   })
 
   it('measures detoasted logical row values instead of projecting tiny-table fixed allocation per retained row', () => {
@@ -46,6 +46,19 @@ describe('R5 free-operation capacity growth model', () => {
     expect(qualifier).toContain("projectedPhysicalRowBytes('xrpl_phase_payload_chunks', normalizedPayloadChunkMaxBytes)")
     expect(qualifier).toContain('payloadChunkHardGuardBoundToR5Writer')
     expect(qualifier).toContain('normalizedPayloadChunkMaxBytes')
+  })
+
+  it('binds the whole successful claim to the executor completion-request hard cap', () => {
+    expect(r5RecoveryBatch).toContain('const COMPLETION_REQUEST_MAX_BYTES = 2 * 1024 * 1024')
+    expect(r5RecoveryBatch).toContain('resolved.completionRequestBytes > COMPLETION_REQUEST_MAX_BYTES')
+    expect(r5RecoveryBatch).toContain('fixedPoint.completionRequestBody')
+    expect(qualifier).toContain('const EXPECTED_COMPLETION_REQUEST_MAX_BYTES = 2 * 1024 * 1024')
+    expect(qualifier).toContain('completion request byte guard is not unique')
+    expect(qualifier).toContain('completion request byte guard changed from reviewed contract')
+    expect(qualifier).toContain('R5 writer is no longer bound to the reviewed aggregate completion request guard')
+    expect(qualifier).toContain('completionRequestHardGuardBoundToR5Writer')
+    expect(qualifier).toContain('completionRequestPhysicalEnvelopeBytes')
+    expect(qualifier).toContain('projectedStructuralOverheadDatabaseBytes')
   })
 
   it('counts the full reserve horizon and requires the exact active raw-retention contract without authorizing mutation', () => {
