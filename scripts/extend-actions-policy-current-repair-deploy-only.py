@@ -20,6 +20,7 @@ if text.count(marker) != 1:
 block = r'''
 current_repair_deploy = (root / "deploy-queue-minute-cadence-fix.yml").read_text()
 current_repair_queue_pause_manager = (root / "../../scripts/current-repair-queue-pause.py").read_text()
+compile(current_repair_queue_pause_manager, "current-repair-queue-pause.py", "exec")
 for required in (
     "name: Deploy Current repair only",
     "issue_comment:",
