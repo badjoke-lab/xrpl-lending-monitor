@@ -5,6 +5,22 @@ import {
   type FastLaneShadowPersistenceUsage,
 } from './fast-lane-shadow-repository'
 
+const HISTORY_WINDOWS_PER_D1_QUERY = 8
+const MUTATIONS_PER_D1_QUERY = 256
+export const FAST_LANE_MAX_PERSISTENCE_D1_QUERIES = 24
+
+export class FastLaneD1QueryBudgetError extends Error {
+  readonly queries: number
+  readonly limit: number
+
+  constructor(queries: number, limit = FAST_LANE_MAX_PERSISTENCE_D1_QUERIES) {
+    super(`Fast-lane persistence D1 query budget exceeded: queries=${queries}, limit=${limit}`)
+    this.name = 'FastLaneD1QueryBudgetError'
+    this.queries = queries
+    this.limit = limit
+  }
+}
+
 function finiteMetric(meta: unknown, key: 'rows_read' | 'rows_written'): number {
   if (!meta || typeof meta !== 'object') return 0
   const value = (meta as Record<string, unknown>)[key]
@@ -85,45 +101,185 @@ function objectLookupJson(historyBundle: FastLaneHistoryBundle): string {
   return JSON.stringify([...objects.values()])
 }
 
-function appendActivityWindow(
+function chunks<T>(values: readonly T[], size: number): T[][] {
+  const output: T[][] = []
+  for (let offset = 0; offset < values.length; offset += size) {
+    output.push(values.slice(offset, offset + size))
+  }
+  return output
+}
+
+function appendMutationStatements(
   db: D1Database,
   statements: D1PreparedStatement[],
-  activityPlan: FastLaneShadowWindowPlan,
-  historyBundle: FastLaneHistoryBundle,
-  processedAt: string,
+  plan: FastLaneShadowWindowPlan,
 ): void {
-  statements.push(
-    db.prepare(
-      `INSERT INTO fast_lane_shadow_windows (
-         network, epoch_id, window_start_close_time, window_end_close_time,
-         start_ledger_index, end_ledger_index, end_ledger_hash,
-         inspected_transaction_count, lending_transaction_count,
-         successful_lending_transaction_count, affected_object_count,
-         activity_bundle_json, object_lookup_json, created_at
-       ) VALUES (
-         'devnet', ?1, ?2, ?3,
-         ?4, ?5, ?6,
-         ?7, ?8,
-         ?9, ?10,
-         ?11, ?12, ?13
-       )
-       ON CONFLICT(network, epoch_id, window_start_close_time) DO NOTHING`,
-    ).bind(
-      activityPlan.epochId,
-      activityPlan.windowStartCloseTime,
-      activityPlan.windowEndCloseTime,
-      activityPlan.startLedgerIndex,
-      activityPlan.endLedgerIndex,
-      activityPlan.endLedgerHash,
-      activityPlan.inspectedTransactions,
-      activityPlan.lendingTransactions,
-      activityPlan.successfulLendingTransactions,
-      activityPlan.mutations.length,
-      JSON.stringify(activityPlan.activity),
-      objectLookupJson(historyBundle),
-      processedAt,
-    ),
-  )
+  const serialized = plan.mutations.map((entry) => {
+    const relationships = entry.mutation.relationships ?? {}
+    return {
+      objectType: entry.mutation.objectType,
+      objectId: entry.mutation.objectId,
+      operation: entry.mutation.operation,
+      projectionJson: entry.mutation.operation === 'upsert' ? entry.mutation.projectionJson : null,
+      owner: relationships.owner ?? null,
+      account: relationships.account ?? null,
+      borrower: relationships.borrower ?? null,
+      vaultId: relationships.vaultId ?? null,
+      loanBrokerId: relationships.loanBrokerId ?? null,
+      assetKey: relationships.assetKey ?? null,
+      onLedgerStatus: relationships.onLedgerStatus ?? null,
+      sourceLedgerIndex: entry.ledgerIndex,
+      sourceLedgerHash: entry.ledgerHash,
+      sourceTransactionHash: entry.transactionHash,
+      sourceTransactionIndex: entry.transactionIndex,
+      updatedAt: entry.updatedAt,
+    }
+  })
+
+  for (const group of chunks(serialized, MUTATIONS_PER_D1_QUERY)) {
+    statements.push(
+      db.prepare(
+        `INSERT INTO fast_lane_shadow_objects_compact (
+           network, epoch_id, object_type, object_id, operation, projection_json,
+           owner, account, borrower, vault_id, loan_broker_id, asset_key,
+           on_ledger_status, source_ledger_index, source_ledger_hash,
+           source_transaction_hash, source_transaction_index, updated_at
+         )
+         SELECT
+           'devnet', ?1,
+           json_extract(item.value, '$.objectType'),
+           json_extract(item.value, '$.objectId'),
+           json_extract(item.value, '$.operation'),
+           json_extract(item.value, '$.projectionJson'),
+           json_extract(item.value, '$.owner'),
+           json_extract(item.value, '$.account'),
+           json_extract(item.value, '$.borrower'),
+           json_extract(item.value, '$.vaultId'),
+           json_extract(item.value, '$.loanBrokerId'),
+           json_extract(item.value, '$.assetKey'),
+           json_extract(item.value, '$.onLedgerStatus'),
+           CAST(json_extract(item.value, '$.sourceLedgerIndex') AS INTEGER),
+           json_extract(item.value, '$.sourceLedgerHash'),
+           json_extract(item.value, '$.sourceTransactionHash'),
+           CAST(json_extract(item.value, '$.sourceTransactionIndex') AS INTEGER),
+           json_extract(item.value, '$.updatedAt')
+         FROM json_each(?2) AS item
+         WHERE true
+         ON CONFLICT(network, epoch_id, object_type, object_id)
+         DO UPDATE SET
+           operation = excluded.operation,
+           projection_json = excluded.projection_json,
+           owner = excluded.owner,
+           account = excluded.account,
+           borrower = excluded.borrower,
+           vault_id = excluded.vault_id,
+           loan_broker_id = excluded.loan_broker_id,
+           asset_key = excluded.asset_key,
+           on_ledger_status = excluded.on_ledger_status,
+           source_ledger_index = excluded.source_ledger_index,
+           source_ledger_hash = excluded.source_ledger_hash,
+           source_transaction_hash = excluded.source_transaction_hash,
+           source_transaction_index = excluded.source_transaction_index,
+           updated_at = excluded.updated_at
+         WHERE excluded.source_ledger_index > fast_lane_shadow_objects_compact.source_ledger_index
+            OR (
+              excluded.source_ledger_index = fast_lane_shadow_objects_compact.source_ledger_index
+              AND excluded.source_transaction_index > fast_lane_shadow_objects_compact.source_transaction_index
+            )`,
+      ).bind(plan.epochId, JSON.stringify(group)),
+    )
+  }
+}
+
+function appendHistoryStatements(
+  db: D1Database,
+  statements: D1PreparedStatement[],
+  historyWindows: readonly EncodedFastLaneHistoryWindow[],
+): void {
+  for (const group of chunks(historyWindows, HISTORY_WINDOWS_PER_D1_QUERY)) {
+    const historyRows = group.map(({ historyBundle, encodedHistoryBundle }) => ({
+      epochId: historyBundle.epochId,
+      startLedgerIndex: historyBundle.startLedgerIndex,
+      endLedgerIndex: historyBundle.endLedgerIndex,
+      endLedgerHash: historyBundle.endLedgerHash,
+      encodedHistoryBundle,
+      createdAt: historyBundle.createdAt,
+    }))
+    statements.push(
+      db.prepare(
+        `INSERT INTO fast_lane_history_windows (
+           network, epoch_id, start_ledger_index, end_ledger_index,
+           end_ledger_hash, bundle_json, created_at
+         )
+         SELECT
+           'devnet',
+           json_extract(item.value, '$.epochId'),
+           CAST(json_extract(item.value, '$.startLedgerIndex') AS INTEGER),
+           CAST(json_extract(item.value, '$.endLedgerIndex') AS INTEGER),
+           json_extract(item.value, '$.endLedgerHash'),
+           json_extract(item.value, '$.encodedHistoryBundle'),
+           json_extract(item.value, '$.createdAt')
+         FROM json_each(?1) AS item
+         WHERE true
+         ON CONFLICT(network, epoch_id, start_ledger_index)
+         DO UPDATE SET
+           end_ledger_index = excluded.end_ledger_index,
+           end_ledger_hash = excluded.end_ledger_hash,
+           bundle_json = excluded.bundle_json,
+           created_at = excluded.created_at
+         WHERE excluded.end_ledger_index >= fast_lane_history_windows.end_ledger_index`,
+      ).bind(JSON.stringify(historyRows)),
+    )
+
+    const activityRows = group.map(({ historyBundle, activityPlan }) => {
+      const resolvedPlan = activityPlan
+      if (!resolvedPlan) throw new Error('Fast-lane activity plan is required')
+      return {
+        epochId: resolvedPlan.epochId,
+        windowStartCloseTime: resolvedPlan.windowStartCloseTime,
+        windowEndCloseTime: resolvedPlan.windowEndCloseTime,
+        startLedgerIndex: resolvedPlan.startLedgerIndex,
+        endLedgerIndex: resolvedPlan.endLedgerIndex,
+        endLedgerHash: resolvedPlan.endLedgerHash,
+        inspectedTransactions: resolvedPlan.inspectedTransactions,
+        lendingTransactions: resolvedPlan.lendingTransactions,
+        successfulLendingTransactions: resolvedPlan.successfulLendingTransactions,
+        affectedObjectCount: resolvedPlan.mutations.length,
+        activityBundleJson: JSON.stringify(resolvedPlan.activity),
+        objectLookupJson: objectLookupJson(historyBundle),
+        createdAt: historyBundle.createdAt,
+      }
+    })
+    statements.push(
+      db.prepare(
+        `INSERT INTO fast_lane_shadow_windows (
+           network, epoch_id, window_start_close_time, window_end_close_time,
+           start_ledger_index, end_ledger_index, end_ledger_hash,
+           inspected_transaction_count, lending_transaction_count,
+           successful_lending_transaction_count, affected_object_count,
+           activity_bundle_json, object_lookup_json, created_at
+         )
+         SELECT
+           'devnet',
+           json_extract(item.value, '$.epochId'),
+           CAST(json_extract(item.value, '$.windowStartCloseTime') AS INTEGER),
+           CAST(json_extract(item.value, '$.windowEndCloseTime') AS INTEGER),
+           CAST(json_extract(item.value, '$.startLedgerIndex') AS INTEGER),
+           CAST(json_extract(item.value, '$.endLedgerIndex') AS INTEGER),
+           json_extract(item.value, '$.endLedgerHash'),
+           CAST(json_extract(item.value, '$.inspectedTransactions') AS INTEGER),
+           CAST(json_extract(item.value, '$.lendingTransactions') AS INTEGER),
+           CAST(json_extract(item.value, '$.successfulLendingTransactions') AS INTEGER),
+           CAST(json_extract(item.value, '$.affectedObjectCount') AS INTEGER),
+           json_extract(item.value, '$.activityBundleJson'),
+           json_extract(item.value, '$.objectLookupJson'),
+           json_extract(item.value, '$.createdAt')
+         FROM json_each(?1) AS item
+         WHERE true
+         ON CONFLICT(network, epoch_id, window_start_close_time) DO NOTHING`,
+      ).bind(JSON.stringify(activityRows)),
+    )
+  }
 }
 
 export async function commitFastLaneCompactShadowWindows(options: {
@@ -184,96 +340,8 @@ export async function commitFastLaneCompactShadowWindows(options: {
     ).bind(token, options.expectedPreviousLedger, options.expectedPreviousHash, options.processedAt),
   )
 
-  for (const entry of plan.mutations) {
-    const projection = entry.mutation.operation === 'upsert' ? entry.mutation.projectionJson : null
-    const relationships = entry.mutation.relationships ?? {}
-    statements.push(
-      db.prepare(
-        `INSERT INTO fast_lane_shadow_objects_compact (
-           network, epoch_id, object_type, object_id, operation, projection_json,
-           owner, account, borrower, vault_id, loan_broker_id, asset_key,
-           on_ledger_status, source_ledger_index, source_ledger_hash,
-           source_transaction_hash, source_transaction_index, updated_at
-         ) VALUES (
-           'devnet', ?1, ?2, ?3, ?4, ?5,
-           ?6, ?7, ?8, ?9, ?10, ?11,
-           ?12, ?13, ?14, ?15, ?16, ?17
-         )
-         ON CONFLICT(network, epoch_id, object_type, object_id)
-         DO UPDATE SET
-           operation = excluded.operation,
-           projection_json = excluded.projection_json,
-           owner = excluded.owner,
-           account = excluded.account,
-           borrower = excluded.borrower,
-           vault_id = excluded.vault_id,
-           loan_broker_id = excluded.loan_broker_id,
-           asset_key = excluded.asset_key,
-           on_ledger_status = excluded.on_ledger_status,
-           source_ledger_index = excluded.source_ledger_index,
-           source_ledger_hash = excluded.source_ledger_hash,
-           source_transaction_hash = excluded.source_transaction_hash,
-           source_transaction_index = excluded.source_transaction_index,
-           updated_at = excluded.updated_at
-         WHERE excluded.source_ledger_index > fast_lane_shadow_objects_compact.source_ledger_index
-            OR (
-              excluded.source_ledger_index = fast_lane_shadow_objects_compact.source_ledger_index
-              AND excluded.source_transaction_index > fast_lane_shadow_objects_compact.source_transaction_index
-            )`,
-      ).bind(
-        plan.epochId,
-        entry.mutation.objectType,
-        entry.mutation.objectId,
-        entry.mutation.operation,
-        projection,
-        relationships.owner ?? null,
-        relationships.account ?? null,
-        relationships.borrower ?? null,
-        relationships.vaultId ?? null,
-        relationships.loanBrokerId ?? null,
-        relationships.assetKey ?? null,
-        relationships.onLedgerStatus ?? null,
-        entry.ledgerIndex,
-        entry.ledgerHash,
-        entry.transactionHash,
-        entry.transactionIndex,
-        entry.updatedAt,
-      ),
-    )
-  }
-
-  for (const window of options.historyWindows) {
-    const { historyBundle, encodedHistoryBundle } = window
-    statements.push(
-      db.prepare(
-        `INSERT INTO fast_lane_history_windows (
-           network, epoch_id, start_ledger_index, end_ledger_index,
-           end_ledger_hash, bundle_json, created_at
-         ) VALUES ('devnet', ?1, ?2, ?3, ?4, ?5, ?6)
-         ON CONFLICT(network, epoch_id, start_ledger_index)
-         DO UPDATE SET
-           end_ledger_index = excluded.end_ledger_index,
-           end_ledger_hash = excluded.end_ledger_hash,
-           bundle_json = excluded.bundle_json,
-           created_at = excluded.created_at
-         WHERE excluded.end_ledger_index >= fast_lane_history_windows.end_ledger_index`,
-      ).bind(
-        historyBundle.epochId,
-        historyBundle.startLedgerIndex,
-        historyBundle.endLedgerIndex,
-        historyBundle.endLedgerHash,
-        encodedHistoryBundle,
-        historyBundle.createdAt,
-      ),
-    )
-    appendActivityWindow(
-      db,
-      statements,
-      window.activityPlan ?? plan,
-      historyBundle,
-      options.processedAt,
-    )
-  }
+  appendMutationStatements(db, statements, plan)
+  appendHistoryStatements(db, statements, options.historyWindows)
 
   statements.push(
     db.prepare(
@@ -305,6 +373,10 @@ export async function commitFastLaneCompactShadowWindows(options: {
   statements.push(
     db.prepare('DELETE FROM fast_lane_shadow_commit_guards WHERE commit_token = ?1').bind(token),
   )
+
+  if (statements.length > FAST_LANE_MAX_PERSISTENCE_D1_QUERIES) {
+    throw new FastLaneD1QueryBudgetError(statements.length)
+  }
 
   const results = await db.batch(statements)
   const usage = results.reduce<FastLaneShadowPersistenceUsage>(
