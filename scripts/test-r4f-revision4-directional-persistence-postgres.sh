@@ -117,6 +117,10 @@ CURRENT_FIRST_POSTGRES_CONTAINER="$container_name" \
   CURRENT_FIRST_OUTPUT="${output_directory}/current-first" \
   bash scripts/test-current-first-lane-postgres.sh
 
+CURRENT_FIRST_POSTGRES_CONTAINER="$container_name" \
+  CURRENT_FIRST_STORAGE_OUTPUT="${output_directory}/current-first-storage" \
+  bash scripts/test-current-first-storage-envelope-postgres.sh
+
 cat > "${output_directory}/summary.md" <<'EOF'
 ## R4F revision-4 G2D PostgreSQL integration
 
@@ -132,6 +136,8 @@ cat > "${output_directory}/summary.md" <<'EOF'
 - compact checkpoint exact replay converged: `true`
 - current-first candidate SQL applied locally: `true`
 - current/history watermark split verified: `true`
+- current-first physical storage envelope measured locally: `true`
+- repeated current updates reuse ordinary-VACUUM storage: `true`
 - public-role privilege leak: `false`
 - deterministic candidate export retained: `true`
 - recovery mutation committed: `false`
