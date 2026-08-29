@@ -1,92 +1,259 @@
-name: Deploy Queue minute-cadence fix
+name: Deploy Current repair only
 
 on:
-  pull_request:
-    branches: [main]
-    paths:
-      - .github/workflows/deploy-queue-minute-cadence-fix.yml
-      - .github/queue-minute-cadence-deploy-trigger
-      - scripts/controlled-queue-minute-cadence-deploy.py
-      - scripts/check-actions-workflow-allowlist.sh
-  push:
-    branches: [main]
-    paths:
-      - .github/queue-minute-cadence-deploy-trigger
+  issue_comment:
+    types: [created]
 
 permissions:
   contents: read
+  issues: write
+  actions: read
 
 concurrency:
-  group: ${{ github.event_name == 'push' && 'production-worker-write' || format('queue-cadence-validation-{0}', github.event.pull_request.number) }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: current-repair-production-worker-write
+  cancel-in-progress: false
 
 env:
-  RUNTIME_SHA: 088cb45caff2a59511a7def65bd6517ff6a60399
+  QUALIFICATION_ISSUE: '995'
+  RUNTIME_SHA: 4f3f185da6e5093d0a5ce13b43b22f3070e630b3
   SCRIPT_NAME: xrpl-lending-monitor
-  QUEUE_NAME: xrpl-lending-fast-lane
   QUEUE_ID: 2ae398f2edbf43749e45cd7ede77c6cd
-  DATABASE_NAME: xrpl-lending-monitor
   DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
   PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
   CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
   CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  GH_TOKEN: ${{ github.token }}
 
 jobs:
-  validate:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+  prepare:
+    if: >-
+      github.event.issue.number == 995 &&
+      github.event.comment.user.login == 'badjoke-lab' &&
+      github.event.comment.body == '/current-repair-deploy-prepare'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out exact current main
+        uses: actions/checkout@v4
         with:
+          ref: main
           fetch-depth: 1
-      - name: Validate exact source and guarded operation
-        shell: bash
-        run: |
-          set -euo pipefail
-          git fetch --no-tags --depth=1 origin "${RUNTIME_SHA}"
-          test "$(cat .github/queue-minute-cadence-deploy-trigger)" = "deploy-${RUNTIME_SHA}"
-          git diff --quiet "${RUNTIME_SHA}" -- src wrangler.jsonc package.json pnpm-lock.yaml
-          jq -e '
-            .main == "src/worker/p0-redundant-scheduler-entry.ts"
-            and .triggers.crons == []
-            and .vars.APP_NETWORK == "devnet"
-            and .vars.MAINNET_ENABLED == "false"
-            and .vars.FAST_LANE_MAX_LEDGERS_PER_RUN == "32"
-            and .queues.producers == [{"binding":"FAST_LANE_QUEUE","queue":"xrpl-lending-fast-lane"}]
-            and (.queues.consumers|length) == 1
-            and .queues.consumers[0].queue == "xrpl-lending-fast-lane"
-            and .queues.consumers[0].max_batch_size == 1
-            and .queues.consumers[0].max_concurrency == 1
-          ' wrangler.jsonc >/dev/null
-          python -m py_compile scripts/controlled-queue-minute-cadence-deploy.py
-          python scripts/controlled-queue-minute-cadence-deploy.py --validate-source-only
+          persist-credentials: false
 
-  deploy-and-probe:
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    timeout-minutes: 35
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-      - uses: pnpm/action-setup@v4
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
         with:
           version: 11.9.0
-      - uses: actions/setup-node@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: 24.18.0
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - name: Fetch exact runtime commit
-        run: git fetch --no-tags --depth=1 origin "${RUNTIME_SHA}"
-      - name: Preflight, deploy, one delivery, and fail-closed cleanup
-        run: python scripts/controlled-queue-minute-cadence-deploy.py
-      - name: Upload controlled deployment evidence
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Capture exact read-only deployment preflight
+        id: preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p current-repair-deploy-prepare-evidence
+          source_commit="$(git rev-parse HEAD)"
+          git fetch --no-tags --depth=1 origin "$RUNTIME_SHA"
+          RUNTIME_SHA="$RUNTIME_SHA" \
+            CURRENT_REPAIR_DEPLOY_OUTPUT=current-repair-deploy-prepare-evidence/source-validation \
+            python scripts/deploy-current-repair-only.py --validate-source-only
+          CURRENT_RESTART_PREFLIGHT_OUTPUT=current-repair-deploy-prepare-evidence/preflight \
+            python scripts/current-restart-preflight.py
+          result=current-repair-deploy-prepare-evidence/preflight/result.json
+          test "$(jq -r '.safeToDeployRepair' "$result")" = true
+          test "$(jq -r '.safeToRestart' "$result")" = false
+          test "$(jq -r '.productionMutation' "$result")" = false
+          test "$(jq -r '.failures | length' "$result")" -eq 0
+          old_version="$(jq -r '.state.deployment.versions[0].version_id' "$result")"
+          test -n "$old_version"
+          state="$(jq -cS '{safeToDeployRepair,safeToRestart,checks,state:{fastLane:.state.fastLane,overlay:.state.overlay,baseBinding:.state.baseBinding,latestMetric:.state.latestMetric,queueSlotCounts:.state.queueSlotCounts,processingSlots:.state.processingSlots,compact:.state.compact,foldableCompactRows:.state.foldableCompactRows,staleOverlayRows:.state.staleOverlayRows,deployment:.state.deployment,appNetwork:.state.appNetwork,mainnetEnabled:.state.mainnetEnabled,maxLedgersPerRun:.state.maxLedgersPerRun,queueBindings:.state.queueBindings,schedules:.state.schedules}}' "$result" | sha256sum | awk '{print $1}')"
+          manager="$(sha256sum scripts/deploy-current-repair-only.py | awk '{print $1}')"
+          printf 'source_commit=%s\nstate=%s\nmanager=%s\nold_version=%s\n' \
+            "$source_commit" "$state" "$manager" "$old_version" >> "$GITHUB_OUTPUT"
+
+      - name: Publish exact deploy-only authorization proposal
+        env:
+          SOURCE_COMMIT: ${{ steps.preflight.outputs.source_commit }}
+          STATE: ${{ steps.preflight.outputs.state }}
+          MANAGER: ${{ steps.preflight.outputs.manager }}
+          OLD_VERSION: ${{ steps.preflight.outputs.old_version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          expires="$(date -u -d '+2 hours' '+%Y-%m-%dT%H:%M:%SZ')"
+          nonce="$(openssl rand -hex 8)"
+          command="/current-repair-deploy-authorize commit=${SOURCE_COMMIT} runtime=${RUNTIME_SHA} manager=${MANAGER} state=${STATE} old_version=${OLD_VERSION} prepare_run=${GITHUB_RUN_ID} expires=${expires} nonce=${nonce}"
+          cat > /tmp/current-repair-deploy-proposal.md <<EOF
+          ## Current repair deploy-only authorization proposal
+
+          Preparation run: \`${GITHUB_RUN_ID}\`
+          Source main commit: \`${SOURCE_COMMIT}\`
+          Exact repaired runtime: \`${RUNTIME_SHA}\`
+          Current Worker version: \`${OLD_VERSION}\`
+          Read-only state digest: \`${STATE}\`
+          Deploy manager SHA-256: \`${MANAGER}\`
+
+          The read-only preflight passed with \`safeToDeployRepair=true\` and \`safeToRestart=false\`. This authorization can only install the repaired Worker version while the Queue remains paused. It does not send/reseed a Queue message, resume delivery, purge the Queue, create a Cron, mutate D1, alter Supabase History, enable Mainnet, or start continuous catch-up.
+
+          Exact authorization command:
+
+          \`${command}\`
+          EOF
+          gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/current-repair-deploy-proposal.md
+
+      - name: Upload read-only deploy preparation evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: current-repair-deploy-prepare
+          path: current-repair-deploy-prepare-evidence
+          if-no-files-found: error
+          retention-days: 14
+
+  execute:
+    if: >-
+      github.event.issue.number == 995 &&
+      github.event.comment.user.login == 'badjoke-lab' &&
+      startsWith(github.event.comment.body, '/current-repair-deploy-authorize ')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      AUTHORIZATION_BODY: ${{ github.event.comment.body }}
+      AUTHORIZATION_CREATED_AT: ${{ github.event.comment.created_at }}
+      AUTHORIZATION_COMMENT_ID: ${{ github.event.comment.id }}
+    steps:
+      - name: Check out exact current main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Parse and bind exact owner authorization
+        id: auth
+        shell: bash
+        run: |
+          set -euo pipefail
+          regex='^/current-repair-deploy-authorize commit=([a-f0-9]{40}) runtime=([a-f0-9]{40}) manager=([a-f0-9]{64}) state=([a-f0-9]{64}) old_version=([0-9a-f-]{36}) prepare_run=([0-9]+) expires=([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z) nonce=([a-f0-9]{16})$'
+          [[ "$AUTHORIZATION_BODY" =~ $regex ]] || { echo 'Current repair deploy authorization shape mismatch' >&2; exit 1; }
+          names=(commit runtime manager state old_version prepare_run expires nonce)
+          for index in "${!names[@]}"; do
+            printf '%s=%s\n' "${names[$index]}" "${BASH_REMATCH[$((index + 1))]}" >> "$GITHUB_OUTPUT"
+          done
+          test "${BASH_REMATCH[1]}" = "$(git rev-parse HEAD)"
+          test "${BASH_REMATCH[2]}" = "$RUNTIME_SHA"
+          test "${BASH_REMATCH[3]}" = "$(sha256sum scripts/deploy-current-repair-only.py | awk '{print $1}')"
+          expires_epoch="$(date -u -d "${BASH_REMATCH[7]}" +%s)"
+          auth_epoch="$(date -u -d "$AUTHORIZATION_CREATED_AT" +%s)"
+          now_epoch="$(date -u +%s)"
+          test "$auth_epoch" -lt "$expires_epoch"
+          test "$now_epoch" -le "$expires_epoch"
+          test $((expires_epoch - auth_epoch)) -le 7200
+
+      - name: Verify exact prior proposal and unique authorization
+        env:
+          PREPARE_RUN: ${{ steps.auth.outputs.prepare_run }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${QUALIFICATION_ISSUE}/comments?per_page=100" | jq -s 'add' > /tmp/current-repair-comments.json
+          EXPECTED="$AUTHORIZATION_BODY" PREPARE="$PREPARE_RUN" AUTH_ID="$AUTHORIZATION_COMMENT_ID" node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs'
+          const comments = JSON.parse(readFileSync('/tmp/current-repair-comments.json', 'utf8'))
+          const proposals = comments.filter((comment) => comment?.user?.login === 'github-actions[bot]' && typeof comment?.body === 'string' && comment.body.includes(`Preparation run: \`${process.env.PREPARE}\``) && comment.body.includes(`\`${process.env.EXPECTED}\``))
+          if (proposals.length !== 1) throw new Error(`expected one exact Current repair deploy proposal, found ${proposals.length}`)
+          const authorizations = comments.filter((comment) => comment?.user?.login === 'badjoke-lab' && comment?.body === process.env.EXPECTED)
+          if (authorizations.length !== 1 || Number(authorizations[0].id) !== Number(process.env.AUTH_ID)) throw new Error('Current repair deploy authorization is not unique')
+          NODE
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Re-prove exact authorized stopped state
+        env:
+          AUTHORIZED_STATE: ${{ steps.auth.outputs.state }}
+          AUTHORIZED_OLD_VERSION: ${{ steps.auth.outputs.old_version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p current-repair-deploy-evidence/preflight
+          CURRENT_RESTART_PREFLIGHT_OUTPUT=current-repair-deploy-evidence/preflight \
+            python scripts/current-restart-preflight.py
+          result=current-repair-deploy-evidence/preflight/result.json
+          test "$(jq -r '.safeToDeployRepair' "$result")" = true
+          test "$(jq -r '.safeToRestart' "$result")" = false
+          test "$(jq -r '.productionMutation' "$result")" = false
+          test "$(jq -r '.state.deployment.versions[0].version_id' "$result")" = "$AUTHORIZED_OLD_VERSION"
+          current_state="$(jq -cS '{safeToDeployRepair,safeToRestart,checks,state:{fastLane:.state.fastLane,overlay:.state.overlay,baseBinding:.state.baseBinding,latestMetric:.state.latestMetric,queueSlotCounts:.state.queueSlotCounts,processingSlots:.state.processingSlots,compact:.state.compact,foldableCompactRows:.state.foldableCompactRows,staleOverlayRows:.state.staleOverlayRows,deployment:.state.deployment,appNetwork:.state.appNetwork,mainnetEnabled:.state.mainnetEnabled,maxLedgersPerRun:.state.maxLedgersPerRun,queueBindings:.state.queueBindings,schedules:.state.schedules}}' "$result" | sha256sum | awk '{print $1}')"
+          test "$current_state" = "$AUTHORIZED_STATE"
+
+      - name: Deploy exact repaired Worker version only
+        env:
+          CURRENT_REPAIR_DEPLOY_AUTHORIZATION: deploy-current-repair-only:${{ steps.auth.outputs.runtime }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "$RUNTIME_SHA"
+          CURRENT_REPAIR_DEPLOY_OUTPUT=current-repair-deploy-evidence/deploy \
+            python scripts/deploy-current-repair-only.py
+
+      - name: Publish deploy-only result
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          result=current-repair-deploy-evidence/deploy/result.json
+          if test -f "$result"; then
+            passed="$(jq -r '.passed' "$result")"
+            new_version="$(jq -r '.newVersionId' "$result")"
+            rollback="$(jq -r '.rollback' "$result")"
+            queue_resumed="$(jq -r '.queueResumed' "$result")"
+            d1_mutation="$(jq -r '.d1Mutation' "$result")"
+          else
+            passed=false
+            new_version=unavailable
+            rollback=unknown
+            queue_resumed=unknown
+            d1_mutation=unknown
+          fi
+          cat > /tmp/current-repair-deploy-result.md <<EOF
+          ## Current repair deploy-only result
+
+          Run: \`${GITHUB_RUN_ID}\`
+          Exact runtime: \`${RUNTIME_SHA}\`
+          Passed: \`${passed}\`
+          New Worker version: \`${new_version}\`
+          Rollback: \`${rollback}\`
+          Queue resumed: \`${queue_resumed}\`
+          D1 mutation: \`${d1_mutation}\`
+
+          This operation does not authorize or perform Queue reseed/restart. Continuous Current catch-up remains stopped pending a separate bounded-delivery authorization.
+          EOF
+          gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/current-repair-deploy-result.md
+
+      - name: Upload deploy-only evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: queue-minute-cadence-controlled-deployment
-          path: queue-minute-cadence-evidence
-          if-no-files-found: error
+          name: current-repair-deploy-only
+          path: current-repair-deploy-evidence
+          if-no-files-found: warn
           retention-days: 30
