@@ -20,6 +20,10 @@ const RAW_JOB_NAME = 'xrpl-r5-raw-evidence-retention-v1'
 const RAW_JOB_SCHEDULE = '47 */6 * * *'
 const RAW_JOB_COMMAND_SHA256 = 'a7029e464b56f7652b7690b6a8f5b90331d5dfbb0812e3a0ab2788987c64ec98'
 const RAW_CADENCE_LAG_BUDGET_WORK = 120
+const PORTABLE_PAYLOAD_CONTRACT_PATH = 'src/shared/portable-collector-payload.ts'
+const PORTABLE_NORMALIZATION_PATH = 'src/collector/history-segments/portable-xrpl-normalization.ts'
+const R5_RECOVERY_BATCH_PATH = 'supabase/functions/xrpl-r5-recovery-batch/index.ts'
+const EXPECTED_NORMALIZED_PAYLOAD_CHUNK_MAX_BYTES = 512_000
 
 const REVIEWED_RESOURCE_BASELINE = {
   runId: 31882543711,
@@ -216,10 +220,44 @@ const sourceCommit = options['source-commit']
 if (!/^[a-f0-9]{40}$/u.test(sourceCommit ?? '')) fail('invalid --source-commit')
 if (!options.output) fail('--output is required')
 
-const [runtimeAccountingBlobSha1, directionalContractBlobSha1] = await Promise.all([
+const [
+  runtimeAccountingBlobSha1,
+  directionalContractBlobSha1,
+  portablePayloadContractSource,
+  portableNormalizationSource,
+  r5RecoveryBatchSource,
+  portablePayloadContractBlobSha1,
+  portableNormalizationBlobSha1,
+  r5RecoveryBatchBlobSha1,
+] = await Promise.all([
   gitBlobSha1(RUNTIME_ACCOUNTING_PATH),
   gitBlobSha1(DIRECTIONAL_CONTRACT_PATH),
+  readFile(resolve(PORTABLE_PAYLOAD_CONTRACT_PATH), 'utf8'),
+  readFile(resolve(PORTABLE_NORMALIZATION_PATH), 'utf8'),
+  readFile(resolve(R5_RECOVERY_BATCH_PATH), 'utf8'),
+  gitBlobSha1(PORTABLE_PAYLOAD_CONTRACT_PATH),
+  gitBlobSha1(PORTABLE_NORMALIZATION_PATH),
+  gitBlobSha1(R5_RECOVERY_BATCH_PATH),
 ])
+const payloadChunkMaxMatches = [...portablePayloadContractSource.matchAll(
+  /^export const NORMALIZED_PAYLOAD_CHUNK_MAX_BYTES = ([0-9_]+)$/gmu,
+)]
+if (payloadChunkMaxMatches.length !== 1) fail('normalized payload chunk byte guard is not unique')
+const normalizedPayloadChunkMaxBytes = Number(payloadChunkMaxMatches[0][1].replaceAll('_', ''))
+if (normalizedPayloadChunkMaxBytes !== EXPECTED_NORMALIZED_PAYLOAD_CHUNK_MAX_BYTES) {
+  fail('normalized payload chunk byte guard changed from reviewed contract')
+}
+const portableNormalizationUsesDefaultChunkGuard = portableNormalizationSource.includes(
+  'chunks: await buildNormalizedPayloadChunks(payload),',
+)
+const r5RecoveryUsesPortableNormalization = r5RecoveryBatchSource.includes(
+  'buildPortableXrplNormalizedWork({',
+)
+if (!portableNormalizationUsesDefaultChunkGuard || !r5RecoveryUsesPortableNormalization) {
+  fail('R5 writer is no longer bound to the reviewed normalized payload chunk guard')
+}
+const payloadChunkHardGuardBoundToR5Writer = true
+
 const reviewedResourceAccountingUnchanged = runtimeAccountingBlobSha1 === REVIEWED_RESOURCE_BASELINE.runtimeAccountingBlobSha1
   && directionalContractBlobSha1 === REVIEWED_RESOURCE_BASELINE.directionalContractBlobSha1
 const state = firstState(await managementQuery(stateSql()))
@@ -235,10 +273,11 @@ function metric(name) {
   if (!found) fail(`missing relation metric: ${name}`)
   return found
 }
-function projectedPhysicalRowBytes(name) {
+function projectedPhysicalRowBytes(name, hardLogicalRowFloorBytes = 0) {
   const maxLogical = number(metric(name).maxLogicalRowBytes, `${name}.maxLogicalRowBytes`)
   if (maxLogical <= 0) fail(`${name} has no logical-row sample`)
-  return Math.max(MIN_PHYSICAL_ROW_BYTES, Math.ceil(maxLogical * physicalAmplificationFactor))
+  const contractAwareLogicalBytes = Math.max(maxLogical, hardLogicalRowFloorBytes)
+  return Math.max(MIN_PHYSICAL_ROW_BYTES, Math.ceil(contractAwareLogicalBytes * physicalAmplificationFactor))
 }
 
 const observedRows = {
@@ -257,7 +296,7 @@ const projectedRows = {
 }
 const projectedPhysicalBytes = {
   work: projectedPhysicalRowBytes('xrpl_phase_work'),
-  payload: projectedPhysicalRowBytes('xrpl_phase_payload_chunks'),
+  payload: projectedPhysicalRowBytes('xrpl_phase_payload_chunks', normalizedPayloadChunkMaxBytes),
   commit: projectedPhysicalRowBytes('xrpl_phase_commit_chunks'),
   reference: projectedPhysicalRowBytes('xrpl_phase_reference_rows'),
   genericOverhead: maxPersistentPhysicalBytesPerRow,
@@ -310,6 +349,7 @@ const integrityPreservingReclaimOrRetentionProven = state.restoreSchemaExists ==
 const databaseCapacitySafe = sampleLedgerCount === RETAINED_SAMPLE_LEDGERS
   && physicalAmplificationFactor >= 1
   && maxGeneratedDirectRowsPerLedger > 0
+  && payloadChunkHardGuardBoundToR5Writer
   && projectedIncrementalDatabaseBytes > 0
   && requiredReserveDatabaseBytes < databaseHeadroomBytes
   && projectedDatabaseBytesReserve < DATABASE_HALT_BYTES
@@ -347,6 +387,15 @@ const evidence = {
     rowCountSafetyMultiplier: OBSERVED_ROW_COUNT_SAFETY_MULTIPLIER,
     projectedComponentRowsPerLedger: projectedRows,
     projectedComponentPhysicalBytesPerRow: projectedPhysicalBytes,
+    normalizedPayloadChunkMaxBytes,
+    expectedNormalizedPayloadChunkMaxBytes: EXPECTED_NORMALIZED_PAYLOAD_CHUNK_MAX_BYTES,
+    payloadChunkHardGuardBoundToR5Writer,
+    portablePayloadContractPath: PORTABLE_PAYLOAD_CONTRACT_PATH,
+    portablePayloadContractBlobSha1,
+    portableNormalizationPath: PORTABLE_NORMALIZATION_PATH,
+    portableNormalizationBlobSha1,
+    r5RecoveryBatchPath: R5_RECOVERY_BATCH_PATH,
+    r5RecoveryBatchBlobSha1,
     projectedRowsPerLedger,
     projectedDatabaseBytesPerLedger,
     selectedMaximumLedgersPerClaim: SELECTED_MAX_LEDGERS_PER_CLAIM,
