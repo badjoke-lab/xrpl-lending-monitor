@@ -1,8 +1,44 @@
 # Implementation status
 
-Last updated: `2026-08-07`.
+Last updated: `2026-08-29`.
 
-## Current phase
+## Current phase — 2026-08-29
+
+XRPL Lending Monitor is **not formally released**.
+
+The current engineering correction is to decouple **Current State freshness** from **full History persistence** without abandoning or rewriting History truth.
+
+PR `#1488` merged as commit `a6cabb095c9a42e27a1f4a5144c6d85a9f0f555e` and added a non-production Current-first candidate boundary:
+
+- Current persists only one current watermark/lease row plus the newest projection/tombstone per canonical object identity;
+- validated-ledger continuity is still checked for every Current batch;
+- protocol events, object changes, lifecycle, archive, and balance-history persistence are explicitly deferred rather than represented as complete;
+- the existing History watermark does not advance when Current advances;
+- History deferral is exposed as separate metadata and must never be presented as complete History;
+- the candidate does not append to `xrpl_phase_messages`, `xrpl_phase_successors`, `xrpl_phase_payload_chunks`, `xrpl_phase_reference_rows`, or `xrpl_phase_watermarks`;
+- production schema/application, scheduler cutover, public-reader cutover, R5 rearm, Mainnet, stabilization, and soak remain unauthorized.
+
+The latest retained read-only database-footprint evidence on Issue `#1261` reports:
+
+| Field | Value |
+| --- | ---: |
+| Database bytes | `389,688,467` |
+| 400 MB headroom | `10,311,533` |
+| Committed phase work rows | `17,063` |
+| Reference rows | `87,885` |
+| Completed phase messages | `50,235` |
+| Live queue messages | `2` |
+| Production mutation | `false` |
+
+This is the storage-capacity condition that makes another append-heavy full-History continuation unsuitable as the gating path for Current freshness.
+
+The active next unit is PR `#1489`, which measures the Current-first physical storage envelope on PostgreSQL 15. It must prove that repeated Current updates remain bounded by live object identity/update churn rather than ledger-count append growth. After that, the next unit is a read-only production sizing/preflight and public-reader composition proof. None of those steps authorize production mutation by themselves.
+
+The Current-first path is **not** a latest-state-only replacement for History. History remains a separate truth surface with its existing committed boundary and deferred coverage explicitly exposed until a separately qualified History path catches up.
+
+## Prior status snapshot — 2026-08-07
+
+The remainder of this document preserves the prior `2026-08-07` implementation-status record for provenance. Where that snapshot conflicts with the current section above, the current `2026-08-29` section controls.
 
 XRPL Lending Monitor is **not formally released**.
 
@@ -177,7 +213,7 @@ Retained artifact:
 Measured shapes:
 
 | Shape | Baseline RSS | Peak RSS | Headroom | Retained / processed |
-| --- | ---: | ---: | ---: | ---: |
+| --- | ---: | ---: | ---: |
 | exact 12-ledger | 61,845,504 | 77,430,784 | 157,450,240 | 12 / 12 |
 | heavier retained | 59,494,400 | 75,296,768 | 159,584,256 | 24 / 12 |
 
