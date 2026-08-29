@@ -24,6 +24,7 @@ const PORTABLE_PAYLOAD_CONTRACT_PATH = 'src/shared/portable-collector-payload.ts
 const PORTABLE_NORMALIZATION_PATH = 'src/collector/history-segments/portable-xrpl-normalization.ts'
 const R5_RECOVERY_BATCH_PATH = 'supabase/functions/xrpl-r5-recovery-batch/index.ts'
 const EXPECTED_NORMALIZED_PAYLOAD_CHUNK_MAX_BYTES = 512_000
+const EXPECTED_COMPLETION_REQUEST_MAX_BYTES = 2 * 1024 * 1024
 
 const REVIEWED_RESOURCE_BASELINE = {
   runId: 31882543711,
@@ -258,6 +259,22 @@ if (!portableNormalizationUsesDefaultChunkGuard || !r5RecoveryUsesPortableNormal
 }
 const payloadChunkHardGuardBoundToR5Writer = true
 
+const completionRequestMaxMatches = [...r5RecoveryBatchSource.matchAll(
+  /^const COMPLETION_REQUEST_MAX_BYTES = 2 \* 1024 \* 1024$/gmu,
+)]
+if (completionRequestMaxMatches.length !== 1) fail('completion request byte guard is not unique')
+const completionRequestMaxBytes = EXPECTED_COMPLETION_REQUEST_MAX_BYTES
+if (!r5RecoveryBatchSource.includes('resolved.completionRequestBytes > COMPLETION_REQUEST_MAX_BYTES')) {
+  fail('completion request byte guard changed from reviewed contract')
+}
+const r5RecoveryUsesGuardedCompletionBody = r5RecoveryBatchSource.includes(
+  "'xrpl_complete_r5_revision4_recovery_batch',",
+) && r5RecoveryBatchSource.includes('fixedPoint.completionRequestBody,')
+if (!r5RecoveryUsesGuardedCompletionBody) {
+  fail('R5 writer is no longer bound to the reviewed aggregate completion request guard')
+}
+const completionRequestHardGuardBoundToR5Writer = true
+
 const reviewedResourceAccountingUnchanged = runtimeAccountingBlobSha1 === REVIEWED_RESOURCE_BASELINE.runtimeAccountingBlobSha1
   && directionalContractBlobSha1 === REVIEWED_RESOURCE_BASELINE.directionalContractBlobSha1
 const state = firstState(await managementQuery(stateSql()))
@@ -308,7 +325,13 @@ const projectedDatabaseBytesPerLedger = Object.entries(projectedRows).reduce(
 )
 const projectedIncrementalRows = projectedRowsPerLedger * SELECTED_MAX_LEDGERS_PER_CLAIM
 const requiredReserveRows = projectedIncrementalRows * RESERVE_WINDOWS
-const projectedIncrementalDatabaseBytes = projectedDatabaseBytesPerLedger * SELECTED_MAX_LEDGERS_PER_CLAIM
+const independentPerLedgerRowCeilingDatabaseBytes = projectedDatabaseBytesPerLedger * SELECTED_MAX_LEDGERS_PER_CLAIM
+const completionRequestPhysicalEnvelopeBytes = completionRequestMaxBytes
+  * physicalAmplificationFactor
+  * OBSERVED_ROW_COUNT_SAFETY_MULTIPLIER
+const projectedStructuralOverheadDatabaseBytes = projectedIncrementalRows * maxPersistentPhysicalBytesPerRow
+const projectedIncrementalDatabaseBytes = completionRequestPhysicalEnvelopeBytes
+  + projectedStructuralOverheadDatabaseBytes
 const requiredReserveDatabaseBytes = projectedIncrementalDatabaseBytes * RESERVE_WINDOWS
 const projectedDatabaseBytesOneClaim = databaseBytes + projectedIncrementalDatabaseBytes
 const projectedDatabaseBytesReserve = databaseBytes + requiredReserveDatabaseBytes
@@ -350,6 +373,7 @@ const databaseCapacitySafe = sampleLedgerCount === RETAINED_SAMPLE_LEDGERS
   && physicalAmplificationFactor >= 1
   && maxGeneratedDirectRowsPerLedger > 0
   && payloadChunkHardGuardBoundToR5Writer
+  && completionRequestHardGuardBoundToR5Writer
   && projectedIncrementalDatabaseBytes > 0
   && requiredReserveDatabaseBytes < databaseHeadroomBytes
   && projectedDatabaseBytesReserve < DATABASE_HALT_BYTES
@@ -368,7 +392,7 @@ const safeForR5Rearm = currentSpecificationIntact
 
 const projectId = requireEnv('SUPABASE_PROJECT_ID', /^[a-z]{20}$/u)
 const evidence = {
-  schemaVersion: 3,
+  schemaVersion: 4,
   purpose: 'r5-free-operation-capacity-readonly-qualification',
   sourceCommit,
   projectIdentityDigest: sha256(projectId),
@@ -377,7 +401,7 @@ const evidence = {
   postReclaimCapacityRemeasured: true,
   growthRemeasured: sampleLedgerCount === RETAINED_SAMPLE_LEDGERS,
   growthModel: {
-    method: 'retention_aware_generated_rows_times_persistent_physical_amplification',
+    method: 'retention_aware_aggregate_completion_cap_times_physical_amplification_plus_structural_row_reserve',
     logicalByteMeasure: 'pg_column_size(to_jsonb(row))',
     sampleLedgerCount,
     requiredSampleLedgerCount: RETAINED_SAMPLE_LEDGERS,
@@ -390,6 +414,12 @@ const evidence = {
     normalizedPayloadChunkMaxBytes,
     expectedNormalizedPayloadChunkMaxBytes: EXPECTED_NORMALIZED_PAYLOAD_CHUNK_MAX_BYTES,
     payloadChunkHardGuardBoundToR5Writer,
+    completionRequestMaxBytes,
+    expectedCompletionRequestMaxBytes: EXPECTED_COMPLETION_REQUEST_MAX_BYTES,
+    completionRequestHardGuardBoundToR5Writer,
+    completionRequestPhysicalEnvelopeBytes,
+    projectedStructuralOverheadDatabaseBytes,
+    independentPerLedgerRowCeilingDatabaseBytes,
     portablePayloadContractPath: PORTABLE_PAYLOAD_CONTRACT_PATH,
     portablePayloadContractBlobSha1,
     portableNormalizationPath: PORTABLE_NORMALIZATION_PATH,
