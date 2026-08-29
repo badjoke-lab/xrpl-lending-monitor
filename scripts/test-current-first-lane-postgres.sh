@@ -13,9 +13,73 @@ owner='current-first-local-owner'
 rm -rf "$output_directory"
 mkdir -p "$output_directory"
 
+cat > "${output_directory}/phase-fixture.sql" <<'SQL'
+\set ON_ERROR_STOP on
+
+-- The current-first candidate depends only on the committed phase boundary
+-- contract, not on the legacy phase-chain bootstrap side effects. Define the
+-- smallest production-shaped fixture needed to prove that boundary locally.
+create table if not exists public.xrpl_phase_streams (
+  profile_id text primary key,
+  network text not null,
+  epoch_id text not null,
+  base_identity text not null,
+  immutable_base_ledger_index bigint not null,
+  immutable_base_ledger_hash text not null,
+  status text not null,
+  created_at timestamptz not null,
+  updated_at timestamptz not null
+);
+
+create table if not exists public.xrpl_phase_work (
+  work_id text primary key,
+  profile_id text not null references public.xrpl_phase_streams(profile_id),
+  network text not null,
+  epoch_id text not null,
+  base_identity text not null,
+  previous_ledger_index bigint not null,
+  start_ledger_index bigint not null,
+  expected_parent_hash text not null,
+  planned_end_ledger_index bigint not null,
+  scanned_end_ledger_index bigint,
+  final_ledger_hash text,
+  status text not null,
+  plan_json text not null,
+  semantic_counts_json text,
+  payload_digest text,
+  expected_payload_chunks integer not null default 0,
+  expected_commit_chunks integer not null default 0,
+  created_at timestamptz not null,
+  updated_at timestamptz not null,
+  committed_at timestamptz
+);
+
+create table if not exists public.xrpl_phase_watermarks (
+  profile_id text primary key references public.xrpl_phase_streams(profile_id),
+  network text not null,
+  epoch_id text not null,
+  base_identity text not null,
+  ledger_index bigint not null,
+  ledger_hash text not null,
+  work_id text not null references public.xrpl_phase_work(work_id),
+  updated_at timestamptz not null
+);
+
+create table if not exists public.xrpl_phase_messages (
+  message_id text primary key
+);
+
+create table if not exists public.xrpl_phase_reference_rows (
+  work_id text not null,
+  semantic_class text not null,
+  canonical_key text not null,
+  primary key (work_id, semantic_class, canonical_key)
+);
+SQL
+
 docker exec -i "$container_name" psql -v ON_ERROR_STOP=1 -U postgres -d postgres \
-  < supabase/migrations/20260802095000_xrpl_remote_portable_phase_chain.sql \
-  > "${output_directory}/phase-base.log"
+  < "${output_directory}/phase-fixture.sql" \
+  > "${output_directory}/phase-fixture.log"
 
 docker exec -i "$container_name" psql -v ON_ERROR_STOP=1 -U postgres -d postgres \
   < supabase/candidates/current-first/001_xrpl_current_first_lane.sql \
@@ -176,6 +240,8 @@ cat > "${output_directory}/summary.md" <<'EOF'
 - production connection used: `false`
 - production mutation: `false`
 - candidate SQL auto-deploy path: `false`
+- production-shaped source boundary fixture only: `true`
+- legacy phase bootstrap side effects required: `false`
 - current watermark advanced independently: `true`
 - history watermark advanced: `false`
 - phase message/reference history rows written by current completion: `false`
