@@ -1,8 +1,47 @@
 # Implementation status
 
-Last updated: `2026-08-07`.
+Last updated: `2026-08-29`.
 
-## Current phase
+## Current phase — 2026-08-29
+
+XRPL Lending Monitor is **not formally released**.
+
+A fresh read-only production qualification on Actions run `33247087956` changed the Current-state diagnosis. The direct production Current blocker is the existing Cloudflare/D1 fast lane, which stopped on `2026-08-01` because the Worker exceeded its per-invocation subrequest budget. Full Supabase History recovery remains a separate halted problem and must not be described as the direct cause of the Current fast-lane stop.
+
+Retained production facts from that read-only probe:
+
+| Field | Value |
+| --- | ---: |
+| Fast-lane last processed ledger | `4,051,454` |
+| Fast-lane last update | `2026-08-01T03:52:12.771Z` |
+| Retained latest observed ledger | `4,108,194` |
+| Retained lag at stop | `56,740` |
+| Latest fast-lane result | `error` |
+| Error | `Too many subrequests by single Worker invocation.` |
+| Active base ledger | `4,039,102` |
+| Canonical overlay ledger | `4,039,122` |
+| Production mutation by probe | `false` |
+
+PR `#1488` merged as commit `a6cabb095c9a42e27a1f4a5144c6d85a9f0f555e` and retained a non-production Supabase Current-first candidate, but that candidate is **not** the selected production Current path. Follow-up storage PR `#1489` was deliberately closed unmerged after the fresh production probe showed that the existing D1 Current lane is the direct repair target and already has bounded overlay/rolling-base semantics.
+
+The active P0 implementation is PR `#1490`:
+
+- emergency HTTP ledger fallback is bounded before the Workers Free external-subrequest ceiling;
+- current-projection mutations are grouped instead of issuing one D1 query per object;
+- history/activity windows are grouped instead of issuing one D1 query per window;
+- the fast-lane persistence batch has an explicit application-level D1 query ceiling and fails before `db.batch()` if it would exceed that ceiling;
+- Current and History remain distinct truth surfaces; this repair does not declare History complete;
+- no production deployment, Queue reseed/restart, cron change, public-reader cutover, Supabase mutation, R5 rearm, Mainnet enablement, stabilization, or soak is authorized by the PR itself.
+
+The direct repair record is [`docs/ops/p0-fast-lane-subrequest-repair-2026-08-29.md`](ops/p0-fast-lane-subrequest-repair-2026-08-29.md).
+
+The next operational gate after a green merge is a **read-only restart preflight** against the retained D1 state and current Devnet head. Any actual Worker deploy or Queue reseed/restart remains a separate production operation requiring explicit authorization.
+
+The latest retained Supabase footprint remains approximately `389,688,467` bytes with `10,311,533` bytes below the 400 MB application halt. That capacity problem belongs to History/R5 recovery and is not being solved by moving Current production traffic into Supabase.
+
+## Prior status snapshot — 2026-08-07
+
+The remainder of this document preserves the prior `2026-08-07` status for provenance. Where it conflicts with the current section above, the `2026-08-29` section controls.
 
 XRPL Lending Monitor is **not formally released**.
 

@@ -2,7 +2,10 @@ import { XrplJsonRpcClient } from '../network/xrpl-rpc'
 import type { CatchUpBaseIdentity } from '../../shared/catch-up-base-identity'
 import type { RuntimeConfig } from '../../shared/runtime-config'
 import type { FastLaneShadowRuntimeConfig } from '../../shared/fast-lane-shadow-runtime-config'
-import { createFastLaneResilientLedgerReader } from './fast-lane-resilient-ledger-reader'
+import {
+  createFastLaneResilientLedgerReader,
+  type FastLaneHttpFallbackBudget,
+} from './fast-lane-resilient-ledger-reader'
 import { buildFastLaneShadowWindowPlan } from './fast-lane-shadow-plan'
 import { fastLaneShadowReanchorReason } from './fast-lane-shadow-reanchor'
 import { scanValidatedLedgerRange } from './scan-validated-ledgers'
@@ -158,6 +161,7 @@ export async function runFastLaneShadowCycle(options: {
   runtimeConfig: RuntimeConfig
   fastLaneConfig: FastLaneShadowRuntimeConfig
   base: CatchUpBaseIdentity
+  httpFallbackBudget?: FastLaneHttpFallbackBudget
   now?: () => Date
 }): Promise<FastLaneShadowCycleResult> {
   const now = options.now ?? (() => new Date())
@@ -232,6 +236,7 @@ export async function runFastLaneShadowCycle(options: {
   const reader = createFastLaneResilientLedgerReader({
     primary: session.reader,
     fallbackEndpoints: options.runtimeConfig.xrplRpcUrls,
+    fallbackBudget: options.httpFallbackBudget,
   })
   try {
     const previousHash = state?.lastProcessedHash ?? (

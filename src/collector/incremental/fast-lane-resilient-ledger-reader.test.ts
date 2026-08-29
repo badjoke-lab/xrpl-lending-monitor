@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import type { LedgerReader } from './scan-validated-ledgers'
-import { createFastLaneResilientLedgerReader } from './fast-lane-resilient-ledger-reader'
+import {
+  createFastLaneResilientLedgerReader,
+  FastLaneHttpFallbackBudgetError,
+} from './fast-lane-resilient-ledger-reader'
 
 function ledger(endpoint: string, ledgerIndex: number) {
   return {
@@ -59,5 +62,21 @@ describe('fast-lane resilient ledger reader', () => {
 
     await expect(reader({ endpoint: 'wss://devnet.example', ledgerIndex: 303, timeoutMs: 1000 }))
       .rejects.toThrow('ledger 303 failed on WebSocket and all HTTP fallbacks')
+  })
+
+  it('bounds fallback requests across the whole scan session', async () => {
+    const fallback = vi.fn<LedgerReader>().mockRejectedValue(new Error('HTTP timeout'))
+    const reader = createFastLaneResilientLedgerReader({
+      primary: vi.fn<LedgerReader>().mockRejectedValue(new Error('WebSocket terminal failure')),
+      fallbackEndpoints: ['https://rpc-one.example', 'https://rpc-two.example'],
+      fallbackReader: fallback,
+      maxFallbackRequests: 3,
+    })
+
+    await expect(reader({ endpoint: 'wss://devnet.example', ledgerIndex: 401, timeoutMs: 1000 }))
+      .rejects.toThrow('ledger 401 failed on WebSocket and all HTTP fallbacks')
+    await expect(reader({ endpoint: 'wss://devnet.example', ledgerIndex: 402, timeoutMs: 1000 }))
+      .rejects.toBeInstanceOf(FastLaneHttpFallbackBudgetError)
+    expect(fallback).toHaveBeenCalledTimes(3)
   })
 })
