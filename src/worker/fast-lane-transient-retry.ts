@@ -1,6 +1,11 @@
 import { XrplRpcError } from '../collector/network/xrpl-rpc'
 
-const DEFAULT_MAX_ATTEMPTS = 6
+// Do not replay a whole fast-lane cycle inside one Worker invocation. The Queue
+// layer already provides bounded delayed retries, and a fresh invocation resets
+// the platform's external-subrequest and D1-query budgets. Keeping this at one
+// attempt prevents a transient failure late in a cycle from multiplying the
+// same invocation's resource consumption.
+const DEFAULT_MAX_ATTEMPTS = 1
 const DEFAULT_BASE_DELAY_MS = 500
 
 const TRANSIENT_RPC_CODES = new Set([
