@@ -73,9 +73,12 @@ for required in (
     '"noPendingQueueSlot": slots["pending"] == 0',
     '"noLiveUnstagedProcessingSlot": slots["liveUnstaged"] == 0',
     '"noStagedSuccessorSlot": slots["stagedSuccessor"] == 0',
-    'f"/accounts/{ACCOUNT_ID}/queues/{QUEUE_ID}/settings"',
-    '{"delivery_paused": True}',
+    'f"/accounts/{ACCOUNT_ID}/queues/{QUEUE_ID}"',
+    '{"settings": {"delivery_paused": True}}',
+    '"queuePauseRequestAccepted": False',
+    'result["queuePauseRequestAccepted"] = queue_paused(mutation_queue) is True',
     'wait_for_paused()',
+    'result["queuePausePerformed"] = True',
     '"queueResumed": False',
     '"workerDeploymentMutation": False',
     '"d1Mutation": False',
@@ -84,6 +87,7 @@ for required in (
     if required not in current_repair_queue_pause_manager:
         raise SystemExit(f"Current repair Queue-pause manager is missing guarded requirement: {required}")
 for forbidden in (
+    'f"/accounts/{ACCOUNT_ID}/queues/{QUEUE_ID}/settings"',
     '{"delivery_paused": False}',
     'api("DELETE"',
     'api("PUT"',
