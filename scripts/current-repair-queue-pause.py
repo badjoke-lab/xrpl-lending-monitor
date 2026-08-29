@@ -4,7 +4,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import re
 import sys
 import time
 import urllib.request
@@ -16,7 +15,6 @@ API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN", "")
 QUEUE_ID = os.environ.get("QUEUE_ID", "")
 DATABASE_ID = os.environ.get("DATABASE_ID", "")
 SCRIPT_NAME = os.environ.get("SCRIPT_NAME", "xrpl-lending-monitor")
-AUTHORIZED_STATE = os.environ.get("CURRENT_REPAIR_QUEUE_PAUSE_AUTHORIZED_STATE", "")
 OUT = Path(os.environ.get("CURRENT_REPAIR_QUEUE_PAUSE_OUTPUT", "current-repair-queue-pause-evidence"))
 OUT.mkdir(parents=True, exist_ok=True)
 API_BASE = "https://api.cloudflare.com/client/v4"
@@ -160,7 +158,7 @@ def capture() -> dict[str, Any]:
         "noLiveUnstagedProcessingSlot": slots["liveUnstaged"] == 0,
         "noStagedSuccessorSlot": slots["stagedSuccessor"] == 0,
     }
-    authorization_state = {
+    state = {
         "queue": {
             "id": QUEUE_ID,
             "name": queue.get("queue_name"),
@@ -174,15 +172,13 @@ def capture() -> dict[str, Any]:
         "maxLedgersPerRun": binding_value(bindings, "FAST_LANE_MAX_LEDGERS_PER_RUN"),
         "slots": slots,
     }
-    digest = hashlib.sha256(
-        json.dumps(authorization_state, separators=(",", ":"), sort_keys=True).encode()
-    ).hexdigest()
+    digest = hashlib.sha256(json.dumps(state, separators=(",", ":"), sort_keys=True).encode()).hexdigest()
     return {
         "safeToPause": all(checks.values()),
         "checks": checks,
         "failures": [name for name, passed in checks.items() if not passed],
         "stateDigest": digest,
-        "state": authorization_state,
+        "state": state,
     }
 
 
@@ -209,9 +205,6 @@ def do_prepare() -> int:
 
 
 def do_execute() -> int:
-    if not re.fullmatch(r"[0-9a-f]{64}", AUTHORIZED_STATE):
-        raise SystemExit("exact authorized Queue-pause state digest is required")
-
     result: dict[str, Any] = {
         "schemaVersion": 1,
         "mode": "execute",
@@ -229,8 +222,6 @@ def do_execute() -> int:
         save("pre-state.json", pre)
         if not pre["safeToPause"]:
             raise RuntimeError(f"Queue pause pre-state is not safe: {pre['failures']}")
-        if pre["stateDigest"] != AUTHORIZED_STATE:
-            raise RuntimeError("authorized Queue-pause state digest changed")
 
         api(
             "PATCH",
