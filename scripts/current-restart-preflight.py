@@ -11,6 +11,7 @@ from urllib.request import Request, urlopen
 
 ACCOUNT_ID = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "")
 TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN", "")
+QUEUE_ID = os.environ.get("QUEUE_ID", "")
 DATABASE_ID = os.environ.get("DATABASE_ID", "bebc2c68-03d2-4a1c-98a7-46b34ee4e25d")
 PRODUCTION = os.environ.get("PRODUCTION_BASE", "https://xrpl-lending-monitor.badjoke-lab.workers.dev")
 OUT = Path(os.environ.get("CURRENT_RESTART_PREFLIGHT_OUTPUT", "current-restart-preflight-evidence"))
@@ -24,8 +25,8 @@ PUBLIC_HEADERS = {
     "Accept": "application/json",
 }
 
-if not ACCOUNT_ID or not TOKEN:
-    raise SystemExit("Cloudflare read credentials are required")
+if not ACCOUNT_ID or not TOKEN or not QUEUE_ID:
+    raise SystemExit("Cloudflare read credentials and exact Queue identity are required")
 
 
 def now_utc() -> str:
@@ -100,6 +101,40 @@ def binding(settings: dict[str, Any], name: str) -> Any:
     return values[0] if values else None
 
 
+def parse_bool(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int) and value in (0, 1):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "paused"}:
+            return True
+        if normalized in {"false", "0", "no", "active", "running"}:
+            return False
+    return None
+
+
+def queue_is_paused(queue_state: dict[str, Any]) -> bool:
+    candidates = [
+        queue_state.get("delivery_paused"),
+        queue_state.get("paused"),
+    ]
+    settings_value = queue_state.get("settings")
+    if isinstance(settings_value, dict):
+        candidates.extend(
+            [
+                settings_value.get("delivery_paused"),
+                settings_value.get("paused"),
+            ]
+        )
+    for value in candidates:
+        parsed = parse_bool(value)
+        if parsed is not None:
+            return parsed
+    return False
+
+
 fast = one(d1_query(
     "fast-lane-state.json",
     "SELECT epoch_id,last_processed_ledger,last_processed_hash,latest_observed_ledger,latest_observed_hash,status,updated_at FROM fast_lane_shadow_state WHERE network='devnet'",
@@ -143,6 +178,7 @@ stale = one(d1_query(
 settings = cf_get("worker-settings.json", "/workers/scripts/xrpl-lending-monitor/settings")
 deployments = cf_get("worker-deployments.json", "/workers/scripts/xrpl-lending-monitor/deployments")
 schedules = cf_get("worker-schedules.json", "/workers/scripts/xrpl-lending-monitor/schedules")
+queue = cf_get("queue-state.json", f"/queues/{QUEUE_ID}")
 overview = public_get("overview.json", "/api/overview")
 replacement = public_get("replacement-base.json", "/api/status/replacement-base-rebase")
 
@@ -152,6 +188,8 @@ cron_schedules = (schedules.get("result") or {}).get("schedules") or []
 deployment_list = (deployments.get("result") or {}).get("deployments") or []
 latest_deployment = deployment_list[0] if deployment_list else {}
 versions = latest_deployment.get("versions") or []
+queue_state = queue.get("result") or {}
+queue_delivery_paused = queue_is_paused(queue_state)
 
 status_counts = {str(row.get("status")): int(row.get("row_count", 0)) for row in slot_counts}
 pending_slots = status_counts.get("pending", 0)
@@ -173,6 +211,7 @@ checks = {
     "devnetOnly": binding(settings, "APP_NETWORK") == "devnet" and binding(settings, "MAINNET_ENABLED") == "false",
     "currentMaxLedgersBound": binding(settings, "FAST_LANE_MAX_LEDGERS_PER_RUN") == EXPECTED_MAX_LEDGERS,
     "singleQueueBinding": len(queue_bindings) == 1,
+    "queueDeliveryPaused": queue_delivery_paused,
     "schedulerStillDisabled": len(cron_schedules) == 0,
     "singleDeploymentVersion": len(versions) == 1 and versions[0].get("percentage") == 100,
     "baseBindingAligned": base_aligned,
@@ -189,7 +228,7 @@ checks = {
 }
 
 result = {
-    "schemaVersion": 1,
+    "schemaVersion": 2,
     "checkedAt": now_utc(),
     "sourceCommit": os.environ.get("GITHUB_SHA"),
     "productionMutation": False,
@@ -203,6 +242,10 @@ result = {
         "overlay": overlay,
         "baseBinding": base,
         "latestMetric": latest_metric,
+        "queue": {
+            "id": QUEUE_ID,
+            "deliveryPaused": queue_delivery_paused,
+        },
         "queueSlotCounts": status_counts,
         "processingSlots": {
             "liveUnstaged": live_unstaged,
@@ -229,6 +272,7 @@ print(json.dumps({
     "safeToDeployRepair": result["safeToDeployRepair"],
     "safeToRestart": result["safeToRestart"],
     "failures": result["failures"],
+    "queueDeliveryPaused": queue_delivery_paused,
     "fastLedger": fast.get("last_processed_ledger"),
     "compactRows": compact.get("row_count"),
     "liveProcessingSlots": live_unstaged,
