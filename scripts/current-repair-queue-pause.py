@@ -210,6 +210,7 @@ def do_execute() -> int:
         "mode": "execute",
         "passed": False,
         "productionMutation": False,
+        "queuePauseRequestAccepted": False,
         "queuePausePerformed": False,
         "queueResumed": False,
         "workerDeploymentMutation": False,
@@ -223,14 +224,19 @@ def do_execute() -> int:
         if not pre["safeToPause"]:
             raise RuntimeError(f"Queue pause pre-state is not safe: {pre['failures']}")
 
-        api(
+        mutation = api(
             "PATCH",
-            f"/accounts/{ACCOUNT_ID}/queues/{QUEUE_ID}/settings",
-            {"delivery_paused": True},
+            f"/accounts/{ACCOUNT_ID}/queues/{QUEUE_ID}",
+            {"settings": {"delivery_paused": True}},
         )
         result["productionMutation"] = True
-        result["queuePausePerformed"] = True
+        mutation_queue = mutation.get("result") or {}
+        result["queuePauseRequestAccepted"] = queue_paused(mutation_queue) is True
+        if not result["queuePauseRequestAccepted"]:
+            raise RuntimeError(f"Queue pause API response did not report paused delivery: {mutation_queue}")
+
         wait_for_paused()
+        result["queuePausePerformed"] = True
 
         post = capture()
         save("post-state.json", post)
@@ -258,6 +264,7 @@ def do_execute() -> int:
         save("result.json", result)
         print(json.dumps({
             "passed": result["passed"],
+            "queuePauseRequestAccepted": result["queuePauseRequestAccepted"],
             "queuePausePerformed": result["queuePausePerformed"],
             "queueResumed": result["queueResumed"],
             "workerDeploymentMutation": result["workerDeploymentMutation"],
