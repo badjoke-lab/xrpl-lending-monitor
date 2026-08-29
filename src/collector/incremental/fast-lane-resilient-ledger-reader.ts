@@ -17,6 +17,29 @@ export class FastLaneHttpFallbackBudgetError extends Error {
   }
 }
 
+export class FastLaneHttpFallbackBudget {
+  readonly limit: number
+  #used = 0
+
+  constructor(limit = FAST_LANE_HTTP_FALLBACK_REQUEST_LIMIT) {
+    if (!Number.isSafeInteger(limit) || limit < 0) {
+      throw new Error('Fast-lane HTTP fallback request budget is invalid')
+    }
+    this.limit = limit
+  }
+
+  get used(): number {
+    return this.#used
+  }
+
+  consume(ledgerIndex: number): void {
+    if (this.#used >= this.limit) {
+      throw new FastLaneHttpFallbackBudgetError(this.limit, ledgerIndex)
+    }
+    this.#used += 1
+  }
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
@@ -25,15 +48,14 @@ export function createFastLaneResilientLedgerReader(options: {
   primary: LedgerReader
   fallbackEndpoints: readonly string[]
   fallbackReader?: LedgerReader
+  fallbackBudget?: FastLaneHttpFallbackBudget
   maxFallbackRequests?: number
 }): LedgerReader {
   const fallbackReader = options.fallbackReader ?? readValidatedLedger
   const endpoints = [...new Set(options.fallbackEndpoints)]
-  const maxFallbackRequests = options.maxFallbackRequests ?? FAST_LANE_HTTP_FALLBACK_REQUEST_LIMIT
-  if (!Number.isSafeInteger(maxFallbackRequests) || maxFallbackRequests < 0) {
-    throw new Error('Fast-lane HTTP fallback request budget is invalid')
-  }
-  let fallbackRequests = 0
+  const fallbackBudget = options.fallbackBudget ?? new FastLaneHttpFallbackBudget(
+    options.maxFallbackRequests ?? FAST_LANE_HTTP_FALLBACK_REQUEST_LIMIT,
+  )
 
   return async (request) => {
     try {
@@ -41,10 +63,7 @@ export function createFastLaneResilientLedgerReader(options: {
     } catch (primaryError) {
       const failures = [`primary=${errorMessage(primaryError)}`]
       for (const endpoint of endpoints) {
-        if (fallbackRequests >= maxFallbackRequests) {
-          throw new FastLaneHttpFallbackBudgetError(maxFallbackRequests, request.ledgerIndex)
-        }
-        fallbackRequests += 1
+        fallbackBudget.consume(request.ledgerIndex)
         try {
           return await fallbackReader({ ...request, endpoint })
         } catch (fallbackError) {
