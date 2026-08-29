@@ -194,6 +194,7 @@ function appendMutationStatements(
 function appendHistoryStatements(
   db: D1Database,
   statements: D1PreparedStatement[],
+  plan: FastLaneShadowWindowPlan,
   historyWindows: readonly EncodedFastLaneHistoryWindow[],
 ): void {
   for (const group of chunks(historyWindows, HISTORY_WINDOWS_PER_D1_QUERY)) {
@@ -232,8 +233,7 @@ function appendHistoryStatements(
     )
 
     const activityRows = group.map(({ historyBundle, activityPlan }) => {
-      const resolvedPlan = activityPlan
-      if (!resolvedPlan) throw new Error('Fast-lane activity plan is required')
+      const resolvedPlan = activityPlan ?? plan
       return {
         epochId: resolvedPlan.epochId,
         windowStartCloseTime: resolvedPlan.windowStartCloseTime,
@@ -341,7 +341,7 @@ export async function commitFastLaneCompactShadowWindows(options: {
   )
 
   appendMutationStatements(db, statements, plan)
-  appendHistoryStatements(db, statements, options.historyWindows)
+  appendHistoryStatements(db, statements, plan, options.historyWindows)
 
   statements.push(
     db.prepare(
