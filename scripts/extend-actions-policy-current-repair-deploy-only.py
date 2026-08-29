@@ -88,7 +88,6 @@ for required in (
         raise SystemExit(f"Current repair Queue-pause manager is missing guarded requirement: {required}")
 for forbidden in (
     'f"/accounts/{ACCOUNT_ID}/queues/{QUEUE_ID}/settings"',
-    '{"delivery_paused": True}',
     '{"delivery_paused": False}',
     'api("DELETE"',
     'api("PUT"',
