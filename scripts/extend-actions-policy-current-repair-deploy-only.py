@@ -19,6 +19,7 @@ if text.count(marker) != 1:
 
 block = r'''
 current_repair_deploy = (root / "deploy-queue-minute-cadence-fix.yml").read_text()
+current_repair_queue_pause_manager = (root / "../../scripts/current-repair-queue-pause.py").read_text()
 for required in (
     "name: Deploy Current repair only",
     "issue_comment:",
@@ -29,6 +30,7 @@ for required in (
     "github.event.comment.user.login == 'badjoke-lab'",
     "github.event.comment.body == '/current-repair-deploy-prepare'",
     "startsWith(github.event.comment.body, '/current-repair-deploy-authorize ')",
+    "startsWith(github.event.comment.body, '/current-repair-queue-pause-authorize ')",
     "RUNTIME_SHA: 4f3f185da6e5093d0a5ce13b43b22f3070e630b3",
     "python scripts/current-restart-preflight.py",
     "python scripts/deploy-current-repair-only.py --validate-source-only",
@@ -36,9 +38,13 @@ for required in (
     "safeToRestart",
     "CURRENT_REPAIR_DEPLOY_AUTHORIZATION",
     "python scripts/deploy-current-repair-only.py",
+    "python scripts/current-repair-queue-pause.py --prepare",
+    "python scripts/current-repair-queue-pause.py --execute",
     "current-repair-deploy-prepare",
     "current-repair-deploy-only",
+    "current-repair-queue-pause-only",
     "This operation does not authorize or perform Queue reseed/restart.",
+    "This operation authorizes Queue delivery pause only.",
 ):
     if required not in current_repair_deploy:
         raise SystemExit(f"Current repair deploy workflow is missing guarded requirement: {required}")
@@ -58,6 +64,36 @@ for forbidden in (
         raise SystemExit(f"Current repair deploy workflow contains forbidden capability: {forbidden.strip()}")
 if current_repair_deploy.count("issues: write") != 1:
     raise SystemExit("Current repair deploy issue-write capability must remain exactly one permission")
+
+for required in (
+    '"queueCurrentlyActive": paused is False',
+    '"queueBacklogEmpty": metrics["backlogCount"] == 0 and metrics["backlogBytes"] == 0',
+    '"schedulerStillDisabled": cron == []',
+    '"noPendingQueueSlot": slots["pending"] == 0',
+    '"noLiveUnstagedProcessingSlot": slots["liveUnstaged"] == 0',
+    '"noStagedSuccessorSlot": slots["stagedSuccessor"] == 0',
+    'f"/accounts/{ACCOUNT_ID}/queues/{QUEUE_ID}/settings"',
+    '{"delivery_paused": True}',
+    'wait_for_paused()',
+    '"queueResumed": False',
+    '"workerDeploymentMutation": False',
+    '"d1Mutation": False',
+    '"schedulerMutation": False',
+):
+    if required not in current_repair_queue_pause_manager:
+        raise SystemExit(f"Current repair Queue-pause manager is missing guarded requirement: {required}")
+for forbidden in (
+    '{"delivery_paused": False}',
+    'api("DELETE"',
+    'api("PUT"',
+    'wrangler',
+    'delete_messages_permanently',
+    '/purge',
+):
+    if forbidden in current_repair_queue_pause_manager:
+        raise SystemExit(f"Current repair Queue-pause manager contains forbidden capability: {forbidden}")
+if current_repair_queue_pause_manager.count('api(\n            "PATCH",') != 1:
+    raise SystemExit("Current repair Queue-pause manager must contain exactly one Queue PATCH mutation")
 '''
 
 text = text.replace(marker, '\n' + block + marker)
