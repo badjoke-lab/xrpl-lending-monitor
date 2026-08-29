@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
 
 import type { FastLaneShadowWindowPlan } from '../../collector/incremental/fast-lane-shadow-plan'
-import { commitFastLaneCompactShadowWindow } from './fast-lane-compact-shadow-repository'
+import {
+  commitFastLaneCompactShadowWindow,
+  FAST_LANE_MAX_PERSISTENCE_D1_QUERIES,
+} from './fast-lane-compact-shadow-repository'
 import type { FastLaneHistoryBundle } from './fast-lane-history-window'
 
 const ENCODED_HISTORY_BUNDLE = 'gzip-base64-v1:test-payload'
@@ -104,9 +107,9 @@ function fakeDatabase() {
 }
 
 describe('compact fast-lane shadow persistence', () => {
-  it('writes current objects and one encoded compact history bundle in the same batch', async () => {
+  it('writes current objects and one encoded compact history bundle in a bounded batch', async () => {
     const state = fakeDatabase()
-    await commitFastLaneCompactShadowWindow({
+    const usage = await commitFastLaneCompactShadowWindow({
       db: state.db,
       plan: plan(),
       historyBundle: historyBundle(),
@@ -117,11 +120,48 @@ describe('compact fast-lane shadow persistence', () => {
     })
 
     const sql = state.batches[0]?.map((index) => state.prepared[index]?.sql ?? '') ?? []
-    expect(sql.some((item) => item.includes('INSERT INTO fast_lane_shadow_objects_compact'))).toBe(true)
-    expect(sql.some((item) => item.includes('INSERT INTO fast_lane_history_windows'))).toBe(true)
+    expect(sql.filter((item) => item.includes('INSERT INTO fast_lane_shadow_objects_compact'))).toHaveLength(1)
+    expect(sql.filter((item) => item.includes('INSERT INTO fast_lane_history_windows'))).toHaveLength(1)
+    expect(sql.filter((item) => item.includes('INSERT INTO fast_lane_shadow_windows'))).toHaveLength(1)
     expect(sql.some((item) => item.includes('INSERT INTO fast_lane_shadow_objects ('))).toBe(false)
+    expect(usage.statements).toBe(7)
+    expect(usage.statements).toBeLessThanOrEqual(FAST_LANE_MAX_PERSISTENCE_D1_QUERIES)
+
     const historyStatement = state.prepared.find((item) => item.sql.includes('INSERT INTO fast_lane_history_windows'))
-    expect(historyStatement?.values).toContain(ENCODED_HISTORY_BUNDLE)
+    const encodedRows = JSON.parse(String(historyStatement?.values[0])) as Array<{ encodedHistoryBundle: string }>
+    expect(encodedRows[0]?.encodedHistoryBundle).toBe(ENCODED_HISTORY_BUNDLE)
+  })
+
+  it('groups hundreds of current mutations instead of spending one D1 query per object', async () => {
+    const state = fakeDatabase()
+    const basePlan = plan()
+    const largePlan: FastLaneShadowWindowPlan = {
+      ...basePlan,
+      mutations: Array.from({ length: 600 }, (_, index) => ({
+        ...basePlan.mutations[0]!,
+        mutation: {
+          ...basePlan.mutations[0]!.mutation,
+          objectId: `${String(index).padStart(4, '0')}${'L'.repeat(60)}`,
+          projectionJson: JSON.stringify({ index }),
+        },
+        transactionIndex: index,
+      })),
+    }
+
+    const usage = await commitFastLaneCompactShadowWindow({
+      db: state.db,
+      plan: largePlan,
+      historyBundle: historyBundle(),
+      encodedHistoryBundle: ENCODED_HISTORY_BUNDLE,
+      expectedPreviousLedger: 100,
+      expectedPreviousHash: 'P'.repeat(64),
+      processedAt: '2026-07-11T03:00:00.000Z',
+    })
+
+    const sql = state.batches[0]?.map((index) => state.prepared[index]?.sql ?? '') ?? []
+    expect(sql.filter((item) => item.includes('INSERT INTO fast_lane_shadow_objects_compact'))).toHaveLength(3)
+    expect(usage.statements).toBe(9)
+    expect(usage.statements).toBeLessThanOrEqual(FAST_LANE_MAX_PERSISTENCE_D1_QUERIES)
   })
 
   it('rejects a history bundle from a different ledger window', async () => {
