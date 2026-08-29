@@ -27,7 +27,8 @@ The path still allowed:
 1. a failed WebSocket ledger read to fan out over every configured HTTP fallback endpoint for each subsequent ledger;
 2. one D1 persistence query per current-object mutation;
 3. one D1 history insert and one activity insert per bounded history window;
-4. the surrounding Queue claim, retention, capacity, metric, successor, and promotion queries in the same invocation.
+4. up to six complete fast-lane cycle retries inside the same Worker invocation after a transient XRPL failure;
+5. the surrounding Queue claim, retention, capacity, metric, successor, and promotion queries in the same invocation.
 
 Cloudflare Workers Free currently permits 50 external subrequests per invocation, and D1 Free permits 50 queries per Worker invocation. Therefore a ledger-count cap by itself is not a valid subrequest envelope.
 
@@ -40,6 +41,8 @@ PR `#1490` changes the application envelope rather than increasing platform limi
 - WebSocket remains primary.
 - Emergency HTTP fallback is capped at 4 requests per cycle.
 - Budget exhaustion throws `FastLaneHttpFallbackBudgetError` before another fallback request is made.
+- A full fast-lane cycle is attempted only once per Worker invocation by default.
+- Transient cycle failures are handed back to the Queue and retried in a later Worker invocation, which starts with fresh platform subrequest/query budgets.
 - The application-level budget error remains retryable; the platform-level `Too many subrequests` error must no longer be the normal control mechanism.
 
 ### D1 persistence
