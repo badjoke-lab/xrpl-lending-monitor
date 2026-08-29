@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import runpy
 from pathlib import Path
 from urllib.request import build_opener, install_opener
@@ -21,6 +22,24 @@ except SystemExit as exc:
     exit_code = int(exc.code or 0) if isinstance(exc.code, int) else 1
 
 out = Path("qualification-evidence")
+
+# A normal read-only probe also records the narrower Current restart/deploy
+# preflight. It is supplementary evidence: the existing qualification result
+# remains authoritative for soak/qualification and is expected to stay red
+# while Current is intentionally stopped.
+if os.environ.get("MODE", "probe") == "probe":
+    previous_output = os.environ.get("CURRENT_RESTART_PREFLIGHT_OUTPUT")
+    os.environ["CURRENT_RESTART_PREFLIGHT_OUTPUT"] = str(out / "current-restart-preflight")
+    try:
+        runpy.run_path(str(Path(__file__).parents[1] / "current-restart-preflight.py"), run_name="__main__")
+    except SystemExit:
+        pass
+    finally:
+        if previous_output is None:
+            os.environ.pop("CURRENT_RESTART_PREFLIGHT_OUTPUT", None)
+        else:
+            os.environ["CURRENT_RESTART_PREFLIGHT_OUTPUT"] = previous_output
+
 readiness_files = sorted(out.glob("*-pre-soak-readiness.json"))
 readiness_records: list[dict[str, object]] = []
 for path in readiness_files:
