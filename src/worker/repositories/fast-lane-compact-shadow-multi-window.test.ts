@@ -95,7 +95,7 @@ function fakeDatabase() {
 }
 
 describe('multi-window compact fast-lane commit', () => {
-  it('commits multiple bounded history rows with one coalesced current projection', async () => {
+  it('commits multiple bounded history rows with grouped D1 queries', async () => {
     const state = fakeDatabase()
     await commitFastLaneCompactShadowWindows({
       db: state.db,
@@ -110,9 +110,14 @@ describe('multi-window compact fast-lane commit', () => {
     })
 
     const sql = state.batches[0]?.map((index) => state.prepared[index]?.sql ?? '') ?? []
-    expect(sql.filter((item) => item.includes('INSERT INTO fast_lane_history_windows'))).toHaveLength(2)
+    expect(sql.filter((item) => item.includes('INSERT INTO fast_lane_history_windows'))).toHaveLength(1)
+    expect(sql.filter((item) => item.includes('INSERT INTO fast_lane_shadow_windows'))).toHaveLength(1)
     expect(sql.filter((item) => item.includes('INSERT INTO fast_lane_shadow_objects_compact'))).toHaveLength(1)
     expect(sql.filter((item) => item.includes('UPDATE fast_lane_shadow_state'))).toHaveLength(1)
+
+    const historyStatement = state.prepared.find((item) => item.sql.includes('INSERT INTO fast_lane_history_windows'))
+    const rows = JSON.parse(String(historyStatement?.values[0])) as Array<{ startLedgerIndex: number }>
+    expect(rows.map((row) => row.startLedgerIndex)).toEqual([101, 102])
   })
 
   it('rejects a gap between history partitions before persistence', async () => {
