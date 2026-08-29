@@ -8,6 +8,7 @@ on:
       - .github/workflows/read-only-production-qualification.yml
       - scripts/qualification-995-read-only/**
       - scripts/current-restart-preflight.py
+      - scripts/deploy-current-repair-only.py
       - scripts/history-reconstruction/**
       - scripts/measure-history-reconstruction.ts
       - vite.history-reconstruction-measurement.config.ts
@@ -43,7 +44,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - run: python -m py_compile scripts/qualification-995-read-only/bootstrap.py scripts/qualification-995-read-only/run.py scripts/current-restart-preflight.py
+      - run: python -m py_compile scripts/qualification-995-read-only/bootstrap.py scripts/qualification-995-read-only/run.py scripts/current-restart-preflight.py scripts/deploy-current-repair-only.py
       - run: bash scripts/check-actions-workflow-allowlist-r5-one-shot.sh
 
   pull-request-probe:
