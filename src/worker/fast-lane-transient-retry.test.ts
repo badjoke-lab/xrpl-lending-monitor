@@ -26,7 +26,7 @@ describe('fast-lane transient retry', () => {
       .toBe(false)
   })
 
-  it('retries a transient failure in the same invocation', async () => {
+  it('can retry explicitly when a caller owns a separate bounded budget', async () => {
     const operation = vi.fn()
       .mockRejectedValueOnce(new XrplRpcError({
         endpoint: 'wss://s.devnet.rippletest.net:51233/',
@@ -55,36 +55,23 @@ describe('fast-lane transient retry', () => {
     }))
   })
 
-  it('keeps the default retry window open through a multi-second Devnet gap', async () => {
+  it('does not retry a transient full cycle inside one Worker invocation by default', async () => {
     const failure = new XrplRpcError({
       endpoint: 'wss://s.devnet.rippletest.net:51233/',
       method: 'ledger',
       code: 'ledgerNotFound',
       message: 'ledgerNotFound',
     })
-    const operation = vi.fn()
-      .mockRejectedValueOnce(failure)
-      .mockRejectedValueOnce(failure)
-      .mockRejectedValueOnce(failure)
-      .mockRejectedValueOnce(failure)
-      .mockResolvedValueOnce('recovered')
+    const operation = vi.fn().mockRejectedValue(failure)
     const sleep = vi.fn(async () => undefined)
     const onRetry = vi.fn()
 
     await expect(withFastLaneTransientRetry(operation, { sleep, onRetry }))
-      .resolves.toBe('recovered')
+      .rejects.toBe(failure)
 
-    expect(operation).toHaveBeenCalledTimes(5)
-    expect(sleep).toHaveBeenNthCalledWith(1, 500)
-    expect(sleep).toHaveBeenNthCalledWith(2, 1_000)
-    expect(sleep).toHaveBeenNthCalledWith(3, 1_500)
-    expect(sleep).toHaveBeenNthCalledWith(4, 2_000)
-    expect(onRetry).toHaveBeenLastCalledWith(expect.objectContaining({
-      attempt: 4,
-      nextAttempt: 5,
-      maxAttempts: 6,
-      delayMs: 2_000,
-    }))
+    expect(operation).toHaveBeenCalledTimes(1)
+    expect(sleep).not.toHaveBeenCalled()
+    expect(onRetry).not.toHaveBeenCalled()
   })
 
   it('does not retry a permanent invariant failure', async () => {
@@ -97,7 +84,7 @@ describe('fast-lane transient retry', () => {
     expect(sleep).not.toHaveBeenCalled()
   })
 
-  it('throws after the bounded attempt limit', async () => {
+  it('throws after an explicitly configured bounded attempt limit', async () => {
     const failure = new XrplRpcError({
       endpoint: 'wss://s.devnet.rippletest.net:51233/',
       method: 'ledger',
