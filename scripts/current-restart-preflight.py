@@ -19,6 +19,10 @@ OUT.mkdir(parents=True, exist_ok=True)
 EXPECTED_ERROR_FRAGMENT = "too many subrequests by single worker invocation"
 EXPECTED_MAX_LEDGERS = "32"
 QUEUE_LEASE_SECONDS = 15 * 60
+PUBLIC_HEADERS = {
+    "User-Agent": "curl/8.5.0",
+    "Accept": "application/json",
+}
 
 if not ACCOUNT_ID or not TOKEN:
     raise SystemExit("Cloudflare read credentials are required")
@@ -34,7 +38,8 @@ def write_json(name: str, value: Any) -> None:
 
 def request_json(url: str, payload: Any | None = None, headers: dict[str, str] | None = None) -> tuple[int, Any]:
     body = None if payload is None else json.dumps(payload).encode()
-    merged = dict(headers or {})
+    merged = dict(PUBLIC_HEADERS)
+    merged.update(headers or {})
     if payload is not None:
         merged.setdefault("Content-Type", "application/json")
     try:
