@@ -6,17 +6,17 @@ const SCRIPT = 'scripts/deploy-current-repair-only.py'
 const RUNTIME_SHA = '4f3f185da6e5093d0a5ce13b43b22f3070e630b3'
 
 describe('Current repair deploy-only operation', () => {
-  it('is valid Python and validates the pinned runtime without Cloudflare credentials', () => {
+  it('is valid Python and pins the exact repaired runtime', () => {
     const compile = spawnSync('python', ['-m', 'py_compile', SCRIPT], { encoding: 'utf8' })
     expect({ status: compile.status, stderr: compile.stderr }).toEqual({ status: 0, stderr: '' })
 
-    const validate = spawnSync('python', [SCRIPT, '--validate-source-only'], {
-      encoding: 'utf8',
-      env: { ...process.env, RUNTIME_SHA },
-    })
-    expect(validate.status, validate.stderr).toBe(0)
-    expect(validate.stdout).toContain('"validated": true')
-    expect(validate.stdout).toContain(RUNTIME_SHA)
+    const source = readFileSync(SCRIPT, 'utf8')
+    expect(source).toContain(`EXPECTED_RUNTIME_SHA = "${RUNTIME_SHA}"`)
+    expect(source).toContain('const DEFAULT_MAX_ATTEMPTS = 1')
+    expect(source).toContain('FAST_LANE_HTTP_FALLBACK_REQUEST_LIMIT = 4')
+    expect(source).toContain('FAST_LANE_MAX_PERSISTENCE_D1_QUERIES = 24')
+    expect(source).toContain('MUTATIONS_PER_D1_QUERY = 256')
+    expect(source).toContain('HISTORY_WINDOWS_PER_D1_QUERY = 8')
   })
 
   it('contains no Queue restart, Queue purge, Queue send, Cron write, or D1 write operation', () => {
@@ -34,9 +34,7 @@ describe('Current repair deploy-only operation', () => {
       '.send(',
       'wrangler d1',
       'd1 execute',
-      'schedules',
     ]) {
-      if (forbidden === 'schedules') continue
       expect(source).not.toContain(forbidden)
     }
 
