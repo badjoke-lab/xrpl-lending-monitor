@@ -113,6 +113,10 @@ grep -q 'directional_accounting_observations' "${output_directory}/candidate-evi
 R4F_POSTGRES_CONTAINER="$container_name" \
   bash scripts/test-r4f-revision4-qualification-compact-checkpoint-postgres.sh
 
+CURRENT_FIRST_POSTGRES_CONTAINER="$container_name" \
+  CURRENT_FIRST_OUTPUT="${output_directory}/current-first" \
+  bash scripts/test-current-first-lane-postgres.sh
+
 cat > "${output_directory}/summary.md" <<'EOF'
 ## R4F revision-4 G2D PostgreSQL integration
 
@@ -126,6 +130,8 @@ cat > "${output_directory}/summary.md" <<'EOF'
 - reader reconciliation: `true`
 - compact qualification checkpoint SQL executed locally: `true`
 - compact checkpoint exact replay converged: `true`
+- current-first candidate SQL applied locally: `true`
+- current/history watermark split verified: `true`
 - public-role privilege leak: `false`
 - deterministic candidate export retained: `true`
 - recovery mutation committed: `false`
