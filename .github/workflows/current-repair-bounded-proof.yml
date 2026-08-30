@@ -211,3 +211,212 @@ jobs:
           path: current-repair-bounded-proof-evidence
           if-no-files-found: warn
           retention-days: 30
+
+  five_slot_prepare:
+    if: >-
+      github.event.issue.number == 995 &&
+      github.event.comment.user.login == 'badjoke-lab' &&
+      github.event.comment.body == '/current-repair-five-slot-ramp-prepare'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out exact current main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Capture exact five-slot ramp preflight
+        id: preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p current-repair-five-slot-ramp-prepare-evidence
+          CURRENT_REPAIR_RAMP_OUTPUT=current-repair-five-slot-ramp-prepare-evidence \
+            python scripts/current-repair-five-slot-ramp.py --prepare
+          result=current-repair-five-slot-ramp-prepare-evidence/result.json
+          test "$(jq -r '.safeToRunFiveSlotRamp' "$result")" = true
+          test "$(jq -r '.productionMutation' "$result")" = false
+          test "$(jq -r '.failures | length' "$result")" -eq 0
+          source_commit="$(git rev-parse HEAD)"
+          state="$(jq -r '.stateDigest' "$result")"
+          first="$(jq -r '.state.firstSuccessor' "$result")"
+          version="$(jq -r '.state.deploymentVersion' "$result")"
+          manager="$(sha256sum scripts/current-repair-five-slot-ramp.py | awk '{print $1}')"
+          pre_ledger="$(jq -r '.state.fastLane.last_processed_ledger' "$result")"
+          pre_lag="$(jq -r '.state.latestMetric.lag_ledgers' "$result")"
+          test "$version" = "$REPAIRED_VERSION_ID"
+          test "$first" -gt 0
+          printf 'source_commit=%s\nstate=%s\nfirst=%s\nversion=%s\nmanager=%s\npre_ledger=%s\npre_lag=%s\n' \
+            "$source_commit" "$state" "$first" "$version" "$manager" "$pre_ledger" "$pre_lag" >> "$GITHUB_OUTPUT"
+
+      - name: Publish exact five-slot ramp authorization proposal
+        env:
+          SOURCE_COMMIT: ${{ steps.preflight.outputs.source_commit }}
+          STATE: ${{ steps.preflight.outputs.state }}
+          FIRST: ${{ steps.preflight.outputs.first }}
+          VERSION: ${{ steps.preflight.outputs.version }}
+          MANAGER: ${{ steps.preflight.outputs.manager }}
+          PRE_LEDGER: ${{ steps.preflight.outputs.pre_ledger }}
+          PRE_LAG: ${{ steps.preflight.outputs.pre_lag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          expires="$(date -u -d '+2 hours' '+%Y-%m-%dT%H:%M:%SZ')"
+          nonce="$(openssl rand -hex 8)"
+          command="/current-repair-five-slot-ramp-authorize commit=${SOURCE_COMMIT} version=${VERSION} manager=${MANAGER} state=${STATE} first=${FIRST} prepare_run=${GITHUB_RUN_ID} expires=${expires} nonce=${nonce}"
+          cat > /tmp/current-repair-five-slot-ramp-proposal.md <<EOF
+          ## Current repair five-slot ramp authorization proposal
+
+          Preparation run: \`${GITHUB_RUN_ID}\`
+          Source main commit: \`${SOURCE_COMMIT}\`
+          Repaired Worker version: \`${VERSION}\`
+          Read-only state digest: \`${STATE}\`
+          First staged successor: \`${FIRST}\`
+          Pre-ramp ledger: \`${PRE_LEDGER}\`
+          Pre-ramp lag: \`${PRE_LAG}\`
+          Manager SHA-256: \`${MANAGER}\`
+
+          This authorization resumes the existing paused Queue only for a bounded five-invocation ramp. Each invocation remains capped at 32 ledgers. Delivery is re-paused as soon as the fifth exact successor slot is observed started; that in-flight invocation may finish and stage the sixth successor, which must remain undelivered. The maximum intended cursor advance is 160 ledgers. This does not create a Cron, purge the Queue, deploy a Worker, enable Mainnet, alter Supabase History/R5, or start continuous catch-up.
+
+          Exact authorization command:
+
+          \`${command}\`
+          EOF
+          gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/current-repair-five-slot-ramp-proposal.md
+
+      - name: Upload five-slot ramp preparation evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: current-repair-five-slot-ramp-prepare
+          path: current-repair-five-slot-ramp-prepare-evidence
+          if-no-files-found: error
+          retention-days: 14
+
+  five_slot_execute:
+    if: >-
+      github.event.issue.number == 995 &&
+      github.event.comment.user.login == 'badjoke-lab' &&
+      startsWith(github.event.comment.body, '/current-repair-five-slot-ramp-authorize ')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      AUTHORIZATION_BODY: ${{ github.event.comment.body }}
+      AUTHORIZATION_CREATED_AT: ${{ github.event.comment.created_at }}
+      AUTHORIZATION_COMMENT_ID: ${{ github.event.comment.id }}
+    steps:
+      - name: Check out exact current main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Parse and bind exact five-slot ramp authorization
+        id: auth
+        shell: bash
+        run: |
+          set -euo pipefail
+          regex='^/current-repair-five-slot-ramp-authorize commit=([a-f0-9]{40}) version=([0-9a-f-]{36}) manager=([a-f0-9]{64}) state=([a-f0-9]{64}) first=([0-9]{13}) prepare_run=([0-9]+) expires=([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z) nonce=([a-f0-9]{16})$'
+          [[ "$AUTHORIZATION_BODY" =~ $regex ]] || { echo 'Current repair five-slot ramp authorization shape mismatch' >&2; exit 1; }
+          names=(commit version manager state first prepare_run expires nonce)
+          for index in "${!names[@]}"; do
+            printf '%s=%s\n' "${names[$index]}" "${BASH_REMATCH[$((index + 1))]}" >> "$GITHUB_OUTPUT"
+          done
+          test "${BASH_REMATCH[1]}" = "$(git rev-parse HEAD)"
+          test "${BASH_REMATCH[2]}" = "$REPAIRED_VERSION_ID"
+          test "${BASH_REMATCH[3]}" = "$(sha256sum scripts/current-repair-five-slot-ramp.py | awk '{print $1}')"
+          expires_epoch="$(date -u -d "${BASH_REMATCH[7]}" +%s)"
+          auth_epoch="$(date -u -d "$AUTHORIZATION_CREATED_AT" +%s)"
+          now_epoch="$(date -u +%s)"
+          test "$auth_epoch" -lt "$expires_epoch"
+          test "$now_epoch" -le "$expires_epoch"
+          test $((expires_epoch - auth_epoch)) -le 7200
+
+      - name: Verify exact five-slot proposal and unique authorization
+        env:
+          PREPARE_RUN: ${{ steps.auth.outputs.prepare_run }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${QUALIFICATION_ISSUE}/comments?per_page=100" | jq -s 'add' > /tmp/current-repair-five-slot-comments.json
+          EXPECTED="$AUTHORIZATION_BODY" PREPARE="$PREPARE_RUN" AUTH_ID="$AUTHORIZATION_COMMENT_ID" node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs'
+          const comments = JSON.parse(readFileSync('/tmp/current-repair-five-slot-comments.json', 'utf8'))
+          const proposals = comments.filter((comment) => comment?.user?.login === 'github-actions[bot]' && typeof comment?.body === 'string' && comment.body.includes(`Preparation run: \`${process.env.PREPARE}\``) && comment.body.includes(`\`${process.env.EXPECTED}\``))
+          if (proposals.length !== 1) throw new Error(`expected one exact five-slot ramp proposal, found ${proposals.length}`)
+          const authorizations = comments.filter((comment) => comment?.user?.login === 'badjoke-lab' && comment?.body === process.env.EXPECTED)
+          if (authorizations.length !== 1 || Number(authorizations[0].id) !== Number(process.env.AUTH_ID)) throw new Error('five-slot ramp authorization is not unique')
+          NODE
+
+      - name: Execute exactly five bounded Current invocations
+        env:
+          AUTHORIZED_STATE_DIGEST: ${{ steps.auth.outputs.state }}
+          AUTHORIZED_FIRST_SUCCESSOR: ${{ steps.auth.outputs.first }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p current-repair-five-slot-ramp-evidence
+          CURRENT_REPAIR_RAMP_OUTPUT=current-repair-five-slot-ramp-evidence \
+            python scripts/current-repair-five-slot-ramp.py --execute
+
+      - name: Publish five-slot ramp result
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          result=current-repair-five-slot-ramp-evidence/result.json
+          if test -f "$result"; then
+            passed="$(jq -r '.passed' "$result")"
+            resumed="$(jq -r '.queueResumed' "$result")"
+            repaused="$(jq -r '.queueRepaused' "$result")"
+            ledger_delta="$(jq -r '.ledgerDelta // "unavailable"' "$result")"
+            lag_delta="$(jq -r '.lagDelta // "unavailable"' "$result")"
+            rows_read="$(jq -r '.totalPersistenceRowsRead // "unavailable"' "$result")"
+            rows_written="$(jq -r '.totalPersistenceRowsWritten // "unavailable"' "$result")"
+            max_duration="$(jq -r '.maxSlotDurationSeconds // "unavailable"' "$result")"
+            db_delta="$(jq -r '.databaseSizeDelta // "unavailable"' "$result")"
+            sixth="$(jq -r '.sixthSuccessor // "unavailable"' "$result")"
+            failure="$(jq -r '.failure // "none"' "$result")"
+          else
+            passed=false
+            resumed=unknown
+            repaused=unknown
+            ledger_delta=unavailable
+            lag_delta=unavailable
+            rows_read=unavailable
+            rows_written=unavailable
+            max_duration=unavailable
+            db_delta=unavailable
+            sixth=unavailable
+            failure='result unavailable'
+          fi
+          cat > /tmp/current-repair-five-slot-ramp-result.md <<EOF
+          ## Current repair five-slot ramp result
+
+          Run: \`${GITHUB_RUN_ID}\`
+          Passed: \`${passed}\`
+          Queue resumed: \`${resumed}\`
+          Queue re-paused: \`${repaused}\`
+          Fast-lane ledger delta: \`${ledger_delta}\`
+          Lag delta: \`${lag_delta}\`
+          Persistence rows read: \`${rows_read}\`
+          Persistence rows written: \`${rows_written}\`
+          Max slot duration seconds: \`${max_duration}\`
+          D1 file-size delta bytes: \`${db_delta}\`
+          Sixth successor: \`${sixth}\`
+          Failure: \`${failure}\`
+
+          Continuous catch-up remains stopped. Queue delivery must remain paused after this bounded ramp.
+          EOF
+          gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/current-repair-five-slot-ramp-result.md
+
+      - name: Upload five-slot ramp evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: current-repair-five-slot-ramp
+          path: current-repair-five-slot-ramp-evidence
+          if-no-files-found: warn
+          retention-days: 30
