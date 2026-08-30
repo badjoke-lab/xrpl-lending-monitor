@@ -15,7 +15,7 @@ concurrency:
 
 env:
   QUALIFICATION_ISSUE: '995'
-  RUNTIME_SHA: 4f3f185da6e5093d0a5ce13b43b22f3070e630b3
+  RUNTIME_SHA: 705332b5e9c5f639693c57d4ce7e11d85bffc05d
   SCRIPT_NAME: xrpl-lending-monitor
   QUEUE_ID: 2ae398f2edbf43749e45cd7ede77c6cd
   DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
