@@ -160,7 +160,12 @@ def wait_for_version(version_id: str, attempts: int = 60) -> dict[str, Any]:
 def public_smoke() -> dict[str, int]:
     statuses: dict[str, int] = {}
     for path in ("/api/overview", "/api/status/history-source", "/api/status/fast-lane-diff?limit=1"):
-        with urllib.request.urlopen(PRODUCTION_BASE + path, timeout=45) as response:
+        request = urllib.request.Request(
+            PRODUCTION_BASE + path,
+            headers={"User-Agent": "curl/8.5.0", "Accept": "application/json"},
+            method="GET",
+        )
+        with urllib.request.urlopen(request, timeout=45) as response:
             statuses[path] = response.status
     if any(status != 200 for status in statuses.values()):
         raise RuntimeError(f"public smoke failed: {statuses}")
