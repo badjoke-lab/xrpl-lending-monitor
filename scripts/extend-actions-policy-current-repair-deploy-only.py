@@ -125,7 +125,7 @@ for required in (
     "github.event.comment.user.login == 'badjoke-lab'",
     "github.event.comment.body == '/current-repair-bounded-proof-prepare'",
     "startsWith(github.event.comment.body, '/current-repair-bounded-proof-authorize ')",
-    "REPAIRED_VERSION_ID: 75009b7d-f6f6-48dd-9350-1b44012b3553",
+    "REPAIRED_VERSION_ID: 6141a09f-cf99-4098-a75b-145cef1b9e63",
     "python scripts/current-repair-bounded-proof.py --prepare",
     "python scripts/current-repair-bounded-proof.py --execute",
     "AUTHORIZED_STATE_DIGEST",
