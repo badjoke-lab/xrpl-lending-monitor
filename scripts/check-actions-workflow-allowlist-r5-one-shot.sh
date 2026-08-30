@@ -34,6 +34,7 @@ python scripts/extend-actions-policy-r5-collector-runs-retention-preflight.py "$
 python scripts/extend-actions-policy-r5-collector-runs-retention-rewrite.py "$generated_script"
 python scripts/extend-actions-policy-r5-phase-ready-index-physical-reindex.py "$generated_script"
 python scripts/extend-actions-policy-current-repair-deploy-only.py "$generated_script"
+python scripts/extend-actions-policy-current-repair-queue-consumer.py "$generated_script"
 chmod 700 "$generated_script"
 bash "$generated_script" "$@"
 node --check scripts/r5-index-footprint-readonly-probe.mjs
