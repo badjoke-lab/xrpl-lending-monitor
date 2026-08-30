@@ -222,7 +222,7 @@ checks = {
     "staleOverlayZero": int(stale.get("row_count", -1)) == 0,
     "foldableCompactZero": int(foldable.get("row_count", -1)) == 0,
     "compactRowsDoNotExceedFastCursor": compact_within_fast_cursor,
-    "expectedTerminalFailureRetained": latest_metric.get("status") == "error" and EXPECTED_ERROR_FRAGMENT in latest_error,
+    "latestMetricCommittedAtCursor": latest_metric.get("status") == "committed" and latest_metric.get("error_message") is None and int(latest_metric.get("end_ledger_index") or -1) == int(fast.get("last_processed_ledger") or -2),
     "replacementBaseReplaySafe": replacement.get("http") == 200 and isinstance(replacement.get("payload"), dict) and replacement["payload"].get("status") == "replayed",
     "publicOverviewReachable": overview.get("http") == 200 and isinstance(overview.get("payload"), dict) and overview["payload"].get("network") == "devnet",
 }
