@@ -11,9 +11,9 @@ export interface CurrentStateWatermark {
   ledgerIndex: number
   ledgerHash: string
   updatedAt: string | null
-  latestObservedLedger: number | null
-  lagLedgers: number | null
-  status: CurrentStateWatermarkStatus | null
+  latestObservedLedger?: number | null
+  lagLedgers?: number | null
+  status?: CurrentStateWatermarkStatus | null
 }
 
 export interface CountsWatermark {
