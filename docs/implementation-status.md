@@ -1,47 +1,52 @@
 # Implementation status
 
-Last updated: `2026-08-29`.
+Last updated: `2026-08-30`.
 
-## Current phase — 2026-08-29
+## Current phase — 2026-08-30
 
 XRPL Lending Monitor is **not formally released**.
 
-A fresh read-only production qualification on Actions run `33247087956` changed the Current-state diagnosis. The direct production Current blocker is the existing Cloudflare/D1 fast lane, which stopped on `2026-08-01` because the Worker exceeded its per-invocation subrequest budget. Full Supabase History recovery remains a separate halted problem and must not be described as the direct cause of the Current fast-lane stop.
+The direct production Current-state blocker was the existing Cloudflare/D1 fast lane, which stopped on `2026-08-01` because the Worker exceeded its per-invocation subrequest budget. Full Supabase History recovery remains a separate halted problem and must not be described as the direct cause of the Current fast-lane stop.
 
-Retained production facts from that read-only probe:
+The bounded Current repair is now deployed but continuous collection remains stopped.
+
+Retained production state:
 
 | Field | Value |
 | --- | ---: |
-| Fast-lane last processed ledger | `4,051,454` |
+| Fast-lane last processed ledger before bounded proof | `4,051,454` |
 | Fast-lane last update | `2026-08-01T03:52:12.771Z` |
-| Retained latest observed ledger | `4,108,194` |
-| Retained lag at stop | `56,740` |
-| Latest fast-lane result | `error` |
-| Error | `Too many subrequests by single Worker invocation.` |
+| Latest retained terminal error | `Too many subrequests by single Worker invocation.` |
 | Active base ledger | `4,039,102` |
 | Canonical overlay ledger | `4,039,122` |
-| Production mutation by probe | `false` |
+| Repaired runtime source | `4f3f185da6e5093d0a5ce13b43b22f3070e630b3` |
+| Effective production Worker version | `c858ab5d-846e-4bd4-b26b-8f71c9382f8f` |
+| Queue delivery | `paused` |
+| Worker Cron | `none` |
+| Network boundary | `devnet / Mainnet disabled` |
 
-PR `#1488` merged as commit `a6cabb095c9a42e27a1f4a5144c6d85a9f0f555e` and retained a non-production Supabase Current-first candidate, but that candidate is **not** the selected production Current path. Follow-up storage PR `#1489` was deliberately closed unmerged after the fresh production probe showed that the existing D1 Current lane is the direct repair target and already has bounded overlay/rolling-base semantics.
+The repair runtime keeps the application envelope below platform ceilings:
 
-The active P0 implementation is PR `#1490`:
-
-- emergency HTTP ledger fallback is bounded before the Workers Free external-subrequest ceiling;
+- emergency HTTP ledger fallback is capped before the Workers Free external-subrequest ceiling;
 - current-projection mutations are grouped instead of issuing one D1 query per object;
 - history/activity windows are grouped instead of issuing one D1 query per window;
 - the fast-lane persistence batch has an explicit application-level D1 query ceiling and fails before `db.batch()` if it would exceed that ceiling;
-- Current and History remain distinct truth surfaces; this repair does not declare History complete;
-- no production deployment, Queue reseed/restart, cron change, public-reader cutover, Supabase mutation, R5 rearm, Mainnet enablement, stabilization, or soak is authorized by the PR itself.
+- Current and History remain distinct truth surfaces; this repair does not declare History complete.
 
-The direct repair record is [`docs/ops/p0-fast-lane-subrequest-repair-2026-08-29.md`](ops/p0-fast-lane-subrequest-repair-2026-08-29.md).
+Queue delivery pause was separately proven in Actions run `33265201170`. The repaired Worker deployment was executed in run `33287377843`. That workflow ended red only after the new version had been deployed at 100% because its final public smoke used Python urllib's default request identity and received HTTP 403. A fresh independent read-only preflight in run `33287456830` then observed `c858ab5d-846e-4bd4-b26b-8f71c9382f8f` as the single 100% production version and passed the public API, Queue, D1, scheduler, Devnet/Mainnet, and configuration checks. The repaired version is therefore the effective production runtime and must not be redeployed merely to change the earlier workflow conclusion.
 
-The next operational gate after a green merge is a **read-only restart preflight** against the retained D1 state and current Devnet head. Any actual Worker deploy or Queue reseed/restart remains a separate production operation requiring explicit authorization.
+The active P0 gate is now a **single-invocation bounded Current proof**. It must send exactly one seed message while Queue delivery is paused, resume only long enough for that exact slot to start, immediately pause delivery again, permit only the already in-flight invocation to finish, and prove a successful cursor advance of at least one and at most the fixed 32-ledger cap. A successful proof still leaves Queue delivery paused. Continuous catch-up remains separately unauthorized.
+
+The controlling repair records are:
+
+- [`docs/ops/p0-fast-lane-subrequest-repair-2026-08-29.md`](ops/p0-fast-lane-subrequest-repair-2026-08-29.md);
+- [`docs/ops/p0-current-repair-deploy-effective-bounded-proof-2026-08-30.md`](ops/p0-current-repair-deploy-effective-bounded-proof-2026-08-30.md).
 
 The latest retained Supabase footprint remains approximately `389,688,467` bytes with `10,311,533` bytes below the 400 MB application halt. That capacity problem belongs to History/R5 recovery and is not being solved by moving Current production traffic into Supabase.
 
 ## Prior status snapshot — 2026-08-07
 
-The remainder of this document preserves the prior `2026-08-07` status for provenance. Where it conflicts with the current section above, the `2026-08-29` section controls.
+The remainder of this document preserves the prior `2026-08-07` status for provenance. Where it conflicts with the current section above, the `2026-08-30` section controls.
 
 XRPL Lending Monitor is **not formally released**.
 
@@ -216,7 +221,7 @@ Retained artifact:
 Measured shapes:
 
 | Shape | Baseline RSS | Peak RSS | Headroom | Retained / processed |
-| --- | ---: | ---: | ---: | ---: |
+| --- | ---: |
 | exact 12-ledger | 61,845,504 | 77,430,784 | 157,450,240 | 12 / 12 |
 | heavier retained | 59,494,400 | 75,296,768 | 159,584,256 | 24 / 12 |
 
