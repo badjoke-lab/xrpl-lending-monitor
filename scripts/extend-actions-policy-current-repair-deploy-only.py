@@ -19,10 +19,10 @@ if text.count(old_allowlist) != 1:
     raise SystemExit(f'expected one Current repair allowlist insertion point, found {text.count(old_allowlist)}')
 text = text.replace(old_allowlist, new_allowlist)
 
-old_count = 'GitHub Actions workflow count must remain exactly forty while R4F qualification and the guarded R5 workflows are active.'
-new_count = 'GitHub Actions workflow count must remain exactly forty-one while R4F qualification, guarded R5 workflows, and the bounded Current repair proof are active.'
+old_count = 'GitHub Actions workflow count must remain exactly forty-six while R4F qualification and the guarded R5 workflows are active.'
+new_count = 'GitHub Actions workflow count must remain exactly forty-seven while R4F qualification, guarded R5 workflows, and the bounded Current repair proof are active.'
 if text.count(old_count) != 1:
-    raise SystemExit(f'expected one forty-workflow count guard, found {text.count(old_count)}')
+    raise SystemExit(f'expected one forty-six-workflow count guard, found {text.count(old_count)}')
 text = text.replace(old_count, new_count)
 
 marker = '\nscheduled = []\n'
