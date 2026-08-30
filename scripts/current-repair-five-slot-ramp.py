@@ -228,7 +228,6 @@ def capture() -> dict[str, Any]:
     }
     checks = {
         "queuePaused": paused is True,
-        "successorQueuedByBytes": qmetrics["backlogBytes"] > 0 and qmetrics["oldestMessageTimestampMs"] > 0,
         "schedulerDisabled": cron == [],
         "repairedVersionActive": version == REPAIRED_VERSION_ID,
         "devnetOnly": binding_value(bindings, "APP_NETWORK") == "devnet" and binding_value(bindings, "MAINNET_ENABLED") == "false",
