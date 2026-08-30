@@ -44,7 +44,7 @@ for required in (
     "github.event.comment.body == '/current-repair-deploy-prepare'",
     "startsWith(github.event.comment.body, '/current-repair-deploy-authorize ')",
     "startsWith(github.event.comment.body, '/current-repair-queue-pause-authorize ')",
-    "RUNTIME_SHA: 4f3f185da6e5093d0a5ce13b43b22f3070e630b3",
+    "RUNTIME_SHA: 705332b5e9c5f639693c57d4ce7e11d85bffc05d",
     "python scripts/current-restart-preflight.py",
     "python scripts/deploy-current-repair-only.py --validate-source-only",
     "safeToDeployRepair",
