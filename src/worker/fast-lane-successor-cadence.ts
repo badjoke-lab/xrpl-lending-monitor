@@ -1,6 +1,6 @@
 export const FAST_LANE_CATCH_UP_CRON = 'queue-catch-up'
 export const FAST_LANE_NORMAL_CRON = 'queue-self-schedule'
-export const FAST_LANE_CATCH_UP_INTERVAL_MS = 60_000
+export const FAST_LANE_CATCH_UP_INTERVAL_MS = 10_000
 export const FAST_LANE_NORMAL_INTERVAL_MS = 5 * 60_000
 
 function nextBoundary(now: number, intervalMs: number): number {
