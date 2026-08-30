@@ -18,7 +18,7 @@ DATABASE_ID = os.environ.get("DATABASE_ID", "")
 SCRIPT_NAME = os.environ.get("SCRIPT_NAME", "xrpl-lending-monitor")
 REPAIRED_VERSION_ID = os.environ.get("REPAIRED_VERSION_ID", "c858ab5d-846e-4bd4-b26b-8f71c9382f8f")
 PRODUCTION_BASE = os.environ.get("PRODUCTION_BASE", "https://xrpl-lending-monitor.badjoke-lab.workers.dev")
-PROOF_SLOT = int(os.environ.get("CURRENT_REPAIR_PROOF_SLOT", "1788057060000"))
+PROOF_SLOT = int(os.environ.get("CURRENT_REPAIR_PROOF_SLOT", "1788060300000"))
 OUT = Path(os.environ.get("CURRENT_REPAIR_RAMP_OUTPUT", "current-repair-five-slot-ramp-evidence"))
 OUT.mkdir(parents=True, exist_ok=True)
 API_BASE = "https://api.cloudflare.com/client/v4"
