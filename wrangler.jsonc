@@ -18,7 +18,7 @@
         "queue": "xrpl-lending-fast-lane",
         "max_batch_size": 1,
         "max_batch_timeout": 1,
-        "max_retries": 3,
+        "max_retries": 100,
         "max_concurrency": 1
       }
     ]
