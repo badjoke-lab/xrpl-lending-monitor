@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   FAST_LANE_CATCH_UP_CRON,
+  FAST_LANE_CATCH_UP_INTERVAL_MS,
   FAST_LANE_NORMAL_CRON,
   isSyntheticFastLaneCatchUp,
   nextFastLaneSuccessor,
@@ -9,26 +10,32 @@ import {
 import { shouldRunProtectedHeavyCycle } from './scheduled-cadence'
 
 describe('fast-lane successor cadence', () => {
-  it('provides catch-up capacity above the observed Devnet rate', () => {
-    let cursor = 1_000
-    let head = cursor + 300
-    let scheduledTime = Date.parse('2026-07-31T12:00:00Z')
+  it('uses a ten-second serial catch-up cadence', () => {
+    let scheduledTime = Date.parse('2026-08-30T03:30:00Z')
 
-    for (let minute = 0; minute < 5; minute += 1) {
-      cursor += Math.min(32, head - cursor)
-      if (minute < 4) head += 84 / 5
+    for (let slot = 0; slot < 5; slot += 1) {
       const successor = nextFastLaneSuccessor({
         currentScheduledTime: scheduledTime,
-        now: scheduledTime,
-        caughtUp: cursor >= head,
+        now: scheduledTime + 3_500,
+        caughtUp: false,
       })
-      expect(successor.scheduledTime - scheduledTime).toBe(60_000)
+      expect(successor.scheduledTime - scheduledTime).toBe(10_000)
       expect(successor.cron).toBe(FAST_LANE_CATCH_UP_CRON)
       scheduledTime = successor.scheduledTime
     }
 
-    expect(head - cursor).toBeLessThan(300)
-    expect(cursor).toBe(1_160)
+    expect(FAST_LANE_CATCH_UP_INTERVAL_MS).toBe(10_000)
+  })
+
+  it('moves to the next ten-second boundary instead of replaying a stale schedule', () => {
+    expect(nextFastLaneSuccessor({
+      currentScheduledTime: Date.parse('2026-08-30T03:30:00Z'),
+      now: Date.parse('2026-08-30T03:30:26Z'),
+      caughtUp: false,
+    })).toEqual({
+      scheduledTime: Date.parse('2026-08-30T03:30:30Z'),
+      cron: FAST_LANE_CATCH_UP_CRON,
+    })
   })
 
   it('models exact contiguous non-overlapping 32-ledger catch-up ranges', () => {
