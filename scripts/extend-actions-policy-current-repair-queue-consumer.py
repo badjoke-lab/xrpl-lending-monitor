@@ -8,19 +8,19 @@ path = Path(sys.argv[1])
 text = path.read_text()
 
 old_policy = '    "current-repair-bounded-proof.yml": ["issue_comment"],\n    "deploy-queue-minute-cadence-fix.yml": ["issue_comment"],'
-new_policy = '    "current-repair-bounded-proof.yml": ["issue_comment"],\n    "current-repair-queue-consumer.yml": ["issue_comment"],\n    "deploy-queue-minute-cadence-fix.yml": ["issue_comment"],'
+new_policy = '    "current-repair-bounded-proof.yml": ["issue_comment"],\n    "current-repair-queue-consumer.yml": ["issue_comment"],\n    "current-repair-queue-diagnostics.yml": ["issue_comment"],\n    "deploy-queue-minute-cadence-fix.yml": ["issue_comment"],'
 if text.count(old_policy) != 1:
     raise SystemExit(f'expected one Current repair policy insertion point, found {text.count(old_policy)}')
 text = text.replace(old_policy, new_policy)
 
 old_allowlist = '  current-repair-bounded-proof.yml\n  deploy-queue-minute-cadence-fix.yml'
-new_allowlist = '  current-repair-bounded-proof.yml\n  current-repair-queue-consumer.yml\n  deploy-queue-minute-cadence-fix.yml'
+new_allowlist = '  current-repair-bounded-proof.yml\n  current-repair-queue-consumer.yml\n  current-repair-queue-diagnostics.yml\n  deploy-queue-minute-cadence-fix.yml'
 if text.count(old_allowlist) != 1:
     raise SystemExit(f'expected one Current repair allowlist insertion point, found {text.count(old_allowlist)}')
 text = text.replace(old_allowlist, new_allowlist)
 
 old_count = 'GitHub Actions workflow count must remain exactly forty-seven while R4F qualification, guarded R5 workflows, and the bounded Current repair proof are active.'
-new_count = 'GitHub Actions workflow count must remain exactly forty-eight while R4F qualification, guarded R5 workflows, and the bounded Current repair controls are active.'
+new_count = 'GitHub Actions workflow count must remain exactly forty-nine while R4F qualification, guarded R5 workflows, and the bounded Current repair controls are active.'
 if text.count(old_count) != 1:
     raise SystemExit(f'expected one forty-seven-workflow count guard, found {text.count(old_count)}')
 text = text.replace(old_count, new_count)
@@ -109,6 +109,66 @@ for forbidden in (
         raise SystemExit(f"Current repair Queue consumer manager contains forbidden capability: {forbidden}")
 if current_repair_queue_consumer_manager.count('"PUT",') != 1:
     raise SystemExit("Current repair Queue consumer manager must contain exactly one PUT mutation")
+
+current_repair_queue_diagnostics = (root / "current-repair-queue-diagnostics.yml").read_text()
+current_repair_queue_diagnostics_manager = (root / "../../scripts/current-repair-queue-diagnostics.py").read_text()
+compile(current_repair_queue_diagnostics_manager, "current-repair-queue-diagnostics.py", "exec")
+for required in (
+    "name: Current repair Queue blocker diagnostics",
+    "issue_comment:",
+    "contents: read",
+    "issues: write",
+    "github.event.issue.number == 995",
+    "github.event.comment.user.login == 'badjoke-lab'",
+    "github.event.comment.body == '/current-repair-queue-diagnostics'",
+    "python scripts/current-repair-queue-diagnostics.py",
+    "current-repair-queue-diagnostics",
+    "This workflow is read-only.",
+):
+    if required not in current_repair_queue_diagnostics:
+        raise SystemExit(f"Current repair Queue diagnostics workflow is missing guarded requirement: {required}")
+for forbidden in (
+    "  push:",
+    "  pull_request:",
+    "  schedule:",
+    "workflow_dispatch:",
+    "pull_request_target",
+    "contents: write",
+    "wrangler deploy",
+    "delete_messages_permanently",
+):
+    if forbidden in current_repair_queue_diagnostics:
+        raise SystemExit(f"Current repair Queue diagnostics workflow contains forbidden capability: {forbidden.strip()}")
+if current_repair_queue_diagnostics.count("issues: write") != 1:
+    raise SystemExit("Current repair Queue diagnostics workflow must have exactly one issue-write permission")
+for required in (
+    '"mode": "read-only-diagnostics"',
+    '"productionMutation": False',
+    'f"/accounts/{ACCOUNT_ID}/queues/{QUEUE_ID}/consumers/{consumer_id}"',
+    'PRAGMA table_info(fast_lane_queue_slots)',
+    'QUEUE_LEASE_SECONDS = 15 * 60',
+    'oldestStaleSample',
+    'newestStaleSample',
+    'LIMIT 5',
+):
+    if required not in current_repair_queue_diagnostics_manager:
+        raise SystemExit(f"Current repair Queue diagnostics manager is missing read-only guard: {required}")
+for forbidden in (
+    'api("PUT"',
+    'api("DELETE"',
+    'api("PATCH"',
+    '/messages',
+    '/purge',
+    'wrangler',
+    'INSERT ',
+    'UPDATE ',
+    'DELETE ',
+    'DROP ',
+    'ALTER ',
+    'CREATE ',
+):
+    if forbidden in current_repair_queue_diagnostics_manager:
+        raise SystemExit(f"Current repair Queue diagnostics manager contains forbidden mutation capability: {forbidden}")
 '''
 
 text = text.replace(marker, '\n' + block + marker)
