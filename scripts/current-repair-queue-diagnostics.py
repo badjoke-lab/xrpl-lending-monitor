@@ -117,7 +117,7 @@ def first_alias(columns: list[str], aliases: tuple[str, ...]) -> str | None:
     return next((alias for alias in aliases if alias in column_set), None)
 
 
-def stale_message_relations(stale_where: str) -> dict[str, Any]:
+def stale_message_relations() -> dict[str, Any]:
     evidence: dict[str, Any] = {
         "authoritative": False,
         "purpose": "discover exact message_id relations only; never authorize mutation",
@@ -136,7 +136,9 @@ def stale_message_relations(stale_where: str) -> dict[str, Any]:
     )
     table_rows = d1_query(
         "SELECT name FROM sqlite_master WHERE type='table' "
-        "AND name NOT LIKE 'sqlite_%' ORDER BY name LIMIT 200"
+        "AND name NOT LIKE 'sqlite_%' "
+        "AND lower(COALESCE(sql,'')) LIKE '%message_id%' "
+        "ORDER BY name LIMIT 50"
     )
     candidates: list[dict[str, Any]] = []
     for table_row in table_rows:
@@ -344,7 +346,7 @@ def main() -> int:
             "OR lower(name) LIKE '%queue%') ORDER BY name LIMIT 50"
         )
         stale_run_evidence["relationTableCandidates"] = relation_table_candidates
-        message_relation_evidence = stale_message_relations(stale_where)
+        message_relation_evidence = stale_message_relations()
 
         fast_lane = one(d1_query(
             "SELECT last_processed_ledger, latest_observed_ledger, updated_at "
