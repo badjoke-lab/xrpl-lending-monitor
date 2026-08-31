@@ -18,7 +18,6 @@ DATABASE_ID = os.environ.get("DATABASE_ID", "")
 SCRIPT_NAME = os.environ.get("SCRIPT_NAME", "xrpl-lending-monitor")
 REPAIRED_VERSION_ID = os.environ.get("REPAIRED_VERSION_ID", "c858ab5d-846e-4bd4-b26b-8f71c9382f8f")
 PRODUCTION_BASE = os.environ.get("PRODUCTION_BASE", "https://xrpl-lending-monitor.badjoke-lab.workers.dev")
-PROOF_SLOT = int(os.environ.get("CURRENT_REPAIR_PROOF_SLOT", "1788060300000"))
 OUT = Path(os.environ.get("CURRENT_REPAIR_RAMP_OUTPUT", "current-repair-five-slot-ramp-evidence"))
 OUT.mkdir(parents=True, exist_ok=True)
 API_BASE = "https://api.cloudflare.com/client/v4"
@@ -155,6 +154,18 @@ def read_slot(scheduled_time: int) -> dict[str, Any] | None:
     return rows[0] if rows else None
 
 
+def proof_tip_candidates() -> list[dict[str, Any]]:
+    return d1_query(
+        "SELECT p.scheduled_time,p.status,p.message_id,p.started_at,p.completed_at,p.next_scheduled_time,p.next_cron,p.error_message,p.updated_at "
+        "FROM fast_lane_queue_slots p "
+        "LEFT JOIN fast_lane_queue_slots s ON s.scheduled_time=p.next_scheduled_time "
+        "WHERE p.status='completed' AND p.error_message IS NULL "
+        "AND p.next_scheduled_time IS NOT NULL AND p.next_scheduled_time>p.scheduled_time "
+        "AND p.next_cron IS NOT NULL AND s.scheduled_time IS NULL "
+        "ORDER BY p.completed_at DESC,p.scheduled_time DESC LIMIT 2"
+    )
+
+
 def slot_summary() -> dict[str, Any]:
     counts = d1_query("SELECT status,COUNT(*) AS row_count FROM fast_lane_queue_slots GROUP BY status ORDER BY status")
     summary = one(d1_query(
@@ -209,7 +220,9 @@ def current_deployment_version() -> tuple[str | None, dict[str, Any]]:
 
 
 def capture() -> dict[str, Any]:
-    proof = read_slot(PROOF_SLOT)
+    proof_candidates = proof_tip_candidates()
+    proof = proof_candidates[0] if len(proof_candidates) == 1 else None
+    proof_slot = int((proof or {}).get("scheduled_time") or 0)
     first_successor = int((proof or {}).get("next_scheduled_time") or 0)
     queue = queue_state()
     qmetrics = queue_metrics()
@@ -233,8 +246,9 @@ def capture() -> dict[str, Any]:
         "devnetOnly": binding_value(bindings, "APP_NETWORK") == "devnet" and binding_value(bindings, "MAINNET_ENABLED") == "false",
         "maxLedgers32": binding_value(bindings, "FAST_LANE_MAX_LEDGERS_PER_RUN") == str(EXPECTED_MAX_LEDGERS),
         "singleQueueBinding": len([item for item in bindings if item.get("name") == "FAST_LANE_QUEUE" and item.get("type") == "queue"]) == 1,
+        "proofTipUnique": len(proof_candidates) == 1,
         "proofSlotCompleted": bool(proof) and proof.get("status") == "completed" and proof.get("error_message") is None,
-        "proofSuccessorStaged": first_successor > PROOF_SLOT and bool((proof or {}).get("next_cron")),
+        "proofSuccessorStaged": first_successor > proof_slot and bool((proof or {}).get("next_cron")),
         "successorNotYetDelivered": first_successor > 0 and read_slot(first_successor) is None,
         "noPendingSlot": slots["pending"] == 0,
         "noLiveUnstagedSlot": slots["liveUnstaged"] == 0,
@@ -243,6 +257,7 @@ def capture() -> dict[str, Any]:
         "publicSmoke": all(status == 200 for status in public.values()),
     }
     state = {
+        "proofTipCandidateCount": len(proof_candidates),
         "proofSlot": proof,
         "firstSuccessor": first_successor,
         "queue": {"deliveryPaused": paused, "metrics": qmetrics},
