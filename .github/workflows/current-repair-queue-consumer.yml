@@ -10,7 +10,17 @@ permissions:
   actions: read
 
 concurrency:
-  group: current-repair-production-worker-write
+  group: >-
+    ${{
+      github.event.issue.number == 995 &&
+      github.event.comment.user.login == 'badjoke-lab' &&
+      (
+        github.event.comment.body == '/current-repair-queue-consumer-prepare' ||
+        startsWith(github.event.comment.body, '/current-repair-queue-consumer-authorize ')
+      ) &&
+      'current-repair-production-worker-write' ||
+      format('current-repair-queue-consumer-noop-{0}', github.run_id)
+    }}
   cancel-in-progress: false
 
 env:

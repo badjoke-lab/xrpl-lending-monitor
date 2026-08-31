@@ -9,7 +9,14 @@ permissions:
   issues: write
 
 concurrency:
-  group: current-repair-production-worker-write
+  group: >-
+    ${{
+      github.event.issue.number == 995 &&
+      github.event.comment.user.login == 'badjoke-lab' &&
+      github.event.comment.body == '/current-repair-queue-diagnostics' &&
+      'current-repair-production-worker-write' ||
+      format('current-repair-queue-diagnostics-noop-{0}', github.run_id)
+    }}
   cancel-in-progress: false
 
 env:
