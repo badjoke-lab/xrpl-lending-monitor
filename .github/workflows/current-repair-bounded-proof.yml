@@ -10,7 +10,18 @@ permissions:
   actions: read
 
 concurrency:
-  group: current-repair-production-worker-write
+  group: >-
+    ${{
+      github.event.issue.number == 995 &&
+      github.event.comment.user.login == 'badjoke-lab' &&
+      (
+        startsWith(github.event.comment.body, '/current-repair-bounded-proof-') ||
+        startsWith(github.event.comment.body, '/current-repair-five-slot-ramp-') ||
+        startsWith(github.event.comment.body, '/current-repair-continuous-catchup-')
+      ) &&
+      'current-repair-production-worker-write' ||
+      format('current-repair-bounded-control-noop-{0}', github.run_id)
+    }}
   cancel-in-progress: false
 
 env:
