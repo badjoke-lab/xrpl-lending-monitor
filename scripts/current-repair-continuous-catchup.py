@@ -312,7 +312,13 @@ def execute() -> int:
                 ledger_ranges_ok = False
                 break
             expected_start = end + 1
-        cadence_ok = int(terminals[2].get("scheduled_time") or 0) - int(terminals[1].get("scheduled_time") or 0) == EXPECTED_CADENCE_MS
+        scheduled_times = [int(terminal.get("scheduled_time") or 0) for terminal in terminals]
+        cadence_deltas = [later - earlier for earlier, later in zip(scheduled_times, scheduled_times[1:])]
+        cadence_ok = (
+            len(scheduled_times) == OBSERVE_SLOTS
+            and all(scheduled > 0 and scheduled % EXPECTED_CADENCE_MS == 0 for scheduled in scheduled_times)
+            and all(delta >= EXPECTED_CADENCE_MS and delta % EXPECTED_CADENCE_MS == 0 for delta in cadence_deltas)
+        )
         fresh_lag_decreased = int(metrics[-1].get("lag_ledgers") or 0) < int(metrics[0].get("lag_ledgers") or 0)
         final_fast = fast_state()
         final_version = current_version()
@@ -322,7 +328,7 @@ def execute() -> int:
             "workerUnchanged": final_version == EXPECTED_VERSION_ID,
             "threeSlotsCompleted": len(terminals) == OBSERVE_SLOTS,
             "contiguousBoundedCoverage": ledger_ranges_ok,
-            "tenSecondCadenceContinues": cadence_ok,
+            "catchUpCadenceContract": cadence_ok,
             "freshLagDecreased": fresh_lag_decreased,
             "cursorAdvanced": int(final_fast.get("last_processed_ledger") or 0) >= int(metrics[-1].get("end_ledger_index") or 0) > pre_ledger,
             "publicOverviewReachable": public_status("/api/overview") == 200,
