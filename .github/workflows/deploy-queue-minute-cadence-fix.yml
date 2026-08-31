@@ -10,7 +10,17 @@ permissions:
   actions: read
 
 concurrency:
-  group: current-repair-production-worker-write
+  group: >-
+    ${{
+      github.event.issue.number == 995 &&
+      github.event.comment.user.login == 'badjoke-lab' &&
+      (
+        startsWith(github.event.comment.body, '/current-repair-deploy-') ||
+        startsWith(github.event.comment.body, '/current-repair-queue-pause-authorize ')
+      ) &&
+      'current-repair-production-worker-write' ||
+      format('current-repair-deploy-noop-{0}', github.run_id)
+    }}
   cancel-in-progress: false
 
 env:
@@ -177,7 +187,6 @@ jobs:
         uses: pnpm/action-setup@v4
         with:
           version: 11.9.0
-
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
