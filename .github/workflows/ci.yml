@@ -80,7 +80,7 @@ jobs:
         run: node .fast-lane-production-build/run-fast-lane-production.mjs --validate-config
 
       - name: Unit tests
-        run: pnpm test
+        run: pnpm exec vitest run --no-file-parallelism
 
       - name: Verify revision-4 PostgreSQL persistence locally
         run: bash scripts/test-r4f-revision4-directional-persistence-postgres.sh
