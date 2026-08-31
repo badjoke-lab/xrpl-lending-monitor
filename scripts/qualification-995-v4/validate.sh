@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Validation-only PR marker: fixed v4 boundaries must remain internally identical.
 set -euo pipefail
 test "$(cat .github/complete-history-12-slot-qualification-995-v4-trigger)" = \
   "qualify-v4-${START_MS}-${END_MS}-${RUNTIME_SHA}"
