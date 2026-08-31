@@ -150,6 +150,7 @@ def capture() -> dict[str, Any]:
         "queueStateKnown": paused is not None,
         "queueCurrentlyActive": paused is False,
         "queueBacklogEmpty": metrics["backlogCount"] == 0 and metrics["backlogBytes"] == 0,
+        "queueBacklogSingleSuccessor": metrics["backlogCount"] == 1 and metrics["backlogBytes"] > 0 and metrics["oldestMessageTimestampMs"] > 0,
         "schedulerStillDisabled": cron == [],
         "singleDeploymentVersion": len(versions) == 1 and versions[0].get("percentage") == 100,
         "devnetOnly": binding_value(bindings, "APP_NETWORK") == "devnet" and binding_value(bindings, "MAINNET_ENABLED") == "false",
@@ -157,6 +158,12 @@ def capture() -> dict[str, Any]:
         "noPendingQueueSlot": slots["pending"] == 0,
         "noLiveUnstagedProcessingSlot": slots["liveUnstaged"] == 0,
         "noStagedSuccessorSlot": slots["stagedSuccessor"] == 0,
+    }
+    backlog_safe = checks["queueBacklogEmpty"] or checks["queueBacklogSingleSuccessor"]
+    required_checks = {
+        name: passed
+        for name, passed in checks.items()
+        if name not in {"queueBacklogEmpty", "queueBacklogSingleSuccessor"}
     }
     state = {
         "queue": {
@@ -173,10 +180,14 @@ def capture() -> dict[str, Any]:
         "slots": slots,
     }
     digest = hashlib.sha256(json.dumps(state, separators=(",", ":"), sort_keys=True).encode()).hexdigest()
+    safe_to_pause = backlog_safe and all(required_checks.values())
+    failures = [name for name, passed in required_checks.items() if not passed]
+    if not backlog_safe:
+        failures.append("queueBacklogBounded")
     return {
-        "safeToPause": all(checks.values()),
-        "checks": checks,
-        "failures": [name for name, passed in checks.items() if not passed],
+        "safeToPause": safe_to_pause,
+        "checks": {**checks, "queueBacklogBounded": backlog_safe},
+        "failures": failures,
         "stateDigest": digest,
         "state": state,
     }
@@ -194,7 +205,7 @@ def wait_for_paused(attempts: int = 30) -> None:
 def do_prepare() -> int:
     pre = capture()
     result = {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "mode": "prepare",
         "productionMutation": False,
         **pre,
@@ -206,7 +217,7 @@ def do_prepare() -> int:
 
 def do_execute() -> int:
     result: dict[str, Any] = {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "mode": "execute",
         "passed": False,
         "productionMutation": False,
@@ -242,7 +253,7 @@ def do_execute() -> int:
         save("post-state.json", post)
         post_checks = {
             "queuePaused": post["state"]["queue"]["deliveryPaused"] is True,
-            "queueBacklogStillEmpty": post["state"]["queue"]["metrics"]["backlogCount"] == 0 and post["state"]["queue"]["metrics"]["backlogBytes"] == 0,
+            "queueBacklogPreserved": post["state"]["queue"]["metrics"] == pre["state"]["queue"]["metrics"],
             "schedulerStillDisabled": post["state"]["schedules"] == [],
             "deploymentUnchanged": post["state"]["deploymentVersion"] == pre["state"]["deploymentVersion"],
             "networkBoundaryUnchanged": post["state"]["appNetwork"] == pre["state"]["appNetwork"] == "devnet" and post["state"]["mainnetEnabled"] == pre["state"]["mainnetEnabled"] == "false",
