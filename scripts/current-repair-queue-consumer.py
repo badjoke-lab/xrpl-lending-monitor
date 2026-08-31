@@ -19,6 +19,11 @@ EXPECTED_WORKER_VERSION = os.environ.get(
     "EXPECTED_WORKER_VERSION",
     "6141a09f-cf99-4098-a75b-145cef1b9e63",
 )
+EXPECTED_CONSUMER_ID = os.environ.get(
+    "EXPECTED_CONSUMER_ID",
+    "149852ab52d548fea9e6b1d377d28fc1",
+)
+EXPECTED_STALE_SLOT_COUNT = int(os.environ.get("EXPECTED_STALE_SLOT_COUNT", "58"))
 AUTHORIZED_STATE_DIGEST = os.environ.get("AUTHORIZED_STATE_DIGEST", "")
 AUTHORIZED_CONSUMER_ID = os.environ.get("AUTHORIZED_CONSUMER_ID", "")
 OUT = Path(os.environ.get(
@@ -174,7 +179,18 @@ def normalized_consumer(consumer: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def slot_state() -> dict[str, int]:
+def stale_slot_rows() -> list[dict[str, Any]]:
+    return d1_query(
+        "SELECT scheduled_time, message_id, status, started_at, completed_at, "
+        "next_scheduled_time, error_message, updated_at, next_cron "
+        "FROM fast_lane_queue_slots WHERE status='processing' "
+        "AND next_scheduled_time IS NULL "
+        f"AND unixepoch(updated_at) <= unixepoch('now')-{QUEUE_LEASE_SECONDS} "
+        "ORDER BY scheduled_time ASC, message_id ASC"
+    )
+
+
+def slot_state() -> dict[str, Any]:
     row = one(d1_query(
         "SELECT "
         "COALESCE(SUM(CASE WHEN status='processing' AND next_scheduled_time IS NULL "
@@ -184,10 +200,16 @@ def slot_state() -> dict[str, int]:
         "COALESCE(SUM(CASE WHEN status='processing' AND next_scheduled_time IS NOT NULL THEN 1 ELSE 0 END),0) AS staged_successor "
         "FROM fast_lane_queue_slots"
     ))
+    stale_rows = stale_slot_rows()
+    fingerprint = hashlib.sha256(
+        json.dumps(stale_rows, separators=(",", ":"), sort_keys=True).encode()
+    ).hexdigest()
     return {
         "liveUnstaged": int(row.get("live_unstaged", -1)),
         "staleReclaimable": int(row.get("stale_reclaimable", -1)),
         "stagedSuccessor": int(row.get("staged_successor", -1)),
+        "staleSnapshotRowCount": len(stale_rows),
+        "staleSnapshotFingerprint": fingerprint,
     }
 
 
@@ -221,9 +243,10 @@ def capture(expected_settings: dict[str, Any]) -> dict[str, Any]:
     checks = {
         "queuePaused": paused is True,
         "queueBacklogEmpty": metrics["backlogCount"] == 0 and metrics["backlogBytes"] == 0,
-        "oneWorkerConsumer": len(consumer_list) == 1
+        "pinnedWorkerConsumer": len(consumer_list) == 1
             and consumer.get("type") == "worker"
-            and consumer.get("scriptName") == SCRIPT_NAME,
+            and consumer.get("consumerId") == EXPECTED_CONSUMER_ID
+            and consumer.get("scriptName") in (None, SCRIPT_NAME),
         "queueNameExact": consumer.get("queueName") == EXPECTED_QUEUE_NAME,
         "consumerSettingsExact": consumer.get("settings") == expected_settings,
         "deadLetterQueueAbsent": consumer.get("deadLetterQueue") == "",
@@ -235,7 +258,9 @@ def capture(expected_settings: dict[str, Any]) -> dict[str, Any]:
             and binding_value(bindings, "MAINNET_ENABLED") == "false",
         "maxLedgers32": binding_value(bindings, "FAST_LANE_MAX_LEDGERS_PER_RUN") == "32",
         "noLiveUnstagedSlot": slots["liveUnstaged"] == 0,
-        "oneStaleReclaimableSlot": slots["staleReclaimable"] == 1,
+        "exactKnownStaleSnapshot": slots["staleReclaimable"] == EXPECTED_STALE_SLOT_COUNT
+            and slots["staleSnapshotRowCount"] == EXPECTED_STALE_SLOT_COUNT
+            and len(slots["staleSnapshotFingerprint"]) == 64,
         "noStagedSuccessor": slots["stagedSuccessor"] == 0,
         "fastLaneBehind": 0 < fast_lane["lastProcessedLedger"] < fast_lane["latestObservedLedger"],
     }
@@ -247,6 +272,8 @@ def capture(expected_settings: dict[str, Any]) -> dict[str, Any]:
             "metrics": metrics,
         },
         "consumer": consumer,
+        "expectedConsumerId": EXPECTED_CONSUMER_ID,
+        "expectedStaleSlotCount": EXPECTED_STALE_SLOT_COUNT,
         "schedules": cron,
         "workerVersion": versions[0].get("version_id") if len(versions) == 1 else None,
         "appNetwork": binding_value(bindings, "APP_NETWORK"),
@@ -270,7 +297,7 @@ def capture(expected_settings: dict[str, Any]) -> dict[str, Any]:
 def do_prepare() -> int:
     pre = capture(EXPECTED_OLD_SETTINGS)
     result = {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "mode": "prepare",
         "productionMutation": False,
         "targetMaxRetries": 100,
@@ -282,6 +309,7 @@ def do_prepare() -> int:
         "failures": result["failures"],
         "stateDigest": result["stateDigest"],
         "consumerId": result["state"].get("consumer", {}).get("consumerId"),
+        "staleSnapshotFingerprint": result["state"].get("slots", {}).get("staleSnapshotFingerprint"),
         "lastProcessedLedger": result["state"].get("fastLane", {}).get("lastProcessedLedger"),
     }, sort_keys=True))
     return 0 if result["safe"] else 1
@@ -289,7 +317,7 @@ def do_prepare() -> int:
 
 def do_execute() -> int:
     result: dict[str, Any] = {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "mode": "execute",
         "passed": False,
         "productionMutation": False,
@@ -305,6 +333,8 @@ def do_execute() -> int:
     try:
         if not AUTHORIZED_STATE_DIGEST or not AUTHORIZED_CONSUMER_ID:
             raise RuntimeError("exact authorized state digest and consumer id are required")
+        if AUTHORIZED_CONSUMER_ID != EXPECTED_CONSUMER_ID:
+            raise RuntimeError("authorized Queue consumer does not match pinned production consumer")
         pre = capture(EXPECTED_OLD_SETTINGS)
         save("pre-state.json", pre)
         if not pre["safe"]:
