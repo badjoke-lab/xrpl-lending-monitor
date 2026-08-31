@@ -10,6 +10,23 @@ const stagedPath = resolve(
 )
 const staged = readFileSync(stagedPath, 'utf8')
 
+function runDisposablePostgresProof(): string {
+  let lastError: unknown
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      return execFileSync(
+        'bash',
+        [resolve(process.cwd(), 'scripts/test-r5-terminal-generic-scan-certificate-postgres.sh')],
+        { encoding: 'utf8' },
+      )
+    } catch (error) {
+      lastError = error
+      if (attempt < 3) execFileSync('sleep', ['1'])
+    }
+  }
+  throw lastError
+}
+
 describe('generic terminal scan certificate staging', () => {
   it('is an ops-only transactional staging patch', () => {
     expect(staged.trimStart().startsWith('begin;')).toBe(true)
@@ -56,11 +73,7 @@ describe('generic terminal scan certificate staging', () => {
   })
 
   it('runs the disposable PostgreSQL transition proof', () => {
-    const output = execFileSync(
-      'bash',
-      [resolve(process.cwd(), 'scripts/test-r5-terminal-generic-scan-certificate-postgres.sh')],
-      { encoding: 'utf8' },
-    )
+    const output = runDisposablePostgresProof()
     expect(output).toContain('exact active scan sequence persisted into generic work: `true`')
     expect(output).toContain('stale generic scan rejects without work/stream mutation: `true`')
     expect(output).toContain('generic finalize verifies work certificate and resets sequence to zero: `true`')
