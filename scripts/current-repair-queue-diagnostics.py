@@ -26,6 +26,8 @@ HEADERS = {
     "Content-Type": "application/json",
 }
 QUEUE_LEASE_SECONDS = 15 * 60
+STATE_COLUMN_ALIASES = ("status", "state", "run_status")
+RUN_ID_COLUMN_ALIASES = ("run_id", "run_uuid", "execution_id", "workflow_run_id")
 
 if not all((ACCOUNT_ID, API_TOKEN, QUEUE_ID, DATABASE_ID)):
     raise SystemExit("Cloudflare credentials, Queue identity, and D1 identity are required")
@@ -101,9 +103,124 @@ def quoted_identifier(name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
 
 
+def table_columns(table_name: str) -> list[str]:
+    rows = d1_query(f"PRAGMA table_info({quoted_identifier(table_name)})")
+    return [
+        str(row.get("name"))
+        for row in rows
+        if isinstance(row.get("name"), str) and row.get("name")
+    ]
+
+
+def first_alias(columns: list[str], aliases: tuple[str, ...]) -> str | None:
+    column_set = set(columns)
+    return next((alias for alias in aliases if alias in column_set), None)
+
+
+def stale_message_relations(stale_where: str) -> dict[str, Any]:
+    evidence: dict[str, Any] = {
+        "authoritative": False,
+        "purpose": "discover exact message_id relations only; never authorize mutation",
+        "slotMessageIdColumnPresent": False,
+        "candidateCount": 0,
+        "candidates": [],
+    }
+    slot_columns = table_columns("fast_lane_queue_slots")
+    evidence["slotMessageIdColumnPresent"] = "message_id" in slot_columns
+    if "message_id" not in slot_columns:
+        return evidence
+
+    stale_where_s = (
+        "s.status='processing' AND s.next_scheduled_time IS NULL "
+        f"AND unixepoch(s.updated_at) <= unixepoch('now')-{QUEUE_LEASE_SECONDS}"
+    )
+    table_rows = d1_query(
+        "SELECT name FROM sqlite_master WHERE type='table' "
+        "AND name NOT LIKE 'sqlite_%' ORDER BY name LIMIT 200"
+    )
+    candidates: list[dict[str, Any]] = []
+    for table_row in table_rows:
+        table_name = table_row.get("name")
+        if not isinstance(table_name, str) or table_name == "fast_lane_queue_slots":
+            continue
+        columns = table_columns(table_name)
+        if "message_id" not in columns:
+            continue
+
+        table_q = quoted_identifier(table_name)
+        message_q = quoted_identifier("message_id")
+        state_column = first_alias(columns, STATE_COLUMN_ALIASES)
+        run_id_column = first_alias(columns, RUN_ID_COLUMN_ALIASES)
+        state_select = (
+            f", CAST(r.{quoted_identifier(state_column)} AS TEXT) AS relation_state"
+            if state_column
+            else ", NULL AS relation_state"
+        )
+        run_select = (
+            f", CAST(r.{quoted_identifier(run_id_column)} AS TEXT) AS relation_run_id"
+            if run_id_column
+            else ", NULL AS relation_run_id"
+        )
+        match = one(d1_query(
+            "SELECT COUNT(DISTINCT s.message_id) AS matched_stale_messages, "
+            "COUNT(*) AS relation_rows "
+            "FROM fast_lane_queue_slots s JOIN " + table_q + " r "
+            f"ON CAST(r.{message_q} AS TEXT)=CAST(s.message_id AS TEXT) "
+            "WHERE " + stale_where_s
+        ))
+        unmatched = one(d1_query(
+            "SELECT COUNT(*) AS unmatched_stale_messages "
+            "FROM fast_lane_queue_slots s WHERE " + stale_where_s
+            + " AND NOT EXISTS (SELECT 1 FROM " + table_q + " r WHERE "
+            f"CAST(r.{message_q} AS TEXT)=CAST(s.message_id AS TEXT))"
+        ))
+        ambiguous = one(d1_query(
+            "SELECT COUNT(*) AS ambiguous_stale_messages FROM ("
+            "SELECT s.message_id FROM fast_lane_queue_slots s JOIN " + table_q + " r "
+            f"ON CAST(r.{message_q} AS TEXT)=CAST(s.message_id AS TEXT) "
+            "WHERE " + stale_where_s + " GROUP BY s.message_id HAVING COUNT(*) > 1)"
+        ))
+        state_counts: list[dict[str, Any]] = []
+        if state_column:
+            state_q = quoted_identifier(state_column)
+            state_counts = d1_query(
+                f"SELECT CAST(r.{state_q} AS TEXT) AS state, "
+                "COUNT(DISTINCT s.message_id) AS stale_message_count, COUNT(*) AS relation_rows "
+                "FROM fast_lane_queue_slots s JOIN " + table_q + " r "
+                f"ON CAST(r.{message_q} AS TEXT)=CAST(s.message_id AS TEXT) "
+                "WHERE " + stale_where_s
+                + f" GROUP BY CAST(r.{state_q} AS TEXT) ORDER BY state"
+            )
+        sample = d1_query(
+            "SELECT CAST(s.message_id AS TEXT) AS message_id, s.scheduled_time, "
+            "s.started_at, s.updated_at"
+            + state_select + run_select
+            + " FROM fast_lane_queue_slots s JOIN " + table_q + " r "
+            f"ON CAST(r.{message_q} AS TEXT)=CAST(s.message_id AS TEXT) "
+            "WHERE " + stale_where_s
+            + " ORDER BY unixepoch(s.updated_at) DESC LIMIT 10"
+        )
+        candidates.append({
+            "table": table_name,
+            "columns": columns,
+            "stateColumn": state_column,
+            "runIdColumn": run_id_column,
+            "matchedStaleMessages": int(match.get("matched_stale_messages", 0)),
+            "relationRows": int(match.get("relation_rows", 0)),
+            "unmatchedStaleMessages": int(unmatched.get("unmatched_stale_messages", 0)),
+            "ambiguousStaleMessages": int(ambiguous.get("ambiguous_stale_messages", 0)),
+            "stateCounts": state_counts,
+            "newestMatchedSample": sample,
+        })
+
+    evidence["candidateCount"] = len(candidates)
+    evidence["candidates"] = candidates
+    return evidence
+
+
 def main() -> int:
     result: dict[str, Any] = {
-        "schemaVersion": 2,
+        "schemaVersion": 3,
         "mode": "read-only-diagnostics",
         "productionMutation": False,
         "capturedAt": datetime.now(timezone.utc).isoformat(),
@@ -227,6 +344,7 @@ def main() -> int:
             "OR lower(name) LIKE '%queue%') ORDER BY name LIMIT 50"
         )
         stale_run_evidence["relationTableCandidates"] = relation_table_candidates
+        message_relation_evidence = stale_message_relations(stale_where)
 
         fast_lane = one(d1_query(
             "SELECT last_processed_ledger, latest_observed_ledger, updated_at "
@@ -274,6 +392,7 @@ def main() -> int:
                 "oldestStaleSample": oldest_sample,
                 "newestStaleSample": newest_sample,
                 "staleRunEvidence": stale_run_evidence,
+                "staleMessageRelationEvidence": message_relation_evidence,
             },
             "fastLane": {
                 "lastProcessedLedger": int(fast_lane.get("last_processed_ledger", 0)),
@@ -295,6 +414,7 @@ def main() -> int:
             "staleReclaimable": result.get("slots", {}).get("staleReclaimable"),
             "staleDistinctRunIds": result.get("slots", {}).get("staleRunEvidence", {}).get("distinctRunIdCount"),
             "staleMissingRunIds": result.get("slots", {}).get("staleRunEvidence", {}).get("missingRunIdCount"),
+            "staleMessageRelationCandidateCount": result.get("slots", {}).get("staleMessageRelationEvidence", {}).get("candidateCount"),
             "oldestStaleUpdatedAt": result.get("slots", {}).get("staleSpan", {}).get("oldestUpdatedAt"),
             "newestStaleUpdatedAt": result.get("slots", {}).get("staleSpan", {}).get("newestUpdatedAt"),
         }, sort_keys=True))
