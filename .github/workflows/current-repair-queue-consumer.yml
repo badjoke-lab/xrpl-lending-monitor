@@ -19,6 +19,8 @@ env:
   QUEUE_ID: 2ae398f2edbf43749e45cd7ede77c6cd
   DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
   EXPECTED_WORKER_VERSION: 6141a09f-cf99-4098-a75b-145cef1b9e63
+  EXPECTED_CONSUMER_ID: 149852ab52d548fea9e6b1d377d28fc1
+  EXPECTED_STALE_SLOT_COUNT: '58'
   CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
   CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
   GH_TOKEN: ${{ github.token }}
@@ -62,10 +64,12 @@ jobs:
           source_commit="$(git rev-parse HEAD)"
           state="$(jq -r '.stateDigest' "$result")"
           consumer="$(jq -r '.state.consumer.consumerId // ""' "$result")"
+          stale_count="$(jq -r '.state.slots.staleSnapshotRowCount // -1' "$result")"
+          stale_fingerprint="$(jq -r '.state.slots.staleSnapshotFingerprint // ""' "$result")"
           manager="$(sha256sum scripts/current-repair-queue-consumer.py | awk '{print $1}')"
-          printf 'safe=%s\nprepare_result_available=true\nprepare_rc=%s\nproduction_mutation=%s\nfailure_count=%s\nfailures=%s\nsource_commit=%s\nstate=%s\nconsumer=%s\nmanager=%s\n' \
+          printf 'safe=%s\nprepare_result_available=true\nprepare_rc=%s\nproduction_mutation=%s\nfailure_count=%s\nfailures=%s\nsource_commit=%s\nstate=%s\nconsumer=%s\nstale_count=%s\nstale_fingerprint=%s\nmanager=%s\n' \
             "$safe" "$prepare_rc" "$production_mutation" "$failure_count" "$failures" \
-            "$source_commit" "$state" "$consumer" "$manager" >> "$GITHUB_OUTPUT"
+            "$source_commit" "$state" "$consumer" "$stale_count" "$stale_fingerprint" "$manager" >> "$GITHUB_OUTPUT"
 
       - name: Publish exact Queue consumer authorization proposal
         if: steps.prepare.outputs.safe == 'true' && steps.prepare.outputs.prepare_result_available == 'true'
@@ -73,6 +77,8 @@ jobs:
           SOURCE_COMMIT: ${{ steps.prepare.outputs.source_commit }}
           STATE: ${{ steps.prepare.outputs.state }}
           CONSUMER: ${{ steps.prepare.outputs.consumer }}
+          STALE_COUNT: ${{ steps.prepare.outputs.stale_count }}
+          STALE_FINGERPRINT: ${{ steps.prepare.outputs.stale_fingerprint }}
           MANAGER: ${{ steps.prepare.outputs.manager }}
         shell: bash
         run: |
@@ -80,6 +86,9 @@ jobs:
           test "${{ steps.prepare.outputs.production_mutation }}" = false
           test "${{ steps.prepare.outputs.failure_count }}" -eq 0
           test -n "$CONSUMER"
+          test "$CONSUMER" = "$EXPECTED_CONSUMER_ID"
+          test "$STALE_COUNT" -eq "$EXPECTED_STALE_SLOT_COUNT"
+          [[ "$STALE_FINGERPRINT" =~ ^[a-f0-9]{64}$ ]]
           expires="$(date -u -d '+2 hours' '+%Y-%m-%dT%H:%M:%SZ')"
           nonce="$(openssl rand -hex 8)"
           command="/current-repair-queue-consumer-authorize commit=${SOURCE_COMMIT} consumer=${CONSUMER} manager=${MANAGER} state=${STATE} worker=${EXPECTED_WORKER_VERSION} prepare_run=${GITHUB_RUN_ID} expires=${expires} nonce=${nonce}"
@@ -90,12 +99,14 @@ jobs:
           Source main commit: \`${SOURCE_COMMIT}\`
           Queue consumer: \`${CONSUMER}\`
           Current Worker: \`${EXPECTED_WORKER_VERSION}\`
+          Retained stale-slot snapshot: \`${STALE_COUNT}\` rows
+          Stale-slot snapshot SHA-256: \`${STALE_FINGERPRINT}\`
           Read-only state digest: \`${STATE}\`
           Manager SHA-256: \`${MANAGER}\`
 
-          The read-only preflight requires Queue delivery already paused, one exact Worker consumer, \`batch_size=1\`, \`max_concurrency=1\`, current \`max_retries=3\`, no Cron, Devnet only, Mainnet disabled, no live Queue slot, and the retained stale failed slot. This authorization changes only that exact consumer's \`max_retries\` from \`3\` to \`100\`.
+          The read-only preflight requires Queue delivery already paused, the exact pinned Worker consumer, \`batch_size=1\`, \`max_concurrency=1\`, current \`max_retries=3\`, no Cron, Devnet only, Mainnet disabled, no live Queue slot, no staged successor, and the exact retained \`${EXPECTED_STALE_SLOT_COUNT}\`-row stale-slot snapshot above. This authorization changes only that exact consumer's \`max_retries\` from \`3\` to \`100\`.
 
-          It does not resume delivery, send/reseed/purge Queue messages, deploy a Worker, mutate D1/Supabase, create a Cron, or enable Mainnet.
+          The retained stale rows are not classified or reclaimed by this operation. It does not resume delivery, send/reseed/purge Queue messages, deploy a Worker, mutate D1/Supabase, create a Cron, or enable Mainnet.
 
           Exact authorization command:
 
@@ -122,6 +133,7 @@ jobs:
             schedules="$(jq -c '.state.schedules' "$result")"
             live="$(jq -r '.state.slots.liveUnstaged' "$result")"
             stale="$(jq -r '.state.slots.staleReclaimable' "$result")"
+            stale_fingerprint="$(jq -r '.state.slots.staleSnapshotFingerprint // "unavailable"' "$result")"
             staged="$(jq -r '.state.slots.stagedSuccessor' "$result")"
             processed="$(jq -r '.state.fastLane.lastProcessedLedger' "$result")"
             observed="$(jq -r '.state.fastLane.latestObservedLedger' "$result")"
@@ -134,6 +146,7 @@ jobs:
             schedules=unavailable
             live=unavailable
             stale=unavailable
+            stale_fingerprint=unavailable
             staged=unavailable
             processed=unavailable
             observed=unavailable
@@ -150,6 +163,7 @@ jobs:
           Worker version: \`${worker}\`
           Worker schedules: \`${schedules}\`
           Queue slots live / stale / staged: \`${live} / ${stale} / ${staged}\`
+          Stale-slot snapshot SHA-256: \`${stale_fingerprint}\`
           Fast-lane processed / observed ledger: \`${processed} / ${observed}\`
 
           No production mutation was authorized or performed by this preparation run.
@@ -203,6 +217,7 @@ jobs:
             printf '%s=%s\n' "${names[$index]}" "${BASH_REMATCH[$((index + 1))]}" >> "$GITHUB_OUTPUT"
           done
           test "${BASH_REMATCH[1]}" = "$(git rev-parse HEAD)"
+          test "${BASH_REMATCH[2]}" = "$EXPECTED_CONSUMER_ID"
           test "${BASH_REMATCH[3]}" = "$(sha256sum scripts/current-repair-queue-consumer.py | awk '{print $1}')"
           test "${BASH_REMATCH[5]}" = "$EXPECTED_WORKER_VERSION"
           expires_epoch="$(date -u -d "${BASH_REMATCH[7]}" +%s)"
