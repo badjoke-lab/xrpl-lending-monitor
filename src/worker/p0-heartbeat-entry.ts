@@ -178,22 +178,22 @@ async function runQueuedFastLaneCycle(options: {
       if (caughtUp) break
     }
 
-    if (caughtUp) {
-      const promotion = await promoteFastLaneCompactToCanonicalOverlay(env.DB)
-      if (promotion) {
-        console.log(JSON.stringify({
-          event: 'fast_lane_compact_promoted',
-          runAt,
-          scheduledTime: message.scheduledTime,
-          ...promotion,
-        }))
-      }
-    } else {
-      console.warn(JSON.stringify({
-        event: 'fast_lane_compact_promotion_deferred',
+    const promotion = await promoteFastLaneCompactToCanonicalOverlay(env.DB)
+    if (promotion) {
+      console.log(JSON.stringify({
+        event: 'fast_lane_compact_promoted',
         runAt,
         scheduledTime: message.scheduledTime,
-        reason: 'fast_lane_not_caught_up',
+        caughtUp,
+        ...promotion,
+      }))
+    } else {
+      console.warn(JSON.stringify({
+        event: 'fast_lane_compact_promotion_unavailable',
+        runAt,
+        scheduledTime: message.scheduledTime,
+        caughtUp,
+        reason: 'promotion_prerequisites_not_met',
       }))
     }
 
