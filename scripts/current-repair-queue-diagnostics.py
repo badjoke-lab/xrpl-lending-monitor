@@ -103,7 +103,7 @@ def quoted_identifier(name: str) -> str:
 
 def main() -> int:
     result: dict[str, Any] = {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "mode": "read-only-diagnostics",
         "productionMutation": False,
         "capturedAt": datetime.now(timezone.utc).isoformat(),
@@ -192,6 +192,42 @@ def main() -> int:
             + stale_where
             + " ORDER BY unixepoch(updated_at) DESC LIMIT 5"
         )
+
+        stale_run_evidence: dict[str, Any] = {
+            "runIdColumnPresent": "run_id" in schema_columns,
+            "distinctRunIdCount": None,
+            "missingRunIdCount": None,
+            "boundedRunIds": [],
+            "relationTableCandidates": [],
+        }
+        if "run_id" in schema_columns:
+            run_counts = one(d1_query(
+                "SELECT COUNT(DISTINCT CASE WHEN run_id IS NOT NULL AND trim(run_id)<>'' "
+                "THEN run_id END) AS distinct_run_ids, "
+                "COALESCE(SUM(CASE WHEN run_id IS NULL OR trim(run_id)='' THEN 1 ELSE 0 END),0) "
+                "AS missing_run_ids FROM fast_lane_queue_slots WHERE " + stale_where
+            ))
+            bounded_run_ids = d1_query(
+                "SELECT run_id, COUNT(*) AS slot_count, MIN(updated_at) AS oldest_updated_at, "
+                "MAX(updated_at) AS newest_updated_at "
+                "FROM fast_lane_queue_slots WHERE " + stale_where
+                + " AND run_id IS NOT NULL AND trim(run_id)<>'' "
+                "GROUP BY run_id ORDER BY unixepoch(MAX(updated_at)) DESC, run_id LIMIT 25"
+            )
+            stale_run_evidence.update({
+                "distinctRunIdCount": int(run_counts.get("distinct_run_ids", 0)),
+                "missingRunIdCount": int(run_counts.get("missing_run_ids", 0)),
+                "boundedRunIds": bounded_run_ids,
+            })
+
+        relation_table_candidates = d1_query(
+            "SELECT name, sql FROM sqlite_master WHERE type='table' "
+            "AND name NOT LIKE 'sqlite_%' "
+            "AND (lower(name) LIKE '%run%' OR lower(name) LIKE '%fast_lane%' "
+            "OR lower(name) LIKE '%queue%') ORDER BY name LIMIT 50"
+        )
+        stale_run_evidence["relationTableCandidates"] = relation_table_candidates
+
         fast_lane = one(d1_query(
             "SELECT last_processed_ledger, latest_observed_ledger, updated_at "
             "FROM fast_lane_shadow_state WHERE network='devnet'"
@@ -237,6 +273,7 @@ def main() -> int:
                 },
                 "oldestStaleSample": oldest_sample,
                 "newestStaleSample": newest_sample,
+                "staleRunEvidence": stale_run_evidence,
             },
             "fastLane": {
                 "lastProcessedLedger": int(fast_lane.get("last_processed_ledger", 0)),
@@ -256,6 +293,8 @@ def main() -> int:
             "detailScriptName": result.get("consumer", {}).get("detail", {}).get("scriptName"),
             "consumerIdentityMatchesExpectedWorker": result.get("consumer", {}).get("identityMatchesExpectedWorker"),
             "staleReclaimable": result.get("slots", {}).get("staleReclaimable"),
+            "staleDistinctRunIds": result.get("slots", {}).get("staleRunEvidence", {}).get("distinctRunIdCount"),
+            "staleMissingRunIds": result.get("slots", {}).get("staleRunEvidence", {}).get("missingRunIdCount"),
             "oldestStaleUpdatedAt": result.get("slots", {}).get("staleSpan", {}).get("oldestUpdatedAt"),
             "newestStaleUpdatedAt": result.get("slots", {}).get("staleSpan", {}).get("newestUpdatedAt"),
         }, sort_keys=True))
