@@ -13,7 +13,7 @@ from typing import Any
 
 EVIDENCE = Path(os.environ.get("CURRENT_REPAIR_DEPLOY_OUTPUT", "current-repair-deploy-evidence"))
 EVIDENCE.mkdir(exist_ok=True)
-EXPECTED_RUNTIME_SHA = "cf6cf39200e5384b4301aa3c0c0274f461a97c49"
+EXPECTED_RUNTIME_SHA = "9c2b4864b2fcfe61db46374e2fedbb95097b41f1"
 EXPECTED_ENTRY = "src/worker/p0-redundant-scheduler-entry.ts"
 EXPECTED_QUEUE_NAME = "xrpl-lending-fast-lane"
 EXPECTED_MAX_LEDGERS = "32"
