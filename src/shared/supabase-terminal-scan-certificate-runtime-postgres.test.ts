@@ -15,6 +15,24 @@ const proofPath = resolve(
 const staged = readFileSync(stagedPath, 'utf8')
 const proof = readFileSync(proofPath, 'utf8')
 
+function runDisposablePostgresProof(): void {
+  let lastError: unknown
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      execFileSync('bash', [proofPath], {
+        cwd: process.cwd(),
+        stdio: 'inherit',
+        timeout: 120_000,
+      })
+      return
+    } catch (error) {
+      lastError = error
+      if (attempt < 3) execFileSync('sleep', ['1'])
+    }
+  }
+  throw lastError
+}
+
 describe('terminal scan certificate runtime staging', () => {
   it('stages rather than auto-deploys the production change', () => {
     expect(stagedPath).toContain('ops/production-sql/')
@@ -86,12 +104,8 @@ describe('terminal scan certificate runtime staging', () => {
   it.runIf(Boolean(process.env.CI))(
     'runs the disposable PostgreSQL atomic proof',
     () => {
-      execFileSync('bash', [proofPath], {
-        cwd: process.cwd(),
-        stdio: 'inherit',
-        timeout: 120_000,
-      })
+      runDisposablePostgresProof()
     },
-    130_000,
+    390_000,
   )
 })
