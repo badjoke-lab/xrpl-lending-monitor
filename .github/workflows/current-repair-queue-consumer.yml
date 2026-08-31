@@ -45,21 +45,30 @@ jobs:
         run: |
           set -euo pipefail
           python -m py_compile scripts/current-repair-queue-consumer.py
+          set +e
           CURRENT_REPAIR_QUEUE_CONSUMER_OUTPUT=current-repair-queue-consumer-evidence/prepare \
             python scripts/current-repair-queue-consumer.py --prepare
+          prepare_rc=$?
+          set -e
           result=current-repair-queue-consumer-evidence/prepare/result.json
-          test "$(jq -r '.safe' "$result")" = true
-          test "$(jq -r '.productionMutation' "$result")" = false
-          test "$(jq -r '.failures | length' "$result")" -eq 0
+          if ! test -f "$result"; then
+            printf 'safe=false\nprepare_result_available=false\nprepare_rc=%s\n' "$prepare_rc" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          safe="$(jq -r '.safe' "$result")"
+          production_mutation="$(jq -r '.productionMutation' "$result")"
+          failure_count="$(jq -r '.failures | length' "$result")"
+          failures="$(jq -c '.failures' "$result")"
           source_commit="$(git rev-parse HEAD)"
           state="$(jq -r '.stateDigest' "$result")"
-          consumer="$(jq -r '.state.consumer.consumerId' "$result")"
+          consumer="$(jq -r '.state.consumer.consumerId // ""' "$result")"
           manager="$(sha256sum scripts/current-repair-queue-consumer.py | awk '{print $1}')"
-          test -n "$consumer"
-          printf 'source_commit=%s\nstate=%s\nconsumer=%s\nmanager=%s\n' \
+          printf 'safe=%s\nprepare_result_available=true\nprepare_rc=%s\nproduction_mutation=%s\nfailure_count=%s\nfailures=%s\nsource_commit=%s\nstate=%s\nconsumer=%s\nmanager=%s\n' \
+            "$safe" "$prepare_rc" "$production_mutation" "$failure_count" "$failures" \
             "$source_commit" "$state" "$consumer" "$manager" >> "$GITHUB_OUTPUT"
 
       - name: Publish exact Queue consumer authorization proposal
+        if: steps.prepare.outputs.safe == 'true' && steps.prepare.outputs.prepare_result_available == 'true'
         env:
           SOURCE_COMMIT: ${{ steps.prepare.outputs.source_commit }}
           STATE: ${{ steps.prepare.outputs.state }}
@@ -68,6 +77,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          test "${{ steps.prepare.outputs.production_mutation }}" = false
+          test "${{ steps.prepare.outputs.failure_count }}" -eq 0
+          test -n "$CONSUMER"
           expires="$(date -u -d '+2 hours' '+%Y-%m-%dT%H:%M:%SZ')"
           nonce="$(openssl rand -hex 8)"
           command="/current-repair-queue-consumer-authorize commit=${SOURCE_COMMIT} consumer=${CONSUMER} manager=${MANAGER} state=${STATE} worker=${EXPECTED_WORKER_VERSION} prepare_run=${GITHUB_RUN_ID} expires=${expires} nonce=${nonce}"
@@ -91,13 +103,74 @@ jobs:
           EOF
           gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/current-repair-queue-consumer-proposal.md
 
+      - name: Publish unsafe Queue consumer preparation result
+        if: steps.prepare.outputs.safe != 'true'
+        env:
+          PREPARE_RESULT_AVAILABLE: ${{ steps.prepare.outputs.prepare_result_available }}
+          PREPARE_RC: ${{ steps.prepare.outputs.prepare_rc }}
+          FAILURES: ${{ steps.prepare.outputs.failures }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          result=current-repair-queue-consumer-evidence/prepare/result.json
+          if test "$PREPARE_RESULT_AVAILABLE" = true && test -f "$result"; then
+            failures="$(jq -c '.failures' "$result")"
+            queue_paused="$(jq -r '.state.queue.deliveryPaused' "$result")"
+            backlog="$(jq -r '.state.queue.metrics.backlogCount' "$result")"
+            consumer_retries="$(jq -r '.state.consumer.settings.max_retries // "unavailable"' "$result")"
+            worker="$(jq -r '.state.workerVersion // "unavailable"' "$result")"
+            schedules="$(jq -c '.state.schedules' "$result")"
+            live="$(jq -r '.state.slots.liveUnstaged' "$result")"
+            stale="$(jq -r '.state.slots.staleReclaimable' "$result")"
+            staged="$(jq -r '.state.slots.stagedSuccessor' "$result")"
+            processed="$(jq -r '.state.fastLane.lastProcessedLedger' "$result")"
+            observed="$(jq -r '.state.fastLane.latestObservedLedger' "$result")"
+          else
+            failures='["prepareExecutionFailedBeforeStructuredResult"]'
+            queue_paused=unavailable
+            backlog=unavailable
+            consumer_retries=unavailable
+            worker=unavailable
+            schedules=unavailable
+            live=unavailable
+            stale=unavailable
+            staged=unavailable
+            processed=unavailable
+            observed=unavailable
+          fi
+          cat > /tmp/current-repair-queue-consumer-unsafe.md <<EOF
+          ## Current repair Queue consumer preparation — unsafe
+
+          Run: \`${GITHUB_RUN_ID}\`
+          Prepare exit code: \`${PREPARE_RC}\`
+          Failed checks: \`${failures}\`
+          Queue delivery paused: \`${queue_paused}\`
+          Queue backlog count: \`${backlog}\`
+          Current consumer max_retries: \`${consumer_retries}\`
+          Worker version: \`${worker}\`
+          Worker schedules: \`${schedules}\`
+          Queue slots live / stale / staged: \`${live} / ${stale} / ${staged}\`
+          Fast-lane processed / observed ledger: \`${processed} / ${observed}\`
+
+          No production mutation was authorized or performed by this preparation run.
+          EOF
+          gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/current-repair-queue-consumer-unsafe.md
+
       - name: Upload read-only Queue consumer preparation evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: current-repair-queue-consumer-prepare
           path: current-repair-queue-consumer-evidence/prepare
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 14
+
+      - name: Fail unsafe Queue consumer preparation
+        if: steps.prepare.outputs.safe != 'true'
+        shell: bash
+        run: |
+          echo 'Queue consumer preparation is unsafe; see Issue #995 diagnostic comment.' >&2
+          exit 1
 
   execute:
     if: >-
