@@ -63,6 +63,15 @@ jobs:
             printf 'result_available=false\npassed=false\n' >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Capture read-only D1 storage evidence
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile scripts/current-repair-d1-storage-diagnostics.py
+          CURRENT_REPAIR_QUEUE_DIAGNOSTICS_OUTPUT=current-repair-queue-diagnostics-evidence \
+            python scripts/current-repair-d1-storage-diagnostics.py
+
       - name: Publish bounded read-only Queue blocker evidence
         if: always()
         shell: bash
