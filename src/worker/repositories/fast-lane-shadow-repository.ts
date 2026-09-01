@@ -6,7 +6,7 @@ export interface FastLaneShadowState {
   lastProcessedHash: string
   latestObservedLedger: number
   latestObservedHash: string
-  status: 'healthy' | 'behind' | 'error'
+  status: 'healthy' | 'stale' | 'error'
   updatedAt: string
 }
 
@@ -22,7 +22,7 @@ interface StateRow {
   last_processed_hash: string
   latest_observed_ledger: number
   latest_observed_hash: string
-  status: 'healthy' | 'behind' | 'error'
+  status: 'healthy' | 'stale' | 'error'
   updated_at: string
 }
 
@@ -109,7 +109,7 @@ export async function commitFastLaneShadowWindow(options: {
       options.expectedPreviousHash,
       plan.latestObservedLedger,
       plan.latestObservedHash,
-      plan.latestObservedLedger === options.expectedPreviousLedger ? 'healthy' : 'behind',
+      plan.latestObservedLedger === options.expectedPreviousLedger ? 'healthy' : 'stale',
       options.processedAt,
     ),
   )
@@ -238,7 +238,7 @@ export async function commitFastLaneShadowWindow(options: {
       plan.endLedgerHash,
       plan.latestObservedLedger,
       plan.latestObservedHash,
-      plan.endLedgerIndex === plan.latestObservedLedger ? 'healthy' : 'behind',
+      plan.endLedgerIndex === plan.latestObservedLedger ? 'healthy' : 'stale',
       options.processedAt,
       options.expectedPreviousLedger,
       options.expectedPreviousHash,
