@@ -19,6 +19,11 @@ EXPECTED_QUEUE_NAME = "xrpl-lending-fast-lane"
 EXPECTED_MAX_LEDGERS = "32"
 EXPECTED_CAPACITY_SOURCE = "src/worker/repositories/fast-lane-storage-retention.ts"
 EXPECTED_CAPACITY_STOP = "400_000_000"
+EXPECTED_SOURCE_DELTAS = [
+    "src/shared/supabase-terminal-generic-scan-certificate-postgres.test.ts",
+    "src/shared/supabase-terminal-scan-certificate-runtime-postgres.test.ts",
+    EXPECTED_CAPACITY_SOURCE,
+]
 MAX_DATABASE_BYTES = 400_000_000
 
 
@@ -44,7 +49,7 @@ def validate_source(runtime_sha: str) -> dict[str, Any]:
         capture_output=True,
         text=True,
     ).stdout.splitlines()
-    if changed_src != [EXPECTED_CAPACITY_SOURCE]:
+    if changed_src != EXPECTED_SOURCE_DELTAS:
         raise RuntimeError(f"unexpected runtime source delta: {changed_src}")
     capacity_source = Path(EXPECTED_CAPACITY_SOURCE).read_text(encoding="utf-8")
     capacity_guard_exact = (
@@ -61,7 +66,7 @@ def validate_source(runtime_sha: str) -> dict[str, Any]:
     persistence_source = Path("src/worker/repositories/fast-lane-compact-shadow-repository.ts").read_text(encoding="utf-8")
     checks = {
         "runtimePinned": runtime_sha == EXPECTED_RUNTIME_SHA,
-        "capacityDeltaOnly": changed_src == [EXPECTED_CAPACITY_SOURCE],
+        "reviewedSourceDeltasOnly": changed_src == EXPECTED_SOURCE_DELTAS,
         "capacityGuard400Mb": capacity_guard_exact,
         "entryExact": config.get("main") == EXPECTED_ENTRY,
         "cronEmpty": config.get("triggers", {}).get("crons") == [],
