@@ -7,9 +7,9 @@ const MAX_SHADOW_WINDOWS = 256
 // The live-tail ring is intentionally bounded and is not formal soak evidence.
 const MAX_RUN_METRICS = 4_096
 
-// Stop materially below the D1 Free per-database ceiling. This matches the
-// existing bootstrap safety threshold and preserves intervention headroom.
-export const FAST_LANE_DATABASE_STOP_BYTES = 350_000_000
+// Stop materially below the D1 Free per-database ceiling. At 400 MB this
+// preserves 100 MB of intervention headroom below the 500 MB provider limit.
+export const FAST_LANE_DATABASE_STOP_BYTES = 400_000_000
 
 // The compact table is transient and should normally return to zero after every
 // completed five-minute cycle.
