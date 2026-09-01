@@ -17,7 +17,9 @@ EXPECTED_RUNTIME_SHA = "9c2b4864b2fcfe61db46374e2fedbb95097b41f1"
 EXPECTED_ENTRY = "src/worker/p0-redundant-scheduler-entry.ts"
 EXPECTED_QUEUE_NAME = "xrpl-lending-fast-lane"
 EXPECTED_MAX_LEDGERS = "32"
-MAX_DATABASE_BYTES = 350_000_000
+EXPECTED_CAPACITY_SOURCE = "src/worker/repositories/fast-lane-storage-retention.ts"
+EXPECTED_CAPACITY_STOP = "400_000_000"
+MAX_DATABASE_BYTES = 400_000_000
 
 
 def save(name: str, value: Any) -> Any:
@@ -32,10 +34,25 @@ def validate_source(runtime_sha: str) -> dict[str, Any]:
     subprocess.run(
         [
             "git", "diff", "--quiet", runtime_sha, "--",
-            "src", "wrangler.jsonc", "package.json", "pnpm-lock.yaml",
+            "wrangler.jsonc", "package.json", "pnpm-lock.yaml",
         ],
         check=True,
     )
+    changed_src = subprocess.run(
+        ["git", "diff", "--name-only", runtime_sha, "--", "src"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.splitlines()
+    if changed_src != [EXPECTED_CAPACITY_SOURCE]:
+        raise RuntimeError(f"unexpected runtime source delta: {changed_src}")
+    capacity_source = Path(EXPECTED_CAPACITY_SOURCE).read_text(encoding="utf-8")
+    capacity_guard_exact = (
+        f"export const FAST_LANE_DATABASE_STOP_BYTES = {EXPECTED_CAPACITY_STOP}" in capacity_source
+        and "FAST_LANE_DATABASE_STOP_BYTES = 350_000_000" not in capacity_source
+    )
+    if not capacity_guard_exact:
+        raise RuntimeError("Current capacity guard delta is not the exact reviewed 400 MB change")
     config = json.loads(Path("wrangler.jsonc").read_text(encoding="utf-8"))
     consumers = config.get("queues", {}).get("consumers", [])
     producers = config.get("queues", {}).get("producers", [])
@@ -44,6 +61,8 @@ def validate_source(runtime_sha: str) -> dict[str, Any]:
     persistence_source = Path("src/worker/repositories/fast-lane-compact-shadow-repository.ts").read_text(encoding="utf-8")
     checks = {
         "runtimePinned": runtime_sha == EXPECTED_RUNTIME_SHA,
+        "capacityDeltaOnly": changed_src == [EXPECTED_CAPACITY_SOURCE],
+        "capacityGuard400Mb": capacity_guard_exact,
         "entryExact": config.get("main") == EXPECTED_ENTRY,
         "cronEmpty": config.get("triggers", {}).get("crons") == [],
         "devnetOnly": config.get("vars", {}).get("APP_NETWORK") == "devnet",
