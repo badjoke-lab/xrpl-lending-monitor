@@ -23,6 +23,7 @@ EXPECTED_SOURCE_DELTAS = [
     "src/shared/supabase-terminal-generic-scan-certificate-postgres.test.ts",
     "src/shared/supabase-terminal-scan-certificate-runtime-postgres.test.ts",
     EXPECTED_CAPACITY_SOURCE,
+    "src/worker/repositories/fast-lane-shadow-repository.ts",
 ]
 MAX_DATABASE_BYTES = 400_000_000
 
