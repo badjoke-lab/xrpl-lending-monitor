@@ -136,13 +136,16 @@ def read_slot(scheduled_time: int) -> dict[str, Any] | None:
     return rows[0] if rows else None
 
 
-def latest_completed_chain_slot() -> dict[str, Any]:
-    return one(d1_query(
-        "SELECT scheduled_time,status,started_at,completed_at,next_scheduled_time,next_cron,error_message,updated_at "
-        "FROM fast_lane_queue_slots WHERE status='completed' AND error_message IS NULL "
-        "AND next_scheduled_time IS NOT NULL AND next_cron='queue-catch-up' "
-        "ORDER BY completed_at DESC,scheduled_time DESC LIMIT 1"
-    ))
+def proof_tip_candidates() -> list[dict[str, Any]]:
+    return d1_query(
+        "SELECT p.scheduled_time,p.status,p.started_at,p.completed_at,p.next_scheduled_time,p.next_cron,p.error_message,p.updated_at "
+        "FROM fast_lane_queue_slots p "
+        "LEFT JOIN fast_lane_queue_slots s ON s.scheduled_time=p.next_scheduled_time "
+        "WHERE p.status='completed' AND p.error_message IS NULL "
+        "AND p.next_scheduled_time IS NOT NULL AND p.next_scheduled_time>p.scheduled_time "
+        "AND p.next_cron='queue-catch-up' AND s.scheduled_time IS NULL "
+        "ORDER BY p.completed_at DESC,p.scheduled_time DESC LIMIT 2"
+    )
 
 
 def slot_summary() -> dict[str, int]:
@@ -184,9 +187,9 @@ def capture() -> dict[str, Any]:
     settings = worker_settings()
     bindings = settings.get("bindings") or []
     slots = slot_summary()
-    anchor = latest_completed_chain_slot()
+    candidates = proof_tip_candidates()
+    anchor = candidates[0] if len(candidates) == 1 else {}
     successor = int(anchor.get("next_scheduled_time") or 0)
-    successor_row = read_slot(successor) if successor > 0 else None
     fast = fast_state()
     metric = latest_metric()
     public = {
@@ -200,9 +203,10 @@ def capture() -> dict[str, Any]:
         "devnetOnly": binding_value(bindings, "APP_NETWORK") == "devnet" and binding_value(bindings, "MAINNET_ENABLED") == "false",
         "maxLedgers32": binding_value(bindings, "FAST_LANE_MAX_LEDGERS_PER_RUN") == str(EXPECTED_MAX_LEDGERS),
         "singleQueueBinding": len([item for item in bindings if item.get("name") == "FAST_LANE_QUEUE" and item.get("type") == "queue"]) == 1,
+        "proofTipUnique": len(candidates) == 1,
         "anchorCompleted": bool(anchor) and anchor.get("status") == "completed" and anchor.get("error_message") is None,
         "successorStaged": successor > int(anchor.get("scheduled_time") or 0) and anchor.get("next_cron") == "queue-catch-up",
-        "successorUndelivered": successor > 0 and successor_row is None,
+        "successorUndelivered": successor > 0 and read_slot(successor) is None,
         "noPendingSlot": slots["pending"] == 0,
         "noLiveProcessing": slots["liveUnstaged"] == 0,
         "noStagedProcessing": slots["stagedSuccessor"] == 0,
@@ -210,6 +214,7 @@ def capture() -> dict[str, Any]:
         "publicSmoke": all(status == 200 for status in public.values()),
     }
     state = {
+        "proofTipCandidateCount": len(candidates),
         "queuePaused": paused,
         "schedules": cron,
         "deploymentVersion": version,
