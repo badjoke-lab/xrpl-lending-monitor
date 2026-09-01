@@ -235,7 +235,7 @@ def capture() -> dict[str, Any]:
 def prepare() -> int:
     result = {"schemaVersion": 1, "mode": "prepare", "productionMutation": False, **capture()}
     save("result.json", result)
-    print(json.dumps({"safeToStartContinuous": result["safeToStartContinuous"], "failures": result["failures"], "stateDigest": result["stateDigest"], "successor": result["state"]["successor"], "preLedger": result["state"]["fastLane"].get("last_processed_ledger")}, sort_keys=True))
+    print(json.dumps({"safeToStartContinuous": result["safeToStartContinuous"], "failures": result["failures"], "stateDigest": result["stateDigest"], "proofTipCandidateCount": result["state"]["proofTipCandidateCount"], "slots": result["state"]["slots"], "anchor": result["state"]["anchor"], "successor": result["state"]["successor"], "preLedger": result["state"]["fastLane"].get("last_processed_ledger")}, sort_keys=True))
     return 0 if result["safeToStartContinuous"] else 1
 
 
