@@ -180,7 +180,7 @@ function appendMutationStatements(
            vault_id = excluded.vault_id,
            loan_broker_id = excluded.loan_broker_id,
            asset_key = excluded.asset_key,
-           on_ledger_status = excluded.onLedgerStatus,
+           on_ledger_status = excluded.on_ledger_status,
            source_ledger_index = excluded.source_ledger_index,
            source_ledger_hash = excluded.source_ledger_hash,
            source_transaction_hash = excluded.source_transaction_hash,
