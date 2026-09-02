@@ -1,40 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-source_script='scripts/check-actions-workflow-allowlist.sh'
 generated_script="$(mktemp)"
 trap 'rm -f "$generated_script"' EXIT
-
-python scripts/generate-actions-policy-r4f-g3-dual.py "$source_script" "$generated_script"
-python scripts/normalize-actions-policy-r4f-g3-dual.py "$generated_script"
-python scripts/extend-actions-policy-r4f-revision4-proof.py "$generated_script"
-python scripts/normalize-actions-policy-r4f-revision4-resume.py "$generated_script"
-python scripts/extend-actions-policy-r4f-revision4-cleanup.py "$generated_script"
-python scripts/extend-actions-policy-r4f-revision4-invocation-probe.py "$generated_script"
-python scripts/extend-actions-policy-r4f-revision4-resource-snapshot-refresh.py "$generated_script"
-python scripts/extend-actions-policy-r5-revision4-minute-activation.py "$generated_script"
-python scripts/extend-actions-policy-r5-revision4-db-footprint-probe.py "$generated_script"
-python scripts/extend-actions-policy-r5-phase-message-ready-partial-index-apply.py "$generated_script"
-python scripts/extend-actions-policy-r5-retention-readonly-preflight.py "$generated_script"
-python scripts/extend-actions-policy-r5-cron-history-retention.py "$generated_script"
-python scripts/extend-actions-policy-r5-index-footprint-readonly-probe.py "$generated_script"
-python scripts/extend-actions-policy-r5-work-status-partial-index-apply.py "$generated_script"
-python scripts/extend-actions-policy-r5-raw-evidence-retention.py "$generated_script"
-python scripts/extend-actions-policy-r5-raw-evidence-compaction.py "$generated_script"
-python scripts/extend-actions-policy-r5-revision4-resource-halt-rearm.py "$generated_script"
-python scripts/extend-actions-policy-r5-revision4-prepared-head-repair.py "$generated_script"
-python scripts/extend-actions-policy-r5-revision4-minute-completion-repair.py "$generated_script"
-python scripts/extend-actions-policy-r5-terminal-archive-phase-a-apply.py "$generated_script"
-python scripts/extend-actions-policy-r5-legacy-rev3-execution-retirement.py "$generated_script"
-python scripts/extend-actions-policy-r5-terminal-archive-phase-b-tranche.py "$generated_script"
-python scripts/extend-actions-policy-r5-terminal-archive-phase-b-500-ramp.py "$generated_script"
-python scripts/extend-actions-policy-r5-terminal-transport-compaction-preflight.py "$generated_script"
-python scripts/extend-actions-policy-r5-terminal-archive-v2-preflight.py "$generated_script"
-python scripts/extend-actions-policy-r5-collector-runs-retention-preflight.py "$generated_script"
-python scripts/extend-actions-policy-r5-collector-runs-retention-rewrite.py "$generated_script"
-python scripts/extend-actions-policy-r5-phase-ready-index-physical-reindex.py "$generated_script"
-python scripts/extend-actions-policy-current-repair-deploy-only.py "$generated_script"
-python scripts/extend-actions-policy-current-repair-queue-consumer.py "$generated_script"
+python scripts/compile-current-actions-policy.py "$generated_script"
 chmod 700 "$generated_script"
 bash "$generated_script" "$@"
 node --check scripts/r5-index-footprint-readonly-probe.mjs

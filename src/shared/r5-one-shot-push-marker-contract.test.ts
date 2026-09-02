@@ -11,8 +11,9 @@ function read(path: string): string {
 const workflow = read('.github/workflows/r5-bounded-recovery-burst.yml')
 const ci = read('.github/workflows/ci.yml')
 const adapter = read('scripts/check-actions-workflow-allowlist-r5-one-shot.sh')
+const compiler = read('scripts/compile-current-actions-policy.py')
 const generator = read('scripts/generate-actions-policy-r4f-g3-dual.py')
-const policyImplementation = `${adapter}\n${generator}`
+const policyImplementation = `${adapter}\n${compiler}\n${generator}`
 const diagnostic = read('scripts/diagnose-supabase-r5-egress-halt-v2.mjs')
 const markerPath = 'ops/r5/run-once-20260805-pending-scan-readonly.marker'
 const marker = read(markerPath)
@@ -20,6 +21,8 @@ const markerDigest = createHash('sha256').update(marker).digest('hex')
 const sourceMain = '55911f23638fcbf24c157ed2a39235b42d3cef2b'
 const expectedDigest =
   '6d2b17c6bd72b1edd2976f149d030dc52f9de59de495a7e8f59726fa61368c4f'
+const expectedPolicyDigest =
+  '354d4cd5402ff44aa0dd661e036550c66b89ef67c88921a1cad95aebf75fd93c'
 
 describe('R5 egress halt read-only breakdown V2 trigger', () => {
   it('pins the exact halt evidence, failed diagnostic, and fixed thresholds', () => {
@@ -124,10 +127,12 @@ describe('R5 egress halt read-only breakdown V2 trigger', () => {
     }
   })
 
-  it('adapts the canonical allowlist by exact replacements', () => {
+  it('adapts the canonical allowlist through the hash-pinned compiler', () => {
     expect(adapter).toContain(
-      'python scripts/generate-actions-policy-r4f-g3-dual.py "$source_script" "$generated_script"',
+      'python scripts/compile-current-actions-policy.py "$generated_script"',
     )
+    expect(compiler).toContain(`EXPECTED_SHA256 = "${expectedPolicyDigest}"`)
+    expect(compiler).toContain('generated Actions policy drift:')
     for (const required of [
       'R5 egress halt V2 diagnostic trigger policy',
       'R5 egress halt V2 diagnostic and owner burst contract',
