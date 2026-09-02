@@ -12,33 +12,42 @@ jobs:
     if: >-
       github.event.issue.number == 995 &&
       github.event.comment.user.login == 'badjoke-lab' &&
-      github.event.comment.body == '/current-repair-apply-behind-status-fix'
+      github.event.comment.body == '/current-repair-apply-deploy-status-delta-fix'
     runs-on: ubuntu-24.04
     steps:
-      - name: Check out exact hotfix branch
+      - name: Check out exact deploy-guard branch
         uses: actions/checkout@v4
         with:
-          ref: fix/current-repair-behind-status
+          ref: fix/current-repair-deploy-status-delta
           fetch-depth: 1
           token: ${{ github.token }}
-      - name: Replace invalid compact shadow status
+      - name: Add exact compact status hotfix delta
         shell: bash
         run: |
           set -euo pipefail
-          file=src/worker/repositories/fast-lane-compact-shadow-repository.ts
-          test "$(grep -o "'behind'" "$file" | wc -l)" -eq 2
-          sed -i "s/'behind'/'stale'/g" "$file"
-          test "$(grep -o "'behind'" "$file" | wc -l)" -eq 0
-          test "$(grep -o "'stale'" "$file" | wc -l)" -ge 2
+          file=scripts/deploy-current-repair-only.py
+          test "$(grep -c 'fast-lane-compact-shadow-repository.ts' "$file")" -eq 1
+          test "$(grep -c 'src/worker/repositories/fast-lane-shadow-repository.ts' "$file")" -eq 1
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/deploy-current-repair-only.py')
+          s = p.read_text()
+          needle = '    "src/worker/repositories/fast-lane-shadow-repository.ts",\n]'
+          replacement = '    "src/worker/repositories/fast-lane-shadow-repository.ts",\n    "src/worker/repositories/fast-lane-compact-shadow-repository.ts",\n]'
+          if s.count(needle) != 1:
+              raise SystemExit('expected deploy delta list anchor exactly once')
+          p.write_text(s.replace(needle, replacement))
+          PY
+          test "$(grep -c 'src/worker/repositories/fast-lane-compact-shadow-repository.ts' "$file")" -eq 1
           git diff --check
-          git diff --exit-code -- . ':!src/worker/repositories/fast-lane-compact-shadow-repository.ts'
-          git diff -- src/worker/repositories/fast-lane-compact-shadow-repository.ts
-      - name: Commit exact hotfix
+          git diff --exit-code -- . ':!scripts/deploy-current-repair-only.py'
+          git diff -- scripts/deploy-current-repair-only.py
+      - name: Commit exact deploy-guard fix
         shell: bash
         run: |
           set -euo pipefail
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add src/worker/repositories/fast-lane-compact-shadow-repository.ts
-          git commit -m 'Use valid stale status in compact shadow persistence'
-          git push origin HEAD:fix/current-repair-behind-status
+          git add scripts/deploy-current-repair-only.py
+          git commit -m 'Allow exact compact status repair runtime delta'
+          git push origin HEAD:fix/current-repair-deploy-status-delta
