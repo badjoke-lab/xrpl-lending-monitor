@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
-  "batch": 1,
-  "firstOrdinal": 1,
-  "lastOrdinal": 100,
+  "batch": 2,
+  "firstOrdinal": 101,
+  "lastOrdinal": 200,
   "targetLedger": 4987118,
   "targetLedgerHash": "82A7D82D9970F7D1D4B9E217F4E26AF443D9E8C3C9586BCDA484147D732A1231",
-  "lastSegmentId": "devnet-3371675-3981802-3982301",
-  "lastSegmentEndHash": "35A5C4FBF62AB00287E2F74EA36C348F71DD511DC48BF29C8F3B02E0A86C6BE7"
+  "lastSegmentId": "devnet-3371675-4031802-4032301",
+  "lastSegmentEndHash": "90FC03A8C18DC6A92D320FB20E7F3C6FE4EF5418FD58BBF9FC6B1E02A42A7AE6"
 }
