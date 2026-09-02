@@ -1,4 +1,0 @@
-{
-  "httpCode": "400",
-  "body": "{\"error\":\"invalid_cursor\",\"message\":\"Unexpected token 'ޭ', \\\"ޭ��\\\" is not valid JSON\"}"
-}
