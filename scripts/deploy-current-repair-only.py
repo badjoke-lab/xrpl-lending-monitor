@@ -49,7 +49,7 @@ def validate_source(runtime_sha: str) -> dict[str, Any]:
         text=True,
     ).stdout.splitlines()
     changed_runtime_src = [path for path in changed_src if not path.endswith(".test.ts")]
-    if changed_runtime_src != EXPECTED_RUNTIME_SOURCE_DELTAS:
+    if sorted(changed_runtime_src) != sorted(EXPECTED_RUNTIME_SOURCE_DELTAS):
         raise RuntimeError(f"unexpected runtime source delta: {changed_runtime_src}")
     capacity_source = Path(EXPECTED_CAPACITY_SOURCE).read_text(encoding="utf-8")
     capacity_guard_exact = (
@@ -66,7 +66,7 @@ def validate_source(runtime_sha: str) -> dict[str, Any]:
     persistence_source = Path("src/worker/repositories/fast-lane-compact-shadow-repository.ts").read_text(encoding="utf-8")
     checks = {
         "runtimePinned": runtime_sha == EXPECTED_RUNTIME_SHA,
-        "reviewedSourceDeltasOnly": changed_runtime_src == EXPECTED_RUNTIME_SOURCE_DELTAS,
+        "reviewedSourceDeltasOnly": sorted(changed_runtime_src) == sorted(EXPECTED_RUNTIME_SOURCE_DELTAS),
         "capacityGuard400Mb": capacity_guard_exact,
         "entryExact": config.get("main") == EXPECTED_ENTRY,
         "cronEmpty": config.get("triggers", {}).get("crons") == [],
