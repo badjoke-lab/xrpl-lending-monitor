@@ -1,1 +1,110 @@
-placeholder
+name: Current fixed-target extension plan
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    if: >-
+      github.event.issue.number == 995 &&
+      github.event.comment.body == '/current-fixed-target-plan'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out implementation
+        uses: actions/checkout@v4
+
+      - name: Check out active history source metadata
+        uses: actions/checkout@v4
+        with:
+          ref: history-data
+          path: .local/history-source
+          sparse-checkout: |
+            history-channel.json
+            history/publication.json
+          sparse-checkout-cone-mode: false
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build:history-extension-plan
+
+      - name: Freeze active source and validated Devnet target
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=current-fixed-target-plan
+          CHANNEL=.local/history-source/history-channel.json
+          PUBLICATION=.local/history-source/history/publication.json
+          mkdir -p "${ROOT}"
+
+          PUBLICATION_FILE_SHA="$(sha256sum "${PUBLICATION}" | awk '{print $1}')"
+          CHANNEL_FILE_SHA="$(jq -r '.active.publicationSha256' "${CHANNEL}")"
+          test "${PUBLICATION_FILE_SHA}" = "${CHANNEL_FILE_SHA}"
+          jq -e --slurpfile publication "${PUBLICATION}" '
+            .active.publicationPath == "history/publication.json"
+            and .active.chainId == $publication[0].chainId
+            and .active.epochId == $publication[0].epochId
+          ' "${CHANNEL}" > /dev/null
+
+          jq -n '{method:"ledger",params:[{ledger_index:"validated",transactions:false,expand:false}]}' \
+            > "${ROOT}/target-request.json"
+          curl --fail-with-body --silent --show-error --retry 3 \
+            -H 'Content-Type: application/json' \
+            --data @"${ROOT}/target-request.json" \
+            https://devnet.honeycluster.io/ \
+            > "${ROOT}/target-response.json"
+
+          TARGET_LEDGER="$(jq -r '.result.ledger_index // .result.ledger.ledger_index // empty' "${ROOT}/target-response.json")"
+          TARGET_HASH="$(jq -r '.result.ledger_hash // .result.ledger.ledger_hash // empty' "${ROOT}/target-response.json")"
+          printf '%s' "${TARGET_LEDGER}" | grep -Eq '^[0-9]+$'
+          printf '%s' "${TARGET_HASH}" | grep -Eq '^[A-F0-9]{64}$'
+
+          node .history-extension-plan-build/plan-history-extension.mjs \
+            --local \
+            --publication "${PUBLICATION}" \
+            --target-ledger "${TARGET_LEDGER}" \
+            --target-ledger-hash "${TARGET_HASH}" \
+            --segment-ledgers 500 \
+            --checkpoint-every-segments 20 \
+            --output "${ROOT}/plan.json" \
+            > "${ROOT}/plan.stdout.json"
+
+          jq -n \
+            --arg source_commit "$(jq -r '.active.dataCommitSha' "${CHANNEL}")" \
+            --arg publication_file_sha256 "${PUBLICATION_FILE_SHA}" \
+            --argjson source_end "$(jq -r '.endLedgerIndex' "${PUBLICATION}")" \
+            --argjson target_ledger "${TARGET_LEDGER}" \
+            --arg target_hash "${TARGET_HASH}" \
+            --argjson extension_ledgers "$(jq -r '.extension.ledgerCount' "${ROOT}/plan.json")" \
+            --argjson extension_segments "$(jq -r '.extension.segmentCount' "${ROOT}/plan.json")" \
+            '{
+              passed: true,
+              sourceDataCommitSha: $source_commit,
+              sourcePublicationFileSha256: $publication_file_sha256,
+              sourceEndLedger: $source_end,
+              targetLedger: $target_ledger,
+              targetLedgerHash: $target_hash,
+              extensionLedgerCount: $extension_ledgers,
+              extensionSegmentCount: $extension_segments,
+              segmentLedgerLimit: 500,
+              checkpointEverySegments: 20,
+              productionMutation: false
+            }' > "${ROOT}/evidence.json"
+
+          cat "${ROOT}/evidence.json"
+
+      - name: Upload fixed-target plan evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: current-fixed-target-plan
+          path: current-fixed-target-plan
+          if-no-files-found: error
