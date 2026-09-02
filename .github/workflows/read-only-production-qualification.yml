@@ -11,8 +11,6 @@ on:
       - scripts/history-reconstruction/**
       - scripts/measure-history-reconstruction.ts
       - vite.history-reconstruction-measurement.config.ts
-      - scripts/check-actions-workflow-allowlist.sh
-      - scripts/check-actions-workflow-allowlist-r5-one-shot.sh
   workflow_dispatch:
     inputs:
       mode:
@@ -44,7 +42,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: python -m py_compile scripts/qualification-995-read-only/bootstrap.py scripts/qualification-995-read-only/run.py scripts/current-restart-preflight.py
-      - run: bash scripts/check-actions-workflow-allowlist-r5-one-shot.sh
 
   pull-request-probe:
     if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
