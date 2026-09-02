@@ -80,7 +80,16 @@ jobs:
         run: node .fast-lane-production-build/run-fast-lane-production.mjs --validate-config
 
       - name: Unit tests
-        run: pnpm exec vitest run --no-file-parallelism
+        run: pnpm exec vitest run --no-file-parallelism 2>&1 | tee vitest.log
+
+      - name: Upload Vitest diagnostic log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vitest-diagnostic-log
+          path: vitest.log
+          if-no-files-found: warn
+          retention-days: 1
 
       - name: Verify revision-4 PostgreSQL persistence locally
         run: bash scripts/test-r4f-revision4-directional-persistence-postgres.sh
