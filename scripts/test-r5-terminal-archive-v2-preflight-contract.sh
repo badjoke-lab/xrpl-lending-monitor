@@ -3,12 +3,13 @@ set -euo pipefail
 
 probe='scripts/r5-terminal-archive-v2-readonly-preflight.mjs'
 workflow='.github/workflows/r5-terminal-archive-v2-preflight.yml'
-policy='scripts/extend-actions-policy-r5-terminal-archive-v2-preflight.py'
-for file in "$probe" "$workflow" "$policy"; do
+policy="$(mktemp)"
+trap 'rm -f "$policy"' EXIT
+for file in "$probe" "$workflow"; do
   [[ -f "$file" ]] || { echo "missing $file" >&2; exit 1; }
 done
 node --check "$probe"
-python -m py_compile "$policy"
+python scripts/compile-current-actions-policy.py "$policy"
 
 for required in \
   "const MIN_ARCHIVE_ROWS = 1500" \
@@ -76,5 +77,7 @@ for key in ('nullPayloadRows','missingWorkIdRows','workIdRows','payloadColumnByt
     if f'as "{key}"' not in match.group(1):
         raise SystemExit(f'v2 preflight JSON key casing not pinned: {key}')
 PY
+
+grep -Fq 'r5-terminal-archive-v2-preflight.yml' "$policy"
 
 echo 'R5 terminal archive v2 production read-only preflight contract PASS'
