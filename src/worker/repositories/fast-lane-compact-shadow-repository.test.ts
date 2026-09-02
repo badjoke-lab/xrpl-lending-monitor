@@ -132,7 +132,7 @@ describe('compact fast-lane shadow persistence', () => {
     expect(encodedRows[0]?.encodedHistoryBundle).toBe(ENCODED_HISTORY_BUNDLE)
   })
 
-  it('groups hundreds of current mutations instead of spending one D1 query per object', async () => {
+  it('fails closed before D1 persistence when a dense pass exceeds the free-tier write envelope', async () => {
     const state = fakeDatabase()
     const basePlan = plan()
     const largePlan: FastLaneShadowWindowPlan = {
@@ -148,7 +148,7 @@ describe('compact fast-lane shadow persistence', () => {
       })),
     }
 
-    const usage = await commitFastLaneCompactShadowWindow({
+    await expect(commitFastLaneCompactShadowWindow({
       db: state.db,
       plan: largePlan,
       historyBundle: historyBundle(),
@@ -156,12 +156,9 @@ describe('compact fast-lane shadow persistence', () => {
       expectedPreviousLedger: 100,
       expectedPreviousHash: 'P'.repeat(64),
       processedAt: '2026-07-11T03:00:00.000Z',
-    })
+    })).rejects.toThrow('Fast-lane persistence D1 query budget exceeded')
 
-    const sql = state.batches[0]?.map((index) => state.prepared[index]?.sql ?? '') ?? []
-    expect(sql.filter((item) => item.includes('INSERT INTO fast_lane_shadow_objects_compact'))).toHaveLength(3)
-    expect(usage.statements).toBe(9)
-    expect(usage.statements).toBeLessThanOrEqual(FAST_LANE_MAX_PERSISTENCE_D1_QUERIES)
+    expect(state.batches).toHaveLength(0)
   })
 
   it('rejects a history bundle from a different ledger window', async () => {
