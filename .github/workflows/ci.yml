@@ -20,9 +20,6 @@ jobs:
       - name: Enforce minimal Actions workflow surface
         run: bash scripts/check-actions-workflow-allowlist-r5-one-shot.sh
 
-      - name: Capture generated Actions policy
-        run: bash scripts/capture-current-actions-policy.sh
-
       - name: Upload Actions workflow policy evidence
         if: always()
         uses: actions/upload-artifact@v4
