@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { gunzipSync } from 'node:zlib'
 
 import { describe, expect, it } from 'vitest'
 
@@ -12,8 +13,13 @@ const workflow = read('.github/workflows/r5-bounded-recovery-burst.yml')
 const ci = read('.github/workflows/ci.yml')
 const adapter = read('scripts/check-actions-workflow-allowlist-r5-one-shot.sh')
 const compiler = read('scripts/compile-current-actions-policy.py')
-const generator = read('scripts/generate-actions-policy-r4f-g3-dual.py')
-const policyImplementation = `${adapter}\n${compiler}\n${generator}`
+const encodedPolicy = [0, 1, 2, 3]
+  .map((index) =>
+    read(`scripts/actions-policy-canonical/part-${String(index).padStart(2, '0')}.b64`),
+  )
+  .join('')
+const canonicalPolicy = gunzipSync(Buffer.from(encodedPolicy, 'base64')).toString('utf8')
+const policyImplementation = `${adapter}\n${compiler}\n${canonicalPolicy}`
 const diagnostic = read('scripts/diagnose-supabase-r5-egress-halt-v2.mjs')
 const markerPath = 'ops/r5/run-once-20260805-pending-scan-readonly.marker'
 const marker = read(markerPath)
@@ -23,6 +29,7 @@ const expectedDigest =
   '6d2b17c6bd72b1edd2976f149d030dc52f9de59de495a7e8f59726fa61368c4f'
 const expectedPolicyDigest =
   '354d4cd5402ff44aa0dd661e036550c66b89ef67c88921a1cad95aebf75fd93c'
+const canonicalPolicyDigest = createHash('sha256').update(canonicalPolicy).digest('hex')
 
 describe('R5 egress halt read-only breakdown V2 trigger', () => {
   it('pins the exact halt evidence, failed diagnostic, and fixed thresholds', () => {
@@ -127,12 +134,13 @@ describe('R5 egress halt read-only breakdown V2 trigger', () => {
     }
   })
 
-  it('adapts the canonical allowlist through the hash-pinned compiler', () => {
+  it('adapts the canonical allowlist through the hash-pinned snapshot compiler', () => {
     expect(adapter).toContain(
       'python scripts/compile-current-actions-policy.py "$generated_script"',
     )
     expect(compiler).toContain(`EXPECTED_SHA256 = "${expectedPolicyDigest}"`)
-    expect(compiler).toContain('generated Actions policy drift:')
+    expect(compiler).toContain('canonical Actions policy snapshot drift:')
+    expect(canonicalPolicyDigest).toBe(expectedPolicyDigest)
     for (const required of [
       'R5 egress halt V2 diagnostic trigger policy',
       'R5 egress halt V2 diagnostic and owner burst contract',

@@ -3,14 +3,15 @@ set -euo pipefail
 
 probe='scripts/r5-terminal-transport-compaction-readonly-preflight.mjs'
 workflow='.github/workflows/r5-terminal-transport-compaction-preflight.yml'
-policy='scripts/extend-actions-policy-r5-terminal-transport-compaction-preflight.py'
+policy="$(mktemp)"
+trap 'rm -f "$policy"' EXIT
 
-for file in "$probe" "$workflow" "$policy"; do
+for file in "$probe" "$workflow"; do
   [[ -f "$file" ]] || { echo "missing $file" >&2; exit 1; }
 done
 
 node --check "$probe"
-python -m py_compile "$policy"
+python scripts/compile-current-actions-policy.py "$policy"
 
 grep -Fq "const MIN_ARCHIVE_ROWS = 1500" "$probe"
 grep -Fq "const CHECKPOINT_AFTER_DEFINITION_SHA256 = 'e170166e6c73bf4e7a112ad3daf94873935d0b2b248abf55f7bb42059575c733'" "$probe"
@@ -42,7 +43,6 @@ for required in \
   grep -Fq "$required" "$workflow" || { echo "workflow missing: $required" >&2; exit 1; }
 done
 
-# No execution path or production mutation is permitted in this preflight.
 for forbidden in \
   '  push:' \
   '  schedule:' \
@@ -62,8 +62,6 @@ for forbidden in \
   fi
 done
 
-# The query must remain a single read-only SELECT. Mutation words may occur only in
-# JavaScript fail-closed regexes/labels, never as executable SQL statements.
 python - "$probe" <<'PY'
 from pathlib import Path
 import re, sys
@@ -82,5 +80,7 @@ for pattern in (
     if re.search(pattern, sql, re.I):
         raise SystemExit(f'Phase C preflight SQL contains mutation token: {pattern}')
 PY
+
+grep -Fq 'r5-terminal-transport-compaction-preflight.yml' "$policy"
 
 echo 'R5 terminal transport compaction read-only preflight contract PASS'

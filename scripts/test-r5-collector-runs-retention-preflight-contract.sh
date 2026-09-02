@@ -3,12 +3,13 @@ set -euo pipefail
 
 probe='scripts/r5-collector-runs-retention-readonly-preflight.mjs'
 workflow='.github/workflows/r5-collector-runs-retention-preflight.yml'
-policy='scripts/extend-actions-policy-r5-collector-runs-retention-preflight.py'
-for file in "$probe" "$workflow" "$policy"; do
+policy="$(mktemp)"
+trap 'rm -f "$policy"' EXIT
+for file in "$probe" "$workflow"; do
   [[ -f "$file" ]] || { echo "missing $file" >&2; exit 1; }
 done
 node --check "$probe"
-python -m py_compile "$policy"
+python scripts/compile-current-actions-policy.py "$policy"
 
 for required in \
   "const RETAIN_LATEST_ROWS = 256" \
@@ -66,5 +67,7 @@ for pattern in (
     if re.search(pattern,sql,re.I):
         raise SystemExit(f'collector preflight SQL contains mutation token: {pattern}')
 PY
+
+grep -Fq 'r5-collector-runs-retention-preflight.yml' "$policy"
 
 echo 'R5 collector run retention read-only preflight contract PASS'

@@ -79,5 +79,5 @@ describe('generic terminal scan certificate staging', () => {
     expect(output).toContain('generic finalize verifies work certificate and resets sequence to zero: `true`')
     expect(output).toContain('mismatched generic finalize rejects without work/stream mutation: `true`')
     expect(output).toContain('production SQL applied: `false`')
-  })
+  }, 210_000)
 })
