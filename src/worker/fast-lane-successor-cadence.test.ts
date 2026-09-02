@@ -4,37 +4,36 @@ import {
   FAST_LANE_CATCH_UP_CRON,
   FAST_LANE_CATCH_UP_INTERVAL_MS,
   FAST_LANE_NORMAL_CRON,
-  FAST_LANE_NORMAL_INTERVAL_MS,
   isSyntheticFastLaneCatchUp,
   nextFastLaneSuccessor,
 } from './fast-lane-successor-cadence'
 import { shouldRunProtectedHeavyCycle } from './scheduled-cadence'
 
 describe('fast-lane successor cadence', () => {
-  it('does not accelerate dense catch-up beyond the bounded live-tail cadence', () => {
-    let scheduledTime = Date.parse('2026-08-30T03:30:00Z')
+  it('keeps dense catch-up on the protected four-hour cadence', () => {
+    let scheduledTime = Date.parse('2026-08-30T04:00:00Z')
 
-    for (let slot = 0; slot < 5; slot += 1) {
+    for (let slot = 0; slot < 3; slot += 1) {
       const successor = nextFastLaneSuccessor({
         currentScheduledTime: scheduledTime,
         now: scheduledTime + 3_500,
         caughtUp: false,
       })
-      expect(successor.scheduledTime - scheduledTime).toBe(5 * 60_000)
+      expect(successor.scheduledTime - scheduledTime).toBe(4 * 60 * 60_000)
       expect(successor.cron).toBe(FAST_LANE_CATCH_UP_CRON)
       scheduledTime = successor.scheduledTime
     }
 
-    expect(FAST_LANE_CATCH_UP_INTERVAL_MS).toBe(FAST_LANE_NORMAL_INTERVAL_MS)
+    expect(FAST_LANE_CATCH_UP_INTERVAL_MS).toBe(4 * 60 * 60_000)
   })
 
-  it('moves to the next five-minute boundary instead of replaying a stale schedule', () => {
+  it('moves to the next four-hour boundary instead of replaying a stale schedule', () => {
     expect(nextFastLaneSuccessor({
-      currentScheduledTime: Date.parse('2026-08-30T03:30:00Z'),
-      now: Date.parse('2026-08-30T03:36:26Z'),
+      currentScheduledTime: Date.parse('2026-08-30T04:00:00Z'),
+      now: Date.parse('2026-08-30T09:36:26Z'),
       caughtUp: false,
     })).toEqual({
-      scheduledTime: Date.parse('2026-08-30T03:40:00Z'),
+      scheduledTime: Date.parse('2026-08-30T12:00:00Z'),
       cron: FAST_LANE_CATCH_UP_CRON,
     })
   })
