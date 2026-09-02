@@ -1,0 +1,114 @@
+name: Current fixed-target plan
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/current-fixed-target-plan.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out implementation
+        uses: actions/checkout@v4
+
+      - name: Check out active history source metadata
+        uses: actions/checkout@v4
+        with:
+          ref: history-data
+          path: .local/history-source
+          sparse-checkout: |
+            history-channel.json
+            history/publication.json
+          sparse-checkout-cone-mode: false
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build:history-extension-plan
+
+      - name: Freeze current source and validated Devnet head
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=current-fixed-target-plan
+          CHANNEL=.local/history-source/history-channel.json
+          PUBLICATION=.local/history-source/history/publication.json
+          mkdir -p "${ROOT}"
+
+          PUBLICATION_FILE_SHA="$(sha256sum "${PUBLICATION}" | awk '{print $1}')"
+          CHANNEL_FILE_SHA="$(jq -r '.active.publicationSha256' "${CHANNEL}")"
+          test "${PUBLICATION_FILE_SHA}" = "${CHANNEL_FILE_SHA}"
+
+          jq -n '{method:"ledger",params:[{ledger_index:"validated",transactions:false,expand:false}]}' \
+            > "${ROOT}/head-request.json"
+          curl --fail-with-body --silent --show-error --retry 3 \
+            -H 'Content-Type: application/json' \
+            --data @"${ROOT}/head-request.json" \
+            https://devnet.honeycluster.io/ \
+            > "${ROOT}/head-response.json"
+
+          TARGET_LEDGER="$(jq -r '.result.ledger_index // .result.ledger.ledger_index // empty' "${ROOT}/head-response.json")"
+          TARGET_HASH="$(jq -r '.result.ledger_hash // .result.ledger.ledger_hash // empty' "${ROOT}/head-response.json")"
+          printf '%s' "${TARGET_LEDGER}" | grep -Eq '^[0-9]+$'
+          printf '%s' "${TARGET_HASH}" | grep -Eq '^[A-F0-9]{64}$'
+
+          node .history-extension-plan-build/plan-history-extension.mjs \
+            --local \
+            --publication "${PUBLICATION}" \
+            --target-ledger "${TARGET_LEDGER}" \
+            --target-ledger-hash "${TARGET_HASH}" \
+            --segment-ledgers 500 \
+            --checkpoint-every-segments 20 \
+            --output "${ROOT}/plan.json" \
+            > "${ROOT}/plan.stdout.json"
+
+          jq -e '
+            .extension.startLedgerIndex == (.source.endLedgerIndex + 1)
+            and .extension.endLedgerIndex == .target.ledgerIndex
+            and .extension.ledgerCount > 0
+            and .extension.segmentCount > 0
+          ' "${ROOT}/plan.json" > /dev/null
+
+          jq -n \
+            --arg source_commit "${GITHUB_SHA}" \
+            --arg publication_file_sha256 "${PUBLICATION_FILE_SHA}" \
+            --slurpfile channel "${CHANNEL}" \
+            --slurpfile plan "${ROOT}/plan.json" \
+            '{
+              passed: true,
+              sourceCommit: $source_commit,
+              publicationFileSha256: $publication_file_sha256,
+              channel: $channel[0].active,
+              source: $plan[0].source,
+              target: $plan[0].target,
+              extension: {
+                startLedgerIndex: $plan[0].extension.startLedgerIndex,
+                endLedgerIndex: $plan[0].extension.endLedgerIndex,
+                ledgerCount: $plan[0].extension.ledgerCount,
+                segmentCount: $plan[0].extension.segmentCount,
+                segmentLedgers: 500,
+                checkpointEverySegments: 20
+              }
+            }' > "${ROOT}/evidence.json"
+
+          cat "${ROOT}/evidence.json"
+
+      - name: Upload plan evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: current-fixed-target-plan
+          path: current-fixed-target-plan
+          if-no-files-found: error
