@@ -3,12 +3,12 @@ set -euo pipefail
 
 workflow='.github/workflows/r5-terminal-archive-phase-a-apply.yml'
 manager='scripts/manage-r5-terminal-archive-production-apply.mjs'
-policy='scripts/extend-actions-policy-r5-terminal-archive-phase-a-apply.py'
+policy="$(mktemp)"
+trap 'rm -f "$policy"' EXIT
 
 required_paths=(
   "$workflow"
   "$manager"
-  "$policy"
   'ops/production-sql/20260816183000_xrpl_phase_terminal_archive_contract.sql'
   'ops/production-sql/20260816190000_xrpl_phase_terminal_archive_window.sql'
   'ops/production-sql/20260816193000_xrpl_r5_revision4_terminal_archive_completion_patch.sql'
@@ -20,7 +20,7 @@ for path in "${required_paths[@]}"; do
 done
 
 node --check "$manager"
-python -m py_compile "$policy"
+python scripts/compile-current-actions-policy.py "$policy"
 
 required_workflow=(
   "github.event.issue.number == 1261"
@@ -124,5 +124,7 @@ prepare_count="$(grep -Fc "github.event.comment.body == '/r5-terminal-archive-ph
 authorize_count="$(grep -Fc "startsWith(github.event.comment.body, '/r5-terminal-archive-phase-a-authorize ')" "$workflow")"
 test "$prepare_count" = 1
 test "$authorize_count" = 1
+
+grep -Fq 'r5-terminal-archive-phase-a-apply.yml' "$policy"
 
 echo 'R5 terminal archive Phase A formal apply contract: PASS'
