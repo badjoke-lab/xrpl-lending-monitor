@@ -1,10 +1,11 @@
 export const FAST_LANE_CATCH_UP_CRON = 'queue-catch-up'
 export const FAST_LANE_NORMAL_CRON = 'queue-self-schedule'
 export const FAST_LANE_NORMAL_INTERVAL_MS = 5 * 60_000
-// Dense backlog must never be accelerated inside the Worker/D1 hot path.
-// Production evidence already showed multi-thousand-row D1 writes per dense pass;
-// synthetic catch-up therefore uses the same bounded cadence as the live tail.
-export const FAST_LANE_CATCH_UP_INTERVAL_MS = FAST_LANE_NORMAL_INTERVAL_MS
+// Dense backlog must not be replayed through the Worker/D1 hot path at live-tail speed.
+// Production evidence showed multi-thousand-row D1 writes per dense pass, so synthetic
+// catch-up is intentionally reduced to the protected four-hour cadence while the
+// fixed-target canonical extension path handles bulk recovery outside D1.
+export const FAST_LANE_CATCH_UP_INTERVAL_MS = 4 * 60 * 60_000
 
 function nextBoundary(now: number, intervalMs: number): number {
   return Math.ceil((now + 1_000) / intervalMs) * intervalMs
