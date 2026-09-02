@@ -5,12 +5,13 @@ import {
   type FastLaneShadowPersistenceUsage,
 } from './fast-lane-shadow-repository'
 
-// One-minute operation has at most 69.4 D1 rows/day-slot before any Queue/metric
-// overhead. Keep persistence itself well below that boundary. With one history
-// partition, at most one 40-row mutation statement can fit inside the seven-query
-// commit envelope, keeping the persistence write ceiling to roughly the mid-40s.
-const HISTORY_WINDOWS_PER_D1_QUERY = 1
-const MUTATIONS_PER_D1_QUERY = 40
+// One-minute operation has at most 69.4 D1 rows/day-slot before Queue/metric
+// overhead. Keep persistence itself materially below that boundary. A seven-query
+// commit can contain the four state/guard statements, one mutation statement with
+// at most 24 rows, and two history statements with at most 8 rows each. That caps
+// persistence at roughly the mid-40s while preserving normal history partitioning.
+const HISTORY_WINDOWS_PER_D1_QUERY = 8
+const MUTATIONS_PER_D1_QUERY = 24
 export const FAST_LANE_MAX_PERSISTENCE_D1_QUERIES = 7
 
 export class FastLaneD1QueryBudgetError extends Error {
@@ -179,7 +180,7 @@ function appendMutationStatements(
            vault_id = excluded.vault_id,
            loan_broker_id = excluded.loan_broker_id,
            asset_key = excluded.asset_key,
-           on_ledger_status = excluded.on_ledger_status,
+           on_ledger_status = excluded.onLedgerStatus,
            source_ledger_index = excluded.source_ledger_index,
            source_ledger_hash = excluded.source_ledger_hash,
            source_transaction_hash = excluded.source_transaction_hash,
