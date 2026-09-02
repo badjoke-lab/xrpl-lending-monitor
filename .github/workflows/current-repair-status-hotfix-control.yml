@@ -1,0 +1,44 @@
+name: Current repair status hotfix control
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: >-
+      github.event.issue.number == 995 &&
+      github.event.comment.user.login == 'badjoke-lab' &&
+      github.event.comment.body == '/current-repair-apply-behind-status-fix'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out exact hotfix branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/current-repair-behind-status
+          fetch-depth: 1
+          token: ${{ github.token }}
+      - name: Replace invalid compact shadow status
+        shell: bash
+        run: |
+          set -euo pipefail
+          file=src/worker/repositories/fast-lane-compact-shadow-repository.ts
+          test "$(grep -o "'behind'" "$file" | wc -l)" -eq 2
+          sed -i "s/'behind'/'stale'/g" "$file"
+          test "$(grep -o "'behind'" "$file" | wc -l)" -eq 0
+          test "$(grep -o "'stale'" "$file" | wc -l)" -ge 2
+          git diff --check
+          git diff --exit-code -- . ':!src/worker/repositories/fast-lane-compact-shadow-repository.ts'
+          git diff -- src/worker/repositories/fast-lane-compact-shadow-repository.ts
+      - name: Commit exact hotfix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/worker/repositories/fast-lane-compact-shadow-repository.ts
+          git commit -m 'Use valid stale status in compact shadow persistence'
+          git push origin HEAD:fix/current-repair-behind-status
