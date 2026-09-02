@@ -3,11 +3,13 @@ set -euo pipefail
 
 script='scripts/r4f-revision4-residue-cleanup.mjs'
 workflow='.github/workflows/r4f-revision4-residue-cleanup.yml'
-policy='scripts/extend-actions-policy-r4f-revision4-cleanup.py'
+policy="$(mktemp)"
+trap 'rm -f "$policy"' EXIT
 
-for path in "$script" "$workflow" "$policy"; do
+for path in "$script" "$workflow"; do
   test -f "$path" || { echo "missing revision-4 residue cleanup contract file: $path" >&2; exit 1; }
 done
+python scripts/compile-current-actions-policy.py "$policy"
 
 node --check "$script"
 
