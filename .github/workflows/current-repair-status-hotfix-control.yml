@@ -26,8 +26,6 @@ jobs:
         run: |
           set -euo pipefail
           file=scripts/deploy-current-repair-only.py
-          test "$(grep -c 'src/worker/repositories/fast-lane-compact-shadow-repository.ts' "$file")" -eq 0
-          test "$(grep -c 'src/worker/repositories/fast-lane-shadow-repository.ts' "$file")" -eq 1
           python - <<'PY'
           from pathlib import Path
           p = Path('scripts/deploy-current-repair-only.py')
@@ -37,8 +35,9 @@ jobs:
           if s.count(needle) != 1:
               raise SystemExit('expected deploy delta list anchor exactly once')
           p.write_text(s.replace(needle, replacement))
+          if p.read_text().count(replacement) != 1:
+              raise SystemExit('expected repaired deploy delta list exactly once')
           PY
-          test "$(grep -c 'src/worker/repositories/fast-lane-compact-shadow-repository.ts' "$file")" -eq 1
           git diff --check
           git diff --exit-code -- . ':!scripts/deploy-current-repair-only.py'
           git diff -- scripts/deploy-current-repair-only.py
