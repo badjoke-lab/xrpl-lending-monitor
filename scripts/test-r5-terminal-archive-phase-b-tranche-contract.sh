@@ -3,17 +3,18 @@ set -euo pipefail
 
 workflow='.github/workflows/r5-terminal-archive-phase-b-tranche.yml'
 manager='scripts/manage-r5-terminal-archive-phase-b-tranche.mjs'
-extender='scripts/extend-actions-policy-r5-terminal-archive-phase-b-tranche.py'
 checkpoint='ops/production-sql/20260817110500_xrpl_r5_checkpoint_terminal_archive_fail_close.sql'
 microsecond_test='scripts/test-r5-phase-b-microsecond-identity-postgres.sh'
+policy="$(mktemp)"
+trap 'rm -f "$policy"' EXIT
 
-for file in "$workflow" "$manager" "$extender" "$checkpoint" "$microsecond_test"; do
+for file in "$workflow" "$manager" "$checkpoint" "$microsecond_test"; do
   [[ -f "$file" ]] || { echo "missing $file" >&2; exit 1; }
 done
 
 node --check "$manager"
-python -m py_compile "$extender"
 bash -n "$microsecond_test"
+python scripts/compile-current-actions-policy.py "$policy"
 
 for required in \
   "github.event.comment.body == '/r5-terminal-archive-phase-b-prepare'" \
@@ -75,16 +76,11 @@ if grep -Fq 'createdAt: new Date(raw.createdAt).toISOString()' "$manager" || \
   exit 1
 fi
 
-# The only direct row-deletion capability must remain encapsulated in the already-installed
-# private terminalizer. The Phase B manager itself must never emit raw DELETE/TRUNCATE/VACUUM/
-# REINDEX statements or scheduler/deployment commands.
 if grep -Eiq '\b(delete[[:space:]]+from|truncate|vacuum[[:space:]]|reindex[[:space:]]|cron\.schedule|cron\.unschedule|wrangler[[:space:]]+deploy|supabase[[:space:]]+db[[:space:]]+push)\b' "$manager"; then
   echo 'Phase B manager contains forbidden direct mutation capability' >&2
   exit 1
 fi
 
-# The checkpoint patch is exact-definition-bound and must remain the first semantic mutation
-# before any authorized terminalizer call inside the assembled transaction.
 python - "$manager" <<'PY'
 from pathlib import Path
 import sys
@@ -102,6 +98,7 @@ if "retainedToOldEdges !== 0" not in text:
     raise SystemExit('Phase B retained-to-old edge gate missing')
 PY
 
+grep -Fq 'r5-terminal-archive-phase-b-tranche.yml' "$policy"
 bash "$microsecond_test"
 
 echo 'R5 terminal archive Phase B bounded tranche contract PASS'
