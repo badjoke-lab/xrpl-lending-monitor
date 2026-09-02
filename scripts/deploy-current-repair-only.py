@@ -22,6 +22,7 @@ EXPECTED_CAPACITY_STOP = "400_000_000"
 EXPECTED_RUNTIME_SOURCE_DELTAS = [
     EXPECTED_CAPACITY_SOURCE,
     "src/worker/repositories/fast-lane-shadow-repository.ts",
+    "src/worker/repositories/fast-lane-compact-shadow-repository.ts",
 ]
 MAX_DATABASE_BYTES = 400_000_000
 
