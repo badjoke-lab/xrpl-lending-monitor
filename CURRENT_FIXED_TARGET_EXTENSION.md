@@ -1,0 +1,1 @@
+Temporary candidate branch for the frozen Devnet history extension from ledger 3,932,302 through fixed target 4,987,118. This branch is not a production history source. Generated batches are persisted here for final full-chain verification before any promotion.
