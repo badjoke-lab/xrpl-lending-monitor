@@ -3,12 +3,13 @@ set -euo pipefail
 
 manager='scripts/manage-r5-collector-runs-retention-rewrite.mjs'
 workflow='.github/workflows/r5-collector-runs-retention-rewrite.yml'
-policy='scripts/extend-actions-policy-r5-collector-runs-retention-rewrite.py'
-for file in "$manager" "$workflow" "$policy"; do
+policy="$(mktemp)"
+trap 'rm -f "$policy"' EXIT
+for file in "$manager" "$workflow"; do
   [[ -f "$file" ]] || { echo "missing $file" >&2; exit 1; }
 done
 node --check "$manager"
-python -m py_compile "$policy"
+python scripts/compile-current-actions-policy.py "$policy"
 
 for required in \
   "const RETAIN_LATEST_ROWS=256" \
@@ -88,5 +89,7 @@ for pattern in (r'\bdelete\s+from\b',r'\brestart\s+identity\b',r'\bcascade\b',r'
 if "const exactMutation=mutationSql(before.dataState)" not in text or "sha256(exactMutation)!==authorizedMutation" not in text:
     raise SystemExit('authorized dynamic mutation reconstruction missing')
 PY
+
+grep -Fq 'r5-collector-runs-retention-rewrite.yml' "$policy"
 
 echo 'R5 collector run retention production rewrite contract PASS'
