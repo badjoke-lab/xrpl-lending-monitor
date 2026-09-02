@@ -1,0 +1,51 @@
+name: Current repair existing retry version patch
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: >-
+      github.event.issue.number == 995 &&
+      github.event.comment.user.login == 'badjoke-lab' &&
+      github.event.comment.body == '/current-repair-update-existing-retry-version'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out exact patch branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/current-repair-existing-retry-version
+          fetch-depth: 1
+          token: ${{ github.token }}
+      - name: Update exact repaired Worker version pin
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('.github/workflows/current-repair-existing-retry-proof.yml')
+          s = p.read_text()
+          old = '  REPAIRED_VERSION_ID: 4c5ba859-0d22-41ae-9978-8369beea6a0e\n'
+          new = '  REPAIRED_VERSION_ID: 1fb7543a-6693-45d6-85b4-c7d08ff623cc\n'
+          if s.count(old) != 1:
+              raise SystemExit('expected old repaired version pin exactly once')
+          p.write_text(s.replace(old, new))
+          if p.read_text().count(new) != 1:
+              raise SystemExit('expected new repaired version pin exactly once')
+          PY
+          git diff --check
+          git diff --exit-code -- . ':!.github/workflows/current-repair-existing-retry-proof.yml'
+          git diff -- .github/workflows/current-repair-existing-retry-proof.yml
+      - name: Commit exact version pin update
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add .github/workflows/current-repair-existing-retry-proof.yml
+          git commit -m 'Pin existing retry proof to repaired Worker version'
+          git push origin HEAD:fix/current-repair-existing-retry-version
