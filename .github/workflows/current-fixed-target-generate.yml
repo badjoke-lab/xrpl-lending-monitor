@@ -1,0 +1,225 @@
+name: Current fixed-target extension generation
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: current-fixed-target-extension-generation
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: >-
+      github.event.issue.number == 995 &&
+      startsWith(github.event.comment.body, '/current-fixed-target-generate batch=')
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      batch: ${{ steps.plan.outputs.batch }}
+      first_ordinal: ${{ steps.plan.outputs.first_ordinal }}
+      last_ordinal: ${{ steps.plan.outputs.last_ordinal }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: |
+          pnpm build:history-segment
+          pnpm build:history-segment-chain
+      - name: Recover exact frozen plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p frozen-plan
+          gh run download 33640945197 -n current-fixed-target-plan -D frozen-plan
+          test "$(jq -r '.source.endLedgerIndex' frozen-plan/plan.json)" = '3932301'
+          test "$(jq -r '.target.ledgerIndex' frozen-plan/plan.json)" = '4987118'
+          test "$(jq -r '.target.ledgerHash' frozen-plan/plan.json)" = '82A7D82D9970F7D1D4B9E217F4E26AF443D9E8C3C9586BCDA484147D732A1231'
+          test "$(jq -r '.extension.segmentCount' frozen-plan/plan.json)" = '2110'
+      - id: plan
+        name: Select exact batch ordinals
+        shell: bash
+        run: |
+          set -euo pipefail
+          BODY='${{ github.event.comment.body }}'
+          BATCH="${BODY#'/current-fixed-target-generate batch='}"
+          printf '%s' "${BATCH}" | grep -Eq '^[0-9]+$'
+          BATCH=$((10#${BATCH}))
+          test "${BATCH}" -ge 1
+          test "${BATCH}" -le 22
+          FIRST=$(( (BATCH - 1) * 100 + 1 ))
+          LAST=$(( BATCH * 100 ))
+          if [[ "${LAST}" -gt 2110 ]]; then LAST=2110; fi
+          MATRIX="$(jq -c --argjson first "${FIRST}" --argjson last "${LAST}" '{ordinal:[.extension.segments[] | select(.ordinal >= $first and .ordinal <= $last) | .ordinal]}' frozen-plan/plan.json)"
+          test "$(jq '.ordinal | length' <<<"${MATRIX}")" -gt 0
+          echo "matrix=${MATRIX}" >> "${GITHUB_OUTPUT}"
+          echo "batch=${BATCH}" >> "${GITHUB_OUTPUT}"
+          echo "first_ordinal=${FIRST}" >> "${GITHUB_OUTPUT}"
+          echo "last_ordinal=${LAST}" >> "${GITHUB_OUTPUT}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frozen-plan
+          path: frozen-plan
+          if-no-files-found: error
+
+  generate:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build:history-segment
+      - uses: actions/download-artifact@v4
+        with:
+          name: frozen-plan
+          path: frozen-plan
+      - name: Generate exact frozen segment
+        shell: bash
+        run: |
+          set -euo pipefail
+          ORDINAL='${{ matrix.ordinal }}'
+          PLAN=frozen-plan/plan.json
+          SEGMENT="$(jq -c --argjson ordinal "${ORDINAL}" '.extension.segments[] | select(.ordinal == $ordinal)' "${PLAN}")"
+          test -n "${SEGMENT}"
+          SEGMENT_ID="$(jq -r '.segmentId' <<<"${SEGMENT}")"
+          START="$(jq -r '.startLedgerIndex' <<<"${SEGMENT}")"
+          END="$(jq -r '.endLedgerIndex' <<<"${SEGMENT}")"
+          EPOCH="$(jq -r '.epochId' "${PLAN}")"
+          PREVIOUS_LEDGER=$((START - 1))
+          if [[ "${ORDINAL}" -eq 1 ]]; then
+            PREV_ID="$(jq -r '.extension.anchorPreviousSegmentId' "${PLAN}")"
+          else
+            PREV_ID="$(jq -r --argjson ordinal "$((ORDINAL - 1))" '.extension.segments[] | select(.ordinal == $ordinal) | .segmentId' "${PLAN}")"
+          fi
+          jq -n --argjson ledger_index "${PREVIOUS_LEDGER}" '{method:"ledger",params:[{ledger_index:$ledger_index,transactions:false,expand:false}]}' > previous-request.json
+          curl --fail-with-body --silent --show-error --retry 5 \
+            -H 'Content-Type: application/json' \
+            --data @previous-request.json \
+            https://devnet.honeycluster.io/ > previous-response.json
+          PREV_HASH="$(jq -r '.result.ledger_hash // .result.ledger.ledger_hash // empty' previous-response.json)"
+          printf '%s' "${PREV_HASH}" | grep -Eq '^[A-F0-9]{64}$'
+          if [[ "${ORDINAL}" -eq 1 ]]; then
+            test "${PREV_HASH}" = "$(jq -r '.extension.anchorPreviousSegmentEndHash' "${PLAN}")"
+          fi
+          OUT="generated/${SEGMENT_ID}"
+          for ATTEMPT in 1 2 3; do
+            rm -rf "${OUT}"
+            if node .history-segment-build/run-history-segment.mjs \
+              --local \
+              --endpoint https://devnet.honeycluster.io/ \
+              --timeout-ms 8000 \
+              --read-window-size 16 \
+              --start-ledger "${START}" \
+              --end-ledger "${END}" \
+              --epoch-id "${EPOCH}" \
+              --segment-id "${SEGMENT_ID}" \
+              --previous-segment-id "${PREV_ID}" \
+              --previous-segment-end-hash "${PREV_HASH}" \
+              --source-revision b9314e7a0ec95b6ac13faa76ec63b29e0551ce7b \
+              --output-dir "${OUT}" > segment.stdout.json; then
+              break
+            fi
+            if [[ "${ATTEMPT}" -eq 3 ]]; then exit 1; fi
+            sleep $((ATTEMPT * 5))
+          done
+          test "$(jq -r '.segmentId' "${OUT}/manifest.json")" = "${SEGMENT_ID}"
+          test "$(jq -r '.startLedgerIndex' "${OUT}/manifest.json")" = "${START}"
+          test "$(jq -r '.endLedgerIndex' "${OUT}/manifest.json")" = "${END}"
+          test "$(jq -r '.previousSegmentId' "${OUT}/manifest.json")" = "${PREV_ID}"
+          test "$(jq -r '.previousSegmentEndHash' "${OUT}/manifest.json")" = "${PREV_HASH}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: extension-segment-${{ matrix.ordinal }}
+          path: generated
+          if-no-files-found: error
+
+  persist:
+    needs: [prepare, generate]
+    if: ${{ needs.generate.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: current-fixed-target-extension-data
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: extension-segment-*
+          path: batch-artifacts
+      - uses: actions/download-artifact@v4
+        with:
+          name: frozen-plan
+          path: frozen-plan
+      - name: Verify batch continuity and persist candidate suffix
+        shell: bash
+        run: |
+          set -euo pipefail
+          PLAN=frozen-plan/plan.json
+          EPOCH="$(jq -r '.epochId' "${PLAN}")"
+          FIRST='${{ needs.prepare.outputs.first_ordinal }}'
+          LAST='${{ needs.prepare.outputs.last_ordinal }}'
+          mkdir -p "history/${EPOCH}"
+          PREV_ID=''
+          PREV_HASH=''
+          if [[ "${FIRST}" -eq 1 ]]; then
+            PREV_ID="$(jq -r '.extension.anchorPreviousSegmentId' "${PLAN}")"
+            PREV_HASH="$(jq -r '.extension.anchorPreviousSegmentEndHash' "${PLAN}")"
+          else
+            PREV_SEGMENT_ID="$(jq -r --argjson ordinal "$((FIRST - 1))" '.extension.segments[] | select(.ordinal == $ordinal) | .segmentId' "${PLAN}")"
+            PREV_MANIFEST="history/${EPOCH}/${PREV_SEGMENT_ID}/manifest.json"
+            test -f "${PREV_MANIFEST}"
+            PREV_ID="${PREV_SEGMENT_ID}"
+            PREV_HASH="$(jq -r '.endLedgerHash' "${PREV_MANIFEST}")"
+          fi
+          for ORDINAL in $(seq "${FIRST}" "${LAST}"); do
+            SEGMENT_ID="$(jq -r --argjson ordinal "${ORDINAL}" '.extension.segments[] | select(.ordinal == $ordinal) | .segmentId' "${PLAN}")"
+            SOURCE="batch-artifacts/extension-segment-${ORDINAL}/${SEGMENT_ID}"
+            MANIFEST="${SOURCE}/manifest.json"
+            test -f "${MANIFEST}"
+            test "$(jq -r '.previousSegmentId' "${MANIFEST}")" = "${PREV_ID}"
+            test "$(jq -r '.previousSegmentEndHash' "${MANIFEST}")" = "${PREV_HASH}"
+            EXPECTED_START="$(jq -r --argjson ordinal "${ORDINAL}" '.extension.segments[] | select(.ordinal == $ordinal) | .startLedgerIndex' "${PLAN}")"
+            EXPECTED_END="$(jq -r --argjson ordinal "${ORDINAL}" '.extension.segments[] | select(.ordinal == $ordinal) | .endLedgerIndex' "${PLAN}")"
+            test "$(jq -r '.startLedgerIndex' "${MANIFEST}")" = "${EXPECTED_START}"
+            test "$(jq -r '.endLedgerIndex' "${MANIFEST}")" = "${EXPECTED_END}"
+            rm -rf "history/${EPOCH}/${SEGMENT_ID}"
+            cp -R "${SOURCE}" "history/${EPOCH}/${SEGMENT_ID}"
+            PREV_ID="${SEGMENT_ID}"
+            PREV_HASH="$(jq -r '.endLedgerHash' "${MANIFEST}")"
+          done
+          jq -n \
+            --argjson batch '${{ needs.prepare.outputs.batch }}' \
+            --argjson firstOrdinal "${FIRST}" \
+            --argjson lastOrdinal "${LAST}" \
+            --arg targetLedger '4987118' \
+            --arg targetLedgerHash '82A7D82D9970F7D1D4B9E217F4E26AF443D9E8C3C9586BCDA484147D732A1231' \
+            --arg lastSegmentId "${PREV_ID}" \
+            --arg lastSegmentEndHash "${PREV_HASH}" \
+            '{schemaVersion:1,batch:$batch,firstOrdinal:$firstOrdinal,lastOrdinal:$lastOrdinal,targetLedger:($targetLedger|tonumber),targetLedgerHash:$targetLedgerHash,lastSegmentId:$lastSegmentId,lastSegmentEndHash:$lastSegmentEndHash}' \
+            > current-fixed-target-extension-progress.json
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add "history/${EPOCH}" current-fixed-target-extension-progress.json
+          git diff --cached --quiet && { echo 'No new candidate data to persist'; exit 1; }
+          git commit -m "Persist fixed-target extension batch ${{ needs.prepare.outputs.batch }}"
+          git push origin HEAD:current-fixed-target-extension-data
