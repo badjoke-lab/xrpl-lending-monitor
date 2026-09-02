@@ -1,0 +1,220 @@
+name: Current repair bounded proof v2
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+  actions: read
+
+concurrency:
+  group: >-
+    ${{
+      github.event.issue.number == 995 &&
+      github.event.comment.user.login == 'badjoke-lab' &&
+      startsWith(github.event.comment.body, '/current-repair-bounded-proof-v2-') &&
+      'current-repair-production-worker-write' ||
+      format('current-repair-bounded-v2-noop-{0}', github.run_id)
+    }}
+  cancel-in-progress: false
+
+env:
+  QUALIFICATION_ISSUE: '995'
+  REPAIRED_VERSION_ID: 4c5ba859-0d22-41ae-9978-8369beea6a0e
+  SCRIPT_NAME: xrpl-lending-monitor
+  QUEUE_ID: 2ae398f2edbf43749e45cd7ede77c6cd
+  DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
+  PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  prepare:
+    if: >-
+      github.event.issue.number == 995 &&
+      github.event.comment.user.login == 'badjoke-lab' &&
+      github.event.comment.body == '/current-repair-bounded-proof-v2-prepare'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out exact current main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Capture exact bounded-proof v2 preflight
+        id: preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p current-repair-bounded-proof-v2-prepare-evidence
+          CURRENT_REPAIR_BOUNDED_PROOF_OUTPUT=current-repair-bounded-proof-v2-prepare-evidence \
+            python scripts/current-repair-bounded-proof.py --prepare
+          result=current-repair-bounded-proof-v2-prepare-evidence/result.json
+          test "$(jq -r '.safeToRunBoundedProof' "$result")" = true
+          test "$(jq -r '.productionMutation' "$result")" = false
+          test "$(jq -r '.failures | length' "$result")" -eq 0
+          source_commit="$(git rev-parse HEAD)"
+          state="$(jq -r '.stateDigest' "$result")"
+          scheduled="$(jq -r '.targetScheduledTime' "$result")"
+          version="$(jq -r '.state.deploymentVersion' "$result")"
+          manager="$(sha256sum scripts/current-repair-bounded-proof.py | awk '{print $1}')"
+          test "$version" = "$REPAIRED_VERSION_ID"
+          printf 'source_commit=%s\nstate=%s\nscheduled=%s\nversion=%s\nmanager=%s\n' \
+            "$source_commit" "$state" "$scheduled" "$version" "$manager" >> "$GITHUB_OUTPUT"
+
+      - name: Publish exact bounded-proof v2 authorization proposal
+        env:
+          SOURCE_COMMIT: ${{ steps.preflight.outputs.source_commit }}
+          STATE: ${{ steps.preflight.outputs.state }}
+          SCHEDULED: ${{ steps.preflight.outputs.scheduled }}
+          VERSION: ${{ steps.preflight.outputs.version }}
+          MANAGER: ${{ steps.preflight.outputs.manager }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          expires="$(date -u -d '+2 hours' '+%Y-%m-%dT%H:%M:%SZ')"
+          nonce="$(openssl rand -hex 8)"
+          command="/current-repair-bounded-proof-v2-authorize commit=${SOURCE_COMMIT} version=${VERSION} manager=${MANAGER} state=${STATE} scheduled=${SCHEDULED} prepare_run=${GITHUB_RUN_ID} expires=${expires} nonce=${nonce}"
+          cat > /tmp/current-repair-bounded-proof-v2-proposal.md <<EOF
+          ## Current repair bounded-proof v2 authorization proposal
+
+          Preparation run: \`${GITHUB_RUN_ID}\`
+          Source main commit: \`${SOURCE_COMMIT}\`
+          Repaired Worker version: \`${VERSION}\`
+          Read-only state digest: \`${STATE}\`
+          Exact proof scheduled time: \`${SCHEDULED}\`
+          Manager SHA-256: \`${MANAGER}\`
+
+          This authorization sends exactly one delayed seed message while Queue delivery is paused, resumes delivery only long enough for that exact slot to start, immediately pauses delivery again, and permits only that in-flight Worker invocation to finish. The proof may write the normal bounded Current D1 state for at most 32 ledgers and stage one successor message. It does not create a Cron, purge the Queue, enable Mainnet, alter Supabase History, start continuous catch-up, or leave Queue delivery active.
+
+          Exact authorization command:
+
+          \`${command}\`
+          EOF
+          gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/current-repair-bounded-proof-v2-proposal.md
+
+      - name: Upload bounded-proof v2 preparation evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: current-repair-bounded-proof-v2-prepare
+          path: current-repair-bounded-proof-v2-prepare-evidence
+          if-no-files-found: error
+          retention-days: 14
+
+  execute:
+    if: >-
+      github.event.issue.number == 995 &&
+      github.event.comment.user.login == 'badjoke-lab' &&
+      startsWith(github.event.comment.body, '/current-repair-bounded-proof-v2-authorize ')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      AUTHORIZATION_BODY: ${{ github.event.comment.body }}
+      AUTHORIZATION_CREATED_AT: ${{ github.event.comment.created_at }}
+      AUTHORIZATION_COMMENT_ID: ${{ github.event.comment.id }}
+    steps:
+      - name: Check out exact current main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Parse and bind exact bounded-proof v2 authorization
+        id: auth
+        shell: bash
+        run: |
+          set -euo pipefail
+          regex='^/current-repair-bounded-proof-v2-authorize commit=([a-f0-9]{40}) version=([0-9a-f-]{36}) manager=([a-f0-9]{64}) state=([a-f0-9]{64}) scheduled=([0-9]{13}) prepare_run=([0-9]+) expires=([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z) nonce=([a-f0-9]{16})$'
+          [[ "$AUTHORIZATION_BODY" =~ $regex ]] || { echo 'Current repair bounded-proof v2 authorization shape mismatch' >&2; exit 1; }
+          names=(commit version manager state scheduled prepare_run expires nonce)
+          for index in "${!names[@]}"; do
+            printf '%s=%s\n' "${names[$index]}" "${BASH_REMATCH[$((index + 1))]}" >> "$GITHUB_OUTPUT"
+          done
+          test "${BASH_REMATCH[1]}" = "$(git rev-parse HEAD)"
+          test "${BASH_REMATCH[2]}" = "$REPAIRED_VERSION_ID"
+          test "${BASH_REMATCH[3]}" = "$(sha256sum scripts/current-repair-bounded-proof.py | awk '{print $1}')"
+          expires_epoch="$(date -u -d "${BASH_REMATCH[7]}" +%s)"
+          auth_epoch="$(date -u -d "$AUTHORIZATION_CREATED_AT" +%s)"
+          now_epoch="$(date -u +%s)"
+          test "$auth_epoch" -lt "$expires_epoch"
+          test "$now_epoch" -le "$expires_epoch"
+          test $((expires_epoch - auth_epoch)) -le 7200
+
+      - name: Verify exact prior proposal and unique authorization
+        env:
+          PREPARE_RUN: ${{ steps.auth.outputs.prepare_run }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${QUALIFICATION_ISSUE}/comments?per_page=100" | jq -s 'add' > /tmp/current-repair-bounded-v2-comments.json
+          EXPECTED="$AUTHORIZATION_BODY" PREPARE="$PREPARE_RUN" AUTH_ID="$AUTHORIZATION_COMMENT_ID" node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs'
+          const comments = JSON.parse(readFileSync('/tmp/current-repair-bounded-v2-comments.json', 'utf8'))
+          const proposals = comments.filter((comment) => comment?.user?.login === 'github-actions[bot]' && typeof comment?.body === 'string' && comment.body.includes(`Preparation run: \`${process.env.PREPARE}\``) && comment.body.includes(`\`${process.env.EXPECTED}\``))
+          if (proposals.length !== 1) throw new Error(`expected one exact bounded-proof v2 proposal, found ${proposals.length}`)
+          const authorizations = comments.filter((comment) => comment?.user?.login === 'badjoke-lab' && comment?.body === process.env.EXPECTED)
+          if (authorizations.length !== 1 || Number(authorizations[0].id) !== Number(process.env.AUTH_ID)) throw new Error('bounded-proof v2 authorization is not unique')
+          NODE
+
+      - name: Execute exactly one bounded Current proof
+        env:
+          AUTHORIZED_STATE_DIGEST: ${{ steps.auth.outputs.state }}
+          AUTHORIZED_TARGET_SCHEDULED_TIME: ${{ steps.auth.outputs.scheduled }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p current-repair-bounded-proof-v2-evidence
+          CURRENT_REPAIR_BOUNDED_PROOF_OUTPUT=current-repair-bounded-proof-v2-evidence \
+            python scripts/current-repair-bounded-proof.py --execute
+
+      - name: Publish bounded-proof v2 result
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          result=current-repair-bounded-proof-v2-evidence/result.json
+          if test -f "$result"; then
+            passed="$(jq -r '.passed' "$result")"
+            seeded="$(jq -r '.seedMessageSent' "$result")"
+            resumed="$(jq -r '.queueResumed' "$result")"
+            repaused="$(jq -r '.queueRepaused' "$result")"
+            delta="$(jq -r '.ledgerDelta // "unavailable"' "$result")"
+            failure="$(jq -r '.failure // "none"' "$result")"
+          else
+            passed=false
+            seeded=unknown
+            resumed=unknown
+            repaused=unknown
+            delta=unavailable
+            failure='result unavailable'
+          fi
+          cat > /tmp/current-repair-bounded-proof-v2-result.md <<EOF
+          ## Current repair bounded-proof v2 result
+
+          Run: \`${GITHUB_RUN_ID}\`
+          Passed: \`${passed}\`
+          Seed message sent: \`${seeded}\`
+          Queue resumed: \`${resumed}\`
+          Queue re-paused: \`${repaused}\`
+          Fast-lane ledger delta: \`${delta}\`
+          Failure: \`${failure}\`
+
+          Continuous catch-up remains stopped. A separate authorization is still required before Queue delivery may remain active.
+          EOF
+          gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/current-repair-bounded-proof-v2-result.md
+
+      - name: Upload bounded-proof v2 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: current-repair-bounded-proof-v2
+          path: current-repair-bounded-proof-v2-evidence
+          if-no-files-found: warn
+          retention-days: 30
