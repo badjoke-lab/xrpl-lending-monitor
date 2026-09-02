@@ -1,4 +1,4 @@
-name: Current fixed-target plan
+name: Current fixed-target extension rehearsal
 
 on:
   pull_request:
@@ -6,15 +6,16 @@ on:
       - main
     paths:
       - '.github/workflows/current-fixed-target-plan.yml'
+      - 'scripts/run-history-extension-resumable.mjs'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  plan:
+  rehearse:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - name: Check out implementation
         uses: actions/checkout@v4
@@ -36,7 +37,11 @@ jobs:
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
-      - run: pnpm build:history-extension-plan
+      - name: Build extension tools
+        run: |
+          pnpm build:history-extension-plan
+          pnpm build:history-segment
+          pnpm build:history-segment-checkpoint
 
       - name: Freeze current source and validated Devnet head
         shell: bash
@@ -103,12 +108,32 @@ jobs:
               }
             }' > "${ROOT}/evidence.json"
 
-          cat "${ROOT}/evidence.json"
+      - name: Rehearse two resumable extension segments
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/run-history-extension-resumable.mjs \
+            --local \
+            --plan current-fixed-target-plan/plan.json \
+            --output-dir current-fixed-target-plan/extension \
+            --max-segments 2 \
+            --source-revision "${GITHUB_SHA}" \
+            --endpoint https://devnet.honeycluster.io/ \
+            > current-fixed-target-plan/extension.stdout.json
 
-      - name: Upload plan evidence
+          jq -e '
+            .completedSegments == 2
+            and .remainingSegments == (.totalSegments - 2)
+            and .productionMutation == false
+          ' current-fixed-target-plan/extension/summary.json > /dev/null
+
+          cat current-fixed-target-plan/evidence.json
+          cat current-fixed-target-plan/extension/summary.json
+
+      - name: Upload retained recovery evidence
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: current-fixed-target-plan
+          name: current-fixed-target-extension-rehearsal
           path: current-fixed-target-plan
           if-no-files-found: error
