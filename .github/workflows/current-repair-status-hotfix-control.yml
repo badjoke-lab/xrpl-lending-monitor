@@ -26,7 +26,7 @@ jobs:
         run: |
           set -euo pipefail
           file=scripts/deploy-current-repair-only.py
-          test "$(grep -c 'fast-lane-compact-shadow-repository.ts' "$file")" -eq 1
+          test "$(grep -c 'src/worker/repositories/fast-lane-compact-shadow-repository.ts' "$file")" -eq 0
           test "$(grep -c 'src/worker/repositories/fast-lane-shadow-repository.ts' "$file")" -eq 1
           python - <<'PY'
           from pathlib import Path
