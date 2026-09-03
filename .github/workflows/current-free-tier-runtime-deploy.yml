@@ -9,7 +9,7 @@ permissions:
   issues: write
 
 concurrency:
-  group: current-repair-production-worker-write
+  group: current-free-tier-runtime-deploy-exact-control
   cancel-in-progress: false
 
 env:
