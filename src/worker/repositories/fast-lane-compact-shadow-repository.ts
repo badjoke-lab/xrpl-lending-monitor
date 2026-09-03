@@ -5,12 +5,11 @@ import {
   type FastLaneShadowPersistenceUsage,
 } from './fast-lane-shadow-repository'
 
-// One-minute operation has at most 69.4 D1 rows/day-slot before Queue/metric
-// overhead. Keep persistence itself materially below that boundary. A seven-query
-// commit can contain the four state/guard statements, one mutation statement with
-// at most 24 rows, and two history statements with at most 16 rows each. That caps
-// persistence at roughly 60 logical rows while preserving normal history partitioning.
-const HISTORY_WINDOWS_PER_D1_QUERY = 16
+// Keep the persistence batch at seven D1 statements or fewer. A bounded 32-ledger
+// recovery pass can legitimately split into as many as 32 encoded history windows,
+// so keep all history rows and all activity rows for that pass in one statement each
+// rather than allowing the grouping boundary itself to inflate the query count.
+const HISTORY_WINDOWS_PER_D1_QUERY = 32
 const MUTATIONS_PER_D1_QUERY = 24
 export const FAST_LANE_MAX_PERSISTENCE_D1_QUERIES = 7
 
