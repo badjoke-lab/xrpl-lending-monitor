@@ -16,7 +16,7 @@ env:
   QUEUE_ID: 2ae398f2edbf43749e45cd7ede77c6cd
   DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
   SCRIPT_NAME: xrpl-lending-monitor
-  REPAIRED_VERSION_ID: efab5e6a-048a-4071-a1e5-e125731e0bde
+  REPAIRED_VERSION_ID: e3b926fe-82db-498b-8f99-d17809b136c9
   PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
   CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
   CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
