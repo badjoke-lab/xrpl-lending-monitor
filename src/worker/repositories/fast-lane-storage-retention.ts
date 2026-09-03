@@ -7,6 +7,11 @@ const MAX_SHADOW_WINDOWS = 256
 // The live-tail ring is intentionally bounded and is not formal soak evidence.
 const MAX_RUN_METRICS = 4_096
 
+// D1 Free bills deleted rows as rows written. Each prune statement therefore
+// selects at most this many primary keys before deleting them. With four prune
+// statements, one prune call can delete at most 64 rows in total.
+export const FAST_LANE_MAX_PRUNE_ROWS_PER_TABLE = 16
+
 // Stop materially below the D1 Free per-database ceiling. At 400 MB this
 // preserves 100 MB of intervention headroom below the 500 MB provider limit.
 export const FAST_LANE_DATABASE_STOP_BYTES = 400_000_000
@@ -112,59 +117,82 @@ export async function pruneFastLaneStorage(db: D1Database): Promise<void> {
   await db.batch([
     db.prepare(
       `DELETE FROM fast_lane_shadow_objects_compact
-       WHERE network = 'devnet'
-         AND EXISTS (
-           SELECT 1
-           FROM fast_lane_shadow_base_binding AS binding
-           JOIN current_state_overlay_objects AS overlay
-             ON overlay.network = 'devnet'
-            AND overlay.epoch_id = binding.base_epoch_id
-            AND overlay.base_snapshot_id = binding.base_snapshot_id
-            AND overlay.object_type = fast_lane_shadow_objects_compact.object_type
-            AND overlay.object_id = fast_lane_shadow_objects_compact.object_id
-           WHERE binding.network = 'devnet'
-             AND binding.shadow_epoch_id = fast_lane_shadow_objects_compact.epoch_id
-             AND (
-               overlay.source_ledger_index > fast_lane_shadow_objects_compact.source_ledger_index
-               OR (
-                 overlay.source_ledger_index = fast_lane_shadow_objects_compact.source_ledger_index
-                 AND overlay.source_transaction_index >= fast_lane_shadow_objects_compact.source_transaction_index
+       WHERE (network, epoch_id, object_type, object_id) IN (
+         SELECT compact.network, compact.epoch_id, compact.object_type, compact.object_id
+         FROM fast_lane_shadow_objects_compact AS compact
+         WHERE compact.network = 'devnet'
+           AND EXISTS (
+             SELECT 1
+             FROM fast_lane_shadow_base_binding AS binding
+             JOIN current_state_overlay_objects AS overlay
+               ON overlay.network = 'devnet'
+              AND overlay.epoch_id = binding.base_epoch_id
+              AND overlay.base_snapshot_id = binding.base_snapshot_id
+              AND overlay.object_type = compact.object_type
+              AND overlay.object_id = compact.object_id
+             WHERE binding.network = 'devnet'
+               AND binding.shadow_epoch_id = compact.epoch_id
+               AND (
+                 overlay.source_ledger_index > compact.source_ledger_index
+                 OR (
+                   overlay.source_ledger_index = compact.source_ledger_index
+                   AND overlay.source_transaction_index >= compact.source_transaction_index
+                 )
                )
-             )
-         )`,
-    ),
+           )
+         LIMIT ?1
+       )`,
+    ).bind(FAST_LANE_MAX_PRUNE_ROWS_PER_TABLE),
     db.prepare(
       `DELETE FROM fast_lane_history_windows
-       WHERE network = 'devnet'
-         AND (epoch_id, start_ledger_index) NOT IN (
-           SELECT epoch_id, start_ledger_index
-           FROM fast_lane_history_windows
-           WHERE network = 'devnet'
-           ORDER BY end_ledger_index DESC
-           LIMIT ?1
-         )`,
-    ).bind(MAX_HISTORY_WINDOWS),
+       WHERE (network, epoch_id, start_ledger_index) IN (
+         SELECT candidate.network, candidate.epoch_id, candidate.start_ledger_index
+         FROM fast_lane_history_windows AS candidate
+         WHERE candidate.network = 'devnet'
+           AND (candidate.epoch_id, candidate.start_ledger_index) NOT IN (
+             SELECT epoch_id, start_ledger_index
+             FROM fast_lane_history_windows
+             WHERE network = 'devnet'
+             ORDER BY end_ledger_index DESC
+             LIMIT ?1
+           )
+         ORDER BY candidate.end_ledger_index ASC
+         LIMIT ?2
+       )`,
+    ).bind(MAX_HISTORY_WINDOWS, FAST_LANE_MAX_PRUNE_ROWS_PER_TABLE),
     db.prepare(
       `DELETE FROM fast_lane_shadow_windows
-       WHERE network = 'devnet'
-         AND (epoch_id, window_start_close_time) NOT IN (
-           SELECT epoch_id, window_start_close_time
-           FROM fast_lane_shadow_windows
-           WHERE network = 'devnet'
-           ORDER BY end_ledger_index DESC
-           LIMIT ?1
-         )`,
-    ).bind(MAX_SHADOW_WINDOWS),
+       WHERE (network, epoch_id, window_start_close_time) IN (
+         SELECT candidate.network, candidate.epoch_id, candidate.window_start_close_time
+         FROM fast_lane_shadow_windows AS candidate
+         WHERE candidate.network = 'devnet'
+           AND (candidate.epoch_id, candidate.window_start_close_time) NOT IN (
+             SELECT epoch_id, window_start_close_time
+             FROM fast_lane_shadow_windows
+             WHERE network = 'devnet'
+             ORDER BY end_ledger_index DESC
+             LIMIT ?1
+           )
+         ORDER BY candidate.end_ledger_index ASC
+         LIMIT ?2
+       )`,
+    ).bind(MAX_SHADOW_WINDOWS, FAST_LANE_MAX_PRUNE_ROWS_PER_TABLE),
     db.prepare(
       `DELETE FROM fast_lane_shadow_run_metrics
-       WHERE network = 'devnet'
-         AND run_at NOT IN (
-           SELECT run_at
-           FROM fast_lane_shadow_run_metrics
-           WHERE network = 'devnet'
-           ORDER BY run_at DESC
-           LIMIT ?1
-         )`,
-    ).bind(MAX_RUN_METRICS),
+       WHERE (network, run_at) IN (
+         SELECT candidate.network, candidate.run_at
+         FROM fast_lane_shadow_run_metrics AS candidate
+         WHERE candidate.network = 'devnet'
+           AND candidate.run_at NOT IN (
+             SELECT run_at
+             FROM fast_lane_shadow_run_metrics
+             WHERE network = 'devnet'
+             ORDER BY run_at DESC
+             LIMIT ?1
+           )
+         ORDER BY candidate.run_at ASC
+         LIMIT ?2
+       )`,
+    ).bind(MAX_RUN_METRICS, FAST_LANE_MAX_PRUNE_ROWS_PER_TABLE),
   ])
 }

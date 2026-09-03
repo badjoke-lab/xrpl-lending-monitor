@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest'
 import {
   assertFastLaneStorageCapacity,
   FAST_LANE_DATABASE_STOP_BYTES,
+  FAST_LANE_MAX_PRUNE_ROWS_PER_TABLE,
+  pruneFastLaneStorage,
 } from './fast-lane-storage-retention'
 
 interface Usage {
@@ -45,6 +47,26 @@ function database(options: {
   } as unknown as D1Database
 }
 
+function pruneDatabase(captured: Array<{ sql: string; bindings: unknown[] }>): D1Database {
+  return {
+    prepare(sql: string) {
+      const statement = {
+        sql,
+        bindings: [] as unknown[],
+        bind(...bindings: unknown[]) {
+          this.bindings = bindings
+          return this
+        },
+      }
+      captured.push(statement)
+      return statement
+    },
+    async batch() {
+      return []
+    },
+  } as unknown as D1Database
+}
+
 describe('fast-lane storage capacity', () => {
   it('accepts the recovered production-size range', async () => {
     await expect(assertFastLaneStorageCapacity(database({
@@ -74,5 +96,18 @@ describe('fast-lane storage capacity', () => {
       name: 'FastLaneStorageCapacityError',
       reason: 'canonical_overlay',
     })
+  })
+
+  it('bounds every retention delete by the D1 write-row cap', async () => {
+    const captured: Array<{ sql: string; bindings: unknown[] }> = []
+
+    await pruneFastLaneStorage(pruneDatabase(captured))
+
+    expect(captured).toHaveLength(4)
+    for (const statement of captured) {
+      expect(statement.sql).toContain('LIMIT ?')
+      expect(statement.bindings).toContain(FAST_LANE_MAX_PRUNE_ROWS_PER_TABLE)
+    }
+    expect(FAST_LANE_MAX_PRUNE_ROWS_PER_TABLE).toBe(16)
   })
 })
