@@ -35,13 +35,14 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: main
-          fetch-depth: 0
+          fetch-depth: 1
           persist-credentials: false
 
       - name: Prove runtime source is exact
         shell: bash
         run: |
           set -euo pipefail
+          git fetch --no-tags --depth=1 origin "$RUNTIME_SOURCE_SHA"
           git cat-file -e "${RUNTIME_SOURCE_SHA}^{commit}"
           git diff --quiet "$RUNTIME_SOURCE_SHA" HEAD -- src wrangler.jsonc package.json pnpm-lock.yaml
           grep -F "export const FAST_LANE_CATCH_UP_INTERVAL_MS = 4 * 60 * 60_000" src/worker/fast-lane-successor-cadence.ts
