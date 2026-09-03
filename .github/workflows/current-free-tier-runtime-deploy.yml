@@ -115,9 +115,9 @@ jobs:
             | tee current-free-tier-runtime-deploy/version-upload.txt
           new_version="$(grep -Eio '[0-9a-f]{8}-[0-9a-f-]{27,}' current-free-tier-runtime-deploy/version-upload.txt | tail -1)"
           test -n "$new_version"
+          deployed=true
           pnpm exec wrangler versions deploy "${new_version}@100%" --yes \
             | tee current-free-tier-runtime-deploy/version-deploy.txt
-          deployed=true
           trap - ERR
           echo "new_version=$new_version" >> "$GITHUB_OUTPUT"
 
@@ -153,6 +153,15 @@ jobs:
             --argjson databaseSize "$db_after" \
             '{passed:true,runtimeSource:$runtimeSource,newVersion:$newVersion,queueResumed:false,queuePurged:false,cronChanged:false,d1Mutation:false,databaseSize:$databaseSize}' \
             > current-free-tier-runtime-deploy/result.json
+
+      - name: Roll back deployment if post-check failed
+        if: failure() && steps.deploy.outputs.new_version != ''
+        shell: bash
+        env:
+          OLD_VERSION: ${{ steps.before.outputs.old_version }}
+        run: |
+          set -euo pipefail
+          pnpm exec wrangler versions deploy "${OLD_VERSION}@100%" --yes
 
       - name: Upload deploy evidence
         if: always()
