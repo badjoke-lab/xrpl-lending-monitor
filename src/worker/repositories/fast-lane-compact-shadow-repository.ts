@@ -325,7 +325,7 @@ export async function commitFastLaneCompactShadowWindows(options: {
       options.expectedPreviousHash,
       plan.latestObservedLedger,
       plan.latestObservedHash,
-      plan.latestObservedLedger === options.expectedPreviousLedger ? 'healthy' : 'stale',
+      plan.latestObservedLedger === options.expectedPreviousLedger ? 'healthy' : 'behind',
       options.processedAt,
     ),
   )
@@ -367,7 +367,7 @@ export async function commitFastLaneCompactShadowWindows(options: {
       plan.endLedgerHash,
       plan.latestObservedLedger,
       plan.latestObservedHash,
-      plan.endLedgerIndex === plan.latestObservedLedger ? 'healthy' : 'stale',
+      plan.endLedgerIndex === plan.latestObservedLedger ? 'healthy' : 'behind',
       options.processedAt,
       options.expectedPreviousLedger,
       options.expectedPreviousHash,
