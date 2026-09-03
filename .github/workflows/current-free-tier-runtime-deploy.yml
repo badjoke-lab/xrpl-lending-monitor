@@ -1,0 +1,164 @@
+name: Current free-tier runtime deploy
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: current-repair-production-worker-write
+  cancel-in-progress: false
+
+env:
+  QUALIFICATION_ISSUE: '995'
+  RUNTIME_SOURCE_SHA: 02ee6e14146bedd3bb425a3cd56a214f78f24446
+  SCRIPT_NAME: xrpl-lending-monitor
+  QUEUE_ID: 2ae398f2edbf43749e45cd7ede77c6cd
+  DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
+  PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+jobs:
+  deploy:
+    if: >-
+      github.event.issue.number == 995 &&
+      github.event.comment.user.login == 'badjoke-lab' &&
+      github.event.comment.body == '/current-free-tier-runtime-deploy'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out exact main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Prove runtime source is exact
+        shell: bash
+        run: |
+          set -euo pipefail
+          git cat-file -e "${RUNTIME_SOURCE_SHA}^{commit}"
+          git diff --quiet "$RUNTIME_SOURCE_SHA" HEAD -- src wrangler.jsonc package.json pnpm-lock.yaml
+          grep -F "export const FAST_LANE_CATCH_UP_INTERVAL_MS = 4 * 60 * 60_000" src/worker/fast-lane-successor-cadence.ts
+          grep -F "export const FAST_LANE_MAX_PERSISTENCE_D1_QUERIES = 7" src/worker/repositories/fast-lane-compact-shadow-repository.ts
+          grep -F "const MUTATIONS_PER_D1_QUERY = 24" src/worker/repositories/fast-lane-compact-shadow-repository.ts
+          grep -F "export const FAST_LANE_MAX_PRUNE_ROWS_PER_TABLE = 16" src/worker/repositories/fast-lane-storage-retention.ts
+          test "$(jq -r '.triggers.crons | length' wrangler.jsonc)" -eq 0
+          test "$(jq -r '.vars.APP_NETWORK' wrangler.jsonc)" = devnet
+          test "$(jq -r '.vars.MAINNET_ENABLED' wrangler.jsonc)" = false
+          test "$(jq -r '.vars.FAST_LANE_MAX_LEDGERS_PER_RUN' wrangler.jsonc)" = 32
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Read-only stopped-state preflight
+        id: before
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p current-free-tier-runtime-deploy/preflight-before
+          CURRENT_RESTART_PREFLIGHT_OUTPUT=current-free-tier-runtime-deploy/preflight-before \
+            python scripts/current-restart-preflight.py
+          result=current-free-tier-runtime-deploy/preflight-before/result.json
+          test "$(jq -r '.safeToDeployRepair' "$result")" = true
+          test "$(jq -r '.safeToRestart' "$result")" = false
+          test "$(jq -r '.productionMutation' "$result")" = false
+          test "$(jq -r '.failures | length' "$result")" -eq 0
+          old_version="$(jq -r '.state.deployment.versions[0].version_id' "$result")"
+          test -n "$old_version"
+          echo "old_version=$old_version" >> "$GITHUB_OUTPUT"
+          curl -fsS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/queues/${QUEUE_ID}" \
+            | jq -e '.success == true and .result.settings.delivery_paused == true' >/dev/null
+          db_before="$(curl -fsS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database/${DATABASE_ID}" \
+            | jq -r '.result.file_size')"
+          echo "db_before=$db_before" >> "$GITHUB_OUTPUT"
+
+      - name: Build deploy assets
+        run: pnpm build:deploy-assets
+
+      - name: Upload and deploy exact runtime
+        id: deploy
+        shell: bash
+        env:
+          OLD_VERSION: ${{ steps.before.outputs.old_version }}
+        run: |
+          set -euo pipefail
+          mkdir -p current-free-tier-runtime-deploy
+          deployed=false
+          rollback() {
+            rc=$?
+            if test "$deployed" = true; then
+              pnpm exec wrangler versions deploy "${OLD_VERSION}@100%" --yes || true
+            fi
+            exit "$rc"
+          }
+          trap rollback ERR
+          pnpm exec wrangler versions upload --message "Free-tier Current runtime ${RUNTIME_SOURCE_SHA}" \
+            | tee current-free-tier-runtime-deploy/version-upload.txt
+          new_version="$(grep -Eio '[0-9a-f]{8}-[0-9a-f-]{27,}' current-free-tier-runtime-deploy/version-upload.txt | tail -1)"
+          test -n "$new_version"
+          pnpm exec wrangler versions deploy "${new_version}@100%" --yes \
+            | tee current-free-tier-runtime-deploy/version-deploy.txt
+          deployed=true
+          trap - ERR
+          echo "new_version=$new_version" >> "$GITHUB_OUTPUT"
+
+      - name: Verify stopped state remained unchanged
+        shell: bash
+        env:
+          DB_BEFORE: ${{ steps.before.outputs.db_before }}
+          NEW_VERSION: ${{ steps.deploy.outputs.new_version }}
+        run: |
+          set -euo pipefail
+          mkdir -p current-free-tier-runtime-deploy/preflight-after
+          CURRENT_RESTART_PREFLIGHT_OUTPUT=current-free-tier-runtime-deploy/preflight-after \
+            python scripts/current-restart-preflight.py
+          result=current-free-tier-runtime-deploy/preflight-after/result.json
+          test "$(jq -r '.safeToDeployRepair' "$result")" = true
+          test "$(jq -r '.safeToRestart' "$result")" = false
+          test "$(jq -r '.productionMutation' "$result")" = false
+          test "$(jq -r '.failures | length' "$result")" -eq 0
+          test "$(jq -r '.state.deployment.versions[0].version_id' "$result")" = "$NEW_VERSION"
+          curl -fsS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/queues/${QUEUE_ID}" \
+            | jq -e '.success == true and .result.settings.delivery_paused == true' >/dev/null
+          db_after="$(curl -fsS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database/${DATABASE_ID}" \
+            | jq -r '.result.file_size')"
+          test "$db_after" = "$DB_BEFORE"
+          curl -fsS "${PRODUCTION_BASE}/api/overview" >/dev/null
+          curl -fsS "${PRODUCTION_BASE}/api/status/history-source" >/dev/null
+          curl -fsS "${PRODUCTION_BASE}/api/status/fast-lane-diff?limit=1" >/dev/null
+          jq -n \
+            --arg runtimeSource "$RUNTIME_SOURCE_SHA" \
+            --arg newVersion "$NEW_VERSION" \
+            --argjson databaseSize "$db_after" \
+            '{passed:true,runtimeSource:$runtimeSource,newVersion:$newVersion,queueResumed:false,queuePurged:false,cronChanged:false,d1Mutation:false,databaseSize:$databaseSize}' \
+            > current-free-tier-runtime-deploy/result.json
+
+      - name: Upload deploy evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: current-free-tier-runtime-deploy
+          path: current-free-tier-runtime-deploy
+          if-no-files-found: warn
+          retention-days: 30
