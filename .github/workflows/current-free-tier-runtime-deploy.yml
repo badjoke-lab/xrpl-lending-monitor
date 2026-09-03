@@ -14,7 +14,7 @@ concurrency:
 
 env:
   QUALIFICATION_ISSUE: '995'
-  RUNTIME_SOURCE_SHA: 02ee6e14146bedd3bb425a3cd56a214f78f24446
+  RUNTIME_SOURCE_SHA: c61a9931e594f6987fb72f4a655528d40d97ed4e
   SCRIPT_NAME: xrpl-lending-monitor
   QUEUE_ID: 2ae398f2edbf43749e45cd7ede77c6cd
   DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
@@ -48,6 +48,7 @@ jobs:
           grep -F "export const FAST_LANE_CATCH_UP_INTERVAL_MS = 4 * 60 * 60_000" src/worker/fast-lane-successor-cadence.ts
           grep -F "export const FAST_LANE_MAX_PERSISTENCE_D1_QUERIES = 7" src/worker/repositories/fast-lane-compact-shadow-repository.ts
           grep -F "const MUTATIONS_PER_D1_QUERY = 24" src/worker/repositories/fast-lane-compact-shadow-repository.ts
+          grep -F "const HISTORY_WINDOWS_PER_D1_QUERY = 16" src/worker/repositories/fast-lane-compact-shadow-repository.ts
           grep -F "export const FAST_LANE_MAX_PRUNE_ROWS_PER_TABLE = 16" src/worker/repositories/fast-lane-storage-retention.ts
           test "$(jq -r '.triggers.crons | length' wrangler.jsonc)" -eq 0
           test "$(jq -r '.vars.APP_NETWORK' wrangler.jsonc)" = devnet
