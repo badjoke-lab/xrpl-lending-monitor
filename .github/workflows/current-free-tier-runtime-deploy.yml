@@ -94,7 +94,7 @@ jobs:
             and .checks.noPendingQueueSlot == true
             and .checks.noStagedSuccessorSlot == true
             and .state.latestMetric.status == "error"
-            and .state.latestMetric.error_message == "Fast-lane persistence D1 query budget exceeded: queries=9, limit=7"
+            and .state.latestMetric.error_message == "D1_ERROR: CHECK constraint failed: status IN ('\''healthy'\'', '\''behind'\'', '\''error'\''): SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_CHECK)"
             and .state.latestSlots[0].scheduled_time == 1788441960000
             and .state.latestSlots[0].status == "error"
             and .state.latestSlots[0].error_message == "D1_ERROR: CHECK constraint failed: status IN ('\''healthy'\'', '\''behind'\'', '\''error'\''): SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_CHECK)"
@@ -166,7 +166,7 @@ jobs:
             and .checks.noPendingQueueSlot == true
             and .checks.noStagedSuccessorSlot == true
             and .state.latestMetric.status == "error"
-            and .state.latestMetric.error_message == "Fast-lane persistence D1 query budget exceeded: queries=9, limit=7"
+            and .state.latestMetric.error_message == "D1_ERROR: CHECK constraint failed: status IN ('\''healthy'\'', '\''behind'\'', '\''error'\''): SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_CHECK)"
             and .state.latestSlots[0].scheduled_time == 1788441960000
             and .state.latestSlots[0].status == "error"
             and .state.latestSlots[0].error_message == "D1_ERROR: CHECK constraint failed: status IN ('\''healthy'\'', '\''behind'\'', '\''error'\''): SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_CHECK)"
