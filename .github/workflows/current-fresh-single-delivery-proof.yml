@@ -61,6 +61,17 @@ jobs:
           AUTHORIZED_TARGET_SCHEDULED_TIME: ${{ steps.prepare.outputs.target }}
         run: |
           set -euo pipefail
+          target_seconds=$((AUTHORIZED_TARGET_SCHEDULED_TIME / 1000))
+          execute_not_before=$((target_seconds - 60))
+          now_seconds="$(date +%s)"
+          if (( now_seconds < execute_not_before )); then
+            sleep $((execute_not_before - now_seconds))
+          fi
+          remaining_lead=$((target_seconds - $(date +%s)))
+          if (( remaining_lead < 30 )); then
+            echo "authorized target no longer has the required 30-second lead" >&2
+            exit 1
+          fi
           export CURRENT_REPAIR_BOUNDED_PROOF_OUTPUT=current-fresh-single-delivery-proof/execute
           python scripts/current-repair-bounded-proof.py --execute
           result="$CURRENT_REPAIR_BOUNDED_PROOF_OUTPUT/result.json"
