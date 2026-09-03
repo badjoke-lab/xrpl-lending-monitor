@@ -8,7 +8,10 @@ import {
 } from './fast-lane-resilient-ledger-reader'
 import { buildFastLaneShadowWindowPlan } from './fast-lane-shadow-plan'
 import { fastLaneShadowReanchorReason } from './fast-lane-shadow-reanchor'
-import { scanValidatedLedgerRange } from './scan-validated-ledgers'
+import {
+  scanValidatedLedgerRange,
+  type IncrementalScanResult,
+} from './scan-validated-ledgers'
 import { createXrplWebSocketLedgerSession } from './xrpl-websocket-ledger-session'
 import {
   commitFastLaneCompactShadowWindows,
@@ -24,6 +27,14 @@ import {
 } from '../../worker/repositories/fast-lane-shadow-repository'
 
 const SHADOW_EPOCH_ID = 'fast-lane-shadow-devnet'
+
+// The compact persistence contract has a seven-query D1 ceiling. Four queries are
+// fixed state/guard work, one query can carry at most 24 coalesced object mutations,
+// and one pair of history/activity queries can carry at most 16 history windows.
+// Keep the network scan cap independent, then commit only the largest contiguous
+// prefix that is guaranteed to fit this persistence shape.
+export const FAST_LANE_PERSISTENCE_MAX_LEDGERS = 16
+export const FAST_LANE_PERSISTENCE_MAX_MUTATIONS = 24
 
 export interface FastLaneShadowCycleResult {
   status: 'caught_up' | 'committed' | 'reanchored'
@@ -56,6 +67,61 @@ function integer(value: unknown, field: string): number {
 function stringValue(value: unknown, field: string): string {
   if (typeof value !== 'string' || value.length === 0) throw new Error(`${field} is invalid`)
   return value
+}
+
+function fastLaneScanPrefix(scan: IncrementalScanResult, ledgerCount: number): IncrementalScanResult {
+  if (!Number.isSafeInteger(ledgerCount) || ledgerCount < 1 || ledgerCount > scan.ledgers.length) {
+    throw new Error('Fast-lane persistence prefix ledger count is invalid')
+  }
+  const ledgers = scan.ledgers.slice(0, ledgerCount)
+  const endLedgerIndex = ledgers.at(-1)?.ledgerIndex ?? null
+  return {
+    ...scan,
+    endLedgerIndex,
+    completeToLatest: endLedgerIndex === scan.latestValidatedLedger,
+    ledgers,
+    metrics: {
+      ...scan.metrics,
+      ledgers: ledgers.length,
+      inspectedTransactions: ledgers.reduce((total, ledger) => total + ledger.transactions.length, 0),
+      lendingTransactions: ledgers.reduce(
+        (total, ledger) => total + ledger.lendingTransactions.length,
+        0,
+      ),
+    },
+  }
+}
+
+export function selectFastLanePersistenceSafeScan(options: {
+  scan: IncrementalScanResult
+  latestObservedHash: string
+  processedAt: string
+}): {
+  scan: IncrementalScanResult
+  plan: ReturnType<typeof buildFastLaneShadowWindowPlan>
+} {
+  if (options.scan.ledgers.length === 0) {
+    throw new Error('Fast-lane persistence selection requires at least one scanned ledger')
+  }
+
+  let ledgerCount = Math.min(options.scan.ledgers.length, FAST_LANE_PERSISTENCE_MAX_LEDGERS)
+  while (ledgerCount >= 1) {
+    const candidateScan = fastLaneScanPrefix(options.scan, ledgerCount)
+    const candidatePlan = buildFastLaneShadowWindowPlan({
+      epochId: SHADOW_EPOCH_ID,
+      scan: candidateScan,
+      latestObservedHash: options.latestObservedHash,
+      processedAt: options.processedAt,
+    })
+    if (candidatePlan.mutations.length <= FAST_LANE_PERSISTENCE_MAX_MUTATIONS) {
+      return { scan: candidateScan, plan: candidatePlan }
+    }
+    ledgerCount -= 1
+  }
+
+  throw new Error(
+    `Fast-lane single-ledger mutation budget exceeded: limit=${FAST_LANE_PERSISTENCE_MAX_MUTATIONS}`,
+  )
 }
 
 export function selectFastLaneHeadRpcEndpoint(options: {
@@ -273,17 +339,21 @@ export async function runFastLaneShadowCycle(options: {
       }
     }
 
-    const boundedWindows = await buildBoundedFastLaneHistoryWindows({
-      scan: scanned,
-      epochId: options.base.epochId,
-      processedAt,
-    })
-    const plan = buildFastLaneShadowWindowPlan({
-      epochId: SHADOW_EPOCH_ID,
+    const selected = selectFastLanePersistenceSafeScan({
       scan: scanned,
       latestObservedHash: head.ledgerHash,
       processedAt,
     })
+    const boundedWindows = await buildBoundedFastLaneHistoryWindows({
+      scan: selected.scan,
+      epochId: options.base.epochId,
+      processedAt,
+    })
+    if (boundedWindows.length > FAST_LANE_PERSISTENCE_MAX_LEDGERS) {
+      throw new Error('Fast-lane history persistence window budget exceeded')
+    }
+
+    const plan = selected.plan
     const persistence = await commitFastLaneCompactShadowWindows({
       db: options.db,
       plan,
@@ -309,7 +379,7 @@ export async function runFastLaneShadowCycle(options: {
       endLedgerIndex: plan.endLedgerIndex,
       latestObservedLedger: head.ledgerIndex,
       lagLedgers,
-      ledgersProcessed: scanned.metrics.ledgers,
+      ledgersProcessed: selected.scan.metrics.ledgers,
       lendingTransactions: plan.lendingTransactions,
       coalescedObjectRows: plan.mutations.length,
       persistenceRowsRead: persistence.rowsRead,
