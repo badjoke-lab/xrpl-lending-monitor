@@ -6,6 +6,7 @@ import {
   createFastLaneResilientLedgerReader,
   type FastLaneHttpFallbackBudget,
 } from './fast-lane-resilient-ledger-reader'
+import { selectFastLanePersistenceWindow } from './fast-lane-persistence-window'
 import { buildFastLaneShadowWindowPlan } from './fast-lane-shadow-plan'
 import { fastLaneShadowReanchorReason } from './fast-lane-shadow-reanchor'
 import { scanValidatedLedgerRange } from './scan-validated-ledgers'
@@ -273,15 +274,17 @@ export async function runFastLaneShadowCycle(options: {
       }
     }
 
-    const boundedWindows = await buildBoundedFastLaneHistoryWindows({
+    const selected = selectFastLanePersistenceWindow({
       scan: scanned,
-      epochId: options.base.epochId,
+      epochId: SHADOW_EPOCH_ID,
+      latestObservedHash: head.ledgerHash,
       processedAt,
     })
-    const plan = buildFastLaneShadowWindowPlan({
-      epochId: SHADOW_EPOCH_ID,
-      scan: scanned,
-      latestObservedHash: head.ledgerHash,
+    const persistenceScan = selected.scan
+    const plan = selected.plan
+    const boundedWindows = await buildBoundedFastLaneHistoryWindows({
+      scan: persistenceScan,
+      epochId: options.base.epochId,
       processedAt,
     })
     const persistence = await commitFastLaneCompactShadowWindows({
@@ -309,7 +312,7 @@ export async function runFastLaneShadowCycle(options: {
       endLedgerIndex: plan.endLedgerIndex,
       latestObservedLedger: head.ledgerIndex,
       lagLedgers,
-      ledgersProcessed: scanned.metrics.ledgers,
+      ledgersProcessed: persistenceScan.metrics.ledgers,
       lendingTransactions: plan.lendingTransactions,
       coalescedObjectRows: plan.mutations.length,
       persistenceRowsRead: persistence.rowsRead,
