@@ -8,7 +8,10 @@ permissions:
   contents: read
 
 concurrency:
-  group: current-repair-production-worker-write
+  # Temporary isolation for the exact stale-message purge. issue_comment fan-out
+  # causes unrelated workflows that share the production-write group to evict
+  # this pending run before its guarded job can start.
+  group: current-stale-queue-exact-control
   cancel-in-progress: false
 
 env:
