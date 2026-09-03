@@ -1,6 +1,39 @@
 import { describe, expect, it } from 'vitest'
 
-import { selectFastLaneHeadRpcEndpoint, selectFastLaneStartLedger } from './fast-lane-shadow-cycle'
+import type { IncrementalScanResult } from './scan-validated-ledgers'
+import {
+  FAST_LANE_PERSISTENCE_MAX_LEDGERS,
+  selectFastLaneHeadRpcEndpoint,
+  selectFastLanePersistenceSafeScan,
+  selectFastLaneStartLedger,
+} from './fast-lane-shadow-cycle'
+
+function emptyLedgerScan(ledgerCount: number): IncrementalScanResult {
+  const startLedgerIndex = 100
+  const ledgers = Array.from({ length: ledgerCount }, (_, offset) => ({
+    endpoint: 'wss://s.devnet.rippletest.net:51233/',
+    ledgerIndex: startLedgerIndex + offset,
+    ledgerHash: String(startLedgerIndex + offset).padStart(64, '0'),
+    parentHash: String(startLedgerIndex + offset - 1).padStart(64, '0'),
+    closeTime: 1_000 + offset,
+    transactions: [],
+    lendingTransactions: [],
+  }))
+  return {
+    endpoint: 'wss://s.devnet.rippletest.net:51233/',
+    startLedgerIndex,
+    endLedgerIndex: ledgers.at(-1)?.ledgerIndex ?? null,
+    latestValidatedLedger: ledgers.at(-1)?.ledgerIndex ?? startLedgerIndex,
+    completeToLatest: true,
+    ledgers,
+    metrics: {
+      ledgers: ledgerCount,
+      inspectedTransactions: 0,
+      lendingTransactions: 0,
+      elapsedMs: 10,
+    },
+  }
+}
 
 describe('selectFastLaneHeadRpcEndpoint', () => {
   it('selects the HTTP endpoint on the same host as the ledger WebSocket', () => {
@@ -51,5 +84,25 @@ describe('selectFastLaneStartLedger', () => {
       baseLedgerIndex: 3_860_021,
       lastProcessedLedger: 3_860_020,
     })).toThrow('Fast-lane last processed ledger is invalid')
+  })
+})
+
+describe('selectFastLanePersistenceSafeScan', () => {
+  it('keeps a 32-ledger network scan but limits the contiguous persistence prefix to 16 ledgers', () => {
+    const scan = emptyLedgerScan(32)
+    const selected = selectFastLanePersistenceSafeScan({
+      scan,
+      latestObservedHash: 'F'.repeat(64),
+      processedAt: '2026-09-03T10:00:00.000Z',
+    })
+
+    expect(scan.ledgers).toHaveLength(32)
+    expect(selected.scan.ledgers).toHaveLength(FAST_LANE_PERSISTENCE_MAX_LEDGERS)
+    expect(selected.scan.startLedgerIndex).toBe(100)
+    expect(selected.scan.endLedgerIndex).toBe(115)
+    expect(selected.scan.completeToLatest).toBe(false)
+    expect(selected.plan.startLedgerIndex).toBe(100)
+    expect(selected.plan.endLedgerIndex).toBe(115)
+    expect(selected.plan.mutations).toHaveLength(0)
   })
 })
