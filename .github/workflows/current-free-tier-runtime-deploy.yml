@@ -86,15 +86,18 @@ jobs:
           test "$(jq -r '.safeToRestart' "$result")" = false
           test "$(jq -r '.productionMutation' "$result")" = false
           jq -e '
-            (.safeToDeployRepair == true and (.failures | length) == 0)
-            or (
-              .safeToDeployRepair == false
-              and .checks.queueDeliveryPaused == true
-              and .checks.schedulerStillDisabled == true
-              and .checks.noLiveUnstagedProcessingSlot == true
-              and .checks.noPendingQueueSlot == true
-              and .checks.noStagedSuccessorSlot == true
-            )
+            .safeToDeployRepair == false
+            and .failures == ["latestMetricCommittedAtCursor"]
+            and .checks.queueDeliveryPaused == true
+            and .checks.schedulerStillDisabled == true
+            and .checks.noLiveUnstagedProcessingSlot == true
+            and .checks.noPendingQueueSlot == true
+            and .checks.noStagedSuccessorSlot == true
+            and .state.latestMetric.status == "error"
+            and .state.latestMetric.error_message == "Fast-lane persistence D1 query budget exceeded: queries=9, limit=7"
+            and .state.latestSlots[0].scheduled_time == 1788441960000
+            and .state.latestSlots[0].status == "error"
+            and .state.latestSlots[0].error_message == "D1_ERROR: CHECK constraint failed: status IN ('\''healthy'\'', '\''behind'\'', '\''error'\''): SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_CHECK)"
           ' "$result" >/dev/null
           old_version="$(jq -r '.state.deployment.versions[0].version_id' "$result")"
           test -n "$old_version"
@@ -155,15 +158,18 @@ jobs:
           test "$(jq -r '.safeToRestart' "$result")" = false
           test "$(jq -r '.productionMutation' "$result")" = false
           jq -e '
-            (.safeToDeployRepair == true and (.failures | length) == 0)
-            or (
-              .safeToDeployRepair == false
-              and .checks.queueDeliveryPaused == true
-              and .checks.schedulerStillDisabled == true
-              and .checks.noLiveUnstagedProcessingSlot == true
-              and .checks.noPendingQueueSlot == true
-              and .checks.noStagedSuccessorSlot == true
-            )
+            .safeToDeployRepair == false
+            and .failures == ["latestMetricCommittedAtCursor"]
+            and .checks.queueDeliveryPaused == true
+            and .checks.schedulerStillDisabled == true
+            and .checks.noLiveUnstagedProcessingSlot == true
+            and .checks.noPendingQueueSlot == true
+            and .checks.noStagedSuccessorSlot == true
+            and .state.latestMetric.status == "error"
+            and .state.latestMetric.error_message == "Fast-lane persistence D1 query budget exceeded: queries=9, limit=7"
+            and .state.latestSlots[0].scheduled_time == 1788441960000
+            and .state.latestSlots[0].status == "error"
+            and .state.latestSlots[0].error_message == "D1_ERROR: CHECK constraint failed: status IN ('\''healthy'\'', '\''behind'\'', '\''error'\''): SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_CHECK)"
           ' "$result" >/dev/null
           test "$(jq -r '.state.deployment.versions[0].version_id' "$result")" = "$NEW_VERSION"
           curl -fsS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
