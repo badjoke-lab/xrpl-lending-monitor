@@ -1,4 +1,4 @@
-name: Current stale Queue peek
+name: Current stale Queue control
 
 on:
   issue_comment:
@@ -14,6 +14,9 @@ concurrency:
 env:
   QUALIFICATION_ISSUE: '995'
   QUEUE_ID: 2ae398f2edbf43749e45cd7ede77c6cd
+  EXPECTED_MESSAGE_ID: 3a504373e28bd9ae052f7091e2482c86
+  EXPECTED_SCHEDULED_TIME: '1788260040000'
+  EXPECTED_CRON: queue-bounded-current-repair-proof
   CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
   CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
@@ -49,3 +52,68 @@ jobs:
           path: current-stale-queue-peek
           if-no-files-found: error
           retention-days: 14
+
+  purge_exact_stale:
+    if: >-
+      github.event.issue.number == 995 &&
+      github.event.comment.user.login == 'badjoke-lab' &&
+      github.event.comment.body == '/current-stale-queue-purge-exact'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Re-prove paused state and exact stale physical message
+        id: prove
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p current-stale-queue-purge
+          auth="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          base="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/queues/${QUEUE_ID}"
+          curl -fsS -H "$auth" "$base" | tee current-stale-queue-purge/queue-before.json \
+            | jq -e '.success == true and .result.settings.delivery_paused == true' >/dev/null
+          curl -fsS -X POST -H "$auth" -H 'Content-Type: application/json' \
+            "$base/messages/peek" -d '{"batch_size":2}' \
+            | tee current-stale-queue-purge/peek-before.json >/dev/null
+          message_count="$(jq '(.result.messages // .result // []) | length' current-stale-queue-purge/peek-before.json)"
+          test "$message_count" -eq 1
+          id="$(jq -r '(.result.messages // .result // [])[0].id' current-stale-queue-purge/peek-before.json)"
+          body="$(jq -r '(.result.messages // .result // [])[0].body' current-stale-queue-purge/peek-before.json)"
+          ref="$(jq -r '(.result.messages // .result // [])[0].ref' current-stale-queue-purge/peek-before.json)"
+          test "$id" = "$EXPECTED_MESSAGE_ID"
+          test -n "$ref" && test "$ref" != null
+          jq -e --argjson scheduled "$EXPECTED_SCHEDULED_TIME" --arg cron "$EXPECTED_CRON" \
+            '.scheduledTime == $scheduled and .cron == $cron' <<<"$body" >/dev/null
+          printf 'ref=%s\n' "$ref" >> "$GITHUB_OUTPUT"
+
+      - name: Purge only the re-proved stale ref
+        env:
+          STALE_REF: ${{ steps.prove.outputs.ref }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          auth="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          base="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/queues/${QUEUE_ID}"
+          jq -n --arg ref "$STALE_REF" '{refs:[{ref:$ref}]}' > /tmp/purge-body.json
+          curl -fsS -X POST -H "$auth" -H 'Content-Type: application/json' \
+            "$base/messages/purge" --data-binary @/tmp/purge-body.json \
+            | tee current-stale-queue-purge/purge-response.json \
+            | jq -e '.success == true and ((.errors // []) | length) == 0' >/dev/null
+          sleep 2
+          curl -fsS -H "$auth" "$base" | tee current-stale-queue-purge/queue-after.json \
+            | jq -e '.success == true and .result.settings.delivery_paused == true' >/dev/null
+          curl -fsS -X POST -H "$auth" -H 'Content-Type: application/json' \
+            "$base/messages/peek" -d '{"batch_size":2}' \
+            | tee current-stale-queue-purge/peek-after.json \
+            | jq -e '.success == true and ((.result.messages // .result // []) | length) == 0' >/dev/null
+          jq -n --arg id "$EXPECTED_MESSAGE_ID" \
+            '{passed:true,productionMutation:true,purgedMessageId:$id,queueResumed:false,queueRepaused:false,d1Mutation:false,cronChanged:false}' \
+            > current-stale-queue-purge/result.json
+
+      - name: Upload exact purge evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: current-stale-queue-purge
+          path: current-stale-queue-purge
+          if-no-files-found: warn
+          retention-days: 30
