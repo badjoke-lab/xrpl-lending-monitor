@@ -14,7 +14,7 @@ concurrency:
 
 env:
   QUALIFICATION_ISSUE: '995'
-  RUNTIME_SOURCE_SHA: ba3a6d3815933ef5a64f2080a42c85cc71410d72
+  RUNTIME_SOURCE_SHA: 58ff315674a0ea65254fd9306d2943f185ac07eb
   SCRIPT_NAME: xrpl-lending-monitor
   QUEUE_ID: 2ae398f2edbf43749e45cd7ede77c6cd
   DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
@@ -96,7 +96,7 @@ jobs:
               and .checks.noStagedSuccessorSlot == true
               and .state.latestMetric.status == "error"
               and .state.latestMetric.error_message == "Fast-lane persistence D1 query budget exceeded: queries=9, limit=7"
-              and .state.latestSlots[0].scheduled_time == 1788418080000
+              and .state.latestSlots[0].scheduled_time == 1788434820000
               and .state.latestSlots[0].status == "error"
               and .state.latestSlots[0].error_message == "Fast-lane persistence D1 query budget exceeded: queries=9, limit=7"
             )
@@ -171,7 +171,7 @@ jobs:
               and .checks.noStagedSuccessorSlot == true
               and .state.latestMetric.status == "error"
               and .state.latestMetric.error_message == "Fast-lane persistence D1 query budget exceeded: queries=9, limit=7"
-              and .state.latestSlots[0].scheduled_time == 1788418080000
+              and .state.latestSlots[0].scheduled_time == 1788434820000
               and .state.latestSlots[0].status == "error"
               and .state.latestSlots[0].error_message == "Fast-lane persistence D1 query budget exceeded: queries=9, limit=7"
             )
