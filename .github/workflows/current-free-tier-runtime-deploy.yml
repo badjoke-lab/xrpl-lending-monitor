@@ -77,29 +77,24 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p current-free-tier-runtime-deploy/preflight-before
-          set +e
           CURRENT_RESTART_PREFLIGHT_OUTPUT=current-free-tier-runtime-deploy/preflight-before \
             python scripts/current-restart-preflight.py
-          preflight_rc=$?
-          set -e
-          test "$preflight_rc" -eq 0 -o "$preflight_rc" -eq 1
           result=current-free-tier-runtime-deploy/preflight-before/result.json
           test "$(jq -r '.safeToRestart' "$result")" = false
           test "$(jq -r '.productionMutation' "$result")" = false
           jq -e '
-            .safeToDeployRepair == false
-            and .failures == ["latestMetricCommittedAtCursor"]
+            .safeToDeployRepair == true
+            and .failures == []
             and .checks.queueDeliveryPaused == true
             and .checks.schedulerStillDisabled == true
             and .checks.noLiveUnstagedProcessingSlot == true
             and .checks.noPendingQueueSlot == true
             and .checks.noStagedSuccessorSlot == true
+            and .checks.latestMetricCommittedAtCursor == true
             and .state.fastLane.last_processed_ledger == 4086697
-            and .state.latestMetric.status == "error"
-            and .state.latestMetric.error_message == "D1_ERROR: CHECK constraint failed: status IN ('\''uninitialized'\'', '\''healthy'\'', '\''stale'\'', '\''error'\'', '\''reset_suspected'\''): SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_CHECK)"
-            and .state.latestSlots[0].scheduled_time == 1788445920000
-            and .state.latestSlots[0].status == "error"
-            and .state.latestSlots[0].error_message == "D1_ERROR: CHECK constraint failed: status IN ('\''uninitialized'\'', '\''healthy'\'', '\''stale'\'', '\''error'\'', '\''reset_suspected'\''): SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_CHECK)"
+            and .state.latestMetric.status == "committed"
+            and .state.latestMetric.error_message == null
+            and .state.latestMetric.end_ledger_index == 4086697
           ' "$result" >/dev/null
           old_version="$(jq -r '.state.deployment.versions[0].version_id' "$result")"
           test -n "$old_version"
@@ -150,29 +145,24 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p current-free-tier-runtime-deploy/preflight-after
-          set +e
           CURRENT_RESTART_PREFLIGHT_OUTPUT=current-free-tier-runtime-deploy/preflight-after \
             python scripts/current-restart-preflight.py
-          preflight_rc=$?
-          set -e
-          test "$preflight_rc" -eq 0 -o "$preflight_rc" -eq 1
           result=current-free-tier-runtime-deploy/preflight-after/result.json
           test "$(jq -r '.safeToRestart' "$result")" = false
           test "$(jq -r '.productionMutation' "$result")" = false
           jq -e '
-            .safeToDeployRepair == false
-            and .failures == ["latestMetricCommittedAtCursor"]
+            .safeToDeployRepair == true
+            and .failures == []
             and .checks.queueDeliveryPaused == true
             and .checks.schedulerStillDisabled == true
             and .checks.noLiveUnstagedProcessingSlot == true
             and .checks.noPendingQueueSlot == true
             and .checks.noStagedSuccessorSlot == true
+            and .checks.latestMetricCommittedAtCursor == true
             and .state.fastLane.last_processed_ledger == 4086697
-            and .state.latestMetric.status == "error"
-            and .state.latestMetric.error_message == "D1_ERROR: CHECK constraint failed: status IN ('\''uninitialized'\'', '\''healthy'\'', '\''stale'\'', '\''error'\'', '\''reset_suspected'\''): SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_CHECK)"
-            and .state.latestSlots[0].scheduled_time == 1788445920000
-            and .state.latestSlots[0].status == "error"
-            and .state.latestSlots[0].error_message == "D1_ERROR: CHECK constraint failed: status IN ('\''uninitialized'\'', '\''healthy'\'', '\''stale'\'', '\''error'\'', '\''reset_suspected'\''): SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_CHECK)"
+            and .state.latestMetric.status == "committed"
+            and .state.latestMetric.error_message == null
+            and .state.latestMetric.end_ledger_index == 4086697
           ' "$result" >/dev/null
           test "$(jq -r '.state.deployment.versions[0].version_id' "$result")" = "$NEW_VERSION"
           curl -fsS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
