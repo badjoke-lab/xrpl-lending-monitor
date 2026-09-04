@@ -9,6 +9,7 @@ import { initializeCatchUpFromVerifiedBase } from './catch-up-initialization'
 import { rebaseToReplacementBase } from './replacement-base-rebase'
 import { readFastLaneShadowBaseBinding } from '../repositories/fast-lane-shadow-base-binding'
 import { readFastLaneShadowState } from '../repositories/fast-lane-shadow-repository'
+import { fastLanePromotionStatuses } from './fast-lane-promotion-status'
 
 const FAST_LANE_COMPACT_COVERAGE_START_LEDGER = 3_626_457
 const CANONICAL_BRIDGE_TARGET_LEDGER = FAST_LANE_COMPACT_COVERAGE_START_LEDGER - 1
@@ -141,7 +142,7 @@ export async function promoteFastLaneCompactToCanonicalOverlay(
   const promotedThroughHash = fast.lastProcessedHash
   const promotedAt = new Date().toISOString()
   const lagLedgers = Math.max(0, fast.latestObservedLedger - fast.lastProcessedLedger)
-  const canonicalStatus = lagLedgers === 0 ? 'healthy' : 'behind'
+  const statuses = fastLanePromotionStatuses(lagLedgers)
   const rowsBefore = await compactRowCount(db)
 
   await db.batch([
@@ -233,7 +234,7 @@ export async function promoteFastLaneCompactToCanonicalOverlay(
       fast.latestObservedLedger,
       fast.latestObservedHash,
       promotedAt,
-      canonicalStatus,
+      statuses.syncState,
       overlay.epoch_id,
     ),
     db.prepare(
@@ -260,7 +261,7 @@ export async function promoteFastLaneCompactToCanonicalOverlay(
            error_message = NULL,
            updated_at = ?2
        WHERE network = 'devnet'`,
-    ).bind(canonicalStatus, promotedAt, lagLedgers),
+    ).bind(statuses.incrementalCollector, promotedAt, lagLedgers),
     db.prepare(
       `UPDATE network_epochs
        SET last_ledger_index = ?1,
