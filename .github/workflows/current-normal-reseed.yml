@@ -1,0 +1,123 @@
+name: Current normal Queue reseed
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: current-normal-queue-reseed-exact-control
+  cancel-in-progress: false
+
+env:
+  QUALIFICATION_ISSUE: '995'
+  QUEUE_ID: 2ae398f2edbf43749e45cd7ede77c6cd
+  DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
+  SCRIPT_NAME: xrpl-lending-monitor
+  EXPECTED_VERSION_ID: 6c9af7da-863e-4afa-8711-fd28d18bc05e
+  EXPECTED_FAST_LEDGER: '4086707'
+  EXPECTED_LATEST_SLOT: '1788491160000'
+  NORMAL_CRON: queue-catch-up
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+jobs:
+  reseed:
+    if: >-
+      github.event.issue.number == 995 &&
+      github.event.comment.user.login == 'badjoke-lab' &&
+      github.event.comment.body == '/current-normal-reseed'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Re-prove exact stalled normal state
+        id: prove
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p current-normal-reseed
+          auth="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          api="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          queue="${api}/queues/${QUEUE_ID}"
+          d1="${api}/d1/database/${DATABASE_ID}/query"
+          worker="${api}/workers/scripts/${SCRIPT_NAME}"
+
+          curl -fsS -H "$auth" "$queue" | tee current-normal-reseed/queue-before.json \
+            | jq -e '.success == true and .result.settings.delivery_paused == false' >/dev/null
+          curl -fsS -H "$auth" "$worker/schedules" | tee current-normal-reseed/schedules-before.json \
+            | jq -e '.success == true and (.result.schedules | length) == 0' >/dev/null
+          curl -fsS -H "$auth" "$worker/deployments" | tee current-normal-reseed/deployments-before.json \
+            | jq -e --arg v "$EXPECTED_VERSION_ID" '.success == true and (.result.deployments[0].versions | length) == 1 and .result.deployments[0].versions[0].percentage == 100 and .result.deployments[0].versions[0].version_id == $v' >/dev/null
+
+          query() {
+            local sql="$1"
+            curl -fsS -X POST -H "$auth" -H 'Content-Type: application/json' "$d1" \
+              --data "$(jq -cn --arg sql "$sql" '{sql:$sql}')"
+          }
+
+          query "SELECT last_processed_ledger,status FROM fast_lane_shadow_state WHERE network='devnet'" \
+            | tee current-normal-reseed/fast-before.json \
+            | jq -e --argjson ledger "$EXPECTED_FAST_LEDGER" '.success == true and .result[0].results[0].last_processed_ledger == $ledger and .result[0].results[0].status == "behind"' >/dev/null
+
+          query "SELECT scheduled_time,status,error_message FROM fast_lane_queue_slots ORDER BY scheduled_time DESC LIMIT 1" \
+            | tee current-normal-reseed/latest-slot-before.json \
+            | jq -e --argjson slot "$EXPECTED_LATEST_SLOT" '.success == true and .result[0].results[0].scheduled_time == $slot and .result[0].results[0].status == "completed" and .result[0].results[0].error_message == null' >/dev/null
+
+          query "SELECT run_at,status,end_ledger_index,error_message FROM fast_lane_shadow_run_metrics WHERE network='devnet' ORDER BY run_at DESC LIMIT 1" \
+            | tee current-normal-reseed/metric-before.json \
+            | jq -e --argjson ledger "$EXPECTED_FAST_LEDGER" '.success == true and .result[0].results[0].status == "committed" and .result[0].results[0].end_ledger_index == $ledger and .result[0].results[0].error_message == null' >/dev/null
+
+          target=$(( (( $(date +%s) + 90 + 59 ) / 60) * 60 * 1000 ))
+          delay=$(( (target - $(date +%s%3N) + 999) / 1000 ))
+          test "$delay" -ge 30
+          test "$delay" -le 180
+          echo "target=$target" >> "$GITHUB_OUTPUT"
+          echo "delay=$delay" >> "$GITHUB_OUTPUT"
+
+      - name: Send exactly one normal catch-up seed
+        env:
+          TARGET_SCHEDULED_TIME: ${{ steps.prove.outputs.target }}
+          DELAY_SECONDS: ${{ steps.prove.outputs.delay }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          auth="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          base="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/queues/${QUEUE_ID}"
+          jq -n \
+            --argjson scheduled "$TARGET_SCHEDULED_TIME" \
+            --arg cron "$NORMAL_CRON" \
+            --arg enqueuedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{body:{scheduledTime:$scheduled,cron:$cron,enqueuedAt:$enqueuedAt},content_type:"json",delay_seconds:'"$DELAY_SECONDS"'}' \
+            > current-normal-reseed/request.json
+          curl -fsS -X POST -H "$auth" -H 'Content-Type: application/json' "$base/messages" \
+            --data-binary @current-normal-reseed/request.json \
+            | tee current-normal-reseed/response.json \
+            | jq -e '.success == true' >/dev/null
+
+      - name: Verify Queue remains normally active
+        env:
+          TARGET_SCHEDULED_TIME: ${{ steps.prove.outputs.target }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          auth="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          base="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/queues/${QUEUE_ID}"
+          curl -fsS -H "$auth" "$base" | tee current-normal-reseed/queue-after.json \
+            | jq -e '.success == true and .result.settings.delivery_paused == false' >/dev/null
+          jq -n \
+            --argjson scheduled "$TARGET_SCHEDULED_TIME" \
+            --arg cron "$NORMAL_CRON" \
+            '{passed:true,productionMutation:true,seedSent:true,scheduledTime:$scheduled,cron:$cron,queueDeliveryPaused:false,d1Mutation:false,cronChanged:false,workerDeploymentMutation:false}' \
+            > current-normal-reseed/result.json
+          cat current-normal-reseed/result.json
+
+      - name: Upload reseed evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: current-normal-reseed
+          path: current-normal-reseed
+          if-no-files-found: warn
+          retention-days: 30
