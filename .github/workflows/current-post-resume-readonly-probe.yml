@@ -45,6 +45,12 @@ jobs:
           curl -fsS -H "$auth" "$worker/schedules" | tee current-post-resume-probe/schedules.json >/dev/null
           curl -fsS -H "$auth" "$worker/deployments" | tee current-post-resume-probe/deployments.json >/dev/null
 
+          # Cloudflare Queue peek is non-leasing and non-consuming: it returns queued
+          # messages without acknowledging, retrying, purging, or otherwise mutating them.
+          curl -fsS -X POST -H "$auth" -H 'Content-Type: application/json' \
+            "$queue/messages/peek" --data '{"batch_size":10}' \
+            | tee current-post-resume-probe/queue-peek.json >/dev/null
+
           query() {
             local sql="$1"
             curl -fsS -X POST -H "$auth" -H 'Content-Type: application/json' "$d1" \
@@ -53,14 +59,15 @@ jobs:
 
           query "SELECT epoch_id,last_processed_ledger,latest_observed_ledger,status,updated_at FROM fast_lane_shadow_state WHERE network='devnet'" \
             | tee current-post-resume-probe/fast.json >/dev/null
-          query "SELECT run_at,status,start_ledger_index,end_ledger_index,error_message FROM fast_lane_shadow_run_metrics WHERE network='devnet' ORDER BY run_at DESC LIMIT 3" \
+          query "SELECT run_at,status,start_ledger_index,end_ledger_index,error_message FROM fast_lane_shadow_run_metrics WHERE network='devnet' ORDER BY run_at DESC LIMIT 6" \
             | tee current-post-resume-probe/metrics.json >/dev/null
-          query "SELECT scheduled_time,status,message_id,started_at,completed_at,next_scheduled_time,next_cron,error_message,updated_at FROM fast_lane_queue_slots ORDER BY scheduled_time DESC LIMIT 8" \
+          query "SELECT scheduled_time,status,message_id,started_at,completed_at,next_scheduled_time,next_cron,error_message,updated_at FROM fast_lane_queue_slots ORDER BY scheduled_time DESC LIMIT 16" \
             | tee current-post-resume-probe/slots.json >/dev/null
 
           jq -e '.success == true and .result.settings.delivery_paused == false' current-post-resume-probe/queue.json >/dev/null
           jq -e '.success == true and (.result.schedules | length) == 0' current-post-resume-probe/schedules.json >/dev/null
           jq -e --arg v "$EXPECTED_VERSION_ID" '.success == true and (.result.deployments[0].versions | length) == 1 and .result.deployments[0].versions[0].percentage == 100 and .result.deployments[0].versions[0].version_id == $v' current-post-resume-probe/deployments.json >/dev/null
+          jq -e '.success == true and ((.result.messages // .messages // []) | type == "array")' current-post-resume-probe/queue-peek.json >/dev/null
 
           ledger="$(jq -r '.result[0].results[0].last_processed_ledger' current-post-resume-probe/fast.json)"
           latest="$(jq -r '.result[0].results[0].latest_observed_ledger' current-post-resume-probe/fast.json)"
@@ -71,6 +78,7 @@ jobs:
           slot_status="$(jq -r '.result[0].results[0].status' current-post-resume-probe/slots.json)"
           slot_time="$(jq -r '.result[0].results[0].scheduled_time' current-post-resume-probe/slots.json)"
           slot_error="$(jq -r '.result[0].results[0].error_message' current-post-resume-probe/slots.json)"
+          peek_count="$(jq -r '(.result.messages // .messages // []) | length' current-post-resume-probe/queue-peek.json)"
           advanced=false
           if [ "$ledger" -gt "$BASELINE_LEDGER" ]; then advanced=true; fi
 
@@ -85,8 +93,9 @@ jobs:
             --arg slotStatus "$slot_status" \
             --argjson slotTime "$slot_time" \
             --arg slotError "$slot_error" \
+            --argjson peekCount "$peek_count" \
             --argjson advanced "$advanced" \
-            '{passed:true,productionMutation:false,queueDeliveryPaused:false,baselineLedger:$baseline,lastProcessedLedger:$ledger,latestObservedLedger:$latest,fastLaneStatus:$status,advanced:$advanced,latestMetricStatus:$metricStatus,latestMetricEndLedger:$metricEnd,latestMetricError:(if $metricError=="null" then null else $metricError end),latestSlotStatus:$slotStatus,latestSlotScheduledTime:$slotTime,latestSlotError:(if $slotError=="null" then null else $slotError end)}' \
+            '{passed:true,productionMutation:false,queuePeekNonLeasing:true,queueDeliveryPaused:false,baselineLedger:$baseline,lastProcessedLedger:$ledger,latestObservedLedger:$latest,fastLaneStatus:$status,advanced:$advanced,queuePeekCount:$peekCount,latestMetricStatus:$metricStatus,latestMetricEndLedger:$metricEnd,latestMetricError:(if $metricError=="null" then null else $metricError end),latestSlotStatus:$slotStatus,latestSlotScheduledTime:$slotTime,latestSlotError:(if $slotError=="null" then null else $slotError end)}' \
             > current-post-resume-probe/result.json
 
           cat current-post-resume-probe/result.json
