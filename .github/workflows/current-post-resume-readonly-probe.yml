@@ -42,6 +42,7 @@ jobs:
           worker="${api}/workers/scripts/${SCRIPT_NAME}"
 
           curl -fsS -H "$auth" "$queue" | tee current-post-resume-probe/queue.json >/dev/null
+          curl -fsS -H "$auth" "$queue/metrics" | tee current-post-resume-probe/queue-metrics.json >/dev/null
           curl -fsS -H "$auth" "$worker/schedules" | tee current-post-resume-probe/schedules.json >/dev/null
           curl -fsS -H "$auth" "$worker/deployments" | tee current-post-resume-probe/deployments.json >/dev/null
 
@@ -65,6 +66,7 @@ jobs:
             | tee current-post-resume-probe/slots.json >/dev/null
 
           jq -e '.success == true and .result.settings.delivery_paused == false' current-post-resume-probe/queue.json >/dev/null
+          jq -e '.success == true and (.result.backlog_count | type == "number")' current-post-resume-probe/queue-metrics.json >/dev/null
           jq -e '.success == true and (.result.schedules | length) == 0' current-post-resume-probe/schedules.json >/dev/null
           jq -e --arg v "$EXPECTED_VERSION_ID" '.success == true and (.result.deployments[0].versions | length) == 1 and .result.deployments[0].versions[0].percentage == 100 and .result.deployments[0].versions[0].version_id == $v' current-post-resume-probe/deployments.json >/dev/null
           jq -e '.success == true and ((.result.messages // .messages // []) | type == "array")' current-post-resume-probe/queue-peek.json >/dev/null
@@ -79,6 +81,9 @@ jobs:
           slot_time="$(jq -r '.result[0].results[0].scheduled_time' current-post-resume-probe/slots.json)"
           slot_error="$(jq -r '.result[0].results[0].error_message' current-post-resume-probe/slots.json)"
           peek_count="$(jq -r '(.result.messages // .messages // []) | length' current-post-resume-probe/queue-peek.json)"
+          backlog_count="$(jq -r '.result.backlog_count' current-post-resume-probe/queue-metrics.json)"
+          backlog_bytes="$(jq -r '.result.backlog_bytes' current-post-resume-probe/queue-metrics.json)"
+          oldest_message_timestamp_ms="$(jq -r '.result.oldest_message_timestamp_ms' current-post-resume-probe/queue-metrics.json)"
           advanced=false
           if [ "$ledger" -gt "$BASELINE_LEDGER" ]; then advanced=true; fi
 
@@ -94,8 +99,11 @@ jobs:
             --argjson slotTime "$slot_time" \
             --arg slotError "$slot_error" \
             --argjson peekCount "$peek_count" \
+            --argjson backlogCount "$backlog_count" \
+            --argjson backlogBytes "$backlog_bytes" \
+            --argjson oldestMessageTimestampMs "$oldest_message_timestamp_ms" \
             --argjson advanced "$advanced" \
-            '{passed:true,productionMutation:false,queuePeekNonLeasing:true,queueDeliveryPaused:false,baselineLedger:$baseline,lastProcessedLedger:$ledger,latestObservedLedger:$latest,fastLaneStatus:$status,advanced:$advanced,queuePeekCount:$peekCount,latestMetricStatus:$metricStatus,latestMetricEndLedger:$metricEnd,latestMetricError:(if $metricError=="null" then null else $metricError end),latestSlotStatus:$slotStatus,latestSlotScheduledTime:$slotTime,latestSlotError:(if $slotError=="null" then null else $slotError end)}' \
+            '{passed:true,productionMutation:false,queuePeekNonLeasing:true,queueDeliveryPaused:false,baselineLedger:$baseline,lastProcessedLedger:$ledger,latestObservedLedger:$latest,fastLaneStatus:$status,advanced:$advanced,queueBacklogCount:$backlogCount,queueBacklogBytes:$backlogBytes,queueOldestMessageTimestampMs:$oldestMessageTimestampMs,queuePeekCount:$peekCount,latestMetricStatus:$metricStatus,latestMetricEndLedger:$metricEnd,latestMetricError:(if $metricError=="null" then null else $metricError end),latestSlotStatus:$slotStatus,latestSlotScheduledTime:$slotTime,latestSlotError:(if $slotError=="null" then null else $slotError end)}' \
             > current-post-resume-probe/result.json
 
           cat current-post-resume-probe/result.json
