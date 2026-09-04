@@ -1,0 +1,85 @@
+name: Current Queue telemetry read-only probe
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: current-queue-telemetry-readonly-probe
+  cancel-in-progress: false
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  SCRIPT_NAME: xrpl-lending-monitor
+  WINDOW_START_MS: '1788491100000'
+
+jobs:
+  probe:
+    if: >-
+      github.event.issue.number == 995 &&
+      github.event.comment.user.login == 'badjoke-lab' &&
+      github.event.comment.body == '/current-queue-telemetry-probe'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Query Workers Observability only
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p current-queue-telemetry-probe
+          auth="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          api="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/observability/telemetry"
+          now_ms="$(( $(date +%s) * 1000 ))"
+
+          # These POST endpoints are query/read operations in Cloudflare Workers
+          # Observability. No Queue ack/retry/purge/enqueue, Worker deploy/config,
+          # D1 mutation, or saved observability query is performed.
+          curl -fsS -X POST -H "$auth" -H 'Content-Type: application/json' \
+            "$api/keys" \
+            --data "$(jq -cn --argjson to "$now_ms" '{datasets:[],limit:1000,to:$to,needle:{value:"fast_lane_queue",isRegex:false,matchCase:false}}')" \
+            | tee current-queue-telemetry-probe/keys.json >/dev/null
+
+          body="$(jq -cn \
+            --arg service "$SCRIPT_NAME" \
+            --argjson from "$WINDOW_START_MS" \
+            --argjson to "$now_ms" \
+            '{
+              queryId:"current-queue-telemetry-readonly-probe",
+              timeframe:{from:$from,to:$to},
+              dry:true,
+              view:"events",
+              limit:500,
+              parameters:{
+                datasets:[],
+                filterCombination:"and",
+                filters:[{kind:"filter",key:"$metadata.service",operation:"eq",type:"string",value:$service}],
+                needle:{value:"fast_lane_queue",isRegex:false,matchCase:false}
+              }
+            }')"
+          curl -fsS -X POST -H "$auth" -H 'Content-Type: application/json' \
+            "$api/query" --data "$body" \
+            | tee current-queue-telemetry-probe/events.json >/dev/null
+
+          jq -e '.success == true' current-queue-telemetry-probe/keys.json >/dev/null
+          jq -e '.success == true' current-queue-telemetry-probe/events.json >/dev/null
+
+          jq -n \
+            --argjson from "$WINDOW_START_MS" \
+            --argjson to "$now_ms" \
+            --arg service "$SCRIPT_NAME" \
+            --argjson keyCount "$(jq '.result | length' current-queue-telemetry-probe/keys.json)" \
+            --argjson eventCount "$(jq '(.result.events // []) | length' current-queue-telemetry-probe/events.json)" \
+            '{passed:true,productionMutation:false,observabilityQueryDryRun:true,service:$service,timeframe:{from:$from,to:$to},matchingKeyCount:$keyCount,eventCount:$eventCount}' \
+            | tee current-queue-telemetry-probe/result.json
+
+      - name: Upload read-only telemetry evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: current-queue-telemetry-readonly-probe
+          path: current-queue-telemetry-probe
+          if-no-files-found: error
+          retention-days: 30
