@@ -1,0 +1,159 @@
+name: Current normal Queue resume
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: current-normal-queue-resume-exact-control
+  cancel-in-progress: false
+
+env:
+  QUALIFICATION_ISSUE: '995'
+  QUEUE_ID: 2ae398f2edbf43749e45cd7ede77c6cd
+  DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
+  SCRIPT_NAME: xrpl-lending-monitor
+  EXPECTED_VERSION_ID: 6c9af7da-863e-4afa-8711-fd28d18bc05e
+  EXPECTED_FAST_LEDGER: '4086707'
+  EXPECTED_PROOF_SLOT: '1788491160000'
+  EXPECTED_SUCCESSOR_TIME: '1788505560000'
+  EXPECTED_SUCCESSOR_CRON: queue-catch-up
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+jobs:
+  resume:
+    if: >-
+      github.event.issue.number == 995 &&
+      github.event.comment.user.login == 'badjoke-lab' &&
+      github.event.comment.body == '/current-normal-queue-resume'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out exact main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Re-prove exact successful proof state
+        id: before
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p current-normal-queue-resume
+          auth="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          api="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          queue="${api}/queues/${QUEUE_ID}"
+          d1="${api}/d1/database/${DATABASE_ID}/query"
+          worker="${api}/workers/scripts/${SCRIPT_NAME}"
+
+          curl -fsS -H "$auth" "$queue" | tee current-normal-queue-resume/queue-before.json \
+            | jq -e '.success == true and .result.settings.delivery_paused == true' >/dev/null
+          curl -fsS -H "$auth" "$worker/schedules" | tee current-normal-queue-resume/schedules-before.json \
+            | jq -e '.success == true and (.result.schedules | length) == 0' >/dev/null
+          curl -fsS -H "$auth" "$worker/deployments" | tee current-normal-queue-resume/deployments-before.json \
+            | jq -e --arg v "$EXPECTED_VERSION_ID" '.success == true and (.result.deployments[0].versions | length) == 1 and .result.deployments[0].versions[0].percentage == 100 and .result.deployments[0].versions[0].version_id == $v' >/dev/null
+
+          query() {
+            local sql="$1"
+            curl -fsS -X POST -H "$auth" -H 'Content-Type: application/json' "$d1" \
+              --data "$(jq -cn --arg sql "$sql" '{sql:$sql}')"
+          }
+
+          query "SELECT epoch_id,last_processed_ledger,latest_observed_ledger,status FROM fast_lane_shadow_state WHERE network='devnet'" \
+            | tee current-normal-queue-resume/fast-before.json \
+            | jq -e --argjson ledger "$EXPECTED_FAST_LEDGER" '.success == true and .result[0].success == true and .result[0].results[0].last_processed_ledger == $ledger and .result[0].results[0].latest_observed_ledger > $ledger and .result[0].results[0].status == "behind"' >/dev/null
+
+          query "SELECT run_at,status,end_ledger_index,error_message FROM fast_lane_shadow_run_metrics WHERE network='devnet' ORDER BY run_at DESC LIMIT 1" \
+            | tee current-normal-queue-resume/metric-before.json \
+            | jq -e --argjson ledger "$EXPECTED_FAST_LEDGER" '.success == true and .result[0].success == true and .result[0].results[0].status == "committed" and .result[0].results[0].end_ledger_index == $ledger and .result[0].results[0].error_message == null' >/dev/null
+
+          query "SELECT scheduled_time,status,error_message,next_scheduled_time,next_cron FROM fast_lane_queue_slots WHERE scheduled_time=${EXPECTED_PROOF_SLOT} LIMIT 1" \
+            | tee current-normal-queue-resume/proof-slot-before.json \
+            | jq -e --argjson slot "$EXPECTED_PROOF_SLOT" --argjson next "$EXPECTED_SUCCESSOR_TIME" --arg cron "$EXPECTED_SUCCESSOR_CRON" '.success == true and .result[0].success == true and .result[0].results[0].scheduled_time == $slot and .result[0].results[0].status == "completed" and .result[0].results[0].error_message == null and .result[0].results[0].next_scheduled_time == $next and .result[0].results[0].next_cron == $cron' >/dev/null
+
+          query "SELECT COALESCE(SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END),0) AS pending, COALESCE(SUM(CASE WHEN status='processing' AND next_scheduled_time IS NULL AND unixepoch(updated_at) > unixepoch('now')-900 THEN 1 ELSE 0 END),0) AS live_unstaged, COALESCE(SUM(CASE WHEN status='processing' AND next_scheduled_time IS NOT NULL THEN 1 ELSE 0 END),0) AS staged_successor FROM fast_lane_queue_slots" \
+            | tee current-normal-queue-resume/slots-before.json \
+            | jq -e '.success == true and .result[0].success == true and .result[0].results[0].pending == 0 and .result[0].results[0].live_unstaged == 0 and .result[0].results[0].staged_successor == 0' >/dev/null
+
+          db_before="$(curl -fsS -H "$auth" "${api}/d1/database/${DATABASE_ID}" | jq -r '.result.file_size')"
+          test "$db_before" -gt 0
+          echo "db_before=$db_before" >> "$GITHUB_OUTPUT"
+
+      - name: Resume Queue delivery only
+        shell: bash
+        run: |
+          set -euo pipefail
+          auth="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          queue="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/queues/${QUEUE_ID}"
+          curl -fsS -X PATCH -H "$auth" -H 'Content-Type: application/json' "$queue" \
+            --data '{"settings":{"delivery_paused":false}}' \
+            | tee current-normal-queue-resume/resume-response.json \
+            | jq -e '.success == true and .result.settings.delivery_paused == false' >/dev/null
+
+      - name: Verify normal Queue state without side mutations
+        shell: bash
+        env:
+          DB_BEFORE: ${{ steps.before.outputs.db_before }}
+        run: |
+          set -euo pipefail
+          sleep 3
+          auth="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          api="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          queue="${api}/queues/${QUEUE_ID}"
+          d1="${api}/d1/database/${DATABASE_ID}/query"
+          worker="${api}/workers/scripts/${SCRIPT_NAME}"
+
+          curl -fsS -H "$auth" "$queue" | tee current-normal-queue-resume/queue-after.json \
+            | jq -e '.success == true and .result.settings.delivery_paused == false' >/dev/null
+          curl -fsS -H "$auth" "$worker/schedules" | tee current-normal-queue-resume/schedules-after.json \
+            | jq -e '.success == true and (.result.schedules | length) == 0' >/dev/null
+          curl -fsS -H "$auth" "$worker/deployments" | tee current-normal-queue-resume/deployments-after.json \
+            | jq -e --arg v "$EXPECTED_VERSION_ID" '.success == true and (.result.deployments[0].versions | length) == 1 and .result.deployments[0].versions[0].percentage == 100 and .result.deployments[0].versions[0].version_id == $v' >/dev/null
+
+          query() {
+            local sql="$1"
+            curl -fsS -X POST -H "$auth" -H 'Content-Type: application/json' "$d1" \
+              --data "$(jq -cn --arg sql "$sql" '{sql:$sql}')"
+          }
+          query "SELECT last_processed_ledger,status FROM fast_lane_shadow_state WHERE network='devnet'" \
+            | tee current-normal-queue-resume/fast-after.json \
+            | jq -e --argjson ledger "$EXPECTED_FAST_LEDGER" '.success == true and .result[0].results[0].last_processed_ledger == $ledger and .result[0].results[0].status == "behind"' >/dev/null
+          query "SELECT scheduled_time,status,error_message,next_scheduled_time,next_cron FROM fast_lane_queue_slots WHERE scheduled_time=${EXPECTED_PROOF_SLOT} LIMIT 1" \
+            | tee current-normal-queue-resume/proof-slot-after.json \
+            | jq -e --argjson next "$EXPECTED_SUCCESSOR_TIME" --arg cron "$EXPECTED_SUCCESSOR_CRON" '.success == true and .result[0].results[0].status == "completed" and .result[0].results[0].error_message == null and .result[0].results[0].next_scheduled_time == $next and .result[0].results[0].next_cron == $cron' >/dev/null
+
+          db_after="$(curl -fsS -H "$auth" "${api}/d1/database/${DATABASE_ID}" | jq -r '.result.file_size')"
+          test "$db_after" = "$DB_BEFORE"
+          jq -n \
+            --arg version "$EXPECTED_VERSION_ID" \
+            --argjson fastLedger "$EXPECTED_FAST_LEDGER" \
+            --argjson nextScheduledTime "$EXPECTED_SUCCESSOR_TIME" \
+            --arg nextCron "$EXPECTED_SUCCESSOR_CRON" \
+            --argjson databaseSize "$db_after" \
+            '{passed:true,queueResumed:true,queueDeliveryPaused:false,workerVersion:$version,fastLedger:$fastLedger,nextScheduledTime:$nextScheduledTime,nextCron:$nextCron,cronChanged:false,d1Mutation:false,workerDeploymentMutation:false,databaseSize:$databaseSize}' \
+            > current-normal-queue-resume/result.json
+
+      - name: Re-pause Queue if post-check failed
+        if: failure()
+        shell: bash
+        run: |
+          set -euo pipefail
+          auth="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          queue="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/queues/${QUEUE_ID}"
+          curl -fsS -X PATCH -H "$auth" -H 'Content-Type: application/json' "$queue" \
+            --data '{"settings":{"delivery_paused":true}}' >/dev/null || true
+
+      - name: Upload resume evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: current-normal-queue-resume
+          path: current-normal-queue-resume
+          if-no-files-found: warn
+          retention-days: 30
