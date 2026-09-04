@@ -1,0 +1,75 @@
+name: Current D1 schema read-only probe
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: current-d1-schema-readonly-probe
+  cancel-in-progress: false
+
+env:
+  DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+jobs:
+  probe:
+    if: >-
+      github.event.issue.number == 995 &&
+      github.event.comment.user.login == 'badjoke-lab' &&
+      github.event.comment.body == '/current-d1-schema-probe'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Read production D1 schema only
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p current-d1-schema-probe
+          auth="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          d1="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database/${DATABASE_ID}/query"
+
+          query() {
+            local sql="$1"
+            curl -fsS -X POST -H "$auth" -H 'Content-Type: application/json' "$d1" \
+              --data "$(jq -cn --arg sql "$sql" '{sql:$sql}')"
+          }
+
+          query "SELECT type,name,tbl_name,sql FROM sqlite_master WHERE tbl_name IN ('fast_lane_queue_slots','fast_lane_shadow_state','fast_lane_shadow_run_metrics') OR name IN ('fast_lane_queue_slots','fast_lane_shadow_state','fast_lane_shadow_run_metrics') ORDER BY tbl_name,type,name" \
+            | tee current-d1-schema-probe/schema.json >/dev/null
+          query "PRAGMA table_info(fast_lane_queue_slots)" \
+            | tee current-d1-schema-probe/queue-slot-columns.json >/dev/null
+          query "PRAGMA table_info(fast_lane_shadow_state)" \
+            | tee current-d1-schema-probe/shadow-state-columns.json >/dev/null
+          query "SELECT scheduled_time,status,message_id,started_at,completed_at,next_scheduled_time,next_cron,error_message,updated_at FROM fast_lane_queue_slots ORDER BY scheduled_time DESC LIMIT 24" \
+            | tee current-d1-schema-probe/slots.json >/dev/null
+          query "SELECT network,epoch_id,last_processed_ledger,latest_observed_ledger,status,updated_at FROM fast_lane_shadow_state WHERE network='devnet'" \
+            | tee current-d1-schema-probe/state.json >/dev/null
+
+          for file in schema queue-slot-columns shadow-state-columns slots state; do
+            jq -e '.success == true' "current-d1-schema-probe/${file}.json" >/dev/null
+          done
+
+          slot_sql="$(jq -r '.result[0].results[] | select(.type=="table" and .name=="fast_lane_queue_slots") | .sql' current-d1-schema-probe/schema.json)"
+          state_sql="$(jq -r '.result[0].results[] | select(.type=="table" and .name=="fast_lane_shadow_state") | .sql' current-d1-schema-probe/schema.json)"
+          jq -n \
+            --arg slotSql "$slot_sql" \
+            --arg stateSql "$state_sql" \
+            --arg latestSlotStatus "$(jq -r '.result[0].results[0].status' current-d1-schema-probe/slots.json)" \
+            --argjson latestSlotTime "$(jq -r '.result[0].results[0].scheduled_time' current-d1-schema-probe/slots.json)" \
+            --arg stateStatus "$(jq -r '.result[0].results[0].status' current-d1-schema-probe/state.json)" \
+            --argjson ledger "$(jq -r '.result[0].results[0].last_processed_ledger' current-d1-schema-probe/state.json)" \
+            '{passed:true,productionMutation:false,queueSlotCreateSql:$slotSql,shadowStateCreateSql:$stateSql,latestSlotStatus:$latestSlotStatus,latestSlotScheduledTime:$latestSlotTime,shadowStateStatus:$stateStatus,lastProcessedLedger:$ledger}' \
+            | tee current-d1-schema-probe/result.json
+
+      - name: Upload read-only schema evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: current-d1-schema-readonly-probe
+          path: current-d1-schema-probe
+          if-no-files-found: error
+          retention-days: 30
