@@ -1,0 +1,192 @@
+name: Current incremental status schema repair
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: current-incremental-status-schema-repair-exact-control
+  cancel-in-progress: false
+
+env:
+  QUALIFICATION_ISSUE: '995'
+  DATABASE_NAME: xrpl-lending-monitor
+  DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
+  QUEUE_ID: 2ae398f2edbf43749e45cd7ede77c6cd
+  EXPECTED_FAST_LEDGER: '4086686'
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+jobs:
+  repair:
+    if: >-
+      github.event.issue.number == 995 &&
+      github.event.comment.user.login == 'badjoke-lab' &&
+      github.event.comment.body == '/current-incremental-status-schema-repair-exact'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out exact main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Re-prove stopped production and exact schema drift
+        id: before
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p current-incremental-status-schema-repair
+          auth="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          queue_base="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/queues/${QUEUE_ID}"
+          curl -fsS -H "$auth" "$queue_base" | tee current-incremental-status-schema-repair/queue-before.json \
+            | jq -e '.success == true and .result.settings.delivery_paused == true' >/dev/null
+          curl -fsS -X POST -H "$auth" -H 'Content-Type: application/json' \
+            "$queue_base/messages/peek" -d '{"batch_size":2}' \
+            | tee current-incremental-status-schema-repair/peek-before.json \
+            | jq -e '.success == true and ((.result.messages // .result // []) | length) == 0' >/dev/null
+
+          runq() {
+            pnpm exec wrangler d1 execute "$DATABASE_NAME" --remote --command "$1" --json
+          }
+
+          runq "SELECT last_processed_ledger FROM fast_lane_shadow_state WHERE network='devnet'" \
+            > current-incremental-status-schema-repair/cursor-before.json
+          fast_ledger="$(jq -r '.[0].results[0].last_processed_ledger' current-incremental-status-schema-repair/cursor-before.json)"
+          test "$fast_ledger" = "$EXPECTED_FAST_LEDGER"
+
+          runq "SELECT sql FROM sqlite_master WHERE type='table' AND name='incremental_collector_state'" \
+            > current-incremental-status-schema-repair/schema-before.json
+          schema_before="$(jq -r '.[0].results[0].sql' current-incremental-status-schema-repair/schema-before.json)"
+          test -n "$schema_before" && test "$schema_before" != null
+          grep -F "status IN ('uninitialized', 'healthy', 'stale', 'error', 'reset_suspected')" <<<"$schema_before" >/dev/null
+          if grep -F "'behind'" <<<"$schema_before" >/dev/null; then
+            echo 'production schema already contains behind; refusing repair' >&2
+            exit 1
+          fi
+          if grep -F "'awaiting_initialization'" <<<"$schema_before" >/dev/null; then
+            echo 'production schema already contains awaiting_initialization; refusing repair' >&2
+            exit 1
+          fi
+
+          runq "SELECT COUNT(*) AS n FROM incremental_collector_state" \
+            > current-incremental-status-schema-repair/count-before.json
+          test "$(jq -r '.[0].results[0].n' current-incremental-status-schema-repair/count-before.json)" = 1
+
+          runq "SELECT COUNT(*) AS n FROM sqlite_master WHERE tbl_name='incremental_collector_state' AND type IN ('trigger','index') AND sql IS NOT NULL" \
+            > current-incremental-status-schema-repair/dependents-before.json
+          test "$(jq -r '.[0].results[0].n' current-incremental-status-schema-repair/dependents-before.json)" = 0
+
+          runq "SELECT json_object('network',network,'status',status,'last_attempt_at',last_attempt_at,'last_success_at',last_success_at,'consecutive_failures',consecutive_failures,'lag_ledgers',lag_ledgers,'endpoint',endpoint,'last_run_duration_ms',last_run_duration_ms,'last_rpc_requests',last_rpc_requests,'last_endpoint_attempts',last_endpoint_attempts,'last_ledgers_processed',last_ledgers_processed,'last_inspected_transactions',last_inspected_transactions,'last_lending_transactions',last_lending_transactions,'last_estimated_rows',last_estimated_rows,'last_estimated_statements',last_estimated_statements,'last_overlay_mutations',last_overlay_mutations,'error_code',error_code,'error_message',error_message,'created_at',created_at,'updated_at',updated_at,'last_persistence_batch_results',last_persistence_batch_results,'last_persistence_statements',last_persistence_statements,'last_persistence_rows_read',last_persistence_rows_read,'last_persistence_rows_written',last_persistence_rows_written) AS row_json FROM incremental_collector_state WHERE network='devnet'" \
+            > current-incremental-status-schema-repair/row-before.json
+          jq -r '.[0].results[0].row_json' current-incremental-status-schema-repair/row-before.json \
+            > current-incremental-status-schema-repair/row-before.txt
+
+      - name: Build exact replacement table and prove copied row
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm exec wrangler d1 execute "$DATABASE_NAME" --remote --command \
+            "CREATE TABLE incremental_collector_state_contract_repair (network TEXT PRIMARY KEY CHECK (network = 'devnet'), status TEXT NOT NULL CHECK (status IN ('uninitialized', 'awaiting_initialization', 'healthy', 'behind', 'stale', 'error', 'reset_suspected')), last_attempt_at TEXT, last_success_at TEXT, consecutive_failures INTEGER NOT NULL DEFAULT 0 CHECK (consecutive_failures >= 0), lag_ledgers INTEGER CHECK (lag_ledgers IS NULL OR lag_ledgers >= 0), endpoint TEXT, last_run_duration_ms INTEGER CHECK (last_run_duration_ms IS NULL OR last_run_duration_ms >= 0), last_rpc_requests INTEGER NOT NULL DEFAULT 0 CHECK (last_rpc_requests >= 0), last_endpoint_attempts INTEGER NOT NULL DEFAULT 0 CHECK (last_endpoint_attempts >= 0), last_ledgers_processed INTEGER NOT NULL DEFAULT 0 CHECK (last_ledgers_processed >= 0), last_inspected_transactions INTEGER NOT NULL DEFAULT 0 CHECK (last_inspected_transactions >= 0), last_lending_transactions INTEGER NOT NULL DEFAULT 0 CHECK (last_lending_transactions >= 0), last_estimated_rows INTEGER NOT NULL DEFAULT 0 CHECK (last_estimated_rows >= 0), last_estimated_statements INTEGER NOT NULL DEFAULT 0 CHECK (last_estimated_statements >= 0), last_overlay_mutations INTEGER NOT NULL DEFAULT 0 CHECK (last_overlay_mutations >= 0), error_code TEXT, error_message TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, last_persistence_batch_results INTEGER NOT NULL DEFAULT 0 CHECK (last_persistence_batch_results >= 0), last_persistence_statements INTEGER NOT NULL DEFAULT 0 CHECK (last_persistence_statements >= 0), last_persistence_rows_read INTEGER NOT NULL DEFAULT 0 CHECK (last_persistence_rows_read >= 0), last_persistence_rows_written INTEGER NOT NULL DEFAULT 0 CHECK (last_persistence_rows_written >= 0))" --json \
+            > current-incremental-status-schema-repair/create-repair-table.json
+
+          pnpm exec wrangler d1 execute "$DATABASE_NAME" --remote --command \
+            "INSERT INTO incremental_collector_state_contract_repair SELECT * FROM incremental_collector_state" --json \
+            > current-incremental-status-schema-repair/copy-row.json
+
+          pnpm exec wrangler d1 execute "$DATABASE_NAME" --remote --command \
+            "SELECT json_object('network',network,'status',status,'last_attempt_at',last_attempt_at,'last_success_at',last_success_at,'consecutive_failures',consecutive_failures,'lag_ledgers',lag_ledgers,'endpoint',endpoint,'last_run_duration_ms',last_run_duration_ms,'last_rpc_requests',last_rpc_requests,'last_endpoint_attempts',last_endpoint_attempts,'last_ledgers_processed',last_ledgers_processed,'last_inspected_transactions',last_inspected_transactions,'last_lending_transactions',last_lending_transactions,'last_estimated_rows',last_estimated_rows,'last_estimated_statements',last_estimated_statements,'last_overlay_mutations',last_overlay_mutations,'error_code',error_code,'error_message',error_message,'created_at',created_at,'updated_at',updated_at,'last_persistence_batch_results',last_persistence_batch_results,'last_persistence_statements',last_persistence_statements,'last_persistence_rows_read',last_persistence_rows_read,'last_persistence_rows_written',last_persistence_rows_written) AS row_json FROM incremental_collector_state_contract_repair WHERE network='devnet'" --json \
+            > current-incremental-status-schema-repair/repair-row.json
+          jq -r '.[0].results[0].row_json' current-incremental-status-schema-repair/repair-row.json \
+            > current-incremental-status-schema-repair/repair-row.txt
+          cmp current-incremental-status-schema-repair/row-before.txt current-incremental-status-schema-repair/repair-row.txt
+
+      - name: Swap table names with immediate rollback on failure
+        shell: bash
+        run: |
+          set -euo pipefail
+          rollback_old=false
+          cleanup() {
+            rc=$?
+            if test "$rollback_old" = true; then
+              pnpm exec wrangler d1 execute "$DATABASE_NAME" --remote --command \
+                "ALTER TABLE incremental_collector_state_contract_backup RENAME TO incremental_collector_state" --json || true
+            fi
+            exit "$rc"
+          }
+          trap cleanup ERR
+          pnpm exec wrangler d1 execute "$DATABASE_NAME" --remote --command \
+            "ALTER TABLE incremental_collector_state RENAME TO incremental_collector_state_contract_backup" --json \
+            > current-incremental-status-schema-repair/rename-old.json
+          rollback_old=true
+          pnpm exec wrangler d1 execute "$DATABASE_NAME" --remote --command \
+            "ALTER TABLE incremental_collector_state_contract_repair RENAME TO incremental_collector_state" --json \
+            > current-incremental-status-schema-repair/rename-new.json
+          rollback_old=false
+          trap - ERR
+
+      - name: Prove canonical schema and row identity then remove backup
+        shell: bash
+        run: |
+          set -euo pipefail
+          runq() {
+            pnpm exec wrangler d1 execute "$DATABASE_NAME" --remote --command "$1" --json
+          }
+          runq "SELECT sql FROM sqlite_master WHERE type='table' AND name='incremental_collector_state'" \
+            > current-incremental-status-schema-repair/schema-after.json
+          schema_after="$(jq -r '.[0].results[0].sql' current-incremental-status-schema-repair/schema-after.json)"
+          grep -F "'awaiting_initialization'" <<<"$schema_after" >/dev/null
+          grep -F "'behind'" <<<"$schema_after" >/dev/null
+          grep -F "'reset_suspected'" <<<"$schema_after" >/dev/null
+
+          runq "SELECT json_object('network',network,'status',status,'last_attempt_at',last_attempt_at,'last_success_at',last_success_at,'consecutive_failures',consecutive_failures,'lag_ledgers',lag_ledgers,'endpoint',endpoint,'last_run_duration_ms',last_run_duration_ms,'last_rpc_requests',last_rpc_requests,'last_endpoint_attempts',last_endpoint_attempts,'last_ledgers_processed',last_ledgers_processed,'last_inspected_transactions',last_inspected_transactions,'last_lending_transactions',last_lending_transactions,'last_estimated_rows',last_estimated_rows,'last_estimated_statements',last_estimated_statements,'last_overlay_mutations',last_overlay_mutations,'error_code',error_code,'error_message',error_message,'created_at',created_at,'updated_at',updated_at,'last_persistence_batch_results',last_persistence_batch_results,'last_persistence_statements',last_persistence_statements,'last_persistence_rows_read',last_persistence_rows_read,'last_persistence_rows_written',last_persistence_rows_written) AS row_json FROM incremental_collector_state WHERE network='devnet'" \
+            > current-incremental-status-schema-repair/row-after.json
+          jq -r '.[0].results[0].row_json' current-incremental-status-schema-repair/row-after.json \
+            > current-incremental-status-schema-repair/row-after.txt
+          cmp current-incremental-status-schema-repair/row-before.txt current-incremental-status-schema-repair/row-after.txt
+
+          runq "SELECT last_processed_ledger FROM fast_lane_shadow_state WHERE network='devnet'" \
+            > current-incremental-status-schema-repair/cursor-after.json
+          test "$(jq -r '.[0].results[0].last_processed_ledger' current-incremental-status-schema-repair/cursor-after.json)" = "$EXPECTED_FAST_LEDGER"
+
+          runq "DROP TABLE incremental_collector_state_contract_backup" \
+            > current-incremental-status-schema-repair/drop-backup.json
+
+          auth="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          queue_base="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/queues/${QUEUE_ID}"
+          curl -fsS -H "$auth" "$queue_base" | tee current-incremental-status-schema-repair/queue-after.json \
+            | jq -e '.success == true and .result.settings.delivery_paused == true' >/dev/null
+          curl -fsS -X POST -H "$auth" -H 'Content-Type: application/json' \
+            "$queue_base/messages/peek" -d '{"batch_size":2}' \
+            | tee current-incremental-status-schema-repair/peek-after.json \
+            | jq -e '.success == true and ((.result.messages // .result // []) | length) == 0' >/dev/null
+          jq -n '{passed:true,productionMutation:true,rowChanged:false,queueResumed:false,queuePurged:false,cronChanged:false,oldStatusContract:5,newStatusContract:7}' \
+            > current-incremental-status-schema-repair/result.json
+
+      - name: Upload schema repair evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: current-incremental-status-schema-repair
+          path: current-incremental-status-schema-repair
+          if-no-files-found: warn
+          retention-days: 30
