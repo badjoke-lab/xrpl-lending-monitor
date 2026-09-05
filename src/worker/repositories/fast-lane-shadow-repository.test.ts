@@ -62,6 +62,14 @@ function plan(): FastLaneShadowWindowPlan {
   }
 }
 
+function behindPlan(): FastLaneShadowWindowPlan {
+  return {
+    ...plan(),
+    latestObservedLedger: 103,
+    latestObservedHash: 'D'.repeat(64),
+  }
+}
+
 function fakeDatabase() {
   const prepared: PreparedRecord[] = []
   const batches: number[][] = []
@@ -142,5 +150,22 @@ describe('fast-lane shadow persistence', () => {
     })).rejects.toThrow('does not begin after the expected cursor')
 
     expect(state.batches).toHaveLength(0)
+  })
+
+  it('uses the production shadow-state behind vocabulary while catch-up remains', async () => {
+    const state = fakeDatabase()
+
+    await commitFastLaneShadowWindow({
+      db: state.db,
+      plan: behindPlan(),
+      expectedPreviousLedger: 100,
+      expectedPreviousHash: 'P'.repeat(64),
+      processedAt: '2026-07-11T03:00:00.000Z',
+    })
+
+    const insert = state.prepared.find(({ sql }) => sql.includes('INSERT INTO fast_lane_shadow_state'))
+    const update = state.prepared.find(({ sql }) => sql.includes('UPDATE fast_lane_shadow_state'))
+    expect(insert?.values[5]).toBe('behind')
+    expect(update?.values[5]).toBe('behind')
   })
 })
