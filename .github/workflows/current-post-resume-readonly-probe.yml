@@ -60,16 +60,19 @@ jobs:
 
           query "SELECT epoch_id,last_processed_ledger,latest_observed_ledger,status,updated_at FROM fast_lane_shadow_state WHERE network='devnet'" \
             | tee current-post-resume-probe/fast.json >/dev/null
-          query "SELECT run_at,status,start_ledger_index,end_ledger_index,error_message FROM fast_lane_shadow_run_metrics WHERE network='devnet' ORDER BY run_at DESC LIMIT 6" \
+          query "SELECT run_at,status,start_ledger_index,end_ledger_index,latest_observed_ledger,lag_ledgers,ledgers_processed,lending_transactions,coalesced_object_rows,persistence_rows_read,persistence_rows_written,error_message FROM fast_lane_shadow_run_metrics WHERE network='devnet' ORDER BY run_at DESC LIMIT 6" \
             | tee current-post-resume-probe/metrics.json >/dev/null
           query "SELECT scheduled_time,status,message_id,started_at,completed_at,next_scheduled_time,next_cron,error_message,updated_at FROM fast_lane_queue_slots ORDER BY scheduled_time DESC LIMIT 16" \
             | tee current-post-resume-probe/slots.json >/dev/null
+          query "SELECT sql FROM sqlite_master WHERE type='table' AND name='incremental_collector_state'" \
+            | tee current-post-resume-probe/incremental-collector-state-schema.json >/dev/null
 
           jq -e '.success == true and .result.settings.delivery_paused == false' current-post-resume-probe/queue.json >/dev/null
           jq -e '.success == true and (.result.backlog_count | type == "number")' current-post-resume-probe/queue-metrics.json >/dev/null
           jq -e '.success == true and (.result.schedules | length) == 0' current-post-resume-probe/schedules.json >/dev/null
           jq -e --arg v "$EXPECTED_VERSION_ID" '.success == true and (.result.deployments[0].versions | length) == 1 and .result.deployments[0].versions[0].percentage == 100 and .result.deployments[0].versions[0].version_id == $v' current-post-resume-probe/deployments.json >/dev/null
           jq -e '.success == true and ((.result.messages // .messages // []) | type == "array")' current-post-resume-probe/queue-peek.json >/dev/null
+          jq -e '.success == true and (.result[0].results | length) == 1 and (.result[0].results[0].sql | type == "string")' current-post-resume-probe/incremental-collector-state-schema.json >/dev/null
 
           ledger="$(jq -r '.result[0].results[0].last_processed_ledger' current-post-resume-probe/fast.json)"
           latest="$(jq -r '.result[0].results[0].latest_observed_ledger' current-post-resume-probe/fast.json)"
@@ -84,6 +87,11 @@ jobs:
           backlog_count="$(jq -r '.result.backlog_count' current-post-resume-probe/queue-metrics.json)"
           backlog_bytes="$(jq -r '.result.backlog_bytes' current-post-resume-probe/queue-metrics.json)"
           oldest_message_timestamp_ms="$(jq -r '.result.oldest_message_timestamp_ms' current-post-resume-probe/queue-metrics.json)"
+          incremental_status_schema="$(jq -r '.result[0].results[0].sql' current-post-resume-probe/incremental-collector-state-schema.json)"
+          incremental_status_allows_behind=false
+          if printf '%s' "$incremental_status_schema" | grep -Eq "status IN \\([^)]*'behind'"; then
+            incremental_status_allows_behind=true
+          fi
           advanced=false
           if [ "$ledger" -gt "$BASELINE_LEDGER" ]; then advanced=true; fi
 
@@ -102,8 +110,9 @@ jobs:
             --argjson backlogCount "$backlog_count" \
             --argjson backlogBytes "$backlog_bytes" \
             --argjson oldestMessageTimestampMs "$oldest_message_timestamp_ms" \
+            --argjson incrementalStatusAllowsBehind "$incremental_status_allows_behind" \
             --argjson advanced "$advanced" \
-            '{passed:true,productionMutation:false,queuePeekNonLeasing:true,queueDeliveryPaused:false,baselineLedger:$baseline,lastProcessedLedger:$ledger,latestObservedLedger:$latest,fastLaneStatus:$status,advanced:$advanced,queueBacklogCount:$backlogCount,queueBacklogBytes:$backlogBytes,queueOldestMessageTimestampMs:$oldestMessageTimestampMs,queuePeekCount:$peekCount,latestMetricStatus:$metricStatus,latestMetricEndLedger:$metricEnd,latestMetricError:(if $metricError=="null" then null else $metricError end),latestSlotStatus:$slotStatus,latestSlotScheduledTime:$slotTime,latestSlotError:(if $slotError=="null" then null else $slotError end)}' \
+            '{passed:true,productionMutation:false,queuePeekNonLeasing:true,queueDeliveryPaused:false,baselineLedger:$baseline,lastProcessedLedger:$ledger,latestObservedLedger:$latest,fastLaneStatus:$status,advanced:$advanced,queueBacklogCount:$backlogCount,queueBacklogBytes:$backlogBytes,queueOldestMessageTimestampMs:$oldestMessageTimestampMs,queuePeekCount:$peekCount,incrementalCollectorStatusAllowsBehind:$incrementalStatusAllowsBehind,latestMetricStatus:$metricStatus,latestMetricEndLedger:$metricEnd,latestMetricError:(if $metricError=="null" then null else $metricError end),latestSlotStatus:$slotStatus,latestSlotScheduledTime:$slotTime,latestSlotError:(if $slotError=="null" then null else $slotError end)}' \
             > current-post-resume-probe/result.json
 
           cat current-post-resume-probe/result.json
