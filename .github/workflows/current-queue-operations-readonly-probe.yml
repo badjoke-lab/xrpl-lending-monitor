@@ -36,7 +36,7 @@ jobs:
             --arg query "$query" \
             --arg accountTag "$CLOUDFLARE_ACCOUNT_ID" \
             --arg queueId "$QUEUE_ID" \
-            '{query:$query,variables:{accountTag:$accountTag,queueId:$queueId,datetimeStart:"2026-09-04",datetimeEnd:"2026-09-05"}}')"
+            '{query:$query,variables:{accountTag:$accountTag,queueId:$queueId,datetimeStart:"2026-09-04T00:00:00Z",datetimeEnd:"2026-09-05T23:59:59Z"}}')"
 
           http_code="$(curl -sS -o current-queue-operations-probe/graphql.json -w '%{http_code}' \
             -X POST \
@@ -58,7 +58,7 @@ jobs:
               passed:($httpStatus == "200" and ($errors|length) == 0),
               productionMutation:false,
               source:"Cloudflare GraphQL Analytics API / queueMessageOperationsAdaptiveGroups",
-              dateRange:{start:"2026-09-04",end:"2026-09-05"},
+              dateRange:{start:"2026-09-04T00:00:00Z",end:"2026-09-05T23:59:59Z"},
               httpStatus:$httpStatus,
               graphqlErrors:$errors,
               operationRows:$rows,
