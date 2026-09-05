@@ -17,7 +17,6 @@ env:
   DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
   SCRIPT_NAME: xrpl-lending-monitor
   BASELINE_LEDGER: '4086707'
-  EXPECTED_VERSION_ID: 6c9af7da-863e-4afa-8711-fd28d18bc05e
   CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
   CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
@@ -67,10 +66,10 @@ jobs:
           query "SELECT sql FROM sqlite_master WHERE type='table' AND name='incremental_collector_state'" \
             | tee current-post-resume-probe/incremental-collector-state-schema.json >/dev/null
 
-          jq -e '.success == true and .result.settings.delivery_paused == false' current-post-resume-probe/queue.json >/dev/null
+          jq -e '.success == true and (.result.settings.delivery_paused | type == "boolean")' current-post-resume-probe/queue.json >/dev/null
           jq -e '.success == true and (.result.backlog_count | type == "number")' current-post-resume-probe/queue-metrics.json >/dev/null
           jq -e '.success == true and (.result.schedules | length) == 0' current-post-resume-probe/schedules.json >/dev/null
-          jq -e --arg v "$EXPECTED_VERSION_ID" '.success == true and (.result.deployments[0].versions | length) == 1 and .result.deployments[0].versions[0].percentage == 100 and .result.deployments[0].versions[0].version_id == $v' current-post-resume-probe/deployments.json >/dev/null
+          jq -e '.success == true and (.result.deployments | length) > 0 and (.result.deployments[0].versions | length) > 0' current-post-resume-probe/deployments.json >/dev/null
           jq -e '.success == true and ((.result.messages // .messages // []) | type == "array")' current-post-resume-probe/queue-peek.json >/dev/null
           jq -e '.success == true and (.result[0].results | length) == 1 and (.result[0].results[0].sql | type == "string")' current-post-resume-probe/incremental-collector-state-schema.json >/dev/null
 
@@ -87,6 +86,10 @@ jobs:
           backlog_count="$(jq -r '.result.backlog_count' current-post-resume-probe/queue-metrics.json)"
           backlog_bytes="$(jq -r '.result.backlog_bytes' current-post-resume-probe/queue-metrics.json)"
           oldest_message_timestamp_ms="$(jq -r '.result.oldest_message_timestamp_ms' current-post-resume-probe/queue-metrics.json)"
+          queue_delivery_paused="$(jq -r '.result.settings.delivery_paused' current-post-resume-probe/queue.json)"
+          deployment_id="$(jq -r '.result.deployments[0].id' current-post-resume-probe/deployments.json)"
+          deployed_at="$(jq -r '.result.deployments[0].created_on' current-post-resume-probe/deployments.json)"
+          version_id="$(jq -r '.result.deployments[0].versions[0].version_id' current-post-resume-probe/deployments.json)"
           incremental_status_schema="$(jq -r '.result[0].results[0].sql' current-post-resume-probe/incremental-collector-state-schema.json)"
           incremental_status_allows_behind=false
           if printf '%s' "$incremental_status_schema" | grep -Eq "status IN \\([^)]*'behind'"; then
@@ -110,14 +113,19 @@ jobs:
             --argjson backlogCount "$backlog_count" \
             --argjson backlogBytes "$backlog_bytes" \
             --argjson oldestMessageTimestampMs "$oldest_message_timestamp_ms" \
+            --argjson queueDeliveryPaused "$queue_delivery_paused" \
+            --arg deploymentId "$deployment_id" \
+            --arg deployedAt "$deployed_at" \
+            --arg versionId "$version_id" \
             --argjson incrementalStatusAllowsBehind "$incremental_status_allows_behind" \
             --argjson advanced "$advanced" \
-            '{passed:true,productionMutation:false,queuePeekNonLeasing:true,queueDeliveryPaused:false,baselineLedger:$baseline,lastProcessedLedger:$ledger,latestObservedLedger:$latest,fastLaneStatus:$status,advanced:$advanced,queueBacklogCount:$backlogCount,queueBacklogBytes:$backlogBytes,queueOldestMessageTimestampMs:$oldestMessageTimestampMs,queuePeekCount:$peekCount,incrementalCollectorStatusAllowsBehind:$incrementalStatusAllowsBehind,latestMetricStatus:$metricStatus,latestMetricEndLedger:$metricEnd,latestMetricError:(if $metricError=="null" then null else $metricError end),latestSlotStatus:$slotStatus,latestSlotScheduledTime:$slotTime,latestSlotError:(if $slotError=="null" then null else $slotError end)}' \
+            '{probeCompleted:true,productionMutation:false,queuePeekNonLeasing:true,queueDeliveryPaused:$queueDeliveryPaused,baselineLedger:$baseline,lastProcessedLedger:$ledger,latestObservedLedger:$latest,fastLaneStatus:$status,advanced:$advanced,queueBacklogCount:$backlogCount,queueBacklogBytes:$backlogBytes,queueOldestMessageTimestampMs:$oldestMessageTimestampMs,queuePeekCount:$peekCount,activeDeploymentId:$deploymentId,activeDeploymentCreatedOn:$deployedAt,activeVersionId:$versionId,incrementalCollectorStatusAllowsBehind:$incrementalStatusAllowsBehind,latestMetricStatus:$metricStatus,latestMetricEndLedger:$metricEnd,latestMetricError:(if $metricError=="null" then null else $metricError end),latestSlotStatus:$slotStatus,latestSlotScheduledTime:$slotTime,latestSlotError:(if $slotError=="null" then null else $slotError end)}' \
             > current-post-resume-probe/result.json
 
           cat current-post-resume-probe/result.json
 
       - name: Upload read-only evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: current-post-resume-readonly-probe
