@@ -8,7 +8,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: current-fresh-replacement-base-build-official-codec
+  group: current-fresh-replacement-base-build-filtered-binary
   cancel-in-progress: false
 
 env:
@@ -61,13 +61,13 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Keep the fresh-base build on binary ledger_data so each response can carry
-          # up to 2048 objects. The repository's pinned legacy codec is behind Devnet,
-          # so this isolated workflow switches only the built release script to the
-          # current official XRPL binary codec installed above. Remove only this
-          # workflow's page-count stop: marker exhaustion is the success boundary and
-          # the 120-minute job timeout remains the outer safety bound. Guard every
-          # replacement so source drift fails closed.
+          # Full binary traversal is fast but Devnet contains newer unrelated ledger
+          # entry fields that even the current published codec cannot decode. Keep the
+          # 2048-entry binary pagination, but ask xrpld to return only the three lending
+          # entry types needed by this release. Each filtered pass still advances its
+          # marker through the complete fixed ledger tree, so all three passes must
+          # reach marker exhaustion before the snapshot is complete. The 120-minute job
+          # timeout remains the outer safety bound. Source-shape guards fail closed.
           node --input-type=module <<'NODE'
           import { readFile, writeFile } from 'node:fs/promises'
 
@@ -76,9 +76,9 @@ jobs:
 
           function replaceExactlyOnce(from, to, label) {
             const first = source.indexOf(from)
-            if (first < 0) throw new Error(`fresh-base codec patch target missing: ${label}`)
+            if (first < 0) throw new Error(`fresh-base patch target missing: ${label}`)
             if (source.indexOf(from, first + from.length) >= 0) {
-              throw new Error(`fresh-base codec patch target repeated: ${label}`)
+              throw new Error(`fresh-base patch target repeated: ${label}`)
             }
             source = `${source.slice(0, first)}${to}${source.slice(first + from.length)}`
           }
@@ -89,19 +89,119 @@ jobs:
             'fresh builder codec import',
           )
 
-          const pageLimitGuard = [
-            '    if (page >= options.pageLimit) {',
-            '      process.stderr.write(`Streaming traversal stopped at page limit ${options.pageLimit}; snapshot is partial.\\n`)',
-            '      break',
-            '    }',
-          ].join('\n')
-          replaceExactlyOnce(pageLimitGuard, '', 'fresh traversal page-limit guard')
-          replaceExactlyOnce(
-            '  process.stderr.write(`Running streaming full-ledger traversal with page limit ${options.pageLimit}.\\n`)',
-            '  process.stderr.write(`Running streaming full-ledger traversal until marker exhaustion.\\n`)',
-            'fresh traversal startup message',
-          )
+          const traversalStartMarker = 'async function streamFullLedgerTraversal('
+          const traversalEndMarker = '\nasync function appendIndexRecordsForSegment'
+          const traversalStart = source.indexOf(traversalStartMarker)
+          if (traversalStart < 0) throw new Error('fresh filtered traversal start missing')
+          if (source.indexOf(traversalStartMarker, traversalStart + traversalStartMarker.length) >= 0) {
+            throw new Error('fresh filtered traversal start repeated')
+          }
+          const traversalEnd = source.indexOf(traversalEndMarker, traversalStart)
+          if (traversalEnd < 0) throw new Error('fresh filtered traversal end missing')
+          if (source.indexOf(traversalEndMarker, traversalEnd + traversalEndMarker.length) >= 0) {
+            throw new Error('fresh filtered traversal end repeated')
+          }
 
+          const filteredTraversal = `async function streamFullLedgerTraversal(options: Arguments, ledger: LedgerIdentity, workDataDir: string): Promise<TraversalResult> {
+            const client = new XrplJsonRpcClient({ endpoint: options.endpoint, timeoutMs: options.timeoutMs })
+            const counts = emptyCounts()
+            const entryTypes = ['Vault', 'LoanBroker', 'Loan'] as const
+            let sourcePages = 0
+            let decodedObjectCount = 0
+            let relevantObjectCount = 0
+
+            process.stderr.write('Running binary type-filtered traversal until marker exhaustion for Vault, LoanBroker, Loan.\\n')
+            for (const entryType of entryTypes) {
+              const seenMarkers = new Set<string>()
+              let marker: unknown = undefined
+              let page = 0
+
+              process.stderr.write(\`Starting ledger_data type filter \${entryType}.\\n\`)
+              for (;;) {
+                const params: Record<string, unknown> = {
+                  ledger_hash: ledger.ledgerHash,
+                  binary: true,
+                  limit: options.objectLimitPerPage,
+                  type: entryType,
+                }
+                if (marker !== undefined) params.marker = marker
+
+                const result = await client.call<LedgerDataResult>('ledger_data', params)
+                const ledgerHash = id(requiredString(result.ledger_hash, 'ledger_hash'), 'ledger_hash')
+                const ledgerIndex = requiredLedgerIndex(result.ledger_index)
+                if (ledgerHash !== ledger.ledgerHash || ledgerIndex !== ledger.ledgerIndex) throw new Error('ledger_data moved during filtered traversal')
+                if (result.validated !== true) throw new Error('ledger_data response must describe a validated ledger')
+                if (!Array.isArray(result.state)) throw new Error('ledger_data response state must be an array')
+
+                page += 1
+                sourcePages += 1
+                const pageBatches = Array.from({ length: options.dataSegments }, () => [] as ReleaseNativeDataRecord[])
+
+                for (let index = 0; index < result.state.length; index += 1) {
+                  const stateEntry = result.state[index]
+                  if (!isRecord(stateEntry)) throw new Error(\`state[\${index}] must be an object\`)
+                  const binaryHex = requiredHex(stateEntry.data, \`state[\${index}].data\`)
+                  const decoded = decode(binaryHex)
+                  if (!isRecord(decoded)) throw new Error(\`state[\${index}] did not decode to an object\`)
+                  decodedObjectCount += 1
+
+                  if (decoded.LedgerEntryType !== entryType) {
+                    throw new Error(\`ledger_data type filter \${entryType} returned \${String(decoded.LedgerEntryType)}\`)
+                  }
+                  const kind = kindFromLedgerEntryType(decoded.LedgerEntryType)
+                  if (!kind) throw new Error(\`Unexpected filtered ledger entry type \${String(decoded.LedgerEntryType)}\`)
+
+                  const objectId = id(requiredString(stateEntry.index, \`state[\${index}].index\`), \`state[\${index}].index\`)
+                  const value: Record<string, unknown> = {
+                    ...decoded,
+                    LedgerEntryType: decoded.LedgerEntryType,
+                    index: objectId,
+                  }
+                  const segment = dataSegmentForId(objectId, options.dataSegments)
+                  const record: ReleaseNativeDataRecord = {
+                    schemaVersion: 1,
+                    segmentId: segmentId(segment),
+                    sourcePage: sourcePages,
+                    id: objectId,
+                    kind,
+                    valueSha256: await sha256Hex(canonicalJson(value)),
+                    value,
+                  }
+                  pageBatches[segment]!.push(record)
+                  relevantObjectCount += 1
+                  addKindCount(counts, kind)
+                }
+
+                for (let segment = 0; segment < pageBatches.length; segment += 1) {
+                  await appendCanonicalLines(dataRawPath(workDataDir, segment), pageBatches[segment]!)
+                }
+
+                if (page % 100 === 0) {
+                  process.stderr.write(\`Processed \${page} pages for \${entryType}; total source pages: \${sourcePages}; relevant objects: \${relevantObjectCount}; decoded objects: \${decodedObjectCount}.\\n\`)
+                }
+
+                marker = result.marker
+                if (marker === undefined || marker === null) {
+                  process.stderr.write(\`Completed ledger_data type filter \${entryType} after \${page} pages.\\n\`)
+                  break
+                }
+                const fingerprint = markerFingerprint(marker)
+                if (seenMarkers.has(fingerprint)) throw new Error(\`ledger_data repeated marker for \${entryType} after page \${page}\`)
+                seenMarkers.add(fingerprint)
+              }
+            }
+
+            return {
+              sourcePages: Math.max(1, sourcePages),
+              decodedObjectCount,
+              relevantObjectCount,
+              counts,
+              complete: true,
+            }
+          }
+          `
+
+          source = `${source.slice(0, traversalStart)}${filteredTraversal}${source.slice(traversalEnd)}`
           await writeFile(path, source, 'utf8')
           NODE
 
