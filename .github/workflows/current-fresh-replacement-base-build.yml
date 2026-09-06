@@ -57,6 +57,47 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
+          # The Devnet server is ahead of the pinned client binary definitions.
+          # For this isolated fresh-base build, consume ledger_data as server-decoded
+          # JSON so unrelated new ledger fields cannot break traversal in the client
+          # codec. Guard every replacement so source drift fails closed.
+          node --input-type=module <<'NODE'
+          import { readFile, writeFile } from 'node:fs/promises'
+
+          const path = 'scripts/run-release-current-state.ts'
+          let source = await readFile(path, 'utf8')
+
+          function replaceExactlyOnce(from, to, label) {
+            const first = source.indexOf(from)
+            if (first < 0) throw new Error(`fresh-base JSON patch target missing: ${label}`)
+            if (source.indexOf(from, first + from.length) >= 0) {
+              throw new Error(`fresh-base JSON patch target repeated: ${label}`)
+            }
+            source = `${source.slice(0, first)}${to}${source.slice(first + from.length)}`
+          }
+
+          replaceExactlyOnce(
+            '      binary: true,',
+            '      binary: false,',
+            'ledger_data binary mode',
+          )
+
+          const binaryDecodeBlock = [
+            '      const binaryHex = requiredHex(stateEntry.data, `state[${index}].data`)',
+            '      const decoded = decode(binaryHex)',
+            '      if (!isRecord(decoded)) throw new Error(`state[${index}] did not decode to an object`)',
+            '      decodedObjectCount += 1',
+          ].join('\n')
+          const jsonDecodeBlock = [
+            '      const decoded = stateEntry',
+            '      decodedObjectCount += 1',
+          ].join('\n')
+          replaceExactlyOnce(binaryDecodeBlock, jsonDecodeBlock, 'binary decode block')
+
+          await writeFile(path, source, 'utf8')
+          NODE
+
           pnpm build:release-current-state
           RELEASE_TAG="current-fresh-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           node .release-current-state-build/run-release-current-state.mjs \
@@ -64,7 +105,7 @@ jobs:
             --endpoint https://s.devnet.rippletest.net:51234/ \
             --timeout-ms 12000 \
             --page-limit 500 \
-            --object-limit-per-page 2048 \
+            --object-limit-per-page 256 \
             --epoch-id "${ACTIVE_EPOCH_ID}" \
             --release-tag "${RELEASE_TAG}" \
             --index-buckets 64 \
