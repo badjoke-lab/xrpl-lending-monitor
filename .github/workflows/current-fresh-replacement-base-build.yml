@@ -8,7 +8,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: current-fresh-replacement-base-build
+  group: current-fresh-replacement-base-build-official-codec
   cancel-in-progress: false
 
 env:
