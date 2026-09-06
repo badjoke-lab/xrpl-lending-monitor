@@ -145,7 +145,7 @@ jobs:
           jq -e \
             --arg epoch "${ACTIVE_EPOCH_ID}" \
             --argjson ledger "${release_ledger}" \
-            --arg hash "${release_hash" '
+            --arg hash "${release_hash}" '
               .complete == true
               and .epochId == $epoch
               and .ledgerIndex == $ledger
