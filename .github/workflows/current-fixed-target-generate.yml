@@ -111,36 +111,59 @@ jobs:
             PREV_ID="$(jq -r --argjson ordinal "$((ORDINAL - 1))" '.extension.segments[] | select(.ordinal == $ordinal) | .segmentId' "${PLAN}")"
           fi
           jq -n --argjson ledger_index "${PREVIOUS_LEDGER}" '{method:"ledger",params:[{ledger_index:$ledger_index,transactions:false,expand:false}]}' > previous-request.json
-          curl --fail-with-body --silent --show-error --retry 5 \
-            -H 'Content-Type: application/json' \
-            --data @previous-request.json \
-            https://devnet.honeycluster.io/ > previous-response.json
-          PREV_HASH="$(jq -r '.result.ledger_hash // .result.ledger.ledger_hash // empty' previous-response.json)"
-          printf '%s' "${PREV_HASH}" | grep -Eq '^[A-F0-9]{64}$'
-          if [[ "${ORDINAL}" -eq 1 ]]; then
-            test "${PREV_HASH}" = "$(jq -r '.extension.anchorPreviousSegmentEndHash' "${PLAN}")"
-          fi
+
+          ENDPOINTS=(
+            'https://devnet.honeycluster.io/'
+            'https://clio.devnet.rippletest.net:51234/'
+            'https://s.devnet.rippletest.net:51234/'
+          )
           OUT="generated/${SEGMENT_ID}"
-          for ATTEMPT in 1 2 3; do
-            rm -rf "${OUT}"
-            if node .history-segment-build/run-history-segment.mjs \
-              --local \
-              --endpoint https://devnet.honeycluster.io/ \
-              --timeout-ms 8000 \
-              --read-window-size 16 \
-              --start-ledger "${START}" \
-              --end-ledger "${END}" \
-              --epoch-id "${EPOCH}" \
-              --segment-id "${SEGMENT_ID}" \
-              --previous-segment-id "${PREV_ID}" \
-              --previous-segment-end-hash "${PREV_HASH}" \
-              --source-revision b9314e7a0ec95b6ac13faa76ec63b29e0551ce7b \
-              --output-dir "${OUT}" > segment.stdout.json; then
+          GENERATED='false'
+          for ENDPOINT in "${ENDPOINTS[@]}"; do
+            echo "Trying ${ENDPOINT} for ordinal ${ORDINAL} (${START}-${END})"
+            if ! curl --fail-with-body --silent --show-error --retry 2 \
+              -H 'Content-Type: application/json' \
+              --data @previous-request.json \
+              "${ENDPOINT}" > previous-response.json; then
+              echo "Endpoint request failed: ${ENDPOINT}"
+              continue
+            fi
+            PREV_HASH="$(jq -r '.result.ledger_hash // .result.ledger.ledger_hash // empty' previous-response.json)"
+            if ! printf '%s' "${PREV_HASH}" | grep -Eq '^[A-F0-9]{64}$'; then
+              echo "Endpoint has no validated previous ledger ${PREVIOUS_LEDGER}: ${ENDPOINT}"
+              jq -c '{status,error,error_code,error_message,result:{status,error,error_code,error_message}}' previous-response.json || true
+              continue
+            fi
+            if [[ "${ORDINAL}" -eq 1 ]]; then
+              test "${PREV_HASH}" = "$(jq -r '.extension.anchorPreviousSegmentEndHash' "${PLAN}")"
+            fi
+            for ATTEMPT in 1 2 3; do
+              rm -rf "${OUT}"
+              if node .history-segment-build/run-history-segment.mjs \
+                --local \
+                --endpoint "${ENDPOINT}" \
+                --timeout-ms 8000 \
+                --read-window-size 16 \
+                --start-ledger "${START}" \
+                --end-ledger "${END}" \
+                --epoch-id "${EPOCH}" \
+                --segment-id "${SEGMENT_ID}" \
+                --previous-segment-id "${PREV_ID}" \
+                --previous-segment-end-hash "${PREV_HASH}" \
+                --source-revision b9314e7a0ec95b6ac13faa76ec63b29e0551ce7b \
+                --output-dir "${OUT}" > segment.stdout.json; then
+                GENERATED='true'
+                break
+              fi
+              sleep $((ATTEMPT * 5))
+            done
+            if [[ "${GENERATED}" = 'true' ]]; then
+              echo "Generated ordinal ${ORDINAL} from ${ENDPOINT}"
               break
             fi
-            if [[ "${ATTEMPT}" -eq 3 ]]; then exit 1; fi
-            sleep $((ATTEMPT * 5))
+            echo "Segment generation failed from ${ENDPOINT}; trying next public Devnet endpoint"
           done
+          test "${GENERATED}" = 'true'
           test "$(jq -r '.segmentId' "${OUT}/manifest.json")" = "${SEGMENT_ID}"
           test "$(jq -r '.startLedgerIndex' "${OUT}/manifest.json")" = "${START}"
           test "$(jq -r '.endLedgerIndex' "${OUT}/manifest.json")" = "${END}"
