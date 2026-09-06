@@ -61,7 +61,9 @@ jobs:
           # The Devnet server is ahead of the pinned client binary definitions.
           # For this isolated fresh-base build, consume ledger_data as server-decoded
           # JSON so unrelated new ledger fields cannot break traversal in the client
-          # codec. Guard every replacement so source drift fails closed.
+          # codec. Remove only this workflow's page-count stop so the validated-ledger
+          # marker is the success boundary; the 120-minute job timeout remains the
+          # outer safety bound. Guard every replacement so source drift fails closed.
           node --input-type=module <<'NODE'
           import { readFile, writeFile } from 'node:fs/promises'
 
@@ -94,6 +96,19 @@ jobs:
             '      decodedObjectCount += 1',
           ].join('\n')
           replaceExactlyOnce(binaryDecodeBlock, jsonDecodeBlock, 'binary decode block')
+
+          const pageLimitGuard = [
+            '    if (page >= options.pageLimit) {',
+            '      process.stderr.write(`Streaming traversal stopped at page limit ${options.pageLimit}; snapshot is partial.\\n`)',
+            '      break',
+            '    }',
+          ].join('\n')
+          replaceExactlyOnce(pageLimitGuard, '', 'fresh traversal page-limit guard')
+          replaceExactlyOnce(
+            '  process.stderr.write(`Running streaming full-ledger traversal with page limit ${options.pageLimit}.\\n`)',
+            '  process.stderr.write(`Running streaming full-ledger traversal until marker exhaustion.\\n`)',
+            'fresh traversal startup message',
+          )
 
           await writeFile(path, source, 'utf8')
           NODE
