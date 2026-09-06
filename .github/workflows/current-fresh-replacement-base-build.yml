@@ -104,7 +104,7 @@ jobs:
             --local \
             --endpoint https://s.devnet.rippletest.net:51234/ \
             --timeout-ms 12000 \
-            --page-limit 500 \
+            --page-limit 4000 \
             --object-limit-per-page 256 \
             --epoch-id "${ACTIVE_EPOCH_ID}" \
             --release-tag "${RELEASE_TAG}" \
