@@ -8,7 +8,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: current-fresh-replacement-base-build-server-definitions
+  group: current-fresh-replacement-base-build-reassociated-definitions
   cancel-in-progress: false
 
 env:
@@ -65,8 +65,11 @@ jobs:
           # definitions shipped by the latest published codec. XRPL documents
           # server_definitions specifically for this case. Keep fast binary ledger_data
           # pagination, load SDK-compatible definitions from this exact Devnet server,
-          # and require marker exhaustion on one fixed validated ledger. The 120-minute
-          # job timeout remains the outer safety bound. Source-shape guards fail closed.
+          # and require marker exhaustion on one fixed validated ledger. The published
+          # codec associates PermissionValue before delegatablePermissions is initialized,
+          # so repeat its public type-association pass once after construction. The
+          # 120-minute job timeout remains the outer safety bound. Source-shape guards
+          # fail closed.
           node --input-type=module <<'NODE'
           import { readFile, writeFile } from 'node:fs/promises'
 
@@ -98,7 +101,10 @@ jobs:
               "    throw new Error('server_definitions result is not SDK-compatible')",
               '  }',
               '  const definitions = new XrplDefinitions(serverDefinitions as ConstructorParameters<typeof XrplDefinitions>[0])',
-              "  process.stderr.write(`Loaded ${serverDefinitions.FIELDS.length} Devnet serialization fields from server_definitions.\\n`)",
+              '  definitions.associateTypes(definitions.getAssociatedTypes())',
+              "  const permissionValueField = definitions.field['PermissionValue']",
+              "  if (permissionValueField && !permissionValueField.associatedType) throw new Error('PermissionValue codec association remains unresolved')",
+              "  process.stderr.write(`Loaded ${serverDefinitions.FIELDS.length} Devnet serialization fields from server_definitions and reassociated codec types.\\n`)",
             ].join('\n'),
             'Devnet server definitions initialization',
           )
