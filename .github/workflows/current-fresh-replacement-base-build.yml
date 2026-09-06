@@ -53,17 +53,21 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Install current XRPL binary codec for fresh build
+        run: pnpm add --ignore-workspace-root-check --save-exact ripple-binary-codec@2.10.0
+
       - name: Build fresh validated Devnet snapshot
         shell: bash
         run: |
           set -euo pipefail
 
-          # The Devnet server is ahead of the pinned client binary definitions.
-          # For this isolated fresh-base build, consume ledger_data as server-decoded
-          # JSON so unrelated new ledger fields cannot break traversal in the client
-          # codec. Remove only this workflow's page-count stop so the validated-ledger
-          # marker is the success boundary; the 120-minute job timeout remains the
-          # outer safety bound. Guard every replacement so source drift fails closed.
+          # Keep the fresh-base build on binary ledger_data so each response can carry
+          # up to 2048 objects. The repository's pinned legacy codec is behind Devnet,
+          # so this isolated workflow switches only the built release script to the
+          # current official XRPL binary codec installed above. Remove only this
+          # workflow's page-count stop: marker exhaustion is the success boundary and
+          # the 120-minute job timeout remains the outer safety bound. Guard every
+          # replacement so source drift fails closed.
           node --input-type=module <<'NODE'
           import { readFile, writeFile } from 'node:fs/promises'
 
@@ -72,30 +76,18 @@ jobs:
 
           function replaceExactlyOnce(from, to, label) {
             const first = source.indexOf(from)
-            if (first < 0) throw new Error(`fresh-base JSON patch target missing: ${label}`)
+            if (first < 0) throw new Error(`fresh-base codec patch target missing: ${label}`)
             if (source.indexOf(from, first + from.length) >= 0) {
-              throw new Error(`fresh-base JSON patch target repeated: ${label}`)
+              throw new Error(`fresh-base codec patch target repeated: ${label}`)
             }
             source = `${source.slice(0, first)}${to}${source.slice(first + from.length)}`
           }
 
           replaceExactlyOnce(
-            '      binary: true,',
-            '      binary: false,',
-            'ledger_data binary mode',
+            "import { decode } from '@xrpl-commons/ripple-binary-codec'",
+            "import { decode } from 'ripple-binary-codec'",
+            'fresh builder codec import',
           )
-
-          const binaryDecodeBlock = [
-            '      const binaryHex = requiredHex(stateEntry.data, `state[${index}].data`)',
-            '      const decoded = decode(binaryHex)',
-            '      if (!isRecord(decoded)) throw new Error(`state[${index}] did not decode to an object`)',
-            '      decodedObjectCount += 1',
-          ].join('\n')
-          const jsonDecodeBlock = [
-            '      const decoded = stateEntry',
-            '      decodedObjectCount += 1',
-          ].join('\n')
-          replaceExactlyOnce(binaryDecodeBlock, jsonDecodeBlock, 'binary decode block')
 
           const pageLimitGuard = [
             '    if (page >= options.pageLimit) {',
@@ -120,7 +112,7 @@ jobs:
             --endpoint https://s.devnet.rippletest.net:51234/ \
             --timeout-ms 12000 \
             --page-limit 4000 \
-            --object-limit-per-page 256 \
+            --object-limit-per-page 2048 \
             --epoch-id "${ACTIVE_EPOCH_ID}" \
             --release-tag "${RELEASE_TAG}" \
             --index-buckets 64 \
