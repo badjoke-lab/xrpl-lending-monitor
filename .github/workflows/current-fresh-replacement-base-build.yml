@@ -1,0 +1,220 @@
+name: Current fresh replacement base build
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: current-fresh-replacement-base-build
+  cancel-in-progress: false
+
+env:
+  QUALIFICATION_ISSUE: '995'
+  CANDIDATE_BRANCH: current-state-fresh-replacement-candidate-data
+  ACTIVE_EPOCH_ID: devnet-3371675
+  MINIMUM_LEDGER: '4086727'
+
+jobs:
+  build:
+    if: >-
+      github.event.issue.number == 995 &&
+      github.event.comment.user.login == 'badjoke-lab' &&
+      github.event.comment.body == '/current-fresh-replacement-base-build'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Check out exact main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Check out isolated candidate branch
+        uses: actions/checkout@v4
+        with:
+          ref: current-state-fresh-replacement-candidate-data
+          path: .local/candidate
+          fetch-depth: 1
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build fresh validated Devnet snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm build:release-current-state
+          RELEASE_TAG="current-fresh-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          node .release-current-state-build/run-release-current-state.mjs \
+            --local \
+            --endpoint https://s.devnet.rippletest.net:51234/ \
+            --timeout-ms 12000 \
+            --page-limit 500 \
+            --object-limit-per-page 2048 \
+            --epoch-id "${ACTIVE_EPOCH_ID}" \
+            --release-tag "${RELEASE_TAG}" \
+            --index-buckets 64 \
+            --data-segments 20 \
+            --output-dir .local/fresh-release \
+            > .local/fresh-release.stdout.json
+
+          jq -e \
+            --arg epoch "${ACTIVE_EPOCH_ID}" \
+            --argjson minimum "${MINIMUM_LEDGER}" '
+              .complete == true
+              and .ledger.ledgerIndex > $minimum
+              and (.ledger.ledgerHash | test("^[A-F0-9]{64}$"))
+            ' .local/fresh-release/release-summary.json >/dev/null
+          jq -e --arg epoch "${ACTIVE_EPOCH_ID}" '
+            .complete == true
+            and .network == "devnet"
+            and .epochId == $epoch
+            and (.manifestSha256 | test("^[a-f0-9]{64}$"))
+          ' .local/fresh-release/assets/manifest.json >/dev/null
+
+      - name: Build compact read model from fresh snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm exec vite build --config vite.base-current-state-read-model.config.ts
+          node .base-current-state-read-model-build/build-base-current-state-read-model.mjs \
+            --local \
+            --input-dir .local/fresh-release/assets \
+            --output-dir .local/fresh-read-model \
+            --page-size 50 \
+            --lookup-prefix-length 2 \
+            > .local/fresh-read-model.stdout.json
+
+          release_ledger="$(jq -r '.ledger.ledgerIndex' .local/fresh-release/release-summary.json)"
+          release_hash="$(jq -r '.ledger.ledgerHash' .local/fresh-release/release-summary.json)"
+          jq -e \
+            --arg epoch "${ACTIVE_EPOCH_ID}" \
+            --argjson ledger "${release_ledger}" \
+            --arg hash "${release_hash}" '
+              .complete == true
+              and .epochId == $epoch
+              and .ledgerIndex == $ledger
+              and .ledgerHash == $hash
+              and .lookupPrefixLength == 2
+              and (.manifestSha256 | test("^[a-f0-9]{64}$"))
+          ' .local/fresh-read-model/read-model/manifest.json >/dev/null
+
+      - name: Publish isolated candidate data
+        id: publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          candidate="${GITHUB_WORKSPACE}/.local/candidate"
+          model="${GITHUB_WORKSPACE}/.local/fresh-read-model"
+          release="${GITHUB_WORKSPACE}/.local/fresh-release"
+
+          cd "$candidate"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -R "$model/read-model" ./read-model
+          cp "$model/base-read-model-summary.json" ./fresh-replacement-base-summary.json
+          cp "$release/release-summary.json" ./fresh-replacement-release-summary.json
+
+          ledger="$(jq -r '.ledgerIndex' read-model/manifest.json)"
+          snapshot="$(jq -r '.snapshotId' read-model/manifest.json)"
+          release_tag="$(jq -r '.releaseTag' read-model/manifest.json)"
+          manifest_sha="$(jq -r '.manifestSha256' read-model/manifest.json)"
+
+          git add -A
+          git commit -m "Stage fresh replacement Current base ${ledger}"
+          data_sha="$(git rev-parse HEAD)"
+          git push --force-with-lease origin "HEAD:${CANDIDATE_BRANCH}"
+
+          jq -n \
+            --arg dataCommitSha "$data_sha" \
+            --arg manifestSha256 "$manifest_sha" \
+            --arg releaseTag "$release_tag" \
+            --arg snapshotId "$snapshot" \
+            --arg updatedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{schemaVersion:1,active:{dataCommitSha:$dataCommitSha,manifestPath:"read-model/manifest.json",manifestSha256:$manifestSha256,releaseTag:$releaseTag,snapshotId:$snapshotId},updatedAt:$updatedAt}' \
+            > channel.json
+
+          git add channel.json
+          git commit -m "Activate fresh replacement Current candidate ${ledger}"
+          candidate_sha="$(git rev-parse HEAD)"
+          git push origin "HEAD:${CANDIDATE_BRANCH}"
+
+          echo "ledger=$ledger" >> "$GITHUB_OUTPUT"
+          echo "snapshot=$snapshot" >> "$GITHUB_OUTPUT"
+          echo "manifest_sha=$manifest_sha" >> "$GITHUB_OUTPUT"
+          echo "data_sha=$data_sha" >> "$GITHUB_OUTPUT"
+          echo "candidate_sha=$candidate_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Verify candidate branch resolves exact staged data
+        shell: bash
+        env:
+          LEDGER: ${{ steps.publish.outputs.ledger }}
+          SNAPSHOT: ${{ steps.publish.outputs.snapshot }}
+          MANIFEST_SHA: ${{ steps.publish.outputs.manifest_sha }}
+          DATA_SHA: ${{ steps.publish.outputs.data_sha }}
+          CANDIDATE_SHA: ${{ steps.publish.outputs.candidate_sha }}
+        run: |
+          set -euo pipefail
+          git ls-remote origin "refs/heads/${CANDIDATE_BRANCH}" \
+            | grep -F "${CANDIDATE_SHA}" >/dev/null
+          curl -fsSL "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${CANDIDATE_BRANCH}/channel.json" \
+            > .local/candidate-channel-remote.json
+          jq -e \
+            --arg data "$DATA_SHA" \
+            --arg snapshot "$SNAPSHOT" \
+            --arg manifest "$MANIFEST_SHA" '
+              .active.dataCommitSha == $data
+              and .active.snapshotId == $snapshot
+              and .active.manifestSha256 == $manifest
+            ' .local/candidate-channel-remote.json >/dev/null
+          curl -fsSL "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${DATA_SHA}/read-model/manifest.json" \
+            > .local/candidate-manifest-remote.json
+          jq -e \
+            --arg snapshot "$SNAPSHOT" \
+            --arg manifest "$MANIFEST_SHA" \
+            --argjson ledger "$LEDGER" '
+              .complete == true
+              and .snapshotId == $snapshot
+              and .manifestSha256 == $manifest
+              and .ledgerIndex == $ledger
+            ' .local/candidate-manifest-remote.json >/dev/null
+
+          jq -n \
+            --arg branch "$CANDIDATE_BRANCH" \
+            --argjson ledger "$LEDGER" \
+            --arg snapshot "$SNAPSHOT" \
+            --arg manifestSha256 "$MANIFEST_SHA" \
+            --arg dataCommitSha "$DATA_SHA" \
+            --arg candidateCommitSha "$CANDIDATE_SHA" \
+            '{passed:true,productionMutation:false,historyMutation:false,candidateBranch:$branch,ledgerIndex:$ledger,snapshotId:$snapshot,manifestSha256:$manifestSha256,dataCommitSha:$dataCommitSha,candidateCommitSha:$candidateCommitSha}' \
+            > .local/fresh-replacement-base-build-result.json
+
+      - name: Upload candidate build summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: current-fresh-replacement-base-build
+          path: |
+            .local/fresh-replacement-base-build-result.json
+            .local/fresh-release/release-summary.json
+            .local/fresh-read-model/base-read-model-summary.json
+            .local/candidate-channel-remote.json
+            .local/candidate-manifest-remote.json
+          if-no-files-found: warn
+          retention-days: 30
