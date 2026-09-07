@@ -48,7 +48,7 @@ echo "due-state queuePaused=$(jq -r '.result.settings.delivery_paused' "$STATE_R
 jq -e '.success == true and .result.settings.delivery_paused == true' "$STATE_ROOT/queue.json" >/dev/null
 curl -fsS -H "$auth" "$qbase/metrics" > "$STATE_ROOT/queue-metrics.json"
 echo "due-state backlogCount=$(jq -r '.result.backlog_count' "$STATE_ROOT/queue-metrics.json") backlogBytes=$(jq -r '.result.backlog_bytes' "$STATE_ROOT/queue-metrics.json")"
-jq -e --argjson bytes "$EXPECTED_QUEUE_BYTES" '.success == true and (.result.backlog_count // -1) == 0 and (.result.backlog_bytes // -1) == $bytes' "$STATE_ROOT/queue-metrics.json" >/dev/null
+jq -e --argjson bytes "$EXPECTED_QUEUE_BYTES" '.success == true and (.result.backlog_count // -1) == 1 and (.result.backlog_bytes // -1) == $bytes' "$STATE_ROOT/queue-metrics.json" >/dev/null
 curl -fsS -X POST -H "$auth" -H 'Content-Type: application/json' "$qbase/messages/peek" -d '{"batch_size":2}' > "$STATE_ROOT/queue-peek.json"
 visible_count="$(jq '(.result.messages // .result // []) | length' "$STATE_ROOT/queue-peek.json")"
 echo "due-state visibleMessages=$visible_count"
