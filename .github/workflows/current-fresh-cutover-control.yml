@@ -32,6 +32,7 @@ env:
   RUNTIME_SOURCE_SHA: 07af3846ac056b892a23ef6146cc986bdf753dc1
   CUTOVER_DATA_BRANCH: current-state-fresh-replacement-cutover-data
   CUTOVER_DATA_COMMIT: 4fad78c2b8e5dc6e83363d9c8239bbfd6010e352
+  CUTOVER_PAYLOAD_COMMIT: d9ba9fc769ab7ec8002d6ab56f54801f7967800b
   TARGET_EPOCH: devnet-3371675
   TARGET_SNAPSHOT: devnet-5101160-ea7a044b3eea
   TARGET_LEDGER: '5101160'
@@ -57,27 +58,26 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Verify immutable cutover target and runtime configuration
+      - name: Verify immutable target and unchanged production source
         shell: bash
         run: |
           set -euo pipefail
           git fetch --no-tags --depth=1 origin "$RUNTIME_SOURCE_SHA"
-          git diff --quiet "$RUNTIME_SOURCE_SHA" HEAD -- src package.json pnpm-lock.yaml
+          git diff --quiet "$RUNTIME_SOURCE_SHA" HEAD -- src wrangler.jsonc package.json pnpm-lock.yaml
           test "$(jq -r '.triggers.crons | length' wrangler.jsonc)" -eq 0
           test "$(jq -r '.vars.APP_NETWORK' wrangler.jsonc)" = devnet
           test "$(jq -r '.vars.MAINNET_ENABLED' wrangler.jsonc)" = false
-          test "$(jq -r '.vars.CURRENT_STATE_GITHUB_BRANCH' wrangler.jsonc)" = "$CUTOVER_DATA_BRANCH"
-          test "$(jq -r '.vars.CURRENT_STATE_REPLACEMENT_GITHUB_BRANCH' wrangler.jsonc)" = "$CUTOVER_DATA_BRANCH"
-          test "$(jq -r '.vars.CURRENT_STATE_REPLACEMENT_SNAPSHOT_ID' wrangler.jsonc)" = "$TARGET_SNAPSHOT"
-          test "$(jq -r '.vars.REPLACEMENT_BASE_REBASE_ENABLED' wrangler.jsonc)" = true
-          test "$(jq -r '.vars.REPLACEMENT_BASE_EPOCH_ID' wrangler.jsonc)" = "$TARGET_EPOCH"
-          test "$(jq -r '.vars.REPLACEMENT_BASE_SNAPSHOT_ID' wrangler.jsonc)" = "$TARGET_SNAPSHOT"
-          test "$(jq -r '.vars.REPLACEMENT_BASE_LEDGER_INDEX' wrangler.jsonc)" = "$TARGET_LEDGER"
-          test "$(jq -r '.vars.REPLACEMENT_BASE_LEDGER_HASH' wrangler.jsonc)" = "$TARGET_HASH"
+          test "$(jq -r '.vars.CURRENT_STATE_GITHUB_BRANCH' wrangler.jsonc)" = current-state-data
+          test "$(jq -r '.vars.CURRENT_STATE_REPLACEMENT_SNAPSHOT_ID' wrangler.jsonc)" = devnet-4039102-4298500c53ba
+          test "$(jq -r '.vars.REPLACEMENT_BASE_LEDGER_INDEX' wrangler.jsonc)" = 4039102
           head="$(gh api "repos/${GITHUB_REPOSITORY}/branches/${CUTOVER_DATA_BRANCH}" --jq '.commit.sha')"
           test "$head" = "$CUTOVER_DATA_COMMIT"
+          gh api "repos/${GITHUB_REPOSITORY}/contents/channel.json?ref=${CUTOVER_DATA_BRANCH}" --jq '.content' | tr -d '\n' | base64 -d > /tmp/channel.json
           gh api "repos/${GITHUB_REPOSITORY}/contents/fresh-replacement-base-summary.json?ref=${CUTOVER_DATA_BRANCH}" --jq '.content' | tr -d '\n' | base64 -d > /tmp/base-summary.json
           gh api "repos/${GITHUB_REPOSITORY}/contents/read-model/manifest.json?ref=${CUTOVER_DATA_BRANCH}" --jq '.content' | tr -d '\n' | base64 -d > /tmp/read-model-manifest.json
+          jq -e --arg payload "$CUTOVER_PAYLOAD_COMMIT" --arg snapshot "$TARGET_SNAPSHOT" --arg manifest "$TARGET_MANIFEST" '
+            .active.dataCommitSha == $payload and .active.snapshotId == $snapshot and .active.manifestSha256 == $manifest and .active.manifestPath == "read-model/manifest.json"
+          ' /tmp/channel.json >/dev/null
           jq -e --arg epoch "$TARGET_EPOCH" --arg snapshot "$TARGET_SNAPSHOT" --arg hash "$TARGET_HASH" --arg manifest "$TARGET_MANIFEST" --argjson ledger "$TARGET_LEDGER" '
             .epochId == $epoch and .snapshotId == $snapshot and .ledgerIndex == $ledger and .ledgerHash == $hash and .manifestSha256 == $manifest
           ' /tmp/base-summary.json >/dev/null
@@ -116,6 +116,7 @@ jobs:
             and .checks.foldableCompactZero == true
             and .checks.compactRowsDoNotExceedFastCursor == true
             and .checks.latestMetricCommittedAtCursor == true
+            and .checks.replacementBaseReplaySafe == true
             and .state.queue.deliveryPaused == false
           ' "$result" >/dev/null
           auth="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
@@ -171,7 +172,7 @@ jobs:
           Read-only stable-state digest: \`${STATE}\`
           Manager SHA-256: \`${MANAGER}\`
 
-          This authorization performs a production mutation. It pauses Queue delivery, uploads and deploys one Worker version using the already-reviewed runtime source plus the pinned fresh Current target, injects a one-run random replacement-base cutover secret into that version, proves the deployed dry-run is exactly \`rebase / advance_to_target\`, applies the replacement-base cutover, resets/binds the fast-lane base, and leaves Queue delivery paused. It does not resume Queue delivery, enqueue a message, create a Cron, enable Mainnet, mutate Supabase History, or claim Current recovery.
+          Merging this control does not change production runtime configuration. This authorization performs the production mutation: pause Queue delivery; create a temporary fresh-target Wrangler config only inside this Actions job; upload/deploy one Worker version with a one-run random cutover secret; prove the deployed target is exactly \`rebase / advance_to_target\`; apply the replacement-base cutover; and leave Queue delivery paused. It does not resume Queue delivery, enqueue a message, create a Cron, enable Mainnet, mutate Supabase History, or claim Current recovery.
 
           Exact authorization command:
 
@@ -259,6 +260,7 @@ jobs:
 
       - name: Install dependencies and build deploy assets
         run: |
+          set -euo pipefail
           pnpm install --frozen-lockfile
           pnpm build:deploy-assets
 
@@ -271,6 +273,8 @@ jobs:
           set -euo pipefail
           ROOT=current-fresh-cutover-execute
           mkdir -p "$ROOT/preflight"
+          git fetch --no-tags --depth=1 origin "$RUNTIME_SOURCE_SHA"
+          git diff --quiet "$RUNTIME_SOURCE_SHA" HEAD -- src wrangler.jsonc package.json pnpm-lock.yaml
           head="$(gh api "repos/${GITHUB_REPOSITORY}/branches/${CUTOVER_DATA_BRANCH}" --jq '.commit.sha')"
           test "$head" = "$CUTOVER_DATA_COMMIT"
           set +e
@@ -279,7 +283,7 @@ jobs:
           set -e
           result="$ROOT/preflight/result.json"
           test "$preflight_rc" -eq 1
-          jq -e '.failures == ["queueDeliveryPaused"] and .state.queue.deliveryPaused == false and .checks.noPendingQueueSlot == true and .checks.noLiveUnstagedProcessingSlot == true and .checks.noStagedSuccessorSlot == true and .checks.schedulerStillDisabled == true' "$result" >/dev/null
+          jq -e '.failures == ["queueDeliveryPaused"] and .state.queue.deliveryPaused == false and .checks.replacementBaseReplaySafe == true and .checks.noPendingQueueSlot == true and .checks.noLiveUnstagedProcessingSlot == true and .checks.noStagedSuccessorSlot == true and .checks.schedulerStillDisabled == true' "$result" >/dev/null
           deployment="$(jq -r '.state.deployment.versions[0].version_id' "$result")"
           test "$deployment" = "$AUTHORIZED_DEPLOYMENT"
           auth="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
@@ -305,6 +309,35 @@ jobs:
             > "$ROOT/stable-state-before.json"
           test "$(sha256sum "$ROOT/stable-state-before.json" | awk '{print $1}')" = "$AUTHORIZED_STATE"
 
+      - name: Build ephemeral fresh-target runtime config
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq \
+            --arg branch "$CUTOVER_DATA_BRANCH" \
+            --arg epoch "$TARGET_EPOCH" \
+            --arg snapshot "$TARGET_SNAPSHOT" \
+            --arg ledger "$TARGET_LEDGER" \
+            --arg hash "$TARGET_HASH" '
+              .vars.CURRENT_STATE_GITHUB_BRANCH = $branch
+              | .vars.CURRENT_STATE_REPLACEMENT_SNAPSHOT_ID = $snapshot
+              | .vars.CURRENT_STATE_REPLACEMENT_GITHUB_BRANCH = $branch
+              | .vars.REPLACEMENT_BASE_REBASE_ENABLED = "true"
+              | .vars.REPLACEMENT_BASE_EPOCH_ID = $epoch
+              | .vars.REPLACEMENT_BASE_SNAPSHOT_ID = $snapshot
+              | .vars.REPLACEMENT_BASE_LEDGER_INDEX = $ledger
+              | .vars.REPLACEMENT_BASE_LEDGER_HASH = $hash
+            ' wrangler.jsonc > .wrangler-fresh-cutover.json
+          test "$(jq -r '.triggers.crons | length' .wrangler-fresh-cutover.json)" -eq 0
+          test "$(jq -r '.vars.APP_NETWORK' .wrangler-fresh-cutover.json)" = devnet
+          test "$(jq -r '.vars.MAINNET_ENABLED' .wrangler-fresh-cutover.json)" = false
+          test "$(jq -r '.vars.CURRENT_STATE_GITHUB_BRANCH' .wrangler-fresh-cutover.json)" = "$CUTOVER_DATA_BRANCH"
+          test "$(jq -r '.vars.CURRENT_STATE_REPLACEMENT_SNAPSHOT_ID' .wrangler-fresh-cutover.json)" = "$TARGET_SNAPSHOT"
+          test "$(jq -r '.vars.REPLACEMENT_BASE_EPOCH_ID' .wrangler-fresh-cutover.json)" = "$TARGET_EPOCH"
+          test "$(jq -r '.vars.REPLACEMENT_BASE_SNAPSHOT_ID' .wrangler-fresh-cutover.json)" = "$TARGET_SNAPSHOT"
+          test "$(jq -r '.vars.REPLACEMENT_BASE_LEDGER_INDEX' .wrangler-fresh-cutover.json)" = "$TARGET_LEDGER"
+          test "$(jq -r '.vars.REPLACEMENT_BASE_LEDGER_HASH' .wrangler-fresh-cutover.json)" = "$TARGET_HASH"
+
       - name: Pause Queue, deploy fresh runtime, and apply cutover
         id: mutate
         env:
@@ -316,14 +349,15 @@ jobs:
           mkdir -p "$ROOT"
           auth="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
           qbase="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/queues/${QUEUE_ID}"
-          deployed=false
+          deployment_attempted=false
           cutover_applied=false
           rollback() {
             rc=$?
-            if test "$deployed" = true && test "$cutover_applied" = false; then
+            if test "$deployment_attempted" = true && test "$cutover_applied" = false; then
               pnpm exec wrangler versions deploy "${OLD_VERSION}@100%" --yes || true
             fi
             curl -fsS -X PATCH -H "$auth" -H 'Content-Type: application/json' "$qbase" -d '{"settings":{"delivery_paused":true}}' >/dev/null || true
+            rm -f .wrangler-fresh-cutover.json
             exit "$rc"
           }
           trap rollback ERR
@@ -335,12 +369,12 @@ jobs:
           cutover_token="$(openssl rand -hex 32)"
           secret_file="$(mktemp)"
           jq -n --arg token "$cutover_token" '{REPLACEMENT_BASE_CUTOVER_TOKEN:$token}' > "$secret_file"
-          pnpm exec wrangler versions upload --secrets-file "$secret_file" --message "Fresh Current replacement cutover ${TARGET_LEDGER}" | tee "$ROOT/version-upload.txt"
+          pnpm exec wrangler versions upload --config .wrangler-fresh-cutover.json --secrets-file "$secret_file" --message "Fresh Current replacement cutover ${TARGET_LEDGER}" | tee "$ROOT/version-upload.txt"
           rm -f "$secret_file"
           new_version="$(grep -Eio '[0-9a-f]{8}-[0-9a-f-]{27,}' "$ROOT/version-upload.txt" | tail -1)"
           test -n "$new_version"
+          deployment_attempted=true
           pnpm exec wrangler versions deploy "${new_version}@100%" --yes | tee "$ROOT/version-deploy.txt"
-          deployed=true
 
           curl -fsS "$PRODUCTION_BASE/api/status/replacement-base-rebase" | tee "$ROOT/deployed-dry-run.json" >/dev/null
           jq -e --arg epoch "$TARGET_EPOCH" --arg snapshot "$TARGET_SNAPSHOT" --arg hash "$TARGET_HASH" --argjson ledger "$TARGET_LEDGER" '
@@ -366,6 +400,7 @@ jobs:
             and .target.ledgerHash == $hash
           ' "$ROOT/cutover-response.json" >/dev/null
           cutover_applied=true
+          rm -f .wrangler-fresh-cutover.json
           trap - ERR
           echo "new_version=$new_version" >> "$GITHUB_OUTPUT"
 
@@ -427,10 +462,9 @@ jobs:
           Passed: \`${passed}\`
           Deployed version: \`${version}\`
           Target: \`${TARGET_LEDGER} / ${TARGET_SNAPSHOT}\`
-          Queue remains paused: \`true\`
           Current recovered: \`false\`
 
-          A separate fresh-delivery authorization and proof is required before Current can be called recovered.
+          The execute path is designed to leave Queue delivery paused on both success and failure. A separate read-only Queue proof and separate fresh-delivery authorization are required before Current can be called recovered.
           EOF
           gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/fresh-cutover-result.md
 
