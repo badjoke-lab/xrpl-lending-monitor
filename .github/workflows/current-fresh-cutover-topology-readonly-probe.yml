@@ -1,0 +1,77 @@
+name: Current fresh cutover topology read-only probe
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: current-fresh-cutover-topology-readonly-probe
+  cancel-in-progress: false
+
+env:
+  QUEUE_ID: 2ae398f2edbf43749e45cd7ede77c6cd
+  DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
+  PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+jobs:
+  probe:
+    if: >-
+      github.event.issue.number == 995 &&
+      github.event.comment.user.login == 'badjoke-lab' &&
+      github.event.comment.body == '/current-fresh-cutover-topology-probe'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Capture topology with existing read-only preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=current-fresh-cutover-topology-readonly-probe
+          mkdir -p "${ROOT}"
+          set +e
+          CURRENT_RESTART_PREFLIGHT_OUTPUT="${ROOT}" python scripts/current-restart-preflight.py
+          rc=$?
+          set -e
+          test -f "${ROOT}/result.json"
+          test "$(jq -r '.productionMutation' "${ROOT}/result.json")" = false
+          jq -n \
+            --arg implementationCommit "$(git rev-parse HEAD)" \
+            --slurpfile result "${ROOT}/result.json" '
+              $result[0] as $r |
+              {
+                passed:true,
+                productionMutation:false,
+                implementationCommit:$implementationCommit,
+                legacyPreflightExitCode:'"${rc}"',
+                deploymentVersion:($r.state.deployment.versions[0].version_id // null),
+                deploymentVersions:($r.state.deployment.versions // []),
+                schedules:($r.state.schedules // []),
+                queue:$r.state.queue,
+                queueSlotCounts:$r.state.queueSlotCounts,
+                processingSlots:$r.state.processingSlots,
+                fastLane:$r.state.fastLane,
+                latestMetric:$r.state.latestMetric,
+                checks:$r.checks,
+                failures:$r.failures
+              }
+            ' | tee "${ROOT}/topology-summary.json"
+
+      - name: Upload topology evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: current-fresh-cutover-topology-readonly-probe
+          path: current-fresh-cutover-topology-readonly-probe
+          if-no-files-found: warn
+          retention-days: 30
