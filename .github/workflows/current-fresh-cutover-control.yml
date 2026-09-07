@@ -123,8 +123,12 @@ jobs:
           qbase="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/queues/${QUEUE_ID}"
           curl -fsS -H "$auth" "$qbase/metrics" | tee "$ROOT/queue-metrics.json" >/dev/null
           curl -fsS -X POST -H "$auth" -H 'Content-Type: application/json' "$qbase/messages/peek" -d '{"batch_size":2}' | tee "$ROOT/queue-peek.json" >/dev/null
-          jq -e '.success == true and (.result.backlog_count // 0) == 0 and (.result.backlog_bytes // 0) == 0' "$ROOT/queue-metrics.json" >/dev/null
-          jq -e '.success == true and ((.result.messages // .result // []) | length) == 0' "$ROOT/queue-peek.json" >/dev/null
+          python scripts/current-fresh-cutover-queue-proof.py \
+            --mode prepare \
+            --preflight "$result" \
+            --metrics "$ROOT/queue-metrics.json" \
+            --peek "$ROOT/queue-peek.json" \
+            --output "$ROOT/queue-proof.json"
           deployment="$(jq -r '.state.deployment.versions[0].version_id' "$result")"
           test -n "$deployment"
           jq -n -S \
@@ -140,12 +144,15 @@ jobs:
             --argjson pending "$(jq -r '.state.queueSlotCounts.pending // 0' "$result")" \
             --argjson live "$(jq -r '.state.processingSlots.liveUnstaged' "$result")" \
             --argjson staged "$(jq -r '.state.processingSlots.stagedSuccessor' "$result")" \
-            '{sourceCommit:$sourceCommit,candidateCommit:$candidateCommit,deployment:$deployment,target:$target,snapshot:$snapshot,manifest:$manifest,fastLedger:$fastLedger,fastHash:$fastHash,metricRunAt:$metricRunAt,pending:$pending,live:$live,staged:$staged,queuePaused:false,backlog:0,messages:0,schedules:0}' \
+            --argjson backlogBytes "$(jq -r '.backlogBytes' "$ROOT/queue-proof.json")" \
+            --argjson successorScheduledTime "$(jq -r '.successorScheduledTime' "$ROOT/queue-proof.json")" \
+            '{sourceCommit:$sourceCommit,candidateCommit:$candidateCommit,deployment:$deployment,target:$target,snapshot:$snapshot,manifest:$manifest,fastLedger:$fastLedger,fastHash:$fastHash,metricRunAt:$metricRunAt,pending:$pending,live:$live,staged:$staged,queuePaused:false,backlogCount:0,backlogBytes:$backlogBytes,messages:0,schedules:0,delayedSuccessorScheduledTime:$successorScheduledTime}' \
             > "$ROOT/stable-state.json"
           digest="$(sha256sum "$ROOT/stable-state.json" | awk '{print $1}')"
           manager="$(sha256sum .github/workflows/current-fresh-cutover-control.yml | awk '{print $1}')"
-          printf 'source_commit=%s\ncandidate_commit=%s\ndeployment=%s\nstate=%s\nmanager=%s\n' \
-            "$(git rev-parse HEAD)" "$CUTOVER_DATA_COMMIT" "$deployment" "$digest" "$manager" >> "$GITHUB_OUTPUT"
+          printf 'source_commit=%s\ncandidate_commit=%s\ndeployment=%s\nstate=%s\nmanager=%s\nsuccessor_deadline_ms=%s\n' \
+            "$(git rev-parse HEAD)" "$CUTOVER_DATA_COMMIT" "$deployment" "$digest" "$manager" \
+            "$(jq -r '.successorScheduledTime' "$ROOT/queue-proof.json")" >> "$GITHUB_OUTPUT"
 
       - name: Publish exact fresh cutover authorization proposal
         env:
@@ -154,10 +161,20 @@ jobs:
           DEPLOYMENT: ${{ steps.state.outputs.deployment }}
           STATE: ${{ steps.state.outputs.state }}
           MANAGER: ${{ steps.state.outputs.manager }}
+          SUCCESSOR_DEADLINE_MS: ${{ steps.state.outputs.successor_deadline_ms }}
         shell: bash
         run: |
           set -euo pipefail
-          expires="$(date -u -d '+2 hours' '+%Y-%m-%dT%H:%M:%SZ')"
+          now_epoch="$(date -u +%s)"
+          expires_epoch=$((now_epoch + 2 * 60 * 60))
+          if test "$SUCCESSOR_DEADLINE_MS" -gt 0; then
+            successor_safe_epoch=$((SUCCESSOR_DEADLINE_MS / 1000 - 20 * 60))
+            if test "$successor_safe_epoch" -lt "$expires_epoch"; then
+              expires_epoch="$successor_safe_epoch"
+            fi
+          fi
+          test "$expires_epoch" -gt "$now_epoch"
+          expires="$(date -u -d "@${expires_epoch}" '+%Y-%m-%dT%H:%M:%SZ')"
           nonce="$(openssl rand -hex 8)"
           command="/current-fresh-cutover-authorize commit=${SOURCE_COMMIT} manager=${MANAGER} state=${STATE} candidate=${CANDIDATE_COMMIT} deployment=${DEPLOYMENT} target=${TARGET_LEDGER} snapshot=${TARGET_SNAPSHOT} manifest=${TARGET_MANIFEST} prepare_run=${GITHUB_RUN_ID} expires=${expires} nonce=${nonce}"
           cat > /tmp/fresh-cutover-proposal.md <<EOF
@@ -290,8 +307,12 @@ jobs:
           qbase="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/queues/${QUEUE_ID}"
           curl -fsS -H "$auth" "$qbase/metrics" > "$ROOT/queue-metrics-before.json"
           curl -fsS -X POST -H "$auth" -H 'Content-Type: application/json' "$qbase/messages/peek" -d '{"batch_size":2}' > "$ROOT/queue-peek-before.json"
-          jq -e '.success == true and (.result.backlog_count // 0) == 0 and (.result.backlog_bytes // 0) == 0' "$ROOT/queue-metrics-before.json" >/dev/null
-          jq -e '.success == true and ((.result.messages // .result // []) | length) == 0' "$ROOT/queue-peek-before.json" >/dev/null
+          python scripts/current-fresh-cutover-queue-proof.py \
+            --mode execute \
+            --preflight "$result" \
+            --metrics "$ROOT/queue-metrics-before.json" \
+            --peek "$ROOT/queue-peek-before.json" \
+            --output "$ROOT/queue-proof-before.json"
           jq -n -S \
             --arg sourceCommit "$(git rev-parse HEAD)" \
             --arg candidateCommit "$CUTOVER_DATA_COMMIT" \
@@ -305,7 +326,9 @@ jobs:
             --argjson pending "$(jq -r '.state.queueSlotCounts.pending // 0' "$result")" \
             --argjson live "$(jq -r '.state.processingSlots.liveUnstaged' "$result")" \
             --argjson staged "$(jq -r '.state.processingSlots.stagedSuccessor' "$result")" \
-            '{sourceCommit:$sourceCommit,candidateCommit:$candidateCommit,deployment:$deployment,target:$target,snapshot:$snapshot,manifest:$manifest,fastLedger:$fastLedger,fastHash:$fastHash,metricRunAt:$metricRunAt,pending:$pending,live:$live,staged:$staged,queuePaused:false,backlog:0,messages:0,schedules:0}' \
+            --argjson backlogBytes "$(jq -r '.backlogBytes' "$ROOT/queue-proof-before.json")" \
+            --argjson successorScheduledTime "$(jq -r '.successorScheduledTime' "$ROOT/queue-proof-before.json")" \
+            '{sourceCommit:$sourceCommit,candidateCommit:$candidateCommit,deployment:$deployment,target:$target,snapshot:$snapshot,manifest:$manifest,fastLedger:$fastLedger,fastHash:$fastHash,metricRunAt:$metricRunAt,pending:$pending,live:$live,staged:$staged,queuePaused:false,backlogCount:0,backlogBytes:$backlogBytes,messages:0,schedules:0,delayedSuccessorScheduledTime:$successorScheduledTime}' \
             > "$ROOT/stable-state-before.json"
           test "$(sha256sum "$ROOT/stable-state-before.json" | awk '{print $1}')" = "$AUTHORIZED_STATE"
 
