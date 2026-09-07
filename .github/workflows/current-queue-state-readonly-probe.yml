@@ -25,7 +25,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - name: Read Queue state and peek without state assertions
+      - name: Read Queue state, metrics, and peek without state assertions
         shell: bash
         run: |
           set -euo pipefail
@@ -34,25 +34,42 @@ jobs:
           auth="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
           base="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/queues/${QUEUE_ID}"
 
-          curl -fsS -H "$auth" "$base" | tee "${ROOT}/queue.json" >/dev/null
-          jq -e '.success == true' "${ROOT}/queue.json" >/dev/null
-
-          curl -fsS -X POST -H "$auth" -H 'Content-Type: application/json' \
-            "$base/messages/peek" -d '{"batch_size":2}' | tee "${ROOT}/peek.json" >/dev/null
-          jq -e '.success == true' "${ROOT}/peek.json" >/dev/null
+          queue_http="$(curl -sS -o "${ROOT}/queue.json" -w '%{http_code}' -H "$auth" "$base")"
+          metrics_http="$(curl -sS -o "${ROOT}/metrics.json" -w '%{http_code}' -H "$auth" "$base/metrics")"
+          peek_http="$(curl -sS -o "${ROOT}/peek.json" -w '%{http_code}' -X POST -H "$auth" -H 'Content-Type: application/json' \
+            "$base/messages/peek" -d '{"batch_size":2}')"
 
           jq -n \
+            --argjson queueHttp "$queue_http" \
+            --argjson metricsHttp "$metrics_http" \
+            --argjson peekHttp "$peek_http" \
             --slurpfile queue "${ROOT}/queue.json" \
+            --slurpfile metrics "${ROOT}/metrics.json" \
             --slurpfile peek "${ROOT}/peek.json" '
               ($peek[0].result.messages // $peek[0].result // []) as $messages |
               {
-                passed:true,
+                passed:($queueHttp == 200 and $peekHttp == 200),
                 productionMutation:false,
-                deliveryPaused:$queue[0].result.settings.delivery_paused,
+                queueHttp:$queueHttp,
+                metricsHttp:$metricsHttp,
+                peekHttp:$peekHttp,
+                queueSuccess:($queue[0].success // false),
+                metricsSuccess:($metrics[0].success // false),
+                peekSuccess:($peek[0].success // false),
+                deliveryPaused:($queue[0].result.settings.delivery_paused // null),
+                backlogCount:($metrics[0].result.backlog_count // null),
+                backlogBytes:($metrics[0].result.backlog_bytes // null),
+                oldestMessageTimestampMs:($metrics[0].result.oldest_message_timestamp_ms // null),
                 messageCount:($messages | length),
-                messages:($messages | map({id,body}))
+                messages:($messages | map({id,body})),
+                metricsErrors:($metrics[0].errors // [])
               }
             ' | tee "${ROOT}/result.json"
+
+          test "$queue_http" -eq 200
+          test "$peek_http" -eq 200
+          jq -e '.success == true' "${ROOT}/queue.json" >/dev/null
+          jq -e '.success == true' "${ROOT}/peek.json" >/dev/null
 
       - name: Upload Queue state evidence
         if: always()
