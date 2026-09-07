@@ -1,0 +1,247 @@
+name: Current fresh cutover propagation retry v2
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+  actions: read
+
+concurrency:
+  group: >-
+    ${{
+      github.event.issue.number == 995 &&
+      github.event.comment.user.login == 'badjoke-lab' &&
+      github.event.comment.body == '/current-fresh-cutover-propagation-retry-v2' &&
+      'current-fresh-cutover-production-write' ||
+      format('current-fresh-cutover-propagation-retry-v2-noop-{0}', github.run_id)
+    }}
+  cancel-in-progress: false
+
+env:
+  QUALIFICATION_ISSUE: '995'
+  QUEUE_ID: 2ae398f2edbf43749e45cd7ede77c6cd
+  DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
+  PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+  RUNTIME_SOURCE_SHA: 07af3846ac056b892a23ef6146cc986bdf753dc1
+  EXPECTED_OLD_VERSION: 6c9af7da-863e-4afa-8711-fd28d18bc05e
+  CUTOVER_DATA_BRANCH: current-state-fresh-replacement-cutover-data
+  CUTOVER_DATA_COMMIT: 4fad78c2b8e5dc6e83363d9c8239bbfd6010e352
+  TARGET_EPOCH: devnet-3371675
+  TARGET_SNAPSHOT: devnet-5101160-ea7a044b3eea
+  TARGET_LEDGER: '5101160'
+  TARGET_HASH: EA7A044B3EEA548AA9C12831104CA8AFEB6FE14C0FE96CA95E96E8C789234401
+  EXPECTED_SUCCESSOR: '1788788700000'
+  EXPECTED_QUEUE_BYTES: '95'
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  execute:
+    if: >-
+      github.event.issue.number == 995 &&
+      github.event.comment.user.login == 'badjoke-lab' &&
+      github.event.comment.body == '/current-fresh-cutover-propagation-retry-v2'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Re-prove paused rollback state and exact delayed successor
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=current-fresh-cutover-propagation-retry-v2
+          mkdir -p "$ROOT/preflight"
+          git fetch --no-tags --depth=1 origin "$RUNTIME_SOURCE_SHA"
+          git diff --quiet "$RUNTIME_SOURCE_SHA" HEAD -- src wrangler.jsonc package.json pnpm-lock.yaml
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/branches/${CUTOVER_DATA_BRANCH}" --jq '.commit.sha')" = "$CUTOVER_DATA_COMMIT"
+
+          CURRENT_RESTART_PREFLIGHT_OUTPUT="$ROOT/preflight" python scripts/current-restart-preflight.py
+          result="$ROOT/preflight/result.json"
+          jq -e '
+            .productionMutation == false
+            and .safeToDeployRepair == true
+            and .checks.devnetOnly == true
+            and .checks.queueDeliveryPaused == true
+            and .checks.schedulerStillDisabled == true
+            and .checks.singleDeploymentVersion == true
+            and .checks.noLiveUnstagedProcessingSlot == true
+            and .checks.noStagedSuccessorSlot == true
+            and .checks.noPendingQueueSlot == true
+            and .checks.staleOverlayZero == true
+            and .checks.foldableCompactZero == true
+            and .checks.latestMetricCommittedAtCursor == true
+            and .checks.replacementBaseReplaySafe == true
+          ' "$result" >/dev/null
+          test "$(jq -r '.state.deployment.versions[0].version_id' "$result")" = "$EXPECTED_OLD_VERSION"
+
+          auth="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          qbase="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/queues/${QUEUE_ID}"
+          curl -fsS -H "$auth" "$qbase/metrics" > "$ROOT/queue-metrics.json"
+          jq -e --argjson bytes "$EXPECTED_QUEUE_BYTES" '.success == true and (.result.backlog_count // -1) == 0 and (.result.backlog_bytes // -1) == $bytes' "$ROOT/queue-metrics.json" >/dev/null
+          curl -fsS -X POST -H "$auth" -H 'Content-Type: application/json' "$qbase/messages/peek" -d '{"batch_size":2}' > "$ROOT/queue-peek.json"
+          jq -e '.success == true and ((.result.messages // .result // []) | length) == 0' "$ROOT/queue-peek.json" >/dev/null
+
+          api="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database/${DATABASE_ID}/query"
+          sql="SELECT scheduled_time,status,started_at,completed_at,next_scheduled_time,error_message,updated_at FROM fast_lane_queue_slots WHERE status='completed' AND next_scheduled_time=${EXPECTED_SUCCESSOR}"
+          curl -fsS -H "$auth" -H 'Content-Type: application/json' "$api" -d "$(jq -n --arg sql "$sql" '{sql:$sql}')" > "$ROOT/future-successor.json"
+          jq -e --argjson successor "$EXPECTED_SUCCESSOR" '
+            .success == true
+            and .result[0].success == true
+            and (.result[0].results | length) == 1
+            and .result[0].results[0].status == "completed"
+            and .result[0].results[0].error_message == null
+            and .result[0].results[0].next_scheduled_time == $successor
+            and (.result[0].results[0].next_scheduled_time - .result[0].results[0].scheduled_time) == 14400000
+          ' "$ROOT/future-successor.json" >/dev/null
+          now_ms="$(( $(date -u +%s) * 1000 ))"
+          test "$EXPECTED_SUCCESSOR" -ge "$((now_ms + 900000))"
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+
+      - name: Build deploy assets and exact fresh config
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
+          pnpm build:deploy-assets
+          jq --arg branch "$CUTOVER_DATA_BRANCH" --arg epoch "$TARGET_EPOCH" --arg snapshot "$TARGET_SNAPSHOT" --arg ledger "$TARGET_LEDGER" --arg hash "$TARGET_HASH" '
+            .vars.CURRENT_STATE_GITHUB_BRANCH = $branch
+            | .vars.CURRENT_STATE_REPLACEMENT_SNAPSHOT_ID = $snapshot
+            | .vars.CURRENT_STATE_REPLACEMENT_GITHUB_BRANCH = $branch
+            | .vars.REPLACEMENT_BASE_REBASE_ENABLED = "true"
+            | .vars.REPLACEMENT_BASE_EPOCH_ID = $epoch
+            | .vars.REPLACEMENT_BASE_SNAPSHOT_ID = $snapshot
+            | .vars.REPLACEMENT_BASE_LEDGER_INDEX = $ledger
+            | .vars.REPLACEMENT_BASE_LEDGER_HASH = $hash
+          ' wrangler.jsonc > .wrangler-fresh-cutover-propagation-retry-v2.json
+          test "$(jq -r '.triggers.crons | length' .wrangler-fresh-cutover-propagation-retry-v2.json)" -eq 0
+          test "$(jq -r '.vars.APP_NETWORK' .wrangler-fresh-cutover-propagation-retry-v2.json)" = devnet
+          test "$(jq -r '.vars.MAINNET_ENABLED' .wrangler-fresh-cutover-propagation-retry-v2.json)" = false
+          test "$(jq -r '.vars.REPLACEMENT_BASE_LEDGER_INDEX' .wrangler-fresh-cutover-propagation-retry-v2.json)" = "$TARGET_LEDGER"
+
+      - name: Prove preview, deploy, wait for production propagation, apply cutover, verify
+        id: mutate
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=current-fresh-cutover-propagation-retry-v2
+          auth="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          qbase="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/queues/${QUEUE_ID}"
+          deployment_attempted=false
+          cutover_applied=false
+          rollback() {
+            rc=$?
+            if test "$deployment_attempted" = true && test "$cutover_applied" = false; then
+              pnpm exec wrangler versions deploy "${EXPECTED_OLD_VERSION}@100%" --yes || true
+            fi
+            curl -fsS -X PATCH -H "$auth" -H 'Content-Type: application/json' "$qbase" -d '{"settings":{"delivery_paused":true}}' >/dev/null || true
+            rm -f "${secret_file:-}" .wrangler-fresh-cutover-propagation-retry-v2.json
+            exit "$rc"
+          }
+          trap rollback ERR
+
+          curl -fsS -H "$auth" "$qbase" | tee "$ROOT/queue-before-mutation.json" | jq -e '.success == true and .result.settings.delivery_paused == true' >/dev/null
+
+          umask 077
+          cutover_token="$(openssl rand -hex 32)"
+          secret_file="$(mktemp)"
+          jq -n --arg token "$cutover_token" '{REPLACEMENT_BASE_CUTOVER_TOKEN:$token}' > "$secret_file"
+          pnpm exec wrangler versions upload --config .wrangler-fresh-cutover-propagation-retry-v2.json --secrets-file "$secret_file" --message "Fresh Current propagation retry v2 ${TARGET_LEDGER}" | tee "$ROOT/version-upload.txt"
+          rm -f "$secret_file"
+          new_version="$(grep -Eio '[0-9a-f]{8}-[0-9a-f-]{27,}' "$ROOT/version-upload.txt" | tail -1)"
+          test -n "$new_version"
+
+          preview="https://${new_version}-xrpl-lending-monitor.badjoke-lab.workers.dev/api/status/replacement-base-rebase"
+          preview_ready=false
+          for attempt in $(seq 1 15); do
+            curl -fsS "$preview" > "$ROOT/preview-dry-run.json" || true
+            if jq -e --arg epoch "$TARGET_EPOCH" --arg snapshot "$TARGET_SNAPSHOT" --arg hash "$TARGET_HASH" --argjson ledger "$TARGET_LEDGER" '.status == "ready" and .plan.action == "rebase" and .plan.cursorMode == "advance_to_target" and .target.epochId == $epoch and .target.snapshotId == $snapshot and .target.ledgerIndex == $ledger and .target.ledgerHash == $hash' "$ROOT/preview-dry-run.json" >/dev/null 2>&1; then
+              preview_ready=true
+              break
+            fi
+            sleep 2
+          done
+          test "$preview_ready" = true
+
+          deployment_attempted=true
+          pnpm exec wrangler versions deploy "${new_version}@100%" --yes | tee "$ROOT/version-deploy.txt"
+
+          propagated=false
+          for attempt in $(seq 1 45); do
+            curl -fsS "$PRODUCTION_BASE/api/status/replacement-base-rebase" > "$ROOT/deployed-dry-run.json" || true
+            cp "$ROOT/deployed-dry-run.json" "$ROOT/deployed-dry-run-${attempt}.json" 2>/dev/null || true
+            if jq -e --arg epoch "$TARGET_EPOCH" --arg snapshot "$TARGET_SNAPSHOT" --arg hash "$TARGET_HASH" --argjson ledger "$TARGET_LEDGER" '.status == "ready" and .plan.action == "rebase" and .plan.cursorMode == "advance_to_target" and .target.epochId == $epoch and .target.snapshotId == $snapshot and .target.ledgerIndex == $ledger and .target.ledgerHash == $hash' "$ROOT/deployed-dry-run.json" >/dev/null 2>&1; then
+              propagated=true
+              break
+            fi
+            sleep 2
+          done
+          test "$propagated" = true
+
+          curl -fsS -X POST -H "x-replacement-base-cutover-token: ${cutover_token}" "$PRODUCTION_BASE/api/operator/replacement-base-cutover" > "$ROOT/cutover-response.json"
+          jq -e --arg epoch "$TARGET_EPOCH" --arg snapshot "$TARGET_SNAPSHOT" --arg hash "$TARGET_HASH" --argjson ledger "$TARGET_LEDGER" '.status == "cutover_applied" and .network == "devnet" and .rebase.status == "rebased" and .rebase.plan.action == "rebase" and .rebase.plan.cursorMode == "advance_to_target" and .target.epochId == $epoch and .target.snapshotId == $snapshot and .target.ledgerIndex == $ledger and .target.ledgerHash == $hash' "$ROOT/cutover-response.json" >/dev/null
+          cutover_applied=true
+
+          api="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database/${DATABASE_ID}/query"
+          query() { curl -fsS -H "$auth" -H 'Content-Type: application/json' "$api" -d "$(jq -n --arg sql "$1" '{sql:$sql}')"; }
+          curl -fsS -H "$auth" "$qbase" > "$ROOT/queue-after.json"
+          jq -e '.success == true and .result.settings.delivery_paused == true' "$ROOT/queue-after.json" >/dev/null
+          query "SELECT COUNT(*) AS row_count FROM fast_lane_queue_slots WHERE status='completed' AND next_scheduled_time=${EXPECTED_SUCCESSOR}" > "$ROOT/delayed-successor-after.json"
+          jq -e '.success == true and .result[0].success == true and .result[0].results[0].row_count == 1' "$ROOT/delayed-successor-after.json" >/dev/null
+          query "SELECT epoch_id,last_processed_ledger,last_processed_hash FROM sync_state WHERE network='devnet'" > "$ROOT/sync-after.json"
+          query "SELECT epoch_id,base_snapshot_id,base_ledger_index,base_ledger_hash,overlay_ledger_index,overlay_ledger_hash FROM current_state_overlay_state WHERE network='devnet' AND base_snapshot_id='${TARGET_SNAPSHOT}' ORDER BY updated_at DESC LIMIT 1" > "$ROOT/overlay-after.json"
+          query "SELECT COUNT(*) AS row_count FROM fast_lane_shadow_state" > "$ROOT/fast-state-count-after.json"
+          query "SELECT COUNT(*) AS row_count FROM fast_lane_shadow_objects_compact" > "$ROOT/compact-count-after.json"
+          jq -e --arg epoch "$TARGET_EPOCH" --arg hash "$TARGET_HASH" --argjson ledger "$TARGET_LEDGER" '.success == true and .result[0].results[0].epoch_id == $epoch and .result[0].results[0].last_processed_ledger == $ledger and .result[0].results[0].last_processed_hash == $hash' "$ROOT/sync-after.json" >/dev/null
+          jq -e --arg epoch "$TARGET_EPOCH" --arg snapshot "$TARGET_SNAPSHOT" --arg hash "$TARGET_HASH" --argjson ledger "$TARGET_LEDGER" '.success == true and .result[0].results[0].epoch_id == $epoch and .result[0].results[0].base_snapshot_id == $snapshot and .result[0].results[0].base_ledger_index == $ledger and .result[0].results[0].base_ledger_hash == $hash and .result[0].results[0].overlay_ledger_index == $ledger and .result[0].results[0].overlay_ledger_hash == $hash' "$ROOT/overlay-after.json" >/dev/null
+          jq -e '.success == true and .result[0].results[0].row_count == 0' "$ROOT/fast-state-count-after.json" >/dev/null
+          jq -e '.success == true and .result[0].results[0].row_count == 0' "$ROOT/compact-count-after.json" >/dev/null
+
+          replayed=false
+          for attempt in $(seq 1 20); do
+            curl -fsS "$PRODUCTION_BASE/api/status/replacement-base-rebase" > "$ROOT/replay-proof.json" || true
+            if jq -e --arg snapshot "$TARGET_SNAPSHOT" --arg hash "$TARGET_HASH" --argjson ledger "$TARGET_LEDGER" '.status == "replayed" and .plan.action == "replay" and .target.snapshotId == $snapshot and .target.ledgerIndex == $ledger and .target.ledgerHash == $hash' "$ROOT/replay-proof.json" >/dev/null 2>&1; then
+              replayed=true
+              break
+            fi
+            sleep 1
+          done
+          test "$replayed" = true
+
+          jq -n --arg newVersion "$new_version" --arg snapshot "$TARGET_SNAPSHOT" --argjson ledger "$TARGET_LEDGER" --argjson successor "$EXPECTED_SUCCESSOR" '{passed:true,productionMutation:true,newVersion:$newVersion,targetLedger:$ledger,targetSnapshot:$snapshot,queuePaused:true,queueResumed:false,queuePurged:false,delayedSuccessorPreserved:true,delayedSuccessorNextScheduledTime:$successor,currentRecovered:false,recoveryRequiresFreshDeliveryProof:true}' | tee "$ROOT/result.json"
+          rm -f .wrangler-fresh-cutover-propagation-retry-v2.json
+          trap - ERR
+          echo "new_version=$new_version" >> "$GITHUB_OUTPUT"
+
+      - name: Publish result
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          result=current-fresh-cutover-propagation-retry-v2/result.json
+          if test -f "$result"; then passed="$(jq -r '.passed' "$result")"; version="$(jq -r '.newVersion' "$result")"; else passed=false; version=unavailable; fi
+          gh issue comment "$QUALIFICATION_ISSUE" --repo "$GITHUB_REPOSITORY" --body "Fresh propagation-aware cutover v2 run \`${GITHUB_RUN_ID}\`: passed=\`${passed}\`, version=\`${version}\`, Current recovered=\`false\`. Queue remains paused pending fresh-delivery proof."
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: current-fresh-cutover-propagation-retry-v2
+          path: current-fresh-cutover-propagation-retry-v2
+          if-no-files-found: warn
+          retention-days: 30
