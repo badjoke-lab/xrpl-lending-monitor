@@ -44,7 +44,7 @@ auth="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
 qbase="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/queues/${QUEUE_ID}"
 curl -fsS -H "$auth" "$qbase/metrics" > "$STATE_ROOT/queue-metrics.json"
 curl -fsS -X POST -H "$auth" -H 'Content-Type: application/json' "$qbase/messages/peek" -d '{"batch_size":2}' > "$STATE_ROOT/queue-peek.json"
-jq -e '.success == true and (.result.backlog_count // -1) == 0 and (.result.backlog_bytes // 0) > 0' "$STATE_ROOT/queue-metrics.json" >/dev/null
+jq -e '.success == true and (.result.backlog_count // -1) == 0 and (.result.backlog_bytes // -1) == 95' "$STATE_ROOT/queue-metrics.json" >/dev/null
 jq -e '.success == true and ((.result.messages // .result // []) | length) == 0' "$STATE_ROOT/queue-peek.json" >/dev/null
 
 api="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database/${DATABASE_ID}/query"
@@ -62,14 +62,37 @@ jq -e '
 ' "$STATE_ROOT/future-successor.json" >/dev/null
 
 successor_next="$(jq -r '.result[0].results[0].next_scheduled_time' "$STATE_ROOT/future-successor.json")"
+jq -e --argjson successor "$successor_next" '
+  .state.fastLane.status == "behind"
+  and (.state.fastLane.latest_observed_ledger > .state.fastLane.last_processed_ledger)
+  and (.state.latestMetric.status == "committed")
+  and (.state.latestMetric.error_message == null)
+  and (.state.latestMetric.end_ledger_index == .state.fastLane.last_processed_ledger)
+  and (.state.latestSlots[0:3] | length) == 3
+  and (.state.latestSlots[0:3] as $slots
+    | all($slots[];
+        .status == "completed"
+        and .error_message == null
+        and ((.scheduled_time | type) == "number")
+        and ((.next_scheduled_time | type) == "number")
+        and (.next_scheduled_time - .scheduled_time == 14400000))
+    and ($slots[0].next_scheduled_time == $successor)
+    and ($slots[0].scheduled_time == $slots[1].next_scheduled_time)
+    and ($slots[1].scheduled_time == $slots[2].next_scheduled_time)
+    and (.state.latestMetric.run_at >= $slots[0].started_at)
+    and (.state.latestMetric.run_at <= $slots[0].completed_at))
+' "$result" >/dev/null
+
 now_ms="$(( $(date -u +%s) * 1000 ))"
-# Leave at least 15 minutes before the known delayed delivery can become eligible.
-test "$successor_next" -ge "$((now_ms + 900000))"
+# Keep the proof comfortably ahead of the known delayed delivery. The execute path
+# re-runs this exact proof before Queue pause, so late authorizations fail closed.
+test "$successor_next" -ge "$((now_ms + 1800000))"
 
 deployment="$(jq -r '.state.deployment.versions[0].version_id' "$result")"
 test -n "$deployment"
 backlog_count="$(jq -r '.result.backlog_count' "$STATE_ROOT/queue-metrics.json")"
 backlog_bytes="$(jq -r '.result.backlog_bytes' "$STATE_ROOT/queue-metrics.json")"
+chain_digest="$(jq -cS '.state.latestSlots[0:3] | map({scheduled_time,next_scheduled_time,status,started_at,completed_at,error_message,updated_at})' "$result" | sha256sum | awk '{print $1}')"
 
 jq -n -S \
   --arg sourceCommit "$(git rev-parse HEAD)" \
@@ -82,6 +105,7 @@ jq -n -S \
   --arg successorStatus "$(jq -r '.result[0].results[0].status' "$STATE_ROOT/future-successor.json")" \
   --arg successorCompletedAt "$(jq -r '.result[0].results[0].completed_at' "$STATE_ROOT/future-successor.json")" \
   --arg successorUpdatedAt "$(jq -r '.result[0].results[0].updated_at' "$STATE_ROOT/future-successor.json")" \
+  --arg successorChainDigest "$chain_digest" \
   --argjson target "$TARGET_LEDGER" \
   --argjson fastLedger "$(jq -r '.state.fastLane.last_processed_ledger' "$result")" \
   --argjson pending "$(jq -r '.state.queueSlotCounts.pending // 0' "$result")" \
@@ -91,7 +115,7 @@ jq -n -S \
   --argjson backlogBytes "$backlog_bytes" \
   --argjson successorScheduled "$(jq -r '.result[0].results[0].scheduled_time' "$STATE_ROOT/future-successor.json")" \
   --argjson successorNext "$successor_next" \
-  '{sourceCommit:$sourceCommit,candidateCommit:$candidateCommit,deployment:$deployment,target:$target,snapshot:$snapshot,manifest:$manifest,fastLedger:$fastLedger,fastHash:$fastHash,metricRunAt:$metricRunAt,pending:$pending,live:$live,staged:$staged,queuePaused:false,backlogCount:$backlogCount,backlogBytes:$backlogBytes,messagesVisible:0,schedules:0,delayedSuccessor:{status:$successorStatus,scheduledTime:$successorScheduled,nextScheduledTime:$successorNext,completedAt:$successorCompletedAt,updatedAt:$successorUpdatedAt,cadenceMs:14400000}}' \
+  '{sourceCommit:$sourceCommit,candidateCommit:$candidateCommit,deployment:$deployment,target:$target,snapshot:$snapshot,manifest:$manifest,fastLedger:$fastLedger,fastHash:$fastHash,metricRunAt:$metricRunAt,pending:$pending,live:$live,staged:$staged,queuePaused:false,backlogCount:$backlogCount,backlogBytes:$backlogBytes,messagesVisible:0,schedules:0,successorChainDigest:$successorChainDigest,delayedSuccessor:{status:$successorStatus,scheduledTime:$successorScheduled,nextScheduledTime:$successorNext,completedAt:$successorCompletedAt,updatedAt:$successorUpdatedAt,cadenceMs:14400000}}' \
   > "$STATE_ROOT/stable-state.json"
 
 jq -n -S \
