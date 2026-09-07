@@ -36,6 +36,7 @@ jq -e '
 ' "$result" >/dev/null
 
 deployment="$(jq -r '.state.deployment.versions[0].version_id' "$result")"
+echo "due-state deployment=$deployment expected=$EXPECTED_OLD_VERSION"
 test "$deployment" = "$EXPECTED_OLD_VERSION"
 
 auth="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
@@ -43,10 +44,14 @@ qbase="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/qu
 api="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database/${DATABASE_ID}/query"
 
 curl -fsS -H "$auth" "$qbase" > "$STATE_ROOT/queue.json"
+echo "due-state queuePaused=$(jq -r '.result.settings.delivery_paused' "$STATE_ROOT/queue.json")"
 jq -e '.success == true and .result.settings.delivery_paused == true' "$STATE_ROOT/queue.json" >/dev/null
 curl -fsS -H "$auth" "$qbase/metrics" > "$STATE_ROOT/queue-metrics.json"
+echo "due-state backlogCount=$(jq -r '.result.backlog_count' "$STATE_ROOT/queue-metrics.json") backlogBytes=$(jq -r '.result.backlog_bytes' "$STATE_ROOT/queue-metrics.json")"
 jq -e --argjson bytes "$EXPECTED_QUEUE_BYTES" '.success == true and (.result.backlog_count // -1) == 0 and (.result.backlog_bytes // -1) == $bytes' "$STATE_ROOT/queue-metrics.json" >/dev/null
 curl -fsS -X POST -H "$auth" -H 'Content-Type: application/json' "$qbase/messages/peek" -d '{"batch_size":2}' > "$STATE_ROOT/queue-peek.json"
+visible_count="$(jq '(.result.messages // .result // []) | length' "$STATE_ROOT/queue-peek.json")"
+echo "due-state visibleMessages=$visible_count"
 jq -e '.success == true and ((.result.messages // .result // []) | length) == 1' "$STATE_ROOT/queue-peek.json" >/dev/null
 
 message_id="$(jq -r '(.result.messages // .result // [])[0].id' "$STATE_ROOT/queue-peek.json")"
@@ -54,15 +59,18 @@ message_ref="$(jq -r '(.result.messages // .result // [])[0].ref' "$STATE_ROOT/q
 message_body="$(jq -r '(.result.messages // .result // [])[0].body' "$STATE_ROOT/queue-peek.json")"
 test -n "$message_id" && test "$message_id" != null
 test -n "$message_ref" && test "$message_ref" != null
-test "$(printf '%s' "$message_body" | wc -c | tr -d ' ')" -eq "$EXPECTED_QUEUE_BYTES"
-jq -e --argjson scheduled "$EXPECTED_SUCCESSOR" --arg cron "$EXPECTED_SUCCESSOR_CRON" '.scheduledTime == $scheduled and .cron == $cron' <<<"$message_body" >/dev/null
+body_bytes="$(printf '%s' "$message_body" | wc -c | tr -d ' ')"
 body_sha="$(printf '%s' "$message_body" | sha256sum | awk '{print $1}')"
+echo "due-state messageId=$message_id bodyBytes=$body_bytes bodySha=$body_sha scheduled=$(jq -r '.scheduledTime // "missing"' <<<"$message_body" 2>/dev/null || echo invalid-json) cron=$(jq -r '.cron // "missing"' <<<"$message_body" 2>/dev/null || echo invalid-json)"
+test "$body_bytes" -eq "$EXPECTED_QUEUE_BYTES"
+jq -e --argjson scheduled "$EXPECTED_SUCCESSOR" --arg cron "$EXPECTED_SUCCESSOR_CRON" '.scheduledTime == $scheduled and .cron == $cron' <<<"$message_body" >/dev/null
 
 query() {
   local sql="$1"
   curl -fsS -H "$auth" -H 'Content-Type: application/json' "$api" -d "$(jq -n --arg sql "$sql" '{sql:$sql}')"
 }
 query "SELECT scheduled_time,status,completed_at,next_scheduled_time,next_cron,error_message,updated_at FROM fast_lane_queue_slots WHERE status='completed' AND next_scheduled_time=${EXPECTED_SUCCESSOR}" > "$STATE_ROOT/predecessor.json"
+echo "due-state predecessor=$(jq -c '.result[0].results // []' "$STATE_ROOT/predecessor.json")"
 jq -e --argjson successor "$EXPECTED_SUCCESSOR" --arg cron "$EXPECTED_SUCCESSOR_CRON" '
   .success == true
   and .result[0].success == true
@@ -74,6 +82,7 @@ jq -e --argjson successor "$EXPECTED_SUCCESSOR" --arg cron "$EXPECTED_SUCCESSOR_
   and (.result[0].results[0].next_scheduled_time - .result[0].results[0].scheduled_time) == 14400000
 ' "$STATE_ROOT/predecessor.json" >/dev/null
 query "SELECT COUNT(*) AS row_count FROM fast_lane_queue_slots WHERE scheduled_time=${EXPECTED_SUCCESSOR}" > "$STATE_ROOT/due-slot.json"
+echo "due-state dueSlotRows=$(jq -r '.result[0].results[0].row_count' "$STATE_ROOT/due-slot.json")"
 jq -e '.success == true and .result[0].success == true and .result[0].results[0].row_count == 0' "$STATE_ROOT/due-slot.json" >/dev/null
 
 backlog_count="$(jq -r '.result.backlog_count' "$STATE_ROOT/queue-metrics.json")"
