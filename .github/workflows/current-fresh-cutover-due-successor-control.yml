@@ -323,7 +323,7 @@ jobs:
           curl -fsS -H "$auth" "$qbase" > "$ROOT/queue-after.json"
           jq -e '.success == true and .result.settings.delivery_paused == true' "$ROOT/queue-after.json" >/dev/null
           curl -fsS -H "$auth" "$qbase/metrics" > "$ROOT/queue-metrics-after.json"
-          jq -e --argjson bytes "$EXPECTED_QUEUE_BYTES" '.success == true and (.result.backlog_count // -1) == 0 and (.result.backlog_bytes // -1) == $bytes' "$ROOT/queue-metrics-after.json" >/dev/null
+          jq -e --argjson bytes "$EXPECTED_QUEUE_BYTES" '.success == true and (.result.backlog_count // -1) == 1 and (.result.backlog_bytes // -1) == $bytes' "$ROOT/queue-metrics-after.json" >/dev/null
           curl -fsS -X POST -H "$auth" -H 'Content-Type: application/json' "$qbase/messages/peek" -d '{"batch_size":2}' > "$ROOT/queue-peek-after.json"
           jq -e --arg id "$AUTHORIZED_MESSAGE_ID" '.success == true and ((.result.messages // .result // []) | length) == 1 and (.result.messages // .result // [])[0].id == $id' "$ROOT/queue-peek-after.json" >/dev/null
           body="$(jq -r '(.result.messages // .result // [])[0].body' "$ROOT/queue-peek-after.json")"
