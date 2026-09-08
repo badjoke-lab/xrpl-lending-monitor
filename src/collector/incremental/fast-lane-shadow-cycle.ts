@@ -260,6 +260,11 @@ export async function runFastLaneShadowCycle(options: {
     })
     const scannedFinalLedger = scanned.ledgers.at(-1)
     if (!scannedFinalLedger) {
+      if (expectedPreviousLedger < head.ledgerIndex) {
+        throw new Error(
+          `Fast-lane scan made no progress while behind: cursor=${expectedPreviousLedger}, head=${head.ledgerIndex}`,
+        )
+      }
       return {
         status: 'caught_up',
         startLedgerIndex: null,
