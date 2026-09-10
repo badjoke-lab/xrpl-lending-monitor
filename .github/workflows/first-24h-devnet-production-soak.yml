@@ -1,0 +1,16 @@
+name: First 24-hour XRPL Devnet production soak (retired)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  retired:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse retired workflow
+        run: |
+          echo 'This workflow is retired. Use the corrected stable manual workflow only after rehearsal passes.'
+          exit 1
