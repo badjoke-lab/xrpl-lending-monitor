@@ -1,0 +1,271 @@
+name: Current live fresh-base cutover
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: current-live-fresh-base-cutover
+  cancel-in-progress: false
+
+env:
+  QUALIFICATION_ISSUE: '995'
+  CANDIDATE_BRANCH: current-state-fresh-replacement-candidate-data
+  SCRIPT_NAME: xrpl-lending-monitor
+  QUEUE_ID: 2ae398f2edbf43749e45cd7ede77c6cd
+  DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
+  PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
+  TARGET_EPOCH: devnet-3371675
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  cutover:
+    if: >-
+      github.event.issue.number == 995 &&
+      github.event.comment.user.login == 'badjoke-lab' &&
+      github.event.comment.body == '/current-live-fresh-base-cutover'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out current main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Resolve and freeze fresh candidate
+        id: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT=current-live-fresh-base-cutover
+          mkdir -p "$ROOT"
+
+          candidate_head="$(gh api "repos/${GITHUB_REPOSITORY}/branches/${CANDIDATE_BRANCH}" --jq '.commit.sha')"
+          gh api "repos/${GITHUB_REPOSITORY}/contents/channel.json?ref=${candidate_head}" --jq '.content' | tr -d '\n' | base64 -d > "$ROOT/channel.json"
+          gh api "repos/${GITHUB_REPOSITORY}/contents/read-model/manifest.json?ref=${candidate_head}" --jq '.content' | tr -d '\n' | base64 -d > "$ROOT/manifest.json"
+
+          data_commit="$(jq -r '.active.dataCommitSha // empty' "$ROOT/channel.json")"
+          snapshot="$(jq -r '.snapshotId // empty' "$ROOT/manifest.json")"
+          ledger="$(jq -r '.ledgerIndex // empty' "$ROOT/manifest.json")"
+          hash="$(jq -r '.ledgerHash // empty' "$ROOT/manifest.json")"
+          manifest_sha="$(jq -r '.manifestSha256 // empty' "$ROOT/manifest.json")"
+
+          printf '%s' "$candidate_head" | grep -Eq '^[a-f0-9]{40}$'
+          printf '%s' "$data_commit" | grep -Eq '^[a-f0-9]{40}$'
+          printf '%s' "$ledger" | grep -Eq '^[0-9]+$'
+          printf '%s' "$hash" | grep -Eq '^[A-F0-9]{64}$'
+          printf '%s' "$manifest_sha" | grep -Eq '^[a-f0-9]{64}$'
+          test "$ledger" -gt 4086792
+          jq -e --arg epoch "$TARGET_EPOCH" --arg snapshot "$snapshot" --arg manifest "$manifest_sha" --arg data "$data_commit" '
+            .schemaVersion == 1
+            and .active.dataCommitSha == $data
+            and .active.snapshotId == $snapshot
+            and .active.manifestSha256 == $manifest
+            and .active.manifestPath == "read-model/manifest.json"
+          ' "$ROOT/channel.json" >/dev/null
+          jq -e --arg epoch "$TARGET_EPOCH" --arg snapshot "$snapshot" --arg hash "$hash" --arg manifest "$manifest_sha" --argjson ledger "$ledger" '
+            .complete == true
+            and .epochId == $epoch
+            and .snapshotId == $snapshot
+            and .ledgerIndex == $ledger
+            and .ledgerHash == $hash
+            and .manifestSha256 == $manifest
+          ' "$ROOT/manifest.json" >/dev/null
+
+          immutable_branch="current-state-live-${ledger}-${GITHUB_RUN_ID}"
+          gh api -X POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+            -f ref="refs/heads/${immutable_branch}" \
+            -f sha="$candidate_head" > "$ROOT/immutable-ref.json"
+          test "$(jq -r '.object.sha' "$ROOT/immutable-ref.json")" = "$candidate_head"
+
+          echo "candidate_head=$candidate_head" >> "$GITHUB_OUTPUT"
+          echo "data_commit=$data_commit" >> "$GITHUB_OUTPUT"
+          echo "snapshot=$snapshot" >> "$GITHUB_OUTPUT"
+          echo "ledger=$ledger" >> "$GITHUB_OUTPUT"
+          echo "hash=$hash" >> "$GITHUB_OUTPUT"
+          echo "manifest_sha=$manifest_sha" >> "$GITHUB_OUTPUT"
+          echo "immutable_branch=$immutable_branch" >> "$GITHUB_OUTPUT"
+          echo "Fresh target: $ledger / $snapshot / $candidate_head"
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+
+      - name: Install and build runtime
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
+          pnpm build:deploy-assets
+
+      - name: Cut over fresh base and restart Queue
+        id: execute
+        shell: bash
+        env:
+          TARGET_LEDGER: ${{ steps.target.outputs.ledger }}
+          TARGET_HASH: ${{ steps.target.outputs.hash }}
+          TARGET_SNAPSHOT: ${{ steps.target.outputs.snapshot }}
+          TARGET_BRANCH: ${{ steps.target.outputs.immutable_branch }}
+        run: |
+          set -euo pipefail
+          ROOT=current-live-fresh-base-cutover
+          auth="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          api="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          qbase="$api/queues/$QUEUE_ID"
+          d1="$api/d1/database/$DATABASE_ID/query"
+          deployed=false
+          cutover_applied=false
+          old_version=""
+
+          resume_queue() {
+            curl -fsS -X PATCH -H "$auth" -H 'Content-Type: application/json' "$qbase" \
+              -d '{"settings":{"delivery_paused":false}}' >/dev/null || true
+          }
+          rollback() {
+            rc=$?
+            if test "$cutover_applied" != true && test "$deployed" = true && test -n "$old_version"; then
+              pnpm exec wrangler versions deploy "${old_version}@100%" --yes || true
+            fi
+            resume_queue
+            rm -f .wrangler-live-fresh.json
+            exit "$rc"
+          }
+          trap rollback ERR
+
+          curl -fsS -H "$auth" "$qbase" \
+            | tee "$ROOT/queue-before.json" \
+            | jq -e '.success == true and .result.settings.delivery_paused == false' >/dev/null
+          curl -fsS -H "$auth" "$api/workers/scripts/$SCRIPT_NAME/deployments" \
+            | tee "$ROOT/deployments-before.json" >/dev/null
+          old_version="$(jq -r '.result.deployments[0].versions[0].version_id' "$ROOT/deployments-before.json")"
+          test -n "$old_version" && test "$old_version" != null
+
+          curl -fsS -X PATCH -H "$auth" -H 'Content-Type: application/json' "$qbase" \
+            -d '{"settings":{"delivery_paused":true}}' \
+            | tee "$ROOT/queue-pause.json" \
+            | jq -e '.success == true' >/dev/null
+          curl -fsS -H "$auth" "$qbase" \
+            | tee "$ROOT/queue-paused.json" \
+            | jq -e '.success == true and .result.settings.delivery_paused == true' >/dev/null
+
+          jq \
+            --arg branch "$TARGET_BRANCH" \
+            --arg epoch "$TARGET_EPOCH" \
+            --arg snapshot "$TARGET_SNAPSHOT" \
+            --arg ledger "$TARGET_LEDGER" \
+            --arg hash "$TARGET_HASH" '
+              .vars.CURRENT_STATE_GITHUB_BRANCH = $branch
+              | .vars.CURRENT_STATE_REPLACEMENT_SNAPSHOT_ID = $snapshot
+              | .vars.CURRENT_STATE_REPLACEMENT_GITHUB_BRANCH = $branch
+              | .vars.REPLACEMENT_BASE_REBASE_ENABLED = "true"
+              | .vars.REPLACEMENT_BASE_EPOCH_ID = $epoch
+              | .vars.REPLACEMENT_BASE_SNAPSHOT_ID = $snapshot
+              | .vars.REPLACEMENT_BASE_LEDGER_INDEX = $ledger
+              | .vars.REPLACEMENT_BASE_LEDGER_HASH = $hash
+            ' wrangler.jsonc > .wrangler-live-fresh.json
+          test "$(jq -r '.triggers.crons | length' .wrangler-live-fresh.json)" -eq 0
+          test "$(jq -r '.vars.APP_NETWORK' .wrangler-live-fresh.json)" = devnet
+          test "$(jq -r '.vars.MAINNET_ENABLED' .wrangler-live-fresh.json)" = false
+          test "$(jq -r '.vars.REPLACEMENT_BASE_LEDGER_INDEX' .wrangler-live-fresh.json)" = "$TARGET_LEDGER"
+
+          umask 077
+          cutover_token="$(openssl rand -hex 32)"
+          secret_file="$(mktemp)"
+          jq -n --arg token "$cutover_token" '{REPLACEMENT_BASE_CUTOVER_TOKEN:$token}' > "$secret_file"
+          pnpm exec wrangler versions upload --config .wrangler-live-fresh.json --secrets-file "$secret_file" \
+            --message "Operational fresh Current base ${TARGET_LEDGER}" \
+            | tee "$ROOT/version-upload.txt"
+          rm -f "$secret_file"
+          new_version="$(grep -Eio '[0-9a-f]{8}-[0-9a-f-]{27,}' "$ROOT/version-upload.txt" | tail -1)"
+          test -n "$new_version"
+          deployed=true
+          pnpm exec wrangler versions deploy "${new_version}@100%" --yes \
+            | tee "$ROOT/version-deploy.txt"
+
+          curl -fsS -X POST -H "x-replacement-base-cutover-token: ${cutover_token}" \
+            "$PRODUCTION_BASE/api/operator/replacement-base-cutover" \
+            | tee "$ROOT/cutover-response.json" >/dev/null
+          jq -e --arg epoch "$TARGET_EPOCH" --arg snapshot "$TARGET_SNAPSHOT" --arg hash "$TARGET_HASH" --argjson ledger "$TARGET_LEDGER" '
+            .status == "cutover_applied"
+            and .network == "devnet"
+            and .target.epochId == $epoch
+            and .target.snapshotId == $snapshot
+            and .target.ledgerIndex == $ledger
+            and .target.ledgerHash == $hash
+            and .rebase.status == "rebased"
+          ' "$ROOT/cutover-response.json" >/dev/null
+          cutover_applied=true
+
+          resume_queue
+          curl -fsS -H "$auth" "$qbase" \
+            | tee "$ROOT/queue-resumed.json" \
+            | jq -e '.success == true and .result.settings.delivery_paused == false' >/dev/null
+
+          scheduled=$(( (( $(date +%s) + 30 + 59 ) / 60) * 60 * 1000 ))
+          delay=$(( (scheduled - $(date +%s%3N) + 999) / 1000 ))
+          jq -n \
+            --argjson scheduled "$scheduled" \
+            --arg enqueuedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --argjson delay "$delay" \
+            '{body:{scheduledTime:$scheduled,cron:"queue-catch-up",enqueuedAt:$enqueuedAt},content_type:"json",delay_seconds:$delay}' \
+            > "$ROOT/seed-request.json"
+          curl -fsS -X POST -H "$auth" -H 'Content-Type: application/json' "$qbase/messages" \
+            --data-binary @"$ROOT/seed-request.json" \
+            | tee "$ROOT/seed-response.json" \
+            | jq -e '.success == true' >/dev/null
+
+          query() {
+            local sql="$1"
+            curl -fsS -X POST -H "$auth" -H 'Content-Type: application/json' "$d1" \
+              --data "$(jq -cn --arg sql "$sql" '{sql:$sql}')"
+          }
+          sleep $(( delay + 20 ))
+          advanced=false
+          for attempt in 1 2 3 4 5 6; do
+            query "SELECT last_processed_ledger,latest_observed_ledger,status,updated_at FROM fast_lane_shadow_state WHERE network='devnet'" \
+              > "$ROOT/fast-after-${attempt}.json"
+            current="$(jq -r '.result[0].results[0].last_processed_ledger // 0' "$ROOT/fast-after-${attempt}.json")"
+            echo "Fresh Current observation $attempt: target=$TARGET_LEDGER current=$current"
+            if test "$current" -gt "$TARGET_LEDGER"; then
+              cp "$ROOT/fast-after-${attempt}.json" "$ROOT/fast-after.json"
+              advanced=true
+              break
+            fi
+            sleep 20
+          done
+          query "SELECT scheduled_time,status,next_scheduled_time,next_cron,error_message,updated_at FROM fast_lane_queue_slots ORDER BY scheduled_time DESC LIMIT 5" \
+            | tee "$ROOT/slots-after.json" >/dev/null
+
+          jq -n \
+            --argjson target "$TARGET_LEDGER" \
+            --arg snapshot "$TARGET_SNAPSHOT" \
+            --arg branch "$TARGET_BRANCH" \
+            --arg version "$new_version" \
+            --argjson advanced "$advanced" \
+            '{cutoverApplied:true,target:$target,snapshot:$snapshot,branch:$branch,workerVersion:$version,queueDeliveryPaused:false,currentAdvanced:$advanced}' \
+            | tee "$ROOT/result.json"
+          test "$advanced" = true
+          trap - ERR
+          rm -f .wrangler-live-fresh.json
+
+      - name: Upload operational record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: current-live-fresh-base-cutover
+          path: current-live-fresh-base-cutover
+          if-no-files-found: warn
+          retention-days: 30
