@@ -13,7 +13,7 @@ concurrency:
 
 env:
   QUALIFICATION_ISSUE: '995'
-  RUNTIME_SOURCE_SHA: 18d12f7ce40000397b073d033b99d74c18f96dd2
+  RUNTIME_SOURCE_SHA: 05cf59c4d425782944a94f9dd175e1235d26bd3d
   SCRIPT_NAME: xrpl-lending-monitor
   QUEUE_ID: 2ae398f2edbf43749e45cd7ede77c6cd
   DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
@@ -45,6 +45,7 @@ jobs:
           grep -F "export const FAST_LANE_CATCH_UP_INTERVAL_MS = 60_000" src/worker/fast-lane-successor-cadence.ts
           grep -F "export const FAST_LANE_MAX_PERSISTENCE_LEDGERS = 32" src/collector/incremental/fast-lane-persistence-window.ts
           grep -F "export const FAST_LANE_MAX_PERSISTENCE_MUTATIONS = 24" src/collector/incremental/fast-lane-persistence-window.ts
+          grep -F "export const FAST_LANE_HTTP_FALLBACK_REQUEST_LIMIT = 40" src/collector/incremental/fast-lane-resilient-ledger-reader.ts
           test "$(jq -r '.triggers.crons | length' wrangler.jsonc)" -eq 0
           test "$(jq -r '.vars.APP_NETWORK' wrangler.jsonc)" = devnet
           test "$(jq -r '.vars.MAINNET_ENABLED' wrangler.jsonc)" = false
@@ -69,6 +70,7 @@ jobs:
           pnpm exec vitest run
           src/worker/fast-lane-successor-cadence.test.ts
           src/collector/incremental/fast-lane-persistence-window.test.ts
+          src/collector/incremental/fast-lane-resilient-ledger-reader.test.ts
 
       - name: Build deploy assets
         run: pnpm build:deploy-assets
