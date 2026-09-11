@@ -14,9 +14,7 @@
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1",
     "deploy": "pnpm build && wrangler deploy",
-    "lint": "eslint src",
     "typecheck": "tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.worker.json --noEmit",
-    "test": "vitest run src/collector/incremental src/collector/network src/ui",
     "db:migrate:local": "wrangler d1 migrations apply xrpl-lending-monitor --local",
     "check": "pnpm typecheck && pnpm build"
   },
