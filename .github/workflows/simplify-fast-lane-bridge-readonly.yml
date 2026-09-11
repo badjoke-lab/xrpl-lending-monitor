@@ -1,4 +1,4 @@
-name: Simplify fast-lane bridge read-only audit
+name: Simplify fresh-base read-only audit
 
 on:
   push:
@@ -12,17 +12,18 @@ env:
   DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
   CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
   CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  SNAPSHOT_ID: devnet-5101160-ea7a044b3eea
 
 jobs:
   audit:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - name: Read bridge identities and row coverage
+      - name: Verify fresh base in production D1
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p simplify-fast-lane-bridge
+          mkdir -p simplify-fresh-base-audit
           auth="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
           d1="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database/${DATABASE_ID}/query"
           query() {
@@ -30,25 +31,34 @@ jobs:
             curl -fsS -X POST -H "$auth" -H 'Content-Type: application/json' "$d1" --data "$(jq -cn --arg sql "$sql" '{sql:$sql}')"
           }
 
-          query "SELECT * FROM fast_lane_shadow_base_binding WHERE network='devnet'" > simplify-fast-lane-bridge/binding.json
-          query "SELECT network,epoch_id,last_processed_ledger,last_processed_hash,latest_observed_ledger,status,updated_at FROM fast_lane_shadow_state WHERE network='devnet'" > simplify-fast-lane-bridge/fast-state.json
-          query "SELECT network,epoch_id,base_snapshot_id,base_ledger_index,base_ledger_hash,overlay_ledger_index,overlay_ledger_hash,updated_at FROM current_state_overlay_state WHERE network='devnet' ORDER BY updated_at DESC LIMIT 5" > simplify-fast-lane-bridge/canonical-state.json
-          query "SELECT object_type,operation,COUNT(*) AS rows,MIN(source_ledger_index) AS min_ledger,MAX(source_ledger_index) AS max_ledger FROM fast_lane_shadow_objects WHERE network='devnet' GROUP BY object_type,operation ORDER BY object_type,operation" > simplify-fast-lane-bridge/fast-objects.json
-          query "SELECT object_type,operation,COUNT(*) AS rows,MIN(source_ledger_index) AS min_ledger,MAX(source_ledger_index) AS max_ledger FROM fast_lane_shadow_objects_compact WHERE network='devnet' GROUP BY object_type,operation ORDER BY object_type,operation" > simplify-fast-lane-bridge/compact-objects.json
-          query "SELECT object_type,operation,COUNT(*) AS rows,MIN(source_ledger_index) AS min_ledger,MAX(source_ledger_index) AS max_ledger FROM current_state_overlay_objects WHERE network='devnet' GROUP BY object_type,operation ORDER BY object_type,operation" > simplify-fast-lane-bridge/canonical-objects.json
-          query "SELECT COUNT(*) AS fast_rows, SUM(CASE WHEN c.object_id IS NOT NULL THEN 1 ELSE 0 END) AS overlapping_rows, SUM(CASE WHEN c.object_id IS NULL OR f.source_ledger_index > c.source_ledger_index OR (f.source_ledger_index=c.source_ledger_index AND f.source_transaction_index>c.source_transaction_index) THEN 1 ELSE 0 END) AS newer_or_missing_rows, SUM(CASE WHEN c.object_id IS NOT NULL AND (f.source_ledger_index < c.source_ledger_index OR (f.source_ledger_index=c.source_ledger_index AND f.source_transaction_index<=c.source_transaction_index)) THEN 1 ELSE 0 END) AS not_newer_rows FROM fast_lane_shadow_objects f LEFT JOIN current_state_overlay_objects c ON c.network='devnet' AND c.epoch_id='devnet-3371675' AND c.base_snapshot_id='devnet-4039102-4298500c53ba' AND c.object_type=f.object_type AND c.object_id=f.object_id WHERE f.network='devnet'" > simplify-fast-lane-bridge/overlap.json
+          query "SELECT id,network,epoch_id,status,ledger_index,ledger_hash,endpoint,page_count,request_count,decoded_object_count,object_count,vault_count,loan_broker_count,loan_count,batch_count,normalized_bytes,manifest_hash,duration_ms,error_code,error_message,started_at,completed_at,verified_at,created_at,updated_at FROM current_state_d1_snapshots WHERE id='${SNAPSHOT_ID}'" > simplify-fresh-base-audit/snapshot.json
+          query "SELECT snapshot_id,schema_version,manifest_hash,batch_count,object_count,vault_count,loan_broker_count,loan_count,normalized_bytes,verified_at,created_at FROM current_state_d1_snapshot_manifests WHERE snapshot_id='${SNAPSHOT_ID}'" > simplify-fresh-base-audit/manifest.json
+          query "SELECT COUNT(*) AS rows,MIN(batch_sequence) AS min_batch,MAX(batch_sequence) AS max_batch,SUM(object_count) AS object_count,SUM(vault_count) AS vault_count,SUM(loan_broker_count) AS loan_broker_count,SUM(loan_count) AS loan_count FROM current_state_d1_batches WHERE snapshot_id='${SNAPSHOT_ID}'" > simplify-fresh-base-audit/batches.json
+          query "SELECT COUNT(*) AS rows,COUNT(DISTINCT object_id) AS distinct_ids FROM current_state_d1_vaults WHERE snapshot_id='${SNAPSHOT_ID}'" > simplify-fresh-base-audit/vaults.json
+          query "SELECT COUNT(*) AS rows,COUNT(DISTINCT object_id) AS distinct_ids FROM current_state_d1_loan_brokers WHERE snapshot_id='${SNAPSHOT_ID}'" > simplify-fresh-base-audit/brokers.json
+          query "SELECT COUNT(*) AS rows,COUNT(DISTINCT object_id) AS distinct_ids FROM current_state_d1_loans WHERE snapshot_id='${SNAPSHOT_ID}'" > simplify-fresh-base-audit/loans.json
+          query "SELECT network,epoch_id,snapshot_id,rollback_snapshot_id,activated_at,updated_at FROM current_state_d1_active_snapshots WHERE network='devnet'" > simplify-fresh-base-audit/active.json
+          query "SELECT * FROM fast_lane_shadow_base_binding WHERE network='devnet'" > simplify-fresh-base-audit/binding.json
+          query "SELECT network,epoch_id,last_processed_ledger,last_processed_hash,latest_observed_ledger,latest_observed_hash,status,updated_at FROM fast_lane_shadow_state WHERE network='devnet'" > simplify-fresh-base-audit/fast-state.json
+          query "SELECT object_type,operation,COUNT(*) AS rows,MIN(source_ledger_index) AS min_ledger,MAX(source_ledger_index) AS max_ledger FROM fast_lane_shadow_objects_compact WHERE network='devnet' GROUP BY object_type,operation ORDER BY object_type,operation" > simplify-fresh-base-audit/compact-counts.json
 
-          for file in binding fast-state canonical-state fast-objects compact-objects canonical-objects overlap; do jq -e '.success == true' "simplify-fast-lane-bridge/${file}.json" >/dev/null; done
+          for file in snapshot manifest batches vaults brokers loans active binding fast-state compact-counts; do jq -e '.success == true' "simplify-fresh-base-audit/${file}.json" >/dev/null; done
+
           jq -n \
-            --argjson binding "$(jq '.result[0].results[0] // null' simplify-fast-lane-bridge/binding.json)" \
-            --argjson fast "$(jq '.result[0].results[0] // null' simplify-fast-lane-bridge/fast-state.json)" \
-            --argjson canonical "$(jq '.result[0].results[0] // null' simplify-fast-lane-bridge/canonical-state.json)" \
-            --argjson overlap "$(jq '.result[0].results[0] // null' simplify-fast-lane-bridge/overlap.json)" \
-            '{productionMutation:false,binding:$binding,fast:$fast,canonical:$canonical,overlap:$overlap}' | tee simplify-fast-lane-bridge/summary.json
+            --argjson snapshot "$(jq '.result[0].results[0] // null' simplify-fresh-base-audit/snapshot.json)" \
+            --argjson manifest "$(jq '.result[0].results[0] // null' simplify-fresh-base-audit/manifest.json)" \
+            --argjson batches "$(jq '.result[0].results[0] // null' simplify-fresh-base-audit/batches.json)" \
+            --argjson vaults "$(jq '.result[0].results[0] // null' simplify-fresh-base-audit/vaults.json)" \
+            --argjson brokers "$(jq '.result[0].results[0] // null' simplify-fresh-base-audit/brokers.json)" \
+            --argjson loans "$(jq '.result[0].results[0] // null' simplify-fresh-base-audit/loans.json)" \
+            --argjson active "$(jq '.result[0].results[0] // null' simplify-fresh-base-audit/active.json)" \
+            --argjson binding "$(jq '.result[0].results[0] // null' simplify-fresh-base-audit/binding.json)" \
+            --argjson fast "$(jq '.result[0].results[0] // null' simplify-fresh-base-audit/fast-state.json)" \
+            '{productionMutation:false,snapshot:$snapshot,manifest:$manifest,batches:$batches,vaults:$vaults,brokers:$brokers,loans:$loans,active:$active,binding:$binding,fast:$fast}' | tee simplify-fresh-base-audit/summary.json
 
       - uses: actions/upload-artifact@v4
         with:
-          name: simplify-fast-lane-bridge-readonly
-          path: simplify-fast-lane-bridge
+          name: simplify-fresh-base-readonly
+          path: simplify-fresh-base-audit
           if-no-files-found: error
           retention-days: 7
