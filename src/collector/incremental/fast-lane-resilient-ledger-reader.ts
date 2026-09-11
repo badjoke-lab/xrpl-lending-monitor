@@ -1,11 +1,12 @@
 import { readValidatedLedger } from './read-validated-ledger-rpc'
 import type { LedgerReader } from './scan-validated-ledgers'
 
-// runFastLaneCycle can retry a transient XRPL failure up to six times inside one
-// Queue invocation. Keep each cycle's emergency HTTP fallback allowance low
-// enough that head reads, base verification, WebSocket connections, and all six
-// retry attempts remain below the Workers Free 50-external-subrequest ceiling.
-export const FAST_LANE_HTTP_FALLBACK_REQUEST_LIMIT = 4
+// Transient fast-lane retries now happen across Queue invocations, not by replaying
+// a whole cycle inside one Worker invocation. Reserve ten of the Workers Free
+// 50-external-subrequest allowance for the validated-head/base reads, the primary
+// WebSocket connection and other runtime work, while allowing a full bounded
+// 32-ledger pass to use HTTP fallback when the WebSocket transport is unavailable.
+export const FAST_LANE_HTTP_FALLBACK_REQUEST_LIMIT = 40
 
 export class FastLaneHttpFallbackBudgetError extends Error {
   readonly limit: number
