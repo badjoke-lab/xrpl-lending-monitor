@@ -1,27 +1,10 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "xrpl-lending-monitor",
-  "main": "src/worker/p0-redundant-scheduler-entry.ts",
+  "main": "src/worker/current-direct-entry.ts",
   "compatibility_date": "2026-07-01",
   "triggers": {
-    "crons": []
-  },
-  "queues": {
-    "producers": [
-      {
-        "binding": "FAST_LANE_QUEUE",
-        "queue": "xrpl-lending-fast-lane"
-      }
-    ],
-    "consumers": [
-      {
-        "queue": "xrpl-lending-fast-lane",
-        "max_batch_size": 1,
-        "max_batch_timeout": 1,
-        "max_retries": 100,
-        "max_concurrency": 1
-      }
-    ]
+    "crons": ["*/5 * * * *"]
   },
   "assets": {
     "directory": "./dist",
