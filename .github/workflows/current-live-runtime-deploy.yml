@@ -12,10 +12,8 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  QUALIFICATION_ISSUE: '995'
-  RUNTIME_SOURCE_SHA: 05cf59c4d425782944a94f9dd175e1235d26bd3d
+  RUNTIME_SOURCE_SHA: 5075c8a1116cb3bea241e318dd48f357b3eeefdc
   SCRIPT_NAME: xrpl-lending-monitor
-  QUEUE_ID: 2ae398f2edbf43749e45cd7ede77c6cd
   DATABASE_ID: bebc2c68-03d2-4a1c-98a7-46b34ee4e25d
   PRODUCTION_BASE: https://xrpl-lending-monitor.badjoke-lab.workers.dev
   CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -28,28 +26,30 @@ jobs:
       github.event.comment.user.login == 'badjoke-lab' &&
       github.event.comment.body == '/current-live-runtime-deploy'
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
-      - name: Check out runtime source
+      - name: Check out direct Current runtime
         uses: actions/checkout@v4
         with:
           ref: ${{ env.RUNTIME_SOURCE_SHA }}
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Verify live runtime invariants
+      - name: Verify direct Current invariants
         shell: bash
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$RUNTIME_SOURCE_SHA"
-          grep -F "export const FAST_LANE_CATCH_UP_INTERVAL_MS = 60_000" src/worker/fast-lane-successor-cadence.ts
-          grep -F "export const FAST_LANE_MAX_PERSISTENCE_LEDGERS = 32" src/collector/incremental/fast-lane-persistence-window.ts
-          grep -F "export const FAST_LANE_MAX_PERSISTENCE_MUTATIONS = 24" src/collector/incremental/fast-lane-persistence-window.ts
-          grep -F "export const FAST_LANE_HTTP_FALLBACK_REQUEST_LIMIT = 40" src/collector/incremental/fast-lane-resilient-ledger-reader.ts
-          test "$(jq -r '.triggers.crons | length' wrangler.jsonc)" -eq 0
+          test "$(jq -r '.main' wrangler.jsonc)" = 'src/worker/current-direct-entry.ts'
+          jq -e '.triggers.crons == ["*/5 * * * *"]' wrangler.jsonc >/dev/null
+          jq -e 'has("queues") | not' wrangler.jsonc >/dev/null
           test "$(jq -r '.vars.APP_NETWORK' wrangler.jsonc)" = devnet
           test "$(jq -r '.vars.MAINNET_ENABLED' wrangler.jsonc)" = false
-          test "$(jq -r '.vars.FAST_LANE_MAX_LEDGERS_PER_RUN' wrangler.jsonc)" = 32
+          grep -F 'runBoundedIncrementalCollectorCycle' src/worker/current-direct-entry.ts >/dev/null
+          if grep -F 'FAST_LANE_QUEUE' src/worker/current-direct-entry.ts; then
+            echo 'direct Current entry must not reference FAST_LANE_QUEUE' >&2
+            exit 1
+          fi
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
@@ -65,17 +65,18 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Run focused runtime tests
+      - name: Run direct collector tests
         run: >-
           pnpm exec vitest run
-          src/worker/fast-lane-successor-cadence.test.ts
-          src/collector/incremental/fast-lane-persistence-window.test.ts
-          src/collector/incremental/fast-lane-resilient-ledger-reader.test.ts
+          src/collector/incremental/collector-cycle.test.ts
+          src/collector/incremental/run-bounded-prepared-range.test.ts
+          src/collector/incremental/measured-incremental-commit.test.ts
+          src/collector/incremental/current-state-overlay.test.ts
 
       - name: Build deploy assets
         run: pnpm build:deploy-assets
 
-      - name: Capture live state
+      - name: Capture canonical state before deploy
         id: before
         shell: bash
         run: |
@@ -83,87 +84,87 @@ jobs:
           mkdir -p current-live-runtime-deploy
           auth="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
           api="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
-          curl -fsS -H "$auth" "$api/queues/$QUEUE_ID" \
-            | tee current-live-runtime-deploy/queue-before.json \
-            | jq -e '.success == true and .result.settings.delivery_paused == false' >/dev/null
-          curl -fsS -H "$auth" "$api/workers/scripts/$SCRIPT_NAME/deployments" \
-            | tee current-live-runtime-deploy/deployments-before.json >/dev/null
-          old_version="$(jq -r '.result.deployments[0].versions[0].version_id' current-live-runtime-deploy/deployments-before.json)"
-          test -n "$old_version" && test "$old_version" != null
-          echo "old_version=$old_version" >> "$GITHUB_OUTPUT"
           query() {
             local sql="$1"
             curl -fsS -X POST -H "$auth" -H 'Content-Type: application/json' \
               "$api/d1/database/$DATABASE_ID/query" \
               --data "$(jq -cn --arg sql "$sql" '{sql:$sql}')"
           }
-          query "SELECT last_processed_ledger,latest_observed_ledger,status,updated_at FROM fast_lane_shadow_state WHERE network='devnet'" \
-            | tee current-live-runtime-deploy/fast-before.json >/dev/null
-          query "SELECT scheduled_time,status,next_scheduled_time,next_cron,error_message,updated_at FROM fast_lane_queue_slots ORDER BY scheduled_time DESC LIMIT 3" \
-            | tee current-live-runtime-deploy/slots-before.json >/dev/null
-          echo "Current before deploy:"
-          jq '.result[0].results[0] // null' current-live-runtime-deploy/fast-before.json
-          echo "Latest Queue slots before deploy:"
-          jq '.result[0].results' current-live-runtime-deploy/slots-before.json
+          query "SELECT epoch_id,last_processed_ledger,last_processed_hash,latest_observed_ledger,latest_observed_hash,status,error_code,error_message,updated_at FROM sync_state WHERE network='devnet'" \
+            | tee current-live-runtime-deploy/sync-before.json \
+            | jq -e '.success == true' >/dev/null
+          query "SELECT epoch_id,base_snapshot_id,base_ledger_index,base_ledger_hash,overlay_ledger_index,overlay_ledger_hash,updated_at FROM current_state_overlay_state WHERE network='devnet'" \
+            | tee current-live-runtime-deploy/overlay-before.json \
+            | jq -e '.success == true' >/dev/null
+          before_ledger="$(jq -r '.result[0].results[0].last_processed_ledger // empty' current-live-runtime-deploy/sync-before.json)"
+          test "$before_ledger" -eq "$before_ledger"
+          echo "before_ledger=$before_ledger" >> "$GITHUB_OUTPUT"
+          echo 'Canonical state before deploy:'
+          jq '.result[0].results[0] // null' current-live-runtime-deploy/sync-before.json
 
-      - name: Upload and deploy runtime
-        id: deploy
+      - name: Deploy direct Current runtime and schedule
         shell: bash
-        env:
-          OLD_VERSION: ${{ steps.before.outputs.old_version }}
         run: |
           set -euo pipefail
-          deployed=false
-          rollback() {
-            rc=$?
-            if test "$deployed" = true; then
-              pnpm exec wrangler versions deploy "${OLD_VERSION}@100%" --yes || true
-            fi
-            exit "$rc"
-          }
-          trap rollback ERR
-          pnpm exec wrangler versions upload --message "Live Current runtime ${RUNTIME_SOURCE_SHA}" \
-            | tee current-live-runtime-deploy/version-upload.txt
-          new_version="$(grep -Eio '[0-9a-f]{8}-[0-9a-f-]{27,}' current-live-runtime-deploy/version-upload.txt | tail -1)"
-          test -n "$new_version"
-          deployed=true
-          pnpm exec wrangler versions deploy "${new_version}@100%" --yes \
-            | tee current-live-runtime-deploy/version-deploy.txt
-          trap - ERR
-          echo "new_version=$new_version" >> "$GITHUB_OUTPUT"
+          pnpm exec wrangler deploy --config wrangler.jsonc \
+            | tee current-live-runtime-deploy/wrangler-deploy.txt
 
-      - name: Confirm live endpoints and Queue remain active
+      - name: Confirm public endpoints
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS "$PRODUCTION_BASE/api/health" \
+            | tee current-live-runtime-deploy/health-after.json \
+            | jq -e '.ok == true and .network == "devnet" and .mainnet_enabled == false' >/dev/null
+          curl -fsS "$PRODUCTION_BASE/api/status" \
+            | tee current-live-runtime-deploy/status-immediate.json >/dev/null
+          curl -fsS "$PRODUCTION_BASE/api/overview" \
+            | tee current-live-runtime-deploy/overview-immediate.json >/dev/null
+
+      - name: Wait for one five-minute Current cycle
+        run: sleep 370
+
+      - name: Verify canonical cursor advances
         shell: bash
         env:
-          NEW_VERSION: ${{ steps.deploy.outputs.new_version }}
+          BEFORE_LEDGER: ${{ steps.before.outputs.before_ledger }}
         run: |
           set -euo pipefail
           auth="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
           api="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
-          curl -fsS -H "$auth" "$api/queues/$QUEUE_ID" \
-            | tee current-live-runtime-deploy/queue-after.json \
-            | jq -e '.success == true and .result.settings.delivery_paused == false' >/dev/null
-          curl -fsS -H "$auth" "$api/workers/scripts/$SCRIPT_NAME/deployments" \
-            | tee current-live-runtime-deploy/deployments-after.json \
-            | jq -e --arg v "$NEW_VERSION" '.success == true and .result.deployments[0].versions[0].version_id == $v and .result.deployments[0].versions[0].percentage == 100' >/dev/null
-          curl -fsS "$PRODUCTION_BASE/api/overview" \
-            | tee current-live-runtime-deploy/overview-after.json >/dev/null
-          curl -fsS "$PRODUCTION_BASE/api/status/fast-lane-diff?limit=1" \
-            | tee current-live-runtime-deploy/fast-lane-diff-after.json >/dev/null
           query() {
             local sql="$1"
             curl -fsS -X POST -H "$auth" -H 'Content-Type: application/json' \
               "$api/d1/database/$DATABASE_ID/query" \
               --data "$(jq -cn --arg sql "$sql" '{sql:$sql}')"
           }
-          query "SELECT last_processed_ledger,latest_observed_ledger,status,updated_at FROM fast_lane_shadow_state WHERE network='devnet'" \
-            | tee current-live-runtime-deploy/fast-after.json >/dev/null
-          echo "Current immediately after deploy:"
-          jq '.result[0].results[0] // null' current-live-runtime-deploy/fast-after.json
+          query "SELECT epoch_id,last_processed_ledger,last_processed_hash,latest_observed_ledger,latest_observed_hash,status,error_code,error_message,updated_at FROM sync_state WHERE network='devnet'" \
+            | tee current-live-runtime-deploy/sync-after.json \
+            | jq -e '.success == true' >/dev/null
+          query "SELECT epoch_id,base_snapshot_id,base_ledger_index,base_ledger_hash,overlay_ledger_index,overlay_ledger_hash,updated_at FROM current_state_overlay_state WHERE network='devnet'" \
+            | tee current-live-runtime-deploy/overlay-after.json \
+            | jq -e '.success == true' >/dev/null
+
+          after_ledger="$(jq -r '.result[0].results[0].last_processed_ledger // empty' current-live-runtime-deploy/sync-after.json)"
+          latest_ledger="$(jq -r '.result[0].results[0].latest_observed_ledger // empty' current-live-runtime-deploy/sync-after.json)"
+          test "$after_ledger" -eq "$after_ledger"
+          test "$latest_ledger" -eq "$latest_ledger"
+          if ! { test "$after_ledger" -gt "$BEFORE_LEDGER" || test "$after_ledger" -eq "$latest_ledger"; }; then
+            echo "direct Current cursor did not advance: before=$BEFORE_LEDGER after=$after_ledger latest=$latest_ledger" >&2
+            jq '.result[0].results[0] // null' current-live-runtime-deploy/sync-after.json >&2
+            exit 1
+          fi
+
+          curl -fsS "$PRODUCTION_BASE/api/status" \
+            | tee current-live-runtime-deploy/status-after.json >/dev/null
+          curl -fsS "$PRODUCTION_BASE/api/overview" \
+            | tee current-live-runtime-deploy/overview-after.json >/dev/null
           jq -n \
             --arg runtimeSource "$RUNTIME_SOURCE_SHA" \
-            --arg newVersion "$NEW_VERSION" \
-            '{passed:true,runtimeSource:$runtimeSource,newVersion:$newVersion,queueDeliveryPaused:false}' \
+            --argjson beforeLedger "$BEFORE_LEDGER" \
+            --argjson afterLedger "$after_ledger" \
+            --argjson latestObservedLedger "$latest_ledger" \
+            '{passed:true,runtimeSource:$runtimeSource,mode:"direct-five-minute-collector",beforeLedger:$beforeLedger,afterLedger:$afterLedger,latestObservedLedger:$latestObservedLedger}' \
             | tee current-live-runtime-deploy/result.json
 
       - name: Upload operational record
