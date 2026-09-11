@@ -26,7 +26,7 @@ export function readThreeLayerCursorScope(value: string | undefined): string | n
     const scope = objectScope(decodeBase64UrlText(value), 'q')
     if (scope !== null) return scope
   } catch {
-    // Try the legacy raw canonical cursor below.
+    // Fall through to the canonical hex cursor.
   }
   try {
     return objectScope(decodeHexText(value), 'scope')

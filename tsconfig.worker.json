@@ -16,6 +16,13 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src/worker", "src/shared"],
+  "include": [
+    "src/worker/entry.ts",
+    "src/worker/index.ts",
+    "src/worker/env.ts",
+    "src/shared/runtime-config.ts",
+    "src/shared/incremental-runtime-config.ts",
+    "src/shared/cloudflare-sockets.d.ts"
+  ],
   "exclude": ["src/**/*.test.ts"]
 }
