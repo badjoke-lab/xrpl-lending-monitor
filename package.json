@@ -88,7 +88,9 @@
     "candidate-source-rehearsal:build": "pnpm build:candidate-source-rehearsal",
     "candidate-source-rehearsal:local": "pnpm build:candidate-source-rehearsal && node .candidate-source-rehearsal-build/rehearse-candidate-sources.mjs --local",
     "types:worker": "wrangler types",
-    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm db:migrate:local && pnpm build"
+    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm db:migrate:local && pnpm build",
+    "build:db-less-current-base": "vite build --config vite.db-less-current-base-read-model.config.ts",
+    "db-less-current-base:local": "pnpm build:db-less-current-base && node .db-less-current-base-read-model-build/build-db-less-current-base-read-model.mjs --local"
   },
   "dependencies": {
     "@xrpl-commons/ripple-binary-codec": "2.7.0",
