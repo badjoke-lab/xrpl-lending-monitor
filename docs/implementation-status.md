@@ -1,315 +1,99 @@
 # Implementation status
 
-Last updated: `2026-08-30`.
+Last updated: 2026-09-20
 
-## Current phase — 2026-08-30
+## Current decision
 
-XRPL Lending Monitor is **not formally released**.
+XRPL Lending Monitor is pivoting to a DB-less static-artifact runtime.
 
-The direct production Current-state blocker was the existing Cloudflare/D1 fast lane, which stopped on `2026-08-01` because the Worker exceeded its per-invocation subrequest budget. Full Supabase History recovery remains a separate halted problem and must not be described as the direct cause of the Current fast-lane stop.
+The prior Cloudflare D1 / Queue / Worker-scheduled collector and Supabase recovery architecture is retired as a future direction. It must not be restarted merely to continue the old recovery chain.
 
-The bounded Current repair is now deployed but continuous collection remains stopped.
+The repository still contains substantial legacy runtime code. Therefore the architecture decision is **adopted**, but the DB-less production implementation is **not yet complete**.
 
-Retained production state:
+## Canonical main at decision time
 
-| Field | Value |
-| --- | ---: |
-| Fast-lane last processed ledger before bounded proof | `4,051,454` |
-| Fast-lane last update | `2026-08-01T03:52:12.771Z` |
-| Latest retained terminal error | `Too many subrequests by single Worker invocation.` |
-| Active base ledger | `4,039,102` |
-| Canonical overlay ledger | `4,039,122` |
-| Repaired runtime source | `4f3f185da6e5093d0a5ce13b43b22f3070e630b3` |
-| Effective production Worker version | `c858ab5d-846e-4bd4-b26b-8f71c9382f8f` |
-| Queue delivery | `paused` |
-| Worker Cron | `none` |
-| Network boundary | `devnet / Mainnet disabled` |
+`fc6e9f2b8d967b6923c5d8529378c21cb172a08e`
 
-The repair runtime keeps the application envelope below platform ceilings:
+Commit title:
 
-- emergency HTTP ledger fallback is capped before the Workers Free external-subrequest ceiling;
-- current-projection mutations are grouped instead of issuing one D1 query per object;
-- history/activity windows are grouped instead of issuing one D1 query per window;
-- the fast-lane persistence batch has an explicit application-level D1 query ceiling and fails before `db.batch()` if it would exceed that ceiling;
-- Current and History remain distinct truth surfaces; this repair does not declare History complete.
+`Remove retired Current control-plane workflows (#1660)`
 
-Queue delivery pause was separately proven in Actions run `33265201170`. The repaired Worker deployment was executed in run `33287377843`. That workflow ended red only after the new version had been deployed at 100% because its final public smoke used Python urllib's default request identity and received HTTP 403. A fresh independent read-only preflight in run `33287456830` then observed `c858ab5d-846e-4bd4-b26b-8f71c9382f8f` as the single 100% production version and passed the public API, Queue, D1, scheduler, Devnet/Mainnet, and configuration checks. The repaired version is therefore the effective production runtime and must not be redeployed merely to change the earlier workflow conclusion.
+At this commit, `wrangler.jsonc` still declares a D1 database, minute Cron, and legacy Worker runtime. Those bindings describe legacy code that D6 will remove; they do not override the new source-of-truth documents.
 
-The active P0 gate is now a **single-invocation bounded Current proof**. It must send exactly one seed message while Queue delivery is paused, resume only long enough for that exact slot to start, immediately pause delivery again, permit only the already in-flight invocation to finish, and prove a successful cursor advance of at least one and at most the fixed 32-ledger cap. A successful proof still leaves Queue delivery paused. Continuous catch-up remains separately unauthorized.
+## Proven reusable evidence
 
-The controlling repair records are:
+### Fresh complete Current build
 
-- [`docs/ops/p0-fast-lane-subrequest-repair-2026-08-29.md`](ops/p0-fast-lane-subrequest-repair-2026-08-29.md);
-- [`docs/ops/p0-current-repair-deploy-effective-bounded-proof-2026-08-30.md`](ops/p0-current-repair-deploy-effective-bounded-proof-2026-08-30.md).
+A 2026-09-11 GitHub Actions run successfully built a complete type-filtered binary Current snapshot.
 
-The latest retained Supabase footprint remains approximately `389,688,467` bytes with `10,311,533` bytes below the 400 MB application halt. That capacity problem belongs to History/R5 recovery and is not being solved by moving Current production traffic into Supabase.
+Evidence:
 
-## Prior status snapshot — 2026-08-07
+- Actions run: `34563293802`;
+- validated ledger: `5,218,039`;
+- ledger hash: `5701853F89034B14F4E9698AD31E04535636CF4DD9CD986136ABDA7F290011A6`;
+- Vaults: `1,234,169`;
+- LoanBrokers: `776,954`;
+- Loans: `339,744`;
+- total relevant objects: `2,350,867`;
+- read-model page size: `50`;
+- read-model lookup prefix length: `2`.
 
-The remainder of this document preserves the prior `2026-08-07` status for provenance. Where it conflicts with the current section above, the `2026-08-30` section controls.
+This proves complete DB-independent source acquisition and static read-model generation are feasible. It does not prove the new live runtime.
 
-XRPL Lending Monitor is **not formally released**.
+### Existing historical archive
 
-The selected Supabase revision-3 R5 recovery remains safely halted on the application-owned rolling 31-day egress guard. R5C1 status reconciliation, R5C2 retained byte attribution, R5C3 candidate evaluation, and the R5C4 architecture decision are complete. Revision-3 continuation is rejected as a convergence path.
+The retained `history-data` publication proves:
 
-The immediate engineering phase is **R4F revision-4 qualification**, controlled by Issue `#1261`.
+- epoch: `devnet-3371675`;
+- start ledger: `3,371,676`;
+- end ledger: `3,932,301`;
+- ledgers: `560,626`;
+- segments: `1,136`;
+- exact index records: `33,811,930`.
 
-- G1 directional accounting contract: `pass`;
-- G2 instrumentation and retained accounting: `pass`;
-- G3 isolated provider reconciliation: `unresolved`;
-- G4 memory requalification: `pass`;
-- G5-G10: `unresolved`.
+The archive is retained as historical evidence.
 
-G4 is closed from the authorized bounded offline replay retained by Actions run `31086304493` and artifact `8961530550`. The oldest unresolved hard gate remains G3. Revision 4 is still `not_selected` and authorizes no R5 recovery mutation.
+No continuity is claimed from `3,932,302` to the future DB-less live-history start until backfill is independently verified.
 
-Issue `#1175` remains the controlling halted R5 recovery record. Public-reader cutover, Mainnet, stabilization, soak, and restart of the retired Cloudflare collector remain prohibited.
+## Reusable code
 
-## Roadmap position
+High-value reuse candidates already exist for:
 
-```text
-M0 foundation                         complete
-M1 current-state collector            implemented; runtime replacement/recovery active
-M2 event history and lifecycle        complete through Checkpoint B
-M3 public API                         complete through exports/feeds; final live cross-audit gated
-M4 baseline UI                        complete through Checkpoint C
-M5 differentiated audit UI            API cross-audit passed; final browser evidence gated
-R4E deployment-profile qualification  revision 3 selected
-R5 Devnet recovery                    HALTED — clean rolling-egress boundary
-R5C1 status reconciliation            complete
-R5C2 retained byte attribution        complete
-R5C3 candidate evaluation             complete
-R5C4 architecture decision            revision 3 continuation rejected
-R4F revision-4 qualification          ACTIVE — G3 unresolved; G4 pass
-R5 proof unit / continuation          not authorized
-R5 stabilization                      not authorized
-M6 hardening / Explorer v1            gated by R5 and stabilization
-multi-day Devnet soak                 not authorized
-formal Devnet release                 not authorized
-O1 -> O2 -> O3 Observatory path       post-release
-```
+- validated ledger parsing;
+- WebSocket ledger reading;
+- Lending transaction filtering;
+- AffectedNodes normalization;
+- Current overlay mutation derivation;
+- Loan lifecycle derivation;
+- deleted-object archive derivation;
+- cover/debt/loss history derivation;
+- history segment record building;
+- Vault/LoanBroker/Loan normalization;
+- existing React presentation routes/components.
 
-## Selected runtime identity
+## Retired problem area
 
-R4E selected the exact currently deployed profile:
+Do not spend new implementation time repairing:
 
-- profile: `supabase_free_postgres_pgcron_edge`;
-- revision: `3`;
-- profile identity digest: `3a5c4ff2c43a48d3e5b7ceded60027173d215d6f083fb33c22375758520bbe67`;
-- R4E selection digest: `13a313d9d0679c7c512b59f9931d733dcb3217ec8e1cc6e74a36125a0354b667`;
-- selection commit: `198eae836f5c6814cbc6009c95740becf41bdda3`;
-- controlling qualification run: `30817518929`.
+- D1 capacity behavior;
+- Queue delivery/cadence;
+- fast-lane D1 persistence;
+- Supabase R4/R5 recovery;
+- Worker Cron cutover/reseed;
+- D1 overlay fold/cutover.
 
-Revision 3 remains the identity of the retained halted R5 state. It behaved correctly by denying a claim before mutation. Its fail-closed safety result is preserved even though its recovery accounting is not convergent.
+These are historical implementation paths.
 
-## R5 checkpoint and retained recovery state
+## Active roadmap unit
 
-The retained active checkpoint and recovery are bound to:
+**D0 — Source-of-truth reset**
 
-- checkpoint ID: `r5-checkpoint-selected-revision3-entry`;
-- recovery run ID: `r5-recovery-selected-revision3-entry`;
-- network: `devnet`;
-- epoch: `supabase-r4c2c-v1`;
-- checkpoint watermark: `4,133,101`;
-- checkpoint state digest: `8c7ea9e12ae88e98ae54bdeb6b15314d43a993d154b235e5b42be415166a9f35`.
+After D0 merges, proceed directly to:
 
-The recovery preserves `scan -> commit -> finalize -> successor`, exact identity checks, parent-hash continuity, and committed-only visibility.
+**D1 — Persistence decoupling**
 
-Read-only diagnostic run `31032129918` retained:
+## Release status
 
-| Field | Value |
-| --- | ---: |
-| Recovery status | `halted` |
-| Last error | `r5_recovery_monthly_egress_halt` |
-| Completed batches | `297` |
-| Committed ledgers | `5,811` |
-| Recovery watermark | `4,139,118` |
-| Physical watermark | `4,139,122` |
-| Active batches | `0` |
-| Noncommitted work | `0` |
-| Nonterminal messages | `20,195` |
-| Recent batch errors | none |
-| Database bytes | `276,958,355` |
+Not formally released.
 
-No active batch or partially committed work remains.
-
-## Revision-3 halt, attribution, and convergence decision
-
-Read-only diagnostic run `31034105841` retained:
-
-| Value | Bytes |
-| --- | ---: |
-| Attempt conservative bytes | 1,286,596,364 |
-| R5 recovery conservative bytes | 2,880,972,004 |
-| Prior conservative bytes | 4,167,568,368 |
-| One new reservation | 134,217,728 |
-| Projected conservative bytes | 4,301,786,096 |
-| Fixed halt | 4,294,967,296 |
-| Headroom after reservation | -6,818,800 |
-
-The claim was correctly rejected before mutation. `2026-09-03T10:46:04.042Z` is only the first calculated time one new revision-3 reservation may fit if no new contributions occur. It is not a restart date or authorization.
-
-Read-only run `31068546022` reconciled every retained recovery batch:
-
-- executor/adopted batches: `231 / 66`;
-- executor/adopted ledgers: `5,076 / 735`;
-- recovery conservative bytes: `2,880,972,004`;
-- deterministic conservative floor: `2,302,894,080`;
-- variable conservative bytes: `578,077,924`;
-- retained normalized payload bytes: `5,753,011`;
-- full-reservation noncompleted batches: `0`;
-- all diagnostic checks: passed.
-
-Three repaired completed batches retain a full 128 MiB failure reservation. They remain valid failure-history accounting but are not ordinary successful-batch cost. Exact directional wire counters and the original accounting JSON were not retained.
-
-Excluding repair-only rows, normal completed work used `2,478,318,820` conservative bytes for `5,016` ledgers, approximately `494,083` bytes per ledger and `0.195` ledger/minute under the fixed 4 GiB rolling halt. The qualified steady requirement is `21` ledgers/minute. The memory-qualified future 12-ledger revision-3 shape permits approximately `0.109` ledger/minute; even deleting the deterministic floor permits only approximately `2.35` ledgers/minute.
-
-Revision-3 continuation is therefore rejected. Waiting for rolling release, removing anomalies, reserve tuning, restoring unqualified 24-ledger claims, or performing a one-time rebase does not prove convergence.
-
-## R4F revision-4 candidate
-
-Issue `#1261` qualifies a new identity:
-
-- profile: `supabase_free_postgres_pgcron_edge`;
-- revision: `4`;
-- candidate identity digest: `39e8b620a20bb08fbe8306fe753d4d445c5191bcafddbf67721e0c17d5b6bcd5`;
-- selection: `not_selected`;
-- recovery mutation authorized: `false`.
-
-The fixed guards remain:
-
-- rolling application egress halt: `4 GiB / 31 days`;
-- memory halt: `224 MiB` (`234881024` bytes);
-- invocation halt: `400,000 / 31 days`;
-- memory-qualified claim cap: `12 ledgers`.
-
-G1 separates rolling billable-direction egress from independent memory/transport accounting. Inbound XRPL responses are excluded from the rolling billable-egress sum but remain fully included in memory and transport safety.
-
-## R4F G2 completion
-
-G2 completed:
-
-- all eight G1 byte directions with typed observations and source-backed framing reserves;
-- deterministic canonical accounting JSON and SHA-256 digest;
-- candidate-only persistence under `xrpl_r4f_v1`;
-- deterministic production-parser/source-shaped offline shadow generation;
-- isolated PostgreSQL 15 migration, writer, idempotent replay, reader, conflict rejection, role isolation, and export verification.
-
-The passing PostgreSQL CI run is `31079355564`, merged through PR `#1266` as commit `0f032f3599ca11df6c8269a1a25eb9aa9f52ae37`. No production Supabase migration, R5 mutation, reader change, Mainnet, stabilization, or soak occurred.
-
-## R4F G3 status
-
-G3 remains `unresolved`.
-
-The provider interval reconciliation contract, unexplained-delta arithmetic, bounded Dashboard capture contract, and offline verifier are prepared. No separately authorized isolated Supabase Dashboard before/after capture has been retained, and synthetic evidence cannot satisfy this gate.
-
-## R4F G4 completion
-
-G4 is `pass`.
-
-The authorized bounded offline replay ran on source commit `5a25d091919dc2d90116ca9cc4e92335031be9f2` in Actions run `31086304493`. Both `quality` and `r4f-g4-memory-replay` completed successfully.
-
-Retained artifact:
-
-- name: `r4f-g4-memory-replay-evidence`;
-- artifact ID: `8961530550`;
-- size: `160152` bytes;
-- digest: `sha256:e0b4157b70faea269c61f643b78882dffb30a9168632c77e5ec6972673009ed7`;
-- expiration: `2026-08-20T08:47:12Z`;
-- verifier: `proofReady: true`;
-- blocking reasons: none.
-
-Measured shapes:
-
-| Shape | Baseline RSS | Peak RSS | Headroom | Retained / processed |
-| --- | ---: |
-| exact 12-ledger | 61,845,504 | 77,430,784 | 157,450,240 | 12 / 12 |
-| heavier retained | 59,494,400 | 75,296,768 | 159,584,256 | 24 / 12 |
-
-The maximum peak was `77430784` bytes and the minimum headroom below the unchanged `234881024`-byte halt was `157450240` bytes. No memory-halt recurrence or claim-cap override occurred.
-
-The official artifact download and the retained owner-supplied copy are byte-identical. All 24 source ledger JSON files match the retained source manifest by size and SHA-256.
-
-Closure records:
-
-- [`docs/ops/r4f-g4-memory-gate-closure-2026-08-07.md`](ops/r4f-g4-memory-gate-closure-2026-08-07.md);
-- [`ops/r4f/revision4-memory-gate-closure.json`](../ops/r4f/revision4-memory-gate-closure.json).
-
-G4 completion does not satisfy G3 or G5-G10, select revision 4, authorize R5 recovery, or change the public reader, Mainnet, stabilization, or soak state.
-
-## R4F remaining gates
-
-- G3: complete one separately authorized bounded provider capture, reconcile provider display intervals, and retain a conservative unexplained-delta reserve;
-- G5: prove steady convergence at or above 21 ledgers/minute;
-- G6: prove catch-up convergence against a moving Devnet head;
-- G7: prove failed, retried, repaired, and adopted accounting;
-- G8: reprove export, restore, continuation, rollback, and operator independence;
-- G9: run one separately authorized bounded proof unit;
-- G10: select or reject revision 4.
-
-No R5 work may resume before G10 selection and a separate bounded-proof authorization.
-
-## R5 exit condition
-
-R5 completes only after:
-
-- Devnet lag reaches zero;
-- no skipped or duplicated ledger is proved;
-- parent-hash continuity is proved;
-- committed-only visibility is proved;
-- retry, rollback, lease, interruption, and duplicate replay converge;
-- quota accounting reconciles;
-- no active or noncommitted recovery work remains;
-- a terminal read-only recovery record is retained;
-- a separate stabilization decision is prepared.
-
-## Post-R5 order
-
-After R5 exit:
-
-1. separately authorize and run stabilization qualification;
-2. complete M5-5 real-data browser regression and representative production behavior smoke;
-3. complete early M6 integrity/reset and resource guardrails;
-4. implement bounded Explorer v1;
-5. run final visual, accessibility, performance, security, and cross-browser audits;
-6. finalize canonical host, sitemap, metadata, analytics, and operations documentation;
-7. verify backup, restore, rollback, and continuation on the selected production shape;
-8. run real multi-day Devnet soak;
-9. perform final Devnet release verification;
-10. only after stable release and soak, begin Observatory O1, then O2, then O3.
-
-## Controlling evidence
-
-- halted R5 issue: GitHub Issue `#1175`;
-- revision-4 qualification: GitHub Issue `#1261`;
-- checkpoint and preparation run: `30831843111`;
-- health-change diagnostic: `31032129918`;
-- monthly halt breakdown: `31034105841`;
-- retained attribution: `31068546022`;
-- attribution artifact: `8954754584`;
-- replan: [`ops/r5-egress-convergence-replan-2026-08-06.md`](ops/r5-egress-convergence-replan-2026-08-06.md);
-- candidate decision: [`ops/r5-egress-candidate-evaluation-2026-08-06.md`](ops/r5-egress-candidate-evaluation-2026-08-06.md);
-- revision-4 G1 contract: [`ops/r4f-revision4-directional-egress-contract-2026-08-06.md`](ops/r4f-revision4-directional-egress-contract-2026-08-06.md);
-- revision-4 G2 meter: [`ops/r4f-g2-directional-meter-2026-08-06.md`](ops/r4f-g2-directional-meter-2026-08-06.md);
-- revision-4 G2 persistence: [`ops/r4f-g2-directional-persistence-2026-08-06.md`](ops/r4f-g2-directional-persistence-2026-08-06.md);
-- revision-4 G2 offline shadow: [`ops/r4f-g2-offline-shadow-2026-08-06.md`](ops/r4f-g2-offline-shadow-2026-08-06.md);
-- revision-4 G2 PostgreSQL readback: [`ops/r4f-g2-postgres-readback-2026-08-06.md`](ops/r4f-g2-postgres-readback-2026-08-06.md);
-- revision-4 G3 plan: [`ops/r4f-g3-provider-reconciliation-plan-2026-08-06.md`](ops/r4f-g3-provider-reconciliation-plan-2026-08-06.md);
-- revision-4 G4 contract: [`ops/r4f-g4-memory-evidence-contract-2026-08-06.md`](ops/r4f-g4-memory-evidence-contract-2026-08-06.md);
-- revision-4 G4 closure: [`ops/r4f-g4-memory-gate-closure-2026-08-07.md`](ops/r4f-g4-memory-gate-closure-2026-08-07.md);
-- revision-4 G4 machine closure: [`../ops/r4f/revision4-memory-gate-closure.json`](../ops/r4f/revision4-memory-gate-closure.json);
-- runtime invariants: [`history-runtime-contract.md`](history-runtime-contract.md);
-- resource boundary: [`resource-envelope.md`](resource-envelope.md).
-
-## Operating restrictions
-
-- Do not restart R5 under revision 3 or when rolling revision-3 headroom first becomes positive.
-- Do not run a revision-3 proof burst.
-- Do not describe conservative application accounting as exact provider egress.
-- Do not reduce the fixed 4 GiB rolling halt, 224 MiB memory halt, 400,000 invocation halt, or 12-ledger cap.
-- Do not exclude inbound bytes from memory or transport accounting.
-- Do not satisfy G3 without real bounded provider evidence.
-- Do not skip ledgers, break parent-hash continuity, or replace history with latest-state-only collection.
-- Do not rebase without fixed-ledger, manifest, relationship, identity, and continuation evidence.
-- Do not restart the retired Cloudflare collector or use GitHub Actions as the normal collection clock.
-- Do not switch the public reader, enable Mainnet, or start stabilization or soak.
-- Do not advance state after partial persistence or silently fall back after an integrity failure.
+The next release requires completion of D1-D8 in `development-roadmap.md`, with evidence recorded as each unit exits.
