@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This document defines responsibility, required content, API dependency, unavailable behavior, navigation, and milestone assignment for every public page. It complements `product-spec.md` and `explorer-spec.md` and does not weaken data, status, asset, provenance, or release requirements.
+This document defines responsibility, required content, data-source dependency, unavailable behavior, and navigation for every public page. It complements `product-spec.md` and `db-less-runtime-contract.md` and does not weaken data, status, asset, provenance, or release requirements.
 
 ## Common requirements
 
@@ -88,7 +88,7 @@ Provide a beginner-oriented guided view of how observed Vaults, Loan Brokers, Lo
 - a separate Explorer collector;
 - an Explorer-only scheduled job;
 - request-time full-history scans;
-- periodic page-specific D1 recomputation;
+- periodic page-specific full-history or full-Current recomputation;
 - unbounded relationship graph loading;
 - unbounded historical range queries;
 - protocol-wide historical trend charts that require unapproved Observatory metrics;
@@ -113,7 +113,7 @@ A dedicated bounded Explorer composition endpoint may be added only after E1-1 m
 
 E1, after M5-5 exit and early M6 integrity/resource guardrails, before final M6 visual and release-hardening gates.
 
-Detailed E1-1 through E1-5 sequence and completion conditions are defined in `explorer-spec.md` and `observatory-roadmap.md`.
+Any future Explorer implementation requires a new specification built on the active DB-less runtime contract and roadmap.
 
 ### Explorer v2 boundary
 
@@ -531,6 +531,6 @@ Explorer additionally requires explicit behavior when relationship seed data, on
 
 A route is complete only when it has approved information architecture, required data states, responsive behavior, keyboard and screen-reader support, focused tests, API-contract alignment, no invented values, and implementation-status evidence.
 
-Explorer v1 is additionally incomplete until request, D1-read, base-read, cache, representative interaction, graph/list accessibility, and production-shaped browser evidence satisfy the E1 completion gates.
+Any future Explorer surface must prove bounded artifact reads, representative interaction cost, accessibility, and production-shaped browser behavior before release.
 
 Explorer v2 remains unavailable until O1 and O2 dependencies are satisfied.
