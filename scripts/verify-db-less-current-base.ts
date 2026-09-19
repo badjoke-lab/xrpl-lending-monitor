@@ -11,8 +11,6 @@ import {
 } from '../src/shared/db-less/base-manifest'
 import { canonicalJson } from '../src/shared/current-state/canonical-json'
 
-type PageKind = 'vault-page' | 'loan-broker-page' | 'loan-page'
-
 type VerificationCounts = {
   vaults: number
   loanBrokers: number
