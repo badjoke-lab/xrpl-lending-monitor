@@ -1,0 +1,188 @@
+name: DB-less D2 Current base candidate
+
+on:
+  workflow_dispatch:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: db-less-d2-current-base-candidate
+  cancel-in-progress: false
+
+jobs:
+  build-and-publish:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event.issue.number == 1673 &&
+        github.event.comment.user.login == 'badjoke-lab' &&
+        github.event.comment.body == '/d2-build-base-candidate'
+      )
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    env:
+      D2_ISSUE: '1673'
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build D2 executables
+        run: |
+          pnpm build:release-current-state
+          pnpm build:db-less-current-base
+          pnpm build:db-less-current-base-verifier
+
+      - name: Capture source revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "SOURCE_REVISION=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          echo "RELEASE_TAG=d2-current-base-${GITHUB_RUN_ID}" >> "$GITHUB_ENV"
+
+      - name: Build fresh fixed-ledger source snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          node .release-current-state-build/run-release-current-state.mjs             --local             --output-dir .local/d2-source             --release-tag "$RELEASE_TAG"             --page-limit 4000             --object-limit-per-page 2048             --index-buckets 64             --data-segments 20
+
+      - name: Build Release-compatible DB-less base
+        shell: bash
+        run: |
+          set -euo pipefail
+          node .db-less-current-base-read-model-build/build-db-less-current-base-read-model.mjs             --local             --input-dir .local/d2-source/assets             --output-dir .local/d2-base             --source-revision "$SOURCE_REVISION"             --page-size 4096             --lookup-prefix-length 2
+
+      - name: Independently verify generated base
+        shell: bash
+        run: |
+          set -euo pipefail
+          node .db-less-current-base-verifier-build/verify-db-less-current-base.mjs             --assets-dir .local/d2-base/assets             --output .local/d2-base/base-verification-summary.json
+
+      - name: Assert Release asset ceiling before publication
+        shell: bash
+        run: |
+          set -euo pipefail
+          count="$(jq -r '.releaseAssetCount' .local/d2-base/base-read-model-summary.json)"
+          test "$count" -le 1000
+          actual="$(find .local/d2-base/assets -maxdepth 1 -type f | wc -l | tr -d ' ')"
+          test "$actual" -eq "$count"
+
+      - name: Create draft candidate Release
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > .local/d2-base/release-notes.md <<EOF
+          DB-less D2 Current base candidate.
+
+          This prerelease is evidence only and is not the active public Current channel.
+          Source revision: $SOURCE_REVISION
+          Actions run: $GITHUB_RUN_ID
+          EOF
+          gh release create "$RELEASE_TAG"             --target "$SOURCE_REVISION"             --draft             --title "DB-less D2 Current base $GITHUB_RUN_ID"             --notes-file .local/d2-base/release-notes.md
+
+      - name: Upload candidate assets in bounded batches
+        shell: bash
+        run: |
+          set -euo pipefail
+          cleanup() {
+            gh release delete "$RELEASE_TAG" --yes --cleanup-tag >/dev/null 2>&1 || true
+          }
+          trap cleanup ERR
+          mapfile -d '' files < <(find .local/d2-base/assets -maxdepth 1 -type f -print0 | sort -z)
+          for ((i=0; i<${#files[@]}; i+=40)); do
+            batch=("${files[@]:i:40}")
+            gh release upload "$RELEASE_TAG" "${batch[@]}"
+          done
+          trap - ERR
+
+      - name: Verify uploaded Release asset names and sizes
+        shell: bash
+        run: |
+          set -euo pipefail
+          cleanup() {
+            gh release delete "$RELEASE_TAG" --yes --cleanup-tag >/dev/null 2>&1 || true
+          }
+          trap cleanup ERR
+          release_id="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" --jq '.id')"
+          gh api --paginate --slurp             "repos/$GITHUB_REPOSITORY/releases/$release_id/assets?per_page=100"             > .local/d2-base/release-assets-pages.json
+          node --input-type=module <<'NODE'
+          import { readdir, stat, readFile } from 'node:fs/promises'
+          import { join } from 'node:path'
+
+          const dir = '.local/d2-base/assets'
+          const pages = JSON.parse(await readFile('.local/d2-base/release-assets-pages.json', 'utf8'))
+          const remote = pages.flat()
+          const localNames = (await readdir(dir)).sort()
+          if (remote.length !== localNames.length) throw new Error(`Release asset count mismatch: ${remote.length} != ${localNames.length}`)
+          const byName = new Map(remote.map((asset) => [asset.name, asset]))
+          for (const name of localNames) {
+            const asset = byName.get(name)
+            if (!asset) throw new Error(`Missing Release asset ${name}`)
+            const info = await stat(join(dir, name))
+            if (asset.size !== info.size) throw new Error(`Release asset size mismatch for ${name}`)
+          }
+          NODE
+          trap - ERR
+
+      - name: Publish verified candidate as prerelease
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release edit "$RELEASE_TAG" --draft=false --prerelease --latest=false
+
+      - name: Record D2 candidate evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          ledger="$(jq -r '.ledgerIndex' .local/d2-base/base-read-model-summary.json)"
+          hash="$(jq -r '.ledgerHash' .local/d2-base/base-read-model-summary.json)"
+          vaults="$(jq -r '.counts.vaults' .local/d2-base/base-read-model-summary.json)"
+          brokers="$(jq -r '.counts.loanBrokers' .local/d2-base/base-read-model-summary.json)"
+          loans="$(jq -r '.counts.loans' .local/d2-base/base-read-model-summary.json)"
+          assets="$(jq -r '.releaseAssetCount' .local/d2-base/base-read-model-summary.json)"
+          bytes="$(jq -r '.totalCompressedBytes' .local/d2-base/base-read-model-summary.json)"
+          manifest="$(jq -r '.manifestSha256' .local/d2-base/base-read-model-summary.json)"
+          gh issue comment "$D2_ISSUE" --body "$(cat <<EOF
+          D2 candidate build PASS.
+
+          - run: $GITHUB_RUN_ID
+          - source revision: `$SOURCE_REVISION`
+          - release tag: `$RELEASE_TAG`
+          - ledger: `$ledger`
+          - ledger hash: `$hash`
+          - Vaults: `$vaults`
+          - LoanBrokers: `$brokers`
+          - Loans: `$loans`
+          - Release assets: `$assets`
+          - compressed bytes: `$bytes`
+          - base manifest SHA-256: `$manifest`
+
+          The release is a prerelease evidence candidate only. It is not the active public Current channel.
+          EOF
+          )"
+
+      - name: Upload compact evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: db-less-d2-current-base-evidence
+          path: |
+            .local/d2-source/release-summary.json
+            .local/d2-base/base-read-model-summary.json
+            .local/d2-base/base-verification-summary.json
+            .local/d2-base/assets/base-manifest.json
+            .local/d2-base/release-assets-pages.json
+          if-no-files-found: warn
+          retention-days: 30

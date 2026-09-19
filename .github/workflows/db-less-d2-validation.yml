@@ -13,7 +13,10 @@ on:
       - 'src/shared/db-less/base-manifest.ts'
       - 'src/shared/db-less/base-manifest.test.ts'
       - 'vite.db-less-current-base-read-model.config.ts'
+      - 'scripts/verify-db-less-current-base.ts'
+      - 'vite.db-less-current-base-verifier.config.ts'
       - '.github/workflows/db-less-d2-validation.yml'
+      - '.github/workflows/db-less-d2-current-base-candidate.yml'
 
 permissions:
   contents: read
@@ -37,6 +40,8 @@ jobs:
         run: pnpm build:release-current-state
       - name: Build DB-less Current base read-model source
         run: pnpm build:db-less-current-base
+      - name: Build DB-less Current base verifier
+        run: pnpm build:db-less-current-base-verifier
       - name: Typecheck shared contracts
         run: pnpm exec tsc -p tsconfig.worker.json --noEmit
       - name: Typecheck Node build configs
@@ -47,6 +52,8 @@ jobs:
           scripts/run-release-current-state.ts
           scripts/build-db-less-current-base-read-model.ts
           vite.db-less-current-base-read-model.config.ts
+          scripts/verify-db-less-current-base.ts
+          vite.db-less-current-base-verifier.config.ts
           src/shared/current-state/filtered-ledger-traversal.ts
           src/shared/current-state/filtered-ledger-traversal.test.ts
           src/shared/db-less/base-manifest.ts

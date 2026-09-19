@@ -90,7 +90,9 @@
     "types:worker": "wrangler types",
     "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm db:migrate:local && pnpm build",
     "build:db-less-current-base": "vite build --config vite.db-less-current-base-read-model.config.ts",
-    "db-less-current-base:local": "pnpm build:db-less-current-base && node .db-less-current-base-read-model-build/build-db-less-current-base-read-model.mjs --local"
+    "db-less-current-base:local": "pnpm build:db-less-current-base && node .db-less-current-base-read-model-build/build-db-less-current-base-read-model.mjs --local",
+    "build:db-less-current-base-verifier": "vite build --config vite.db-less-current-base-verifier.config.ts",
+    "db-less-current-base:verify": "pnpm build:db-less-current-base-verifier && node .db-less-current-base-verifier-build/verify-db-less-current-base.mjs"
   },
   "dependencies": {
     "@xrpl-commons/ripple-binary-codec": "2.7.0",
