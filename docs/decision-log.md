@@ -193,7 +193,7 @@ D-022 preserves the guarantees that matter:
 ## D-022 — Verified base read model with D1 incremental overlay
 
 - Date: 2026-07-04
-- Status: accepted
+- Status: superseded by D-025
 
 ### Decision
 
@@ -225,7 +225,7 @@ Incremental history, lifecycle, archive, balance, overlay, and cursor changes sh
 ## D-023 — Explorer-first presentation layer and Observatory sequence
 
 - Date: 2026-07-08
-- Status: accepted
+- Status: superseded by D-025; retained as product-history context only
 
 ### Decision
 
@@ -260,7 +260,7 @@ Explorer v2 begins only after the Observatory data foundation and Observatory mo
 ## D-024 — Explorer v1 Guided Dashboard + Relationship Explorer direction
 
 - Date: 2026-07-08
-- Status: accepted
+- Status: superseded by D-025; retained as visual-history context only
 
 ### Decision
 
