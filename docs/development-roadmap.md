@@ -23,7 +23,7 @@ Exit:
 - repository source of truth has one coherent architecture;
 - no active roadmap points to D1, Queue, Supabase, or Worker Cron.
 
-## D1 — Persistence decoupling
+## D1 — Persistence decoupling — COMPLETE
 
 Scope:
 
@@ -33,12 +33,16 @@ Scope:
 - add channel schema;
 - preserve existing parser and derivation behavior.
 
-Exit:
+Exit evidence:
 
-- fixture ledger ranges can produce Current + History artifacts without D1;
-- repeated runs are byte/semantic deterministic as specified.
+- PR #1663 merged as `09b9fae2eeeec54f3dbc82101e16704b41fe0b80`;
+- validation run `35457202156`: typecheck, lint, and focused tests all passed;
+- fixture ledger ranges produce Current + History artifacts without D1;
+- repeated artifact generation is byte-for-byte deterministic for the same source revision;
+- immutable artifact conflicts fail closed;
+- active channel contracts encode Current continuity and explicit History coverage gaps.
 
-## D2 — Current base generation
+## D2 — Current base generation — ACTIVE
 
 Scope:
 
