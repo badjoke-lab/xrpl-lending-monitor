@@ -72,6 +72,12 @@ describe('DB-less base manifest', () => {
     await expect(buildDbLessBaseManifest(input)).rejects.toThrow('1000-asset limit')
   })
 
+  it('rejects duplicate immutable asset keys', async () => {
+    const input = body()
+    input.assets[1] = { ...input.assets[1]!, key: input.assets[0]!.key }
+    await expect(buildDbLessBaseManifest(input)).rejects.toThrow('asset keys must be unique')
+  })
+
   it('rejects missing or non-contiguous page ordinals', async () => {
     const input = body()
     input.assets[0] = asset('vault-page', 2, 2)
