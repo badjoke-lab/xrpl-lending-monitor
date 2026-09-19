@@ -90,9 +90,15 @@ These are historical implementation paths.
 
 Merged through PR #1661 as `f764967947f0be10f08013ac8a655cef3bc816f6`.
 
-**D1 — Persistence decoupling: active**
+**D1 — Persistence decoupling: complete**
 
-The next implementation unit extracts provider-independent collector/derivation output from D1 repository interfaces and defines deterministic artifact/channel contracts.
+Merged through PR #1663 as `09b9fae2eeeec54f3dbc82101e16704b41fe0b80`.
+
+Validation run `35457202156` passed typecheck, focused lint, and the DB-less fixture suite. The merged contracts now provide deterministic seven-class Current+History live artifacts, immutable artifact publication interfaces, channel integrity/coverage rules, and collector-layer overlay typing without a Worker repository dependency.
+
+**D2 — Current base generation: active**
+
+The next implementation unit canonicalizes the proven type-filtered binary `ledger_data` full snapshot path, removes workflow-time source patching, emits a verified DB-less Current base generation, and measures the resulting static artifact layout.
 
 ## Release status
 
