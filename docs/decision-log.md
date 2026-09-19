@@ -1,5 +1,36 @@
 # Decision log
 
+## D-025 — DB-less static-artifact runtime
+
+- Date: 2026-09-20
+- Status: accepted
+
+### Decision
+
+The canonical production direction no longer uses Cloudflare D1, Cloudflare Queues, Worker-scheduled persistence, Supabase, or another hosted database as the authoritative runtime data plane.
+
+Current state is represented by a verified complete fixed-ledger base plus verified contiguous live mutations. Historical records are derived from the same validated-ledger scan. Persistent public data is published as verified static artifacts; GitHub Release assets are the initial publication target. A small channel manifest is switched only after referenced artifacts are uploaded and verified.
+
+The public React application becomes a static application with a data-source layer that resolves Current and History artifacts directly. Normal browser reads must remain bounded and must never require a full scan of the multi-million-object Current dataset.
+
+### Evidence
+
+A successful 2026-09-11 fresh build at validated ledger 5,218,039 produced 1,234,169 Vaults, 776,954 LoanBrokers, and 339,744 Loans. This establishes the scale requirement and proves that complete fixed-ledger acquisition and static read-model generation are feasible outside a canonical database.
+
+The retained historical publication covers ledger 3,371,676 through 3,932,301. Continuity after that boundary is not assumed.
+
+### Consequences
+
+- D-022 persistence architecture is superseded;
+- D1/Queue/Supabase recovery work is historical only;
+- the existing parser, normalization, lifecycle, archive, balance-history, and React presentation code should be reused where provider-independent;
+- a five-minute collector catches up from a committed ledger/hash cursor rather than relying on exact schedule execution;
+- publication is fail-closed and channel-last;
+- large generated data is kept out of five-minute Git commit history;
+- historical gaps remain explicit until independently backfilled and verified;
+- legacy runtime code is removed only after the replacement path demonstrates equivalent integrity and bounded public reads.
+
+
 Public decisions are recorded in the product, architecture, roadmap, and implementation-status documents.
 
 This file records concise public architecture and product decisions that materially constrain later implementation.
@@ -162,7 +193,7 @@ D-022 preserves the guarantees that matter:
 ## D-022 — Verified base read model with D1 incremental overlay
 
 - Date: 2026-07-04
-- Status: accepted
+- Status: superseded by D-025
 
 ### Decision
 
@@ -194,7 +225,7 @@ Incremental history, lifecycle, archive, balance, overlay, and cursor changes sh
 ## D-023 — Explorer-first presentation layer and Observatory sequence
 
 - Date: 2026-07-08
-- Status: accepted
+- Status: superseded by D-025; retained as product-history context only
 
 ### Decision
 
@@ -229,7 +260,7 @@ Explorer v2 begins only after the Observatory data foundation and Observatory mo
 ## D-024 — Explorer v1 Guided Dashboard + Relationship Explorer direction
 
 - Date: 2026-07-08
-- Status: accepted
+- Status: superseded by D-025; retained as visual-history context only
 
 ### Decision
 

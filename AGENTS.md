@@ -2,115 +2,112 @@
 
 These rules apply to every contributor and automation working in this repository.
 
-## Source of truth
+## Active source of truth
 
-Before changing code or documentation, read:
+Read these documents before implementation, operations, release work, or architecture changes:
 
 1. `docs/README.md`
 2. `docs/product-spec.md`
-3. `docs/architecture.md`
-4. `docs/data-model.md`
-5. `docs/status-model.md`
-6. `docs/asset-model.md`
-7. `docs/collector-design.md`
-8. `docs/testing-strategy.md`
+3. `docs/db-less-runtime-contract.md`
+4. `docs/architecture.md`
+5. `docs/data-model.md`
+6. `docs/status-model.md`
+7. `docs/asset-model.md`
+8. `docs/collector-design.md`
 9. `docs/resource-envelope.md`
-10. `docs/development-roadmap.md`
-11. `docs/implementation-status.md`
-12. `docs/m6-integrity-reset-plan.md` and `docs/m6-resource-guardrail-plan.md` for early M6 integrity/reset or runtime/resource work
-13. `docs/m6-i1-fixture-catalog.md` before M6-I1 implementation
-14. the UI specification documents for user-visible work
-15. `docs/explorer-spec.md` and `docs/observatory-roadmap.md` for Explorer or XRPL Lending Observatory work
-16. `docs/explorer-v1-visual-direction.md`, `docs/explorer-v1-contract-matrix.md`, `docs/explorer-v1-translation-dictionary.md`, `docs/explorer-v1-content-copy.md`, `docs/explorer-v1-relationship-contract.md`, and `docs/explorer-v1-static-api-shape-audit.md` before Explorer E1-1 through E1-5
+10. `docs/testing-strategy.md`
+11. `docs/development-roadmap.md`
+12. `docs/implementation-status.md`
+13. affected UI specification documents for user-visible work
 
-Repository documents are authoritative when they agree with implementation and verified evidence. Correct stale documentation in the same pull request as the related change.
+The current tree is authoritative. Historical versions in Git history are forensic evidence only and MUST NOT be used as implementation guidance unless a task explicitly asks for historical analysis.
+
+## Architecture boundary
+
+The active architecture is DB-less.
+
+The canonical production design MUST NOT use:
+
+- Cloudflare D1;
+- Cloudflare Queues;
+- Cloudflare KV, R2, Durable Objects, or another Cloudflare stateful data product;
+- Supabase or another hosted database as the canonical runtime store;
+- a Worker scheduled collector as the canonical collector;
+- a Git branch as an append-only database.
+
+Cloudflare DNS may remain independent infrastructure. A static hosting provider may be selected separately. The product must continue to function without Cloudflare stateful services.
+
+Persistent public data is published as verified static artifacts. GitHub Actions performs bounded collection. GitHub Release assets are the initial publication target. Replacing the publication provider later requires preserving the same artifact contracts.
 
 ## Product boundary
 
-- The public product is an independent, read-only XRPL Lending Protocol monitor.
-- The initial release is Devnet only.
-- Explorer v1 is an approved bounded guided presentation layer over the Monitor data contracts; it is not a separate collector or analytics pipeline.
-- The approved post-release expansion is named XRPL Lending Observatory. Explorer v2 remains gated behind the Observatory data foundation and Observatory monitoring view.
-- Mainnet, wallet connection, signing, transaction submission, lending actions, repayment actions, deposits, withdrawals, and public write APIs are outside scope.
-- Funding, donation, payment, pricing, fiat conversion, cross-asset totals, and proprietary risk or credit scores are outside scope.
-- XRP, IOU, and MPT identities and quantities must remain distinct.
+- The product is an independent, read-only XRPL Lending Protocol monitor and historical audit surface.
+- The current release target is Devnet.
+- Mainnet, wallet connection, signing, transaction submission, lending actions, repayment actions, deposits, withdrawals, and public write APIs are outside the current scope.
+- XRP, IOU, and MPT identities and quantities remain distinct.
 - Missing or unavailable data is never represented as zero.
-- On-ledger state and schedule-derived state must remain separate.
-- A partial bootstrap must never activate or be reported as complete.
-- Deleted protocol objects leave current projections but remain available through indexed history where collected.
+- On-ledger state and schedule-derived state remain separate.
+- Deleted protocol objects leave current projections but remain available through collected history.
+- Current state and historical coverage must expose their independent freshness and continuity boundaries.
 
 ## Data integrity
 
-Collection and persistence must be:
+All collection must be:
 
 - validated-ledger based;
 - network and epoch scoped;
-- marker-aware or cursor-aware;
 - restartable and idempotent;
 - gap rejecting;
-- bounded by the documented resource envelope;
-- atomic at the defined commit boundary;
-- explicit about unavailable, stale, partial, and unsupported data.
+- parent-hash continuous;
+- bounded;
+- explicit about stale, unavailable, partial, unsupported, and uncollected states.
 
-Current-state activation requires one fixed validated ledger, complete traversal, deterministic object hashing, manifest verification, relationship checks, and an atomic active-pointer switch. A failed replacement must preserve the prior active snapshot.
+A current base activates only after a fixed validated ledger has been completely traversed, normalized, hashed, indexed, relationship-checked, and manifest-verified.
+
+A live update activates only after every referenced artifact is uploaded and verified. The channel/manifest pointer is always the final publication step. Failed publication preserves the previously active generation.
 
 ## Implementation discipline
 
-- Work from the current canonical predecessor.
-- Before every new implementation unit, operational probe, release-preparation unit, or externally visible configuration change, re-read `docs/development-roadmap.md` and `docs/implementation-status.md`; repository source-of-truth documents override stale conversation summaries or prior plans.
-- Before the first M6 integrity/reset or runtime/resource unit, also re-read `docs/m6-integrity-reset-plan.md` and `docs/m6-resource-guardrail-plan.md`; do not start M6 while `implementation-status.md` still records M5-5 as active.
-- Before M6-I1 implementation, also re-read `docs/m6-i1-fixture-catalog.md` and issue #283, inventory existing repository test helpers first, and record evidence-backed deviations rather than creating a parallel fixture model.
-- Before every Explorer or Observatory implementation unit, also re-read `docs/explorer-spec.md` and `docs/observatory-roadmap.md` and reconcile them with the active roadmap, implementation status, resource envelope, early M6 baseline evidence, and affected UI/data specifications.
-- Before Explorer E1-1 through E1-5, also re-read the Explorer v1 pre-entry design, copy, and static-audit documents. Revalidate endpoint assumptions, static API-shape findings, translation wording, content copy, relationship bounds, and measurement hooks against actual M6 evidence before coding; pre-entry design preparation does not satisfy the E1 start gate.
-- After new evidence changes an active gate, blocker, sequencing decision, or measured resource state, reconcile the affected status and roadmap documents before the next dependent unit proceeds.
+- Start from latest `main`.
 - Prefer one coherent roadmap unit per pull request.
-- Do not create parallel implementations of the same feature.
-- Update affected specifications, roadmap status, resource limits, and operational documentation with the implementation.
-- Do not weaken tests or integrity guarantees to obtain a passing build.
-- Do not merge with failing required checks, stale migrations, unresolved material findings, or contradictory documentation.
+- Do not create a second parser or second domain model when existing collector/domain code can be reused.
+- Do not restore retired D1/Queue/Supabase recovery work as a shortcut.
+- Do not make generated data commits on a five-minute cadence.
+- Keep large generated data out of Git history.
+- Reconcile `development-roadmap.md` and `implementation-status.md` after evidence changes a gate or sequencing decision.
+- Do not weaken integrity tests to obtain a passing build.
+- Do not describe target behavior as implemented until evidence exists.
 
 ## Required validation
 
-Run checks appropriate to the changed surface. The normal full validation is:
+The target normal validation after the DB-less migration is:
 
 ```sh
 corepack enable
 pnpm install --frozen-lockfile
-pnpm check
+pnpm lint
+pnpm typecheck
+pnpm test
 pnpm test:e2e
+pnpm build
 ```
+
+Until the migration reaches the cleanup phase, legacy commands may still exist in the repository. Their existence does not make them part of the active architecture.
 
 Additional evidence is required where applicable:
 
-- local D1 migration application for schema changes;
-- fixture-ledger replay for parser, history, lifecycle, archive, and reconciliation work;
+- fixture-ledger replay for parser, lifecycle, archive, balance-history, and reconciliation work;
 - non-destructive live Devnet reads for network-dependent collectors;
+- full fixed-ledger traversal evidence for a new Current base;
+- interruption/retry/idempotence/continuity evidence for live collection;
+- publication atomicity evidence for release assets and channel switching;
 - browser evidence for user-visible flows and accessibility;
-- runtime, request, storage, and recovery measurements for collector and bootstrap changes;
-- reset-signal classification, interruption/replay, epoch-transition, catch-up, and reconciliation evidence for early M6 integrity/reset work;
-- collector, replay/catch-up, representative API-read, browser-request-shape, and Explorer harness measurements for early M6 resource work;
-- request, D1-read, base-read, cache, accessibility, and representative interaction measurements for Explorer work;
-- aggregate replay, storage growth, read/write profile, retention, reset, and reconciliation evidence for Observatory data-foundation work;
-- rollback and interruption evidence for persistence and deployment changes.
-
-## Public-information boundary
-
-Repository content and generated artifacts must not contain:
-
-- credentials, access tokens, private keys, seeds, or private endpoints;
-- personal billing, account, or budget information;
-- unnecessary provider account identifiers or internal incident details;
-- unpublished operational strategy or unrelated project context;
-- unredacted personal data.
-
-Public documentation should explain decisions through product integrity, security, maintainability, measurable resource limits, accessibility, and operational reliability.
+- request/asset-size/runtime measurements before production cutover.
 
 ## UI rules
 
-- Use the approved dark ledger-observatory direction.
+- Preserve the approved dark ledger-observatory direction.
 - Preserve keyboard access, visible focus, semantic landmarks, contrast, zoom, reduced motion, long identifiers, and responsive behavior.
-- Implement explicit loading, empty, unavailable, stale, partial, error, archived, not-found, and invalid-identifier states.
-- Explorer plain-language summaries supplement rather than replace canonical transaction types, results, field meanings, identifiers, provenance, and technical routes.
+- Implement explicit loading, empty, unavailable, stale, partial, error, archived, not-found, invalid-identifier, and coverage-gap states.
+- Plain-language summaries supplement rather than replace canonical transaction types, results, identifiers, provenance, and technical detail.
 - Generated mockups define visual direction only and never define product data.
-- Explorer v1 Hero styling remains visually aligned with the current Monitor and does not use lighthouse, observatory-building, scenic landscape, or decorative architectural illustration.
-- Do not publish placeholder external links.

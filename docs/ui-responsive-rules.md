@@ -197,7 +197,7 @@ At minimum test:
 
 ## Release visual audit matrix
 
-Before public Devnet release, run a manual-dispatch full-page screenshot audit against the deployed read-only site after M1 has reached a verified healthy fresh head and D1 resource headroom has been checked. Capture at minimum:
+Before public Devnet release, run a full-page screenshot audit against the deployed read-only site after the DB-less Current channel has reached a verified fresh head and representative static artifact read budgets have passed. Capture at minimum:
 
 - wide desktop at approximately 1440 CSS pixels;
 - narrow mobile at approximately 390 CSS pixels;
