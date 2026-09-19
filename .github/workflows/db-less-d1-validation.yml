@@ -1,0 +1,45 @@
+name: DB-less D1 validation
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/shared/db-less/**'
+      - 'src/collector/history-segments/**'
+      - 'src/collector/incremental/coalesced-overlay-mutations.ts'
+      - 'docs/development-roadmap.md'
+      - 'docs/implementation-status.md'
+      - '.github/workflows/db-less-d1-validation.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: db-less-d1-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24.18.0'
+          cache: pnpm
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - name: Typecheck worker/shared graph
+        run: pnpm exec tsc -p tsconfig.worker.json --noEmit
+      - name: Lint D1 surface
+        run: pnpm exec eslint src/shared/db-less src/collector/history-segments/portable-xrpl-normalization.ts src/collector/incremental/coalesced-overlay-mutations.ts
+      - name: D1 focused tests
+        run: >-
+          pnpm exec vitest run
+          src/shared/db-less/live-delta.test.ts
+          src/shared/db-less/channel.test.ts
+          src/shared/db-less/publication.test.ts
+          src/collector/history-segments/build-segment-records.test.ts
+          src/collector/history-segments/portable-xrpl-normalization.test.ts
+          src/collector/incremental/coalesced-overlay-mutations.test.ts
