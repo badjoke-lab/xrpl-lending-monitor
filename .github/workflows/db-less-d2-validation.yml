@@ -35,12 +35,18 @@ jobs:
         run: pnpm install --no-frozen-lockfile --ignore-scripts
       - name: Build release Current source
         run: pnpm build:release-current-state
+      - name: Build DB-less Current base read-model source
+        run: pnpm build:db-less-current-base
       - name: Typecheck shared contracts
         run: pnpm exec tsc -p tsconfig.worker.json --noEmit
+      - name: Typecheck Node build configs
+        run: pnpm exec tsc -p tsconfig.node.json --noEmit
       - name: Lint D2 surface
         run: >-
           pnpm exec eslint
           scripts/run-release-current-state.ts
+          scripts/build-db-less-current-base-read-model.ts
+          vite.db-less-current-base-read-model.config.ts
           src/shared/current-state/filtered-ledger-traversal.ts
           src/shared/current-state/filtered-ledger-traversal.test.ts
           src/shared/db-less/base-manifest.ts
