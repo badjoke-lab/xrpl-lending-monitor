@@ -204,3 +204,322 @@ async function readNdjson<T>(path: string): Promise<T[]> {
   if (text.length === 0) return []
   return text.split('\n').filter(Boolean).map((line) => JSON.parse(line) as T)
 }
+
+async function appendCanonicalLines(path: string, values: readonly unknown[]): Promise<void> {
+  if (values.length === 0) return
+  await appendFile(path, `${values.map((value) => canonicalJson(value)).join('\n')}\n`, 'utf8')
+}
+
+function reference(record: ReleaseNativeDataRecord): ReleaseNativeObjectReference {
+  return {
+    segmentId: record.segmentId,
+    assetName: dataAssetNameForRecord(record),
+    id: record.id,
+    kind: record.kind,
+  }
+}
+
+function indexRecordsForRecord(record: ReleaseNativeDataRecord): ReleaseNativeIndexRecord[] {
+  const indexes: ReleaseNativeIndexRecord[] = [{
+    schemaVersion: 1,
+    bucket: 0,
+    term: record.id,
+    lookupKind: 'object-id',
+    value: { reference: reference(record) },
+  }]
+
+  for (const field of ['Account', 'Owner', 'Borrower'] as const) {
+    const value = record.value[field]
+    if (typeof value !== 'string' || value.length === 0) continue
+    indexes.push({
+      schemaVersion: 1,
+      bucket: 0,
+      term: value,
+      lookupKind: 'account',
+      value: { field, reference: reference(record) },
+    })
+  }
+
+  if (record.kind === 'loan-broker') {
+    const vaultId = id(requiredString(record.value.VaultID, 'VaultID'), 'VaultID')
+    indexes.push({
+      schemaVersion: 1,
+      bucket: 0,
+      term: vaultId,
+      lookupKind: 'relationship',
+      value: {
+        relation: 'vault-loan-broker',
+        source: { id: vaultId, kind: 'vault' },
+        target: reference(record),
+      },
+    })
+  }
+
+  if (record.kind === 'loan') {
+    const loanBrokerId = id(requiredString(record.value.LoanBrokerID, 'LoanBrokerID'), 'LoanBrokerID')
+    indexes.push({
+      schemaVersion: 1,
+      bucket: 0,
+      term: loanBrokerId,
+      lookupKind: 'relationship',
+      value: {
+        relation: 'loan-broker-loan',
+        source: { id: loanBrokerId, kind: 'loan-broker' },
+        target: reference(record),
+      },
+    })
+  }
+
+  return indexes
+}
+
+async function streamFullLedgerTraversal(options: Arguments, ledger: LedgerIdentity, workDataDir: string): Promise<TraversalResult> {
+  const client = new XrplJsonRpcClient({ endpoint: options.endpoint, timeoutMs: options.timeoutMs })
+
+  process.stderr.write(
+    `Running binary type-filtered traversal to marker exhaustion for Vault, LoanBroker, and Loan; per-type page safety limit ${options.pageLimit}.\n`,
+  )
+
+  const traversal = await streamFilteredLendingLedgerObjects({
+    ledger,
+    objectLimitPerPage: options.objectLimitPerPage,
+    pageLimitPerType: options.pageLimit,
+    callLedgerData: (params) => client.call<unknown>('ledger_data', params),
+    decodeBinary: decode,
+    async onPage(page) {
+      const pageBatches = Array.from({ length: options.dataSegments }, () => [] as ReleaseNativeDataRecord[])
+      for (const object of page.records) {
+        const kind = currentKindForLedgerEntryType(object.entryType) as ReleaseKind
+        const segment = dataSegmentForId(object.objectId, options.dataSegments)
+        pageBatches[segment]!.push({
+          schemaVersion: 1,
+          segmentId: segmentId(segment),
+          sourcePage: object.sourcePage,
+          id: object.objectId,
+          kind,
+          valueSha256: await sha256Hex(canonicalJson(object.value)),
+          value: object.value,
+        })
+      }
+
+      for (let segment = 0; segment < pageBatches.length; segment += 1) {
+        await appendCanonicalLines(dataRawPath(workDataDir, segment), pageBatches[segment]!)
+      }
+
+      if (page.typePage % 100 === 0) {
+        process.stderr.write(
+          `Processed ${page.typePage} pages for ${page.entryType}; total source pages: ${page.sourcePage}.\n`,
+        )
+      }
+    },
+  })
+
+  for (const [entryType, pages] of Object.entries(traversal.pagesByType)) {
+    process.stderr.write(`Completed ledger_data type filter ${entryType} after ${pages} pages.\n`)
+  }
+  return traversal
+}
+
+async function appendIndexRecordsForSegment(records: readonly ReleaseNativeDataRecord[], bucketCount: number, workIndexDir: string): Promise<void> {
+  const batches = Array.from({ length: bucketCount }, () => [] as ReleaseNativeIndexRecord[])
+  for (const record of records) {
+    for (const seed of indexRecordsForRecord(record)) {
+      const bucket = await releaseNativeBucket(seed.term, bucketCount)
+      batches[bucket]!.push({ ...seed, bucket })
+    }
+  }
+  for (let bucket = 0; bucket < batches.length; bucket += 1) {
+    await appendCanonicalLines(indexRawPath(workIndexDir, bucket), batches[bucket]!)
+  }
+}
+
+async function materializeDataAssets(options: Arguments, traversal: TraversalResult, assetsDir: string, workDataDir: string, workIndexDir: string): Promise<DataMaterializationResult> {
+  const dataAssets: ReleaseNativeDataAsset[] = []
+  const totalCounts = emptyCounts()
+  let dataCompressedBytes = 0
+  let dataUncompressedBytes = 0
+  let relevantObjectCount = 0
+
+  for (let segment = 0; segment < options.dataSegments; segment += 1) {
+    process.stderr.write(`Materializing data segment ${segment + 1}/${options.dataSegments}.\n`)
+    const records = await readNdjson<ReleaseNativeDataRecord>(dataRawPath(workDataDir, segment))
+    records.sort((left, right) => left.id.localeCompare(right.id) || left.kind.localeCompare(right.kind))
+
+    const assetName = dataAssetName(segment)
+    const stats = await writeGzipNdjson(join(assetsDir, assetName), records)
+    const counts = countRecords(records)
+    addCounts(totalCounts, counts)
+    relevantObjectCount += records.length
+    dataCompressedBytes += stats.compressedBytes
+    dataUncompressedBytes += stats.uncompressedBytes
+
+    dataAssets.push({
+      assetName,
+      segmentId: segmentId(segment),
+      sha256: stats.sha256,
+      compressedBytes: stats.compressedBytes,
+      uncompressedBytes: stats.uncompressedBytes,
+      recordCount: records.length,
+      sourcePages: { first: 1, last: traversal.sourcePages, count: traversal.sourcePages },
+      firstObjectId: records[0]?.id ?? null,
+      lastObjectId: records.at(-1)?.id ?? null,
+      counts,
+    })
+
+    await appendIndexRecordsForSegment(records, options.indexBuckets, workIndexDir)
+  }
+
+  return {
+    dataAssets,
+    dataCompressedBytes,
+    dataUncompressedBytes,
+    counts: totalCounts,
+    relevantObjectCount,
+  }
+}
+
+async function materializeIndexAssets(options: Arguments, assetsDir: string, workIndexDir: string): Promise<IndexMaterializationResult> {
+  const indexAssets: ReleaseNativeIndexAsset[] = []
+  let indexCompressedBytes = 0
+  let indexUncompressedBytes = 0
+
+  for (let bucket = 0; bucket < options.indexBuckets; bucket += 1) {
+    process.stderr.write(`Materializing index bucket ${bucket + 1}/${options.indexBuckets}.\n`)
+    const records = await readNdjson<ReleaseNativeIndexRecord>(indexRawPath(workIndexDir, bucket))
+    records.sort((left, right) => left.term.localeCompare(right.term)
+      || left.lookupKind.localeCompare(right.lookupKind)
+      || canonicalJson(left.value).localeCompare(canonicalJson(right.value)))
+
+    const assetName = `index-bucket-${String(bucket).padStart(5, '0')}.ndjson.gz`
+    const stats = await writeGzipNdjson(join(assetsDir, assetName), records)
+    indexCompressedBytes += stats.compressedBytes
+    indexUncompressedBytes += stats.uncompressedBytes
+
+    indexAssets.push({
+      assetName,
+      bucket,
+      sha256: stats.sha256,
+      compressedBytes: stats.compressedBytes,
+      uncompressedBytes: stats.uncompressedBytes,
+      recordCount: records.length,
+      firstTerm: records[0]?.term ?? null,
+      lastTerm: records.at(-1)?.term ?? null,
+    })
+  }
+
+  return { indexAssets, indexCompressedBytes, indexUncompressedBytes }
+}
+
+function assertTraversalAccounting(traversal: TraversalResult, data: DataMaterializationResult): void {
+  if (traversal.relevantObjectCount !== data.relevantObjectCount) {
+    throw new Error(`Relevant object count mismatch: traversal=${traversal.relevantObjectCount} materialized=${data.relevantObjectCount}`)
+  }
+  if (
+    traversal.counts.vaults !== data.counts.vaults
+    || traversal.counts.loanBrokers !== data.counts.loanBrokers
+    || traversal.counts.loans !== data.counts.loans
+  ) throw new Error('Object type counts changed during materialization')
+}
+
+async function main(): Promise<void> {
+  const args = parseArguments(process.argv.slice(2))
+  const assetsDir = join(args.outputDir, 'assets')
+  const channelDir = join(args.outputDir, 'channel')
+  const workDir = resolve(`${args.outputDir}.work`)
+  const workDataDir = join(workDir, 'data')
+  const workIndexDir = join(workDir, 'index')
+
+  await rm(workDir, { recursive: true, force: true })
+  await mkdir(assetsDir, { recursive: true })
+  await mkdir(channelDir, { recursive: true })
+  await mkdir(workDataDir, { recursive: true })
+  await mkdir(workIndexDir, { recursive: true })
+
+  const ledger = await getValidatedLedger(args.endpoint, args.timeoutMs)
+  const epochId = args.epochId ?? `devnet-${ledger.ledgerIndex}`
+  const snapshotId = args.snapshotId ?? `devnet-${ledger.ledgerIndex}-${ledger.ledgerHash.slice(0, 12).toLowerCase()}`
+
+  const traversal = await streamFullLedgerTraversal(args, ledger, workDataDir)
+  const data = await materializeDataAssets(args, traversal, assetsDir, workDataDir, workIndexDir)
+  assertTraversalAccounting(traversal, data)
+  const indexes = await materializeIndexAssets(args, assetsDir, workIndexDir)
+
+  const manifestWithoutDigest = {
+    schemaVersion: 2 as const,
+    network: 'devnet' as const,
+    endpoint: args.endpoint,
+    epochId,
+    snapshotId,
+    releaseTag: args.releaseTag,
+    ledgerIndex: ledger.ledgerIndex,
+    ledgerHash: ledger.ledgerHash,
+    complete: traversal.complete,
+    sourcePages: traversal.sourcePages,
+    decodedObjectCount: traversal.decodedObjectCount,
+    relevantObjectCount: data.relevantObjectCount,
+    counts: data.counts,
+    layout: {
+      pagesPerSegment: Math.max(1, Math.ceil(traversal.sourcePages / args.dataSegments)),
+      indexBuckets: args.indexBuckets,
+      dataSegmentCount: data.dataAssets.length,
+      hashFunction: 'sha256-first-u32-mod-bucket-count' as const,
+    },
+    dataAssets: data.dataAssets,
+    indexAssets: indexes.indexAssets,
+    totals: {
+      dataCompressedBytes: data.dataCompressedBytes,
+      dataUncompressedBytes: data.dataUncompressedBytes,
+      indexCompressedBytes: indexes.indexCompressedBytes,
+      indexUncompressedBytes: indexes.indexUncompressedBytes,
+    },
+    manifestSha256: null,
+  }
+
+  const manifestSha256 = await sha256Hex(`${canonicalJson(manifestWithoutDigest)}\n`)
+  const manifest: ReleaseNativeManifest = { ...manifestWithoutDigest, manifestSha256 }
+  const manifestAssetName = 'manifest.json'
+  await writeText(join(assetsDir, manifestAssetName), manifest)
+
+  const channel = {
+    schemaVersion: 1 as const,
+    active: {
+      releaseTag: args.releaseTag,
+      manifestAssetName,
+      manifestSha256,
+    },
+    rollback: null,
+    updatedAt: new Date().toISOString(),
+  }
+  await writeText(join(channelDir, 'channel.json'), channel)
+
+  const summary = {
+    releaseTag: args.releaseTag,
+    channelTag: 'current-state-channel',
+    traversalMode: 'binary-type-filtered-marker-exhaustive' as const,
+    complete: traversal.complete,
+    manifestAssetName,
+    manifestSha256,
+    ledger,
+    sourcePages: traversal.sourcePages,
+    decodedObjectCount: traversal.decodedObjectCount,
+    counts: data.counts,
+    dataAssets: data.dataAssets.length,
+    indexAssets: indexes.indexAssets.length,
+    totalAssets: data.dataAssets.length + indexes.indexAssets.length + 1,
+  }
+  await writeText(join(args.outputDir, 'release-summary.json'), summary)
+
+  await writeFile(
+    join(args.outputDir, 'release-notes.md'),
+    `# XRPL Lending Monitor current-state snapshot\n\n- release: ${args.releaseTag}\n- traversal mode: binary-type-filtered-marker-exhaustive\n- complete: ${traversal.complete}\n- source pages: ${traversal.sourcePages}\n- decoded objects: ${traversal.decodedObjectCount}\n- data assets: ${data.dataAssets.length}\n- index assets: ${indexes.indexAssets.length}\n- total release assets: ${data.dataAssets.length + indexes.indexAssets.length + 1}\n- ledger: ${ledger.ledgerIndex}\n- ledger hash: ${ledger.ledgerHash}\n- vaults: ${data.counts.vaults}\n- loan brokers: ${data.counts.loanBrokers}\n- loans: ${data.counts.loans}\n- manifest sha256: ${manifestSha256}\n`,
+    'utf8',
+  )
+
+  await rm(workDir, { recursive: true, force: true })
+  process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`)
+}
+
+main().catch((error: unknown) => {
+  process.stderr.write(`${error instanceof Error ? error.stack ?? error.message : String(error)}\n`)
+  process.exitCode = 1
+})
