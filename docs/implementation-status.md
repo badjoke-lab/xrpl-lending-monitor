@@ -86,11 +86,13 @@ These are historical implementation paths.
 
 ## Active roadmap unit
 
-**D0 — Source-of-truth reset**
+**D0 — Source-of-truth reset: complete**
 
-After D0 merges, proceed directly to:
+Merged through PR #1661 as `f764967947f0be10f08013ac8a655cef3bc816f6`.
 
-**D1 — Persistence decoupling**
+**D1 — Persistence decoupling: active**
+
+The next implementation unit extracts provider-independent collector/derivation output from D1 repository interfaces and defines deterministic artifact/channel contracts.
 
 ## Release status
 
