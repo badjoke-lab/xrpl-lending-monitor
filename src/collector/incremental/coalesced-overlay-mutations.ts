@@ -1,4 +1,4 @@
-import type { CurrentStateOverlayMutation } from '../../worker/repositories/current-state-overlay'
+import type { CurrentStateOverlayMutation } from './current-state-overlay-types'
 
 export interface SourcedOverlayMutation {
   mutation: CurrentStateOverlayMutation
