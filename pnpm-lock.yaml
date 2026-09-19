@@ -21,8 +21,8 @@ importers:
         specifier: 19.2.7
         version: 19.2.7(react@19.2.7)
       ripple-binary-codec:
-        specifier: 2.10.0
-        version: 2.10.0
+        specifier: 2.11.0
+        version: 2.11.0
     devDependencies:
       '@cloudflare/workers-types':
         specifier: 4.20260630.1
@@ -1193,8 +1193,8 @@ packages:
     resolution: {integrity: sha512-JQHLKuVJV8lv9Qobmn4aUM2Dpv9WRRLKnNWfM8tN02fAbUtG8mUPsu9q9UYX8P76G4qzytEc5ZKMp/3JggNYmw==}
     engines: {node: '>= 18'}
 
-  ripple-binary-codec@2.10.0:
-    resolution: {integrity: sha512-H4pBm2WdOMmVnA0HGUdWAShmUFdmqavWAsi2WlMCzOknc1XjrZssa/RxEyziaPww8MXe1OpgGU7uCs8G2nYe/A==}
+  ripple-binary-codec@2.11.0:
+    resolution: {integrity: sha512-qad61CYAqIi8H7DuPnuDpj40wrXY8wYrc1YbuDcA9G/NZG0Uu8unHNbTC6Itz8SlOSL0P/nF/8HTFW/1caVlTg==}
     engines: {node: '>= 18'}
 
   rolldown@1.1.3:
@@ -2360,7 +2360,7 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  ripple-binary-codec@2.10.0:
+  ripple-binary-codec@2.11.0:
     dependencies:
       '@xrplf/isomorphic': 1.0.2
       bignumber.js: 10.0.2

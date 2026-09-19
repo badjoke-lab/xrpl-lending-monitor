@@ -99,7 +99,7 @@
     "hono": "4.12.27",
     "react": "19.2.7",
     "react-dom": "19.2.7",
-    "ripple-binary-codec": "2.10.0"
+    "ripple-binary-codec": "2.11.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "4.20260630.1",
