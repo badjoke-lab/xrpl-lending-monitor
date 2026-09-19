@@ -1,9 +1,10 @@
 import { appendFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 
-import { decode } from '@xrpl-commons/ripple-binary-codec'
+import { decode } from 'ripple-binary-codec'
 
 import { XrplJsonRpcClient } from '../src/collector/network/xrpl-rpc'
+import { currentKindForLedgerEntryType, streamFilteredLendingLedgerObjects, type FilteredLedgerTraversalResult } from '../src/shared/current-state/filtered-ledger-traversal'
 import { canonicalJson, gzipDeterministic, sha256Hex, utf8 } from '../src/shared/current-state/canonical-json'
 import { releaseNativeBucket, type ReleaseNativeDataAsset, type ReleaseNativeDataRecord, type ReleaseNativeIndexAsset, type ReleaseNativeIndexRecord, type ReleaseNativeManifest, type ReleaseNativeObjectReference } from '../src/shared/current-state/release-native-reader'
 
@@ -33,21 +34,7 @@ type Arguments = {
   dataSegments: number
 }
 
-type LedgerDataResult = {
-  ledger_hash?: unknown
-  ledger_index?: unknown
-  validated?: unknown
-  state?: unknown
-  marker?: unknown
-}
-
-type TraversalResult = {
-  sourcePages: number
-  decodedObjectCount: number
-  relevantObjectCount: number
-  counts: Counts
-  complete: boolean
-}
+type TraversalResult = FilteredLedgerTraversalResult
 
 type DataMaterializationResult = {
   dataAssets: ReleaseNativeDataAsset[]
@@ -94,7 +81,7 @@ function parseArguments(args: readonly string[]): Arguments {
   return {
     endpoint: argumentValue(args, '--endpoint') ?? DEFAULT_ENDPOINT,
     timeoutMs: integerArgument(args, '--timeout-ms', 8_000),
-    pageLimit: integerArgument(args, '--page-limit', 500),
+    pageLimit: integerArgument(args, '--page-limit', 4_000),
     objectLimitPerPage: integerArgument(args, '--object-limit-per-page', 2_048),
     outputDir: resolve(argumentValue(args, '--output-dir') ?? '.local/current-state-release'),
     releaseTag,
@@ -114,12 +101,6 @@ function requiredString(value: unknown, field: string): string {
   return value
 }
 
-function requiredHex(value: unknown, field: string): string {
-  const hex = requiredString(value, field)
-  if (hex.length % 2 !== 0 || !/^[A-Fa-f0-9]+$/.test(hex)) throw new Error(`${field} must be an even-length hexadecimal string`)
-  return hex.toUpperCase()
-}
-
 function requiredLedgerIndex(value: unknown): number {
   const parsed = typeof value === 'string' ? Number(value) : value
   if (!Number.isSafeInteger(parsed) || Number(parsed) < 1) throw new Error('ledger_index must be a positive safe integer')
@@ -130,21 +111,6 @@ function id(value: string, field: string): string {
   const normalized = value.toUpperCase()
   if (!/^[A-F0-9]{64}$/.test(normalized)) throw new Error(`${field} must be a 64-character uppercase object id`)
   return normalized
-}
-
-function markerFingerprint(marker: unknown): string {
-  try {
-    return JSON.stringify(marker)
-  } catch {
-    throw new Error('ledger_data marker could not be serialized')
-  }
-}
-
-function kindFromLedgerEntryType(value: unknown): ReleaseKind | null {
-  if (value === 'Vault') return 'vault'
-  if (value === 'LoanBroker') return 'loan-broker'
-  if (value === 'Loan') return 'loan'
-  return null
 }
 
 function emptyCounts(): Counts {
@@ -309,95 +275,49 @@ function indexRecordsForRecord(record: ReleaseNativeDataRecord): ReleaseNativeIn
 
 async function streamFullLedgerTraversal(options: Arguments, ledger: LedgerIdentity, workDataDir: string): Promise<TraversalResult> {
   const client = new XrplJsonRpcClient({ endpoint: options.endpoint, timeoutMs: options.timeoutMs })
-  const seenMarkers = new Set<string>()
-  const counts = emptyCounts()
-  let marker: unknown = undefined
-  let page = 0
-  let decodedObjectCount = 0
-  let relevantObjectCount = 0
-  let complete = false
 
-  process.stderr.write(`Running streaming full-ledger traversal with page limit ${options.pageLimit}.\n`)
-  for (;;) {
-    if (page >= options.pageLimit) {
-      process.stderr.write(`Streaming traversal stopped at page limit ${options.pageLimit}; snapshot is partial.\n`)
-      break
-    }
+  process.stderr.write(
+    `Running binary type-filtered traversal to marker exhaustion for Vault, LoanBroker, and Loan; per-type page safety limit ${options.pageLimit}.\n`,
+  )
 
-    const params: Record<string, unknown> = {
-      ledger_hash: ledger.ledgerHash,
-      binary: true,
-      limit: options.objectLimitPerPage,
-    }
-    if (marker !== undefined) params.marker = marker
-
-    const result = await client.call<LedgerDataResult>('ledger_data', params)
-    const ledgerHash = id(requiredString(result.ledger_hash, 'ledger_hash'), 'ledger_hash')
-    const ledgerIndex = requiredLedgerIndex(result.ledger_index)
-    if (ledgerHash !== ledger.ledgerHash || ledgerIndex !== ledger.ledgerIndex) throw new Error('ledger_data moved during traversal')
-    if (result.validated !== true) throw new Error('ledger_data response must describe a validated ledger')
-    if (!Array.isArray(result.state)) throw new Error('ledger_data response state must be an array')
-
-    page += 1
-    const pageBatches = Array.from({ length: options.dataSegments }, () => [] as ReleaseNativeDataRecord[])
-
-    for (let index = 0; index < result.state.length; index += 1) {
-      const stateEntry = result.state[index]
-      if (!isRecord(stateEntry)) throw new Error(`state[${index}] must be an object`)
-      const binaryHex = requiredHex(stateEntry.data, `state[${index}].data`)
-      const decoded = decode(binaryHex)
-      if (!isRecord(decoded)) throw new Error(`state[${index}] did not decode to an object`)
-      decodedObjectCount += 1
-
-      const kind = kindFromLedgerEntryType(decoded.LedgerEntryType)
-      if (!kind) continue
-
-      const objectId = id(requiredString(stateEntry.index, `state[${index}].index`), `state[${index}].index`)
-      const value: Record<string, unknown> = {
-        ...decoded,
-        LedgerEntryType: decoded.LedgerEntryType,
-        index: objectId,
+  const traversal = await streamFilteredLendingLedgerObjects({
+    ledger,
+    objectLimitPerPage: options.objectLimitPerPage,
+    pageLimitPerType: options.pageLimit,
+    callLedgerData: (params) => client.call<unknown>('ledger_data', params),
+    decodeBinary: decode,
+    async onPage(page) {
+      const pageBatches = Array.from({ length: options.dataSegments }, () => [] as ReleaseNativeDataRecord[])
+      for (const object of page.records) {
+        const kind = currentKindForLedgerEntryType(object.entryType) as ReleaseKind
+        const segment = dataSegmentForId(object.objectId, options.dataSegments)
+        pageBatches[segment]!.push({
+          schemaVersion: 1,
+          segmentId: segmentId(segment),
+          sourcePage: object.sourcePage,
+          id: object.objectId,
+          kind,
+          valueSha256: await sha256Hex(canonicalJson(object.value)),
+          value: object.value,
+        })
       }
-      const segment = dataSegmentForId(objectId, options.dataSegments)
-      const record: ReleaseNativeDataRecord = {
-        schemaVersion: 1,
-        segmentId: segmentId(segment),
-        sourcePage: page,
-        id: objectId,
-        kind,
-        valueSha256: await sha256Hex(canonicalJson(value)),
-        value,
+
+      for (let segment = 0; segment < pageBatches.length; segment += 1) {
+        await appendCanonicalLines(dataRawPath(workDataDir, segment), pageBatches[segment]!)
       }
-      pageBatches[segment]!.push(record)
-      relevantObjectCount += 1
-      addKindCount(counts, kind)
-    }
 
-    for (let segment = 0; segment < pageBatches.length; segment += 1) {
-      await appendCanonicalLines(dataRawPath(workDataDir, segment), pageBatches[segment]!)
-    }
+      if (page.typePage % 100 === 0) {
+        process.stderr.write(
+          `Processed ${page.typePage} pages for ${page.entryType}; total source pages: ${page.sourcePage}.\n`,
+        )
+      }
+    },
+  })
 
-    if (page % 100 === 0) {
-      process.stderr.write(`Processed ${page} ledger_data pages; relevant objects: ${relevantObjectCount}; decoded objects: ${decodedObjectCount}.\n`)
-    }
-
-    marker = result.marker
-    if (marker === undefined || marker === null) {
-      complete = true
-      break
-    }
-    const fingerprint = markerFingerprint(marker)
-    if (seenMarkers.has(fingerprint)) throw new Error(`ledger_data repeated marker after page ${page}`)
-    seenMarkers.add(fingerprint)
+  for (const [entryType, pages] of Object.entries(traversal.pagesByType)) {
+    process.stderr.write(`Completed ledger_data type filter ${entryType} after ${pages} pages.\n`)
   }
-
-  return {
-    sourcePages: Math.max(1, page),
-    decodedObjectCount,
-    relevantObjectCount,
-    counts,
-    complete,
-  }
+  return traversal
 }
 
 async function appendIndexRecordsForSegment(records: readonly ReleaseNativeDataRecord[], bucketCount: number, workIndexDir: string): Promise<void> {
@@ -575,7 +495,7 @@ async function main(): Promise<void> {
   const summary = {
     releaseTag: args.releaseTag,
     channelTag: 'current-state-channel',
-    traversalMode: 'streaming-full-ledger' as const,
+    traversalMode: 'binary-type-filtered-marker-exhaustive' as const,
     complete: traversal.complete,
     manifestAssetName,
     manifestSha256,
@@ -591,7 +511,7 @@ async function main(): Promise<void> {
 
   await writeFile(
     join(args.outputDir, 'release-notes.md'),
-    `# XRPL Lending Monitor current-state snapshot\n\n- release: ${args.releaseTag}\n- traversal mode: streaming-full-ledger\n- complete: ${traversal.complete}\n- source pages: ${traversal.sourcePages}\n- decoded objects: ${traversal.decodedObjectCount}\n- data assets: ${data.dataAssets.length}\n- index assets: ${indexes.indexAssets.length}\n- total release assets: ${data.dataAssets.length + indexes.indexAssets.length + 1}\n- ledger: ${ledger.ledgerIndex}\n- ledger hash: ${ledger.ledgerHash}\n- vaults: ${data.counts.vaults}\n- loan brokers: ${data.counts.loanBrokers}\n- loans: ${data.counts.loans}\n- manifest sha256: ${manifestSha256}\n`,
+    `# XRPL Lending Monitor current-state snapshot\n\n- release: ${args.releaseTag}\n- traversal mode: binary-type-filtered-marker-exhaustive\n- complete: ${traversal.complete}\n- source pages: ${traversal.sourcePages}\n- decoded objects: ${traversal.decodedObjectCount}\n- data assets: ${data.dataAssets.length}\n- index assets: ${indexes.indexAssets.length}\n- total release assets: ${data.dataAssets.length + indexes.indexAssets.length + 1}\n- ledger: ${ledger.ledgerIndex}\n- ledger hash: ${ledger.ledgerHash}\n- vaults: ${data.counts.vaults}\n- loan brokers: ${data.counts.loanBrokers}\n- loans: ${data.counts.loans}\n- manifest sha256: ${manifestSha256}\n`,
     'utf8',
   )
 
