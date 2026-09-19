@@ -123,6 +123,28 @@ describe('DB-less live delta artifacts', () => {
     ])
   })
 
+  it('uses source revision in immutable generation identity without changing semantic payload', async () => {
+    const common = {
+      scan: scan(),
+      epochId: 'devnet-test',
+      baseIdentity: 'base-test',
+      previousLedgerIndex: 100,
+      expectedParentHash: PARENT,
+    }
+    const left = await buildDbLessLiveDeltaArtifacts({
+      ...common,
+      sourceRevision: 'revision-a',
+    })
+    const right = await buildDbLessLiveDeltaArtifacts({
+      ...common,
+      sourceRevision: 'revision-b',
+    })
+
+    expect(left.manifest.payloadDigest).toBe(right.manifest.payloadDigest)
+    expect(left.manifest.generationId).not.toBe(right.manifest.generationId)
+    expect(left.manifestArtifact.key).not.toBe(right.manifestArtifact.key)
+  })
+
   it('is byte-for-byte deterministic for the same validated input', async () => {
     const options = {
       scan: scan(),
