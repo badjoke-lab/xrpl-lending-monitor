@@ -1,0 +1,62 @@
+name: DB-less D2 validation
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'scripts/run-release-current-state.ts'
+      - 'src/shared/current-state/filtered-ledger-traversal.ts'
+      - 'src/shared/current-state/filtered-ledger-traversal.test.ts'
+      - 'scripts/build-db-less-current-base-read-model.ts'
+      - 'src/shared/db-less/base-manifest.ts'
+      - 'src/shared/db-less/base-manifest.test.ts'
+      - 'vite.db-less-current-base-read-model.config.ts'
+      - '.github/workflows/db-less-d2-validation.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: db-less-d2-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - name: Report runner Node
+        run: node --version
+      - run: corepack enable
+      - name: Resolve candidate lockfile
+        run: pnpm install --no-frozen-lockfile --ignore-scripts
+      - name: Build release Current source
+        run: pnpm build:release-current-state
+      - name: Typecheck shared contracts
+        run: pnpm exec tsc -p tsconfig.worker.json --noEmit
+      - name: Lint D2 surface
+        run: >-
+          pnpm exec eslint
+          scripts/run-release-current-state.ts
+          src/shared/current-state/filtered-ledger-traversal.ts
+          src/shared/current-state/filtered-ledger-traversal.test.ts
+          src/shared/db-less/base-manifest.ts
+          src/shared/db-less/base-manifest.test.ts
+      - name: D2 focused tests
+        run: >-
+          pnpm exec vitest run
+          src/shared/current-state/filtered-ledger-traversal.test.ts
+          src/shared/db-less/base-manifest.test.ts
+      - name: Upload resolved lockfile
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: db-less-d2-resolved-lockfile
+          path: pnpm-lock.yaml
+          if-no-files-found: error
+          retention-days: 7
+      - name: Verify committed lockfile is synchronized
+        run: git diff --exit-code -- pnpm-lock.yaml
