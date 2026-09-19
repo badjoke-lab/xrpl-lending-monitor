@@ -23,6 +23,7 @@
     "vite.release-current-state.config.ts",
     "vite.fast-lane-production.config.ts",
     "vite.db-less-current-base-read-model.config.ts",
+    "vite.db-less-current-base-verifier.config.ts",
     "vitest.config.ts",
     "playwright.config.ts"
   ]
