@@ -81,7 +81,7 @@ function parseArguments(args: readonly string[]): Arguments {
   return {
     endpoint: argumentValue(args, '--endpoint') ?? DEFAULT_ENDPOINT,
     timeoutMs: integerArgument(args, '--timeout-ms', 8_000),
-    pageLimit: integerArgument(args, '--page-limit', 4_000),
+    pageLimit: integerArgument(args, '--page-limit', 8_000),
     objectLimitPerPage: integerArgument(args, '--object-limit-per-page', 2_048),
     outputDir: resolve(argumentValue(args, '--output-dir') ?? '.local/current-state-release'),
     releaseTag,
