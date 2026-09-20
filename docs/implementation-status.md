@@ -98,7 +98,11 @@ Validation run `35457202156` passed typecheck, focused lint, and the DB-less fix
 
 **D2 — Current base generation: active**
 
-The next implementation unit canonicalizes the proven type-filtered binary `ledger_data` full snapshot path, removes workflow-time source patching, emits a verified DB-less Current base generation, and measures the resulting static artifact layout.
+The canonical type-filtered binary traversal, Release-compatible base read model, independent verifier, and candidate publication workflow are implemented on main.
+
+Latest candidate run `35458490439` failed closed before publication because the Vault traversal reached the configured 4,000-page safety limit before marker exhaustion. The Devnet endpoint is returning roughly 256 objects per page even when the client requests 2,048; the previously verified 1,234,169-Vault scale therefore already requires about 4,821 pages. D2 now raises the per-type safety ceiling to 8,000 pages while retaining marker repetition checks, fixed-ledger identity checks, and fail-closed exhaustion requirements.
+
+D2 remains active until a fresh candidate reaches marker exhaustion for all three types, passes the independent manifest/relationship verifier, and is uploaded and read back successfully as a prerelease Release generation.
 
 ## Release status
 
