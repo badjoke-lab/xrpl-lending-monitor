@@ -100,7 +100,11 @@ Validation run `35457202156` passed typecheck, focused lint, and the DB-less fix
 
 The canonical type-filtered binary traversal, Release-compatible base read model, independent verifier, and candidate publication workflow are implemented on main.
 
-Latest candidate run `35458490439` failed closed before publication because the Vault traversal reached the configured 4,000-page safety limit before marker exhaustion. The Devnet endpoint is returning roughly 256 objects per page even when the client requests 2,048; the previously verified 1,234,169-Vault scale therefore already requires about 4,821 pages. D2 now raises the per-type safety ceiling to 8,000 pages while retaining marker repetition checks, fixed-ledger identity checks, and fail-closed exhaustion requirements.
+Candidate run `35458490439` failed closed at the former 4,000-page Vault safety limit. PR #1678 raised the cap to 8,000 while retaining fixed-ledger, repeated-marker, and marker-exhaustion checks.
+
+The next fresh candidate, run `35481411720`, proved that 8,000 was still an artificial blocker: the traversal remained valid through all 8,000 Vault pages and again stopped only because of the configured page ceiling. No Release was created.
+
+The type-filtered traversal is streaming and separately protected by fixed-ledger identity verification, repeated-marker rejection, the workflow timeout, downstream independent verification, and the Release asset ceiling. D2 therefore raises the per-type page ceiling to 50,000 so it serves as an abnormal-run safety stop rather than an estimate of expected Devnet object count.
 
 D2 remains active until a fresh candidate reaches marker exhaustion for all three types, passes the independent manifest/relationship verifier, and is uploaded and read back successfully as a prerelease Release generation.
 

@@ -56,7 +56,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node .release-current-state-build/run-release-current-state.mjs             --local             --output-dir .local/d2-source             --release-tag "$RELEASE_TAG"             --page-limit 8000             --object-limit-per-page 2048             --index-buckets 64             --data-segments 20
+          node .release-current-state-build/run-release-current-state.mjs             --local             --output-dir .local/d2-source             --release-tag "$RELEASE_TAG"             --page-limit 50000             --object-limit-per-page 2048             --index-buckets 64             --data-segments 20
 
       - name: Build Release-compatible DB-less base
         shell: bash
