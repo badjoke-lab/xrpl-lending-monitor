@@ -92,49 +92,112 @@ jobs:
           EOF
           gh release create "$RELEASE_TAG"             --target "$SOURCE_REVISION"             --draft             --title "DB-less D2 Current base $GITHUB_RUN_ID"             --notes-file .local/d2-base/release-notes.md
 
-      - name: Upload candidate assets in bounded batches
+      - name: Upload candidate assets with throttled retry
         shell: bash
         run: |
           set -euo pipefail
-          cleanup() {
-            gh release delete "$RELEASE_TAG" --yes --cleanup-tag >/dev/null 2>&1 || true
-          }
-          trap cleanup ERR
+          release_id="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" --jq '.id')"
           mapfile -d '' files < <(find .local/d2-base/assets -maxdepth 1 -type f -print0 | sort -z)
-          for ((i=0; i<${#files[@]}; i+=40)); do
-            batch=("${files[@]:i:40}")
-            gh release upload "$RELEASE_TAG" "${batch[@]}"
-          done
-          trap - ERR
+          delays=(5 15 30 60 120 180)
 
-      - name: Verify uploaded Release asset names and sizes
+          for file in "${files[@]}"; do
+            name="$(basename "$file")"
+            expected_size="$(stat -c '%s' "$file")"
+            expected_digest="sha256:$(sha256sum "$file" | awk '{print $1}')"
+            attempt=0
+
+            while :; do
+              response=".local/d2-base/upload-response.json"
+              code="$(curl --silent --show-error --location                 --output "$response"                 --write-out '%{http_code}'                 --request POST                 --header 'Accept: application/vnd.github+json'                 --header "Authorization: Bearer $GH_TOKEN"                 --header 'X-GitHub-Api-Version: 2026-03-10'                 --header 'Content-Type: application/octet-stream'                 --data-binary "@$file"                 "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$release_id/assets?name=$name" || true)"
+
+              if [ "$code" = "201" ]; then
+                uploaded_name="$(jq -r '.name' "$response")"
+                uploaded_size="$(jq -r '.size' "$response")"
+                uploaded_digest="$(jq -r '.digest // empty' "$response")"
+                test "$uploaded_name" = "$name"
+                test "$uploaded_size" = "$expected_size"
+                test "$uploaded_digest" = "$expected_digest"
+                break
+              fi
+
+              # An uncertain failed response can race with a successful server-side upload.
+              # Before retrying, accept only an exact remote name/size/digest match.
+              gh api --paginate --slurp                 "repos/$GITHUB_REPOSITORY/releases/$release_id/assets?per_page=100"                 > .local/d2-base/release-assets-pages.json
+              matches="$(jq --arg name "$name" '[.[][] | select(.name == $name)] | length' .local/d2-base/release-assets-pages.json)"
+              if [ "$matches" -eq 1 ]; then
+                remote_size="$(jq -r --arg name "$name" '.[][] | select(.name == $name) | .size' .local/d2-base/release-assets-pages.json)"
+                remote_digest="$(jq -r --arg name "$name" '.[][] | select(.name == $name) | .digest // empty' .local/d2-base/release-assets-pages.json)"
+                if [ "$remote_size" = "$expected_size" ] && [ "$remote_digest" = "$expected_digest" ]; then
+                  break
+                fi
+                echo "Remote asset conflict after upload failure: $name" >&2
+                exit 1
+              fi
+              if [ "$matches" -gt 1 ]; then
+                echo "Duplicate remote Release asset name: $name" >&2
+                exit 1
+              fi
+
+              if [ "$attempt" -ge "${#delays[@]}" ]; then
+                echo "Release asset upload failed after bounded retries: $name (HTTP $code)" >&2
+                cat "$response" >&2 || true
+                exit 1
+              fi
+
+              delay="${delays[$attempt]}"
+              echo "Upload $name returned HTTP $code; retrying after ${delay}s." >&2
+              sleep "$delay"
+              attempt=$((attempt + 1))
+            done
+
+            # Avoid tripping GitHub's secondary rate limiter with a burst of uploads.
+            sleep 1
+          done
+
+      - name: Verify uploaded Release asset names sizes and digests
         shell: bash
         run: |
           set -euo pipefail
-          cleanup() {
-            gh release delete "$RELEASE_TAG" --yes --cleanup-tag >/dev/null 2>&1 || true
-          }
-          trap cleanup ERR
           release_id="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" --jq '.id')"
           gh api --paginate --slurp             "repos/$GITHUB_REPOSITORY/releases/$release_id/assets?per_page=100"             > .local/d2-base/release-assets-pages.json
           node --input-type=module <<'NODE'
+          import { createHash } from 'node:crypto'
+          import { createReadStream } from 'node:fs'
           import { readdir, stat, readFile } from 'node:fs/promises'
           import { join } from 'node:path'
+
+          async function digest(path) {
+            const hash = createHash('sha256')
+            for await (const chunk of createReadStream(path)) hash.update(chunk)
+            return `sha256:${hash.digest('hex')}`
+          }
 
           const dir = '.local/d2-base/assets'
           const pages = JSON.parse(await readFile('.local/d2-base/release-assets-pages.json', 'utf8'))
           const remote = pages.flat()
           const localNames = (await readdir(dir)).sort()
-          if (remote.length !== localNames.length) throw new Error(`Release asset count mismatch: ${remote.length} != ${localNames.length}`)
-          const byName = new Map(remote.map((asset) => [asset.name, asset]))
+          if (remote.length !== localNames.length) {
+            throw new Error(`Release asset count mismatch: ${remote.length} != ${localNames.length}`)
+          }
+
+          const byName = new Map()
+          for (const asset of remote) {
+            if (byName.has(asset.name)) throw new Error(`Duplicate Release asset name: ${asset.name}`)
+            byName.set(asset.name, asset)
+          }
+
           for (const name of localNames) {
             const asset = byName.get(name)
             if (!asset) throw new Error(`Missing Release asset ${name}`)
-            const info = await stat(join(dir, name))
+            const path = join(dir, name)
+            const info = await stat(path)
             if (asset.size !== info.size) throw new Error(`Release asset size mismatch for ${name}`)
+            const localDigest = await digest(path)
+            if (asset.digest !== localDigest) {
+              throw new Error(`Release asset digest mismatch for ${name}`)
+            }
           }
           NODE
-          trap - ERR
 
       - name: Publish verified candidate as prerelease
         shell: bash
