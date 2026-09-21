@@ -20,7 +20,10 @@ jobs:
       (
         github.event.issue.number == 1673 &&
         github.event.comment.user.login == github.repository_owner &&
-        github.event.comment.body == '/d3-live-once'
+        (
+          github.event.comment.body == '/d3-live-once' ||
+          github.event.comment.body == '/d3-live-catch-up'
+        )
       )
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -85,12 +88,22 @@ jobs:
           test -f ".local/d3-live-input/previous/$key"
           echo "PREVIOUS_CHAIN_ARG=--previous-chain .local/d3-live-input/previous/$key" >> "$GITHUB_ENV"
 
+      - name: Resolve bounded scan limit
+        shell: bash
+        run: |
+          set -euo pipefail
+          max_ledgers=256
+          if [ "${GITHUB_EVENT_NAME}" = "issue_comment" ] && [ "${{ github.event.comment.body }}" = "/d3-live-catch-up" ]; then
+            max_ledgers=2048
+          fi
+          echo "MAX_LEDGERS=$max_ledgers" >> "$GITHUB_ENV"
+
       - name: Prepare bounded validated-ledger catch-up
         shell: bash
         run: |
           set -euo pipefail
           # shellcheck disable=SC2086
-          node .db-less-live-run-build/prepare-db-less-live-run.mjs             --local             --channel .local/d3-live-input/channel.json             $PREVIOUS_CHAIN_ARG             --source-revision "$GITHUB_SHA"             --live-repository "$GITHUB_REPOSITORY"             --live-release-prefix "$DATA_RELEASE_PREFIX"             --shard-bucket-hours 6             --shard-max-assets 720             --shard-max-rotations 24             --endpoint https://devnet.honeycluster.io/             --endpoint https://s.devnet.rippletest.net:51234/             --timeout-ms 8000             --max-ledgers 256             --read-window-size 16             --output-dir .local/d3-live
+          node .db-less-live-run-build/prepare-db-less-live-run.mjs             --local             --channel .local/d3-live-input/channel.json             $PREVIOUS_CHAIN_ARG             --source-revision "$GITHUB_SHA"             --live-repository "$GITHUB_REPOSITORY"             --live-release-prefix "$DATA_RELEASE_PREFIX"             --shard-bucket-hours 6             --shard-max-assets 720             --shard-max-rotations 24             --endpoint https://devnet.honeycluster.io/             --endpoint https://s.devnet.rippletest.net:51234/             --timeout-ms 8000             --max-ledgers "$MAX_LEDGERS"             --read-window-size 16             --output-dir .local/d3-live
 
       - name: Resolve bounded immutable data shard
         if: ${{ hashFiles('.local/d3-live/publication-plan.json') != '' }}
