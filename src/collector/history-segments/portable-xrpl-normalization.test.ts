@@ -155,4 +155,31 @@ describe('portable XRPL seven-class normalization', () => {
     )
     expect(result.semanticCountsJson).toContain('"totalRecords"')
   })
+
+  it('honors explicit record density without relaxing the encoded byte guard', async () => {
+    const result = await buildPortableXrplNormalizedWork({
+      scan: scan(),
+      workId: 'collector-work-v1:devnet:epoch:base:101:' + parentHash,
+      network: 'devnet',
+      epochId: 'epoch',
+      baseIdentity: 'base',
+      previousLedgerIndex: 100,
+      expectedParentHash: parentHash,
+      chunkLimits: {
+        maxRecords: 2,
+        maxEncodedBytes: 512_000,
+      },
+    })
+
+    expect(result.chunks.length).toBeGreaterThan(1)
+    expect(
+      result.chunks.every(
+        ({ chunk, encoded }) =>
+          chunk.records.length <= 2 && encoded.byteLength <= 512_000,
+      ),
+    ).toBe(true)
+    expect(
+      result.chunks.reduce((total, { chunk }) => total + chunk.records.length, 0),
+    ).toBe(result.payload.semanticCounts.totalRecords)
+  })
 })
