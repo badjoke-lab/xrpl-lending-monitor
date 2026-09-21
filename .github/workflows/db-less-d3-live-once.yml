@@ -93,8 +93,10 @@ jobs:
           set -euo pipefail
 
           limits=(256)
+          chunk_max_records=40
           if [ "${GITHUB_EVENT_NAME}" = "issue_comment" ] && [ "${{ github.event.comment.body }}" = "/d3-live-catch-up" ]; then
             limits=(2048 1024 512 256)
+            chunk_max_records=160
           fi
 
           selected=""
@@ -118,6 +120,7 @@ jobs:
               --endpoint https://s.devnet.rippletest.net:51234/ \
               --timeout-ms 8000 \
               --max-ledgers "$max_ledgers" \
+              --chunk-max-records "$chunk_max_records" \
               --read-window-size 16 \
               --output-dir .local/d3-live \
               > .local/d3-live-prepare.stdout \
@@ -142,7 +145,9 @@ jobs:
 
           test -n "$selected"
           echo "MAX_LEDGERS=$selected" >> "$GITHUB_ENV"
+          echo "CHUNK_MAX_RECORDS=$chunk_max_records" >> "$GITHUB_ENV"
           echo "Selected bounded catch-up width: $selected"
+          echo "Selected chunk max records: $chunk_max_records"
 
       - name: Resolve bounded immutable data shard
         if: ${{ hashFiles('.local/d3-live/publication-plan.json') != '' }}
