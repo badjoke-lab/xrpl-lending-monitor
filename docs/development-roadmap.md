@@ -42,7 +42,7 @@ Exit evidence:
 - immutable artifact conflicts fail closed;
 - active channel contracts encode Current continuity and explicit History coverage gaps.
 
-## D2 — Current base generation — ACTIVE
+## D2 — Current base generation — COMPLETE
 
 Scope:
 
@@ -52,14 +52,18 @@ Scope:
 - publish an immutable candidate base as Release assets;
 - measure scale.
 
-Exit:
+Exit evidence:
 
-- complete marker exhaustion for Vault/LoanBroker/Loan;
-- relationship checks pass;
-- manifest/digests pass;
-- candidate is readable without D1.
+- Actions run `35558034659` completed successfully on source revision `f2d4da7009f3b3a34bae5c846d4558b752b0b9fe`;
+- fixed validated Devnet ledger `5,479,808` / hash `7A7D48431A7B36490C226D4D9731F7C3AB825F108321FF974ACF29ABB856D59C`;
+- complete marker exhaustion produced Vault `1,301,400`, LoanBroker `807,256`, and Loan `353,698`;
+- independent verifier passed;
+- Release-compatible base stayed within the GitHub asset ceiling at `860` assets;
+- all `860` remote assets passed name/size/SHA-256 readback verification;
+- verified prerelease `d2-current-base-35558034659` was published with base manifest SHA-256 `89d9346d4eb2403b80ffc53b81b1a7621d8467506b3b931bfc9f688e6b5a4dc3`;
+- no D1/Queue/Supabase mutation was required.
 
-## D3 — Live collector and publication
+## D3 — Live collector and publication — ACTIVE
 
 Scope:
 
