@@ -1,4 +1,5 @@
 import type { IncrementalScanResult } from '../../collector/incremental/scan-validated-ledgers'
+import type { NormalizedPayloadChunkLimits } from '../portable-collector-payload'
 import { canonicalJson, sha256Hex, utf8 } from '../current-state/canonical-json'
 import {
   buildDbLessChannel,
@@ -122,6 +123,7 @@ export async function prepareDbLessLiveDelta(options: {
   previousChain?: DbLessLiveChainManifestV1 | null
   scan: IncrementalScanResult
   sourceRevision: string
+  chunkLimits?: NormalizedPayloadChunkLimits
 }): Promise<DbLessLiveDeltaPreparation> {
   await verifyDbLessChannel(options.channel)
   await assertPreviousChainMatchesChannel({
@@ -161,6 +163,7 @@ export async function prepareDbLessLiveDelta(options: {
     previousLedgerIndex: options.channel.lastCommittedLedgerIndex,
     expectedParentHash: options.channel.lastCommittedLedgerHash,
     sourceRevision: options.sourceRevision,
+    chunkLimits: options.chunkLimits,
   })
 
   return {
@@ -227,12 +230,14 @@ export async function prepareDbLessLivePublication(options: {
   previousChain?: DbLessLiveChainManifestV1 | null
   scan: IncrementalScanResult
   sourceRevision: string
+  chunkLimits?: NormalizedPayloadChunkLimits
 }): Promise<DbLessLivePublicationPlan> {
   const prepared = await prepareDbLessLiveDelta({
     channel: options.channel,
     previousChain: options.previousChain,
     scan: options.scan,
     sourceRevision: options.sourceRevision,
+    chunkLimits: options.chunkLimits,
   })
   if (prepared.status === 'caught-up') return prepared
   return finalizeDbLessLivePublication({
