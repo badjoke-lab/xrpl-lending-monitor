@@ -9,10 +9,6 @@ permissions:
   contents: write
   issues: write
 
-concurrency:
-  group: db-less-d3-live-candidate-write
-  cancel-in-progress: false
-
 jobs:
   collect-and-publish:
     if: >-
@@ -25,6 +21,9 @@ jobs:
           github.event.comment.body == '/d3-live-catch-up'
         )
       )
+    concurrency:
+      group: db-less-d3-live-candidate-write
+      cancel-in-progress: false
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
