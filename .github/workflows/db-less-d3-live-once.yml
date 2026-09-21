@@ -1,0 +1,211 @@
+name: DB-less D3 live one-shot
+
+on:
+  workflow_dispatch:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: db-less-d3-live-candidate-write
+  cancel-in-progress: false
+
+jobs:
+  collect-and-publish:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event.issue.number == 1673 &&
+        github.event.comment.user.login == github.repository_owner &&
+        github.event.comment.body == '/d3-live-once'
+      )
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      CHANNEL_RELEASE_TAG: db-less-live-channel-candidate-v1
+      DATA_RELEASE_PREFIX: db-less-live-data-v1
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - run: corepack enable
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build D3 live CLIs
+        run: |
+          pnpm build:db-less-live-run
+          pnpm build:db-less-live-publisher
+          pnpm build:db-less-live-chain-verifier
+
+      - name: Read active candidate channel
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .local/d3-live-input
+          release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$CHANNEL_RELEASE_TAG")"
+          test "$(jq -r '.draft' <<<"$release_json")" = "false"
+          test "$(jq -r '.prerelease' <<<"$release_json")" = "true"
+          jq -j '.body' <<<"$release_json" > .local/d3-live-input/channel.json
+
+          location_provider="$(jq -r '.live.location.provider // empty' .local/d3-live-input/channel.json)"
+          location_repo="$(jq -r '.live.location.repository // empty' .local/d3-live-input/channel.json)"
+          location_tag="$(jq -r '.live.location.releaseTag // empty' .local/d3-live-input/channel.json)"
+          if [ -n "$location_provider" ]; then
+            test "$location_provider" = "github-release"
+            test "$location_repo" = "$GITHUB_REPOSITORY"
+            test -n "$location_tag"
+          fi
+
+      - name: Fetch previous live chain when present
+        shell: bash
+        run: |
+          set -euo pipefail
+          key="$(jq -r '.live.manifestKey // empty' .local/d3-live-input/channel.json)"
+          if [ -z "$key" ]; then
+            echo "PREVIOUS_CHAIN_ARG=" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          provider="$(jq -r '.live.location.provider' .local/d3-live-input/channel.json)"
+          repository="$(jq -r '.live.location.repository' .local/d3-live-input/channel.json)"
+          release_tag="$(jq -r '.live.location.releaseTag' .local/d3-live-input/channel.json)"
+          test "$provider" = "github-release"
+          test "$repository" = "$GITHUB_REPOSITORY"
+          test -n "$release_tag"
+
+          mkdir -p .local/d3-live-input/previous
+          gh release download "$release_tag"             --pattern "$key"             --dir .local/d3-live-input/previous
+          test -f ".local/d3-live-input/previous/$key"
+          echo "PREVIOUS_CHAIN_ARG=--previous-chain .local/d3-live-input/previous/$key" >> "$GITHUB_ENV"
+
+      - name: Prepare bounded validated-ledger catch-up
+        shell: bash
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC2086
+          node .db-less-live-run-build/prepare-db-less-live-run.mjs             --local             --channel .local/d3-live-input/channel.json             $PREVIOUS_CHAIN_ARG             --source-revision "$GITHUB_SHA"             --live-repository "$GITHUB_REPOSITORY"             --live-release-prefix "$DATA_RELEASE_PREFIX"             --shard-bucket-hours 6             --shard-max-assets 720             --shard-max-rotations 24             --endpoint https://devnet.honeycluster.io/             --endpoint https://s.devnet.rippletest.net:51234/             --timeout-ms 8000             --max-ledgers 256             --read-window-size 16             --output-dir .local/d3-live
+
+      - name: Resolve bounded immutable data shard
+        if: ${{ hashFiles('.local/d3-live/publication-plan.json') != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          data_release_tag="$(jq -r '.liveReleaseTag' .local/d3-live/run-summary.json)"
+          test -n "$data_release_tag"
+          test "$data_release_tag" != "null"
+          echo "DATA_RELEASE_TAG=$data_release_tag" >> "$GITHUB_ENV"
+
+          shard_fits="$(jq -r '.releaseShard.fits' .local/d3-live/run-summary.json)"
+          projected="$(jq -r '.releaseShard.projectedAssets' .local/d3-live/run-summary.json)"
+          ceiling="$(jq -r '.releaseShard.maxAssets' .local/d3-live/run-summary.json)"
+          test "$shard_fits" = "true"
+          test "$projected" -le "$ceiling"
+
+      - name: Create or verify immutable data shard Release
+        if: ${{ hashFiles('.local/d3-live/publication-plan.json') != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$DATA_RELEASE_TAG" >/dev/null 2>&1; then
+            release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$DATA_RELEASE_TAG")"
+            test "$(jq -r '.draft' <<<"$release_json")" = "false"
+            test "$(jq -r '.prerelease' <<<"$release_json")" = "true"
+          else
+            gh release create "$DATA_RELEASE_TAG"               --target "$GITHUB_SHA"               --prerelease               --latest=false               --title "DB-less D3 live data shard $DATA_RELEASE_TAG"               --notes "Immutable bounded DB-less D3 live data shard. Unreachable unless referenced by the control channel."
+          fi
+
+      - name: Publish immutable artifacts then control channel
+        if: ${{ hashFiles('.local/d3-live/publication-plan.json') != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node .db-less-live-publisher-build/publish-db-less-live-release.mjs             --local             --root-dir .local/d3-live             --plan .local/d3-live/publication-plan.json             --data-repository "$GITHUB_REPOSITORY"             --data-release-tag "$DATA_RELEASE_TAG"             --channel-repository "$GITHUB_REPOSITORY"             --channel-release-tag "$CHANNEL_RELEASE_TAG"             --output .local/d3-live/publish-summary.json
+
+      - name: Verify one-shot result
+        shell: bash
+        run: |
+          set -euo pipefail
+          status="$(jq -r '.status' .local/d3-live/run-summary.json)"
+          test "$status" = "prepared" -o "$status" = "caught-up"
+
+          if [ "$status" = "prepared" ]; then
+            test -f .local/d3-live/publish-summary.json
+            planned="$(jq -r '.nextChannelSha256' .local/d3-live/run-summary.json)"
+            published="$(jq -r '.channelSha256' .local/d3-live/publish-summary.json)"
+            test "$planned" = "$published"
+          fi
+
+      - name: Verify linked live chain from control channel
+        shell: bash
+        run: |
+          set -euo pipefail
+          node .db-less-live-chain-verifier-build/verify-db-less-live-release-chain.mjs             --local             --head-only             --repository "$GITHUB_REPOSITORY"             --channel-release-tag "$CHANNEL_RELEASE_TAG"             --output .local/d3-live/chain-verification.json
+
+          status="$(jq -r '.status' .local/d3-live/run-summary.json)"
+          if [ "$status" = "prepared" ]; then
+            planned="$(jq -r '.nextChannelSha256' .local/d3-live/run-summary.json)"
+            verified="$(jq -r '.channelSha256' .local/d3-live/chain-verification.json)"
+            test "$planned" = "$verified"
+
+            published_head="$(jq -r '.lastCommittedLedgerIndex' .local/d3-live/publish-summary.json)"
+            verified_head="$(jq -r '.lastCommittedLedgerIndex' .local/d3-live/chain-verification.json)"
+            test "$published_head" = "$verified_head"
+
+            mode="$(jq -r '.verificationMode' .local/d3-live/chain-verification.json)"
+            generations="$(jq -r '.live.generationCount' .local/d3-live/chain-verification.json)"
+            traversed="$(jq -r '.live.traversedManifests' .local/d3-live/chain-verification.json)"
+            test "$mode" = "head"
+            test "$generations" -ge 1
+            test "$traversed" -ge 1
+            test "$traversed" -le 2
+          fi
+
+      - name: Record one-shot evidence
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          status="$(jq -r '.status' .local/d3-live/run-summary.json)"
+          latest="$(jq -r '.latestValidatedLedger' .local/d3-live/run-summary.json)"
+          if [ "$status" = "prepared" ]; then
+            start="$(jq -r '.startLedgerIndex' .local/d3-live/run-summary.json)"
+            end="$(jq -r '.endLedgerIndex' .local/d3-live/run-summary.json)"
+            digest="$(jq -r '.channelSha256' .local/d3-live/publish-summary.json)"
+            gh issue comment 1673 --body "$(cat <<EOF
+          D3 live one-shot PASS.
+
+          - run: $GITHUB_RUN_ID
+          - validated target observed: `$latest`
+          - published range: `$start → $end`
+          - channel SHA-256: `$digest`
+          - data shard: `$DATA_RELEASE_TAG`
+          - immutable artifacts were uploaded/read back before channel update
+
+          This is still candidate operation; five-minute scheduling is not enabled by this workflow.
+          EOF
+          )"
+          else
+            gh issue comment 1673 --body "D3 live one-shot PASS (caught up). Run: `$GITHUB_RUN_ID`; latest validated ledger: `$latest`. No publication mutation was required."
+          fi
+
+      - name: Upload one-shot evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: db-less-d3-live-one-shot
+          path: |
+            .local/d3-live-input/channel.json
+            .local/d3-live/run-summary.json
+            .local/d3-live/publication-plan.json
+            .local/d3-live/next-channel.json
+            .local/d3-live/publish-summary.json
+            .local/d3-live/chain-verification.json
+          if-no-files-found: warn
+          retention-days: 30

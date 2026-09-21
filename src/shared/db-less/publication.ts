@@ -1,6 +1,6 @@
 import { sha256Hex } from '../current-state/canonical-json'
 import type { DbLessArtifact } from './live-delta'
-import type { DbLessChannelV1 } from './channel'
+import { verifyDbLessChannel, type DbLessChannelV1 } from './channel'
 
 export interface DbLessArtifactMetadata {
   key: string
@@ -61,4 +61,53 @@ export async function publishImmutableArtifacts(options: {
   }
 
   return { written, reused }
+}
+
+export interface DbLessChannelLastPublicationResult {
+  artifacts: {
+    written: number
+    reused: number
+  }
+  revision: string | null
+}
+
+export async function publishArtifactsThenChannel(options: {
+  writer: DbLessImmutableArtifactWriter
+  publisher: DbLessChannelPublisher
+  artifacts: readonly DbLessArtifact[]
+  nextChannel: DbLessChannelV1
+  expectedPreviousChannelSha256: string | null
+}): Promise<DbLessChannelLastPublicationResult> {
+  await verifyDbLessChannel(options.nextChannel)
+
+  const before = await options.publisher.readChannel()
+  if (before) await verifyDbLessChannel(before.channel)
+
+  const actualPreviousChannelSha256 = before?.channel.channelSha256 ?? null
+  if (actualPreviousChannelSha256 !== options.expectedPreviousChannelSha256) {
+    throw new Error('Active channel changed before immutable artifact publication')
+  }
+
+  const artifacts = await publishImmutableArtifacts({
+    writer: options.writer,
+    artifacts: options.artifacts,
+  })
+
+  const published = await options.publisher.publishChannel({
+    channel: options.nextChannel,
+    expectedPreviousChannelSha256: options.expectedPreviousChannelSha256,
+    expectedRevision: before?.revision ?? null,
+  })
+
+  const after = await options.publisher.readChannel()
+  if (!after) throw new Error('Published channel could not be read back')
+  await verifyDbLessChannel(after.channel)
+  if (after.channel.channelSha256 !== options.nextChannel.channelSha256) {
+    throw new Error('Published channel readback does not match the intended channel')
+  }
+
+  return {
+    artifacts,
+    revision: published.revision,
+  }
 }

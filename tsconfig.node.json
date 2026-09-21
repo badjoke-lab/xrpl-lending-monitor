@@ -24,6 +24,10 @@
     "vite.fast-lane-production.config.ts",
     "vite.db-less-current-base-read-model.config.ts",
     "vite.db-less-current-base-verifier.config.ts",
+    "vite.db-less-initial-channel.config.ts",
+    "vite.db-less-live-run.config.ts",
+    "vite.db-less-live-publisher.config.ts",
+    "vite.db-less-live-chain-verifier.config.ts",
     "vitest.config.ts",
     "playwright.config.ts"
   ]

@@ -1,0 +1,164 @@
+name: DB-less D3 live candidate init
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_release_tag:
+        description: Verified D2 Current base prerelease tag
+        required: true
+        type: string
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: db-less-d3-live-candidate-write
+  cancel-in-progress: false
+
+jobs:
+  initialize:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event.issue.number == 1673 &&
+        github.event.comment.user.login == github.repository_owner &&
+        startsWith(github.event.comment.body, '/d3-init-live ')
+      )
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      INPUT_BASE_RELEASE_TAG: ${{ inputs.base_release_tag }}
+      COMMENT_BODY: ${{ github.event.comment.body }}
+      CHANNEL_RELEASE_TAG: db-less-live-channel-candidate-v1
+    steps:
+      - name: Resolve verified D2 base Release tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            tag="$INPUT_BASE_RELEASE_TAG"
+          else
+            prefix="/d3-init-live "
+            case "$COMMENT_BODY" in
+              "$prefix"*) tag="${COMMENT_BODY#"$prefix"}" ;;
+              *) echo "Invalid initialization command" >&2; exit 1 ;;
+            esac
+          fi
+          if [[ ! "$tag" =~ ^d2-current-base-[0-9]+$ ]]; then
+            echo "Invalid D2 base release tag: $tag" >&2
+            exit 1
+          fi
+          echo "BASE_RELEASE_TAG=$tag" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - run: corepack enable
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build initial channel CLI
+        run: pnpm build:db-less-initial-channel
+
+      - name: Verify D2 base Release and download manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .local/d3-init/base
+          release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$BASE_RELEASE_TAG")"
+          test "$(jq -r '.draft' <<<"$release_json")" = "false"
+          test "$(jq -r '.prerelease' <<<"$release_json")" = "true"
+          published_at="$(jq -r '.published_at // .created_at' <<<"$release_json")"
+          test -n "$published_at"
+          echo "BASE_UPDATED_AT=$published_at" >> "$GITHUB_ENV"
+
+          gh release download "$BASE_RELEASE_TAG"             --pattern 'base-manifest.json'             --dir .local/d3-init/base
+
+      - name: Fetch pinned legacy History evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .local/d3-init/history
+
+          gh api "repos/$GITHUB_REPOSITORY/contents/history-channel.json?ref=history-data"             --jq '.content'             | tr -d '\n'             | base64 --decode             > .local/d3-init/history/history-channel.json
+
+          data_commit="$(jq -r '.active.dataCommitSha' .local/d3-init/history/history-channel.json)"
+          publication_path="$(jq -r '.active.publicationPath' .local/d3-init/history/history-channel.json)"
+          exact_index_path="$(jq -r '.active.exactIndex.manifestPath' .local/d3-init/history/history-channel.json)"
+          test "$data_commit" != "null"
+          test "$publication_path" != "null"
+          test "$exact_index_path" != "null"
+
+          gh api "repos/$GITHUB_REPOSITORY/contents/$publication_path?ref=$data_commit"             --jq '.content'             | tr -d '\n'             | base64 --decode             > .local/d3-init/history/publication.json
+
+          gh api "repos/$GITHUB_REPOSITORY/contents/$exact_index_path?ref=$data_commit"             --jq '.content'             | tr -d '\n'             | base64 --decode             > .local/d3-init/history/exact-index-manifest.json
+
+      - name: Build verified initial channel
+        shell: bash
+        run: |
+          set -euo pipefail
+          node .db-less-initial-channel-build/build-db-less-initial-channel.mjs             --local             --base-manifest .local/d3-init/base/base-manifest.json             --base-repository "$GITHUB_REPOSITORY"             --base-release-tag "$BASE_RELEASE_TAG"             --archive-channel .local/d3-init/history/history-channel.json             --archive-publication .local/d3-init/history/publication.json             --archive-exact-index .local/d3-init/history/exact-index-manifest.json             --archive-repository "$GITHUB_REPOSITORY"             --updated-at "$BASE_UPDATED_AT"             --output .local/d3-init/channel.json
+
+      - name: Create dedicated live candidate Release
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$CHANNEL_RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Live control Release already exists; refusing to replace its channel." >&2
+            exit 1
+          fi
+
+          gh release create "$CHANNEL_RELEASE_TAG"             --target "$GITHUB_SHA"             --prerelease             --latest=false             --title "DB-less D3 live candidate"             --notes-file .local/d3-init/channel.json
+
+      - name: Read back initial channel
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$CHANNEL_RELEASE_TAG" > .local/d3-init/live-release.json
+          test "$(jq -r '.draft' .local/d3-init/live-release.json)" = "false"
+          test "$(jq -r '.prerelease' .local/d3-init/live-release.json)" = "true"
+
+          jq -j '.body' .local/d3-init/live-release.json > .local/d3-init/channel-readback.json
+          cmp -s .local/d3-init/channel.json .local/d3-init/channel-readback.json
+          expected="$(jq -r '.channelSha256' .local/d3-init/channel.json)"
+          actual="$(jq -r '.channelSha256' .local/d3-init/channel-readback.json)"
+          test "$expected" = "$actual"
+
+      - name: Record initialization evidence
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          ledger="$(jq -r '.lastCommittedLedgerIndex' .local/d3-init/channel.json)"
+          digest="$(jq -r '.channelSha256' .local/d3-init/channel.json)"
+          gh issue comment 1673 --body "$(cat <<EOF
+          D3 live candidate initialization PASS.
+
+          - run: $GITHUB_RUN_ID
+          - base release: `$BASE_RELEASE_TAG`
+          - channel release: `$CHANNEL_RELEASE_TAG`
+          - initial committed ledger: `$ledger`
+          - channel SHA-256: `$digest`
+          - legacy History archive and exact-index pointers verified from their pinned commit
+
+          No live delta has been published yet.
+          EOF
+          )"
+
+      - name: Upload initialization evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: db-less-d3-live-candidate-init
+          path: |
+            .local/d3-init/channel.json
+            .local/d3-init/channel-readback.json
+            .local/d3-init/live-release.json
+          if-no-files-found: warn
+          retention-days: 30
