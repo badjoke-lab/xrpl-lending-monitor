@@ -96,29 +96,31 @@ Merged through PR #1663 as `09b9fae2eeeec54f3dbc82101e16704b41fe0b80`.
 
 Validation run `35457202156` passed typecheck, focused lint, and the DB-less fixture suite. The merged contracts now provide deterministic seven-class Current+History live artifacts, immutable artifact publication interfaces, channel integrity/coverage rules, and collector-layer overlay typing without a Worker repository dependency.
 
-**D2 — Current base generation: active**
+**D2 — Current base generation: complete**
 
 The canonical type-filtered binary traversal, Release-compatible base read model, independent verifier, and candidate publication workflow are implemented on main.
 
-The first marker-exhaustive production-shaped candidate, Actions run `35481956144`, proved the full source/build path at validated ledger `5,450,831`:
+The first production-shaped candidate, Actions run `35481956144`, proved the full source/build path but failed during high-rate Release upload because GitHub returned HTTP 403 secondary rate limiting. PR #1681 added one-at-a-time upload, pacing, bounded retry/backoff, uncertain-upload recovery, and GitHub-provided SHA-256 verification.
 
-- ledger hash: `C521EEB008ECB856988EBC0F584D746E7D559959AC8711F680FDC0E165BDCD13`;
-- Vaults: `1,297,202`;
-- LoanBrokers: `805,523`;
-- Loans: `352,870`;
-- total Current objects: `2,455,595`;
-- Release assets: `858`;
-- compressed bytes: `859,629,453`;
-- largest asset: `1,887,208` bytes;
-- base manifest SHA-256: `7bf42041f02b8955b59e9c9f0c4c163ddf4f4e48c61351d1f1847483d789a31d`.
+Run `35515051078` then passed snapshot generation, base generation, independent verification, and the asset ceiling, but exposed a separate draft-Release lookup bug before the first upload. PR #1683 fixed draft Release handling by carrying the exact Release ID through upload/verify/publish and using the tag endpoint only after publication. It merged as `f2d4da7009f3b3a34bae5c846d4558b752b0b9fe`.
 
-That run passed complete marker exhaustion, Release-compatible base generation, the independent verifier, and the Release asset ceiling. It failed only during high-rate Release upload when GitHub returned HTTP 403 secondary rate limiting at `lookup-E4.json.gz`. No prerelease was published.
+The D2 exit run `35558034659` completed successfully:
 
-PR #1681 replaced burst uploads with one-at-a-time upload, pacing, bounded retry/backoff, uncertain-upload recovery, and final GitHub-provided SHA-256 digest verification. It merged as `560ddcc8cee38a2eb07de0f27fef8052e208296e`.
+- source revision: `f2d4da7009f3b3a34bae5c846d4558b752b0b9fe`;
+- validated ledger: `5,479,808`;
+- ledger hash: `7A7D48431A7B36490C226D4D9731F7C3AB825F108321FF974ACF29ABB856D59C`;
+- Vaults: `1,301,400`;
+- LoanBrokers: `807,256`;
+- Loans: `353,698`;
+- Release assets: `860`;
+- compressed bytes: `861,955,138`;
+- largest asset: `1,886,419` bytes;
+- source manifest SHA-256: `cfe4c70ff1ef2da6c30c397a5f5819247bf2182ffe45cefa975696767b88cc70`;
+- base manifest SHA-256: `89d9346d4eb2403b80ffc53b81b1a7621d8467506b3b931bfc9f688e6b5a4dc3`.
 
-Fresh retry run `35515051078` is the active D2 exit run. D2 is not complete until that run or a successor completes remote upload, name/size/SHA-256 readback, and prerelease publication.
+Every D2 publication step passed: draft Release creation/recovery, throttled upload, exact remote name/size/SHA-256 verification, prerelease publication, and compact evidence upload. Release `d2-current-base-35558034659` exists as `draft=false`, `prerelease=true`, with all `860` assets remotely present.
 
-**D3 — Live collector and publication: implementation prepared, activation gated on D2**
+**D3 — Live collector and publication: active implementation / activation sequence**
 
 Draft PR #1679 contains the DB-less live collector path. Its current design separates:
 
@@ -133,16 +135,19 @@ The branch also contains:
 - one-scan Current + History derivation;
 - channel-last publication;
 - immutable artifact readback verification;
+- canonical-byte control Release enforcement;
+- bounded head + immediate-predecessor verification for normal one-shot/scheduled operation;
+- full cross-Release linked-chain reconstruction for explicit qualification;
+- live-head freshness fallback with a 30-second maximum validated-ledger age;
 - owner-gated read-only rehearsal;
 - owner-gated candidate initialization;
 - owner-gated one-shot live publication;
+- read-only qualification requiring that the active head can reach the latest validated Devnet ledger within one <=256-ledger catch-up;
 - one non-cancelling single-writer concurrency group.
 
-The five-minute schedule is intentionally not enabled yet. Candidate one-shot publication must pass first.
+The five-minute schedule remains intentionally disabled. D2 is complete, so the remaining activation order is: merge #1679, pass read-only rehearsal against `d2-current-base-35558034659`, initialize the candidate control channel, pass at least one live one-shot publication, pass `/d3-qualify-live`, then merge the isolated #1682 schedule switch.
 
-Bounded Release sharding is now implemented in the D3 draft: live data uses deterministic six-hour UTC shard tags, a 720-asset soft ceiling below GitHub's 1,000-asset Release ceiling, and `-rN` early rotation when the projected artifact count would exceed the configured shard limit. Shard selection happens only after delta artifact count is known, so heavy catch-up runs do not rely on a guessed per-run asset count. The rule is implemented but not yet activation evidence; it must pass rehearsal/one-shot verification before scheduling.
-
-Latest validation for the Release-spanning design is required to remain green before #1679 leaves draft.
+Bounded Release sharding uses deterministic six-hour UTC shard tags, a 720-asset operational ceiling below GitHub's 1,000-asset Release ceiling, and `-rN` early rotation when projected artifact count would exceed the shard limit.
 
 ## Release status
 
