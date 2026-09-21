@@ -36,8 +36,12 @@ jobs:
         run: >-
           pnpm exec vitest run
           src/shared/db-less/live-delta.test.ts
+          src/shared/db-less/live-chain.test.ts
+          src/shared/db-less/live-publication.test.ts
           src/shared/db-less/channel.test.ts
+          src/shared/db-less/initial-channel.test.ts
           src/shared/db-less/publication.test.ts
+          src/shared/db-less/github-release-publication.test.ts
           src/collector/history-segments/build-segment-records.test.ts
           src/collector/history-segments/portable-xrpl-normalization.test.ts
           src/collector/incremental/coalesced-overlay-mutations.test.ts

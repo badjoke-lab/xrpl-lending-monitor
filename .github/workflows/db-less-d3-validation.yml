@@ -1,0 +1,98 @@
+name: DB-less D3 validation
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'package.json'
+      - 'tsconfig.node.json'
+      - 'scripts/prepare-db-less-live-run.ts'
+      - 'scripts/build-db-less-initial-channel.ts'
+      - 'vite.db-less-live-run.config.ts'
+      - 'vite.db-less-initial-channel.config.ts'
+      - '.github/workflows/db-less-d3-live-rehearsal.yml'
+      - '.github/workflows/db-less-d3-live-once.yml'
+      - '.github/workflows/db-less-d3-live-candidate-init.yml'
+      - '.github/workflows/db-less-d3-live-qualification.yml'
+      - 'vite.db-less-live-publisher.config.ts'
+      - 'vite.db-less-live-chain-verifier.config.ts'
+      - 'scripts/publish-db-less-live-release.ts'
+      - 'scripts/verify-db-less-live-release-chain.ts'
+      - 'src/shared/db-less/**'
+      - 'src/collector/incremental/read-latest-validated-head.ts'
+      - 'src/collector/incremental/read-latest-validated-head.test.ts'
+      - 'src/collector/incremental/scan-validated-ledgers.ts'
+      - 'src/collector/incremental/scan-validated-ledgers.test.ts'
+      - '.github/workflows/db-less-d3-validation.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: db-less-d3-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Report runner Node
+        run: node --version
+
+      - run: corepack enable
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build D3 initial channel CLI
+        run: pnpm build:db-less-initial-channel
+
+      - name: Build D3 live collector preparation CLI
+        run: pnpm build:db-less-live-run
+
+      - name: Build D3 live publisher CLI
+        run: pnpm build:db-less-live-publisher
+
+      - name: Build D3 live-chain verifier CLI
+        run: pnpm build:db-less-live-chain-verifier
+
+      - name: Typecheck worker/shared graph
+        run: pnpm exec tsc -p tsconfig.worker.json --noEmit
+
+      - name: Typecheck Node build configs
+        run: pnpm exec tsc -p tsconfig.node.json --noEmit
+
+      - name: Lint D3 surface
+        run: >-
+          pnpm exec eslint
+          scripts/prepare-db-less-live-run.ts
+          scripts/build-db-less-initial-channel.ts
+          vite.db-less-live-run.config.ts
+          vite.db-less-live-publisher.config.ts
+          vite.db-less-initial-channel.config.ts
+          scripts/publish-db-less-live-release.ts
+          scripts/verify-db-less-live-release-chain.ts
+          vite.db-less-live-chain-verifier.config.ts
+          src/shared/db-less
+          src/collector/incremental/read-latest-validated-head.ts
+          src/collector/incremental/read-latest-validated-head.test.ts
+          src/collector/incremental/scan-validated-ledgers.ts
+          src/collector/incremental/scan-validated-ledgers.test.ts
+
+      - name: D3 focused tests
+        run: >-
+          pnpm exec vitest run
+          src/shared/db-less/live-delta.test.ts
+          src/shared/db-less/live-chain.test.ts
+          src/shared/db-less/live-chain-reader.test.ts
+          src/shared/db-less/live-publication.test.ts
+          src/shared/db-less/live-release-shard.test.ts
+          src/shared/db-less/channel.test.ts
+          src/shared/db-less/initial-channel.test.ts
+          src/shared/db-less/publication.test.ts
+          src/shared/db-less/github-release-publication.test.ts
+          src/shared/db-less/github-release-shard-selector.test.ts
+          src/collector/incremental/read-latest-validated-head.test.ts
+          src/collector/incremental/scan-validated-ledgers.test.ts

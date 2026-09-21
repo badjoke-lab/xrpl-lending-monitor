@@ -1,0 +1,172 @@
+name: DB-less D3 live qualification
+
+on:
+  workflow_dispatch:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: db-less-d3-live-qualification
+  cancel-in-progress: false
+
+jobs:
+  qualify:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event.issue.number == 1673 &&
+        github.event.comment.user.login == github.repository_owner &&
+        github.event.comment.body == '/d3-qualify-live'
+      )
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      CHANNEL_RELEASE_TAG: db-less-live-channel-candidate-v1
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - run: corepack enable
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build qualification CLIs
+        run: |
+          pnpm build:db-less-live-chain-verifier
+          pnpm build:db-less-live-run
+
+      - name: Read active candidate control channel
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .local/d3-qualification
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$CHANNEL_RELEASE_TAG" > .local/d3-qualification/control-release.json
+          test "$(jq -r '.draft' .local/d3-qualification/control-release.json)" = "false"
+          test "$(jq -r '.prerelease' .local/d3-qualification/control-release.json)" = "true"
+          jq -j '.body' .local/d3-qualification/control-release.json > .local/d3-qualification/channel.json
+
+          live_provider="$(jq -r '.live.location.provider // empty' .local/d3-qualification/channel.json)"
+          live_repository="$(jq -r '.live.location.repository // empty' .local/d3-qualification/channel.json)"
+          live_release_tag="$(jq -r '.live.location.releaseTag // empty' .local/d3-qualification/channel.json)"
+          test "$live_provider" = "github-release"
+          test "$live_repository" = "$GITHUB_REPOSITORY"
+          test -n "$live_release_tag"
+          echo "ACTIVE_DATA_RELEASE_TAG=$live_release_tag" >> "$GITHUB_ENV"
+
+      - name: Verify active immutable data shard bounds
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$ACTIVE_DATA_RELEASE_TAG" > .local/d3-qualification/data-release.json
+          test "$(jq -r '.draft' .local/d3-qualification/data-release.json)" = "false"
+          test "$(jq -r '.prerelease' .local/d3-qualification/data-release.json)" = "true"
+
+          release_id="$(jq -r '.id' .local/d3-qualification/data-release.json)"
+          gh api --paginate --slurp             "repos/$GITHUB_REPOSITORY/releases/$release_id/assets?per_page=100"             > .local/d3-qualification/data-assets-pages.json
+
+          asset_count="$(jq '[.[][]] | length' .local/d3-qualification/data-assets-pages.json)"
+          test "$asset_count" -ge 1
+          test "$asset_count" -le 720
+          echo "ACTIVE_DATA_ASSET_COUNT=$asset_count" >> "$GITHUB_ENV"
+
+      - name: Verify complete linked chain from control channel
+        shell: bash
+        run: |
+          set -euo pipefail
+          node .db-less-live-chain-verifier-build/verify-db-less-live-release-chain.mjs             --local             --repository "$GITHUB_REPOSITORY"             --channel-release-tag "$CHANNEL_RELEASE_TAG"             --max-generations 2048             --output .local/d3-qualification/chain-verification.json
+
+          expected_channel="$(jq -r '.channelSha256' .local/d3-qualification/channel.json)"
+          verified_channel="$(jq -r '.channelSha256' .local/d3-qualification/chain-verification.json)"
+          test "$expected_channel" = "$verified_channel"
+
+          expected_head="$(jq -r '.lastCommittedLedgerIndex' .local/d3-qualification/channel.json)"
+          verified_head="$(jq -r '.lastCommittedLedgerIndex' .local/d3-qualification/chain-verification.json)"
+          test "$expected_head" = "$verified_head"
+
+          mode="$(jq -r '.verificationMode' .local/d3-qualification/chain-verification.json)"
+          generations="$(jq -r '.live.generationCount' .local/d3-qualification/chain-verification.json)"
+          traversed="$(jq -r '.live.traversedManifests' .local/d3-qualification/chain-verification.json)"
+          test "$mode" = "full"
+          test "$generations" -ge 1
+          test "$generations" = "$traversed"
+
+      - name: Prove current head is within one bounded catch-up
+        shell: bash
+        run: |
+          set -euo pipefail
+          key="$(jq -r '.live.manifestKey' .local/d3-qualification/channel.json)"
+          test -n "$key"
+          mkdir -p .local/d3-qualification/previous
+          gh release download "$ACTIVE_DATA_RELEASE_TAG" --pattern "$key" --dir .local/d3-qualification/previous
+          test -f ".local/d3-qualification/previous/$key"
+
+          node .db-less-live-run-build/prepare-db-less-live-run.mjs \
+            --local \
+            --channel .local/d3-qualification/channel.json \
+            --previous-chain ".local/d3-qualification/previous/$key" \
+            --source-revision "$GITHUB_SHA" \
+            --live-repository "$GITHUB_REPOSITORY" \
+            --live-release-tag "d3-live-qualification-$GITHUB_RUN_ID" \
+            --endpoint https://devnet.honeycluster.io/ \
+            --endpoint https://s.devnet.rippletest.net:51234/ \
+            --timeout-ms 8000 \
+            --max-ledgers 256 \
+            --read-window-size 16 \
+            --output-dir .local/d3-qualification/catch-up
+
+          status="$(jq -r '.status' .local/d3-qualification/catch-up/run-summary.json)"
+          test "$status" = "prepared" -o "$status" = "caught-up"
+          if [ "$status" = "prepared" ]; then
+            complete="$(jq -r '.completeToLatest' .local/d3-qualification/catch-up/run-summary.json)"
+            scanned="$(jq -r '.scannedLedgers' .local/d3-qualification/catch-up/run-summary.json)"
+            test "$complete" = "true"
+            test "$scanned" -ge 1
+            test "$scanned" -le 256
+          else
+            scanned=0
+          fi
+
+          echo "QUALIFICATION_CATCHUP_STATUS=$status" >> "$GITHUB_ENV"
+          echo "QUALIFICATION_CATCHUP_SCANNED=$scanned" >> "$GITHUB_ENV"
+          echo "QUALIFICATION_LATEST_VALIDATED=$(jq -r '.latestValidatedLedger' .local/d3-qualification/catch-up/run-summary.json)" >> "$GITHUB_ENV"
+
+      - name: Record qualification summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -n             --arg channelRelease "$CHANNEL_RELEASE_TAG"             --arg dataRelease "$ACTIVE_DATA_RELEASE_TAG"             --argjson dataAssets "$ACTIVE_DATA_ASSET_COUNT"             --arg channelSha256 "$(jq -r '.channelSha256' .local/d3-qualification/channel.json)"             --argjson lastCommittedLedgerIndex "$(jq -r '.lastCommittedLedgerIndex' .local/d3-qualification/channel.json)"             --argjson generationCount "$(jq -r '.live.generationCount' .local/d3-qualification/chain-verification.json)"             --arg catchUpStatus "$QUALIFICATION_CATCHUP_STATUS"             --argjson catchUpScanned "$QUALIFICATION_CATCHUP_SCANNED"             --argjson latestValidatedLedger "$QUALIFICATION_LATEST_VALIDATED"             '{
+              schemaVersion: 1,
+              status: "pass",
+              channelRelease: $channelRelease,
+              dataRelease: $dataRelease,
+              dataAssets: $dataAssets,
+              channelSha256: $channelSha256,
+              lastCommittedLedgerIndex: $lastCommittedLedgerIndex,
+              generationCount: $generationCount,
+              catchUpStatus: $catchUpStatus,
+              catchUpScanned: $catchUpScanned,
+              latestValidatedLedger: $latestValidatedLedger,
+              scheduleEnabled: false
+            }' > .local/d3-qualification/qualification-summary.json
+
+      - name: Upload qualification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: db-less-d3-live-qualification
+          path: |
+            .local/d3-qualification/channel.json
+            .local/d3-qualification/control-release.json
+            .local/d3-qualification/data-release.json
+            .local/d3-qualification/data-assets-pages.json
+            .local/d3-qualification/chain-verification.json
+            .local/d3-qualification/catch-up/run-summary.json
+            .local/d3-qualification/qualification-summary.json
+          if-no-files-found: warn
+          retention-days: 30

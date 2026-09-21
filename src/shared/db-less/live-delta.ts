@@ -86,13 +86,8 @@ function portableDigest(value: string, field: string): void {
 
 function safeKey(value: string, field: string): void {
   nonEmpty(value, field)
-  if (
-    value.startsWith('/')
-    || value.includes('\\')
-    || value.split('/').some((part) => part === '' || part === '.' || part === '..')
-    || !/^[A-Za-z0-9._/-]+$/.test(value)
-  ) {
-    throw new Error(`${field} is unsafe`)
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value)) {
+    throw new Error(`${field} must be a flat GitHub Release asset name`)
   }
 }
 
@@ -204,7 +199,7 @@ export async function buildDbLessLiveDeltaArtifacts(options: {
   const chunkArtifacts: DbLessArtifact[] = []
   const chunks: DbLessLiveDeltaChunkV1[] = []
   for (const built of normalized.chunks) {
-    const key = `live/${generationId}/chunks/${String(built.chunk.chunkIndex).padStart(4, '0')}.json`
+    const key = `${generationId}-chunk-${String(built.chunk.chunkIndex).padStart(4, '0')}.json`
     const artifactSha256 = await sha256Hex(built.encoded)
     chunkArtifacts.push({
       key,
@@ -247,7 +242,7 @@ export async function buildDbLessLiveDeltaArtifacts(options: {
 
   const manifestBytes = utf8(`${canonicalJson(manifest)}\n`)
   const manifestArtifact: DbLessArtifact = {
-    key: `live/${generationId}/manifest.json`,
+    key: `${generationId}-manifest.json`,
     mediaType: 'application/json',
     bytes: manifestBytes,
     sha256: await sha256Hex(manifestBytes),

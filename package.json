@@ -92,7 +92,15 @@
     "build:db-less-current-base": "vite build --config vite.db-less-current-base-read-model.config.ts",
     "db-less-current-base:local": "pnpm build:db-less-current-base && node .db-less-current-base-read-model-build/build-db-less-current-base-read-model.mjs --local",
     "build:db-less-current-base-verifier": "vite build --config vite.db-less-current-base-verifier.config.ts",
-    "db-less-current-base:verify": "pnpm build:db-less-current-base-verifier && node .db-less-current-base-verifier-build/verify-db-less-current-base.mjs"
+    "db-less-current-base:verify": "pnpm build:db-less-current-base-verifier && node .db-less-current-base-verifier-build/verify-db-less-current-base.mjs",
+    "build:db-less-live-run": "vite build --config vite.db-less-live-run.config.ts",
+    "db-less-live-run:local": "pnpm build:db-less-live-run && node .db-less-live-run-build/prepare-db-less-live-run.mjs --local",
+    "build:db-less-initial-channel": "vite build --config vite.db-less-initial-channel.config.ts",
+    "db-less-initial-channel:local": "pnpm build:db-less-initial-channel && node .db-less-initial-channel-build/build-db-less-initial-channel.mjs --local",
+    "build:db-less-live-publisher": "vite build --config vite.db-less-live-publisher.config.ts",
+    "db-less-live-publisher:local": "pnpm build:db-less-live-publisher && node .db-less-live-publisher-build/publish-db-less-live-release.mjs --local",
+    "build:db-less-live-chain-verifier": "vite build --config vite.db-less-live-chain-verifier.config.ts",
+    "db-less-live-chain-verifier:local": "pnpm build:db-less-live-chain-verifier && node .db-less-live-chain-verifier-build/verify-db-less-live-release-chain.mjs --local"
   },
   "dependencies": {
     "@xrpl-commons/ripple-binary-codec": "2.7.0",

@@ -4,7 +4,20 @@ const LEDGER_HASH = /^[A-F0-9]{64}$/
 const SHA256 = /^[a-f0-9]{64}$/
 const PORTABLE_DIGEST = /^sha256:[a-f0-9]{64}$/
 
+export type DbLessArtifactLocationV1 =
+  | {
+      provider: 'github-release'
+      repository: string
+      releaseTag: string
+    }
+  | {
+      provider: 'github-commit'
+      repository: string
+      commitSha: string
+    }
+
 export interface DbLessBasePointerV1 {
+  location: DbLessArtifactLocationV1
   generationId: string
   snapshotId: string
   manifestKey: string
@@ -14,20 +27,31 @@ export interface DbLessBasePointerV1 {
 }
 
 export interface DbLessLivePointerV1 {
+  location: DbLessArtifactLocationV1
   generationId: string
   manifestKey: string
   manifestSha256: string
   payloadDigest: string
   startLedgerIndex: number
+  startLedgerHash: string
   startParentHash: string
   endLedgerIndex: number
   endLedgerHash: string
+}
+
+export interface DbLessHistoryExactIndexPointerV1 {
+  manifestKey: string
+  manifestSha256: string
 }
 
 export interface DbLessHistoryCoverageRangeV1 {
   rangeId: string
   source: 'archive' | 'live'
   epochId: string
+  location: DbLessArtifactLocationV1
+  manifestKey: string
+  manifestSha256: string
+  exactIndex: DbLessHistoryExactIndexPointerV1 | null
   startLedgerIndex: number
   startLedgerHash: string
   endLedgerIndex: number
@@ -71,7 +95,7 @@ function payloadDigest(value: string, field: string): void {
   if (!PORTABLE_DIGEST.test(value)) throw new Error(`${field} must be a portable SHA-256 digest`)
 }
 
-function safeKey(value: string, field: string): void {
+function safePath(value: string, field: string): void {
   nonEmpty(value, field)
   if (
     value.startsWith('/')
@@ -81,22 +105,78 @@ function safeKey(value: string, field: string): void {
   ) throw new Error(`${field} is unsafe`)
 }
 
+function safeReleaseAssetName(value: string, field: string): void {
+  nonEmpty(value, field)
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value)) {
+    throw new Error(`${field} must be a flat GitHub Release asset name`)
+  }
+}
+
+function artifactKey(
+  location: DbLessArtifactLocationV1,
+  value: string,
+  field: string,
+): void {
+  if (location.provider === 'github-release') {
+    safeReleaseAssetName(value, field)
+    return
+  }
+  safePath(value, field)
+}
+
+export function assertDbLessArtifactLocation(
+  location: DbLessArtifactLocationV1,
+  field = 'location',
+): void {
+  if (!location || typeof location !== 'object') {
+    throw new Error(`${field} must be an object`)
+  }
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(location.repository)) {
+    throw new Error(`${field}.repository must be owner/repository`)
+  }
+
+  if (location.provider === 'github-release') {
+    nonEmpty(location.releaseTag, `${field}.releaseTag`)
+    if (
+      location.releaseTag.startsWith('/')
+      || location.releaseTag.includes('\\')
+      || location.releaseTag.split('/').some((part) => part === '' || part === '.' || part === '..')
+      || !/^[A-Za-z0-9._/-]+$/.test(location.releaseTag)
+    ) {
+      throw new Error(`${field}.releaseTag is unsafe`)
+    }
+    return
+  }
+
+  if (location.provider === 'github-commit') {
+    if (!/^[a-f0-9]{40}$/.test(location.commitSha)) {
+      throw new Error(`${field}.commitSha must be a lowercase 40-character commit SHA`)
+    }
+    return
+  }
+
+  throw new Error(`${field}.provider is unsupported`)
+}
+
 function assertBase(base: DbLessBasePointerV1): void {
+  assertDbLessArtifactLocation(base.location, 'base.location')
   nonEmpty(base.generationId, 'base.generationId')
   nonEmpty(base.snapshotId, 'base.snapshotId')
-  safeKey(base.manifestKey, 'base.manifestKey')
+  artifactKey(base.location, base.manifestKey, 'base.manifestKey')
   sha256(base.manifestSha256, 'base.manifestSha256')
   safeInteger(base.ledgerIndex, 'base.ledgerIndex', 1)
   ledgerHash(base.ledgerHash, 'base.ledgerHash')
 }
 
 function assertLive(live: DbLessLivePointerV1): void {
+  assertDbLessArtifactLocation(live.location, 'live.location')
   nonEmpty(live.generationId, 'live.generationId')
-  safeKey(live.manifestKey, 'live.manifestKey')
+  artifactKey(live.location, live.manifestKey, 'live.manifestKey')
   sha256(live.manifestSha256, 'live.manifestSha256')
   payloadDigest(live.payloadDigest, 'live.payloadDigest')
   safeInteger(live.startLedgerIndex, 'live.startLedgerIndex', 1)
   safeInteger(live.endLedgerIndex, 'live.endLedgerIndex', 1)
+  ledgerHash(live.startLedgerHash, 'live.startLedgerHash')
   ledgerHash(live.startParentHash, 'live.startParentHash')
   ledgerHash(live.endLedgerHash, 'live.endLedgerHash')
   if (live.endLedgerIndex < live.startLedgerIndex) {
@@ -112,6 +192,13 @@ function assertCoverage(ranges: readonly DbLessHistoryCoverageRangeV1[]): void {
       throw new Error('historyCoverage source is invalid')
     }
     nonEmpty(range.epochId, `historyCoverage[${index}].epochId`)
+    assertDbLessArtifactLocation(range.location, `historyCoverage[${index}].location`)
+    artifactKey(range.location, range.manifestKey, `historyCoverage[${index}].manifestKey`)
+    sha256(range.manifestSha256, `historyCoverage[${index}].manifestSha256`)
+    if (range.exactIndex !== null) {
+      artifactKey(range.location, range.exactIndex.manifestKey, `historyCoverage[${index}].exactIndex.manifestKey`)
+      sha256(range.exactIndex.manifestSha256, `historyCoverage[${index}].exactIndex.manifestSha256`)
+    }
     safeInteger(range.startLedgerIndex, `historyCoverage[${index}].startLedgerIndex`, 1)
     safeInteger(range.endLedgerIndex, `historyCoverage[${index}].endLedgerIndex`, 1)
     ledgerHash(range.startLedgerHash, `historyCoverage[${index}].startLedgerHash`)

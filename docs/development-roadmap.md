@@ -59,21 +59,28 @@ Exit:
 - manifest/digests pass;
 - candidate is readable without D1.
 
-## D3 — Five-minute live collector
+## D3 — Live collector and publication
 
 Scope:
 
-- scheduled GitHub Actions collector;
+- stable control channel separate from immutable live-data Releases;
 - channel cursor/hash;
-- contiguous catch-up;
+- contiguous validated-ledger catch-up;
 - Current mutations and History records from one scan;
-- immutable delta publication;
+- immutable delta and live-chain publication;
+- each delta records its own artifact location so chains may span Releases;
 - channel-last activation;
-- concurrency guard.
+- single-writer concurrency guard;
+- read-only rehearsal followed by one-shot publication;
+- deterministic bounded data-Release sharding after delta artifact count is known;
+- six-hour UTC shard buckets with a 720-asset operational ceiling and `-rN` early rotation;
+- enable five-minute scheduling only after candidate evidence and bounded Release-sharding tests pass.
 
 Exit:
 
-- no-op, normal run, catch-up, failure, retry, and duplicate-run tests pass;
+- no-op, normal run, catch-up, failure, retry, duplicate-run, and Release-rotation tests pass;
+- immutable data publication succeeds before control-channel activation;
+- live-chain reconstruction remains valid across more than one data Release;
 - no D1/Queue/Supabase mutation occurs.
 
 ## D4 — Compaction and bounded indexes

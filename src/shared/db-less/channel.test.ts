@@ -6,6 +6,17 @@ import {
   type DbLessChannelBodyV1,
 } from './channel'
 
+const LOCATION = {
+  provider: 'github-release' as const,
+  repository: 'badjoke-lab/xrpl-lending-monitor',
+  releaseTag: 'test-release',
+}
+const ARCHIVE_LOCATION = {
+  provider: 'github-commit' as const,
+  repository: 'badjoke-lab/xrpl-lending-monitor',
+  commitSha: '12252ce9df0d5ab50adc51e2743edb8ff03989dd',
+}
+
 const A = 'A'.repeat(64)
 const B = 'B'.repeat(64)
 const C = 'C'.repeat(64)
@@ -19,19 +30,22 @@ function body(): DbLessChannelBodyV1 {
     network: 'devnet',
     epochId: 'devnet-3371675',
     base: {
+      location: LOCATION,
       generationId: 'base-v1',
       snapshotId: 'snapshot-v1',
-      manifestKey: 'current/base-v1/manifest.json',
+      manifestKey: 'base-v1-manifest.json',
       manifestSha256: SHA,
       ledgerIndex: 5_218_039,
       ledgerHash: A,
     },
     live: {
+      location: LOCATION,
       generationId: 'live-v1',
-      manifestKey: 'live/live-v1/manifest.json',
+      manifestKey: 'live-v1-manifest.json',
       manifestSha256: SHA,
       payloadDigest: PAYLOAD,
       startLedgerIndex: 5_218_040,
+      startLedgerHash: B,
       startParentHash: A,
       endLedgerIndex: 5_218_042,
       endLedgerHash: B,
@@ -43,6 +57,13 @@ function body(): DbLessChannelBodyV1 {
         rangeId: 'archive-v1',
         source: 'archive',
         epochId: 'devnet-3371675',
+        location: ARCHIVE_LOCATION,
+        manifestKey: 'history/publication.json',
+        manifestSha256: SHA,
+        exactIndex: {
+          manifestKey: 'history/index/exact/manifest.json',
+          manifestSha256: SHA,
+        },
         startLedgerIndex: 3_371_676,
         startLedgerHash: C,
         endLedgerIndex: 3_932_301,
@@ -52,6 +73,10 @@ function body(): DbLessChannelBodyV1 {
         rangeId: 'live-v1',
         source: 'live',
         epochId: 'devnet-3371675',
+        location: LOCATION,
+        manifestKey: 'live-v1-manifest.json',
+        manifestSha256: SHA,
+        exactIndex: null,
         startLedgerIndex: 5_218_040,
         startLedgerHash: A,
         endLedgerIndex: 5_218_042,

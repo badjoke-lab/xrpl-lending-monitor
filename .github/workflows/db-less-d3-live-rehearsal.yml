@@ -1,0 +1,141 @@
+name: DB-less D3 live rehearsal
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_release_tag:
+        description: Verified D2 Current base prerelease tag
+        required: true
+        type: string
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: db-less-d3-live-rehearsal
+  cancel-in-progress: false
+
+jobs:
+  rehearse:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event.issue.number == 1673 &&
+        github.event.comment.user.login == github.repository_owner &&
+        startsWith(github.event.comment.body, '/d3-rehearse-live ')
+      )
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      INPUT_BASE_RELEASE_TAG: ${{ inputs.base_release_tag }}
+      COMMENT_BODY: ${{ github.event.comment.body }}
+    steps:
+      - name: Resolve verified D2 base Release tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            tag="$INPUT_BASE_RELEASE_TAG"
+          else
+            prefix="/d3-rehearse-live "
+            case "$COMMENT_BODY" in
+              "$prefix"*) tag="${COMMENT_BODY#"$prefix"}" ;;
+              *) echo "Invalid rehearsal command" >&2; exit 1 ;;
+            esac
+          fi
+
+          if [[ ! "$tag" =~ ^d2-current-base-[0-9]+$ ]]; then
+            echo "Invalid D2 base release tag: $tag" >&2
+            exit 1
+          fi
+          echo "BASE_RELEASE_TAG=$tag" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - run: corepack enable
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build D3 CLIs
+        run: |
+          pnpm build:db-less-initial-channel
+          pnpm build:db-less-live-run
+
+      - name: Download verified D2 base manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .local/d3-input/base
+          gh release download "$BASE_RELEASE_TAG"             --pattern 'base-manifest.json'             --dir .local/d3-input/base
+
+          release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$BASE_RELEASE_TAG")"
+          test "$(jq -r '.draft' <<<"$release_json")" = "false"
+          test "$(jq -r '.prerelease' <<<"$release_json")" = "true"
+          base_updated_at="$(jq -r '.published_at // .created_at' <<<"$release_json")"
+          test -n "$base_updated_at"
+          echo "BASE_UPDATED_AT=$base_updated_at" >> "$GITHUB_ENV"
+
+      - name: Fetch pinned legacy History publication
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .local/d3-input/history
+
+          gh api "repos/$GITHUB_REPOSITORY/contents/history-channel.json?ref=history-data"             --jq '.content'             | tr -d '\n'             | base64 --decode             > .local/d3-input/history/history-channel.json
+
+          data_commit="$(jq -r '.active.dataCommitSha' .local/d3-input/history/history-channel.json)"
+          publication_path="$(jq -r '.active.publicationPath' .local/d3-input/history/history-channel.json)"
+          exact_index_path="$(jq -r '.active.exactIndex.manifestPath' .local/d3-input/history/history-channel.json)"
+          test "$data_commit" != "null"
+          test "$publication_path" != "null"
+          test "$exact_index_path" != "null"
+
+          gh api "repos/$GITHUB_REPOSITORY/contents/$publication_path?ref=$data_commit"             --jq '.content'             | tr -d '\n'             | base64 --decode             > .local/d3-input/history/publication.json
+
+          gh api "repos/$GITHUB_REPOSITORY/contents/$exact_index_path?ref=$data_commit"             --jq '.content'             | tr -d '\n'             | base64 --decode             > .local/d3-input/history/exact-index-manifest.json
+
+      - name: Build verified initial channel
+        shell: bash
+        run: |
+          set -euo pipefail
+          node .db-less-initial-channel-build/build-db-less-initial-channel.mjs             --local             --base-manifest .local/d3-input/base/base-manifest.json             --base-repository "$GITHUB_REPOSITORY"             --base-release-tag "$BASE_RELEASE_TAG"             --archive-channel .local/d3-input/history/history-channel.json             --archive-publication .local/d3-input/history/publication.json             --archive-exact-index .local/d3-input/history/exact-index-manifest.json             --archive-repository "$GITHUB_REPOSITORY"             --updated-at "$BASE_UPDATED_AT"             --output .local/d3-input/channel.json
+
+      - name: Prepare one bounded live catch-up without publication
+        shell: bash
+        run: |
+          set -euo pipefail
+          node .db-less-live-run-build/prepare-db-less-live-run.mjs             --local             --channel .local/d3-input/channel.json             --source-revision "$GITHUB_SHA"             --live-repository "$GITHUB_REPOSITORY"             --live-release-tag "d3-live-rehearsal-$GITHUB_RUN_ID"             --endpoint https://devnet.honeycluster.io/             --endpoint https://s.devnet.rippletest.net:51234/             --timeout-ms 8000             --max-ledgers 256             --read-window-size 16             --output-dir .local/d3-live
+
+      - name: Assert rehearsal is bounded and non-publishing
+        shell: bash
+        run: |
+          set -euo pipefail
+          status="$(jq -r '.status' .local/d3-live/run-summary.json)"
+          test "$status" = "prepared" -o "$status" = "caught-up"
+          if [ "$status" = "prepared" ]; then
+            scanned="$(jq -r '.scannedLedgers' .local/d3-live/run-summary.json)"
+            test "$scanned" -ge 1
+            test "$scanned" -le 256
+            test -f .local/d3-live/publication-plan.json
+            test -f .local/d3-live/next-channel.json
+          fi
+
+      - name: Upload D3 rehearsal evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: db-less-d3-live-rehearsal
+          path: |
+            .local/d3-input/channel.json
+            .local/d3-live/run-summary.json
+            .local/d3-live/publication-plan.json
+            .local/d3-live/next-channel.json
+            .local/d3-live/immutable
+          if-no-files-found: warn
+          retention-days: 30
