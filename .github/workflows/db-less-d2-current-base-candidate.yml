@@ -79,7 +79,7 @@ jobs:
           actual="$(find .local/d2-base/assets -maxdepth 1 -type f | wc -l | tr -d ' ')"
           test "$actual" -eq "$count"
 
-      - name: Create draft candidate Release
+      - name: Create or recover exact draft candidate Release
         shell: bash
         run: |
           set -euo pipefail
@@ -90,13 +90,66 @@ jobs:
           Source revision: $SOURCE_REVISION
           Actions run: $GITHUB_RUN_ID
           EOF
-          gh release create "$RELEASE_TAG"             --target "$SOURCE_REVISION"             --draft             --title "DB-less D2 Current base $GITHUB_RUN_ID"             --notes-file .local/d2-base/release-notes.md
+
+          gh api --paginate --slurp \
+            "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            > .local/d2-base/releases-pages.json
+
+          matches="$(jq --arg tag "$RELEASE_TAG" '[.[][] | select(.tag_name == $tag)] | length' .local/d2-base/releases-pages.json)"
+          if [ "$matches" -gt 1 ]; then
+            echo "Duplicate Release tag entries exist for $RELEASE_TAG" >&2
+            exit 1
+          fi
+
+          if [ "$matches" -eq 1 ]; then
+            jq --arg tag "$RELEASE_TAG" '.[][] | select(.tag_name == $tag)' \
+              .local/d2-base/releases-pages.json \
+              > .local/d2-base/draft-release.json
+
+            test "$(jq -r '.draft' .local/d2-base/draft-release.json)" = "true"
+            test "$(jq -r '.prerelease' .local/d2-base/draft-release.json)" = "false"
+            test "$(jq -r '.name' .local/d2-base/draft-release.json)" = "DB-less D2 Current base $GITHUB_RUN_ID"
+
+            release_id="$(jq -r '.id' .local/d2-base/draft-release.json)"
+            gh api --paginate --slurp \
+              "repos/$GITHUB_REPOSITORY/releases/$release_id/assets?per_page=100" \
+              > .local/d2-base/release-assets-pages.json
+            test "$(jq '[.[][]] | length' .local/d2-base/release-assets-pages.json)" -eq 0
+          else
+            jq -n \
+              --arg tag "$RELEASE_TAG" \
+              --arg target "$SOURCE_REVISION" \
+              --arg name "DB-less D2 Current base $GITHUB_RUN_ID" \
+              --rawfile body .local/d2-base/release-notes.md \
+              '{
+                tag_name: $tag,
+                target_commitish: $target,
+                name: $name,
+                body: $body,
+                draft: true,
+                prerelease: false
+              }' > .local/d2-base/create-release.json
+
+            gh api --method POST \
+              "repos/$GITHUB_REPOSITORY/releases" \
+              --input .local/d2-base/create-release.json \
+              > .local/d2-base/draft-release.json
+
+            test "$(jq -r '.tag_name' .local/d2-base/draft-release.json)" = "$RELEASE_TAG"
+            test "$(jq -r '.draft' .local/d2-base/draft-release.json)" = "true"
+            test "$(jq -r '.prerelease' .local/d2-base/draft-release.json)" = "false"
+            release_id="$(jq -r '.id' .local/d2-base/draft-release.json)"
+          fi
+
+          test "$release_id" -ge 1
+          echo "D2_RELEASE_ID=$release_id" >> "$GITHUB_ENV"
 
       - name: Upload candidate assets with throttled retry
         shell: bash
         run: |
           set -euo pipefail
-          release_id="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" --jq '.id')"
+          release_id="$D2_RELEASE_ID"
+          test "$release_id" -ge 1
           mapfile -d '' files < <(find .local/d2-base/assets -maxdepth 1 -type f -print0 | sort -z)
           delays=(5 15 30 60 120 180)
 
@@ -158,7 +211,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          release_id="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" --jq '.id')"
+          release_id="$D2_RELEASE_ID"
+          test "$release_id" -ge 1
           gh api --paginate --slurp             "repos/$GITHUB_REPOSITORY/releases/$release_id/assets?per_page=100"             > .local/d2-base/release-assets-pages.json
           node --input-type=module <<'NODE'
           import { createHash } from 'node:crypto'
@@ -203,7 +257,27 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gh release edit "$RELEASE_TAG" --draft=false --prerelease --latest=false
+          jq -n '{
+            draft: false,
+            prerelease: true,
+            make_latest: "false"
+          }' > .local/d2-base/publish-release.json
+
+          gh api --method PATCH \
+            "repos/$GITHUB_REPOSITORY/releases/$D2_RELEASE_ID" \
+            --input .local/d2-base/publish-release.json \
+            > .local/d2-base/published-release.json
+
+          test "$(jq -r '.id' .local/d2-base/published-release.json)" = "$D2_RELEASE_ID"
+          test "$(jq -r '.tag_name' .local/d2-base/published-release.json)" = "$RELEASE_TAG"
+          test "$(jq -r '.draft' .local/d2-base/published-release.json)" = "false"
+          test "$(jq -r '.prerelease' .local/d2-base/published-release.json)" = "true"
+
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" \
+            > .local/d2-base/published-release-readback.json
+          test "$(jq -r '.id' .local/d2-base/published-release-readback.json)" = "$D2_RELEASE_ID"
+          test "$(jq -r '.draft' .local/d2-base/published-release-readback.json)" = "false"
+          test "$(jq -r '.prerelease' .local/d2-base/published-release-readback.json)" = "true"
 
       - name: Record D2 candidate evidence
         shell: bash
@@ -246,6 +320,9 @@ jobs:
             .local/d2-base/base-read-model-summary.json
             .local/d2-base/base-verification-summary.json
             .local/d2-base/assets/base-manifest.json
+            .local/d2-base/draft-release.json
             .local/d2-base/release-assets-pages.json
+            .local/d2-base/published-release.json
+            .local/d2-base/published-release-readback.json
           if-no-files-found: warn
           retention-days: 30
