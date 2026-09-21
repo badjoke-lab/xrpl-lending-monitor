@@ -3,7 +3,7 @@ import {
   buildPortableXrplNormalizedWork,
   type PortableXrplNormalizedWorkV1,
 } from '../../collector/history-segments/portable-xrpl-normalization'
-import type { SemanticCountsV1 } from '../portable-collector-payload'
+import type { NormalizedPayloadChunkLimits, SemanticCountsV1 } from '../portable-collector-payload'
 import { canonicalJson, sha256Hex, utf8 } from '../current-state/canonical-json'
 
 const RIPPLE_EPOCH_UNIX_SECONDS = 946_684_800
@@ -158,6 +158,7 @@ export async function buildDbLessLiveDeltaArtifacts(options: {
   previousLedgerIndex: number
   expectedParentHash: string
   sourceRevision: string
+  chunkLimits?: NormalizedPayloadChunkLimits
 }): Promise<DbLessLiveDeltaArtifactSet> {
   const first = options.scan.ledgers[0]
   const last = options.scan.ledgers.at(-1)
@@ -185,6 +186,7 @@ export async function buildDbLessLiveDeltaArtifacts(options: {
     baseIdentity: options.baseIdentity,
     previousLedgerIndex: options.previousLedgerIndex,
     expectedParentHash: options.expectedParentHash,
+    chunkLimits: options.chunkLimits,
   })
 
   const sourceRevisionDigest = await sha256Hex(options.sourceRevision)
