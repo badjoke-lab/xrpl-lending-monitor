@@ -62,6 +62,9 @@ class FakeGitHub {
   uploadAttempts = 0
   uploadFailuresRemaining = 0
   persistOnUploadFailure = false
+  releaseReadCount = 0
+  assetListReadCount = 0
+  assetDownloadCount = 0
 
   constructor(body: string | null) {
     this.body = body
@@ -72,6 +75,7 @@ class FakeGitHub {
     const method = init?.method ?? 'GET'
 
     if (url.hostname === 'api.github.com' && url.pathname === `/repos/${REPO}/releases/tags/${TAG}`) {
+      this.releaseReadCount += 1
       return Response.json({
         id: this.releaseId,
         tag_name: TAG,
@@ -82,6 +86,7 @@ class FakeGitHub {
     }
 
     if (url.hostname === 'api.github.com' && url.pathname === `/repos/${REPO}/releases/${this.releaseId}/assets`) {
+      this.assetListReadCount += 1
       const values = await Promise.all([...this.assets.values()].map(async (asset) => ({
         id: asset.id,
         name: asset.name,
@@ -93,6 +98,7 @@ class FakeGitHub {
 
     const assetMatch = url.pathname.match(new RegExp(`^/repos/${REPO}/releases/assets/(\\d+)$`))
     if (url.hostname === 'api.github.com' && assetMatch) {
+      this.assetDownloadCount += 1
       const id = Number(assetMatch[1])
       const asset = this.assets.get(id)
       if (!asset) return new Response('missing', { status: 404 })
@@ -217,6 +223,37 @@ describe('GitHub Release DB-less store', () => {
     })
   })
 
+  it('caches immutable Release metadata and asset listings across multiple writes', async () => {
+    const current = await channel()
+    const github = new FakeGitHub(`${canonicalJson(current)}\n`)
+    const store = new GitHubReleaseDbLessStore({
+      repository: REPO,
+      releaseTag: TAG,
+      token: 'token',
+      fetcher: github.fetch,
+      uploadPacingMs: 0,
+    })
+    const values = await Promise.all([
+      artifact('live-v1-101-101-cache-1.json'),
+      artifact('live-v1-101-101-cache-2.json'),
+      artifact('live-v1-101-101-cache-3.json'),
+    ])
+
+    for (const value of values) {
+      await store.writeImmutable(value)
+      await expect(store.inspect(value.key)).resolves.toEqual({
+        key: value.key,
+        bytes: value.bytes.byteLength,
+        sha256: value.sha256,
+      })
+    }
+
+    expect(github.uploadAttempts).toBe(3)
+    expect(github.releaseReadCount).toBe(1)
+    expect(github.assetListReadCount).toBe(1)
+    expect(github.assetDownloadCount).toBe(3)
+  })
+
   it('retries a rate-limited upload and accepts the later exact digest', async () => {
     const current = await channel()
     const github = new FakeGitHub(`${canonicalJson(current)}\n`)
@@ -295,6 +332,21 @@ describe('GitHub Release DB-less store', () => {
       expectedRevision: 'release:7:channel:stale',
     })).rejects.toThrow('revision changed')
     expect(github.patchCount).toBe(0)
+  })
+
+  it('keeps channel reads fresh instead of using the immutable Release cache', async () => {
+    const current = await channel()
+    const github = new FakeGitHub(`${canonicalJson(current)}\n`)
+    const store = new GitHubReleaseDbLessStore({
+      repository: REPO,
+      releaseTag: TAG,
+      token: 'token',
+      fetcher: github.fetch,
+    })
+
+    await store.readChannel()
+    await store.readChannel()
+    expect(github.releaseReadCount).toBe(2)
   })
 
   it('updates only the Release body when the expected channel matches', async () => {
