@@ -95,8 +95,8 @@ jobs:
           limits=(256)
           chunk_max_records=40
           if [ "${GITHUB_EVENT_NAME}" = "issue_comment" ] && [ "${{ github.event.comment.body }}" = "/d3-live-catch-up" ]; then
-            limits=(4096 2048 1024 512 256)
-            chunk_max_records=640
+            limits=(8192 4096 2048 1024 512 256)
+            chunk_max_records=4096
           fi
 
           selected=""
