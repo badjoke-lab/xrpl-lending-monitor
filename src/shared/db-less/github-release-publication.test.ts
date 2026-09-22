@@ -59,6 +59,9 @@ class FakeGitHub {
   readonly assets = new Map<number, { id: number; name: string; bytes: Uint8Array }>()
   nextAssetId = 100
   patchCount = 0
+  uploadAttempts = 0
+  uploadFailuresRemaining = 0
+  persistOnUploadFailure = false
 
   constructor(body: string | null) {
     this.body = body
@@ -79,11 +82,12 @@ class FakeGitHub {
     }
 
     if (url.hostname === 'api.github.com' && url.pathname === `/repos/${REPO}/releases/${this.releaseId}/assets`) {
-      const values = [...this.assets.values()].map((asset) => ({
+      const values = await Promise.all([...this.assets.values()].map(async (asset) => ({
         id: asset.id,
         name: asset.name,
         size: asset.bytes.byteLength,
-      }))
+        digest: `sha256:${await sha256Hex(asset.bytes)}`,
+      })))
       return Response.json(values)
     }
 
@@ -111,9 +115,24 @@ class FakeGitHub {
       } else {
         return new Response('missing bytes', { status: 400 })
       }
+      this.uploadAttempts += 1
+      if (this.uploadFailuresRemaining > 0) {
+        this.uploadFailuresRemaining -= 1
+        if (this.persistOnUploadFailure) {
+          const id = this.nextAssetId++
+          this.assets.set(id, { id, name, bytes })
+        }
+        return new Response('secondary rate limit', { status: 403 })
+      }
+
       const id = this.nextAssetId++
       this.assets.set(id, { id, name, bytes })
-      return Response.json({ id, name, size: bytes.byteLength })
+      return Response.json({
+        id,
+        name,
+        size: bytes.byteLength,
+        digest: `sha256:${await sha256Hex(bytes)}`,
+      })
     }
 
     if (
@@ -186,10 +205,58 @@ describe('GitHub Release DB-less store', () => {
       releaseTag: TAG,
       token: 'token',
       fetcher: github.fetch,
+      uploadPacingMs: 0,
     })
     const value = await artifact('live-v1-101-101-test-manifest.json')
 
     await store.writeImmutable(value)
+    await expect(store.inspect(value.key)).resolves.toEqual({
+      key: value.key,
+      bytes: value.bytes.byteLength,
+      sha256: value.sha256,
+    })
+  })
+
+  it('retries a rate-limited upload and accepts the later exact digest', async () => {
+    const current = await channel()
+    const github = new FakeGitHub(`${canonicalJson(current)}\n`)
+    github.uploadFailuresRemaining = 2
+    const store = new GitHubReleaseDbLessStore({
+      repository: REPO,
+      releaseTag: TAG,
+      token: 'token',
+      fetcher: github.fetch,
+      uploadRetryDelaysMs: [0, 0],
+      uploadPacingMs: 0,
+    })
+    const value = await artifact('live-v1-101-101-retry-manifest.json')
+
+    await expect(store.writeImmutable(value)).resolves.toBeUndefined()
+    expect(github.uploadAttempts).toBe(3)
+    await expect(store.inspect(value.key)).resolves.toEqual({
+      key: value.key,
+      bytes: value.bytes.byteLength,
+      sha256: value.sha256,
+    })
+  })
+
+  it('recovers an uncertain failed upload only from an exact remote digest match', async () => {
+    const current = await channel()
+    const github = new FakeGitHub(`${canonicalJson(current)}\n`)
+    github.uploadFailuresRemaining = 1
+    github.persistOnUploadFailure = true
+    const store = new GitHubReleaseDbLessStore({
+      repository: REPO,
+      releaseTag: TAG,
+      token: 'token',
+      fetcher: github.fetch,
+      uploadRetryDelaysMs: [0],
+      uploadPacingMs: 0,
+    })
+    const value = await artifact('live-v1-101-101-uncertain-manifest.json')
+
+    await expect(store.writeImmutable(value)).resolves.toBeUndefined()
+    expect(github.uploadAttempts).toBe(1)
     await expect(store.inspect(value.key)).resolves.toEqual({
       key: value.key,
       bytes: value.bytes.byteLength,

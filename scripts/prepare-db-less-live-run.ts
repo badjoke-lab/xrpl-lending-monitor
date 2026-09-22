@@ -17,6 +17,10 @@ import {
 } from '../src/shared/db-less/live-publication'
 import { selectDbLessLiveReleaseShard } from '../src/shared/db-less/github-release-shard-selector'
 import { canonicalJson } from '../src/shared/current-state/canonical-json'
+import {
+  NORMALIZED_PAYLOAD_CHUNK_MAX_BYTES,
+  NORMALIZED_PAYLOAD_CHUNK_MAX_RECORDS,
+} from '../src/shared/portable-collector-payload'
 
 type Arguments = {
   channelPath: string
@@ -33,6 +37,7 @@ type Arguments = {
   timeoutMs: number
   maxHeadAgeSeconds: number
   maxLedgers: number
+  chunkMaxRecords: number
   readWindowSize: number
 }
 
@@ -99,6 +104,11 @@ function parseArguments(args: readonly string[]): Arguments {
     timeoutMs: positiveInteger(args, '--timeout-ms', 8_000),
     maxHeadAgeSeconds: positiveInteger(args, '--max-head-age-seconds', 30),
     maxLedgers: positiveInteger(args, '--max-ledgers', 256),
+    chunkMaxRecords: positiveInteger(
+      args,
+      '--chunk-max-records',
+      NORMALIZED_PAYLOAD_CHUNK_MAX_RECORDS,
+    ),
     readWindowSize: positiveInteger(args, '--read-window-size', 16),
   }
 }
@@ -144,6 +154,10 @@ async function main(): Promise<void> {
     previousChain,
     scan,
     sourceRevision: args.sourceRevision,
+    chunkLimits: {
+      maxRecords: args.chunkMaxRecords,
+      maxEncodedBytes: NORMALIZED_PAYLOAD_CHUNK_MAX_BYTES,
+    },
   })
 
   await rm(args.outputDir, { recursive: true, force: true })
@@ -164,6 +178,7 @@ async function main(): Promise<void> {
       committedLedgerIndex: channel.lastCommittedLedgerIndex,
       committedLedgerHash: channel.lastCommittedLedgerHash,
       scannedLedgers: 0,
+      chunkMaxRecords: args.chunkMaxRecords,
       immutableArtifacts: 0,
     }
     await writeJson(join(args.outputDir, 'run-summary.json'), summary)
@@ -262,6 +277,7 @@ async function main(): Promise<void> {
     endLedgerIndex: publication.delta.manifest.endLedgerIndex,
     endLedgerHash: publication.delta.manifest.endLedgerHash,
     scannedLedgers: publication.delta.manifest.ledgerCount,
+    chunkMaxRecords: args.chunkMaxRecords,
     completeToLatest: scan.completeToLatest,
     semanticCounts: publication.delta.manifest.semanticCounts,
     deltaGenerationId: publication.delta.manifest.generationId,

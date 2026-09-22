@@ -5,6 +5,7 @@ import {
   type BuiltNormalizedPayloadChunkV1,
   type NormalizedCandidateV1,
   type NormalizedCollectorPayloadV1,
+  type NormalizedPayloadChunkLimits,
   type PortableJsonValue,
 } from '../../shared/portable-collector-payload'
 import { canonicalPortableJson } from '../../shared/portable-collector-reference-store'
@@ -141,6 +142,7 @@ export async function buildPortableXrplNormalizedWork(options: {
   baseIdentity: string
   previousLedgerIndex: number
   expectedParentHash: string
+  chunkLimits?: NormalizedPayloadChunkLimits
 }): Promise<PortableXrplNormalizedWorkV1> {
   const finalLedger = options.scan.ledgers.at(-1)
   if (!finalLedger || options.scan.endLedgerIndex === null) {
@@ -343,7 +345,7 @@ export async function buildPortableXrplNormalizedWork(options: {
 
   return {
     payload,
-    chunks: await buildNormalizedPayloadChunks(payload),
+    chunks: await buildNormalizedPayloadChunks(payload, options.chunkLimits),
     semanticCountsJson: canonicalPortableJson(payload.semanticCounts),
   }
 }

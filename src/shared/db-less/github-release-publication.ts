@@ -24,6 +24,7 @@ interface GitHubReleaseAsset {
   id: number
   name: string
   size: number
+  digest?: string | null
 }
 
 interface GitHubRelease {
@@ -71,6 +72,10 @@ function canonicalChannelBody(channel: DbLessChannelV1): string {
   return `${canonicalJson(channel)}\n`
 }
 
+function defaultSleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
 export class GitHubReleaseDbLessStore
 implements DbLessImmutableArtifactWriter, DbLessChannelPublisher {
   readonly #repository: string
@@ -78,6 +83,9 @@ implements DbLessImmutableArtifactWriter, DbLessChannelPublisher {
   readonly #token: string
   readonly #fetcher: GitHubFetchLike
   readonly #maxAssets: number
+  readonly #uploadRetryDelaysMs: readonly number[]
+  readonly #uploadPacingMs: number
+  readonly #sleep: (ms: number) => Promise<void>
 
   constructor(options: {
     repository: string
@@ -85,6 +93,9 @@ implements DbLessImmutableArtifactWriter, DbLessChannelPublisher {
     token: string
     fetcher?: GitHubFetchLike
     maxAssets?: number
+    uploadRetryDelaysMs?: readonly number[]
+    uploadPacingMs?: number
+    sleep?: (ms: number) => Promise<void>
   }) {
     assertRepository(options.repository)
     assertReleaseTag(options.releaseTag)
@@ -97,8 +108,22 @@ implements DbLessImmutableArtifactWriter, DbLessChannelPublisher {
     this.#repository = options.repository
     this.#releaseTag = options.releaseTag
     this.#token = options.token
+    const uploadRetryDelaysMs = options.uploadRetryDelaysMs ?? [5_000, 15_000, 30_000, 60_000, 120_000, 180_000]
+    if (
+      uploadRetryDelaysMs.some((delay) => !Number.isSafeInteger(delay) || delay < 0)
+    ) {
+      throw new Error('uploadRetryDelaysMs must contain non-negative safe integers')
+    }
+    const uploadPacingMs = options.uploadPacingMs ?? 1_000
+    if (!Number.isSafeInteger(uploadPacingMs) || uploadPacingMs < 0) {
+      throw new Error('uploadPacingMs must be a non-negative safe integer')
+    }
+
     this.#fetcher = options.fetcher ?? ((input, init) => fetch(input, init))
     this.#maxAssets = maxAssets
+    this.#uploadRetryDelaysMs = [...uploadRetryDelaysMs]
+    this.#uploadPacingMs = uploadPacingMs
+    this.#sleep = options.sleep ?? defaultSleep
   }
 
   async #release(): Promise<GitHubRelease> {
@@ -134,6 +159,11 @@ implements DbLessImmutableArtifactWriter, DbLessChannelPublisher {
           || typeof asset.name !== 'string'
           || !Number.isSafeInteger(asset.size)
           || asset.size < 0
+          || (
+            asset.digest !== undefined
+            && asset.digest !== null
+            && typeof asset.digest !== 'string'
+          )
         ) {
           throw new Error('GitHub Release asset response is invalid')
         }
@@ -197,31 +227,71 @@ implements DbLessImmutableArtifactWriter, DbLessChannelPublisher {
     if (release.draft) {
       throw new Error('GitHub Release DB-less live store must not be a draft')
     }
-    const assets = await this.#assets(release.id)
-    if (assets.some((asset) => asset.name === artifact.key)) {
+    const expectedDigest = `sha256:${artifact.sha256}`
+    const initialAssets = await this.#assets(release.id)
+    if (initialAssets.some((asset) => asset.name === artifact.key)) {
       throw new Error(`GitHub Release asset already exists: ${artifact.key}`)
     }
-    if (assets.length >= this.#maxAssets) {
+    if (initialAssets.length >= this.#maxAssets) {
       throw new Error('GitHub Release live asset ceiling reached before upload')
     }
 
-    const response = await this.#fetcher(
-      `https://uploads.github.com/repos/${this.#repository}/releases/${release.id}/assets?name=${encodeURIComponent(artifact.key)}`,
-      {
-        method: 'POST',
-        headers: {
-          ...apiHeaders(this.#token),
-          'Content-Type': artifact.mediaType,
+    let attempt = 0
+    while (true) {
+      const response = await this.#fetcher(
+        `https://uploads.github.com/repos/${this.#repository}/releases/${release.id}/assets?name=${encodeURIComponent(artifact.key)}`,
+        {
+          method: 'POST',
+          headers: {
+            ...apiHeaders(this.#token),
+            'Content-Type': artifact.mediaType,
+          },
+          body: artifact.bytes.buffer.slice(
+            artifact.bytes.byteOffset,
+            artifact.bytes.byteOffset + artifact.bytes.byteLength,
+          ) as ArrayBuffer,
         },
-        body: artifact.bytes.buffer.slice(
-          artifact.bytes.byteOffset,
-          artifact.bytes.byteOffset + artifact.bytes.byteLength,
-        ) as ArrayBuffer,
-      },
-    )
-    const uploaded = await jsonResponse<GitHubReleaseAsset>(response, 'GitHub Release asset upload')
-    if (uploaded.name !== artifact.key || uploaded.size !== artifact.bytes.byteLength) {
-      throw new Error(`GitHub Release upload metadata mismatch for ${artifact.key}`)
+      )
+
+      if (response.ok) {
+        const uploaded = await response.json() as GitHubReleaseAsset
+        if (
+          uploaded.name !== artifact.key
+          || uploaded.size !== artifact.bytes.byteLength
+          || uploaded.digest !== expectedDigest
+        ) {
+          throw new Error(`GitHub Release upload metadata mismatch for ${artifact.key}`)
+        }
+        if (this.#uploadPacingMs > 0) await this.#sleep(this.#uploadPacingMs)
+        return
+      }
+
+      const remoteAssets = await this.#assets(release.id)
+      const matches = remoteAssets.filter((asset) => asset.name === artifact.key)
+      if (matches.length > 1) {
+        throw new Error(`Duplicate GitHub Release asset name: ${artifact.key}`)
+      }
+      if (matches.length === 1) {
+        const remote = matches[0]!
+        if (
+          remote.size === artifact.bytes.byteLength
+          && remote.digest === expectedDigest
+        ) {
+          if (this.#uploadPacingMs > 0) await this.#sleep(this.#uploadPacingMs)
+          return
+        }
+        throw new Error(`Remote GitHub Release asset conflict after upload failure: ${artifact.key}`)
+      }
+
+      if (attempt >= this.#uploadRetryDelaysMs.length) {
+        throw new Error(
+          `GitHub Release asset upload failed after bounded retries with GitHub HTTP ${response.status}`,
+        )
+      }
+
+      const delay = this.#uploadRetryDelaysMs[attempt]!
+      attempt += 1
+      if (delay > 0) await this.#sleep(delay)
     }
   }
 
