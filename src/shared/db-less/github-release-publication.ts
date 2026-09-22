@@ -86,6 +86,8 @@ implements DbLessImmutableArtifactWriter, DbLessChannelPublisher {
   readonly #uploadRetryDelaysMs: readonly number[]
   readonly #uploadPacingMs: number
   readonly #sleep: (ms: number) => Promise<void>
+  #releaseCache: GitHubRelease | null = null
+  #assetsCache: { releaseId: number; assets: GitHubReleaseAsset[] } | null = null
 
   constructor(options: {
     repository: string
@@ -126,7 +128,9 @@ implements DbLessImmutableArtifactWriter, DbLessChannelPublisher {
     this.#sleep = options.sleep ?? defaultSleep
   }
 
-  async #release(): Promise<GitHubRelease> {
+  async #release(fresh = false): Promise<GitHubRelease> {
+    if (!fresh && this.#releaseCache) return this.#releaseCache
+
     const response = await this.#fetcher(
       `https://api.github.com/repos/${this.#repository}/releases/tags/${encodeURIComponent(this.#releaseTag)}`,
       { headers: apiHeaders(this.#token) },
@@ -141,10 +145,23 @@ implements DbLessImmutableArtifactWriter, DbLessChannelPublisher {
     ) {
       throw new Error('GitHub Release response is invalid')
     }
+
+    if (this.#releaseCache && this.#releaseCache.id !== release.id) {
+      this.#assetsCache = null
+    }
+    this.#releaseCache = release
     return release
   }
 
-  async #assets(releaseId: number): Promise<GitHubReleaseAsset[]> {
+  async #assets(releaseId: number, fresh = false): Promise<GitHubReleaseAsset[]> {
+    if (
+      !fresh
+      && this.#assetsCache
+      && this.#assetsCache.releaseId === releaseId
+    ) {
+      return this.#assetsCache.assets
+    }
+
     const assets: GitHubReleaseAsset[] = []
     for (let page = 1; page <= 10; page += 1) {
       const response = await this.#fetcher(
@@ -169,9 +186,21 @@ implements DbLessImmutableArtifactWriter, DbLessChannelPublisher {
         }
         assets.push(asset)
       }
-      if (values.length < 100) return assets
+      if (values.length < 100) {
+        this.#assetsCache = { releaseId, assets }
+        return assets
+      }
     }
     throw new Error('GitHub Release asset pagination exceeded 1000 assets')
+  }
+
+  #cacheUploadedAsset(releaseId: number, asset: GitHubReleaseAsset): void {
+    if (!this.#assetsCache || this.#assetsCache.releaseId !== releaseId) return
+    const matches = this.#assetsCache.assets.filter((value) => value.name === asset.name)
+    if (matches.length > 0) {
+      throw new Error(`Duplicate GitHub Release asset name: ${asset.name}`)
+    }
+    this.#assetsCache.assets.push(asset)
   }
 
   async #downloadAsset(asset: GitHubReleaseAsset): Promise<Uint8Array> {
@@ -262,11 +291,12 @@ implements DbLessImmutableArtifactWriter, DbLessChannelPublisher {
         ) {
           throw new Error(`GitHub Release upload metadata mismatch for ${artifact.key}`)
         }
+        this.#cacheUploadedAsset(release.id, uploaded)
         if (this.#uploadPacingMs > 0) await this.#sleep(this.#uploadPacingMs)
         return
       }
 
-      const remoteAssets = await this.#assets(release.id)
+      const remoteAssets = await this.#assets(release.id, true)
       const matches = remoteAssets.filter((asset) => asset.name === artifact.key)
       if (matches.length > 1) {
         throw new Error(`Duplicate GitHub Release asset name: ${artifact.key}`)
@@ -296,7 +326,7 @@ implements DbLessImmutableArtifactWriter, DbLessChannelPublisher {
   }
 
   async readChannel(): Promise<DbLessChannelRead | null> {
-    const release = await this.#release()
+    const release = await this.#release(true)
     if (release.draft) {
       throw new Error('GitHub Release DB-less channel must not be a draft')
     }
@@ -325,7 +355,7 @@ implements DbLessImmutableArtifactWriter, DbLessChannelPublisher {
   }): Promise<{ revision: string | null }> {
     await verifyDbLessChannel(options.channel)
 
-    const release = await this.#release()
+    const release = await this.#release(true)
     let current: DbLessChannelV1 | null = null
     if (release.body !== null && release.body.trim().length) {
       try {
@@ -361,6 +391,7 @@ implements DbLessImmutableArtifactWriter, DbLessChannelPublisher {
       },
     )
     const updated = await jsonResponse<GitHubRelease>(response, 'GitHub Release channel update')
+    this.#releaseCache = updated
     if (updated.id !== release.id || updated.tag_name !== this.#releaseTag) {
       throw new Error('GitHub Release channel update returned the wrong Release')
     }
