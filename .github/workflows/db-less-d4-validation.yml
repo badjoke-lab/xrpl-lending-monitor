@@ -1,0 +1,44 @@
+name: DB-less D4 validation
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/shared/db-less/current-overlay-checkpoint.ts'
+      - 'src/shared/db-less/current-overlay-checkpoint.test.ts'
+      - '.github/workflows/db-less-d4-validation.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: db-less-d4-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Report runner Node
+        run: node --version
+
+      - run: corepack enable
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Typecheck worker/shared graph
+        run: pnpm exec tsc -p tsconfig.worker.json --noEmit
+
+      - name: Lint D4 surface
+        run: >-
+          pnpm exec eslint
+          src/shared/db-less/current-overlay-checkpoint.ts
+          src/shared/db-less/current-overlay-checkpoint.test.ts
+
+      - name: D4 focused tests
+        run: >-
+          pnpm exec vitest run
+          src/shared/db-less/current-overlay-checkpoint.test.ts
