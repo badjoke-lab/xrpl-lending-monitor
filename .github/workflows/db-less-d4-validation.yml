@@ -6,6 +6,8 @@ on:
     paths:
       - 'src/shared/db-less/current-overlay-checkpoint.ts'
       - 'src/shared/db-less/current-overlay-checkpoint.test.ts'
+      - 'src/shared/db-less/current-overlay-generation-reader.ts'
+      - 'src/shared/db-less/current-overlay-generation-reader.test.ts'
       - '.github/workflows/db-less-d4-validation.yml'
 
 permissions:
@@ -37,6 +39,9 @@ jobs:
           pnpm exec eslint
           src/shared/db-less/current-overlay-checkpoint.ts
           src/shared/db-less/current-overlay-checkpoint.test.ts
+          src/shared/db-less/current-overlay-generation-reader.test.ts
+          src/shared/db-less/current-overlay-generation-reader.ts
+          src/shared/db-less/current-overlay-generation-reader.test.ts
 
       - name: D4 focused tests
         run: >-
