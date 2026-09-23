@@ -229,7 +229,7 @@ export class DbLessCompositeCurrentReader {
     let shadowChecks = 0
     let shadowShardReads = 0
     let phase = cursor.phase
-    let overlayCursor = cursor.overlayCursor ?? undefined
+    const overlayCursor = cursor.overlayCursor ?? undefined
     let baseCursor = cursor.baseCursor ?? undefined
 
     if (phase === 'overlay') {
