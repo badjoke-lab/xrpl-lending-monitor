@@ -169,6 +169,19 @@ Bounded Release sharding uses deterministic six-hour UTC shard tags, a 720-asset
 
 D4 now owns the next implementation gate: compact live Current mutations into bounded overlay/index shards, define retention for superseded live artifacts, prove bounded exact/list query plans, and prevent project-age-driven five-minute delta fan-out.
 
+Implemented D4 slices now include:
+
+- deterministic hash-bucketed Current overlay checkpoint construction with tombstone preservation;
+- full verified D3 live-chain ingestion into chronological Current generations;
+- read-only production-shaped checkpoint rehearsal;
+- bounded checkpoint exact lookup and cursor-based list traversal;
+- bounded D2-base + checkpoint-overlay composition, where overlay tombstones mask base rows and overlay upserts override them;
+- independent source-generation versus checkpoint-state equivalence verification;
+- bounded retry for transient GitHub Release asset download failures during full-chain reconstruction;
+- a fail-closed retention planner for future D4 checkpoint Releases.
+
+The D4 retention contract applies only to immutable Current overlay checkpoint Releases named `db-less-current-overlay-v1-<ledger>`. It keeps the active checkpoint plus two predecessors by default. Draft/non-prerelease checkpoints are protected, and a newer unactivated checkpoint causes planning to fail closed. D3 `db-less-live-data-v1-*` Releases are explicitly outside this retention contract because they carry History/live-chain evidence required by later stages. Actual Release deletion is not performed by the planner and remains a separate explicit mutation step.
+
 ## Release status
 
 Not formally released.
