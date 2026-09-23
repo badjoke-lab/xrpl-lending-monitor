@@ -63,7 +63,7 @@ Exit evidence:
 - verified prerelease `d2-current-base-35558034659` was published with base manifest SHA-256 `89d9346d4eb2403b80ffc53b81b1a7621d8467506b3b931bfc9f688e6b5a4dc3`;
 - no D1/Queue/Supabase mutation was required.
 
-## D3 — Live collector and publication — ACTIVE
+## D3 — Live collector and publication — COMPLETE
 
 Scope:
 
@@ -93,11 +93,14 @@ Current exit evidence:
 - diagnostic schedule-driver run `35822507664` passed and dispatched collector run `35822514298`, which also passed;
 - no D1/Queue/Supabase mutation occurs.
 
-Remaining exit proof:
+Final exit proof:
 
-- observe at least one genuine GitHub Actions `event=schedule` driver delivery and successful bounded collector dispatch from it.
+- genuine GitHub Actions schedule driver run `35847201599` completed successfully with `event=schedule`;
+- its bounded collector dispatch run `35847211102` completed successfully;
+- the scheduled collector advanced the live control head to ledger `5,534,676` with full channel-last publication and linked-chain verification;
+- D3 therefore satisfies the schedule-delivery exit condition.
 
-## D4 — Compaction and bounded indexes
+## D4 — Compaction and bounded indexes — ACTIVE
 
 Scope:
 
