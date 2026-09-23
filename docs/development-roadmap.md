@@ -78,14 +78,24 @@ Scope:
 - read-only rehearsal followed by one-shot publication;
 - deterministic bounded data-Release sharding after delta artifact count is known;
 - six-hour UTC shard buckets with a 720-asset operational ceiling and `-rN` early rotation;
-- enable five-minute scheduling only after candidate evidence and bounded Release-sharding tests pass.
+- five-minute scheduling is activated through a dedicated driver after candidate evidence and bounded Release-sharding tests pass;
+- owner-only diagnostic dispatch proves the exact driver → bounded collector handoff independently of GitHub cron delivery.
 
-Exit:
+Current exit evidence:
 
-- no-op, normal run, catch-up, failure, retry, duplicate-run, and Release-rotation tests pass;
-- immutable data publication succeeds before control-channel activation;
-- live-chain reconstruction remains valid across more than one data Release;
+- D3 rehearsal run `35594182270` passed;
+- candidate initialization run `35594237813` passed;
+- bounded one-shot/catch-up publication has repeatedly passed with channel-last activation and linked-chain verification;
+- formal qualification run `35809460180` passed, including active shard bounds, full linked-chain reconstruction, and <=256-ledger catch-up-to-latest;
+- post-activation qualification run `35822742381` also passed;
+- schedule activation PR #1682 merged;
+- dedicated schedule driver PR #1692, staggered five-minute cron PR #1693, and diagnostic trigger PR #1694 merged;
+- diagnostic schedule-driver run `35822507664` passed and dispatched collector run `35822514298`, which also passed;
 - no D1/Queue/Supabase mutation occurs.
+
+Remaining exit proof:
+
+- observe at least one genuine GitHub Actions `event=schedule` driver delivery and successful bounded collector dispatch from it.
 
 ## D4 — Compaction and bounded indexes
 
