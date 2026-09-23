@@ -120,7 +120,7 @@ The D2 exit run `35558034659` completed successfully:
 
 Every D2 publication step passed: draft Release creation/recovery, throttled upload, exact remote name/size/SHA-256 verification, prerelease publication, and compact evidence upload. Release `d2-current-base-35558034659` exists as `draft=false`, `prerelease=true`, with all `860` assets remotely present.
 
-**D3 — Live collector and publication: active / schedule delivery proof pending**
+**D3 — Live collector and publication: complete**
 
 The DB-less live collector and publication chain are implemented on main. The design separates:
 
@@ -153,9 +153,18 @@ Five-minute activation is also merged:
 - diagnostic driver run `35822507664`: PASS;
 - dispatched collector run `35822514298`: PASS.
 
-The only remaining D3 exit evidence is a genuine GitHub Actions `event=schedule` delivery from `.github/workflows/db-less-d3-live-schedule.yml`, followed by successful bounded collector dispatch. Manual or diagnostic dispatch is not substituted for that proof.
+The final D3 exit proof is now complete:
+
+- genuine schedule driver run `35847201599` ran with `event=schedule` and passed;
+- that driver dispatched bounded collector run `35847211102`, which passed every collection, publication, readback, channel-update, linked-chain verification, and evidence step;
+- the successful scheduled collector advanced the candidate control head to ledger `5,534,676`, hash `178264A1B34857E9DDAD07C4FEDD73247487FF2A0B812B48EC57F9C6EEEB0579`;
+- resulting channel SHA-256: `5124bc0e69cb235887fc5a477987e904f9417be724132a4ac3511a29fa727164`.
 
 Bounded Release sharding uses deterministic six-hour UTC shard tags, a 720-asset operational ceiling below GitHub's 1,000-asset Release ceiling, and `-rN` early rotation when projected artifact count would exceed the shard limit.
+
+**D4 — Compaction and bounded indexes: active**
+
+D4 now owns the next implementation gate: compact live Current mutations into bounded overlay/index shards, define retention for superseded live artifacts, prove bounded exact/list query plans, and prevent project-age-driven five-minute delta fan-out.
 
 ## Release status
 
