@@ -265,7 +265,6 @@ export class DbLessCompositeCurrentReader {
       }
 
       phase = 'base'
-      overlayCursor = undefined
       if (items.length >= limit) {
         return {
           items,
