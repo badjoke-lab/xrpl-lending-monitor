@@ -1,4 +1,4 @@
-import { canonicalJson, sha256Hex, utf8 } from '../current-state/canonical-json'
+import { sha256Hex, utf8 } from '../current-state/canonical-json'
 import {
   decodeAndVerifyNormalizedPayloadChunk,
   type NormalizedCandidateV1,
@@ -15,13 +15,6 @@ export type DbLessLocatedArtifactReader = (
   location: DbLessArtifactLocationV1,
   key: string,
 ) => Promise<Uint8Array | null>
-
-function sameLocation(
-  left: DbLessArtifactLocationV1,
-  right: DbLessArtifactLocationV1,
-): boolean {
-  return canonicalJson(left) === canonicalJson(right)
-}
 
 function assertDeltaPointerMatchesManifest(
   pointer: DbLessLiveChainDeltaV1,
