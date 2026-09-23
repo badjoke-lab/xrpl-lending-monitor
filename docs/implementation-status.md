@@ -120,32 +120,40 @@ The D2 exit run `35558034659` completed successfully:
 
 Every D2 publication step passed: draft Release creation/recovery, throttled upload, exact remote name/size/SHA-256 verification, prerelease publication, and compact evidence upload. Release `d2-current-base-35558034659` exists as `draft=false`, `prerelease=true`, with all `860` assets remotely present.
 
-**D3 — Live collector and publication: active implementation / activation sequence**
+**D3 — Live collector and publication: active / schedule delivery proof pending**
 
-Draft PR #1679 contains the DB-less live collector path. Its current design separates:
+The DB-less live collector and publication chain are implemented on main. The design separates:
 
 - one small mutable control Release that contains the authoritative channel;
 - immutable data Releases that hold live delta/chunk/chain artifacts;
 - per-delta artifact locations so one live chain can span multiple data Releases.
 
-The branch also contains:
+Implemented and production-shaped evidence now includes:
 
-- verified initial-channel generation from the D2 base plus pinned legacy History publication/exact index;
-- bounded validated-ledger catch-up;
-- one-scan Current + History derivation;
-- channel-last publication;
-- immutable artifact readback verification;
+- D3 rehearsal run `35594182270`: PASS;
+- candidate initialization run `35594237813`: PASS;
+- repeated bounded one-shot and activation catch-up publications with channel-last control updates;
+- adaptive catch-up width bounded by the 720-asset Release ceiling;
+- denser manual catch-up chunks while retaining the 512,000-byte chunk ceiling;
+- one-at-a-time GitHub Release upload pacing, bounded retry/backoff, and exact remote SHA-256 recovery;
 - canonical-byte control Release enforcement;
-- bounded head + immediate-predecessor verification for normal one-shot/scheduled operation;
-- full cross-Release linked-chain reconstruction for explicit qualification;
+- bounded head + immediate-predecessor verification for normal operation;
+- full cross-Release linked-chain reconstruction for qualification;
 - live-head freshness fallback with a 30-second maximum validated-ledger age;
-- owner-gated read-only rehearsal;
-- owner-gated candidate initialization;
-- owner-gated one-shot live publication;
-- read-only qualification requiring that the active head can reach the latest validated Devnet ledger within one <=256-ledger catch-up;
-- one non-cancelling single-writer concurrency group.
+- one non-cancelling single-writer concurrency group on the actual mutation job;
+- formal qualification run `35809460180`: PASS, with active shard bounds, full linked-chain verification, and the <=256-ledger catch-up-to-latest gate all passing;
+- post-activation qualification run `35822742381`: PASS.
 
-The five-minute schedule remains intentionally disabled. D2 is complete, so the remaining activation order is: merge #1679, pass read-only rehearsal against `d2-current-base-35558034659`, initialize the candidate control channel, pass at least one live one-shot publication, pass `/d3-qualify-live`, then merge the isolated #1682 schedule switch.
+Five-minute activation is also merged:
+
+- #1682 enabled the five-minute schedule;
+- #1692 moved cron delivery into a dedicated driver that dispatches the existing bounded collector;
+- #1693 staggered the cron to `2-59/5 * * * *` to avoid the common top-of-hour boundary;
+- #1694 added an owner-only diagnostic trigger for the exact driver logic;
+- diagnostic driver run `35822507664`: PASS;
+- dispatched collector run `35822514298`: PASS.
+
+The only remaining D3 exit evidence is a genuine GitHub Actions `event=schedule` delivery from `.github/workflows/db-less-d3-live-schedule.yml`, followed by successful bounded collector dispatch. Manual or diagnostic dispatch is not substituted for that proof.
 
 Bounded Release sharding uses deterministic six-hour UTC shard tags, a 720-asset operational ceiling below GitHub's 1,000-asset Release ceiling, and `-rN` early rotation when projected artifact count would exceed the shard limit.
 
