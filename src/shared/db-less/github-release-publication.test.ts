@@ -65,6 +65,7 @@ class FakeGitHub {
   releaseReadCount = 0
   assetListReadCount = 0
   assetDownloadCount = 0
+  downloadFailuresRemaining = 0
 
   constructor(body: string | null) {
     this.body = body
@@ -99,6 +100,10 @@ class FakeGitHub {
     const assetMatch = url.pathname.match(new RegExp(`^/repos/${REPO}/releases/assets/(\\d+)$`))
     if (url.hostname === 'api.github.com' && assetMatch) {
       this.assetDownloadCount += 1
+      if (this.downloadFailuresRemaining > 0) {
+        this.downloadFailuresRemaining -= 1
+        return new Response('transient', { status: 500 })
+      }
       const id = Number(assetMatch[1])
       const asset = this.assets.get(id)
       if (!asset) return new Response('missing', { status: 404 })
@@ -251,6 +256,26 @@ describe('GitHub Release DB-less store', () => {
     expect(github.uploadAttempts).toBe(3)
     expect(github.releaseReadCount).toBe(1)
     expect(github.assetListReadCount).toBe(1)
+    expect(github.assetDownloadCount).toBe(3)
+  })
+
+  it('retries transient Release asset download failures with a bounded policy', async () => {
+    const current = await channel()
+    const github = new FakeGitHub(`${canonicalJson(current)}\n`)
+    const store = new GitHubReleaseDbLessStore({
+      repository: REPO,
+      releaseTag: TAG,
+      token: 'token',
+      fetcher: github.fetch,
+      uploadPacingMs: 0,
+      downloadRetryDelaysMs: [0, 0],
+    })
+    const value = await artifact('live-v1-101-101-download-retry.json')
+
+    await store.writeImmutable(value)
+    github.downloadFailuresRemaining = 2
+
+    await expect(store.readImmutable(value.key)).resolves.toEqual(value.bytes)
     expect(github.assetDownloadCount).toBe(3)
   })
 
