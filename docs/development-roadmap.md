@@ -93,12 +93,14 @@ Current exit evidence:
 - diagnostic schedule-driver run `35822507664` passed and dispatched collector run `35822514298`, which also passed;
 - no D1/Queue/Supabase mutation occurs.
 
-Final exit proof:
+Schedule-delivery evidence and operational hardening:
 
 - genuine GitHub Actions schedule driver run `35847201599` completed successfully with `event=schedule`;
-- its bounded collector dispatch run `35847211102` completed successfully;
-- the scheduled collector advanced the live control head to ledger `5,534,676` with full channel-last publication and linked-chain verification;
-- D3 therefore satisfies the schedule-delivery exit condition.
+- its bounded collector dispatch run `35847211102` completed successfully and advanced the live control head to ledger `5,534,676` with full channel-last publication and linked-chain verification;
+- subsequent observation found that GitHub did not deliver the dedicated five-minute cron consistently enough to treat one successful scheduled event as sustained cadence proof;
+- PR #1700 replaced direct five-minute cron dependence with a half-hour driver (`:17`, `:47`) that holds six bounded five-minute dispatch slots, while preserving the existing collector, channel, sharding, and qualification contracts;
+- post-#1700 owner diagnostic driver run `35870131475` passed and dispatched collector run `35870142951`, which also passed and advanced the control head to ledger `5,534,932`;
+- D3 implementation/qualification remains complete; sustained natural schedule cadence is an operational reliability observation and must not be inferred from a single scheduled run.
 
 ## D4 — Compaction and bounded indexes — ACTIVE
 

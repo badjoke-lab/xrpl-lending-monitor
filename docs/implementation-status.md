@@ -153,12 +153,15 @@ Five-minute activation is also merged:
 - diagnostic driver run `35822507664`: PASS;
 - dispatched collector run `35822514298`: PASS.
 
-The final D3 exit proof is now complete:
+Schedule delivery has one genuine end-to-end success but required further hardening:
 
 - genuine schedule driver run `35847201599` ran with `event=schedule` and passed;
 - that driver dispatched bounded collector run `35847211102`, which passed every collection, publication, readback, channel-update, linked-chain verification, and evidence step;
-- the successful scheduled collector advanced the candidate control head to ledger `5,534,676`, hash `178264A1B34857E9DDAD07C4FEDD73247487FF2A0B812B48EC57F9C6EEEB0579`;
-- resulting channel SHA-256: `5124bc0e69cb235887fc5a477987e904f9417be724132a4ac3511a29fa727164`.
+- that scheduled collector advanced the candidate control head to ledger `5,534,676`, hash `178264A1B34857E9DDAD07C4FEDD73247487FF2A0B812B48EC57F9C6EEEB0579`, with channel SHA-256 `5124bc0e69cb235887fc5a477987e904f9417be724132a4ac3511a29fa727164`;
+- multi-hour observation then showed that GitHub did not deliver the five-minute cron consistently enough to treat that single success as sustained cadence evidence;
+- PR #1700 therefore reduced scheduler dependence to two half-hour cron deliveries per hour and performs six five-minute dispatch slots inside each driver run, skipping a slot when a collector is already active;
+- post-#1700 diagnostic driver run `35870131475` passed, dispatched collector run `35870142951`, and that collector passed end-to-end, advancing the live control head to ledger `5,534,932`;
+- D3 collector/chain/publication/qualification implementation remains complete; sustained natural scheduler cadence remains under operational observation rather than being declared proven from one event.
 
 Bounded Release sharding uses deterministic six-hour UTC shard tags, a 720-asset operational ceiling below GitHub's 1,000-asset Release ceiling, and `-rN` early rotation when projected artifact count would exceed the shard limit.
 
