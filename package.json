@@ -100,7 +100,9 @@
     "build:db-less-live-publisher": "vite build --config vite.db-less-live-publisher.config.ts",
     "db-less-live-publisher:local": "pnpm build:db-less-live-publisher && node .db-less-live-publisher-build/publish-db-less-live-release.mjs --local",
     "build:db-less-live-chain-verifier": "vite build --config vite.db-less-live-chain-verifier.config.ts",
-    "db-less-live-chain-verifier:local": "pnpm build:db-less-live-chain-verifier && node .db-less-live-chain-verifier-build/verify-db-less-live-release-chain.mjs --local"
+    "db-less-live-chain-verifier:local": "pnpm build:db-less-live-chain-verifier && node .db-less-live-chain-verifier-build/verify-db-less-live-release-chain.mjs --local",
+    "build:db-less-current-overlay-checkpoint": "vite build --config vite.db-less-current-overlay-checkpoint.config.ts",
+    "db-less-current-overlay-checkpoint:local": "pnpm build:db-less-current-overlay-checkpoint && node .db-less-current-overlay-checkpoint-build/build-db-less-current-overlay-checkpoint.mjs --local"
   },
   "dependencies": {
     "@xrpl-commons/ripple-binary-codec": "2.7.0",

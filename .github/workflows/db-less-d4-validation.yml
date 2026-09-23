@@ -4,6 +4,11 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - 'package.json'
+      - 'tsconfig.node.json'
+      - 'scripts/build-db-less-current-overlay-checkpoint.ts'
+      - 'vite.db-less-current-overlay-checkpoint.config.ts'
+      - '.github/workflows/db-less-d4-current-overlay-rehearsal.yml'
       - 'src/shared/db-less/current-overlay-checkpoint.ts'
       - 'src/shared/db-less/current-overlay-checkpoint.test.ts'
       - 'src/shared/db-less/current-overlay-generation-reader.ts'
@@ -33,12 +38,20 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      - name: Build D4 Current overlay rehearsal CLI
+        run: pnpm build:db-less-current-overlay-checkpoint
+
       - name: Typecheck worker/shared graph
         run: pnpm exec tsc -p tsconfig.worker.json --noEmit
+
+      - name: Typecheck Node build configs
+        run: pnpm exec tsc -p tsconfig.node.json --noEmit
 
       - name: Lint D4 surface
         run: >-
           pnpm exec eslint
+          scripts/build-db-less-current-overlay-checkpoint.ts
+          vite.db-less-current-overlay-checkpoint.config.ts
           src/shared/db-less/current-overlay-checkpoint.ts
           src/shared/db-less/current-overlay-checkpoint.test.ts
           src/shared/db-less/current-overlay-generation-reader.test.ts
