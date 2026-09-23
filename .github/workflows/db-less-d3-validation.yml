@@ -12,6 +12,7 @@ on:
       - 'vite.db-less-initial-channel.config.ts'
       - '.github/workflows/db-less-d3-live-rehearsal.yml'
       - '.github/workflows/db-less-d3-live-once.yml'
+      - '.github/workflows/db-less-d3-live-schedule.yml'
       - '.github/workflows/db-less-d3-live-candidate-init.yml'
       - '.github/workflows/db-less-d3-live-qualification.yml'
       - 'vite.db-less-live-publisher.config.ts'
