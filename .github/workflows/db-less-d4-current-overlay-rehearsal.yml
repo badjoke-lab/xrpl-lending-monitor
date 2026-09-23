@@ -1,0 +1,48 @@
+name: DB-less D4 Current overlay rehearsal
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+
+jobs:
+  rehearse:
+    if: >-
+      github.event.issue.number == 1673 &&
+      github.event.comment.user.login == github.repository_owner &&
+      github.event.comment.body == '/d4-rehearse-current-overlay'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - run: corepack enable
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build D4 Current overlay rehearsal CLI
+        run: pnpm build:db-less-current-overlay-checkpoint
+
+      - name: Build verified Current overlay checkpoint locally
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          node .db-less-current-overlay-checkpoint-build/build-db-less-current-overlay-checkpoint.mjs
+          --local
+          --repository "$GITHUB_REPOSITORY"
+          --channel-release-tag db-less-live-channel-candidate-v1
+          --max-generations 2048
+          --bucket-count 256
+          --max-records-per-shard 50000
+          --max-bytes-per-shard 2000000
+          --output-dir .local/d4-current-overlay
+
+      - name: Upload rehearsal evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: db-less-d4-current-overlay-rehearsal
+          path: .local/d4-current-overlay
+          if-no-files-found: error
+          retention-days: 14
