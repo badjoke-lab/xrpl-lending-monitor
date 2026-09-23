@@ -17,6 +17,8 @@ on:
       - 'src/shared/db-less/current-overlay-chain-compactor.test.ts'
       - 'src/shared/db-less/current-overlay-reader.ts'
       - 'src/shared/db-less/current-overlay-reader.test.ts'
+      - 'src/shared/db-less/github-release-publication.ts'
+      - 'src/shared/db-less/github-release-publication.test.ts'
       - '.github/workflows/db-less-d4-validation.yml'
 
 permissions:
@@ -64,6 +66,8 @@ jobs:
           src/shared/db-less/current-overlay-generation-reader.test.ts
           src/shared/db-less/current-overlay-reader.ts
           src/shared/db-less/current-overlay-reader.test.ts
+          src/shared/db-less/github-release-publication.ts
+          src/shared/db-less/github-release-publication.test.ts
 
       - name: D4 focused tests
         run: >-
@@ -72,3 +76,4 @@ jobs:
           src/shared/db-less/current-overlay-generation-reader.test.ts
           src/shared/db-less/current-overlay-chain-compactor.test.ts
           src/shared/db-less/current-overlay-reader.test.ts
+          src/shared/db-less/github-release-publication.test.ts
