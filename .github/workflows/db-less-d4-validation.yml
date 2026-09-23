@@ -8,6 +8,8 @@ on:
       - 'src/shared/db-less/current-overlay-checkpoint.test.ts'
       - 'src/shared/db-less/current-overlay-generation-reader.ts'
       - 'src/shared/db-less/current-overlay-generation-reader.test.ts'
+      - 'src/shared/db-less/current-overlay-chain-compactor.ts'
+      - 'src/shared/db-less/current-overlay-chain-compactor.test.ts'
       - '.github/workflows/db-less-d4-validation.yml'
 
 permissions:
@@ -40,6 +42,9 @@ jobs:
           src/shared/db-less/current-overlay-checkpoint.ts
           src/shared/db-less/current-overlay-checkpoint.test.ts
           src/shared/db-less/current-overlay-generation-reader.test.ts
+          src/shared/db-less/current-overlay-chain-compactor.test.ts
+          src/shared/db-less/current-overlay-chain-compactor.ts
+          src/shared/db-less/current-overlay-chain-compactor.test.ts
           src/shared/db-less/current-overlay-generation-reader.ts
           src/shared/db-less/current-overlay-generation-reader.test.ts
 
