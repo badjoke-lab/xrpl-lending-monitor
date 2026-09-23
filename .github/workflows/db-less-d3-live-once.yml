@@ -2,6 +2,8 @@ name: DB-less D3 live one-shot
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '*/5 * * * *'
   issue_comment:
     types: [created]
 
@@ -13,6 +15,7 @@ jobs:
   collect-and-publish:
     if: >-
       github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'schedule' ||
       (
         github.event.issue.number == 1673 &&
         github.event.comment.user.login == github.repository_owner &&
@@ -63,6 +66,12 @@ jobs:
             test "$location_provider" = "github-release"
             test "$location_repo" = "$GITHUB_REPOSITORY"
             test -n "$location_tag"
+          fi
+
+          # The scheduled collector must never become the first live mutation.
+          # A successful owner-gated one-shot must already have installed a live pointer.
+          if [ "$GITHUB_EVENT_NAME" = "schedule" ]; then
+            test "$(jq -r '.live != null' .local/d3-live-input/channel.json)" = "true"
           fi
 
       - name: Fetch previous live chain when present
