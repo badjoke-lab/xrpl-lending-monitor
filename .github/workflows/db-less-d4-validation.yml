@@ -19,6 +19,8 @@ on:
       - 'src/shared/db-less/current-overlay-reader.test.ts'
       - 'src/shared/db-less/current-overlay-equivalence.ts'
       - 'src/shared/db-less/current-overlay-equivalence.test.ts'
+      - 'src/shared/db-less/current-overlay-retention.ts'
+      - 'src/shared/db-less/current-overlay-retention.test.ts'
       - 'src/shared/db-less/current-composite-reader.ts'
       - 'src/shared/db-less/current-composite-reader.test.ts'
       - 'src/shared/db-less/github-release-publication.ts'
@@ -72,6 +74,8 @@ jobs:
           src/shared/db-less/current-overlay-reader.test.ts
           src/shared/db-less/current-overlay-equivalence.ts
           src/shared/db-less/current-overlay-equivalence.test.ts
+          src/shared/db-less/current-overlay-retention.ts
+          src/shared/db-less/current-overlay-retention.test.ts
           src/shared/db-less/current-composite-reader.ts
           src/shared/db-less/current-composite-reader.test.ts
           src/shared/db-less/github-release-publication.ts
@@ -85,5 +89,6 @@ jobs:
           src/shared/db-less/current-overlay-chain-compactor.test.ts
           src/shared/db-less/current-overlay-reader.test.ts
           src/shared/db-less/current-overlay-equivalence.test.ts
+          src/shared/db-less/current-overlay-retention.test.ts
           src/shared/db-less/current-composite-reader.test.ts
           src/shared/db-less/github-release-publication.test.ts
