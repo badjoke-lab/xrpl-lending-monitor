@@ -84,6 +84,7 @@ implements DbLessImmutableArtifactWriter, DbLessChannelPublisher {
   readonly #fetcher: GitHubFetchLike
   readonly #maxAssets: number
   readonly #uploadRetryDelaysMs: readonly number[]
+  readonly #downloadRetryDelaysMs: readonly number[]
   readonly #uploadPacingMs: number
   readonly #sleep: (ms: number) => Promise<void>
   #releaseCache: GitHubRelease | null = null
@@ -96,6 +97,7 @@ implements DbLessImmutableArtifactWriter, DbLessChannelPublisher {
     fetcher?: GitHubFetchLike
     maxAssets?: number
     uploadRetryDelaysMs?: readonly number[]
+    downloadRetryDelaysMs?: readonly number[]
     uploadPacingMs?: number
     sleep?: (ms: number) => Promise<void>
   }) {
@@ -116,6 +118,12 @@ implements DbLessImmutableArtifactWriter, DbLessChannelPublisher {
     ) {
       throw new Error('uploadRetryDelaysMs must contain non-negative safe integers')
     }
+    const downloadRetryDelaysMs = options.downloadRetryDelaysMs ?? [2_000, 5_000, 15_000, 30_000]
+    if (
+      downloadRetryDelaysMs.some((delay) => !Number.isSafeInteger(delay) || delay < 0)
+    ) {
+      throw new Error('downloadRetryDelaysMs must contain non-negative safe integers')
+    }
     const uploadPacingMs = options.uploadPacingMs ?? 1_000
     if (!Number.isSafeInteger(uploadPacingMs) || uploadPacingMs < 0) {
       throw new Error('uploadPacingMs must be a non-negative safe integer')
@@ -124,6 +132,7 @@ implements DbLessImmutableArtifactWriter, DbLessChannelPublisher {
     this.#fetcher = options.fetcher ?? ((input, init) => fetch(input, init))
     this.#maxAssets = maxAssets
     this.#uploadRetryDelaysMs = [...uploadRetryDelaysMs]
+    this.#downloadRetryDelaysMs = [...downloadRetryDelaysMs]
     this.#uploadPacingMs = uploadPacingMs
     this.#sleep = options.sleep ?? defaultSleep
   }
@@ -204,21 +213,32 @@ implements DbLessImmutableArtifactWriter, DbLessChannelPublisher {
   }
 
   async #downloadAsset(asset: GitHubReleaseAsset): Promise<Uint8Array> {
-    const response = await this.#fetcher(
-      `https://api.github.com/repos/${this.#repository}/releases/assets/${asset.id}`,
-      {
-        headers: apiHeaders(this.#token, 'application/octet-stream'),
-        redirect: 'follow',
-      },
-    )
-    if (!response.ok) {
-      throw new Error(`GitHub Release asset download failed with HTTP ${response.status}`)
+    let attempt = 0
+    while (true) {
+      const response = await this.#fetcher(
+        `https://api.github.com/repos/${this.#repository}/releases/assets/${asset.id}`,
+        {
+          headers: apiHeaders(this.#token, 'application/octet-stream'),
+          redirect: 'follow',
+        },
+      )
+      if (response.ok) {
+        const bytes = new Uint8Array(await response.arrayBuffer())
+        if (bytes.byteLength !== asset.size) {
+          throw new Error(`GitHub Release asset byte mismatch for ${asset.name}`)
+        }
+        return bytes
+      }
+
+      if (attempt >= this.#downloadRetryDelaysMs.length) {
+        throw new Error(
+          `GitHub Release asset download failed after bounded retries with HTTP ${response.status}`,
+        )
+      }
+      const delay = this.#downloadRetryDelaysMs[attempt]!
+      attempt += 1
+      if (delay > 0) await this.#sleep(delay)
     }
-    const bytes = new Uint8Array(await response.arrayBuffer())
-    if (bytes.byteLength !== asset.size) {
-      throw new Error(`GitHub Release asset byte mismatch for ${asset.name}`)
-    }
-    return bytes
   }
 
   async readImmutable(key: string): Promise<Uint8Array | null> {
