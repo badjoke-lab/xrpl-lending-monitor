@@ -1,0 +1,33 @@
+name: DB-less D3 five-minute schedule driver
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch-live:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      CHANNEL_RELEASE_TAG: db-less-live-channel-candidate-v1
+    steps:
+      - name: Verify candidate channel is initialized
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$CHANNEL_RELEASE_TAG")"
+          test "$(jq -r '.draft' <<<"$release_json")" = "false"
+          test "$(jq -r '.prerelease' <<<"$release_json")" = "true"
+          test "$(jq -r '.body | fromjson | .live != null' <<<"$release_json")" = "true"
+
+      - name: Dispatch bounded live collector
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh workflow run db-less-d3-live-once.yml --repo "$GITHUB_REPOSITORY" --ref main
