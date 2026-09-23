@@ -3,6 +3,7 @@ import { verifyDbLessChannel, type DbLessChannelV1, type DbLessLivePointerV1 } f
 import {
   buildDbLessCurrentOverlayCheckpoint,
   type DbLessCurrentOverlayCheckpointV1,
+  type DbLessCurrentOverlayGenerationV1,
 } from './current-overlay-checkpoint'
 import {
   readDbLessCurrentOverlayGeneration,
@@ -15,6 +16,7 @@ import {
 import {
   verifyDbLessLiveChainFromChannel,
   type DbLessLiveChainArtifactReader,
+  type DbLessLiveChainVerificationSummary,
 } from './live-chain-reader'
 
 function sameLocation(
@@ -58,15 +60,17 @@ async function readVerifiedChainManifest(options: {
   return manifest
 }
 
-export async function buildDbLessCurrentOverlayCheckpointFromChannel(options: {
+export interface DbLessCurrentOverlaySourceV1 {
+  verification: DbLessLiveChainVerificationSummary
+  generations: DbLessCurrentOverlayGenerationV1[]
+}
+
+export async function readDbLessCurrentOverlaySourceFromChannel(options: {
   channel: DbLessChannelV1
   readChainArtifact: DbLessLiveChainArtifactReader
   readLocatedArtifact: DbLessLocatedArtifactReader
   maxGenerations?: number
-  bucketCount?: number
-  maxRecordsPerShard?: number
-  maxBytesPerShard?: number
-}): Promise<DbLessCurrentOverlayCheckpointV1> {
+}): Promise<DbLessCurrentOverlaySourceV1> {
   await verifyDbLessChannel(options.channel)
   if (options.channel.live === null) {
     throw new Error('D4 Current overlay compaction requires a live chain')
@@ -99,7 +103,7 @@ export async function buildDbLessCurrentOverlayCheckpointFromChannel(options: {
   }
 
   const manifests = reverse.reverse()
-  const generations = []
+  const generations: DbLessCurrentOverlayGenerationV1[] = []
   for (const manifest of manifests) {
     generations.push(await readDbLessCurrentOverlayGeneration({
       delta: manifest.delta,
@@ -107,12 +111,26 @@ export async function buildDbLessCurrentOverlayCheckpointFromChannel(options: {
     }))
   }
 
+  return { verification, generations }
+}
+
+export async function buildDbLessCurrentOverlayCheckpointFromChannel(options: {
+  channel: DbLessChannelV1
+  readChainArtifact: DbLessLiveChainArtifactReader
+  readLocatedArtifact: DbLessLocatedArtifactReader
+  maxGenerations?: number
+  bucketCount?: number
+  maxRecordsPerShard?: number
+  maxBytesPerShard?: number
+}): Promise<DbLessCurrentOverlayCheckpointV1> {
+  const source = await readDbLessCurrentOverlaySourceFromChannel(options)
+
   return buildDbLessCurrentOverlayCheckpoint({
     epochId: options.channel.epochId,
     baseIdentity: options.channel.base.generationId,
     throughLedgerIndex: options.channel.lastCommittedLedgerIndex,
     throughLedgerHash: options.channel.lastCommittedLedgerHash,
-    generations,
+    generations: source.generations,
     bucketCount: options.bucketCount,
     maxRecordsPerShard: options.maxRecordsPerShard,
     maxBytesPerShard: options.maxBytesPerShard,

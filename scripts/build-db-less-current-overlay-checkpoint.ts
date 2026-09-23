@@ -5,7 +5,10 @@ import type {
   DbLessArtifactLocationV1,
   DbLessLivePointerV1,
 } from '../src/shared/db-less/channel'
-import { buildDbLessCurrentOverlayCheckpointFromChannel } from '../src/shared/db-less/current-overlay-chain-compactor'
+import { readDbLessCurrentOverlaySourceFromChannel } from '../src/shared/db-less/current-overlay-chain-compactor'
+import { buildDbLessCurrentOverlayCheckpoint } from '../src/shared/db-less/current-overlay-checkpoint'
+import { verifyDbLessCurrentOverlayEquivalence } from '../src/shared/db-less/current-overlay-equivalence'
+import { DbLessCurrentOverlayReader } from '../src/shared/db-less/current-overlay-reader'
 import { GitHubReleaseDbLessStore } from '../src/shared/db-less/github-release-publication'
 import { canonicalJson } from '../src/shared/current-state/canonical-json'
 
@@ -79,16 +82,36 @@ async function main(): Promise<void> {
     return store
   }
 
-  const checkpoint = await buildDbLessCurrentOverlayCheckpointFromChannel({
+  const source = await readDbLessCurrentOverlaySourceFromChannel({
     channel: channelRead.channel,
     maxGenerations,
-    bucketCount,
-    maxRecordsPerShard,
-    maxBytesPerShard,
     readChainArtifact: async (pointer: DbLessLivePointerV1) =>
       storeFor(pointer.location).readImmutable(pointer.manifestKey),
     readLocatedArtifact: async (location, key) =>
       storeFor(location).readImmutable(key),
+  })
+
+  const checkpoint = await buildDbLessCurrentOverlayCheckpoint({
+    epochId: channelRead.channel.epochId,
+    baseIdentity: channelRead.channel.base.generationId,
+    throughLedgerIndex: channelRead.channel.lastCommittedLedgerIndex,
+    throughLedgerHash: channelRead.channel.lastCommittedLedgerHash,
+    generations: source.generations,
+    bucketCount,
+    maxRecordsPerShard,
+    maxBytesPerShard,
+  })
+
+  const localArtifacts = new Map(
+    checkpoint.shardArtifacts.map((artifact) => [artifact.key, artifact.bytes] as const),
+  )
+  const equivalence = await verifyDbLessCurrentOverlayEquivalence({
+    generations: source.generations,
+    reader: new DbLessCurrentOverlayReader({
+      manifest: checkpoint.manifest,
+      readArtifact: async (key) => localArtifacts.get(key) ?? null,
+      maxShardBytes: maxBytesPerShard,
+    }),
   })
 
   await mkdir(outputDir, { recursive: true })
@@ -116,6 +139,8 @@ async function main(): Promise<void> {
     manifestKey: checkpoint.manifestArtifact.key,
     manifestSha256: checkpoint.manifestArtifact.sha256,
     storesRead: stores.size,
+    verifiedGenerationCount: source.verification.generationCount,
+    equivalence,
   }
   await writeFile(
     resolve(outputDir, 'rehearsal-summary.json'),
