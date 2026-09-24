@@ -101,6 +101,8 @@ Schedule-delivery evidence and operational hardening:
 - PR #1700 replaced direct five-minute cron dependence with a half-hour driver (`:17`, `:47`) that holds six bounded five-minute dispatch slots, while preserving the existing collector, channel, sharding, and qualification contracts;
 - post-#1700 owner diagnostic driver run `35870131475` passed and dispatched collector run `35870142951`, which also passed and advanced the control head to ledger `5,534,932`;
 - D3 implementation/qualification remains complete; sustained natural schedule cadence is an operational reliability observation and must not be inferred from a single scheduled run.
+- 2026-09-24 read-only qualification measured ledger `5,538,772 → 5,556,349` (lag `17,577`) after half-hour cron delivery again proved intermittent; shard bounds and full chain verification remained valid.
+- The driver is hardened to self-chain one successor `workflow_dispatch` after each six-slot batch, leaving cron `:17/:47` as bootstrap/fallback while preserving the bounded collector and single-writer contract.
 
 ## D4 — Compaction and bounded indexes — ACTIVE
 

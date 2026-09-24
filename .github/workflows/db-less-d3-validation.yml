@@ -82,6 +82,18 @@ jobs:
           src/collector/incremental/scan-validated-ledgers.ts
           src/collector/incremental/scan-validated-ledgers.test.ts
 
+      - name: Validate D3 schedule-driver topology
+        shell: bash
+        run: |
+          set -euo pipefail
+          driver=".github/workflows/db-less-d3-live-schedule.yml"
+          grep -Fq "cron: '17,47 * * * *'" "$driver"
+          grep -Fq "continue_chain:" "$driver"
+          grep -Fq "for slot in 1 2 3 4 5 6; do" "$driver"
+          grep -Fq "gh workflow run db-less-d3-live-once.yml" "$driver"
+          grep -Fq "gh workflow run db-less-d3-live-schedule.yml" "$driver"
+          grep -Fq -- "-f continue_chain=true" "$driver"
+
       - name: D3 focused tests
         run: >-
           pnpm exec vitest run
