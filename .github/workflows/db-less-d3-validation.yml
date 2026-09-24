@@ -89,6 +89,7 @@ jobs:
           driver=".github/workflows/db-less-d3-live-schedule.yml"
           grep -Fq "cron: '17,47 * * * *'" "$driver"
           grep -Fq "continue_chain:" "$driver"
+          grep -Fq "/d3-schedule-chain-start" "$driver"
           grep -Fq "for slot in 1 2 3 4 5 6; do" "$driver"
           grep -Fq "gh workflow run db-less-d3-live-once.yml" "$driver"
           grep -Fq "gh workflow run db-less-d3-live-schedule.yml" "$driver"
