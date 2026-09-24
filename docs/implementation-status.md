@@ -164,6 +164,7 @@ Schedule delivery has one genuine end-to-end success but required further harden
 - D3 collector/chain/publication/qualification implementation remains complete; sustained natural scheduler cadence remains under operational observation rather than being declared proven from one event.
 - 2026-09-24 operational qualification found the control head at ledger `5,538,772` while the latest validated Devnet ledger was `5,556,349` (lag `17,577`) after the half-hour driver itself was not delivered consistently; active shard bounds and the full linked chain still passed.
 - The schedule driver is therefore hardened so real scheduled runs enter a six-slot batch and enqueue exactly one successor driver through `workflow_dispatch`; GitHub cron remains a bootstrap/fallback rather than the sole cadence source. Owner-only diagnostic runs remain single-dispatch.
+- Owner command `/d3-schedule-chain-start` is the explicit manual bootstrap/restart path for that self-sustaining driver chain; `/d3-schedule-driver-once` remains diagnostic-only.
 
 Bounded Release sharding uses deterministic six-hour UTC shard tags, a 720-asset operational ceiling below GitHub's 1,000-asset Release ceiling, and `-rN` early rotation when projected artifact count would exceed the shard limit.
 
