@@ -72,6 +72,12 @@ jobs:
             exit 0
           fi
 
+          gh workflow run db-less-d3-live-schedule.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f continue_chain=true
+          echo "Prequeued successor five-minute driver run."
+
           for slot in 1 2 3 4 5 6; do
             active="$(
               gh run list \
@@ -94,8 +100,3 @@ jobs:
             fi
           done
 
-          gh workflow run db-less-d3-live-schedule.yml \
-            --repo "$GITHUB_REPOSITORY" \
-            --ref main \
-            -f continue_chain=true
-          echo "Queued successor five-minute driver run."
