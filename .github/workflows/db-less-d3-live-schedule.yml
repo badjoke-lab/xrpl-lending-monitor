@@ -4,6 +4,12 @@ on:
   schedule:
     - cron: '17,47 * * * *'
   workflow_dispatch:
+    inputs:
+      continue_chain:
+        description: Continue the self-sustaining five-minute driver chain
+        required: false
+        default: false
+        type: boolean
   issue_comment:
     types: [created]
 
@@ -42,11 +48,21 @@ jobs:
 
       - name: Dispatch bounded live collector cadence
         shell: bash
+        env:
+          CONTINUE_CHAIN: ${{ github.event.inputs.continue_chain || 'false' }}
         run: |
           set -euo pipefail
 
-          if [ "$GITHUB_EVENT_NAME" != "schedule" ]; then
+          chain_mode=false
+          if [ "$GITHUB_EVENT_NAME" = "schedule" ]; then
+            chain_mode=true
+          elif [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ "$CONTINUE_CHAIN" = "true" ]; then
+            chain_mode=true
+          fi
+
+          if [ "$chain_mode" != "true" ]; then
             gh workflow run db-less-d3-live-once.yml --repo "$GITHUB_REPOSITORY" --ref main
+            echo "Dispatched one diagnostic live collector run."
             exit 0
           fi
 
@@ -71,3 +87,9 @@ jobs:
               sleep 300
             fi
           done
+
+          gh workflow run db-less-d3-live-schedule.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f continue_chain=true
+          echo "Queued successor five-minute driver run."
