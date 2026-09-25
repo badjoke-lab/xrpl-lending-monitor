@@ -73,7 +73,7 @@ function assertSummary(summary: RehearsalSummary, repository: string): void {
   positiveInteger(summary.throughLedgerIndex, 'throughLedgerIndex')
   positiveInteger(summary.generationCount, 'generationCount')
   positiveInteger(summary.bucketCount, 'bucketCount')
-  positiveInteger(summary.shardCount, 'shardCount')
+  if (!Number.isSafeInteger(summary.shardCount) || summary.shardCount < 0) {\n    throw new Error('shardCount must be a non-negative safe integer')\n  }
   if (!Number.isSafeInteger(summary.entryCount) || summary.entryCount < 0) {
     throw new Error('entryCount must be a non-negative safe integer')
   }
