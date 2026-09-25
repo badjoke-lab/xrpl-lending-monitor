@@ -1,6 +1,6 @@
 # Implementation status
 
-Last updated: 2026-09-20
+Last updated: 2026-09-25
 
 ## Current decision
 
@@ -161,10 +161,14 @@ Schedule delivery has one genuine end-to-end success but required further harden
 - multi-hour observation then showed that GitHub did not deliver the five-minute cron consistently enough to treat that single success as sustained cadence evidence;
 - PR #1700 therefore reduced scheduler dependence to two half-hour cron deliveries per hour and performs six five-minute dispatch slots inside each driver run, skipping a slot when a collector is already active;
 - post-#1700 diagnostic driver run `35870131475` passed, dispatched collector run `35870142951`, and that collector passed end-to-end, advancing the live control head to ledger `5,534,932`;
-- D3 collector/chain/publication/qualification implementation remains complete; sustained natural scheduler cadence remains under operational observation rather than being declared proven from one event.
 - 2026-09-24 operational qualification found the control head at ledger `5,538,772` while the latest validated Devnet ledger was `5,556,349` (lag `17,577`) after the half-hour driver itself was not delivered consistently; active shard bounds and the full linked chain still passed.
 - The schedule driver is therefore hardened so real scheduled runs enter a six-slot batch and prequeue exactly one successor driver through `workflow_dispatch` before processing the batch; GitHub cron remains a bootstrap/fallback rather than the sole cadence source. Owner-only diagnostic runs remain single-dispatch.
 - Owner command `/d3-schedule-chain-start` is the explicit manual bootstrap/restart path for that self-sustaining driver chain; `/d3-schedule-driver-once` remains diagnostic-only.
+- A later 20-minute publication gap was traced to three consecutive collector failures, not to loss of the self-chained driver: runs `36082182694` and `36082557410` failed with `LatestValidatedLedgerHeadError`, and run `36082924751` failed with `XrplRpcError: ledgerNotFound`.
+- PR #1714 merged as `a2564945b988b8aa15b7dd8837fe59fc89ef9252`. It adds four bounded same-slot retries only for XRPL RPC preparation failures, alternates endpoint priority between attempts, and uses 5s/10s/15s backoff without relaxing continuity, publication, Release asset, or single-writer rules.
+- Post-#1714 natural cadence is now sustained in production-shaped operation: collector runs `36097185560` through `36148943212` cover 2026-09-25 05:06:44Z–14:40:09Z, with 114 executed collectors all succeeding and a maximum start-to-start interval of 314 seconds.
+- Latest observed run `36148943212` ended at ledger `5,596,916`, exactly matching its latest validated target, with `completeToLatest=true`; linked-head verification also passed.
+- Sustained five-minute cadence is therefore PASS at this evidence point. The separate claim that same-slot RPC retry can rescue a real transient remains unproven until an actual retry event is observed or deliberately exercised.
 
 Bounded Release sharding uses deterministic six-hour UTC shard tags, a 720-asset operational ceiling below GitHub's 1,000-asset Release ceiling, and `-rN` early rotation when projected artifact count would exceed the shard limit.
 
