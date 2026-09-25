@@ -102,7 +102,7 @@ jobs:
           collector=".github/workflows/db-less-d3-live-once.yml"
           grep -Fq "for rpc_attempt in 1 2 3 4; do" "$collector"
           grep -Fq "LatestValidatedLedgerHeadError|XrplRpcError:" "$collector"
-          grep -Fq "retry_delay=$((5 * rpc_attempt))" "$collector"
+          grep -Fq 'retry_delay=$((5 * rpc_attempt))' "$collector"
           grep -Fq 'endpoints=(' "$collector"
           grep -Fq 'reversed endpoint priority' "$collector"
           grep -Fq 'XRPL RPC preparation still failed after 4 bounded attempts.' "$collector"
