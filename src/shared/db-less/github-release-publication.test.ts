@@ -259,6 +259,24 @@ describe('GitHub Release DB-less store', () => {
     expect(github.assetDownloadCount).toBe(3)
   })
 
+  it('caches downloaded immutable Release bytes for repeated reads', async () => {
+    const current = await channel()
+    const github = new FakeGitHub(`${canonicalJson(current)}\n`)
+    const store = new GitHubReleaseDbLessStore({
+      repository: REPO,
+      releaseTag: TAG,
+      token: 'token',
+      fetcher: github.fetch,
+      uploadPacingMs: 0,
+    })
+    const value = await artifact('live-v1-101-101-download-cache.json')
+
+    await store.writeImmutable(value)
+    await expect(store.readImmutable(value.key)).resolves.toEqual(value.bytes)
+    await expect(store.readImmutable(value.key)).resolves.toEqual(value.bytes)
+    expect(github.assetDownloadCount).toBe(1)
+  })
+
   it('retries transient Release asset download failures with a bounded policy', async () => {
     const current = await channel()
     const github = new FakeGitHub(`${canonicalJson(current)}\n`)
