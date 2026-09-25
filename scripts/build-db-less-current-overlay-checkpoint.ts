@@ -84,6 +84,7 @@ async function main(): Promise<void> {
     return store
   }
 
+  process.stdout.write(`D4 initial compaction: source channel head ${channelRead.channel.lastCommittedLedgerIndex}\n`)
   const source = await readDbLessCurrentOverlaySourceFromChannel({
     channel: channelRead.channel,
     maxGenerations,
@@ -91,8 +92,16 @@ async function main(): Promise<void> {
       storeFor(pointer.location).readImmutable(pointer.manifestKey),
     readLocatedArtifact: async (location, key) =>
       storeFor(location).readImmutable(key),
+    onProgress: (progress) => {
+      const total = progress.total === null ? '?' : String(progress.total)
+      process.stdout.write(
+        `D4 initial compaction: ${progress.phase} ${progress.completed}/${total}\n`,
+      )
+    },
   })
+  process.stdout.write(`D4 initial compaction: source read complete (${source.generations.length} generations)\n`)
 
+  process.stdout.write('D4 initial compaction: building checkpoint\n')
   const checkpoint = await buildDbLessCurrentOverlayCheckpoint({
     epochId: channelRead.channel.epochId,
     baseIdentity: channelRead.channel.base.generationId,
@@ -107,6 +116,7 @@ async function main(): Promise<void> {
   const localArtifacts = new Map(
     checkpoint.shardArtifacts.map((artifact) => [artifact.key, artifact.bytes] as const),
   )
+  process.stdout.write('D4 initial compaction: verifying equivalence\n')
   const equivalence = await verifyDbLessCurrentOverlayEquivalence({
     generations: source.generations,
     reader: new DbLessCurrentOverlayReader({
