@@ -7,8 +7,11 @@ on:
       - 'package.json'
       - 'tsconfig.node.json'
       - 'scripts/build-db-less-current-overlay-checkpoint.ts'
+      - 'scripts/publish-db-less-current-overlay-checkpoint.ts'
       - 'vite.db-less-current-overlay-checkpoint.config.ts'
+      - 'vite.db-less-current-overlay-publisher.config.ts'
       - '.github/workflows/db-less-d4-current-overlay-rehearsal.yml'
+      - '.github/workflows/db-less-d4-current-overlay-activate.yml'
       - 'src/shared/db-less/current-overlay-checkpoint.ts'
       - 'src/shared/db-less/current-overlay-checkpoint.test.ts'
       - 'src/shared/db-less/current-overlay-generation-reader.ts'
@@ -23,6 +26,8 @@ on:
       - 'src/shared/db-less/current-overlay-retention.test.ts'
       - 'src/shared/db-less/current-overlay-channel.ts'
       - 'src/shared/db-less/current-overlay-channel.test.ts'
+      - 'src/shared/db-less/current-overlay-channel-github-release.ts'
+      - 'src/shared/db-less/current-overlay-channel-github-release.test.ts'
       - 'src/shared/db-less/current-composite-reader.ts'
       - 'src/shared/db-less/current-composite-reader.test.ts'
       - 'src/shared/db-less/github-release-publication.ts'
@@ -50,8 +55,10 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - name: Build D4 Current overlay rehearsal CLI
-        run: pnpm build:db-less-current-overlay-checkpoint
+      - name: Build D4 Current overlay CLIs
+        run: |
+          pnpm build:db-less-current-overlay-checkpoint
+          pnpm build:db-less-current-overlay-publisher
 
       - name: Typecheck worker/shared graph
         run: pnpm exec tsc -p tsconfig.worker.json --noEmit
@@ -63,7 +70,9 @@ jobs:
         run: >-
           pnpm exec eslint
           scripts/build-db-less-current-overlay-checkpoint.ts
+          scripts/publish-db-less-current-overlay-checkpoint.ts
           vite.db-less-current-overlay-checkpoint.config.ts
+          vite.db-less-current-overlay-publisher.config.ts
           src/shared/db-less/current-overlay-checkpoint.ts
           src/shared/db-less/current-overlay-checkpoint.test.ts
           src/shared/db-less/current-overlay-generation-reader.test.ts
@@ -80,10 +89,24 @@ jobs:
           src/shared/db-less/current-overlay-retention.test.ts
           src/shared/db-less/current-overlay-channel.ts
           src/shared/db-less/current-overlay-channel.test.ts
+          src/shared/db-less/current-overlay-channel-github-release.ts
+          src/shared/db-less/current-overlay-channel-github-release.test.ts
           src/shared/db-less/current-composite-reader.ts
           src/shared/db-less/current-composite-reader.test.ts
           src/shared/db-less/github-release-publication.ts
           src/shared/db-less/github-release-publication.test.ts
+
+      - name: Validate D4 activation topology
+        shell: bash
+        run: |
+          set -euo pipefail
+          workflow=".github/workflows/db-less-d4-current-overlay-activate.yml"
+          grep -Fq "/d4-activate-current-overlay" "$workflow"
+          grep -Fq "group: db-less-d4-current-overlay-activation" "$workflow"
+          grep -Fq "pnpm build:db-less-current-overlay-publisher" "$workflow"
+          grep -Fq "db-less-current-overlay-v1-$through" "$workflow"
+          grep -Fq "db-less-current-overlay-channel-v1" "$workflow"
+          grep -Fq "Publish immutable checkpoint then activate D4 channel" "$workflow"
 
       - name: D4 focused tests
         run: >-
@@ -95,5 +118,6 @@ jobs:
           src/shared/db-less/current-overlay-equivalence.test.ts
           src/shared/db-less/current-overlay-retention.test.ts
           src/shared/db-less/current-overlay-channel.test.ts
+          src/shared/db-less/current-overlay-channel-github-release.test.ts
           src/shared/db-less/current-composite-reader.test.ts
           src/shared/db-less/github-release-publication.test.ts
