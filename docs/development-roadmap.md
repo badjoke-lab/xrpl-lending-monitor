@@ -100,9 +100,12 @@ Schedule-delivery evidence and operational hardening:
 - subsequent observation found that GitHub did not deliver the dedicated five-minute cron consistently enough to treat one successful scheduled event as sustained cadence proof;
 - PR #1700 replaced direct five-minute cron dependence with a half-hour driver (`:17`, `:47`) that holds six bounded five-minute dispatch slots, while preserving the existing collector, channel, sharding, and qualification contracts;
 - post-#1700 owner diagnostic driver run `35870131475` passed and dispatched collector run `35870142951`, which also passed and advanced the control head to ledger `5,534,932`;
-- D3 implementation/qualification remains complete; sustained natural schedule cadence is an operational reliability observation and must not be inferred from a single scheduled run.
 - 2026-09-24 read-only qualification measured ledger `5,538,772 → 5,556,349` (lag `17,577`) after half-hour cron delivery again proved intermittent; shard bounds and full chain verification remained valid.
 - The driver is hardened to self-chain one successor `workflow_dispatch` after each six-slot batch, leaving cron `:17/:47` as bootstrap/fallback while preserving the bounded collector and single-writer contract.
+- PR #1714 merged as `a2564945b988b8aa15b7dd8837fe59fc89ef9252` after three consecutive scheduled collectors failed on transient Devnet RPC reads; D3 now retries only XRPL RPC preparation failures inside the same collector slot, with four bounded attempts, alternating endpoint priority, and bounded 5s/10s/15s backoff while non-RPC/integrity failures remain fail-closed.
+- Sustained five-minute cadence is now demonstrated after that hardening: natural collector runs `36097185560` through `36148943212` cover 2026-09-25 05:06:44Z–14:40:09Z, with 114 executed collectors all succeeding and a maximum start-to-start interval of 314 seconds.
+- The latest observed collector `36148943212` advanced the verified control head from ledger `5,596,828` to `5,596,916`, matched the latest validated ledger, and reported `completeToLatest=true`.
+- No claim is made yet that the new same-slot RPC retry path has recovered a real production transient; the sustained-cadence PASS is based on uninterrupted natural execution, not on an injected or observed retry event.
 
 ## D4 — Compaction and bounded indexes — ACTIVE
 
