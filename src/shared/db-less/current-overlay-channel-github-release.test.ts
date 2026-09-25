@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 
-import {\n  buildDbLessCurrentOverlayChannel,\n  encodeDbLessCurrentOverlayChannel,\n} from './current-overlay-channel'
+import {
+  buildDbLessCurrentOverlayChannel,
+  encodeDbLessCurrentOverlayChannel,
+} from './current-overlay-channel'
 import {
   GitHubReleaseCurrentOverlayChannelStore,
   type CurrentOverlayChannelFetchLike,
@@ -11,7 +14,10 @@ const TAG = 'db-less-current-overlay-channel-v1'
 const HASH = 'A'.repeat(64)
 const SHA = 'a'.repeat(64)
 
-async function channel(throughLedgerIndex = 100, updatedAt = '2026-09-25T00:00:00.000Z') {
+async function channel(
+  throughLedgerIndex = 100,
+  updatedAt = '2026-09-25T00:00:00.000Z',
+) {
   return buildDbLessCurrentOverlayChannel({
     schemaVersion: 1,
     network: 'devnet',
@@ -36,6 +42,12 @@ async function channel(throughLedgerIndex = 100, updatedAt = '2026-09-25T00:00:0
     },
     updatedAt,
   })
+}
+
+function canonicalBody(
+  value: Awaited<ReturnType<typeof channel>>,
+): string {
+  return new TextDecoder().decode(encodeDbLessCurrentOverlayChannel(value))
 }
 
 class FakeGitHub {
@@ -122,7 +134,7 @@ describe('D4 Current overlay GitHub Release channel store', () => {
 
   it('rejects a stale expected channel revision', async () => {
     const current = await channel()
-    const github = new FakeGitHub(`${JSON.stringify(current)}\n`)
+    const github = new FakeGitHub(canonicalBody(current))
     const store = new GitHubReleaseCurrentOverlayChannelStore({
       repository: REPO,
       releaseTag: TAG,
@@ -141,14 +153,17 @@ describe('D4 Current overlay GitHub Release channel store', () => {
 
   it('rejects rollback or replacement at the same through ledger', async () => {
     const current = await channel(101)
-    const github = new FakeGitHub(`${JSON.stringify(current)}\n`)
+    const github = new FakeGitHub(canonicalBody(current))
     const store = new GitHubReleaseCurrentOverlayChannelStore({
       repository: REPO,
       releaseTag: TAG,
       token: 'token',
       fetcher: github.fetch,
     })
-    const sameLedgerDifferentChannel = await channel(101, '2026-09-25T00:10:00.000Z')
+    const sameLedgerDifferentChannel = await channel(
+      101,
+      '2026-09-25T00:10:00.000Z',
+    )
 
     await expect(store.publish({
       channel: sameLedgerDifferentChannel,
@@ -160,7 +175,7 @@ describe('D4 Current overlay GitHub Release channel store', () => {
 
   it('returns idempotently when the desired canonical channel is already active', async () => {
     const current = await channel(101)
-    const github = new FakeGitHub(`${JSON.stringify(current)}\n`)
+    const github = new FakeGitHub(canonicalBody(current))
     const store = new GitHubReleaseCurrentOverlayChannelStore({
       repository: REPO,
       releaseTag: TAG,
