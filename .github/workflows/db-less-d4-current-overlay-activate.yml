@@ -1,0 +1,127 @@
+name: DB-less D4 Current overlay activation
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  activate:
+    if: >-
+      github.event.issue.number == 1673 &&
+      github.event.comment.user.login == github.repository_owner &&
+      github.event.comment.body == '/d4-activate-current-overlay'
+    concurrency:
+      group: db-less-d4-current-overlay-activation
+      cancel-in-progress: false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ github.token }}
+      D3_CHANNEL_RELEASE_TAG: db-less-live-channel-candidate-v1
+      D4_CHANNEL_RELEASE_TAG: db-less-current-overlay-channel-v1
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - run: corepack enable
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build D4 checkpoint and publisher CLIs
+        run: |
+          pnpm build:db-less-current-overlay-checkpoint
+          pnpm build:db-less-current-overlay-publisher
+
+      - name: Build and verify fresh Current overlay checkpoint locally
+        run: >-
+          node .db-less-current-overlay-checkpoint-build/build-db-less-current-overlay-checkpoint.mjs
+          --local
+          --repository "$GITHUB_REPOSITORY"
+          --channel-release-tag "$D3_CHANNEL_RELEASE_TAG"
+          --max-generations 2048
+          --bucket-count 256
+          --max-records-per-shard 50000
+          --max-bytes-per-shard 2000000
+          --output-dir .local/d4-current-overlay
+
+      - name: Resolve and verify D4 Releases
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          summary=.local/d4-current-overlay/rehearsal-summary.json
+          through="$(jq -r '.throughLedgerIndex' "$summary")"
+          test "$through" -gt 0
+          checkpoint_tag="db-less-current-overlay-v1-$through"
+          echo "CHECKPOINT_RELEASE_TAG=$checkpoint_tag" >> "$GITHUB_ENV"
+
+          if gh release view "$checkpoint_tag" >/dev/null 2>&1; then
+            release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$checkpoint_tag")"
+            test "$(jq -r '.draft' <<<"$release_json")" = "false"
+            test "$(jq -r '.prerelease' <<<"$release_json")" = "true"
+          else
+            gh release create "$checkpoint_tag"               --target "$GITHUB_SHA"               --prerelease               --latest=false               --title "D4 Current overlay checkpoint $through"               --notes "Immutable verified D4 Current overlay checkpoint. Activated only through the D4 channel Release."
+          fi
+
+          if gh release view "$D4_CHANNEL_RELEASE_TAG" >/dev/null 2>&1; then
+            channel_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$D4_CHANNEL_RELEASE_TAG")"
+            test "$(jq -r '.draft' <<<"$channel_json")" = "false"
+            test "$(jq -r '.prerelease' <<<"$channel_json")" = "true"
+          else
+            gh api               --method POST               "repos/$GITHUB_REPOSITORY/releases"               -f tag_name="$D4_CHANNEL_RELEASE_TAG"               -f target_commitish="$GITHUB_SHA"               -f name="D4 Current overlay active checkpoint channel"               -f body=''               -F draft=false               -F prerelease=true               -f make_latest=false               >/dev/null
+          fi
+
+      - name: Publish immutable checkpoint then activate D4 channel
+        shell: bash
+        run: |
+          set -euo pipefail
+          updated_at="$(node -e 'process.stdout.write(new Date().toISOString())')"
+          node .db-less-current-overlay-publisher-build/publish-db-less-current-overlay-checkpoint.mjs             --local             --repository "$GITHUB_REPOSITORY"             --input-dir .local/d4-current-overlay             --checkpoint-release-tag "$CHECKPOINT_RELEASE_TAG"             --channel-release-tag "$D4_CHANNEL_RELEASE_TAG"             --updated-at "$updated_at"             --output .local/d4-current-overlay/publication-summary.json
+
+      - name: Record D4 activation evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          summary=.local/d4-current-overlay/publication-summary.json
+          through="$(jq -r '.throughLedgerIndex' "$summary")"
+          manifest="$(jq -r '.manifestSha256' "$summary")"
+          state="$(jq -r '.stateSha256' "$summary")"
+          source_channel="$(jq -r '.sourceChannelSha256' "$summary")"
+          d4_channel="$(jq -r '.channelSha256' "$summary")"
+          uploaded="$(jq -r '.uploadedAssets' "$summary")"
+          reused="$(jq -r '.reusedAssets' "$summary")"
+
+          gh issue comment 1673 --body "$(cat <<EOF
+          D4 Current overlay activation PASS.
+
+          - run: $GITHUB_RUN_ID
+          - through ledger: `$through`
+          - checkpoint Release: `$CHECKPOINT_RELEASE_TAG`
+          - checkpoint manifest SHA-256: `$manifest`
+          - compacted state SHA-256: `$state`
+          - source D3 channel SHA-256: `$source_channel`
+          - D4 channel SHA-256: `$d4_channel`
+          - immutable assets uploaded/reused: `$uploaded / $reused`
+          - checkpoint assets were verified before channel activation
+
+          No D3 channel, D2 base, D1, Queue, or Supabase state was mutated.
+          EOF
+          )"
+
+      - name: Upload D4 activation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: db-less-d4-current-overlay-activation
+          path: |
+            .local/d4-current-overlay/rehearsal-summary.json
+            .local/d4-current-overlay/publication-summary.json
+            .local/d4-current-overlay/current-overlay-v1-*-manifest.json
+          if-no-files-found: warn
+          retention-days: 30
