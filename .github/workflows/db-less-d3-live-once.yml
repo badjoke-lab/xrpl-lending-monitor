@@ -101,43 +101,81 @@ jobs:
 
           selected=""
           for max_ledgers in "${limits[@]}"; do
-            rm -rf .local/d3-live
-            mkdir -p .local/d3-live
+            reduce_width=false
 
-            set +e
-            # shellcheck disable=SC2086
-            node .db-less-live-run-build/prepare-db-less-live-run.mjs \
-              --local \
-              --channel .local/d3-live-input/channel.json \
-              $PREVIOUS_CHAIN_ARG \
-              --source-revision "$GITHUB_SHA" \
-              --live-repository "$GITHUB_REPOSITORY" \
-              --live-release-prefix "$DATA_RELEASE_PREFIX" \
-              --shard-bucket-hours 6 \
-              --shard-max-assets 720 \
-              --shard-max-rotations 24 \
-              --endpoint https://devnet.honeycluster.io/ \
-              --endpoint https://s.devnet.rippletest.net:51234/ \
-              --timeout-ms 8000 \
-              --max-ledgers "$max_ledgers" \
-              --chunk-max-records "$chunk_max_records" \
-              --read-window-size 16 \
-              --output-dir .local/d3-live \
-              > .local/d3-live-prepare.stdout \
-              2> .local/d3-live-prepare.stderr
-            prepare_status=$?
-            set -e
+            for rpc_attempt in 1 2 3 4; do
+              rm -rf .local/d3-live
+              mkdir -p .local/d3-live
 
-            cat .local/d3-live-prepare.stdout
-            cat .local/d3-live-prepare.stderr >&2
+              if [ $((rpc_attempt % 2)) -eq 1 ]; then
+                endpoints=(
+                  --endpoint https://devnet.honeycluster.io/
+                  --endpoint https://s.devnet.rippletest.net:51234/
+                )
+              else
+                endpoints=(
+                  --endpoint https://s.devnet.rippletest.net:51234/
+                  --endpoint https://devnet.honeycluster.io/
+                )
+              fi
 
-            if [ "$prepare_status" -eq 0 ]; then
-              selected="$max_ledgers"
+              set +e
+              # shellcheck disable=SC2086
+              node .db-less-live-run-build/prepare-db-less-live-run.mjs \
+                --local \
+                --channel .local/d3-live-input/channel.json \
+                $PREVIOUS_CHAIN_ARG \
+                --source-revision "$GITHUB_SHA" \
+                --live-repository "$GITHUB_REPOSITORY" \
+                --live-release-prefix "$DATA_RELEASE_PREFIX" \
+                --shard-bucket-hours 6 \
+                --shard-max-assets 720 \
+                --shard-max-rotations 24 \
+                "${endpoints[@]}" \
+                --timeout-ms 8000 \
+                --max-ledgers "$max_ledgers" \
+                --chunk-max-records "$chunk_max_records" \
+                --read-window-size 16 \
+                --output-dir .local/d3-live \
+                > .local/d3-live-prepare.stdout \
+                2> .local/d3-live-prepare.stderr
+              prepare_status=$?
+              set -e
+
+              cat .local/d3-live-prepare.stdout
+              cat .local/d3-live-prepare.stderr >&2
+
+              if [ "$prepare_status" -eq 0 ]; then
+                selected="$max_ledgers"
+                break
+              fi
+
+              if grep -Fq "One live publication exceeds the configured Release shard asset ceiling" .local/d3-live-prepare.stderr; then
+                reduce_width=true
+                break
+              fi
+
+              if ! grep -Eq "LatestValidatedLedgerHeadError|XrplRpcError:" .local/d3-live-prepare.stderr; then
+                exit "$prepare_status"
+              fi
+
+              if [ "$rpc_attempt" -eq 4 ]; then
+                echo "XRPL RPC preparation still failed after 4 bounded attempts." >&2
+                exit "$prepare_status"
+              fi
+
+              retry_delay=$((5 * rpc_attempt))
+              echo "Transient XRPL RPC preparation failure on attempt $rpc_attempt; retrying in ${retry_delay}s with reversed endpoint priority."
+              sleep "$retry_delay"
+            done
+
+            if [ -n "$selected" ]; then
               break
             fi
 
-            if ! grep -Fq "One live publication exceeds the configured Release shard asset ceiling" .local/d3-live-prepare.stderr; then
-              exit "$prepare_status"
+            if [ "$reduce_width" != "true" ]; then
+              echo "D3 preparation failed without a selected width." >&2
+              exit 1
             fi
 
             echo "Catch-up width $max_ledgers exceeds the 720-asset shard ceiling; retrying with a smaller bounded width."
@@ -245,7 +283,7 @@ jobs:
           - data shard: `$DATA_RELEASE_TAG`
           - immutable artifacts were uploaded/read back before channel update
 
-          This is still candidate operation; five-minute scheduling is not enabled by this workflow.
+          This run is collector evidence; five-minute schedule cadence is qualified separately.
           EOF
           )"
           else
