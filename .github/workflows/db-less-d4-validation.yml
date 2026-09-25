@@ -104,7 +104,7 @@ jobs:
           grep -Fq "/d4-activate-current-overlay" "$workflow"
           grep -Fq "group: db-less-d4-current-overlay-activation" "$workflow"
           grep -Fq "pnpm build:db-less-current-overlay-publisher" "$workflow"
-          grep -Fq "db-less-current-overlay-v1-$through" "$workflow"
+          grep -Fq 'db-less-current-overlay-v1-$through' "$workflow"
           grep -Fq "db-less-current-overlay-channel-v1" "$workflow"
           grep -Fq "Publish immutable checkpoint then activate D4 channel" "$workflow"
 
