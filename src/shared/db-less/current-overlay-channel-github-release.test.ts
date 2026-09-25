@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { buildDbLessCurrentOverlayChannel } from './current-overlay-channel'
+import {\n  buildDbLessCurrentOverlayChannel,\n  encodeDbLessCurrentOverlayChannel,\n} from './current-overlay-channel'
 import {
   GitHubReleaseCurrentOverlayChannelStore,
   type CurrentOverlayChannelFetchLike,
