@@ -1,0 +1,36 @@
+name: First 24-hour XRPL Devnet production soak stable
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: Type RUN_AFTER_VALIDATION only after the corrected monitor and short rehearsal have passed
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: first-24h-devnet-production-soak-stable
+  cancel-in-progress: false
+
+jobs:
+  blocked_until_validated:
+    if: ${{ inputs.confirm != 'RUN_AFTER_VALIDATION' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse unvalidated soak start
+        run: |
+          echo 'The 24-hour soak is blocked until the corrected monitor and short rehearsal pass.'
+          exit 1
+
+  awaiting_corrected_workflow:
+    if: ${{ inputs.confirm == 'RUN_AFTER_VALIDATION' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse placeholder execution
+        run: |
+          echo 'The corrected long-running workflow has not been installed yet.'
+          exit 1
