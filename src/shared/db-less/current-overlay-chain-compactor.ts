@@ -65,23 +65,36 @@ export interface DbLessCurrentOverlaySourceV1 {
   generations: DbLessCurrentOverlayGenerationV1[]
 }
 
+export interface DbLessCurrentOverlayProgressV1 {
+  phase: 'verify-chain' | 'read-chain-manifests' | 'read-generations'
+  completed: number
+  total: number | null
+}
+
 export async function readDbLessCurrentOverlaySourceFromChannel(options: {
   channel: DbLessChannelV1
   readChainArtifact: DbLessLiveChainArtifactReader
   readLocatedArtifact: DbLessLocatedArtifactReader
   maxGenerations?: number
+  onProgress?: (progress: DbLessCurrentOverlayProgressV1) => void
 }): Promise<DbLessCurrentOverlaySourceV1> {
   await verifyDbLessChannel(options.channel)
   if (options.channel.live === null) {
     throw new Error('D4 Current overlay compaction requires a live chain')
   }
 
+  options.onProgress?.({ phase: 'verify-chain', completed: 0, total: null })
   const verification = await verifyDbLessLiveChainFromChannel({
     channel: options.channel,
     readArtifact: options.readChainArtifact,
     maxGenerations: options.maxGenerations,
   })
   if (!verification) throw new Error('D4 Current overlay compaction requires a verified live chain')
+  options.onProgress?.({
+    phase: 'verify-chain',
+    completed: verification.generationCount,
+    total: verification.generationCount,
+  })
 
   const reverse: DbLessLiveChainManifestV1[] = []
   let pointer: DbLessLivePointerV1 = options.channel.live
@@ -91,6 +104,13 @@ export async function readDbLessCurrentOverlaySourceFromChannel(options: {
       readArtifact: options.readChainArtifact,
     })
     reverse.push(manifest)
+    if (reverse.length === 1 || reverse.length % 25 === 0) {
+      options.onProgress?.({
+        phase: 'read-chain-manifests',
+        completed: reverse.length,
+        total: verification.generationCount,
+      })
+    }
     if (manifest.previous === null) break
     pointer = manifest.previous
   }
@@ -102,6 +122,12 @@ export async function readDbLessCurrentOverlaySourceFromChannel(options: {
     throw new Error('D4 Current overlay traversal count does not match live-chain verification')
   }
 
+  options.onProgress?.({
+    phase: 'read-chain-manifests',
+    completed: reverse.length,
+    total: verification.generationCount,
+  })
+
   const manifests = reverse.reverse()
   const generations: DbLessCurrentOverlayGenerationV1[] = []
   for (const manifest of manifests) {
@@ -109,7 +135,19 @@ export async function readDbLessCurrentOverlaySourceFromChannel(options: {
       delta: manifest.delta,
       readArtifact: options.readLocatedArtifact,
     }))
+    if (generations.length === 1 || generations.length % 25 === 0) {
+      options.onProgress?.({
+        phase: 'read-generations',
+        completed: generations.length,
+        total: manifests.length,
+      })
+    }
   }
+  options.onProgress?.({
+    phase: 'read-generations',
+    completed: generations.length,
+    total: manifests.length,
+  })
 
   return { verification, generations }
 }

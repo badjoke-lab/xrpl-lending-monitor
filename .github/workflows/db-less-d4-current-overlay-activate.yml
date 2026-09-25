@@ -18,7 +18,7 @@ jobs:
       group: db-less-d4-current-overlay-activation
       cancel-in-progress: false
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 120
     env:
       GH_TOKEN: ${{ github.token }}
       D3_CHANNEL_RELEASE_TAG: db-less-live-channel-candidate-v1
