@@ -4,12 +4,16 @@ import { readFastLaneShadowState } from './fast-lane-shadow-repository'
 
 export type CurrentStateWatermarkSource = 'fast_lane' | 'canonical_overlay' | 'base_snapshot'
 export type CountsWatermarkSource = 'canonical_overlay' | 'base_snapshot'
+export type CurrentStateWatermarkStatus = 'healthy' | 'behind' | 'error'
 
 export interface CurrentStateWatermark {
   source: CurrentStateWatermarkSource
   ledgerIndex: number
   ledgerHash: string
   updatedAt: string | null
+  latestObservedLedger?: number | null
+  lagLedgers?: number | null
+  status?: CurrentStateWatermarkStatus | null
 }
 
 export interface CountsWatermark {
@@ -40,6 +44,9 @@ function baseWatermark(snapshot: ActiveSnapshotRecord): CurrentStateWatermark {
     ledgerIndex: snapshot.ledgerIndex,
     ledgerHash: snapshot.ledgerHash,
     updatedAt: snapshot.completedAt,
+    latestObservedLedger: null,
+    lagLedgers: null,
+    status: null,
   }
 }
 
@@ -49,6 +56,9 @@ function overlayWatermark(overlay: CanonicalOverlayWatermark): CurrentStateWater
     ledgerIndex: overlay.overlayLedgerIndex,
     ledgerHash: overlay.overlayLedgerHash,
     updatedAt: overlay.updatedAt,
+    latestObservedLedger: null,
+    lagLedgers: null,
+    status: null,
   }
 }
 
@@ -75,6 +85,9 @@ async function eligibleFastWatermark(options: {
       ledgerIndex: state.lastProcessedLedger,
       ledgerHash: state.lastProcessedHash,
       updatedAt: state.updatedAt,
+      latestObservedLedger: state.latestObservedLedger,
+      lagLedgers: Math.max(0, state.latestObservedLedger - state.lastProcessedLedger),
+      status: state.status,
     }
   } catch {
     return null

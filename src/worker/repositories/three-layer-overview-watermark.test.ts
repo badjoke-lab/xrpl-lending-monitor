@@ -28,6 +28,7 @@ const overlay = {
 
 function database(options: {
   fastLedger?: number
+  fastLatestObservedLedger?: number
   fastHash?: string
   fastStatus?: 'healthy' | 'behind' | 'error'
   boundSnapshotId?: string
@@ -51,11 +52,12 @@ function database(options: {
           }
           if (sql.includes('FROM fast_lane_shadow_state')) {
             const ledger = options.fastLedger ?? 120
+            const latestObservedLedger = options.fastLatestObservedLedger ?? ledger
             return {
               epoch_id: 'fast-lane-shadow-devnet',
               last_processed_ledger: ledger,
               last_processed_hash: options.fastHash ?? 'D'.repeat(64),
-              latest_observed_ledger: ledger,
+              latest_observed_ledger: latestObservedLedger,
               latest_observed_hash: options.fastHash ?? 'D'.repeat(64),
               status: options.fastStatus ?? 'healthy',
               updated_at: '2026-07-11T00:15:00.000Z',
@@ -81,11 +83,30 @@ describe('three-layer Overview watermarks', () => {
       source: 'fast_lane',
       ledgerIndex: 120,
       ledgerHash: 'D'.repeat(64),
+      latestObservedLedger: 120,
+      lagLedgers: 0,
+      status: 'healthy',
     })
     expect(result.counts).toMatchObject({
       source: 'canonical_overlay',
       ledgerIndex: 110,
       ledgerHash: overlay.overlayLedgerHash,
+    })
+  })
+
+  it('exposes the actual fast-lane lag while catch-up is behind', async () => {
+    const result = await resolveThreeLayerOverviewWatermarks({
+      db: database({ fastLedger: 120, fastLatestObservedLedger: 900, fastStatus: 'behind' }),
+      snapshot,
+      overlay,
+    })
+
+    expect(result.currentState).toMatchObject({
+      source: 'fast_lane',
+      ledgerIndex: 120,
+      latestObservedLedger: 900,
+      lagLedgers: 780,
+      status: 'behind',
     })
   })
 

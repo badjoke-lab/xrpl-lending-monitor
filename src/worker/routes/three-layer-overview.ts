@@ -30,12 +30,24 @@ export async function handleThreeLayerOverview(
   const watermarks = snapshot
     ? await resolveThreeLayerOverviewWatermarks({ db: env.DB, snapshot, overlay })
     : null
-
-  return Response.json(serializeOverview({
+  const response = serializeOverview({
     state,
     epoch,
     snapshot,
     overlay,
     watermarks,
-  }))
+  })
+  const currentStateWatermark = watermarks?.currentState ?? null
+
+  return Response.json({
+    ...response,
+    current_state_watermark: response.current_state_watermark && currentStateWatermark
+      ? {
+          ...response.current_state_watermark,
+          status: currentStateWatermark.status,
+          latest_observed_ledger: currentStateWatermark.latestObservedLedger,
+          lag_ledgers: currentStateWatermark.lagLedgers,
+        }
+      : null,
+  })
 }

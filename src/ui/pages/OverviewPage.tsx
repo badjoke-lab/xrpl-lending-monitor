@@ -25,6 +25,9 @@ interface OverviewWatermark {
   ledger_index: number
   ledger_hash: string
   updated_at: string
+  status?: 'healthy' | 'behind' | 'error' | null
+  latest_observed_ledger?: number | null
+  lag_ledgers?: number | null
 }
 
 function snapshotProvenance(resources: DashboardResources): Provenance {
@@ -40,11 +43,21 @@ function ageSeconds(value: string | null | undefined): number | null {
   return Math.max(0, (Date.now() - timestamp) / 1000)
 }
 
-function currentStateStatus(age: number | null): 'healthy' | 'delayed' | 'stale' | 'unavailable' {
-  if (age === null) return 'unavailable'
+function currentStateStatus(
+  watermark: OverviewWatermark | null,
+  age: number | null,
+): 'healthy' | 'delayed' | 'stale' | 'unavailable' {
+  if (!watermark || age === null) return 'unavailable'
+  if (age > 30 * 60) return 'stale'
+  if (watermark.source === 'fast_lane') {
+    if (watermark.status === 'error') return 'unavailable'
+    if (watermark.status === 'behind' || (watermark.lag_ledgers ?? 0) > 0) return 'delayed'
+    if (watermark.status !== 'healthy' || watermark.lag_ledgers === null || watermark.lag_ledgers === undefined) {
+      return 'unavailable'
+    }
+  }
   if (age <= 10 * 60) return 'healthy'
-  if (age <= 30 * 60) return 'delayed'
-  return 'stale'
+  return 'delayed'
 }
 
 export function OverviewPage({ resources, onNavigate, onReload }: OverviewPageProps) {
@@ -64,7 +77,9 @@ export function OverviewPage({ resources, onNavigate, onReload }: OverviewPagePr
   const countsWatermark = extendedOverview?.counts_watermark ?? null
   const currentAge = ageSeconds(currentWatermark?.updated_at)
   const countsAge = ageSeconds(countsWatermark?.updated_at)
-  const currentStatus = currentStateStatus(currentAge)
+  const currentStatus = currentStateStatus(currentWatermark, currentAge)
+  const currentCatchingUp = currentWatermark?.source === 'fast_lane'
+    && (currentWatermark.status === 'behind' || (currentWatermark.lag_ledgers ?? 0) > 0)
   const indexedCountDetail = countsProvenance === 'unavailable'
     ? unavailableReason
     : countsWatermark
@@ -100,18 +115,30 @@ export function OverviewPage({ resources, onNavigate, onReload }: OverviewPagePr
 
       <Panel
         title="Current-state freshness"
-        description="Five-minute current object state is separate from indexed counts and historical records"
+        description="Current object state is separate from indexed counts and historical records"
       >
-        {currentStatus !== 'healthy' ? (
+        {currentCatchingUp ? (
           <div className="stale-warning" role="status">
-            <strong>Current-state data is not within the ten-minute freshness window</strong>
-            <span>The five-minute layer last updated {formatDuration(currentAge)} ago.</span>
+            <strong>Current state is catching up to Devnet</strong>
+            <span>
+              Processed through ledger {formatInteger(currentWatermark?.ledger_index)} of observed ledger{' '}
+              {formatInteger(currentWatermark?.latest_observed_ledger)}, with{' '}
+              {formatInteger(currentWatermark?.lag_ledgers)} ledgers remaining.
+            </span>
+          </div>
+        ) : currentStatus !== 'healthy' ? (
+          <div className="stale-warning" role="status">
+            <strong>Current-state data is not within the healthy freshness window</strong>
+            <span>The current-state layer last updated {formatDuration(currentAge)} ago.</span>
           </div>
         ) : null}
         <DefinitionGrid
           items={[
             { label: 'Current state', value: <StatusBadge value={currentStatus} /> },
+            { label: 'Pipeline state', value: currentWatermark?.status ? <StatusBadge value={currentWatermark.status} /> : 'Unavailable' },
             { label: 'Current-state ledger', value: formatInteger(currentWatermark?.ledger_index), mono: true },
+            { label: 'Latest observed ledger', value: formatInteger(currentWatermark?.latest_observed_ledger), mono: true },
+            { label: 'Ledger lag', value: formatInteger(currentWatermark?.lag_ledgers), mono: true },
             { label: 'Current-state age', value: formatDuration(currentAge) },
             { label: 'Current-state updated', value: formatUtc(currentWatermark?.updated_at), wide: true },
             { label: 'Indexed counts ledger', value: formatInteger(countsWatermark?.ledger_index), mono: true },
@@ -161,7 +188,7 @@ export function OverviewPage({ resources, onNavigate, onReload }: OverviewPagePr
       <div className="overview-grid">
         <Panel
           title="Indexed history and network"
-          description="Canonical history indexing status; separate from the five-minute current state"
+          description="Canonical history indexing status; separate from the current-state layer"
           action={
             <a
               href="/network-status"
@@ -244,7 +271,7 @@ export function OverviewPage({ resources, onNavigate, onReload }: OverviewPagePr
 
       <Panel
         title="Recent protocol activity"
-        description="Indexed history events; this panel may trail the five-minute current-state layer"
+        description="Indexed history events; this panel may trail the current-state layer"
         className="activity-panel"
         action={<a href="/api/activity?limit=20">Activity API</a>}
       >
