@@ -86,9 +86,11 @@ implements DbLessImmutableArtifactWriter, DbLessChannelPublisher {
   readonly #uploadRetryDelaysMs: readonly number[]
   readonly #downloadRetryDelaysMs: readonly number[]
   readonly #uploadPacingMs: number
+  readonly #downloadPacingMs: number
   readonly #sleep: (ms: number) => Promise<void>
   #releaseCache: GitHubRelease | null = null
   #assetsCache: { releaseId: number; assets: GitHubReleaseAsset[] } | null = null
+  readonly #downloadCache = new Map<number, Uint8Array>()
 
   constructor(options: {
     repository: string
@@ -99,6 +101,7 @@ implements DbLessImmutableArtifactWriter, DbLessChannelPublisher {
     uploadRetryDelaysMs?: readonly number[]
     downloadRetryDelaysMs?: readonly number[]
     uploadPacingMs?: number
+    downloadPacingMs?: number
     sleep?: (ms: number) => Promise<void>
   }) {
     assertRepository(options.repository)
@@ -128,12 +131,17 @@ implements DbLessImmutableArtifactWriter, DbLessChannelPublisher {
     if (!Number.isSafeInteger(uploadPacingMs) || uploadPacingMs < 0) {
       throw new Error('uploadPacingMs must be a non-negative safe integer')
     }
+    const downloadPacingMs = options.downloadPacingMs ?? 0
+    if (!Number.isSafeInteger(downloadPacingMs) || downloadPacingMs < 0) {
+      throw new Error('downloadPacingMs must be a non-negative safe integer')
+    }
 
     this.#fetcher = options.fetcher ?? ((input, init) => fetch(input, init))
     this.#maxAssets = maxAssets
     this.#uploadRetryDelaysMs = [...uploadRetryDelaysMs]
     this.#downloadRetryDelaysMs = [...downloadRetryDelaysMs]
     this.#uploadPacingMs = uploadPacingMs
+    this.#downloadPacingMs = downloadPacingMs
     this.#sleep = options.sleep ?? defaultSleep
   }
 
@@ -213,6 +221,9 @@ implements DbLessImmutableArtifactWriter, DbLessChannelPublisher {
   }
 
   async #downloadAsset(asset: GitHubReleaseAsset): Promise<Uint8Array> {
+    const cached = this.#downloadCache.get(asset.id)
+    if (cached) return cached
+
     let attempt = 0
     while (true) {
       const response = await this.#fetcher(
@@ -227,6 +238,8 @@ implements DbLessImmutableArtifactWriter, DbLessChannelPublisher {
         if (bytes.byteLength !== asset.size) {
           throw new Error(`GitHub Release asset byte mismatch for ${asset.name}`)
         }
+        this.#downloadCache.set(asset.id, bytes)
+        if (this.#downloadPacingMs > 0) await this.#sleep(this.#downloadPacingMs)
         return bytes
       }
 
