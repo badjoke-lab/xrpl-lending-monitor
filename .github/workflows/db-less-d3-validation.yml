@@ -95,6 +95,18 @@ jobs:
           grep -Fq "gh workflow run db-less-d3-live-schedule.yml" "$driver"
           grep -Fq -- "-f continue_chain=true" "$driver"
 
+      - name: Validate D3 transient RPC retry contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          collector=".github/workflows/db-less-d3-live-once.yml"
+          grep -Fq "for rpc_attempt in 1 2 3 4; do" "$collector"
+          grep -Fq "LatestValidatedLedgerHeadError|XrplRpcError:" "$collector"
+          grep -Fq 'retry_delay=$((5 * rpc_attempt))' "$collector"
+          grep -Fq 'endpoints=(' "$collector"
+          grep -Fq 'reversed endpoint priority' "$collector"
+          grep -Fq 'XRPL RPC preparation still failed after 4 bounded attempts.' "$collector"
+
       - name: D3 focused tests
         run: >-
           pnpm exec vitest run
