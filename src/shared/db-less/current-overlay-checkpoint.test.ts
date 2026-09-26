@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { NormalizedCandidateV1 } from '../portable-collector-payload'
 import { buildDbLessCurrentOverlayCheckpoint } from './current-overlay-checkpoint'
+import { buildDbLessCurrentProjectionCanonicalKey } from './current-projection-identity'
 
 const HASH_A = 'A'.repeat(64)
 const HASH_B = 'B'.repeat(64)
@@ -18,7 +19,7 @@ function projection(options: {
 }): NormalizedCandidateV1 {
   return {
     semanticClass: 'current-projection',
-    canonicalKey: `projection:${options.type}:${options.id.toLowerCase()}`,
+    canonicalKey: buildDbLessCurrentProjectionCanonicalKey(options.type, options.id),
     sourceLedgerIndex: options.ledger,
     sourceLedgerHash: options.ledgerHash,
     sourceTransactionHash: `TX-${options.ledger}-${options.id}`,

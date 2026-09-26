@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { NormalizedCandidateV1 } from '../portable-collector-payload'
 import { buildDbLessCurrentOverlayCheckpoint } from './current-overlay-checkpoint'
 import { DbLessCurrentOverlayReader } from './current-overlay-reader'
+import { buildDbLessCurrentProjectionCanonicalKey } from './current-projection-identity'
 
 const HASH = 'A'.repeat(64)
 
@@ -14,7 +15,7 @@ function projection(options: {
   const ledger = options.ledger ?? 101
   return {
     semanticClass: 'current-projection',
-    canonicalKey: `projection:vault:${options.id.toLowerCase()}`,
+    canonicalKey: buildDbLessCurrentProjectionCanonicalKey('vault', options.id),
     sourceLedgerIndex: ledger,
     sourceLedgerHash: HASH,
     sourceTransactionHash: `TX-${ledger}-${options.id}`,
@@ -61,6 +62,16 @@ async function fixture(options: {
 }
 
 describe('D4 bounded Current overlay reader', () => {
+  it('preserves the D3 canonical key for uppercase object IDs', async () => {
+    const built = await fixture({
+      values: [projection({ id: 'ABCDEF012345' })],
+    })
+
+    const found = await built.reader.get('vault', 'ABCDEF012345')
+    expect(found.item?.canonicalKey).toBe('projection:vault:ABCDEF012345')
+    expect(found.item?.objectId).toBe('ABCDEF012345')
+  })
+
   it('resolves an exact overlay object with at most one shard read', async () => {
     const built = await fixture()
 

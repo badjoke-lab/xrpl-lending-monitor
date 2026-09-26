@@ -1,4 +1,5 @@
 import { canonicalJson, sha256Hex, utf8 } from '../current-state/canonical-json'
+import { buildDbLessCurrentProjectionCanonicalKey } from './current-projection-identity'
 import type {
   DbLessCurrentOverlayCheckpointManifestV1,
   DbLessCurrentOverlayEntryV1,
@@ -84,13 +85,6 @@ function objectType(value: unknown, field: string): DbLessCurrentOverlayObjectTy
   return value
 }
 
-function canonicalKey(
-  type: DbLessCurrentOverlayObjectTypeV1,
-  objectId: string,
-): string {
-  return `projection:${type}:${objectId.toLowerCase()}`
-}
-
 async function bucketFor(key: string, bucketCount: number): Promise<number> {
   const digest = await sha256Hex(utf8(key))
   return Number.parseInt(digest.slice(0, 8), 16) % bucketCount
@@ -155,7 +149,7 @@ function parseEntry(value: unknown): DbLessCurrentOverlayEntryV1 {
   const parsedType = objectType(source.objectType, 'entry.objectType')
   const objectId = nonEmpty(String(source.objectId ?? ''), 'entry.objectId')
   const key = nonEmpty(String(source.canonicalKey ?? ''), 'entry.canonicalKey')
-  if (key !== canonicalKey(parsedType, objectId)) {
+  if (key !== buildDbLessCurrentProjectionCanonicalKey(parsedType, objectId)) {
     throw new Error('D4 Current overlay entry canonical key is inconsistent')
   }
   const sourceLedgerIndex = Number(source.sourceLedgerIndex)
@@ -325,7 +319,7 @@ export class DbLessCurrentOverlayReader {
     objectId: string,
   ): Promise<DbLessCurrentOverlayLookupResult> {
     const id = nonEmpty(objectId, 'objectId')
-    const key = canonicalKey(type, id)
+    const key = buildDbLessCurrentProjectionCanonicalKey(type, id)
     const bucket = await bucketFor(key, this.manifest.bucketCount)
     const descriptor = this.manifest.shards.find((shard) => shard.bucket === bucket)
     if (!descriptor) return { item: null, shardReads: 0 }

@@ -4,6 +4,7 @@ import type {
 } from '../portable-collector-payload'
 import { canonicalJson, sha256Hex, utf8 } from '../current-state/canonical-json'
 import type { DbLessArtifact } from './live-delta'
+import { parseDbLessCurrentProjectionCanonicalKey } from './current-projection-identity'
 
 const LEDGER_HASH = /^[A-F0-9]{64}$/
 
@@ -91,12 +92,11 @@ function projectionIdentity(candidate: NormalizedCandidateV1): {
     throw new Error('Current projection record must have a source transaction hash')
   }
 
-  const match = /^projection:(vault|loan_broker|loan):/.exec(candidate.canonicalKey)
-  if (!match) {
-    throw new Error('Current projection canonical key is invalid')
-  }
   return {
-    objectType: match[1] as DbLessCurrentOverlayObjectTypeV1,
+    objectType: parseDbLessCurrentProjectionCanonicalKey(
+      candidate.canonicalKey,
+      candidate.objectId,
+    ),
     objectId: candidate.objectId,
   }
 }
