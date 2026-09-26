@@ -1,4 +1,5 @@
 import { canonicalJson, sha256Hex, utf8 } from '../current-state/canonical-json'
+import { buildDbLessCurrentProjectionCanonicalKey } from './current-projection-identity'
 import type {
   DbLessCurrentOverlayCheckpointManifestV1,
   DbLessCurrentOverlayEntryV1,
