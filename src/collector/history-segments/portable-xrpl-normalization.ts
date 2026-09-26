@@ -121,7 +121,11 @@ function coalescedProjectionCandidates(
 
   return [...latest.values()].map((record) => ({
     semanticClass: 'current-projection',
-    canonicalKey: buildDbLessCurrentProjectionCanonicalKey(\n      record.mutation.objectType,\n      record.mutation.objectId,\n    ),\n    sourceLedgerIndex: record.ledgerIndex,
+    canonicalKey: buildDbLessCurrentProjectionCanonicalKey(
+      record.mutation.objectType,
+      record.mutation.objectId,
+    ),
+    sourceLedgerIndex: record.ledgerIndex,
     sourceLedgerHash: record.ledgerHash,
     sourceTransactionHash: record.transactionHash,
     objectId: record.mutation.objectId,
