@@ -6,7 +6,10 @@ import type {
   DbLessCurrentOverlayObjectTypeV1,
 } from './current-overlay-checkpoint'
 import { DbLessCurrentOverlayReader } from './current-overlay-reader'
-import {\n  compareDbLessCurrentProjectionCanonicalKeys,\n  parseDbLessCurrentProjectionCanonicalKey,\n} from './current-projection-identity'
+import {
+  compareDbLessCurrentProjectionCanonicalKeys,
+  parseDbLessCurrentProjectionCanonicalKey,
+} from './current-projection-identity'
 
 export interface DbLessCurrentOverlayEquivalenceSummaryV1 {
   schemaVersion: 1
