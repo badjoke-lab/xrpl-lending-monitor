@@ -6,6 +6,7 @@ import type {
   DbLessCurrentOverlayObjectTypeV1,
 } from './current-overlay-checkpoint'
 import { DbLessCurrentOverlayReader } from './current-overlay-reader'
+import { parseDbLessCurrentProjectionCanonicalKey } from './current-projection-identity'
 
 export interface DbLessCurrentOverlayEquivalenceSummaryV1 {
   schemaVersion: 1
@@ -26,8 +27,10 @@ function entryFromCandidate(candidate: NormalizedCandidateV1): DbLessCurrentOver
   if (candidate.objectId === null || candidate.sourceTransactionHash === null) {
     throw new Error('D4 equivalence source Current projection is missing identity provenance')
   }
-  const match = /^projection:(vault|loan_broker|loan):/.exec(candidate.canonicalKey)
-  if (!match) throw new Error('D4 equivalence source canonical key is invalid')
+  const parsedType = parseDbLessCurrentProjectionCanonicalKey(
+    candidate.canonicalKey,
+    candidate.objectId,
+  )
   if (candidate.isTombstone && candidate.value !== null) {
     throw new Error('D4 equivalence source tombstone must have a null value')
   }
@@ -37,7 +40,7 @@ function entryFromCandidate(candidate: NormalizedCandidateV1): DbLessCurrentOver
 
   return {
     canonicalKey: candidate.canonicalKey,
-    objectType: match[1] as DbLessCurrentOverlayObjectTypeV1,
+    objectType: parsedType as DbLessCurrentOverlayObjectTypeV1,
     objectId: candidate.objectId,
     sourceLedgerIndex: candidate.sourceLedgerIndex,
     sourceLedgerHash: candidate.sourceLedgerHash,
