@@ -305,8 +305,13 @@ describe('GitHub Release DB-less store', () => {
       preferBrowserDownload: true,
     })
     const value = await artifact('live-v1-101-101-browser-download.json')
+    const id = github.nextAssetId++
+    github.assets.set(id, {
+      id,
+      name: value.key,
+      bytes: value.bytes,
+    })
 
-    await store.writeImmutable(value)
     await expect(store.readImmutable(value.key)).resolves.toEqual(value.bytes)
     expect(github.browserDownloadCount).toBe(1)
     expect(github.assetDownloadCount).toBe(0)
