@@ -4,7 +4,7 @@ import type {
 } from '../portable-collector-payload'
 import { canonicalJson, sha256Hex, utf8 } from '../current-state/canonical-json'
 import type { DbLessArtifact } from './live-delta'
-import { parseDbLessCurrentProjectionCanonicalKey } from './current-projection-identity'
+import {\n  compareDbLessCurrentProjectionCanonicalKeys,\n  parseDbLessCurrentProjectionCanonicalKey,\n} from './current-projection-identity'
 
 const LEDGER_HASH = /^[A-F0-9]{64}$/
 
@@ -191,7 +191,10 @@ export async function buildDbLessCurrentOverlayCheckpoint(options: {
 
   const buckets = Array.from({ length: bucketCount }, () => [] as DbLessCurrentOverlayEntryV1[])
   const entries = [...latest.values()].sort((left, right) =>
-    left.canonicalKey.localeCompare(right.canonicalKey),
+    compareDbLessCurrentProjectionCanonicalKeys(
+      left.canonicalKey,
+      right.canonicalKey,
+    ),
   )
   for (const entry of entries) {
     buckets[await bucketFor(entry.canonicalKey, bucketCount)]!.push(entry)
