@@ -18,7 +18,7 @@ function projection(options: {
 }): NormalizedCandidateV1 {
   return {
     semanticClass: 'current-projection',
-    canonicalKey: `projection:${options.type}:${options.id.toLowerCase()}`,
+    canonicalKey: buildDbLessCurrentProjectionCanonicalKey(options.type, options.id),
     sourceLedgerIndex: options.ledger,
     sourceLedgerHash: options.hash,
     sourceTransactionHash: `TX-${options.ledger}-${options.id}`,
