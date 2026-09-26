@@ -4,7 +4,10 @@ import type {
 } from '../portable-collector-payload'
 import { canonicalJson, sha256Hex, utf8 } from '../current-state/canonical-json'
 import type { DbLessArtifact } from './live-delta'
-import {\n  compareDbLessCurrentProjectionCanonicalKeys,\n  parseDbLessCurrentProjectionCanonicalKey,\n} from './current-projection-identity'
+import {
+  compareDbLessCurrentProjectionCanonicalKeys,
+  parseDbLessCurrentProjectionCanonicalKey,
+} from './current-projection-identity'
 
 const LEDGER_HASH = /^[A-F0-9]{64}$/
 
