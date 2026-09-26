@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { NormalizedCandidateV1 } from '../portable-collector-payload'
 import { buildDbLessCurrentOverlayCheckpoint } from './current-overlay-checkpoint'
 import { DbLessCurrentOverlayReader } from './current-overlay-reader'
+import { buildDbLessCurrentProjectionCanonicalKey } from './current-projection-identity'
 
 const HASH = 'A'.repeat(64)
 
