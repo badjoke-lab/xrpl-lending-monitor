@@ -6,7 +6,10 @@ import type {
   DbLessCurrentOverlayObjectTypeV1,
 } from './current-overlay-checkpoint'
 import { DbLessCurrentOverlayReader } from './current-overlay-reader'
-import { parseDbLessCurrentProjectionCanonicalKey } from './current-projection-identity'
+import {
+  compareDbLessCurrentProjectionCanonicalKeys,
+  parseDbLessCurrentProjectionCanonicalKey,
+} from './current-projection-identity'
 
 export interface DbLessCurrentOverlayEquivalenceSummaryV1 {
   schemaVersion: 1
@@ -91,7 +94,10 @@ function sourceState(
   }
 
   return [...latest.values()].sort((left, right) =>
-    left.canonicalKey.localeCompare(right.canonicalKey))
+    compareDbLessCurrentProjectionCanonicalKeys(
+      left.canonicalKey,
+      right.canonicalKey,
+    ))
 }
 
 async function checkpointState(
@@ -128,7 +134,11 @@ async function checkpointState(
     }
   }
 
-  return entries.sort((left, right) => left.canonicalKey.localeCompare(right.canonicalKey))
+  return entries.sort((left, right) =>
+    compareDbLessCurrentProjectionCanonicalKeys(
+      left.canonicalKey,
+      right.canonicalKey,
+    ))
 }
 
 async function digestState(entries: readonly DbLessCurrentOverlayEntryV1[]): Promise<string> {

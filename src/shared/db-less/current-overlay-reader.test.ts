@@ -72,6 +72,30 @@ describe('D4 bounded Current overlay reader', () => {
     expect(found.item?.objectId).toBe('ABCDEF012345')
   })
 
+  it('uses one bytewise canonical ordering for checkpoint write and readback', async () => {
+    const built = await fixture({
+      bucketCount: 1,
+      values: [
+        projection({ id: 'a' }),
+        projection({ id: 'B' }),
+        projection({ id: 'A/b' }),
+        projection({ id: 'A%2Fb' }),
+      ],
+    })
+
+    const page = await built.reader.list('vault', {
+      limit: 100,
+      maxShardReads: 1,
+      includeTombstones: true,
+    })
+    expect(page.complete).toBe(true)
+    expect(page.items).toHaveLength(4)
+    const keys = page.items.map((item) => item.canonicalKey)
+    expect(keys).toEqual([...keys].sort((left, right) => (
+      left === right ? 0 : left < right ? -1 : 1
+    )))
+  })
+
   it('resolves an exact overlay object with at most one shard read', async () => {
     const built = await fixture()
 

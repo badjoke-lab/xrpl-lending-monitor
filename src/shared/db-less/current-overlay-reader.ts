@@ -1,5 +1,8 @@
 import { canonicalJson, sha256Hex, utf8 } from '../current-state/canonical-json'
-import { buildDbLessCurrentProjectionCanonicalKey } from './current-projection-identity'
+import {
+  buildDbLessCurrentProjectionCanonicalKey,
+  compareDbLessCurrentProjectionCanonicalKeys,
+} from './current-projection-identity'
 import type {
   DbLessCurrentOverlayCheckpointManifestV1,
   DbLessCurrentOverlayEntryV1,
@@ -300,7 +303,10 @@ export class DbLessCurrentOverlayReader {
       if (await bucketFor(entry.canonicalKey, this.manifest.bucketCount) !== descriptor.bucket) {
         throw new Error('D4 Current overlay entry is in the wrong bucket')
       }
-      if (previousKey !== null && entry.canonicalKey <= previousKey) {
+      if (
+        previousKey !== null
+        && compareDbLessCurrentProjectionCanonicalKeys(entry.canonicalKey, previousKey) <= 0
+      ) {
         throw new Error('D4 Current overlay shard entries must be strictly ordered')
       }
       previousKey = entry.canonicalKey
