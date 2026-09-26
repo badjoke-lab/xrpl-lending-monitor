@@ -8,6 +8,7 @@ import {
 } from './current-composite-reader'
 import { buildDbLessCurrentOverlayCheckpoint } from './current-overlay-checkpoint'
 import { DbLessCurrentOverlayReader } from './current-overlay-reader'
+import { buildDbLessCurrentProjectionCanonicalKey } from './current-projection-identity'
 
 const HASH = 'A'.repeat(64)
 
@@ -18,7 +19,7 @@ function projection(options: {
 }): NormalizedCandidateV1 {
   return {
     semanticClass: 'current-projection',
-    canonicalKey: `projection:vault:${options.id.toLowerCase()}`,
+    canonicalKey: buildDbLessCurrentProjectionCanonicalKey('vault', options.id),
     sourceLedgerIndex: 101,
     sourceLedgerHash: HASH,
     sourceTransactionHash: `TX-${options.id}`,
