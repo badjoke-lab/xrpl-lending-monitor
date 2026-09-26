@@ -4,6 +4,7 @@ import type { NormalizedCandidateV1 } from '../portable-collector-payload'
 import { buildDbLessCurrentOverlayCheckpoint } from './current-overlay-checkpoint'
 import { verifyDbLessCurrentOverlayEquivalence } from './current-overlay-equivalence'
 import { DbLessCurrentOverlayReader } from './current-overlay-reader'
+import { buildDbLessCurrentProjectionCanonicalKey } from './current-projection-identity'
 
 const HASH_A = 'A'.repeat(64)
 const HASH_B = 'B'.repeat(64)
