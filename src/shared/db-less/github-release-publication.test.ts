@@ -65,6 +65,7 @@ class FakeGitHub {
   releaseReadCount = 0
   assetListReadCount = 0
   assetDownloadCount = 0
+  browserDownloadCount = 0
   downloadFailuresRemaining = 0
 
   constructor(body: string | null) {
@@ -93,6 +94,7 @@ class FakeGitHub {
         name: asset.name,
         size: asset.bytes.byteLength,
         digest: `sha256:${await sha256Hex(asset.bytes)}`,
+        browser_download_url: `https://github.com/${REPO}/releases/download/${TAG}/${asset.name}`,
       })))
       return Response.json(values)
     }
@@ -106,6 +108,19 @@ class FakeGitHub {
       }
       const id = Number(assetMatch[1])
       const asset = this.assets.get(id)
+      if (!asset) return new Response('missing', { status: 404 })
+      return new Response(asset.bytes)
+    }
+
+    const browserPrefix = `/${REPO}/releases/download/${TAG}/`
+    if (url.hostname === 'github.com' && url.pathname.startsWith(browserPrefix)) {
+      this.browserDownloadCount += 1
+      if (this.downloadFailuresRemaining > 0) {
+        this.downloadFailuresRemaining -= 1
+        return new Response('transient', { status: 503 })
+      }
+      const name = decodeURIComponent(url.pathname.slice(browserPrefix.length))
+      const asset = [...this.assets.values()].find((value) => value.name === name)
       if (!asset) return new Response('missing', { status: 404 })
       return new Response(asset.bytes)
     }
@@ -275,6 +290,31 @@ describe('GitHub Release DB-less store', () => {
     await expect(store.readImmutable(value.key)).resolves.toEqual(value.bytes)
     await expect(store.readImmutable(value.key)).resolves.toEqual(value.bytes)
     expect(github.assetDownloadCount).toBe(1)
+  })
+
+  it('uses browser download URLs when explicitly enabled', async () => {
+    const current = await channel()
+    const github = new FakeGitHub(`${canonicalJson(current)}\n`)
+    const store = new GitHubReleaseDbLessStore({
+      repository: REPO,
+      releaseTag: TAG,
+      token: 'token',
+      fetcher: github.fetch,
+      uploadPacingMs: 0,
+      downloadPacingMs: 0,
+      preferBrowserDownload: true,
+    })
+    const value = await artifact('live-v1-101-101-browser-download.json')
+    const id = github.nextAssetId++
+    github.assets.set(id, {
+      id,
+      name: value.key,
+      bytes: value.bytes,
+    })
+
+    await expect(store.readImmutable(value.key)).resolves.toEqual(value.bytes)
+    expect(github.browserDownloadCount).toBe(1)
+    expect(github.assetDownloadCount).toBe(0)
   })
 
   it('retries transient Release asset download failures with a bounded policy', async () => {

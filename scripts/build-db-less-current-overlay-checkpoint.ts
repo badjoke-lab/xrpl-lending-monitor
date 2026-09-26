@@ -76,8 +76,9 @@ async function main(): Promise<void> {
         releaseTag: location.releaseTag,
         token,
         maxAssets: 900,
-        downloadRetryDelaysMs: [5_000, 15_000, 30_000, 60_000, 120_000, 180_000],
-        downloadPacingMs: 250,
+        downloadRetryDelaysMs: [2_000, 5_000, 15_000, 30_000, 60_000],
+        downloadPacingMs: 25,
+        preferBrowserDownload: true,
       })
       stores.set(location.releaseTag, store)
     }

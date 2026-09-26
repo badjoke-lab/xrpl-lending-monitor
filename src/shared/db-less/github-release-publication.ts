@@ -25,6 +25,7 @@ interface GitHubReleaseAsset {
   name: string
   size: number
   digest?: string | null
+  browser_download_url?: string | null
 }
 
 interface GitHubRelease {
@@ -87,6 +88,7 @@ implements DbLessImmutableArtifactWriter, DbLessChannelPublisher {
   readonly #downloadRetryDelaysMs: readonly number[]
   readonly #uploadPacingMs: number
   readonly #downloadPacingMs: number
+  readonly #preferBrowserDownload: boolean
   readonly #sleep: (ms: number) => Promise<void>
   #releaseCache: GitHubRelease | null = null
   #assetsCache: { releaseId: number; assets: GitHubReleaseAsset[] } | null = null
@@ -102,6 +104,7 @@ implements DbLessImmutableArtifactWriter, DbLessChannelPublisher {
     downloadRetryDelaysMs?: readonly number[]
     uploadPacingMs?: number
     downloadPacingMs?: number
+    preferBrowserDownload?: boolean
     sleep?: (ms: number) => Promise<void>
   }) {
     assertRepository(options.repository)
@@ -142,6 +145,7 @@ implements DbLessImmutableArtifactWriter, DbLessChannelPublisher {
     this.#downloadRetryDelaysMs = [...downloadRetryDelaysMs]
     this.#uploadPacingMs = uploadPacingMs
     this.#downloadPacingMs = downloadPacingMs
+    this.#preferBrowserDownload = options.preferBrowserDownload ?? false
     this.#sleep = options.sleep ?? defaultSleep
   }
 
@@ -198,6 +202,11 @@ implements DbLessImmutableArtifactWriter, DbLessChannelPublisher {
             && asset.digest !== null
             && typeof asset.digest !== 'string'
           )
+          || (
+            asset.browser_download_url !== undefined
+            && asset.browser_download_url !== null
+            && typeof asset.browser_download_url !== 'string'
+          )
         ) {
           throw new Error('GitHub Release asset response is invalid')
         }
@@ -226,12 +235,21 @@ implements DbLessImmutableArtifactWriter, DbLessChannelPublisher {
 
     let attempt = 0
     while (true) {
+      const useBrowserDownload = (
+        this.#preferBrowserDownload
+        && typeof asset.browser_download_url === 'string'
+        && asset.browser_download_url.length > 0
+      )
       const response = await this.#fetcher(
-        `https://api.github.com/repos/${this.#repository}/releases/assets/${asset.id}`,
-        {
-          headers: apiHeaders(this.#token, 'application/octet-stream'),
-          redirect: 'follow',
-        },
+        useBrowserDownload
+          ? asset.browser_download_url!
+          : `https://api.github.com/repos/${this.#repository}/releases/assets/${asset.id}`,
+        useBrowserDownload
+          ? { redirect: 'follow' }
+          : {
+              headers: apiHeaders(this.#token, 'application/octet-stream'),
+              redirect: 'follow',
+            },
       )
       if (response.ok) {
         const bytes = new Uint8Array(await response.arrayBuffer())
