@@ -9,6 +9,7 @@ import {
   type PortableJsonValue,
 } from '../../shared/portable-collector-payload'
 import { canonicalPortableJson } from '../../shared/portable-collector-reference-store'
+import { buildDbLessCurrentProjectionCanonicalKey } from '../../shared/db-less/current-projection-identity'
 import { buildHistorySegmentRecords } from './build-segment-records'
 
 export interface PortablePersistedReferenceRowV1 {
@@ -120,8 +121,7 @@ function coalescedProjectionCandidates(
 
   return [...latest.values()].map((record) => ({
     semanticClass: 'current-projection',
-    canonicalKey: `projection:${record.mutation.objectType}:${encodeIdentity(record.mutation.objectId)}`,
-    sourceLedgerIndex: record.ledgerIndex,
+    canonicalKey: buildDbLessCurrentProjectionCanonicalKey(\n      record.mutation.objectType,\n      record.mutation.objectId,\n    ),\n    sourceLedgerIndex: record.ledgerIndex,
     sourceLedgerHash: record.ledgerHash,
     sourceTransactionHash: record.transactionHash,
     objectId: record.mutation.objectId,
