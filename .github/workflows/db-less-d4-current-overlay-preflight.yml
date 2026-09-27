@@ -1,0 +1,144 @@
+name: DB-less D4 Current overlay activation preflight
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    if: >-
+      github.event.issue.number == 1673 &&
+      github.event.comment.user.login == github.repository_owner &&
+      github.event.comment.body == '/d4-activate-current-overlay-preflight'
+    concurrency:
+      group: db-less-d4-current-overlay-preflight
+      cancel-in-progress: false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      D3_CHANNEL_RELEASE_TAG: db-less-live-channel-candidate-v1
+      D4_CHANNEL_RELEASE_TAG: db-less-current-overlay-channel-v1
+      QUALIFIED_D4_REHEARSAL_RUN: "36263240118"
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - run: corepack enable
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build full live-chain verifier
+        run: pnpm build:db-less-live-chain-verifier
+
+      - name: Verify current D3 chain within D4 bound
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .local/d4-activation-preflight
+          node .db-less-live-chain-verifier-build/verify-db-less-live-release-chain.mjs \
+            --local \
+            --repository "$GITHUB_REPOSITORY" \
+            --channel-release-tag "$D3_CHANNEL_RELEASE_TAG" \
+            --max-generations 2048 \
+            --prefer-browser-download \
+            --output .local/d4-activation-preflight/live-chain-verification.json
+
+      - name: Verify qualified D4 rehearsal evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          rehearsal="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$QUALIFIED_D4_REHEARSAL_RUN")"
+          test "$(jq -r '.status' <<<"$rehearsal")" = "completed"
+          test "$(jq -r '.conclusion' <<<"$rehearsal")" = "success"
+
+      - name: Read D4 activation state without mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          verification=.local/d4-activation-preflight/live-chain-verification.json
+          head="$(jq -r '.lastCommittedLedgerIndex' "$verification")"
+          chain_end="$(jq -r '.live.endLedgerIndex' "$verification")"
+          generations="$(jq -r '.live.generationCount' "$verification")"
+          channel_sha="$(jq -r '.channelSha256' "$verification")"
+
+          test "$head" -gt 0
+          test "$chain_end" -eq "$head"
+          test "$generations" -gt 0
+          test "$generations" -le 2048
+
+          target_tag="db-less-current-overlay-v1-$head"
+          target_exists=false
+          target_assets=0
+          if target_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$target_tag" 2>/dev/null)"; then
+            target_exists=true
+            test "$(jq -r '.draft' <<<"$target_json")" = "false"
+            test "$(jq -r '.prerelease' <<<"$target_json")" = "true"
+            target_assets="$(jq -r '.assets | length' <<<"$target_json")"
+          fi
+
+          channel_exists=false
+          active_through=null
+          active_channel_sha=null
+          if channel_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$D4_CHANNEL_RELEASE_TAG" 2>/dev/null)"; then
+            channel_exists=true
+            test "$(jq -r '.draft' <<<"$channel_json")" = "false"
+            test "$(jq -r '.prerelease' <<<"$channel_json")" = "true"
+            body="$(jq -r '.body // ""' <<<"$channel_json")"
+            test -n "$body"
+            active_through="$(jq -r '.active.throughLedgerIndex' <<<"$body")"
+            active_channel_sha="$(jq -r '.channelSha256' <<<"$body")"
+            test "$active_through" -lt "$head"
+          fi
+
+          active_runs="$(
+            gh run list \
+              --workflow db-less-d4-current-overlay-activate.yml \
+              --limit 20 \
+              --json status \
+            | jq '[.[] | select(.status == "queued" or .status == "in_progress" or .status == "pending" or .status == "waiting" or .status == "requested")] | length'
+          )"
+          test "$active_runs" -eq 0
+
+          jq -n \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg sourceChannelSha256 "$channel_sha" \
+            --arg targetReleaseTag "$target_tag" \
+            --argjson throughLedgerIndex "$head" \
+            --argjson generationCount "$generations" \
+            --argjson targetReleaseExists "$target_exists" \
+            --argjson targetAssetCount "$target_assets" \
+            --argjson channelReleaseExists "$channel_exists" \
+            --arg activeThroughLedgerIndex "$active_through" \
+            --arg activeChannelSha256 "$active_channel_sha" \
+            --argjson activeActivationRuns "$active_runs" \
+            '{
+              schemaVersion: 1,
+              repository: $repository,
+              sourceChannelSha256: $sourceChannelSha256,
+              throughLedgerIndex: $throughLedgerIndex,
+              generationCount: $generationCount,
+              targetReleaseTag: $targetReleaseTag,
+              targetReleaseExists: $targetReleaseExists,
+              targetAssetCount: $targetAssetCount,
+              channelReleaseExists: $channelReleaseExists,
+              activeThroughLedgerIndex: (if $activeThroughLedgerIndex == "null" then null else ($activeThroughLedgerIndex | tonumber) end),
+              activeChannelSha256: (if $activeChannelSha256 == "null" then null else $activeChannelSha256 end),
+              activeActivationRuns: $activeActivationRuns,
+              preflight: "pass"
+            }' > .local/d4-activation-preflight/preflight-summary.json
+
+          cat .local/d4-activation-preflight/preflight-summary.json
+
+      - name: Upload D4 activation preflight evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: db-less-d4-current-overlay-activation-preflight
+          path: .local/d4-activation-preflight
+          if-no-files-found: error
+          retention-days: 30
