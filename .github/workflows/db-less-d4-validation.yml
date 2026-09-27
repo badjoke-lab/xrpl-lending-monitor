@@ -118,7 +118,7 @@ jobs:
           grep -Fq -- "--max-generations 2048" "$preflight"
           grep -Fq -- "--prefer-browser-download" "$preflight"
           grep -Fq "activeActivationRuns" "$preflight"
-          grep -Fq '"preflight": "pass"' "$preflight"
+          grep -Fq 'preflight: "pass"' "$preflight"
 
       - name: D4 focused tests
         run: >-
