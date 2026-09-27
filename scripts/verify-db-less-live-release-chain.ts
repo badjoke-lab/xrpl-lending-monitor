@@ -42,6 +42,7 @@ async function main(): Promise<void> {
   const outputPath = resolve(requiredArgument(args, '--output'))
   const maxGenerations = positiveInteger(args, '--max-generations', 2_048)
   const headOnly = args.includes('--head-only')
+  const preferBrowserDownload = args.includes('--prefer-browser-download')
   const token = process.env.GH_TOKEN
   if (!token) throw new Error('GH_TOKEN is required')
 
@@ -70,6 +71,11 @@ async function main(): Promise<void> {
         releaseTag: key,
         token,
         maxAssets: 900,
+        downloadRetryDelaysMs: preferBrowserDownload
+          ? [2_000, 5_000, 15_000, 30_000, 60_000]
+          : undefined,
+        downloadPacingMs: preferBrowserDownload ? 25 : undefined,
+        preferBrowserDownload,
       })
       stores.set(key, store)
     }
