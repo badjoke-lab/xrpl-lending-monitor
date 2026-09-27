@@ -1,6 +1,6 @@
 # Implementation status
 
-Last updated: 2026-09-25
+Last updated: 2026-09-27
 
 ## Current decision
 
@@ -180,12 +180,29 @@ Implemented D4 slices now include:
 
 - deterministic hash-bucketed Current overlay checkpoint construction with tombstone preservation;
 - full verified D3 live-chain ingestion into chronological Current generations;
-- read-only production-shaped checkpoint rehearsal;
 - bounded checkpoint exact lookup and cursor-based list traversal;
 - bounded D2-base + checkpoint-overlay composition, where overlay tombstones mask base rows and overlay upserts override them;
 - independent source-generation versus checkpoint-state equivalence verification;
-- bounded retry for transient GitHub Release asset download failures during full-chain reconstruction;
+- bounded retry and browser-download transport for large GitHub Release asset reconstruction;
+- a GitHub Release-backed D4 active-channel contract and owner-gated activation workflow;
 - a fail-closed retention planner for future D4 checkpoint Releases.
+
+The full read-only D4 rehearsal is now PASS:
+
+- Actions run: `36263240118`;
+- main: `f7ccb36908df2bad082f1fb5e1037d8ffd2c1e09`;
+- source D3 channel SHA-256: `9f6fe3076833c7c9bac34709f67c6aacb2801300372c84385be9958f95c7d831`;
+- through ledger: `5,629,502`;
+- verified generations: `747 / 747`;
+- entries: `49,045`;
+- tombstones: `891`;
+- buckets/shards: `256 / 256`;
+- checkpoint manifest SHA-256: `cbdb9a91ae3af56c184df5793e71fb3fd5b307b13dfe3dc5f41e3b52edb9b274`;
+- source state SHA-256: `68300b3727907d86065a1d8c8c0ba2ff5575009517cc3ce030b35a0f182ad616`;
+- checkpoint state SHA-256: `68300b3727907d86065a1d8c8c0ba2ff5575009517cc3ce030b35a0f182ad616`;
+- equivalence: `true`.
+
+This proves D4 checkpoint construction and equivalence at that evidence point. It does **not** mean the D4 checkpoint/channel has been activated; the rehearsal was read-only and no D4 Release/channel mutation occurred.
 
 The D4 retention contract applies only to immutable Current overlay checkpoint Releases named `db-less-current-overlay-v1-<ledger>`. It keeps the active checkpoint plus two predecessors by default. Draft/non-prerelease checkpoints are protected, and a newer unactivated checkpoint causes planning to fail closed. D3 `db-less-live-data-v1-*` Releases are explicitly outside this retention contract because they carry History/live-chain evidence required by later stages. Actual Release deletion is not performed by the planner and remains a separate explicit mutation step.
 
