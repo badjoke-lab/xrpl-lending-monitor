@@ -11,7 +11,10 @@ on:
       - 'vite.db-less-current-overlay-checkpoint.config.ts'
       - 'vite.db-less-current-overlay-publisher.config.ts'
       - '.github/workflows/db-less-d4-current-overlay-rehearsal.yml'
+      - '.github/workflows/db-less-d4-current-overlay-preflight.yml'
       - '.github/workflows/db-less-d4-current-overlay-activate.yml'
+      - 'scripts/verify-db-less-live-release-chain.ts'
+      - 'vite.db-less-live-chain-verifier.config.ts'
       - 'src/shared/db-less/current-overlay-checkpoint.ts'
       - 'src/shared/db-less/current-overlay-checkpoint.test.ts'
       - 'src/shared/db-less/current-overlay-generation-reader.ts'
@@ -59,6 +62,7 @@ jobs:
         run: |
           pnpm build:db-less-current-overlay-checkpoint
           pnpm build:db-less-current-overlay-publisher
+          pnpm build:db-less-live-chain-verifier
 
       - name: Typecheck worker/shared graph
         run: pnpm exec tsc -p tsconfig.worker.json --noEmit
@@ -101,12 +105,20 @@ jobs:
         run: |
           set -euo pipefail
           workflow=".github/workflows/db-less-d4-current-overlay-activate.yml"
+          preflight=".github/workflows/db-less-d4-current-overlay-preflight.yml"
           grep -Fq "/d4-activate-current-overlay" "$workflow"
           grep -Fq "group: db-less-d4-current-overlay-activation" "$workflow"
           grep -Fq "pnpm build:db-less-current-overlay-publisher" "$workflow"
           grep -Fq 'db-less-current-overlay-v1-$through' "$workflow"
           grep -Fq "db-less-current-overlay-channel-v1" "$workflow"
           grep -Fq "Publish immutable checkpoint then activate D4 channel" "$workflow"
+          grep -Fq "/d4-activate-current-overlay-preflight" "$preflight"
+          grep -Fq "permissions:" "$preflight"
+          grep -Fq "contents: read" "$preflight"
+          grep -Fq -- "--max-generations 2048" "$preflight"
+          grep -Fq -- "--prefer-browser-download" "$preflight"
+          grep -Fq "activeActivationRuns" "$preflight"
+          grep -Fq '"preflight": "pass"' "$preflight"
 
       - name: D4 focused tests
         run: >-
