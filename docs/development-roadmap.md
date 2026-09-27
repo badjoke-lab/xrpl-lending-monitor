@@ -116,10 +116,25 @@ Scope:
 - prove exact lookup and list-page query plans;
 - prevent unbounded five-minute delta fan-out.
 
+Current evidence:
+
+- PR #1720 moved D4 initial-compaction payload reads away from the GitHub REST asset-download endpoint while retaining digest verification and bounded retry;
+- PR #1721 aligned D4 Current projection canonical identity with the D3 contract;
+- PR #1722 unified checkpoint writer, reader, and equivalence ordering under one bytewise canonical-key comparator;
+- full read-only rehearsal run `36263240118` passed on main `f7ccb36908df2bad082f1fb5e1037d8ffd2c1e09`;
+- source D3 channel head was ledger `5,629,502`;
+- all `747 / 747` source generations were verified and read;
+- the compacted checkpoint contains `49,045` entries, including `891` tombstones, across `256` buckets/shards;
+- checkpoint manifest SHA-256: `cbdb9a91ae3af56c184df5793e71fb3fd5b307b13dfe3dc5f41e3b52edb9b274`;
+- source and checkpoint state SHA-256 both equal `68300b3727907d86065a1d8c8c0ba2ff5575009517cc3ce030b35a0f182ad616`;
+- equivalence: `true`;
+- the rehearsal was read-only and did not activate a D4 checkpoint/channel.
+
 Exit:
 
 - normal browser reads are bounded independently of project age;
-- compaction equivalence passes.
+- compaction equivalence passes;
+- D4 active-channel publication/activation is separately verified before D5 consumes it.
 
 ## D5 — Static UI cutover
 
