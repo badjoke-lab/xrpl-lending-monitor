@@ -13,7 +13,7 @@ jobs:
     if: >-
       github.event.issue.number == 1673 &&
       github.event.comment.user.login == github.repository_owner &&
-      github.event.comment.body == '/d4-activate-current-overlay'
+      startsWith(github.event.comment.body, '/d4-activate-current-overlay ')
     concurrency:
       group: db-less-d4-current-overlay-activation
       cancel-in-progress: false
@@ -23,11 +23,33 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       D3_CHANNEL_RELEASE_TAG: db-less-live-channel-candidate-v1
       D4_CHANNEL_RELEASE_TAG: db-less-current-overlay-channel-v1
+      AUTHORIZATION_COMMENT: ${{ github.event.comment.body }}
     steps:
       - uses: actions/checkout@v5
         with:
           ref: main
           fetch-depth: 1
+
+      - name: Verify exact D4 activation authorization
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          read -r command expected_main expected_channel extra <<< "$AUTHORIZATION_COMMENT"
+          test "$command" = "/d4-activate-current-overlay"
+          test -z "${extra:-}"
+          [[ "$expected_main" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$expected_channel" =~ ^[a-f0-9]{64}$ ]]
+
+          actual_main="$(git rev-parse HEAD)"
+          test "$actual_main" = "$expected_main"
+
+          channel_body="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$D3_CHANNEL_RELEASE_TAG" --jq '.body')"
+          actual_channel="$(jq -er '.channelSha256' <<< "$channel_body")"
+          test "$actual_channel" = "$expected_channel"
+
+          echo "AUTHORIZED_MAIN_SHA=$expected_main" >> "$GITHUB_ENV"
+          echo "EXPECTED_D3_CHANNEL_SHA=$expected_channel" >> "$GITHUB_ENV"
 
       - run: corepack enable
 
@@ -44,11 +66,19 @@ jobs:
           --local
           --repository "$GITHUB_REPOSITORY"
           --channel-release-tag "$D3_CHANNEL_RELEASE_TAG"
+          --expected-channel-sha256 "$EXPECTED_D3_CHANNEL_SHA"
           --max-generations 2048
           --bucket-count 256
           --max-records-per-shard 50000
           --max-bytes-per-shard 2000000
           --output-dir .local/d4-current-overlay
+
+      - name: Verify checkpoint matches exact authorization
+        shell: bash
+        run: |
+          set -euo pipefail
+          summary=.local/d4-current-overlay/rehearsal-summary.json
+          test "$(jq -r '.channelSha256' "$summary")" = "$EXPECTED_D3_CHANNEL_SHA"
 
       - name: Resolve and verify D4 Releases
         shell: bash
@@ -66,7 +96,7 @@ jobs:
             test "$(jq -r '.draft' <<<"$release_json")" = "false"
             test "$(jq -r '.prerelease' <<<"$release_json")" = "true"
           else
-            gh release create "$checkpoint_tag"               --target "$GITHUB_SHA"               --prerelease               --latest=false               --title "D4 Current overlay checkpoint $through"               --notes "Immutable verified D4 Current overlay checkpoint. Activated only through the D4 channel Release."
+            gh release create "$checkpoint_tag"               --target "$AUTHORIZED_MAIN_SHA"               --prerelease               --latest=false               --title "D4 Current overlay checkpoint $through"               --notes "Immutable verified D4 Current overlay checkpoint. Activated only through the D4 channel Release."
           fi
 
           if gh release view "$D4_CHANNEL_RELEASE_TAG" >/dev/null 2>&1; then
@@ -74,7 +104,7 @@ jobs:
             test "$(jq -r '.draft' <<<"$channel_json")" = "false"
             test "$(jq -r '.prerelease' <<<"$channel_json")" = "true"
           else
-            gh api               --method POST               "repos/$GITHUB_REPOSITORY/releases"               -f tag_name="$D4_CHANNEL_RELEASE_TAG"               -f target_commitish="$GITHUB_SHA"               -f name="D4 Current overlay active checkpoint channel"               -f body=''               -F draft=false               -F prerelease=true               -f make_latest=false               >/dev/null
+            gh api               --method POST               "repos/$GITHUB_REPOSITORY/releases"               -f tag_name="$D4_CHANNEL_RELEASE_TAG"               -f target_commitish="$AUTHORIZED_MAIN_SHA"               -f name="D4 Current overlay active checkpoint channel"               -f body=''               -F draft=false               -F prerelease=true               -f make_latest=false               >/dev/null
           fi
 
       - name: Publish immutable checkpoint then activate D4 channel
@@ -101,6 +131,8 @@ jobs:
           D4 Current overlay activation PASS.
 
           - run: $GITHUB_RUN_ID
+          - authorized main: `$AUTHORIZED_MAIN_SHA`
+          - authorized D3 channel SHA-256: `$EXPECTED_D3_CHANNEL_SHA`
           - through ledger: `$through`
           - checkpoint Release: `$CHECKPOINT_RELEASE_TAG`
           - checkpoint manifest SHA-256: `$manifest`
