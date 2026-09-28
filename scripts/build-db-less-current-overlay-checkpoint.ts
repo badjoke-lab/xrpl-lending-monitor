@@ -12,6 +12,8 @@ import { DbLessCurrentOverlayReader } from '../src/shared/db-less/current-overla
 import { GitHubReleaseDbLessStore } from '../src/shared/db-less/github-release-publication'
 import { canonicalJson } from '../src/shared/current-state/canonical-json'
 
+const SHA256 = /^[a-f0-9]{64}$/
+
 function argumentValue(args: readonly string[], name: string): string | null {
   const index = args.indexOf(name)
   if (index < 0) return null
@@ -45,6 +47,10 @@ async function main(): Promise<void> {
   const repository = requiredArgument(args, '--repository')
   const channelReleaseTag = requiredArgument(args, '--channel-release-tag')
   const outputDir = resolve(requiredArgument(args, '--output-dir'))
+  const expectedChannelSha256 = argumentValue(args, '--expected-channel-sha256')
+  if (expectedChannelSha256 !== null && !SHA256.test(expectedChannelSha256)) {
+    throw new Error('--expected-channel-sha256 must be a lowercase SHA-256 digest')
+  }
   const maxGenerations = positiveInteger(args, '--max-generations', 2_048)
   const bucketCount = positiveInteger(args, '--bucket-count', 256)
   const maxRecordsPerShard = positiveInteger(args, '--max-records-per-shard', 50_000)
@@ -60,6 +66,12 @@ async function main(): Promise<void> {
   })
   const channelRead = await channelStore.readChannel()
   if (!channelRead) throw new Error('DB-less control channel Release does not contain a channel')
+  if (
+    expectedChannelSha256 !== null
+    && channelRead.channel.channelSha256 !== expectedChannelSha256
+  ) {
+    throw new Error('DB-less control channel SHA-256 does not match the authorized source')
+  }
 
   const stores = new Map<string, GitHubReleaseDbLessStore>()
   const storeFor = (location: DbLessArtifactLocationV1): GitHubReleaseDbLessStore => {
