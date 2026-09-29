@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest'
 
 import type { NormalizedCandidateV1 } from '../portable-collector-payload'
 import { buildDbLessCurrentOverlayCheckpoint } from './current-overlay-checkpoint'
-import {\n  verifyDbLessCurrentOverlayEquivalence,\n  verifyDbLessCurrentOverlayIncrementalEquivalence,\n} from './current-overlay-equivalence'
+import {
+  verifyDbLessCurrentOverlayEquivalence,
+  verifyDbLessCurrentOverlayIncrementalEquivalence,
+} from './current-overlay-equivalence'
 import { DbLessCurrentOverlayReader } from './current-overlay-reader'
 import { buildDbLessCurrentProjectionCanonicalKey } from './current-projection-identity'
 
