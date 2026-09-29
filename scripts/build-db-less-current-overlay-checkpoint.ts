@@ -145,7 +145,10 @@ async function main(): Promise<void> {
   const repository = requiredArgument(args, '--repository')
   const channelReleaseTag = requiredArgument(args, '--channel-release-tag')
   const outputDir = resolve(requiredArgument(args, '--output-dir'))
-  const activeOverlayChannelReleaseTag = argumentValue(\n    args,\n    '--active-overlay-channel-release-tag',\n  )
+  const activeOverlayChannelReleaseTag = argumentValue(
+    args,
+    '--active-overlay-channel-release-tag',
+  )
   const expectedChannelSha256 = argumentValue(args, '--expected-channel-sha256')
   if (expectedChannelSha256 !== null && !SHA256.test(expectedChannelSha256)) {
     throw new Error('--expected-channel-sha256 must be a lowercase SHA-256 digest')
