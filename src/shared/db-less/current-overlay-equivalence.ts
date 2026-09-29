@@ -1,6 +1,7 @@
 import type { NormalizedCandidateV1 } from '../portable-collector-payload'
 import { canonicalJson, sha256Hex } from '../current-state/canonical-json'
 import type {
+  DbLessCurrentOverlayCheckpointManifestV1,
   DbLessCurrentOverlayEntryV1,
   DbLessCurrentOverlayGenerationV1,
   DbLessCurrentOverlayObjectTypeV1,
@@ -56,13 +57,21 @@ function entryFromCandidate(candidate: NormalizedCandidateV1): DbLessCurrentOver
 
 function sourceState(
   generations: readonly DbLessCurrentOverlayGenerationV1[],
+  seedEntries: readonly DbLessCurrentOverlayEntryV1[] = [],
+  initialPreviousEnd: number | null = null,
 ): DbLessCurrentOverlayEntryV1[] {
   if (generations.length === 0) {
     throw new Error('D4 equivalence requires at least one source generation')
   }
 
   const latest = new Map<string, DbLessCurrentOverlayEntryV1>()
-  let previousEnd: number | null = null
+  for (const entry of seedEntries) {
+    if (latest.has(entry.canonicalKey)) {
+      throw new Error('D4 equivalence seed contains duplicate canonical keys')
+    }
+    latest.set(entry.canonicalKey, entry)
+  }
+  let previousEnd: number | null = initialPreviousEnd
   for (const generation of generations) {
     if (
       !Number.isSafeInteger(generation.startLedgerIndex)
@@ -181,6 +190,86 @@ export async function verifyDbLessCurrentOverlayEquivalence(options: {
   return {
     schemaVersion: 1,
     generationCount: options.generations.length,
+    sourceEntryCount: expected.length,
+    checkpointEntryCount: actual.length,
+    sourceTombstoneCount,
+    checkpointTombstoneCount,
+    sourceStateSha256,
+    checkpointStateSha256,
+    equivalent: true,
+  }
+}
+
+export async function verifyDbLessCurrentOverlayIncrementalEquivalence(options: {
+  seedManifest: DbLessCurrentOverlayCheckpointManifestV1
+  seedEntries: readonly DbLessCurrentOverlayEntryV1[]
+  generations: readonly DbLessCurrentOverlayGenerationV1[]
+  reader: DbLessCurrentOverlayReader
+}): Promise<DbLessCurrentOverlayEquivalenceSummaryV1> {
+  if (options.generations.length === 0) {
+    throw new Error('D4 incremental equivalence requires at least one new generation')
+  }
+  if (
+    options.seedManifest.epochId !== options.reader.manifest.epochId
+    || options.seedManifest.baseIdentity !== options.reader.manifest.baseIdentity
+    || options.seedManifest.bucketCount !== options.reader.manifest.bucketCount
+    || options.seedManifest.throughLedgerIndex >= options.reader.manifest.throughLedgerIndex
+  ) {
+    throw new Error('D4 incremental equivalence seed identity is incompatible')
+  }
+  if (
+    options.seedEntries.length !== options.seedManifest.entryCount
+    || options.seedEntries.filter((entry) => entry.isTombstone).length
+      !== options.seedManifest.tombstoneCount
+  ) {
+    throw new Error('D4 incremental equivalence seed counts are inconsistent')
+  }
+
+  const expectedGenerationIds = [
+    ...options.seedManifest.sourceGenerationIds,
+    ...options.generations.map((generation) => generation.generationId),
+  ]
+  if (
+    options.reader.manifest.generationCount !== expectedGenerationIds.length
+    || canonicalJson(options.reader.manifest.sourceGenerationIds)
+      !== canonicalJson(expectedGenerationIds)
+  ) {
+    throw new Error('D4 incremental equivalence generation provenance does not match')
+  }
+
+  const firstGeneration = options.generations[0]!
+  const lastGeneration = options.generations.at(-1)!
+  if (firstGeneration.startLedgerIndex !== options.seedManifest.throughLedgerIndex + 1) {
+    throw new Error('D4 incremental equivalence does not continue the seed checkpoint')
+  }
+  if (lastGeneration.endLedgerIndex !== options.reader.manifest.throughLedgerIndex) {
+    throw new Error('D4 incremental equivalence source head does not match checkpoint')
+  }
+
+  const expected = sourceState(
+    options.generations,
+    options.seedEntries,
+    options.seedManifest.throughLedgerIndex,
+  )
+  const actual = await checkpointState(options.reader)
+  const sourceStateSha256 = await digestState(expected)
+  const checkpointStateSha256 = await digestState(actual)
+  const sourceTombstoneCount = expected.filter((entry) => entry.isTombstone).length
+  const checkpointTombstoneCount = actual.filter((entry) => entry.isTombstone).length
+
+  if (
+    expected.length !== options.reader.manifest.entryCount
+    || actual.length !== options.reader.manifest.entryCount
+    || sourceTombstoneCount !== options.reader.manifest.tombstoneCount
+    || checkpointTombstoneCount !== options.reader.manifest.tombstoneCount
+    || sourceStateSha256 !== checkpointStateSha256
+  ) {
+    throw new Error('D4 incremental checkpoint is not equivalent to seed plus new generations')
+  }
+
+  return {
+    schemaVersion: 1,
+    generationCount: options.reader.manifest.generationCount,
     sourceEntryCount: expected.length,
     checkpointEntryCount: actual.length,
     sourceTombstoneCount,

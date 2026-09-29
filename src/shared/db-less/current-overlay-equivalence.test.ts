@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest'
 
 import type { NormalizedCandidateV1 } from '../portable-collector-payload'
 import { buildDbLessCurrentOverlayCheckpoint } from './current-overlay-checkpoint'
-import { verifyDbLessCurrentOverlayEquivalence } from './current-overlay-equivalence'
+import {
+  verifyDbLessCurrentOverlayEquivalence,
+  verifyDbLessCurrentOverlayIncrementalEquivalence,
+} from './current-overlay-equivalence'
 import { DbLessCurrentOverlayReader } from './current-overlay-reader'
 import { buildDbLessCurrentProjectionCanonicalKey } from './current-projection-identity'
 
@@ -89,6 +92,57 @@ describe('D4 Current overlay compaction equivalence', () => {
     expect(result.checkpointEntryCount).toBe(2)
     expect(result.sourceTombstoneCount).toBe(1)
     expect(result.checkpointTombstoneCount).toBe(1)
+    expect(result.sourceStateSha256).toBe(result.checkpointStateSha256)
+  })
+
+  it('matches seed state plus new generations to an incremental checkpoint', async () => {
+    const source = generations()
+    const seedCheckpoint = await buildDbLessCurrentOverlayCheckpoint({
+      epochId: 'epoch-1',
+      baseIdentity: 'base-1',
+      throughLedgerIndex: 101,
+      throughLedgerHash: HASH_A,
+      bucketCount: 8,
+      generations: [source[0]!],
+    })
+    const seedArtifacts = new Map(
+      seedCheckpoint.shardArtifacts.map((artifact) => [artifact.key, artifact.bytes] as const),
+    )
+    const seedReader = new DbLessCurrentOverlayReader({
+      manifest: seedCheckpoint.manifest,
+      readArtifact: async (key) => seedArtifacts.get(key) ?? null,
+    })
+    const seedState = await seedReader.readAll()
+
+    const checkpoint = await buildDbLessCurrentOverlayCheckpoint({
+      epochId: 'epoch-1',
+      baseIdentity: 'base-1',
+      throughLedgerIndex: 102,
+      throughLedgerHash: HASH_B,
+      bucketCount: 8,
+      generations: [source[1]!],
+      seed: {
+        manifest: seedCheckpoint.manifest,
+        entries: seedState.items,
+      },
+    })
+    const artifacts = new Map(
+      checkpoint.shardArtifacts.map((artifact) => [artifact.key, artifact.bytes] as const),
+    )
+    const reader = new DbLessCurrentOverlayReader({
+      manifest: checkpoint.manifest,
+      readArtifact: async (key) => artifacts.get(key) ?? null,
+    })
+
+    const result = await verifyDbLessCurrentOverlayIncrementalEquivalence({
+      seedManifest: seedCheckpoint.manifest,
+      seedEntries: seedState.items,
+      generations: [source[1]!],
+      reader,
+    })
+
+    expect(result.equivalent).toBe(true)
+    expect(result.generationCount).toBe(2)
     expect(result.sourceStateSha256).toBe(result.checkpointStateSha256)
   })
 
