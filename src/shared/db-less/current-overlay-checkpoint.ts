@@ -61,6 +61,11 @@ export interface DbLessCurrentOverlayCheckpointV1 {
   shardArtifacts: DbLessArtifact[]
 }
 
+export interface DbLessCurrentOverlayCheckpointSeedV1 {
+  manifest: DbLessCurrentOverlayCheckpointManifestV1
+  entries: readonly DbLessCurrentOverlayEntryV1[]
+}
+
 function nonEmpty(value: string, field: string): string {
   if (!value.length) throw new Error(`${field} must be non-empty`)
   return value
@@ -136,6 +141,7 @@ export async function buildDbLessCurrentOverlayCheckpoint(options: {
   throughLedgerIndex: number
   throughLedgerHash: string
   generations: readonly DbLessCurrentOverlayGenerationV1[]
+  seed?: DbLessCurrentOverlayCheckpointSeedV1
   bucketCount?: number
   maxRecordsPerShard?: number
   maxBytesPerShard?: number
@@ -144,7 +150,7 @@ export async function buildDbLessCurrentOverlayCheckpoint(options: {
   const baseIdentity = nonEmpty(options.baseIdentity, 'baseIdentity')
   const throughLedgerIndex = positiveInteger(options.throughLedgerIndex, 'throughLedgerIndex')
   const throughLedgerHash = ledgerHash(options.throughLedgerHash, 'throughLedgerHash')
-  const bucketCount = positiveInteger(options.bucketCount ?? 256, 'bucketCount')
+  const bucketCount = positiveInteger(\n    options.bucketCount ?? options.seed?.manifest.bucketCount ?? 256,\n    'bucketCount',\n  )
   const maxRecordsPerShard = positiveInteger(
     options.maxRecordsPerShard ?? 50_000,
     'maxRecordsPerShard',
@@ -152,12 +158,49 @@ export async function buildDbLessCurrentOverlayCheckpoint(options: {
   const maxBytesPerShard = positiveInteger(options.maxBytesPerShard ?? 2_000_000, 'maxBytesPerShard')
 
   if (options.generations.length === 0) {
-    throw new Error('D4 Current overlay checkpoint requires at least one generation')
+    throw new Error('D4 Current overlay checkpoint requires at least one new generation')
   }
 
   const latest = new Map<string, DbLessCurrentOverlayEntryV1>()
   const sourceGenerationIds: string[] = []
   let previousEnd: number | null = null
+
+  if (options.seed) {
+    const seed = options.seed
+    if (
+      seed.manifest.epochId !== epochId
+      || seed.manifest.baseIdentity !== baseIdentity
+      || seed.manifest.bucketCount !== bucketCount
+      || seed.manifest.throughLedgerIndex >= throughLedgerIndex
+      || seed.manifest.generationCount !== seed.manifest.sourceGenerationIds.length
+    ) {
+      throw new Error('D4 Current overlay seed checkpoint identity is incompatible')
+    }
+    if (
+      seed.entries.length !== seed.manifest.entryCount
+      || seed.entries.filter((entry) => entry.isTombstone).length !== seed.manifest.tombstoneCount
+    ) {
+      throw new Error('D4 Current overlay seed checkpoint counts are inconsistent')
+    }
+
+    for (const entry of seed.entries) {
+      const parsedType = parseDbLessCurrentProjectionCanonicalKey(
+        entry.canonicalKey,
+        entry.objectId,
+      )
+      if (
+        parsedType !== entry.objectType
+        || entry.sourceLedgerIndex > seed.manifest.throughLedgerIndex
+        || latest.has(entry.canonicalKey)
+      ) {
+        throw new Error('D4 Current overlay seed entry is inconsistent')
+      }
+      latest.set(entry.canonicalKey, entry)
+    }
+
+    sourceGenerationIds.push(...seed.manifest.sourceGenerationIds)
+    previousEnd = seed.manifest.throughLedgerIndex
+  }
 
   for (const generation of options.generations) {
     nonEmpty(generation.generationId, 'generationId')
@@ -170,6 +213,9 @@ export async function buildDbLessCurrentOverlayCheckpoint(options: {
       throw new Error('D4 Current overlay generations must be contiguous and ordered')
     }
     previousEnd = generation.endLedgerIndex
+    if (sourceGenerationIds.includes(generation.generationId)) {
+      throw new Error('D4 Current overlay generation ID is duplicated')
+    }
     sourceGenerationIds.push(generation.generationId)
 
     const seen = new Set<string>()
@@ -251,7 +297,7 @@ export async function buildDbLessCurrentOverlayCheckpoint(options: {
     baseIdentity,
     throughLedgerIndex,
     throughLedgerHash,
-    generationCount: options.generations.length,
+    generationCount: sourceGenerationIds.length,
     sourceGenerationIds,
     bucketCount,
     entryCount: entries.length,
