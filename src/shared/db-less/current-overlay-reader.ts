@@ -40,6 +40,11 @@ export interface DbLessCurrentOverlayListResult {
   shardReads: number
 }
 
+export interface DbLessCurrentOverlayReadAllResult {
+  items: DbLessCurrentOverlayEntryV1[]
+  shardReads: number
+}
+
 type CursorV1 = {
   v: 1
   throughLedgerIndex: number
@@ -318,6 +323,26 @@ export class DbLessCurrentOverlayReader {
     }
     this.#cache.set(descriptor.bucket, records)
     return { records, shardReads: 1 }
+  }
+
+  async readAll(): Promise<DbLessCurrentOverlayReadAllResult> {
+    const items: DbLessCurrentOverlayEntryV1[] = []
+    let shardReads = 0
+
+    for (const descriptor of this.manifest.shards) {
+      const loaded = await this.#shard(descriptor)
+      shardReads += loaded.shardReads
+      items.push(...loaded.records)
+    }
+
+    if (
+      items.length !== this.manifest.entryCount
+      || items.filter((entry) => entry.isTombstone).length !== this.manifest.tombstoneCount
+    ) {
+      throw new Error('D4 Current overlay full read does not match manifest counts')
+    }
+
+    return { items, shardReads }
   }
 
   async get(

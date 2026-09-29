@@ -3,7 +3,11 @@ import { describe, expect, it } from 'vitest'
 import type { IncrementalScanResult } from '../../collector/incremental/scan-validated-ledgers'
 import type { ValidatedLedgerTransaction } from '../../collector/incremental/validated-ledger-parser'
 import { buildDbLessChannel, type DbLessArtifactLocationV1 } from './channel'
-import { buildDbLessCurrentOverlayCheckpointFromChannel } from './current-overlay-chain-compactor'
+import {
+  buildDbLessCurrentOverlayCheckpointFromChannel,
+  buildDbLessCurrentOverlayCheckpointIncrementally,
+} from './current-overlay-chain-compactor'
+import { DbLessCurrentOverlayReader } from './current-overlay-reader'
 import { buildDbLessLiveChainArtifacts } from './live-chain'
 import { buildDbLessLiveDeltaArtifacts } from './live-delta'
 
@@ -149,6 +153,26 @@ async function fixture() {
     deltaManifestArtifact: firstDelta.manifestArtifact,
   })
 
+  const firstChannel = await buildDbLessChannel({
+    schemaVersion: 1,
+    network: 'devnet',
+    epochId: 'devnet-test',
+    base: {
+      location: LOCATION_1,
+      generationId: 'base-test',
+      snapshotId: 'snapshot-test',
+      manifestKey: 'base-manifest.json',
+      manifestSha256: SHA,
+      ledgerIndex: 100,
+      ledgerHash: BASE,
+    },
+    live: firstChain.channelPointer,
+    lastCommittedLedgerIndex: 101,
+    lastCommittedLedgerHash: L101,
+    historyCoverage: [],
+    updatedAt: '2026-09-23T00:00:00.000Z',
+  })
+
   const secondDelta = await buildDbLessLiveDeltaArtifacts({
     scan: scan({
       ledgerIndex: 102,
@@ -209,6 +233,7 @@ async function fixture() {
   }
 
   return {
+    firstChannel,
     channel,
     firstDelta,
     secondDelta,
@@ -257,6 +282,94 @@ describe('D4 full-chain Current compactor', () => {
         value: null,
       }),
     ])
+  })
+
+  it('advances from an active checkpoint without rereading the checkpoint boundary chain', async () => {
+    const built = await fixture()
+    const seed = await buildDbLessCurrentOverlayCheckpointFromChannel({
+      channel: built.firstChannel,
+      bucketCount: 8,
+      readChainArtifact: async (pointer) =>
+        built.chainArtifacts.get(locationKey(pointer.location, pointer.manifestKey)) ?? null,
+      readLocatedArtifact: async (location, key) =>
+        built.locatedArtifacts.get(locationKey(location, key)) ?? null,
+    })
+    const seedArtifacts = new Map(
+      seed.shardArtifacts.map((artifact) => [artifact.key, artifact.bytes] as const),
+    )
+    const seedReader = new DbLessCurrentOverlayReader({
+      manifest: seed.manifest,
+      readArtifact: async (key) => seedArtifacts.get(key) ?? null,
+    })
+    const seedState = await seedReader.readAll()
+    expect(seedState.shardReads).toBe(seed.manifest.shards.length)
+
+    let incrementalChainReads = 0
+    const incremental = await buildDbLessCurrentOverlayCheckpointIncrementally({
+      channel: built.channel,
+      seedManifest: seed.manifest,
+      seedEntries: seedState.items,
+      bucketCount: 8,
+      readChainArtifact: async (pointer) => {
+        incrementalChainReads += 1
+        return built.chainArtifacts.get(locationKey(pointer.location, pointer.manifestKey)) ?? null
+      },
+      readLocatedArtifact: async (location, key) =>
+        built.locatedArtifacts.get(locationKey(location, key)) ?? null,
+    })
+    const full = await buildDbLessCurrentOverlayCheckpointFromChannel({
+      channel: built.channel,
+      bucketCount: 8,
+      readChainArtifact: async (pointer) =>
+        built.chainArtifacts.get(locationKey(pointer.location, pointer.manifestKey)) ?? null,
+      readLocatedArtifact: async (location, key) =>
+        built.locatedArtifacts.get(locationKey(location, key)) ?? null,
+    })
+
+    expect(incremental).not.toBeNull()
+    expect(incremental!.manifestArtifact.sha256).toBe(full.manifestArtifact.sha256)
+    expect(
+      incremental!.shardArtifacts.map((artifact) => [artifact.key, artifact.sha256]),
+    ).toEqual(
+      full.shardArtifacts.map((artifact) => [artifact.key, artifact.sha256]),
+    )
+    expect(incrementalChainReads).toBe(1)
+  })
+
+  it('returns a no-op without chain reads when the active checkpoint already matches D3', async () => {
+    const built = await fixture()
+    const seed = await buildDbLessCurrentOverlayCheckpointFromChannel({
+      channel: built.firstChannel,
+      bucketCount: 8,
+      readChainArtifact: async (pointer) =>
+        built.chainArtifacts.get(locationKey(pointer.location, pointer.manifestKey)) ?? null,
+      readLocatedArtifact: async (location, key) =>
+        built.locatedArtifacts.get(locationKey(location, key)) ?? null,
+    })
+    const seedArtifacts = new Map(
+      seed.shardArtifacts.map((artifact) => [artifact.key, artifact.bytes] as const),
+    )
+    const seedReader = new DbLessCurrentOverlayReader({
+      manifest: seed.manifest,
+      readArtifact: async (key) => seedArtifacts.get(key) ?? null,
+    })
+    const seedState = await seedReader.readAll()
+    let chainReads = 0
+
+    const incremental = await buildDbLessCurrentOverlayCheckpointIncrementally({
+      channel: built.firstChannel,
+      seedManifest: seed.manifest,
+      seedEntries: seedState.items,
+      bucketCount: 8,
+      readChainArtifact: async () => {
+        chainReads += 1
+        return null
+      },
+      readLocatedArtifact: async () => null,
+    })
+
+    expect(incremental).toBeNull()
+    expect(chainReads).toBe(0)
   })
 
   it('fails before compaction when a linked-chain artifact is missing', async () => {
