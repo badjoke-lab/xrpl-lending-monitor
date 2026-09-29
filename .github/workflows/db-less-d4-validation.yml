@@ -11,6 +11,7 @@ on:
       - 'vite.db-less-current-overlay-checkpoint.config.ts'
       - 'vite.db-less-current-overlay-publisher.config.ts'
       - '.github/workflows/db-less-d4-current-overlay-rehearsal.yml'
+      - '.github/workflows/db-less-d4-current-overlay-incremental-rehearsal.yml'
       - '.github/workflows/db-less-d4-current-overlay-activate.yml'
       - 'src/shared/db-less/current-overlay-checkpoint.ts'
       - 'src/shared/db-less/current-overlay-checkpoint.test.ts'
@@ -117,6 +118,10 @@ jobs:
           grep -Fq -- '--target "$AUTHORIZED_MAIN_SHA"' "$workflow"
           grep -Fq 'target_commitish="$AUTHORIZED_MAIN_SHA"' "$workflow"
           grep -Fq "Publish immutable checkpoint then activate D4 channel" "$workflow"
+          incremental_workflow=".github/workflows/db-less-d4-current-overlay-incremental-rehearsal.yml"
+          grep -Fq "/d4-rehearse-current-overlay-incremental" "$incremental_workflow"
+          grep -Fq -- '--active-overlay-channel-release-tag db-less-current-overlay-channel-v1' "$incremental_workflow"
+          grep -Fq "Build verified incremental Current overlay checkpoint locally" "$incremental_workflow"
 
       - name: D4 focused tests
         run: >-
