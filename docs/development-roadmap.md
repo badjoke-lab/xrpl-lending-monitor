@@ -133,7 +133,11 @@ Current evidence:
 - activation was bound to D3 channel SHA-256 `646dc88384067d641040aa2f230f48fb2e9b0c434eca91325f8b6be22d72dbaf` at ledger `5,678,037`;
 - active checkpoint Release `db-less-current-overlay-v1-5678037` contains `257` verified immutable assets and D4 channel SHA-256 `6b7f016925187c8e4875535b1465f64f0df099a73344131ad89fda8894bf9ca3`;
 - activated checkpoint state SHA-256 is `21e03e8115f4f27aa426bbe05d031028afb4303b2ddca32f30d6d6aee80c22c8`;
-- D4 remains ACTIVE because recurrent compaction still rereads the full D3 chain; incremental compaction from the active checkpoint is the next required gate.
+- production-shaped incremental rehearsal run `36581602886` passed on main `b41855ffcabbf7a275d61cf88970c9ad4d4a9891`;
+- it seeded from active checkpoint ledger `5,678,037` with exactly `256` checkpoint shard reads and read only `300` post-checkpoint D3 generations/manifests to reach ledger `5,707,555`;
+- incremental output contained `62,334` entries / `1,220` tombstones / `256` shards and independently matched source state SHA-256 `2273296f93e48f29fe18b8f6e6958b07ea1e32c5f39430e1de99633a2342b450`;
+- recurrent compaction network traversal is therefore bounded by the fixed active-checkpoint shard set plus generations since the last checkpoint, rather than total project age;
+- D4 remains ACTIVE because checkpoint provenance still stores the full `sourceGenerationIds` list, so manifest size remains project-age-dependent; bounded provenance is the next required gate.
 
 Exit:
 
