@@ -128,7 +128,12 @@ Current evidence:
 - checkpoint manifest SHA-256: `cbdb9a91ae3af56c184df5793e71fb3fd5b307b13dfe3dc5f41e3b52edb9b274`;
 - source and checkpoint state SHA-256 both equal `68300b3727907d86065a1d8c8c0ba2ff5575009517cc3ce030b35a0f182ad616`;
 - equivalence: `true`;
-- the rehearsal was read-only and did not activate a D4 checkpoint/channel.
+- the rehearsal was read-only and did not activate a D4 checkpoint/channel;
+- exact-bound activation PR #1725 merged and initial activation run `36425196028` passed on main `2316eec6c1d1300a8e1776d2760df2bf79066cf3`;
+- activation was bound to D3 channel SHA-256 `646dc88384067d641040aa2f230f48fb2e9b0c434eca91325f8b6be22d72dbaf` at ledger `5,678,037`;
+- active checkpoint Release `db-less-current-overlay-v1-5678037` contains `257` verified immutable assets and D4 channel SHA-256 `6b7f016925187c8e4875535b1465f64f0df099a73344131ad89fda8894bf9ca3`;
+- activated checkpoint state SHA-256 is `21e03e8115f4f27aa426bbe05d031028afb4303b2ddca32f30d6d6aee80c22c8`;
+- D4 remains ACTIVE because recurrent compaction still rereads the full D3 chain; incremental compaction from the active checkpoint is the next required gate.
 
 Exit:
 

@@ -131,15 +131,15 @@ jobs:
           D4 Current overlay activation PASS.
 
           - run: $GITHUB_RUN_ID
-          - authorized main: `$AUTHORIZED_MAIN_SHA`
-          - authorized D3 channel SHA-256: `$EXPECTED_D3_CHANNEL_SHA`
-          - through ledger: `$through`
-          - checkpoint Release: `$CHECKPOINT_RELEASE_TAG`
-          - checkpoint manifest SHA-256: `$manifest`
-          - compacted state SHA-256: `$state`
-          - source D3 channel SHA-256: `$source_channel`
-          - D4 channel SHA-256: `$d4_channel`
-          - immutable assets uploaded/reused: `$uploaded / $reused`
+          - authorized main: $AUTHORIZED_MAIN_SHA
+          - authorized D3 channel SHA-256: $EXPECTED_D3_CHANNEL_SHA
+          - through ledger: $through
+          - checkpoint Release: $CHECKPOINT_RELEASE_TAG
+          - checkpoint manifest SHA-256: $manifest
+          - compacted state SHA-256: $state
+          - source D3 channel SHA-256: $source_channel
+          - D4 channel SHA-256: $d4_channel
+          - immutable assets uploaded/reused: $uploaded / $reused
           - checkpoint assets were verified before channel activation
 
           No D3 channel, D2 base, D1, Queue, or Supabase state was mutated.
