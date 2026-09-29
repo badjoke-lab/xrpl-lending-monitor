@@ -67,6 +67,7 @@ jobs:
           --repository "$GITHUB_REPOSITORY"
           --channel-release-tag "$D3_CHANNEL_RELEASE_TAG"
           --expected-channel-sha256 "$EXPECTED_D3_CHANNEL_SHA"
+          --active-overlay-channel-release-tag "$D4_CHANNEL_RELEASE_TAG"
           --max-generations 2048
           --bucket-count 256
           --max-records-per-shard 50000
@@ -119,7 +120,12 @@ jobs:
         run: |
           set -euo pipefail
           summary=.local/d4-current-overlay/publication-summary.json
+          rehearsal=.local/d4-current-overlay/rehearsal-summary.json
           through="$(jq -r '.throughLedgerIndex' "$summary")"
+          mode="$(jq -r '.mode' "$rehearsal")"
+          seed_through="$(jq -r '.seedThroughLedgerIndex' "$rehearsal")"
+          incremental_generations="$(jq -r '.incrementalGenerationCount' "$rehearsal")"
+          traversed_manifests="$(jq -r '.traversedIncrementalManifests' "$rehearsal")"
           manifest="$(jq -r '.manifestSha256' "$summary")"
           state="$(jq -r '.stateSha256' "$summary")"
           source_channel="$(jq -r '.sourceChannelSha256' "$summary")"
@@ -133,6 +139,10 @@ jobs:
           - run: $GITHUB_RUN_ID
           - authorized main: $AUTHORIZED_MAIN_SHA
           - authorized D3 channel SHA-256: $EXPECTED_D3_CHANNEL_SHA
+          - mode: $mode
+          - seed through ledger: $seed_through
+          - incremental generations: $incremental_generations
+          - traversed incremental manifests: $traversed_manifests
           - through ledger: $through
           - checkpoint Release: $CHECKPOINT_RELEASE_TAG
           - checkpoint manifest SHA-256: $manifest

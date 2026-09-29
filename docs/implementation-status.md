@@ -217,7 +217,24 @@ The first exact-bound D4 activation is also PASS:
 - checkpoint state SHA-256: `21e03e8115f4f27aa426bbe05d031028afb4303b2ddca32f30d6d6aee80c22c8`;
 - D4 channel SHA-256: `6b7f016925187c8e4875535b1465f64f0df099a73344131ad89fda8894bf9ca3`.
 
-The checkpoint and D4 channel Releases exist as published prereleases and target the authorized main revision. D4 is still **active**, not complete: the current compactor reconstructs every live generation from the D2 boundary on every run, so recurrent compaction cost still grows with project age. Incremental compaction from the active checkpoint remains the next D4 gate.
+The checkpoint and D4 channel Releases exist as published prereleases and target the authorized main revision.
+
+Production-shaped incremental compaction is now also PASS:
+
+- Actions run: `36581602886`;
+- main: `b41855ffcabbf7a275d61cf88970c9ad4d4a9891`;
+- seed checkpoint through ledger: `5,678,037`;
+- seed checkpoint shard reads: `256`;
+- source D3 head: `5,707,555`;
+- new generations/manifests traversed: `300 / 300`;
+- total checkpoint generations after compaction: `1,550`;
+- entries: `62,334`;
+- tombstones: `1,220`;
+- shards: `256`;
+- source/checkpoint state SHA-256: `2273296f93e48f29fe18b8f6e6958b07ea1e32c5f39430e1de99633a2342b450`;
+- equivalence: `true`.
+
+This proves recurrent compaction can read the fixed active checkpoint shard set plus only post-checkpoint D3 generations instead of reconstructing all historical live generations. D4 is still **active**, not complete: checkpoint manifests still carry the complete `sourceGenerationIds` array, so provenance size remains project-age-dependent. Bounded provenance is the next D4 gate.
 
 The D4 retention contract applies only to immutable Current overlay checkpoint Releases named `db-less-current-overlay-v1-<ledger>`. It keeps the active checkpoint plus two predecessors by default. Draft/non-prerelease checkpoints are protected, and a newer unactivated checkpoint causes planning to fail closed. D3 `db-less-live-data-v1-*` Releases are explicitly outside this retention contract because they carry History/live-chain evidence required by later stages. Actual Release deletion is not performed by the planner and remains a separate explicit mutation step.
 
