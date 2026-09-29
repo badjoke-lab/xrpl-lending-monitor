@@ -150,7 +150,10 @@ export async function buildDbLessCurrentOverlayCheckpoint(options: {
   const baseIdentity = nonEmpty(options.baseIdentity, 'baseIdentity')
   const throughLedgerIndex = positiveInteger(options.throughLedgerIndex, 'throughLedgerIndex')
   const throughLedgerHash = ledgerHash(options.throughLedgerHash, 'throughLedgerHash')
-  const bucketCount = positiveInteger(\n    options.bucketCount ?? options.seed?.manifest.bucketCount ?? 256,\n    'bucketCount',\n  )
+  const bucketCount = positiveInteger(
+    options.bucketCount ?? options.seed?.manifest.bucketCount ?? 256,
+    'bucketCount',
+  )
   const maxRecordsPerShard = positiveInteger(
     options.maxRecordsPerShard ?? 50_000,
     'maxRecordsPerShard',
