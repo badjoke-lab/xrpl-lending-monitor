@@ -5,12 +5,23 @@ import type {
   DbLessArtifactLocationV1,
   DbLessLivePointerV1,
 } from '../src/shared/db-less/channel'
-import { readDbLessCurrentOverlaySourceFromChannel } from '../src/shared/db-less/current-overlay-chain-compactor'
-import { buildDbLessCurrentOverlayCheckpoint } from '../src/shared/db-less/current-overlay-checkpoint'
-import { verifyDbLessCurrentOverlayEquivalence } from '../src/shared/db-less/current-overlay-equivalence'
+import {
+  readDbLessCurrentOverlaySourceAfterCheckpoint,
+  readDbLessCurrentOverlaySourceFromChannel,
+} from '../src/shared/db-less/current-overlay-chain-compactor'
+import {
+  buildDbLessCurrentOverlayCheckpoint,
+  type DbLessCurrentOverlayCheckpointManifestV1,
+} from '../src/shared/db-less/current-overlay-checkpoint'
+import {
+  verifyDbLessCurrentOverlayEquivalence,
+  verifyDbLessCurrentOverlayIncrementalEquivalence,
+} from '../src/shared/db-less/current-overlay-equivalence'
+import { GitHubReleaseCurrentOverlayChannelStore } from '../src/shared/db-less/current-overlay-channel-github-release'
 import { DbLessCurrentOverlayReader } from '../src/shared/db-less/current-overlay-reader'
+import { compareDbLessCurrentProjectionCanonicalKeys } from '../src/shared/db-less/current-projection-identity'
 import { GitHubReleaseDbLessStore } from '../src/shared/db-less/github-release-publication'
-import { canonicalJson } from '../src/shared/current-state/canonical-json'
+import { canonicalJson, sha256Hex } from '../src/shared/current-state/canonical-json'
 
 const SHA256 = /^[a-f0-9]{64}$/
 
@@ -38,6 +49,93 @@ function positiveInteger(args: readonly string[], name: string, fallback: number
   return value
 }
 
+async function readActiveCheckpointSeed(options: {
+  repository: string
+  channelReleaseTag: string
+  token: string
+  maxBytesPerShard: number
+}): Promise<{
+  manifest: DbLessCurrentOverlayCheckpointManifestV1
+  entries: Awaited<ReturnType<DbLessCurrentOverlayReader['readAll']>>['items']
+  shardReads: number
+  stateSha256: string
+}> {
+  const channelStore = new GitHubReleaseCurrentOverlayChannelStore({
+    repository: options.repository,
+    releaseTag: options.channelReleaseTag,
+    token: options.token,
+  })
+  const channelRead = await channelStore.read()
+  if (!channelRead) {
+    throw new Error('D4 active channel Release does not contain a checkpoint')
+  }
+  const active = channelRead.channel.active
+  if (
+    active.location.repository !== options.repository
+    || active.location.provider !== 'github-release'
+  ) {
+    throw new Error('D4 active checkpoint location is unsupported')
+  }
+
+  const checkpointStore = new GitHubReleaseDbLessStore({
+    repository: options.repository,
+    releaseTag: active.location.releaseTag,
+    token: options.token,
+    maxAssets: 900,
+    downloadRetryDelaysMs: [2_000, 5_000, 15_000, 30_000, 60_000],
+    downloadPacingMs: 25,
+    preferBrowserDownload: true,
+  })
+  const manifestBytes = await checkpointStore.readImmutable(active.manifestKey)
+  if (!manifestBytes || await sha256Hex(manifestBytes) !== active.manifestSha256) {
+    throw new Error('D4 active checkpoint manifest is missing or does not match the channel')
+  }
+
+  let manifest: DbLessCurrentOverlayCheckpointManifestV1
+  try {
+    manifest = JSON.parse(
+      new TextDecoder().decode(manifestBytes),
+    ) as DbLessCurrentOverlayCheckpointManifestV1
+  } catch {
+    throw new Error('D4 active checkpoint manifest is not valid JSON')
+  }
+  if (
+    manifest.epochId !== channelRead.channel.epochId
+    || manifest.baseIdentity !== active.baseIdentity
+    || manifest.throughLedgerIndex !== active.throughLedgerIndex
+    || manifest.throughLedgerHash !== active.throughLedgerHash
+    || manifest.generationCount !== active.generationCount
+    || manifest.entryCount !== active.entryCount
+    || manifest.tombstoneCount !== active.tombstoneCount
+    || manifest.bucketCount !== active.bucketCount
+  ) {
+    throw new Error('D4 active checkpoint manifest does not match its channel pointer')
+  }
+
+  const reader = new DbLessCurrentOverlayReader({
+    manifest,
+    readArtifact: async (key) => checkpointStore.readImmutable(key),
+    maxShardBytes: options.maxBytesPerShard,
+  })
+  const seed = await reader.readAll()
+  const ordered = [...seed.items].sort((left, right) =>
+    compareDbLessCurrentProjectionCanonicalKeys(
+      left.canonicalKey,
+      right.canonicalKey,
+    ))
+  const stateSha256 = await sha256Hex(`${canonicalJson(ordered)}\n`)
+  if (stateSha256 !== active.stateSha256) {
+    throw new Error('D4 active checkpoint state digest does not match the channel')
+  }
+
+  return {
+    manifest,
+    entries: seed.items,
+    shardReads: seed.shardReads,
+    stateSha256,
+  }
+}
+
 async function main(): Promise<void> {
   const args = process.argv.slice(2)
   if (!args.includes('--local')) {
@@ -47,6 +145,7 @@ async function main(): Promise<void> {
   const repository = requiredArgument(args, '--repository')
   const channelReleaseTag = requiredArgument(args, '--channel-release-tag')
   const outputDir = resolve(requiredArgument(args, '--output-dir'))
+  const activeOverlayChannelReleaseTag = argumentValue(\n    args,\n    '--active-overlay-channel-release-tag',\n  )
   const expectedChannelSha256 = argumentValue(args, '--expected-channel-sha256')
   if (expectedChannelSha256 !== null && !SHA256.test(expectedChannelSha256)) {
     throw new Error('--expected-channel-sha256 must be a lowercase SHA-256 digest')
@@ -97,47 +196,126 @@ async function main(): Promise<void> {
     return store
   }
 
-  process.stdout.write(`D4 initial compaction: source channel head ${channelRead.channel.lastCommittedLedgerIndex}\n`)
-  const source = await readDbLessCurrentOverlaySourceFromChannel({
-    channel: channelRead.channel,
-    maxGenerations,
-    readChainArtifact: async (pointer: DbLessLivePointerV1) =>
-      storeFor(pointer.location).readImmutable(pointer.manifestKey),
-    readLocatedArtifact: async (location, key) =>
-      storeFor(location).readImmutable(key),
-    onProgress: (progress) => {
-      const total = progress.total === null ? '?' : String(progress.total)
-      process.stdout.write(
-        `D4 initial compaction: ${progress.phase} ${progress.completed}/${total}\n`,
-      )
-    },
-  })
-  process.stdout.write(`D4 initial compaction: source read complete (${source.generations.length} generations)\n`)
+  const progress = (label: string) => (value: {
+    phase: string
+    completed: number
+    total: number | null
+  }) => {
+    const total = value.total === null ? '?' : String(value.total)
+    process.stdout.write(
+      `D4 ${label}: ${value.phase} ${value.completed}/${total}\n`,
+    )
+  }
 
-  process.stdout.write('D4 initial compaction: building checkpoint\n')
-  const checkpoint = await buildDbLessCurrentOverlayCheckpoint({
-    epochId: channelRead.channel.epochId,
-    baseIdentity: channelRead.channel.base.generationId,
-    throughLedgerIndex: channelRead.channel.lastCommittedLedgerIndex,
-    throughLedgerHash: channelRead.channel.lastCommittedLedgerHash,
-    generations: source.generations,
-    bucketCount,
-    maxRecordsPerShard,
-    maxBytesPerShard,
-  })
+  let mode: 'initial' | 'incremental' = 'initial'
+  let seedThroughLedgerIndex: number | null = null
+  let seedShardReads = 0
+  let incrementalGenerationCount: number | null = null
+  let traversedIncrementalManifests: number | null = null
 
-  const localArtifacts = new Map(
-    checkpoint.shardArtifacts.map((artifact) => [artifact.key, artifact.bytes] as const),
-  )
-  process.stdout.write('D4 initial compaction: verifying equivalence\n')
-  const equivalence = await verifyDbLessCurrentOverlayEquivalence({
-    generations: source.generations,
-    reader: new DbLessCurrentOverlayReader({
-      manifest: checkpoint.manifest,
-      readArtifact: async (key) => localArtifacts.get(key) ?? null,
-      maxShardBytes: maxBytesPerShard,
-    }),
-  })
+  let checkpoint: Awaited<ReturnType<typeof buildDbLessCurrentOverlayCheckpoint>>
+  let equivalence: Awaited<ReturnType<typeof verifyDbLessCurrentOverlayEquivalence>>
+  let verifiedGenerationCount: number
+
+  if (activeOverlayChannelReleaseTag === null) {
+    process.stdout.write(
+      `D4 initial compaction: source channel head ${channelRead.channel.lastCommittedLedgerIndex}\n`,
+    )
+    const source = await readDbLessCurrentOverlaySourceFromChannel({
+      channel: channelRead.channel,
+      maxGenerations,
+      readChainArtifact: async (pointer: DbLessLivePointerV1) =>
+        storeFor(pointer.location).readImmutable(pointer.manifestKey),
+      readLocatedArtifact: async (location, key) =>
+        storeFor(location).readImmutable(key),
+      onProgress: progress('initial compaction'),
+    })
+    process.stdout.write(
+      `D4 initial compaction: source read complete (${source.generations.length} generations)\n`,
+    )
+    checkpoint = await buildDbLessCurrentOverlayCheckpoint({
+      epochId: channelRead.channel.epochId,
+      baseIdentity: channelRead.channel.base.generationId,
+      throughLedgerIndex: channelRead.channel.lastCommittedLedgerIndex,
+      throughLedgerHash: channelRead.channel.lastCommittedLedgerHash,
+      generations: source.generations,
+      bucketCount,
+      maxRecordsPerShard,
+      maxBytesPerShard,
+    })
+    const localArtifacts = new Map(
+      checkpoint.shardArtifacts.map((artifact) => [artifact.key, artifact.bytes] as const),
+    )
+    equivalence = await verifyDbLessCurrentOverlayEquivalence({
+      generations: source.generations,
+      reader: new DbLessCurrentOverlayReader({
+        manifest: checkpoint.manifest,
+        readArtifact: async (key) => localArtifacts.get(key) ?? null,
+        maxShardBytes: maxBytesPerShard,
+      }),
+    })
+    verifiedGenerationCount = source.verification.generationCount
+  } else {
+    mode = 'incremental'
+    process.stdout.write(
+      `D4 incremental compaction: source channel head ${channelRead.channel.lastCommittedLedgerIndex}\n`,
+    )
+    const seed = await readActiveCheckpointSeed({
+      repository,
+      channelReleaseTag: activeOverlayChannelReleaseTag,
+      token,
+      maxBytesPerShard,
+    })
+    seedThroughLedgerIndex = seed.manifest.throughLedgerIndex
+    seedShardReads = seed.shardReads
+    process.stdout.write(
+      `D4 incremental compaction: seed checkpoint ${seedThroughLedgerIndex} with ${seedShardReads} shard reads\n`,
+    )
+
+    const source = await readDbLessCurrentOverlaySourceAfterCheckpoint({
+      channel: channelRead.channel,
+      checkpoint: seed.manifest,
+      maxNewGenerations: maxGenerations,
+      readChainArtifact: async (pointer: DbLessLivePointerV1) =>
+        storeFor(pointer.location).readImmutable(pointer.manifestKey),
+      readLocatedArtifact: async (location, key) =>
+        storeFor(location).readImmutable(key),
+      onProgress: progress('incremental compaction'),
+    })
+    if (source.generations.length === 0) {
+      throw new Error('D4 incremental rehearsal has no new D3 generations')
+    }
+    incrementalGenerationCount = source.generations.length
+    traversedIncrementalManifests = source.traversedManifests
+    checkpoint = await buildDbLessCurrentOverlayCheckpoint({
+      epochId: channelRead.channel.epochId,
+      baseIdentity: channelRead.channel.base.generationId,
+      throughLedgerIndex: channelRead.channel.lastCommittedLedgerIndex,
+      throughLedgerHash: channelRead.channel.lastCommittedLedgerHash,
+      generations: source.generations,
+      seed: {
+        manifest: seed.manifest,
+        entries: seed.entries,
+      },
+      bucketCount,
+      maxRecordsPerShard,
+      maxBytesPerShard,
+    })
+    const localArtifacts = new Map(
+      checkpoint.shardArtifacts.map((artifact) => [artifact.key, artifact.bytes] as const),
+    )
+    equivalence = await verifyDbLessCurrentOverlayIncrementalEquivalence({
+      seedManifest: seed.manifest,
+      seedEntries: seed.entries,
+      generations: source.generations,
+      reader: new DbLessCurrentOverlayReader({
+        manifest: checkpoint.manifest,
+        readArtifact: async (key) => localArtifacts.get(key) ?? null,
+        maxShardBytes: maxBytesPerShard,
+      }),
+    })
+    verifiedGenerationCount = checkpoint.manifest.generationCount
+  }
 
   await mkdir(outputDir, { recursive: true })
   await writeFile(
@@ -150,6 +328,7 @@ async function main(): Promise<void> {
 
   const summary = {
     schemaVersion: 1,
+    mode,
     repository,
     channelReleaseTag,
     channelSha256: channelRead.channel.channelSha256,
@@ -164,7 +343,11 @@ async function main(): Promise<void> {
     manifestKey: checkpoint.manifestArtifact.key,
     manifestSha256: checkpoint.manifestArtifact.sha256,
     storesRead: stores.size,
-    verifiedGenerationCount: source.verification.generationCount,
+    verifiedGenerationCount,
+    seedThroughLedgerIndex,
+    seedShardReads,
+    incrementalGenerationCount,
+    traversedIncrementalManifests,
     equivalence,
   }
   await writeFile(
