@@ -2,7 +2,7 @@ import { canonicalJson, sha256Hex } from '../current-state/canonical-json'
 import { verifyDbLessChannel, type DbLessChannelV1, type DbLessLivePointerV1 } from './channel'
 import {
   buildDbLessCurrentOverlayCheckpoint,
-  type DbLessCurrentOverlayCheckpointManifestV1,
+  type DbLessCurrentOverlayCheckpointManifest,
   type DbLessCurrentOverlayCheckpointV1,
   type DbLessCurrentOverlayEntryV1,
   type DbLessCurrentOverlayGenerationV1,
@@ -163,7 +163,7 @@ export interface DbLessCurrentOverlayIncrementalSourceV1 {
 
 export async function readDbLessCurrentOverlaySourceAfterCheckpoint(options: {
   channel: DbLessChannelV1
-  checkpoint: DbLessCurrentOverlayCheckpointManifestV1
+  checkpoint: DbLessCurrentOverlayCheckpointManifest
   readChainArtifact: DbLessLiveChainArtifactReader
   readLocatedArtifact: DbLessLocatedArtifactReader
   maxNewGenerations?: number
@@ -307,7 +307,7 @@ export async function readDbLessCurrentOverlaySourceAfterCheckpoint(options: {
 
 export async function buildDbLessCurrentOverlayCheckpointIncrementally(options: {
   channel: DbLessChannelV1
-  seedManifest: DbLessCurrentOverlayCheckpointManifestV1
+  seedManifest: DbLessCurrentOverlayCheckpointManifest
   seedEntries: readonly DbLessCurrentOverlayEntryV1[]
   readChainArtifact: DbLessLiveChainArtifactReader
   readLocatedArtifact: DbLessLocatedArtifactReader
