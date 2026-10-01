@@ -4,11 +4,12 @@ import {
   compareDbLessCurrentProjectionCanonicalKeys,
 } from './current-projection-identity'
 import type {
-  DbLessCurrentOverlayCheckpointManifestV1,
+  DbLessCurrentOverlayCheckpointManifest,
   DbLessCurrentOverlayEntryV1,
   DbLessCurrentOverlayObjectTypeV1,
   DbLessCurrentOverlayShardV1,
 } from './current-overlay-checkpoint'
+import { assertDbLessCurrentOverlayGenerationProvenance } from './current-overlay-provenance'
 
 const LEDGER_HASH = /^[A-F0-9]{64}$/
 const SHA256 = /^[a-f0-9]{64}$/
@@ -98,8 +99,11 @@ async function bucketFor(key: string, bucketCount: number): Promise<number> {
   return Number.parseInt(digest.slice(0, 8), 16) % bucketCount
 }
 
-function assertManifest(manifest: DbLessCurrentOverlayCheckpointManifestV1): void {
-  if (manifest.schemaVersion !== 1 || manifest.network !== 'devnet') {
+function assertManifest(manifest: DbLessCurrentOverlayCheckpointManifest): void {
+  if (
+    (manifest.schemaVersion !== 1 && manifest.schemaVersion !== 2)
+    || manifest.network !== 'devnet'
+  ) {
     throw new Error('D4 Current overlay manifest schema is invalid')
   }
   nonEmpty(manifest.epochId, 'epochId')
@@ -109,14 +113,25 @@ function assertManifest(manifest: DbLessCurrentOverlayCheckpointManifestV1): voi
     throw new Error('throughLedgerHash must be an uppercase 64-character ledger hash')
   }
   positiveInteger(manifest.generationCount, 'generationCount')
-  if (
-    manifest.sourceGenerationIds.length !== manifest.generationCount
-    || new Set(manifest.sourceGenerationIds).size !== manifest.sourceGenerationIds.length
-  ) {
-    throw new Error('D4 Current overlay source generation IDs are inconsistent')
+  if (manifest.schemaVersion === 1) {
+    if (
+      manifest.sourceGenerationIds.length !== manifest.generationCount
+      || new Set(manifest.sourceGenerationIds).size !== manifest.sourceGenerationIds.length
+    ) {
+      throw new Error('D4 Current overlay source generation IDs are inconsistent')
+    }
+    manifest.sourceGenerationIds.forEach((value, index) =>
+      nonEmpty(value, `sourceGenerationIds[${index}]`))
+  } else {
+    assertDbLessCurrentOverlayGenerationProvenance(
+      manifest.sourceGenerationProvenance,
+    )
+    if (
+      manifest.sourceGenerationProvenance.generationCount !== manifest.generationCount
+    ) {
+      throw new Error('D4 Current overlay bounded provenance count is inconsistent')
+    }
   }
-  manifest.sourceGenerationIds.forEach((value, index) =>
-    nonEmpty(value, `sourceGenerationIds[${index}]`))
   positiveInteger(manifest.bucketCount, 'bucketCount')
   nonNegativeInteger(manifest.entryCount, 'entryCount')
   nonNegativeInteger(manifest.tombstoneCount, 'tombstoneCount')
@@ -202,7 +217,7 @@ function encodeCursor(cursor: CursorV1): string {
 
 function decodeCursor(options: {
   cursor?: string
-  manifest: DbLessCurrentOverlayCheckpointManifestV1
+  manifest: DbLessCurrentOverlayCheckpointManifest
   objectType: DbLessCurrentOverlayObjectTypeV1
   includeTombstones: boolean
 }): CursorV1 {
@@ -250,13 +265,13 @@ function decodeCursor(options: {
 }
 
 export class DbLessCurrentOverlayReader {
-  readonly manifest: DbLessCurrentOverlayCheckpointManifestV1
+  readonly manifest: DbLessCurrentOverlayCheckpointManifest
   readonly #readArtifact: DbLessCurrentOverlayArtifactReader
   readonly #maxShardBytes: number
   readonly #cache = new Map<number, DbLessCurrentOverlayEntryV1[]>()
 
   constructor(options: {
-    manifest: DbLessCurrentOverlayCheckpointManifestV1
+    manifest: DbLessCurrentOverlayCheckpointManifest
     readArtifact: DbLessCurrentOverlayArtifactReader
     maxShardBytes?: number
   }) {

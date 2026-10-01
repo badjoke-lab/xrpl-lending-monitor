@@ -11,7 +11,7 @@ import {
 } from '../src/shared/db-less/current-overlay-chain-compactor'
 import {
   buildDbLessCurrentOverlayCheckpoint,
-  type DbLessCurrentOverlayCheckpointManifestV1,
+  type DbLessCurrentOverlayCheckpointManifest,
 } from '../src/shared/db-less/current-overlay-checkpoint'
 import {
   verifyDbLessCurrentOverlayEquivalence,
@@ -55,7 +55,7 @@ async function readActiveCheckpointSeed(options: {
   token: string
   maxBytesPerShard: number
 }): Promise<{
-  manifest: DbLessCurrentOverlayCheckpointManifestV1
+  manifest: DbLessCurrentOverlayCheckpointManifest
   entries: Awaited<ReturnType<DbLessCurrentOverlayReader['readAll']>>['items']
   shardReads: number
   stateSha256: string
@@ -91,11 +91,11 @@ async function readActiveCheckpointSeed(options: {
     throw new Error('D4 active checkpoint manifest is missing or does not match the channel')
   }
 
-  let manifest: DbLessCurrentOverlayCheckpointManifestV1
+  let manifest: DbLessCurrentOverlayCheckpointManifest
   try {
     manifest = JSON.parse(
       new TextDecoder().decode(manifestBytes),
-    ) as DbLessCurrentOverlayCheckpointManifestV1
+    ) as DbLessCurrentOverlayCheckpointManifest
   } catch {
     throw new Error('D4 active checkpoint manifest is not valid JSON')
   }

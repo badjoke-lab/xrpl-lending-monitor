@@ -168,6 +168,6 @@ describe('D4 Current overlay compaction equivalence', () => {
     await expect(verifyDbLessCurrentOverlayEquivalence({
       generations: changed,
       reader: built.reader,
-    })).rejects.toThrow('generation IDs')
+    })).rejects.toThrow('generation provenance')
   })
 })

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { NormalizedCandidateV1 } from '../portable-collector-payload'
-import { buildDbLessCurrentOverlayCheckpoint } from './current-overlay-checkpoint'
+import { buildDbLessCurrentOverlayCheckpoint, dbLessCurrentOverlayManifestProvenance } from './current-overlay-checkpoint'
 import { buildDbLessCurrentProjectionCanonicalKey } from './current-projection-identity'
 
 const HASH_A = 'A'.repeat(64)
@@ -90,8 +90,17 @@ describe('D4 Current overlay checkpoint', () => {
 
     expect(built.manifest.entryCount).toBe(1)
     expect(built.manifest.tombstoneCount).toBe(1)
+    expect(built.manifest.schemaVersion).toBe(2)
     expect(built.manifest.generationCount).toBe(2)
-    expect(built.manifest.sourceGenerationIds).toEqual(['g1', 'g2'])
+    expect('sourceGenerationIds' in built.manifest).toBe(false)
+    const provenance = await dbLessCurrentOverlayManifestProvenance(built.manifest)
+    expect(provenance).toMatchObject({
+      scheme: 'rolling-sha256-v1',
+      generationCount: 2,
+      firstGenerationId: 'g1',
+      lastGenerationId: 'g2',
+    })
+    expect(provenance.digestSha256).toMatch(/^[a-f0-9]{64}$/)
 
     const records = await shardRecords(built) as Array<{
       sourceLedgerIndex: number

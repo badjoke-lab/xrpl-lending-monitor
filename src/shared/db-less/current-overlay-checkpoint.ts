@@ -8,6 +8,11 @@ import {
   compareDbLessCurrentProjectionCanonicalKeys,
   parseDbLessCurrentProjectionCanonicalKey,
 } from './current-projection-identity'
+import {
+  assertDbLessCurrentOverlayGenerationProvenance,
+  buildDbLessCurrentOverlayGenerationProvenance,
+  type DbLessCurrentOverlayGenerationProvenanceV2,
+} from './current-overlay-provenance'
 
 const LEDGER_HASH = /^[A-F0-9]{64}$/
 
@@ -40,30 +45,70 @@ export interface DbLessCurrentOverlayShardV1 {
   artifactSha256: string
 }
 
-export interface DbLessCurrentOverlayCheckpointManifestV1 {
-  schemaVersion: 1
+interface DbLessCurrentOverlayCheckpointManifestCommonV1 {
   network: 'devnet'
   epochId: string
   baseIdentity: string
   throughLedgerIndex: number
   throughLedgerHash: string
   generationCount: number
-  sourceGenerationIds: string[]
   bucketCount: number
   entryCount: number
   tombstoneCount: number
   shards: DbLessCurrentOverlayShardV1[]
 }
 
+export interface DbLessCurrentOverlayCheckpointManifestV1
+extends DbLessCurrentOverlayCheckpointManifestCommonV1 {
+  schemaVersion: 1
+  sourceGenerationIds: string[]
+}
+
+export interface DbLessCurrentOverlayCheckpointManifestV2
+extends DbLessCurrentOverlayCheckpointManifestCommonV1 {
+  schemaVersion: 2
+  sourceGenerationProvenance: DbLessCurrentOverlayGenerationProvenanceV2
+}
+
+export type DbLessCurrentOverlayCheckpointManifest =
+  | DbLessCurrentOverlayCheckpointManifestV1
+  | DbLessCurrentOverlayCheckpointManifestV2
+
 export interface DbLessCurrentOverlayCheckpointV1 {
-  manifest: DbLessCurrentOverlayCheckpointManifestV1
+  manifest: DbLessCurrentOverlayCheckpointManifest
   manifestArtifact: DbLessArtifact
   shardArtifacts: DbLessArtifact[]
 }
 
 export interface DbLessCurrentOverlayCheckpointSeedV1 {
-  manifest: DbLessCurrentOverlayCheckpointManifestV1
+  manifest: DbLessCurrentOverlayCheckpointManifest
   entries: readonly DbLessCurrentOverlayEntryV1[]
+}
+
+export async function dbLessCurrentOverlayManifestProvenance(
+  manifest: DbLessCurrentOverlayCheckpointManifest,
+): Promise<DbLessCurrentOverlayGenerationProvenanceV2> {
+  if (manifest.schemaVersion === 1) {
+    if (
+      manifest.sourceGenerationIds.length !== manifest.generationCount
+      || new Set(manifest.sourceGenerationIds).size !== manifest.sourceGenerationIds.length
+    ) {
+      throw new Error('D4 Current overlay source generation IDs are inconsistent')
+    }
+    return buildDbLessCurrentOverlayGenerationProvenance({
+      generationIds: manifest.sourceGenerationIds,
+    })
+  }
+
+  assertDbLessCurrentOverlayGenerationProvenance(
+    manifest.sourceGenerationProvenance,
+  )
+  if (
+    manifest.sourceGenerationProvenance.generationCount !== manifest.generationCount
+  ) {
+    throw new Error('D4 Current overlay bounded provenance count is inconsistent')
+  }
+  return { ...manifest.sourceGenerationProvenance }
 }
 
 function nonEmpty(value: string, field: string): string {
@@ -165,7 +210,8 @@ export async function buildDbLessCurrentOverlayCheckpoint(options: {
   }
 
   const latest = new Map<string, DbLessCurrentOverlayEntryV1>()
-  const sourceGenerationIds: string[] = []
+  const newGenerationIds: string[] = []
+  let seedProvenance: DbLessCurrentOverlayGenerationProvenanceV2 | null = null
   let previousEnd: number | null = null
 
   if (options.seed) {
@@ -175,7 +221,6 @@ export async function buildDbLessCurrentOverlayCheckpoint(options: {
       || seed.manifest.baseIdentity !== baseIdentity
       || seed.manifest.bucketCount !== bucketCount
       || seed.manifest.throughLedgerIndex >= throughLedgerIndex
-      || seed.manifest.generationCount !== seed.manifest.sourceGenerationIds.length
     ) {
       throw new Error('D4 Current overlay seed checkpoint identity is incompatible')
     }
@@ -201,7 +246,7 @@ export async function buildDbLessCurrentOverlayCheckpoint(options: {
       latest.set(entry.canonicalKey, entry)
     }
 
-    sourceGenerationIds.push(...seed.manifest.sourceGenerationIds)
+    seedProvenance = await dbLessCurrentOverlayManifestProvenance(seed.manifest)
     previousEnd = seed.manifest.throughLedgerIndex
   }
 
@@ -216,10 +261,16 @@ export async function buildDbLessCurrentOverlayCheckpoint(options: {
       throw new Error('D4 Current overlay generations must be contiguous and ordered')
     }
     previousEnd = generation.endLedgerIndex
-    if (sourceGenerationIds.includes(generation.generationId)) {
+    if (newGenerationIds.includes(generation.generationId)) {
       throw new Error('D4 Current overlay generation ID is duplicated')
     }
-    sourceGenerationIds.push(generation.generationId)
+    if (
+      options.seed?.manifest.schemaVersion === 1
+      && options.seed.manifest.sourceGenerationIds.includes(generation.generationId)
+    ) {
+      throw new Error('D4 Current overlay generation ID duplicates the seed')
+    }
+    newGenerationIds.push(generation.generationId)
 
     const seen = new Set<string>()
     for (const candidate of generation.records) {
@@ -293,15 +344,20 @@ export async function buildDbLessCurrentOverlayCheckpoint(options: {
     })
   }
 
-  const manifest: DbLessCurrentOverlayCheckpointManifestV1 = {
-    schemaVersion: 1,
+  const sourceGenerationProvenance =
+    await buildDbLessCurrentOverlayGenerationProvenance({
+      generationIds: newGenerationIds,
+      seed: seedProvenance,
+    })
+  const manifest: DbLessCurrentOverlayCheckpointManifestV2 = {
+    schemaVersion: 2,
     network: 'devnet',
     epochId,
     baseIdentity,
     throughLedgerIndex,
     throughLedgerHash,
-    generationCount: sourceGenerationIds.length,
-    sourceGenerationIds,
+    generationCount: sourceGenerationProvenance.generationCount,
+    sourceGenerationProvenance,
     bucketCount,
     entryCount: entries.length,
     tombstoneCount: entries.filter((entry) => entry.isTombstone).length,
