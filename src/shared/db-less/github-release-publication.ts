@@ -233,43 +233,55 @@ implements DbLessImmutableArtifactWriter, DbLessChannelPublisher {
     const cached = this.#downloadCache.get(asset.id)
     if (cached) return cached
 
-    let attempt = 0
-    while (true) {
-      const useBrowserDownload = (
-        this.#preferBrowserDownload
-        && typeof asset.browser_download_url === 'string'
-        && asset.browser_download_url.length > 0
-      )
-      const response = await this.#fetcher(
-        useBrowserDownload
-          ? asset.browser_download_url!
-          : `https://api.github.com/repos/${this.#repository}/releases/assets/${asset.id}`,
-        useBrowserDownload
-          ? { redirect: 'follow' }
-          : {
-              headers: apiHeaders(this.#token, 'application/octet-stream'),
-              redirect: 'follow',
-            },
-      )
-      if (response.ok) {
-        const bytes = new Uint8Array(await response.arrayBuffer())
-        if (bytes.byteLength !== asset.size) {
-          throw new Error(`GitHub Release asset byte mismatch for ${asset.name}`)
-        }
-        this.#downloadCache.set(asset.id, bytes)
-        if (this.#downloadPacingMs > 0) await this.#sleep(this.#downloadPacingMs)
-        return bytes
-      }
+    const browserUrl = (
+      this.#preferBrowserDownload
+      && typeof asset.browser_download_url === 'string'
+      && asset.browser_download_url.length > 0
+    )
+      ? asset.browser_download_url
+      : null
+    const transports: Array<'browser' | 'api'> = browserUrl
+      ? ['browser', 'api']
+      : ['api']
+    const failures: string[] = []
 
-      if (attempt >= this.#downloadRetryDelaysMs.length) {
-        throw new Error(
-          `GitHub Release asset download failed after bounded retries with HTTP ${response.status}`,
+    for (const transport of transports) {
+      let attempt = 0
+      while (true) {
+        const response = await this.#fetcher(
+          transport === 'browser'
+            ? browserUrl!
+            : `https://api.github.com/repos/${this.#repository}/releases/assets/${asset.id}`,
+          transport === 'browser'
+            ? { redirect: 'follow' }
+            : {
+                headers: apiHeaders(this.#token, 'application/octet-stream'),
+                redirect: 'follow',
+              },
         )
+        if (response.ok) {
+          const bytes = new Uint8Array(await response.arrayBuffer())
+          if (bytes.byteLength !== asset.size) {
+            throw new Error(`GitHub Release asset byte mismatch for ${asset.name}`)
+          }
+          this.#downloadCache.set(asset.id, bytes)
+          if (this.#downloadPacingMs > 0) await this.#sleep(this.#downloadPacingMs)
+          return bytes
+        }
+
+        if (attempt >= this.#downloadRetryDelaysMs.length) {
+          failures.push(`${transport}:HTTP ${response.status}`)
+          break
+        }
+        const delay = this.#downloadRetryDelaysMs[attempt]!
+        attempt += 1
+        if (delay > 0) await this.#sleep(delay)
       }
-      const delay = this.#downloadRetryDelaysMs[attempt]!
-      attempt += 1
-      if (delay > 0) await this.#sleep(delay)
     }
+
+    throw new Error(
+      `GitHub Release asset download failed after bounded retries (${failures.join(', ')})`,
+    )
   }
 
   async readImmutable(key: string): Promise<Uint8Array | null> {
