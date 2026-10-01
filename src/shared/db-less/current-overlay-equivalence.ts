@@ -1,11 +1,13 @@
 import type { NormalizedCandidateV1 } from '../portable-collector-payload'
 import { canonicalJson, sha256Hex } from '../current-state/canonical-json'
-import type {
-  DbLessCurrentOverlayCheckpointManifestV1,
-  DbLessCurrentOverlayEntryV1,
+import {
+  dbLessCurrentOverlayManifestProvenance,
+  type DbLessCurrentOverlayCheckpointManifest,
+  type DbLessCurrentOverlayEntryV1,
   DbLessCurrentOverlayGenerationV1,
   DbLessCurrentOverlayObjectTypeV1,
 } from './current-overlay-checkpoint'
+import { buildDbLessCurrentOverlayGenerationProvenance } from './current-overlay-provenance'
 import { DbLessCurrentOverlayReader } from './current-overlay-reader'
 import {
   compareDbLessCurrentProjectionCanonicalKeys,
@@ -161,9 +163,14 @@ export async function verifyDbLessCurrentOverlayEquivalence(options: {
   if (options.generations.length !== options.reader.manifest.generationCount) {
     throw new Error('D4 equivalence generation count does not match checkpoint manifest')
   }
-  const sourceGenerationIds = options.generations.map((generation) => generation.generationId)
-  if (canonicalJson(sourceGenerationIds) !== canonicalJson(options.reader.manifest.sourceGenerationIds)) {
-    throw new Error('D4 equivalence source generation IDs do not match checkpoint manifest')
+  const expectedProvenance = await buildDbLessCurrentOverlayGenerationProvenance({
+    generationIds: options.generations.map((generation) => generation.generationId),
+  })
+  const actualProvenance = await dbLessCurrentOverlayManifestProvenance(
+    options.reader.manifest,
+  )
+  if (canonicalJson(expectedProvenance) !== canonicalJson(actualProvenance)) {
+    throw new Error('D4 equivalence source generation provenance does not match checkpoint manifest')
   }
   const lastGeneration = options.generations.at(-1)!
   if (lastGeneration.endLedgerIndex !== options.reader.manifest.throughLedgerIndex) {
@@ -201,7 +208,7 @@ export async function verifyDbLessCurrentOverlayEquivalence(options: {
 }
 
 export async function verifyDbLessCurrentOverlayIncrementalEquivalence(options: {
-  seedManifest: DbLessCurrentOverlayCheckpointManifestV1
+  seedManifest: DbLessCurrentOverlayCheckpointManifest
   seedEntries: readonly DbLessCurrentOverlayEntryV1[]
   generations: readonly DbLessCurrentOverlayGenerationV1[]
   reader: DbLessCurrentOverlayReader
@@ -225,14 +232,19 @@ export async function verifyDbLessCurrentOverlayIncrementalEquivalence(options: 
     throw new Error('D4 incremental equivalence seed counts are inconsistent')
   }
 
-  const expectedGenerationIds = [
-    ...options.seedManifest.sourceGenerationIds,
-    ...options.generations.map((generation) => generation.generationId),
-  ]
+  const seedProvenance = await dbLessCurrentOverlayManifestProvenance(
+    options.seedManifest,
+  )
+  const expectedProvenance = await buildDbLessCurrentOverlayGenerationProvenance({
+    generationIds: options.generations.map((generation) => generation.generationId),
+    seed: seedProvenance,
+  })
+  const actualProvenance = await dbLessCurrentOverlayManifestProvenance(
+    options.reader.manifest,
+  )
   if (
-    options.reader.manifest.generationCount !== expectedGenerationIds.length
-    || canonicalJson(options.reader.manifest.sourceGenerationIds)
-      !== canonicalJson(expectedGenerationIds)
+    options.reader.manifest.generationCount !== expectedProvenance.generationCount
+    || canonicalJson(actualProvenance) !== canonicalJson(expectedProvenance)
   ) {
     throw new Error('D4 incremental equivalence generation provenance does not match')
   }
