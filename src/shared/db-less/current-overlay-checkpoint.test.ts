@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest'
 
 import type { NormalizedCandidateV1 } from '../portable-collector-payload'
-import { buildDbLessCurrentOverlayCheckpoint, dbLessCurrentOverlayManifestProvenance } from './current-overlay-checkpoint'
+import {
+  buildDbLessCurrentOverlayCheckpoint,
+  dbLessCurrentOverlayManifestProvenance,
+  type DbLessCurrentOverlayCheckpointManifestV1,
+  type DbLessCurrentOverlayEntryV1,
+} from './current-overlay-checkpoint'
 import { buildDbLessCurrentProjectionCanonicalKey } from './current-projection-identity'
 
 const HASH_A = 'A'.repeat(64)
@@ -113,6 +118,93 @@ describe('D4 Current overlay checkpoint', () => {
       isTombstone: true,
       value: null,
     })
+  })
+
+  it('migrates a legacy v1 seed to the same bounded v2 manifest as a v2 seed', async () => {
+    const seed = await buildDbLessCurrentOverlayCheckpoint({
+      epochId: 'epoch-1',
+      baseIdentity: 'base-1',
+      throughLedgerIndex: 101,
+      throughLedgerHash: HASH_A,
+      bucketCount: 8,
+      generations: [{
+        generationId: 'g1',
+        startLedgerIndex: 101,
+        endLedgerIndex: 101,
+        records: [
+          projection({
+            type: 'vault',
+            id: 'A1',
+            ledger: 101,
+            ledgerHash: HASH_A,
+            value: { version: 1 },
+          }),
+        ],
+      }],
+    })
+    const seedEntries = await shardRecords(seed) as DbLessCurrentOverlayEntryV1[]
+    const legacyManifest: DbLessCurrentOverlayCheckpointManifestV1 = {
+      schemaVersion: 1,
+      network: seed.manifest.network,
+      epochId: seed.manifest.epochId,
+      baseIdentity: seed.manifest.baseIdentity,
+      throughLedgerIndex: seed.manifest.throughLedgerIndex,
+      throughLedgerHash: seed.manifest.throughLedgerHash,
+      generationCount: 1,
+      sourceGenerationIds: ['g1'],
+      bucketCount: seed.manifest.bucketCount,
+      entryCount: seed.manifest.entryCount,
+      tombstoneCount: seed.manifest.tombstoneCount,
+      shards: seed.manifest.shards,
+    }
+    const nextGeneration = [{
+      generationId: 'g2',
+      startLedgerIndex: 102,
+      endLedgerIndex: 102,
+      records: [
+        projection({
+          type: 'vault',
+          id: 'A1',
+          ledger: 102,
+          ledgerHash: HASH_B,
+          value: { version: 2 },
+        }),
+      ],
+    }]
+
+    const fromLegacy = await buildDbLessCurrentOverlayCheckpoint({
+      epochId: 'epoch-1',
+      baseIdentity: 'base-1',
+      throughLedgerIndex: 102,
+      throughLedgerHash: HASH_B,
+      bucketCount: 8,
+      generations: nextGeneration,
+      seed: {
+        manifest: legacyManifest,
+        entries: seedEntries,
+      },
+    })
+    const fromV2 = await buildDbLessCurrentOverlayCheckpoint({
+      epochId: 'epoch-1',
+      baseIdentity: 'base-1',
+      throughLedgerIndex: 102,
+      throughLedgerHash: HASH_B,
+      bucketCount: 8,
+      generations: nextGeneration,
+      seed: {
+        manifest: seed.manifest,
+        entries: seedEntries,
+      },
+    })
+
+    expect(fromLegacy.manifestArtifact.sha256).toBe(fromV2.manifestArtifact.sha256)
+    expect(
+      fromLegacy.shardArtifacts.map((artifact) => [artifact.key, artifact.sha256]),
+    ).toEqual(
+      fromV2.shardArtifacts.map((artifact) => [artifact.key, artifact.sha256]),
+    )
+    expect(fromLegacy.manifest.schemaVersion).toBe(2)
+    expect('sourceGenerationIds' in fromLegacy.manifest).toBe(false)
   })
 
   it('is deterministic when record order inside a generation changes', async () => {
