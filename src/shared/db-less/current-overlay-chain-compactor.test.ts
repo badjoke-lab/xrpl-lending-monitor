@@ -8,6 +8,7 @@ import {
   buildDbLessCurrentOverlayCheckpointIncrementally,
 } from './current-overlay-chain-compactor'
 import { DbLessCurrentOverlayReader } from './current-overlay-reader'
+import { dbLessCurrentOverlayManifestProvenance } from './current-overlay-checkpoint'
 import { buildDbLessLiveChainArtifacts } from './live-chain'
 import { buildDbLessLiveDeltaArtifacts } from './live-delta'
 
@@ -254,11 +255,14 @@ describe('D4 full-chain Current compactor', () => {
         built.locatedArtifacts.get(locationKey(location, key)) ?? null,
     })
 
+    expect(checkpoint.manifest.schemaVersion).toBe(2)
     expect(checkpoint.manifest.generationCount).toBe(2)
-    expect(checkpoint.manifest.sourceGenerationIds).toEqual([
-      built.firstDelta.manifest.generationId,
-      built.secondDelta.manifest.generationId,
-    ])
+    const provenance = await dbLessCurrentOverlayManifestProvenance(checkpoint.manifest)
+    expect(provenance).toMatchObject({
+      generationCount: 2,
+      firstGenerationId: built.firstDelta.manifest.generationId,
+      lastGenerationId: built.secondDelta.manifest.generationId,
+    })
     expect(checkpoint.manifest.throughLedgerIndex).toBe(102)
     expect(checkpoint.manifest.entryCount).toBe(1)
     expect(checkpoint.manifest.tombstoneCount).toBe(1)
