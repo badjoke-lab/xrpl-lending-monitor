@@ -4,8 +4,8 @@ import {
   dbLessCurrentOverlayManifestProvenance,
   type DbLessCurrentOverlayCheckpointManifest,
   type DbLessCurrentOverlayEntryV1,
-  DbLessCurrentOverlayGenerationV1,
-  DbLessCurrentOverlayObjectTypeV1,
+  type DbLessCurrentOverlayGenerationV1,
+  type DbLessCurrentOverlayObjectTypeV1,
 } from './current-overlay-checkpoint'
 import { buildDbLessCurrentOverlayGenerationProvenance } from './current-overlay-provenance'
 import { DbLessCurrentOverlayReader } from './current-overlay-reader'
