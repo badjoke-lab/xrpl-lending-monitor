@@ -317,6 +317,33 @@ describe('GitHub Release DB-less store', () => {
     expect(github.assetDownloadCount).toBe(0)
   })
 
+  it('falls back to the API asset endpoint after bounded browser-download failures', async () => {
+    const current = await channel()
+    const github = new FakeGitHub(`${canonicalJson(current)}\n`)
+    const store = new GitHubReleaseDbLessStore({
+      repository: REPO,
+      releaseTag: TAG,
+      token: 'token',
+      fetcher: github.fetch,
+      uploadPacingMs: 0,
+      downloadPacingMs: 0,
+      downloadRetryDelaysMs: [0],
+      preferBrowserDownload: true,
+    })
+    const value = await artifact('live-v1-101-101-browser-fallback.json')
+    const id = github.nextAssetId++
+    github.assets.set(id, {
+      id,
+      name: value.key,
+      bytes: value.bytes,
+    })
+    github.downloadFailuresRemaining = 2
+
+    await expect(store.readImmutable(value.key)).resolves.toEqual(value.bytes)
+    expect(github.browserDownloadCount).toBe(2)
+    expect(github.assetDownloadCount).toBe(1)
+  })
+
   it('retries transient Release asset download failures with a bounded policy', async () => {
     const current = await channel()
     const github = new FakeGitHub(`${canonicalJson(current)}\n`)
