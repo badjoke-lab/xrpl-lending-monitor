@@ -6,7 +6,7 @@ import {
   type DbLessCurrentOverlayPointerV1,
 } from '../src/shared/db-less/current-overlay-channel'
 import { GitHubReleaseCurrentOverlayChannelStore } from '../src/shared/db-less/current-overlay-channel-github-release'
-import type { DbLessCurrentOverlayCheckpointManifestV1 } from '../src/shared/db-less/current-overlay-checkpoint'
+import type { DbLessCurrentOverlayCheckpointManifest } from '../src/shared/db-less/current-overlay-checkpoint'
 import { GitHubReleaseDbLessStore } from '../src/shared/db-less/github-release-publication'
 import type { DbLessArtifact } from '../src/shared/db-less/live-delta'
 import { canonicalJson, sha256Hex } from '../src/shared/current-state/canonical-json'
@@ -203,10 +203,10 @@ async function main(): Promise<void> {
   })
   const manifest = JSON.parse(
     new TextDecoder().decode(manifestArtifact.bytes),
-  ) as DbLessCurrentOverlayCheckpointManifestV1
+  ) as DbLessCurrentOverlayCheckpointManifest
 
   if (
-    manifest.schemaVersion !== 1
+    (manifest.schemaVersion !== 1 && manifest.schemaVersion !== 2)
     || manifest.network !== 'devnet'
     || manifest.baseIdentity !== summary.baseIdentity
     || manifest.throughLedgerIndex !== summary.throughLedgerIndex
