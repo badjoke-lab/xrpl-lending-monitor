@@ -126,6 +126,9 @@ jobs:
           seed_through="$(jq -r '.seedThroughLedgerIndex' "$rehearsal")"
           incremental_generations="$(jq -r '.incrementalGenerationCount' "$rehearsal")"
           traversed_manifests="$(jq -r '.traversedIncrementalManifests' "$rehearsal")"
+          manifest_schema="$(jq -r '.manifestSchemaVersion' "$rehearsal")"
+          provenance_scheme="$(jq -r '.generationProvenance.scheme // "none"' "$rehearsal")"
+          provenance_digest="$(jq -r '.generationProvenance.digestSha256 // "none"' "$rehearsal")"
           manifest="$(jq -r '.manifestSha256' "$summary")"
           state="$(jq -r '.stateSha256' "$summary")"
           source_channel="$(jq -r '.sourceChannelSha256' "$summary")"
@@ -143,6 +146,9 @@ jobs:
           - seed through ledger: $seed_through
           - incremental generations: $incremental_generations
           - traversed incremental manifests: $traversed_manifests
+          - checkpoint manifest schema: $manifest_schema
+          - generation provenance scheme: $provenance_scheme
+          - generation provenance SHA-256: $provenance_digest
           - through ledger: $through
           - checkpoint Release: $CHECKPOINT_RELEASE_TAG
           - checkpoint manifest SHA-256: $manifest

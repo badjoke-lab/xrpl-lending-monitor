@@ -345,6 +345,10 @@ async function main(): Promise<void> {
     shardCount: checkpoint.manifest.shards.length,
     manifestKey: checkpoint.manifestArtifact.key,
     manifestSha256: checkpoint.manifestArtifact.sha256,
+    manifestSchemaVersion: checkpoint.manifest.schemaVersion,
+    generationProvenance: checkpoint.manifest.schemaVersion === 2
+      ? checkpoint.manifest.sourceGenerationProvenance
+      : null,
     storesRead: stores.size,
     verifiedGenerationCount,
     seedThroughLedgerIndex,
