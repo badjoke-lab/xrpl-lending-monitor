@@ -15,6 +15,8 @@ on:
       - '.github/workflows/db-less-d4-current-overlay-activate.yml'
       - 'src/shared/db-less/current-overlay-checkpoint.ts'
       - 'src/shared/db-less/current-overlay-checkpoint.test.ts'
+      - 'src/shared/db-less/current-overlay-provenance.ts'
+      - 'src/shared/db-less/current-overlay-provenance.test.ts'
       - 'src/shared/db-less/current-overlay-generation-reader.ts'
       - 'src/shared/db-less/current-overlay-generation-reader.test.ts'
       - 'src/shared/db-less/current-overlay-chain-compactor.ts'
@@ -76,6 +78,8 @@ jobs:
           vite.db-less-current-overlay-publisher.config.ts
           src/shared/db-less/current-overlay-checkpoint.ts
           src/shared/db-less/current-overlay-checkpoint.test.ts
+          src/shared/db-less/current-overlay-provenance.ts
+          src/shared/db-less/current-overlay-provenance.test.ts
           src/shared/db-less/current-overlay-generation-reader.test.ts
           src/shared/db-less/current-overlay-chain-compactor.test.ts
           src/shared/db-less/current-overlay-chain-compactor.ts
@@ -130,6 +134,7 @@ jobs:
         run: >-
           pnpm exec vitest run
           src/shared/db-less/current-overlay-checkpoint.test.ts
+          src/shared/db-less/current-overlay-provenance.test.ts
           src/shared/db-less/current-overlay-generation-reader.test.ts
           src/shared/db-less/current-overlay-chain-compactor.test.ts
           src/shared/db-less/current-overlay-reader.test.ts
