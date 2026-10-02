@@ -277,17 +277,17 @@ jobs:
           D3 live one-shot PASS.
 
           - run: $GITHUB_RUN_ID
-          - validated target observed: `$latest`
-          - published range: `$start → $end`
-          - channel SHA-256: `$digest`
-          - data shard: `$DATA_RELEASE_TAG`
+          - validated target observed: $latest
+          - published range: $start → $end
+          - channel SHA-256: $digest
+          - data shard: $DATA_RELEASE_TAG
           - immutable artifacts were uploaded/read back before channel update
 
           This run is collector evidence; five-minute schedule cadence is qualified separately.
           EOF
           )"
           else
-            gh issue comment 1673 --body "D3 live one-shot PASS (caught up). Run: `$GITHUB_RUN_ID`; latest validated ledger: `$latest`. No publication mutation was required."
+            gh issue comment 1673 --body "D3 live one-shot PASS (caught up). Run: $GITHUB_RUN_ID; latest validated ledger: $latest. No publication mutation was required."
           fi
 
       - name: Upload one-shot evidence
