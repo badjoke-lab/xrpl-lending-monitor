@@ -22,7 +22,7 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (
-        github.event.issue.number == 1673 &&
+        github.event.issue.number == 1736 &&
         github.event.comment.user.login == github.repository_owner &&
         startsWith(github.event.comment.body, '/d3-rehearse-live ')
       )

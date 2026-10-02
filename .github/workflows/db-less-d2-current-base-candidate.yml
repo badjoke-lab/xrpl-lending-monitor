@@ -18,14 +18,14 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (
-        github.event.issue.number == 1673 &&
+        github.event.issue.number == 1736 &&
         github.event.comment.user.login == 'badjoke-lab' &&
         github.event.comment.body == '/d2-build-base-candidate'
       )
     runs-on: ubuntu-24.04
     timeout-minutes: 350
     env:
-      D2_ISSUE: '1673'
+      D2_ISSUE: '1736'
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v5

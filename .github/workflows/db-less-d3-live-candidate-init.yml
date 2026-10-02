@@ -19,7 +19,7 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (
-        github.event.issue.number == 1673 &&
+        github.event.issue.number == 1736 &&
         github.event.comment.user.login == github.repository_owner &&
         startsWith(github.event.comment.body, '/d3-init-live ')
       )
@@ -136,7 +136,7 @@ jobs:
           set -euo pipefail
           ledger="$(jq -r '.lastCommittedLedgerIndex' .local/d3-init/channel.json)"
           digest="$(jq -r '.channelSha256' .local/d3-init/channel.json)"
-          gh issue comment 1673 --body "$(cat <<EOF
+          gh issue comment 1736 --body "$(cat <<EOF
           D3 live candidate initialization PASS.
 
           - run: $GITHUB_RUN_ID
