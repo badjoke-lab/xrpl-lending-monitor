@@ -10,7 +10,7 @@ permissions:
 jobs:
   rehearse:
     if: >-
-      github.event.issue.number == 1673 &&
+      github.event.issue.number == 1736 &&
       github.event.comment.user.login == github.repository_owner &&
       github.event.comment.body == '/d4-rehearse-current-overlay'
     runs-on: ubuntu-24.04
