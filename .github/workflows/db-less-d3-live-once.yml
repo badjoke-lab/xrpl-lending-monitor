@@ -267,13 +267,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -p .local/d3-live
           status="$(jq -r '.status' .local/d3-live/run-summary.json)"
           latest="$(jq -r '.latestValidatedLedger' .local/d3-live/run-summary.json)"
           if [ "$status" = "prepared" ]; then
             start="$(jq -r '.startLedgerIndex' .local/d3-live/run-summary.json)"
             end="$(jq -r '.endLedgerIndex' .local/d3-live/run-summary.json)"
             digest="$(jq -r '.channelSha256' .local/d3-live/publish-summary.json)"
-            gh issue comment 1673 --body "$(cat <<EOF
+            cat > .local/d3-live/evidence.md <<EOF
           D3 live one-shot PASS.
 
           - run: $GITHUB_RUN_ID
@@ -285,10 +286,17 @@ jobs:
 
           This run is collector evidence; five-minute schedule cadence is qualified separately.
           EOF
-          )"
           else
-            gh issue comment 1673 --body "D3 live one-shot PASS (caught up). Run: $GITHUB_RUN_ID; latest validated ledger: $latest. No publication mutation was required."
+            cat > .local/d3-live/evidence.md <<EOF
+          D3 live one-shot PASS (caught up).
+
+          - run: $GITHUB_RUN_ID
+          - latest validated ledger: $latest
+          - no publication mutation was required
+          EOF
           fi
+
+          cat .local/d3-live/evidence.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload one-shot evidence
         if: always()
@@ -302,5 +310,6 @@ jobs:
             .local/d3-live/next-channel.json
             .local/d3-live/publish-summary.json
             .local/d3-live/chain-verification.json
+            .local/d3-live/evidence.md
           if-no-files-found: warn
           retention-days: 30
