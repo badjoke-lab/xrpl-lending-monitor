@@ -11,7 +11,7 @@ permissions:
 jobs:
   activate:
     if: >-
-      github.event.issue.number == 1673 &&
+      github.event.issue.number == 1736 &&
       github.event.comment.user.login == github.repository_owner &&
       startsWith(github.event.comment.body, '/d4-activate-current-overlay ')
     concurrency:
@@ -136,7 +136,7 @@ jobs:
           uploaded="$(jq -r '.uploadedAssets' "$summary")"
           reused="$(jq -r '.reusedAssets' "$summary")"
 
-          gh issue comment 1673 --body "$(cat <<EOF
+          gh issue comment 1736 --body "$(cat <<EOF
           D4 Current overlay activation PASS.
 
           - run: $GITHUB_RUN_ID
