@@ -1,5 +1,35 @@
 # Decision log
 
+## D-026 — XRPL.to is a future provider candidate, not a current Devnet dependency
+
+- Date: 2026-10-04
+- Status: accepted
+
+### Decision
+
+XRPL.to MUST NOT replace the current Devnet collector or become a dependency of the active D4/D5 release path.
+
+The current product target is XRPL Lending Devnet. XRPL.to currently documents Mainnet and Testnet read surfaces, but no documented Devnet endpoint. Its API is therefore evaluated as:
+
+- a possible non-canonical Testnet compatibility source; and
+- a future Mainnet read-provider candidate after Mainnet is separately approved.
+
+If added later, XRPL.to must sit behind a provider adapter and must not change the existing validated-ledger, parent-hash continuity, deterministic derivation, artifact verification, or channel-last publication semantics.
+
+Any public generation that stores XRPL.to-derived data and republishes it through this project's static artifacts/dashboard requires written redistribution permission from XRPL.to before activation. Partner-tier approval alone is not assumed to satisfy that requirement.
+
+See [XRPL.to provider evaluation](xrpl-to-provider-evaluation.md).
+
+### Consequences
+
+- D4/D5 Devnet qualification continues unchanged;
+- no XRPL.to API key is required for the current release;
+- no XRPL.to key may be placed in the static browser bundle;
+- an isolated Testnet conformance probe may be added later without becoming release evidence;
+- a future Mainnet provider adapter must prove fixed-ledger parity, expanded transaction-metadata compatibility, marker exhaustion, retry/backoff behavior, parent-hash continuity, and resource bounds;
+- provider-specific response envelopes remain outside the domain layer;
+- visible attribution and written redistribution permission are activation gates for any public XRPL.to-backed artifacts.
+
 ## D-025 — DB-less static-artifact runtime
 
 - Date: 2026-09-20
