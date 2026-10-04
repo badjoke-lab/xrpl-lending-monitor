@@ -33,6 +33,12 @@ For user-visible work, also read the affected `ui-*.md` documents.
 
 When documents conflict, stop and reconcile the conflict before dependent implementation.
 
+## Research and future-provider evaluations
+
+These documents are informative and do not override the required source-of-truth set above:
+
+- [XRPL.to provider evaluation](xrpl-to-provider-evaluation.md) — Mainnet/Testnet capability, legal gates, and why the current Devnet collector remains unchanged.
+
 ## Active architecture in one diagram
 
 ```text
