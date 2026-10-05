@@ -62,7 +62,9 @@ jobs:
         if: always()
         shell: bash
         run: |
-          for path in             .local/xrplto-testnet-probe/evidence.md             .local/xrplto-testnet-parity/evidence.md \
+          for path in \
+            .local/xrplto-testnet-probe/evidence.md \
+            .local/xrplto-testnet-parity/evidence.md \
             .local/xrplto-testnet-benchmark/evidence.md
           do
             if [ -f "$path" ]; then
