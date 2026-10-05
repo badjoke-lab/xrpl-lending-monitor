@@ -12,6 +12,7 @@ on:
       - 'vite.db-less-current-overlay-publisher.config.ts'
       - '.github/workflows/db-less-d4-current-overlay-rehearsal.yml'
       - '.github/workflows/db-less-d4-current-overlay-incremental-rehearsal.yml'
+      - '.github/workflows/db-less-d4-current-overlay-preflight.yml'
       - '.github/workflows/db-less-d4-current-overlay-activate.yml'
       - 'src/shared/db-less/current-overlay-checkpoint.ts'
       - 'src/shared/db-less/current-overlay-checkpoint.test.ts'
@@ -125,6 +126,18 @@ jobs:
           grep -Fq -- '--target "$AUTHORIZED_MAIN_SHA"' "$workflow"
           grep -Fq 'target_commitish="$AUTHORIZED_MAIN_SHA"' "$workflow"
           grep -Fq "Publish immutable checkpoint then activate D4 channel" "$workflow"
+          preflight_workflow=".github/workflows/db-less-d4-current-overlay-preflight.yml"
+          grep -Fq "github.event.issue.number == 1736" "$preflight_workflow"
+          grep -Fq "github.event.comment.body == '/d4-activate-current-overlay-preflight'" "$preflight_workflow"
+          grep -Fq "actions: read" "$preflight_workflow"
+          grep -Fq "contents: read" "$preflight_workflow"
+          grep -Fq -- '--expected-channel-sha256 "$EXPECTED_D3_CHANNEL_SHA"' "$preflight_workflow"
+          grep -Fq -- '--active-overlay-channel-release-tag "$D4_CHANNEL_RELEASE_TAG"' "$preflight_workflow"
+          grep -Fq -- '--max-generations 2048' "$preflight_workflow"
+          grep -Fq "manifestSchemaVersion" "$preflight_workflow"
+          grep -Fq "rolling-sha256-v1" "$preflight_workflow"
+          grep -Fq "equivalence.equivalent" "$preflight_workflow"
+          grep -Fq 'publicationMutation: false' "$preflight_workflow"
           incremental_workflow=".github/workflows/db-less-d4-current-overlay-incremental-rehearsal.yml"
           grep -Fq "/d4-rehearse-current-overlay-incremental" "$incremental_workflow"
           grep -Fq -- '--active-overlay-channel-release-tag db-less-current-overlay-channel-v1' "$incremental_workflow"
