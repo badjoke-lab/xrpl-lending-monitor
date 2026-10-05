@@ -13,6 +13,7 @@ on:
       - '.github/workflows/db-less-d4-current-overlay-rehearsal.yml'
       - '.github/workflows/db-less-d4-current-overlay-incremental-rehearsal.yml'
       - '.github/workflows/db-less-d4-current-overlay-preflight.yml'
+      - '.github/workflows/db-less-d4-exit-qualification.yml'
       - '.github/workflows/db-less-d4-current-overlay-activate.yml'
       - 'src/shared/db-less/current-overlay-checkpoint.ts'
       - 'src/shared/db-less/current-overlay-checkpoint.test.ts'
@@ -138,6 +139,15 @@ jobs:
           grep -Fq "rolling-sha256-v1" "$preflight_workflow"
           grep -Fq "equivalence.equivalent" "$preflight_workflow"
           grep -Fq 'publicationMutation: false' "$preflight_workflow"
+          exit_workflow=".github/workflows/db-less-d4-exit-qualification.yml"
+          grep -Fq "github.event.issue.number == 1736" "$exit_workflow"
+          grep -Fq "github.event.comment.body == '/d4-qualify-current-overlay-exit'" "$exit_workflow"
+          grep -Fq "checkpointManifestSchemaVersion: 2" "$exit_workflow"
+          grep -Fq "rolling-sha256-v1" "$exit_workflow"
+          grep -Fq 'has("sourceGenerationIds")' "$exit_workflow"
+          grep -Fq "current-overlay-reader.test.ts" "$exit_workflow"
+          grep -Fq "current-composite-reader.test.ts" "$exit_workflow"
+          grep -Fq "current-overlay-retention.test.ts" "$exit_workflow"
           incremental_workflow=".github/workflows/db-less-d4-current-overlay-incremental-rehearsal.yml"
           grep -Fq "/d4-rehearse-current-overlay-incremental" "$incremental_workflow"
           grep -Fq -- '--active-overlay-channel-release-tag db-less-current-overlay-channel-v1' "$incremental_workflow"
