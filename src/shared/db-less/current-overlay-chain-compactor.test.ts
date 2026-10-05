@@ -11,7 +11,10 @@ import { DbLessCurrentOverlayReader } from './current-overlay-reader'
 import { dbLessCurrentOverlayManifestProvenance } from './current-overlay-checkpoint'
 import { buildDbLessLiveChainArtifacts } from './live-chain'
 import { buildDbLessLiveDeltaArtifacts } from './live-delta'
-import { readPublicCurrentTailAfterCheckpoint } from './current-tail-github-public'
+import {
+  readPublicCurrentTailAfterCheckpoint,
+  readPublicIndexedCurrentTailAfterCheckpoint,
+} from './current-tail-github-public'
 
 const BASE = 'A'.repeat(64)
 const L101 = 'B'.repeat(64)
@@ -404,6 +407,105 @@ describe('D4 full-chain Current compactor', () => {
     })).rejects.toThrow('Missing live delta chunk')
   })
 
+
+
+  it('reads sparse indexed Current mutations without traversing live-chain manifests', async () => {
+    const built = await fixture()
+    const seed = await buildDbLessCurrentOverlayCheckpointFromChannel({
+      channel: built.firstChannel,
+      bucketCount: 8,
+      readChainArtifact: async (pointer) =>
+        built.chainArtifacts.get(locationKey(pointer.location, pointer.manifestKey)) ?? null,
+      readLocatedArtifact: async (location, key) =>
+        built.locatedArtifacts.get(locationKey(location, key)) ?? null,
+    })
+    const indexedChannel = await buildDbLessChannel({
+      schemaVersion: 1,
+      network: 'devnet',
+      epochId: built.channel.epochId,
+      base: built.channel.base,
+      live: built.channel.live,
+      currentProjectionTail: {
+        schemaVersion: 1,
+        coverageStartLedgerIndex: seed.manifest.throughLedgerIndex,
+        coverageStartLedgerHash: seed.manifest.throughLedgerHash,
+        generations: [{
+          location: LOCATION_2,
+          generationId: built.secondDelta.manifest.generationId,
+          manifestKey: built.secondDelta.manifestArtifact.key,
+          manifestSha256: built.secondDelta.manifestArtifact.sha256,
+          payloadDigest: built.secondDelta.manifest.payloadDigest,
+          previousLedgerIndex: built.secondDelta.manifest.previousLedgerIndex,
+          expectedParentHash: built.secondDelta.manifest.expectedParentHash,
+          startLedgerIndex: built.secondDelta.manifest.startLedgerIndex,
+          startLedgerHash: built.secondDelta.manifest.startLedgerHash,
+          endLedgerIndex: built.secondDelta.manifest.endLedgerIndex,
+          endLedgerHash: built.secondDelta.manifest.endLedgerHash,
+          ledgerCount: built.secondDelta.manifest.ledgerCount,
+          currentProjectionMutations:
+            built.secondDelta.manifest.semanticCounts.currentProjectionMutations,
+        }],
+      },
+      lastCommittedLedgerIndex: built.channel.lastCommittedLedgerIndex,
+      lastCommittedLedgerHash: built.channel.lastCommittedLedgerHash,
+      historyCoverage: built.channel.historyCoverage,
+      updatedAt: built.channel.updatedAt,
+    })
+    const repository = 'badjoke-lab/xrpl-lending-monitor'
+    const channelTag = 'db-less-live-channel-test'
+    const channelBody = new TextDecoder().decode(encodeDbLessChannel(indexedChannel))
+    const requests: string[] = []
+
+    function withUrl(response: Response, url: string): Response {
+      Object.defineProperty(response, 'url', { value: url })
+      return response
+    }
+
+    const result = await readPublicIndexedCurrentTailAfterCheckpoint({
+      repository,
+      channelReleaseTag: channelTag,
+      checkpoint: seed.manifest,
+      maxMutationGenerations: 1,
+      fetcher: async (input) => {
+        const url = String(input)
+        requests.push(url)
+        if (url.startsWith('https://api.github.com/')) {
+          return withUrl(new Response(JSON.stringify({
+            id: 1,
+            tag_name: channelTag,
+            body: channelBody,
+            draft: false,
+            prerelease: true,
+          }), { status: 200 }), url)
+        }
+        const marker = '/releases/download/'
+        const markerIndex = url.indexOf(marker)
+        if (markerIndex < 0) return withUrl(new Response(null, { status: 404 }), url)
+        const parts = url.slice(markerIndex + marker.length).split('/')
+        const releaseTag = decodeURIComponent(parts.shift() ?? '')
+        const key = decodeURIComponent(parts.join('/'))
+        const bytes = built.locatedArtifacts.get(`${releaseTag}|${key}`)
+        if (!bytes) return withUrl(new Response(null, { status: 404 }), url)
+        const payload = bytes.buffer.slice(
+          bytes.byteOffset,
+          bytes.byteOffset + bytes.byteLength,
+        ) as ArrayBuffer
+        return withUrl(new Response(payload, {
+          status: 200,
+          headers: { 'content-length': String(bytes.byteLength) },
+        }), url)
+      },
+    })
+
+    expect(result.source.indexedGenerationPointers).toBe(1)
+    expect(result.source.generations).toHaveLength(1)
+    expect(result.source.generations[0]?.generationId).toBe(
+      built.secondDelta.manifest.generationId,
+    )
+    expect(requests.some((url) => url.includes('live-chain-v1-'))).toBe(false)
+    expect(requests.filter((url) => url.includes('/releases/download/')).length)
+      .toBe(1 + built.secondDelta.chunkArtifacts.length)
+  })
   it('reads only the post-checkpoint D3 tail through public token-free GitHub transports', async () => {
     const built = await fixture()
     const seed = await buildDbLessCurrentOverlayCheckpointFromChannel({

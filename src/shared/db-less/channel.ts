@@ -39,6 +39,29 @@ export interface DbLessLivePointerV1 {
   endLedgerHash: string
 }
 
+export interface DbLessCurrentProjectionTailGenerationV1 {
+  location: DbLessArtifactLocationV1
+  generationId: string
+  manifestKey: string
+  manifestSha256: string
+  payloadDigest: string
+  previousLedgerIndex: number
+  expectedParentHash: string
+  startLedgerIndex: number
+  startLedgerHash: string
+  endLedgerIndex: number
+  endLedgerHash: string
+  ledgerCount: number
+  currentProjectionMutations: number
+}
+
+export interface DbLessCurrentProjectionTailIndexV1 {
+  schemaVersion: 1
+  coverageStartLedgerIndex: number
+  coverageStartLedgerHash: string
+  generations: DbLessCurrentProjectionTailGenerationV1[]
+}
+
 export interface DbLessHistoryExactIndexPointerV1 {
   manifestKey: string
   manifestSha256: string
@@ -64,6 +87,7 @@ export interface DbLessChannelV1 {
   epochId: string
   base: DbLessBasePointerV1
   live: DbLessLivePointerV1 | null
+  currentProjectionTail?: DbLessCurrentProjectionTailIndexV1
   lastCommittedLedgerIndex: number
   lastCommittedLedgerHash: string
   historyCoverage: DbLessHistoryCoverageRangeV1[]
@@ -184,6 +208,62 @@ function assertLive(live: DbLessLivePointerV1): void {
   }
 }
 
+function assertCurrentProjectionTail(
+  tail: DbLessCurrentProjectionTailIndexV1,
+  channel: Pick<DbLessChannelV1, 'lastCommittedLedgerIndex' | 'lastCommittedLedgerHash'>,
+): void {
+  if (tail.schemaVersion !== 1) {
+    throw new Error('Current projection tail schema is invalid')
+  }
+  safeInteger(tail.coverageStartLedgerIndex, 'currentProjectionTail.coverageStartLedgerIndex', 1)
+  ledgerHash(tail.coverageStartLedgerHash, 'currentProjectionTail.coverageStartLedgerHash')
+  if (tail.coverageStartLedgerIndex > channel.lastCommittedLedgerIndex) {
+    throw new Error('Current projection tail coverage starts after the committed head')
+  }
+  if (!Array.isArray(tail.generations) || tail.generations.length > 128) {
+    throw new Error('Current projection tail generation list exceeds the bounded limit')
+  }
+
+  let previousEnd = tail.coverageStartLedgerIndex
+  for (const [index, generation] of tail.generations.entries()) {
+    const field = `currentProjectionTail.generations[${index}]`
+    assertDbLessArtifactLocation(generation.location, `${field}.location`)
+    nonEmpty(generation.generationId, `${field}.generationId`)
+    artifactKey(generation.location, generation.manifestKey, `${field}.manifestKey`)
+    sha256(generation.manifestSha256, `${field}.manifestSha256`)
+    payloadDigest(generation.payloadDigest, `${field}.payloadDigest`)
+    safeInteger(generation.previousLedgerIndex, `${field}.previousLedgerIndex`, 1)
+    safeInteger(generation.startLedgerIndex, `${field}.startLedgerIndex`, 1)
+    safeInteger(generation.endLedgerIndex, `${field}.endLedgerIndex`, 1)
+    safeInteger(generation.ledgerCount, `${field}.ledgerCount`, 1)
+    safeInteger(generation.currentProjectionMutations, `${field}.currentProjectionMutations`, 1)
+    ledgerHash(generation.expectedParentHash, `${field}.expectedParentHash`)
+    ledgerHash(generation.startLedgerHash, `${field}.startLedgerHash`)
+    ledgerHash(generation.endLedgerHash, `${field}.endLedgerHash`)
+    if (
+      generation.startLedgerIndex !== generation.previousLedgerIndex + 1
+      || generation.endLedgerIndex < generation.startLedgerIndex
+      || generation.ledgerCount !== generation.endLedgerIndex - generation.startLedgerIndex + 1
+    ) {
+      throw new Error('Current projection tail generation boundaries are invalid')
+    }
+    if (generation.previousLedgerIndex < previousEnd) {
+      throw new Error('Current projection tail generations overlap or are out of order')
+    }
+    if (generation.endLedgerIndex > channel.lastCommittedLedgerIndex) {
+      throw new Error('Current projection tail generation exceeds the committed head')
+    }
+    previousEnd = generation.endLedgerIndex
+  }
+
+  if (
+    tail.coverageStartLedgerIndex === channel.lastCommittedLedgerIndex
+    && tail.coverageStartLedgerHash !== channel.lastCommittedLedgerHash
+  ) {
+    throw new Error('Current projection tail coverage head hash is inconsistent')
+  }
+}
+
 function assertCoverage(ranges: readonly DbLessHistoryCoverageRangeV1[]): void {
   const byEpoch = new Map<string, DbLessHistoryCoverageRangeV1[]>()
   for (const [index, range] of ranges.entries()) {
@@ -231,6 +311,9 @@ export function assertDbLessChannel(channel: DbLessChannelV1): void {
   sha256(channel.channelSha256, 'channelSha256')
   assertBase(channel.base)
   assertCoverage(channel.historyCoverage)
+  if (channel.currentProjectionTail !== undefined) {
+    assertCurrentProjectionTail(channel.currentProjectionTail, channel)
+  }
 
   if (channel.live === null) {
     if (

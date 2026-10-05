@@ -118,4 +118,29 @@ describe('DB-less channel', () => {
     const tampered = { ...channel, lastCommittedLedgerIndex: channel.lastCommittedLedgerIndex + 1 }
     await expect(verifyDbLessChannel(tampered)).rejects.toThrow()
   })
+
+  it('rejects a Current projection tail index above the 128-generation bound', async () => {
+    const input = body()
+    input.currentProjectionTail = {
+      schemaVersion: 1,
+      coverageStartLedgerIndex: input.base.ledgerIndex,
+      coverageStartLedgerHash: input.base.ledgerHash,
+      generations: Array.from({ length: 129 }, () => ({
+        location: LOCATION,
+        generationId: 'live-delta-v1',
+        manifestKey: 'live-delta-v1-manifest.json',
+        manifestSha256: SHA,
+        payloadDigest: PAYLOAD,
+        previousLedgerIndex: input.base.ledgerIndex,
+        expectedParentHash: input.base.ledgerHash,
+        startLedgerIndex: input.base.ledgerIndex + 1,
+        startLedgerHash: B,
+        endLedgerIndex: input.base.ledgerIndex + 1,
+        endLedgerHash: B,
+        ledgerCount: 1,
+        currentProjectionMutations: 1,
+      })),
+    }
+    await expect(buildDbLessChannel(input)).rejects.toThrow('bounded limit')
+  })
 })
