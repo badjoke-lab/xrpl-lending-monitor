@@ -52,16 +52,18 @@ async function fetchJson({ name, url, init }) {
       signal: controller.signal,
       headers: {
         accept: 'application/json',
+        'user-agent': 'xrpl-lending-monitor-xrplto-probe/1.0 (+https://github.com/badjoke-lab/xrpl-lending-monitor)',
         ...(init?.headers || {}),
       },
     })
     const elapsedMs = Number((performance.now() - started).toFixed(3))
     const text = await response.text()
-    let body
+    let body = null
+    let parseError = null
     try {
       body = JSON.parse(text)
-    } catch {
-      throw new Error(`${name}: invalid JSON response (HTTP ${response.status})`)
+    } catch (error) {
+      parseError = error instanceof Error ? error.message : String(error)
     }
 
     const record = {
@@ -73,6 +75,8 @@ async function fetchJson({ name, url, init }) {
       responseBytes: Buffer.byteLength(text),
       headers: responseHeaders(response.headers),
       body,
+      parseError,
+      bodyTextPreview: body === null ? text.slice(0, 2000) : null,
     }
 
     await writeFile(
@@ -82,6 +86,9 @@ async function fetchJson({ name, url, init }) {
 
     if (!response.ok) {
       throw new Error(`${name}: HTTP ${response.status}`)
+    }
+    if (body === null) {
+      throw new Error(`${name}: invalid JSON response (HTTP ${response.status})`)
     }
 
     return record
