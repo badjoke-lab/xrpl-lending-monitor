@@ -179,15 +179,45 @@ Reason:
 
 This classification is not `PRIMARY_CANDIDATE`.
 
+## Keyed-access contract
+
+The current XRPL.to documentation specifies API-key use as:
+
+`X-Api-Key: xrpl_…`
+
+The key can be created from the dashboard or through `POST /v1/keys` with an XRPL wallet signature. The returned API key is shown once and must be saved by the operator.
+
+This lane now contains a **manual-only** keyed benchmark workflow:
+
+`.github/workflows/xrplto-keyed-benchmark.yml`
+
+It reads only the GitHub Actions secret:
+
+`XRPLTO_API_KEY`
+
+The key is sent only in the `X-Api-Key` request header and is not written to evidence artifacts.
+
+The manual benchmark defaults to:
+
+- 100 contiguous ledgers;
+- 125 ms request spacing, below the documented Free-key 10 req/s limit.
+
+A 1,000-ledger option is also available. Tighter spacing must not be used merely to force a rate-limit test; it is appropriate only after the key's actual tier/limits are known.
+
+Official references:
+
+- https://xrpl.to/docs/api-keys
+- https://xrpl.to/docs/subscriptions
+
 ## Next qualification gate
 
 Do not broaden the anonymous benchmark further merely to spend daily request allowance.
 
 The next useful evidence requires keyed/Partner access:
 
-1. verify the exact current authentication contract from official XRPL.to documentation;
-2. store any credential only in GitHub Actions secrets;
-3. rerun the same canonical parser comparison with keyed access;
+1. create a project-scoped XRPL.to API key and store it as the GitHub Actions secret `XRPLTO_API_KEY`;
+2. run the manual 100-ledger keyed benchmark;
+3. if that passes, run the 1,000-ledger keyed benchmark;
 4. measure 100-ledger and 1,000-ledger bounded catch-up;
 5. measure keyed `ledger_data` traversal behavior;
 6. record 429 / `Retry-After` behavior without intentionally violating provider policy;
