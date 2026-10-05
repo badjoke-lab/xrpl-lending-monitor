@@ -1,0 +1,126 @@
+name: DB-less D4 exit qualification
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+
+jobs:
+  qualify:
+    if: >-
+      github.event.issue.number == 1736 &&
+      github.event.comment.user.login == github.repository_owner &&
+      github.event.comment.body == '/d4-qualify-current-overlay-exit'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      D3_CHANNEL_RELEASE_TAG: db-less-live-channel-candidate-v1
+      D4_CHANNEL_RELEASE_TAG: db-less-current-overlay-channel-v1
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - run: corepack enable
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Re-prove bounded Current read and retention contracts
+        run: >-
+          pnpm exec vitest run
+          src/shared/db-less/current-overlay-provenance.test.ts
+          src/shared/db-less/current-overlay-reader.test.ts
+          src/shared/db-less/current-composite-reader.test.ts
+          src/shared/db-less/current-overlay-retention.test.ts
+
+      - name: Verify active remote D4 checkpoint is bounded provenance v2
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .local/d4-exit
+
+          d4_release="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$D4_CHANNEL_RELEASE_TAG")"
+          test "$(jq -r '.draft' <<<"$d4_release")" = "false"
+          test "$(jq -r '.prerelease' <<<"$d4_release")" = "true"
+          d4_body="$(jq -er '.body' <<<"$d4_release")"
+
+          active_tag="$(jq -er '.active.location.releaseTag' <<<"$d4_body")"
+          manifest_key="$(jq -er '.active.manifestKey' <<<"$d4_body")"
+          manifest_sha="$(jq -er '.active.manifestSha256' <<<"$d4_body")"
+          active_through="$(jq -er '.active.throughLedgerIndex' <<<"$d4_body")"
+          active_generations="$(jq -er '.active.generationCount' <<<"$d4_body")"
+          active_base="$(jq -er '.active.baseIdentity' <<<"$d4_body")"
+          source_channel_sha="$(jq -er '.active.sourceChannelSha256' <<<"$d4_body")"
+
+          [[ "$manifest_sha" =~ ^[a-f0-9]{64}$ ]]
+          [[ "$source_channel_sha" =~ ^[a-f0-9]{64}$ ]]
+          test "$active_through" -gt 0
+          test "$active_generations" -gt 0
+
+          checkpoint_release="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$active_tag")"
+          test "$(jq -r '.draft' <<<"$checkpoint_release")" = "false"
+          test "$(jq -r '.prerelease' <<<"$checkpoint_release")" = "true"
+
+          gh release download "$active_tag"             --pattern "$manifest_key"             --dir .local/d4-exit
+          test -f ".local/d4-exit/$manifest_key"
+          actual_manifest_sha="$(sha256sum ".local/d4-exit/$manifest_key" | awk '{print $1}')"
+          test "$actual_manifest_sha" = "$manifest_sha"
+
+          manifest=".local/d4-exit/$manifest_key"
+          test "$(jq -r '.schemaVersion' "$manifest")" = "2"
+          test "$(jq -r '.network' "$manifest")" = "devnet"
+          test "$(jq -r '.throughLedgerIndex' "$manifest")" = "$active_through"
+          test "$(jq -r '.generationCount' "$manifest")" = "$active_generations"
+          test "$(jq -r '.baseIdentity' "$manifest")" = "$active_base"
+          test "$(jq -r '.bucketCount' "$manifest")" = "256"
+          test "$(jq -r '.sourceGenerationProvenance.scheme' "$manifest")" = "rolling-sha256-v1"
+          test "$(jq -r '.sourceGenerationProvenance.generationCount' "$manifest")" = "$active_generations"
+          test "$(jq -r 'has("sourceGenerationIds")' "$manifest")" = "false"
+          test "$(jq -r '[.shards[].bytes] | max <= 2000000' "$manifest")" = "true"
+          test "$(jq -r '.shards | length > 0 and length <= 256' "$manifest")" = "true"
+
+          d3_release="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$D3_CHANNEL_RELEASE_TAG")"
+          test "$(jq -r '.draft' <<<"$d3_release")" = "false"
+          test "$(jq -r '.prerelease' <<<"$d3_release")" = "true"
+          d3_body="$(jq -er '.body' <<<"$d3_release")"
+          d3_head="$(jq -er '.lastCommittedLedgerIndex' <<<"$d3_body")"
+          d3_base="$(jq -er '.base.generationId' <<<"$d3_body")"
+          test "$d3_head" -ge "$active_through"
+          test "$d3_base" = "$active_base"
+
+          lag="$((d3_head - active_through))"
+          manifest_bytes="$(wc -c < "$manifest" | tr -d ' ')"
+          provenance_digest="$(jq -er '.sourceGenerationProvenance.digestSha256' "$manifest")"
+
+          jq -n             --arg mainSha "$(git rev-parse HEAD)"             --arg activeCheckpointTag "$active_tag"             --arg activeManifestKey "$manifest_key"             --arg activeManifestSha256 "$manifest_sha"             --arg sourceChannelSha256 "$source_channel_sha"             --arg generationProvenanceDigestSha256 "$provenance_digest"             --argjson activeThroughLedgerIndex "$active_through"             --argjson currentD3Head "$d3_head"             --argjson currentLagLedgers "$lag"             --argjson generationCount "$active_generations"             --argjson manifestBytes "$manifest_bytes"             '{
+              schemaVersion: 1,
+              mainSha: $mainSha,
+              activeCheckpointTag: $activeCheckpointTag,
+              activeManifestKey: $activeManifestKey,
+              activeManifestSha256: $activeManifestSha256,
+              activeThroughLedgerIndex: $activeThroughLedgerIndex,
+              currentD3Head: $currentD3Head,
+              currentLagLedgers: $currentLagLedgers,
+              generationCount: $generationCount,
+              checkpointManifestSchemaVersion: 2,
+              generationProvenanceScheme: "rolling-sha256-v1",
+              generationProvenanceDigestSha256: $generationProvenanceDigestSha256,
+              sourceChannelSha256: $sourceChannelSha256,
+              manifestBytes: $manifestBytes,
+              boundedReadTests: true,
+              retentionContractTests: true,
+              qualification: "pass"
+            }' | tee .local/d4-exit/qualification-summary.json
+
+      - name: Upload D4 exit qualification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: db-less-d4-exit-qualification
+          path: .local/d4-exit
+          if-no-files-found: warn
+          retention-days: 30
