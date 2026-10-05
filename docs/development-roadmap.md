@@ -137,7 +137,11 @@ Current evidence:
 - it seeded from active checkpoint ledger `5,678,037` with exactly `256` checkpoint shard reads and read only `300` post-checkpoint D3 generations/manifests to reach ledger `5,707,555`;
 - incremental output contained `62,334` entries / `1,220` tombstones / `256` shards and independently matched source state SHA-256 `2273296f93e48f29fe18b8f6e6958b07ea1e32c5f39430e1de99633a2342b450`;
 - recurrent compaction network traversal is therefore bounded by the fixed active-checkpoint shard set plus generations since the last checkpoint, rather than total project age;
-- D4 remains ACTIVE because checkpoint provenance still stores the full `sourceGenerationIds` list, so manifest size remains project-age-dependent; bounded provenance is the next required gate.
+- bounded provenance is now implemented on main through PRs #1731-#1733: checkpoint schema v2 replaces the project-age-sized `sourceGenerationIds` array with `rolling-sha256-v1` provenance containing generation count, first/last generation IDs, and one SHA-256 digest;
+- production-shaped incremental rehearsal run `37020574615` migrated the legacy v1 active seed to schema v2, reached ledger `5,789,957` with `2,405` total generations / `1,155` incremental generations / `256` seed shard reads, and preserved exact source/checkpoint state equivalence;
+- PR #1741 added the read-only exact-channel incremental activation preflight, replacing stale PR #1724's full-chain <=2048-generation assumption;
+- PR #1743 added a separate read-only D4 exit qualification for the activated remote schema-v2 checkpoint, bounded reader tests, and retention contract;
+- D4 remains ACTIVE until a fresh schema-v2 checkpoint is activated near the current D3 head and that remote exit qualification passes.
 
 Exit:
 
