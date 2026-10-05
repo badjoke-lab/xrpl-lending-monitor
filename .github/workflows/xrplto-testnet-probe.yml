@@ -11,18 +11,14 @@ on:
       - 'vite.xrplto-testnet-benchmark.config.ts'
       - 'src/collector/incremental/validated-ledger-parser.ts'
       - 'docs/xrplto-testnet-probe.md'
-  pull_request:
-    paths:
-      - '.github/workflows/xrplto-testnet-probe.yml'
-      - 'scripts/xrplto/**'
-      - 'vite.xrplto-testnet-parity.config.ts'
-      - 'vite.xrplto-testnet-benchmark.config.ts'
-      - 'src/collector/incremental/validated-ledger-parser.ts'
-      - 'docs/xrplto-testnet-probe.md'
   workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: xrplto-testnet-qualification-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   probe:
