@@ -9,11 +9,22 @@ const XRPLTO_RPC = 'https://api.xrpl.to/v1/testnet/rpc'
 const DIRECT_RPC = 'https://s.altnet.rippletest.net:51234/'
 const OUTPUT_DIR = process.env.XRPLTO_BENCHMARK_OUTPUT_DIR || '.local/xrplto-testnet-benchmark'
 const TIMEOUT_MS = 15_000
-const SAMPLE_LEDGERS = 30
-const XRPLTO_ANON_SPACING_MS = 2_100
+const SAMPLE_LEDGERS = Number.parseInt(process.env.XRPLTO_SAMPLE_LEDGERS || '30', 10)
+const XRPLTO_API_KEY = process.env.XRPLTO_API_KEY?.trim() || ''
+const XRPLTO_SPACING_MS = Number.parseInt(
+  process.env.XRPLTO_SPACING_MS || (XRPLTO_API_KEY ? '0' : '2100'),
+  10,
+)
 const DIRECT_WINDOW = 16
 const USER_AGENT =
   'xrpl-lending-monitor-xrplto-benchmark/1.0 (+https://github.com/badjoke-lab/xrpl-lending-monitor)'
+
+if (!Number.isSafeInteger(SAMPLE_LEDGERS) || SAMPLE_LEDGERS < 1 || SAMPLE_LEDGERS > 1000) {
+  throw new Error('XRPLTO_SAMPLE_LEDGERS must be an integer from 1 through 1000')
+}
+if (!Number.isSafeInteger(XRPLTO_SPACING_MS) || XRPLTO_SPACING_MS < 0) {
+  throw new Error('XRPLTO_SPACING_MS must be a non-negative integer')
+}
 
 interface RpcRead {
   result: Record<string, unknown>
@@ -73,6 +84,9 @@ async function postJson(url: string, payload: unknown): Promise<{
         accept: 'application/json',
         'content-type': 'application/json',
         'user-agent': USER_AGENT,
+        ...(url === XRPLTO_RPC && XRPLTO_API_KEY
+          ? { 'x-api-key': XRPLTO_API_KEY }
+          : {}),
       },
       body: JSON.stringify(payload),
       signal: controller.signal,
@@ -233,7 +247,7 @@ async function readXrplToRange(indexes: readonly number[]) {
   let lastHeaders: Record<string, string> = {}
 
   for (let i = 0; i < indexes.length; i += 1) {
-    if (i > 0) await sleep(XRPLTO_ANON_SPACING_MS)
+    if (i > 0 && XRPLTO_SPACING_MS > 0) await sleep(XRPLTO_SPACING_MS)
     const ledgerIndex = indexes[i]
     if (ledgerIndex === undefined) throw new Error('Missing XRPL.to ledger index')
     const read = await xrplToRpc('ledger', {
@@ -331,7 +345,9 @@ async function main() {
 
   const summary = {
     schemaVersion: 1,
-    probe: 'xrplto-testnet-x3-prekey-benchmark',
+    probe: XRPLTO_API_KEY
+      ? 'xrplto-testnet-x4-keyed-benchmark'
+      : 'xrplto-testnet-x3-prekey-benchmark',
     startedAt,
     completedAt: new Date().toISOString(),
     sample: {
@@ -341,8 +357,8 @@ async function main() {
       latestObservedByXrplTo: latest,
     },
     xrplTo: {
-      auth: 'anonymous/no-key',
-      intentionalSpacingMs: XRPLTO_ANON_SPACING_MS,
+      auth: XRPLTO_API_KEY ? 'api-key' : 'anonymous/no-key',
+      intentionalSpacingMs: XRPLTO_SPACING_MS,
       ...stats(xrplTo.reads, xrplTo.wallMs),
       finalRateLimitHeaders: xrplTo.finalRateLimitHeaders,
     },
@@ -357,9 +373,11 @@ async function main() {
       allSemanticDigestsEqual: mismatches.length === 0,
     },
     qualificationLimits: {
-      hundredLedgerCatchUp: 'not-qualified-without-key',
-      thousandLedgerCatchUp: 'not-qualified-without-key',
-      partnerPerformance: 'unmeasured',
+      hundredLedgerCatchUp:
+        XRPLTO_API_KEY && SAMPLE_LEDGERS >= 100 ? 'measured-in-this-run' : 'not-qualified',
+      thousandLedgerCatchUp:
+        XRPLTO_API_KEY && SAMPLE_LEDGERS >= 1000 ? 'measured-in-this-run' : 'not-qualified',
+      partnerPerformance: XRPLTO_API_KEY ? 'tier-must-be-verified-separately' : 'unmeasured',
     },
     pass:
       xrplTo.reads.length === SAMPLE_LEDGERS &&
@@ -373,20 +391,27 @@ async function main() {
   )
 
   const evidence = [
-    '# XRPL.to Testnet X3 pre-key benchmark',
+    XRPLTO_API_KEY
+      ? '# XRPL.to Testnet X4 keyed benchmark'
+      : '# XRPL.to Testnet X3 pre-key benchmark',
     '',
     `- pass: **${summary.pass ? 'YES' : 'NO'}**`,
     `- range: \`${startLedger} → ${endLedger}\` (${SAMPLE_LEDGERS} ledgers)`,
     `- semantic mismatches: \`${mismatches.length}\``,
-    `- XRPL.to anonymous wall time: \`${summary.xrplTo.wallMs} ms\``,
+    `- XRPL.to auth: \`${summary.xrplTo.auth}\``,
+    `- XRPL.to wall time: \`${summary.xrplTo.wallMs} ms\``,
     `- XRPL.to p50/p95: \`${summary.xrplTo.latencyMs.p50} / ${summary.xrplTo.latencyMs.p95} ms\``,
     `- XRPL.to effective rate: \`${summary.xrplTo.requestsPerSecond} req/s\``,
     `- direct window-${DIRECT_WINDOW} wall time: \`${summary.direct.wallMs} ms\``,
     `- direct p50/p95: \`${summary.direct.latencyMs.p50} / ${summary.direct.latencyMs.p95} ms\``,
     `- direct effective rate: \`${summary.direct.requestsPerSecond} req/s\``,
     '',
-    'The XRPL.to run is deliberately paced to stay within the documented anonymous request window.',
-    'This does not qualify Partner-tier performance. 100- and 1,000-ledger catch-up remain gated on keyed access.',
+    XRPLTO_API_KEY
+      ? 'The API key is supplied only through the X-Api-Key request header and is never written to artifacts.'
+      : 'The XRPL.to run is deliberately paced to stay within the documented anonymous request window.',
+    XRPLTO_API_KEY
+      ? 'The key tier must be verified separately; keyed access alone does not prove Partner-tier limits.'
+      : 'This does not qualify Partner-tier performance. 100- and 1,000-ledger catch-up remain gated on keyed access.',
     '',
   ].join('\n')
 
@@ -400,7 +425,9 @@ main().catch(async (error) => {
   await mkdir(OUTPUT_DIR, { recursive: true })
   const failure = {
     schemaVersion: 1,
-    probe: 'xrplto-testnet-x3-prekey-benchmark',
+    probe: XRPLTO_API_KEY
+      ? 'xrplto-testnet-x4-keyed-benchmark'
+      : 'xrplto-testnet-x3-prekey-benchmark',
     pass: false,
     failedAt: new Date().toISOString(),
     error: error instanceof Error ? error.message : String(error),
