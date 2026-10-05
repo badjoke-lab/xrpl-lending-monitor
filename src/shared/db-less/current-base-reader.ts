@@ -9,6 +9,11 @@ import {
   type DbLessBaseManifestV1,
 } from './base-manifest'
 import { sha256Hex } from '../current-state/canonical-json'
+import type { PortableJsonValue } from '../portable-collector-payload'
+import type {
+  DbLessBaseCurrentReaderV1,
+  DbLessBaseCurrentRecordV1,
+} from './current-composite-reader'
 
 export type DbLessBaseReadKind = 'vault' | 'loan-broker' | 'loan'
 
@@ -361,5 +366,65 @@ export class DbLessCurrentBaseReader {
       pageReads,
       objectsExamined,
     }
+  }
+}
+
+
+function compositeKind(
+  objectType: 'vault' | 'loan_broker' | 'loan',
+): DbLessBaseReadKind {
+  return objectType === 'loan_broker' ? 'loan-broker' : objectType
+}
+
+function projectionFromPageRecord(
+  kind: DbLessBaseReadKind,
+  record: DbLessBasePageRecord,
+): VaultCurrentProjection | LoanBrokerCurrentProjection | LoanCurrentProjection {
+  if (kind === 'vault') return record as VaultCurrentProjection
+  if (kind === 'loan-broker') {
+    return (record as { broker: LoanBrokerCurrentProjection }).broker
+  }
+  return (record as { loan: LoanCurrentProjection }).loan
+}
+
+function compositeRecord(
+  kind: DbLessBaseReadKind,
+  record: DbLessBasePageRecord,
+): DbLessBaseCurrentRecordV1 {
+  const projection = projectionFromPageRecord(kind, record)
+  return {
+    objectId: projection.id,
+    value: projection as unknown as PortableJsonValue,
+  }
+}
+
+export function asDbLessCompositeBaseReader(
+  reader: DbLessCurrentBaseReader,
+): DbLessBaseCurrentReaderV1 {
+  return {
+    async get(objectType, objectId) {
+      const kind = compositeKind(objectType)
+      const result = await reader.get(kind, objectId)
+      return {
+        item: result.item ? compositeRecord(kind, result.item) : null,
+        assetReads: result.assetReads,
+      }
+    },
+
+    async list(objectType, options) {
+      const kind = compositeKind(objectType)
+      const result = await reader.list(kind, {
+        limit: options.limit,
+        cursor: options.cursor,
+        maxPageReads: options.maxAssetReads,
+        scope: `composite:${objectType}`,
+      })
+      return {
+        items: result.items.map((record) => compositeRecord(kind, record)),
+        nextCursor: result.nextCursor,
+        complete: result.nextCursor === null,
+        assetReads: result.pageReads,
+      }
+    },
   }
 }
