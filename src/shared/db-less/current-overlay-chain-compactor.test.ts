@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { IncrementalScanResult } from '../../collector/incremental/scan-validated-ledgers'
 import type { ValidatedLedgerTransaction } from '../../collector/incremental/validated-ledger-parser'
-import { buildDbLessChannel, type DbLessArtifactLocationV1 } from './channel'
+import { buildDbLessChannel, encodeDbLessChannel, type DbLessArtifactLocationV1 } from './channel'
 import {
   buildDbLessCurrentOverlayCheckpointFromChannel,
   buildDbLessCurrentOverlayCheckpointIncrementally,
@@ -11,6 +11,7 @@ import { DbLessCurrentOverlayReader } from './current-overlay-reader'
 import { dbLessCurrentOverlayManifestProvenance } from './current-overlay-checkpoint'
 import { buildDbLessLiveChainArtifacts } from './live-chain'
 import { buildDbLessLiveDeltaArtifacts } from './live-delta'
+import { readPublicCurrentTailAfterCheckpoint } from './current-tail-github-public'
 
 const BASE = 'A'.repeat(64)
 const L101 = 'B'.repeat(64)
@@ -401,5 +402,76 @@ describe('D4 full-chain Current compactor', () => {
       readLocatedArtifact: async (location, key) =>
         built.locatedArtifacts.get(locationKey(location, key)) ?? null,
     })).rejects.toThrow('Missing live delta chunk')
+  })
+
+  it('reads only the post-checkpoint D3 tail through public token-free GitHub transports', async () => {
+    const built = await fixture()
+    const seed = await buildDbLessCurrentOverlayCheckpointFromChannel({
+      channel: built.firstChannel,
+      bucketCount: 8,
+      readChainArtifact: async (pointer) =>
+        built.chainArtifacts.get(locationKey(pointer.location, pointer.manifestKey)) ?? null,
+      readLocatedArtifact: async (location, key) =>
+        built.locatedArtifacts.get(locationKey(location, key)) ?? null,
+    })
+    const repository = 'badjoke-lab/xrpl-lending-monitor'
+    const channelTag = 'db-less-live-channel-test'
+    const channelBody = new TextDecoder().decode(encodeDbLessChannel(built.channel))
+    const requests: Array<{ url: string; authorization: string | null }> = []
+
+    function withUrl(response: Response, url: string): Response {
+      Object.defineProperty(response, 'url', { value: url })
+      return response
+    }
+
+    const result = await readPublicCurrentTailAfterCheckpoint({
+      repository,
+      channelReleaseTag: channelTag,
+      checkpoint: seed.manifest,
+      maxNewGenerations: 1,
+      fetcher: async (input, init) => {
+        const url = String(input)
+        requests.push({
+          url,
+          authorization: new Headers(init?.headers).get('authorization'),
+        })
+        if (url.startsWith('https://api.github.com/')) {
+          return withUrl(new Response(JSON.stringify({
+            id: 1,
+            tag_name: channelTag,
+            body: channelBody,
+            draft: false,
+            prerelease: true,
+          }), { status: 200 }), url)
+        }
+
+        const marker = '/releases/download/'
+        const markerIndex = url.indexOf(marker)
+        if (markerIndex < 0) return withUrl(new Response(null, { status: 404 }), url)
+        const parts = url.slice(markerIndex + marker.length).split('/')
+        const releaseTag = decodeURIComponent(parts.shift() ?? '')
+        const key = decodeURIComponent(parts.join('/'))
+        const bytes = built.chainArtifacts.get(`${releaseTag}|${key}`)
+          ?? built.locatedArtifacts.get(`${releaseTag}|${key}`)
+        if (!bytes) return withUrl(new Response(null, { status: 404 }), url)
+        const payload = bytes.buffer.slice(
+          bytes.byteOffset,
+          bytes.byteOffset + bytes.byteLength,
+        ) as ArrayBuffer
+        return withUrl(new Response(payload, {
+          status: 200,
+          headers: { 'content-length': String(bytes.byteLength) },
+        }), url)
+      },
+    })
+
+    expect(result.source.traversedManifests).toBe(1)
+    expect(result.source.generations).toHaveLength(1)
+    expect(result.source.generations[0]?.generationId).toBe(
+      built.secondDelta.manifest.generationId,
+    )
+    expect(result.source.fromLedgerIndex).toBe(101)
+    expect(result.source.toLedgerIndex).toBe(102)
+    expect(requests.every((request) => request.authorization === null)).toBe(true)
   })
 })
