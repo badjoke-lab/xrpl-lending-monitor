@@ -1,0 +1,52 @@
+name: XRPL.to Testnet X1 probe
+
+on:
+  push:
+    branches:
+      - research/xrplto-testnet-probe-x1-20261005
+    paths:
+      - '.github/workflows/xrplto-testnet-probe.yml'
+      - 'scripts/xrplto/**'
+      - 'docs/xrplto-testnet-probe.md'
+  pull_request:
+    paths:
+      - '.github/workflows/xrplto-testnet-probe.yml'
+      - 'scripts/xrplto/**'
+      - 'docs/xrplto-testnet-probe.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Run isolated XRPL.to Testnet probe
+        env:
+          XRPLTO_PROBE_OUTPUT_DIR: .local/xrplto-testnet-probe
+        run: node scripts/xrplto/testnet-probe.mjs
+
+      - name: Publish evidence to job summary
+        if: always()
+        shell: bash
+        run: |
+          if [ -f .local/xrplto-testnet-probe/evidence.md ]; then
+            cat .local/xrplto-testnet-probe/evidence.md >> "$GITHUB_STEP_SUMMARY"
+          elif [ -f .local/xrplto-testnet-probe/failure.json ]; then
+            echo '## XRPL.to Testnet X1 probe failed' >> "$GITHUB_STEP_SUMMARY"
+            cat .local/xrplto-testnet-probe/failure.json >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload probe artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xrplto-testnet-x1-probe
+          path: .local/xrplto-testnet-probe
+          if-no-files-found: error
+          retention-days: 30
