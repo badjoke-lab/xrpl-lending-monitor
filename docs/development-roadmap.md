@@ -107,7 +107,7 @@ Schedule-delivery evidence and operational hardening:
 - The latest observed collector `36148943212` advanced the verified control head from ledger `5,596,828` to `5,596,916`, matched the latest validated ledger, and reported `completeToLatest=true`.
 - No claim is made yet that the new same-slot RPC retry path has recovered a real production transient; the sustained-cadence PASS is based on uninterrupted natural execution, not on an injected or observed retry event.
 
-## D4 — Compaction and bounded indexes — ACTIVE
+## D4 — Compaction and bounded indexes — COMPLETE
 
 Scope:
 
@@ -141,7 +141,10 @@ Current evidence:
 - production-shaped incremental rehearsal run `37020574615` migrated the legacy v1 active seed to schema v2, reached ledger `5,789,957` with `2,405` total generations / `1,155` incremental generations / `256` seed shard reads, and preserved exact source/checkpoint state equivalence;
 - PR #1741 added the read-only exact-channel incremental activation preflight, replacing stale PR #1724's full-chain <=2048-generation assumption;
 - PR #1743 added a separate read-only D4 exit qualification for the activated remote schema-v2 checkpoint, bounded reader tests, and retention contract;
-- D4 remains ACTIVE until a fresh schema-v2 checkpoint is activated near the current D3 head and that remote exit qualification passes.
+- fresh exact-bound activation run `37275016536` passed on main `8630caad5d08e4dd2d13357e00235dcbf954e98c`, activating schema-v2 checkpoint `db-less-current-overlay-v1-5864075` at ledger `5,864,075`;
+- activation used `1,916` post-checkpoint generations from seed ledger `5,678,037`, emitted `rolling-sha256-v1` provenance, uploaded `257` immutable assets, and activated D4 channel SHA-256 `4fc8294a48204ec087f8a073b7a3a04989654e2430dd0286ab739c183aa9c701`;
+- remote exit qualification run `37343418614` passed: 18/18 bounded read/retention tests, remote manifest schema v2, no legacy `sourceGenerationIds`, manifest size `46,633` bytes at `3,166` generations, shard bounds preserved, and active manifest SHA-256 `c8121f42a1b51ebddaf8575dae13730befafd13fbf31df048b9e750eb00ada25`;
+- D4 exit criteria are satisfied. D5 Static UI cutover is the next active stage.
 
 Exit:
 
