@@ -2,7 +2,12 @@ import { describe, expect, it } from 'vitest'
 
 import type { VaultCurrentProjection } from '../../domain/lending/current-projections'
 import { buildDbLessBaseManifest, type DbLessBaseAssetDescriptorV1 } from './base-manifest'
-import { DbLessCurrentBaseReader } from './current-base-reader'
+import { asDbLessCompositeBaseReader, DbLessCurrentBaseReader } from './current-base-reader'
+import { DbLessCompositeCurrentReader } from './current-composite-reader'
+import { buildDbLessCurrentOverlayCheckpoint } from './current-overlay-checkpoint'
+import { DbLessCurrentOverlayReader } from './current-overlay-reader'
+import { buildDbLessCurrentProjectionCanonicalKey } from './current-projection-identity'
+import type { NormalizedCandidateV1 } from '../portable-collector-payload'
 import { canonicalJson, gzipDeterministic, sha256Hex, utf8 } from '../current-state/canonical-json'
 
 const HASH = 'A'.repeat(64)
@@ -154,5 +159,73 @@ describe('DB-less D5 browser base reader', () => {
     await expect(
       built.reader.list<VaultCurrentProjection>('vault', { limit: 1 }),
     ).rejects.toThrow(/Missing or invalid|SHA-256 mismatch/)
+  })
+
+  it('composes the D2 base with D4 upserts and tombstones without API state', async () => {
+    const built = await fixture()
+    const candidate = (
+      id: string,
+      options: { tombstone?: boolean; ledger?: number } = {},
+    ): NormalizedCandidateV1 => {
+      const ledger = options.ledger ?? 101
+      return {
+        semanticClass: 'current-projection',
+        canonicalKey: buildDbLessCurrentProjectionCanonicalKey('vault', id),
+        sourceLedgerIndex: ledger,
+        sourceLedgerHash: HASH,
+        sourceTransactionHash: `TX-${ledger}-${id}`,
+        objectId: id,
+        relationshipIds: [],
+        isTombstone: options.tombstone ?? false,
+        value: options.tombstone ? null : vault(id),
+      }
+    }
+    const checkpoint = await buildDbLessCurrentOverlayCheckpoint({
+      epochId: 'epoch-1',
+      baseIdentity: 'base-1',
+      throughLedgerIndex: 101,
+      throughLedgerHash: HASH,
+      bucketCount: 8,
+      generations: [{
+        generationId: 'g1',
+        startLedgerIndex: 101,
+        endLedgerIndex: 101,
+        records: [
+          candidate('A2', { tombstone: true }),
+          candidate('C1'),
+        ],
+      }],
+    })
+    const artifacts = new Map(
+      checkpoint.shardArtifacts.map((artifact) => [artifact.key, artifact.bytes] as const),
+    )
+    const overlay = new DbLessCurrentOverlayReader({
+      manifest: checkpoint.manifest,
+      readArtifact: async (key) => artifacts.get(key) ?? null,
+    })
+    const composite = new DbLessCompositeCurrentReader({
+      overlay,
+      base: asDbLessCompositeBaseReader(built.reader),
+    })
+
+    const deleted = await composite.get('vault', 'A2')
+    expect(deleted.item).toBeNull()
+
+    const base = await composite.get('vault', 'A1')
+    expect(base.item?.source).toBe('base')
+    expect((base.item?.value as { id?: string }).id).toBe('A1')
+
+    const added = await composite.get('vault', 'C1')
+    expect(added.item?.source).toBe('overlay')
+
+    const page = await composite.list('vault', {
+      limit: 10,
+      maxOverlayShardReads: 8,
+      maxBaseAssetReads: 4,
+      maxShadowChecks: 10,
+    })
+    expect(page.items.map((item) => item.objectId)).toContain('C1')
+    expect(page.items.map((item) => item.objectId)).toContain('A1')
+    expect(page.items.map((item) => item.objectId)).not.toContain('A2')
   })
 })
