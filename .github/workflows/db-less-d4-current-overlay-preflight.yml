@@ -1,0 +1,141 @@
+name: DB-less D4 Current overlay activation preflight
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  preflight:
+    if: >-
+      github.event.issue.number == 1736 &&
+      github.event.comment.user.login == github.repository_owner &&
+      github.event.comment.body == '/d4-activate-current-overlay-preflight'
+    concurrency:
+      group: db-less-d4-current-overlay-preflight
+      cancel-in-progress: false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      GH_TOKEN: ${{ github.token }}
+      D3_CHANNEL_RELEASE_TAG: db-less-live-channel-candidate-v1
+      D4_CHANNEL_RELEASE_TAG: db-less-current-overlay-channel-v1
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - run: corepack enable
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build D4 Current overlay rehearsal CLI
+        run: pnpm build:db-less-current-overlay-checkpoint
+
+      - name: Freeze exact read-only activation input
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .local/d4-activation-preflight
+
+          main_sha="$(git rev-parse HEAD)"
+          d3_release="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$D3_CHANNEL_RELEASE_TAG")"
+          d3_body="$(jq -er '.body' <<<"$d3_release")"
+          d3_channel_sha="$(jq -er '.channelSha256' <<<"$d3_body")"
+          d3_head="$(jq -er '.lastCommittedLedgerIndex' <<<"$d3_body")"
+
+          d4_release="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$D4_CHANNEL_RELEASE_TAG")"
+          d4_body="$(jq -er '.body' <<<"$d4_release")"
+          active_through="$(jq -er '.active.throughLedgerIndex' <<<"$d4_body")"
+          active_generation_count="$(jq -er '.active.generationCount' <<<"$d4_body")"
+
+          [[ "$main_sha" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$d3_channel_sha" =~ ^[a-f0-9]{64}$ ]]
+          test "$d3_head" -gt 0
+          test "$active_through" -gt 0
+          test "$active_through" -lt "$d3_head"
+          test "$active_generation_count" -gt 0
+
+          active_runs="$(
+            gh run list               --workflow db-less-d4-current-overlay-activate.yml               --limit 20               --json status             | jq '[.[] | select(.status == "queued" or .status == "in_progress" or .status == "pending" or .status == "waiting" or .status == "requested")] | length'
+          )"
+          test "$active_runs" -eq 0
+
+          {
+            echo "AUTHORIZED_MAIN_SHA=$main_sha"
+            echo "EXPECTED_D3_CHANNEL_SHA=$d3_channel_sha"
+            echo "EXPECTED_D3_HEAD=$d3_head"
+            echo "EXPECTED_D4_SEED_THROUGH=$active_through"
+            echo "EXPECTED_D4_SEED_GENERATIONS=$active_generation_count"
+          } >> "$GITHUB_ENV"
+
+      - name: Build exact-channel incremental checkpoint without publication
+        run: >-
+          node .db-less-current-overlay-checkpoint-build/build-db-less-current-overlay-checkpoint.mjs
+          --local
+          --repository "$GITHUB_REPOSITORY"
+          --channel-release-tag "$D3_CHANNEL_RELEASE_TAG"
+          --expected-channel-sha256 "$EXPECTED_D3_CHANNEL_SHA"
+          --active-overlay-channel-release-tag "$D4_CHANNEL_RELEASE_TAG"
+          --max-generations 2048
+          --bucket-count 256
+          --max-records-per-shard 50000
+          --max-bytes-per-shard 2000000
+          --output-dir .local/d4-activation-preflight
+
+      - name: Verify bounded-provenance D4 exit candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          summary=.local/d4-activation-preflight/rehearsal-summary.json
+
+          test "$(jq -r '.mode' "$summary")" = "incremental"
+          test "$(jq -r '.channelSha256' "$summary")" = "$EXPECTED_D3_CHANNEL_SHA"
+          test "$(jq -r '.throughLedgerIndex' "$summary")" = "$EXPECTED_D3_HEAD"
+          test "$(jq -r '.seedThroughLedgerIndex' "$summary")" = "$EXPECTED_D4_SEED_THROUGH"
+          test "$(jq -r '.manifestSchemaVersion' "$summary")" = "2"
+          test "$(jq -r '.generationProvenance.scheme' "$summary")" = "rolling-sha256-v1"
+          test "$(jq -r '.generationProvenance.generationCount' "$summary")" = "$(jq -r '.generationCount' "$summary")"
+          test "$(jq -r '.equivalence.equivalent' "$summary")" = "true"
+          test "$(jq -r '.equivalence.sourceStateSha256' "$summary")" = "$(jq -r '.equivalence.checkpointStateSha256' "$summary")"
+          test "$(jq -r '.traversedIncrementalManifests' "$summary")" = "$(jq -r '.incrementalGenerationCount' "$summary")"
+
+          incremental_generations="$(jq -r '.incrementalGenerationCount' "$summary")"
+          seed_shard_reads="$(jq -r '.seedShardReads' "$summary")"
+          test "$incremental_generations" -gt 0
+          test "$incremental_generations" -le 2048
+          test "$seed_shard_reads" -eq 256
+
+          jq -n             --arg mainSha "$AUTHORIZED_MAIN_SHA"             --arg d3ChannelSha256 "$EXPECTED_D3_CHANNEL_SHA"             --argjson d3Head "$EXPECTED_D3_HEAD"             --argjson seedThroughLedgerIndex "$EXPECTED_D4_SEED_THROUGH"             --argjson throughLedgerIndex "$(jq -r '.throughLedgerIndex' "$summary")"             --argjson incrementalGenerationCount "$incremental_generations"             --argjson totalGenerationCount "$(jq -r '.generationCount' "$summary")"             --arg provenanceDigest "$(jq -r '.generationProvenance.digestSha256' "$summary")"             --arg stateSha256 "$(jq -r '.equivalence.checkpointStateSha256' "$summary")"             '{
+              schemaVersion: 1,
+              mainSha: $mainSha,
+              d3ChannelSha256: $d3ChannelSha256,
+              d3Head: $d3Head,
+              seedThroughLedgerIndex: $seedThroughLedgerIndex,
+              throughLedgerIndex: $throughLedgerIndex,
+              incrementalGenerationCount: $incrementalGenerationCount,
+              totalGenerationCount: $totalGenerationCount,
+              checkpointManifestSchemaVersion: 2,
+              generationProvenanceScheme: "rolling-sha256-v1",
+              generationProvenanceDigestSha256: $provenanceDigest,
+              checkpointStateSha256: $stateSha256,
+              equivalence: true,
+              publicationMutation: false,
+              preflight: "pass"
+            }' | tee .local/d4-activation-preflight/preflight-summary.json
+
+      - name: Upload D4 activation preflight evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: db-less-d4-current-overlay-activation-preflight
+          path: |
+            .local/d4-activation-preflight/rehearsal-summary.json
+            .local/d4-activation-preflight/preflight-summary.json
+            .local/d4-activation-preflight/current-overlay-v1-*-manifest.json
+          if-no-files-found: warn
+          retention-days: 30
