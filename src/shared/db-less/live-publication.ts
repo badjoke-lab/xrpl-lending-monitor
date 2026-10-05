@@ -7,6 +7,8 @@ import {
   verifyDbLessChannel,
   type DbLessArtifactLocationV1,
   type DbLessChannelV1,
+  type DbLessCurrentProjectionTailIndexV1,
+  type DbLessCurrentProjectionTailGenerationV1,
   type DbLessHistoryCoverageRangeV1,
 } from './channel'
 import {
@@ -20,6 +22,8 @@ import {
   type DbLessArtifact,
   type DbLessLiveDeltaArtifactSet,
 } from './live-delta'
+
+export const DB_LESS_CURRENT_PROJECTION_TAIL_MAX_GENERATIONS = 128
 
 export interface DbLessPreparedLivePublication {
   status: 'prepared'
@@ -87,6 +91,58 @@ async function assertPreviousChainMatchesChannel(options: {
     || channel.live.endLedgerHash !== previousChain.endLedgerHash
   ) {
     throw new Error('Previous live chain manifest does not match the active channel pointer')
+  }
+}
+
+function nextCurrentProjectionTail(options: {
+  prepared: DbLessPreparedLiveDelta
+  publicationLocation: DbLessArtifactLocationV1
+}): DbLessCurrentProjectionTailIndexV1 {
+  const previous = options.prepared.channel.currentProjectionTail ?? {
+    schemaVersion: 1 as const,
+    coverageStartLedgerIndex: options.prepared.channel.lastCommittedLedgerIndex,
+    coverageStartLedgerHash: options.prepared.channel.lastCommittedLedgerHash,
+    generations: [],
+  }
+  let coverageStartLedgerIndex = previous.coverageStartLedgerIndex
+  let coverageStartLedgerHash = previous.coverageStartLedgerHash
+  let generations: DbLessCurrentProjectionTailGenerationV1[] = [
+    ...previous.generations,
+  ]
+
+  const mutations = options.prepared.delta.manifest.semanticCounts.currentProjectionMutations
+  if (mutations > 0) {
+    const manifest = options.prepared.delta.manifest
+    const artifact = options.prepared.delta.manifestArtifact
+    generations.push({
+      location: options.publicationLocation,
+      generationId: manifest.generationId,
+      manifestKey: artifact.key,
+      manifestSha256: artifact.sha256,
+      payloadDigest: manifest.payloadDigest,
+      previousLedgerIndex: manifest.previousLedgerIndex,
+      expectedParentHash: manifest.expectedParentHash,
+      startLedgerIndex: manifest.startLedgerIndex,
+      startLedgerHash: manifest.startLedgerHash,
+      endLedgerIndex: manifest.endLedgerIndex,
+      endLedgerHash: manifest.endLedgerHash,
+      ledgerCount: manifest.ledgerCount,
+      currentProjectionMutations: mutations,
+    })
+  }
+
+  if (generations.length > DB_LESS_CURRENT_PROJECTION_TAIL_MAX_GENERATIONS) {
+    generations = generations.slice(-DB_LESS_CURRENT_PROJECTION_TAIL_MAX_GENERATIONS)
+    const first = generations[0]!
+    coverageStartLedgerIndex = first.previousLedgerIndex
+    coverageStartLedgerHash = first.expectedParentHash
+  }
+
+  return {
+    schemaVersion: 1,
+    coverageStartLedgerIndex,
+    coverageStartLedgerHash,
+    generations,
   }
 }
 
@@ -201,6 +257,10 @@ export async function finalizeDbLessLivePublication(options: {
     epochId: prepared.channel.epochId,
     base: prepared.channel.base,
     live: chain.channelPointer,
+    currentProjectionTail: nextCurrentProjectionTail({
+      prepared,
+      publicationLocation: options.publicationLocation,
+    }),
     lastCommittedLedgerIndex: prepared.finalLedgerIndex,
     lastCommittedLedgerHash: prepared.finalLedgerHash,
     historyCoverage: nextHistoryCoverage({
