@@ -1,0 +1,39 @@
+name: DB-less D5 static UI validation
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/shared/db-less/current-base-reader.ts'
+      - 'src/shared/db-less/current-base-reader.test.ts'
+      - 'src/shared/db-less/current-base-github-release.ts'
+      - 'src/shared/db-less/current-base-github-release.test.ts'
+      - '.github/workflows/db-less-d5-static-ui-validation.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - name: Typecheck worker/shared graph
+        run: pnpm exec tsc -p tsconfig.worker.json --noEmit
+      - name: Typecheck app graph
+        run: pnpm exec tsc -p tsconfig.app.json --noEmit
+      - name: Lint D5 base browser reader
+        run: >-
+          pnpm exec eslint
+          src/shared/db-less/current-base-reader.ts
+          src/shared/db-less/current-base-reader.test.ts
+          src/shared/db-less/current-base-github-release.ts
+          src/shared/db-less/current-base-github-release.test.ts
+      - name: D5 focused tests
+        run: >-
+          pnpm exec vitest run
+          src/shared/db-less/current-base-reader.test.ts
+          src/shared/db-less/current-base-github-release.test.ts
