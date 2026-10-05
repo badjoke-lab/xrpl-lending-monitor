@@ -245,6 +245,48 @@ function ledgerDataSummary(result) {
   }
 }
 
+function featureSummary(result) {
+  const features = isRecord(result.features) ? result.features : {}
+  const selected = []
+
+  for (const [id, value] of Object.entries(features)) {
+    if (!isRecord(value)) continue
+    const name = typeof value.name === 'string' ? value.name : id
+    if (!/(Lending|Vault|MPT|Oracle)/i.test(name)) continue
+    selected.push({
+      id,
+      name,
+      enabled: typeof value.enabled === 'boolean' ? value.enabled : null,
+      supported: typeof value.supported === 'boolean' ? value.supported : null,
+    })
+  }
+
+  return selected.sort((a, b) => a.name.localeCompare(b.name))
+}
+
+function validateTypedLedgerData(result, requestedType) {
+  const summary = ledgerDataSummary(result)
+  const entries = result.state
+  const mismatches = entries.filter(
+    (entry) =>
+      !isRecord(entry) ||
+      typeof entry.LedgerEntryType !== 'string' ||
+      entry.LedgerEntryType.toLowerCase() !== requestedType.toLowerCase(),
+  )
+
+  if (mismatches.length > 0) {
+    throw new Error(
+      `ledger_data type=${requestedType}: ${mismatches.length} returned entries did not match requested type`,
+    )
+  }
+
+  return {
+    ...summary,
+    requestedType,
+    allReturnedEntriesMatchType: true,
+  }
+}
+
 async function main() {
   await mkdir(OUTPUT_DIR, { recursive: true })
 
@@ -272,6 +314,7 @@ async function main() {
   if (feature.body.result.error) {
     throw new Error(`feature: node returned ${String(feature.body.result.error)}`)
   }
+  const relevantFeatures = featureSummary(feature.body.result)
 
   const ledger = await rpc('ledger-expanded', 'ledger', {
     ledger_index: validatedLedger.index,
@@ -302,7 +345,29 @@ async function main() {
     ledgerDataPage2 = ledgerDataSummary(second.body.result)
   }
 
-  const vaultCandidate = findVaultCandidate(fixtures.body)
+  const lendingTypeReads = {}
+  let vaultFromTypedLedgerData = null
+  for (const type of ['Vault', 'LoanBroker', 'Loan']) {
+    const name = `ledger-data-type-${type.toLowerCase()}`
+    const typed = await rpc(name, 'ledger_data', {
+      ledger_index: validatedLedger.index,
+      binary: false,
+      limit: 256,
+      type,
+    })
+    requests.push(typed)
+    lendingTypeReads[type] = validateTypedLedgerData(typed.body.result, type)
+
+    if (
+      type === 'Vault' &&
+      Array.isArray(typed.body.result.state) &&
+      typed.body.result.state.length > 0
+    ) {
+      vaultFromTypedLedgerData = findVaultCandidate(typed.body.result.state)
+    }
+  }
+
+  const vaultCandidate = findVaultCandidate(fixtures.body) ?? vaultFromTypedLedgerData
   let vaultInfo = {
     attempted: false,
     status: 'fixture-not-found',
@@ -371,7 +436,9 @@ async function main() {
     },
     feature: {
       topLevelResultKeys: Object.keys(feature.body.result).sort(),
+      relevantFeatures,
     },
+    lendingTypeReads,
     vaultInfo,
     requests: requests.map((request) => ({
       name: request.name,
@@ -386,7 +453,12 @@ async function main() {
       expandedLedger.index === validatedLedger.index &&
       expandedLedger.hash === validatedLedger.hash &&
       expandedLedger.transactionHashOnlyCount === 0 &&
-      ledgerDataPage1.ledgerIndex === validatedLedger.index,
+      ledgerDataPage1.ledgerIndex === validatedLedger.index &&
+      Object.values(lendingTypeReads).every(
+        (item) =>
+          item.ledgerIndex === validatedLedger.index &&
+          item.allReturnedEntriesMatchType === true,
+      ),
   }
 
   await writeFile(
@@ -408,7 +480,10 @@ async function main() {
     `- second page rows: \`${ledgerDataPage2?.stateCount ?? 'not-run'}\``,
     `- fixture catalogue entries: \`${fixturesCatalogue.length}\``,
     `- fixture lending kinds: \`${lendingKinds.join(', ') || 'none observed'}\``,
-    `- vault fixture: \`${vaultInfo.status}\``,
+    `- typed Vault rows: \`${lendingTypeReads.Vault.stateCount}\``,
+    `- typed LoanBroker rows: \`${lendingTypeReads.LoanBroker.stateCount}\``,
+    `- typed Loan rows: \`${lendingTypeReads.Loan.stateCount}\``,
+    `- vault_info: \`${vaultInfo.status}\``,
     '',
     'This is a non-canonical compatibility probe. It does not modify the active Devnet runtime.',
     '',
