@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 
 import type { NormalizedCandidateV1 } from '../portable-collector-payload'
 import { buildDbLessCurrentOverlayCheckpoint } from './current-overlay-checkpoint'
+import { buildDbLessCurrentOverlayChannel, encodeDbLessCurrentOverlayChannel } from './current-overlay-channel'
+import { openPublicGithubCurrentOverlay } from './current-overlay-github-public'
 import { DbLessCurrentOverlayReader } from './current-overlay-reader'
 import { buildDbLessCurrentProjectionCanonicalKey } from './current-projection-identity'
 
@@ -175,4 +177,91 @@ describe('D4 bounded Current overlay reader', () => {
       /Missing or invalid|SHA-256 mismatch/,
     )
   })
+  it('opens the active D4 checkpoint through the public token-free browser transport', async () => {
+    const built = await fixture({
+      values: [projection({ id: 'A1' })],
+    })
+    const repository = 'badjoke-lab/xrpl-lending-monitor'
+    const channelTag = 'db-less-current-overlay-channel-v1'
+    const checkpointTag = `db-less-current-overlay-v1-${built.checkpoint.manifest.throughLedgerIndex}`
+    const channel = await buildDbLessCurrentOverlayChannel({
+      schemaVersion: 1,
+      network: 'devnet',
+      epochId: built.checkpoint.manifest.epochId,
+      active: {
+        location: {
+          provider: 'github-release',
+          repository,
+          releaseTag: checkpointTag,
+        },
+        manifestKey: built.checkpoint.manifestArtifact.key,
+        manifestSha256: built.checkpoint.manifestArtifact.sha256,
+        sourceChannelSha256: 'c'.repeat(64),
+        stateSha256: 'd'.repeat(64),
+        baseIdentity: built.checkpoint.manifest.baseIdentity,
+        throughLedgerIndex: built.checkpoint.manifest.throughLedgerIndex,
+        throughLedgerHash: built.checkpoint.manifest.throughLedgerHash,
+        generationCount: built.checkpoint.manifest.generationCount,
+        entryCount: built.checkpoint.manifest.entryCount,
+        tombstoneCount: built.checkpoint.manifest.tombstoneCount,
+        bucketCount: built.checkpoint.manifest.bucketCount,
+      },
+      updatedAt: '2026-10-05T00:00:00.000Z',
+    })
+    const channelBody = new TextDecoder().decode(
+      encodeDbLessCurrentOverlayChannel(channel),
+    )
+    const assets = new Map<string, Uint8Array>([
+      [built.checkpoint.manifestArtifact.key, built.checkpoint.manifestArtifact.bytes],
+      ...built.checkpoint.shardArtifacts.map((artifact) =>
+        [artifact.key, artifact.bytes] as const),
+    ])
+    const requests: Array<{ url: string; authorization: string | null }> = []
+
+    function withUrl(response: Response, url: string): Response {
+      Object.defineProperty(response, 'url', { value: url })
+      return response
+    }
+
+    function bytesResponse(bytes: Uint8Array, url: string): Response {
+      const payload = bytes.buffer.slice(
+        bytes.byteOffset,
+        bytes.byteOffset + bytes.byteLength,
+      ) as ArrayBuffer
+      return withUrl(new Response(payload, {
+        status: 200,
+        headers: { 'content-length': String(bytes.byteLength) },
+      }), url)
+    }
+
+    const opened = await openPublicGithubCurrentOverlay({
+      repository,
+      channelReleaseTag: channelTag,
+      fetcher: async (input, init) => {
+        const url = String(input)
+        const headers = new Headers(init?.headers)
+        requests.push({ url, authorization: headers.get('authorization') })
+        if (url.startsWith('https://api.github.com/')) {
+          return withUrl(new Response(JSON.stringify({
+            id: 1,
+            tag_name: channelTag,
+            body: channelBody,
+            draft: false,
+            prerelease: true,
+          }), { status: 200 }), url)
+        }
+        const key = decodeURIComponent(url.slice(url.lastIndexOf('/') + 1))
+        const bytes = assets.get(key)
+        return bytes
+          ? bytesResponse(bytes, url)
+          : withUrl(new Response(null, { status: 404 }), url)
+      },
+    })
+
+    const found = await opened.reader.get('vault', 'A1')
+    expect(found.item?.objectId).toBe('A1')
+    expect(opened.manifest.schemaVersion).toBe(2)
+    expect(requests.every((request) => request.authorization === null)).toBe(true)
+  })
+
 })
