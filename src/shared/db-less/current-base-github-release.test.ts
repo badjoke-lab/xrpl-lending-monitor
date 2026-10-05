@@ -25,10 +25,14 @@ describe('DB-less D5 GitHub Release base transport', () => {
       manifest,
       fetcher: async (input, init) => {
         seen.push({ input: String(input), init })
-        return new Response(bytes, {
+        const response = new Response(bytes, {
           status: 200,
           headers: { 'content-length': String(bytes.byteLength) },
         })
+        Object.defineProperty(response, 'url', {
+          value: 'https://github.com/badjoke-lab/xrpl-lending-monitor/releases/download/d2-current-base-test/vault-page-000000.json.gz',
+        })
+        return response
       },
     })
 
