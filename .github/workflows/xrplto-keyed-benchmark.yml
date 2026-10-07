@@ -17,10 +17,20 @@ on:
           - '100'
           - '1000'
       spacing_ms:
-        description: Delay between XRPL.to requests; 125ms stays below Free-key 10 req/s
+        description: Delay between bounded request windows
         required: true
-        default: '125'
+        default: '0'
         type: string
+      xrplto_window:
+        description: XRPL.to concurrent read window; 4 is conservative for Free-key qualification
+        required: true
+        default: '4'
+        type: choice
+        options:
+          - '1'
+          - '2'
+          - '4'
+          - '8'
 
 permissions:
   contents: read
@@ -53,7 +63,8 @@ jobs:
         env:
           XRPLTO_API_KEY: ${{ secrets.XRPLTO_API_KEY }}
           XRPLTO_SAMPLE_LEDGERS: ${{ inputs.sample_ledgers || '100' }}
-          XRPLTO_SPACING_MS: ${{ inputs.spacing_ms || '125' }}
+          XRPLTO_SPACING_MS: ${{ inputs.spacing_ms || '0' }}
+          XRPLTO_WINDOW: ${{ inputs.xrplto_window || '4' }}
           XRPLTO_BENCHMARK_OUTPUT_DIR: .local/xrplto-testnet-keyed-benchmark
         run: node .xrplto-testnet-benchmark-build/testnet-benchmark.mjs
 
