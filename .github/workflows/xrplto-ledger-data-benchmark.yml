@@ -1,0 +1,83 @@
+name: XRPL.to keyed ledger_data benchmark
+
+on:
+  push:
+    branches:
+      - research/xrplto-testnet-probe-x1-20261005
+    paths:
+      - '.github/workflows/xrplto-ledger-data-benchmark.yml'
+  workflow_dispatch:
+    inputs:
+      pages:
+        description: Maximum ledger_data pages per provider
+        required: true
+        default: '100'
+        type: choice
+        options:
+          - '25'
+          - '100'
+          - '250'
+      page_limit:
+        description: ledger_data page limit
+        required: true
+        default: '256'
+        type: choice
+        options:
+          - '64'
+          - '128'
+          - '256'
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Require XRPL.to API key secret
+        env:
+          XRPLTO_API_KEY: ${{ secrets.XRPLTO_API_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$XRPLTO_API_KEY"
+
+      - name: Install repository dependencies
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+
+      - name: Build ledger_data benchmark
+        run: pnpm exec vite build --config vite.xrplto-ledger-data-benchmark.config.ts
+
+      - name: Run bounded keyed ledger_data benchmark
+        env:
+          XRPLTO_API_KEY: ${{ secrets.XRPLTO_API_KEY }}
+          XRPLTO_LEDGER_DATA_PAGES: ${{ inputs.pages || '100' }}
+          XRPLTO_LEDGER_DATA_LIMIT: ${{ inputs.page_limit || '256' }}
+          XRPLTO_LEDGER_DATA_OUTPUT_DIR: .local/xrplto-ledger-data-benchmark
+        run: node .xrplto-ledger-data-benchmark-build/testnet-ledger-data-benchmark.mjs
+
+      - name: Publish evidence to job summary
+        if: always()
+        shell: bash
+        run: |
+          if [ -f .local/xrplto-ledger-data-benchmark/evidence.md ]; then
+            cat .local/xrplto-ledger-data-benchmark/evidence.md >> "$GITHUB_STEP_SUMMARY"
+          elif [ -f .local/xrplto-ledger-data-benchmark/failure.json ]; then
+            echo '## XRPL.to ledger_data benchmark failed' >> "$GITHUB_STEP_SUMMARY"
+            cat .local/xrplto-ledger-data-benchmark/failure.json >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload ledger_data benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xrplto-testnet-keyed-ledger-data-benchmark
+          path: .local/xrplto-ledger-data-benchmark
+          if-no-files-found: error
+          retention-days: 30
