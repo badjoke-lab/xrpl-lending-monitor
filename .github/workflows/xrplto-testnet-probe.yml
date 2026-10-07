@@ -1,0 +1,100 @@
+name: XRPL.to Testnet qualification
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: xrplto-testnet-qualification-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Run X1 isolated XRPL.to Testnet probe
+        env:
+          XRPLTO_PROBE_OUTPUT_DIR: .local/xrplto-testnet-probe
+        run: node scripts/xrplto/testnet-probe.mjs
+
+      - name: Install repository dependencies
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+
+      - name: Build X2 canonical-parser parity probe
+        run: pnpm exec vite build --config vite.xrplto-testnet-parity.config.ts
+
+      - name: Run X2 XRPL.to versus direct Testnet parity
+        env:
+          XRPLTO_PARITY_OUTPUT_DIR: .local/xrplto-testnet-parity
+        run: node .xrplto-testnet-parity-build/testnet-parity.mjs
+
+      - name: Build X3 pre-key benchmark
+        run: pnpm exec vite build --config vite.xrplto-testnet-benchmark.config.ts
+
+      - name: Run X3 pre-key benchmark
+        env:
+          XRPLTO_BENCHMARK_OUTPUT_DIR: .local/xrplto-testnet-benchmark
+        run: node .xrplto-testnet-benchmark-build/testnet-benchmark.mjs
+
+      - name: Publish evidence to job summary
+        if: always()
+        shell: bash
+        run: |
+          for path in \
+            .local/xrplto-testnet-probe/evidence.md \
+            .local/xrplto-testnet-parity/evidence.md \
+            .local/xrplto-testnet-benchmark/evidence.md
+          do
+            if [ -f "$path" ]; then
+              cat "$path" >> "$GITHUB_STEP_SUMMARY"
+              echo >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+
+          if [ -f .local/xrplto-testnet-probe/failure.json ]; then
+            echo '## XRPL.to Testnet X1 probe failed' >> "$GITHUB_STEP_SUMMARY"
+            cat .local/xrplto-testnet-probe/failure.json >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ -f .local/xrplto-testnet-parity/failure.json ]; then
+            echo '## XRPL.to Testnet X2 parity failed' >> "$GITHUB_STEP_SUMMARY"
+            cat .local/xrplto-testnet-parity/failure.json >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ -f .local/xrplto-testnet-benchmark/failure.json ]; then
+            echo '## XRPL.to Testnet X3 benchmark failed' >> "$GITHUB_STEP_SUMMARY"
+            cat .local/xrplto-testnet-benchmark/failure.json >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload X1 probe artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xrplto-testnet-x1-probe
+          path: .local/xrplto-testnet-probe
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload X2 parity artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xrplto-testnet-x2-parity
+          path: .local/xrplto-testnet-parity
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload X3 benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xrplto-testnet-x3-benchmark
+          path: .local/xrplto-testnet-benchmark
+          if-no-files-found: warn
+          retention-days: 30

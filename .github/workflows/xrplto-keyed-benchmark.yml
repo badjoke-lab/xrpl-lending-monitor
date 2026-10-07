@@ -1,0 +1,84 @@
+name: XRPL.to keyed benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      sample_ledgers:
+        description: Number of contiguous ledgers to compare
+        required: true
+        default: '100'
+        type: choice
+        options:
+          - '100'
+          - '1000'
+      spacing_ms:
+        description: Delay between bounded request windows
+        required: true
+        default: '0'
+        type: string
+      xrplto_window:
+        description: XRPL.to concurrent read window; 4 is conservative for Free-key qualification
+        required: true
+        default: '4'
+        type: choice
+        options:
+          - '1'
+          - '2'
+          - '4'
+          - '8'
+
+permissions:
+  contents: read
+
+jobs:
+  keyed-benchmark:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Require XRPL.to API key secret
+        env:
+          XRPLTO_API_KEY: ${{ secrets.XRPLTO_API_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$XRPLTO_API_KEY"
+
+      - name: Install repository dependencies
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+
+      - name: Build canonical-parser benchmark
+        run: pnpm exec vite build --config vite.xrplto-testnet-benchmark.config.ts
+
+      - name: Run keyed bounded benchmark
+        env:
+          XRPLTO_API_KEY: ${{ secrets.XRPLTO_API_KEY }}
+          XRPLTO_SAMPLE_LEDGERS: ${{ inputs.sample_ledgers || '100' }}
+          XRPLTO_SPACING_MS: ${{ inputs.spacing_ms || '0' }}
+          XRPLTO_WINDOW: ${{ inputs.xrplto_window || '4' }}
+          XRPLTO_BENCHMARK_OUTPUT_DIR: .local/xrplto-testnet-keyed-benchmark
+        run: node .xrplto-testnet-benchmark-build/testnet-benchmark.mjs
+
+      - name: Publish evidence to job summary
+        if: always()
+        shell: bash
+        run: |
+          if [ -f .local/xrplto-testnet-keyed-benchmark/evidence.md ]; then
+            cat .local/xrplto-testnet-keyed-benchmark/evidence.md >> "$GITHUB_STEP_SUMMARY"
+          elif [ -f .local/xrplto-testnet-keyed-benchmark/failure.json ]; then
+            echo '## XRPL.to keyed benchmark failed' >> "$GITHUB_STEP_SUMMARY"
+            cat .local/xrplto-testnet-keyed-benchmark/failure.json >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload keyed benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xrplto-testnet-keyed-benchmark-${{ inputs.sample_ledgers || '100' }}
+          path: .local/xrplto-testnet-keyed-benchmark
+          if-no-files-found: error
+          retention-days: 30
