@@ -80,3 +80,7 @@ The following remain useful because they are not inherently tied to the retired 
 - Explorer visual/copy documents only where they do not contradict the active runtime contract
 
 Future cleanup may consolidate these documents after the DB-less cutover is stable.
+
+## Non-authoritative provider research
+
+- [XRPL.to shadow provider lane](xrplto-shadow-provider.md) — isolated provider qualification only; does not override the active Devnet architecture or authorize Mainnet activation.
