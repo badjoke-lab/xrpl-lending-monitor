@@ -1,11 +1,6 @@
 name: XRPL.to keyed ledger_data benchmark
 
 on:
-  push:
-    branches:
-      - research/xrplto-testnet-probe-x1-20261005
-    paths:
-      - '.github/workflows/xrplto-ledger-data-benchmark.yml'
   workflow_dispatch:
     inputs:
       pages:
