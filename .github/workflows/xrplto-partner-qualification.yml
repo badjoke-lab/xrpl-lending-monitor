@@ -1,0 +1,123 @@
+name: XRPL.to Partner qualification
+
+on:
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: Qualification stage to run after Partner preflight
+        required: true
+        default: '100-ledger'
+        type: choice
+        options:
+          - '100-ledger'
+          - '1000-ledger'
+          - 'ledger-data'
+          - 'all'
+      xrplto_window:
+        description: XRPL.to concurrent read window
+        required: true
+        default: '16'
+        type: choice
+        options:
+          - '8'
+          - '16'
+          - '32'
+      partner_min_limit:
+        description: Minimum X-RateLimit-Limit required before Partner benchmark
+        required: true
+        default: '100'
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  qualify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Require XRPL.to API key
+        env:
+          XRPLTO_API_KEY: ${{ secrets.XRPLTO_API_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$XRPLTO_API_KEY"
+
+      - name: Partner-tier preflight
+        env:
+          XRPLTO_API_KEY: ${{ secrets.XRPLTO_API_KEY }}
+          XRPLTO_PARTNER_MIN_LIMIT: ${{ inputs.partner_min_limit }}
+          XRPLTO_PARTNER_PREFLIGHT_OUTPUT_DIR: .local/xrplto-partner-preflight
+        run: node scripts/xrplto/partner-preflight.mjs
+
+      - name: Install repository dependencies
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+
+      - name: Build Partner catch-up benchmark
+        if: ${{ inputs.stage == '100-ledger' || inputs.stage == '1000-ledger' || inputs.stage == 'all' }}
+        run: pnpm exec vite build --config vite.xrplto-partner-benchmark.config.ts
+
+      - name: Run Partner 100-ledger benchmark
+        if: ${{ inputs.stage == '100-ledger' || inputs.stage == 'all' }}
+        env:
+          XRPLTO_API_KEY: ${{ secrets.XRPLTO_API_KEY }}
+          XRPLTO_SAMPLE_LEDGERS: '100'
+          XRPLTO_WINDOW: ${{ inputs.xrplto_window }}
+          XRPLTO_SPACING_MS: '0'
+          XRPLTO_PARTNER_BENCHMARK_OUTPUT_DIR: .local/xrplto-partner-100
+        run: node .xrplto-partner-benchmark-build/partner-benchmark.mjs
+
+      - name: Run Partner 1000-ledger benchmark
+        if: ${{ inputs.stage == '1000-ledger' || inputs.stage == 'all' }}
+        env:
+          XRPLTO_API_KEY: ${{ secrets.XRPLTO_API_KEY }}
+          XRPLTO_SAMPLE_LEDGERS: '1000'
+          XRPLTO_WINDOW: ${{ inputs.xrplto_window }}
+          XRPLTO_SPACING_MS: '0'
+          XRPLTO_PARTNER_BENCHMARK_OUTPUT_DIR: .local/xrplto-partner-1000
+        run: node .xrplto-partner-benchmark-build/partner-benchmark.mjs
+
+      - name: Build Partner ledger_data benchmark
+        if: ${{ inputs.stage == 'ledger-data' || inputs.stage == 'all' }}
+        run: pnpm exec vite build --config vite.xrplto-partner-ledger-data.config.ts
+
+      - name: Run Partner binary ledger_data benchmark
+        if: ${{ inputs.stage == 'ledger-data' || inputs.stage == 'all' }}
+        env:
+          XRPLTO_API_KEY: ${{ secrets.XRPLTO_API_KEY }}
+          XRPLTO_LEDGER_DATA_PAGES: '100'
+          XRPLTO_LEDGER_DATA_LIMIT: '2048'
+          XRPLTO_LEDGER_DATA_BINARY: 'true'
+          XRPLTO_PARTNER_LEDGER_DATA_OUTPUT_DIR: .local/xrplto-partner-ledger-data
+        run: node .xrplto-partner-ledger-data-build/partner-ledger-data-benchmark.mjs
+
+      - name: Publish evidence
+        if: always()
+        shell: bash
+        run: |
+          for path in             .local/xrplto-partner-preflight/evidence.md             .local/xrplto-partner-100/evidence.md             .local/xrplto-partner-1000/evidence.md             .local/xrplto-partner-ledger-data/evidence.md
+          do
+            if [ -f "$path" ]; then
+              cat "$path" >> "$GITHUB_STEP_SUMMARY"
+              echo >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+
+      - name: Upload Partner qualification artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xrplto-partner-qualification-${{ inputs.stage }}-window-${{ inputs.xrplto_window }}
+          path: |
+            .local/xrplto-partner-preflight
+            .local/xrplto-partner-100
+            .local/xrplto-partner-1000
+            .local/xrplto-partner-ledger-data
+          if-no-files-found: error
+          retention-days: 30
